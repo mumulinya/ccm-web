@@ -24,6 +24,7 @@
 | TestAgent独立验收与主Agent自验 | 已实现任务级不可变模式快照、真实自验证据、失败关闭和模式匹配终态门禁 | [TestAgent独立验收与主Agent自验](./TEST-AGENT-AND-MAIN-AGENT-SELF-VERIFICATION.md) |
 | 飞书全局与项目Agent双向会话V2 | 已实现双入口、精确话题身份、跨传输幂等、原消息队列恢复和原路投递；群聊不再直连飞书 | [飞书全局与项目Agent双向会话V2](./FEISHU-GLOBAL-PROJECT-BIDIRECTIONAL-V2.md) |
 | 全局Agent运行体系V2 | 已实现服务端权威精确会话队列、单轮写授权、完整轮次正式压缩、Mission监督和终态持久投递 | [全局Agent运行体系V2](./GLOBAL-AGENT-RUNTIME-PRODUCTION-V2.md) |
+| 三类会话CC式统一Agent Loop | 已实现全局、群聊和项目首轮统一理解、按需只读工具、同Run续轮与一次问候调用 | [三类会话CC式统一Agent Loop](./THREE-SESSION-CC-MAIN-AGENT-LOOP.md) |
 | 需求池、文档、图片与附件摄取V2 | 已实现流式上传、固定IP公网读取、完整Token分片、来源证据门禁、需求池原子认领和孤立附件清理 | [需求资料摄取完整流程V2](./REQUIREMENT-INGESTION-END-TO-END-V2.md) |
 | 定时任务与AI日报周报V3 | 已实现不可变证据快照、模型结构化总结、时区调度、证据校验和飞书持久投递 | [定时任务与AI日报周报完整链路](./SCHEDULED-TASKS-AI-WORK-REPORTS.md) |
 | 项目Git与代码协作V2 | 已实现真实仓库身份、分页快照、仓库级写入租约、显式提交范围、TestAgent内容证据和原子克隆恢复 | [项目Git与代码协作完整链路V2](./PROJECT-GIT-CODE-COLLABORATION-V2.md) |

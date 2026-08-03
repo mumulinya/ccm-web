@@ -65,12 +65,12 @@ exports.measureGroupMainAgentPayload = measureGroupMainAgentPayload;
 exports.prepareExactGroupMainAgentInput = prepareExactGroupMainAgentInput;
 exports.runGroupOrchestratorCore = runGroupOrchestratorCore;
 exports.summarizeGroupOrchestratorProviderError = summarizeGroupOrchestratorProviderError;
+exports.streamCanonicalGroupReply = streamCanonicalGroupReply;
 exports.runGroupOrchestrator = runGroupOrchestrator;
 exports.isContextLimitError = isContextLimitError;
 exports.buildReactiveCompactionContext = buildReactiveCompactionContext;
 const path = __importStar(require("path"));
 const db_1 = require("../../core/db");
-const group_orchestrator_llm_client_1 = require("./group-orchestrator-llm-client");
 const session_compaction_core_1 = require("../../system/session-compaction-core");
 const group_compaction_strategy_1 = require("./group-compaction-strategy");
 const group_session_model_context_1 = require("./group-session-model-context");
@@ -79,7 +79,6 @@ const group_reactive_compact_retry_ownership_1 = require("./group-reactive-compa
 const group_orchestrator_config_1 = require("./group-orchestrator-config");
 const group_orchestrator_prompts_1 = require("./group-orchestrator-prompts");
 const group_orchestrator_coded_1 = require("./group-orchestrator-coded");
-const knowledge_access_1 = require("../knowledge/knowledge-access");
 const group_orchestrator_llm_1 = require("./group-orchestrator-llm");
 exports.GROUP_MEMORY_REPLAY_REPAIR_WORK_ITEMS_DIR = path.join(group_orchestrator_config_1.CCM_DIR, "group-memory-replay-repair-work-items");
 exports.GROUP_MEMORY_REPLAY_REPAIR_DISPATCH_PLANS_DIR = path.join(group_orchestrator_config_1.CCM_DIR, "group-memory-replay-repair-dispatch-plans");
@@ -564,28 +563,7 @@ async function prepareExactGroupMainAgentInput(input, group, groupSessionId, con
 }
 async function runGroupOrchestratorCore(input) {
     const group = normalizeGroupOrchestrator(input.group);
-    let initialInput = { ...input, group };
-    if (input.ragContext === undefined && String(input.message || "").trim()) {
-        try {
-            const members = getRoutableMembers(group).map((member) => ({ name: member.project }));
-            const knowledge = await (0, knowledge_access_1.searchAgentKnowledge)((0, group_orchestrator_coded_1.buildGroupRagQuery)(group, input), {
-                role: "group-main-agent",
-                project: getCoordinatorProject(group),
-                groupId: String(group.id || ""),
-                projects: members,
-            }, { limit: 6, maxContextChars: 18000 });
-            initialInput = {
-                ...initialInput,
-                ragContext: knowledge.context,
-                ragCitations: knowledge.citations,
-                ragScoped: knowledge.results.some(item => item.scope?.type !== "global"),
-            };
-        }
-        catch (error) {
-            console.warn(`[群聊知识检索] 已使用无知识上下文继续：${error?.message || error}`);
-            initialInput = { ...initialInput, ragContext: "", ragCitations: [], ragScoped: false };
-        }
-    }
+    const initialInput = { ...input, group };
     const groupSessionId = String(initialInput.groupSessionId || initialInput.group_session_id || "").trim();
     const config = (0, group_orchestrator_config_1.loadOrchestratorConfig)();
     const configIssue = getLlmConfigIssue(config);
@@ -822,77 +800,41 @@ function summarizeGroupOrchestratorProviderError(error) {
         .trim();
     return (firstLine || "主 Agent Provider 调用失败").slice(0, 220);
 }
+function streamCanonicalGroupReply(text, onDelta, maxChunkChars = 240) {
+    if (!onDelta)
+        return 0;
+    const value = String(text || "").trim();
+    if (!value)
+        return 0;
+    const chunks = [];
+    for (const paragraph of value.split(/(\n{2,})/)) {
+        if (!paragraph)
+            continue;
+        if (paragraph.length <= maxChunkChars) {
+            chunks.push(paragraph);
+            continue;
+        }
+        const characters = Array.from(paragraph);
+        for (let offset = 0; offset < characters.length; offset += maxChunkChars) {
+            chunks.push(characters.slice(offset, offset + maxChunkChars).join(""));
+        }
+    }
+    chunks.forEach(chunk => onDelta(chunk));
+    return chunks.length;
+}
 async function runGroupOrchestrator(input) {
     const startedAt = Date.now();
     const group = normalizeGroupOrchestrator(input.group);
     const groupSessionId = String(input.groupSessionId || input.group_session_id || "");
     const coordinator = getCoordinatorMember(group);
     try {
-        let result = await runGroupOrchestratorCore(input);
+        const reusedFirstTurn = !!(input.mainAgentFirstTurnResult || input.main_agent_first_turn_result);
+        const result = input.mainAgentFirstTurnResult || input.main_agent_first_turn_result || await runGroupOrchestratorCore(input);
         const runtime = String(result?.runtime || "");
         if (input.onDelta && !["llm-error", "llm-not-configured"].includes(runtime)) {
             const canonicalReply = String(result?.content || "").trim();
             if (canonicalReply) {
-                const config = (0, group_orchestrator_config_1.loadOrchestratorConfig)();
-                let emitted = false;
-                let visibleUsage = null;
-                try {
-                    const messages = [
-                        {
-                            role: "system",
-                            content: "你是 CCM 群聊主 Agent 的正式回复输出层。完整保留给定正式回复中的事实、任务分派、验收标准、风险与待补充问题，仅改善自然语言可读性。不得增加未提供的事实，不得输出 JSON、内部协议、工具参数或分析过程，只输出面向用户的最终正文。",
-                        },
-                        {
-                            role: "user",
-                            content: JSON.stringify({ user_request: input.message, official_reply: canonicalReply }),
-                        },
-                    ];
-                    const rendered = (0, group_orchestrator_llm_client_1.shouldUseAnthropic)(config)
-                        ? await (0, group_orchestrator_llm_client_1.callAnthropicCompatibleChat)(config, {
-                            messages,
-                            maxTokens: 1800,
-                            temperature: 0.2,
-                            defaultTimeoutMs: 60_000,
-                            httpErrorPrefix: "群聊主 Agent 正式回复流式输出失败",
-                            stream: true,
-                            onDelta: delta => {
-                                if (!delta)
-                                    return;
-                                emitted = true;
-                                input.onDelta?.(delta);
-                            },
-                            onUsage: usage => { visibleUsage = usage; },
-                            promptCacheTracking: { groupId: group.id, groupSessionId, source: "group_main_visible_reply" },
-                        })
-                        : await (0, group_orchestrator_llm_client_1.callOpenAiCompatibleChat)(config, {
-                            messages,
-                            maxTokens: 1800,
-                            temperature: 0.2,
-                            defaultTimeoutMs: 60_000,
-                            httpErrorPrefix: "群聊主 Agent 正式回复流式输出失败",
-                            stream: true,
-                            onDelta: delta => {
-                                if (!delta)
-                                    return;
-                                emitted = true;
-                                input.onDelta?.(delta);
-                            },
-                            onUsage: usage => { visibleUsage = usage; },
-                            promptCacheTracking: { groupId: group.id, groupSessionId, source: "group_main_visible_reply" },
-                        });
-                    if (String(rendered || "").trim()) {
-                        result = {
-                            ...result,
-                            content: String(rendered).trim(),
-                            usage: (0, group_orchestrator_llm_1.mergeLlmTokenUsage)(result?.usage, visibleUsage),
-                        };
-                    }
-                }
-                catch (error) {
-                    console.warn(`[群聊主 Agent] 正式回复流式输出失败：${error?.message || error}`);
-                    if (!emitted)
-                        input.onDelta(canonicalReply);
-                }
+                streamCanonicalGroupReply(canonicalReply, input.onDelta);
             }
         }
         const workflowDecision = result?.workflowDecision || result?.analysis?.workflowDecision || null;
@@ -903,21 +845,22 @@ async function runGroupOrchestrator(input) {
             modelDecision: workflowDecision,
         }).names;
         const finalRuntime = String(result?.runtime || "");
-        (0, db_1.recordMetric)(coordinator.project, {
-            success: !["llm-error", "llm-not-configured"].includes(finalRuntime),
-            durationMs: Date.now() - startedAt,
-            fileChangeCount: 0,
-            scopeType: "group",
-            groupId: group.id,
-            role: "main_agent",
-            source: String(input.source || "group-orchestrator"),
-            runtime: finalRuntime,
-            traceId: input.traceId || input.trace_id || "",
-            taskId: input.taskId || input.task_id || "",
-            executionId: input.executionId || input.execution_id || "",
-            usage: result?.usage || null,
-            error: finalRuntime === "llm-error" ? "群聊主 Agent 大模型调用失败" : finalRuntime === "llm-not-configured" ? "群聊主 Agent 模型未配置" : "",
-        });
+        if (!reusedFirstTurn)
+            (0, db_1.recordMetric)(coordinator.project, {
+                success: !["llm-error", "llm-not-configured"].includes(finalRuntime),
+                durationMs: Date.now() - startedAt,
+                fileChangeCount: 0,
+                scopeType: "group",
+                groupId: group.id,
+                role: "main_agent",
+                source: String(input.source || "group-orchestrator"),
+                runtime: finalRuntime,
+                traceId: input.traceId || input.trace_id || "",
+                taskId: input.taskId || input.task_id || "",
+                executionId: input.executionId || input.execution_id || "",
+                usage: result?.usage || null,
+                error: finalRuntime === "llm-error" ? "群聊主 Agent 大模型调用失败" : finalRuntime === "llm-not-configured" ? "群聊主 Agent 模型未配置" : "",
+            });
         return { ...result, selectedRoleSkills };
     }
     catch (error) {

@@ -5,13 +5,14 @@ import * as path from "path";
 import { spawnSync } from "child_process";
 import { classifyExecutionFailure } from "../../agents/execution-kernel";
 import { normalizeAgentRuntimeId, type AgentRuntimeId } from "../../agents/runtime";
+import { resolveAntigravityCliCommand } from "../system/agent-provider-settings";
 import { prepareChildAgentWorkDir } from "../../agents/worktree";
 
 const RUNTIME_COMMANDS: Record<string, string[]> = {
   claudecode: ["claude"],
   codex: ["codex"],
   cursor: ["cursor-agent", "agent"],
-  gemini: ["gemini"],
+  gemini: [resolveAntigravityCliCommand(), "agy"],
   qoder: ["qodercli"],
 };
 

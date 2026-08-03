@@ -157,6 +157,7 @@ export declare function publicAgentProviderSettings(settings?: {
     updatedAt: string;
 };
 export declare function resolveCursorAgentCommand(): string;
+export declare function resolveAntigravityCliCommand(): string;
 export declare function getAgentProviderAccountIdentity(providerValue: string): string;
 export declare function parseCursorAuthStatus(rawOutput: string, exitCode: number | null): {
     loggedIn: boolean;
@@ -173,7 +174,6 @@ export declare function buildAgentProviderLoginSpec(provider: DevelopmentAgentPr
     args: string[];
     env: {
         NO_OPEN_BROWSER?: undefined;
-        NO_BROWSER?: undefined;
     };
     requiresCode: boolean;
 } | {
@@ -181,15 +181,6 @@ export declare function buildAgentProviderLoginSpec(provider: DevelopmentAgentPr
     args: string[];
     env: {
         NO_OPEN_BROWSER: string;
-        NO_BROWSER?: undefined;
-    };
-    requiresCode: boolean;
-} | {
-    command: string;
-    args: any[];
-    env: {
-        NO_BROWSER: string;
-        NO_OPEN_BROWSER?: undefined;
     };
     requiresCode: boolean;
 };
@@ -210,11 +201,16 @@ export declare function startAgentProviderInstall(providerValue: string): {
 export declare function getAgentProviderInstallJobs(): {
     [k: string]: InstallState;
 };
+export declare function parseAntigravityModels(output: string): {
+    id: string;
+    label: string;
+}[];
 export declare function buildAgentProviderTestSpec(providerValue: string, modelValue?: string, promptFile?: string): {
     command: string;
     args: string[];
     env: Record<string, string>;
 };
+export declare function summarizeAgentProviderTestFailure(stderrValue: unknown, stdoutValue?: unknown, fallback?: string): string;
 export declare function parseAgentProviderTestOutput(rawOutput: string, selectedModel?: string, providerValue?: string, challenge?: string): {
     usable: boolean;
     model: string;
@@ -227,7 +223,7 @@ export declare function parseGeminiCliDefaultModels(source: string): {
 }[];
 export declare function getAgentProviderModels(providerValue: string): Promise<any>;
 export declare function parseAgentProviderLoginProgress(providerValue: string, rawOutput: string): {
-    authUrl: any;
+    authUrl: string;
     userCode: string;
     awaitingCode: boolean;
     succeeded: boolean;
@@ -237,6 +233,12 @@ export declare function startAgentProviderLogin(providerValue: string, options?:
     providerId?: string;
     methodId?: string;
 }): {
+    launched: boolean;
+    browser: boolean;
+    manual: boolean;
+    command: string;
+    detail: string;
+} | {
     sessionId: string;
     provider: DevelopmentAgentProvider;
     status: LoginSessionStatus;
@@ -250,6 +252,7 @@ export declare function startAgentProviderLogin(providerValue: string, options?:
     command: string;
     launched: boolean;
     browser: boolean;
+    manual?: undefined;
 };
 export declare function getAgentProviderLoginSession(providerValue: string, sessionIdValue: string): {
     sessionId: string;
@@ -280,35 +283,31 @@ export declare function submitAgentProviderLoginCode(providerValue: string, sess
 export declare function logoutAgentProvider(providerValue: string): {
     provider: "gemini";
     loggedOut: boolean;
-    partial: boolean;
-    remainingCredentialSources: string[];
-    interactive?: undefined;
-    manual?: undefined;
-    command?: undefined;
+    interactive: boolean;
+    manual: boolean;
+    command: string;
+    detail: string;
 } | {
     provider: "opencode";
     loggedOut: boolean;
     interactive: boolean;
     manual: boolean;
     command: string;
-    partial?: undefined;
-    remainingCredentialSources?: undefined;
+    detail?: undefined;
 } | {
     provider: "opencode";
     loggedOut: boolean;
     interactive: boolean;
-    partial?: undefined;
-    remainingCredentialSources?: undefined;
     manual?: undefined;
     command?: undefined;
+    detail?: undefined;
 } | {
     provider: "claudecode" | "codex" | "cursor";
     loggedOut: boolean;
-    partial?: undefined;
-    remainingCredentialSources?: undefined;
     interactive?: undefined;
     manual?: undefined;
     command?: undefined;
+    detail?: undefined;
 };
 export declare function getConfiguredDevelopmentAgentEnv(agentType: string): Record<string, string>;
 export declare function getConfiguredDevelopmentAgentModel(agentType: string): string;

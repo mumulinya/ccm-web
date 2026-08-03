@@ -85,10 +85,15 @@
             <p>输入需求、粘贴图片或添加附件。发送第一条消息后，这个会话才会创建并进入列表。</p>
           </div>
           <template v-else>
-            <div
+            <div class="project-messages-flow">
+            <ConversationMessageShell
               v-for="(msg, i) in messages"
               :key="getMessageKey(msg)"
               :id="'msg-' + i"
+              :role="msg.role"
+              :timestamp="msg.timestamp || msg.created_at || msg.createdAt"
+              :structured="!!getProjectTaskCard(msg) || (Array.isArray(msg.workEvents) && msg.workEvents.length > 0) || Number(msg.fileChanges?.count || 0) > 0"
+              :streaming="!!msg.streaming || (isStreaming && i === messages.length - 1)"
               class="message"
               :class="[
                 msg.role,
@@ -98,16 +103,13 @@
                 },
               ]"
             >
-              <ChatAvatar v-if="msg.role === 'user'" role="user" class="message-avatar" />
-              <ChatAvatar v-else-if="msg.role === 'assistant'" role="agent" class="message-avatar" />
               <CommandResultCard v-if="msg.type === 'command_result'" :result="msg.commandResult" />
               <!-- 思考过程消息 -->
-              <div v-else-if="msg.role === 'thinking'" class="thinking-bubble">
-                <div class="thinking-header">
-                  <span>{{ msg.messageMode === 'task' ? '项目 Agent 正在处理任务...' : '项目 Agent 正在回复...' }}</span>
-                </div>
-                <span class="stream-cursor">▌</span>
-              </div>
+              <ConversationProcessingState
+                v-else-if="msg.role === 'thinking'"
+                :title="msg.messageMode === 'task' ? '项目主 Agent 正在推进任务' : '项目主 Agent 正在组织回复'"
+                :detail="msg.content || (msg.messageMode === 'task' ? '正在读取项目上下文并更新执行计划。' : '完成后会在当前会话继续回复。')"
+              />
               <!-- 用户消息 -->
               <div v-else-if="msg.role === 'user'" class="bubble">
                 <div>{{ msg.content }}</div>
@@ -122,10 +124,7 @@
                   @open-file-diff="openFileDiff"
                 />
               </div>
-              <MessageTimestamp
-                class="msg-meta"
-                :value="msg.timestamp || msg.created_at || msg.createdAt"
-              />
+            </ConversationMessageShell>
             </div>
           </template>
         </div>

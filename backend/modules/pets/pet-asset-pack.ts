@@ -43,10 +43,28 @@ export function validatePetAssetManifest(root: string, expectedVersion: string) 
   return manifest;
 }
 
+export function resolvePetAssetNpmInvocation(platform = process.platform) {
+  if (platform !== "win32") return { command: "npm", prefixArgs: [] as string[] };
+  const candidates = [
+    process.env.npm_execpath,
+    path.join(path.dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js"),
+  ].filter(Boolean) as string[];
+  const npmCli = candidates.find(candidate => {
+    try { return fs.lstatSync(candidate).isFile(); } catch { return false; }
+  });
+  if (!npmCli) throw new Error("找不到可用的 npm CLI，无法下载宠物资源包");
+  return { command: process.execPath, prefixArgs: [npmCli] };
+}
+
 function runNpmInstall(prefix: string, spec: string) {
   return new Promise<void>((resolve, reject) => {
-    const command = process.platform === "win32" ? "npm.cmd" : "npm";
-    const child = spawn(command, ["install", "--prefix", prefix, spec, "--ignore-scripts", "--no-audit", "--no-fund"], {
+    let invocation: ReturnType<typeof resolvePetAssetNpmInvocation>;
+    try { invocation = resolvePetAssetNpmInvocation(); }
+    catch (error) { reject(error); return; }
+    const child = spawn(invocation.command, [
+      ...invocation.prefixArgs,
+      "install", "--prefix", prefix, spec, "--ignore-scripts", "--no-audit", "--no-fund",
+    ], {
       shell: false,
       windowsHide: true,
       env: { ...process.env, npm_config_audit: "false", npm_config_fund: "false" },

@@ -28,8 +28,10 @@
         "context-engine-v2-selftest.mjs",
         "session-execution-ledger-selftest.mjs",
         "session-model-context-selftest.mjs",
-        "memory-center-microcompact-display-selftest.mjs",
-        "session-memory-dynamic-window-selftest.mjs",
+      "memory-center-microcompact-display-selftest.mjs",
+      "session-context-usage-ui-selftest.mjs",
+      "group-context-pressure-accounting-selftest.mjs",
+      "session-memory-dynamic-window-selftest.mjs",
         "global-agent-model-session-compaction-selftest.mjs",
         "third-party-memory-mcp-hydration-selftest.mjs",
         "memory-reliability-upgrade-selftest.mjs",
@@ -78,6 +80,7 @@
         "unified-model-retry-selftest.mjs",
         "model-semantic-routing-audit.mjs",
         "semantic-decision-runtime-selftest.mjs",
+        "group-direct-reply-fast-path-selftest.mjs",
         "agent-tool-inheritance-selftest.mjs",
         "runtime-tool-fabric-selftest.mjs",
         "marketplace-supply-chain-v2-selftest.mjs",
@@ -140,6 +143,7 @@
         "clipboard-attachments-selftest.mjs",
         "deferred-session-creation-selftest.mjs",
         "project-stream-message-layout-selftest.mjs",
+        "unified-conversation-layout-selftest.mjs",
         "sidebar-brand-header-selftest.mjs",
         "menu-configuration-selftest.mjs",
         "menu-configuration-render-regression.mjs",
@@ -186,7 +190,8 @@
         "pet-built-in-action-preview-selftest.mjs",
         "pet-space-management-redesign-selftest.mjs",
         "pet-notification-security-selftest.mjs",
-        "yuexinmiao1-replacement-selftest.mjs"
+        "pet-transparent-rendering-selftest.mjs",
+        "yuexinmiao-original-skin-selftest.mjs"
       ]
     },
     "release": {

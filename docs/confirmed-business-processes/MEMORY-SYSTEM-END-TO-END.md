@@ -91,13 +91,14 @@ Web和飞书只影响消息来源及回复路由，不改变记忆作用域。�
 
 ### 5. 固定模型上下文
 
-System、Rules、当前授权Skill、MCP工具定义、子Agent目录和本轮任务状态属于模型上下文块。它们每轮按当前配置重新构造并计入真实Token，但不是跨会话长期记忆。
+System、Rules、实际载入的Skill/MCP定义、子Agent目录和本轮任务状态属于模型上下文块。授权可用但未进入当前Provider载荷的Skill/MCP只保留在可用目录中，不计入本轮Token，也不会被伪装成已加载；这些内容都不是跨会话长期记忆。
 
 Skill/MCP的处理规则：
 
-- 定义和授权清单作为独立块进入当前模型请求；
+- 授权清单先形成可用目录，只有真实放入当前Provider载荷的目录、Schema或Skill正文才标记为`loaded`并计Token；
 - 大模型决定当前任务实际选择哪些Skill和MCP；
-- 实际工具调用和结果进入当前会话隐藏执行链；
+- 实际工具调用和结果进入当前会话隐藏执行链，并按精确名称标记为`invoked`；
+- 每个项目分别保存`available | loaded | invoked | unavailable`状态、内容或Schema checksum及调用结果checksum；旧会话没有逐项回执时显示“本轮状态未证明”，禁止按整个分类Token反推；
 - 正式压缩可以总结工具执行形成的决定和证据；
 - Skill/MCP定义本身不会被复制进长期记忆或反复写进会话摘要。
 
@@ -301,7 +302,7 @@ flowchart LR
 
 ## 第三方Agent记忆MCP
 
-Codex、Claude Code、Cursor、Gemini CLI、OpenCode等支持MCP的开发Agent使用签名只读快照读取记忆。
+Codex、Claude Code、Cursor、Antigravity CLI、OpenCode等支持MCP的开发Agent使用签名只读快照读取记忆。
 
 快照包含：
 
@@ -375,6 +376,7 @@ Provider不支持原生缓存或无法证明时仍可使用：
 会话上下文和记忆中心使用真实数据展示：
 
 - System、Rules、Skill、MCP、长期记忆、会话、工具、恢复和当前请求的Token占比；
+- MCP与Skill逐项展示“可用、已加载、已调用、不可用”；授权但未加载的条目不计入本轮百分比；
 - 当前是否未压缩、正式摘要来源、近期原文和距离压缩门限；
 - MicroCompact触发原因、清理量、保留量和原始数据保留状态；
 - Context Engine块复用、热缓存来源、稳定前缀、投影耗时和Provider耗时；

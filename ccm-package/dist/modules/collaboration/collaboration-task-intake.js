@@ -17,7 +17,6 @@ exports.buildProjectCodeReadOnlySnapshot = buildProjectCodeReadOnlySnapshot;
 exports.buildChildAgentWorkerHandoff = buildChildAgentWorkerHandoff;
 exports.buildQueuedGroupTaskMessage = buildQueuedGroupTaskMessage;
 const db_1 = require("../../core/db");
-const workflow_decision_1 = require("../../agents/workflow-decision");
 const group_orchestrator_1 = require("./group-orchestrator");
 const project_analysis_1 = require("./project-analysis");
 const memory_1 = require("./memory");
@@ -216,49 +215,28 @@ async function classifyGroupProjectTaskIntentWithAgent(input) {
     };
     const mode = String(input.messageMode || "conversation").trim().toLowerCase();
     try {
-        if (input.forceProjectTask) {
-            const modelDecision = await (0, workflow_decision_1.decideWorkflowWithModel)({
-                message: input.message,
-                scope: "group",
-                sourceCount: (input.uploadedFiles || []).length,
-                context: { group_id: input.group?.id || "", message_mode: mode, target: input.isOrchestrated ? "group" : "direct-project", explicit_task_choice: true },
-            });
-            const workflowDecision = (0, workflow_decision_1.explicitWorkflowDecision)("execute_direct", "用户显式要求创建并执行项目任务", modelDecision);
-            return {
-                executable: true,
-                analysisEligible: false,
-                kind: "task",
-                reason: workflowDecision.reason,
-                confidence: workflowDecision.confidence,
-                workflowDecision,
-                agent_gateway: { runtime: "llm-api", llm_backed: true, explicit: true },
-            };
-        }
-        if (!input.isOrchestrated) {
-            const workflowDecision = await (0, workflow_decision_1.decideWorkflowWithModel)({
-                message: input.message,
-                scope: "group",
-                sourceCount: (input.uploadedFiles || []).length,
-                context: { group_id: input.group?.id || "", message_mode: mode, target: "direct-project" },
-            });
-            return {
-                executable: workflowDecision.actionRequired,
-                analysisEligible: workflowDecision.mode === "project_analysis",
-                kind: workflowDecision.actionRequired ? "task" : workflowDecision.mode === "project_analysis" ? "project_analysis" : "conversation",
-                reason: workflowDecision.reason,
-                confidence: workflowDecision.confidence,
-                workflowDecision,
-                agent_gateway: { runtime: "llm-api", llm_backed: true, direct_project: true },
-            };
-        }
         const coordinatorResult = await (0, group_orchestrator_1.runGroupOrchestrator)({
             group: input.group,
             message: input.message,
-            source: "intent-gateway",
-            sharedFilesContext: input.sharedFilesContext || "",
+            source: "group-chat-main-first-turn",
             groupSessionId: input.groupSessionId || input.group_session_id || "",
+            context: input.context || "",
+            sharedFilesContext: input.sharedFilesContext || "",
+            extraInstructions: input.forceProjectTask
+                ? "用户通过明确的任务入口要求执行；请在同一首轮形成 workflowDecision、计划与分派草稿。"
+                : `当前消息模式：${mode}。请在本次主 Agent首轮直接决定回复、工具、澄清、计划或分派。`,
         });
-        return normalizeGroupAgentGatewayTaskIntent(fallback, coordinatorResult, mode);
+        const normalized = normalizeGroupAgentGatewayTaskIntent(fallback, coordinatorResult, mode);
+        return {
+            ...normalized,
+            coordinatorResult,
+            mainAgentFirstTurnResult: coordinatorResult,
+            agent_gateway: {
+                ...(normalized.agent_gateway || {}),
+                main_first_turn: true,
+                turn_receipt: coordinatorResult?.mainAgentTurnReceipt || null,
+            },
+        };
     }
     catch (error) {
         return {
@@ -355,10 +333,15 @@ async function buildGroupPlanModePreflight(input) {
     if (!areas.length)
         areas.push("由主 Agent 只读探索后收敛影响范围");
     let readOnlyContext = "";
-    const planningSource = await (0, project_analysis_1.buildModelDrivenGroupPlanningSourceContext)(group, message, configs, {
-        targetProjects: selectedProjects,
-        maxRounds: 3,
-    });
+    const firstTurnSource = input.taskIntent?.mainAgentFirstTurnResult?.projectSourceEvidence
+        || input.taskIntent?.coordinatorResult?.projectSourceEvidence
+        || null;
+    const planningSource = firstTurnSource?.schema === "ccm-group-main-source-planning-v1"
+        ? firstTurnSource
+        : await (0, project_analysis_1.buildModelDrivenGroupPlanningSourceContext)(group, message, configs, {
+            targetProjects: selectedProjects,
+            maxRounds: 3,
+        });
     readOnlyContext = planningSource.rendered;
     const sourceModelPlan = planningSource.modelPlanning;
     workflowDecision = {

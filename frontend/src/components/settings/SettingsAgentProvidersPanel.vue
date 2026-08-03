@@ -68,8 +68,16 @@ const hasModelCatalog = provider => modelMetadata.value[provider]?.source !== 'u
 
 const modelSelectionValue = provider => customModelMode.value[provider] ? '__custom__' : String(config.value[provider]?.model || '')
 
+const clearProviderTestResult = provider => {
+  if (!testResults.value[provider]) return
+  const next = { ...testResults.value }
+  delete next[provider]
+  testResults.value = next
+}
+
 const selectProviderModel = (provider, event) => {
   const value = String(event.target.value || '')
+  clearProviderTestResult(provider)
   if (value === '__custom__') {
     customModelMode.value = { ...customModelMode.value, [provider]: true }
     config.value[provider].model = ''
@@ -87,6 +95,24 @@ const syncCustomModelMode = provider => {
 
 const updateLoginSession = (provider, session) => {
   loginSessions.value = { ...loginSessions.value, [provider]: session }
+}
+
+const closeLoginPopup = provider => {
+  const popup = loginPopups.get(provider)
+  try { if (popup && !popup.closed) popup.close() } catch {}
+  loginPopups.delete(provider)
+  openedAuthUrls.delete(provider)
+}
+
+const clearLoginSession = provider => {
+  stopLoginPolling(provider)
+  closeLoginPopup(provider)
+  const next = { ...loginSessions.value }
+  delete next[provider]
+  loginSessions.value = next
+  const nextCodes = { ...loginCodes.value }
+  delete nextCodes[provider]
+  loginCodes.value = nextCodes
 }
 
 const stopLoginPolling = provider => {
@@ -155,16 +181,22 @@ const pollLoginSession = provider => {
       if (data.status === 'succeeded') {
         stopLoginPolling(provider)
         toast.success(`${providerLabel(provider)} 已登录`)
-        await load(true, true)
+        try {
+          await load(true, true)
+        } finally {
+          clearLoginSession(provider)
+        }
         return
       }
       if (data.status === 'failed') {
         stopLoginPolling(provider)
+        closeLoginPopup(provider)
         toast.error(data.error || `${providerLabel(provider)} 登录未完成`)
         return
       }
     } catch (error) {
       stopLoginPolling(provider)
+      closeLoginPopup(provider)
       toast.error(error?.message || '读取网页登录状态失败')
       return
     }
@@ -401,7 +433,11 @@ const install = async provider => {
 }
 
 const login = async provider => {
-  const popup = createLoginPopup(provider)
+  clearLoginSession(provider)
+  const nextTestResults = { ...testResults.value }
+  delete nextTestResults[provider]
+  testResults.value = nextTestResults
+  const popup = provider === 'gemini' ? null : createLoginPopup(provider)
   actionProvider.value = provider
   try {
     const response = await fetch(`/api/system/agent-providers/${provider}/login`, {
@@ -411,13 +447,19 @@ const login = async provider => {
     })
     const data = await response.json()
     if (!response.ok || !data.success) throw new Error(data.error || '无法启动登录')
+    if (data.manual) {
+      closeLoginPopup(provider)
+      await rememberManualCommand(provider, data.command, provider === 'gemini' ? 'Antigravity账号由官方CLI管理，完成登录后返回这里点击“测试”' : undefined)
+      toast.success(data.detail || `${providerLabel(provider)} 登录终端已打开`)
+      return
+    }
     updateLoginSession(provider, data)
     navigateLoginPopup(provider, data.authUrl)
     pollLoginSession(provider)
     if (!popup) toast.error('浏览器阻止了登录弹窗，请允许本站弹窗并点击“打开认证页”')
     else toast.success('网页登录已启动，请在弹出的浏览器页面完成认证')
   } catch (error) {
-    try { if (popup && !popup.closed) popup.close() } catch {}
+    closeLoginPopup(provider)
     toast.error(error?.message || '无法启动登录')
   } finally {
     actionProvider.value = ''
@@ -520,7 +562,7 @@ onBeforeUnmount(() => {
         <Terminal :size="20" />
         <div>
           <h2>开发 Agent</h2>
-          <p>统一管理项目 Agent 和群聊项目子 Agent 使用的 Claude Code、Codex、Cursor、Gemini CLI 与 OpenCode。设置会作用于后续新任务和新运行世代。</p>
+          <p>统一管理项目 Agent 和群聊项目子 Agent 使用的 Claude Code、Codex、Cursor、Antigravity CLI 与 OpenCode。设置会作用于后续新任务和新运行世代。</p>
         </div>
       </div>
       <button type="button" class="settings-button" :disabled="checking || loading" @click="load(true)">
@@ -576,6 +618,7 @@ onBeforeUnmount(() => {
               v-model="config[provider.id].model"
               class="settings-input provider-custom-model"
               :placeholder="modelLoading[provider.id] ? '正在读取可用模型...' : '输入模型 ID，留空使用自动模式'"
+              @input="clearProviderTestResult(provider.id)"
             >
             <span v-if="hasModelCatalog(provider.id)" class="settings-field-hint model-catalog-ok">{{ modelMetadata[provider.id]?.detail || `当前账号返回 ${modelOptions[provider.id].filter(model => model.id).length} 个可用模型，修改后应用于后续任务。` }}</span>
             <span v-else class="settings-field-hint">{{ modelLoading[provider.id] ? '正在读取当前账号与本机 CLI 的模型目录...' : (modelMetadata[provider.id]?.error || '当前 Agent 无法枚举模型，可留空使用自动模式或手动填写模型 ID。') }}</span>
@@ -703,7 +746,7 @@ onBeforeUnmount(() => {
                 <option v-for="model in modelOptions.claudecode" :key="model.id" :value="model.id">{{ model.label }}</option>
                 <option v-if="modelMetadata.claudecode?.allowsCustom" value="__custom__">自定义模型 ID...</option>
               </select>
-              <input v-if="!hasModelCatalog('claudecode') || customModelMode.claudecode" id="claude-provider-custom-model" v-model="config.claudecode.model" class="settings-input provider-custom-model" :disabled="config.claudecode.externalManaged" placeholder="输入第三方 API 支持的模型 ID">
+              <input v-if="!hasModelCatalog('claudecode') || customModelMode.claudecode" id="claude-provider-custom-model" v-model="config.claudecode.model" class="settings-input provider-custom-model" :disabled="config.claudecode.externalManaged" placeholder="输入第三方 API 支持的模型 ID" @input="clearProviderTestResult('claudecode')">
               <span class="settings-field-hint">{{ hasModelCatalog('claudecode') ? `当前 API 返回 ${modelOptions.claudecode.length} 个可用模型。` : (modelMetadata.claudecode?.error || '保存 API 凭据后可读取模型列表。') }}</span>
             </div>
           </div>
@@ -740,7 +783,7 @@ onBeforeUnmount(() => {
       <div class="settings-details provider-routing-note">
         <div class="settings-details-content">
           <CheckCircle2 :size="15" />
-          <span>项目选择哪一种 Agent，就只读取对应认证。CLI 登录与 Claude Code API 互不混用；Gemini CLI 和 OpenCode 同样受 CCM 的项目范围、MCP 权限和记忆快照约束。</span>
+          <span>项目选择哪一种 Agent，就只读取对应认证。CLI 登录与 Claude Code API 互不混用；Antigravity CLI 和 OpenCode 同样受 CCM 的项目范围、MCP 权限和记忆快照约束。</span>
         </div>
       </div>
     </template>

@@ -32,6 +32,7 @@ import {
 import {
   usesCodexCliLogin,
   getConfiguredDevelopmentAgentEnv,
+  resolveAntigravityCliCommand,
 } from "../modules/system/agent-provider-settings";
 import {
   buildToolAuthorizationInventory,
@@ -277,7 +278,7 @@ function runtimeCliCandidates(runtime: string) {
   if (runtime === "claudecode") return ["claude"];
   if (runtime === "cursor") return ["cursor-agent", "agent"];
   if (runtime === "codex") return ["codex"];
-  if (runtime === "gemini") return ["gemini"];
+  if (runtime === "gemini") return [resolveAntigravityCliCommand(), "agy"];
   if (runtime === "opencode") return ["opencode"];
   if (runtime === "qoder") return ["qodercli"];
   return [runtime].filter(Boolean);
@@ -1774,7 +1775,7 @@ export function syncRuntimeToolsWithCatalog(
       writeRuntimeSnapshot(runtimeRoot, audit);
     } else {
       const runtimeSpec = runtime === "gemini"
-          ? { root: ".gemini", config: "settings.json", skillDir: "skills", format: "gemini-project-settings" }
+          ? { root: ".agents", config: "mcp_config.json", skillDir: "skills", format: "antigravity-workspace-config" }
           : { root: ".qoder", config: "settings.local.json", skillDir: "skills", format: "qoder-local-settings" };
       const runtimeRoot = path.join(workDir, runtimeSpec.root);
       const configPath = path.join(runtimeRoot, runtimeSpec.config);
@@ -1786,9 +1787,7 @@ export function syncRuntimeToolsWithCatalog(
         ...mcpServers,
       };
       if (runtime === "gemini") {
-        settings.mcp = settings.mcp && typeof settings.mcp === "object" ? settings.mcp : {};
-        settings.mcp.allowed = Object.keys(mcpServers);
-        audit.isolation = "allowlist";
+        audit.isolation = "project-scope";
       } else {
         audit.isolation = "project-scope";
         audit.warnings.push(`${runtime} CLI 没有严格 MCP 快照参数；CCM 已同步项目级配置，仍保留平台代理作为权限兜底`);

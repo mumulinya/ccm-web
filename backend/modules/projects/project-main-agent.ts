@@ -22,11 +22,13 @@ import {
 } from "../collaboration/group-orchestrator-llm-client";
 import { loadOrchestratorConfig } from "../collaboration/group-orchestrator-config";
 import { getGroupAutoCompactThreshold, resolveGroupModelContextCapacity } from "../collaboration/group-compaction-strategy";
-import type { WorkflowDecision } from "../../agents/workflow-decision";
+import { WORKFLOW_DECISION_GUIDANCE, normalizeWorkflowDecision, type WorkflowDecision } from "../../agents/workflow-decision";
+import { createMainAgentTurnReceipt, normalizeMainAgentTurnDecision } from "../../agents/main-agent-turn";
 import { validateProjectName, validateSessionId, validateWorkDirectory } from "./project-validation";
 import { buildRoleSkillPrompt } from "../../skills/role-skills";
 import {
   buildMainAgentToolRuntimeContext,
+  buildMainAgentLoadedContextItems,
   executeMainAgentToolRequests,
   mainAgentToolRequestFingerprint,
   normalizeMainAgentToolRequests,
@@ -63,6 +65,7 @@ import {
 import { isTestAgentEnabled } from "../system/test-agent-settings";
 import { runMainAgentSelfVerification } from "../collaboration/main-agent-self-verification";
 import { resolveTaskAcceptancePolicy } from "../collaboration/task-acceptance-policy";
+import { searchAgentKnowledge } from "../knowledge/knowledge-access";
 
 function projectMainToolCallId(projectSessionId: string, toolName: string) {
   return `pmtool_${crypto.createHash("sha256").update(`${projectSessionId}:${toolName}:${Date.now()}:${crypto.randomBytes(4).toString("hex")}`).digest("hex").slice(0, 20)}`;
@@ -278,6 +281,7 @@ type ProjectMainModelTelemetry = {
   projectSessionId: string;
   currentRequest?: any;
   contextComponents?: any;
+  onUsage?: (usage: any) => void;
 };
 
 function projectMainModelCallOptions(config: any, messages: any[], telemetry?: ProjectMainModelTelemetry) {
@@ -307,6 +311,7 @@ function projectMainModelCallOptions(config: any, messages: any[], telemetry?: P
       source: "project_main_agent",
     },
     onUsage: (usage: any) => {
+      telemetry.onUsage?.(usage);
       try {
         recordProjectSessionProviderUsage(telemetry.project, telemetry.projectSessionId, {
           usage,
@@ -344,6 +349,34 @@ async function modelText(
   return shouldUseAnthropic(config)
     ? callAnthropicCompatibleChat(config, { messages, maxTokens, temperature: 0.2, defaultTimeoutMs: 60_000, httpErrorPrefix: errorPrefix, stream: !!onDelta, onDelta, ...telemetryOptions })
     : callOpenAiCompatibleChat(config, { messages, temperature: 0.2, defaultTimeoutMs: 60_000, httpErrorPrefix: errorPrefix, stream: !!onDelta, onDelta, ...telemetryOptions });
+}
+
+function projectMainLoadedContextItems(toolContext: MainAgentToolRuntimeContext | null, results: any[], roleSkills: any, runtimeResults: any[] = []) {
+  const selectedSkills = (Array.isArray(roleSkills?.selected) ? roleSkills.selected : []).map((skill: any) => ({
+    name: String(skill?.name || ""),
+    loadLevel: "body" as const,
+    checksum: crypto.createHash("sha256").update(String(skill?.body || "")).digest("hex"),
+  })).filter((skill: any) => skill.name);
+  const evidence: any = toolContext ? buildMainAgentLoadedContextItems(toolContext, results, selectedSkills) : {
+    schema: "ccm-loaded-context-items-v1" as const,
+    skills: selectedSkills.map((skill: any) => ({
+      kind: "skill" as const,
+      name: skill.name,
+      aliases: [skill.name, `skill:${skill.name}`],
+      loadLevel: "body" as const,
+      checksum: skill.checksum,
+    })),
+    mcp: [],
+    invocations: [],
+  };
+  for (const row of Array.isArray(runtimeResults) ? runtimeResults : []) {
+    const name = String(row?.name || "").trim();
+    if (!name) continue;
+    const resultChecksum = crypto.createHash("sha256").update(JSON.stringify(row?.output ?? row?.error ?? null)).digest("hex");
+    evidence.mcp.push({ kind: "mcp", name, aliases: [name], loadLevel: "result", checksum: resultChecksum });
+    evidence.invocations.push({ kind: "mcp", name, aliases: [name], ok: !row?.error, resultChecksum });
+  }
+  return evidence;
 }
 
 function projectMainPlanChecksum(plan: any) {
@@ -590,6 +623,18 @@ async function hydrateProjectRuntimeDiagnostics(input: {
       contextComponents: {
         messageMcpTools: PROJECT_RUNTIME_DIAGNOSTIC_TOOL_SPECS,
         mcpResults: manifest,
+        loadedContextItems: {
+          schema: "ccm-loaded-context-items-v1",
+          skills: [],
+          mcp: PROJECT_RUNTIME_DIAGNOSTIC_TOOL_SPECS.map((tool: any) => ({
+            kind: "mcp",
+            name: String(tool?.name || ""),
+            aliases: [String(tool?.name || "")],
+            loadLevel: "schema",
+            checksum: crypto.createHash("sha256").update(JSON.stringify(tool)).digest("hex"),
+          })),
+          invocations: [],
+        },
       },
     });
     const allowed = new Set(PROJECT_RUNTIME_DIAGNOSTIC_TOOL_SPECS.map(tool => tool.name));
@@ -642,6 +687,190 @@ function projectRuntimeEvidenceSummary(
       error: cleanText(result.error, 500),
     })),
   };
+}
+
+export async function runProjectMainAgentFirstTurn(input: {
+  project: string;
+  projectSessionId: string;
+  userMessage: string;
+  turnId?: string;
+  sourceCount?: number;
+}) {
+  const project = validateProjectName(input.project);
+  const projectSessionId = validateSessionId(input.projectSessionId);
+  const exactContext = projectMainExactSessionContext(project, projectSessionId, input.userMessage);
+  const configuredToolContext = buildProjectMainConfiguredToolContext({
+    project,
+    projectSessionId,
+    executionSkills: [],
+    source: "project-main-first-turn",
+  });
+  const builtinTools = [
+    { canonicalName: "read_project_source", name: "read_project_source", server: "ccm-project-readonly", description: "只读检索当前项目源码并形成带checksum的证据。", inputSchema: { type: "object", properties: {} }, annotations: { readOnlyHint: true } },
+    { canonicalName: "read_runtime_diagnostics", name: "read_runtime_diagnostics", server: "ccm-project-readonly", description: "只读查询当前项目运行配置、状态和日志摘要。", inputSchema: { type: "object", properties: {} }, annotations: { readOnlyHint: true } },
+    { canonicalName: "query_knowledge", name: "query_knowledge", server: "ccm-project-readonly", description: "按当前项目授权范围查询知识库。", inputSchema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] }, annotations: { readOnlyHint: true } },
+  ];
+  const toolContext: MainAgentToolRuntimeContext = {
+    ...configuredToolContext,
+    catalog: { ...configuredToolContext.catalog, mcp: [...builtinTools, ...configuredToolContext.catalog.mcp] },
+    policyPrompt: [
+      "项目主 Agent内置只读工具：",
+      ...builtinTools.map(tool => `- ${tool.canonicalName}: ${tool.description}; 参数 Schema=${JSON.stringify(tool.inputSchema)}`),
+      configuredToolContext.policyPrompt,
+    ].filter(Boolean).join("\n"),
+  };
+  const toolResults: any[] = [];
+  const executed = new Set<string>();
+  let sourceHydration: Awaited<ReturnType<typeof hydrateProjectMainSource>> | null = null;
+  let runtimeHydration: Awaited<ReturnType<typeof hydrateProjectRuntimeDiagnostics>> | null = null;
+  let parsed: any = null;
+  let modelCallCount = 0;
+  let tokenUsage: any = null;
+  const captureUsage = (usage: any) => {
+    if (!usage || typeof usage !== "object") return;
+    const inputTokens = Number(tokenUsage?.inputTokens || 0) + Number(usage.inputTokens || usage.input_tokens || 0);
+    const outputTokens = Number(tokenUsage?.outputTokens || 0) + Number(usage.outputTokens || usage.output_tokens || 0);
+    tokenUsage = {
+      inputTokens,
+      outputTokens,
+      totalTokens: inputTokens + outputTokens,
+      directInputTokens: Number(tokenUsage?.directInputTokens || 0) + Number(usage.directInputTokens || usage.direct_input_tokens || 0),
+      cacheCreationInputTokens: Number(tokenUsage?.cacheCreationInputTokens || 0) + Number(usage.cacheCreationInputTokens || usage.cache_creation_input_tokens || 0),
+      cacheReadInputTokens: Number(tokenUsage?.cacheReadInputTokens || 0) + Number(usage.cacheReadInputTokens || usage.cache_read_input_tokens || 0),
+      reported: true,
+    };
+  };
+
+  const buildMessages = () => [{
+    role: "system",
+    content: `你是 CCM 项目“${project}”的项目主 Agent。你必须在这次主 Agent 首轮调用中直接理解用户消息并决定：直接回答、调用只读工具、澄清、制定计划或分派当前项目开发任务。不要先做独立意图分类。
+
+${WORKFLOW_DECISION_GUIDANCE}
+
+规则：
+1. 普通问候、致谢和自包含问答直接 responseType=reply，不调用工具、不创建任务。
+2. 只有缺少项目事实时才请求只读工具。内置工具为 read_project_source、read_runtime_diagnostics、query_knowledge；其他工具只能从授权目录选择。
+3. 工具结果会回到同一 Agent Loop；不要重复相同请求。
+4. 需要实际修改时 responseType=plan 或 dispatch，并同时给出可执行 plan；项目主 Agent本身不修改代码。
+5. 信息不足时 responseType=clarify。写入权限、RBAC和高风险确认由服务端最终裁决。
+6. 只输出JSON，不输出Markdown或内部推理。
+
+JSON：{"responseType":"reply|tool_calls|clarify|plan|dispatch","reply":"给用户的完整回复或澄清问题","workflowDecision":{"mode":"answer|project_analysis|execute_direct|plan_task|decompose_epic","reason":"语义依据","confidence":0.95,"needsPlanning":false,"needsEpicDecomposition":false,"actionRequired":false,"continuationKind":"new_task|supplement|revise_goal","readAction":"none|inspect_status","targetRefs":[],"impactScope":[],"planSteps":[],"clarificationQuestions":[],"selectedSkills":[],"intentKind":"conversation|question|status|analysis|execution|management|continuation","requiresCodeChanges":false,"requiresAgentQa":false,"requiresIndependentReview":false,"verificationModes":[],"memoryPolicy":"use|ignore","authorizationDirective":"preserve|grant|revoke","riskLevel":"low|write|high","requiresUserConfirmation":false},"toolRequests":[{"name":"工具名","arguments":{},"reason":"原因"}],"plan":{"title":"标题","summary":"摘要","requiresConfirmation":false,"acceptanceEvidencePlan":[{"criterion":"标准","observableOutcome":"可观察结果","evidenceTypes":["command"],"target":"对象"}],"verificationProfile":{"tier":"lightweight|standard|interactive|critical","changeClass":"documentation|configuration|code|interactive|critical","reason":"依据"},"permissionBoundaries":[],"workItems":[{"id":"work_1","title":"步骤","objective":"自包含目标","acceptanceCriteria":[],"dependsOn":[]}]}}
+
+${toolContext.policyPrompt}`,
+  }, {
+    role: "user",
+    content: JSON.stringify({
+      project,
+      project_session_id: projectSessionId,
+      exact_session_context: exactContext,
+      current_message: input.userMessage,
+      source_count: Math.max(0, Number(input.sourceCount || 0)),
+      tool_results: toolResults,
+    }),
+  }];
+
+  for (let round = 0; round <= 2; round += 1) {
+    const gate = await ensureProjectMainModelCapacity({
+      project,
+      projectSessionId,
+      currentRequest: input.userMessage,
+      buildMessages,
+      contextComponents: {
+        messageMcpTools: toolContext.catalog.mcp,
+        mcpResults: toolResults,
+        loadedContextItems: buildMainAgentLoadedContextItems(toolContext, toolResults),
+      },
+    });
+    modelCallCount += 1;
+    parsed = await modelJson(gate.messages, "项目主 Agent首轮决策失败", {
+      project,
+      projectSessionId,
+      currentRequest: input.userMessage,
+      contextComponents: { messageMcpTools: toolContext.catalog.mcp, mcpResults: toolResults, loadedContextItems: buildMainAgentLoadedContextItems(toolContext, toolResults) },
+      onUsage: captureUsage,
+    });
+    const requests = normalizeMainAgentToolRequests(parsed?.toolRequests || parsed?.tool_requests).filter(request => {
+      const fingerprint = mainAgentToolRequestFingerprint(request);
+      if (executed.has(fingerprint)) return false;
+      executed.add(fingerprint);
+      return true;
+    });
+    if (!requests.length) break;
+    if (round >= 2) throw new Error("PROJECT_MAIN_TOOL_LOOP_MAX_ROUNDS");
+    for (const request of requests.slice(0, 2)) {
+      const callId = recordProjectMainToolUse(project, projectSessionId, request.name, request.arguments || {});
+      try {
+        let output: any;
+        if (request.name === "read_project_source") {
+          const decision = normalizeWorkflowDecision(parsed?.workflowDecision || parsed?.workflow_decision || {});
+          sourceHydration = await hydrateProjectMainSource({ project, projectSessionId, userMessage: input.userMessage, conversationContext: exactContext, purpose: "planning", requiresCodeChanges: decision.requiresCodeChanges });
+          output = sourceHydration.prompt;
+        } else if (request.name === "read_runtime_diagnostics") {
+          runtimeHydration = await hydrateProjectRuntimeDiagnostics({ project, projectSessionId, userMessage: input.userMessage, conversationContext: exactContext, purpose: "analysis" });
+          output = runtimeHydration.prompt;
+        } else if (request.name === "query_knowledge") {
+          const knowledge = await searchAgentKnowledge(String(request.arguments?.query || input.userMessage), { role: "project-agent", project }, { limit: 6 });
+          output = { context: knowledge.context, citations: knowledge.citations, retrievalMode: knowledge.embeddingMode, indexGeneration: knowledge.indexGeneration };
+        } else {
+          const rows = await executeMainAgentToolRequests({ requests: [request], toolContext, resultTokenLimit: 8_000 });
+          output = rows[0];
+        }
+        recordProjectMainToolResult(project, projectSessionId, request.name, callId, sanitizeSessionExecutionValue(output));
+        toolResults.push({ name: request.name, ok: true, output });
+      } catch (error: any) {
+        const detail = cleanText(error?.message || error, 1000);
+        recordProjectMainToolResult(project, projectSessionId, request.name, callId, null, detail);
+        toolResults.push({ name: request.name, ok: false, error: detail });
+      }
+    }
+  }
+
+  const workflowDecision = normalizeWorkflowDecision(parsed?.workflowDecision || parsed?.workflow_decision || {});
+  const turnDecision = normalizeMainAgentTurnDecision({
+    scope: "project",
+    scopeId: project,
+    exactSessionId: projectSessionId,
+    turnId: input.turnId || `${projectSessionId}:${Date.now()}`,
+    parsed,
+    workflowDecision,
+    reply: parsed?.reply,
+    planDraft: parsed?.plan,
+  });
+  const turnReceipt = createMainAgentTurnReceipt({
+    decision: turnDecision,
+    modelCallIndex: Math.max(1, modelCallCount),
+    toolRound: Math.max(0, modelCallCount - 1),
+    usage: tokenUsage,
+    inputIdentity: { project, projectSessionId, turnId: input.turnId || "", message: input.userMessage },
+  });
+  const planValue = parsed?.plan && typeof parsed.plan === "object" ? parsed.plan : null;
+  let plan: ProjectMainPlan | null = null;
+  if (["plan", "dispatch"].includes(turnDecision.responseKind) || workflowDecision.actionRequired) {
+    const acceptanceEvidencePlan = normalizeTestAgentAcceptanceEvidencePlan(planValue?.acceptanceEvidencePlan || planValue?.acceptance_evidence_plan);
+    const acceptanceCriteria = acceptanceEvidencePlan.map(item => item.criterion);
+    const workItems = normalizedWorkItems(planValue?.workItems || planValue?.work_items, input.userMessage);
+    for (const item of workItems) if (!item.acceptanceCriteria.length) item.acceptanceCriteria = acceptanceCriteria.slice();
+    const independentTestAgentEnabled = isTestAgentEnabled();
+    plan = {
+      schema: "ccm-project-main-plan-v1",
+      title: cleanText(planValue?.title || input.userMessage, 120) || "项目开发任务",
+      summary: cleanText(planValue?.summary || workflowDecision.reason, 1600),
+      project,
+      projectSessionId,
+      acceptanceMode: independentTestAgentEnabled ? "test_agent" : "main_agent_self_verification",
+      requiresConfirmation: planValue?.requiresConfirmation === true || workflowDecision.requiresUserConfirmation || workflowDecision.riskLevel === "high" || workflowDecision.clarificationQuestions.length > 0,
+      acceptanceCriteria,
+      acceptanceEvidencePlan,
+      verificationProfile: normalizeTestAgentVerificationProfile(planValue?.verificationProfile || planValue?.verification_profile),
+      permissionBoundaries: cleanList(planValue?.permissionBoundaries || planValue?.permission_boundaries, 12, 600),
+      sourceEvidence: sourceHydration ? projectSourceEvidenceSummary(sourceHydration.evidence) : { manifestChecksum: "", manifestFiles: 0, selectedPaths: [], rejectedPaths: [], totalChars: 0, truncated: false },
+      runtimeEvidence: runtimeHydration ? projectRuntimeEvidenceSummary(runtimeHydration) : { manifestChecksum: "", profiles: 0, toolCalls: [] },
+      workItems,
+      createdAt: new Date().toISOString(),
+    };
+  }
+  return { workflowDecision, responseType: turnDecision.responseKind, reply: turnDecision.reply, plan, toolResults, turnDecision, turnReceipt };
 }
 
 export async function planProjectMainTask(input: {
@@ -705,6 +934,7 @@ export async function planProjectMainTask(input: {
     projectSource: sourceHydration.prompt,
     messageMcpTools: configuredToolContext.catalog.mcp,
     mcpResults: [runtimeHydration.prompt, configuredToolHydration.prompt].filter(Boolean).join("\n\n"),
+    loadedContextItems: projectMainLoadedContextItems(configuredToolContext, configuredToolHydration.results, roleSkills, runtimeHydration.results),
   };
   const buildPlanningMessages = () => [
     {
@@ -821,6 +1051,8 @@ export async function answerAsProjectMainAgent(input: {
   let sourceEvidence = "";
   let runtimeEvidence = "";
   let configuredToolContext: MainAgentToolRuntimeContext | null = null;
+  let configuredToolResults: any[] = [];
+  let runtimeToolResults: any[] = [];
   const exactSessionContext = () => projectMainExactSessionContext(input.project, input.projectSessionId, input.userMessage);
   const hydrationContext = [exactSessionContext(), input.context].filter(Boolean).join("\n\n");
   if (input.mode === "project_analysis") {
@@ -841,6 +1073,7 @@ export async function answerAsProjectMainAgent(input: {
       purpose: "analysis",
     });
     runtimeEvidence = runtimeHydration.prompt;
+    runtimeToolResults = runtimeHydration.results;
     configuredToolContext = buildProjectMainConfiguredToolContext({
       project: input.project,
       projectSessionId: input.projectSessionId,
@@ -858,12 +1091,14 @@ export async function answerAsProjectMainAgent(input: {
       runtimeEvidence,
     });
     toolEvidence = hydrated.prompt;
+    configuredToolResults = hydrated.results;
   }
   const contextComponents = {
     skills: [roleSkills.prompt, configuredToolContext?.skillPrompt || ""].filter(Boolean).join("\n\n"),
     projectSource: sourceEvidence,
     messageMcpTools: configuredToolContext?.catalog.mcp || [],
     mcpResults: [runtimeEvidence, toolEvidence].filter(Boolean).join("\n\n"),
+    loadedContextItems: projectMainLoadedContextItems(configuredToolContext, configuredToolResults, roleSkills, runtimeToolResults),
   };
   const buildAnswerMessages = () => [
     {
@@ -1103,7 +1338,10 @@ async function finalSummary(input: {
     project: input.plan.project,
     projectSessionId: input.plan.projectSessionId,
     currentRequest: input.task.business_goal || input.task.title || "",
-    contextComponents: { skills: roleSkills.prompt },
+    contextComponents: {
+      skills: roleSkills.prompt,
+      loadedContextItems: projectMainLoadedContextItems(null, [], roleSkills),
+    },
   }, input.onDelta);
   return cleanText(response, 14000);
 }
@@ -1333,6 +1571,7 @@ async function hydrateProjectConfiguredTools(input: {
         skills: input.toolContext.skillPrompt,
         messageMcpTools: input.toolContext.catalog.mcp,
         mcpResults: results,
+        loadedContextItems: buildMainAgentLoadedContextItems(input.toolContext, results),
       },
     });
     const selected = await modelJson(capacity.messages, "项目主 Agent工具选择失败", {
@@ -1343,6 +1582,7 @@ async function hydrateProjectConfiguredTools(input: {
         skills: input.toolContext.skillPrompt,
         messageMcpTools: input.toolContext.catalog.mcp,
         mcpResults: results,
+        loadedContextItems: buildMainAgentLoadedContextItems(input.toolContext, results),
       },
     });
     const requests = normalizeMainAgentToolRequests(selected?.toolRequests || selected?.tool_requests).filter(request => {

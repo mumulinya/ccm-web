@@ -1,4 +1,28 @@
 import { ConversationSummary, FactAnchor } from "./group-compaction-receipts";
+export declare function buildGroupPressureAccountingSelection(triggerPayload: any, providerUsageBaseline: any, groupId: string, groupSessionId: string): {
+    triggerFixedTokens: number;
+    providerAccountingPayload: {
+        schema: string;
+        scope: string;
+        sessionId: string;
+        tokenBreakdown: any;
+        totalTokens: number;
+        payloadChecksum: string;
+        fixedContextChecksum: string;
+        contentStored: boolean;
+    };
+    measurementPayload: any;
+    persistedAccounting: {
+        schema: string;
+        scope: string;
+        sessionId: string;
+        tokenBreakdown: any;
+        totalTokens: number;
+        payloadChecksum: string;
+        fixedContextChecksum: string;
+        contentStored: boolean;
+    };
+};
 export declare function normalizeHookAnchor(raw: any, index: number, type?: FactAnchor["type"]): FactAnchor | null;
 export declare function extractHookAnchors(results: any[], key: string, type: FactAnchor["type"]): FactAnchor[];
 export declare function buildCompactionTimeline(messages: any[]): {

@@ -11,7 +11,7 @@ Status: Confirmed and implemented
 -> 账号与模型目录 -> 任务启动门禁 -> 失效、退出与恢复
 ```
 
-Codex、Gemini CLI和OpenCode的凭据文件只证明本机存在候选凭据，不能直接证明账号仍可用。Cursor可使用CLI的正向status证据；Claude Code绑定CCM或CC-Switch配置，但仍需真实API challenge。只有有效的`DevelopmentAgentAuthEvidenceV2`才能让项目任务进入对应运行时。
+Codex、Antigravity CLI和OpenCode的本机状态只证明存在候选认证，不能直接证明账号仍可用。Cursor可使用CLI的正向status证据；Claude Code绑定CCM或CC-Switch配置，但仍需真实API challenge。只有有效的`DevelopmentAgentAuthEvidenceV2`才能让项目任务进入对应运行时。
 
 ## 认证证据
 
@@ -22,7 +22,8 @@ Codex、Gemini CLI和OpenCode的凭据文件只证明本机存在候选凭据，
 ## Provider边界
 
 - OpenCode登录允许选择Provider，不再固定OpenAI；未指定时由OpenCode交互选择。
-- Gemini分别识别OAuth、环境变量API Key、Service Account和gcloud ADC；退出后返回仍生效的凭据来源，不能误报完全退出。
+- Antigravity使用官方`agy`管理账号。CCM只读取非敏感状态并执行随机challenge，不保存、转发或删除Google认证材料；登录、退出和切换账号在官方交互终端完成。
+- 历史内部ID`gemini`继续映射到Antigravity，旧项目与任务无需迁移；旧`gemini`可执行程序不再进入生产派发。
 - Claude远程接口必须使用HTTPS，HTTP只允许localhost、127.0.0.0/8和::1。
 - 模型目录按Provider、账号、CLI版本和认证checksum做Singleflight及短期缓存，旧请求不能覆盖新账号结果。
 

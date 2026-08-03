@@ -1,4 +1,14 @@
 import { MemoryScope } from "./memory-control-center-types";
+export declare function isCompleteMemoryCenterContextAccounting(payload: any): boolean;
+export declare function selectMemoryCenterContextAccounting(input: {
+    scope: MemoryScope;
+    stored?: any;
+    provider?: any;
+    rebuilt?: any;
+}): {
+    payload: any;
+    source: string;
+};
 export declare function listJsonFiles(dir: string): string[];
 export declare function readMemoryFile(file: string): any;
 export declare function groupLabelMap(): Map<unknown, unknown>;
@@ -104,6 +114,50 @@ export declare function memorySummary(scope: MemoryScope, scopeId: string, memor
     postCompactGate: any;
     tokenMeasurement: any;
     modelVisiblePayload: any;
+    availableContextCatalog: {
+        schema: string;
+        accounting: string;
+        mcp: {
+            configured: number;
+            available: number;
+            loaded: number;
+            invoked: number;
+            loadedThisTurn: boolean;
+            loadedTokens: number;
+            estimatedTokensIfLoaded: any;
+            items: {
+                estimatedTokens: number;
+                state: string;
+                configured: boolean;
+                evidenceStatus: string;
+                loadLevels: unknown[];
+                invocationCount: any;
+                invocationSucceeded: any;
+                loadedChecksum: string;
+                name: string;
+            }[];
+        };
+        skills: {
+            configured: number;
+            available: number;
+            loaded: number;
+            invoked: number;
+            loadedThisTurn: boolean;
+            loadedTokens: number;
+            estimatedTokensIfLoaded: any;
+            items: {
+                estimatedTokens: number;
+                state: string;
+                configured: boolean;
+                evidenceStatus: string;
+                loadLevels: unknown[];
+                invocationCount: any;
+                invocationSucceeded: any;
+                loadedChecksum: string;
+                name: string;
+            }[];
+        };
+    };
     resolvedModelCapacity: any;
     pendingRequestTokens: number;
     recoveryContextTokens: number;
@@ -307,6 +361,50 @@ export declare function getMemoryCenterScope(scope: MemoryScope, scopeId: string
         postCompactGate: any;
         tokenMeasurement: any;
         modelVisiblePayload: any;
+        availableContextCatalog: {
+            schema: string;
+            accounting: string;
+            mcp: {
+                configured: number;
+                available: number;
+                loaded: number;
+                invoked: number;
+                loadedThisTurn: boolean;
+                loadedTokens: number;
+                estimatedTokensIfLoaded: any;
+                items: {
+                    estimatedTokens: number;
+                    state: string;
+                    configured: boolean;
+                    evidenceStatus: string;
+                    loadLevels: unknown[];
+                    invocationCount: any;
+                    invocationSucceeded: any;
+                    loadedChecksum: string;
+                    name: string;
+                }[];
+            };
+            skills: {
+                configured: number;
+                available: number;
+                loaded: number;
+                invoked: number;
+                loadedThisTurn: boolean;
+                loadedTokens: number;
+                estimatedTokensIfLoaded: any;
+                items: {
+                    estimatedTokens: number;
+                    state: string;
+                    configured: boolean;
+                    evidenceStatus: string;
+                    loadLevels: unknown[];
+                    invocationCount: any;
+                    invocationSucceeded: any;
+                    loadedChecksum: string;
+                    name: string;
+                }[];
+            };
+        };
         resolvedModelCapacity: any;
         pendingRequestTokens: number;
         recoveryContextTokens: number;

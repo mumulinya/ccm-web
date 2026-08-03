@@ -60,7 +60,7 @@ await firstProject.locator(':scope > summary').click()
 assert.equal(await firstProject.getAttribute('open'), '')
 const visibleLabels = await firstProject.locator('.scope-children > button strong').allTextContents()
 assert.ok(visibleLabels.length > 0)
-assert.ok(visibleLabels.every(label => /Claude Code|Codex|Cursor|Gemini CLI|OpenCode|开发 Agent/.test(label)))
+assert.ok(visibleLabels.every(label => /Claude Code|Codex|Cursor|Antigravity CLI|OpenCode|开发 Agent/.test(label)))
 await taskGroup.evaluate(element => {
   const sidebar = element.closest('.scope-list')
   sidebar.scrollTop = Math.max(0, element.offsetTop - 8)

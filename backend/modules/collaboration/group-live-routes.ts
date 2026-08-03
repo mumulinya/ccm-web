@@ -555,6 +555,7 @@ export async function handleGroupLiveRoutesSendPreface(
         const messageMode = String(clarificationContext?.message_mode || clarificationContext?.messageMode || payload.message_mode || payload.messageMode || "conversation").trim().toLowerCase();
         const messageTraceId = ensureTraceId(payload.trace_id || payload.traceId || clarificationContext?.trace_id || clarificationContext?.traceId, "group");
         const forceProjectTask = groupLiveFlag(payload.force_task ?? payload.forceTask, groupLiveFlag(clarificationContext?.force_task ?? clarificationContext?.forceTask, false));
+        const exactSessionContext = buildExactGroupSessionModelContextPacket(group_id, { groupSessionId }).rendered;
         let taskIntent = await classifyGroupProjectTaskIntentWithAgent({
             group,
             message: effectiveUserMessage,
@@ -564,6 +565,7 @@ export async function handleGroupLiveRoutesSendPreface(
             forceProjectTask: forceProjectTask || !!explicitContinuationTask,
             sharedFilesContext: uploadedFilesContext,
             groupSessionId,
+            context: exactSessionContext,
           });
         if (readOnly && taskIntent?.workflowDecision?.actionRequired === true) {
           sendJson(res, { success: false, error: "当前 Viewer 账户仅允许群聊只读问答；这条需求需要创建或执行任务，请联系 Operator 或 Admin", code: "VIEWER_EXECUTION_FORBIDDEN" }, 403);
@@ -1335,6 +1337,8 @@ export function handleGroupLiveRoutes(
             context: projectAnalysisRequest ? `${context}\n\n${projectAnalysisContext}` : context,
             source: "user",
             groupSessionId,
+            workflowDecision: taskIntent?.workflowDecision || null,
+            mainAgentFirstTurnResult: taskIntent?.mainAgentFirstTurnResult || taskIntent?.coordinatorResult || null,
             sharedFilesContext: [sharedFilesContext, projectAnalysisContext].filter(Boolean).join("\n\n"),
             onDelta: delta => {
               if (!delta) return;
@@ -1345,6 +1349,14 @@ export function handleGroupLiveRoutes(
               });
             },
           });
+          writeSse(res, {
+            type: "turn_decision",
+            decision: (coordinatorResult as any).mainAgentTurnDecision || null,
+            receipt: (coordinatorResult as any).mainAgentTurnReceipt || null,
+          });
+          for (const item of ((coordinatorResult as any).mainAgentToolUsage?.results || [])) {
+            writeSse(res, { type: "tool_activity", phase: item.ok === false ? "failed" : "completed", tool: item.name, output_tokens: item.outputTokens || 0, error: item.error || "" });
+          }
 
           try {
             const responseMessageId = "m" + Date.now().toString(36) + "coord" + crypto.randomBytes(2).toString("hex");

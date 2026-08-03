@@ -21,7 +21,7 @@
 | 全局 Agent | 仅全局工具配置 | CCM模型工具目录；Skill使用`invoke_skill`，MCP使用`invoke_mcp`并经过权限门禁 |
 | 群聊主 Agent | 仅当前群聊配置，加当前轮内部规划Skill | Skill与只读MCP进入主Agent受控工具循环 |
 | 项目主 Agent | 仅当前项目配置，加当前轮内部规划Skill | 计划、计划修订和项目分析均可使用Skill与只读MCP |
-| 群聊项目子 Agent | 当前群聊配置、目标项目配置、任务内部角色Skill | 按Claude Code、Cursor、Codex、Gemini CLI、OpenCode或Qoder生成原生配置；工具级MCP走CCM代理 |
+| 群聊项目子 Agent | 当前群聊配置、目标项目配置、任务内部角色Skill | 按Claude Code、Cursor、Codex、Antigravity CLI、OpenCode或Qoder生成原生配置；工具级MCP走CCM代理 |
 | 项目会话子 Agent | 当前项目配置、任务内部角色Skill | 与群聊子Agent相同，但不读取群聊或兄弟项目授权 |
 | TestAgent | 独立只读验收工具 | 不继承开发Agent的写入MCP或项目Skill |
 

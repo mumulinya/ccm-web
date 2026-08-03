@@ -10,6 +10,14 @@ const file = fileURLToPath(import.meta.url);
 const root = path.resolve(path.dirname(file), "..");
 const resultPrefix = "PHASE326_RESULT=";
 
+function mockCompactionModel({ user }) {
+  const prefix = "保真校验参考（最终摘要必须由模型生成并完整覆盖这些事实）：\n";
+  const start = String(user || "").indexOf(prefix);
+  const end = start >= 0 ? String(user || "").indexOf("\n\n本次被压缩区间内的全部用户消息", start + prefix.length) : -1;
+  if (start < 0 || end < 0) throw new Error("mock compaction reference missing");
+  return { summary: JSON.parse(String(user).slice(start + prefix.length, end)), provider: "mock", model: "mock-compactor" };
+}
+
 function modules() {
   const require = createRequire(import.meta.url);
   const dist = (...parts) => path.join(root, "ccm-package", "dist", ...parts);
@@ -198,6 +206,7 @@ async function childCreate(fixtureFile) {
       minKeepTokens: 1,
       maxKeepTokens: 500,
       memoryCompactionUseModel: false,
+      compactionModelCall: mockCompactionModel,
       postCompactDynamicContextCatalog: catalog(true),
     },
   });
@@ -231,7 +240,7 @@ async function childCreate(fixtureFile) {
   const loaded = persisted.compaction?.postCompactReinject?.dynamicContextDeltaReceipt?.loaded_tool_state || {};
   const childLoaded = childBundle.dynamic_context_delta_receipt?.loaded_tool_state || {};
   const centerProjection = center.getMemoryCenterScope("group", `${groupId}::${groupSessionId}`).postCompactUsage?.postCompactDynamicContextDelta || {};
-  const uiSource = fs.readFileSync(path.join(root, "frontend", "src", "components", "knowledge", "MemoryCenter.vue"), "utf8");
+  const uiSource = fs.readFileSync(path.join(root, "frontend", "src", "components", "knowledge", "PostCompactRecoveryPanel.vue"), "utf8");
   const checks = {
     ...direct.checks,
     compactBoundaryCarriesLoadedTools: compacted.boundary?.compactMetadata?.preCompactDiscoveredTools?.includes(toolNames.alpha)
@@ -254,7 +263,7 @@ async function childCreate(fixtureFile) {
     siblingSessionUnaffected: !memory.loadGroupMemory(groupId, siblingSessionId).compaction?.preCompactDiscoveredTools,
     rawTranscriptUntouched: JSON.stringify(storage.getGroupMessages(groupId, groupSessionId)) === originalTranscript,
     memoryCenterShowsLoadedState: centerProjection.receiptValid === true && centerProjection.receipt?.loaded_tool_state?.carried_count === 3,
-    memoryCenterCardPresent: uiSource.includes("label: 'loaded tools'") && uiSource.includes("pre-compact loaded tool schemas"),
+    memoryCenterCardPresent: uiSource.includes("label: 'MCP 与动态工具恢复'") && uiSource.includes("loaded_tool_count"),
   };
   fs.writeFileSync(fixtureFile, JSON.stringify({
     groupId, groupSessionId, siblingSessionId, originalTranscript,

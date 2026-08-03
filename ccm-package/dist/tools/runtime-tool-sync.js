@@ -184,7 +184,7 @@ function runtimeCliCandidates(runtime) {
     if (runtime === "codex")
         return ["codex"];
     if (runtime === "gemini")
-        return ["gemini"];
+        return [(0, agent_provider_settings_1.resolveAntigravityCliCommand)(), "agy"];
     if (runtime === "opencode")
         return ["opencode"];
     if (runtime === "qoder")
@@ -1586,7 +1586,7 @@ function syncRuntimeToolsWithCatalog(workDir, agentType, allowedTools, catalog =
         }
         else {
             const runtimeSpec = runtime === "gemini"
-                ? { root: ".gemini", config: "settings.json", skillDir: "skills", format: "gemini-project-settings" }
+                ? { root: ".agents", config: "mcp_config.json", skillDir: "skills", format: "antigravity-workspace-config" }
                 : { root: ".qoder", config: "settings.local.json", skillDir: "skills", format: "qoder-local-settings" };
             const runtimeRoot = path.join(workDir, runtimeSpec.root);
             const configPath = path.join(runtimeRoot, runtimeSpec.config);
@@ -1598,9 +1598,7 @@ function syncRuntimeToolsWithCatalog(workDir, agentType, allowedTools, catalog =
                 ...mcpServers,
             };
             if (runtime === "gemini") {
-                settings.mcp = settings.mcp && typeof settings.mcp === "object" ? settings.mcp : {};
-                settings.mcp.allowed = Object.keys(mcpServers);
-                audit.isolation = "allowlist";
+                audit.isolation = "project-scope";
             }
             else {
                 audit.isolation = "project-scope";

@@ -82,17 +82,26 @@ export declare function extractProviderOutputContractEvidence(agentType: string,
         eventType: string;
         sessionIdPath: string;
         eventTypes?: undefined;
+        statuses?: undefined;
         acknowledgement?: undefined;
     } | {
         eventTypes: string[];
         sessionIdPath: string;
         eventType?: undefined;
+        statuses?: undefined;
+        acknowledgement?: undefined;
+    } | {
+        statuses: string[];
+        sessionIdPath: string;
+        eventType?: undefined;
+        eventTypes?: undefined;
         acknowledgement?: undefined;
     } | {
         acknowledgement: string;
         eventType?: undefined;
         sessionIdPath?: undefined;
         eventTypes?: undefined;
+        statuses?: undefined;
     };
     runtimeVersionSnapshot: any;
     runtimeVersionStatus: string;
@@ -138,17 +147,26 @@ export declare function normalizeAgentCommandOutput(agentType: string, rawOutput
             eventType: string;
             sessionIdPath: string;
             eventTypes?: undefined;
+            statuses?: undefined;
             acknowledgement?: undefined;
         } | {
             eventTypes: string[];
             sessionIdPath: string;
             eventType?: undefined;
+            statuses?: undefined;
+            acknowledgement?: undefined;
+        } | {
+            statuses: string[];
+            sessionIdPath: string;
+            eventType?: undefined;
+            eventTypes?: undefined;
             acknowledgement?: undefined;
         } | {
             acknowledgement: string;
             eventType?: undefined;
             sessionIdPath?: undefined;
             eventTypes?: undefined;
+            statuses?: undefined;
         };
         runtimeVersionSnapshot: any;
         runtimeVersionStatus: string;

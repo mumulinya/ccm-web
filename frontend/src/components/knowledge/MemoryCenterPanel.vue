@@ -192,8 +192,12 @@ const taskAgentRuntimeLabel = value => ({
   claude: 'Claude Code',
   codex: 'Codex',
   cursor: 'Cursor',
-  gemini: 'Gemini CLI',
-  geminicli: 'Gemini CLI',
+  gemini: 'Antigravity CLI',
+  geminicli: 'Antigravity CLI',
+  'gemini-cli': 'Antigravity CLI',
+  antigravity: 'Antigravity CLI',
+  'antigravity-cli': 'Antigravity CLI',
+  agy: 'Antigravity CLI',
   opencode: 'OpenCode',
 }[String(value || '').toLowerCase()] || '开发 Agent')
 const shortTaskAgentId = value => {

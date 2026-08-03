@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 import Database from 'better-sqlite3'
@@ -25,10 +26,20 @@ fs.writeFileSync(path.join(geminiCliRoot, 'bundle', 'chunk-models.js'), [
   'var DEFAULT_GEMINI_MODEL = "gemini-selftest-pro";',
   'var DEFAULT_GEMINI_FLASH_MODEL = "gemini-selftest-flash";',
   'var DEFAULT_GEMINI_FLASH_LITE_MODEL = "gemini-selftest-flash-lite";',
+  'var DEFAULT_GEMINI_3_5_FLASH_MODEL = "gemini-3.5-flash";',
 ].join('\n'))
 if (process.platform === 'win32') {
   fs.writeFileSync(path.join(binDir, 'codex.cmd'), '@echo off\r\nif "%1"=="--version" (echo codex-selftest 1.0.0& exit /b 0)\r\necho CCM_AGENT_OK\r\nexit /b 0\r\n')
   fs.writeFileSync(path.join(binDir, 'cursor-agent.cmd'), '@echo off\r\nif "%1"=="--version" (echo cursor-selftest 1.0.0& exit /b 0)\r\nif "%1"=="models" (echo cursor-model - Cursor Model& exit /b 0)\r\nif "%1"=="update" exit /b 0\r\necho CCM_AGENT_OK\r\nexit /b 0\r\n')
+  const fakeAntigravityEntry = path.join(binDir, 'antigravity-selftest.js')
+  fs.writeFileSync(fakeAntigravityEntry, [
+    'const args=process.argv.slice(2);',
+    'if(args.includes("--version")){console.log("agy 1.1.9");process.exit(0)}',
+    'if(args[0]==="models"){console.log("gemini-3.6-flash-low\\nclaude-sonnet-4-6");process.exit(0)}',
+    'const prompt=args.at(-1)||""; const challenge=prompt.match(/CCM_AGENT_OK:([a-f0-9]+)/)?.[1]||"";',
+    'console.log(JSON.stringify({conversation_id:"agy-selftest-conversation",status:"SUCCESS",response:challenge?"CCM_AGENT_OK:"+challenge:prompt,argc:args.length,usage:{input_tokens:12,output_tokens:3,total_tokens:15}}));',
+  ].join('\n'))
+  fs.writeFileSync(path.join(binDir, 'agy.cmd'), '@ECHO off\r\nSET dp0=%~dp0\r\nnode "%dp0%\\antigravity-selftest.js" %*\r\n')
   const fakeCodexEntry = path.join(binDir, 'node_modules', '@openai', 'codex', 'bin', 'codex.js')
   fs.mkdirSync(path.dirname(fakeCodexEntry), { recursive: true })
   fs.writeFileSync(fakeCodexEntry, '#!/usr/bin/env node\nif (process.argv.includes("--version")) console.log("codex-selftest 1.0.0"); else { let p=""; process.stdin.on("data",c=>p+=c); process.stdin.on("end",()=>{ const c=p.match(/CCM_AGENT_OK:([a-f0-9]+)/)?.[1]||""; console.log(JSON.stringify({type:"item.completed",item:{type:"agent_message",text:"CCM_AGENT_OK:"+c}})); }); }\n')
@@ -39,8 +50,12 @@ if (process.platform === 'win32') {
   const cursorCommand = path.join(binDir, 'cursor-agent')
   fs.writeFileSync(cursorCommand, '#!/bin/sh\nif [ "$1" = "--version" ]; then echo "cursor-selftest 1.0.0"; exit 0; fi\nif [ "$1" = "models" ]; then echo "cursor-model - Cursor Model"; exit 0; fi\nexit 0\n')
   fs.chmodSync(cursorCommand, 0o755)
+  const antigravityCommand = path.join(binDir, 'agy')
+  fs.writeFileSync(antigravityCommand, `#!${process.execPath}\nconst args=process.argv.slice(2); if(args.includes('--version')) console.log('agy 1.1.9'); else if(args[0]==='models') console.log('gemini-3.6-flash-low\\nclaude-sonnet-4-6'); else { const prompt=args.at(-1)||''; const challenge=prompt.match(/CCM_AGENT_OK:([a-f0-9]+)/)?.[1]||''; console.log(JSON.stringify({conversation_id:'agy-selftest-conversation',status:'SUCCESS',response:challenge?'CCM_AGENT_OK:'+challenge:prompt,usage:{input_tokens:12,output_tokens:3,total_tokens:15}})); }\n`)
+  fs.chmodSync(antigravityCommand, 0o755)
 }
 process.env.PATH = `${binDir}${path.delimiter}${process.env.PATH || ''}`
+process.env.CCM_ANTIGRAVITY_CLI_COMMAND = process.platform === 'win32' ? path.join(binDir, 'agy.cmd') : path.join(binDir, 'agy')
 
 const jwt = claims => `test.${Buffer.from(JSON.stringify(claims)).toString('base64url')}.signature`
 fs.mkdirSync(path.join(testHome, '.codex'), { recursive: true })
@@ -54,12 +69,15 @@ fs.writeFileSync(path.join(testHome, '.cursor', 'cli-config.json'), JSON.stringi
 fs.mkdirSync(path.join(testHome, '.gemini'), { recursive: true })
 fs.writeFileSync(path.join(testHome, '.gemini', 'google_accounts.json'), JSON.stringify({ active: 'gemini-user@example.test' }))
 fs.writeFileSync(path.join(testHome, '.gemini', 'oauth_creds.json'), JSON.stringify({ id_token: jwt({ email: 'gemini-user@example.test' }), access_token: 'never-expose-me' }))
+fs.mkdirSync(path.join(testHome, '.gemini', 'antigravity'), { recursive: true })
+fs.writeFileSync(path.join(testHome, '.gemini', 'antigravity', 'installation_id'), 'antigravity-selftest-installation')
 fs.mkdirSync(path.join(testHome, '.local', 'share', 'opencode'), { recursive: true })
 fs.writeFileSync(path.join(testHome, '.local', 'share', 'opencode', 'auth.json'), JSON.stringify({ openai: { type: 'oauth', accountId: 'acct_selftest', access: 'never-expose-me' } }))
 const ccSwitchDir = path.join(testHome, '.cc-switch')
 fs.mkdirSync(ccSwitchDir, { recursive: true })
 fs.writeFileSync(path.join(ccSwitchDir, 'settings.json'), JSON.stringify({ currentProviderClaude: 'claude-provider-selftest' }))
-const ccSwitchDb = new Database(path.join(ccSwitchDir, 'cc-switch.db'))
+const bundledSqliteBinding = path.join(root, 'ccm-package', 'node_modules', 'better-sqlite3', 'build', 'Release', 'better_sqlite3.node')
+const ccSwitchDb = new Database(path.join(ccSwitchDir, 'cc-switch.db'), fs.existsSync(bundledSqliteBinding) ? { nativeBinding: bundledSqliteBinding } : {})
 ccSwitchDb.exec('CREATE TABLE providers (id TEXT PRIMARY KEY, app_type TEXT, name TEXT, settings_config TEXT, is_current INTEGER)')
 ccSwitchDb.prepare('INSERT INTO providers (id, app_type, name, settings_config, is_current) VALUES (?, ?, ?, ?, 1)').run(
   'claude-provider-selftest',
@@ -131,7 +149,7 @@ try {
 
   const codexLogin = settings.parseAgentProviderLoginProgress('codex', 'Open https://auth.openai.com/codex/device\nEnter code: ABCD-EFGH')
   const cursorLogin = settings.parseAgentProviderLoginProgress('cursor', 'Open a browser and navigate to this link: https://cursor.com/loginDeepControl?challenge=test')
-  const geminiLogin = settings.parseAgentProviderLoginProgress('gemini', 'Please visit the following URL to authorize the application:\nhttps://accounts.google.com/o/oauth2/v2/auth?state=test\nEnter the authorization code: ')
+  const geminiLogin = settings.parseAgentProviderLoginProgress('gemini', 'Please visit the following URL to authorize the application:\nhttps://accounts.google.com/o/oauth2/v2/auth?client_id=ccm-test&redirect_uri=https%3A%2F%2Fcodeassist.google.com%2Fauthcode&response_type=code&state=test&code_challenge=challenge\nEnter the authorization code: ')
   const rejectedUrl = settings.parseAgentProviderLoginProgress('cursor', 'Open https://attacker.example.test/login')
   assert.equal(codexLogin.authUrl, 'https://auth.openai.com/codex/device')
   assert.equal(codexLogin.userCode, 'ABCD-EFGH')
@@ -183,15 +201,30 @@ try {
   const cursorArgs = decodeArgs(runtime.buildAgentCommand('cursor', 'prompt.txt'))
   const claudeCommand = runtime.buildAgentCommand('claudecode', 'prompt.txt')
   const geminiArgs = decodeArgs(runtime.buildAgentCommand('gemini', 'prompt.txt'))
+  const antigravityResumeArgs = decodeArgs(runtime.buildAgentCommand('antigravity', 'prompt.txt', { persistSession: true, resumeSession: true, sessionId: 'agy-conversation-1' }))
   const openCodeArgs = decodeArgs(runtime.buildAgentCommand('opencode', 'prompt.txt'))
   assert.deepEqual(codexArgs.slice(0, 3), ['exec', '--model', 'gpt-5.3-codex'])
   assert.equal(cursorArgs.includes('--model'), true)
   assert.equal(cursorArgs[cursorArgs.indexOf('--model') + 1], 'composer-test')
   assert.match(claudeCommand, /--model "claude-test"/)
   assert.equal(geminiArgs[geminiArgs.indexOf('--model') + 1], 'gemini-test')
+  assert.equal(geminiArgs.includes('--print'), true)
+  assert.equal(geminiArgs[geminiArgs.indexOf('--mode') + 1], 'accept-edits')
+  assert.equal(antigravityResumeArgs[antigravityResumeArgs.indexOf('--conversation') + 1], 'agy-conversation-1')
   assert.equal(openCodeArgs[openCodeArgs.indexOf('--model') + 1], 'provider/model-test')
   assert.equal(openCodeArgs.includes('--auto'), true)
   checks.push({ name: 'saved model selection is passed explicitly to all five managed Agent launches', pass: true })
+
+  const normalizedAntigravity = runtime.normalizeAgentCommandOutput('agy', JSON.stringify({
+    conversation_id: 'agy-conversation-1',
+    status: 'SUCCESS',
+    response: 'Antigravity completed',
+    usage: { input_tokens: 120, output_tokens: 8, cache_read_tokens: 40, total_tokens: 128 },
+  }))
+  assert.equal(normalizedAntigravity.output, 'Antigravity completed')
+  assert.equal(normalizedAntigravity.sessionId, 'agy-conversation-1')
+  assert.equal(normalizedAntigravity.usage.cacheReadInputTokens, 40)
+  checks.push({ name: 'Antigravity native conversation and usage receipts support exact-session continuation', pass: true })
 
   const codexModels = await settings.getAgentProviderModels('codex')
   assert.equal(codexModels.allowsCustom, true)
@@ -203,22 +236,57 @@ try {
 
   const geminiModels = await settings.getAgentProviderModels('gemini')
   assert.equal(geminiModels.source, 'cli_catalog')
-  assert.equal(geminiModels.models.some(item => item.id === 'gemini-selftest-pro'), true)
-  assert.equal(geminiModels.models.some(item => item.id === 'gemini-selftest-flash'), true)
-  assert.equal(geminiModels.models.some(item => item.id === 'gemini-selftest-flash-lite'), true)
+  assert.equal(geminiModels.models.some(item => item.id === 'gemini-3.6-flash-low'), true)
+  assert.equal(geminiModels.models.some(item => item.id === 'claude-sonnet-4-6'), true)
   assert.doesNotMatch(JSON.stringify(geminiModels), /never-expose-me/)
-  checks.push({ name: 'Gemini OAuth sessions use the installed CLI model catalog without exposing or reusing stale access tokens', pass: true })
+  checks.push({ name: 'Antigravity model catalog comes from agy models without exposing account credentials', pass: true })
+
+  if (process.platform === 'win32') {
+    const helperPrompt = path.join(outputDir, 'windows-shim-prompt.txt')
+    fs.writeFileSync(helperPrompt, 'CCM_AGENT_OK:windows shim keeps spaces')
+    const helper = path.join(root, 'ccm-package', 'dist', 'agents', 'cli-prompt-runner.js')
+    const helperResult = spawnSync(process.execPath, [helper, helperPrompt, process.env.CCM_ANTIGRAVITY_CLI_COMMAND, 'W10='], {
+      cwd: outputDir,
+      env: process.env,
+      encoding: 'utf-8',
+      windowsHide: true,
+    })
+    assert.equal(helperResult.status, 0, helperResult.stderr || helperResult.error?.message)
+    const helperPayload = JSON.parse(helperResult.stdout.trim())
+    assert.equal(helperPayload.response, 'CCM_AGENT_OK:windows shim keeps spaces')
+    assert.equal(helperPayload.argc, 1)
+    checks.push({ name: 'Windows npm command shims resolve to their native entrypoint and preserve a spaced prompt as one argv item', pass: true })
+  }
+
+  const credentialBackedStatus = await settings.refreshAgentProviderStatusesAsync()
+  assert.equal(credentialBackedStatus.gemini.authState, 'credential_detected')
+  const antigravityProbe = await settings.testAgentProvider('gemini', 'gemini-test')
+  assert.equal(antigravityProbe.usable, true, JSON.stringify(antigravityProbe))
+  const statusAfterProbe = await settings.refreshAgentProviderStatusesAsync()
+  assert.equal(statusAfterProbe.gemini.authState, 'logged_in')
+  checks.push({ name: 'Antigravity secure state requires a successful model challenge before becoming task-ready', pass: true })
 
   const decodeProbeArgs = spec => JSON.parse(Buffer.from(spec.args.at(-1), 'base64').toString('utf-8'))
   const codexProbeArgs = decodeProbeArgs(settings.buildAgentProviderTestSpec('codex', 'account-codex-model'))
+  const geminiProbeArgs = decodeProbeArgs(settings.buildAgentProviderTestSpec('gemini', 'gemini-test'))
   const cursorProbeArgs = decodeProbeArgs(settings.buildAgentProviderTestSpec('cursor', 'cursor-model'))
   const claudeProbeArgs = decodeProbeArgs(settings.buildAgentProviderTestSpec('claudecode', 'claude-model'))
   assert.deepEqual(codexProbeArgs.slice(0, 3), ['exec', '--model', 'account-codex-model'])
   assert.equal(codexProbeArgs.includes('read-only'), true)
+  assert.equal(codexProbeArgs.includes('--json'), true)
+  assert.equal(geminiProbeArgs[geminiProbeArgs.indexOf('--mode') + 1], 'plan')
+  assert.equal(geminiProbeArgs.includes('--print'), true)
   assert.equal(cursorProbeArgs.includes('ask'), true)
   assert.equal(claudeProbeArgs.includes('plan'), true)
   assert.equal(settings.parseAgentProviderTestOutput('{"type":"item.completed","item":{"type":"agent_message","text":"CCM_AGENT_OK:abc"},"model":"probe-model"}', 'probe-model', 'codex', 'abc').usable, true)
   assert.equal(settings.parseAgentProviderTestOutput('{"type":"user","message":"CCM_AGENT_OK:abc"}', '', 'codex', 'abc').usable, false)
+  const geminiEligibilityError = settings.summarizeAgentProviderTestFailure([
+    'Warning: Windows 10 detected.',
+    'Error authenticating: IneligibleTierError: This client is no longer supported for Gemini Code Assist for individuals.',
+    "reasonCode: 'UNSUPPORTED_CLIENT'",
+  ].join('\n'))
+  assert.match(geminiEligibilityError, /UNSUPPORTED_CLIENT/)
+  assert.doesNotMatch(geminiEligibilityError, /Windows 10 detected/)
   const openCodeLogin = settings.buildAgentProviderLoginSpec('opencode', { providerId: 'anthropic' })
   assert.deepEqual(openCodeLogin.args, ['auth', 'login', '--provider', 'anthropic'])
   assert.throws(() => settings.buildAgentProviderTestSpec('codex', 'model & echo unsafe'), /不支持的字符/)
@@ -251,7 +319,7 @@ try {
   assert.match(apiSource, /actionMatch[\s\S]+codex\|cursor\|gemini\|opencode\|claudecode/)
   assert.match(apiSource, /installMatch[\s\S]+startAgentProviderInstall/)
   assert.match(apiSource, /modelsMatch[\s\S]+getAgentProviderModels/)
-  assert.match(catalogSource, /Gemini CLI/)
+  assert.match(catalogSource, /Antigravity CLI/)
   assert.match(catalogSource, /OpenCode/)
   assert.match(uiSource, /Claude Code API/)
   assert.match(uiSource, /安装 Claude Code/)
@@ -277,7 +345,7 @@ try {
   const ccSwitchSource = fs.readFileSync(path.join(root, 'backend/modules/system/cc-switch-provider.ts'), 'utf-8')
   assert.match(providerSource, /LOGIN_SESSION_TTL_MS/)
   assert.match(providerSource, /NO_OPEN_BROWSER/)
-  assert.match(providerSource, /NO_BROWSER/)
+  assert.match(providerSource, /CCM_ANTIGRAVITY_CLI_COMMAND/)
   assert.match(providerSource, /AGENT_TEST_TIMEOUT_MS/)
   assert.match(providerSource, /CCM_AGENT_OK/)
   assert.match(providerSource, /resolveEffectiveClaudeProviderSettings/)

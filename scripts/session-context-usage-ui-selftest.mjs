@@ -15,9 +15,13 @@ const projectPanel = read('frontend/src/components/projects/ProjectManagerPanel.
 const projectTemplate = read('frontend/src/components/projects/ProjectManager.template.html')
 const app = read('frontend/src/App.vue')
 const globalMemory = read('backend/agents/global/memory.ts')
+const globalAgentRuntime = read('backend/modules/global/global-agent-agentic-runtime.ts')
 const projectCompaction = read('backend/modules/projects/project-session-compaction.ts')
 const projectMainAgent = read('backend/modules/projects/project-main-agent.ts')
 const memoryCenterApi = read('backend/modules/knowledge/memory-control-center-api.ts')
+const contextSnapshot = read('backend/system/session-compaction-core.ts')
+const mainAgentToolRuntime = read('backend/tools/main-agent-tool-runtime.ts')
+const groupOrchestrator = read('backend/modules/collaboration/group-orchestrator-llm.ts')
 const agentToolsModal = read('frontend/src/components/common/AgentToolsModal.vue')
 const groupToolsModal = read('frontend/src/components/collaboration/GroupToolsModal.vue')
 const projectToolsModal = read('frontend/src/components/projects/ProjectToolsModal.vue')
@@ -69,10 +73,34 @@ const checks = {
   componentRatiosVisible: /usedPercent/.test(component) && /row\.usedPercent/.test(component),
   segmentedCapacityMeterVisible: /context-meter-segment/.test(component) && /row\.capacityPercent/.test(component),
   providerRemainderIsTransparent: /Provider 其余上下文/.test(component) && /历史 Provider 总量（无分项快照）/.test(component),
+  latestPayloadAndConversationAreDistinguished: /最近完整模型载荷/.test(component)
+    && /会话正文/.test(component)
+    && /System、Rules 与已启用工具定义属于稳定上下文/.test(component)
+    && /Skill 正文、知识、源码和工具结果按需加载/.test(component),
+  deferredToolsRemainVisibleWithoutInflatingUsage: (/授权可用目录/.test(component)
+    || /工具上下文/.test(component))
+    && /逐项按真实载荷与调用回执统计/.test(component)
+    && /availableContextCatalog/.test(component)
+    && /per_item_model_payload_evidence/.test(memoryCenterApi)
+    && /scopeConfiguredContextTools/.test(memoryCenterApi),
+  exactPerItemToolEvidenceIsPersisted: /ccm-loaded-context-items-v1/.test(contextSnapshot)
+    && /loadedContextItemsChecksum/.test(contextSnapshot)
+    && /buildMainAgentLoadedContextItems/.test(mainAgentToolRuntime)
+    && /itemName/.test(mainAgentToolRuntime)
+    && /resultChecksum/.test(mainAgentToolRuntime),
+  toolStateDoesNotGuessFromCategoryTokens: !/loadedThisTurn:\s*mcpLoadedTokens\s*>\s*0/.test(memoryCenterApi)
+    && !/loadedThisTurn:\s*skillLoadedTokens\s*>\s*0/.test(memoryCenterApi)
+    && /evidenceStatus:\s*evidenceAvailable\s*\?\s*"exact"\s*:\s*"unproven"/.test(memoryCenterApi),
+  threeMainAgentSurfacesAttachExactEvidence: /buildMainAgentLoadedContextItems/.test(groupOrchestrator)
+    && /projectMainLoadedContextItems/.test(projectMainAgent)
+    && /loadedContextItems/.test(globalAgentRuntime),
   explicitZeroBucketsDoNotFallback: /hasPayloadBreakdown \? breakdown\.system \|\| 0/.test(component),
   exactGroupScopeRebuildsMissingBreakdown: /rebuildCurrentGroupContextAccounting/.test(memoryCenterApi)
     && /rebuildCurrentPayload:\s*true/.test(memoryCenterApi)
     && /modelVisiblePayloadAccounting/.test(memoryCenterApi),
+  completeProviderAccountingBeatsConversationOnlySnapshot: /isCompleteMemoryCenterContextAccounting/.test(memoryCenterApi)
+    && /selectMemoryCenterContextAccounting/.test(memoryCenterApi)
+    && /provider_payload_accounting/.test(memoryCenterApi),
   globalAndProjectRebuildMissingBreakdown: /rebuildCurrentSessionContextAccounting/.test(memoryCenterApi)
     && /scope === "global_session"/.test(memoryCenterApi)
     && /scope === "project_session"/.test(memoryCenterApi)

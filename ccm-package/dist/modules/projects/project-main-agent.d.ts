@@ -1,5 +1,5 @@
 import { type TestAgentAcceptanceEvidence, type TestAgentVerificationProfile } from "../collaboration/test-agent-review-policy";
-import type { WorkflowDecision } from "../../agents/workflow-decision";
+import { type WorkflowDecision } from "../../agents/workflow-decision";
 export type ProjectMainWorkItem = {
     id: string;
     title: string;
@@ -85,6 +85,21 @@ export declare function reconcileInterruptedProjectMainTasks(): {
     active_elsewhere: number;
     results: any[];
 };
+export declare function runProjectMainAgentFirstTurn(input: {
+    project: string;
+    projectSessionId: string;
+    userMessage: string;
+    turnId?: string;
+    sourceCount?: number;
+}): Promise<{
+    workflowDecision: WorkflowDecision;
+    responseType: import("../../agents/main-agent-turn").MainAgentTurnResponseKind;
+    reply: string;
+    plan: ProjectMainPlan;
+    toolResults: any[];
+    turnDecision: import("../../agents/main-agent-turn").MainAgentTurnDecisionV1;
+    turnReceipt: import("../../agents/main-agent-turn").MainAgentTurnReceiptV1;
+}>;
 export declare function planProjectMainTask(input: {
     project: string;
     projectSessionId: string;

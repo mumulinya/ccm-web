@@ -1,0 +1,68 @@
+{
+  "schema": "ccm-release-artifact-manifest-v1",
+  "package_name": "@mumulinya167/cc-web",
+  "version": "2.0.0",
+  "tarball": "mumulinya167-cc-web-2.0.0.tgz",
+  "tarball_sha256": "06137fb6242098c5b784c0a40b62fc4b1928c75f7064d7f16341ce7d73b74923",
+  "sbom": "sbom.cdx.json",
+  "sbom_sha256": "999080da15087728b41248739c9bc55a7d0945380f2d39d0cf220ce5d33ca7e3",
+  "pet_assets": {
+    "package_name": "@mumulinya167/ccm-pet-assets",
+    "version": "2.0.0",
+    "tarball": "mumulinya167-ccm-pet-assets-2.0.0.tgz",
+    "tarball_sha256": "4ab657356163178adb9fe7c20ec4c47457fec920cb8b35800c50702c82213f42",
+    "compressed_bytes": 17494561,
+    "unpacked_bytes": 20847417,
+    "entries": 178
+  },
+  "budgets": {
+    "compressed_bytes": 20971520,
+    "unpacked_bytes": 36700160,
+    "entries": 700
+  },
+  "actual": {
+    "compressed_bytes": 10522821,
+    "unpacked_bytes": 29755465,
+    "entries": 693
+  },
+  "executable_entries": [
+    "package/bin/ccm.js",
+    "package/bin/legacy-project-cli.js",
+    "package/bin/postinstall.js",
+    "package/bin/prepublish-guard.js",
+    "package/bin/setup.js"
+  ],
+  "tested": true,
+  "created_at": "2026-08-01T07:37:30.556Z",
+  "tested_at": "2026-08-01T07:42:03.593Z",
+  "test_evidence": [
+    {
+      "platform": "linux",
+      "node": "20.20.2",
+      "tarball_sha256": "06137fb6242098c5b784c0a40b62fc4b1928c75f7064d7f16341ce7d73b74923",
+      "verified_at": "2026-08-01T07:38:59.247Z",
+      "paid_provider_calls": 0
+    },
+    {
+      "platform": "linux",
+      "node": "22.23.1",
+      "tarball_sha256": "06137fb6242098c5b784c0a40b62fc4b1928c75f7064d7f16341ce7d73b74923",
+      "verified_at": "2026-08-01T07:38:56.798Z",
+      "paid_provider_calls": 0
+    },
+    {
+      "platform": "win32",
+      "node": "20.20.2",
+      "tarball_sha256": "06137fb6242098c5b784c0a40b62fc4b1928c75f7064d7f16341ce7d73b74923",
+      "verified_at": "2026-08-01T07:40:51.908Z",
+      "paid_provider_calls": 0
+    },
+    {
+      "platform": "win32",
+      "node": "22.23.1",
+      "tarball_sha256": "06137fb6242098c5b784c0a40b62fc4b1928c75f7064d7f16341ce7d73b74923",
+      "verified_at": "2026-08-01T07:41:31.532Z",
+      "paid_provider_calls": 0
+    }
+  ]
+}

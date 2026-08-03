@@ -687,10 +687,15 @@
 }
 
 .messages-flow {
+  --conversation-locator-safe-area: 44px;
+  box-sizing: border-box;
   display: flex;
   width: 100%;
   flex: 1;
   flex-direction: column;
+  align-self: center;
+  margin: 0 auto;
+  padding: 0 0 0 var(--conversation-locator-safe-area);
 }
 
 .group-chat .message {
@@ -823,17 +828,47 @@
   border-radius: 6px;
 }
 
+.group-chat .messages-flow > .conversation-message.message {
+  width: fit-content;
+  max-width: min(72%, 780px);
+  margin: 0 0 16px;
+  padding: 0;
+}
+
+.group-chat .messages-flow > .conversation-message.message.conversation-message--user {
+  margin-left: 0;
+  max-width: min(68%, 680px);
+}
+
+.group-chat .messages-flow > .conversation-message.message.conversation-message--structured {
+  width: min(86%, 960px);
+  max-width: min(86%, 960px);
+}
+
+.group-chat .messages-flow > .conversation-message .bubble {
+  max-width: 100%;
+  padding: 11px 14px;
+  border-radius: 10px;
+}
+
 @media (max-width: 900px) {
   .group-chat .messages { padding: 20px 14px 28px; }
   .group-chat .message,
   .group-chat .message.user,
   .group-chat .message.message-error { max-width: 94%; }
   .composer-region { padding: 8px 10px 10px; }
+  .group-chat .messages-flow > .conversation-message.message,
+  .group-chat .messages-flow > .conversation-message.message.conversation-message--user,
+  .group-chat .messages-flow > .conversation-message.message.conversation-message--structured {
+    max-width: 92%;
+  }
+  .group-chat .messages-flow > .conversation-message.message.conversation-message--structured { width: 92%; }
 }
 
 @media (max-width: 720px) {
-  .group-chat .message { padding-left: 38px; }
-  .group-chat .message.user { padding-right: 38px; padding-left: 0; }
+  .group-chat .messages-flow { --conversation-locator-safe-area: 34px; }
+  .group-chat .messages-flow > .conversation-message.message,
+  .group-chat .messages-flow > .conversation-message.message.conversation-message--user { padding: 0; }
   .group-chat .message-mode { width: 100%; }
   .group-chat .message-mode button { flex: 1; }
 }

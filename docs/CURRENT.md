@@ -285,3 +285,19 @@
 - 已删除不可达的旧 `Dashboard.vue`，工作台统一指向生产使用的 `UsabilityWorkbench.vue`。
 - `coverage:check` 已接入文档、完整测试和发布候选门禁；当前入口与确认文档覆盖率为100%。
 - 完整流程见 [全项目业务覆盖矩阵完整治理流程](confirmed-business-processes/PROJECT-BUSINESS-COVERAGE-GOVERNANCE.md)。
+
+# 2026-08-01 Antigravity CLI迁移
+
+- 历史内部运行时ID`gemini`保持兼容，用户界面与实际生产命令统一迁移到官方Antigravity CLI（`agy`）。
+- 安装、更新、模型目录、随机challenge测试和项目任务执行不再调用已停止个人账号服务的旧Gemini CLI。
+- Antigravity账号登录由官方交互终端管理，CCM不再截获或提交Google授权码。
+- 项目子Agent的MCP与Skill配置改为`.agents/mcp_config.json`和`.agents/skills`，并继续受CCM作用域授权快照约束。
+
+# 2026-08-01 三类会话CC式统一Agent Loop
+
+- 全局、群聊和项目聊天入口取消独立语义分类调用，`WorkflowDecision`改为主Agent首轮响应的一部分。
+- 普通问候在正常容量下只调用一次Provider，不自动读取知识、源码、运行日志或创建任务。
+- 群聊和项目增加模型按需选择的源码、知识与运行诊断只读工具，结果回到同一个Agent Loop。
+- 全局共享文件改为`read_global_shared_files`按需读取；Skill正文只在选择后加载，MCP按实际Schema和调用结果计量。
+- Web与飞书共享主Agent入口；三类会话继续使用精确串行、正式压缩、RBAC、任务、TestAgent和回放链。
+- 完整流程见 [三类会话CC式统一Agent Loop](confirmed-business-processes/THREE-SESSION-CC-MAIN-AGENT-LOOP.md)。

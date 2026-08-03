@@ -48,6 +48,7 @@ export declare function classifyGroupProjectTaskIntentWithAgent(input: {
     sharedFilesContext?: string;
     groupSessionId?: string;
     group_session_id?: string;
+    context?: string;
 }): Promise<any>;
 export declare function shouldUseProjectAnalysisMode(input: {
     isOrchestrated?: boolean;
@@ -96,17 +97,11 @@ export declare function buildGroupPlanModePreflight(input: {
         projects: any;
         knowledge_used: boolean;
         code_snapshot_used: boolean;
-        source_snapshot_checksum: string;
-        model_planning_receipt: import("./project-analysis").ModelDrivenSourcePlanningReceiptV1;
-        source_evidence: {
-            project: string;
-            status: "ready" | "unavailable" | "empty";
-            manifest_checksum: string;
-            selected_paths: string[];
-            issue: string;
-        }[];
+        source_snapshot_checksum: any;
+        model_planning_receipt: any;
+        source_evidence: any;
         source_ready: boolean;
-        source_issues: string[];
+        source_issues: any;
     };
     steps: ({
         id: string;

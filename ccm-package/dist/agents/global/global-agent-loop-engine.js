@@ -62,7 +62,6 @@ const reasoning_loop_1 = require("../reasoning-loop");
 const runtime_1 = require("./runtime");
 const workchain_1 = require("../workchain");
 const delivery_report_1 = require("../delivery-report");
-const workflow_decision_1 = require("../workflow-decision");
 const global_agent_authorization_1 = require("./global-agent-authorization");
 const global_terminal_delivery_1 = require("./global-terminal-delivery");
 const global_agent_loop_self_tests_1 = require("./global-agent-loop-self-tests");
@@ -843,6 +842,14 @@ async function continueLoop(run, runtime) {
             run.phase = decision.state;
             run.workflow_decision = decision.workflowDecision;
             run.workflowDecision = decision.workflowDecision;
+            if (runtime.onWorkflowDecision) {
+                try {
+                    await runtime.onWorkflowDecision(decision.workflowDecision, run, run.model_calls, decision);
+                }
+                catch (error) {
+                    return completeRun(run, runtime, "failed", error?.message || "当前账户无权执行这项操作。", error?.code || error?.message || "workflow_authorization_failed");
+                }
+            }
             const normalizedIntent = (0, quality_center_1.normalizeAgentDecisionIntent)(decision.intent, run.user_message);
             decision.intent = normalizedIntent;
             (0, reasoning_loop_1.updateReasoningPlan)(run.reasoning_loop, decision.plan || [], normalizedIntent.reason || `decision:${decision.state}`);
@@ -1134,6 +1141,7 @@ async function continueLoop(run, runtime) {
             (0, runtime_1.markGlobalAgentToolTodo)(run, decision.tool.name, "in_progress", step.message || `执行 ${decision.tool.name}`);
             (0, runtime_1.recordGlobalAgentRuntimeOutput)(run, { type: "tool_started", tool: decision.tool.name, risk, arguments: args });
             emit(runtime, { type: "tool_started", tool: step.tool, message: step.message }, run);
+            emit(runtime, { type: "tool_activity", phase: "started", tool: decision.tool.name, risk, step: step.index }, run);
             const toolStarted = runtime.now ? runtime.now() : Date.now();
             let acceptedSupervision = false;
             let lightUiShortReply = "";
@@ -1256,6 +1264,7 @@ async function continueLoop(run, runtime) {
                 (0, runtime_1.recordGlobalAgentRuntimeOutput)(run, { type: "tool_completed", tool: decision.tool.name, risk, duration_ms: step.duration_ms, observation: step.observation });
                 (0, runtime_1.markGlobalAgentToolTodo)(run, decision.tool.name, toolSucceeded ? "done" : "blocked", toolSucceeded ? `${decision.tool.name} 完成` : String(result?.error || `${decision.tool.name} 返回失败`));
                 emit(runtime, { type: "tool_completed", tool: step.tool, observation: step.observation }, run);
+                emit(runtime, { type: "tool_activity", phase: "completed", tool: decision.tool.name, risk, step: step.index }, run);
                 if (toolSucceeded)
                     emitGlobalDispatchLaunchProgress(runtime, run, step);
             }
@@ -1291,6 +1300,7 @@ async function continueLoop(run, runtime) {
                 (0, runtime_1.recordGlobalAgentRuntimeOutput)(run, { type: "tool_failed", tool: decision.tool.name, risk, duration_ms: step.duration_ms, error: step.error });
                 (0, runtime_1.markGlobalAgentToolTodo)(run, decision.tool.name, "blocked", step.error);
                 emit(runtime, { type: "tool_failed", tool: step.tool, error: step.error }, run);
+                emit(runtime, { type: "tool_activity", phase: "failed", tool: decision.tool.name, risk, step: step.index, error: step.error }, run);
             }
             run.steps.push(step);
             run.pending_tool = null;
@@ -1540,18 +1550,12 @@ async function continueGlobalAgentRunWithClarification(id, answer, runtime, opti
     const clarification = String(answer || "").trim();
     if (!clarification)
         throw new Error("澄清内容不能为空");
-    const clarificationDecision = await (0, workflow_decision_1.decideWorkflowWithModel)({
-        message: clarification,
-        scope: "global",
-        context: {
-            current_goal: run.reasoning_loop.effective_goal || run.original_user_message || run.user_message,
-            waiting_for_clarification: true,
-            inherited_write_authorization: run.explicit_write_authorization === true,
-        },
-    });
-    const revokesAuthorization = clarificationDecision.authorizationDirective === "revoke";
-    const inheritedAuthorization = run.explicit_write_authorization && !revokesAuthorization;
-    const currentAuthorization = options.explicitWriteAuthorization === true && !revokesAuthorization;
+    // This is an explicit continuation of a known waiting run. Natural-language
+    // interpretation happens in the next main Agent loop call, not in a separate classifier.
+    const clarificationDecision = run.workflow_decision || run.workflowDecision || null;
+    const revokesAuthorization = false;
+    const inheritedAuthorization = run.explicit_write_authorization;
+    const currentAuthorization = options.explicitWriteAuthorization === true;
     (0, reasoning_loop_1.appendReasoningClarification)(run.reasoning_loop, {
         question: run.clarification_question || run.final_reply || "请补充目标和影响范围",
         answer: clarification,
@@ -1566,7 +1570,7 @@ async function continueGlobalAgentRunWithClarification(id, answer, runtime, opti
     run.user_message = run.reasoning_loop.effective_goal;
     run.workflow_decision = clarificationDecision;
     run.workflowDecision = clarificationDecision;
-    if (clarificationDecision.sourcePolicy === "ignore_unread") {
+    if (clarificationDecision?.sourcePolicy === "ignore_unread") {
         run.source_execution_waiver = {
             granted_at: nowIso(runtime),
             answer: clarification,

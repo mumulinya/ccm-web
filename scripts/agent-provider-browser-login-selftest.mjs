@@ -10,6 +10,8 @@ const binDir = path.join(outputDir, 'bin')
 fs.rmSync(outputDir, { recursive: true, force: true })
 fs.mkdirSync(testHome, { recursive: true })
 fs.mkdirSync(binDir, { recursive: true })
+fs.mkdirSync(path.join(testHome, '.gemini'), { recursive: true })
+fs.writeFileSync(path.join(testHome, '.gemini', 'oauth_creds.json'), JSON.stringify({ access_token: 'stale-login' }))
 
 process.env.HOME = testHome
 process.env.USERPROFILE = testHome
@@ -29,17 +31,10 @@ if (process.platform === 'win32') {
     ')',
     'exit /b 1',
   ].join('\r\n'))
-  fs.writeFileSync(path.join(binDir, 'gemini.cmd'), [
+  fs.writeFileSync(path.join(binDir, 'agy.cmd'), [
     '@echo off',
-    'if "%1"=="--version" (echo gemini-cli test& exit /b 0)',
-    'echo Please visit the following URL to authorize the application:',
-    'echo https://accounts.google.com/o/oauth2/v2/auth?state=ccm-test',
-    '<nul set /p="Enter the authorization code: "',
-    'set /p AUTH_CODE=',
-    'if "%AUTH_CODE%"=="" exit /b 1',
-    'if not exist "%USERPROFILE%/.gemini" mkdir "%USERPROFILE%/.gemini"',
-    'echo {"access_token":"mock"}>"%USERPROFILE%/.gemini/oauth_creds.json"',
-    'echo Authentication succeeded',
+    'if "%1"=="--version" (echo agy 1.1.9& exit /b 0)',
+    'echo Antigravity interactive login',
     'exit /b 0',
   ].join('\r\n'))
 } else {
@@ -53,23 +48,18 @@ if (process.platform === 'win32') {
     'exit 1',
   ].join('\n'))
   fs.chmodSync(command, 0o755)
-  const gemini = path.join(binDir, 'gemini')
+  const gemini = path.join(binDir, 'agy')
   fs.writeFileSync(gemini, [
     '#!/bin/sh',
-    'if [ "$1" = "--version" ]; then echo "gemini-cli test"; exit 0; fi',
-    'echo "Please visit the following URL to authorize the application:"',
-    'echo "https://accounts.google.com/o/oauth2/v2/auth?state=ccm-test"',
-    'printf "Enter the authorization code: "',
-    'read AUTH_CODE',
-    '[ -n "$AUTH_CODE" ] || exit 1',
-    'mkdir -p "$HOME/.gemini"',
-    'printf "{\\"access_token\\":\\"mock\\"}" > "$HOME/.gemini/oauth_creds.json"',
-    'echo "Authentication succeeded"',
+    'if [ "$1" = "--version" ]; then echo "agy 1.1.9"; exit 0; fi',
+    'echo "Antigravity interactive login"',
   ].join('\n'))
   fs.chmodSync(gemini, 0o755)
 }
 
 process.env.PATH = `${binDir}${path.delimiter}${process.env.PATH || ''}`
+process.env.CCM_ANTIGRAVITY_CLI_COMMAND = process.platform === 'win32' ? path.join(binDir, 'agy.cmd') : path.join(binDir, 'agy')
+process.env.CCM_ANTIGRAVITY_DISABLE_INTERACTIVE_LAUNCH = '1'
 
 const settings = await import('../ccm-package/dist/modules/system/agent-provider-settings.js')
 const checks = []
@@ -99,24 +89,23 @@ try {
   )
   checks.push({ name: 'login session is bound to the exact provider', pass: true })
 
-  const geminiStarted = settings.startAgentProviderLogin('gemini')
-  let geminiSession = geminiStarted
-  const codeDeadline = Date.now() + 4_000
-  while (!geminiSession.requiresCode && Date.now() < codeDeadline) {
-    await new Promise(resolve => setTimeout(resolve, 80))
-    geminiSession = settings.getAgentProviderLoginSession('gemini', geminiStarted.sessionId)
-  }
-  assert.equal(geminiSession.requiresCode, true)
-  assert.match(geminiSession.authUrl, /^https:\/\/accounts\.google\.com\//)
-  settings.submitAgentProviderLoginCode('gemini', geminiStarted.sessionId, 'mock-google-code')
-  const successDeadline = Date.now() + 4_000
-  while (geminiSession.status !== 'succeeded' && Date.now() < successDeadline) {
-    await new Promise(resolve => setTimeout(resolve, 80))
-    geminiSession = settings.getAgentProviderLoginSession('gemini', geminiStarted.sessionId)
-  }
-  assert.equal(geminiSession.status, 'succeeded')
+  const antigravityStarted = settings.startAgentProviderLogin('gemini')
+  assert.equal(antigravityStarted.browser, false)
+  assert.equal(antigravityStarted.manual, true)
+  assert.equal('sessionId' in antigravityStarted, false)
+  assert.match(antigravityStarted.command, /agy/i)
   assert.equal(fs.existsSync(path.join(testHome, '.gemini', 'oauth_creds.json')), true)
-  checks.push({ name: 'Gemini browser authorization code returns only to its waiting CLI session and completes login', pass: true })
+  assert.throws(() => settings.submitAgentProviderLoginCode('gemini', 'auth_missing', 'legacy-code'), /不存在|过期/)
+  checks.push({ name: 'Antigravity authentication stays inside the official interactive CLI and CCM never captures Google authorization codes', pass: true })
+
+  const providerPanelSource = fs.readFileSync(
+    path.join(root, 'frontend', 'src', 'components', 'settings', 'SettingsAgentProvidersPanel.vue'),
+    'utf-8',
+  )
+  assert.match(providerPanelSource, /finally\s*\{\s*clearLoginSession\(provider\)/)
+  assert.match(providerPanelSource, /data\.status === 'failed'[\s\S]{0,180}closeLoginPopup\(provider\)/)
+  assert.match(providerPanelSource, /delete nextTestResults\[provider\]/)
+  checks.push({ name: 'the settings page clears completed login prompts and stale test results before a new login', pass: true })
 
   const report = { pass: true, generatedAt: new Date().toISOString(), platform: os.platform(), checks, paidProviderCalls: 0 }
   fs.writeFileSync(path.join(outputDir, 'report.json'), JSON.stringify(report, null, 2))

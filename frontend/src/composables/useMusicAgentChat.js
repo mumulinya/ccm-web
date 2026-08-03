@@ -19,7 +19,7 @@ export function useMusicAgentChat(options = {}) {
   let activeRequestController = null
 
   const nowLabel = () => options.nowLabel?.() || '00:00:00'
-  const greetingMessage = (time = '00:00:00') => ({ role: 'agent', content: options.greeting || DEFAULT_GREETING, time })
+  const greetingMessage = (time = '00:00:00') => ({ role: 'agent', content: options.greeting || DEFAULT_GREETING, time, timestamp: new Date().toISOString() })
   const createAgentMessageId = () => `music-chat-${Date.now().toString(36)}-${agentMessageIdSeq++}`
 
   const normalizeAgentMessage = (msg) => {
@@ -33,7 +33,7 @@ export function useMusicAgentChat(options = {}) {
   }
 
   const pushAgentMessage = (msg) => {
-    const item = normalizeAgentMessage(msg)
+    const item = normalizeAgentMessage({ timestamp: new Date().toISOString(), ...(msg || {}) })
     agentMessages.value.push(item)
     return item
   }
@@ -143,6 +143,7 @@ export function useMusicAgentChat(options = {}) {
     id: String(message?.id || ''),
     role: message?.role === 'assistant' ? 'agent' : 'operator',
     content: String(message?.content || ''),
+    timestamp: String(message?.timestamp || ''),
     time: (() => {
       const date = new Date(message?.timestamp || '')
       return Number.isNaN(date.getTime()) ? nowLabel() : date.toLocaleTimeString('zh-CN', { hour12: false })

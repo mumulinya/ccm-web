@@ -120,6 +120,36 @@ import { reviewSessionSummaryIfSelected } from "../../system/session-summary-sec
 
 // ===== merged from group-compaction-engine-part-01.ts =====
 
+const GROUP_CONTEXT_FIXED_BUCKETS = ["system", "tools", "rules", "skills", "mcpTools", "subagentDefinitions"];
+
+export function buildGroupPressureAccountingSelection(triggerPayload: any, providerUsageBaseline: any, groupId: string, groupSessionId: string) {
+  const triggerFixedTokens = GROUP_CONTEXT_FIXED_BUCKETS
+    .reduce((sum, key) => sum + Math.max(0, Number(triggerPayload?.tokenBreakdown?.[key] || 0)), 0);
+  const providerAccountingPayload = providerUsageBaseline?.valid === true
+    && providerUsageBaseline.event?.token_breakdown
+    && Number(providerUsageBaseline.event?.accounting_total_tokens || 0) > 0
+    ? {
+        schema: "ccm-model-visible-payload-accounting-v1",
+        scope: "group",
+        sessionId: `${groupId}:${groupSessionId}`,
+        tokenBreakdown: { ...providerUsageBaseline.event.token_breakdown },
+        totalTokens: Number(providerUsageBaseline.event.accounting_total_tokens || 0),
+        payloadChecksum: String(providerUsageBaseline.event.payload_checksum || ""),
+        fixedContextChecksum: String(providerUsageBaseline.event.fixed_context_checksum || ""),
+        contentStored: false,
+      }
+    : null;
+  const useProviderAccounting = !!providerAccountingPayload && triggerFixedTokens <= 0;
+  return {
+    triggerFixedTokens,
+    providerAccountingPayload,
+    measurementPayload: useProviderAccounting ? null : triggerPayload,
+    persistedAccounting: useProviderAccounting
+      ? providerAccountingPayload
+      : modelVisiblePayloadAccounting(triggerPayload),
+  };
+}
+
 export function normalizeHookAnchor(raw: any, index: number, type: FactAnchor["type"] = "user_requirement"): FactAnchor | null {
   const text = compactText(raw?.text || raw?.requirement || raw?.value || raw, 2000);
   if (!text) return null;
@@ -741,6 +771,11 @@ export async function compactGroupConversationMemory(input: {
       subagentDefinitions: input.config?.modelVisibleSubagentDefinitions || input.config?.model_visible_subagent_definitions || null,
     },
   });
+  const pressureAccounting = buildGroupPressureAccountingSelection(triggerPayload, providerUsageBaseline, groupId, groupSessionId);
+  const { triggerFixedTokens, providerAccountingPayload } = pressureAccounting;
+  // A background post-turn pressure sample may not receive the main Agent's fixed
+  // prompt and tool catalog. Do not let that message-only projection invalidate or
+  // overwrite the last complete Provider payload accounting.
   const contextTokenMeasurement = measureSessionContextTokens({
     scope: "group",
     sessionId: `${groupId}:${groupSessionId}`,
@@ -754,8 +789,25 @@ export async function compactGroupConversationMemory(input: {
     provider: expectedProvider,
     model: String(input.config?.model || ""),
     boundaryGeneration: Math.max(0, Number(previousState.boundaryGeneration || previousState.boundary_generation || 0)),
-    modelVisiblePayload: triggerPayload,
+    modelVisiblePayload: pressureAccounting.measurementPayload,
   });
+  if (providerAccountingPayload && triggerFixedTokens <= 0) {
+    contextTokenMeasurement.activeTokens = Math.max(
+      Number(contextTokenMeasurement.activeTokens || 0),
+      Number(providerAccountingPayload.totalTokens || 0),
+    );
+    contextTokenMeasurement.estimatedFixedTokens = Math.max(
+      Number(contextTokenMeasurement.estimatedFixedTokens || 0),
+      Object.entries(providerAccountingPayload.tokenBreakdown)
+        .filter(([key]) => ["system", "tools", "rules", "skills", "mcpTools", "subagentDefinitions"].includes(key))
+        .reduce((sum, [, value]) => sum + Math.max(0, Number(value || 0)), 0),
+    );
+    contextTokenMeasurement.method = "provider_usage_plus_complete_payload_accounting";
+    contextTokenMeasurement.modelVisiblePayload = null;
+    contextTokenMeasurement.payloadChecksum = providerAccountingPayload.payloadChecksum;
+    contextTokenMeasurement.fixedContextChecksum = providerAccountingPayload.fixedContextChecksum;
+  }
+  const persistedTriggerAccounting = pressureAccounting.persistedAccounting;
   const providerObservedCorrection = Math.max(0, contextTokenMeasurement.activeTokens - estimatedActiveTokens);
   const activeTokens = contextTokenMeasurement.activeTokens;
   const triggerTokens = getGroupAutoCompactThreshold(input.config);
@@ -778,8 +830,8 @@ export async function compactGroupConversationMemory(input: {
       lastPressureSampleAt: now,
       tokenMeasurement: contextTokenMeasurement,
       token_measurement: contextTokenMeasurement,
-      modelVisiblePayload: modelVisiblePayloadAccounting(triggerPayload),
-      model_visible_payload: modelVisiblePayloadAccounting(triggerPayload),
+      modelVisiblePayload: persistedTriggerAccounting,
+      model_visible_payload: persistedTriggerAccounting,
     },
     messageCompression: {
       ...(memory?.messageCompression || {}),

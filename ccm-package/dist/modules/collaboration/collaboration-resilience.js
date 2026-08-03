@@ -49,12 +49,13 @@ const path = __importStar(require("path"));
 const child_process_1 = require("child_process");
 const execution_kernel_1 = require("../../agents/execution-kernel");
 const runtime_1 = require("../../agents/runtime");
+const agent_provider_settings_1 = require("../system/agent-provider-settings");
 const worktree_1 = require("../../agents/worktree");
 const RUNTIME_COMMANDS = {
     claudecode: ["claude"],
     codex: ["codex"],
     cursor: ["cursor-agent", "agent"],
-    gemini: ["gemini"],
+    gemini: [(0, agent_provider_settings_1.resolveAntigravityCliCommand)(), "agy"],
     qoder: ["qodercli"],
 };
 const DEFAULT_FALLBACK_ORDER = {

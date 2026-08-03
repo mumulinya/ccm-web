@@ -68,6 +68,7 @@ const accessibleLabel = computed(() => props.usage
 const tokenSourceLabel = computed(() => ({
   provider_usage_plus_estimate: 'Provider 实测 + 后续增量',
   provider_usage: 'Provider 实测',
+  provider_payload_accounting: 'Provider 调用完整上下文',
   context_pressure_sample: '完整上下文采样',
   model_visible_payload: '完整模型可见上下文估算',
   model_visible_payload_projection: '当前模型可见上下文投影',
@@ -117,6 +118,41 @@ const breakdownRows = computed(() => {
     capacityPercent: contextWindow.value > 0 ? Math.max(0, (row.tokens / contextWindow.value) * 100) : 0,
   }))
 })
+const conversationTokens = computed(() => breakdownRows.value
+  .filter(row => ['summary', 'recentMessages', 'currentRequest'].includes(row.key))
+  .reduce((sum, row) => sum + Number(row.tokens || 0), 0))
+const dynamicContextTokens = computed(() => breakdownRows.value
+  .filter(row => ['tools', 'skills', 'mcp', 'subagents', 'recoveryContext', 'hookResults', 'hydratedContext'].includes(row.key))
+  .reduce((sum, row) => sum + Number(row.tokens || 0), 0))
+const availableCatalog = computed(() => props.usage?.availableContextCatalog || {})
+const deferredCatalogRows = computed(() => [
+  { key: 'mcp', label: 'MCP 工具', tone: 'mcp', value: availableCatalog.value?.mcp || {} },
+  { key: 'skills', label: 'Skills', tone: 'skills', value: availableCatalog.value?.skills || {} },
+].map(row => ({
+  ...row,
+  configured: Math.max(0, Number(row.value?.configured || 0)),
+  available: Math.max(0, Number(row.value?.available || 0)),
+  loaded: Math.max(0, Number(row.value?.loaded || 0)),
+  invoked: Math.max(0, Number(row.value?.invoked || 0)),
+  loadedThisTurn: row.value?.loadedThisTurn === true,
+  estimatedTokens: Math.max(0, Number(row.value?.estimatedTokensIfLoaded || 0)),
+  items: (Array.isArray(row.value?.items) ? row.value.items : [])
+    .map(item => ({
+      name: String(item?.name || '').trim(),
+      state: ['available', 'loaded', 'invoked', 'unavailable'].includes(String(item?.state || '')) ? String(item.state) : 'available',
+      configured: item?.configured !== false,
+      evidenceStatus: String(item?.evidenceStatus || ''),
+      loadLevels: Array.isArray(item?.loadLevels) ? item.loadLevels : [],
+      invocationCount: Math.max(0, Number(item?.invocationCount || 0)),
+    }))
+    .filter(item => item.name),
+})).filter(row => row.items.length > 0))
+const contextItemStateLabel = item => ({
+  invoked: item.invocationCount > 1 ? `已调用 ${item.invocationCount} 次` : '已调用',
+  loaded: item.loadLevels.includes('body') ? '正文已加载' : item.loadLevels.includes('schema') ? 'Schema 已加载' : '目录已加载',
+  unavailable: '当前不可用',
+  available: item.evidenceStatus === 'unproven' ? '可用 · 本轮状态未证明' : '可用 · 本轮未加载',
+})[item.state] || '可用'
 const compactStateLabel = computed(() => {
   if (isCompacting.value) return '正在压缩'
   if (circuitBlocked.value) return circuitWaitingRetry.value ? '压缩熔断（待重试）' : '压缩熔断（待重置）'
@@ -134,6 +170,7 @@ const summarySourceLabel = computed(() => ({
 })[String(props.usage?.summarySource || '').toLowerCase()] || '暂无正式摘要')
 const measurementMethodLabel = computed(() => ({
   latest_provider_usage_plus_new_message_estimate: 'Provider 实测 + 后续增量',
+  provider_usage_plus_complete_payload_accounting: 'Provider 实测 + 完整上下文分项',
   model_visible_payload_estimate: '完整模型可见上下文估算',
   current_model_visible_payload_projection: '当前模型可见上下文投影',
   encrypted_transcript_estimate: '加密会话原文估算',
@@ -182,11 +219,16 @@ onUnmounted(() => document.removeEventListener('pointerdown', closeDetails))
     <span>{{ usage ? contextPercentLabel : '--' }}</span>
     <div v-if="detailsOpen" class="context-usage-popover" role="dialog" aria-label="当前会话上下文详情" @click.stop>
       <header class="context-popover-header">
-        <div><span>CONTEXT</span><strong>{{ usage ? `${contextPercentLabel} Full` : stateLabel }}</strong></div>
+        <div><span>CONTEXT</span><strong>{{ usage ? `${contextPercentLabel} 本轮载荷` : stateLabel }}</strong></div>
         <button type="button" class="context-popover-close" aria-label="关闭上下文详情" @click="detailsOpen = false"><X :size="14" /></button>
       </header>
       <div v-if="usage" class="context-popover-session">{{ sessionLabel }}<span>{{ compactStateLabel }}</span></div>
-      <div v-if="usage" class="context-popover-total"><span>模型可见上下文</span><b>~{{ formatTokens(currentTokens) }} / {{ formatTokens(contextWindow) }} Tokens</b></div>
+      <div v-if="usage" class="context-popover-total"><span>最近完整模型载荷</span><b>~{{ formatTokens(currentTokens) }} / {{ formatTokens(contextWindow) }} Tokens</b></div>
+      <div v-if="usage" class="context-continuity-note">
+        <span><b>会话正文 {{ formatTokens(conversationTokens) }}</b><small>消息与正式摘要</small></span>
+        <p v-if="dynamicContextTokens > 0">System、Rules 与已启用工具定义属于稳定上下文；Skill 正文、知识、源码和工具结果按需加载，因此本轮总载荷可升降。会话原文与正式摘要没有被删除。</p>
+        <p v-else>这里统计当前精确会话的消息与正式摘要；发生正式压缩时会保留可追溯摘要。</p>
+      </div>
       <div v-if="usage" class="context-meter" aria-hidden="true">
         <span
           v-for="row in breakdownRows"
@@ -202,6 +244,24 @@ onUnmounted(() => document.removeEventListener('pointerdown', closeDetails))
         <div v-for="row in breakdownRows" :key="row.key" class="context-breakdown-row"><span class="context-breakdown-name"><i :class="`tone-${row.tone}`"></i>{{ row.label }}</span><span class="context-breakdown-value"><b>{{ formatTokens(row.tokens) }}</b><small>{{ row.usedPercent }}%</small></span></div>
         <div v-if="!breakdownRows.length" class="context-breakdown-empty">当前会话还没有可分解的模型上下文样本。</div>
       </div>
+      <section v-if="usage && deferredCatalogRows.length" class="context-available-catalog">
+        <header><strong>工具上下文</strong><small>逐项按真实载荷与调用回执统计</small></header>
+        <div v-for="row in deferredCatalogRows" :key="`available-${row.key}`" class="context-available-row">
+          <div class="context-available-summary">
+            <span><i :class="`tone-${row.tone}`"></i>{{ row.label }}</span>
+            <b>{{ row.loaded }} 已加载 · {{ row.invoked }} 已调用</b>
+          </div>
+          <div class="context-available-state">
+            <span>{{ row.available }} 可用 · {{ row.configured }} 项用户授权</span>
+            <small v-if="row.estimatedTokens">全部加载约 {{ formatTokens(row.estimatedTokens) }} Tokens</small>
+          </div>
+          <div v-if="row.items.length" class="context-available-items">
+            <span v-for="item in row.items" :key="`${row.key}-${item.name}`" :class="`state-${item.state}`" :title="contextItemStateLabel(item)">
+              <b>{{ item.name }}</b><small>{{ contextItemStateLabel(item) }}</small>
+            </span>
+          </div>
+        </div>
+      </section>
       <div v-if="usage" class="context-popover-meta">
         <span><strong>摘要</strong>{{ summarySourceLabel }}</span>
         <span><strong>计量</strong>{{ measurementMethodLabel }}</span>
@@ -266,9 +326,12 @@ onUnmounted(() => document.removeEventListener('pointerdown', closeDetails))
 .context-popover-close { width: 24px; height: 24px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 50%; background: var(--panel-muted); color: var(--text-muted); cursor: pointer; }.context-popover-close:hover { background: var(--control-hover); color: var(--accent-green); }
 .context-popover-session { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 0 4px; color: var(--text-muted); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.context-popover-session span { flex: 0 0 auto; color: var(--accent-green); font-size: 10px; font-weight: 700; }
 .context-popover-total { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 7px 0 8px; color: var(--text-muted); font-size: 10px; }.context-popover-total b { color: var(--text-primary); font-family: var(--font-mono, monospace); font-size: 11px; font-weight: 600; }
+.context-continuity-note { display: grid; gap: 6px; margin-bottom: 9px; padding: 8px 9px; border: 1px solid color-mix(in srgb, var(--accent-cyan, #22d3ee) 18%, var(--border-color)); border-radius: 6px; background: color-mix(in srgb, var(--surface) 93%, var(--accent-cyan, #22d3ee) 7%); }
+.context-continuity-note span { display: flex; align-items: center; justify-content: space-between; gap: 10px; }.context-continuity-note b { color: var(--text-primary); font-size: 10px; }.context-continuity-note small { color: var(--text-muted); font-size: 9px; }.context-continuity-note p { margin: 0; color: var(--text-secondary); font-size: 9px; line-height: 1.55; }
 .context-meter { position: relative; display: flex; height: 8px; overflow: hidden; border-radius: 4px; background: var(--panel-muted); }.context-meter-segment { display: block; flex: 0 0 auto; height: 100%; transition: width .25s ease; }.context-meter-segment + .context-meter-segment { box-shadow: inset 1px 0 color-mix(in srgb, var(--surface) 70%, transparent); }.context-meter-threshold { position: absolute; top: 0; bottom: 0; z-index: 2; width: 2px; background: var(--accent-yellow); box-shadow: 0 0 0 1px var(--surface); }
 .context-meter-labels { display: flex; justify-content: space-between; gap: 6px; padding: 5px 0 10px; color: var(--text-muted); font-family: var(--font-mono, monospace); font-size: 8px; }.context-meter-labels span:nth-child(2) { color: var(--accent-yellow); }
 .context-breakdown { display: grid; gap: 0; max-height: 246px; overflow: auto; padding: 4px 0 5px; border-top: 1px solid var(--border-color); border-bottom: 1px solid var(--border-color); }.context-breakdown-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 27px; color: var(--text-secondary); font-size: 10px; }.context-breakdown-name { display: inline-flex; align-items: center; min-width: 0; gap: 8px; }.context-breakdown-name i { width: 10px; height: 10px; flex: 0 0 auto; border-radius: 2px; background: var(--text-muted); }.tone-system { background: #777d7a !important; }.tone-tools { background: #7654d9 !important; }.tone-rules { background: #188d65 !important; }.tone-skills { background: #c58928 !important; }.tone-mcp { background: #bd438c !important; }.tone-subagents { background: #398dc0 !important; }.tone-summary { background: #d12858 !important; }.tone-conversation { background: #db6b42 !important; }.tone-request { background: #287f9d !important; }.tone-recovery { background: #745dc9 !important; }.tone-hooks { background: #4e9d7a !important; }.tone-bootstrap { background: #3d728f !important; }.tone-hydration { background: #a85791 !important; }.tone-envelope { background: #5f6f68 !important; }.tone-remainder { background: #a2aea8 !important; }.context-breakdown-value { display: inline-flex; align-items: baseline; justify-content: flex-end; gap: 7px; min-width: 78px; }.context-breakdown-row b { color: var(--text-secondary); font-family: var(--font-mono, monospace); font-size: 10px; font-weight: 600; }.context-breakdown-row small { min-width: 31px; color: var(--text-muted); font-family: var(--font-mono, monospace); font-size: 8px; text-align: right; }.context-breakdown-empty, .context-popover-empty { padding: 8px 0; color: var(--text-muted); font-size: 10px; line-height: 1.5; }
+.context-available-catalog { display: grid; gap: 8px; padding: 10px 0 4px; border-bottom: 1px solid var(--border-color); }.context-available-catalog header { display: flex; align-items: center; justify-content: space-between; gap: 10px; }.context-available-catalog header strong { color: var(--text-primary); font-size: 10px; }.context-available-catalog header small { color: var(--text-muted); font-size: 8px; }.context-available-row { display: grid; gap: 5px; padding: 7px 8px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--panel-muted); }.context-available-summary, .context-available-state { display: flex; align-items: center; justify-content: space-between; gap: 10px; }.context-available-summary span { display: inline-flex; align-items: center; gap: 7px; color: var(--text-secondary); font-size: 10px; }.context-available-summary i { width: 9px; height: 9px; flex: 0 0 auto; border-radius: 2px; }.context-available-summary b { color: var(--text-primary); font-size: 9px; }.context-available-state { color: var(--text-secondary); font-size: 8px; }.context-available-state small { color: var(--text-muted); font-size: 8px; }.context-available-items { display: grid; gap: 4px; max-height: 96px; overflow: auto; }.context-available-items > span { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; min-width: 0; padding: 3px 0; border-top: 1px solid color-mix(in srgb, var(--border-color) 58%, transparent); }.context-available-items b { min-width: 0; overflow: hidden; color: var(--text-secondary); font-size: 8px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }.context-available-items small { color: var(--text-muted); font-size: 7px; white-space: nowrap; }.context-available-items .state-loaded small { color: var(--accent-cyan, #22d3ee); }.context-available-items .state-invoked small { color: var(--success-color, #22a979); }.context-available-items .state-unavailable small { color: var(--danger-color, #df5c65); }
 .context-popover-meta { display: grid; gap: 5px; padding-top: 10px; color: var(--text-muted); font-size: 9px; }.context-popover-meta span { display: flex; justify-content: space-between; gap: 8px; }.context-popover-meta strong { color: var(--text-secondary); font-weight: 700; }
 
 .context-spinner { animation: context-spin 0.9s linear infinite; }

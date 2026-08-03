@@ -5,7 +5,7 @@ import * as path from "path";
 import { DEFAULT_CONTEXT_WINDOW_TOKENS } from "../../system/context-budget";
 import { CCM_DIR, GROUP_MESSAGES_DIR } from "../../core/utils";
 import { withFileLock, writeJsonAtomic as writeJsonAtomicDurable } from "../../core/atomic-json-file";
-import { getConfigs, loadProjectConfigs, loadTasks, saveTasks } from "../../core/db";
+import { getConfigs, loadMcpTools, loadProjectConfigs, loadSkills, loadTasks, saveTasks } from "../../core/db";
 import {
   inspectGroupSessionMemoryExtractionLease,
   readGroupSessionMemoryExtractionState,
@@ -67,6 +67,210 @@ import { readLatestProviderNeutralContextCacheState } from "../../system/provide
 import { readProviderCacheCapabilityState } from "../../system/provider-cache-capability-registry";
 import { readContextEngineTrends } from "../../system/context-engine-observability";
 import { listContextEngineRecoveryPoints } from "../../system/context-engine-recovery";
+
+const MODEL_VISIBLE_FIXED_BUCKETS = [
+  "system",
+  "tools",
+  "rules",
+  "skills",
+  "mcpTools",
+  "subagentDefinitions",
+  "workerBootstrap",
+  "hydratedContext",
+  "providerEnvelope",
+];
+
+function cleanAvailableContextName(value: any, max = 120) {
+  return String(value || "").replace(/[\0\r\n\t]+/g, " ").trim().slice(0, max);
+}
+
+function normalizeAvailableContextNames(value: any) {
+  const rows = Array.isArray(value) ? value : [];
+  return [...new Set(rows.map((item: any) => cleanAvailableContextName(
+    item && typeof item === "object"
+      ? item.name || item.grant || item.server || item.tool
+      : item,
+  )).filter(Boolean))].slice(0, 100);
+}
+
+function scopeConfiguredContextTools(scope: MemoryScope, scopeId: string, memory: any) {
+  try {
+    if (scope === "global_session" || scope === "global") {
+      const store = require("../global/global-agent-tool-authorization").loadGlobalAgentToolAuthorization();
+      return store?.tools || {};
+    }
+    if (scope === "group") {
+      const groupId = parseGroupMemoryScopeId(scopeId, memory).groupId;
+      const group = require("../collaboration/storage").loadGroups()
+        .find((item: any) => String(item?.id || "") === String(groupId || ""));
+      return group?.tools || {};
+    }
+    if (scope === "project" || scope === "project_session") {
+      const separator = scopeId.indexOf("::");
+      const projectId = cleanId(scope === "project_session" && separator >= 0 ? scopeId.slice(0, separator) : memory?.project || scopeId);
+      return loadProjectConfigs()?.[projectId]?.tools || {};
+    }
+  } catch {}
+  return {};
+}
+
+function estimateAvailableContextTokens(value: any) {
+  if (!value) return 0;
+  try {
+    return estimateGroupMessageTokens({ role: "system", content: typeof value === "string" ? value : JSON.stringify(value) });
+  } catch {
+    return 0;
+  }
+}
+
+function buildAvailableContextCatalog(scope: MemoryScope, scopeId: string, memory: any, modelVisiblePayload: any) {
+  const configured = scopeConfiguredContextTools(scope, scopeId, memory);
+  const configuredMcp = normalizeAvailableContextNames(configured?.mcp);
+  const configuredSkills = normalizeAvailableContextNames(configured?.skill);
+  const mcpCatalog = loadMcpTools().filter((item: any) => item?.enabled !== false);
+  const skillCatalog = loadSkills().filter((item: any) => item?.enabled !== false);
+  const mcpByName = new Map(mcpCatalog.map((item: any) => [String(item?.name || ""), item]));
+  const skillByName = new Map(skillCatalog.map((item: any) => [String(item?.name || ""), item]));
+  const breakdown = modelVisiblePayload?.tokenBreakdown || modelVisiblePayload?.token_breakdown || {};
+  const mcpLoadedTokens = Math.max(0, Number(breakdown.mcpTools ?? breakdown.mcp ?? 0) + Number(breakdown.mcpResults || 0));
+  const skillLoadedTokens = Math.max(0, Number(breakdown.skills || 0));
+  const loadedEvidence = modelVisiblePayload?.loadedContextItems || modelVisiblePayload?.loaded_context_items || {};
+  const loadedMcp = Array.isArray(loadedEvidence?.mcp) ? loadedEvidence.mcp : [];
+  const loadedSkills = Array.isArray(loadedEvidence?.skills) ? loadedEvidence.skills : [];
+  const invocations = Array.isArray(loadedEvidence?.invocations) ? loadedEvidence.invocations : [];
+  const evidenceAvailable = loadedEvidence?.schema === "ccm-loaded-context-items-v1";
+  const normalizedAliases = (item: any) => Array.from(new Set([
+    String(item?.name || ""),
+    ...(Array.isArray(item?.aliases) ? item.aliases.map((value: any) => String(value || "")) : []),
+  ].map(value => value.trim().toLowerCase()).filter(Boolean)));
+  const evidenceMatches = (item: any, name: string, kind: "mcp" | "skill") => {
+    if (String(item?.kind || kind) !== kind) return false;
+    const target = String(name || "").trim().toLowerCase();
+    if (!target) return false;
+    return normalizedAliases(item).some(alias => alias === target || (kind === "mcp" && (alias.startsWith(`${target}/`) || target.startsWith(`${alias}/`))));
+  };
+  const decorateEvidence = (name: string, kind: "mcp" | "skill", available: boolean, configured = true) => {
+    const loadedRows = kind === "mcp" ? loadedMcp : loadedSkills;
+    const loaded = loadedRows.filter((item: any) => evidenceMatches(item, name, kind));
+    const invoked = invocations.filter((item: any) => evidenceMatches(item, name, kind));
+    return {
+      state: !available && !loaded.length ? "unavailable" : invoked.length ? "invoked" : loaded.length ? "loaded" : "available",
+      configured,
+      evidenceStatus: evidenceAvailable ? "exact" : "unproven",
+      loadLevels: Array.from(new Set(loaded.map((item: any) => String(item?.loadLevel || "")).filter(Boolean))),
+      invocationCount: invoked.length,
+      invocationSucceeded: invoked.some((item: any) => item?.ok === true),
+      loadedChecksum: String(loadedEvidence?.checksum || modelVisiblePayload?.loadedContextItemsChecksum || modelVisiblePayload?.loaded_context_items_checksum || ""),
+    };
+  };
+  const mcp = configuredMcp.map((grant: string) => {
+    const server = grant.split("/")[0];
+    const item: any = mcpByName.get(server) || null;
+    return {
+      name: grant,
+      ...decorateEvidence(grant, "mcp", !!item),
+      estimatedTokens: estimateAvailableContextTokens({
+        name: grant,
+        description: item?.description || "",
+        tools: Array.isArray(item?.tools) ? item.tools : [],
+      }),
+    };
+  });
+  const skills = configuredSkills.map((name: string) => {
+    const item: any = skillByName.get(name) || null;
+    return {
+      name,
+      ...decorateEvidence(name, "skill", !!item),
+      estimatedTokens: estimateAvailableContextTokens({
+        name,
+        description: item?.description || "",
+        content: item?.content || item?.prompt || item?.instructions || "",
+      }),
+    };
+  });
+  for (const row of loadedMcp) {
+    const name = String(row?.name || "").trim();
+    if (!name || mcp.some((item: any) => evidenceMatches(row, item.name, "mcp"))) continue;
+    mcp.push({
+      name,
+      ...decorateEvidence(name, "mcp", true, false),
+      estimatedTokens: 0,
+    });
+  }
+  for (const row of loadedSkills) {
+    const name = String(row?.name || "").trim();
+    if (!name || skills.some((item: any) => evidenceMatches(row, item.name, "skill"))) continue;
+    skills.push({
+      name,
+      ...decorateEvidence(name, "skill", true, false),
+      estimatedTokens: 0,
+    });
+  }
+  return {
+    schema: "ccm-context-available-catalog-v2",
+    accounting: "per_item_model_payload_evidence",
+    mcp: {
+      configured: mcp.filter((item: any) => item.configured !== false).length,
+      available: mcp.filter((item: any) => item.state !== "unavailable").length,
+      loaded: mcp.filter((item: any) => ["loaded", "invoked"].includes(item.state)).length,
+      invoked: mcp.filter((item: any) => item.state === "invoked").length,
+      loadedThisTurn: mcp.some((item: any) => ["loaded", "invoked"].includes(item.state)),
+      loadedTokens: mcpLoadedTokens,
+      estimatedTokensIfLoaded: mcp.reduce((sum: number, item: any) => sum + item.estimatedTokens, 0),
+      items: mcp,
+    },
+    skills: {
+      configured: skills.filter((item: any) => item.configured !== false).length,
+      available: skills.filter((item: any) => item.state !== "unavailable").length,
+      loaded: skills.filter((item: any) => ["loaded", "invoked"].includes(item.state)).length,
+      invoked: skills.filter((item: any) => item.state === "invoked").length,
+      loadedThisTurn: skills.some((item: any) => ["loaded", "invoked"].includes(item.state)),
+      loadedTokens: skillLoadedTokens,
+      estimatedTokensIfLoaded: skills.reduce((sum: number, item: any) => sum + item.estimatedTokens, 0),
+      items: skills,
+    },
+  };
+}
+
+function modelVisiblePayloadFixedTokens(payload: any) {
+  const breakdown = payload?.tokenBreakdown || payload?.token_breakdown;
+  if (!breakdown || typeof breakdown !== "object") return 0;
+  return MODEL_VISIBLE_FIXED_BUCKETS.reduce((sum, key) => sum + Math.max(0, Number(breakdown[key] || 0)), 0);
+}
+
+export function isCompleteMemoryCenterContextAccounting(payload: any) {
+  const breakdown = payload?.tokenBreakdown || payload?.token_breakdown;
+  const totalTokens = Number(payload?.totalTokens ?? payload?.total_tokens ?? 0);
+  return !!breakdown
+    && typeof breakdown === "object"
+    && Number.isFinite(totalTokens)
+    && totalTokens > 0
+    && modelVisiblePayloadFixedTokens(payload) > 0;
+}
+
+export function selectMemoryCenterContextAccounting(input: {
+  scope: MemoryScope;
+  stored?: any;
+  provider?: any;
+  rebuilt?: any;
+}) {
+  const stored = input.stored || null;
+  const provider = input.provider || null;
+  const rebuilt = input.rebuilt || null;
+  if (input.scope === "group" && isCompleteMemoryCenterContextAccounting(provider)) {
+    return { payload: provider, source: "provider_payload_accounting" };
+  }
+  if (isCompleteMemoryCenterContextAccounting(stored)) {
+    return { payload: stored, source: "stored_model_visible_payload" };
+  }
+  if (isCompleteMemoryCenterContextAccounting(rebuilt)) {
+    return { payload: rebuilt, source: "current_model_visible_payload_projection" };
+  }
+  if (rebuilt) return { payload: rebuilt, source: "current_model_visible_payload_projection" };
+  if (provider) return { payload: provider, source: "provider_payload_accounting_partial" };
+  if (stored) return { payload: stored, source: "stored_model_visible_payload_partial" };
+  return { payload: null, source: "" };
+}
 
 function latestGroupContextAccounting(scopeId: string, memory: any) {
   try {
@@ -844,23 +1048,36 @@ export function memorySummary(scope: MemoryScope, scopeId: string, memory: any, 
   const tokenState = resolveMemoryCenterTokenState(scope, scopeId, memory);
   const storedModelVisiblePayload = compaction.modelVisiblePayload || compaction.model_visible_payload || compactionContainer.model_visible_payload || memory?.modelVisiblePayload || null;
   const groupAccounting = scope === "group" ? latestGroupContextAccounting(scopeId, memory) : null;
-  let modelVisiblePayload = groupAccounting
-    && (!tokenState.tokenUpdatedAt || Date.parse(groupAccounting.updatedAt) >= Date.parse(String(tokenState.tokenUpdatedAt)))
-    ? groupAccounting.payload
-    : storedModelVisiblePayload;
-  const rebuiltAccounting = options.rebuildCurrentPayload === true && !modelVisiblePayload
+  const initialAccounting = selectMemoryCenterContextAccounting({
+    scope,
+    stored: storedModelVisiblePayload,
+    provider: groupAccounting?.payload || null,
+  });
+  const rebuiltAccounting = options.rebuildCurrentPayload === true
+    && !isCompleteMemoryCenterContextAccounting(initialAccounting.payload)
     ? scope === "group"
       ? rebuildCurrentGroupContextAccounting(scopeId, memory)
       : rebuildCurrentSessionContextAccounting(scope, scopeId, memory)
     : null;
-  if (rebuiltAccounting?.payload) modelVisiblePayload = rebuiltAccounting.payload;
-  const currentTokens = rebuiltAccounting?.payload
-    ? Number(rebuiltAccounting.payload.totalTokens || 0)
+  const selectedAccounting = selectMemoryCenterContextAccounting({
+    scope,
+    stored: storedModelVisiblePayload,
+    provider: groupAccounting?.payload || null,
+    rebuilt: rebuiltAccounting?.payload || null,
+  });
+  const modelVisiblePayload = selectedAccounting.payload;
+  const completeAccounting = isCompleteMemoryCenterContextAccounting(modelVisiblePayload);
+  const currentTokens = completeAccounting
+    ? Number(modelVisiblePayload.totalTokens || modelVisiblePayload.total_tokens || 0)
     : tokenState.currentTokens;
-  const tokenSource = rebuiltAccounting?.source === "current_model_visible_payload_projection"
-    ? "model_visible_payload_projection"
-    : rebuiltAccounting ? "model_visible_payload" : tokenState.tokenSource;
-  const tokenUpdatedAt = rebuiltAccounting?.updatedAt || tokenState.tokenUpdatedAt;
+  const tokenSource = selectedAccounting.source === "provider_payload_accounting"
+    ? "provider_payload_accounting"
+    : selectedAccounting.source === "current_model_visible_payload_projection"
+      ? "model_visible_payload_projection"
+      : completeAccounting ? "model_visible_payload" : tokenState.tokenSource;
+  const tokenUpdatedAt = selectedAccounting.source.startsWith("provider_payload_accounting")
+    ? String(groupAccounting?.updatedAt || tokenState.tokenUpdatedAt)
+    : rebuiltAccounting?.updatedAt || tokenState.tokenUpdatedAt;
   const remainingTokens = Math.max(0, tokenState.effectiveContextWindow - currentTokens);
   const tokenPressure = tokenState.effectiveContextWindow > 0
     ? Math.min(100, Math.round((currentTokens / tokenState.effectiveContextWindow) * 1000) / 10)
@@ -929,6 +1146,7 @@ export function memorySummary(scope: MemoryScope, scopeId: string, memory: any, 
     postCompactGate: compaction.postCompactGate || compaction.post_compact_gate || compactionContainer.post_compact_gate || null,
     tokenMeasurement: compaction.tokenMeasurement || compaction.token_measurement || compactionContainer.token_measurement || tokenState.fallbackTokenMeasurement || null,
     modelVisiblePayload,
+    availableContextCatalog: buildAvailableContextCatalog(scope, scopeId, memory, modelVisiblePayload),
     resolvedModelCapacity: compaction.resolvedModelCapacity || compaction.resolved_model_capacity || compactionContainer.resolved_model_capacity || memory?.model?.modelContextCapacity || null,
     pendingRequestTokens: Number(compaction.pendingRequestTokens ?? compaction.pending_request_tokens ?? compactionContainer.pending_request_tokens ?? 0),
     recoveryContextTokens: Number(compaction.recoveryContextTokens ?? compaction.recovery_context_tokens ?? compactionContainer.recovery_context_tokens ?? 0),

@@ -43,6 +43,28 @@ export type ModelVisiblePayloadSnapshot = {
     payloadChecksum: string;
     fixedContextChecksum: string;
     pendingRequestChecksum: string;
+    loadedContextItems: LoadedContextItemsV1;
+    loadedContextItemsChecksum: string;
+};
+export type LoadedContextItemV1 = {
+    kind: "skill" | "mcp";
+    name: string;
+    aliases: string[];
+    loadLevel: "catalog" | "body" | "schema" | "result";
+    checksum: string;
+};
+export type InvokedContextItemV1 = {
+    kind: "skill" | "mcp";
+    name: string;
+    aliases: string[];
+    ok: boolean;
+    resultChecksum: string;
+};
+export type LoadedContextItemsV1 = {
+    schema: "ccm-loaded-context-items-v1";
+    skills: LoadedContextItemV1[];
+    mcp: LoadedContextItemV1[];
+    invocations: InvokedContextItemV1[];
 };
 export type SessionCompactionStateV2 = {
     schema: typeof SESSION_COMPACTION_STATE_SCHEMA;
@@ -87,6 +109,7 @@ type ContextComponentHints = {
     messageSkills?: any;
     messageMcpTools?: any;
     messageSubagentDefinitions?: any;
+    loadedContextItems?: Partial<LoadedContextItemsV1>;
 };
 export declare function buildModelVisiblePayloadSnapshot(input: {
     scope: SessionCompactionScope;
@@ -112,6 +135,8 @@ export declare function modelVisiblePayloadAccounting(snapshot: ModelVisiblePayl
     payloadChecksum: string;
     fixedContextChecksum: string;
     pendingRequestChecksum: string;
+    loadedContextItems: LoadedContextItemsV1;
+    loadedContextItemsChecksum: string;
     contentStored: boolean;
 };
 export declare function evaluateSessionMemoryCadence(messagesInput: any[], stateInput?: any): {

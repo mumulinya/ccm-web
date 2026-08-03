@@ -110,6 +110,57 @@ function valueTokens(value) {
         return 0;
     return (0, context_budget_1.estimateTextTokens)(typeof value === "string" ? value : JSON.stringify(value));
 }
+function normalizedContextItemName(value) {
+    return String(value || "").trim().slice(0, 240);
+}
+function normalizeContextAliases(value, name) {
+    return Array.from(new Set([name, ...(Array.isArray(value) ? value : [])]
+        .map(normalizedContextItemName)
+        .filter(Boolean))).slice(0, 12);
+}
+function normalizeLoadedContextItems(value) {
+    const normalizeLoaded = (rows, kind) => (Array.isArray(rows) ? rows : [])
+        .map((row) => {
+        const name = normalizedContextItemName(row?.name);
+        if (!name)
+            return null;
+        const requestedLevel = String(row?.loadLevel || row?.level || "");
+        const loadLevel = kind === "skill"
+            ? (requestedLevel === "body" || requestedLevel === "result" ? requestedLevel : "catalog")
+            : (requestedLevel === "result" ? "result" : "schema");
+        return {
+            kind,
+            name,
+            aliases: normalizeContextAliases(row?.aliases, name),
+            loadLevel,
+            checksum: normalizedContextItemName(row?.checksum || row?.contentHash || row?.content_hash),
+        };
+    })
+        .filter(Boolean)
+        .slice(0, 200);
+    const invocations = (Array.isArray(value?.invocations) ? value.invocations : [])
+        .map((row) => {
+        const kind = String(row?.kind || "") === "skill" ? "skill" : String(row?.kind || "") === "mcp" ? "mcp" : "";
+        const name = normalizedContextItemName(row?.name || row?.itemName);
+        if (!kind || !name)
+            return null;
+        return {
+            kind,
+            name,
+            aliases: normalizeContextAliases(row?.aliases, name),
+            ok: row?.ok === true,
+            resultChecksum: normalizedContextItemName(row?.resultChecksum || row?.result_checksum || row?.checksum),
+        };
+    })
+        .filter(Boolean)
+        .slice(0, 200);
+    return {
+        schema: "ccm-loaded-context-items-v1",
+        skills: normalizeLoaded(value?.skills, "skill"),
+        mcp: normalizeLoaded(value?.mcp, "mcp"),
+        invocations,
+    };
+}
 function contextComponentKey(key) {
     const value = String(key || "").replace(/[^a-z0-9]/gi, "").toLowerCase();
     if (/skill/.test(value))
@@ -184,6 +235,7 @@ function buildModelVisiblePayloadSnapshot(input) {
     const structuredHints = structuredContextHints(input.system);
     const toolHints = toolContextHints(input.tools);
     const explicit = input.contextComponents || {};
+    const loadedContextItems = normalizeLoadedContextItems(explicit.loadedContextItems);
     const toolMcpTokens = explicit.mcpTools === undefined ? toolHints.mcpTools : valueTokens(explicit.mcpTools);
     const toolSubagentTokens = toolHints.subagentDefinitions;
     const toolPartition = partitionTokens(rawToolTokens, { mcpTools: toolMcpTokens, subagentDefinitions: toolSubagentTokens });
@@ -234,6 +286,8 @@ function buildModelVisiblePayloadSnapshot(input) {
         payloadChecksum: checksum(payload),
         fixedContextChecksum: checksum(fixedContext),
         pendingRequestChecksum: input.currentRequest == null ? "" : checksum(input.currentRequest),
+        loadedContextItems,
+        loadedContextItemsChecksum: checksum(loadedContextItems),
     };
 }
 function modelVisibleFixedTokens(snapshot) {
@@ -252,6 +306,8 @@ function modelVisiblePayloadAccounting(snapshot) {
         payloadChecksum: snapshot.payloadChecksum,
         fixedContextChecksum: snapshot.fixedContextChecksum,
         pendingRequestChecksum: snapshot.pendingRequestChecksum,
+        loadedContextItems: normalizeLoadedContextItems(snapshot.loadedContextItems),
+        loadedContextItemsChecksum: snapshot.loadedContextItemsChecksum || checksum(normalizeLoadedContextItems(snapshot.loadedContextItems)),
         contentStored: false,
     };
 }

@@ -3,7 +3,7 @@ import * as path from "path";
 import * as crypto from "crypto";
 import { spawnSync } from "child_process";
 import { getNativeContinuationCapabilityProfile } from "./native-continuation";
-import { getConfiguredDevelopmentAgentModel, isDevelopmentAgentReady, resolveCursorAgentCommand } from "../modules/system/agent-provider-settings";
+import { getConfiguredDevelopmentAgentModel, isDevelopmentAgentReady, resolveAntigravityCliCommand, resolveCursorAgentCommand } from "../modules/system/agent-provider-settings";
 import { DEVELOPMENT_AGENT_CATALOG, findDevelopmentAgent } from "./catalog";
 import type { AgentRuntimeId as RegisteredAgentRuntimeId } from "./catalog";
 export type AgentRuntimeId = RegisteredAgentRuntimeId;
@@ -71,7 +71,7 @@ function getRuntimeVersionCommand(agentType: string) {
     if (explicit) return explicit;
     return resolveCursorAgentCommand();
   }
-  if (provider === "gemini") return "gemini";
+  if (provider === "gemini") return resolveAntigravityCliCommand();
   if (provider === "opencode") return "opencode";
   if (provider === "qoder") return "qodercli";
   return provider;
@@ -302,17 +302,15 @@ function buildCursorAgentCommand(msgFile: string, options: AgentCommandOptions =
   return `${homePrefix}node ${quoteCmdArg(helper)} ${quoteCmdArg(msgFile)} ${quoteCmdArg(command)} ${encodeCliArgs(args)}`;
 }
 
-function buildGeminiAgentCommand(msgFile: string, options: AgentCommandOptions = {}) {
-  const args = ["--approval-mode", "yolo", "--skip-trust", "--output-format", "json"];
+function buildAntigravityAgentCommand(msgFile: string, options: AgentCommandOptions = {}) {
+  const args = ["--mode", "accept-edits", "--dangerously-skip-permissions", "--output-format", "json", "--print-timeout", "30m"];
   const selectedModel = getConfiguredDevelopmentAgentModel("gemini");
   if (selectedModel) args.push("--model", selectedModel);
-  const tools = Array.isArray(options.cliAllowedTools)
-    ? Array.from(new Set(options.cliAllowedTools.map(item => String(item || "").trim()).filter(Boolean)))
-    : [];
-  if (tools.length) args.push("--allowed-tools", tools.join(","));
-  args.push("--prompt");
+  const sessionId = String(options.sessionId || "").trim();
+  if (options.persistSession && options.resumeSession && sessionId) args.push("--conversation", sessionId);
+  args.push("--print");
   const helper = path.join(__dirname, "cli-prompt-runner.js");
-  return `node ${quoteCmdArg(helper)} ${quoteCmdArg(msgFile)} ${quoteCmdArg("gemini")} ${encodeCliArgs(args)}`;
+  return `node ${quoteCmdArg(helper)} ${quoteCmdArg(msgFile)} ${quoteCmdArg(resolveAntigravityCliCommand())} ${encodeCliArgs(args)}`;
 }
 
 function buildOpenCodeAgentCommand(msgFile: string, options: AgentCommandOptions = {}) {
@@ -371,18 +369,18 @@ export const AGENT_RUNTIMES: AgentRuntimeDescriptor[] = [
   },
   {
     id: "gemini",
-    aliases: ["gemini", "geminicli", "gemini-cli"],
-    label: "Gemini CLI",
-    commandLabel: "gemini --output-format json --prompt",
+    aliases: ["gemini", "geminicli", "gemini-cli", "antigravity", "antigravity-cli", "agy"],
+    label: "Antigravity CLI",
+    commandLabel: "agy --print --output-format json",
     capabilities: {
       print: true,
       streaming: false,
       externalRunner: true,
       worktreeIsolation: true,
-      sessionResume: false,
+      sessionResume: true,
       scratchpadContinuation: true,
     },
-    buildCommand: (msgFile, options) => buildGeminiAgentCommand(msgFile, options),
+    buildCommand: (msgFile, options) => buildAntigravityAgentCommand(msgFile, options),
   },
   {
     id: "codex",
@@ -553,6 +551,8 @@ export function extractAgentCommandUsage(rawOutput: string, agentType = "") {
         const includedCacheReadTokens = takeMax(0,
           candidate.cached_input_tokens,
           candidate.cachedInputTokens,
+          candidate.cache_read_tokens,
+          candidate.cacheReadTokens,
           candidate.prompt_tokens_details?.cached_tokens,
           candidate.promptTokensDetails?.cachedTokens,
           candidate.input_tokens_details?.cached_tokens,
@@ -629,13 +629,21 @@ export function extractProviderOutputContractEvidence(agentType: string, rawOutp
       } else if (id) {
         driftReasons.push(`cursor_session_id_contract_changed:${eventType || "untyped"}`);
       }
+    } else if (provider === "gemini") {
+      const id = String(event?.conversation_id || event?.conversationId || "").trim();
+      if (id) observedIds.push(id);
+      if (id && ["SUCCESS", "ERROR", "FAILED"].includes(String(event?.status || "").toUpperCase())) {
+        recognized.push({ index, eventType: String(event?.status || "result").toLowerCase(), sessionIdPath: "conversation_id", sessionId: id });
+      } else if (id) {
+        driftReasons.push("antigravity_conversation_contract_changed");
+      }
     }
   }
   const uniqueIds = Array.from(new Set(observedIds));
   if (uniqueIds.length > 1) driftReasons.push("provider_output_session_identity_conflict");
   if (invalidJsonLineCount > 0) driftReasons.push("provider_output_invalid_json_line");
   const matched = recognized.length ? recognized[recognized.length - 1] : null;
-  const status = !["codex", "cursor"].includes(provider)
+  const status = !["codex", "cursor", "gemini"].includes(provider)
     ? "not_applicable"
     : recognized.length > 0 && uniqueIds.length <= 1 && invalidJsonLineCount === 0
       ? "recognized"
@@ -648,7 +656,9 @@ export function extractProviderOutputContractEvidence(agentType: string, rawOutp
     ? { eventType: "thread.started", sessionIdPath: "thread_id" }
     : provider === "cursor"
       ? { eventTypes: ["assistant", "error", "result", "system", "tool", "user"], sessionIdPath: "session_id" }
-      : { acknowledgement: "exit_success" };
+      : provider === "gemini"
+        ? { statuses: ["SUCCESS", "ERROR", "FAILED"], sessionIdPath: "conversation_id" }
+        : { acknowledgement: "exit_success" };
   const runtimeIdentityChecksum = String(runtimeVersionSnapshot?.executableIdentityChecksum || "unresolved");
   const providerContractId = `pcc_${stableRuntimeChecksum({ provider, parserVersion, contractDefinition, runtimeIdentityChecksum }).slice(0, 24)}`;
   return {
@@ -686,12 +696,14 @@ export function normalizeAgentCommandOutput(agentType: string, rawOutput: string
 
   if (["gemini", "opencode"].includes(runtime)) {
     const messages: string[] = [];
+    let rawSessionId = "";
     const append = (value: any) => {
       const text = String(value || "").trim();
       if (text && messages[messages.length - 1] !== text) messages.push(text);
     };
     const inspect = (event: any) => {
       if (!event || typeof event !== "object") return;
+      if (runtime === "gemini") rawSessionId = String(event.conversation_id || event.conversationId || rawSessionId || "");
       if (typeof event.response === "string") append(event.response);
       if (typeof event.result === "string") append(event.result);
       if (event.type === "text") append(event.text || event.part?.text);
@@ -711,8 +723,8 @@ export function normalizeAgentCommandOutput(agentType: string, rawOutput: string
     }
     return {
       output: messages.length ? messages.join("\n\n") : raw,
-      sessionId: "",
-      rawSessionId: "",
+      sessionId: runtime === "gemini" ? providerOutputContractEvidence.trustedSessionId : "",
+      rawSessionId: runtime === "gemini" ? (rawSessionId || providerOutputContractEvidence.sessionId) : "",
       usage,
       providerOutputContractEvidence,
     };

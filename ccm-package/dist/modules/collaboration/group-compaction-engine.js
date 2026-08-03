@@ -34,6 +34,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.buildGroupPressureAccountingSelection = buildGroupPressureAccountingSelection;
 exports.normalizeHookAnchor = normalizeHookAnchor;
 exports.extractHookAnchors = extractHookAnchors;
 exports.buildCompactionTimeline = buildCompactionTimeline;
@@ -74,6 +75,34 @@ const session_memory_window_1 = require("../../system/session-memory-window");
 const group_session_lifecycle_head_1 = require("./group-session-lifecycle-head");
 const session_summary_secondary_review_1 = require("../../system/session-summary-secondary-review");
 // ===== merged from group-compaction-engine-part-01.ts =====
+const GROUP_CONTEXT_FIXED_BUCKETS = ["system", "tools", "rules", "skills", "mcpTools", "subagentDefinitions"];
+function buildGroupPressureAccountingSelection(triggerPayload, providerUsageBaseline, groupId, groupSessionId) {
+    const triggerFixedTokens = GROUP_CONTEXT_FIXED_BUCKETS
+        .reduce((sum, key) => sum + Math.max(0, Number(triggerPayload?.tokenBreakdown?.[key] || 0)), 0);
+    const providerAccountingPayload = providerUsageBaseline?.valid === true
+        && providerUsageBaseline.event?.token_breakdown
+        && Number(providerUsageBaseline.event?.accounting_total_tokens || 0) > 0
+        ? {
+            schema: "ccm-model-visible-payload-accounting-v1",
+            scope: "group",
+            sessionId: `${groupId}:${groupSessionId}`,
+            tokenBreakdown: { ...providerUsageBaseline.event.token_breakdown },
+            totalTokens: Number(providerUsageBaseline.event.accounting_total_tokens || 0),
+            payloadChecksum: String(providerUsageBaseline.event.payload_checksum || ""),
+            fixedContextChecksum: String(providerUsageBaseline.event.fixed_context_checksum || ""),
+            contentStored: false,
+        }
+        : null;
+    const useProviderAccounting = !!providerAccountingPayload && triggerFixedTokens <= 0;
+    return {
+        triggerFixedTokens,
+        providerAccountingPayload,
+        measurementPayload: useProviderAccounting ? null : triggerPayload,
+        persistedAccounting: useProviderAccounting
+            ? providerAccountingPayload
+            : (0, session_compaction_core_1.modelVisiblePayloadAccounting)(triggerPayload),
+    };
+}
 function normalizeHookAnchor(raw, index, type = "user_requirement") {
     const text = (0, group_compaction_projections_1.compactText)(raw?.text || raw?.requirement || raw?.value || raw, 2000);
     if (!text)
@@ -715,6 +744,11 @@ async function compactGroupConversationMemory(input) {
             subagentDefinitions: input.config?.modelVisibleSubagentDefinitions || input.config?.model_visible_subagent_definitions || null,
         },
     });
+    const pressureAccounting = buildGroupPressureAccountingSelection(triggerPayload, providerUsageBaseline, groupId, groupSessionId);
+    const { triggerFixedTokens, providerAccountingPayload } = pressureAccounting;
+    // A background post-turn pressure sample may not receive the main Agent's fixed
+    // prompt and tool catalog. Do not let that message-only projection invalidate or
+    // overwrite the last complete Provider payload accounting.
     const contextTokenMeasurement = (0, session_compaction_core_1.measureSessionContextTokens)({
         scope: "group",
         sessionId: `${groupId}:${groupSessionId}`,
@@ -728,8 +762,19 @@ async function compactGroupConversationMemory(input) {
         provider: expectedProvider,
         model: String(input.config?.model || ""),
         boundaryGeneration: Math.max(0, Number(previousState.boundaryGeneration || previousState.boundary_generation || 0)),
-        modelVisiblePayload: triggerPayload,
+        modelVisiblePayload: pressureAccounting.measurementPayload,
     });
+    if (providerAccountingPayload && triggerFixedTokens <= 0) {
+        contextTokenMeasurement.activeTokens = Math.max(Number(contextTokenMeasurement.activeTokens || 0), Number(providerAccountingPayload.totalTokens || 0));
+        contextTokenMeasurement.estimatedFixedTokens = Math.max(Number(contextTokenMeasurement.estimatedFixedTokens || 0), Object.entries(providerAccountingPayload.tokenBreakdown)
+            .filter(([key]) => ["system", "tools", "rules", "skills", "mcpTools", "subagentDefinitions"].includes(key))
+            .reduce((sum, [, value]) => sum + Math.max(0, Number(value || 0)), 0));
+        contextTokenMeasurement.method = "provider_usage_plus_complete_payload_accounting";
+        contextTokenMeasurement.modelVisiblePayload = null;
+        contextTokenMeasurement.payloadChecksum = providerAccountingPayload.payloadChecksum;
+        contextTokenMeasurement.fixedContextChecksum = providerAccountingPayload.fixedContextChecksum;
+    }
+    const persistedTriggerAccounting = pressureAccounting.persistedAccounting;
     const providerObservedCorrection = Math.max(0, contextTokenMeasurement.activeTokens - estimatedActiveTokens);
     const activeTokens = contextTokenMeasurement.activeTokens;
     const triggerTokens = (0, group_compaction_strategy_1.getGroupAutoCompactThreshold)(input.config);
@@ -752,8 +797,8 @@ async function compactGroupConversationMemory(input) {
             lastPressureSampleAt: now,
             tokenMeasurement: contextTokenMeasurement,
             token_measurement: contextTokenMeasurement,
-            modelVisiblePayload: (0, session_compaction_core_1.modelVisiblePayloadAccounting)(triggerPayload),
-            model_visible_payload: (0, session_compaction_core_1.modelVisiblePayloadAccounting)(triggerPayload),
+            modelVisiblePayload: persistedTriggerAccounting,
+            model_visible_payload: persistedTriggerAccounting,
         },
         messageCompression: {
             ...(memory?.messageCompression || {}),

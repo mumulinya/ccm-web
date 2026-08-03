@@ -12,12 +12,9 @@ import {
   renderWorkerContextPacket,
 } from "../../agents/runtime-kernel";
 import {
-  callAnthropicCompatibleChat,
   callAnthropicCompatibleJson,
-  callOpenAiCompatibleChat,
   callOpenAiCompatibleJson,
   extractJsonObject,
-  shouldUseAnthropic,
   type LlmTokenUsage,
 } from "./group-orchestrator-llm-client";
 import {
@@ -738,6 +735,8 @@ export type GroupOrchestratorInput = {
   workflow_decision?: WorkflowDecision | null;
   projectSourceEvidence?: any;
   project_source_evidence?: any;
+  mainAgentFirstTurnResult?: any;
+  main_agent_first_turn_result?: any;
   onDelta?: (delta: string) => void;
 };
 
@@ -808,27 +807,7 @@ export async function prepareExactGroupMainAgentInput(input: any, group: any, gr
 
 export async function runGroupOrchestratorCore(input: GroupOrchestratorInput) {
   const group = normalizeGroupOrchestrator(input.group);
-  let initialInput: GroupOrchestratorInput = { ...input, group };
-  if (input.ragContext === undefined && String(input.message || "").trim()) {
-    try {
-      const members = getRoutableMembers(group).map((member: any) => ({ name: member.project }));
-      const knowledge = await searchAgentKnowledge(buildGroupRagQuery(group, input), {
-        role: "group-main-agent",
-        project: getCoordinatorProject(group),
-        groupId: String(group.id || ""),
-        projects: members,
-      }, { limit: 6, maxContextChars: 18000 });
-      initialInput = {
-        ...initialInput,
-        ragContext: knowledge.context,
-        ragCitations: knowledge.citations,
-        ragScoped: knowledge.results.some(item => item.scope?.type !== "global"),
-      };
-    } catch (error: any) {
-      console.warn(`[群聊知识检索] 已使用无知识上下文继续：${error?.message || error}`);
-      initialInput = { ...initialInput, ragContext: "", ragCitations: [], ragScoped: false };
-    }
-  }
+  const initialInput: GroupOrchestratorInput = { ...input, group };
   const groupSessionId = String(initialInput.groupSessionId || initialInput.group_session_id || "").trim();
   const config = loadOrchestratorConfig();
   const configIssue = getLlmConfigIssue(config);
@@ -1067,73 +1046,39 @@ export function summarizeGroupOrchestratorProviderError(error: any) {
 
 
 
+export function streamCanonicalGroupReply(text: string, onDelta?: (delta: string) => void, maxChunkChars = 240) {
+  if (!onDelta) return 0;
+  const value = String(text || "").trim();
+  if (!value) return 0;
+  const chunks: string[] = [];
+  for (const paragraph of value.split(/(\n{2,})/)) {
+    if (!paragraph) continue;
+    if (paragraph.length <= maxChunkChars) {
+      chunks.push(paragraph);
+      continue;
+    }
+    const characters = Array.from(paragraph);
+    for (let offset = 0; offset < characters.length; offset += maxChunkChars) {
+      chunks.push(characters.slice(offset, offset + maxChunkChars).join(""));
+    }
+  }
+  chunks.forEach(chunk => onDelta(chunk));
+  return chunks.length;
+}
+
 export async function runGroupOrchestrator(input: GroupOrchestratorInput) {
   const startedAt = Date.now();
   const group = normalizeGroupOrchestrator(input.group);
   const groupSessionId = String((input as any).groupSessionId || (input as any).group_session_id || "");
   const coordinator = getCoordinatorMember(group);
   try {
-    let result: any = await runGroupOrchestratorCore(input);
+    const reusedFirstTurn = !!(input.mainAgentFirstTurnResult || input.main_agent_first_turn_result);
+    const result: any = input.mainAgentFirstTurnResult || input.main_agent_first_turn_result || await runGroupOrchestratorCore(input);
     const runtime = String((result as any)?.runtime || "");
     if (input.onDelta && !["llm-error", "llm-not-configured"].includes(runtime)) {
       const canonicalReply = String((result as any)?.content || "").trim();
       if (canonicalReply) {
-        const config = loadOrchestratorConfig();
-        let emitted = false;
-        let visibleUsage: LlmTokenUsage | null = null;
-        try {
-          const messages = [
-            {
-              role: "system",
-              content: "你是 CCM 群聊主 Agent 的正式回复输出层。完整保留给定正式回复中的事实、任务分派、验收标准、风险与待补充问题，仅改善自然语言可读性。不得增加未提供的事实，不得输出 JSON、内部协议、工具参数或分析过程，只输出面向用户的最终正文。",
-            },
-            {
-              role: "user",
-              content: JSON.stringify({ user_request: input.message, official_reply: canonicalReply }),
-            },
-          ];
-          const rendered = shouldUseAnthropic(config)
-            ? await callAnthropicCompatibleChat(config, {
-                messages,
-                maxTokens: 1800,
-                temperature: 0.2,
-                defaultTimeoutMs: 60_000,
-                httpErrorPrefix: "群聊主 Agent 正式回复流式输出失败",
-                stream: true,
-                onDelta: delta => {
-                  if (!delta) return;
-                  emitted = true;
-                  input.onDelta?.(delta);
-                },
-                onUsage: usage => { visibleUsage = usage; },
-                promptCacheTracking: { groupId: group.id, groupSessionId, source: "group_main_visible_reply" },
-              })
-            : await callOpenAiCompatibleChat(config, {
-                messages,
-                maxTokens: 1800,
-                temperature: 0.2,
-                defaultTimeoutMs: 60_000,
-                httpErrorPrefix: "群聊主 Agent 正式回复流式输出失败",
-                stream: true,
-                onDelta: delta => {
-                  if (!delta) return;
-                  emitted = true;
-                  input.onDelta?.(delta);
-                },
-                onUsage: usage => { visibleUsage = usage; },
-                promptCacheTracking: { groupId: group.id, groupSessionId, source: "group_main_visible_reply" },
-              });
-          if (String(rendered || "").trim()) {
-            result = {
-              ...result,
-              content: String(rendered).trim(),
-              usage: mergeLlmTokenUsage((result as any)?.usage, visibleUsage),
-            };
-          }
-        } catch (error: any) {
-          console.warn(`[群聊主 Agent] 正式回复流式输出失败：${error?.message || error}`);
-          if (!emitted) input.onDelta(canonicalReply);
-        }
+        streamCanonicalGroupReply(canonicalReply, input.onDelta);
       }
     }
     const workflowDecision = (result as any)?.workflowDecision || (result as any)?.analysis?.workflowDecision || null;
@@ -1144,7 +1089,7 @@ export async function runGroupOrchestrator(input: GroupOrchestratorInput) {
       modelDecision: workflowDecision,
     }).names;
     const finalRuntime = String((result as any)?.runtime || "");
-    recordMetric(coordinator.project, {
+    if (!reusedFirstTurn) recordMetric(coordinator.project, {
       success: !["llm-error", "llm-not-configured"].includes(finalRuntime),
       durationMs: Date.now() - startedAt,
       fileChangeCount: 0,

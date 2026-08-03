@@ -74,9 +74,13 @@
                   v-if="contextCompactionEvent?.insertIndex === i"
                   :event="contextCompactionEvent"
                 />
-                <div
+                <ConversationMessageShell
                   v-show="shouldShowGroupMessage(msg, i)"
                   :id="'gc-msg-' + i"
+                  :role="msg.role"
+                  :timestamp="msg.timestamp || msg.created_at || msg.createdAt"
+                  :structured="isPrimaryTaskCard(msg, i) || msg.type === 'project_task_intake' || msg.type === 'conflict_plan' || getWorkEvents(msg).length > 0 || Number(msg.fileChanges?.count || 0) > 0"
+                  :streaming="!!msg.streaming"
                   class="message"
                   :class="[
                     msg.role,
@@ -86,18 +90,13 @@
                     },
                   ]"
                 >
-                <ChatAvatar v-if="msg.role === 'user'" role="user" class="message-avatar" />
-                <ChatAvatar v-else-if="msg.role === 'assistant'" role="agent" class="message-avatar" />
                 <CommandResultCard v-if="msg.type === 'command_result'" :result="msg.commandResult" />
                 <!-- 思考过程消息 -->
-                <div v-else-if="msg.role === 'thinking'" class="thinking-bubble">
-                  <div class="thinking-header">
-                    <span class="thinking-icon">🧠</span>
-                    <span>正在处理...</span>
-                  </div>
-                  <div class="thinking-content">{{ msg.content }}</div>
-                  <span class="stream-cursor">▌</span>
-                </div>
+                <ConversationProcessingState
+                  v-else-if="msg.role === 'thinking'"
+                  title="群聊主 Agent 正在协调任务"
+                  :detail="msg.content || '正在理解需求、核对成员项目并更新执行计划。'"
+                />
                 <!-- 用户消息 -->
                 <div v-else-if="msg.role === 'user'" class="bubble">
                   <div v-html="highlightMentions(msg.content)"></div>
@@ -154,11 +153,7 @@
                   @open-pipeline="openPipelineViewer(msg)"
                   @open-file-diff="openFileDiff"
                 />
-                <MessageTimestamp
-                  class="msg-meta"
-                  :value="msg.timestamp || msg.created_at || msg.createdAt"
-                />
-                </div>
+                </ConversationMessageShell>
               </template>
               <ContextCompactionEvent
                 v-if="contextCompactionEvent?.insertIndex === messages.length"

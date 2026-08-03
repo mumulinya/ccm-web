@@ -1,4 +1,8 @@
 export declare function validatePetAssetManifest(root: string, expectedVersion: string): any;
+export declare function resolvePetAssetNpmInvocation(platform?: NodeJS.Platform): {
+    command: string;
+    prefixArgs: string[];
+};
 export declare function getPetAssetPackStatus(): {
     schema: string;
     package: string;

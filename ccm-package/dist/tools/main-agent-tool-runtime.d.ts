@@ -1,5 +1,6 @@
 import { type ToolGrantSet } from "./tool-authorization";
 import { type ToolScope } from "./tool-manager";
+import type { LoadedContextItemsV1 } from "../system/session-compaction-core";
 export type MainAgentToolRequest = {
     name: string;
     arguments: any;
@@ -32,6 +33,12 @@ export declare function buildMainAgentToolRuntimeContext(input: {
 }): MainAgentToolRuntimeContext;
 export declare function normalizeMainAgentToolRequests(value: any, limit?: number): MainAgentToolRequest[];
 export declare function mainAgentToolRequestFingerprint(request: MainAgentToolRequest): string;
+export declare function buildMainAgentLoadedContextItems(toolContext: MainAgentToolRuntimeContext, results?: any[], additionalSkills?: Array<{
+    name: string;
+    contentHash?: string;
+    checksum?: string;
+    loadLevel?: "catalog" | "body";
+}>): LoadedContextItemsV1;
 export declare function executeMainAgentToolRequests(input: {
     requests: MainAgentToolRequest[];
     toolContext: MainAgentToolRuntimeContext;

@@ -4,8 +4,8 @@ import LoadingSkeleton from '../common/LoadingSkeleton.vue'
 import TaskExperienceCard from '../tasks/TaskExperienceCard.vue'
 import MessageNavigator from '../common/MessageNavigator.vue'
 import CommandResultCard from '../common/CommandResultCard.vue'
-import ChatAvatar from '../common/ChatAvatar.vue'
-import MessageTimestamp from '../common/MessageTimestamp.vue'
+import ConversationMessageShell from '../common/ConversationMessageShell.vue'
+import ConversationProcessingState from '../common/ConversationProcessingState.vue'
 import {
   buildGlobalStreamCurrentTodoSummary,
   globalDispatchLaunchRows,
@@ -63,8 +63,8 @@ defineProps({
 
 <template>
       <div class="chat-body" :ref="setChatBody" @scroll="updateScrollState">
-        <div :ref="setChatContentInner" style="display: flex; flex-direction: column; gap: 24px; width: 100%;">
-          <div class="chat-flow" :key="currentSessionId" style="display: flex; flex-direction: column; gap: 24px; width: 100%;">
+        <div :ref="setChatContentInner" class="chat-content-inner">
+          <div class="chat-flow" :key="currentSessionId">
             <LoadingSkeleton v-if="!messages.length && isSending" :rows="5" />
             <EmptyState
               v-else-if="!messages.length"
@@ -72,16 +72,19 @@ defineProps({
               :title="draft ? '想让全局 Agent 做什么？' : '还没有消息'"
               :hint="draft ? '输入需求、粘贴图片或添加附件。发送第一条消息后，这个会话才会创建并进入列表。' : '在下方输入开始对话'"
             />
-            <div 
+            <ConversationMessageShell
               v-for="(msg, index) in messages" 
               :key="index"
               :id="'msg-' + index"
+              :role="msg.role"
+              :timestamp="msg.timestamp || msg.created_at || msg.createdAt"
+              :structured="!!msg.type && msg.type !== 'text'"
+              :streaming="!!msg.streaming"
               class="chat-bubble-wrapper"
               :class="[msg.role, { 'search-hit': searchHighlightMsgIndex === index, 'structured-message': !!msg.type && msg.type !== 'text' }]"
               :data-message-type="msg.type || undefined"
               :data-message-id="msg.id || undefined"
             >
-            <ChatAvatar :role="msg.role === 'user' ? 'user' : 'agent'" :size="40" class="avatar" />
             <div class="chat-bubble">
               <!-- 助手消息判定 -->
               <template v-if="msg.role === 'assistant'">
@@ -411,12 +414,8 @@ defineProps({
                 </div>
               </div>
   
-              <MessageTimestamp
-                class="bubble-time"
-                :value="msg.timestamp || msg.created_at || msg.createdAt"
-              />
             </div>
-          </div>
+          </ConversationMessageShell>
           
           <!-- 执行系统动作 of 提示效果 -->
           <div v-if="executingAction" class="action-runner-indicator">
@@ -431,16 +430,14 @@ defineProps({
           </div>
           
           <!-- 正在分析状态 -->
-          <div v-if="isSending && (!currentSession?.messages?.length || currentSession.messages[currentSession.messages.length - 1].role !== 'assistant')" class="chat-bubble-wrapper assistant typing">
-            <ChatAvatar role="agent" :size="40" class="avatar" />
-            <div class="chat-bubble">
-              <div class="typing-dots">
-                <span></span>
-                <span></span>
-                <span></span>
-              </div>
-            </div>
-          </div>
+          <ConversationMessageShell
+            v-if="isSending && (!currentSession?.messages?.length || currentSession.messages[currentSession.messages.length - 1].role !== 'assistant')"
+            role="assistant"
+            streaming
+            class="chat-bubble-wrapper assistant typing"
+          >
+            <ConversationProcessingState title="全局 Agent 正在理解你的需求" detail="正在判断是直接回复、创建任务还是分派到对应工作区。" />
+          </ConversationMessageShell>
         </div>
       </div>
 

@@ -722,6 +722,49 @@
   background: var(--surface);
 }
 
+.project-messages-flow {
+  --conversation-locator-safe-area: 44px;
+  box-sizing: border-box;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  margin: 0 auto;
+  padding: 0 0 0 var(--conversation-locator-safe-area);
+}
+
+.project-manager .project-messages-flow > .conversation-message.message {
+  width: fit-content;
+  max-width: min(72%, 780px);
+  margin: 0 0 16px;
+  padding: 0;
+}
+
+.project-manager .project-messages-flow > .conversation-message.message.conversation-message--user {
+  margin-left: 0;
+  max-width: min(68%, 680px);
+}
+
+.project-manager .project-messages-flow > .conversation-message.message.conversation-message--structured {
+  width: min(86%, 960px);
+  max-width: min(86%, 960px);
+}
+
+.project-manager .project-messages-flow > .conversation-message .bubble {
+  max-width: 100%;
+  padding: 11px 14px;
+  border-radius: 10px;
+  font-size: 13.5px;
+  line-height: 1.65;
+}
+
+.project-manager .project-messages-flow > .conversation-message.conversation-message--user .bubble {
+  border-bottom-right-radius: 4px;
+}
+
+.project-manager .project-messages-flow > .conversation-message.conversation-message--assistant .bubble {
+  border-bottom-left-radius: 4px;
+}
+
 /* 移动端适配 */
 @media (max-width: 768px) {
   .project-manager .main-content { display:block; min-width:0; width:100%; }
@@ -729,8 +772,15 @@
   .content-header { padding:10px 12px; min-height:48px; }
   .mobile-session-trigger { display:inline-flex; }
   .messages { padding:14px 12px; }
+  .project-messages-flow { --conversation-locator-safe-area: 34px; }
   .message { max-width:94%; }
   .message .bubble { padding:10px 12px; border-radius:10px; font-size:14px; }
+  .project-manager .project-messages-flow > .conversation-message.message,
+  .project-manager .project-messages-flow > .conversation-message.message.conversation-message--user,
+  .project-manager .project-messages-flow > .conversation-message.message.conversation-message--structured {
+    max-width: 92%;
+  }
+  .project-manager .project-messages-flow > .conversation-message.message.conversation-message--structured { width: 92%; }
   .toolbar {
     flex-wrap: wrap;
     gap: 6px;

@@ -1,7 +1,7 @@
 <script setup>
 import { computed } from 'vue'
-import ChatAvatar from '../common/ChatAvatar.vue'
-import MessageTimestamp from '../common/MessageTimestamp.vue'
+import ConversationMessageShell from '../common/ConversationMessageShell.vue'
+import ConversationProcessingState from '../common/ConversationProcessingState.vue'
 import SessionContextUsage from '../common/SessionContextUsage.vue'
 import ConversationFindBar from '../common/ConversationFindBar.vue'
 import PermissionApprovalCards from '../common/PermissionApprovalCards.vue'

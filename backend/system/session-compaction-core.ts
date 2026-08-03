@@ -50,6 +50,31 @@ export type ModelVisiblePayloadSnapshot = {
   payloadChecksum: string;
   fixedContextChecksum: string;
   pendingRequestChecksum: string;
+  loadedContextItems: LoadedContextItemsV1;
+  loadedContextItemsChecksum: string;
+};
+
+export type LoadedContextItemV1 = {
+  kind: "skill" | "mcp";
+  name: string;
+  aliases: string[];
+  loadLevel: "catalog" | "body" | "schema" | "result";
+  checksum: string;
+};
+
+export type InvokedContextItemV1 = {
+  kind: "skill" | "mcp";
+  name: string;
+  aliases: string[];
+  ok: boolean;
+  resultChecksum: string;
+};
+
+export type LoadedContextItemsV1 = {
+  schema: "ccm-loaded-context-items-v1";
+  skills: LoadedContextItemV1[];
+  mcp: LoadedContextItemV1[];
+  invocations: InvokedContextItemV1[];
 };
 
 const MODEL_VISIBLE_FIXED_TOKEN_KEYS = [
@@ -148,7 +173,60 @@ type ContextComponentHints = {
   messageSkills?: any;
   messageMcpTools?: any;
   messageSubagentDefinitions?: any;
+  loadedContextItems?: Partial<LoadedContextItemsV1>;
 };
+
+function normalizedContextItemName(value: any) {
+  return String(value || "").trim().slice(0, 240);
+}
+
+function normalizeContextAliases(value: any, name: string) {
+  return Array.from(new Set([name, ...(Array.isArray(value) ? value : [])]
+    .map(normalizedContextItemName)
+    .filter(Boolean))).slice(0, 12);
+}
+
+function normalizeLoadedContextItems(value: any): LoadedContextItemsV1 {
+  const normalizeLoaded = (rows: any, kind: "skill" | "mcp") => (Array.isArray(rows) ? rows : [])
+    .map((row: any) => {
+      const name = normalizedContextItemName(row?.name);
+      if (!name) return null;
+      const requestedLevel = String(row?.loadLevel || row?.level || "");
+      const loadLevel = kind === "skill"
+        ? (requestedLevel === "body" || requestedLevel === "result" ? requestedLevel : "catalog")
+        : (requestedLevel === "result" ? "result" : "schema");
+      return {
+        kind,
+        name,
+        aliases: normalizeContextAliases(row?.aliases, name),
+        loadLevel,
+        checksum: normalizedContextItemName(row?.checksum || row?.contentHash || row?.content_hash),
+      } as LoadedContextItemV1;
+    })
+    .filter(Boolean)
+    .slice(0, 200) as LoadedContextItemV1[];
+  const invocations = (Array.isArray(value?.invocations) ? value.invocations : [])
+    .map((row: any) => {
+      const kind = String(row?.kind || "") === "skill" ? "skill" : String(row?.kind || "") === "mcp" ? "mcp" : "";
+      const name = normalizedContextItemName(row?.name || row?.itemName);
+      if (!kind || !name) return null;
+      return {
+        kind,
+        name,
+        aliases: normalizeContextAliases(row?.aliases, name),
+        ok: row?.ok === true,
+        resultChecksum: normalizedContextItemName(row?.resultChecksum || row?.result_checksum || row?.checksum),
+      } as InvokedContextItemV1;
+    })
+    .filter(Boolean)
+    .slice(0, 200) as InvokedContextItemV1[];
+  return {
+    schema: "ccm-loaded-context-items-v1",
+    skills: normalizeLoaded(value?.skills, "skill"),
+    mcp: normalizeLoaded(value?.mcp, "mcp"),
+    invocations,
+  };
+}
 
 function contextComponentKey(key: string) {
   const value = String(key || "").replace(/[^a-z0-9]/gi, "").toLowerCase();
@@ -227,6 +305,7 @@ export function buildModelVisiblePayloadSnapshot(input: {
   const structuredHints = structuredContextHints(input.system);
   const toolHints = toolContextHints(input.tools);
   const explicit = input.contextComponents || {};
+  const loadedContextItems = normalizeLoadedContextItems(explicit.loadedContextItems);
   const toolMcpTokens = explicit.mcpTools === undefined ? toolHints.mcpTools : valueTokens(explicit.mcpTools);
   const toolSubagentTokens = toolHints.subagentDefinitions;
   const toolPartition = partitionTokens(rawToolTokens, { mcpTools: toolMcpTokens, subagentDefinitions: toolSubagentTokens });
@@ -277,6 +356,8 @@ export function buildModelVisiblePayloadSnapshot(input: {
     payloadChecksum: checksum(payload),
     fixedContextChecksum: checksum(fixedContext),
     pendingRequestChecksum: input.currentRequest == null ? "" : checksum(input.currentRequest),
+    loadedContextItems,
+    loadedContextItemsChecksum: checksum(loadedContextItems),
   };
 }
 
@@ -296,6 +377,8 @@ export function modelVisiblePayloadAccounting(snapshot: ModelVisiblePayloadSnaps
     payloadChecksum: snapshot.payloadChecksum,
     fixedContextChecksum: snapshot.fixedContextChecksum,
     pendingRequestChecksum: snapshot.pendingRequestChecksum,
+    loadedContextItems: normalizeLoadedContextItems(snapshot.loadedContextItems),
+    loadedContextItemsChecksum: snapshot.loadedContextItemsChecksum || checksum(normalizeLoadedContextItems(snapshot.loadedContextItems)),
     contentStored: false,
   };
 }

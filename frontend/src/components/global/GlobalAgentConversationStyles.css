@@ -1253,3 +1253,86 @@
   width: 100%;
 }
 
+/* Unified conversation reading rhythm shared with project, group and music chat. */
+.chat-content-inner,
+.chat-flow {
+  box-sizing: border-box;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-self: center;
+  margin: 0 auto;
+  gap: 0;
+}
+
+.chat-flow {
+  --conversation-locator-safe-area: 44px;
+  padding: 0 0 0 var(--conversation-locator-safe-area);
+}
+
+.chat-flow > .conversation-message.chat-bubble-wrapper {
+  width: fit-content;
+  max-width: min(72%, 780px);
+  min-height: 0;
+  margin: 0 0 16px;
+  padding: 0;
+  gap: 10px;
+}
+
+.chat-flow > .conversation-message.chat-bubble-wrapper.user {
+  max-width: min(68%, 680px);
+}
+
+.chat-flow > .conversation-message.chat-bubble-wrapper.structured-message {
+  width: min(86%, 960px);
+  max-width: min(86%, 960px);
+}
+
+.chat-flow > .conversation-message :deep(.conversation-message__main) {
+  min-width: 0;
+}
+
+.chat-flow > .conversation-message .chat-bubble {
+  max-width: 100%;
+  padding: 11px 14px;
+  border-radius: 10px;
+  line-height: 1.65;
+}
+
+.chat-flow > .conversation-message.user .chat-bubble {
+  border-top-right-radius: 10px;
+  border-bottom-right-radius: 4px;
+}
+
+.chat-flow > .conversation-message.assistant .chat-bubble {
+  border-top-left-radius: 10px;
+  border-bottom-left-radius: 4px;
+}
+
+.chat-flow > .conversation-message.typing .conversation-processing {
+  width: min(430px, 100%);
+}
+
+@media (max-width: 900px) {
+  .chat-flow > .conversation-message.chat-bubble-wrapper,
+  .chat-flow > .conversation-message.chat-bubble-wrapper.user,
+  .chat-flow > .conversation-message.chat-bubble-wrapper.structured-message {
+    max-width: 88%;
+  }
+
+  .chat-flow > .conversation-message.chat-bubble-wrapper.structured-message {
+    width: 88%;
+  }
+}
+
+@media (max-width: 560px) {
+  .chat-body { padding: 14px 10px 20px; }
+  .chat-flow { --conversation-locator-safe-area: 34px; }
+  .chat-flow > .conversation-message.chat-bubble-wrapper,
+  .chat-flow > .conversation-message.chat-bubble-wrapper.user,
+  .chat-flow > .conversation-message.chat-bubble-wrapper.structured-message {
+    max-width: 94%;
+  }
+  .chat-flow > .conversation-message.chat-bubble-wrapper.structured-message { width: 94%; }
+}
+

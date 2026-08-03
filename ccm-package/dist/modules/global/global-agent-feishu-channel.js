@@ -40,7 +40,6 @@ const path = __importStar(require("path"));
 const utils_1 = require("../../core/utils");
 const feishu_1 = require("../collaboration/feishu");
 const source_ingestion_1 = require("../requirements/source-ingestion");
-const workflow_decision_1 = require("../../agents/workflow-decision");
 const project_runtime_1 = require("../projects/project-runtime");
 const feishu_access_1 = require("../collaboration/feishu-access");
 const feishu_channel_1 = require("../collaboration/feishu-channel");
@@ -49,7 +48,6 @@ const feishu_conversation_v2_1 = require("../collaboration/feishu-conversation-v
 function createGlobalAgentFeishuChannel(deps) {
     const { GLOBAL_AGENT_VISIBLE_RESULT_FALLBACK, appendGlobalActionAudit, appendGlobalAgentConversationMessage, appendTraceEvent, bindFeishuIdentifiersFromValue, bindFeishuTaskContext, cancelGlobalAgentRun, conversationTurnControl, createAgenticRuntime, ensureTraceId, feishuRuntimeEventPresentation, findWaitingGlobalAgentRun, formatMissionStatus, getConfigs, getFeishuMessageId, getGlobalAgentConversationMessages, getGlobalAgentRun, getGlobalDevelopmentMission, globalRunVisibleReply, isGlobalProgressStatusRequest, listGlobalAgentRuns, listTaskPermissionRequests, loadGroups, notifyFeishuTaskStage, postLocalApi, recordFeishuInbound, resolveFeishuGlobalAgentSessionId, resumeGlobalAgentRun, runAgenticGlobalRequest, sendFeishuReportMessage, steerGlobalAgentRun } = deps;
     const resolveUserAccess = deps.resolveFeishuUserAccess || feishu_access_1.resolveFeishuUserAccess;
-    const decideWorkflow = deps.decideWorkflowWithModel || workflow_decision_1.decideWorkflowWithModel;
     const resolveBoundFeishuGlobalSessionId = typeof deps.resolveBoundFeishuGlobalSessionId === "function"
         ? deps.resolveBoundFeishuGlobalSessionId
         : (_payload, fallbackSessionId = "") => String(fallbackSessionId || "");
@@ -565,37 +563,11 @@ function createGlobalAgentFeishuChannel(deps) {
         }
         const sessionRuns = listGlobalAgentRuns({ sessionId: conversationId, limit: 100 });
         const activeRun = sessionRuns.find((run) => String(run?.status || "") === "running") || null;
-        const trackedRun = activeRun || sessionRuns.find((run) => ["supervising", "paused", "waiting_confirmation", "waiting_clarification", "blocked"].includes(String(run?.status || ""))) || null;
-        if (trackedRun && command.kind === "normal") {
-            const workflow = await decideWorkflow({
-                message: command.message,
-                scope: "global",
-                context: { channel: "feishu", current_goal: trackedRun.original_user_message || trackedRun.user_message || "", phase: trackedRun.status },
-            });
-            if (workflow.readAction === "inspect_status" || workflow.intentKind === "status") {
-                const reply = globalRunVisibleReply(trackedRun, "当前任务仍在处理中。");
-                appendGlobalAgentConversationMessage(conversationId, "user", command.message, "feishu");
-                appendGlobalAgentConversationMessage(conversationId, "assistant", reply, "feishu");
-                const delivery = options.sendReport !== false
-                    ? await sendFeishuConversationReply({ conversationId, title: "全局 Agent 进度", markdown: reply, traceId: options.traceId, dedupeSuffix: `status:${messageId || trackedRun.id}` })
-                    : null;
-                return { reply, status_query: true, run_id: trackedRun.id, report_sent: options.sendReport !== false, delivery, origin_receipt: originReceipt };
-            }
-        }
         if (!access.canOperate && activeRun && command.kind === "normal") {
             const reply = "当前飞书用户只有查看权限，不能向正在执行的任务追加或排队新要求。";
             if (options.sendReport !== false)
                 await sendFeishuConversationReply({ conversationId, title: "全局 Agent 访问受限", markdown: reply, traceId: options.traceId, dedupeSuffix: `queue-denied:${messageId}` });
             return { reply, denied: true, report_sent: options.sendReport !== false };
-        }
-        if (!access.canOperate && !activeRun && command.kind === "normal") {
-            const workflow = await decideWorkflow({ message: command.message, scope: "global", context: { channel: "feishu", access_role: access.role } });
-            if (workflow.actionRequired || workflow.intentKind === "management") {
-                const reply = "当前飞书用户只有查看权限，可以询问和查看状态，但不能创建、修改或管理任务。";
-                if (options.sendReport !== false)
-                    await sendFeishuConversationReply({ conversationId, title: "全局 Agent 访问受限", markdown: reply, traceId: options.traceId, dedupeSuffix: `workflow-denied:${messageId}` });
-                return { reply, denied: true, report_sent: options.sendReport !== false };
-            }
         }
         if (command.kind === "stop") {
             if (activeRun?.id)
@@ -622,13 +594,8 @@ function createGlobalAgentFeishuChannel(deps) {
                 metadata: { source: "feishu-control-bot", trace_id: options.traceId || "" },
             });
             try {
-                const continuationKind = (await decideWorkflow({
-                    message: command.message,
-                    scope: "global",
-                    context: { current_goal: activeRun.original_user_message || activeRun.user_message || "", phase: activeRun.status },
-                })).continuationKind;
                 steerGlobalAgentRun(activeRun.id, command.message, {
-                    kind: continuationKind,
+                    kind: "supplement",
                     source: "feishu_mid_turn",
                     requestId: queued.turn.request_id,
                 });

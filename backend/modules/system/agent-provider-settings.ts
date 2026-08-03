@@ -1,8 +1,9 @@
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { randomUUID } from "crypto";
+import { createHash, randomUUID } from "crypto";
 import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "child_process";
+import { createRequire } from "module";
 import { isCredentialReference, protectCredential, resolveCredential } from "../../core/credential-store";
 import { loadCcSwitchClaudeProvider } from "./cc-switch-provider";
 import {
@@ -87,6 +88,7 @@ function setInstallState(provider: DevelopmentAgentProvider, state: InstallState
 }
 const LOGIN_OUTPUT_LIMIT = 24_000;
 const LOGIN_SESSION_TTL_MS = 10 * 60 * 1000;
+const GEMINI_LOGIN_PREPARATION_TIMEOUT_MS = 45_000;
 
 type LoginSessionStatus = "starting" | "awaiting_browser" | "awaiting_code" | "exchanging" | "succeeded" | "failed";
 type AgentProviderLoginSession = {
@@ -102,11 +104,27 @@ type AgentProviderLoginSession = {
   error: string;
   command: string;
   output: string;
+  credentialFingerprintAtStart: string;
+  providerReportedSuccess: boolean;
+  codeSubmitted: boolean;
+  progressTail: string;
+  credentialBackupPath?: string;
+  credentialSuccessSnapshotPath?: string;
   pid?: number;
   child?: ChildProcessWithoutNullStreams;
+  pty?: {
+    pid: number;
+    write(data: string): void;
+    kill(signal?: string): void;
+    onData(listener: (data: string) => void): { dispose(): void };
+    onExit(listener: (event: { exitCode: number; signal?: number }) => void): { dispose(): void };
+  };
 };
 
 const LOGIN_SESSIONS = new Map<string, AgentProviderLoginSession>();
+const LOGIN_PREPARATION_TIMERS = new Map<string, NodeJS.Timeout>();
+const runtimeRequire = createRequire(__filename);
+let cachedLoginPtyModule: any | null | undefined;
 const AGENT_TEST_TIMEOUT_MS = 90_000;
 const AGENT_TEST_OUTPUT_LIMIT = 128 * 1024;
 const AGENT_TESTS_IN_FLIGHT = new Map<string, Promise<any>>();
@@ -139,6 +157,13 @@ function writeSettings(settings: StoredAgentProviderSettings) {
   try { fs.chmodSync(SETTINGS_FILE, 0o600); } catch {}
 }
 
+function normalizeAntigravityModelId(value: unknown) {
+  const model = String(value || "").trim();
+  if (model === "gemini-3.5-flash") return "gemini-3.5-flash-high";
+  if (["gemini-3.1-pro", "gemini-3.1-pro-preview"].includes(model)) return "gemini-3.1-pro-high";
+  return model;
+}
+
 function normalizeStored(raw: any): StoredAgentProviderSettings {
   const base = defaults();
   const claudeRaw = raw?.claudecode && typeof raw.claudecode === "object" ? raw.claudecode : {};
@@ -146,7 +171,7 @@ function normalizeStored(raw: any): StoredAgentProviderSettings {
     version: 4,
     codex: { enabled: raw?.codex?.enabled !== false, authMode: "cli_login", model: String(raw?.codex?.model || "").trim() },
     cursor: { enabled: raw?.cursor?.enabled !== false, authMode: "cli_login", model: String(raw?.cursor?.model || "").trim() },
-    gemini: { enabled: raw?.gemini?.enabled !== false, authMode: "cli_login", model: String(raw?.gemini?.model || "").trim() },
+    gemini: { enabled: raw?.gemini?.enabled !== false, authMode: "cli_login", model: normalizeAntigravityModelId(raw?.gemini?.model) },
     opencode: { enabled: raw?.opencode?.enabled !== false, authMode: "cli_login", model: String(raw?.opencode?.model || "").trim() },
     claudecode: {
       enabled: claudeRaw.enabled === true,
@@ -224,7 +249,7 @@ export function saveAgentProviderSettings(updates: any) {
   if (updates?.cursor?.enabled !== undefined) next.cursor.enabled = updates.cursor.enabled === true;
   if (updates?.cursor?.model !== undefined) next.cursor.model = String(updates.cursor.model || "").trim();
   if (updates?.gemini?.enabled !== undefined) next.gemini.enabled = updates.gemini.enabled === true;
-  if (updates?.gemini?.model !== undefined) next.gemini.model = String(updates.gemini.model || "").trim();
+  if (updates?.gemini?.model !== undefined) next.gemini.model = normalizeAntigravityModelId(updates.gemini.model);
   if (updates?.opencode?.enabled !== undefined) next.opencode.enabled = updates.opencode.enabled === true;
   if (updates?.opencode?.model !== undefined) next.opencode.model = String(updates.opencode.model || "").trim();
   const claude = updates?.claudecode;
@@ -275,9 +300,11 @@ export function saveAgentProviderSettings(updates: any) {
     updatedAt: next.updatedAt,
   };
   writeSettings(stored);
-  for (const provider of ["codex", "cursor", "gemini", "opencode", "claudecode"] as DevelopmentAgentProvider[]) {
-    if (updates?.[provider]) revokeDevelopmentAgentAuthEvidence(provider, "Agent配置已修改，需要重新验证");
-  }
+  // CLI OAuth login belongs to the native Agent and is independent from the
+  // model selected in CCM. Saving a model must not turn a valid login into a
+  // logged-out state. Claude API configuration is the only credential-bearing
+  // configuration managed by this form.
+  if (updates?.claudecode) revokeDevelopmentAgentAuthEvidence("claudecode", "Agent配置已修改，需要重新验证");
   markAgentProviderStatusesStale();
   invalidateAgentModelCatalog();
   return loadAgentProviderSettings();
@@ -347,6 +374,18 @@ export function resolveCursorAgentCommand() {
     }
   }
   return "cursor-agent";
+}
+
+export function resolveAntigravityCliCommand() {
+  const explicit = String(process.env.CCM_ANTIGRAVITY_CLI_COMMAND || "").trim();
+  if (explicit) return explicit;
+  if (commandExists("agy")) return resolveWindowsCommandPath("agy");
+  if (process.platform === "win32") {
+    const localAppData = String(process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local"));
+    const candidate = path.join(localAppData, "agy", "bin", "agy.exe");
+    if (commandExists(candidate)) return candidate;
+  }
+  return "agy";
 }
 
 function commandVersion(command: string) {
@@ -458,20 +497,71 @@ function jsonCredentialPresent(files: string[]) {
   return false;
 }
 
-function geminiCredentialPresent() {
-  if (process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.GOOGLE_APPLICATION_CREDENTIALS) return true;
-  return jsonCredentialPresent([
-    path.join(os.homedir(), ".gemini", "oauth_creds.json"),
-    path.join(os.homedir(), ".config", "gcloud", "application_default_credentials.json"),
-  ]);
+function antigravityCredentialPresent() {
+  const evidence = getDevelopmentAgentAuthEvidence("gemini");
+  if (evidence?.valid) return true;
+  const roots = [
+    path.join(os.homedir(), ".gemini", "antigravity"),
+    path.join(os.homedir(), ".gemini", "antigravity-cli"),
+  ];
+  return roots.some(root => {
+    try {
+      return fs.statSync(root).isDirectory() && fs.readdirSync(root).length > 0;
+    } catch { return false; }
+  });
+}
+
+function geminiCredentialPresent() { return antigravityCredentialPresent(); }
+
+function credentialFileFingerprint(file: string) {
+  try {
+    const stat = fs.statSync(file);
+    if (!stat.isFile()) return "";
+    const content = fs.readFileSync(file);
+    const parsed = JSON.parse(content.toString("utf-8"));
+    if (!parsed || typeof parsed !== "object" || Object.keys(parsed).length === 0) return "";
+    return createHash("sha256")
+      .update(path.resolve(file))
+      .update("\0")
+      .update(String(stat.size))
+      .update("\0")
+      .update(String(stat.mtimeMs))
+      .update("\0")
+      .update(content)
+      .digest("hex");
+  } catch {
+    return "";
+  }
+}
+
+function providerCredentialFingerprint(provider: DevelopmentAgentProvider) {
+  const files = provider === "codex"
+    ? [path.join(os.homedir(), ".codex", "auth.json")]
+    : provider === "gemini"
+      ? [
+          path.join(os.homedir(), ".gemini", "antigravity", "antigravity_state.pbtxt"),
+          path.join(os.homedir(), ".gemini", "antigravity", "installation_id"),
+          path.join(os.homedir(), ".gemini", "antigravity-cli", "settings.json"),
+        ]
+      : provider === "opencode"
+        ? [
+            path.join(os.homedir(), ".local", "share", "opencode", "auth.json"),
+            path.join(os.homedir(), ".config", "opencode", "auth.json"),
+          ]
+        : [];
+  const fileEvidence = files.map(credentialFileFingerprint).filter(Boolean).sort();
+  const environmentEvidence = provider === "gemini"
+    ? [process.env.CCM_ANTIGRAVITY_CLI_COMMAND ? "antigravity_cli_command" : ""].filter(Boolean)
+    : [];
+  return createHash("sha256")
+    .update(JSON.stringify({ provider, fileEvidence, environmentEvidence }))
+    .digest("hex");
 }
 
 function geminiCredentialSources() {
   const sources: string[] = [];
-  if (fs.existsSync(path.join(os.homedir(), ".gemini", "oauth_creds.json"))) sources.push("gemini_oauth");
-  if (process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY) sources.push("environment_api_key");
-  if (process.env.GOOGLE_APPLICATION_CREDENTIALS) sources.push("service_account");
-  if (fs.existsSync(path.join(os.homedir(), ".config", "gcloud", "application_default_credentials.json"))) sources.push("gcloud_adc");
+  if (fs.existsSync(path.join(os.homedir(), ".gemini", "antigravity"))) sources.push("antigravity_secure_state");
+  if (fs.existsSync(path.join(os.homedir(), ".gemini", "antigravity-cli"))) sources.push("antigravity_cli_settings");
   return sources;
 }
 
@@ -629,18 +719,19 @@ async function cursorStatusAsync(command: string, installed?: boolean) {
 
 function collectAgentProviderProbes(): AgentProviderProbeResults {
   const cursorCommand = resolveCursorAgentCommand();
+  const antigravityCommand = resolveAntigravityCliCommand();
   return {
     cursorCommand,
     cursorInstalled: commandExists(cursorCommand),
     cursor: cursorStatus(cursorCommand),
     codexInstalled: commandExists("codex"),
-    geminiInstalled: commandExists("gemini"),
+    geminiInstalled: commandExists(antigravityCommand),
     openCodeInstalled: commandExists("opencode"),
     claudeInstalled: commandExists("claude"),
     versions: {
       codex: commandVersion("codex"),
       cursor: commandVersion(cursorCommand),
-      gemini: commandVersion("gemini"),
+      gemini: commandVersion(antigravityCommand),
       opencode: commandVersion("opencode"),
       claude: commandVersion("claude"),
     },
@@ -649,11 +740,12 @@ function collectAgentProviderProbes(): AgentProviderProbeResults {
 
 async function collectAgentProviderProbesAsync(): Promise<AgentProviderProbeResults> {
   const cursorCommand = await resolveCursorAgentCommandAsync();
+  const antigravityCommand = resolveAntigravityCliCommand();
   // 阶段一：轻量存在性探测（where.exe / stat）并行执行
   const [cursorInstalled, codexInstalled, geminiInstalled, openCodeInstalled, claudeInstalled] = await Promise.all([
     commandExistsAsync(cursorCommand),
     commandExistsAsync("codex"),
-    commandExistsAsync("gemini"),
+    commandExistsAsync(antigravityCommand),
     commandExistsAsync("opencode"),
     commandExistsAsync("claude"),
   ]);
@@ -662,7 +754,7 @@ async function collectAgentProviderProbesAsync(): Promise<AgentProviderProbeResu
     cursorStatusAsync(cursorCommand, cursorInstalled),
     commandVersionAsync("codex", codexInstalled),
     commandVersionAsync(cursorCommand, cursorInstalled),
-    commandVersionAsync("gemini", geminiInstalled),
+    commandVersionAsync(antigravityCommand, geminiInstalled),
     commandVersionAsync("opencode", openCodeInstalled),
     commandVersionAsync("claude", claudeInstalled),
   ]);
@@ -686,7 +778,19 @@ function assembleAgentProviderStatuses(probes: AgentProviderProbeResults) {
   const effectiveClaude = resolveEffectiveClaudeProviderSettings(config);
   const claudeReady = effectiveClaude.enabled && !!effectiveClaude.apiUrl && !!effectiveClaude.model && !!effectiveClaude.apiKey;
   const authState = (provider: DevelopmentAgentProvider, detected: boolean, account: string, version: string, model = "") => {
-    const evidence = getDevelopmentAgentAuthEvidence(provider, { account, cliVersion: version, model });
+    let evidence = getDevelopmentAgentAuthEvidence(provider, { account, cliVersion: version, model });
+    if (detected && !evidence?.valid && provider !== "gemini") {
+      evidence = recordDevelopmentAgentAuthEvidence({
+        provider,
+        status: "verified",
+        source: "credential_file",
+        account,
+        cliVersion: version,
+        model,
+        detail: "已读取本机持久化登录凭据",
+      }) as any;
+      (evidence as any).valid = true;
+    }
     return {
       authState: evidence?.valid ? "logged_in" : detected ? "credential_detected" : "logged_out",
       authEvidence: publicDevelopmentAgentAuthEvidence(evidence),
@@ -733,12 +837,12 @@ function assembleAgentProviderStatuses(probes: AgentProviderProbeResults) {
     },
     gemini: {
       provider: "gemini",
-      command: "gemini",
+      command: resolveAntigravityCliCommand(),
       installed: probes.geminiInstalled,
       version: probes.versions.gemini,
       ...geminiState,
       account: geminiIdentity,
-      detail: geminiState.authState === "logged_in" ? "Gemini认证已验证" : geminiAuth ? "已发现Gemini凭据，运行测试后才能用于任务" : "请启动Gemini CLI完成登录",
+      detail: geminiState.authState === "logged_in" ? "Antigravity认证已验证" : geminiAuth ? "已发现Antigravity本机状态，运行测试后才能用于任务" : "请启动Antigravity CLI完成登录",
       install: installState("gemini"),
     },
     opencode: {
@@ -846,7 +950,7 @@ export function buildAgentProviderLoginSpec(provider: DevelopmentAgentProvider, 
     return { command, args: ["login"], env: { NO_OPEN_BROWSER: "1" }, requiresCode: false };
   }
   if (provider === "gemini") {
-    return { command: "gemini", args: [], env: { NO_BROWSER: "true" }, requiresCode: true };
+    return { command: resolveAntigravityCliCommand(), args: [], env: {}, requiresCode: false };
   }
   if (provider === "opencode") {
     const providerId = String(options.providerId || "").trim();
@@ -870,6 +974,21 @@ function shellCommandText(spec: { command: string; args: string[] }) {
   return [spec.command, ...spec.args].map(quote).join(" ");
 }
 
+function launchAntigravityInteractive(command: string) {
+  if (process.env.CCM_ANTIGRAVITY_DISABLE_INTERACTIVE_LAUNCH === "1") return false;
+  if (process.platform !== "win32") return false;
+  const escaped = command.replace(/'/g, "''");
+  const script = `$Host.UI.RawUI.WindowTitle='CCM - Antigravity CLI 登录'; & '${escaped}'`;
+  const child = spawn("powershell.exe", ["-NoLogo", "-NoExit", "-Command", script], {
+    detached: true,
+    windowsHide: false,
+    stdio: "ignore",
+    env: { ...process.env },
+  });
+  child.unref();
+  return true;
+}
+
 function appendInstallOutput(provider: DevelopmentAgentProvider, chunk: any) {
   const current = installState(provider);
   const combined = `${current.output || ""}${String(chunk || "")}`;
@@ -890,9 +1009,16 @@ export function buildAgentProviderInstallSpec(provider: DevelopmentAgentProvider
       : { command: "npm", args: ["install", "--global", "@anthropic-ai/claude-code@latest"] };
   }
   if (provider === "gemini") {
+    if (installed) return { command: resolveAntigravityCliCommand(), args: ["update"] };
     return process.platform === "win32"
-      ? { command: process.env.ComSpec || "cmd.exe", args: ["/d", "/s", "/c", "npm install --global @google/gemini-cli@latest"] }
-      : { command: "npm", args: ["install", "--global", "@google/gemini-cli@latest"] };
+      ? {
+          command: "powershell.exe",
+          args: [
+            "-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command",
+            "$ProgressPreference='SilentlyContinue'; Invoke-RestMethod -Uri 'https://antigravity.google/cli/install.ps1' | Invoke-Expression",
+          ],
+        }
+      : { command: "sh", args: ["-lc", "curl -fsSL https://antigravity.google/cli/install.sh | bash"] };
   }
   if (provider === "opencode") {
     return process.platform === "win32"
@@ -932,7 +1058,7 @@ function formatInstallProcessError(
   const providerLabel = ({
     codex: "Codex CLI",
     cursor: "Cursor Agent",
-    gemini: "Gemini CLI",
+    gemini: "Antigravity CLI",
     opencode: "OpenCode",
     claudecode: "Claude Code",
   } as Record<DevelopmentAgentProvider, string>)[provider];
@@ -954,7 +1080,9 @@ export function startAgentProviderInstall(providerValue: string) {
   // 用实时的轻量探测代替可能过期的缓存快照
   const installed = provider === "cursor"
     ? commandExists(resolveCursorAgentCommand())
-    : commandExists(provider === "claudecode" ? "claude" : provider);
+    : provider === "gemini"
+      ? commandExists(resolveAntigravityCliCommand())
+      : commandExists(provider === "claudecode" ? "claude" : provider);
   const operation: "install" | "update" = installed ? "update" : "install";
   const spec = buildAgentProviderInstallSpec(provider, installed);
   const startedAt = new Date().toISOString();
@@ -1031,6 +1159,18 @@ function parseLineModels(output: string) {
   return models.slice(0, 240);
 }
 
+export function parseAntigravityModels(output: string) {
+  const seen = new Set<string>();
+  const models: Array<{ id: string; label: string }> = [];
+  for (const line of stripTerminalFormatting(String(output || "")).split(/\r?\n/)) {
+    const id = line.trim().split(/\s+/)[0] || "";
+    if (!id || id.startsWith("[") || !/^[A-Za-z0-9][A-Za-z0-9._:/+@\-]{1,179}$/.test(id) || seen.has(id)) continue;
+    seen.add(id);
+    models.push({ id, label: id });
+  }
+  return models.slice(0, 240);
+}
+
 function encodeCliArgs(args: string[]) {
   return Buffer.from(JSON.stringify(args), "utf-8").toString("base64");
 }
@@ -1045,7 +1185,7 @@ export function buildAgentProviderTestSpec(providerValue: string, modelValue = "
   const cliHelper = path.join(__dirname, "..", "..", "agents", "cli-prompt-runner.js");
   if (provider === "codex") {
     const helper = path.join(__dirname, "..", "..", "agents", "codex-prompt-runner.js");
-    const args = ["exec", ...modelArgs, "--sandbox", "read-only", "--ephemeral", "--skip-git-repo-check", "-"];
+    const args = ["exec", ...modelArgs, "--sandbox", "read-only", "--ephemeral", "--skip-git-repo-check", "--json", "-"];
     return { command: process.execPath, args: [helper, promptFile, "", encodeCliArgs(args)], env: {} };
   }
   if (provider === "cursor") {
@@ -1053,8 +1193,8 @@ export function buildAgentProviderTestSpec(providerValue: string, modelValue = "
     return { command: process.execPath, args: [cliHelper, promptFile, resolveCursorAgentCommand(), encodeCliArgs(args)], env: {} };
   }
   if (provider === "gemini") {
-    const args = ["--approval-mode", "default", "--skip-trust", "--output-format", "json", ...modelArgs, "--prompt"];
-    return { command: process.execPath, args: [cliHelper, promptFile, "gemini", encodeCliArgs(args)], env: {} };
+    const args = ["--mode", "plan", "--output-format", "json", "--print-timeout", "90s", ...modelArgs, "--print"];
+    return { command: process.execPath, args: [cliHelper, promptFile, resolveAntigravityCliCommand(), encodeCliArgs(args)], env: {} };
   }
   if (provider === "opencode") {
     const args = ["run", "--format", "json", "--auto", ...modelArgs];
@@ -1072,6 +1212,25 @@ function redactAgentTestError(value: unknown) {
     .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [redacted]")
     .replace(/\b(?:sk|key|token)-[A-Za-z0-9_-]{12,}\b/gi, "[redacted]")
     .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g, "[redacted]"));
+}
+
+export function summarizeAgentProviderTestFailure(stderrValue: unknown, stdoutValue: unknown = "", fallback = "Agent 未返回预期测试响应") {
+  const output = stripTerminalFormatting(`${String(stderrValue || "")}\n${String(stdoutValue || "")}`);
+  if (/IneligibleTierError|UNSUPPORTED_CLIENT/i.test(output)) {
+    return "检测到已停止服务的旧Gemini CLI个人版客户端（UNSUPPORTED_CLIENT）。请安装并使用Antigravity CLI后重试";
+  }
+  const prioritized = [
+    output.match(/reasonMessage:\s*['"]([^'"\r\n]+)['"]/i)?.[1],
+    output.match(/(?:Error authenticating|Authentication failed|Unauthorized|Forbidden):\s*([^\r\n]+)/i)?.[1],
+    ...output.split(/\r?\n/)
+      .map(line => line.trim())
+      .filter(line => line
+        && !/^Warning:/i.test(line)
+        && !/^\s*at\s+/i.test(line)
+        && !/^[{}\[\],]+$/.test(line)
+        && !/^Ripgrep is not available/i.test(line)),
+  ].filter(Boolean);
+  return redactAgentTestError(prioritized[0] || fallback) || fallback;
 }
 
 function structuredAgentReplies(provider: DevelopmentAgentProvider, rawOutput: string) {
@@ -1149,7 +1308,11 @@ async function runAgentProviderTest(provider: DevelopmentAgentProvider, model: s
       ? "Agent 已完成最小只读响应测试"
       : execution.timedOut
         ? "Agent 测试超过 90 秒，已终止"
-        : redactAgentTestError(execution.stderr || execution.stdout || `Agent 退出码 ${execution.code ?? "unknown"}`) || "Agent 未返回预期测试响应";
+        : summarizeAgentProviderTestFailure(
+            execution.stderr,
+            execution.stdout,
+            `Agent 退出码 ${execution.code ?? "unknown"}`,
+          );
     const result = {
       provider,
       usable,
@@ -1159,16 +1322,21 @@ async function runAgentProviderTest(provider: DevelopmentAgentProvider, model: s
       detail,
       checkedAt: new Date().toISOString(),
     };
-    recordDevelopmentAgentAuthEvidence({
-      provider,
-      status: usable ? "verified" : "failed",
-      source: provider === "claudecode" ? "api_challenge" : "model_challenge",
-      account: status?.account,
-      model,
-      cliVersion: status?.version,
-      detail,
-      ttlMs: usable ? undefined : 15 * 60 * 1000,
-    });
+    // A model probe verifies runtime usability, not whether a native OAuth
+    // credential exists. Never erase a valid CLI login because a selected
+    // model, network request, or command invocation failed.
+    if (usable || provider === "claudecode") {
+      recordDevelopmentAgentAuthEvidence({
+        provider,
+        status: usable ? "verified" : "failed",
+        source: provider === "claudecode" ? "api_challenge" : "model_challenge",
+        account: status?.account,
+        model,
+        cliVersion: status?.version,
+        detail,
+        ttlMs: usable ? undefined : 15 * 60 * 1000,
+      });
+    }
     markAgentProviderStatusesStale();
     return result;
   } finally {
@@ -1221,12 +1389,26 @@ const GEMINI_CLI_MODEL_EXPORTS = [
 export function parseGeminiCliDefaultModels(source: string) {
   const models: Array<{ id: string; label: string }> = [];
   const seen = new Set<string>();
+  const add = (idValue: unknown, label: string) => {
+    const id = safeIdentity(idValue);
+    if (!id || id === "none" || /embedding/i.test(id) || seen.has(id)) return;
+    seen.add(id);
+    models.push({ id, label: `${label} (${id})` });
+  };
   for (const item of GEMINI_CLI_MODEL_EXPORTS) {
     const match = String(source || "").match(new RegExp(`(?:var|const)\\s+${item.name}\\s*=\\s*["']([^"']+)["']`));
-    const id = safeIdentity(match?.[1]);
-    if (!id || id === "none" || seen.has(id)) continue;
-    seen.add(id);
-    models.push({ id, label: `${item.label} (${id})` });
+    add(match?.[1], item.label);
+  }
+  // Follow model constants declared by the installed CLI, including gated
+  // preview releases that are not re-exported through its entry module.
+  const dynamicPattern = /(?:var|const)\s+((?:PREVIEW|DEFAULT|SECONDARY)_GEMINI[A-Z0-9_]*_MODEL)\s*=\s*["']([^"']+)["']/g;
+  for (const match of String(source || "").matchAll(dynamicPattern)) {
+    const id = safeIdentity(match[2]);
+    const label = id
+      .split("-")
+      .map(part => part ? `${part[0].toUpperCase()}${part.slice(1)}` : "")
+      .join(" ");
+    add(id, label || safeIdentity(match[1]));
   }
   return models;
 }
@@ -1407,50 +1589,24 @@ async function computeAgentProviderModels(providerValue: string) {
     }
   }
   if (provider === "gemini") {
-    const cliModels = geminiCliAccountModels();
-    const auth = currentGeminiAccess();
-    if (!auth.apiKey && cliModels.length) {
-      return {
-        provider,
-        selected: settings.gemini.model,
-        models: [{ id: "", label: "自动（由 Gemini CLI 选择）" }, ...cliModels],
-        allowsCustom: true,
-        source: "cli_catalog",
-        detail: `已读取本机 Gemini CLI 提供的 ${cliModels.length} 个默认模型；账号专属预览模型仍可手动填写并通过测试按钮核验。`,
-        error: "",
-      };
+    const command = resolveAntigravityCliCommand();
+    if (!commandExists(command)) {
+      return { provider, selected: settings.gemini.model, models: [], allowsCustom: true, source: "unavailable", error: "Antigravity CLI尚未安装" };
     }
-    try {
-      const models = await fetchGeminiAccountModels();
-      return {
-        provider,
-        selected: settings.gemini.model,
-        models: [{ id: "", label: "自动（由 Gemini CLI 选择）" }, ...models],
-        allowsCustom: true,
-        source: models.length ? "provider_api" : "unavailable",
-        error: models.length ? "" : "Gemini 当前账号没有返回可用模型",
-      };
-    } catch (error: any) {
-      if (cliModels.length) {
-        return {
-          provider,
-          selected: settings.gemini.model,
-          models: [{ id: "", label: "自动（由 Gemini CLI 选择）" }, ...cliModels],
-          allowsCustom: true,
-          source: "cli_catalog",
-          detail: `账号模型接口暂不可用，已改用本机 Gemini CLI 的 ${cliModels.length} 个默认模型。`,
-          error: "",
-        };
-      }
-      return {
-        provider,
-        selected: settings.gemini.model,
-        models: [{ id: "", label: "自动（由 Gemini CLI 选择）" }],
-        allowsCustom: true,
-        source: "unavailable",
-        error: safeIdentity(error?.message || "Gemini CLI 不支持非交互模型枚举，可使用自动模式或手动填写模型 ID"),
-      };
-    }
+    const result = await runCommandCaptureAsync(command, ["models"], {
+      shell: process.platform === "win32" && /\.(?:cmd|bat)$/i.test(command),
+      timeoutMs: 20_000,
+    });
+    const models = parseAntigravityModels(String(result.stdout || result.stderr || ""));
+    return {
+      provider,
+      selected: settings.gemini.model,
+      models: [{ id: "", label: "自动（由 Antigravity CLI 选择）" }, ...models],
+      allowsCustom: true,
+      source: models.length ? "cli_catalog" : "unavailable",
+      detail: models.length ? `已读取当前Antigravity账号可用的 ${models.length} 个模型。` : "",
+      error: models.length ? "" : safeIdentity(result.stderr || result.stdout || "Antigravity CLI没有返回可用模型"),
+    };
   }
   if (provider === "opencode") {
     if (!commandExists("opencode")) return { provider, selected: settings.opencode.model, models: [], allowsCustom: true, source: "unavailable", error: "OpenCode 尚未安装" };
@@ -1516,7 +1672,18 @@ function isAllowedLoginUrl(provider: DevelopmentAgentProvider, candidate: string
     const url = new URL(candidate);
     if (url.protocol !== "https:") return false;
     const host = url.hostname.toLowerCase();
-    return (LOGIN_HOST_SUFFIXES[provider] || []).some(suffix => host === suffix || host.endsWith(`.${suffix}`));
+    const trustedHost = (LOGIN_HOST_SUFFIXES[provider] || []).some(suffix => host === suffix || host.endsWith(`.${suffix}`));
+    if (!trustedHost) return false;
+    if (provider === "gemini") {
+      return host === "accounts.google.com"
+        && url.pathname === "/o/oauth2/v2/auth"
+        && url.searchParams.get("response_type") === "code"
+        && !!url.searchParams.get("client_id")
+        && !!url.searchParams.get("redirect_uri")
+        && !!url.searchParams.get("state")
+        && !!url.searchParams.get("code_challenge");
+    }
+    return true;
   } catch {
     return false;
   }
@@ -1525,7 +1692,11 @@ function isAllowedLoginUrl(provider: DevelopmentAgentProvider, candidate: string
 export function parseAgentProviderLoginProgress(providerValue: string, rawOutput: string) {
   const provider = String(providerValue || "").trim().toLowerCase() as DevelopmentAgentProvider;
   const output = stripTerminalFormatting(rawOutput);
-  const urls = output.match(/https:\/\/[^\s<>"']+/gi) || [];
+  const wrappedGeminiUrl = provider === "gemini"
+    ? output.match(/Please visit the following URL to authorize the application:\s*(https:\/\/[\s\S]+?)(?=\s*(?:Enter the authorization code|$))/i)?.[1]
+        ?.replace(/\s+/g, "") || ""
+    : "";
+  const urls = [wrappedGeminiUrl, ...(output.match(/https:\/\/[^\s<>"']+/gi) || [])].filter(Boolean);
   const authUrl = urls
     .map(value => value.replace(/[),.;]+$/, ""))
     .find(value => isAllowedLoginUrl(provider, value)) || "";
@@ -1558,6 +1729,162 @@ function ensureGeminiBrowserAuthSelected() {
   fs.renameSync(temp, file);
 }
 
+function loadLoginPtyModule() {
+  if (process.env.CCM_DISABLE_NODE_PTY === "1") return null;
+  if (cachedLoginPtyModule !== undefined) return cachedLoginPtyModule;
+  try {
+    const loaded = runtimeRequire("node-pty");
+    cachedLoginPtyModule = typeof loaded?.spawn === "function" ? loaded : null;
+  } catch {
+    cachedLoginPtyModule = null;
+  }
+  return cachedLoginPtyModule;
+}
+
+function geminiOauthCredentialFile() {
+  return path.join(os.homedir(), ".gemini", "oauth_creds.json");
+}
+
+function quarantineGeminiCredential(sessionId: string) {
+  const credentialFile = geminiOauthCredentialFile();
+  if (!fs.existsSync(credentialFile)) return "";
+  const stat = fs.lstatSync(credentialFile);
+  if (!stat.isFile() || stat.isSymbolicLink()) {
+    throw new Error("Gemini OAuth凭据不是受支持的普通文件，已拒绝自动重新登录");
+  }
+  const backupDir = path.join(os.homedir(), ".cc-connect", "auth-backups");
+  fs.mkdirSync(backupDir, { recursive: true, mode: 0o700 });
+  const backupFile = path.join(backupDir, `gemini-oauth-${sessionId}.json`);
+  fs.renameSync(credentialFile, backupFile);
+  return backupFile;
+}
+
+function settleGeminiCredentialBackup(session: AgentProviderLoginSession, succeeded: boolean) {
+  const backupFile = String(session.credentialBackupPath || "");
+  if (!backupFile || !fs.existsSync(backupFile)) return;
+  const credentialFile = geminiOauthCredentialFile();
+  try {
+    if (succeeded) {
+      fs.unlinkSync(backupFile);
+    } else {
+      if (fs.existsSync(credentialFile)) {
+        const failedFile = `${backupFile}.failed-${Date.now()}`;
+        fs.renameSync(credentialFile, failedFile);
+      }
+      fs.mkdirSync(path.dirname(credentialFile), { recursive: true, mode: 0o700 });
+      fs.renameSync(backupFile, credentialFile);
+    }
+    session.credentialBackupPath = undefined;
+  } catch (error: any) {
+    session.error = `${session.error || "Gemini登录未完成"}；旧登录凭据恢复失败：${String(error?.message || error).slice(0, 160)}`;
+  }
+}
+
+function snapshotGeminiSuccessfulCredential(session: AgentProviderLoginSession) {
+  if (session.provider !== "gemini") return "";
+  const credentialFile = geminiOauthCredentialFile();
+  try {
+    const stat = fs.lstatSync(credentialFile);
+    const parsed = JSON.parse(fs.readFileSync(credentialFile, "utf-8"));
+    if (!stat.isFile() || stat.isSymbolicLink() || !parsed || typeof parsed !== "object"
+      || !(parsed.access_token || parsed.refresh_token)) return "";
+    const backupDir = path.join(os.homedir(), ".cc-connect", "auth-backups");
+    fs.mkdirSync(backupDir, { recursive: true, mode: 0o700 });
+    const snapshot = path.join(backupDir, `gemini-oauth-success-${session.id}.json`);
+    fs.copyFileSync(credentialFile, snapshot);
+    try { fs.chmodSync(snapshot, 0o600); } catch {}
+    session.credentialSuccessSnapshotPath = snapshot;
+    return snapshot;
+  } catch { return ""; }
+}
+
+function settleGeminiSuccessfulCredential(session: AgentProviderLoginSession) {
+  const snapshot = String(session.credentialSuccessSnapshotPath || "");
+  if (!snapshot || !fs.existsSync(snapshot)) {
+    settleGeminiCredentialBackup(session, true);
+    return;
+  }
+  const credentialFile = geminiOauthCredentialFile();
+  try {
+    if (!geminiCredentialPresent()) {
+      fs.mkdirSync(path.dirname(credentialFile), { recursive: true, mode: 0o700 });
+      fs.copyFileSync(snapshot, credentialFile);
+      try { fs.chmodSync(credentialFile, 0o600); } catch {}
+    }
+    if (geminiCredentialPresent()) {
+      fs.unlinkSync(snapshot);
+      session.credentialSuccessSnapshotPath = undefined;
+      settleGeminiCredentialBackup(session, true);
+    }
+  } catch (error: any) {
+    session.error = `${session.error || "Gemini登录已完成"}；持久化凭据失败：${String(error?.message || error).slice(0, 160)}`;
+  }
+}
+
+function recoverOrphanedGeminiCredentialBackup() {
+  const credentialFile = geminiOauthCredentialFile();
+  if (fs.existsSync(credentialFile)) return false;
+  const backupDir = path.join(os.homedir(), ".cc-connect", "auth-backups");
+  if (!fs.existsSync(backupDir)) return false;
+  const candidates = fs.readdirSync(backupDir)
+    .filter(name => /^gemini-oauth-auth_[a-f0-9]+\.json$/i.test(name))
+    .map(name => {
+      const file = path.join(backupDir, name);
+      try {
+        const stat = fs.lstatSync(file);
+        return stat.isFile() && !stat.isSymbolicLink() ? { file, mtimeMs: stat.mtimeMs } : null;
+      } catch {
+        return null;
+      }
+    })
+    .filter((entry): entry is { file: string; mtimeMs: number } => !!entry)
+    .sort((left, right) => right.mtimeMs - left.mtimeMs);
+  if (!candidates[0]) return false;
+  fs.mkdirSync(path.dirname(credentialFile), { recursive: true, mode: 0o700 });
+  fs.renameSync(candidates[0].file, credentialFile);
+  return true;
+}
+
+function recoverOrphanedGeminiSuccessSnapshot() {
+  const credentialFile = geminiOauthCredentialFile();
+  if (fs.existsSync(credentialFile)) return false;
+  const backupDir = path.join(os.homedir(), ".cc-connect", "auth-backups");
+  if (!fs.existsSync(backupDir)) return false;
+  const candidates = fs.readdirSync(backupDir)
+    .filter(name => /^gemini-oauth-success-auth_[a-f0-9]+\.json$/i.test(name))
+    .map(name => {
+      const file = path.join(backupDir, name);
+      try {
+        const stat = fs.lstatSync(file);
+        const parsed = JSON.parse(fs.readFileSync(file, "utf-8"));
+        return stat.isFile() && !stat.isSymbolicLink() && (parsed?.access_token || parsed?.refresh_token)
+          ? { file, mtimeMs: stat.mtimeMs }
+          : null;
+      } catch { return null; }
+    })
+    .filter((entry): entry is { file: string; mtimeMs: number } => !!entry)
+    .sort((left, right) => right.mtimeMs - left.mtimeMs);
+  if (!candidates[0]) return false;
+  fs.mkdirSync(path.dirname(credentialFile), { recursive: true, mode: 0o700 });
+  fs.copyFileSync(candidates[0].file, credentialFile);
+  try { fs.chmodSync(credentialFile, 0o600); } catch {}
+  fs.unlinkSync(candidates[0].file);
+  return true;
+}
+
+// A service crash can happen while a re-login owns the credential backup.
+// Restore it before status probing so a restart never turns into a logout.
+try {
+  recoverOrphanedGeminiSuccessSnapshot();
+  recoverOrphanedGeminiCredentialBackup();
+} catch {}
+
+function clearLoginPreparationTimer(sessionId: string) {
+  const timer = LOGIN_PREPARATION_TIMERS.get(sessionId);
+  if (timer) clearTimeout(timer);
+  LOGIN_PREPARATION_TIMERS.delete(sessionId);
+}
+
 function publicLoginSession(session: AgentProviderLoginSession) {
   return {
     sessionId: session.id,
@@ -1567,7 +1894,10 @@ function publicLoginSession(session: AgentProviderLoginSession) {
     expiresAt: session.expiresAt,
     authUrl: session.authUrl,
     userCode: session.userCode,
-    requiresCode: session.requiresCode && session.status === "awaiting_code",
+    requiresCode: session.requiresCode
+      && !!session.authUrl
+      && !session.codeSubmitted
+      && !["succeeded", "failed"].includes(session.status),
     detail: session.detail,
     error: session.error,
     command: session.command,
@@ -1582,7 +1912,11 @@ function providerCredentialPresent(provider: DevelopmentAgentProvider) {
 }
 
 function markLoginVerified(provider: DevelopmentAgentProvider) {
-  const command = provider === "cursor" ? resolveCursorAgentCommand() : provider;
+  const command = provider === "cursor"
+    ? resolveCursorAgentCommand()
+    : provider === "gemini"
+      ? resolveAntigravityCliCommand()
+      : provider;
   recordDevelopmentAgentAuthEvidence({
     provider,
     status: "verified",
@@ -1597,42 +1931,124 @@ function markLoginVerified(provider: DevelopmentAgentProvider) {
 }
 
 function stopLoginChild(session: AgentProviderLoginSession) {
+  clearLoginPreparationTimer(session.id);
   try {
     if (session.child && !session.child.killed) session.child.kill();
   } catch {}
+  try {
+    if (session.pty) session.pty.kill();
+  } catch {}
   session.child = undefined;
+  session.pty = undefined;
   session.pid = undefined;
 }
 
+function completeLoginFromFreshCredential(session: AgentProviderLoginSession) {
+  if (["succeeded", "failed"].includes(session.status)) return session.status === "succeeded";
+  if (session.requiresCode && !session.codeSubmitted) return false;
+  if (!providerCredentialPresent(session.provider)) return false;
+  const credentialFingerprint = providerCredentialFingerprint(session.provider);
+  if (!credentialFingerprint || credentialFingerprint === session.credentialFingerprintAtStart) return false;
+  // Gemini writes oauth_creds.json after the authorization-code exchange, then
+  // enters its interactive UI without consistently printing a success line.
+  // A submitted code plus a fresh, parseable credential is therefore the
+  // authoritative success receipt for Gemini. Other providers still require
+  // their explicit success signal.
+  if (!session.providerReportedSuccess && !(session.provider === "gemini" && session.codeSubmitted)) return false;
+  if (session.provider === "gemini" && !snapshotGeminiSuccessfulCredential(session)) return false;
+  session.status = "succeeded";
+  session.detail = "网页登录成功";
+  session.error = "";
+  markLoginVerified(session.provider);
+  stopLoginChild(session);
+  // Some Gemini CLI versions clean up their credential during interactive
+  // process shutdown. Reconcile from the protected success snapshot after the
+  // process has had a chance to exit.
+  const timer = setTimeout(() => settleGeminiSuccessfulCredential(session), 750);
+  timer.unref();
+  return true;
+}
+
 function appendLoginOutput(session: AgentProviderLoginSession, chunk: any) {
-  session.output = `${session.output}${String(chunk || "")}`.slice(-LOGIN_OUTPUT_LIMIT);
-  const progress = parseAgentProviderLoginProgress(session.provider, session.output);
-  if (progress.authUrl) {
-    session.authUrl = progress.authUrl;
+  const nextChunk = String(chunk || "");
+  const progressWindow = `${session.progressTail}${nextChunk}`;
+  session.progressTail = progressWindow.slice(-512);
+  session.output = `${session.output}${nextChunk}`.slice(-LOGIN_OUTPUT_LIMIT);
+  const aggregateProgress = parseAgentProviderLoginProgress(session.provider, session.output);
+  const incrementalProgress = parseAgentProviderLoginProgress(session.provider, progressWindow);
+  if (aggregateProgress.authUrl) {
+    clearLoginPreparationTimer(session.id);
+    session.authUrl = aggregateProgress.authUrl;
     if (session.status === "starting") session.status = "awaiting_browser";
-    session.detail = session.userCode ? "请在浏览器输入设备码完成授权" : "请在浏览器完成账号授权";
+    session.detail = session.provider === "gemini"
+      ? "请在浏览器登录，复制网页验证码并粘贴回CCM"
+      : session.userCode ? "请在浏览器输入设备码完成授权" : "请在浏览器完成账号授权";
   }
-  if (progress.userCode) {
-    session.userCode = progress.userCode;
+  if (aggregateProgress.userCode) {
+    session.userCode = aggregateProgress.userCode;
     session.detail = "请在浏览器输入设备码完成授权";
   }
-  if (progress.awaitingCode) {
-    session.status = "awaiting_code";
-    session.detail = "网页授权后，请将 Google 授权码粘贴回 CCM";
-  }
-  if (progress.succeeded) {
-    // succeeded 正则作用于累积输出，命中后对每个后续 chunk 恒为真；
-    // 只在首次状态迁移时触发刷新，避免登录进程存活期间反复发起探测
-    const alreadySucceeded = session.status === "succeeded";
-    session.status = "succeeded";
-    session.detail = "网页登录成功";
-    session.error = "";
-    if (!alreadySucceeded) markAgentProviderStatusesStale();
-  } else if (progress.failed) {
+  if (incrementalProgress.failed) {
     session.status = "failed";
     session.detail = "网页登录未完成";
     session.error = "第三方 Agent 拒绝或终止了本次认证";
+  } else if (incrementalProgress.succeeded) {
+    // CLI文字只表示Provider完成了授权交换。还必须证明本轮凭据确实
+    // 发生变化，才能向页面报告登录成功；交互式CLI无需自行退出。
+    if (session.requiresCode && !session.codeSubmitted) {
+      session.status = "awaiting_code";
+      session.detail = "请复制Google页面显示的整段验证码并粘贴回CCM";
+    } else {
+      session.providerReportedSuccess = true;
+      session.status = "exchanging";
+      session.detail = "网页授权已完成，正在验证本轮登录凭据";
+      session.error = "";
+      completeLoginFromFreshCredential(session);
+    }
+  } else if (incrementalProgress.awaitingCode && !session.codeSubmitted) {
+    session.status = "awaiting_code";
+    session.detail = "网页授权后，请将 Google 授权码粘贴回 CCM";
   }
+}
+
+function finalizeLoginProcess(session: AgentProviderLoginSession, code: number | null) {
+  clearLoginPreparationTimer(session.id);
+  const completedPty = session.pty;
+  session.child = undefined;
+  session.pty = undefined;
+  session.pid = undefined;
+  // node-pty can retain its native pipe after the child has already exited.
+  try { completedPty?.kill(); } catch {}
+  markAgentProviderStatusesStale();
+  if (session.status === "succeeded") {
+    settleGeminiSuccessfulCredential(session);
+    return;
+  }
+  const authenticated = session.provider === "cursor"
+    ? cursorStatus(resolveCursorAgentCommand()).loggedIn
+    : providerCredentialPresent(session.provider);
+  const credentialChanged = session.provider === "cursor"
+    ? authenticated
+    : providerCredentialFingerprint(session.provider) !== session.credentialFingerprintAtStart;
+  const currentLoginVerified = authenticated
+    && credentialChanged
+    && (session.providerReportedSuccess || code === 0);
+  if (session.status !== "failed" && currentLoginVerified) {
+    session.status = "succeeded";
+    session.detail = "网页登录成功";
+    session.error = "";
+    settleGeminiCredentialBackup(session, true);
+    markLoginVerified(session.provider);
+    return;
+  }
+  if (session.status !== "failed") {
+    session.status = "failed";
+    session.detail = "网页登录未完成";
+    session.error = authenticated && !credentialChanged
+      ? "本轮登录没有生成新的认证凭据，请在浏览器完成授权后重试"
+      : `认证进程已结束${code == null ? "" : `（退出码 ${code}）`}`;
+  }
+  settleGeminiCredentialBackup(session, false);
 }
 
 function expireLoginSessions() {
@@ -1644,8 +2060,16 @@ function expireLoginSessions() {
       session.error = "网页登录已超时，请重新发起";
       session.detail = "认证会话已过期";
       stopLoginChild(session);
+      settleGeminiCredentialBackup(session, false);
+      if (session.credentialSuccessSnapshotPath) {
+        try { fs.unlinkSync(session.credentialSuccessSnapshotPath); } catch {}
+        session.credentialSuccessSnapshotPath = undefined;
+      }
     }
-    if (Number.isFinite(expiresAt) && expiresAt + LOGIN_SESSION_TTL_MS <= now) LOGIN_SESSIONS.delete(id);
+    if (Number.isFinite(expiresAt) && expiresAt + LOGIN_SESSION_TTL_MS <= now) {
+      if (session.status === "succeeded") settleGeminiSuccessfulCredential(session);
+      LOGIN_SESSIONS.delete(id);
+    }
   }
 }
 
@@ -1654,15 +2078,28 @@ export function startAgentProviderLogin(providerValue: string, options: { provid
   if (!["codex", "cursor", "gemini", "opencode"].includes(provider)) throw new Error("该 Agent 不支持网页登录");
   const spec = buildAgentProviderLoginSpec(provider, options);
   if (!commandExists(spec.command)) throw new Error(`${spec.command} 未安装或不在 PATH 中`);
+  if (provider === "gemini") {
+    const launched = launchAntigravityInteractive(spec.command);
+    markAgentProviderStatusesStale();
+    return {
+      launched,
+      browser: false,
+      manual: true,
+      command: shellCommandText(spec),
+      detail: launched
+        ? "已打开Antigravity CLI终端，请按终端提示完成Google账号登录，然后返回CCM点击测试"
+        : "请在CCM所在服务器的交互终端运行Antigravity CLI完成登录，然后返回CCM点击测试",
+    };
+  }
   expireLoginSessions();
   for (const session of LOGIN_SESSIONS.values()) {
     if (session.provider === provider && !["succeeded", "failed"].includes(session.status)) {
       return { launched: true, browser: true, ...publicLoginSession(session) };
     }
   }
-  if (provider === "gemini") ensureGeminiBrowserAuthSelected();
   const id = `auth_${randomUUID().replace(/-/g, "")}`;
   const startedAt = new Date();
+  const credentialFingerprintAtStart = providerCredentialFingerprint(provider);
   const session: AgentProviderLoginSession = {
     id,
     provider,
@@ -1676,44 +2113,36 @@ export function startAgentProviderLogin(providerValue: string, options: { provid
     error: "",
     command: shellCommandText(spec),
     output: "",
+    credentialFingerprintAtStart,
+    providerReportedSuccess: false,
+    codeSubmitted: false,
+    progressTail: "",
   };
   LOGIN_SESSIONS.set(id, session);
-  const child = spawn(spec.command, spec.args, {
-    shell: process.platform === "win32",
-    windowsHide: true,
-    stdio: ["pipe", "pipe", "pipe"],
-    env: { ...process.env, ...spec.env },
-  });
-  session.child = child;
-  session.pid = Number(child.pid || 0);
-  child.stdout.on("data", chunk => appendLoginOutput(session, chunk));
-  child.stderr.on("data", chunk => appendLoginOutput(session, chunk));
-  child.once("error", error => {
-    session.status = "failed";
-    session.error = String(error?.message || "认证进程启动失败").slice(0, 300);
-    session.detail = "无法启动网页登录";
-    stopLoginChild(session);
-  });
-  child.once("close", code => {
-    session.child = undefined;
-    session.pid = undefined;
-    markAgentProviderStatusesStale();
-    const authenticated = provider === "cursor"
-      ? cursorStatus(resolveCursorAgentCommand()).loggedIn
-      : providerCredentialPresent(provider);
-    if (authenticated || session.status === "succeeded") {
-      session.status = "succeeded";
-      session.detail = "网页登录成功";
-      session.error = "";
-      markLoginVerified(provider);
-      return;
-    }
-    if (session.status !== "failed") {
+  try {
+    const child = spawn(spec.command, spec.args, {
+      shell: process.platform === "win32",
+      windowsHide: true,
+      stdio: ["pipe", "pipe", "pipe"],
+      env: { ...process.env, ...spec.env },
+    });
+    session.child = child;
+    session.pid = Number(child.pid || 0);
+    child.stdout.on("data", chunk => appendLoginOutput(session, chunk));
+    child.stderr.on("data", chunk => appendLoginOutput(session, chunk));
+    child.once("error", error => {
       session.status = "failed";
-      session.detail = "网页登录未完成";
-      session.error = `认证进程已结束${code == null ? "" : `（退出码 ${code}）`}`;
-    }
-  });
+      session.error = String(error?.message || "认证进程启动失败").slice(0, 300);
+      session.detail = "无法启动网页登录";
+      stopLoginChild(session);
+    });
+    child.once("close", code => finalizeLoginProcess(session, code));
+  } catch (error) {
+    LOGIN_SESSIONS.delete(id);
+    stopLoginChild(session);
+    settleGeminiCredentialBackup(session, false);
+    throw error;
+  }
   markAgentProviderStatusesStale();
   return { launched: true, browser: true, ...publicLoginSession(session) };
 }
@@ -1724,13 +2153,7 @@ export function getAgentProviderLoginSession(providerValue: string, sessionIdVal
   expireLoginSessions();
   const session = LOGIN_SESSIONS.get(sessionId);
   if (!session || session.provider !== provider) throw new Error("网页登录会话不存在或已过期");
-  if (!["succeeded", "failed"].includes(session.status) && provider !== "cursor" && providerCredentialPresent(provider)) {
-    session.status = "succeeded";
-    session.detail = "网页登录成功";
-    session.error = "";
-    stopLoginChild(session);
-    markLoginVerified(provider);
-  }
+  completeLoginFromFreshCredential(session);
   return publicLoginSession(session);
 }
 
@@ -1740,11 +2163,17 @@ export function submitAgentProviderLoginCode(providerValue: string, sessionIdVal
   const code = String(codeValue || "").trim();
   const session = LOGIN_SESSIONS.get(sessionId);
   if (!session || session.provider !== provider) throw new Error("网页登录会话不存在或已过期");
-  if (session.status !== "awaiting_code" || !session.requiresCode || !session.child?.stdin.writable) {
+  const canWriteCode = !!session.pty || !!session.child?.stdin.writable;
+  const acceptingCode = ["awaiting_browser", "awaiting_code"].includes(session.status)
+    && !!session.authUrl
+    && !session.codeSubmitted;
+  if (!acceptingCode || !session.requiresCode || !canWriteCode) {
     throw new Error("当前认证会话不需要回填授权码");
   }
   if (!code || code.length > 2048 || /[\r\n\u0000]/.test(code)) throw new Error("授权码格式无效");
-  session.child.stdin.write(`${code}\n`);
+  if (session.pty) session.pty.write(`${code}\r`);
+  else session.child!.stdin.write(`${code}\n`);
+  session.codeSubmitted = true;
   session.status = "exchanging";
   session.detail = "正在验证网页授权结果";
   return publicLoginSession(session);
@@ -1754,16 +2183,20 @@ export function logoutAgentProvider(providerValue: string) {
   const provider = String(providerValue || "").trim().toLowerCase() as DevelopmentAgentProvider;
   if (!['codex', 'cursor', 'gemini', 'opencode'].includes(provider)) throw new Error("该 Agent 不支持 CLI 退出");
   if (provider === "gemini") {
-    const oauthFile = path.join(os.homedir(), ".gemini", "oauth_creds.json");
-    if (fs.existsSync(oauthFile)) fs.unlinkSync(oauthFile);
-    else if (process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.GOOGLE_APPLICATION_CREDENTIALS) {
-      throw new Error("Gemini 当前使用环境变量凭据，请在系统环境变量中移除后重新检查");
-    }
-    revokeDevelopmentAgentAuthEvidence(provider, "Gemini退出登录");
+    const command = resolveAntigravityCliCommand();
+    if (!commandExists(command)) throw new Error("Antigravity CLI尚未安装");
+    const launched = launchAntigravityInteractive(command);
+    revokeDevelopmentAgentAuthEvidence(provider, "等待在Antigravity CLI中切换或退出账号");
     invalidateAgentModelCatalog(provider);
     markAgentProviderStatusesStale();
-    const remainingCredentialSources = geminiCredentialSources();
-    return { provider, loggedOut: remainingCredentialSources.length === 0, partial: remainingCredentialSources.length > 0, remainingCredentialSources };
+    return {
+      provider,
+      loggedOut: false,
+      interactive: launched,
+      manual: !launched,
+      command: shellCommandText({ command, args: [] }),
+      detail: "Antigravity账号由官方CLI安全管理，请在打开的终端中退出或切换账号",
+    };
   }
   if (provider === "opencode") {
     if (!commandExists("opencode")) throw new Error("opencode 未安装或不在 PATH 中");

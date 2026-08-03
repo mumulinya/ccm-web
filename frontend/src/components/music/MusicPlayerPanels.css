@@ -636,6 +636,46 @@
   border-radius: 2px 12px 12px 12px;
 }
 
+.agent-chat-messages > .conversation-message.aura-chat-row {
+  width: fit-content;
+  max-width: 94%;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 7px;
+  margin: 0 0 10px;
+}
+
+.agent-chat-messages > .conversation-message.aura-chat-row.operator {
+  align-self: flex-end;
+  flex-direction: row-reverse;
+}
+
+.agent-chat-messages > .conversation-message.aura-chat-row.conversation-message--structured {
+  width: 100%;
+  max-width: 100%;
+}
+
+.agent-chat-messages > .conversation-message .chat-bubble-container {
+  max-width: 100%;
+}
+
+.agent-chat-messages > .conversation-message :deep(.conversation-message__main) {
+  max-width: calc(100% - 35px);
+}
+
+.agent-chat-messages > .conversation-message .conversation-processing {
+  min-width: 0;
+  width: min(330px, 100%);
+  padding: 9px 10px;
+}
+
+.agent-chat-messages > .conversation-message .chat-body-text {
+  padding: 7px 10px;
+  border-radius: 10px;
+  font-size: 10px;
+  line-height: 1.5;
+}
+
 /* 推荐歌曲卡片列表 */
 .tracks-card-box {
   margin-top: 4px;

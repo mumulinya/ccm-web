@@ -2,7 +2,7 @@
 
 ## 适用范围
 
-独立项目开发 Agent和群聊项目子 Agent统一支持 Codex、Cursor、Gemini CLI、OpenCode和Claude Code。开发 Agent认证与主 Agent对话模型配置分离，凭据不能跨Provider回退或串用。
+独立项目开发 Agent和群聊项目子 Agent统一支持 Codex、Cursor、Antigravity CLI、OpenCode和Claude Code。为兼容历史任务，Antigravity的内部运行时ID继续使用`gemini`，但生产命令统一为`agy`。开发 Agent认证与主 Agent对话模型配置分离，凭据不能跨Provider回退或串用。
 
 ## 状态模型
 
@@ -18,14 +18,14 @@
 
 - Codex：使用本机Codex账号，任务在隔离`CODEX_HOME`中运行，并显式传递用户选择的模型。
 - Cursor：使用Cursor Agent原生登录状态和账号模型目录；原生status可以形成验证证据。
-- Gemini CLI：识别OAuth、环境API Key、Service Account和gcloud ADC；退出后若仍有其他来源，页面显示部分退出而非谎报未登录。
+- Antigravity CLI：使用官方`agy`及其安全账号状态；CCM不截获Google授权码。模型目录来自`agy models`，真实challenge通过后才允许派发任务。
 - OpenCode：登录时由用户选择Provider和认证方式，不固定为OpenAI；模型目录和任务配置绑定当前Provider身份。
 - Claude Code：使用加密保存的Anthropic兼容API配置、模型和凭据类型；远程Base URL必须为HTTPS，本机loopback可使用HTTP。
 
 ## 安装、测试与派发
 
 1. 设置页通过服务端白名单命令安装或更新CLI，安装任务持久化并可在服务重启后识别中断状态。
-2. 登录只暴露允许的浏览器URL、设备码或授权码，不把CLI原始输出直接返回浏览器。
+2. Codex等支持设备授权的CLI只暴露允许的浏览器URL和设备码；Antigravity登录在官方交互终端内完成，CCM不接收Google授权码。
 3. 测试使用一次性随机challenge和结构化最终助手消息；Prompt回显、日志回显和普通stdout不能伪造成功。
 4. 动态模型目录按账号、版本和认证证据缓存，并用Singleflight合并并发读取；旧响应不能覆盖新选择。
 5. 派发前再次核验安装、认证证据、模型、工具授权快照和项目作用域。

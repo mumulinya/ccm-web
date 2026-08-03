@@ -34,11 +34,13 @@ const openCodeConfig = JSON.parse(fs.readFileSync(openCodeAudit.mcpConfigPath, '
 assert.equal(catalog.PROJECT_AGENT_TYPES.includes('gemini'), true)
 assert.equal(catalog.PROJECT_AGENT_TYPES.includes('opencode'), true)
 assert.equal(runtime.normalizeAgentRuntimeId('gemini-cli'), 'gemini')
+assert.equal(runtime.normalizeAgentRuntimeId('antigravity-cli'), 'gemini')
+assert.equal(runtime.normalizeAgentRuntimeId('agy'), 'gemini')
 assert.equal(runtime.normalizeAgentRuntimeId('open-code'), 'opencode')
 assert.equal(geminiAudit.mode, 'native-and-proxy')
 assert.equal(geminiAudit.errors.length, 0)
-assert.equal(geminiConfig.mcp.allowed.includes('ccm__memory-context'), true)
 assert.equal(geminiConfig.mcpServers['ccm__memory-context'].command, 'node')
+assert.match(geminiAudit.mcpConfigPath, /\.agents[\\/]mcp_config\.json$/)
 assert.equal(openCodeAudit.mode, 'native-and-proxy')
 assert.equal(openCodeAudit.errors.length, 0)
 assert.deepEqual(openCodeConfig.mcp['ccm__memory-context'].command, ['node', 'memory-context-server.js'])
@@ -52,7 +54,7 @@ assert.match(openCodeCommand, /cli-prompt-runner\.js/)
 
 const report = {
   pass: true,
-  checks: 15,
+  checks: 18,
   geminiConfig: geminiAudit.mcpConfigPath,
   openCodeConfig: openCodeAudit.mcpConfigPath,
   paidProviderCalls: 0,

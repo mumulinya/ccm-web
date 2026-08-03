@@ -166,6 +166,7 @@ export interface GlobalAgentLoopRuntime {
   persist?: boolean;
   now?: () => number;
   qualityPolicyOverride?: any;
+  onWorkflowDecision?: (decision: any, run: GlobalAgentRun, modelCallIndex: number, modelDecision?: GlobalAgentDecision) => Promise<void> | void;
 }
 
 export * from "./global-agent-loop-engine";

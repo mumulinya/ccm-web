@@ -95,6 +95,7 @@ export declare function buildLlmCoordinatorContextComponents(input: {
     mcpTools: any;
     mcpResults: any[];
     subagentDefinitions: any;
+    loadedContextItems: import("../../system/session-compaction-core").LoadedContextItemsV1;
 };
 export declare function normalizeDocumentFindings(parsed: any): any;
 export declare function enrichTaskWithDocumentFindings(task: string, findings: string[]): string;
@@ -187,6 +188,8 @@ export declare function runLlmGroupOrchestrator(input: {
     project_source_evidence?: any;
 }): Promise<{
     usage: LlmTokenUsage;
+    mainAgentTurnDecision: import("../../agents/main-agent-turn").MainAgentTurnDecisionV1;
+    mainAgentTurnReceipt: import("../../agents/main-agent-turn").MainAgentTurnReceiptV1;
     mainAgentToolUsage: {
         schema: string;
         groupId: string;
@@ -232,6 +235,8 @@ export declare function runLlmGroupOrchestrator(input: {
     coordinationStrategy?: undefined;
 } | {
     usage: LlmTokenUsage;
+    mainAgentTurnDecision: import("../../agents/main-agent-turn").MainAgentTurnDecisionV1;
+    mainAgentTurnReceipt: import("../../agents/main-agent-turn").MainAgentTurnReceiptV1;
     mainAgentToolUsage: {
         schema: string;
         groupId: string;

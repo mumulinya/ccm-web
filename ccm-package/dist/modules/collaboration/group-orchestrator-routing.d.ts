@@ -117,6 +117,8 @@ export type GroupOrchestratorInput = {
     workflow_decision?: WorkflowDecision | null;
     projectSourceEvidence?: any;
     project_source_evidence?: any;
+    mainAgentFirstTurnResult?: any;
+    main_agent_first_turn_result?: any;
     onDelta?: (delta: string) => void;
 };
 export declare function measureGroupMainAgentPayload(input: any): {
@@ -239,6 +241,8 @@ export declare function prepareExactGroupMainAgentInput(input: any, group: any, 
 }>;
 export declare function runGroupOrchestratorCore(input: GroupOrchestratorInput): Promise<{
     usage: LlmTokenUsage;
+    mainAgentTurnDecision: import("../../agents/main-agent-turn").MainAgentTurnDecisionV1;
+    mainAgentTurnReceipt: import("../../agents/main-agent-turn").MainAgentTurnReceiptV1;
     mainAgentToolUsage: {
         schema: string;
         groupId: string;
@@ -284,6 +288,8 @@ export declare function runGroupOrchestratorCore(input: GroupOrchestratorInput):
     coordinationStrategy?: undefined;
 } | {
     usage: LlmTokenUsage;
+    mainAgentTurnDecision: import("../../agents/main-agent-turn").MainAgentTurnDecisionV1;
+    mainAgentTurnReceipt: import("../../agents/main-agent-turn").MainAgentTurnReceiptV1;
     mainAgentToolUsage: {
         schema: string;
         groupId: string;
@@ -350,6 +356,8 @@ export declare function runGroupOrchestratorCore(input: GroupOrchestratorInput):
         recoveredChars: any;
         ownership: any;
     };
+    mainAgentTurnDecision: import("../../agents/main-agent-turn").MainAgentTurnDecisionV1;
+    mainAgentTurnReceipt: import("../../agents/main-agent-turn").MainAgentTurnReceiptV1;
     mainAgentToolUsage: {
         schema: string;
         groupId: string;
@@ -402,6 +410,8 @@ export declare function runGroupOrchestratorCore(input: GroupOrchestratorInput):
         recoveredChars: any;
         ownership: any;
     };
+    mainAgentTurnDecision: import("../../agents/main-agent-turn").MainAgentTurnDecisionV1;
+    mainAgentTurnReceipt: import("../../agents/main-agent-turn").MainAgentTurnReceiptV1;
     mainAgentToolUsage: {
         schema: string;
         groupId: string;
@@ -476,6 +486,7 @@ export declare function runGroupOrchestratorCore(input: GroupOrchestratorInput):
     content: string;
 }>;
 export declare function summarizeGroupOrchestratorProviderError(error: any): string;
+export declare function streamCanonicalGroupReply(text: string, onDelta?: (delta: string) => void, maxChunkChars?: number): number;
 export declare function runGroupOrchestrator(input: GroupOrchestratorInput): Promise<any>;
 export declare function isContextLimitError(error: any): boolean;
 export declare function buildReactiveCompactionContext(context: string, maxChars?: number): string;

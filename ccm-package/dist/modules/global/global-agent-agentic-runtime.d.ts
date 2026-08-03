@@ -38,6 +38,12 @@ export declare function createGlobalAgentAgenticRuntime(deps: any): {
         onEvent?: (event: any) => void;
         sourceIngestion?: RequirementIngestionResult | null;
         knowledgeContext?: string;
+        principal?: any;
+        readOnly?: boolean;
+        turnId?: string;
+        sessionId?: string;
+        source?: string;
+        authorizationMessage?: string;
     }) => GlobalAgentLoopRuntime;
     runAgenticGlobalRequest: (baseUrl: string, ctx: CollabCtx, input: {
         message: string;

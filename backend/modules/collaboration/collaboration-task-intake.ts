@@ -53,8 +53,8 @@ import {
   publicOrchestratorConfig,
   resolveMemberRuntime,
   runCodedGroupOrchestrator,
-  runCoordinatorProtocolSelfTest,
   runGroupOrchestrator,
+  runCoordinatorProtocolSelfTest,
   runLlmCoordinatorReview,
   runLlmCoordinatorSummary,
   sanitizeCoordinatorUserText,
@@ -667,6 +667,7 @@ export async function classifyGroupProjectTaskIntentWithAgent(input: {
   sharedFilesContext?: string;
   groupSessionId?: string;
   group_session_id?: string;
+  context?: string;
 }) {
   const fallback = {
     executable: false,
@@ -676,49 +677,28 @@ export async function classifyGroupProjectTaskIntentWithAgent(input: {
   };
   const mode = String(input.messageMode || "conversation").trim().toLowerCase();
   try {
-    if (input.forceProjectTask) {
-      const modelDecision = await decideWorkflowWithModel({
-        message: input.message,
-        scope: "group",
-        sourceCount: (input.uploadedFiles || []).length,
-        context: { group_id: input.group?.id || "", message_mode: mode, target: input.isOrchestrated ? "group" : "direct-project", explicit_task_choice: true },
-      });
-      const workflowDecision = explicitWorkflowDecision("execute_direct", "用户显式要求创建并执行项目任务", modelDecision);
-      return {
-        executable: true,
-        analysisEligible: false,
-        kind: "task",
-        reason: workflowDecision.reason,
-        confidence: workflowDecision.confidence,
-        workflowDecision,
-        agent_gateway: { runtime: "llm-api", llm_backed: true, explicit: true },
-      };
-    }
-    if (!input.isOrchestrated) {
-      const workflowDecision = await decideWorkflowWithModel({
-        message: input.message,
-        scope: "group",
-        sourceCount: (input.uploadedFiles || []).length,
-        context: { group_id: input.group?.id || "", message_mode: mode, target: "direct-project" },
-      });
-      return {
-        executable: workflowDecision.actionRequired,
-        analysisEligible: workflowDecision.mode === "project_analysis",
-        kind: workflowDecision.actionRequired ? "task" : workflowDecision.mode === "project_analysis" ? "project_analysis" : "conversation",
-        reason: workflowDecision.reason,
-        confidence: workflowDecision.confidence,
-        workflowDecision,
-        agent_gateway: { runtime: "llm-api", llm_backed: true, direct_project: true },
-      };
-    }
-    const coordinatorResult = await runGroupOrchestrator({
+    const coordinatorResult: any = await runGroupOrchestrator({
       group: input.group,
       message: input.message,
-      source: "intent-gateway",
-      sharedFilesContext: input.sharedFilesContext || "",
+      source: "group-chat-main-first-turn",
       groupSessionId: input.groupSessionId || input.group_session_id || "",
-    });
-    return normalizeGroupAgentGatewayTaskIntent(fallback, coordinatorResult, mode);
+      context: input.context || "",
+      sharedFilesContext: input.sharedFilesContext || "",
+      extraInstructions: input.forceProjectTask
+        ? "用户通过明确的任务入口要求执行；请在同一首轮形成 workflowDecision、计划与分派草稿。"
+        : `当前消息模式：${mode}。请在本次主 Agent首轮直接决定回复、工具、澄清、计划或分派。`,
+    } as any);
+    const normalized = normalizeGroupAgentGatewayTaskIntent(fallback, coordinatorResult, mode);
+    return {
+      ...normalized,
+      coordinatorResult,
+      mainAgentFirstTurnResult: coordinatorResult,
+      agent_gateway: {
+        ...(normalized.agent_gateway || {}),
+        main_first_turn: true,
+        turn_receipt: coordinatorResult?.mainAgentTurnReceipt || null,
+      },
+    };
   } catch (error: any) {
     return {
       executable: false,
@@ -835,10 +815,15 @@ export async function buildGroupPlanModePreflight(input: { group: any; message: 
   const areas = [...(workflowDecision.impactScope || [])];
   if (!areas.length) areas.push("由主 Agent 只读探索后收敛影响范围");
   let readOnlyContext = "";
-  const planningSource = await buildModelDrivenGroupPlanningSourceContext(group, message, configs, {
-    targetProjects: selectedProjects,
-    maxRounds: 3,
-  });
+  const firstTurnSource = input.taskIntent?.mainAgentFirstTurnResult?.projectSourceEvidence
+    || input.taskIntent?.coordinatorResult?.projectSourceEvidence
+    || null;
+  const planningSource = firstTurnSource?.schema === "ccm-group-main-source-planning-v1"
+    ? firstTurnSource
+    : await buildModelDrivenGroupPlanningSourceContext(group, message, configs, {
+        targetProjects: selectedProjects,
+        maxRounds: 3,
+      });
   readOnlyContext = planningSource.rendered;
   const sourceModelPlan = planningSource.modelPlanning;
   workflowDecision = {

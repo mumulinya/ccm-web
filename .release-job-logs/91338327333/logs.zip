@@ -1,0 +1,306 @@
+﻿2026-08-01T06:44:20.7973231Z Current runner version: '2.336.0'
+2026-08-01T06:44:20.8001595Z ##[group]Runner Image Provisioner
+2026-08-01T06:44:20.8002446Z Hosted Compute Agent
+2026-08-01T06:44:20.8002982Z Version: 20260707.563
+2026-08-01T06:44:20.8003589Z Commit: 02667638d2b423fbc733a8e32a88b44996a3ba6e
+2026-08-01T06:44:20.8004260Z Build Date: 2026-07-07T19:33:50Z
+2026-08-01T06:44:20.8004885Z Worker ID: {15fcfeb5-600c-42d9-9e0a-84ce3c268247}
+2026-08-01T06:44:20.8005569Z Azure Region: westus
+2026-08-01T06:44:20.8006077Z ##[endgroup]
+2026-08-01T06:44:20.8007525Z ##[group]Operating System
+2026-08-01T06:44:20.8008580Z Microsoft Windows Server 2025
+2026-08-01T06:44:20.8009276Z 10.0.26100
+2026-08-01T06:44:20.8009873Z Datacenter
+2026-08-01T06:44:20.8010354Z ##[endgroup]
+2026-08-01T06:44:20.8010854Z ##[group]Runner Image
+2026-08-01T06:44:20.8011411Z Image: windows-2025-vs2026
+2026-08-01T06:44:20.8011972Z Version: 20260728.188.1
+2026-08-01T06:44:20.8013581Z Included Software: https://github.com/actions/runner-images/blob/win25-vs2026/20260728.188/images/windows/Windows2025-VS2026-Readme.md
+2026-08-01T06:44:20.8015231Z Image Release: https://github.com/actions/runner-images/releases/tag/win25-vs2026%2F20260728.188
+2026-08-01T06:44:20.8016255Z ##[endgroup]
+2026-08-01T06:44:20.8017364Z ##[group]GITHUB_TOKEN Permissions
+2026-08-01T06:44:20.8019289Z Contents: read
+2026-08-01T06:44:20.8019855Z Metadata: read
+2026-08-01T06:44:20.8020437Z Packages: read
+2026-08-01T06:44:20.8020958Z ##[endgroup]
+2026-08-01T06:44:20.8023087Z Secret source: Actions
+2026-08-01T06:44:20.8024181Z Prepare workflow directory
+2026-08-01T06:44:20.8444157Z Prepare all required actions
+2026-08-01T06:44:20.8508730Z Getting action download info
+2026-08-01T06:44:21.1906918Z Download action repository 'actions/checkout@v4' (SHA:11d5960a326750d5838078e36cf38b85af677262)
+2026-08-01T06:44:21.3268700Z Download action repository 'actions/setup-node@v4' (SHA:49933ea5288caeca8642d1e84afbd3f7d6820020)
+2026-08-01T06:44:21.5167954Z Download action repository 'actions/download-artifact@v4' (SHA:d3f86a106a0bac45b974a628896c90dbdf5c8093)
+2026-08-01T06:44:21.9991593Z Download action repository 'actions/upload-artifact@v4' (SHA:ea165f8d65b6e75b540449e92b4886f43607fa02)
+2026-08-01T06:44:22.3637118Z Complete job name: test-candidate (windows-latest, 22)
+2026-08-01T06:44:22.5318930Z Node 20 is being deprecated. This workflow is running with Node 24 by default. If you need to temporarily use Node 20, you can set the ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION=true environment variable. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+2026-08-01T06:44:22.5333496Z ##[group]Run actions/checkout@v4
+2026-08-01T06:44:22.5334690Z with:
+2026-08-01T06:44:22.5335485Z   repository: mumulinya/ccm-web
+2026-08-01T06:44:22.5343966Z   token: ***
+2026-08-01T06:44:22.5345013Z   ssh-strict: true
+2026-08-01T06:44:22.5346300Z   ssh-user: git
+2026-08-01T06:44:22.5347230Z   persist-credentials: true
+2026-08-01T06:44:22.5348270Z   clean: true
+2026-08-01T06:44:22.5349144Z   sparse-checkout-cone-mode: true
+2026-08-01T06:44:22.5350112Z   fetch-depth: 1
+2026-08-01T06:44:22.5350920Z   fetch-tags: false
+2026-08-01T06:44:22.5351753Z   show-progress: true
+2026-08-01T06:44:22.5352567Z   lfs: false
+2026-08-01T06:44:22.5353368Z   submodules: false
+2026-08-01T06:44:22.5354177Z   set-safe-directory: true
+2026-08-01T06:44:22.5355113Z   allow-unsafe-pr-checkout: false
+2026-08-01T06:44:22.5356440Z ##[endgroup]
+2026-08-01T06:44:22.6860685Z Syncing repository: mumulinya/ccm-web
+2026-08-01T06:44:22.6863415Z ##[group]Getting Git version info
+2026-08-01T06:44:22.6864528Z Working directory is 'D:\a\ccm-web\ccm-web'
+2026-08-01T06:44:22.7874760Z [command]"C:\Program Files\Git\bin\git.exe" version
+2026-08-01T06:44:23.1152509Z git version 2.55.0.windows.3
+2026-08-01T06:44:23.1202508Z ##[endgroup]
+2026-08-01T06:44:23.1224793Z Temporarily overriding HOME='D:\a\_temp\33f3f5e4-392c-4796-abcd-2dca4a043d02' before making global git config changes
+2026-08-01T06:44:23.1229473Z Adding repository directory to the temporary git global config as a safe directory
+2026-08-01T06:44:23.1237415Z [command]"C:\Program Files\Git\bin\git.exe" config --global --add safe.directory D:\a\ccm-web\ccm-web
+2026-08-01T06:44:23.1843128Z Deleting the contents of 'D:\a\ccm-web\ccm-web'
+2026-08-01T06:44:23.1850720Z ##[group]Initializing the repository
+2026-08-01T06:44:23.1859743Z [command]"C:\Program Files\Git\bin\git.exe" init D:\a\ccm-web\ccm-web
+2026-08-01T06:44:23.2731196Z Initialized empty Git repository in D:/a/ccm-web/ccm-web/.git/
+2026-08-01T06:44:23.2778313Z [command]"C:\Program Files\Git\bin\git.exe" remote add origin https://github.com/mumulinya/ccm-web
+2026-08-01T06:44:23.3527885Z ##[endgroup]
+2026-08-01T06:44:23.3529141Z ##[group]Disabling automatic garbage collection
+2026-08-01T06:44:23.3543338Z [command]"C:\Program Files\Git\bin\git.exe" config --local gc.auto 0
+2026-08-01T06:44:23.3875018Z ##[endgroup]
+2026-08-01T06:44:23.3876167Z ##[group]Setting up auth
+2026-08-01T06:44:23.3888141Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp core\.sshCommand
+2026-08-01T06:44:23.4213473Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "sh -c \"git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :\""
+2026-08-01T06:44:24.8111247Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-08-01T06:44:24.8487905Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "sh -c \"git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :\""
+2026-08-01T06:44:25.4309201Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-08-01T06:44:25.4637175Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "git config --local --show-origin --name-only --get-regexp remote.origin.url"
+2026-08-01T06:44:26.0179885Z [command]"C:\Program Files\Git\bin\git.exe" config --local http.https://github.com/.extraheader "AUTHORIZATION: basic ***"
+2026-08-01T06:44:26.0504491Z ##[endgroup]
+2026-08-01T06:44:26.0505192Z ##[group]Fetching the repository
+2026-08-01T06:44:26.0523811Z [command]"C:\Program Files\Git\bin\git.exe" -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +ec9443debe285d4d3b1271646f9856a7b7bd1bfa:refs/remotes/pull/1/merge
+2026-08-01T06:44:32.1652102Z From https://github.com/mumulinya/ccm-web
+2026-08-01T06:44:32.1653089Z  * [new ref]         ec9443debe285d4d3b1271646f9856a7b7bd1bfa -> pull/1/merge
+2026-08-01T06:44:32.1697415Z ##[endgroup]
+2026-08-01T06:44:32.1697849Z ##[group]Determining the checkout info
+2026-08-01T06:44:32.1700403Z ##[endgroup]
+2026-08-01T06:44:32.1717028Z [command]"C:\Program Files\Git\bin\git.exe" sparse-checkout disable
+2026-08-01T06:44:32.2171434Z [command]"C:\Program Files\Git\bin\git.exe" config --local --unset-all extensions.worktreeConfig
+2026-08-01T06:44:32.2490778Z ##[group]Checking out the ref
+2026-08-01T06:44:32.2501710Z [command]"C:\Program Files\Git\bin\git.exe" checkout --progress --force refs/remotes/pull/1/merge
+2026-08-01T06:44:33.4474725Z Updating files:  43% (2307/5298)
+2026-08-01T06:44:33.5216715Z Updating files:  44% (2332/5298)
+2026-08-01T06:44:33.5861270Z Updating files:  45% (2385/5298)
+2026-08-01T06:44:33.6234324Z Updating files:  46% (2438/5298)
+2026-08-01T06:44:33.6406369Z Updating files:  47% (2491/5298)
+2026-08-01T06:44:33.7516061Z Updating files:  48% (2544/5298)
+2026-08-01T06:44:33.7721599Z Updating files:  49% (2597/5298)
+2026-08-01T06:44:33.7868544Z Updating files:  50% (2649/5298)
+2026-08-01T06:44:33.8469518Z Updating files:  51% (2702/5298)
+2026-08-01T06:44:33.8903516Z Updating files:  52% (2755/5298)
+2026-08-01T06:44:33.9519401Z Updating files:  53% (2808/5298)
+2026-08-01T06:44:34.0055437Z Updating files:  54% (2861/5298)
+2026-08-01T06:44:34.0259086Z Updating files:  55% (2914/5298)
+2026-08-01T06:44:34.0476237Z Updating files:  56% (2967/5298)
+2026-08-01T06:44:34.0626747Z Updating files:  57% (3020/5298)
+2026-08-01T06:44:34.0848558Z Updating files:  58% (3073/5298)
+2026-08-01T06:44:34.1049039Z Updating files:  59% (3126/5298)
+2026-08-01T06:44:34.1255322Z Updating files:  60% (3179/5298)
+2026-08-01T06:44:34.1450539Z Updating files:  61% (3232/5298)
+2026-08-01T06:44:34.1660777Z Updating files:  62% (3285/5298)
+2026-08-01T06:44:34.1845000Z Updating files:  63% (3338/5298)
+2026-08-01T06:44:34.2238920Z Updating files:  64% (3391/5298)
+2026-08-01T06:44:34.2375057Z Updating files:  65% (3444/5298)
+2026-08-01T06:44:34.2524995Z Updating files:  66% (3497/5298)
+2026-08-01T06:44:34.2785851Z Updating files:  67% (3550/5298)
+2026-08-01T06:44:34.3092603Z Updating files:  68% (3603/5298)
+2026-08-01T06:44:34.3146005Z Updating files:  69% (3656/5298)
+2026-08-01T06:44:34.3392315Z Updating files:  69% (3659/5298)
+2026-08-01T06:44:34.3613374Z Updating files:  70% (3709/5298)
+2026-08-01T06:44:34.3753039Z Updating files:  71% (3762/5298)
+2026-08-01T06:44:34.3913524Z Updating files:  72% (3815/5298)
+2026-08-01T06:44:34.4148751Z Updating files:  73% (3868/5298)
+2026-08-01T06:44:34.4303641Z Updating files:  74% (3921/5298)
+2026-08-01T06:44:34.4449673Z Updating files:  75% (3974/5298)
+2026-08-01T06:44:34.4588976Z Updating files:  76% (4027/5298)
+2026-08-01T06:44:34.4720605Z Updating files:  77% (4080/5298)
+2026-08-01T06:44:34.4851454Z Updating files:  78% (4133/5298)
+2026-08-01T06:44:34.5040199Z Updating files:  79% (4186/5298)
+2026-08-01T06:44:34.6051734Z Updating files:  80% (4239/5298)
+2026-08-01T06:44:34.6554964Z Updating files:  81% (4292/5298)
+2026-08-01T06:44:34.6704082Z Updating files:  82% (4345/5298)
+2026-08-01T06:44:34.7108559Z Updating files:  83% (4398/5298)
+2026-08-01T06:44:34.8898982Z Updating files:  84% (4451/5298)
+2026-08-01T06:44:34.9470798Z Updating files:  85% (4504/5298)
+2026-08-01T06:44:35.0009760Z Updating files:  86% (4557/5298)
+2026-08-01T06:44:35.0299294Z Updating files:  87% (4610/5298)
+2026-08-01T06:44:35.0466530Z Updating files:  88% (4663/5298)
+2026-08-01T06:44:35.0630955Z Updating files:  89% (4716/5298)
+2026-08-01T06:44:35.0849899Z Updating files:  90% (4769/5298)
+2026-08-01T06:44:35.1005690Z Updating files:  91% (4822/5298)
+2026-08-01T06:44:35.1165099Z Updating files:  92% (4875/5298)
+2026-08-01T06:44:35.1311580Z Updating files:  93% (4928/5298)
+2026-08-01T06:44:35.1464793Z Updating files:  94% (4981/5298)
+2026-08-01T06:44:35.1615182Z Updating files:  95% (5034/5298)
+2026-08-01T06:44:35.1762006Z Updating files:  96% (5087/5298)
+2026-08-01T06:44:35.1895589Z Updating files:  97% (5140/5298)
+2026-08-01T06:44:35.2029195Z Updating files:  98% (5193/5298)
+2026-08-01T06:44:35.2159639Z Updating files:  99% (5246/5298)
+2026-08-01T06:44:35.2159967Z Updating files: 100% (5298/5298)
+2026-08-01T06:44:35.2160220Z Updating files: 100% (5298/5298), done.
+2026-08-01T06:44:35.2338742Z Note: switching to 'refs/remotes/pull/1/merge'.
+2026-08-01T06:44:35.2339181Z 
+2026-08-01T06:44:35.2339549Z You are in 'detached HEAD' state. You can look around, make experimental
+2026-08-01T06:44:35.2340362Z changes and commit them, and you can discard any commits you make in this
+2026-08-01T06:44:35.2341114Z state without impacting any branches by switching back to a branch.
+2026-08-01T06:44:35.2341561Z 
+2026-08-01T06:44:35.2341897Z If you want to create a new branch to retain commits you create, you may
+2026-08-01T06:44:35.2342515Z do so (now or later) by using -c with the switch command. Example:
+2026-08-01T06:44:35.2342796Z 
+2026-08-01T06:44:35.2342914Z   git switch -c <new-branch-name>
+2026-08-01T06:44:35.2343102Z 
+2026-08-01T06:44:35.2343195Z Or undo this operation with:
+2026-08-01T06:44:35.2343703Z 
+2026-08-01T06:44:35.2343784Z   git switch -
+2026-08-01T06:44:35.2343912Z 
+2026-08-01T06:44:35.2344131Z Turn off this advice by setting config variable advice.detachedHead to false
+2026-08-01T06:44:35.2344809Z 
+2026-08-01T06:44:35.2345181Z HEAD is now at ec9443d Merge 8006bd6ccdda5a431f9ed88f99182722bfd3cdf0 into 8140e3f5a37b3c58345d02022856d79b80d7fca5
+2026-08-01T06:44:35.2624060Z ##[endgroup]
+2026-08-01T06:44:35.3073024Z [command]"C:\Program Files\Git\bin\git.exe" log -1 --format=%H
+2026-08-01T06:44:35.3361114Z ec9443debe285d4d3b1271646f9856a7b7bd1bfa
+2026-08-01T06:44:35.3876997Z Node 20 is being deprecated. This workflow is running with Node 24 by default. If you need to temporarily use Node 20, you can set the ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION=true environment variable. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+2026-08-01T06:44:35.3879075Z ##[group]Run actions/setup-node@v4
+2026-08-01T06:44:35.3879315Z with:
+2026-08-01T06:44:35.3879484Z   node-version: 22
+2026-08-01T06:44:35.3879682Z   always-auth: false
+2026-08-01T06:44:35.3879865Z   check-latest: false
+2026-08-01T06:44:35.3882552Z   token: ***
+2026-08-01T06:44:35.3882724Z ##[endgroup]
+2026-08-01T06:44:35.5784847Z Found in cache @ C:\hostedtoolcache\windows\node\22.23.1\x64
+2026-08-01T06:44:35.5792924Z (node:1868) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+2026-08-01T06:44:35.5794092Z (Use `node --trace-deprecation ...` to show where the warning was created)
+2026-08-01T06:44:35.5796851Z ##[group]Environment details
+2026-08-01T06:44:39.6470304Z node: v22.23.1
+2026-08-01T06:44:39.6470636Z npm: 10.9.8
+2026-08-01T06:44:39.6470800Z yarn: 1.22.22
+2026-08-01T06:44:39.6471399Z ##[endgroup]
+2026-08-01T06:44:39.6804805Z Node 20 is being deprecated. This workflow is running with Node 24 by default. If you need to temporarily use Node 20, you can set the ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION=true environment variable. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+2026-08-01T06:44:39.6806506Z ##[group]Run actions/download-artifact@v4
+2026-08-01T06:44:39.6806804Z with:
+2026-08-01T06:44:39.6807013Z   name: ccm-release-candidate
+2026-08-01T06:44:39.6807281Z   path: release-artifacts
+2026-08-01T06:44:39.6807530Z   merge-multiple: false
+2026-08-01T06:44:39.6807770Z   repository: mumulinya/ccm-web
+2026-08-01T06:44:39.6808021Z   run-id: 30688077939
+2026-08-01T06:44:39.6808230Z ##[endgroup]
+2026-08-01T06:44:39.8687357Z Downloading single artifact
+2026-08-01T06:44:39.8917583Z (node:8824) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+2026-08-01T06:44:39.8918785Z (Use `node --trace-deprecation ...` to show where the warning was created)
+2026-08-01T06:44:40.1474293Z Preparing to download the following artifacts:
+2026-08-01T06:44:40.1475378Z - ccm-release-candidate (ID: 8814727694, Size: 28025471, Expected Digest: sha256:8f107ce863582c8d22409dcd1a591068cb1386117ece9b3d7f9b952236a0fcdb)
+2026-08-01T06:44:40.3610182Z Redirecting to blob download url: https://productionresultssa13.blob.core.windows.net/actions-results/03c43046-b2f4-4a70-ae44-37e79d0a685e/workflow-job-run-fffe54f6-4aeb-5c8b-9291-46623b6ca52b/artifacts/a54cd562bcae16e5bed63b31fbe3c59e099c9915d6396506b16baa1d2d08528b.zip
+2026-08-01T06:44:40.3613003Z Starting download of artifact to: D:\a\ccm-web\ccm-web\release-artifacts
+2026-08-01T06:44:40.6965272Z (node:8824) [DEP0005] DeprecationWarning: Buffer() is deprecated due to security and usability issues. Please use the Buffer.alloc(), Buffer.allocUnsafe(), or Buffer.from() methods instead.
+2026-08-01T06:44:42.0251333Z SHA256 digest of downloaded artifact is 8f107ce863582c8d22409dcd1a591068cb1386117ece9b3d7f9b952236a0fcdb
+2026-08-01T06:44:42.0252493Z Artifact download completed successfully.
+2026-08-01T06:44:42.0253078Z Total of 1 artifact(s) downloaded
+2026-08-01T06:44:42.0259767Z Download artifact has finished successfully
+2026-08-01T06:44:42.0611746Z ##[group]Run $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+2026-08-01T06:44:42.0612697Z [36;1m$version = (Get-Content package.json -Raw | ConvertFrom-Json).version[0m
+2026-08-01T06:44:42.0613305Z [36;1m$manifestPath = Join-Path $PWD "release-artifacts/$version/release-artifact-manifest.json"[0m
+2026-08-01T06:44:42.0614126Z [36;1mif (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { throw "Release artifact manifest not found for version $version" }[0m
+2026-08-01T06:44:42.0614872Z [36;1m$data = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json[0m
+2026-08-01T06:44:42.0615565Z [36;1mif ($data.version -ne $version) { throw "Release artifact version mismatch: expected $version, received $($data.version)" }[0m
+2026-08-01T06:44:42.0616286Z [36;1m$tarball = Join-Path (Split-Path -Parent $manifestPath) $data.tarball[0m
+2026-08-01T06:44:42.0616892Z [36;1m$evidence = Join-Path $PWD "release-evidence/evidence-windows-latest-node22.json"[0m
+2026-08-01T06:44:42.0617375Z [36;1m$env:CCM_RELEASE_EVIDENCE_FILE = $evidence[0m
+2026-08-01T06:44:42.0617803Z [36;1mnode scripts/npm-package-install-release-selftest.mjs $tarball[0m
+2026-08-01T06:44:42.1244443Z shell: C:\Program Files\PowerShell\7\pwsh.EXE -command ". '{0}'"
+2026-08-01T06:44:42.1245422Z ##[endgroup]
+2026-08-01T06:45:24.5464430Z npm warn deprecated prebuild-install@7.1.3: No longer maintained. Please contact the author of the relevant native addon; alternatives are available.
+2026-08-01T06:45:27.7990302Z npm warn deprecated boolean@3.2.0: Package no longer supported. Contact Support at https://www.npmjs.com/support for more info.
+2026-08-01T06:45:41.1128509Z npm warn deprecated glob@10.5.0: Old versions of glob are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me
+2026-08-01T06:47:01.1230033Z 
+2026-08-01T06:47:01.1237071Z added 237 packages in 2m
+2026-08-01T06:47:12.5587985Z file:///D:/a/ccm-web/ccm-web/scripts/npm-installed-package-selftest.mjs:68
+2026-08-01T06:47:12.5589473Z     throw new Error(`${String(error?.message || error)}\n--- ccm-server.log ---\n${serverLog}`)
+2026-08-01T06:47:12.5590130Z           ^
+2026-08-01T06:47:12.5590286Z 
+2026-08-01T06:47:12.5591810Z Error: Command failed: C:\hostedtoolcache\windows\node\22.23.1\x64\node.exe C:\Users\RUNNER~1\AppData\Local\Temp\ccm-npm-release-L7zPb3\install\node_modules\@mumulinya167\cc-web\bin\ccm.js start --background --port 64416
+2026-08-01T06:47:12.5594632Z FAILED   服务未通过身份与就绪校验（process_exited）
+2026-08-01T06:47:12.5632871Z Log      C:\Users\RUNNER~1\AppData\Local\Temp\ccm-npm-release-L7zPb3\install\runtime-home-2.0.0\.cc-connect\logs\ccm-server.log
+2026-08-01T06:47:12.5633718Z 
+2026-08-01T06:47:12.5634003Z --- ccm-server.log ---
+2026-08-01T06:47:12.5634262Z 
+2026-08-01T06:47:12.5634658Z [2026-08-01T06:47:06.883Z] ccm start --background
+2026-08-01T06:47:12.5635728Z [RAG] 索引构建完成：0 份文档，0 个语义分片，缓存命中 0
+2026-08-01T06:47:12.5636750Z C:\Users\RUNNER~1\AppData\Local\Temp\ccm-npm-release-L7zPb3\install\node_modules\@mumulinya167\cc-web\dist\core\server-instance-lock.js:160
+2026-08-01T06:47:12.5637423Z 
+2026-08-01T06:47:12.5637819Z         throw new Error("无法建立可核验的 CCM 进程身份，拒绝启动");
+2026-08-01T06:47:12.5638108Z 
+2026-08-01T06:47:12.5638255Z         ^
+2026-08-01T06:47:12.5638411Z 
+2026-08-01T06:47:12.5638418Z 
+2026-08-01T06:47:12.5638423Z 
+2026-08-01T06:47:12.5638627Z Error: 无法建立可核验的 CCM 进程身份，拒绝启动
+2026-08-01T06:47:12.5638855Z 
+2026-08-01T06:47:12.5639708Z     at acquireCcmServerInstanceLock (C:\Users\RUNNER~1\AppData\Local\Temp\ccm-npm-release-L7zPb3\install\node_modules\@mumulinya167\cc-web\dist\core\server-instance-lock.js:160:15)
+2026-08-01T06:47:12.5640587Z 
+2026-08-01T06:47:12.5641269Z     at startServer (C:\Users\RUNNER~1\AppData\Local\Temp\ccm-npm-release-L7zPb3\install\node_modules\@mumulinya167\cc-web\dist\server.js:1897:82)
+2026-08-01T06:47:12.5644989Z 
+2026-08-01T06:47:12.5645838Z     at Object.<anonymous> (C:\Users\RUNNER~1\AppData\Local\Temp\ccm-npm-release-L7zPb3\install\node_modules\@mumulinya167\cc-web\dist\server.js:2030:20)
+2026-08-01T06:47:12.5647264Z 
+2026-08-01T06:47:12.5647672Z     at Module._compile (node:internal/modules/cjs/loader:1781:14)
+2026-08-01T06:47:12.5648015Z 
+2026-08-01T06:47:12.5648230Z     at Object..js (node:internal/modules/cjs/loader:1913:10)
+2026-08-01T06:47:12.5648517Z 
+2026-08-01T06:47:12.5648749Z     at Module.load (node:internal/modules/cjs/loader:1505:32)
+2026-08-01T06:47:12.5649006Z 
+2026-08-01T06:47:12.5649227Z     at Function._load (node:internal/modules/cjs/loader:1309:12)
+2026-08-01T06:47:12.5649521Z 
+2026-08-01T06:47:12.5649728Z     at wrapModuleLoad (node:internal/modules/cjs/loader:254:19)
+2026-08-01T06:47:12.5650017Z 
+2026-08-01T06:47:12.5650326Z     at Function.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:171:5)
+2026-08-01T06:47:12.5650733Z 
+2026-08-01T06:47:12.5650925Z     at node:internal/main/run_main_module:36:49
+2026-08-01T06:47:12.5651150Z 
+2026-08-01T06:47:12.5651156Z 
+2026-08-01T06:47:12.5651192Z 
+2026-08-01T06:47:12.5651300Z Node.js v22.23.1
+2026-08-01T06:47:12.5651468Z 
+2026-08-01T06:47:12.5651473Z 
+2026-08-01T06:47:12.5651760Z     at file:///D:/a/ccm-web/ccm-web/scripts/npm-installed-package-selftest.mjs:68:11
+2026-08-01T06:47:12.5652457Z     at process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+2026-08-01T06:47:12.5652808Z 
+2026-08-01T06:47:12.5652936Z Node.js v22.23.1
+2026-08-01T06:47:22.9545306Z file:///D:/a/ccm-web/ccm-web/scripts/npm-package-install-release-selftest.mjs:28
+2026-08-01T06:47:22.9547021Z   if (result.status !== 0) throw new Error(String(result.error?.message || result.stderr || result.stdout || `${args.join(' ')} failed`))
+2026-08-01T06:47:22.9548245Z                                  ^
+2026-08-01T06:47:22.9548612Z 
+2026-08-01T06:47:22.9549764Z Error: D:\a\ccm-web\ccm-web\scripts\npm-installed-package-selftest.mjs C:\Users\RUNNER~1\AppData\Local\Temp\ccm-npm-release-L7zPb3\install 2.0.0 failed
+2026-08-01T06:47:22.9551481Z     at run (file:///D:/a/ccm-web/ccm-web/scripts/npm-package-install-release-selftest.mjs:28:34)
+2026-08-01T06:47:22.9552869Z     at file:///D:/a/ccm-web/ccm-web/scripts/npm-package-install-release-selftest.mjs:59:3
+2026-08-01T06:47:22.9553948Z     at ModuleJob.run (node:internal/modules/esm/module_job:343:25)
+2026-08-01T06:47:22.9555020Z     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:681:26)
+2026-08-01T06:47:22.9557187Z     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:117:5)
+2026-08-01T06:47:22.9557987Z 
+2026-08-01T06:47:22.9558192Z Node.js v22.23.1
+2026-08-01T06:47:23.0026888Z ##[error]Process completed with exit code 1.
+2026-08-01T06:47:23.0406502Z Node 20 is being deprecated. This workflow is running with Node 24 by default. If you need to temporarily use Node 20, you can set the ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION=true environment variable. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+2026-08-01T06:47:23.0408122Z Post job cleanup.
+2026-08-01T06:47:23.3902966Z [command]"C:\Program Files\Git\bin\git.exe" version
+2026-08-01T06:47:23.4319161Z git version 2.55.0.windows.3
+2026-08-01T06:47:23.4417188Z Temporarily overriding HOME='D:\a\_temp\5925fff6-c04b-49df-ae8a-6fd19744d75a' before making global git config changes
+2026-08-01T06:47:23.4420159Z Adding repository directory to the temporary git global config as a safe directory
+2026-08-01T06:47:23.4442707Z [command]"C:\Program Files\Git\bin\git.exe" config --global --add safe.directory D:\a\ccm-web\ccm-web
+2026-08-01T06:47:23.5007761Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp core\.sshCommand
+2026-08-01T06:47:23.5446703Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "sh -c \"git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :\""
+2026-08-01T06:47:24.3788695Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-08-01T06:47:24.4084573Z http.https://github.com/.extraheader
+2026-08-01T06:47:24.4135134Z [command]"C:\Program Files\Git\bin\git.exe" config --local --unset-all http.https://github.com/.extraheader
+2026-08-01T06:47:24.4476842Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "sh -c \"git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :\""
+2026-08-01T06:47:25.0571046Z [command]"C:\Program Files\Git\bin\git.exe" config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-08-01T06:47:25.0911990Z [command]"C:\Program Files\Git\bin\git.exe" submodule foreach --recursive "git config --local --show-origin --name-only --get-regexp remote.origin.url"
+2026-08-01T06:47:25.7135612Z Cleaning up orphan processes
+2026-08-01T06:47:25.7756563Z ##[warning]Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4, actions/download-artifact@v4, actions/setup-node@v4. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/

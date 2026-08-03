@@ -48,7 +48,7 @@ const report = { pass: false, generatedAt: new Date().toISOString(), checks: [],
 const providers = [
   { id: 'codex', label: 'Codex CLI', description: '使用本机 Codex 账号登录。', settingsManaged: true },
   { id: 'cursor', label: 'Cursor Agent', description: '使用本机 Cursor 账号登录。', settingsManaged: true },
-  { id: 'gemini', label: 'Gemini CLI', description: '使用 Google 账号登录。', settingsManaged: true },
+  { id: 'gemini', label: 'Antigravity CLI', description: '使用 Google Antigravity 账号登录。', settingsManaged: true },
   { id: 'opencode', label: 'OpenCode', description: '使用已连接的模型 Provider。', settingsManaged: true },
   { id: 'claudecode', label: 'Claude Code API', description: '使用第三方 API。', settingsManaged: true },
 ]
@@ -87,7 +87,7 @@ Object.assign(statuses.claudecode, { authState: 'configured', externalManaged: t
 const modelCatalog = {
   codex: [{ id: '', label: '自动（跟随 Codex CLI）' }, { id: 'gpt-account-a', label: 'Account Model A' }, { id: 'gpt-account-b', label: 'Account Model B' }],
   cursor: [{ id: '', label: '自动（由 Cursor 选择）' }, { id: 'cursor-account-model', label: 'Cursor Account Model' }],
-  gemini: [{ id: '', label: '自动（由 Gemini CLI 选择）' }, { id: 'gemini-account-model', label: 'Gemini Account Model' }],
+  gemini: [{ id: '', label: '自动（由 Antigravity CLI 选择）' }, { id: 'gemini-3.6-flash-low', label: 'gemini-3.6-flash-low' }],
   opencode: [{ id: '', label: '自动（由 OpenCode 选择）' }, { id: 'openai/account-model', label: 'openai/account-model' }],
   claudecode: [{ id: 'claude-external-model', label: 'Claude External Model' }],
 }

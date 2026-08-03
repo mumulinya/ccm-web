@@ -384,15 +384,30 @@
           </div>
 
           <div class="agent-chat-messages" id="agent-chat" ref="agentChatEl" @scroll="updateAgentChatScrollState">
-            <div v-for="(msg, index) in agentMessages" v-show="isAgentMessageVisible(msg)" :id="'music-agent-msg-' + index" :key="getAgentMessageKey(msg)" class="aura-chat-row" :class="msg.role">
+            <ConversationMessageShell
+              v-for="(msg, index) in agentMessages"
+              v-show="isAgentMessageVisible(msg)"
+              :id="'music-agent-msg-' + index"
+              :key="getAgentMessageKey(msg)"
+              :role="msg.role"
+              :timestamp="msg.timestamp || ''"
+              :time-label="msg.timestamp ? '' : (msg.time || '')"
+              :sender-label="msg.role === 'agent' ? musicAgentLabel : msg.role === 'operator' ? '我' : '系统'"
+              :structured="!!getMessageResults(msg)"
+              :streaming="!!msg.streaming"
+              compact
+              class="aura-chat-row"
+              :class="msg.role"
+            >
               
               <!-- 消息气泡 -->
               <div class="chat-bubble-container">
-                <div class="chat-meta">
-                  <span class="meta-role">{{ msg.role === 'agent' ? musicAgentLabel : msg.role === 'operator' ? '我' : '系统' }}</span>
-                  <span class="meta-time">{{ msg.time || '00:00:00' }}</span>
-                </div>
-                <div class="chat-body-text" :class="{ 'blink-cursor': msg.streaming }">{{ displayMessageContent(msg.content) || (msg.streaming ? '正在理解你的需求...' : '') }}</div>
+                <ConversationProcessingState
+                  v-if="msg.streaming && !displayMessageContent(msg.content)"
+                  title="音乐助手正在理解你的需求"
+                  detail="正在检索曲库并准备候选歌曲。"
+                />
+                <div v-else class="chat-body-text" :class="{ 'blink-cursor': msg.streaming }">{{ displayMessageContent(msg.content) }}</div>
                 
                 <!-- 推荐歌曲卡片列表 -->
                 <div v-if="getMessageResults(msg)" class="tracks-card-box">
@@ -427,16 +442,11 @@
                   </div>
                 </div>
               </div>
-            </div>
+            </ConversationMessageShell>
             
-            <div v-if="showStandaloneAgentLoading" class="aura-chat-row agent">
-              <div class="chat-bubble-container">
-                <div class="chat-meta">
-                  <span class="meta-role">{{ musicAgentLabel }}</span>
-                </div>
-                <div class="chat-body-text blink-cursor">正在理解你的需求...</div>
-              </div>
-            </div>
+            <ConversationMessageShell v-if="showStandaloneAgentLoading" role="assistant" :sender-label="musicAgentLabel" compact streaming class="aura-chat-row agent">
+              <ConversationProcessingState title="音乐助手正在理解你的需求" detail="正在检索曲库并准备候选歌曲。" />
+            </ConversationMessageShell>
             <div id="agent-chat-end"></div>
           </div>
 

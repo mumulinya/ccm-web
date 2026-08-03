@@ -65,6 +65,7 @@ function normalizeWorkflowDecision(value, source = "model") {
     const directReplyReady = rawMode === "answer"
         && value?.directReplyReady === true
         && !!directReply;
+    const semanticDecisionReceipt = value?.semanticDecisionReceipt || value?.semantic_decision_receipt || null;
     return {
         schema: "ccm-model-workflow-decision-v1",
         mode: rawMode,
@@ -104,6 +105,7 @@ function normalizeWorkflowDecision(value, source = "model") {
         directReplyReady,
         directReply: directReplyReady ? directReply : "",
         source,
+        ...(semanticDecisionReceipt ? { semanticDecisionReceipt } : {}),
     };
 }
 function explicitWorkflowDecision(mode, reason, overrides = {}) {

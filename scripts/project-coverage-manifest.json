@@ -147,13 +147,15 @@
       ],
       "criticalTests": [
         "global-agent-runtime-production-closure-selftest.mjs",
+        "group-direct-reply-fast-path-selftest.mjs",
         "unified-model-retry-selftest.mjs"
       ],
       "architectureDocs": [
         "docs/confirmed-project-architecture/GLOBAL-AGENT-OPERATIONS.md"
       ],
       "businessProcessDocs": [
-        "docs/confirmed-business-processes/GLOBAL-AGENT-RUNTIME-PRODUCTION-V2.md"
+        "docs/confirmed-business-processes/GLOBAL-AGENT-RUNTIME-PRODUCTION-V2.md",
+        "docs/confirmed-business-processes/THREE-SESSION-CC-MAIN-AGENT-LOOP.md"
       ],
       "sharedBy": [
         "semantic-routing",
@@ -880,7 +882,7 @@
       "id": "development-agent-runtime",
       "label": "开发Agent认证与运行配置",
       "status": "active",
-      "summary": "Codex、Cursor、Gemini CLI、OpenCode和Claude Code的安装、登录、模型与可用性。",
+      "summary": "Codex、Cursor、Antigravity CLI、OpenCode和Claude Code的安装、登录、模型与可用性。",
       "frontendPages": [],
       "backendRoots": [
         "backend/agents",

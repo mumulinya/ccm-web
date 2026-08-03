@@ -190,8 +190,6 @@ export function usePetMenu(props, emit) {
       color: '#b98268',
       format: 'svg',
       pixelated: false,
-      sourceCreator: 'kiffin',
-      sourceUrl: 'https://codex-pet.org/zh/pets/yuexinmiao1/',
     },
     { id: 'cloudling', name: '小云朵', emoji: '☁️', color: '#38bdf8' },
     { id: 'calico', name: '三花猫', emoji: '🐱', color: '#d97706' },
@@ -251,6 +249,15 @@ export function usePetMenu(props, emit) {
       return `/pets/${type}.${custom.format || 'png'}`
     }
     const safeType = normalizePetType(type)
+    const stableBuiltInIcons = {
+      yuexinmiao: '/pets/yuexinmiao-idle.svg',
+      cloudling: '/pets/cloudling/cloudling-idle.svg',
+      calico: '/pets/calico/calico-idle-follow.svg',
+      clawd: '/pets/clawd/clawd-idle.svg',
+      ghost: '/pets/ghost-idle.svg',
+      robot: '/pets/robot-idle.svg',
+    }
+    if (stableBuiltInIcons[safeType]) return stableBuiltInIcons[safeType]
     return `/pets/${safeType}.svg`
   }
 
@@ -428,26 +435,26 @@ export function usePetMenu(props, emit) {
       dir: 'cloudling',
       files: {
         idle: 'cloudling-idle.svg',
-        yawning: 'cloudling-idle-to-dozing.svg',
-        dozing: 'cloudling-dozing.svg',
-        collapsing: 'cloudling-dozing-to-sleeping.svg',
+        yawning: 'cloudling-mini-enter-sleep.svg',
+        dozing: 'cloudling-mini-sleep.svg',
+        collapsing: 'cloudling-mini-enter-sleep.svg',
         thinking: 'cloudling-thinking.svg',
         planning: 'cloudling-thinking.svg',
         working: 'cloudling-typing.svg',
-        building: 'cloudling-building.svg',
-        debugging: 'cloudling-sweeping.svg',
+        building: 'cloudling-typing.svg',
+        debugging: 'cloudling-thinking.svg',
         reviewing: 'cloudling-conducting.svg',
         waiting: 'cloudling-notification.svg',
         juggling: 'cloudling-juggling.svg',
-        sweeping: 'cloudling-sweeping.svg',
+        sweeping: 'cloudling-thinking.svg',
         error: 'cloudling-error.svg',
         attention: 'cloudling-attention.svg',
         happy: 'cloudling-attention.svg',
         notification: 'cloudling-notification.svg',
-        carrying: 'cloudling-carrying.svg',
+        carrying: 'cloudling-idle-reading.svg',
         drag: 'cloudling-react-drag.svg',
-        sleeping: 'cloudling-sleeping.svg',
-        waking: 'cloudling-sleeping-to-idle.svg',
+        sleeping: 'cloudling-mini-sleep.svg',
+        waking: 'cloudling-mini-enter-roll-in.svg',
       },
       idleAnimations: ['cloudling-idle-reading.svg'],
       reactions: { drag: 'cloudling-react-drag.svg' }
@@ -769,6 +776,7 @@ export function usePetMenu(props, emit) {
   }
 
   const updatePetType = async (agent, type) => {
+    if (engineBusy.value) return false
     if (type !== BUILTIN_FALLBACK_PET_TYPE && fallbackPetTypes.some(item => item.id === type)) {
       engineBusy.value = true
       try {
@@ -816,7 +824,7 @@ export function usePetMenu(props, emit) {
   }
 
   const applyLibraryPet = async () => {
-    if (!selectedAgent.value || !selectedLibrarySkin.value) return
+    if (engineBusy.value || !selectedAgent.value || !selectedLibrarySkin.value) return
     if (!await updatePetType(selectedAgent.value, selectedLibrarySkin.value.id)) return
     toast.success(`已为 ${getAgentLabel(selectedAgentInfo.value)} 应用 ${selectedLibrarySkin.value.name}`)
   }

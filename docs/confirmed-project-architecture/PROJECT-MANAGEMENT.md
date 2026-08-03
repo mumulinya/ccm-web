@@ -18,7 +18,7 @@
 
 网页项目会话产生的普通回复不会自动发送到飞书。删除飞书会话时会同步清理该项目 cc-connect 的活动与历史会话映射。
 
-Windows 上的项目飞书长连接和它启动的 Claude Code、Codex、Cursor、Gemini CLI 或 OpenCode 任务都必须在无控制台进程树中执行。项目消息不能弹出命令行窗口；Agent 设置页中由用户主动点击的登录、授权或退出流程仍可打开必要的浏览器或交互窗口。
+Windows 上的项目飞书长连接和它启动的 Claude Code、Codex、Cursor、Antigravity CLI 或 OpenCode 任务都必须在无控制台进程树中执行。项目消息不能弹出命令行窗口；Agent 设置页中由用户主动点击的登录、授权或退出流程仍可打开必要的浏览器或交互窗口。
 
 项目飞书机器人只负责收发平台消息。运行时 Agent 必须使用项目ACP将消息交给CCM，并按应用、项目、`chat_id + open_id`和话题根消息解析精确绑定；无法证明ACP映射时拒绝路由，不能因只有一个目标而自动选择。普通问答由项目主 Agent回复；开发任务才进入规划、第三方开发 Agent和TestAgent闭环。
 

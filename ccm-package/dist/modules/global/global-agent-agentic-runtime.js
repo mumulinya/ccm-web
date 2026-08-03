@@ -41,7 +41,7 @@ const group_compaction_strategy_1 = require("../collaboration/group-compaction-s
 const source_ingestion_1 = require("../requirements/source-ingestion");
 const knowledge_access_1 = require("../knowledge/knowledge-access");
 const project_runtime_1 = require("../projects/project-runtime");
-const workflow_decision_1 = require("../../agents/workflow-decision");
+const main_agent_turn_1 = require("../../agents/main-agent-turn");
 const global_agent_tool_authorization_1 = require("./global-agent-tool-authorization");
 const global_agent_run_store_1 = require("../../agents/global/global-agent-run-store");
 const reliability_ledger_1 = require("../../system/reliability-ledger");
@@ -215,6 +215,7 @@ function createGlobalAgentAgenticRuntime(deps) {
         };
     }
     function buildAgenticContext(query = "", sessionId = "", options = {}) {
+        const lazyResources = options.lazyResources === true || options.lazy_resources === true;
         const tasks = loadTasks();
         const groups = Array.isArray(options.groups) ? options.groups : loadGroups();
         const globalTasks = tasks.filter(isGlobalAgentOwnedTask);
@@ -259,14 +260,14 @@ function createGlobalAgentAgenticRuntime(deps) {
                 })),
                 policy: "global_scope_authorized_only",
             },
-            global_memory: query ? buildGlobalAgentMemoryPacket(query, {
+            global_memory: query && !lazyResources ? buildGlobalAgentMemoryPacket(query, {
                 sessionId,
                 limit: 7,
                 recordMetric: options.recordMemoryMetric !== false && options.record_memory_metric !== false,
             }) : "",
             global_knowledge: options.knowledgeContext || options.knowledge_context || "",
             global_shared_files: {
-                context: globalSharedFiles.context,
+                context: lazyResources ? "" : globalSharedFiles.context,
                 manifest_checksum: globalSharedFiles.checksum,
                 complete: globalSharedFiles.complete,
                 files: globalSharedFiles.files.map((file) => ({
@@ -311,9 +312,10 @@ function createGlobalAgentAgenticRuntime(deps) {
             throw new Error(`global agent context boundary failed: ${validation.issues.join(", ")}`);
         return context;
     }
-    function buildGlobalProviderPayloadSnapshot(messages, sessionId) {
+    function buildGlobalProviderPayloadSnapshot(messages, sessionId, run) {
         const systemMessages = messages.filter(message => message.role === "system");
         const systemText = systemMessages.map(message => String(message.content || "")).join("\n");
+        const completeMessageText = messages.map(message => String(message.content || "")).join("\n");
         const skillSections = [];
         const catalogStart = systemText.indexOf("[CCM 可由模型选择的 Skill 目录]");
         if (catalogStart >= 0) {
@@ -326,6 +328,64 @@ function createGlobalAgentAgenticRuntime(deps) {
         const authorizedTools = (0, global_agent_tool_authorization_1.buildGlobalAgentToolRuntimeContext)({ source: "global-agent-provider-payload" });
         const configuredSkills = authorizedTools.catalog.skills.map((skill) => ({ name: String(skill?.name || ""), contentHash: String(skill?.contentHash || "") })).filter((skill) => skill.name);
         const configuredMcpTools = authorizedTools.catalog.tools.map((tool) => ({ name: String(tool?.canonicalName || tool?.name || ""), server: String(tool?.server || "") })).filter((tool) => tool.name);
+        const loadedSkills = authorizedTools.catalog.skills
+            .filter((skill) => systemText.includes(String(skill?.name || "")))
+            .map((skill) => ({
+            kind: "skill",
+            name: String(skill?.name || ""),
+            aliases: [String(skill?.name || ""), `skill:${String(skill?.name || "")}`].filter(Boolean),
+            loadLevel: systemText.includes(`## Skill:${String(skill?.name || "")}`) ? "body" : "catalog",
+            checksum: String(skill?.contentHash || ""),
+        }));
+        const allSkillCatalog = new Map((Array.isArray(loadSkills()) ? loadSkills() : [])
+            .map((skill) => [String(skill?.name || ""), skill]));
+        for (const match of systemText.matchAll(/^## Skill:([^\r\n]+)/gm)) {
+            const name = String(match[1] || "").trim();
+            if (!name || loadedSkills.some((skill) => skill.name === name))
+                continue;
+            const skill = allSkillCatalog.get(name) || null;
+            loadedSkills.push({
+                kind: "skill",
+                name,
+                aliases: [name, `skill:${name}`],
+                loadLevel: "body",
+                checksum: String(skill?.contentHash || crypto.createHash("sha256").update(name).digest("hex")),
+            });
+        }
+        const loadedMcp = authorizedTools.catalog.tools
+            .filter((tool) => systemText.includes(String(tool?.canonicalName || tool?.name || "")))
+            .map((tool) => ({
+            kind: "mcp",
+            name: String(tool?.canonicalName || tool?.name || ""),
+            aliases: [
+                String(tool?.canonicalName || ""),
+                String(tool?.server || ""),
+                tool?.server && tool?.name ? `${tool.server}/${tool.name}` : "",
+                String(tool?.name || ""),
+            ].filter(Boolean),
+            loadLevel: "schema",
+            checksum: crypto.createHash("sha256").update(JSON.stringify({
+                name: tool?.canonicalName || tool?.name,
+                server: tool?.server,
+                inputSchema: tool?.inputSchema || null,
+            })).digest("hex"),
+        }));
+        const invocations = (Array.isArray(run?.steps) ? run.steps : []).flatMap((step) => {
+            const wrapper = String(step?.tool?.name || "");
+            const kind = wrapper === "invoke_skill" ? "skill" : wrapper === "invoke_mcp" ? "mcp" : "";
+            const name = kind === "skill"
+                ? String(step?.tool?.arguments?.name || "")
+                : kind === "mcp" ? String(step?.tool?.arguments?.tool_name || step?.tool?.arguments?.toolName || step?.tool?.arguments?.name || "") : "";
+            if (!kind || !name || !completeMessageText.includes(name) || (step?.observation === undefined && !step?.error))
+                return [];
+            return [{
+                    kind,
+                    name,
+                    aliases: [name, kind === "skill" ? `skill:${name}` : ""].filter(Boolean),
+                    ok: !step?.error && step?.observation?.success !== false,
+                    resultChecksum: crypto.createHash("sha256").update(JSON.stringify(step?.observation ?? step?.error ?? null)).digest("hex"),
+                }];
+        });
         return (0, session_compaction_core_1.buildModelVisiblePayloadSnapshot)({
             scope: "global",
             sessionId,
@@ -338,6 +398,12 @@ function createGlobalAgentAgenticRuntime(deps) {
                 subagentDefinitions: {
                     projects: getConfigs().map((project) => String(project?.name || "")).filter(Boolean),
                     groups: loadGroups().map((group) => ({ id: String(group?.id || ""), name: String(group?.name || "") })),
+                },
+                loadedContextItems: {
+                    schema: "ccm-loaded-context-items-v1",
+                    skills: loadedSkills,
+                    mcp: loadedMcp,
+                    invocations,
                 },
             },
         });
@@ -352,7 +418,7 @@ function createGlobalAgentAgenticRuntime(deps) {
         const config = loadOrchestratorConfig();
         const modelCapacity = (0, group_compaction_strategy_1.resolveGroupModelContextCapacity)(config);
         const threshold = (0, group_compaction_strategy_1.getGroupAutoCompactThreshold)(config);
-        const triggerPayload = buildGlobalProviderPayloadSnapshot(messages, sessionId);
+        const triggerPayload = buildGlobalProviderPayloadSnapshot(messages, sessionId, run);
         if (!options.promptTooLong && triggerPayload.totalTokens < threshold)
             return messages;
         const compaction = await compactGlobalAgentSessionWithModel(sessionId, {
@@ -379,7 +445,7 @@ function createGlobalAgentAgenticRuntime(deps) {
                 const rebuiltMessages = await (0, global_agent_run_projection_1.buildGlobalAgentModelMessages)(run, runtime, { sessionContinuationOverride: continuation });
                 return {
                     messages: rebuiltMessages,
-                    modelVisiblePayload: buildGlobalProviderPayloadSnapshot(rebuiltMessages, sessionId),
+                    modelVisiblePayload: buildGlobalProviderPayloadSnapshot(rebuiltMessages, sessionId, run),
                 };
             },
         });
@@ -392,7 +458,7 @@ function createGlobalAgentAgenticRuntime(deps) {
         const rebuiltMessages = Array.isArray(compaction.preparedModelMessages)
             ? compaction.preparedModelMessages
             : await (0, global_agent_run_projection_1.buildGlobalAgentModelMessages)(run, runtime);
-        const rebuiltPayload = buildGlobalProviderPayloadSnapshot(rebuiltMessages, sessionId);
+        const rebuiltPayload = buildGlobalProviderPayloadSnapshot(rebuiltMessages, sessionId, run);
         const postCompactGate = (0, session_compaction_core_1.buildSessionPostCompactGate)({ modelVisiblePayload: rebuiltPayload, threshold });
         if (postCompactGate.providerCallAllowed !== true || rebuiltPayload.totalTokens >= modelCapacity.contextWindow) {
             throw new Error(`全局 Agent 正式压缩后的真实 Provider Payload 仍超限：${rebuiltPayload.totalTokens}/${threshold}`);
@@ -708,6 +774,19 @@ function createGlobalAgentAgenticRuntime(deps) {
             }
             else if (name === "query_global_memory") {
                 observation = { success: true, query: args.query, ...recallGlobalAgentMemory(String(args.query || ""), { sessionId: run.session_id, limit: Number(args.limit || 8) }) };
+            }
+            else if (name === "read_global_shared_files") {
+                const sharedFiles = (0, shared_files_v2_1.buildSharedFilesContextV2)("global", "global", {
+                    maxTokens: 32_000,
+                    title: "以下是全局 Agent 已授权共享文件。使用其中事实时必须引用文件和分片：",
+                });
+                observation = {
+                    success: true,
+                    context: sharedFiles.context,
+                    manifest_checksum: sharedFiles.checksum,
+                    complete: sharedFiles.complete,
+                    files: sharedFiles.files.map((file) => ({ id: file.id, name: file.name, checksum: file.checksum, chunks: file.chunks?.length || 0 })),
+                };
             }
             else if (name === "manage_global_memory") {
                 const operation = String(args.operation || "").toLowerCase();
@@ -1087,7 +1166,7 @@ function createGlobalAgentAgenticRuntime(deps) {
                     throw new Error("统一大模型尚未配置");
                 const { accumulateGlobalAgentRunUsage } = require("../../agents/global/global-agent-metrics");
                 const invoke = (providerMessages) => {
-                    run.latest_model_visible_payload = buildGlobalProviderPayloadSnapshot(providerMessages, String(run.session_id || ""));
+                    run.latest_model_visible_payload = buildGlobalProviderPayloadSnapshot(providerMessages, String(run.session_id || ""), run);
                     const providerCacheBoundary = buildGlobalAgentSessionContinuation(String(run.session_id || ""));
                     return callGlobalModelWithRetry(config, providerMessages, {
                         providerContextCache: {
@@ -1120,6 +1199,7 @@ function createGlobalAgentAgenticRuntime(deps) {
             prepareModelMessages: (messages, run) => prepareGlobalProviderMessages(messages, run, runtime),
             getContext: (run) => buildAgenticContext(run.user_message, run.session_id, {
                 knowledgeContext: input.knowledgeContext || "",
+                lazyResources: true,
                 runId: run.id,
                 source: run.source || "global-agent",
             }),
@@ -1134,6 +1214,51 @@ function createGlobalAgentAgenticRuntime(deps) {
                 recordGlobalAgentRuntimeOutput(run, { type: "model_fallback", status: "warning", error: detail });
                 // 模型不可用时只总结已有观察；不得让本地关键词规则替模型选择新工作流。
                 return null;
+            },
+            onWorkflowDecision: (workflowDecision, run, modelCallIndex, modelDecision) => {
+                const responseType = modelDecision?.tool
+                    ? "tool_calls"
+                    : modelDecision?.state === "needs_confirmation" ? "clarify"
+                        : modelDecision?.state === "plan" ? "plan"
+                            : modelDecision?.state === "execute" ? "dispatch"
+                                : "reply";
+                const decision = (0, main_agent_turn_1.normalizeMainAgentTurnDecision)({
+                    scope: "global",
+                    scopeId: "global",
+                    exactSessionId: String(run.session_id || input.sessionId || "default"),
+                    turnId: String(run.turn_id || input.turnId || run.id),
+                    parsed: { responseType, reply: modelDecision?.message || "" },
+                    workflowDecision,
+                    reply: modelDecision?.message || "",
+                    toolRequests: modelDecision?.tool ? [{ name: modelDecision.tool.name, arguments: modelDecision.tool.arguments || {}, reason: modelDecision.message || "" }] : [],
+                });
+                const receipt = (0, main_agent_turn_1.createMainAgentTurnReceipt)({
+                    decision,
+                    modelCallIndex,
+                    toolRound: Math.max(0, modelCallIndex - 1),
+                    usage: run.latest_context_usage || null,
+                    inputIdentity: { sessionId: run.session_id, turnId: run.turn_id || input.turnId || "", message: input.authorizationMessage || run.original_user_message || run.user_message },
+                });
+                run.main_agent_turn_decision = decision;
+                run.main_agent_turn_receipt = receipt;
+                input.onEvent?.({ type: "turn_decision", decision: (0, main_agent_turn_1.publicMainAgentTurnDecision)(decision), receipt });
+                if (modelCallIndex !== 1)
+                    return;
+                const authorizationReceipt = (0, global_agent_authorization_1.buildGlobalWriteAuthorizationReceipt)({
+                    turnId: String(run.turn_id || input.turnId || run.id),
+                    sessionId: String(run.session_id || input.sessionId || "default"),
+                    source: String(run.source || input.source || "web"),
+                    message: String(input.authorizationMessage || run.original_user_message || run.user_message || ""),
+                    workflowDecision,
+                    principal: input.principal,
+                    readOnly: input.readOnly,
+                });
+                if (input.readOnly === true && workflowDecision.actionRequired === true) {
+                    throw Object.assign(new Error("当前 Viewer 账户仅允许只读问答；这条需求需要创建任务或执行写入操作，请联系 Operator 或 Admin"), { code: "VIEWER_EXECUTION_FORBIDDEN" });
+                }
+                run.write_authorization_receipt = authorizationReceipt;
+                run.writeAuthorizationReceipt = authorizationReceipt;
+                run.explicit_write_authorization = authorizationReceipt.allowed_risk === "write";
             },
             onEvent: input.onEvent ? (event) => input.onEvent(event) : undefined,
         };
@@ -1168,107 +1293,21 @@ function createGlobalAgentAgenticRuntime(deps) {
         else {
             clarificationCandidate = findClarifyingGlobalAgentRun(sessionId);
         }
-        const workflowDecision = await (0, workflow_decision_1.decideWorkflowWithModel)({
-            message: input.message,
-            scope: "global",
-            sourceCount: Number(input.sourceIngestion?.source_count || input.sourceIngestion?.sources?.length || 0),
-            context: {
-                session_id: sessionId,
-                current_goal: clarificationCandidate?.original_user_message || clarificationCandidate?.user_message || "",
-                current_phase: clarificationCandidate?.status || "new",
-                has_waiting_clarification: !!clarificationCandidate,
-            },
-        });
-        if (input.readOnly === true && workflowDecision.actionRequired === true) {
-            throw Object.assign(new Error("当前 Viewer 账户仅允许只读问答；这条需求需要创建任务或执行写入操作，请联系 Operator 或 Admin"), { code: "VIEWER_EXECUTION_FORBIDDEN" });
-        }
-        const directReply = !clarificationCandidate
-            && workflowDecision.mode === "answer"
-            && workflowDecision.directReplyReady === true
-            && !!String(workflowDecision.directReply || "").trim()
-            && workflowDecision.actionRequired === false
-            && workflowDecision.readAction === "none"
-            && workflowDecision.continuationKind === "new_task"
-            && workflowDecision.targetRefs.length === 0
-            && workflowDecision.selectedSkills.length === 0
-            && workflowDecision.clarificationQuestions.length === 0
-            && Number(input.sourceIngestion?.source_count || input.sourceIngestion?.sources?.length || 0) === 0
-            ? String(workflowDecision.directReply).trim()
-            : "";
-        let globalKnowledgeContext = "";
-        let compactionFixedContext = null;
-        if (!directReply) {
-            try {
-                globalKnowledgeContext = (await (0, knowledge_access_1.searchAgentKnowledge)(input.message, { role: "global-agent" }, { limit: 5, maxContextChars: 14000 })).context;
-            }
-            catch (error) {
-                console.warn(`[全局知识检索] 已使用无知识上下文继续：${error?.message || error}`);
-            }
-            compactionFixedContext = buildAgenticContext(input.message, sessionId, {
-                includeSessionContinuity: false,
-                recordMemoryMetric: false,
-                knowledgeContext: globalKnowledgeContext,
-            });
-            const compaction = await compactGlobalAgentSessionWithModel(sessionId, {
-                reason: "auto_model",
-                currentRequest: { role: "user", content: input.message },
-                fixedContext: compactionFixedContext,
-                tools: GLOBAL_AGENT_TOOL_SPECS,
-            });
-            if (compaction?.reason === "circuit_breaker") {
-                throw new Error("当前全局会话记忆压缩已熔断，本轮未调用模型；请在记忆中心检查该精确会话");
-            }
-        }
-        const runtime = createAgenticRuntime(baseUrl, ctx, { localIntent: null, onEvent: runtimeEventSink, sourceIngestion: input.sourceIngestion, knowledgeContext: globalKnowledgeContext });
-        const waitingClarification = clarificationCandidate && workflowDecision.continuationKind !== "new_task"
-            ? clarificationCandidate
-            : null;
-        const authorizationReceipt = (0, global_agent_authorization_1.buildGlobalWriteAuthorizationReceipt)({
-            turnId: input.turnId || `direct:${input.traceId || sessionId}`,
-            sessionId,
-            source: input.source || "web",
-            message: visibleUserMessage,
-            workflowDecision,
+        const runtime = createAgenticRuntime(baseUrl, ctx, {
+            localIntent: null,
+            onEvent: runtimeEventSink,
+            sourceIngestion: input.sourceIngestion,
+            knowledgeContext: "",
             principal: input.principal,
             readOnly: input.readOnly,
+            turnId: input.turnId,
+            sessionId,
+            source: input.source || "web",
+            authorizationMessage: visibleUserMessage,
         });
-        const explicitWriteAuthorization = authorizationReceipt.allowed_risk === "write";
-        const supervisedCandidate = !waitingClarification && workflowDecision.continuationKind !== "new_task"
-            ? listGlobalAgentRuns({ sessionId, limit: 100 }).find((item) => item.supervisor_id && ["supervising", "paused"].includes(String(item.status || ""))) || null
-            : null;
-        let supervisedContinuation = null;
-        if (supervisedCandidate) {
-            const supervisorBefore = getGlobalMissionSupervisor(supervisedCandidate.supervisor_id);
-            if (!supervisorBefore)
-                throw new Error("全局任务跟进记录不存在");
-            const kind = workflowDecision.continuationKind === "revise_goal" ? "revise_goal" : "supplement";
-            const businessGoal = [
-                String(supervisorBefore.business_goal || supervisedCandidate.original_user_message || supervisedCandidate.user_message || "").trim(),
-                `${kind === "revise_goal" ? "目标调整" : "补充要求"}：${visibleUserMessage}`,
-            ].filter(Boolean).join("\n").slice(0, 50_000);
-            const supervisor = await controlGlobalMissionSupervisor(supervisedCandidate.supervisor_id, "update_goal", createMissionSupervisorRuntime(ctx), {
-                business_goal: businessGoal,
-                acceptance: supervisorBefore.acceptance,
-                message: visibleUserMessage,
-                continuation_kind: kind,
-                request_id: input.turnId || input.traceId || "",
-                source: input.source || "global-supervision-continuation",
-                continuation: { kind, source: input.source || "global-supervision-continuation", reason: visibleUserMessage, interrupt_current_run: kind === "revise_goal" },
-            });
-            supervisedContinuation = applyGlobalAgentSupervisionSteer(supervisedCandidate.id, visibleUserMessage, {
-                kind,
-                source: input.source || "global-supervision-continuation",
-                requestId: input.turnId || input.traceId || "",
-                supervisorState: supervisor.status,
-                continuationSummary: supervisor.last_continuation || null,
-            });
-        }
-        const run = supervisedContinuation?.run || (waitingClarification
-            ? await continueGlobalAgentRunWithClarification(waitingClarification.id, input.message, runtime, {
-                explicitWriteAuthorization,
-                writeAuthorizationReceipt: authorizationReceipt,
-                turnId: input.turnId,
-            })
+        const waitingClarification = requestedClarificationRunId ? clarificationCandidate : null;
+        const run = waitingClarification
+            ? await continueGlobalAgentRunWithClarification(waitingClarification.id, input.message, runtime, { turnId: input.turnId })
             : await startGlobalAgentRun({
                 message: input.message,
                 originalMessage: input.originalMessage || input.message,
@@ -1276,19 +1315,17 @@ function createGlobalAgentAgenticRuntime(deps) {
                 sessionId,
                 source: input.source || "web",
                 traceId: input.traceId,
-                explicitWriteAuthorization,
-                writeAuthorizationReceipt: authorizationReceipt,
+                explicitWriteAuthorization: false,
+                writeAuthorizationReceipt: null,
                 authorizationMessage: visibleUserMessage,
                 turnId: input.turnId,
                 queueScope: input.queueScope,
-                workflowDecision,
-                directReply,
+                workflowDecision: null,
+                directReply: "",
                 maxSteps: 10,
                 timeoutMs: 12 * 60 * 1000,
-            }, runtime));
+            }, runtime);
         attachGlobalRunRequirementSources(run, input.sourceIngestion);
-        run.write_authorization_receipt = authorizationReceipt;
-        run.writeAuthorizationReceipt = authorizationReceipt;
         run.retryable = run.status === "failed";
         run.degraded = run.status === "failed" && /模型|provider|timeout|network|熔断/i.test(String(run.error || run.final_reply || ""));
         if (run.degraded)
@@ -1296,64 +1333,8 @@ function createGlobalAgentAgenticRuntime(deps) {
         (0, global_agent_run_store_1.saveRun)(run, true);
         if (input.onEvent) {
             const canonicalReply = globalRunVisibleReply(run, "我已整理处理结果，技术细节已放入技术详情。");
-            if (canonicalReply.trim()) {
-                if (run.direct_reply_fast_path === true) {
-                    input.onEvent({ type: "text", text: canonicalReply, run_id: run.id, trace_id: run.trace_id, direct_reply: true });
-                }
-                else {
-                    let emittedVisibleDelta = false;
-                    try {
-                        const config = loadOrchestratorConfig();
-                        const renderMessages = [
-                            {
-                                role: "system",
-                                content: "你是 CCM 的正式回复输出层。请完整保留给定正式回复中的事实、结论、风险、未完成事项、文件和验证结果，仅改善自然语言可读性。不得增加未提供的事实，不得输出 JSON、协议字段、分析过程或代码围栏，只输出面向用户的最终正文。",
-                            },
-                            {
-                                role: "user",
-                                content: JSON.stringify({ user_request: visibleUserMessage, official_reply: canonicalReply }),
-                            },
-                        ];
-                        run.latest_model_visible_payload = buildGlobalProviderPayloadSnapshot(renderMessages, String(run.session_id || ""));
-                        const { accumulateGlobalAgentRunUsage } = require("../../agents/global/global-agent-metrics");
-                        const providerCacheBoundary = buildGlobalAgentSessionContinuation(String(run.session_id || ""));
-                        const renderedReply = await callGlobalModelWithRetry(config, renderMessages, {
-                            providerContextCache: {
-                                scope: "global",
-                                scopeId: String(run.session_id || ""),
-                                sessionId: String(run.session_id || ""),
-                                generation: Number(run.generation || 0),
-                                boundaryGeneration: Number(providerCacheBoundary?.boundaryGeneration || 0),
-                                source: "global_final_reply",
-                            },
-                            onProviderContextCache: (receipt) => {
-                                run.latest_provider_context_cache = receipt;
-                            },
-                            onDelta: (delta) => {
-                                if (!delta)
-                                    return;
-                                emittedVisibleDelta = true;
-                                input.onEvent?.({ type: "text", text: delta, run_id: run.id, trace_id: run.trace_id });
-                            },
-                            onUsage: (usage) => {
-                                run.latest_context_usage = usage;
-                                accumulateGlobalAgentRunUsage(run, usage);
-                            },
-                        });
-                        if (String(renderedReply || "").trim()) {
-                            run.final_reply = String(renderedReply).trim().slice(0, 12000);
-                            run.updated_at = new Date().toISOString();
-                            (0, global_agent_run_store_1.saveRun)(run, runtime.persist !== false);
-                        }
-                    }
-                    catch (error) {
-                        console.warn(`[全局 Agent] 正式回复流式输出失败：${error?.message || error}`);
-                        if (!emittedVisibleDelta) {
-                            input.onEvent({ type: "text", text: canonicalReply, run_id: run.id, trace_id: run.trace_id, fallback: true });
-                        }
-                    }
-                }
-            }
+            if (canonicalReply.trim())
+                input.onEvent({ type: "text", text: canonicalReply, run_id: run.id, trace_id: run.trace_id, canonical: true });
             if (deferredTerminalEvent) {
                 input.onEvent({
                     ...deferredTerminalEvent,
@@ -1393,7 +1374,7 @@ function createGlobalAgentAgenticRuntime(deps) {
                 model: String(run.latest_context_usage?.model || loadOrchestratorConfig()?.model || ""),
                 anchorMessageId: assistantMessageId,
                 currentRequest: { role: "user", content: input.message },
-                fixedContext: compactionFixedContext || { direct_reply_fast_path: true },
+                fixedContext: { main_agent_loop: true },
                 tools: run.direct_reply_fast_path === true ? [] : GLOBAL_AGENT_TOOL_SPECS,
                 modelVisiblePayload: run.latest_model_visible_payload || null,
                 contextComponents: (() => {

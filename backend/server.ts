@@ -142,7 +142,6 @@ import {
 import { handleProjectsApi, reconcileProjectFeishuConnections, startControlBotConnection, startFeishuChannelSupervisorForServer, stopControlBotConnection, stopFeishuChannelSupervisorForServer } from "./modules/projects/projects";
 import { cleanupStaleProjectCloneArtifacts } from "./modules/projects/project-git";
 import { cleanupStaleGitMutationLeases } from "./modules/tools/git-workspace-runtime";
-import { classifyProjectChatIntentWithModel } from "./modules/projects/project-chat-intent";
 import {
   answerAsProjectMainAgent,
   cancelProjectMainTask,
@@ -154,6 +153,7 @@ import {
   projectMainTaskPublic,
   reconcileInterruptedProjectMainTasks,
   reviseProjectMainTask,
+  runProjectMainAgentFirstTurn,
 } from "./modules/projects/project-main-agent";
 import {
   appendProjectSessionTaskMessage,
@@ -1208,18 +1208,66 @@ function handleRequest(req: any, res: any) {
           return sendJson(res, { error: "续跑来源不属于当前项目会话" }, 409);
         }
       }
+      let projectFirstTurn: any;
+      try {
+        projectFirstTurn = await runProjectMainAgentFirstTurn({
+          project,
+          projectSessionId: exactProjectSessionId,
+          userMessage: finalMessage,
+          turnId: String((sourceIngestion as any)?.client_message_id || req.headers?.["x-client-message-id"] || ""),
+          sourceCount: Number(sourceIngestion?.source_count || sourceIngestion?.sources?.length || files?.length || 0),
+        });
+      } catch (error: any) {
+        return sendJson(res, {
+          success: false,
+          error: `统一大模型无法形成可靠工作流决策，本轮未启动项目 Agent：${error?.message || error}`,
+        }, 503);
+      }
+      const chatIntent = {
+        mode: projectFirstTurn.responseType === "reply" || projectFirstTurn.responseType === "clarify"
+          ? "conversation"
+          : projectFirstTurn.workflowDecision?.mode === "project_analysis" ? "project_analysis" : "task",
+        workflowDecision: projectFirstTurn.workflowDecision,
+      };
+      const directProjectReply = ["reply", "clarify"].includes(String(projectFirstTurn.responseType || ""))
+        ? String(projectFirstTurn.reply || "").trim()
+        : "";
+      if (directProjectReply) {
+        res.writeHead(200, {
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-cache, no-transform",
+          "Connection": "keep-alive",
+          "Access-Control-Allow-Origin": "*",
+          "X-Accel-Buffering": "no",
+        });
+        if (typeof res.flushHeaders === "function") res.flushHeaders();
+        writeSse(res, { type: "turn_decision", decision: projectFirstTurn.turnDecision, receipt: projectFirstTurn.turnReceipt });
+        for (const item of projectFirstTurn.toolResults || []) writeSse(res, { type: "tool_activity", phase: item.ok === false ? "failed" : "completed", tool: item.name, error: item.error || "" });
+        writeSse(res, { type: "presentation", message_mode: "conversation", show_task_card: false, main_agent: "project", direct_reply_fast_path: true });
+        writeSse(res, { type: "chunk", text: directProjectReply, agent: "project-main-agent" });
+        writeSse(res, { type: "done", message_mode: "conversation", main_agent: "project", taskExperience: null, direct_reply_fast_path: true });
+        recordMetric("project-main-agent", {
+          success: true,
+          durationMs: 0,
+          fileChangeCount: 0,
+          scopeType: "project",
+          projectId: project,
+          role: "main_agent",
+          source: source === "feishu" ? "project-feishu-direct-reply" : "project-direct-reply",
+          runtime: "main-first-turn",
+          usage: projectFirstTurn.turnReceipt?.usage || null,
+        });
+        scheduleFeishuSessionTitle(directProjectReply);
+        res.end();
+        return;
+      }
       const info = getConfigInfo(config.path);
       const workDir = info[0]?.workDir;
       const configuredAgentType = info[0]?.agent || "claudecode";
       const resolvedRuntime = resolveAvailableAgentRuntime(configuredAgentType);
       const agentType = resolvedRuntime.selected;
       if (exactProjectSessionId) syncSessions(project);
-      let projectKnowledge: any = { context: "", citations: [], embeddingMode: "hashing", fallback: true };
-      try {
-        projectKnowledge = await searchAgentKnowledge(finalMessage, { role: "project-agent", project }, { limit: 6, maxContextChars: 18000 });
-      } catch (error: any) {
-        console.warn(`[项目知识检索] ${project} 已使用无知识上下文继续：${error?.message || error}`);
-      }
+      const projectKnowledge: any = { context: "", citations: [], embeddingMode: "not_loaded", fallback: false };
       const projectConfigSnapshot = loadProjectConfigs()?.[project] || {};
       migrateLegacySharedFilesV2("project", project, projectConfigSnapshot.shared_files || [], "project-config-v1");
       const projectSharedFiles = buildSharedFilesContextV2("project", project, {
@@ -1227,31 +1275,6 @@ function handleRequest(req: any, res: any) {
         title: "以下是当前项目已授权共享文件。规划、开发和验收必须引用对应文件与分片证据：",
       });
       if (exactProjectSessionId) {
-        const knowledgeToolCallId = `knowledge_${Date.now().toString(36)}_${Math.random().toString(16).slice(2, 8)}`;
-        appendProjectSessionExecutionEvent(project, exactProjectSessionId, {
-          type: "tool_use",
-          toolName: "query_knowledge",
-          toolCallId: knowledgeToolCallId,
-          runId: `project-main:${exactProjectSessionId}`,
-          arguments: { query_checksum: projectKnowledge.scopeChecksum || "", limit: 6 },
-        });
-        appendProjectSessionExecutionEvent(project, exactProjectSessionId, {
-          type: "tool_result",
-          toolName: "query_knowledge",
-          toolCallId: knowledgeToolCallId,
-          runId: `project-main:${exactProjectSessionId}`,
-          status: projectKnowledge.embeddingError && !projectKnowledge.results?.length ? "error" : "ok",
-          observation: {
-            context: projectKnowledge.context || "",
-            citations: projectKnowledge.citations || [],
-            retrieval_mode: projectKnowledge.embeddingMode || "lexical",
-            fallback_reason: projectKnowledge.fallbackReason || "",
-            index_generation: projectKnowledge.indexGeneration || "",
-            stale_served: projectKnowledge.staleServed === true,
-            token_budget: projectKnowledge.tokenBudget || null,
-          },
-          error: projectKnowledge.embeddingError || "",
-        });
         if (projectSharedFiles.files.length) {
           const sharedToolCallId = `shared_${Date.now().toString(36)}_${Math.random().toString(16).slice(2, 8)}`;
           appendProjectSessionExecutionEvent(project, exactProjectSessionId, {
@@ -1275,15 +1298,6 @@ function handleRequest(req: any, res: any) {
             },
           });
         }
-      }
-      let chatIntent: any;
-      try {
-        chatIntent = await classifyProjectChatIntentWithModel(finalMessage, files, { forceTask: !!parentRunId, project, sessionId: exactProjectSessionId });
-      } catch (error: any) {
-        return sendJson(res, {
-          success: false,
-          error: `统一大模型无法形成可靠工作流决策，本轮未启动项目 Agent：${error?.message || error}`,
-        }, 503);
       }
       const selectedProjectRoleSkills = chatIntent.mode === "task"
         ? selectRoleSkills("project-child-agent", finalMessage, {
@@ -1460,6 +1474,10 @@ function handleRequest(req: any, res: any) {
           }
         }, 15000);
         heartbeat.unref?.();
+        send({ type: "turn_decision", decision: projectFirstTurn.turnDecision, receipt: projectFirstTurn.turnReceipt });
+        for (const item of projectFirstTurn.toolResults || []) {
+          send({ type: "tool_activity", phase: item.ok === false ? "failed" : "completed", tool: item.name, error: item.error || "" });
+        }
 
         if (chatIntent.mode !== "task") {
           send({ type: "presentation", message_mode: chatIntent.mode, show_task_card: false, main_agent: "project" });
@@ -1470,7 +1488,7 @@ function handleRequest(req: any, res: any) {
             project,
             projectSessionId: exactProjectSessionId,
             userMessage: finalMessage,
-            mode: chatIntent.mode,
+            mode: chatIntent.mode === "project_analysis" ? "project_analysis" : "conversation",
             context: projectMainContext,
             workflowDecision: chatIntent.workflowDecision,
             onDelta: delta => {
@@ -1494,7 +1512,7 @@ function handleRequest(req: any, res: any) {
         let activeTaskAgentSession = bound.session;
         let activeAgentSessionOptions = bound.options;
         const existingTask = parentProjectMainTask;
-        const plan = existingTask?.workflow_meta?.project_main_plan || await planProjectMainTask({
+        const plan = existingTask?.workflow_meta?.project_main_plan || projectFirstTurn.plan || await planProjectMainTask({
           project,
           projectSessionId: exactProjectSessionId,
           userMessage: finalMessage,
