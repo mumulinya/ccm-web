@@ -1,7 +1,7 @@
 {
   "name": "@mumulinya167/cc-web",
-  "version": "2.0.1",
-  "description": "CCM 本地多 Agent 协作工作区，支持会话记忆、项目执行、代码协作、TestAgent 与持久终端",
+  "version": "2.0.2",
+  "description": "本地优先的多 Agent 协作与自动开发工作区，集成任务编排、记忆上下文、MCP/Skill、TestAgent、Git、飞书、知识库和终端",
   "main": "dist/server.js",
   "bin": {
     "cc-web": "bin/ccm.js",
@@ -56,14 +56,38 @@
     "prepublishOnly": "node bin/prepublish-guard.js --publish"
   },
   "keywords": [
-    "cc-connect",
-    "claude-code",
     "ai-agent",
-    "feishu",
     "multi-agent",
+    "agent-orchestration",
+    "agent-workspace",
+    "automatic-development",
+    "claude-code",
+    "codex-cli",
+    "cursor-agent",
+    "antigravity-cli",
+    "mcp",
+    "model-context-protocol",
+    "skills",
+    "test-agent",
+    "context-engine",
+    "agent-memory",
+    "rag",
+    "local-embedding",
+    "feishu",
+    "git-workflow",
+    "terminal",
+    "cc-connect",
     "web-console"
   ],
-  "author": "",
+  "author": "mumulinya167",
+  "homepage": "https://github.com/mumulinya/ccm-web#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mumulinya/ccm-web.git"
+  },
+  "bugs": {
+    "url": "https://github.com/mumulinya/ccm-web/issues"
+  },
   "license": "MIT",
   "engines": {
     "node": ">=20.0.0"

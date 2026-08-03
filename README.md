@@ -1,544 +1,325 @@
-# 🚀 cc-web (Connect & Control Manager)
+# CCM Workspace
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Node.js-%3E%3D18.0.0-brightgreen.svg" alt="Node version">
-  <img src="https://img.shields.io/badge/Vue.js-3.x-4FC08D.svg" alt="Vue version">
-  <img src="https://img.shields.io/npm/v/@mumulinya167/cc-web.svg" alt="npm version">
-  <img src="https://img.shields.io/badge/Protocol-MCP%20Ready-blueviolet" alt="MCP Ready">
-  <img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License">
+  <img src="https://raw.githubusercontent.com/mumulinya/ccm-web/main/ccm-package/public/ccm-app-icon.png" alt="CCM Workspace" width="88" height="88" />
 </p>
 
 <p align="center">
-  <b>极客风的本地大模型多 Agent 协作工作区与可视化调度台</b><br>
-  让复杂的 AI Agent 任务派发、执行、门禁验收与灾难恢复变得触手可及。
+  <strong>本地优先的多 Agent 协作、自动开发与工作区管理平台</strong>
 </p>
-
----
-
-## 📑 目录导航
-
-<details>
-<summary><b>点击展开完整目录</b></summary>
-
-- [🌟 核心理念与亮点](#-核心理念与亮点)
-- [🤖 多 Agent 分级协作体系](#-多-agent-分级协作体系)
-- [🚀 全量功能特性详解](#-全量功能特性详解)
-  - [1. ⚙️ 自动开发与看门狗](#1-️-自动开发与看门狗-autodevops--watchdog)
-  - [2. 💻 任务流水线与原生代码审查](#2--任务流水线与原生代码审查-task-pipeline--code-review)
-  - [3. 📊 系统自检与就绪大盘](#3--系统自检与就绪大盘-system-diagnostics-dashboard)
-  - [4. 🧠 记忆控制中心](#4--记忆控制中心-memory-center)
-  - [5. 🌐 全局智能助手](#5--全局智能助手-global-agent)
-  - [6. 🔌 MCP 生态与插件市场](#6--mcp-生态深度集成与插件市场-mcp-ecosystem--marketplace)
-  - [7. 📚 RAG 本地知识库引擎](#7--rag-本地知识库引擎-local-knowledge-base)
-  - [8. 📋 需求分析与智能分解](#8--需求分析与智能分解-requirement-analysis--decomposition)
-  - [9. 💬 多端社交平台聚合协作](#9--多端社交平台聚合协作-multi-channel-integrations)
-  - [10. 🔍 全域对话搜索引擎](#10--全域对话搜索引擎-unified-conversation-search)
-  - [11. 📅 定时任务与工作日志](#11--定时任务与工作日志-cron-scheduling--work-journal)
-  - [12. 📝 提示词模板库](#12--提示词模板库-prompt-template-library)
-  - [13. 🎮 极客彩蛋与沉浸式陪伴](#13--极客彩蛋与沉浸式陪伴-geek-perks--desktop-pets)
-  - [14. 🗄️ 纯本地无痕存储](#14-️-纯本地无痕存储-database-free-architecture)
-  - [15. 🔧 多 Agent 运行时统一适配](#15--多-agent-运行时统一适配-multi-runtime-compatibility)
-  - [16. 📊 我的工作台与拖拽看板](#16--我的工作台与拖拽看板-dashboard--kanban)
-  - [17. 🧹 清理中心与存储治理](#17--清理中心与存储治理-cleanup-center)
-  - [18. 🧭 导航菜单自定义管理器](#18--导航菜单自定义管理器-menu-manager)
-  - [19. 🔧 项目管理与会话生命周期](#19--项目管理与会话生命周期-project-management)
-- [🏗️ 核心架构与工作流](#️-核心架构与工作流)
-- [📦 如何安装与启动](#-如何安装与启动)
-- [💻 开发者指南](#-开发者指南-参与贡献源码)
-- [📈 规划与 Roadmap](#-规划与-roadmap-敬请期待)
-
-</details>
-
----
-
-## 🌟 核心理念与亮点
-
-**cc-web** 不仅仅是一个套壳的前端面板，它是一整套**企业级单机 AI 协作基础设施**。它打破了传统"单体 LLM 对话框"的限制，通过引入流水线式的多 Agent 协同机制，结合本地真实的执行环境，让 AI 真正成为您的**全自动外包开发团队**。
-
-### 🎨 极致的极客风 UI 设计 (Glassmorphism & Cyberpunk)
 
 <p align="center">
-  <img src="docs/images/music.png" width="800" alt="CCM 极客暗黑风 UI 界面">
-  <br><em>沉浸式音乐播放器 — Glassmorphism 暗黑风设计示例</em>
+  <a href="https://www.npmjs.com/package/@mumulinya167/cc-web"><img src="https://img.shields.io/npm/v/@mumulinya167/cc-web" alt="npm version" /></a>
+  <img src="https://img.shields.io/badge/Node.js-%3E%3D20-339933" alt="Node.js 20+" />
+  <img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT License" />
+  <img src="https://img.shields.io/badge/storage-local--first-0f766e" alt="Local first" />
 </p>
 
-摒弃传统的后台管理系统样式，我们采用了次世代的设计语言：
-- **全息玻璃态界面 (Glassmorphism)**：底层模糊、自适应光效卡片，所有界面如悬浮玻璃般通透。午夜蓝深色底色 (`#0a0e1a`)，电光蓝 (`#00d4ff`) 高亮点缀，紫罗兰梯度过渡。
-- **动态微交互与暗黑模式**：流光按钮，数据加载微动效，`backdrop-filter: blur()` 半透明卡片。支持多套预设色调（`cyberpunk`、`aurora`、`deep-void`）与低性能设备友好模式。
-- **Web 原生操作体验**：内置 XTerm.js 虚拟终端、Hunk 级 Side-by-Side / Unified Diff 代码审查面板、WebAudio Canvas 实时频谱可视化，全程无需离开浏览器。
+CCM 将全局助手、群聊主 Agent、项目主 Agent、项目开发 Agent、TestAgent、会话记忆、MCP/Skill、知识库、Git、终端、飞书和任务回放放进同一个本地工作区。它不是单一聊天界面，而是一套从需求进入、源码规划、开发执行、独立验收到最终交付的可恢复工作流。
 
----
+## 快速开始
 
-## 🤖 多 Agent 分级协作体系
-
-我们定义了极其严密的职责边界，确保 AI 团队不会"乱套"：
-
-1. 🌐 **全局主入口 (Global Agent)**：
-   用户意图的第一接触点。它内置了完整的 **Agentic Loop 状态机**引擎（`answer → investigate → plan → execute → needs_confirmation → complete`），负责意图识别、鉴权、跨项目路由。所有写操作需显式授权，高风险操作挂起 `waiting_confirmation` 状态等待用户确认。每次运行持久化到 `~/.cc-connect/global-agent-runs/`，携带全局唯一 `trace_id`，可在服务器重启后无缝恢复。
-
-2. 👨‍💼 **群聊协调者 (Group Coordinator / Group Agent)**：
-   它在特定群聊内扮演 **Tech Lead** 角色。接收到史诗级需求 (Epic) 后，通过 **LLM 协调器**（`group-orchestrator-llm`）进行智能任务拆解，生成包含子任务目标 (`targets`)、依赖关系 (`dependency_edges`) 与推理循环 (`reasoning`) 的结构化 JSON 计划。当 LLM 不可用时，自动降级为**规则协调器**（`group-orchestrator-coded`），基于领域关键词与本地 RAG 知识库完成保底分发。最终负责评审汇总、Code Review 与交付。
-
-3. 👷‍♂️ **执行子 Agent (Worker Sub-Agent)**：
-   干脏活累活的"打工人"。通过 `agent-worktree.ts` 在独立的 **Git Worktree** 隔离分支中并行工作，互不冲突。当多个 Agent 的写入路径存在重叠时，**冲突防护引擎**（`collaboration-resilience.ts`）会自动将并行降级为串行，并指定唯一 `mergeOwner`。每个子 Agent 执行完毕后提交结构化回执 `CCM_AGENT_RECEIPT`（含 `status`、`filesChanged`、`verification`、`blockers` 等字段）。
-
-4. 🧪 **测试验证门禁 (Test Agent)**：
-   独立的测试专员，与开发 Agent 严格隔离（防止"自证陷阱"）。在独立的 CLI 子进程中运行预验（`--plan-only`）或真实复核。能够精准区分"代码 Bug"与"环境缺失"——当检测到环境变量/登录态缺失时，走 `prepare_verification_environment` 路线生成环境预备清单，而非误判为代码问题。当发现浏览器 Provider 存在能力盲区时，自动重路由为原生 **Playwright** 执行。
-
-5. ⚙️ **规则兜底引擎 (Coded Orchestrator & Agent Runner)**：
-   非 LLM 的本地确定性调度器。处理 **FIFO 优先级队列**、任务去重（`idempotency_key`）、依赖阻塞等待、执行失败自动续跑（指数退避）。`Agent Runner` 提供基于文件队列（`~/.cc-connect/agent-runner/requests/*.json`）的离线异步执行能力，适用于进程 Spawn 受限的环境。内置心跳文件 (`heartbeat.json`) 追踪 Runner 进程状态。
-
----
-
-## 🚀 全量功能特性详解
-
-### 1. ⚙️ 自动开发与看门狗 (AutoDevOps & Watchdog)
-真正实现"无人值守"的自动接单与容灾：
-- **定时抓单 (Autopilot)**：通过 Cron 定时任务，自动扫描未认领的需求 Backlog（`claimReadyDailyDevBacklog`）并启动开发流水线。
-- **看门狗与死锁恢复**：后台 `Task Watchdog` 定时轮询，自动检测并修复：停滞在 `pending`/`in_progress` 的超时任务、超时未更新的子 Agent 工作项（`work_item_stalled`）、临时失败可重试任务、存在交付缺口（`gap_rework`）的每日开发任务。
-- **Agent CLI 引擎容错切换**：当主 Agent（如 Cursor）崩溃或返回 401/403/429 时，自动按候选优先级链（`claudecode → codex → cursor → gemini → opencode`）切换引擎，并注入上下文续跑 Prompt，防止从零重复实现。
-- **服务重启自愈**：服务器重启后，自动搜寻未完成任务，使用 `acquireTaskLease` 防止多实例争抢，低风险任务自动恢复排队，高风险任务挂起 `manual_startup_recovery` 等待人工确认。
-- **真实试运行与闭环演练 (Smoke Test)**：一键自动跑通"派发→执行→回执→验收"全闭环链路。
-
-### 2. 💻 任务流水线与原生代码审查 (Task Pipeline & Code Review)
-
-<p align="center">
-  <img src="docs/images/tasks.png" width="800" alt="任务流水线控制台">
-  <br><em>任务派发控制台 — 派发、跟进与验收</em>
-</p>
-
-从需求到交付的全链路可视化：
-- **需求 Epic 拆解**：复杂需求自动拆解为拓扑依赖 (DAG) 的多层次子任务，建立依赖图谱 (`dependency_edges`)。需求文档版本升级时，自动 Diff 计算新增/变更/移除的子任务，保留旧版交付历史。
-- **结构化执行报告**：任务详情页一键查看 Agent 交付总结、实际修改文件列表、失败验证命令、Token 消耗与费用估算。
-- **内建 Git Diff 视图**：基于 Hunk 解析的高效 Diff 渲染引擎，支持 **Side-by-Side** 和 **Unified** 两种对比模式（红绿高亮），与 Agent 任务改动归属 (Task Attribution) 深度绑定。支持在浏览器中直接 Stage/Commit 到本地仓库。
-- **25+ 项综合验收门禁**：`buildAcceptanceGate` 引擎校验 Coordinator 计划完整性、子 Agent 派发覆盖率、回执质量评分（0-100）、文件变更一致性、验证覆盖率、独立复核通过状态、Spot Check 抽查、记忆快照校验等。任何关键门禁未通过直接拦截任务完成。
-- **Trace 重放诊断**：输入 Task ID 或 Trace ID，沿时间轴查看 `需求 → 计划 → 派发 → 执行 → 测试 → 验收` 完整 Event 链条。支持展开 Playwright 截图、浏览器日志或错误 Traceback 等法医式证据。
-
-### 3. 📊 系统自检与就绪大盘 (System Diagnostics Dashboard)
-
-<p align="center">
-  <img src="docs/images/metrics.png" width="800" alt="系统诊断大盘">
-  <br><em>系统自检与就绪大盘 — 探针矩阵与资源监控</em>
-</p>
-
-运维级的数据大盘，随时掌握 AI 团队的健康状态：
-- **探针矩阵 (Probe Matrix)**：实时探测所有 Agent CLI（Claude Code、Codex、Cursor、Gemini CLI、OpenCode）的安装路径、版本号、SHA256 身份 Hash 与启动耗时。
-- **MCP 服务健康度**：监控所有已连接 MCP 服务器的连通性、工具发现状态、鉴权有效期（OAuth Token 过期检测）。
-- **资源监控**：系统内存、CPU、磁盘空间使用情况追踪。
-- **折叠式高级诊断分析**：一键聚合 Node 子进程报错、Runner 运行日志、验证推断等海量调试信息。自动识别常见错误模式并给出修复建议。
-- **凭据安全保护**：所有敏感密钥自动迁移为加密协议存储（`ccm-secret://`），防止配置文件明文泄露。
-
-### 4. 🧠 记忆控制中心 (Memory Center)
-告别 AI 永远记不住上下文的痛点：
-- **四层作用域隔离**：支持 Global（全局）、Group（群组共识）、Project（项目级）、Task（任务级）四个独立的记忆作用域。
-- **记忆穿透机制**：Agent 在生成 Prompt 时自动挂载相关记忆库，实现全团队信息同步。通过 `Memory Context Snapshot` 与 WAL 追溯记录实现记忆消耗回执跟踪。
-- **自动压缩与蒸馏**：当上下文超出 Token 预算时，使用 LLM 进行智能会话压缩（`compactProjectSessionWithModel`）。基于 `Typed Memory Ledger` 进行记忆蒸馏，按类型（决策、代码模式、偏好等）结构化存储。
-- **Token 预算分配矩阵**：可视化配置各作用域的 Context Window（如 516K / 1M）与 Auto-Compact 临界点阈值。
-- **群组记忆自治**：群聊对话的 Post-Turn Summary（轮后摘要）、Boundary Journal（边界日记）、Compaction Projection（压缩投影）等多级记忆管理机制，确保长期协作中上下文始终精准。
-
-### 5. 🌐 全局智能助手 (Global Agent)
-
-<p align="center">
-  <img src="docs/images/global_agent.png" width="800" alt="全局智能助手">
-  <br><em>全局智能助手 — Agentic Loop 引擎控制中枢</em>
-</p>
-
-系统级 AI 控制中枢，不止是聊天：
-- **后端 Agentic Loop 引擎**：所有交互在服务端持久化执行，无需浏览器保持打开。模型拥有完整的工具调用能力（文件读写、项目管理、任务创建、知识检索、MCP 工具调用）。
-- **写授权与高风险拦截**：只读工具自动执行；写操作需用户授权；高风险操作（如删除项目、数据库迁移）挂起 `waiting_confirmation` 并渲染确认卡片，确认后仅执行原挂起的精确操作。
-- **Mission Supervisor 长任务监视器**：跟踪由 Global Agent 创建的大型开发 Mission，支持周期性巡检与自动汇报进度。
-- **飞书控制机器人**：动态接收飞书 Webhook 消息，同步回传交互卡片与任务状态。用户可以在飞书端直接与 Global Agent 对话并下发开发指令。
-- **跨项目路由**：智能识别用户意图涉及的项目、群组或系统功能，自动路由到对应模块执行。
-
-### 6. 🔌 MCP 生态深度集成与插件市场 (MCP Ecosystem & Marketplace)
-
-<p align="center">
-  <img src="docs/images/tools.png" width="800" alt="MCP 工具管理">
-  <br><em>MCP 工具配置与 Skills 技能包管理</em>
-</p>
-
-AI 的感官与手脚无限延伸：
-- **MCP 协议客户端**：标准 JSON-RPC 2.0 over Stdio 实现，支持工具发现、工具调用、反向请求安全拦截（`elicitation`/`consent`/`auth` 请求返回 `-32000` 错误码，防止外部 MCP 绕过 CCM UI 擅自触发用户交互）。
-- **运行时工具同步与门禁系统**：在 Agent 启动前，将 MCP 工具和 Skills 根据权限作用域物理投影到隔离目录（`~/.cc-connect/agent-runtime/<runtime>/<snapshotId>/`）。全量授权的服务器直接 Native 加载；仅部分授权的服务器自动回退为 Proxy-only 代理模式，防止权限溢出。通过 Catalog Revision Hash 检测工具快照过期并自动 Resync。
-- **Smithery 市场集成**：原生对接 MCP 插件市场，支持一键搜索、预览、安装、升级与卸载。安装时自动处理依赖配置与授权影响分析。
-- **内置 MCP 服务**：`filesystem-mcp`（受控文件读写）、`fetch-web-mcp`（联网检索）、`mcp-feishu`（飞书集成）。
-- **Skills 技能包**：可复用的 Prompt 指令片段，支持 CRUD 管理与别名映射，可按项目粒度分配。
-
-### 7. 📚 RAG 本地知识库引擎 (Local Knowledge Base)
-
-<p align="center">
-  <img src="docs/images/knowledge.png" width="800" alt="RAG 知识库">
-  <br><em>RAG 本地知识库 — 文档索引与检索</em>
-</p>
-
-让 AI 真正懂你的代码：
-- **TF/TF-IDF 轻量级检索引擎**：无需依赖外部重型向量数据库（无 Pinecone/Weaviate 依赖），使用词频/逆文档频率算法完成文档切片、索引与相似度匹配。
-- **多格式文档支持**：Markdown、TXT、PDF（pdf-parse）、Word DOCX（内置 OOXML 解析器，免依赖解压直读）、CSV、JSON。还支持从在线 URL 导入文档。
-- **实时增量索引**：自动监听 `~/.cc-connect/knowledge/` 目录变动，文件修改后实时增量重建索引。
-- **Agent 上下文自动注入**：当 Agent 处理任务时，系统自动检索相关知识片段并注入到 Prompt 上下文，实现精准的代码库理解。
-- **RAG 查询调试工作区**：在前端界面实时测试检索效果，预览文档切片与相似度评分。
-
-### 8. 📋 需求分析与智能分解 (Requirement Analysis & Decomposition)
-从文档到任务的全自动流水线：
-- **多源文档摄取**：支持上传 PDF、Word、Markdown、TXT、图片（基于 Vision 视觉大模型 OCR）、在线网页文档。
-- **结构化需求提取**：LLM 自动识别业务目标 (Business Goal)、交付范围 (Scope)、验收标准 (Acceptance Criteria)、依赖与风险 (Risks & Dependencies)。
-- **DAG 拓扑任务拆解**：将大需求拆解为多个并行/串行的子项，自动推荐匹配的 Group 或 Project 以及所需的 Agent 技能。生成的 Epic 任务自动灌入协作模块进行团队分发。
-- **Plan Mode 安全预检**：高风险操作（破坏性修改、数据库迁移、跨项目操作）强制进入 Plan Mode，生成执行前计划与澄清问题 (Clarification Questions)，等待用户确认后方可派发。
-
-### 9. 💬 多端社交平台聚合协作 (Multi-Channel Integrations)
-
-<p align="center">
-  <img src="docs/images/settings.png" width="800" alt="设置中心">
-  <br><em>系统设置 — Agent Provider 管理与飞书通道配置</em>
-</p>
-
-打破内部协作的信息孤岛：
-- **飞书深度集成 (mcp-feishu)**：独立的 ESM MCP Server（`@modelcontextprotocol/sdk` + `StdioServerTransport`），支持：
-  - QR 扫码快捷认证 OAuth 登录。
-  - `list_chats`：列出机器人加入的飞书群聊。
-  - `get_chat_history`：拉取指定群聊历史消息（支持时间范围过滤）。
-  - `search_messages`：群聊消息关键词搜索。
-  - `get_message_detail`：获取单条消息完整富文本与附件。
-  - 双向消息同步：AI 开发进度、测试报告直接以群消息推送给人类同事。
-  - 可作为 MCP Server 供 Agent 调用，也可作为独立 CLI 工具使用。
-- **飞书控制机器人**：接收飞书 Webhook 事件，在飞书端直接与 Global Agent 对话。
-- **架构层扩展**：已预留 WeChat、Telegram、Slack、Discord、DingTalk 等主流 IM 接入能力。
-
-### 10. 🔍 全域对话搜索引擎 (Unified Conversation Search)
-一站式检索所有历史记录：
-- **全源聚合**：实时聚合来自项目 Session、群聊协作记录、Global Agent 历史及飞书双向消息的全部内容。
-- **多维度检索与分面统计**：支持多词 AND 逻辑、短语精确匹配。按来源 (Feishu / Project / Group / Global)、角色 (User / Assistant)、日期范围过滤，自动返回分类计数 (Facets) 及上下文前后文消息。
-- **噪声抑制**：自动识别并合并系统自动生成的欢迎会话，消除重复搜索噪声。
-- **深度链接导航**：搜索结果支持点击直接跳转到对应的项目/群聊/消息位置并高亮。
-
-### 11. 📅 定时任务与工作日志 (Cron Scheduling & Work Journal)
-
-<p align="center">
-  <img src="docs/images/cron.png" width="800" alt="定时任务管理">
-  <br><em>Cron 定时任务调度与工作日志</em>
-</p>
-
-无人值守的自动化调度：
-- **Cron 调度引擎**：内存级秒/分精准触发器，支持标准 Cron 表达式。可视化编辑器配置调度规则。
-- **每日开发日报自动生成**：自动扫描完成的任务与 Git 提交，汇总生成每日工作日志（Work Journal）。通过配置自动将日报/周报通过飞书推送给指定接收人。
-- **Backlog 自动补充**：定时检查未完成的 Daily Dev 需求 Backlog，自动灌入任务队列执行。
-- **执行历史追溯**：每次 Cron 触发的执行历史与结果完整保留，支持手动触发与批量管理。
-
-### 12. 📝 提示词模板库 (Prompt Template Library)
-高效复用的 Prompt 工程：
-- **8 大预设场景模板**：覆盖前端开发、后端 API、Bug 修复、代码审查、前后端联调、代码重构、功能规划、数据库设计等典型开发场景。
-- **变量占位符**：模板支持 `{页面名称}`、`{接口路径}` 等变量替换，一键填充。
-- **分类管理**：`development`（开发）、`maintenance`（维护）、`review`（审查）、`collaboration`（协作）、`planning`（规划）及 `custom`（自定义）分类。
-- **智能升级**：用户自定义修改过的模板被保留，未修改的旧版本自动升级到最新代码预设。
-
-### 13. 🎮 极客彩蛋与沉浸式陪伴 (Geek Perks & Desktop Pets)
-
-<p align="center">
-  <img src="docs/images/pets.png" width="800" alt="桌面宠物">
-  <br><em>Electron 桌面宠物 — 陪伴你的全自动开发流</em>
-</p>
-
-开发也可以很优雅：
-- **Electron 桌面宠物**：
-  - 独立 Electron 进程控制，桌面悬浮交互式挂件。
-  - 多状态动画（SVG/Sprite 双引擎）：根据系统活动（编码中、测试中、空闲）切换宠物表情与气泡台词。
-  - 通过 SSE 实时订阅后台 Agent 任务状态，代码构建成功时欢呼，测试失败时伤心。
-  - 支持上传自定义宠物皮肤（带 XSS 安全校验）。
-- **沉浸式音乐播放器**：
-  - 集成网易云 API 与 Bilibili 搜索，使用 `yt-dlp` 进行音频流解析与格式转换。
-  - **Music Agent AI 意图理解**：自然语言点歌（如"来一首适合写代码的轻音乐"），LLM 自动筛选最佳曲目。
-  - WebAudio Canvas 实时频谱可视化，弹幕区实时互动。
-  - 本地歌曲封面提取、离线音乐库管理及后台异步下载。
-  - 后台持续播放，迷你播放器跟随导航。
-
-### 14. 🗄️ 纯本地无痕存储 (Database-Free Architecture)
-零配置，极致轻量：
-- 不依赖 MySQL/PostgreSQL/Redis 等任何重型数据库。
-- 所有配置、状态、日志、任务流水均以结构化 **JSON 文件**持久化在 `~/.cc-connect/`。
-- **崩溃安全原子写入**：先写临时文件后执行 `rename`，写入前自动备份 `.bak` 文件，防止崩溃导致数据损坏。
-- **敏感凭据保护**：API Key、App Secret 自动迁移为加密协议存储 (`ccm-secret://`)。
-- **指标统计聚合器**：按 Agent、日期、作用域多维统计调用次数、成功率、耗时、Token 消耗量、估算费用 (USD)。
-- 目录结构随拷随走，极致轻量。
-
-### 15. 🔧 多 Agent 运行时统一适配 (Multi-Runtime Compatibility)
-一套系统，兼容所有主流 AI 编程助手：
-- **Claude Code** (`claude --permission-mode auto`)：主力 Agent，支持会话续接（`--session-id` / `--resume`）。
-- **Codex CLI** (`codex exec`)：OpenAI 编程助手。
-- **Cursor Agent** (`cursor-agent -p --force`)：Cursor AI 编程助手。
-- **Gemini CLI**：Google Gemini 编程助手。
-- **OpenCode**：开源编程助手。
-- **Qoder CLI**：自定义/替代 Agent 运行时。
-- **统一输出契约**：每种 Agent 的 JSON 行输出进行漂移检测（Drift Detection），防范 CLI 输出格式非预期变化。
-- **版本快照**：捕获 CLI 可执行文件路径、SHA256 身份 Hash、语义化版本号，确保运行时一致性。
-
-### 16. 📊 我的工作台与拖拽看板 (Dashboard & Kanban)
-你的个人任务总控中心：
-- **可视化拖拽看板**：Drag-and-Drop 拖拽任务卡片，在 Pending → In Progress → Done → Failed 四列之间流转。
-- **快捷动作入口**：集成需求智能分解 Modal 与代码审查 Modal 的快速入口，一键启动工作流。
-- **全局概览**：汇聚所有项目、群聊的实时任务状态，提供统一的工作鸟瞰视图。
-- **Agent 流水线可视化卡片**：直观展示多 Agent 协作任务在 Intake → Dispatch → Execute → Review 各阶段的节点状态流转。
-
-### 17. 🧹 清理中心与存储治理 (Cleanup Center)
-保持系统整洁如新：
-- **存储空间概览**：可视化磁盘占用、临时文件、缓存与无效工件的空间分布。
-- **清理操作预检与效果预览**：在执行清理前预览将要清除的文件和释放的空间。
-- **一键智能清理**：清理临时日志、过期 Worktree、已归档任务产物、Runner 历史记录。
-- **清理历史追溯**：完整记录每次清理操作的时间、类型与释放空间。
-
-### 18. 🧭 导航菜单自定义管理器 (Menu Manager)
-打造你自己的专属工作台布局：
-- **自由定制导航排序**：拖拽调整顶部导航栏的 Tab 排序、分组与显示/隐藏状态。
-- **常用功能固定 (Pin)**：将高频使用的功能固定到导航栏首位。
-- **自定义外部链接**：支持添加自定义外部 URL 链接作为菜单项。
-- **导航配置导出/导入**：JSON 格式的配置备份与一键恢复。
-
-### 19. 🔧 项目管理与会话生命周期 (Project Management)
-
-<p align="center">
-  <img src="docs/images/projects.png" width="800" alt="项目管理">
-  <br><em>项目管理 — 会话、Agent 控制与代码对话</em>
-</p>
-
-每个项目的完整生命周期管理：
-- **项目创建向导**：步骤化项目设置（名称、路径、Agent 类型、模型选择），支持 Git URL 直接克隆建项。
-- **TOML 配置在线编辑**：浏览器内直接编辑 `.toml` 项目配置文件。
-- **Agent 控制面板**：Start/Stop/Restart 按钮实时控制每个项目的 Agent 进程，配合红/绿/黄状态指示灯。
-- **多 Agent 绑定**：单个项目支持同时配置多个不同类型的 Agent。
-- **会话管理与世代轮转**：管理项目会话的创建、压缩（`/compact`）、消息删除与回滚时的世代旋转。
-- **项目归档与恢复**：软删除/归档、恢复、预览彻底清除的完整项目生命周期操作。
-- **上下文 Token 占用度量**：实时显示当前会话的 Token 消耗量与剩余 Context Window 空间。
-- **会话内查找 (Ctrl+F)**：支持在长会话中对消息内容进行实时高亮定位与前后跳转。
-- **斜杠命令菜单**：输入 `/` 快速唤起提示词模板与命令动作菜单（如 `/compact`、`/help`、`/clear`）。
-
----
-
-## 🏗️ 核心架构与工作流
-
-### 系统架构图
-
-```mermaid
-graph TD
-    %% 终端用户层
-    Browser[极客控制台 Browser UI] -- SSE / HTTP --> Server(CCM 后端调度网关)
-    Feishu[飞书 / Lark 客户端] -- Webhook --> Server
-    
-    %% 调度网关层
-    subgraph "CCM Core Orchestrator"
-      Server --> Router[意图路由与鉴权]
-      Server --> Watchdog[Task Watchdog & 灾难恢复]
-      Server --> Memory[记忆控制中心]
-      Server --> ToolSync[工具同步与门禁]
-    end
-
-    %% Agent 协作层
-    subgraph "Multi-Agent Ecosystem"
-      Router --> GlobalAgent[🌐 全局主 Agent<br/>Agentic Loop 引擎]
-      Router --> GroupAgent[👨‍💼 群聊主 Agent<br/>LLM / Coded 协调器]
-      GroupAgent -- 拆解派发工单 --> SubAgent1[👷 子 Agent A]
-      GroupAgent -- 拆解派发工单 --> SubAgent2[👷 子 Agent B]
-      GroupAgent -- 测试移交 --> TestAgent[🧪 Test Agent]
-    end
-
-    %% 执行与协议层
-    subgraph "Execution & Protocol Sandbox"
-      SubAgent1 -.-> CLI[Claude / Codex / Cursor / Gemini CLI]
-      SubAgent2 -.-> CLI
-      TestAgent -.-> CLI
-      CLI --> Worktree[(Git Worktree 隔离工作区)]
-      CLI -- MCP Protocol --> MCPGateway{MCP 工具网关}
-      MCPGateway --> FS[File System MCP]
-      MCPGateway --> Web[Fetch Web MCP]
-      MCPGateway --> FeishuMCP[飞书 MCP]
-      MCPGateway --> Marketplace[Smithery 市场扩展]
-    end
-
-    %% 数据与知识层
-    subgraph "Data & Knowledge"
-      Memory --> RAG[📚 RAG 知识库]
-      Memory --> JSONStore[(~/.cc-connect/ JSON 存储)]
-    end
-```
-
-### Agent 自动开发工作流 (核心业务流程)
-
-cc-web 采用严密的 **六阶段流水线执行闭环**：
-
-```mermaid
-sequenceDiagram
-    participant User as 用户 (前端/飞书)
-    participant Global as 🌐 全局主 Agent
-    participant Group as 👨‍💼 群聊主 Agent
-    participant Worker as 👷‍♂️ 项目子 Agent
-    participant Test as 🧪 Test Agent
-    participant Env as 💻 本地沙盒环境
-
-    Note over User,Env: 阶段一：Intake 需求摄取
-    User->>Global: 提出非结构化需求 (文本/文档/图片)
-    Global->>Global: 意图识别、鉴权、风险评估
-    alt 高风险操作
-        Global-->>User: 展示 Plan Mode 预检计划，等待确认
-        User->>Global: 确认执行
-    end
-    Global->>Group: 路由分派到指定业务群聊
-
-    Note over Group,Env: 阶段二：Dispatch 智能拆解
-    Group->>Group: LLM 协调器需求分析，拆解为 DAG 子任务
-    Group->>Group: 冲突防护检测 (Git 写入重叠 → 串行化)
-
-    Note over Worker,Env: 阶段三：Execute 隔离执行
-    Group->>Worker: 派发自包含 Worker Handoff
-    Worker->>Env: 在隔离 Git Worktree 中读取代码、执行修改 (MCP)
-    Env-->>Worker: 返回执行结果/报错
-    Worker->>Env: (若失败) 自动 Debug 并修复
-    
-    Note over Group,Worker: 阶段四：Receipt 回执收集
-    Worker-->>Group: 提交结构化回执 CCM_AGENT_RECEIPT + 代码 Diff
-
-    Note over Test,Env: 阶段五：Test 独立复核
-    Group->>Test: 移交测试验证 (独立 CLI 子进程)
-    Test->>Env: 运行验证命令、冒烟演练、浏览器测试
-    Env-->>Test: 返回测试结果
-    Test-->>Group: 提供独立复核决策 (passed/needs_rework/needs_environment)
-
-    Note over Group,User: 阶段六：Accept 综合验收
-    Group->>Group: 25+ 项验收门禁 + Code Review 报告
-    Group-->>User: 交付最终验证通过的成果！
-```
-
-#### 📌 六阶段业务流程解析：
-
-1. **Intake 需求摄取**：用户通过 Web 界面或飞书发送需求（支持文本、文档、图片）。全局主 Agent 进行意图识别与风险评估。对于高风险操作（破坏性修改、数据库迁移），强制进入 Plan Mode 生成执行前计划与澄清问题，等待用户确认后方可派发。
-
-2. **Dispatch 智能拆解**：群聊主 Agent 接过需求，通过 LLM 协调器进行智能任务拆解，生成包含子任务目标、依赖关系与推理链的结构化计划。同时冲突防护引擎分析各子 Agent 的 Git 写入目标，若存在重叠则自动串行化并指定合并所有者。
-
-3. **Execute 隔离执行**：每个子 Agent 在独立的 Git Worktree 隔离分支中工作，通过 MCP 协议与本地终端交互。遇到报错时自动 Debug 和自修复。MCP 工具授权通过物理快照方式投影到隔离目录，防止代码库污染。
-
-4. **Receipt 回执收集**：子 Agent 执行完毕后，提交结构化回执 `CCM_AGENT_RECEIPT`（含状态、修改文件列表、验证证据、阻塞项等），系统自动解析和评分（0-100 分）。
-
-5. **Test 独立复核**：群聊主 Agent 将变更移交给独立的 Test Agent（严格与开发 Agent 隔离）。Test Agent 在独立 CLI 子进程中运行验证命令、冒烟演练及浏览器测试。精准区分代码 Bug 与环境缺失，遇到浏览器 Provider 能力盲区时自动重路由为 Playwright。
-
-6. **Accept 综合验收**：25+ 项综合验收门禁检查通过后，群聊主 Agent 生成 Code Review 报告并交付用户。未通过的门禁会触发返工或看门狗续跑机制。父级 Epic 任务的后继依赖自动解锁。
-
----
-
-## 📦 如何安装与启动
-
-对于绝大多数使用者，我们推荐直接通过 NPM 进行全局安装，即插即用！
-
-### 环境准备
-- Node.js >= 20.0.0
-- 推荐使用现代浏览器（Chrome / Edge）以获取最佳玻璃态渲染体验。
-
-### 快速上手 (推荐)
+要求 Node.js 20 或更高版本。
 
 ```bash
-# 1. 全局安装 cc-web
-npm install -g @mumulinya167/cc-web
-
-# 2. 一键启动 Web 控制台
-ccm start
+npm install -g @mumulinya167/cc-web@latest
+ccm start --background --open
 ```
 
-启动后在浏览器打开：`http://localhost:3080`。
+默认访问地址：<http://localhost:3080>
 
-### 💡 初次使用指南 (Quick Start)
+- 默认只监听 `127.0.0.1`，不会自动暴露到局域网或公网。
+- 首次运行会创建本地数据目录并进入账户初始化流程。
+- 账户、项目、会话、任务和运行数据保存在 `~/.cc-connect`，不会写入 npm 安装目录。
+- 首次运行会在后台准备本地知识库 Embedding 模型；下载失败不会阻止CCM启动，知识检索会明确降级。
+- Electron不随服务端安装。桌面宠物首次启动时按需准备桌面运行时，纯Web或Linux服务器无需下载。
 
-完成启动后，您可以按照以下步骤体验 Agent 自动开发流：
-
-1. **配置大模型密钥**：点击左侧导航栏的「系统设置」，在 Provider 配置中填入您的大模型 API Key（支持 Claude / OpenAI / Gemini 等）。
-2. **连接本地项目**：进入「项目管理」页面，点击“新建项目”，输入您本地某个待开发的代码仓库绝对路径。
-3. **唤醒群聊主 Agent**：在项目中发起对话，输入您的需求，例如：*“帮我在项目中添加一个深色模式切换按钮”*。
-4. **全自动流水线**：
-   - 🌐 **全局助手** 会评估该意图，并将其转交。
-   - 👨‍💼 **群聊主 Agent** 将自动把这个大需求拆解为若干个开发步骤（例如：更新 CSS、修改 Vue 组件、增加状态管理）。
-   - 👷 **项目子 Agent** 们将被分配到独立的 Worktree 中并行编写代码。
-   - 最终等待 🧪 **Test Agent** 独立复核完成后，您可以在「任务派发」面板一键查看代码 Diff 并合并！
-
----
-
-## 💻 开发者指南 (参与贡献源码)
-
-我们非常欢迎开发者一起共建这套强大的 Agent 基础设施！
+检查安装状态：
 
 ```bash
-# 1. 下载源码
-git clone https://github.com/mumulinya167/cc-web.git
-cd cc-web
+ccm status
+ccm doctor
+ccm logs --follow
+```
 
-# 2. 安装全部依赖
+## 核心工作链
+
+```text
+用户消息 / 需求文档 / 图片 / 附件
+→ 精确会话队列
+→ 主 Agent首次模型决策
+→ 按需读取源码、知识、Skill、MCP和运行状态
+→ 制定并实时更新计划
+→ 项目开发 Agent执行工作项
+→ TestAgent独立验收或主 Agent自验
+→ 返工、最终验收与终态规范化
+→ 原会话回传、任务回放与记忆准入
+```
+
+普通问答由主 Agent首轮直接回答。只有模型确实需要信息时才加载知识、源码、Skill或MCP；复杂开发任务进入持久队列和验收链，后台执行不会长期占用聊天回合。
+
+## 功能概览
+
+### 三类主 Agent与统一工具核心
+
+- **全局 Agent**负责普通问答、全局状态、目标选择以及跨群聊、跨项目派发。
+- **群聊主 Agent**绑定精确群聊会话，读取成员项目能力并协调跨项目工作。
+- **项目主 Agent**绑定单个项目，按需读取源码、Git、运行日志、知识和项目工具。
+- 三类主 Agent共享一套受控工具目录，但会话、记忆、队列和权限范围彼此隔离。
+- 主 Agent默认只有结构化只读源码工具；代码写入和Shell执行由项目开发 Agent承担。
+
+### 自动开发、计划与验收
+
+- 需求池、全局 Agent、工作台、群聊和项目会话共享同一任务事实与状态机。
+- 主 Agent先读取相关源码，再生成目标、边界、依赖、源码证据、工作项和验收标准。
+- 计划在任务卡中实时更新，补充要求可修订同一任务，不创建重复气泡。
+- 项目开发 Agent按精确工作项执行，TestAgent独立验证命令、HTTP和浏览器行为。
+- TestAgent关闭时明确切换为主 Agent自验，不显示或暗示独立验收。
+- 失败会生成精确返工项；最终交付进入原会话、长期记忆和任务回放。
+
+### 中断、重试与恢复
+
+- 普通问答、编排和长任务使用不同的重试与总时限配置。
+- 网络、Provider或服务重启导致中断时保留任务、计划、源码证据和子 Agent原生会话。
+- 能证明不会重复副作用时自动恢复；Git提交、发布或部署结果不确定时等待用户确认。
+- “停止当前执行”和“永久取消任务”是两个独立动作，停止不会删除会话。
+- 旧执行attempt的租约和fencing token失效后，迟到结果不能覆盖恢复后的新执行轮。
+
+### CC式上下文与记忆
+
+- 全局、群聊和项目使用精确会话隔离的完整对话链。
+- 未超限时保留全部完整轮次；超过真实Token容量时先执行正式模型压缩。
+- 不用字符截断伪装完整读取，不因压缩删除原始transcript或隐藏工具账本。
+- Skill正文和延迟MCP Schema按需加载；压缩后仅恢复实际调用的Skill和已加载工具状态。
+- MicroCompact只处理足够旧、已配对且满足上下文压力条件的工具结果。
+- 记忆中心展示系统提示、规则、Skill、MCP、会话、Token、压缩边界、缓存和恢复来源。
+- Provider无法证明原生缓存时使用CCM受控上下文投影，不伪装成Provider KV缓存。
+
+### MCP、Skill与工具市场
+
+- 主 Agent原生支持询问用户、Todo、计划、Skill调用、工具搜索、任务派发和状态读取。
+- 内置只读工作区工具覆盖目录、Glob、Grep、分段文件读取、定义/引用、Git状态/Diff/历史和运行日志。
+- 用户可按全局、群聊和项目作用域配置MCP与Skill。
+- 项目开发 Agent获得绑定任务、项目、会话、generation和目录revision的签名授权快照。
+- 工具市场对社区和自定义工具执行安全读取、隔离预览、Admin确认、运行时测试与授权重同步。
+- 工具调用写入精确会话隐藏执行账本，不暴露Prompt、密钥或原始协议。
+
+### 开发 Agent运行时
+
+CCM负责配置、派发、上下文交付、授权和回执验收，第三方CLI由用户自行安装并登录。
+
+| 运行时 | 主要用途 |
+| --- | --- |
+| Claude Code | 项目开发与原生会话续跑 |
+| Codex CLI | 项目开发、模型选择与会话续跑 |
+| Cursor Agent | 项目开发与本机登录态执行 |
+| Antigravity CLI | Google账号体系的开发Agent适配 |
+| OpenCode | 多Provider开发运行时 |
+| Qoder CLI | 可选项目开发运行时 |
+
+设置页可检查安装、版本、登录状态、可用模型和真实只读测试。CCM不会替用户创建第三方账号、模型额度或外部授权。
+
+### 项目、Git、终端与源码运行
+
+- 项目管理支持本地目录、项目分组、GitHub仓库、JDK/Maven/Gradle和多套运行配置。
+- Git工作区支持分页状态、Diff、精确文件提交、fetch、fast-forward pull、push和可核验操作回执。
+- 同一仓库写入事务串行；状态漂移、路径越界、符号链接和隐式全量提交会被拒绝。
+- 内置终端使用`node-pty`与xterm；原生模块不可用时降级到逐条命令模式，核心服务仍能启动。
+- Java项目使用Maven/Gradle源码运行配置，不强制先构建JAR。
+- 项目Agent连接状态与源码运行状态分离，断开项目Agent时按项目边界停止对应受管进程。
+
+### 知识库与需求摄取
+
+- 支持文本、PDF、Office文档、图片和安全公开在线文档快照。
+- 长文档按真实Token分片，所有必需来源完整覆盖后才能自动派发。
+- 工作项引用`source_id + checksum + chunk_ids`证据，不能引用兄弟任务或旧版本来源。
+- 知识库提供词面与语义混合召回，支持本地多语言Embedding和外部Embedding。
+- 索引使用generation和last-good策略，构建失败时继续服务上一份可用索引并明确降级原因。
+- 上传、在线抓取、重定向和文件读取执行格式、大小、真实路径与SSRF安全门禁。
+
+### 飞书、定时任务与AI报告
+
+- 飞书仅直接连接全局 Agent和项目 Agent，不再建立群聊飞书直连。
+- 同群不同话题、用户、项目和机器人应用使用独立会话、幂等身份与串行队列。
+- 全局飞书任务派发到群聊后，进度、权限、验收和终态沿原来源回执返回。
+- 日报和周报由模型基于不可变工作事件证据生成，每项结论必须引用真实事件。
+- 报告生成失败时保留证据并显示可重试状态，不发送固定模板冒充AI总结。
+- 会话回复和工作报告使用相互隔离的持久飞书发件箱。
+
+### 工作台、搜索、监控与治理
+
+- 工作台提供分页任务、项目、群聊、运行配置和阻塞操作入口。
+- 会话搜索跨全局、群聊和项目建立脱敏索引，并严格保持作用域隔离。
+- 任务回放按用户目标、执行步骤、完成内容、验证、变更文件和风险组织信息。
+- 性能监控支持全局、群聊、项目范围，自定义日期、结构化状态筛选和分页执行记录。
+- Trace、可靠性演练和清理中心使用持久租约、幂等回执与可恢复事务。
+- 菜单采用Admin工作区默认与用户个人覆盖，导航布局不能扩大服务端权限。
+
+### 音乐、通知与桌面宠物
+
+- 音乐页面统一管理本地曲库、网易、B站、搜索、下载、播放队列、歌词、历史和音质升级。
+- 浏览器负责实际音频输出；服务端负责索引、平台搜索、下载、持久命令、领取租约和播放回执。
+- 新点歌使用latest-wins语义，旧下载完成后不能抢回播放权。
+- 用户通知先写入持久通知中心，再投递网页、网页宠物、Electron宠物或精确飞书来源。
+- 桌宠只显示脱敏短摘要，离线通知在重连后按游标补发。
+
+### 本地认证与访问安全
+
+- 新安装使用一次性安装码创建首个Admin，不提供公开默认密码。
+- 内置Viewer、Operator和Admin角色，服务端能力门禁是唯一权威。
+- 浏览器修改请求受会话、CSRF、Host和客户端指纹保护。
+- 内部Agent调用使用带时间与nonce的HMAC签名，不因loopback地址自动可信。
+- API Key存入本地加密凭据仓库；Prompt、Cookie、凭据和大工具原文不会写入公开Trace。
+
+## 常用CLI
+
+```text
+ccm start                         前台启动
+ccm start --background --open     后台启动并打开浏览器
+ccm stop                          排空并停止服务
+ccm restart --background          按原启动配置重启
+ccm status                        查看服务和项目状态
+ccm status --json                 输出结构化状态
+ccm doctor                        检查Node、PTY、资源和Agent CLI
+ccm open                          打开当前工作区
+ccm logs --follow                 跟踪轮转日志
+ccm setup-code [--rotate]         查看或轮换首次安装码
+ccm update --check                检查新版本
+ccm update                        验证并更新npm版本
+ccm update --status               查看更新事务
+ccm update --rollback             回滚更新
+ccm agents                        查看开发Agent状态
+ccm pet [stop]                    控制桌面宠物
+ccm version                       查看版本
+```
+
+项目命令：
+
+```text
+ccm project list
+ccm project connect <项目名>
+ccm project disconnect <项目名|all>
+ccm project runtime start <项目名> --profile <配置ID>
+ccm project runtime stop <项目名>
+ccm project runtime restart <项目名> --profile <配置ID>
+ccm project runtime build <项目名> --profile <配置ID>
+```
+
+## 部署与本地数据
+
+局域网访问需要显式监听网卡：
+
+```bash
+ccm start --background --host 0.0.0.0 --port 3080
+```
+
+公网部署建议让CCM继续监听`127.0.0.1`，使用Nginx、Caddy或Cloudflare Tunnel提供HTTPS，并通过`CCM_PUBLIC_ORIGIN`或CLI参数声明可信来源。不要直接暴露未加密HTTP登录入口。
+
+默认数据目录：
+
+```text
+~/.cc-connect/
+  configs/       项目、Agent与工作区配置
+  logs/          服务、项目与运行日志
+  sessions/      会话与连续性数据
+  uploads/       受控附件与来源快照
+  models/        本地Embedding模型缓存
+  run/           服务身份、锁与生命周期状态
+```
+
+卸载npm包不会主动删除用户数据。停止服务并完成备份后，才能单独处理`.cc-connect`目录。
+
+## 项目结构
+
+```text
+ccm/
+  backend/                       Node.js/TypeScript服务端与Agent运行时
+  frontend/                      Vue 3工作区界面
+  integrations/                 飞书与独立MCP实现
+  ccm-package/                  npm核心发布包与生产构建产物
+  pet-assets-package/           按需下载的官方宠物资源包
+  scripts/                       测试、审计、构建与发布工具
+  docs/
+    confirmed-project-architecture/  已确认项目结构
+    confirmed-business-processes/    已确认端到端业务流程
+```
+
+权威业务覆盖清单位于[`scripts/project-coverage-manifest.json`](scripts/project-coverage-manifest.json)，GitHub可读矩阵由它确定性生成到[`docs/confirmed-project-architecture/PROJECT-COVERAGE-MATRIX.md`](docs/confirmed-project-architecture/PROJECT-COVERAGE-MATRIX.md)。
+
+## 本地开发
+
+```bash
 npm install
 npm --prefix frontend install
-
-# 3. 本地全量构建与静态类型检查
-npm run check
 npm run build
-
-# 4. 启动开发模式 (热更新)
-# 前端服务会自动在 3081 端口启动，并无缝代理至 3080 的后端 API
-npm run dev:frontend
 ```
 
-> ⚠️ **关于分层架构的特别说明**: 
-> 本项目严格采用了「开发态」与「运行态」分离的架构。源码位于 `backend/`、`frontend/` 及 `integrations/` 中；执行 `npm run build` 后，最终的运行时工件将被注入并打包在 `ccm-package/` 目录中。
-> **请开发者绝对不要手动修改 `ccm-package/` 内的任何自动生成文件。**
+开发服务器与生产构建：
 
-### 项目目录结构
-
-```
-cc-web/
-├── backend/                    # 后端源码 (TypeScript, CommonJS)
-│   ├── server.ts               # HTTP 服务入口 (原生 Node.js, 无 Express)
-│   ├── core/
-│   │   ├── db.ts               # JSON/SQLite 持久层, 原子写入
-│   │   └── utils.ts            # 路径/Diff/OOXML/Multipart 工具集
-│   ├── agents/
-│   │   ├── runtime.ts          # 6 种 Agent CLI 统一适配层
-│   │   ├── runner.ts           # 文件队列异步执行器
-│   │   └── worktree.ts         # Git Worktree 隔离编排
-│   ├── tools/
-│   │   ├── mcp-client.ts       # MCP JSON-RPC Stdio 客户端
-│   │   ├── tool-manager.ts     # 工具 & Skill 统一调度
-│   │   └── runtime-tool-sync.ts # 运行时物理快照 & 门禁系统
-│   └── modules/
-│       ├── collaboration/      # 🔥 核心协作模块 (246 个文件)
-│       ├── global/             # 全局 Agent & Agentic Loop
-│       ├── projects/           # 项目管理 & 会话生命周期
-│       ├── tools/              # MCP/Skills/终端/市场
-│       ├── knowledge/          # RAG 知识库 & 记忆控制中心
-│       ├── scheduling/         # Cron 调度 & 工作日志
-│       ├── templates/          # 提示词模板库
-│       ├── requirements/       # 需求分析 & DAG 分解
-│       ├── search/             # 全域对话搜索
-│       ├── system/             # 系统诊断 & Provider 管理
-│       ├── music/              # 音乐播放器
-│       └── pets/               # 桌面宠物
-├── frontend/                   # 前端源码 (Vue 3 SPA + Vite)
-│   └── src/
-│       ├── App.vue             # 20 页面异步懒加载 + SSE 事件流
-│       ├── api/index.js        # 全量 API 封装
-│       └── components/         # 120+ Vue 组件 (16 个功能模块)
-├── integrations/
-│   └── mcp-feishu/             # 飞书 MCP Server (ESM, 独立发布)
-└── ccm-package/                # ⚠️ 构建产物 (禁止手动修改)
+```bash
+npm --prefix frontend run dev
+npm run build:frontend
+npm run build:backend
+npm run build:mcp-feishu
 ```
 
----
+本地数据默认落在用户目录的`.cc-connect`。开发测试需要隔离数据时，应配置独立的测试目录和端口，不要复用正在运行的生产数据目录。
 
-## 📈 规划与 Roadmap (敬请期待)
-- [x] 多 Agent 协作与状态流转可视化
-- [x] 基于 MCP 协议的全栈工具链接入
-- [x] AutoDevOps 自动化接单与死锁恢复看门狗
-- [x] Glassmorphism 暗黑极客风 UI 重构
-- [x] RAG 本地知识库与四层记忆控制中心
-- [x] 需求 Epic DAG 拓扑分解与自动流水线
-- [x] 全域对话搜索引擎
-- [x] 25+ 项综合验收门禁与 Trace 重放诊断
-- [x] 6 种 Agent 运行时统一适配（Claude/Codex/Cursor/Gemini/OpenCode/Qoder）
-- [ ] 大模型 Token 消耗与计费成本实时大盘 (Coming Soon!)
-- [ ] 更多云端 IDE 协议接入
+## 测试与发布
 
----
+常用验证：
 
-## 📄 许可证
+```bash
+npm run coverage:check
+npm run docs:check
+npm run release:readme-check
+npm run test:all
+npm run build
+```
 
-本项目基于 [MIT License](LICENSE) 开源。欢迎点亮 ⭐️ Star，提交 Issue 与 PR，一起打造属于开发者的最强 AI 协作终端！
+发布候选：
+
+```bash
+npm run release:gate
+node scripts/build-release-artifact.mjs
+```
+
+发布流程会生成：
+
+- 固定版本npm tarball
+- SHA256与npm integrity
+- CycloneDX SBOM
+- 核心包和宠物资源包物料清单
+- Node 20/22与Windows/Linux安装矩阵证据
+- 包体积、解压大小、文件数和可执行权限门禁
+
+默认自动化测试使用Mock Provider，付费模型调用为0。真实Provider、飞书和外部Agent验收必须通过显式live入口启动。
+
+## 文档
+
+- [已确认项目结构](docs/confirmed-project-architecture/README.md)
+- [已确认业务流程](docs/confirmed-business-processes/README.md)
+- [全项目业务覆盖矩阵](docs/confirmed-project-architecture/PROJECT-COVERAGE-MATRIX.md)
+- [当前实现状态](docs/CURRENT.md)
+- [npm安装与服务生命周期](docs/confirmed-business-processes/NPM-CLI-SERVICE-LIFECYCLE.md)
+- [自动开发完整链路](docs/confirmed-business-processes/AUTOMATIC-DEVELOPMENT-END-TO-END.md)
+- [记忆系统完整链路](docs/confirmed-business-processes/MEMORY-SYSTEM-END-TO-END.md)
+- [主Agent工具体系](docs/confirmed-business-processes/MAIN-AGENT-CC-STYLE-TOOLS.md)
+
+## 外部条件与边界
+
+- 第三方Agent、模型Provider、飞书租户、Git远端和外部媒体平台需要用户自己的账号、网络、权限与凭据。
+- CCM不会绕过VIP、版权、地区限制、OAuth限制或远端仓库权限。
+- 高风险、发布、部署、破坏性操作及无法证明副作用结果的恢复需要用户确认。
+- 原始会话、任务、执行账本和历史回放不会因更新或压缩被批量删除。
+
+## 问题反馈
+
+- npm：<https://www.npmjs.com/package/@mumulinya167/cc-web>
+- Issues：<https://github.com/mumulinya/ccm-web/issues>
+
+提交问题时请提供CCM版本、操作系统、Node版本、复现步骤和脱敏后的错误信息。不要提交API Key、Cookie、OAuth验证码、完整Prompt或私有源码。
+
+## License
+
+MIT
