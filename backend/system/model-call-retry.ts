@@ -2,19 +2,57 @@ export const UNIFIED_MODEL_MAX_ATTEMPTS = 5;
 export const UNIFIED_MODEL_ATTEMPT_TIMEOUT_MS = 30_000;
 export const UNIFIED_MODEL_TOTAL_TIMEOUT_MS = 180_000;
 
+export type ModelRetryProfileId =
+  | "interactive_first_turn"
+  | "agent_orchestration"
+  | "long_running_task"
+  | "background_auxiliary";
+
+export type ModelRetryProfileV1 = {
+  schema: "ccm-model-retry-profile-v1";
+  id: ModelRetryProfileId;
+  maxAttempts: number;
+  attemptTimeoutMs: number;
+  totalTimeoutMs: number;
+};
+
+const RETRY_PROFILES: Record<ModelRetryProfileId, Omit<ModelRetryProfileV1, "attemptTimeoutMs"> & { attemptTimeoutCapMs: number }> = {
+  interactive_first_turn: { schema: "ccm-model-retry-profile-v1", id: "interactive_first_turn", maxAttempts: 2, attemptTimeoutCapMs: 60_000, totalTimeoutMs: 60_000 },
+  agent_orchestration: { schema: "ccm-model-retry-profile-v1", id: "agent_orchestration", maxAttempts: 3, attemptTimeoutCapMs: 120_000, totalTimeoutMs: 120_000 },
+  long_running_task: { schema: "ccm-model-retry-profile-v1", id: "long_running_task", maxAttempts: 5, attemptTimeoutCapMs: 360_000, totalTimeoutMs: 360_000 },
+  background_auxiliary: { schema: "ccm-model-retry-profile-v1", id: "background_auxiliary", maxAttempts: 1, attemptTimeoutCapMs: 30_000, totalTimeoutMs: 30_000 },
+};
+
+export function resolveModelRetryProfile(
+  id: ModelRetryProfileId = "long_running_task",
+  configuredAttemptTimeoutMs = UNIFIED_MODEL_ATTEMPT_TIMEOUT_MS,
+): ModelRetryProfileV1 {
+  const source = RETRY_PROFILES[id] || RETRY_PROFILES.long_running_task;
+  return {
+    schema: source.schema,
+    id: source.id,
+    maxAttempts: source.maxAttempts,
+    attemptTimeoutMs: Math.max(1_000, Math.min(source.attemptTimeoutCapMs, Number(configuredAttemptTimeoutMs) || UNIFIED_MODEL_ATTEMPT_TIMEOUT_MS)),
+    totalTimeoutMs: source.totalTimeoutMs,
+  };
+}
+
 export type ModelCallRetryContext = {
   attempt: number;
   maxAttempts: number;
   attemptTimeoutMs: number;
   elapsedMs: number;
+  signal: AbortSignal;
+  profile: ModelRetryProfileId;
 };
 
-export type ModelCallRetryNotice = ModelCallRetryContext & {
+export type ModelCallRetryNotice = Omit<ModelCallRetryContext, "signal"> & {
   delayMs: number;
   error: any;
 };
 
 export type ModelCallRetryOptions = {
+  profile?: ModelRetryProfileId;
   attempts?: number;
   attemptTimeoutMs?: number;
   totalTimeoutMs?: number;
@@ -22,6 +60,7 @@ export type ModelCallRetryOptions = {
   scope?: string;
   shouldRetry?: (error: any) => boolean;
   onRetry?: (notice: ModelCallRetryNotice) => void;
+  signal?: AbortSignal;
 };
 
 const RETRYABLE_HTTP_STATUS = new Set([408, 409, 425, 429]);
@@ -64,19 +103,61 @@ function compactError(error: any) {
     .slice(0, 360);
 }
 
-function sleep(ms: number) {
-  return ms > 0 ? new Promise(resolve => setTimeout(resolve, ms)) : Promise.resolve();
+function cancellationError(reason?: any) {
+  const error: any = new Error(String(reason?.message || reason || "模型调用已取消"));
+  error.code = "CCM_MODEL_CALL_CANCELLED";
+  return error;
 }
 
-async function withTimeout<T>(operation: Promise<T>, timeoutMs: number, scope: string) {
-  let timer: NodeJS.Timeout | null = null;
-  const timeout = new Promise<never>((_resolve, reject) => {
-    timer = setTimeout(() => reject(new Error(`${scope} timeout after ${timeoutMs}ms`)), timeoutMs);
+function abortableSleep(ms: number, signal?: AbortSignal) {
+  if (ms <= 0) return Promise.resolve();
+  return new Promise<void>((resolve, reject) => {
+    if (signal?.aborted) return reject(cancellationError(signal.reason));
+    const timer = setTimeout(() => {
+      cleanup();
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      cleanup();
+      reject(cancellationError(signal?.reason));
+    };
+    const cleanup = () => signal?.removeEventListener("abort", onAbort);
+    signal?.addEventListener("abort", onAbort, { once: true });
   });
+}
+
+function retryAfterMs(error: any) {
+  const direct = Number(error?.retryAfterMs || error?.retry_after_ms || 0);
+  if (Number.isFinite(direct) && direct > 0) return direct;
+  const seconds = Number(error?.retryAfter || error?.retry_after || 0);
+  return Number.isFinite(seconds) && seconds > 0 ? seconds * 1_000 : 0;
+}
+
+async function withTimeout<T>(
+  operation: (signal: AbortSignal) => Promise<T>,
+  timeoutMs: number,
+  scope: string,
+  parentSignal?: AbortSignal,
+) {
+  const controller = new AbortController();
+  const onParentAbort = () => controller.abort(parentSignal?.reason || cancellationError());
+  if (parentSignal?.aborted) throw cancellationError(parentSignal.reason);
+  parentSignal?.addEventListener("abort", onParentAbort, { once: true });
+  const timer = setTimeout(() => controller.abort(Object.assign(new Error(`${scope} timeout after ${timeoutMs}ms`), { code: "CCM_MODEL_ATTEMPT_TIMEOUT" })), timeoutMs);
   try {
-    return await Promise.race([operation, timeout]);
+    return await operation(controller.signal);
+  } catch (error: any) {
+    if (parentSignal?.aborted) throw cancellationError(parentSignal.reason);
+    if (controller.signal.aborted && error?.code !== "CCM_MODEL_CALL_CANCELLED") {
+      const timeoutError: any = new Error(`${scope} timeout after ${timeoutMs}ms`);
+      timeoutError.code = "CCM_MODEL_ATTEMPT_TIMEOUT";
+      throw timeoutError;
+    }
+    throw error;
   } finally {
-    if (timer) clearTimeout(timer);
+    clearTimeout(timer);
+    parentSignal?.removeEventListener("abort", onParentAbort);
   }
 }
 
@@ -84,12 +165,15 @@ export async function runModelCallWithRetry<T>(
   call: (context: ModelCallRetryContext) => Promise<T>,
   options: ModelCallRetryOptions = {},
 ): Promise<T> {
+  const configuredTimeout = Math.max(1_000, Number(options.attemptTimeoutMs) || UNIFIED_MODEL_ATTEMPT_TIMEOUT_MS);
+  const profile = resolveModelRetryProfile(options.profile || "long_running_task", configuredTimeout);
   const maxAttempts = Math.max(1, Math.min(
-    UNIFIED_MODEL_MAX_ATTEMPTS,
-    Math.floor(Number(options.attempts) || UNIFIED_MODEL_MAX_ATTEMPTS),
+    profile.maxAttempts,
+    Math.floor(Number(options.attempts) || profile.maxAttempts),
   ));
-  const configuredAttemptTimeoutMs = Math.max(1_000, Number(options.attemptTimeoutMs) || UNIFIED_MODEL_ATTEMPT_TIMEOUT_MS);
-  const totalTimeoutMs = Math.max(configuredAttemptTimeoutMs, Number(options.totalTimeoutMs) || UNIFIED_MODEL_TOTAL_TIMEOUT_MS);
+  const configuredAttemptTimeoutMs = profile.attemptTimeoutMs;
+  const requestedTotal = Number(options.totalTimeoutMs);
+  const totalTimeoutMs = Math.max(1_000, Math.min(profile.totalTimeoutMs, Number.isFinite(requestedTotal) && requestedTotal > 0 ? requestedTotal : profile.totalTimeoutMs));
   const baseDelayMs = Math.max(0, Math.min(5_000, Number(options.baseDelayMs ?? 500)));
   const scope = String(options.scope || "model call").trim() || "model call";
   const shouldRetry = options.shouldRetry || shouldRetryModelCallError;
@@ -98,13 +182,19 @@ export async function runModelCallWithRetry<T>(
   let completedAttempts = 0;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    if (options.signal?.aborted) throw cancellationError(options.signal.reason);
     const elapsedMs = Date.now() - startedAt;
     const remainingMs = totalTimeoutMs - elapsedMs;
     if (remainingMs <= 0) break;
     const attemptTimeoutMs = Math.max(1, Math.min(configuredAttemptTimeoutMs, remainingMs));
     completedAttempts = attempt;
     try {
-      return await withTimeout(call({ attempt, maxAttempts, attemptTimeoutMs, elapsedMs }), attemptTimeoutMs + 250, scope);
+      return await withTimeout(
+        signal => call({ attempt, maxAttempts, attemptTimeoutMs, elapsedMs, signal, profile: profile.id }),
+        attemptTimeoutMs,
+        scope,
+        options.signal,
+      );
     } catch (error: any) {
       lastError = error;
       if (!shouldRetry(error)) {
@@ -118,9 +208,10 @@ export async function runModelCallWithRetry<T>(
         throw error;
       }
       if (attempt >= maxAttempts) break;
-      const delayMs = Math.min(baseDelayMs * 2 ** (attempt - 1), Math.max(0, totalTimeoutMs - (Date.now() - startedAt)));
-      options.onRetry?.({ attempt, maxAttempts, attemptTimeoutMs, elapsedMs: Date.now() - startedAt, delayMs, error });
-      await sleep(delayMs);
+      const remainingBudgetMs = Math.max(0, totalTimeoutMs - (Date.now() - startedAt));
+      const delayMs = Math.min(Math.max(baseDelayMs * 2 ** (attempt - 1), retryAfterMs(error)), remainingBudgetMs);
+      options.onRetry?.({ attempt, maxAttempts, attemptTimeoutMs, elapsedMs: Date.now() - startedAt, profile: profile.id, delayMs, error });
+      await abortableSleep(delayMs, options.signal);
     }
   }
 
@@ -133,6 +224,8 @@ export async function runModelCallWithRetry<T>(
   exhaustedError.attemptTimeoutMs = configuredAttemptTimeoutMs;
   exhaustedError.totalTimeoutMs = totalTimeoutMs;
   exhaustedError.lastErrorCode = String(lastError?.code || "");
+  exhaustedError.retryProfile = profile.id;
+  exhaustedError.retryable = true;
   throw exhaustedError;
 }
 

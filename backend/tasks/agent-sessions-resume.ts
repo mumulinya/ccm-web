@@ -375,7 +375,7 @@ export function reopenTaskAgentSessions(taskId: string, reason = "用户在同�
     const reopened: TaskAgentSession[] = [];
     store.sessions = store.sessions.map((session: TaskAgentSession) => {
       if (!ids.has(session.id) || session.status === "open") return session;
-      const next = { ...session, status: "open" as const, closedAt: "", closeReason: "", lastUsedAt: now, lastError: reason };
+      const next = { ...session, status: "open" as const, closedAt: "", closeReason: "", suspendedAt: "", suspendReason: "", lastUsedAt: now, lastError: reason };
       reopened.push(next);
       return next;
     });

@@ -34,6 +34,7 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.closeTaskAgentSessions = closeTaskAgentSessions;
+exports.suspendTaskAgentSessions = suspendTaskAgentSessions;
 exports.pruneTaskAgentMemoryContextSnapshots = pruneTaskAgentMemoryContextSnapshots;
 exports.purgeTaskAgentSessions = purgeTaskAgentSessions;
 exports.reconcileTaskAgentSessions = reconcileTaskAgentSessions;
@@ -65,6 +66,35 @@ function closeTaskAgentSessions(input, reason = "主 Agent 已完成最终验收
         if (closed.length)
             (0, agent_sessions_shared_1.saveStore)(store);
         return closed;
+    });
+}
+function suspendTaskAgentSessions(input, reason = "任务执行已中断") {
+    if (!String(input.scopeId || "").trim() && !String(input.taskId || "").trim())
+        return [];
+    return (0, agent_sessions_shared_1.withTaskAgentSessionStoreLock)(() => {
+        const store = (0, agent_sessions_shared_1.loadStore)();
+        const now = new Date().toISOString();
+        const suspended = [];
+        store.sessions = store.sessions.map((item) => {
+            const matches = item.status === "open"
+                && (!input.scopeId || item.scopeId === input.scopeId)
+                && (!input.taskId || item.taskId === input.taskId)
+                && (!input.groupId || item.groupId === input.groupId);
+            if (!matches)
+                return item;
+            const next = {
+                ...item,
+                status: "suspended",
+                suspendedAt: now,
+                suspendReason: reason,
+                lastUsedAt: now,
+            };
+            suspended.push(next);
+            return next;
+        });
+        if (suspended.length)
+            (0, agent_sessions_shared_1.saveStore)(store);
+        return suspended;
     });
 }
 function pruneTaskAgentMemoryContextSnapshots(options = {}) {

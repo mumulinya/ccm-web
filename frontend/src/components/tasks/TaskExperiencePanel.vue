@@ -1115,7 +1115,7 @@ const taskActionPayload = (action) => {
 watch(() => props.card.task_id || props.card.id || '', () => {
   planAcceptFeedback.value = ''
 })
-const handoffActionCanEmit = (action) => ['view_changes', 'continue', 'retry', 'resume', 'gap_continue', 'confirm_plan', 'revise_plan', 'approve_epic', 'targeted_rework', 'continue_work_item', 'rollback', 'save_knowledge'].includes(action?.kind)
+const handoffActionCanEmit = (action) => ['view_changes', 'continue', 'retry', 'resume', 'interrupt', 'resume_interrupted', 'cancel', 'gap_continue', 'confirm_plan', 'revise_plan', 'approve_epic', 'targeted_rework', 'continue_work_item', 'rollback', 'save_knowledge'].includes(action?.kind)
 const handoffActionPayload = (action) => {
   if (!action) return action
   if (action.kind === 'view_changes') {

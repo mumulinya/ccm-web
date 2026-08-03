@@ -369,7 +369,7 @@ function reopenTaskAgentSessions(taskId, reason = "用户在同一任务中继�
         store.sessions = store.sessions.map((session) => {
             if (!ids.has(session.id) || session.status === "open")
                 return session;
-            const next = { ...session, status: "open", closedAt: "", closeReason: "", lastUsedAt: now, lastError: reason };
+            const next = { ...session, status: "open", closedAt: "", closeReason: "", suspendedAt: "", suspendReason: "", lastUsedAt: now, lastError: reason };
             reopened.push(next);
             return next;
         });

@@ -141,6 +141,33 @@ export function buildStartupTaskRecoveryDecision(task: any, forceAuto = false): 
       { requiresUser: true },
     );
   }
+  if (task?.interruption_receipt?.schema === "ccm-task-interruption-receipt-v1") {
+    const recovery = buildTaskRecoveryDecision(task, task.interruption_receipt, {
+      userRequested: forceAuto,
+      authorizationValid: !hasAuthorizationBlock(task),
+      runtimeValid: true,
+    });
+    if (recovery.mode === "auto") {
+      return decision(
+        task,
+        "auto",
+        recovery.reason_code,
+        recovery.reason,
+        "已核验中断现场，将继续原任务和子 Agent 会话。",
+        "任务会从上一个安全检查点继续，已完成的副作用不会重复执行。",
+        { authorizationPreserved: true, authorizationEvidence: ["interruption_receipt", recovery.checksum], requiresUser: false },
+      );
+    }
+    return decision(
+      task,
+      "manual",
+      recovery.reason_code,
+      recovery.reason,
+      "任务执行已停止，现场和子 Agent 会话均已保留。",
+      "检查当前源码和权限后点击“恢复任务”，即可沿用原任务继续。",
+      { requiresUser: true },
+    );
+  }
   if (task?.cancellation_requested_at || task?.cancellation_reason) {
     return decision(
       task,
@@ -370,3 +397,4 @@ export function runStartupTaskRecoveryDecisionSelfTest() {
     },
   };
 }
+import { buildTaskRecoveryDecision } from "../../tasks/task-interruption";

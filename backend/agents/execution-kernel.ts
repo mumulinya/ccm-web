@@ -113,6 +113,7 @@ export interface ExecutionRecord {
   updatedAt: string;
   startedAt: string;
   finishedAt: string;
+  executionAttempt?: number;
   events: ExecutionEvent[];
 }
 
@@ -362,6 +363,26 @@ export function transitionExecution(executionId: string, state: ExecutionState, 
   record.events = [...(record.events || []), createEvent(record, extra.name || `execution.${state}`, message || state, {
     state, status: extra.status || (state === "failed" ? "error" : state === "succeeded" ? "ok" : state === "cancelled" ? "warning" : "info"),
     failureClass: extra.failureClass, data: extra.data,
+  })].slice(-MAX_EVENTS);
+  writeJsonAtomic(executionFile(executionId), record);
+  return record;
+}
+
+export function beginExecutionAttempt(executionId: string, message = "任务开始新的执行轮次") {
+  const record = loadExecution(executionId);
+  if (!record) return null;
+  const at = now();
+  record.state = "spawning";
+  record.executionAttempt = Math.max(0, Number(record.executionAttempt || 0)) + 1;
+  record.startedAt = at;
+  record.finishedAt = "";
+  record.failure = null;
+  record.cancellation = null;
+  record.updatedAt = at;
+  record.events = [...(record.events || []), createEvent(record, "execution.attempt_started", message, {
+    state: "spawning",
+    status: "info",
+    data: { execution_attempt: record.executionAttempt },
   })].slice(-MAX_EVENTS);
   writeJsonAtomic(executionFile(executionId), record);
   return record;

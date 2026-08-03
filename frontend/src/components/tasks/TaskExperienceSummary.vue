@@ -198,7 +198,7 @@ const fileCount = computed(() => {
   return Math.max(0, ...candidates.map(value => asList(value).length))
 })
 
-const actionKinds = new Set(['confirm', 'confirm_plan', 'revise_plan', 'approve_epic', 'targeted_rework', 'continue', 'continue_work_item', 'retry', 'resume', 'gap_continue', 'cancel', 'rollback', 'save_knowledge'])
+const actionKinds = new Set(['confirm', 'confirm_plan', 'revise_plan', 'approve_epic', 'targeted_rework', 'continue', 'continue_work_item', 'retry', 'resume', 'interrupt', 'resume_interrupted', 'gap_continue', 'cancel', 'rollback', 'save_knowledge'])
 const primaryActions = computed(() => asList(props.card.actions)
   .filter(action => actionKinds.has(action?.kind))
   .slice(0, needsUser.value ? 2 : 1))

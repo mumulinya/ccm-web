@@ -14,6 +14,7 @@
 | 群聊项目子 Agent 跨项目协作 | 已实现、已启用签名与精确会话门禁 | [项目子 Agent 协作流程](./PROJECT-CHILD-AGENT-COLLABORATION.md) |
 | 记忆系统端到端流程 | 已实现、已完成CC式压缩、长期记忆、MCP hydration与Context Engine闭环 | [记忆系统完整业务流程](./MEMORY-SYSTEM-END-TO-END.md) |
 | 自动开发任务端到端流程 | 已记录全局Agent、任务派发、工作台、群聊/项目会话从需求摄取到开发、验收、回传、回放和记忆准入的完整链路 | [自动开发任务完整业务流程](./AUTOMATIC-DEVELOPMENT-END-TO-END.md) |
+| 分级重试、任务中断与恢复 | 已记录四类模型重试档、停止与永久取消、子Agent会话保留、安全恢复和任务回放链路 | [分级重试、任务中断与会话恢复](./TASK-INTERRUPTION-AND-RECOVERY.md) |
 | 自动开发统一任务系统V2 | 已实现精确作用域身份、真实会话队列、跨会话工作区互斥、结构化终态门禁和旧入口兼容 | [自动开发统一任务系统V2](./AUTOMATIC-DEVELOPMENT-UNIFIED-TASK-SYSTEM-V2.md) |
 | Agent MCP/Skill注册与继承 | 已实现全局、群聊、项目主Agent工具调用，以及项目子Agent签名快照、原生注册和精确作用域复验 | [Agent MCP与Skill注册继承流程](./AGENT-MCP-SKILL-INHERITANCE.md) |
 | MCP/Skill工具市场供应链 | 已实现安全来源、完整物料哈希、隔离事务、Admin签名激活、多传输MCP、归属卸载和启动恢复 | [MCP/Skill工具市场完整业务流程](./MCP-SKILL-MARKETPLACE-SUPPLY-CHAIN.md) |

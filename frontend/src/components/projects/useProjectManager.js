@@ -971,10 +971,28 @@ export function useProjectManager(props, emit) {
         chatInput.value = requirement
         await nextTick()
         await sendMessage()
+      } else if (action.kind === 'interrupt' || action.kind === 'resume_interrupted') {
+        if (!id || !isProjectMainTask) return toast.info('当前任务不支持此恢复操作')
+        if (action.kind === 'interrupt' && !await confirmDialog(`确定停止“${card.title}”当前这一轮执行吗？任务和子 Agent 会话会保留。`)) return
+        const data = await postTaskAction('/api/projects/main-agent/task-action', {
+          action: action.kind,
+          task_id: id,
+          project: currentProject.value,
+          project_session_id: currentSession.value,
+          reason: action.kind === 'interrupt' ? '用户从项目任务卡停止当前执行' : undefined,
+        })
+        msg.taskExperience = data.taskExperience || data.task || msg.taskExperience
+        if (action.kind === 'resume_interrupted') pendingProjectParentRunId.value = data.resume_parent_run_id || id
+        await refreshCurrentProjectSession(currentSession.value)
+        toast.success(action.kind === 'interrupt' ? '当前执行已停止，恢复现场已保留' : '已恢复原任务和子 Agent 会话')
       } else if (action.kind === 'cancel') {
         if (!id) return toast.info('当前项目直连执行暂未绑定任务，无法远程停止')
-        if (!await confirmDialog(`确定停止任务“${card.title}”？`)) return
-        await postTaskAction(isProjectRun ? '/api/project-runs/cancel' : '/api/tasks/cancel', { id, reason: '用户从项目聊天任务卡停止' })
+        if (!await confirmDialog(`确定永久取消任务“${card.title}”？历史会保留，但不会自动恢复。`)) return
+        if (isProjectMainTask) {
+          await postTaskAction('/api/projects/main-agent/task-action', { action: 'cancel', task_id: id, project: currentProject.value, project_session_id: currentSession.value, reason: '用户从项目聊天任务卡永久取消' })
+        } else {
+          await postTaskAction(isProjectRun ? '/api/project-runs/cancel' : '/api/tasks/cancel', { id, reason: '用户从项目聊天任务卡永久取消' })
+        }
       } else if (action.kind === 'retry') {
         if (isProjectRun || isProjectMainTask) {
           pendingProjectParentRunId.value = id

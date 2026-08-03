@@ -1180,14 +1180,25 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
   } = {}): GlobalAgentLoopRuntime {
     const config = loadOrchestratorConfig();
     const runtime: GlobalAgentLoopRuntime = {
-      callModel: async (messages, run) => {
+      callModel: async (messages, run, signal) => {
         attachGlobalRunRequirementSources(run, input.sourceIngestion);
         if (!config.apiKey || !config.apiUrl || !config.model) throw new Error("统一大模型尚未配置");
         const { accumulateGlobalAgentRunUsage } = require("../../agents/global/global-agent-metrics");
         const invoke = (providerMessages: Array<{ role: string; content: string }>) => {
+          const modelCallIndex = Math.max(0, Number((run as any).main_model_call_count || 0));
+          (run as any).main_model_call_count = modelCallIndex + 1;
           (run as any).latest_model_visible_payload = buildGlobalProviderPayloadSnapshot(providerMessages, String(run.session_id || ""), run);
           const providerCacheBoundary = buildGlobalAgentSessionContinuation(String(run.session_id || ""));
           return callGlobalModelWithRetry(config, providerMessages, {
+          signal,
+          retryProfile: modelCallIndex === 0 ? "interactive_first_turn" : "agent_orchestration",
+          onRetry: (notice: any) => input.onEvent?.({
+            type: "retrying",
+            attempt: notice.attempt + 1,
+            max_attempts: notice.maxAttempts,
+            remaining_budget_ms: Math.max(0, (modelCallIndex === 0 ? 60_000 : 120_000) - Number(notice.elapsedMs || 0)),
+            reason: String(notice.error?.message || notice.error || "模型暂时不可用").slice(0, 240),
+          }),
           providerContextCache: {
             scope: "global",
             scopeId: String(run.session_id || ""),

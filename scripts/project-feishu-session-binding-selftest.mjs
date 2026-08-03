@@ -41,7 +41,8 @@ const checks = {
     source.includes('Object.values(data.active_session || {})')
     && source.includes('Object.values(data.user_sessions || {}).flatMap'),
   project_sidebar_groups_sources:
-    sidebar.includes('网页会话')
+    sidebar.includes('普通会话')
+    && sidebar.includes('自动化任务会话')
     && sidebar.includes('飞书会话')
     && sidebar.includes("emit('bind-feishu', session)"),
   project_ui_creates_and_binds_feishu_sessions:

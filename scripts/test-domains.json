@@ -57,6 +57,7 @@
         "user-notification-pet-production-selftest.mjs",
         "group-test-targets-selftest.mjs",
         "project-main-agent-orchestration-selftest.mjs",
+        "task-interruption-recovery-selftest.mjs",
         "project-plan-production-closure-selftest.mjs",
         "project-main-agent-source-selftest.mjs",
         "project-main-agent-runtime-diagnostics-selftest.mjs",

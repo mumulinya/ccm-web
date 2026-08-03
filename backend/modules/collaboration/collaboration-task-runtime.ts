@@ -321,6 +321,7 @@ import {
   recordTaskAgentSessionTurn,
   reopenTaskAgentSessions,
 } from "../../tasks/agent-sessions";
+import { resumeInterruptedTaskExecution } from "../../tasks/task-interruption";
 
 import {
   bindTaskAgentInvocationContext,
@@ -767,6 +768,17 @@ export function resumeTaskQueues(ctx: CollabCtx, options: any = {}) {
     }
 
     const traceId = ensureTraceId(task.trace_id, "task");
+    if (task?.interruption_receipt?.schema === "ccm-task-interruption-receipt-v1") {
+      const recoveredExecution = resumeInterruptedTaskExecution(task, {
+        userRequested: forceAuto,
+        authorizationValid: recoveryDecision.authorization_preserved,
+        runtimeValid: true,
+      });
+      if (!recoveredExecution.resumed) {
+        results.push({ task_id: task.id, queued: false, manual_recovery_required: true, reason_code: recoveredExecution.decision.reason_code, message: recoveredExecution.decision.reason });
+        continue;
+      }
+    }
     const recoveryLease = acquireTaskLease(task.id, traceId, 45_000);
     if (!recoveryLease.acquired) {
       addTaskLog(task.id, "info", `启动恢复跳过：另一个存活实例仍持有任务租约（owner=${recoveryLease.lease?.owner_id || "unknown"}）`);

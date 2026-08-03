@@ -91,6 +91,7 @@ const storage_1 = require("./storage");
 const worktree_1 = require("../../agents/worktree");
 const execution_kernel_1 = require("../../agents/execution-kernel");
 const agent_sessions_1 = require("../../tasks/agent-sessions");
+const task_interruption_1 = require("../../tasks/task-interruption");
 const task_agent_invocation_lineage_1 = require("../../tasks/task-agent-invocation-lineage");
 const reliability_ledger_1 = require("../../system/reliability-ledger");
 const reasoning_loop_1 = require("../../agents/reasoning-loop");
@@ -755,7 +756,7 @@ async function processTargetQueue(targetKey, ctx, testHooks = {}) {
                 collaboration_runtime_task_queue_1.runningTaskIds.add(taskId);
                 leaseHeartbeat = setInterval(() => (0, reliability_ledger_1.renewTaskLease)(taskId, 45_000), 10_000);
                 ensureTaskKernelExecution(task);
-                (0, execution_kernel_1.transitionExecution)(taskId, "spawning", "任务队列正在启动开发执行内核");
+                (0, execution_kernel_1.beginExecutionAttempt)(taskId, "任务队列正在启动新的开发执行轮次");
                 const reasoningLoop = (0, collaboration_runtime_task_queue_1.buildTaskPreflightReasoning)(task, "主 Agent 执行前重新核对目标、当前状态和验收条件", Number(leaseResult.lease.recovery_count || 0) > 0 || !!task.recovery);
                 const startedTask = (0, collaboration_runtime_runtime_tools_1.updateTask)(taskId, { status: "in_progress", trace_id: traceId, started_at: new Date().toISOString(), queue_position: 0, queue_state: "running", reasoning_loop: reasoningLoop, execution_lease: { owner_id: leaseResult.lease.owner_id, acquired_at: leaseResult.lease.acquired_at, recovery_count: leaseResult.lease.recovery_count } }) || task;
                 (0, logs_1.appendTaskTimelineEvent)(taskId, { type: "reasoning_preflight", title: "我已复核目标与验收", detail: `计划版本 v${reasoningLoop.plan_version} · 待证明 ${reasoningLoop.assertions.filter(item => item.status !== "passed").length} 项`, status: "ok", phase: "planning", data: { plan_version: reasoningLoop.plan_version, fact_hash: reasoningLoop.fact_snapshots[reasoningLoop.fact_snapshots.length - 1]?.hash || "", recovery: Number(leaseResult.lease.recovery_count || 0) > 0 || !!task.recovery } });
@@ -1103,8 +1104,18 @@ async function processTargetQueue(targetKey, ctx, testHooks = {}) {
             catch (error) {
                 console.error(`[任务队列] [${targetKey}] 任务执行失败: ${task.title}`, error.message);
                 const failure = (0, execution_kernel_1.classifyExecutionFailure)(error);
-                const cancelled = failure.failureClass === "cancelled" || (0, execution_kernel_1.isTaskCancellationRequested)(taskId);
                 const latestWithFollowups = (0, db_1.loadTasks)().find((item) => item.id === taskId) || task;
+                const alreadyInterrupted = latestWithFollowups?.interruption_receipt?.schema === "ccm-task-interruption-receipt-v1"
+                    && latestWithFollowups?.acceptance_state === "recovery_required";
+                if (alreadyInterrupted) {
+                    (0, collaboration_runtime_task_queue_1.updateGroupTaskInlineStatus)(latestWithFollowups, "blocked", latestWithFollowups.status_detail || "当前执行已停止，可恢复原任务");
+                    finalizeTaskKernel(task, (0, collaboration_runtime_status_helpers_1.buildTaskExecutionResult)("waiting", "当前执行已停止，可恢复原任务", { detail: latestWithFollowups.status_detail || "当前执行已停止" }), latestWithFollowups.delivery_summary || null, "cancelled", "当前执行已停止，子 Agent 会话已挂起");
+                    (0, logs_1.addTaskLog)(taskId, "warning", "当前执行已停止；任务、计划和子 Agent 会话已保留，未转换为永久取消");
+                    await ctx.onTaskStatusChange?.(latestWithFollowups, "blocked", latestWithFollowups.status_detail || "等待恢复任务");
+                    (0, collaboration_runtime_task_queue_1.appendTaskGroupReport)(latestWithFollowups, "waiting", latestWithFollowups.status_detail || "当前执行已停止，等待恢复");
+                    continue;
+                }
+                const cancelled = failure.failureClass === "cancelled" || (0, execution_kernel_1.isTaskCancellationRequested)(taskId);
                 if (cancelled && (0, collaboration_runtime_task_queue_1.shouldResumeAfterGoalRevisionInterruption)(latestWithFollowups, executionFollowupRevision)) {
                     const pending = Array.isArray(latestWithFollowups.pending_followups) ? latestWithFollowups.pending_followups : [];
                     const acceptedAt = new Date().toISOString();
@@ -1140,6 +1151,48 @@ async function processTargetQueue(targetKey, ctx, testHooks = {}) {
                     (0, collaboration_runtime_task_queue_1.syncTaskBacklogStatus)(resumedTask, "in_progress", resumedTask.status_detail);
                     await ctx.onTaskStatusChange?.(resumedTask, "waiting", resumedTask.status_detail);
                     enqueueFollowupAfterRound = true;
+                    continue;
+                }
+                const retryExhausted = String(error?.code || "") === "CCM_MODEL_RETRY_EXHAUSTED";
+                const temporaryInterruption = retryExhausted
+                    || ["network", "timeout", "provider", "lease_lost"].includes(String(failure.failureClass || ""));
+                if (!cancelled && temporaryInterruption) {
+                    const reasonCode = String(failure.failureClass || "") === "lease_lost"
+                        ? "lease_lost"
+                        : retryExhausted
+                            ? "provider_unavailable"
+                            : String(failure.failureClass || "") === "network"
+                                ? "temporary_network"
+                                : "provider_overload";
+                    const interruption = (0, task_interruption_1.interruptTaskExecution)({
+                        task: latestWithFollowups,
+                        reasonCode: reasonCode,
+                        reason: String(error?.message || "模型或网络暂时不可用，当前执行已安全中断").slice(0, 500),
+                        actor: "group-task-runtime",
+                        checkpoint: latestWithFollowups.acceptance_state || "executing",
+                        workspaceChecksum: latestWithFollowups.workspace_snapshot_checksum || latestWithFollowups.workspace_evidence?.checksum || "",
+                        sideEffectState: latestWithFollowups.git_commit_receipt || latestWithFollowups.deployment_receipt ? "uncertain" : "none",
+                    });
+                    const interruptedTask = (0, collaboration_runtime_runtime_tools_1.updateTask)(taskId, {
+                        status: "blocked",
+                        acceptance_state: "recovery_required",
+                        auto_execute: false,
+                        is_paused: true,
+                        paused: true,
+                        recovery_pending: true,
+                        interruption_receipt: interruption.receipt,
+                        interrupted_at: interruption.receipt.interrupted_at,
+                        status_detail: retryExhausted
+                            ? "模型重试预算已耗尽，当前执行已停止；任务和子 Agent 会话已保留"
+                            : "网络或运行环境中断，当前执行已停止；任务和子 Agent 会话已保留",
+                    }) || latestWithFollowups;
+                    (0, collaboration_runtime_task_queue_1.updateGroupTaskInlineStatus)(interruptedTask, "blocked", interruptedTask.status_detail);
+                    finalizeTaskKernel(task, (0, collaboration_runtime_status_helpers_1.buildTaskExecutionResult)("waiting", interruptedTask.status_detail, { detail: interruptedTask.status_detail }), interruptedTask.delivery_summary || null, "cancelled", interruptedTask.status_detail);
+                    (0, logs_1.addTaskLog)(taskId, "warning", interruptedTask.status_detail);
+                    (0, logs_1.appendTaskTimelineEvent)(taskId, { type: "task_interrupted", title: "当前执行已中断", detail: interruptedTask.status_detail, status: "warn", phase: "recovery_required", data: { reason_code: interruption.receipt.reason_code, receipt_checksum: interruption.receipt.checksum } });
+                    (0, collaboration_runtime_task_queue_1.syncTaskBacklogStatus)(interruptedTask, "blocked", interruptedTask.status_detail);
+                    await ctx.onTaskStatusChange?.(interruptedTask, "blocked", interruptedTask.status_detail);
+                    (0, collaboration_runtime_task_queue_1.appendTaskGroupReport)(interruptedTask, "waiting", interruptedTask.status_detail);
                     continue;
                 }
                 const failedExecution = (0, collaboration_runtime_status_helpers_1.buildTaskExecutionResult)("failed", `执行失败: ${error.message}`, { detail: String(error.message || "执行失败") });

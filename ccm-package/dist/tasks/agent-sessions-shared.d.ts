@@ -60,13 +60,15 @@ export type TaskAgentSession = {
     agentType: string;
     nativeSessionId: string;
     resumeMode: "native" | "scratchpad";
-    status: "open" | "closed";
+    status: "open" | "suspended" | "closed";
     turnCount: number;
     lastTurnSucceeded: boolean | null;
     createdAt: string;
     lastUsedAt: string;
     closedAt: string;
     closeReason: string;
+    suspendedAt?: string;
+    suspendReason?: string;
     nativeCaptureFailures?: number;
     nativeRecoveryAttempts?: number;
     nativeSessionHistory?: string[];

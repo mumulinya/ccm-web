@@ -87,6 +87,33 @@ export function closeTaskAgentSessions(input: { scopeId?: string; taskId?: strin
   });
 }
 
+export function suspendTaskAgentSessions(input: { scopeId?: string; taskId?: string; groupId?: string }, reason = "任务执行已中断") {
+  if (!String(input.scopeId || "").trim() && !String(input.taskId || "").trim()) return [];
+  return withTaskAgentSessionStoreLock(() => {
+    const store = loadStore();
+    const now = new Date().toISOString();
+    const suspended: TaskAgentSession[] = [];
+    store.sessions = store.sessions.map((item: TaskAgentSession) => {
+      const matches = item.status === "open"
+        && (!input.scopeId || item.scopeId === input.scopeId)
+        && (!input.taskId || item.taskId === input.taskId)
+        && (!input.groupId || item.groupId === input.groupId);
+      if (!matches) return item;
+      const next: TaskAgentSession = {
+        ...item,
+        status: "suspended",
+        suspendedAt: now,
+        suspendReason: reason,
+        lastUsedAt: now,
+      };
+      suspended.push(next);
+      return next;
+    });
+    if (suspended.length) saveStore(store);
+    return suspended;
+  });
+}
+
 
 export function pruneTaskAgentMemoryContextSnapshots(options: any = {}) {
   const dryRun = options.dryRun !== false && options.dry_run !== false;
@@ -222,4 +249,3 @@ export function shouldCloseTaskAgentSessions(input: { taskId?: string; reviewSta
     ? terminalStatuses.has(String(input.taskStatus || ""))
     : String(input.reviewStatus || "") === "complete";
 }
-

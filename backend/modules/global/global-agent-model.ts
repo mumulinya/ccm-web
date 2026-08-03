@@ -1,11 +1,11 @@
 import { callAnthropicCompatibleChat, callOpenAiCompatibleChat, normalizeAnthropicMessagesUrl, normalizeChatCompletionsUrl, shouldUseAnthropic } from "../collaboration/group-orchestrator-llm-client";
-import { shouldRetryModelCallError } from "../../system/model-call-retry";
+import { ModelRetryProfileId, runModelCallWithRetry, shouldRetryModelCallError } from "../../system/model-call-retry";
 import { compactPetText } from "./global-agent-test-agent-display";
 
 export async function callLlm(
   config: any,
   messages: any[],
-  options: { onUsage?: (usage: any) => void; onDelta?: (delta: string) => void; providerContextCache?: any; onProviderContextCache?: (receipt: any) => void } = {},
+  options: { onUsage?: (usage: any) => void; onDelta?: (delta: string) => void; providerContextCache?: any; onProviderContextCache?: (receipt: any) => void; retryProfile?: ModelRetryProfileId; signal?: AbortSignal; onRetry?: (notice: any) => void } = {},
 ): Promise<string> {
   const requestBytes = Buffer.byteLength(JSON.stringify(messages));
   const maxRequestBytes = 512 * 1024;
@@ -33,6 +33,9 @@ export async function callLlm(
       onDelta: options.onDelta,
       providerContextCache: options.providerContextCache,
       onProviderContextCache: options.onProviderContextCache,
+      retryProfile: options.retryProfile,
+      signal: options.signal,
+      onRetry: options.onRetry,
     });
   }
 
@@ -46,6 +49,9 @@ export async function callLlm(
     onDelta: options.onDelta,
     providerContextCache: options.providerContextCache,
     onProviderContextCache: options.onProviderContextCache,
+    retryProfile: options.retryProfile,
+    signal: options.signal,
+    onRetry: options.onRetry,
   });
 }
 
@@ -60,6 +66,9 @@ export async function callGlobalModelWithRetry(config: any, messages: any[], opt
   onDelta?: (delta: string) => void;
   providerContextCache?: any;
   onProviderContextCache?: (receipt: any) => void;
+  retryProfile?: ModelRetryProfileId;
+  signal?: AbortSignal;
+  onRetry?: (notice: any) => void;
   call?: (config: any, messages: any[]) => Promise<string>;
 } = {}) {
   if (!options.call) return callLlm(config, messages, {
@@ -67,22 +76,22 @@ export async function callGlobalModelWithRetry(config: any, messages: any[], opt
     onDelta: options.onDelta,
     providerContextCache: options.providerContextCache,
     onProviderContextCache: options.onProviderContextCache,
+    retryProfile: options.retryProfile,
+    signal: options.signal,
+    onRetry: options.onRetry,
   });
-  const attempts = Math.max(1, Math.min(5, Number(options.attempts || 5)));
-  const delayMs = Math.max(0, Math.min(5_000, Number(options.delayMs ?? 500)));
   const call = options.call;
-  let lastError: any = null;
-  for (let attempt = 1; attempt <= attempts; attempt++) {
-    try {
-      return await call(config, messages);
-    } catch (error: any) {
-      lastError = error;
-      if (attempt >= attempts || !shouldRetryGlobalModelError(error)) throw error;
-      console.warn(`[全局 Agent] 统一大模型调用暂时失败，正在重试（${attempt + 1}/${attempts}）：${compactPetText(error?.message || error, 240)}`);
-      if (delayMs > 0) await new Promise(resolve => setTimeout(resolve, delayMs));
-    }
-  }
-  throw lastError;
+  return runModelCallWithRetry(
+    () => call(config, messages),
+    {
+      profile: options.retryProfile || "long_running_task",
+      attempts: options.attempts,
+      baseDelayMs: options.delayMs,
+      signal: options.signal,
+      scope: "全局 Agent 模型调用",
+      onRetry: options.onRetry || (notice => console.warn(`[全局 Agent] 统一大模型调用暂时失败，正在重试（${notice.attempt + 1}/${notice.maxAttempts}）：${compactPetText(notice.error?.message || notice.error, 240)}`)),
+    },
+  );
 }
 
 export async function runGlobalModelRetrySelfTest() {

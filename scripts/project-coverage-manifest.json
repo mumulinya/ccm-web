@@ -218,7 +218,8 @@
       "businessProcessDocs": [
         "docs/confirmed-business-processes/AUTOMATIC-DEVELOPMENT-END-TO-END.md",
         "docs/confirmed-business-processes/AUTOMATIC-DEVELOPMENT-UNIFIED-TASK-SYSTEM-V2.md",
-        "docs/confirmed-business-processes/PROJECT-CHILD-AGENT-COLLABORATION.md"
+        "docs/confirmed-business-processes/PROJECT-CHILD-AGENT-COLLABORATION.md",
+        "docs/confirmed-business-processes/TASK-INTERRUPTION-AND-RECOVERY.md"
       ],
       "sharedBy": [
         "test-agent-acceptance",

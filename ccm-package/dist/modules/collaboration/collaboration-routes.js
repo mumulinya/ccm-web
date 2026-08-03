@@ -74,6 +74,7 @@ const daily_dev_backlog_1 = require("./daily-dev-backlog");
 const runtime_1 = require("../../agents/runtime");
 const execution_kernel_1 = require("../../agents/execution-kernel");
 const agent_sessions_1 = require("../../tasks/agent-sessions");
+const task_interruption_1 = require("../../tasks/task-interruption");
 const task_agent_invocation_lineage_1 = require("../../tasks/task-agent-invocation-lineage");
 const collaboration_resilience_1 = require("./collaboration-resilience");
 const reliability_ledger_1 = require("../../system/reliability-ledger");
@@ -550,6 +551,50 @@ function handleCollaborationApiReplayAndExecutionRoutes(pathname, req, res, pars
             }
             catch (e) {
                 (0, utils_1.sendJson)(res, { error: e.message }, 409);
+            }
+        });
+        return true;
+    }
+    if (["/api/tasks/interrupt", "/api/tasks/resume-interrupted"].includes(pathname) && req.method === "POST") {
+        let body = "";
+        req.on("data", (chunk) => body += chunk);
+        req.on("end", async () => {
+            try {
+                const payload = body ? JSON.parse(body) : {};
+                const taskId = String(payload.task_id || payload.taskId || payload.id || "");
+                const task = (0, db_1.loadTasks)().find((item) => item.id === taskId);
+                if (!task)
+                    return (0, utils_1.sendJson)(res, { error: "任务不存在" }, 404);
+                if (pathname.endsWith("/interrupt")) {
+                    for (const queue of collaboration_1.taskQueues.values()) {
+                        let index = queue.indexOf(taskId);
+                        while (index >= 0) {
+                            queue.splice(index, 1);
+                            index = queue.indexOf(taskId);
+                        }
+                    }
+                    const reason = (0, collaboration_1.compactFormText)(payload.reason, "用户停止当前执行");
+                    const interruption = (0, task_interruption_1.interruptTaskExecution)({ task, reasonCode: "user_interrupt", reason, actor: String(payload.actor || "local-user"), checkpoint: String(task.acceptance_state || task.status || "unknown"), sideEffectState: "uncertain" });
+                    (0, test_agent_runner_1.cancelTestAgentRunsForTask)(taskId, reason);
+                    const updated = (0, collaboration_1.updateTask)(taskId, { status: "blocked", acceptance_state: "recovery_required", auto_execute: false, is_paused: true, paused: true, recovery_pending: true, interrupted_at: interruption.receipt.interrupted_at, interruption_receipt: interruption.receipt, status_detail: "当前执行已停止，任务和子 Agent 会话已保留" });
+                    (0, reliability_ledger_1.releaseTaskLease)(taskId, "interrupted");
+                    (0, collaboration_1.updateGroupTaskInlineStatus)(updated || task, "blocked", "当前执行已停止，可恢复原任务");
+                    (0, logs_1.appendTaskTimelineEvent)(taskId, { type: "task_interrupted", title: "当前执行已停止，可恢复", detail: reason, status: "warn", phase: "blocked", data: { receipt_checksum: interruption.receipt.checksum } });
+                    await ctx.onTaskStatusChange?.(updated || task, "interrupted", reason);
+                    return (0, utils_1.sendJson)(res, { success: true, task: updated, interruption_receipt: interruption.receipt, queue_status: (0, collaboration_1.getQueueStatus)() });
+                }
+                if (collaboration_1.runningTaskIds.has(taskId))
+                    return (0, utils_1.sendJson)(res, { error: "旧执行仍在终止，请稍后再恢复" }, 409);
+                const recovery = (0, task_interruption_1.resumeInterruptedTaskExecution)(task, { userRequested: true, authorizationValid: true, runtimeValid: true });
+                if (!recovery.resumed)
+                    return (0, utils_1.sendJson)(res, { error: recovery.decision.reason, recovery_decision: recovery.decision }, 409);
+                const updated = (0, collaboration_1.updateTask)(taskId, { status: "pending", acceptance_state: task.interruption_receipt?.checkpoint || "planned", auto_execute: true, is_paused: false, paused: false, recovery_pending: false, recovery_decision: recovery.decision, execution_attempt: Math.max(0, Number(task.execution_attempt || 0)) + 1, resumed_at: new Date().toISOString(), status_detail: "已恢复原任务和子 Agent 会话，等待继续执行" });
+                (0, logs_1.appendTaskTimelineEvent)(taskId, { type: "task_recovered", title: "已恢复原任务和子 Agent 会话", detail: recovery.decision.reason, status: "ok", phase: "queued", data: { reopened_session_ids: recovery.reopenedSessions.map((item) => item.id), recovery_checksum: recovery.decision.checksum } });
+                const queued = (0, collaboration_1.enqueueTask)(taskId, ctx);
+                return (0, utils_1.sendJson)(res, { success: true, task: updated, recovery_decision: recovery.decision, queue_result: queued });
+            }
+            catch (e) {
+                return (0, utils_1.sendJson)(res, { error: e.message }, 400);
             }
         });
         return true;

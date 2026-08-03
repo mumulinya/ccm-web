@@ -921,13 +921,17 @@ function buildUserTaskActions(task, phase, executions) {
         actions.push({ id: "continue", label: "继续修改", kind: "continue", tone: "primary" });
     else if (!terminal)
         actions.push({ id: "supplement", label: "追加要求", kind: "continue", tone: "primary" });
-    if (retryable)
+    if (task?.acceptance_state === "recovery_required")
+        actions.push({ id: "resume_interrupted", label: "恢复任务", kind: "resume_interrupted", tone: "primary" });
+    else if (retryable)
         actions.push({ id: "retry", label: "重新执行", kind: "retry", tone: "warning" });
     const checkpointIds = executions.flatMap((item) => Array.isArray(item.checkpointIds) ? item.checkpointIds : []).filter(Boolean);
     if (completed && checkpointIds.length)
         actions.push({ id: "rollback", label: "安全撤销", kind: "rollback", tone: "danger", checkpoint_ids: checkpointIds });
     if (!terminal)
-        actions.push({ id: "cancel", label: "停止", kind: "cancel", tone: "danger" });
+        actions.push({ id: "interrupt", label: "停止当前执行", kind: "interrupt", tone: "danger" });
+    if (!completed && !stopped)
+        actions.push({ id: "cancel", label: "永久取消", kind: "cancel", tone: "outline" });
     return actions;
 }
 function getTaskWorkItems(task, executions = []) {

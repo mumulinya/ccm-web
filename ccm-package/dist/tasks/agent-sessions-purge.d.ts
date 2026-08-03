@@ -4,6 +4,11 @@ export declare function closeTaskAgentSessions(input: {
     taskId?: string;
     groupId?: string;
 }, reason?: string): TaskAgentSession[];
+export declare function suspendTaskAgentSessions(input: {
+    scopeId?: string;
+    taskId?: string;
+    groupId?: string;
+}, reason?: string): TaskAgentSession[];
 export declare function pruneTaskAgentMemoryContextSnapshots(options?: any): {
     schema: string;
     generatedAt: string;

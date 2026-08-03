@@ -168,6 +168,8 @@ export declare function getProjectMainTask(taskId: string): any;
 export declare function confirmProjectMainTask(taskId: string, projectInput: string, projectSessionIdInput: string): any;
 export declare function cancelProjectMainTask(taskId: string, projectInput: string, projectSessionIdInput: string, reason?: string): any;
 export declare function cancelProjectMainTasksForSession(projectInput: string, projectSessionIdInput: string, reason: string): any[];
+export declare function interruptProjectMainTask(taskId: string, projectInput: string, projectSessionIdInput: string, reason?: string): any;
+export declare function resumeInterruptedProjectMainTask(taskId: string, projectInput: string, projectSessionIdInput: string): any;
 export declare function reviseProjectMainTask(input: {
     taskId: string;
     project: string;
@@ -261,6 +263,18 @@ export declare function projectMainTaskPublic(task: any): {
     plan_revision_count: any;
     plan_revisions: any;
     plan_revision_pending: any;
+    interruption_receipt: {
+        schema: any;
+        receipt_id: any;
+        reason_code: any;
+        reason: any;
+        checkpoint: any;
+        recoverable: boolean;
+        auto_resume_allowed: boolean;
+        interrupted_at: any;
+        checksum: any;
+    };
+    recovery_decision: any;
     actions: {
         id: string;
         kind: string;

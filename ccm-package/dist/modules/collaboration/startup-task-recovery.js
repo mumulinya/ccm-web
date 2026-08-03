@@ -107,6 +107,17 @@ function buildStartupTaskRecoveryDecision(task, forceAuto = false) {
     if (planRequiresConfirmation(task)) {
         return decision(task, "manual", "awaiting_plan_confirmation", "执行前计划仍待用户确认。", "这轮任务还在等你确认执行计划，服务重启后没有自动开始。", "确认计划后，我会沿用同一任务上下文继续执行。", { requiresUser: true });
     }
+    if (task?.interruption_receipt?.schema === "ccm-task-interruption-receipt-v1") {
+        const recovery = (0, task_interruption_1.buildTaskRecoveryDecision)(task, task.interruption_receipt, {
+            userRequested: forceAuto,
+            authorizationValid: !hasAuthorizationBlock(task),
+            runtimeValid: true,
+        });
+        if (recovery.mode === "auto") {
+            return decision(task, "auto", recovery.reason_code, recovery.reason, "已核验中断现场，将继续原任务和子 Agent 会话。", "任务会从上一个安全检查点继续，已完成的副作用不会重复执行。", { authorizationPreserved: true, authorizationEvidence: ["interruption_receipt", recovery.checksum], requiresUser: false });
+        }
+        return decision(task, "manual", recovery.reason_code, recovery.reason, "任务执行已停止，现场和子 Agent 会话均已保留。", "检查当前源码和权限后点击“恢复任务”，即可沿用原任务继续。", { requiresUser: true });
+    }
     if (task?.cancellation_requested_at || task?.cancellation_reason) {
         return decision(task, "manual", "cancellation_requested", "任务存在用户取消请求。", "这轮任务之前已请求停止，服务重启后不会自动继续。", "如需继续，请重新发起或明确恢复这项任务。", { requiresUser: true });
     }
@@ -252,4 +263,5 @@ function runStartupTaskRecoveryDecisionSelfTest() {
         },
     };
 }
+const task_interruption_1 = require("../../tasks/task-interruption");
 //# sourceMappingURL=startup-task-recovery.js.map

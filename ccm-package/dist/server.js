@@ -904,6 +904,16 @@ function handleRequest(req, res) {
                     const task = persistProjectTaskProjection(cancelledTask, "任务已停止。原计划、修订记录和已经产生的执行证据会继续保留。", "project-main-agent-cancelled");
                     return (0, utils_1.sendJson)(res, { success: true, task, taskExperience: { ...task, requires_card: true }, message_id: task.message_id });
                 }
+                if (action === "interrupt") {
+                    const interruptedTask = (0, project_main_agent_1.interruptProjectMainTask)(taskId, project, projectSessionId, String(payload.reason || "用户停止当前项目主 Agent 执行"));
+                    const task = persistProjectTaskProjection(interruptedTask, "当前执行已经停止。任务、计划、源码证据和子 Agent 会话都已保留，可以从这里继续。", "project-main-agent-interrupted");
+                    return (0, utils_1.sendJson)(res, { success: true, task, taskExperience: { ...task, requires_card: true }, message_id: task.message_id, recovery_required: true });
+                }
+                if (action === "resume_interrupted") {
+                    const resumedTask = (0, project_main_agent_1.resumeInterruptedProjectMainTask)(taskId, project, projectSessionId);
+                    const task = persistProjectTaskProjection(resumedTask, "已经恢复原任务和子 Agent 会话，将从上一个安全检查点继续。", "project-main-agent-recovered");
+                    return (0, utils_1.sendJson)(res, { success: true, task, taskExperience: { ...task, requires_card: true }, message_id: task.message_id, resume_required: true, resume_parent_run_id: resumedTask.id });
+                }
                 if (action === "revise_plan") {
                     const feedback = String(payload.feedback || "").trim();
                     const clientMessageId = String(payload.client_message_id || payload.clientMessageId || "").trim();

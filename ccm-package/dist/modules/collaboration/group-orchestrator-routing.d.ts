@@ -243,6 +243,11 @@ export declare function runGroupOrchestratorCore(input: GroupOrchestratorInput):
     usage: LlmTokenUsage;
     mainAgentTurnDecision: import("../../agents/main-agent-turn").MainAgentTurnDecisionV1;
     mainAgentTurnReceipt: import("../../agents/main-agent-turn").MainAgentTurnReceiptV1;
+    modelRetryReceipt: {
+        schema: string;
+        attempts: any;
+        retries: any[];
+    };
     mainAgentToolUsage: {
         schema: string;
         groupId: string;
@@ -290,6 +295,11 @@ export declare function runGroupOrchestratorCore(input: GroupOrchestratorInput):
     usage: LlmTokenUsage;
     mainAgentTurnDecision: import("../../agents/main-agent-turn").MainAgentTurnDecisionV1;
     mainAgentTurnReceipt: import("../../agents/main-agent-turn").MainAgentTurnReceiptV1;
+    modelRetryReceipt: {
+        schema: string;
+        attempts: any;
+        retries: any[];
+    };
     mainAgentToolUsage: {
         schema: string;
         groupId: string;
@@ -358,6 +368,11 @@ export declare function runGroupOrchestratorCore(input: GroupOrchestratorInput):
     };
     mainAgentTurnDecision: import("../../agents/main-agent-turn").MainAgentTurnDecisionV1;
     mainAgentTurnReceipt: import("../../agents/main-agent-turn").MainAgentTurnReceiptV1;
+    modelRetryReceipt: {
+        schema: string;
+        attempts: any;
+        retries: any[];
+    };
     mainAgentToolUsage: {
         schema: string;
         groupId: string;
@@ -412,6 +427,11 @@ export declare function runGroupOrchestratorCore(input: GroupOrchestratorInput):
     };
     mainAgentTurnDecision: import("../../agents/main-agent-turn").MainAgentTurnDecisionV1;
     mainAgentTurnReceipt: import("../../agents/main-agent-turn").MainAgentTurnReceiptV1;
+    modelRetryReceipt: {
+        schema: string;
+        attempts: any;
+        retries: any[];
+    };
     mainAgentToolUsage: {
         schema: string;
         groupId: string;

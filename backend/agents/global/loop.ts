@@ -158,9 +158,9 @@ export interface GlobalAgentRun {
 }
 
 export interface GlobalAgentLoopRuntime {
-  callModel: (messages: Array<{ role: string; content: string }>, run: GlobalAgentRun) => Promise<string | GlobalAgentDecision>;
+  callModel: (messages: Array<{ role: string; content: string }>, run: GlobalAgentRun, signal?: AbortSignal) => Promise<string | GlobalAgentDecision>;
   prepareModelMessages?: (messages: Array<{ role: string; content: string }>, run: GlobalAgentRun) => Promise<Array<{ role: string; content: string }>> | Array<{ role: string; content: string }>;
-  executeTool: (name: string, args: any, run: GlobalAgentRun) => Promise<any>;
+  executeTool: (name: string, args: any, run: GlobalAgentRun, signal?: AbortSignal) => Promise<any>;
   getContext?: (run: GlobalAgentRun) => Promise<any> | any;
   verifyContextBoundary?: (context: any, run: GlobalAgentRun) => { valid: boolean; issues?: string[] } | boolean;
   fallbackDecision?: (run: GlobalAgentRun, error: any) => Promise<GlobalAgentDecision | null> | GlobalAgentDecision | null;

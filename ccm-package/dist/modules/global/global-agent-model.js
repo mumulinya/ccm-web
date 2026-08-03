@@ -33,6 +33,9 @@ async function callLlm(config, messages, options = {}) {
             onDelta: options.onDelta,
             providerContextCache: options.providerContextCache,
             onProviderContextCache: options.onProviderContextCache,
+            retryProfile: options.retryProfile,
+            signal: options.signal,
+            onRetry: options.onRetry,
         });
     }
     return (0, group_orchestrator_llm_client_1.callOpenAiCompatibleChat)(config, {
@@ -45,6 +48,9 @@ async function callLlm(config, messages, options = {}) {
         onDelta: options.onDelta,
         providerContextCache: options.providerContextCache,
         onProviderContextCache: options.onProviderContextCache,
+        retryProfile: options.retryProfile,
+        signal: options.signal,
+        onRetry: options.onRetry,
     });
 }
 function shouldRetryGlobalModelError(error) {
@@ -57,25 +63,19 @@ async function callGlobalModelWithRetry(config, messages, options = {}) {
             onDelta: options.onDelta,
             providerContextCache: options.providerContextCache,
             onProviderContextCache: options.onProviderContextCache,
+            retryProfile: options.retryProfile,
+            signal: options.signal,
+            onRetry: options.onRetry,
         });
-    const attempts = Math.max(1, Math.min(5, Number(options.attempts || 5)));
-    const delayMs = Math.max(0, Math.min(5_000, Number(options.delayMs ?? 500)));
     const call = options.call;
-    let lastError = null;
-    for (let attempt = 1; attempt <= attempts; attempt++) {
-        try {
-            return await call(config, messages);
-        }
-        catch (error) {
-            lastError = error;
-            if (attempt >= attempts || !shouldRetryGlobalModelError(error))
-                throw error;
-            console.warn(`[全局 Agent] 统一大模型调用暂时失败，正在重试（${attempt + 1}/${attempts}）：${(0, global_agent_test_agent_display_1.compactPetText)(error?.message || error, 240)}`);
-            if (delayMs > 0)
-                await new Promise(resolve => setTimeout(resolve, delayMs));
-        }
-    }
-    throw lastError;
+    return (0, model_call_retry_1.runModelCallWithRetry)(() => call(config, messages), {
+        profile: options.retryProfile || "long_running_task",
+        attempts: options.attempts,
+        baseDelayMs: options.delayMs,
+        signal: options.signal,
+        scope: "全局 Agent 模型调用",
+        onRetry: options.onRetry || (notice => console.warn(`[全局 Agent] 统一大模型调用暂时失败，正在重试（${notice.attempt + 1}/${notice.maxAttempts}）：${(0, global_agent_test_agent_display_1.compactPetText)(notice.error?.message || notice.error, 240)}`)),
+    });
 }
 async function runGlobalModelRetrySelfTest() {
     let transientCalls = 0;

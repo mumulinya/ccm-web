@@ -1,5 +1,7 @@
 # CCM 当前状态
 
+- 模型重试、任务中断与恢复已统一：普通首轮最多2次/60秒，计划与工具续跑最多3次/120秒，正式压缩、开发编排与TestAgent最多5次/360秒，标题和非关键摘要最多1次。停止当前执行会生成中断回执并挂起子Agent原生会话；永久取消保持终态但保留历史。网络、Provider过载和服务重启仅在源码、权限、运行时、会话及副作用证据完整时自动恢复，否则等待用户确认；恢复沿用同一任务和会话并创建新执行attempt。完整流程见[分级重试、任务中断与会话恢复](./confirmed-business-processes/TASK-INTERRUPTION-AND-RECOVERY.md)。
+
 - 三类主Agent工具体系已升级为V2并对齐Claude Code延迟加载语义：全局、群聊和项目主Agent共享同一工具目录与执行器，基础目录/Glob/Grep/分段Read进入首轮上下文，Git、运行日志、配置及普通用户MCP只先提供名称，完整Schema通过`tool_search`按需加载；仅受信`alwaysLoad`可首轮加载。Skill首轮只提供目录，正文在模型调用`invoke_skill`后进入同一Agent Loop。`ccm__workspace_readonly`使用精确会话能力令牌和逐段路径校验，跨项目、敏感文件、symlink/Junction及超Token结果全部失败关闭；项目独立工具选择模型已退出生产链。主Agent没有Edit、Write、Bash或Worktree权限，源码修改仍由项目子Agent执行。完整流程见[三类主Agent CC式工具体系](./confirmed-business-processes/MAIN-AGENT-CC-STYLE-TOOLS.md)。
 - 三类主Agent的压缩后动态工具连续性已统一：实际调用的Skill和通过`tool_search`加载的MCP Schema在正式压缩边界生成`MainAgentPostCompactRestoreManifestV1`，新Run重新核验精确会话、generation、授权、目录revision、连接和checksum后恢复；未调用Skill与未加载MCP不恢复，`alwaysLoad`由当前目录自然加载。恢复内容参加完整payload Token门禁，超限退回延迟加载，不做字符裁剪；记忆中心区分“同Run加载、压缩边界恢复、固定加载”并展示真实Token和失效原因。
 

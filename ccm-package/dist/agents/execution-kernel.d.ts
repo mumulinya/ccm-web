@@ -73,6 +73,7 @@ export interface ExecutionRecord {
     updatedAt: string;
     startedAt: string;
     finishedAt: string;
+    executionAttempt?: number;
     events: ExecutionEvent[];
 }
 export declare function sanitizeExecutionEnv(extra?: Record<string, any>, allowlist?: string[]): Record<string, string>;
@@ -98,6 +99,7 @@ export declare function purgeTaskExecutionArtifacts(taskId: string): {
     outputs: number;
 };
 export declare function transitionExecution(executionId: string, state: ExecutionState, message?: string, extra?: any): ExecutionRecord;
+export declare function beginExecutionAttempt(executionId: string, message?: string): ExecutionRecord;
 export declare function attachExecutionWorkspace(executionId: string, workspace: any): ExecutionRecord;
 export declare function registerExternalRunnerRequest(executionId: string, requestId: string): void;
 export declare function listActiveAgentRuns(filters?: any): {

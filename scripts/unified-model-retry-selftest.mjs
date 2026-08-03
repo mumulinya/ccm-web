@@ -43,6 +43,28 @@ try {
   );
   assert.equal(longRequestBudget.attemptTimeoutMs, 120_000, "configured provider request timeout must not be clamped to 30 seconds");
   assert.equal(longRequestBudget.totalTimeoutMs, 360_000, "long model requests must have a bounded six minute total budget");
+  assert.deepEqual(
+    ["interactive_first_turn", "agent_orchestration", "long_running_task", "background_auxiliary"].map(id => retry.resolveModelRetryProfile(id, 120_000)).map(item => [item.id, item.maxAttempts, item.totalTimeoutMs]),
+    [
+      ["interactive_first_turn", 2, 60_000],
+      ["agent_orchestration", 3, 120_000],
+      ["long_running_task", 5, 360_000],
+      ["background_auxiliary", 1, 30_000],
+    ],
+    "retry profiles must keep interactive turns fast and long tasks bounded",
+  );
+
+  let abortedCalls = 0;
+  const abortController = new AbortController();
+  const abortedPromise = retry.runModelCallWithRetry(async ({ signal }) => {
+    abortedCalls += 1;
+    await new Promise((resolve, reject) => {
+      signal.addEventListener("abort", () => reject(Object.assign(new Error("aborted"), { name: "AbortError" })), { once: true });
+    });
+  }, { profile: "long_running_task", baseDelayMs: 0, signal: abortController.signal });
+  setTimeout(() => abortController.abort(new Error("selftest stop")), 10);
+  await assert.rejects(abortedPromise, error => error?.code === "CCM_MODEL_CALL_CANCELLED");
+  assert.equal(abortedCalls, 1, "external abort must stop the current request and all retry waits");
 
   let transientCalls = 0;
   globalThis.fetch = async () => {
@@ -138,6 +160,8 @@ try {
       configured_120_second_timeout_is_respected: true,
       long_request_total_budget_is_bounded: true,
       exhausted_error_has_machine_readable_metadata: true,
+      tiered_retry_profiles: true,
+      abort_signal_stops_retry_loop: true,
       paid_provider_calls: 0,
     },
   }, null, 2));

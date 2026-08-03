@@ -66,6 +66,42 @@ const group_memory_compaction_1 = require("./group-memory-compaction");
 const group_prompt_cache_break_detection_1 = require("./group-prompt-cache-break-detection");
 const provider_neutral_context_cache_1 = require("../../system/provider-neutral-context-cache");
 const provider_context_cache_adapters_1 = require("../../system/provider-context-cache-adapters");
+function createLlmAbortContext(options, timeoutMs) {
+    const controller = new AbortController();
+    const onAbort = () => controller.abort(options.signal?.reason || new Error("模型调用已取消"));
+    if (options.signal?.aborted)
+        onAbort();
+    else
+        options.signal?.addEventListener("abort", onAbort, { once: true });
+    const timeout = setTimeout(() => controller.abort(Object.assign(new Error(`model request timeout after ${timeoutMs}ms`), { code: "CCM_MODEL_ATTEMPT_TIMEOUT" })), timeoutMs);
+    return {
+        controller,
+        cleanup: () => {
+            clearTimeout(timeout);
+            options.signal?.removeEventListener("abort", onAbort);
+        },
+    };
+}
+function normalizeLlmAbortError(error, options) {
+    if (!options.signal?.aborted)
+        return error;
+    const cancelled = new Error(String(options.signal.reason?.message || options.signal.reason || "模型调用已取消"));
+    cancelled.code = "CCM_MODEL_CALL_CANCELLED";
+    return cancelled;
+}
+function providerHttpError(prefix, response, detail) {
+    const error = new Error(formatHttpError(prefix, response.status, detail));
+    error.status = Number(response.status || 0);
+    const header = String(response.headers?.get?.("retry-after") || "").trim();
+    if (/^\d+(?:\.\d+)?$/.test(header))
+        error.retryAfterMs = Math.max(0, Number(header) * 1_000);
+    else if (header) {
+        const at = Date.parse(header);
+        if (Number.isFinite(at))
+            error.retryAfterMs = Math.max(0, at - Date.now());
+    }
+    return error;
+}
 function providerContextCacheOptions(config, options, provider) {
     const explicit = options.providerContextCache || options.provider_context_cache || null;
     const tracking = options.promptCacheTracking || options.prompt_cache_tracking || null;
@@ -808,8 +844,7 @@ async function callOpenAiCompatibleChatOnce(config, options) {
     const streaming = options.stream === true || typeof options.onDelta === "function";
     let emitted = false;
     const cache = await prepareContextCache(config, options, "openai");
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), resolveLlmTimeoutMs(config, options.defaultTimeoutMs || 30000, options.timeoutMs));
+    const abort = createLlmAbortContext(options, resolveLlmTimeoutMs(config, options.defaultTimeoutMs || 30000, options.timeoutMs));
     try {
         const response = await fetchWithNodeHttpFallback(endpoint, {
             method: "POST",
@@ -826,11 +861,11 @@ async function callOpenAiCompatibleChatOnce(config, options) {
                 ...(cache.adapterPatch?.body || {}),
                 messages: cache.messages,
             }),
-            signal: controller.signal,
+            signal: abort.controller.signal,
         });
         if (!response.ok) {
             const text = await response.text();
-            throw new Error(formatHttpError(options.httpErrorPrefix || "HTTP", response.status, text));
+            throw providerHttpError(options.httpErrorPrefix || "HTTP", response, text);
         }
         if (streaming) {
             let content = "";
@@ -864,10 +899,10 @@ async function callOpenAiCompatibleChatOnce(config, options) {
     }
     catch (error) {
         finishContextCache(options, cache.plan, { ok: false, error });
-        throw markStreamInterrupted(error, emitted);
+        throw markStreamInterrupted(normalizeLlmAbortError(error, options), emitted);
     }
     finally {
-        clearTimeout(timeout);
+        abort.cleanup();
     }
 }
 function geminiContentText(value) {
@@ -914,19 +949,18 @@ async function callGeminiCompatibleChatOnce(config, options) {
             ...(options.maxTokens ? { maxOutputTokens: options.maxTokens } : {}),
         },
     };
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), resolveLlmTimeoutMs(config, options.defaultTimeoutMs || 30000, options.timeoutMs));
+    const abort = createLlmAbortContext(options, resolveLlmTimeoutMs(config, options.defaultTimeoutMs || 30000, options.timeoutMs));
     let emitted = false;
     try {
         const response = await fetchWithNodeHttpFallback(geminiEndpointWithKey(endpoint, config.apiKey, streaming), {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(body),
-            signal: controller.signal,
+            signal: abort.controller.signal,
         });
         if (!response.ok) {
             const detail = await response.text();
-            throw new Error(formatHttpError(options.httpErrorPrefix || "Gemini HTTP", response.status, detail));
+            throw providerHttpError(options.httpErrorPrefix || "Gemini HTTP", response, detail);
         }
         if (streaming) {
             let content = "";
@@ -960,10 +994,10 @@ async function callGeminiCompatibleChatOnce(config, options) {
     }
     catch (error) {
         finishContextCache(options, cache.plan, { ok: false, error });
-        throw markStreamInterrupted(error, emitted);
+        throw markStreamInterrupted(normalizeLlmAbortError(error, options), emitted);
     }
     finally {
-        clearTimeout(timeout);
+        abort.cleanup();
     }
 }
 async function callAnthropicCompatibleChatOnce(config, options) {
@@ -977,8 +1011,7 @@ async function callAnthropicCompatibleChatOnce(config, options) {
     const userMessages = messages
         .filter((m) => m.role !== "system")
         .map((m) => ({ role: m.role === "assistant" ? "assistant" : "user", content: m.content }));
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), resolveLlmTimeoutMs(config, options.defaultTimeoutMs || 30000, options.timeoutMs));
+    const abort = createLlmAbortContext(options, resolveLlmTimeoutMs(config, options.defaultTimeoutMs || 30000, options.timeoutMs));
     try {
         const patched = applyApiMicrocompactNativeRequestPatch({
             model: config.model,
@@ -1003,7 +1036,7 @@ async function callAnthropicCompatibleChatOnce(config, options) {
                 method: "POST",
                 headers: patched.headers,
                 body: JSON.stringify(patched.body),
-                signal: controller.signal,
+                signal: abort.controller.signal,
             });
         }
         catch (error) {
@@ -1037,7 +1070,7 @@ async function callAnthropicCompatibleChatOnce(config, options) {
                 ok: false,
                 error: `HTTP ${response.status}`,
             });
-            throw new Error(formatHttpError(options.httpErrorPrefix || "HTTP", response.status, text));
+            throw providerHttpError(options.httpErrorPrefix || "HTTP", response, text);
         }
         if (streaming) {
             let content = "";
@@ -1135,10 +1168,10 @@ async function callAnthropicCompatibleChatOnce(config, options) {
     }
     catch (error) {
         finishContextCache(options, cache.plan, { ok: false, error });
-        throw markStreamInterrupted(error, emitted);
+        throw markStreamInterrupted(normalizeLlmAbortError(error, options), emitted);
     }
     finally {
-        clearTimeout(timeout);
+        abort.cleanup();
     }
 }
 exports.MODEL_LONG_REQUEST_TOTAL_TIMEOUT_MS = 360_000;
@@ -1148,6 +1181,7 @@ function resolveLlmRetryOptions(config, options, fallbackScope) {
     const configuredTotalTimeoutMs = Number(options.retryTotalTimeoutMs);
     const derivedTotalTimeoutMs = Math.max(model_call_retry_1.UNIFIED_MODEL_TOTAL_TIMEOUT_MS, Math.min(exports.MODEL_LONG_REQUEST_TOTAL_TIMEOUT_MS, configuredTimeoutMs * Math.min(3, attempts)));
     return {
+        profile: options.retryProfile || "long_running_task",
         attempts,
         // timeoutMs is a per-provider-request contract. Do not silently replace a
         // user configured 120 second request with the historical 30 second default.
@@ -1159,6 +1193,7 @@ function resolveLlmRetryOptions(config, options, fallbackScope) {
             ? Math.max(configuredTimeoutMs, configuredTotalTimeoutMs)
             : derivedTotalTimeoutMs,
         scope: options.retryScope || fallbackScope,
+        signal: options.signal,
         onRetry: options.onRetry || ((notice) => {
             const message = String(notice.error?.message || notice.error || "temporary model error").slice(0, 240);
             console.warn(`[模型重试] ${options.retryScope || fallbackScope} 暂时失败，将执行第 ${notice.attempt + 1}/${notice.maxAttempts} 次尝试：${message}`);
@@ -1170,17 +1205,17 @@ async function callOpenAiCompatibleChat(config, options) {
         return callGeminiCompatibleChat(config, options);
     if (options.retry === false)
         return callOpenAiCompatibleChatOnce(config, options);
-    return (0, model_call_retry_1.runModelCallWithRetry)(context => callOpenAiCompatibleChatOnce(config, { ...options, timeoutMs: context.attemptTimeoutMs, retry: false }), resolveLlmRetryOptions(config, options, "OpenAI-compatible model call"));
+    return (0, model_call_retry_1.runModelCallWithRetry)(context => callOpenAiCompatibleChatOnce(config, { ...options, timeoutMs: context.attemptTimeoutMs, signal: context.signal, retry: false }), resolveLlmRetryOptions(config, options, "OpenAI-compatible model call"));
 }
 async function callGeminiCompatibleChat(config, options) {
     if (options.retry === false)
         return callGeminiCompatibleChatOnce(config, options);
-    return (0, model_call_retry_1.runModelCallWithRetry)(context => callGeminiCompatibleChatOnce(config, { ...options, timeoutMs: context.attemptTimeoutMs, retry: false }), resolveLlmRetryOptions(config, options, "Gemini-compatible model call"));
+    return (0, model_call_retry_1.runModelCallWithRetry)(context => callGeminiCompatibleChatOnce(config, { ...options, timeoutMs: context.attemptTimeoutMs, signal: context.signal, retry: false }), resolveLlmRetryOptions(config, options, "Gemini-compatible model call"));
 }
 async function callAnthropicCompatibleChat(config, options) {
     if (options.retry === false)
         return callAnthropicCompatibleChatOnce(config, options);
-    return (0, model_call_retry_1.runModelCallWithRetry)(context => callAnthropicCompatibleChatOnce(config, { ...options, timeoutMs: context.attemptTimeoutMs, retry: false }), resolveLlmRetryOptions(config, options, "Anthropic-compatible model call"));
+    return (0, model_call_retry_1.runModelCallWithRetry)(context => callAnthropicCompatibleChatOnce(config, { ...options, timeoutMs: context.attemptTimeoutMs, signal: context.signal, retry: false }), resolveLlmRetryOptions(config, options, "Anthropic-compatible model call"));
 }
 async function callOpenAiCompatibleJson(config, options) {
     if (shouldUseGemini(config))
@@ -1198,6 +1233,7 @@ async function callOpenAiCompatibleJson(config, options) {
             ...options,
             retry: false,
             timeoutMs: context.attemptTimeoutMs,
+            signal: context.signal,
             onUsage: value => { usage = value; },
         });
         const parsed = extractJsonObject(content);
@@ -1222,6 +1258,7 @@ async function callGeminiCompatibleJson(config, options) {
             ...options,
             retry: false,
             timeoutMs: context.attemptTimeoutMs,
+            signal: context.signal,
             onUsage: value => { usage = value; },
         });
         const parsed = extractJsonObject(content);
@@ -1246,6 +1283,7 @@ async function callAnthropicCompatibleJson(config, options) {
             ...options,
             retry: false,
             timeoutMs: context.attemptTimeoutMs,
+            signal: context.signal,
             onUsage: value => { usage = value; },
         });
         const parsed = extractJsonObject(content);

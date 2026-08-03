@@ -1,8 +1,12 @@
+import { ModelRetryProfileId } from "../../system/model-call-retry";
 export declare function callLlm(config: any, messages: any[], options?: {
     onUsage?: (usage: any) => void;
     onDelta?: (delta: string) => void;
     providerContextCache?: any;
     onProviderContextCache?: (receipt: any) => void;
+    retryProfile?: ModelRetryProfileId;
+    signal?: AbortSignal;
+    onRetry?: (notice: any) => void;
 }): Promise<string>;
 export declare function shouldRetryGlobalModelError(error: any): boolean;
 export declare function callGlobalModelWithRetry(config: any, messages: any[], options?: {
@@ -12,6 +16,9 @@ export declare function callGlobalModelWithRetry(config: any, messages: any[], o
     onDelta?: (delta: string) => void;
     providerContextCache?: any;
     onProviderContextCache?: (receipt: any) => void;
+    retryProfile?: ModelRetryProfileId;
+    signal?: AbortSignal;
+    onRetry?: (notice: any) => void;
     call?: (config: any, messages: any[]) => Promise<string>;
 }): Promise<string>;
 export declare function runGlobalModelRetrySelfTest(): Promise<{

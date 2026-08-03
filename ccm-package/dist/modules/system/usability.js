@@ -48,6 +48,7 @@ const agent_sessions_1 = require("../../tasks/agent-sessions");
 const project_runtime_1 = require("../projects/project-runtime");
 const api_access_control_1 = require("./api-access-control");
 const execution_kernel_1 = require("../../agents/execution-kernel");
+const task_interruption_1 = require("../../tasks/task-interruption");
 const reliability_ledger_1 = require("../../system/reliability-ledger");
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
@@ -113,7 +114,7 @@ function taskActions(task, phase) {
     if (phase === "failed")
         return ["retry", "switch_executor", "cancel"];
     if (phase === "in_progress")
-        return ["supplement", "pause", "cancel"];
+        return ["supplement", "interrupt", "pause", "cancel"];
     if (phase === "queued")
         return ["start", "edit", "cancel"];
     if (phase === "recently_completed")
@@ -174,6 +175,8 @@ function taskRevision(task) {
     })).digest("hex");
 }
 function taskBlockerKind(task, phase) {
+    if (task?.acceptance_state === "recovery_required" || task?.interruption_receipt?.schema === "ccm-task-interruption-receipt-v1")
+        return "recovery_required";
     if (task?.intake_state === "awaiting_confirmation")
         return "waiting_confirmation";
     const permissionState = String(task?.permission_state || task?.permission_request?.state || "").toLowerCase();
@@ -199,6 +202,8 @@ function taskActionsForBlocker(task, phase) {
         return ["view_permission", "cancel"];
     if (blocker === "paused")
         return ["resume", "cancel"];
+    if (blocker === "recovery_required")
+        return ["resume_interrupted", "cancel"];
     if (blocker === "needs_user")
         return ["supplement", "cancel"];
     return taskActions(task, phase);
@@ -581,6 +586,58 @@ async function executeWorkbenchTaskAction(taskId, payload, req, deps) {
             if (!changed.updated)
                 throw Object.assign(new Error("任务状态已经变化，请刷新后重试"), { code: "state_drift" });
             result = { task: changed.task, queue_result: deps.enqueueTask(taskId, deps.ctx) };
+        }
+        else if (action === "interrupt") {
+            deps.removeTaskFromQueues(taskId);
+            const interrupted = (0, task_interruption_1.interruptTaskExecution)({
+                task,
+                reasonCode: "user_interrupt",
+                reason: String(payload.reason || "用户从工作台停止当前执行"),
+                actor: `workbench:${principal.userId || "user"}`,
+                checkpoint: String(task.acceptance_state || task.status || "unknown"),
+                sideEffectState: "uncertain",
+            });
+            const changed = (0, db_1.updateTaskByIdCas)(taskId, current => taskRevision(current) === taskRevision(task), current => ({
+                ...current,
+                status: "blocked",
+                acceptance_state: "recovery_required",
+                auto_execute: false,
+                paused: true,
+                is_paused: true,
+                recovery_pending: true,
+                interruption_receipt: interrupted.receipt,
+                interrupted_at: interrupted.receipt.interrupted_at,
+                updated_at: new Date().toISOString(),
+                status_detail: "当前执行已停止，任务和子 Agent 会话已保留",
+            }));
+            if (!changed.updated)
+                throw Object.assign(new Error("任务状态已经变化，请刷新后重试"), { code: "state_drift" });
+            (0, reliability_ledger_1.releaseTaskLease)(taskId, "interrupted");
+            result = { task: changed.task, interruption_receipt: interrupted.receipt };
+        }
+        else if (action === "resume_interrupted") {
+            if (blocker !== "recovery_required")
+                throw Object.assign(new Error("当前任务不在可恢复中断状态"), { code: "recovery_gate_failed" });
+            const recovery = (0, task_interruption_1.resumeInterruptedTaskExecution)(task, { userRequested: true, authorizationValid: true, runtimeValid: true });
+            if (!recovery.resumed)
+                throw Object.assign(new Error(recovery.decision.reason), { code: "recovery_gate_failed" });
+            const changed = (0, db_1.updateTaskByIdCas)(taskId, current => taskRevision(current) === taskRevision(task), current => ({
+                ...current,
+                status: "pending",
+                acceptance_state: current.interruption_receipt?.checkpoint || "planned",
+                auto_execute: true,
+                paused: false,
+                is_paused: false,
+                recovery_pending: false,
+                recovery_decision: recovery.decision,
+                execution_attempt: Math.max(0, Number(current.execution_attempt || 0)) + 1,
+                resumed_at: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+                status_detail: "已恢复原任务和子 Agent 会话，等待继续执行",
+            }));
+            if (!changed.updated)
+                throw Object.assign(new Error("任务状态已经变化，请刷新后重试"), { code: "state_drift" });
+            result = { task: changed.task, queue_result: deps.enqueueTask(taskId, deps.ctx), recovery_decision: recovery.decision };
         }
         else if (action === "retry") {
             if (blocker !== "failed")

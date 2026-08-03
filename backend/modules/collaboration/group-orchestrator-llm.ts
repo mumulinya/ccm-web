@@ -302,8 +302,8 @@ export async function runLlmCoordinatorSummary(group: any, userMessage: string, 
       { role: "user", content: user },
     ];
     const content = anthropic
-      ? await callAnthropicCompatibleChat(config, { messages, system, maxTokens: 1000, temperature: 0.3, defaultTimeoutMs: 30000, promptCacheTracking: { groupId: group.id, groupSessionId, source: "group_main_summary" }, onUsage: captureTokenUsage })
-      : await callOpenAiCompatibleChat(config, { messages, temperature: 0.3, defaultTimeoutMs: 30000, promptCacheTracking: { groupId: group.id, groupSessionId, source: "group_main_summary" }, onUsage: captureTokenUsage });
+      ? await callAnthropicCompatibleChat(config, { messages, system, maxTokens: 1000, temperature: 0.3, defaultTimeoutMs: 30000, retryProfile: "background_auxiliary", promptCacheTracking: { groupId: group.id, groupSessionId, source: "group_main_summary" }, onUsage: captureTokenUsage })
+      : await callOpenAiCompatibleChat(config, { messages, temperature: 0.3, defaultTimeoutMs: 30000, retryProfile: "background_auxiliary", promptCacheTracking: { groupId: group.id, groupSessionId, source: "group_main_summary" }, onUsage: captureTokenUsage });
 
     const summary = sanitizeCoordinatorUserText(content, "主 Agent 已收到子 Agent 的结果，正在整理下一步。", 1200);
     if (!summary.trim()) {
@@ -1161,6 +1161,7 @@ export async function runLlmGroupOrchestrator(input: {
   workflow_decision?: WorkflowDecision | null;
   projectSourceEvidence?: any;
   project_source_evidence?: any;
+  onRetry?: (notice: any) => void;
 }) {
   const group = normalizeGroupOrchestrator(input.group);
   const config = loadOrchestratorConfig();
@@ -1185,6 +1186,7 @@ export async function runLlmGroupOrchestrator(input: {
   const anthropic = shouldUseAnthropic(config);
   let tokenUsage: LlmTokenUsage | null = null;
   let modelCallCount = 0;
+  const retryNotices: any[] = [];
   const callPlanningModel = async (roundInput: any, round: number) => {
     modelCallCount += 1;
     const messages = buildLlmCoordinatorMessages(roundInput);
@@ -1224,6 +1226,12 @@ export async function runLlmGroupOrchestrator(input: {
           messages,
           maxTokens: 1500,
           defaultTimeoutMs: 45000,
+          retryProfile: round > 0 ? "agent_orchestration" : "interactive_first_turn",
+          onRetry: notice => {
+            const publicNotice = { attempt: notice.attempt, max_attempts: notice.maxAttempts, remaining_budget_ms: Math.max(0, (notice.profile === "interactive_first_turn" ? 60_000 : 120_000) - notice.elapsedMs), profile: notice.profile, reason: String(notice.error?.message || notice.error || "模型暂时不可用").slice(0, 240) };
+            retryNotices.push(publicNotice);
+            input.onRetry?.(publicNotice);
+          },
           httpErrorPrefix: "主 Agent API 调用失败",
           promptCacheTracking: { groupId: group.id, groupSessionId, source: round > 0 ? `group_main_tool_followup_${round}` : "group_main_planning" },
           onUsage: captureTokenUsage,
@@ -1231,6 +1239,12 @@ export async function runLlmGroupOrchestrator(input: {
       : await callOpenAiCompatibleJson(config, {
           messages,
           defaultTimeoutMs: 45000,
+          retryProfile: round > 0 ? "agent_orchestration" : "interactive_first_turn",
+          onRetry: notice => {
+            const publicNotice = { attempt: notice.attempt, max_attempts: notice.maxAttempts, remaining_budget_ms: Math.max(0, (notice.profile === "interactive_first_turn" ? 60_000 : 120_000) - notice.elapsedMs), profile: notice.profile, reason: String(notice.error?.message || notice.error || "模型暂时不可用").slice(0, 240) };
+            retryNotices.push(publicNotice);
+            input.onRetry?.(publicNotice);
+          },
           httpErrorPrefix: "主 Agent API 调用失败",
           promptCacheTracking: { groupId: group.id, groupSessionId, source: round > 0 ? `group_main_tool_followup_${round}` : "group_main_planning" },
           onUsage: captureTokenUsage,
@@ -1305,6 +1319,11 @@ export async function runLlmGroupOrchestrator(input: {
     usage: tokenUsage,
     mainAgentTurnDecision: turnDecision,
     mainAgentTurnReceipt: turnReceipt,
+    modelRetryReceipt: {
+      schema: "ccm-model-retry-receipt-v1",
+      attempts: retryNotices.length ? retryNotices.at(-1).attempt + 1 : 1,
+      retries: retryNotices,
+    },
     mainAgentToolUsage: {
       schema: "ccm-group-main-tool-usage-v1",
       groupId: String(group.id || ""),

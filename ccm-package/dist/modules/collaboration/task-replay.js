@@ -831,7 +831,39 @@ function paginateReplayEventsForView(allEvents, options = {}) {
 }
 function taskPublicRow(task, rootId) {
     const normalized = require("./collaboration-task-service").normalizeTaskTerminalStateView(task);
-    return { id: String(normalized.id || ""), parent_task_id: String(normalized.parent_task_id || ""), root_task_id: rootId, title: taskLabel(normalized), goal: (0, task_replay_shared_1.safeText)(normalized.business_goal || normalized.description, 500), project: (0, task_replay_shared_1.safeText)(normalized.target_project, 100), group_id: String(normalized.group_id || ""), group_session_id: String(normalized.group_session_id || ""), project_session_id: String(normalized.project_session_id || ""), request_origin: String(normalized.request_origin || ""), queue_scope: String(normalized.queue_scope || ""), queue_target_key: String(normalized.queue_target_key || ""), queue_position: Math.max(0, Number(normalized.queue_position || 0)), queue_state: String(normalized.queue_state || ""), scheduler_state: normalized.scheduler_state || null, workspace_lane: String(normalized.scheduler_state?.workspace_lane || normalized.workspace_lane || ""), trace_id: String(normalized.trace_id || ""), status: String(normalized.status || "pending"), acceptance_state: String(normalized.acceptance_state || "pending"), intake_identity_checksum: String(normalized.intake_identity_checksum || ""), terminal_state_receipt: normalized.terminal_state_receipt || null, terminal_decision: normalized.terminal_decision || null, terminal_gate: normalized.terminal_gate || null, legacy_status_unverified: normalized.legacy_status_unverified === true || (TERMINAL.has(String(normalized.status || "").toLowerCase()) && !normalized.terminal_decision), semantic_decision_receipt: normalized.semantic_decision_receipt || normalized.workflow_decision?.semantic_decision_receipt || null, route_decision: normalized.route_decision || null, created_at: (0, task_replay_shared_1.iso)(normalized.created_at), updated_at: (0, task_replay_shared_1.iso)(normalized.updated_at), is_root: String(normalized.id) === rootId };
+    return {
+        id: String(normalized.id || ""),
+        parent_task_id: String(normalized.parent_task_id || ""),
+        root_task_id: rootId,
+        title: taskLabel(normalized),
+        goal: (0, task_replay_shared_1.safeText)(normalized.business_goal || normalized.description, 500),
+        project: (0, task_replay_shared_1.safeText)(normalized.target_project, 100),
+        group_id: String(normalized.group_id || ""),
+        group_session_id: String(normalized.group_session_id || ""),
+        project_session_id: String(normalized.project_session_id || ""),
+        request_origin: String(normalized.request_origin || ""),
+        queue_scope: String(normalized.queue_scope || ""),
+        queue_target_key: String(normalized.queue_target_key || ""),
+        queue_position: Math.max(0, Number(normalized.queue_position || 0)),
+        queue_state: String(normalized.queue_state || ""),
+        scheduler_state: normalized.scheduler_state || null,
+        workspace_lane: String(normalized.scheduler_state?.workspace_lane || normalized.workspace_lane || ""),
+        trace_id: String(normalized.trace_id || ""),
+        status: String(normalized.status || "pending"),
+        acceptance_state: String(normalized.acceptance_state || "pending"),
+        interruption_receipt: normalized.interruption_receipt || null,
+        recovery_decision: normalized.recovery_decision || null,
+        intake_identity_checksum: String(normalized.intake_identity_checksum || ""),
+        terminal_state_receipt: normalized.terminal_state_receipt || null,
+        terminal_decision: normalized.terminal_decision || null,
+        terminal_gate: normalized.terminal_gate || null,
+        legacy_status_unverified: normalized.legacy_status_unverified === true || (TERMINAL.has(String(normalized.status || "").toLowerCase()) && !normalized.terminal_decision),
+        semantic_decision_receipt: normalized.semantic_decision_receipt || normalized.workflow_decision?.semantic_decision_receipt || null,
+        route_decision: normalized.route_decision || null,
+        created_at: (0, task_replay_shared_1.iso)(normalized.created_at),
+        updated_at: (0, task_replay_shared_1.iso)(normalized.updated_at),
+        is_root: String(normalized.id) === rootId,
+    };
 }
 function buildCompleteTaskReplay(taskId, options = {}) {
     const family = taskFamily(String(taskId || ""));
@@ -918,6 +950,8 @@ function buildCompleteTaskReplay(taskId, options = {}) {
         goal: (0, task_replay_shared_1.safeText)(family.root.business_goal || family.root.description, 700),
         status: rootStatus,
         acceptance_state: String(normalizedRoot.acceptance_state || "pending"),
+        interruption_receipt: normalizedRoot.interruption_receipt || null,
+        recovery_decision: normalizedRoot.recovery_decision || null,
         acceptance_decision: normalizedRoot.acceptance_decision || normalizedRoot.epic_acceptance_decision || null,
         terminal_state_receipt: normalizedRoot.terminal_state_receipt || null,
         terminal_decision: normalizedRoot.terminal_decision || null,

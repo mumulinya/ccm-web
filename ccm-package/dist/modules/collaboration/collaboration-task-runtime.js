@@ -22,6 +22,7 @@ const logs_1 = require("./logs");
 const startup_task_recovery_1 = require("./startup-task-recovery");
 const test_agent_runner_1 = require("./test-agent-runner");
 const execution_kernel_1 = require("../../agents/execution-kernel");
+const task_interruption_1 = require("../../tasks/task-interruption");
 const reliability_ledger_1 = require("../../system/reliability-ledger");
 const work_items_1 = require("../../agents/work-items");
 const collaboration_1 = require("./collaboration");
@@ -289,6 +290,17 @@ function resumeTaskQueues(ctx, options = {}) {
             continue;
         }
         const traceId = (0, reliability_ledger_1.ensureTraceId)(task.trace_id, "task");
+        if (task?.interruption_receipt?.schema === "ccm-task-interruption-receipt-v1") {
+            const recoveredExecution = (0, task_interruption_1.resumeInterruptedTaskExecution)(task, {
+                userRequested: forceAuto,
+                authorizationValid: recoveryDecision.authorization_preserved,
+                runtimeValid: true,
+            });
+            if (!recoveredExecution.resumed) {
+                results.push({ task_id: task.id, queued: false, manual_recovery_required: true, reason_code: recoveredExecution.decision.reason_code, message: recoveredExecution.decision.reason });
+                continue;
+            }
+        }
         const recoveryLease = (0, reliability_ledger_1.acquireTaskLease)(task.id, traceId, 45_000);
         if (!recoveryLease.acquired) {
             (0, logs_1.addTaskLog)(task.id, "info", `启动恢复跳过：另一个存活实例仍持有任务租约（owner=${recoveryLease.lease?.owner_id || "unknown"}）`);

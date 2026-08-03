@@ -4,7 +4,7 @@ export { recordTaskAgentMemoryContextDelivery, readTaskAgentMemoryContextDeliver
 export { listTaskAgentMemoryContextSnapshots, buildTaskAgentMemoryContextSnapshotInventory, } from "./agent-sessions-inventory";
 export { TASK_AGENT_MEMORY_TRANSPORT_USAGE_COHORT_MINIMUM_SAMPLES, TASK_AGENT_MEMORY_TRANSPORT_USAGE_COHORT_SCHEMA, buildTaskAgentMemoryTransportUsageCohortReport, verifyTaskAgentMemoryTransportUsageCohortReport, } from "./task-agent-memory-transport-usage-cohorts";
 export { openTaskAgentSession, recordTaskAgentSessionTurn, verifyTaskAgentFinalDispatchReactiveCompactCircuitBreaker, inspectTaskAgentFinalDispatchReactiveCompactCircuitBreaker, recordTaskAgentFinalDispatchReactiveCompactCircuitOutcome, advanceTaskAgentSession, reopenTaskAgentSessions, getTaskAgentSessionOptions, getTaskAgentSessionContinuity, listTaskAgentSessions, markTaskAgentSessionsForCapacityDowngrade, verifyTaskAgentSessionCapacityRevalidationProof, verifyTaskAgentSessionCapacityRevalidationCommitReceipt, prepareTaskAgentSessionCapacityRevalidation, commitTaskAgentSessionCapacityRevalidation, acknowledgeTaskAgentSessionCapacityRevalidation, runTaskAgentSessionModelIdentitySelfTest } from "./agent-sessions-resume";
-export { closeTaskAgentSessions, pruneTaskAgentMemoryContextSnapshots, purgeTaskAgentSessions, reconcileTaskAgentSessions, shouldCloseTaskAgentSessions } from "./agent-sessions-purge";
+export { closeTaskAgentSessions, suspendTaskAgentSessions, pruneTaskAgentMemoryContextSnapshots, purgeTaskAgentSessions, reconcileTaskAgentSessions, shouldCloseTaskAgentSessions } from "./agent-sessions-purge";
 export declare function runTaskAgentSessionSelfTest(): {
     pass: boolean;
     checks: {

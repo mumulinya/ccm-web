@@ -314,7 +314,7 @@ export const buildTaskQueueOverview = (card = {}, phase = '') => {
 export const buildTaskIntervention = (card = {}, phase = '', context = 'task') => {
   if (!['needs_user', 'environment_blocked', 'recovery_required', 'blocked'].includes(phase)) return null
   const actions = asList(card.actions)
-  const action = actions.find(item => ['confirm', 'confirm_plan', 'continue', 'retry', 'resume', 'provide_clarification'].includes(item?.kind))
+  const action = actions.find(item => ['confirm', 'confirm_plan', 'continue', 'retry', 'resume', 'resume_interrupted', 'provide_clarification'].includes(item?.kind))
     || actions[0]
   const reasons = unique([
     ...asList(card.blockers),

@@ -42,6 +42,8 @@ exports.getProjectMainTask = getProjectMainTask;
 exports.confirmProjectMainTask = confirmProjectMainTask;
 exports.cancelProjectMainTask = cancelProjectMainTask;
 exports.cancelProjectMainTasksForSession = cancelProjectMainTasksForSession;
+exports.interruptProjectMainTask = interruptProjectMainTask;
+exports.resumeInterruptedProjectMainTask = resumeInterruptedProjectMainTask;
 exports.reviseProjectMainTask = reviseProjectMainTask;
 exports.executeProjectMainTask = executeProjectMainTask;
 exports.projectMainTaskPublic = projectMainTaskPublic;
@@ -74,6 +76,10 @@ const test_agent_settings_1 = require("../system/test-agent-settings");
 const main_agent_self_verification_1 = require("../collaboration/main-agent-self-verification");
 const task_acceptance_policy_1 = require("../collaboration/task-acceptance-policy");
 const knowledge_access_1 = require("../knowledge/knowledge-access");
+const test_agent_runner_1 = require("../collaboration/test-agent-runner");
+const execution_kernel_1 = require("../../agents/execution-kernel");
+const agent_sessions_purge_1 = require("../../tasks/agent-sessions-purge");
+const task_interruption_1 = require("../../tasks/task-interruption");
 function projectMainToolCallId(projectSessionId, toolName) {
     return `pmtool_${crypto.createHash("sha256").update(`${projectSessionId}:${toolName}:${Date.now()}:${crypto.randomBytes(4).toString("hex")}`).digest("hex").slice(0, 20)}`;
 }
@@ -100,6 +106,7 @@ function recordProjectMainToolResult(project, projectSessionId, toolName, toolCa
     });
 }
 const activeProjectMainTasks = new Set();
+const activeProjectMainAbortControllers = new Map();
 const PROJECT_MAIN_LEASE_TTL_MS = 60_000;
 const PROJECT_MAIN_LEASE_HEARTBEAT_MS = 15_000;
 function reconcileInterruptedProjectMainTasks() {
@@ -126,8 +133,19 @@ function reconcileInterruptedProjectMainTasks() {
             results.push({ task_id: task.id, recovered: false, active_elsewhere: true });
             continue;
         }
-        const detail = "服务重启中断了项目主 Agent 编排；源码改动、开发回执和 TestAgent 证据均已保留，请检查后手动继续";
+        const detail = "服务重启中断了项目主 Agent 编排；任务、源码证据和子 Agent 会话均已保留，正在执行安全恢复检查";
         const now = new Date().toISOString();
+        const sideEffectState = Array.isArray(task.worker_outputs) && task.worker_outputs.length ? "uncertain" : "none";
+        const interruptionReceipt = (0, task_interruption_1.buildTaskInterruptionReceipt)({
+            task,
+            reasonCode: "service_restart",
+            reason: detail,
+            actor: "startup-recovery",
+            checkpoint: String(task.acceptance_state || task.status || "unknown"),
+            sideEffectState,
+            processTerminationProven: true,
+        });
+        const recoveryDecision = (0, task_interruption_1.buildTaskRecoveryDecision)(task, interruptionReceipt, { authorizationValid: true, runtimeValid: true });
         const blockedTask = (0, collaboration_task_service_1.updateTask)(task.id, {
             trace_id: traceId,
             status: "blocked",
@@ -137,6 +155,8 @@ function reconcileInterruptedProjectMainTasks() {
             is_paused: true,
             paused: true,
             recovery_pending: true,
+            interruption_receipt: interruptionReceipt,
+            recovery_decision: recoveryDecision,
             project_main_execution: {
                 ...(task.project_main_execution || {}),
                 schema: "ccm-project-main-execution-v1",
@@ -215,6 +235,18 @@ function projectMainModelCallOptions(config, messages, telemetry) {
         contextComponents: telemetry.contextComponents,
     });
     return {
+        retryProfile: telemetry.retryProfile || "agent_orchestration",
+        signal: telemetry.signal,
+        onRetry: (notice) => (0, runtime_events_1.publishRuntimeEvent)("project", "project.main_agent.retrying", {
+            project: telemetry.project,
+            sessionId: telemetry.projectSessionId,
+            status: "retrying",
+            attempt: notice.attempt + 1,
+            max_attempts: notice.maxAttempts,
+            retry_profile: notice.profile,
+            remaining_budget_ms: Math.max(0, (notice.profile === "interactive_first_turn" ? 60_000 : notice.profile === "agent_orchestration" ? 120_000 : 360_000) - Number(notice.elapsedMs || 0)),
+            reason: cleanText(notice.error?.message || notice.error, 240),
+        }),
         providerContextCache: {
             scope: "project",
             scopeId: telemetry.project,
@@ -658,6 +690,7 @@ ${toolContext.policyPrompt}`,
             currentRequest: input.userMessage,
             contextComponents: { messageMcpTools: toolContext.catalog.mcp, mcpResults: toolResults, loadedContextItems: (0, main_agent_tool_runtime_1.buildMainAgentLoadedContextItems)(toolContext, toolResults) },
             onUsage: captureUsage,
+            retryProfile: round === 0 ? "interactive_first_turn" : "agent_orchestration",
         });
         const requests = (0, main_agent_tool_runtime_1.normalizeMainAgentToolRequests)(parsed?.toolRequests || parsed?.tool_requests).filter(request => {
             const fingerprint = (0, main_agent_tool_runtime_1.mainAgentToolRequestFingerprint)(request);
@@ -1109,7 +1142,7 @@ function confirmProjectMainTask(taskId, projectInput, projectSessionIdInput) {
     (0, logs_1.appendTaskTimelineEvent)(task.id, { type: "project_main_plan_confirmed", title: "用户已确认项目执行计划", detail: "下一条项目会话请求将沿用当前任务和原计划执行", status: "ok", phase: "planning", agent: "user" });
     return updated;
 }
-function cancelProjectMainTask(taskId, projectInput, projectSessionIdInput, reason = "用户取消项目主 Agent 任务") {
+function cancelProjectMainTask(taskId, projectInput, projectSessionIdInput, reason = "用户永久取消项目主 Agent 任务") {
     const task = getProjectMainTask(taskId);
     if (!task)
         throw new Error("项目主 Agent 任务不存在");
@@ -1117,7 +1150,11 @@ function cancelProjectMainTask(taskId, projectInput, projectSessionIdInput, reas
     const projectSessionId = (0, project_validation_1.validateSessionId)(projectSessionIdInput);
     if (task.target_project !== project || task.project_session_id !== projectSessionId)
         throw new Error("任务不属于当前项目会话");
-    const updated = (0, collaboration_task_service_1.updateTask)(task.id, { status: "cancelled", acceptance_state: "cancelled", status_detail: cleanText(reason, 500) });
+    activeProjectMainAbortControllers.get(task.id)?.abort(new Error(reason));
+    (0, execution_kernel_1.requestTaskCancellation)(task.id, reason, "project-main-agent-cancel");
+    (0, test_agent_runner_1.cancelTestAgentRunsForTask)(task.id, reason);
+    (0, agent_sessions_purge_1.closeTaskAgentSessions)({ taskId: task.id }, reason);
+    const updated = (0, collaboration_task_service_1.updateTask)(task.id, { status: "cancelled", acceptance_state: "cancelled", auto_execute: false, recovery_pending: false, cancelled_at: new Date().toISOString(), status_detail: cleanText(reason, 500) });
     (0, logs_1.appendTaskTimelineEvent)(task.id, { type: "project_main_cancelled", title: "项目主 Agent 任务已取消", detail: reason, status: "warn", phase: "cancelled", agent: "user" });
     return updated;
 }
@@ -1180,8 +1217,69 @@ async function finalSummary(input) {
             skills: roleSkills.prompt,
             loadedContextItems: projectMainLoadedContextItems(null, [], roleSkills),
         },
+        retryProfile: "long_running_task",
+        signal: input.signal,
     }, input.onDelta);
     return cleanText(response, 14000);
+}
+function interruptProjectMainTask(taskId, projectInput, projectSessionIdInput, reason = "用户停止当前项目主 Agent 执行") {
+    const task = getProjectMainTask(taskId);
+    if (!task)
+        throw new Error("项目主 Agent 任务不存在");
+    const project = (0, project_validation_1.validateProjectName)(projectInput);
+    const projectSessionId = (0, project_validation_1.validateSessionId)(projectSessionIdInput);
+    if (task.target_project !== project || task.project_session_id !== projectSessionId)
+        throw new Error("任务不属于当前项目会话");
+    activeProjectMainAbortControllers.get(task.id)?.abort(new Error(reason));
+    const interrupted = (0, task_interruption_1.interruptTaskExecution)({
+        task,
+        reasonCode: "user_interrupt",
+        reason,
+        actor: "project-main-agent-user",
+        checkpoint: String(task.acceptance_state || task.status || "unknown"),
+        sideEffectState: "uncertain",
+    });
+    (0, test_agent_runner_1.cancelTestAgentRunsForTask)(task.id, reason);
+    const updated = (0, collaboration_task_service_1.updateTask)(task.id, {
+        status: "blocked",
+        acceptance_state: "recovery_required",
+        status_detail: cleanText(reason, 500),
+        auto_execute: false,
+        is_paused: true,
+        paused: true,
+        recovery_pending: true,
+        interrupted_at: interrupted.receipt.interrupted_at,
+        interruption_receipt: interrupted.receipt,
+    });
+    (0, logs_1.appendTaskTimelineEvent)(task.id, { type: "project_main_interrupted", title: "当前执行已停止，可继续恢复", detail: reason, status: "warn", phase: "blocked", agent: "user", data: { interruption_receipt_checksum: interrupted.receipt.checksum } });
+    (0, reliability_ledger_1.releaseTaskLease)(task.id, "interrupted");
+    return updated;
+}
+function resumeInterruptedProjectMainTask(taskId, projectInput, projectSessionIdInput) {
+    const task = getProjectMainTask(taskId);
+    if (!task)
+        throw new Error("项目主 Agent 任务不存在");
+    const project = (0, project_validation_1.validateProjectName)(projectInput);
+    const projectSessionId = (0, project_validation_1.validateSessionId)(projectSessionIdInput);
+    if (task.target_project !== project || task.project_session_id !== projectSessionId)
+        throw new Error("任务不属于当前项目会话");
+    const recovery = (0, task_interruption_1.resumeInterruptedTaskExecution)(task, { userRequested: true, authorizationValid: true, runtimeValid: true });
+    if (!recovery.resumed)
+        throw Object.assign(new Error(recovery.decision.reason), { code: "recovery_gate_failed", recovery_decision: recovery.decision });
+    const updated = (0, collaboration_task_service_1.updateTask)(task.id, {
+        status: "pending",
+        acceptance_state: task.interruption_receipt?.checkpoint || "planned",
+        status_detail: "已恢复原任务和子 Agent 会话，等待继续执行",
+        auto_execute: true,
+        is_paused: false,
+        paused: false,
+        recovery_pending: false,
+        recovery_decision: recovery.decision,
+        execution_attempt: Math.max(0, Number(task.execution_attempt || 0)) + 1,
+        resumed_at: new Date().toISOString(),
+    });
+    (0, logs_1.appendTaskTimelineEvent)(task.id, { type: "project_main_recovered", title: "已恢复原任务和子 Agent 会话", detail: recovery.decision.reason, status: "ok", phase: "queued", agent: "project-main-agent", data: { reopened_session_ids: recovery.reopenedSessions.map((item) => item.id), recovery_checksum: recovery.decision.checksum } });
+    return updated;
 }
 async function reviseProjectMainTask(input) {
     const project = (0, project_validation_1.validateProjectName)(input.project);
@@ -1385,6 +1483,8 @@ async function executeProjectMainTask(input) {
     if (!lease.acquired)
         throw new Error("项目主 Agent 任务已由另一个运行实例接管");
     activeProjectMainTasks.add(taskId);
+    const taskAbortController = new AbortController();
+    activeProjectMainAbortControllers.set(taskId, taskAbortController);
     const reviewCycleId = (0, rework_policy_1.createReviewCycleId)(`project-${taskId}`);
     let leaseLost = false;
     let executionPhase = "executing";
@@ -1434,6 +1534,8 @@ async function executeProjectMainTask(input) {
     let latestReview = null;
     const independentTestAgentEnabled = acceptancePolicy.mode === "test_agent";
     const assertNotCancelled = () => {
+        if (taskAbortController.signal.aborted)
+            throw Object.assign(new Error("项目主 Agent 当前执行已中断"), { code: "CCM_MODEL_CALL_CANCELLED" });
         if (leaseLost)
             throw new Error("项目主 Agent 执行租约已丢失，为避免重复执行已停止本轮编排");
         const latest = getProjectMainTask(taskId);
@@ -1658,6 +1760,7 @@ async function executeProjectMainTask(input) {
             review: latestReview,
             status: accepted ? "completed" : "blocked",
             onDelta: input.onDelta,
+            signal: taskAbortController.signal,
         });
         const fileChanges = aggregateFileChanges(results);
         const verification = cleanList(latestReview?.report?.verification || latestReview?.verdict?.evidence || (accepted ? [independentTestAgentEnabled ? "TestAgent 独立验收已通过" : "项目主 Agent 自验已通过"] : []), 20, 600);
@@ -1717,46 +1820,73 @@ async function executeProjectMainTask(input) {
     }
     catch (error) {
         const summary = `项目主 Agent 未能完成本轮任务：${error?.message || error}`;
-        const cancelled = getProjectMainTask(taskId)?.status === "cancelled" || /已取消/.test(String(error?.message || ""));
+        let currentTask = getProjectMainTask(taskId) || input.task;
+        const cancelled = currentTask?.status === "cancelled" || /已取消/.test(String(error?.message || ""));
         const lostLease = leaseLost || /租约已丢失/.test(String(error?.message || ""));
-        const task = cancelled
-            ? getProjectMainTask(taskId) || input.task
-            : (0, collaboration_task_service_1.updateTask)(taskId, {
-                status: lostLease ? "blocked" : "failed",
-                acceptance_state: lostLease ? "recovery_required" : "failed",
+        const retryExhausted = String(error?.code || "") === "CCM_MODEL_RETRY_EXHAUSTED";
+        let interrupted = currentTask?.acceptance_state === "recovery_required" || currentTask?.interruption_receipt?.schema === "ccm-task-interruption-receipt-v1";
+        if (!cancelled && !interrupted && (lostLease || retryExhausted)) {
+            const interruption = (0, task_interruption_1.interruptTaskExecution)({
+                task: currentTask,
+                reasonCode: lostLease ? "lease_lost" : "provider_unavailable",
+                reason: summary,
+                actor: "project-main-agent-runtime",
+                checkpoint: executionPhase,
+                sideEffectState: results.length ? "uncertain" : "none",
+            });
+            currentTask = (0, collaboration_task_service_1.updateTask)(taskId, {
+                status: "blocked",
+                acceptance_state: "recovery_required",
                 status_detail: summary,
-                result: summary,
-                worker_outputs: results,
-                auto_execute: lostLease ? false : input.task.auto_execute,
-                is_paused: lostLease ? true : input.task.is_paused,
-                paused: lostLease ? true : input.task.paused,
-                project_main_execution: {
-                    schema: "ccm-project-main-execution-v1",
-                    state: lostLease ? "lease_lost" : "failed",
-                    phase: executionPhase,
-                    owner_pid: process.pid,
-                    lease_recovery_count: Number(lease.lease?.recovery_count || 0),
-                    started_at: executionStartedAt,
-                    heartbeat_at: new Date().toISOString(),
-                    finished_at: new Date().toISOString(),
-                    review_cycle_id: reviewCycleId,
-                },
-            }) || input.task;
+                auto_execute: interruption.receipt.auto_resume_allowed,
+                is_paused: true,
+                paused: true,
+                recovery_pending: true,
+                interruption_receipt: interruption.receipt,
+            }) || currentTask;
+            interrupted = true;
+        }
+        const task = cancelled
+            ? currentTask
+            : interrupted
+                ? currentTask
+                : (0, collaboration_task_service_1.updateTask)(taskId, {
+                    status: lostLease ? "blocked" : "failed",
+                    acceptance_state: lostLease ? "recovery_required" : "failed",
+                    status_detail: summary,
+                    result: summary,
+                    worker_outputs: results,
+                    auto_execute: lostLease ? false : input.task.auto_execute,
+                    is_paused: lostLease ? true : input.task.is_paused,
+                    paused: lostLease ? true : input.task.paused,
+                    project_main_execution: {
+                        schema: "ccm-project-main-execution-v1",
+                        state: lostLease ? "lease_lost" : "failed",
+                        phase: executionPhase,
+                        owner_pid: process.pid,
+                        lease_recovery_count: Number(lease.lease?.recovery_count || 0),
+                        started_at: executionStartedAt,
+                        heartbeat_at: new Date().toISOString(),
+                        finished_at: new Date().toISOString(),
+                        review_cycle_id: reviewCycleId,
+                    },
+                }) || input.task;
         (0, logs_1.appendTaskTimelineEvent)(taskId, {
-            type: lostLease ? "project_main_lease_lost" : "project_main_failed",
-            title: lostLease ? "项目主 Agent 已停止重复执行风险" : "项目主 Agent 执行失败",
+            type: interrupted ? "project_main_interrupted" : lostLease ? "project_main_lease_lost" : "project_main_failed",
+            title: interrupted ? "项目主 Agent 执行已中断并保留恢复现场" : lostLease ? "项目主 Agent 已停止重复执行风险" : "项目主 Agent 执行失败",
             detail: summary,
-            status: lostLease ? "warn" : "error",
-            phase: lostLease ? "blocked" : "failed",
+            status: interrupted || lostLease ? "warn" : "error",
+            phase: interrupted || lostLease ? "blocked" : "failed",
             agent: "project-main-agent",
         });
-        emit("blocked", { status: lostLease ? "blocked" : "failed", summary });
-        return { task, status: lostLease ? "blocked" : "failed", summary, fileChanges: aggregateFileChanges(results), verification: [], risks: [summary], testAgent: independentTestAgentEnabled ? latestReview : null };
+        emit(interrupted ? "interrupted" : "blocked", { status: interrupted || lostLease ? "blocked" : "failed", summary, recovery_required: interrupted });
+        return { task, status: interrupted || lostLease ? "blocked" : "failed", summary, fileChanges: aggregateFileChanges(results), verification: [], risks: [summary], testAgent: independentTestAgentEnabled ? latestReview : null };
     }
     finally {
         clearInterval(leaseHeartbeat);
         (0, reliability_ledger_1.releaseTaskLease)(taskId, String(getProjectMainTask(taskId)?.status || "released"));
         activeProjectMainTasks.delete(taskId);
+        activeProjectMainAbortControllers.delete(taskId);
     }
 }
 function projectMainTaskPublic(task) {
@@ -1818,12 +1948,26 @@ function projectMainTaskPublic(task) {
         plan_revision_count: Array.isArray(task.plan_revisions) ? task.plan_revisions.length : 0,
         plan_revisions: Array.isArray(task.plan_revisions) ? task.plan_revisions.slice(-20) : [],
         plan_revision_pending: task.plan_revision_pending || null,
+        interruption_receipt: task.interruption_receipt ? {
+            schema: task.interruption_receipt.schema,
+            receipt_id: task.interruption_receipt.receipt_id,
+            reason_code: task.interruption_receipt.reason_code,
+            reason: task.interruption_receipt.reason,
+            checkpoint: task.interruption_receipt.checkpoint,
+            recoverable: task.interruption_receipt.recoverable === true,
+            auto_resume_allowed: task.interruption_receipt.auto_resume_allowed === true,
+            interrupted_at: task.interruption_receipt.interrupted_at,
+            checksum: task.interruption_receipt.checksum,
+        } : null,
+        recovery_decision: task.recovery_decision || null,
         actions: task.status === "paused"
             ? [{ id: "confirm_plan", kind: "confirm_plan", label: "确认并执行", tone: "primary" }, { id: "revise_plan", kind: "revise_plan", label: "补充要求", tone: "outline" }]
             : runtimeStatus.active
-                ? [{ id: "cancel", kind: "cancel", label: "停止任务", tone: "danger" }]
+                ? [{ id: "interrupt", kind: "interrupt", label: "停止当前执行", tone: "danger" }, { id: "cancel", kind: "cancel", label: "永久取消", tone: "outline" }]
                 : ["failed", "blocked", "environment_blocked", "recovery_required"].includes(runtimeStatus.phase)
-                    ? [{ id: "retry", kind: "retry", label: "重新执行", tone: "primary" }]
+                    ? task.acceptance_state === "recovery_required"
+                        ? [{ id: "resume_interrupted", kind: "resume_interrupted", label: "恢复任务", tone: "primary" }, { id: "cancel", kind: "cancel", label: "永久取消", tone: "outline" }]
+                        : [{ id: "retry", kind: "retry", label: "重新执行", tone: "primary" }]
                     : [],
     };
 }

@@ -1,4 +1,4 @@
-import { ModelCallRetryNotice } from "../../system/model-call-retry";
+import { ModelRetryProfileId, ModelCallRetryNotice } from "../../system/model-call-retry";
 export type LlmChatMessage = {
     role: string;
     content: any;
@@ -44,6 +44,8 @@ export type LlmCallOptions = {
     retryTotalTimeoutMs?: number;
     retryScope?: string;
     onRetry?: (notice: ModelCallRetryNotice) => void;
+    retryProfile?: ModelRetryProfileId;
+    signal?: AbortSignal;
 };
 export declare function normalizeLlmTokenUsage(value: any, provider?: "openai" | "anthropic" | "gemini"): LlmTokenUsage;
 export declare function normalizeChatCompletionsUrl(apiUrl: string): string;
@@ -85,11 +87,13 @@ export declare function applyAnthropicCacheReferenceEditing(bodyInput: any, conf
 };
 export declare const MODEL_LONG_REQUEST_TOTAL_TIMEOUT_MS = 360000;
 export declare function resolveLlmRetryOptions(config: any, options: LlmCallOptions, fallbackScope: string): {
+    profile: ModelRetryProfileId;
     attempts: number;
     attemptTimeoutMs: number;
     baseDelayMs: number;
     totalTimeoutMs: number;
     scope: string;
+    signal: AbortSignal;
     onRetry: (notice: ModelCallRetryNotice) => void;
 };
 export declare function callOpenAiCompatibleChat(config: any, options: LlmCallOptions): Promise<any>;

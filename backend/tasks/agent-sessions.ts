@@ -50,6 +50,7 @@ export {
 } from "./agent-sessions-resume";
 export {
   closeTaskAgentSessions,
+  suspendTaskAgentSessions,
   pruneTaskAgentMemoryContextSnapshots,
   purgeTaskAgentSessions,
   reconcileTaskAgentSessions,

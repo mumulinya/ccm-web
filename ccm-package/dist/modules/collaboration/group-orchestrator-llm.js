@@ -233,8 +233,8 @@ async function runLlmCoordinatorSummary(group, userMessage, outputs, options = {
             { role: "user", content: user },
         ];
         const content = anthropic
-            ? await (0, group_orchestrator_llm_client_1.callAnthropicCompatibleChat)(config, { messages, system, maxTokens: 1000, temperature: 0.3, defaultTimeoutMs: 30000, promptCacheTracking: { groupId: group.id, groupSessionId, source: "group_main_summary" }, onUsage: captureTokenUsage })
-            : await (0, group_orchestrator_llm_client_1.callOpenAiCompatibleChat)(config, { messages, temperature: 0.3, defaultTimeoutMs: 30000, promptCacheTracking: { groupId: group.id, groupSessionId, source: "group_main_summary" }, onUsage: captureTokenUsage });
+            ? await (0, group_orchestrator_llm_client_1.callAnthropicCompatibleChat)(config, { messages, system, maxTokens: 1000, temperature: 0.3, defaultTimeoutMs: 30000, retryProfile: "background_auxiliary", promptCacheTracking: { groupId: group.id, groupSessionId, source: "group_main_summary" }, onUsage: captureTokenUsage })
+            : await (0, group_orchestrator_llm_client_1.callOpenAiCompatibleChat)(config, { messages, temperature: 0.3, defaultTimeoutMs: 30000, retryProfile: "background_auxiliary", promptCacheTracking: { groupId: group.id, groupSessionId, source: "group_main_summary" }, onUsage: captureTokenUsage });
         const summary = (0, group_orchestrator_prompts_1.sanitizeCoordinatorUserText)(content, "主 Agent 已收到子 Agent 的结果，正在整理下一步。", 1200);
         if (!summary.trim()) {
             (0, db_1.recordMetric)(coordinator.project, { success: false, durationMs: Date.now() - startedAt, scopeType: "group", groupId: group.id, role: "main_agent", source: "coordinator-summary", runtime: "llm-api", usage: tokenUsage, error: "主 Agent 汇总返回空内容" });
@@ -1018,6 +1018,7 @@ async function runLlmGroupOrchestrator(input) {
     const anthropic = (0, group_orchestrator_llm_client_1.shouldUseAnthropic)(config);
     let tokenUsage = null;
     let modelCallCount = 0;
+    const retryNotices = [];
     const callPlanningModel = async (roundInput, round) => {
         modelCallCount += 1;
         const messages = buildLlmCoordinatorMessages(roundInput);
@@ -1058,6 +1059,12 @@ async function runLlmGroupOrchestrator(input) {
                 messages,
                 maxTokens: 1500,
                 defaultTimeoutMs: 45000,
+                retryProfile: round > 0 ? "agent_orchestration" : "interactive_first_turn",
+                onRetry: notice => {
+                    const publicNotice = { attempt: notice.attempt, max_attempts: notice.maxAttempts, remaining_budget_ms: Math.max(0, (notice.profile === "interactive_first_turn" ? 60_000 : 120_000) - notice.elapsedMs), profile: notice.profile, reason: String(notice.error?.message || notice.error || "模型暂时不可用").slice(0, 240) };
+                    retryNotices.push(publicNotice);
+                    input.onRetry?.(publicNotice);
+                },
                 httpErrorPrefix: "主 Agent API 调用失败",
                 promptCacheTracking: { groupId: group.id, groupSessionId, source: round > 0 ? `group_main_tool_followup_${round}` : "group_main_planning" },
                 onUsage: captureTokenUsage,
@@ -1065,6 +1072,12 @@ async function runLlmGroupOrchestrator(input) {
             : await (0, group_orchestrator_llm_client_1.callOpenAiCompatibleJson)(config, {
                 messages,
                 defaultTimeoutMs: 45000,
+                retryProfile: round > 0 ? "agent_orchestration" : "interactive_first_turn",
+                onRetry: notice => {
+                    const publicNotice = { attempt: notice.attempt, max_attempts: notice.maxAttempts, remaining_budget_ms: Math.max(0, (notice.profile === "interactive_first_turn" ? 60_000 : 120_000) - notice.elapsedMs), profile: notice.profile, reason: String(notice.error?.message || notice.error || "模型暂时不可用").slice(0, 240) };
+                    retryNotices.push(publicNotice);
+                    input.onRetry?.(publicNotice);
+                },
                 httpErrorPrefix: "主 Agent API 调用失败",
                 promptCacheTracking: { groupId: group.id, groupSessionId, source: round > 0 ? `group_main_tool_followup_${round}` : "group_main_planning" },
                 onUsage: captureTokenUsage,
@@ -1144,6 +1157,11 @@ async function runLlmGroupOrchestrator(input) {
         usage: tokenUsage,
         mainAgentTurnDecision: turnDecision,
         mainAgentTurnReceipt: turnReceipt,
+        modelRetryReceipt: {
+            schema: "ccm-model-retry-receipt-v1",
+            attempts: retryNotices.length ? retryNotices.at(-1).attempt + 1 : 1,
+            retries: retryNotices,
+        },
         mainAgentToolUsage: {
             schema: "ccm-group-main-tool-usage-v1",
             groupId: String(group.id || ""),

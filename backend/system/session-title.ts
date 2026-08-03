@@ -68,6 +68,7 @@ async function defaultModelCall(system: string, user: string) {
       temperature: 0.1,
       maxTokens: 64,
       defaultTimeoutMs: 20_000,
+      retryProfile: "background_auxiliary",
       httpErrorPrefix: "会话标题模型调用失败:",
     });
   }
@@ -76,6 +77,7 @@ async function defaultModelCall(system: string, user: string) {
     temperature: 0.1,
     maxTokens: 64,
     defaultTimeoutMs: 20_000,
+    retryProfile: "background_auxiliary",
     httpErrorPrefix: "会话标题模型调用失败:",
   });
 }

@@ -327,11 +327,6 @@ const readNavigationTargetFromUrl = () => {
   return { tab }
 }
 
-const navigationEntry = typeof performance !== 'undefined'
-  ? performance.getEntriesByType?.('navigation')?.[0]
-  : null
-const isPageReload = navigationEntry?.type === 'reload'
-
 const applyPetNavigationTarget = async (target) => {
   if (!target || !target.tab) return
   navigateTo.value = null
@@ -657,8 +652,8 @@ const roleFilteredTabs = source => source.map(tab => ({
   disabledReason: authRole !== 'admin' && ADMIN_ONLY_TABS.has(tab.id) ? '需要 Admin 权限' : '',
 }))
 const tabs = ref(roleFilteredTabs(buildConfiguredTabs(DEFAULT_TABS, menuConfig.value)))
-// 工作台是首页：普通深链接仍可直达，浏览器刷新统一回到工作台。
-const startupNavigationTarget = isPageReload ? { tab: 'dashboard' } : readNavigationTargetFromUrl()
+// URL中的tab是当前页面的权威位置；只有没有导航目标时才使用工作台首页。
+const startupNavigationTarget = readNavigationTargetFromUrl()
 const startupTabId = RETIRED_TAB_REDIRECTS[startupNavigationTarget?.tab] || startupNavigationTarget?.tab
 const startupTab = tabs.value.find(tab => tab.id === startupTabId && !tab.isExternal)
   || tabs.value.find(tab => tab.id === 'dashboard')

@@ -300,7 +300,7 @@ const toggleCron = async job => {
 }
 
 const actionLabel = action => ({
-  confirm: '确认执行', edit: '调整计划', cancel: '取消', supplement: '补充说明', resume: '恢复', retry: '重试',
+  confirm: '确认执行', edit: '调整计划', cancel: '永久取消', supplement: '补充说明', resume: '恢复', interrupt: '停止当前执行', resume_interrupted: '恢复任务', retry: '重试',
   switch_executor: '切换执行器', pause: '暂停', start: '开始', view_report: '查看交付', archive: '归档', view: '查看',
 })[action] || action
 

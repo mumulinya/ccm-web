@@ -73,6 +73,7 @@ const globalAgentRunStore = __importStar(require("./global-agent-run-store"));
 const { compactObservation, GLOBAL_MODEL_ROUTE_KEYS, GLOBAL_MODEL_FORBIDDEN_FIELD, GROUP_SESSION_ID_PATTERN, redactGroupSessionIds, redactGroupSessionFields, projectRoutingValue, projectProjectRows, projectGroupRows, projectGlobalTaskRows, projectGlobalAgentObservationForModel, projectGlobalAgentReasoningForModel, parseGlobalAgentDecision, normalizeDecision, buildToolPrompt, buildGlobalAgentModelMessages } = globalAgentRunProjection;
 const { nowIso, stripNonExecutionReportSections, GLOBAL_USER_SUMMARY_INTERNAL_PATTERN, GLOBAL_USER_SUMMARY_TECHNICAL_EVIDENCE_PATTERN, hasGlobalUserSummaryTechnicalDetails, compactGlobalUserSummaryText, uniqueGlobalStrings, sanitizeGlobalVisibleReplyTerminology, globalVisibleReplyFallback, buildGlobalVisibleReplyContent, attachGlobalReplyTechnicalContent, getGlobalToolUserLabel, summarizeGlobalToolTarget, buildGlobalClarificationSummary, buildGlobalConfirmationSummary, buildGlobalPlanSteps, buildGlobalPlanExecutionFollowup, buildGlobalPlanModeSummary, updateGlobalPlanModeStatus, GLOBAL_DISPATCH_VISIBLE_TEXT_PATTERN, sanitizeGlobalDispatchVisibleText, normalizeDispatchDependency, buildGlobalDispatchRow, isGlobalDispatchTool, normalizeGlobalDispatchLaunchRowStatus, buildGlobalDispatchLaunchSummary } = globalAgentRunReplies;
 const { GLOBAL_AGENT_TOOL_SPECS, STORE_DIR, STORE_FILE, STORE_BACKUP, MAX_STORED_RUNS, MAX_OBSERVATION_CHARS, GLOBAL_DISPATCH_TOOL_NAMES, LIGHT_UI_TOOL_NAMES, activeRuns, pauseRequests, cancelRequests, volatileRuns, activeRunObjects, destructiveOperation, writeJsonAtomic, normalizeGlobalAgentUserSteer, normalizeGlobalAgentUserSteers, normalizeRun, loadStore, saveRun, getGlobalAgentRun, listGlobalAgentRuns, findWaitingGlobalAgentRun, findClarifyingGlobalAgentRun, getGlobalAgentToolSpec, classifyGlobalAgentToolRisk, classifyGlobalAgentRunPresentation, isReadOnlyGlobalConsultation, stable, toolSignature, validateTool } = globalAgentRunStore;
+const activeRunAbortControllers = new Map();
 _a = (0, global_agent_run_supervision_1.createGlobalAgentRunSupervision)({ appendTraceEvent: reliability_ledger_1.appendTraceEvent, buildGlobalDisplayStreamFromWorkchain, buildGlobalRunWorkchain, getGlobalAgentRun, normalizeRun, recordGlobalAgentRuntimeOutput: runtime_1.recordGlobalAgentRuntimeOutput, saveRun, volatileRuns }), exports.attachGlobalAgentRunSupervision = _a.attachGlobalAgentRunSupervision, exports.completeGlobalAgentSupervision = _a.completeGlobalAgentSupervision, exports.globalSupervisionStateVisibleSummary = _a.globalSupervisionStateVisibleSummary, exports.updateGlobalAgentSupervisionState = _a.updateGlobalAgentSupervisionState;
 function emitGlobalDispatchLaunchProgress(runtime, run, step) {
     if (!isGlobalDispatchTool(step.tool?.name) || step.error || step.observation?.success === false || step.observation?.error)
@@ -795,6 +796,8 @@ async function continueLoop(run, runtime) {
         return activeRunObjects.get(run.id) || run;
     activeRuns.add(run.id);
     activeRunObjects.set(run.id, run);
+    const runAbortController = new AbortController();
+    activeRunAbortControllers.set(run.id, runAbortController);
     try {
         run.status = "running";
         run.updated_at = nowIso(runtime);
@@ -826,12 +829,21 @@ async function continueLoop(run, runtime) {
                 if (runtime.prepareModelMessages)
                     messages = await runtime.prepareModelMessages(messages, run);
                 run.model_calls += 1;
-                const rawDecision = await runtime.callModel(messages, run);
+                const rawDecision = await runtime.callModel(messages, run, runAbortController.signal);
                 if (applyPendingGlobalAgentUserSteers(run, runtime).length)
                     continue;
                 decision = parseGlobalAgentDecision(rawDecision, run.workflow_decision || run.workflowDecision || null);
             }
             catch (error) {
+                if (cancelRequests.delete(run.id))
+                    return completeRun(run, runtime, "cancelled", "用户已取消本次运行。", "user_cancelled");
+                if (pauseRequests.delete(run.id)) {
+                    run.status = "paused";
+                    run.updated_at = nowIso(runtime);
+                    saveRun(run, runtime.persist !== false);
+                    emit(runtime, { type: "interrupted", reply: "当前执行已停止，运行上下文已经保留。" }, run);
+                    return run;
+                }
                 if (applyPendingGlobalAgentUserSteers(run, runtime).length)
                     continue;
                 const fallback = runtime.fallbackDecision ? await runtime.fallbackDecision(run, error) : null;
@@ -1147,7 +1159,7 @@ async function continueLoop(run, runtime) {
             let lightUiShortReply = "";
             let lightUiToolSucceeded = false;
             try {
-                const result = await runtime.executeTool(decision.tool.name, args, run);
+                const result = await runtime.executeTool(decision.tool.name, args, run, activeRunAbortControllers.get(run.id)?.signal);
                 acceptedSupervision = isGlobalDispatchTool(decision.tool.name)
                     && result?.accepted === true
                     && result?.completed !== true
@@ -1322,6 +1334,7 @@ async function continueLoop(run, runtime) {
         activeRuns.delete(run.id);
         if (activeRunObjects.get(run.id) === run)
             activeRunObjects.delete(run.id);
+        activeRunAbortControllers.delete(run.id);
     }
 }
 async function startGlobalAgentRun(input, runtime) {
@@ -1476,7 +1489,7 @@ async function resumeGlobalAgentRun(id, runtime, options = {}) {
             (0, runtime_1.markGlobalAgentToolTodo)(run, pending.name, "in_progress", `确认后执行 ${pending.name}`);
             (0, runtime_1.recordGlobalAgentRuntimeOutput)(run, { type: "tool_started", tool: pending.name, risk: pending.risk, confirmed: true, arguments: pending.arguments });
             emit(runtime, { type: "tool_started", tool: pending, confirmed: true }, run);
-            const result = await runtime.executeTool(pending.name, pending.arguments, run);
+            const result = await runtime.executeTool(pending.name, pending.arguments, run, activeRunAbortControllers.get(run.id)?.signal);
             (0, reasoning_loop_1.captureReasoningFacts)(run.reasoning_loop, `confirmed_tool:${pending.name}`, result);
             (0, reasoning_loop_1.setReasoningAssertion)(run.reasoning_loop, { id: `tool_${pending.signature}`, label: `确认后的工具 ${pending.name} 产生可核验结果`, kind: "tool_outcome", status: result?.success === false || result?.error ? "failed" : "passed", evidence: [result], reason: "用户确认后执行" });
             if (step) {
@@ -1607,6 +1620,7 @@ function pauseGlobalAgentRun(id) {
     if (stored.status !== "running")
         return stored;
     pauseRequests.add(id);
+    activeRunAbortControllers.get(id)?.abort(new Error("用户停止当前全局 Agent 执行"));
     const run = normalizeRun(stored);
     run.status = "paused";
     run.clarification_summary = null;
@@ -1623,6 +1637,7 @@ function cancelGlobalAgentRun(id) {
     if (["completed", "failed", "cancelled"].includes(stored.status))
         return stored;
     cancelRequests.add(id);
+    activeRunAbortControllers.get(id)?.abort(new Error("用户停止当前全局 Agent 执行"));
     if (activeRuns.has(id))
         return stored;
     const run = normalizeRun(stored);

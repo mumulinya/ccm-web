@@ -1,6 +1,6 @@
 {
   "name": "@mumulinya167/cc-web",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "CCM 本地多 Agent 协作工作区，支持会话记忆、项目执行、代码协作、TestAgent 与持久终端",
   "main": "dist/server.js",
   "bin": {

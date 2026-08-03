@@ -91,9 +91,14 @@ export function createGroupTaskCardActionHandler(options = {}) {
         await openTestTargets?.()
         return
       }
-      if (action.kind === 'cancel') {
-        if (!await confirmDialog(`确定取消任务“${card?.title || id}”？运行中的执行会被安全终止。`)) return
-        await postTaskCardAction('/api/tasks/cancel', { id, reason: '用户从群聊任务卡取消任务' })
+      if (action.kind === 'interrupt') {
+        if (!await confirmDialog(`确定停止“${card?.title || id}”当前这一轮执行吗？任务和子 Agent 会话会保留。`)) return
+        await postTaskCardAction('/api/tasks/interrupt', { id, reason: '用户从群聊任务卡停止当前执行' })
+      } else if (action.kind === 'resume_interrupted') {
+        await postTaskCardAction('/api/tasks/resume-interrupted', { id })
+      } else if (action.kind === 'cancel') {
+        if (!await confirmDialog(`确定永久取消任务“${card?.title || id}”？任务回放会保留，但不会自动恢复。`)) return
+        await postTaskCardAction('/api/tasks/cancel', { id, reason: '用户从群聊任务卡永久取消任务' })
       } else if (action.kind === 'confirm_plan') {
         const acceptFeedback = String(action.accept_feedback || action.acceptFeedback || action.feedback || '').trim()
         const confirmText = acceptFeedback
