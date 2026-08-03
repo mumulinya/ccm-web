@@ -1,5 +1,8 @@
 # CCM 当前状态
 
+- 三类主Agent工具体系已升级为V2并对齐Claude Code延迟加载语义：全局、群聊和项目主Agent共享同一工具目录与执行器，基础目录/Glob/Grep/分段Read进入首轮上下文，Git、运行日志、配置及普通用户MCP只先提供名称，完整Schema通过`tool_search`按需加载；仅受信`alwaysLoad`可首轮加载。Skill首轮只提供目录，正文在模型调用`invoke_skill`后进入同一Agent Loop。`ccm__workspace_readonly`使用精确会话能力令牌和逐段路径校验，跨项目、敏感文件、symlink/Junction及超Token结果全部失败关闭；项目独立工具选择模型已退出生产链。主Agent没有Edit、Write、Bash或Worktree权限，源码修改仍由项目子Agent执行。完整流程见[三类主Agent CC式工具体系](./confirmed-business-processes/MAIN-AGENT-CC-STYLE-TOOLS.md)。
+- 三类主Agent的压缩后动态工具连续性已统一：实际调用的Skill和通过`tool_search`加载的MCP Schema在正式压缩边界生成`MainAgentPostCompactRestoreManifestV1`，新Run重新核验精确会话、generation、授权、目录revision、连接和checksum后恢复；未调用Skill与未加载MCP不恢复，`alwaysLoad`由当前目录自然加载。恢复内容参加完整payload Token门禁，超限退回延迟加载，不做字符裁剪；记忆中心区分“同Run加载、压缩边界恢复、固定加载”并展示真实Token和失效原因。
+
 - npm安装、CLI与服务生命周期已升级为V2：服务实例由锁文件、进程启动指纹、入口checksum和HMAC身份接口共同证明；并发启动只有一个所有者，端口占用和归属不明均失败关闭。停止先进入`draining`，关闭HTTP接入并完成项目运行、终端、SQLite和生命周期回执后才释放锁。更新先固定精确npm产物并在隔离数据目录完成doctor与启动停止验证，新版本失败自动回滚，双重失败进入`recovery_required`。核心包当前受20MB/35MB/700文件预算保护，默认月薪喵离线可用，其他官方宠物由同版本资源包按需下载。本轮只生成发布候选，不发布npm。完整流程见[npm安装、CLI与服务生命周期](./confirmed-business-processes/NPM-CLI-SERVICE-LIFECYCLE.md)。
 
 - 桌面宠物与用户通知已升级为V2：任务终态、权限和Agent正式事件先写入SQLite持久通知，再由网页通知中心、Electron桌宠、网页宠物或精确飞书渠道投递。桌宠只显示最多240字的脱敏摘要，窗口实际展示后才确认送达；Electron离线时网页宠物自动接管。配置使用revision/PATCH，支持图形桌面自动启动；PNG/SVG资源经过签名、尺寸、脚本、外部引用和路径边界校验。已读普通通知默认180天后由清理中心事务化清理，未解决权限和阻塞通知持续保留。完整流程见[桌面宠物与用户通知](./confirmed-business-processes/DESKTOP-PET-AND-USER-NOTIFICATIONS.md)。
@@ -223,6 +226,8 @@
 ## 业务需求池
 
 - 用户可以在需求池上传业务描述、图片或文档，主模型先生成可编辑的任务图，确认后才原子创建需求集合父任务和全部子任务。
+- 群聊和项目需求池在条目创建时固定目标scope、目标ID和精确会话；确认、手动派发、批量派发及定时认领默认复用该快照，不跟随后来切换的活动会话。用户可明确改选同一目标下的可写会话，失效会话会阻塞并要求处理；跨目标工作项分别保存自己的会话。
+- 任务派发和工作台使用相同的精确会话绑定：用户可选择已有普通/自动化会话，未选择时创建专属自动化任务会话。群聊会话栏分为“普通会话/自动化任务会话”，项目会话栏增加独立“飞书会话”；Web入口不会把任务隐式派往飞书会话。
 - 拆分结果支持修改执行位置、范围、验收标准与依赖，也支持新增、删除、合并和排序；浏览器与服务端都会拒绝未知依赖、自依赖和循环依赖。
 - 无前置依赖的任务进入精确会话的串行队列，后继任务必须等待前置任务通过交付验收；代码或文件变化继续经过 TestAgent 独立验收。
 - 需求池只展示集合整体进度，完整计划、开发、验收、返工和证据统一进入原有任务回放，避免形成第二套事实源。

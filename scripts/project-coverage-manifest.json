@@ -520,6 +520,7 @@
       ],
       "businessProcessDocs": [
         "docs/confirmed-business-processes/AGENT-MCP-SKILL-INHERITANCE.md",
+        "docs/confirmed-business-processes/MAIN-AGENT-CC-STYLE-TOOLS.md",
         "docs/confirmed-business-processes/MCP-SKILL-MARKETPLACE-SUPPLY-CHAIN.md",
         "docs/confirmed-business-processes/SLASH-COMMANDS-AND-SHARED-FILES-V2.md"
       ],

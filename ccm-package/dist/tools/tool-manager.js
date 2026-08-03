@@ -313,6 +313,7 @@ class ToolManager {
                         serverName: config.name,
                         inputSchema: t.inputSchema,
                         annotations: t.annotations && typeof t.annotations === "object" ? t.annotations : undefined,
+                        meta: t._meta && typeof t._meta === "object" ? t._meta : undefined,
                     });
                 }
                 this.serverStatuses.set(config.name, {
@@ -499,14 +500,26 @@ class ToolManager {
         };
     }
     getScopedToolCatalog(scope) {
-        const tools = (scope ? this.tools.filter(tool => isMcpToolAllowed(scope, tool)) : this.tools).map(tool => ({
-            name: tool.name,
-            canonicalName: `mcp__ccm__${safeSlug(tool.serverName)}__${tool.name}`,
-            description: tool.description || "",
-            server: tool.serverName,
-            inputSchema: tool.inputSchema || null,
-            annotations: tool.annotations || {},
-        }));
+        const tools = (scope ? this.tools.filter(tool => isMcpToolAllowed(scope, tool)) : this.tools).map(tool => {
+            const config = this.serverConfigs.get(tool.serverName) || {};
+            const origin = String(config?.origin || config?.marketplace?.source?.trust || "").trim().toLowerCase();
+            const serverTrust = config?.systemManaged === true || config?.protected === true || ["internal", "builtin", "official"].includes(origin)
+                ? "official"
+                : config?.main_agent_readonly_approved === true || config?.trusted_readonly === true || (!!scope && tool.annotations?.readOnlyHint === true) ? "approved" : "external";
+            return ({
+                name: tool.name,
+                canonicalName: `mcp__ccm__${safeSlug(tool.serverName)}__${tool.name}`,
+                description: tool.description || "",
+                server: tool.serverName,
+                inputSchema: tool.inputSchema || null,
+                annotations: tool.annotations || {},
+                _meta: tool.meta || {},
+                origin: config?.systemManaged === true || origin === "internal" ? "internal" : origin || "external",
+                serverTrust,
+                alwaysLoad: ["official", "approved"].includes(serverTrust)
+                    && (tool.meta?.["anthropic/alwaysLoad"] === true || tool.annotations?.["anthropic/alwaysLoad"] === true),
+            });
+        });
         const skills = (scope ? this.skills.filter(skill => isSkillAllowed(scope, skill.name)) : this.skills).map(skill => ({
             name: skill.name,
             description: skill.description || "",
@@ -528,6 +541,23 @@ class ToolManager {
             toolName: `skill:${skill.name}`,
             invokeToolName: "invoke_skill",
         }));
+    }
+    getSkillContinuitySnapshot(name, scope) {
+        const skillName = String(name || "").replace(/^Skill\s*[:：]\s*/i, "").replace(/^skill:/i, "").trim();
+        const skill = this.skills.find(item => item.name === skillName && item.enabled !== false);
+        if (!skill)
+            return { ok: false, name: skillName, error: "skill_unavailable" };
+        if (scope && !isSkillAllowed(scope, skill.name)) {
+            return { ok: false, name: skill.name, error: "skill_unauthorized" };
+        }
+        return {
+            ok: true,
+            name: skill.name,
+            description: skill.description || "",
+            prompt: String(skill.prompt || ""),
+            contentHash: skill.contentHash || contentHash(skill),
+            sourcePath: skill.sourcePath || "",
+        };
     }
     getPostCompactDynamicToolCatalog(scope) {
         const tools = (scope ? this.tools.filter(tool => isMcpToolAllowed(scope, tool)) : this.tools)
@@ -693,6 +723,7 @@ class ToolManager {
                 serverName,
                 inputSchema: t.inputSchema,
                 annotations: t.annotations && typeof t.annotations === "object" ? t.annotations : undefined,
+                meta: t._meta && typeof t._meta === "object" ? t._meta : undefined,
             })),
         ];
         this.serverStatuses.set(serverName, {

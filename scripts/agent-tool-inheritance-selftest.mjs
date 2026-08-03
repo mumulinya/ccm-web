@@ -20,7 +20,8 @@ fs.mkdirSync(reportRoot, { recursive: true });
 try {
   toolManager.getScopedToolCatalog = scope => ({
     tools: [
-      { name: "search_docs", canonicalName: "mcp__ccm__docs__search_docs", server: "docs", description: "search", inputSchema: { type: "object" }, annotations: { readOnlyHint: true } },
+      { name: "search_docs", canonicalName: "mcp__ccm__docs__search_docs", server: "docs", description: "search", inputSchema: { type: "object" }, annotations: { readOnlyHint: true }, serverTrust: "approved" },
+      { name: "list_docs", canonicalName: "mcp__ccm__docs__list_docs", server: "docs", description: "list", inputSchema: { type: "object", properties: { limit: { type: "number" } } }, annotations: { readOnlyHint: true }, serverTrust: "approved", alwaysLoad: true },
       { name: "update_docs", canonicalName: "mcp__ccm__docs__update_docs", server: "docs", description: "update", inputSchema: { type: "object" }, annotations: { readOnlyHint: false } },
     ].filter(row => (scope.mcp || []).includes("docs")),
     skills: (scope.skill || []).map(name => ({ name, description: name, contentHash: `hash-${name}` })),
@@ -37,9 +38,27 @@ try {
     label: "项目主 Agent",
     auditContext: { runtime: "project-main-agent", project: "alpha", executionId: "pchat-alpha" },
   });
-  assert.ok(projectContext.catalog.mcp.some(row => row.name === "search_docs"));
+  assert.ok(projectContext.catalog.discoverableMcp.some(row => row.name === "search_docs"));
+  assert.ok(!projectContext.catalog.mcp.some(row => row.name === "search_docs"));
+  assert.ok(projectContext.policyPrompt.includes("mcp__ccm__docs__search_docs"));
+  assert.ok(!projectContext.mcpPrompt.includes("mcp__ccm__docs__search_docs"));
+  assert.ok(projectContext.catalog.mcp.some(row => row.name === "list_docs"));
   assert.ok(!projectContext.catalog.mcp.some(row => row.name === "update_docs"));
   assert.ok(projectContext.catalog.skills.some(row => row.name === "code-review"));
+  const rejectedBeforeSearch = await mainTools.executeMainAgentToolRequests({
+    toolContext: projectContext,
+    requests: [{ name: "mcp__ccm__docs__search_docs", arguments: {}, reason: "search" }],
+    executeToolCall: async name => name === "invoke_skill" ? "skill instructions" : "source evidence",
+  });
+  assert.equal(rejectedBeforeSearch[0].error, "MAIN_AGENT_TOOL_SCHEMA_NOT_LOADED");
+  const discovered = await mainTools.executeMainAgentToolRequests({
+    toolContext: projectContext,
+    requests: [{ name: "tool_search", arguments: { query: "search_docs" }, reason: "discover" }],
+  });
+  assert.equal(discovered[0].ok, true);
+  assert.match(discovered[0].output, /inputSchema/);
+  assert.ok(projectContext.loadedToolNames.includes("mcp__ccm__docs__search_docs"));
+  assert.ok(projectContext.mcpPrompt.includes("mcp__ccm__docs__search_docs"));
   const calls = await mainTools.executeMainAgentToolRequests({
     toolContext: projectContext,
     requests: [
@@ -141,7 +160,8 @@ try {
   assert.match(wrongSession.reason, /不匹配/);
 
   const projectMainSource = fs.readFileSync(path.join(repoRoot, "backend", "modules", "projects", "project-main-agent.ts"), "utf-8");
-  assert.match(projectMainSource, /hydrateProjectConfiguredTools/);
+  assert.equal((projectMainSource.match(/hydrateProjectConfiguredTools\(\{/g) || []).length, 0, "项目主Agent生产链不应再次调用独立工具选择器");
+  assert.match(projectMainSource, /scopeIdentity:\s*\{[\s\S]*?scope:\s*"project"/);
   assert.match(projectMainSource, /configuredToolContext\.skillPrompt/);
   assert.match(projectMainSource, /executionSkills: roleSkills\.names/);
 
@@ -150,6 +170,8 @@ try {
     checks: {
       projectMainConfiguredSkillRegistered: true,
       projectMainReadOnlyMcpRegistered: true,
+      projectMainMcpDeferredUntilSearch: true,
+      projectMainAlwaysLoadMcpRegistered: true,
       projectMainWriteMcpHidden: true,
       projectMainSkillAndMcpInvoked: true,
       childConfiguredAndRoleSkillsAccepted: true,

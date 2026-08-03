@@ -1242,7 +1242,7 @@ function handleRequest(req: any, res: any) {
         });
         if (typeof res.flushHeaders === "function") res.flushHeaders();
         writeSse(res, { type: "turn_decision", decision: projectFirstTurn.turnDecision, receipt: projectFirstTurn.turnReceipt });
-        for (const item of projectFirstTurn.toolResults || []) writeSse(res, { type: "tool_activity", phase: item.ok === false ? "failed" : "completed", tool: item.name, error: item.error || "" });
+        for (const item of projectFirstTurn.toolResults || []) writeSse(res, { type: "tool_activity", phase: item.ok === false ? "failed" : "completed", tool: item.name, scope: item.scope || "project", source: item.source || item.toolKind || "", loaded: item.loaded !== false, output_tokens: item.outputTokens || 0, duration_ms: item.durationMs || 0, result_checksum: item.resultChecksum || "", error: item.error || "" });
         writeSse(res, { type: "presentation", message_mode: "conversation", show_task_card: false, main_agent: "project", direct_reply_fast_path: true });
         writeSse(res, { type: "chunk", text: directProjectReply, agent: "project-main-agent" });
         writeSse(res, { type: "done", message_mode: "conversation", main_agent: "project", taskExperience: null, direct_reply_fast_path: true });
@@ -1476,7 +1476,7 @@ function handleRequest(req: any, res: any) {
         heartbeat.unref?.();
         send({ type: "turn_decision", decision: projectFirstTurn.turnDecision, receipt: projectFirstTurn.turnReceipt });
         for (const item of projectFirstTurn.toolResults || []) {
-          send({ type: "tool_activity", phase: item.ok === false ? "failed" : "completed", tool: item.name, error: item.error || "" });
+          send({ type: "tool_activity", phase: item.ok === false ? "failed" : "completed", tool: item.name, scope: item.scope || "project", source: item.source || item.toolKind || "", loaded: item.loaded !== false, output_tokens: item.outputTokens || 0, duration_ms: item.durationMs || 0, result_checksum: item.resultChecksum || "", error: item.error || "" });
         }
 
         if (chatIntent.mode !== "task") {

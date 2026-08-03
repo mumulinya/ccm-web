@@ -75,6 +75,8 @@ const tool_catalog_management_1 = require("../../tools/tool-catalog-management")
 const internal_skill_catalog_1 = require("../../skills/internal-skill-catalog");
 const internal_mcp_registry_1 = require("../../tools/internal-mcp-registry");
 const global_agent_tool_authorization_1 = require("../global/global-agent-tool-authorization");
+const main_agent_tool_runtime_1 = require("../../tools/main-agent-tool-runtime");
+const workspace_readonly_tools_1 = require("../../tools/workspace-readonly-tools");
 const metrics_v3_1 = require("../../system/metrics-v3");
 // ===== merged from tools-part-01-part-01.ts =====
 const { toolManager } = require("../../tools/tool-manager");
@@ -1562,7 +1564,31 @@ function handleToolsAndMetricsApi(pathname, req, res, parsed) {
                 groups: (0, storage_1.loadGroups)(),
                 runtimeReadiness,
             });
-            (0, utils_1.sendJson)(res, { success: true, ...inventory });
+            (0, utils_1.sendJson)(res, {
+                success: true,
+                ...inventory,
+                main_agent_catalog: {
+                    schema: "ccm-main-agent-tool-catalog-v2",
+                    native: main_agent_tool_runtime_1.MAIN_AGENT_NATIVE_TOOLS_V2.map(tool => ({ ...tool, source: "native", applicable_agents: ["global", "group", "project"] })),
+                    workspace_readonly: workspace_readonly_tools_1.WORKSPACE_READONLY_TOOL_DEFINITIONS_V2.map(tool => ({
+                        name: tool.name,
+                        canonical_name: tool.canonicalName,
+                        description: tool.description,
+                        source: "ccm__workspace_readonly",
+                        load_state: tool.loadPolicy === "base" ? "loaded_schema_by_default" : "authorized_not_loaded",
+                        checksum: tool.checksum,
+                        applicable_agents: ["global", "group", "project"],
+                    })),
+                    state_semantics: {
+                        authorized_not_loaded: "当前作用域可用，但本轮尚未把Schema加入模型上下文",
+                        loaded_schema_by_default: "基础Schema进入首轮上下文，只有模型调用后才产生工具结果Token",
+                        configured_mcp_default: "普通授权MCP首轮只提供名称与发现提示，tool_search选中后才加载完整Schema",
+                        trusted_always_load: "仅CCM官方或已批准MCP声明anthropic/alwaysLoad时，完整Schema可进入首轮上下文",
+                        skill_catalog_only: "Skill首轮只提供名称、描述与校验身份，invoke_skill后才加载正文",
+                        invoked: "真实调用状态按精确会话隐藏执行账本和调用审计计算",
+                    },
+                },
+            });
         }
         catch (e) {
             (0, utils_1.sendJson)(res, { success: false, error: e.message }, 500);

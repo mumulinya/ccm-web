@@ -68,7 +68,6 @@ import {
 } from "../../agents/workflow-decision";
 import { createMainAgentTurnReceipt, normalizeMainAgentTurnDecision } from "../../agents/main-agent-turn";
 import { searchAgentKnowledge } from "../knowledge/knowledge-access";
-import { buildModelDrivenGroupPlanningSourceContext } from "./project-analysis";
 import {
   normalizeTestAgentAcceptanceEvidencePlan,
   normalizeTestAgentVerificationProfile,
@@ -139,14 +138,6 @@ const GROUP_MAIN_BUILTIN_TOOLS = [
     inputSchema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] },
     annotations: { readOnlyHint: true },
   },
-  {
-    canonicalName: "read_project_source",
-    name: "read_project_source",
-    server: "ccm-group-readonly",
-    description: "只读检索当前群聊成员项目源码，并返回带checksum的规划证据。仅在回答或任务计划确实需要源码事实时调用。",
-    inputSchema: { type: "object", properties: { targetProjects: { type: "array", items: { type: "string" } } } },
-    annotations: { readOnlyHint: true },
-  },
 ] as const;
 
 export function isGroupMainReadOnlyMcpTool(tool: any) {
@@ -160,6 +151,7 @@ export function buildGroupMainAgentToolContext(input: {
   groupSessionId?: string;
   group_session_id?: string;
   workflowDecision?: WorkflowDecision | null;
+  loadedMainAgentTools?: string[];
 }): any {
   const group = normalizeGroupOrchestrator(input.group);
   const selectedRoleSkills = buildRoleSkillPrompt("group-main-agent", input.message, {
@@ -179,6 +171,13 @@ export function buildGroupMainAgentToolContext(input: {
       groupId: String(group?.id || ""),
       source: String(input.source || "group-main-planning"),
     },
+    scopeIdentity: {
+      scope: "group",
+      scopeId: String(group?.id || ""),
+      exactSessionId: String(input.groupSessionId || input.group_session_id || `group-main:${group?.id || "unknown"}`),
+      allowedProjects: getRoutableMembers(group).map((member: any) => String(member?.project || "")).filter(Boolean),
+    },
+    loadedToolNames: input.loadedMainAgentTools || [],
   });
   const builtinNames = new Set(GROUP_MAIN_BUILTIN_TOOLS.map(tool => tool.canonicalName));
   const mcp = [
@@ -192,6 +191,7 @@ export function buildGroupMainAgentToolContext(input: {
   return {
     ...shared,
     catalog: { ...shared.catalog, mcp },
+    mcpPrompt: [builtinPrompt, shared.mcpPrompt].filter(Boolean).join("\n\n"),
     policyPrompt: [builtinPrompt, shared.policyPrompt].filter(Boolean).join("\n\n"),
     group,
     message: input.message,
@@ -213,6 +213,7 @@ export async function executeGroupMainAgentToolRequests(input: {
   const configuredRequests = input.requests.filter(request => !GROUP_MAIN_BUILTIN_TOOLS.some(tool => tool.canonicalName === request.name));
   const builtinRows: any[] = [];
   for (const request of builtinRequests.slice(0, 2)) {
+    const startedAt = Date.now();
     try {
       let rawOutput: any;
       if (request.name === "query_knowledge") {
@@ -222,22 +223,13 @@ export async function executeGroupMainAgentToolRequests(input: {
           groupId: String(input.toolContext.group?.id || ""),
           projects,
         }, { limit: 6 });
-      } else {
-        rawOutput = await buildModelDrivenGroupPlanningSourceContext(
-          input.toolContext.group,
-          String(input.toolContext.message || ""),
-          getConfigs(),
-          { targetProjects: Array.isArray(request.arguments?.targetProjects) ? request.arguments.targetProjects : undefined, maxRounds: 3 },
-        );
-      }
-      const modelOutput = request.name === "read_project_source"
-        ? { rendered: rawOutput.rendered, ready: rawOutput.ready, checksum: rawOutput.checksum, issues: rawOutput.issues, projects: rawOutput.projects, modelPlanning: rawOutput.modelPlanning }
-        : { context: rawOutput.context, citations: rawOutput.citations, retrievalMode: rawOutput.embeddingMode, indexGeneration: rawOutput.indexGeneration };
+      } else throw new Error(`未知群聊内置工具：${request.name}`);
+      const modelOutput = { context: rawOutput.context, citations: rawOutput.citations, retrievalMode: rawOutput.embeddingMode, indexGeneration: rawOutput.indexGeneration };
       const output = JSON.stringify(modelOutput);
       const outputTokens = estimateTextTokens(output);
       builtinRows.push(outputTokens > 8_000
         ? { name: request.name, itemName: request.name, toolKind: "mcp", ok: false, error: "GROUP_MAIN_TOOL_RESULT_EXCEEDS_8K_TOKEN_BUDGET", outputTokens, reason: request.reason }
-        : { name: request.name, itemName: request.name, toolKind: "mcp", ok: true, output, rawOutput, outputTokens, reason: request.reason });
+        : { name: request.name, itemName: request.name, toolKind: "internal_mcp", source: "ccm__knowledge_context", scope: "group", loaded: true, durationMs: Date.now() - startedAt, ok: true, output, rawOutput, outputTokens, resultChecksum: crypto.createHash("sha256").update(output).digest("hex"), reason: request.reason });
     } catch (error: any) {
       builtinRows.push({ name: request.name, itemName: request.name, toolKind: "mcp", ok: false, error: String(error?.message || error).slice(0, 1000), reason: request.reason });
     }
@@ -247,6 +239,8 @@ export async function executeGroupMainAgentToolRequests(input: {
     : [];
   return [...builtinRows, ...configuredRows].map(row => row.error === "MAIN_AGENT_TOOL_NOT_AUTHORIZED"
     ? { ...row, error: "GROUP_MAIN_TOOL_NOT_AUTHORIZED" }
+    : row.error === "MAIN_AGENT_TOOL_SCHEMA_NOT_LOADED"
+      ? { ...row, error: "GROUP_MAIN_TOOL_SCHEMA_NOT_LOADED" }
     : row.error === "MAIN_AGENT_TOOL_RESULT_EXCEEDS_8K_TOKEN_BUDGET"
       ? { ...row, error: "GROUP_MAIN_TOOL_RESULT_EXCEEDS_8K_TOKEN_BUDGET" }
       : row);
@@ -1264,12 +1258,11 @@ export async function runLlmGroupOrchestrator(input: {
       const toolContext = buildGroupMainAgentToolContext(planningInput);
       const roundResults = await executeGroupMainAgentToolRequests({ requests: freshRequests, toolContext });
       toolResults.push(...roundResults);
-      const sourceResult = [...roundResults].reverse().find((row: any) => row.name === "read_project_source" && row.ok && row.rawOutput);
       const knowledgeResult = [...roundResults].reverse().find((row: any) => row.name === "query_knowledge" && row.ok && row.rawOutput);
       planningInput = {
         ...planningInput,
         mainAgentToolResults: toolResults,
-        ...(sourceResult ? { projectSourceEvidence: sourceResult.rawOutput } : {}),
+        loadedMainAgentTools: toolContext.loadedToolNames || [],
         ...(knowledgeResult ? { ragContext: knowledgeResult.rawOutput.context || "" } : {}),
       };
       const hydratedMessages = buildLlmCoordinatorMessages(planningInput);

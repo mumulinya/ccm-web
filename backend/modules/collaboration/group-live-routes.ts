@@ -1355,7 +1355,7 @@ export function handleGroupLiveRoutes(
             receipt: (coordinatorResult as any).mainAgentTurnReceipt || null,
           });
           for (const item of ((coordinatorResult as any).mainAgentToolUsage?.results || [])) {
-            writeSse(res, { type: "tool_activity", phase: item.ok === false ? "failed" : "completed", tool: item.name, output_tokens: item.outputTokens || 0, error: item.error || "" });
+            writeSse(res, { type: "tool_activity", phase: item.ok === false ? "failed" : "completed", tool: item.name, scope: item.scope || "group", source: item.source || item.toolKind || "", loaded: item.loaded !== false, output_tokens: item.outputTokens || 0, duration_ms: item.durationMs || 0, result_checksum: item.resultChecksum || "", error: item.error || "" });
           }
 
           try {

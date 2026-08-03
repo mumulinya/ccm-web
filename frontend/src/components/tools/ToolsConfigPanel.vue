@@ -149,12 +149,12 @@ const runtimeOrderedChecks = (item) => [...runtimeChecks(item)].sort((left, righ
 // 静态定义的系统核心内置工具列表
 const coreToolsList = [
   {
-    name: 'view_file',
+    name: 'workspace_readonly',
     emoji: '🔍',
-    category: '文件 I/O',
-    security: '受控授权',
+    category: '源码与检索',
+    security: '严格只读',
     securityClass: 'sec-warning',
-    desc: '读取并检索本地文件内容。支持普通文本文件的行段提取，以及图片、PDF、Word/Excel、音视频等媒体资源的底层预览与结构提取。',
+    desc: '目录、Glob、Grep、分段Read、项目配置、Git和运行日志使用同一受保护目录；按Agent作用域限制项目并阻止敏感文件和路径越界。',
     params: [
       { name: 'AbsolutePath', type: 'String (必填)', desc: '要查看文件的绝对物理路径。' },
       { name: 'StartLine', type: 'Number (可选)', desc: '查看文本文件时的起始行号（1-indexed）。' },
@@ -163,12 +163,12 @@ const coreToolsList = [
     example: 'await view_file({ AbsolutePath: "C:/project/src/main.js", StartLine: 1, EndLine: 100 })'
   },
   {
-    name: 'replace_file_content',
+    name: 'update_todo / plan_mode',
     emoji: '✏️',
-    category: '代码重写',
-    security: '写入确认',
-    securityClass: 'sec-danger',
-    desc: '对本地文件中的单个连续代码片段执行替换修改。需要提供完全精确的目标内容匹配（包含缩进和换行符），以防止代码错位。',
+    category: '计划控制',
+    security: '状态机管理',
+    securityClass: 'sec-success',
+    desc: '维护实时计划、当前步骤和确认状态，只更新主Agent编排状态，不直接修改源码。',
     params: [
       { name: 'TargetFile', type: 'String (必填)', desc: '目标文件的绝对路径。' },
       { name: 'TargetContent', type: 'String (必填)', desc: '要被替换的精确现有代码段（必须完全一致，包含缩进）。' },
@@ -177,12 +177,12 @@ const coreToolsList = [
     example: 'await replace_file_content({ TargetFile: "C:/src/app.js", TargetContent: "const a = 1;", ReplacementContent: "const a = 2;" })'
   },
   {
-    name: 'run_command',
+    name: 'dispatch_task / task_status',
     emoji: '💻',
-    category: '命令行执行',
-    security: '高危确认',
-    securityClass: 'sec-danger',
-    desc: '在系统宿主环境下执行 shell 指令。支持 Windows PowerShell 及 Unix Bash，可接收实时输出并返回终端当前目录。',
+    category: '任务编排',
+    security: 'RBAC与风险门禁',
+    securityClass: 'sec-warning',
+    desc: '把计划交给现有串行任务队列并读取或停止精确任务；源码编辑和Shell只由项目子Agent执行。',
     params: [
       { name: 'CommandLine', type: 'String (必填)', desc: '要在终端执行的完整命令行字符串。' },
       { name: 'Cwd', type: 'String (必填)', desc: '命令执行时的当前工作目录路径。' }
@@ -190,24 +190,24 @@ const coreToolsList = [
     example: 'await run_command({ CommandLine: "npm run test", Cwd: "C:/my-project" })'
   },
   {
-    name: 'search_web',
+    name: 'tool_search / invoke_skill',
     emoji: '🌐',
-    category: '搜索引擎',
-    security: '自动执行',
-    securityClass: 'sec-success',
-    desc: '无感调用搜索引擎检索外部互联网资源与最新技术文档。支持通过 query 词条进行多维度查询。',
+    category: '按需加载',
+    security: '授权目录',
+    securityClass: 'sec-warning',
+    desc: '发现低频工具或已授权Skill，模型选择后才加载Schema或Skill正文，避免每轮无条件占用上下文。',
     params: [
       { name: 'query', type: 'String (必填)', desc: '检索词或检索问题。' }
     ],
     example: 'await search_web({ query: "Vue 3 reactive read-only update logic" })'
   },
   {
-    name: 'invoke_subagent',
+    name: 'ask_user_question',
     emoji: '🤖',
-    category: '协同分工',
-    security: '受控授权',
-    securityClass: 'sec-warning',
-    desc: '在后台创建并派发多名拥有特定角色分工的子 Agent 协作处理任务。可进行并发搜索或分布式编译。',
+    category: '会话控制',
+    security: '精确会话',
+    securityClass: 'sec-success',
+    desc: '信息不足时只向当前精确会话提出结构化问题，并释放执行租约等待用户补充。',
     params: [
       { name: 'Subagents', type: 'Array (必填)', desc: '子 Agent 的声明数组，包含 TypeName, Role, Prompt 等。' }
     ],

@@ -4,6 +4,8 @@ import * as path from "path";
 import { CCM_DIR } from "../../core/utils";
 import { toolManager, type ToolScope } from "../../tools/tool-manager";
 import { buildMainAgentToolRuntimeContext } from "../../tools/main-agent-tool-runtime";
+import { executeWorkspaceReadonlyTool } from "../../tools/workspace-readonly-tools";
+import { recordMainAgentToolContinuityFromResult } from "../../system/main-agent-post-compact-continuity";
 import {
   buildFreshToolAuthorizationPayload,
   buildToolAuthorizationPayload,
@@ -94,7 +96,7 @@ export async function saveGlobalAgentToolAuthorization(input: any = {}) {
   return { ...store, ...payload, authorization_change: authorizationChange };
 }
 
-export function buildGlobalAgentToolRuntimeContext(auditContext: ToolScope["auditContext"] = {}) {
+export function buildGlobalAgentToolRuntimeContext(auditContext: ToolScope["auditContext"] = {}, loadedToolNames: string[] = []) {
   const authorization = getGlobalAgentToolAuthorizationPayload();
   const shared = buildMainAgentToolRuntimeContext({
     configuredTools: authorization.tools,
@@ -106,8 +108,16 @@ export function buildGlobalAgentToolRuntimeContext(auditContext: ToolScope["audi
       groupId: "",
       taskId: String(auditContext?.taskId || ""),
       executionId: String(auditContext?.executionId || ""),
+      sessionId: String(auditContext?.sessionId || ""),
       source: String(auditContext?.source || "global-agent"),
     },
+    scopeIdentity: {
+      scope: "global",
+      scopeId: "global-agent",
+      exactSessionId: String(auditContext?.sessionId || auditContext?.executionId || auditContext?.taskId || "global-agent-runtime"),
+      allowedProjects: [],
+    },
+    loadedToolNames,
   });
   const catalog = { tools: shared.catalog.mcp, skills: shared.catalog.skills };
   return {
@@ -121,6 +131,15 @@ export function buildGlobalAgentToolRuntimeContext(auditContext: ToolScope["audi
     configured_counts: { mcp: authorization.tools.mcp.length, skill: authorization.tools.skill.length },
     checksum: shared.checksum,
     scope: shared.scope,
+    capability_token: shared.capabilityToken || "",
+    loaded_tool_names: shared.loadedToolNames || [],
+    discoverable_tools: shared.catalog.discoverableMcp || [],
+    deferred_tool_names: shared.deferredToolNames || [],
+    scope_identity: shared.scopeIdentity,
+    restored_skill_attachments: shared.restoredSkillAttachments || [],
+    post_compact_restore_receipt: shared.postCompactRestoreReceipt || null,
+    policy_prompt: shared.policyPrompt,
+    mcp_prompt: shared.mcpPrompt,
     updated_at: authorization.updated_at,
     updated_by: authorization.updated_by,
   };
@@ -144,8 +163,8 @@ function parseToolResult(value: string) {
   catch { return { content: text }; }
 }
 
-export async function executeGlobalAgentAuthorizedTool(kind: "mcp" | "skill", input: any, auditContext: ToolScope["auditContext"] = {}) {
-  const runtime = buildGlobalAgentToolRuntimeContext(auditContext);
+export async function executeGlobalAgentAuthorizedTool(kind: "mcp" | "skill", input: any, auditContext: ToolScope["auditContext"] = {}, loadedToolNames: string[] = []) {
+  const runtime = buildGlobalAgentToolRuntimeContext(auditContext, loadedToolNames);
   if (runtime.authorization_readiness?.dispatchReady !== true) {
     throw new Error("全局 Agent 工具授权存在缺失、断连或无效项，请先在工具配置中处理");
   }
@@ -153,15 +172,30 @@ export async function executeGlobalAgentAuthorizedTool(kind: "mcp" | "skill", in
     const name = String(input?.name || input?.skill || "").trim();
     if (!runtime.catalog.skills.some(row => row.name === name)) throw new Error(`Skill 未授权给全局 Agent：${name || "未指定"}`);
     const output = await toolManager.executeToolCall("invoke_skill", { name, input: input?.input ?? input?.context ?? "" }, runtime.scope);
-    return { success: true, kind, name, result: parseToolResult(output), authorization_checksum: runtime.checksum };
+    const result = parseToolResult(output);
+    recordMainAgentToolContinuityFromResult({
+      identity: runtime.scope_identity,
+      requestName: "invoke_skill",
+      requestArguments: { name, input: input?.input ?? input?.context ?? "" },
+      rawOutput: result,
+      eventId: String(auditContext?.executionId || ""),
+      sourceMessageId: String((auditContext as any)?.userMessageId || ""),
+    });
+    return { success: true, kind, name, result, authorization_checksum: runtime.checksum };
   }
-  const toolName = resolveMcpToolName(input?.tool_name || input?.toolName || input?.name, runtime.catalog.tools);
+  const requestedName = input?.tool_name || input?.toolName || input?.name;
+  const deferredMatch = runtime.discoverable_tools.find((row: any) => requestedName === row.canonicalName || requestedName === row.name || requestedName === `${row.server}/${row.name}`);
+  if (deferredMatch) throw new Error(`MAIN_AGENT_TOOL_SCHEMA_NOT_LOADED:${deferredMatch.canonicalName}`);
+  const toolName = resolveMcpToolName(requestedName, runtime.catalog.tools);
   const args = input?.arguments && typeof input.arguments === "object" && !Array.isArray(input.arguments)
     ? input.arguments
     : input?.args && typeof input.args === "object" && !Array.isArray(input.args)
       ? input.args
       : {};
-  const output = await toolManager.executeToolCall(toolName, args, runtime.scope);
+  const selected = runtime.catalog.tools.find(row => row.canonicalName === toolName);
+  const output = selected?.server === "ccm__workspace_readonly"
+    ? JSON.stringify(await executeWorkspaceReadonlyTool(selected.name, args, runtime.capability_token))
+    : await toolManager.executeToolCall(toolName, args, runtime.scope);
   return { success: true, kind, name: toolName, result: parseToolResult(output), authorization_checksum: runtime.checksum };
 }
 

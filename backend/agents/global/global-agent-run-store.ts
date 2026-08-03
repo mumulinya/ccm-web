@@ -5,6 +5,7 @@ import { CCM_DIR } from "../../core/utils";
 import { ensureTraceId } from "../../system/reliability-ledger";
 import { normalizeAgentReasoningState } from "../reasoning-loop";
 import type { GlobalAgentDecisionState, GlobalAgentRun, GlobalAgentRunStatus, GlobalAgentToolRisk, GlobalAgentToolSpec, GlobalAgentUserSteer, GlobalAgentUserSteerStatus } from "./loop";
+import { WORKSPACE_READONLY_TOOL_DEFINITIONS_V2 } from "../../tools/workspace-readonly-tools";
 
 export const STORE_DIR = path.join(CCM_DIR, "global-agent-runs");
 export const STORE_FILE = path.join(STORE_DIR, "runs.json");
@@ -138,6 +139,8 @@ export function normalizeRun(run: any): GlobalAgentRun {
     resume_count: Number(run?.resume_count || 0),
     model_calls: Number(run?.model_calls || 0),
     tool_calls: Number(run?.tool_calls || 0),
+    loaded_tool_names: Array.from(new Set<string>((Array.isArray(run?.loaded_tool_names) ? run.loaded_tool_names : Array.isArray(run?.loadedToolNames) ? run.loadedToolNames : []).map((value: any) => String(value || "").trim()).filter(Boolean))).slice(0, 256),
+    loadedToolNames: Array.from(new Set<string>((Array.isArray(run?.loadedToolNames) ? run.loadedToolNames : Array.isArray(run?.loaded_tool_names) ? run.loaded_tool_names : []).map((value: any) => String(value || "").trim()).filter(Boolean))).slice(0, 256),
     consecutive_failures: Number(run?.consecutive_failures || 0),
     client_effects: Array.isArray(run?.client_effects) ? run.client_effects.slice(-20) : [],
     presentation: (["reply", "plan", "delivery"].includes(String(run?.presentation || ""))
@@ -365,6 +368,13 @@ export function validateTool(name: string, args: any) {
 
 
 export const GLOBAL_AGENT_TOOL_SPECS: GlobalAgentToolSpec[] = [
+  { name: "tool_search", description: "按需发现本轮尚未加载的低频只读工作区工具。", required: ["query"], risk: "read" },
+  ...WORKSPACE_READONLY_TOOL_DEFINITIONS_V2.map(tool => ({
+    name: tool.name,
+    description: tool.description,
+    required: Array.isArray(tool.inputSchema?.required) ? tool.inputSchema.required : [],
+    risk: "read" as const,
+  })),
   { name: "inspect_system", description: "读取 CCM 服务、项目、群聊、任务、定时任务和执行器概况。", risk: "read" },
   { name: "list_projects", description: "列出真实项目及 Agent 配置。", risk: "read" },
   { name: "inspect_project", description: "读取指定项目的路由配置；项目记忆由群聊主 Agent 和项目子 Agent 使用。", required: ["project"], risk: "read" },

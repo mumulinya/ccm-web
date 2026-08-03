@@ -60,7 +60,8 @@ function executableIdentity(pid) {
     try {
         if (process.platform === "win32") {
             const script = [
-                `$p=Get-Process -Id ${pid} -ErrorAction Stop`,
+                `$p=Get-Process -Id ${pid} -ErrorAction SilentlyContinue`,
+                "if ($null -eq $p -or $null -eq $p.StartTime -or [string]::IsNullOrWhiteSpace([string]$p.Path)) { exit 3 }",
                 "$v=[ordered]@{created=$p.StartTime.ToUniversalTime().ToString('o');executable=$p.Path}|ConvertTo-Json -Compress",
                 "Write-Output $v",
             ].join(";");

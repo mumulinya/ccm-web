@@ -47,6 +47,7 @@ exports.executeProjectMainTask = executeProjectMainTask;
 exports.projectMainTaskPublic = projectMainTaskPublic;
 exports.runProjectMainAgentContractSelfTest = runProjectMainAgentContractSelfTest;
 const crypto = __importStar(require("crypto"));
+const context_budget_1 = require("../../system/context-budget");
 const db_1 = require("../../core/db");
 const task_user_runtime_1 = require("../../agents/task-user-runtime");
 const collaboration_task_service_1 = require("../collaboration/collaboration-task-service");
@@ -577,8 +578,6 @@ async function runProjectMainAgentFirstTurn(input) {
         source: "project-main-first-turn",
     });
     const builtinTools = [
-        { canonicalName: "read_project_source", name: "read_project_source", server: "ccm-project-readonly", description: "只读检索当前项目源码并形成带checksum的证据。", inputSchema: { type: "object", properties: {} }, annotations: { readOnlyHint: true } },
-        { canonicalName: "read_runtime_diagnostics", name: "read_runtime_diagnostics", server: "ccm-project-readonly", description: "只读查询当前项目运行配置、状态和日志摘要。", inputSchema: { type: "object", properties: {} }, annotations: { readOnlyHint: true } },
         { canonicalName: "query_knowledge", name: "query_knowledge", server: "ccm-project-readonly", description: "按当前项目授权范围查询知识库。", inputSchema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] }, annotations: { readOnlyHint: true } },
     ];
     const toolContext = {
@@ -620,7 +619,7 @@ ${workflow_decision_1.WORKFLOW_DECISION_GUIDANCE}
 
 规则：
 1. 普通问候、致谢和自包含问答直接 responseType=reply，不调用工具、不创建任务。
-2. 只有缺少项目事实时才请求只读工具。内置工具为 read_project_source、read_runtime_diagnostics、query_knowledge；其他工具只能从授权目录选择。
+2. 只有缺少项目事实时才请求只读工具。基础工作区工具为 list_directory、glob_files、grep_text、read_file；低频Git、运行日志和配置工具先用 tool_search 加载。知识检索使用 query_knowledge。
 3. 工具结果会回到同一 Agent Loop；不要重复相同请求。
 4. 需要实际修改时 responseType=plan 或 dispatch，并同时给出可执行 plan；项目主 Agent本身不修改代码。
 5. 信息不足时 responseType=clarify。写入权限、RBAC和高风险确认由服务端最终裁决。
@@ -690,10 +689,25 @@ ${toolContext.policyPrompt}`,
                 }
                 else {
                     const rows = await (0, main_agent_tool_runtime_1.executeMainAgentToolRequests)({ requests: [request], toolContext, resultTokenLimit: 8_000 });
-                    output = rows[0];
+                    const row = rows[0];
+                    if (!row?.ok)
+                        throw new Error(row?.error || `项目主 Agent工具调用失败：${request.name}`);
+                    output = row;
                 }
                 recordProjectMainToolResult(project, projectSessionId, request.name, callId, (0, session_execution_ledger_1.sanitizeSessionExecutionValue)(output));
-                toolResults.push({ name: request.name, ok: true, output });
+                const receipt = output && typeof output === "object" && "toolKind" in output ? output : {};
+                toolResults.push({
+                    name: request.name,
+                    ok: true,
+                    output,
+                    toolKind: receipt.toolKind || (request.name === "query_knowledge" ? "internal_mcp" : "mcp"),
+                    source: receipt.source || (request.name === "query_knowledge" ? "ccm__knowledge_context" : "project_builtin"),
+                    loaded: receipt.loaded !== false,
+                    scope: receipt.scope || "project",
+                    outputTokens: receipt.outputTokens || (0, context_budget_1.estimateTextTokens)(JSON.stringify(output)),
+                    durationMs: receipt.durationMs || 0,
+                    resultChecksum: receipt.resultChecksum || crypto.createHash("sha256").update(JSON.stringify(output)).digest("hex"),
+                });
             }
             catch (error) {
                 const detail = cleanText(error?.message || error, 1000);
@@ -789,16 +803,7 @@ async function planProjectMainTask(input) {
         executionSkills: roleSkills.names,
         source: "project-main-planning",
     });
-    const configuredToolHydration = await hydrateProjectConfiguredTools({
-        project,
-        projectSessionId,
-        userMessage: input.userMessage,
-        conversationContext: hydrationContext,
-        purpose: "planning",
-        toolContext: configuredToolContext,
-        sourceEvidence: sourceHydration.prompt,
-        runtimeEvidence: runtimeHydration.prompt,
-    });
+    const configuredToolHydration = { results: [], prompt: "" };
     const contextComponents = {
         skills: [roleSkills.prompt, configuredToolContext.skillPrompt].filter(Boolean).join("\n\n"),
         projectSource: sourceHydration.prompt,
@@ -938,18 +943,8 @@ async function answerAsProjectMainAgent(input) {
             executionSkills: roleSkills.names,
             source: "project-analysis",
         });
-        const hydrated = await hydrateProjectConfiguredTools({
-            project: input.project,
-            projectSessionId: input.projectSessionId,
-            userMessage: input.userMessage,
-            conversationContext: hydrationContext,
-            purpose: "analysis",
-            toolContext: configuredToolContext,
-            sourceEvidence,
-            runtimeEvidence,
-        });
-        toolEvidence = hydrated.prompt;
-        configuredToolResults = hydrated.results;
+        toolEvidence = "";
+        configuredToolResults = [];
     }
     const contextComponents = {
         skills: [roleSkills.prompt, configuredToolContext?.skillPrompt || ""].filter(Boolean).join("\n\n"),
@@ -1355,85 +1350,13 @@ function buildProjectMainConfiguredToolContext(input) {
             executionId: input.projectSessionId,
             source: input.source,
         },
+        scopeIdentity: {
+            scope: "project",
+            scopeId: input.project,
+            exactSessionId: input.projectSessionId,
+            allowedProjects: [input.project],
+        },
     });
-}
-async function hydrateProjectConfiguredTools(input) {
-    const results = [];
-    const executed = new Set();
-    if (!input.toolContext.catalog.mcp.length && !input.toolContext.catalog.skills.length) {
-        return { results, prompt: "", usage: { calls: 0, rounds: 0 }, toolContext: input.toolContext };
-    }
-    let rounds = 0;
-    for (let round = 0; round < 2; round += 1) {
-        const decisionMessages = [
-            {
-                role: "system",
-                content: `你是项目主 Agent的受控工具选择器。判断当前${input.purpose === "planning" ? "实施计划" : "项目分析"}是否需要调用已授权工具。最多选择2个。MCP只能选择列出的只读canonicalName；Skill只能选择invoke_skill并在arguments.name中填写已列出的Skill。不需要时返回空数组。不得把工具请求视为已完成。只输出JSON：{"toolRequests":[{"name":"canonicalName或invoke_skill","arguments":{},"reason":"原因"}]}\n\n${input.toolContext.policyPrompt}`,
-            },
-            {
-                role: "user",
-                content: JSON.stringify({
-                    project: input.project,
-                    project_session_id: input.projectSessionId,
-                    user_message: input.userMessage,
-                    conversation_context: input.conversationContext,
-                    source_evidence: input.sourceEvidence || "",
-                    runtime_evidence: input.runtimeEvidence || "",
-                    previous_tool_results: results,
-                }),
-            },
-        ];
-        const capacity = await ensureProjectMainModelCapacity({
-            project: input.project,
-            projectSessionId: input.projectSessionId,
-            currentRequest: input.userMessage,
-            buildMessages: () => decisionMessages,
-            contextComponents: {
-                skills: input.toolContext.skillPrompt,
-                messageMcpTools: input.toolContext.catalog.mcp,
-                mcpResults: results,
-                loadedContextItems: (0, main_agent_tool_runtime_1.buildMainAgentLoadedContextItems)(input.toolContext, results),
-            },
-        });
-        const selected = await modelJson(capacity.messages, "项目主 Agent工具选择失败", {
-            project: input.project,
-            projectSessionId: input.projectSessionId,
-            currentRequest: input.userMessage,
-            contextComponents: {
-                skills: input.toolContext.skillPrompt,
-                messageMcpTools: input.toolContext.catalog.mcp,
-                mcpResults: results,
-                loadedContextItems: (0, main_agent_tool_runtime_1.buildMainAgentLoadedContextItems)(input.toolContext, results),
-            },
-        });
-        const requests = (0, main_agent_tool_runtime_1.normalizeMainAgentToolRequests)(selected?.toolRequests || selected?.tool_requests).filter(request => {
-            const fingerprint = (0, main_agent_tool_runtime_1.mainAgentToolRequestFingerprint)(request);
-            if (executed.has(fingerprint))
-                return false;
-            executed.add(fingerprint);
-            return true;
-        });
-        if (!requests.length)
-            break;
-        rounds += 1;
-        const rows = await (0, main_agent_tool_runtime_1.executeMainAgentToolRequests)({
-            requests,
-            toolContext: input.toolContext,
-            resultTokenLimit: 8_000,
-            onUse: request => recordProjectMainToolUse(input.project, input.projectSessionId, request.name, {
-                ...(request.arguments || {}),
-                reason: cleanText(request.reason, 300),
-            }),
-            onResult: (request, callId, output, error = "") => recordProjectMainToolResult(input.project, input.projectSessionId, request.name, callId, error ? null : (0, session_execution_ledger_1.sanitizeSessionExecutionValue)(output), cleanText(error, 1000)),
-        });
-        results.push(...rows);
-    }
-    return {
-        results,
-        prompt: results.length ? `项目主 Agent已授权工具结果：\n${JSON.stringify(results)}` : "",
-        usage: { calls: results.length, rounds },
-        toolContext: input.toolContext,
-    };
 }
 async function executeProjectMainTask(input) {
     const taskId = String(input.task?.id || "");

@@ -52,7 +52,7 @@ export declare function saveGlobalAgentToolAuthorization(input?: any): Promise<{
     updated_at: string;
     updated_by: string;
 }>;
-export declare function buildGlobalAgentToolRuntimeContext(auditContext?: ToolScope["auditContext"]): {
+export declare function buildGlobalAgentToolRuntimeContext(auditContext?: ToolScope["auditContext"], loadedToolNames?: string[]): {
     schema: string;
     tools: Required<Pick<ToolScope, "mcp" | "skill">>;
     tool_audit: any;
@@ -72,10 +72,19 @@ export declare function buildGlobalAgentToolRuntimeContext(auditContext?: ToolSc
     };
     checksum: string;
     scope: ToolScope;
+    capability_token: string;
+    loaded_tool_names: string[];
+    discoverable_tools: any[];
+    deferred_tool_names: string[];
+    scope_identity: import("../../system/main-agent-post-compact-continuity").MainAgentContinuityIdentityV1;
+    restored_skill_attachments: any[];
+    post_compact_restore_receipt: import("../../system/main-agent-post-compact-continuity").PostCompactToolRestoreReceiptV1;
+    policy_prompt: string;
+    mcp_prompt: string;
     updated_at: string;
     updated_by: string;
 };
-export declare function executeGlobalAgentAuthorizedTool(kind: "mcp" | "skill", input: any, auditContext?: ToolScope["auditContext"]): Promise<{
+export declare function executeGlobalAgentAuthorizedTool(kind: "mcp" | "skill", input: any, auditContext?: ToolScope["auditContext"], loadedToolNames?: string[]): Promise<{
     success: boolean;
     kind: "skill";
     name: string;

@@ -121,8 +121,14 @@ const groupCore = groupRouting.slice(groupRouting.indexOf("export async function
 assert.doesNotMatch(groupCore, /searchAgentKnowledge\s*\(/);
 const groupLoop = source("backend/modules/collaboration/group-orchestrator-llm.ts");
 assert.match(groupLoop, /canonicalName:\s*"query_knowledge"/);
-assert.match(groupLoop, /canonicalName:\s*"read_project_source"/);
-assert.match(groupLoop, /projectSourceEvidence:\s*sourceResult\.rawOutput/);
+assert.doesNotMatch(groupLoop, /canonicalName:\s*"read_project_source"/);
+assert.match(groupLoop, /mainAgentToolResults:\s*toolResults/);
+const sharedToolRuntime = source("backend/tools/main-agent-tool-runtime.ts");
+const workspaceTools = source("backend/tools/workspace-readonly-tools.ts");
+assert.match(sharedToolRuntime, /WORKSPACE_READONLY_TOOL_DEFINITIONS_V2\.filter\(tool => tool\.loadPolicy === "base"\)/);
+assert.match(workspaceTools, /name:\s*"glob_files"/);
+assert.match(workspaceTools, /name:\s*"grep_text"/);
+assert.match(workspaceTools, /name:\s*"read_file"/);
 
 const projectServer = source("backend/server.ts");
 const projectChat = projectServer.slice(projectServer.indexOf('pathname === "/api/send-stream"'), projectServer.indexOf('// === 发送消息给 Agent（非流式）==='));
@@ -136,8 +142,8 @@ const projectFirstTurn = source("backend/modules/projects/project-main-agent.ts"
 );
 assert.match(projectFirstTurn, /responseType.*reply\|tool_calls\|clarify\|plan\|dispatch/);
 assert.match(projectFirstTurn, /query_knowledge/);
-assert.match(projectFirstTurn, /read_project_source/);
-assert.match(projectFirstTurn, /read_runtime_diagnostics/);
+assert.doesNotMatch(projectFirstTurn, /canonicalName:\s*"read_project_source"/);
+assert.doesNotMatch(projectFirstTurn, /canonicalName:\s*"read_runtime_diagnostics"/);
 assert.match(projectFirstTurn, /let modelCallCount = 0/);
 
 const globalTools = source("backend/agents/global/global-agent-run-store.ts");

@@ -17,6 +17,8 @@ import {
   buildGlobalAgentToolRuntimeContext,
   executeGlobalAgentAuthorizedTool,
 } from "./global-agent-tool-authorization";
+import { executeMainAgentToolRequests } from "../../tools/main-agent-tool-runtime";
+import { WORKSPACE_READONLY_TOOL_DEFINITIONS_V2 } from "../../tools/workspace-readonly-tools";
 import { saveRun as saveGlobalAgentRun } from "../../agents/global/global-agent-run-store";
 import { appendTraceEvent } from "../../system/reliability-ledger";
 import { buildGlobalWriteAuthorizationReceipt } from "../../agents/global/global-agent-authorization";
@@ -184,8 +186,9 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
     const authorizedTools = buildGlobalAgentToolRuntimeContext({
       taskId: String(options.runId || options.run_id || ""),
       executionId: String(options.executionId || options.execution_id || ""),
+      sessionId,
       source: String(options.source || "global-agent-context"),
-    });
+    }, Array.isArray(options.loadedToolNames || options.loaded_tool_names) ? (options.loadedToolNames || options.loaded_tool_names) : []);
     migrateLegacyGlobalSharedDirectoryV2();
     const globalSharedFiles = buildSharedFilesContextV2("global", "global", {
       maxTokens: 32_000,
@@ -215,6 +218,10 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
           input_schema: tool.inputSchema,
           annotations: tool.annotations,
         })),
+        deferred_mcp: authorizedTools.discoverable_tools.map((tool: any) => ({
+          name: tool.canonicalName || tool.name,
+        })),
+        loaded_tool_names: authorizedTools.loaded_tool_names,
         skills: authorizedTools.catalog.skills.map((skill: any) => ({
           name: skill.name,
           description: skill.description,
@@ -286,17 +293,22 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
     }
     const selectedSkillStart = systemText.indexOf("[CCM 本轮角色 Skill]");
     if (selectedSkillStart >= 0) skillSections.push(systemText.slice(selectedSkillStart));
-    const authorizedTools = buildGlobalAgentToolRuntimeContext({ source: "global-agent-provider-payload" });
+    const authorizedTools = buildGlobalAgentToolRuntimeContext(
+      { sessionId, taskId: String(run?.id || ""), source: "global-agent-provider-payload" },
+      (run?.loaded_tool_names || run?.loadedToolNames || []) as string[],
+    );
     const configuredSkills = authorizedTools.catalog.skills.map((skill: any) => ({ name: String(skill?.name || ""), contentHash: String(skill?.contentHash || "") })).filter((skill: any) => skill.name);
     const configuredMcpTools = authorizedTools.catalog.tools.map((tool: any) => ({ name: String(tool?.canonicalName || tool?.name || ""), server: String(tool?.server || "") })).filter((tool: any) => tool.name);
-    const loadedSkills = authorizedTools.catalog.skills
-      .filter((skill: any) => systemText.includes(String(skill?.name || "")))
+    const restoredSkillNames = new Set((authorizedTools.restored_skill_attachments || []).map((skill: any) => String(skill?.name || "")));
+    const loadedSkills: any[] = authorizedTools.catalog.skills
       .map((skill: any) => ({
         kind: "skill" as const,
         name: String(skill?.name || ""),
         aliases: [String(skill?.name || ""), `skill:${String(skill?.name || "")}`].filter(Boolean),
-        loadLevel: systemText.includes(`## Skill:${String(skill?.name || "")}`) ? "body" as const : "catalog" as const,
+        loadLevel: restoredSkillNames.has(String(skill?.name || "")) ? "body" as const : "catalog" as const,
         checksum: String(skill?.contentHash || ""),
+        loadSource: restoredSkillNames.has(String(skill?.name || "")) ? "post_compact_restored" as const : "catalog" as const,
+        tokens: Number((authorizedTools.restored_skill_attachments || []).find((item: any) => item?.name === skill?.name)?.tokenCount || 0),
       }));
     const allSkillCatalog = new Map((Array.isArray(loadSkills()) ? loadSkills() : [])
       .map((skill: any) => [String(skill?.name || ""), skill]));
@@ -310,11 +322,11 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
         aliases: [name, `skill:${name}`],
         loadLevel: "body",
         checksum: String(skill?.contentHash || crypto.createHash("sha256").update(name).digest("hex")),
+        loadSource: "same_run",
+        tokens: 0,
       });
     }
-    const loadedMcp = authorizedTools.catalog.tools
-      .filter((tool: any) => systemText.includes(String(tool?.canonicalName || tool?.name || "")))
-      .map((tool: any) => ({
+    const loadedMcp = authorizedTools.catalog.tools.map((tool: any) => ({
         kind: "mcp" as const,
         name: String(tool?.canonicalName || tool?.name || ""),
         aliases: [
@@ -329,14 +341,22 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
           server: tool?.server,
           inputSchema: tool?.inputSchema || null,
         })).digest("hex"),
+        loadSource: authorizedTools.post_compact_restore_receipt?.loadedToolNames?.includes(String(tool?.canonicalName || tool?.name || ""))
+          ? "post_compact_restored" as const
+          : tool?.alwaysLoad === true ? "always_load" as const : "same_run" as const,
       }));
+    const loadedToolNames = new Set((run?.loaded_tool_names || run?.loadedToolNames || []).map(value => String(value || "")));
+    const deferredWorkspaceNames = new Set(WORKSPACE_READONLY_TOOL_DEFINITIONS_V2
+      .filter(tool => tool.loadPolicy === "search" && !loadedToolNames.has(tool.name) && !loadedToolNames.has(tool.canonicalName))
+      .map(tool => tool.name));
+    const modelVisibleToolSpecs = GLOBAL_AGENT_TOOL_SPECS.filter(spec => !deferredWorkspaceNames.has(spec.name));
     const invocations = (Array.isArray(run?.steps) ? run!.steps : []).flatMap((step: any) => {
       const wrapper = String(step?.tool?.name || "");
       const kind: "skill" | "mcp" | "" = wrapper === "invoke_skill" ? "skill" : wrapper === "invoke_mcp" ? "mcp" : "";
       const name = kind === "skill"
         ? String(step?.tool?.arguments?.name || "")
         : kind === "mcp" ? String(step?.tool?.arguments?.tool_name || step?.tool?.arguments?.toolName || step?.tool?.arguments?.name || "") : "";
-      if (!kind || !name || !completeMessageText.includes(name) || (step?.observation === undefined && !step?.error)) return [];
+      if (!kind || !name || (step?.observation === undefined && !step?.error)) return [];
       return [{
         kind,
         name,
@@ -349,10 +369,10 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
       scope: "global",
       sessionId,
       system: systemMessages,
-      tools: GLOBAL_AGENT_TOOL_SPECS,
+      tools: modelVisibleToolSpecs,
       recentMessages: messages.filter(message => message.role !== "system"),
       contextComponents: {
-        skills: [...skillSections, ...configuredSkills],
+        skills: [...skillSections, ...configuredSkills, ...(authorizedTools.restored_skill_attachments || [])],
         mcpTools: configuredMcpTools,
         subagentDefinitions: {
           projects: getConfigs().map((project: any) => String(project?.name || "")).filter(Boolean),
@@ -656,6 +676,20 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
   async function executeAgenticTool(baseUrl: string, ctx: CollabCtx, name: string, args: any, run: GlobalAgentRun, onEvent?: (event: any) => void) {
     const sourceGate = sourceExecutionGate(run, name, args);
     if (sourceGate) return sourceGate;
+    const loadedNames = new Set((run.loaded_tool_names || run.loadedToolNames || []).map(value => String(value || "")));
+    const deferredWorkspace = WORKSPACE_READONLY_TOOL_DEFINITIONS_V2.find(tool => tool.loadPolicy === "search" && (tool.name === name || tool.canonicalName === name));
+    if (deferredWorkspace && !loadedNames.has(deferredWorkspace.name) && !loadedNames.has(deferredWorkspace.canonicalName)) {
+      throw new Error(`MAIN_AGENT_TOOL_SCHEMA_NOT_LOADED:${deferredWorkspace.canonicalName}`);
+    }
+    if (name === "invoke_mcp") {
+      const preflight = buildGlobalAgentToolRuntimeContext(
+        { taskId: run.id, sessionId: run.session_id, source: run.source || "global-agent-preflight" },
+        run.loaded_tool_names || run.loadedToolNames || [],
+      );
+      const requested = String(args?.tool_name || args?.toolName || args?.name || "");
+      const deferred = preflight.discoverable_tools.find((tool: any) => requested === tool.canonicalName || requested === tool.name || requested === `${tool.server}/${tool.name}`);
+      if (deferred) throw new Error(`MAIN_AGENT_TOOL_SCHEMA_NOT_LOADED:${deferred.canonicalName}`);
+    }
     const signature = crypto.createHash("sha256").update(`${name}:${JSON.stringify(args || {})}`).digest("hex").slice(0, 24);
     const operationKey = `${run.id}:${signature}`;
     const operation = acquireIdempotency({
@@ -667,7 +701,17 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
     });
     if (!operation.acquired) {
       const settled = operation.inProgress ? await waitForIdempotencyResult("global-agent-tool", operationKey, 12 * 60 * 1000) : operation.record;
-      if (settled?.status === "completed") return { ...(settled.result?.observation || settled.result || {}), replayed: true };
+      if (settled?.status === "completed") {
+        const replayed = { ...(settled.result?.observation || settled.result || {}), replayed: true };
+        if (name === "tool_search") {
+          const rows = Array.isArray((replayed as any)?.result?.tools) ? (replayed as any).result.tools : [];
+          const names = rows.map((tool: any) => String(tool?.canonicalName || tool?.name || "")).filter(Boolean);
+          run.loaded_tool_names = Array.from(new Set([...(run.loaded_tool_names || run.loadedToolNames || []), ...names]));
+          run.loadedToolNames = run.loaded_tool_names.slice();
+          saveGlobalAgentRun(run, true);
+        }
+        return replayed;
+      }
       if (settled?.status === "failed") throw new Error(settled.error || `工具 ${name} 的历史执行失败`);
       throw new Error(`工具 ${name} 仍在另一个执行实例中运行`);
     }
@@ -678,14 +722,61 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
         observation = await executeGlobalAgentAuthorizedTool("skill", args, {
           taskId: run.id,
           executionId: operationKey,
+          sessionId: run.session_id,
           source: run.source || "global-agent",
-        });
+        }, run.loaded_tool_names || run.loadedToolNames || []);
       } else if (name === "invoke_mcp") {
         observation = await executeGlobalAgentAuthorizedTool("mcp", args, {
           taskId: run.id,
           executionId: operationKey,
+          sessionId: run.session_id,
           source: run.source || "global-agent",
+        }, run.loaded_tool_names || run.loadedToolNames || []);
+      } else if (name === "tool_search" || WORKSPACE_READONLY_TOOL_DEFINITIONS_V2.some(tool => tool.name === name)) {
+        const runtime = buildGlobalAgentToolRuntimeContext({
+          taskId: run.id,
+          executionId: operationKey,
+          sessionId: run.session_id,
+          source: run.source || "global-agent",
+        }, run.loaded_tool_names || run.loadedToolNames || []);
+        const toolContext: any = {
+          schema: "ccm-main-agent-tool-runtime-context-v2",
+          scope: runtime.scope,
+          configured: runtime.tools,
+          executionSkills: [],
+          effective: runtime.tools,
+          catalog: {
+            mcp: runtime.catalog.tools,
+            skills: runtime.catalog.skills,
+            rejectedMcp: [],
+            discoverableMcp: runtime.discoverable_tools,
+            native: [],
+          },
+          toolAudit: runtime.tool_audit,
+          mcpPrompt: "",
+          skillPrompt: "",
+          policyPrompt: "",
+          checksum: runtime.checksum,
+          version: 2,
+          capabilityToken: runtime.capability_token,
+          loadedToolNames: runtime.loaded_tool_names,
+          scopeIdentity: runtime.scope_identity,
+          restoredSkillAttachments: runtime.restored_skill_attachments || [],
+          postCompactRestoreReceipt: runtime.post_compact_restore_receipt || undefined,
+        };
+        const rows = await executeMainAgentToolRequests({
+          requests: [{ name, arguments: args || {}, reason: "全局主 Agent按需读取" }],
+          toolContext,
+          resultTokenLimit: 8_000,
         });
+        const row = rows[0];
+        if (!row?.ok) throw new Error(row?.error || `${name}调用失败`);
+        if (name === "tool_search") {
+          run.loaded_tool_names = Array.from(new Set((toolContext.loadedToolNames || []).map((value: any) => String(value || "")).filter(Boolean)));
+          run.loadedToolNames = run.loaded_tool_names.slice();
+          saveGlobalAgentRun(run, true);
+        }
+        observation = { success: true, tool: name, result: (() => { try { return JSON.parse(row.output); } catch { return row.output; } })(), authorization_checksum: runtime.checksum };
       } else if (name === "inspect_system") {
         observation = { success: true, ...buildAgenticContext(), missions: refreshGlobalDevelopmentMissions().slice(-8) };
       } else if (name === "list_projects") {
@@ -1128,6 +1219,7 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
         lazyResources: true,
         runId: run.id,
         source: run.source || "global-agent",
+        loadedToolNames: run.loaded_tool_names || run.loadedToolNames || [],
       }),
       verifyContextBoundary: context => verifyGlobalAgentContextBoundary(context),
       executeTool: (name, args, run) => {
@@ -1309,11 +1401,18 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
         anchorMessageId: assistantMessageId,
         currentRequest: { role: "user", content: input.message },
         fixedContext: { main_agent_loop: true },
-        tools: (run as any).direct_reply_fast_path === true ? [] : GLOBAL_AGENT_TOOL_SPECS,
+        tools: (run as any).direct_reply_fast_path === true ? [] : GLOBAL_AGENT_TOOL_SPECS.filter(spec => {
+          const loaded = new Set((run.loaded_tool_names || run.loadedToolNames || []).map(value => String(value || "")));
+          const deferred = WORKSPACE_READONLY_TOOL_DEFINITIONS_V2.find(tool => tool.loadPolicy === "search" && tool.name === spec.name);
+          return !deferred || loaded.has(deferred.name) || loaded.has(deferred.canonicalName);
+        }),
         modelVisiblePayload: (run as any).latest_model_visible_payload || null,
         contextComponents: (() => {
           if ((run as any).direct_reply_fast_path === true) return { skills: [], mcpTools: [] };
-          const authorizedTools = buildGlobalAgentToolRuntimeContext({ taskId: run.id, source: run.source || "global-agent-usage" });
+          const authorizedTools = buildGlobalAgentToolRuntimeContext(
+            { taskId: run.id, sessionId: run.session_id, source: run.source || "global-agent-usage" },
+            run.loaded_tool_names || run.loadedToolNames || [],
+          );
           return {
             skills: authorizedTools.catalog.skills.map((skill: any) => ({ name: String(skill?.name || ""), contentHash: String(skill?.contentHash || "") })).filter((skill: any) => skill.name),
             mcpTools: authorizedTools.catalog.tools.map((tool: any) => ({ name: String(tool?.canonicalName || tool?.name || ""), server: String(tool?.server || "") })).filter((tool: any) => tool.name),

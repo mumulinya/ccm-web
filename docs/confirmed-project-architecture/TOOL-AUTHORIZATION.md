@@ -43,7 +43,7 @@ CCM 的 MCP 与 Skill 配置按 Agent 作用域隔离，不以“已安装”代
 - 未授权的 MCP 或 Skill 直接拒绝。
 - 授权项缺失、断连、需要登录或授权格式无效时 fail closed。
 - 短名称对应多个 MCP 工具时拒绝执行，必须使用目录给出的完整名称。
-- 上下文占用只统计当前 Agent真实可见的授权 MCP 与 Skill，不统计其他作用域或仅安装未授权的工具。
+- 上下文占用区分授权目录与真实载荷：Skill目录和延迟MCP名称计目录Token；只有实际加载的MCP Schema、调用后的Skill正文及工具结果计入对应完整载荷，不统计其他作用域或仅安装未授权的工具。
 - 页面数量、就绪状态和模型上下文来自同一份服务端授权数据，不生成展示用假数据。
 
 ## 接口与存储
@@ -64,3 +64,6 @@ CCM 的 MCP 与 Skill 配置按 Agent 作用域隔离，不以“已安装”代
 - 全局上下文边界校验通过，默认未配置时模型可见 MCP/Skill 均为零。
 - 浏览器验证全局与项目页头入口、授权弹窗和项目原有配置弹窗正常，控制台无错误。
 - 验证过程未调用付费 Provider。
+# 主 Agent V2工具核心
+
+全局、群聊和项目主 Agent共享`MainAgentToolCatalogV2`，作用域适配器只负责身份、精确会话和可读项目集合。内置`ccm__workspace_readonly`不可卸载，基础Schema默认加载，低频Schema和普通用户MCP通过`tool_search`按需进入上下文；受信`alwaysLoad`是唯一首轮例外。Skill首轮只投影目录，正文在`invoke_skill`后进入同一Agent Loop。每次调用必须验证`ScopedToolCapabilityTokenV1`；主 Agent不获得源码写入、Shell或Worktree权限。完整运行流程见[三类主Agent CC式工具体系](../confirmed-business-processes/MAIN-AGENT-CC-STYLE-TOOLS.md)。

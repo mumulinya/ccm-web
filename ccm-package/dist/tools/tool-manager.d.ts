@@ -37,6 +37,7 @@ export interface ToolInvocationAuditContext {
     groupId?: string;
     taskId?: string;
     executionId?: string;
+    sessionId?: string;
     source?: string;
 }
 interface McpServerStatus {
@@ -127,6 +128,10 @@ export declare class ToolManager {
                 idempotentHint?: boolean;
                 openWorldHint?: boolean;
             };
+            _meta: Record<string, any>;
+            origin: string;
+            serverTrust: string;
+            alwaysLoad: boolean;
         }[];
         skills: {
             name: string;
@@ -144,6 +149,23 @@ export declare class ToolManager {
         toolName: string;
         invokeToolName: string;
     }[];
+    getSkillContinuitySnapshot(name: string, scope?: ToolScope): {
+        ok: boolean;
+        name: string;
+        error: string;
+        description?: undefined;
+        prompt?: undefined;
+        contentHash?: undefined;
+        sourcePath?: undefined;
+    } | {
+        ok: boolean;
+        name: string;
+        description: string;
+        prompt: string;
+        contentHash: string;
+        sourcePath: string;
+        error?: undefined;
+    };
     getPostCompactDynamicToolCatalog(scope?: ToolScope): PostCompactDynamicToolCatalog;
     invokeSkill(name: string, input?: any, scope?: ToolScope): {
         ok: boolean;

@@ -300,15 +300,17 @@ export function runInternalMcpRegistrySelfTest(packageRoot = findCcmPackageRoot(
   ]);
   const workflowItems = [...workflowMcps].map(([name, tools]) => ({ item: configured.items.find((row: any) => row.name === name), name, tools }));
   const permissionBroker = configured.items.find((item: any) => item.name === "ccm__permission_broker");
+  const workspaceReadonly = configured.items.find((item: any) => item.name === "ccm__workspace_readonly");
   const hiddenSecrets = !JSON.stringify(configured).includes("secret") && !JSON.stringify(configured).includes("cli_test");
   const checks = {
-    bundledCatalogDiscovered: configured.items.length === 8 && configured.summary.tools === 44,
+    bundledCatalogDiscovered: configured.items.length === 9 && configured.summary.tools === 56,
     coordinatorProtectedAndReady: coordinator?.protected === true && coordinator?.state === "ready" && coordinator?.tools?.length === 4,
     feishuBundledAndReady: feishu?.bundled === true && feishu?.state === "ready" && feishu?.tools?.length === 4,
     workflowMcpsProtectedAndReady: workflowItems.every(({ item, tools }) => item?.bundled === true && item?.protected === true && item?.immutable === true && item?.state === "ready" && item?.lifecycle === "task_scoped" && item?.tools?.length === tools),
     permissionBrokerProtectedAndReady: permissionBroker?.bundled === true && permissionBroker?.protected === true && permissionBroker?.immutable === true && permissionBroker?.state === "ready" && permissionBroker?.lifecycle === "session_scoped" && permissionBroker?.tools?.length === 3,
+    workspaceReadonlyProtectedAndReady: workspaceReadonly?.bundled === true && workspaceReadonly?.protected === true && workspaceReadonly?.immutable === true && workspaceReadonly?.state === "ready" && workspaceReadonly?.tools?.length === 12,
     feishuNeedsSettingsWithoutCredentials: unconfigured.items.find((item: any) => item.name === FEISHU_INTERNAL_MCP)?.state === "needs_configuration",
-    internalNamesReserved: [GROUP_COORDINATOR_INTERNAL_MCP, FEISHU_INTERNAL_MCP, ...workflowMcps.keys(), "ccm__permission_broker"].every(isInternalMcpName),
+    internalNamesReserved: [GROUP_COORDINATOR_INTERNAL_MCP, FEISHU_INTERNAL_MCP, ...workflowMcps.keys(), "ccm__permission_broker", "ccm__workspace_readonly"].every(isInternalMcpName),
     secretsNeverExposed: hiddenSecrets,
   };
   return { pass: Object.values(checks).every(Boolean), checks, catalog: configured };

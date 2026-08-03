@@ -114,7 +114,7 @@
             <div v-for="tool in coreToolsList" :key="tool.name" class="tool-card">
               <div class="tool-header">
                 <div style="display:flex;align-items:flex-start;gap:12px;width:100%">
-                  <span style="font-size:24px;line-height:1">{{ tool.emoji }}</span>
+                  <span class="core-tool-icon" aria-hidden="true"><Wrench :size="18" /></span>
                   <div style="flex:1">
                     <div class="tool-name">
                       {{ tool.name }}
@@ -125,22 +125,9 @@
                       {{ tool.desc }}
                     </div>
 
-                    <!-- 参数说明 -->
                     <div class="core-tool-section">
-                      <div class="section-lbl">📋 参数规格:</div>
-                      <div class="params-grid">
-                        <div v-for="param in tool.params" :key="param.name" class="param-row">
-                          <span class="param-name font-mono">{{ param.name }}</span>
-                          <span class="param-type font-mono">{{ param.type }}</span>
-                          <span class="param-desc">{{ param.desc }}</span>
-                        </div>
-                      </div>
-                    </div>
-
-                    <!-- 代码示例 -->
-                    <div class="core-tool-section" style="margin-top:8px">
-                      <div class="section-lbl">💻 最佳调用代码用例:</div>
-                      <div class="tool-cmd font-mono" style="margin-top:4px">{{ tool.example }}</div>
+                      <div class="section-lbl">适用范围</div>
+                      <div class="tool-cmd" style="margin-top:4px">全局、群聊和项目主 Agent共用同一工具定义；实际调用仍按精确会话与项目权限核验。</div>
                     </div>
                   </div>
                 </div>

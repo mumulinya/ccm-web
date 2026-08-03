@@ -12,6 +12,7 @@ export declare function buildGroupMainAgentToolContext(input: {
     groupSessionId?: string;
     group_session_id?: string;
     workflowDecision?: WorkflowDecision | null;
+    loadedMainAgentTools?: string[];
 }): any;
 export declare function normalizeGroupMainToolRequests(value: any): GroupMainToolRequest[];
 export declare function executeGroupMainAgentToolRequests(input: {

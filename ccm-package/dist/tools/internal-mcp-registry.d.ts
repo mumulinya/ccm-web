@@ -92,6 +92,7 @@ export declare function runInternalMcpRegistrySelfTest(packageRoot?: string): {
         feishuBundledAndReady: boolean;
         workflowMcpsProtectedAndReady: boolean;
         permissionBrokerProtectedAndReady: boolean;
+        workspaceReadonlyProtectedAndReady: boolean;
         feishuNeedsSettingsWithoutCredentials: boolean;
         internalNamesReserved: boolean;
         secretsNeverExposed: boolean;
