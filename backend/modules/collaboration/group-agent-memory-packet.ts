@@ -198,6 +198,7 @@ import {
 import { deleteWorkerContextCompactSessionArtifactsForCoordinator } from "./group-orchestrator";
 
 import { buildAgentMemoryContextBundle, renderGroupMemoryContextBundle } from "./group-memory-context";
+import { compactPreserveLines } from "./group-memory-shared";
 import { TYPED_MEMORY_DELIVERY_HARD_MAX_BYTES_PER_DOCUMENT, TYPED_MEMORY_DELIVERY_HARD_MAX_DOCUMENTS, TYPED_MEMORY_DELIVERY_HARD_MAX_LINES_PER_DOCUMENT, TYPED_MEMORY_DELIVERY_HARD_MAX_SESSION_BYTES, compactMemoryText, createEmptyAgentMemory, findMemoryArtifactBySchema, formatAgentMemoryReceipt, hashSessionMemoryText, normalizeAgentMemoryProject, normalizeWorkerLedgerItem, runnerRequestHasDurableReturnEvidence, uniqueByKey } from "./group-memory-shared";
 import { loadGroupMemory } from "./group-memory-storage";
 
@@ -1070,5 +1071,11 @@ export function recoverChildTypedMemoryDispatchWal(options: any = {}) {
 
 
 export function buildAgentMemoryPacket(groupId: string, targetProject: string, task = "", options: any = {}) {
-  return renderGroupMemoryContextBundle(buildAgentMemoryContextBundle(groupId, targetProject, task, options));
+  const bundle = buildAgentMemoryContextBundle(groupId, targetProject, task, options);
+  // bundle.rendered_text 是 buildAgentMemoryContextBundle 已经按 maxRenderedChars
+  // 算好的受限文本；此前这里重新整段渲染，把那份上限丢掉了，导致本函数成为
+  // 记忆注入里唯一不设上限的一条路径。
+  const bounded = String(bundle?.rendered_text || "");
+  if (bounded) return bounded;
+  return compactPreserveLines(renderGroupMemoryContextBundle(bundle), Number(options.maxRenderedChars || 6000));
 }

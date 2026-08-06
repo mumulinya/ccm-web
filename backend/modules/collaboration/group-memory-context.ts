@@ -591,7 +591,10 @@ export function buildGroupMemoryContext(memory: any) {
   addList("Worker scratchpad", memory.workerLedger || [], (item: any) => `${item.project || "unknown"} [${item.status || "unknown"}]：${item.summary || ""}${item.verification?.length ? `；验证：${item.verification.join("、")}` : ""}`);
   addList("开放问题", memory.openQuestions || [], (item: any) => String(item.question || item));
   addList("下一步", modelRuntime.nextActions, (item: any) => String(item.action || item));
-  return lines.join("\n");
+  // 条数由 slice(-6) 控制，但单条文本长度不受限；这里补一道总量上限，
+  // 与同类记忆渲染路径保持一致。上层 buildGroupContextPacket 会再按自己的
+  // 预算收缩一次，此处取更宽的值以免双重截断把内容切得过碎。
+  return compactPreserveLines(lines.join("\n"), 14_000);
 }
 
 function mergeVerifiedGroupPostCompactReinjection(groupId: string, groupSessionId: string, stored: any, rebuilt: any) {
@@ -4769,6 +4772,8 @@ export function buildGroupContextPacket(groupId: string, options: any = {}) {
     || memory.compactBoundary?.postCompactPayloadGate
     || memory.compactBoundary?.post_compact_restore?.postCompactPayloadGate
     || null;
-  if (postCompactPayloadGate?.status !== "recompact_required") return rendered;
+  // 正常路径此前直接返回未设上限的 rendered，只有 recompact_required 时才收缩。
+  // 沿用同类路径既有的 14_000 上限，避免单次注入无限增长。
+  if (postCompactPayloadGate?.status !== "recompact_required") return compactPreserveLines(rendered, 14_000);
   return compactPreserveLines(rendered, Math.max(4000, Number(postCompactPayloadGate.safe_render_chars || 6000)));
 }
