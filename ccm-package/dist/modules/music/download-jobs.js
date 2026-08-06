@@ -39,6 +39,7 @@ const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const child_process_1 = require("child_process");
 const bilibili_1 = require("./bilibili");
+const douyin_1 = require("./douyin");
 const library_1 = require("./library");
 const search_results_1 = require("./search-results");
 const music_persistence_1 = require("./music-persistence");
@@ -82,6 +83,7 @@ async function checksumFile(file) {
 class MusicDownloadJobStore {
     jobs = new Map();
     children = new Map();
+    abortControllers = new Map();
     activeRuns = new Set();
     pumping = false;
     constructor() {
@@ -148,6 +150,7 @@ class MusicDownloadJobStore {
         job.phase = "已取消";
         job.finishedAt = now();
         job.updatedAt = job.finishedAt;
+        this.abortControllers.get(id)?.abort();
         const child = this.children.get(id);
         if (child)
             void (0, managed_process_tree_1.terminateManagedProcessTree)(child);
@@ -210,7 +213,11 @@ class MusicDownloadJobStore {
             (0, music_persistence_1.upsertPersistedDownloadJob)(job);
     }
     outputFile(job) {
-        const suffix = job.source === "bilibili" ? ` [${job.sourceId}]` : ` [netease-${job.sourceId}]`;
+        const suffix = job.source === "bilibili"
+            ? ` [${job.sourceId}]`
+            : job.source === "douyin"
+                ? ` [douyin-${job.sourceId}]`
+                : ` [netease-${job.sourceId}]`;
         return path.join(library_1.MUSIC_DIR, `${safeName(`${job.artist} - ${job.title}${suffix}`)}.mp3`);
     }
     removePartial(job) {
@@ -240,13 +247,15 @@ class MusicDownloadJobStore {
     }
     async run(job) {
         this.activeRuns.add(job.id);
+        const abortController = new AbortController();
+        this.abortControllers.set(job.id, abortController);
         const output = this.outputFile(job);
         const partial = `${output}.${job.id}.ccm-part`;
         const existingAsset = (0, music_persistence_1.findMusicMediaAsset)(job.source, job.sourceId);
         const requestedRank = QUALITY_RANK[job.requestedQuality || job.quality] || QUALITY_RANK.high;
         this.removePartial(job);
         job.status = "resolving";
-        job.phase = "正在解析音频地址";
+        job.phase = job.source === "douyin" ? "正在解析抖音视频" : "正在解析音频地址";
         job.checkpoint = "resolving";
         job.startedAt = now();
         job.updatedAt = job.startedAt;
@@ -269,16 +278,21 @@ class MusicDownloadJobStore {
                     }
                 }
             }
+            const douyinInput = job.source === "douyin" ? await (0, douyin_1.resolveDouyinMediaInput)(job.sourceId, { signal: abortController.signal }) : null;
             const audioUrl = job.source === "bilibili"
                 ? await (0, bilibili_1.getBiliAudioUrl)(job.sourceId)
-                : `https://music.163.com/song/media/outer/url?id=${encodeURIComponent(job.sourceId)}.mp3`;
+                : job.source === "douyin"
+                    ? String(douyinInput?.url || "")
+                    : `https://music.163.com/song/media/outer/url?id=${encodeURIComponent(job.sourceId)}.mp3`;
             if (this.jobs.get(job.id)?.status !== "resolving")
                 return;
             const headers = job.source === "bilibili"
                 ? `User-Agent: ${bilibili_1.BILI_UA}\r\nReferer: https://www.bilibili.com/\r\n`
-                : "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64)\r\nReferer: https://music.163.com/\r\n";
+                : job.source === "douyin"
+                    ? Object.entries(douyinInput?.headers || {}).map(([key, value]) => `${key}: ${String(value).replace(/[\r\n]/g, " ")}`).join("\r\n") + "\r\n"
+                    : "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64)\r\nReferer: https://music.163.com/\r\n";
             job.status = "running";
-            job.phase = "正在下载并转码";
+            job.phase = job.source === "douyin" ? "正在提取音频" : "正在下载并转码";
             job.checkpoint = "downloading";
             job.progress = null;
             job.updatedAt = now();
@@ -296,7 +310,7 @@ class MusicDownloadJobStore {
             this.children.set(job.id, child);
             let stderr = "";
             let stdout = "";
-            let durationSeconds = 0;
+            let durationSeconds = Number(douyinInput?.durationSeconds || 0);
             let lastPersist = 0;
             child.stdout.on("data", (chunk) => {
                 stdout = `${stdout}${chunk.toString()}`.slice(-1000);
@@ -333,9 +347,14 @@ class MusicDownloadJobStore {
                 return;
             }
             if (exitCode !== 0 || !looksLikeAudio(partial)) {
-                throw new Error(job.source === "netease" ? "歌曲可能需要 VIP、已下架或无法获取音频" : (stderr.trim().slice(-300) || "下载转码失败"));
+                throw new Error(job.source === "netease"
+                    ? "歌曲可能需要 VIP、已下架或无法获取音频"
+                    : job.source === "douyin"
+                        ? (stderr.trim().slice(-300) || "抖音公开视频无法解析或已触发平台限制")
+                        : (stderr.trim().slice(-300) || "下载转码失败"));
             }
             job.checkpoint = "verifying";
+            job.phase = "正在校验媒体文件";
             const metadata = await (0, music_catalog_1.probeMusicFile)(partial);
             const actualQuality = qualityFromBitrate(metadata.bitrate);
             if ((QUALITY_RANK[actualQuality] || 0) < Math.min(requestedRank, QUALITY_RANK.very_high)) {
@@ -394,6 +413,7 @@ class MusicDownloadJobStore {
         }
         finally {
             this.children.delete(job.id);
+            this.abortControllers.delete(job.id);
             this.activeRuns.delete(job.id);
             this.persist();
             this.pump();

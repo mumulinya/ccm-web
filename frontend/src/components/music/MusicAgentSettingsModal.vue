@@ -1,13 +1,14 @@
 <script setup>
-import { Bot, Moon, Settings2, Sparkles, Volume2, X } from '@lucide/vue'
+import { Bot, Download, Globe2, LogIn, LogOut, Moon, RefreshCw, Settings2, Sparkles, Volume2, X } from '@lucide/vue'
 
 defineProps({
   config: { type: Object, required: true },
   playbackSettings: { type: Object, required: true },
   aiSongQuoteEnabled: { type: Boolean, default: false },
+  douyinLoginBusy: { type: Boolean, default: false },
 })
 
-const emit = defineEmits(['close', 'save', 'update-proxy', 'update-weather-location', 'update-setting', 'toggle-ai-quote'])
+const emit = defineEmits(['close', 'save', 'update-proxy', 'update-weather-location', 'update-setting', 'update-douyin-field', 'toggle-ai-quote', 'douyin-login', 'douyin-logout', 'douyin-refresh', 'douyin-prepare'])
 </script>
 
 <template>
@@ -43,6 +44,30 @@ const emit = defineEmits(['close', 'save', 'update-proxy', 'update-weather-locat
           <input :value="config.proxy" placeholder="http://127.0.0.1:7890" @input="emit('update-proxy', $event.target.value)" />
           <span class="hint">B站搜索被封时配置代理，支持 http/socks5</span>
         </div>
+        <section class="settings-section douyin-settings">
+          <div class="section-heading"><Globe2 :size="16" /><div><strong>抖音音乐来源</strong><span>官方能力优先，网页登录作为公开内容兼容通道</span></div></div>
+          <label class="setting-row switch-row">
+            <span><strong>网页登录兼容通道</strong><small>官方视频搜索能力不可用时，使用独立浏览器会话搜索公开内容</small></span>
+            <input type="checkbox" :checked="config.douyinCompatibilityEnabled !== false" @change="emit('update-douyin-field', 'douyinCompatibilityEnabled', $event.target.checked)" />
+          </label>
+          <div class="setting-row douyin-status-row">
+            <span><strong>网页登录（可选）</strong><small>{{ config.douyin?.browser?.authenticated ? '已登录' : config.douyin?.browser?.loginState === 'waiting' ? '等待登录' : '未登录' }}</small></span>
+            <div class="inline-actions">
+              <button type="button" title="刷新状态" @click="emit('douyin-refresh')"><RefreshCw :size="13" /></button>
+              <button v-if="!config.douyin?.browser?.authenticated" type="button" :disabled="douyinLoginBusy || config.douyin?.browser?.loginState === 'waiting'" @click="emit('douyin-login')"><LogIn :size="13" />{{ douyinLoginBusy ? '正在打开' : config.douyin?.browser?.loginState === 'waiting' ? '等待登录' : '登录' }}</button>
+              <button v-else type="button" @click="emit('douyin-logout')"><LogOut :size="13" />退出</button>
+            </div>
+          </div>
+          <div class="setting-row douyin-status-row">
+            <span><strong>媒体解析器</strong><small>{{ config.douyin?.runtime?.ready ? `已就绪 · ${config.douyin.runtime.version}` : '首次下载前需要准备' }}</small></span>
+            <button v-if="!config.douyin?.runtime?.ready" type="button" class="inline-command" @click="emit('douyin-prepare')"><Download :size="13" />准备</button>
+          </div>
+          <div class="douyin-official-fields">
+            <label><span>官方 Client Key（可选）</span><input :value="config.douyinOfficialClientKey" autocomplete="off" @input="emit('update-douyin-field', 'douyinOfficialClientKey', $event.target.value)" /></label>
+            <label><span>官方 Client Secret（可选）</span><input type="password" :placeholder="config.douyin?.official?.secretProtected ? '已加密保存，留空不修改' : '仅在已开通视频搜索能力时填写'" autocomplete="new-password" @input="emit('update-douyin-field', 'douyinOfficialClientSecret', $event.target.value)" /></label>
+          </div>
+          <p class="model-note">官方搜索能力未普遍开放。网页登录只用于用户有权访问的公开内容；登录失效、风控或内容受限时会明确失败。</p>
+        </section>
         <div class="field">
           <label>天气城市（可选）</label>
           <input
@@ -242,6 +267,7 @@ const emit = defineEmits(['close', 'save', 'update-proxy', 'update-weather-locat
 .setting-row.vertical { align-items: stretch; flex-direction: column; gap: 7px; }.setting-row input[type="range"] { width: 100%; accent-color: #7fdce5; }
 .switch-row input[type="checkbox"] { width: 34px; height: 18px; accent-color: #65d6df; cursor: pointer; }
 .model-call { box-shadow: inset 2px 0 0 rgba(83,205,215,.3); }.model-note { margin: 0; padding: 9px 12px; color: #6f8794; background: rgba(83,205,215,.035); font-size: 9px; line-height: 1.55; }
+.inline-actions { display: flex; align-items: center; gap: 6px; }.inline-actions button, .inline-command { min-height: 30px; padding: 0 9px; display: inline-flex; align-items: center; justify-content: center; gap: 5px; border: 1px solid rgba(165,139,255,.2); border-radius: 5px; color: #d8ccff; background: rgba(165,139,255,.05); cursor: pointer; }.inline-actions button:first-child { width: 30px; padding: 0; }.douyin-official-fields { padding: 10px 12px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }.douyin-official-fields label { min-width: 0; display: grid; gap: 5px; color: #9488aa; font-size: 9px; }.douyin-official-fields input { min-width: 0; height: 32px; padding: 0 9px; border: 1px solid rgba(165,139,255,.16); border-radius: 5px; color: #e9e2fa; background: #0d0a18; }
 
 .hint {
   font-size: 11px;
@@ -289,5 +315,7 @@ const emit = defineEmits(['close', 'save', 'update-proxy', 'update-weather-locat
   .settings-footer .btn-aura {
     flex: 1;
   }
+  .douyin-official-fields { grid-template-columns: 1fr; }
 }
 </style>
+

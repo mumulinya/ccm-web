@@ -297,6 +297,7 @@ node scripts/build-release-artifact.mjs
 
 ## 文档
 
+- [文档中心与阅读顺序](docs/README.md)
 - [已确认项目结构](docs/confirmed-project-architecture/README.md)
 - [已确认业务流程](docs/confirmed-business-processes/README.md)
 - [全项目业务覆盖矩阵](docs/confirmed-project-architecture/PROJECT-COVERAGE-MATRIX.md)

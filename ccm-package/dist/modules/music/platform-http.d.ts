@@ -1,5 +1,5 @@
 import { Dispatcher } from "undici";
-export type MusicPlatformStatus = "success" | "unavailable" | "timeout" | "rate_limited" | "rejected";
+export type MusicPlatformStatus = "success" | "unavailable" | "timeout" | "rate_limited" | "rejected" | "login_required" | "risk_controlled" | "capability_unavailable";
 export declare class MusicPlatformHttpError extends Error {
     readonly status: MusicPlatformStatus;
     readonly httpStatus: number;

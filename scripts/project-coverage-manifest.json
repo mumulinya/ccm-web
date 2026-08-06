@@ -658,7 +658,7 @@
       "id": "music-platform",
       "label": "音乐意图、曲库、媒体平台与统一播放器",
       "status": "active",
-      "summary": "模型点歌、三源搜索、媒体索引、下载、latest-wins队列和浏览器播放。",
+      "summary": "模型点歌、四源搜索（本地/网易/B站/抖音）、媒体索引、下载转码、latest-wins队列和浏览器播放。",
       "frontendPages": [
         {
           "id": "music",
@@ -682,7 +682,8 @@
       ],
       "criticalTests": [
         "music-semantic-playback-selftest.mjs",
-        "music-media-platform-v4-selftest.mjs"
+        "music-media-platform-v4-selftest.mjs",
+        "music-douyin-platform-selftest.mjs"
       ],
       "architectureDocs": [
         "docs/confirmed-project-architecture/MUSIC-PLAYBACK.md",

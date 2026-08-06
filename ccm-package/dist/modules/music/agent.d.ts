@@ -23,7 +23,7 @@ export type MusicIntentDecisionV2 = {
     artist: string;
     mood: string;
     genre: string;
-    sourceMode: "auto" | "local" | "netease" | "bilibili";
+    sourceMode: "auto" | "local" | "netease" | "bilibili" | "douyin";
     randomize: boolean;
     strictMatch: boolean;
     confidence: number;

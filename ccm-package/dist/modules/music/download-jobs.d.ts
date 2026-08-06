@@ -30,6 +30,7 @@ export type MusicDownloadJob = {
 declare class MusicDownloadJobStore {
     private jobs;
     private children;
+    private abortControllers;
     private activeRuns;
     private pumping;
     constructor();

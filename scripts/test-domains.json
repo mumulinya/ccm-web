@@ -187,6 +187,7 @@
         "music-quote-mode-selftest.mjs",
         "music-platform-features-selftest.mjs",
         "music-media-platform-v4-selftest.mjs",
+      "music-douyin-platform-selftest.mjs",
         "pet-workspace-companion-selftest.mjs",
         "authenticated-music-release-selftest.mjs",
         "music-ui-regression-selftest.mjs",

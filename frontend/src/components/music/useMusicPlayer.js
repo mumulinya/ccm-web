@@ -113,6 +113,7 @@ export function useMusicPlayer(options = {}) {
   const queueSourceLabel = (source) => {
     const value = String(source || '').toLowerCase()
     if (value.includes('netease')) return '网易'
+    if (value.includes('douyin')) return '抖音'
     if (value.includes('bili') || value.includes('cloud')) return 'B站'
     if (value.includes('agent') || value.includes('global')) return '音乐 Agent'
     if (value.includes('playlist')) return '歌单'
@@ -438,6 +439,10 @@ export function useMusicPlayer(options = {}) {
     proxy: '',
     weatherLocation: '',
     hasKey: false,
+    douyinOfficialClientKey: '',
+    douyinOfficialClientSecret: '',
+    douyinCompatibilityEnabled: true,
+    douyin: null,
     sourceLabel: '系统设置 / 统一大模型配置'
   })
   const sleepTimerEndsAt = ref(0)
@@ -473,13 +478,20 @@ export function useMusicPlayer(options = {}) {
     sleepTimerInterval = value ? setInterval(refreshSleepTimer, 1000) : null
   }
   const agentConfigLoaded = ref(false)
+  const douyinLoginStarting = ref(false)
 
   const loadAgentConfig = async () => {
     try {
       const res = await fetch('/api/music/config')
       const data = await res.json()
       if (data.success) {
-        agentConfig.value = { ...agentConfig.value, ...data.config }
+        agentConfig.value = {
+          ...agentConfig.value,
+          ...data.config,
+          douyinOfficialClientKey: data.config?.douyin?.official?.clientKey || agentConfig.value.douyinOfficialClientKey || '',
+          douyinCompatibilityEnabled: data.config?.douyin?.browser?.compatibilityEnabled !== false,
+          douyinOfficialClientSecret: '',
+        }
         playbackSettings.value = {
           ...playbackSettings.value,
           quality: data.config.quality || 'high',
@@ -513,6 +525,11 @@ export function useMusicPlayer(options = {}) {
           aiRecommendationEnabled: playbackSettings.value.aiRecommendationEnabled !== false,
           aiEmotionEnabled: playbackSettings.value.aiEmotionEnabled !== false,
           aiAutoSelectEnabled: playbackSettings.value.aiAutoSelectEnabled !== false,
+          douyin: {
+            officialClientKey: agentConfig.value.douyinOfficialClientKey || '',
+            officialClientSecret: agentConfig.value.douyinOfficialClientSecret || '',
+            compatibilityEnabled: agentConfig.value.douyinCompatibilityEnabled !== false,
+          },
         })
       })
       const data = await res.json()
@@ -528,6 +545,53 @@ export function useMusicPlayer(options = {}) {
     } catch (error) {
       toast.error(error?.message || '保存音乐设置失败')
     }
+  }
+
+  const refreshDouyinStatus = async () => {
+    const res = await fetch('/api/music/platforms/douyin/status')
+    const data = await res.json()
+    if (!res.ok || !data.success) throw new Error(data.error || '读取抖音状态失败')
+    agentConfig.value = {
+      ...agentConfig.value,
+      douyin: data.status,
+      douyinOfficialClientKey: data.status?.official?.clientKey || agentConfig.value.douyinOfficialClientKey || '',
+      douyinCompatibilityEnabled: data.status?.browser?.compatibilityEnabled !== false,
+    }
+    return data.status
+  }
+
+  const startDouyinLogin = async () => {
+    if (douyinLoginStarting.value || agentConfig.value.douyin?.browser?.loginState === 'waiting') return
+    douyinLoginStarting.value = true
+    try {
+      const res = await fetch('/api/music/platforms/douyin/auth/start', { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok || !data.success) throw new Error(data.error || '打开抖音登录失败')
+      agentConfig.value = { ...agentConfig.value, douyin: data.status }
+      toast.info('抖音登录窗口已打开，请在该窗口完成登录')
+    } catch (error) { toast.error(error?.message || '打开抖音登录失败') }
+    finally { douyinLoginStarting.value = false }
+  }
+
+  const clearDouyinLogin = async () => {
+    try {
+      const res = await fetch('/api/music/platforms/douyin/auth', { method: 'DELETE' })
+      const data = await res.json()
+      if (!res.ok || !data.success) throw new Error(data.error || '清除抖音登录失败')
+      agentConfig.value = { ...agentConfig.value, douyin: data.status }
+      toast.success('已清除抖音登录状态')
+    } catch (error) { toast.error(error?.message || '清除抖音登录失败') }
+  }
+
+  const prepareDouyinRuntime = async () => {
+    try {
+      toast.info('正在准备抖音媒体解析器')
+      const res = await fetch('/api/music/platforms/douyin/runtime/prepare', { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok || !data.success) throw new Error(data.error || '准备抖音媒体解析器失败')
+      agentConfig.value = { ...agentConfig.value, douyin: data.status }
+      toast.success('抖音媒体解析器已就绪')
+    } catch (error) { toast.error(error?.message || '准备抖音媒体解析器失败') }
   }
 
   const updatePlaybackSetting = (key, value) => {
@@ -1262,7 +1326,16 @@ export function useMusicPlayer(options = {}) {
               duration: decidedCandidate.duration,
               downloadToken: decidedCandidate.downloadToken,
             }
-          : {
+          : decidedCandidate.source === 'douyin'
+            ? {
+                type: 'douyin',
+                awemeId: decidedCandidate.sourceId,
+                title: decidedCandidate.title,
+                author: decidedCandidate.artist,
+                duration: decidedCandidate.duration,
+                downloadToken: decidedCandidate.downloadToken,
+              }
+            : {
               type: 'bilibili',
               bvid: decidedCandidate.sourceId,
               title: decidedCandidate.title,
@@ -1271,9 +1344,7 @@ export function useMusicPlayer(options = {}) {
               downloadToken: decidedCandidate.downloadToken,
             }
         if (!remote.downloadToken) return { success: false, error: '播放决定缺少有效下载凭证，请重新点歌' }
-        const played = decidedCandidate.source === 'netease'
-          ? await convertNeteaseAndPlay(remote, { ...options, remote: true, playbackIntent })
-          : await convertAndPlay(remote, { ...options, remote: true, playbackIntent })
+        const played = await downloadResult(remote, { ...options, remote: true, playbackIntent })
         if (!isLatest()) return superseded()
         syncUiFromAudio?.()
         return played
@@ -1521,7 +1592,7 @@ export function useMusicPlayer(options = {}) {
   const playLocalTrack = (track) => { play(track) }
 
   const downloadResult = async (item, options = {}) => {
-    const identifier = item.type === 'netease' ? item.songId : item.bvid
+    const identifier = item.type === 'netease' ? item.songId : item.type === 'douyin' ? item.awemeId : item.bvid
     const title = String(item.title || '').replace(/<[^>]*>/g, '')
     const shouldPlay = options.play !== false
     const playbackIntent = shouldPlay
@@ -1553,7 +1624,7 @@ export function useMusicPlayer(options = {}) {
       if (!isLatest()) return superseded()
       if (options.queue !== false) {
         if (options.queuePosition === 'next') await playTrackNext(newTrack)
-        else await addTrackToQueue(newTrack, { focus: options.play !== false, source: item.type === 'netease' ? '网易' : 'B站' })
+        else await addTrackToQueue(newTrack, { focus: options.play !== false, source: item.type === 'netease' ? '网易' : item.type === 'douyin' ? '抖音' : 'B站' })
       }
       if (!isLatest()) return superseded()
       if (options.play !== false) {
@@ -1578,6 +1649,7 @@ export function useMusicPlayer(options = {}) {
 
   const convertAndPlay = (item, options = {}) => downloadResult({ type: 'bilibili', ...item }, options)
   const convertNeteaseAndPlay = (item, options = {}) => downloadResult({ type: 'netease', ...item }, options)
+  const convertDouyinAndPlay = (item, options = {}) => downloadResult({ type: 'douyin', ...item }, options)
 
   const handleUnifiedSearchAction = async (action, item) => {
     const source = item?.type || 'local'
@@ -1587,7 +1659,8 @@ export function useMusicPlayer(options = {}) {
         await addTrackToQueue(localTrack, { focus: true, source: '统一搜索 / 本地' })
         return play(localTrack, { source: '统一搜索 / 本地' })
       }
-      return downloadResult(item, { source: `统一搜索 / ${source === 'netease' ? '网易' : 'B站'}` })
+      const label = source === 'netease' ? '网易' : source === 'douyin' ? '抖音' : 'B站'
+      return downloadResult(item, { source: `统一搜索 / ${label}` })
     }
     if (action === 'next') {
       if (localTrack) return playTrackNext(localTrack)
@@ -1631,6 +1704,9 @@ export function useMusicPlayer(options = {}) {
       } else if (r.type === 'netease') {
         const result = await convertNeteaseAndPlay(r, { wait: false, play: false, silent: true })
         if (result.success) queued += 1
+      } else if (r.type === 'douyin') {
+        const result = await convertDouyinAndPlay(r, { wait: false, play: false, silent: true })
+        if (result.success) queued += 1
       } else if (r.type === 'local') {
         await addTrackToQueue(r.track)
         queued += 1
@@ -1656,7 +1732,15 @@ export function useMusicPlayer(options = {}) {
         const tracks = Array.isArray(parsed) ? parsed : (parsed.tracks || []);
         if (Array.isArray(tracks)) {
           return tracks.map(t => {
-            if (t.bvid) {
+            if (t.awemeId) {
+              return {
+                type: 'douyin',
+                awemeId: t.awemeId,
+                title: t.title,
+                author: t.author || t.artist || '抖音作者',
+                duration: t.duration || ''
+              };
+            } else if (t.bvid) {
               return {
                 type: 'bilibili',
                 bvid: t.bvid,
@@ -1747,6 +1831,7 @@ export function useMusicPlayer(options = {}) {
     companionTimeStr,
     companionTimer,
     convertAndPlay,
+    convertDouyinAndPlay,
     convertNeteaseAndPlay,
     converting,
     coverStyle,
@@ -1773,6 +1858,7 @@ export function useMusicPlayer(options = {}) {
     downloadCenterOpen,
     downloadJobs,
     downloadResult,
+    douyinLoginStarting,
     drawSpectrums,
     duration,
     fetchWeather,
@@ -1862,6 +1948,10 @@ export function useMusicPlayer(options = {}) {
     rightCanvasRef,
     rightCaps,
     saveAgentConfig,
+    refreshDouyinStatus,
+    startDouyinLogin,
+    clearDouyinLogin,
+    prepareDouyinRuntime,
     sleepTimerRemaining,
     scrollChat,
     seekTo,

@@ -5,6 +5,7 @@ import { loadMusicConfig } from "../../core/db";
 import { loadOrchestratorConfig, publicOrchestratorConfig } from "../collaboration/group-orchestrator";
 import { notifyFeishuTaskStage } from "../collaboration/feishu-channel";
 import { publishRuntimeEvent } from "../../system/runtime-events";
+import { douyinPlatformStatus } from "./douyin";
 import {
   claimPersistedMusicCommand,
   completePersistedMusicCommand,
@@ -281,5 +282,6 @@ export function publicMusicAgentConfig() {
     aiRecommendationEnabled: config.aiRecommendationEnabled,
     aiEmotionEnabled: config.aiEmotionEnabled,
     aiAutoSelectEnabled: config.aiAutoSelectEnabled,
+    douyin: douyinPlatformStatus(),
   };
 }

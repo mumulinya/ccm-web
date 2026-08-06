@@ -1,8 +1,9 @@
-export type MusicSource = "netease" | "bilibili";
+export type MusicSource = "netease" | "bilibili" | "douyin";
 export type SignedMusicResult = {
     type: MusicSource;
     songId?: number | string;
     bvid?: string;
+    awemeId?: string;
     title: string;
     artist?: string;
     author?: string;
@@ -23,6 +24,11 @@ export declare function signSearchResults(source: MusicSource, query: string, re
 export declare function verifyDownloadToken(token: any, expectedSource?: MusicSource): TokenPayload;
 export declare function issueDownloadToken(source: MusicSource, sourceId: string, title: string, artist: string): string;
 export declare function extractMusicConvertTarget(message: string, keyword?: string): {
+    source: "douyin";
+    sourceId: string;
+    title: string;
+    artist: string;
+} | {
     source: "bilibili";
     sourceId: string;
     title: string;

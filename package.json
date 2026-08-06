@@ -15,7 +15,7 @@
     "build": "node scripts/clean-build-output.mjs && npm run build:frontend && npm run build:mcp-feishu && npm run build:backend",
     "coverage:generate": "node scripts/generate-project-coverage-matrix.mjs",
     "coverage:check": "node scripts/project-coverage-matrix-audit.mjs",
-    "docs:catalog": "node scripts/generate-doc-catalogs.mjs && node scripts/generate-main-agent-doc-catalog.mjs",
+    "docs:catalog": "node scripts/generate-doc-catalogs.mjs && node scripts/generate-main-agent-doc-catalog.mjs && node scripts/generate-legacy-topic-catalog.mjs",
     "docs:check": "npm run coverage:check && npm run docs:catalog && node scripts/check-doc-links.mjs",
     "storage:status": "npm run build:backend && node scripts/task-store-sqlite.mjs status",
     "storage:verify": "npm run build:backend && node scripts/task-store-sqlite.mjs verify",

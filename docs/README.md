@@ -10,7 +10,7 @@
 | [确认项目结构](./confirmed-project-architecture/README.md) | 已确认的全局、群聊、项目、记忆、权限和集成业务流程 |
 | [已确认业务流程实现](./confirmed-business-processes/README.md) | 已进入生产代码并通过回归的端到端业务流程、状态、门禁和实现证据 |
 | [测试指南](./TESTING.md) | 领域测试、快速回归、历史测试命令和报告位置 |
-| [历史归档索引](./archive/README.md) | 阶段记录的逻辑归档说明，不移动或删除原始证据 |
+| [历史归档索引](./archive/README.md) | 阶段记录与单次专题的归档入口，不删除原始证据 |
 
 ## 当前业务文档
 
@@ -31,13 +31,16 @@
 
 ## 历史实施记录
 
-`main-agent-workchain`、`test-agent`、`tooling-and-extensions`、`group-memory-cc-parity` 和 `product-evolution` 中的大量日期化文档是实现与验证证据。它们继续保留在原位置以维持链接稳定，但不再作为当前产品事实的首选入口。详情见 [历史归档索引](./archive/README.md)。
+`main-agent-workchain`、`test-agent`、`tooling-and-extensions`、`group-memory-cc-parity` 和 `product-evolution` 中的大量日期化文档是实现与验证证据。它们继续保留在原位置以维持链接稳定，但不再作为当前产品事实的首选入口。
+
+已经收口、不再迭代的一次性专题统一放在 [单次专题归档](./archive/legacy-topics/CATALOG.md)，按日期可检索。详情见 [历史归档索引](./archive/README.md)。
 
 ## 归档规则
 
 1. 新功能或升级记录使用 `YYYY-MM-DD-功能名-vN.md`。
-2. 专题文档放入最具体的业务叶子目录；根目录只保留 `README.md`、`CURRENT.md` 和 `TESTING.md` 三个稳定入口。
+2. 专题文档放入最具体的业务叶子目录；根目录只保留 `README.md`、`CURRENT.md` 和 `TESTING.md` 三个稳定入口，不要在 `docs/` 下新建一次性的日期化目录。
 3. 主 Agent 工作链记录进入 `main-agent-workchain`；TestAgent 内部能力进入 `test-agent`，两者不要混放。
 4. MCP、Skill、第三方 CLI 和工具权限记录进入 `tooling-and-extensions`。
 5. 截图、JSON 报告等验证材料放在所属专题的 `evidence` 目录。
-6. 移动或新增文档后，运行 `node scripts/generate-doc-catalogs.mjs`；主 Agent 工作链另运行 `node scripts/generate-main-agent-doc-catalog.mjs`。
+6. 一次性专题（单篇记录、无后续迭代）直接放入 `archive/legacy-topics/<专题名>-YYYY-MM-DD/README.md`。
+7. 移动或新增文档后运行 `npm run docs:check`，它会重建全部目录（含单次专题归档）并校验文档内链接。

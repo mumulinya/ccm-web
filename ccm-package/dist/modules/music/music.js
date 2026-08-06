@@ -48,6 +48,7 @@ const db_1 = require("../../core/db");
 const group_orchestrator_1 = require("../collaboration/group-orchestrator");
 const bilibili_1 = require("./bilibili");
 const netease_1 = require("./netease");
+const douyin_1 = require("./douyin");
 const library_1 = require("./library");
 const music_catalog_1 = require("./music-catalog");
 const secure_multipart_1 = require("../../system/secure-multipart");
@@ -82,6 +83,18 @@ function publicPlaybackCommand(command) {
         } : undefined,
     };
 }
+function publicMusicCandidate(candidate) {
+    if (candidate?.source === "local") {
+        return { type: "local", track: { filename: candidate.filename || candidate.sourceId, title: candidate.title, artist: candidate.artist } };
+    }
+    if (candidate?.source === "netease") {
+        return { type: "netease", songId: candidate.sourceId, title: candidate.title, artist: candidate.artist, duration: candidate.duration };
+    }
+    if (candidate?.source === "douyin") {
+        return { type: "douyin", awemeId: candidate.sourceId, title: candidate.title, author: candidate.artist, duration: candidate.duration };
+    }
+    return { type: "bilibili", bvid: candidate?.sourceId, title: candidate?.title, author: candidate?.artist, duration: candidate?.duration };
+}
 function handleMusicApi(pathname, req, res, parsed, ctx) {
     if ((0, memory_1.handleMusicMemoryApi)(pathname, req, res))
         return true;
@@ -94,7 +107,7 @@ function startMusicConvertJob(message, keyword = "") {
     if (!target) {
         return {
             ok: false,
-            reply: "请提供 B 站 BV 号/链接，或网易歌曲 ID，我帮你转码下载。",
+            reply: "请提供 B站 BV号/链接、网易歌曲ID，或抖音公开的视频链接，我帮你转码下载。",
         };
     }
     try {
@@ -103,7 +116,7 @@ function startMusicConvertJob(message, keyword = "") {
         return {
             ok: true,
             job,
-            reply: `已创建${target.source === "bilibili" ? "B站" : "网易"}下载转码任务：${job.title}（${job.id}）。可在下载中心查看进度。`,
+            reply: `已创建${target.source === "bilibili" ? "B站" : target.source === "douyin" ? "抖音" : "网易"}下载转码任务：${job.title}（${job.id}）。可在下载中心查看进度。`,
         };
     }
     catch (error) {
@@ -183,6 +196,31 @@ function handleMusicApiPartA(pathname, req, res, parsed, ctx) {
     if (!pathname.startsWith("/api/music"))
         return false;
     const libraryErrorStatus = (error) => Number(error?.statusCode || (error?.code === "state_drift" ? 409 : 400));
+    if (pathname === "/api/music/platforms/douyin/status" && req.method === "GET") {
+        (0, utils_1.sendJson)(res, { success: true, status: (0, douyin_1.douyinPlatformStatus)() });
+        return true;
+    }
+    if (pathname === "/api/music/platforms/douyin/auth/start" && req.method === "POST") {
+        (0, douyin_1.startDouyinBrowserLogin)()
+            .then(status => (0, utils_1.sendJson)(res, { success: true, status }, 202))
+            .catch((error) => (0, utils_1.sendJson)(res, { success: false, error: error?.message || "无法启动抖音登录" }, 503));
+        return true;
+    }
+    if (pathname === "/api/music/platforms/douyin/auth" && req.method === "DELETE") {
+        try {
+            (0, utils_1.sendJson)(res, { success: true, status: (0, douyin_1.revokeDouyinBrowserLogin)() });
+        }
+        catch (error) {
+            (0, utils_1.sendJson)(res, { success: false, error: error?.message || "清除抖音登录失败" }, 400);
+        }
+        return true;
+    }
+    if (pathname === "/api/music/platforms/douyin/runtime/prepare" && req.method === "POST") {
+        (0, douyin_1.prepareDouyinMediaRuntime)()
+            .then(runtime => (0, utils_1.sendJson)(res, { success: true, runtime, status: (0, douyin_1.douyinPlatformStatus)() }))
+            .catch((error) => (0, utils_1.sendJson)(res, { success: false, error: error?.message || "抖音媒体解析器准备失败", status: (0, douyin_1.douyinPlatformStatus)() }, 503));
+        return true;
+    }
     if (pathname === "/api/music/download-jobs" && req.method === "GET") {
         (0, utils_1.sendJson)(res, { success: true, jobs: download_jobs_1.musicDownloadJobs.list() });
         return true;
@@ -316,7 +354,12 @@ function handleMusicApiPartA(pathname, req, res, parsed, ctx) {
     if ((pathname === "/api/music/download-jobs" || pathname === "/api/music/download" || pathname === "/api/music/convert" || pathname === "/api/music/convert-netease") && req.method === "POST") {
         readMusicJsonBody(req).then(body => {
             try {
-                const source = pathname === "/api/music/convert-netease" || body.source === "netease" || body.songId ? "netease" : "bilibili";
+                const requestedSource = pathname === "/api/music/convert-netease" || body.songId
+                    ? "netease"
+                    : String(body.source || (body.awemeId ? "douyin" : body.bvid ? "bilibili" : ""));
+                if (!["netease", "bilibili", "douyin"].includes(requestedSource))
+                    throw new Error("下载来源无效，请重新选择搜索结果");
+                const source = requestedSource;
                 const job = download_jobs_1.musicDownloadJobs.create(source, String(body.downloadToken || ""), body.quality || (0, db_1.loadMusicConfig)()?.quality, {
                     commandId: String(body.command_id || body.commandId || ""),
                     consumerKind: body.consumer_kind === "playback" || body.consumerKind === "playback" ? "playback" : "manual",
@@ -654,17 +697,18 @@ function handleMusicApiPartA(pathname, req, res, parsed, ctx) {
     if (pathname === "/api/music/search-unified" && req.method === "GET") {
         const query = String(parsed.query.q || "").trim();
         if (!query) {
-            (0, utils_1.sendJson)(res, { success: true, query, local: [], netease: [], bilibili: [], errors: {} });
+            (0, utils_1.sendJson)(res, { success: true, query, local: [], netease: [], bilibili: [], douyin: [], errors: {} });
             return true;
         }
         Promise.allSettled([
             Promise.resolve((0, music_catalog_1.queryMusicCatalog)({ query, limit: 20 }).tracks),
             (0, netease_1.neteaseSearch)(query),
             (0, bilibili_1.biliSearch)(query),
-        ]).then(([local, netease, bilibili]) => {
+            (0, douyin_1.douyinSearch)(query),
+        ]).then(([local, netease, bilibili, douyin]) => {
             const errors = {};
             const source_statuses = {};
-            for (const [name, result] of Object.entries({ local, netease, bilibili })) {
+            for (const [name, result] of Object.entries({ local, netease, bilibili, douyin })) {
                 if (result.status === "fulfilled") {
                     source_statuses[name] = { status: "success", result_count: result.value.length };
                 }
@@ -682,6 +726,7 @@ function handleMusicApiPartA(pathname, req, res, parsed, ctx) {
                 local: local.status === "fulfilled" ? local.value.map(track => ({ type: "local", track })) : [],
                 netease: netease.status === "fulfilled" ? (0, search_results_1.signSearchResults)("netease", query, netease.value).map(item => ({ ...item, type: "netease" })) : [],
                 bilibili: bilibili.status === "fulfilled" ? (0, search_results_1.signSearchResults)("bilibili", query, bilibili.value).map(item => ({ ...item, type: "bilibili" })) : [],
+                douyin: douyin.status === "fulfilled" ? (0, search_results_1.signSearchResults)("douyin", query, douyin.value).map(item => ({ ...item, type: "douyin" })) : [],
                 errors,
                 source_statuses,
                 retryable: everySourceFailed,
@@ -818,6 +863,20 @@ function handleMusicApiPartA(pathname, req, res, parsed, ctx) {
         });
         return true;
     }
+    if (pathname === "/api/music/search-douyin" && req.method === "GET") {
+        const query = String(parsed.query.q || "").trim();
+        if (!query) {
+            (0, utils_1.sendJson)(res, { success: true, results: [], status: (0, douyin_1.douyinPlatformStatus)() });
+            return true;
+        }
+        (0, douyin_1.douyinSearch)(query).then(results => {
+            (0, utils_1.sendJson)(res, { success: true, results: (0, search_results_1.signSearchResults)("douyin", query, results), status: (0, douyin_1.douyinPlatformStatus)() });
+        }).catch((error) => {
+            const detail = (0, platform_http_1.publicMusicPlatformError)(error);
+            (0, utils_1.sendJson)(res, { success: false, results: [], ...detail, status: (0, douyin_1.douyinPlatformStatus)() }, detail.retryable ? 503 : 422);
+        });
+        return true;
+    }
     if (pathname === "/api/music/select-track" && req.method === "POST") {
         let body = "";
         req.on("data", (chunk) => body += chunk);
@@ -894,6 +953,8 @@ function handleMusicApiPartA(pathname, req, res, parsed, ctx) {
                         cfg[key] = updates[key] === true;
                 }
                 (0, db_1.saveMusicConfig)(cfg);
+                if (updates.douyin && typeof updates.douyin === "object")
+                    (0, douyin_1.updateDouyinSettings)(updates.douyin);
                 (0, utils_1.sendJson)(res, { success: true, config: (0, state_1.publicMusicAgentConfig)() });
             }
             catch (e) {
@@ -957,11 +1018,7 @@ ${memoryContext.continuityText}`;
                         modelConfig: cfg,
                     });
                     (0, agent_1.writeSse)(res, { type: "decision", turn_id: turnId, decision: (0, playback_decision_1.publicMusicPlaybackDecision)(playbackDecision) });
-                    const resultRows = playbackDecision.candidates.map((candidate) => candidate.source === "local"
-                        ? { type: "local", track: { filename: candidate.filename || candidate.sourceId, title: candidate.title, artist: candidate.artist } }
-                        : candidate.source === "netease"
-                            ? { type: "netease", songId: candidate.sourceId, title: candidate.title, artist: candidate.artist, duration: candidate.duration }
-                            : { type: "bilibili", bvid: candidate.sourceId, title: candidate.title, author: candidate.artist, duration: candidate.duration });
+                    const resultRows = playbackDecision.candidates.map(publicMusicCandidate);
                     (0, agent_1.writeSse)(res, { type: "candidate_results", turn_id: turnId, results: resultRows });
                     (0, agent_1.writeSse)(res, { type: "music_results", mode: playbackDecision.sourceMode, results: resultRows });
                     let command = null;
@@ -1149,11 +1206,7 @@ function handleMusicApiPartB(pathname, req, res, parsed, ctx) {
                     aiAutoSelectEnabled: (0, db_1.loadMusicConfig)()?.aiAutoSelectEnabled !== false,
                     modelConfig: (0, state_1.loadMusicAgentConfig)(),
                 });
-                const rows = decision.candidates.map((candidate) => candidate.source === "local"
-                    ? { type: "local", track: { filename: candidate.filename || candidate.sourceId, title: candidate.title, artist: candidate.artist } }
-                    : candidate.source === "netease"
-                        ? { type: "netease", songId: candidate.sourceId, title: candidate.title, artist: candidate.artist, duration: candidate.duration }
-                        : { type: "bilibili", bvid: candidate.sourceId, title: candidate.title, author: candidate.artist, duration: candidate.duration });
+                const rows = decision.candidates.map(publicMusicCandidate);
                 let command = null;
                 if (intent.action === "play" && decision.status === "resolved" && decision.selectedCandidate) {
                     command = (0, state_1.enqueueMusicRemoteCommand)({ type: "play", keyword: decision.searchQuery, request_text: message, mode: decision.sourceMode, source: "music-chat-compat", decision, origin: { source: "music-chat", sessionId: "music-singleton" } });

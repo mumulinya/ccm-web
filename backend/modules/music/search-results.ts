@@ -3,12 +3,13 @@ import * as fs from "fs";
 import * as path from "path";
 import { CCM_DIR } from "../../core/utils";
 
-export type MusicSource = "netease" | "bilibili";
+export type MusicSource = "netease" | "bilibili" | "douyin";
 
 export type SignedMusicResult = {
   type: MusicSource;
   songId?: number | string;
   bvid?: string;
+  awemeId?: string;
   title: string;
   artist?: string;
   author?: string;
@@ -73,7 +74,7 @@ function scoreResult(query: string, result: any, source: MusicSource) {
   }
   const requestsVariant = /live|现场|翻唱|cover|伴奏|remix|纯音乐/i.test(query);
   if (!requestsVariant && /live|现场|翻唱|cover|伴奏|remix|纯音乐/i.test(`${result.title} ${result.album || ""}`)) score -= 30;
-  if (source === "bilibili") score += Math.min(15, Math.log10(Math.max(1, Number(result.play) || 1)) * 3);
+  if (source === "bilibili" || source === "douyin") score += Math.min(15, Math.log10(Math.max(1, Number(result.play) || 1)) * 3);
   return score;
 }
 
@@ -85,13 +86,13 @@ function tokenFor(payload: TokenPayload) {
 
 export function signSearchResults(source: MusicSource, query: string, results: any[], limit = 8): SignedMusicResult[] {
   return (results || [])
-    .filter(result => source === "netease" ? result?.songId : result?.bvid)
+    .filter(result => source === "netease" ? result?.songId : source === "douyin" ? result?.awemeId : result?.bvid)
     .map((result, index) => ({ result, index, score: scoreResult(query, result, source) }))
     .sort((a, b) => b.score - a.score || a.index - b.index)
     .slice(0, Math.max(1, Math.min(20, limit)))
     .map(({ result }) => {
-      const sourceId = String(source === "netease" ? result.songId : result.bvid);
-      const artist = String(source === "netease" ? result.artist || "未知艺术家" : result.author || "未知UP主");
+      const sourceId = String(source === "netease" ? result.songId : source === "douyin" ? result.awemeId : result.bvid);
+      const artist = String(source === "netease" ? result.artist || "未知艺术家" : result.author || (source === "douyin" ? "抖音作者" : "未知UP主"));
       const payload: TokenPayload = {
         v: 1,
         source,
@@ -133,6 +134,15 @@ export function issueDownloadToken(source: MusicSource, sourceId: string, title:
 
 export function extractMusicConvertTarget(message: string, keyword = "") {
   const text = `${keyword || ""} ${message || ""}`;
+  const awemeId = text.match(/(?:douyin\.com\/video\/|抖音(?:视频)?\s*[#：:]?)(\d{10,24})/i)?.[1];
+  if (awemeId) {
+    return {
+      source: "douyin" as const,
+      sourceId: awemeId,
+      title: awemeId,
+      artist: "抖音转码",
+    };
+  }
   const bvid = text.match(/BV[\w]+/i)?.[0];
   if (bvid) {
     return {

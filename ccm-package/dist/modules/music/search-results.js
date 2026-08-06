@@ -96,7 +96,7 @@ function scoreResult(query, result, source) {
     const requestsVariant = /live|现场|翻唱|cover|伴奏|remix|纯音乐/i.test(query);
     if (!requestsVariant && /live|现场|翻唱|cover|伴奏|remix|纯音乐/i.test(`${result.title} ${result.album || ""}`))
         score -= 30;
-    if (source === "bilibili")
+    if (source === "bilibili" || source === "douyin")
         score += Math.min(15, Math.log10(Math.max(1, Number(result.play) || 1)) * 3);
     return score;
 }
@@ -107,13 +107,13 @@ function tokenFor(payload) {
 }
 function signSearchResults(source, query, results, limit = 8) {
     return (results || [])
-        .filter(result => source === "netease" ? result?.songId : result?.bvid)
+        .filter(result => source === "netease" ? result?.songId : source === "douyin" ? result?.awemeId : result?.bvid)
         .map((result, index) => ({ result, index, score: scoreResult(query, result, source) }))
         .sort((a, b) => b.score - a.score || a.index - b.index)
         .slice(0, Math.max(1, Math.min(20, limit)))
         .map(({ result }) => {
-        const sourceId = String(source === "netease" ? result.songId : result.bvid);
-        const artist = String(source === "netease" ? result.artist || "未知艺术家" : result.author || "未知UP主");
+        const sourceId = String(source === "netease" ? result.songId : source === "douyin" ? result.awemeId : result.bvid);
+        const artist = String(source === "netease" ? result.artist || "未知艺术家" : result.author || (source === "douyin" ? "抖音作者" : "未知UP主"));
         const payload = {
             v: 1,
             source,
@@ -167,6 +167,15 @@ function issueDownloadToken(source, sourceId, title, artist) {
 }
 function extractMusicConvertTarget(message, keyword = "") {
     const text = `${keyword || ""} ${message || ""}`;
+    const awemeId = text.match(/(?:douyin\.com\/video\/|抖音(?:视频)?\s*[#：:]?)(\d{10,24})/i)?.[1];
+    if (awemeId) {
+        return {
+            source: "douyin",
+            sourceId: awemeId,
+            title: awemeId,
+            artist: "抖音转码",
+        };
+    }
     const bvid = text.match(/BV[\w]+/i)?.[0];
     if (bvid) {
         return {

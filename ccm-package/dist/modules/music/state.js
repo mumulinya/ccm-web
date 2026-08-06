@@ -54,6 +54,7 @@ const db_1 = require("../../core/db");
 const group_orchestrator_1 = require("../collaboration/group-orchestrator");
 const feishu_channel_1 = require("../collaboration/feishu-channel");
 const runtime_events_1 = require("../../system/runtime-events");
+const douyin_1 = require("./douyin");
 const music_persistence_1 = require("./music-persistence");
 exports.MUSIC_REMOTE_COMMAND_FILE = path.join(utils_1.CCM_DIR, "music-remote-command.json");
 exports.MUSIC_REMOTE_COMMANDS_FILE = path.join(utils_1.CCM_DIR, "music-remote-commands.json");
@@ -284,6 +285,7 @@ function publicMusicAgentConfig() {
         aiRecommendationEnabled: config.aiRecommendationEnabled,
         aiEmotionEnabled: config.aiEmotionEnabled,
         aiAutoSelectEnabled: config.aiAutoSelectEnabled,
+        douyin: (0, douyin_1.douyinPlatformStatus)(),
     };
 }
 //# sourceMappingURL=state.js.map

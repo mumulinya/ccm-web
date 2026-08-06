@@ -1,6 +1,6 @@
 import { MusicIntentDecisionV2 } from "./agent";
 export type MusicPlaybackCandidateV2 = {
-    source: "local" | "netease" | "bilibili";
+    source: "local" | "netease" | "bilibili" | "douyin";
     sourceId: string;
     filename?: string;
     title: string;
@@ -25,8 +25,8 @@ export type MusicPlaybackDecisionV2 = {
     reason: string;
     intentReceipt: any;
     selectionReceipt: any;
-    sourceStatuses: Record<"local" | "netease" | "bilibili", {
-        status: "success" | "unavailable" | "timeout" | "rate_limited" | "rejected" | "not_requested";
+    sourceStatuses: Record<"local" | "netease" | "bilibili" | "douyin", {
+        status: "success" | "unavailable" | "timeout" | "rate_limited" | "rejected" | "login_required" | "risk_controlled" | "capability_unavailable" | "not_requested";
         resultCount: number;
         error?: string;
         retryable?: boolean;
@@ -45,7 +45,7 @@ export declare function resolveMusicPlaybackDecisionV2(input: {
 export declare function publicMusicPlaybackDecision(decision: MusicPlaybackDecisionV2 | null): {
     candidates: {
         downloadToken: any;
-        source: "local" | "netease" | "bilibili";
+        source: "local" | "netease" | "bilibili" | "douyin";
         sourceId: string;
         filename?: string;
         title: string;
@@ -54,7 +54,7 @@ export declare function publicMusicPlaybackDecision(decision: MusicPlaybackDecis
     }[];
     selectedCandidate: {
         downloadToken: any;
-        source: "local" | "netease" | "bilibili";
+        source: "local" | "netease" | "bilibili" | "douyin";
         sourceId: string;
         filename?: string;
         title: string;
@@ -75,8 +75,8 @@ export declare function publicMusicPlaybackDecision(decision: MusicPlaybackDecis
     reason: string;
     intentReceipt: any;
     selectionReceipt: any;
-    sourceStatuses: Record<"local" | "netease" | "bilibili", {
-        status: "success" | "unavailable" | "timeout" | "rate_limited" | "rejected" | "not_requested";
+    sourceStatuses: Record<"local" | "netease" | "bilibili" | "douyin", {
+        status: "success" | "unavailable" | "timeout" | "rate_limited" | "rejected" | "login_required" | "risk_controlled" | "capability_unavailable" | "not_requested";
         resultCount: number;
         error?: string;
         retryable?: boolean;

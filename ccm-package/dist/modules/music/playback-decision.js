@@ -5,6 +5,7 @@ exports.publicMusicPlaybackDecision = publicMusicPlaybackDecision;
 exports.sameMusicPlaybackCandidate = sameMusicPlaybackCandidate;
 const semantic_decision_runtime_1 = require("../../system/semantic-decision-runtime");
 const bilibili_1 = require("./bilibili");
+const douyin_1 = require("./douyin");
 const music_catalog_1 = require("./music-catalog");
 const netease_1 = require("./netease");
 const search_results_1 = require("./search-results");
@@ -22,6 +23,8 @@ function sourceMode(value) {
         return "netease";
     if (mode === "bilibili")
         return "bilibili";
+    if (mode === "douyin")
+        return "douyin";
     return "auto";
 }
 function candidateIdentity(candidate) {
@@ -48,11 +51,12 @@ async function searchCandidates(decision) {
     const query = decision.strategy === "random"
         ? "热门 华语 音乐 推荐"
         : decision.searchQuery;
-    const requested = new Set(mode === "auto" ? ["local", "netease", "bilibili"] : [mode]);
+    const requested = new Set(mode === "auto" ? ["local", "netease", "bilibili", "douyin"] : [mode]);
     const statuses = {
         local: { status: requested.has("local") ? "unavailable" : "not_requested", resultCount: 0 },
         netease: { status: requested.has("netease") ? "unavailable" : "not_requested", resultCount: 0 },
         bilibili: { status: requested.has("bilibili") ? "unavailable" : "not_requested", resultCount: 0 },
+        douyin: { status: requested.has("douyin") ? "unavailable" : "not_requested", resultCount: 0 },
     };
     const jobs = [];
     if (requested.has("local"))
@@ -91,6 +95,18 @@ async function searchCandidates(decision) {
                     downloadToken: String(item.downloadToken || ""),
                 })).filter(item => item.sourceId),
             })) });
+    if (requested.has("douyin"))
+        jobs.push({ source: "douyin", promise: (0, douyin_1.douyinSearch)(query).then(results => ({
+                source: "douyin",
+                candidates: (0, search_results_1.signSearchResults)("douyin", query, results, 12).map((item) => ({
+                    source: "douyin",
+                    sourceId: String(item.awemeId || ""),
+                    title: cleanText(item.title || item.awemeId, 200),
+                    artist: cleanText(item.author || "抖音作者", 120),
+                    duration: cleanText(item.duration || "", 40),
+                    downloadToken: String(item.downloadToken || ""),
+                })).filter(item => item.sourceId),
+            })) });
     const settled = await Promise.allSettled(jobs.map(job => job.promise));
     const candidates = [];
     for (const [index, item] of settled.entries()) {
@@ -120,6 +136,7 @@ async function resolveMusicPlaybackDecisionV2(input) {
             local: { status: "not_requested", resultCount: 0 },
             netease: { status: "not_requested", resultCount: 0 },
             bilibili: { status: "not_requested", resultCount: 0 },
+            douyin: { status: "not_requested", resultCount: 0 },
         },
     };
     if (intent.action === "none") {

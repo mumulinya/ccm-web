@@ -1,6 +1,7 @@
 import { semanticDecisionChecksum } from "../../system/semantic-decision-runtime";
 import { MusicIntentDecisionV2 } from "./agent";
 import { biliSearch } from "./bilibili";
+import { douyinSearch } from "./douyin";
 import { queryMusicCatalog } from "./music-catalog";
 import { neteaseSearch } from "./netease";
 import { signSearchResults } from "./search-results";
@@ -9,7 +10,7 @@ import { loadMusicAgentConfig } from "./state";
 import { publicMusicPlatformError } from "./platform-http";
 
 export type MusicPlaybackCandidateV2 = {
-  source: "local" | "netease" | "bilibili";
+  source: "local" | "netease" | "bilibili" | "douyin";
   sourceId: string;
   filename?: string;
   title: string;
@@ -35,8 +36,8 @@ export type MusicPlaybackDecisionV2 = {
   reason: string;
   intentReceipt: any;
   selectionReceipt: any;
-  sourceStatuses: Record<"local" | "netease" | "bilibili", {
-    status: "success" | "unavailable" | "timeout" | "rate_limited" | "rejected" | "not_requested";
+  sourceStatuses: Record<"local" | "netease" | "bilibili" | "douyin", {
+    status: "success" | "unavailable" | "timeout" | "rate_limited" | "rejected" | "login_required" | "risk_controlled" | "capability_unavailable" | "not_requested";
     resultCount: number;
     error?: string;
     retryable?: boolean;
@@ -55,6 +56,7 @@ function sourceMode(value: any): MusicIntentDecisionV2["sourceMode"] {
   if (mode === "local") return "local";
   if (mode === "netease") return "netease";
   if (mode === "bilibili") return "bilibili";
+  if (mode === "douyin") return "douyin";
   return "auto";
 }
 
@@ -84,15 +86,16 @@ async function searchCandidates(decision: MusicIntentDecisionV2) {
   const query = decision.strategy === "random"
     ? "热门 华语 音乐 推荐"
     : decision.searchQuery;
-  const requested = new Set(mode === "auto" ? ["local", "netease", "bilibili"] : [mode]);
+  const requested = new Set(mode === "auto" ? ["local", "netease", "bilibili", "douyin"] : [mode]);
   const statuses: MusicPlaybackDecisionV2["sourceStatuses"] = {
     local: { status: requested.has("local") ? "unavailable" : "not_requested", resultCount: 0 },
     netease: { status: requested.has("netease") ? "unavailable" : "not_requested", resultCount: 0 },
     bilibili: { status: requested.has("bilibili") ? "unavailable" : "not_requested", resultCount: 0 },
+    douyin: { status: requested.has("douyin") ? "unavailable" : "not_requested", resultCount: 0 },
   };
   const jobs: Array<{
-    source: "local" | "netease" | "bilibili";
-    promise: Promise<{ source: "local" | "netease" | "bilibili"; candidates: MusicPlaybackCandidateV2[] }>;
+    source: "local" | "netease" | "bilibili" | "douyin";
+    promise: Promise<{ source: "local" | "netease" | "bilibili" | "douyin"; candidates: MusicPlaybackCandidateV2[] }>;
   }> = [];
   if (requested.has("local")) jobs.push({ source: "local", promise: Promise.resolve().then(() => ({
     source: "local" as const,
@@ -125,6 +128,17 @@ async function searchCandidates(decision: MusicIntentDecisionV2) {
     artist: cleanText(item.author || "未知UP主", 120),
     duration: cleanText(item.duration || "", 40),
     downloadToken: String(item.downloadToken || ""),
+    })).filter(item => item.sourceId),
+  })) });
+  if (requested.has("douyin")) jobs.push({ source: "douyin", promise: douyinSearch(query).then(results => ({
+    source: "douyin" as const,
+    candidates: signSearchResults("douyin", query, results, 12).map((item: any) => ({
+      source: "douyin" as const,
+      sourceId: String(item.awemeId || ""),
+      title: cleanText(item.title || item.awemeId, 200),
+      artist: cleanText(item.author || "抖音作者", 120),
+      duration: cleanText(item.duration || "", 40),
+      downloadToken: String(item.downloadToken || ""),
     })).filter(item => item.sourceId),
   })) });
   const settled = await Promise.allSettled(jobs.map(job => job.promise));
@@ -163,6 +177,7 @@ export async function resolveMusicPlaybackDecisionV2(input: {
       local: { status: "not_requested" as const, resultCount: 0 },
       netease: { status: "not_requested" as const, resultCount: 0 },
       bilibili: { status: "not_requested" as const, resultCount: 0 },
+      douyin: { status: "not_requested" as const, resultCount: 0 },
     },
   };
   if (intent.action === "none") {

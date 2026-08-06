@@ -23,6 +23,8 @@ function normalizeMusicSourceMode(value) {
         return "netease";
     if (mode === "bilibili")
         return "bilibili";
+    if (mode === "douyin")
+        return "douyin";
     return "auto";
 }
 function validateMusicIntentDecision(value, requestText, mode) {
@@ -83,9 +85,9 @@ async function resolveMusicIntentDecisionV2(input) {
 - 只要求查找、推荐列表或询问有没有：search。
 - 下载、转码或转换：convert。
 - 闲聊、歌词问题、播放器说明：none。
-sourceMode 默认必须为 auto；只有用户在当前消息中明确指定“本地、网易或B站”时才返回 local、netease 或 bilibili。
+sourceMode 默认必须为 auto；只有用户在当前消息中明确指定“本地、网易、B站或抖音”时才返回 local、netease、bilibili 或 douyin。
 页面当前浏览标签不是来源限制，不得据此缩小AI点歌来源。
-返回：{"action":"none|search|play|convert","strategy":"none|exact_song|artist_random|mood_recommendation|genre_recommendation|random","searchQuery":"","artist":"","mood":"","genre":"","sourceMode":"auto|local|netease|bilibili","confidence":0.0,"reason":""}`;
+返回：{"action":"none|search|play|convert","strategy":"none|exact_song|artist_random|mood_recommendation|genre_recommendation|random","searchQuery":"","artist":"","mood":"","genre":"","sourceMode":"auto|local|netease|bilibili|douyin","confidence":0.0,"reason":""}`;
     const result = await (0, semantic_decision_runtime_1.runSemanticDecision)({
         kind: "music_intent",
         identity: {

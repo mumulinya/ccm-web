@@ -658,6 +658,8 @@
       :open="unifiedSearchOpen"
       :initial-query="filterText"
       :action-handler="handleUnifiedSearchAction"
+      :douyin-login-busy="douyinLoginStarting || agentConfig?.douyin?.browser?.loginState === 'waiting'"
+      @douyin-login="startDouyinLogin"
       @close="unifiedSearchOpen = false"
     />
 
@@ -680,10 +682,16 @@
       :config="agentConfig"
       :playback-settings="playbackSettings"
       :ai-song-quote-enabled="aiSongQuoteEnabled"
+      :douyin-login-busy="douyinLoginStarting || agentConfig?.douyin?.browser?.loginState === 'waiting'"
       @update-proxy="agentConfig.proxy = $event"
       @update-weather-location="agentConfig.weatherLocation = $event"
       @update-setting="updatePlaybackSetting"
+      @update-douyin-field="(key, value) => agentConfig[key] = value"
       @toggle-ai-quote="toggleAiSongQuote"
+      @douyin-login="startDouyinLogin"
+      @douyin-logout="clearDouyinLogin"
+      @douyin-refresh="refreshDouyinStatus"
+      @douyin-prepare="prepareDouyinRuntime"
       @save="saveAgentConfig"
       @close="showSettings = false"
     />

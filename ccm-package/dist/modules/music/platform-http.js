@@ -12,6 +12,11 @@ const DEFAULT_HOSTS = new Set([
     "api.bilibili.com",
     "www.bilibili.com",
     "comment.bilibili.com",
+    "open.douyin.com",
+    "www.douyin.com",
+    "github.com",
+    "release-assets.githubusercontent.com",
+    "objects.githubusercontent.com",
 ]);
 const MAX_REDIRECTS = 5;
 const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
@@ -29,6 +34,9 @@ exports.MusicPlatformHttpError = MusicPlatformHttpError;
 function classifyError(error) {
     if (error instanceof MusicPlatformHttpError)
         return error;
+    if (["login_required", "risk_controlled", "capability_unavailable"].includes(String(error?.douyinState || ""))) {
+        return new MusicPlatformHttpError(String(error?.message || "抖音搜索暂不可用"), error.douyinState);
+    }
     const code = String(error?.code || error?.cause?.code || "");
     const message = String(error?.message || "媒体平台请求失败");
     if (/timeout|timed out|abort/i.test(message) || ["UND_ERR_CONNECT_TIMEOUT", "UND_ERR_HEADERS_TIMEOUT", "UND_ERR_BODY_TIMEOUT"].includes(code)) {
@@ -89,7 +97,7 @@ async function readLimitedBody(body, maxBytes) {
 }
 async function musicPlatformRequest(input) {
     const timeoutMs = Math.max(1_000, Math.min(30_000, Number(input.timeoutMs || 10_000)));
-    const maxBytes = Math.max(1_024, Math.min(16 * 1024 * 1024, Number(input.maxBytes || 2 * 1024 * 1024)));
+    const maxBytes = Math.max(1_024, Math.min(64 * 1024 * 1024, Number(input.maxBytes || 2 * 1024 * 1024)));
     const retries = Math.max(0, Math.min(2, Number(input.retries ?? 1)));
     let current = assertAllowedUrl(input.url, input.allowedHosts);
     let redirects = 0;

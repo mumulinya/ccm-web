@@ -24,7 +24,7 @@ export function useMusicDownloadJobs(options = {}) {
 
   const createDownloadJob = async (item, settings = {}) => {
     if (!item?.downloadToken) throw new Error('该搜索结果已失效，请重新搜索')
-    const source = item.type === 'netease' ? 'netease' : 'bilibili'
+    const source = item.type === 'netease' ? 'netease' : item.type === 'douyin' ? 'douyin' : 'bilibili'
     const res = await fetch('/api/music/download-jobs', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

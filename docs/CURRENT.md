@@ -1,5 +1,7 @@
 # CCM 当前状态
 
+- 音乐统一搜索与AI点歌已扩展为四源：本地、网易、B站和抖音。抖音优先使用官方视频搜索OpenAPI，未开通能力时先用无需登录的隔离浏览器会话读取公开内容，只有平台明确拦截时才允许用户主动登录；两条通道都如实上报`login_required | risk_controlled | capability_unavailable`，不把平台错误伪装成空结果；登录等待有10分钟上限，凭据只以`secretProtected`布尔值对外投影。视频转音频使用按需获取、SHA256校验的固定版本`yt-dlp`，以`shell:false`执行并强制单视频模式，Cookie写入仅所有者可读的临时文件并在结束时删除；下载任务只保存`awemeId`和规范化页面地址，执行时重新解析媒体地址，取消会同时中止解析与ffmpeg。只处理用户有权访问的公开内容，私密、付费、地区限制、DRM和直播一律拒绝。完整流程见[音乐曲库、媒体平台与统一播放器V4](./confirmed-business-processes/MUSIC-LIBRARY-MEDIA-PLATFORM-V4.md)。
+
 - 模型重试、任务中断与恢复已统一：普通首轮最多2次/60秒，计划与工具续跑最多3次/120秒，正式压缩、开发编排与TestAgent最多5次/360秒，标题和非关键摘要最多1次。停止当前执行会生成中断回执并挂起子Agent原生会话；永久取消保持终态但保留历史。网络、Provider过载和服务重启仅在源码、权限、运行时、会话及副作用证据完整时自动恢复，否则等待用户确认；恢复沿用同一任务和会话并创建新执行attempt。完整流程见[分级重试、任务中断与会话恢复](./confirmed-business-processes/TASK-INTERRUPTION-AND-RECOVERY.md)。
 
 - 三类主Agent工具体系已升级为V2并对齐Claude Code延迟加载语义：全局、群聊和项目主Agent共享同一工具目录与执行器，基础目录/Glob/Grep/分段Read进入首轮上下文，Git、运行日志、配置及普通用户MCP只先提供名称，完整Schema通过`tool_search`按需加载；仅受信`alwaysLoad`可首轮加载。Skill首轮只提供目录，正文在模型调用`invoke_skill`后进入同一Agent Loop。`ccm__workspace_readonly`使用精确会话能力令牌和逐段路径校验，跨项目、敏感文件、symlink/Junction及超Token结果全部失败关闭；项目独立工具选择模型已退出生产链。主Agent没有Edit、Write、Bash或Worktree权限，源码修改仍由项目子Agent执行。完整流程见[三类主Agent CC式工具体系](./confirmed-business-processes/MAIN-AGENT-CC-STYLE-TOOLS.md)。
@@ -308,3 +310,4 @@
 - 全局共享文件改为`read_global_shared_files`按需读取；Skill正文只在选择后加载，MCP按实际Schema和调用结果计量。
 - Web与飞书共享主Agent入口；三类会话继续使用精确串行、正式压缩、RBAC、任务、TestAgent和回放链。
 - 完整流程见 [三类会话CC式统一Agent Loop](confirmed-business-processes/THREE-SESSION-CC-MAIN-AGENT-LOOP.md)。
+
