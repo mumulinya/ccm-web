@@ -60,8 +60,6 @@ export const AUDIT_FILE = path.join(CONTROL_DIR, "audit.jsonl");
 
 export const METRICS_FILE = path.join(CONTROL_DIR, "metrics.json");
 
-export const QUALITY_FILE = path.join(CONTROL_DIR, "quality.json");
-
 export const DISPATCH_RECOVERY_RESOLUTION_DIR = path.join(CONTROL_DIR, "dispatch-recovery-resolutions");
 
 export const GROUP_MEMORY_DIR = path.join(CCM_DIR, "group-memory");

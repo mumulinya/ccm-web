@@ -12,6 +12,10 @@ export const STORE_FILE = path.join(STORE_DIR, "runs.json");
 export const STORE_BACKUP = `${STORE_FILE}.bak`;
 export const MAX_STORED_RUNS = 120;
 export const MAX_OBSERVATION_CHARS = 4_000;
+/** 单条历史 run 的展示类字段落盘上限。仅约束已终态的旧 run，活跃 run 不受影响。 */
+export const MAX_ARCHIVED_RUN_FIELD_BYTES = 32 * 1024;
+/** 展示类字段中最近保留多少条 run 不做归档收缩（按 updated_at 倒序）。 */
+export const RECENT_RUNS_KEPT_INTACT = 12;
 export const GLOBAL_DISPATCH_TOOL_NAMES = ["orchestrate_development", "create_requirement_epic", "send_group_cmd", "send_project_cmd", "create_task"];
 /** 浏览器 UI 副作用：按轻量 reply 展示，不挂交付脚手架 */
 export const LIGHT_UI_TOOL_NAMES = ["play_music", "stop_music", "navigate"];
@@ -45,6 +49,38 @@ function truncateStepObservation(step: any) {
       original_chars: serialized.length,
     },
   };
+}
+
+const ARCHIVED_RUN_BOUNDED_FIELDS = ["display_stream", "workchain", "final_report", "final_delivery_report", "reasoning_loop", "history"] as const;
+const RUN_TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled", "canceled", "error", "timeout"]);
+
+/**
+ * 归档收缩：只对已终态且不在最近 N 条内的 run 生效。
+ * 超限字段替换为可识别的收缩标记而不是直接删除，让回放侧能明确告知用户
+ * "此处内容已归档收缩" ——而不是渲染成一片空白让人以为运行没有产出。
+ */
+function boundArchivedRunFields(run: any, keepIntact: boolean) {
+  if (keepIntact) return run;
+  if (!RUN_TERMINAL_STATUSES.has(String(run?.status || "").toLowerCase())) return run;
+  let next = run;
+  for (const field of ARCHIVED_RUN_BOUNDED_FIELDS) {
+    const value = next?.[field];
+    if (value === undefined || value === null) continue;
+    let serialized = "";
+    try { serialized = JSON.stringify(value) || ""; } catch { continue; }
+    if (Buffer.byteLength(serialized) <= MAX_ARCHIVED_RUN_FIELD_BYTES) continue;
+    if (next === run) next = { ...run };
+    next[field] = {
+      ccm_archived_shrunk: true,
+      schema: "ccm-archived-run-field-v1",
+      field,
+      original_bytes: Buffer.byteLength(serialized),
+      limit_bytes: MAX_ARCHIVED_RUN_FIELD_BYTES,
+      note: "历史运行的展示内容已归档收缩，仅保留摘要预览。完整过程见该 run 的日志与转录。",
+      preview: serialized.slice(0, 2_000),
+    };
+  }
+  return next;
 }
 
 export function destructiveOperation(args: any) {
@@ -239,10 +275,18 @@ export function saveRun(run: GlobalAgentRun, persist = true) {
   store.runs = store.runs
     .sort((a, b) => String(b.updated_at).localeCompare(String(a.updated_at)))
     .slice(0, MAX_STORED_RUNS);
-  writeJsonAtomic(STORE_FILE, store);
+  // 落盘投影：不改内存里的 run 对象，只收缩写入磁盘的历史副本。
+  // normalizeRun 同时服务 loadStore，收缩若下沉进去会把降级记录回灌进
+  // 内存缓存和 activeRunObjects，损坏正在执行的 run。
+  const persistedRuns = store.runs.map((item, index) =>
+    boundArchivedRunFields(item, index < RECENT_RUNS_KEPT_INTACT || item.id === run.id));
+  writeJsonAtomic(STORE_FILE, { ...store, runs: persistedRuns });
   let mtimeMs = Date.now();
   try { mtimeMs = fs.statSync(STORE_FILE).mtimeMs; } catch {}
-  runStoreCache = { version: 1, runs: store.runs.slice(), mtimeMs };
+  // 缓存必须与磁盘一致：mtime 命中时 loadStore 直接返回缓存，若这里存未收缩的
+  // 副本，重启前后同一个 run 会读到两种内容。活跃 run 由 activeRunObjects 持有，
+  // 不依赖这份缓存。
+  runStoreCache = { version: 1, runs: persistedRuns.slice(), mtimeMs };
 }
 
 export function getGlobalAgentRun(id: string) {
