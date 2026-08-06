@@ -819,6 +819,13 @@ export async function compactGroupConversationMemory(input: {
     config: input.config,
     now,
   });
+  // 落盘投影：token 计量只保留分桶与校验和。原始 measurement 仍要交给压缩钩子，
+  // 所以另建投影而不是原地改写；modelVisiblePayload 内含整段 recentMessages，
+  // 落盘会让单个会话文件多出数 MB，且原文可从转录恢复。
+  const persistedTokenMeasurement = {
+    ...contextTokenMeasurement,
+    modelVisiblePayload: modelVisiblePayloadAccounting(contextTokenMeasurement.modelVisiblePayload),
+  };
   const warningOnlyMemory = {
     ...memory,
     compaction: {
@@ -828,8 +835,8 @@ export async function compactGroupConversationMemory(input: {
       contextPressureWarning: preCompactWarning,
       compactWarning: preCompactWarning,
       lastPressureSampleAt: now,
-      tokenMeasurement: contextTokenMeasurement,
-      token_measurement: contextTokenMeasurement,
+      tokenMeasurement: persistedTokenMeasurement,
+      token_measurement: persistedTokenMeasurement,
       modelVisiblePayload: persistedTriggerAccounting,
       model_visible_payload: persistedTriggerAccounting,
     },
@@ -1262,7 +1269,7 @@ export async function compactGroupConversationMemory(input: {
     true_post_compact_token_count: finalModelVisiblePayload.totalTokens,
     will_retrigger_next_turn: sharedPostCompactGate.providerCallAllowed !== true,
     payload_checksum: finalModelVisiblePayload.payloadChecksum,
-    model_visible_payload: finalModelVisiblePayload,
+    model_visible_payload: modelVisiblePayloadAccounting(finalModelVisiblePayload),
     shared_post_compact_gate: sharedPostCompactGate,
   };
   let formalRecompaction: any = {
@@ -1334,7 +1341,7 @@ export async function compactGroupConversationMemory(input: {
         true_post_compact_token_count: finalModelVisiblePayload.totalTokens,
         will_retrigger_next_turn: sharedPostCompactGate.providerCallAllowed !== true,
         payload_checksum: finalModelVisiblePayload.payloadChecksum,
-        model_visible_payload: finalModelVisiblePayload,
+        model_visible_payload: modelVisiblePayloadAccounting(finalModelVisiblePayload),
         shared_post_compact_gate: sharedPostCompactGate,
       };
       formalRecompaction = {
@@ -1380,7 +1387,7 @@ export async function compactGroupConversationMemory(input: {
     ptl_applied: ptlEmergency?.engaged === true,
     safe_render_chars: postCompactPayloadBudget.will_retrigger_next_turn === true ? 6000 : 14_000,
     payload_checksum: postCompactPayloadBudget.payload_checksum,
-    model_visible_payload: finalModelVisiblePayload,
+    model_visible_payload: modelVisiblePayloadAccounting(finalModelVisiblePayload),
     shared_gate: sharedPostCompactGate,
     formal_recompaction: formalRecompaction,
   };
