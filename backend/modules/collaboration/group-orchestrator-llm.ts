@@ -632,7 +632,11 @@ export function buildLlmCoordinatorMessages(input: {
   });
   const roleSkillsPart = roleSkills.prompt ? `\n\n${roleSkills.prompt}` : "";
   const mainAgentTools = buildGroupMainAgentToolContext(input);
-  const mainAgentToolsPart = mainAgentTools.policyPrompt ? `\n\n${mainAgentTools.policyPrompt}` : "";
+  // 工具目录不再拼进 system 主体：policyPrompt 会被 tool_search 在 Run 中途
+  // 改写，混在固定规则里会让整条 system 的 contentChecksum 每轮都变，
+  // provider-neutral-context-cache 的稳定前缀被整体击穿。改为单独一条
+  // system 消息，位置仍紧跟在原来的插入点之后。
+  const mainAgentToolsPart = "";
   const toolResults = Array.isArray(input.mainAgentToolResults)
     ? input.mainAgentToolResults
     : Array.isArray(input.main_agent_tool_results) ? input.main_agent_tool_results : [];
@@ -796,6 +800,9 @@ ${JSON.stringify(input.workflowDecision || null)}
 
   return [
     { role: "system", content: system },
+    ...(mainAgentTools.policyPrompt
+      ? [{ role: "system", contextBlockType: "mcp", content: mainAgentTools.policyPrompt }]
+      : []),
     { role: "user", content: user },
   ];
 }

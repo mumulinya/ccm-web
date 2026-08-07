@@ -976,7 +976,14 @@ async function callAnthropicCompatibleChatOnce(config: any, options: LlmCallOpti
 
   const cache = await prepareContextCache(config, options, "anthropic");
   const messages = cache.messages;
-  const system = options.system ?? (messages.find((m: any) => m.role === "system")?.content || "");
+  // Anthropic 的 system 是独立字段，必须把所有 system 消息按序拼接。
+  // 此前用 find() 只取首条，一旦上游把稳定段与易变段拆成多条 system
+  // （为了让 prompt cache 前缀不被工具目录变更击穿），后续几条会被静默丢弃。
+  const system = options.system ?? messages
+    .filter((m: any) => m.role === "system")
+    .map((m: any) => String(m?.content ?? ""))
+    .filter(Boolean)
+    .join("\n\n");
   const userMessages = messages
     .filter((m: any) => m.role !== "system")
     .map((m: any) => ({ role: m.role === "assistant" ? "assistant" : "user", content: m.content }));
