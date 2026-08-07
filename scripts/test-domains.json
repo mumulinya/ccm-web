@@ -32,6 +32,7 @@
       "memory-center-microcompact-display-selftest.mjs",
       "session-context-usage-ui-selftest.mjs",
       "group-context-pressure-accounting-selftest.mjs",
+      "group-compaction-invariant-selftest.mjs",
       "session-memory-dynamic-window-selftest.mjs",
         "global-agent-model-session-compaction-selftest.mjs",
         "third-party-memory-mcp-hydration-selftest.mjs",

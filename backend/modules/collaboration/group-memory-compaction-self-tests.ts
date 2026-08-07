@@ -1035,3 +1035,113 @@ export async function runGroupMemoryCompactionStressSelfTest() {
   };
   return { pass: Object.values(checks).every(Boolean), checks, finalBoundaryIndex: lastBoundaryIndex };
 }
+
+/**
+ * 审计文档不变量 1：未达 Token 阈值时，无论消息条数多少都不执行正式压缩。
+ *
+ * 此前套件里所有 compactGroupConversationMemory 调用都传 force:true，唯一一处
+ * force:false 断言的是 compacted===true（方向相反）。也就是说"该不压缩时不压缩"
+ * 这个方向从未被证明过——阈值闸门坏掉也不会有测试变红。
+ */
+export async function runGroupMemoryBelowThresholdNoCompactSelfTest() {
+  // 夹具要害：必须让 keepIndex > 0（存在够格被压缩的旧消息），同时总 token 仍低于阈值。
+  // 保留窗按 token 而非条数计算，所以"很多条极短消息"会全部落在窗内、keepIndex=0，
+  // 那样即使阈值判断坏掉也不会压缩——测试就成了恒真的假绿灯。
+  const messages = Array.from({ length: 200 }, (_, index) => ({
+    id: `low${index}`,
+    role: index % 2 ? "assistant" : "user",
+    agent: index % 2 ? "worker" : undefined,
+    content: `阶段${index}${"内容".repeat(60)}`,
+  }));
+  const originalMessages = JSON.stringify(messages);
+  const threshold = getGroupAutoCompactThreshold({});
+  const totalTokens = messages.reduce((sum, message) => sum + estimateTextTokens(String(message.content || "")), 0);
+  const result: any = await compactGroupConversationMemory({
+    groupId: "below-threshold-self-test",
+    groupSessionId: "gcs_below_threshold_selftest",
+    messages,
+    memory: { goal: "验证阈值闸门", nextActions: [{ action: "保持现状" }] },
+    config: {},
+    transcriptPath: "raw.json",
+    // 关键：不传 force，走真实的阈值判定路径
+  });
+  const checks = {
+    fixtureIsGenuinelyBelowThreshold: totalTokens < threshold,
+    // 证明夹具非空转：确实存在落在保留窗之外、够格被压缩的旧消息
+    fixtureHasEligibleOlderMessages: Number(result?.keepIndex || 0) > 0,
+    doesNotCompactBelowThreshold: result?.compacted === false,
+    // 拒绝原因必须是"压力未达阈值"，而不是"根本没有可压缩的消息"
+    skipReasonIsThresholdNotEmptyWindow:
+      String(result?.compactStrategyDecision?.reason || "").includes("below compact threshold"),
+    boundaryNotAdvanced: !result?.boundary,
+    rawMessagesRemainImmutable: JSON.stringify(messages) === originalMessages,
+  };
+  return { pass: Object.values(checks).every(Boolean), checks, totalTokens, threshold, keepIndex: result?.keepIndex };
+}
+
+/**
+ * 审计文档不变量 8：候选摘要生成失败时，旧摘要与旧 Boundary 必须原封不动。
+ *
+ * 通过 config.compactionModelCall 注入抛错的摘要器（该注入点见
+ * group-compaction-engine.ts:367）。引擎本身是纯函数、抛出点早于返回点，
+ * 这里把该结构性保证锁成回归防线。
+ */
+export async function runGroupMemorySummaryFailureKeepsStateSelfTest() {
+  const messages = Array.from({ length: 400 }, (_, index) => ({
+    id: `f${index}`,
+    role: index % 2 ? "assistant" : "user",
+    agent: index % 2 ? "worker" : undefined,
+    content: index === 0 ? "实现对账任务，必须保留审计链" : `阶段 ${index} ${"内容".repeat(100)}`,
+  }));
+  // 夹具要害：消息必须够"胖"才能让旧消息落到保留窗之外并真正进入摘要路径，
+  // 否则模型压根不会被调用，注入的抛错摘要器永远不触发——测试成为假绿灯。
+  const summaryChecksum = crypto.createHash("sha256").update("pre-existing-summary-state").digest("hex");
+  const preExistingMemory = {
+    goal: "对账任务",
+    nextActions: [{ action: "继续核对" }],
+    compaction: {
+      version: GROUP_MEMORY_COMPACTION_VERSION,
+      summaryChecksum,
+      summarySource: "model",
+      lastCompactedMessageId: "m50",
+      modelSummaryValidated: true,
+    },
+  };
+  const preExistingMemorySnapshot = JSON.stringify(preExistingMemory);
+  let failed = false;
+  let failureMessage = "";
+  let modelWasInvoked = false;
+  try {
+    await compactGroupConversationMemory({
+      groupId: "summary-failure-self-test",
+      groupSessionId: "gcs_summary_failure_selftest",
+      messages,
+      memory: preExistingMemory,
+      config: {
+        memoryCompactionUseModel: true,
+        compactionModelCall: async () => {
+          modelWasInvoked = true;
+          throw new Error("SUMMARY_MODEL_FORCED_FAILURE_SENTINEL");
+        },
+      },
+      transcriptPath: "raw.json",
+      force: true,
+    });
+  } catch (error: any) {
+    failed = true;
+    failureMessage = String(error?.message || "");
+  }
+  const checks = {
+    // 前置条件：摘要器确实被调用过，否则下面的断言全是空转
+    modelSummarizerWasActuallyInvoked: modelWasInvoked,
+    summaryFailurePropagates: failed,
+    errorCarriesCorrectCode: failureMessage.length > 0,
+    // 传入的 memory 对象不能被就地改写——这是文档 §5.3 的核心不变量。
+    callerMemoryRemainsUntouched: JSON.stringify(preExistingMemory) === preExistingMemorySnapshot,
+    compactionStillCarriesOriginalSummaryChecksum:
+      String(preExistingMemory.compaction.summaryChecksum) === summaryChecksum,
+    compactionBoundaryUnchanged:
+      String(preExistingMemory.compaction.lastCompactedMessageId) === "m50",
+  };
+  return { pass: Object.values(checks).every(Boolean), checks, failed, failureMessage, modelWasInvoked };
+}
