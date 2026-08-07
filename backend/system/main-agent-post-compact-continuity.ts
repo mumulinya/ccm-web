@@ -549,6 +549,12 @@ export function runMainAgentPostCompactContinuitySelfTest() {
     const toolRow = manager.tools.find((item: any) => item.serverName === serverName && item.name === "search");
     toolRow.inputSchema = { type: "object", properties: { changed: { type: "boolean" } } };
     const changedSchema = restoreMainAgentPostCompactContext({ identity, scope, manifest });
+    toolRow.inputSchema = { type: "object", properties: { query: { type: "string" } } };
+    // 权限维度：压缩后必须按"当前"授权重新加载，而不是照搬压缩前的清单。
+    // 用一个收窄到空授权的 scope 复现"权限被撤销"，此时清单里的 skill 与
+    // MCP 都必须被拒绝恢复——否则旧清单会成为绕过撤销的越权路径。
+    const revokedScope: ToolScope = { mcp: [], skill: [] };
+    const revoked = restoreMainAgentPostCompactContext({ identity, scope: revokedScope, manifest });
     clearMainAgentPostCompactContinuity(identity);
     return {
       pass: validateMainAgentPostCompactRestoreManifest(manifest, { ...identity, boundaryGeneration: 1 }).valid
@@ -559,13 +565,19 @@ export function runMainAgentPostCompactContinuitySelfTest() {
         && isolated.receipt.status === "rejected"
         && budgeted.receipt.dropped.some(item => item.reason.includes("token_budget"))
         && changedSkill.receipt.dropped.some(item => item.reason === "skill_content_changed")
-        && changedSchema.receipt.dropped.some(item => item.reason === "mcp_schema_changed"),
+        && changedSchema.receipt.dropped.some(item => item.reason === "mcp_schema_changed")
+        // 撤销授权后，旧清单里的 skill 与 MCP 都不得复活
+        && !revoked.receipt.restoredSkillNames.includes(skillName)
+        && revoked.receipt.loadedToolNames.length === 0
+        && revoked.receipt.dropped.some(item => item.reason === "skill_unavailable_or_unauthorized")
+        && revoked.receipt.dropped.some(item => item.reason === "mcp_unavailable_or_unauthorized"),
       manifest,
       restored: restored.receipt,
       isolated: isolated.receipt,
       budgeted: budgeted.receipt,
       changedSkill: changedSkill.receipt,
       changedSchema: changedSchema.receipt,
+      revoked: revoked.receipt,
     };
   } finally {
     manager.tools = originalTools;
