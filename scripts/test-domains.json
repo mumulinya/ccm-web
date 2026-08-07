@@ -34,6 +34,7 @@
       "group-context-pressure-accounting-selftest.mjs",
       "group-compaction-invariant-selftest.mjs",
       "group-boundary-cursor-fence-selftest.mjs",
+      "group-manual-auto-compact-parity-selftest.mjs",
       "session-memory-dynamic-window-selftest.mjs",
         "global-agent-model-session-compaction-selftest.mjs",
         "third-party-memory-mcp-hydration-selftest.mjs",
