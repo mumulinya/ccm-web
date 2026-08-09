@@ -45,13 +45,16 @@ const emit = defineEmits(['close', 'save', 'update-proxy', 'update-weather-locat
           <span class="hint">B站搜索被封时配置代理，支持 http/socks5</span>
         </div>
         <section class="settings-section douyin-settings">
-          <div class="section-heading"><Globe2 :size="16" /><div><strong>抖音音乐来源</strong><span>官方能力优先，网页登录作为公开内容兼容通道</span></div></div>
+          <div class="section-heading"><Globe2 :size="16" /><div><strong>抖音音乐来源</strong><span>开启兼容通道即可搜索公开内容，登录后可访问更多内容</span></div></div>
           <label class="setting-row switch-row">
-            <span><strong>网页登录兼容通道</strong><small>官方视频搜索能力不可用时，使用独立浏览器会话搜索公开内容</small></span>
+            <span><strong>网页兼容通道</strong><small>使用独立浏览器会话搜索抖音公开内容，不登录也可搜索</small></span>
             <input type="checkbox" :checked="config.douyinCompatibilityEnabled !== false" @change="emit('update-douyin-field', 'douyinCompatibilityEnabled', $event.target.checked)" />
           </label>
           <div class="setting-row douyin-status-row">
-            <span><strong>网页登录（可选）</strong><small>{{ config.douyin?.browser?.authenticated ? '已登录' : config.douyin?.browser?.loginState === 'waiting' ? '等待登录' : '未登录' }}</small></span>
+            <span>
+              <strong>抖音账号（可选）</strong>
+              <small>{{ config.douyin?.browser?.authenticated ? '已登录，搜索范围增强' : config.douyin?.browser?.loginState === 'waiting' ? '等待扫码登录' : '未登录，仅可访问公开内容' }}</small>
+            </span>
             <div class="inline-actions">
               <button type="button" title="刷新状态" @click="emit('douyin-refresh')"><RefreshCw :size="13" /></button>
               <button v-if="!config.douyin?.browser?.authenticated" type="button" :disabled="douyinLoginBusy || config.douyin?.browser?.loginState === 'waiting'" @click="emit('douyin-login')"><LogIn :size="13" />{{ douyinLoginBusy ? '正在打开' : config.douyin?.browser?.loginState === 'waiting' ? '等待登录' : '登录' }}</button>
@@ -59,14 +62,14 @@ const emit = defineEmits(['close', 'save', 'update-proxy', 'update-weather-locat
             </div>
           </div>
           <div class="setting-row douyin-status-row">
-            <span><strong>媒体解析器</strong><small>{{ config.douyin?.runtime?.ready ? `已就绪 · ${config.douyin.runtime.version}` : '首次下载前需要准备' }}</small></span>
+            <span><strong>下载转码解析器</strong><small>{{ config.douyin?.runtime?.ready ? `已就绪 · ${config.douyin.runtime.version}` : '播放/下载抖音歌曲前需要准备，搜索不依赖此项' }}</small></span>
             <button v-if="!config.douyin?.runtime?.ready" type="button" class="inline-command" @click="emit('douyin-prepare')"><Download :size="13" />准备</button>
           </div>
           <div class="douyin-official-fields">
             <label><span>官方 Client Key（可选）</span><input :value="config.douyinOfficialClientKey" autocomplete="off" @input="emit('update-douyin-field', 'douyinOfficialClientKey', $event.target.value)" /></label>
             <label><span>官方 Client Secret（可选）</span><input type="password" :placeholder="config.douyin?.official?.secretProtected ? '已加密保存，留空不修改' : '仅在已开通视频搜索能力时填写'" autocomplete="new-password" @input="emit('update-douyin-field', 'douyinOfficialClientSecret', $event.target.value)" /></label>
           </div>
-          <p class="model-note">官方搜索能力未普遍开放。网页登录只用于用户有权访问的公开内容；登录失效、风控或内容受限时会明确失败。</p>
+          <p class="model-note">开启兼容通道即可搜索公开内容；官方接口未普遍开放。下载抖音歌曲前需准备"下载转码解析器"，搜索本身无需准备。</p>
         </section>
         <div class="field">
           <label>天气城市（可选）</label>

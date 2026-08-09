@@ -1,3 +1,4 @@
+import type { MainAgentContinuityIdentityV1 } from "../system/main-agent-post-compact-continuity";
 export declare function scanProjectFileStructure(workDir: string, maxDepth?: number, maxEntries?: number): string;
 export declare function loadProjectMemory(project: string, options?: {
     workDir?: string;
@@ -15,6 +16,7 @@ export declare function updateProjectMemoryFromReceipt(input: {
     receipt: any;
     actualFiles?: any[];
     resources?: any;
+    contextSourceIdentity?: MainAgentContinuityIdentityV1;
 }): any;
 export declare function recordAcceptedProjectDeliveryMemory(input: {
     task: any;

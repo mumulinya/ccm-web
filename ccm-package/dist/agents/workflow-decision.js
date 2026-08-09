@@ -53,8 +53,12 @@ const INTENT_KINDS = new Set(["conversation", "question", "status", "analysis", 
 const VERIFICATION_MODES = new Set(["commands", "http", "browser", "visual", "integration", "release"]);
 function normalizeWorkflowDecision(value, source = "model") {
     const rawMode = String(value?.mode || value?.workflowMode || "").trim();
-    if (!MODES.has(rawMode))
-        throw new Error(`大模型返回了无效工作流：${rawMode || "空"}`);
+    if (!MODES.has(rawMode)) {
+        const error = new Error(`大模型返回了无效工作流：${rawMode || "空"}`);
+        error.code = "CCM_WORKFLOW_DECISION_INVALID";
+        error.workflowMode = rawMode;
+        throw error;
+    }
     const needsEpicDecomposition = rawMode === "decompose_epic" || value?.needsEpicDecomposition === true;
     const needsPlanning = needsEpicDecomposition || rawMode === "plan_task" || value?.needsPlanning === true;
     const rawContinuation = String(value?.continuationKind || value?.continuation_kind || "new_task").trim();

@@ -9,6 +9,11 @@ import * as crypto from "crypto";
 import { spawnSync } from "child_process";
 
 import * as os from "os";
+import {
+  bridgeLegacyAgentCommunication,
+  getAgentCommunication,
+  reconcileAgentCommunications,
+} from "../../system/agent-communication-v2";
 
 import {
   sendJson,
@@ -661,6 +666,7 @@ export function createAndQueueTask(task: any, ctx: CollabCtx) {
 
 export function resumeTaskQueues(ctx: CollabCtx, options: any = {}) {
   bindTaskRuntimeCollabCtx(ctx);
+  const communicationRecovery = reconcileAgentCommunications();
   const testAgentRunnerRecovery = reconcileTestAgentRunnerRecords();
   const traceBackfilled = backfillTaskTraceIds();
   const tasks = loadTasks();
@@ -765,6 +771,42 @@ export function resumeTaskQueues(ctx: CollabCtx, options: any = {}) {
         message: recoveryDecision.user_headline || recoveryDecision.reason,
       });
       continue;
+    }
+
+    const existingCommunicationId = String(task.agent_communication_message_id || "");
+    const existingCommunication = existingCommunicationId
+      ? getAgentCommunication(existingCommunicationId, { includeEvents: false, includeReceipts: false })
+      : null;
+    if (!existingCommunication && !existingCommunicationId) {
+      const bridgeGeneration = Math.max(1, Number(task.agent_communication_generation || task.generation || 0) + 1);
+      const scope = task.group_id ? "group" : task.global_mission_id ? "global" : "project";
+      const scopeId = String(task.group_id || task.global_mission_id || task.target_project || task.id);
+      const exactSessionId = String(task.group_session_id || task.groupSessionId || task.project_session_id || task.projectSessionId || task.task_agent_session_id || task.id);
+      const bridge: any = bridgeLegacyAgentCommunication({
+        taskId: task.id,
+        workItemId: String(task.work_item_id || task.workItemId || task.id),
+        scope,
+        scopeId,
+        exactSessionId,
+        generation: bridgeGeneration,
+        attempt: Math.max(1, Number(task.retry_count || 0) + 1),
+        senderAgentId: task.group_id ? "ccm-group-main-agent" : task.global_mission_id ? "ccm-global-agent" : "ccm-project-main-agent",
+        receiverAgentId: String(task.target_project || "unassigned-agent"),
+        legacySchema: "ccm-task-v1",
+        legacyId: task.id,
+        legacyStatus: task.status,
+        payload: { authorizationRevalidated: true, worktreeRef: task.execution_workspace?.worktree_path || task.worktree_path || "" },
+      });
+      if (bridge.bridged && bridge.envelope?.messageId) {
+        task.agent_communication_message_id = bridge.envelope.messageId;
+        task.agent_communication_generation = bridgeGeneration;
+        updateTask(task.id, {
+          agent_communication_message_id: bridge.envelope.messageId,
+          agent_communication_generation: bridgeGeneration,
+          agent_communication_state: bridge.envelope.state,
+        });
+        appendTaskTimelineEvent(task.id, { type: "legacy_agent_communication_bridge", title: "旧任务已桥接通信 V2", detail: `generation=${bridgeGeneration}`, status: "ok", phase: "planning", data: { message_id: bridge.envelope.messageId, content_stored: false } });
+      }
     }
 
     const traceId = ensureTraceId(task.trace_id, "task");
@@ -876,6 +918,7 @@ export function resumeTaskQueues(ctx: CollabCtx, options: any = {}) {
     mixed_recovery: resumed > 0 && manualPending > 0,
     recovery_policy: "risk_tiered_authorization_preserving",
     test_agent_runner_recovery: testAgentRunnerRecovery,
+    agent_communication_recovery: communicationRecovery,
     results,
     queue_status: getQueueStatus(),
   };

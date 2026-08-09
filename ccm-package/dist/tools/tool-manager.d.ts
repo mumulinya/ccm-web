@@ -6,6 +6,11 @@ interface SkillDef {
     filename?: string;
     sourcePath?: string;
     contentHash?: string;
+    context?: "inline" | "fork";
+    allowedTools?: string[];
+    agent?: string;
+    model?: string;
+    effort?: "low" | "medium" | "high" | "";
 }
 export interface PostCompactDynamicToolCatalog {
     tools: Array<{
@@ -177,6 +182,11 @@ export declare class ToolManager {
         input: string;
         invokedAt: string;
         auditFile: string;
+        executionMode: string;
+        allowedTools: string[];
+        agent: string;
+        model: string;
+        effort: string;
     } | {
         ok: boolean;
         name: string;

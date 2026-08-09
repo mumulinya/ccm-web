@@ -32,6 +32,7 @@ export function useMusicPlayback(deps) {
     nextRecommendTrack,
     loadLyrics,
     resetLyrics,
+    invalidateLyricsRequest,
     resetPetLyricIndex,
     updateCurrentLyrics,
     notifyMusicPetPlaying,
@@ -365,6 +366,7 @@ export function useMusicPlayback(deps) {
         source: options.source || (options.remote ? 'remote-stop' : 'player-stop'),
       })
     }
+    invalidateLyricsRequest?.()
     if (audioEl.value) {
       audioEl.value.pause()
       if (options.resetPosition !== false) audioEl.value.currentTime = 0

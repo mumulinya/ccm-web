@@ -16,6 +16,8 @@ import {
 import { getBoundInternalMcpTask, internalMcpTaskPayload } from "./internal-mcp-task-store";
 import { recordMemoryContextConsumptionReceipt } from "./memory-context-consumption-receipt";
 import { buildProjectMemoryPacket } from "../projects/memory";
+import { estimateTextTokens } from "../system/context-budget";
+import { recordContextSourceReceipts } from "../system/main-agent-context-source-continuity";
 import {
   acknowledgeThirdPartyMemoryHydration,
   getThirdPartyMemoryManifest,
@@ -145,8 +147,15 @@ function scopeAllowed(metadata: KnowledgeDocumentMetadata | undefined, context: 
 }
 
 async function scopedSearch(context: InternalMcpTaskContext, query: string, limit: number, filename = "") {
-  const search = await searchAgentKnowledge(query, context, { limit, filename: filename || undefined, maxChunkChars: 5000 });
+  const search = await searchAgentKnowledge(query, context, { limit, filename: filename || undefined, maxChunkChars: 5000, continuityIdentity: contextSourceIdentity(context), boundaryGeneration: context.boundaryGeneration });
   return search.results;
+}
+
+function contextSourceIdentity(context: InternalMcpTaskContext) {
+  const agentKind = context.role === "group-main-agent" ? "group" : context.role === "global-agent" ? "global" : "project";
+  const scopeId = agentKind === "group" ? context.groupId : agentKind === "global" ? "global" : context.project;
+  const exactSessionId = context.projectSessionId || context.taskAgentSessionId || context.groupSessionId || context.nativeSessionId || context.taskId;
+  return { agentKind, scope: agentKind, scopeId, exactSessionId, generation: Number(context.nativeGeneration || context.boundaryGeneration || 0) } as any;
 }
 
 async function callTool(context: InternalMcpTaskContext, name: string, args: any) {
@@ -221,7 +230,22 @@ async function callTool(context: InternalMcpTaskContext, name: string, args: any
     const offset = Math.max(0, Number(args?.offset || 0));
     const maxChars = Math.max(500, Math.min(30000, Number(args?.max_chars || 12000)));
     const content = String(parsed.content || "");
-    return { success: true, filename, parser: parsed.parser, status: parsed.status, offset, total_chars: content.length, has_more: offset + maxChars < content.length, content: content.slice(offset, offset + maxChars), citations: getKnowledgeDocumentChunks(filename).map(chunk => chunk.citation) };
+    const selectedContent = content.slice(offset, offset + maxChars);
+    const chunks = getKnowledgeDocumentChunks(filename);
+    recordContextSourceReceipts(contextSourceIdentity(context), [{
+      sourceKind: "knowledge",
+      sourceId: filename,
+      documentName: filename,
+      chunkIds: chunks.filter(chunk => chunk.charEnd > offset && chunk.charStart < offset + maxChars).map(chunk => chunk.id),
+      headings: chunks.filter(chunk => chunk.charEnd > offset && chunk.charStart < offset + maxChars).map(chunk => chunk.heading).filter(Boolean),
+      revision: String(metadata[filename].version || ""),
+      checksum: metadata[filename].content_hash,
+      tokenCount: estimateTextTokens(selectedContent),
+      injected: true,
+      state: "injected",
+      boundaryGeneration: context.boundaryGeneration,
+    }]);
+    return { success: true, filename, parser: parsed.parser, status: parsed.status, offset, total_chars: content.length, has_more: offset + maxChars < content.length, content: selectedContent, citations: chunks.map(chunk => chunk.citation) };
   }
   if (name === "list_citations") {
     await ensureIndex();

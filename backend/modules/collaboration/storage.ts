@@ -10,7 +10,9 @@ import { appendTraceEvent, ensureTraceId } from "../../system/reliability-ledger
 import { requestGroupSessionAgentCancellation } from "../../agents/execution-kernel";
 import { invalidateProviderNeutralContextCacheState } from "../../system/provider-neutral-context-cache";
 import {
+  generateProvisionalSessionTitle,
   generateSessionTitleWithModel,
+  isSessionTitleAutoReplaceable,
   isMeaningfulSessionTitleInput,
   isSessionTitlePlaceholder,
 } from "../../system/session-title";
@@ -277,6 +279,25 @@ export function renameGroupChatSession(groupId: string, sessionId: string, title
   return renamed;
 }
 
+export function applyGroupSessionProvisionalTitle(groupId: string, sessionId: string, message: any) {
+  const manifest = listGroupChatSessions(groupId);
+  const session = manifest.sessions.find((item: any) => item.id === sessionId);
+  if (!session || !isSessionTitleAutoReplaceable(session.title, session.titleOrigin)) {
+    return { renamed: false, reason: "title_not_replaceable", session };
+  }
+  const files = message?.files || message?.attachments || [];
+  const generated = generateProvisionalSessionTitle({
+    scope: "group",
+    userMessage: String(message?.content || ""),
+    attachmentNames: files.map((file: any) => String(file?.name || file?.filename || "")).filter(Boolean),
+  });
+  if (!generated.title) return { renamed: false, reason: "title_input_skipped", session, generated };
+  const now = new Date().toISOString();
+  const renamed = { ...session, title: generated.title, titleOrigin: "provisional", titleProvisionalAt: now, updatedAt: now };
+  writeGroupSessionManifest(groupId, { ...manifest, sessions: manifest.sessions.map((item: any) => item.id === sessionId ? renamed : item) });
+  return { renamed: true, session: renamed, generated };
+}
+
 const groupSessionTitleJobs = new Map<string, Promise<any>>();
 
 export function scheduleGroupSessionAutoTitle(groupId: string, sessionId: string, options: { modelCall?: (request: any) => Promise<any> } = {}) {
@@ -286,7 +307,7 @@ export function scheduleGroupSessionAutoTitle(groupId: string, sessionId: string
   const job = (async () => {
     const manifest = listGroupChatSessions(groupId);
     const session = manifest.sessions.find((item: any) => item.id === sessionId);
-    if (!session || !isSessionTitlePlaceholder(session.title, session.titleOrigin)) return { renamed: false, reason: "title_already_set", session };
+    if (!session || !isSessionTitleAutoReplaceable(session.title, session.titleOrigin)) return { renamed: false, reason: "title_already_set", session };
     const messages = getGroupMessages(groupId, sessionId);
     const userIndex = messages.findIndex((message: any) => message?.role === "user"
       && (isMeaningfulSessionTitleInput(message?.content) || (message?.files || message?.attachments || []).length));
@@ -304,7 +325,7 @@ export function scheduleGroupSessionAutoTitle(groupId: string, sessionId: string
     if (!generated.title) return { renamed: false, reason: "title_input_skipped", generated };
     const latest = listGroupChatSessions(groupId);
     const current = latest.sessions.find((item: any) => item.id === sessionId);
-    if (!current || !isSessionTitlePlaceholder(current.title, current.titleOrigin)) return { renamed: false, reason: "title_changed_during_generation", session: current };
+    if (!current || !isSessionTitleAutoReplaceable(current.title, current.titleOrigin)) return { renamed: false, reason: "title_changed_during_generation", session: current };
     const now = new Date().toISOString();
     const renamed = { ...current, title: generated.title, titleOrigin: generated.source === "model" ? "model" : "fallback", titleGeneratedAt: now, updatedAt: now };
     writeGroupSessionManifest(groupId, { ...latest, sessions: latest.sessions.map((item: any) => item.id === sessionId ? renamed : item) });
@@ -580,6 +601,11 @@ export function appendGroupMessage(groupId: string, msg: any) {
   appendTraceEvent(traceId, { id: `group-message:${groupId}:${messageId || messages.length}`, type: "group.message_persisted", status: "ok", group_id: groupId, task_id: msg?.task_id || "", agent: msg?.agent || msg?.role || "", message: String(msg?.content || "").slice(0, 500), data: { message_id: messageId } });
   for (const hook of getGroupMessageAppendHooks()) {
     try { hook(groupId, next, messages); } catch {}
+  }
+  if (String(next.role || "") === "user") {
+    try { applyGroupSessionProvisionalTitle(groupId, sessionId, next); } catch (error: any) {
+      console.warn(`[群聊会话] 临时命名失败 (${groupId}/${sessionId})：${error?.message || error}`);
+    }
   }
   if (String(next.role || "") === "assistant" && String(next.content || "").trim()) {
     void scheduleGroupSessionAutoTitle(groupId, sessionId).catch((error: any) => {

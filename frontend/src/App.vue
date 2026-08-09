@@ -189,6 +189,7 @@ const PAGE_LOADERS = {
   'memory-center': () => import('./components/knowledge/MemoryCenter.vue'),
   'cleanup-center': () => import('./components/system/cleanup/CleanupCenter.vue'),
   'trace-replay': () => import('./components/system/TraceReplay.vue'),
+  'code-intelligence': () => import('./components/tools/CodeIntelligence.vue'),
 }
 const ProjectManager = definePageComponent('projects', PAGE_LOADERS.projects)
 const GroupChat = definePageComponent('groups', PAGE_LOADERS.groups)
@@ -210,6 +211,7 @@ const KnowledgeBase = definePageComponent('knowledge', PAGE_LOADERS.knowledge)
 const MemoryCenter = definePageComponent('memory-center', PAGE_LOADERS['memory-center'])
 const CleanupCenter = definePageComponent('cleanup-center', PAGE_LOADERS['cleanup-center'])
 const TraceReplay = definePageComponent('trace-replay', PAGE_LOADERS['trace-replay'])
+const CodeIntelligence = definePageComponent('code-intelligence', PAGE_LOADERS['code-intelligence'])
 
 const currentTab = ref('')
 const musicPlayerActivated = ref(false)
@@ -593,6 +595,7 @@ const DEFAULT_TABS = [
   { id: 'changes', icon: '📝', label: '代码协作' },
   { id: 'tasks', icon: '📋', label: '任务派发' },
   { id: 'trace-replay', icon: '🔁', label: '任务回放' },
+  { id: 'code-intelligence', icon: '🧭', label: '代码智能' },
   { id: 'autodev', icon: '🧭', label: '自动开发' },
   { id: 'knowledge', icon: '📖', label: '知识库与文档' },
   { id: 'memory-center', icon: '🧠', label: '记忆控制中心' },
@@ -616,6 +619,7 @@ const TAB_ICONS = {
   changes: FileDiff,
   tasks: ListTodo,
   'trace-replay': History,
+  'code-intelligence': Search,
   autodev: Workflow,
   knowledge: BookOpen,
   'memory-center': Brain,
@@ -950,6 +954,7 @@ const closeTab = (tabId, event) => {
         <div v-if="isTabOpen('changes')" v-show="currentTab === 'changes'" class="tab-pane code-changes-pane"><CodeChanges /></div>
         <div v-if="isTabOpen('tasks')" v-show="currentTab === 'tasks'" class="tab-pane"><TaskManager :navigate-to="navigateTo" @navigated="navigateTo = null" @navigate="handleWorkbenchNavigate" @resume-project-permission="resumeProjectPermission" /></div>
         <div v-if="isTabOpen('trace-replay')" v-show="currentTab === 'trace-replay'" class="tab-pane"><TraceReplay :navigate-to="navigateTo" /></div>
+        <div v-if="isTabOpen('code-intelligence')" v-show="currentTab === 'code-intelligence'" class="tab-pane"><CodeIntelligence /></div>
         <div v-if="isTabOpen('autodev')" v-show="currentTab === 'autodev'" class="tab-pane"><AutoDevOps @navigate="handleWorkbenchNavigate" /></div>
         <div v-if="isTabOpen('knowledge')" v-show="currentTab === 'knowledge'" class="tab-pane"><KnowledgeBase /></div>
         <div v-if="isTabOpen('memory-center')" v-show="currentTab === 'memory-center'" class="tab-pane"><MemoryCenter /></div>

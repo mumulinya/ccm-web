@@ -1,11 +1,12 @@
 # 群聊记忆 CC 对齐阶段目录
 
-> 群聊记忆、压缩、恢复和会话连续性的分阶段实现记录。共 321 篇。该文件由 `node scripts/generate-doc-catalogs.mjs` 生成。
+> 群聊记忆、压缩、恢复和会话连续性的分阶段实现记录。共 322 篇。该文件由 `node scripts/generate-doc-catalogs.mjs` 生成。
 
-## . (39)
+## . (40)
 
 - [CCM 记忆系统实施与文档审计](./IMPLEMENTATION-AUDIT.md)
 - [CCM 记忆系统当前状态](./CURRENT-STATE.md)
+- [Claude Code 源码对照与 CCM 多 Agent 记忆压缩审计](./2026-08-08-cc-source-compaction-and-v5-audit.md)
 - [CCM Group Memory CC-Parity Phase 9](./2026-07-07-cc-parity-memory-phase-9.md)
 - [CCM Group Memory CC Parity Phase 8](./2026-07-07-cc-parity-memory-phase-8.md)
 - [CCM Group Memory CC Parity Phase 7](./2026-07-07-cc-parity-memory-phase-7.md)

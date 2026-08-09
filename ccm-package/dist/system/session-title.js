@@ -1,8 +1,10 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.isSessionTitlePlaceholder = isSessionTitlePlaceholder;
+exports.isSessionTitleAutoReplaceable = isSessionTitleAutoReplaceable;
 exports.isMeaningfulSessionTitleInput = isMeaningfulSessionTitleInput;
 exports.fallbackSessionTitle = fallbackSessionTitle;
+exports.generateProvisionalSessionTitle = generateProvisionalSessionTitle;
 exports.generateSessionTitleWithModel = generateSessionTitleWithModel;
 const group_orchestrator_config_1 = require("../modules/collaboration/group-orchestrator-config");
 const group_orchestrator_llm_client_1 = require("../modules/collaboration/group-orchestrator-llm-client");
@@ -15,6 +17,14 @@ function isSessionTitlePlaceholder(title, origin = "") {
         return true;
     const value = String(title || "").trim();
     return !value || PLACEHOLDER_TITLES.has(value) || /^会话\s*\d+\s*[\u00b7-]/.test(value);
+}
+function isSessionTitleAutoReplaceable(title, origin = "") {
+    const normalizedOrigin = String(origin || "").toLowerCase();
+    if (normalizedOrigin === "manual" || normalizedOrigin === "model" || normalizedOrigin === "fallback")
+        return false;
+    if (normalizedOrigin === "placeholder" || normalizedOrigin === "provisional")
+        return true;
+    return isSessionTitlePlaceholder(title, origin);
 }
 function isMeaningfulSessionTitleInput(value) {
     const text = String(value || "").replace(/\s+/g, " ").trim();
@@ -45,6 +55,15 @@ function fallbackSessionTitle(input) {
         .split(/[。！？\n.!?]/)[0]
         .trim();
     return cleanTitle(text) || "新会话";
+}
+function generateProvisionalSessionTitle(input) {
+    if (!isMeaningfulSessionTitleInput(input.userMessage) && !(input.attachmentNames || []).length) {
+        return { title: "", source: "skipped" };
+    }
+    const title = fallbackSessionTitle(input);
+    return title && !isSessionTitlePlaceholder(title)
+        ? { title, source: "provisional" }
+        : { title: "", source: "skipped" };
 }
 async function defaultModelCall(system, user) {
     const config = (0, group_orchestrator_config_1.loadOrchestratorConfig)();

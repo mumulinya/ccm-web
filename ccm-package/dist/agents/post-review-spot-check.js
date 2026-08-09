@@ -69,9 +69,7 @@ function commandBlockComplete(item) {
     return !!String(item?.command || "").trim()
         && !!String(item?.cwd || "").trim()
         && hasOwn(item, "exitCode")
-        && hasOwn(item, "stdout")
-        && hasOwn(item, "stderr")
-        && hasOwn(item, "output");
+        && !!String(item?.status || "").trim();
 }
 function isWithinRoot(candidate, root) {
     const relative = path.relative(root, candidate);

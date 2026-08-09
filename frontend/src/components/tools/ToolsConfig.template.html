@@ -965,6 +965,12 @@
           <label>Prompt 模板</label>
           <textarea v-model="newSkill.prompt" placeholder="请审查以下代码，关注安全性、性能 and 可维护性..." rows="5"></textarea>
           <div class="form-hint">Skill 执行时注入到 Agent 上下文的 prompt 模板</div>
+          <label>执行上下文</label>
+          <select v-model="newSkill.context"><option value="inline">inline（父Loop）</option><option value="fork">fork（隔离Skill子Agent）</option></select>
+          <label>允许工具（逗号分隔）</label>
+          <input :value="newSkill.allowedTools.join(', ')" placeholder="read_file, grep_text" @change="newSkill.allowedTools = $event.target.value.split(',').map(item => item.trim()).filter(Boolean)">
+          <label>可选 Agent / 模型 / Effort</label>
+          <div class="form-row"><input v-model="newSkill.agent" placeholder="agent role"><input v-model="newSkill.model" placeholder="model"><select v-model="newSkill.effort"><option value="">继承</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option></select></div>
         </div>
         <div class="form-actions">
           <button class="btn btn-cancel" @click="showAddSkill = false">取消</button>

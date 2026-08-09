@@ -9,6 +9,15 @@ import {
   resolveProjectTestTargets,
   type ResolvedProjectTestTarget,
 } from "./project-test-targets";
+import {
+  buildTestAgentEvidenceProjection,
+  summarizeTestAgentEvidenceProjection,
+} from "../../test-agent/evidence-projection";
+import { auditTestAgentSurface } from "../../test-agent/surface-audit";
+import { captureTestAgentRuntimeFingerprint } from "../../test-agent/runtime-fingerprint";
+import { buildTestAgentHardeningPolicy, validateTestAgentHardeningPolicy } from "../../test-agent/hardening-policy";
+import { buildTestAgentCompletionGate, publicTestAgentVerificationHardening } from "../../test-agent/completion-gate";
+import { runMainAgentPostReviewSpotCheck } from "../../agents/post-review-spot-check";
 
 function cleanText(value: any, max = 1200) {
   return String(value || "").trim().slice(0, max);
@@ -147,6 +156,10 @@ export async function runProjectTaskTestAgentReview(input: {
     evidencePlan,
     hasTestTarget: targets.length > 0,
   });
+  const frozenHardening = input.task?.acceptance_policy_snapshot?.hardening;
+  const hardeningPolicy = validateTestAgentHardeningPolicy(frozenHardening).valid
+    ? frozenHardening
+    : buildTestAgentHardeningPolicy({ task: input.task, reviewPolicy, riskTier: reviewPolicy.tier });
   const incrementalScope = buildTestAgentIncrementalScope({
     round: input.round,
     acceptanceCriteria: allAcceptanceCriteria,
@@ -173,8 +186,37 @@ export async function runProjectTaskTestAgentReview(input: {
     ? cleanList([...taskBrowserScenarios, ...workItemBrowserScenarios], 12, 600)
     : [];
   const targetUrl = reviewPolicy.browserEnabled || reviewPolicy.httpEnabled ? target?.baseUrl || "" : "";
+  const declaredFiles = changes.files.map((item: any) => String(item.path || item.file || "")).filter(Boolean);
+  const evidenceProjection = buildTestAgentEvidenceProjection({
+    taskId: input.task.id,
+    scope: "project",
+    scopeId: input.project,
+    workerResults: input.workerResults,
+  });
+  // This is an observation at handoff time. The shared completion gate may
+  // run the same audit strictly after the worker exits and after merge.
+  const surfaceAudit = auditTestAgentSurface({
+    workDir: input.workDir,
+    declaredFiles,
+    acceptanceCriteria,
+    criterionBindings: acceptanceCriteria.map((criterion, index) => ({
+      id: `criterion-${index + 1}`,
+      text: criterion,
+      checkIds: commands.map((_command, commandIndex) => `command-${commandIndex + 1}`),
+      fileRefs: declaredFiles,
+    })),
+    checkDefinitions: commands.map((command, index) => ({ id: `command-${index + 1}`, command })),
+    mode: hardeningPolicy.surfaceAuditMode,
+  });
+  const runtimeFingerprint = captureTestAgentRuntimeFingerprint({
+    workDir: input.workDir,
+    targetUrl,
+    providerFamily: reviewPolicy.browserEnabled ? "browser" : reviewPolicy.httpEnabled ? "http" : "local",
+    providerCapabilityVersion: String((reviewPolicy as any).providerCapabilityVersion || ""),
+    isolationMode: "handoff_preflight",
+  });
   const handoff = {
-    schema: "ccm-test-agent-handoff-v1",
+    schema: "ccm-test-agent-handoff-v2",
     id: `project-${input.task.id}-${input.reviewCycleId || "legacy"}-review-${input.round}`,
     taskId: input.task.id,
     groupId: "",
@@ -188,13 +230,14 @@ export async function runProjectTaskTestAgentReview(input: {
       workDir: input.workDir,
       targetUrl,
       devServerCommand: targetUrl ? target?.startupCommand || "" : "",
-      changedFiles: changes.files.map((item: any) => String(item.path || item.file || "")).filter(Boolean),
+      changedFiles: declaredFiles,
       completedTasks: workItems.map(item => String(item.title || item.objective || item)).filter(Boolean),
       acceptanceCriteria,
       verificationCommands: commands,
       browserChecks,
       browserScenarios,
-      agentSummary: input.workerResults.map(result => cleanText(result.output, 1800)).join("\n\n"),
+      agentSummary: summarizeTestAgentEvidenceProjection(evidenceProjection),
+      deliveryEvidence: evidenceProjection,
       risks: input.workerResults.flatMap(result => result.success === false ? [result.error || "开发 Agent 执行失败"] : []),
     }],
     options: {
@@ -233,7 +276,11 @@ export async function runProjectTaskTestAgentReview(input: {
       reviewRound: input.round,
       reviewCycleId: input.reviewCycleId || "",
       reviewPolicy,
+      hardeningPolicy,
+      verificationHardening: { version: 2, policy: hardeningPolicy },
       incrementalScope,
+      surfaceAudit,
+      runtimeFingerprint,
     },
   };
   const planRun = await runTestAgentCliJob({
@@ -272,7 +319,37 @@ export async function runProjectTaskTestAgentReview(input: {
     && invocation.outputValidation?.valid === true
     && invocation.artifactVerification?.status === "passed";
   const canAccept = valid && invocation?.canAccept === true && invocationRun.record.sourceStable === true;
-  const provisional = {
+  const surfaceAuditAfter = auditTestAgentSurface({
+    workDir: input.workDir,
+    declaredFiles,
+    acceptanceCriteria,
+    criterionBindings: acceptanceCriteria.map((criterion, index) => ({
+      id: `criterion-${index + 1}`,
+      text: criterion,
+      checkIds: commands.map((_command, commandIndex) => `command-${commandIndex + 1}`),
+      fileRefs: declaredFiles,
+    })),
+    checkDefinitions: commands.map((command, index) => ({ id: `command-${index + 1}`, command })),
+    mode: hardeningPolicy.surfaceAuditMode,
+  });
+  const runtimeFingerprintAfter = captureTestAgentRuntimeFingerprint({
+    workDir: input.workDir,
+    targetUrl,
+    providerFamily: reviewPolicy.browserEnabled ? "browser" : reviewPolicy.httpEnabled ? "http" : "local",
+    providerCapabilityVersion: String((reviewPolicy as any).providerCapabilityVersion || ""),
+    isolationMode: "handoff_preflight",
+  });
+  const spotCheck = valid && invocation?.canAccept === true && invocationRun.record.sourceStable === true
+    ? await runMainAgentPostReviewSpotCheck({
+        report: invocation?.report,
+        taskId: input.task.id,
+        projectRoot: input.workDir,
+        required: hardeningPolicy.requiresSpotCheck,
+        maxCommands: 3,
+        timeoutMs: 300_000,
+      })
+    : null;
+  const provisional: any = {
     canAccept,
     status: invocation?.outcome || invocation?.status || invocationRun.record.status,
     error: valid ? "" : invocation?.error || invocationRun.record.error || "TestAgent 输出或证据校验未通过",
@@ -284,7 +361,31 @@ export async function runProjectTaskTestAgentReview(input: {
     runner: invocationRun.record,
     reviewPolicy,
     incrementalScope,
+    evidenceProjection,
+    surfaceAuditBefore: surfaceAudit,
+    surfaceAuditAfter,
+    runtimeFingerprintBefore: runtimeFingerprint,
+    runtimeFingerprintAfter,
+    postReviewSpotCheck: spotCheck,
+    post_review_spot_check: spotCheck,
   };
+  const completionGate = buildTestAgentCompletionGate({
+    task: input.task,
+    workItemId: String(input.workItems?.[0]?.id || input.workItems?.[0]?.workItemId || ""),
+    exactSessionId: String(input.task.project_session_id || input.task.exact_session_id || ""),
+    generation: Number(input.task.generation || 0),
+    attempt: input.round,
+    policy: { hardening: hardeningPolicy },
+    review: provisional,
+    reviewPolicy,
+    spotCheck,
+  });
+  provisional.completionGate = completionGate;
+  provisional.completion_gate = completionGate;
+  provisional.verificationHardening = publicTestAgentVerificationHardening(completionGate);
+  provisional.verification_hardening = { completionGate, public: provisional.verificationHardening };
+  provisional.canAccept = provisional.canAccept === true && completionGate.pass === true;
+  if (!completionGate.pass && !provisional.error) provisional.error = completionGate.blockedReasons.join("；");
   const decision = classifyTestAgentReview(provisional);
   return { ...provisional, decision, failureRoute: decision.route };
 }

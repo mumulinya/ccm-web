@@ -46,6 +46,7 @@ const path = __importStar(require("path"));
 const utils_1 = require("../../core/utils");
 const group_compaction_engine_1 = require("../collaboration/group-compaction-engine");
 const group_orchestrator_config_1 = require("../collaboration/group-orchestrator-config");
+const main_agent_context_policy_1 = require("../../tools/main-agent-context-policy");
 const group_compaction_strategy_1 = require("../collaboration/group-compaction-strategy");
 const model_capability_cache_1 = require("../collaboration/model-capability-cache");
 const context_budget_1 = require("../../system/context-budget");
@@ -745,8 +746,10 @@ async function compactProjectSessionWithModel(project, projectSessionId, options
             verifiedAttachments: verifiedRecoveryAttachments,
         };
         const nextBoundaryGeneration = state.boundaryGeneration + 1;
+        const projectConfig = (0, db_1.loadProjectConfigs)()?.[safeProject] || {};
+        const effectiveContextPolicy = (0, main_agent_context_policy_1.resolveMainAgentContextPolicy)(config, projectConfig?.context_policy || projectConfig?.contextPolicy || {}).effective;
         const projectToolScope = {
-            ...((0, db_1.loadProjectConfigs)()?.[safeProject]?.tools || {}),
+            ...(projectConfig?.tools || {}),
             auditContext: { runtime: "project-main-agent", project: safeProject, sessionId: safeSessionId, source: "post-compact-restore" },
         };
         const dynamicToolIdentity = {
@@ -765,6 +768,8 @@ async function compactProjectSessionWithModel(project, projectSessionId, options
             identity: dynamicToolIdentity,
             scope: projectToolScope,
             manifest: dynamicContextRestoreManifest,
+            maxPerSkillTokens: effectiveContextPolicy.postCompactSkillPerItemMaxTokens,
+            maxTotalSkillTokens: effectiveContextPolicy.postCompactSkillTotalMaxTokens,
         });
         const restoredMcpCatalog = tool_manager_1.toolManager.getScopedToolCatalog(projectToolScope).tools
             .filter((tool) => dynamicContextRestore.loadedToolNames.includes(String(tool.canonicalName || tool.name || "")));

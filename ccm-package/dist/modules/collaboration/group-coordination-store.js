@@ -42,6 +42,7 @@ const crypto = __importStar(require("crypto"));
 const path = __importStar(require("path"));
 const utils_1 = require("../../core/utils");
 const atomic_json_file_1 = require("../../core/atomic-json-file");
+const agent_communication_v2_1 = require("../../system/agent-communication-v2");
 const MAX_RECORDS = 1600;
 const TERMINAL = new Set(["resumed", "failed", "timeout", "cancelled"]);
 function storeFile() {
@@ -118,7 +119,7 @@ function submitGroupCoordinationRequest(contextInput, input) {
         summary,
         question,
     })).digest("hex");
-    return mutateStore(store => {
+    const submitted = mutateStore(store => {
         const existing = [...store.requests].reverse().find(row => matchesContext(row, context)
             && row.idempotency_key === idempotencyKey
             && !TERMINAL.has(row.status));
@@ -159,6 +160,50 @@ function submitGroupCoordinationRequest(contextInput, input) {
         store.requests.push(record);
         return { record, deduplicated: false };
     });
+    if ((0, agent_communication_v2_1.readAgentCommunicationPolicy)().agentCommunicationV2Enabled) {
+        try {
+            const communication = (0, agent_communication_v2_1.createAgentCommunicationEnvelope)({
+                taskId: context.taskId,
+                workItemId: submitted.record.id,
+                scope: "group",
+                scopeId: context.groupId,
+                exactSessionId: context.groupSessionId,
+                generation: Math.max(0, Number(input.metadata?.generation || 0)),
+                attempt: Math.max(1, Number(input.metadata?.attempt || 1)),
+                senderAgentId: context.sourceProject,
+                receiverAgentId: "ccm-group-main-agent",
+                messageType: "coordination_request",
+                correlationId: String(input.metadata?.correlation_id || submitted.record.id),
+                parentMessageId: String(input.metadata?.communication_message_id || ""),
+                idempotencyKey: `coordination-v2:${submitted.record.id}`,
+                initialState: "waiting_dependency",
+                payload: {
+                    kind,
+                    summary,
+                    requiredCapabilities: input.requiredCapabilities,
+                    targetHint: input.targetHint,
+                    acceptanceCriteria: input.acceptanceCriteria,
+                    requestedWritePaths: input.requestedWritePaths,
+                    legacyRequestId: submitted.record.id,
+                },
+            });
+            if (submitted.record.metadata?.communication_message_id !== communication.envelope.messageId) {
+                submitted.record = updateGroupCoordinationRequest(submitted.record.id, {
+                    metadata: { ...(submitted.record.metadata || {}), communication_message_id: communication.envelope.messageId },
+                    auditType: communication.deduplicated ? "communication_v2_reused" : "communication_v2_created",
+                    auditDetail: "协调请求已进入Agent Communication V2账本",
+                }) || submitted.record;
+            }
+            return { ...submitted, communication: communication.envelope };
+        }
+        catch (error) {
+            submitted.record = updateGroupCoordinationRequest(submitted.record.id, {
+                auditType: "communication_v2_retryable",
+                auditDetail: `V2通信账本写入待重试：${String(error?.message || error).slice(0, 300)}`,
+            }) || submitted.record;
+        }
+    }
+    return submitted;
 }
 function listGroupCoordinationRequests(query = {}) {
     const context = normalizeContext(query);
@@ -201,7 +246,7 @@ function claimSubmittedGroupCoordinationRequests(contextInput, claimId) {
 }
 function updateGroupCoordinationRequest(id, patch) {
     const safeId = cleanText(id, 240);
-    return mutateStore(store => {
+    const updated = mutateStore(store => {
         const row = store.requests.find(item => item.id === safeId);
         if (!row)
             return null;
@@ -213,6 +258,71 @@ function updateGroupCoordinationRequest(id, patch) {
         }
         return row;
     });
+    if (updated?.status === "merge_conflict") {
+        try {
+            (0, agent_communication_v2_1.recordAgentCommunicationAuditEvent)(String(updated.metadata?.communication_message_id || ""), "worktree_merge_conflict", {
+                requestId: updated.id,
+                workItemTaskId: updated.work_item_task_id,
+            });
+        }
+        catch { }
+    }
+    if (updated && (0, agent_communication_v2_1.readAgentCommunicationPolicy)().agentCommunicationV2Enabled
+        && ["resolved", "resumed", "failed", "timeout", "cancelled"].includes(updated.status)
+        && updated.group_session_id) {
+        try {
+            (0, agent_communication_v2_1.createAgentCommunicationEnvelope)({
+                taskId: updated.task_id,
+                workItemId: updated.id,
+                scope: "group",
+                scopeId: updated.group_id,
+                exactSessionId: updated.group_session_id,
+                generation: Math.max(0, Number(updated.metadata?.generation || 0)),
+                attempt: Math.max(1, Number(updated.metadata?.attempt || 1)),
+                senderAgentId: "ccm-group-main-agent",
+                receiverAgentId: updated.source_project,
+                messageType: "coordination_resolution",
+                correlationId: updated.id,
+                parentMessageId: String(updated.metadata?.communication_message_id || ""),
+                idempotencyKey: `coordination-resolution-v2:${updated.id}`,
+                initialState: "completed",
+                payload: {
+                    requestId: updated.id,
+                    status: updated.status,
+                    kind: updated.kind,
+                    workItemTaskId: updated.work_item_task_id,
+                    routeChecksum: updated.route_checksum,
+                    resolutionChecksum: crypto.createHash("sha256").update(JSON.stringify(updated.resolution || {})).digest("hex"),
+                    sourceSessionId: updated.source_task_agent_session_id,
+                },
+            });
+            const requestMessageId = String(updated.metadata?.communication_message_id || "");
+            let requestMessage = requestMessageId
+                ? (0, agent_communication_v2_1.getAgentCommunication)(requestMessageId, { includeEvents: false, includeReceipts: false })
+                : null;
+            if (requestMessage && !["completed", "cancelled", "failed"].includes(requestMessage.state)) {
+                if (["failed", "timeout"].includes(updated.status)) {
+                    (0, agent_communication_v2_1.transitionAgentCommunication)(requestMessageId, "failed", { eventType: "coordination_failed", detail: { requestId: updated.id, status: updated.status } });
+                }
+                else if (updated.status === "cancelled") {
+                    if (requestMessage.state !== "cancel_requested")
+                        (0, agent_communication_v2_1.transitionAgentCommunication)(requestMessageId, "cancel_requested", { eventType: "coordination_cancel_requested", detail: { requestId: updated.id } });
+                    (0, agent_communication_v2_1.transitionAgentCommunication)(requestMessageId, "cancelled", { eventType: "coordination_cancelled", detail: { requestId: updated.id } });
+                }
+                else if (requestMessage.state === "waiting_dependency") {
+                    requestMessage = (0, agent_communication_v2_1.transitionAgentCommunication)(requestMessageId, "result_submitted", { eventType: "coordination_result_submitted", detail: { requestId: updated.id } }).envelope;
+                    requestMessage = (0, agent_communication_v2_1.transitionAgentCommunication)(requestMessageId, "verifying", { eventType: "coordination_resolution_verified", detail: { requestId: updated.id } }).envelope;
+                    requestMessage = (0, agent_communication_v2_1.transitionAgentCommunication)(requestMessageId, "accepted", { eventType: "coordination_resolution_accepted", detail: { requestId: updated.id } }).envelope;
+                    (0, agent_communication_v2_1.transitionAgentCommunication)(requestMessageId, "completed", { eventType: "coordination_completed", detail: { requestId: updated.id } });
+                }
+            }
+        }
+        catch {
+            // The v1 coordination record remains authoritative and the idempotent V2
+            // resolution can be reconciled on the next status update or restart.
+        }
+    }
+    return updated;
 }
 function getGroupCoordinationStoreDiagnostics() {
     const rows = loadStore().requests;

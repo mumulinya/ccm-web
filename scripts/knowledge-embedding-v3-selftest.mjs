@@ -63,7 +63,7 @@ try {
   assert.equal(checks.failedVectorsRetried, true)
 
   const semanticOnly = await index.searchKnowledgeBase('car', { scopeType: 'global', includeGlobal: false, limit: 3 })
-  checks.semanticOnlyRecall = semanticOnly.results.some(item => item.chunk.id === 'vehicle-guide.md#0')
+  checks.semanticOnlyRecall = semanticOnly.results.some(item => /^vehicle-guide\.md#[a-f0-9]{10}_\d+$/.test(item.chunk.id))
     && semanticOnly.results.some(item => String(item.retrievalMode).includes('semantic:remote'))
     && semanticOnly.candidateCounts.semantic > 0
   assert.equal(checks.semanticOnlyRecall, true)
@@ -71,11 +71,11 @@ try {
   const groupResult = await access.searchAgentKnowledge('PROJECT-PRIVATE-CODE', {
     role: 'group-main-agent', groupId: 'group-a', project: '__coordinator__', projects: [{ name: 'project-a' }]
   })
-  checks.restrictedProjectDoesNotLeakToGroup = !groupResult.citations.includes('project-private.md#0')
+  checks.restrictedProjectDoesNotLeakToGroup = !groupResult.citations.some(item => item.startsWith('project-private.md#'))
   assert.equal(checks.restrictedProjectDoesNotLeakToGroup, true)
 
   const projectResult = await access.searchAgentKnowledge('PROJECT-PRIVATE-CODE', { role: 'project-agent', project: 'project-a' })
-  checks.exactProjectCanReadRestricted = projectResult.citations.includes('project-private.md#0')
+  checks.exactProjectCanReadRestricted = projectResult.citations.some(item => item.startsWith('project-private.md#'))
   assert.equal(checks.exactProjectCanReadRestricted, true)
 
   const cached = await index.rebuildKnowledgeIndex('v3-cache-hit')

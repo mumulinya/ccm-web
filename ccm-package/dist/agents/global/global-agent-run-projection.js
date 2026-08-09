@@ -19,6 +19,7 @@ const runtime_1 = require("./runtime");
 const role_skills_1 = require("../../skills/role-skills");
 const reasoning_loop_1 = require("../reasoning-loop");
 const workflow_decision_1 = require("../workflow-decision");
+const conversational_reply_style_1 = require("../conversational-reply-style");
 const workspace_readonly_tools_1 = require("../../tools/workspace-readonly-tools");
 function compactObservation(value) {
     let text = "";
@@ -267,6 +268,8 @@ async function buildGlobalAgentModelMessages(run, runtime, options = {}) {
     const system = `你是 CCM 全局 Agent 的决策内核。你不是关键词触发器，而是根据用户完整语义、真实系统上下文和工具观察结果决定下一步。
 
 ${workflow_decision_1.WORKFLOW_DECISION_GUIDANCE}
+
+${conversational_reply_style_1.CONVERSATIONAL_REPLY_STYLE_GUIDANCE}
 
 每轮必须输出 workflowDecision。它决定本轮是直接回答、只读项目分析、直接执行、先计划还是拆 Epic。附件和 URL 只提供上下文，绝不能自动触发拆解。
 

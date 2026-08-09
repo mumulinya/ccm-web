@@ -62,8 +62,16 @@ const allSourcesFailed = computed(() => {
 })
 const douyinNeedsLogin = computed(() => {
   const status = sourceStatuses.value.douyin?.status
-  return status === 'login_required' || status === 'rejected'
+  return status === 'login_required'
 })
+const douyinRiskControlled = computed(() => sourceStatuses.value.douyin?.status === 'risk_controlled')
+const douyinCapabilityUnavailable = computed(() => sourceStatuses.value.douyin?.status === 'capability_unavailable')
+const douyinSearchChannel = computed(() => {
+  const s = sourceStatuses.value.douyin
+  if (!s || s.status !== 'success') return null
+  return s.channel || null
+})
+const douyinSearchAuthenticated = computed(() => sourceStatuses.value.douyin?.authenticated === true)
 const itemTrack = item => item.type === 'local' ? item.track : item
 const itemKey = item => `${item.type}:${item.track?.filename || item.songId || item.bvid || item.awemeId}`
 
@@ -130,12 +138,17 @@ watch(() => props.open, async (open) => {
         <div v-if="visibleFailures.length" class="unified-source-alerts">
           <div v-for="failure in visibleFailures" :key="failure.id" class="unified-source-alert">
             <AlertTriangle :size="14" />
-            <span><strong>{{ failure.label }}</strong>{{ failure.error }}</span>
+            <span>
+              <strong>{{ failure.label }}</strong>
+              <template v-if="failure.id === 'douyin' && douyinRiskControlled">触发了安全验证，请稍后重试</template>
+              <template v-else-if="failure.id === 'douyin' && douyinCapabilityUnavailable">搜索能力暂不可用，请在设置中开启兼容通道</template>
+              <template v-else>{{ failure.error }}</template>
+            </span>
             <button v-if="failure.id === 'douyin' && douyinNeedsLogin" type="button" :disabled="douyinLoginBusy" @click="emit('douyin-login')">
               <LoaderCircle v-if="douyinLoginBusy" class="spin" :size="13" />
               <LogIn v-else :size="13" />{{ douyinLoginBusy ? '正在打开' : '登录抖音' }}
             </button>
-            <button v-else-if="failure.retryable" type="button" :disabled="loading" @click="search">
+            <button v-else-if="!douyinCapabilityUnavailable && failure.retryable" type="button" :disabled="loading" @click="search">
               <RefreshCw :size="13" />重试
             </button>
           </div>
@@ -154,6 +167,9 @@ watch(() => props.open, async (open) => {
             <small>{{ itemTrack(item).artist || itemTrack(item).author || '未知艺术家' }}</small>
           </span>
           <span class="source-chip" :class="item.type">{{ sourceLabel[item.type] }}</span>
+          <span v-if="item.type === 'douyin' && douyinSearchChannel" class="source-chip-sub douyin-channel">
+            {{ douyinSearchChannel === 'official' ? '官方' : douyinSearchAuthenticated ? '已登录' : '公开' }}
+          </span>
           <span class="unified-result-duration">{{ itemTrack(item).duration || '--:--' }}</span>
           <div class="unified-result-actions">
             <button title="立即播放" :disabled="!!busyKey" @click="runAction('play', item)"><Play :size="14" /></button>
@@ -202,6 +218,8 @@ watch(() => props.open, async (open) => {
 .unified-source-alert button { min-height: 26px; padding: 0 9px; display: inline-flex; align-items: center; gap: 5px; border: 1px solid rgba(255,176,102,.3); border-radius: 5px; color: #ffd7ad; background: rgba(255,176,102,.08); cursor: pointer; }
 .unified-source-alert button:disabled { opacity: .55; cursor: default; }
 .source-chip.netease { color: #ff9ba5; background: rgba(255,93,108,.08); }.source-chip.bilibili { color: #f2b4cd; background: rgba(236,115,162,.08); }.source-chip.douyin { color: #8ce7ee; background: rgba(37,244,238,.08); }
+.source-chip-sub { padding: 2px 5px; border-radius: 3px; font-size: 8px; }
+.source-chip-sub.douyin-channel { color: #6bd4dc; background: rgba(37,244,238,.05); border: 1px solid rgba(37,244,238,.15); }
 .unified-result-actions { display: flex; gap: 2px; }
 .unified-result-actions button { width: 30px; height: 30px; display: grid; place-items: center; border: 1px solid transparent; border-radius: 5px; color: #819eac; background: transparent; cursor: pointer; }
 .unified-result-actions button:hover { color: #e7f8fb; border-color: rgba(105,184,207,.18); background: rgba(105,184,207,.07); }

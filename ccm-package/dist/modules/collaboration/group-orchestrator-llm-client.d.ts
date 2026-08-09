@@ -46,6 +46,9 @@ export type LlmCallOptions = {
     onRetry?: (notice: ModelCallRetryNotice) => void;
     retryProfile?: ModelRetryProfileId;
     signal?: AbortSignal;
+    nativeTools?: import("../../system/provider-native-tools").ProviderToolDefinition[];
+    nativeToolReference?: boolean;
+    onProviderAgentTurn?: (turn: import("../../system/provider-native-tools").ProviderAgentTurn) => void;
 };
 export declare function normalizeLlmTokenUsage(value: any, provider?: "openai" | "anthropic" | "gemini"): LlmTokenUsage;
 export declare function normalizeChatCompletionsUrl(apiUrl: string): string;
@@ -96,9 +99,9 @@ export declare function resolveLlmRetryOptions(config: any, options: LlmCallOpti
     signal: AbortSignal;
     onRetry: (notice: ModelCallRetryNotice) => void;
 };
-export declare function callOpenAiCompatibleChat(config: any, options: LlmCallOptions): Promise<any>;
-export declare function callGeminiCompatibleChat(config: any, options: LlmCallOptions): Promise<any>;
-export declare function callAnthropicCompatibleChat(config: any, options: LlmCallOptions): Promise<any>;
+export declare function callOpenAiCompatibleChat(config: any, options: LlmCallOptions): Promise<string>;
+export declare function callGeminiCompatibleChat(config: any, options: LlmCallOptions): Promise<string>;
+export declare function callAnthropicCompatibleChat(config: any, options: LlmCallOptions): Promise<string>;
 export declare function callOpenAiCompatibleJson(config: any, options: LlmCallOptions): Promise<any>;
 export declare function callGeminiCompatibleJson(config: any, options: LlmCallOptions): Promise<any>;
 export declare function callAnthropicCompatibleJson(config: any, options: LlmCallOptions): Promise<any>;

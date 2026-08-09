@@ -39,6 +39,10 @@ import {
   buildSharedFilesContextV2,
   migrateLegacySharedFilesV2,
 } from "../tools/shared-files-v2";
+import { resolveGroupModelContextCapacity } from "./group-compaction-strategy";
+import { resolveMainAgentContextPolicy } from "../../tools/main-agent-context-policy";
+import { buildContextSourceCatalog, calculateContextSourceBudget, listContextSourceCatalogEntries, readContextSourceContinuity, recordContextSourceCatalog, recordSharedFileProjection, restoreContextSources } from "../../system/main-agent-context-source-continuity";
+import { resolveMainAgentContinuityIdentity } from "../../system/main-agent-post-compact-continuity";
 import {
   buildCodedCoordinatorSummary,
   buildCoordinatorCollaborationInstructions,
@@ -1695,15 +1699,44 @@ export interface CollabCtx {
   onTaskStatusChange?: (task: any, status: string, result?: string) => void | Promise<void>;
 }
 
-export function buildCoordinatorSharedFilesContext(ctx: CollabCtx, group: any) {
+export function buildCoordinatorSharedFilesContext(ctx: CollabCtx, group: any, options: { groupSessionId?: string; message?: string; generation?: number } = {}) {
   const groupId = String(group?.id || "").trim();
   if (!groupId) return undefined;
+  const config = loadOrchestratorConfig();
+  const contextPolicy = resolveMainAgentContextPolicy(config, group?.context_policy || group?.contextPolicy || {}).effective;
+  const contextWindow = Number(resolveGroupModelContextCapacity(config).effectiveContextWindow || 200_000);
+  const budget = calculateContextSourceBudget({ contextWindow, catalogPercent: contextPolicy.contextSourceCatalogBudgetPercent, hydrationPercent: contextPolicy.contextSourceHydrationBudgetPercent });
   migrateLegacySharedFilesV2("group", groupId, group?.shared_files || [], "groups-v1");
   const projection = buildSharedFilesContextV2("group", groupId, {
-    maxTokens: 32_000,
+    contextWindow,
+    hydrationBudgetPercent: contextPolicy.contextSourceHydrationBudgetPercent,
+    remainingSafeTokens: budget.hydrationTargetTokens,
+    explicitText: options.message,
     title: "以下是当前群聊已授权共享文档/文件。主 Agent拆分任务时必须引用对应文件与分片证据：",
   });
-  return projection.context.trim() ? projection.context : undefined;
+  const identity = options.groupSessionId ? resolveMainAgentContinuityIdentity({ agentKind: "group" as const, scope: "group" as const, scopeId: groupId, exactSessionId: options.groupSessionId, generation: Number(options.generation || 0) }) : null;
+  const projects = getRoutableMembers(group).map((member: any) => ({ name: String(member?.project || "") })).filter((item: any) => item.name);
+  const catalog = buildContextSourceCatalog({
+    sources: listContextSourceCatalogEntries({ sharedScope: "group", sharedScopeId: groupId, knowledgeContext: { role: "group-main-agent", groupId, projects } }),
+    maxTokens: budget.catalogTargetTokens,
+    explicitText: options.message,
+    recentReceipts: identity ? readContextSourceContinuity(identity).receipts : [],
+  });
+  if (identity) {
+    recordContextSourceCatalog(identity, catalog, budget);
+    recordSharedFileProjection(identity, projection, { ...budget, catalogUsedTokens: catalog.usedTokens, sharedFileTokens: projection.total_tokens, hydrationUsedTokens: projection.total_tokens });
+  }
+  const restoredSources = identity && identity.generation > 0 ? restoreContextSources({
+    identity,
+    knowledgeContext: { role: "group-main-agent", groupId, projects },
+    explicitText: options.message,
+    maxPerItemTokens: contextPolicy.postCompactSourcePerItemMaxTokens,
+    maxTotalTokens: contextPolicy.postCompactSourceTotalMaxTokens,
+    hydrationTargetTokens: budget.hydrationTargetTokens,
+    remainingSafeTokens: budget.remainingSafeTokens,
+  }).context : "";
+  const context = [catalog.context, restoredSources, projection.context].filter(Boolean).join("\n\n");
+  return context.trim() ? context : undefined;
 }
 
 export function buildTaskSourceDocumentsContext(task: any) {

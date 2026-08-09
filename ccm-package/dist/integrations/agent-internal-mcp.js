@@ -9,6 +9,8 @@ const task_evidence_mcp_1 = require("./task-evidence-mcp");
 const task_runtime_mcp_1 = require("./task-runtime-mcp");
 const test_acceptance_mcp_1 = require("./test-acceptance-mcp");
 const permission_broker_mcp_1 = require("./permission-broker-mcp");
+const agent_communication_mcp_1 = require("./agent-communication-mcp");
+const notebook_workspace_mcp_1 = require("./notebook-workspace-mcp");
 function buildTaskBoundInternalMcpServers(input) {
     if (!input.taskId || !input.project || !input.workDir)
         return {};
@@ -35,6 +37,7 @@ function buildTaskBoundInternalMcpServers(input) {
     };
     const servers = {
         [task_runtime_mcp_1.TASK_RUNTIME_MCP_SERVER_NAME]: (0, task_runtime_mcp_1.buildTaskRuntimeMcpServerConfig)(context),
+        [agent_communication_mcp_1.AGENT_COMMUNICATION_MCP_SERVER_NAME]: (0, agent_communication_mcp_1.buildAgentCommunicationMcpServerConfig)(context),
         [knowledge_context_mcp_1.KNOWLEDGE_CONTEXT_MCP_SERVER_NAME]: (0, knowledge_context_mcp_1.buildKnowledgeContextMcpServerConfig)(context),
         [task_evidence_mcp_1.TASK_EVIDENCE_MCP_SERVER_NAME]: (0, task_evidence_mcp_1.buildTaskEvidenceMcpServerConfig)(context),
         [permission_broker_mcp_1.PERMISSION_BROKER_MCP_SERVER_NAME]: (0, permission_broker_mcp_1.buildPermissionBrokerMcpServerConfig)(context),
@@ -56,6 +59,9 @@ function buildTaskBoundInternalMcpServers(input) {
             sourceNativeSessionId: input.nativeSessionId || "",
             sourceWorkDir: input.workDir,
         });
+    }
+    if (input.role === "project-child-agent") {
+        servers[notebook_workspace_mcp_1.NOTEBOOK_WORKSPACE_MCP_SERVER_NAME] = (0, notebook_workspace_mcp_1.buildNotebookWorkspaceMcpServerConfig)(context);
     }
     return servers;
 }

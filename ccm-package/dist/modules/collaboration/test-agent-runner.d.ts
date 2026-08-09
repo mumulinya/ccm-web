@@ -16,10 +16,12 @@ export interface TestAgentSourceProjectBinding {
         checksum: string;
         verified: boolean;
     }>;
+    runtimeFingerprint?: any;
     fingerprint: string;
 }
 export interface TestAgentSourceBinding {
-    schema: "ccm-test-agent-source-binding-v1";
+    schema: "ccm-test-agent-source-binding-v1" | "ccm-test-agent-source-binding-v2";
+    version?: 1 | 2;
     capturedAt: string;
     fingerprint: string;
     projects: TestAgentSourceProjectBinding[];
@@ -55,6 +57,12 @@ export interface TestAgentRunnerRecord {
     attemptScope?: string;
     runtimeEnvFingerprint?: string;
     result?: any;
+    persistenceProjection?: {
+        schema: "ccm-test-agent-runner-record-persistence-v2";
+        contentStored: false;
+        redactedResultFields: number;
+        checksum: string;
+    };
 }
 export interface RunTestAgentJobInput {
     mode: TestAgentRunnerMode;

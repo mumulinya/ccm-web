@@ -52,6 +52,32 @@ export declare function promoteTypedMemoryCandidates(scopeId: string, options?: 
     promoted: number;
     updated: number;
     skippedRevoked: number;
+    file: string;
+    entries: any;
+    schema: string;
+    scopeId: string;
+    project: string;
+    usageLedgerValid: boolean;
+    candidateCount: number;
+    promotableCount: number;
+    candidates: any[];
+    generatedAt: string;
+} | {
+    committedCandidates: {
+        memoryId: any;
+        factChecksum: any;
+        sourceRefs: any;
+        admissionChecksum: any;
+        contentStored: boolean;
+    }[];
+    sourcePromotion: {
+        attempted: number;
+        results: any[];
+        contentStored: boolean;
+    };
+    promoted: number;
+    updated: number;
+    skippedRevoked: number;
     unchanged: boolean;
     file: string;
     entries: any[];
@@ -64,11 +90,23 @@ export declare function promoteTypedMemoryCandidates(scopeId: string, options?: 
     candidates: any[];
     generatedAt: string;
 } | {
+    committedCandidates: {
+        memoryId: any;
+        factChecksum: any;
+        sourceRefs: any;
+        admissionChecksum: any;
+        contentStored: boolean;
+    }[];
+    sourcePromotion: {
+        attempted: number;
+        results: any[];
+        contentStored: boolean;
+    };
     promoted: number;
     updated: number;
     skippedRevoked: number;
     file: string;
-    entries: any;
+    entries: any[];
     schema: string;
     scopeId: string;
     project: string;
@@ -103,6 +141,42 @@ export declare function promoteTypedMemoryCandidatesWithModel(scopeId: string, o
     promoted: number;
     updated: number;
     skippedRevoked: number;
+    file: string;
+    entries: any;
+    schema: string;
+    scopeId: string;
+    project: string;
+    usageLedgerValid: boolean;
+    candidateCount: number;
+    promotableCount: number;
+    candidates: any[];
+    generatedAt: string;
+} | {
+    modelJudgment: {
+        applied: boolean;
+        reason: string;
+        degraded?: undefined;
+        shortlisted?: undefined;
+        admitted?: undefined;
+        cacheHits?: undefined;
+        modelCalls?: undefined;
+        invalidJudgments?: undefined;
+    };
+    committedCandidates: {
+        memoryId: any;
+        factChecksum: any;
+        sourceRefs: any;
+        admissionChecksum: any;
+        contentStored: boolean;
+    }[];
+    sourcePromotion: {
+        attempted: number;
+        results: any[];
+        contentStored: boolean;
+    };
+    promoted: number;
+    updated: number;
+    skippedRevoked: number;
     unchanged: boolean;
     file: string;
     entries: any[];
@@ -125,34 +199,21 @@ export declare function promoteTypedMemoryCandidatesWithModel(scopeId: string, o
         modelCalls?: undefined;
         invalidJudgments?: undefined;
     };
-    promoted: number;
-    updated: number;
-    skippedRevoked: number;
-    file: string;
-    entries: any;
-    schema: string;
-    scopeId: string;
-    project: string;
-    usageLedgerValid: boolean;
-    candidateCount: number;
-    promotableCount: number;
-    candidates: any[];
-    generatedAt: string;
-} | {
-    modelJudgment: {
-        applied: boolean;
-        degraded: boolean;
-        reason: any;
-        shortlisted?: undefined;
-        admitted?: undefined;
-        cacheHits?: undefined;
-        modelCalls?: undefined;
-        invalidJudgments?: undefined;
+    committedCandidates: {
+        memoryId: any;
+        factChecksum: any;
+        sourceRefs: any;
+        admissionChecksum: any;
+        contentStored: boolean;
+    }[];
+    sourcePromotion: {
+        attempted: number;
+        results: any[];
+        contentStored: boolean;
     };
     promoted: number;
     updated: number;
     skippedRevoked: number;
-    unchanged: boolean;
     file: string;
     entries: any[];
     schema: string;
@@ -191,17 +252,65 @@ export declare function promoteTypedMemoryCandidatesWithModel(scopeId: string, o
     modelJudgment: {
         applied: boolean;
         degraded: boolean;
-        shortlisted: number;
-        admitted: number;
-        cacheHits: any;
-        modelCalls: any;
-        invalidJudgments: any;
-        reason?: undefined;
+        reason: any;
+        shortlisted?: undefined;
+        admitted?: undefined;
+        cacheHits?: undefined;
+        modelCalls?: undefined;
+        invalidJudgments?: undefined;
+    };
+    committedCandidates: {
+        memoryId: any;
+        factChecksum: any;
+        sourceRefs: any;
+        admissionChecksum: any;
+        contentStored: boolean;
+    }[];
+    sourcePromotion: {
+        attempted: number;
+        results: any[];
+        contentStored: boolean;
     };
     promoted: number;
     updated: number;
     skippedRevoked: number;
     unchanged: boolean;
+    file: string;
+    entries: any[];
+    schema: string;
+    scopeId: string;
+    project: string;
+    usageLedgerValid: boolean;
+    candidateCount: number;
+    promotableCount: number;
+    candidates: any[];
+    generatedAt: string;
+} | {
+    modelJudgment: {
+        applied: boolean;
+        degraded: boolean;
+        reason: any;
+        shortlisted?: undefined;
+        admitted?: undefined;
+        cacheHits?: undefined;
+        modelCalls?: undefined;
+        invalidJudgments?: undefined;
+    };
+    committedCandidates: {
+        memoryId: any;
+        factChecksum: any;
+        sourceRefs: any;
+        admissionChecksum: any;
+        contentStored: boolean;
+    }[];
+    sourcePromotion: {
+        attempted: number;
+        results: any[];
+        contentStored: boolean;
+    };
+    promoted: number;
+    updated: number;
+    skippedRevoked: number;
     file: string;
     entries: any[];
     schema: string;
@@ -228,6 +337,79 @@ export declare function promoteTypedMemoryCandidatesWithModel(scopeId: string, o
     skippedRevoked: number;
     file: string;
     entries: any;
+    schema: string;
+    scopeId: string;
+    project: string;
+    usageLedgerValid: boolean;
+    candidateCount: number;
+    promotableCount: number;
+    candidates: any[];
+    generatedAt: string;
+} | {
+    modelJudgment: {
+        applied: boolean;
+        degraded: boolean;
+        shortlisted: number;
+        admitted: number;
+        cacheHits: any;
+        modelCalls: any;
+        invalidJudgments: any;
+        reason?: undefined;
+    };
+    committedCandidates: {
+        memoryId: any;
+        factChecksum: any;
+        sourceRefs: any;
+        admissionChecksum: any;
+        contentStored: boolean;
+    }[];
+    sourcePromotion: {
+        attempted: number;
+        results: any[];
+        contentStored: boolean;
+    };
+    promoted: number;
+    updated: number;
+    skippedRevoked: number;
+    unchanged: boolean;
+    file: string;
+    entries: any[];
+    schema: string;
+    scopeId: string;
+    project: string;
+    usageLedgerValid: boolean;
+    candidateCount: number;
+    promotableCount: number;
+    candidates: any[];
+    generatedAt: string;
+} | {
+    modelJudgment: {
+        applied: boolean;
+        degraded: boolean;
+        shortlisted: number;
+        admitted: number;
+        cacheHits: any;
+        modelCalls: any;
+        invalidJudgments: any;
+        reason?: undefined;
+    };
+    committedCandidates: {
+        memoryId: any;
+        factChecksum: any;
+        sourceRefs: any;
+        admissionChecksum: any;
+        contentStored: boolean;
+    }[];
+    sourcePromotion: {
+        attempted: number;
+        results: any[];
+        contentStored: boolean;
+    };
+    promoted: number;
+    updated: number;
+    skippedRevoked: number;
+    file: string;
+    entries: any[];
     schema: string;
     scopeId: string;
     project: string;

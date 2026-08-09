@@ -1,6 +1,7 @@
 // collaboration-task-card.ts — merged from 5 part files (behavior-freeze merge).
 
 import { buildTaskUserRuntimeStatus } from "../../agents/task-user-runtime";
+import { buildAgentCommunicationTaskSummary } from "../../system/agent-communication-v2";
 import {
   buildDispatchLaunchSummary,
   classifyGroupProjectTaskIntent,
@@ -1526,6 +1527,7 @@ export function buildTaskCardView(task: any, executions: any[], sessions: any[])
   const acceptanceReview = buildUserAcceptanceReview(task, summary, executions, phase);
   const planAlignment = buildUserPlanAlignmentReview(task, summary, phase, planMode, workOrderPreview, acceptanceReview);
   const agentCoordination = buildUserAgentCoordinationProtocol(task, summary, executions, workOrderPreview, acceptanceReview);
+  const agentCommunication = buildAgentCommunicationTaskSummary(String(task?.id || ""));
   const agentProgressSummary = buildUserAgentProgressSummary(task, summary, workers, executions, sessions, workItems, phase);
   const changeSummary = buildUserChangeSummary(task, summary, workers, workItems);
   const receiptReworkSummary = buildUserReceiptReworkSummary(task, summary, agentCoordination);
@@ -1627,6 +1629,8 @@ export function buildTaskCardView(task: any, executions: any[], sessions: any[])
     planAlignment,
     agent_coordination: agentCoordination,
     agentCoordination,
+    agent_communication: agentCommunication,
+    agentCommunication,
     agent_progress_summary: agentProgressSummary,
     agentProgressSummary,
     change_summary: changeSummary,

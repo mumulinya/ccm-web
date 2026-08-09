@@ -1,3 +1,5 @@
+import Database from "better-sqlite3";
+export declare function withSqliteTaskStore<T>(operation: (db: Database.Database) => T): T;
 export declare function loadTasksFromSqlite(): any[];
 export declare function getTaskByIdFromSqlite(id: string): any | null;
 export declare function listTasksByParentIdFromSqlite(parentId: string): any[];

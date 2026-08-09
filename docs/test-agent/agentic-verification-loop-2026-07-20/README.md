@@ -12,7 +12,7 @@
 - 模型计划重新进入 `normalizeTestAgentWorkOrder()`，复用现有命令、路径、URL、生产环境和浏览器动作安全校验。
 - 危险命令通过 `isUnsafeVerificationCommand()` 在合并前剔除，命令执行器仍会进行第二次阻断。
 - 规划结果写入 TestAgent report metadata，记录读取文件、增加的检查、只读边界和最终裁决来源。
-- 模型不可用时记录 `agentic_test_planning_degraded`，继续执行确定性计划。
+- 模型超时、连接失败或无效JSON时记录`ccm-test-agent-planning-receipt-v2`并按冻结风险等级决定是否执行确定性计划；critical、权限/安全错误、非法handoff和验收覆盖不足均阻塞。
 - 首轮出现失败、阻断或无证据时允许一次模型复核，最多补充 3 条安全命令；已执行命令不会重复，复核不能覆盖原失败证据。
 - 群聊正式 TestAgent 工作单默认启用；其他入口必须显式开启。
 

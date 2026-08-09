@@ -13,6 +13,8 @@ export function useMusicLyrics(options = {}) {
   const showLyricTranslation = ref(true)
   let lastPetLyricIndex = -1
   let compactViewportQuery = null
+  let lyricsLoadGeneration = 0
+  let lyricsLoadController = null
 
   const updateViewportMetrics = () => {
     compactViewport.value = compactViewportQuery?.matches === true
@@ -80,6 +82,29 @@ export function useMusicLyrics(options = {}) {
     resetPetLyricIndex()
   }
 
+  const getLyricsTrackKey = (track) => {
+    if (!track) return ''
+    const filename = String(track.filename || '').trim()
+    if (filename) return `filename:${filename}`
+    const bvid = String(track.bvid || '').trim()
+    const title = String(track.title || '').trim()
+    const artist = String(track.artist || track.author || '').trim()
+    if (!bvid && !title && !artist) return ''
+    return [bvid, title, artist].join('|')
+  }
+
+  const invalidateLyricsRequest = () => {
+    lyricsLoadGeneration += 1
+    lyricsLoadController?.abort()
+    lyricsLoadController = null
+  }
+
+  const isLyricsRequestCurrent = (generation, controller, trackKey) => (
+    generation === lyricsLoadGeneration
+    && controller === lyricsLoadController
+    && getLyricsTrackKey(currentTrack.value) === trackKey
+  )
+
   const updateCurrentLyrics = () => {
     if (lyrics.value.length === 0) return
     let activeIdx = -1
@@ -102,25 +127,48 @@ export function useMusicLyrics(options = {}) {
 
   const loadLyrics = async (track) => {
     if (!track) {
+      invalidateLyricsRequest()
       resetLyrics()
       return
     }
+
+    const trackKey = getLyricsTrackKey(track)
+    if (!trackKey) {
+      invalidateLyricsRequest()
+      resetLyrics()
+      return
+    }
+
+    invalidateLyricsRequest()
+    const generation = lyricsLoadGeneration
+    const controller = typeof AbortController === 'function' ? new AbortController() : null
+    lyricsLoadController = controller
     try {
       lyricTimingOffsetMs.value = Number(loadOffsetMap()[track.filename] || 0)
-      const res = await fetch(`/api/music/lyric?filename=${encodeURIComponent(track.filename || '')}&bvid=${encodeURIComponent(track.bvid || '')}&title=${encodeURIComponent(track.title || '')}`)
+      const res = await fetch(`/api/music/lyric?filename=${encodeURIComponent(track.filename || '')}&bvid=${encodeURIComponent(track.bvid || '')}&title=${encodeURIComponent(track.title || '')}`, {
+        ...(controller ? { signal: controller.signal } : {}),
+      })
+      if (!isLyricsRequestCurrent(generation, controller, trackKey)) return
       const data = await res.json()
+      if (!isLyricsRequestCurrent(generation, controller, trackKey)) return
       if (data.success && data.lyrics) {
         lyrics.value = data.lyrics
       } else {
         lyrics.value = []
       }
+      if (!isLyricsRequestCurrent(generation, controller, trackKey)) return
+      currentLyricIndex.value = -1
+      resetPetLyricIndex()
+      updateCurrentLyrics()
     } catch (err) {
+      if (!isLyricsRequestCurrent(generation, controller, trackKey) || err?.name === 'AbortError') return
       console.error('Failed to load lyrics:', err)
       lyrics.value = []
+      currentLyricIndex.value = -1
+      resetPetLyricIndex()
+    } finally {
+      if (lyricsLoadController === controller) lyricsLoadController = null
     }
-    currentLyricIndex.value = -1
-    resetPetLyricIndex()
-    updateCurrentLyrics()
   }
 
   return {
@@ -136,6 +184,7 @@ export function useMusicLyrics(options = {}) {
     loadLyrics,
     updateCurrentLyrics,
     resetLyrics,
+    invalidateLyricsRequest,
     resetPetLyricIndex,
   }
 }

@@ -1193,7 +1193,7 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                         }),
                     });
                     const context = (0, group_session_model_context_1.buildExactGroupSessionModelContextPacket)(group_id, { groupSessionId }).rendered;
-                    const sharedFilesContext = buildCoordinatorSharedFilesContext(ctx, group);
+                    const sharedFilesContext = buildCoordinatorSharedFilesContext(ctx, group, { groupSessionId, message: messageForAgent });
                     const projectAnalysisContext = projectAnalysisRequest ? buildGroupProjectAnalysisContext(group, messageForAgent, ctx, configs) : "";
                     const coordinatorResult = await (0, group_orchestrator_1.runGroupOrchestrator)({
                         group,

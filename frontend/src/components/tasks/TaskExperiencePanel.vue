@@ -841,6 +841,43 @@ const userRequestSummary = computed(() => {
 })
 const userRequestSuggestions = computed(() => asList(userRequestSummary.value?.answer_suggestions || userRequestSummary.value?.answerSuggestions).slice(0, 4))
 const agentCoordination = computed(() => displayValue(props.card.agent_coordination || props.card.agentCoordination || null, '协作状态已整理。'))
+const agentCommunication = computed(() => props.card.agent_communication || props.card.agentCommunication || null)
+const agentCommunicationStateLabel = (state) => ({
+  created: '已创建', queued: '排队中', lease_acquired: '已领取', runner_starting: 'Runner 启动中', runner_started: '等待 ACK',
+  acknowledged: '已 ACK', executing: '执行中', waiting_dependency: '等待依赖', result_submitted: '结果已提交', verifying: 'CCM 验收中',
+  accepted: '已验收', rejected: '需返工', completed: '已完成', startup_timeout: '启动超时', ack_timeout: 'ACK 超时',
+  heartbeat_lost: '心跳丢失', lease_expired: '租约过期', cancel_requested: '取消中', cancelled: '已取消', recovery_required: '需接管', failed: '失败',
+}[state] || state || '未派发')
+const communicationActionBusy = ref('')
+const communicationActionNotice = ref('')
+const communicationRetryable = computed(() => ['rejected', 'startup_timeout', 'ack_timeout', 'heartbeat_lost', 'lease_expired', 'recovery_required', 'failed'].includes(String(agentCommunication.value?.latest?.state || '')))
+const communicationTakeoverAvailable = computed(() => !['completed', 'cancelled', 'failed'].includes(String(agentCommunication.value?.latest?.state || '')))
+const runAgentCommunicationAction = async (action) => {
+  const messageId = String(agentCommunication.value?.latest?.messageId || '')
+  if (!messageId || communicationActionBusy.value) return
+  let reason = ''
+  if (action !== 'reconcile') {
+    reason = String(window.prompt(action === 'cancel' ? '请输入取消原因' : action === 'retry' ? '请输入重试原因' : '请输入接管原因', '') || '').trim()
+    if (!reason) return
+  }
+  if (['cancel', 'takeover'].includes(action) && !window.confirm(action === 'cancel' ? '确认停止当前 Runner 并核验副作用吗？' : '确认停止当前 Runner 并进入人工接管吗？')) return
+  communicationActionBusy.value = action
+  communicationActionNotice.value = ''
+  try {
+    const response = await fetch(`/api/agent-communications/${encodeURIComponent(messageId)}/action`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action, reason }),
+    })
+    const data = await response.json()
+    if (!response.ok || !data.success) throw new Error(data.error || '通信管理操作失败')
+    communicationActionNotice.value = action === 'reconcile' ? '已重新核验当前通信状态' : action === 'retry' ? '已安排安全重试' : action === 'cancel' ? '已请求停止并核验副作用' : '已进入人工接管流程'
+  } catch (error) {
+    communicationActionNotice.value = error?.message || '通信管理操作失败'
+  } finally {
+    communicationActionBusy.value = ''
+  }
+}
 const buildChildPlanReviewFromAck = (ackReview = null) => {
   const rows = Array.isArray(ackReview?.rows) ? ackReview.rows : []
   if (!rows.length) return null

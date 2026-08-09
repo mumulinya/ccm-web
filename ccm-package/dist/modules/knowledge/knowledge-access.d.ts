@@ -16,6 +16,9 @@ export type AgentKnowledgeSearchOptions = {
     maxChunkChars?: number;
     maxContextChars?: number;
     maxContextTokens?: number;
+    continuityIdentity?: any;
+    boundaryGeneration?: number;
+    injected?: boolean;
 };
 export declare function isKnowledgeDocumentAllowed(metadata: KnowledgeDocumentMetadata | undefined, context: AgentKnowledgeAccessContext): boolean;
 export declare function searchAgentKnowledge(query: string, context: AgentKnowledgeAccessContext, options?: AgentKnowledgeSearchOptions): Promise<{
@@ -44,6 +47,8 @@ export declare function searchAgentKnowledge(query: string, context: AgentKnowle
         scope: any;
         visibility: "shared" | "restricted";
         source: Record<string, any>;
+        revision: string;
+        checksum: string;
     }[];
     citations: string[];
     context: string;

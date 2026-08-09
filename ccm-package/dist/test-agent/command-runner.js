@@ -3,9 +3,29 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.runVerificationCommands = runVerificationCommands;
 const child_process_1 = require("child_process");
 const utils_1 = require("./utils");
-function runSingleCommand(project, command, timeoutMs, maxOutputChars) {
+const isolation_1 = require("./isolation");
+const side_effect_policy_1 = require("./side-effect-policy");
+function runSingleCommand(project, command, timeoutMs, maxOutputChars, policyContext = null) {
     const startedAt = (0, utils_1.nowIso)();
     const started = Date.now();
+    const policy = policyContext ? (0, side_effect_policy_1.evaluateTestAgentCommandSideEffect)(command, { ...policyContext, project }) : null;
+    if (policy && !policy.allowed) {
+        const finishedAt = (0, utils_1.nowIso)();
+        return Promise.resolve({
+            project: project.name,
+            command,
+            cwd: project.workDir,
+            status: "blocked",
+            exitCode: null,
+            startedAt,
+            finishedAt,
+            durationMs: Date.now() - started,
+            stdout: "",
+            stderr: "",
+            output: "",
+            error: `副作用安全门阻止命令：${policy.reason}`,
+        });
+    }
     const invocation = (0, utils_1.verificationCommandInvocation)(command);
     const unsafeReason = invocation.error;
     if (unsafeReason) {
@@ -88,9 +108,10 @@ function runSingleCommand(project, command, timeoutMs, maxOutputChars) {
 }
 async function runVerificationCommands(workOrder) {
     const results = [];
+    const policyContext = (0, isolation_1.testAgentPolicyContextFromWorkOrder)(workOrder);
     for (const project of workOrder.projects) {
         for (const command of project.verificationCommands) {
-            results.push(await runSingleCommand(project, command, workOrder.options.commandTimeoutMs, workOrder.options.maxOutputChars));
+            results.push(await runSingleCommand(project, command, workOrder.options.commandTimeoutMs, workOrder.options.maxOutputChars, policyContext));
         }
     }
     return results;

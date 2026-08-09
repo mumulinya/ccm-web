@@ -19,6 +19,9 @@ function createGlobalAgentHistoryRuntime(deps) {
     const generateSessionTitle = typeof deps.generateSessionTitle === "function"
         ? deps.generateSessionTitle
         : async () => ({ title: "", source: "skipped" });
+    const generateProvisionalSessionTitle = typeof deps.generateProvisionalSessionTitle === "function"
+        ? deps.generateProvisionalSessionTitle
+        : () => ({ title: "", source: "skipped" });
     const isSessionTitlePlaceholder = typeof deps.isSessionTitlePlaceholder === "function"
         ? deps.isSessionTitlePlaceholder
         : (title, origin = "") => String(origin || "").toLowerCase() !== "manual"
@@ -26,7 +29,38 @@ function createGlobalAgentHistoryRuntime(deps) {
     const isMeaningfulSessionTitleInput = typeof deps.isMeaningfulSessionTitleInput === "function"
         ? deps.isMeaningfulSessionTitleInput
         : (value) => /\p{L}/u.test(String(value || ""));
+    const isSessionTitleAutoReplaceable = typeof deps.isSessionTitleAutoReplaceable === "function"
+        ? deps.isSessionTitleAutoReplaceable
+        : (title, origin = "") => {
+            const normalizedOrigin = String(origin || "").toLowerCase();
+            if (["manual", "model", "fallback"].includes(normalizedOrigin))
+                return false;
+            return normalizedOrigin === "provisional" || isSessionTitlePlaceholder(title, origin);
+        };
     const globalSessionTitleJobs = new Map();
+    function applyProvisionalTitleToSession(session) {
+        if (!session || !isSessionTitleAutoReplaceable(session.name, session.titleOrigin))
+            return false;
+        const messages = normalizeGlobalAgentMessages(session.messages || []);
+        const userMessage = messages.find((message) => message.role === "user"
+            && (isMeaningfulSessionTitleInput(message.content) || (message.files || []).length));
+        if (!userMessage)
+            return false;
+        const generated = generateProvisionalSessionTitle({
+            scope: "global",
+            userMessage: String(userMessage.content || ""),
+            attachmentNames: (userMessage.files || []).map((file) => String(file?.name || "")).filter(Boolean),
+        });
+        if (!generated?.title)
+            return false;
+        if (session.name === generated.title && String(session.titleOrigin || "") === "provisional")
+            return false;
+        session.name = generated.title;
+        session.titleOrigin = "provisional";
+        session.titleProvisionalAt = new Date().toISOString();
+        session.updatedAt = session.titleProvisionalAt;
+        return true;
+    }
     const GLOBAL_AGENT_HISTORY_METADATA_KEYS = [
         "type",
         "source",
@@ -242,7 +276,7 @@ function createGlobalAgentHistoryRuntime(deps) {
         const job = (async () => {
             const store = loadGlobalAgentHistoryStore();
             const session = (store.sessions || []).find((item) => String(item.id) === sessionId);
-            if (!session || !isSessionTitlePlaceholder(session.name, session.titleOrigin))
+            if (!session || !isSessionTitleAutoReplaceable(session.name, session.titleOrigin))
                 return { renamed: false, reason: "title_already_set", session };
             const messages = normalizeGlobalAgentMessages(session.messages || []);
             const userIndex = messages.findIndex((message) => message.role === "user"
@@ -263,7 +297,7 @@ function createGlobalAgentHistoryRuntime(deps) {
                 return { renamed: false, reason: "title_input_skipped", generated };
             const latestStore = loadGlobalAgentHistoryStore();
             const current = (latestStore.sessions || []).find((item) => String(item.id) === sessionId);
-            if (!current || !isSessionTitlePlaceholder(current.name, current.titleOrigin))
+            if (!current || !isSessionTitleAutoReplaceable(current.name, current.titleOrigin))
                 return { renamed: false, reason: "title_changed_during_generation", session: current };
             current.name = generated.title;
             current.titleOrigin = generated.source === "model" ? "model" : "fallback";
@@ -294,19 +328,22 @@ function createGlobalAgentHistoryRuntime(deps) {
             const incomingName = String(session.name || "").trim();
             const existingName = String(existing?.name || "").trim();
             const keepExistingTitle = !!existingName
-                && !isSessionTitlePlaceholder(existingName, existing?.titleOrigin)
-                && isSessionTitlePlaceholder(incomingName, session.titleOrigin);
+                && !isSessionTitleAutoReplaceable(existingName, existing?.titleOrigin)
+                && isSessionTitleAutoReplaceable(incomingName, session.titleOrigin);
             const resolvedName = keepExistingTitle ? existingName : incomingName || existingName || "全局 Agent 会话";
-            webSessions.push({
+            const resolvedSession = {
                 id,
                 name: resolvedName,
                 titleOrigin: keepExistingTitle ? existing?.titleOrigin : session.titleOrigin || existing?.titleOrigin || (isSessionTitlePlaceholder(resolvedName) ? "placeholder" : "manual"),
                 titleGeneratedAt: keepExistingTitle ? existing?.titleGeneratedAt || "" : session.titleGeneratedAt || existing?.titleGeneratedAt || "",
+                titleProvisionalAt: keepExistingTitle ? existing?.titleProvisionalAt || "" : session.titleProvisionalAt || existing?.titleProvisionalAt || "",
                 source: "web",
                 createdAt: existing?.createdAt || session.createdAt || new Date().toISOString(),
                 updatedAt: session.updatedAt || session.updated_at || lastMessageAt || existing?.updatedAt || new Date().toISOString(),
                 messages: mergeGlobalAgentMessages(existing?.messages || [], incomingMessages),
-            });
+            };
+            applyProvisionalTitleToSession(resolvedSession);
+            webSessions.push(resolvedSession);
         }
         const sessions = [...webSessions, ...preservedSessions];
         const requestedCurrentId = String(payload.currentSessionId || "").trim();
@@ -337,6 +374,11 @@ function createGlobalAgentHistoryRuntime(deps) {
         for (const session of reconciled.sessions || []) {
             if (String(session.source || "") !== "web")
                 continue;
+            const previous = (store.sessions || []).find((item) => String(item.id || "") === String(session.id || ""));
+            if (String(session.titleOrigin || "") === "provisional"
+                && (String(previous?.name || "") !== String(session.name || "") || String(previous?.titleOrigin || "") !== "provisional")) {
+                onSessionTitleChanged(session);
+            }
             void scheduleGlobalSessionAutoTitle(String(session.id || "")).catch((error) => {
                 console.warn(`[全局会话] 自动命名失败 (${session.id})：${error?.message || error}`);
             });
@@ -438,8 +480,11 @@ function createGlobalAgentHistoryRuntime(deps) {
         }
         session.messages = normalizeGlobalAgentMessages([...(session.messages || []), message]);
         session.updatedAt = new Date().toISOString();
+        const provisionalTitleChanged = role === "user" && applyProvisionalTitleToSession(session);
         store.sessions = sessions;
         saveGlobalAgentHistoryStore(store);
+        if (provisionalTitleChanged)
+            onSessionTitleChanged(session);
         if (role === "assistant") {
             void scheduleGlobalSessionAutoTitle(sessionId).catch((error) => {
                 console.warn(`[全局会话] 自动命名失败 (${sessionId})：${error?.message || error}`);

@@ -39,11 +39,12 @@ try {
     auditContext: { runtime: "project-main-agent", project: "alpha", executionId: "pchat-alpha" },
   });
   assert.ok(projectContext.catalog.discoverableMcp.some(row => row.name === "search_docs"));
-  assert.ok(!projectContext.catalog.mcp.some(row => row.name === "search_docs"));
+  assert.ok(!projectContext.catalog.loadedMcp.some(row => row.name === "search_docs"));
   assert.ok(projectContext.policyPrompt.includes("mcp__ccm__docs__search_docs"));
-  assert.ok(!projectContext.mcpPrompt.includes("mcp__ccm__docs__search_docs"));
-  assert.ok(projectContext.catalog.mcp.some(row => row.name === "list_docs"));
-  assert.ok(!projectContext.catalog.mcp.some(row => row.name === "update_docs"));
+  assert.ok(projectContext.mcpPrompt.includes("mcp__ccm__docs__search_docs"));
+  assert.ok(!projectContext.mcpPrompt.includes("mcp__ccm__docs__search_docs: search; 参数 Schema="));
+  assert.ok(projectContext.catalog.loadedMcp.some(row => row.name === "list_docs"));
+  assert.ok(!projectContext.catalog.loadedMcp.some(row => row.name === "update_docs"));
   assert.ok(projectContext.catalog.skills.some(row => row.name === "code-review"));
   const rejectedBeforeSearch = await mainTools.executeMainAgentToolRequests({
     toolContext: projectContext,

@@ -1,3 +1,4 @@
+import { type TestAgentHardeningPolicyV1 } from "../../test-agent/hardening-policy";
 export type TaskAcceptanceMode = "test_agent" | "main_agent_self_verification";
 export type TaskAcceptancePolicySnapshotV1 = {
     schema: "ccm-task-acceptance-policy-snapshot-v1";
@@ -13,14 +14,31 @@ export type TaskAcceptancePolicySnapshotV1 = {
     captured_at: string;
     checksum: string;
 };
+export type TaskAcceptancePolicySnapshotV2 = {
+    schema: "ccm-task-acceptance-policy-snapshot-v2";
+    version: 2;
+    task_id: string;
+    scope: "group" | "project";
+    scope_id: string;
+    exact_session_id: string;
+    generation: number;
+    mode: TaskAcceptanceMode;
+    test_agent_enabled: boolean;
+    max_review_rounds: number;
+    settings_revision: string;
+    hardening: TestAgentHardeningPolicyV1;
+    captured_at: string;
+    checksum: string;
+};
+export type TaskAcceptancePolicySnapshot = TaskAcceptancePolicySnapshotV1 | TaskAcceptancePolicySnapshotV2;
 export declare function taskNeedsAcceptancePolicy(task: any): boolean;
 export declare function buildTaskAcceptancePolicySnapshot(task: any, options?: {
     capturedAt?: string;
-}): TaskAcceptancePolicySnapshotV1 | null;
+}): TaskAcceptancePolicySnapshotV2 | null;
 export declare function validateTaskAcceptancePolicySnapshot(task: any, snapshot?: any): {
     valid: boolean;
     reason: string;
-    snapshot: TaskAcceptancePolicySnapshotV1 | null;
+    snapshot: TaskAcceptancePolicySnapshot | null;
 };
 export declare function resolveTaskAcceptancePolicy(task: any, options?: {
     allowLegacyCapture?: boolean;
@@ -28,6 +46,6 @@ export declare function resolveTaskAcceptancePolicy(task: any, options?: {
     legacyCaptured: boolean;
     valid: boolean;
     reason: string;
-    snapshot: TaskAcceptancePolicySnapshotV1 | null;
+    snapshot: TaskAcceptancePolicySnapshot | null;
 };
 export declare function acceptanceModeForTask(task: any): TaskAcceptanceMode | null;

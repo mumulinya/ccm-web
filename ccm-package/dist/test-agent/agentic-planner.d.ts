@@ -1,5 +1,6 @@
 import { BrowserCheckSpec, BrowserCheckResult, CommandRunResult, HttpCheckResult, HttpCheckSpec, NormalizedTestAgentWorkOrder, TestAgentRuntimeOptions, WorkOrderIssue } from "./types";
 import { TestAgentSemanticPlanV2 } from "../system/semantic-decision-runtime";
+import { type TestAgentPlanningReceiptV2 } from "./planning-fallback";
 export interface AgenticTestProjectPlan {
     name: string;
     rationale?: string;
@@ -16,6 +17,8 @@ export interface AgenticTestPlan {
 }
 export interface AgenticTestPlanningInput {
     workOrder: NormalizedTestAgentWorkOrder;
+    /** Current-Loop-only signed read-only Skill/MCP projection. */
+    readonlyCapabilityPrompt?: string;
     sourceContext: Array<{
         project: string;
         files: string[];
@@ -41,9 +44,10 @@ export interface AgenticTestFollowupPlan {
         browserChecks?: BrowserCheckSpec[];
     }>;
 }
-export declare function applyAgenticTestPlanning(workOrder: NormalizedTestAgentWorkOrder, runtime: TestAgentRuntimeOptions): Promise<{
+export declare function applyAgenticTestPlanning(workOrder: NormalizedTestAgentWorkOrder, runtime: TestAgentRuntimeOptions, preexistingIssues?: WorkOrderIssue[]): Promise<{
     workOrder: NormalizedTestAgentWorkOrder;
     issues: WorkOrderIssue[];
+    planningReceipt?: TestAgentPlanningReceiptV2;
 }>;
 export declare function planAgenticTestFollowup(input: AgenticTestFollowupInput, runtime: TestAgentRuntimeOptions): Promise<{
     workOrder: NormalizedTestAgentWorkOrder | null;

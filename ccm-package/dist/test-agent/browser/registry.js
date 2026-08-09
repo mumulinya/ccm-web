@@ -10,6 +10,8 @@ const provider_routing_1 = require("./provider-routing");
 const shared_1 = require("./shared");
 const check_execution_coverage_1 = require("./check-execution-coverage");
 const tool_call_timeout_1 = require("./tool-call-timeout");
+const isolation_1 = require("../isolation");
+const side_effect_policy_1 = require("../side-effect-policy");
 function preferredProvider(workOrder, runtime) {
     return runtime.browserProvider || workOrder.options.browserProvider || "auto";
 }
@@ -84,15 +86,40 @@ async function runBrowserVerificationWithProviders(workOrder, runtime = {}) {
     return reconciled.results;
 }
 async function runRoutedBrowserProviders(workOrder, runtime, preferred) {
-    const hasExistingSessionChecks = workOrder.projects.some(project => (0, shared_1.checksForProject)(project, workOrder.acceptanceCriteria).some(existing_session_1.browserCheckUsesExistingSession));
-    const hasStandardChecks = workOrder.projects.some(project => (0, shared_1.checksForProject)(project, workOrder.acceptanceCriteria).some(check => !(0, existing_session_1.browserCheckUsesExistingSession)(check)));
+    const isolationPolicy = (0, isolation_1.testAgentPolicyContextFromWorkOrder)(workOrder);
+    const policyDecision = (project, check) => isolationPolicy
+        ? (0, side_effect_policy_1.evaluateTestAgentBrowserSideEffect)(check, { ...isolationPolicy, project })
+        : null;
+    const policyAllows = (project, check) => {
+        const decision = policyDecision(project, check);
+        return !decision || decision.allowed;
+    };
+    const hasExistingSessionChecks = workOrder.projects.some(project => (0, shared_1.checksForProject)(project, workOrder.acceptanceCriteria).some(check => (0, existing_session_1.browserCheckUsesExistingSession)(check) && policyAllows(project, check)));
+    const hasStandardChecks = workOrder.projects.some(project => (0, shared_1.checksForProject)(project, workOrder.acceptanceCriteria).some(check => !(0, existing_session_1.browserCheckUsesExistingSession)(check) && policyAllows(project, check)));
     const results = [];
+    const policyBlocked = workOrder.projects.flatMap(project => (0, shared_1.checksForProject)(project, workOrder.acceptanceCriteria)
+        .map(check => ({ check, decision: policyDecision(project, check) }))
+        .filter(item => item.decision && !item.decision.allowed)
+        .map(item => {
+        const blocked = (0, provider_types_1.blockedBrowserResult)("none", item.check.name || "Browser check", `副作用安全门阻止浏览器检查：${item.decision.reason}`);
+        return {
+            ...blocked,
+            project: project.name,
+            name: item.check.name || "Browser check",
+            url: item.check.url || project.targetUrl || project.startupUrl || "",
+            adversarial: item.check.adversarial === true,
+            probeType: item.check.probeType || item.check.probe_type,
+            context: { ...(item.check.context || {}), sideEffectPolicy: "blocked" },
+        };
+    }));
     if (hasStandardChecks) {
-        const standardFilter = (_project, check) => !(0, existing_session_1.browserCheckUsesExistingSession)(check);
+        const standardFilter = (_project, check) => !(0, existing_session_1.browserCheckUsesExistingSession)(check) && policyAllows(_project, check);
         if (preferred === "mcp") {
             const playwrightRequiredFilter = (_project, check, index) => standardFilter(_project, check, index)
+                && policyAllows(_project, check)
                 && (0, provider_routing_1.browserProviderRouteForCheck)(workOrder, check, preferred).provider === "playwright";
             const mcpCompatibleFilter = (_project, check, index) => standardFilter(_project, check, index)
+                && policyAllows(_project, check)
                 && (0, provider_routing_1.browserProviderRouteForCheck)(workOrder, check, preferred).provider === "mcp";
             if (hasChecksMatching(workOrder, mcpCompatibleFilter)) {
                 results.push(...await runProviderChain(workOrder, runtime, [mcp_provider_1.McpBrowserProvider, playwright_provider_1.PlaywrightBrowserProvider], mcpCompatibleFilter));
@@ -106,8 +133,10 @@ async function runRoutedBrowserProviders(workOrder, runtime, preferred) {
         }
     }
     if (hasExistingSessionChecks) {
-        results.push(...await runProviderChain(workOrder, runtime, [mcp_provider_1.McpBrowserProvider], (_project, check) => (0, existing_session_1.browserCheckUsesExistingSession)(check)));
+        results.push(...await runProviderChain(workOrder, runtime, [mcp_provider_1.McpBrowserProvider], (_project, check) => (0, existing_session_1.browserCheckUsesExistingSession)(check) && policyAllows(_project, check)));
     }
+    if (policyBlocked.length)
+        results.push(...policyBlocked);
     return results.length ? results : [(0, provider_types_1.blockedBrowserResult)("none", "Browser verification", "No browser checks were routed to a provider.")];
 }
 function hasChecksMatching(workOrder, checkFilter) {

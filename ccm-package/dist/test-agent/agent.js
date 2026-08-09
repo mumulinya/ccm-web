@@ -20,12 +20,64 @@ const work_order_1 = require("./work-order");
 const artifact_retention_1 = require("./artifact-retention");
 const role_skills_1 = require("../skills/role-skills");
 const agentic_planner_1 = require("./agentic-planner");
+const planning_fallback_1 = require("./planning-fallback");
+const isolation_1 = require("./isolation");
+const readonly_capabilities_1 = require("./readonly-capabilities");
+const isolation_execution_gate_1 = require("./isolation-execution-gate");
 async function runTestAgent(input, options = {}) {
     const startedAt = (0, utils_1.nowIso)();
     const normalized = (0, work_order_1.normalizeTestAgentWorkOrder)(input, options);
-    const agentic = await (0, agentic_planner_1.applyAgenticTestPlanning)(normalized.workOrder, options);
+    let isolatedSession = null;
+    let planningInput = normalized.workOrder;
+    let planningRuntimeOptions = { ...options };
+    try {
+        const hardeningPolicy = (0, planning_fallback_1.resolveTestAgentHardeningPolicy)(normalized.workOrder);
+        isolatedSession = await (0, isolation_1.prepareTestAgentIsolation)(normalized.workOrder, {
+            riskLevel: hardeningPolicy.riskTier,
+            mode: hardeningPolicy.isolationMode,
+            executionId: normalized.workOrder.id,
+        });
+        planningInput = isolatedSession.workOrder;
+        const selectedSkillNames = Array.isArray(planningInput.metadata?.selectedSkills)
+            ? planningInput.metadata.selectedSkills
+            : Array.isArray(planningInput.metadata?.workflowDecision?.selectedSkills)
+                ? planningInput.metadata.workflowDecision.selectedSkills
+                : [];
+        const readonlyCapabilities = (0, readonly_capabilities_1.buildTestAgentReadonlyCapabilityManifest)({
+            targetName: planningInput.projects[0]?.name || "test-agent",
+            workDir: planningInput.projects[0]?.workDir || "",
+            taskText: [planningInput.originalUserGoal, ...(planningInput.acceptanceCriteria || [])].join("\n"),
+            selectedSkillNames,
+        });
+        planningInput.metadata = {
+            ...(planningInput.metadata || {}),
+            verificationHardening: {
+                ...(planningInput.metadata?.verificationHardening || {}),
+                readonlyCapabilityManifest: readonlyCapabilities.manifest,
+                readonlyCapabilityRejected: {
+                    mcp: readonlyCapabilities.rejectedMcp,
+                    skill: readonlyCapabilities.rejectedSkills,
+                },
+            },
+        };
+        planningRuntimeOptions = {
+            ...planningRuntimeOptions,
+            readonlyCapabilityPrompt: readonlyCapabilities.prompt,
+            readonlyCapabilityManifest: readonlyCapabilities.manifest,
+        };
+    }
+    catch (error) {
+        normalized.issues.push({
+            severity: "error",
+            code: "test_agent_isolation_prepare_failed",
+            message: `TestAgent isolation preparation failed: ${String(error?.message || error).slice(0, 500)}`,
+        });
+    }
+    const agentic = await (0, agentic_planner_1.applyAgenticTestPlanning)(planningInput, planningRuntimeOptions, normalized.issues);
     const planned = (0, command_planner_1.planVerificationCommands)(agentic.workOrder, [...normalized.issues, ...agentic.issues]);
-    const { workOrder, issues } = planned;
+    const isolationGate = (0, isolation_execution_gate_1.applyTestAgentIsolationExecutionGate)(planned.workOrder, isolatedSession);
+    const workOrder = isolationGate.workOrder;
+    const issues = [...planned.issues, ...isolationGate.issues];
     const modelSelectedSkills = Array.isArray(workOrder.metadata?.selectedSkills)
         ? workOrder.metadata.selectedSkills
         : Array.isArray(workOrder.metadata?.workflowDecision?.selectedSkills)
@@ -83,7 +135,7 @@ async function runTestAgent(input, options = {}) {
         })),
     });
     const executionWorkOrder = withRuntimeEnvironments(workOrder);
-    const semanticPlanningBlocked = String(workOrder.metadata?.agenticPlanning?.status || "") === "blocked";
+    const semanticPlanningBlocked = (0, planning_fallback_1.testAgentPlanningIsBlocked)(workOrder);
     let commandResults = [];
     let devServers = [];
     let httpResults = [];
@@ -91,7 +143,11 @@ async function runTestAgent(input, options = {}) {
     let browserProviderPreflight = [];
     try {
         if (semanticPlanningBlocked) {
-            const blocked = new Error("TestAgent 语义规划未通过，已阻止执行验收命令和浏览器检查");
+            const planningStatus = String(workOrder.metadata?.planningReceipt?.status
+                || workOrder.metadata?.verificationHardening?.planningReceipt?.status
+                || workOrder.metadata?.agenticPlanning?.status
+                || "blocked");
+            const blocked = new Error(`TestAgent 语义规划未通过（${planningStatus}），已阻止执行验收命令和浏览器检查`);
             blocked.code = "CCM_TEST_AGENT_SEMANTIC_PLANNING_BLOCKED";
             throw blocked;
         }
@@ -160,6 +216,35 @@ async function runTestAgent(input, options = {}) {
                 server.stop();
             }
             catch { }
+        }
+        if (isolatedSession) {
+            try {
+                const cleanupReceipt = await isolatedSession.cleanup();
+                const hardening = workOrder.metadata?.verificationHardening && typeof workOrder.metadata.verificationHardening === "object"
+                    ? workOrder.metadata.verificationHardening
+                    : {};
+                workOrder.metadata = {
+                    ...workOrder.metadata,
+                    verificationHardening: {
+                        ...hardening,
+                        isolationReceipt: cleanupReceipt,
+                    },
+                };
+                if (cleanupReceipt.status === "cleanup_failed" || cleanupReceipt.status === "recovery_required") {
+                    issues.push({
+                        severity: "error",
+                        code: "test_agent_isolation_cleanup_failed",
+                        message: `TestAgent isolation cleanup failed: ${String(cleanupReceipt.reason || cleanupReceipt.status).slice(0, 500)}`,
+                    });
+                }
+            }
+            catch (error) {
+                issues.push({
+                    severity: "error",
+                    code: "test_agent_isolation_cleanup_failed",
+                    message: `TestAgent isolation cleanup failed: ${String(error?.message || error).slice(0, 500)}`,
+                });
+            }
         }
     }
     const browserToolCalls = browserToolRecorder?.getRecords() || [];

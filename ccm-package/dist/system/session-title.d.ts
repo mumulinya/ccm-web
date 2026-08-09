@@ -6,12 +6,14 @@ export type SessionTitleInput = {
 };
 export type SessionTitleResult = {
     title: string;
-    source: "model" | "fallback" | "skipped";
+    source: "model" | "fallback" | "provisional" | "skipped";
     error?: string;
 };
 export declare function isSessionTitlePlaceholder(title: any, origin?: any): boolean;
+export declare function isSessionTitleAutoReplaceable(title: any, origin?: any): boolean;
 export declare function isMeaningfulSessionTitleInput(value: any): boolean;
 export declare function fallbackSessionTitle(input: SessionTitleInput): string;
+export declare function generateProvisionalSessionTitle(input: SessionTitleInput): SessionTitleResult;
 export declare function generateSessionTitleWithModel(input: SessionTitleInput, options?: {
     modelCall?: (request: {
         system: string;

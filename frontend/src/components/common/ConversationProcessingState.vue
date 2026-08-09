@@ -5,16 +5,17 @@ defineProps({
   title: { type: String, default: '正在理解你的需求' },
   detail: { type: String, default: '完成后会在当前会话继续回复。' },
   phase: { type: String, default: '处理中' },
+  compact: { type: Boolean, default: false },
 })
 </script>
 
 <template>
-  <div class="conversation-processing" role="status" aria-live="polite">
+  <div class="conversation-processing" :class="{ 'conversation-processing--compact': compact }" role="status" aria-live="polite">
     <LoaderCircle :size="16" class="conversation-processing__spinner" aria-hidden="true" />
     <div class="conversation-processing__copy">
-      <span>{{ phase }}</span>
+      <span v-if="!compact">{{ phase }}</span>
       <strong>{{ title }}</strong>
-      <small v-if="detail">{{ detail }}</small>
+      <small v-if="detail && !compact">{{ detail }}</small>
     </div>
     <span class="conversation-processing__pulse" aria-hidden="true"><i></i><i></i><i></i></span>
   </div>
@@ -86,6 +87,23 @@ defineProps({
 
 .conversation-processing__pulse i:nth-child(2) { animation-delay: .15s; }
 .conversation-processing__pulse i:nth-child(3) { animation-delay: .3s; }
+
+.conversation-processing--compact {
+  width: auto;
+  min-width: 0;
+  display: inline-grid;
+  grid-template-columns: 16px auto auto;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 2px;
+  border: 0;
+  background: transparent;
+}
+
+.conversation-processing--compact .conversation-processing__spinner { margin-top: 0; }
+.conversation-processing--compact .conversation-processing__copy { display: block; }
+.conversation-processing--compact .conversation-processing__copy strong { font-size: 12px; font-weight: 600; }
+.conversation-processing--compact .conversation-processing__pulse { margin-top: 0; }
 
 @keyframes conversation-processing-spin { to { transform: rotate(360deg); } }
 @keyframes conversation-processing-pulse {

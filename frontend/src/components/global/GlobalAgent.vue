@@ -14,6 +14,7 @@ import GlobalAgentFeishuBindingModal from './GlobalAgentFeishuBindingModal.vue'
 import GlobalAgentMessageList from './GlobalAgentMessageList.vue'
 import AgentToolsModal from '../common/AgentToolsModal.vue'
 import OnlineDocumentReferences from '../common/OnlineDocumentReferences.vue'
+import { useAgentExecutionEvents } from '../../composables/useAgentExecutionEvents.js'
 import { useCodeChangeDrawer } from '../../composables/useCodeChangeDrawer.js'
 import { useGlobalAgentAttachments } from '../../composables/useGlobalAgentAttachments.js'
 import { useGlobalAgentControlCenter } from '../../composables/useGlobalAgentControlCenter.js'
@@ -31,6 +32,7 @@ import { notifySessionContextUsage, useSessionContextUsage } from '../../composa
 import { usePermissionApprovals } from '../../composables/usePermissionApprovals.js'
 import { getDeliveryReport } from '../../utils/agentDisplay.js'
 import { subscribeRuntimeEvents } from '../../utils/runtimeEventBus.js'
+import { getEditableUserMessageText, hasMessageAttachments } from '../../utils/messageActions.js'
 import {
   classifyGlobalAgentRunPresentation,
   PRESENTATION_REPLY,
@@ -110,6 +112,16 @@ const {
     toast.success('网页会话历史已清空')
     scrollToBottom()
   },
+})
+
+const {
+  events: globalAgentExecutionEvents,
+  enabled: globalAgentExecutionEnabled,
+} = useAgentExecutionEvents({
+  scope: computed(() => 'global'),
+  scopeId: computed(() => 'global'),
+  exactSessionId: currentSessionId,
+  active: computed(() => props.active !== false && !!currentSessionId.value && !isCurrentSessionDraft.value),
 })
 
 const feishuBindings = ref([])
@@ -443,6 +455,25 @@ const canSendGlobalMessage = computed(() => {
   if (globalTurnBusy.value) return !!chatInput.value.trim()
   return !!chatInput.value.trim() || selectedFiles.value.length > 0
 })
+
+const editGlobalUserMessage = async (message) => {
+  if (isSending.value) return toast.info('请先等待当前回复结束或停止执行，再编辑历史消息')
+  const text = getEditableUserMessageText(message)
+  if (!text) return toast.info('这条消息没有可重新发送的文字内容')
+  const hasDifferentDraft = !!chatInput.value.trim() && chatInput.value.trim() !== text
+  const hasDirectedInput = !!pendingGlobalMissionInput.value || !!pendingGlobalClarificationInput.value
+  if ((hasDifferentDraft || selectedFiles.value.length || hasDirectedInput)
+    && !(await confirmDialog('编辑历史消息会替换当前输入框草稿，并退出正在进行的补充输入。是否继续？'))) return
+  chatInput.value = text
+  selectedFiles.value = []
+  pendingGlobalMissionInput.value = null
+  pendingGlobalClarificationInput.value = null
+  await nextTick()
+  chatInputElement.value?.focus?.()
+  toast.info(hasMessageAttachments(message)
+    ? '原消息文字已载入；历史附件不会自动复用，请重新添加附件后发送'
+    : '原消息已载入输入框，修改后发送即可重新请求')
+}
 
 const runGlobalClientCommand = createSlashCommandClientActions({
   scope: 'global',
@@ -948,7 +979,17 @@ onMounted(() => {
   loadHistory()
   void loadFeishuSessionState()
   void loadGlobalTools(false)
-  unsubscribeFeishuSessionEvents = subscribeRuntimeEvents(['feishu', 'music'], event => {
+  unsubscribeFeishuSessionEvents = subscribeRuntimeEvents(['feishu', 'music', 'global'], event => {
+    if (event?.type === 'global.session_title_changed') {
+      const sessionId = String(event?.data?.sessionId || '')
+      const session = sessions.value.find(item => item.id === sessionId)
+      const title = String(event?.data?.title || '').trim()
+      if (session && title) {
+        session.name = title
+        session.titleOrigin = String(event?.data?.titleOrigin || 'provisional')
+        saveHistory()
+      }
+    }
     if (event?.type === 'feishu.session_binding_changed'
       || event?.type === 'feishu.session_title_changed'
       || event?.type === 'feishu.inbound') {
@@ -1339,6 +1380,8 @@ const handleGitCommitCardSubmit = async (msg) => {
       
       <GlobalAgentMessageList
         :messages="messages"
+        :execution-events="globalAgentExecutionEvents"
+        :execution-events-enabled="globalAgentExecutionEnabled"
         :current-session-id="currentSessionId"
         :draft="isCurrentSessionDraft"
         :search-highlight-msg-index="searchHighlightMsgIndex"
@@ -1368,6 +1411,7 @@ const handleGitCommitCardSubmit = async (msg) => {
         :handle-git-commit-card-submit="handleGitCommitCardSubmit"
         :zoom-image="zoomImage"
         :format-size="formatSize"
+        @edit-message="editGlobalUserMessage"
       />
 
       <div class="chat-footer">

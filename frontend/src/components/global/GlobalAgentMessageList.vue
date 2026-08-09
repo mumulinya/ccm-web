@@ -6,6 +6,7 @@ import MessageNavigator from '../common/MessageNavigator.vue'
 import CommandResultCard from '../common/CommandResultCard.vue'
 import ConversationMessageShell from '../common/ConversationMessageShell.vue'
 import ConversationProcessingState from '../common/ConversationProcessingState.vue'
+import AgentExecutionTranscript from '../common/AgentExecutionTranscript.vue'
 import {
   buildGlobalStreamCurrentTodoSummary,
   globalDispatchLaunchRows,
@@ -26,9 +27,12 @@ import {
   globalAttachmentUrl,
   isGlobalImageAttachment,
 } from '../../utils/globalAgentAttachments.js'
+import { getCopyableMessageText } from '../../utils/messageActions.js'
 
 defineProps({
   messages: { type: Array, default: () => [] },
+  executionEvents: { type: Array, default: () => [] },
+  executionEventsEnabled: { type: Boolean, default: true },
   currentSessionId: { type: String, default: '' },
   draft: Boolean,
   searchHighlightMsgIndex: { type: Number, default: -1 },
@@ -59,6 +63,8 @@ defineProps({
   zoomImage: { type: Function, required: true },
   formatSize: { type: Function, required: true },
 })
+
+const emit = defineEmits(['edit-message'])
 </script>
 
 <template>
@@ -84,7 +90,17 @@ defineProps({
               :class="[msg.role, { 'search-hit': searchHighlightMsgIndex === index, 'structured-message': !!msg.type && msg.type !== 'text' }]"
               :data-message-type="msg.type || undefined"
               :data-message-id="msg.id || undefined"
+              :copy-text="getCopyableMessageText(msg, getVisibleGlobalMessageContent(msg))"
+              :editable="msg.role === 'user' && !!String(msg.content || '').trim()"
+              :edit-disabled="isSending"
+              @edit="emit('edit-message', msg)"
             >
+            <AgentExecutionTranscript
+              :events="executionEvents"
+              :enabled="executionEventsEnabled"
+              :messages="messages"
+              :message-index="index"
+            />
             <div class="chat-bubble">
               <!-- 助手消息判定 -->
               <template v-if="msg.role === 'assistant'">
@@ -433,10 +449,11 @@ defineProps({
           <ConversationMessageShell
             v-if="isSending && (!currentSession?.messages?.length || currentSession.messages[currentSession.messages.length - 1].role !== 'assistant')"
             role="assistant"
+            compact
             streaming
             class="chat-bubble-wrapper assistant typing"
           >
-            <ConversationProcessingState title="全局 Agent 正在理解你的需求" detail="正在判断是直接回复、创建任务还是分派到对应工作区。" />
+            <ConversationProcessingState compact title="正在思考…" detail="" />
           </ConversationMessageShell>
         </div>
       </div>

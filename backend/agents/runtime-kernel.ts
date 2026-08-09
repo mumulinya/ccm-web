@@ -15,6 +15,7 @@ import {
   getTrace,
   listTraces,
 } from "../system/reliability-ledger";
+import { projectContextSourceToolResultForPersistence } from "../system/context-source-tool-result-projection";
 import {
   extractGroupPostTurnSummaryDeliveryCapsule,
   validateGroupPostTurnSummaryDeliveryCapsule,
@@ -2057,7 +2058,12 @@ export function buildArtifactBudget(value: any, maxChars = 12_000) {
 export function recordAgentRuntimeLifecycle(input: AgentRuntimeLifecycleInput) {
   const permission = evaluateAgentRuntimePermission(input);
   const context_budget = buildContextBudget({ context: input.data?.context || input.data?.prompt || input.message || "" });
-  const artifact_budget = buildArtifactBudget(input.data?.observation || input.data?.result || input.data || {});
+  const persistedData = input.data && typeof input.data === "object" ? {
+    ...input.data,
+    ...(input.data.observation !== undefined ? { observation: projectContextSourceToolResultForPersistence(input.action, input.data.observation) } : {}),
+    ...(input.data.result !== undefined ? { result: projectContextSourceToolResultForPersistence(input.action, input.data.result) } : {}),
+  } : input.data;
+  const artifact_budget = buildArtifactBudget(persistedData?.observation || persistedData?.result || persistedData || {});
   const record: AgentRuntimeLifecycleRecord = {
     id: `arl_${Date.now().toString(36)}_${hash(input, 8)}`,
     type: "agent_runtime.lifecycle",
@@ -2075,7 +2081,7 @@ export function recordAgentRuntimeLifecycle(input: AgentRuntimeLifecycleInput) {
       truncated: artifact_budget.truncated,
       artifact_hash: artifact_budget.artifact_hash,
     },
-    data: input.data || {},
+    data: persistedData || {},
   };
   if (input.traceId) {
     appendTraceEvent(input.traceId, {

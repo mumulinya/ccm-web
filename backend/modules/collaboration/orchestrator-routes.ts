@@ -32,7 +32,7 @@ import {
 } from "../../system/context-engine-recovery";
 
 type OrchestratorRouteDeps = {
-  buildCoordinatorSharedFilesContext: (ctx: any, group: any) => string;
+  buildCoordinatorSharedFilesContext: (ctx: any, group: any, options?: { groupSessionId?: string; message?: string; generation?: number }) => string;
   runGroupOrchestrator: (options: any) => Promise<any>;
   buildDailyDevAgentDiagnostics: () => any;
   replayAgentTrace: (traceId: string) => any;

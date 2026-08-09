@@ -45,6 +45,9 @@ const group_memory_auto_compact_circuit_breaker_1 = require("../collaboration/gr
 const typed_memory_promotion_1 = require("../collaboration/typed-memory-promotion");
 const typed_memory_conflict_1 = require("../collaboration/typed-memory-conflict");
 const group_session_memory_model_extraction_1 = require("../collaboration/group-session-memory-model-extraction");
+const context_source_history_maintenance_1 = require("../../system/context-source-history-maintenance");
+const maintenance_1 = require("../../test-agent/maintenance");
+const local_auth_1 = require("../system/local-auth");
 function projectSummaries() {
     const longTerm = (0, memory_control_center_api_1.listJsonFiles)(memory_control_center_types_1.PROJECT_MEMORY_DIR).flatMap(file => {
         const memory = (0, memory_control_center_api_1.readMemoryFile)(file);
@@ -192,9 +195,20 @@ function customizationScopeId(value) {
     return String(value || "").trim().replace("::gcs_", "--gcs_");
 }
 function handleMemoryCenterApi(pathname, req, res, parsed) {
-    if (!pathname.startsWith("/api/memory-center/"))
+    if (!pathname.startsWith("/api/memory-center/") && !pathname.startsWith("/api/test-agent/maintenance/"))
         return false;
     const query = parsed?.query || {};
+    if (pathname.startsWith("/api/test-agent/maintenance/")) {
+        const auth = (0, local_auth_1.resolveLocalAuthSession)(req);
+        if (!auth) {
+            (0, utils_1.sendJson)(res, { success: false, error: "请先登录", code: "AUTH_REQUIRED" }, 401);
+            return true;
+        }
+        if (auth.user.role !== "admin") {
+            (0, utils_1.sendJson)(res, { success: false, error: "仅管理员可以维护历史 TestAgent 数据", code: "ADMIN_REQUIRED" }, 403);
+            return true;
+        }
+    }
     if (pathname === "/api/memory-center/overview" && req.method === "GET") {
         (0, utils_1.sendJson)(res, buildMemoryCenterOverview());
         return true;
@@ -397,6 +411,72 @@ function handleMemoryCenterApi(pathname, req, res, parsed) {
                 const scopeId = customizationScopeId(data.scopeId || data.scope_id);
                 const profile = (0, group_session_memory_model_extraction_1.saveGroupSessionMemoryCustomTemplate)(scopeId, data.content, { reset: data.reset === true });
                 (0, utils_1.sendJson)(res, { success: true, profile });
+            }
+            catch (error) {
+                (0, utils_1.sendJson)(res, { success: false, error: String(error?.message || error) }, 400);
+            }
+        }, error => (0, utils_1.sendJson)(res, { success: false, error: String(error?.message || error) }, 400));
+        return true;
+    }
+    if (pathname === "/api/memory-center/context-source-maintenance/preview" && req.method === "POST") {
+        readBody(req, data => {
+            try {
+                (0, utils_1.sendJson)(res, (0, context_source_history_maintenance_1.previewContextSourceMaintenance)(data));
+            }
+            catch (error) {
+                (0, utils_1.sendJson)(res, { success: false, error: String(error?.message || error) }, 400);
+            }
+        }, error => (0, utils_1.sendJson)(res, { success: false, error: String(error?.message || error) }, 400));
+        return true;
+    }
+    if (pathname === "/api/memory-center/context-source-maintenance/apply" && req.method === "POST") {
+        readBody(req, data => {
+            try {
+                (0, utils_1.sendJson)(res, (0, context_source_history_maintenance_1.applyContextSourceMaintenance)(data));
+            }
+            catch (error) {
+                (0, utils_1.sendJson)(res, { success: false, error: String(error?.message || error) }, 409);
+            }
+        }, error => (0, utils_1.sendJson)(res, { success: false, error: String(error?.message || error) }, 400));
+        return true;
+    }
+    if (pathname === "/api/memory-center/context-source-maintenance/rollback" && req.method === "POST") {
+        readBody(req, data => {
+            try {
+                (0, utils_1.sendJson)(res, (0, context_source_history_maintenance_1.rollbackContextSourceMaintenance)(data));
+            }
+            catch (error) {
+                (0, utils_1.sendJson)(res, { success: false, error: String(error?.message || error) }, 400);
+            }
+        }, error => (0, utils_1.sendJson)(res, { success: false, error: String(error?.message || error) }, 400));
+        return true;
+    }
+    if (pathname === "/api/test-agent/maintenance/preview" && req.method === "POST") {
+        readBody(req, data => {
+            try {
+                (0, utils_1.sendJson)(res, (0, maintenance_1.previewTestAgentMaintenance)(data));
+            }
+            catch (error) {
+                (0, utils_1.sendJson)(res, { success: false, error: String(error?.message || error) }, 400);
+            }
+        }, error => (0, utils_1.sendJson)(res, { success: false, error: String(error?.message || error) }, 400));
+        return true;
+    }
+    if (pathname === "/api/test-agent/maintenance/apply" && req.method === "POST") {
+        readBody(req, data => {
+            try {
+                (0, utils_1.sendJson)(res, (0, maintenance_1.applyTestAgentMaintenance)(data));
+            }
+            catch (error) {
+                (0, utils_1.sendJson)(res, { success: false, error: String(error?.message || error) }, 409);
+            }
+        }, error => (0, utils_1.sendJson)(res, { success: false, error: String(error?.message || error) }, 400));
+        return true;
+    }
+    if (pathname === "/api/test-agent/maintenance/rollback" && req.method === "POST") {
+        readBody(req, data => {
+            try {
+                (0, utils_1.sendJson)(res, (0, maintenance_1.rollbackTestAgentMaintenance)(data));
             }
             catch (error) {
                 (0, utils_1.sendJson)(res, { success: false, error: String(error?.message || error) }, 400);

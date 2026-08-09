@@ -16,6 +16,7 @@ const access = require(path.join(root, 'ccm-package', 'dist', 'modules', 'knowle
 files.saveRagEmbeddingConfig({ mode: 'lexical' })
 const checks = []
 const check = (name, fn) => { fn(); checks.push({ name, pass: true }) }
+const hasCitation = (citations, filename) => citations.some(item => item.startsWith(`${filename}#`))
 
 function store(name, text, scope, visibility = 'shared') {
   files.storeKnowledgeBuffer(name, Buffer.from(`# ${name}\n\n${text}`), {
@@ -38,33 +39,34 @@ try {
   check('no Embedding configuration uses local hybrid retrieval', () => {
     assert.equal(local.embeddingMode, 'lexical')
     assert.equal(local.fallback, true)
-    assert.deepEqual(local.citations, ['global-shared.md#0'])
+    assert.equal(local.citations.length, 1)
+    assert.equal(hasCitation(local.citations, 'global-shared.md'), true)
   })
 
   const globalAgent = await access.searchAgentKnowledge('GLOBAL-RESTRICTED-842', { role: 'global-agent' })
-  check('global Agent can read restricted global knowledge', () => assert.ok(globalAgent.citations.includes('global-restricted.md#0')))
+  check('global Agent can read restricted global knowledge', () => assert.ok(hasCitation(globalAgent.citations, 'global-restricted.md')))
   const projectCannotReadRestrictedGlobal = await access.searchAgentKnowledge('GLOBAL-RESTRICTED-842', { role: 'project-agent', project: 'project-a' })
-  check('project Agent cannot read restricted global knowledge', () => assert.equal(projectCannotReadRestrictedGlobal.citations.includes('global-restricted.md#0'), false))
+  check('project Agent cannot read restricted global knowledge', () => assert.equal(hasCitation(projectCannotReadRestrictedGlobal.citations, 'global-restricted.md'), false))
 
   const groupOwn = await access.searchAgentKnowledge('GROUP-A-953', {
     role: 'group-main-agent', project: '__coordinator__', groupId: 'group-a', projects: [{ name: 'project-a' }, { name: 'project-b' }],
   })
-  check('group main Agent reads its exact restricted group knowledge', () => assert.ok(groupOwn.citations.includes('group-a.md#0')))
+  check('group main Agent reads its exact restricted group knowledge', () => assert.ok(hasCitation(groupOwn.citations, 'group-a.md')))
   const groupSibling = await access.searchAgentKnowledge('GROUP-B-164', {
     role: 'group-main-agent', project: '__coordinator__', groupId: 'group-a', projects: [{ name: 'project-a' }, { name: 'project-b' }],
   })
-  check('group main Agent cannot read a sibling group', () => assert.equal(groupSibling.citations.includes('group-b.md#0'), false))
+  check('group main Agent cannot read a sibling group', () => assert.equal(hasCitation(groupSibling.citations, 'group-b.md'), false))
 
   const sharedMemberProject = await access.searchAgentKnowledge('PROJECT-B-386', {
     role: 'group-main-agent', project: '__coordinator__', groupId: 'group-a', projects: [{ name: 'project-a' }, { name: 'project-b' }],
   })
-  check('group main Agent reads shared member-project knowledge', () => assert.ok(sharedMemberProject.citations.includes('project-b.md#0')))
+  check('group main Agent reads shared member-project knowledge', () => assert.ok(hasCitation(sharedMemberProject.citations, 'project-b.md')))
   const restrictedMemberProject = await access.searchAgentKnowledge('PROJECT-A-275', {
     role: 'group-main-agent', project: '__coordinator__', groupId: 'group-a', projects: [{ name: 'project-a' }],
   })
-  check('group main Agent does not implicitly read restricted member-project knowledge', () => assert.equal(restrictedMemberProject.citations.includes('project-a.md#0'), false))
+  check('group main Agent does not implicitly read restricted member-project knowledge', () => assert.equal(hasCitation(restrictedMemberProject.citations, 'project-a.md'), false))
   const exactProject = await access.searchAgentKnowledge('PROJECT-A-275', { role: 'project-agent', project: 'project-a' })
-  check('exact project Agent reads its restricted project knowledge', () => assert.ok(exactProject.citations.includes('project-a.md#0')))
+  check('exact project Agent reads its restricted project knowledge', () => assert.ok(hasCitation(exactProject.citations, 'project-a.md')))
 
   files.saveRagEmbeddingConfig({ mode: 'remote', enabled: true, apiUrl: 'http://127.0.0.1:9/v1', apiKey: 'selftest', model: 'unreachable-test-model' })
   await index.rebuildKnowledgeIndex('agent-knowledge-remote-degraded')
@@ -72,7 +74,7 @@ try {
   check('remote Embedding failure falls back to local retrieval', () => {
     assert.equal(degraded.embeddingMode, 'lexical-fallback')
     assert.equal(degraded.fallback, true)
-    assert.ok(degraded.citations.includes('global-shared.md#0'))
+    assert.ok(hasCitation(degraded.citations, 'global-shared.md'))
     assert.ok(degraded.embeddingError)
   })
 

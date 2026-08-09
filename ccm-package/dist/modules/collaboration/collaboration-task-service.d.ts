@@ -128,6 +128,22 @@ export declare function buildTaskTerminalDecisionV2(task: any, updates?: any): {
     acceptance_state: string;
     actor: string;
     gate_passed: boolean;
+    evidence_registry: {
+        evidenceIds: string[];
+        validCount: number;
+        staleCount: number;
+        acceptance: {
+            satisfied: boolean;
+            criteria: {
+                criterionId: string;
+                description: string;
+                requiredEvidenceTypes: string[];
+                status: string;
+                evidenceIds: string[];
+            }[];
+            evidenceIds: string[];
+        };
+    };
     evidence_checksum: string;
     reason: string;
     decided_at: string;

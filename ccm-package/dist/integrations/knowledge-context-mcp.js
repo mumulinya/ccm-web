@@ -44,6 +44,8 @@ const internal_mcp_runtime_1 = require("./internal-mcp-runtime");
 const internal_mcp_task_store_1 = require("./internal-mcp-task-store");
 const memory_context_consumption_receipt_1 = require("./memory-context-consumption-receipt");
 const memory_1 = require("../projects/memory");
+const context_budget_1 = require("../system/context-budget");
+const main_agent_context_source_continuity_1 = require("../system/main-agent-context-source-continuity");
 const third_party_memory_snapshot_1 = require("./third-party-memory-snapshot");
 exports.KNOWLEDGE_CONTEXT_MCP_SERVER_NAME = "ccm__knowledge_context";
 function buildKnowledgeContextMcpServerConfig(context) {
@@ -157,8 +159,14 @@ function scopeAllowed(metadata, context) {
     return (0, knowledge_access_1.isKnowledgeDocumentAllowed)(metadata, context);
 }
 async function scopedSearch(context, query, limit, filename = "") {
-    const search = await (0, knowledge_access_1.searchAgentKnowledge)(query, context, { limit, filename: filename || undefined, maxChunkChars: 5000 });
+    const search = await (0, knowledge_access_1.searchAgentKnowledge)(query, context, { limit, filename: filename || undefined, maxChunkChars: 5000, continuityIdentity: contextSourceIdentity(context), boundaryGeneration: context.boundaryGeneration });
     return search.results;
+}
+function contextSourceIdentity(context) {
+    const agentKind = context.role === "group-main-agent" ? "group" : context.role === "global-agent" ? "global" : "project";
+    const scopeId = agentKind === "group" ? context.groupId : agentKind === "global" ? "global" : context.project;
+    const exactSessionId = context.projectSessionId || context.taskAgentSessionId || context.groupSessionId || context.nativeSessionId || context.taskId;
+    return { agentKind, scope: agentKind, scopeId, exactSessionId, generation: Number(context.nativeGeneration || context.boundaryGeneration || 0) };
 }
 async function callTool(context, name, args) {
     if (name === "acknowledge_memory_context") {
@@ -238,7 +246,22 @@ async function callTool(context, name, args) {
         const offset = Math.max(0, Number(args?.offset || 0));
         const maxChars = Math.max(500, Math.min(30000, Number(args?.max_chars || 12000)));
         const content = String(parsed.content || "");
-        return { success: true, filename, parser: parsed.parser, status: parsed.status, offset, total_chars: content.length, has_more: offset + maxChars < content.length, content: content.slice(offset, offset + maxChars), citations: (0, knowledge_index_1.getKnowledgeDocumentChunks)(filename).map(chunk => chunk.citation) };
+        const selectedContent = content.slice(offset, offset + maxChars);
+        const chunks = (0, knowledge_index_1.getKnowledgeDocumentChunks)(filename);
+        (0, main_agent_context_source_continuity_1.recordContextSourceReceipts)(contextSourceIdentity(context), [{
+                sourceKind: "knowledge",
+                sourceId: filename,
+                documentName: filename,
+                chunkIds: chunks.filter(chunk => chunk.charEnd > offset && chunk.charStart < offset + maxChars).map(chunk => chunk.id),
+                headings: chunks.filter(chunk => chunk.charEnd > offset && chunk.charStart < offset + maxChars).map(chunk => chunk.heading).filter(Boolean),
+                revision: String(metadata[filename].version || ""),
+                checksum: metadata[filename].content_hash,
+                tokenCount: (0, context_budget_1.estimateTextTokens)(selectedContent),
+                injected: true,
+                state: "injected",
+                boundaryGeneration: context.boundaryGeneration,
+            }]);
+        return { success: true, filename, parser: parsed.parser, status: parsed.status, offset, total_chars: content.length, has_more: offset + maxChars < content.length, content: selectedContent, citations: chunks.map(chunk => chunk.citation) };
     }
     if (name === "list_citations") {
         await ensureIndex();

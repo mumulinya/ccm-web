@@ -43,6 +43,7 @@ exports.eventsAnchoredToMessages = eventsAnchoredToMessages;
 exports.mergeConversationWithExecution = mergeConversationWithExecution;
 exports.runSessionExecutionLedgerSelfTest = runSessionExecutionLedgerSelfTest;
 const crypto = __importStar(require("crypto"));
+const context_source_tool_result_projection_1 = require("./context-source-tool-result-projection");
 const SECRET_KEY = /(?:^|_)(?:api[_-]?key|access[_-]?token|refresh[_-]?token|authorization|cookie|password|passwd|secret|credential)(?:$|_)/i;
 const BINARY_KEY = /(?:^|_)(?:data|base64|bytes|image[_-]?data|file[_-]?data)(?:$|_)/i;
 const DATA_URL = /data:(?:image|application\/pdf)\/[a-z0-9.+-]+;base64,[a-z0-9+/=]{64,}/gi;
@@ -87,7 +88,9 @@ function createSessionExecutionEvent(input) {
         traceId: String(input.traceId || ""),
         anchorMessageId: String(input.anchorMessageId || ""),
         status,
-        payload: sanitizeSessionExecutionValue(input.payload ?? null),
+        payload: sanitizeSessionExecutionValue(input.type === "tool_result"
+            ? (0, context_source_tool_result_projection_1.projectContextSourceToolResultForPersistence)(input.toolName, input.payload ?? null)
+            : input.payload ?? null),
     };
     const toolCallId = normalized.toolCallId || `tc_${hash([normalized.runId, normalized.toolName, timestamp, normalized.type])}`;
     return {

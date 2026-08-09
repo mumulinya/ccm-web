@@ -51,6 +51,9 @@ const child_process_1 = require("child_process");
 const utils_1 = require("../../core/utils");
 const artifact_verifier_1 = require("../../test-agent/artifact-verifier");
 const git_workspace_runtime_1 = require("../tools/git-workspace-runtime");
+const operation_registry_1 = require("../../system/operation-registry");
+const evidence_projection_1 = require("../../test-agent/evidence-projection");
+const runtime_fingerprint_1 = require("../../test-agent/runtime-fingerprint");
 const RUN_DIR = path.join(utils_1.CCM_DIR, "test-agent-runs");
 const HANDOFF_DIR = path.join(utils_1.CCM_DIR, "test-agent-handoffs");
 const activeByKey = new Map();
@@ -129,7 +132,24 @@ function writeJsonAtomic(file, value) {
 function saveRecord(record) {
     if (purgedRunIds.has(record.id))
         return;
-    writeJsonAtomic(recordFile(record.id), record);
+    const projectedResult = record.result === undefined
+        ? undefined
+        : (0, evidence_projection_1.projectTestAgentExecutionResultForPersistence)(record.result);
+    const persisted = {
+        ...record,
+        ...(projectedResult === undefined ? {} : { result: projectedResult }),
+        persistenceProjection: {
+            schema: "ccm-test-agent-runner-record-persistence-v2",
+            contentStored: false,
+            redactedResultFields: projectedResult?.persistenceProjection?.redactedCount || 0,
+            checksum: crypto.createHash("sha256").update(JSON.stringify({
+                id: record.id,
+                status: record.status,
+                result: projectedResult || null,
+            })).digest("hex"),
+        },
+    };
+    writeJsonAtomic(recordFile(record.id), persisted);
 }
 function loadRecords() {
     ensureDirs();
@@ -214,6 +234,24 @@ function readLimited(file, max = 32 * 1024 * 1024) {
     }
     finally {
         fs.closeSync(fd);
+    }
+}
+/** stdout/stderr are IPC scratch files, not durable evidence. They exist only
+ * while a child is running (or while a restarted runner parses its terminal
+ * JSON), and are removed immediately after the in-memory result is built. */
+function removeTransientOutputFiles(record) {
+    for (const file of [record.stdoutPath, record.stderrPath]) {
+        if (!file)
+            continue;
+        const resolved = path.resolve(file);
+        const relative = path.relative(RUN_DIR, resolved);
+        if (relative.startsWith("..") || path.isAbsolute(relative))
+            continue;
+        try {
+            if (fs.existsSync(resolved))
+                fs.unlinkSync(resolved);
+        }
+        catch { }
     }
 }
 function parseResult(mode, stdout) {
@@ -314,6 +352,16 @@ function captureTestAgentSourceBinding(handoff) {
         const declaredFiles = [...new Set((project?.changedFiles || project?.changed_files || []).map(String).filter(Boolean))].sort();
         const fileEvidence = declaredFileEvidence(project, realWorkDir);
         const fileHash = hash(fileEvidence);
+        const runtimeFingerprint = (0, runtime_fingerprint_1.captureTestAgentRuntimeFingerprint)({
+            workDir: realWorkDir,
+            targetUrl: project?.targetUrl || project?.target_url || project?.startupUrl || project?.startup_url || "",
+            providerFamily: project?.providerFamily || project?.provider_family || "",
+            providerCapabilityVersion: project?.providerCapabilityVersion || project?.provider_capability_version || "",
+            isolationMode: project?.isolationMode || project?.isolation_mode || "runner",
+            isolationEnvironmentId: project?.isolationEnvironmentId || project?.isolation_environment_id || "",
+            testTenantReference: project?.testTenantReference || project?.test_tenant_reference || "",
+            credentialReference: project?.credentialReference || project?.credential_reference || "",
+        });
         return {
             name: String(project?.name || `project-${index + 1}`),
             workDir,
@@ -323,11 +371,13 @@ function captureTestAgentSourceBinding(handoff) {
             declaredFiles,
             declaredFileHash: fileHash,
             declaredFileEvidence: fileEvidence,
-            fingerprint: hash({ realWorkDir: realWorkDir.toLowerCase(), gitHead, gitStatusHash, fileHash }),
+            runtimeFingerprint,
+            fingerprint: hash({ realWorkDir: realWorkDir.toLowerCase(), gitHead, gitStatusHash, fileHash, runtimeFingerprint: runtimeFingerprint.checksum }),
         };
     });
     return {
-        schema: "ccm-test-agent-source-binding-v1",
+        schema: "ccm-test-agent-source-binding-v2",
+        version: 2,
         capturedAt: nowIso(),
         fingerprint: hash(projects.map(project => project.fingerprint)),
         projects,
@@ -374,9 +424,10 @@ function resolveCliPath() {
 function writeHandoff(handoff) {
     ensureDirs();
     const id = safeId(handoff?.id, "test-agent-handoff");
-    const file = path.join(HANDOFF_DIR, `${id}-${hash(handoff).slice(0, 16)}.handoff.json`);
+    const projected = (0, evidence_projection_1.projectTestAgentHandoffForPersistence)(handoff);
+    const file = path.join(HANDOFF_DIR, `${id}-${hash(projected).slice(0, 16)}.handoff.json`);
     if (!fs.existsSync(file))
-        fs.writeFileSync(file, `${JSON.stringify(handoff, null, 2)}\n`, "utf-8");
+        fs.writeFileSync(file, `${JSON.stringify(projected, null, 2)}\n`, "utf-8");
     return file;
 }
 function resultFromRecord(record, reused) {
@@ -424,6 +475,7 @@ async function waitForRecoveredRecord(record) {
         record.error = "TestAgent process ended without a contract-valid result.";
     saveRecord(record);
     const result = resultFromRecord(record, true);
+    removeTransientOutputFiles(record);
     purgedRunIds.delete(record.id);
     return result;
 }
@@ -454,7 +506,9 @@ function finalizeRecord(record, status, exitCode, signal, error = "") {
     record.finishedAt = nowIso();
     record.heartbeatAt = record.finishedAt;
     saveRecord(record);
-    return resultFromRecord(record, false);
+    const result = resultFromRecord(record, false);
+    removeTransientOutputFiles(record);
+    return result;
 }
 async function startJob(input, key) {
     ensureDirs();
@@ -565,6 +619,15 @@ async function startJob(input, key) {
 async function runTestAgentCliJob(input) {
     const source = captureTestAgentSourceBinding(input.handoff);
     const key = buildTestAgentRunnerJobKey(input, source.fingerprint);
+    const rawInput = input;
+    const operation = (0, operation_registry_1.reserveOperation)({
+        operationType: "test",
+        normalizedArguments: { taskId: input.taskId, handoff: input.handoff?.acceptanceCriteria || input.handoff?.acceptance_criteria || [], runner: rawInput.runner || rawInput.cli || "test-agent" },
+        scope: rawInput.scope || "project",
+        target: input.taskId,
+        repoStateFingerprint: source.fingerprint,
+        toolVersion: rawInput.runner || rawInput.cli || "test-agent",
+    });
     const active = activeByKey.get(key);
     if (active)
         return active;
@@ -574,7 +637,9 @@ async function runTestAgentCliJob(input) {
     if (existing?.result
         && existing.sourceStable !== false
         && (existing.status === "completed" || existing.status === "failed")) {
-        return resultFromRecord(existing, true);
+        const reused = resultFromRecord(existing, true);
+        (0, operation_registry_1.completeOperation)(operation.record.operationId, { status: "succeeded", evidenceIds: existing.result?.evidenceIds || [] });
+        return reused;
     }
     if (existing?.status === "running" && processAlive(existing.pid)) {
         const recovered = waitForRecoveredRecord(existing);
@@ -586,7 +651,13 @@ async function runTestAgentCliJob(input) {
             activeByKey.delete(key);
         }
     }
-    const promise = startJob(input, key);
+    const promise = startJob(input, key).then((result) => {
+        (0, operation_registry_1.completeOperation)(operation.record.operationId, { status: result?.status === "completed" || result?.status === "failed" ? "succeeded" : "failed", evidenceIds: result?.evidenceIds || [] });
+        return result;
+    }).catch(error => {
+        (0, operation_registry_1.completeOperation)(operation.record.operationId, { status: "failed" });
+        throw error;
+    });
     activeByKey.set(key, promise);
     try {
         return await promise;
@@ -647,6 +718,7 @@ function reconcileTestAgentRunnerRecords() {
         record.heartbeatAt = record.finishedAt;
         record.recoveredAfterRestart = true;
         saveRecord(record);
+        removeTransientOutputFiles(record);
         interrupted += record.status === "interrupted" ? 1 : 0;
     }
     const retention = pruneTestAgentRunnerRecords();

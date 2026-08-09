@@ -1,7 +1,11 @@
 import type { IncomingMessage, ServerResponse } from "http";
 import type { UrlWithParsedQuery } from "url";
 type OrchestratorRouteDeps = {
-    buildCoordinatorSharedFilesContext: (ctx: any, group: any) => string;
+    buildCoordinatorSharedFilesContext: (ctx: any, group: any, options?: {
+        groupSessionId?: string;
+        message?: string;
+        generation?: number;
+    }) => string;
     runGroupOrchestrator: (options: any) => Promise<any>;
     buildDailyDevAgentDiagnostics: () => any;
     replayAgentTrace: (traceId: string) => any;

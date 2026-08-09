@@ -9,11 +9,19 @@ const CURRENT_ID_STORAGE_KEY = 'cc_global_assistant_current_id_v2'
 const SESSION_MESSAGE_LIMIT = 120
 const isPlaceholderSessionTitle = (name, origin = '') => {
   const normalizedOrigin = String(origin || '').toLowerCase()
-  if (normalizedOrigin === 'manual') return false
-  if (normalizedOrigin === 'placeholder') return true
+  if (['manual', 'model', 'fallback'].includes(normalizedOrigin)) return false
+  if (['placeholder', 'provisional'].includes(normalizedOrigin)) return true
   return !String(name || '').trim()
     || ['新会话', '新建飞书会话', '默认会话', '全局 Agent 会话', '飞书全局 Agent', '未命名会话'].includes(String(name || '').trim())
     || /^会话\s*\d+\s*[·-]/.test(String(name || '').trim())
+}
+
+const sessionTitleRank = (name, origin = '') => {
+  const normalizedOrigin = String(origin || '').toLowerCase()
+  if (normalizedOrigin === 'manual') return 4
+  if (['model', 'fallback'].includes(normalizedOrigin)) return 3
+  if (normalizedOrigin === 'provisional') return 2
+  return isPlaceholderSessionTitle(name, origin) ? 1 : 4
 }
 
 const createWelcomeMessage = (welcome) => ({
@@ -399,7 +407,7 @@ export function useGlobalAgentSessions(options = {}) {
           existing.feishuBindings = serverSession.feishuBindings || []
           changed = true
         }
-        if (isPlaceholderSessionTitle(existing.name, existing.titleOrigin) && !isPlaceholderSessionTitle(serverSession.name, serverSession.titleOrigin)) {
+        if (sessionTitleRank(serverSession.name, serverSession.titleOrigin) > sessionTitleRank(existing.name, existing.titleOrigin)) {
           existing.name = serverSession.name
           existing.titleOrigin = serverSession.titleOrigin || 'model'
           existing.titleGeneratedAt = serverSession.titleGeneratedAt || ''

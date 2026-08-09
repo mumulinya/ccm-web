@@ -59,6 +59,10 @@ const source_ingestion_1 = require("../requirements/source-ingestion");
 const db_1 = require("../../core/db");
 const task_acceptance_policy_1 = require("./task-acceptance-policy");
 const main_agent_self_verification_1 = require("./main-agent-self-verification");
+const unified_evidence_registry_1 = require("../../system/unified-evidence-registry");
+const failure_record_1 = require("../../system/failure-record");
+const task_transition_ledger_1 = require("../../system/task-transition-ledger");
+const completion_gate_1 = require("../../test-agent/completion-gate");
 const group_orchestrator_1 = require("./group-orchestrator");
 const memory_1 = require("./memory");
 const logs_1 = require("./logs");
@@ -185,6 +189,7 @@ function createTaskWithScopedIdentity(task) {
         group_session_id: taskGroupSessionId || null,
         assign_type: task.assign_type || "project",
         status: "pending",
+        revision: 0,
         priority: task.priority || "normal",
         auto_execute: !!(task.auto_execute || task.autoExecute),
         queue_scope: task.queue_scope || task.queueScope || (taskGroupSessionId || taskProjectSessionId ? "conversation_serial" : ""),
@@ -893,12 +898,24 @@ function hasStructuredTaskAcceptanceEvidence(task, updates = {}) {
         }
         const summary = updates.delivery_summary || task?.delivery_summary || {};
         const review = updates.test_agent_review || task?.test_agent_review || updates.delivery_summary?.test_agent || task?.delivery_summary?.test_agent;
+        const hardeningGate = review?.completionGate
+            || review?.completion_gate
+            || summary?.verification_hardening?.completionGate
+            || summary?.verificationHardening?.completionGate
+            || summary?.completion_gate
+            || null;
+        const hardeningRequired = policyResult.snapshot.schema === "ccm-task-acceptance-policy-snapshot-v2";
+        const hardeningGateValid = !hardeningRequired || (0, completion_gate_1.validateTestAgentCompletionGate)(hardeningGate).valid;
         const independentReviewValid = review?.canAccept === true
             && (review?.runner?.sourceStable === true || review?.invocation?.artifactVerification?.status === "passed")
-            && (review?.invocation?.outputValidation?.valid === true || review?.report?.acceptanceEvidenceGateSummary?.pass === true);
+            && (review?.invocation?.outputValidation?.valid === true || review?.report?.acceptanceEvidenceGateSummary?.pass === true)
+            && hardeningGateValid;
         const groupIndependentReviewValid = summary?.independent_review_gate?.pass === true
             && summary?.post_review_spot_check_gate?.pass === true
-            && summary?.verification_source_gate_passed === true;
+            && summary?.verification_source_gate_passed === true
+            && (!hardeningRequired || (0, completion_gate_1.validateTestAgentCompletionGate)(summary?.verification_hardening?.completionGate
+                || summary?.verificationHardening?.completionGate
+                || summary?.completion_gate).valid);
         return (independentReviewValid || groupIndependentReviewValid) && finalAcceptanceValid;
     }
     const summary = updates.delivery_summary || task?.delivery_summary || {};
@@ -921,13 +938,88 @@ function validateTaskTerminalTransition(task, updates = {}) {
     const workflowType = String(task?.workflow_type || "general").trim().toLowerCase();
     if (!AUTOMATED_TERMINAL_WORKFLOWS.has(workflowType))
         return null;
-    if (hasStructuredTaskAcceptanceEvidence(task, updates))
-        return null;
-    return `自动开发任务 ${task?.id || ""} 缺少结构化最终验收证据，不能进入 done + accepted`;
+    const config = (0, group_orchestrator_1.loadOrchestratorConfig)();
+    const structured = hasStructuredTaskAcceptanceEvidence(task, updates);
+    if (!structured) {
+        if (config.strictEvidenceFreshnessEnabled === true) {
+            const criteria = updates.acceptanceCriteria || updates.acceptance_criteria || task?.acceptanceCriteria || task?.acceptance_criteria || task?.acceptance_evidence_plan || [];
+            const evaluation = (0, unified_evidence_registry_1.buildAcceptanceEvaluation)(criteria, collectTerminalEvidence(task, updates));
+            if (!evaluation.satisfied)
+                return `自动开发任务 ${task?.id || ""} 的 Evidence 尚未满足全部验收条件`;
+        }
+        return `自动开发任务 ${task?.id || ""} 缺少结构化最终验收证据，不能进入 done + accepted`;
+    }
+    if (config.strictEvidenceFreshnessEnabled === true) {
+        const criteria = updates.acceptanceCriteria || updates.acceptance_criteria || task?.acceptanceCriteria || task?.acceptance_criteria || task?.acceptance_evidence_plan || [];
+        const evaluation = (0, unified_evidence_registry_1.buildAcceptanceEvaluation)(criteria, collectTerminalEvidence(task, updates));
+        if (!evaluation.satisfied)
+            return `自动开发任务 ${task?.id || ""} 的 Evidence 尚未满足全部验收条件`;
+    }
+    return null;
+}
+function collectTerminalEvidence(task, updates = {}) {
+    const merged = { ...task, ...updates };
+    const receipt = updates.receipt || task?.receipt || {};
+    const summary = updates.delivery_summary || task?.delivery_summary || {};
+    const review = updates.test_agent_review || task?.test_agent_review || summary?.test_agent || {};
+    const workDir = String(updates.worktree || updates.workTree || updates.work_dir || updates.workDir
+        || task?.worktree || task?.workTree || task?.work_dir || task?.workDir || "").trim();
+    let repoStateIdentity = null;
+    try {
+        if (workDir)
+            repoStateIdentity = (0, unified_evidence_registry_1.captureRepoStateIdentity)(workDir, [
+                ...(Array.isArray(receipt.filesChanged) ? receipt.filesChanged : []),
+                ...(Array.isArray(receipt.files_changed) ? receipt.files_changed : []),
+                ...(Array.isArray(summary.files_changed) ? summary.files_changed : []),
+            ].map(String));
+    }
+    catch { }
+    const base = {
+        taskId: merged.id,
+        workItemId: updates.workItemId || updates.work_item_id || task?.work_item_id || task?.workItemId || "",
+        scope: updates.scope || task?.scope || "",
+        scopeId: updates.scopeId || updates.scope_id || task?.scope_id || task?.scopeId || "",
+        exactSessionId: updates.exactSessionId || updates.exact_session_id || task?.exact_session_id || task?.exactSessionId || "",
+        generation: updates.generation ?? task?.generation ?? 0,
+        attempt: updates.attempt ?? task?.attempt ?? 1,
+        leaseId: updates.leaseId || updates.lease_id || task?.lease_id || task?.leaseId || "",
+        producerAgentId: updates.agentId || updates.agent_id || receipt.agentId || receipt.agent_id || task?.target_project || "",
+        repoStateIdentity,
+    };
+    const records = [];
+    const verification = [
+        ...(Array.isArray(updates.verificationResults) ? updates.verificationResults : []),
+        ...(Array.isArray(updates.verification_results) ? updates.verification_results : []),
+        ...(Array.isArray(receipt.verificationResults) ? receipt.verificationResults : []),
+        ...(Array.isArray(receipt.verification_results) ? receipt.verification_results : []),
+        ...(Array.isArray(summary.verification) ? summary.verification : []),
+        ...(Array.isArray(review?.invocation?.verificationResults) ? review.invocation.verificationResults : []),
+    ];
+    verification.slice(0, 80).forEach((item, index) => {
+        const command = typeof item === "string" ? item : item?.command || item?.name || `verification-${index + 1}`;
+        const status = typeof item === "object" && (item?.status || item?.state || item?.exitCode !== undefined)
+            ? String(item.status || item.state || (Number(item.exitCode) === 0 ? "passed" : "failed"))
+            : "recorded";
+        records.push((0, unified_evidence_registry_1.recordEvidence)({ ...base, evidenceType: "test", subject: command, status: /pass|success|ok|recorded|completed|0/.test(status.toLowerCase()) ? "valid" : "invalid", summary: status, references: typeof item === "object" ? item.filesChanged || item.files_changed : [] }));
+    });
+    const files = [
+        ...(Array.isArray(receipt.filesChanged) ? receipt.filesChanged : []),
+        ...(Array.isArray(receipt.files_changed) ? receipt.files_changed : []),
+        ...(Array.isArray(summary.files_changed) ? summary.files_changed : []),
+    ].map(String).filter(Boolean);
+    if (files.length)
+        records.push((0, unified_evidence_registry_1.recordEvidence)({ ...base, evidenceType: "diff", subject: "workspace diff", status: "valid", references: files, summary: `${files.length} files changed` }));
+    if (review && typeof review === "object" && (review.canAccept !== undefined || review.report)) {
+        records.push((0, unified_evidence_registry_1.recordEvidence)({ ...base, evidenceType: "review", subject: "independent review", status: review.canAccept === true ? "valid" : "invalid", summary: review.canAccept === true ? "accepted" : "rejected" }));
+    }
+    return records;
 }
 function buildTaskTerminalDecisionV2(task, updates = {}) {
     const status = String(updates.status || "").trim().toLowerCase();
     const acceptanceState = { done: "accepted", failed: "rejected", blocked: "blocked", cancelled: "cancelled" };
+    const evidenceRecords = collectTerminalEvidence(task, updates);
+    const acceptanceCriteria = updates.acceptanceCriteria || updates.acceptance_criteria || task?.acceptanceCriteria || task?.acceptance_criteria || task?.acceptance_evidence_plan || [];
+    const acceptanceEvaluation = (0, unified_evidence_registry_1.buildAcceptanceEvaluation)(acceptanceCriteria, evidenceRecords);
     const base = {
         schema: "ccm-task-terminal-decision-v2",
         task_id: String(task?.id || ""),
@@ -935,6 +1027,12 @@ function buildTaskTerminalDecisionV2(task, updates = {}) {
         acceptance_state: acceptanceState[status] || String(updates.acceptance_state || task?.acceptance_state || "pending"),
         actor: (0, collaboration_1.compactFormText)(updates.terminal_actor || updates.terminalActor || updates.acceptance_decision?.actor, "task-runtime"),
         gate_passed: status === "done" ? hasStructuredTaskAcceptanceEvidence(task, updates) : true,
+        evidence_registry: {
+            evidenceIds: evidenceRecords.map(item => item.evidenceId),
+            validCount: evidenceRecords.filter(item => item.status === "valid").length,
+            staleCount: evidenceRecords.filter(item => item.status === "stale").length,
+            acceptance: acceptanceEvaluation,
+        },
         evidence_checksum: crypto.createHash("sha256").update(JSON.stringify({
             delivery_summary: updates.delivery_summary || task?.delivery_summary || null,
             receipt: updates.receipt || task?.receipt || null,
@@ -951,6 +1049,14 @@ function updateTask(id, updates) {
     const idx = tasks.findIndex(t => t.id === id);
     if (idx === -1)
         return null;
+    const expectedRevision = updates?.expectedRevision ?? updates?.expected_revision;
+    const currentRevision = Math.max(0, Number(tasks[idx].revision || 0));
+    if (expectedRevision !== undefined && Number(expectedRevision) !== currentRevision) {
+        throw new Error(`任务状态版本冲突：expected=${Number(expectedRevision)} actual=${currentRevision}`);
+    }
+    updates = { ...(updates || {}) };
+    delete updates.expectedRevision;
+    delete updates.expected_revision;
     const previousStatus = tasks[idx].status;
     const previousGatePassed = tasks[idx].global_mission_gate_passed === true;
     const previousReceiptKey = String(tasks[idx].receipt_idempotency_key || "");
@@ -986,6 +1092,21 @@ function updateTask(id, updates) {
     };
     if (terminalAcceptance[requestedStatus]) {
         const terminalDecision = buildTaskTerminalDecisionV2(tasks[idx], updates);
+        if (requestedStatus === "failed" || requestedStatus === "blocked") {
+            const failure = (0, failure_record_1.recordFailure)({
+                taskId: id,
+                workItemId: updates.workItemId || updates.work_item_id || tasks[idx].work_item_id || tasks[idx].workItemId || "",
+                failureType: updates.failureType || updates.failure_type,
+                reason: updates.status_detail || updates.statusDetail || requestedStatus,
+                criterionIds: updates.unresolvedCriteria || updates.unresolved_criteria || updates.failedCriteria || updates.failed_criteria,
+                observedEvidenceIds: terminalDecision.evidence_registry?.evidenceIds || [],
+                allowedFiles: updates.allowedFiles || updates.allowed_files,
+                forbiddenFiles: updates.forbiddenFiles || updates.forbidden_files,
+                attempt: updates.attempt || tasks[idx].attempt || 1,
+                recommendedAction: updates.nextAction || updates.next_action || "",
+            });
+            updates = { ...updates, failure_record: failure };
+        }
         const settledAt = String(updates.completed_at || updates.failed_at || updates.cancelled_at || new Date().toISOString());
         const evidenceChecksum = crypto.createHash("sha256").update(JSON.stringify({
             delivery_summary: updates.delivery_summary || tasks[idx].delivery_summary || null,
@@ -1025,7 +1146,17 @@ function updateTask(id, updates) {
     if (updates.receipt) {
         updates.receipt_idempotency_key = crypto.createHash("sha256").update(JSON.stringify(updates.receipt)).digest("hex");
     }
-    Object.assign(tasks[idx], updates, { updated_at: new Date().toISOString() });
+    Object.assign(tasks[idx], updates, { revision: currentRevision + 1, updated_at: new Date().toISOString() });
+    if ((0, group_orchestrator_1.loadOrchestratorConfig)().taskEventReducerShadowWriteEnabled !== false) {
+        (0, task_transition_ledger_1.appendTaskTransitionEvent)({
+            taskId: id,
+            revision: tasks[idx].revision,
+            from: previousStatus || "unknown",
+            to: tasks[idx].status || previousStatus || "unknown",
+            actor: updates.terminal_actor || updates.actor || "task-runtime",
+            reasonCode: updates.status_detail || (requestedStatus ? `status_${requestedStatus}` : "task_patch"),
+        });
+    }
     if (terminalAcceptance[requestedStatus] && previousStatus !== requestedStatus) {
         const terminalEvent = {
             id: `tl_terminal_${requestedStatus}_${tasks[idx].terminal_state_receipt?.checksum || Date.now().toString(36)}`,
@@ -1040,6 +1171,17 @@ function updateTask(id, updates) {
         };
         tasks[idx].workflow_timeline = [...(Array.isArray(tasks[idx].workflow_timeline) ? tasks[idx].workflow_timeline : []), terminalEvent].slice(-160);
     }
+    tasks[idx].workflow_timeline = [...(Array.isArray(tasks[idx].workflow_timeline) ? tasks[idx].workflow_timeline : []), {
+            id: `tl_transition_${id}_${tasks[idx].revision}`,
+            at: tasks[idx].updated_at,
+            type: "task_state_transition",
+            title: "任务状态已通过版本校验更新",
+            detail: `${previousStatus || "unknown"} → ${requestedStatus || previousStatus || "unknown"}`,
+            status: "info",
+            phase: "state",
+            agent: "task-runtime",
+            data: { revision: tasks[idx].revision, from: previousStatus || "", to: requestedStatus || previousStatus || "" },
+        }].slice(-160);
     if (updates.delivery_summary && typeof updates.delivery_summary === "object") {
         tasks[idx].collaboration_state = reconcileTaskCollaborationState(tasks[idx], previousCollaborationState);
     }

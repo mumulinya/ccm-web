@@ -207,6 +207,7 @@
         "agents"
       ],
       "criticalTests": [
+        "agent-communication-v2-selftest.mjs",
         "automatic-development-production-chain-selftest.mjs",
         "automatic-development-unified-task-v2-audit.mjs",
         "project-main-agent-orchestration-selftest.mjs"
@@ -216,6 +217,7 @@
         "docs/confirmed-project-architecture/TASK-PERMISSION-APPROVAL.md"
       ],
       "businessProcessDocs": [
+        "docs/confirmed-business-processes/AGENT-COMMUNICATION-V2.md",
         "docs/confirmed-business-processes/AUTOMATIC-DEVELOPMENT-END-TO-END.md",
         "docs/confirmed-business-processes/AUTOMATIC-DEVELOPMENT-UNIFIED-TASK-SYSTEM-V2.md",
         "docs/confirmed-business-processes/PROJECT-CHILD-AGENT-COLLABORATION.md",

@@ -48,6 +48,7 @@ Object.defineProperty(exports, "rebuildKnowledgeIndex", { enumerable: true, get:
 const knowledge_watcher_1 = require("./knowledge-watcher");
 const knowledge_embedding_1 = require("./knowledge-embedding");
 const knowledge_index_lease_1 = require("./knowledge-index-lease");
+const api_access_control_1 = require("../system/api-access-control");
 const MAX_JSON_BODY_BYTES = 1024 * 1024;
 function readLimitedBuffer(req, limit = MAX_JSON_BODY_BYTES) {
     return new Promise((resolve, reject) => {
@@ -115,6 +116,7 @@ function metadataFor(filename) {
         parseError: metadata.parse_error || "",
         indexedAt: metadata.indexed_at || "",
         updatedAt: metadata.updated_at || "",
+        duplicateOf: metadata.duplicate_of || "",
     };
 }
 function debugChunk(item, fullText = false) {
@@ -243,7 +245,7 @@ async function handleUpload(req, res, contentType) {
         cleanupMultipartFiles(files);
     }
 }
-async function handleKnowledgeChat(payload, res) {
+async function handleKnowledgeChat(payload, res, readOnly = false) {
     const query = String(payload.query || "").trim();
     if (!query)
         return (0, utils_1.sendJson)(res, { error: "查询内容不能为空" }, 400);
@@ -257,6 +259,12 @@ async function handleKnowledgeChat(payload, res) {
     });
     const debugChunks = search.results.map(item => debugChunk(item, true));
     const citations = debugChunks.map(chunk => chunk.citation);
+    // viewer(只读)账户只允许拿到回答正文和引用标识，不暴露分片原文、检索得分等内部细节。
+    const exposedChunks = readOnly ? [] : debugChunks;
+    const exposedRetrieval = (search, citations) => {
+        const summary = retrievalSummary(search, citations);
+        return readOnly ? { citations: summary.citations } : summary;
+    };
     if (!debugChunks.length) {
         const indexBuilding = search.fallbackReason === "index_building";
         return (0, utils_1.sendJson)(res, {
@@ -264,7 +272,7 @@ async function handleKnowledgeChat(payload, res) {
             reply: indexBuilding ? "知识索引正在准备中，请稍后再试；系统不会把尚未完成的索引当成没有资料。" : "知识库中暂时没有找到与这个问题相关的资料。可以换一种问法，或先导入对应文档。",
             debugChunks: [],
             citations: [],
-            retrieval: retrievalSummary(search),
+            retrieval: exposedRetrieval(search, []),
         });
     }
     const references = debugChunks.map((chunk, index) => [
@@ -278,9 +286,9 @@ async function handleKnowledgeChat(payload, res) {
         return (0, utils_1.sendJson)(res, {
             success: true,
             reply: "知识资料已经检索完成，但当前还没有配置可用的大模型。请先在设置中配置群聊主 Agent 模型，再使用知识问答。",
-            debugChunks,
+            debugChunks: exposedChunks,
             citations,
-            retrieval: retrievalSummary(search, citations),
+            retrieval: exposedRetrieval(search, citations),
             modelReady: false,
         });
     }
@@ -292,9 +300,9 @@ async function handleKnowledgeChat(payload, res) {
     return (0, utils_1.sendJson)(res, {
         success: true,
         reply,
-        debugChunks,
+        debugChunks: exposedChunks,
         citations,
-        retrieval: retrievalSummary(search, citations),
+        retrieval: exposedRetrieval(search, citations),
         modelReady: true,
     });
 }
@@ -490,7 +498,7 @@ function handleRagApi(pathname, req, res, parsed) {
         return true;
     }
     if (pathname === "/api/rag/chat" && req.method === "POST") {
-        void readJsonBody(req).then(payload => handleKnowledgeChat(payload, res)).catch(error => (0, utils_1.sendJson)(res, { error: error.message }, 500));
+        void readJsonBody(req).then(payload => handleKnowledgeChat(payload, res, (0, api_access_control_1.requestIsReadOnly)(req))).catch(error => (0, utils_1.sendJson)(res, { error: error.message }, 500));
         return true;
     }
     if (pathname === "/api/rag/document-content" && req.method === "GET") {
@@ -513,9 +521,14 @@ function handleRagApi(pathname, req, res, parsed) {
         if (req.method === "GET")
             return (0, utils_1.sendJson)(res, { success: true, paths: knowledge_watcher_1.knowledgeDirectoryWatcher.listPaths() });
         if (req.method === "POST") {
-            void readJsonBody(req).then(payload => {
-                const paths = knowledge_watcher_1.knowledgeDirectoryWatcher.addPath(payload);
-                (0, utils_1.sendJson)(res, { success: true, paths, message: "目录已开始监控，首次同步正在后台进行" });
+            void readJsonBody(req).then(async (payload) => {
+                const { paths, sync } = await knowledge_watcher_1.knowledgeDirectoryWatcher.addPath(payload);
+                (0, utils_1.sendJson)(res, {
+                    success: true,
+                    paths,
+                    sync,
+                    message: `已扫描 ${sync.files} 个文件，导入 ${sync.synced} 个，跳过 ${sync.skipped} 个${sync.removed ? `，清理 ${sync.removed} 个已消失文件` : ""}`,
+                });
             }).catch(error => (0, utils_1.sendJson)(res, { error: error.message }, 400));
             return true;
         }

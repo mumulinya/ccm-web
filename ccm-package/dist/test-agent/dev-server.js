@@ -5,6 +5,8 @@ const child_process_1 = require("child_process");
 const utils_1 = require("./utils");
 const existing_session_1 = require("./browser/existing-session");
 const shared_1 = require("./browser/shared");
+const isolation_1 = require("./isolation");
+const side_effect_policy_1 = require("./side-effect-policy");
 function browserChecksRequested(workOrder) {
     if ((0, utils_1.requiredCheckEnabled)(workOrder.requiredChecks, "browser_e2e", "screenshots", "console_errors", "http", "api"))
         return true;
@@ -51,12 +53,20 @@ function stopProcessTree(child) {
     }
     catch { }
 }
-async function startProjectServer(project, maxOutputChars) {
+async function startProjectServer(project, maxOutputChars, policyContext = null) {
     const startedAt = (0, utils_1.nowIso)();
     const url = project.startupUrl || project.targetUrl;
     if (!url) {
         return {
             result: { project: project.name, command: "", cwd: project.workDir, url: "", status: "skipped", startedAt, error: "No target URL was provided." },
+            stop: () => { },
+        };
+    }
+    const urlPolicy = policyContext ? (0, side_effect_policy_1.evaluateTestAgentHttpSideEffect)({ url, method: "GET" }, { ...policyContext, project }) : null;
+    if (urlPolicy && !urlPolicy.allowed) {
+        const startedAt = (0, utils_1.nowIso)();
+        return {
+            result: { project: project.name, command: project.devServerCommand || "", cwd: project.workDir, url, status: "failed", startedAt, error: `副作用安全门阻止访问目标 URL：${urlPolicy.reason}` },
             stop: () => { },
         };
     }
@@ -70,6 +80,13 @@ async function startProjectServer(project, maxOutputChars) {
     if (!command) {
         return {
             result: { project: project.name, command: "", cwd: project.workDir, url, status: "failed", startedAt, error: "Target URL is not reachable and no dev server command was provided." },
+            stop: () => { },
+        };
+    }
+    const commandPolicy = policyContext ? (0, side_effect_policy_1.evaluateTestAgentCommandSideEffect)(command, { ...policyContext, project }) : null;
+    if (commandPolicy && !commandPolicy.allowed) {
+        return {
+            result: { project: project.name, command, cwd: project.workDir, url, status: "failed", startedAt, error: `副作用安全门阻止启动开发服务器：${commandPolicy.reason}` },
             stop: () => { },
         };
     }
@@ -112,6 +129,7 @@ async function startDevServersForBrowserChecks(workOrder) {
     if (!browserChecksRequested(workOrder))
         return [];
     const servers = [];
+    const policyContext = (0, isolation_1.testAgentPolicyContextFromWorkOrder)(workOrder);
     for (const project of workOrder.projects) {
         if (!project.targetUrl && !project.startupUrl && !project.browserChecks.length && !project.httpChecks.length && !project.adversarialHttpChecks.length)
             continue;
@@ -121,7 +139,7 @@ async function startDevServersForBrowserChecks(workOrder) {
             && projectUsesOnlyExistingBrowserSession(workOrder, project)) {
             continue;
         }
-        servers.push(await startProjectServer(project, workOrder.options.maxOutputChars));
+        servers.push(await startProjectServer(project, workOrder.options.maxOutputChars, policyContext));
     }
     return servers;
 }

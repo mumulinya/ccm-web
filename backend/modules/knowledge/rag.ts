@@ -48,6 +48,7 @@ import {
   removeLocalKnowledgeModel,
 } from "./knowledge-embedding";
 import { inspectKnowledgeIndexLease } from "./knowledge-index-lease";
+import { requestIsReadOnly } from "../system/api-access-control";
 
 export { queryKnowledgeBase, queryKnowledgeBaseScoped, rebuildKnowledgeIndex };
 
@@ -117,6 +118,7 @@ function metadataFor(filename: string) {
     parseError: metadata.parse_error || "",
     indexedAt: metadata.indexed_at || "",
     updatedAt: metadata.updated_at || "",
+    duplicateOf: metadata.duplicate_of || "",
   };
 }
 
@@ -243,7 +245,7 @@ async function handleUpload(req: any, res: any, contentType: string) {
   }
 }
 
-async function handleKnowledgeChat(payload: any, res: any) {
+async function handleKnowledgeChat(payload: any, res: any, readOnly = false) {
   const query = String(payload.query || "").trim();
   if (!query) return sendJson(res, { error: "查询内容不能为空" }, 400);
   const search = await searchKnowledgeBase(query, {
@@ -256,6 +258,12 @@ async function handleKnowledgeChat(payload: any, res: any) {
   });
   const debugChunks = search.results.map(item => debugChunk(item, true));
   const citations = debugChunks.map(chunk => chunk.citation);
+  // viewer(只读)账户只允许拿到回答正文和引用标识，不暴露分片原文、检索得分等内部细节。
+  const exposedChunks = readOnly ? [] : debugChunks;
+  const exposedRetrieval = (search: any, citations: string[]) => {
+    const summary = retrievalSummary(search, citations);
+    return readOnly ? { citations: summary.citations } : summary;
+  };
   if (!debugChunks.length) {
     const indexBuilding = search.fallbackReason === "index_building";
     return sendJson(res, {
@@ -263,7 +271,7 @@ async function handleKnowledgeChat(payload: any, res: any) {
       reply: indexBuilding ? "知识索引正在准备中，请稍后再试；系统不会把尚未完成的索引当成没有资料。" : "知识库中暂时没有找到与这个问题相关的资料。可以换一种问法，或先导入对应文档。",
       debugChunks: [],
       citations: [],
-      retrieval: retrievalSummary(search),
+      retrieval: exposedRetrieval(search, []),
     });
   }
   const references = debugChunks.map((chunk, index) => [
@@ -277,9 +285,9 @@ async function handleKnowledgeChat(payload: any, res: any) {
     return sendJson(res, {
       success: true,
       reply: "知识资料已经检索完成，但当前还没有配置可用的大模型。请先在设置中配置群聊主 Agent 模型，再使用知识问答。",
-      debugChunks,
+      debugChunks: exposedChunks,
       citations,
-      retrieval: retrievalSummary(search, citations),
+      retrieval: exposedRetrieval(search, citations),
       modelReady: false,
     });
   }
@@ -291,9 +299,9 @@ async function handleKnowledgeChat(payload: any, res: any) {
   return sendJson(res, {
     success: true,
     reply,
-    debugChunks,
+    debugChunks: exposedChunks,
     citations,
-    retrieval: retrievalSummary(search, citations),
+    retrieval: exposedRetrieval(search, citations),
     modelReady: true,
   });
 }
@@ -489,7 +497,7 @@ export function handleRagApi(pathname: string, req: any, res: any, parsed: any):
   }
 
   if (pathname === "/api/rag/chat" && req.method === "POST") {
-    void readJsonBody(req).then(payload => handleKnowledgeChat(payload, res)).catch(error => sendJson(res, { error: error.message }, 500));
+    void readJsonBody(req).then(payload => handleKnowledgeChat(payload, res, requestIsReadOnly(req))).catch(error => sendJson(res, { error: error.message }, 500));
     return true;
   }
 
@@ -510,9 +518,14 @@ export function handleRagApi(pathname: string, req: any, res: any, parsed: any):
   if (pathname === "/api/rag/watch-paths") {
     if (req.method === "GET") return sendJson(res, { success: true, paths: knowledgeDirectoryWatcher.listPaths() });
     if (req.method === "POST") {
-      void readJsonBody(req).then(payload => {
-        const paths = knowledgeDirectoryWatcher.addPath(payload);
-        sendJson(res, { success: true, paths, message: "目录已开始监控，首次同步正在后台进行" });
+      void readJsonBody(req).then(async payload => {
+        const { paths, sync } = await knowledgeDirectoryWatcher.addPath(payload);
+        sendJson(res, {
+          success: true,
+          paths,
+          sync,
+          message: `已扫描 ${sync.files} 个文件，导入 ${sync.synced} 个，跳过 ${sync.skipped} 个${sync.removed ? `，清理 ${sync.removed} 个已消失文件` : ""}`,
+        });
       }).catch(error => sendJson(res, { error: error.message }, 400));
       return true;
     }

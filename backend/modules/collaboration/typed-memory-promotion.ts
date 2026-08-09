@@ -12,6 +12,10 @@ import * as fs from "fs";
 import * as path from "path";
 import { CCM_DIR } from "../../core/utils";
 import { readJsonWithBackup, withFileLock, writeJsonAtomic } from "../../core/atomic-json-file";
+import {
+  extractStructuredContextSourceRefs,
+  promoteContextSourceReceipts,
+} from "../../system/main-agent-context-source-continuity";
 
 export const PROMOTED_MEMORY_VERSION = 1;
 
@@ -190,6 +194,17 @@ export function buildTypedMemoryPromotionCandidates(scopeId: string, options: an
         howToApply: compactText(admission.howToApply, 400),
         confidence: Number(admission.confidence || 0),
         admissionReason: String(admission.reason || ""),
+        sourceRefs: extractStructuredContextSourceRefs(
+          fact?.sourceRefs,
+          fact?.source_refs,
+          fact?.contextSourceRefs,
+          fact?.context_source_refs,
+          fact?.evidence,
+          fact?.memoryUsed,
+          text,
+          admission?.why,
+          admission?.howToApply,
+        ),
         usage: { ...docUsage },
         source: {
           scopeId: scope,
@@ -233,7 +248,7 @@ export function promoteTypedMemoryCandidates(scopeId: string, options: any = {})
   if (!promotable.length) {
     return { ...inspection, promoted: 0, updated: 0, skippedRevoked: 0, file, entries: listActivePromotedMemory(projectKey) };
   }
-  return withFileLock(file, () => {
+  const committed = withFileLock(file, () => {
     const store = readPromotedMemoryStore(projectKey);
     const entries = [...store.entries];
     const byId = new Map(entries.map((entry: any, index: number) => [String(entry.promotionId || ""), index]));
@@ -258,6 +273,7 @@ export function promoteTypedMemoryCandidates(scopeId: string, options: any = {})
           promotionReason: candidate.decision.reason,
           usageWeightAtPromotion: candidate.decision.usageWeight,
           sources: [candidate.source],
+          sourceRefs: candidate.sourceRefs,
           status: "active",
           createdAt: at,
           updatedAt: at,
@@ -289,6 +305,7 @@ export function promoteTypedMemoryCandidates(scopeId: string, options: any = {})
         confidence: Math.max(Number(existing.confidence || 0), candidate.confidence),
         usageWeightAtPromotion: Math.max(Number(existing.usageWeightAtPromotion || 0), candidate.decision.usageWeight),
         sources: nextSources,
+        sourceRefs: extractStructuredContextSourceRefs(existing.sourceRefs, candidate.sourceRefs),
         updatedAt: at,
       };
       updated += 1;
@@ -326,6 +343,43 @@ export function promoteTypedMemoryCandidates(scopeId: string, options: any = {})
       entries: bounded.filter((entry: any) => String(entry.status || "active") === "active"),
     };
   });
+  const activeIds = new Set((committed.entries || []).map((entry: any) => String(entry?.promotionId || "")));
+  const committedCandidates = promotable.filter((candidate: any) => activeIds.has(String(candidate.promotionId || "")));
+  const promotionResults: any[] = [];
+  for (const candidate of committedCandidates) {
+    const sourceRefs = extractStructuredContextSourceRefs(candidate.sourceRefs);
+    if (!sourceRefs.length || !candidate.source?.groupId || !candidate.source?.groupSessionId) continue;
+    const admissionChecksum = checksum({
+      promotionId: candidate.promotionId,
+      factChecksum: candidate.source.factChecksum,
+      admissionReason: candidate.admissionReason,
+      decision: candidate.decision,
+    }, 64);
+    try {
+      promotionResults.push({ memoryId: candidate.promotionId, ...promoteContextSourceReceipts({
+        identity: {
+          agentKind: "group",
+          scope: "group",
+          scopeId: candidate.source.groupId,
+          exactSessionId: candidate.source.groupSessionId,
+          generation: Math.max(0, Number(options.generation || options.boundaryGeneration || 0)),
+        },
+        sourceRefs,
+        memoryKind: "group_typed_memory",
+        memoryId: candidate.promotionId,
+        admissionChecksum,
+      }) });
+    } catch (error: any) {
+      promotionResults.push({ memoryId: candidate.promotionId, retryable: true, error: compactText(error?.message || error, 300), contentStored: false });
+    }
+  }
+  return { ...committed, committedCandidates: committedCandidates.map((candidate: any) => ({
+    memoryId: candidate.promotionId,
+    factChecksum: candidate.source.factChecksum,
+    sourceRefs: candidate.sourceRefs,
+    admissionChecksum: checksum({ promotionId: candidate.promotionId, factChecksum: candidate.source.factChecksum, admissionReason: candidate.admissionReason, decision: candidate.decision }, 64),
+    contentStored: false,
+  })), sourcePromotion: { attempted: promotionResults.length, results: promotionResults, contentStored: false } };
 }
 
 /** 撤销一条已升格记忆；撤销后不会被自动升格流程重新写回。 */

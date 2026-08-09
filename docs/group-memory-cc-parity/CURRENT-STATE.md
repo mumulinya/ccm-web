@@ -123,7 +123,7 @@ Memory Center 分别列出：
 
 精确会话详情只展示正式模型摘要、真实近期原文和压缩状态。本地 `factAnchors / decisions / nextActions` 运行流水不再作为会话记忆展示或注入模型；deterministic Session Memory fallback 不再标记为 ready。
 
-全局、群聊和项目的用户可见会话已统一模型自动命名：首轮 Agent 回复后根据完整首轮语义生成标题，不再截取用户首句；手动标题永不被覆盖。
+全局、群聊和项目的用户可见会话已统一两阶段自动命名：第一条有意义用户消息落盘后立即生成 deterministic 临时标题，首轮 Agent 回复后再根据完整首轮语义异步生成模型标题；模型失败保留 fallback，手动标题永不被覆盖。
 
 每个精确会话展示当前 token、自动阈值、摘要来源、近期窗口、Session Memory、压缩后门禁、连续失败和熔断状态。模型容量、自动阈值和 Session Memory 参数从用户设置进入所有链路，并允许 scope 覆盖。
 

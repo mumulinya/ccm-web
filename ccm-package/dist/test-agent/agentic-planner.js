@@ -43,6 +43,7 @@ const utils_1 = require("./utils");
 const work_order_1 = require("./work-order");
 const agentic_planner_browser_contract_1 = require("./agentic-planner-browser-contract");
 const semantic_decision_runtime_1 = require("../system/semantic-decision-runtime");
+const planning_fallback_1 = require("./planning-fallback");
 const SOURCE_EXTENSIONS = new Set([
     ".ts", ".tsx", ".js", ".jsx", ".vue", ".svelte", ".py", ".go", ".rs", ".java", ".cs",
     ".html", ".css", ".scss", ".json", ".md", ".yaml", ".yml", ".toml",
@@ -143,7 +144,7 @@ function buildSourceContext(workOrder) {
         };
     });
 }
-function plannerSystemPrompt() {
+function plannerSystemPrompt(readonlyCapabilityPrompt = "") {
     return [
         "You are CCM TestAgent's read-only verification planner.",
         "Design executable checks from the user goal, acceptance criteria, changed files and current source excerpts.",
@@ -158,6 +159,7 @@ function plannerSystemPrompt() {
         "Keep at most 6 commands, 4 HTTP checks and 8 browser checks per project.",
         "",
         (0, agentic_planner_browser_contract_1.browserCheckContractPrompt)(),
+        readonlyCapabilityPrompt ? `\n${readonlyCapabilityPrompt}` : "",
     ].join("\n");
 }
 function followupSystemPrompt() {
@@ -223,7 +225,7 @@ async function callDefaultPlanner(input) {
             sessionId: String(input.workOrder.metadata?.projectSessionId || input.workOrder.metadata?.groupSessionId || input.workOrder.id),
             taskId: input.workOrder.taskId || input.workOrder.id,
         },
-        system: plannerSystemPrompt(),
+        system: plannerSystemPrompt(input.readonlyCapabilityPrompt || ""),
         input: semanticInput,
         maxTokens: 5_000,
         validate: value => normalizeSemanticTestPlan(value, input.workOrder),
@@ -320,13 +322,31 @@ function mergePlan(workOrder, plan) {
     });
     return { projects, additions, issues };
 }
-async function applyAgenticTestPlanning(workOrder, runtime) {
+async function applyAgenticTestPlanning(workOrder, runtime, preexistingIssues = []) {
+    // Freeze the effective hardening policy before the optional model planner
+    // runs. Older v1 handoffs do not carry a policy snapshot, so derive one
+    // from their reviewPolicy/risk metadata for backward-compatible reads.
+    const policy = (0, planning_fallback_1.resolveTestAgentHardeningPolicy)(workOrder);
+    const existingHardening = workOrder.metadata?.verificationHardening && typeof workOrder.metadata.verificationHardening === "object"
+        ? workOrder.metadata.verificationHardening
+        : {};
+    const policyBoundWorkOrder = {
+        ...workOrder,
+        metadata: {
+            ...workOrder.metadata,
+            verificationHardening: {
+                ...existingHardening,
+                policy,
+            },
+        },
+    };
     if (!workOrder.options.agenticPlanning)
-        return { workOrder, issues: [] };
+        return { workOrder: policyBoundWorkOrder, issues: [] };
+    workOrder = policyBoundWorkOrder;
     const sourceContext = buildSourceContext(workOrder);
     try {
         const planner = runtime.agenticPlanner || callDefaultPlanner;
-        const plan = await planner({ workOrder, sourceContext });
+        const plan = await planner({ workOrder, sourceContext, readonlyCapabilityPrompt: runtime.readonlyCapabilityPrompt || "" });
         const semanticPlan = normalizeSemanticTestPlan(plan || {}, workOrder);
         const merged = mergePlan(workOrder, plan || {});
         const unplannedCriteria = semanticPlan.criterionCoverage.filter(item => item.status !== "planned");
@@ -354,35 +374,105 @@ async function applyAgenticTestPlanning(workOrder, runtime) {
                 semanticDecisionReceipt: plan?.semanticDecisionReceipt || null,
             },
         }, runtime);
+        const planningCoverage = (0, planning_fallback_1.buildTestAgentDeterministicCoverage)(renormalized.workOrder);
+        const planningReceipt = (0, planning_fallback_1.buildTestAgentPlanningReceiptV2)({
+            status: unplannedCriteria.length ? "blocked" : "model_applied",
+            riskTier: policy.riskTier,
+            failureClass: unplannedCriteria.length ? "acceptance_uncovered" : "none",
+            semanticDecisionReceipt: plan?.semanticDecisionReceipt || null,
+            policy,
+            coverage: planningCoverage,
+        });
+        const receiptWorkOrder = (0, planning_fallback_1.attachTestAgentPlanningMetadata)(renormalized.workOrder, planningReceipt, {
+            agenticPlanning: {
+                ...renormalized.workOrder.metadata?.agenticPlanning,
+                planningReceipt,
+            },
+        });
         const coverageIssues = unplannedCriteria.map(item => ({
             severity: "error",
             code: item.status === "needs_user" ? "semantic_acceptance_needs_user" : "semantic_acceptance_unsupported",
             message: `${item.criterion}: ${item.reason || "TestAgent 无法形成可执行验收检查"}`,
         }));
-        return { workOrder: renormalized.workOrder, issues: [...merged.issues, ...coverageIssues, ...renormalized.issues] };
+        return {
+            workOrder: receiptWorkOrder,
+            issues: [...merged.issues, ...coverageIssues, ...renormalized.issues],
+            planningReceipt,
+        };
     }
     catch (error) {
-        return {
-            workOrder: {
+        const decision = (0, planning_fallback_1.decideTestAgentPlannerFallback)({ workOrder, error, preexistingIssues });
+        const planningReceipt = (0, planning_fallback_1.buildTestAgentPlanningReceiptV2)({
+            status: decision.status,
+            riskTier: decision.policy.riskTier,
+            error,
+            semanticDecisionReceipt: error?.semanticDecisionReceipt || null,
+            policy: decision.policy,
+            coverage: decision.coverage,
+            isolationStatus: decision.isolationStatus,
+            isolationReady: decision.isolationReady,
+        });
+        const fallback = decision.allowed
+            ? (0, work_order_1.normalizeTestAgentWorkOrder)({
                 ...workOrder,
+                // A degraded path may execute only the checks that were already in
+                // the handoff. This also prevents a follow-up model call inventing
+                // new checks after a planner outage.
+                options: {
+                    ...workOrder.options,
+                    agenticPlanning: false,
+                    autoDiscoverVerificationCommands: false,
+                },
                 metadata: {
                     ...workOrder.metadata,
                     agenticPlanning: {
-                        schema: "ccm-test-agent-agentic-planning-v1",
-                        status: "blocked",
+                        schema: "ccm-test-agent-semantic-plan-v2",
+                        status: "degraded",
+                        fallback: "deterministic_frozen_checks",
+                        degraded: true,
+                        blocked: false,
                         error: cleanText(error?.message || error, 800),
-                        fallback: "none",
                         readOnly: true,
                         verdictAuthority: "deterministic_evidence_gate",
+                        planningReceipt,
                     },
                     semanticDecisionReceipt: error?.semanticDecisionReceipt || null,
+                    planningReceipt,
                 },
+            }, runtime).workOrder
+            : workOrder;
+        const withReceipt = (0, planning_fallback_1.attachTestAgentPlanningMetadata)(fallback, planningReceipt, {
+            agenticPlanning: {
+                ...fallback.metadata?.agenticPlanning,
+                ...(decision.allowed ? {} : {
+                    schema: "ccm-test-agent-semantic-plan-v2",
+                    status: "blocked",
+                    fallback: "none",
+                    degraded: decision.status === "degraded_blocked",
+                    blocked: true,
+                    error: cleanText(error?.message || error, 800),
+                    readOnly: true,
+                    verdictAuthority: "deterministic_evidence_gate",
+                }),
+                planningReceipt,
             },
-            issues: [{
-                    severity: "error",
-                    code: "agentic_test_planning_blocked",
-                    message: `TestAgent semantic planning failed closed: ${cleanText(error?.message || error, 500)}`,
-                }],
+            semanticDecisionReceipt: error?.semanticDecisionReceipt || null,
+        });
+        const issue = decision.allowed
+            ? {
+                severity: "warning",
+                code: "agentic_test_planning_degraded",
+                message: `TestAgent semantic planning unavailable; executing only frozen handoff checks (${decision.reason}).`,
+            }
+            : {
+                severity: "error",
+                code: decision.status === "environment_blocked" ? "agentic_test_planning_environment_blocked" : "agentic_test_planning_blocked",
+                message: `TestAgent semantic planning blocked: ${decision.reason}`,
+            };
+        return {
+            workOrder: withReceipt,
+            issues: [issue],
+            planningReceipt,
         };
     }
 }
@@ -394,7 +484,13 @@ function needsFollowup(input) {
     return failedCommand || failedHttp || failedBrowser || noEvidence;
 }
 async function planAgenticTestFollowup(input, runtime) {
-    if (!input.workOrder.options.agenticPlanning || !needsFollowup(input)) {
+    // A deterministic fallback is intentionally closed to model-generated
+    // follow-up checks. The original handoff remains the execution allowlist
+    // until a fresh planning attempt succeeds.
+    if (!input.workOrder.options.agenticPlanning
+        || input.workOrder.metadata?.planningReceipt?.degraded === true
+        || input.workOrder.metadata?.verificationHardening?.planningReceipt?.degraded === true
+        || !needsFollowup(input)) {
         return { workOrder: null, metadata: { status: "not_needed" } };
     }
     try {

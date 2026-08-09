@@ -26,6 +26,16 @@ import {
   buildSharedFilesContextV2,
   migrateLegacyGlobalSharedDirectoryV2,
 } from "../tools/shared-files-v2";
+import {
+  buildContextSourceCatalog,
+  calculateContextSourceBudget,
+  listContextSourceCatalogEntries,
+  readContextSourceContinuity,
+  recordContextSourceCatalog,
+  recordSharedFileProjection,
+  restoreContextSources,
+} from "../../system/main-agent-context-source-continuity";
+import { isContextSourceToolResult, projectContextSourceToolResultForPersistence } from "../../system/context-source-tool-result-projection";
 
 type LocalIntentResult = any;
 
@@ -75,6 +85,7 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
     "global_memory",
     "global_knowledge",
     "global_shared_files",
+    "context_source_catalog",
     "session_continuity",
     "memory_context_boundary",
     "context_source_manifest",
@@ -190,10 +201,38 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
       source: String(options.source || "global-agent-context"),
     }, Array.isArray(options.loadedToolNames || options.loaded_tool_names) ? (options.loadedToolNames || options.loaded_tool_names) : []);
     migrateLegacyGlobalSharedDirectoryV2();
+    const globalContextPolicy = authorizedTools.context_policy.effective;
+    const globalContextWindow = Number(authorizedTools.context_budget?.contextWindow || resolveGroupModelContextCapacity(loadOrchestratorConfig()).effectiveContextWindow || 200_000);
+    const globalSourceBudget = calculateContextSourceBudget({ contextWindow: globalContextWindow, catalogPercent: globalContextPolicy.contextSourceCatalogBudgetPercent, hydrationPercent: globalContextPolicy.contextSourceHydrationBudgetPercent, remainingSafeTokens: authorizedTools.context_budget?.finalSafetyRemainingTokens });
     const globalSharedFiles = buildSharedFilesContextV2("global", "global", {
-      maxTokens: 32_000,
+      contextWindow: globalContextWindow,
+      hydrationBudgetPercent: globalContextPolicy.contextSourceHydrationBudgetPercent,
+      remainingSafeTokens: globalSourceBudget.hydrationTargetTokens,
+      explicitText: query,
       title: "以下是全局 Agent 已授权共享文件。使用其中事实时必须引用文件和分片：",
     });
+    const sourceIdentity = sessionId ? { agentKind: "global" as const, scope: "global" as const, scopeId: "global-agent", exactSessionId: sessionId, generation: Number(authorizedTools.scope_identity?.generation || 0) } : null;
+    const globalSourceCatalog = buildContextSourceCatalog({
+      sources: listContextSourceCatalogEntries({ sharedScope: "global", sharedScopeId: "global", knowledgeContext: { role: "global-agent" } }),
+      maxTokens: globalSourceBudget.catalogTargetTokens,
+      explicitText: query,
+      recentReceipts: sourceIdentity ? readContextSourceContinuity(sourceIdentity).receipts : [],
+    });
+    if (sourceIdentity && !lazyResources) {
+      recordContextSourceCatalog(sourceIdentity, globalSourceCatalog, globalSourceBudget);
+      recordSharedFileProjection(sourceIdentity, globalSharedFiles, { ...globalSourceBudget, catalogUsedTokens: globalSourceCatalog.usedTokens, sharedFileTokens: globalSharedFiles.total_tokens, hydrationUsedTokens: globalSharedFiles.total_tokens });
+    }
+    const restoredSources = sourceIdentity && Number(authorizedTools.scope_identity?.generation || 0) > 0 && !lazyResources
+      ? restoreContextSources({
+          identity: { ...sourceIdentity, generation: Number(authorizedTools.scope_identity?.generation || 0) },
+          knowledgeContext: { role: "global-agent" },
+          explicitText: query,
+          maxPerItemTokens: globalContextPolicy.postCompactSourcePerItemMaxTokens,
+          maxTotalTokens: globalContextPolicy.postCompactSourceTotalMaxTokens,
+          hydrationTargetTokens: globalSourceBudget.hydrationTargetTokens,
+          remainingSafeTokens: globalSourceBudget.remainingSafeTokens,
+        }).context
+      : "";
     const context: any = {
       projects: safeProjectRows(),
       groups: groups.map((group: any) => ({ id: group.id, name: group.name, members: (group.members || []).map((member: any) => ({ project: member.project, agent: member.agent })) })),
@@ -235,6 +274,7 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
         recordMetric: options.recordMemoryMetric !== false && options.record_memory_metric !== false,
       }) : "",
       global_knowledge: options.knowledgeContext || options.knowledge_context || "",
+      context_source_catalog: [globalSourceCatalog.context, restoredSources].filter(Boolean).join("\n\n"),
       global_shared_files: {
         context: lazyResources ? "" : globalSharedFiles.context,
         manifest_checksum: globalSharedFiles.checksum,
@@ -691,8 +731,9 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
       if (deferred) throw new Error(`MAIN_AGENT_TOOL_SCHEMA_NOT_LOADED:${deferred.canonicalName}`);
     }
     const signature = crypto.createHash("sha256").update(`${name}:${JSON.stringify(args || {})}`).digest("hex").slice(0, 24);
-    const operationKey = `${run.id}:${signature}`;
-    const operation = acquireIdempotency({
+    const contextSourceRead = isContextSourceToolResult(name, { toolName: args?.tool_name || args?.toolName || args?.name });
+    let operationKey = `${run.id}:${signature}`;
+    let operation = acquireIdempotency({
       scope: "global-agent-tool",
       key: operationKey,
       traceId: run.trace_id,
@@ -702,6 +743,18 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
     if (!operation.acquired) {
       const settled = operation.inProgress ? await waitForIdempotencyResult("global-agent-tool", operationKey, 12 * 60 * 1000) : operation.record;
       if (settled?.status === "completed") {
+        if (contextSourceRead) {
+          // 来源正文不进入幂等结果。重复读取另开只读尝试，从权威存储取得当前版本。
+          operationKey = `${run.id}:${signature}:source-reread:${crypto.randomBytes(8).toString("hex")}`;
+          operation = acquireIdempotency({
+            scope: "global-agent-tool",
+            key: operationKey,
+            traceId: run.trace_id,
+            leaseMs: 12 * 60 * 1000,
+            metadata: { run_id: run.id, tool: name, authoritative_reread: true },
+          });
+          if (!operation.acquired) throw new Error(`来源工具 ${name} 无法取得权威重读租约`);
+        } else {
         const replayed = { ...(settled.result?.observation || settled.result || {}), replayed: true };
         if (name === "tool_search") {
           const rows = Array.isArray((replayed as any)?.result?.tools) ? (replayed as any).result.tools : [];
@@ -711,10 +764,14 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
           saveGlobalAgentRun(run, true);
         }
         return replayed;
+        }
       }
-      if (settled?.status === "failed") throw new Error(settled.error || `工具 ${name} 的历史执行失败`);
-      throw new Error(`工具 ${name} 仍在另一个执行实例中运行`);
+      if (!operation.acquired) {
+        if (settled?.status === "failed") throw new Error(settled.error || `工具 ${name} 的历史执行失败`);
+        throw new Error(`工具 ${name} 仍在另一个执行实例中运行`);
+      }
     }
+    const sourceRuntime = buildGlobalAgentToolRuntimeContext({ taskId: run.id, executionId: operationKey, sessionId: run.session_id, source: run.source || "global-agent-source" }, run.loaded_tool_names || run.loadedToolNames || []);
   
     try {
       let observation: any;
@@ -804,27 +861,48 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
       } else if (name === "list_cron") {
         observation = { success: true, jobs: buildAgenticContext().cron_jobs };
       } else if (name === "query_knowledge") {
-        const knowledge = await searchAgentKnowledge(String(args.query || ""), { role: "global-agent" }, { limit: 6 });
+        const knowledge = await searchAgentKnowledge(String(args.query || ""), { role: "global-agent" }, { limit: 6, continuityIdentity: { agentKind: "global", scope: "global", scopeId: "global-agent", exactSessionId: run.session_id, generation: Number(sourceRuntime.scope_identity?.generation || 0) } });
         observation = {
           success: true,
           query: args.query,
           content: knowledge.context || "未检索到相关知识",
           citations: knowledge.citations,
           retrieval: { embedding: knowledge.embeddingMode, fallback: knowledge.fallback, error: knowledge.embeddingError },
+          sourceReferences: (knowledge.results || []).map((result: any) => ({
+            sourceKind: "knowledge",
+            sourceId: result.filename,
+            documentName: result.filename,
+            chunkIds: [result.citation].filter(Boolean),
+            revision: result.revision,
+            checksum: result.checksum,
+            citations: [result.citation].filter(Boolean),
+            tokenCount: result.tokenCount,
+          })),
         };
       } else if (name === "query_global_memory") {
         observation = { success: true, query: args.query, ...recallGlobalAgentMemory(String(args.query || ""), { sessionId: run.session_id, limit: Number(args.limit || 8) }) };
       } else if (name === "read_global_shared_files") {
+        const runtimeBudget = calculateContextSourceBudget({ contextWindow: Number(sourceRuntime.context_budget?.contextWindow || 200_000), catalogPercent: Number(sourceRuntime.context_policy?.effective?.contextSourceCatalogBudgetPercent || 1), hydrationPercent: Number(sourceRuntime.context_policy?.effective?.contextSourceHydrationBudgetPercent || 10), remainingSafeTokens: Number(sourceRuntime.context_budget?.finalSafetyRemainingTokens || 0) });
         const sharedFiles = buildSharedFilesContextV2("global", "global", {
-          maxTokens: 32_000,
+          maxTokens: runtimeBudget.hydrationTargetTokens,
+          explicitText: String(args.file_id || args.name || args.query || ""),
           title: "以下是全局 Agent 已授权共享文件。使用其中事实时必须引用文件和分片：",
         });
+        recordSharedFileProjection({ agentKind: "global", scope: "global", scopeId: "global-agent", exactSessionId: run.session_id, generation: Number(sourceRuntime.scope_identity?.generation || 0) }, sharedFiles, runtimeBudget);
         observation = {
           success: true,
           context: sharedFiles.context,
           manifest_checksum: sharedFiles.checksum,
           complete: sharedFiles.complete,
           files: sharedFiles.files.map((file: any) => ({ id: file.id, name: file.name, checksum: file.checksum, chunks: file.chunks?.length || 0 })),
+          sourceReferences: (sharedFiles.selected_chunks || []).map((chunk: any) => ({
+            sourceKind: "shared_file",
+            sourceId: chunk.file_id,
+            documentName: chunk.file_name,
+            chunkIds: [chunk.chunk_id].filter(Boolean),
+            checksum: chunk.checksum,
+            tokenCount: chunk.token_count,
+          })),
         };
       } else if (name === "manage_global_memory") {
         const operation = String(args.operation || "").toLowerCase();
@@ -1140,7 +1218,9 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
         });
         observation = { success: true, summary };
       }
-      completeIdempotency("global-agent-tool", operationKey, { observation });
+      completeIdempotency("global-agent-tool", operationKey, {
+        observation: projectContextSourceToolResultForPersistence(name === "invoke_mcp" ? (args?.tool_name || args?.toolName || name) : name, observation, args?.query || args?.file_id || args?.name || ""),
+      });
       return observation;
     } catch (error: any) {
       failIdempotency("global-agent-tool", operationKey, error);

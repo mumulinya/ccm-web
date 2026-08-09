@@ -53,6 +53,12 @@ const slashClientSource = read('frontend/src/composables/useSlashCommands.js')
 assert.ok(slashClientSource.includes('/api/slash-commands/confirm'), '高风险命令必须使用服务端确认挑战')
 assert.ok(read('backend/modules/tools/slash-commands.ts').includes('SLASH_CONFIRMATION_REQUIRED'), '服务端必须拒绝缺少确认回执的高风险命令')
 assert.ok(!slashClientSource.includes('.slice(0, 18)'), '命令菜单不能继续限制为 18 项')
+const mcpCommand = snapshot.commands.find(command => command.name === 'mcp')
+const skillsCommand = snapshot.commands.find(command => command.name === 'skills')
+assert.match(mcpCommand.action.endpointByScope.project, /scope=project&project=\$PROJECT/, '/mcp 必须读取当前项目授权，而不是全局目录')
+assert.match(mcpCommand.action.endpointByScope.group, /scope=group&group_id=\$GROUP_ID/, '/mcp 必须读取当前群聊授权')
+assert.match(skillsCommand.action.endpointByScope.project, /scope=project&project=\$PROJECT/, '/skills 必须读取当前项目授权')
+assert.match(read('backend/modules/tools/tools.ts'), /buildScopedMcpCatalog/, 'MCP 接口必须实现作用域过滤')
 
 for (const page of [
   'frontend/src/components/global/GlobalAgent.vue',

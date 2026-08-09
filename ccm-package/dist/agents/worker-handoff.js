@@ -577,8 +577,26 @@ function buildSelfContainedWorkerHandoff(input) {
             }, contextUsageOptions);
         }
     }
+    const communicationEnvelope = input.communicationEnvelope ? {
+        schema: "ccm-agent-communication-envelope-v2",
+        messageId: String(input.communicationEnvelope.messageId || ""),
+        correlationId: String(input.communicationEnvelope.correlationId || ""),
+        taskId: String(input.communicationEnvelope.taskId || input.taskId || ""),
+        workItemId: String(input.communicationEnvelope.workItemId || input.taskId || ""),
+        scope: String(input.communicationEnvelope.scope || ""),
+        scopeId: String(input.communicationEnvelope.scopeId || ""),
+        exactSessionId: String(input.communicationEnvelope.exactSessionId || ""),
+        generation: Number(input.communicationEnvelope.generation || 0),
+        attempt: Math.max(1, Number(input.communicationEnvelope.attempt || 1)),
+        leaseId: String(input.communicationEnvelope.leaseId || ""),
+        senderAgentId: String(input.communicationEnvelope.senderAgentId || ""),
+        receiverAgentId: String(input.communicationEnvelope.receiverAgentId || ""),
+        deadlineAt: String(input.communicationEnvelope.deadlineAt || ""),
+        payloadChecksum: String(input.communicationEnvelope.payloadChecksum || ""),
+        contentStored: false,
+    } : null;
     const handoff = {
-        schema: "ccm-self-contained-worker-handoff-v1",
+        schema: "ccm-self-contained-worker-handoff-v2",
         handoff_id: `wh_${hash([project, task, input.traceId, input.taskId, workerContextPacket?.packet_id], 16)}`,
         project,
         source: String(input.source || "主 Agent 派发").trim(),
@@ -587,6 +605,7 @@ function buildSelfContainedWorkerHandoff(input) {
         task,
         work_dir: String(input.workDir || "").trim(),
         agent_type: String(input.agentType || "").trim(),
+        communication_envelope: communicationEnvelope,
         worker_context_packet: workerContextPacket,
         scope: {
             allowed: allowedScope.length ? allowedScope : [
@@ -633,7 +652,9 @@ function buildSelfContainedWorkerHandoff(input) {
         ack_gate: {
             required: true,
             fields: ["understoodGoal", "plannedScope", "forbiddenScope", "verificationPlan", "unclear"],
-            rule: "实现或写入前必须先确认目标、范围、禁止范围和验证计划；不清楚时先 blocked/needs_info。",
+            rule: communicationEnvelope
+                ? "实现或写入前必须通过 ccm__agent_communication.acknowledge_assignment 提交ACK；随后按心跳周期报告，最后只能 submit_result，正式终态由 CCM 验收生成。"
+                : "实现或写入前必须先确认目标、范围、禁止范围和验证计划；不清楚时先 blocked/needs_info。",
         },
         receipt_schema: {
             marker: "CCM_AGENT_RECEIPT",
@@ -649,6 +670,7 @@ function buildSelfContainedWorkerHandoff(input) {
                 has_done_criteria: true,
                 has_receipt_schema: true,
                 has_ack_gate: true,
+                has_agent_communication_v2: !!communicationEnvelope,
                 has_memory_freshness_gate: !!memoryFreshnessGate,
                 has_post_compact_reinjection_gate: !!postCompactReinjectionGate,
                 has_post_compact_dispatch_marker: !!postCompactDispatchMarker,
@@ -866,6 +888,7 @@ function renderSelfContainedWorkerHandoff(handoff) {
         "【主 Agent 自包含 Worker 工作包】",
         `schema: ${handoff?.schema || "ccm-self-contained-worker-handoff-v1"}`,
         `handoff_id: ${handoff?.handoff_id || ""}`,
+        handoff?.communication_envelope?.messageId ? `communication_message_id: ${handoff.communication_envelope.messageId}` : "",
         "",
         "重要原则：你看不到用户和主 Agent 的完整历史对话，以下内容就是完成任务所需的完整上下文。不要用泛泛的历史引用来代替理解；必须把你实际理解、实际动作和证据写清楚。",
         "",
@@ -920,6 +943,12 @@ function renderSelfContainedWorkerHandoff(handoff) {
         "ACK gate：",
         `- ${handoff?.ack_gate?.rule || "实现前先确认目标、范围和验证计划。"}`,
         `- 字段：${(handoff?.ack_gate?.fields || []).join("、")}`,
+        handoff?.communication_envelope?.messageId
+            ? `- 通信身份：task=${handoff.communication_envelope.taskId} workItem=${handoff.communication_envelope.workItemId} session=${handoff.communication_envelope.exactSessionId} generation=${handoff.communication_envelope.generation} attempt=${handoff.communication_envelope.attempt} lease=${handoff.communication_envelope.leaseId}`
+            : "",
+        handoff?.communication_envelope?.messageId
+            ? "- 使用 ccm__agent_communication：先 acknowledge_assignment；执行期间 heartbeat/report_progress；需要其他 Agent 时 request_coordination/request_review；完成时 submit_result。第三方 Agent 不得自行提交 terminal。"
+            : "",
         "",
         renderReceiptSchemaForWorker(handoff),
     ].filter(line => line !== "").join("\n");
@@ -1013,7 +1042,7 @@ function runWorkerHandoffSelfTest() {
     });
     const rendered = renderSelfContainedWorkerHandoff(handoff);
     const checks = {
-        schema: handoff.schema === "ccm-self-contained-worker-handoff-v1",
+        schema: handoff.schema === "ccm-self-contained-worker-handoff-v2",
         packet: !!handoff.worker_context_packet?.packet_id && rendered.includes("WorkerContextPacket"),
         selfContainedPrinciple: rendered.includes("你看不到用户和主 Agent 的完整历史对话"),
         goalAndScope: rendered.includes("用户目标") && rendered.includes("允许范围") && rendered.includes("禁止范围"),

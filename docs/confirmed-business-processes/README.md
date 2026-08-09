@@ -11,6 +11,7 @@
 
 | 业务流程 | 当前状态 | 文档 |
 | --- | --- | --- |
+| Agent Communication V2 | 已实现CCM唯一控制面、四段证据、租约/心跳、隔离并行、验收终态和V1桥接 | [Agent Communication V2完整流程](./AGENT-COMMUNICATION-V2.md) |
 | 群聊项目子 Agent 跨项目协作 | 已实现、已启用签名与精确会话门禁 | [项目子 Agent 协作流程](./PROJECT-CHILD-AGENT-COLLABORATION.md) |
 | 记忆系统端到端流程 | 已实现、已完成CC式压缩、长期记忆、MCP hydration与Context Engine闭环 | [记忆系统完整业务流程](./MEMORY-SYSTEM-END-TO-END.md) |
 | 自动开发任务端到端流程 | 已记录全局Agent、任务派发、工作台、群聊/项目会话从需求摄取到开发、验收、回传、回放和记忆准入的完整链路 | [自动开发任务完整业务流程](./AUTOMATIC-DEVELOPMENT-END-TO-END.md) |
@@ -26,6 +27,7 @@
 | 飞书全局与项目Agent双向会话V2 | 已实现双入口、精确话题身份、跨传输幂等、原消息队列恢复和原路投递；群聊不再直连飞书 | [飞书全局与项目Agent双向会话V2](./FEISHU-GLOBAL-PROJECT-BIDIRECTIONAL-V2.md) |
 | 全局Agent运行体系V2 | 已实现服务端权威精确会话队列、单轮写授权、完整轮次正式压缩、Mission监督和终态持久投递 | [全局Agent运行体系V2](./GLOBAL-AGENT-RUNTIME-PRODUCTION-V2.md) |
 | 三类会话CC式统一Agent Loop | 已实现全局、群聊和项目首轮统一理解、按需只读工具、同Run续轮与一次问候调用 | [三类会话CC式统一Agent Loop](./THREE-SESSION-CC-MAIN-AGENT-LOOP.md) |
+| CC式用户可见执行流 | 已实现三类会话统一事件、逐工具/Skill/MCP/子Agent状态、SSE重放、Ctrl+O安全详情与终态门禁 | [CC式用户可见执行流](./CC-STYLE-USER-VISIBLE-EXECUTION-FLOW.md) |
 | 三类主Agent CC式工具体系 | 已实现统一工具目录、12项工作区只读能力、按需Schema加载、精确作用域令牌和无主Agent源码写权限 | [三类主Agent CC式工具体系](./MAIN-AGENT-CC-STYLE-TOOLS.md) |
 | 需求池、文档、图片与附件摄取V2 | 已实现流式上传、固定IP公网读取、完整Token分片、来源证据门禁、需求池原子认领和孤立附件清理 | [需求资料摄取完整流程V2](./REQUIREMENT-INGESTION-END-TO-END-V2.md) |
 | 定时任务与AI日报周报V3 | 已实现不可变证据快照、模型结构化总结、时区调度、证据校验和飞书持久投递 | [定时任务与AI日报周报完整链路](./SCHEDULED-TASKS-AI-WORK-REPORTS.md) |
@@ -45,3 +47,6 @@
 4. 涉及会话、任务、项目、权限或记忆时，必须写明精确作用域和跨作用域拒绝策略。
 5. 原始协议字段和排障标识可以记录，但不能代替用户可理解的业务说明。
 6. 实现变化后同步更新本文索引、对应流程文档及 `docs/CURRENT.md`。
+# CC级代码智能与工具
+
+- [CC 级代码智能与工具链确认流程](./CC-LEVEL-CODE-INTELLIGENCE-AND-TOOLS.md)

@@ -94,7 +94,7 @@ export type GroupLiveRoutesDeps = {
   buildInlineTaskRuntime: (task: any) => any;
   updateGroupMemory: (groupId: string, patch: any) => any;
   enqueueTask: (taskId: string, ctx: any) => any;
-  buildCoordinatorSharedFilesContext: (ctx: any, group: any) => string;
+  buildCoordinatorSharedFilesContext: (ctx: any, group: any, options?: { groupSessionId?: string; message?: string; generation?: number }) => string;
   buildGroupProjectAnalysisContext: (group: any, message: string, ctx: any, configs?: any[]) => string;
   normalizePlanAssignments: (items: any[]) => any[];
   getInitialWorkflowMeta: (assignments: any[], dispatchPolicy: any, label?: string) => any;
@@ -1327,7 +1327,7 @@ export function handleGroupLiveRoutes(
             }),
           });
           const context = buildExactGroupSessionModelContextPacket(group_id, { groupSessionId }).rendered;
-          const sharedFilesContext = buildCoordinatorSharedFilesContext(ctx, group);
+          const sharedFilesContext = buildCoordinatorSharedFilesContext(ctx, group, { groupSessionId, message: messageForAgent });
           const projectAnalysisContext = projectAnalysisRequest ? buildGroupProjectAnalysisContext(group, messageForAgent, ctx, configs) : "";
           const coordinatorResult = await runGroupOrchestrator({
             group,

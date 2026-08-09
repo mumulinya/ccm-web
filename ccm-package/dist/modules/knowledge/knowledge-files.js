@@ -352,6 +352,10 @@ function storeKnowledgeBuffer(name, buffer, options = {}) {
     fs.writeFileSync(targetPath, buffer);
     const scope = normalizeKnowledgeScope(options.scope || current.scope || { type: options.scopeType, id: options.scopeId });
     const now = new Date().toISOString();
+    // 跨文件名的重复内容检测：只提示，不阻断导入。同文件名的重复由上面的 sameContent 处理，
+    // 这里补上"不同文件名但内容一致"的情况（比如同一份文档被换了个名字重复上传）。
+    const duplicateOf = Object.entries(all)
+        .find(([otherName, value]) => otherName !== safeName && value?.content_hash === contentHash)?.[0] || "";
     const metadata = updateKnowledgeMetadata(safeName, {
         ...current,
         scope,
@@ -362,12 +366,13 @@ function storeKnowledgeBuffer(name, buffer, options = {}) {
         version,
         history,
         content_hash: contentHash,
+        duplicate_of: duplicateOf,
         created_at: current.created_at || now,
         updated_at: sameContent ? (current.updated_at || now) : now,
         parse_status: "ready",
         parse_error: "",
     });
-    return { name: safeName, path: targetPath, metadata, duplicate: sameContent };
+    return { name: safeName, path: targetPath, metadata, duplicate: sameContent, duplicateOf };
 }
 function deleteKnowledgeDocument(name) {
     const filePath = resolveKnowledgeFile(name, true);

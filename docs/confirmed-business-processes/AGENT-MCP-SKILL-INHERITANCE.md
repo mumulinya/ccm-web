@@ -29,7 +29,9 @@
 
 ## 主 Agent工具循环
 
-群聊和项目主 Agent先接收授权工具的名称、说明、Schema和Skill hash，不预先加载所有Skill正文。模型最多执行两轮补充读取，每轮最多请求两个工具；重复请求去重，单个结果超过8K Token时拒绝进入上下文。每轮结果重新进入完整Provider Token容量门禁。
+群聊和项目主 Agent默认只接收授权MCP canonical name；`tool_search`命中后才把功能和完整参数Schema加入当前上下文。`auto`在MCP定义不超过上下文10%时内联，`inline`明确全部内联。Skill目录按上下文1%动态预算保留全部名称，简介按优先级裁剪，不预先加载Skill正文。模型补充读取、重复去重和结果注入都重新经过Provider Token容量门禁。
+
+命令中心的`/mcp`和`/skills`也遵守同一作用域：全局入口只读取全局授权，项目入口只读取当前项目授权，群聊入口只读取当前群聊授权。无作用域的`/api/mcp`与`/api/skills`仍供管理页面读取完整注册目录；命令中心不得用完整目录冒充当前Agent可用工具。已授权但注册项缺失的名称单独作为`missing`返回，不能显示为可用。
 
 Skill只能通过`invoke_skill`按授权名称读取。MCP只能使用目录给出的完整canonicalName。未授权、断开、需要登录或可能写入的工具不会执行，也不能被模型描述为已经执行。
 
@@ -48,6 +50,8 @@ Skill只能通过`invoke_skill`按授权名称读取。MCP只能使用目录给�
 Runner启动前重新读取当前群聊与项目配置，只将其与`configuredTools`比较；随后从持久任务重新计算内部角色Skill。这样既不会把合法角色Skill误判为越权，也不能伪造额外Skill。签名、任务、会话、项目、群聊、generation、运行时、配置或并集不匹配时均拒绝启动。
 
 完整Server授权可进入第三方CLI原生MCP配置；仅授权单个子工具时使用CCM代理，避免原生客户端获得整个Server。缺失工具会阻止派发，空授权则正常运行。
+
+每个正式第三方开发工作还会注入签名的 `ccm__agent_communication`。它提供接单ACK、进度、心跳、协调/评审请求、阻塞报告、状态查询和Result提交；调用绑定精确任务、会话、generation、attempt和lease。旧 `ccm__group_coordinator` 是兼容别名，TestAgent没有开发转派权限。详见 [Agent Communication V2](./AGENT-COMMUNICATION-V2.md)。
 
 ## 内置网页MCP
 

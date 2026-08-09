@@ -795,11 +795,17 @@ function buildDeliverySummary(task, execution, finalStatus) {
         post_review_spot_check: receipt.post_review_spot_check || receipt.postReviewSpotCheck || null,
         postReviewSpotCheckSummary: receipt.postReviewSpotCheckSummary || receipt.post_review_spot_check_summary || null,
         post_review_spot_check_summary: receipt.post_review_spot_check_summary || receipt.postReviewSpotCheckSummary || null,
+        completionGate: receipt.completionGate || receipt.completion_gate || receipt.verificationHardening?.completionGate || receipt.verification_hardening?.completionGate || null,
+        completion_gate: receipt.completion_gate || receipt.completionGate || receipt.verification_hardening?.completionGate || receipt.verificationHardening?.completionGate || null,
         testAgentReport: receipt.testAgentReport || receipt.test_agent_report || null,
         test_agent_report: receipt.test_agent_report || receipt.testAgentReport || null,
         blockers: Array.isArray(receipt.blockers) ? receipt.blockers.slice(0, 20) : [],
         needs: Array.isArray(receipt.needs) ? receipt.needs.slice(0, 20) : [],
     }));
+    const latestTestAgentCompletionGate = [...receiptEvidence]
+        .reverse()
+        .map((receipt) => receipt.completionGate || receipt.completion_gate)
+        .find((gate) => gate?.schema === "ccm-test-agent-completion-gate-v2") || null;
     const implementationReceiptEvidence = receiptEvidence.filter((receipt) => !(0, collaboration_1.isCoordinatorTestAgentName)(receipt.agent)
         && String(receipt.role || "").toLowerCase() !== "independent_verifier");
     const memoryUsageEvidence = receiptEvidence
@@ -1227,6 +1233,16 @@ function buildDeliverySummary(task, execution, finalStatus) {
         post_review_spot_check_gate_passed: postReviewSpotCheckGate.pass,
         post_review_spot_check: postReviewSpotCheckGate.latest,
         post_review_spot_check_summary: postReviewSpotCheckGate.summary,
+        verification_hardening: {
+            schema: "ccm-test-agent-verification-hardening-summary-v2",
+            completionGate: latestTestAgentCompletionGate,
+            contentStored: false,
+        },
+        verificationHardening: {
+            schema: "ccm-test-agent-verification-hardening-summary-v2",
+            completionGate: latestTestAgentCompletionGate,
+            contentStored: false,
+        },
         blockers,
         needs,
         blocking_needs: blockingNeeds,

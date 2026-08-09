@@ -28,6 +28,7 @@ import { browserResourceLifecycleErrors } from "../browser/resource-lifecycle";
 
 export const TEST_AGENT_CONTRACT_IDS = {
   handoff: "ccm-test-agent-handoff-v1",
+  handoffV2: "ccm-test-agent-handoff-v2",
   workOrder: "ccm-test-agent-work-order-v1",
   report: "ccm-test-agent-report-v1",
   verdict: "ccm-test-agent-verdict-v1",
@@ -821,7 +822,10 @@ export const TestAgentHandoffProjectContractSchema: z.ZodTypeAny = z.object({
 }).passthrough();
 
 export const TestAgentHandoffContractSchema: z.ZodTypeAny = z.object({
-  schema: z.literal(TEST_AGENT_CONTRACT_IDS.handoff).optional(),
+  schema: z.union([
+    z.literal(TEST_AGENT_CONTRACT_IDS.handoff),
+    z.literal(TEST_AGENT_CONTRACT_IDS.handoffV2),
+  ]).optional(),
   id: optionalString,
   taskId: optionalString,
   task_id: optionalString,

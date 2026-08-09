@@ -28,6 +28,8 @@ import {
 import { compactText, nowIso, resolveUrl, validateTestAgentUrl } from "./utils";
 import { browserCheckUsesExistingSession } from "./browser/existing-session";
 import { checksForProject } from "./browser/shared";
+import { testAgentPolicyContextFromWorkOrder } from "./isolation";
+import { evaluateTestAgentHttpSideEffect } from "./side-effect-policy";
 
 function wantsHttp(workOrder: NormalizedTestAgentWorkOrder) {
   return workOrder.projects.some(project =>
@@ -318,6 +320,27 @@ async function verifyProjectPageHttp(workOrder: NormalizedTestAgentWorkOrder, pr
     const finishedAt = nowIso();
     return { project: project.name, name: "Page HTTP probe", url: "", method: "GET", status: "skipped", statusCode: null, contentType: "", startedAt, finishedAt, durationMs: Date.now() - started, resourceChecks: [] };
   }
+  const policyContext = testAgentPolicyContextFromWorkOrder(workOrder);
+  const policy = policyContext ? evaluateTestAgentHttpSideEffect({ url, method: "GET" }, { ...policyContext, project }) : null;
+  if (policy && !policy.allowed) {
+    const finishedAt = nowIso();
+    return {
+      project: project.name,
+      name: "Page HTTP probe",
+      url,
+      method: "GET",
+      status: "blocked",
+      statusCode: null,
+      contentType: "",
+      startedAt,
+      finishedAt,
+      durationMs: Date.now() - started,
+      resourceChecks: [],
+      context: { pageResourceProbe: true, sideEffectPolicy: "blocked" },
+      responsePreview: "",
+      error: `副作用安全门阻止 HTTP 页面探测：${policy.reason}`,
+    };
+  }
   const main = await fetchWithTimeout(url, workOrder.options.httpTimeoutMs);
   const statusCode = main.response?.status ?? null;
   const contentType = main.response?.headers.get("content-type") || "";
@@ -518,6 +541,31 @@ async function verifyConcurrentHttpCheck(
 }
 
 async function verifyExplicitHttpCheck(workOrder: NormalizedTestAgentWorkOrder, project: NormalizedTestAgentProjectTarget, check: HttpCheckSpec, index: number): Promise<HttpCheckResult> {
+  const policyContext = testAgentPolicyContextFromWorkOrder(workOrder);
+  const policyCheck = { ...check, url: resolveUrl(project.targetUrl || project.startupUrl, check.url) };
+  const policy = policyContext ? evaluateTestAgentHttpSideEffect(policyCheck, { ...policyContext, project }) : null;
+  if (policy && !policy.allowed) {
+    const startedAt = nowIso();
+    return {
+      project: project.name,
+      name: check.name || `HTTP check ${index + 1}`,
+      url: resolveUrl(project.targetUrl || project.startupUrl, check.url),
+      method: String(check.method || "GET").toUpperCase(),
+      status: "blocked",
+      statusCode: null,
+      contentType: "",
+      startedAt,
+      finishedAt: nowIso(),
+      durationMs: 0,
+      resourceChecks: [],
+      assertions: [],
+      responsePreview: "",
+      adversarial: check.adversarial === true,
+      probeType: check.probeType || check.probe_type,
+      context: { ...(check.context || {}), sideEffectPolicy: "blocked" },
+      error: `副作用安全门阻止 HTTP 检查：${policy.reason}`,
+    };
+  }
   if (httpConcurrencySpecFor(check)) {
     return verifyConcurrentHttpCheck(workOrder, project, check, index);
   }

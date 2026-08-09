@@ -743,7 +743,16 @@ export function handleMusicApiPartA(pathname: string, req: any, res: any, parsed
       const source_statuses: Record<string, any> = {};
       for (const [name, result] of Object.entries({ local, netease, bilibili, douyin })) {
         if (result.status === "fulfilled") {
-          source_statuses[name] = { status: "success", result_count: result.value.length };
+          const rows: any[] = Array.isArray(result.value) ? result.value : [];
+          const entry: any = { status: "success", result_count: rows.length };
+          if (name === "douyin" && rows.length > 0) {
+            const first = rows[0] as any;
+            entry.channel = first?.searchChannel || "browser";
+            entry.authenticated = !!first?.searchChannel && first.searchChannel === "official"
+              ? null
+              : douyinPlatformStatus().browser.authenticated;
+          }
+          source_statuses[name] = entry;
         } else {
           const detail = publicMusicPlatformError(result.reason);
           source_statuses[name] = { ...detail, result_count: 0 };

@@ -158,15 +158,23 @@ function buildCommandResult(command, data, args, context, durationMs) {
     ;(Array.isArray(tools) ? tools : Object.entries(tools || {}).map(([name, value]) => ({ name, value }))).slice(0, 30).forEach(item => addItem(item.name || item.label || item.id || item.type, item.description || item.operations || item.value || item.type, item.destructive === true ? '破坏性' : item.risk || item.permission || '受控'))
   } else if (command.name === 'mcp') {
     const tools = data.tools || []
-    result.summary = `当前配置了 ${tools.length} 个 MCP 服务。`
+    result.summary = `当前作用域授权了 ${tools.length} 个可识别的 MCP 服务。`
     addMetric('MCP', tools.length)
     addMetric('启用', tools.filter(item => item.enabled !== false).length)
+    if (data.authorization) {
+      addMetric('授权项', data.authorization.requested || 0)
+      addMetric('缺失', (data.authorization.missing || []).length)
+    }
     tools.forEach(item => addItem(item.name || item.id, item.description || item.command || item.url || '', item.enabled === false ? '停用' : '启用'))
   } else if (command.name === 'skills') {
     const skills = data.skills || []
-    result.summary = `当前安装了 ${skills.length} 个 Skill。`
+    result.summary = `当前作用域授权了 ${skills.length} 个可识别的 Skill。`
     addMetric('Skill', skills.length)
     addMetric('启用', skills.filter(item => item.enabled !== false).length)
+    if (data.authorization) {
+      addMetric('授权项', data.authorization.requested || 0)
+      addMetric('缺失', (data.authorization.missing || []).length)
+    }
     skills.forEach(item => addItem(item.name || item.id, item.description || '', item.enabled === false ? '停用' : '启用'))
   } else if (command.name === 'hooks') {
     const hooks = data.hooks || []

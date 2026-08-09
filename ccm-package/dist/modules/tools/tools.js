@@ -1531,6 +1531,92 @@ function loadCustomSkills() {
     return result;
 }
 // ===== merged from tools-part-02.ts =====
+function normalizeScopedMcpServerName(value) {
+    return String(value || "").trim().replace(/^ccm__/, "").toLowerCase();
+}
+function resolveCatalogAuthorizationScope(query = {}) {
+    const scope = String(query?.scope || "").trim().toLowerCase();
+    if (!scope)
+        return null;
+    if (scope === "global") {
+        return { scope: "global", scopeId: "global-agent", tools: (0, tool_authorization_1.normalizeToolAuthorization)((0, global_agent_tool_authorization_1.loadGlobalAgentToolAuthorization)()?.tools || {}) };
+    }
+    if (scope === "project") {
+        const project = String(query?.project || query?.project_id || "").trim();
+        if (!project)
+            throw new Error("缺少项目名称");
+        const config = (0, db_1.loadProjectConfigs)()?.[project];
+        if (!config)
+            throw new Error("项目不存在");
+        return { scope: "project", scopeId: project, tools: (0, tool_authorization_1.normalizeToolAuthorization)(config?.tools || {}) };
+    }
+    if (scope === "group") {
+        const groupId = String(query?.group_id || query?.groupId || query?.id || "").trim();
+        if (!groupId)
+            throw new Error("缺少群聊 ID");
+        const group = (0, storage_1.loadGroups)().find((item) => String(item?.id || "") === groupId);
+        if (!group)
+            throw new Error("群聊不存在");
+        return { scope: "group", scopeId: groupId, tools: (0, tool_authorization_1.normalizeToolAuthorization)(group?.tools || {}) };
+    }
+    throw new Error("工具目录作用域无效");
+}
+function buildScopedMcpCatalog(query = {}) {
+    const authorization = resolveCatalogAuthorizationScope(query);
+    const catalog = (0, db_1.loadMcpTools)().filter(tool => !(0, internal_mcp_registry_1.isInternalMcpName)(tool?.name));
+    if (!authorization)
+        return { success: true, tools: catalog.map(tool_catalog_management_1.redactMcpToolForDisplay) };
+    const parsedGrants = authorization.tools.mcp.map(tool_authorization_1.parseMcpGrant).filter(item => item.server);
+    const matchedGrants = new Set();
+    const tools = catalog.flatMap((tool) => {
+        const serverKey = normalizeScopedMcpServerName(tool?.name);
+        const grants = parsedGrants.filter(item => normalizeScopedMcpServerName(item.server) === serverKey);
+        if (!grants.length)
+            return [];
+        grants.forEach(item => matchedGrants.add(item.raw));
+        return [{
+                ...(0, tool_catalog_management_1.redactMcpToolForDisplay)(tool),
+                authorization: {
+                    scope: authorization.scope,
+                    scopeId: authorization.scopeId,
+                    fullServer: grants.some(item => !item.tool),
+                    tools: [...new Set(grants.map(item => item.tool).filter(Boolean))],
+                    grants: grants.map(item => item.raw),
+                },
+            }];
+    });
+    return {
+        success: true,
+        scope: authorization.scope,
+        scope_id: authorization.scopeId,
+        tools,
+        authorization: {
+            requested: authorization.tools.mcp.length,
+            available: matchedGrants.size,
+            missing: authorization.tools.mcp.filter((grant) => !matchedGrants.has(grant)),
+        },
+    };
+}
+function buildScopedSkillCatalog(query = {}) {
+    const authorization = resolveCatalogAuthorizationScope(query);
+    const catalog = (0, db_1.loadSkills)();
+    if (!authorization)
+        return { skills: catalog };
+    const authorized = new Set(authorization.tools.skill.map((name) => String(name).trim().toLowerCase()).filter(Boolean));
+    const skills = catalog.filter((skill) => authorized.has(String(skill?.name || "").trim().toLowerCase()));
+    const available = new Set(skills.map((skill) => String(skill?.name || "").trim().toLowerCase()));
+    return {
+        success: true,
+        scope: authorization.scope,
+        scope_id: authorization.scopeId,
+        skills,
+        authorization: {
+            requested: authorization.tools.skill.length,
+            available: skills.length,
+            missing: authorization.tools.skill.filter((name) => !available.has(String(name).trim().toLowerCase())),
+        },
+    };
+}
 function handleToolsAndMetricsApi(pathname, req, res, parsed) {
     if ((0, terminal_1.handleTerminalApi)(pathname, req, res))
         return true;
@@ -1735,7 +1821,12 @@ function handleToolsAndMetricsApi(pathname, req, res, parsed) {
     }
     // === MCP 工具管理 API ===
     if (pathname === "/api/mcp" && req.method === "GET") {
-        (0, utils_1.sendJson)(res, { success: true, tools: (0, db_1.loadMcpTools)().filter(tool => !(0, internal_mcp_registry_1.isInternalMcpName)(tool?.name)).map(tool_catalog_management_1.redactMcpToolForDisplay) });
+        try {
+            (0, utils_1.sendJson)(res, buildScopedMcpCatalog(parsed?.query || {}));
+        }
+        catch (e) {
+            (0, utils_1.sendJson)(res, { success: false, error: e?.message || "读取 MCP 配置失败" }, /不存在/.test(String(e?.message || "")) ? 404 : 400);
+        }
         return true;
     }
     if (pathname === "/api/mcp" && req.method === "POST") {
@@ -1825,7 +1916,12 @@ function handleToolsAndMetricsApi(pathname, req, res, parsed) {
         return true;
     }
     if (pathname === "/api/skills" && req.method === "GET") {
-        (0, utils_1.sendJson)(res, { skills: (0, db_1.loadSkills)() });
+        try {
+            (0, utils_1.sendJson)(res, buildScopedSkillCatalog(parsed?.query || {}));
+        }
+        catch (e) {
+            (0, utils_1.sendJson)(res, { success: false, error: e?.message || "读取 Skill 配置失败" }, /不存在/.test(String(e?.message || "")) ? 404 : 400);
+        }
         return true;
     }
     if (pathname === "/api/skills" && req.method === "POST") {

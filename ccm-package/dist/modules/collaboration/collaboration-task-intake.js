@@ -527,6 +527,7 @@ function buildChildAgentWorkerHandoff(targetProject, taskText = "", options = {}
         forbiddenScope: options.forbidden_scope || options.forbiddenScope || [],
         expectedFiles: options.expected_files || options.expectedFiles || [],
         doneCriteria: options.done_criteria || options.doneCriteria || [],
+        communicationEnvelope: options.communication_envelope || options.communicationEnvelope || null,
     });
 }
 function buildQueuedGroupTaskMessage(task) {

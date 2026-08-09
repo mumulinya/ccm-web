@@ -627,6 +627,7 @@ export declare function getMemoryCenterScope(scope: MemoryScope, scopeId: string
     alerts: any[];
     postCompactUsage: any;
     providerContextCache: any;
+    contextSourceContinuity: any;
     memory: any;
     rawMemory: any;
     itemGroups: any[];

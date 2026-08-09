@@ -27,6 +27,22 @@ export declare function createGroupChatSession(groupId: string, title?: string, 
 };
 export declare function selectGroupChatSession(groupId: string, sessionId: string): any;
 export declare function renameGroupChatSession(groupId: string, sessionId: string, title: string): any;
+export declare function applyGroupSessionProvisionalTitle(groupId: string, sessionId: string, message: any): {
+    renamed: boolean;
+    reason: string;
+    session: any;
+    generated?: undefined;
+} | {
+    renamed: boolean;
+    reason: string;
+    session: any;
+    generated: import("../../system/session-title").SessionTitleResult;
+} | {
+    renamed: boolean;
+    session: any;
+    generated: import("../../system/session-title").SessionTitleResult;
+    reason?: undefined;
+};
 export declare function scheduleGroupSessionAutoTitle(groupId: string, sessionId: string, options?: {
     modelCall?: (request: any) => Promise<any>;
 }): Promise<any>;

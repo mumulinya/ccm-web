@@ -65,7 +65,7 @@ sequenceDiagram
 
 ## 协作 MCP
 
-内部服务名：`ccm__group_coordinator`
+主服务名：`ccm__agent_communication`。`ccm__group_coordinator` 作为兼容别名继续可用，两者写入同一 Agent Communication V2 账本。
 
 项目子 Agent可调用：
 
@@ -74,7 +74,10 @@ sequenceDiagram
 | `request_coordination` | 提交 `information`、`implementation`、`review` 或 `risk` 协作需求 |
 | `request_review` | 请求群聊主 Agent安排另一个 Agent进行只读评审 |
 | `report_blocker` | 报告权限、环境、风险或需要用户决策的阻塞 |
-| `get_coordination_status` | 查询当前精确任务会话中的协调状态 |
+| `get_assignment_status` | 查询当前精确任务会话中的通信、租约和协调状态 |
+| `acknowledge_assignment` | 在写入前提交目标、范围和验证计划 ACK |
+| `report_progress` / `heartbeat` | 报告语义进度并续租当前执行 |
+| `submit_result` | 提交 Result Receipt；不能提交正式终态 |
 
 MCP只负责“子 Agent向主 Agent提交协调请求”和状态查询。B 的开发回执、文件证据、验收结果和 A 的恢复由持久任务系统、任务时间线及主 Agent编排链处理，不是子 Agent之间通过 MCP直接互发消息。
 
@@ -110,6 +113,10 @@ MCP只负责“子 Agent向主 Agent提交协调请求”和状态查询。B 的
 - 与来源任务关联的父子工作项
 
 B 项目已有会话可以继续运行，新协作工作项不会复用或打断它。B 完成后，主 Agent检查结构化回执、真实文件变化、验证命令和阻塞项；只有验收通过并安全合并后才恢复 A。
+
+`isolated_parallel` 的执行通道是 `worktree:<absolute-path>`，不再二次进入项目主目录串行 lane。基础仓库锁只用于创建 worktree 和最终合并，因此 B 的新工作项能在 B 的旧任务仍运行时启动。
+
+每个实现工作项还必须形成 Dispatch、ACK、Result、Terminal 四段 V2 证据；Terminal 只由 CCM 验收门生成。完整状态机和时序见 [Agent Communication V2](./AGENT-COMMUNICATION-V2.md)。
 
 ## 状态流转
 
@@ -158,6 +165,9 @@ submitted
 ## 实现入口
 
 - `backend/integrations/group-coordination-mcp.ts`
+- `backend/integrations/agent-communication-mcp.ts`
+- `backend/system/agent-communication-v2.ts`
+- `backend/system/agent-communication-api.ts`
 - `backend/integrations/internal-mcp-runtime.ts`
 - `backend/integrations/agent-internal-mcp.ts`
 - `backend/modules/collaboration/group-coordination-store.ts`
@@ -170,6 +180,5 @@ submitted
 - 协作 MCP JSON-RPC、签名、过期、篡改、结束任务、错误群聊会话和跨会话 claim 自测通过。
 - Claude Code、Cursor、Codex、Gemini、OpenCode、Qoder运行时注入通过。
 - A 请求 B、B 独立执行、worktree合并、服务重启恢复及 A 原会话续跑的完整业务链通过。
-- 内部 MCP总回归验证 `8` 个内部 MCP、`44` 个工具、角色最小权限、TestAgent和交付门禁。
-- Agent领域回归 `8/8` 通过，生产构建通过，付费 Provider调用为 `0`。
-
+- Agent Communication V2 自测验证精确身份、旧generation/lease迟到回执、并发上限、V1桥接和持久化无Prompt/正文。
+- 跨项目完整业务链验证 B 已有任务执行时，新 `isolated_parallel` 工作项并行启动、独立合并、恢复 A 原会话，并具备四段通信证据。

@@ -39,6 +39,13 @@ export interface TestAgentOptions {
     requireAdversarialProbe?: boolean;
     adversarialProbeWaiver?: string;
     agenticPlanning?: boolean;
+    /** V2 verification hardening is kept optional for v1 handoff compatibility. */
+    hardeningPolicy?: Record<string, any>;
+    hardening_policy?: Record<string, any>;
+    isolationProfile?: Record<string, any>;
+    isolation_profile?: Record<string, any>;
+    readonlyCapabilityManifest?: Record<string, any>;
+    readonly_capability_manifest?: Record<string, any>;
 }
 export interface TestAgentBrowserToolExecutor {
     listTools?: (options?: {
@@ -66,6 +73,9 @@ export interface BrowserToolCallRecord {
     error?: string;
 }
 export interface TestAgentRuntimeOptions extends Partial<TestAgentOptions> {
+    /** Ephemeral native TestAgent capability prompt; never persist this field. */
+    readonlyCapabilityPrompt?: string;
+    readonlyCapabilityManifest?: Record<string, any>;
     runtimeProjectEnvironments?: Record<string, Record<string, string>>;
     browserToolExecutor?: TestAgentBrowserToolExecutor;
     browserToolCallScope?: <T>(execution: BrowserCheckExecutionIdentity, task: () => Promise<T>) => Promise<T>;

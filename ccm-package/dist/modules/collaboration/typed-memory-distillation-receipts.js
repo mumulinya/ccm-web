@@ -250,6 +250,7 @@ const crypto = __importStar(require("crypto"));
 const fs = __importStar(require("fs"));
 const os = __importStar(require("os"));
 const path = __importStar(require("path"));
+const main_agent_context_source_continuity_1 = require("../../system/main-agent-context-source-continuity");
 const utils_1 = require("../../core/utils");
 const typed_memory_index_build_1 = require("./typed-memory-index-build");
 const typed_memory_ledgers_1 = require("./typed-memory-ledgers");
@@ -850,6 +851,7 @@ function addDistilledCandidate(candidates, category, type, message, index, text,
         text: bounded,
         checksum: key,
         memoryAdmission: overrides.memoryAdmission || (0, typed_memory_shared_1.normalizeGroupLogMemoryAdmission)(message),
+        sourceRefs: (0, main_agent_context_source_continuity_1.extractStructuredContextSourceRefs)(overrides.sourceRefs, overrides.source_refs, message?.sourceRefs, message?.source_refs, message?.contextSourceRefs, message?.context_source_refs, message?.citations, message?.evidence, bounded),
         ...(overrides.confirmation ? { confirmation: overrides.confirmation } : {}),
     });
 }

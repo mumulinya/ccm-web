@@ -13,6 +13,9 @@ import {
 import {
   recordAgentRuntimeLifecycle,
 } from "../runtime-kernel";
+import { projectContextSourceToolResultForPersistence } from "../../system/context-source-tool-result-projection";
+import { appendUserVisibleAgentEvent, buildUserVisibleAgentResult } from "../../system/user-visible-agent-events";
+import { publishUserVisibleAssistantText } from "../../system/user-visible-agent-projections";
 import {
   recordGlobalAgentRunMetric,
 } from "./global-agent-metrics";
@@ -71,6 +74,7 @@ import {
   revokeGlobalWriteAuthorization,
 } from "./global-agent-authorization";
 import { createGlobalRunTerminalReceipt } from "./global-terminal-delivery";
+import { finalizeContextSourceRun, markContextSourcesFromOutput } from "../../system/main-agent-context-source-continuity";
 import {
   createGlobalAgentLoopSelfTest,
 } from "./global-agent-loop-self-tests";
@@ -129,6 +133,62 @@ export function emitGlobalDispatchLaunchProgress(runtime: GlobalAgentLoopRuntime
 
 export function emit(runtime: GlobalAgentLoopRuntime, event: any, run: GlobalAgentRun) {
   try { runtime.onEvent?.({ ...event, run_id: run.id, trace_id: run.trace_id, status: run.status, phase: run.phase }, run); } catch {}
+  try {
+    const sourceType = String(event?.type || "");
+    const accepted = new Set([
+      "started", "decision", "tool_started", "tool_completed", "tool_failed",
+      "clarification_required", "confirmation_required", "completed", "failed", "cancelled", "blocked", "paused", "interrupted",
+    ]);
+    if (!accepted.has(sourceType) || !run.session_id) return;
+    const tool = event?.tool || event?.pending_tool || {};
+    const toolName = typeof tool === "string" ? tool : tool?.name;
+    const eventType = sourceType === "decision" ? "thinking_status"
+      : sourceType === "confirmation_required" ? "permission_required"
+        : ["paused", "interrupted"].includes(sourceType) ? "result"
+          : sourceType;
+    const result = ["completed", "failed", "cancelled", "blocked", "paused", "interrupted"].includes(sourceType)
+      ? buildUserVisibleAgentResult({
+        status: sourceType === "completed" ? "success" : sourceType,
+        text: run.final_reply || event?.reply,
+        durationMs: Math.max(0, Date.parse(run.completed_at || run.updated_at) - Date.parse(run.started_at)),
+        turns: run.model_calls,
+        toolCalls: run.tool_calls,
+        stopReason: sourceType,
+        usage: run.usage,
+      })
+      : undefined;
+    appendUserVisibleAgentEvent({
+      eventId: `global:${run.id}:${sourceType}:${tool?.signature || event?.step?.index || run.steps.length}`,
+      scope: "global",
+      scopeId: "global",
+      exactSessionId: run.session_id,
+      generation: Math.max(0, Number(run.resume_count || 0)),
+      taskId: run.mission_id || run.id,
+      eventType,
+      toolName,
+      toolCallId: tool?.signature || undefined,
+      arguments: tool?.arguments || {},
+      observation: event?.observation,
+      error: event?.error,
+      durationMs: event?.step?.duration_ms,
+      result,
+      usage: result ? run.usage : undefined,
+      display: {
+        title: sourceType === "started" ? "全局 Agent"
+          : sourceType === "decision" ? "正在思考"
+            : sourceType === "confirmation_required" ? "需要操作确认"
+              : sourceType === "clarification_required" ? "需要补充信息"
+                : sourceType === "completed" ? "回复完成"
+                  : undefined,
+        summary: event?.message || event?.reply || event?.error || (sourceType === "tool_started" ? "正在执行" : sourceType === "tool_completed" ? "执行完成" : ""),
+        status: sourceType === "completed" || sourceType === "tool_completed" ? "success"
+          : sourceType === "tool_failed" || sourceType === "failed" || sourceType === "blocked" ? "failed"
+            : ["confirmation_required", "clarification_required", "paused", "interrupted"].includes(sourceType) ? "waiting" : "running",
+        toolUseCount: result ? run.tool_calls : undefined,
+        tokenCount: result ? Number(run.usage?.totalTokens || 0) : undefined,
+      },
+    });
+  } catch {}
 }
 
 export function classifyGlobalAgentUserSteer(message: string, requestedKind: string = "auto"): GlobalAgentUserSteerKind {
@@ -821,12 +881,23 @@ export function completeRun(run: GlobalAgentRun, runtime: GlobalAgentLoopRuntime
     report: run.final_report || { summary: run.final_reply, error: run.error },
     settled_at: completedAt,
   });
+  if (run.session_id) {
+    const sourceIdentity = { agentKind: "global" as const, scope: "global" as const, scopeId: "global-agent", exactSessionId: run.session_id, generation: 0 };
+    // 最终回答只证明来源被使用；正式 promotion 必须由长期记忆原子准入后的事务入口完成。
+    markContextSourcesFromOutput(sourceIdentity, run.final_reply);
+    finalizeContextSourceRun(sourceIdentity);
+  }
   saveRun(run, runtime.persist !== false);
   recordGlobalAgentRuntimeOutput(run, { type: "run_terminal", status, reply: run.final_reply, error: run.error });
   appendTraceEvent(run.trace_id, { id: `${run.id}:${status}:${run.completed_at}`, type: `global_agent.run_${status}`, status: status === "completed" ? "ok" : status === "cancelled" ? "warning" : "error", message: run.final_reply.slice(0, 1000), data: { steps: run.steps.length, model_calls: run.model_calls, tool_calls: run.tool_calls, error: run.error } });
   if (recordGlobalAgentRunMetric(run, status, { source: run.source || "global-agent-loop" }) && run.metrics_recorded === true) {
     saveRun(run, runtime.persist !== false);
   }
+  publishUserVisibleAssistantText({
+    scope: "global", scopeId: "global", exactSessionId: run.session_id,
+    generation: Math.max(0, Number(run.resume_count || 0)), taskId: run.mission_id || run.id,
+    turnId: run.id, text: run.final_reply, title: "全局 Agent 回复",
+  });
   emit(runtime, { type: status === "completed" ? "completed" : status, reply: run.final_reply, error: run.error }, run);
   return run;
 }
@@ -1198,12 +1269,14 @@ async function continueLoop(run: GlobalAgentRun, runtime: GlobalAgentLoopRuntime
       let lightUiToolSucceeded = false;
       try {
         const result = await runtime.executeTool(decision.tool.name, args, run, activeRunAbortControllers.get(run.id)?.signal);
+        const persistentToolName = decision.tool.name === "invoke_mcp" ? (args?.tool_name || args?.toolName || decision.tool.name) : decision.tool.name;
+        const persistentObservation = projectContextSourceToolResultForPersistence(persistentToolName, result, args?.query || args?.file_id || args?.name || "");
         acceptedSupervision = isGlobalDispatchTool(decision.tool.name)
           && result?.accepted === true
           && result?.completed !== true
           && !!run.supervisor_id;
         step.observation = compactObservation(result);
-        captureReasoningFacts(run.reasoning_loop, `tool:${decision.tool.name}`, result);
+        captureReasoningFacts(run.reasoning_loop, `tool:${decision.tool.name}`, persistentObservation);
         if (result?.needs_clarification === true) {
           const question = String(
             (Array.isArray(result?.clarification_questions) ? result.clarification_questions[0] : "")
@@ -1219,7 +1292,7 @@ async function continueLoop(run: GlobalAgentRun, runtime: GlobalAgentLoopRuntime
             label: `工具 ${decision.tool.name} 的执行条件已满足`,
             kind: "tool_outcome",
             status: "blocked",
-            evidence: [compactObservation(result)],
+            evidence: [compactObservation(persistentObservation)],
             reason: question,
           });
           recordReasoningDeviation(run.reasoning_loop, "tool_precondition_missing", question, "warning");
@@ -1242,8 +1315,9 @@ async function continueLoop(run: GlobalAgentRun, runtime: GlobalAgentLoopRuntime
           recordGlobalAgentRuntimeOutput(run, {
             type: "clarification_required",
             tool: decision.tool.name,
+            sourceToolName: persistentToolName,
             question,
-            observation: step.observation,
+            observation: persistentObservation,
           });
           appendTraceEvent(run.trace_id, {
             id: `${run.id}:tool-clarification:${step.index}:${signature}`,
@@ -1277,7 +1351,7 @@ async function continueLoop(run: GlobalAgentRun, runtime: GlobalAgentLoopRuntime
           label: `工具 ${decision.tool.name} 产生可核验结果`,
           kind: "tool_outcome",
           status: toolSucceeded ? "passed" : "failed",
-          evidence: [compactObservation(result)],
+          evidence: [compactObservation(persistentObservation)],
           reason: toolSucceeded ? "工具返回成功观察" : String(result?.error || "工具结果标记失败"),
         });
         if (toolSucceeded) {
@@ -1307,10 +1381,10 @@ async function continueLoop(run: GlobalAgentRun, runtime: GlobalAgentLoopRuntime
           target: signature,
           status: toolSucceeded ? "ok" : "error",
           message: `${decision.tool.name} 执行完成`,
-          data: { duration_ms: step.duration_ms, observation: step.observation },
+          data: { duration_ms: step.duration_ms, observation: compactObservation(persistentObservation) },
         });
-        runGlobalAgentHooks("post_tool_use", { run, tool: decision.tool.name, args, risk, observation: step.observation });
-        recordGlobalAgentRuntimeOutput(run, { type: "tool_completed", tool: decision.tool.name, risk, duration_ms: step.duration_ms, observation: step.observation });
+        runGlobalAgentHooks("post_tool_use", { run, tool: decision.tool.name, args, risk, observation: persistentObservation });
+        recordGlobalAgentRuntimeOutput(run, { type: "tool_completed", tool: decision.tool.name, sourceToolName: decision.tool.name === "invoke_mcp" ? (args?.tool_name || args?.toolName || "") : "", risk, duration_ms: step.duration_ms, observation: step.observation });
         markGlobalAgentToolTodo(run, decision.tool.name, toolSucceeded ? "done" : "blocked", toolSucceeded ? `${decision.tool.name} 完成` : String(result?.error || `${decision.tool.name} 返回失败`));
         emit(runtime, { type: "tool_completed", tool: step.tool, observation: step.observation }, run);
         emit(runtime, { type: "tool_activity", phase: "completed", tool: decision.tool.name, risk, step: step.index }, run);
@@ -1530,8 +1604,10 @@ export async function resumeGlobalAgentRun(id: string, runtime: GlobalAgentLoopR
       recordGlobalAgentRuntimeOutput(run, { type: "tool_started", tool: pending.name, risk: pending.risk, confirmed: true, arguments: pending.arguments });
       emit(runtime, { type: "tool_started", tool: pending, confirmed: true }, run);
       const result = await runtime.executeTool(pending.name, pending.arguments, run, activeRunAbortControllers.get(run.id)?.signal);
-      captureReasoningFacts(run.reasoning_loop, `confirmed_tool:${pending.name}`, result);
-      setReasoningAssertion(run.reasoning_loop, { id: `tool_${pending.signature}`, label: `确认后的工具 ${pending.name} 产生可核验结果`, kind: "tool_outcome", status: result?.success === false || result?.error ? "failed" : "passed", evidence: [result], reason: "用户确认后执行" });
+      const persistentToolName = pending.name === "invoke_mcp" ? (pending.arguments?.tool_name || pending.arguments?.toolName || pending.name) : pending.name;
+      const persistentObservation = projectContextSourceToolResultForPersistence(persistentToolName, result, pending.arguments?.query || pending.arguments?.file_id || pending.arguments?.name || "");
+      captureReasoningFacts(run.reasoning_loop, `confirmed_tool:${pending.name}`, persistentObservation);
+      setReasoningAssertion(run.reasoning_loop, { id: `tool_${pending.signature}`, label: `确认后的工具 ${pending.name} 产生可核验结果`, kind: "tool_outcome", status: result?.success === false || result?.error ? "failed" : "passed", evidence: [persistentObservation], reason: "用户确认后执行" });
       if (step) {
         step.observation = compactObservation(result);
         step.duration_ms = Math.max(0, (runtime.now ? runtime.now() : Date.now()) - started);
@@ -1547,8 +1623,8 @@ export async function resumeGlobalAgentRun(id: string, runtime: GlobalAgentLoopR
         outcome: "executed", reasons: ["用户确认后执行原待处理工具"], status: "ok",
       });
       appendTraceEvent(run.trace_id, { id: `${run.id}:tool_confirmed:${pending.signature}`, type: "global_agent.tool_completed", status: "ok", message: `${pending.name} 确认后执行完成`, data: { tool: pending.name, risk: pending.risk } });
-      runGlobalAgentHooks("post_tool_use", { run, tool: pending.name, args: pending.arguments, risk: pending.risk, observation: result });
-      recordGlobalAgentRuntimeOutput(run, { type: "tool_completed", tool: pending.name, risk: pending.risk, confirmed: true, observation: compactObservation(result) });
+      runGlobalAgentHooks("post_tool_use", { run, tool: pending.name, args: pending.arguments, risk: pending.risk, observation: persistentObservation });
+      recordGlobalAgentRuntimeOutput(run, { type: "tool_completed", tool: pending.name, sourceToolName: pending.name === "invoke_mcp" ? (pending.arguments?.tool_name || pending.arguments?.toolName || "") : "", risk: pending.risk, confirmed: true, observation: compactObservation(result) });
       markGlobalAgentToolTodo(run, pending.name, result?.success === false || result?.error ? "blocked" : "done", result?.error || `${pending.name} 确认后执行完成`);
       emit(runtime, { type: "tool_completed", tool: pending, observation: result, confirmed: true }, run);
       if (!(result?.success === false || result?.error) && step) emitGlobalDispatchLaunchProgress(runtime, run, step);

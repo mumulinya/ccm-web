@@ -14,14 +14,24 @@ export declare class KnowledgeDirectoryWatcher {
     start(): void;
     stopAll(): void;
     listPaths(): KnowledgeWatchConfig[];
-    syncDirectory(input: any): Promise<{
+    syncDirectory(input: any, rebuildIndex?: boolean): Promise<{
         files: number;
         synced: number;
         skipped: number;
+        removed: number;
     }>;
-    watchPath(input: any, restore?: boolean): string;
+    private registerWatcher;
+    watchPath(input: any): string;
     private syncFile;
-    addPath(input: any): KnowledgeWatchConfig[];
+    addPath(input: any): Promise<{
+        paths: KnowledgeWatchConfig[];
+        sync: {
+            files: number;
+            synced: number;
+            skipped: number;
+            removed: number;
+        };
+    }>;
     removePath(dirPath: string): KnowledgeWatchConfig[];
 }
 export declare const knowledgeDirectoryWatcher: KnowledgeDirectoryWatcher;

@@ -4,7 +4,7 @@ import * as os from "os";
 import * as path from "path";
 import Database from "better-sqlite3";
 
-const STORE_SCHEMA_VERSION = 1;
+const STORE_SCHEMA_VERSION = 2;
 const DEFAULT_STORE_DIR = path.join(os.homedir(), ".cc-connect");
 const STORE_DIR = path.resolve(process.env.CCM_TASK_STORE_DIR || DEFAULT_STORE_DIR);
 const DATABASE_FILE = path.join(STORE_DIR, "ccm.db");
@@ -139,6 +139,80 @@ function createSchema(db: Database.Database) {
     );
     CREATE INDEX IF NOT EXISTS idx_group_logs_group_id_id ON group_logs(group_id, id);
     CREATE INDEX IF NOT EXISTS idx_group_logs_timestamp ON group_logs(timestamp);
+
+    CREATE TABLE IF NOT EXISTS agent_communication_messages (
+      message_id TEXT PRIMARY KEY,
+      message_type TEXT NOT NULL,
+      correlation_id TEXT NOT NULL,
+      parent_message_id TEXT NOT NULL DEFAULT '',
+      task_id TEXT NOT NULL,
+      work_item_id TEXT NOT NULL,
+      scope TEXT NOT NULL,
+      scope_id TEXT NOT NULL,
+      exact_session_id TEXT NOT NULL,
+      generation INTEGER NOT NULL DEFAULT 0,
+      attempt INTEGER NOT NULL DEFAULT 1,
+      lease_id TEXT NOT NULL DEFAULT '',
+      sender_agent_id TEXT NOT NULL,
+      receiver_agent_id TEXT NOT NULL,
+      state TEXT NOT NULL,
+      deadline_at TEXT NOT NULL DEFAULT '',
+      idempotency_key TEXT NOT NULL,
+      payload_checksum TEXT NOT NULL,
+      payload_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_comm_idempotency ON agent_communication_messages(idempotency_key);
+    CREATE INDEX IF NOT EXISTS idx_agent_comm_task ON agent_communication_messages(task_id, updated_at);
+    CREATE INDEX IF NOT EXISTS idx_agent_comm_session ON agent_communication_messages(scope, scope_id, exact_session_id, updated_at);
+    CREATE INDEX IF NOT EXISTS idx_agent_comm_state ON agent_communication_messages(state, updated_at);
+
+    CREATE TABLE IF NOT EXISTS agent_communication_events (
+      event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+      message_id TEXT NOT NULL,
+      event_type TEXT NOT NULL,
+      from_state TEXT NOT NULL DEFAULT '',
+      to_state TEXT NOT NULL DEFAULT '',
+      generation INTEGER NOT NULL DEFAULT 0,
+      attempt INTEGER NOT NULL DEFAULT 1,
+      lease_id TEXT NOT NULL DEFAULT '',
+      receipt_checksum TEXT NOT NULL DEFAULT '',
+      detail_json TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL,
+      FOREIGN KEY(message_id) REFERENCES agent_communication_messages(message_id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_agent_comm_events_message ON agent_communication_events(message_id, event_id);
+
+    CREATE TABLE IF NOT EXISTS agent_communication_leases (
+      lease_id TEXT PRIMARY KEY,
+      message_id TEXT NOT NULL UNIQUE,
+      owner_id TEXT NOT NULL,
+      generation INTEGER NOT NULL DEFAULT 0,
+      attempt INTEGER NOT NULL DEFAULT 1,
+      status TEXT NOT NULL,
+      side_effect_state TEXT NOT NULL DEFAULT 'none',
+      heartbeat_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY(message_id) REFERENCES agent_communication_messages(message_id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_agent_comm_leases_status ON agent_communication_leases(status, expires_at);
+
+    CREATE TABLE IF NOT EXISTS agent_communication_receipts (
+      receipt_checksum TEXT PRIMARY KEY,
+      message_id TEXT NOT NULL,
+      receipt_type TEXT NOT NULL,
+      generation INTEGER NOT NULL DEFAULT 0,
+      attempt INTEGER NOT NULL DEFAULT 1,
+      lease_id TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL,
+      receipt_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY(message_id) REFERENCES agent_communication_messages(message_id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_agent_comm_receipts_message ON agent_communication_receipts(message_id, created_at);
   `);
   setMeta(db, "schema_version", STORE_SCHEMA_VERSION);
 }
@@ -283,6 +357,10 @@ function getDatabase() {
     initialized = true;
   }
   return database;
+}
+
+export function withSqliteTaskStore<T>(operation: (db: Database.Database) => T): T {
+  return operation(getDatabase());
 }
 
 export function loadTasksFromSqlite(): any[] {

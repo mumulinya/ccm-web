@@ -2,7 +2,8 @@ import { type ToolGrantSet } from "./tool-authorization";
 import { type ToolScope } from "./tool-manager";
 import type { LoadedContextItemsV1 } from "../system/session-compaction-core";
 import { type MainAgentScopeKind } from "./workspace-readonly-tools";
-import { type MainAgentContinuityIdentityV1, type PostCompactToolRestoreReceiptV1 } from "../system/main-agent-post-compact-continuity";
+import { type MainAgentContinuityIdentityV1, type PostCompactToolRestoreReceipt } from "../system/main-agent-post-compact-continuity";
+import { type MainAgentContextPolicy } from "./main-agent-context-policy";
 export type MainAgentToolRequest = {
     name: string;
     arguments: any;
@@ -16,6 +17,7 @@ export type MainAgentToolRuntimeContext = {
     effective: ToolGrantSet;
     catalog: {
         mcp: any[];
+        loadedMcp?: any[];
         skills: any[];
         rejectedMcp: any[];
         discoverableMcp?: any[];
@@ -32,7 +34,9 @@ export type MainAgentToolRuntimeContext = {
     deferredToolNames?: string[];
     scopeIdentity?: MainAgentContinuityIdentityV1;
     restoredSkillAttachments?: any[];
-    postCompactRestoreReceipt?: PostCompactToolRestoreReceiptV1;
+    postCompactRestoreReceipt?: PostCompactToolRestoreReceipt;
+    contextPolicy?: MainAgentContextPolicy;
+    contextBudget?: any;
 };
 export type MainAgentNativeToolV2 = {
     name: string;
@@ -56,6 +60,15 @@ export declare function buildMainAgentToolRuntimeContext(input: {
         generation?: number;
     };
     loadedToolNames?: string[];
+    contextPolicy?: any;
+    contextWindow?: number;
+    currentUserInput?: any;
+    contextReservedTokens?: {
+        system?: number;
+        summary?: number;
+        output?: number;
+        safety?: number;
+    };
 }): MainAgentToolRuntimeContext;
 export declare function normalizeMainAgentToolRequests(value: any, limit?: number): MainAgentToolRequest[];
 export declare function mainAgentToolRequestFingerprint(request: MainAgentToolRequest): string;
@@ -72,4 +85,6 @@ export declare function executeMainAgentToolRequests(input: {
     onUse?: (request: MainAgentToolRequest) => string | void;
     onResult?: (request: MainAgentToolRequest, callId: string, output: any, error?: string) => void;
     resultTokenLimit?: number;
+    toolBatchSize?: number;
+    readOnlyParallelism?: number;
 }): Promise<any[]>;

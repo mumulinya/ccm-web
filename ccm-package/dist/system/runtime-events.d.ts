@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "http";
-export type RuntimeEventTopic = "task" | "permission" | "agent" | "feishu" | "project" | "group" | "cron" | "music" | "system";
+export type RuntimeEventTopic = "task" | "permission" | "agent" | "feishu" | "global" | "project" | "group" | "cron" | "music" | "system";
 export type RuntimeEvent = {
     id: number;
     topic: RuntimeEventTopic;

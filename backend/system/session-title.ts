@@ -14,7 +14,7 @@ export type SessionTitleInput = {
 
 export type SessionTitleResult = {
   title: string;
-  source: "model" | "fallback" | "skipped";
+  source: "model" | "fallback" | "provisional" | "skipped";
   error?: string;
 };
 
@@ -26,6 +26,13 @@ export function isSessionTitlePlaceholder(title: any, origin: any = "") {
   if (normalizedOrigin === "placeholder") return true;
   const value = String(title || "").trim();
   return !value || PLACEHOLDER_TITLES.has(value) || /^会话\s*\d+\s*[\u00b7-]/.test(value);
+}
+
+export function isSessionTitleAutoReplaceable(title: any, origin: any = "") {
+  const normalizedOrigin = String(origin || "").toLowerCase();
+  if (normalizedOrigin === "manual" || normalizedOrigin === "model" || normalizedOrigin === "fallback") return false;
+  if (normalizedOrigin === "placeholder" || normalizedOrigin === "provisional") return true;
+  return isSessionTitlePlaceholder(title, origin);
 }
 
 export function isMeaningfulSessionTitleInput(value: any) {
@@ -57,6 +64,16 @@ export function fallbackSessionTitle(input: SessionTitleInput) {
     .split(/[。！？\n.!?]/)[0]
     .trim();
   return cleanTitle(text) || "新会话";
+}
+
+export function generateProvisionalSessionTitle(input: SessionTitleInput): SessionTitleResult {
+  if (!isMeaningfulSessionTitleInput(input.userMessage) && !(input.attachmentNames || []).length) {
+    return { title: "", source: "skipped" };
+  }
+  const title = fallbackSessionTitle(input);
+  return title && !isSessionTitlePlaceholder(title)
+    ? { title, source: "provisional" }
+    : { title: "", source: "skipped" };
 }
 
 async function defaultModelCall(system: string, user: string) {

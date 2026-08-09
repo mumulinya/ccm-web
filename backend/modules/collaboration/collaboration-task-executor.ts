@@ -12,6 +12,13 @@ import {
 import { runMainAgentSelfVerification } from "./main-agent-self-verification";
 import { resolveTaskAcceptancePolicy } from "./task-acceptance-policy";
 import { loadProjectConfigs } from "../../core/db";
+import {
+  heartbeatAgentCommunication,
+  markAgentCommunicationRunnerStarted,
+  readAgentCommunicationPolicy,
+  startAgentCommunicationDispatch,
+  submitAgentCommunicationResult,
+} from "../../system/agent-communication-v2";
 
 type CollabCtx = any;
 
@@ -321,7 +328,7 @@ export async function executeTask(task: any, ctx: CollabCtx, deps: any) {
       };
     }
     const sharedFilesContext = mergeCoordinatorDocumentContexts(
-      buildCoordinatorSharedFilesContext(ctx, group),
+      buildCoordinatorSharedFilesContext(ctx, group, { groupSessionId: groupSessionIdForTask(task), message }),
       buildTaskSourceDocumentsContext(task),
       planningSource.rendered,
     );
@@ -448,6 +455,22 @@ export async function executeTask(task: any, ctx: CollabCtx, deps: any) {
     const coordinatorRuntime = String((coordinatorResult as any).runtime || "");
     if (coordinatorRuntime === "llm-error") {
       const providerFailure = (coordinatorResult as any).providerFailure || {};
+      if (providerFailure.kind && providerFailure.kind !== "provider") {
+        const failureKind = String(providerFailure.kind || "internal");
+        const failureMessage = compactMemoryText(coordinatorOutput, 500) || "群聊主 Agent 内部处理失败";
+        updateTask(task.id, { status_detail: failureMessage });
+        appendTaskTimelineEvent(task.id, {
+          type: "main_agent_processing_failed",
+          title: failureKind === "workflow_contract" ? "主 Agent 工作流格式校验失败" : failureKind === "context" ? "主 Agent 上下文处理失败" : "主 Agent 内部处理失败",
+          detail: failureMessage,
+          status: "warn",
+          phase: "planning",
+          agent: coordinatorProject,
+          data: { failure_kind: failureKind, provider_circuit_opened: false },
+        });
+        addTaskLog(task.id, "warning", `${failureMessage}；该错误不是 Provider 连接故障，未开启任务级 Provider 冷却`);
+        return getGroupTaskExecutionStatus(null, coordinatorResult, coordinatorTranscript.join("\n\n---\n\n"), task);
+      }
       const circuit = openTaskProviderCircuit(task, providerFailure, {
         reason: compactMemoryText(coordinatorOutput, 500) || "群聊主 Agent Provider 调用失败",
       });
@@ -762,6 +785,65 @@ export async function executeTask(task: any, ctx: CollabCtx, deps: any) {
     markGroupCoordinationDependencyStarted(task, preparedWorkDir, directTaskSession);
     const directMemoryDeliveryAttemptSequence = directTaskSession ? directTaskSession.turnCount + 1 : 0;
     const directGroupSessionId = String(task.group_session_id || task.groupSessionId || "");
+    const communicationScope = task.group_id ? "group" : task.global_mission_id ? "global" : "project";
+    const communicationScopeId = String(task.group_id || task.global_mission_id || task.target_project);
+    const communicationExactSessionId = directGroupSessionId || String(task.project_session_id || task.projectSessionId || task.id);
+    const communicationAttempt = Math.max(1, directMemoryDeliveryAttemptSequence || Number(task.retry_count || 0) + 1);
+    const communicationGeneration = Math.max(0, Number(task.agent_communication_generation ?? task.generation ?? directTaskSession?.generation ?? 0));
+    const communicationDispatch: any = startAgentCommunicationDispatch({
+      taskId: task.id,
+      workItemId: String(task.work_item_id || task.workItemId || task.id),
+      scope: communicationScope,
+      scopeId: communicationScopeId,
+      exactSessionId: communicationExactSessionId,
+      generation: communicationGeneration,
+      attempt: communicationAttempt,
+      senderAgentId: task.group_id ? "ccm-group-main-agent" : task.global_mission_id ? "ccm-global-agent" : "ccm-project-main-agent",
+      receiverAgentId: task.target_project,
+      ownerId: `task-queue:${task.id}`,
+      existingMessageId: String(task.agent_communication_message_id || "") || undefined,
+      idempotencyKey: `task-dispatch-v2:${task.id}:${communicationGeneration}:${communicationAttempt}`,
+      payload: {
+        objectiveChecksum: task.requirement_checksum || task.goal_checksum || "",
+        acceptanceChecksum: task.acceptance_checksum || "",
+        authorizedProject: task.target_project,
+        workspaceMode: preparedWorkDir.mode,
+        worktreeRef: preparedWorkDir.mode === "worktree" ? preparedWorkDir.worktreePath || preparedWorkDir.workDir : "",
+        verificationRequired: task.requires_verification !== false,
+      },
+      policy: task.contextPolicy?.effective || task.context_policy?.effective || task.context_policy_effective || {},
+    });
+    if (communicationDispatch.enabled !== false && communicationDispatch.acquired !== true) {
+      if (communicationDispatch.envelope?.messageId) updateTask(task.id, {
+        agent_communication_message_id: communicationDispatch.envelope.messageId,
+        agent_communication_state: "queued",
+        queue_state: "capacity_wait",
+        queue_capacity_reason: communicationDispatch.reason || "capacity_limit",
+        queue_position: communicationDispatch.position || 1,
+      });
+      const capacityError: any = new Error(`Agent Communication并发容量等待：${communicationDispatch.reason || "capacity_limit"}`);
+      capacityError.code = "CCM_AGENT_COMMUNICATION_CAPACITY_WAIT";
+      capacityError.capacity = communicationDispatch;
+      throw capacityError;
+    }
+    const communicationEnvelope = communicationDispatch.envelope || null;
+    if (communicationEnvelope?.messageId) {
+      updateTask(task.id, {
+        agent_communication_message_id: communicationEnvelope.messageId,
+        agent_communication_state: communicationEnvelope.state,
+        agent_communication_attempt: communicationEnvelope.attempt,
+        agent_communication_lease_id: communicationEnvelope.leaseId,
+      });
+      appendTaskTimelineEvent(task.id, {
+        type: "agent_communication_dispatch",
+        title: `${task.target_project} 通信信封已创建`,
+        detail: `generation=${communicationEnvelope.generation} · attempt=${communicationEnvelope.attempt}`,
+        status: "ok",
+        phase: "dispatching",
+        agent: task.target_project,
+        data: { message_id: communicationEnvelope.messageId, payload_checksum: communicationEnvelope.payloadChecksum, content_stored: false },
+      });
+    }
     let directInvocationEdge: any = task.workflow_type !== "agent_coordination_dependency" && task.group_id && directTaskSession && directGroupSessionId.startsWith("gcs_") ? prepareTaskAgentInvocationEdge({
       groupId: task.group_id,
       groupSessionId: directGroupSessionId,
@@ -844,6 +926,7 @@ export async function executeTask(task: any, ctx: CollabCtx, deps: any) {
       },
       memory: directGroupMemoryContext,
       continuation: directContinuation,
+      communication_envelope: communicationEnvelope,
     });
     addTaskLog(task.id, "info", `${task.target_project} 直接任务工作单已补齐：目标、范围、验收、ACK 和回执要求已打包`);
     appendTaskTimelineEvent(task.id, {
@@ -1054,6 +1137,18 @@ ${requirementEpicExecutionBoundary(task)}
       }
       let directRunnerRequestId = "";
       let directRunnerStarted = false;
+      let communicationHeartbeat: any = null;
+      const communicationIdentity = communicationEnvelope ? {
+        taskId: communicationEnvelope.taskId,
+        workItemId: communicationEnvelope.workItemId,
+        exactSessionId: communicationEnvelope.exactSessionId,
+        generation: communicationEnvelope.generation,
+        attempt: communicationEnvelope.attempt,
+        leaseId: communicationEnvelope.leaseId,
+        senderAgentId: communicationEnvelope.receiverAgentId,
+        receiverAgentId: communicationEnvelope.senderAgentId,
+      } : null;
+      try {
       output = await ctx.callAgent(task.target_project, message, workDir, agentType, 300000, {
         groupId: task.group_id || "",
         allowedTools: toolContext.allowedTools,
@@ -1077,6 +1172,24 @@ ${requirementEpicExecutionBoundary(task)}
           || directMemoryContextSnapshot?.context?.memory_prompt_injection_proof?.trusted_envelope_bound === true,
         onRunnerRequestCreated: (requestId: string) => {
           directRunnerRequestId = String(requestId || "");
+          if (communicationEnvelope?.messageId && communicationIdentity) {
+            markAgentCommunicationRunnerStarted(communicationEnvelope.messageId, {
+              runnerRequestId: directRunnerRequestId,
+              runtime: agentType,
+              worktreeRef: preparedWorkDir.mode === "worktree" ? preparedWorkDir.worktreePath || preparedWorkDir.workDir : "",
+            });
+            const communicationPolicy = readAgentCommunicationPolicy();
+            communicationHeartbeat = setInterval(() => {
+              try {
+                heartbeatAgentCommunication(communicationEnvelope.messageId, communicationIdentity, {
+                  phase: "executing",
+                });
+              } catch (error: any) {
+                addTaskLog(task.id, "warning", `Agent Communication心跳写入失败：${String(error?.message || error).slice(0, 240)}`);
+              }
+            }, communicationPolicy.agentHeartbeatIntervalMs);
+            communicationHeartbeat.unref?.();
+          }
           if (directTypedMemoryDispatchWalRecord && directRunnerRequestId) {
             directTypedMemoryDispatchWalRecord = markChildTypedMemoryDispatchStarted({ required: true, record: directTypedMemoryDispatchWalRecord }, {
               dispatchStartedAt: directTypedMemoryDispatchStartedAt,
@@ -1107,6 +1220,9 @@ ${requirementEpicExecutionBoundary(task)}
           directRunnerStarted = opts?.runnerStarted === true;
         },
       });
+      } finally {
+        if (communicationHeartbeat) clearInterval(communicationHeartbeat);
+      }
       if (!directCapacityRevalidationCommitted && directTaskSession && directCapacityRevalidationPreparation?.proof) {
         const capacityCommit = commitTaskAgentSessionCapacityRevalidation(directTaskSession.id, directCapacityRevalidationPreparation.proof, {
           runnerRequestId: directRunnerRequestId,
@@ -1253,6 +1369,29 @@ ${requirementEpicExecutionBoundary(task)}
       const detectedSkillUse = attachInvokedSkillsToReceipt(extractAgentReceipt(output, task.target_project), output, toolContext.allowedTools, runtimeToolContext.audit);
       receipt = detectedSkillUse.receipt;
       invokedSkills = detectedSkillUse.invoked;
+      if (communicationEnvelope?.messageId) {
+        const communicationResult: any = submitAgentCommunicationResult(communicationEnvelope.messageId, {
+          ...(receipt || {}),
+          status: receipt?.status || (directSessionSucceeded ? "submitted" : "failed"),
+          summary: receipt?.summary || (directSessionSucceeded ? "第三方 Agent 已返回执行结果" : directSessionError || "第三方 Agent 执行失败"),
+          filesChanged: receipt?.filesChanged || fileChanges?.files || [],
+          verificationResults: receipt?.verificationResults || [],
+          sideEffectState: (receipt?.filesChanged?.length || fileChanges?.files?.length) ? "known" : "none",
+        });
+        updateTask(task.id, {
+          agent_communication_message_id: communicationEnvelope.messageId,
+          agent_communication_state: communicationResult.envelope?.state || "result_submitted",
+        });
+        appendTaskTimelineEvent(task.id, {
+          type: "agent_communication_result",
+          title: `${task.target_project} 已提交结构化结果`,
+          detail: `message=${communicationEnvelope.messageId}`,
+          status: communicationResult.accepted === true ? "ok" : "warn",
+          phase: "reviewing",
+          agent: task.target_project,
+          data: { receipt_checksum: communicationResult.receiptChecksum || "", content_stored: false },
+        });
+      }
     if (receipt) updateTaskWorkItemFromReceipt(task.id, task.target_project, receipt, fileChanges, output, { ctx });
     const coordination = {
       coordinationPlan: {

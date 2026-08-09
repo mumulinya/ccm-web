@@ -1298,11 +1298,25 @@ function parseSkillMarkdown(content, fallbackName = "", fallbackDescription = ""
         const field = frontmatter.match(new RegExp(`^${name}:\\s*(.+)$`, "mi"))?.[1]?.trim() || "";
         return field.replace(/^['"]|['"]$/g, "");
     };
+    const readList = (name) => {
+        const inline = readField(name);
+        if (inline.startsWith("[") && inline.endsWith("]"))
+            return inline.slice(1, -1).split(",").map(item => item.trim().replace(/^['"]|['"]$/g, "")).filter(Boolean);
+        const match = frontmatter.match(new RegExp(`^${name}:\\s*\\r?\\n((?:\\s+-\\s+.*\\r?\\n?)*)`, "mi"));
+        return String(match?.[1] || "").split(/\r?\n/).map(line => line.match(/^\s+-\s+(.+)$/)?.[1]?.trim().replace(/^['"]|['"]$/g, "") || "").filter(Boolean);
+    };
+    const context = readField("context").toLowerCase();
+    const effort = readField("effort").toLowerCase();
     return {
         name: readField("name") || fallbackName,
         description: readField("description") || fallbackDescription,
         prompt: match ? text.slice(match[0].length).trim() : text.trim(),
         content: text,
+        context: context === "fork" ? "fork" : "inline",
+        allowedTools: readList("allowed-tools"),
+        agent: readField("agent"),
+        model: readField("model"),
+        effort: ["low", "medium", "high"].includes(effort) ? effort : "",
     };
 }
 function ensureSkillFrontmatter(content, name, description) {

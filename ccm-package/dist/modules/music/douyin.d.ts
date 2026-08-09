@@ -51,6 +51,12 @@ export declare function revokeDouyinBrowserLogin(): {
         platformSupported: boolean;
         preparation: RuntimePreparationState;
     };
+    search: {
+        enabled: boolean;
+        mode: string;
+        anonymousSupported: boolean;
+        authenticatedEnhancement: any;
+    };
 };
 export declare function douyinSearch(keyword: string, limit?: number): Promise<DouyinMusicResult[]>;
 export declare function prepareDouyinMediaRuntime(): Promise<any>;
@@ -84,6 +90,12 @@ export declare function douyinPlatformStatus(): {
         version: string;
         platformSupported: boolean;
         preparation: RuntimePreparationState;
+    };
+    search: {
+        enabled: boolean;
+        mode: string;
+        anonymousSupported: boolean;
+        authenticatedEnhancement: any;
     };
 };
 export declare function runDouyinMusicSelfTest(): {

@@ -43,6 +43,7 @@ exports.findGroupChatSessionContainingMessage = findGroupChatSessionContainingMe
 exports.createGroupChatSession = createGroupChatSession;
 exports.selectGroupChatSession = selectGroupChatSession;
 exports.renameGroupChatSession = renameGroupChatSession;
+exports.applyGroupSessionProvisionalTitle = applyGroupSessionProvisionalTitle;
 exports.scheduleGroupSessionAutoTitle = scheduleGroupSessionAutoTitle;
 exports.archiveGroupChatSession = archiveGroupChatSession;
 exports.findActiveGroupSessionTasks = findActiveGroupSessionTasks;
@@ -342,6 +343,25 @@ function renameGroupChatSession(groupId, sessionId, title) {
     writeGroupSessionManifest(groupId, { ...manifest, sessions });
     return renamed;
 }
+function applyGroupSessionProvisionalTitle(groupId, sessionId, message) {
+    const manifest = listGroupChatSessions(groupId);
+    const session = manifest.sessions.find((item) => item.id === sessionId);
+    if (!session || !(0, session_title_1.isSessionTitleAutoReplaceable)(session.title, session.titleOrigin)) {
+        return { renamed: false, reason: "title_not_replaceable", session };
+    }
+    const files = message?.files || message?.attachments || [];
+    const generated = (0, session_title_1.generateProvisionalSessionTitle)({
+        scope: "group",
+        userMessage: String(message?.content || ""),
+        attachmentNames: files.map((file) => String(file?.name || file?.filename || "")).filter(Boolean),
+    });
+    if (!generated.title)
+        return { renamed: false, reason: "title_input_skipped", session, generated };
+    const now = new Date().toISOString();
+    const renamed = { ...session, title: generated.title, titleOrigin: "provisional", titleProvisionalAt: now, updatedAt: now };
+    writeGroupSessionManifest(groupId, { ...manifest, sessions: manifest.sessions.map((item) => item.id === sessionId ? renamed : item) });
+    return { renamed: true, session: renamed, generated };
+}
 const groupSessionTitleJobs = new Map();
 function scheduleGroupSessionAutoTitle(groupId, sessionId, options = {}) {
     const key = `${groupId}::${sessionId}`;
@@ -351,7 +371,7 @@ function scheduleGroupSessionAutoTitle(groupId, sessionId, options = {}) {
     const job = (async () => {
         const manifest = listGroupChatSessions(groupId);
         const session = manifest.sessions.find((item) => item.id === sessionId);
-        if (!session || !(0, session_title_1.isSessionTitlePlaceholder)(session.title, session.titleOrigin))
+        if (!session || !(0, session_title_1.isSessionTitleAutoReplaceable)(session.title, session.titleOrigin))
             return { renamed: false, reason: "title_already_set", session };
         const messages = getGroupMessages(groupId, sessionId);
         const userIndex = messages.findIndex((message) => message?.role === "user"
@@ -373,7 +393,7 @@ function scheduleGroupSessionAutoTitle(groupId, sessionId, options = {}) {
             return { renamed: false, reason: "title_input_skipped", generated };
         const latest = listGroupChatSessions(groupId);
         const current = latest.sessions.find((item) => item.id === sessionId);
-        if (!current || !(0, session_title_1.isSessionTitlePlaceholder)(current.title, current.titleOrigin))
+        if (!current || !(0, session_title_1.isSessionTitleAutoReplaceable)(current.title, current.titleOrigin))
             return { renamed: false, reason: "title_changed_during_generation", session: current };
         const now = new Date().toISOString();
         const renamed = { ...current, title: generated.title, titleOrigin: generated.source === "model" ? "model" : "fallback", titleGeneratedAt: now, updatedAt: now };
@@ -672,6 +692,14 @@ function appendGroupMessage(groupId, msg) {
             hook(groupId, next, messages);
         }
         catch { }
+    }
+    if (String(next.role || "") === "user") {
+        try {
+            applyGroupSessionProvisionalTitle(groupId, sessionId, next);
+        }
+        catch (error) {
+            console.warn(`[群聊会话] 临时命名失败 (${groupId}/${sessionId})：${error?.message || error}`);
+        }
     }
     if (String(next.role || "") === "assistant" && String(next.content || "").trim()) {
         void scheduleGroupSessionAutoTitle(groupId, sessionId).catch((error) => {

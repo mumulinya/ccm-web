@@ -1274,6 +1274,13 @@ export function createAgentRunnerRuntime(deps: any) {
                 agent: projectName,
                 accepted: true,
                 sourceKind: "accepted_project_session_memory_mcp_report",
+                contextSourceIdentity: {
+                  agentKind: "project",
+                  scope: "project",
+                  scopeId: projectName,
+                  exactSessionId: String(projectRun.project_session_id || projectRun.session_id || projectRun.id),
+                  generation: Math.max(0, Number(projectRun.project_session_generation || projectRun.generation || 0)),
+                },
                 actualFiles: fileChanges?.files || fileChanges?.items || [],
                 receipt: {
                   status: "done",

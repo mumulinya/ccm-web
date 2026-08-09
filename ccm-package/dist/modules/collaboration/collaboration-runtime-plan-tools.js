@@ -87,6 +87,10 @@ const utils_1 = require("../../core/utils");
 const db_1 = require("../../core/db");
 const role_skills_1 = require("../../skills/role-skills");
 const shared_files_v2_1 = require("../tools/shared-files-v2");
+const group_compaction_strategy_1 = require("./group-compaction-strategy");
+const main_agent_context_policy_1 = require("../../tools/main-agent-context-policy");
+const main_agent_context_source_continuity_1 = require("../../system/main-agent-context-source-continuity");
+const main_agent_post_compact_continuity_1 = require("../../system/main-agent-post-compact-continuity");
 const group_orchestrator_1 = require("./group-orchestrator");
 const display_1 = require("./display");
 const memory_1 = require("./memory");
@@ -1152,16 +1156,45 @@ async function runAgentCliProbeBatch(payload, ctx) {
             : `批量复检完成：通过 ${results.filter((item) => item.success).length}/${results.length}`,
     };
 }
-function buildCoordinatorSharedFilesContext(ctx, group) {
+function buildCoordinatorSharedFilesContext(ctx, group, options = {}) {
     const groupId = String(group?.id || "").trim();
     if (!groupId)
         return undefined;
+    const config = (0, group_orchestrator_1.loadOrchestratorConfig)();
+    const contextPolicy = (0, main_agent_context_policy_1.resolveMainAgentContextPolicy)(config, group?.context_policy || group?.contextPolicy || {}).effective;
+    const contextWindow = Number((0, group_compaction_strategy_1.resolveGroupModelContextCapacity)(config).effectiveContextWindow || 200_000);
+    const budget = (0, main_agent_context_source_continuity_1.calculateContextSourceBudget)({ contextWindow, catalogPercent: contextPolicy.contextSourceCatalogBudgetPercent, hydrationPercent: contextPolicy.contextSourceHydrationBudgetPercent });
     (0, shared_files_v2_1.migrateLegacySharedFilesV2)("group", groupId, group?.shared_files || [], "groups-v1");
     const projection = (0, shared_files_v2_1.buildSharedFilesContextV2)("group", groupId, {
-        maxTokens: 32_000,
+        contextWindow,
+        hydrationBudgetPercent: contextPolicy.contextSourceHydrationBudgetPercent,
+        remainingSafeTokens: budget.hydrationTargetTokens,
+        explicitText: options.message,
         title: "以下是当前群聊已授权共享文档/文件。主 Agent拆分任务时必须引用对应文件与分片证据：",
     });
-    return projection.context.trim() ? projection.context : undefined;
+    const identity = options.groupSessionId ? (0, main_agent_post_compact_continuity_1.resolveMainAgentContinuityIdentity)({ agentKind: "group", scope: "group", scopeId: groupId, exactSessionId: options.groupSessionId, generation: Number(options.generation || 0) }) : null;
+    const projects = (0, group_orchestrator_1.getRoutableMembers)(group).map((member) => ({ name: String(member?.project || "") })).filter((item) => item.name);
+    const catalog = (0, main_agent_context_source_continuity_1.buildContextSourceCatalog)({
+        sources: (0, main_agent_context_source_continuity_1.listContextSourceCatalogEntries)({ sharedScope: "group", sharedScopeId: groupId, knowledgeContext: { role: "group-main-agent", groupId, projects } }),
+        maxTokens: budget.catalogTargetTokens,
+        explicitText: options.message,
+        recentReceipts: identity ? (0, main_agent_context_source_continuity_1.readContextSourceContinuity)(identity).receipts : [],
+    });
+    if (identity) {
+        (0, main_agent_context_source_continuity_1.recordContextSourceCatalog)(identity, catalog, budget);
+        (0, main_agent_context_source_continuity_1.recordSharedFileProjection)(identity, projection, { ...budget, catalogUsedTokens: catalog.usedTokens, sharedFileTokens: projection.total_tokens, hydrationUsedTokens: projection.total_tokens });
+    }
+    const restoredSources = identity && identity.generation > 0 ? (0, main_agent_context_source_continuity_1.restoreContextSources)({
+        identity,
+        knowledgeContext: { role: "group-main-agent", groupId, projects },
+        explicitText: options.message,
+        maxPerItemTokens: contextPolicy.postCompactSourcePerItemMaxTokens,
+        maxTotalTokens: contextPolicy.postCompactSourceTotalMaxTokens,
+        hydrationTargetTokens: budget.hydrationTargetTokens,
+        remainingSafeTokens: budget.remainingSafeTokens,
+    }).context : "";
+    const context = [catalog.context, restoredSources, projection.context].filter(Boolean).join("\n\n");
+    return context.trim() ? context : undefined;
 }
 function buildTaskSourceDocumentsContext(task) {
     const lines = [

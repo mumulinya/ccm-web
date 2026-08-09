@@ -194,6 +194,34 @@ export declare function completeIdempotency(scope: string, key: string, result?:
     metadata: any;
     result: any;
 };
+export declare function buildContextSourceIdempotencyMaintenancePlan(runIdsInput: string[]): {
+    scope: any;
+    keyChecksum: any;
+    resultChecksum: string;
+    projectedResult: any;
+    removedTokens: number;
+}[];
+export declare function applyContextSourceIdempotencyMaintenance(entries: any[], backupFile: string): {
+    updated: number;
+    backupFile: string;
+};
+export declare function rollbackContextSourceIdempotencyMaintenance(backupFile: string): {
+    restored: number;
+};
+export declare function buildContextSourceTraceMaintenancePlan(traceIdsInput: string[]): {
+    traceId: any;
+    eventId: any;
+    dataChecksum: string;
+    projectedData: any;
+    removedTokens: number;
+}[];
+export declare function applyContextSourceTraceMaintenance(entries: any[], backupFile: string): {
+    updated: number;
+    backupFile: string;
+};
+export declare function rollbackContextSourceTraceMaintenance(backupFile: string): {
+    restored: number;
+};
 export declare function failIdempotency(scope: string, key: string, error: any): {
     version: number;
     schema: string;

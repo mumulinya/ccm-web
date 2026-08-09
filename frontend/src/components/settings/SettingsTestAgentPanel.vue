@@ -17,6 +17,15 @@ const loading = ref(true)
 const saving = ref(false)
 const enabled = ref(true)
 const updatedAt = ref('')
+const hardeningSaving = ref(false)
+const hardening = ref({
+  testAgentPlannerFallbackMode: 'risk_based',
+  testAgentIsolationMode: 'sandbox_preferred',
+  testAgentReadonlyCapabilityInjection: true,
+  testAgentSurfaceAuditMode: 'strict',
+  testAgentRuntimeFingerprintEnabled: true,
+  testAgentPostReviewSpotCheckMode: 'policy'
+})
 
 const modeLabel = computed(() => enabled.value ? '独立验收已开启' : '主 Agent 自验模式')
 const modeDescription = computed(() => enabled.value
@@ -26,15 +35,52 @@ const modeDescription = computed(() => enabled.value
 const load = async () => {
   loading.value = true
   try {
-    const response = await fetch('/api/system/test-agent')
+    const [response, orchestratorResponse] = await Promise.all([
+      fetch('/api/system/test-agent'),
+      fetch('/api/orchestrator/config')
+    ])
     const data = await response.json()
     if (!response.ok || !data.success) throw new Error(data.error || '读取 TestAgent 设置失败')
     enabled.value = data.settings?.enabled !== false
     updatedAt.value = data.settings?.updated_at || ''
+    if (orchestratorResponse.ok) {
+      const orchestrator = await orchestratorResponse.json()
+      if (orchestrator.success && orchestrator.config) {
+        hardening.value = {
+          ...hardening.value,
+          testAgentPlannerFallbackMode: orchestrator.config.testAgentPlannerFallbackMode || 'risk_based',
+          testAgentIsolationMode: orchestrator.config.testAgentIsolationMode || 'sandbox_preferred',
+          testAgentReadonlyCapabilityInjection: orchestrator.config.testAgentReadonlyCapabilityInjection !== false,
+          testAgentSurfaceAuditMode: orchestrator.config.testAgentSurfaceAuditMode || 'strict',
+          testAgentRuntimeFingerprintEnabled: orchestrator.config.testAgentRuntimeFingerprintEnabled !== false,
+          testAgentPostReviewSpotCheckMode: orchestrator.config.testAgentPostReviewSpotCheckMode || 'policy'
+        }
+      }
+    }
   } catch (error) {
     toast.error(error?.message || '读取 TestAgent 设置失败')
   } finally {
     loading.value = false
+  }
+}
+
+const saveHardening = async () => {
+  if (loading.value || hardeningSaving.value) return
+  hardeningSaving.value = true
+  try {
+    const response = await fetch('/api/orchestrator/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(hardening.value)
+    })
+    const data = await response.json()
+    if (!response.ok || !data.success) throw new Error(data.error || '保存 TestAgent 安全策略失败')
+    if (data.config) hardening.value = { ...hardening.value, ...Object.fromEntries(Object.keys(hardening.value).map(key => [key, data.config[key]])) }
+    toast.success('TestAgent V2 安全策略已保存；只对新任务生效')
+  } catch (error) {
+    toast.error(error?.message || '保存 TestAgent 安全策略失败')
+  } finally {
+    hardeningSaving.value = false
   }
 }
 
@@ -106,6 +152,24 @@ onMounted(load)
       </div>
     </section>
 
+    <section class="test-agent-section" data-test-agent-hardening>
+      <div class="test-agent-section-heading">
+        <div><strong>验收链 V2 安全策略</strong><p>新任务会冻结本轮有效策略；项目和群聊只能收紧，不能绕过全局安全门。</p></div>
+        <span>CCM 控制面</span>
+      </div>
+      <div class="test-agent-hardening-grid">
+        <label><span>规划失败处理</span><select v-model="hardening.testAgentPlannerFallbackMode"><option value="risk_based">按风险降级</option><option value="always">全部确定性降级</option><option value="never">始终阻断</option></select></label>
+        <label><span>执行隔离</span><select v-model="hardening.testAgentIsolationMode"><option value="sandbox_preferred">优先沙箱/测试租户</option><option value="sandbox_required">必须沙箱</option><option value="strict_allowlist">严格只读白名单</option></select></label>
+        <label><span>完成前抽查</span><select v-model="hardening.testAgentPostReviewSpotCheckMode"><option value="policy">按风险策略</option><option value="required">始终要求</option><option value="off">仅低风险关闭</option></select></label>
+        <label><span>变更面审计</span><select v-model="hardening.testAgentSurfaceAuditMode"><option value="strict">严格阻断</option><option value="warn">仅告警（高风险仍阻断）</option></select></label>
+      </div>
+      <div class="test-agent-hardening-toggles">
+        <label><input v-model="hardening.testAgentReadonlyCapabilityInjection" type="checkbox"><span>注入签名的只读 Skill/MCP 能力清单</span></label>
+        <label><input v-model="hardening.testAgentRuntimeFingerprintEnabled" type="checkbox"><span>校验运行时与 Provider 新鲜度（高风险强制开启）</span></label>
+      </div>
+      <button class="settings-primary-button" type="button" :disabled="loading || hardeningSaving" @click="saveHardening">{{ hardeningSaving ? '保存中…' : '保存 V2 安全策略' }}</button>
+    </section>
+
     <section class="test-agent-section">
       <div class="test-agent-section-heading">
         <div><strong>它会重点检查这些内容</strong><p>验收以真实证据为准，不以开发 Agent自述的“已经完成”为准。</p></div>
@@ -139,4 +203,5 @@ onMounted(load)
 
 <style scoped>
 .test-agent-flow{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.test-agent-flow article{display:grid;grid-template-columns:34px minmax(0,1fr);gap:10px;padding:14px;border:1px solid var(--border-color);border-radius:8px;background:var(--bg-secondary)}.test-agent-flow article>span{width:34px;height:34px;display:grid;place-items:center;border:1px solid color-mix(in srgb,var(--accent-blue) 22%,var(--border-color));border-radius:7px;color:var(--accent-blue);background:color-mix(in srgb,var(--accent-blue) 7%,var(--bg-primary))}.test-agent-flow strong,.test-agent-section strong,.test-agent-boundary strong{font-size:12px}.test-agent-flow p,.test-agent-section p,.test-agent-boundary p{margin:5px 0 0;color:var(--text-muted);font-size:10.5px;line-height:1.55}.test-agent-section{margin-top:14px;padding:14px;border:1px solid var(--border-color);border-radius:8px;background:var(--bg-secondary)}.test-agent-section-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding-bottom:12px;border-bottom:1px solid var(--border-color)}.test-agent-section-heading>div>p{margin-top:4px}.test-agent-section-heading>span{flex:none;padding:4px 7px;border:1px solid color-mix(in srgb,var(--accent-blue) 28%,var(--border-color));border-radius:6px;color:var(--accent-blue);background:color-mix(in srgb,var(--accent-blue) 7%,transparent);font-size:9.5px}.test-agent-steps{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:0;padding-top:14px}.test-agent-steps article{position:relative;display:grid;grid-template-columns:24px minmax(0,1fr);gap:8px;padding-right:16px}.test-agent-steps article:not(:last-child)::after{content:"";position:absolute;top:11px;right:4px;width:8px;border-top:1px solid var(--border-color)}.test-agent-steps i{width:24px;height:24px;display:grid;place-items:center;border:1px solid color-mix(in srgb,var(--accent-blue) 35%,var(--border-color));border-radius:50%;color:var(--accent-blue);background:var(--bg-primary);font-size:10px;font-style:normal}.test-agent-checks{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;padding-top:14px}.test-agent-checks article{display:grid;grid-template-columns:24px minmax(0,1fr);gap:8px;padding:10px;border:1px solid color-mix(in srgb,var(--border-color) 75%,transparent);border-radius:7px;background:var(--bg-primary)}.test-agent-checks article>svg{margin-top:1px;color:var(--accent-blue)}.test-agent-boundary{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:14px}.test-agent-boundary>div{display:grid;grid-template-columns:24px minmax(0,1fr);gap:8px;padding:12px;border-left:2px solid var(--accent-blue);background:color-mix(in srgb,var(--accent-blue) 5%,var(--bg-secondary))}.test-agent-boundary svg{margin-top:1px;color:var(--accent-blue)}.test-agent-updated{display:block;margin-top:12px;color:var(--text-muted);font-size:10px}@media(max-width:1050px){.test-agent-steps{grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.test-agent-steps article:not(:last-child)::after{display:none}}@media(max-width:900px){.test-agent-flow,.test-agent-checks,.test-agent-boundary,.test-agent-steps{grid-template-columns:1fr}}
+.test-agent-hardening-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;padding-top:14px}.test-agent-hardening-grid label{display:grid;gap:6px;color:var(--text-muted);font-size:10.5px}.test-agent-hardening-grid select{min-width:0;padding:8px 10px;border:1px solid var(--border-color);border-radius:7px;color:var(--text-primary);background:var(--bg-primary)}.test-agent-hardening-toggles{display:grid;gap:8px;margin:12px 0}.test-agent-hardening-toggles label{display:flex;align-items:center;gap:8px;color:var(--text-secondary);font-size:10.5px}@media(max-width:900px){.test-agent-hardening-grid{grid-template-columns:1fr}}
 </style>

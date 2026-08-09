@@ -90,6 +90,27 @@
       </ol>
       <small v-if="continuationStatus.next_action">下一步：{{ continuationStatus.next_action }}</small>
     </div>
+    <div v-if="agentCommunication?.latest" class="task-card-section agent-communication-v2" :class="agentCommunication.latest.state">
+      <div class="section-head">
+        <label>Agent Communication V2</label>
+        <span>{{ agentCommunicationStateLabel(agentCommunication.latest.state) }}</span>
+      </div>
+      <p>{{ agentCommunication.latest.receiverAgentId }} · generation {{ agentCommunication.latest.generation }} · attempt {{ agentCommunication.latest.attempt }}</p>
+      <div class="continuation-meta">
+        <span>通信 {{ agentCommunication.total }} 条</span>
+        <span>活动 {{ agentCommunication.active }} 条</span>
+        <span v-if="agentCommunication.latest.heartbeatAt">心跳 {{ formatTime(agentCommunication.latest.heartbeatAt) }}</span>
+        <span v-if="agentCommunication.latest.leaseExpiresAt">租约至 {{ formatTime(agentCommunication.latest.leaseExpiresAt) }}</span>
+      </div>
+      <small>Dispatch、ACK、Result 和 CCM Terminal 均绑定精确会话、代次、attempt 与 lease；迟到回执不会覆盖当前执行。</small>
+      <div class="task-card-actions">
+        <button type="button" :disabled="busy || !!communicationActionBusy" @click="runAgentCommunicationAction('reconcile')">重新核验</button>
+        <button v-if="communicationRetryable" type="button" :disabled="busy || !!communicationActionBusy" @click="runAgentCommunicationAction('retry')">安全重试</button>
+        <button v-if="communicationTakeoverAvailable" type="button" :disabled="busy || !!communicationActionBusy" @click="runAgentCommunicationAction('takeover')">人工接管</button>
+        <button v-if="communicationTakeoverAvailable" type="button" :disabled="busy || !!communicationActionBusy" @click="runAgentCommunicationAction('cancel')">停止</button>
+      </div>
+      <small v-if="communicationActionNotice">{{ communicationActionNotice }}</small>
+    </div>
     <div v-if="agentProgressRows.length" class="task-card-section agent-progress-summary" :class="agentProgressSummary.status">
       <div class="section-head">
         <label>{{ agentProgressSummary.title || '执行成员进展' }}</label>

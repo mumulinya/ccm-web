@@ -10217,7 +10217,11 @@ export interface CollabCtx {
     normalizeSharedFileList: (files: any[]) => any[];
     onTaskStatusChange?: (task: any, status: string, result?: string) => void | Promise<void>;
 }
-export declare function buildCoordinatorSharedFilesContext(ctx: CollabCtx, group: any): string;
+export declare function buildCoordinatorSharedFilesContext(ctx: CollabCtx, group: any, options?: {
+    groupSessionId?: string;
+    message?: string;
+    generation?: number;
+}): string;
 export declare function buildTaskSourceDocumentsContext(task: any): string;
 export declare function mergeCoordinatorDocumentContexts(...contexts: any[]): string;
 export declare function runCollaborationProtocolSelfTest(): any;

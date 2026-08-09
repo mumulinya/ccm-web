@@ -48,6 +48,7 @@ const context_budget_1 = require("../system/context-budget");
 const utils_1 = require("../core/utils");
 const memory_control_center_1 = require("../modules/knowledge/memory-control-center");
 const durable_memory_taxonomy_1 = require("../system/durable-memory-taxonomy");
+const main_agent_context_source_continuity_1 = require("../system/main-agent-context-source-continuity");
 const PROJECT_MEMORY_DIR = path.join(utils_1.CCM_DIR, "project-memory");
 const PROJECT_MEMORY_VERSION = 4;
 const CONCLUSION_COMPACT_THRESHOLD = 20;
@@ -137,6 +138,7 @@ function normalizeDurableMemoryCandidate(value, fallbackType, meta) {
         content,
         reason: compact(object.reason || object.rationale || "", 600),
         evidence: uniqueStrings(object.evidence || object.sources || []).slice(0, 12),
+        sourceRefs: (0, main_agent_context_source_continuity_1.extractStructuredContextSourceRefs)(object.sourceRefs, object.source_refs, object.contextSourceRefs, object.context_source_refs, object.evidence, object.sources, content),
         relatedFiles: uniqueStrings(object.relatedFiles || object.related_files || meta.filesModified || []).slice(0, 24),
         status,
         confidence: meta.accepted === true ? "accepted" : "unverified",
@@ -149,6 +151,8 @@ function normalizeDurableMemoryCandidate(value, fallbackType, meta) {
             taskId: String(meta.taskId || ""),
             groupId: String(meta.groupId || ""),
             agent: String(meta.agent || ""),
+            sessionId: String(meta.contextSourceIdentity?.exactSessionId || ""),
+            generation: Math.max(0, Number(meta.contextSourceIdentity?.generation || 0)),
         },
         sourceTaskIds: uniqueStrings(meta.taskId || []).slice(-20),
         ccMemoryType: taxonomy.type,
@@ -205,6 +209,7 @@ function mergeDurableMemories(existing, candidates) {
             createdAt: previous.createdAt || candidate.createdAt,
             reason: candidate.reason || previous.reason || "",
             evidence: uniqueStrings(previous.evidence || [], candidate.evidence || []).slice(-12),
+            sourceRefs: (0, main_agent_context_source_continuity_1.extractStructuredContextSourceRefs)(previous.sourceRefs, candidate.sourceRefs),
             relatedFiles: uniqueStrings(previous.relatedFiles || [], candidate.relatedFiles || []).slice(-24),
             occurrences: Number(previous.occurrences || 1) + 1,
             sourceTaskIds: uniqueStrings(previous.sourceTaskIds || [], candidate.sourceTaskIds || []).slice(-20),
@@ -234,6 +239,7 @@ function buildTaskHistoryRecord(receipt, meta) {
         summary,
         actions,
         filesModified,
+        contextSourceIdentity: meta.contextSourceIdentity || null,
         verification,
         blockers,
         needs,
@@ -665,6 +671,7 @@ function updateProjectMemoryFromReceipt(input) {
         sourceKind: input.sourceKind || "agent_receipt",
         accepted: input.accepted === true,
         filesModified,
+        contextSourceIdentity: input.contextSourceIdentity || null,
     };
     const historyRecord = buildTaskHistoryRecord(receipt, meta);
     memory.taskHistory = upsertTaskHistory(memory.taskHistory, historyRecord);
@@ -704,6 +711,36 @@ function updateProjectMemoryFromReceipt(input) {
     };
     memory.updatedAt = now;
     writeJsonAtomic(memoryFile(input.project), memory);
+    const promotionResults = [];
+    if (input.contextSourceIdentity) {
+        for (const candidate of durableCandidates) {
+            const sourceRefs = (0, main_agent_context_source_continuity_1.extractStructuredContextSourceRefs)(candidate.sourceRefs, candidate.evidence, candidate.content);
+            if (!sourceRefs.length)
+                continue;
+            const admissionChecksum = crypto.createHash("sha256").update(JSON.stringify({
+                memoryId: candidate.id,
+                type: candidate.type,
+                contentChecksum: crypto.createHash("sha256").update(candidate.content).digest("hex"),
+                accepted: true,
+                taskId: input.taskId || "",
+            })).digest("hex");
+            try {
+                promotionResults.push({ memoryId: candidate.id, ...(0, main_agent_context_source_continuity_1.promoteContextSourceReceipts)({
+                        identity: input.contextSourceIdentity,
+                        sourceRefs,
+                        memoryKind: "project_durable_memory",
+                        memoryId: candidate.id,
+                        admissionChecksum,
+                    }) });
+            }
+            catch (error) {
+                promotionResults.push({ memoryId: candidate.id, retryable: true, error: compact(error?.message || error, 500), contentStored: false });
+            }
+        }
+    }
+    memory.lastMemoryAdmission = { ...memory.lastMemoryAdmission, sourcePromotion: { attempted: promotionResults.length, results: promotionResults, contentStored: false } };
+    if (promotionResults.length)
+        writeJsonAtomic(memoryFile(input.project), memory);
     return memory;
 }
 function recordAcceptedProjectDeliveryMemory(input) {

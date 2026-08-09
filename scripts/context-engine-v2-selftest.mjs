@@ -7,6 +7,7 @@ import { createRequire } from 'node:module'
 const root = path.resolve(import.meta.dirname, '..')
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'ccm-context-engine-v2-'))
 process.env.CCM_PROVIDER_CACHE_CAPABILITY_DIR = path.join(temp, 'capability')
+process.env.CCM_MODEL_TOKEN_PREFLIGHT_DIR = path.join(temp, 'calibration')
 const require = createRequire(import.meta.url)
 const engine = require(path.join(root, 'ccm-package', 'dist', 'system', 'provider-neutral-context-cache.js'))
 const registry = require(path.join(root, 'ccm-package', 'dist', 'system', 'provider-cache-capability-registry.js'))

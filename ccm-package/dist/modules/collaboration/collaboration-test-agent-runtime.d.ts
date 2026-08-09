@@ -65,7 +65,26 @@ export declare function buildCoordinatorTestAgentHandoff(item: any, input: {
         route: any;
         reviewSubject: string;
         verifier: string;
-        previousLedger: any;
+        previousLedger: {
+            schema: string;
+            project: string;
+            evidence: import("../../test-agent/evidence-projection").TestAgentEvidenceProjectionV2;
+            summary: string;
+            actionCount: any;
+            actionChecksum: string;
+            filesChanged: any[];
+            verification: any[];
+            blockerCount: any;
+            blockerChecksum: string;
+            sourceRefs: any[];
+            contentStored: boolean;
+        };
+        verifierContext: {
+            schema: string;
+            mode: string;
+            contentStored: boolean;
+            fields: string[];
+        };
         reviewPolicy: {
             browserEnabled: boolean;
             requireAdversarialProbe: boolean;
@@ -77,8 +96,19 @@ export declare function buildCoordinatorTestAgentHandoff(item: any, input: {
             collectBrowserArtifacts: boolean;
             autoDiscoverVerificationCommands: boolean;
         };
-        coordinatorOutputPreview: string;
+        hardeningPolicy: any;
+        verificationHardening: {
+            version: number;
+            policy: any;
+        };
+        coordinatorOutputReference: {
+            checksum: string;
+            charCount: number;
+            contentStored: boolean;
+        };
         projectRuntimeSource: string;
+        surfaceAudit: import("../../test-agent/surface-audit").TestAgentSurfaceAuditReceipt;
+        runtimeFingerprint: import("../../test-agent/runtime-fingerprint").TestAgentRuntimeFingerprint;
         reviewInstructions: string[];
     };
     target: string;
@@ -295,19 +325,36 @@ export declare function buildNativeTestAgentRuntimeToolContext(targetName: strin
         mcpConfigPath: string;
         skillRoot: string;
         requested: {
-            mcp: any[];
-            skill: any[];
+            mcp: string[];
+            skill: string[];
         };
         synced: {
-            mcp: any[];
-            skill: any[];
+            mcp: string[];
+            skill: string[];
         };
         missing: {
-            mcp: any[];
-            skill: any[];
+            mcp: string[];
+            skill: string[];
         };
-        mcp_statuses: any[];
-        skill_statuses: any[];
+        mcp_statuses: {
+            name: string;
+            server: string;
+            state: string;
+            readOnly: boolean;
+            mutability: string;
+            schemaChecksum: string;
+            signature: string;
+        }[];
+        skill_statuses: {
+            name: string;
+            state: string;
+            readOnly: boolean;
+            source: "builtin" | "registry";
+            contentHash: string;
+            summaryChecksum: string;
+            truncated: boolean;
+            signature: string;
+        }[];
         permission_rules: any[];
         invoked_skills: any[];
         authorization_readiness: {
@@ -317,20 +364,25 @@ export declare function buildNativeTestAgentRuntimeToolContext(targetName: strin
         dispatch_gate: {
             dispatchReady: boolean;
             reason: string;
+            readonlyCapabilityManifestChecksum: string;
         };
         catalogRevision: string;
-        warnings: any[];
+        warnings: string[];
         errors: any[];
         reusedSnapshot: boolean;
         timestamp: string;
         workDir: string;
+        readonly_capability_manifest: import("../../test-agent/readonly-capabilities").TestAgentReadonlyCapabilityManifest;
     };
     dispatchGate: {
         dispatchReady: boolean;
         reason: string;
+        readonlyCapabilityManifestChecksum: string;
     };
     dispatchBlocked: boolean;
     prompt: string;
+    readonlyCapabilityManifest: import("../../test-agent/readonly-capabilities").TestAgentReadonlyCapabilityManifest;
+    readonlyCapabilityPrompt: string;
     workEvent: {
         id: string;
         time: string;
@@ -346,19 +398,36 @@ export declare function buildNativeTestAgentRuntimeToolContext(targetName: strin
             mcpConfigPath: string;
             skillRoot: string;
             requested: {
-                mcp: any[];
-                skill: any[];
+                mcp: string[];
+                skill: string[];
             };
             synced: {
-                mcp: any[];
-                skill: any[];
+                mcp: string[];
+                skill: string[];
             };
             missing: {
-                mcp: any[];
-                skill: any[];
+                mcp: string[];
+                skill: string[];
             };
-            mcp_statuses: any[];
-            skill_statuses: any[];
+            mcp_statuses: {
+                name: string;
+                server: string;
+                state: string;
+                readOnly: boolean;
+                mutability: string;
+                schemaChecksum: string;
+                signature: string;
+            }[];
+            skill_statuses: {
+                name: string;
+                state: string;
+                readOnly: boolean;
+                source: "builtin" | "registry";
+                contentHash: string;
+                summaryChecksum: string;
+                truncated: boolean;
+                signature: string;
+            }[];
             permission_rules: any[];
             invoked_skills: any[];
             authorization_readiness: {
@@ -368,13 +437,15 @@ export declare function buildNativeTestAgentRuntimeToolContext(targetName: strin
             dispatch_gate: {
                 dispatchReady: boolean;
                 reason: string;
+                readonlyCapabilityManifestChecksum: string;
             };
             catalogRevision: string;
-            warnings: any[];
+            warnings: string[];
             errors: any[];
             reusedSnapshot: boolean;
             timestamp: string;
             workDir: string;
+            readonly_capability_manifest: import("../../test-agent/readonly-capabilities").TestAgentReadonlyCapabilityManifest;
         };
     };
 };

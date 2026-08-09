@@ -1,6 +1,7 @@
 import { z } from "zod";
 export declare const TEST_AGENT_CONTRACT_IDS: {
     readonly handoff: "ccm-test-agent-handoff-v1";
+    readonly handoffV2: "ccm-test-agent-handoff-v2";
     readonly workOrder: "ccm-test-agent-work-order-v1";
     readonly report: "ccm-test-agent-report-v1";
     readonly verdict: "ccm-test-agent-verdict-v1";

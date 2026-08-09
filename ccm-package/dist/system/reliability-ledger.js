@@ -42,6 +42,12 @@ exports.listTraces = listTraces;
 exports.getIdempotencyRecord = getIdempotencyRecord;
 exports.acquireIdempotency = acquireIdempotency;
 exports.completeIdempotency = completeIdempotency;
+exports.buildContextSourceIdempotencyMaintenancePlan = buildContextSourceIdempotencyMaintenancePlan;
+exports.applyContextSourceIdempotencyMaintenance = applyContextSourceIdempotencyMaintenance;
+exports.rollbackContextSourceIdempotencyMaintenance = rollbackContextSourceIdempotencyMaintenance;
+exports.buildContextSourceTraceMaintenancePlan = buildContextSourceTraceMaintenancePlan;
+exports.applyContextSourceTraceMaintenance = applyContextSourceTraceMaintenance;
+exports.rollbackContextSourceTraceMaintenance = rollbackContextSourceTraceMaintenance;
 exports.failIdempotency = failIdempotency;
 exports.settleIdempotencyByTrace = settleIdempotencyByTrace;
 exports.getTaskLease = getTaskLease;
@@ -60,6 +66,9 @@ const utils_1 = require("../core/utils");
 const task_replay_journal_1 = require("./task-replay-journal");
 const observability_database_1 = require("./observability-database");
 const trace_sanitizer_1 = require("./trace-sanitizer");
+const context_source_tool_result_projection_1 = require("./context-source-tool-result-projection");
+const context_budget_1 = require("./context-budget");
+const atomic_json_file_1 = require("../core/atomic-json-file");
 const ROOT = path.join(utils_1.CCM_DIR, "reliability");
 const TRACE_DIR = path.join(ROOT, "traces");
 const IDEMPOTENCY_DIR = path.join(ROOT, "idempotency");
@@ -370,6 +379,104 @@ function finishIdempotency(scopeInput, key, status, result) {
 }
 function completeIdempotency(scope, key, result = {}) {
     return finishIdempotency(scope, key, "completed", result);
+}
+function buildContextSourceIdempotencyMaintenancePlan(runIdsInput) {
+    const runIds = new Set((runIdsInput || []).map(value => String(value || "")).filter(Boolean));
+    if (!runIds.size)
+        return [];
+    const rows = (0, observability_database_1.getObservabilityDatabase)().prepare("SELECT scope, key_checksum, metadata_json, result_json FROM reliability_idempotency_v2 WHERE scope = 'global-agent-tool' AND status = 'completed'").all();
+    return rows.flatMap(row => {
+        const metadata = parseJson(row.metadata_json, {});
+        const tool = String(metadata.tool || "");
+        if (!runIds.has(String(metadata.run_id || "")) || !(0, context_source_tool_result_projection_1.isContextSourceToolResult)(tool, { toolName: tool }))
+            return [];
+        const result = parseJson(row.result_json, {});
+        const projected = { ...result, observation: (0, context_source_tool_result_projection_1.projectContextSourceToolResultForPersistence)(tool, result?.observation, "") };
+        const before = JSON.stringify(result);
+        const after = JSON.stringify(projected);
+        if (before === after)
+            return [];
+        return [{
+                scope: row.scope,
+                keyChecksum: row.key_checksum,
+                resultChecksum: digest(before),
+                projectedResult: projected,
+                removedTokens: Math.max(0, (0, context_budget_1.estimateTextTokens)(before) - (0, context_budget_1.estimateTextTokens)(after)),
+            }];
+    });
+}
+function applyContextSourceIdempotencyMaintenance(entries, backupFile) {
+    const backups = (0, observability_database_1.withImmediateObservabilityTransaction)(db => {
+        const saved = [];
+        for (const entry of entries || []) {
+            const row = db.prepare("SELECT result_json FROM reliability_idempotency_v2 WHERE scope = ? AND key_checksum = ?").get(String(entry.scope || ""), String(entry.keyChecksum || ""));
+            if (!row || digest(String(row.result_json || "{}")) !== String(entry.resultChecksum || ""))
+                throw new Error(`context_source_maintenance_idempotency_drift:${entry.keyChecksum}`);
+            saved.push({ scope: entry.scope, keyChecksum: entry.keyChecksum, resultJson: String(row.result_json || "{}") });
+        }
+        for (const entry of entries || [])
+            db.prepare("UPDATE reliability_idempotency_v2 SET result_json = ?, updated_at = ? WHERE scope = ? AND key_checksum = ?").run(JSON.stringify(entry.projectedResult || {}), new Date().toISOString(), entry.scope, entry.keyChecksum);
+        return saved;
+    });
+    (0, atomic_json_file_1.writeJsonAtomic)(backupFile, { schema: "ccm-context-source-idempotency-backup-v1", version: 1, rows: backups, createdAt: new Date().toISOString() });
+    return { updated: backups.length, backupFile };
+}
+function rollbackContextSourceIdempotencyMaintenance(backupFile) {
+    const backup = readJson(backupFile, null);
+    if (!backup || backup.schema !== "ccm-context-source-idempotency-backup-v1")
+        throw new Error("context_source_maintenance_idempotency_backup_invalid");
+    return (0, observability_database_1.withImmediateObservabilityTransaction)(db => {
+        for (const row of backup.rows || [])
+            db.prepare("UPDATE reliability_idempotency_v2 SET result_json = ?, updated_at = ? WHERE scope = ? AND key_checksum = ?").run(String(row.resultJson || "{}"), new Date().toISOString(), row.scope, row.keyChecksum);
+        return { restored: Number(backup.rows?.length || 0) };
+    });
+}
+function buildContextSourceTraceMaintenancePlan(traceIdsInput) {
+    const traceIds = new Set((traceIdsInput || []).map(value => String(value || "")).filter(Boolean));
+    if (!traceIds.size)
+        return [];
+    const rows = (0, observability_database_1.getObservabilityDatabase)().prepare("SELECT trace_id, event_id, data_json FROM reliability_trace_events_v2 WHERE type = 'agent_runtime.lifecycle'").all();
+    return rows.flatMap(row => {
+        if (!traceIds.has(String(row.trace_id || "")))
+            return [];
+        const data = parseJson(row.data_json, {});
+        const tool = String(data?.action || data?.data?.action || "");
+        const observation = data?.data?.observation;
+        if (observation === undefined || !(0, context_source_tool_result_projection_1.isContextSourceToolResult)(tool, observation))
+            return [];
+        const projected = { ...data, data: { ...(data.data || {}), observation: (0, context_source_tool_result_projection_1.projectContextSourceToolResultForPersistence)(tool, observation) } };
+        const before = JSON.stringify(data);
+        const after = JSON.stringify(projected);
+        if (before === after)
+            return [];
+        return [{ traceId: row.trace_id, eventId: row.event_id, dataChecksum: digest(before), projectedData: projected, removedTokens: Math.max(0, (0, context_budget_1.estimateTextTokens)(before) - (0, context_budget_1.estimateTextTokens)(after)) }];
+    });
+}
+function applyContextSourceTraceMaintenance(entries, backupFile) {
+    const backups = (0, observability_database_1.withImmediateObservabilityTransaction)(db => {
+        const saved = [];
+        for (const entry of entries || []) {
+            const row = db.prepare("SELECT data_json FROM reliability_trace_events_v2 WHERE trace_id = ? AND event_id = ?").get(entry.traceId, entry.eventId);
+            if (!row || digest(String(row.data_json || "{}")) !== String(entry.dataChecksum || ""))
+                throw new Error(`context_source_maintenance_trace_drift:${entry.eventId}`);
+            saved.push({ traceId: entry.traceId, eventId: entry.eventId, dataJson: String(row.data_json || "{}") });
+        }
+        for (const entry of entries || [])
+            db.prepare("UPDATE reliability_trace_events_v2 SET data_json = ?, data_checksum = ? WHERE trace_id = ? AND event_id = ?").run(JSON.stringify(entry.projectedData || {}), digest(JSON.stringify(entry.projectedData || {})), entry.traceId, entry.eventId);
+        return saved;
+    });
+    (0, atomic_json_file_1.writeJsonAtomic)(backupFile, { schema: "ccm-context-source-trace-backup-v1", version: 1, rows: backups, createdAt: new Date().toISOString() });
+    return { updated: backups.length, backupFile };
+}
+function rollbackContextSourceTraceMaintenance(backupFile) {
+    const backup = readJson(backupFile, null);
+    if (!backup || backup.schema !== "ccm-context-source-trace-backup-v1")
+        throw new Error("context_source_maintenance_trace_backup_invalid");
+    return (0, observability_database_1.withImmediateObservabilityTransaction)(db => {
+        for (const row of backup.rows || [])
+            db.prepare("UPDATE reliability_trace_events_v2 SET data_json = ?, data_checksum = ? WHERE trace_id = ? AND event_id = ?").run(row.dataJson, digest(row.dataJson), row.traceId, row.eventId);
+        return { restored: Number(backup.rows?.length || 0) };
+    });
 }
 function failIdempotency(scope, key, error) {
     return finishIdempotency(scope, key, "failed", { error: String(error?.message || error || "unknown error").slice(0, 2000) });

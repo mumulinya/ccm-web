@@ -21,6 +21,7 @@ export type KnowledgeDocumentMetadata = {
     visibility: "shared" | "restricted";
     version: number;
     content_hash: string;
+    duplicate_of?: string;
     created_at: string;
     updated_at: string;
     indexed_at?: string;
@@ -84,6 +85,7 @@ export declare function storeKnowledgeBuffer(name: string, buffer: Buffer, optio
     path: string;
     metadata: KnowledgeDocumentMetadata;
     duplicate: boolean;
+    duplicateOf: string;
 };
 export declare function deleteKnowledgeDocument(name: string): void;
 export declare function listKnowledgeVersions(name: string): any;
@@ -94,6 +96,7 @@ export declare function restoreKnowledgeVersion(name: string, versionFile: strin
     path: string;
     metadata: KnowledgeDocumentMetadata;
     duplicate: boolean;
+    duplicateOf: string;
 };
 export declare function parseKnowledgeDocument(filePath: string, name: string): Promise<ParsedKnowledgeDocument>;
 export declare function importOnlineKnowledgeDocument(input?: any): Promise<{
@@ -101,5 +104,6 @@ export declare function importOnlineKnowledgeDocument(input?: any): Promise<{
     path: string;
     metadata: KnowledgeDocumentMetadata;
     duplicate: boolean;
+    duplicateOf: string;
 }>;
 export declare function watchedKnowledgeFilename(rootPath: string, relativePath: string): string;

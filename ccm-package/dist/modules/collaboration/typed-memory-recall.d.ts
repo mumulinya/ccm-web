@@ -123,7 +123,7 @@ export declare function workerContextPressureRecallUsageEntryTimeMs(entry?: any,
 export declare function workerContextPressureRecallUsageAgeDays(entry?: any, aging?: any): number;
 export declare function workerContextPressureRecallUsageDecayWeight(ageDays: any, aging?: any): number;
 export declare function workerContextPressureRecallStatsKey(row?: any, targetProject?: string): string;
-export declare function workerContextPressureRecallUsageRecommendation(stats?: any): "stale_pressure_recall_history" | "promote_pressure_recall" | "deprioritize_pressure_recall" | "require_pressure_usage_receipt" | "neutral_verify_current_pressure";
+export declare function workerContextPressureRecallUsageRecommendation(stats?: any): "promote_pressure_recall" | "stale_pressure_recall_history" | "deprioritize_pressure_recall" | "neutral_verify_current_pressure" | "require_pressure_usage_receipt";
 export declare function buildWorkerContextPressureRecallUsageEntry(groupId: string, input?: any, row?: any): {
     group_id: string;
     target_project: string;

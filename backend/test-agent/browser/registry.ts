@@ -1,4 +1,4 @@
-import { BrowserCheckResult, NormalizedTestAgentWorkOrder, TestAgentRuntimeOptions } from "../types";
+import { BrowserCheckResult, NormalizedTestAgentProjectTarget, NormalizedTestAgentWorkOrder, TestAgentRuntimeOptions } from "../types";
 import { blockedBrowserResult, BrowserProvider, BrowserProviderAvailability, BrowserProviderContext } from "./provider-types";
 import { McpBrowserProvider } from "./mcp-provider";
 import { PlaywrightBrowserProvider } from "./playwright-provider";
@@ -10,6 +10,8 @@ import {
   reconcileBrowserCheckExecution,
 } from "./check-execution-coverage";
 import { browserResultHasToolCallTimeout } from "./tool-call-timeout";
+import { testAgentPolicyContextFromWorkOrder } from "../isolation";
+import { evaluateTestAgentBrowserSideEffect } from "../side-effect-policy";
 
 export interface BrowserProviderPreflightResult {
   provider: BrowserProvider["id"];
@@ -105,23 +107,50 @@ async function runRoutedBrowserProviders(
   runtime: TestAgentRuntimeOptions,
   preferred: string,
 ): Promise<BrowserCheckResult[]> {
+  const isolationPolicy = testAgentPolicyContextFromWorkOrder(workOrder);
+  const policyDecision = (project: NormalizedTestAgentProjectTarget, check: any) => isolationPolicy
+    ? evaluateTestAgentBrowserSideEffect(check, { ...isolationPolicy, project })
+    : null;
+  const policyAllows = (project: NormalizedTestAgentProjectTarget, check: any) => {
+    const decision = policyDecision(project, check);
+    return !decision || decision.allowed;
+  };
   const hasExistingSessionChecks = workOrder.projects.some(project =>
-    checksForProject(project, workOrder.acceptanceCriteria).some(browserCheckUsesExistingSession)
+    checksForProject(project, workOrder.acceptanceCriteria).some(check => browserCheckUsesExistingSession(check) && policyAllows(project, check))
   );
   const hasStandardChecks = workOrder.projects.some(project =>
-    checksForProject(project, workOrder.acceptanceCriteria).some(check => !browserCheckUsesExistingSession(check))
+    checksForProject(project, workOrder.acceptanceCriteria).some(check => !browserCheckUsesExistingSession(check) && policyAllows(project, check))
   );
   const results: BrowserCheckResult[] = [];
+  const policyBlocked: BrowserCheckResult[] = workOrder.projects.flatMap(project =>
+    checksForProject(project, workOrder.acceptanceCriteria)
+      .map(check => ({ check, decision: policyDecision(project, check) }))
+      .filter(item => item.decision && !item.decision.allowed)
+      .map(item => {
+        const blocked = blockedBrowserResult("none", item.check.name || "Browser check", `副作用安全门阻止浏览器检查：${item.decision!.reason}`);
+        return {
+          ...blocked,
+          project: project.name,
+          name: item.check.name || "Browser check",
+          url: item.check.url || project.targetUrl || project.startupUrl || "",
+          adversarial: item.check.adversarial === true,
+          probeType: item.check.probeType || item.check.probe_type,
+          context: { ...(item.check.context || {}), sideEffectPolicy: "blocked" },
+        };
+      }),
+  );
 
   if (hasStandardChecks) {
     const standardFilter: BrowserCheckFilter = (_project, check) =>
-      !browserCheckUsesExistingSession(check);
+      !browserCheckUsesExistingSession(check) && policyAllows(_project, check);
     if (preferred === "mcp") {
       const playwrightRequiredFilter: BrowserCheckFilter = (_project, check, index) =>
         standardFilter(_project, check, index)
+        && policyAllows(_project, check)
         && browserProviderRouteForCheck(workOrder, check, preferred).provider === "playwright";
       const mcpCompatibleFilter: BrowserCheckFilter = (_project, check, index) =>
         standardFilter(_project, check, index)
+        && policyAllows(_project, check)
         && browserProviderRouteForCheck(workOrder, check, preferred).provider === "mcp";
       if (hasChecksMatching(workOrder, mcpCompatibleFilter)) {
         results.push(...await runProviderChain(
@@ -153,9 +182,10 @@ async function runRoutedBrowserProviders(
       workOrder,
       runtime,
       [McpBrowserProvider],
-      (_project, check) => browserCheckUsesExistingSession(check),
+      (_project, check) => browserCheckUsesExistingSession(check) && policyAllows(_project, check),
     ));
   }
+  if (policyBlocked.length) results.push(...policyBlocked);
   return results.length ? results : [blockedBrowserResult("none", "Browser verification", "No browser checks were routed to a provider.")];
 }
 

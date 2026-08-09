@@ -3,6 +3,8 @@ import { DevServerResult, NormalizedTestAgentProjectTarget, NormalizedTestAgentW
 import { appendLimited, buildTestAgentSubprocessEnv, compactText, nowIso, redactTestAgentSensitiveText, requiredCheckEnabled, verificationCommandInvocation } from "./utils";
 import { browserCheckUsesExistingSession } from "./browser/existing-session";
 import { checksForProject } from "./browser/shared";
+import { testAgentPolicyContextFromWorkOrder } from "./isolation";
+import { evaluateTestAgentCommandSideEffect, evaluateTestAgentHttpSideEffect } from "./side-effect-policy";
 
 export interface ManagedDevServer {
   result: DevServerResult;
@@ -54,12 +56,21 @@ function stopProcessTree(child: ChildProcess) {
   try { child.kill("SIGTERM"); } catch {}
 }
 
-async function startProjectServer(project: NormalizedTestAgentProjectTarget, maxOutputChars: number): Promise<ManagedDevServer> {
+async function startProjectServer(project: NormalizedTestAgentProjectTarget, maxOutputChars: number, policyContext: any = null): Promise<ManagedDevServer> {
   const startedAt = nowIso();
   const url = project.startupUrl || project.targetUrl;
   if (!url) {
     return {
       result: { project: project.name, command: "", cwd: project.workDir, url: "", status: "skipped", startedAt, error: "No target URL was provided." },
+      stop: () => {},
+    };
+  }
+
+  const urlPolicy = policyContext ? evaluateTestAgentHttpSideEffect({ url, method: "GET" }, { ...policyContext, project }) : null;
+  if (urlPolicy && !urlPolicy.allowed) {
+    const startedAt = nowIso();
+    return {
+      result: { project: project.name, command: project.devServerCommand || "", cwd: project.workDir, url, status: "failed", startedAt, error: `副作用安全门阻止访问目标 URL：${urlPolicy.reason}` },
       stop: () => {},
     };
   }
@@ -75,6 +86,14 @@ async function startProjectServer(project: NormalizedTestAgentProjectTarget, max
   if (!command) {
     return {
       result: { project: project.name, command: "", cwd: project.workDir, url, status: "failed", startedAt, error: "Target URL is not reachable and no dev server command was provided." },
+      stop: () => {},
+    };
+  }
+
+  const commandPolicy = policyContext ? evaluateTestAgentCommandSideEffect(command, { ...policyContext, project }) : null;
+  if (commandPolicy && !commandPolicy.allowed) {
+    return {
+      result: { project: project.name, command, cwd: project.workDir, url, status: "failed", startedAt, error: `副作用安全门阻止启动开发服务器：${commandPolicy.reason}` },
       stop: () => {},
     };
   }
@@ -121,6 +140,7 @@ async function startProjectServer(project: NormalizedTestAgentProjectTarget, max
 export async function startDevServersForBrowserChecks(workOrder: NormalizedTestAgentWorkOrder): Promise<ManagedDevServer[]> {
   if (!browserChecksRequested(workOrder)) return [];
   const servers: ManagedDevServer[] = [];
+  const policyContext = testAgentPolicyContextFromWorkOrder(workOrder);
   for (const project of workOrder.projects) {
     if (!project.targetUrl && !project.startupUrl && !project.browserChecks.length && !project.httpChecks.length && !project.adversarialHttpChecks.length) continue;
     if (
@@ -131,7 +151,7 @@ export async function startDevServersForBrowserChecks(workOrder: NormalizedTestA
     ) {
       continue;
     }
-    servers.push(await startProjectServer(project, workOrder.options.maxOutputChars));
+    servers.push(await startProjectServer(project, workOrder.options.maxOutputChars, policyContext));
   }
   return servers;
 }

@@ -25,6 +25,12 @@ const ADMIN_GET = [
 
 const OPERATOR_GET = [
   /^\/api\/metrics\/events(?:\/|$)/,
+  /^\/api\/rag\/documents(?:\/|$)/,
+  /^\/api\/rag\/chunks(?:\/|$)/,
+  /^\/api\/rag\/document-content(?:\/|$)/,
+  /^\/api\/rag\/document-versions(?:\/|$)/,
+  /^\/api\/rag\/document-version-content(?:\/|$)/,
+  /^\/api\/rag\/watch-paths(?:\/|$)/,
 ];
 
 const VIEWER_CHAT = [

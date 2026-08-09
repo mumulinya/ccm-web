@@ -159,6 +159,60 @@ export declare function scheduleGroupMemoryAutoCompaction(groupId: string, optio
     circuitAdmission?: undefined;
 };
 export declare function runGroupMemoryAutoCompactionNow(groupId: string, options?: any): Promise<{
+    compactionActivity: {
+        finished: boolean;
+        terminal: any;
+        ledger: any;
+        commitFence: {
+            schema: string;
+            status: string;
+            group_id: string;
+            group_session_id: string;
+            operation_id: string;
+            boundary_id: any;
+            compact_transaction_receipt_checksum: any;
+            committed_at: string;
+            body_free: boolean;
+            ledger_checksum: any;
+        };
+    };
+    success: boolean;
+    compacted: boolean;
+    boundary: any;
+    keepIndex: any;
+    background: {
+        status: string;
+        reason: string;
+        messageId: string;
+        compacted: boolean;
+        modelCompactionEnabled: boolean;
+        rebuild: boolean;
+        force: boolean;
+        boundaryId: string;
+        summarizedThroughMessageId: string;
+        keepIndex: number;
+        messageCount: number;
+        typedMemoryScopeId: string;
+        error: string;
+        startedAt: string;
+        completedAt: string;
+    };
+    memory: any;
+    compactHead: {
+        committed: boolean;
+        idempotent: boolean;
+        head: any;
+        file: any;
+    };
+    typedMemoryScopeId: string;
+    logDistillation: any;
+    providerNativeCompactSessionCapacityReset: any;
+    postCompactSessionStateReset: any;
+    promptCacheCompactionNotification: any;
+    circuitBreaker: any;
+    lifecycleValidation: any;
+    lifecycleCommitProof: any;
+} | {
     success: boolean;
     compacted: boolean;
     reason: string;
@@ -394,71 +448,6 @@ export declare function runGroupMemoryAutoCompactionNow(groupId: string, options
     cancelRequestedAt?: undefined;
     lifecycleStage?: undefined;
     background?: undefined;
-} | {
-    compactionActivity: {
-        finished: boolean;
-        terminal: any;
-        ledger: any;
-        commitFence: {
-            schema: string;
-            status: string;
-            group_id: string;
-            group_session_id: string;
-            operation_id: string;
-            boundary_id: any;
-            compact_transaction_receipt_checksum: any;
-            committed_at: string;
-            body_free: boolean;
-            ledger_checksum: any;
-        };
-    };
-    success: boolean;
-    compacted: boolean;
-    boundary: any;
-    keepIndex: any;
-    background: {
-        status: string;
-        reason: string;
-        messageId: string;
-        compacted: boolean;
-        modelCompactionEnabled: boolean;
-        rebuild: boolean;
-        force: boolean;
-        boundaryId: string;
-        summarizedThroughMessageId: string;
-        keepIndex: number;
-        messageCount: number;
-        typedMemoryScopeId: string;
-        error: string;
-        startedAt: string;
-        completedAt: string;
-    };
-    memory: any;
-    compactHead: {
-        committed: boolean;
-        idempotent: boolean;
-        head: any;
-        file: any;
-    };
-    typedMemoryScopeId: string;
-    logDistillation: any;
-    providerNativeCompactSessionCapacityReset: any;
-    postCompactSessionStateReset: any;
-    promptCacheCompactionNotification: any;
-    circuitBreaker: any;
-    lifecycleValidation: any;
-    lifecycleCommitProof: any;
-    reason?: undefined;
-    groupId?: undefined;
-    sessionId?: undefined;
-    skipped?: undefined;
-    circuitAdmission?: undefined;
-    scheduled?: undefined;
-    error?: undefined;
-    cancelled?: undefined;
-    cancelRequestId?: undefined;
-    cancelRequestedAt?: undefined;
-    lifecycleStage?: undefined;
 } | {
     success: boolean;
     compacted: boolean;

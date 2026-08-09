@@ -26,7 +26,7 @@
 
 ## 三、统一队列与工作区互斥
 
-任务执行同时经过两层串行控制：
+普通任务执行同时经过两层串行控制：
 
 1. 精确会话队列：`group_id + group_session_id` 或 `project_id + project_session_id` 内严格串行。
 2. 工作区变更通道：不同会话只要修改同一个真实源码目录，也必须按目录串行。
@@ -34,6 +34,8 @@
 高优先级任务可以插到等待队列前面，但不会打断正在执行的任务。任务只有进入 `done`、`failed`、`blocked` 或 `cancelled` 后才释放会话队首。等待补充资料会转为 `blocked/needs_user`，不会留下游离的 `in_progress`。
 
 项目主 Agent 的 `/api/send-stream` 不再绕过队列直接执行；群聊项目子 Agent 与项目主 Agent 共用工作区互斥。重复调度同一活跃任务会返回当前队列状态，不启动兄弟执行副本。
+
+隔离协作是明确例外：`queue_scope=isolated_parallel` 在基础仓库短时锁内创建 worktree 后，使用 `worktree:<absolute-path>` 独立执行通道，不继续占用项目主目录 lane。单项目默认最多2个、全局最多6个第三方 Agent；达到上限保持排队并展示容量原因。
 
 队列状态、位置、工作区通道和调度回执写入任务与回放。进程重启后，无法重建内存执行闭包的旧 `queued/running` 项目任务会进入 `recovery_required`，系统不会假装继续执行或重复修改源码。
 
@@ -44,6 +46,8 @@
 开发 Agent 的进程退出码为 0 只表示执行结束。代码或文件变更还必须经过 TestAgent 独立验收；关闭 TestAgent 时改为主 Agent 自验，页面、回放和最终交付不得声称经过独立验收。失败返工继续绑定原任务，最多三轮，不创建无限兄弟任务。
 
 TestAgent、Agent 回执和执行器只能通过结构化字段影响状态。生产代码不再从 `passed`、`失败`、`可以继续` 等自由文本猜测完成、失败或返工结论。缺失结构化回执时任务等待或阻塞。
+
+第三方 Agent 通信使用 [Agent Communication V2](./AGENT-COMMUNICATION-V2.md)：派发前创建 Dispatch 和 lease，Runner启动后等待ACK，执行期写系统心跳，Agent只提交Result，CCM通过验收后生成Terminal。旧generation、attempt、lease或跨会话回执只进入`stale_receipt`审计。
 
 ## 五、统一终态门禁
 
@@ -74,6 +78,7 @@ TestAgent、Agent 回执和执行器只能通过结构化字段影响状态。�
 - Provider 重试受统一超时、五次上限和任务级熔断约束。
 - TestAgent 返工有明确轮次上限，相同证据不会无限重派。
 - 服务重启后只恢复能够证明归属的持久状态；无法证明时 fail closed。
+- Agent Communication watchdog每5秒核对60秒启动、30秒ACK、20秒心跳、90秒失联和120秒租约；副作用不确定时进入`recovery_required`，不自动重跑。
 
 ## 八、实现入口
 
@@ -85,6 +90,7 @@ TestAgent、Agent 回执和执行器只能通过结构化字段影响状态。�
 - 项目入口调度：`backend/server.ts`
 - 旧群聊拆分兼容：`backend/modules/collaboration/group-live-routes.ts`
 - 任务回放：`backend/modules/collaboration/task-replay.ts`
+- Agent通信账本与API：`backend/system/agent-communication-v2.ts`、`backend/system/agent-communication-api.ts`
 - 用户任务体验：`frontend/src/utils/taskExperience.js`
 
 ## 九、上线验证

@@ -6,6 +6,7 @@ import { ensureTraceId } from "../../system/reliability-ledger";
 import { normalizeAgentReasoningState } from "../reasoning-loop";
 import type { GlobalAgentDecisionState, GlobalAgentRun, GlobalAgentRunStatus, GlobalAgentToolRisk, GlobalAgentToolSpec, GlobalAgentUserSteer, GlobalAgentUserSteerStatus } from "./loop";
 import { WORKSPACE_READONLY_TOOL_DEFINITIONS_V2 } from "../../tools/workspace-readonly-tools";
+import { projectContextSourceToolResultForPersistence } from "../../system/context-source-tool-result-projection";
 
 export const STORE_DIR = path.join(CCM_DIR, "global-agent-runs");
 export const STORE_FILE = path.join(STORE_DIR, "runs.json");
@@ -34,13 +35,17 @@ export function invalidateGlobalAgentRunStoreCache() {
 
 function truncateStepObservation(step: any) {
   if (!step || typeof step !== "object" || step.observation === undefined) return step;
+  const persistedToolName = step?.tool?.name === "invoke_mcp"
+    ? (step?.tool?.arguments?.tool_name || step?.tool?.arguments?.toolName || step?.tool?.name)
+    : (step?.tool?.name || step?.tool);
+  const persistedObservation = projectContextSourceToolResultForPersistence(persistedToolName, step.observation);
   let serialized = "";
   try {
-    serialized = typeof step.observation === "string" ? step.observation : JSON.stringify(step.observation);
+    serialized = typeof persistedObservation === "string" ? persistedObservation : JSON.stringify(persistedObservation);
   } catch {
     serialized = String(step.observation);
   }
-  if (serialized.length <= MAX_OBSERVATION_CHARS) return step;
+  if (serialized.length <= MAX_OBSERVATION_CHARS) return persistedObservation === step.observation ? step : { ...step, observation: persistedObservation };
   return {
     ...step,
     observation: {

@@ -83,6 +83,7 @@ const crypto = __importStar(require("crypto"));
 const task_agent_memory_entry_sync_1 = require("../tasks/task-agent-memory-entry-sync");
 const context_budget_1 = require("../system/context-budget");
 const reliability_ledger_1 = require("../system/reliability-ledger");
+const context_source_tool_result_projection_1 = require("../system/context-source-tool-result-projection");
 const group_post_turn_summary_1 = require("../modules/collaboration/group-post-turn-summary");
 exports.DEFAULT_PERMISSION_RULES = [
     { id: "read-auto", scope: "all", action: "*", risk: "read", decision: "allow", reason: "只读动作默认允许" },
@@ -2107,7 +2108,12 @@ function buildArtifactBudget(value, maxChars = 12_000) {
 function recordAgentRuntimeLifecycle(input) {
     const permission = evaluateAgentRuntimePermission(input);
     const context_budget = (0, context_budget_1.buildContextBudget)({ context: input.data?.context || input.data?.prompt || input.message || "" });
-    const artifact_budget = buildArtifactBudget(input.data?.observation || input.data?.result || input.data || {});
+    const persistedData = input.data && typeof input.data === "object" ? {
+        ...input.data,
+        ...(input.data.observation !== undefined ? { observation: (0, context_source_tool_result_projection_1.projectContextSourceToolResultForPersistence)(input.action, input.data.observation) } : {}),
+        ...(input.data.result !== undefined ? { result: (0, context_source_tool_result_projection_1.projectContextSourceToolResultForPersistence)(input.action, input.data.result) } : {}),
+    } : input.data;
+    const artifact_budget = buildArtifactBudget(persistedData?.observation || persistedData?.result || persistedData || {});
     const record = {
         id: `arl_${Date.now().toString(36)}_${hash(input, 8)}`,
         type: "agent_runtime.lifecycle",
@@ -2125,7 +2131,7 @@ function recordAgentRuntimeLifecycle(input) {
             truncated: artifact_budget.truncated,
             artifact_hash: artifact_budget.artifact_hash,
         },
-        data: input.data || {},
+        data: persistedData || {},
     };
     if (input.traceId) {
         (0, reliability_ledger_1.appendTraceEvent)(input.traceId, {

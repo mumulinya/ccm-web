@@ -121,6 +121,7 @@ exports.loopStageStatus = loopStageStatus;
 exports.planStepHasVerificationSignal = planStepHasVerificationSignal;
 exports.summaryHasExecutedVerification = summaryHasExecutedVerification;
 const task_user_runtime_1 = require("../../agents/task-user-runtime");
+const agent_communication_v2_1 = require("../../system/agent-communication-v2");
 const collaboration_1 = require("./collaboration");
 const collaboration_coordination_ux_1 = require("./collaboration-coordination-ux");
 const collaboration_memory_gates_1 = require("./collaboration-memory-gates");
@@ -1182,6 +1183,7 @@ function buildTaskCardView(task, executions, sessions) {
     const acceptanceReview = buildUserAcceptanceReview(task, summary, executions, phase);
     const planAlignment = buildUserPlanAlignmentReview(task, summary, phase, planMode, workOrderPreview, acceptanceReview);
     const agentCoordination = (0, collaboration_coordination_ux_1.buildUserAgentCoordinationProtocol)(task, summary, executions, workOrderPreview, acceptanceReview);
+    const agentCommunication = (0, agent_communication_v2_1.buildAgentCommunicationTaskSummary)(String(task?.id || ""));
     const agentProgressSummary = buildUserAgentProgressSummary(task, summary, workers, executions, sessions, workItems, phase);
     const changeSummary = buildUserChangeSummary(task, summary, workers, workItems);
     const receiptReworkSummary = (0, collaboration_coordination_ux_1.buildUserReceiptReworkSummary)(task, summary, agentCoordination);
@@ -1296,6 +1298,8 @@ function buildTaskCardView(task, executions, sessions) {
         planAlignment,
         agent_coordination: agentCoordination,
         agentCoordination,
+        agent_communication: agentCommunication,
+        agentCommunication,
         agent_progress_summary: agentProgressSummary,
         agentProgressSummary,
         change_summary: changeSummary,

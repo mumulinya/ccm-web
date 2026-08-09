@@ -36,9 +36,23 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.runNativeTestAgentDispatchBranch = runNativeTestAgentDispatchBranch;
 // Behavior-freeze helper extracted from collaboration-cross-agents-part-02-part-02.ts.
 const crypto = __importStar(require("crypto"));
+const evidence_projection_1 = require("../../test-agent/evidence-projection");
+const completion_gate_1 = require("../../test-agent/completion-gate");
+const hardening_policy_1 = require("../../test-agent/hardening-policy");
+function outputReference(value) {
+    const text = String(value || "");
+    return {
+        checksum: (0, evidence_projection_1.testAgentEvidenceChecksum)(text),
+        charCount: text.length,
+        tokenCount: Math.ceil(text.length / 4),
+        present: !!text,
+        contentStored: false,
+    };
+}
 async function runNativeTestAgentDispatchBranch(input) {
     const { mention, deps, ctx, targetName, groupId, taskId, streamRes, testAgentHandoffPayload, testAgentWorkDirPolicy, runtimeAttemptTimeoutMs, laneExecutionId, sourceTask, executionOrder, activeTaskSession, testAgentProjectWorkDir, tWorkDir, state, } = input;
     const { addTaskLog, appendTaskTimelineEvent, writeSse, runTestAgentCliJob, compactMemoryText, summarizeNativeTestAgentExecutionPlan, buildNativeTestAgentPlanBlockedReceipt, formatNativeTestAgentPlanBlockedOutput, transitionExecution, buildNativeTestAgentReceipt, uniqueStrings, runMainAgentPostReviewSpotCheck, buildPostReviewSpotCheckSummary, buildNativeTestAgentReviewSummary, formatNativeTestAgentOutput, getTestAgentHandoffReviewSubject, } = deps;
+    const persistedHandoffPayload = (0, evidence_projection_1.projectTestAgentHandoffForPersistence)(testAgentHandoffPayload);
     let { testAgentPlanDispatch, testAgentExecutionPlan, targetReceipt, tOutput, targetSessionSucceeded, targetSessionError, testAgentInvocationResult, testAgentCliDispatch, testAgentNativeReport, testAgentReviewSummary, targetWorkEvents, } = state;
     const reviewCycleId = String(sourceTask?.review_cycle_id
         || testAgentHandoffPayload?.metadata?.reviewCycleId
@@ -62,7 +76,7 @@ async function runNativeTestAgentDispatchBranch(input) {
             status: "active",
             phase: "executing",
             agent: targetName,
-            data: { test_agent_handoff: testAgentHandoffPayload },
+            data: { test_agent_handoff: persistedHandoffPayload },
         });
     }
     writeSse(streamRes, { type: "status", text: `${targetName} 正在生成 TestAgent 复核计划...`, agent: targetName });
@@ -84,8 +98,8 @@ async function runNativeTestAgentDispatchBranch(input) {
         exitCode: testAgentPlanRun.record.exitCode,
         signal: testAgentPlanRun.record.signal,
         error: testAgentPlanRun.record.error,
-        stdout: testAgentPlanRun.stdout,
-        stderr: testAgentPlanRun.stderr,
+        stdoutReference: outputReference(testAgentPlanRun.stdout),
+        stderrReference: outputReference(testAgentPlanRun.stderr),
         reused: testAgentPlanRun.reused,
     };
     testAgentExecutionPlan = testAgentPlanDispatch.plan;
@@ -93,8 +107,8 @@ async function runNativeTestAgentDispatchBranch(input) {
         throw new Error([
             "TestAgent CLI --plan-only 未返回可解析的 ccm-test-agent-execution-plan-v1",
             testAgentPlanDispatch.error ? `error=${testAgentPlanDispatch.error}` : "",
-            testAgentPlanDispatch.stderr ? `stderr=${compactMemoryText(testAgentPlanDispatch.stderr, 500)}` : "",
-            testAgentPlanDispatch.stdout ? `stdout=${compactMemoryText(testAgentPlanDispatch.stdout, 500)}` : "",
+            testAgentPlanRun.stderr ? `stderr_ref=${testAgentPlanDispatch.stderrReference.checksum}` : "",
+            testAgentPlanRun.stdout ? `stdout_ref=${testAgentPlanDispatch.stdoutReference.checksum}` : "",
         ].filter(Boolean).join("；"));
     }
     const planSummary = summarizeNativeTestAgentExecutionPlan(testAgentExecutionPlan);
@@ -114,7 +128,8 @@ async function runNativeTestAgentDispatchBranch(input) {
                     handoffPath: testAgentPlanDispatch.handoffPath,
                     exitCode: testAgentPlanDispatch.exitCode,
                     signal: testAgentPlanDispatch.signal,
-                    stderr: compactMemoryText(testAgentPlanDispatch.stderr, 4000),
+                    stderrReference: testAgentPlanDispatch.stderrReference,
+                    stdoutReference: testAgentPlanDispatch.stdoutReference,
                 },
             },
         });
@@ -137,7 +152,8 @@ async function runNativeTestAgentDispatchBranch(input) {
                 handoffPath: testAgentPlanDispatch.handoffPath,
                 exitCode: testAgentPlanDispatch.exitCode,
                 signal: testAgentPlanDispatch.signal,
-                stderr: compactMemoryText(testAgentPlanDispatch.stderr, 4000),
+                stderrReference: testAgentPlanDispatch.stderrReference,
+                stdoutReference: testAgentPlanDispatch.stdoutReference,
             },
         },
     });
@@ -194,8 +210,8 @@ async function runNativeTestAgentDispatchBranch(input) {
             exitCode: invocationRun.record.exitCode,
             signal: invocationRun.record.signal,
             error: invocationRun.record.error,
-            stdout: invocationRun.stdout,
-            stderr: invocationRun.stderr,
+            stdoutReference: outputReference(invocationRun.stdout),
+            stderrReference: outputReference(invocationRun.stderr),
             reused: invocationRun.reused,
         };
         testAgentNativeReport = testAgentInvocationResult?.report || null;
@@ -209,13 +225,13 @@ async function runNativeTestAgentDispatchBranch(input) {
                 testAgentInvocationResult?.status ? `status=${testAgentInvocationResult.status}` : "",
                 testAgentInvocationResult?.error ? `invocation=${testAgentInvocationResult.error}` : "",
                 testAgentCliDispatch.error ? `error=${testAgentCliDispatch.error}` : "",
-                testAgentCliDispatch.stderr ? `stderr=${compactMemoryText(testAgentCliDispatch.stderr, 500)}` : "",
-                testAgentCliDispatch.stdout ? `stdout=${compactMemoryText(testAgentCliDispatch.stdout, 500)}` : "",
+                invocationRun.stderr ? `stderr_ref=${testAgentCliDispatch.stderrReference.checksum}` : "",
+                invocationRun.stdout ? `stdout_ref=${testAgentCliDispatch.stdoutReference.checksum}` : "",
             ].filter(Boolean).join("；"));
         }
         targetReceipt = buildNativeTestAgentReceipt(targetName, testAgentNativeReport, testAgentHandoffPayload, testAgentExecutionPlan?.metadata?.normalizedWorkOrder || testAgentHandoffPayload, testAgentInvocationResult);
-        targetReceipt.testAgentHandoff = testAgentHandoffPayload;
-        targetReceipt.test_agent_handoff = testAgentHandoffPayload;
+        targetReceipt.testAgentHandoff = persistedHandoffPayload;
+        targetReceipt.test_agent_handoff = persistedHandoffPayload;
         targetReceipt.testAgentInvocation = {
             schema: testAgentInvocationResult.schema,
             invocationId: testAgentInvocationResult.invocationId,
@@ -297,6 +313,45 @@ async function runNativeTestAgentDispatchBranch(input) {
                 technical: { post_review_spot_check: postReviewSpotCheck },
             });
         }
+        const suppliedHardening = testAgentHandoffPayload?.metadata?.hardeningPolicy
+            || testAgentHandoffPayload?.metadata?.verificationHardening?.policy
+            || sourceTask?.acceptance_policy_snapshot?.hardening;
+        const hardeningPolicy = (0, hardening_policy_1.validateTestAgentHardeningPolicy)(suppliedHardening).valid
+            ? suppliedHardening
+            : (0, hardening_policy_1.buildTestAgentHardeningPolicy)({
+                task: sourceTask,
+                reviewPolicy: testAgentHandoffPayload?.metadata?.reviewPolicy,
+                riskTier: testAgentHandoffPayload?.metadata?.reviewPolicy?.tier,
+            });
+        const completionGate = (0, completion_gate_1.buildTestAgentCompletionGate)({
+            task: sourceTask,
+            workItemId: String(mention?.workItemId || mention?.work_item_id || mention?.assignmentId || mention?.assignment_id || ""),
+            exactSessionId: String(sourceTask?.group_session_id || sourceTask?.exact_session_id || activeTaskSession?.id || ""),
+            generation: Number(sourceTask?.generation || 0),
+            attempt: Number(mention?.attempt || 1),
+            policy: { hardening: hardeningPolicy },
+            review: {
+                canAccept: targetReceipt.status === "done" && testAgentInvocationResult?.canAccept === true,
+                invocation: testAgentInvocationResult,
+                report: testAgentNativeReport,
+                runner: testAgentCliDispatch?.runnerRecord,
+                surfaceAudit: testAgentHandoffPayload?.metadata?.surfaceAudit,
+                readonlyCapabilityManifest: testAgentNativeReport?.metadata?.verificationHardening?.readonlyCapabilityManifest,
+                postReviewSpotCheck: targetReceipt.postReviewSpotCheck,
+            },
+            reviewPolicy: testAgentHandoffPayload?.metadata?.reviewPolicy,
+            spotCheck: targetReceipt.postReviewSpotCheck,
+        });
+        targetReceipt.completionGate = completionGate;
+        targetReceipt.completion_gate = completionGate;
+        targetReceipt.verificationHardening = (0, completion_gate_1.publicTestAgentVerificationHardening)(completionGate);
+        targetReceipt.verification_hardening = { completionGate, public: targetReceipt.verificationHardening };
+        if (!completionGate.pass) {
+            targetReceipt.status = "blocked";
+            targetReceipt.summary = "TestAgent 证据已返回，但统一 V2 完成门禁未通过。";
+            targetReceipt.blockers = uniqueStrings([...(targetReceipt.blockers || []), ...completionGate.blockedReasons]);
+            targetReceipt.needs = uniqueStrings([...(targetReceipt.needs || []), "修复完成门禁缺口后沿用原工作单重新复验"]);
+        }
         testAgentReviewSummary = buildNativeTestAgentReviewSummary(targetName, testAgentNativeReport, targetReceipt);
         ctx.setAgentActivity(testAgentActivityKey, targetReceipt.status === "done" ? "reviewing" : "debugging", targetReceipt.status === "done"
             ? `${reviewSubjectLabel} 独立复核已通过，主 Agent 正在完成最终验收`
@@ -308,7 +363,9 @@ async function runNativeTestAgentDispatchBranch(input) {
                 : `${reviewSubjectLabel} 复核发现问题，正在安排返工。`,
             source: "test-agent",
         });
-        tOutput = formatNativeTestAgentOutput(targetName, testAgentNativeReport, targetReceipt, testAgentHandoffPayload);
+        const persistedNativeReport = (0, evidence_projection_1.projectTestAgentExecutionResultForPersistence)(testAgentNativeReport);
+        const persistedTargetReceipt = (0, evidence_projection_1.projectTestAgentExecutionResultForPersistence)(targetReceipt);
+        tOutput = formatNativeTestAgentOutput(targetName, persistedNativeReport, persistedTargetReceipt, persistedHandoffPayload);
         targetSessionSucceeded = targetReceipt.status === "done";
         targetSessionError = targetSessionSucceeded ? "" : (targetReceipt.blockers || []).join("；");
         targetWorkEvents = [...targetWorkEvents, {
@@ -336,8 +393,8 @@ async function runNativeTestAgentDispatchBranch(input) {
                 phase: "executing",
                 agent: targetName,
                 data: {
-                    receipt: targetReceipt,
-                    test_agent_report: testAgentNativeReport,
+                    receipt: persistedTargetReceipt,
+                    test_agent_report: persistedNativeReport,
                     test_agent_review_summary: testAgentReviewSummary,
                     test_agent_execution_plan: testAgentExecutionPlan,
                     test_agent_cli_dispatch: {
@@ -345,7 +402,8 @@ async function runNativeTestAgentDispatchBranch(input) {
                         handoffPath: testAgentCliDispatch.handoffPath,
                         exitCode: testAgentCliDispatch.exitCode,
                         signal: testAgentCliDispatch.signal,
-                        stderr: compactMemoryText(testAgentCliDispatch.stderr, 4000),
+                        stderrReference: testAgentCliDispatch.stderrReference,
+                        stdoutReference: testAgentCliDispatch.stdoutReference,
                     },
                 },
             });
@@ -357,9 +415,9 @@ async function runNativeTestAgentDispatchBranch(input) {
             agent: targetName,
             detail: testAgentReviewSummary?.headline || targetReceipt.summary,
             status: targetSessionSucceeded ? "ok" : "warn",
-            receipt: targetReceipt,
-            testAgentReport: testAgentNativeReport,
-            test_agent_report: testAgentNativeReport,
+            receipt: persistedTargetReceipt,
+            testAgentReport: persistedNativeReport,
+            test_agent_report: persistedNativeReport,
             testAgentVerdict: targetReceipt?.testAgentReport?.verdict || null,
             test_agent_verdict: targetReceipt?.testAgentReport?.verdict || null,
             testAgentReviewSummary: testAgentReviewSummary,
@@ -373,8 +431,8 @@ async function runNativeTestAgentDispatchBranch(input) {
             testAgentExecutionPlan: testAgentExecutionPlan,
             test_agent_execution_plan: testAgentExecutionPlan,
             technical: {
-                receipt: targetReceipt,
-                test_agent_report: testAgentNativeReport,
+                receipt: persistedTargetReceipt,
+                test_agent_report: persistedNativeReport,
                 test_agent_verdict: targetReceipt?.testAgentReport?.verdict || null,
                 test_agent_invocation: targetReceipt?.test_agent_invocation || null,
                 test_agent_review_summary: testAgentReviewSummary,
@@ -390,20 +448,23 @@ async function runNativeTestAgentDispatchBranch(input) {
                     handoffPath: testAgentCliDispatch.handoffPath,
                     exitCode: testAgentCliDispatch.exitCode,
                     signal: testAgentCliDispatch.signal,
-                    stderr: compactMemoryText(testAgentCliDispatch.stderr, 4000),
+                    stderrReference: testAgentCliDispatch.stderrReference,
+                    stdoutReference: testAgentCliDispatch.stdoutReference,
                 } : null,
             },
         });
     }
     state.testAgentPlanDispatch = testAgentPlanDispatch;
     state.testAgentExecutionPlan = testAgentExecutionPlan;
-    state.targetReceipt = targetReceipt;
+    state.targetReceipt = (0, evidence_projection_1.projectTestAgentExecutionResultForPersistence)(targetReceipt);
     state.tOutput = tOutput;
     state.targetSessionSucceeded = targetSessionSucceeded;
     state.targetSessionError = targetSessionError;
     state.testAgentInvocationResult = testAgentInvocationResult;
     state.testAgentCliDispatch = testAgentCliDispatch;
-    state.testAgentNativeReport = testAgentNativeReport;
+    state.testAgentNativeReport = testAgentNativeReport
+        ? (0, evidence_projection_1.projectTestAgentExecutionResultForPersistence)(testAgentNativeReport)
+        : null;
     state.testAgentReviewSummary = testAgentReviewSummary;
     state.targetWorkEvents = targetWorkEvents;
 }

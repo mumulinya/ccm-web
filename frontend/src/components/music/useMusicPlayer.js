@@ -192,6 +192,7 @@ export function useMusicPlayer(options = {}) {
     loadLyrics,
     updateCurrentLyrics,
     resetLyrics,
+    invalidateLyricsRequest,
     resetPetLyricIndex,
   } = useMusicLyrics({ currentTime, isPlaying, currentTrack, notifyMusicPetSpeech })
 
@@ -568,7 +569,32 @@ export function useMusicPlayer(options = {}) {
       const data = await res.json()
       if (!res.ok || !data.success) throw new Error(data.error || '打开抖音登录失败')
       agentConfig.value = { ...agentConfig.value, douyin: data.status }
-      toast.info('抖音登录窗口已打开，请在该窗口完成登录')
+      toast.info('抖音登录窗口已打开，请在该窗口完成扫码登录')
+      // 登录期间自动轮询，检测到认证后停止
+      let pollCount = 0
+      const maxPolls = 400 // 10 分钟（400 × 1.5s）
+      const pollTimer = setInterval(async () => {
+        pollCount += 1
+        if (pollCount > maxPolls) {
+          clearInterval(pollTimer)
+          return
+        }
+        try {
+          const statusRes = await fetch('/api/music/platforms/douyin/status')
+          const statusData = await statusRes.json()
+          if (!statusRes.ok || !statusData.success) return
+          const loginState = statusData.status?.browser?.loginState
+          agentConfig.value = { ...agentConfig.value, douyin: statusData.status }
+          if (loginState === 'authenticated') {
+            clearInterval(pollTimer)
+            toast.success('抖音登录成功，搜索范围已增强')
+          } else if (loginState === 'failed') {
+            clearInterval(pollTimer)
+            const err = statusData.status?.browser?.error
+            if (err) toast.error(`抖音登录失败：${err}`)
+          }
+        } catch { /* 轮询失败静默，不中断轮询 */ }
+      }, 1500)
     } catch (error) { toast.error(error?.message || '打开抖音登录失败') }
     finally { douyinLoginStarting.value = false }
   }
@@ -1061,6 +1087,7 @@ export function useMusicPlayer(options = {}) {
     nextRecommendTrack,
     loadLyrics,
     resetLyrics,
+    invalidateLyricsRequest,
     resetPetLyricIndex,
     updateCurrentLyrics,
     notifyMusicPetPlaying,

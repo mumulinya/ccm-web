@@ -43,6 +43,9 @@ exports.runGlobalAgentMemorySelfTestIsolationSelfTest = runGlobalAgentMemorySelf
 exports.getGlobalAgentTranscriptFile = getGlobalAgentTranscriptFile;
 exports.loadGlobalAgentTranscript = loadGlobalAgentTranscript;
 exports.appendGlobalAgentExecutionEvent = appendGlobalAgentExecutionEvent;
+exports.previewGlobalTranscriptContextSourceMaintenance = previewGlobalTranscriptContextSourceMaintenance;
+exports.applyGlobalTranscriptContextSourceMaintenance = applyGlobalTranscriptContextSourceMaintenance;
+exports.rollbackGlobalTranscriptContextSourceMaintenance = rollbackGlobalTranscriptContextSourceMaintenance;
 exports.loadGlobalAgentMemory = loadGlobalAgentMemory;
 exports.pruneDeletedGlobalWebSessionMemory = pruneDeletedGlobalWebSessionMemory;
 exports.recordGlobalAgentSessionProviderUsage = recordGlobalAgentSessionProviderUsage;
@@ -72,6 +75,7 @@ const utils_1 = require("../../core/utils");
 const memory_control_center_1 = require("../../modules/knowledge/memory-control-center");
 const group_compaction_engine_1 = require("../../modules/collaboration/group-compaction-engine");
 const group_orchestrator_config_1 = require("../../modules/collaboration/group-orchestrator-config");
+const main_agent_context_policy_1 = require("../../tools/main-agent-context-policy");
 const group_compaction_strategy_1 = require("../../modules/collaboration/group-compaction-strategy");
 const session_compaction_core_1 = require("../../system/session-compaction-core");
 const session_execution_ledger_1 = require("../../system/session-execution-ledger");
@@ -600,6 +604,48 @@ function appendGlobalAgentExecutionEvent(sessionIdInput, event) {
     saveTranscript(transcript);
     return created;
 }
+function previewGlobalTranscriptContextSourceMaintenance(sessionIdInput) {
+    const sessionId = String(sessionIdInput || "").trim();
+    const file = transcriptFile(sessionId);
+    if (!sessionId || !fs.existsSync(file))
+        return null;
+    const disk = fs.readFileSync(file, "utf8");
+    const transcript = decryptJson(JSON.parse(disk));
+    const before = JSON.stringify(transcript?.executionMessages || transcript?.execution_messages || []);
+    const projectedEvents = (0, session_execution_ledger_1.normalizeSessionExecutionEvents)(transcript?.executionMessages || transcript?.execution_messages);
+    const after = JSON.stringify(projectedEvents);
+    return {
+        file,
+        fileChecksum: sha(disk, 64),
+        changed: before === after ? 0 : projectedEvents.filter((event) => event.type === "tool_result" && event.payload?.contentStored === false).length,
+        removedTokens: Math.max(0, (0, context_budget_1.estimateTextTokens)(before) - (0, context_budget_1.estimateTextTokens)(after)),
+        contentStored: false,
+    };
+}
+function applyGlobalTranscriptContextSourceMaintenance(plan, backupFile) {
+    if (!plan?.file || !fs.existsSync(plan.file))
+        throw new Error("global_transcript_maintenance_source_missing");
+    const disk = fs.readFileSync(plan.file, "utf8");
+    if (sha(disk, 64) !== String(plan.fileChecksum || ""))
+        throw new Error("global_transcript_maintenance_source_drift");
+    const transcript = decryptJson(JSON.parse(disk));
+    const projectedTranscript = {
+        ...transcript,
+        executionMessages: (0, session_execution_ledger_1.normalizeSessionExecutionEvents)(transcript?.executionMessages || transcript?.execution_messages),
+        execution_messages: undefined,
+        updatedAt: now(),
+    };
+    fs.mkdirSync(path.dirname(backupFile), { recursive: true });
+    fs.copyFileSync(plan.file, backupFile);
+    writeAtomic(plan.file, encryptJson(projectedTranscript));
+    return { updated: Number(plan.changed || 0), backupFile };
+}
+function rollbackGlobalTranscriptContextSourceMaintenance(file, backupFile) {
+    if (!fs.existsSync(backupFile))
+        throw new Error("global_transcript_maintenance_backup_missing");
+    fs.copyFileSync(backupFile, file);
+    return { restored: 1 };
+}
 function emptyMemory() {
     return {
         version: 1,
@@ -1093,6 +1139,7 @@ function commitGlobalAgentSessionCompaction(sessionId, options = {}) {
     const unsummarizedExecution = globalExecutionForMessages(transcript, unsummarized);
     const unsummarizedModelTimeline = (0, session_execution_ledger_1.mergeConversationWithExecution)(unsummarized, unsummarizedExecution);
     const config = (0, group_orchestrator_config_1.loadOrchestratorConfig)();
+    const effectiveContextPolicy = (0, main_agent_context_policy_1.resolveMainAgentContextPolicy)(config).effective;
     const modelCapacity = (0, group_compaction_strategy_1.resolveGroupModelContextCapacity)(config);
     const threshold = (0, group_compaction_strategy_1.getGroupAutoCompactThreshold)(config);
     const triggerPayload = (0, session_compaction_core_1.buildModelVisiblePayloadSnapshot)({
@@ -1170,6 +1217,8 @@ function commitGlobalAgentSessionCompaction(sessionId, options = {}) {
             identity: dynamicToolIdentity,
             scope: dynamicToolScope,
             manifest: dynamicContextRestoreManifest,
+            maxPerSkillTokens: effectiveContextPolicy.postCompactSkillPerItemMaxTokens,
+            maxTotalSkillTokens: effectiveContextPolicy.postCompactSkillTotalMaxTokens,
         });
         const restoredMcpCatalog = tool_manager_1.toolManager.getScopedToolCatalog(dynamicToolScope).tools
             .filter((tool) => dynamicContextRestore.loadedToolNames.includes(String(tool.canonicalName || tool.name || "")));

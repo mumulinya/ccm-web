@@ -56,6 +56,8 @@ Web / 飞书消息
 5. Mission监督与聊天回合解耦。同一会话可以管理多个已派发Mission，但模型回合仍严格串行。
 6. 与已有Mission有关的状态查询或补充要求由模型绑定原Run；独立新需求创建新的Run。
 
+下游第三方 Agent 统一使用 `ccm-agent-communication-envelope-v2`。全局 Agent只选择目标作用域并创建 Dispatch，不直接替代项目子 Agent改源码；目标项目收到 ACK 后执行，Result 经目标主 Agent与全局 Supervisor验收后才由 CCM 生成 Terminal。跨项目实现必须升级到拥有成员关系的群聊，第三方 Agent之间不建立账本外点对点连接。完整流程见 [Agent Communication V2](./AGENT-COMMUNICATION-V2.md)。
+
 ## 四、会话上下文与正式压缩
 
 1. 未压缩时使用当前精确会话的全部完整轮次，以及对应隐藏执行账本。
@@ -87,6 +89,7 @@ Run、Supervisor和Mission的完成、失败、取消与验收统一生成 `Glob
 5. 队列租约过期后受控重排；失败Turn释放队首，后续消息仍可继续。
 6. 调度器独立扫描活动Supervisor和终态未投递发件箱。历史终态缺少通知时惰性生成补发项，并按原来源去重投递。
 7. 所有后台调用统一捕获异常、写入时间线并触发一次受控唤醒，不留下未处理Promise。
+8. 活跃 V1 下游任务恢复时重新核验 scope、exact session、授权、worktree和副作用，随后用新generation生成legacy bridge；历史V1终态保持只读，不补造ACK或Terminal。
 
 ## 七、用户可见状态
 

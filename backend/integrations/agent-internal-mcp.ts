@@ -6,6 +6,8 @@ import { buildTaskEvidenceMcpServerConfig, TASK_EVIDENCE_MCP_SERVER_NAME } from 
 import { buildTaskRuntimeMcpServerConfig, TASK_RUNTIME_MCP_SERVER_NAME } from "./task-runtime-mcp";
 import { buildTestAcceptanceMcpServerConfig, TEST_ACCEPTANCE_MCP_SERVER_NAME } from "./test-acceptance-mcp";
 import { buildPermissionBrokerMcpServerConfig, PERMISSION_BROKER_MCP_SERVER_NAME } from "./permission-broker-mcp";
+import { buildAgentCommunicationMcpServerConfig, AGENT_COMMUNICATION_MCP_SERVER_NAME } from "./agent-communication-mcp";
+import { buildNotebookWorkspaceMcpServerConfig, NOTEBOOK_WORKSPACE_MCP_SERVER_NAME } from "./notebook-workspace-mcp";
 
 export type TaskBoundInternalMcpInput = {
   taskId: string;
@@ -54,6 +56,7 @@ export function buildTaskBoundInternalMcpServers(input: TaskBoundInternalMcpInpu
   };
   const servers: Record<string, any> = {
     [TASK_RUNTIME_MCP_SERVER_NAME]: buildTaskRuntimeMcpServerConfig(context),
+    [AGENT_COMMUNICATION_MCP_SERVER_NAME]: buildAgentCommunicationMcpServerConfig(context),
     [KNOWLEDGE_CONTEXT_MCP_SERVER_NAME]: buildKnowledgeContextMcpServerConfig(context),
     [TASK_EVIDENCE_MCP_SERVER_NAME]: buildTaskEvidenceMcpServerConfig(context),
     [PERMISSION_BROKER_MCP_SERVER_NAME]: buildPermissionBrokerMcpServerConfig(context),
@@ -75,6 +78,9 @@ export function buildTaskBoundInternalMcpServers(input: TaskBoundInternalMcpInpu
       sourceNativeSessionId: input.nativeSessionId || "",
       sourceWorkDir: input.workDir,
     });
+  }
+  if (input.role === "project-child-agent") {
+    servers[NOTEBOOK_WORKSPACE_MCP_SERVER_NAME] = buildNotebookWorkspaceMcpServerConfig(context);
   }
   return servers;
 }

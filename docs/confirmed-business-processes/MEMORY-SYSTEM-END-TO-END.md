@@ -1,18 +1,20 @@
 # CCM 记忆系统完整业务流程
 
-确认日期：2026-07-28  
-实现状态：已完成并通过记忆、Agent、前端和生产构建回归
+首次确认日期：2026-07-28<br>
+最近审计更新：2026-08-08<br>
+实现状态：核心闭环及来源连续性收口已完成；动态 Skill/MCP、Provider MicroCompact、usage 校准 v2、知识/共享文件持久化无正文化、正式记忆准入后的 Promotion 回写，以及显式历史维护均已落地。
 
 ## 业务目标
 
-本文确认 CCM 从用户发送消息开始，到消息持久化、模型上下文构造、工具执行、Token门禁、MicroCompact、正式模型压缩、长期记忆写入、第三方Agent读取、缓存复用、页面展示和会话删除的完整业务流程。
+本文确认 CCM 从用户发送消息开始，到消息持久化、模型上下文构造、动态 Skill/MCP 加载、知识库与共享文件 hydration、工具执行、Token门禁、MicroCompact、正式模型压缩、压缩后权威恢复、长期记忆写入、第三方Agent读取、缓存复用、页面展示和会话删除的完整业务流程。
 
-记忆系统遵守四条根本边界：
+记忆系统遵守五条根本边界：
 
 1. 原始 transcript、正式模型摘要和通过准入的长期记忆是事实来源。
 2. 会话连续性始终绑定一个精确会话，不把整个群聊、项目或全局助手混成一个上下文。
 3. 压缩只改变模型下一轮读取的投影，不删除原始消息和原始执行证据。
 4. 缓存只复用上下文准备或Provider前缀，不缓存模型最终回答，也不成为第二套记忆数据库。
+5. Skill、MCP、知识库和共享文件继续由各自注册中心或业务存储保存完整定义与正文；连续性账本和压缩恢复清单只保存身份、定位、版本、checksum、Token和状态，不保存正文。
 
 ## 参与角色和精确作用域
 
@@ -53,7 +55,7 @@ Web和飞书只影响消息来源及回复路由，不改变记忆作用域。�
 - 与对应用户消息锚点绑定；
 - 保持工具调用与结果配对；
 - 参与Token计量、正式压缩和恢复；
-- 原始记录不因MicroCompact或正式压缩删除。
+- 非来源工具的原始记录不因MicroCompact或正式压缩删除；知识/共享文件读取结果在当前Loop保持完整，进入隐藏链、run/runtime、幂等和审计持久化前替换为无正文来源投影。
 
 项目子Agent和TestAgent的完整原始过程留在任务时间线与任务回放。只有被主Agent正式采纳的结果进入父会话隐藏执行链。
 
@@ -89,7 +91,24 @@ Web和飞书只影响消息来源及回复路由，不改变记忆作用域。�
 - 可随时从源码、配置或日志重新读取的事实；
 - 无来源、无证据或作用域不明的候选。
 
-### 5. 固定模型上下文
+### 5. 可恢复上下文来源
+
+知识库、全局/项目/群聊共享文件属于可恢复的权威上下文来源，不是第三层长期记忆。来源正文或知识分片被检索、自动投影或工具读取后先进入当前 Agent Loop；来源连续性账本只保存无正文回执：
+
+- `sourceKind: knowledge | shared_file`、scope、scopeId、精确session和generation；
+- source/document/chunk定位、章节、revision、checksum；
+- 知识索引generation、scope checksum和query checksum；
+- Token、读取/注入时间及`discovered | read | injected | used | ignored | promoted | restored`状态；
+- 截断、漂移、权限撤销、删除和无法重新定位等结果；
+- `contentStored: false`。
+
+新写来源账本使用`ccm-context-source-read-receipt-v2`与`ccm-context-source-continuity-store-v2`。正式记忆准入回写的`promotionEvidence[]`只保存memory kind、memory ID、admission checksum、source ref checksum和时间，不保存长期记忆正文。
+
+同一版本、checksum和分片组合在一个精确连续性身份内去重。普通用户在管理页面查看文件不会写入Agent来源连续性；只有上下文构建、Agent工具调用或签名内部MCP读取才写回执。
+
+压缩后不从连续性账本恢复旧正文，而是先重新验证当前scope、权限、revision、checksum、知识索引generation和分片定位，再从知识库或共享文件权威存储读取当前版本。发生漂移时使用当前内容并记录`drift`；权限撤销、来源删除或无法定位时跳过并记录原因。
+
+### 6. 固定模型上下文
 
 System、Rules、实际载入的Skill/MCP定义、子Agent目录和本轮任务状态属于模型上下文块。授权可用但未进入当前Provider载荷的Skill/MCP只保留在可用目录中，不计入本轮Token，也不会被伪装成已加载；这些内容都不是跨会话长期记忆。
 
@@ -102,22 +121,96 @@ Skill/MCP的处理规则：
 - 正式压缩可以总结工具执行形成的决定和证据；
 - Skill/MCP定义本身不会被复制进长期记忆或反复写进会话摘要。
 
-正式压缩提交时会同时生成动态工具恢复清单，但清单与长期记忆、摘要正文彼此独立：
+正式压缩提交时会同时生成共享 `MainAgentPostCompactRestoreManifestV3`，但清单与长期记忆、摘要正文彼此独立：
 
 - 已实际调用的Skill保存调用证据和内容checksum，压缩后新Run重新读取当前正文并校验后恢复；
 - 通过`tool_search`实际加载的MCP保存Schema checksum，压缩后在授权、连接和目录revision仍一致时恢复到`loadedToolNames`；
 - 未调用Skill、未加载的延迟MCP不进入恢复内容；可信`alwaysLoad`由当前目录自然加载；
-- 恢复项加入完整Provider payload后重新执行Token门禁，超限项退回延迟加载，不做字符截断；
+- MCP恢复项加入完整Provider payload后重新执行Token门禁，超限项退回延迟加载；超长Skill正文按统一预算保留首尾和明确截断标记，不整项静默丢弃；
 - Skill内容变化、MCP Schema变化、授权撤销、连接断开或作用域不匹配均失败关闭，不使用旧内容；
-- 清单只保存身份、checksum、Token和证据ID，正文继续来自当前Skill/MCP目录，原始调用结果继续来自隐藏执行账本。
+- 来源恢复引用独立的无正文来源manifest checksum；正文从当前知识库或共享文件存储权威重读；
+- 清单只保存身份、checksum、Token和证据ID，正文继续来自当前Skill/MCP目录或来源权威存储；来源工具的持久执行结果只保留`ccm-context-source-tool-result-reference-v1`，不以隐藏执行链作为正文副本。
 
 因此，压缩后的同一精确会话可以继续使用此前已经实际选择的Skill和MCP状态，但新会话、兄弟会话、清空或归档会话不会继承。群聊旧`ccm-post-compact-reinjection-v1`保持只读兼容，新压缩统一写入共享清单。
 
-### 6. 缓存和审计元数据
+### 7. 动态上下文策略
+
+全局、项目和群聊三类主Agent共用 `MainAgentContextPolicy`。全局Agent使用全局配置；项目主Agent使用“项目覆盖 > 全局”；群聊主Agent使用“群覆盖 > 全局”。项目/群字段省略表示保持原值，`null`表示清除覆盖并继承全局；接口接受camelCase和snake_case，统一返回camelCase。
+
+默认预算和加载模式：
+
+| 项目 | 默认值 | 作用 |
+| --- | ---: | --- |
+| MCP加载模式 | `deferred` | 首轮只投影可发现名称，搜索命中后加载完整功能和参数Schema |
+| MCP auto阈值 | 上下文窗口的10% | 可选定义总量未超过阈值时inline，否则整体deferred |
+| Skill目录 | 上下文窗口的1% | 保留所有已授权名称，简介按最近调用、内置、名称排序填充 |
+| 单条Skill恢复 | 5,000 Token | 压缩后单个已调用Skill正文上限 |
+| Skill恢复总量 | 25,000 Token | 压缩后所有Skill正文联合上限 |
+| 来源目录 | 上下文窗口的1% | 知识库与共享文件名称、类型、说明、版本等无正文目录 |
+| 来源正文hydration | 上下文窗口的10% | 本轮知识分片与共享文件正文联合目标预算 |
+| 单来源恢复 | 5,000 Token | 压缩后单个知识/共享文件来源上限 |
+| 来源恢复总量 | 25,000 Token | 压缩后所有来源联合上限 |
+
+上述值都是目标或配置上限，不是绕过Provider安全门的保留容量。最终预算必须先扣除System、摘要、当前请求、MCP Schema、Skill恢复、输出预留和安全缓冲。名称保留、`alwaysLoad`、当前已加载项和压缩恢复项也不能越过Provider上限；容量不足时必须降级deferred或fail closed。
+
+### 8. 缓存和审计元数据
 
 Context Engine状态只保存块ID、类型、Token、checksum、不可变地址、编辑计划、能力证据、usage和耗时。磁盘状态不保存Prompt正文、API Key、完整工具结果或模型最终回答。
 
 ## 从用户消息到模型回复
+
+### 当前实际工作流程
+
+```mermaid
+flowchart TD
+    A["用户消息进入 Web / 飞书 / 项目 / 群聊"] --> B["绑定精确 scope、session、generation"]
+    B --> C["立即保存用户原始消息"]
+    C --> D["解析全局配置及项目/群聊覆盖配置"]
+
+    D --> E["读取权威上下文"]
+    E --> E1["当前 transcript 或正式摘要"]
+    E --> E2["隐藏工具执行链"]
+    E --> E3["按请求召回长期记忆"]
+    E --> E4["Skill 动态目录"]
+    E --> E5["MCP 动态目录或已加载 Schema"]
+    E --> E6["知识库与共享文件目录、检索分片"]
+
+    E1 --> F["统一 ContextPlan"]
+    E2 --> F
+    E3 --> F
+    E4 --> F
+    E5 --> F
+    E6 --> F
+
+    F --> G["动态 Token 分配与 Provider 安全门"]
+    G --> H{"是否超过安全容量"}
+    H -- "否" --> I["发送 Provider"]
+    H -- "旧工具结果可清理" --> J["MicroCompact"]
+    J --> G
+    H -- "需要正式压缩" --> K["模型生成正式摘要"]
+    K --> L["质量校验及压缩后 Payload 二次门禁"]
+    L -- "通过" --> I
+    L -- "失败" --> M["Fail closed，不推进 boundary"]
+
+    I --> N["Agent Loop 调用 Skill、MCP、知识库和共享文件"]
+    N --> O["结果进入本轮上下文"]
+    O --> P["持久化边界替换为无正文来源投影并写回执"]
+    P --> Q["引用过的来源标记 used，未使用标记 ignored"]
+    Q --> R["高价值结论进入长期记忆候选准入"]
+    R --> R1{"正式记忆是否原子提交成功"}
+    R1 -- "是且有精确来源引用" --> R2["事务回写 important / promoted 与 Promotion 证据"]
+    R1 -- "否" --> R3["不标记 promoted"]
+    R2 --> S["正式回复"]
+    R3 --> S
+
+    S --> T["压缩边界生成 v3 恢复清单"]
+    T --> U["下一 generation 重新校验权限、hash、checksum"]
+    U --> V["从 Skill、MCP、知识库和共享文件权威存储重新读取"]
+```
+
+流程图表达当前全局、项目和群聊主Agent的共同主链。音乐Agent继续使用其单例会话、正式摘要和长期音乐偏好流程，不接入开发知识库与本次新增的知识/共享文件来源连续性。
+
+### 参与方调用时序
 
 ```mermaid
 sequenceDiagram
@@ -160,7 +253,9 @@ Context Engine从事实来源读取：
 2. 当前精确会话隐藏执行消息；
 3. 当前scope召回出的长期记忆；
 4. 本轮用户消息、附件和恢复上下文；
-5. 当前System、Rules、授权Skill、MCP定义和任务状态。
+5. 当前System、Rules、授权Skill、MCP定义和任务状态；
+6. 当前scope允许读取的知识库与全局/项目/群聊共享文件目录；
+7. 本轮相关检索、显式引用、自动共享文件投影和压缩后权威重读得到的正文分片。
 
 任何兄弟会话、其他项目或其他群聊的数据都不能因名称相似被读取。scope、session、generation、boundary或checksum不一致时停止增量复用并重新完整读取。
 
@@ -173,6 +268,8 @@ Context Engine从事实来源读取：
 - 完整轮次包含用户消息、assistant response及成对的tool-use/tool-result。
 - 不使用固定消息条数、12K/24K字符截断或本地摘要绕过容量门禁。
 - 图片和二进制内容在模型压缩投影中使用安全标记，原始附件仍由权威存储保存。
+- 知识库和共享文件正文按当前请求、使用状态、最近读取和稳定顺序进入动态hydration预算；超限内容降级为deferred，不再使用固定32K共享文件投影。
+- 同一来源分片在一个Run内只注入和计量一次；来源目录、读取回执和恢复manifest不保存正文。
 
 Context Engine V2将payload划分为不可变块：
 
@@ -181,6 +278,8 @@ System
 Rules
 Skills
 MCP definitions
+Context source catalog
+Knowledge/shared-file hydration
 Long-term memory
 Canonical summary / recovery
 Conversation turns
@@ -197,9 +296,13 @@ Current request
 - 完整模型可见输入Token；
 - 当前模型上下文窗口；
 - 预留输出Token；
-- Provider usage校准；
+- Provider usage校准v2；
 - 第三方Agent必需hydration Token；
-- Hooks、恢复附件和本轮请求Token。
+- Skill/MCP/来源目录与压缩恢复Token；
+- 知识库与共享文件正文hydration Token；
+- Hooks、恢复附件、安全缓冲和本轮请求Token。
+
+Provider usage校准按endpoint、协议、Provider family、model、backend和估算器版本隔离。成功的流式和非流式调用采集`direct input + cache creation + cache read`；失败或缺少usage的调用不参与学习。每个身份最多保留64个无正文样本，EWMA系数为0.25；8个样本后使用median/MAD排除异常值，同时计算p95比例与p95正向Token漂移。30天未更新停止用于门限，90天后清理。最终安全估算取原始估算、EWMA、p95比例和p95正向漂移的最大值，因此校准不能降低原始安全门限。
 
 门禁结果：
 
@@ -226,6 +329,15 @@ MicroCompact只处理已经配对、足够旧且不属于近期工作集的工�
 - 记录选择原因、清理数量、保留数量、节省Token、checksum和执行时间；
 - 普通Provider遇到上下文压力仍进入正式模型压缩，不能用MicroCompact绕过。
 
+Provider原生MicroCompact与Prompt Cache是两种不同能力：
+
+- 官方Anthropic端点可使用原生`context_management`；兼容端必须通过“测试连接”触发的无业务内容能力探测，证明有效期为7天；
+- Prompt Cache能力证据不能直接证明`context_management`或MicroCompact可用；
+- 流式与非流式请求统一携带经过验证的原生字段和beta header；
+- 只有Provider响应中存在可核验的`context_management.applied_edits`，才记录`native_applied`并扣减会话容量；仅字段被接受、仅返回请求ID或延迟下降都不算原生应用；
+- 兼容端在输出开始前明确拒绝原生字段时，标记`unsupported`并以CCM controlled projection重试一次；已经产生输出时不重试，避免重复回答；
+- OpenAI Prompt Cache和Gemini implicit/explicit cache继续作为缓存能力，不标记为MicroCompact。
+
 ## 正式模型压缩流程
 
 ```text
@@ -240,6 +352,8 @@ MicroCompact只处理已经配对、足够旧且不属于近期工作集的工�
 首次压缩形成 `S1`；后续压缩使用上一代正式摘要与新增内容形成 `S2`、`S3`。新摘要必须保留仍然有效的用户要求、决定、约束、风险和未完成事项。
 
 压缩前创建精确会话恢复点。Prompt Too Long恢复按完整assistant/API回合从旧到新处理，不拆分工具调用与结果。压缩候选只有在质量门禁和压缩后真实payload门禁均通过后才能提交。
+
+正式压缩提交时同时写入共享v3恢复清单。来源恢复候选按“当前请求再次明确引用、已经提升的重要来源、实际使用来源、最近注入来源”排序；单来源默认最多5K、合计最多25K，并同时受10%来源hydration目标与剩余安全容量约束。恢复前必须重新验证权限和当前版本，正文只进入重建后的当前Provider payload，来源恢复回执保持`contentStored: false`。
 
 压缩不会执行：
 
@@ -286,6 +400,16 @@ MicroCompact只处理已经配对、足够旧且不属于近期工作集的工�
 - TestAgent不能写业务代码，也不能直接写长期记忆。
 - 只有主Agent采用的验收结论进入父会话执行链。
 
+### 知识库与共享文件使用判定
+
+- 来源被最终回答中的citation、文件ID、分片ID或后续工具参数引用时标记为`used`；
+- 本轮已经注入但结束时没有被引用的来源标记为`ignored`，这不删除来源，也不表示来源质量有问题；
+- 项目 durable-memory 或群聊 typed-memory 原子提交成功且候选包含精确结构化来源引用后，统一事务入口才把对应回执标记`important/promoted`；
+- Promotion按`memoryId + sourceRefChecksum`幂等，回写失败不回滚已经提交的正式记忆，但记录可重试审计；准入拒绝、未验收、写入失败、撤销或跨session引用不提升；
+- 不额外调用付费模型判断来源重要性；
+- 压缩摘要或长期记忆只保存结论、必要引用和来源定位，不应复制知识文档或共享文件原始正文；
+- 第三方Agent通过签名内部MCP搜索或读取知识/共享文件时，也写入绑定精确session/generation的同类无正文回执。
+
 ## 长期记忆准入流程
 
 ```mermaid
@@ -297,7 +421,8 @@ flowchart LR
     E -- 否 --> F["保留过程记录，不写长期记忆"]
     E -- 是 --> G["价值、重复、冲突和作用域准入"]
     G --> H["写入typed long-term memory"]
-    H --> I["后续会话按当前请求召回"]
+    H --> H1["按精确source refs回写Promotion证据"]
+    H1 --> I["后续会话按当前请求召回"]
 ```
 
 长期记忆写入必须同时满足：
@@ -331,6 +456,7 @@ Codex、Claude Code、Cursor、Antigravity CLI、OpenCode等支持MCP的开发Ag
 - challenge、snapshot、checksum、scope或游标不匹配：拒绝确认并设置 `rehydration_required`。
 - 必需分段或必需记忆未读完：`acknowledge_memory_context`失败。
 - 修改任务缺少有效确认：不提交任务回执和长期记忆；只读问答才允许完整Prompt降级。
+- `search_knowledge`、`read_knowledge_document`和共享文件读取仍从权威存储返回当前内容，同时写入精确session/generation的无正文来源回执。
 
 MCP快照只是可重新生成的派发缓存，不是记忆权威存储，也不能直接写canonical memory。
 
@@ -350,7 +476,7 @@ Provider不支持原生缓存或无法证明时仍可使用：
 ### Provider原生缓存
 
 - OpenAI：稳定 `prompt_cache_key`、可选保留时间及真实cached token usage。
-- Anthropic：能力成立时使用 `cache_control/context_management` 和经过校验的 `cache_reference/cache_edits`。
+- Anthropic：Prompt Cache与`context_management`分别验证；能力成立时使用`cache_control`，只有独立MicroCompact证明成立时才使用经过校验的`context_management/cache_reference/cache_edits`。
 - Gemini：Generate Content稳定前缀和原生缓存usage。
 - 中转站：只有两轮稳定前缀测试返回真实缓存Token才标记 `confirmed`。
 - vLLM/SGLang：CCM只连接外部服务；只有每请求Token证据可以计入节省。
@@ -369,14 +495,19 @@ Provider不支持原生缓存或无法证明时仍可使用：
 | 主Agent采用的验收结论 | 主Agent复盘后 | 父会话隐藏执行链 | 是 | 通过准入后可以 |
 | 正式会话摘要 | 模型压缩和双门禁通过后 | 当前精确会话摘要链 | 是 | 否 |
 | 动态近期原文 | 每次投影动态选择 | 从原始transcript读取 | 是 | 否 |
-| Skill/MCP定义 | 每轮按授权构造 | 配置与ContextPlan元数据 | 是并计Token | 否 |
+| Skill/MCP目录 | 每轮按授权和动态预算构造 | 注册中心与ContextPlan元数据 | 只有实际目录内容计Token | 否 |
+| 已加载Skill/MCP定义 | 调用、搜索命中、alwaysLoad或压缩恢复后 | 当前Provider payload；定义正文仍在注册中心 | 是并计Token | 否 |
+| 知识/共享文件正文 | 相关检索、显式读取、自动投影或压缩恢复时 | 权威知识库/共享文件存储；只在当前Agent Loop保留完整值 | 是并计Token | 否；持久化边界统一替换为无正文来源引用 |
+| 上下文来源读取回执 | 来源被发现、读取、注入、使用、忽略、提升或恢复时 | 精确session/generation的v2来源连续性账本 | 只作为恢复与审计元数据 | 否，`contentStored: false`；Promotion只存无正文证据 |
+| v3压缩恢复清单 | 正式压缩提交时 | 精确主Agent连续性清单 | 下一generation用于重新校验和权威重读 | 否，`contentStored: false` |
 | 长期记忆候选 | 成功回执或会话提取后 | 候选/审计 | 准入前不作为正式记忆 | 待准入 |
 | 正式长期记忆 | admission通过后 | 精确全局/群聊/项目typed memory | 按任务召回 | 已是长期记忆 |
 | ContextPlan/cache状态 | 每次上下文准备和usage后 | 元数据、checksum和回执 | 不作为聊天正文 | 否 |
+| usage校准v2 | 成功且包含usage的Provider调用后 | endpoint/协议/family/model/backend/估算器隔离的无正文样本 | 用于下一轮安全门限 | 否 |
 
 ## 删除、归档和代际变化
 
-- 删除会话会删除该会话连续性、压缩状态和精确Context Engine缓存，不删除scope级长期记忆。
+- 删除会话会删除该会话连续性、工具/Skill/MCP/来源恢复状态、压缩状态和精确Context Engine缓存，不删除scope级长期记忆，也不删除知识库或共享文件权威数据。
 - 归档会话保留原始消息和正式摘要，但不再作为当前活跃会话继续追加。
 - native generation、Provider或compact boundary变化会关闭旧增量身份，下一轮重新完整hydration。
 - CCM重启后从canonical transcript、正式摘要、执行账本和持久回执恢复；内存热缓存可以丢失且可安全重建。
@@ -392,6 +523,8 @@ Provider不支持原生缓存或无法证明时仍可使用：
 - MicroCompact触发原因、清理量、保留量和原始数据保留状态；
 - Context Engine块复用、热缓存来源、稳定前缀、投影耗时和Provider耗时；
 - 直接输入、缓存创建、缓存读取、命中率、成本和配置建议；
+- 来源目录、知识库、共享文件、来源恢复和安全余量的Token分配；
+- 来源`discovered/read/injected/used/ignored/promoted/restored`数量、版本、漂移、截断及容量/权限/删除跳过原因；
 - 历史数据缺少分类或回执时显示“历史未记录”，不生成虚假统计。
 
 Prompt正文、API Key、完整工具结果、Provider内部session和排障协议默认不显示。
@@ -404,6 +537,8 @@ Prompt正文、API Key、完整工具结果、Provider内部session和排障协�
 - 工具调用与结果不完整：禁止MicroCompact和摘要提交破坏配对。
 - Provider原生缓存未证明：使用CCM受控投影，不宣称原生命中。
 - MCP确认不完整：修改任务fail closed，不提交正式回执和长期记忆。
+- 来源权限、scope、session或generation不匹配：不读取正文；来源恢复失败只记录无正文原因，不使用旧内容绕过。
+- 来源目录或hydration预算不足：降级deferred，不越过输出预留和安全缓冲。
 - 子Agent或TestAgent退出码为0但证据不足：任务不能标记完成。
 - 长期记忆候选冲突、无来源或未验收：拒绝写入正式记忆。
 - 删除、维护和多实例更新使用原子写入与文件锁，避免并发覆盖。
@@ -415,42 +550,87 @@ Prompt正文、API Key、完整工具结果、Provider内部session和排障协�
 - `backend/system/context-engine-observability.ts`
 - `backend/system/session-execution-ledger.ts`
 - `backend/system/session-memory-window.ts`
+- `backend/tools/main-agent-context-policy.ts`
+- `backend/tools/main-agent-tool-runtime.ts`
+- `backend/system/main-agent-post-compact-continuity.ts`
+- `backend/system/main-agent-context-source-continuity.ts`
+- `backend/system/model-token-preflight.ts`
+- `backend/system/provider-native-microcompact-capability.ts`
 - `backend/modules/collaboration/group-session-model-context.ts`
 - `backend/modules/collaboration/group-memory-compaction.ts`
+- `backend/modules/collaboration/collaboration-runtime-plan-tools.ts`
+- `backend/modules/collaboration/provider-native-compact-execution-receipt.ts`
 - `backend/modules/projects/project-session-compaction.ts`
+- `backend/modules/projects/project-main-agent.ts`
 - `backend/agents/global/memory.ts`
+- `backend/modules/global/global-agent-agentic-runtime.ts`
 - `backend/integrations/third-party-memory-snapshot.ts`
 - `backend/integrations/knowledge-context-mcp.ts`
+- `backend/modules/knowledge/knowledge-access.ts`
+- `backend/modules/tools/shared-files-v2.ts`
 - `backend/modules/knowledge/memory-control-center-api.ts`
+- `frontend/src/components/knowledge/MemoryCenterPanel.vue`
+- `frontend/src/components/common/ContextPolicyFields.vue`
+
+## 已完成的来源收口与历史维护
+
+2026-08-08源码对照审计发现的两个待收口项已经关闭：
+
+1. `query_knowledge`、`search_knowledge`、`read_knowledge_document`、`read_shared_files`、`read_global_shared_files`及内部MCP等价调用，在模型当前Loop中仍使用完整结果；进入全局/项目隐藏执行链、全局run/runtime、`global-agent-tool`幂等结果和受控审计边界前，统一替换为`ccm-context-source-tool-result-reference-v1`。非来源工具保持原行为。
+2. 项目durable-memory与群聊typed-memory仅在正式准入并原子提交成功后调用`promoteContextSourceReceipts`；`used`不再被全局final report等宽松信号直接升级为`promoted`。
+
+历史数据不会在启动时自动改写。管理员在记忆中心“历史来源收口”面板按精确scope/session执行：
+
+```text
+预览 -> 返回数量、ID、checksum、预计移除Token和未确认项
+-> 管理员填写原因并二次确认
+-> 服务端核对planChecksum与所有源文件/幂等记录checksum
+-> 创建受限备份并原子替换可证明的来源正文副本
+-> 对具有精确session及结构化source refs的正式记忆幂等补齐Promotion
+-> 必要时按job ID回滚备份
+```
+
+历史中无法证明属于来源读取的普通工具数据标记为`unresolved`并跳过；维护接口和manifest不返回正文，备份只用于同一维护任务回滚，不删除知识库、共享文件、正式长期记忆或用户可见聊天。
 
 ## 验证证据
 
 - Context Engine V2专项 `55` 项通过。
 - 全会话CC压缩对齐 `51` 项通过。
 - 第三方记忆MCP hydration `49` 项通过。
-- 记忆领域回归 `12/12` 通过。
-- Agent领域回归 `8/8` 通过。
+- 记忆领域回归 `27/27` 通过。
+- 知识领域回归 `6/6` 通过。
+- Agent领域回归 `19/19` 通过。
 - 前端领域回归 `21/21` 通过。
 - 前端、飞书MCP和后端production build通过。
 - 文档链接 `1181` 个，失败 `0`。
 - 所有Provider测试使用mock，付费Provider调用为 `0`。
+- 2026-08-08来源连续性专项通过：32K/200K/516K分别得到1%目录与10%hydration目标预算，来源回执`contentStored: false`，共享文件漂移后恢复当前权威版本。
+- 2026-08-08动态上下文策略与usage校准专项通过：Skill名称保留、MCP deferred/auto/inline、10%临界值、范围/继承/null清除、v2无正文样本、MAD异常排除和“校准不低于原始估算”均通过。
+- 2026-08-08压缩连续性专项通过：新写`ccm-main-agent-post-compact-restore-manifest-v3`，Skill与MCP正常恢复，内容或Schema变化时拒绝旧项并记录漂移原因。
+- 2026-08-08来源无正文化与Promotion闭环专项通过：当前Loop保留正文可用性，执行链、run/runtime、幂等结果、来源账本与维护API仅持久化无正文投影；正式记忆提交后精确Promotion、错误checksum拒绝、显式迁移与rollback均通过。
+- 2026-08-08来源持久化与Promotion专项通过：正文哨兵不进入来源投影、v2回执或维护响应；Promotion精确匹配且重复提交幂等，历史维护支持checksum拒绝、备份与回滚。
 
 ## 最终确认
 
-CCM当前记忆系统已经形成完整闭环：
+CCM当前记忆系统的核心链路已经形成闭环：
 
 ```text
 用户消息
 -> 精确会话原始存储
--> 固定上下文、长期记忆、会话和执行链统一投影
--> 真实Token门禁
+-> 解析全局与项目/群聊覆盖策略
+-> 固定上下文、长期记忆、会话、执行链、动态Skill/MCP目录和来源目录统一投影
+-> 知识库/共享文件按联合动态预算检索或hydration
+-> usage校准v2参与真实Token安全门
 -> 选择性MicroCompact或正式模型压缩
 -> 主Agent/子Agent/TestAgent执行与验收
--> 正式回复和隐藏执行证据写回
--> 高价值候选经过准入写入长期记忆
+-> 正式回复、无正文来源工具投影和v2来源回执写回
+-> 高价值候选经过准入原子写入长期记忆，并按精确source refs回写Promotion证据
 -> 后续精确会话按需召回
+-> 压缩后按v3清单重新校验Skill、MCP和来源并从权威存储恢复
 -> 第三方Agent通过签名MCP完整或增量hydration
 -> 缓存、usage、页面展示和受控清理
 ```
 
-该流程适用于当前全局、群聊、项目、项目子Agent和音乐Agent记忆链。任何未来实现不得以本地字符截断、跨scope查询、未验收写回、伪造缓存命中或删除原始事实来源的方式绕过上述边界。
+精确会话、正式摘要、长期记忆、Token门禁、缓存和受控清理流程适用于当前全局、群聊、项目、项目子Agent和音乐Agent记忆链；动态Skill/MCP与知识/共享文件来源连续性适用于全局、项目和群聊三类主Agent，第三方开发Agent通过签名MCP接入，音乐Agent不读取开发知识库。任何未来实现不得以本地字符截断、跨scope查询、未验收写回、伪造缓存命中或删除原始事实来源的方式绕过上述边界。
+
+发布说明必须继续区分`used`与已经通过正式长期记忆准入的`promoted`，并明确“当前Loop可用完整来源正文”不等于“CCM持久执行链保存正文副本”。

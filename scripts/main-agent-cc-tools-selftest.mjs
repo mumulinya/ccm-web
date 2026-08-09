@@ -24,7 +24,7 @@ const workspace = require(path.join(root, "ccm-package", "dist", "tools", "works
 const mainRuntime = require(path.join(root, "ccm-package", "dist", "tools", "main-agent-tool-runtime.js"));
 
 assert.equal(workspace.runWorkspaceReadonlyToolsSelfTest().success, true);
-assert.equal(workspace.WORKSPACE_READONLY_TOOL_DEFINITIONS_V2.length, 12);
+assert.ok(workspace.WORKSPACE_READONLY_TOOL_DEFINITIONS_V2.length >= 21);
 const token = workspace.sealScopedToolCapability({ scope: "project", scopeId: "alpha", exactSessionId: "pchat-alpha", generation: 3, allowedProjects: ["alpha"] });
 assert.equal(workspace.openScopedToolCapability(token).exactSessionId, "pchat-alpha");
 
@@ -42,6 +42,18 @@ const secondRead = await workspace.executeWorkspaceReadonlyTool("read_file", { p
 assert.equal(secondRead.lines[0].line, 2);
 await assert.rejects(() => workspace.executeWorkspaceReadonlyTool("read_file", { path: ".env" }, token), /敏感文件/);
 
+const symbolResult = await workspace.executeWorkspaceReadonlyTool("workspace_symbols", { query: "alpha", limit: 20 }, token);
+assert.equal(symbolResult.schema, "ccm-code-intelligence-result-v1");
+assert.equal(symbolResult.contentStored, false);
+assert.equal(symbolResult.locations.some(location => location.symbol === "alpha"), true);
+const definitionResult = await workspace.executeWorkspaceReadonlyTool("find_definition", { path: "src/service.ts", symbol: "alpha", limit: 20 }, token);
+assert.equal(definitionResult.locations.some(location => location.path === "src/service.ts"), true);
+const firstIndexGeneration = definitionResult.indexGeneration;
+fs.appendFileSync(path.join(project, "src", "service.ts"), "\nexport function beta() { return alpha(); }\n");
+const incrementalResult = await workspace.executeWorkspaceReadonlyTool("workspace_symbols", { query: "beta", limit: 20 }, token);
+assert.equal(incrementalResult.locations.some(location => location.symbol === "beta"), true);
+assert.ok(incrementalResult.indexGeneration > firstIndexGeneration);
+
 const globalToken = workspace.sealScopedToolCapability({ scope: "global", scopeId: "global-agent", exactSessionId: "gas-alpha", generation: 1, allowedProjects: ["alpha"] });
 await assert.rejects(() => workspace.executeWorkspaceReadonlyTool("read_file", { project_id: "beta", path: "package.json" }, globalToken), /无权读取项目/);
 const expired = workspace.sealScopedToolCapability({ scope: "project", scopeId: "alpha", exactSessionId: "pchat-alpha", generation: 1, allowedProjects: ["alpha"], issuedAt: "2020-01-01T00:00:00.000Z", expiresAt: "2020-01-01T00:01:00.000Z" });
@@ -54,26 +66,93 @@ const context = mainRuntime.buildMainAgentToolRuntimeContext({
   scopeIdentity: { scope: "project", scopeId: "alpha", exactSessionId: "pchat-alpha", allowedProjects: ["alpha"] },
 });
 assert.equal(context.schema, "ccm-main-agent-tool-runtime-context-v2");
-assert.deepEqual(context.catalog.mcp.filter(tool => tool.server === "ccm__workspace_readonly").map(tool => tool.name).sort(), ["glob_files", "grep_text", "list_directory", "read_file"]);
-assert.equal(context.catalog.discoverableMcp.length, 8);
+assert.deepEqual(context.catalog.loadedMcp.filter(tool => tool.server === "ccm__workspace_readonly").map(tool => tool.name).sort(), ["glob_files", "grep_text", "list_directory", "read_file"]);
+assert.equal(context.catalog.discoverableMcp.length, workspace.WORKSPACE_READONLY_TOOL_DEFINITIONS_V2.length - 4);
 const rejectedBeforeSearch = await mainRuntime.executeMainAgentToolRequests({ requests: [{ name: "read_git_status", arguments: {}, reason: "inspect" }], toolContext: context });
 assert.equal(rejectedBeforeSearch[0].error, "MAIN_AGENT_TOOL_SCHEMA_NOT_LOADED");
 const searchRows = await mainRuntime.executeMainAgentToolRequests({ requests: [{ name: "tool_search", arguments: { query: "Git" }, reason: "inspect" }], toolContext: context });
 assert.equal(searchRows[0].ok, true);
-assert.equal(context.catalog.mcp.some(tool => tool.name === "read_git_status"), true);
+assert.equal(context.catalog.loadedMcp.some(tool => tool.name === "read_git_status"), true);
 assert.match(searchRows[0].output, /inputSchema/);
 assert.match(context.policyPrompt, /CCM ToolSearch 本轮已加载 Schema/);
+
+const fakeTool = (name, readOnlyHint) => ({
+  name,
+  canonicalName: name,
+  server: "selftest",
+  description: name,
+  inputSchema: { type: "object", properties: {} },
+  annotations: { readOnlyHint },
+});
+const fakeContext = {
+  catalog: {
+    mcp: [fakeTool("read_a", true), fakeTool("read_b", true), fakeTool("write_c", false)],
+    loadedMcp: [fakeTool("read_a", true), fakeTool("read_b", true), fakeTool("write_c", false)],
+    discoverableMcp: [],
+    skills: [],
+  },
+  scope: {},
+  capabilityToken: "",
+};
+let activeCalls = 0;
+let maxActiveCalls = 0;
+const executionOrder = [];
+const executeTimed = async name => {
+  activeCalls += 1;
+  maxActiveCalls = Math.max(maxActiveCalls, activeCalls);
+  executionOrder.push(`start:${name}`);
+  await new Promise(resolve => setTimeout(resolve, name === "read_a" ? 25 : 10));
+  executionOrder.push(`end:${name}`);
+  activeCalls -= 1;
+  return { name };
+};
+const parallelRows = await mainRuntime.executeMainAgentToolRequests({
+  requests: [
+    { name: "read_a", arguments: {}, reason: "parallel read" },
+    { name: "read_b", arguments: {}, reason: "parallel read" },
+  ],
+  toolContext: fakeContext,
+  executeToolCall: executeTimed,
+  toolBatchSize: 2,
+  readOnlyParallelism: 2,
+});
+assert.equal(maxActiveCalls, 2);
+assert.deepEqual(parallelRows.map(row => row.name), ["read_a", "read_b"]);
+
+activeCalls = 0;
+maxActiveCalls = 0;
+executionOrder.length = 0;
+const serialRows = await mainRuntime.executeMainAgentToolRequests({
+  requests: [
+    { name: "read_a", arguments: {}, reason: "read before write" },
+    { name: "write_c", arguments: {}, reason: "serialized write" },
+    { name: "read_b", arguments: {}, reason: "read after write" },
+  ],
+  toolContext: fakeContext,
+  executeToolCall: executeTimed,
+  toolBatchSize: 3,
+  readOnlyParallelism: 3,
+});
+assert.equal(maxActiveCalls, 1);
+assert.deepEqual(serialRows.map(row => row.name), ["read_a", "write_c", "read_b"]);
+assert.deepEqual(executionOrder, ["start:read_a", "end:read_a", "start:write_c", "end:write_c", "start:read_b", "end:read_b"]);
 
 const projectSource = fs.readFileSync(path.join(root, "backend", "modules", "projects", "project-main-agent.ts"), "utf8");
 const groupSource = fs.readFileSync(path.join(root, "backend", "modules", "collaboration", "group-orchestrator-llm.ts"), "utf8");
 assert.equal((projectSource.match(/hydrateProjectConfiguredTools\(\{/g) || []).length, 0);
 assert.equal(groupSource.includes('canonicalName: "read_project_source"'), false);
+assert.equal(projectSource.includes("while (true)"), true);
+assert.equal(groupSource.includes("while (true)"), true);
+assert.equal(projectSource.includes("for (let round = 0; round <= loopBudget.maxToolRounds"), false);
+assert.equal(groupSource.includes("for (let round = 0; round <= loopBudget.maxToolRounds"), false);
 
 console.log(JSON.stringify({
   pass: true,
-  tools: 12,
+  tools: workspace.WORKSPACE_READONLY_TOOL_DEFINITIONS_V2.length,
   base_tools: 4,
-  lazy_tools: 8,
+  lazy_tools: workspace.WORKSPACE_READONLY_TOOL_DEFINITIONS_V2.length - 4,
+  semantic_code_intelligence: true,
+  incremental_index_generation: true,
   complete_line_paging: true,
   root_glob_and_sensitive_grep: true,
   sensitive_file_blocked: true,
@@ -81,5 +160,8 @@ console.log(JSON.stringify({
   expired_capability_blocked: true,
   duplicate_project_selector_removed: true,
   group_duplicate_source_schema_removed: true,
+  safe_read_parallelism: true,
+  side_effect_serial_barrier: true,
+  adaptive_project_group_loops: true,
   provider_calls: 0,
 }, null, 2));

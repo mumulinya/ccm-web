@@ -37,6 +37,17 @@ import {
   saveGroupSessionMemoryCustomPrompt,
   saveGroupSessionMemoryCustomTemplate,
 } from "../collaboration/group-session-memory-model-extraction";
+import {
+  applyContextSourceMaintenance,
+  previewContextSourceMaintenance,
+  rollbackContextSourceMaintenance,
+} from "../../system/context-source-history-maintenance";
+import {
+  applyTestAgentMaintenance,
+  previewTestAgentMaintenance,
+  rollbackTestAgentMaintenance,
+} from "../../test-agent/maintenance";
+import { resolveLocalAuthSession } from "../system/local-auth";
 
 function projectSummaries() {
   const longTerm = listJsonFiles(PROJECT_MEMORY_DIR).flatMap(file => {
@@ -184,8 +195,19 @@ function customizationScopeId(value: any) {
 }
 
 export function handleMemoryCenterApi(pathname: string, req: any, res: any, parsed: any): boolean {
-  if (!pathname.startsWith("/api/memory-center/")) return false;
+  if (!pathname.startsWith("/api/memory-center/") && !pathname.startsWith("/api/test-agent/maintenance/")) return false;
   const query = parsed?.query || {};
+  if (pathname.startsWith("/api/test-agent/maintenance/")) {
+    const auth = resolveLocalAuthSession(req);
+    if (!auth) {
+      sendJson(res, { success: false, error: "请先登录", code: "AUTH_REQUIRED" }, 401);
+      return true;
+    }
+    if (auth.user.role !== "admin") {
+      sendJson(res, { success: false, error: "仅管理员可以维护历史 TestAgent 数据", code: "ADMIN_REQUIRED" }, 403);
+      return true;
+    }
+  }
 
   if (pathname === "/api/memory-center/overview" && req.method === "GET") {
     sendJson(res, buildMemoryCenterOverview());
@@ -398,6 +420,54 @@ export function handleMemoryCenterApi(pathname: string, req: any, res: any, pars
       } catch (error: any) {
         sendJson(res, { success: false, error: String(error?.message || error) }, 400);
       }
+    }, error => sendJson(res, { success: false, error: String(error?.message || error) }, 400));
+    return true;
+  }
+
+  if (pathname === "/api/memory-center/context-source-maintenance/preview" && req.method === "POST") {
+    readBody(req, data => {
+      try { sendJson(res, previewContextSourceMaintenance(data)); }
+      catch (error: any) { sendJson(res, { success: false, error: String(error?.message || error) }, 400); }
+    }, error => sendJson(res, { success: false, error: String(error?.message || error) }, 400));
+    return true;
+  }
+
+  if (pathname === "/api/memory-center/context-source-maintenance/apply" && req.method === "POST") {
+    readBody(req, data => {
+      try { sendJson(res, applyContextSourceMaintenance(data)); }
+      catch (error: any) { sendJson(res, { success: false, error: String(error?.message || error) }, 409); }
+    }, error => sendJson(res, { success: false, error: String(error?.message || error) }, 400));
+    return true;
+  }
+
+  if (pathname === "/api/memory-center/context-source-maintenance/rollback" && req.method === "POST") {
+    readBody(req, data => {
+      try { sendJson(res, rollbackContextSourceMaintenance(data)); }
+      catch (error: any) { sendJson(res, { success: false, error: String(error?.message || error) }, 400); }
+    }, error => sendJson(res, { success: false, error: String(error?.message || error) }, 400));
+    return true;
+  }
+
+  if (pathname === "/api/test-agent/maintenance/preview" && req.method === "POST") {
+    readBody(req, data => {
+      try { sendJson(res, previewTestAgentMaintenance(data)); }
+      catch (error: any) { sendJson(res, { success: false, error: String(error?.message || error) }, 400); }
+    }, error => sendJson(res, { success: false, error: String(error?.message || error) }, 400));
+    return true;
+  }
+
+  if (pathname === "/api/test-agent/maintenance/apply" && req.method === "POST") {
+    readBody(req, data => {
+      try { sendJson(res, applyTestAgentMaintenance(data)); }
+      catch (error: any) { sendJson(res, { success: false, error: String(error?.message || error) }, 409); }
+    }, error => sendJson(res, { success: false, error: String(error?.message || error) }, 400));
+    return true;
+  }
+
+  if (pathname === "/api/test-agent/maintenance/rollback" && req.method === "POST") {
+    readBody(req, data => {
+      try { sendJson(res, rollbackTestAgentMaintenance(data)); }
+      catch (error: any) { sendJson(res, { success: false, error: String(error?.message || error) }, 400); }
     }, error => sendJson(res, { success: false, error: String(error?.message || error) }, 400));
     return true;
   }

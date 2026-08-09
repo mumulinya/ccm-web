@@ -55,6 +55,7 @@ const crypto = __importStar(require("crypto"));
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const utils_1 = require("../../core/utils");
+const context_source_tool_result_projection_1 = require("../../system/context-source-tool-result-projection");
 const RUNTIME_DIR = path.join(utils_1.CCM_DIR, "global-agent-runtime");
 const PERMISSIONS_FILE = path.join(RUNTIME_DIR, "permissions.json");
 const HOOKS_FILE = path.join(RUNTIME_DIR, "hooks.json");
@@ -368,16 +369,19 @@ function markGlobalAgentToolTodo(run, tool, status, text = "") {
     return state.todos;
 }
 function recordGlobalAgentRuntimeOutput(run, event) {
+    const persistedEvent = ["tool_completed", "clarification_required"].includes(String(event?.type || ""))
+        ? { ...event, observation: (0, context_source_tool_result_projection_1.projectContextSourceToolResultForPersistence)(event?.sourceToolName || event?.source_tool_name || event?.tool, event?.observation) }
+        : event;
     if (["tool_started", "tool_completed", "tool_failed", "clarification_required"].includes(String(event?.type || ""))) {
         try {
-            globalExecutionEventSink?.(run, event);
+            globalExecutionEventSink?.(run, persistedEvent);
         }
         catch (error) {
             console.warn(`[全局执行账本] 工具事件写入失败 (${run.session_id || ""})：${error?.message || error}`);
         }
     }
     const state = getRunState(run);
-    state.output.push({ at: now(), ...compact(event, 3000) });
+    state.output.push({ at: now(), ...compact(persistedEvent, 3000) });
     state.output = state.output.slice(-MAX_OUTPUT_ITEMS);
     state.status = run.status;
     state.updated_at = now();

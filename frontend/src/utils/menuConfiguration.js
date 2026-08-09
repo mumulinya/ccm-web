@@ -22,6 +22,7 @@ export const DEFAULT_MENU_ASSIGNMENTS = {
   groups: 'collab',
   tasks: 'collab',
   'trace-replay': 'collab',
+  'code-intelligence': 'dev',
   autodev: 'collab',
   tools: 'dev',
   changes: 'dev',

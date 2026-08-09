@@ -11,8 +11,10 @@ if (process.argv.includes('--child')) {
   const home = path.join(os.homedir(), '.cc-connect')
   fs.mkdirSync(home, { recursive: true })
   const {
+    generateProvisionalSessionTitle,
     generateSessionTitleWithModel,
     isMeaningfulSessionTitleInput,
+    isSessionTitleAutoReplaceable,
     isSessionTitlePlaceholder,
   } = await import('../ccm-package/dist/system/session-title.js')
 
@@ -26,6 +28,12 @@ if (process.argv.includes('--child')) {
 
   const storage = await import('../ccm-package/dist/modules/collaboration/storage.js')
   const group = storage.createGroupChatSession('group-title-test', '新会话')
+  storage.appendGroupMessage('group-title-test', {
+    id: 'gu1', role: 'user', content: '帮我修复登录页权限校验', timestamp: '2026-07-18T10:00:00.000Z', session_id: group.id,
+  })
+  const groupProvisional = storage.listGroupChatSessions('group-title-test').sessions.find(item => item.id === group.id)
+  assert.equal(groupProvisional.title, '修复登录页权限校验')
+  assert.equal(groupProvisional.titleOrigin, 'provisional')
   storage.saveGroupMessages('group-title-test', [
     { id: 'gu1', role: 'user', content: '帮我修复登录页权限校验', timestamp: '2026-07-18T10:00:00.000Z' },
     { id: 'ga1', role: 'assistant', content: '已完成权限校验修复并通过测试', timestamp: '2026-07-18T10:00:05.000Z' },
@@ -48,6 +56,11 @@ if (process.argv.includes('--child')) {
     ],
   }, null, 2))
   const projects = await import('../ccm-package/dist/modules/projects/sessions.js')
+  const projectProvisional = projects.applyProjectSessionProvisionalTitle('project-title-test', 's1', {
+    role: 'user', content: '帮我修复登录页权限校验',
+  })
+  assert.equal(projectProvisional.renamed, true)
+  assert.equal(projectProvisional.name, '修复登录页权限校验')
   const projectResult = await projects.scheduleProjectSessionAutoTitle('project-title-test', 's1', { modelCall })
   const projectSession = JSON.parse(fs.readFileSync(path.join(projectDir, 's1.json'), 'utf8'))
   assert.equal(projectResult.renamed, true)
@@ -69,8 +82,11 @@ if (process.argv.includes('--child')) {
     GLOBAL_AGENT_HISTORY_LIMIT: 80,
     GLOBAL_AGENT_SESSION_LIMIT: 30,
     buildGlobalVisibleReplyContent: ({ value }) => ({ text: String(value || ''), technical_content: '' }),
+    generateProvisionalSessionTitle,
     generateSessionTitle: input => generateSessionTitleWithModel(input, { modelCall }),
     ingestGlobalAgentConversation: () => {},
+    isMeaningfulSessionTitleInput,
+    isSessionTitleAutoReplaceable,
     isSessionTitlePlaceholder,
     writeGlobalJsonAtomic: (file, value) => fs.writeFileSync(file, JSON.stringify(value, null, 2)),
   })
@@ -79,6 +95,19 @@ if (process.argv.includes('--child')) {
     sessions: [{
       id: 'global-s1', name: '新会话', titleOrigin: 'placeholder', messages: [
         { role: 'user', content: '帮我修复登录页权限校验', timestamp: '2026-07-18T10:00:00.000Z' },
+      ],
+    }],
+  })
+  const globalProvisional = runtime.loadGlobalAgentHistoryStore().sessions.find(item => item.id === 'global-s1')
+  assert.equal(globalProvisional.name, '修复登录页权限校验')
+  assert.equal(globalProvisional.titleOrigin, 'provisional')
+  await new Promise(resolve => setImmediate(resolve))
+  runtime.syncGlobalAgentWebHistory({
+    currentSessionId: 'global-s1',
+    sessions: [{
+      ...globalProvisional,
+      messages: [
+        ...globalProvisional.messages,
         { role: 'assistant', content: '已完成权限校验修复并通过测试', timestamp: '2026-07-18T10:00:05.000Z' },
       ],
     }],
@@ -106,10 +135,13 @@ if (process.argv.includes('--child')) {
     modelCall: async () => { throw new Error('mock unavailable') },
   })
   assert.equal(fallback.source, 'fallback')
+  assert.equal(generateProvisionalSessionTitle({ scope: 'global', userMessage: '帮我新增订单导出功能' }).source, 'provisional')
+  assert.equal(isSessionTitleAutoReplaceable('订单导出功能', 'provisional'), true)
+  assert.equal(isSessionTitleAutoReplaceable('用户标题', 'manual'), false)
   assert.equal(isMeaningfulSessionTitleInput('111'), false)
   assert.equal(isMeaningfulSessionTitleInput('修复登录页'), true)
   assert.equal(modelCalls, 3)
-  console.log(JSON.stringify({ pass: true, checks: 23, modelCalls, paidProviderCalls: 0 }))
+  console.log(JSON.stringify({ pass: true, checks: 33, modelCalls, paidProviderCalls: 0 }))
   process.exit(0)
 }
 
@@ -119,6 +151,7 @@ const projectSessions = fs.readFileSync(new URL('../backend/modules/projects/ses
 assert.doesNotMatch(globalMessaging, /nameSource\.slice/)
 assert.match(globalSessions, /titleOrigin: 'placeholder'/)
 assert.match(globalSessions, /serverSession\.titleOrigin/)
+assert.match(globalSessions, /sessionTitleRank\(serverSession\.name/)
 assert.doesNotMatch(projectSessions, /claude -p/)
 
 const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'ccm-session-auto-title-'))
@@ -132,7 +165,7 @@ try {
   assert.equal(child.status, 0, child.stderr || child.stdout)
   const result = JSON.parse(String(child.stdout || '').trim().split(/\r?\n/).at(-1))
   assert.equal(result.pass, true)
-  console.log(JSON.stringify({ pass: true, checks: result.checks + 4, scopes: ['global', 'group', 'project'], paidProviderCalls: 0 }, null, 2))
+  console.log(JSON.stringify({ pass: true, checks: result.checks + 5, scopes: ['global', 'group', 'project'], paidProviderCalls: 0 }, null, 2))
 } finally {
   fs.rmSync(tempHome, { recursive: true, force: true })
 }

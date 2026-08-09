@@ -3,6 +3,7 @@ import { buildGlobalAgentToolDefinitions } from "./runtime";
 import { buildModelSelectableSkillCatalog, buildRoleSkillPrompt } from "../../skills/role-skills";
 import { captureReasoningFacts, type AgentReasoningState } from "../reasoning-loop";
 import { WORKFLOW_DECISION_GUIDANCE, normalizeWorkflowDecision } from "../workflow-decision";
+import { CONVERSATIONAL_REPLY_STYLE_GUIDANCE } from "../conversational-reply-style";
 import type { GlobalAgentDecision, GlobalAgentDecisionState, GlobalAgentLoopRuntime, GlobalAgentRun } from "./loop";
 import { WORKSPACE_READONLY_TOOL_DEFINITIONS_V2 } from "../../tools/workspace-readonly-tools";
 
@@ -244,6 +245,8 @@ export async function buildGlobalAgentModelMessages(run: GlobalAgentRun, runtime
   const system = `你是 CCM 全局 Agent 的决策内核。你不是关键词触发器，而是根据用户完整语义、真实系统上下文和工具观察结果决定下一步。
 
 ${WORKFLOW_DECISION_GUIDANCE}
+
+${CONVERSATIONAL_REPLY_STYLE_GUIDANCE}
 
 每轮必须输出 workflowDecision。它决定本轮是直接回答、只读项目分析、直接执行、先计划还是拆 Epic。附件和 URL 只提供上下文，绝不能自动触发拆解。
 

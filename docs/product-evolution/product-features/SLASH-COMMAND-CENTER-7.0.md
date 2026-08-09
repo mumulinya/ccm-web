@@ -51,6 +51,7 @@ CCM 对齐这些设计思想，但没有复制 Claude Code 的 React/Ink UI 或�
 - `/retry`、`/resume`、`/recover` 明确要求读取真实回执、Trace 与检查点，不能把“重新发一句话”伪装成原生恢复。
 - 未知命令不会作为普通消息悄悄发送给模型。
 - 审计只记录命令名、作用域、风险、动作类型、上下文标识和是否有参数，不记录参数正文，避免敏感内容进入命令日志。
+- `/mcp`与`/skills`解析后会携带精确`global/project/group`参数，由目录接口按当前作用域授权过滤；工具管理页继续使用无作用域接口读取完整注册目录。
 
 审计文件：`C:\Users\admin\.cc-connect\logs\slash-command-audit.jsonl`。
 

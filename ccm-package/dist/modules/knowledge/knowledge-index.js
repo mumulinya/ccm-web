@@ -264,6 +264,9 @@ function splitLongUnit(text, heading) {
 function markdownUnits(content) {
     const lines = content.split("\n");
     const units = [];
+    // headingStack 按标题层级保留祖先标题，heading 记录完整路径（如"安装 › 环境变量配置"），
+    // 而不是只记录最近一级标题——这样引用和检索都能看到分片所在的完整上下文位置。
+    const headingStack = [];
     let heading = "";
     let buffer = [];
     let inFence = false;
@@ -279,7 +282,10 @@ function markdownUnits(content) {
         const headingMatch = !inFence ? line.match(/^\s{0,3}(#{1,6})\s+(.+?)\s*$/) : null;
         if (headingMatch) {
             flush();
-            heading = headingMatch[2].trim();
+            const level = headingMatch[1].length;
+            headingStack.length = level - 1;
+            headingStack[level - 1] = headingMatch[2].trim();
+            heading = headingStack.filter(Boolean).join(" › ").slice(0, 200);
             buffer.push(line);
             continue;
         }
@@ -355,6 +361,22 @@ function formatAwareChunkText(content, extension = ".txt") {
             flush();
     }
     flush();
+    // 相邻分片之间补一段重叠尾部：答案跨越两个 chunk 边界时，靠这段重叠内容
+    // 也能被单个 chunk 命中，避免只召回半句话。charStart/charEnd 不受影响，
+    // 仍然表示这个 chunk 自己的主内容范围，重叠只追加进 text 里辅助召回。
+    // 从后往前遍历保证读取 chunks[i-1] 时它还是未被重叠追加过的原始文本。
+    const OVERLAP_CHARS = 140;
+    for (let index = chunks.length - 1; index > 0; index--) {
+        const previousText = chunks[index - 1].text;
+        if (!previousText)
+            continue;
+        const window = previousText.slice(-OVERLAP_CHARS);
+        const boundary = Math.max(window.indexOf("\n"), window.indexOf("。"), window.indexOf(". "));
+        const tail = (boundary > 0 ? window.slice(boundary + 1) : window).trim();
+        if (tail && !chunks[index].text.startsWith(tail)) {
+            chunks[index].text = `${tail}\n\n${chunks[index].text}`;
+        }
+    }
     return chunks;
 }
 function serializeChunk(chunk) {
@@ -581,8 +603,11 @@ async function buildDocumentChunks(filename, content, scope, domain, embeddingCo
         const tf = {};
         for (const token of tokens)
             tf[token] = (tf[token] || 0) + 1;
+        // 引用 ID 用内容短哈希而不是纯顺序号：文档开头插入新内容会让后面所有分片的顺序号
+        // 整体偏移，导致历史引用（[source:文件名#N]）全部失效。只要分片内容本身没变，
+        // 它的引用标识就不随其他分片的增删而改变；顺序号仅在极小概率哈希冲突时兜底区分。
         chunks.push({
-            id: `${filename}#${index}`,
+            id: `${filename}#${(0, knowledge_files_1.sha256)(`${piece.heading}\n${piece.text}`).slice(0, 10)}_${index}`,
             filename,
             index,
             domain,
@@ -645,7 +670,9 @@ async function performRebuild(reason) {
     for (const filename of files) {
         const filePath = (0, knowledge_files_1.resolveKnowledgeFile)(filename, true);
         const stat = fs.statSync(filePath);
-        const fileHash = metadata[filename]?.content_hash || (0, knowledge_files_1.sha256)(fs.readFileSync(filePath));
+        // 必须每次都从磁盘真实内容计算hash，不能信任metadata里存的旧值：
+        // 监控目录里的文件可能在CCM未运行期间被外部修改，metadata不会自动更新。
+        const fileHash = (0, knowledge_files_1.sha256)(fs.readFileSync(filePath));
         const scope = metadata[filename]?.scope || { type: "global", id: "" };
         const domain = metadata[filename]?.domain || scope.id || scope.type || "global";
         const cached = previousCache.entries[filename];
@@ -853,27 +880,36 @@ function getParsedKnowledgeDocument(filename) {
     (0, knowledge_files_1.resolveKnowledgeFile)(filename, true);
     return documentContent.get(filename) || null;
 }
-function matchesScope(chunk, options) {
+function matchesScope(scope, options) {
     const scopeType = String(options.scopeType || "").trim().toLowerCase();
     if (!scopeType || scopeType === "all")
         return true;
-    if (chunk.scope.type === scopeType && (!options.scopeId || chunk.scope.id === options.scopeId))
+    if (scope.type === scopeType && (!options.scopeId || scope.id === options.scopeId))
         return true;
-    return options.includeGlobal !== false && scopeType !== "global" && chunk.scope.type === "global";
+    return options.includeGlobal !== false && scopeType !== "global" && scope.type === "global";
 }
+// 范围、可见性和"文档是否仍存在"必须以当前 metadata 为准，而不是索引构建那一刻缓存在
+// chunk 上的旧值：否则删除文档、收紧范围或改为受限后，只要重建尚未完成或失败，
+// 检索仍会命中已删除/已变更权限的分片。metadata 的删除与更新都是同步生效的，
+// 这样做不需要额外的 tombstone 机制。
 function eligibleKnowledgeChunks(options = {}) {
     const metadata = (0, knowledge_files_1.loadKnowledgeMetadata)();
     return documentChunks.filter(chunk => {
+        const current = metadata[chunk.filename];
+        if (!current)
+            return false; // 文档已被删除，索引尚未刷新
         if (options.filename && chunk.filename !== options.filename)
             return false;
         if (Array.isArray(options.filenames) && !options.filenames.includes(chunk.filename))
             return false;
-        if (options.domain && chunk.domain !== options.domain)
+        const scope = current.scope || chunk.scope;
+        const domain = current.domain || chunk.domain;
+        if (options.domain && domain !== options.domain)
             return false;
-        if (!matchesScope(chunk, options))
+        if (!matchesScope(scope, options))
             return false;
         if (options.tags?.length) {
-            const tags = metadata[chunk.filename]?.tags || [];
+            const tags = current.tags || [];
             if (!options.tags.some(tag => tags.includes(tag)))
                 return false;
         }
@@ -1038,7 +1074,8 @@ function runKnowledgeIndexSelfTest() {
     const markdown = "# 安装\n\n第一步安装依赖。\n\n## 验证\n\n运行 npm test 验证。";
     const chunks = formatAwareChunkText(markdown, ".md");
     return {
-        pass: chunks.length >= 2 && chunks.some(chunk => chunk.heading === "安装") && chunks.some(chunk => chunk.heading === "验证"),
+        // heading 现在是完整标题路径（父级 › 子级），二级标题下的分片应带上一级标题前缀。
+        pass: chunks.length >= 2 && chunks.some(chunk => chunk.heading === "安装") && chunks.some(chunk => chunk.heading === "安装 › 验证"),
         chunks,
     };
 }

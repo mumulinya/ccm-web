@@ -147,7 +147,9 @@ const addWatchPath = async payload => {
   try {
     const data = await readJson(await fetch('/api/rag/watch-paths', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }))
     watchPaths.value = data.paths || []
-    toast.success(data.message || '同步目录已添加')
+    await loadDocuments()
+    const sync = data.sync || {}
+    toast.success(`已扫描 ${sync.files ?? 0} 个文件，导入 ${sync.synced ?? 0} 个，跳过 ${sync.skipped ?? 0} 个${sync.removed ? `，清理 ${sync.removed} 个已消失的文件` : ''}`)
   } catch (error) {
     toast.error(error?.message || '添加同步目录失败')
   } finally {

@@ -46,6 +46,9 @@ const tool_authorization_1 = require("./tool-authorization");
 const tool_manager_1 = require("./tool-manager");
 const workspace_readonly_tools_1 = require("./workspace-readonly-tools");
 const main_agent_post_compact_continuity_1 = require("../system/main-agent-post-compact-continuity");
+const main_agent_context_policy_1 = require("./main-agent-context-policy");
+const tool_search_index_1 = require("./tool-search-index");
+const skill_fork_runtime_1 = require("../system/skill-fork-runtime");
 exports.MAIN_AGENT_NATIVE_TOOLS_V2 = [
     { name: "ask_user_question", description: "向当前精确会话提出结构化澄清问题。", loadPolicy: "base", sideEffect: "orchestrator_control" },
     { name: "update_todo", description: "更新当前Run的计划步骤和进度。", loadPolicy: "base", sideEffect: "orchestrator_control" },
@@ -69,9 +72,13 @@ function isMainAgentReadOnlyMcpTool(tool) {
     const name = String(tool?.name || "").trim();
     if (!name)
         return false;
-    return annotations.readOnlyHint === true && (["official", "approved"].includes(String(tool?.serverTrust || "")) || tool?.origin === "internal");
+    const trust = String(tool?.serverTrust || "").trim().toLowerCase();
+    return annotations.readOnlyHint === true
+        && !["blocked", "denied", "untrusted"].includes(trust);
 }
 function buildMainAgentToolRuntimeContext(input) {
+    const contextPolicy = (0, main_agent_context_policy_1.readMainAgentContextPolicy)(input.contextPolicy || {});
+    const contextWindow = Math.max(32_000, Math.floor(Number(input.contextWindow || 200_000)));
     const configured = (0, tool_authorization_1.normalizeToolAuthorization)(input.configuredTools || {});
     const executionSkills = uniqueNames(input.executionSkills || []);
     const effective = (0, tool_authorization_1.normalizeToolAuthorization)({
@@ -88,9 +95,40 @@ function buildMainAgentToolRuntimeContext(input) {
         exactSessionId: input.scopeIdentity.exactSessionId,
         generation: Number(input.scopeIdentity.generation || 0),
     }) : undefined;
-    const restored = continuityIdentity
-        ? (0, main_agent_post_compact_continuity_1.restoreMainAgentPostCompactContext)({ identity: continuityIdentity, scope })
+    const skillCatalogTargetTokens = Math.max(1, Math.floor(contextWindow * contextPolicy.skillCatalogBudgetPercent / 100));
+    const contextSourceCatalogTargetTokens = Math.max(1, Math.floor(contextWindow * contextPolicy.contextSourceCatalogBudgetPercent / 100));
+    const contextSourceHydrationNominalTokens = Math.max(1, Math.floor(contextWindow * contextPolicy.contextSourceHydrationBudgetPercent / 100));
+    const reserveInput = input.contextReservedTokens || {};
+    const reservedTokenBudget = {
+        system: Math.max(0, Math.floor(Number(reserveInput.system ?? 4_000))),
+        summary: Math.max(0, Math.floor(Number(reserveInput.summary ?? 4_000))),
+        currentUser: (0, context_budget_1.estimateTextTokens)(typeof input.currentUserInput === "string" ? input.currentUserInput : JSON.stringify(input.currentUserInput ?? "")),
+        output: Math.max(0, Math.floor(Number(reserveInput.output ?? Math.max(4_096, Math.min(16_000, contextWindow * 0.05))))),
+        safety: Math.max(0, Math.floor(Number(reserveInput.safety ?? Math.max(2_048, contextWindow * 0.02)))),
+    };
+    const fixedReservedTokens = Object.values(reservedTokenBudget).reduce((sum, value) => sum + value, 0);
+    const dynamicRestoreCapacity = Math.max(0, contextWindow - fixedReservedTokens - skillCatalogTargetTokens - contextSourceCatalogTargetTokens);
+    let restored = continuityIdentity
+        ? (0, main_agent_post_compact_continuity_1.restoreMainAgentPostCompactContext)({
+            identity: continuityIdentity,
+            scope,
+            maxPerSkillTokens: contextPolicy.postCompactSkillPerItemMaxTokens,
+            maxTotalSkillTokens: Math.min(contextPolicy.postCompactSkillTotalMaxTokens, dynamicRestoreCapacity),
+            maxTotalMcpSchemaTokens: dynamicRestoreCapacity,
+        })
         : null;
+    if (continuityIdentity && restored) {
+        const skillCapacityAfterMcp = Math.max(0, dynamicRestoreCapacity - Number(restored.receipt.restoredMcpSchemaTokens || 0));
+        if (Number(restored.receipt.restoredSkillTokens || 0) > skillCapacityAfterMcp) {
+            restored = (0, main_agent_post_compact_continuity_1.restoreMainAgentPostCompactContext)({
+                identity: continuityIdentity,
+                scope,
+                maxPerSkillTokens: contextPolicy.postCompactSkillPerItemMaxTokens,
+                maxTotalSkillTokens: Math.min(contextPolicy.postCompactSkillTotalMaxTokens, skillCapacityAfterMcp),
+                maxTotalMcpSchemaTokens: dynamicRestoreCapacity,
+            });
+        }
+    }
     const capabilityToken = input.scopeIdentity ? (0, workspace_readonly_tools_1.sealScopedToolCapability)({
         scope: input.scopeIdentity.scope,
         scopeId: input.scopeIdentity.scopeId,
@@ -108,8 +146,36 @@ function buildMainAgentToolRuntimeContext(input) {
     const configuredAlwaysLoaded = configuredMcp.filter((tool) => tool?.alwaysLoad === true);
     const configuredPreviouslyLoaded = configuredMcp.filter((tool) => requestedLoaded.has(String(tool?.canonicalName || "")) || requestedLoaded.has(String(tool?.name || "")));
     const loadedConfiguredNames = new Set([...configuredAlwaysLoaded, ...configuredPreviouslyLoaded].map((tool) => String(tool?.canonicalName || "")));
-    const mcp = [...workspaceBase, ...configuredMcp.filter((tool) => loadedConfiguredNames.has(String(tool?.canonicalName || "")))];
-    const discoverableMcp = [...workspaceSearch, ...configuredMcp.filter((tool) => !loadedConfiguredNames.has(String(tool?.canonicalName || "")))];
+    const workspacePreviouslyLoaded = workspaceSearch.filter((tool) => requestedLoaded.has(String(tool?.canonicalName || "")) || requestedLoaded.has(String(tool?.name || "")));
+    const loadedWorkspaceNames = new Set(workspacePreviouslyLoaded.map((tool) => String(tool?.canonicalName || tool?.name || "")));
+    const optionalMcp = [
+        ...workspaceSearch.filter((tool) => !loadedWorkspaceNames.has(String(tool?.canonicalName || tool?.name || ""))),
+        ...configuredMcp.filter((tool) => !loadedConfiguredNames.has(String(tool?.canonicalName || ""))),
+    ];
+    const optionalMcpTokens = optionalMcp.reduce((sum, tool) => sum + (0, main_agent_context_policy_1.estimateMcpToolDefinitionTokens)(tool), 0);
+    const mcpLoading = (0, main_agent_context_policy_1.resolveMcpToolLoadingDecision)(contextPolicy, contextWindow, optionalMcpTokens);
+    const autoThresholdTokens = mcpLoading.autoThresholdTokens;
+    const priorityMcp = [
+        ...workspaceBase,
+        ...workspacePreviouslyLoaded,
+        ...configuredMcp.filter((tool) => loadedConfiguredNames.has(String(tool?.canonicalName || ""))),
+    ];
+    const priorityMcpTokens = priorityMcp.reduce((sum, tool) => sum + (0, main_agent_context_policy_1.estimateMcpToolDefinitionTokens)(tool), 0);
+    const finalInlineTokens = fixedReservedTokens
+        + skillCatalogTargetTokens
+        + contextSourceCatalogTargetTokens
+        + Number(restored?.receipt?.restoredSkillTokens || 0)
+        + priorityMcpTokens
+        + optionalMcpTokens;
+    const inlineSafetyDowngraded = mcpLoading.safetyDowngraded || (mcpLoading.inline && finalInlineTokens > contextWindow);
+    const loadOptionalMcp = mcpLoading.inline && !inlineSafetyDowngraded;
+    const mcp = [
+        ...workspaceBase,
+        ...workspacePreviouslyLoaded,
+        ...configuredMcp.filter((tool) => loadedConfiguredNames.has(String(tool?.canonicalName || ""))),
+        ...(loadOptionalMcp ? optionalMcp : []),
+    ];
+    const discoverableMcp = loadOptionalMcp ? [] : optionalMcp;
     const rejectedMcp = readOnly ? scoped.tools.filter(tool => !isMainAgentReadOnlyMcpTool(tool)) : [];
     const toolAudit = tool_manager_1.toolManager.buildScopeAudit(scope);
     const label = String(input.label || "主 Agent");
@@ -127,10 +193,14 @@ function buildMainAgentToolRuntimeContext(input) {
         ...discoverableMcp.map(tool => `- ${tool.canonicalName || tool.name}`),
         "这些名称仅用于发现，不代表 Schema 已进入本轮上下文。调用前必须先使用 tool_search；tool_search 返回的完整 Schema 会保留在当前 Run 的后续轮次。",
     ].join("\n") : "";
-    const skillPrompt = scoped.skills.length ? [
-        `${label}已授权的 Skill：`,
-        ...scoped.skills.map(skill => `- ${skill.name}: ${skill.description || "未提供描述"}; hash=${skill.contentHash || ""}`),
-    ].join("\n") : "";
+    const skillCatalog = (0, main_agent_context_policy_1.buildDynamicSkillCatalogPrompt)({
+        label,
+        skills: scoped.skills,
+        contextWindow,
+        budgetPercent: contextPolicy.skillCatalogBudgetPercent,
+        recentlyInvokedSkillNames: restored?.skillAttachments?.map((item) => String(item?.name || "")) || [],
+    });
+    const skillPrompt = skillCatalog.prompt;
     const unavailable = [
         ...(Array.isArray(toolAudit?.missing_mcp_servers) ? toolAudit.missing_mcp_servers : []),
         ...(Array.isArray(toolAudit?.missing_mcp_tools) ? toolAudit.missing_mcp_tools : []),
@@ -145,18 +215,51 @@ function buildMainAgentToolRuntimeContext(input) {
         rejectedMcp.length ? `以下 MCP 可能写入或产生副作用，不向${label}开放：${rejectedMcp.map(tool => tool.canonicalName).join(", ")}` : "",
         unavailable.length ? "部分已配置工具当前不可用；不得声称已经调用。" : "",
         discoverableMcp.length ? `延迟工具不会预先占用完整 Schema Token；需要时先调用 tool_search，按名称或能力描述加载。` : "",
+        inlineSafetyDowngraded ? `MCP完整定义超过本轮安全容量，已从${contextPolicy.mcpToolLoadingMode}安全降级为deferred。` : "",
         `需要工具数据时在 toolRequests 中请求。MCP优先使用上面列出的 canonicalName；CCM内部只读工具也接受短名称。Skill只能使用 invoke_skill，并在 arguments.name 中填写已列出的 Skill。工具结果由CCM执行后重新交给模型，不得把请求本身视为完成。`,
     ].filter(Boolean).join("\n\n");
-    const checksum = crypto.createHash("sha256").update(JSON.stringify({ effective, mcp: mcp.map((row) => ({ name: row.canonicalName, checksum: row.checksum || "" })), discoverable: discoverableMcp.map((row) => ({ name: row.canonicalName, checksum: row.checksum || "" })), skills: scoped.skills.map(row => row.name), auditContext: scope.auditContext || {}, scopeIdentity: continuityIdentity || null, restore: restored?.receipt?.checksum || "" })).digest("hex");
+    const contextBudget = {
+        contextWindow,
+        reservedTokenBudget,
+        fixedReservedTokens,
+        dynamicRestoreCapacity,
+        mcpLoadingMode: contextPolicy.mcpToolLoadingMode,
+        mcpOptionalDefinitionTokens: optionalMcpTokens,
+        mcpAutoThresholdTokens: autoThresholdTokens,
+        mcpInline: loadOptionalMcp,
+        mcpSafetyDowngraded: inlineSafetyDowngraded,
+        skillCatalogTargetTokens: skillCatalog.targetTokens,
+        skillCatalogActualTokens: skillCatalog.actualTokens,
+        skillCatalogNameOnlyTokens: skillCatalog.nameOnlyTokens,
+        skillCatalogBudgetOverrun: skillCatalog.budgetOverrun,
+        skillCatalogDescribedCount: skillCatalog.describedCount,
+        skillCatalogNameOnlyCount: skillCatalog.nameOnlyCount,
+        contextSourceCatalogTargetTokens,
+        contextSourceHydrationTargetTokens: Math.min(contextSourceHydrationNominalTokens, Math.max(0, contextWindow - finalInlineTokens)),
+        postCompactSourcePerItemMaxTokens: contextPolicy.postCompactSourcePerItemMaxTokens,
+        postCompactSourceTotalMaxTokens: Math.min(contextPolicy.postCompactSourceTotalMaxTokens, Math.max(0, contextWindow - finalInlineTokens)),
+        restoredSkillTokens: Number(restored?.receipt?.restoredSkillTokens || 0),
+        restoredMcpSchemaTokens: Number(restored?.receipt?.restoredMcpSchemaTokens || 0),
+        priorityMcpSchemaTokens: priorityMcpTokens,
+        finalSafetyRemainingTokens: Math.max(0, contextWindow - fixedReservedTokens - skillCatalog.actualTokens - contextSourceCatalogTargetTokens - Number(restored?.receipt?.restoredSkillTokens || 0) - priorityMcpTokens - (loadOptionalMcp ? optionalMcpTokens : 0)),
+    };
+    const checksum = crypto.createHash("sha256").update(JSON.stringify({ effective, contextPolicy, contextBudget, mcp: mcp.map((row) => ({ name: row.canonicalName, checksum: row.checksum || "" })), discoverable: discoverableMcp.map((row) => ({ name: row.canonicalName, checksum: row.checksum || "" })), skills: scoped.skills.map(row => row.name), auditContext: scope.auditContext || {}, scopeIdentity: continuityIdentity || null, restore: restored?.receipt?.checksum || "" })).digest("hex");
     return {
         schema: "ccm-main-agent-tool-runtime-context-v2",
         scope,
         configured,
         executionSkills,
         effective,
-        catalog: { mcp, skills: scoped.skills, rejectedMcp, discoverableMcp, native: exports.MAIN_AGENT_NATIVE_TOOLS_V2 },
+        catalog: {
+            mcp: configuredMcp,
+            loadedMcp: mcp,
+            skills: scoped.skills,
+            rejectedMcp,
+            discoverableMcp,
+            native: exports.MAIN_AGENT_NATIVE_TOOLS_V2,
+        },
         toolAudit,
-        mcpPrompt,
+        mcpPrompt: [mcpPrompt, deferredMcpPrompt].filter(Boolean).join("\n\n"),
         skillPrompt,
         policyPrompt,
         checksum,
@@ -167,15 +270,24 @@ function buildMainAgentToolRuntimeContext(input) {
         scopeIdentity: continuityIdentity,
         restoredSkillAttachments: restored?.skillAttachments || [],
         postCompactRestoreReceipt: restored?.receipt,
+        contextPolicy,
+        contextBudget,
     };
 }
 function refreshMainAgentToolPromptState(toolContext) {
     const label = String(toolContext.scope.auditContext?.runtime || "主 Agent");
-    toolContext.mcpPrompt = toolContext.catalog.mcp.length ? [
+    const loadedMcp = toolContext.catalog.loadedMcp || toolContext.catalog.mcp;
+    const loadedPrompt = loadedMcp.length ? [
         `${label}当前已加载 Schema 的 MCP 工具（必须使用 canonicalName）：`,
-        ...toolContext.catalog.mcp.map((tool) => `- ${tool.canonicalName}: ${tool.description || tool.name}; 参数 Schema=${JSON.stringify(tool.inputSchema || {})}`),
+        ...loadedMcp.map((tool) => `- ${tool.canonicalName}: ${tool.description || tool.name}; 参数 Schema=${JSON.stringify(tool.inputSchema || {})}`),
     ].join("\n") : "";
-    toolContext.loadedToolNames = uniqueNames(toolContext.catalog.mcp.map((tool) => tool.canonicalName || tool.name));
+    const deferredPrompt = (toolContext.catalog.discoverableMcp || []).length ? [
+        `${label}已授权但尚未加载 Schema 的 MCP/低频工具：`,
+        ...(toolContext.catalog.discoverableMcp || []).map((tool) => `- ${tool.canonicalName || tool.name}`),
+        "调用前必须先使用 tool_search 加载完整功能说明和参数 Schema。",
+    ].join("\n") : "";
+    toolContext.mcpPrompt = [loadedPrompt, deferredPrompt].filter(Boolean).join("\n\n");
+    toolContext.loadedToolNames = uniqueNames(loadedMcp.map((tool) => tool.canonicalName || tool.name));
     toolContext.deferredToolNames = uniqueNames((toolContext.catalog.discoverableMcp || []).map((tool) => tool.canonicalName || tool.name));
     const marker = "[CCM ToolSearch 本轮已加载 Schema]";
     toolContext.policyPrompt = `${String(toolContext.policyPrompt || "").split(marker)[0].trim()}\n\n${marker}\n${toolContext.mcpPrompt}`.trim();
@@ -251,7 +363,7 @@ function buildMainAgentLoadedContextItems(toolContext, results = [], additionalS
             };
         }),
     ].filter(item => item.name);
-    const mcp = toolContext.catalog.mcp.map((tool) => ({
+    const mcp = (toolContext.catalog.loadedMcp || toolContext.catalog.mcp).map((tool) => ({
         kind: "mcp",
         name: String(tool?.canonicalName || tool?.name || ""),
         aliases: [
@@ -282,34 +394,35 @@ function buildMainAgentLoadedContextItems(toolContext, results = [], additionalS
     return { schema: "ccm-loaded-context-items-v1", skills, mcp, invocations };
 }
 async function executeMainAgentToolRequests(input) {
-    const workspaceTools = [...input.toolContext.catalog.mcp, ...(input.toolContext.catalog.discoverableMcp || [])]
+    const loadedMcp = input.toolContext.catalog.loadedMcp || input.toolContext.catalog.mcp;
+    const workspaceTools = [...input.toolContext.catalog.mcp, ...loadedMcp, ...(input.toolContext.catalog.discoverableMcp || [])]
         .filter((tool) => tool?.server === "ccm__workspace_readonly");
     const workspaceByName = new Map();
     for (const tool of workspaceTools) {
         workspaceByName.set(String(tool.name || ""), tool);
         workspaceByName.set(String(tool.canonicalName || ""), tool);
     }
-    const allowedMcp = new Set(input.toolContext.catalog.mcp.map(tool => tool.canonicalName));
+    const allowedMcp = new Set(loadedMcp.map(tool => tool.canonicalName));
     const allowedSkills = new Set(input.toolContext.catalog.skills.map(skill => skill.name));
     const execute = input.executeToolCall || ((name, args, scope) => tool_manager_1.toolManager.executeToolCall(name, args, scope));
-    const results = [];
-    for (const request of input.requests.slice(0, 2)) {
+    const batchSize = Math.max(1, Math.min(8, Math.floor(Number(input.toolBatchSize || 2))));
+    const readOnlyParallelism = Math.max(1, Math.min(8, Math.floor(Number(input.readOnlyParallelism || 2))));
+    const requests = input.requests.slice(0, batchSize);
+    const executeOne = async (request) => {
         if (request.name === "tool_search") {
             const callId = input.onUse?.(request) || "";
             const rawQuery = String(request.arguments?.query || request.arguments?.name || "").trim();
-            const query = rawQuery.toLowerCase().replace(/^select:\s*/, "");
-            const requestedNames = new Set(query.split(/[\s,]+/).map(value => value.trim()).filter(Boolean));
             const discoverable = input.toolContext.catalog.discoverableMcp || [];
-            const exact = discoverable.filter((tool) => requestedNames.has(String(tool.name || "").toLowerCase()) || requestedNames.has(String(tool.canonicalName || "").toLowerCase()));
-            const candidates = (exact.length ? exact : discoverable.filter((tool) => !query || `${tool.name} ${tool.canonicalName} ${tool.description}`.toLowerCase().includes(query))).slice(0, 12);
+            const ranked = (0, tool_search_index_1.searchTools)({ query: rawQuery, intent: request.reason, tools: discoverable, maxResults: request.arguments?.max_results || request.arguments?.maxResults || 12 });
+            const candidates = ranked.map(item => item.tool);
             for (const tool of candidates) {
-                if (!input.toolContext.catalog.mcp.some((row) => row.canonicalName === tool.canonicalName))
-                    input.toolContext.catalog.mcp.push(tool);
+                if (!loadedMcp.some((row) => row.canonicalName === tool.canonicalName))
+                    loadedMcp.push(tool);
             }
             const selectedNames = new Set(candidates.map((tool) => String(tool.canonicalName || "")));
             input.toolContext.catalog.discoverableMcp = discoverable.filter((tool) => !selectedNames.has(String(tool.canonicalName || "")));
             refreshMainAgentToolPromptState(input.toolContext);
-            const output = { schema: "ccm-main-agent-tool-search-v1", query, tools: candidates.map((tool) => ({ name: tool.name, canonicalName: tool.canonicalName, description: tool.description, inputSchema: tool.inputSchema, checksum: tool.checksum })) };
+            const output = { schema: "ccm-main-agent-tool-search-v2", query: rawQuery, tools: ranked.map((item) => ({ name: item.tool.name, canonicalName: item.tool.canonicalName, description: item.tool.description, inputSchema: item.tool.inputSchema, checksum: item.schemaChecksum, score: Number(item.score.toFixed(3)), matchReasons: item.reasons })) };
             (0, main_agent_post_compact_continuity_1.recordMainAgentToolContinuityFromResult)({
                 identity: input.toolContext.scopeIdentity,
                 requestName: request.name,
@@ -319,8 +432,7 @@ async function executeMainAgentToolRequests(input) {
                 sourceMessageId: String(input.toolContext.scope.auditContext?.userMessageId || ""),
             });
             input.onResult?.(request, String(callId || ""), output);
-            results.push({ name: request.name, itemName: request.name, toolKind: "native", source: "native", loaded: true, scope: input.toolContext.capabilityToken ? "scoped_session" : "configured_scope", durationMs: 0, aliases: ["tool_search"], ok: true, output: JSON.stringify(output), outputTokens: (0, context_budget_1.estimateTextTokens)(JSON.stringify(output)), resultChecksum: contextItemChecksum(output), reason: request.reason });
-            continue;
+            return { name: request.name, itemName: request.name, toolKind: "native", source: "native", loaded: true, scope: input.toolContext.capabilityToken ? "scoped_session" : "configured_scope", durationMs: 0, aliases: ["tool_search"], ok: true, output: JSON.stringify(output), outputTokens: (0, context_budget_1.estimateTextTokens)(JSON.stringify(output)), resultChecksum: contextItemChecksum(output), reason: request.reason };
         }
         const skillName = request.name === "invoke_skill" ? String(request.arguments?.name || "").trim() : "";
         const workspaceTool = workspaceByName.get(request.name);
@@ -333,26 +445,43 @@ async function executeMainAgentToolRequests(input) {
                     .flatMap((tool) => [tool?.server, tool?.server && tool?.name ? `${tool.server}/${tool.name}` : "", tool?.name])]
                 .map(value => String(value || ""))
                 .filter(Boolean);
-        const workspaceLoaded = workspaceTool && input.toolContext.catalog.mcp.some((tool) => tool.canonicalName === workspaceTool.canonicalName);
+        const workspaceLoaded = workspaceTool && loadedMcp.some((tool) => tool.canonicalName === workspaceTool.canonicalName);
         const deferredTool = (input.toolContext.catalog.discoverableMcp || []).find((tool) => request.name === tool.canonicalName || request.name === tool.name);
         if (!(skillName ? allowedSkills.has(skillName) : workspaceTool ? workspaceLoaded : allowedMcp.has(request.name))) {
             const error = deferredTool ? "MAIN_AGENT_TOOL_SCHEMA_NOT_LOADED" : "MAIN_AGENT_TOOL_NOT_AUTHORIZED";
-            results.push({ name: request.name, itemName, toolKind, aliases, ok: false, error, resultChecksum: contextItemChecksum(error), reason: request.reason });
-            continue;
+            return { name: request.name, itemName, toolKind, aliases, ok: false, error, resultChecksum: contextItemChecksum(error), reason: request.reason };
         }
         const callId = String(input.onUse?.(request) || "");
         const startedAt = Date.now();
         try {
-            const rawOutput = workspaceTool
+            let rawOutput = workspaceTool
                 ? await (0, workspace_readonly_tools_1.executeWorkspaceReadonlyTool)(workspaceTool.name, request.arguments, String(input.toolContext.capabilityToken || ""))
                 : await execute(request.name, request.arguments, input.toolContext.scope);
+            if (skillName && rawOutput?.executionMode === "fork") {
+                const parentIdentity = input.toolContext.scopeIdentity;
+                if (!parentIdentity)
+                    throw new Error("SKILL_FORK_REQUIRES_EXACT_SESSION_IDENTITY");
+                rawOutput = await (0, skill_fork_runtime_1.executeSkillFork)({
+                    skill: rawOutput,
+                    parent: { scope: parentIdentity.scope, scopeId: parentIdentity.scopeId, exactSessionId: parentIdentity.exactSessionId, generation: parentIdentity.generation, turn: callId || startedAt },
+                    modelVisibleContext: input.toolContext.policyPrompt,
+                    tools: loadedMcp,
+                    executeTool: (name, args) => {
+                        const forkWorkspaceTool = workspaceByName.get(name);
+                        return forkWorkspaceTool
+                            ? (0, workspace_readonly_tools_1.executeWorkspaceReadonlyTool)(forkWorkspaceTool.name, args, String(input.toolContext.capabilityToken || ""))
+                            : execute(name, args, input.toolContext.scope);
+                    },
+                });
+            }
+            if (!skillName)
+                (0, tool_search_index_1.recordToolSearchSuccess)(request.name);
             const output = typeof rawOutput === "string" ? rawOutput : JSON.stringify(rawOutput);
             const outputTokens = (0, context_budget_1.estimateTextTokens)(output);
             if (outputTokens > Math.max(1, Number(input.resultTokenLimit || 8_000))) {
                 const error = "MAIN_AGENT_TOOL_RESULT_EXCEEDS_8K_TOKEN_BUDGET";
                 input.onResult?.(request, callId, null, error);
-                results.push({ name: request.name, itemName, toolKind, source: workspaceTool ? "ccm__workspace_readonly" : toolKind, loaded: true, scope: input.toolContext.capabilityToken ? "scoped_session" : "configured_scope", durationMs: Date.now() - startedAt, aliases, ok: false, error, outputTokens, resultChecksum: contextItemChecksum(error), reason: request.reason });
-                continue;
+                return { name: request.name, itemName, toolKind, source: workspaceTool ? "ccm__workspace_readonly" : toolKind, loaded: true, scope: input.toolContext.capabilityToken ? "scoped_session" : "configured_scope", durationMs: Date.now() - startedAt, aliases, ok: false, error, outputTokens, resultChecksum: contextItemChecksum(error), reason: request.reason };
             }
             input.onResult?.(request, callId, rawOutput);
             (0, main_agent_post_compact_continuity_1.recordMainAgentToolContinuityFromResult)({
@@ -363,13 +492,37 @@ async function executeMainAgentToolRequests(input) {
                 eventId: callId,
                 sourceMessageId: String(input.toolContext.scope.auditContext?.userMessageId || ""),
             });
-            results.push({ name: request.name, itemName, toolKind, source: workspaceTool ? "ccm__workspace_readonly" : toolKind, loaded: true, scope: input.toolContext.capabilityToken ? "scoped_session" : "configured_scope", durationMs: Date.now() - startedAt, aliases, ok: !/^\[(?:错误|工具错误)\]/.test(output), output, outputTokens, resultChecksum: contextItemChecksum(rawOutput), reason: request.reason });
+            return { name: request.name, itemName, toolKind, source: workspaceTool ? "ccm__workspace_readonly" : toolKind, loaded: true, scope: input.toolContext.capabilityToken ? "scoped_session" : "configured_scope", durationMs: Date.now() - startedAt, aliases, ok: !/^\[(?:错误|工具错误)\]/.test(output), output, outputTokens, resultChecksum: contextItemChecksum(rawOutput), reason: request.reason };
         }
         catch (error) {
             const detail = String(error?.message || error || "工具调用失败").slice(0, 1000);
             input.onResult?.(request, callId, null, detail);
-            results.push({ name: request.name, itemName, toolKind, source: workspaceTool ? "ccm__workspace_readonly" : toolKind, loaded: true, scope: input.toolContext.capabilityToken ? "scoped_session" : "configured_scope", durationMs: Date.now() - startedAt, aliases, ok: false, error: detail, resultChecksum: contextItemChecksum(detail), reason: request.reason });
+            return { name: request.name, itemName, toolKind, source: workspaceTool ? "ccm__workspace_readonly" : toolKind, loaded: true, scope: input.toolContext.capabilityToken ? "scoped_session" : "configured_scope", durationMs: Date.now() - startedAt, aliases, ok: false, error: detail, resultChecksum: contextItemChecksum(detail), reason: request.reason };
         }
+    };
+    const isSafeReadOnly = (request) => {
+        if (request.name === "tool_search" || request.name === "invoke_skill")
+            return false;
+        if (workspaceByName.has(request.name))
+            return true;
+        const tool = loadedMcp.find((row) => request.name === row?.canonicalName || request.name === row?.name);
+        return isMainAgentReadOnlyMcpTool(tool);
+    };
+    // Preserve request order and never let a side-effectful/unknown request overlap
+    // another call. Consecutive proven-read-only requests may share a small pool.
+    const results = [];
+    for (let index = 0; index < requests.length;) {
+        if (!isSafeReadOnly(requests[index])) {
+            results.push(await executeOne(requests[index]));
+            index += 1;
+            continue;
+        }
+        const readBatch = [];
+        while (index < requests.length && isSafeReadOnly(requests[index]) && readBatch.length < readOnlyParallelism) {
+            readBatch.push(requests[index]);
+            index += 1;
+        }
+        results.push(...await Promise.all(readBatch.map(executeOne)));
     }
     return results;
 }

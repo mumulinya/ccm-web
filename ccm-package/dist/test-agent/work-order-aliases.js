@@ -34,6 +34,12 @@ exports.DEFAULT_OPTIONS = {
     requireAdversarialProbe: true,
     adversarialProbeWaiver: "",
     agenticPlanning: false,
+    hardeningPolicy: {},
+    hardening_policy: {},
+    isolationProfile: {},
+    isolation_profile: {},
+    readonlyCapabilityManifest: {},
+    readonly_capability_manifest: {},
 };
 function text(value) {
     return String(value || "").trim();

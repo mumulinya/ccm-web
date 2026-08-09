@@ -13,6 +13,7 @@ const importDist = relative => import(`${pathToFileURL(path.join(root, 'ccm-pack
 const policyModule = await importDist('modules/collaboration/task-acceptance-policy.js')
 const selfVerificationModule = await importDist('modules/collaboration/main-agent-self-verification.js')
 const taskServiceModule = await importDist('modules/collaboration/collaboration-task-service.js')
+const completionGateModule = await importDist('test-agent/completion-gate.js')
 const taskServiceSource = fs.readFileSync(path.join(root, 'backend/modules/collaboration/collaboration-task-service.ts'), 'utf8')
 const executorSource = fs.readFileSync(path.join(root, 'backend/modules/collaboration/collaboration-task-executor.ts'), 'utf8')
 const coordinatorSource = fs.readFileSync(path.join(root, 'backend/modules/collaboration/collaboration-runtime-coordinator-review.ts'), 'utf8')
@@ -108,14 +109,32 @@ assert.equal(taskServiceModule.hasStructuredTaskAcceptanceEvidence({ ...selfAcce
 
 const independentTaskBase = { ...task, id: 'task-independent', acceptance_mode: 'test_agent', test_agent_enabled: true }
 const independentPolicy = policyModule.buildTaskAcceptancePolicySnapshot(independentTaskBase)
+const independentReview = {
+  canAccept: true,
+  planningReceipt: { status: 'model_applied' },
+  isolationReceipt: { status: 'cleanup_passed', sideEffectState: 'none' },
+  surfaceAudit: { status: 'passed' },
+  runtimeStable: true,
+  readonlyCapabilityManifest: { checksum: 'readonly-capability-selftest' },
+  postReviewSpotCheckSummary: { pass: true, status: 'passed' },
+  runner: { sourceStable: true, sourceAfter: { fingerprint: 'source-selftest' } },
+  invocation: {
+    outputValidation: { valid: true },
+    artifactVerification: { status: 'passed' },
+    report: { acceptanceEvidenceGateSummary: { canAccept: true } },
+  },
+}
+independentReview.completionGate = completionGateModule.buildTestAgentCompletionGate({
+  task: independentTaskBase,
+  policy: independentPolicy,
+  review: independentReview,
+  spotCheck: independentReview.postReviewSpotCheckSummary,
+})
+assert.equal(completionGateModule.validateTestAgentCompletionGate(independentReview.completionGate).valid, true)
 const independentTask = {
   ...independentTaskBase,
   acceptance_policy_snapshot: independentPolicy,
-  test_agent_review: {
-    canAccept: true,
-    runner: { sourceStable: true },
-    invocation: { outputValidation: { valid: true }, artifactVerification: { status: 'passed' } },
-  },
+  test_agent_review: independentReview,
   main_agent_final_acceptance: {
     accepted: true,
     mode: 'test_agent',

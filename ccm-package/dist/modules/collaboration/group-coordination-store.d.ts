@@ -67,6 +67,10 @@ export interface GroupCoordinationRequestRecord {
 export declare function submitGroupCoordinationRequest(contextInput: GroupCoordinationContext, input: GroupCoordinationRequestInput): {
     record: GroupCoordinationRequestRecord;
     deduplicated: boolean;
+} | {
+    communication: import("../../system/agent-communication-v2").AgentCommunicationEnvelopeV2;
+    record: GroupCoordinationRequestRecord;
+    deduplicated: boolean;
 };
 export declare function listGroupCoordinationRequests(query?: Partial<GroupCoordinationContext> & {
     statuses?: GroupCoordinationRequestStatus[];

@@ -180,8 +180,8 @@ const COMMANDS: SlashCommand[] = [
   { name: "soak", aliases: ["稳定性"], description: "读取 24 小时稳定性运行状态和报告", category: "运维", icon: "≈", scopes: ["global", "group"], risk: "safe", source: "ccm", action: { type: "query", endpoint: "/api/reliability/soak/status" } },
   { name: "permissions", aliases: ["权限"], description: "读取全局 Agent 能力与授权边界", category: "治理", icon: "⚿", scopes: ["global", "project", "group"], risk: "safe", source: "ccm", action: { type: "query", endpoint: "/api/global-agent/capabilities" } },
   { name: "model", aliases: ["模型"], description: "读取可用模型执行器及原生续跑能力", category: "执行", icon: "◇", scopes: ["global", "project", "group"], risk: "safe", source: "ccm", action: { type: "query", endpoint: "/api/orchestrator/resilience" } },
-  { name: "mcp", aliases: ["MCP服务"], description: "直接读取已配置的 MCP 服务", category: "工具", icon: "◇", scopes: ["global", "project", "group"], risk: "safe", source: "builtin", action: { type: "query", endpoint: "/api/mcp" } },
-  { name: "skills", aliases: ["技能"], description: "直接读取已安装的 Skill", category: "工具", icon: "✦", scopes: ["global", "project", "group"], risk: "safe", source: "builtin", action: { type: "query", endpoint: "/api/skills" } },
+  { name: "mcp", aliases: ["MCP服务"], description: "直接读取当前作用域已授权的 MCP 服务", category: "工具", icon: "◇", scopes: ["global", "project", "group"], risk: "safe", source: "builtin", action: { type: "query", endpointByScope: { global: "/api/mcp?scope=global", project: "/api/mcp?scope=project&project=$PROJECT", group: "/api/mcp?scope=group&group_id=$GROUP_ID" } } },
+  { name: "skills", aliases: ["技能"], description: "直接读取当前作用域已授权的 Skill", category: "工具", icon: "✦", scopes: ["global", "project", "group"], risk: "safe", source: "builtin", action: { type: "query", endpointByScope: { global: "/api/skills?scope=global", project: "/api/skills?scope=project&project=$PROJECT", group: "/api/skills?scope=group&group_id=$GROUP_ID" } } },
   { name: "hooks", aliases: ["钩子"], description: "直接读取全局 Agent 运行时钩子", category: "治理", icon: "⌁", scopes: ["global", "project", "group"], risk: "safe", source: "builtin", action: { type: "query", endpoint: "/api/global-agent/runtime/hooks" } },
   { name: "branch", aliases: ["分支"], description: "直接读取当前项目 Git 分支和变更数", category: "开发现场", icon: "⑂", scopes: ["project"], risk: "safe", source: "builtin", action: { type: "query", endpoint: "/api/git/status?project=$PROJECT" } },
   { name: "history", aliases: ["git-log", "提交历史"], description: "直接读取当前项目 Git 提交历史", category: "开发现场", icon: "≡", scopes: ["project"], risk: "safe", source: "builtin", action: { type: "query", endpoint: "/api/git/log?project=$PROJECT&limit=30" } },
@@ -409,6 +409,8 @@ export function runSlashCommandSelfTest() {
     ccParityCommandsPresent: ["help", "status", "config", "context", "copy", "diff", "doctor", "export", "hooks", "mcp", "memory", "model", "permissions", "plan", "rename", "review", "security-review", "sessions", "skills", "stats", "tasks", "theme", "usage"].every(name =>
       [globalCommands, projectCommands, commandsForScope("group")].flat().some(command => command.name === name)
     ),
+    scopedToolCatalogCommands: projectCommands.find(command => command.name === "mcp")?.action.endpointByScope?.project?.includes("scope=project") === true
+      && commandsForScope("group").find(command => command.name === "skills")?.action.endpointByScope?.group?.includes("scope=group") === true,
   };
   return { pass: Object.values(checks).every(Boolean), checks, endpointPreview: expandedEndpoint, counts: { global: globalCommands.length, project: projectCommands.length, group: commandsForScope("group").length } };
 }

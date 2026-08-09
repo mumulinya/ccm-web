@@ -60,6 +60,8 @@ import {
 import {
   buildToolAuthorizationInventory,
   buildToolAuthorizationOptions,
+  normalizeToolAuthorization,
+  parseMcpGrant,
 } from "../../tools/tool-authorization";
 import {
   getRuntimeToolRealCliMatrixStatus,
@@ -1584,6 +1586,88 @@ export function loadCustomSkills() {
 
 // ===== merged from tools-part-02.ts =====
 
+function normalizeScopedMcpServerName(value: any) {
+  return String(value || "").trim().replace(/^ccm__/, "").toLowerCase();
+}
+
+function resolveCatalogAuthorizationScope(query: any = {}) {
+  const scope = String(query?.scope || "").trim().toLowerCase();
+  if (!scope) return null;
+  if (scope === "global") {
+    return { scope: "global", scopeId: "global-agent", tools: normalizeToolAuthorization(loadGlobalAgentToolAuthorization()?.tools || {}) };
+  }
+  if (scope === "project") {
+    const project = String(query?.project || query?.project_id || "").trim();
+    if (!project) throw new Error("缺少项目名称");
+    const config = loadProjectConfigs()?.[project];
+    if (!config) throw new Error("项目不存在");
+    return { scope: "project", scopeId: project, tools: normalizeToolAuthorization(config?.tools || {}) };
+  }
+  if (scope === "group") {
+    const groupId = String(query?.group_id || query?.groupId || query?.id || "").trim();
+    if (!groupId) throw new Error("缺少群聊 ID");
+    const group = loadGroups().find((item: any) => String(item?.id || "") === groupId);
+    if (!group) throw new Error("群聊不存在");
+    return { scope: "group", scopeId: groupId, tools: normalizeToolAuthorization(group?.tools || {}) };
+  }
+  throw new Error("工具目录作用域无效");
+}
+
+function buildScopedMcpCatalog(query: any = {}) {
+  const authorization = resolveCatalogAuthorizationScope(query);
+  const catalog = loadMcpTools().filter(tool => !isInternalMcpName(tool?.name));
+  if (!authorization) return { success: true, tools: catalog.map(redactMcpToolForDisplay) };
+  const parsedGrants = authorization.tools.mcp.map(parseMcpGrant).filter(item => item.server);
+  const matchedGrants = new Set<string>();
+  const tools = catalog.flatMap((tool: any) => {
+    const serverKey = normalizeScopedMcpServerName(tool?.name);
+    const grants = parsedGrants.filter(item => normalizeScopedMcpServerName(item.server) === serverKey);
+    if (!grants.length) return [];
+    grants.forEach(item => matchedGrants.add(item.raw));
+    return [{
+      ...redactMcpToolForDisplay(tool),
+      authorization: {
+        scope: authorization.scope,
+        scopeId: authorization.scopeId,
+        fullServer: grants.some(item => !item.tool),
+        tools: [...new Set(grants.map(item => item.tool).filter(Boolean))],
+        grants: grants.map(item => item.raw),
+      },
+    }];
+  });
+  return {
+    success: true,
+    scope: authorization.scope,
+    scope_id: authorization.scopeId,
+    tools,
+    authorization: {
+      requested: authorization.tools.mcp.length,
+      available: matchedGrants.size,
+      missing: authorization.tools.mcp.filter((grant: string) => !matchedGrants.has(grant)),
+    },
+  };
+}
+
+function buildScopedSkillCatalog(query: any = {}) {
+  const authorization = resolveCatalogAuthorizationScope(query);
+  const catalog = loadSkills();
+  if (!authorization) return { skills: catalog };
+  const authorized = new Set(authorization.tools.skill.map((name: string) => String(name).trim().toLowerCase()).filter(Boolean));
+  const skills = catalog.filter((skill: any) => authorized.has(String(skill?.name || "").trim().toLowerCase()));
+  const available = new Set(skills.map((skill: any) => String(skill?.name || "").trim().toLowerCase()));
+  return {
+    success: true,
+    scope: authorization.scope,
+    scope_id: authorization.scopeId,
+    skills,
+    authorization: {
+      requested: authorization.tools.skill.length,
+      available: skills.length,
+      missing: authorization.tools.skill.filter((name: string) => !available.has(String(name).trim().toLowerCase())),
+    },
+  };
+}
+
 
 
 export function handleToolsAndMetricsApi(pathname: string, req: any, res: any, parsed: any): boolean {
@@ -1797,7 +1881,8 @@ export function handleToolsAndMetricsApi(pathname: string, req: any, res: any, p
 
   // === MCP 工具管理 API ===
   if (pathname === "/api/mcp" && req.method === "GET") {
-    sendJson(res, { success: true, tools: loadMcpTools().filter(tool => !isInternalMcpName(tool?.name)).map(redactMcpToolForDisplay) });
+    try { sendJson(res, buildScopedMcpCatalog(parsed?.query || {})); }
+    catch (e: any) { sendJson(res, { success: false, error: e?.message || "读取 MCP 配置失败" }, /不存在/.test(String(e?.message || "")) ? 404 : 400); }
     return true;
   }
 
@@ -1884,7 +1969,8 @@ export function handleToolsAndMetricsApi(pathname: string, req: any, res: any, p
   }
 
   if (pathname === "/api/skills" && req.method === "GET") {
-    sendJson(res, { skills: loadSkills() });
+    try { sendJson(res, buildScopedSkillCatalog(parsed?.query || {})); }
+    catch (e: any) { sendJson(res, { success: false, error: e?.message || "读取 Skill 配置失败" }, /不存在/.test(String(e?.message || "")) ? 404 : 400); }
     return true;
   }
 

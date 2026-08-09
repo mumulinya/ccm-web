@@ -6,6 +6,8 @@ const http_page_resources_1 = require("./http-page-resources");
 const utils_1 = require("./utils");
 const existing_session_1 = require("./browser/existing-session");
 const shared_1 = require("./browser/shared");
+const isolation_1 = require("./isolation");
+const side_effect_policy_1 = require("./side-effect-policy");
 function wantsHttp(workOrder) {
     return workOrder.projects.some(project => project.httpChecks.length > 0
         || project.adversarialHttpChecks.length > 0
@@ -299,6 +301,27 @@ async function verifyProjectPageHttp(workOrder, project) {
         const finishedAt = (0, utils_1.nowIso)();
         return { project: project.name, name: "Page HTTP probe", url: "", method: "GET", status: "skipped", statusCode: null, contentType: "", startedAt, finishedAt, durationMs: Date.now() - started, resourceChecks: [] };
     }
+    const policyContext = (0, isolation_1.testAgentPolicyContextFromWorkOrder)(workOrder);
+    const policy = policyContext ? (0, side_effect_policy_1.evaluateTestAgentHttpSideEffect)({ url, method: "GET" }, { ...policyContext, project }) : null;
+    if (policy && !policy.allowed) {
+        const finishedAt = (0, utils_1.nowIso)();
+        return {
+            project: project.name,
+            name: "Page HTTP probe",
+            url,
+            method: "GET",
+            status: "blocked",
+            statusCode: null,
+            contentType: "",
+            startedAt,
+            finishedAt,
+            durationMs: Date.now() - started,
+            resourceChecks: [],
+            context: { pageResourceProbe: true, sideEffectPolicy: "blocked" },
+            responsePreview: "",
+            error: `副作用安全门阻止 HTTP 页面探测：${policy.reason}`,
+        };
+    }
     const main = await fetchWithTimeout(url, workOrder.options.httpTimeoutMs);
     const statusCode = main.response?.status ?? null;
     const contentType = main.response?.headers.get("content-type") || "";
@@ -488,6 +511,31 @@ async function verifyConcurrentHttpCheck(workOrder, project, check, index) {
     };
 }
 async function verifyExplicitHttpCheck(workOrder, project, check, index) {
+    const policyContext = (0, isolation_1.testAgentPolicyContextFromWorkOrder)(workOrder);
+    const policyCheck = { ...check, url: (0, utils_1.resolveUrl)(project.targetUrl || project.startupUrl, check.url) };
+    const policy = policyContext ? (0, side_effect_policy_1.evaluateTestAgentHttpSideEffect)(policyCheck, { ...policyContext, project }) : null;
+    if (policy && !policy.allowed) {
+        const startedAt = (0, utils_1.nowIso)();
+        return {
+            project: project.name,
+            name: check.name || `HTTP check ${index + 1}`,
+            url: (0, utils_1.resolveUrl)(project.targetUrl || project.startupUrl, check.url),
+            method: String(check.method || "GET").toUpperCase(),
+            status: "blocked",
+            statusCode: null,
+            contentType: "",
+            startedAt,
+            finishedAt: (0, utils_1.nowIso)(),
+            durationMs: 0,
+            resourceChecks: [],
+            assertions: [],
+            responsePreview: "",
+            adversarial: check.adversarial === true,
+            probeType: check.probeType || check.probe_type,
+            context: { ...(check.context || {}), sideEffectPolicy: "blocked" },
+            error: `副作用安全门阻止 HTTP 检查：${policy.reason}`,
+        };
+    }
     if ((0, http_concurrency_1.httpConcurrencySpecFor)(check)) {
         return verifyConcurrentHttpCheck(workOrder, project, check, index);
     }

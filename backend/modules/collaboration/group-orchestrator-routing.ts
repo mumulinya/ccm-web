@@ -77,6 +77,7 @@ import {
   isBroadDevelopmentRequest,
 } from "./group-orchestrator-coded";
 import { searchAgentKnowledge } from "../knowledge/knowledge-access";
+import { finalizeContextSourceRun, markContextSourcesFromOutput } from "../../system/main-agent-context-source-continuity";
 import {
   attachLlmTokenUsage,
   buildLlmCoordinatorContextComponents,
@@ -998,6 +999,7 @@ export async function runGroupOrchestratorCore(input: GroupOrchestratorInput) {
         error = attachLlmTokenUsage(recoveryError, firstAttemptUsage);
       }
     }
+    const failure = classifyGroupOrchestratorFailure(error);
     const providerErrorSummary = summarizeGroupOrchestratorProviderError(error);
     return {
       agent: coordinator.project,
@@ -1005,6 +1007,7 @@ export async function runGroupOrchestratorCore(input: GroupOrchestratorInput) {
       assignments: [],
       runtime: "llm-error",
       providerFailure: {
+        kind: failure.kind,
         code: String(error?.code || "CCM_MODEL_CALL_FAILED"),
         retryExhausted: String(error?.code || "") === "CCM_MODEL_RETRY_EXHAUSTED",
         attempts: Math.max(0, Number(error?.attempts) || 0),
@@ -1017,14 +1020,47 @@ export async function runGroupOrchestratorCore(input: GroupOrchestratorInput) {
       contextRecovery: reactiveCompactOwnership ? { type: "reactive-compact-not-retried", ownership: reactiveCompactOwnership } : undefined,
       agentBoundary: buildGroupMainAgentBoundary("llm-error"),
       content: [
-        "主 Agent 大模型调用失败，本轮不分派子 Agent。",
+        failure.title,
         "",
         `错误：${providerErrorSummary}`,
         "",
-        "请检查主 Agent API 配置、网络、模型名或 Key 是否有效。"
+        failure.guidance,
       ].join("\n"),
     };
   }
+}
+
+
+export function classifyGroupOrchestratorFailure(error: any) {
+  const code = String(error?.code || "").trim();
+  const raw = String(error?.message || error || "").trim();
+  if (code === "CCM_WORKFLOW_DECISION_INVALID"
+    || /无效工作流|workflowDecision|workflow_decision|结构化工作流|有效 JSON|合法 JSON/i.test(raw)) {
+    return {
+      kind: "workflow_contract",
+      title: "主 Agent 返回的工作流格式未通过校验，本轮不分派子 Agent。",
+      guidance: "这不是 API Key 或网络故障。请重试；如果持续出现，请检查当前模型或兼容端是否遵循 CCM 的结构化 JSON 工作流契约。",
+    };
+  }
+  if (/CONTEXT|COMPACT|上下文|容量|prompt.{0,20}(?:long|large)|too.{0,10}long/i.test(`${code} ${raw}`)) {
+    return {
+      kind: "context",
+      title: "主 Agent 上下文准备或压缩失败，本轮不分派子 Agent。",
+      guidance: "请查看当前会话容量和压缩状态；不要把这类错误误判为 API Key 失效。",
+    };
+  }
+  if (/^CCM_MODEL_|HTTP\s+\d{3}|fetch|network|socket|timeout|timed out|ECONN|ENOTFOUND|模型返回空响应|Provider/i.test(`${code} ${raw}`)) {
+    return {
+      kind: "provider",
+      title: "主 Agent 大模型调用失败，本轮不分派子 Agent。",
+      guidance: "请检查主 Agent API 配置、网络、模型名或 Key 是否有效。",
+    };
+  }
+  return {
+    kind: "internal",
+    title: "主 Agent 内部处理失败，本轮不分派子 Agent。",
+    guidance: "请查看本轮 Trace 和服务日志定位内部处理阶段；不要先修改可正常使用的 Provider 配置。",
+  };
 }
 
 
@@ -1089,6 +1125,11 @@ export async function runGroupOrchestrator(input: GroupOrchestratorInput) {
       modelDecision: workflowDecision,
     }).names;
     const finalRuntime = String((result as any)?.runtime || "");
+    if (groupSessionId) {
+      const sourceIdentity = { agentKind: "group" as const, scope: "group" as const, scopeId: String(group.id), exactSessionId: groupSessionId, generation: 0 };
+      markContextSourcesFromOutput(sourceIdentity, JSON.stringify({ content: (result as any)?.content || "", assignments: (result as any)?.assignments || [], workflowDecision }));
+      finalizeContextSourceRun(sourceIdentity);
+    }
     if (!reusedFirstTurn) recordMetric(coordinator.project, {
       success: !["llm-error", "llm-not-configured"].includes(finalRuntime),
       durationMs: Date.now() - startedAt,

@@ -6,6 +6,7 @@ const zod_1 = require("zod");
 const http_concurrency_1 = require("../http-concurrency");
 exports.TEST_AGENT_CONTRACT_IDS = {
     handoff: "ccm-test-agent-handoff-v1",
+    handoffV2: "ccm-test-agent-handoff-v2",
     workOrder: "ccm-test-agent-work-order-v1",
     report: "ccm-test-agent-report-v1",
     verdict: "ccm-test-agent-verdict-v1",
@@ -771,7 +772,10 @@ exports.TestAgentHandoffProjectContractSchema = zod_1.z.object({
     risks: exports.stringList.optional(),
 }).passthrough();
 exports.TestAgentHandoffContractSchema = zod_1.z.object({
-    schema: zod_1.z.literal(exports.TEST_AGENT_CONTRACT_IDS.handoff).optional(),
+    schema: zod_1.z.union([
+        zod_1.z.literal(exports.TEST_AGENT_CONTRACT_IDS.handoff),
+        zod_1.z.literal(exports.TEST_AGENT_CONTRACT_IDS.handoffV2),
+    ]).optional(),
     id: exports.optionalString,
     taskId: exports.optionalString,
     task_id: exports.optionalString,

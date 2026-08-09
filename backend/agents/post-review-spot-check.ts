@@ -102,9 +102,7 @@ function commandBlockComplete(item: any) {
   return !!String(item?.command || "").trim()
     && !!String(item?.cwd || "").trim()
     && hasOwn(item, "exitCode")
-    && hasOwn(item, "stdout")
-    && hasOwn(item, "stderr")
-    && hasOwn(item, "output");
+    && !!String(item?.status || "").trim();
 }
 
 function isWithinRoot(candidate: string, root: string) {

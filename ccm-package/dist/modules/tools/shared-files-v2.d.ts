@@ -132,8 +132,22 @@ export declare function migrateLegacySharedFilesV2(scopeType: SharedFileScope, s
 export declare function migrateLegacyGlobalSharedDirectoryV2(): any[];
 export declare function buildSharedFilesContextV2(scopeTypeInput: unknown, scopeIdInput: unknown, options?: {
     maxTokens?: number;
+    contextWindow?: number;
+    hydrationBudgetPercent?: number;
+    remainingSafeTokens?: number;
     title?: string;
+    explicitText?: string;
+    prioritySourceIds?: string[];
 }): {
+    context: string;
+    files: any[];
+    selected_chunks: any[];
+    total_tokens: number;
+    complete: boolean;
+    checksum: string;
+    max_tokens?: undefined;
+    deferred_chunks?: undefined;
+} | {
     context: string;
     files: {
         schema: "ccm-shared-file-manifest-v2";
@@ -157,6 +171,8 @@ export declare function buildSharedFilesContextV2(scopeTypeInput: unknown, scope
     selected_chunks: any[];
     total_tokens: number;
     complete: boolean;
+    max_tokens: number;
+    deferred_chunks: number;
     checksum: string;
 };
 export declare function readSharedFileChunkV2(scopeType: unknown, scopeId: unknown, fileId: unknown, chunkId: unknown): {

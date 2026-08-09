@@ -48,6 +48,10 @@ const util_1 = require("util");
 const db_1 = require("../core/db");
 const project_runtime_1 = require("../modules/projects/project-runtime");
 const context_budget_1 = require("../system/context-budget");
+const code_intelligence_1 = require("../system/code-intelligence");
+const web_notebook_tools_1 = require("./web-notebook-tools");
+const unified_evidence_registry_1 = require("../system/unified-evidence-registry");
+const group_orchestrator_config_1 = require("../modules/collaboration/group-orchestrator-config");
 const execFileAsync = (0, util_1.promisify)(child_process_1.execFile);
 const SECRET_FILE = path.join(os.homedir(), ".cc-connect", "private", "main-agent-tool-capability-secret");
 const EXCLUDED_DIRECTORIES = new Set([".git", "node_modules", "target", "dist", "build", "coverage", ".next", ".nuxt", ".output"]);
@@ -125,8 +129,18 @@ const rawDefinitions = [
     { name: "glob_files", loadPolicy: "base", description: "在授权项目中按Glob模式查找文件，返回稳定分页结果。", inputSchema: { type: "object", required: ["pattern"], properties: { project_id: { type: "string" }, pattern: { type: "string" }, cursor: { type: "string" }, limit: { type: "integer", minimum: 1, maximum: 500 } } } },
     { name: "grep_text", loadPolicy: "base", description: "使用ripgrep在授权项目源码中检索文本或正则表达式。", inputSchema: { type: "object", required: ["pattern"], properties: { project_id: { type: "string" }, pattern: { type: "string" }, glob: { type: "string" }, mode: { enum: ["content", "files_with_matches", "count"] }, multiline: { type: "boolean" }, cursor: { type: "string" }, limit: { type: "integer", minimum: 1, maximum: 500 } } } },
     { name: "read_file", loadPolicy: "base", description: "按完整行读取授权项目内的普通文本文件，支持offset、limit和继续游标。", inputSchema: { type: "object", required: ["path"], properties: { project_id: { type: "string" }, path: { type: "string" }, offset: { type: "integer", minimum: 1 }, limit: { type: "integer", minimum: 1, maximum: 2000 }, token_budget: { type: "integer", minimum: 256, maximum: 8000 } } } },
+    { name: "inspect_notebook", loadPolicy: "search", description: "结构化检查Notebook元数据、单元格身份、源码校验值和输出类型；不返回单元格正文。", inputSchema: { type: "object", required: ["path"], properties: { project_id: { type: "string" }, path: { type: "string" }, cursor: { type: "string" }, limit: { type: "integer", minimum: 1, maximum: 200 } } } },
+    { name: "web_fetch", loadPolicy: "search", description: "安全读取公开HTTPS网页、文本、JSON或PDF；逐次校验DNS和重定向并阻止私网、凭据URL和超限响应。", inputSchema: { type: "object", required: ["url"], properties: { project_id: { type: "string" }, url: { type: "string" }, max_chars: { type: "integer", minimum: 1000, maximum: 300000 } } } },
+    ...((0, web_notebook_tools_1.isWebSearchAvailable)() ? [{ name: "web_search", loadPolicy: "search", description: "通过已配置的真实搜索Provider检索公开Web；未配置真实后端时本工具不会注册。", inputSchema: { type: "object", required: ["query"], properties: { project_id: { type: "string" }, query: { type: "string" }, count: { type: "integer", minimum: 1, maximum: 20 } } } }] : []),
     { name: "find_definition", loadPolicy: "search", description: "通过已配置语言服务查找符号定义；没有可靠语言服务时明确返回不可用。", inputSchema: { type: "object", required: ["symbol"], properties: { project_id: { type: "string" }, symbol: { type: "string" }, path: { type: "string" } } } },
     { name: "find_references", loadPolicy: "search", description: "通过已配置语言服务查找符号引用；没有可靠语言服务时明确返回不可用。", inputSchema: { type: "object", required: ["symbol"], properties: { project_id: { type: "string" }, symbol: { type: "string" }, path: { type: "string" } } } },
+    { name: "workspace_symbols", loadPolicy: "search", description: "通过项目语义索引查询工作区符号，返回位置、类型、索引代次和代码状态，不返回源码正文。多语言项目可指定language_server_id。", inputSchema: { type: "object", properties: { project_id: { type: "string" }, query: { type: "string" }, language_server_id: { type: "string" }, language: { type: "string" }, cursor: { type: "string" }, limit: { type: "integer", minimum: 1, maximum: 500 } } } },
+    { name: "document_symbols", loadPolicy: "search", description: "通过语言服务和增量索引查询指定源码文件中的符号。", inputSchema: { type: "object", required: ["path"], properties: { project_id: { type: "string" }, path: { type: "string" }, query: { type: "string" }, cursor: { type: "string" }, limit: { type: "integer", minimum: 1, maximum: 500 } } } },
+    { name: "find_implementations", loadPolicy: "search", description: "通过语言服务定位接口、抽象成员或符号的真实实现。", inputSchema: { type: "object", required: ["symbol"], properties: { project_id: { type: "string" }, symbol: { type: "string" }, path: { type: "string" }, cursor: { type: "string" }, limit: { type: "integer", minimum: 1, maximum: 500 } } } },
+    { name: "find_type_definition", loadPolicy: "search", description: "通过语言服务定位符号的类型定义。", inputSchema: { type: "object", required: ["symbol"], properties: { project_id: { type: "string" }, symbol: { type: "string" }, path: { type: "string" }, cursor: { type: "string" }, limit: { type: "integer", minimum: 1, maximum: 500 } } } },
+    { name: "find_incoming_calls", loadPolicy: "search", description: "通过语言服务调用层级查询调用当前符号的函数或方法。", inputSchema: { type: "object", required: ["symbol"], properties: { project_id: { type: "string" }, symbol: { type: "string" }, path: { type: "string" }, cursor: { type: "string" }, limit: { type: "integer", minimum: 1, maximum: 500 } } } },
+    { name: "find_outgoing_calls", loadPolicy: "search", description: "通过语言服务调用层级查询当前符号调用的函数或方法。", inputSchema: { type: "object", required: ["symbol"], properties: { project_id: { type: "string" }, symbol: { type: "string" }, path: { type: "string" }, cursor: { type: "string" }, limit: { type: "integer", minimum: 1, maximum: 500 } } } },
+    { name: "read_code_diagnostics", loadPolicy: "search", description: "读取绑定索引代次与RepoStateIdentity的LSP诊断；源码变化后旧诊断不能作为强验收证据。", inputSchema: { type: "object", properties: { project_id: { type: "string" }, path: { type: "string" }, cursor: { type: "string" }, limit: { type: "integer", minimum: 1, maximum: 500 } } } },
     { name: "read_project_config", loadPolicy: "search", description: "读取授权项目的标准构建和运行配置文件。", inputSchema: { type: "object", properties: { project_id: { type: "string" }, cursor: { type: "string" }, limit: { type: "integer", minimum: 1, maximum: 50 } } } },
     { name: "read_git_status", loadPolicy: "search", description: "读取授权项目Git工作区状态。", inputSchema: { type: "object", properties: { project_id: { type: "string" } } } },
     { name: "read_git_diff", loadPolicy: "search", description: "读取授权项目Git差异，支持指定文件和暂存区。", inputSchema: { type: "object", properties: { project_id: { type: "string" }, path: { type: "string" }, staged: { type: "boolean" }, cursor: { type: "string" }, limit: { type: "integer", minimum: 1, maximum: 2000 } } } },
@@ -366,8 +380,52 @@ async function executeWorkspaceReadonlyToolWithCapability(toolName, args, capabi
     }
     if (name === "read_file")
         return { project, ...(await readFileTool(root, args)) };
-    if (name === "find_definition" || name === "find_references") {
-        return enforceResultBudget({ project, success: false, state: "capability_unavailable", tool: name, symbol: String(args?.symbol || ""), reason: "当前项目未连接可证明语义定义/引用结果的语言服务；未使用文本匹配冒充LSP结果。" });
+    if (["inspect_notebook", "web_fetch", "web_search"].includes(name)) {
+        const featureConfig = (0, group_orchestrator_config_1.loadOrchestratorConfig)();
+        if (name === "inspect_notebook") {
+            if (featureConfig.notebookToolsEnabled === false)
+                throw new Error("capability_unavailable: Notebook工具已关闭");
+            return enforceResultBudget({ project, ...(0, web_notebook_tools_1.inspectNotebook)(root, args) });
+        }
+        if (featureConfig.webToolsEnabled === false)
+            throw new Error("capability_unavailable: Web工具已关闭");
+        if (name === "web_fetch")
+            return enforceResultBudget({ project, ...(await (0, web_notebook_tools_1.webFetch)(args, featureConfig.webFetchBrowserFallbackEnabled !== false)) });
+        return enforceResultBudget({ project, ...(await (0, web_notebook_tools_1.webSearch)({ ...args, provider_order: args?.provider_order || featureConfig.webSearchProviderOrder })) });
+    }
+    if (["workspace_symbols", "document_symbols", "find_definition", "find_references", "find_implementations", "find_type_definition", "find_incoming_calls", "find_outgoing_calls", "read_code_diagnostics"].includes(name)) {
+        try {
+            const featureConfig = (0, group_orchestrator_config_1.loadOrchestratorConfig)();
+            if (featureConfig.codeIntelligenceEnabled === false)
+                throw new Error("capability_unavailable: 代码智能已关闭");
+            const result = await (0, code_intelligence_1.executeCodeIntelligenceTool)(project, name, args);
+            const evidence = (0, unified_evidence_registry_1.recordEvidence)({
+                evidenceType: name === "read_code_diagnostics" ? "test" : "source",
+                taskId: String(capability.scope === "project" ? capability.scopeId : ""),
+                workItemId: String(args?.work_item_id || ""),
+                scope: capability.scope,
+                scopeId: capability.scopeId,
+                exactSessionId: capability.exactSessionId,
+                generation: capability.generation,
+                attempt: Math.max(1, Number(args?.attempt || 1)),
+                repoStateIdentity: result.repoStateIdentity,
+                producerAgentId: "ccm-code-intelligence",
+                status: "valid",
+                subject: name,
+                references: result.locations.map((item) => item.path),
+                summary: `${result.locations.length} semantic locations at index generation ${result.indexGeneration}`,
+                sourceChecksum: result.resultChecksum,
+            });
+            result.evidenceId = evidence.evidenceId;
+            result.resultChecksum = checksum({ ...result, resultChecksum: undefined });
+            return enforceResultBudget(result);
+        }
+        catch (error) {
+            const reason = String(error?.message || error);
+            if (/capability_unavailable/i.test(reason))
+                return enforceResultBudget({ project, success: false, state: "capability_unavailable", tool: name, symbol: String(args?.symbol || ""), reason });
+            throw error;
+        }
     }
     if (name === "read_project_config") {
         const names = new Set(["package.json", "pnpm-workspace.yaml", "yarn.lock", "package-lock.json", "bun.lockb", "pom.xml", "build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts", "go.mod", "cargo.toml", "pyproject.toml", "requirements.txt", "docker-compose.yml", "docker-compose.yaml", "Dockerfile"]);
@@ -410,7 +468,7 @@ async function executeWorkspaceReadonlyTool(toolName, args, capabilityToken) {
 function runWorkspaceReadonlyToolsSelfTest() {
     const checksums = exports.WORKSPACE_READONLY_TOOL_DEFINITIONS_V2.map(tool => tool.checksum);
     return {
-        success: exports.WORKSPACE_READONLY_TOOL_DEFINITIONS_V2.length === 12 && new Set(checksums).size === checksums.length,
+        success: exports.WORKSPACE_READONLY_TOOL_DEFINITIONS_V2.length >= 21 && new Set(checksums).size === checksums.length,
         tools: exports.WORKSPACE_READONLY_TOOL_DEFINITIONS_V2.map(tool => ({ name: tool.name, checksum: tool.checksum, loadPolicy: tool.loadPolicy })),
     };
 }

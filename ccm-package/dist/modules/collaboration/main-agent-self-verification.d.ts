@@ -1,4 +1,4 @@
-import type { TaskAcceptancePolicySnapshotV1 } from "./task-acceptance-policy";
+import type { TaskAcceptancePolicySnapshot } from "./task-acceptance-policy";
 type VerificationProject = {
     name: string;
     workDir: string;
@@ -62,7 +62,7 @@ export type MainAgentSelfVerificationReceiptV1 = {
 };
 export declare function runMainAgentSelfVerification(input: {
     task: any;
-    policy: TaskAcceptancePolicySnapshotV1;
+    policy: TaskAcceptancePolicySnapshot;
     acceptanceCriteria?: string[];
     changedFiles?: any[];
     projects?: VerificationProject[];
@@ -76,7 +76,7 @@ export declare function runMainAgentSelfVerification(input: {
     }) => Promise<any>;
     semanticConfig?: any;
 }): Promise<MainAgentSelfVerificationReceiptV1>;
-export declare function validateMainAgentSelfVerificationReceipt(task: any, policy: TaskAcceptancePolicySnapshotV1, receipt: any): {
+export declare function validateMainAgentSelfVerificationReceipt(task: any, policy: TaskAcceptancePolicySnapshot, receipt: any): {
     valid: boolean;
     reason: string;
 };

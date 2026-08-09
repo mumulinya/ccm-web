@@ -94,7 +94,12 @@ const VERIFICATION_MODES = new Set(["commands", "http", "browser", "visual", "in
 
 export function normalizeWorkflowDecision(value: any, source: WorkflowDecision["source"] = "model"): WorkflowDecision {
   const rawMode = String(value?.mode || value?.workflowMode || "").trim() as WorkflowDecisionMode;
-  if (!MODES.has(rawMode)) throw new Error(`大模型返回了无效工作流：${rawMode || "空"}`);
+  if (!MODES.has(rawMode)) {
+    const error: any = new Error(`大模型返回了无效工作流：${rawMode || "空"}`);
+    error.code = "CCM_WORKFLOW_DECISION_INVALID";
+    error.workflowMode = rawMode;
+    throw error;
+  }
   const needsEpicDecomposition = rawMode === "decompose_epic" || value?.needsEpicDecomposition === true;
   const needsPlanning = needsEpicDecomposition || rawMode === "plan_task" || value?.needsPlanning === true;
   const rawContinuation = String(value?.continuationKind || value?.continuation_kind || "new_task").trim();

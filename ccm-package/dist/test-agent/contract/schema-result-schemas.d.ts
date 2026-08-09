@@ -4890,24 +4890,24 @@ export declare const browserResourceLifecycleEventSchema: z.ZodObject<{
     error?: string;
     scope?: string;
     provider?: "mcp" | "playwright";
+    releasedAt?: string;
     acquiredAt?: string;
     ownership?: "owned" | "external";
     planId?: string;
     resourceType?: "browser" | "browser_context" | "external_browser_session";
     releaseAttemptedAt?: string;
-    releasedAt?: string;
 }, {
     id?: string;
     status?: "released" | "open" | "retained" | "cleanup_failed";
     error?: string;
     scope?: string;
     provider?: "mcp" | "playwright";
+    releasedAt?: string;
     acquiredAt?: string;
     ownership?: "owned" | "external";
     planId?: string;
     resourceType?: "browser" | "browser_context" | "external_browser_session";
     releaseAttemptedAt?: string;
-    releasedAt?: string;
 }>;
 export declare const browserResourceLifecycleSummarySchema: z.ZodObject<{
     status: z.ZodEnum<["complete", "incomplete", "invalid"]>;
@@ -4954,24 +4954,24 @@ export declare const browserResourceLifecycleSummarySchema: z.ZodObject<{
         error?: string;
         scope?: string;
         provider?: "mcp" | "playwright";
+        releasedAt?: string;
         acquiredAt?: string;
         ownership?: "owned" | "external";
         planId?: string;
         resourceType?: "browser" | "browser_context" | "external_browser_session";
         releaseAttemptedAt?: string;
-        releasedAt?: string;
     }, {
         id?: string;
         status?: "released" | "open" | "retained" | "cleanup_failed";
         error?: string;
         scope?: string;
         provider?: "mcp" | "playwright";
+        releasedAt?: string;
         acquiredAt?: string;
         ownership?: "owned" | "external";
         planId?: string;
         resourceType?: "browser" | "browser_context" | "external_browser_session";
         releaseAttemptedAt?: string;
-        releasedAt?: string;
     }>, "many">;
 }, "strict", z.ZodTypeAny, {
     status?: "invalid" | "complete" | "incomplete";
@@ -4981,12 +4981,12 @@ export declare const browserResourceLifecycleSummarySchema: z.ZodObject<{
         error?: string;
         scope?: string;
         provider?: "mcp" | "playwright";
+        releasedAt?: string;
         acquiredAt?: string;
         ownership?: "owned" | "external";
         planId?: string;
         resourceType?: "browser" | "browser_context" | "external_browser_session";
         releaseAttemptedAt?: string;
-        releasedAt?: string;
     }[];
     eventCount?: number;
     invalidTimestampCount?: number;
@@ -5013,12 +5013,12 @@ export declare const browserResourceLifecycleSummarySchema: z.ZodObject<{
         error?: string;
         scope?: string;
         provider?: "mcp" | "playwright";
+        releasedAt?: string;
         acquiredAt?: string;
         ownership?: "owned" | "external";
         planId?: string;
         resourceType?: "browser" | "browser_context" | "external_browser_session";
         releaseAttemptedAt?: string;
-        releasedAt?: string;
     }[];
     eventCount?: number;
     invalidTimestampCount?: number;

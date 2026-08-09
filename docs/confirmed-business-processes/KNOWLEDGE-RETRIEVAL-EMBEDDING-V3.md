@@ -12,7 +12,9 @@
 → 独立召回两类候选并混合排序
 → 按真实Token预算选择完整分片
 → 主Agent上下文或签名MCP深读
-→ 引用和检索回执进入精确会话执行连续性
+→ 完整正文只进入当前Agent Loop
+→ 持久执行链替换为无正文来源投影，读取回执进入精确会话连续性
+→ 正式长期记忆准入成功后按精确引用回写Promotion证据
 ```
 
 文档内容始终是不可信资料层，不能覆盖系统指令、权限边界或用户当前要求。Agent使用事实时保留`[source:文件名#分片序号]`。
@@ -42,6 +44,10 @@
 
 自动上下文不截断分片正文。系统使用真实模型Token估算，在预算内选择完整分片；超出预算的分片不注入。第三方Agent可继续通过`ccm__knowledge_context`按签名范围搜索或分页读取原文。
 
+`query_knowledge`、`search_knowledge`和`read_knowledge_document`的完整返回值只供当前内存Loop使用。进入隐藏执行链、全局run/runtime、幂等结果、来源回执和审计前，统一替换为`ccm-context-source-tool-result-reference-v1`，只保存document/chunk定位、revision、checksum、citation、Token与query/result checksum，强制`contentStored:false`。重复来源调用不从幂等记录回放旧正文，而是重新读取当前active generation和文档版本。
+
+来源回执新写v2并兼容读取v1。项目durable-memory或群聊typed-memory只有在正式准入和原子提交成功后，才通过精确source refs回写`important/promoted`及无正文`promotionEvidence`；拒绝、未验收、撤销、跨session或模糊文本引用不提升。
+
 ## 索引与恢复
 
 每次重建生成独立的V3 generation。新generation完成解析、向量和checksum校验后才切换active pointer；失败继续服务上一份last-good索引，并在状态和回执标记`stale_served`。
@@ -56,6 +62,7 @@
 - 旧明文Key在读取时惰性迁移；接口地址中的内联凭据和敏感查询参数不会进入状态、签名或日志。
 - 新同步目录默认`global/restricted`并保存明确scope；旧字符串目录显示“历史共享范围”，不会静默改写原文档。
 - 页面提供准备/删除本地模型、修复缺失向量和清除失效索引入口；所有操作保留知识原文和历史版本。
+- 历史执行链不在启动时自动改写。管理员通过记忆中心先预览受影响数量、checksum、预计移除Token和未确认项，再显式执行并创建备份；源数据漂移会整体拒绝，维护任务可按job ID回滚。
 
 ## 关键接口
 
@@ -66,6 +73,9 @@
 - `POST /api/rag/repair-vectors`：重新生成失败、缺失或过期向量。
 - `DELETE /api/rag/index-cache`：只清除失效generation，保留active/last-good索引和文档原文。
 - 现有查询、问答和签名MCP接口保持兼容。
+- `POST /api/memory-center/context-source-maintenance/preview`：按精确scope/session生成无正文维护计划与`planChecksum`。
+- `POST /api/memory-center/context-source-maintenance/apply`：校验计划、原因和源checksum后执行无正文化及可验证Promotion回填。
+- `POST /api/memory-center/context-source-maintenance/rollback`：按维护job ID恢复备份，不删除知识原文或正式长期记忆。
 
 ## 验证证据
 

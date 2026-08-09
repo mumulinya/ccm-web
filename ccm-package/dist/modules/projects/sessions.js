@@ -46,6 +46,7 @@ exports.syncSessions = syncSessions;
 exports.getSessions = getSessions;
 exports.getSessionDetail = getSessionDetail;
 exports.createProjectSessionRecord = createProjectSessionRecord;
+exports.applyProjectSessionProvisionalTitle = applyProjectSessionProvisionalTitle;
 exports.bindProjectFeishuSession = bindProjectFeishuSession;
 exports.ensureProjectAutomationSession = ensureProjectAutomationSession;
 exports.appendProjectSessionTaskMessage = appendProjectSessionTaskMessage;
@@ -67,6 +68,7 @@ const provider_neutral_context_cache_1 = require("../../system/provider-neutral-
 const feishu_conversation_v2_1 = require("../collaboration/feishu-conversation-v2");
 const conversation_search_dirty_1 = require("../../system/conversation-search-dirty");
 const main_agent_post_compact_continuity_1 = require("../../system/main-agent-post-compact-continuity");
+const user_visible_agent_events_1 = require("../../system/user-visible-agent-events");
 exports.WEB_SESSIONS_DIR = path.join(utils_1.CCM_DIR, "web-sessions");
 function clearProjectMainDynamicContext(project, sessionId) {
     try {
@@ -488,6 +490,39 @@ function createProjectSessionRecord(projectName, name = "", source = "web", opti
     syncToFilesystemToCc(safeProject);
     return { project: safeProject, sessionId, name: sessionName, source: normalizedSource, session_kind: sessionData.session_kind, created: true };
 }
+function applyProjectSessionProvisionalTitle(project, sessionId, message) {
+    const safeProject = (0, project_validation_1.validateProjectName)(project);
+    const safeSessionId = (0, project_validation_1.validateSessionId)(sessionId);
+    const filePath = getSessionFilePath(safeProject, safeSessionId);
+    if (!fs.existsSync(filePath))
+        return { renamed: false, reason: "session_missing" };
+    const data = JSON.parse(fs.readFileSync(filePath, "utf-8"));
+    if (!(0, session_title_1.isSessionTitleAutoReplaceable)(data.name, data.title_origin || data.titleOrigin)) {
+        return { renamed: false, reason: "title_not_replaceable", name: data.name };
+    }
+    const files = message?.files || message?.attachments || [];
+    const generated = (0, session_title_1.generateProvisionalSessionTitle)({
+        scope: "project",
+        userMessage: String(message?.content || ""),
+        attachmentNames: files.map((file) => String(file?.name || file?.filename || "")).filter(Boolean),
+    });
+    if (!generated.title)
+        return { renamed: false, reason: "title_input_skipped", name: data.name, generated };
+    const now = new Date().toISOString();
+    data.name = generated.title;
+    data.title_origin = "provisional";
+    data.title_provisional_at = now;
+    data.updated_at = now;
+    fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
+    (0, conversation_search_dirty_1.markConversationSearchIndexDirty)(`project:${safeProject}:${safeSessionId}`);
+    syncToFilesystemToCc(safeProject);
+    (0, runtime_events_1.publishRuntimeEvent)("project", "project.session_title_changed", {
+        project: safeProject,
+        sessionId: safeSessionId,
+        source: "project-session-provisional-title",
+    });
+    return { renamed: true, name: data.name, generated };
+}
 function bindProjectFeishuSession(projectName, sessionId, targetId, action = "bind") {
     const project = requireActiveProject(projectName).project;
     const safeSessionId = (0, project_validation_1.validateSessionId)(sessionId);
@@ -561,7 +596,17 @@ function appendProjectSessionTaskMessage(projectName, sessionId, message) {
     fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
     (0, conversation_search_dirty_1.markConversationSearchIndexDirty)(`project:${safeProject}:${safeSessionId}`);
     syncToFilesystemToCc(safeProject);
-    if (normalized.role === "assistant" && String(normalized.content || "").trim()) {
+    if (normalized.role === "user") {
+        try {
+            applyProjectSessionProvisionalTitle(safeProject, safeSessionId, normalized);
+        }
+        catch (error) {
+            console.warn(`[项目会话] 临时命名失败 (${safeProject}/${safeSessionId})：${error?.message || error}`);
+        }
+    }
+    const hasStoredUserTitleInput = data.history.some((item) => item?.role === "user"
+        && ((0, session_title_1.isMeaningfulSessionTitleInput)(item?.content) || (item?.files || item?.attachments || []).length));
+    if (normalized.role === "assistant" && String(normalized.content || "").trim() && hasStoredUserTitleInput) {
         void scheduleProjectSessionAutoTitle(safeProject, safeSessionId).catch((error) => {
             console.warn(`[项目会话] 自动命名失败 (${safeProject}/${safeSessionId})：${error?.message || error}`);
         });
@@ -610,6 +655,21 @@ function upsertProjectSessionTaskMessage(projectName, sessionId, message) {
         status: String(normalized.taskExperience?.status || normalized.taskExperience?.phase || "changed").slice(0, 40),
         source: "project-main-agent-session-projection",
     });
+    if (normalized.role === "user") {
+        try {
+            applyProjectSessionProvisionalTitle(safeProject, safeSessionId, normalized);
+        }
+        catch (error) {
+            console.warn(`[项目会话] 临时命名失败 (${safeProject}/${safeSessionId})：${error?.message || error}`);
+        }
+    }
+    const hasStoredUserTitleInput = data.history.some((item) => item?.role === "user"
+        && ((0, session_title_1.isMeaningfulSessionTitleInput)(item?.content) || (item?.files || item?.attachments || []).length));
+    if (normalized.role === "assistant" && String(normalized.content || "").trim() && hasStoredUserTitleInput) {
+        void scheduleProjectSessionAutoTitle(safeProject, safeSessionId).catch((error) => {
+            console.warn(`[项目会话] 自动命名失败 (${safeProject}/${safeSessionId})：${error?.message || error}`);
+        });
+    }
     return existingIndex >= 0 ? data.history[existingIndex] : normalized;
 }
 function scheduleProjectSessionAutoTitle(project, sessionId, options = {}) {
@@ -624,7 +684,7 @@ function scheduleProjectSessionAutoTitle(project, sessionId, options = {}) {
         if (!fs.existsSync(filePath))
             return { renamed: false, reason: "session_missing" };
         const data = JSON.parse(fs.readFileSync(filePath, "utf-8"));
-        if (!(0, session_title_1.isSessionTitlePlaceholder)(data.name, data.title_origin || data.titleOrigin))
+        if (!(0, session_title_1.isSessionTitleAutoReplaceable)(data.name, data.title_origin || data.titleOrigin))
             return { renamed: false, reason: "title_already_set", name: data.name };
         const history = Array.isArray(data.history) ? data.history : [];
         const userIndex = history.findIndex((message) => message?.role === "user"
@@ -653,7 +713,7 @@ function scheduleProjectSessionAutoTitle(project, sessionId, options = {}) {
         if (!generated.title)
             return { renamed: false, reason: "title_input_skipped", name: data.name, generated };
         const latest = JSON.parse(fs.readFileSync(filePath, "utf-8"));
-        if (!(0, session_title_1.isSessionTitlePlaceholder)(latest.name, latest.title_origin || latest.titleOrigin))
+        if (!(0, session_title_1.isSessionTitleAutoReplaceable)(latest.name, latest.title_origin || latest.titleOrigin))
             return { renamed: false, reason: "title_changed_during_generation", name: latest.name };
         latest.name = generated.title;
         latest.title_origin = generated.source === "model" ? "model" : "fallback";
@@ -746,13 +806,23 @@ function handleSessionsApi(pathname, req, res, parsed) {
                 data.updated_at = new Date().toISOString();
                 fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
                 syncToFilesystemToCc(project);
+                let provisionalTitle = null;
+                if (!duplicate && normalizedMessage.role === "user") {
+                    provisionalTitle = applyProjectSessionProvisionalTitle(project, sessionId, normalizedMessage);
+                }
                 if (normalizedMessage.role === "assistant") {
                     (0, project_session_compaction_1.scheduleProjectSessionMemoryExtraction)(project, sessionId);
                     void scheduleProjectSessionAutoTitle(project, sessionId).catch((error) => {
                         console.warn(`[项目会话] 自动命名失败 (${project}/${sessionId})：${error?.message || error}`);
                     });
                 }
-                (0, utils_1.sendJson)(res, { success: true, count: data.history.length, name: data.name, duplicate });
+                (0, utils_1.sendJson)(res, {
+                    success: true,
+                    count: data.history.length,
+                    name: provisionalTitle?.name || data.name,
+                    title_origin: provisionalTitle?.renamed ? "provisional" : data.title_origin || "",
+                    duplicate,
+                });
             }
             catch (e) {
                 (0, utils_1.sendJson)(res, { error: e.message }, 400);
@@ -876,6 +946,14 @@ function handleSessionsApi(pathname, req, res, parsed) {
                     reason: "manual_slash_compact",
                     customInstructions: String(payload.customInstructions || payload.custom_instructions || "").trim(),
                 });
+                if (result?.compacted === true)
+                    (0, user_visible_agent_events_1.appendUserVisibleAgentEvent)({
+                        eventId: `project-compact:${sessionId}:${String(result?.boundary?.id || Date.now())}`,
+                        scope: "project", scopeId: project, exactSessionId: sessionId,
+                        generation: Number(result?.boundary?.generation || result?.boundaryGeneration || 0),
+                        eventType: "context_compacted",
+                        display: { title: "上下文已压缩", summary: "压缩完成，当前会话可以继续工作", status: "success" },
+                    });
                 (0, utils_1.sendJson)(res, { success: true, project, session_id: sessionId, mode: "model_required", ...result });
             }
             catch (e) {

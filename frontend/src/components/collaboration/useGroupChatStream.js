@@ -278,6 +278,7 @@ export function useGroupChatStream({
         id: clientMessageId,
         role: 'user',
         target: 'coordinator',
+        message_mode: directedInputFields?.message_mode || queuedTurn?.metadata?.message_mode || messageMode.value,
         content: `${msg || '请处理附件'}${attachmentText}`,
         timestamp: new Date().toISOString(),
         ...(taskSupplementTarget ? { task_id: taskSupplementTarget.taskId } : {}),

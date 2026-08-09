@@ -40,6 +40,7 @@ exports.resolveTaskAcceptancePolicy = resolveTaskAcceptancePolicy;
 exports.acceptanceModeForTask = acceptanceModeForTask;
 const crypto = __importStar(require("crypto"));
 const test_agent_settings_1 = require("../system/test-agent-settings");
+const hardening_policy_1 = require("../../test-agent/hardening-policy");
 const SNAPSHOT_WORKFLOWS = new Set(["daily_dev", "project_main_agent", "requirement_epic"]);
 function stable(value) {
     if (Array.isArray(value))
@@ -89,23 +90,34 @@ function buildTaskAcceptancePolicySnapshot(task, options = {}) {
         ? String(task?.project_session_id || task?.projectSessionId || task?.exact_session_id || task?.exactSessionId || "").trim()
         : String(task?.group_session_id || task?.groupSessionId || task?.exact_session_id || task?.exactSessionId || "").trim();
     const capturedAt = options.capturedAt || new Date().toISOString();
+    const hardening = (0, hardening_policy_1.buildTestAgentHardeningPolicy)({
+        task,
+        reviewPolicy: task?.test_agent_review_policy
+            || task?.workflow_meta?.project_main_plan?.verificationProfile
+            || task?.workflow_meta?.project_main_plan?.verification_profile
+            || null,
+    });
     const core = {
-        schema: "ccm-task-acceptance-policy-snapshot-v1",
-        version: 1,
+        schema: "ccm-task-acceptance-policy-snapshot-v2",
+        version: 2,
         task_id: String(task?.id || "").trim(),
         scope,
         scope_id: scopeId,
         exact_session_id: exactSessionId,
+        generation: Math.max(0, Math.floor(Number(task?.generation || task?.collaboration_generation || task?.workflow_meta?.generation || 0))),
         mode,
         test_agent_enabled: mode === "test_agent",
         max_review_rounds: mode === "test_agent" ? 3 : 1,
-        settings_revision: checksum({ enabled: settings.enabled, updated_at: settings.updated_at || "default" }),
+        settings_revision: checksum({ enabled: settings.enabled, updated_at: settings.updated_at || "default", hardening: hardening.checksum }),
+        hardening,
         captured_at: capturedAt,
     };
     return { ...core, checksum: checksum(core) };
 }
 function validateTaskAcceptancePolicySnapshot(task, snapshot = task?.acceptance_policy_snapshot) {
-    if (!snapshot || snapshot.schema !== "ccm-task-acceptance-policy-snapshot-v1" || snapshot.version !== 1) {
+    const legacyV1 = snapshot?.schema === "ccm-task-acceptance-policy-snapshot-v1" && snapshot?.version === 1;
+    const currentV2 = snapshot?.schema === "ccm-task-acceptance-policy-snapshot-v2" && snapshot?.version === 2;
+    if (!snapshot || (!legacyV1 && !currentV2)) {
         return { valid: false, reason: "acceptance_policy_snapshot_missing", snapshot: null };
     }
     const { checksum: supplied, ...core } = snapshot;
@@ -113,6 +125,9 @@ function validateTaskAcceptancePolicySnapshot(task, snapshot = task?.acceptance_
         return { valid: false, reason: "acceptance_policy_snapshot_checksum_mismatch", snapshot: null };
     if (String(snapshot.task_id || "") !== String(task?.id || ""))
         return { valid: false, reason: "acceptance_policy_task_mismatch", snapshot: null };
+    if (currentV2 && !(0, hardening_policy_1.validateTestAgentHardeningPolicy)(snapshot.hardening).valid) {
+        return { valid: false, reason: "acceptance_policy_hardening_invalid", snapshot: null };
+    }
     const rebuiltIdentity = buildTaskAcceptancePolicySnapshot({
         ...task,
         acceptance_mode: snapshot.mode,
@@ -121,7 +136,7 @@ function validateTaskAcceptancePolicySnapshot(task, snapshot = task?.acceptance_
     if (!rebuiltIdentity || rebuiltIdentity.scope !== snapshot.scope || rebuiltIdentity.scope_id !== snapshot.scope_id || rebuiltIdentity.exact_session_id !== snapshot.exact_session_id) {
         return { valid: false, reason: "acceptance_policy_scope_mismatch", snapshot: null };
     }
-    return { valid: true, reason: "ok", snapshot: snapshot };
+    return { valid: true, reason: legacyV1 ? "legacy_v1" : "ok", snapshot: snapshot };
 }
 function resolveTaskAcceptancePolicy(task, options = {}) {
     const validated = validateTaskAcceptancePolicySnapshot(task);

@@ -26,6 +26,7 @@ export interface SelfContainedWorkerHandoffInput {
     forbiddenScope?: any[];
     expectedFiles?: any[];
     doneCriteria?: any[];
+    communicationEnvelope?: any;
 }
 export declare function buildSelfContainedWorkerHandoff(input: SelfContainedWorkerHandoffInput): {
     schema: string;
@@ -37,6 +38,24 @@ export declare function buildSelfContainedWorkerHandoff(input: SelfContainedWork
     task: string;
     work_dir: string;
     agent_type: string;
+    communication_envelope: {
+        schema: string;
+        messageId: string;
+        correlationId: string;
+        taskId: string;
+        workItemId: string;
+        scope: string;
+        scopeId: string;
+        exactSessionId: string;
+        generation: number;
+        attempt: number;
+        leaseId: string;
+        senderAgentId: string;
+        receiverAgentId: string;
+        deadlineAt: string;
+        payloadChecksum: string;
+        contentStored: boolean;
+    };
     worker_context_packet: any;
     scope: {
         allowed: string[];
@@ -87,6 +106,7 @@ export declare function buildSelfContainedWorkerHandoff(input: SelfContainedWork
             has_done_criteria: boolean;
             has_receipt_schema: boolean;
             has_ack_gate: boolean;
+            has_agent_communication_v2: boolean;
             has_memory_freshness_gate: boolean;
             has_post_compact_reinjection_gate: boolean;
             has_post_compact_dispatch_marker: boolean;
@@ -135,6 +155,24 @@ export declare function runWorkerHandoffSelfTest(): {
         task: string;
         work_dir: string;
         agent_type: string;
+        communication_envelope: {
+            schema: string;
+            messageId: string;
+            correlationId: string;
+            taskId: string;
+            workItemId: string;
+            scope: string;
+            scopeId: string;
+            exactSessionId: string;
+            generation: number;
+            attempt: number;
+            leaseId: string;
+            senderAgentId: string;
+            receiverAgentId: string;
+            deadlineAt: string;
+            payloadChecksum: string;
+            contentStored: boolean;
+        };
         worker_context_packet: any;
         scope: {
             allowed: string[];
@@ -185,6 +223,7 @@ export declare function runWorkerHandoffSelfTest(): {
                 has_done_criteria: boolean;
                 has_receipt_schema: boolean;
                 has_ack_gate: boolean;
+                has_agent_communication_v2: boolean;
                 has_memory_freshness_gate: boolean;
                 has_post_compact_reinjection_gate: boolean;
                 has_post_compact_dispatch_marker: boolean;

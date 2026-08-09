@@ -710,7 +710,16 @@ function handleMusicApiPartA(pathname, req, res, parsed, ctx) {
             const source_statuses = {};
             for (const [name, result] of Object.entries({ local, netease, bilibili, douyin })) {
                 if (result.status === "fulfilled") {
-                    source_statuses[name] = { status: "success", result_count: result.value.length };
+                    const rows = Array.isArray(result.value) ? result.value : [];
+                    const entry = { status: "success", result_count: rows.length };
+                    if (name === "douyin" && rows.length > 0) {
+                        const first = rows[0];
+                        entry.channel = first?.searchChannel || "browser";
+                        entry.authenticated = !!first?.searchChannel && first.searchChannel === "official"
+                            ? null
+                            : (0, douyin_1.douyinPlatformStatus)().browser.authenticated;
+                    }
+                    source_statuses[name] = entry;
                 }
                 else {
                     const detail = (0, platform_http_1.publicMusicPlatformError)(result.reason);

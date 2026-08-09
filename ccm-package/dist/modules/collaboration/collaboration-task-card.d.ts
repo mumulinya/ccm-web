@@ -47,7 +47,7 @@ export declare function buildMainAgentRecoverySummary(task: any, phase: string, 
 };
 export declare function taskCardPhase(task: any, executions: any[]): string;
 export declare function taskCardGapLabel(item: any): string;
-export declare function userAgentRole(project: string): "项目" | "测试" | "前端" | "后端";
+export declare function userAgentRole(project: string): "测试" | "项目" | "前端" | "后端";
 export declare function userAgentProgress(worker: any): string;
 export declare function sanitizeUserAgentProgressText(value: any, fallback?: string, max?: number): string;
 export declare function normalizeUserAgentProgressStatus(status: any, phase?: string): "pending" | "completed" | "failed" | "blocked" | "running";
@@ -5911,6 +5911,46 @@ export declare function buildTaskCardView(task: any, executions: any[], sessions
         }[];
         targeted_rework: any[];
         next_action: string;
+    };
+    agent_communication: {
+        schema: string;
+        total: number;
+        active: number;
+        latest: {
+            messageId: string;
+            state: import("../../system/agent-communication-v2").AgentCommunicationState;
+            receiverAgentId: string;
+            generation: number;
+            attempt: number;
+            heartbeatAt: any;
+            leaseExpiresAt: any;
+            sideEffectState: any;
+            updatedAt: string;
+        };
+        states: {
+            [k: string]: number;
+        };
+        contentStored: boolean;
+    };
+    agentCommunication: {
+        schema: string;
+        total: number;
+        active: number;
+        latest: {
+            messageId: string;
+            state: import("../../system/agent-communication-v2").AgentCommunicationState;
+            receiverAgentId: string;
+            generation: number;
+            attempt: number;
+            heartbeatAt: any;
+            leaseExpiresAt: any;
+            sideEffectState: any;
+            updatedAt: string;
+        };
+        states: {
+            [k: string]: number;
+        };
+        contentStored: boolean;
     };
     agent_progress_summary: {
         schema: string;

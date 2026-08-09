@@ -15,7 +15,8 @@
 → tool_search按需加载低频Schema
 → 服务端复核ScopedToolCapabilityTokenV1
 → 工具执行与Token门禁
-→ tool_result写入同一Agent Loop
+→ 安全只读批次并行；副作用、Skill与发现操作串行
+→ tool_result写入同一Agent Loop，有进展则动态续环
 → 形成回答、计划、澄清或任务派发
 ```
 
@@ -24,6 +25,8 @@
 ## 3. 工具分层
 
 原生控制能力包括结构化澄清、Todo、计划模式、Skill调用、工具发现和现有任务状态机。澄清、Todo和计划通过主 Agent结构化决策字段进入现有状态机；它们不是可以绕开权限的任意执行接口。
+
+项目与群聊不再使用固定总工具轮数作为正常终止条件。每轮默认最多两个请求仅控制批量大小；只要出现新的工具签名、有效结果或未满足验收项，主Agent可以继续下一轮。历史`agentToolCallBudget`和`agentMaxModelTurns`在默认`adaptive`模式中是续环分段大小，用于审计和上下文重建；只有显式切换`bounded`兼容模式时才是硬上限。
 
 `ccm__workspace_readonly`提供12项受保护能力：目录、Glob、Grep、分段Read、定义、引用、项目配置、Git状态、Git差异、Git历史、运行状态和运行日志。基础四项Schema进入首轮上下文，其余八项先由`tool_search`发现并加载。
 
@@ -45,6 +48,8 @@ Skill首轮只提供名称、说明和内容hash。完整`SKILL.md`只在模型�
 
 主 Agent不注册`Edit`、`Write`、`Bash`、`NotebookEdit`或`Worktree`。实际源码修改、命令和工作树操作仍由项目子 Agent执行，并经过任务、RBAC、TestAgent和最终验收门禁。
 
+并行只采用正向证明：工作区只读工具、内置知识检索或`annotations.readOnlyHint=true`且可信的MCP可以在同一小批次执行，结果按请求顺序返回。`tool_search`会改变本轮目录，`invoke_skill`会改变Skill连续性，写入或未知MCP可能产生副作用，因此这些调用与其前后批次之间保持串行屏障。
+
 ## 5. 上下文、记忆与回放
 
 页面和API区分“已授权但未加载”“已加载Schema”和“已实际调用”。延迟目录只按名称投影计算Token，完整Schema只在`alwaysLoad`或ToolSearch加载后计算，工具结果只在真实调用后计算。Context Engine只统计本轮真实载荷；调用与结果保持成对写入精确会话隐藏执行账本，旧结果仅在满足MicroCompact条件时压缩。聊天正文不展示源码原文或内部协议。
@@ -63,7 +68,7 @@ Skill首轮只提供名称、说明和内容hash。完整`SKILL.md`只在模型�
 
 ## 6. 失败处理
 
-能力令牌无效、过期、跨作用域、工具未加载、结果超Token、MCP断开、敏感路径或语言服务不可用均失败关闭。失败结果返回同一Agent Loop，模型只能说明限制、继续缩小读取范围或向用户澄清，不能声称已经读取或完成。
+能力令牌无效、过期、跨作用域、工具未加载、结果超Token、MCP断开、敏感路径或语言服务不可用均失败关闭。失败结果返回同一Agent Loop，模型只能说明限制、继续缩小读取范围或向用户澄清，不能声称已经读取或完成。重复签名不重放工具；连续无进展达到阈值时写`no_progress`并停止，防止API空转。
 
 ## 7. 实现与验证入口
 
@@ -80,3 +85,10 @@ Skill首轮只提供名称、说明和内容hash。完整`SKILL.md`只在模型�
 - `scripts/internal-mcp-catalog-selftest.mjs`
 
 自动化验证不调用付费Provider。
+
+## 8. 页面回传
+
+工具不再只以聚合计数出现在页面。全局、项目、群聊会将每个工具开始、完成或失败投影成统一安全事件，展示名称、目标、状态、耗时和结果摘要；Skill fork与项目子Agent使用CC式紧凑Agent行。完整页面协议和安全边界见 [CC-STYLE-USER-VISIBLE-EXECUTION-FLOW.md](./CC-STYLE-USER-VISIBLE-EXECUTION-FLOW.md)。
+# 2026-08-09 CC级工具升级
+
+当前实现已增加真实 TS/JS Language Service、项目增量符号索引、定义/引用/实现/类型/调用层级/诊断工具、ToolSearch V2 多维评分、三类 Provider 原生工具归一化、Skill `context: fork`、Notebook结构化工具和安全Web工具。完整确认流程见 [CC-LEVEL-CODE-INTELLIGENCE-AND-TOOLS.md](./CC-LEVEL-CODE-INTELLIGENCE-AND-TOOLS.md)。语义服务缺失时必须返回 `capability_unavailable`，不得用 Grep 伪造语义关系。

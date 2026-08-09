@@ -2,6 +2,7 @@ import * as crypto from "crypto";
 import * as fs from "fs";
 import * as path from "path";
 import { CCM_DIR } from "../../core/utils";
+import { projectContextSourceToolResultForPersistence } from "../../system/context-source-tool-result-projection";
 import type { GlobalAgentRun, GlobalAgentToolRisk, GlobalAgentToolSpec } from "./loop";
 
 type HookPhase = "pre_tool_use" | "post_tool_use";
@@ -377,13 +378,16 @@ export function markGlobalAgentToolTodo(run: GlobalAgentRun, tool: string, statu
 }
 
 export function recordGlobalAgentRuntimeOutput(run: GlobalAgentRun, event: any) {
+  const persistedEvent = ["tool_completed", "clarification_required"].includes(String(event?.type || ""))
+    ? { ...event, observation: projectContextSourceToolResultForPersistence(event?.sourceToolName || event?.source_tool_name || event?.tool, event?.observation) }
+    : event;
   if (["tool_started", "tool_completed", "tool_failed", "clarification_required"].includes(String(event?.type || ""))) {
-    try { globalExecutionEventSink?.(run, event); } catch (error: any) {
+    try { globalExecutionEventSink?.(run, persistedEvent); } catch (error: any) {
       console.warn(`[全局执行账本] 工具事件写入失败 (${run.session_id || ""})：${error?.message || error}`);
     }
   }
   const state = getRunState(run);
-  state.output.push({ at: now(), ...compact(event, 3000) });
+  state.output.push({ at: now(), ...compact(persistedEvent, 3000) });
   state.output = state.output.slice(-MAX_OUTPUT_ITEMS);
   state.status = run.status;
   state.updated_at = now();

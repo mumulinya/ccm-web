@@ -474,6 +474,11 @@ export declare function parseSkillMarkdown(content: string, fallbackName?: strin
     description: string;
     prompt: string;
     content: string;
+    context: string;
+    allowedTools: string[];
+    agent: string;
+    model: string;
+    effort: string;
 };
 export declare function parseGithubSkillSource(value: string): {
     cloneUrl: string;
@@ -503,6 +508,11 @@ export declare function stageSkillPackage(item: any, skillPackagesDir?: string):
         description: string;
         prompt: string;
         content: string;
+        context: string;
+        allowedTools: string[];
+        agent: string;
+        model: string;
+        effort: string;
     };
     checksum: string;
     treeHash: string;

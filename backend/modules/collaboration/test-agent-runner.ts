@@ -6,6 +6,12 @@ import { CCM_DIR } from "../../core/utils";
 import type { TestAgentInvocationResult } from "../../test-agent/invocation";
 import { verifyTestAgentArtifactManifestFile } from "../../test-agent/artifact-verifier";
 import { resolveSafeRepositoryPath } from "../tools/git-workspace-runtime";
+import { reserveOperation, completeOperation } from "../../system/operation-registry";
+import {
+  projectTestAgentExecutionResultForPersistence,
+  projectTestAgentHandoffForPersistence,
+} from "../../test-agent/evidence-projection";
+import { captureTestAgentRuntimeFingerprint } from "../../test-agent/runtime-fingerprint";
 
 export type TestAgentRunnerMode = "plan" | "invocation";
 export type TestAgentRunnerStatus = "queued" | "running" | "completed" | "failed" | "cancelled" | "interrupted";
@@ -19,11 +25,13 @@ export interface TestAgentSourceProjectBinding {
   declaredFiles: string[];
   declaredFileHash: string;
   declaredFileEvidence?: Array<{ path: string; state: string; size: number; checksum: string; verified: boolean }>;
+  runtimeFingerprint?: any;
   fingerprint: string;
 }
 
 export interface TestAgentSourceBinding {
-  schema: "ccm-test-agent-source-binding-v1";
+  schema: "ccm-test-agent-source-binding-v1" | "ccm-test-agent-source-binding-v2";
+  version?: 1 | 2;
   capturedAt: string;
   fingerprint: string;
   projects: TestAgentSourceProjectBinding[];
@@ -60,6 +68,12 @@ export interface TestAgentRunnerRecord {
   attemptScope?: string;
   runtimeEnvFingerprint?: string;
   result?: any;
+  persistenceProjection?: {
+    schema: "ccm-test-agent-runner-record-persistence-v2";
+    contentStored: false;
+    redactedResultFields: number;
+    checksum: string;
+  };
 }
 
 export interface RunTestAgentJobInput {
@@ -161,7 +175,24 @@ function writeJsonAtomic(file: string, value: any) {
 
 function saveRecord(record: TestAgentRunnerRecord) {
   if (purgedRunIds.has(record.id)) return;
-  writeJsonAtomic(recordFile(record.id), record);
+  const projectedResult = record.result === undefined
+    ? undefined
+    : projectTestAgentExecutionResultForPersistence(record.result);
+  const persisted: any = {
+    ...record,
+    ...(projectedResult === undefined ? {} : { result: projectedResult }),
+    persistenceProjection: {
+      schema: "ccm-test-agent-runner-record-persistence-v2",
+      contentStored: false,
+      redactedResultFields: projectedResult?.persistenceProjection?.redactedCount || 0,
+      checksum: crypto.createHash("sha256").update(JSON.stringify({
+        id: record.id,
+        status: record.status,
+        result: projectedResult || null,
+      })).digest("hex"),
+    },
+  };
+  writeJsonAtomic(recordFile(record.id), persisted);
 }
 
 function loadRecords() {
@@ -243,6 +274,19 @@ function readLimited(file: string, max = 32 * 1024 * 1024) {
     return buffer.toString("utf-8");
   } finally {
     fs.closeSync(fd);
+  }
+}
+
+/** stdout/stderr are IPC scratch files, not durable evidence. They exist only
+ * while a child is running (or while a restarted runner parses its terminal
+ * JSON), and are removed immediately after the in-memory result is built. */
+function removeTransientOutputFiles(record: Pick<TestAgentRunnerRecord, "stdoutPath" | "stderrPath">) {
+  for (const file of [record.stdoutPath, record.stderrPath]) {
+    if (!file) continue;
+    const resolved = path.resolve(file);
+    const relative = path.relative(RUN_DIR, resolved);
+    if (relative.startsWith("..") || path.isAbsolute(relative)) continue;
+    try { if (fs.existsSync(resolved)) fs.unlinkSync(resolved); } catch {}
   }
 }
 
@@ -333,6 +377,16 @@ export function captureTestAgentSourceBinding(handoff: any): TestAgentSourceBind
       const declaredFiles = [...new Set((project?.changedFiles || project?.changed_files || []).map(String).filter(Boolean))].sort() as string[];
       const fileEvidence = declaredFileEvidence(project, realWorkDir);
       const fileHash = hash(fileEvidence);
+      const runtimeFingerprint = captureTestAgentRuntimeFingerprint({
+        workDir: realWorkDir,
+        targetUrl: project?.targetUrl || project?.target_url || project?.startupUrl || project?.startup_url || "",
+        providerFamily: project?.providerFamily || project?.provider_family || "",
+        providerCapabilityVersion: project?.providerCapabilityVersion || project?.provider_capability_version || "",
+        isolationMode: project?.isolationMode || project?.isolation_mode || "runner",
+        isolationEnvironmentId: project?.isolationEnvironmentId || project?.isolation_environment_id || "",
+        testTenantReference: project?.testTenantReference || project?.test_tenant_reference || "",
+        credentialReference: project?.credentialReference || project?.credential_reference || "",
+      });
       return {
         name: String(project?.name || `project-${index + 1}`),
         workDir,
@@ -342,11 +396,13 @@ export function captureTestAgentSourceBinding(handoff: any): TestAgentSourceBind
         declaredFiles,
         declaredFileHash: fileHash,
         declaredFileEvidence: fileEvidence,
-        fingerprint: hash({ realWorkDir: realWorkDir.toLowerCase(), gitHead, gitStatusHash, fileHash }),
+        runtimeFingerprint,
+        fingerprint: hash({ realWorkDir: realWorkDir.toLowerCase(), gitHead, gitStatusHash, fileHash, runtimeFingerprint: runtimeFingerprint.checksum }),
       };
     });
   return {
-    schema: "ccm-test-agent-source-binding-v1",
+    schema: "ccm-test-agent-source-binding-v2",
+    version: 2,
     capturedAt: nowIso(),
     fingerprint: hash(projects.map(project => project.fingerprint)),
     projects,
@@ -378,8 +434,9 @@ function resolveCliPath() {
 function writeHandoff(handoff: any) {
   ensureDirs();
   const id = safeId(handoff?.id, "test-agent-handoff");
-  const file = path.join(HANDOFF_DIR, `${id}-${hash(handoff).slice(0, 16)}.handoff.json`);
-  if (!fs.existsSync(file)) fs.writeFileSync(file, `${JSON.stringify(handoff, null, 2)}\n`, "utf-8");
+  const projected = projectTestAgentHandoffForPersistence(handoff);
+  const file = path.join(HANDOFF_DIR, `${id}-${hash(projected).slice(0, 16)}.handoff.json`);
+  if (!fs.existsSync(file)) fs.writeFileSync(file, `${JSON.stringify(projected, null, 2)}\n`, "utf-8");
   return file;
 }
 
@@ -428,6 +485,7 @@ async function waitForRecoveredRecord(record: TestAgentRunnerRecord) {
   if (!parsed && !record.error) record.error = "TestAgent process ended without a contract-valid result.";
   saveRecord(record);
   const result = resultFromRecord(record, true);
+  removeTransientOutputFiles(record);
   purgedRunIds.delete(record.id);
   return result;
 }
@@ -456,7 +514,9 @@ function finalizeRecord(record: TestAgentRunnerRecord, status: TestAgentRunnerSt
   record.finishedAt = nowIso();
   record.heartbeatAt = record.finishedAt;
   saveRecord(record);
-  return resultFromRecord(record, false);
+  const result = resultFromRecord(record, false);
+  removeTransientOutputFiles(record);
+  return result;
 }
 
 async function startJob(input: RunTestAgentJobInput, key: string): Promise<TestAgentRunnerResult> {
@@ -566,6 +626,15 @@ async function startJob(input: RunTestAgentJobInput, key: string): Promise<TestA
 export async function runTestAgentCliJob(input: RunTestAgentJobInput): Promise<TestAgentRunnerResult> {
   const source = captureTestAgentSourceBinding(input.handoff);
   const key = buildTestAgentRunnerJobKey(input, source.fingerprint);
+  const rawInput: any = input;
+  const operation = reserveOperation({
+    operationType: "test",
+    normalizedArguments: { taskId: input.taskId, handoff: input.handoff?.acceptanceCriteria || input.handoff?.acceptance_criteria || [], runner: rawInput.runner || rawInput.cli || "test-agent" },
+    scope: rawInput.scope || "project",
+    target: input.taskId,
+    repoStateFingerprint: source.fingerprint,
+    toolVersion: rawInput.runner || rawInput.cli || "test-agent",
+  });
   const active = activeByKey.get(key);
   if (active) return active;
 
@@ -577,7 +646,9 @@ export async function runTestAgentCliJob(input: RunTestAgentJobInput): Promise<T
     && existing.sourceStable !== false
     && (existing.status === "completed" || existing.status === "failed")
   ) {
-    return resultFromRecord(existing, true);
+    const reused = resultFromRecord(existing, true);
+    completeOperation(operation.record.operationId, { status: "succeeded", evidenceIds: existing.result?.evidenceIds || [] });
+    return reused;
   }
   if (existing?.status === "running" && processAlive(existing.pid)) {
     const recovered = waitForRecoveredRecord(existing);
@@ -585,7 +656,13 @@ export async function runTestAgentCliJob(input: RunTestAgentJobInput): Promise<T
     try { return await recovered; } finally { activeByKey.delete(key); }
   }
 
-  const promise = startJob(input, key);
+  const promise = startJob(input, key).then((result: any) => {
+    completeOperation(operation.record.operationId, { status: result?.status === "completed" || result?.status === "failed" ? "succeeded" : "failed", evidenceIds: result?.evidenceIds || [] });
+    return result;
+  }).catch(error => {
+    completeOperation(operation.record.operationId, { status: "failed" });
+    throw error;
+  });
   activeByKey.set(key, promise);
   try { return await promise; } finally { activeByKey.delete(key); }
 }
@@ -638,6 +715,7 @@ export function reconcileTestAgentRunnerRecords() {
     record.heartbeatAt = record.finishedAt;
     record.recoveredAfterRestart = true;
     saveRecord(record);
+    removeTransientOutputFiles(record);
     interrupted += record.status === "interrupted" ? 1 : 0;
   }
   const retention = pruneTestAgentRunnerRecords();

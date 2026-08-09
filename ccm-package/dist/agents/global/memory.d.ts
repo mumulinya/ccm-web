@@ -131,6 +131,20 @@ export declare function appendGlobalAgentExecutionEvent(sessionIdInput: string, 
     status: "error" | "ok" | "running";
     payload: any;
 };
+export declare function previewGlobalTranscriptContextSourceMaintenance(sessionIdInput: string): {
+    file: string;
+    fileChecksum: string;
+    changed: number;
+    removedTokens: number;
+    contentStored: boolean;
+};
+export declare function applyGlobalTranscriptContextSourceMaintenance(plan: any, backupFile: string): {
+    updated: number;
+    backupFile: string;
+};
+export declare function rollbackGlobalTranscriptContextSourceMaintenance(file: string, backupFile: string): {
+    restored: number;
+};
 export declare function loadGlobalAgentMemory(options?: {
     recover?: boolean;
 }): any;

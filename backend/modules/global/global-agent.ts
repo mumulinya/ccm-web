@@ -11,7 +11,13 @@ import { createGlobalAgentDirectDispatchRuntime } from "./global-agent-direct-di
 import { createGlobalAgentTestAgentRelay } from "./global-agent-test-agent-relay";
 import { createGlobalAgentHistoryRuntime } from "./global-agent-history";
 import { createGlobalAgentStatusRuntime } from "./global-agent-status";
-import { generateSessionTitleWithModel, isMeaningfulSessionTitleInput, isSessionTitlePlaceholder } from "../../system/session-title";
+import {
+  generateProvisionalSessionTitle,
+  generateSessionTitleWithModel,
+  isMeaningfulSessionTitleInput,
+  isSessionTitleAutoReplaceable,
+  isSessionTitlePlaceholder,
+} from "../../system/session-title";
 import { publishRuntimeEvent } from "../../system/runtime-events";
 import { clearMainAgentPostCompactContinuity } from "../../system/main-agent-post-compact-continuity";
 import * as fs from "fs";
@@ -201,15 +207,19 @@ const globalAgentHistoryRuntime = createGlobalAgentHistoryRuntime({
   GLOBAL_AGENT_HISTORY_LIMIT,
   GLOBAL_AGENT_SESSION_LIMIT,
   buildGlobalVisibleReplyContent,
+  generateProvisionalSessionTitle,
   generateSessionTitle: generateSessionTitleWithModel,
   ingestGlobalAgentConversation,
   isMeaningfulSessionTitleInput,
+  isSessionTitleAutoReplaceable,
   isSessionTitlePlaceholder,
   onSessionTitleChanged: (session: any) => {
-    if (String(session?.source || "") !== "feishu") return;
-    publishRuntimeEvent("feishu", "feishu.session_title_changed", {
+    const scope = String(session?.source || "") === "feishu" ? "feishu" : "global";
+    publishRuntimeEvent(scope, `${scope}.session_title_changed`, {
       sessionId: String(session?.id || ""),
-      source: "global-session-auto-title",
+      title: String(session?.name || ""),
+      titleOrigin: String(session?.titleOrigin || ""),
+      source: "global-session-title",
     });
   },
   writeGlobalJsonAtomic,

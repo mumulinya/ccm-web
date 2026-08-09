@@ -4,6 +4,7 @@ import * as crypto from "crypto";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
+import { extractStructuredContextSourceRefs } from "../../system/main-agent-context-source-continuity";
 import {
   CCM_DIR,
 } from "../../core/utils";
@@ -689,6 +690,17 @@ export function addDistilledCandidate(candidates: any[], category: GroupTypedMem
     text: bounded,
     checksum: key,
     memoryAdmission: overrides.memoryAdmission || normalizeGroupLogMemoryAdmission(message),
+    sourceRefs: extractStructuredContextSourceRefs(
+      overrides.sourceRefs,
+      overrides.source_refs,
+      message?.sourceRefs,
+      message?.source_refs,
+      message?.contextSourceRefs,
+      message?.context_source_refs,
+      message?.citations,
+      message?.evidence,
+      bounded,
+    ),
     ...(overrides.confirmation ? { confirmation: overrides.confirmation } : {}),
   });
 }

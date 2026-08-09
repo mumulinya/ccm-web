@@ -105,7 +105,7 @@ const showAddSkill = ref(false)
 const editingMcp = ref(null)
 
 // 新建表单
-const newSkill = ref({ name: '', description: '', prompt: '' })
+const newSkill = ref({ name: '', description: '', prompt: '', context: 'inline', allowedTools: [], agent: '', model: '', effort: '' })
 
 const isInternalSkill = (skill) => skill?.origin === 'internal'
   || skill?.scope === 'ccm-internal'
@@ -1488,7 +1488,7 @@ const submitAddSkill = async () => {
   try {
     await toolsApi.skills.create({ ...newSkill.value, enabled: true, createOnly: true })
     showAddSkill.value = false
-    newSkill.value = { name: '', description: '', prompt: '' }
+    newSkill.value = { name: '', description: '', prompt: '', context: 'inline', allowedTools: [], agent: '', model: '', effort: '' }
     await loadTools()
     toast.success('Skill 已添加并同步')
   } catch (error) { toast.error(`添加失败：${error.message}`) }

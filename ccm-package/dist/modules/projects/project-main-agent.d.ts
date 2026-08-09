@@ -8,6 +8,10 @@ export type ProjectMainWorkItem = {
     dependsOn: string[];
     status: "pending" | "running" | "awaiting_review" | "completed" | "failed";
     attempts: number;
+    unresolvedCriteria?: string[];
+    allowedFiles?: string[];
+    forbiddenFiles?: string[];
+    repairOfWorkItemId?: string;
     output?: string;
     fileChanges?: any;
 };
@@ -60,6 +64,11 @@ export type ProjectMainPlanRevisionV1 = {
     source_snapshot_checksum: string;
     requested_at: string;
     completed_at: string;
+    inheritance?: {
+        schema: "ccm-plan-inheritance-v1";
+        checksum: string;
+        rows: any[];
+    };
 };
 export type ProjectMainWorkerResult = {
     success: boolean;
@@ -99,6 +108,16 @@ export declare function runProjectMainAgentFirstTurn(input: {
     toolResults: any[];
     turnDecision: import("../../agents/main-agent-turn").MainAgentTurnDecisionV1;
     turnReceipt: import("../../agents/main-agent-turn").MainAgentTurnReceiptV1;
+    mainAgentToolUsage: {
+        schema: string;
+        mode: import("../../system/agent-loop-budget").AgentLoopMode;
+        modelCalls: number;
+        toolRounds: number;
+        calls: number;
+        continuationSegments: number;
+        noProgressCount: number;
+        stopReason: string;
+    };
 }>;
 export declare function planProjectMainTask(input: {
     project: string;

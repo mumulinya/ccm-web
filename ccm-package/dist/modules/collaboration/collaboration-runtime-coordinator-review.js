@@ -79,6 +79,7 @@ const fs = __importStar(require("fs"));
 const crypto = __importStar(require("crypto"));
 const utils_1 = require("../../core/utils");
 const unified_task_scheduler_1 = require("../../system/unified-task-scheduler");
+const agent_communication_v2_1 = require("../../system/agent-communication-v2");
 const db_1 = require("../../core/db");
 const group_orchestrator_1 = require("./group-orchestrator");
 const display_1 = require("./display");
@@ -681,6 +682,42 @@ function finalizeTaskKernel(task, execution, deliverySummary, state, message) {
     return rootGreen;
 }
 // 队列处理
+function settleTaskAgentCommunication(taskId, outcome, evidence = {}) {
+    const latest = (0, db_1.loadTasks)().find((item) => item.id === taskId);
+    const ids = Array.from(new Set([
+        String(latest?.agent_communication_message_id || ""),
+        ...(0, agent_communication_v2_1.listAgentCommunications)({ taskId, limit: 100 })
+            .filter((item) => item.messageType === "task_dispatch")
+            .map((item) => String(item.messageId || "")),
+    ].filter(Boolean)));
+    const settledRows = [];
+    for (const messageId of ids) {
+        try {
+            const directIdentity = messageId === String(latest?.agent_communication_message_id || "") ? {
+                expectedAttempt: Number(latest?.agent_communication_attempt || 0),
+                expectedLeaseId: String(latest?.agent_communication_lease_id || ""),
+            } : {};
+            const settled = (0, agent_communication_v2_1.finalizeAgentCommunication)(messageId, outcome, { ...evidence, ...directIdentity });
+            const envelope = settled?.envelope || (0, agent_communication_v2_1.getAgentCommunication)(messageId, { includeEvents: false, includeReceipts: false });
+            settledRows.push({ messageId, state: envelope?.state || outcome });
+        }
+        catch (error) {
+            (0, logs_1.addTaskLog)(taskId, "warning", `Agent Communication验收状态写入失败，可通过reconcile重试：${String(error?.message || error).slice(0, 300)}`);
+        }
+    }
+    if (!settledRows.length)
+        return null;
+    (0, collaboration_runtime_runtime_tools_1.updateTask)(taskId, { agent_communication_state: settledRows.every(row => row.state === "completed") ? "completed" : settledRows[0].state });
+    (0, logs_1.appendTaskTimelineEvent)(taskId, {
+        type: "agent_communication_terminal",
+        title: outcome === "accepted" ? "CCM 已生成最终验收回执" : "CCM 已记录通信验收结果",
+        detail: `${settledRows.length} 条通信 · ${settledRows.map(row => row.state).join("/")}`,
+        status: outcome === "accepted" ? "ok" : "warn",
+        phase: outcome === "accepted" ? "done" : "reviewing",
+        data: { messages: settledRows, content_stored: false },
+    });
+    return settledRows;
+}
 async function processTargetQueue(targetKey, ctx, testHooks = {}) {
     if (collaboration_runtime_task_queue_1.runningTasks.has(targetKey)) {
         console.log(`[任务队列] [${targetKey}] 正在执行任务，等待中...`);
@@ -766,8 +803,11 @@ async function processTargetQueue(targetKey, ctx, testHooks = {}) {
                 await ctx.onTaskStatusChange?.(startedTask, "in_progress");
                 (0, logs_1.addTaskLog)(taskId, "info", `调用 Agent 执行任务...`);
                 const executeCurrentTask = () => (testHooks.executeTask || executeTask)(startedTask, ctx);
+                const workspaceMutationLane = startedTask.queue_scope === "isolated_parallel"
+                    ? `worktree:${String(startedTask.execution_workspace?.worktree_path || startedTask.worktree_path || startedTask.id)}`
+                    : (0, unified_task_scheduler_1.canonicalWorkspaceMutationLane)((0, utils_1.getWorkDirForProject)(startedTask.target_project), `workspace:project:${startedTask.target_project || "unknown"}`);
                 const execution = (0, collaboration_runtime_status_helpers_1.taskRequiresCodeChanges)(startedTask)
-                    ? await (0, unified_task_scheduler_1.withUnifiedWorkspaceMutationLane)((0, unified_task_scheduler_1.canonicalWorkspaceMutationLane)((0, utils_1.getWorkDirForProject)(startedTask.target_project), `workspace:project:${startedTask.target_project || "unknown"}`), executeCurrentTask)
+                    ? await (0, unified_task_scheduler_1.withUnifiedWorkspaceMutationLane)(workspaceMutationLane, executeCurrentTask)
                     : await executeCurrentTask();
                 const result = execution.result || execution.report || "";
                 const latestWithFollowups = (0, db_1.loadTasks)().find((item) => item.id === taskId) || startedTask;
@@ -867,6 +907,11 @@ async function processTargetQueue(targetKey, ctx, testHooks = {}) {
                         failed_at: coordinationAcceptance.accepted ? undefined : completedAt,
                         execution_kernel: { execution_id: task.id, state: coordinationAcceptance.accepted ? "succeeded" : "failed", green, updated_at: completedAt },
                     }) || task;
+                    settleTaskAgentCommunication(task.id, coordinationAcceptance.accepted ? "accepted" : "failed", {
+                        summary: coordinationAcceptance.reason,
+                        verificationResults: coordinationAcceptance.verification || [],
+                        result: { ...(execution.receipt || {}), filesChanged: workspaceFiles },
+                    });
                     (0, agent_sessions_1.closeTaskAgentSessions)({ taskId, groupId: task.group_id || undefined }, coordinationAcceptance.accepted ? "协作工作项已交付，等待主 Agent 合并" : "协作工作项未通过证据门禁");
                     (0, collaboration_runtime_task_queue_1.updateGroupTaskInlineStatus)(settledTask, coordinationAcceptance.accepted ? "done" : "failed", coordinationAcceptance.reason);
                     (0, logs_1.addTaskLog)(task.id, coordinationAcceptance.accepted ? "success" : "warning", coordinationAcceptance.reason);
@@ -888,6 +933,7 @@ async function processTargetQueue(targetKey, ctx, testHooks = {}) {
                         reasoning_loop: deliverySummary.reasoning_loop,
                         acceptance_state: "blocked",
                     }) || { ...task, status: "blocked", result: result.substring(0, 500) };
+                    settleTaskAgentCommunication(taskId, "failed", { summary: detail, result: execution.receipt || execution });
                     (0, collaboration_runtime_task_queue_1.updateGroupTaskInlineStatus)(blockedTask, "failed", detail);
                     finalizeTaskKernel(task, execution, deliverySummary, "failed", detail);
                     (0, logs_1.addTaskLog)(taskId, "warning", `任务已阻塞：${detail}`);
@@ -910,6 +956,7 @@ async function processTargetQueue(targetKey, ctx, testHooks = {}) {
                         delivery_summary: deliverySummary,
                         reasoning_loop: deliverySummary.reasoning_loop,
                     }) || { ...task, status: "failed", result: result.substring(0, 500) };
+                    settleTaskAgentCommunication(taskId, "failed", { summary: execution.detail || "Agent 回执失败", result: execution.receipt || execution });
                     (0, collaboration_runtime_task_queue_1.updateGroupTaskInlineStatus)(failedTask, "failed", execution.detail || "Agent 回执失败");
                     finalizeTaskKernel(task, execution, deliverySummary, "failed", execution.detail || "Agent 回执失败");
                     (0, logs_1.addTaskLog)(taskId, "error", `❌ 任务执行失败：${execution.detail || "Agent 回执失败"}`);
@@ -941,6 +988,7 @@ async function processTargetQueue(targetKey, ctx, testHooks = {}) {
                             reasoning_loop: deliverySummary.reasoning_loop,
                             ...(0, rework_policy_1.buildReworkExhaustedUpdate)(detail, { path: "group_review" }),
                         }) || task;
+                        settleTaskAgentCommunication(taskId, "failed", { summary: detail, result: execution.receipt || execution });
                         (0, collaboration_runtime_task_queue_1.updateGroupTaskInlineStatus)(blockedTask, "failed", detail);
                         finalizeTaskKernel(task, execution, deliverySummary, "failed", detail);
                         (0, logs_1.addTaskLog)(taskId, "warning", detail);
@@ -970,6 +1018,7 @@ async function processTargetQueue(targetKey, ctx, testHooks = {}) {
                             reasoning_loop: finalizedDeliverySummary.reasoning_loop,
                             ...(0, rework_policy_1.buildReworkExhaustedUpdate)(detail, { path: "group_review" }),
                         }) || task;
+                        settleTaskAgentCommunication(taskId, "failed", { summary: detail, result: execution.receipt || execution });
                         (0, collaboration_runtime_task_queue_1.updateGroupTaskInlineStatus)(blockedTask, "failed", detail);
                         finalizeTaskKernel(task, finalizedExecution, finalizedDeliverySummary, "failed", detail);
                         (0, logs_1.addTaskLog)(taskId, "warning", detail);
@@ -992,6 +1041,11 @@ async function processTargetQueue(targetKey, ctx, testHooks = {}) {
                         daily_dev_execution_readiness: null,
                         completed_at: new Date().toISOString()
                     }) || { ...task, status: "done", result: result.substring(0, 500) };
+                    settleTaskAgentCommunication(taskId, "accepted", {
+                        summary: execution.detail || "验收通过",
+                        verificationResults: finalizedDeliverySummary?.verification_executed || [],
+                        result: execution.receipt || execution,
+                    });
                     const projectMemoryResult = (0, memory_2.recordAcceptedProjectDeliveryMemory)({ task: completedTask, deliverySummary: finalizedDeliverySummary });
                     if (projectMemoryResult.committed)
                         (0, logs_1.addTaskLog)(taskId, "info", `项目长期记忆已完成验收后提交：${projectMemoryResult.projects.length} 个项目，${projectMemoryResult.durableCandidateCount} 条长期记录`);
@@ -1035,6 +1089,7 @@ async function processTargetQueue(targetKey, ctx, testHooks = {}) {
                                 reasoning_loop: finalizedPromotedSummary.reasoning_loop,
                                 ...(0, rework_policy_1.buildReworkExhaustedUpdate)(detail, { path: "group_review" }),
                             }) || task;
+                            settleTaskAgentCommunication(taskId, "failed", { summary: detail, result: execution.receipt || execution });
                             (0, collaboration_runtime_task_queue_1.updateGroupTaskInlineStatus)(blockedTask, "failed", detail);
                             finalizeTaskKernel(task, finalizedPromotedExecution, finalizedPromotedSummary, "failed", detail);
                             (0, logs_1.addTaskLog)(taskId, "warning", detail);
@@ -1057,6 +1112,11 @@ async function processTargetQueue(targetKey, ctx, testHooks = {}) {
                             daily_dev_execution_readiness: null,
                             completed_at: new Date().toISOString()
                         }) || { ...task, status: "done", result: result.substring(0, 500) };
+                        settleTaskAgentCommunication(taskId, "accepted", {
+                            summary: promotedExecution.detail,
+                            verificationResults: finalizedPromotedSummary?.verification_executed || [],
+                            result: execution.receipt || execution,
+                        });
                         const projectMemoryResult = (0, memory_2.recordAcceptedProjectDeliveryMemory)({ task: completedTask, deliverySummary: finalizedPromotedSummary });
                         if (projectMemoryResult.committed)
                             (0, logs_1.addTaskLog)(taskId, "info", `项目长期记忆已完成验收后提交：${projectMemoryResult.projects.length} 个项目，${projectMemoryResult.durableCandidateCount} 条长期记录`);
@@ -1088,6 +1148,10 @@ async function processTargetQueue(targetKey, ctx, testHooks = {}) {
                                 ? { ...(task.collaboration_state || {}), phase: "reworking", needs_user: false, updated_at: new Date().toISOString() }
                                 : { ...(task.collaboration_state || {}), phase: "needs_user", needs_user: true, updated_at: new Date().toISOString() },
                         }) || { ...task, status: shouldRequeue ? "pending" : "blocked", result: result.substring(0, 500) };
+                        settleTaskAgentCommunication(taskId, shouldRequeue ? "rejected" : "failed", {
+                            summary: execution.detail || "等待补充信息或返工",
+                            result: execution.receipt || execution,
+                        });
                         (0, collaboration_runtime_task_queue_1.updateGroupTaskInlineStatus)(waitingTask, shouldRequeue ? "pending" : "failed", execution.detail || "等待补充信息或返工");
                         finalizeTaskKernel(task, execution, deliverySummary, shouldRequeue ? "reviewing" : "failed", execution.detail || "等待补充信息或返工");
                         (0, logs_1.addTaskLog)(taskId, "warning", `任务仍需继续：${execution.detail || "验收未完成"}`);
@@ -1103,6 +1167,21 @@ async function processTargetQueue(targetKey, ctx, testHooks = {}) {
             }
             catch (error) {
                 console.error(`[任务队列] [${targetKey}] 任务执行失败: ${task.title}`, error.message);
+                if (String(error?.code || "") === "CCM_AGENT_COMMUNICATION_CAPACITY_WAIT") {
+                    const capacity = error?.capacity || {};
+                    const waitingTask = (0, collaboration_runtime_runtime_tools_1.updateTask)(taskId, {
+                        status: "pending",
+                        queue_state: "capacity_wait",
+                        queue_capacity_reason: capacity.reason || "capacity_limit",
+                        queue_position: capacity.position || 1,
+                        status_detail: `第三方 Agent 并发容量已满，保留队列等待（${capacity.reason || "capacity_limit"}）`,
+                    }) || task;
+                    (0, logs_1.addTaskLog)(taskId, "info", waitingTask.status_detail);
+                    (0, logs_1.appendTaskTimelineEvent)(taskId, { type: "agent_capacity_wait", title: "等待第三方 Agent 并发容量", detail: waitingTask.status_detail, status: "active", phase: "queued", data: { reason: capacity.reason || "capacity_limit", position: capacity.position || 1 } });
+                    await ctx.onTaskStatusChange?.(waitingTask, "waiting", waitingTask.status_detail);
+                    enqueueFollowupAfterRound = true;
+                    continue;
+                }
                 const failure = (0, execution_kernel_1.classifyExecutionFailure)(error);
                 const latestWithFollowups = (0, db_1.loadTasks)().find((item) => item.id === taskId) || task;
                 const alreadyInterrupted = latestWithFollowups?.interruption_receipt?.schema === "ccm-task-interruption-receipt-v1"
@@ -1205,6 +1284,10 @@ async function processTargetQueue(targetKey, ctx, testHooks = {}) {
                     delivery_summary: failedDeliverySummary,
                     reasoning_loop: failedDeliverySummary.reasoning_loop,
                 }) || { ...task, status: cancelled ? "cancelled" : "failed", result: cancelled ? "任务已取消" : `执行失败: ${error.message}` };
+                settleTaskAgentCommunication(taskId, cancelled ? "cancelled" : "failed", {
+                    summary: cancelled ? "任务已由用户取消" : String(error.message || "执行失败"),
+                    sideEffectState: failedTask.git_commit_receipt || failedTask.deployment_receipt ? "uncertain" : "none",
+                });
                 (0, collaboration_runtime_task_queue_1.updateGroupTaskInlineStatus)(failedTask, cancelled ? "cancelled" : "failed", cancelled ? "任务已由用户取消" : String(error.message || "执行失败"));
                 finalizeTaskKernel(task, failedExecution, failedTask.delivery_summary, cancelled ? "cancelled" : "failed", cancelled ? "任务已由用户取消" : error.message);
                 if (cancelled) {

@@ -124,16 +124,19 @@ const globalAgentHistoryRuntime = (0, global_agent_history_1.createGlobalAgentHi
     GLOBAL_AGENT_HISTORY_LIMIT,
     GLOBAL_AGENT_SESSION_LIMIT,
     buildGlobalVisibleReplyContent: loop_1.buildGlobalVisibleReplyContent,
+    generateProvisionalSessionTitle: session_title_1.generateProvisionalSessionTitle,
     generateSessionTitle: session_title_1.generateSessionTitleWithModel,
     ingestGlobalAgentConversation: memory_2.ingestGlobalAgentConversation,
     isMeaningfulSessionTitleInput: session_title_1.isMeaningfulSessionTitleInput,
+    isSessionTitleAutoReplaceable: session_title_1.isSessionTitleAutoReplaceable,
     isSessionTitlePlaceholder: session_title_1.isSessionTitlePlaceholder,
     onSessionTitleChanged: (session) => {
-        if (String(session?.source || "") !== "feishu")
-            return;
-        (0, runtime_events_1.publishRuntimeEvent)("feishu", "feishu.session_title_changed", {
+        const scope = String(session?.source || "") === "feishu" ? "feishu" : "global";
+        (0, runtime_events_1.publishRuntimeEvent)(scope, `${scope}.session_title_changed`, {
             sessionId: String(session?.id || ""),
-            source: "global-session-auto-title",
+            title: String(session?.name || ""),
+            titleOrigin: String(session?.titleOrigin || ""),
+            source: "global-session-title",
         });
     },
     writeGlobalJsonAtomic,

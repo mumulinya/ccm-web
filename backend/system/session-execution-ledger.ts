@@ -1,4 +1,5 @@
 import * as crypto from "crypto";
+import { projectContextSourceToolResultForPersistence } from "./context-source-tool-result-projection";
 
 export type SessionExecutionEventType = "tool_use" | "tool_result";
 
@@ -58,7 +59,9 @@ export function createSessionExecutionEvent(input: Partial<SessionExecutionEvent
     traceId: String(input.traceId || ""),
     anchorMessageId: String(input.anchorMessageId || ""),
     status,
-    payload: sanitizeSessionExecutionValue(input.payload ?? null),
+    payload: sanitizeSessionExecutionValue(input.type === "tool_result"
+      ? projectContextSourceToolResultForPersistence(input.toolName, input.payload ?? null)
+      : input.payload ?? null),
   };
   const toolCallId = normalized.toolCallId || `tc_${hash([normalized.runId, normalized.toolName, timestamp, normalized.type])}`;
   return {

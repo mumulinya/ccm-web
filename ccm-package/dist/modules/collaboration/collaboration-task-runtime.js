@@ -15,6 +15,7 @@ exports.startAgentRecoveryMonitor = startAgentRecoveryMonitor;
 exports.stopAgentRecoveryMonitor = stopAgentRecoveryMonitor;
 exports.startTaskWatchdog = startTaskWatchdog;
 exports.stopTaskWatchdog = stopTaskWatchdog;
+const agent_communication_v2_1 = require("../../system/agent-communication-v2");
 const db_1 = require("../../core/db");
 const provider_task_circuit_breaker_1 = require("./provider-task-circuit-breaker");
 const agent_qa_service_1 = require("./agent-qa-service");
@@ -184,6 +185,7 @@ function createAndQueueTask(task, ctx) {
 }
 function resumeTaskQueues(ctx, options = {}) {
     bindTaskRuntimeCollabCtx(ctx);
+    const communicationRecovery = (0, agent_communication_v2_1.reconcileAgentCommunications)();
     const testAgentRunnerRecovery = (0, test_agent_runner_1.reconcileTestAgentRunnerRecords)();
     const traceBackfilled = (0, collaboration_1.backfillTaskTraceIds)();
     const tasks = (0, db_1.loadTasks)();
@@ -288,6 +290,41 @@ function resumeTaskQueues(ctx, options = {}) {
                 message: recoveryDecision.user_headline || recoveryDecision.reason,
             });
             continue;
+        }
+        const existingCommunicationId = String(task.agent_communication_message_id || "");
+        const existingCommunication = existingCommunicationId
+            ? (0, agent_communication_v2_1.getAgentCommunication)(existingCommunicationId, { includeEvents: false, includeReceipts: false })
+            : null;
+        if (!existingCommunication && !existingCommunicationId) {
+            const bridgeGeneration = Math.max(1, Number(task.agent_communication_generation || task.generation || 0) + 1);
+            const scope = task.group_id ? "group" : task.global_mission_id ? "global" : "project";
+            const scopeId = String(task.group_id || task.global_mission_id || task.target_project || task.id);
+            const exactSessionId = String(task.group_session_id || task.groupSessionId || task.project_session_id || task.projectSessionId || task.task_agent_session_id || task.id);
+            const bridge = (0, agent_communication_v2_1.bridgeLegacyAgentCommunication)({
+                taskId: task.id,
+                workItemId: String(task.work_item_id || task.workItemId || task.id),
+                scope,
+                scopeId,
+                exactSessionId,
+                generation: bridgeGeneration,
+                attempt: Math.max(1, Number(task.retry_count || 0) + 1),
+                senderAgentId: task.group_id ? "ccm-group-main-agent" : task.global_mission_id ? "ccm-global-agent" : "ccm-project-main-agent",
+                receiverAgentId: String(task.target_project || "unassigned-agent"),
+                legacySchema: "ccm-task-v1",
+                legacyId: task.id,
+                legacyStatus: task.status,
+                payload: { authorizationRevalidated: true, worktreeRef: task.execution_workspace?.worktree_path || task.worktree_path || "" },
+            });
+            if (bridge.bridged && bridge.envelope?.messageId) {
+                task.agent_communication_message_id = bridge.envelope.messageId;
+                task.agent_communication_generation = bridgeGeneration;
+                (0, collaboration_1.updateTask)(task.id, {
+                    agent_communication_message_id: bridge.envelope.messageId,
+                    agent_communication_generation: bridgeGeneration,
+                    agent_communication_state: bridge.envelope.state,
+                });
+                (0, logs_1.appendTaskTimelineEvent)(task.id, { type: "legacy_agent_communication_bridge", title: "旧任务已桥接通信 V2", detail: `generation=${bridgeGeneration}`, status: "ok", phase: "planning", data: { message_id: bridge.envelope.messageId, content_stored: false } });
+            }
         }
         const traceId = (0, reliability_ledger_1.ensureTraceId)(task.trace_id, "task");
         if (task?.interruption_receipt?.schema === "ccm-task-interruption-receipt-v1") {
@@ -399,6 +436,7 @@ function resumeTaskQueues(ctx, options = {}) {
         mixed_recovery: resumed > 0 && manualPending > 0,
         recovery_policy: "risk_tiered_authorization_preserving",
         test_agent_runner_recovery: testAgentRunnerRecovery,
+        agent_communication_recovery: communicationRecovery,
         results,
         queue_status: (0, collaboration_1.getQueueStatus)(),
     };

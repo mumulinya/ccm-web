@@ -8,12 +8,27 @@ const root = process.cwd();
 const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), "ccm-main-first-turn-"));
 process.env.HOME = sandbox;
 process.env.USERPROFILE = sandbox;
+const sandboxCcm = path.join(sandbox, ".cc-connect");
+fs.mkdirSync(sandboxCcm, { recursive: true });
+fs.writeFileSync(path.join(sandboxCcm, "group-orchestrator-config.json"), JSON.stringify({
+  enabled: true,
+  format: "openai-compatible",
+  apiUrl: "https://provider.invalid/v1",
+  apiKey: "selftest-key",
+  model: "selftest-model",
+  timeoutMs: 5_000,
+  fallbackToRules: false,
+  providerContextCacheMode: "off",
+  providerNativeCacheEnabled: false,
+  providerNativeToolsMode: "json",
+}, null, 2));
 const require = createRequire(import.meta.url);
 const dist = (...parts) => require(path.join(root, "ccm-package", "dist", ...parts));
 
 const turnRuntime = dist("agents", "main-agent-turn.js");
 const loop = dist("agents", "global", "loop.js");
 const orchestrator = dist("modules", "collaboration", "group-orchestrator-routing.js");
+const groupLlm = dist("modules", "collaboration", "group-orchestrator-llm.js");
 
 const helloWorkflow = {
   schema: "ccm-model-workflow-decision-v1",
@@ -104,6 +119,53 @@ assert.equal(reused.content, cachedGroupResult.content);
 assert.equal(reused.mainAgentTurnDecision.checksum, cachedGroupResult.mainAgentTurnDecision.checksum);
 assert.equal(chunks.join(""), cachedGroupResult.content);
 
+let uncachedGroupProviderCalls = 0;
+const originalFetch = globalThis.fetch;
+try {
+  globalThis.fetch = async () => {
+    uncachedGroupProviderCalls += 1;
+    return {
+      ok: true,
+      status: 200,
+      headers: { get: () => "" },
+      async text() {
+        return JSON.stringify({
+          choices: [{
+            finish_reason: "stop",
+            message: {
+              content: JSON.stringify({
+                responseType: "reply",
+                friendlyResponse: "这是一个多 Agent 协作开发控制台，还可以继续扩展功能。",
+                summary: "介绍当前项目并给出扩展方向",
+                shouldDelegate: false,
+                workflowDecision: helloWorkflow,
+                dispatchPolicy: { action: "direct_answer", reason: "普通项目咨询不需要派发", requiresConfirmation: false },
+                targets: [],
+                toolRequests: [],
+              }),
+            },
+          }],
+          usage: { prompt_tokens: 120, completion_tokens: 60, total_tokens: 180 },
+        });
+      },
+    };
+  };
+  const uncachedGroupResult = await groupLlm.runLlmGroupOrchestrator({
+    group: { id: "group-first-turn", members: [{ project: "coordinator", role: "coordinator" }] },
+    message: "我这个是一个什么项目，还能新增一些其他的功能吗",
+    groupSessionId: "selftest-group-session",
+  });
+  assert.equal(uncachedGroupProviderCalls, 1, "没有预置 workflowDecision 时必须进入群聊首轮模型调用");
+  assert.equal(uncachedGroupResult.workflowDecision?.mode, "answer");
+  assert.match(uncachedGroupResult.content, /多 Agent 协作开发控制台/);
+} finally {
+  globalThis.fetch = originalFetch;
+}
+
+const contractFailure = orchestrator.classifyGroupOrchestratorFailure(Object.assign(new Error("大模型返回了无效工作流：空"), { code: "CCM_WORKFLOW_DECISION_INVALID" }));
+assert.equal(contractFailure.kind, "workflow_contract");
+assert.doesNotMatch(contractFailure.guidance, /Key 是否有效/);
+
 const source = relative => fs.readFileSync(path.join(root, relative), "utf8");
 const globalSource = source("backend/modules/global/global-agent-agentic-runtime.ts");
 const globalChat = globalSource.slice(globalSource.indexOf("async function runAgenticGlobalRequest"), globalSource.indexOf("async function resumeGlobalAgentLoopsForServer"));
@@ -156,6 +218,8 @@ process.stdout.write(`${JSON.stringify({
     globalGreetingOneProviderCall: globalModelCalls === 1,
     globalGreetingNoTool: globalToolCalls === 0,
     groupFirstTurnReusedWithoutSecondProvider: reused.content === cachedGroupResult.content,
+    groupFirstTurnWithoutPresetWorkflowCallsProvider: uncachedGroupProviderCalls === 1,
+    workflowContractErrorDoesNotBlameProviderKey: contractFailure.kind === "workflow_contract",
     globalPreclassifierRemoved: true,
     groupPreclassifierRemoved: true,
     groupAutomaticKnowledgeSearchRemoved: true,

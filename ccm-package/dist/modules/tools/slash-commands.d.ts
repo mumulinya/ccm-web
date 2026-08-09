@@ -56,6 +56,7 @@ export declare function runSlashCommandSelfTest(): {
         allCommandsDeclareExecutableActions: boolean;
         implementationMetadataPublished: boolean;
         ccParityCommandsPresent: boolean;
+        scopedToolCatalogCommands: boolean;
     };
     endpointPreview: any;
     counts: {

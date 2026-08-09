@@ -1,10 +1,30 @@
 import { spawn, spawnSync } from "child_process";
 import { CommandRunResult, NormalizedTestAgentProjectTarget, NormalizedTestAgentWorkOrder } from "./types";
 import { appendLimited, buildTestAgentSubprocessEnv, compactText, nowIso, redactTestAgentSensitiveText, verificationCommandInvocation } from "./utils";
+import { testAgentPolicyContextFromWorkOrder } from "./isolation";
+import { evaluateTestAgentCommandSideEffect, type TestAgentSideEffectPolicyContext } from "./side-effect-policy";
 
-function runSingleCommand(project: NormalizedTestAgentProjectTarget, command: string, timeoutMs: number, maxOutputChars: number): Promise<CommandRunResult> {
+function runSingleCommand(project: NormalizedTestAgentProjectTarget, command: string, timeoutMs: number, maxOutputChars: number, policyContext: TestAgentSideEffectPolicyContext | null = null): Promise<CommandRunResult> {
   const startedAt = nowIso();
   const started = Date.now();
+  const policy = policyContext ? evaluateTestAgentCommandSideEffect(command, { ...policyContext, project }) : null;
+  if (policy && !policy.allowed) {
+    const finishedAt = nowIso();
+    return Promise.resolve({
+      project: project.name,
+      command,
+      cwd: project.workDir,
+      status: "blocked",
+      exitCode: null,
+      startedAt,
+      finishedAt,
+      durationMs: Date.now() - started,
+      stdout: "",
+      stderr: "",
+      output: "",
+      error: `副作用安全门阻止命令：${policy.reason}`,
+    });
+  }
   const invocation = verificationCommandInvocation(command);
   const unsafeReason = invocation.error;
   if (unsafeReason) {
@@ -80,9 +100,10 @@ function runSingleCommand(project: NormalizedTestAgentProjectTarget, command: st
 
 export async function runVerificationCommands(workOrder: NormalizedTestAgentWorkOrder): Promise<CommandRunResult[]> {
   const results: CommandRunResult[] = [];
+  const policyContext = testAgentPolicyContextFromWorkOrder(workOrder);
   for (const project of workOrder.projects) {
     for (const command of project.verificationCommands) {
-      results.push(await runSingleCommand(project, command, workOrder.options.commandTimeoutMs, workOrder.options.maxOutputChars));
+      results.push(await runSingleCommand(project, command, workOrder.options.commandTimeoutMs, workOrder.options.maxOutputChars, policyContext));
     }
   }
   return results;

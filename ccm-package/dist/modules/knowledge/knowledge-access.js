@@ -100,8 +100,33 @@ async function searchAgentKnowledge(query, context, options = {}) {
                 scope: source?.scope || item.chunk.scope,
                 visibility: source?.visibility || "shared",
                 source: source?.source || { type: "manual" },
+                revision: String(source?.version || ""),
+                checksum: String(source?.content_hash || ""),
             }];
     });
+    if (options.continuityIdentity && results.length) {
+        const { recordContextSourceReceipts } = require("../../system/main-agent-context-source-continuity");
+        recordContextSourceReceipts(options.continuityIdentity, results.map(item => ({
+            sourceKind: "knowledge",
+            sourceId: item.filename,
+            documentName: item.filename,
+            chunkIds: [item.citation],
+            headings: item.heading ? [item.heading] : [],
+            revision: item.revision,
+            checksum: item.checksum,
+            indexGeneration: search.indexGeneration || "",
+            scopeChecksum: search.scopeChecksum || "",
+            queryChecksum: require("crypto").createHash("sha256").update(normalizedQuery).digest("hex"),
+            tokenCount: item.tokenCount,
+            state: options.injected === false ? "read" : "injected",
+            injected: options.injected !== false,
+            boundaryGeneration: options.boundaryGeneration,
+            truncated: false,
+        })), {
+            knowledgeTokens: usedTokens,
+            hydrationUsedTokens: usedTokens,
+        });
+    }
     return {
         results,
         citations: results.map(item => item.citation),

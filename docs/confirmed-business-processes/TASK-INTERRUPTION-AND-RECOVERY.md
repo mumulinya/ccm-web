@@ -70,6 +70,10 @@ CCM将短对话和长任务分开处理。普通问答优先快速返回；开�
 
 恢复继续使用同一任务、计划、工作项、`task_agent_session_id`和可用的`native_session_id`，同时创建新的`execution_attempt`。执行内核会清除上轮的`finishedAt`、failure和cancellation状态，再记录新的attempt事件。原生resume不可用时使用持久scratchpad和任务快照续跑，但不重放已经完成的副作用。
 
+第三方 Agent 的执行还受 Agent Communication V2 fencing 约束。恢复时旧 lease 先失效，新的 attempt 领取新 lease；所有 ACK、进度和 Result 必须匹配 `taskId + workItemId + exactSessionId + generation + attempt + leaseId + 双方Agent身份`。迟到回执记录为 `stale_receipt`，不会触发二次改码、二次合并或错误终态。
+
+取消采用两阶段：`cancel_requested -> Runner停止并释放lease -> 副作用核验 -> cancelled / recovery_required`。已经产生输出或写副作用时不自动改派。管理员可通过 Agent Communication API 执行取消、重试、接管和重新核验；取消与接管会同时触发受管Runner停止。
+
 ## 三类主Agent
 
 - 全局Agent：普通问答使用快速档；Mission和下游任务使用长任务档。等待用户的Run不占聊天队首。
@@ -92,5 +96,5 @@ Web、飞书、工作台、群聊任务卡、项目任务卡和任务详情读�
 - 中断不会删除子Agent会话或原生会话ID。
 - 恢复创建新attempt，旧fencing token和迟到结果无效。
 - 副作用不确定时绝不自动恢复。
+- 服务重启不丢失通信消息、lease、依赖或原会话投递目标；V1活跃任务重新校验后桥接到新generation，V1终态不伪造证据。
 - Provider Mock回归中付费调用为0。
-

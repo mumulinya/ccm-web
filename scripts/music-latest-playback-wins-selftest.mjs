@@ -18,6 +18,20 @@ let isolatedPlaybackSource = playbackSource
     "const formatTrackLabel = (track) => track?.title || track?.filename || ''; const rememberPlayedTrack = () => {}; const selectNextPlaybackTrack = (rows, options = {}) => rows?.[(Number(options.currentIndex ?? -1) + 1 + (rows?.length || 1)) % (rows?.length || 1)]",
   )
 const { useMusicPlayback } = await import(`data:text/javascript;base64,${Buffer.from(isolatedPlaybackSource).toString('base64')}`)
+const lyricsModulePath = path.join(root, 'frontend/src/composables/useMusicLyrics.js')
+const lyricsSource = fs.readFileSync(lyricsModulePath, 'utf8')
+globalThis.__ccMusicLyricsVue = await import('../frontend/node_modules/vue/index.mjs')
+let isolatedLyricsSource = lyricsSource
+  .replace("import { computed, onMounted, onUnmounted, ref } from 'vue'", 'const { computed, ref } = globalThis.__ccMusicLyricsVue; const onMounted = () => {}; const onUnmounted = () => {}')
+  .replace("import { toast } from '../utils/toast.js'", 'const toast = { error() {} }')
+  .replace("import { formatTrackLabel, rememberPlayedTrack, selectNextPlaybackTrack } from '../utils/musicTrackHelpers.js'", 'const formatTrackLabel = () => \'\'; const rememberPlayedTrack = () => {}; const selectNextPlaybackTrack = () => null;')
+const { useMusicLyrics } = await import(`data:text/javascript;base64,${Buffer.from(isolatedLyricsSource).toString('base64')}`)
+
+globalThis.localStorage = {
+  getItem() { return null },
+  setItem() {},
+  removeItem() {},
+}
 
 function createFakeChannelBus() {
   const channels = new Map()
@@ -270,6 +284,106 @@ assert.equal(brokenFailures[0]?.filename, tracks[0].filename)
 assert.equal(brokenFailures[0]?.reason, 'damaged file')
 assert.deepEqual(recoveryHistory, [tracks[1].filename], 'the recovered next track should become the successful history event')
 
+const createDeferred = () => {
+  let resolve
+  let reject
+  const promise = new Promise((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise
+    reject = rejectPromise
+  })
+  return { promise, resolve, reject }
+}
+
+const lyricTrackA = { filename: 'lyric-a.mp3', title: 'Lyric A', artist: 'A' }
+const lyricTrackB = { filename: 'lyric-b.mp3', title: 'Lyric B', artist: 'B' }
+const activeLyricTrack = ref(lyricTrackA)
+const lyricRequests = []
+globalThis.fetch = (url, options = {}) => {
+  const deferred = createDeferred()
+  lyricRequests.push({ url, signal: options.signal, deferred })
+  return deferred.promise
+}
+const lyricRuntime = useMusicLyrics({
+  currentTime: ref(0),
+  isPlaying: ref(false),
+  currentTrack: activeLyricTrack,
+})
+const lyricsA = lyricRuntime.loadLyrics(lyricTrackA)
+activeLyricTrack.value = lyricTrackB
+const lyricsB = lyricRuntime.loadLyrics(lyricTrackB)
+assert.equal(lyricRequests[0].signal?.aborted, true, 'starting a newer lyric request should abort the previous request')
+lyricRequests[1].deferred.resolve({
+  async json() { return { success: true, lyrics: [{ time: 0, text: 'B lyric' }] } },
+})
+await lyricsB
+assert.equal(lyricRuntime.lyrics.value[0]?.text, 'B lyric')
+lyricRequests[0].deferred.resolve({
+  async json() { return { success: true, lyrics: [{ time: 0, text: 'stale A lyric' }] } },
+})
+await lyricsA
+assert.equal(lyricRuntime.lyrics.value[0]?.text, 'B lyric', 'an older lyric response must not overwrite the latest track')
+
+activeLyricTrack.value = lyricTrackA
+const stoppedLyrics = lyricRuntime.loadLyrics(lyricTrackA)
+const stoppedRequest = lyricRequests.at(-1)
+lyricRuntime.invalidateLyricsRequest()
+lyricRuntime.resetLyrics()
+assert.equal(stoppedRequest.signal?.aborted, true, 'invalidating lyrics should abort the active request')
+stoppedRequest.deferred.resolve({
+  async json() { return { success: true, lyrics: [{ time: 0, text: 'stopped lyric' }] } },
+})
+await stoppedLyrics
+assert.deepEqual(lyricRuntime.lyrics.value, [], 'a response received after stop must not restore lyrics')
+
+const identityLyrics = lyricRuntime.loadLyrics(lyricTrackA)
+const identityRequest = lyricRequests.at(-1)
+activeLyricTrack.value = lyricTrackB
+identityRequest.deferred.resolve({
+  async json() { return { success: true, lyrics: [{ time: 0, text: 'wrong identity lyric' }] } },
+})
+await identityLyrics
+assert.deepEqual(lyricRuntime.lyrics.value, [], 'a response must match the current track identity before committing')
+
+const lyricTrackC = { filename: 'lyric-c.mp3', title: 'Lyric C', artist: 'C' }
+const lyricTrackD = { filename: 'lyric-d.mp3', title: 'Lyric D', artist: 'D' }
+activeLyricTrack.value = lyricTrackC
+const jsonDeferred = createDeferred()
+const jsonLyrics = lyricRuntime.loadLyrics(lyricTrackC)
+const jsonRequest = lyricRequests.at(-1)
+jsonRequest.deferred.resolve({ json: () => jsonDeferred.promise })
+await Promise.resolve()
+activeLyricTrack.value = lyricTrackD
+jsonDeferred.resolve({ success: true, lyrics: [{ time: 0, text: 'stale JSON lyric' }] })
+await jsonLyrics
+assert.deepEqual(lyricRuntime.lyrics.value, [], 'a track change while json is pending must block the stale response')
+
+activeLyricTrack.value = lyricTrackB
+const successfulLyrics = lyricRuntime.loadLyrics(lyricTrackB)
+lyricRequests.at(-1).deferred.resolve({
+  async json() { return { success: true, lyrics: [{ time: 0, text: 'loaded lyric' }] } },
+})
+await successfulLyrics
+assert.equal(lyricRuntime.lyrics.value[0]?.text, 'loaded lyric')
+const failedLyrics = lyricRuntime.loadLyrics(lyricTrackB)
+const originalConsoleError = console.error
+console.error = () => {}
+lyricRequests.at(-1).deferred.reject(new Error('lyric network failed'))
+await failedLyrics
+console.error = originalConsoleError
+assert.deepEqual(lyricRuntime.lyrics.value, [], 'a current lyric request failure should preserve the existing clear-on-error behavior')
+
+let stopInvalidations = 0
+const stopOnlyPlayback = useMusicPlayback({
+  audioEl: ref(null), audioCtx: ref(null), playlist: ref([]), currentIndex: ref(-1), currentTrack: ref(null),
+  activePlaybackFilename: ref(''), isPlaying: ref(false), currentTime: ref(0), duration: ref(0), volume: ref(0.7),
+  playMode: ref('list'), nextRecommendTrack: ref(null), loadLyrics() {}, resetLyrics() {},
+  invalidateLyricsRequest() { stopInvalidations += 1 }, resetPetLyricIndex() {}, updateCurrentLyrics() {},
+  notifyMusicPetPlaying() {}, notifyMusicPetIdle() {}, notifyMusicPet() {}, updatePreselectedTrack() {}, loadDanmaku() {},
+  initAnalyser() {}, drawSpectrums() {}, danmakuItems: ref([]), addBubbleComment() {},
+})
+stopOnlyPlayback.stopPlayback({ broadcast: false })
+assert.equal(stopInvalidations, 1, 'stop must invalidate lyrics even before the audio element exists')
+
 const playerSource = fs.readFileSync(path.join(root, 'frontend/src/components/music/useMusicPlayer.js'), 'utf8')
 const playerTemplate = fs.readFileSync(path.join(root, 'frontend/src/components/music/MusicPlayer.template.html'), 'utf8')
 const waitIndex = playerSource.indexOf('await waitForJob(job.id)')
@@ -291,6 +405,10 @@ console.log(JSON.stringify({
     one_audio_element_per_page: true,
     playback_retry_then_success: true,
     terminal_failure_skips_next: true,
+    latest_lyric_request_wins: true,
+    stopped_lyric_request_cannot_restore_state: true,
+    lyric_response_requires_current_track_identity: true,
+    stop_invalidates_lyrics_without_audio: true,
   },
   paid_provider_calls: 0,
 }, null, 2))

@@ -53,6 +53,12 @@ export const DEFAULT_OPTIONS: Required<TestAgentOptions> = {
   requireAdversarialProbe: true,
   adversarialProbeWaiver: "",
   agenticPlanning: false,
+  hardeningPolicy: {},
+  hardening_policy: {},
+  isolationProfile: {},
+  isolation_profile: {},
+  readonlyCapabilityManifest: {},
+  readonly_capability_manifest: {},
 };
 
 export function text(value: any) {

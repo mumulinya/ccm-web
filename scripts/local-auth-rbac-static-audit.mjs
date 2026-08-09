@@ -18,6 +18,22 @@ assert.doesNotMatch(server, /browserApiAccessAllowed/)
 assert.match(access, /else if \(role === "operator" && !matches\(ADMIN_ONLY_MUTATIONS, pathname\) && matches\(OPERATOR_MUTATIONS/)
 assert.match(access, /else if \(role === "viewer" && matches\(VIEWER_CHAT/)
 assert.match(access, /let allowed = role === "admin"/)
+// viewer 只允许"查看和只读问答"，不能拿到知识文档原文、分片正文或历史版本内容——
+// 这些 GET 接口必须收在 OPERATOR_GET 里，不能落在默认放行的分支。
+for (const routePattern of [
+  /\/api\\\/rag\\\/documents/,
+  /\/api\\\/rag\\\/chunks/,
+  /\/api\\\/rag\\\/document-content/,
+  /\/api\\\/rag\\\/document-versions/,
+  /\/api\\\/rag\\\/document-version-content/,
+  /\/api\\\/rag\\\/watch-paths/,
+]) {
+  const operatorGetBlock = access.slice(access.indexOf('const OPERATOR_GET'), access.indexOf('const VIEWER_CHAT'))
+  assert.match(operatorGetBlock, routePattern, `${routePattern} 必须在 OPERATOR_GET 中，避免 viewer 读到知识文档原文`)
+}
+const rag = read('backend/modules/knowledge/rag.ts')
+assert.match(rag, /readOnly \? \[\] : debugChunks/, 'viewer(只读)账户的知识问答不能拿到分片原文和检索得分')
+assert.match(rag, /handleKnowledgeChat\(payload, res, requestIsReadOnly\(req\)\)/, '/api/rag/chat 必须把 readOnly 主体传给 handleKnowledgeChat')
 assert.match(access, /CSRF_INVALID/)
 assert.match(access, /HOST_NOT_ALLOWED/)
 assert.match(auth, /ccm-local-auth-users-v2/)

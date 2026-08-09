@@ -78,6 +78,8 @@ let browserLoginStartPromise: Promise<any> | null = null;
 let officialTokenCache: { token: string; expiresAt: number; clientKey: string } | null = null;
 let runtimePreparePromise: Promise<any> | null = null;
 let lastBrowserLoginError = "";
+// 串行锁：避免统一搜索与单独抖音搜索同时启动多个 Chromium 实例
+let browserSearchLock: Promise<DouyinMusicResult[]> | null = null;
 let runtimePreparation: RuntimePreparationState = {
   state: "idle", downloadedBytes: 0, totalBytes: 0,
   startedAt: "", updatedAt: "", error: "",
@@ -402,15 +404,36 @@ export async function douyinSearch(keyword: string, limit = 12): Promise<DouyinM
   const query = cleanText(keyword, 120);
   if (!query) return [];
   const config = settings();
-  let officialError: any = null;
+
+  // 1. 官方接口优先
   if (config.officialClientKey && officialSecret(config)) {
-    try { return await searchOfficial(query, limit); }
-    catch (error: any) { officialError = error; }
+    try {
+      return await searchOfficial(query, limit);
+    } catch (officialError: any) {
+      // capability_unavailable / unavailable / timeout → 降级到浏览器；rejected 直接抛出
+      const state = String(officialError?.douyinState || (officialError instanceof MusicPlatformHttpError ? officialError.status : ""));
+      if (state === "rejected") throw officialError;
+      // 其余错误降级，不再暴露官方失败
+    }
   }
-  if (config.compatibilityEnabled) return searchBrowser(query, limit);
-  if (officialError) throw officialError;
-  const error: any = new Error("抖音搜索尚未配置官方能力或浏览器登录");
-  error.douyinState = "login_required";
+
+  // 2. 浏览器兼容通道（匿名或登录增强）
+  if (config.compatibilityEnabled) {
+    // 串行锁：最多只允许一个并发浏览器搜索，避免多个 Chromium 实例同时启动
+    if (browserSearchLock) {
+      try { return await browserSearchLock; } catch { /* 前一次失败，重新搜索 */ }
+    }
+    browserSearchLock = searchBrowser(query, limit);
+    try {
+      return await browserSearchLock;
+    } finally {
+      browserSearchLock = null;
+    }
+  }
+
+  // 3. 两个通道都不可用
+  const error: any = new Error("抖音搜索需要配置官方能力或开启浏览器兼容通道");
+  error.douyinState = "capability_unavailable";
   throw error;
 }
 
@@ -564,18 +587,26 @@ export function douyinPlatformStatus() {
   const config = settings();
   const storage = browserStorage(config);
   const runtime = existingYtDlpPath();
+  const authenticated = hasAuthenticatedCookie(storage);
+  const officialConfigured = !!config.officialClientKey && !!officialSecret(config);
+  const browserAvailable = config.compatibilityEnabled;
+  const searchEnabled = officialConfigured || browserAvailable;
+  const searchMode = officialConfigured && browserAvailable ? "official+browser"
+    : officialConfigured ? "official"
+    : browserAvailable ? "browser"
+    : "disabled";
   return {
     schema: "ccm-douyin-music-status-v1",
     official: {
-      configured: !!config.officialClientKey && !!officialSecret(config),
+      configured: officialConfigured,
       clientKey: config.officialClientKey,
       secretProtected: !!config.officialClientSecretRef,
     },
     browser: {
       compatibilityEnabled: config.compatibilityEnabled,
-      authenticated: hasAuthenticatedCookie(storage),
+      authenticated,
       authenticatedAt: config.browserAuthenticatedAt || null,
-      loginState: activeBrowserLogin?.state || (hasAuthenticatedCookie(storage) ? "authenticated" : "idle"),
+      loginState: activeBrowserLogin?.state || (authenticated ? "authenticated" : "idle"),
       loginStartedAt: activeBrowserLogin?.startedAt || null,
       error: activeBrowserLogin?.error || lastBrowserLoginError || null,
     },
@@ -585,6 +616,12 @@ export function douyinPlatformStatus() {
       version: YTDLP_VERSION,
       platformSupported: !!runtimeAsset() || !!runtime,
       preparation: runtimePreparation,
+    },
+    search: {
+      enabled: searchEnabled,
+      mode: searchMode,
+      anonymousSupported: browserAvailable,
+      authenticatedEnhancement: authenticated,
     },
   };
 }

@@ -1,5 +1,7 @@
 # CCM 当前状态
 
+- 全局、项目和群聊三类会话已统一为 CC 风格用户可见执行流：页面按“准备/思考、逐项工具、Skill/MCP、子 Agent、权限或澄清、最终回答”顺序显示，默认紧凑，点击“展开执行记录”或按 `Ctrl+O` 查看安全参数、Evidence、文件变化、验证和 Provider usage。三作用域安全回复增量统一经 SSE 发送且不落盘；群聊自动压缩只在 Boundary 与恢复清单正式提交后写入无正文 `context_compacted` 事件。系统 Prompt、隐藏思维链、密钥、知识/网页/Notebook 正文及工具大输出不会进入事件 API。第三方 Agent 的 Result 固定显示“等待 CCM 验收”，只有 Terminal Gate 通过后才显示完成；原任务卡继续作为最终回答后的交付与验收区域。桌面、390px 移动端和“代码查找→Worker→TestAgent→Terminal”业务链 E2E 已通过。完整流程见[CC 风格用户可见执行流](./confirmed-business-processes/CC-STYLE-USER-VISIBLE-EXECUTION-FLOW.md)。
+
 - 音乐统一搜索与AI点歌已扩展为四源：本地、网易、B站和抖音。抖音优先使用官方视频搜索OpenAPI，未开通能力时先用无需登录的隔离浏览器会话读取公开内容，只有平台明确拦截时才允许用户主动登录；两条通道都如实上报`login_required | risk_controlled | capability_unavailable`，不把平台错误伪装成空结果；登录等待有10分钟上限，凭据只以`secretProtected`布尔值对外投影。视频转音频使用按需获取、SHA256校验的固定版本`yt-dlp`，以`shell:false`执行并强制单视频模式，Cookie写入仅所有者可读的临时文件并在结束时删除；下载任务只保存`awemeId`和规范化页面地址，执行时重新解析媒体地址，取消会同时中止解析与ffmpeg。只处理用户有权访问的公开内容，私密、付费、地区限制、DRM和直播一律拒绝。完整流程见[音乐曲库、媒体平台与统一播放器V4](./confirmed-business-processes/MUSIC-LIBRARY-MEDIA-PLATFORM-V4.md)。
 
 - 模型重试、任务中断与恢复已统一：普通首轮最多2次/60秒，计划与工具续跑最多3次/120秒，正式压缩、开发编排与TestAgent最多5次/360秒，标题和非关键摘要最多1次。停止当前执行会生成中断回执并挂起子Agent原生会话；永久取消保持终态但保留历史。网络、Provider过载和服务重启仅在源码、权限、运行时、会话及副作用证据完整时自动恢复，否则等待用户确认；恢复沿用同一任务和会话并创建新执行attempt。完整流程见[分级重试、任务中断与会话恢复](./confirmed-business-processes/TASK-INTERRUPTION-AND-RECOVERY.md)。

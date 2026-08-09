@@ -160,6 +160,18 @@ import {
 
 import { buildTestAgentVerdict } from "../../test-agent/verdict";
 
+import {
+  buildTestAgentEvidenceProjection,
+  summarizeTestAgentEvidenceProjection,
+} from "../../test-agent/evidence-projection";
+import { auditTestAgentSurface } from "../../test-agent/surface-audit";
+import { captureTestAgentRuntimeFingerprint } from "../../test-agent/runtime-fingerprint";
+import { buildTestAgentHardeningPolicy, validateTestAgentHardeningPolicy } from "../../test-agent/hardening-policy";
+import {
+  buildTestAgentReadonlyCapabilityManifest,
+  verifyTestAgentReadonlyCapabilityManifest,
+} from "../../test-agent/readonly-capabilities";
+
 import type { TestAgentReport, TestAgentVerdict } from "../../test-agent/types";
 
 import {
@@ -672,6 +684,31 @@ export function hasConfiguredTestAgentMultiSessionBrowserCheck(...lists: any[][]
   });
 }
 
+function buildMinimalVerifierLedger(previous: any, project: string) {
+  const source = previous && typeof previous === "object" ? previous : {};
+  const evidence = buildTestAgentEvidenceProjection({
+    scope: "group",
+    scopeId: project,
+    workerResults: [source],
+  });
+  const actionValues = Array.isArray(source.actions) ? source.actions : [];
+  const blockerValues = Array.isArray(source.blockers) ? source.blockers : [];
+  return {
+    schema: "ccm-verifier-ledger-projection-v2",
+    project,
+    evidence,
+    summary: summarizeTestAgentEvidenceProjection(evidence),
+    actionCount: actionValues.length,
+    actionChecksum: actionValues.length ? evidence.checksum : "",
+    filesChanged: evidence.workerReceipts.flatMap(item => item.fileRefs).slice(0, 100),
+    verification: evidence.workerReceipts.flatMap(item => item.verificationRefs).slice(0, 30),
+    blockerCount: blockerValues.length,
+    blockerChecksum: blockerValues.length ? evidence.checksum : "",
+    sourceRefs: evidence.workerReceipts.flatMap(item => item.sourceRefs).slice(0, 40),
+    contentStored: false,
+  };
+}
+
 export function buildCoordinatorTestAgentHandoff(item: any, input: {
   group: any;
   sourceTask?: any;
@@ -689,6 +726,7 @@ export function buildCoordinatorTestAgentHandoff(item: any, input: {
   const runtime = resolveProjectRuntimeForTestAgentHandoff(input.group, originalTarget);
   const task = input.sourceTask || {};
   const previous = input.previousLedger || {};
+  const verifierPrevious = buildMinimalVerifierLedger(previous, originalTarget);
   const changedFiles = collectCoordinatorChangedFiles([
     ...(Array.isArray(previous.filesChanged) ? previous.filesChanged : []),
     task.file_changes?.files || [],
@@ -707,9 +745,31 @@ export function buildCoordinatorTestAgentHandoff(item: any, input: {
     evidencePlan: Array.isArray(task.acceptance_evidence_plan) ? task.acceptance_evidence_plan : [],
     hasTestTarget: testAgentReviewConfig.hasExecutableSurface,
   });
+  const evidenceProjection = buildTestAgentEvidenceProjection({
+    taskId: input.taskId || task.id || "",
+    scope: "group",
+    scopeId: task.group_id || task.groupId || "",
+    workerResults: [previous],
+  });
+  const frozenHardening = task?.acceptance_policy_snapshot?.hardening;
+  const hardeningPolicy = validateTestAgentHardeningPolicy(frozenHardening).valid
+    ? frozenHardening
+    : buildTestAgentHardeningPolicy({ task, reviewPolicy, riskTier: reviewPolicy.tier });
+  const surfaceAudit = auditTestAgentSurface({
+    workDir: runtime.workDir || process.cwd(),
+    declaredFiles: changedFiles,
+    acceptanceCriteria,
+    criterionBindings: acceptanceCriteria.map((criterion, index) => ({
+      id: `criterion-${index + 1}`,
+      text: criterion,
+      checkIds: verificationCommands.map((_command, commandIndex) => `command-${commandIndex + 1}`),
+      fileRefs: changedFiles,
+    })),
+    checkDefinitions: verificationCommands.map((command, index) => ({ id: `command-${index + 1}`, command })),
+    mode: hardeningPolicy.surfaceAuditMode,
+  });
   const completedTasks = uniqueStrings([
-    previous.summary ? `${originalTarget} 上一轮结果：${previous.summary}` : "",
-    ...(Array.isArray(previous.actions) ? previous.actions : []),
+    summarizeTestAgentEvidenceProjection(evidenceProjection),
     item?.message || item?.task || "",
   ].filter((value: any) => !isCoordinatorReviewInstruction(value))).slice(0, 10);
   const requiredChecks = uniqueStrings(
@@ -723,6 +783,12 @@ export function buildCoordinatorTestAgentHandoff(item: any, input: {
   const requiresBrowser = reviewPolicy.browserEnabled
     || requiredChecks.some(check => ["browser", "browser_e2e", "screenshots", "console_errors", "visual"].includes(check))
     || (Array.isArray(testAgentReviewConfig.project?.browserChecks) && testAgentReviewConfig.project.browserChecks.length > 0);
+  const runtimeFingerprint = captureTestAgentRuntimeFingerprint({
+    workDir: runtime.workDir || process.cwd(),
+    targetUrl: testAgentReviewConfig.project?.targetUrl || testAgentReviewConfig.project?.target_url || "",
+    providerFamily: requiresBrowser ? "browser" : verificationCommands.length ? "local" : "none",
+    isolationMode: "handoff_preflight",
+  });
   const commandOnlyAdversarialPolicy = !testAgentReviewConfig.hasExecutableSurface && !requiresConfiguredAdversarialProbe
     ? {
         requireAdversarialProbe: false,
@@ -734,7 +800,7 @@ export function buildCoordinatorTestAgentHandoff(item: any, input: {
     acceptanceCriteria.length ? "" : "No acceptance criteria were supplied; coverage will be weaker.",
   ]);
   return {
-    schema: "ccm-test-agent-handoff-v1",
+    schema: "ccm-test-agent-handoff-v2",
     id: buildTestAgentHandoffId(input.taskId || task.id || "", originalTarget),
     taskId: input.taskId || task.id || "",
     groupId: task.group_id || task.groupId || "",
@@ -752,8 +818,11 @@ export function buildCoordinatorTestAgentHandoff(item: any, input: {
       completedTasks,
       acceptanceCriteria,
       verificationCommands,
-      agentSummary: previous.summary || item?.summary || item?.reason || "",
-      risks: Array.isArray(previous.blockers) ? previous.blockers : [],
+      agentSummary: summarizeTestAgentEvidenceProjection(evidenceProjection),
+      deliveryEvidence: evidenceProjection,
+      risks: evidenceProjection.workerReceipts.some(item => item.blockerCount > 0)
+        ? [`存在 ${evidenceProjection.workerReceipts.reduce((sum, item) => sum + item.blockerCount, 0)} 个结构化阻塞引用`]
+        : [],
     }],
     options: {
       verificationOnly: true,
@@ -774,15 +843,31 @@ export function buildCoordinatorTestAgentHandoff(item: any, input: {
       route: input.reworkRoute || item?.reworkRoute || null,
       reviewSubject: originalTarget,
       verifier: targetName,
-      previousLedger: previous,
+      previousLedger: verifierPrevious,
+      verifierContext: {
+        schema: "ccm-verifier-context-v1",
+        mode: "minimal-evidence-only",
+        contentStored: false,
+        fields: ["task objective", "acceptance criteria", "changed files", "evidence references", "repo state", "verification commands", "policy constraints"],
+      },
       reviewPolicy: {
         ...reviewPolicy,
         browserEnabled: requiresBrowser,
         requireAdversarialProbe: requiresConfiguredAdversarialProbe,
         requiredChecks,
       },
-      coordinatorOutputPreview: compactMemoryText(input.coordinatorOutput || "", 1000),
+      hardeningPolicy,
+      verificationHardening: { version: 2, policy: hardeningPolicy },
+      coordinatorOutputReference: input.coordinatorOutput
+        ? {
+            checksum: crypto.createHash("sha256").update(String(input.coordinatorOutput)).digest("hex"),
+            charCount: String(input.coordinatorOutput).length,
+            contentStored: false,
+          }
+        : null,
       projectRuntimeSource: runtime.source,
+      surfaceAudit,
+      runtimeFingerprint,
       reviewInstructions: [
         `独立复核 ${originalTarget} 的交付证据，不得只复述原实现者结论。`,
         changedFiles.length ? "核对改动文件是否覆盖用户目标和验收标准。" : "核对原实现 Agent 的完成声明是否有真实证据。",
@@ -1191,6 +1276,18 @@ export function formatNativeTestAgentPlanBlockedOutput(targetName: string, plan:
 }
 
 export function buildNativeTestAgentRuntimeToolContext(targetName: string, workDir: string) {
+  // Native TestAgent receives only signed, read-only capabilities.  The
+  // ephemeral prompt projection is returned to the current Loop, while the
+  // persisted audit below contains hashes and metadata only (never Skill
+  //正文, Prompt or MCP tool output).
+  const readonlyCapabilities = buildTestAgentReadonlyCapabilityManifest({
+    targetName,
+    workDir,
+    taskText: "独立验收与保守结论",
+    scope: "test-agent",
+  });
+  const capabilityVerification = verifyTestAgentReadonlyCapabilityManifest(readonlyCapabilities.manifest);
+  const capabilityManifest = capabilityVerification.valid ? readonlyCapabilities.manifest : null;
   const audit = {
     runtime: "test-agent-native",
     mode: "native-test-agent-runner",
@@ -1199,27 +1296,64 @@ export function buildNativeTestAgentRuntimeToolContext(targetName: string, workD
     snapshotPath: "",
     mcpConfigPath: "",
     skillRoot: "",
-    requested: { mcp: [], skill: [] },
-    synced: { mcp: [], skill: [] },
-    missing: { mcp: [], skill: [] },
-    mcp_statuses: [],
-    skill_statuses: [],
+    requested: {
+      mcp: (capabilityManifest?.mcp || []).map(item => item.canonicalName),
+      skill: (capabilityManifest?.skills || []).map(item => item.name),
+    },
+    synced: {
+      mcp: (capabilityManifest?.mcp || []).map(item => item.canonicalName),
+      skill: (capabilityManifest?.skills || []).map(item => item.name),
+    },
+    missing: {
+      mcp: readonlyCapabilities.rejectedMcp.map(item => item.name),
+      skill: readonlyCapabilities.rejectedSkills.map(item => item.name),
+    },
+    mcp_statuses: (capabilityManifest?.mcp || []).map(item => ({
+      name: item.canonicalName,
+      server: item.server,
+      state: "synced",
+      readOnly: true,
+      mutability: "read_only",
+      schemaChecksum: item.schemaChecksum,
+      signature: item.signature,
+    })),
+    skill_statuses: (capabilityManifest?.skills || []).map(item => ({
+      name: item.name,
+      state: "synced",
+      readOnly: true,
+      source: item.source,
+      contentHash: item.contentHash,
+      summaryChecksum: item.summaryChecksum,
+      truncated: item.truncated,
+      signature: item.signature,
+    })),
     permission_rules: [],
     invoked_skills: [],
     authorization_readiness: { dispatchReady: true, mode: "native_test_agent" },
-    dispatch_gate: { dispatchReady: true, reason: "TestAgent CLI 边界不需要第三方 Agent 工具注入" },
+    dispatch_gate: {
+      dispatchReady: true,
+      reason: "TestAgent CLI 仅注入签名只读 Skill/MCP 能力，不开放第三方 Agent 通用写工具",
+      readonlyCapabilityManifestChecksum: capabilityManifest?.checksum || "",
+    },
     catalogRevision: "",
-    warnings: [],
+    warnings: [
+      ...readonlyCapabilities.rejectedMcp.slice(0, 12).map(item => `MCP ${item.name} 未注入：${item.reason}`),
+      ...readonlyCapabilities.rejectedSkills.slice(0, 12).map(item => `Skill ${item.name} 未注入：${item.reason}`),
+      ...(capabilityVerification.valid ? [] : [`只读能力清单校验失败：${capabilityVerification.reason}`]),
+    ],
     errors: [],
     reusedSnapshot: false,
     timestamp: new Date().toISOString(),
     workDir,
+    readonly_capability_manifest: capabilityManifest,
   };
   return {
     audit,
     dispatchGate: audit.dispatch_gate,
     dispatchBlocked: false,
-    prompt: "",
+    prompt: readonlyCapabilities.prompt,
+    readonlyCapabilityManifest: capabilityManifest,
+    readonlyCapabilityPrompt: readonlyCapabilities.prompt,
     workEvent: {
       id: "we" + Date.now().toString(36) + crypto.randomBytes(2).toString("hex"),
       time: new Date().toISOString(),

@@ -391,7 +391,15 @@ export function migrateLegacyGlobalSharedDirectoryV2() {
 export function buildSharedFilesContextV2(
   scopeTypeInput: unknown,
   scopeIdInput: unknown,
-  options: { maxTokens?: number; title?: string } = {},
+  options: {
+    maxTokens?: number;
+    contextWindow?: number;
+    hydrationBudgetPercent?: number;
+    remainingSafeTokens?: number;
+    title?: string;
+    explicitText?: string;
+    prioritySourceIds?: string[];
+  } = {},
 ) {
   const { type, id } = validateScope(scopeTypeInput, scopeIdInput);
   const records = readStoreUnlocked().files
@@ -405,7 +413,18 @@ export function buildSharedFilesContextV2(
     complete: true,
     checksum: checksum(`${type}\0${id}\0empty`),
   };
-  const maxTokens = Math.max(1000, Number(options.maxTokens || 32_000));
+  const dynamicTarget = Math.floor(Math.max(32_000, Number(options.contextWindow || 200_000)) * Math.max(0.01, Number(options.hydrationBudgetPercent ?? 10) / 100));
+  const maxTokens = Math.max(500, Math.floor(Number(options.maxTokens ?? Math.min(dynamicTarget, Number(options.remainingSafeTokens ?? dynamicTarget)))));
+  const explicitText = String(options.explicitText || "").toLowerCase();
+  const priorities = new Set((options.prioritySourceIds || []).map(String));
+  records.sort((left, right) => {
+    const leftExplicit = explicitText && explicitText.includes(left.name.toLowerCase()) ? 0 : 1;
+    const rightExplicit = explicitText && explicitText.includes(right.name.toLowerCase()) ? 0 : 1;
+    if (leftExplicit !== rightExplicit) return leftExplicit - rightExplicit;
+    const leftPriority = priorities.has(left.id) ? 0 : 1;
+    const rightPriority = priorities.has(right.id) ? 0 : 1;
+    return leftPriority - rightPriority || left.name.localeCompare(right.name, "zh-CN");
+  });
   let used = 0;
   const sections = [options.title || "当前作用域已授权共享文件："];
   const selected: any[] = [];
@@ -445,6 +464,8 @@ export function buildSharedFilesContextV2(
     selected_chunks: selected,
     total_tokens: used,
     complete,
+    max_tokens: maxTokens,
+    deferred_chunks: files.reduce((sum: number, file: any) => sum + Number(file.chunks?.length || 0), 0) - selected.length,
     checksum: checksum(JSON.stringify(files.map(item => [item.id, item.revision, item.checksum]))),
   };
 }

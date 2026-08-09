@@ -56,8 +56,10 @@ const integration = require(path.join(root, 'ccm-package', 'dist', 'integrations
 const store = require(path.join(root, 'ccm-package', 'dist', 'modules', 'collaboration', 'group-coordination-store.js'))
 const { loadTasks } = require(path.join(root, 'ccm-package', 'dist', 'core', 'db.js'))
 const { closeSqliteTaskStore } = require(path.join(root, 'ccm-package', 'dist', 'core', 'task-store.js'))
+const { closeObservabilityDatabaseForTests } = require(path.join(root, 'ccm-package', 'dist', 'system', 'observability-database.js'))
 const { McpClient } = require(path.join(root, 'ccm-package', 'dist', 'tools', 'mcp-client.js'))
 const { openTaskAgentSession } = require(path.join(root, 'ccm-package', 'dist', 'tasks', 'agent-sessions.js'))
+const agentCommunication = require(path.join(root, 'ccm-package', 'dist', 'system', 'agent-communication-v2.js'))
 const { createGroupChatSession } = require(path.join(root, 'ccm-package', 'dist', 'modules', 'collaboration', 'storage.js'))
 
 const group = {
@@ -217,6 +219,10 @@ const waitFor = async (predicate, timeoutMs = 30000) => {
   throw new Error('coordination chain timeout')
 }
 await waitFor(() => store.listGroupCoordinationRequests({ groupId: group.id, taskId: parent.id })[0]?.status === 'resumed')
+await waitFor(() => {
+  const queue = collaboration.getQueueStatus(loadTasks())
+  return parallelEvents.includes('existing-finished') && !queue.running_task_ids.includes(existingBackendTask.id)
+})
 const rows = store.listGroupCoordinationRequests({ groupId: group.id, taskId: parent.id })
 assert.equal(rows.length, 1)
 assert.equal(rows[0].status, 'resumed')
@@ -228,6 +234,18 @@ assert.equal(dependency.workflow_type, 'agent_coordination_dependency')
 assert.equal(dependency.status, 'done')
 assert.equal(dependency.target_project, 'backend-agent')
 assert.equal(dependency.receipt.filesChanged.includes('src/orders-api.ts'), true)
+const dependencyCommunication = agentCommunication.listAgentCommunications({ taskId: dependency.id, limit: 20 }).find(item => item.messageType === 'task_dispatch')
+assert.ok(dependencyCommunication?.messageId, 'dependency dispatch evidence missing')
+const dependencyCommunicationDetail = agentCommunication.getAgentCommunication(dependencyCommunication.messageId)
+assert.equal(dependencyCommunicationDetail.state, 'completed')
+assert.deepEqual(dependencyCommunicationDetail.receipts.map(item => item.receiptType), ['dispatch_ack', 'result', 'terminal'])
+const coordinationResolution = agentCommunication.listAgentCommunications({ taskId: parent.id, limit: 50 })
+  .find(item => item.messageType === 'coordination_resolution' && item.workItemId === rows[0].id)
+assert.equal(coordinationResolution?.state, 'completed', 'coordination resolution evidence missing')
+assert.equal(coordinationResolution?.parentMessageId?.length > 0, true)
+const coordinationRequest = agentCommunication.getAgentCommunication(coordinationResolution.parentMessageId)
+assert.equal(coordinationRequest?.messageType, 'coordination_request')
+assert.equal(coordinationRequest?.state, 'completed')
 assert.equal(refreshedParent.child_task_ids.includes(dependency.id), true)
 assert.equal(calls[0].project, 'backend-agent')
 assert.equal(calls.at(-1).project, 'frontend-agent')
@@ -362,9 +380,12 @@ const report = {
   post_merge_restart_resumed_without_worktree: true,
   merge_conflict_preserved_after_restart: true,
   persisted_for_replay: true,
+  agent_communication_v2_complete: true,
+  coordination_request_resolution_complete: true,
 }
 fs.writeFileSync(path.join(scratch, 'report.json'), `${JSON.stringify(report, null, 2)}\n`)
 closeSqliteTaskStore()
+closeObservabilityDatabaseForTests()
 for (const target of [home, frontendDir, backendDir]) {
   fs.rmSync(target, { recursive:true, force:true, maxRetries:20, retryDelay:150 })
 }

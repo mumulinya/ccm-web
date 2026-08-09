@@ -86,7 +86,7 @@ export declare function arbitratePostCompactCompletionMemoryPreservationClosureE
         native_session_ids: string[];
     };
 };
-export declare function postCompactCompletionMemoryPreservationClosureUsageRecommendation(stats?: any, options?: any): "require_receipt_repair_before_reuse" | "resolved_conflict_promote_but_reverify_future_session" | "resolved_conflict_neutral_reverify_future_session" | "surface_conflict_reverify_current_session" | "deprioritize_closure_recall" | "promote_but_reverify_current_source" | "caution_stale_history_reverify_current_source" | "neutral_reverify_current_source";
+export declare function postCompactCompletionMemoryPreservationClosureUsageRecommendation(stats?: any, options?: any): "deprioritize_closure_recall" | "require_receipt_repair_before_reuse" | "neutral_reverify_current_source" | "resolved_conflict_promote_but_reverify_future_session" | "resolved_conflict_neutral_reverify_future_session" | "surface_conflict_reverify_current_session" | "promote_but_reverify_current_source" | "caution_stale_history_reverify_current_source";
 export declare function readPostCompactCompletionMemoryPreservationClosureUsageLedger(groupId: string, options?: any): any;
 export declare function recordPostCompactCompletionMemoryPreservationClosureUsage(groupId: string, input?: any): any;
 export declare function buildPostCompactCompletionMemoryPreservationClosureUsageSummary(groupId: string, options?: any): any;

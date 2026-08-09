@@ -15,7 +15,9 @@ TestAgent 是独立验收 Agent，不是第二个开发 Agent。它可以像开�
 5. 现有确定性执行器实际运行命令、HTTP 和浏览器检查，收集退出码、输出、动作前后截图、断言截图引用、控制台、网络及工具调用证据。
 6. 出现失败、阻断或没有证据时，模型可以基于真实结果补充一轮聚焦命令和浏览器检查；已执行检查不得重复，补充检查只作为诊断证据，不能篡改首轮冻结计划。
 7. 现有证据门禁计算通过、返工或需要人工判断。模型没有最终裁决权。
-8. 智能模型不可用、规划失败或验收标准未被完整覆盖时，TestAgent 整体进入阻塞；只执行用户已明确配置的结构化测试目标，不用正则或关键词生成替代计划。
+8. 智能模型超时、连接失败或返回无效JSON时按冻结风险等级降级：lightweight执行既有检查，standard要求每条标准已有明确检查映射，interactive还要求预声明交互检查、隔离环境和测试租户，critical阻塞。非法handoff、权限越界、覆盖缺失和安全校验失败始终fail closed。
+9. 项目和群聊共用`ccm-test-agent-completion-gate-v2`；规划、隔离、真实变更面、证据、只读能力、源码/运行时新鲜度和完成前抽查任一失败都不能完成任务。
+10. V2公共硬化投影同时提供规划降级、隔离/副作用阻断、未声明变更、投影拒绝、运行时漂移、抽查失败和只读能力拒绝八类无正文进程指标。
 
 ## 风险分级与失败路由
 
@@ -53,6 +55,8 @@ TestAgent 是独立验收 Agent，不是第二个开发 Agent。它可以像开�
 
 - 可以：读取当前代码、识别变更范围、选择已有测试/构建命令、设计 Playwright 操作与断言、检查 HTTP、截图、控制台和网络错误。
 - 不可以：修改任何项目文件、安装依赖、提交代码、执行写入型 Git 命令、访问未授权生产 URL、绕过证据门禁。
+- native TestAgent只获得签名且绑定scope的verification/read-only Skill摘要和只读MCP名称、功能、参数Schema；业务写工具、部署工具和开发Agent通用工具不会注入。
+- 完整命令输出、HTTP响应和浏览器结果只在当前验证Loop使用；handoff、Runner、任务账本、timeline、回执和API只保存checksum、长度、退出码、artifact/criterion引用与`contentStored:false`。
 - 使用独立TestAgent模式的任务保留原始报告、Verdict 和 artifact manifest，可供对应主 Agent抽查；关闭TestAgent的任务只保存主 Agent自验证据，不伪造TestAgent报告。
 - 主 Agent通过签名 `get_test_evidence` MCP工具按 task、run和 artifact ID读取截图或文本证据；MCP不能跨任务读取，也不能修改证据。
 - 浏览器验收工单支持显式 `browser_scenarios`；自然语言验收标准必须先由模型生成结构化交互流程，并保持每条标准与动作、断言、截图的来源关系。

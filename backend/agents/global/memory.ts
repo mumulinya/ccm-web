@@ -12,6 +12,7 @@ import { CCM_DIR } from "../../core/utils";
 import { applyMemoryControls, recordMemoryMetric, recordMemoryOperation } from "../../modules/knowledge/memory-control-center";
 import { callCompactionModel } from "../../modules/collaboration/group-compaction-engine";
 import { loadOrchestratorConfig } from "../../modules/collaboration/group-orchestrator-config";
+import { resolveMainAgentContextPolicy } from "../../tools/main-agent-context-policy";
 import { getGroupAutoCompactThreshold, resolveGroupModelContextCapacity } from "../../modules/collaboration/group-compaction-strategy";
 import {
   buildSessionPostCompactGate,
@@ -570,6 +571,47 @@ export function appendGlobalAgentExecutionEvent(sessionIdInput: string, event: a
   return created;
 }
 
+export function previewGlobalTranscriptContextSourceMaintenance(sessionIdInput: string) {
+  const sessionId = String(sessionIdInput || "").trim();
+  const file = transcriptFile(sessionId);
+  if (!sessionId || !fs.existsSync(file)) return null;
+  const disk = fs.readFileSync(file, "utf8");
+  const transcript = decryptJson(JSON.parse(disk));
+  const before = JSON.stringify(transcript?.executionMessages || transcript?.execution_messages || []);
+  const projectedEvents = normalizeSessionExecutionEvents(transcript?.executionMessages || transcript?.execution_messages);
+  const after = JSON.stringify(projectedEvents);
+  return {
+    file,
+    fileChecksum: sha(disk, 64),
+    changed: before === after ? 0 : projectedEvents.filter((event: any) => event.type === "tool_result" && event.payload?.contentStored === false).length,
+    removedTokens: Math.max(0, estimateTextTokens(before) - estimateTextTokens(after)),
+    contentStored: false,
+  };
+}
+
+export function applyGlobalTranscriptContextSourceMaintenance(plan: any, backupFile: string) {
+  if (!plan?.file || !fs.existsSync(plan.file)) throw new Error("global_transcript_maintenance_source_missing");
+  const disk = fs.readFileSync(plan.file, "utf8");
+  if (sha(disk, 64) !== String(plan.fileChecksum || "")) throw new Error("global_transcript_maintenance_source_drift");
+  const transcript = decryptJson(JSON.parse(disk));
+  const projectedTranscript = {
+    ...transcript,
+    executionMessages: normalizeSessionExecutionEvents(transcript?.executionMessages || transcript?.execution_messages),
+    execution_messages: undefined,
+    updatedAt: now(),
+  };
+  fs.mkdirSync(path.dirname(backupFile), { recursive: true });
+  fs.copyFileSync(plan.file, backupFile);
+  writeAtomic(plan.file, encryptJson(projectedTranscript));
+  return { updated: Number(plan.changed || 0), backupFile };
+}
+
+export function rollbackGlobalTranscriptContextSourceMaintenance(file: string, backupFile: string) {
+  if (!fs.existsSync(backupFile)) throw new Error("global_transcript_maintenance_backup_missing");
+  fs.copyFileSync(backupFile, file);
+  return { restored: 1 };
+}
+
 function emptyMemory() {
   return {
     version: 1,
@@ -1069,6 +1111,7 @@ function commitGlobalAgentSessionCompaction(sessionId: string, options: GlobalSe
   const unsummarizedExecution = globalExecutionForMessages(transcript, unsummarized);
   const unsummarizedModelTimeline = mergeConversationWithExecution(unsummarized, unsummarizedExecution);
   const config = loadOrchestratorConfig();
+  const effectiveContextPolicy = resolveMainAgentContextPolicy(config).effective;
   const modelCapacity = resolveGroupModelContextCapacity(config);
   const threshold = getGroupAutoCompactThreshold(config);
   const triggerPayload = buildModelVisiblePayloadSnapshot({
@@ -1146,6 +1189,8 @@ function commitGlobalAgentSessionCompaction(sessionId: string, options: GlobalSe
       identity: dynamicToolIdentity,
       scope: dynamicToolScope,
       manifest: dynamicContextRestoreManifest,
+      maxPerSkillTokens: effectiveContextPolicy.postCompactSkillPerItemMaxTokens,
+      maxTotalSkillTokens: effectiveContextPolicy.postCompactSkillTotalMaxTokens,
     });
     const restoredMcpCatalog = toolManager.getScopedToolCatalog(dynamicToolScope).tools
       .filter((tool: any) => dynamicContextRestore.loadedToolNames.includes(String(tool.canonicalName || tool.name || "")));

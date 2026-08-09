@@ -6,7 +6,7 @@ import {
   verificationCommandInvocation,
 } from "../../test-agent/utils";
 import { runSemanticDecision } from "../../system/semantic-decision-runtime";
-import type { TaskAcceptancePolicySnapshotV1 } from "./task-acceptance-policy";
+import type { TaskAcceptancePolicySnapshot } from "./task-acceptance-policy";
 
 type VerificationProject = {
   name: string;
@@ -148,7 +148,7 @@ function normalizeCoverage(value: any, criteria: string[], evidenceIds: Set<stri
 
 export async function runMainAgentSelfVerification(input: {
   task: any;
-  policy: TaskAcceptancePolicySnapshotV1;
+  policy: TaskAcceptancePolicySnapshot;
   acceptanceCriteria?: string[];
   changedFiles?: any[];
   projects?: VerificationProject[];
@@ -270,7 +270,7 @@ export async function runMainAgentSelfVerification(input: {
   return { ...core, checksum: checksum(core) };
 }
 
-export function validateMainAgentSelfVerificationReceipt(task: any, policy: TaskAcceptancePolicySnapshotV1, receipt: any) {
+export function validateMainAgentSelfVerificationReceipt(task: any, policy: TaskAcceptancePolicySnapshot, receipt: any) {
   if (!receipt || receipt.schema !== "ccm-main-agent-self-verification-receipt-v1" || receipt.version !== 1) return { valid: false, reason: "self_verification_receipt_missing" };
   const { checksum: supplied, ...core } = receipt;
   if (!supplied || checksum(core) !== supplied) return { valid: false, reason: "self_verification_receipt_checksum_mismatch" };

@@ -47,6 +47,27 @@ export declare function createProjectSessionRecord(projectName: string, name?: s
     session_kind: string;
     created: boolean;
 };
+export declare function applyProjectSessionProvisionalTitle(project: string, sessionId: string, message: any): {
+    renamed: boolean;
+    reason: string;
+    name?: undefined;
+    generated?: undefined;
+} | {
+    renamed: boolean;
+    reason: string;
+    name: any;
+    generated?: undefined;
+} | {
+    renamed: boolean;
+    reason: string;
+    name: any;
+    generated: import("../../system/session-title").SessionTitleResult;
+} | {
+    renamed: boolean;
+    name: any;
+    generated: import("../../system/session-title").SessionTitleResult;
+    reason?: undefined;
+};
 export declare function bindProjectFeishuSession(projectName: string, sessionId: string, targetId: string, action?: "bind" | "unbind"): {
     project: string;
     session_id: string;

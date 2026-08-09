@@ -167,6 +167,7 @@ export declare function resumeTaskQueues(ctx: CollabCtx, options?: any): {
             removedFiles: number;
         };
     };
+    agent_communication_recovery: any[];
     results: any[];
     queue_status: {
         total_queued: number;

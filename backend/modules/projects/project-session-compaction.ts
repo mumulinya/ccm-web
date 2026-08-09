@@ -4,6 +4,7 @@ import * as path from "path";
 import { CCM_DIR, SESSIONS_DIR } from "../../core/utils";
 import { callCompactionModel } from "../collaboration/group-compaction-engine";
 import { loadOrchestratorConfig } from "../collaboration/group-orchestrator-config";
+import { resolveMainAgentContextPolicy } from "../../tools/main-agent-context-policy";
 import { resolveGroupModelContextCapacity } from "../collaboration/group-compaction-strategy";
 import { resolveTrustedModelContextCapacity } from "../collaboration/model-capability-cache";
 import { estimateTextTokens } from "../../system/context-budget";
@@ -745,8 +746,13 @@ export async function compactProjectSessionWithModel(project: string, projectSes
       verifiedAttachments: verifiedRecoveryAttachments,
     };
     const nextBoundaryGeneration = state.boundaryGeneration + 1;
+    const projectConfig = loadProjectConfigs()?.[safeProject] || {};
+    const effectiveContextPolicy = resolveMainAgentContextPolicy(
+      config,
+      projectConfig?.context_policy || projectConfig?.contextPolicy || {},
+    ).effective;
     const projectToolScope = {
-      ...(loadProjectConfigs()?.[safeProject]?.tools || {}),
+      ...(projectConfig?.tools || {}),
       auditContext: { runtime: "project-main-agent", project: safeProject, sessionId: safeSessionId, source: "post-compact-restore" },
     };
     const dynamicToolIdentity = {
@@ -765,6 +771,8 @@ export async function compactProjectSessionWithModel(project: string, projectSes
       identity: dynamicToolIdentity,
       scope: projectToolScope,
       manifest: dynamicContextRestoreManifest,
+      maxPerSkillTokens: effectiveContextPolicy.postCompactSkillPerItemMaxTokens,
+      maxTotalSkillTokens: effectiveContextPolicy.postCompactSkillTotalMaxTokens,
     });
     const restoredMcpCatalog = toolManager.getScopedToolCatalog(projectToolScope).tools
       .filter((tool: any) => dynamicContextRestore.loadedToolNames.includes(String(tool.canonicalName || tool.name || "")));

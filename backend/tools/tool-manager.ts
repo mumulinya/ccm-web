@@ -36,6 +36,11 @@ interface SkillDef {
   filename?: string;
   sourcePath?: string;
   contentHash?: string;
+  context?: "inline" | "fork";
+  allowedTools?: string[];
+  agent?: string;
+  model?: string;
+  effort?: "low" | "medium" | "high" | "";
 }
 
 export interface PostCompactDynamicToolCatalog {
@@ -675,6 +680,11 @@ export class ToolManager {
       input: inputText,
       invokedAt: new Date().toISOString(),
       auditFile: SKILL_INVOCATION_AUDIT_FILE,
+      executionMode: skill.context === "fork" ? "fork" : "inline",
+      allowedTools: Array.isArray(skill.allowedTools) ? skill.allowedTools.map(String).filter(Boolean) : [],
+      agent: String(skill.agent || ""),
+      model: String(skill.model || ""),
+      effort: String(skill.effort || ""),
     };
     appendSkillInvocationAudit({ type: "skill_invoked", skill: skill.name, contentHash: result.contentHash, inputBytes: Buffer.byteLength(inputText, "utf-8"), ...auditMetaFromScope(scope) });
     return result;
