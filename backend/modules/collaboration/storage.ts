@@ -198,6 +198,33 @@ export function getActiveGroupChatSessionId(groupId: string) {
   return readGroupSessionManifest(groupId).activeSessionId || GROUP_DEFAULT_SESSION_ID;
 }
 
+export function invalidateGroupMembershipContext(groupId: string, reason = "group_membership_changed") {
+  const sessions = listGroupChatSessions(groupId).sessions;
+  const results: any[] = [];
+  for (const session of sessions) {
+    const sessionId = String(session?.id || "").trim();
+    if (!sessionId) continue;
+    try {
+      const result = invalidateProviderNeutralContextCacheState({
+        scope: "group",
+        scopeId: groupId,
+        sessionId,
+      }, reason);
+      results.push({ sessionId, success: result.success === true, hotCleared: Number(result.hotCleared || 0) });
+    } catch (error: any) {
+      results.push({ sessionId, success: false, reason: String(error?.message || error || "context_invalidation_failed").slice(0, 180) });
+    }
+  }
+  return {
+    schema: "ccm-group-membership-context-refresh-v1",
+    groupId,
+    refreshed: results.filter(item => item.success).length,
+    failed: results.filter(item => !item.success).length,
+    sessions: results,
+    refreshedAt: new Date().toISOString(),
+  };
+}
+
 export function resolveWritableGroupChatSession(groupId: string, requestedSessionId = "", options: any = {}) {
   const id = String(groupId || "").trim();
   if (!id) throw new Error("群聊 ID 不能为空");

@@ -2,6 +2,7 @@
 
 import * as fs from "fs";
 import * as path from "path";
+import * as crypto from "crypto";
 import type {
   IncomingMessage,
   ServerResponse,
@@ -14,6 +15,7 @@ import {
   GROUP_MESSAGES_DIR,
 } from "../../core/utils";
 import {
+  getConfigs,
   loadTasks,
 } from "../../core/db";
 import {
@@ -23,6 +25,7 @@ import {
   deleteGroupChatSession,
   getActiveGroupChatSessionId,
   getGroupMessages,
+  invalidateGroupMembershipContext,
   listGroupChatSessions,
   loadGroups,
   purgeLegacyDefaultGroupChatSession,
@@ -38,6 +41,7 @@ import {
 } from "./logs";
 import {
   getCoordinatorMember,
+  inspectGroupMemberRuntimeForAddition,
   loadOrchestratorConfig,
   normalizeGroupOrchestrator,
 } from "./group-orchestrator";
@@ -2356,20 +2360,50 @@ export function handleBasicGroupRoutes(
         const groups = loadGroups();
         const group = groups.find(g => g.id === id);
         if (!group) return sendJson(res, { error: "群聊不存在" }, 404);
-        if (add) {
-          for (const m of add) {
-            if (!group.members.find((x: any) => x.project === m.project)) {
-              group.members.push(m);
-            }
-          }
+        const additions = Array.isArray(add) ? add : [];
+        const removals = Array.isArray(remove) ? remove.map((value: any) => String(value || "").trim()).filter(Boolean) : [];
+        const pendingAdditions = additions.filter((member: any) => {
+          const project = String(member?.project || "").trim();
+          return project && !group.members.find((existing: any) => String(existing?.project || "") === project);
+        });
+        const inspectedAdditions = pendingAdditions.map((member: any) => inspectGroupMemberRuntimeForAddition(
+          member?.project,
+          group,
+          getConfigs(),
+          member?.agent,
+        ));
+        const unavailable = inspectedAdditions.filter((item: any) => item.valid !== true);
+        if (unavailable.length) {
+          return sendJson(res, {
+            success: false,
+            error: unavailable.map((item: any) => `${item.project || "未知项目"}：${item.reason}`).join("；"),
+            code: "group_member_runtime_unavailable",
+            unavailable,
+          }, 409);
         }
-        if (remove) {
+        for (const runtime of inspectedAdditions) {
+          group.members.push({ project: runtime.project, agent: runtime.agentType });
+        }
+        if (removals.length) {
           const coordinatorProject = getCoordinatorMember(group).project;
-          group.members = group.members.filter((m: any) => !remove.includes(m.project) || m.project === coordinatorProject || m.role === "coordinator");
+          group.members = group.members.filter((m: any) => !removals.includes(m.project) || m.project === coordinatorProject || m.role === "coordinator");
         }
         normalizeGroupOrchestrator(group);
+        const membershipChanged = inspectedAdditions.length > 0 || removals.length > 0;
+        if (membershipChanged) {
+          group.membership_revision = Math.max(0, Number(group.membership_revision || 0)) + 1;
+          group.membership_updated_at = new Date().toISOString();
+          group.membership_checksum = crypto.createHash("sha256").update(JSON.stringify(group.members.map((member: any) => ({
+            project: String(member?.project || ""),
+            role: String(member?.role || ""),
+            agent: String(member?.agent || ""),
+          })))).digest("hex");
+        }
         saveGroups(groups);
-        sendJson(res, { success: true, group: publicGroupWithoutTestTargetSecrets(group) });
+        const contextRefresh = membershipChanged
+          ? invalidateGroupMembershipContext(String(group.id || id), "group_membership_changed")
+          : { schema: "ccm-group-membership-context-refresh-v1", groupId: String(group.id || id), refreshed: 0, failed: 0, sessions: [] };
+        sendJson(res, { success: true, group: publicGroupWithoutTestTargetSecrets(group), context_refresh: contextRefresh });
       } catch (e: any) {
         sendJson(res, { error: e.message }, 400);
       }

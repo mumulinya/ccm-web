@@ -39,6 +39,7 @@ export declare function defaultOrchestratorConfig(): {
     googleCseId: string;
     notebookToolsEnabled: boolean;
     ccStyleExecutionDisplayEnabled: boolean;
+    ccStyleAgentProgressNarrationEnabled: boolean;
     mcpToolLoadingMode: string;
     mcpToolAutoThresholdPercent: number;
     skillCatalogBudgetPercent: number;

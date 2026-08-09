@@ -64,7 +64,7 @@ defineProps({
   formatSize: { type: Function, required: true },
 })
 
-const emit = defineEmits(['edit-message'])
+const emit = defineEmits(['edit-message', 'open-file-change', 'open-file-changes'])
 </script>
 
 <template>
@@ -88,6 +88,7 @@ const emit = defineEmits(['edit-message'])
               :streaming="!!msg.streaming"
               class="chat-bubble-wrapper"
               :class="[msg.role, { 'search-hit': searchHighlightMsgIndex === index, 'structured-message': !!msg.type && msg.type !== 'text' }]"
+              :data-local-command="msg.type === 'command_result' || undefined"
               :data-message-type="msg.type || undefined"
               :data-message-id="msg.id || undefined"
               :copy-text="getCopyableMessageText(msg, getVisibleGlobalMessageContent(msg))"
@@ -100,6 +101,9 @@ const emit = defineEmits(['edit-message'])
               :enabled="executionEventsEnabled"
               :messages="messages"
               :message-index="index"
+              stage-grouped
+              presentation="live"
+              @open-file-change="emit('open-file-change', $event)"
             />
             <div class="chat-bubble">
               <!-- 助手消息判定 -->
@@ -431,6 +435,16 @@ const emit = defineEmits(['edit-message'])
               </div>
   
             </div>
+            <AgentExecutionTranscript
+              :events="executionEvents"
+              :enabled="executionEventsEnabled"
+              :messages="messages"
+              :message-index="index"
+              stage-grouped
+              presentation="completed"
+              @open-file-change="emit('open-file-change', $event)"
+              @open-file-changes="emit('open-file-changes', $event)"
+            />
           </ConversationMessageShell>
           
           <!-- 执行系统动作 of 提示效果 -->

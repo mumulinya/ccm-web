@@ -7,6 +7,7 @@ import ConversationTurnControls from '../common/ConversationTurnControls.vue'
 import ConversationFindBar from '../common/ConversationFindBar.vue'
 import LoadingSkeleton from '../common/LoadingSkeleton.vue'
 import SlashCommandMenu from '../common/SlashCommandMenu.vue'
+import SlashCommandPanel from '../common/SlashCommandPanel.vue'
 import SessionContextUsage from '../common/SessionContextUsage.vue'
 import PermissionApprovalCards from '../common/PermissionApprovalCards.vue'
 import GlobalAgentSessionSidebar from './GlobalAgentSessionSidebar.vue'
@@ -14,6 +15,7 @@ import GlobalAgentFeishuBindingModal from './GlobalAgentFeishuBindingModal.vue'
 import GlobalAgentMessageList from './GlobalAgentMessageList.vue'
 import AgentToolsModal from '../common/AgentToolsModal.vue'
 import OnlineDocumentReferences from '../common/OnlineDocumentReferences.vue'
+import ScopeTargetSelect from '../common/ScopeTargetSelect.vue'
 import { useAgentExecutionEvents } from '../../composables/useAgentExecutionEvents.js'
 import { useCodeChangeDrawer } from '../../composables/useCodeChangeDrawer.js'
 import { useGlobalAgentAttachments } from '../../composables/useGlobalAgentAttachments.js'
@@ -66,6 +68,7 @@ const syncGlobalSidebarForViewport = () => {
 const {
   codeChangeDrawer,
   openCodeChangeDrawer,
+  openSingleFileChange,
   closeCodeChangeDrawer,
 } = useCodeChangeDrawer({ title: '全局 Agent 代码改动' })
 
@@ -137,6 +140,43 @@ const globalToolOptions = ref({ mcp: [], skill: [] })
 const globalToolReadiness = ref(null)
 const globalToolPreflight = ref(null)
 const globalToolCount = computed(() => (globalTools.value.mcp?.length || 0) + (globalTools.value.skill?.length || 0))
+const globalDispatchTargets = ref([])
+const globalDispatchTargetsLoading = ref(false)
+const globalDispatchTargetsError = ref('')
+const selectedGlobalTargetKeys = ref([])
+const globalDispatchTargetOptions = computed(() => globalDispatchTargets.value.map(target => ({
+  value: `${target.scope}:${target.scopeId}`,
+  label: target.displayName || target.canonicalName || target.scopeId,
+  scope: target.scope,
+  disabled: target.ready === false,
+  reason: target.unavailableReason || '',
+})))
+const selectedGlobalTargetKey = computed({
+  get: () => selectedGlobalTargetKeys.value[0] || '',
+  set: value => { selectedGlobalTargetKeys.value = value ? [String(value)] : [] },
+})
+const selectedGlobalTargetRefs = computed(() => globalDispatchTargets.value
+  .filter(target => selectedGlobalTargetKeys.value.includes(`${target.scope}:${target.scopeId}`) && target.ready !== false)
+  .map(target => ({ scope: target.scope, scopeId: target.scopeId, name: target.displayName || target.canonicalName || target.scopeId })))
+
+async function loadGlobalDispatchTargets() {
+  globalDispatchTargetsLoading.value = true
+  globalDispatchTargetsError.value = ''
+  try {
+    const response = await fetch('/api/global-agent/dispatch-targets', { cache: 'no-store' })
+    const data = await response.json()
+    if (!response.ok || data.success === false) throw new Error(data.error || '读取可投放目标失败')
+    globalDispatchTargets.value = Array.isArray(data.targets) ? data.targets : []
+    const valid = new Set(globalDispatchTargets.value.filter(item => item.ready !== false).map(item => `${item.scope}:${item.scopeId}`))
+    selectedGlobalTargetKeys.value = selectedGlobalTargetKeys.value.filter(key => valid.has(key))
+  } catch (error) {
+    console.warn('[全局助手] 可投放目标加载失败：', error)
+    globalDispatchTargets.value = []
+    globalDispatchTargetsError.value = error?.message || '读取可投放目标失败'
+  } finally {
+    globalDispatchTargetsLoading.value = false
+  }
+}
 
 const normalizeGlobalTools = (tools = {}) => ({
   mcp: Array.from(new Set((Array.isArray(tools.mcp) ? tools.mcp : []).map(item => String(item || '').trim()).filter(Boolean))),
@@ -481,6 +521,9 @@ const runGlobalClientCommand = createSlashCommandClientActions({
   sessions: () => sessions.value,
   currentSessionId: () => currentSessionId.value,
   context: () => ({ sessionId: currentSessionId.value }),
+  selectSession: (sessionId) => selectSession(sessionId),
+  refreshSessions: () => syncHistoryFromServer({ preferServerCurrent: true }),
+  reloadCurrentSession: () => currentSessionId.value ? syncHistoryFromServer({ replaceSessionId: currentSessionId.value, preferServerCurrent: true }) : undefined,
   statusSummary: () => `全局 Agent 当前会话“${currentSession.value?.name || '未选择'}”已加载 ${messages.value.length} 条消息。`,
   contextMetrics: () => ({ 会话: currentSession.value?.name || '未选择', 会话ID: currentSessionId.value, 全部会话: sessions.value.length }),
   exportFilename: () => `ccm-global-${currentSessionId.value || 'context'}`,
@@ -559,8 +602,7 @@ const slash = useSlashCommands({
   onClientAction: runGlobalClientCommand,
   onResult: (result) => {
     if (!currentSession.value) return
-    currentSession.value.messages.push({ role: 'assistant', type: 'command_result', commandResult: result, content: result.summary || '命令已执行', timestamp: new Date().toISOString() })
-    saveHistory()
+    currentSession.value.messages.push({ id: result.recordId, role: 'assistant', type: 'command_result', commandResult: result, localCommandRecord: result.localCommandRecord, modelVisible: false, content: result.summary || '命令已执行', timestamp: result.at || new Date().toISOString() })
     nextTick(() => scrollToBottom())
   },
   onError: (message) => toast.error(message),
@@ -576,11 +618,12 @@ const handleGlobalInputKeydown = async (event) => {
   }
 }
 
-const globalRequestRetrySignature = ({ sessionId, message, files, clarificationRunId }) => JSON.stringify({
+const globalRequestRetrySignature = ({ sessionId, message, files, clarificationRunId, targetRefs }) => JSON.stringify({
   sessionId,
   message,
   files: (files || []).map(file => [file.name, file.size]),
   clarificationRunId: clarificationRunId || '',
+  targetRefs: (targetRefs || []).map(target => `${target.scope}:${target.scopeId}`).sort(),
 })
 
 const SYSTEM_RESULT_MARKER = '[处理结果]'
@@ -836,6 +879,7 @@ const {
   globalActiveRunId, globalStreamController, currentSessionId, globalTurnControl, currentSupervisedRunMessage,
   activeGlobalRunMessage, activeGlobalExecutionConfirmed,
   pendingGlobalMissionInput, selectedFiles,
+  selectedGlobalTargetRefs, selectedGlobalTargetKeys,
   chatInputElement, postJson: (url, body) => postJson(url, body), visibleGlobalText, isSending,
   pendingGlobalClarificationInput, createNewSession, pendingGlobalRequestRetry, globalRequestRetrySignature,
   materializeCurrentSession,
@@ -979,6 +1023,7 @@ onMounted(() => {
   loadHistory()
   void loadFeishuSessionState()
   void loadGlobalTools(false)
+  void loadGlobalDispatchTargets()
   unsubscribeFeishuSessionEvents = subscribeRuntimeEvents(['feishu', 'music', 'global'], event => {
     if (event?.type === 'global.session_title_changed') {
       const sessionId = String(event?.data?.sessionId || '')
@@ -1412,6 +1457,8 @@ const handleGitCommitCardSubmit = async (msg) => {
         :zoom-image="zoomImage"
         :format-size="formatSize"
         @edit-message="editGlobalUserMessage"
+        @open-file-change="openSingleFileChange"
+        @open-file-changes="openCodeChangeDrawer($event, { title: '全局任务文件改动' })"
       />
 
       <div class="chat-footer">
@@ -1449,6 +1496,25 @@ const handleGitCommitCardSubmit = async (msg) => {
           @guide="guideGlobalQueuedTurn"
           @retry="(turn) => globalTurnControl.retry(turn).then(() => drainGlobalTurnQueue())"
         />
+        <div v-if="!pendingGlobalMissionInput" class="global-dispatch-target-picker">
+          <span class="global-dispatch-target-label">任务投放目标</span>
+          <div class="global-dispatch-target-options">
+            <p v-if="globalDispatchTargetsLoading" class="dispatch-target-state">正在读取可投放项目和群聊…</p>
+            <div v-else-if="globalDispatchTargetsError" class="dispatch-target-load-error" role="alert">
+              <span>目标列表加载失败：{{ globalDispatchTargetsError }}</span>
+              <button type="button" :disabled="isSending" @click="loadGlobalDispatchTargets">重新读取</button>
+            </div>
+            <ScopeTargetSelect
+              v-else-if="globalDispatchTargets.length"
+              v-model="selectedGlobalTargetKey"
+              :options="globalDispatchTargetOptions"
+              :disabled="isSending"
+              placeholder="选择群聊或项目"
+              aria-label="选择本次全局 Agent 任务的投放目标"
+            />
+            <p v-if="!globalDispatchTargetsLoading && !globalDispatchTargetsError && !globalDispatchTargets.length">当前确实没有已配置的项目或群聊。普通问答仍可直接发送。</p>
+          </div>
+        </div>
         <OnlineDocumentReferences :text="chatInput" compact pending-label="发送后读取" />
                 <div class="input-wrapper" :class="{ 'steering-mode': (isSending && !!activeGlobalRunId) || isSupervisionContinuationInput }">
           <input 
@@ -1488,6 +1554,7 @@ const handleGitCommitCardSubmit = async (msg) => {
             :query="slash.query"
             @select="slash.select"
           />
+          <SlashCommandPanel :panel="slash.panel" @close="slash.closePanel" @action="slash.runPanelAction" />
           <SessionContextUsage
             :usage="globalContextUsage"
             :loading="globalContextLoading"

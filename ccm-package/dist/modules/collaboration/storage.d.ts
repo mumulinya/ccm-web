@@ -10,6 +10,14 @@ export declare function listGroupChatSessions(groupId: string): {
     updatedAt: string;
 };
 export declare function getActiveGroupChatSessionId(groupId: string): string;
+export declare function invalidateGroupMembershipContext(groupId: string, reason?: string): {
+    schema: string;
+    groupId: string;
+    refreshed: number;
+    failed: number;
+    sessions: any[];
+    refreshedAt: string;
+};
 export declare function resolveWritableGroupChatSession(groupId: string, requestedSessionId?: string, options?: any): any;
 export declare function findGroupChatSessionContainingMessage(groupId: string, messageId: string): {
     session: any;

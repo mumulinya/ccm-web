@@ -13,7 +13,7 @@ import GlobalAgentFeishuBindingModal from '../global/GlobalAgentFeishuBindingMod
 import AgentExecutionTranscript from '../common/AgentExecutionTranscript.vue'
 import { useAgentExecutionEvents } from '../../composables/useAgentExecutionEvents.js'
 import { getCopyableMessageText } from '../../utils/messageActions.js'
-import { shouldShowCompactProcessingState } from '../../utils/agentExecutionEvents.js'
+import { hasTerminalExecutionForMessage, shouldShowCompactProcessingState } from '../../utils/agentExecutionEvents.js'
 
 const props = defineProps({
   navigateTo: { type: Object, default: null },

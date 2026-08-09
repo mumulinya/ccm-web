@@ -86,6 +86,24 @@ export declare function transitionGroupSessionLifecycleHead(input?: any): {
     };
     file: string;
 };
+export declare function rotateGroupSessionLifecycleHead(input?: any): {
+    committed: boolean;
+    idempotent: boolean;
+    head: any;
+    journal: {
+        committed: boolean;
+        idempotent: boolean;
+        record: any;
+        file: string;
+    };
+    receipt: {
+        committed: boolean;
+        idempotent: boolean;
+        receipt: any;
+        file: string;
+    };
+    file: string;
+};
 export declare function validateGroupSessionLifecycleBinding(input?: any): {
     schema: string;
     valid: boolean;

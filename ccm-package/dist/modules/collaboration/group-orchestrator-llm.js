@@ -57,10 +57,13 @@ const group_orchestrator_llm_client_1 = require("./group-orchestrator-llm-client
 const context_budget_1 = require("../../system/context-budget");
 const agent_loop_budget_1 = require("../../system/agent-loop-budget");
 const user_visible_agent_events_1 = require("../../system/user-visible-agent-events");
+const assistant_progress_1 = require("../../system/assistant-progress");
+const slash_command_session_state_1 = require("../../system/slash-command-session-state");
 const user_visible_agent_projections_1 = require("../../system/user-visible-agent-projections");
 const session_compaction_core_1 = require("../../system/session-compaction-core");
 const role_skills_1 = require("../../skills/role-skills");
 const main_agent_tool_runtime_1 = require("../../tools/main-agent-tool-runtime");
+const cc_tool_result_limits_1 = require("../../tools/cc-tool-result-limits");
 const group_compaction_strategy_1 = require("./group-compaction-strategy");
 const main_agent_context_policy_1 = require("../../tools/main-agent-context-policy");
 const workflow_decision_1 = require("../../agents/workflow-decision");
@@ -160,18 +163,22 @@ function normalizeGroupMainToolRequests(value) {
 async function executeGroupMainAgentToolRequests(input) {
     const batchSize = Math.max(1, Math.min(8, Math.floor(Number(input.toolBatchSize || 2))));
     const readOnlyParallelism = Math.max(1, Math.min(8, Math.floor(Number(input.readOnlyParallelism || 2))));
-    const requests = input.requests.slice(0, batchSize);
-    const executeOne = async (request) => {
+    // Preserve every logical request from the model turn. `batchSize` controls
+    // concurrency only; truncating here made the third project invisible when a
+    // group contained more projects than the default batch size.
+    const requests = input.requests.slice(0, 32);
+    const preparedIds = new Map(requests.map((request, index) => [request, String(input.toolCallIds?.[index] || "")]));
+    const executeOne = async (request, parallelGroupId = "") => {
         const groupId = String(input.toolContext?.group?.id || "");
         const exactSessionId = String(input.toolContext?.groupSessionId || input.toolContext?.group_session_id || "");
         const generation = Math.max(0, Number(input.toolContext?.scopeIdentity?.generation || 0));
-        const toolCallId = `gmtool_${crypto.createHash("sha256").update(JSON.stringify({ groupId, exactSessionId, name: request.name, arguments: request.arguments, at: Date.now(), nonce: crypto.randomBytes(4).toString("hex") })).digest("hex").slice(0, 24)}`;
+        const toolCallId = preparedIds.get(request) || `gmtool_${crypto.createHash("sha256").update(JSON.stringify({ groupId, exactSessionId, name: request.name, arguments: request.arguments, at: Date.now(), nonce: crypto.randomBytes(4).toString("hex") })).digest("hex").slice(0, 24)}`;
         const startedAt = Date.now();
         if (groupId && exactSessionId)
             (0, user_visible_agent_events_1.appendToolProjection)({
                 scope: "group", scopeId: groupId, exactSessionId, generation,
                 eventType: "tool_started", toolName: request.name, toolCallId,
-                arguments: request.arguments || {}, parallelGroupId: input.toolContext?.parallelGroupId,
+                arguments: request.arguments || {}, parallelGroupId: parallelGroupId || undefined,
                 display: { summary: request.reason || "正在执行" },
             });
         const isBuiltin = GROUP_MAIN_BUILTIN_TOOLS.some(tool => tool.canonicalName === request.name);
@@ -181,7 +188,7 @@ async function executeGroupMainAgentToolRequests(input) {
                 const rows = await (0, main_agent_tool_runtime_1.executeMainAgentToolRequests)({
                     ...input,
                     requests: [request],
-                    resultTokenLimit: 8_000,
+                    resultTokenLimit: cc_tool_result_limits_1.CC_ALIGNED_TOOL_RESULT_MAX_TOKENS,
                     toolBatchSize: 1,
                     readOnlyParallelism,
                 });
@@ -207,8 +214,8 @@ async function executeGroupMainAgentToolRequests(input) {
                 const modelOutput = { context: rawOutput.context, citations: rawOutput.citations, retrievalMode: rawOutput.embeddingMode, indexGeneration: rawOutput.indexGeneration };
                 const output = JSON.stringify(modelOutput);
                 const outputTokens = (0, context_budget_1.estimateTextTokens)(output);
-                row = outputTokens > 8_000
-                    ? { name: request.name, itemName: request.name, toolKind: "mcp", ok: false, error: "GROUP_MAIN_TOOL_RESULT_EXCEEDS_8K_TOKEN_BUDGET", outputTokens, reason: request.reason }
+                row = outputTokens > cc_tool_result_limits_1.CC_ALIGNED_TOOL_RESULT_MAX_TOKENS
+                    ? { name: request.name, itemName: request.name, toolKind: "mcp", ok: false, error: cc_tool_result_limits_1.GROUP_MAIN_TOOL_RESULT_LIMIT_ERROR, outputTokens, reason: request.reason }
                     : { name: request.name, itemName: request.name, toolKind: "internal_mcp", source: "ccm__knowledge_context", scope: "group", loaded: true, durationMs: Date.now() - startedAt, ok: true, output, rawOutput, outputTokens, resultChecksum: crypto.createHash("sha256").update(output).digest("hex"), reason: request.reason };
             }
             catch (error) {
@@ -222,7 +229,7 @@ async function executeGroupMainAgentToolRequests(input) {
                 toolName: request.name, toolCallId, arguments: request.arguments || {},
                 result: row, error: row?.ok === false ? row?.error || "工具执行失败" : "",
                 durationMs: Number(row?.durationMs || Date.now() - startedAt), outputTokens: Number(row?.outputTokens || 0),
-                parallelGroupId: input.toolContext?.parallelGroupId,
+                parallelGroupId: parallelGroupId || undefined,
                 display: { summary: row?.ok === false ? row?.error || "工具执行失败" : "执行完成" },
             });
         return { ...row, toolCallId };
@@ -246,18 +253,21 @@ async function executeGroupMainAgentToolRequests(input) {
             continue;
         }
         const readBatch = [];
-        while (index < requests.length && isSafeReadOnly(requests[index]) && readBatch.length < readOnlyParallelism) {
+        while (index < requests.length && isSafeReadOnly(requests[index]) && readBatch.length < Math.min(readOnlyParallelism, batchSize)) {
             readBatch.push(requests[index]);
             index += 1;
         }
-        rows.push(...await Promise.all(readBatch.map(executeOne)));
+        const parallelGroupId = readBatch.length > 1
+            ? `group-parallel:${String(input.toolContext?.groupSessionId || input.toolContext?.group_session_id || "session")}:${Date.now()}:${index - readBatch.length}`
+            : "";
+        rows.push(...await Promise.all(readBatch.map(request => executeOne(request, parallelGroupId))));
     }
     return rows.map(row => row.error === "MAIN_AGENT_TOOL_NOT_AUTHORIZED"
         ? { ...row, error: "GROUP_MAIN_TOOL_NOT_AUTHORIZED" }
         : row.error === "MAIN_AGENT_TOOL_SCHEMA_NOT_LOADED"
             ? { ...row, error: "GROUP_MAIN_TOOL_SCHEMA_NOT_LOADED" }
-            : row.error === "MAIN_AGENT_TOOL_RESULT_EXCEEDS_8K_TOKEN_BUDGET"
-                ? { ...row, error: "GROUP_MAIN_TOOL_RESULT_EXCEEDS_8K_TOKEN_BUDGET" }
+            : row.error === cc_tool_result_limits_1.MAIN_AGENT_TOOL_RESULT_LIMIT_ERROR || row.error === "MAIN_AGENT_TOOL_RESULT_EXCEEDS_8K_TOKEN_BUDGET"
+                ? { ...row, error: cc_tool_result_limits_1.GROUP_MAIN_TOOL_RESULT_LIMIT_ERROR }
                 : row);
 }
 function attachLlmTokenUsage(error, usage) {
@@ -675,7 +685,7 @@ CCM 主 Agent 动作边界（必须按动作风险做决定）：
 - 群聊主 Agent只能审批目标项目内、可恢复、完成当前任务确有必要的权限。
 - 发布、生产部署、强推、密钥、系统提权、项目外路径、破坏性数据库操作和无法判断的事项必须列入 userApprovalRequired，不能提前授权。
 
-你必须只返回 JSON 对象，不要 Markdown，不要解释。
+你必须只返回 JSON 对象，不要 Markdown，不要解释。第一个工具批次前在 progressUpdate 写一句面向用户的简短说明；后续只有关键发现、方向变化、阻塞、返工、验收或总结节点才填写，不要逐个工具机械播报，也不能写隐藏思维链。
 
 允许分派的项目 Agent 只有：
 ${(0, group_orchestrator_coded_1.buildAllowedProjectBrief)(group) || "- 无"}${sharedFilesPart}${ragPart}${extraInstructionsPart}${roleSkillsPart}${mainAgentToolsPart}
@@ -741,6 +751,8 @@ JSON 格式：
     "dependencyRationale": ["每条跨项目依赖为什么存在"],
     "replanTriggers": ["出现什么事实变化或失败时必须重规划"]
   },
+  "progressUpdate": "工具前或关键节点的安全进度说明；不需要时为空字符串",
+  "progressKind": "before_tools | key_finding | direction_change | blocker | rework | verification | before_summary",
   "toolRequests": [
     {
       "name": "只读 MCP 的 canonicalName，或 invoke_skill",
@@ -897,6 +909,34 @@ function normalizeArchitecturePlan(parsed, sourceEvidence, targets) {
         sourceReady: sourceEvidence?.ready === true,
     };
 }
+function groupRequirementPlanProjection(input) {
+    const architecture = input.architecturePlan || {};
+    const acceptanceRows = Array.isArray(input.analysis?.acceptanceEvidencePlan)
+        ? input.analysis.acceptanceEvidencePlan.map((item) => item?.criterion || item?.observableOutcome).filter(Boolean)
+        : [];
+    const deliverables = Array.isArray(input.analysis?.deliverables) ? input.analysis.deliverables : [];
+    return {
+        planId: input.planId,
+        revision: Math.max(1, Number(input.revision || 1)),
+        title: "需求实施计划",
+        goal: architecture.goal || input.analysis?.summary || "按当前需求完成涉及项目的实现与验收。",
+        steps: (Array.isArray(architecture.dependencySteps) ? architecture.dependencySteps : []).map((step, index) => ({
+            id: step.id || `step_${index + 1}`,
+            title: step.title || `实施步骤 ${index + 1}`,
+            description: step.title || "完成当前阶段的业务实现。",
+            outcome: Array.isArray(step.acceptance) ? step.acceptance[0] || "完成后进入下一阶段。" : "完成后进入下一阶段。",
+            project: step.project || input.projects[index] || "",
+            dependsOn: step.dependsOn || [],
+            status: "pending",
+        })),
+        scope: input.projects,
+        expectedResults: [...deliverables, ...acceptanceRows],
+        exclusions: architecture.boundaries || [],
+        status: input.status || "executing",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+    };
+}
 function enrichTaskWithDocumentFindings(task, findings) {
     const text = String(task || "").trim();
     if (!findings.length)
@@ -1048,6 +1088,26 @@ function buildCoordinatorResultFromAnalysis(group, message, analysis, targets, r
     analysis.architecturePlan = architecturePlan;
     coordinationPlan.architecture = architecturePlan;
     coordinationPlan.sourceEvidence = sourceEvidence;
+    const visibleGroupSessionId = String(options.groupSessionId || options.group_session_id || "").trim();
+    const visiblePlanId = String(options.taskId || options.task_id || options.turnId || options.turn_id || `group-${group.id}-${crypto.createHash("sha256").update(message).digest("hex").slice(0, 16)}`);
+    if (group.id && visibleGroupSessionId && architecturePlan.dependencySteps.length) {
+        (0, user_visible_agent_events_1.appendUserVisibleRequirementPlan)({
+            eventId: `group-task:${visiblePlanId}:requirement-plan:1:initial`,
+            scope: "group",
+            scopeId: String(group.id),
+            exactSessionId: visibleGroupSessionId,
+            generation: Math.max(0, Number(options.generation || options.executionGeneration || 0)),
+            taskId: visiblePlanId,
+            plan: groupRequirementPlanProjection({
+                architecturePlan,
+                analysis,
+                projects: delegated,
+                planId: visiblePlanId,
+                revision: 1,
+                status: "executing",
+            }),
+        });
+    }
     return {
         agent: coordinator.project,
         delegated,
@@ -1082,7 +1142,7 @@ function buildCoordinatorResultFromAnalysis(group, message, analysis, targets, r
 }
 async function runLlmGroupOrchestrator(input) {
     const group = (0, group_orchestrator_routing_1.normalizeGroupOrchestrator)(input.group);
-    const config = (0, group_orchestrator_config_1.loadOrchestratorConfig)();
+    const baseConfig = (0, group_orchestrator_config_1.loadOrchestratorConfig)();
     const providedWorkflowDecision = input.workflowDecision || input.workflow_decision || null;
     const workflowDecision = providedWorkflowDecision
         ? (0, workflow_decision_1.normalizeWorkflowDecision)(providedWorkflowDecision)
@@ -1101,7 +1161,11 @@ async function runLlmGroupOrchestrator(input) {
         workflowDecision,
     };
     const groupSessionId = String(input.groupSessionId || input.group_session_id || "").trim();
+    const sessionPreferences = (0, slash_command_session_state_1.readSlashCommandSessionState)("group", String(group.id), groupSessionId).preferences;
+    const config = { ...baseConfig, model: sessionPreferences.model || baseConfig.model, reasoningEffort: sessionPreferences.effort || baseConfig.reasoningEffort };
+    const sessionDirective = (0, slash_command_session_state_1.renderSlashCommandSessionDirective)("group", String(group.id), groupSessionId);
     const visibleTurnId = String(input.turnId || input.turn_id || `${group.id}:${groupSessionId}:${Date.now()}`);
+    const visibleTurnStartedAt = Date.now();
     if (group.id && groupSessionId) {
         (0, user_visible_agent_events_1.appendUserVisibleAgentEvent)({
             eventId: `group-turn:${visibleTurnId}:started`,
@@ -1133,6 +1197,8 @@ async function runLlmGroupOrchestrator(input) {
     });
     let toolCallCount = 0;
     let toolRoundCount = 0;
+    let modelDurationMs = 0;
+    let toolWallDurationMs = 0;
     let segmentToolCalls = 0;
     let segmentModelTurns = 0;
     let segmentStartedAt = Date.now();
@@ -1211,13 +1277,20 @@ async function runLlmGroupOrchestrator(input) {
         return { parsed, messages, providerPayload };
     };
     let parsed;
-    let planningInput = { ...input, group, workflowDecision: providedWorkflowDecision || null };
+    let planningInput = {
+        ...input,
+        group,
+        workflowDecision: providedWorkflowDecision || null,
+        extraInstructions: [String(input.extraInstructions || "").trim(), sessionDirective].filter(Boolean).join("\n\n"),
+    };
     const toolResults = [];
     const executed = new Set();
     try {
         while (true) {
             const round = toolRoundCount;
+            const modelStartedAt = Date.now();
             const response = await callPlanningModel(planningInput, round);
+            modelDurationMs += Math.max(0, Date.now() - modelStartedAt);
             parsed = response.parsed;
             const requests = normalizeGroupMainToolRequests(parsed?.toolRequests || parsed?.tool_requests);
             if (requests.length === 0) {
@@ -1248,23 +1321,62 @@ async function runLlmGroupOrchestrator(input) {
                 throw new Error("GROUP_MAIN_TOOL_LOOP_MAX_ROUNDS");
             const remainingToolCalls = loopBudget.mode === "bounded"
                 ? Math.max(0, loopBudget.toolCallBudget - toolCallCount)
-                : loopBudget.toolBatchSize;
+                : freshRequests.length;
             if (!remainingToolCalls)
                 throw new Error("GROUP_MAIN_TOOL_LOOP_TOOL_BUDGET");
             const toolContext = buildGroupMainAgentToolContext(planningInput);
-            const selectedRequests = freshRequests.slice(0, Math.min(loopBudget.toolBatchSize, remainingToolCalls));
+            const selectedRequests = freshRequests.slice(0, remainingToolCalls);
+            const preparedToolCallIds = selectedRequests.map(request => `gmtool_${crypto.createHash("sha256").update(JSON.stringify({
+                groupId: group.id,
+                exactSessionId: groupSessionId,
+                name: request.name,
+                arguments: request.arguments,
+                turn: visibleTurnId,
+                round,
+                nonce: crypto.randomBytes(4).toString("hex"),
+            })).digest("hex").slice(0, 24)}`);
+            if ((0, assistant_progress_1.assistantProgressNarrationEnabled)(config)) {
+                const explicitProgress = String(parsed?.progressUpdate || parsed?.progress_update || "").trim().slice(0, 600);
+                const progressText = explicitProgress || (round === 0 ? (0, assistant_progress_1.buildAssistantProgressFallback)(selectedRequests) : "");
+                if (progressText)
+                    (0, user_visible_agent_events_1.appendAssistantProgress)({
+                        scope: "group", scopeId: String(group.id), exactSessionId: groupSessionId,
+                        generation: Number(toolContext.scopeIdentity?.generation || 0),
+                        turnId: visibleTurnId,
+                        text: progressText,
+                        kind: parsed?.progressKind || parsed?.progress_kind || (round === 0 ? "before_tools" : "key_finding"),
+                        modelCallIndex: modelCallCount,
+                        relatedToolCallIds: preparedToolCallIds,
+                        title: "群聊主 Agent",
+                    });
+            }
             for (const request of selectedRequests) {
                 executed.add(crypto.createHash("sha256").update(JSON.stringify({ name: request.name, arguments: request.arguments })).digest("hex"));
             }
+            const toolBatchStartedAt = Date.now();
             const roundResults = await executeGroupMainAgentToolRequests({
                 requests: selectedRequests,
                 toolContext,
+                toolCallIds: preparedToolCallIds,
                 toolBatchSize: loopBudget.toolBatchSize,
                 readOnlyParallelism: loopBudget.readOnlyParallelism,
             });
+            toolWallDurationMs += Math.max(0, Date.now() - toolBatchStartedAt);
             toolCallCount += roundResults.length;
             segmentToolCalls += roundResults.length;
             toolResults.push(...roundResults);
+            if ((0, assistant_progress_1.assistantProgressNarrationEnabled)(config) && roundResults.length && roundResults.every((row) => row?.ok !== true)) {
+                (0, user_visible_agent_events_1.appendAssistantProgress)({
+                    scope: "group", scopeId: String(group.id), exactSessionId: groupSessionId,
+                    generation: Number(toolContext.scopeIdentity?.generation || 0),
+                    turnId: visibleTurnId,
+                    text: "当前工具批次没有取得有效结果，我会根据错误调整检查方向，不会机械重复同一请求。",
+                    kind: "blocker",
+                    modelCallIndex: modelCallCount,
+                    relatedToolCallIds: preparedToolCallIds,
+                    title: "群聊主 Agent",
+                });
+            }
             noProgressCount = roundResults.some((row) => row?.ok === true) ? 0 : noProgressCount + 1;
             if (noProgressCount >= loopBudget.noProgressThreshold) {
                 loopStopReason = "no_progress";
@@ -1314,6 +1426,24 @@ async function runLlmGroupOrchestrator(input) {
     catch (error) {
         throw attachLlmTokenUsage(error, tokenUsage);
     }
+    if ((0, slash_command_session_state_1.readSlashCommandSessionState)("group", String(group.id), groupSessionId).planMode?.enabled === true
+        && (["dispatch", "execute"].includes(String(parsed?.responseType || parsed?.response_type || "").toLowerCase())
+            || parsed?.shouldDelegate === true || parsed?.should_delegate === true)) {
+        parsed = {
+            ...parsed,
+            responseType: "plan",
+            shouldDelegate: false,
+            targets: [],
+            workflowDecision: {
+                ...(parsed?.workflowDecision || parsed?.workflow_decision || {}),
+                mode: "plan_task",
+                actionRequired: false,
+                requiresCodeChanges: false,
+                requiresUserConfirmation: false,
+                reason: "当前精确会话处于 Plan Mode，已由服务端阻止任务派发和写操作",
+            },
+        };
+    }
     const analysis = normalizeLlmAnalysis(parsed, fallbackAnalysis);
     const targets = sanitizeLlmTargets(group, parsed, input.message, analysis, false);
     const turnDecision = (0, main_agent_turn_1.normalizeMainAgentTurnDecision)({
@@ -1335,6 +1465,8 @@ async function runLlmGroupOrchestrator(input) {
     });
     if (group.id && groupSessionId && ["reply", "clarify"].includes(turnDecision.responseKind)) {
         const reply = String(parsed?.reply || parsed?.content || parsed?.summary || "");
+        const totalDurationMs = Math.max(0, Date.now() - visibleTurnStartedAt);
+        const otherDurationMs = Math.max(0, totalDurationMs - modelDurationMs - toolWallDurationMs);
         (0, user_visible_agent_projections_1.publishUserVisibleAssistantText)({
             scope: "group", scopeId: String(group.id), exactSessionId: groupSessionId,
             taskId: String(input.taskId || input.task_id || ""),
@@ -1350,8 +1482,12 @@ async function runLlmGroupOrchestrator(input) {
                 status: turnDecision.responseKind === "clarify" ? "waiting" : "success",
                 toolUseCount: toolCallCount,
                 tokenCount: Number(tokenUsage?.totalTokens || 0),
+                tokenType: "provider_total",
+                tokenAccuracy: tokenUsage?.reported === false ? "estimated" : "reported",
+                durationMs: totalDurationMs,
             },
-            result: (0, user_visible_agent_events_1.buildUserVisibleAgentResult)({ status: turnDecision.responseKind === "clarify" ? "waiting" : "success", text: reply, turns: modelCallCount, toolCalls: toolCallCount, usage: tokenUsage }),
+            detail: { timing: { totalMs: totalDurationMs, modelMs: modelDurationMs, toolWallMs: toolWallDurationMs, otherMs: otherDurationMs } },
+            result: (0, user_visible_agent_events_1.buildUserVisibleAgentResult)({ status: turnDecision.responseKind === "clarify" ? "waiting" : "success", text: reply, durationMs: totalDurationMs, modelDurationMs, turns: modelCallCount, toolCalls: toolCallCount, usage: tokenUsage }),
             usage: tokenUsage,
         });
     }

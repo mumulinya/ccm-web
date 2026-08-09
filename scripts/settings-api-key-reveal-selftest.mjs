@@ -17,8 +17,10 @@ assert.match(routes, /resolveLocalAuthSession\(req\)/)
 assert.match(routes, /auth\.user\.role !== "admin"/)
 assert.match(routes, /Cache-Control", "private, no-store, max-age=0"/)
 assert.match(routes, /loadOrchestratorConfig\(\)\.apiKey/)
-assert.match(config, /const \{ apiKey, summaryReviewerApiKey, \.\.\.safe \} = config/)
+assert.match(config, /apiKey, summaryReviewerApiKey, searchMcpToken, braveSearchApiKey/)
+assert.match(config, /bingSearchApiKey, googleCseApiKey, googleCseId, searchMcpUrl, \.\.\.safe/)
 assert.match(config, /summaryReviewerHasKey: !!summaryReviewerApiKey/)
+assert.match(config, /webSearchProvidersConfigured:/)
 assert.ok(
   server.indexOf('!browserApiAccessAllowed(req)') < server.indexOf('handleCollaborationApi(pathname, req, res, parsed, collabCtx)'),
   'credential reveal route must remain behind browser authentication',

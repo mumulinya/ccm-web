@@ -284,13 +284,61 @@ export function resolveMemberRuntime(projectName: string, group: any, configs: a
   const config = configs.find((c: any) => c.name === projectName);
   if (!config) return null;
 
-  const info = getConfigInfo(config.path)[0] || {};
+  const projectInfos = getConfigInfo(config.path);
+  const info = projectInfos.find((item: any) => String(item?.name || "") === projectName) || projectInfos[0] || {};
+  const configuredWorkDir = String(info.workDir || "").trim();
+  // A missing work_dir must never fall back to CCM's own process.cwd(). Apart
+  // from making the member look healthy when it is not, that fallback grants
+  // the wrong repository to a project Agent.
+  if (!configuredWorkDir) return null;
+  let workDir = "";
+  try {
+    workDir = fs.realpathSync(configuredWorkDir);
+    if (!fs.statSync(workDir).isDirectory()) return null;
+    fs.accessSync(workDir, fs.constants.R_OK);
+  } catch {
+    return null;
+  }
   return {
     project: projectName,
-    workDir: info.workDir || process.cwd(),
-    agentType: info.agent || member?.agent || "claudecode",
+    workDir,
+    // A group member may explicitly select a runtime for this collaboration.
+    // Otherwise inherit the project's configured default.
+    agentType: member?.agent || info.agent || "claudecode",
     configured: true,
   };
+}
+
+
+
+
+
+export function inspectGroupMemberRuntimeForAddition(projectName: string, group: any, configs: any[], requestedAgent = "") {
+  const project = String(projectName || "").trim();
+  if (!project) return { valid: false, project, reason: "项目名称不能为空" };
+  const config = (configs || []).find((item: any) => String(item?.name || "") === project);
+  if (!config) return { valid: false, project, reason: "项目配置尚未保存" };
+  const infos = getConfigInfo(config.path);
+  const info = infos.find((item: any) => String(item?.name || "") === project) || infos[0] || {};
+  const configuredWorkDir = String(info.workDir || "").trim();
+  if (!configuredWorkDir) return { valid: false, project, reason: "项目配置缺少 work_dir" };
+  try {
+    const workDir = fs.realpathSync(configuredWorkDir);
+    if (!fs.statSync(workDir).isDirectory()) return { valid: false, project, reason: "项目工作目录不是文件夹" };
+    fs.accessSync(workDir, fs.constants.R_OK);
+    return {
+      valid: true,
+      project,
+      workDir,
+      agentType: String(requestedAgent || info.agent || "claudecode").trim() || "claudecode",
+    };
+  } catch (error: any) {
+    return {
+      valid: false,
+      project,
+      reason: `项目工作目录不可读取：${String(error?.message || error || "unknown").slice(0, 180)}`,
+    };
+  }
 }
 
 

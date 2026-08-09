@@ -49,6 +49,7 @@ const main_agent_post_compact_continuity_1 = require("../system/main-agent-post-
 const main_agent_context_policy_1 = require("./main-agent-context-policy");
 const tool_search_index_1 = require("./tool-search-index");
 const skill_fork_runtime_1 = require("../system/skill-fork-runtime");
+const cc_tool_result_limits_1 = require("./cc-tool-result-limits");
 exports.MAIN_AGENT_NATIVE_TOOLS_V2 = [
     { name: "ask_user_question", description: "向当前精确会话提出结构化澄清问题。", loadPolicy: "base", sideEffect: "orchestrator_control" },
     { name: "update_todo", description: "更新当前Run的计划步骤和进度。", loadPolicy: "base", sideEffect: "orchestrator_control" },
@@ -292,7 +293,7 @@ function refreshMainAgentToolPromptState(toolContext) {
     const marker = "[CCM ToolSearch 本轮已加载 Schema]";
     toolContext.policyPrompt = `${String(toolContext.policyPrompt || "").split(marker)[0].trim()}\n\n${marker}\n${toolContext.mcpPrompt}`.trim();
 }
-function normalizeMainAgentToolRequests(value, limit = 2) {
+function normalizeMainAgentToolRequests(value, limit = 32) {
     const rows = Array.isArray(value) ? value : [];
     const seen = new Set();
     const result = [];
@@ -407,7 +408,10 @@ async function executeMainAgentToolRequests(input) {
     const execute = input.executeToolCall || ((name, args, scope) => tool_manager_1.toolManager.executeToolCall(name, args, scope));
     const batchSize = Math.max(1, Math.min(8, Math.floor(Number(input.toolBatchSize || 2))));
     const readOnlyParallelism = Math.max(1, Math.min(8, Math.floor(Number(input.readOnlyParallelism || 2))));
-    const requests = input.requests.slice(0, batchSize);
+    // `toolBatchSize` is a concurrency limit, not a limit on the number of
+    // logical calls returned by one model turn. Keep the complete bounded turn
+    // and drain it in safe batches so later independent calls are never lost.
+    const requests = input.requests.slice(0, 32);
     const executeOne = async (request) => {
         if (request.name === "tool_search") {
             const callId = input.onUse?.(request) || "";
@@ -478,8 +482,9 @@ async function executeMainAgentToolRequests(input) {
                 (0, tool_search_index_1.recordToolSearchSuccess)(request.name);
             const output = typeof rawOutput === "string" ? rawOutput : JSON.stringify(rawOutput);
             const outputTokens = (0, context_budget_1.estimateTextTokens)(output);
-            if (outputTokens > Math.max(1, Number(input.resultTokenLimit || 8_000))) {
-                const error = "MAIN_AGENT_TOOL_RESULT_EXCEEDS_8K_TOKEN_BUDGET";
+            const resultTokenLimit = (0, cc_tool_result_limits_1.boundedToolResultLimit)(input.resultTokenLimit);
+            if (outputTokens > resultTokenLimit) {
+                const error = cc_tool_result_limits_1.MAIN_AGENT_TOOL_RESULT_LIMIT_ERROR;
                 input.onResult?.(request, callId, null, error);
                 return { name: request.name, itemName, toolKind, source: workspaceTool ? "ccm__workspace_readonly" : toolKind, loaded: true, scope: input.toolContext.capabilityToken ? "scoped_session" : "configured_scope", durationMs: Date.now() - startedAt, aliases, ok: false, error, outputTokens, resultChecksum: contextItemChecksum(error), reason: request.reason };
             }
@@ -518,7 +523,7 @@ async function executeMainAgentToolRequests(input) {
             continue;
         }
         const readBatch = [];
-        while (index < requests.length && isSafeReadOnly(requests[index]) && readBatch.length < readOnlyParallelism) {
+        while (index < requests.length && isSafeReadOnly(requests[index]) && readBatch.length < Math.min(readOnlyParallelism, batchSize)) {
             readBatch.push(requests[index]);
             index += 1;
         }

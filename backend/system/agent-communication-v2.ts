@@ -9,10 +9,37 @@ export const AGENT_PROGRESS_RECEIPT_SCHEMA = "ccm-agent-progress-receipt-v2";
 export const AGENT_RESULT_RECEIPT_SCHEMA = "ccm-agent-result-receipt-v2";
 export const AGENT_TERMINAL_RECEIPT_SCHEMA = "ccm-agent-terminal-receipt-v2";
 
+function runtimeDisplayLabel(value: any) {
+  const runtime = String(value || "").trim();
+  const normalized = runtime.toLowerCase().replace(/[\s_-]+/g, "");
+  if (!runtime) return "";
+  if (normalized === "claudecode" || normalized === "claude") return "Claude Code";
+  if (normalized === "codex") return "Codex";
+  if (normalized === "cursor") return "Cursor";
+  if (normalized === "gemini" || normalized === "geminicli") return "Gemini";
+  if (normalized === "opencode") return "OpenCode";
+  if (normalized === "qoder") return "Qoder";
+  if (normalized.includes("testagent")) return "TestAgent";
+  return runtime;
+}
+
 function projectCommunicationEvent(envelope: any, eventType: "agent_started" | "agent_progress" | "agent_completed" | "agent_failed", input: any = {}) {
   if (!envelope?.scope || !envelope?.scopeId || !envelope?.exactSessionId) return null;
   const phase = String(input?.phase || envelope.state || "");
   const waiting = /queued|waiting|ack|verifying|submitted/.test(phase);
+  let payload: any = {};
+  try { payload = getAgentCommunication(envelope.messageId, { includeEvents: false, includeReceipts: false })?.payload || {}; } catch {}
+  const projectId = String(payload.authorizedProject || payload.projectId || payload.project_id || envelope.receiverAgentId || "").trim();
+  const projectName = String(payload.projectName || payload.project_name || projectId || "项目 Agent").trim();
+  const runtimeLabel = runtimeDisplayLabel(payload.runtimeLabel || payload.runtime_label || payload.runtimeId || payload.runtime_id || input?.runtimeLabel || input?.runtime_label);
+  const workItemTitle = String(payload.workItemTitle || payload.work_item_title || input?.workItemTitle || input?.work_item_title || envelope.workItemId || "").trim().slice(0, 300);
+  const parallelGroupId = String(payload.parallelGroupId || payload.parallel_group_id || input?.parallelGroupId || input?.parallel_group_id || "").trim();
+  const queuePositionValue = Number(input?.queuePosition ?? input?.queue_position);
+  const testAgent = /test.?agent/i.test(`${runtimeLabel} ${envelope.receiverAgentId || ""}`);
+  const durationMs = Math.max(0, Number(input?.durationMs || input?.duration_ms || 0));
+  const terminal = eventType === "agent_completed" || eventType === "agent_failed";
+  const startedAt = String(input?.startedAt || input?.started_at || payload.startedAt || payload.started_at || envelope.createdAt || envelope.created_at || "")
+    || (durationMs > 0 ? new Date(Date.now() - durationMs).toISOString() : new Date().toISOString());
   return appendUserVisibleAgentEvent({
     eventId: `agent-communication:${envelope.messageId}:${eventType}:${input?.receiptChecksum || phase}:${envelope.attempt || 1}`,
     scope: envelope.scope,
@@ -21,11 +48,13 @@ function projectCommunicationEvent(envelope: any, eventType: "agent_started" | "
     generation: envelope.generation,
     taskId: envelope.taskId,
     workItemId: envelope.workItemId,
+    agentRunId: envelope.messageId,
     parentEventId: envelope.parentMessageId,
+    ...(parallelGroupId ? { parallelGroupId } : {}),
     eventType,
     display: {
-      title: String(envelope.receiverAgentId || "执行 Agent"),
-      target: String(envelope.workItemId || ""),
+      title: [projectName, runtimeLabel].filter(Boolean).join(" · ") || "执行 Agent",
+      target: workItemTitle,
       summary: String(input?.summary || phase || "").slice(0, 500),
       status: eventType === "agent_completed" ? "success" : eventType === "agent_failed" ? "failed" : waiting ? "waiting" : "running",
       toolUseCount: Math.max(0, Number(input?.toolUseCount || input?.tool_use_count || 0)),
@@ -44,6 +73,26 @@ function projectCommunicationEvent(envelope: any, eventType: "agent_started" | "
       fileChanges: input?.filesChanged || input?.files_changed || [],
       evidenceIds: input?.evidenceIds || input?.evidence_ids || [],
       usage: input?.usage || {},
+      agentDisplay: {
+        projectId,
+        projectName,
+        runtimeLabel,
+        workItemTitle,
+        phase,
+        attempt: Math.max(1, Number(envelope.attempt || 1)),
+        ...(Number.isFinite(queuePositionValue) && queuePositionValue > 0 ? { queuePosition: Math.floor(queuePositionValue) } : {}),
+        isParallel: !!parallelGroupId,
+      },
+      executionStage: {
+        kind: testAgent ? "independent_verification" : "project_execution",
+        stageRunId: envelope.messageId,
+        ...(String(payload.reviewCycleId || payload.review_cycle_id || "").trim()
+          ? { reviewCycleId: String(payload.reviewCycleId || payload.review_cycle_id) } : {}),
+        attempt: Math.max(1, Number(envelope.attempt || 1)),
+        startedAt,
+        ...(terminal ? { completedAt: new Date().toISOString() } : {}),
+        ...(durationMs > 0 ? { activeDurationMs: durationMs } : {}),
+      },
     },
   });
 }
@@ -820,6 +869,7 @@ export function startAgentCommunicationDispatch(input: AgentCommunicationIdentit
     projectCommunicationEvent(leased.envelope || envelope, "agent_started", {
       phase: "queued",
       summary: leased.capacity ? `等待执行容量${leased.position ? `，队列第 ${leased.position} 位` : ""}` : "等待领取执行租约",
+      queuePosition: leased.position,
     });
     return { enabled: true, ...leased };
   }
@@ -829,6 +879,34 @@ export function startAgentCommunicationDispatch(input: AgentCommunicationIdentit
   }).envelope;
   projectCommunicationEvent(envelope, "agent_started", { phase: "runner_starting", summary: "正在启动执行 Agent" });
   return { enabled: true, acquired: true, deduplicated: created.deduplicated, envelope, lease: leased.lease };
+}
+
+/** Keeps a capacity-limited dispatch queued until its durable lease can be acquired. */
+export async function waitForAgentCommunicationDispatch(
+  input: Parameters<typeof startAgentCommunicationDispatch>[0],
+  options: { initialDispatch?: any; pollIntervalMs?: number; shouldCancel?: () => boolean } = {},
+) {
+  let dispatch: any = options.initialDispatch || startAgentCommunicationDispatch(input);
+  const pollIntervalMs = Math.max(100, Math.min(5_000, Number(options.pollIntervalMs || 500)));
+  while (dispatch?.enabled !== false && dispatch?.acquired !== true && dispatch?.capacity === true) {
+    const messageId = String(dispatch?.envelope?.messageId || input.existingMessageId || "");
+    if (options.shouldCancel?.()) {
+      if (messageId) {
+        try { finalizeAgentCommunication(messageId, "cancelled", { sideEffectState: "none", reason: "任务等待执行容量期间被取消" }); } catch {}
+      }
+      return { ...dispatch, capacity: false, cancelled: true, reason: "cancelled_while_queued" };
+    }
+    const deadlineAt = Date.parse(String(dispatch?.envelope?.deadlineAt || input.deadlineAt || ""));
+    if (Number.isFinite(deadlineAt) && Date.now() >= deadlineAt) {
+      return { ...dispatch, capacity: false, timedOut: true, reason: "dispatch_deadline_reached" };
+    }
+    await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
+    dispatch = startAgentCommunicationDispatch({
+      ...input,
+      existingMessageId: messageId || input.existingMessageId,
+    });
+  }
+  return dispatch;
 }
 
 export function markAgentCommunicationRunnerStarted(messageId: string, detail: any = {}) {
@@ -868,7 +946,7 @@ export function submitAgentCommunicationResult(messageId: string, result: any = 
   }
   if (current.state === "acknowledged") current = transitionAgentCommunication(messageId, "executing", { eventType: "execution_observed" }).envelope;
   if (["result_submitted", "verifying", "accepted", "completed", "rejected", "failed"].includes(current.state)) return { accepted: true, deduplicated: true, envelope: current };
-  return recordAgentCommunicationReceipt(messageId, "result", reverseReceiptIdentity(current), {
+  const recorded: any = recordAgentCommunicationReceipt(messageId, "result", reverseReceiptIdentity(current), {
     status: result.status || "submitted",
     summary: result.summary || "第三方 Agent 已提交执行结果",
     actions: result.actions || [],
@@ -879,6 +957,12 @@ export function submitAgentCommunicationResult(messageId: string, result: any = 
     artifactRefs: result.artifactRefs || result.artifact_refs || [],
     sideEffectState: result.sideEffectState || result.side_effect_state || ((result.filesChanged || result.files_changed || []).length ? "known" : "none"),
   });
+  // The third-party runner has finished once Result is durably accepted. CCM
+  // verification keeps the immutable lease identity on the envelope, but the
+  // execution slot must be released so queued independent project Agents can
+  // start before the parent batch finishes its terminal review.
+  if (recorded?.accepted === true) releaseAgentCommunicationLease(messageId, "result_submitted");
+  return recorded;
 }
 
 /** CCM-only acceptance gate. A worker result can never create its own terminal state. */

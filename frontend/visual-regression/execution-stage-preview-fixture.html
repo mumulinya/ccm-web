@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CCM 分阶段执行记录预览</title>
+    <style>
+      :root { --text-primary:#f2eefa; --text-secondary:#b9aec9; --text-muted:#847890; --border-color:#63345d; --surface-subtle:#160d22; --primary-color:#ec4899; }
+      * { box-sizing:border-box; }
+      body { margin:0; min-height:100vh; color:var(--text-primary); background:#10071c; font-family:Inter,"Microsoft YaHei",sans-serif; }
+      #app { width:min(980px,100%); margin:0 auto; padding:30px 22px 44px; }
+      .preview-title { margin:0 0 8px; font-size:20px; }
+      .preview-note { margin:0 0 18px; color:var(--text-secondary); font-size:13px; }
+      .message { padding:14px; border:1px solid #4d2448; border-radius:12px; background:#130a20; box-shadow:0 18px 50px rgba(0,0,0,.25); }
+      .answer { margin:12px 2px 0; color:#e8dfea; font-size:14px; line-height:1.65; }
+    </style>
+  </head>
+  <body><div id="app"></div><script type="module" src="./execution-stage-preview-fixture.js"></script></body>
+</html>

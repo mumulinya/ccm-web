@@ -20,6 +20,10 @@ const {
   listDailyDevBacklogs,
   persistDailyDevBacklogFile,
 } = require('./ccm-package/dist/modules/collaboration/daily-dev-backlog.js')
+const {
+  listAutomationSessionBindings,
+  replaceAutomationSessionSources,
+} = require('./ccm-package/dist/system/automation-session-bindings.js')
 
 const group = {
   id: 'group-session-binding',
@@ -29,31 +33,20 @@ const group = {
 }
 saveGroups([group])
 
-const sessionA = createGroupChatSession(group.id, '需求创建会话 A')
+const sessionA = createGroupChatSession(group.id, '普通会话 A')
 const createdA = persistDailyDevBacklogFile(loadGroups(), group, {
   priority: 'normal',
   scope: '项目 A',
-  acceptance: '任务进入创建时的精确会话',
+  acceptance: '需求条目只绑定群聊，不在创建时绑定精确会话',
   quality_decision: { state: 'ready', confidence: 1 },
   idempotency_key: 'session-binding-a',
   target_session_id: sessionA.id,
-}, '固定会话需求 A', '验证创建时保存目标会话')
-assert.equal(createdA.target_session_id, sessionA.id)
+}, '来源绑定需求 A', '验证需求条目不接受用户选择的会话')
+assert.equal(createdA.target_session_id, '')
 
-const sessionB = createGroupChatSession(group.id, '后来切换的活动会话 B')
+const sessionB = createGroupChatSession(group.id, '普通会话 B')
 assert.notEqual(sessionA.id, sessionB.id)
-assert.equal(listDailyDevBacklogs(group.id).find(item => item.entry_id === createdA.entry_id).target_session_id, sessionA.id)
-
-const createdDedicated = persistDailyDevBacklogFile(loadGroups(), loadGroups().find(item => item.id === group.id), {
-  priority: 'normal',
-  scope: '项目 A',
-  acceptance: '未指定会话时创建专属自动化任务会话',
-  quality_decision: { state: 'ready', confidence: 1 },
-  idempotency_key: 'session-binding-dedicated',
-}, '专属自动化会话需求', '验证自动化会话不会复用活动普通会话')
-assert.notEqual(createdDedicated.target_session_id, sessionB.id)
-const dedicatedListItem = listDailyDevBacklogs(group.id).find(item => item.entry_id === createdDedicated.entry_id)
-assert.equal(dedicatedListItem.session_options.find(item => item.id === createdDedicated.target_session_id)?.session_kind, 'automation')
+assert.equal(listDailyDevBacklogs(group.id).find(item => item.entry_id === createdA.entry_id).target_session_id, '')
 
 const createdTasks = []
 configureDailyDevBacklogRuntime({
@@ -77,40 +70,65 @@ configureDailyDevBacklogRuntime({
 
 const dispatchedA = dispatchDailyDevBacklog(group.id, createdA.name, {}, { auto_execute: false })
 assert.equal(dispatchedA.success, true)
-assert.equal(dispatchedA.task.group_session_id, sessionA.id)
-assert.equal(dispatchedA.task.exact_session_id, sessionA.id)
+assert.notEqual(dispatchedA.task.group_session_id, sessionA.id)
+assert.notEqual(dispatchedA.task.group_session_id, sessionB.id)
+assert.equal(dispatchedA.task.exact_session_id, dispatchedA.task.group_session_id)
+const firstBoundSessionId = dispatchedA.task.group_session_id
+const firstBinding = listAutomationSessionBindings('group', group.id).find(item => item.status === 'active' && item.sources.includes('requirement_pool'))
+assert.equal(firstBinding.exactSessionId, firstBoundSessionId)
+assert.equal(firstBinding.session.sessionKind, 'automation')
 
 const latestGroup = loadGroups().find(item => item.id === group.id)
 const createdB = persistDailyDevBacklogFile(loadGroups(), latestGroup, {
   priority: 'normal',
   scope: '项目 A',
-  acceptance: '用户可以在派发时明确改选会话',
+  acceptance: '后续需求复用需求池来源绑定',
   quality_decision: { state: 'ready', confidence: 1 },
   idempotency_key: 'session-binding-b',
   target_session_id: sessionA.id,
-}, '可改选会话需求 B', '验证显式会话改选')
-assert.equal(createdB.target_session_id, sessionA.id)
+}, '复用来源绑定需求 B', '验证客户端显式会话被忽略')
+assert.equal(createdB.target_session_id, '')
 
 const dispatchedB = dispatchDailyDevBacklog(group.id, createdB.name, {}, {
   auto_execute: false,
   group_session_id: sessionB.id,
   exact_session_id: sessionB.id,
-  source: 'selftest-explicit-session-change',
+  source: 'selftest-client-session-ignored',
 })
 assert.equal(dispatchedB.success, true)
-assert.equal(dispatchedB.task.group_session_id, sessionB.id)
-assert.equal(dispatchedB.task.exact_session_id, sessionB.id)
-assert.equal(dispatchedB.target_session.id, sessionB.id)
+assert.equal(dispatchedB.task.group_session_id, firstBoundSessionId)
+assert.equal(dispatchedB.task.exact_session_id, firstBoundSessionId)
+
+const replacement = createGroupChatSession(group.id, '手工绑定的需求池自动化会话', { sessionKind: 'automation' })
+replaceAutomationSessionSources({
+  scope: 'group',
+  scopeId: group.id,
+  exactSessionId: replacement.id,
+  sources: ['requirement_pool'],
+  actor: 'selftest',
+  reason: 'verify_new_tasks_follow_new_binding',
+})
+const createdC = persistDailyDevBacklogFile(loadGroups(), loadGroups().find(item => item.id === group.id), {
+  priority: 'normal',
+  scope: '项目 A',
+  acceptance: '绑定调整只影响新任务',
+  quality_decision: { state: 'ready', confidence: 1 },
+  idempotency_key: 'session-binding-c',
+}, '新绑定需求 C', '验证不可变任务会话快照')
+const dispatchedC = dispatchDailyDevBacklog(group.id, createdC.name, {}, { auto_execute: false })
+assert.equal(dispatchedC.task.group_session_id, replacement.id)
+assert.equal(dispatchedA.task.group_session_id, firstBoundSessionId)
 
 console.log(JSON.stringify({
   pass: true,
   paidProviderCalls: 0,
   checks: {
-    creationSnapshotPersisted: true,
-    activeSessionSwitchIgnored: true,
-    dedicatedAutomationSessionCreated: true,
-    explicitDispatchOverrideHonored: true,
-    exactSessionPropagatedToTask: true,
+    backlogCreationDoesNotBindSession: true,
+    firstTaskAutoCreatesSourceBinding: true,
+    clientSessionOverrideIgnored: true,
+    laterTasksReuseSourceBinding: true,
+    rebindingAffectsOnlyNewTasks: true,
+    immutableTaskSessionSnapshot: true,
   },
 }))
 `
@@ -139,9 +157,10 @@ try {
   assert.match(projectSidebar, /普通会话/)
   assert.match(projectSidebar, /自动化任务会话/)
   assert.match(projectSidebar, /飞书会话/)
-  assert.match(workbench, /exact_session_id/)
+  assert.doesNotMatch(workbench, /exact_session_id:/)
+  assert.match(workbench, /按工作台来源自动绑定/)
   receipt.checks.groupAndProjectSessionSections = true
-  receipt.checks.workbenchExactSessionBinding = true
+  receipt.checks.workbenchUsesSourceBinding = true
   console.log(JSON.stringify(receipt, null, 2))
 } finally {
   fs.rmSync(storeDir, { recursive: true, force: true })

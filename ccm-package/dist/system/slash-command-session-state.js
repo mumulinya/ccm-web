@@ -1,0 +1,67 @@
+"use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.readSlashCommandSessionState = readSlashCommandSessionState;
+exports.renderSlashCommandSessionDirective = renderSlashCommandSessionDirective;
+const path = __importStar(require("path"));
+const utils_1 = require("../core/utils");
+const atomic_json_file_1 = require("../core/atomic-json-file");
+const STATE_FILE = path.join(utils_1.CCM_DIR, "slash-command-conversation-state.json");
+function readSlashCommandSessionState(scope, scopeId, exactSessionId) {
+    const normalizedScopeId = scope === "global" ? "global" : String(scopeId || "").trim();
+    const sessionId = String(exactSessionId || "").trim();
+    if (!sessionId || !normalizedScopeId)
+        return { revision: 0, generation: 0, preferences: {}, planMode: { enabled: false } };
+    const store = (0, atomic_json_file_1.readJsonWithBackup)(STATE_FILE, { sessions: {} });
+    const state = store.sessions?.[`${scope}:${normalizedScopeId}:${sessionId}`] || {};
+    return {
+        revision: Math.max(0, Number(state.revision || 0)),
+        generation: Math.max(0, Number(state.generation || 0)),
+        preferences: state.preferences && typeof state.preferences === "object" ? state.preferences : {},
+        planMode: state.planMode && typeof state.planMode === "object" ? state.planMode : { enabled: false },
+    };
+}
+function renderSlashCommandSessionDirective(scope, scopeId, exactSessionId) {
+    const state = readSlashCommandSessionState(scope, scopeId, exactSessionId);
+    const lines = [];
+    if (state.planMode?.enabled === true) {
+        lines.push("当前精确会话处于 Plan Mode：只允许分析、读取和制定计划，不得派发写任务、修改代码或执行有副作用操作。", state.planMode.description ? `Plan Mode 目标：${String(state.planMode.description).slice(0, 4000)}` : "");
+    }
+    const style = String(state.preferences?.outputStyle || "").trim();
+    if (style)
+        lines.push(`当前会话输出风格=${style}：concise=简洁直接，balanced=平衡，detailed=充分展开；不覆盖安全与证据要求。`);
+    return lines.filter(Boolean).join("\n");
+}
+//# sourceMappingURL=slash-command-session-state.js.map

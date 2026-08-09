@@ -53,6 +53,7 @@ exports.retryTask = retryTask;
 exports.purgeArchivedTask = purgeArchivedTask;
 const path = __importStar(require("path"));
 const crypto = __importStar(require("crypto"));
+const task_execution_stage_projection_1 = require("../../system/task-execution-stage-projection");
 const atomic_json_file_1 = require("../../core/atomic-json-file");
 const utils_1 = require("../../core/utils");
 const source_ingestion_1 = require("../requirements/source-ingestion");
@@ -70,6 +71,7 @@ const test_agent_runner_1 = require("./test-agent-runner");
 const artifact_retention_1 = require("../../test-agent/artifact-retention");
 const storage_1 = require("./storage");
 const sessions_1 = require("../projects/sessions");
+const automation_session_bindings_1 = require("../../system/automation-session-bindings");
 const daily_dev_backlog_1 = require("./daily-dev-backlog");
 const execution_kernel_1 = require("../../agents/execution-kernel");
 const agent_sessions_1 = require("../../tasks/agent-sessions");
@@ -132,22 +134,36 @@ function createTaskWithScopedIdentity(task) {
     const tasks = (0, db_1.loadTasks)();
     const explicitIdempotencyKey = String(task.idempotency_key || task.idempotencyKey || "").trim();
     const taskGroupId = String(task.group_id || task.groupId || "").trim();
-    const taskGroupSession = taskGroupId
-        ? (0, storage_1.resolveWritableGroupChatSession)(taskGroupId, task.group_session_id || task.groupSessionId || "", {
-            title: (0, memory_1.compactMemoryText)(task.title || "任务会话", 80),
-            createDedicated: !String(task.group_session_id || task.groupSessionId || "").trim(),
-            sessionKind: "automation",
-        })
-        : null;
-    const taskGroupSessionId = String(taskGroupSession?.id || "");
     const requestedProject = String(task.target_project || task.targetProject || "").trim();
     const projectTask = !taskGroupId
         && String(task.assign_type || task.assignType || "project").trim().toLowerCase() === "project"
         && (0, db_1.getConfigs)().some((config) => String(config?.name || "") === requestedProject);
-    const requestedProjectSessionId = String(task.project_session_id || task.projectSessionId || "").trim();
-    const projectSession = projectTask && !requestedProjectSessionId
-        ? (0, sessions_1.ensureProjectAutomationSession)(requestedProject, "", (0, memory_1.compactMemoryText)(task.title || "自动开发任务", 80))
+    const automationTaskSource = (0, automation_session_bindings_1.inferAutomationTaskSource)(task);
+    const bindingResolution = automationTaskSource && (taskGroupId || projectTask)
+        ? (0, automation_session_bindings_1.resolveAutomationSessionBinding)({
+            scope: taskGroupId ? "group" : "project",
+            scopeId: taskGroupId || requestedProject,
+            source: automationTaskSource,
+            title: (0, memory_1.compactMemoryText)(task.title || "自动化任务", 80),
+            actor: String(task.request_origin || task.requestOrigin || "task-service"),
+        })
         : null;
+    const taskGroupSession = taskGroupId
+        ? bindingResolution
+            ? { id: bindingResolution.snapshot.exactSessionId }
+            : (0, storage_1.resolveWritableGroupChatSession)(taskGroupId, task.group_session_id || task.groupSessionId || "", {
+                title: (0, memory_1.compactMemoryText)(task.title || "任务会话", 80),
+                createDedicated: !String(task.group_session_id || task.groupSessionId || "").trim(),
+                sessionKind: "automation",
+            })
+        : null;
+    const taskGroupSessionId = String(taskGroupSession?.id || "");
+    const requestedProjectSessionId = String(task.project_session_id || task.projectSessionId || "").trim();
+    const projectSession = projectTask && bindingResolution
+        ? { sessionId: bindingResolution.snapshot.exactSessionId }
+        : projectTask && !requestedProjectSessionId
+            ? (0, sessions_1.ensureProjectAutomationSession)(requestedProject, "", (0, memory_1.compactMemoryText)(task.title || "自动开发任务", 80))
+            : null;
     // Public production routes validate supplied session ids before task creation. Preserve
     // existing persisted/internal ids here so historical tasks can still be recovered.
     const taskProjectSessionId = String(projectSession?.sessionId || requestedProjectSessionId || "");
@@ -226,6 +242,8 @@ function createTaskWithScopedIdentity(task) {
         workflow_meta: task.workflow_meta || task.workflowMeta || null,
         orchestration_scope: task.orchestration_scope || task.orchestrationScope || "",
         project_session_id: taskProjectSessionId || null,
+        automation_task_source: automationTaskSource || null,
+        automation_session_binding_snapshot: bindingResolution?.snapshot || null,
         project_main_run_id: task.project_main_run_id || task.projectMainRunId || null,
         request_origin: task.request_origin || task.requestOrigin || task.workflow_meta?.intake?.source || "task-dispatch",
         origin_session_id: task.origin_session_id || task.originSessionId || taskGroupSessionId || task.project_session_id || task.projectSessionId || null,
@@ -295,42 +313,35 @@ function resolveRequirementEpicTarget(item, input, groups, configs) {
     const requestedId = String(item.target_id || "").trim();
     const defaultGroupId = String(input.group_id || input.groupId || input.default_group_id || input.defaultGroupId || "").trim();
     const defaultProject = String(input.target_project || input.targetProject || input.default_project || input.defaultProject || "").trim();
-    const directProject = requestedType === "group"
-        ? null
-        : requestedId
-            ? configs.find((config) => config.name === requestedId)
-            : defaultProject ? configs.find((config) => config.name === defaultProject) : null;
+    const taskSource = (0, automation_session_bindings_1.inferAutomationTaskSource)(input) || "requirement_pool";
+    const directProject = requestedType === "project"
+        ? configs.find((config) => config.name === requestedId)
+        : requestedType === "auto" && !defaultGroupId && defaultProject
+            ? configs.find((config) => config.name === defaultProject)
+            : null;
     if (requestedType === "project" && requestedId && !directProject)
         throw new Error(`子任务 ${item.item_key} 指定的项目不存在：${requestedId}`);
     if (directProject) {
-        const exactProjectSession = String(input.project_session_id || input.projectSessionId || "").trim();
-        const containingGroup = exactProjectSession && !defaultGroupId
-            ? null
-            : groups.find((group) => group.id === defaultGroupId)
-                || groups.find((group) => (group.members || []).some((member) => String(member?.project || "") === directProject.name));
-        const requestedSessionId = String(item.target_session_id || item.targetSessionId || "").trim();
-        const groupSession = containingGroup
-            ? (0, storage_1.resolveWritableGroupChatSession)(containingGroup.id, requestedSessionId || (containingGroup.id === defaultGroupId ? String(input.group_session_id || input.groupSessionId || "") : ""), {
-                title: (0, memory_1.compactMemoryText)(item.title || "需求子任务", 80),
-                createDedicated: !requestedSessionId && containingGroup.id !== defaultGroupId,
-                sessionKind: "automation",
-            })
-            : null;
-        const projectSession = !containingGroup
-            ? (0, sessions_1.ensureProjectAutomationSession)(directProject.name, requestedSessionId || (directProject.name === defaultProject ? exactProjectSession : ""), (0, memory_1.compactMemoryText)(item.title || "需求子任务", 80))
-            : null;
+        const resolution = (0, automation_session_bindings_1.resolveAutomationSessionBinding)({
+            scope: "project",
+            scopeId: directProject.name,
+            source: taskSource,
+            title: (0, memory_1.compactMemoryText)(item.title || "需求子任务", 80),
+            actor: "requirement_epic_target_resolution",
+        });
         return {
-            assign_type: containingGroup ? "group" : "project",
-            group_id: containingGroup?.id || null,
-            group_session_id: groupSession?.id || null,
-            project_session_id: projectSession?.sessionId || null,
+            assign_type: "project",
+            group_id: null,
+            group_session_id: null,
+            project_session_id: resolution.snapshot.exactSessionId,
+            automation_session_binding_snapshot: resolution.snapshot,
             target_project: directProject.name,
             target: {
                 type: "project",
                 name: directProject.name,
                 project: directProject.name,
-                group_id: containingGroup?.id || "",
                 item_key: item.item_key,
+                automation_session_binding_snapshot: resolution.snapshot,
             },
         };
     }
@@ -345,19 +356,19 @@ function resolveRequirementEpicTarget(item, input, groups, configs) {
     const coordinator = (0, group_orchestrator_1.getCoordinatorMember)(group);
     if (!coordinator?.project)
         throw new Error(`群聊 ${group.name || group.id} 没有可执行的主 Agent`);
-    const requestedGroupSessionId = String(item.target_session_id
-        || item.targetSessionId
-        || (group.id === defaultGroupId ? input.group_session_id || input.groupSessionId || "" : "")).trim();
-    const groupSession = (0, storage_1.resolveWritableGroupChatSession)(group.id, requestedGroupSessionId, {
+    const resolution = (0, automation_session_bindings_1.resolveAutomationSessionBinding)({
+        scope: "group",
+        scopeId: group.id,
+        source: taskSource,
         title: (0, memory_1.compactMemoryText)(item.title || "需求子任务", 80),
-        createDedicated: !requestedGroupSessionId,
-        sessionKind: "automation",
+        actor: "requirement_epic_target_resolution",
     });
     return {
         assign_type: "group",
         group_id: group.id,
-        group_session_id: groupSession.id,
+        group_session_id: resolution.snapshot.exactSessionId,
         project_session_id: null,
+        automation_session_binding_snapshot: resolution.snapshot,
         target_project: coordinator.project,
         target: {
             type: "group",
@@ -365,6 +376,7 @@ function resolveRequirementEpicTarget(item, input, groups, configs) {
             group_id: group.id,
             coordinator: coordinator.project,
             item_key: item.item_key,
+            automation_session_binding_snapshot: resolution.snapshot,
         },
     };
 }
@@ -510,6 +522,8 @@ function createRequirementEpicWithChildren(payload) {
         queue_scope: payload.queue_scope || payload.queueScope || "conversation_serial",
         orchestration_scope: payload.orchestration_scope || payload.orchestrationScope || (payload.group_id || payload.groupId ? "group_session" : "project_session"),
         project_session_id: payload.project_session_id || payload.projectSessionId || null,
+        automation_task_source: (0, automation_session_bindings_1.inferAutomationTaskSource)(payload) || null,
+        automation_session_binding_snapshot: payload.automation_session_binding_snapshot || payload.automationSessionBindingSnapshot || null,
         request_origin: payload.request_origin || payload.requestOrigin || payload.source || channel,
         origin_session_id: payload.origin_session_id || payload.originSessionId || payload.group_session_id || payload.groupSessionId || payload.project_session_id || payload.projectSessionId || null,
         source_documents: payload.source_documents || payload.sourceDocuments || "",
@@ -581,6 +595,8 @@ function createRequirementEpicWithChildren(payload) {
             group_id: target.group_id,
             group_session_id: target.group_session_id || null,
             project_session_id: target.project_session_id || null,
+            automation_task_source: (0, automation_session_bindings_1.inferAutomationTaskSource)(payload) || "requirement_pool",
+            automation_session_binding_snapshot: target.automation_session_binding_snapshot || null,
             queue_scope: payload.queue_scope || payload.queueScope || "conversation_serial",
             assign_type: target.assign_type,
             workflow_type: "daily_dev",
@@ -1058,6 +1074,7 @@ function updateTask(id, updates) {
     delete updates.expectedRevision;
     delete updates.expected_revision;
     const previousStatus = tasks[idx].status;
+    const previousTaskSnapshot = { ...tasks[idx] };
     const previousGatePassed = tasks[idx].global_mission_gate_passed === true;
     const previousReceiptKey = String(tasks[idx].receipt_idempotency_key || "");
     const previousCollaborationState = tasks[idx].collaboration_state || {};
@@ -1147,6 +1164,14 @@ function updateTask(id, updates) {
         updates.receipt_idempotency_key = crypto.createHash("sha256").update(JSON.stringify(updates.receipt)).digest("hex");
     }
     Object.assign(tasks[idx], updates, { revision: currentRevision + 1, updated_at: new Date().toISOString() });
+    try {
+        (0, task_execution_stage_projection_1.projectTaskExecutionStageTransition)(previousTaskSnapshot, tasks[idx]);
+    }
+    catch (error) {
+        // User-visible execution events are a projection of the authoritative task
+        // state. A display/audit write must never make the task transition fail.
+        console.warn(`[task-stage-projection] ${id}: ${error?.message || error}`);
+    }
     if ((0, group_orchestrator_1.loadOrchestratorConfig)().taskEventReducerShadowWriteEnabled !== false) {
         (0, task_transition_ledger_1.appendTaskTransitionEvent)({
             taskId: id,

@@ -59,6 +59,7 @@ exports.runGroupStatusFollowupSelfTest = runGroupStatusFollowupSelfTest;
 exports.handleBasicGroupRoutes = handleBasicGroupRoutes;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
+const crypto = __importStar(require("crypto"));
 const utils_1 = require("../../core/utils");
 const db_1 = require("../../core/db");
 const storage_1 = require("./storage");
@@ -2178,20 +2179,45 @@ function handleBasicGroupRoutes(req, res, parsed, ctx, deps) {
                 const group = groups.find(g => g.id === id);
                 if (!group)
                     return (0, utils_1.sendJson)(res, { error: "群聊不存在" }, 404);
-                if (add) {
-                    for (const m of add) {
-                        if (!group.members.find((x) => x.project === m.project)) {
-                            group.members.push(m);
-                        }
-                    }
+                const additions = Array.isArray(add) ? add : [];
+                const removals = Array.isArray(remove) ? remove.map((value) => String(value || "").trim()).filter(Boolean) : [];
+                const pendingAdditions = additions.filter((member) => {
+                    const project = String(member?.project || "").trim();
+                    return project && !group.members.find((existing) => String(existing?.project || "") === project);
+                });
+                const inspectedAdditions = pendingAdditions.map((member) => (0, group_orchestrator_1.inspectGroupMemberRuntimeForAddition)(member?.project, group, (0, db_1.getConfigs)(), member?.agent));
+                const unavailable = inspectedAdditions.filter((item) => item.valid !== true);
+                if (unavailable.length) {
+                    return (0, utils_1.sendJson)(res, {
+                        success: false,
+                        error: unavailable.map((item) => `${item.project || "未知项目"}：${item.reason}`).join("；"),
+                        code: "group_member_runtime_unavailable",
+                        unavailable,
+                    }, 409);
                 }
-                if (remove) {
+                for (const runtime of inspectedAdditions) {
+                    group.members.push({ project: runtime.project, agent: runtime.agentType });
+                }
+                if (removals.length) {
                     const coordinatorProject = (0, group_orchestrator_1.getCoordinatorMember)(group).project;
-                    group.members = group.members.filter((m) => !remove.includes(m.project) || m.project === coordinatorProject || m.role === "coordinator");
+                    group.members = group.members.filter((m) => !removals.includes(m.project) || m.project === coordinatorProject || m.role === "coordinator");
                 }
                 (0, group_orchestrator_1.normalizeGroupOrchestrator)(group);
+                const membershipChanged = inspectedAdditions.length > 0 || removals.length > 0;
+                if (membershipChanged) {
+                    group.membership_revision = Math.max(0, Number(group.membership_revision || 0)) + 1;
+                    group.membership_updated_at = new Date().toISOString();
+                    group.membership_checksum = crypto.createHash("sha256").update(JSON.stringify(group.members.map((member) => ({
+                        project: String(member?.project || ""),
+                        role: String(member?.role || ""),
+                        agent: String(member?.agent || ""),
+                    })))).digest("hex");
+                }
                 (0, storage_1.saveGroups)(groups);
-                (0, utils_1.sendJson)(res, { success: true, group: (0, group_test_targets_1.publicGroupWithoutTestTargetSecrets)(group) });
+                const contextRefresh = membershipChanged
+                    ? (0, storage_1.invalidateGroupMembershipContext)(String(group.id || id), "group_membership_changed")
+                    : { schema: "ccm-group-membership-context-refresh-v1", groupId: String(group.id || id), refreshed: 0, failed: 0, sessions: [] };
+                (0, utils_1.sendJson)(res, { success: true, group: (0, group_test_targets_1.publicGroupWithoutTestTargetSecrets)(group), context_refresh: contextRefresh });
             }
             catch (e) {
                 (0, utils_1.sendJson)(res, { error: e.message }, 400);

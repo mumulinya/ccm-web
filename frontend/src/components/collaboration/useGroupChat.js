@@ -171,6 +171,9 @@ export function useGroupChat(props, emit) {
     sessions: () => groupSessions.value,
     currentSessionId: () => currentGroupSessionId.value,
     context: () => ({ group: currentGroup.value?.name || '', groupId: currentGroup.value?.id || '', sessionId: currentGroupSessionId.value || '' }),
+    selectSession: (sessionId) => selectGroupSession(sessionId),
+    refreshSessions: () => currentGroup.value ? loadGroups() : undefined,
+    reloadCurrentSession: () => loadMessages(),
     statusSummary: () => `群聊“${currentGroup.value?.name || '未选择'}”当前加载了 ${messages.value.length} 条消息。`,
     contextMetrics: () => ({ 群聊: currentGroup.value?.name || '未选择', 群聊ID: currentGroup.value?.id || '', 成员: currentGroup.value?.members?.length || 0 }),
     exportFilename: () => `ccm-group-${currentGroup.value?.id || 'context'}`,
@@ -233,7 +236,7 @@ export function useGroupChat(props, emit) {
     },
     onClientAction: runGroupClientCommand,
     onResult: (result) => {
-      messages.value.push({ role: 'assistant', agent: 'command-center', type: 'command_result', commandResult: result, content: '', timestamp: new Date().toISOString() })
+      messages.value.push({ id: result.recordId, role: 'assistant', agent: 'command-center', type: 'command_result', commandResult: result, localCommandRecord: result.localCommandRecord, modelVisible: false, content: '', timestamp: result.at || new Date().toISOString() })
       nextTick(() => scrollToBottom())
     },
     onError: (message) => toast.error(message),

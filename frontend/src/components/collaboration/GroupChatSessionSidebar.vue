@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 import {
   Archive,
   ChevronRight,
+  Link2,
   ListTodo,
   MessageSquare,
   MoreHorizontal,
@@ -12,6 +13,7 @@ import {
   Plus,
   Trash2,
 } from '@lucide/vue'
+import AutomationSessionBindingDialog from '../common/AutomationSessionBindingDialog.vue'
 
 const props = defineProps({
   groupId: { type: String, default: '' },
@@ -29,6 +31,7 @@ const emit = defineEmits([
   'rename',
   'archive',
   'delete',
+  'refresh',
 ])
 
 const sessionKind = session => String(session?.session_kind || session?.sessionKind || 'conversation') === 'automation' ? 'automation' : 'conversation'
@@ -46,6 +49,32 @@ const readExpandedGroups = () => {
   }
 }
 const expandedGroups = ref(readExpandedGroups())
+const bindingDialogOpen = ref(false)
+const bindingSession = ref(null)
+const automationBindings = ref([])
+const loadAutomationBindings = async () => {
+  if (!props.groupId) { automationBindings.value = []; return }
+  try {
+    const query = new URLSearchParams({ scope: 'group', scope_id: props.groupId })
+    const response = await fetch(`/api/automation-session-bindings?${query}`)
+    const data = await response.json()
+    automationBindings.value = response.ok && data.success !== false ? (data.bindings || []) : []
+  } catch { automationBindings.value = [] }
+}
+watch(() => props.groupId, loadAutomationBindings, { immediate: true })
+const automationSourceText = session => {
+  const binding = automationBindings.value.find(item => String(item.exactSessionId || item.exact_session_id || '') === String(session?.id || '') && item.status !== 'archived')
+  const labels = { requirement_pool: '需求池', workbench: '工作台', global_agent: '全局 Agent' }
+  return binding?.sources?.length ? binding.sources.map(source => labels[source] || source).join('、') : '未绑定来源'
+}
+const handleBindingSaved = () => {
+  loadAutomationBindings()
+  emit('refresh')
+}
+const openBindingDialog = session => {
+  bindingSession.value = session || null
+  bindingDialogOpen.value = true
+}
 const toggleGroup = kind => { expandedGroups.value = { ...expandedGroups.value, [kind]: !expandedGroups.value[kind] } }
 watch(() => props.groupId, () => { expandedGroups.value = readExpandedGroups() })
 watch(expandedGroups, value => {
@@ -129,17 +158,19 @@ const sessionTitle = session => session?.title || session?.name || '新会话'
             <ListTodo :size="15" class="session-item-icon" />
             <div class="session-item-copy">
               <strong :title="sessionTitle(session)">{{ sessionTitle(session) }}</strong>
-              <small>{{ Number(session.messageCount || 0) }} 条消息 · 任务过程与交付</small>
+              <small>{{ Number(session.messageCount || 0) }} 条消息 · {{ automationSourceText(session) }}</small>
             </div>
             <details class="session-item-menu" @click.stop>
               <summary title="会话操作" aria-label="会话操作"><MoreHorizontal :size="16" /></summary>
               <div class="session-item-menu-popover">
+                <button type="button" @click="openBindingDialog(session)"><Link2 :size="14" />来源绑定</button>
                 <button type="button" @click="emit('rename', session.id)"><Pencil :size="14" />重命名</button>
                 <button type="button" @click="emit('archive', session.id)"><Archive :size="14" />归档</button>
                 <button type="button" class="danger" @click="emit('delete', session.id)"><Trash2 :size="14" />删除</button>
               </div>
             </details>
           </div>
+          <button class="empty-automation" type="button" @click="openBindingDialog(null)"><Plus :size="14" />新建自动化任务会话</button>
         </div>
       </section>
 
@@ -179,6 +210,14 @@ const sessionTitle = session => session?.title || session?.name || '新会话'
   >
     <PanelLeftOpen :size="17" />
   </button>
+  <AutomationSessionBindingDialog
+    :open="bindingDialogOpen"
+    scope="group"
+    :scope-id="groupId"
+    :session="bindingSession"
+    @close="bindingDialogOpen = false"
+    @saved="handleBindingSaved"
+  />
 </template>
 
 <style scoped>
@@ -292,6 +331,8 @@ const sessionTitle = session => session?.title || session?.name || '新会话'
 .live-session-label svg:first-child { transition:transform .16s ease; }
 .live-session-label svg:first-child.expanded { transform:rotate(90deg); }
 .live-session-content { display:flex; flex-direction:column; gap:2px; }
+.empty-automation { width:100%; min-height:34px; display:flex; align-items:center; justify-content:center; gap:6px; margin:3px 0; border:1px dashed color-mix(in srgb,var(--accent-blue) 32%,var(--border-color)); border-radius:6px; background:transparent; color:var(--accent-blue); font-size:10px; cursor:pointer; }
+.empty-automation:hover { background:color-mix(in srgb,var(--accent-blue) 6%,transparent); border-color:var(--accent-blue); }
 
 .group-session-item {
   position: relative;

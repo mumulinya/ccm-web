@@ -18,6 +18,7 @@ export declare function normalizeGroupMainToolRequests(value: any): GroupMainToo
 export declare function executeGroupMainAgentToolRequests(input: {
     requests: GroupMainToolRequest[];
     toolContext: any;
+    toolCallIds?: string[];
     executeToolCall?: (name: string, args: any, scope?: ToolScope) => Promise<string>;
     toolBatchSize?: number;
     readOnlyParallelism?: number;

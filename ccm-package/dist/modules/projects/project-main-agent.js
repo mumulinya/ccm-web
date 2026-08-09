@@ -66,6 +66,7 @@ const main_agent_turn_1 = require("../../agents/main-agent-turn");
 const project_validation_1 = require("./project-validation");
 const role_skills_1 = require("../../skills/role-skills");
 const main_agent_tool_runtime_1 = require("../../tools/main-agent-tool-runtime");
+const cc_tool_result_limits_1 = require("../../tools/cc-tool-result-limits");
 const runtime_events_1 = require("../../system/runtime-events");
 const session_execution_ledger_1 = require("../../system/session-execution-ledger");
 const reliability_ledger_1 = require("../../system/reliability-ledger");
@@ -83,6 +84,8 @@ const failure_record_1 = require("../../system/failure-record");
 const plan_inheritance_1 = require("../../system/plan-inheritance");
 const agent_loop_budget_1 = require("../../system/agent-loop-budget");
 const user_visible_agent_events_1 = require("../../system/user-visible-agent-events");
+const assistant_progress_1 = require("../../system/assistant-progress");
+const slash_command_session_state_1 = require("../../system/slash-command-session-state");
 const test_agent_runner_1 = require("../collaboration/test-agent-runner");
 const execution_kernel_1 = require("../../agents/execution-kernel");
 const agent_sessions_purge_1 = require("../../tasks/agent-sessions-purge");
@@ -91,8 +94,8 @@ function projectMainToolCallId(projectSessionId, toolName) {
     return `pmtool_${crypto.createHash("sha256").update(`${projectSessionId}:${toolName}:${Date.now()}:${crypto.randomBytes(4).toString("hex")}`).digest("hex").slice(0, 20)}`;
 }
 const projectMainToolStartedAt = new Map();
-function recordProjectMainToolUse(project, projectSessionId, toolName, args, runId = "") {
-    const toolCallId = projectMainToolCallId(projectSessionId, toolName);
+function recordProjectMainToolUse(project, projectSessionId, toolName, args, runId = "", parallelGroupId = "", preparedToolCallId = "") {
+    const toolCallId = preparedToolCallId || projectMainToolCallId(projectSessionId, toolName);
     (0, project_session_compaction_1.appendProjectSessionExecutionEvent)(project, projectSessionId, {
         type: "tool_use",
         toolName,
@@ -100,7 +103,7 @@ function recordProjectMainToolUse(project, projectSessionId, toolName, args, run
         runId: runId || `project-main:${projectSessionId}`,
         arguments: args,
     });
-    projectMainToolStartedAt.set(toolCallId, Date.now());
+    projectMainToolStartedAt.set(toolCallId, { startedAt: Date.now(), arguments: args, ...(parallelGroupId ? { parallelGroupId } : {}) });
     (0, user_visible_agent_events_1.appendToolProjection)({
         scope: "project",
         scopeId: project,
@@ -110,6 +113,7 @@ function recordProjectMainToolUse(project, projectSessionId, toolName, args, run
         toolCallId,
         taskId: runId || undefined,
         arguments: args,
+        parallelGroupId: parallelGroupId || undefined,
         display: { summary: "正在执行" },
     });
     return toolCallId;
@@ -124,7 +128,9 @@ function recordProjectMainToolResult(project, projectSessionId, toolName, toolCa
         observation,
         error,
     });
-    const startedAt = projectMainToolStartedAt.get(toolCallId) || Date.now();
+    const started = projectMainToolStartedAt.get(toolCallId);
+    const startedAt = started?.startedAt || Date.now();
+    const outputTokens = error ? 0 : (0, context_budget_1.estimateTextTokens)(JSON.stringify(observation ?? ""));
     projectMainToolStartedAt.delete(toolCallId);
     (0, user_visible_agent_events_1.appendToolProjection)({
         scope: "project",
@@ -134,8 +140,11 @@ function recordProjectMainToolResult(project, projectSessionId, toolName, toolCa
         toolName,
         toolCallId,
         taskId: runId || undefined,
+        arguments: started?.arguments || {},
+        parallelGroupId: started?.parallelGroupId,
         observation,
         error,
+        outputTokens,
         durationMs: Math.max(0, Date.now() - startedAt),
         display: { summary: error || "执行完成" },
     });
@@ -253,6 +262,29 @@ function normalizedWorkItems(value, fallbackGoal) {
         item.dependsOn = item.dependsOn.filter(id => id !== item.id && ids.has(id));
     return normalized;
 }
+function projectRequirementPlanProjection(plan, input) {
+    return {
+        planId: input.planId,
+        revision: Math.max(1, Number(input.revision || 1)),
+        title: "需求实施计划",
+        goal: plan.summary || plan.title,
+        steps: plan.workItems.map((item, index) => ({
+            id: item.id || `step_${index + 1}`,
+            title: item.title || `实施步骤 ${index + 1}`,
+            description: item.objective || "按当前需求完成对应功能。",
+            outcome: item.acceptanceCriteria?.[0] || plan.acceptanceCriteria?.[index] || "完成后进入下一步检查。",
+            project: plan.project,
+            dependsOn: item.dependsOn || [],
+            status: item.status || "pending",
+        })),
+        scope: [`${plan.project} 项目`, ...plan.workItems.map(item => item.title).filter(Boolean)],
+        expectedResults: plan.acceptanceCriteria,
+        exclusions: plan.permissionBoundaries,
+        status: input.status || "ready",
+        createdAt: plan.createdAt,
+        updatedAt: input.updatedAt || new Date().toISOString(),
+    };
+}
 function projectMainModelCallOptions(config, messages, telemetry) {
     if (!telemetry?.project || !telemetry?.projectSessionId)
         return {};
@@ -309,7 +341,9 @@ function projectMainModelCallOptions(config, messages, telemetry) {
     };
 }
 async function modelJson(messages, errorPrefix, telemetry) {
-    const config = (0, group_orchestrator_config_1.loadOrchestratorConfig)();
+    const baseConfig = (0, group_orchestrator_config_1.loadOrchestratorConfig)();
+    const preferences = telemetry?.projectSessionId ? (0, slash_command_session_state_1.readSlashCommandSessionState)("project", telemetry.project, telemetry.projectSessionId).preferences : {};
+    const config = { ...baseConfig, model: preferences.model || baseConfig.model, reasoningEffort: preferences.effort || baseConfig.reasoningEffort };
     if (!config.enabled || !config.apiUrl || !config.apiKey || !config.model)
         throw new Error("统一大模型尚未配置");
     const telemetryOptions = projectMainModelCallOptions(config, messages, telemetry);
@@ -318,7 +352,9 @@ async function modelJson(messages, errorPrefix, telemetry) {
         : (0, group_orchestrator_llm_client_1.callOpenAiCompatibleJson)(config, { messages, defaultTimeoutMs: 60_000, httpErrorPrefix: errorPrefix, ...telemetryOptions });
 }
 async function modelText(messages, errorPrefix, maxTokens = 1600, telemetry, onDelta) {
-    const config = (0, group_orchestrator_config_1.loadOrchestratorConfig)();
+    const baseConfig = (0, group_orchestrator_config_1.loadOrchestratorConfig)();
+    const preferences = telemetry?.projectSessionId ? (0, slash_command_session_state_1.readSlashCommandSessionState)("project", telemetry.project, telemetry.projectSessionId).preferences : {};
+    const config = { ...baseConfig, model: preferences.model || baseConfig.model, reasoningEffort: preferences.effort || baseConfig.reasoningEffort };
     if (!config.enabled || !config.apiUrl || !config.apiKey || !config.model)
         throw new Error("统一大模型尚未配置");
     const telemetryOptions = projectMainModelCallOptions(config, messages, telemetry);
@@ -401,7 +437,9 @@ function projectMainExactSessionContext(project, projectSessionId, currentReques
 }
 async function ensureProjectMainModelCapacity(input) {
     let messages = input.buildMessages();
-    const config = (0, group_orchestrator_config_1.loadOrchestratorConfig)();
+    const baseConfig = (0, group_orchestrator_config_1.loadOrchestratorConfig)();
+    const preferences = (0, slash_command_session_state_1.readSlashCommandSessionState)("project", input.project, input.projectSessionId).preferences;
+    const config = { ...baseConfig, model: preferences.model || baseConfig.model, reasoningEffort: preferences.effort || baseConfig.reasoningEffort };
     const capacity = (0, group_compaction_strategy_1.resolveGroupModelContextCapacity)(config);
     const threshold = Math.max(1, Number(capacity?.autoCompactThreshold || (0, group_compaction_strategy_1.getGroupAutoCompactThreshold)(config)));
     const buildPayload = () => (0, session_compaction_core_1.buildModelVisiblePayloadSnapshot)({
@@ -650,6 +688,7 @@ async function runProjectMainAgentFirstTurn(input) {
     const project = (0, project_validation_1.validateProjectName)(input.project);
     const projectSessionId = (0, project_validation_1.validateSessionId)(input.projectSessionId);
     const visibleTurnId = String(input.turnId || `${projectSessionId}:${Date.now()}`);
+    const visibleTurnStartedAt = Date.now();
     (0, user_visible_agent_events_1.appendUserVisibleAgentEvent)({
         eventId: `project-turn:${visibleTurnId}:started`,
         scope: "project",
@@ -712,6 +751,8 @@ async function runProjectMainAgentFirstTurn(input) {
     let runtimeHydration = null;
     let parsed = null;
     let modelCallCount = 0;
+    let modelDurationMs = 0;
+    let toolWallDurationMs = 0;
     let tokenUsage = null;
     const captureUsage = (usage) => {
         if (!usage || typeof usage !== "object")
@@ -728,6 +769,7 @@ async function runProjectMainAgentFirstTurn(input) {
             reported: true,
         };
     };
+    const sessionDirective = (0, slash_command_session_state_1.renderSlashCommandSessionDirective)("project", project, projectSessionId);
     const buildMessages = () => [{
             role: "system",
             content: `你是 CCM 项目“${project}”的项目主 Agent。你必须在这次主 Agent 首轮调用中直接理解用户消息并决定：直接回答、调用只读工具、澄清、制定计划或分派当前项目开发任务。不要先做独立意图分类。
@@ -736,6 +778,8 @@ ${workflow_decision_1.WORKFLOW_DECISION_GUIDANCE}
 
 ${conversational_reply_style_1.CONVERSATIONAL_REPLY_STYLE_GUIDANCE}
 
+${sessionDirective}
+
 规则：
 1. 普通问候、致谢和自包含问答直接 responseType=reply，不调用工具、不创建任务。
 2. 只有缺少项目事实时才请求只读工具。基础工作区工具为 list_directory、glob_files、grep_text、read_file；低频Git、运行日志和配置工具先用 tool_search 加载。知识检索使用 query_knowledge。
@@ -743,8 +787,9 @@ ${conversational_reply_style_1.CONVERSATIONAL_REPLY_STYLE_GUIDANCE}
 4. 需要实际修改时只做形成 WorkItem、验收标准、依赖与权限边界所必需的最小只读核实，然后 responseType=plan 或 dispatch；项目主 Agent本身不修改代码，后续立即交给当前项目子 Agent。
 5. 信息不足时 responseType=clarify。写入权限、RBAC和高风险确认由服务端最终裁决。
 6. 只输出JSON，不输出Markdown或内部推理。
+7. 第一个工具批次前在 progressUpdate 写一句面向用户的简短说明；后续只有关键发现、方向变化、阻塞、返工、验收或总结节点才填写。不要逐个工具机械播报，不能写隐藏思维链。
 
-JSON：{"responseType":"reply|tool_calls|clarify|plan|dispatch","reply":"给用户的完整回复或澄清问题","workflowDecision":{"mode":"answer|project_analysis|execute_direct|plan_task|decompose_epic","reason":"语义依据","confidence":0.95,"needsPlanning":false,"needsEpicDecomposition":false,"actionRequired":false,"continuationKind":"new_task|supplement|revise_goal","readAction":"none|inspect_status","targetRefs":[],"impactScope":[],"planSteps":[],"clarificationQuestions":[],"selectedSkills":[],"intentKind":"conversation|question|status|analysis|execution|management|continuation","requiresCodeChanges":false,"requiresAgentQa":false,"requiresIndependentReview":false,"verificationModes":[],"memoryPolicy":"use|ignore","authorizationDirective":"preserve|grant|revoke","riskLevel":"low|write|high","requiresUserConfirmation":false},"toolRequests":[{"name":"工具名","arguments":{},"reason":"原因"}],"plan":{"title":"标题","summary":"摘要","requiresConfirmation":false,"acceptanceEvidencePlan":[{"criterion":"标准","observableOutcome":"可观察结果","evidenceTypes":["command"],"target":"对象"}],"verificationProfile":{"tier":"lightweight|standard|interactive|critical","changeClass":"documentation|configuration|code|interactive|critical","reason":"依据"},"permissionBoundaries":[],"workItems":[{"id":"work_1","title":"步骤","objective":"自包含目标","acceptanceCriteria":[],"dependsOn":[]}]}}`,
+JSON：{"responseType":"reply|tool_calls|clarify|plan|dispatch","reply":"给用户的完整回复或澄清问题","progressUpdate":"工具前或关键节点的安全进度说明；不需要时为空","progressKind":"before_tools|key_finding|direction_change|blocker|rework|verification|before_summary","workflowDecision":{"mode":"answer|project_analysis|execute_direct|plan_task|decompose_epic","reason":"语义依据","confidence":0.95,"needsPlanning":false,"needsEpicDecomposition":false,"actionRequired":false,"continuationKind":"new_task|supplement|revise_goal","readAction":"none|inspect_status","targetRefs":[],"impactScope":[],"planSteps":[],"clarificationQuestions":[],"selectedSkills":[],"intentKind":"conversation|question|status|analysis|execution|management|continuation","requiresCodeChanges":false,"requiresAgentQa":false,"requiresIndependentReview":false,"verificationModes":[],"memoryPolicy":"use|ignore","authorizationDirective":"preserve|grant|revoke","riskLevel":"low|write|high","requiresUserConfirmation":false},"toolRequests":[{"name":"工具名","arguments":{},"reason":"原因"}],"plan":{"title":"标题","summary":"摘要","requiresConfirmation":false,"acceptanceEvidencePlan":[{"criterion":"标准","observableOutcome":"可观察结果","evidenceTypes":["command"],"target":"对象"}],"verificationProfile":{"tier":"lightweight|standard|interactive|critical","changeClass":"documentation|configuration|code|interactive|critical","reason":"依据"},"permissionBoundaries":[],"workItems":[{"id":"work_1","title":"步骤","objective":"自包含目标","acceptanceCriteria":[],"dependsOn":[]}]}}`,
         }, {
             // 工具目录单独成块：policyPrompt 会被 tool_search 在 Run 中途改写，
             // 与上面这段固定规则合并成一条 system 时，整块 contentChecksum 每次都变，
@@ -763,8 +808,8 @@ JSON：{"responseType":"reply|tool_calls|clarify|plan|dispatch","reply":"给用�
                 tool_results: toolResults,
             }),
         }];
-    const executeSelectedRequest = async (request) => {
-        const callId = recordProjectMainToolUse(project, projectSessionId, request.name, request.arguments || {});
+    const executeSelectedRequest = async (request, parallelGroupId = "", preparedToolCallId = "") => {
+        const callId = recordProjectMainToolUse(project, projectSessionId, request.name, request.arguments || {}, "", parallelGroupId, preparedToolCallId);
         try {
             let output;
             if (request.name === "read_project_source") {
@@ -796,7 +841,7 @@ JSON：{"responseType":"reply|tool_calls|clarify|plan|dispatch","reply":"给用�
                 };
             }
             else {
-                const rows = await (0, main_agent_tool_runtime_1.executeMainAgentToolRequests)({ requests: [request], toolContext, resultTokenLimit: 8_000, toolBatchSize: 1, readOnlyParallelism: loopBudget.readOnlyParallelism });
+                const rows = await (0, main_agent_tool_runtime_1.executeMainAgentToolRequests)({ requests: [request], toolContext, resultTokenLimit: cc_tool_result_limits_1.CC_ALIGNED_TOOL_RESULT_MAX_TOKENS, toolBatchSize: 1, readOnlyParallelism: loopBudget.readOnlyParallelism });
                 const row = rows[0];
                 if (!row?.ok)
                     throw new Error(row?.error || `项目主 Agent工具调用失败：${request.name}`);
@@ -846,24 +891,30 @@ JSON：{"responseType":"reply|tool_calls|clarify|plan|dispatch","reply":"给用�
         });
         modelCallCount += 1;
         segmentModelTurns += 1;
-        parsed = await modelJson(gate.messages, "项目主 Agent首轮决策失败", {
-            project,
-            projectSessionId,
-            currentRequest: input.userMessage,
-            contextComponents: { messageMcpTools: toolContext.catalog.mcp, mcpResults: toolResults, loadedContextItems: (0, main_agent_tool_runtime_1.buildMainAgentLoadedContextItems)(toolContext, toolResults) },
-            onUsage: captureUsage,
-            retryProfile: round === 0 ? "interactive_first_turn" : "agent_orchestration",
-            nativeTools: [
-                ...(toolContext.catalog.loadedMcp || toolContext.catalog.mcp || []).map((tool) => ({ ...tool, deferred: false })),
-                ...(toolContext.catalog.discoverableMcp || []).map((tool) => ({ ...tool, deferred: true })),
-            ].map((tool) => ({
-                name: String(tool.canonicalName || tool.name || ""),
-                description: String(tool.description || ""),
-                inputSchema: tool.inputSchema || { type: "object", properties: {} },
-                deferred: tool.deferred === true,
-            })).filter((tool) => tool.name),
-            nativeToolReference: true,
-        });
+        const modelStartedAt = Date.now();
+        try {
+            parsed = await modelJson(gate.messages, "项目主 Agent首轮决策失败", {
+                project,
+                projectSessionId,
+                currentRequest: input.userMessage,
+                contextComponents: { messageMcpTools: toolContext.catalog.mcp, mcpResults: toolResults, loadedContextItems: (0, main_agent_tool_runtime_1.buildMainAgentLoadedContextItems)(toolContext, toolResults) },
+                onUsage: captureUsage,
+                retryProfile: round === 0 ? "interactive_first_turn" : "agent_orchestration",
+                nativeTools: [
+                    ...(toolContext.catalog.loadedMcp || toolContext.catalog.mcp || []).map((tool) => ({ ...tool, deferred: false })),
+                    ...(toolContext.catalog.discoverableMcp || []).map((tool) => ({ ...tool, deferred: true })),
+                ].map((tool) => ({
+                    name: String(tool.canonicalName || tool.name || ""),
+                    description: String(tool.description || ""),
+                    inputSchema: tool.inputSchema || { type: "object", properties: {} },
+                    deferred: tool.deferred === true,
+                })).filter((tool) => tool.name),
+                nativeToolReference: true,
+            });
+        }
+        finally {
+            modelDurationMs += Math.max(0, Date.now() - modelStartedAt);
+        }
         const requests = (0, main_agent_tool_runtime_1.normalizeMainAgentToolRequests)(parsed?.toolRequests || parsed?.tool_requests);
         if (!requests.length) {
             loopStopReason = "model_completed";
@@ -892,10 +943,26 @@ JSON：{"responseType":"reply|tool_calls|clarify|plan|dispatch","reply":"给用�
             throw new Error("PROJECT_MAIN_TOOL_LOOP_MAX_ROUNDS");
         const remainingToolCalls = loopBudget.mode === "bounded"
             ? Math.max(0, loopBudget.toolCallBudget - toolCallCount)
-            : loopBudget.toolBatchSize;
+            : freshRequests.length;
         if (!remainingToolCalls)
             throw new Error("PROJECT_MAIN_TOOL_LOOP_TOOL_BUDGET");
-        const selectedRequests = freshRequests.slice(0, Math.min(loopBudget.toolBatchSize, remainingToolCalls));
+        const selectedRequests = freshRequests.slice(0, remainingToolCalls);
+        const preparedToolCallIds = selectedRequests.map(request => projectMainToolCallId(projectSessionId, request.name));
+        if ((0, assistant_progress_1.assistantProgressNarrationEnabled)(budgetConfig)) {
+            const explicitProgress = cleanText(parsed?.progressUpdate || parsed?.progress_update, 600);
+            const progressText = explicitProgress || (round === 0 ? (0, assistant_progress_1.buildAssistantProgressFallback)(selectedRequests) : "");
+            if (progressText)
+                (0, user_visible_agent_events_1.appendAssistantProgress)({
+                    scope: "project", scopeId: project, exactSessionId: projectSessionId,
+                    generation: Number(toolContext.scopeIdentity?.generation || 0),
+                    turnId: visibleTurnId,
+                    text: progressText,
+                    kind: parsed?.progressKind || parsed?.progress_kind || (round === 0 ? "before_tools" : "key_finding"),
+                    modelCallIndex: modelCallCount,
+                    relatedToolCallIds: preparedToolCallIds,
+                    title: "项目主 Agent",
+                });
+        }
         for (const request of selectedRequests) {
             executed.add((0, main_agent_tool_runtime_1.mainAgentToolRequestFingerprint)(request));
             toolCallCount += 1;
@@ -904,7 +971,9 @@ JSON：{"responseType":"reply|tool_calls|clarify|plan|dispatch","reply":"给用�
         const roundResults = [];
         for (let index = 0; index < selectedRequests.length;) {
             if (!isSafeReadOnlyProjectRequest(selectedRequests[index])) {
-                roundResults.push(await executeSelectedRequest(selectedRequests[index]));
+                const toolBatchStartedAt = Date.now();
+                roundResults.push(await executeSelectedRequest(selectedRequests[index], "", preparedToolCallIds[index]));
+                toolWallDurationMs += Math.max(0, Date.now() - toolBatchStartedAt);
                 index += 1;
                 continue;
             }
@@ -913,9 +982,26 @@ JSON：{"responseType":"reply|tool_calls|clarify|plan|dispatch","reply":"给用�
                 readBatch.push(selectedRequests[index]);
                 index += 1;
             }
-            roundResults.push(...await Promise.all(readBatch.map(executeSelectedRequest)));
+            const parallelGroupId = readBatch.length > 1
+                ? `project-parallel:${visibleTurnId}:${round}:${index - readBatch.length}`
+                : "";
+            const toolBatchStartedAt = Date.now();
+            roundResults.push(...await Promise.all(readBatch.map(request => executeSelectedRequest(request, parallelGroupId, preparedToolCallIds[selectedRequests.indexOf(request)]))));
+            toolWallDurationMs += Math.max(0, Date.now() - toolBatchStartedAt);
         }
         toolResults.push(...roundResults);
+        if ((0, assistant_progress_1.assistantProgressNarrationEnabled)(budgetConfig) && roundResults.length && roundResults.every(row => row?.ok !== true)) {
+            (0, user_visible_agent_events_1.appendAssistantProgress)({
+                scope: "project", scopeId: project, exactSessionId: projectSessionId,
+                generation: Number(toolContext.scopeIdentity?.generation || 0),
+                turnId: visibleTurnId,
+                text: "当前工具批次没有取得有效结果，我会根据错误调整检查方向，不会机械重复同一请求。",
+                kind: "blocker",
+                modelCallIndex: modelCallCount,
+                relatedToolCallIds: preparedToolCallIds,
+                title: "项目主 Agent",
+            });
+        }
         noProgressCount = roundResults.some(row => row?.ok === true) ? 0 : noProgressCount + 1;
         if (noProgressCount >= loopBudget.noProgressThreshold) {
             loopStopReason = "no_progress";
@@ -941,6 +1027,21 @@ JSON：{"responseType":"reply|tool_calls|clarify|plan|dispatch","reply":"给用�
             segmentModelTurns = 0;
             segmentStartedAt = Date.now();
         }
+    }
+    const planModeActive = (0, slash_command_session_state_1.readSlashCommandSessionState)("project", project, projectSessionId).planMode?.enabled === true;
+    if (planModeActive && ["dispatch", "execute"].includes(String(parsed?.responseType || parsed?.response_type || "").toLowerCase())) {
+        parsed = {
+            ...parsed,
+            responseType: "plan",
+            workflowDecision: {
+                ...(parsed?.workflowDecision || parsed?.workflow_decision || {}),
+                mode: "plan_task",
+                actionRequired: false,
+                requiresCodeChanges: false,
+                requiresUserConfirmation: false,
+                reason: "当前精确会话处于 Plan Mode，已由服务端阻止任务派发和写操作",
+            },
+        };
     }
     const workflowDecision = (0, workflow_decision_1.normalizeWorkflowDecision)(parsed?.workflowDecision || parsed?.workflow_decision || {});
     const turnDecision = (0, main_agent_turn_1.normalizeMainAgentTurnDecision)({
@@ -992,11 +1093,15 @@ JSON：{"responseType":"reply|tool_calls|clarify|plan|dispatch","reply":"给用�
     (0, main_agent_context_source_continuity_1.markContextSourcesFromOutput)(contextSourceIdentity, JSON.stringify({ reply: turnDecision.reply, plan, workflowDecision }));
     (0, main_agent_context_source_continuity_1.finalizeContextSourceRun)(contextSourceIdentity);
     if (["reply", "clarify"].includes(turnDecision.responseKind)) {
+        const totalDurationMs = Math.max(0, Date.now() - visibleTurnStartedAt);
+        const otherDurationMs = Math.max(0, totalDurationMs - modelDurationMs - toolWallDurationMs);
         const result = (0, user_visible_agent_events_1.buildUserVisibleAgentResult)({
             status: turnDecision.responseKind === "clarify" ? "waiting" : "success",
             text: turnDecision.reply,
             turns: modelCallCount,
             toolCalls: toolCallCount,
+            durationMs: totalDurationMs,
+            modelDurationMs,
             usage: tokenUsage,
             stopReason: turnDecision.responseKind,
         });
@@ -1012,7 +1117,11 @@ JSON：{"responseType":"reply|tool_calls|clarify|plan|dispatch","reply":"给用�
                 status: turnDecision.responseKind === "clarify" ? "waiting" : "success",
                 toolUseCount: toolCallCount,
                 tokenCount: Number(tokenUsage?.totalTokens || 0),
+                tokenType: "provider_total",
+                tokenAccuracy: tokenUsage?.reported === false ? "estimated" : "reported",
+                durationMs: totalDurationMs,
             },
+            detail: { timing: { totalMs: totalDurationMs, modelMs: modelDurationMs, toolWallMs: toolWallDurationMs, otherMs: otherDurationMs } },
             result,
             usage: tokenUsage,
         });
@@ -1317,6 +1426,19 @@ function createProjectMainTask(input) {
             evidencePlan: input.plan.acceptanceEvidencePlan,
         }),
     }) || task;
+    (0, user_visible_agent_events_1.appendUserVisibleRequirementPlan)({
+        eventId: `project-task:${updated.id}:requirement-plan:1:initial`,
+        scope: "project",
+        scopeId: input.project,
+        exactSessionId: input.projectSessionId,
+        generation: 0,
+        taskId: String(updated.id),
+        plan: projectRequirementPlanProjection(input.plan, {
+            planId: String(updated.id),
+            revision: 1,
+            status: input.plan.requiresConfirmation ? "ready" : "executing",
+        }),
+    });
     (0, logs_1.appendTaskTimelineEvent)(updated.id, {
         type: "project_main_source_hydrated",
         title: input.plan.sourceEvidence.selectedPaths.length
@@ -1653,6 +1775,20 @@ async function reviseProjectMainTask(input) {
             plan_revisions: nextRevisions,
             plan_revision_pending: null,
         }) || task;
+        (0, user_visible_agent_events_1.appendUserVisibleRequirementPlan)({
+            eventId: `project-task:${task.id}:requirement-plan:${revision.revision + 1}:revised`,
+            scope: "project",
+            scopeId: project,
+            exactSessionId: projectSessionId,
+            generation: Math.max(0, Number(task.execution_generation || task.generation || 0)),
+            taskId: String(task.id),
+            plan: projectRequirementPlanProjection(revisedPlan, {
+                planId: String(task.id),
+                revision: revision.revision + 1,
+                status: "ready",
+                updatedAt: completedAt,
+            }),
+        });
         (0, logs_1.appendTaskTimelineEvent)(task.id, {
             type: "project_main_plan_revised",
             title: `执行计划已完成第 ${revision.revision} 次修订`,
@@ -1747,25 +1883,31 @@ async function executeProjectMainTask(input) {
         return { task: input.task, status: "awaiting_confirmation", summary: input.plan.summary, fileChanges: { count: 0, files: [] }, verification: [], risks: [], testAgent: null };
     }
     const project = (0, project_validation_1.validateProjectName)(input.task.target_project);
+    const executionGeneration = Math.max(0, Number(input.task?.generation || input.task?.boundary_generation || 0));
     let visibleTaskDeltaSequence = 0;
     const onVisibleTaskDelta = input.onDelta ? (delta) => {
         visibleTaskDeltaSequence += 1;
         (0, user_visible_agent_events_1.publishEphemeralUserVisibleAgentEvent)({
             eventId: `project-task-delta:${taskId}:${Date.now()}:${visibleTaskDeltaSequence}`,
             scope: "project", scopeId: project, exactSessionId: input.plan.projectSessionId,
-            taskId, eventType: "assistant_text_delta",
+            generation: executionGeneration, taskId, eventType: "assistant_text_delta",
             display: { title: "项目主 Agent", summary: String(delta || "").slice(0, 500), status: "running" },
         });
         input.onDelta?.(delta);
     } : undefined;
-    (0, user_visible_agent_events_1.appendUserVisibleAgentEvent)({
+    (0, user_visible_agent_events_1.appendAssistantProgress)({
         eventId: `project-task:${taskId}:started`,
         scope: "project",
         scopeId: project,
         exactSessionId: input.plan.projectSessionId,
+        generation: executionGeneration,
         taskId,
-        eventType: "agent_started",
-        display: { title: "项目开发任务", target: input.plan.title, summary: "正在分派项目子 Agent", status: "running" },
+        turnId: `project-task:${taskId}`,
+        text: "我已经确认实施范围，正在分派项目子 Agent 并准备后续验收。",
+        kind: "key_finding",
+        modelCallIndex: 0,
+        relatedToolCallIds: [],
+        title: "项目主 Agent",
     });
     const workDir = projectWorkDir(project);
     let acceptancePolicyResult = (0, task_acceptance_policy_1.resolveTaskAcceptancePolicy)(getProjectMainTask(taskId) || input.task, { allowLegacyCapture: true });
@@ -2086,6 +2228,40 @@ async function executeProjectMainTask(input) {
                 : (0, rework_policy_1.buildReworkExhaustedUpdate)((0, project_test_agent_gate_1.projectTestAgentProblems)(latestReview).join("；") || "TestAgent 验收未通过", { path: "project_direct" })),
         });
         emit("accepting", { status: accepted ? "running" : "blocked", test_agent: independentTestAgentEnabled ? latestReview : null, main_agent_self_verification: independentTestAgentEnabled ? null : latestReview });
+        const mainSummaryStartedAt = new Date().toISOString();
+        if (accepted) {
+            (0, user_visible_agent_events_1.appendAssistantProgress)({
+                scope: "project",
+                scopeId: project,
+                exactSessionId: input.plan.projectSessionId,
+                generation: executionGeneration,
+                taskId,
+                turnId: `project-main-summary:${taskId}`,
+                text: independentTestAgentEnabled
+                    ? "独立验收已经通过，我正在做最后的差异核对并整理交付总结。"
+                    : "项目自验已经通过，我正在做最后的差异核对并整理交付总结。",
+                kind: "before_summary",
+                modelCallIndex: 0,
+                relatedToolCallIds: [],
+                title: "项目主 Agent",
+            });
+            (0, user_visible_agent_events_1.appendUserVisibleAgentEvent)({
+                eventId: `project-task:${taskId}:main-summary:started`,
+                scope: "project",
+                scopeId: project,
+                exactSessionId: input.plan.projectSessionId,
+                generation: executionGeneration,
+                taskId,
+                workItemId: `main-summary:${taskId}`,
+                agentRunId: `project-main-summary:${taskId}`,
+                eventType: "agent_started",
+                display: { title: "项目主 Agent", target: "最终验收与交付总结", summary: "验收门禁已通过，正在生成最终交付总结", status: "running" },
+                detail: {
+                    agentDisplay: { projectId: "", projectName: "", runtimeLabel: "项目主 Agent", workItemTitle: "最终验收与交付总结", phase: "executing", attempt: 1, isParallel: false },
+                    executionStage: { kind: "main_agent_summary", stageRunId: `main-summary:${taskId}`, attempt: 1, startedAt: mainSummaryStartedAt },
+                },
+            });
+        }
         const summary = await finalSummary({
             task: getProjectMainTask(taskId) || input.task,
             plan: input.plan,
@@ -2109,6 +2285,40 @@ async function executeProjectMainTask(input) {
             review_checksum: String(latestReview?.checksum || latestReview?.runner?.checksum || latestReview?.runner?.id || ""),
             decided_at: new Date().toISOString(),
         };
+        if (accepted) {
+            const mainSummaryCompletedAt = new Date().toISOString();
+            (0, user_visible_agent_events_1.appendUserVisibleAgentEvent)({
+                eventId: `project-task:${taskId}:main-summary:completed`,
+                scope: "project",
+                scopeId: project,
+                exactSessionId: input.plan.projectSessionId,
+                generation: executionGeneration,
+                taskId,
+                workItemId: `main-summary:${taskId}`,
+                agentRunId: `project-main-summary:${taskId}`,
+                eventType: "agent_completed",
+                display: {
+                    title: "项目主 Agent",
+                    target: "最终验收与交付总结",
+                    summary: "最终交付总结已完成",
+                    status: "success",
+                    durationMs: Math.max(0, Date.parse(mainSummaryCompletedAt) - Date.parse(mainSummaryStartedAt)),
+                },
+                fileChanges: fileChanges.files,
+                detail: {
+                    agentDisplay: { projectId: "", projectName: "", runtimeLabel: "项目主 Agent", workItemTitle: "最终验收与交付总结", phase: "completed", attempt: 1, isParallel: false },
+                    executionStage: {
+                        kind: "main_agent_summary",
+                        stageRunId: `main-summary:${taskId}`,
+                        attempt: 1,
+                        startedAt: mainSummaryStartedAt,
+                        completedAt: mainSummaryCompletedAt,
+                        activeDurationMs: Math.max(0, Date.parse(mainSummaryCompletedAt) - Date.parse(mainSummaryStartedAt)),
+                    },
+                    evidenceIds: verification,
+                },
+            });
+        }
         const finalTask = (0, collaboration_task_service_1.updateTask)(taskId, {
             status: accepted ? "done" : "blocked",
             acceptance_state: accepted ? "accepted" : "blocked",
@@ -2149,6 +2359,20 @@ async function executeProjectMainTask(input) {
         }) || input.task;
         (0, logs_1.appendTaskTimelineEvent)(taskId, { type: "project_main_final_acceptance", title: accepted ? "项目主 Agent 最终验收通过" : "项目主 Agent 阻止提前交付", detail: summary, status: accepted ? "ok" : "warn", phase: accepted ? "completed" : "blocked", agent: "project-main-agent" });
         emit(accepted ? "accepting" : "blocked", { status: accepted ? "completed" : "blocked", summary, file_changes: fileChanges });
+        const visiblePlanRevision = Math.max(1, Number(Array.isArray(finalTask?.plan_revisions) ? finalTask.plan_revisions.length + 1 : 1));
+        (0, user_visible_agent_events_1.appendUserVisibleRequirementPlan)({
+            eventId: `project-task:${taskId}:requirement-plan:${visiblePlanRevision}:${accepted ? "completed" : "blocked"}`,
+            scope: "project",
+            scopeId: project,
+            exactSessionId: input.plan.projectSessionId,
+            generation: executionGeneration,
+            taskId,
+            plan: projectRequirementPlanProjection(input.plan, {
+                planId: taskId,
+                revision: visiblePlanRevision,
+                status: accepted ? "completed" : "blocked",
+            }),
+        });
         const visibleResult = (0, user_visible_agent_events_1.buildUserVisibleAgentResult)({
             status: accepted ? "success" : "blocked",
             text: summary,
@@ -2162,6 +2386,7 @@ async function executeProjectMainTask(input) {
             scope: "project",
             scopeId: project,
             exactSessionId: input.plan.projectSessionId,
+            generation: executionGeneration,
             taskId,
             eventType: "result",
             display: {
@@ -2170,10 +2395,14 @@ async function executeProjectMainTask(input) {
                 summary,
                 status: accepted ? "success" : "failed",
                 toolUseCount: input.plan.workItems.length,
+                durationMs: Math.max(0, Date.now() - Date.parse(executionStartedAt)),
             },
             result: visibleResult,
             fileChanges: fileChanges.files,
             evidenceIds: verification,
+            detail: {
+                timing: { totalMs: Math.max(0, Date.now() - Date.parse(executionStartedAt)) },
+            },
         });
         return { task: finalTask, status: accepted ? "completed" : "blocked", summary, fileChanges, verification, risks, testAgent: independentTestAgentEnabled ? latestReview : null };
     }
@@ -2238,12 +2467,14 @@ async function executeProjectMainTask(input) {
             phase: interrupted || lostLease ? "blocked" : "failed",
             agent: "project-main-agent",
         });
+        const unacceptedFileChanges = aggregateFileChanges(results);
         emit(interrupted ? "interrupted" : "blocked", { status: interrupted || lostLease ? "blocked" : "failed", summary, recovery_required: interrupted });
         (0, user_visible_agent_events_1.appendUserVisibleAgentEvent)({
             eventId: `project-task:${taskId}:result:${interrupted || lostLease ? "blocked" : "failed"}`,
             scope: "project",
             scopeId: project,
             exactSessionId: input.plan.projectSessionId,
+            generation: executionGeneration,
             taskId,
             eventType: "result",
             error: interrupted || lostLease ? "" : summary,
@@ -2252,10 +2483,20 @@ async function executeProjectMainTask(input) {
                 target: input.plan.title,
                 summary,
                 status: interrupted || lostLease ? "waiting" : "failed",
+                durationMs: Math.max(0, Date.now() - Date.parse(executionStartedAt)),
             },
-            result: (0, user_visible_agent_events_1.buildUserVisibleAgentResult)({ status: interrupted || lostLease ? "blocked" : "failed", text: summary, unfinished: [summary] }),
+            result: (0, user_visible_agent_events_1.buildUserVisibleAgentResult)({
+                status: interrupted || lostLease ? "blocked" : "failed",
+                text: summary,
+                unfinished: [summary],
+                fileChanges: unacceptedFileChanges.files,
+            }),
+            fileChanges: unacceptedFileChanges.files,
+            detail: {
+                timing: { totalMs: Math.max(0, Date.now() - Date.parse(executionStartedAt)) },
+            },
         });
-        return { task, status: interrupted || lostLease ? "blocked" : "failed", summary, fileChanges: aggregateFileChanges(results), verification: [], risks: [summary], testAgent: independentTestAgentEnabled ? latestReview : null };
+        return { task, status: interrupted || lostLease ? "blocked" : "failed", summary, fileChanges: unacceptedFileChanges, verification: [], risks: [summary], testAgent: independentTestAgentEnabled ? latestReview : null };
     }
     finally {
         clearInterval(leaseHeartbeat);

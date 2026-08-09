@@ -39,6 +39,22 @@ export declare function getSessions(projectName: string): {
     feishu_bindings: any[];
 }[];
 export declare function getSessionDetail(projectName: string, sessionId: string): any;
+export declare function replaceProjectSessionConversation(projectInput: string, sessionIdInput: string, messages: any[], reason?: string): {
+    project: string;
+    sessionId: string;
+    count: any;
+    generation: any;
+    data: any;
+};
+export declare function writeProjectSessionConversationBranch(projectInput: string, name: string, messages: any[]): {
+    data: any;
+    project: string;
+    sessionId: string;
+    name: string;
+    source: string;
+    session_kind: string;
+    created: boolean;
+};
 export declare function createProjectSessionRecord(projectName: string, name?: string, source?: string, options?: any): {
     project: string;
     sessionId: string;
@@ -88,6 +104,10 @@ export declare function ensureProjectAutomationSession(projectName: string, requ
     created: boolean;
 };
 export declare function appendProjectSessionTaskMessage(projectName: string, sessionId: string, message: any): any;
+/** Append a CCM-local transcript record without triggering title generation or
+ * rotating the task/session generation. Local slash commands are deliberately
+ * invisible to the model and must not disturb an active Agent run. */
+export declare function appendProjectSessionLocalCommandRecord(projectName: string, sessionId: string, message: any): any;
 export declare function upsertProjectSessionTaskMessage(projectName: string, sessionId: string, message: any): any;
 export declare function scheduleProjectSessionAutoTitle(project: string, sessionId: string, options?: {
     modelCall?: (request: any) => Promise<any>;

@@ -101,11 +101,15 @@ function parseAnthropicAgentTurn(data, usage) {
     };
 }
 function turnForLegacyJsonLoop(turn) {
-    if (turn.text.trim())
-        return turn.text;
     if (turn.toolCalls.length)
-        return JSON.stringify({ responseType: "tool_calls", toolRequests: turn.toolCalls.map(item => ({ name: item.name, arguments: item.arguments, reason: "Provider原生工具调用" })), providerToolCallIds: turn.toolCalls.map(item => item.id) });
-    return "";
+        return JSON.stringify({
+            responseType: "tool_calls",
+            ...(turn.text.trim() ? { progressUpdate: turn.text.trim(), progressKind: "before_tools" } : {}),
+            toolRequests: turn.toolCalls.map(item => ({ name: item.name, arguments: item.arguments, reason: "Provider原生工具调用" })),
+            providerToolCallIds: turn.toolCalls.map(item => item.id),
+            toolReferences: turn.toolReferences,
+        });
+    return turn.text.trim();
 }
 function createOpenAiStreamTurnAccumulator() {
     const calls = new Map();

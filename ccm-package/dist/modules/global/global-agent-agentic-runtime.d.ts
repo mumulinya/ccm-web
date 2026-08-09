@@ -44,6 +44,7 @@ export declare function createGlobalAgentAgenticRuntime(deps: any): {
         sessionId?: string;
         source?: string;
         authorizationMessage?: string;
+        requestedTargetRefs?: any[];
     }) => GlobalAgentLoopRuntime;
     runAgenticGlobalRequest: (baseUrl: string, ctx: CollabCtx, input: {
         message: string;
@@ -59,6 +60,7 @@ export declare function createGlobalAgentAgenticRuntime(deps: any): {
         turnId?: string;
         queueScope?: string;
         principal?: any;
+        requestedTargetRefs?: any[];
     }) => Promise<any>;
     resumeGlobalAgentLoopsForServer: (ctx: CollabCtx, port: number) => Promise<any>;
     startGlobalMissionSupervisionForServer: (ctx: CollabCtx) => any;

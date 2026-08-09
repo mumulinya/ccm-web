@@ -86,6 +86,7 @@ export function buildGroupCollaborationRules(memberList = "") {
   const members = memberList || "无";
   return `\n\n群聊协作规则：
 - 当前群聊成员：${members}
+- 上述成员表来自本轮重新读取的群配置，是当前权威成员范围；历史消息里较旧的成员数量或项目列表不能覆盖它。
 - 这是本地 CCM 群聊协作，不是外部 IM；不要调用飞书、微信、外部机器人或 MCP 通知工具来联系其他 Agent。
 - 像团队群聊一样发言：先给出你的判断、依据和下一步，再在确实需要协作时 @ 对方。
 - 只有群聊主 Agent 可以用独立一行 "@项目名 具体任务" 正式派发；@ 后必须写清背景、目标、范围和交付物。

@@ -30,9 +30,22 @@ export declare function selectGroupTargets(group: any, targetProject: string | u
 };
 export declare function resolveMemberRuntime(projectName: string, group: any, configs: any[]): {
     project: string;
-    workDir: any;
+    workDir: string;
     agentType: any;
     configured: boolean;
+};
+export declare function inspectGroupMemberRuntimeForAddition(projectName: string, group: any, configs: any[], requestedAgent?: string): {
+    valid: boolean;
+    project: string;
+    reason: string;
+    workDir?: undefined;
+    agentType?: undefined;
+} | {
+    valid: boolean;
+    project: string;
+    workDir: string;
+    agentType: string;
+    reason?: undefined;
 };
 export declare function buildRecentGroupContext(messages: any[], fullCount?: number): string;
 export declare function containsAny(text: string, words: string[]): boolean;

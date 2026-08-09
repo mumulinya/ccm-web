@@ -58,11 +58,29 @@ export declare function createGlobalAgentFeishuChannel(deps: any): {
         denied?: undefined;
         report_sent?: undefined;
     }>;
-    processFeishuCardAction: (baseUrl: string, payload: any) => Promise<{
+    processFeishuCardAction: (baseUrl: string, payload: any, ctx?: CollabCtx) => Promise<{
+        success: boolean;
+        action: string;
+        target: {
+            scope: "group" | "project";
+            scopeId: string;
+            canonicalName: string;
+            displayName: string;
+        };
+        run_id: any;
+        status: any;
+        message: string;
+        decision?: undefined;
+        request_id?: undefined;
+    } | {
         success: boolean;
         decision: string;
         request_id: string;
         message: string;
+        action?: undefined;
+        target?: undefined;
+        run_id?: undefined;
+        status?: undefined;
     }>;
     runFeishuConversationTurnCommandSelfTest: () => {
         pass: boolean;

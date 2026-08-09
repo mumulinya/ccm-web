@@ -107,6 +107,7 @@ const runtime_events_1 = require("./system/runtime-events");
 const agent_communication_api_1 = require("./system/agent-communication-api");
 const code_intelligence_api_1 = require("./system/code-intelligence-api");
 const user_visible_agent_events_api_1 = require("./system/user-visible-agent-events-api");
+const automation_session_bindings_api_1 = require("./system/automation-session-bindings-api");
 const agent_communication_v2_1 = require("./system/agent-communication-v2");
 const execution_kernel_2 = require("./agents/execution-kernel");
 const user_notifications_1 = require("./system/user-notifications");
@@ -123,6 +124,7 @@ const main_agent_context_policy_1 = require("./tools/main-agent-context-policy")
 const main_agent_context_source_continuity_1 = require("./system/main-agent-context-source-continuity");
 const main_agent_post_compact_continuity_1 = require("./system/main-agent-post-compact-continuity");
 const slash_commands_1 = require("./modules/tools/slash-commands");
+const slash_command_conversations_1 = require("./modules/tools/slash-command-conversations");
 const credential_store_1 = require("./core/credential-store");
 const feishu_reaction_feedback_1 = require("./integrations/feishu-reaction-feedback");
 const usability_1 = require("./modules/system/usability");
@@ -1937,11 +1939,15 @@ function handleRequest(req, res) {
         return;
     if ((0, task_permission_routes_1.handleTaskPermissionRoutes)(pathname, req, res, parsed, collabCtx))
         return;
+    if ((0, automation_session_bindings_api_1.handleAutomationSessionBindingsApi)(pathname, req, res, parsed))
+        return;
     if ((0, collaboration_1.handleCollaborationApi)(pathname, req, res, parsed, collabCtx))
         return;
     if ((0, global_agent_1.handleGlobalAgentApi)(pathname, req, res, parsed, collabCtx))
         return;
     if ((0, rag_1.handleRagApi)(pathname, req, res, parsed))
+        return;
+    if ((0, slash_command_conversations_1.handleSlashCommandConversationApi)(pathname, req, res, parsed))
         return;
     if ((0, slash_commands_1.handleSlashCommandsApi)(pathname, req, res, parsed))
         return;

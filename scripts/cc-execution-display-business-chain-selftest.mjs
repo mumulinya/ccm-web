@@ -61,6 +61,7 @@ try {
   events.appendUserVisibleAgentEvent({
     ...identity, taskId: base.taskId, eventId: 'project-terminal-result', eventType: 'result',
     display: { title: '任务已完成', summary: '代码修改和独立验收均已通过', status: 'success', toolUseCount: 1 },
+    fileChanges: [{ path: 'src/feature.ts', project: 'fixture-project', additions: 12, deletions: 2 }],
     result: events.buildUserVisibleAgentResult({
       status: 'success', text: '交付完成', turns: 3, toolCalls: 1,
       agents: { worker: 1, testAgent: 1 }, filesChanged: [{ path: 'src/feature.ts' }],
@@ -81,7 +82,8 @@ try {
   assert.ok(workerTerminal && testTerminal, 'Worker和TestAgent必须分别具备CCM Terminal事件')
   assert.ok(resultSubmitted.sequence < workerTerminal.sequence, 'Result不得晚于或替代Terminal')
   assert.ok(testTerminal.sequence < finalResult.sequence, '最终交付必须发生在TestAgent Terminal之后')
-  assert.equal(finalResult.detail?.safeResult?.fileChanges?.[0]?.path, 'src/feature.ts')
+  assert.equal(finalResult.detail?.fileChanges?.[0]?.path, 'src/feature.ts')
+  assert.equal(finalResult.detail?.fileChanges?.[0]?.additions, 12)
   assert.equal(JSON.stringify(rows).includes('PRIVATE_HANDOFF_SENTINEL'), false)
   assert.equal(rows.every(row => row.contentStored === false), true)
 

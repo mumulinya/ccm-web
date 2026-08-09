@@ -14,7 +14,8 @@ const props = defineProps({
   isLastStreaming: {
     type: Boolean,
     default: false
-  }
+  },
+  hideFileChanges: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['task-action', 'open-file-diff'])
@@ -85,7 +86,7 @@ const hasFileChanges = computed(() => (
     </div>
   </details>
 
-  <div v-if="hasFileChanges && !taskCard && isTaskMessage" class="file-changes">
+  <div v-if="hasFileChanges && !taskCard && isTaskMessage && !hideFileChanges" class="file-changes">
     <div class="file-changes-header">📁 修改了 {{ message.fileChanges.count }} 个文件</div>
     <button
       v-for="file in message.fileChanges.files"

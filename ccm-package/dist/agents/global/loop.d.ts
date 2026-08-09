@@ -81,6 +81,7 @@ export interface GlobalAgentRun {
     failure_category?: string;
     terminal_receipt?: any;
     authorization_message?: string;
+    requested_target_refs?: any[];
     created_at: string;
     updated_at: string;
     started_at: string;
@@ -114,6 +115,7 @@ export interface GlobalAgentRun {
     resume_count: number;
     model_calls: number;
     tool_calls: number;
+    model_duration_ms?: number;
     loaded_tool_names?: string[];
     loadedToolNames?: string[];
     consecutive_failures: number;

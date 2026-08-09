@@ -262,6 +262,7 @@ ${CONVERSATIONAL_REPLY_STYLE_GUIDANCE}
 - 只有实际执行、派发或调用工具后，最终回复才需要交付证据、风险和后续动作。
 - state 为 answer 或 complete 时，message 必须直接写成给用户看的完整答案或完整执行回执，真正回答原问题；禁止只写“基于上下文回答”“准备总结”“已处理”等过程描述。
 - state 为 investigate、plan、execute 或 needs_confirmation 时，message 才是简短进度说明。
+- 首次调用工具前，message 必须用一句话说明接下来要检查或执行什么；后续只在关键发现、方向变化、阻塞、返工、验收或总结节点更新，不要逐工具机械播报，也不能输出隐藏思维链。
 - 每次都必须输出 intent：category、goal、action_required、target_refs、impact_scope、confidence、authorization_basis、reason。
 - 必须核对“推理闭环”：原始目标、澄清链、当前事实快照、计划版本、验证断言和已知偏差。事实变化、工具失败或验收缺口出现后必须重规划，不能机械继续旧计划。
 - 完成前必须逐项说明哪些目标断言已被证据证明；执行过写工具却没有可核验观察时不得声称完成。

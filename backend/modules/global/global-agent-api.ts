@@ -34,6 +34,46 @@ import { requestAccessPrincipal, requestIsReadOnly } from "../system/api-access-
 import { runGitCommand, tryGitCommand } from "../tools/git-workspace-runtime";
 import { listGlobalTerminalDeliveries, retryGlobalTerminalDelivery } from "../../agents/global/global-terminal-delivery";
 import { parseSecureMultipartRequest } from "../../system/secure-multipart";
+import { listGlobalDispatchTargets } from "../../system/automation-session-bindings";
+
+function normalizeGlobalRequestedTargets(value: any, message = "") {
+  let rows = value;
+  if (typeof rows === "string") {
+    try { rows = JSON.parse(rows); } catch { rows = []; }
+  }
+  const available = listGlobalDispatchTargets();
+  const byKey = new Map(available.map((item: any) => [`${item.scope}:${item.scopeId}`, item]));
+  const requestedRows = Array.isArray(rows) ? rows : [];
+  const explicit = requestedRows.map((item: any) => {
+    const scope = String(item?.scope || item?.type || "").trim().toLowerCase();
+    const scopeId = String(item?.scopeId || item?.scope_id || item?.id || item?.group_id || item?.project || "").trim();
+    return byKey.get(`${scope}:${scopeId}`) || null;
+  });
+  if (requestedRows.length) {
+    if (explicit.some((item: any) => !item || item.ready !== true)) throw new Error("选择的项目或群聊已经不可投放，请刷新目标列表后重试");
+    return [...new Map(explicit.map((item: any) => [`${item.scope}:${item.scopeId}`, item])).values()];
+  }
+  const text = String(message || "");
+  const exactNameMentioned = (nameValue: any) => {
+    const name = String(nameValue || "").trim();
+    if (name.length < 2) return false;
+    if (text.trim() === name) return true;
+    if (/^[a-z0-9_.-]+$/i.test(name)) {
+      const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      return new RegExp(`(^|[\\s，,。:：;；'\"“”()（）\\[\\]])${escaped}($|[\\s，,。:：;；'\"“”()（）\\[\\]])`, "i").test(text);
+    }
+    return text.includes(name);
+  };
+  const matches = available.filter((item: any) => item.ready === true && [item.canonicalName, item.displayName]
+    .some(exactNameMentioned));
+  const ambiguousNames = new Set<string>();
+  for (const match of matches) {
+    for (const name of [match.canonicalName, match.displayName].filter(Boolean)) {
+      if (matches.filter((item: any) => item.canonicalName === name || item.displayName === name).length > 1) ambiguousNames.add(String(name));
+    }
+  }
+  return matches.filter((item: any) => !ambiguousNames.has(String(item.canonicalName)) && !ambiguousNames.has(String(item.displayName)));
+}
 
 function resolveControlBotAcpPlatformContext(acpSessionIdValue: string) {
   const acpSessionId = String(acpSessionIdValue || "").trim();
@@ -133,6 +173,7 @@ export function createGlobalAgentApi(deps: any) {
             sourceIngestion: metadata.source_ingestion || null,
             readOnly: metadata.read_only === true,
             principal: metadata.principal || null,
+            requestedTargetRefs: Array.isArray(metadata.requested_target_refs) ? metadata.requested_target_refs : [],
             turnId: turn.id,
             queueScope: `global:${sessionId}`,
           });
@@ -507,7 +548,7 @@ export function createGlobalAgentApi(deps: any) {
               return;
             }
             try {
-              const result = await processFeishuCardAction(getRequestBaseUrl(req), payload);
+              const result = await processFeishuCardAction(getRequestBaseUrl(req), payload, ctx);
               sendJson(res, { toast: { type: "success", content: result.message || "操作成功" } });
             } catch (error: any) {
               sendJson(res, { toast: { type: "error", content: error?.message || "卡片操作失败" } });
@@ -1265,6 +1306,7 @@ export function createGlobalAgentApi(deps: any) {
           const displayMessage = originalMessage || (files.length
             ? `请处理已上传的 ${files.length} 份资料：${files.map((file: any) => file.filename || "附件").join("、")}`
             : message);
+          const requestedTargetRefs = normalizeGlobalRequestedTargets(payload.target_refs || payload.targetRefs, originalMessage || message);
           const sourceFiles = serializeGlobalRequestAttachments(files);
           if (!message) throw new Error("消息不能为空");
           let history: any[] = [];
@@ -1309,6 +1351,7 @@ export function createGlobalAgentApi(deps: any) {
                 source_ingestion: sourceIngestion,
                 read_only: requestIsReadOnly(req),
                 principal,
+                requested_target_refs: requestedTargetRefs,
               },
             },
           });
@@ -1339,6 +1382,7 @@ export function createGlobalAgentApi(deps: any) {
             sourceIngestion,
             readOnly: requestIsReadOnly(req),
             principal,
+            requestedTargetRefs,
             turnId: activeTurn.id,
             queueScope: `global:${sessionId}`,
             onEvent: (event: any) => {

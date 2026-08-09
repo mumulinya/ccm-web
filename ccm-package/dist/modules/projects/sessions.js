@@ -45,11 +45,14 @@ exports.syncToFilesystemToCc = syncToFilesystemToCc;
 exports.syncSessions = syncSessions;
 exports.getSessions = getSessions;
 exports.getSessionDetail = getSessionDetail;
+exports.replaceProjectSessionConversation = replaceProjectSessionConversation;
+exports.writeProjectSessionConversationBranch = writeProjectSessionConversationBranch;
 exports.createProjectSessionRecord = createProjectSessionRecord;
 exports.applyProjectSessionProvisionalTitle = applyProjectSessionProvisionalTitle;
 exports.bindProjectFeishuSession = bindProjectFeishuSession;
 exports.ensureProjectAutomationSession = ensureProjectAutomationSession;
 exports.appendProjectSessionTaskMessage = appendProjectSessionTaskMessage;
+exports.appendProjectSessionLocalCommandRecord = appendProjectSessionLocalCommandRecord;
 exports.upsertProjectSessionTaskMessage = upsertProjectSessionTaskMessage;
 exports.scheduleProjectSessionAutoTitle = scheduleProjectSessionAutoTitle;
 exports.handleSessionsApi = handleSessionsApi;
@@ -420,11 +423,47 @@ function normalizeWebSessionMessage(message) {
         "provider_usage",
         "source",
         "type",
+        "commandResult",
+        "localCommandRecord",
+        "modelVisible",
     ]) {
         if (Object.prototype.hasOwnProperty.call(input, key))
             safe[key] = input[key];
     }
     return safe;
+}
+function replaceProjectSessionConversation(projectInput, sessionIdInput, messages, reason = "会话历史被受控替换") {
+    const project = (0, project_validation_1.validateProjectName)(projectInput);
+    const sessionId = (0, project_validation_1.validateSessionId)(sessionIdInput);
+    if (!Array.isArray(messages) || messages.length > 10_000)
+        throw new Error("会话消息数量无效");
+    const filePath = getSessionFilePath(project, sessionId);
+    if (!fs.existsSync(filePath))
+        throw new Error("会话不存在");
+    const data = JSON.parse(fs.readFileSync(filePath, "utf-8"));
+    (0, project_main_agent_1.cancelProjectMainTasksForSession)(project, sessionId, reason);
+    data.history = messages.map(normalizeWebSessionMessage);
+    data.execution_history = [];
+    clearProjectMainDynamicContext(project, sessionId);
+    const rotation = (0, project_session_agent_binding_1.rotateProjectSessionAgentBinding)(project, sessionId, reason);
+    delete data.compaction;
+    data.updated_at = new Date().toISOString();
+    fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
+    syncToFilesystemToCc(project);
+    (0, conversation_search_dirty_1.markConversationSearchIndexDirty)(`project:${project}:${sessionId}`);
+    return { project, sessionId, count: data.history.length, generation: rotation.nextGeneration, data };
+}
+function writeProjectSessionConversationBranch(projectInput, name, messages) {
+    const created = createProjectSessionRecord(projectInput, name, "web");
+    const filePath = getSessionFilePath(created.project, created.sessionId);
+    const data = JSON.parse(fs.readFileSync(filePath, "utf-8"));
+    data.history = messages.map(normalizeWebSessionMessage);
+    data.title_origin = "manual";
+    data.updated_at = new Date().toISOString();
+    fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
+    syncToFilesystemToCc(created.project);
+    (0, conversation_search_dirty_1.markConversationSearchIndexDirty)(`project:${created.project}:${created.sessionId}`);
+    return { ...created, data };
 }
 function messageMatchesDeleteSelector(message, selector, index) {
     if (!message || !selector)
@@ -611,6 +650,26 @@ function appendProjectSessionTaskMessage(projectName, sessionId, message) {
             console.warn(`[项目会话] 自动命名失败 (${safeProject}/${safeSessionId})：${error?.message || error}`);
         });
     }
+    return normalized;
+}
+/** Append a CCM-local transcript record without triggering title generation or
+ * rotating the task/session generation. Local slash commands are deliberately
+ * invisible to the model and must not disturb an active Agent run. */
+function appendProjectSessionLocalCommandRecord(projectName, sessionId, message) {
+    const safeProject = requireActiveProject(projectName).project;
+    const safeSessionId = (0, project_validation_1.validateSessionId)(sessionId);
+    const filePath = getSessionFilePath(safeProject, safeSessionId);
+    if (!fs.existsSync(filePath))
+        throw new Error("项目会话不存在");
+    const data = JSON.parse(fs.readFileSync(filePath, "utf-8"));
+    const normalized = normalizeWebSessionMessage({ ...message, modelVisible: false, type: "command_result" });
+    data.history = Array.isArray(data.history) ? data.history : [];
+    if (!data.history.some((item) => String(item.id || "") === normalized.id))
+        data.history.push(normalized);
+    data.updated_at = new Date().toISOString();
+    fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
+    (0, conversation_search_dirty_1.markConversationSearchIndexDirty)(`project:${safeProject}:${safeSessionId}`);
+    syncToFilesystemToCc(safeProject);
     return normalized;
 }
 function upsertProjectSessionTaskMessage(projectName, sessionId, message) {

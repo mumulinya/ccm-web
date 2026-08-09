@@ -23,7 +23,7 @@ const projectSessions = read('backend/modules/projects/sessions.ts')
 const checks = {
   taskDispatchUsesModelIntake: taskUi.includes('/api/usability/intake/preview') && taskUi.includes('/api/usability/intake/confirm'),
   documentsAndImagesSupported: taskUi.includes('image/*,.txt,.md,.json,.csv,.pdf,.docx,.pptx,.xlsx') && taskUi.includes('@paste.capture'),
-  exactGroupOrProjectSessionSelectable: taskUi.includes('groupsApi.sessions') && taskUi.includes('sessionsApi.list') && taskUi.includes('group_session_id') && taskUi.includes('project_session_id'),
+  targetScopeSelectedAndSessionResolvedBySource: !taskUi.includes('groupsApi.sessions') && !taskUi.includes('sessionsApi.list') && taskUi.includes('按需求池来源自动绑定') && taskService.includes('resolveAutomationSessionBinding'),
   workbenchUsesSamePipeline: workbench.includes("form.append('source', 'workbench')") && workbench.includes("form.append('queue_scope', 'conversation_serial')"),
   groupChatCreatesPersistentTasks: groupLive.includes('createTask({') && groupLive.includes('request_origin: globalDirectDispatch ? "global-agent" : "group-session"'),
   projectChatUsesModelMainAgent: projectMain.includes('planProjectMainTask') && projectMain.includes('queue_scope: "conversation_serial"'),

@@ -529,6 +529,13 @@ const handleSettingsStorage = (e) => {
   }
 }
 
+const handleCommandResultAction = event => {
+  const action = event?.detail || {}
+  if (action.kind !== 'navigate' || !action.tab) return
+  navigateTo.value = { tab: action.tab, ...(action.context || {}) }
+  switchTab(action.tab)
+}
+
 onMounted(async () => {
   // 预设主题会决定有效明暗模式，避免深色预设与浅色组件样式混用。
   applyStoredThemePreferences()
@@ -538,6 +545,7 @@ onMounted(async () => {
   document.documentElement.classList.toggle('low-perf', lowPerf)
   window.addEventListener('storage', handleSettingsStorage)
   window.addEventListener(MENU_CONFIG_EVENT, handleMenuConfigurationEvent)
+  window.addEventListener('ccm-command-result-action', handleCommandResultAction)
   unsubscribeNavigationBroadcast = subscribeMenuConfigurationBroadcast(() => void reloadServerNavigation({ quiet: true }))
   unsubscribeNavigationEvents = subscribeRuntimeEvents(['system'], event => {
     if (String(event?.type || '').startsWith('navigation.')) void reloadServerNavigation({ quiet: true })
@@ -583,6 +591,7 @@ onUnmounted(() => {
   window.removeEventListener('scroll', preventPageScroll)
   window.removeEventListener('storage', handleSettingsStorage)
   window.removeEventListener(MENU_CONFIG_EVENT, handleMenuConfigurationEvent)
+  window.removeEventListener('ccm-command-result-action', handleCommandResultAction)
 })
 
 const DEFAULT_TABS = [

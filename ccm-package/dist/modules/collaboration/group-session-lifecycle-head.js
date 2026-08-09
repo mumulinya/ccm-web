@@ -45,6 +45,7 @@ exports.readGroupSessionLifecycleHead = readGroupSessionLifecycleHead;
 exports.bootstrapGroupSessionLifecycleJournals = bootstrapGroupSessionLifecycleJournals;
 exports.ensureGroupSessionLifecycleHead = ensureGroupSessionLifecycleHead;
 exports.transitionGroupSessionLifecycleHead = transitionGroupSessionLifecycleHead;
+exports.rotateGroupSessionLifecycleHead = rotateGroupSessionLifecycleHead;
 exports.validateGroupSessionLifecycleBinding = validateGroupSessionLifecycleBinding;
 exports.normalizeGroupSessionLifecycleRuntimeFence = normalizeGroupSessionLifecycleRuntimeFence;
 exports.validateGroupSessionLifecycleRuntimeFence = validateGroupSessionLifecycleRuntimeFence;
@@ -492,6 +493,21 @@ function transitionGroupSessionLifecycleHead(input = {}) {
         if (previous?.status === "deleted" && status !== "deleted")
             throw new Error("deleted group session lifecycle tombstone cannot be reactivated");
         const head = buildLifecycleHead(groupId, groupSessionId, status, previous, input);
+        const commit = commitLifecycleHead(groupId, groupSessionId, head);
+        return { committed: true, idempotent: false, head: commit.head, journal: commit.journal, receipt: commit.receipt, file };
+    });
+}
+function rotateGroupSessionLifecycleHead(input = {}) {
+    const groupId = String(input.groupId || input.group_id || "").trim();
+    const groupSessionId = String(input.groupSessionId || input.group_session_id || "").trim();
+    if (!groupId || !groupSessionId.startsWith("gcs_"))
+        throw new Error("session lifecycle rotation requires groupId + gcs_* identity");
+    const file = getGroupSessionLifecycleHeadFile(groupId, groupSessionId);
+    return (0, atomic_json_file_1.withFileLock)(file, () => {
+        const previous = readGroupSessionLifecycleHead(groupId, groupSessionId);
+        if (!previous || previous.status !== "active")
+            throw new Error("only an active group session can rotate generation");
+        const head = buildLifecycleHead(groupId, groupSessionId, "active", previous, { ...input, reason: input.reason || "session_generation_rotated" });
         const commit = commitLifecycleHead(groupId, groupSessionId, head);
         return { committed: true, idempotent: false, head: commit.head, journal: commit.journal, receipt: commit.receipt, file };
     });

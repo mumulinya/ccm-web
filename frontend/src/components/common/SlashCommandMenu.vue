@@ -15,6 +15,14 @@ const implementationLabel = (value) => ({
   navigation: '打开页面',
   'agent-workflow': 'Agent 工作流',
 }[value] || 'CCM 命令')
+
+const executionLabel = command => ({
+  'local-jsx': '面板',
+  local: '本地',
+  prompt: 'Agent',
+}[command.executionType] || implementationLabel(command.implementation))
+
+const scopeLabel = scopes => scopes?.length === 1 ? ({ global: '全局', project: '项目', group: '群聊' }[scopes[0]] || '') : ''
 </script>
 
 <template>
@@ -42,7 +50,9 @@ const implementationLabel = (value) => ({
           <span class="slash-description">{{ command.description }}</span>
         </span>
         <span class="slash-meta">
-          <b class="implementation" :class="`implementation-${command.implementation}`">{{ implementationLabel(command.implementation) }}</b>
+          <b v-if="scopeLabel(command.scopes)" class="scope-badge">{{ scopeLabel(command.scopes) }}</b>
+          <b class="implementation" :class="`implementation-${command.executionType || command.implementation}`">{{ executionLabel(command) }}</b>
+          <b v-if="command.compatibility === 'cc_exact'" class="compatibility">CC 同义</b>
           <b v-if="command.risk !== 'safe'" :class="`risk-${command.risk}`">{{ command.risk === 'high' ? '需确认' : '受控' }}</b>
           <b v-if="command.availability?.enabled === false" class="unavailable">{{ command.availability.reason }}</b>
           <em>{{ command.category }}</em>
@@ -58,6 +68,8 @@ const implementationLabel = (value) => ({
 .slash-list{max-height:390px;overflow:auto;padding:5px}.slash-item{width:100%;display:grid;grid-template-columns:31px minmax(0,1fr) auto;align-items:center;gap:8px;padding:9px;border:0;border-radius:8px;background:transparent;color:inherit;text-align:left;cursor:pointer}.slash-item:hover,.slash-item.active{background:rgba(var(--accent-blue-rgb),.09)}
 .slash-icon{display:grid;place-items:center;width:29px;height:29px;border-radius:8px;background:rgba(var(--accent-blue-rgb),.09);color:var(--accent-blue);font-size:14px}.slash-copy{display:flex;min-width:0;flex-direction:column;gap:2px}.slash-name{font:600 12px/1.3 var(--font-tech,monospace)}.slash-name i{font-style:normal;font-weight:400;color:var(--text-muted)}.slash-description{overflow:hidden;color:var(--text-muted);font-size:10px;text-overflow:ellipsis;white-space:nowrap}.slash-meta{display:flex;align-items:flex-end;flex-direction:column;gap:3px}.slash-meta em,.slash-meta b{font-size:8px;font-style:normal;font-weight:600}.slash-meta em{color:var(--text-muted)}.slash-meta b{padding:2px 5px;border-radius:6px}.slash-meta .implementation{background:rgba(2,132,199,.08);color:#0369a1}.slash-meta .implementation-agent-workflow{background:rgba(124,58,237,.08);color:#6d28d9}.slash-meta .implementation-local-mutation{background:rgba(245,158,11,.1);color:#b45309}.risk-guarded{background:rgba(245,158,11,.1);color:#d97706}.risk-high{background:rgba(239,68,68,.1);color:#dc2626}.slash-empty{padding:24px;text-align:center;color:var(--text-muted);font-size:11px}
 .slash-item.disabled{opacity:.52}.slash-meta .unavailable{color:var(--text-muted);background:rgba(100,116,139,.1)}
+.slash-meta .scope-badge{background:rgba(100,116,139,.1);color:var(--text-muted)}
+.slash-meta .compatibility{background:rgba(16,185,129,.1);color:#059669}
 :global([data-theme="dark"] .slash-menu){background:rgba(15,23,42,.98);border-color:rgba(129,140,248,.28);box-shadow:0 22px 60px rgba(0,0,0,.45)}
 @media(max-width:700px){.slash-head small{display:none}.slash-list{max-height:260px}}
 </style>

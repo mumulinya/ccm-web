@@ -3,12 +3,12 @@ import { getConfigs, loadCronJobs, loadTasks, saveCronJobs } from "../../core/db
 import {
   listGroupChatSessions,
   loadGroups,
-  resolveWritableGroupChatSession,
   saveGroups,
 } from "./storage";
 import { runSemanticDecision } from "../../system/semantic-decision-runtime";
 import { withFileLock } from "../../core/atomic-json-file";
 import { GROUPS_FILE } from "../../core/utils";
+import { resolveAutomationSessionBinding } from "../../system/automation-session-bindings";
 
 type DailyDevRuntimeDeps = {
   validateDailyDevGroupReady: (group: any) => any;
@@ -121,20 +121,6 @@ function persistDailyDevBacklogFileUnlocked(groups: any[], group: any, payload: 
   const quality = normalizeDailyDevQualityDecision(payload?.quality_decision || payload?.qualityDecision);
   const initialState = quality.pass ? "ready" : "needs_user";
   const content = buildDailyDevBacklogDocument(payload, title, goal);
-  const requestedSessionId = String(
-    payload.target_session_id
-    || payload.targetSessionId
-    || payload.exact_session_id
-    || payload.exactSessionId
-    || payload.group_session_id
-    || payload.groupSessionId
-    || "",
-  ).trim();
-  const targetSession = resolveWritableGroupChatSession(group.id, requestedSessionId, {
-    title: compactFormText(title || goal, "需求池任务").slice(0, 80),
-    createDedicated: !requestedSessionId,
-    sessionKind: "automation",
-  });
   const boundAt = new Date().toISOString();
   const record = {
     name,
@@ -151,10 +137,10 @@ function persistDailyDevBacklogFileUnlocked(groups: any[], group: any, payload: 
     idempotency_key: idempotencyKey,
     target_scope: "group_session",
     target_id: group.id,
-    target_session_id: targetSession.id,
-    target_session_title: targetSession.title || targetSession.id,
-    target_session_bound_at: boundAt,
-    target_session_binding_source: requestedSessionId ? "explicit_at_creation" : "creation_default",
+    target_session_id: "",
+    target_session_title: "",
+    target_session_bound_at: "",
+    target_session_binding_source: "pending_requirement_pool_binding",
     status: initialState,
     needs_user_question: initialState === "needs_user" ? buildDailyDevBacklogUserQuestion(quality) : "",
     state_history: [{
@@ -513,35 +499,41 @@ function claimReadyDailyDevBacklogUnlocked(groupId: string, claim: any = {}) {
   if (!selected) return null;
 
   const file = files[selected.index];
-  const storedSessionId = String(file.target_session_id || file.group_session_id || "").trim();
   let targetSession: any;
+  let automationBindingSnapshot: any = null;
   try {
-    targetSession = resolveWritableGroupChatSession(groupId, storedSessionId, {
+    const resolution = resolveAutomationSessionBinding({
+      scope: "group",
+      scopeId: groupId,
+      source: "requirement_pool",
       title: compactFormText(file.name || "需求池任务", "需求池任务").slice(0, 80),
-      createDedicated: !storedSessionId,
-      sessionKind: "automation",
+      actor: String(claim.source || "daily_dev_cron"),
     });
+    targetSession = listGroupChatSessions(groupId).sessions.find((session: any) => String(session?.id || "") === resolution.snapshot.exactSessionId);
+    if (!targetSession) throw new Error("绑定的自动化任务会话不存在");
+    automationBindingSnapshot = resolution.snapshot;
   } catch (error: any) {
     const now = new Date().toISOString();
     file.status = "blocked";
     file.blocked_at = now;
     file.updated_at = now;
     file.revision = Math.max(0, Number(file.revision || 0)) + 1;
-    file.last_result = `目标群聊会话不可用：${error?.message || error}。请改选会话后重新派发。`;
+    file.last_result = `需求池自动化会话不可用：${error?.message || error}。请检查群聊自动化会话的来源绑定。`;
     appendDailyDevBacklogHistory(file, "blocked", file.last_result, claim.source || "daily_dev_cron");
     file.content = replaceBacklogStatusLine(String(file.content || ""), "blocked");
     saveGroups(groups);
     return null;
   }
   const now = new Date().toISOString();
-  if (!storedSessionId) {
+  if (String(file.target_session_id || "") !== String(targetSession.id || "")) {
     file.target_scope = "group_session";
     file.target_id = groupId;
     file.target_session_id = targetSession.id;
     file.target_session_title = targetSession.title || targetSession.id;
     file.target_session_bound_at = now;
-    file.target_session_binding_source = "legacy_first_claim";
-    appendDailyDevBacklogHistory(file, "ready", `历史需求已固定到“${file.target_session_title}”`, claim.source || "daily_dev_cron");
+    file.target_session_binding_source = "automation_source_binding";
+    file.automation_session_binding_snapshot = automationBindingSnapshot;
+    appendDailyDevBacklogHistory(file, "ready", `已按需求池来源绑定到“${file.target_session_title}”`, claim.source || "daily_dev_cron");
   }
   file.status = "planned";
   file.claimed_at = now;
@@ -789,21 +781,26 @@ function dispatchDailyDevBacklogUnlocked(groupId: string, fileName: string, ctx:
     return { success: false, status: 409, error: "需求已经关联执行任务，如需重派请先恢复为 ready" };
   }
 
-  const requestedSessionId = String(options.group_session_id || options.groupSessionId || options.exact_session_id || options.exactSessionId || "").trim();
   const storedSessionId = String(file.target_session_id || file.group_session_id || "").trim();
   let targetSession: any;
+  let automationBindingSnapshot: any = null;
   try {
-    targetSession = resolveWritableGroupChatSession(groupId, requestedSessionId || storedSessionId, {
+    const resolution = resolveAutomationSessionBinding({
+      scope: "group",
+      scopeId: groupId,
+      source: "requirement_pool",
       title: compactFormText(file.name || "需求池任务", "需求池任务").slice(0, 80),
-      createDedicated: !requestedSessionId && !storedSessionId,
-      sessionKind: "automation",
+      actor: String(options.source || "manual_backlog_dispatch"),
     });
+    targetSession = listGroupChatSessions(groupId).sessions.find((session: any) => String(session?.id || "") === resolution.snapshot.exactSessionId);
+    if (!targetSession) throw new Error("绑定的自动化任务会话不存在");
+    automationBindingSnapshot = resolution.snapshot;
   } catch (error: any) {
     return {
       success: false,
       status: 409,
       code: "backlog_target_session_unavailable",
-      error: `目标群聊会话不可用：${error?.message || error}。请明确改选一个可写会话后再派发。`,
+      error: `需求池自动化会话不可用：${error?.message || error}。请在群聊的自动化会话列表中检查来源绑定。`,
     };
   }
   const targetChanged = targetSession.id !== storedSessionId;
@@ -814,11 +811,8 @@ function dispatchDailyDevBacklogUnlocked(groupId: string, fileName: string, ctx:
   file.target_session_id = targetSession.id;
   file.target_session_title = targetSession.title || targetSession.id;
   file.target_session_bound_at = now;
-  file.target_session_binding_source = requestedSessionId
-    ? "explicit_at_dispatch"
-    : storedSessionId
-      ? (file.target_session_binding_source || "creation_snapshot")
-      : "legacy_first_dispatch";
+  file.target_session_binding_source = "automation_source_binding";
+  file.automation_session_binding_snapshot = automationBindingSnapshot;
   file.status = "planned";
   file.entry_id = file.entry_id || `backlog_${crypto.randomUUID()}`;
   file.revision = Math.max(0, Number(file.revision || 0)) + 1;
@@ -851,6 +845,8 @@ function dispatchDailyDevBacklogUnlocked(groupId: string, fileName: string, ctx:
       business_goal: payload.business_goal,
       acceptance_criteria: payload.acceptance || "",
       source_documents: payload.documents,
+      automation_task_source: "requirement_pool",
+      automation_session_binding_snapshot: automationBindingSnapshot,
       workflow_meta: {
         ...(options.workflow_meta || options.workflowMeta || {}),
         intake: {
@@ -860,6 +856,7 @@ function dispatchDailyDevBacklogUnlocked(groupId: string, fileName: string, ctx:
           target_scope: "group_session",
           target_id: groupId,
           target_session_id: targetSession.id,
+          automation_session_binding_snapshot: automationBindingSnapshot,
         },
       },
       client_message_id: file.entry_id,

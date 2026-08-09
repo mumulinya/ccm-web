@@ -74,4 +74,4 @@
 
 ## 用户可见执行流
 
-三类会话已使用同一 `ccm-user-visible-agent-event-v1` 投影和公共页面组件。普通视图按“思考状态 → 工具/Skill/MCP → 子 Agent → 权限/澄清 → 最终回答”显示，完成后折叠；`Ctrl+O`展开安全执行记录。详情见 [CC-STYLE-USER-VISIBLE-EXECUTION-FLOW.md](./CC-STYLE-USER-VISIBLE-EXECUTION-FLOW.md)。
+三类会话已使用同一 `ccm-user-visible-agent-event-v1` 投影和公共页面组件。代码任务运行中直接显示“进度说明 → 工具/Skill/MCP → 用户可读的需求实施计划 → 子 Agent → TestAgent/返工”，且不显示执行记录入口；Result 到达后切换为“最终回答 → 文件变更卡 → 折叠执行记录”，展开记录后仍可在准备阶段和项目 Agent 之间查看最终计划及修订历史。`Ctrl+O`只展开当前完成消息，普通零工具问答仍只显示思考状态和最终回答。详情见 [CC-STYLE-USER-VISIBLE-EXECUTION-FLOW.md](./CC-STYLE-USER-VISIBLE-EXECUTION-FLOW.md)。

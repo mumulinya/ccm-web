@@ -63,6 +63,7 @@ export function defaultOrchestratorConfig() {
     googleCseId: "",
     notebookToolsEnabled: true,
     ccStyleExecutionDisplayEnabled: true,
+    ccStyleAgentProgressNarrationEnabled: true,
     mcpToolLoadingMode: "deferred",
     mcpToolAutoThresholdPercent: 10,
     skillCatalogBudgetPercent: 1,
@@ -288,6 +289,7 @@ export function saveOrchestratorConfig(updates: any) {
     ["webFetchBrowserFallbackEnabled", "web_fetch_browser_fallback_enabled"],
     ["notebookToolsEnabled", "notebook_tools_enabled"],
     ["ccStyleExecutionDisplayEnabled", "cc_style_execution_display_enabled"],
+    ["ccStyleAgentProgressNarrationEnabled", "cc_style_agent_progress_narration_enabled"],
   ] as const) {
     const raw = updates[camelKey] ?? updates[snakeKey];
     if (raw !== undefined) next[camelKey] = raw === true;

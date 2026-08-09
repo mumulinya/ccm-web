@@ -44,6 +44,7 @@ const project_runtime_1 = require("../projects/project-runtime");
 const main_agent_turn_1 = require("../../agents/main-agent-turn");
 const global_agent_tool_authorization_1 = require("./global-agent-tool-authorization");
 const main_agent_tool_runtime_1 = require("../../tools/main-agent-tool-runtime");
+const cc_tool_result_limits_1 = require("../../tools/cc-tool-result-limits");
 const workspace_readonly_tools_1 = require("../../tools/workspace-readonly-tools");
 const global_agent_run_store_1 = require("../../agents/global/global-agent-run-store");
 const reliability_ledger_1 = require("../../system/reliability-ledger");
@@ -51,6 +52,7 @@ const global_agent_authorization_1 = require("../../agents/global/global-agent-a
 const shared_files_v2_1 = require("../tools/shared-files-v2");
 const main_agent_context_source_continuity_1 = require("../../system/main-agent-context-source-continuity");
 const context_source_tool_result_projection_1 = require("../../system/context-source-tool-result-projection");
+const slash_command_session_state_1 = require("../../system/slash-command-session-state");
 // Global-only context, tool execution, mission supervision, and agentic loop lifecycle.
 function createGlobalAgentAgenticRuntime(deps) {
     const { hasExplicitGlobalWriteAuthorization, GLOBAL_AGENT_TOOL_SPECS, GLOBAL_MANAGEMENT_ACTIONS, GLOBAL_PET_AGENT_NAME, acquireIdempotency, annotateGlobalAction, applyGlobalAgentSupervisionSteer, attachGlobalAgentRunSupervision, bindFeishuIdentifiersFromValue, bindFeishuTaskContext, buildGlobalAgentMemoryPacket, buildGlobalAgentSessionContinuation, buildGlobalSingleProjectMissionPayload, callGlobalModelWithRetry, compactGlobalAgentSessionWithModel, compactPetText, completeGlobalAgentSupervision, completeIdempotency, continueGlobalAgentRunWithClarification, controlGlobalDevelopmentMission, controlGlobalMissionSupervisor, createGlobalDevelopmentMission, createRequirementEpicWithChildren, executeFeishuAction, executePlayMusic, executeStopMusic, failIdempotency, findClarifyingGlobalAgentRun, formatGlobalMissionFinalReport, getAgentQualityPolicy, getConfigInfo, getConfigs, getGlobalAgentBackgroundOutput, getGlobalAgentMemoryPolicy, getGlobalAgentRun, getGlobalDevelopmentMission, getGlobalMissionSupervisor, getGlobalMissionSupervisorSchedulerStatus, globalRunVisibleReply, hasExplicitDevelopmentExecutionIntent, inferLocalGlobalAction, ingestGlobalAgentConversation, listGlobalAgentRuns, listGlobalMissionSupervisors, listTaskAgentSessions, loadCronJobs, loadGlobalAgentHistoryStore, loadGlobalAgentHooks, loadGlobalAgentMemory, loadGlobalAgentPermissionRules, loadGroups, loadMcpTools, loadOrchestratorConfig, loadSkills, loadTasks, normalizeText, notifyFeishuTaskStage, postLocalApi, queryKnowledgeBase, recallGlobalAgentMemory, rebuildGlobalAgentMemory, recordGlobalAgentRuntimeOutput, recordGlobalAgentSessionProviderUsage, recordGlobalMissionMemory, recoverInterruptedGlobalAgentRuns, refreshGlobalDevelopmentMissions, renderGlobalGroupMemoryContextBundle, resumeGlobalAgentRun, sanitizeGlobalDirectAgentOutput, setGlobalAgentMemoryPolicy, settleIdempotencyByTrace, startGlobalAgentRun, startGlobalMissionSupervisor, startGlobalMissionSupervisorScheduler, stopGlobalMissionSupervisorScheduler, superviseGlobalDevelopmentMissionCycle, updateGlobalAgentSupervisionState, waitForIdempotencyResult } = deps;
@@ -266,6 +268,13 @@ function createGlobalAgentAgenticRuntime(deps) {
         const context = {
             projects: safeProjectRows(),
             groups: groups.map((group) => ({ id: group.id, name: group.name, members: (group.members || []).map((member) => ({ project: member.project, agent: member.agent })) })),
+            requested_dispatch_targets: {
+                schema: "ccm-global-requested-dispatch-targets-v1",
+                targets: (Array.isArray(options.requestedTargetRefs || options.requested_target_refs) ? (options.requestedTargetRefs || options.requested_target_refs) : [])
+                    .map((target) => ({ scope: target.scope, scope_id: target.scopeId || target.scope_id, name: target.displayName || target.canonicalName || target.name }))
+                    .filter((target) => target.scope && target.scope_id),
+                policy: "only_these_targets_may_receive_tasks",
+            },
             task_summary: {
                 total: globalTasks.length,
                 active: globalTasks.filter((task) => ["pending", "queued", "in_progress", "running"].includes(String(task.status))).length,
@@ -464,7 +473,9 @@ function createGlobalAgentAgenticRuntime(deps) {
         const sessionId = String(run.session_id || "").trim();
         if (!sessionId)
             throw new Error("全局 Agent Provider 调用缺少精确会话 ID");
-        const config = loadOrchestratorConfig();
+        const baseConfig = loadOrchestratorConfig();
+        const sessionPreferences = (0, slash_command_session_state_1.readSlashCommandSessionState)("global", "global", sessionId).preferences;
+        const config = { ...baseConfig, model: sessionPreferences.model || baseConfig.model, reasoningEffort: sessionPreferences.effort || baseConfig.reasoningEffort };
         const modelCapacity = (0, group_compaction_strategy_1.resolveGroupModelContextCapacity)(config);
         const threshold = (0, group_compaction_strategy_1.getGroupAutoCompactThreshold)(config);
         const triggerPayload = buildGlobalProviderPayloadSnapshot(messages, sessionId, run);
@@ -855,7 +866,7 @@ function createGlobalAgentAgenticRuntime(deps) {
                 const rows = await (0, main_agent_tool_runtime_1.executeMainAgentToolRequests)({
                     requests: [{ name, arguments: args || {}, reason: "全局主 Agent按需读取" }],
                     toolContext,
-                    resultTokenLimit: 8_000,
+                    resultTokenLimit: cc_tool_result_limits_1.CC_ALIGNED_TOOL_RESULT_MAX_TOKENS,
                 });
                 const row = rows[0];
                 if (!row?.ok)
@@ -1181,7 +1192,7 @@ function createGlobalAgentAgenticRuntime(deps) {
                             requires_verification: args.requires_verification !== false,
                             requires_independent_review: args.requires_independent_review !== false,
                             auto_execute: args.auto_execute !== false,
-                            source: run.source || "global-agent-create-task",
+                            source: "global_agent",
                             trace_id: run.trace_id,
                             idempotency_key: args.idempotency_key || `${run.id}:group-mission`,
                         }
@@ -1191,12 +1202,29 @@ function createGlobalAgentAgenticRuntime(deps) {
                             source_attachments: args.source_attachments || args.sourceAttachments || run.source_attachments || [],
                             requirement_extraction: args.requirement_extraction || args.requirementExtraction || run.requirement_extraction || null,
                             source_ingestion: args.source_ingestion || args.sourceIngestion || run.source_ingestion || null,
-                            source: run.source || "global-agent",
+                            source: "global_agent",
                             trace_id: run.trace_id,
                             idempotency_key: args.idempotency_key || `${run.id}:mission`,
                         };
+                const groundedTargets = Array.isArray(run.requested_target_refs) ? run.requested_target_refs : [];
+                if (groundedTargets.length) {
+                    const allowed = new Set(groundedTargets.map((target) => `${String(target.scope || target.type)}:${String(target.scopeId || target.scope_id || target.id)}`));
+                    const missionTargets = Array.isArray(missionArgs.targets) ? missionArgs.targets : [];
+                    for (const target of missionTargets) {
+                        const scope = String(target?.type || target?.scope || (target?.group_id || target?.groupId ? "group" : "project"));
+                        const scopeId = String(target?.group_id || target?.groupId || target?.project || target?.project_id || target?.projectId || target?.id || "");
+                        if (!allowed.has(`${scope}:${scopeId}`))
+                            throw new Error(`任务目标 ${scope}:${scopeId} 不在用户本轮明确选择的投放范围内`);
+                        delete target.group_session_id;
+                        delete target.groupSessionId;
+                        delete target.project_session_id;
+                        delete target.projectSessionId;
+                    }
+                }
                 const missionResult = createGlobalDevelopmentMission({
                     ...missionArgs,
+                    source: "global_agent",
+                    automation_task_source: "global_agent",
                     source_documents: missionArgs.source_documents || missionArgs.sourceDocuments || run.user_message || "",
                     source_attachments: missionArgs.source_attachments || missionArgs.sourceAttachments || run.source_attachments || [],
                     requirement_extraction: missionArgs.requirement_extraction || missionArgs.requirementExtraction || run.requirement_extraction || null,
@@ -1324,12 +1352,18 @@ function createGlobalAgentAgenticRuntime(deps) {
         run.requirementSources = ingestion.sources || [];
     }
     function createAgenticRuntime(baseUrl, ctx, input = {}) {
-        const config = loadOrchestratorConfig();
+        const baseConfig = loadOrchestratorConfig();
         const runtime = {
             callModel: async (messages, run, signal) => {
                 attachGlobalRunRequirementSources(run, input.sourceIngestion);
+                const sessionState = (0, slash_command_session_state_1.readSlashCommandSessionState)("global", "global", String(run.session_id || input.sessionId || ""));
+                const config = { ...baseConfig, model: sessionState.preferences?.model || baseConfig.model, reasoningEffort: sessionState.preferences?.effort || baseConfig.reasoningEffort };
                 if (!config.apiKey || !config.apiUrl || !config.model)
                     throw new Error("统一大模型尚未配置");
+                const directive = (0, slash_command_session_state_1.renderSlashCommandSessionDirective)("global", "global", String(run.session_id || input.sessionId || ""));
+                const providerMessages = directive && !messages.some(message => String(message.content || "").includes("当前精确会话处于 Plan Mode"))
+                    ? [...messages.slice(0, -1), { role: "system", content: directive }, ...messages.slice(-1)]
+                    : messages;
                 const { accumulateGlobalAgentRunUsage } = require("../../agents/global/global-agent-metrics");
                 const invoke = (providerMessages) => {
                     const modelCallIndex = Math.max(0, Number(run.main_model_call_count || 0));
@@ -1364,12 +1398,12 @@ function createGlobalAgentAgenticRuntime(deps) {
                     });
                 };
                 try {
-                    return await invoke(messages);
+                    return await invoke(providerMessages);
                 }
                 catch (error) {
                     if (!isGlobalPromptTooLongError(error))
                         throw error;
-                    const recoveredMessages = await prepareGlobalProviderMessages(messages, run, runtime, { promptTooLong: true });
+                    const recoveredMessages = await prepareGlobalProviderMessages(providerMessages, run, runtime, { promptTooLong: true });
                     return invoke(recoveredMessages);
                 }
             },
@@ -1380,6 +1414,7 @@ function createGlobalAgentAgenticRuntime(deps) {
                 runId: run.id,
                 source: run.source || "global-agent",
                 loadedToolNames: run.loaded_tool_names || run.loadedToolNames || [],
+                requestedTargetRefs: input.requestedTargetRefs || run.requested_target_refs || [],
             }),
             verifyContextBoundary: context => verifyGlobalAgentContextBoundary(context),
             executeTool: (name, args, run) => {
@@ -1394,6 +1429,45 @@ function createGlobalAgentAgenticRuntime(deps) {
                 return null;
             },
             onWorkflowDecision: (workflowDecision, run, modelCallIndex, modelDecision) => {
+                const groundedTargets = Array.isArray(input.requestedTargetRefs) ? input.requestedTargetRefs : [];
+                const requestedToolName = String(modelDecision?.tool?.name || "").toLowerCase();
+                const targetRequired = workflowDecision.actionRequired === true && (workflowDecision.requiresCodeChanges === true
+                    || ["plan_task", "decompose_epic"].includes(String(workflowDecision.mode || ""))
+                    || ["orchestrate_development", "send_project_cmd", "send_group_cmd"].includes(requestedToolName));
+                if (groundedTargets.length) {
+                    const targetRefs = groundedTargets.map((target) => ({
+                        type: target.scope,
+                        id: target.scopeId,
+                        name: target.displayName || target.canonicalName || target.scopeId,
+                    }));
+                    workflowDecision.targetRefs = targetRefs;
+                    if (modelDecision?.intent) {
+                        modelDecision.intent.target_refs = targetRefs.map(target => `${target.type}:${target.id}`);
+                    }
+                }
+                else if (targetRequired) {
+                    workflowDecision.actionRequired = false;
+                    workflowDecision.requiresCodeChanges = false;
+                    workflowDecision.clarificationQuestions = ["请选择本次任务要投放的项目或群聊。"];
+                    if (modelDecision) {
+                        modelDecision.state = "needs_confirmation";
+                        modelDecision.tool = undefined;
+                        modelDecision.message = "这项请求需要投放任务，但还没有明确目标。请从可投放的项目或群聊中选择后继续；我不会猜测目标。";
+                    }
+                }
+                const planModeActive = (0, slash_command_session_state_1.readSlashCommandSessionState)("global", "global", String(run.session_id || input.sessionId || "")).planMode?.enabled === true;
+                if (planModeActive && (workflowDecision.actionRequired === true || modelDecision?.tool)) {
+                    workflowDecision.actionRequired = false;
+                    workflowDecision.requiresCodeChanges = false;
+                    workflowDecision.requiresUserConfirmation = false;
+                    workflowDecision.mode = "plan_task";
+                    workflowDecision.reason = "当前精确会话处于 Plan Mode，已由服务端阻止工具执行和任务派发";
+                    if (modelDecision) {
+                        modelDecision.state = "plan";
+                        modelDecision.tool = undefined;
+                        modelDecision.message = modelDecision.message || "已在 Plan Mode 中完成分析；退出 Plan Mode 后才能执行写操作。";
+                    }
+                }
                 const responseType = modelDecision?.tool
                     ? "tool_calls"
                     : modelDecision?.state === "needs_confirmation" ? "clarify"
@@ -1482,8 +1556,12 @@ function createGlobalAgentAgenticRuntime(deps) {
             sessionId,
             source: input.source || "web",
             authorizationMessage: visibleUserMessage,
+            requestedTargetRefs: input.requestedTargetRefs || [],
         });
         const waitingClarification = requestedClarificationRunId ? clarificationCandidate : null;
+        if (waitingClarification && Array.isArray(input.requestedTargetRefs) && input.requestedTargetRefs.length) {
+            waitingClarification.requested_target_refs = input.requestedTargetRefs;
+        }
         const run = waitingClarification
             ? await continueGlobalAgentRunWithClarification(waitingClarification.id, input.message, runtime, { turnId: input.turnId })
             : await startGlobalAgentRun({
@@ -1498,6 +1576,7 @@ function createGlobalAgentAgenticRuntime(deps) {
                 authorizationMessage: visibleUserMessage,
                 turnId: input.turnId,
                 queueScope: input.queueScope,
+                requestedTargetRefs: input.requestedTargetRefs || [],
                 workflowDecision: null,
                 directReply: "",
                 maxSteps: 10,

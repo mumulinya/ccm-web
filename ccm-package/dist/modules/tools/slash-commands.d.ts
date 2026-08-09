@@ -1,6 +1,9 @@
 export type SlashCommandScope = "global" | "project" | "group";
 type SlashRisk = "safe" | "guarded" | "high";
 type SlashImplementation = "local-query" | "local-mutation" | "client" | "navigation" | "agent-workflow";
+type SlashExecutionType = "local-jsx" | "local" | "prompt";
+type SlashDisplayMode = "overlay" | "transcript" | "conversation" | "skip";
+type SlashCompatibility = "cc_exact" | "cc_equivalent" | "ccm_extension";
 export declare function getSlashCommandSummary(): {
     total: number;
     builtin: number;
@@ -9,13 +12,7 @@ export declare function getSlashCommandSummary(): {
 };
 export declare function getSlashCommandContractSnapshot(): {
     commands: {
-        name: string;
-        aliases: string[];
-        scopes: SlashCommandScope[];
-        risk: SlashRisk;
-        requiresArgs: boolean;
-        requiresContext: boolean;
-        implementation: SlashImplementation;
+        compatibility: SlashCompatibility;
         action: {
             type: "prompt" | "navigate" | "query" | "mutation" | "client";
             prompt?: string;
@@ -26,6 +23,17 @@ export declare function getSlashCommandContractSnapshot(): {
             body?: Record<string, any>;
             clientAction?: string;
         };
+        executionType: SlashExecutionType;
+        displayMode: SlashDisplayMode;
+        historyPolicy: "transient" | "persisted";
+        modelVisibility: "hidden" | "visible";
+        name: string;
+        aliases: string[];
+        scopes: SlashCommandScope[];
+        risk: SlashRisk;
+        requiresArgs: boolean;
+        requiresContext: boolean;
+        implementation: SlashImplementation;
     }[];
     counts: {
         global: number;
@@ -39,8 +47,9 @@ export declare function runSlashCommandSelfTest(): {
         parsesNameAndArguments: boolean;
         hasAllCoreScopes: boolean;
         scopeIsolation: boolean;
+        scopePolicyEnforced: boolean;
         highRiskIsNotDirectAction: boolean;
-        navigationIsExplicit: boolean;
+        memoryUsesScopedManager: boolean;
         argumentsAndContextExpand: boolean;
         aliasesAvailable: boolean;
         parameterSchemaPublished: boolean;

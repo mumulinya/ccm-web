@@ -504,6 +504,7 @@ export declare function startGlobalAgentRun(input: {
     writeAuthorizationReceipt?: any;
     authorizationMessage?: string;
     directReply?: string;
+    requestedTargetRefs?: any[];
 }, runtime: GlobalAgentLoopRuntime): Promise<GlobalAgentRun>;
 export declare function resumeGlobalAgentRun(id: string, runtime: GlobalAgentLoopRuntime, options?: {
     approved?: boolean;

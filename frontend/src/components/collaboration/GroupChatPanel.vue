@@ -35,7 +35,7 @@ import { useSessionContextUsage } from '../../composables/useSessionContextUsage
 import { usePermissionApprovals } from '../../composables/usePermissionApprovals.js'
 import { useAgentExecutionEvents } from '../../composables/useAgentExecutionEvents.js'
 import { getCopyableMessageText } from '../../utils/messageActions.js'
-import { shouldShowCompactProcessingState } from '../../utils/agentExecutionEvents.js'
+import { hasTerminalExecutionForMessage, shouldShowCompactProcessingState } from '../../utils/agentExecutionEvents.js'
 
 const props = defineProps({
   navigateTo: { type: Object, default: null },

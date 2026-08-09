@@ -91,6 +91,7 @@
       "build": "backend",
       "tests": [
         "agent-communication-v2-selftest.mjs",
+        "user-visible-agent-events-selftest.mjs",
         "global-agent-runtime-production-closure-selftest.mjs",
         "unified-model-retry-selftest.mjs",
         "model-semantic-routing-audit.mjs",
@@ -158,6 +159,9 @@
         "auto-dev-selftest.mjs",
         "clipboard-attachments-selftest.mjs",
         "message-edit-actions-selftest.mjs",
+        "slash-command-result-v2-selftest.mjs",
+        "slash-command-result-v2-render-regression.mjs",
+        "cc-execution-display-render-regression.mjs",
         "deferred-session-creation-selftest.mjs",
         "project-stream-message-layout-selftest.mjs",
         "unified-conversation-layout-selftest.mjs",

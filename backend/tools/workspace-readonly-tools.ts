@@ -11,6 +11,7 @@ import { executeCodeIntelligenceTool, type CodeIntelligenceToolName } from "../s
 import { inspectNotebook, isWebSearchAvailable, webFetch, webSearch } from "./web-notebook-tools";
 import { recordEvidence } from "../system/unified-evidence-registry";
 import { loadOrchestratorConfig } from "../modules/collaboration/group-orchestrator-config";
+import { CC_ALIGNED_FILE_READ_MAX_TOKENS, CC_ALIGNED_TOOL_RESULT_MAX_TOKENS } from "./cc-tool-result-limits";
 
 const execFileAsync = promisify(execFile);
 const SECRET_FILE = path.join(os.homedir(), ".cc-connect", "private", "main-agent-tool-capability-secret");
@@ -23,7 +24,7 @@ const RG_SENSITIVE_GLOBS = [
   "!**/*service-account*", "!**/*firebase-admin*",
 ];
 const TEXT_FILE_LIMIT = 4 * 1024 * 1024;
-const TOOL_RESULT_TOKEN_LIMIT = 8_000;
+const TOOL_RESULT_TOKEN_LIMIT = CC_ALIGNED_TOOL_RESULT_MAX_TOKENS;
 const DIRECTORY_SCAN_LIMIT = 20_000;
 
 export type MainAgentScopeKind = "global" | "group" | "project";
@@ -109,7 +110,7 @@ const rawDefinitions: Array<Omit<WorkspaceReadonlyToolDefinitionV2, "canonicalNa
   { name: "list_directory", loadPolicy: "base", description: "列出授权项目目录中的文件和子目录，结果分页返回。", inputSchema: { type: "object", properties: { project_id: { type: "string" }, path: { type: "string" }, cursor: { type: "string" }, limit: { type: "integer", minimum: 1, maximum: 500 } } } },
   { name: "glob_files", loadPolicy: "base", description: "在授权项目中按Glob模式查找文件，返回稳定分页结果。", inputSchema: { type: "object", required: ["pattern"], properties: { project_id: { type: "string" }, pattern: { type: "string" }, cursor: { type: "string" }, limit: { type: "integer", minimum: 1, maximum: 500 } } } },
   { name: "grep_text", loadPolicy: "base", description: "使用ripgrep在授权项目源码中检索文本或正则表达式。", inputSchema: { type: "object", required: ["pattern"], properties: { project_id: { type: "string" }, pattern: { type: "string" }, glob: { type: "string" }, mode: { enum: ["content", "files_with_matches", "count"] }, multiline: { type: "boolean" }, cursor: { type: "string" }, limit: { type: "integer", minimum: 1, maximum: 500 } } } },
-  { name: "read_file", loadPolicy: "base", description: "按完整行读取授权项目内的普通文本文件，支持offset、limit和继续游标。", inputSchema: { type: "object", required: ["path"], properties: { project_id: { type: "string" }, path: { type: "string" }, offset: { type: "integer", minimum: 1 }, limit: { type: "integer", minimum: 1, maximum: 2000 }, token_budget: { type: "integer", minimum: 256, maximum: 8000 } } } },
+  { name: "read_file", loadPolicy: "base", description: "按完整行读取授权项目内的普通文本文件，支持offset、limit和继续游标。单次读取最高25000 Token，最终仍受Provider安全容量门限制。", inputSchema: { type: "object", required: ["path"], properties: { project_id: { type: "string" }, path: { type: "string" }, offset: { type: "integer", minimum: 1 }, limit: { type: "integer", minimum: 1, maximum: 2000 }, token_budget: { type: "integer", minimum: 256, maximum: 25000, default: 25000 } } } },
   { name: "inspect_notebook", loadPolicy: "search", description: "结构化检查Notebook元数据、单元格身份、源码校验值和输出类型；不返回单元格正文。", inputSchema: { type: "object", required: ["path"], properties: { project_id: { type: "string" }, path: { type: "string" }, cursor: { type: "string" }, limit: { type: "integer", minimum: 1, maximum: 200 } } } },
   { name: "web_fetch", loadPolicy: "search", description: "安全读取公开HTTPS网页、文本、JSON或PDF；逐次校验DNS和重定向并阻止私网、凭据URL和超限响应。", inputSchema: { type: "object", required: ["url"], properties: { project_id: { type: "string" }, url: { type: "string" }, max_chars: { type: "integer", minimum: 1000, maximum: 300000 } } } },
   ...(isWebSearchAvailable() ? [{ name: "web_search", loadPolicy: "search" as const, description: "通过已配置的真实搜索Provider检索公开Web；未配置真实后端时本工具不会注册。", inputSchema: { type: "object", required: ["query"], properties: { project_id: { type: "string" }, query: { type: "string" }, count: { type: "integer", minimum: 1, maximum: 20 } } } }] : []),
@@ -280,7 +281,7 @@ async function readFileTool(root: string, args: any) {
   const lines = text.split(/\r?\n/);
   const offset = Math.max(1, Number(args?.offset || 1) || 1);
   const limit = Math.max(1, Math.min(2000, Number(args?.limit || 2000) || 2000));
-  const tokenBudget = Math.max(256, Math.min(TOOL_RESULT_TOKEN_LIMIT, Number(args?.token_budget || TOOL_RESULT_TOKEN_LIMIT) || TOOL_RESULT_TOKEN_LIMIT));
+  const tokenBudget = Math.max(256, Math.min(CC_ALIGNED_FILE_READ_MAX_TOKENS, Number(args?.token_budget || CC_ALIGNED_FILE_READ_MAX_TOKENS) || CC_ALIGNED_FILE_READ_MAX_TOKENS));
   const contentTokenBudget = Math.max(128, tokenBudget - 256);
   const selected: Array<{ line: number; text: string }> = [];
   let used = 0;

@@ -8,6 +8,7 @@ process.env.CCM_TASK_STORE_DIR = root
 
 const communication = await import('../ccm-package/dist/system/agent-communication-v2.js')
 const taskStore = await import('../ccm-package/dist/core/task-store.js')
+const parallelDispatch = await import('../ccm-package/dist/modules/collaboration/collaboration-agent-parallel-dispatch.js')
 
 function identity(suffix, receiver = 'project-a') {
   return {
@@ -24,6 +25,16 @@ function identity(suffix, receiver = 'project-a') {
 }
 
 try {
+  const parallelGroupId = parallelDispatch.createAgentParallelGroupId({ groupId: 'group-a', taskId: 'task-parallel', targets: ['project-a', 'project-b'] })
+  assert.match(parallelGroupId, /^agent-batch:/)
+  assert.equal(parallelGroupId, parallelDispatch.createAgentParallelGroupId({ groupId: 'group-a', taskId: 'task-parallel', targets: ['project-a', 'project-b'] }), '并行批次ID必须稳定')
+  const isolatedParallelResults = await parallelDispatch.settleParallelAgentJobs(['project-a', 'project-b'], async project => {
+    if (project === 'project-a') throw new Error('project-a failed')
+    return [`${project} completed`]
+  })
+  assert.equal(isolatedParallelResults[0].error?.message, 'project-a failed')
+  assert.deepEqual(isolatedParallelResults[1].outputs, ['project-b completed'], '一个项目失败不得吞掉其他独立项目结果')
+
   const started = communication.startAgentCommunicationDispatch({
     ...identity('success'),
     ownerId: 'selftest-runner',
@@ -71,6 +82,7 @@ try {
     verificationResults: [{ name: 'test', status: 'passed', evidence: ['exit=0'] }],
   })
   assert.equal(result.accepted, true)
+  assert.equal(communication.getAgentCommunicationDiagnostics().concurrency.global, 0, 'Result提交后必须立即释放第三方Agent运行槽')
   const terminal = communication.finalizeAgentCommunication(started.envelope.messageId, 'accepted', {
     summary: 'CCM verification passed', verificationResults: [{ name: 'test', status: 'passed' }],
   })
@@ -94,6 +106,17 @@ try {
   assert.equal(c3.reason, 'project_parallel_limit')
   assert.equal(c3.position, 1)
   assert.equal(c4.position, 2)
+  const queuedDispatchPromise = communication.waitForAgentCommunicationDispatch({
+    ...identity('cap-3', 'same-project'),
+    ownerId: 'runner-3',
+    existingMessageId: c3.envelope.messageId,
+  }, { initialDispatch: c3, pollIntervalMs: 25 })
+  setTimeout(() => communication.releaseAgentCommunicationLease(c1.envelope.messageId, 'selftest_capacity_release'), 50)
+  const c3Started = await queuedDispatchPromise
+  assert.equal(c3Started.acquired, true, '容量释放后排队Agent必须自动领取租约')
+  assert.equal(c3Started.envelope.state, 'runner_starting')
+  communication.releaseAgentCommunicationLease(c2.envelope.messageId, 'selftest_cleanup')
+  communication.releaseAgentCommunicationLease(c3Started.envelope.messageId, 'selftest_cleanup')
 
   const retryFirst = communication.startAgentCommunicationDispatch({ ...identity('retry', 'retry-project'), ownerId: 'retry-runner-1' })
   communication.markAgentCommunicationRunnerStarted(retryFirst.envelope.messageId, { runnerRequestId: 'retry-1' })

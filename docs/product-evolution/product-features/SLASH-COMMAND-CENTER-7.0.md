@@ -20,7 +20,7 @@ CCM 对齐这些设计思想，但没有复制 Claude Code 的 React/Ink UI 或�
 
 ### 统一注册表
 
-后端注册表位于 `backend/modules/slash-commands.ts`，每条命令公开：
+后端注册表位于 `backend/modules/tools/slash-commands.ts`，每条命令按 `ccm-slash-command-v2` 公开：
 
 - `name`、`aliases`、`description`、`category`、`icon`
 - `scopes`：`global`、`project`、`group`
@@ -29,7 +29,10 @@ CCM 对齐这些设计思想，但没有复制 Claude Code 的 React/Ink UI 或�
 - `permission`：`read`、`agent`、`manage`
 - `source`：`builtin`、`ccm`、`custom`、`skill`
 - `availability`：当前上下文是否可用以及不可用原因
-- `actionType`：`navigate` 或 `prompt`
+- `executionType`：`local-jsx`、`local` 或 `prompt`
+- `displayMode`：`overlay`、`transcript`、`conversation` 或 `skip`
+- `historyPolicy` 与 `modelVisibility`
+- `compatibility`：`cc_exact`、`cc_equivalent` 或 `ccm_extension`
 
 ### 三个输入入口
 
@@ -42,6 +45,18 @@ CCM 对齐这些设计思想，但没有复制 Claude Code 的 React/Ink UI 或�
 支持输入 `/` 自动出现、中文/英文别名、名称/描述/分类模糊检索、最近使用排序、作用域相关排序、上下键、Enter、Tab、Esc、参数提示、风险徽标和不可用原因。
 
 原来的对话模板按钮继续保留；模板负责格式化长提示词，斜杠命令负责明确调用系统能力，两者不再争抢 `/`。
+
+### 命令作用域矩阵
+
+命令候选、手工输入解析和后端执行使用同一份 `scopes` 权威定义。越界命令不会退化为普通消息，也不会调用对应接口，而是返回 `SLASH_COMMAND_SCOPE_MISMATCH` 和允许使用的会话范围。
+
+- 全局会话专属：`/doctor`、`/agent-health`、`/cron`、`/soak`、`/quality`、`/shadow`、`/settings`、`/tools`、`/cleanup` 以及项目启停、构建和连接命令。
+- 项目会话专属：`/diff`、`/git-status`、`/history`、`/commit`。
+- 群聊会话专属：`/forget`。
+- 项目与群聊开发链：`/review`、`/verify`、`/retry`、`/checkpoint`、`/rollback`、`/security-review`。
+- 当前作用域通用：`/branch`、`/resume`、`/session`、`/plan`、`/model`、`/permissions`、`/mcp`、`/hooks`、`/agents`、`/files`、`/skills`、`/knowledge`、任务与 Trace 等；接口继续绑定当前项目、群聊或精确会话身份。
+
+命令菜单会对单一作用域命令显示“全局 / 项目 / 群聊”标识。全局系统命令不会出现在项目或群聊候选中。
 
 ### 安全边界
 
@@ -89,6 +104,37 @@ PUT 会校验名称、作用域、动作类型、重复项和内置命令冲突�
 - `GET /api/slash-commands?scope=global|project|group`：获取当前作用域候选。
 - `POST /api/slash-commands/resolve`：解析完整命令，检查参数与可用性，返回受控导航或 Agent 提示。
 - `GET/PUT /api/slash-commands/custom`：读取或更新自定义注册表。
+- `POST /api/conversations/branch`：从精确消息锚点创建新会话分支。
+- `POST /api/conversations/rewind/preview|apply`：先预览再回退，使用 revision、generation 与 checksum 防漂移。
+- `GET/PATCH /api/conversations/plan-mode`：读取或切换精确会话 Plan Mode。
+- `GET/PATCH /api/conversations/preferences`：读取或切换精确会话模型、推理强度和回答风格。
+- `POST /api/slash-commands/records`：写入无正文、模型不可见的本地命令记录。
+
+## CC 同名语义和展示生命周期
+
+- `/branch` 是会话分叉；原 Git 状态移动到 `/git-status`，`/branch-status` 只是它的兼容别名。
+- `/files` 展示当前模型上下文中的文件与来源；原共享文件列表移动到 `/shared-files`。
+- `/agents` 管理当前作用域 Agent；执行器健康移动到 `/agent-health`。
+- `/tasks` 展示当前会话后台任务、Worker 和 Skill fork；任务中心导航移动到 `/task-center`。
+- `/usage`、`/cost` 只展示 Provider 明确上报的数据；估算上下文占用在 `/context` 和 `/session-stats`。
+- `local-jsx` 使用会话内面板，`Esc` 关闭且不生成消息卡；`local` 写紧凑、无头像、模型不可见的本地记录；`prompt` 进入正常 Agent Loop。
+- Plan Mode 除提示模型外还有服务端硬门：三类主 Agent 均不能在该精确会话中派发写任务或执行副作用工具。
+- 会话模型与推理强度覆盖会进入实际 Provider 配置；输出风格进入系统约束。Provider 未声明可靠 Fast Mode 时 `/fast on` 明确拒绝，不伪装成功。
+
+## 命令结果展示 V2
+
+本地查询、本地操作和客户端命令统一生成 `ccm-command-result-v2`，全局助手、项目 Agent 和群聊主 Agent 共用同一结果卡。展示顺序固定为“命令与作用域 → 一句话结论 → 关键状态 → 分类明细 → 下一步操作 → 技术详情”。
+
+- `compact` 用于会话、复制、主题和导出等轻量回执。
+- `resource_list` 用于 MCP、Skill、权限、Hook、共享文件和会话列表。
+- `health` 用于系统诊断、执行器、模型和稳定性状态。
+- `task/timeline` 用于任务、Trace、日志和定时任务。
+- `git/mutation_receipt` 用于分支、变更、历史、检查点、回滚和提交。
+- `knowledge` 只展示来源定位、版本、相关度和 citation，不持久化知识正文。
+
+MCP 卡片严格区分“目录中存在”“作用域已授权”“配置启用”和“运行时已连接”，缺失授权单独列为警告，不再用红色“启用”造成误解。`/api/mcp?scope=...` 会返回脱敏的 `connected/state/toolsCount/authState/lastErrorAt`，不会返回密钥、环境变量或完整启动命令。
+
+旧版 `metrics/items/rawPreview` 结果继续只读兼容；历史原始响应不再直接展开。新结果只保存白名单技术元数据，`contentStored:false`，禁止保存 Prompt、密钥、知识/共享文件正文和工具原始大输出。
 
 ## 验收要求
 

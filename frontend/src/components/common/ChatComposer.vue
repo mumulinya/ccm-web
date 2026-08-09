@@ -2,6 +2,7 @@
 import { computed, ref, useSlots } from 'vue'
 import AttachmentChips from './AttachmentChips.vue'
 import SlashCommandMenu from './SlashCommandMenu.vue'
+import SlashCommandPanel from './SlashCommandPanel.vue'
 import OnlineDocumentReferences from './OnlineDocumentReferences.vue'
 import {
   countNewAttachmentFiles,
@@ -94,6 +95,12 @@ const onInput = (event) => {
         :loading="!!slashState.loading"
         :query="slashState.query || ''"
         @select="slashState.select"
+      />
+      <SlashCommandPanel
+        v-if="props.slash"
+        :panel="slashState.panel"
+        @close="slashState.closePanel?.()"
+        @action="slashState.runPanelAction?.($event)"
       />
       <slot name="overlays" />
       <div v-if="slots.context" class="composer-context-slot">

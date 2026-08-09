@@ -38,6 +38,7 @@ exports.saveGroups = saveGroups;
 exports.getGroupChatSessionMessagesFile = getGroupChatSessionMessagesFile;
 exports.listGroupChatSessions = listGroupChatSessions;
 exports.getActiveGroupChatSessionId = getActiveGroupChatSessionId;
+exports.invalidateGroupMembershipContext = invalidateGroupMembershipContext;
 exports.resolveWritableGroupChatSession = resolveWritableGroupChatSession;
 exports.findGroupChatSessionContainingMessage = findGroupChatSessionContainingMessage;
 exports.createGroupChatSession = createGroupChatSession;
@@ -251,6 +252,34 @@ function listGroupChatSessions(groupId) {
 }
 function getActiveGroupChatSessionId(groupId) {
     return readGroupSessionManifest(groupId).activeSessionId || GROUP_DEFAULT_SESSION_ID;
+}
+function invalidateGroupMembershipContext(groupId, reason = "group_membership_changed") {
+    const sessions = listGroupChatSessions(groupId).sessions;
+    const results = [];
+    for (const session of sessions) {
+        const sessionId = String(session?.id || "").trim();
+        if (!sessionId)
+            continue;
+        try {
+            const result = (0, provider_neutral_context_cache_1.invalidateProviderNeutralContextCacheState)({
+                scope: "group",
+                scopeId: groupId,
+                sessionId,
+            }, reason);
+            results.push({ sessionId, success: result.success === true, hotCleared: Number(result.hotCleared || 0) });
+        }
+        catch (error) {
+            results.push({ sessionId, success: false, reason: String(error?.message || error || "context_invalidation_failed").slice(0, 180) });
+        }
+    }
+    return {
+        schema: "ccm-group-membership-context-refresh-v1",
+        groupId,
+        refreshed: results.filter(item => item.success).length,
+        failed: results.filter(item => !item.success).length,
+        sessions: results,
+        refreshedAt: new Date().toISOString(),
+    };
 }
 function resolveWritableGroupChatSession(groupId, requestedSessionId = "", options = {}) {
     const id = String(groupId || "").trim();

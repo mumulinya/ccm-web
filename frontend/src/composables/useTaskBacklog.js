@@ -86,7 +86,7 @@ export function useTaskBacklog(options = {}) {
     }
   }
 
-  const dispatchBacklog = async (item, targetSessionId = '') => {
+  const dispatchBacklog = async (item) => {
     try {
       const res = await fetch('/api/tasks/daily-dev-backlog/dispatch', {
         method: 'POST',
@@ -94,8 +94,7 @@ export function useTaskBacklog(options = {}) {
         body: JSON.stringify({
           group_id: item.group_id,
           name: item.name,
-          group_session_id: targetSessionId || item.target_session_id || '',
-          exact_session_id: targetSessionId || item.target_session_id || '',
+          automation_task_source: 'requirement_pool',
           auto_execute: true
         })
       })

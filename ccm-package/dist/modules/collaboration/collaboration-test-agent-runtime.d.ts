@@ -29,7 +29,7 @@ export declare function selectCoordinatorIndependentVerifier(group: any, origina
     } | {
         available: boolean;
         project?: undefined;
-        readonly workDir?: undefined;
+        workDir?: undefined;
     };
     candidates: any[];
 };

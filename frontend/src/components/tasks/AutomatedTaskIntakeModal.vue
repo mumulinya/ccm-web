@@ -1,10 +1,9 @@
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, ref } from 'vue'
 import {
   ArrowDown, ArrowUp, FileText, GitMerge, Layers3, Paperclip, Pencil,
   Plus, Sparkles, Trash2, X,
 } from '@lucide/vue'
-import { groupsApi, sessionsApi } from '../../api/index.js'
 import AttachmentChips from '../common/AttachmentChips.vue'
 import OnlineDocumentReferences from '../common/OnlineDocumentReferences.vue'
 import { toast } from '../../utils/toast.js'
@@ -18,11 +17,6 @@ const emit = defineEmits(['close', 'created'])
 const targetType = ref(props.groups.length ? 'group' : 'project')
 const groupId = ref(props.groups[0]?.id || '')
 const projectId = ref(props.projects[0]?.name || '')
-const sessionId = ref('')
-const sessions = ref([])
-const ordinarySessions = computed(() => sessions.value.filter(item => String(item.session_kind || item.sessionKind || 'conversation') !== 'automation'))
-const automationSessions = computed(() => sessions.value.filter(item => String(item.session_kind || item.sessionKind || '') === 'automation'))
-const sessionsLoading = ref(false)
 const title = ref('')
 const requirement = ref('')
 const priority = ref('normal')
@@ -77,25 +71,6 @@ const planValidation = computed(() => {
   return { pass: true, message: `${planItems.value.length} 个任务的依赖关系有效` }
 })
 
-const loadSessions = async () => {
-  sessions.value = []
-  sessionId.value = ''
-  if (!targetId.value) return
-  sessionsLoading.value = true
-  try {
-    const data = targetType.value === 'group'
-      ? await groupsApi.sessions(targetId.value)
-      : await sessionsApi.list(targetId.value)
-    sessions.value = (data.sessions || []).filter(item => !item.archived && String(item.source || 'web') !== 'feishu')
-  } catch (error) {
-    toast.warning(error?.message || '会话列表暂时无法读取，将创建专属自动开发会话')
-  } finally {
-    sessionsLoading.value = false
-  }
-}
-
-watch([targetType, groupId, projectId], loadSessions)
-onMounted(loadSessions)
 
 const addFiles = incoming => {
   const keys = new Set(files.value.map(file => `${file.name}:${file.size}:${file.lastModified || 0}`))
@@ -216,32 +191,22 @@ const createPreview = async () => {
     form.append('title', title.value.trim())
     form.append('requirement', requirement.value.trim())
     form.append('priority', priority.value)
-    form.append('source', 'task-dispatch')
-    form.append('request_origin', 'task-dispatch')
+    form.append('source', 'requirement_pool')
+    form.append('request_origin', 'requirement_pool')
     form.append('queue_scope', 'conversation_serial')
     form.append('channel', 'web')
     form.append('client_message_id', clientMessageId.value)
-    form.append('source_channel', 'task-dispatch')
+    form.append('source_channel', 'requirement_pool')
     form.append('target_scope', targetType.value === 'group' ? 'group_session' : 'project_session')
     form.append('target_id', targetId.value)
-    form.append('exact_session_id', sessionId.value)
     if (targetType.value === 'group') {
       form.append('group_id', groupId.value)
-      form.append('group_session_id', sessionId.value)
     } else {
       form.append('target_project', projectId.value)
-      form.append('project_session_id', sessionId.value)
     }
     files.value.forEach(file => form.append('files', file, file.name))
     const data = await request('/api/usability/intake/preview', form)
     preview.value = { ...data.task, intake: data.confirmation || data.task?.intake_draft || null, decomposition_plan: data.confirmation?.decomposition_plan }
-    const actualSessionId = data.task?.group_session_id || data.task?.project_session_id || ''
-    if (actualSessionId) {
-      sessionId.value = actualSessionId
-      if (!sessions.value.some(item => item.id === actualSessionId || item.sessionId === actualSessionId)) {
-        sessions.value.push({ id: actualSessionId, title: data.task?.title || '专属自动开发会话', session_kind: 'automation' })
-      }
-    }
     toast.success(`模型已整理执行计划${planItems.value.length ? `，拆分为 ${planItems.value.length} 个任务` : ''}`)
   } catch (error) {
     toast.error(error.message)
@@ -261,8 +226,6 @@ const confirmAndQueue = async () => {
       decomposition_plan: decompositionPlan.value,
       target_scope: targetType.value === 'group' ? 'group_session' : 'project_session',
       target_id: targetId.value,
-      exact_session_id: sessionId.value,
-      ...(targetType.value === 'group' ? { group_session_id: sessionId.value } : { project_session_id: sessionId.value }),
     })
     emit('created', data)
     toast.success(`已创建 ${data.children?.length || 1} 个分派任务，并按会话顺序进入自动执行队列`)
@@ -289,11 +252,7 @@ const confirmAndQueue = async () => {
           <label><span>执行范围</span><select v-model="targetType"><option value="group">群聊会话</option><option value="project">项目会话</option></select></label>
           <label v-if="targetType === 'group'"><span>群聊</span><select v-model="groupId"><option v-for="group in groups" :key="group.id" :value="group.id">{{ group.name }}</option></select></label>
           <label v-else><span>项目</span><select v-model="projectId"><option v-for="project in projects" :key="project.name" :value="project.name">{{ project.display_name || project.name }}</option></select></label>
-          <label><span>会话</span><select v-model="sessionId" :disabled="sessionsLoading">
-            <option value="">新建专属自动开发会话</option>
-            <optgroup v-if="ordinarySessions.length" label="普通会话"><option v-for="session in ordinarySessions" :key="session.id" :value="session.id">{{ session.name || session.title || session.id }}</option></optgroup>
-            <optgroup v-if="automationSessions.length" label="自动化任务会话"><option v-for="session in automationSessions" :key="session.id" :value="session.id">{{ session.name || session.title || session.id }}</option></optgroup>
-          </select></label>
+          <label><span>自动化会话</span><strong>按需求池来源自动绑定</strong></label>
           <label><span>队列优先级</span><select v-model="priority"><option value="high">高，插入当前队列前部</option><option value="normal">普通，按创建顺序</option><option value="low">低，等待普通任务</option></select></label>
         </div>
         <label class="field"><span>任务标题 <small>可选</small></span><input v-model="title" placeholder="模型会根据需求自动生成标题"></label>
@@ -311,10 +270,7 @@ const confirmAndQueue = async () => {
         <div class="plan-summary"><span><Layers3 :size="18" /></span><div><strong>{{ preview.title }}</strong><p>{{ preview.intake?.business_goal || preview.business_goal || preview.description }}</p></div></div>
         <div class="plan-facts">
           <span>执行位置 <strong>{{ targetLabel }}</strong></span>
-          <label class="plan-session-picker"><span>精确会话</span><select v-model="sessionId" :disabled="sessionsLoading">
-            <optgroup v-if="ordinarySessions.length" label="普通会话"><option v-for="session in ordinarySessions" :key="session.id || session.sessionId" :value="session.id || session.sessionId">{{ session.name || session.title || session.id || session.sessionId }}</option></optgroup>
-            <optgroup v-if="automationSessions.length" label="自动化任务会话"><option v-for="session in automationSessions" :key="session.id || session.sessionId" :value="session.id || session.sessionId">{{ session.name || session.title || session.id || session.sessionId }}</option></optgroup>
-          </select></label>
+          <span>自动化会话 <strong>{{ preview.automation_session_binding_snapshot?.resolution === 'auto_created' ? '已自动创建并绑定需求池' : '已使用需求池绑定会话' }}</strong></span>
           <span>任务数量 <strong>{{ planItems.length || 1 }}</strong></span>
           <span>执行策略 <strong>会话内串行</strong></span>
         </div>

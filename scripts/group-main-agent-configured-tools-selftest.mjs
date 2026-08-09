@@ -110,20 +110,22 @@ try {
     { name: "mcp__ccm__docs__search_records", arguments: { query: "api" }, reason: "查接口" },
     { name: "mcp__ccm__docs__search_records", arguments: { query: "api" }, reason: "重复" },
     { name: "invoke_skill", arguments: { name: "requirements-review", input: "review" }, reason: "核对规则" },
-    { name: "mcp__ccm__docs__other", arguments: {}, reason: "超过上限" },
+    { name: "mcp__ccm__docs__search_records", arguments: { query: "schema" }, reason: "查结构" },
   ]);
-  assert.equal(normalized.length, 2);
+  assert.equal(normalized.length, 3);
 
   const executed = [];
   const allowedResults = await llm.executeGroupMainAgentToolRequests({
     requests: normalized,
     toolContext,
+    toolBatchSize: 2,
+    readOnlyParallelism: 2,
     executeToolCall: async (name, args, scope) => {
       executed.push({ name, args, scope });
       return name === "invoke_skill" ? "skill instructions" : "GET /v1/items requires auth";
     },
   });
-  assert.equal(allowedResults.length, 2);
+  assert.equal(allowedResults.length, 3);
   assert.ok(allowedResults.every(row => row.ok));
   assert.ok(executed.every(row => row.scope.auditContext.groupId === "group-a"));
 
@@ -137,12 +139,18 @@ try {
   });
   assert.ok(deniedResults.every(row => row.ok === false && row.error === "GROUP_MAIN_TOOL_NOT_AUTHORIZED"));
 
-  const oversized = await llm.executeGroupMainAgentToolRequests({
+  const formerlyOversized = await llm.executeGroupMainAgentToolRequests({
     requests: [{ name: "mcp__ccm__docs__search_records", arguments: {}, reason: "large" }],
     toolContext,
     executeToolCall: async () => "x".repeat(40_000),
   });
-  assert.equal(oversized[0].error, "GROUP_MAIN_TOOL_RESULT_EXCEEDS_8K_TOKEN_BUDGET");
+  assert.equal(formerlyOversized[0].ok, true, "CC对齐后大于8K但小于100K Token的工具结果应通过原始结果门");
+  const oversized = await llm.executeGroupMainAgentToolRequests({
+    requests: [{ name: "mcp__ccm__docs__search_records", arguments: {}, reason: "too large" }],
+    toolContext,
+    executeToolCall: async () => "x".repeat(400_000),
+  });
+  assert.equal(oversized[0].error, "GROUP_MAIN_TOOL_RESULT_EXCEEDS_100K_TOKEN_BUDGET");
 
   const sibling = llm.buildGroupMainAgentToolContext({
     group: { id: "group-b", tools: { mcp: [], skill: [] }, members: [] },
@@ -163,6 +171,7 @@ try {
       exactGroupScopeBound: true,
       unauthorizedCallsBlocked: true,
       duplicateRequestsDeduplicated: true,
+      logicalRequestsNotTruncatedByBatchSize: true,
       resultBudgetFailClosed: true,
       siblingGroupIsolated: true,
       contextComponentsClassified: true,

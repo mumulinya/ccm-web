@@ -7,8 +7,10 @@ import { createRequire } from 'node:module'
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const require = createRequire(import.meta.url)
 const slashModule = require(path.join(root, 'ccm-package/dist/modules/tools/slash-commands.js'))
+const conversationModule = require(path.join(root, 'ccm-package/dist/modules/tools/slash-command-conversations.js'))
 const snapshot = slashModule.getSlashCommandContractSnapshot()
 const builtin = slashModule.runSlashCommandSelfTest()
+const conversations = conversationModule.runSlashCommandConversationSelfTest()
 
 const read = relative => fs.readFileSync(path.join(root, relative), 'utf8')
 const walk = directory => fs.readdirSync(directory, { withFileTypes: true }).flatMap(entry => {
@@ -18,9 +20,10 @@ const walk = directory => fs.readdirSync(directory, { withFileTypes: true }).fla
 })
 
 assert.equal(builtin.pass, true, '内置命令解析自测必须通过')
+assert.equal(conversations.pass, true, '命令会话与无正文投影自测必须通过')
 assert.ok(snapshot.counts.global >= 50, '全局入口命令数不足 50')
-assert.ok(snapshot.counts.project >= 50, '项目入口命令数不足 50')
-assert.ok(snapshot.counts.group >= 50, '群聊入口命令数不足 50')
+assert.ok(snapshot.counts.project >= 40, '项目入口命令数不足 40')
+assert.ok(snapshot.counts.group >= 40, '群聊入口命令数不足 40')
 
 const names = new Set()
 for (const command of snapshot.commands) {
@@ -50,15 +53,26 @@ for (const command of snapshot.commands.filter(item => ['query', 'mutation'].inc
 }
 
 const slashClientSource = read('frontend/src/composables/useSlashCommands.js')
+const slashMenuSource = read('frontend/src/components/common/SlashCommandMenu.vue')
 assert.ok(slashClientSource.includes('/api/slash-commands/confirm'), '高风险命令必须使用服务端确认挑战')
 assert.ok(read('backend/modules/tools/slash-commands.ts').includes('SLASH_CONFIRMATION_REQUIRED'), '服务端必须拒绝缺少确认回执的高风险命令')
 assert.ok(!slashClientSource.includes('.slice(0, 18)'), '命令菜单不能继续限制为 18 项')
+assert.match(slashMenuSource, /scopeLabel\(command\.scopes\)/, '命令菜单必须展示单一作用域标签')
 const mcpCommand = snapshot.commands.find(command => command.name === 'mcp')
 const skillsCommand = snapshot.commands.find(command => command.name === 'skills')
-assert.match(mcpCommand.action.endpointByScope.project, /scope=project&project=\$PROJECT/, '/mcp 必须读取当前项目授权，而不是全局目录')
-assert.match(mcpCommand.action.endpointByScope.group, /scope=group&group_id=\$GROUP_ID/, '/mcp 必须读取当前群聊授权')
+for (const name of ['doctor', 'agent-health', 'cron', 'soak', 'quality', 'shadow', 'settings', 'tools', 'cleanup']) {
+  assert.deepEqual(snapshot.commands.find(command => command.name === name)?.scopes, ['global'], `/${name} 必须只在全局会话可用`)
+}
+for (const name of ['diff', 'git-status', 'history', 'commit']) assert.deepEqual(snapshot.commands.find(command => command.name === name)?.scopes, ['project'], `/${name} 必须只在项目会话可用`)
+for (const name of ['agents', 'permissions', 'model', 'hooks', 'config', 'branch']) assert.deepEqual(snapshot.commands.find(command => command.name === name)?.scopes, ['global', 'project', 'group'], `/${name} 必须在三类会话可用`)
+assert.deepEqual(snapshot.commands.find(command => command.name === 'forget')?.scopes, ['group'], '/forget 必须只在群聊会话可用')
+assert.equal(builtin.checks.scopePolicyEnforced, true, '后端命令作用域矩阵必须通过')
+assert.equal(mcpCommand.action.clientAction, 'mcp_manager', '/mcp 必须进入当前作用域管理面板')
 assert.match(skillsCommand.action.endpointByScope.project, /scope=project&project=\$PROJECT/, '/skills 必须读取当前项目授权')
 assert.match(read('backend/modules/tools/tools.ts'), /buildScopedMcpCatalog/, 'MCP 接口必须实现作用域过滤')
+assert.match(read('backend/modules/tools/slash-commands.ts'), /SLASH_COMMAND_SCOPE_MISMATCH/, '手输越界命令必须返回明确的作用域错误')
+assert.match(read('backend/modules/tools/slash-command-conversations.ts'), /ccm-local-command-record-v1/, '本地命令必须写无正文记录')
+assert.match(read('frontend/src/components/common/SlashCommandPanel.vue'), /Esc 关闭/, 'local-jsx 命令必须使用 Esc 可关闭面板')
 
 for (const page of [
   'frontend/src/components/global/GlobalAgent.vue',

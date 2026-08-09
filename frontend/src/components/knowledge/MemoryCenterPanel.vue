@@ -97,6 +97,7 @@ const config = ref({
   googleCseId: '',
   notebookToolsEnabled: true,
   ccStyleExecutionDisplayEnabled: true,
+  ccStyleAgentProgressNarrationEnabled: true,
 })
 const webSearchProvidersConfigured = ref({ mcp: false, brave: false, bing: false, google: false })
 const capacity = ref(null)
@@ -506,6 +507,7 @@ async function loadSettings() {
       searchMcpUrl: '', searchMcpToken: '', braveSearchApiKey: '', bingSearchApiKey: '', googleCseApiKey: '', googleCseId: '',
       notebookToolsEnabled: current.notebookToolsEnabled !== false,
       ccStyleExecutionDisplayEnabled: current.ccStyleExecutionDisplayEnabled !== false,
+      ccStyleAgentProgressNarrationEnabled: current.ccStyleAgentProgressNarrationEnabled !== false,
     }
     capacity.value = capacityData
     capabilities.value = capabilityData.entries || []
@@ -866,6 +868,7 @@ onMounted(() => loadOverview(false))
         <label class="toggle-row"><input v-model="config.webFetchBrowserFallbackEnabled" type="checkbox" /><span>允许无Cookie临时浏览器渲染JS壳页面</span></label>
         <label class="toggle-row"><input v-model="config.notebookToolsEnabled" type="checkbox" /><span>启用Notebook结构化检查与项目子Agent受管执行</span></label>
         <label class="toggle-row"><input v-model="config.ccStyleExecutionDisplayEnabled" type="checkbox" /><span>启用 CC 风格用户可见执行流（全局/项目/群聊统一）</span></label>
+        <label class="toggle-row"><input v-model="config.ccStyleAgentProgressNarrationEnabled" type="checkbox" /><span>启用 CC 风格工具前后阶段说明（不展示隐藏思维链）</span></label>
         <p class="compact-history">其他语言服务不会静默下载；搜索没有真实Provider时不注册；Notebook写入与执行必须绑定正式WorkItem、attempt和lease。</p>
       </section>
 

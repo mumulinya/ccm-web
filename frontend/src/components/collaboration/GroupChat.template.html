@@ -42,6 +42,7 @@
         @rename="renameGroupSession"
         @archive="archiveGroupSession"
         @delete="deleteGroupSession"
+        @refresh="loadMessages"
       />
       <div class="content">
         <!-- 消息区域 -->
@@ -81,7 +82,7 @@
                   :role="msg.role"
                   :compact="msg.role === 'thinking'"
                   :timestamp="msg.timestamp || msg.created_at || msg.createdAt"
-                  :structured="isPrimaryTaskCard(msg, i) || msg.type === 'project_task_intake' || msg.type === 'conflict_plan' || getWorkEvents(msg).length > 0 || Number(msg.fileChanges?.count || 0) > 0"
+                  :structured="msg.type === 'command_result' || isPrimaryTaskCard(msg, i) || msg.type === 'project_task_intake' || msg.type === 'conflict_plan' || getWorkEvents(msg).length > 0 || Number(msg.fileChanges?.count || 0) > 0"
                   :streaming="!!msg.streaming"
                   :copy-text="getCopyableMessageText(msg, getVisibleGroupMessageContent(msg, ''))"
                   :editable="msg.role === 'user' && !!String(msg.content || '').trim()"
@@ -92,6 +93,7 @@
                     msg.role,
                     {
                       'msg-highlight': highlightMsgIndex === i,
+                      'local-command-message': msg.type === 'command_result',
                       'message-error': msg.role === 'assistant' && getAgentMessageStatus(msg)?.tone === 'fail',
                     },
                   ]"
@@ -101,6 +103,9 @@
                   :enabled="groupAgentExecutionEnabled"
                   :messages="messages"
                   :message-index="i"
+                  stage-grouped
+                  presentation="live"
+                  @open-file-change="openSingleFileChange"
                 />
                 <CommandResultCard v-if="msg.type === 'command_result'" :result="msg.commandResult" />
                 <!-- 思考过程消息 -->
@@ -151,6 +156,7 @@
                   :work-events="getWorkEvents(msg)"
                   :main-agent="isGroupMainAgentMessage(msg)"
                   :file-changes-title="getFileChangesTitle(msg.fileChanges)"
+                  :hide-file-changes="hasTerminalExecutionForMessage(groupAgentExecutionEvents, messages, i)"
                   :workflow-steps="workflowSteps"
                   :highlight-mentions="highlightMentions"
                   :get-plan-title="getPlanTitle"
@@ -167,6 +173,16 @@
                   @task-action="handleTaskCardAction(msg, $event)"
                   @open-pipeline="openPipelineViewer(msg)"
                   @open-file-diff="openFileDiff"
+                />
+                <AgentExecutionTranscript
+                  :events="groupAgentExecutionEvents"
+                  :enabled="groupAgentExecutionEnabled"
+                  :messages="messages"
+                  :message-index="i"
+                  stage-grouped
+                  presentation="completed"
+                  @open-file-change="openSingleFileChange"
+                  @open-file-changes="openCodeChangeDrawer($event, { title: '群聊任务文件改动' })"
                 />
                 </ConversationMessageShell>
               </template>

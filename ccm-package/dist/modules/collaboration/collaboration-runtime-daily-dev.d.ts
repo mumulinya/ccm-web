@@ -143,7 +143,7 @@ export declare function getDailyDevSmokeStatus(payload?: any): {
         group_id: any;
         group_name: any;
         member: any;
-        work_dir: any;
+        work_dir: string;
         smoke_file: string;
         smoke_path: string;
         file_exists: boolean;
@@ -181,7 +181,7 @@ export declare function runAgentCliProbe(payload: any, ctx: CollabCtx): Promise<
         group_name: any;
         project: any;
         agent_type: "claudecode" | "codex" | "cursor" | "gemini" | "opencode" | "qoder";
-        work_dir: any;
+        work_dir: string;
     };
     execution_path: any;
     expected_marker: string;

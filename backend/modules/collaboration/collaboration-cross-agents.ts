@@ -43,11 +43,16 @@ import {
   isTaskCancellationRequested,
 } from "../../agents/execution-kernel";
 import {
+  createAgentParallelGroupId,
+  settleParallelAgentJobs,
+} from "./collaboration-agent-parallel-dispatch";
+import {
   heartbeatAgentCommunication,
   markAgentCommunicationRunnerStarted,
   readAgentCommunicationPolicy,
   startAgentCommunicationDispatch,
   submitAgentCommunicationResult,
+  waitForAgentCommunicationDispatch,
 } from "../../system/agent-communication-v2";
 
 // ===== merged from collaboration-cross-agents.ts =====
@@ -280,10 +285,35 @@ export async function processCrossAgents(
       rememberMentionOutputsFn(mention, outputs);
     }
   } else {
-    const settledOutputs = await Promise.all(uniqueMentions.map(mention => executeMentionJob(mention)));
-    settledOutputs.forEach((outputs, index) => {
+    const parallelGroupId = uniqueMentions.length > 1
+      ? createAgentParallelGroupId({
+          groupId,
+          taskId,
+          planMessageId,
+          depth,
+          targets: uniqueMentions.map(getMentionTargetName),
+        })
+      : "";
+    const parallelMentions = uniqueMentions.map((mention: any) => ({
+      ...mention,
+      parallelGroupId,
+    }));
+    const settledOutputs = await settleParallelAgentJobs(parallelMentions, executeMentionJob);
+    settledOutputs.forEach(({ mention, outputs, error }) => {
+      if (error) {
+        const targetName = getMentionTargetName(mention);
+        const summary = String(error?.message || error || "项目子 Agent 执行失败").slice(0, 500);
+        const receipt = { agent: targetName, status: "failed", summary, actions: [], filesChanged: [], verification: [], blockers: [summary], needs: [] };
+        outputs = [formatCollectedAgentOutput(targetName, `❌ 项目子 Agent 执行失败：${summary}`, receipt)];
+        emitAssignmentStatus(streamRes, groupId, planMessageId, targetName, "failed", summary);
+        if (taskId) {
+          addTaskLog(taskId, "error", `${targetName} 并行执行失败：${summary}`);
+          appendTaskTimelineEvent(taskId, { type: "child_agent_failed", title: `子 Agent 执行失败：${targetName}`, detail: summary, status: "fail", phase: "executing", agent: targetName });
+          updateTaskWorkItemFromReceipt(taskId, targetName, receipt, null, summary);
+        }
+      }
       collectedOutputs.push(...outputs);
-      rememberMentionOutputsFn(uniqueMentions[index], outputs);
+      rememberMentionOutputsFn(mention, outputs);
     });
   }
   return collectedOutputs;
@@ -868,7 +898,7 @@ export async function executeMentionJob(mention: any, env: CrossAgentEnv): Promi
     const advisoryOnly = !!mention.advisoryOnly;
     const communicationAttempt = Math.max(1, memoryDeliveryAttemptSequence || 1);
     const communicationGeneration = Math.max(0, Number(sourceTask?.agent_communication_generation || sourceTask?.generation || 0));
-    const communicationDispatch: any = taskId ? startAgentCommunicationDispatch({
+    const communicationDispatchInput: any = {
       taskId,
       workItemId: laneExecutionId || `${taskId}--${targetName}`,
       scope: "group",
@@ -883,17 +913,35 @@ export async function executeMentionJob(mention: any, env: CrossAgentEnv): Promi
       payload: {
         sourceProject,
         authorizedProject: targetName,
+        projectName: targetName,
+        runtimeId: activeTaskSession?.agentType || tAgentType,
+        workItemTitle: String(mention?.workItemTitle || mention?.work_item_title || mention?.title || sourceTask?.title || atMessage || "").replace(/\s+/g, " ").trim().slice(0, 300),
+        parallelGroupId: String(mention?.parallelGroupId || mention?.parallel_group_id || ""),
         workspaceMode: preparedWorkDir.mode,
         worktreeRef: preparedWorkDir.mode === "worktree" ? preparedWorkDir.worktreePath || preparedWorkDir.workDir : "",
         advisoryOnly,
         verificationOnly: nativeTestAgentDispatch,
       },
       policy: sourceTask?.contextPolicy?.effective || sourceTask?.context_policy?.effective || sourceTask?.context_policy_effective || {},
-    }) : { enabled: false, acquired: true, envelope: null };
+    };
+    let communicationDispatch: any = taskId
+      ? startAgentCommunicationDispatch(communicationDispatchInput)
+      : { enabled: false, acquired: true, envelope: null };
+    if (communicationDispatch.enabled !== false && communicationDispatch.acquired !== true && communicationDispatch.capacity === true) {
+      communicationDispatch = await waitForAgentCommunicationDispatch(communicationDispatchInput, {
+        initialDispatch: communicationDispatch,
+        shouldCancel: () => !!taskId && isTaskCancellationRequested(taskId),
+      });
+    }
+    if (communicationDispatch.cancelled) {
+      const cancelled = `【${targetName}】\n- 状态：cancelled\n- 摘要：等待执行容量期间任务已取消`;
+      outputs.push(cancelled);
+      return outputs;
+    }
     if (communicationDispatch.enabled !== false && communicationDispatch.acquired !== true) {
-      return failChildDispatch(`第三方 Agent 并发容量已满：${communicationDispatch.reason || "capacity_limit"}`, [
+      return failChildDispatch(`第三方 Agent 无法领取执行租约：${communicationDispatch.reason || "lease_unavailable"}`, [
         `queue_position=${communicationDispatch.position || 1}`,
-        "CCM 已保留结构化队列原因，本轮不会越过全局或项目并发上限",
+        "CCM 已保留结构化队列与租约原因，本轮不会越过全局或项目并发上限",
       ]);
     }
     const communicationEnvelope = communicationDispatch.envelope || null;

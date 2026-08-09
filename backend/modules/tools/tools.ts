@@ -1613,10 +1613,60 @@ function resolveCatalogAuthorizationScope(query: any = {}) {
   throw new Error("工具目录作用域无效");
 }
 
+function buildSafeMcpRuntimeMap() {
+  const runtime = toolManager.getToolList();
+  const runtimeByServer = new Map<string, any>();
+  for (const server of (Array.isArray(runtime?.servers) ? runtime.servers : [])) {
+    const auth = server?.auth || {};
+    const authState = auth?.tokenExpired
+      ? "expired"
+      : (auth?.needsUserAuth && auth?.authRequired && !auth?.authConfigured)
+        ? "required"
+        : auth?.authConfigured
+          ? "configured"
+          : "not_required";
+    runtimeByServer.set(normalizeScopedMcpServerName(server?.name), {
+      connected: server?.connected === true,
+      state: String(server?.state || (server?.connected ? "connected" : "disconnected")),
+      toolsCount: Math.max(0, Number(server?.toolsCount || 0)),
+      authState,
+      lastConnectedAt: String(server?.lastConnectedAt || ""),
+      lastErrorAt: String(server?.lastErrorAt || ""),
+      errorSummary: redactMcpRuntimeError(server?.error || auth?.message || ""),
+    });
+  }
+  return runtimeByServer;
+}
+
+function redactMcpRuntimeError(value: any) {
+  return cleanAuditText(value, 360)
+    .replace(/\b(Bearer\s+)[A-Za-z0-9._~+\/-]+=*/gi, "$1[redacted]")
+    .replace(/\bsk-[A-Za-z0-9_-]{8,}\b/gi, "[redacted-key]")
+    .replace(/([?&](?:token|key|secret|password)=)[^&\s]+/gi, "$1[redacted]")
+    .replace(/((?:api[_-]?key|secret|password|token)\s*[:=]\s*)[^\s,;]+/gi, "$1[redacted]")
+    .slice(0, 180);
+}
+
+function withSafeMcpRuntime(tool: any, runtimeByServer: Map<string, any>) {
+  return {
+    ...redactMcpToolForDisplay(tool),
+    runtime: runtimeByServer.get(normalizeScopedMcpServerName(tool?.name)) || {
+      connected: false,
+      state: "not_loaded",
+      toolsCount: 0,
+      authState: "unknown",
+      lastConnectedAt: "",
+      lastErrorAt: "",
+      errorSummary: "",
+    },
+  };
+}
+
 function buildScopedMcpCatalog(query: any = {}) {
   const authorization = resolveCatalogAuthorizationScope(query);
   const catalog = loadMcpTools().filter(tool => !isInternalMcpName(tool?.name));
-  if (!authorization) return { success: true, tools: catalog.map(redactMcpToolForDisplay) };
+  const runtimeByServer = buildSafeMcpRuntimeMap();
+  if (!authorization) return { success: true, tools: catalog.map(tool => withSafeMcpRuntime(tool, runtimeByServer)) };
   const parsedGrants = authorization.tools.mcp.map(parseMcpGrant).filter(item => item.server);
   const matchedGrants = new Set<string>();
   const tools = catalog.flatMap((tool: any) => {
@@ -1625,7 +1675,7 @@ function buildScopedMcpCatalog(query: any = {}) {
     if (!grants.length) return [];
     grants.forEach(item => matchedGrants.add(item.raw));
     return [{
-      ...redactMcpToolForDisplay(tool),
+      ...withSafeMcpRuntime(tool, runtimeByServer),
       authorization: {
         scope: authorization.scope,
         scopeId: authorization.scopeId,

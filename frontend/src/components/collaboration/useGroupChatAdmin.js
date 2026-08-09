@@ -393,15 +393,16 @@ export function useGroupChatAdmin({ currentGroup, groups, projects, messages, gr
       body: JSON.stringify({ id: currentGroup.value.id, add: [{ project, agent }] })
     })
     const data = await res.json()
-    if (data.success) {
+    if (res.ok && data.success) {
       currentGroup.value = data.group
-      loadGroups()
-      toast.success(`已添加 ${project} 到群聊`)
+      await loadGroups()
+      const refreshed = Number(data.context_refresh?.refreshed || 0)
+      toast.success(`已添加 ${project} 到群聊${refreshed ? `，已刷新 ${refreshed} 个会话上下文` : ''}`)
       // 刷新成员列表
       showMembers.value = false
       nextTick(() => { showMembers.value = true })
     } else {
-      toast.error('添加失败: ' + (data.error || '未知错误'))
+      toast.error('添加失败: ' + (data.error || `HTTP ${res.status}`))
     }
   }
 
@@ -414,15 +415,16 @@ export function useGroupChatAdmin({ currentGroup, groups, projects, messages, gr
       body: JSON.stringify({ id: currentGroup.value.id, remove: [project] })
     })
     const data = await res.json()
-    if (data.success) {
+    if (res.ok && data.success) {
       currentGroup.value = data.group
-      loadGroups()
-      toast.success(`已移除 ${project}`)
+      await loadGroups()
+      const refreshed = Number(data.context_refresh?.refreshed || 0)
+      toast.success(`已移除 ${project}${refreshed ? `，已刷新 ${refreshed} 个会话上下文` : ''}`)
       // 刷新成员列表
       showMembers.value = false
       nextTick(() => { showMembers.value = true })
     } else {
-      toast.error('移除失败: ' + (data.error || '未知错误'))
+      toast.error('移除失败: ' + (data.error || `HTTP ${res.status}`))
     }
   }
 

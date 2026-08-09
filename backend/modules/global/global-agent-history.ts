@@ -81,6 +81,9 @@ export function createGlobalAgentHistoryRuntime(deps: any) {
     "mission_id",
     "run_id",
     "finalNotified",
+    "commandResult",
+    "localCommandRecord",
+    "modelVisible",
   ];
   
   function truncateGlobalHistoryValue(value: any, maxChars = 80_000): any {

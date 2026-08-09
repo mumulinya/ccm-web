@@ -968,6 +968,11 @@ async function processTargetQueue(targetKey, ctx, testHooks = {}) {
                 }
                 const isCompleted = execution.status === "done";
                 if (isCompleted) {
+                    (0, collaboration_runtime_runtime_tools_1.updateTask)(taskId, {
+                        status: "reviewing",
+                        acceptance_state: "main_agent_accepting",
+                        status_detail: "项目 Agent 与独立验收已结束，群聊主 Agent 正在执行最终验收与交付总结",
+                    });
                     const deliverySummary = (0, collaboration_runtime_status_helpers_1.buildDeliverySummary)(task, execution, "waiting");
                     (0, logs_1.appendTaskTimelineEvent)(taskId, { type: "acceptance_gate", title: "代码变更验收检查", detail: deliverySummary.acceptance_gate_passed ? "验收通过" : `${deliverySummary.acceptance_gate?.failed_count || 0} 项未通过`, status: deliverySummary.acceptance_gate_passed ? "ok" : "warn", phase: "reviewing", data: deliverySummary.acceptance_gate || {} });
                     if (!deliverySummary.acceptance_gate_passed) {
@@ -1061,6 +1066,11 @@ async function processTargetQueue(targetKey, ctx, testHooks = {}) {
                     const deliverySummary = (0, collaboration_runtime_status_helpers_1.buildDeliverySummary)(task, execution, "waiting");
                     (0, logs_1.appendTaskTimelineEvent)(taskId, { type: "acceptance_gate", title: "代码变更验收检查", detail: deliverySummary.acceptance_gate_passed ? "验收通过" : `${deliverySummary.acceptance_gate?.failed_count || 0} 项未通过，任务继续推进`, status: deliverySummary.acceptance_gate_passed ? "ok" : "warn", phase: "reviewing", data: deliverySummary.acceptance_gate || {} });
                     if ((0, collaboration_runtime_runtime_tools_1.canCompleteDailyDevFromDeliverySummary)(task, execution, deliverySummary)) {
+                        (0, collaboration_runtime_runtime_tools_1.updateTask)(taskId, {
+                            status: "reviewing",
+                            acceptance_state: "main_agent_accepting",
+                            status_detail: "执行证据已齐全，群聊主 Agent 正在执行最终验收与交付总结",
+                        });
                         const promotedExecution = {
                             ...execution,
                             status: "done",

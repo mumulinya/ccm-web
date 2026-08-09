@@ -1561,11 +1561,58 @@ function resolveCatalogAuthorizationScope(query = {}) {
     }
     throw new Error("工具目录作用域无效");
 }
+function buildSafeMcpRuntimeMap() {
+    const runtime = toolManager.getToolList();
+    const runtimeByServer = new Map();
+    for (const server of (Array.isArray(runtime?.servers) ? runtime.servers : [])) {
+        const auth = server?.auth || {};
+        const authState = auth?.tokenExpired
+            ? "expired"
+            : (auth?.needsUserAuth && auth?.authRequired && !auth?.authConfigured)
+                ? "required"
+                : auth?.authConfigured
+                    ? "configured"
+                    : "not_required";
+        runtimeByServer.set(normalizeScopedMcpServerName(server?.name), {
+            connected: server?.connected === true,
+            state: String(server?.state || (server?.connected ? "connected" : "disconnected")),
+            toolsCount: Math.max(0, Number(server?.toolsCount || 0)),
+            authState,
+            lastConnectedAt: String(server?.lastConnectedAt || ""),
+            lastErrorAt: String(server?.lastErrorAt || ""),
+            errorSummary: redactMcpRuntimeError(server?.error || auth?.message || ""),
+        });
+    }
+    return runtimeByServer;
+}
+function redactMcpRuntimeError(value) {
+    return cleanAuditText(value, 360)
+        .replace(/\b(Bearer\s+)[A-Za-z0-9._~+\/-]+=*/gi, "$1[redacted]")
+        .replace(/\bsk-[A-Za-z0-9_-]{8,}\b/gi, "[redacted-key]")
+        .replace(/([?&](?:token|key|secret|password)=)[^&\s]+/gi, "$1[redacted]")
+        .replace(/((?:api[_-]?key|secret|password|token)\s*[:=]\s*)[^\s,;]+/gi, "$1[redacted]")
+        .slice(0, 180);
+}
+function withSafeMcpRuntime(tool, runtimeByServer) {
+    return {
+        ...(0, tool_catalog_management_1.redactMcpToolForDisplay)(tool),
+        runtime: runtimeByServer.get(normalizeScopedMcpServerName(tool?.name)) || {
+            connected: false,
+            state: "not_loaded",
+            toolsCount: 0,
+            authState: "unknown",
+            lastConnectedAt: "",
+            lastErrorAt: "",
+            errorSummary: "",
+        },
+    };
+}
 function buildScopedMcpCatalog(query = {}) {
     const authorization = resolveCatalogAuthorizationScope(query);
     const catalog = (0, db_1.loadMcpTools)().filter(tool => !(0, internal_mcp_registry_1.isInternalMcpName)(tool?.name));
+    const runtimeByServer = buildSafeMcpRuntimeMap();
     if (!authorization)
-        return { success: true, tools: catalog.map(tool_catalog_management_1.redactMcpToolForDisplay) };
+        return { success: true, tools: catalog.map(tool => withSafeMcpRuntime(tool, runtimeByServer)) };
     const parsedGrants = authorization.tools.mcp.map(tool_authorization_1.parseMcpGrant).filter(item => item.server);
     const matchedGrants = new Set();
     const tools = catalog.flatMap((tool) => {
@@ -1575,7 +1622,7 @@ function buildScopedMcpCatalog(query = {}) {
             return [];
         grants.forEach(item => matchedGrants.add(item.raw));
         return [{
-                ...(0, tool_catalog_management_1.redactMcpToolForDisplay)(tool),
+                ...withSafeMcpRuntime(tool, runtimeByServer),
                 authorization: {
                     scope: authorization.scope,
                     scopeId: authorization.scopeId,

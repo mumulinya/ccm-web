@@ -212,6 +212,7 @@ import { handleRuntimeEventsApi } from "./system/runtime-events";
 import { handleAgentCommunicationApi } from "./system/agent-communication-api";
 import { handleCodeIntelligenceApi } from "./system/code-intelligence-api";
 import { handleUserVisibleAgentEventsApi } from "./system/user-visible-agent-events-api";
+import { handleAutomationSessionBindingsApi } from "./system/automation-session-bindings-api";
 import { performAgentCommunicationAction, startAgentCommunicationWatchdog, stopAgentCommunicationWatchdog } from "./system/agent-communication-v2";
 import { requestTaskCancellation } from "./agents/execution-kernel";
 import {
@@ -246,6 +247,7 @@ import {
 } from "./system/main-agent-context-source-continuity";
 import { resolveMainAgentContinuityIdentity } from "./system/main-agent-post-compact-continuity";
 import { handleSlashCommandsApi } from "./modules/tools/slash-commands";
+import { handleSlashCommandConversationApi } from "./modules/tools/slash-command-conversations";
 import { migrateConfigDirectory, migrateTomlCredentials } from "./core/credential-store";
 import { handleFeishuReactionFeedbackApi } from "./integrations/feishu-reaction-feedback";
 import { handleUsabilityApi, startUsabilityArchiveScheduler, stopUsabilityArchiveScheduler } from "./modules/system/usability";
@@ -2059,9 +2061,11 @@ function handleRequest(req: any, res: any) {
   if (handlePetsApi(pathname, req, res, parsed, petsCtx)) return;
   if (handleMusicApi(pathname, req, res, parsed, musicCtx)) return;
   if (handleTaskPermissionRoutes(pathname, req, res, parsed, collabCtx)) return;
+  if (handleAutomationSessionBindingsApi(pathname, req, res, parsed)) return;
   if (handleCollaborationApi(pathname, req, res, parsed, collabCtx)) return;
   if (handleGlobalAgentApi(pathname, req, res, parsed, collabCtx)) return;
   if (handleRagApi(pathname, req, res, parsed)) return;
+  if (handleSlashCommandConversationApi(pathname, req, res, parsed)) return;
   if (handleSlashCommandsApi(pathname, req, res, parsed)) return;
   if (handleNavigationConfigApi(pathname, req, res)) return;
   if (handleUsabilityApi(pathname, req, res, parsed, {

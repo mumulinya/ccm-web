@@ -5,9 +5,9 @@ import AttachmentChips from './AttachmentChips.vue'
 import OnlineDocumentReferences from './OnlineDocumentReferences.vue'
 import EmptyState from './EmptyState.vue'
 import LoadingSkeleton from './LoadingSkeleton.vue'
+import ScopeTargetSelect from './ScopeTargetSelect.vue'
 import { useUsabilityWorkbenchLive } from '../../composables/useUsabilityWorkbenchLive.js'
 import { useWorkbenchPreferences } from '../../composables/useWorkbenchPreferences.js'
-import { groupsApi, sessionsApi } from '../../api/index.js'
 import {
   AlertTriangle, ArrowDown, ArrowUp, Bot, CalendarClock, CheckCircle2, ChevronRight, Clock3,
   FolderKanban, ListTodo, LoaderCircle, MessageSquare, Paperclip, Play, RefreshCw, RotateCcw, Search,
@@ -21,10 +21,6 @@ const {
 } = useUsabilityWorkbenchLive()
 const requirement = ref('')
 const target = ref('')
-const targetSessionId = ref('')
-const targetSessions = ref([])
-const targetSessionsLoading = ref(false)
-let targetSessionRequestGeneration = 0
 const intakeBusy = ref(false)
 const confirmation = ref(null)
 const confirmationCoverage = computed(() => confirmation.value?.source_ingestion?.coverage_receipt
@@ -58,36 +54,17 @@ const capabilities = computed(() => data.value?.capabilities || {})
 const groupTargetOptions = computed(() => resources.value.groups.map(item => ({
   value: `group:${item.id}`,
   label: item.name,
+  scope: 'group',
 })))
 const projectTargetOptions = computed(() => resources.value.projects.map(item => ({
   value: `project:${item.name}`,
   label: item.display_name || item.displayName || item.name,
+  scope: 'project',
 })))
 const targetOptions = computed(() => [...groupTargetOptions.value, ...projectTargetOptions.value])
-const ordinaryTargetSessions = computed(() => targetSessions.value.filter(item => String(item.session_kind || item.sessionKind || 'conversation') !== 'automation'))
-const automationTargetSessions = computed(() => targetSessions.value.filter(item => String(item.session_kind || item.sessionKind || '') === 'automation'))
 watch(targetOptions, options => {
   if (!target.value && options.length) target.value = options[0].value
 }, { immediate: true })
-const loadTargetSessions = async () => {
-  const generation = ++targetSessionRequestGeneration
-  targetSessions.value = []
-  targetSessionId.value = ''
-  if (!target.value) return
-  targetSessionsLoading.value = true
-  try {
-    const [kind, id] = target.value.split(':')
-    const data = kind === 'group' ? await groupsApi.sessions(id) : await sessionsApi.list(id)
-    if (generation !== targetSessionRequestGeneration) return
-    targetSessions.value = (data.sessions || [])
-      .filter(item => !item.archived && String(item.source || 'web') !== 'feishu')
-  } catch (error) {
-    if (generation === targetSessionRequestGeneration) toast.warning(error?.message || '会话列表暂时无法读取，将新建自动化任务会话')
-  } finally {
-    if (generation === targetSessionRequestGeneration) targetSessionsLoading.value = false
-  }
-}
-watch(target, loadTargetSessions, { immediate: true })
 const quickActions = [
   { label: '全局助手', detail: '直接讨论与分派', tab: 'global-agent', icon: Bot },
   { label: '任务中心', detail: '查看执行与阻塞', tab: 'tasks', icon: ListTodo },
@@ -154,19 +131,9 @@ const createPreview = async () => {
     form.append('target_id', id)
     form.append('group_id', kind === 'group' ? id : '')
     form.append('target_project', kind === 'project' ? id : '')
-    form.append('exact_session_id', targetSessionId.value)
-    form.append('group_session_id', kind === 'group' ? targetSessionId.value : '')
-    form.append('project_session_id', kind === 'project' ? targetSessionId.value : '')
     intakeFiles.value.forEach(file => form.append('files', file))
     const result = await api('/api/usability/intake/preview', form)
     confirmation.value = { ...result.task, intake: result.confirmation || result.task?.intake_draft || null }
-    const actualSessionId = result.task?.group_session_id || result.task?.project_session_id || result.task?.exact_session_id || ''
-    if (actualSessionId) {
-      targetSessionId.value = actualSessionId
-      if (!targetSessions.value.some(item => String(item.id || item.sessionId || '') === String(actualSessionId))) {
-        targetSessions.value.push({ id: actualSessionId, name: result.task?.title || '自动开发任务', session_kind: 'automation' })
-      }
-    }
     toast.success('执行计划已整理好，确认前不会开始')
     await load(true)
   } catch (error) { toast.error(error.message) }
@@ -183,8 +150,6 @@ const confirmIntake = async () => {
       task_id: confirmation.value.id,
       target_scope: kind === 'group' ? 'group_session' : 'project_session',
       target_id: id,
-      exact_session_id: targetSessionId.value,
-      ...(kind === 'group' ? { group_session_id: targetSessionId.value } : { project_session_id: targetSessionId.value }),
     })
     toast.success(result.queued ? '已确认，任务开始推进' : (result.queue_result?.message || '已确认执行'))
     requirement.value = ''
@@ -465,24 +430,8 @@ onUnmounted(() => {
         <input ref="intakeFileInput" class="hidden-file-input" type="file" multiple accept="image/*,.txt,.md,.json,.csv,.pdf,.docx,.pptx,.xlsx" @change="addIntakeFiles">
         <div class="intake-tools">
           <button class="attach-action" type="button" :disabled="intakeBusy" title="添加图片或文档" @click="chooseIntakeFiles"><Paperclip :size="16" /><span>添加资料</span></button>
-          <label class="target-select"><span>执行位置</span><select v-model="target">
-            <option value="" disabled>选择群聊或项目</option>
-            <optgroup v-if="groupTargetOptions.length" :label="`群聊 (${groupTargetOptions.length})`">
-              <option v-for="item in groupTargetOptions" :key="item.value" :value="item.value">{{ item.label }}</option>
-            </optgroup>
-            <optgroup v-if="projectTargetOptions.length" :label="`项目 (${projectTargetOptions.length})`">
-              <option v-for="item in projectTargetOptions" :key="item.value" :value="item.value">{{ item.label }}</option>
-            </optgroup>
-          </select></label>
-          <label class="target-select session-target-select"><span>目标会话</span><select v-model="targetSessionId" :disabled="targetSessionsLoading">
-            <option value="">新建自动化任务会话</option>
-            <optgroup v-if="ordinaryTargetSessions.length" label="普通会话">
-              <option v-for="session in ordinaryTargetSessions" :key="session.id || session.sessionId" :value="session.id || session.sessionId">{{ session.title || session.name || session.id || session.sessionId }}</option>
-            </optgroup>
-            <optgroup v-if="automationTargetSessions.length" label="自动化任务会话">
-              <option v-for="session in automationTargetSessions" :key="session.id || session.sessionId" :value="session.id || session.sessionId">{{ session.title || session.name || session.id || session.sessionId }}</option>
-            </optgroup>
-          </select></label>
+          <label class="target-select"><span>执行位置</span><ScopeTargetSelect v-model="target" :options="targetOptions" /></label>
+          <span class="target-select session-target-select"><span>自动化会话</span><strong>按工作台来源自动绑定</strong></span>
         </div>
         <button class="primary intake-submit" :disabled="intakeBusy || (!requirement.trim() && intakeFiles.length === 0)" @click="createPreview"><Sparkles :size="16" />{{ intakeBusy ? '正在整理' : '整理执行计划' }}</button>
       </div>
@@ -501,10 +450,7 @@ onUnmounted(() => {
       </div>
       <div class="confirm-grid">
         <div><label>目标项目</label><strong>{{ confirmation.intake?.group_name || confirmation.intake?.project }}</strong></div>
-        <div><label>目标会话</label><select v-model="targetSessionId" class="confirmation-session-select">
-          <optgroup v-if="ordinaryTargetSessions.length" label="普通会话"><option v-for="session in ordinaryTargetSessions" :key="session.id || session.sessionId" :value="session.id || session.sessionId">{{ session.title || session.name || session.id || session.sessionId }}</option></optgroup>
-          <optgroup v-if="automationTargetSessions.length" label="自动化任务会话"><option v-for="session in automationTargetSessions" :key="session.id || session.sessionId" :value="session.id || session.sessionId">{{ session.title || session.name || session.id || session.sessionId }}</option></optgroup>
-        </select></div>
+        <div><label>自动化会话</label><strong>{{ confirmation.automation_session_binding_snapshot?.resolution === 'auto_created' ? '已自动创建并绑定工作台' : '已使用工作台绑定会话' }}</strong></div>
         <div><label>分派任务</label><strong>{{ confirmation.intake?.decomposition_plan?.items?.length || 1 }} 个 · 会话内顺序执行</strong></div>
         <div><label>影响范围</label><strong>{{ (confirmation.intake?.scope || confirmation.intake?.impact_scope?.areas || []).join('、') }}</strong></div>
         <div class="wide"><label>验收标准</label><p>{{ Array.isArray(confirmation.intake?.acceptance) ? confirmation.intake.acceptance.join('；') : confirmation.intake?.acceptance }}</p></div>

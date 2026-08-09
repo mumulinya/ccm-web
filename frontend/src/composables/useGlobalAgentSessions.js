@@ -395,7 +395,10 @@ export function useGlobalAgentSessions(options = {}) {
           changed = true
           continue
         }
-        const merged = mergeHistoryMessages(existing.messages || [], serverSession.messages || [])
+        const replaceExactSession = String(syncOptions.replaceSessionId || '') === serverSession.id
+        const merged = replaceExactSession
+          ? mergeHistoryMessages([], serverSession.messages || [])
+          : mergeHistoryMessages(existing.messages || [], serverSession.messages || [])
         if (messagesChanged(existing.messages || [], merged)) changed = true
         existing.messages = merged
         if (existing.source !== serverSession.source) {

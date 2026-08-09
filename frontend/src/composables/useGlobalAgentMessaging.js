@@ -12,7 +12,7 @@ export function useGlobalAgentMessaging(context) {
     applyGlobalMissionPayload, appendGlobalStreamEvent, saveHistory, scrollToBottom, globalTurnBusy,
     stoppingGlobalTurn, globalActiveRunId, globalStreamController, currentSessionId, globalTurnControl,
     currentSupervisedRunMessage, activeGlobalRunMessage, activeGlobalExecutionConfirmed,
-    pendingGlobalMissionInput, selectedFiles, chatInputElement, postJson, visibleGlobalText, isSending,
+    pendingGlobalMissionInput, selectedFiles, selectedGlobalTargetRefs, selectedGlobalTargetKeys, chatInputElement, postJson, visibleGlobalText, isSending,
     pendingGlobalClarificationInput, createNewSession, materializeCurrentSession, pendingGlobalRequestRetry, globalRequestRetrySignature,
     ensureGlobalStreamMessage, sanitizeGlobalVisibleStreamText, GLOBAL_VISIBLE_INTERNAL_TEXT_PATTERN,
     GLOBAL_RESULT_VISIBLE_FALLBACK, trackGlobalMission, emit,
@@ -166,9 +166,10 @@ const submitGlobalMessageWhileBusy = async () => {
     message,
     mode: effectiveMode,
     activeRunId: runId,
-    metadata: { session_id: currentSessionId.value, requested_mode: requestedMode },
+    metadata: { session_id: currentSessionId.value, requested_mode: requestedMode, target_refs: [...(selectedGlobalTargetRefs?.value || [])] },
   })
   chatInput.value = ''
+  if (selectedGlobalTargetKeys) selectedGlobalTargetKeys.value = []
   if (effectiveMode === 'steer') {
     const result = await sendGlobalRunSteer({ userText: message, runId, agentMsg: targetMessage || undefined, supervision })
     await globalTurnControl.settle(turn, result?.success ? 'applied' : 'failed', result?.success ? {} : { error: result?.error || '引导没有接入当前工作' })
@@ -327,6 +328,9 @@ const sendMessage = async (options = {}) => {
   materializeCurrentSession()
   
   const userText = queuedTurn ? String(queuedTurn.message || '').trim() : chatInput.value.trim()
+  const requestedTargetRefs = queuedTurn
+    ? (Array.isArray(queuedTurn.metadata?.target_refs) ? queuedTurn.metadata.target_refs : [])
+    : [...(selectedGlobalTargetRefs?.value || [])]
   const clarificationTarget = pendingGlobalClarificationInput.value
   const attachedFiles = queuedTurn ? [] : [...selectedFiles.value]
   const retrySignature = globalRequestRetrySignature({
@@ -334,6 +338,7 @@ const sendMessage = async (options = {}) => {
     message: userText,
     files: attachedFiles,
     clarificationRunId: clarificationTarget?.runId,
+    targetRefs: requestedTargetRefs,
   })
   const requestId = pendingGlobalRequestRetry.value?.signature === retrySignature
     ? pendingGlobalRequestRetry.value.requestId
@@ -342,6 +347,7 @@ const sendMessage = async (options = {}) => {
   
   chatInput.value = ''
   selectedFiles.value = []
+  if (selectedGlobalTargetKeys) selectedGlobalTargetKeys.value = []
   
   // 构建前端渲染的历史消息（带附件）
   const newMessage = {
@@ -349,6 +355,7 @@ const sendMessage = async (options = {}) => {
     role: 'user',
     content: userText,
     timestamp: new Date().toISOString(),
+    target_refs: requestedTargetRefs,
     files: attachedFiles.map(f => ({
       name: f.name,
       size: f.size,
@@ -381,7 +388,8 @@ const sendMessage = async (options = {}) => {
       executionIntentConfirmed: false,
       streamEvents: [],
       user_message: userText,
-      userMessage: userText
+      userMessage: userText,
+      target_refs: requestedTargetRefs,
     }
     activeGlobalRunMessage.value = agentMsg
     activeGlobalRunId.value = ''
@@ -395,6 +403,7 @@ const sendMessage = async (options = {}) => {
       formData.append('history', JSON.stringify(historyPayload))
       formData.append('session_id', currentSessionId.value)
       formData.append('request_id', requestId)
+      formData.append('target_refs', JSON.stringify(requestedTargetRefs))
       if (clarificationTarget?.runId) formData.append('clarification_run_id', clarificationTarget.runId)
       formData.append('stream', 'true')
       attachedFiles.forEach((f, idx) => {
@@ -419,6 +428,7 @@ const sendMessage = async (options = {}) => {
           history: historyPayload,
           session_id: currentSessionId.value,
           request_id: requestId,
+          target_refs: requestedTargetRefs,
           clarification_run_id: clarificationTarget?.runId || '',
           stream: true
         })
@@ -577,6 +587,7 @@ const sendMessage = async (options = {}) => {
       pendingGlobalRequestRetry.value = null
     } else if (globalStreamFailed && !chatInput.value.trim()) {
       chatInput.value = userText
+      if (selectedGlobalTargetKeys) selectedGlobalTargetKeys.value = requestedTargetRefs.map(target => `${target.scope}:${target.scopeId}`)
     }
 
     saveHistory()
@@ -591,6 +602,7 @@ const sendMessage = async (options = {}) => {
         last.type = 'global_agent_error'
         last.content = stopped ? '本次处理已停止，你可以调整需求后继续。' : `❌ 连接服务器失败：${err.message || '请检查网络或配置'}`
         if (!chatInput.value.trim()) chatInput.value = userText
+        if (selectedGlobalTargetKeys) selectedGlobalTargetKeys.value = requestedTargetRefs.map(target => `${target.scope}:${target.scopeId}`)
         saveHistory()
         scrollToBottom()
         return { success: false, error: stopped ? '当前工作已停止' : (err.message || '连接服务器失败') }
@@ -601,6 +613,7 @@ const sendMessage = async (options = {}) => {
       content: `❌ 连接服务器失败：${err.message || '请检查网络或配置'}`,
       timestamp: new Date().toISOString()
     })
+    if (selectedGlobalTargetKeys) selectedGlobalTargetKeys.value = requestedTargetRefs.map(target => `${target.scope}:${target.scopeId}`)
     saveHistory()
     return { success: false, error: err?.message || '连接服务器失败' }
   } finally {

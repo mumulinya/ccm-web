@@ -79,13 +79,17 @@ function cardActionSecret(config = loadFeishuConfig()) {
 }
 
 function actionPayload(value: any) {
-  return [
+  const base = [
     text(value?.ccm_action, 80),
     text(value?.request_id, 120),
     text(value?.decision, 24),
     text(value?.binding_id, 120),
     text(value?.expires_at, 80),
-  ].join("\n");
+  ];
+  if (String(value?.ccm_action || "") === "global_target_selection") {
+    base.push(text(value?.scope, 32), text(value?.scope_id, 160), text(value?.conversation_id, 180));
+  }
+  return base.join("\n");
 }
 
 export function signFeishuCardAction(value: any, config = loadFeishuConfig()) {

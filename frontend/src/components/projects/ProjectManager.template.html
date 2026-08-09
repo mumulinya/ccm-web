@@ -93,7 +93,7 @@
               :role="msg.role"
               :compact="msg.role === 'thinking'"
               :timestamp="msg.timestamp || msg.created_at || msg.createdAt"
-              :structured="!!getProjectTaskCard(msg) || (Array.isArray(msg.workEvents) && msg.workEvents.length > 0) || Number(msg.fileChanges?.count || 0) > 0"
+              :structured="msg.type === 'command_result' || !!getProjectTaskCard(msg) || (Array.isArray(msg.workEvents) && msg.workEvents.length > 0) || Number(msg.fileChanges?.count || 0) > 0"
               :streaming="!!msg.streaming || (isStreaming && i === messages.length - 1)"
               :copy-text="getCopyableMessageText(msg, (!getProjectTaskCard(msg) && !(Array.isArray(msg.workEvents) && msg.workEvents.length) && !Number(msg.fileChanges?.count || 0)) ? msg.content : '')"
               :editable="msg.role === 'user' && !!String(msg.content || '').trim()"
@@ -104,6 +104,7 @@
                 msg.role,
                 {
                   'msg-highlight': highlightMsgIndex === i,
+                  'local-command-message': msg.type === 'command_result',
                   'structured-message': !!getProjectTaskCard(msg) || (Array.isArray(msg.workEvents) && msg.workEvents.length > 0) || Number(msg.fileChanges?.count || 0) > 0,
                 },
               ]"
@@ -113,6 +114,9 @@
                 :enabled="projectAgentExecutionEnabled"
                 :messages="messages"
                 :message-index="i"
+                stage-grouped
+                presentation="live"
+                @open-file-change="openSingleFileChange"
               />
               <CommandResultCard v-if="msg.type === 'command_result'" :result="msg.commandResult" />
               <!-- 思考过程消息 -->
@@ -134,10 +138,21 @@
                   :message="msg"
                   :task-card="getProjectTaskCard(msg)"
                   :is-last-streaming="isStreaming && i === messages.length - 1"
+                  :hide-file-changes="hasTerminalExecutionForMessage(projectAgentExecutionEvents, messages, i)"
                   @task-action="handleProjectTaskAction(msg, $event)"
                   @open-file-diff="openFileDiff"
                 />
               </div>
+              <AgentExecutionTranscript
+                :events="projectAgentExecutionEvents"
+                :enabled="projectAgentExecutionEnabled"
+                :messages="messages"
+                :message-index="i"
+                stage-grouped
+                presentation="completed"
+                @open-file-change="openSingleFileChange"
+                @open-file-changes="openCodeChangeDrawer($event, { title: '本轮文件改动', project: currentProject })"
+              />
             </ConversationMessageShell>
             </div>
           </template>

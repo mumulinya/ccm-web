@@ -22,7 +22,11 @@ const fetchedDiffs = ref({})
 const fileContents = ref({})
 const loadError = ref('')
 const fileKey = (file) => `${file?.project || props.project || ''}|${file?.path || ''}`
-const fileIdentity = (file) => String(file?.path || '').trim().replace(/\\/g, '/').toLowerCase()
+const fileIdentity = (file) => {
+  const project = String(file?.project || props.project || '').trim().toLowerCase()
+  const path = String(file?.path || '').trim().replace(/\\/g, '/').toLowerCase()
+  return `${project}|${path}`
+}
 
 const escapeHtml = (text) => String(text || '')
   .replace(/&/g, '&amp;')

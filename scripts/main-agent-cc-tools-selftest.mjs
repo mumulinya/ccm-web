@@ -22,15 +22,27 @@ process.env.USERPROFILE = scratch;
 const require = createRequire(import.meta.url);
 const workspace = require(path.join(root, "ccm-package", "dist", "tools", "workspace-readonly-tools.js"));
 const mainRuntime = require(path.join(root, "ccm-package", "dist", "tools", "main-agent-tool-runtime.js"));
+const ccLimits = require(path.join(root, "ccm-package", "dist", "tools", "cc-tool-result-limits.js"));
+const toolDisplay = require(path.join(root, "ccm-package", "dist", "system", "tool-display-projection.js"));
+const eventApi = require(path.join(root, "ccm-package", "dist", "system", "user-visible-agent-events-api.js"));
 
 assert.equal(workspace.runWorkspaceReadonlyToolsSelfTest().success, true);
+assert.equal(ccLimits.CC_ALIGNED_FILE_READ_MAX_TOKENS, 25_000);
+assert.equal(ccLimits.CC_ALIGNED_TOOL_RESULT_MAX_TOKENS, 100_000);
 assert.ok(workspace.WORKSPACE_READONLY_TOOL_DEFINITIONS_V2.length >= 21);
+const readSchema = workspace.WORKSPACE_READONLY_TOOL_DEFINITIONS_V2.find(tool => tool.name === "read_file")?.inputSchema;
+assert.equal(readSchema?.properties?.limit?.maximum, 2_000);
+assert.equal(readSchema?.properties?.token_budget?.maximum, 25_000);
 const token = workspace.sealScopedToolCapability({ scope: "project", scopeId: "alpha", exactSessionId: "pchat-alpha", generation: 3, allowedProjects: ["alpha"] });
 assert.equal(workspace.openScopedToolCapability(token).exactSessionId, "pchat-alpha");
 
 const listing = await workspace.executeWorkspaceReadonlyTool("list_directory", { path: "", limit: 20 }, token);
 assert.equal(listing.items.some(item => item.name === "src"), true);
 assert.equal(listing.items.some(item => item.name === ".env"), false);
+const listingDisplay = toolDisplay.buildToolDisplayDetail({ toolName: "mcp__ccm__ccm_workspace_readonly__list_directory", arguments: { project_id: "alpha", path: "", limit: 20 }, result: listing });
+assert.equal(listingDisplay.tool.label, "List directory");
+assert.equal(listingDisplay.tool.serverLabel, "ccm_workspace_readonly");
+assert.equal(listingDisplay.result.rows.some(item => item.name === "src"), true);
 const glob = await workspace.executeWorkspaceReadonlyTool("glob_files", { pattern: "**/*.ts", limit: 20 }, token);
 assert.deepEqual(glob.items, ["root.ts", "src/service.ts"]);
 const sensitiveGrep = await workspace.executeWorkspaceReadonlyTool("grep_text", { pattern: "do-not-read", limit: 20 }, token);
@@ -38,6 +50,19 @@ assert.equal(sensitiveGrep.lines.some(line => String(line).includes("do-not-read
 const firstRead = await workspace.executeWorkspaceReadonlyTool("read_file", { path: "src/service.ts", offset: 1, limit: 1 }, token);
 assert.equal(firstRead.lines.length, 1);
 assert.equal(firstRead.truncated, true);
+const persistedReadDisplay = toolDisplay.buildToolDisplayDetail({ toolName: "mcp__ccm__ccm_workspace_readonly__read_file", arguments: { path: "src/service.ts", offset: 1, limit: 1 }, result: firstRead });
+assert.equal(JSON.stringify(persistedReadDisplay).includes("export function alpha"), false);
+assert.equal(persistedReadDisplay.result.rehydratable, true);
+const rehydratedReadDisplay = await eventApi.rehydrateReadonlyToolDetail({
+  scope: "project", scopeId: "alpha", exactSessionId: "pchat-alpha", generation: 3,
+  toolName: "mcp__ccm__ccm_workspace_readonly__read_file", toolCallId: "read-call",
+  detail: { safeArguments: { path: "src/service.ts", offset: 1, limit: 1 } },
+});
+assert.equal(JSON.stringify(rehydratedReadDisplay).includes("export function alpha"), true);
+await assert.rejects(() => eventApi.rehydrateReadonlyToolDetail({
+  scope: "project", scopeId: "alpha", exactSessionId: "pchat-alpha", generation: 3,
+  toolName: "mcp__external__write_file", toolCallId: "write-call", detail: { safeArguments: { path: "src/service.ts" } },
+}), /不支持安全详情重取/);
 const secondRead = await workspace.executeWorkspaceReadonlyTool("read_file", { path: "src/service.ts", offset: Number(firstRead.next_cursor), limit: 20 }, token);
 assert.equal(secondRead.lines[0].line, 2);
 await assert.rejects(() => workspace.executeWorkspaceReadonlyTool("read_file", { path: ".env" }, token), /敏感文件/);

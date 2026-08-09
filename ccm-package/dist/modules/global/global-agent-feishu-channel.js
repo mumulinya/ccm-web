@@ -40,10 +40,10 @@ const path = __importStar(require("path"));
 const utils_1 = require("../../core/utils");
 const feishu_1 = require("../collaboration/feishu");
 const source_ingestion_1 = require("../requirements/source-ingestion");
-const project_runtime_1 = require("../projects/project-runtime");
 const feishu_access_1 = require("../collaboration/feishu-access");
 const feishu_channel_1 = require("../collaboration/feishu-channel");
 const feishu_conversation_v2_1 = require("../collaboration/feishu-conversation-v2");
+const automation_session_bindings_1 = require("../../system/automation-session-bindings");
 // Feishu event decoding, message lifecycle, turn control, and restart recovery.
 function createGlobalAgentFeishuChannel(deps) {
     const { GLOBAL_AGENT_VISIBLE_RESULT_FALLBACK, appendGlobalActionAudit, appendGlobalAgentConversationMessage, appendTraceEvent, bindFeishuIdentifiersFromValue, bindFeishuTaskContext, cancelGlobalAgentRun, conversationTurnControl, createAgenticRuntime, ensureTraceId, feishuRuntimeEventPresentation, findWaitingGlobalAgentRun, formatMissionStatus, getConfigs, getFeishuMessageId, getGlobalAgentConversationMessages, getGlobalAgentRun, getGlobalDevelopmentMission, globalRunVisibleReply, isGlobalProgressStatusRequest, listGlobalAgentRuns, listTaskPermissionRequests, loadGroups, notifyFeishuTaskStage, postLocalApi, recordFeishuInbound, resolveFeishuGlobalAgentSessionId, resumeGlobalAgentRun, runAgenticGlobalRequest, sendFeishuReportMessage, steerGlobalAgentRun } = deps;
@@ -62,6 +62,7 @@ function createGlobalAgentFeishuChannel(deps) {
             missionId: input.missionId || "",
             taskId: input.taskId || "",
             dedupeKey: `global-reply:${input.traceId || input.conversationId}:${input.dedupeSuffix || crypto.createHash("sha256").update(input.markdown).digest("hex").slice(0, 16)}`,
+            actions: input.actions,
         });
         if (bound?.success || bound?.queued)
             return { ...bound, channel: "bound_conversation" };
@@ -122,21 +123,54 @@ function createGlobalAgentFeishuChannel(deps) {
             || payload?.message_id
             || "").trim();
     }
-    async function processFeishuCardAction(baseUrl, payload) {
+    async function processFeishuCardAction(baseUrl, payload, ctx) {
         const value = cardActionValue(payload);
-        if (String(value?.ccm_action || "") !== "permission_decision")
-            throw new Error("不支持的飞书卡片操作");
+        const action = String(value?.ccm_action || "");
         if (!(0, feishu_access_1.verifyFeishuCardAction)(value))
-            throw new Error("飞书审批卡片签名无效");
+            throw new Error("飞书交互卡片签名无效");
         if (!value.expires_at || Date.parse(String(value.expires_at)) <= Date.now())
-            throw new Error("飞书审批卡片已经过期");
+            throw new Error("飞书交互卡片已经过期");
         const access = resolveUserAccess(payload);
         if (!access.allowed)
             throw new Error(access.reason);
-        if (!access.canApprove)
-            throw new Error("当前飞书用户没有审批权限");
         const messageId = cardActionMessageId(payload);
         const binding = (0, feishu_channel_1.getFeishuBindingByMessageId)(messageId);
+        if (action === "global_target_selection") {
+            if (!access.canOperate)
+                throw new Error("当前飞书用户没有任务投放权限");
+            if (!ctx)
+                throw new Error("全局 Agent 运行上下文不可用");
+            const conversationId = String(value.conversation_id || "").trim();
+            if (!binding || !conversationId || !binding.session_ids?.includes(conversationId))
+                throw new Error("目标选择卡片与原飞书会话不匹配");
+            const target = (0, automation_session_bindings_1.listGlobalDispatchTargets)().find((item) => item.ready !== false && item.scope === String(value.scope || "") && item.scopeId === String(value.scope_id || ""));
+            if (!target)
+                throw new Error("所选项目或群聊已经不可投放，请重新选择");
+            const waiting = getGlobalAgentRun(String(value.decision || ""));
+            if (!waiting || waiting.status !== "waiting_clarification" || waiting.session_id !== conversationId)
+                throw new Error("原任务已不再等待目标选择");
+            const targetRef = { scope: target.scope, scopeId: target.scopeId, canonicalName: target.canonicalName, displayName: target.displayName };
+            const selectionText = `目标选择：${target.displayName || target.canonicalName}`;
+            appendGlobalAgentConversationMessage(conversationId, "user", selectionText, "feishu");
+            const run = await runAgenticGlobalRequest(baseUrl, ctx, {
+                message: selectionText,
+                originalMessage: selectionText,
+                sessionId: conversationId,
+                source: "feishu-control-bot",
+                clarificationRunId: waiting.id,
+                requestedTargetRefs: [targetRef],
+                principal: { kind: "feishu", id: access.open_id || access.user_id || "unknown", role: access.role, capabilities: [] },
+            });
+            const mission = run.mission_id ? getGlobalDevelopmentMission(run.mission_id) : null;
+            const markdown = formatFeishuTaskJourney(run, mission, null, GLOBAL_AGENT_VISIBLE_RESULT_FALLBACK);
+            appendGlobalAgentConversationMessage(conversationId, "assistant", markdown, "feishu");
+            await sendFeishuConversationReply({ conversationId, title: "全局 Agent 任务进展", markdown, runId: run.id, missionId: run.mission_id || "", stage: run.status, dedupeSuffix: `target:${run.id}:${target.scope}:${target.scopeId}` });
+            return { success: true, action, target: targetRef, run_id: run.id, status: run.status, message: markdown };
+        }
+        if (action !== "permission_decision")
+            throw new Error("不支持的飞书卡片操作");
+        if (!access.canApprove)
+            throw new Error("当前飞书用户没有审批权限");
         if (!binding || binding.id !== String(value.binding_id || ""))
             throw new Error("审批卡片与原飞书会话不匹配");
         const requestId = String(value.request_id || "");
@@ -219,15 +253,56 @@ function createGlobalAgentFeishuChannel(deps) {
         return name || fallback;
     }
     function feishuRequirementTargets() {
+        return (0, automation_session_bindings_1.listGlobalDispatchTargets)().filter((target) => target.ready !== false).map((target) => ({
+            type: target.scope,
+            id: target.scopeId,
+            name: target.displayName || target.canonicalName || target.scopeId,
+            canonicalName: target.canonicalName || target.scopeId,
+            capabilities: target.capabilities || [],
+        }));
+    }
+    function normalizeFeishuRequestedTargets(textValue) {
+        const text = String(textValue || "").trim();
+        const targets = feishuRequirementTargets();
+        const numbered = text.match(/^(?:选择|目标)?\s*(\d{1,2})\s*[。.!！]?$/);
+        if (numbered) {
+            const target = targets[Number(numbered[1]) - 1];
+            return target ? [{ scope: target.type, scopeId: target.id, canonicalName: target.canonicalName, displayName: target.name }] : [];
+        }
+        return targets.filter((target) => {
+            const names = [target.name, target.canonicalName, target.id].map(value => String(value || "").trim()).filter(value => value.length >= 2);
+            return names.some(name => text.includes(name));
+        }).map((target) => ({ scope: target.type, scopeId: target.id, canonicalName: target.canonicalName, displayName: target.name }));
+    }
+    function feishuTargetSelectionMarkdown() {
+        const targets = feishuRequirementTargets();
+        if (!targets.length)
+            return "当前没有可投放的项目或群聊，请先在 CCM 页面完成目标配置。";
         return [
-            ...(typeof loadGroups === "function" ? loadGroups().map((group) => ({
-                type: "group",
-                id: group.id,
-                name: group.name || group.id,
-                capabilities: (group.members || []).flatMap((member) => member.skills || member.capabilities || []),
-            })) : []),
-            ...(typeof getConfigs === "function" ? getConfigs().map((config) => ({ type: "project", id: config.name, name: (0, project_runtime_1.projectDisplayName)(config.name) })) : []),
-        ];
+            "请选择本次任务要投放的目标（可直接回复序号或完整名称）：",
+            ...targets.map((target, index) => `${index + 1}. ${target.name}（${target.type === "group" ? "群聊" : "项目"}）`),
+        ].join("\n");
+    }
+    function feishuTargetSelectionActions(run, conversationId) {
+        try {
+            return feishuRequirementTargets().slice(0, 5).map((target) => {
+                const value = {
+                    ccm_action: "global_target_selection",
+                    request_id: `${target.type}:${target.id}`,
+                    decision: String(run?.id || ""),
+                    binding_id: "",
+                    scope: target.type,
+                    scope_id: target.id,
+                    conversation_id: conversationId,
+                    expires_at: new Date(Date.now() + 30 * 60_000).toISOString(),
+                };
+                value.signature = (0, feishu_access_1.signFeishuCardAction)(value);
+                return { text: String(target.name || target.id).slice(0, 24), type: "default", value };
+            });
+        }
+        catch {
+            return [];
+        }
     }
     async function ingestFeishuRequirementAttachment(payload, userText) {
         const message = payload?.event?.message || {};
@@ -388,6 +463,10 @@ function createGlobalAgentFeishuChannel(deps) {
                 });
             }
             else {
+                const requestedTargetRefs = normalizeFeishuRequestedTargets(text);
+                const clarificationRun = requestedTargetRefs.length
+                    ? listGlobalAgentRuns({ sessionId: conversationId }).find((item) => item.status === "waiting_clarification")
+                    : null;
                 const onFeishuRuntimeEvent = (event) => {
                     bindFeishuIdentifiersFromValue(conversationId, event, destination);
                     if (event?.type === "text" && event?.text) {
@@ -417,6 +496,8 @@ function createGlobalAgentFeishuChannel(deps) {
                     principal: options.principal || { kind: "feishu", id: destination?.open_id || destination?.user_id || "unknown", role: "operator", capabilities: [] },
                     turnId: options.turnId || options.turn_id || "",
                     queueScope: `feishu:${conversationId}`,
+                    clarificationRunId: clarificationRun?.id || "",
+                    requestedTargetRefs,
                     onEvent: onFeishuRuntimeEvent,
                 });
             }
@@ -431,7 +512,10 @@ function createGlobalAgentFeishuChannel(deps) {
                 targetType: "global_agent",
                 originReceipt: options.originReceipt,
             });
-            const markdown = formatFeishuTaskJourney(run, missionSnapshot, sourceIngestion, GLOBAL_AGENT_VISIBLE_RESULT_FALLBACK);
+            let markdown = formatFeishuTaskJourney(run, missionSnapshot, sourceIngestion, GLOBAL_AGENT_VISIBLE_RESULT_FALLBACK);
+            if (run.status === "waiting_clarification" && !run.requested_target_refs?.length) {
+                markdown = `${markdown}\n\n${feishuTargetSelectionMarkdown()}`;
+            }
             appendGlobalActionAudit({ ...auditBase, action: { type: "agentic_loop", params: { run_id: run.id } }, status: run.status, result: { summary: markdown, trace_id: run.trace_id, steps: run.steps.length } });
             appendGlobalAgentConversationMessage(conversationId, "assistant", markdown, "feishu", {
                 extractMemory: run.direct_reply_fast_path !== true,
@@ -450,6 +534,9 @@ function createGlobalAgentFeishuChannel(deps) {
                     runId: run.id,
                     missionId: run.mission_id || "",
                     stage: run.status,
+                    actions: run.status === "waiting_clarification" && !run.requested_target_refs?.length
+                        ? feishuTargetSelectionActions(run, conversationId)
+                        : undefined,
                     dedupeSuffix: `run:${run.id}:${run.status}`,
                 });
             return markdown;

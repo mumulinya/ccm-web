@@ -47,7 +47,7 @@ export declare function buildMainAgentRecoverySummary(task: any, phase: string, 
 };
 export declare function taskCardPhase(task: any, executions: any[]): string;
 export declare function taskCardGapLabel(item: any): string;
-export declare function userAgentRole(project: string): "测试" | "项目" | "前端" | "后端";
+export declare function userAgentRole(project: string): "项目" | "测试" | "前端" | "后端";
 export declare function userAgentProgress(worker: any): string;
 export declare function sanitizeUserAgentProgressText(value: any, fallback?: string, max?: number): string;
 export declare function normalizeUserAgentProgressStatus(status: any, phase?: string): "pending" | "completed" | "failed" | "blocked" | "running";

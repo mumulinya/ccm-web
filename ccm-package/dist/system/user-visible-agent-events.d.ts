@@ -1,6 +1,8 @@
+import { type ToolDisplayDetailV1 } from "./tool-display-projection";
+import { type AssistantProgressKind } from "./assistant-progress";
 export declare const USER_VISIBLE_AGENT_EVENT_SCHEMA: "ccm-user-visible-agent-event-v1";
 export declare const USER_VISIBLE_AGENT_RESULT_SCHEMA: "ccm-user-visible-agent-result-v1";
-export type UserVisibleAgentEventType = "turn_started" | "thinking_status" | "assistant_text_delta" | "tool_started" | "tool_progress" | "tool_completed" | "tool_failed" | "agent_started" | "agent_progress" | "agent_completed" | "agent_failed" | "permission_required" | "clarification_required" | "context_compacted" | "result";
+export type UserVisibleAgentEventType = "turn_started" | "thinking_status" | "assistant_text_delta" | "assistant_progress" | "requirement_plan" | "tool_started" | "tool_progress" | "tool_completed" | "tool_failed" | "agent_started" | "agent_progress" | "agent_completed" | "agent_failed" | "permission_required" | "clarification_required" | "context_compacted" | "result";
 export type UserVisibleAgentEvent = {
     schema: typeof USER_VISIBLE_AGENT_EVENT_SCHEMA;
     eventId: string;
@@ -12,7 +14,9 @@ export type UserVisibleAgentEvent = {
     generation: number;
     taskId?: string;
     workItemId?: string;
+    agentRunId?: string;
     toolCallId?: string;
+    toolName?: string;
     parentEventId?: string;
     parallelGroupId?: string;
     display: {
@@ -23,6 +27,8 @@ export type UserVisibleAgentEvent = {
         durationMs?: number;
         toolUseCount?: number;
         tokenCount?: number;
+        tokenType?: "tool_output" | "provider_total";
+        tokenAccuracy?: "reported" | "estimated";
     };
     detail?: {
         safeArguments?: any;
@@ -30,14 +36,83 @@ export type UserVisibleAgentEvent = {
         evidenceIds?: string[];
         fileChanges?: any[];
         usage?: any;
+        agentDisplay?: {
+            projectId: string;
+            projectName: string;
+            runtimeLabel: string;
+            workItemTitle: string;
+            phase: string;
+            attempt: number;
+            queuePosition?: number;
+            isParallel: boolean;
+        };
+        executionStage?: {
+            kind: "preparation" | "project_execution" | "independent_verification" | "main_agent_summary";
+            stageRunId: string;
+            reviewCycleId?: string;
+            attempt: number;
+            startedAt: string;
+            completedAt?: string;
+            activeDurationMs?: number;
+        };
+        toolDisplay?: ToolDisplayDetailV1;
+        timing?: {
+            totalMs: number;
+            modelMs?: number;
+            toolWallMs?: number;
+            dependencyWaitMs?: number;
+            queueWaitMs?: number;
+            otherMs?: number;
+            stages?: {
+                preparationMs?: number;
+                projectAgentWallMs?: number;
+                testAgentWallMs?: number;
+                mainAgentSummaryMs?: number;
+            };
+        };
+        progress?: {
+            kind: AssistantProgressKind;
+            text: string;
+            modelCallIndex: number;
+            relatedToolCallIds: string[];
+            milestoneChecksum: string;
+        };
+        requirementPlan?: UserVisibleRequirementPlanV1;
     };
     visibility: "default" | "transcript" | "technical";
     contentStored: false;
     createdAt: string;
 };
+export type UserVisibleRequirementPlanStepV1 = {
+    id: string;
+    title: string;
+    description: string;
+    outcome: string;
+    project?: string;
+    dependsOn: string[];
+    status: "pending" | "running" | "completed" | "blocked" | "skipped";
+};
+export type UserVisibleRequirementPlanV1 = {
+    schema: "ccm-user-visible-requirement-plan-v1";
+    planId: string;
+    revision: number;
+    title: string;
+    goal: string;
+    steps: UserVisibleRequirementPlanStepV1[];
+    scope: string[];
+    expectedResults: string[];
+    exclusions: string[];
+    status: "ready" | "executing" | "completed" | "blocked" | "superseded";
+    createdAt: string;
+    updatedAt: string;
+    planChecksum: string;
+    contentStored: false;
+};
 export declare function sanitizeUserVisibleAgentDetail(value: any, depth?: number, seen?: WeakSet<object>): any;
 export declare function normalizeUserVisibleAgentEvent(input: any, sequence?: number): UserVisibleAgentEvent;
 export declare function appendUserVisibleAgentEvent(input: any): UserVisibleAgentEvent;
+export declare function appendAssistantProgress(input: any): UserVisibleAgentEvent;
+export declare function appendUserVisibleRequirementPlan(input: any): UserVisibleAgentEvent;
 export declare function listUserVisibleAgentEvents(filter: any): {
     schema: string;
     events: UserVisibleAgentEvent[];
@@ -45,6 +120,7 @@ export declare function listUserVisibleAgentEvents(filter: any): {
     hasMore: boolean;
     contentStored: boolean;
 };
+export declare function getUserVisibleAgentEvent(filter: any, eventId: string): UserVisibleAgentEvent;
 export declare function subscribeUserVisibleAgentEvents(handler: (event: UserVisibleAgentEvent) => void): () => boolean;
 /** Live-only text/progress events. They deliberately bypass the projection store. */
 export declare function publishEphemeralUserVisibleAgentEvent(input: any): UserVisibleAgentEvent;
@@ -58,7 +134,15 @@ export declare function buildUserVisibleAgentResult(input: any): {
     toolCalls: number;
     stopReason: string;
     agentStats: any;
-    fileChanges: any;
+    fileChanges: {
+        deleted?: boolean;
+        binary?: boolean;
+        deletions?: number;
+        additions?: number;
+        status?: string;
+        project?: string;
+        path: string;
+    }[];
     verification: any;
     unfinished: string[];
     usage: any;

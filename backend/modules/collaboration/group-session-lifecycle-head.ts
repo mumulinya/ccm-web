@@ -394,6 +394,20 @@ export function transitionGroupSessionLifecycleHead(input: any = {}) {
   });
 }
 
+export function rotateGroupSessionLifecycleHead(input: any = {}) {
+  const groupId = String(input.groupId || input.group_id || "").trim();
+  const groupSessionId = String(input.groupSessionId || input.group_session_id || "").trim();
+  if (!groupId || !groupSessionId.startsWith("gcs_")) throw new Error("session lifecycle rotation requires groupId + gcs_* identity");
+  const file = getGroupSessionLifecycleHeadFile(groupId, groupSessionId);
+  return withFileLock(file, () => {
+    const previous = readGroupSessionLifecycleHead(groupId, groupSessionId);
+    if (!previous || previous.status !== "active") throw new Error("only an active group session can rotate generation");
+    const head = buildLifecycleHead(groupId, groupSessionId, "active", previous, { ...input, reason: input.reason || "session_generation_rotated" });
+    const commit = commitLifecycleHead(groupId, groupSessionId, head);
+    return { committed: true, idempotent: false, head: commit.head, journal: commit.journal, receipt: commit.receipt, file };
+  });
+}
+
 export function validateGroupSessionLifecycleBinding(input: any = {}) {
   const groupId = String(input.groupId || input.group_id || "").trim();
   const groupSessionId = String(input.groupSessionId || input.group_session_id || "").trim();

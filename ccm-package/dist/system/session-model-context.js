@@ -290,7 +290,9 @@ function buildUnifiedSessionModelContextProjection(input) {
     if (!sessionId)
         throw new Error("exact_session_required_for_model_context");
     const allMessages = (Array.isArray(input.messages) ? input.messages : [])
-        .filter(message => ["user", "assistant"].includes(String(message?.role || "")));
+        .filter(message => ["user", "assistant"].includes(String(message?.role || "")))
+        .filter(message => message?.modelVisible !== false && message?.model_visible !== false)
+        .filter(message => !["local_command", "command_result"].includes(String(message?.type || "")));
     const pending = excludePendingRequest(allMessages, input.currentRequest);
     const history = pending.messages;
     const canonicalSummary = input.canonicalSummary != null;

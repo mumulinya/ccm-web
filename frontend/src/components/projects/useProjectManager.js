@@ -133,6 +133,9 @@ export function useProjectManager(props, emit) {
     sessions: () => sessions.value,
     currentSessionId: () => currentSession.value || '',
     context: () => ({ project: currentProject.value || '', sessionId: currentSession.value || '' }),
+    selectSession: (sessionId) => selectSession(sessionId),
+    refreshSessions: () => currentProject.value ? loadSessions(currentProject.value) : undefined,
+    reloadCurrentSession: () => refreshCurrentProjectSession(currentSession.value || ''),
     statusSummary: () => `项目 ${currentProject.value || '未选择'} 的当前会话已加载 ${messages.value.length} 条消息。`,
     contextMetrics: () => ({ 项目: currentProject.value || '未选择', 会话: currentSession.value || '未选择' }),
     exportFilename: () => `ccm-project-${currentProject.value || 'unknown'}-${currentSession.value || 'context'}`,
@@ -193,7 +196,7 @@ export function useProjectManager(props, emit) {
     },
     onClientAction: runProjectClientCommand,
     onResult: (result) => {
-      messages.value.push({ role: 'assistant', type: 'command_result', commandResult: result, content: '', timestamp: new Date().toISOString() })
+      messages.value.push({ id: result.recordId, role: 'assistant', type: 'command_result', commandResult: result, localCommandRecord: result.localCommandRecord, modelVisible: false, content: '', timestamp: result.at || new Date().toISOString() })
       nextTick(() => scrollToBottom())
     },
     onError: (message) => toast.error(message),

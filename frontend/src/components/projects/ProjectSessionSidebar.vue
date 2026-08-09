@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { ChevronRight, Link2, ListTodo, MessageSquare, Pencil, Plus, RefreshCw, Send, Trash2, X } from '@lucide/vue'
 import EmptyState from '../common/EmptyState.vue'
+import AutomationSessionBindingDialog from '../common/AutomationSessionBindingDialog.vue'
 const props = defineProps({
   project: { type: String, default: '' },
   sessions: { type: Array, default: () => [] },
@@ -29,6 +30,32 @@ const readGroupState = () => {
   }
 }
 const expandedGroups = ref(readGroupState())
+const bindingDialogOpen = ref(false)
+const bindingSession = ref(null)
+const automationBindings = ref([])
+const loadAutomationBindings = async () => {
+  if (!props.project) { automationBindings.value = []; return }
+  try {
+    const query = new URLSearchParams({ scope: 'project', scope_id: props.project })
+    const response = await fetch(`/api/automation-session-bindings?${query}`)
+    const data = await response.json()
+    automationBindings.value = response.ok && data.success !== false ? (data.bindings || []) : []
+  } catch { automationBindings.value = [] }
+}
+watch(() => props.project, loadAutomationBindings, { immediate: true })
+const automationSourceText = session => {
+  const binding = automationBindings.value.find(item => String(item.exactSessionId || item.exact_session_id || '') === String(session?.id || '') && item.status !== 'archived')
+  const labels = { requirement_pool: '需求池', workbench: '工作台', global_agent: '全局 Agent' }
+  return binding?.sources?.length ? binding.sources.map(source => labels[source] || source).join('、') : '未绑定来源'
+}
+const handleBindingSaved = () => {
+  loadAutomationBindings()
+  emit('refresh')
+}
+const openBindingDialog = session => {
+  bindingSession.value = session || null
+  bindingDialogOpen.value = true
+}
 const toggleGroup = (source) => {
   expandedGroups.value = { ...expandedGroups.value, [source]: !expandedGroups.value[source] }
 }
@@ -105,12 +132,14 @@ const bindingText = (session) => {
               @keydown.enter="emit('select', session.id)"
             >
               <ListTodo class="session-source-icon" :size="14" />
-              <span class="session-copy"><strong>{{ session.name || '自动开发任务' }}</strong><small>{{ session.message_count }} 条消息 · 任务过程与交付</small></span>
+              <span class="session-copy"><strong>{{ session.name || '自动开发任务' }}</strong><small>{{ session.message_count }} 条消息 · {{ automationSourceText(session) }}</small></span>
               <span class="session-actions">
+                <button title="管理任务来源绑定" @click.stop="openBindingDialog(session)"><Link2 :size="14" /></button>
                 <button title="重命名会话" @click.stop="emit('rename', session.id)"><Pencil :size="14" /></button>
                 <button title="删除会话" @click.stop="emit('delete', session.id)"><Trash2 :size="14" /></button>
               </span>
             </div>
+            <button class="empty-automation" type="button" @click="openBindingDialog(null)"><Plus :size="14" />新建自动化任务会话</button>
           </div>
         </section>
         <section class="session-section feishu-section">
@@ -144,6 +173,14 @@ const bindingText = (session) => {
       </template>
     </div>
   </aside>
+  <AutomationSessionBindingDialog
+    :open="bindingDialogOpen"
+    scope="project"
+    :scope-id="project"
+    :session="bindingSession"
+    @close="bindingDialogOpen = false"
+    @saved="handleBindingSaved"
+  />
 </template>
 
 <style scoped>
@@ -184,6 +221,8 @@ header button:hover,.session-actions button:hover { background:var(--control-hov
 .session-item:hover .session-actions,.session-item.active .session-actions { display:flex; }
 .sidebar-backdrop { display:none; }
 .empty-feishu { width:100%; min-height:40px; display:flex; align-items:center; justify-content:center; gap:6px; border:1px dashed var(--border-color); border-radius:6px; background:transparent; color:var(--text-muted); font-size:10px; cursor:pointer; }
+.empty-automation { width:100%; min-height:34px; display:flex; align-items:center; justify-content:center; gap:6px; margin:3px 0; border:1px dashed color-mix(in srgb,var(--accent-blue) 32%,var(--border-color)); border-radius:6px; background:transparent; color:var(--accent-blue); font-size:10px; cursor:pointer; }
+.empty-automation:hover { background:color-mix(in srgb,var(--accent-blue) 6%,transparent); border-color:var(--accent-blue); }
 .empty-feishu:hover { color:#00a870; border-color:color-mix(in srgb,#00a870 45%,var(--border-color)); background:color-mix(in srgb,#00a870 6%,transparent); }
 @media (max-width:768px) {
   .sidebar-backdrop { display:block; position:fixed; inset:0; background:rgba(15,23,42,.35); z-index:49; }

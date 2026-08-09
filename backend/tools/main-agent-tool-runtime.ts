@@ -25,6 +25,7 @@ import {
 } from "./main-agent-context-policy";
 import { recordToolSearchSuccess, searchTools } from "./tool-search-index";
 import { executeSkillFork } from "../system/skill-fork-runtime";
+import { boundedToolResultLimit, MAIN_AGENT_TOOL_RESULT_LIMIT_ERROR } from "./cc-tool-result-limits";
 
 export type MainAgentToolRequest = {
   name: string;
@@ -326,7 +327,7 @@ function refreshMainAgentToolPromptState(toolContext: MainAgentToolRuntimeContex
   toolContext.policyPrompt = `${String(toolContext.policyPrompt || "").split(marker)[0].trim()}\n\n${marker}\n${toolContext.mcpPrompt}`.trim();
 }
 
-export function normalizeMainAgentToolRequests(value: any, limit = 2): MainAgentToolRequest[] {
+export function normalizeMainAgentToolRequests(value: any, limit = 32): MainAgentToolRequest[] {
   const rows = Array.isArray(value) ? value : [];
   const seen = new Set<string>();
   const result: MainAgentToolRequest[] = [];
@@ -452,7 +453,10 @@ export async function executeMainAgentToolRequests(input: {
   const execute = input.executeToolCall || ((name: string, args: any, scope?: ToolScope) => toolManager.executeToolCall(name, args, scope));
   const batchSize = Math.max(1, Math.min(8, Math.floor(Number(input.toolBatchSize || 2))));
   const readOnlyParallelism = Math.max(1, Math.min(8, Math.floor(Number(input.readOnlyParallelism || 2))));
-  const requests = input.requests.slice(0, batchSize);
+  // `toolBatchSize` is a concurrency limit, not a limit on the number of
+  // logical calls returned by one model turn. Keep the complete bounded turn
+  // and drain it in safe batches so later independent calls are never lost.
+  const requests = input.requests.slice(0, 32);
 
   const executeOne = async (request: MainAgentToolRequest) => {
     if (request.name === "tool_search") {
@@ -521,8 +525,9 @@ export async function executeMainAgentToolRequests(input: {
       if (!skillName) recordToolSearchSuccess(request.name);
       const output = typeof rawOutput === "string" ? rawOutput : JSON.stringify(rawOutput);
       const outputTokens = estimateTextTokens(output);
-      if (outputTokens > Math.max(1, Number(input.resultTokenLimit || 8_000))) {
-        const error = "MAIN_AGENT_TOOL_RESULT_EXCEEDS_8K_TOKEN_BUDGET";
+      const resultTokenLimit = boundedToolResultLimit(input.resultTokenLimit);
+      if (outputTokens > resultTokenLimit) {
+        const error = MAIN_AGENT_TOOL_RESULT_LIMIT_ERROR;
         input.onResult?.(request, callId, null, error);
         return { name: request.name, itemName, toolKind, source: workspaceTool ? "ccm__workspace_readonly" : toolKind, loaded: true, scope: input.toolContext.capabilityToken ? "scoped_session" : "configured_scope", durationMs: Date.now() - startedAt, aliases, ok: false, error, outputTokens, resultChecksum: contextItemChecksum(error), reason: request.reason };
       }
@@ -560,7 +565,7 @@ export async function executeMainAgentToolRequests(input: {
       continue;
     }
     const readBatch: MainAgentToolRequest[] = [];
-    while (index < requests.length && isSafeReadOnly(requests[index]) && readBatch.length < readOnlyParallelism) {
+    while (index < requests.length && isSafeReadOnly(requests[index]) && readBatch.length < Math.min(readOnlyParallelism, batchSize)) {
       readBatch.push(requests[index]);
       index += 1;
     }

@@ -20,6 +20,7 @@ const props = defineProps({
   workEvents: { type: Array, default: () => [] },
   mainAgent: { type: Boolean, default: false },
   fileChangesTitle: { type: String, default: '' },
+  hideFileChanges: { type: Boolean, default: false },
   workflowSteps: { type: Array, default: () => [] },
   highlightMentions: { type: Function, default: (value) => value || '' },
   getPlanTitle: { type: Function, default: () => '协作计划' },
@@ -154,7 +155,7 @@ const textOnly = computed(() => !(
       :main-agent="mainAgent"
       :accent-style="accentStyle"
     />
-    <div v-if="msg.fileChanges && msg.fileChanges.count > 0" class="file-changes">
+    <div v-if="msg.fileChanges && msg.fileChanges.count > 0 && !hideFileChanges" class="file-changes">
       <div class="file-changes-header">{{ fileChangesTitle }}</div>
       <button v-for="f in msg.fileChanges.files" :key="f.path" class="file-change-item" @click="emit('open-file-diff', f)">
         <span class="fc-dot" :style="{ background: f.statusColor }"></span>

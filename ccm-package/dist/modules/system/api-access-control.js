@@ -71,12 +71,14 @@ const VIEWER_CHAT = [
 ];
 const SELF_SERVICE_MUTATIONS = [
     /^\/api\/search\/favorites(?:\/|$)/,
-    /^\/api\/slash-commands\/(?:resolve|confirm)$/,
+    /^\/api\/slash-commands\/(?:resolve|confirm|records)$/,
+    /^\/api\/conversations\/(?:branch|rewind\/preview|rewind\/apply|plan-mode|preferences)$/,
     /^\/api\/notifications\/(?:[^/]+\/(?:read|dismiss)|read-all)$/,
     /^\/api\/pets\/runtime\/deliveries\/[^/]+\/ack$/,
     /^\/api\/navigation\/config(?:\/|$)/,
 ];
 const OPERATOR_MUTATIONS = [
+    /^\/api\/automation-session(?:s|-bindings)(?:\/|$)/,
     /^\/api\/(?:tasks|requirements|workbench|missions|agent-qa|auto-dev|conversation-turns)(?:\/|$)/,
     /^\/api\/usability(?:\/|$)/,
     /^\/api\/(?:agent-runs|project-runs)\/(?:cancel|rollback)(?:\/|$)/,

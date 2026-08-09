@@ -47,6 +47,21 @@
 → 执行并写审计
 ```
 
+执行后按 CC 生命周期分流：
+
+```text
+local-jsx → 会话内面板/抽屉 → Esc关闭 → 无消息卡、模型不可见
+local     → 紧凑本地系统记录 → 跨刷新持久化 → 模型不可见
+prompt    → 用户命令 → 主Agent Loop → 工具/子Agent → 最终回答
+navigate  → 直接切换页面 → 不生成消息
+```
+
+同名命令优先遵循 CC 语义：`/branch` 分叉会话，`/files` 显示模型上下文来源，`/agents` 管理 Agent，`/tasks` 管理当前会话后台任务，`/plan` 切换持久 Plan Mode，`/resume` 恢复历史会话。CCM 原能力分别迁移到 `/git-status`、`/shared-files`、`/agent-health`、`/task-center` 和 `/session-stats`。
+
+`/branch` 与 `/rewind` 必须提交精确 scope、scopeId、sessionId、anchor message、revision、generation 与会话 checksum。`/rewind` 还必须先生成预览 checksum；漂移后整体拒绝。项目和群聊会话在回退时取消未完成执行、轮换 generation 并使旧 Evidence 失效。
+
+本地记录使用 `ccm-local-command-record-v1`，只保存命令、状态、摘要、checksum 和脱敏安全详情，`modelVisible:false`、`contentStored:false`。三类 Agent 的模型上下文投影统一过滤 `local_command/command_result`。
+
 确认回执两分钟内有效且只能使用一次。参数、作用域、用户、角色或会话变化都会使回执失效。高风险命令需要Admin；旧的纯前端`window.confirm`不再构成授权证据。
 
 ## 4. Skill命令

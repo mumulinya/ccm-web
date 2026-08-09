@@ -52,6 +52,54 @@ const api_access_control_1 = require("../system/api-access-control");
 const git_workspace_runtime_1 = require("../tools/git-workspace-runtime");
 const global_terminal_delivery_1 = require("../../agents/global/global-terminal-delivery");
 const secure_multipart_1 = require("../../system/secure-multipart");
+const automation_session_bindings_1 = require("../../system/automation-session-bindings");
+function normalizeGlobalRequestedTargets(value, message = "") {
+    let rows = value;
+    if (typeof rows === "string") {
+        try {
+            rows = JSON.parse(rows);
+        }
+        catch {
+            rows = [];
+        }
+    }
+    const available = (0, automation_session_bindings_1.listGlobalDispatchTargets)();
+    const byKey = new Map(available.map((item) => [`${item.scope}:${item.scopeId}`, item]));
+    const requestedRows = Array.isArray(rows) ? rows : [];
+    const explicit = requestedRows.map((item) => {
+        const scope = String(item?.scope || item?.type || "").trim().toLowerCase();
+        const scopeId = String(item?.scopeId || item?.scope_id || item?.id || item?.group_id || item?.project || "").trim();
+        return byKey.get(`${scope}:${scopeId}`) || null;
+    });
+    if (requestedRows.length) {
+        if (explicit.some((item) => !item || item.ready !== true))
+            throw new Error("选择的项目或群聊已经不可投放，请刷新目标列表后重试");
+        return [...new Map(explicit.map((item) => [`${item.scope}:${item.scopeId}`, item])).values()];
+    }
+    const text = String(message || "");
+    const exactNameMentioned = (nameValue) => {
+        const name = String(nameValue || "").trim();
+        if (name.length < 2)
+            return false;
+        if (text.trim() === name)
+            return true;
+        if (/^[a-z0-9_.-]+$/i.test(name)) {
+            const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+            return new RegExp(`(^|[\\s，,。:：;；'\"“”()（）\\[\\]])${escaped}($|[\\s，,。:：;；'\"“”()（）\\[\\]])`, "i").test(text);
+        }
+        return text.includes(name);
+    };
+    const matches = available.filter((item) => item.ready === true && [item.canonicalName, item.displayName]
+        .some(exactNameMentioned));
+    const ambiguousNames = new Set();
+    for (const match of matches) {
+        for (const name of [match.canonicalName, match.displayName].filter(Boolean)) {
+            if (matches.filter((item) => item.canonicalName === name || item.displayName === name).length > 1)
+                ambiguousNames.add(String(name));
+        }
+    }
+    return matches.filter((item) => !ambiguousNames.has(String(item.canonicalName)) && !ambiguousNames.has(String(item.displayName)));
+}
 function resolveControlBotAcpPlatformContext(acpSessionIdValue) {
     const acpSessionId = String(acpSessionIdValue || "").trim();
     if (!acpSessionId || acpSessionId.length > 240 || !fs.existsSync(utils_1.SESSIONS_DIR))
@@ -157,6 +205,7 @@ function createGlobalAgentApi(deps) {
                         sourceIngestion: metadata.source_ingestion || null,
                         readOnly: metadata.read_only === true,
                         principal: metadata.principal || null,
+                        requestedTargetRefs: Array.isArray(metadata.requested_target_refs) ? metadata.requested_target_refs : [],
                         turnId: turn.id,
                         queueScope: `global:${sessionId}`,
                     });
@@ -548,7 +597,7 @@ function createGlobalAgentApi(deps) {
                             return;
                         }
                         try {
-                            const result = await processFeishuCardAction(getRequestBaseUrl(req), payload);
+                            const result = await processFeishuCardAction(getRequestBaseUrl(req), payload, ctx);
                             sendJson(res, { toast: { type: "success", content: result.message || "操作成功" } });
                         }
                         catch (error) {
@@ -1303,6 +1352,7 @@ function createGlobalAgentApi(deps) {
                     const displayMessage = originalMessage || (files.length
                         ? `请处理已上传的 ${files.length} 份资料：${files.map((file) => file.filename || "附件").join("、")}`
                         : message);
+                    const requestedTargetRefs = normalizeGlobalRequestedTargets(payload.target_refs || payload.targetRefs, originalMessage || message);
                     const sourceFiles = (0, global_agent_attachments_1.serializeGlobalRequestAttachments)(files);
                     if (!message)
                         throw new Error("消息不能为空");
@@ -1354,6 +1404,7 @@ function createGlobalAgentApi(deps) {
                                 source_ingestion: sourceIngestion,
                                 read_only: (0, api_access_control_1.requestIsReadOnly)(req),
                                 principal,
+                                requested_target_refs: requestedTargetRefs,
                             },
                         },
                     });
@@ -1387,6 +1438,7 @@ function createGlobalAgentApi(deps) {
                         sourceIngestion,
                         readOnly: (0, api_access_control_1.requestIsReadOnly)(req),
                         principal,
+                        requestedTargetRefs,
                         turnId: activeTurn.id,
                         queueScope: `global:${sessionId}`,
                         onEvent: (event) => {

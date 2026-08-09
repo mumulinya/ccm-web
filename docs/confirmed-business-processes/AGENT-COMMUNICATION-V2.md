@@ -69,7 +69,7 @@ taskId + workItemId + exactSessionId
 
 `CCM_AGENT_RECEIPT` 文本标记继续兼容。尚未主动调用通信 MCP 的旧运行时，会从回执内的 ACK 与 Result 生成标记为兼容桥接的 V2 证据；不会允许第三方结果直接成为终态。
 
-Agent Communication V2 同时投影到用户可见执行流：Dispatch/队列为 `agent_started`，Runner/ACK/Progress/Result待验收为 `agent_progress`，只有 CCM Terminal accepted 才成为 `agent_completed`。该投影不改变通信状态机，也不保存第三方原始输出。页面行为见 [CC-STYLE-USER-VISIBLE-EXECUTION-FLOW.md](./CC-STYLE-USER-VISIBLE-EXECUTION-FLOW.md)。
+Agent Communication V2 同时投影到用户可见执行流：Dispatch/队列为 `agent_started`，Runner/ACK/Progress/Result待验收为 `agent_progress`，只有 CCM Terminal accepted 才成为 `agent_completed`。追加事件按 `agentRunId + taskId + workItemId + projectId + generation` 投影成一条项目行，状态原位更新；项目名称优先、Codex/Claude Code等运行时作为次要标识。该投影不改变通信状态机，也不保存第三方原始输出。页面行为见 [CC-STYLE-USER-VISIBLE-EXECUTION-FLOW.md](./CC-STYLE-USER-VISIBLE-EXECUTION-FLOW.md)。
 
 ## 状态机与时间门禁
 
@@ -84,6 +84,8 @@ created -> queued -> lease_acquired -> runner_starting -> runner_started
 异常状态包括 `startup_timeout`、`ack_timeout`、`heartbeat_lost`、`lease_expired`、`cancel_requested`、`recovery_required`、`stale_receipt` 和 `failed`。服务端维护合法迁移表，通用任务更新和第三方 Agent 不能跳过门禁。
 
 默认值：Runner 启动 60 秒、ACK 30 秒、系统心跳 20 秒、失联 90 秒、lease 120 秒、最大 attempt 3、单项目并发 2、全局并发 6。项目和群聊可降低并发，不能突破全局值。
+
+独立项目工作项在无依赖、无写路径冲突时使用稳定并行批次并以隔离结果收敛；单个项目失败不会吞掉其他项目结果。容量不足的工作项保持 `queued` 并显示真实队列位置，槽位释放后自动领取租约。第三方 Runner 的 Result 被持久接收后立即释放执行槽，CCM Terminal 验收继续使用原 generation、attempt 和 lease 身份校验，不占用运行并发。
 
 后台 watchdog 每 5 秒核对启动、ACK、心跳和租约。无副作用时先递增 attempt、作废旧 lease、停止旧 Runner，等待执行通道释放后自动把原任务重新入队；旧 Runner 的迟到结果因 attempt/lease CAS 不匹配只能写成 `stale_receipt`。已有明确文件变化时先重验 worktree；副作用不确定时进入 `recovery_required`，不自动重复修改。
 

@@ -247,6 +247,12 @@ export declare function startAgentCommunicationDispatch(input: AgentCommunicatio
     envelope: any;
     lease: any;
 };
+/** Keeps a capacity-limited dispatch queued until its durable lease can be acquired. */
+export declare function waitForAgentCommunicationDispatch(input: Parameters<typeof startAgentCommunicationDispatch>[0], options?: {
+    initialDispatch?: any;
+    pollIntervalMs?: number;
+    shouldCancel?: () => boolean;
+}): Promise<any>;
 export declare function markAgentCommunicationRunnerStarted(messageId: string, detail?: any): {
     envelope: any;
     unchanged: boolean;

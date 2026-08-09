@@ -51,6 +51,7 @@ const third_party_memory_snapshot_1 = require("../../integrations/third-party-me
 const agent_sessions_shared_1 = require("../../tasks/agent-sessions-shared");
 const collaboration_cross_agents_part_02_part_02_native_test_1 = require("./collaboration-cross-agents-part-02-part-02-native-test");
 const execution_kernel_1 = require("../../agents/execution-kernel");
+const collaboration_agent_parallel_dispatch_1 = require("./collaboration-agent-parallel-dispatch");
 const agent_communication_v2_1 = require("../../system/agent-communication-v2");
 async function processCrossAgents(groupId, group, sourceProject, output, atMentions, configs, ctx, streamRes = null, depth = 0, seenMentions = new Set(), executionOrder = "parallel", planMessageId = "", taskId = "", deps) {
     const { addGroupLog, addTaskLog, admitChildTypedMemoryDelivery, appendAgentQaTrace, appendGroupMessage, appendTaskTimelineEvent, attachExecutionWorkspace, attachInvokedSkillsToReceipt, attachMemoryContextConsumptionChallenge, attachTaskAgentFinalDispatchPayloadGate, bindTaskAgentInvocationContext, bindTaskAgentInvocationMemoryDelivery, bindTaskAgentInvocationRunnerRequest, bindTaskAgentMemoryContextSnapshot, buildAckPreflightReview, buildAgentMemoryContextBundleWithManifestSelection, buildAgentMemoryPacket, buildAgentQaProtocolInstructions, buildAgentToolContext, buildChildAgentDevelopmentContract, buildChildAgentTaskText, buildChildAgentWorkerHandoff, buildChildAgentWorktreeNotice, buildCollaborationConflictPlan, orderMentionsForConflictPlan, buildCoordinatorCollaborationInstructions, buildCoordinatorReworkContinuationFallback, buildCoordinatorSharedFilesContext, buildFinalWorkerDispatchPayloadGate, buildGroupContextPacket, buildMemberCollaborationInstructions, buildNativeTestAgentPlanBlockedReceipt, buildNativeTestAgentReceipt, buildNativeTestAgentReviewSummary, buildNativeTestAgentRuntimeToolContext, buildPostReviewSpotCheckSummary, buildProjectExecutionBrief, buildProjectVerificationHints, buildRuntimeRecoveryCandidates, buildRuntimeRecoveryPrompt, buildTaskPreflightReasoning, buildTaskProviderSwitchRequests, buildWorkerContinuationHandoff, buildWorkflowMeta, checkTaskFailure, claimTaskWorkItemForAgent, commitChildTypedMemoryDelivery, commitTaskAgentSessionCapacityRevalidation, compactMemoryText, compactRuntimeToolAudit, completeTaskAgentInvocationEdge, coordinatorReworkRouteNeedsFreshVerifier, coordinatorReworkRouteRequiresStop, coordinatorReworkRouteUsesVerifier, createChildTypedMemoryDispatchWal, createExecutionCheckpoint, createMemoryContextConsumptionChallenge, dispatchTaskAgentInvocationEdge, emitAssignmentStatus, ensureExecution, escapeRegExp, evaluateAdvisoryPermissionBoundary, evaluateGreenContract, extractActionableMentions, extractAgentReceipt, extractRunnerVerificationEvidence, formatCollectedAgentOutput, formatNativeTestAgentOutput, formatNativeTestAgentPlanBlockedOutput, getAgentDependencyStateFromOutputs, getChildAgentIsolationMode, getCoordinatorActionMentions, getCoordinatorMember, getInitialWorkflowMeta, getMentionReworkRoute, getProjectAgentCapabilityProfile, getProjectExtraConfig, getReceiptAssignmentStatus, getRoutableMembers, getTaskAgentSessionOptions, getTaskById, getTestAgentHandoffPayload, getTestAgentHandoffProjectWorkDir, getTestAgentHandoffReviewSubject, getTestAgentHandoffWarnings, getWorkDirState, handleAgentQaRequests, inspectTaskAgentFinalDispatchReactiveCompactCircuitBreaker, isCoordinatorTestAgentName, isProviderPromptTooLongFailure, loadExecution, markChildTypedMemoryDispatchCommitted, markChildTypedMemoryDispatchStarted, markChildTypedMemoryRunnerReturned, memoryContextConsumptionReceiptFile, normalizeAgentRuntimeId, normalizeMentionTask, normalizePlanAssignments, openTaskAgentSession, prepareAgentRuntimeTools, prepareChildAgentWorkDir, prepareTaskAgentInvocationEdge, prepareTaskAgentSessionCapacityRevalidation, recordAgentRuntimeLifecycle, recordReplayRepairTimelineBindingsForMention, recordTaskAgentFinalDispatchReactiveCompactCircuitOutcome, recordTaskAgentMemoryContextDelivery, recordTaskAgentSessionTurn, recordWorkerContextProviderSwitchExecutionReceiptForCoordinator, recordWorkerContextProviderSwitchSessionBindingForCoordinator, recoverFinalWorkerDispatchPayload, renderGroupPostCompactDynamicContextDelta, renderGroupPostCompactInvokedSkillAttachments, renderGroupPostCompactPlanAttachment, renderMemoryContextForWorker, resolveMemberRuntime, runGroupOrchestrator, runMainAgentPostReviewSpotCheck, runTestAgentCliJob, runtimeToolDispatchBlockedMessage, runtimeToolDispatchBlockedReceipt, runtimeToolSnapshotFromAudit, shouldSwitchRuntime, stopWrongDirectionWorkerForCoordinatorRoute, stripAgentQaProtocolBlocks, summarizeNativeTestAgentExecutionPlan, summarizeReplayRepairTimelineBindingsForEvent, summarizeTaskAgentMemoryContextSnapshot, summarizeWorkerHandoffForUser, taskAgentInvocationMemoryOptions, taskAgentSessionLifecycleRunnerOptions, taskRequiresCodeChanges, taskRequiresVerification, transitionExecution, uniqueStrings, updateGroupMemory, updateGroupTaskInlineStatus, updateTask, updateTaskWorkItemFromReceipt, validateTestAgentHandoffRegisteredWorkDirs, verifyFinalWorkerDispatchPayloadGate, writeSse } = deps;
@@ -224,10 +225,35 @@ async function processCrossAgents(groupId, group, sourceProject, output, atMenti
         }
     }
     else {
-        const settledOutputs = await Promise.all(uniqueMentions.map(mention => executeMentionJob(mention)));
-        settledOutputs.forEach((outputs, index) => {
+        const parallelGroupId = uniqueMentions.length > 1
+            ? (0, collaboration_agent_parallel_dispatch_1.createAgentParallelGroupId)({
+                groupId,
+                taskId,
+                planMessageId,
+                depth,
+                targets: uniqueMentions.map(collaboration_cross_agents_helpers_1.getMentionTargetName),
+            })
+            : "";
+        const parallelMentions = uniqueMentions.map((mention) => ({
+            ...mention,
+            parallelGroupId,
+        }));
+        const settledOutputs = await (0, collaboration_agent_parallel_dispatch_1.settleParallelAgentJobs)(parallelMentions, executeMentionJob);
+        settledOutputs.forEach(({ mention, outputs, error }) => {
+            if (error) {
+                const targetName = (0, collaboration_cross_agents_helpers_1.getMentionTargetName)(mention);
+                const summary = String(error?.message || error || "项目子 Agent 执行失败").slice(0, 500);
+                const receipt = { agent: targetName, status: "failed", summary, actions: [], filesChanged: [], verification: [], blockers: [summary], needs: [] };
+                outputs = [formatCollectedAgentOutput(targetName, `❌ 项目子 Agent 执行失败：${summary}`, receipt)];
+                emitAssignmentStatus(streamRes, groupId, planMessageId, targetName, "failed", summary);
+                if (taskId) {
+                    addTaskLog(taskId, "error", `${targetName} 并行执行失败：${summary}`);
+                    appendTaskTimelineEvent(taskId, { type: "child_agent_failed", title: `子 Agent 执行失败：${targetName}`, detail: summary, status: "fail", phase: "executing", agent: targetName });
+                    updateTaskWorkItemFromReceipt(taskId, targetName, receipt, null, summary);
+                }
+            }
             collectedOutputs.push(...outputs);
-            rememberMentionOutputsFn(uniqueMentions[index], outputs);
+            rememberMentionOutputsFn(mention, outputs);
         });
     }
     return collectedOutputs;
@@ -740,7 +766,7 @@ async function executeMentionJob(mention, env) {
     const advisoryOnly = !!mention.advisoryOnly;
     const communicationAttempt = Math.max(1, memoryDeliveryAttemptSequence || 1);
     const communicationGeneration = Math.max(0, Number(sourceTask?.agent_communication_generation || sourceTask?.generation || 0));
-    const communicationDispatch = taskId ? (0, agent_communication_v2_1.startAgentCommunicationDispatch)({
+    const communicationDispatchInput = {
         taskId,
         workItemId: laneExecutionId || `${taskId}--${targetName}`,
         scope: "group",
@@ -755,17 +781,35 @@ async function executeMentionJob(mention, env) {
         payload: {
             sourceProject,
             authorizedProject: targetName,
+            projectName: targetName,
+            runtimeId: activeTaskSession?.agentType || tAgentType,
+            workItemTitle: String(mention?.workItemTitle || mention?.work_item_title || mention?.title || sourceTask?.title || atMessage || "").replace(/\s+/g, " ").trim().slice(0, 300),
+            parallelGroupId: String(mention?.parallelGroupId || mention?.parallel_group_id || ""),
             workspaceMode: preparedWorkDir.mode,
             worktreeRef: preparedWorkDir.mode === "worktree" ? preparedWorkDir.worktreePath || preparedWorkDir.workDir : "",
             advisoryOnly,
             verificationOnly: nativeTestAgentDispatch,
         },
         policy: sourceTask?.contextPolicy?.effective || sourceTask?.context_policy?.effective || sourceTask?.context_policy_effective || {},
-    }) : { enabled: false, acquired: true, envelope: null };
+    };
+    let communicationDispatch = taskId
+        ? (0, agent_communication_v2_1.startAgentCommunicationDispatch)(communicationDispatchInput)
+        : { enabled: false, acquired: true, envelope: null };
+    if (communicationDispatch.enabled !== false && communicationDispatch.acquired !== true && communicationDispatch.capacity === true) {
+        communicationDispatch = await (0, agent_communication_v2_1.waitForAgentCommunicationDispatch)(communicationDispatchInput, {
+            initialDispatch: communicationDispatch,
+            shouldCancel: () => !!taskId && (0, execution_kernel_1.isTaskCancellationRequested)(taskId),
+        });
+    }
+    if (communicationDispatch.cancelled) {
+        const cancelled = `【${targetName}】\n- 状态：cancelled\n- 摘要：等待执行容量期间任务已取消`;
+        outputs.push(cancelled);
+        return outputs;
+    }
     if (communicationDispatch.enabled !== false && communicationDispatch.acquired !== true) {
-        return failChildDispatch(`第三方 Agent 并发容量已满：${communicationDispatch.reason || "capacity_limit"}`, [
+        return failChildDispatch(`第三方 Agent 无法领取执行租约：${communicationDispatch.reason || "lease_unavailable"}`, [
             `queue_position=${communicationDispatch.position || 1}`,
-            "CCM 已保留结构化队列原因，本轮不会越过全局或项目并发上限",
+            "CCM 已保留结构化队列与租约原因，本轮不会越过全局或项目并发上限",
         ]);
     }
     const communicationEnvelope = communicationDispatch.envelope || null;

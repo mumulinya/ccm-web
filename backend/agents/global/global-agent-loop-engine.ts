@@ -14,7 +14,9 @@ import {
   recordAgentRuntimeLifecycle,
 } from "../runtime-kernel";
 import { projectContextSourceToolResultForPersistence } from "../../system/context-source-tool-result-projection";
-import { appendUserVisibleAgentEvent, buildUserVisibleAgentResult } from "../../system/user-visible-agent-events";
+import { appendAssistantProgress, appendToolProjection, appendUserVisibleAgentEvent, appendUserVisibleRequirementPlan, buildUserVisibleAgentResult } from "../../system/user-visible-agent-events";
+import { assistantProgressNarrationEnabled, buildAssistantProgressFallback } from "../../system/assistant-progress";
+import { loadOrchestratorConfig } from "../../modules/collaboration/group-orchestrator-config";
 import { publishUserVisibleAssistantText } from "../../system/user-visible-agent-projections";
 import {
   recordGlobalAgentRunMetric,
@@ -145,7 +147,19 @@ export function emit(runtime: GlobalAgentLoopRuntime, event: any, run: GlobalAge
     const eventType = sourceType === "decision" ? "thinking_status"
       : sourceType === "confirmation_required" ? "permission_required"
         : ["paused", "interrupted"].includes(sourceType) ? "result"
-          : sourceType;
+        : sourceType;
+    const finalFileChanges = (() => {
+      const candidates = [
+        run.final_delivery_report?.files,
+        run.final_report?.actual_file_changes,
+        run.final_report?.file_changes,
+        run.final_report?.files_modified,
+        run.workchain?.delivery_report?.files,
+        run.workchain?.completion_summary?.actual_file_changes,
+        run.workchain?.completion_summary?.file_changes,
+      ];
+      return candidates.find(Array.isArray) || [];
+    })();
     const result = ["completed", "failed", "cancelled", "blocked", "paused", "interrupted"].includes(sourceType)
       ? buildUserVisibleAgentResult({
         status: sourceType === "completed" ? "success" : sourceType,
@@ -155,9 +169,16 @@ export function emit(runtime: GlobalAgentLoopRuntime, event: any, run: GlobalAge
         toolCalls: run.tool_calls,
         stopReason: sourceType,
         usage: run.usage,
+        fileChanges: finalFileChanges,
       })
       : undefined;
-    appendUserVisibleAgentEvent({
+    const totalDurationMs = result ? Math.max(0, Date.parse(run.completed_at || run.updated_at) - Date.parse(run.started_at)) : 0;
+    const modelDurationMs = result ? Math.max(0, Number(run.model_duration_ms || 0)) : 0;
+    const toolWallDurationMs = result
+      ? run.steps.reduce((sum, step) => sum + (step.tool ? Math.max(0, Number(step.duration_ms || 0)) : 0), 0)
+      : 0;
+    const otherDurationMs = result ? Math.max(0, totalDurationMs - modelDurationMs - toolWallDurationMs) : 0;
+    const eventInput = {
       eventId: `global:${run.id}:${sourceType}:${tool?.signature || event?.step?.index || run.steps.length}`,
       scope: "global",
       scopeId: "global",
@@ -165,14 +186,16 @@ export function emit(runtime: GlobalAgentLoopRuntime, event: any, run: GlobalAge
       generation: Math.max(0, Number(run.resume_count || 0)),
       taskId: run.mission_id || run.id,
       eventType,
-      toolName,
+      toolName: toolName === "invoke_mcp" ? (tool?.arguments?.tool_name || tool?.arguments?.toolName || toolName) : toolName,
       toolCallId: tool?.signature || undefined,
       arguments: tool?.arguments || {},
       observation: event?.observation,
       error: event?.error,
       durationMs: event?.step?.duration_ms,
       result,
+      fileChanges: result ? finalFileChanges : undefined,
       usage: result ? run.usage : undefined,
+      detail: result ? { timing: { totalMs: totalDurationMs, modelMs: modelDurationMs, toolWallMs: toolWallDurationMs, otherMs: otherDurationMs } } : undefined,
       display: {
         title: sourceType === "started" ? "全局 Agent"
           : sourceType === "decision" ? "正在思考"
@@ -186,9 +209,65 @@ export function emit(runtime: GlobalAgentLoopRuntime, event: any, run: GlobalAge
             : ["confirmation_required", "clarification_required", "paused", "interrupted"].includes(sourceType) ? "waiting" : "running",
         toolUseCount: result ? run.tool_calls : undefined,
         tokenCount: result ? Number(run.usage?.totalTokens || 0) : undefined,
+        tokenType: result ? "provider_total" : undefined,
+        tokenAccuracy: result ? (run.usage?.reported === false ? "estimated" : "reported") : undefined,
       },
-    });
+    };
+    if (["tool_started", "tool_completed", "tool_failed"].includes(sourceType)) appendToolProjection(eventInput);
+    else appendUserVisibleAgentEvent(eventInput);
   } catch {}
+}
+
+function appendGlobalRequirementPlan(run: GlobalAgentRun, decision: GlobalAgentDecision | null, terminalStatus?: "completed" | "blocked") {
+  const current = (run as any).user_visible_requirement_plan || null;
+  const planSteps = Array.isArray(decision?.plan) && decision!.plan.length
+    ? decision!.plan.map(String).filter(Boolean)
+    : Array.isArray(current?.steps) ? current.steps.map((step: any) => String(step?.title || "")).filter(Boolean) : [];
+  const workflow = decision?.workflowDecision || run.workflow_decision || run.workflowDecision || null;
+  const workflowValue: any = workflow;
+  const actionRequired = workflowValue?.actionRequired === true || workflowValue?.action_required === true;
+  if (!planSteps.length || (!actionRequired && !terminalStatus && !current)) return null;
+  const stablePlan = {
+    goal: String(run.original_user_message || run.user_message || "完成当前任务。"),
+    steps: planSteps,
+    scope: Array.isArray(workflowValue?.impactScope || workflowValue?.impact_scope) ? (workflowValue.impactScope || workflowValue.impact_scope).map(String) : [],
+  };
+  const checksum = crypto.createHash("sha256").update(JSON.stringify(stablePlan)).digest("hex");
+  const changed = checksum !== String((run as any).user_visible_requirement_plan_checksum || "");
+  const revision = changed ? Math.max(1, Number((run as any).user_visible_requirement_plan_revision || 0) + 1) : Math.max(1, Number((run as any).user_visible_requirement_plan_revision || 1));
+  if (!terminalStatus && !changed && current) return null;
+  const plan = {
+    planId: run.mission_id || run.id,
+    revision,
+    title: "需求实施计划",
+    goal: stablePlan.goal,
+    steps: planSteps.map((title: string, index: number) => ({
+      id: `step_${index + 1}`,
+      title,
+      description: title,
+      outcome: "完成后进入下一阶段，并保留可验证的结果。",
+      dependsOn: index > 0 ? [`step_${index}`] : [],
+      status: terminalStatus === "completed" ? "completed" : terminalStatus === "blocked" ? "blocked" : index === 0 ? "running" : "pending",
+    })),
+    scope: stablePlan.scope,
+    expectedResults: Array.isArray(decision?.completion?.evidence) ? decision!.completion!.evidence : [],
+    exclusions: [],
+    status: terminalStatus || "executing",
+    createdAt: current?.createdAt || run.started_at,
+    updatedAt: run.updated_at || new Date().toISOString(),
+  };
+  (run as any).user_visible_requirement_plan = plan;
+  (run as any).user_visible_requirement_plan_checksum = checksum;
+  (run as any).user_visible_requirement_plan_revision = revision;
+  return appendUserVisibleRequirementPlan({
+    eventId: `global:${run.id}:requirement-plan:${revision}:${terminalStatus || "executing"}`,
+    scope: "global",
+    scopeId: "global",
+    exactSessionId: run.session_id,
+    generation: Math.max(0, Number(run.resume_count || 0)),
+    taskId: run.mission_id || run.id,
+    plan,
+  });
 }
 
 export function classifyGlobalAgentUserSteer(message: string, requestedKind: string = "auto"): GlobalAgentUserSteerKind {
@@ -887,6 +966,7 @@ export function completeRun(run: GlobalAgentRun, runtime: GlobalAgentLoopRuntime
     markContextSourcesFromOutput(sourceIdentity, run.final_reply);
     finalizeContextSourceRun(sourceIdentity);
   }
+  appendGlobalRequirementPlan(run, null, status === "completed" ? "completed" : "blocked");
   saveRun(run, runtime.persist !== false);
   recordGlobalAgentRuntimeOutput(run, { type: "run_terminal", status, reply: run.final_reply, error: run.error });
   appendTraceEvent(run.trace_id, { id: `${run.id}:${status}:${run.completed_at}`, type: `global_agent.run_${status}`, status: status === "completed" ? "ok" : status === "cancelled" ? "warning" : "error", message: run.final_reply.slice(0, 1000), data: { steps: run.steps.length, model_calls: run.model_calls, tool_calls: run.tool_calls, error: run.error } });
@@ -941,7 +1021,14 @@ async function continueLoop(run: GlobalAgentRun, runtime: GlobalAgentLoopRuntime
         let messages = await buildGlobalAgentModelMessages(run, runtime);
         if (runtime.prepareModelMessages) messages = await runtime.prepareModelMessages(messages, run);
         run.model_calls += 1;
-        const rawDecision = await runtime.callModel(messages, run, runAbortController.signal);
+        const modelStartedAt = runtime.now ? runtime.now() : Date.now();
+        let rawDecision: any;
+        try {
+          rawDecision = await runtime.callModel(messages, run, runAbortController.signal);
+        } finally {
+          run.model_duration_ms = Math.max(0, Number(run.model_duration_ms || 0))
+            + Math.max(0, (runtime.now ? runtime.now() : Date.now()) - modelStartedAt);
+        }
         if (applyPendingGlobalAgentUserSteers(run, runtime).length) continue;
         decision = parseGlobalAgentDecision(rawDecision, run.workflow_decision || run.workflowDecision || null);
       } catch (error: any) {
@@ -973,6 +1060,7 @@ async function continueLoop(run: GlobalAgentRun, runtime: GlobalAgentLoopRuntime
       decision.intent = normalizedIntent;
       updateReasoningPlan(run.reasoning_loop, decision.plan || [], normalizedIntent.reason || `decision:${decision.state}`);
       updateGlobalAgentTodoLedger(run, decision.plan || [], decision.tool?.name || "");
+      appendGlobalRequirementPlan(run, decision);
       explainReasoningDecision(run.reasoning_loop, decision.state, normalizedIntent.reason || decision.message || "模型形成下一步决策");
       const step: GlobalAgentRunStep = {
         index: run.steps.length + 1,
@@ -1259,6 +1347,26 @@ async function continueLoop(run: GlobalAgentRun, runtime: GlobalAgentLoopRuntime
         message: step.message,
         data: { arguments: args, context: run.user_message },
       });
+      let progressConfig: any = {};
+      try { progressConfig = loadOrchestratorConfig(); } catch {}
+      if (assistantProgressNarrationEnabled(progressConfig)) {
+        const previousMessage = [...run.steps].reverse().find(item => item.tool)?.message || "";
+        const decisionProgress = sanitizeMainAgentUserFacingText(String(decision.message || "")).slice(0, 600);
+        const progressText = run.tool_calls === 0
+          ? (decisionProgress || buildAssistantProgressFallback([{ name: decision.tool.name }]))
+          : (decisionProgress && decisionProgress !== previousMessage ? decisionProgress : "");
+        if (progressText) appendAssistantProgress({
+          scope: "global", scopeId: "global", exactSessionId: run.session_id,
+          generation: Math.max(0, Number(run.resume_count || 0)),
+          taskId: run.mission_id || run.id,
+          turnId: run.id,
+          text: progressText,
+          kind: run.tool_calls === 0 ? "before_tools" : "key_finding",
+          modelCallIndex: run.model_calls,
+          relatedToolCallIds: [signature],
+          title: "全局 Agent",
+        });
+      }
       markGlobalAgentToolTodo(run, decision.tool.name, "in_progress", step.message || `执行 ${decision.tool.name}`);
       recordGlobalAgentRuntimeOutput(run, { type: "tool_started", tool: decision.tool.name, risk, arguments: args });
       emit(runtime, { type: "tool_started", tool: step.tool, message: step.message }, run);
@@ -1387,6 +1495,12 @@ async function continueLoop(run: GlobalAgentRun, runtime: GlobalAgentLoopRuntime
         recordGlobalAgentRuntimeOutput(run, { type: "tool_completed", tool: decision.tool.name, sourceToolName: decision.tool.name === "invoke_mcp" ? (args?.tool_name || args?.toolName || "") : "", risk, duration_ms: step.duration_ms, observation: step.observation });
         markGlobalAgentToolTodo(run, decision.tool.name, toolSucceeded ? "done" : "blocked", toolSucceeded ? `${decision.tool.name} 完成` : String(result?.error || `${decision.tool.name} 返回失败`));
         emit(runtime, { type: "tool_completed", tool: step.tool, observation: step.observation }, run);
+        if (!toolSucceeded && assistantProgressNarrationEnabled(progressConfig)) appendAssistantProgress({
+          scope: "global", scopeId: "global", exactSessionId: run.session_id,
+          generation: Math.max(0, Number(run.resume_count || 0)), taskId: run.mission_id || run.id, turnId: run.id,
+          text: "当前工具返回了失败结果，我会根据这项观察调整计划，不会机械重复同一调用。",
+          kind: "blocker", modelCallIndex: run.model_calls, relatedToolCallIds: [signature], title: "全局 Agent",
+        });
         emit(runtime, { type: "tool_activity", phase: "completed", tool: decision.tool.name, risk, step: step.index }, run);
         if (toolSucceeded) emitGlobalDispatchLaunchProgress(runtime, run, step);
       } catch (error: any) {
@@ -1421,6 +1535,12 @@ async function continueLoop(run: GlobalAgentRun, runtime: GlobalAgentLoopRuntime
         recordGlobalAgentRuntimeOutput(run, { type: "tool_failed", tool: decision.tool.name, risk, duration_ms: step.duration_ms, error: step.error });
         markGlobalAgentToolTodo(run, decision.tool.name, "blocked", step.error);
         emit(runtime, { type: "tool_failed", tool: step.tool, error: step.error }, run);
+        if (assistantProgressNarrationEnabled(progressConfig)) appendAssistantProgress({
+          scope: "global", scopeId: "global", exactSessionId: run.session_id,
+          generation: Math.max(0, Number(run.resume_count || 0)), taskId: run.mission_id || run.id, turnId: run.id,
+          text: "当前工具执行失败，我会先核对错误和可用能力，再决定是否重试或请求你介入。",
+          kind: "blocker", modelCallIndex: run.model_calls, relatedToolCallIds: [signature], title: "全局 Agent",
+        });
         emit(runtime, { type: "tool_activity", phase: "failed", tool: decision.tool.name, risk, step: step.index, error: step.error }, run);
       }
       run.steps.push(step);
@@ -1460,6 +1580,7 @@ export async function startGlobalAgentRun(input: {
   writeAuthorizationReceipt?: any;
   authorizationMessage?: string;
   directReply?: string;
+  requestedTargetRefs?: any[];
 }, runtime: GlobalAgentLoopRuntime) {
   const createdAt = nowIso(runtime);
   const id = `gar_${Date.now().toString(36)}_${crypto.randomBytes(4).toString("hex")}`;
@@ -1480,6 +1601,7 @@ export async function startGlobalAgentRun(input: {
     write_authorization_receipt: input.writeAuthorizationReceipt || null,
     writeAuthorizationReceipt: input.writeAuthorizationReceipt || null,
     authorization_message: String(input.authorizationMessage || input.originalMessage || input.message || ""),
+    requested_target_refs: Array.isArray(input.requestedTargetRefs) ? input.requestedTargetRefs : [],
     workflow_decision: input.workflowDecision || null,
     workflowDecision: input.workflowDecision || null,
     created_at: createdAt,

@@ -154,6 +154,7 @@
         "docs/confirmed-project-architecture/GLOBAL-AGENT-OPERATIONS.md"
       ],
       "businessProcessDocs": [
+        "docs/confirmed-business-processes/CC-STYLE-USER-VISIBLE-EXECUTION-FLOW.md",
         "docs/confirmed-business-processes/GLOBAL-AGENT-RUNTIME-PRODUCTION-V2.md",
         "docs/confirmed-business-processes/THREE-SESSION-CC-MAIN-AGENT-LOOP.md"
       ],
