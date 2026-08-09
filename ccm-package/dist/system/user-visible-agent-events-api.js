@@ -44,7 +44,26 @@ async function rehydrateReadonlyToolDetail(event) {
         allowedProjects,
     });
     const result = await (0, workspace_readonly_tools_1.executeWorkspaceReadonlyTool)(event.toolName, event.detail.safeArguments, capabilityToken);
-    return (0, tool_display_projection_1.buildToolDisplayDetail)({ toolName: event.toolName, arguments: event.detail.safeArguments, result, transientBody: true });
+    const current = (0, tool_display_projection_1.buildToolDisplayDetail)({
+        toolName: event.toolName,
+        arguments: event.detail.safeArguments,
+        result,
+        transientBody: true,
+        freshness: "current",
+    });
+    const previousRevision = String(event.detail?.toolDisplay?.result?.authoritativeRevision || "");
+    const currentRevision = String(current.result.authoritativeRevision || "");
+    if (previousRevision && currentRevision && previousRevision !== currentRevision)
+        current.result.freshness = "drifted";
+    return current;
+}
+function rehydrateFailureFreshness(error) {
+    const message = String(error?.message || error || "");
+    if (/permission|权限|授权|forbidden|unauthorized/i.test(message))
+        return "permission_revoked";
+    if (/not.?found|不存在|已删除|ENOENT/i.test(message))
+        return "deleted";
+    return "";
 }
 function handleUserVisibleAgentEventsApi(pathname, req, res, parsed) {
     const detailMatch = pathname.match(/^\/api\/agent-execution\/events\/([^/]+)\/detail$/);
@@ -57,7 +76,12 @@ function handleUserVisibleAgentEventsApi(pathname, req, res, parsed) {
                 return (0, utils_1.sendJson)(res, { success: false, error: "工具事件不存在或不属于当前精确会话" }, 404);
             rehydrateReadonlyToolDetail(event)
                 .then(toolDisplay => (0, utils_1.sendJson)(res, { success: true, schema: "ccm-tool-detail-response-v1", toolDisplay, contentStored: false }))
-                .catch((error) => (0, utils_1.sendJson)(res, { success: false, error: String(error?.message || error) }, Number(error?.statusCode || 400)));
+                .catch((error) => (0, utils_1.sendJson)(res, {
+                success: false,
+                error: String(error?.message || error),
+                ...(rehydrateFailureFreshness(error) ? { freshness: rehydrateFailureFreshness(error) } : {}),
+                contentStored: false,
+            }, Number(error?.statusCode || 400)));
         }
         catch (error) {
             (0, utils_1.sendJson)(res, { success: false, error: String(error?.message || error) }, 400);

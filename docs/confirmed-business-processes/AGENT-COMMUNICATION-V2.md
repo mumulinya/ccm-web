@@ -1,5 +1,7 @@
 # Agent Communication V2 全链路业务流程
 
+> 全局 Agent 到群聊/项目自动化会话的来源绑定、双向导航和终态回写，统一遵循 [自动开发端到端业务流程](./AUTOMATIC-DEVELOPMENT-END-TO-END.md) 的“全局 Agent 跨会话任务闭环”。通信账本负责执行身份和回执；任务与会话链接只是其安全投影，不建立第二套状态机。
+
 确认日期：2026-08-08  
 实现状态：已接入全局任务、项目直派、群聊跨项目协作、六类第三方运行时、任务卡、恢复与审计
 
@@ -152,3 +154,22 @@ created -> queued -> lease_acquired -> runner_starting -> runner_started
 # 2026-08-09 Skill Fork 与工具事件补充
 
 `context: fork` 的 Skill 子 Agent使用父scope、exactSessionId、generation和turn建立隔离身份；父主Agent等待其Result并恢复原Loop。Provider原生tool call、JSON tool request和Fork内只读调用统一经过CCM工具指纹、RBAC和Evidence门，迟到或重复事件不能产生第二次执行。Fork只有无正文 `ccm-skill-fork-receipt-v1` 可持久化。
+
+## 2026-08-10 第三方 Agent 结构化实时进度与严格 ACK
+
+Claude Code、Codex、Cursor、Gemini、OpenCode 和 Qoder 统一接入 `ccm-agent-runtime-event-v1`。运行时只有在输出格式经过能力验证、且事件能够映射为普通助手说明、工具、文件变化、验证或状态事件时，才会形成用户可见进度。自由格式 stdout、thinking、reasoning、Prompt 和工具原始大输出不会被解释成业务事实；没有结构化能力的运行时保持系统见证降级。
+
+新任务执行前必须完成真实 `acknowledge_assignment`。签名内部 MCP 上下文固定绑定：
+
+```text
+messageId + taskId + workItemId + exactSessionId
++ generation + attempt + leaseId + receiverAgentId
+```
+
+需要短 ACK 预检的运行时先在无业务副作用阶段确认任务；30 秒内没有真实 ACK 时进入 `ack_timeout`，正式 Runner 不启动。新任务不能用最终 Result 补造 ACK；旧任务仍保留明确标记的兼容桥接。每次重试重新签发 attempt 与 lease，旧签名进程不能从数据库代填成当前身份。Result 产生的 Evidence 归属实际第三方 Agent。
+
+第三方 Agent 主动 `report_progress` 是最高优先级业务说明。若 60 秒没有语义进度，CCM 只根据已经观察到的结构化工具、文件变化或验证事实生成一次安全兜底；只有心跳时仅显示“仍在运行，等待可验证进度”，且普通心跳不重复刷屏。运行时进度只增强可观察性，不能替代 Result、RepoState、Evidence、TestAgent 或 Terminal Gate。
+
+目标自动化会话在执行前持久化 `anchorMessageId`，跨会话任务另存 `originMessageId`。新用户事件直接携带消息锚点，前端不再依靠 15 秒时间窗绑定；历史事件仍按旧规则兼容。运行时事件在项目 Agent 父行内按 `agentRunId/toolCallId` 原位更新，完成后随该项目 Agent 收入执行记录。
+
+Runner 原始 stdout/stderr 采用 ephemeral 模式：只在进程运行期间存在于受限临时文件，结束后先提取结构化事件、Receipt 和安全错误摘要，再删除正文。持久账本只保存字节数、checksum、截断状态、退出码与安全摘要，并在服务启动时清理已终止任务遗留的临时输出。

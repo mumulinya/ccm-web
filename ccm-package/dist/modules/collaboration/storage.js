@@ -66,6 +66,7 @@ const db_1 = require("../../core/db");
 const reliability_ledger_1 = require("../../system/reliability-ledger");
 const execution_kernel_1 = require("../../agents/execution-kernel");
 const provider_neutral_context_cache_1 = require("../../system/provider-neutral-context-cache");
+const runtime_events_1 = require("../../system/runtime-events");
 const session_title_1 = require("../../system/session-title");
 const group_orchestrator_1 = require("./group-orchestrator");
 const group_post_turn_summary_1 = require("./group-post-turn-summary");
@@ -764,6 +765,13 @@ function saveGroupMessages(groupId, messages, sessionId = "") {
         writeGroupSessionManifest(groupId, { ...manifest, sessions });
     }
     (0, conversation_search_dirty_1.markConversationSearchIndexDirty)(`group:${groupId}:${resolvedSessionId}`);
+    (0, runtime_events_1.publishRuntimeEvent)("group", "group.session_messages_changed", {
+        groupId,
+        sessionId: resolvedSessionId,
+        count: messages.length,
+        messageId: messages.at(-1)?.id || "",
+        taskId: messages.at(-1)?.task_id || "",
+    });
 }
 function runGroupChatSessionsSelfTest() {
     const groupId = `group-chat-sessions-selftest-${process.pid}-${Date.now().toString(36)}`;

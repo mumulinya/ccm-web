@@ -7,6 +7,13 @@ const logs_1 = require("./logs");
 const reliability_ledger_1 = require("../../system/reliability-ledger");
 const agent_sessions_1 = require("../../tasks/agent-sessions");
 const execution_kernel_1 = require("../../agents/execution-kernel");
+const task_conversation_links_1 = require("../../system/task-conversation-links");
+function rejectMutationConflict(res, guard) {
+    if (!("error" in guard))
+        return false;
+    (0, utils_1.sendJson)(res, { success: false, error: guard.error, code: guard.code, ...guard.details }, guard.status);
+    return true;
+}
 function handleTaskGovernanceRoutes(req, res, parsed, ctx, deps) {
     const pathname = parsed.pathname;
     if (pathname === "/api/tasks/delete" && req.method === "POST") {
@@ -111,13 +118,16 @@ function handleTaskGovernanceRoutes(req, res, parsed, ctx, deps) {
         req.on("data", (chunk) => body += chunk);
         req.on("end", () => {
             try {
-                const { task_id } = JSON.parse(body);
+                const payload = JSON.parse(body);
+                const { task_id } = payload;
                 if (!task_id)
                     return (0, utils_1.sendJson)(res, { error: "缺少任务 ID" }, 400);
                 const tasks = (0, db_1.loadTasks)();
                 const task = tasks.find(t => t.id === task_id);
                 if (!task)
                     return (0, utils_1.sendJson)(res, { error: "任务不存在" }, 404);
+                if (rejectMutationConflict(res, (0, task_conversation_links_1.validateTaskMutationGuard)(task, payload, { requireTarget: true })))
+                    return;
                 const queueResult = deps.enqueueTask(task_id, ctx);
                 (0, utils_1.sendJson)(res, { success: true, message: queueResult.message, queued: queueResult.queued, queue_result: queueResult, queue_status: deps.getQueueStatus() });
             }
@@ -138,6 +148,10 @@ function handleTaskGovernanceRoutes(req, res, parsed, ctx, deps) {
                     return (0, utils_1.sendJson)(res, { error: "缺少任务 ID" }, 400);
                 const operationKey = String(payload.idempotency_key || payload.idempotencyKey || payload.request_id || payload.requestId || "").trim();
                 const task = (0, db_1.loadTasks)().find((item) => item.id === taskId);
+                if (!task)
+                    return (0, utils_1.sendJson)(res, { error: "任务不存在" }, 404);
+                if (rejectMutationConflict(res, (0, task_conversation_links_1.validateTaskMutationGuard)(task, payload, { requireTarget: true })))
+                    return;
                 const operation = operationKey ? (0, reliability_ledger_1.acquireIdempotency)({ scope: "task-retry", key: `${taskId}:${operationKey}`, traceId: task?.trace_id, leaseMs: 60_000 }) : null;
                 if (operation && !operation.acquired)
                     return (0, utils_1.sendJson)(res, { success: true, duplicate: true, ...(operation.record?.result || {}), trace_id: operation.traceId });
@@ -146,7 +160,7 @@ function handleTaskGovernanceRoutes(req, res, parsed, ctx, deps) {
                 if (!result.success) {
                     if (operationKey)
                         (0, reliability_ledger_1.failIdempotency)("task-retry", `${taskId}:${operationKey}`, result.error || "重试失败");
-                    return (0, utils_1.sendJson)(res, { error: result.error }, result.status || 400);
+                    return (0, utils_1.sendJson)(res, { error: result.error, ...(result.code ? { code: result.code } : {}) }, result.status || 400);
                 }
                 if (operationKey)
                     (0, reliability_ledger_1.completeIdempotency)("task-retry", `${taskId}:${operationKey}`, { task_id: taskId, queued: !!result.queue_result?.queued, retry_count: result.task?.retry_count });

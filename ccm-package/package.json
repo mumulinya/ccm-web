@@ -1,6 +1,6 @@
 {
   "name": "@mumulinya167/cc-web",
-  "version": "2.0.2",
+  "version": "2.0.3",
   "description": "本地优先的多 Agent 协作与自动开发工作区，集成任务编排、记忆上下文、MCP/Skill、TestAgent、Git、飞书、知识库和终端",
   "main": "dist/server.js",
   "bin": {

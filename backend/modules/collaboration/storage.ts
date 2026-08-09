@@ -9,6 +9,7 @@ import { loadTasks } from "../../core/db";
 import { appendTraceEvent, ensureTraceId } from "../../system/reliability-ledger";
 import { requestGroupSessionAgentCancellation } from "../../agents/execution-kernel";
 import { invalidateProviderNeutralContextCacheState } from "../../system/provider-neutral-context-cache";
+import { publishRuntimeEvent } from "../../system/runtime-events";
 import {
   generateProvisionalSessionTitle,
   generateSessionTitleWithModel,
@@ -666,6 +667,13 @@ export function saveGroupMessages(groupId: string, messages: any[], sessionId = 
     writeGroupSessionManifest(groupId, { ...manifest, sessions });
   }
   markConversationSearchIndexDirty(`group:${groupId}:${resolvedSessionId}`);
+  publishRuntimeEvent("group", "group.session_messages_changed", {
+    groupId,
+    sessionId: resolvedSessionId,
+    count: messages.length,
+    messageId: messages.at(-1)?.id || "",
+    taskId: messages.at(-1)?.task_id || "",
+  });
 }
 
 export function runGroupChatSessionsSelfTest() {

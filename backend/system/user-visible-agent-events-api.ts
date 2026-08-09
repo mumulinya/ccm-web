@@ -47,7 +47,24 @@ export async function rehydrateReadonlyToolDetail(event: UserVisibleAgentEvent) 
     allowedProjects,
   });
   const result = await executeWorkspaceReadonlyTool(event.toolName, event.detail.safeArguments, capabilityToken);
-  return buildToolDisplayDetail({ toolName: event.toolName, arguments: event.detail.safeArguments, result, transientBody: true });
+  const current = buildToolDisplayDetail({
+    toolName: event.toolName,
+    arguments: event.detail.safeArguments,
+    result,
+    transientBody: true,
+    freshness: "current",
+  });
+  const previousRevision = String(event.detail?.toolDisplay?.result?.authoritativeRevision || "");
+  const currentRevision = String(current.result.authoritativeRevision || "");
+  if (previousRevision && currentRevision && previousRevision !== currentRevision) current.result.freshness = "drifted";
+  return current;
+}
+
+function rehydrateFailureFreshness(error: any) {
+  const message = String(error?.message || error || "");
+  if (/permission|权限|授权|forbidden|unauthorized/i.test(message)) return "permission_revoked";
+  if (/not.?found|不存在|已删除|ENOENT/i.test(message)) return "deleted";
+  return "";
 }
 
 export function handleUserVisibleAgentEventsApi(pathname: string, req: IncomingMessage, res: ServerResponse, parsed: any) {
@@ -60,7 +77,12 @@ export function handleUserVisibleAgentEventsApi(pathname: string, req: IncomingM
       if (!event) return sendJson(res, { success: false, error: "工具事件不存在或不属于当前精确会话" }, 404);
       rehydrateReadonlyToolDetail(event)
         .then(toolDisplay => sendJson(res, { success: true, schema: "ccm-tool-detail-response-v1", toolDisplay, contentStored: false }))
-        .catch((error: any) => sendJson(res, { success: false, error: String(error?.message || error) }, Number(error?.statusCode || 400)));
+        .catch((error: any) => sendJson(res, {
+          success: false,
+          error: String(error?.message || error),
+          ...(rehydrateFailureFreshness(error) ? { freshness: rehydrateFailureFreshness(error) } : {}),
+          contentStored: false,
+        }, Number(error?.statusCode || 400)));
     } catch (error: any) {
       sendJson(res, { success: false, error: String(error?.message || error) }, 400);
     }

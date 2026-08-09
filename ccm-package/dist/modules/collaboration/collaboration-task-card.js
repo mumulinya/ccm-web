@@ -126,6 +126,7 @@ const collaboration_1 = require("./collaboration");
 const collaboration_coordination_ux_1 = require("./collaboration-coordination-ux");
 const collaboration_memory_gates_1 = require("./collaboration-memory-gates");
 const crypto = __importStar(require("crypto"));
+const task_conversation_links_1 = require("../../system/task-conversation-links");
 const db_1 = require("../../core/db");
 const display_1 = require("./display");
 const memory_1 = require("./memory");
@@ -899,10 +900,15 @@ function buildUserChangeSummary(task, summary = {}, workers = [], workItems = []
 }
 function buildUserTaskActions(task, phase, executions) {
     const actions = [];
+    const conversationLinks = (0, task_conversation_links_1.buildTaskConversationLinks)(task);
+    const sourceLink = conversationLinks?.links?.find((item) => item.relation === "source" && item.available);
+    if (sourceLink)
+        actions.push({ id: "open_source_session", label: "返回全局任务", kind: "open_source_session", tone: "outline" });
     const completed = String(task?.status || "") === "done" && hasStrongTaskAcceptanceEvidence(task, executions, task?.delivery_summary || {});
     const stopped = ["cancelled", "reverted"].includes(String(task?.status || "")) || ["cancelled", "reverted"].includes(phase);
-    const retryable = ["failed", "blocked", "environment_blocked", "recovery_required"].includes(phase)
-        || ["failed", "blocked"].includes(String(task?.status || ""));
+    const recoveryRequired = phase === "recovery_required" || task?.acceptance_state === "recovery_required";
+    const retryable = !recoveryRequired && (["failed", "blocked", "environment_blocked"].includes(phase)
+        || ["failed", "blocked"].includes(String(task?.status || "")));
     const terminal = completed || stopped || retryable;
     if (task?.intake_state === "awaiting_confirmation") {
         actions.push({ id: "confirm_plan", label: "确认执行", kind: "confirm_plan", tone: "primary" });
@@ -922,8 +928,10 @@ function buildUserTaskActions(task, phase, executions) {
         actions.push({ id: "continue", label: "继续修改", kind: "continue", tone: "primary" });
     else if (!terminal)
         actions.push({ id: "supplement", label: "追加要求", kind: "continue", tone: "primary" });
-    if (task?.acceptance_state === "recovery_required")
-        actions.push({ id: "resume_interrupted", label: "恢复任务", kind: "resume_interrupted", tone: "primary" });
+    if (recoveryRequired) {
+        actions.push({ id: "reconcile_delivery", label: "重新核验", kind: "reconcile_delivery", tone: "primary" });
+        actions.push({ id: "takeover", label: "人工接管", kind: "takeover", tone: "warning" });
+    }
     else if (retryable)
         actions.push({ id: "retry", label: "重新执行", kind: "retry", tone: "warning" });
     const checkpointIds = executions.flatMap((item) => Array.isArray(item.checkpointIds) ? item.checkpointIds : []).filter(Boolean);
@@ -1247,11 +1255,16 @@ function buildTaskCardView(task, executions, sessions) {
     });
     const progressCheckpoints = displayStream.progress_checkpoints || displayStream.workchain?.progress_checkpoints || null;
     const runtimeStatus = (0, task_user_runtime_1.buildTaskUserRuntimeStatus)(task, { phase, statusDetail: summary.headline || task?.status_detail || "" });
+    const conversationLinks = (0, task_conversation_links_1.buildTaskConversationLinks)(task);
     return {
         version: 1,
         visible: visible && presentation !== "reply",
         presentation,
         task_id: task?.id || "",
+        revision: Math.max(0, Number(task?.revision || 0)),
+        generation: Math.max(1, Number(task?.generation || task?.workflow_generation || 1)),
+        conversation_links: conversationLinks?.links || [],
+        conversationLinks: conversationLinks?.links || [],
         task_thread_id: task?.task_thread_id || task?.taskThreadId || task?.root_task_id || task?.rootTaskId || task?.retry_of_task_id || task?.retryOfTaskId || task?.source_task_id || task?.sourceTaskId || task?.id || "",
         title: task?.title || "开发任务",
         goal: task?.business_goal || task?.goal || task?.title || "",

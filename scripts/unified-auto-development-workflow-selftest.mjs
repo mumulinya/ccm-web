@@ -27,7 +27,10 @@ const checks = {
   workbenchUsesSamePipeline: workbench.includes("form.append('source', 'workbench')") && workbench.includes("form.append('queue_scope', 'conversation_serial')"),
   groupChatCreatesPersistentTasks: groupLive.includes('createTask({') && groupLive.includes('request_origin: globalDirectDispatch ? "global-agent" : "group-session"'),
   projectChatUsesModelMainAgent: projectMain.includes('planProjectMainTask') && projectMain.includes('queue_scope: "conversation_serial"'),
-  globalAgentCreatesDispatchTasks: globalMissions.includes('createGlobalDevelopmentMission') && globalMissions.includes('ensureProjectAutomationSession'),
+  globalAgentCreatesDispatchTasks: globalMissions.includes('createGlobalDevelopmentMission')
+    && globalMissions.includes('createTaskWithScopedIdentity')
+    && globalMissions.includes('中央绑定解析器一次性决定')
+    && !globalMissions.includes('ensureProjectAutomationSession('),
   epicChildrenPreserveExactSession: taskService.includes('project_session_id: payload.project_session_id') && taskService.includes('queue_scope: payload.queue_scope'),
   conversationQueueIsSerial: queue.includes('conversation:group:') && queue.includes('conversation:project:'),
   priorityJumpReordersLiveQueue: taskRoutes.includes('task_queue_reprioritized') && taskRoutes.includes('removeTaskFromQueues(id)') && taskRoutes.includes('enqueueTask(id, ctx)'),

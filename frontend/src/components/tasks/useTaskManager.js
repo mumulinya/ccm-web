@@ -207,7 +207,16 @@ export function useTaskManager(props, emit) {
       const response = await fetch('/api/tasks/permission-requests/decide', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ request_id: request.id, decision, reason: `用户在任务派发中心明确${label}`, maxUses: 1, expiresInMinutes: 15 })
+        body: JSON.stringify({
+          request_id: request.id,
+          decision,
+          reason: `用户在任务派发中心明确${label}`,
+          expected_revision: request.taskRevision ?? request.task_revision,
+          generation: request.taskGeneration ?? request.task_generation,
+          binding_checksum: request.bindingChecksum ?? request.binding_checksum,
+          maxUses: 1,
+          expiresInMinutes: 15,
+        })
       })
       const data = await response.json()
       if (!response.ok || data.success === false) throw new Error(data.error || `${label}失败`)

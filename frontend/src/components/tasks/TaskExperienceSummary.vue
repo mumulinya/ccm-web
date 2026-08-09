@@ -10,6 +10,7 @@ import {
   FileDiff,
   ListChecks,
   LoaderCircle,
+  ExternalLink,
   ShieldCheck,
 } from '@lucide/vue'
 import {
@@ -198,6 +199,41 @@ const fileCount = computed(() => {
   return Math.max(0, ...candidates.map(value => asList(value).length))
 })
 
+const conversationLinks = computed(() => asList(props.card.conversation_links || props.card.conversationLinks))
+const sourceLink = computed(() => conversationLinks.value.find(item => item?.relation === 'source') || null)
+const targetLink = computed(() => conversationLinks.value.find(item => item?.relation === 'target') || null)
+const scopeLabel = (link, fallback) => {
+  if (!link) return fallback
+  if (link.scope === 'global') return '全局 Agent'
+  return clean(link.scopeId || link.scope_id || link.title, fallback, 80)
+}
+const sourceLabel = computed(() => scopeLabel(sourceLink.value, '原任务'))
+const targetLabel = computed(() => scopeLabel(targetLink.value, props.context === 'group' ? '当前群聊' : '当前项目'))
+const unavailableLinkReason = computed(() => clean(
+  sourceLink.value?.available === false ? sourceLink.value?.unavailableReason : targetLink.value?.available === false ? targetLink.value?.unavailableReason : '',
+  '',
+  160,
+))
+
+const normalizePlanItem = (item, index) => {
+  const text = clean(
+    typeof item === 'string' ? item : item?.title || item?.label || item?.description || item?.goal || item?.text,
+    '',
+    180,
+  )
+  if (!text) return null
+  const status = String(typeof item === 'object' ? item?.status || item?.state || '' : '').toLowerCase()
+  const completed = ['completed', 'done', 'succeeded', 'accepted', 'passed'].includes(status)
+  const active = ['running', 'in_progress', 'executing', 'active', 'reviewing', 'testing', 'reworking'].includes(status)
+  return { id: String(item?.id || item?.key || `${index}:${text}`), text, completed, active }
+}
+const executionPlan = computed(() => {
+  const plan = props.card.plan_mode || props.card.planMode || props.card.todo_plan || props.card.todoPlan || props.card.execution_plan || props.card.executionPlan || {}
+  const raw = asList(plan.steps || plan.items || plan.plan_steps || plan.planSteps || plan.todos)
+  const candidates = raw.length ? raw : workItems.value
+  return candidates.map(normalizePlanItem).filter(Boolean).slice(0, 5)
+})
+
 const actionKinds = new Set(['confirm', 'confirm_plan', 'revise_plan', 'approve_epic', 'targeted_rework', 'continue', 'continue_work_item', 'retry', 'resume', 'interrupt', 'resume_interrupted', 'gap_continue', 'cancel', 'rollback', 'save_knowledge'])
 const primaryActions = computed(() => asList(props.card.actions)
   .filter(action => actionKinds.has(action?.kind))
@@ -213,6 +249,10 @@ const emitReplay = () => emit('action', {
   task_id: taskId.value,
   trace_id: traceId.value,
 })
+const openSource = () => emit('action', sourceLink.value?.available === false
+  ? { kind: 'open_task_center', id: 'source-unavailable', label: '打开任务中心', reason: unavailableLinkReason.value }
+  : { kind: 'open_source_session', id: 'open-source-session', label: '返回原任务', link: sourceLink.value })
+const openTaskCenter = () => emit('action', { kind: 'open_task_center', id: 'target-unavailable', label: '打开任务中心', reason: unavailableLinkReason.value })
 </script>
 
 <template>
@@ -234,6 +274,19 @@ const emitReplay = () => emit('action', {
     <div class="task-summary-progress" aria-label="任务进度">
       <span :style="{ width: `${progress}%` }"></span>
     </div>
+
+    <section v-if="sourceLink || targetLink" class="task-conversation-route" aria-label="任务来源与目标">
+      <div><small>来源</small><strong>{{ sourceLabel }}</strong></div>
+      <ChevronRight :size="13" aria-hidden="true" />
+      <div><small>目标</small><strong>{{ targetLabel }}</strong></div>
+      <button v-if="sourceLink" type="button" @click="openSource">
+        {{ sourceLink.available === false ? '打开任务中心' : '返回原任务' }}<ExternalLink :size="12" aria-hidden="true" />
+      </button>
+      <button v-if="targetLink?.available === false" type="button" @click="openTaskCenter">
+        打开任务中心<ExternalLink :size="12" aria-hidden="true" />
+      </button>
+      <p v-if="unavailableLinkReason">{{ unavailableLinkReason }}</p>
+    </section>
 
     <section v-if="showRequestContract" class="task-request-contract">
       <header>
@@ -275,6 +328,15 @@ const emitReplay = () => emit('action', {
       <div><strong>{{ journey.rework.label }}</strong><span>{{ journey.rework.headline }}</span></div>
     </section>
 
+    <section v-if="executionPlan.length" class="task-readable-plan">
+      <header><ListChecks :size="14" aria-hidden="true" /><strong>执行计划</strong><small>{{ completedWorkCount }}/{{ executionPlan.length }}</small></header>
+      <ol>
+        <li v-for="item in executionPlan" :key="item.id" :class="{ completed: item.completed, active: item.active }">
+          <span>{{ item.completed ? '✓' : item.active ? '●' : '○' }}</span>{{ item.text }}
+        </li>
+      </ol>
+    </section>
+
     <p class="task-summary-copy">{{ terminal ? terminalSummary : liveSummary }}</p>
     <div :class="['task-runtime-pulse', `tone-${heartbeatTone}`]">
       <Activity :size="14" aria-hidden="true" />
@@ -282,7 +344,7 @@ const emitReplay = () => emit('action', {
       <small>{{ elapsedLabel }}</small>
     </div>
     <p
-      v-if="nextAction && (needsUser || terminal)"
+      v-if="nextAction"
       class="task-summary-next"
     ><strong>下一步</strong>{{ nextAction }}</p>
     <p v-if="responsibleLabel" class="task-summary-responsible"><small>负责项目</small><strong>{{ responsibleLabel }}</strong></p>
@@ -353,6 +415,14 @@ const emitReplay = () => emit('action', {
 .task-summary-state b { color: var(--text-secondary); font-size: 11px; }
 .task-summary-progress { height: 2px; background: var(--panel-muted); }
 .task-summary-progress span { display: block; height: 100%; background: var(--accent-blue); transition: width .25s ease; }
+.task-conversation-route { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; margin: 10px 14px 0; padding: 8px 10px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--panel-muted); }
+.task-conversation-route > div { display: inline-flex; min-width: 0; align-items: baseline; gap: 5px; }
+.task-conversation-route small { color: var(--text-muted); font-size: 9.5px; }
+.task-conversation-route strong { overflow: hidden; max-width: 180px; color: var(--text-secondary); font-size: 10.5px; text-overflow: ellipsis; white-space: nowrap; }
+.task-conversation-route > svg { flex: none; color: var(--text-muted); }
+.task-conversation-route button { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; padding: 3px 5px; border: 0; background: transparent; color: var(--accent-blue); font: inherit; font-size: 10px; font-weight: 800; cursor: pointer; }
+.task-conversation-route button:hover { text-decoration: underline; }
+.task-conversation-route p { flex-basis: 100%; margin: 0; color: #b45309; font-size: 9.5px; line-height: 1.4; }
 .task-request-contract { display: grid; gap: 7px; margin: 11px 14px 2px; padding: 10px 11px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--panel-muted); }
 .task-request-contract header { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .task-request-contract header span { color: var(--text-primary); font-size: 11px; font-weight: 850; }
@@ -372,6 +442,17 @@ const emitReplay = () => emit('action', {
 .task-queue-overview strong,.task-rework-overview strong { color: var(--text-primary); font-size: 10.5px; }
 .task-queue-overview span,.task-rework-overview span { color: var(--text-secondary); font-size: 10px; line-height: 1.4; overflow-wrap: anywhere; }
 .task-rework-overview { border-color: color-mix(in srgb, #f59e0b 30%, var(--border-color)); color: #d97706; }
+.task-readable-plan { display: grid; gap: 6px; margin: 10px 14px 1px; padding: 9px 10px; border: 1px solid var(--border-color); border-radius: 6px; background: color-mix(in srgb, var(--surface) 82%, var(--panel-muted)); }
+.task-readable-plan header { display: flex; align-items: center; gap: 6px; color: var(--accent-blue); }
+.task-readable-plan header strong { color: var(--text-primary); font-size: 10.5px; }
+.task-readable-plan header small { margin-left: auto; color: var(--text-muted); font-size: 9.5px; }
+.task-readable-plan ol { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.task-readable-plan li { display: grid; grid-template-columns: 14px minmax(0, 1fr); gap: 4px; color: var(--text-secondary); font-size: 10.5px; line-height: 1.4; overflow-wrap: anywhere; }
+.task-readable-plan li > span { color: var(--text-muted); text-align: center; }
+.task-readable-plan li.completed { color: var(--text-muted); text-decoration: line-through; }
+.task-readable-plan li.completed > span { color: #16a34a; }
+.task-readable-plan li.active { color: var(--text-primary); font-weight: 750; }
+.task-readable-plan li.active > span { color: var(--accent-blue); }
 .task-summary-copy { margin: 0; padding: 12px 14px 8px; color: var(--text-secondary); font-size: 12.5px; font-weight: 700; line-height: 1.55; overflow-wrap: anywhere; }
 .task-runtime-pulse { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 7px; margin: 0 14px 9px; padding: 7px 9px; border: 1px solid color-mix(in srgb, var(--accent-blue) 18%, var(--border-color)); border-radius: 6px; background: color-mix(in srgb, var(--accent-blue) 5%, var(--surface)); color: var(--accent-blue); }
 .task-runtime-pulse span { min-width: 0; color: var(--text-secondary); font-size: 10.5px; font-weight: 750; line-height: 1.4; overflow-wrap: anywhere; }
@@ -421,7 +502,8 @@ const emitReplay = () => emit('action', {
   .task-summary-head { gap: 8px; padding: 11px 12px 9px; }
   .task-summary-state b { display: none; }
   .task-summary-copy { padding-inline: 12px; }
-  .task-request-contract,.task-intervention,.task-queue-overview,.task-rework-overview { margin-inline: 12px; }
+  .task-conversation-route,.task-request-contract,.task-intervention,.task-queue-overview,.task-rework-overview,.task-readable-plan { margin-inline: 12px; }
+  .task-conversation-route button { flex-basis: 100%; justify-content: flex-start; margin-left: 0; }
   .task-runtime-pulse { grid-template-columns: auto minmax(0, 1fr); margin-inline: 12px; }
   .task-runtime-pulse small { grid-column: 2; }
   .task-summary-metrics { padding-inline: 12px; gap: 5px 12px; }

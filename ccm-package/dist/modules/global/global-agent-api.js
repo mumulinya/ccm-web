@@ -51,6 +51,7 @@ const feishu_channel_1 = require("../collaboration/feishu-channel");
 const api_access_control_1 = require("../system/api-access-control");
 const git_workspace_runtime_1 = require("../tools/git-workspace-runtime");
 const global_terminal_delivery_1 = require("../../agents/global/global-terminal-delivery");
+const task_conversation_links_1 = require("../../system/task-conversation-links");
 const secure_multipart_1 = require("../../system/secure-multipart");
 const automation_session_bindings_1 = require("../../system/automation-session-bindings");
 function normalizeGlobalRequestedTargets(value, message = "") {
@@ -765,7 +766,23 @@ function createGlobalAgentApi(deps) {
                 const result = getGlobalDevelopmentMission(id);
                 if (!result)
                     return sendJson(res, { error: "全局任务不存在" }, 404);
-                sendJson(res, { success: true, ...result, supervisor: getGlobalMissionSupervisor(id) });
+                const supervisor = getGlobalMissionSupervisor(id);
+                const childNavigation = result.children.map((task) => (0, task_conversation_links_1.buildTaskConversationLinks)(task)).filter(Boolean);
+                const navigation = {
+                    schema: "ccm-global-mission-navigation-v1",
+                    source: (0, task_conversation_links_1.buildTaskConversationLinks)(result.mission)?.links?.find((item) => item.relation === "source") || null,
+                    targets: childNavigation.flatMap((item) => item.links || []).filter((item) => item.relation === "target"),
+                    contentStored: false,
+                };
+                const delivery = (0, task_conversation_links_1.buildGlobalMissionSafeProjection)(result.mission, result.children, supervisor);
+                const projectionRevision = crypto.createHash("sha256").update(JSON.stringify({
+                    mission: result.mission?.id,
+                    revision: result.mission?.revision,
+                    updatedAt: result.mission?.updated_at,
+                    supervisor: supervisor?.updated_at,
+                    children: result.children.map((task) => [task.id, task.revision, task.status, task.updated_at]),
+                })).digest("hex");
+                sendJson(res, { success: true, ...result, supervisor, navigation, delivery, projectionRevision });
                 return true;
             }
             const missions = refreshGlobalDevelopmentMissions();

@@ -42,6 +42,33 @@ ccm doctor
 ccm logs --follow
 ```
 
+## 2.0.3 更新重点
+
+### 代码智能与精确源码定位
+
+- 新增三栏代码智能工作台，统一项目/文件/符号树、语义查询、诊断、调用关系、只读源码定位和Agent投递。
+- 支持工作区符号、文件符号、定义、引用、实现、类型定义、调用者、被调用者和代码诊断九类查询。
+- 查询使用精确文件、行和列定位，并绑定索引generation、RepoStateIdentity、Evidence和结果checksum；代码变化后旧结果会标记为陈旧。
+- TS/JS语言服务随包可用；Vue、Python、Go、Rust、Java、Kotlin、C/C++、C#、PHP、Ruby、Lua、HTML、CSS和JSON可通过管理员确认的标准LSP接入。
+- 索引按需异步建立并增量维护。缺少语言服务时明确返回能力不可用，不使用Grep伪造定义、引用或调用关系。
+- 源码正文仅在当前页面按位置有界重读，使用`no-store`响应；索引、Evidence、查询历史和JSON/CSV导出均不保存源码正文。
+
+### 可观察的Agent执行与严格验收
+
+- 普通对话保持轻量；真实工具、Skill、MCP和项目Agent执行才显示CC风格进度说明与折叠详情。
+- 开发任务按准备检索、用户可读计划、项目Agent、TestAgent、返工复验、主Agent总结和文件交付展示。
+- Claude Code、Codex、Cursor、Gemini/Antigravity、OpenCode和Qoder使用Agent Communication V2结构化ACK、进度、Result和CCM终态回执。
+- 新任务必须在写入前完成真实ACK；第三方Agent不汇报业务进度时，CCM只显示可验证的心跳、结构化工具、文件或验证状态，不猜测自由格式stdout。
+- 第三方Result不会直接宣布完成；只有当前RepoState下的Evidence、TestAgent或主Agent自验及Terminal Gate全部通过后才显示最终交付。
+
+### 动态上下文、记忆连续性与跨会话投放
+
+- MCP支持`deferred`、`auto`、`inline`加载；Skill目录、已调用Skill恢复、来源正文和输出预留按模型真实容量动态预算。
+- Skill可选择`inline`或`context: fork`；压缩后重新校验Skill hash、授权和MCP Schema。
+- 知识库和共享文件正文仅进入当前Agent Loop，长期只保存无正文引用与版本回执；恢复时从权威存储重新读取。
+- 全局Agent、工作台和需求池投放任务时只选择项目或群聊，系统自动解析对应的自动化任务会话。
+- 来源任务与目标会话支持双向跳转，同一任务卡原位更新计划、执行、验收、返工、文件变化和最终总结。
+
 ## CCM 能做什么
 
 ### 1. 三类主 Agent 与统一 Agent Loop

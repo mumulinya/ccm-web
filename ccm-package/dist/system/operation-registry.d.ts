@@ -27,6 +27,11 @@ export declare function completeOperation(operationId: string, input?: {
     status?: "succeeded" | "failed" | "invalidated";
     evidenceIds?: string[];
 }): OperationRecord;
+export declare function listOperationRecords(filter?: {
+    target?: string;
+    operationTypes?: OperationType[];
+    status?: OperationRecord["status"];
+}): OperationRecord[];
 export declare function findReusableOperation(input: any): OperationRecord | null;
 export declare function attachOperationEvidence(operationId: string, evidence: EvidenceRecord | string): OperationRecord;
 export declare function runOperationRegistrySelfTest(): {

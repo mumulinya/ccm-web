@@ -194,6 +194,61 @@ function normalizeScope(value) {
         return scope;
     return "global";
 }
+function sanitizeAvailableActions(value) {
+    const allowedKinds = new Set([
+        "retry", "resolve_permission", "view_error", "recheck", "takeover",
+    ]);
+    const seen = new Set();
+    return (Array.isArray(value) ? value : []).slice(0, 8).flatMap((item) => {
+        const kind = String(item?.kind || "").trim();
+        const id = compactText(item?.id || kind, 100);
+        if (!id || !allowedKinds.has(kind) || seen.has(id))
+            return [];
+        seen.add(id);
+        return [{
+                id,
+                kind,
+                label: compactText(item?.label || {
+                    retry: "重试", resolve_permission: "处理授权", view_error: "查看错误",
+                    recheck: "重新核验", takeover: "人工接管",
+                }[kind], 80),
+                enabled: item?.enabled !== false,
+                ...(compactText(item?.disabledReason || item?.disabled_reason, 240)
+                    ? { disabledReason: compactText(item?.disabledReason || item?.disabled_reason, 240) } : {}),
+                ...(Number.isFinite(Number(item?.revision)) ? { revision: Math.max(0, Number(item.revision)) } : {}),
+                ...(Number.isFinite(Number(item?.generation)) ? { generation: Math.max(0, Number(item.generation)) } : {}),
+                ...(compactText(item?.bindingChecksum || item?.binding_checksum, 120)
+                    ? { bindingChecksum: compactText(item?.bindingChecksum || item?.binding_checksum, 120) } : {}),
+            }];
+    });
+}
+function explicitFailureActions(input) {
+    const source = input?.detail || {};
+    const revision = Number(source.revision ?? input?.revision);
+    const generation = Number(input?.generation ?? source.generation);
+    const bindingChecksum = compactText(source.bindingChecksum || source.binding_checksum || input?.bindingChecksum || input?.binding_checksum, 120);
+    const identity = {
+        ...(Number.isFinite(revision) ? { revision: Math.max(0, revision) } : {}),
+        ...(Number.isFinite(generation) ? { generation: Math.max(0, generation) } : {}),
+        ...(bindingChecksum ? { bindingChecksum } : {}),
+    };
+    if (source.recoveryRequired === true || source.recovery_required === true)
+        return [
+            { id: "recheck", kind: "recheck", label: "重新核验", enabled: true, ...identity },
+            { id: "takeover", kind: "takeover", label: "人工接管", enabled: true, ...identity },
+        ];
+    const actions = [];
+    if (source.authorizationRequired === true || source.authorization_required === true) {
+        actions.push({ id: "resolve_permission", kind: "resolve_permission", label: "处理授权", enabled: true, ...identity });
+    }
+    actions.push({ id: "view_error", kind: "view_error", label: "查看错误", enabled: true, ...identity });
+    const sideEffectState = String(source.sideEffectState || source.side_effect_state || "").toLowerCase();
+    if ((source.retryable === true || source.safeRetry === true || source.safe_retry === true)
+        && ["", "none", "not_started", "safe", "read_only"].includes(sideEffectState)) {
+        actions.unshift({ id: "retry", kind: "retry", label: "重试", enabled: true, ...identity });
+    }
+    return actions;
+}
 function eventStoreFile(scope, scopeId, exactSessionId) {
     const identity = `${scope}:${scopeId}:${exactSessionId}`;
     return path.join(STORE_ROOT, scope, `${hash(identity).slice(0, 32)}.json`);
@@ -351,6 +406,9 @@ function normalizeUserVisibleAgentEvent(input, sequence = 0) {
                 ...(Number.isFinite(Number(detailSource.timing.dependencyWaitMs)) ? { dependencyWaitMs: Math.max(0, Number(detailSource.timing.dependencyWaitMs)) } : {}),
                 ...(Number.isFinite(Number(detailSource.timing.queueWaitMs)) ? { queueWaitMs: Math.max(0, Number(detailSource.timing.queueWaitMs)) } : {}),
                 ...(Number.isFinite(Number(detailSource.timing.otherMs)) ? { otherMs: Math.max(0, Number(detailSource.timing.otherMs)) } : {}),
+                ...(Number.isFinite(Number(detailSource.timing.projectAgentWallMs)) ? { projectAgentWallMs: Math.max(0, Number(detailSource.timing.projectAgentWallMs)) } : {}),
+                ...(Number.isFinite(Number(detailSource.timing.verificationMs)) ? { verificationMs: Math.max(0, Number(detailSource.timing.verificationMs)) } : {}),
+                ...(Number.isFinite(Number(detailSource.timing.summaryMs)) ? { summaryMs: Math.max(0, Number(detailSource.timing.summaryMs)) } : {}),
                 ...(detailSource.timing.stages && typeof detailSource.timing.stages === "object" ? { stages: {
                         ...(Number.isFinite(Number(detailSource.timing.stages.preparationMs)) ? { preparationMs: Math.max(0, Number(detailSource.timing.stages.preparationMs)) } : {}),
                         ...(Number.isFinite(Number(detailSource.timing.stages.projectAgentWallMs)) ? { projectAgentWallMs: Math.max(0, Number(detailSource.timing.stages.projectAgentWallMs)) } : {}),
@@ -366,12 +424,36 @@ function normalizeUserVisibleAgentEvent(input, sequence = 0) {
                 text: (0, assistant_progress_1.sanitizeAssistantProgressText)(detailSource.progress.text, 600),
                 modelCallIndex: Math.max(0, Number(detailSource.progress.modelCallIndex || detailSource.progress.model_call_index || 0)),
                 relatedToolCallIds: uniqueStrings(detailSource.progress.relatedToolCallIds || detailSource.progress.related_tool_call_ids, 64),
+                batchId: compactText(detailSource.progress.batchId || detailSource.progress.batch_id, 120),
                 milestoneChecksum: compactText(detailSource.progress.milestoneChecksum || detailSource.progress.milestone_checksum, 80),
+                ...(["agent_reported", "runtime_structured", "system_observed"].includes(String(detailSource.progress.source))
+                    ? { source: String(detailSource.progress.source) } : {}),
+                ...(["declared", "observed"].includes(String(detailSource.progress.confidence))
+                    ? { confidence: String(detailSource.progress.confidence) } : {}),
+                ...(compactText(detailSource.progress.sourceEventChecksum || detailSource.progress.source_event_checksum, 80)
+                    ? { sourceEventChecksum: compactText(detailSource.progress.sourceEventChecksum || detailSource.progress.source_event_checksum, 80) } : {}),
             },
         } : {}),
+        ...(sanitizeAvailableActions(detailSource.availableActions || detailSource.available_actions).length
+            ? { availableActions: sanitizeAvailableActions(detailSource.availableActions || detailSource.available_actions) }
+            : {}),
         ...(sanitizeUserVisibleRequirementPlan(detailSource.requirementPlan || detailSource.requirement_plan)
             ? { requirementPlan: sanitizeUserVisibleRequirementPlan(detailSource.requirementPlan || detailSource.requirement_plan) }
             : {}),
+        ...(detailSource.runtimeObservation && typeof detailSource.runtimeObservation === "object"
+            && ["agent_reported", "runtime_structured", "system_observed"].includes(String(detailSource.runtimeObservation.source))
+            && ["declared", "observed"].includes(String(detailSource.runtimeObservation.confidence))
+            && compactText(detailSource.runtimeObservation.sourceEventChecksum, 80) ? {
+            runtimeObservation: {
+                ...(compactText(detailSource.runtimeObservation.eventType, 80) ? { eventType: compactText(detailSource.runtimeObservation.eventType, 80) } : {}),
+                source: detailSource.runtimeObservation.source,
+                confidence: detailSource.runtimeObservation.confidence,
+                ...(compactText(detailSource.runtimeObservation.runtime, 80) ? { runtime: compactText(detailSource.runtimeObservation.runtime, 80) } : {}),
+                ...(compactText(detailSource.runtimeObservation.runtimeVersion, 120) ? { runtimeVersion: compactText(detailSource.runtimeObservation.runtimeVersion, 120) } : {}),
+                sourceEventChecksum: compactText(detailSource.runtimeObservation.sourceEventChecksum, 80),
+                contentStored: false,
+            },
+        } : {}),
     };
     const stableIdentity = {
         scope, scopeId, exactSessionId, generation: Math.max(0, Number(input?.generation || 0)),
@@ -387,6 +469,10 @@ function normalizeUserVisibleAgentEvent(input, sequence = 0) {
         scopeId,
         exactSessionId,
         generation: Math.max(0, Number(input?.generation || 0)),
+        ...(compactText(input?.anchorMessageId || input?.anchor_message_id, 240)
+            ? { anchorMessageId: compactText(input?.anchorMessageId || input?.anchor_message_id, 240) } : {}),
+        ...(compactText(input?.originMessageId || input?.origin_message_id, 240)
+            ? { originMessageId: compactText(input?.originMessageId || input?.origin_message_id, 240) } : {}),
         ...(compactText(input?.taskId || input?.task_id, 240) ? { taskId: compactText(input?.taskId || input?.task_id, 240) } : {}),
         ...(compactText(input?.workItemId || input?.work_item_id, 240) ? { workItemId: compactText(input?.workItemId || input?.work_item_id, 240) } : {}),
         ...(compactText(input?.agentRunId || input?.agent_run_id, 240) ? { agentRunId: compactText(input?.agentRunId || input?.agent_run_id, 240) } : {}),
@@ -438,9 +524,17 @@ function appendAssistantProgress(input) {
     const kind = (0, assistant_progress_1.normalizeAssistantProgressKind)(input?.kind || input?.progressKind || input?.progress_kind);
     const modelCallIndex = Math.max(0, Number(input?.modelCallIndex || input?.model_call_index || 0));
     const relatedToolCallIds = uniqueStrings(input?.relatedToolCallIds || input?.related_tool_call_ids, 64);
-    const milestoneChecksum = (0, assistant_progress_1.assistantProgressMilestoneChecksum)({ kind, text, modelCallIndex, relatedToolCallIds });
+    const turnIdentity = compactText(input?.turnId || input?.turn_id || input?.taskId || input?.task_id || "turn", 120);
+    const batchId = compactText(input?.batchId || input?.batch_id, 120) || (0, assistant_progress_1.assistantProgressBatchId)({
+        turnId: turnIdentity,
+        generation: input?.generation,
+        modelCallIndex,
+        relatedToolCallIds,
+    });
+    const milestoneChecksum = (0, assistant_progress_1.assistantProgressMilestoneChecksum)({ kind, text, modelCallIndex, relatedToolCallIds, batchId });
+    const repeatableKind = kind === "before_tools" || kind === "key_finding";
     const eventId = compactText(input?.eventId || input?.event_id, 240)
-        || `assistant-progress:${compactText(input?.turnId || input?.turn_id || input?.taskId || input?.task_id || "turn", 120)}:${modelCallIndex}:${milestoneChecksum.slice(0, 20)}`;
+        || `assistant-progress:${turnIdentity}:${repeatableKind ? `${kind}:${hash({ text: text.toLowerCase(), relatedToolCallIds }).slice(0, 16)}` : `${modelCallIndex}:${milestoneChecksum.slice(0, 20)}`}`;
     return appendUserVisibleAgentEvent({
         ...input,
         eventId,
@@ -452,7 +546,7 @@ function appendAssistantProgress(input) {
         },
         detail: {
             ...(input?.detail || {}),
-            progress: { kind, text, modelCallIndex, relatedToolCallIds, milestoneChecksum },
+            progress: { kind, text, modelCallIndex, relatedToolCallIds, batchId, milestoneChecksum },
         },
         visibility: "default",
     });
@@ -578,6 +672,11 @@ function appendToolProjection(input) {
         },
         detail: {
             ...(input?.detail || {}),
+            ...((eventType === "tool_failed" || eventType === "agent_failed") ? {
+                availableActions: sanitizeAvailableActions(input?.detail?.availableActions || input?.detail?.available_actions).length
+                    ? sanitizeAvailableActions(input?.detail?.availableActions || input?.detail?.available_actions)
+                    : explicitFailureActions(input),
+            } : {}),
             executionStage: input?.detail?.executionStage || {
                 kind: stageKind,
                 stageRunId: `tool:${String(input?.toolCallId || input?.tool_call_id || toolName)}`,

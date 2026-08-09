@@ -215,6 +215,7 @@
       ],
       "architectureDocs": [
         "docs/confirmed-project-architecture/AUTOMATIC-DEVELOPMENT.md",
+        "docs/confirmed-project-architecture/CCM-VNEXT-GAP-IMPLEMENTATION.md",
         "docs/confirmed-project-architecture/TASK-PERMISSION-APPROVAL.md"
       ],
       "businessProcessDocs": [
@@ -281,7 +282,9 @@
         "backend/test-agent/index.ts",
         "backend/modules/collaboration/test-agent-runner.ts"
       ],
-      "apiPrefixes": [],
+      "apiPrefixes": [
+        "/api/test-agent"
+      ],
       "cliCommands": [],
       "testDomains": [
         "tasks"
@@ -431,6 +434,43 @@
       ],
       "sharedBy": [
         "project-management",
+        "test-agent-acceptance"
+      ]
+    },
+    {
+      "id": "code-intelligence",
+      "label": "代码智能、语义索引与源码定位",
+      "status": "active",
+      "summary": "多语言LSP、增量符号索引、定义引用与调用关系、诊断、RepoState新鲜度和无正文Evidence。",
+      "frontendPages": [
+        {
+          "id": "code-intelligence",
+          "component": "frontend/src/components/tools/CodeIntelligence.vue"
+        }
+      ],
+      "backendRoots": [],
+      "productionEntrypoints": [
+        "backend/system/code-intelligence.ts",
+        "backend/system/code-intelligence-api.ts",
+        "backend/system/lsp-client.ts"
+      ],
+      "apiPrefixes": [
+        "/api/code-intelligence"
+      ],
+      "cliCommands": [],
+      "testDomains": [
+        "agents"
+      ],
+      "criticalTests": [
+        "code-intelligence-workbench-selftest.mjs"
+      ],
+      "architectureDocs": [],
+      "businessProcessDocs": [
+        "docs/confirmed-business-processes/CC-LEVEL-CODE-INTELLIGENCE-AND-TOOLS.md"
+      ],
+      "sharedBy": [
+        "automatic-development",
+        "project-git-collaboration",
         "test-agent-acceptance"
       ]
     },

@@ -22,6 +22,7 @@ import {
   normalizeAutomationTaskSource,
   resolveAutomationSessionBinding,
 } from "../../system/automation-session-bindings";
+import { buildTaskConversationLinks, validateTaskMutationGuard } from "../../system/task-conversation-links";
 import {
   decomposeRequirementToTaskPlan,
   ingestRequirementSources,
@@ -76,6 +77,13 @@ import {
   buildMainAgentDisplayStream,
   sanitizeMainAgentUserText,
 } from "./display";
+
+function rejectTaskMutationConflict(res: any, task: any, payload: any, requireTarget = false) {
+  const guard = validateTaskMutationGuard(task, payload, { requireTarget });
+  if (!("error" in guard)) return false;
+  sendJson(res, { success: false, error: guard.error, code: guard.code, ...guard.details }, guard.status);
+  return true;
+}
 import {
   buildProjectCodeReadOnlySnapshot as buildProjectCodeReadOnlySnapshotBase,
   buildGroupProjectAnalysisContext as buildGroupProjectAnalysisContextBase,
@@ -719,7 +727,16 @@ export function handleCollaborationApiReplayAndExecutionRoutes(
   res: any,
   parsed: any,
   ctx: CollabCtx,
-): boolean {  if (pathname === "/api/tasks/replay/artifact" && req.method === "GET") {
+): boolean {
+  const conversationLinksMatch = pathname.match(/^\/api\/tasks\/([^/]+)\/conversation-links$/);
+  if (conversationLinksMatch && req.method === "GET") {
+    const taskId = decodeURIComponent(conversationLinksMatch[1] || "").trim();
+    const projection = buildTaskConversationLinks(taskId);
+    if (!projection) { sendJson(res, { success: false, error: "任务不存在" }, 404); return true; }
+    sendJson(res, { success: true, ...projection });
+    return true;
+  }
+  if (pathname === "/api/tasks/replay/artifact" && req.method === "GET") {
     const taskId = String(parsed.query.task_id || parsed.query.taskId || "").trim();
     const runId = String(parsed.query.run_id || parsed.query.runId || "").trim();
     const artifactId = String(parsed.query.artifact_id || parsed.query.artifactId || "").trim();
@@ -1051,6 +1068,7 @@ export function handleCollaborationApiReplayAndExecutionRoutes(
         const taskId = String(payload.task_id || payload.taskId || payload.id || "");
         const task = loadTasks().find((item: any) => item.id === taskId);
         if (!task) return sendJson(res, { error: "任务不存在" }, 404);
+        if (rejectTaskMutationConflict(res, task, payload, pathname.endsWith("/resume-interrupted"))) return;
         if (pathname.endsWith("/interrupt")) {
           for (const queue of taskQueues.values()) {
             let index = queue.indexOf(taskId);
@@ -1088,6 +1106,7 @@ export function handleCollaborationApiReplayAndExecutionRoutes(
         if (!taskId) return sendJson(res, { error: "缺少任务 ID" }, 400);
         const task = loadTasks().find((item: any) => item.id === taskId);
         if (!task) return sendJson(res, { error: "任务不存在" }, 404);
+        if (rejectTaskMutationConflict(res, task, payload, false)) return;
         if (task.status === "done") return sendJson(res, { error: "已完成任务不能取消" }, 409);
         for (const queue of taskQueues.values()) {
           let index = queue.indexOf(taskId);
@@ -1601,6 +1620,7 @@ export function handleCollaborationApiIntakeRoutesPartA(
         const acceptFeedback = compactFormText(payload.accept_feedback || payload.acceptFeedback || payload.feedback || payload.message || "", "");
         const current = loadTasks().find((item: any) => item.id === taskId);
         if (!current) return sendJson(res, { error: "确认卡对应的任务不存在" }, 404);
+        if (rejectTaskMutationConflict(res, current, payload, true)) return;
         if (current.intake_state === "confirmed") return sendJson(res, { success: true, duplicate: true, task: current, trace_id: current.trace_id });
         if (current.intake_state !== "awaiting_confirmation") return sendJson(res, { error: "这张确认卡已经失效" }, 409);
         const requestedExactSessionId = String(
@@ -1903,6 +1923,7 @@ export function handleCollaborationApiIntakeRoutesPartA(
         const feedback = compactFormText(payload.feedback || payload.message || payload.reason || "", "");
         const current = loadTasks().find((item: any) => item.id === taskId);
         if (!current) return sendJson(res, { error: "确认卡对应的任务不存在" }, 404);
+        if (rejectTaskMutationConflict(res, current, payload, true)) return;
         if (current.intake_state !== "awaiting_confirmation") return sendJson(res, { error: "这张确认卡已经失效，不能调整计划" }, 409);
         if (!feedback) return sendJson(res, { error: "请填写希望主 Agent 调整的地方" }, 400);
         const basePlan = getTaskPlanMode(current) || current.intake_draft || {};
@@ -2637,6 +2658,7 @@ export function handleCollaborationApiTaskLifecycleRoutes(
         let updates = incomingUpdates;
         const current = loadTasks().find(t => t.id === id);
         if (!current) return sendJson(res, { error: "任务不存在" }, 404);
+        if (rejectTaskMutationConflict(res, current, payload, incomingUpdates.status === "pending" || incomingUpdates.is_paused === false)) return;
         if (multipart) {
           const attachments = await buildTaskAttachmentMutation({
             files,
@@ -2709,6 +2731,9 @@ export function handleCollaborationApiTaskLifecycleRoutes(
         const payload = body ? JSON.parse(body) : {};
         const taskId = String(payload.task_id || payload.taskId || payload.id || "");
         if (!taskId) return sendJson(res, { error: "缺少任务 ID" }, 400);
+        const current = loadTasks().find((task: any) => String(task?.id || "") === taskId);
+        if (!current) return sendJson(res, { success: false, error: "任务不存在" }, 404);
+        if (rejectTaskMutationConflict(res, current, payload, true)) return;
         const result = reconcileTaskDeliveryEvidence(taskId);
         sendJson(res, result, result.success ? 200 : (result.status || 400));
       } catch (e: any) { sendJson(res, { success: false, error: e.message }, 400); }
@@ -2726,6 +2751,7 @@ export function handleCollaborationApiTaskLifecycleRoutes(
         const message = compactFormText(payload.message || payload.followup || payload.note, "");
         const currentTask = loadTasks().find((task: any) => task.id === taskId);
         if (!currentTask) return sendJson(res, { error: "任务不存在" }, 404);
+        if (rejectTaskMutationConflict(res, currentTask, payload, true)) return;
         const requestedKind = String(payload.continuation_kind || payload.continuationKind || "auto");
         const continuationKind = requestedKind === "auto"
           ? (await decideWorkflowWithModel({
@@ -2764,6 +2790,7 @@ export function handleCollaborationApiTaskLifecycleRoutes(
         if (!taskId) return sendJson(res, { error: "缺少任务 ID" }, 400);
         const current = loadTasks().find(t => t.id === taskId);
         if (!current) return sendJson(res, { error: "任务不存在" }, 404);
+        if (rejectTaskMutationConflict(res, current, payload, true)) return;
         if (current.status === "done") return sendJson(res, { error: "已完成任务不需要按缺口继续" }, 409);
 
         const targeted = payload.rework_kind || payload.reworkKind || payload.work_item_id || payload.workItemId || payload.target || payload.agent || payload.project || payload.reason;

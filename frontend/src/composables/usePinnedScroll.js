@@ -4,6 +4,8 @@ export function usePinnedScroll(scrollRef, options = {}) {
   const threshold = options.threshold || 120
   const observeRef = options.observeRef || scrollRef
   const isPinnedToBottom = ref(true)
+  const pendingUpdates = ref(0)
+  const lastMeaningfulKey = ref('')
   let resizeObserver = null
 
   const isNearBottom = () => {
@@ -14,6 +16,33 @@ export function usePinnedScroll(scrollRef, options = {}) {
 
   const updateScrollState = () => {
     isPinnedToBottom.value = isNearBottom()
+    if (isPinnedToBottom.value) pendingUpdates.value = 0
+  }
+
+  const notifyContentUpdate = async input => {
+    const source = typeof input === 'string' ? { key: input } : (input || {})
+    const key = String(source.key || '')
+    if (key && key === lastMeaningfulKey.value) return
+    if (key) lastMeaningfulKey.value = key
+    if (isNearBottom()) {
+      isPinnedToBottom.value = true
+      await scrollToBottom()
+      pendingUpdates.value = 0
+      return
+    }
+    isPinnedToBottom.value = false
+    pendingUpdates.value += Math.max(1, Number(source.count || 1))
+  }
+
+  const jumpToLatest = async () => {
+    pendingUpdates.value = 0
+    await scrollToBottom({ force: true, smooth: true })
+  }
+
+  const resetPinnedScroll = () => {
+    pendingUpdates.value = 0
+    lastMeaningfulKey.value = ''
+    isPinnedToBottom.value = true
   }
 
   const scrollToBottom = async (input = {}) => {
@@ -56,5 +85,9 @@ export function usePinnedScroll(scrollRef, options = {}) {
     scrollToBottom,
     attachResizeObserver,
     detachResizeObserver,
+    pendingUpdates,
+    notifyContentUpdate,
+    jumpToLatest,
+    resetPinnedScroll,
   }
 }

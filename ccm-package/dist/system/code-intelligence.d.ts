@@ -10,6 +10,9 @@ export type CodeLocation = {
     };
     symbol: string;
     kind: string;
+    container?: string;
+    language?: string;
+    serverId?: string;
 };
 export type CodeIntelligenceResult = {
     schema: typeof CODE_INTELLIGENCE_RESULT_SCHEMA;
@@ -18,8 +21,11 @@ export type CodeIntelligenceResult = {
     languageServer: string;
     repoStateIdentity: RepoStateIdentity;
     locations: CodeLocation[];
+    total: number;
     nextCursor: string;
     truncated: boolean;
+    freshness: "current" | "stale" | "unavailable";
+    staleReason?: string;
     resultChecksum: string;
     contentStored: false;
 };
@@ -63,6 +69,77 @@ export declare function previewLanguageServerInstall(id: string): {
 export declare function listCodeIntelligenceProjects(): any[];
 export declare function getCodeIntelligenceProjectStatus(project: string): any;
 export declare function startCodeIntelligenceProject(project: string, force?: boolean): any;
+export declare function startCodeIntelligenceIndexRun(project: string, mode: "start" | "reindex" | "repair", reason?: string): {
+    schema: string;
+    runId: string;
+    project: string;
+    mode: "start" | "reindex" | "repair";
+    state: string;
+    reason: string;
+    totalFiles: number;
+    processedFiles: number;
+    changedFiles: number;
+    removedFiles: number;
+    failedFiles: number;
+    startedAt: string;
+    completedAt: string;
+    errorSummary: string;
+    generation: number;
+    contentStored: boolean;
+};
+export declare function getCodeIntelligenceIndexRun(runId: string): any;
+export declare function listCodeIntelligenceIndexRuns(project: string, limit?: number): {
+    schema: string;
+    runId: any;
+    project: string;
+    mode: any;
+    state: any;
+    reason: any;
+    totalFiles: number;
+    processedFiles: number;
+    changedFiles: number;
+    removedFiles: number;
+    failedFiles: number;
+    startedAt: any;
+    completedAt: any;
+    errorSummary: any;
+    generation: number;
+    contentStored: boolean;
+}[];
+export declare function listCodeIntelligenceFiles(project: string, input?: {
+    cursor?: string;
+    limit?: number;
+    language?: string;
+    query?: string;
+}): {
+    files: {
+        path: any;
+        language: any;
+        serverId: any;
+        size: number;
+        indexedAt: any;
+    }[];
+    total: number;
+    nextCursor: string;
+    truncated: boolean;
+    contentStored: boolean;
+};
+export declare function readCodeIntelligenceSource(project: string, requestedPath: string, line?: number, context?: number): {
+    schema: string;
+    project: string;
+    path: string;
+    targetLine: number;
+    startLine: number;
+    endLine: number;
+    totalLines: number;
+    lines: {
+        line: number;
+        text: string;
+    }[];
+    revision: string;
+    repoStateIdentity: RepoStateIdentity;
+    contentStored: boolean;
+};
 export declare function stopCodeIntelligence(): void;
 export declare function runTypeScriptLanguageServiceFixtureSelfTest(): {
     success: boolean;

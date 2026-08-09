@@ -2,6 +2,8 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.handleTaskPermissionRoutes = handleTaskPermissionRoutes;
 const utils_1 = require("../../core/utils");
+const db_1 = require("../../core/db");
+const task_conversation_links_1 = require("../../system/task-conversation-links");
 const task_permission_broker_1 = require("./task-permission-broker");
 function readJsonBody(req) {
     return new Promise((resolve, reject) => {
@@ -34,7 +36,21 @@ function handleTaskPermissionRoutes(pathname, req, res, parsed, ctx) {
             originGroupId: String(parsed?.query?.origin_group_id || parsed?.query?.originGroupId || ""),
             originProject: String(parsed?.query?.origin_project || parsed?.query?.originProject || ""),
         });
-        (0, utils_1.sendJson)(res, { success: true, requests, pending_user_count: requests.filter(item => item.state === "awaiting_user").length });
+        const tasks = (0, db_1.loadTasks)();
+        const publicRequests = requests.map((request) => {
+            const task = tasks.find((item) => String(item?.id || "") === String(request?.taskId || ""));
+            if (!task)
+                return request;
+            const links = (0, task_conversation_links_1.buildTaskConversationLinks)(task)?.links || [];
+            const binding = links.find((item) => item.relation === "target") || links.find((item) => item.relation === "source");
+            return {
+                ...request,
+                taskRevision: Math.max(0, Number(task.revision || 0)),
+                taskGeneration: Math.max(1, Number(task.generation || task.workflow_generation || 1)),
+                ...(binding?.bindingChecksum ? { bindingChecksum: binding.bindingChecksum } : {}),
+            };
+        });
+        (0, utils_1.sendJson)(res, { success: true, requests: publicRequests, pending_user_count: publicRequests.filter((item) => item.state === "awaiting_user").length });
         return true;
     }
     if (pathname === "/api/tasks/permission-requests/decide" && req.method === "POST") {
@@ -43,6 +59,13 @@ function handleTaskPermissionRoutes(pathname, req, res, parsed, ctx) {
             if (!requestId)
                 return (0, utils_1.sendJson)(res, { success: false, error: "缺少权限申请 ID" }, 400);
             try {
+                const pending = (0, task_permission_broker_1.listTaskPermissionRequests)({}).find((item) => String(item?.id || item?.requestId || item?.request_id || "") === requestId);
+                const guardedTask = pending?.taskId ? (0, db_1.loadTasks)().find((item) => String(item?.id || "") === String(pending.taskId)) : null;
+                if (guardedTask) {
+                    const guard = (0, task_conversation_links_1.validateTaskMutationGuard)(guardedTask, payload, { requireTarget: payload?.decision === "approve" || payload?.approved === true });
+                    if ("error" in guard)
+                        return (0, utils_1.sendJson)(res, { success: false, error: guard.error, code: guard.code, ...guard.details }, guard.status);
+                }
                 const request = (0, task_permission_broker_1.decideTaskPermission)(requestId, payload);
                 let queueResult = null;
                 if (request.state === "approved" && ctx && !request.taskId.startsWith("project-session:")) {

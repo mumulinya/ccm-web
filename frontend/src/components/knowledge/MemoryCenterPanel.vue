@@ -68,6 +68,10 @@ const config = ref({
   agentRunnerStartTimeoutMs: 60000,
   agentAckTimeoutMs: 30000,
   agentHeartbeatIntervalMs: 20000,
+  agentRuntimeStructuredProgressEnabled: true,
+  strictPreExecutionAckEnabled: true,
+  agentProgressFallbackTimeoutMs: 60000,
+  agentRawOutputRetentionMode: 'ephemeral',
   agentHeartbeatLostTimeoutMs: 90000,
   agentLeaseTtlMs: 120000,
   agentMaxAttempts: 3,
@@ -483,6 +487,10 @@ async function loadSettings() {
       agentRunnerStartTimeoutMs: Number(current.agentRunnerStartTimeoutMs || 60000),
       agentAckTimeoutMs: Number(current.agentAckTimeoutMs || 30000),
       agentHeartbeatIntervalMs: Number(current.agentHeartbeatIntervalMs || 20000),
+      agentRuntimeStructuredProgressEnabled: current.agentRuntimeStructuredProgressEnabled !== false,
+      strictPreExecutionAckEnabled: current.strictPreExecutionAckEnabled !== false,
+      agentProgressFallbackTimeoutMs: Number(current.agentProgressFallbackTimeoutMs || 60000),
+      agentRawOutputRetentionMode: 'ephemeral',
       agentHeartbeatLostTimeoutMs: Number(current.agentHeartbeatLostTimeoutMs || 90000),
       agentLeaseTtlMs: Number(current.agentLeaseTtlMs || 120000),
       agentMaxAttempts: Number(current.agentMaxAttempts || 3),
@@ -891,6 +899,7 @@ onMounted(() => loadOverview(false))
           <label><span>Runner 启动超时（ms）</span><input v-model.number="config.agentRunnerStartTimeoutMs" type="number" min="5000" max="300000" step="1000" /></label>
           <label><span>ACK 超时（ms）</span><input v-model.number="config.agentAckTimeoutMs" type="number" min="5000" max="120000" step="1000" /></label>
           <label><span>系统心跳间隔（ms）</span><input v-model.number="config.agentHeartbeatIntervalMs" type="number" min="5000" max="60000" step="1000" /></label>
+          <label><span>无语义进度兜底（ms）</span><input v-model.number="config.agentProgressFallbackTimeoutMs" type="number" min="15000" max="300000" step="5000" /></label>
           <label><span>失联判定（ms）</span><input v-model.number="config.agentHeartbeatLostTimeoutMs" type="number" min="15000" max="600000" step="1000" /></label>
           <label><span>租约时长（ms）</span><input v-model.number="config.agentLeaseTtlMs" type="number" min="15000" max="900000" step="1000" /></label>
           <label><span>最大执行轮次</span><input v-model.number="config.agentMaxAttempts" type="number" min="1" max="3" step="1" /></label>
@@ -898,6 +907,8 @@ onMounted(() => loadOverview(false))
           <label><span>全局并发</span><input v-model.number="config.agentMaxParallelGlobal" type="number" min="1" max="64" step="1" /></label>
         </div>
         <label class="toggle-row"><input v-model="config.agentCommunicationV2Enabled" type="checkbox" /><span>启用 Dispatch / ACK / Progress / Result / Terminal 证据链</span></label>
+        <label class="toggle-row"><input v-model="config.agentRuntimeStructuredProgressEnabled" type="checkbox" /><span>解析第三方 Agent 已验证的结构化运行事件</span></label>
+        <label class="toggle-row"><input v-model="config.strictPreExecutionAckEnabled" type="checkbox" /><span>新任务必须在正式执行前完成真实 ACK</span></label>
         <p class="compact-history">第三方 Agent 只能提交 ACK、进度和 Result；Terminal 仅由 CCM 在正式验收后生成。项目/群聊只能降低并发上限，不能突破全局值。</p>
       </section>
 

@@ -5,6 +5,10 @@ exports.createAgentRunnerRuntime = createAgentRunnerRuntime;
 const server_agent_runner_support_1 = require("./server-agent-runner-support");
 const third_party_memory_snapshot_1 = require("./integrations/third-party-memory-snapshot");
 const memory_1 = require("./projects/memory");
+const runtime_structured_events_1 = require("./agents/runtime-structured-events");
+const execution_kernel_1 = require("./agents/execution-kernel");
+const agent_runtime_progress_1 = require("./system/agent-runtime-progress");
+const credential_store_1 = require("./core/credential-store");
 function createAgentRunnerRuntime(deps) {
     const { normalizeToolSelection, hasToolSelection, buildAgentRunnerRuntimeToolPayload, normalizeVerificationCommands, extractVerificationCommandsFromMessage, buildAgentCliAllowedTools, isSpawnPermissionError, nativeContinuationDoneFields, callAgentViaExternalRunner, getProjectToolSelection, findRuntimeToolSnapshotPath, readJsonFileSafe, runtimeToolSnapshotFromAudit, normalizeAgentRunnerRuntimeToolSnapshot, getProjectVerificationCommandsForRunner, runIndependentProjectVerification, buildProjectToolContext, sendRuntimeToolDispatchBlocked, ensureAgentRunnerDirs, createAgentRunnerRequest, waitForAgentRunnerResult, recordNativeCapacityRefreshOutcome, callAgentViaExternalRunnerRaw, runManagedAgentContinuation, continueAgentToolCalls, } = (0, server_agent_runner_support_1.createAgentRunnerSupport)(deps);
     const { AGENT_RUNNER_DIR, AGENT_RUNNER_REQUESTS_DIR, AGENT_RUNNER_RESULTS_DIR, UPLOAD_DIR, acknowledgeProviderMemoryChannelLaunch, appendDirectAgentDispatchTranscript, bindProjectRunAgentSession, bindProviderMemoryChannelLaunch, broadcastPetSpeech, buildAgentCommand, buildNativeSessionContinuationEvidence, buildProjectConversationBrief, buildProjectExecutionBrief, buildRuntimeToolDispatchGate, buildRuntimeToolSyncPrompt, buildToolAuthorizationPayload, captureAgentRuntimeVersionSnapshot, completeDirectAgentDispatch, createDirectAgentDispatchRequest, createFileChangeSnapshot, createProjectChatRun, detectAgentCommandFailure, extractNativeModelCapabilityReceipt, extractProviderToolAccessEvidence, fs, getAgentCommandLabel, getAgentRunActivityDuration, getAgentRuntime, getFileChanges, getRuntimeExecutionEnv, isSafeVerificationCommand, loadProjectConfigs, markDirectAgentDispatchStarted, normalizeAgentCommandOutput, normalizeAgentRuntimeId, path, persistBoundedOutput, prepareProviderMemoryChannel, publicProjectChatRun, readMemoryContextConsumptionReceipt, recordMetric, recordProjectSessionProviderUsage, recordModelCapabilityRefreshOutcome, recordRuntimeToolSyncAudit, recordTaskAgentSessionTurn, recordVerifiedNativeModelCapabilityReceipt, recoverMemoryContextConsumptionReceipt, registerExternalRunnerRequest, runManagedCommand, runToolCallLoop, sanitizeExecutionEnv, saveProjectChatRuns, sendJson, setAgentActivity, spawn, syncRuntimeTools, terminateManagedChildProcess, toolManager, trackManagedChildProcess, verifyNativeSessionContinuationEvidence, verifyProviderMemoryChannelEvidence, writeSse } = deps;
@@ -81,6 +85,7 @@ function createAgentRunnerRuntime(deps) {
         let memoryContextConsumptionReceipt = null;
         let memoryContextConsumptionRecovery = null;
         let memoryReceiptRecoveryProviderOutput = "";
+        let stopRuntimeProgressFallback = null;
         if (durableDirectDispatch) {
             if (executionId)
                 registerExternalRunnerRequest(executionId, durableDirectDispatch.id);
@@ -88,6 +93,19 @@ function createAgentRunnerRuntime(deps) {
         }
         try {
             const runtimeVersionSnapshot = captureAgentRuntimeVersionSnapshot(agentType);
+            const runtimeProgressIdentity = workspaceTarget?.runtimeProgressContext || workspaceTarget?.runtime_progress_context || null;
+            const runtimeEventParser = runtimeProgressIdentity?.anchorMessageId && runtimeProgressIdentity?.agentRunId
+                ? (0, runtime_structured_events_1.createAgentRuntimeStructuredEventParser)({
+                    runtime: agentType,
+                    runtimeVersion: runtimeVersionSnapshot?.version || runtimeVersionSnapshot?.runtimeVersion || "",
+                    identity: runtimeProgressIdentity,
+                    onEvent: agent_runtime_progress_1.projectAgentRuntimeStructuredEvent,
+                })
+                : null;
+            if (runtimeEventParser && workspaceTarget?.agentRuntimeStructuredProgressEnabled !== false) {
+                const seedEvent = { ...runtimeProgressIdentity, runtime: normalizeAgentRuntimeId(agentType), runtimeVersion: runtimeVersionSnapshot?.version || "", schema: "ccm-agent-runtime-event-v1", eventId: `seed-${runtimeProgressIdentity.agentRunId}`, eventType: "status", progressSource: "system_observed", confidence: "observed", status: "running", sourceEventChecksum: "seed", createdAt: new Date().toISOString(), contentStored: false };
+                stopRuntimeProgressFallback = (0, agent_runtime_progress_1.startAgentProgressFallback)(seedEvent, Number(workspaceTarget?.agentProgressFallbackTimeoutMs || 60_000));
+            }
             const providerMemoryChannel = prepareProviderMemoryChannel(agentType, message, {
                 required: workspaceTarget?.trustedMemoryProviderChannelRequired === true,
                 envelopeChecksum: workspaceTarget?.trustedMemoryEnvelopeChecksum || "",
@@ -103,6 +121,7 @@ function createAgentRunnerRuntime(deps) {
                 fs.writeFileSync(memoryDeveloperInstructionsFile, providerMemoryChannel.developerPrompt, "utf-8");
             const cmd = buildAgentCommand(agentType, tmpMsg, {
                 mcpConfigPath: workspaceTarget?.mcpConfigPath,
+                cliAllowedTools: Array.isArray(workspaceTarget?.cliAllowedTools) ? workspaceTarget.cliAllowedTools : undefined,
                 appendSystemPromptFile: providerMemoryChannel.systemPrompt ? memorySystemPromptFile : "",
                 developerInstructionsFile: providerMemoryChannel.developerPrompt ? memoryDeveloperInstructionsFile : "",
                 ...(workspaceTarget?.agentSession || {}),
@@ -136,14 +155,13 @@ function createAgentRunnerRuntime(deps) {
                         markDirectAgentDispatchStarted(durableDirectDispatch.id, { runnerPid: pid, startedAt });
                 },
                 onStdout: (text) => {
-                    if (durableDirectDispatch)
-                        appendDirectAgentDispatchTranscript(durableDirectDispatch.id, "stdout", { text });
+                    runtimeEventParser?.push(text);
                 },
                 onStderr: (text) => {
-                    if (durableDirectDispatch)
-                        appendDirectAgentDispatchTranscript(durableDirectDispatch.id, "stderr", { text });
+                    // stderr remains ephemeral and is never interpreted as business progress.
                 },
             });
+            runtimeEventParser?.flush();
             try {
                 fs.unlinkSync(tmpMsg);
             }
@@ -157,6 +175,9 @@ function createAgentRunnerRuntime(deps) {
             }
             catch { }
             const normalized = normalizeAgentCommandOutput(agentType, managed.stdout, { runtimeVersionSnapshot });
+            const rawOutputReceipt = (0, execution_kernel_1.disposeManagedCommandRawOutput)(managed);
+            if (durableDirectDispatch)
+                appendDirectAgentDispatchTranscript(durableDirectDispatch.id, "runtime_output_receipt", { bytes: rawOutputReceipt.bytes, checksum: rawOutputReceipt.checksum, truncated: !!managed.outputFile, removed: rawOutputReceipt.removed, contentStored: false });
             const nativeContinuationEvidence = buildNativeSessionContinuationEvidence({
                 provider: normalizeAgentRuntimeId(agentType),
                 runnerRequestId: durableDirectDispatch?.id || "",
@@ -217,6 +238,9 @@ function createAgentRunnerRuntime(deps) {
                         providerRuntimeVersionSnapshot: runtimeVersionSnapshot,
                         trustedMemoryEnvelopeChecksum: workspaceTarget?.trustedMemoryEnvelopeChecksum || "",
                         trustedMemoryEnvelopeSourceChecksum: workspaceTarget?.trustedMemoryEnvelopeSourceChecksum || "",
+                        runtimeProgressContext: workspaceTarget?.runtimeProgressContext || workspaceTarget?.runtime_progress_context || null,
+                        agentRuntimeStructuredProgressEnabled: workspaceTarget?.agentRuntimeStructuredProgressEnabled !== false,
+                        agentProgressFallbackTimeoutMs: workspaceTarget?.agentProgressFallbackTimeoutMs || 60_000,
                         providerWorkCompleted: true,
                     }, async (recoveryRequest) => {
                         fs.writeFileSync(memoryReceiptRecoveryPromptFile, recoveryRequest.prompt, "utf-8");
@@ -366,6 +390,7 @@ function createAgentRunnerRuntime(deps) {
                 });
                 durableDirectDispatchCompleted = true;
             }
+            stopRuntimeProgressFallback?.();
             workspaceTarget?.onDone?.({
                 runnerRequestId: durableDirectDispatch?.id || "",
                 nativeSessionId: durableNativeSessionId,
@@ -401,6 +426,8 @@ function createAgentRunnerRuntime(deps) {
             return output;
         }
         catch (e) {
+            stopRuntimeProgressFallback?.();
+            (0, execution_kernel_1.disposeManagedCommandRawOutput)(e);
             try {
                 fs.unlinkSync(tmpMsg);
             }
@@ -428,7 +455,7 @@ function createAgentRunnerRuntime(deps) {
                 completeDirectAgentDispatch(durableDirectDispatch.id, {
                     success: false,
                     error: String(e?.message || e),
-                    output: String(e?.stdout || e?.stderr || e?.message || ""),
+                    output: String(e?.message || "Agent执行失败").slice(0, 1000),
                     exitCode: e?.exitCode,
                     signal: e?.signal,
                     nativeContinuationEvidence: failedDirectContinuationEvidence,
@@ -514,7 +541,7 @@ function createAgentRunnerRuntime(deps) {
             }
             const output = e.killed || e.signal === "SIGTERM"
                 ? `[${projectName}] Agent 响应超时，请稍后重试`
-                : `[${projectName}] Agent 错误: ${(e.stderr || e.message || "").substring(0, 200)}`;
+                : `[${projectName}] Agent 错误: ${(0, credential_store_1.redactSensitiveText)(String(e.message || "第三方运行时执行失败")).replace(/[\r\n\t]+/g, " ").slice(0, 200)}`;
             workspaceTarget?.onDone?.({ runnerRequestId: durableDirectDispatch?.id || "", runnerStarted: durableDirectDispatchStarted, nativeSessionId: failedDirectContinuationEvidence.effectiveNativeSessionId, ...nativeContinuationDoneFields(failedDirectContinuationEvidence), memoryContextConsumptionRecovery: e?.memoryContextConsumptionRecovery || memoryContextConsumptionRecovery, isError: true, error: e?.message || String(e) });
             recordMetric(projectName, {
                 ...metricContext,
@@ -541,10 +568,28 @@ function createAgentRunnerRuntime(deps) {
             fs.mkdirSync(UPLOAD_DIR, { recursive: true });
         }
         fs.writeFileSync(tmpMsg, message, "utf-8");
-        const cmd = buildAgentCommand(agentType, tmpMsg, { mcpConfigPath: options.mcpConfigPath, ...(options.agentSession || {}) });
+        const cmd = buildAgentCommand(agentType, tmpMsg, {
+            mcpConfigPath: options.mcpConfigPath,
+            cliAllowedTools: Array.isArray(options.cliAllowedTools) ? options.cliAllowedTools : undefined,
+            ...(options.agentSession || {}),
+        });
         const taskId = String(options.taskId || options.executionId || `standalone-${projectName}-${Date.now()}`);
         const executionId = String(options.executionId || options.taskId || "");
         const launchRuntimeVersionSnapshot = captureAgentRuntimeVersionSnapshot(agentType);
+        const runtimeProgressIdentity = options.runtimeProgressContext || options.runtime_progress_context || null;
+        const runtimeEventParser = runtimeProgressIdentity?.anchorMessageId && runtimeProgressIdentity?.agentRunId
+            ? (0, runtime_structured_events_1.createAgentRuntimeStructuredEventParser)({
+                runtime: agentType,
+                runtimeVersion: launchRuntimeVersionSnapshot?.version || launchRuntimeVersionSnapshot?.runtimeVersion || "",
+                identity: runtimeProgressIdentity,
+                onEvent: agent_runtime_progress_1.projectAgentRuntimeStructuredEvent,
+            })
+            : null;
+        let stopRuntimeProgressFallback = null;
+        if (runtimeEventParser && options.agentRuntimeStructuredProgressEnabled !== false) {
+            const seedEvent = { ...runtimeProgressIdentity, runtime: normalizeAgentRuntimeId(agentType), runtimeVersion: launchRuntimeVersionSnapshot?.version || "", schema: "ccm-agent-runtime-event-v1", eventId: `seed-${runtimeProgressIdentity.agentRunId}`, eventType: "status", progressSource: "system_observed", confidence: "observed", status: "running", sourceEventChecksum: "seed", createdAt: new Date().toISOString(), contentStored: false };
+            stopRuntimeProgressFallback = (0, agent_runtime_progress_1.startAgentProgressFallback)(seedEvent, Number(options.agentProgressFallbackTimeoutMs || 60_000));
+        }
         const metricContext = {
             scopeType: groupId ? "group" : "project",
             scopeId: groupId || projectName,
@@ -644,6 +689,9 @@ function createAgentRunnerRuntime(deps) {
                     sessionLifecycleFence: options.sessionLifecycleFence || options.session_lifecycle_fence || null,
                     runtimeToolSnapshot: options.runtimeToolSnapshot || options.runtime_tool_snapshot || null,
                     runtimeToolDispatchGate: options.runtimeToolDispatchGate || options.runtime_tool_dispatch_gate || options.dispatchGate || null,
+                    runtimeProgressContext: options.runtimeProgressContext || options.runtime_progress_context || null,
+                    agentRuntimeStructuredProgressEnabled: options.agentRuntimeStructuredProgressEnabled !== false,
+                    agentProgressFallbackTimeoutMs: options.agentProgressFallbackTimeoutMs || 60_000,
                     onRunnerRequestCreated: options.onRunnerRequestCreated,
                     onToolEvent: (event) => pushWorkEvent(event.type === "tool_result" ? "tool_result" : "status", event.text, { tool: event.tool || "", round: event.round, ok: event.ok }),
                 })
@@ -864,19 +912,10 @@ function createAgentRunnerRuntime(deps) {
                 if (!text)
                     return;
                 output += text;
-                if (durableGroupDispatch)
-                    appendDirectAgentDispatchTranscript(durableGroupDispatch.id, "stdout", { text });
-                const jsonSessionStream = ["codex", "cursor"].includes(normalizeAgentRuntimeId(agentType)) && !!options.agentSession?.persistSession;
-                if (!jsonSessionStream) {
-                    pushWorkEvent("output", text);
-                    writeSse(streamRes, { type: "chunk", agent: projectName, text });
-                    broadcastPetSpeech(projectName, { role: "assistant", text, mode: "append", source: "group" });
-                }
+                runtimeEventParser?.push(text);
             });
             child.stderr.on("data", (chunk) => {
                 const text = chunk.toString("utf-8");
-                if (durableGroupDispatch)
-                    appendDirectAgentDispatchTranscript(durableGroupDispatch.id, "stderr", { text });
                 stderrOutput = (stderrOutput + text).slice(-12000);
                 if (text.trim() && !output.trim()) {
                     const runningText = `🧠 ${projectName} 运行中...`;
@@ -886,11 +925,20 @@ function createAgentRunnerRuntime(deps) {
                 }
             });
             child.on("close", (code) => {
+                runtimeEventParser?.flush();
+                stopRuntimeProgressFallback?.();
                 const failed = typeof code === "number" && code !== 0;
-                const text = failed ? (output.trim() || stderrOutput.trim() || `Agent 进程退出，exitCode=${code}`) : output.trim();
+                const text = failed
+                    ? `第三方 Agent 执行失败（exitCode=${code ?? "unknown"}）：${(0, credential_store_1.redactSensitiveText)(String(stderrOutput.trim() || "请展开安全错误摘要后重试")).replace(/[\r\n\t]+/g, " ").slice(0, 240)}`
+                    : output.trim();
                 finish(text, failed).catch((err) => finish(`❌ 错误: ${err.message}`, true));
             });
-            child.on("error", (err) => { finish(`❌ 错误: ${err.message}`, true).catch(() => { }); });
+            child.on("error", (err) => {
+                runtimeEventParser?.flush();
+                stopRuntimeProgressFallback?.();
+                const safeError = (0, credential_store_1.redactSensitiveText)(String(err.message || "第三方 Agent 启动失败")).replace(/[\r\n\t]+/g, " ").slice(0, 240);
+                finish(`❌ 错误: ${safeError}`, true).catch(() => { });
+            });
         });
     }
     // 流式调用 Agent（SSE）
@@ -923,7 +971,11 @@ function createAgentRunnerRuntime(deps) {
         fs.writeFileSync(tmpMsg, executionBrief, "utf-8");
         const cmd = buildAgentCommand(agentType, tmpMsg, {
             mcpConfigPath: options.mcpConfigPath,
-            ...(options.memoryContextConsumptionReceiptRequired === true ? { cliAllowedTools: third_party_memory_snapshot_1.THIRD_PARTY_MEMORY_MCP_TOOL_ALIASES } : {}),
+            ...(Array.isArray(options.cliAllowedTools)
+                ? { cliAllowedTools: options.cliAllowedTools }
+                : options.memoryContextConsumptionReceiptRequired === true
+                    ? { cliAllowedTools: third_party_memory_snapshot_1.THIRD_PARTY_MEMORY_MCP_TOOL_ALIASES }
+                    : {}),
             ...taskAgentSessionOptions,
         });
         const send = (data) => writeSse(res, data);

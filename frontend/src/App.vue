@@ -811,6 +811,25 @@ const handleTerminalAnalysis = (payload = {}) => {
   switchTab('global-agent')
 }
 
+const handleCodeIntelligenceNavigate = (payload = {}) => {
+  const draftMessage = String(payload.draftMessage || '').trim()
+  if (payload.tab === 'projects' && payload.project) {
+    navigateTo.value = { tab: 'projects', project: payload.project, draftMessage, configureRuntime: payload.configureRuntime === true }
+    switchTab('projects')
+    return
+  }
+  if (payload.tab === 'groups' && payload.groupId) {
+    navigateTo.value = { tab: 'groups', groupId: payload.groupId, draftMessage }
+    switchTab('groups')
+    return
+  }
+  if (payload.tab === 'changes' && payload.project) {
+    localStorage.setItem('ccm:code-changes:target-project', payload.project)
+    window.dispatchEvent(new CustomEvent('ccm-code-changes-target', { detail: { project: payload.project } }))
+    switchTab('changes')
+  }
+}
+
 const resumeProjectPermission = (target = {}) => {
   if (!target.project || !target.sessionId || !target.autoMessage) return
   navigateTo.value = { ...target, tab: 'projects' }
@@ -955,15 +974,15 @@ const closeTab = (tabId, event) => {
       </div>
 
       <div class="content-area" :class="{ 'has-bottom-bar': isMobile, 'pets-content-area': currentTab === 'pets' }" @wheel.stop>
-        <div v-if="isTabOpen('projects')" v-show="currentTab === 'projects'" class="tab-pane"><ProjectManager :active="currentTab === 'projects'" :navigate-to="navigateTo" @navigated="navigateTo = null" /></div>
-        <div v-if="isTabOpen('groups')" v-show="currentTab === 'groups'" class="tab-pane"><GroupChat :active="currentTab === 'groups'" :navigate-to="navigateTo" @navigated="navigateTo = null" /></div>
+        <div v-if="isTabOpen('projects')" v-show="currentTab === 'projects'" class="tab-pane"><ProjectManager :active="currentTab === 'projects'" :navigate-to="navigateTo" @navigated="navigateTo = null" @switch-tab="switchTab" @set-navigation="(target) => navigateTo = target" /></div>
+        <div v-if="isTabOpen('groups')" v-show="currentTab === 'groups'" class="tab-pane"><GroupChat :active="currentTab === 'groups'" :navigate-to="navigateTo" @navigated="navigateTo = null" @switch-tab="switchTab" @set-navigation="(target) => navigateTo = target" /></div>
         <div v-if="isTabOpen('global-agent')" v-show="currentTab === 'global-agent'" class="tab-pane"><GlobalAgent :active="currentTab === 'global-agent'" :navigate-to="navigateTo" @navigated="navigateTo = null" @switch-tab="switchTab" @set-navigation="(target) => navigateTo = target" /></div>
         <div v-if="isTabOpen('tools')" v-show="currentTab === 'tools'" class="tab-pane"><ToolsConfig @navigate="applyPetNavigationTarget" /></div>
         <div v-if="isTabOpen('pets')" v-show="currentTab === 'pets'" class="tab-pane pet-tab-pane"><PetMenu :active="currentTab === 'pets'" :agents="petAgents" :projects="projects" @agents-updated="refreshMusicPetAgent" /></div>
         <div v-if="isTabOpen('changes')" v-show="currentTab === 'changes'" class="tab-pane code-changes-pane"><CodeChanges /></div>
         <div v-if="isTabOpen('tasks')" v-show="currentTab === 'tasks'" class="tab-pane"><TaskManager :navigate-to="navigateTo" @navigated="navigateTo = null" @navigate="handleWorkbenchNavigate" @resume-project-permission="resumeProjectPermission" /></div>
         <div v-if="isTabOpen('trace-replay')" v-show="currentTab === 'trace-replay'" class="tab-pane"><TraceReplay :navigate-to="navigateTo" /></div>
-        <div v-if="isTabOpen('code-intelligence')" v-show="currentTab === 'code-intelligence'" class="tab-pane"><CodeIntelligence /></div>
+        <div v-if="isTabOpen('code-intelligence')" v-show="currentTab === 'code-intelligence'" class="tab-pane"><CodeIntelligence @navigate="handleCodeIntelligenceNavigate" /></div>
         <div v-if="isTabOpen('autodev')" v-show="currentTab === 'autodev'" class="tab-pane"><AutoDevOps @navigate="handleWorkbenchNavigate" /></div>
         <div v-if="isTabOpen('knowledge')" v-show="currentTab === 'knowledge'" class="tab-pane"><KnowledgeBase /></div>
         <div v-if="isTabOpen('memory-center')" v-show="currentTab === 'memory-center'" class="tab-pane"><MemoryCenter /></div>

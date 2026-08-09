@@ -58,6 +58,7 @@ const tool_authorization_1 = require("./tools/tool-authorization");
 const runtime_tool_real_cli_matrix_1 = require("./tools/runtime-tool-real-cli-matrix");
 const execution_kernel_1 = require("./agents/execution-kernel");
 const memory_1 = require("./projects/memory");
+const task_conversation_links_1 = require("./system/task-conversation-links");
 const direct_dispatch_spool_1 = require("./agents/direct-dispatch-spool");
 const conversation_turn_control_1 = require("./agents/conversation-turn-control");
 const secure_multipart_1 = require("./system/secure-multipart");
@@ -896,6 +897,12 @@ function handleRequest(req, res) {
                 const project = String(payload.project || "");
                 const projectSessionId = String(payload.project_session_id || payload.projectSessionId || payload.session_id || "");
                 const action = pathname.endsWith("/plan-confirm") ? "confirm_plan" : String(payload.action || "");
+                const guardedProjectTask = (0, project_main_agent_1.getProjectMainTask)(taskId);
+                if (!guardedProjectTask)
+                    return (0, utils_1.sendJson)(res, { success: false, error: "项目主 Agent 任务不存在" }, 404);
+                const guard = (0, task_conversation_links_1.validateTaskMutationGuard)(guardedProjectTask, payload, { requireTarget: ["confirm_plan", "resume_interrupted", "revise_plan"].includes(action) });
+                if ("error" in guard)
+                    return (0, utils_1.sendJson)(res, { success: false, error: guard.error, code: guard.code, ...guard.details }, guard.status);
                 const persistProjectTaskProjection = (taskInput, content, source) => {
                     const task = (0, project_main_agent_1.projectMainTaskPublic)(taskInput);
                     (0, sessions_1.upsertProjectSessionTaskMessage)(project, projectSessionId, {

@@ -20,6 +20,8 @@ export type ToolDisplayDetailV1 = {
     truncated: boolean;
     nextCursor?: string;
     rehydratable?: boolean;
+    freshness?: "current" | "drifted" | "deleted" | "permission_revoked";
+    authoritativeRevision?: string;
   };
   contentStored: false;
 };
@@ -153,7 +155,22 @@ function resultProjection(operation: string, rawInput: any, error: any, transien
     : { kind: "empty", summary: "工具执行完成", truncated: false };
 }
 
-export function buildToolDisplayDetail(input: { toolName: any; arguments?: any; result?: any; error?: any; transientBody?: boolean }): ToolDisplayDetailV1 {
+function authoritativeRevision(value: any) {
+  const raw = value?.authoritativeRevision || value?.revision || value?.fileRevision || value?.file_revision
+    || value?.repoStateIdentity?.gitTreeHash || value?.repo_state_identity?.git_tree_hash
+    || value?.indexGeneration || value?.index_generation;
+  return cleanText(raw, 160);
+}
+
+export function buildToolDisplayDetail(input: {
+  toolName: any;
+  arguments?: any;
+  result?: any;
+  error?: any;
+  transientBody?: boolean;
+  freshness?: ToolDisplayDetailV1["result"]["freshness"];
+  authoritativeRevision?: string;
+}): ToolDisplayDetailV1 {
   const parsed = parseToolName(input.toolName);
   const args = input.arguments && typeof input.arguments === "object" ? input.arguments : {};
   return {
@@ -168,7 +185,13 @@ export function buildToolDisplayDetail(input: { toolName: any; arguments?: any; 
       label: argumentLabels[key] || key.replace(/_/g, " "),
       value: SECRET_KEYS.test(key) ? "[redacted]" : safeValue(value),
     })),
-    result: resultProjection(parsed.operation, input.result, input.error, input.transientBody === true),
+    result: {
+      ...resultProjection(parsed.operation, input.result, input.error, input.transientBody === true),
+      ...(input.freshness ? { freshness: input.freshness } : {}),
+      ...((input.authoritativeRevision || authoritativeRevision(input.result))
+        ? { authoritativeRevision: cleanText(input.authoritativeRevision || authoritativeRevision(input.result), 160) }
+        : {}),
+    },
     contentStored: false,
   };
 }

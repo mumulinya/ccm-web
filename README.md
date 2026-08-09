@@ -47,16 +47,46 @@ ccm logs --follow
 ```text
 用户消息 / 需求文档 / 图片 / 附件
 → 精确会话队列
-→ 主 Agent首次模型决策
-→ 按需读取源码、知识、Skill、MCP和运行状态
-→ 制定并实时更新计划
-→ 项目开发 Agent执行工作项
-→ TestAgent独立验收或主 Agent自验
-→ 返工、最终验收与终态规范化
-→ 原会话回传、任务回放与记忆准入
+→ 动态构建会话、记忆、Skill、MCP和来源上下文
+→ 主 Agent自适应循环、精确代码检索与用户可读计划
+→ 项目开发 Agent通过ACK、进度、Result协议执行工作项
+→ Evidence新鲜度校验与TestAgent独立验收
+→ 增量返工、复验和主 Agent最终总结
+→ Terminal Gate生成终态与文件交付
+→ 原会话回传、跨会话导航、任务回放与记忆准入
 ```
 
 普通问答由主 Agent首轮直接回答。只有模型确实需要信息时才加载知识、源码、Skill或MCP；复杂开发任务进入持久队列和验收链，后台执行不会长期占用聊天回合。
+
+## 2.0.3 最新能力
+
+### 代码智能工作台
+
+- 新增三栏代码智能工作台：项目、文件和符号树位于左侧，语义结果与调用关系位于中间，权威源码定位和Agent操作位于右侧。
+- 支持工作区/文件符号、定义、引用、实现、类型定义、调用者、被调用者和代码诊断九类语义查询。
+- 查询优先使用精确的`path + line + character`，同名符号不会再默认跳到第一个文本匹配。
+- TS/JS使用随包TypeScript服务；Vue、Python、Go、Rust、Java、Kotlin、C/C++、C#、PHP、Ruby、Lua、HTML、CSS和JSON通过标准LSP接入。
+- 索引按需启动并增量维护，提供异步进度、运行历史、语言覆盖率、服务缺失、失败文件、RepoState新鲜度和修复入口。
+- 源码仅在用户打开位置时从当前项目有界重读，索引、Evidence、查询历史和导出均不保存源码正文。
+- 查询结果可生成带位置、checksum和Evidence引用的项目/群聊会话草稿，默认等待用户确认，不直接创建开发任务。
+
+### CC风格执行流与第三方Agent通信
+
+- 普通问答保持“正在思考→最终回答”；发生工具、Skill、MCP或子Agent调用时，才显示可折叠执行过程。
+- 任务运行中按准备与检索、用户可读计划、项目Agent、独立验收、返工复验、主Agent总结分阶段展示；完成后收起为执行记录。
+- 工具和Agent按稳定身份原位更新，不同时保留“执行中”和“已完成”两行；详情展示安全参数、业务结果、耗时和Token口径。
+- Claude Code、Codex、Cursor、Gemini/Antigravity、OpenCode和Qoder通过Agent Communication V2绑定任务、工作项、精确会话、generation、attempt与lease。
+- 新任务执行前要求真实ACK；运行时可上报结构化进度、工具、文件与验证事件，缺少业务进度时只展示系统观察到的事实，不解析隐藏思维或猜测stdout。
+- Result只表示第三方Agent声明完成；CCM仍会核对实际文件变化、RepoState、Evidence、TestAgent和Terminal Gate后再生成成功终态。
+
+### 动态上下文、来源连续性与跨会话任务
+
+- MCP支持`deferred`、`auto`和`inline`加载；Skill目录、MCP Schema、压缩恢复与输出预留按真实模型上下文动态分配。
+- Skill支持父循环内联与`context: fork`隔离执行；压缩后重新校验Skill hash、权限和已发现Schema。
+- 知识库与共享文件正文只进入当前Loop；长期保存无正文来源回执，压缩后从权威存储校验版本并重新读取。
+- 全局Agent、工作台和需求池投放任务时只选择目标群聊或项目；系统解析或创建来源绑定的自动化任务会话。
+- 来源任务卡和目标会话双向导航，同一任务原位更新计划、项目Agent、TestAgent、返工、验证、文件变化与最终交付。
+- Evidence Registry将命令、Diff、测试、评审、制品和来源绑定到RepoStateIdentity；代码状态变化后旧证据自动变为陈旧，不能满足新的验收条件。
 
 ## 功能概览
 

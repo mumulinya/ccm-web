@@ -86,7 +86,7 @@ export function isExecutionAnchor(messages, index) {
 }
 
 const toolLifecycleRank = eventType => {
-  if (eventType === 'tool_failed' || eventType === 'tool_completed') return 3
+  if (eventType === 'tool_failed' || eventType === 'tool_completed') return 4
   if (eventType === 'tool_progress') return 2
   if (eventType === 'tool_started') return 1
   return 0
@@ -94,7 +94,7 @@ const toolLifecycleRank = eventType => {
 
 const agentLifecycleRank = event => {
   const eventType = String(event?.eventType || '')
-  if (eventType === 'agent_failed' || eventType === 'agent_completed') return 5
+  if (eventType === 'agent_failed' || eventType === 'agent_completed') return 6
   const phase = String(event?.detail?.agentDisplay?.phase || '').toLowerCase()
   if (/verifying|result_submitted|accepted/.test(phase)) return 4
   if (/queued|waiting_dependency|waiting/.test(phase)) return 3
@@ -199,6 +199,7 @@ export function coalesceExecutionEvents(events) {
       }
       const rank = toolLifecycleRank(eventType)
       if (rank < existing.rank) continue
+      if (existing.rank >= 4 && rank >= 4) continue
       const first = existing.event
       const firstToolDisplay = first?.detail?.toolDisplay
       const nextToolDisplay = event?.detail?.toolDisplay
@@ -239,6 +240,7 @@ export function coalesceExecutionEvents(events) {
       if (attempt < existing.attempt) continue
       const rank = agentLifecycleRank(event)
       if (attempt === existing.attempt && rank < existing.rank) continue
+      if (attempt === existing.attempt && existing.rank >= 6 && rank >= 6) continue
       const projected = mergeAgentEvent(existing.event, event, existing.attempt)
       existing.event = projected
       existing.rank = rank
@@ -259,6 +261,10 @@ export function executionEventsForMessage(events, messages, index) {
     .filter(Boolean)
     .sort((left, right) => Number(left.sequence || 0) - Number(right.sequence || 0) || time(left.createdAt) - time(right.createdAt))
   const messageTime = time(message?.timestamp || message?.createdAt || message?.created_at)
+  const messageId = String(message?.id || message?.uuid || message?.message_id || message?.messageId || '')
+  const anchoredEvents = messageId
+    ? orderedEvents.filter(event => String(event?.anchorMessageId || event?.anchor_message_id || '') === messageId)
+    : []
   // Persisted group user messages can receive their timestamp when the turn is
   // committed, after the tools have already run.  Bind completed turns by the
   // result event nearest to the assistant message instead of relying only on
@@ -301,7 +307,9 @@ export function executionEventsForMessage(events, messages, index) {
     const created = time(event?.createdAt)
     return created && (!start || created >= start) && created < end
   })
-  const current = taskEvents.length
+  const current = anchoredEvents.length
+    ? anchoredEvents
+    : taskEvents.length
     ? [...new Map([...(lifecycleEvents || []), ...timeBoundEvents, ...taskEvents].map(event => [event.eventId, event])).values()]
     : lifecycleEvents || timeBoundEvents
   const merged = [...current, ...legacyExecutionEvents(message)]

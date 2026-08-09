@@ -50,6 +50,10 @@ export declare const DEFAULT_AGENT_COMMUNICATION_POLICY: Readonly<{
     agentMaxAttempts: 3;
     agentMaxParallelPerProject: 2;
     agentMaxParallelGlobal: 6;
+    agentRuntimeStructuredProgressEnabled: true;
+    strictPreExecutionAckEnabled: true;
+    agentProgressFallbackTimeoutMs: 60000;
+    agentRawOutputRetentionMode: "ephemeral";
 }>;
 export declare function readAgentCommunicationPolicy(overrides?: any): {
     agentCommunicationV2Enabled: boolean;
@@ -61,6 +65,10 @@ export declare function readAgentCommunicationPolicy(overrides?: any): {
     agentMaxAttempts: number;
     agentMaxParallelPerProject: number;
     agentMaxParallelGlobal: number;
+    agentRuntimeStructuredProgressEnabled: boolean;
+    strictPreExecutionAckEnabled: boolean;
+    agentProgressFallbackTimeoutMs: number;
+    agentRawOutputRetentionMode: "ephemeral";
 };
 export declare function createAgentCommunicationEnvelope(input: AgentCommunicationIdentity & {
     messageType?: AgentCommunicationMessageType;

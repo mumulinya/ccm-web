@@ -31,11 +31,22 @@ export function useGroupChatMessaging({ messages, currentGroup, currentGroupSess
     return !at || !bt || Math.abs(at - bt) < 120000
   }
 
+  const messageGeneration = (msg) => Math.max(0, Number(
+    msg?.generation
+      ?? msg?.taskRuntime?.generation
+      ?? msg?.task_runtime?.generation
+      ?? msg?.taskCard?.generation
+      ?? msg?.task_card?.generation
+      ?? 0,
+  ))
+
   const mergeIncomingMessage = (msg) => {
     if (!msg || msg.content?.startsWith('📤')) return false
     const existingIndex = messages.value.findIndex(m => (msg.id && m.id === msg.id) || isEquivalentMessage(m, msg))
     if (existingIndex >= 0) {
       const current = messages.value[existingIndex]
+      // 重连或轮询可能带回旧代次的投影；旧 generation 只能留在后端审计，不能覆盖当前卡片。
+      if (messageGeneration(msg) > 0 && messageGeneration(current) > messageGeneration(msg)) return false
       const currentKey = getGroupMessageKey(current)
       const next = {
         ...current,
@@ -189,7 +200,7 @@ export function useGroupChatMessaging({ messages, currentGroup, currentGroupSess
         return
       }
       await pullNewMessages()
-    }, 3000) // 每 3 秒检查一次
+    }, 15000) // 实时状态主要由 runtime events 驱动；这里只做断线和重启恢复兜底
   }
 
   const stopGroupPolling = () => {

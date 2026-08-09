@@ -9,6 +9,7 @@ process.env.CCM_TASK_STORE_DIR = root
 const communication = await import('../ccm-package/dist/system/agent-communication-v2.js')
 const taskStore = await import('../ccm-package/dist/core/task-store.js')
 const parallelDispatch = await import('../ccm-package/dist/modules/collaboration/collaboration-agent-parallel-dispatch.js')
+const communicationMcp = await import('../ccm-package/dist/integrations/agent-communication-mcp.js')
 
 function identity(suffix, receiver = 'project-a') {
   return {
@@ -25,6 +26,7 @@ function identity(suffix, receiver = 'project-a') {
 }
 
 try {
+  assert.equal(communicationMcp.runAgentCommunicationMcpBindingSelfTest().pass, true, '旧attempt/lease签名上下文必须被拒绝')
   const parallelGroupId = parallelDispatch.createAgentParallelGroupId({ groupId: 'group-a', taskId: 'task-parallel', targets: ['project-a', 'project-b'] })
   assert.match(parallelGroupId, /^agent-batch:/)
   assert.equal(parallelGroupId, parallelDispatch.createAgentParallelGroupId({ groupId: 'group-a', taskId: 'task-parallel', targets: ['project-a', 'project-b'] }), '并行批次ID必须稳定')
@@ -95,6 +97,18 @@ try {
   assert.equal(serialized.includes('SENTINEL_PROMPT_MUST_NOT_PERSIST'), false)
   assert.equal(serialized.includes('SENTINEL_OUTPUT_MUST_NOT_PERSIST'), false)
   assert.equal(serialized.includes('SENTINEL_CONTENT_MUST_NOT_PERSIST'), false)
+
+  const strictAck = communication.startAgentCommunicationDispatch({
+    ...identity('strict-ack', 'strict-project'), ownerId: 'strict-runner',
+    payload: { strictPreExecutionAck: true, anchorMessageId: 'target-message-1', originMessageId: 'origin-message-1' },
+  })
+  communication.markAgentCommunicationRunnerStarted(strictAck.envelope.messageId, { runnerRequestId: 'strict-runner-1' })
+  assert.throws(
+    () => communication.submitAgentCommunicationResult(strictAck.envelope.messageId, { status: 'done', summary: 'result without pre-ack' }),
+    /执行前.*ACK|Result不能补造ACK/,
+    '新任务Result不得兼容补造ACK',
+  )
+  communication.releaseAgentCommunicationLease(strictAck.envelope.messageId, 'selftest_cleanup')
 
   const c1 = communication.startAgentCommunicationDispatch({ ...identity('cap-1', 'same-project'), ownerId: 'runner-1' })
   const c2 = communication.startAgentCommunicationDispatch({ ...identity('cap-2', 'same-project'), ownerId: 'runner-2' })

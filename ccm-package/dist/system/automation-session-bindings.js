@@ -119,7 +119,7 @@ function normalizeAutomationTaskSource(value) {
         return "requirement_pool";
     if (["workbench", "usability_intake", "usability"].includes(normalized))
         return "workbench";
-    if (["global_agent", "global", "global_web", "global_feishu"].includes(normalized))
+    if (["global_agent", "global", "global_web", "global_feishu", "global_agent_chat", "web_global_agent", "global_agent_request"].includes(normalized))
         return "global_agent";
     return null;
 }

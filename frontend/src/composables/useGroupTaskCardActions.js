@@ -8,6 +8,16 @@ const postTaskCardAction = async (path, body) => {
   return payload
 }
 
+const taskMutationGuard = (card = {}) => {
+  const links = card.conversation_links || card.conversationLinks || []
+  const binding = links.find(item => item?.relation === 'target') || links.find(item => item?.relation === 'source') || {}
+  return {
+    expected_revision: Math.max(0, Number(card.revision || 0)),
+    generation: Math.max(1, Number(card.generation || card.workflow_generation || 1)),
+    ...(binding.bindingChecksum || binding.binding_checksum ? { binding_checksum: binding.bindingChecksum || binding.binding_checksum } : {}),
+  }
+}
+
 export const buildWaitingUserTaskContinuationFields = (target = {}) => ({
   continuation_task_id: String(target.taskId || target.task_id || '').trim(),
   continuation_kind: 'supplement',
@@ -37,13 +47,28 @@ export function createGroupTaskCardActionHandler(options = {}) {
     openTestTargets,
     beginTaskInput,
     loadMessages,
+    navigateConversation,
   } = options
 
   return async function handleTaskCardAction(msg, action) {
     const card = getTaskCard?.(msg)
     const id = card?.task_id || action?.task_id || msg?.task_id
     if (!id) return
+    const guard = taskMutationGuard(card)
     try {
+      if (action.kind === 'open_task_center') {
+        navigateConversation?.({ tab: 'tasks', taskId: id })
+        return
+      }
+      if (action.kind === 'open_source_session') {
+        const response = await fetch(`/api/tasks/${encodeURIComponent(id)}/conversation-links`)
+        const data = await response.json()
+        if (!response.ok || data.success === false) throw new Error(data.error || '无法读取原任务会话')
+        const link = (data.links || []).find(item => item.relation === 'source')
+        if (!link?.available) throw new Error(link?.unavailableReason || '原全局会话不存在或无权访问')
+        navigateConversation?.({ tab: 'global-agent', sessionId: link.exactSessionId, messageId: link.messageId || '', missionId: link.missionId || '' })
+        return
+      }
       if (action.kind === 'view_changes') {
         const cardChangeFiles = action.files
           || card?.change_summary?.files
@@ -93,38 +118,46 @@ export function createGroupTaskCardActionHandler(options = {}) {
       }
       if (action.kind === 'interrupt') {
         if (!await confirmDialog(`确定停止“${card?.title || id}”当前这一轮执行吗？任务和子 Agent 会话会保留。`)) return
-        await postTaskCardAction('/api/tasks/interrupt', { id, reason: '用户从群聊任务卡停止当前执行' })
+        await postTaskCardAction('/api/tasks/interrupt', { id, reason: '用户从群聊任务卡停止当前执行', ...guard })
       } else if (action.kind === 'resume_interrupted') {
-        await postTaskCardAction('/api/tasks/resume-interrupted', { id })
+        await postTaskCardAction('/api/tasks/resume-interrupted', { id, ...guard })
       } else if (action.kind === 'cancel') {
         if (!await confirmDialog(`确定永久取消任务“${card?.title || id}”？任务回放会保留，但不会自动恢复。`)) return
-        await postTaskCardAction('/api/tasks/cancel', { id, reason: '用户从群聊任务卡永久取消任务' })
+        await postTaskCardAction('/api/tasks/cancel', { id, reason: '用户从群聊任务卡永久取消任务', ...guard })
       } else if (action.kind === 'confirm_plan') {
         const acceptFeedback = String(action.accept_feedback || action.acceptFeedback || action.feedback || '').trim()
         const confirmText = acceptFeedback
           ? `确认执行“${card?.title || id}”？我会带着你的补充要求安排执行成员处理。`
           : `确认执行“${card?.title || id}”？确认后我才会安排执行成员开始修改。`
         if (!await confirmDialog(confirmText)) return
-        await postTaskCardAction('/api/usability/intake/confirm', { id, ...(acceptFeedback ? { accept_feedback: acceptFeedback } : {}) })
+        await postTaskCardAction('/api/usability/intake/confirm', { id, ...guard, ...(acceptFeedback ? { accept_feedback: acceptFeedback } : {}) })
       } else if (action.kind === 'revise_plan') {
         const feedback = window.prompt('希望我怎么调整这份执行前计划？', action.feedback || '')
         if (!feedback?.trim()) return
-        await postTaskCardAction('/api/usability/intake/revise', { id, feedback: feedback.trim() })
+        await postTaskCardAction('/api/usability/intake/revise', { id, feedback: feedback.trim(), ...guard })
       } else if (action.kind === 'pause') {
-        await postTaskCardAction('/api/tasks/update', { id, status: 'paused', is_paused: true, status_detail: '用户从群聊任务卡暂停' })
+        await postTaskCardAction('/api/tasks/update', { id, status: 'paused', is_paused: true, status_detail: '用户从群聊任务卡暂停', ...guard })
       } else if (action.kind === 'resume') {
-        await postTaskCardAction('/api/tasks/update', { id, status: 'pending', is_paused: false, paused: false, status_detail: '用户从群聊任务卡恢复' })
-        await postTaskCardAction('/api/tasks/queue', { task_id: id })
+        const resumed = await postTaskCardAction('/api/tasks/update', { id, status: 'pending', is_paused: false, paused: false, status_detail: '用户从群聊任务卡恢复', ...guard })
+        await postTaskCardAction('/api/tasks/queue', { task_id: id, ...taskMutationGuard(resumed.task || card) })
       } else if (action.kind === 'retry') {
-        await postTaskCardAction('/api/tasks/retry', { id, reason: '用户从群聊任务卡重新派发', auto_execute: true })
+        await postTaskCardAction('/api/tasks/retry', { id, reason: '用户从群聊任务卡重新派发', auto_execute: true, ...guard })
+      } else if (action.kind === 'reconcile_delivery' || action.kind === 'recheck') {
+        await postTaskCardAction('/api/tasks/reconcile-delivery', { id, ...guard })
+      } else if (action.kind === 'resolve_permission') {
+        navigateConversation?.({ tab: 'tools-config', taskId: id })
+        return
+      } else if (action.kind === 'takeover') {
+        if (!await confirmDialog(`确定人工接管“${card?.title || id}”？系统会停止自动重跑并保留当前现场。`)) return
+        await postTaskCardAction('/api/tasks/update', { id, status: 'manual_takeover', acceptance_state: 'recovery_required', status_detail: '用户从任务卡人工接管，已保留当前执行现场', ...guard })
       } else if (action.kind === 'switch_executor') {
         const runtime = window.prompt('切换执行器（claudecode / codex / cursor / gemini / opencode）：', 'codex')
         if (!runtime) return
-        await postTaskCardAction('/api/tasks/switch-executor', { id, runtime: runtime.trim(), reason: '用户从群聊任务卡切换执行器', auto_execute: true })
+        await postTaskCardAction('/api/tasks/switch-executor', { id, runtime: runtime.trim(), reason: '用户从群聊任务卡切换执行器', auto_execute: true, ...guard })
       } else if (action.kind === 'queue') {
-        await postTaskCardAction('/api/tasks/queue', { task_id: id })
+        await postTaskCardAction('/api/tasks/queue', { task_id: id, ...guard })
       } else if (action.kind === 'gap_continue') {
-        await postTaskCardAction('/api/tasks/continue-from-gaps', { id, source: 'user_gap_rework', auto_execute: true })
+        await postTaskCardAction('/api/tasks/continue-from-gaps', { id, source: 'user_gap_rework', auto_execute: true, ...guard })
       } else if (action.kind === 'approve_epic') {
         if (!await confirmDialog(`确认批准“${card?.title || id}”的整批变更并完成 Epic 交付？`)) return
         await postTaskCardAction('/api/tasks/requirement-epic/review', { id, operation: 'approve' })
@@ -132,6 +165,7 @@ export function createGroupTaskCardActionHandler(options = {}) {
         if (!await confirmDialog(`继续安排“${action.reason || action.target || '已解锁工作项'}”？我会复用当前任务上下文，只推进这个工作项。`)) return
         const actionResult = await postTaskCardAction('/api/tasks/continue-from-gaps', {
           id,
+          ...guard,
           source: 'user_next_work_item',
           auto_execute: true,
           rework_kind: 'next_claimable_work_item',
@@ -163,6 +197,7 @@ export function createGroupTaskCardActionHandler(options = {}) {
         if (!await confirmDialog(`按“${action.title || action.label || '精准返工'}”继续任务？系统会复用原任务上下文，只处理这个缺口。`)) return
         await postTaskCardAction('/api/tasks/continue-from-gaps', {
           id,
+          ...guard,
           source: 'user_targeted_rework',
           auto_execute: true,
           rework_kind: action.id,
@@ -172,7 +207,7 @@ export function createGroupTaskCardActionHandler(options = {}) {
         })
       } else if (action.kind === 'confirm_done') {
         if (!await confirmDialog(`确定把任务“${card?.title || id}”标记为已处理？系统仍会执行后端验收校验。`)) return
-        await postTaskCardAction('/api/tasks/update', { id, status: 'done', status_detail: '用户从 Todo 步骤确认已处理', completed_at: new Date().toISOString() })
+        await postTaskCardAction('/api/tasks/update', { id, status: 'done', status_detail: '用户从 Todo 步骤确认已处理', completed_at: new Date().toISOString(), ...guard })
       } else if (action.kind === 'continue') {
         if (card?.phase === 'needs_user' && beginTaskInput) {
           beginTaskInput(msg, card, { ...action, task_id: id })

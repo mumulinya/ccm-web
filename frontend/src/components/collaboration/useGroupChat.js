@@ -11,6 +11,7 @@ import { useMessageNavigation } from '../../composables/useMessageNavigation.js'
 import { usePinnedScroll } from '../../composables/usePinnedScroll.js'
 import { useConversationTurnControl } from '../../composables/useConversationTurnControl.js'
 import { notifySessionContextUsage } from '../../composables/useSessionContextUsage.js'
+import { subscribeRuntimeEvents } from '../../utils/runtimeEventBus.js'
 import { buildGroupConversationKnowledgePayload, postKnowledgeCapture } from '../../utils/knowledgeCapture.js'
 import { normalizeTestAgentExecutionPlanSummary, sanitizeUserFacingStructure } from '../../utils/agentDisplay.js'
 import { getEditableUserMessageText, hasMessageAttachments } from '../../utils/messageActions.js'
@@ -101,7 +102,7 @@ export function useGroupChat(props, emit) {
           task_id: row.taskId || '',
           agent: row.agent || '',
         }))
-      } else if (target.messageId || Number.isInteger(target.messageIndex)) await loadMessages()
+      } else if (target.messageId || target.taskId || Number.isInteger(target.messageIndex)) await loadMessages()
       
       if (target.draftMessage) {
         await nextTick()
@@ -111,10 +112,11 @@ export function useGroupChat(props, emit) {
         newMessage.value = target.autoMessage
         await nextTick()
         sendMessage()
-      } else if (target.messageId || Number.isInteger(target.messageIndex) || target.keyword) {
+      } else if (target.messageId || target.taskId || Number.isInteger(target.messageIndex) || target.keyword) {
         await nextTick()
         const kw = String(target.keyword || '').toLowerCase()
         let idx = target.messageId ? messages.value.findIndex(m => String(m.id || m.message_id || m.messageId || '') === String(target.messageId)) : -1
+        if (idx < 0 && target.taskId) idx = messages.value.findIndex(m => String(m.task_id || m.task?.id || '') === String(target.taskId))
         if (idx < 0 && Number.isInteger(target.messageIndex) && target.messageIndex >= 0 && target.messageIndex < messages.value.length) idx = target.messageIndex
         if (idx < 0 && kw) idx = messages.value.findIndex(m => (m.content || '').toLowerCase().includes(kw))
         if (idx !== -1) {
@@ -154,6 +156,10 @@ export function useGroupChat(props, emit) {
     scrollToBottom,
     attachResizeObserver: attachGroupMessagesResizeObserver,
     detachResizeObserver: detachGroupMessagesResizeObserver,
+    pendingUpdates: pendingGroupProgressCount,
+    notifyContentUpdate: notifyGroupProgress,
+    jumpToLatest: jumpToLatestGroupProgress,
+    resetPinnedScroll: resetGroupPinnedScroll,
   } = usePinnedScroll(groupMessagesEl, { observeRef: groupMessagesContentEl })
   const { navMessages } = useMessageNavigation(messages, { getAssistantContent: (message) => getVisibleGroupMessageContent(message, '这条回复已整理，技术细节已放入技术详情。') })
 
@@ -484,6 +490,8 @@ export function useGroupChat(props, emit) {
 
   let loadGroups = async () => {}
   let selectGroup = async () => {}
+  let unsubscribeGroupRuntime = null
+  let groupRuntimeRefreshTimer = null
 
   const {
     groupMessageKeyMap, groupMessageKeySeq, getGroupMessageKey, createLocalMessageId,
@@ -709,6 +717,10 @@ export function useGroupChat(props, emit) {
     openTestTargets: loadGroupTestTargets,
     beginTaskInput: beginTaskSupplementInput,
     loadMessages,
+    navigateConversation: target => {
+      emit('set-navigation', target)
+      emit('switch-tab', target.tab)
+    },
   })
 
   const selectGroupSession = async sessionId => {
@@ -856,10 +868,33 @@ export function useGroupChat(props, emit) {
   onMounted(() => {
     loadGroups()
     loadProjects()
+    unsubscribeGroupRuntime = subscribeRuntimeEvents(['task', 'group', 'system'], event => {
+      if (!currentGroup.value || props.active === false) return
+      const data = event?.data || {}
+      const eventGroupId = String(data.groupId || data.group_id || '')
+      const eventSessionId = String(data.sessionId || data.session_id || '')
+      const eventTaskId = String(data.taskId || data.task_id || '')
+      const relevantTask = eventTaskId && messages.value.some(message => String(
+        message?.task_id || message?.taskId || message?.taskRuntime?.taskId || message?.task_runtime?.task_id || message?.taskCard?.task_id || message?.task_card?.task_id || '',
+      ) === eventTaskId)
+      const relevantGroup = eventGroupId && eventGroupId === String(currentGroup.value.id || '')
+      const relevantSession = eventSessionId && eventSessionId === String(currentGroupSessionId.value || '')
+      const reconnect = event?.topic === 'system' && event?.type === 'connected'
+      if (!reconnect && !relevantTask && !relevantGroup && !relevantSession) return
+      if (groupRuntimeRefreshTimer) window.clearTimeout(groupRuntimeRefreshTimer)
+      groupRuntimeRefreshTimer = window.setTimeout(() => {
+        groupRuntimeRefreshTimer = null
+        void pullNewMessages()
+      }, 120)
+    })
     nextTick(attachGroupMessagesResizeObserver)
   })
 
   onUnmounted(() => {
+    unsubscribeGroupRuntime?.()
+    unsubscribeGroupRuntime = null
+    if (groupRuntimeRefreshTimer) window.clearTimeout(groupRuntimeRefreshTimer)
+    groupRuntimeRefreshTimer = null
     stopGroupPolling()
     stopLogStream()
     detachGroupMessagesResizeObserver()
@@ -890,6 +925,7 @@ export function useGroupChat(props, emit) {
     currentGroupSessionId, isGroupSessionDraft, groupMemory, mainAgentStatus, groupAgentQa, collaborationProtocol,
     groupMessagesEl, groupMessagesContentEl, isGroupMessagesPinnedToBottom, updateGroupMessageScrollState,
     scrollToBottom, attachGroupMessagesResizeObserver, detachGroupMessagesResizeObserver, navMessages,
+    pendingGroupProgressCount, notifyGroupProgress, jumpToLatestGroupProgress, resetGroupPinnedScroll,
     scrollToMessage, newMessage, slashNavigate, runGroupClientCommand, pendingDirectMemoryCommand, slash,
     focusGroupInput, messageFiles, messageMode, pendingGroupTaskInput,
     pendingGroupClarificationInput, isTaskSupplementMode, isClarificationResponseMode,

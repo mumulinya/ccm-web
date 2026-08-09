@@ -48,12 +48,15 @@ import {
 } from "./collaboration-agent-parallel-dispatch";
 import {
   heartbeatAgentCommunication,
+  getAgentCommunication,
   markAgentCommunicationRunnerStarted,
   readAgentCommunicationPolicy,
   startAgentCommunicationDispatch,
   submitAgentCommunicationResult,
   waitForAgentCommunicationDispatch,
+  transitionAgentCommunication,
 } from "../../system/agent-communication-v2";
+import { AGENT_COMMUNICATION_ACK_MCP_TOOL_ALIASES } from "../../integrations/agent-communication-mcp";
 
 // ===== merged from collaboration-cross-agents.ts =====
 
@@ -898,6 +901,9 @@ export async function executeMentionJob(mention: any, env: CrossAgentEnv): Promi
     const advisoryOnly = !!mention.advisoryOnly;
     const communicationAttempt = Math.max(1, memoryDeliveryAttemptSequence || 1);
     const communicationGeneration = Math.max(0, Number(sourceTask?.agent_communication_generation || sourceTask?.generation || 0));
+    const communicationPolicy = readAgentCommunicationPolicy(sourceTask?.contextPolicy?.effective || sourceTask?.context_policy?.effective || sourceTask?.context_policy_effective || {});
+    const targetAnchorMessageId = String(sourceTask?.target_message_id || sourceTask?.targetMessageId || `task-message:${taskId}:${targetName}`);
+    const originMessageId = String(sourceTask?.origin_message_id || sourceTask?.originMessageId || sourceTask?.source_message_id || sourceTask?.sourceMessageId || "");
     const communicationDispatchInput: any = {
       taskId,
       workItemId: laneExecutionId || `${taskId}--${targetName}`,
@@ -921,6 +927,9 @@ export async function executeMentionJob(mention: any, env: CrossAgentEnv): Promi
         worktreeRef: preparedWorkDir.mode === "worktree" ? preparedWorkDir.worktreePath || preparedWorkDir.workDir : "",
         advisoryOnly,
         verificationOnly: nativeTestAgentDispatch,
+        anchorMessageId: targetAnchorMessageId,
+        originMessageId,
+        strictPreExecutionAck: communicationPolicy.strictPreExecutionAckEnabled === true,
       },
       policy: sourceTask?.contextPolicy?.effective || sourceTask?.context_policy?.effective || sourceTask?.context_policy_effective || {},
     };
@@ -1028,6 +1037,12 @@ export async function executeMentionJob(mention: any, env: CrossAgentEnv): Promi
         memorySnapshotChecksum: thirdPartyMemorySnapshot?.checksum || "",
         boundaryGeneration: thirdPartyMemorySnapshot?.boundaryGeneration || 0,
         nativeGeneration: thirdPartyMemorySnapshot?.nativeGeneration || 0,
+        communicationMessageId: communicationEnvelope?.messageId || "",
+        communicationGeneration: communicationEnvelope?.generation || 0,
+        communicationAttempt: communicationEnvelope?.attempt || 0,
+        communicationLeaseId: communicationEnvelope?.leaseId || "",
+        anchorMessageId: targetAnchorMessageId,
+        originMessageId,
         requestText: childTaskText,
         memoryReadBudgetTokens: thirdPartyMemorySnapshot?.autoCompactThreshold || 0,
       });
@@ -2499,6 +2514,43 @@ export async function executeMentionJobTryA(mention: any, env: CrossAgentEnv): P
           senderAgentId: communicationEnvelope.receiverAgentId,
           receiverAgentId: communicationEnvelope.senderAgentId,
         } : null;
+        const currentCommunication = communicationEnvelope?.messageId
+          ? getAgentCommunication(communicationEnvelope.messageId, { includeEvents: false, includeReceipts: false })
+          : null;
+        const communicationPolicy = readAgentCommunicationPolicy(sourceTask?.contextPolicy?.effective || sourceTask?.context_policy?.effective || sourceTask?.context_policy_effective || {});
+        const targetAnchorMessageId = String(currentCommunication?.payload?.anchorMessageId || currentCommunication?.payload?.anchor_message_id || responseMessageId || `task-message:${taskId}:${targetName}`);
+        const originMessageId = String(currentCommunication?.payload?.originMessageId || currentCommunication?.payload?.origin_message_id || "");
+        if (communicationEnvelope?.messageId && communicationPolicy.strictPreExecutionAckEnabled === true) {
+          markAgentCommunicationRunnerStarted(communicationEnvelope.messageId, { runtime: activeRuntime, runnerKind: "ack_preflight", summary: "正在进行执行前ACK预检" });
+          const preflightSnapshot = tWorkDir ? ctx.createFileChangeSnapshot(tWorkDir) : null;
+          await ctx.callAgent(targetName, [
+            "[CCM执行前ACK预检]",
+            `通信message_id：${communicationEnvelope.messageId}`,
+            `任务目标：${String(childTaskText || "").slice(0, 500)}`,
+            "禁止修改文件、运行构建、测试或执行其他业务工具。只能调用 ccm__agent_communication.acknowledge_assignment，成功后立即结束。",
+          ].join("\n"), tWorkDir, activeRuntime, communicationPolicy.agentAckTimeoutMs, {
+            groupId,
+            allowedTools: toolContext.allowedTools,
+            cliAllowedTools: AGENT_COMMUNICATION_ACK_MCP_TOOL_ALIASES,
+            mcpConfigPath: runtimeToolContext.audit.mcpConfigPath,
+            taskId,
+            executionId: `${laneExecutionId}:ack-preflight`,
+            taskAgentSessionId: activeTaskSession?.id || "",
+            skipIndependentVerification: true,
+            background: true,
+            durableDispatch: false,
+          });
+          const preflightChanges = tWorkDir ? ctx.getFileChanges(targetName, preflightSnapshot) : null;
+          if (Number(preflightChanges?.count || 0) > 0) {
+            transitionAgentCommunication(communicationEnvelope.messageId, "recovery_required", { eventType: "ack_preflight_side_effect", detail: { fileCount: preflightChanges.count, contentStored: false } });
+            throw new Error("ACK预检产生了未授权文件副作用，已停止正式执行");
+          }
+          const acknowledged = getAgentCommunication(communicationEnvelope.messageId, { includeEvents: false, includeReceipts: false });
+          if (!acknowledged || !["acknowledged", "executing"].includes(String(acknowledged.state))) {
+            if (acknowledged?.state === "runner_started") transitionAgentCommunication(communicationEnvelope.messageId, "ack_timeout", { eventType: "ack_timeout", detail: { timeoutMs: communicationPolicy.agentAckTimeoutMs } });
+            throw new Error("第三方 Agent 未在执行前完成真实ACK，正式Runner未启动");
+          }
+        }
         const attemptOutput = await ctx.callAgentForGroupStream(targetName, attemptPrompt, tWorkDir, activeRuntime, {
           res: streamRes,
           groupId,
@@ -2510,6 +2562,21 @@ export async function executeMentionJobTryA(mention: any, env: CrossAgentEnv): P
           executionId: laneExecutionId,
           model: activeTaskSession?.modelId || "",
           taskAgentSessionId: activeTaskSession?.id || "",
+          runtimeProgressContext: communicationEnvelope ? {
+            taskId: communicationEnvelope.taskId,
+            workItemId: communicationEnvelope.workItemId,
+            scope: communicationEnvelope.scope,
+            scopeId: communicationEnvelope.scopeId,
+            exactSessionId: communicationEnvelope.exactSessionId,
+            anchorMessageId: targetAnchorMessageId,
+            ...(originMessageId ? { originMessageId } : {}),
+            agentRunId: communicationEnvelope.messageId,
+            generation: communicationEnvelope.generation,
+            attempt: communicationEnvelope.attempt,
+            leaseId: communicationEnvelope.leaseId,
+          } : null,
+          agentRuntimeStructuredProgressEnabled: communicationPolicy.agentRuntimeStructuredProgressEnabled,
+          agentProgressFallbackTimeoutMs: communicationPolicy.agentProgressFallbackTimeoutMs,
           trustedMemoryProviderChannelRequired: activeMemoryContextSnapshot?.context?.memory_prompt_injection_proof?.trusted_envelope_bound === true,
           trustedMemoryProviderAcknowledgementRequired: activeMemoryContextSnapshot?.context?.provider_memory_channel_acknowledgement_required === true,
           memoryContextConsumptionReceiptRequired: activeMemoryContextSnapshot?.context?.memory_context_consumption_receipt_required === true,

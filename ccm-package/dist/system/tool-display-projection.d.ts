@@ -20,6 +20,8 @@ export type ToolDisplayDetailV1 = {
         truncated: boolean;
         nextCursor?: string;
         rehydratable?: boolean;
+        freshness?: "current" | "drifted" | "deleted" | "permission_revoked";
+        authoritativeRevision?: string;
     };
     contentStored: false;
 };
@@ -29,6 +31,8 @@ export declare function buildToolDisplayDetail(input: {
     result?: any;
     error?: any;
     transientBody?: boolean;
+    freshness?: ToolDisplayDetailV1["result"]["freshness"];
+    authoritativeRevision?: string;
 }): ToolDisplayDetailV1;
 export declare function isWorkspaceReadonlyToolName(value: any): boolean;
 export {};

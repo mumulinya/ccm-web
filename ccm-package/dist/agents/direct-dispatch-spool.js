@@ -232,7 +232,13 @@ function appendDirectAgentDispatchTranscript(id, type, payload = {}) {
             return null;
         if (!isStream && state.bytes >= TRANSCRIPT_MAX_BYTES)
             return null;
-        const compactPayload = compactTranscriptValue(payload);
+        const compactPayload = isStream
+            ? {
+                bytes: Buffer.byteLength(String(payload?.text || "")),
+                checksum: crypto.createHash("sha256").update(String(payload?.text || "")).digest("hex"),
+                contentStored: false,
+            }
+            : compactTranscriptValue(payload);
         const payloadJson = JSON.stringify(compactPayload);
         const event = {
             schema: exports.DIRECT_AGENT_DISPATCH_TRANSCRIPT_SCHEMA,
@@ -297,8 +303,8 @@ function createDirectAgentDispatchRequest(input = {}) {
         memoryContextConsumptionChallenge: input.memoryContextConsumptionChallenge || null,
         trustedMemoryEnvelopeChecksum: String(input.trustedMemoryEnvelopeChecksum || ""),
         trustedMemoryEnvelopeSourceChecksum: String(input.trustedMemoryEnvelopeSourceChecksum || ""),
-        message,
         prompt_checksum: crypto.createHash("sha256").update(message).digest("hex").slice(0, 32),
+        contentStored: false,
         created_at: createdAt,
         started_at: "",
         completed_at: "",

@@ -109,6 +109,11 @@ export function completeOperation(operationId: string, input: { status?: "succee
   return updated;
 }
 
+export function listOperationRecords(filter: { target?: string; operationTypes?: OperationType[]; status?: OperationRecord["status"] } = {}) {
+  const types = new Set(filter.operationTypes || []);
+  return readStore().records.filter(item => (!filter.target || item.target === filter.target) && (!types.size || types.has(item.operationType)) && (!filter.status || item.status === filter.status)).slice(-500);
+}
+
 export function findReusableOperation(input: any): OperationRecord | null {
   const fingerprint = text(input?.fingerprint, 160) || buildOperationFingerprint(input);
   const record = readStore().records.find(item => item.fingerprint === fingerprint && item.status === "succeeded");

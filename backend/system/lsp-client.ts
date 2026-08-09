@@ -12,6 +12,8 @@ export class StdioLspClient extends EventEmitter {
   private pending = new Map<number, { resolve: (value: any) => void; reject: (error: Error) => void; timer: NodeJS.Timeout }>();
   private stopping = false;
   readonly diagnostics = new Map<string, any[]>();
+  private openedDocuments = new Map<string, { version: number; checksum: string }>();
+  capabilities: any = {};
   constructor(readonly config: LspServerConfig) { super(); }
 
   async start() {
@@ -28,8 +30,33 @@ export class StdioLspClient extends EventEmitter {
       if (!this.stopping) this.emit("crash", { code, signal });
     });
     const rootUri = `file:///${path.resolve(this.config.cwd).replace(/\\/g, "/").replace(/^\//, "")}`;
-    await this.request("initialize", { processId: process.pid, rootUri, capabilities: { textDocument: { definition: {}, references: {}, implementation: {}, typeDefinition: {}, documentSymbol: {}, callHierarchy: {} }, workspace: { symbol: {} } }, initializationOptions: this.config.initializationOptions || {} });
+    const initialized = await this.request("initialize", { processId: process.pid, rootUri, capabilities: { textDocument: { definition: {}, references: {}, implementation: {}, typeDefinition: {}, documentSymbol: {}, callHierarchy: {}, publishDiagnostics: {} }, workspace: { symbol: {}, didChangeWatchedFiles: { dynamicRegistration: true } } }, initializationOptions: this.config.initializationOptions || {} });
+    this.capabilities = initialized?.capabilities || {};
     this.notify("initialized", {});
+  }
+
+  openDocument(uri: string, languageId: string, text: string, checksum: string) {
+    const current = this.openedDocuments.get(uri);
+    if (!current) {
+      this.openedDocuments.set(uri, { version: 1, checksum });
+      this.notify("textDocument/didOpen", { textDocument: { uri, languageId, version: 1, text } });
+      return;
+    }
+    if (current.checksum === checksum) return;
+    const version = current.version + 1;
+    this.openedDocuments.set(uri, { version, checksum });
+    this.notify("textDocument/didChange", { textDocument: { uri, version }, contentChanges: [{ text }] });
+  }
+
+  closeDocument(uri: string) {
+    if (!this.openedDocuments.has(uri)) return;
+    this.openedDocuments.delete(uri);
+    this.notify("textDocument/didClose", { textDocument: { uri } });
+    this.diagnostics.delete(uri);
+  }
+
+  watchedFilesChanged(changes: Array<{ uri: string; type: 1 | 2 | 3 }>) {
+    if (changes.length) this.notify("workspace/didChangeWatchedFiles", { changes });
   }
 
   private consume(chunk: Buffer) {
@@ -98,6 +125,8 @@ export class StdioLspClient extends EventEmitter {
       try { child.kill(); } catch { finish(); }
     });
     this.failAll(new Error("LSP已停止"));
+    this.openedDocuments.clear();
+    this.capabilities = {};
   }
 
   identity() { return crypto.createHash("sha256").update(JSON.stringify({ ...this.config, initializationOptions: undefined })).digest("hex"); }
@@ -115,7 +144,7 @@ export class LanguageServerManager {
   get(id: string) { return this.clients.get(id) || null; }
   async stop(id: string) { const client = this.clients.get(id); if (!client) return; this.clients.delete(id); await client.stop(); }
   async stopAll() { await Promise.all([...this.clients.keys()].map(id => this.stop(id))); }
-  status() { return [...this.clients.entries()].map(([id, client]) => ({ id, state: "running", identity: client.identity(), diagnostics: [...client.diagnostics.values()].reduce((sum, rows) => sum + rows.length, 0) })); }
+  status() { return [...this.clients.entries()].map(([id, client]) => ({ id, state: "running", identity: client.identity(), diagnostics: [...client.diagnostics.values()].reduce((sum, rows) => sum + rows.length, 0), capabilities: client.capabilities })); }
 }
 
 export const languageServerManager = new LanguageServerManager();

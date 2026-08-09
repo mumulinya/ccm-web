@@ -16,8 +16,16 @@ export declare class StdioLspClient extends EventEmitter {
     private pending;
     private stopping;
     readonly diagnostics: Map<string, any[]>;
+    private openedDocuments;
+    capabilities: any;
     constructor(config: LspServerConfig);
     start(): Promise<void>;
+    openDocument(uri: string, languageId: string, text: string, checksum: string): void;
+    closeDocument(uri: string): void;
+    watchedFilesChanged(changes: Array<{
+        uri: string;
+        type: 1 | 2 | 3;
+    }>): void;
     private consume;
     private handle;
     private write;
@@ -38,6 +46,7 @@ export declare class LanguageServerManager {
         state: string;
         identity: string;
         diagnostics: number;
+        capabilities: any;
     }[];
 }
 export declare const languageServerManager: LanguageServerManager;

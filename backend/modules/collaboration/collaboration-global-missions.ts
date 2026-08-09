@@ -22,7 +22,9 @@ import {
 } from "../../core/utils";
 
 import { ingestRequirementSources, requirementToIntakeDraft } from "../requirements/source-ingestion";
-import { appendProjectSessionTaskMessage, ensureProjectAutomationSession } from "../projects/sessions";
+import { appendProjectSessionTaskMessage } from "../projects/sessions";
+import { buildTaskCardView } from "./collaboration-task-card";
+import { buildTaskConversationLinks } from "../../system/task-conversation-links";
 
 import {
   loadCronJobs,
@@ -760,6 +762,19 @@ export function superviseGlobalDevelopmentMissionCycle(id: string, ctx: CollabCt
 export async function controlGlobalDevelopmentMission(id: string, operation: string, ctx: CollabCtx, payload: any = {}) {
   const current = getGlobalDevelopmentMission(id);
   if (!current) return { success: false, status: 404, error: "全局任务不存在" };
+  const expectedRevision = payload?.expected_revision ?? payload?.expectedRevision;
+  if (expectedRevision !== undefined && Number(expectedRevision) !== Math.max(0, Number(current.mission?.revision || 0))) {
+    return {
+      success: false,
+      status: 409,
+      error: `全局任务状态已更新，请刷新后重试（expected=${Number(expectedRevision)} actual=${Math.max(0, Number(current.mission?.revision || 0))}）`,
+    };
+  }
+  const expectedGeneration = payload?.generation ?? payload?.expected_generation ?? payload?.expectedGeneration;
+  const actualGeneration = Math.max(1, Number(current.mission?.generation || current.mission?.workflow_generation || 1));
+  if (expectedGeneration !== undefined && Number(expectedGeneration) !== actualGeneration) {
+    return { success: false, status: 409, error: `全局任务执行代次已变化，请刷新后重试（expected=${Number(expectedGeneration)} actual=${actualGeneration}）` };
+  }
   const op = String(operation || "").toLowerCase();
   const now = new Date().toISOString();
   if (!["pause", "resume", "cancel", "takeover", "update_goal"].includes(op)) {
@@ -1139,24 +1154,13 @@ export function createGlobalDevelopmentMission(payload: any, ctx: CollabCtx) {
       }
       const key = `group:${group.id}`;
       if (seen.has(key)) continue;
-      // 会话绑定在目标解析时一次性显式决定，子任务与执行队列全程使用同一个精确 gcs_* 会话。
-      let groupSession: any;
-      try {
-        groupSession = resolveWritableGroupChatSession(group.id, String(target.group_session_id || target.groupSessionId || ""), {
-          title: compactFormText(payload.title || payload.business_goal || payload.businessGoal, "全局开发任务").slice(0, 80),
-          createDedicated: !String(target.group_session_id || target.groupSessionId || "").trim(),
-          sessionKind: "automation",
-        });
-      } catch (error: any) {
-        rejected.push({ target, reason: `群聊会话绑定失败：${error?.message || error}` });
-        continue;
-      }
       seen.add(key);
       resolved.push({
         ...target,
         type: "group",
         group_id: group.id,
-        group_session_id: String(groupSession?.id || ""),
+        // 精确会话由 createTaskWithScopedIdentity 中央绑定解析器一次性决定。
+        group_session_id: "",
         name: group.name || group.id,
         coordinator: readiness.coordinator.project,
         ownership_chain: buildGlobalGroupTestAgentOwnership(),
@@ -1168,59 +1172,17 @@ export function createGlobalDevelopmentMission(payload: any, ctx: CollabCtx) {
       rejected.push({ target, reason: "项目不存在" });
       continue;
     }
-    const candidateGroups = groups.filter((group: any) =>
-      (group.members || []).some((member: any) => String(member?.project || "").trim() === config.name)
-    );
-    const requestedGroupId = String(target.group_id || target.groupId || "").trim();
-    const orderedGroups = requestedGroupId
-      ? [
-          ...candidateGroups.filter((group: any) => group.id === requestedGroupId || group.name === requestedGroupId),
-          ...candidateGroups.filter((group: any) => group.id !== requestedGroupId && group.name !== requestedGroupId),
-        ]
-      : candidateGroups;
-    let selectedGroup: any = null;
-    let selectedReadiness: any = null;
-    for (const group of orderedGroups) {
-      try {
-        selectedReadiness = validateDailyDevGroupReady(group);
-        selectedGroup = group;
-        break;
-      } catch {}
-    }
-    if (!selectedGroup || !selectedReadiness) {
-      rejected.push({
-        target,
-        reason: `项目 ${config.name} 尚未加入可执行的协作群，无法交给群聊主 Agent 完成计划、验收和 TestAgent 复核`,
-      });
-      continue;
-    }
-    const key = `group:${selectedGroup.id}:project:${config.name}`;
+    const key = `project:${config.name}`;
     if (seen.has(key)) continue;
-    // 用户指定的精确会话只在最终选中的群与请求的群一致时生效，避免把别的群的会话 id 带进来。
-    const requestedSession = selectedGroup.id === requestedGroupId || selectedGroup.name === requestedGroupId
-      ? String(target.group_session_id || target.groupSessionId || "")
-      : "";
-    let selectedGroupSession: any;
-    try {
-      selectedGroupSession = resolveWritableGroupChatSession(selectedGroup.id, requestedSession, {
-        title: compactFormText(payload.title || payload.business_goal || payload.businessGoal, "全局开发任务").slice(0, 80),
-        createDedicated: !requestedSession,
-        sessionKind: "automation",
-      });
-    } catch (error: any) {
-      rejected.push({ target, reason: `群聊会话绑定失败：${error?.message || error}` });
-      continue;
-    }
     seen.add(key);
     resolved.push({
       ...target,
-      type: "group",
-      group_id: selectedGroup.id,
-      group_session_id: String(selectedGroupSession?.id || ""),
-      name: selectedGroup.name || selectedGroup.id,
-      coordinator: selectedReadiness.coordinator.project,
-      requested_target_type: "project",
-      requested_project: config.name,
+      type: "project",
+      group_id: "",
+      group_session_id: "",
+      project_session_id: "",
+      name: config.display_name || config.displayName || config.name,
+      coordinator: config.name,
       project: config.name,
       ownership_chain: buildGlobalGroupTestAgentOwnership(),
     });
@@ -1242,6 +1204,14 @@ export function createGlobalDevelopmentMission(payload: any, ctx: CollabCtx) {
   const requirementExtraction = payload.requirement_extraction || payload.requirementExtraction || null;
   const sourceIngestion = payload.source_ingestion || payload.sourceIngestion || null;
   const autoExecute = payload.auto_execute !== false && payload.autoExecute !== false;
+  const sourceSessionId = String(payload.session_id || payload.sessionId || "").trim();
+  const sourceConversationRef = sourceSessionId ? {
+    scope: "global",
+    scopeId: "global-agent",
+    exactSessionId: sourceSessionId,
+    messageId: String(payload.message_id || payload.messageId || ""),
+    title: "全局 Agent 任务",
+  } : null;
   const parent = createTask({
     title,
     description: businessGoal,
@@ -1250,6 +1220,8 @@ export function createGlobalDevelopmentMission(payload: any, ctx: CollabCtx) {
     priority: payload.priority || "normal",
     auto_execute: false,
     workflow_type: "global_mission",
+    origin_session_id: sourceSessionId || null,
+    source_conversation_ref: sourceConversationRef,
     business_goal: businessGoal,
     acceptance_criteria: acceptance,
     source_documents: sourceDocuments,
@@ -1268,6 +1240,8 @@ export function createGlobalDevelopmentMission(payload: any, ctx: CollabCtx) {
     workflow_meta: {
       intake: {
         source: payload.source || "global-agent",
+        session_id: sourceSessionId,
+        message_id: String(payload.message_id || payload.messageId || ""),
         created_at: new Date().toISOString(),
         attachment_count: sourceAttachments.length,
         requirement_extraction: requirementExtraction,
@@ -1297,9 +1271,6 @@ export function createGlobalDevelopmentMission(payload: any, ctx: CollabCtx) {
     const childGoal = compactFormText(target.task, businessGoal);
     const childTitle = compactMemoryText(`${title} - ${target.name}`, 100);
     const targetGroup = target.type === "group" ? groups.find((item: any) => item.id === target.group_id) : null;
-    const projectSession = target.type === "project"
-      ? ensureProjectAutomationSession(target.project, "", childTitle)
-      : null;
     const missionHandoff = buildGlobalMissionTargetHandoff({
       parent,
       target,
@@ -1324,13 +1295,15 @@ export function createGlobalDevelopmentMission(payload: any, ctx: CollabCtx) {
       }),
       target_project: target.type === "group" ? target.coordinator : target.project,
       group_id: target.type === "group" ? target.group_id : null,
-      group_session_id: target.type === "group" ? (target.group_session_id || null) : null,
-      project_session_id: projectSession?.sessionId || null,
+      group_session_id: null,
+      project_session_id: null,
       assign_type: target.type === "group" ? "group" : "project",
       orchestration_scope: target.type === "group" ? "group_session" : "project_session",
       queue_scope: "conversation_serial",
       request_origin: payload.source || "global-agent",
-      origin_session_id: projectSession?.sessionId || (target.type === "group" ? target.group_session_id : "") || payload.session_id || payload.sessionId || null,
+      origin_session_id: sourceSessionId || null,
+      source_conversation_ref: sourceConversationRef,
+      target_message_id: `global-task-queued-${parent.id}-${target.group_id || target.project}`,
       priority: payload.priority || "normal",
       auto_execute: autoExecute,
       workflow_type: "daily_dev",
@@ -1359,28 +1332,98 @@ export function createGlobalDevelopmentMission(payload: any, ctx: CollabCtx) {
           handoff: missionHandoffSummary,
           requirement_extraction: requirementExtraction,
           source_ingestion: sourceIngestion,
+          source_session_id: sourceSessionId,
         },
       },
       trace_id: missionTraceId,
       idempotency_key: missionIdempotencyKey ? `${missionIdempotencyKey}:target:${target.type}:${target.group_id || target.project}` : null,
     });
-    if (projectSession?.sessionId) {
-      appendProjectSessionTaskMessage(target.project, projectSession.sessionId, {
+    const targetMessageId = `global-task-queued-${child.id}`;
+    const targetSessionId = String(child.group_session_id || child.project_session_id || "");
+    const effectiveTarget = {
+      ...target,
+      group_session_id: child.group_session_id || "",
+      project_session_id: child.project_session_id || "",
+      automation_session_binding_snapshot: child.automation_session_binding_snapshot || null,
+    };
+    Object.assign(target, effectiveTarget);
+    const persistedChild = updateTask(child.id, {
+      mission_target: effectiveTarget,
+      target_message_id: targetMessageId,
+      target_conversation_ref: {
+        scope: target.type,
+        scopeId: target.type === "group" ? child.group_id : child.target_project,
+        exactSessionId: targetSessionId,
+        messageId: targetMessageId,
+        title: child.title,
+      },
+    });
+    if (persistedChild) Object.assign(child, persistedChild);
+    if (target.type === "project" && child.project_session_id) {
+      appendProjectSessionTaskMessage(target.project, child.project_session_id, {
         id: `global-task-intake-${child.id}`,
         role: "user",
         content: childGoal,
         timestamp: child.created_at,
         task_id: child.id,
         type: "global_task_dispatch_intake",
+        source_conversation_ref: sourceConversationRef,
       });
-      appendProjectSessionTaskMessage(target.project, projectSession.sessionId, {
-        id: `global-task-queued-${child.id}`,
+      appendProjectSessionTaskMessage(target.project, child.project_session_id, {
+        id: targetMessageId,
         role: "assistant",
         agent: "project-main-agent",
-        content: `全局 Agent 已分派任务“${child.title}”。项目主 Agent 将按当前会话队列执行，并在 TestAgent 验收后提交结果。`,
+        content: `来源：全局 Agent\n\n已接收任务“${child.title}”。项目主 Agent 将先形成用户可读计划，再按当前会话队列执行，并在 TestAgent 验收后提交结果。`,
         timestamp: child.created_at,
         task_id: child.id,
         type: "global_task_dispatch_queued",
+        source_conversation_ref: sourceConversationRef,
+        taskExperience: {
+          requires_card: true,
+          task_id: child.id,
+          title: child.title,
+          goal: childGoal,
+          phase: "queued",
+          status: "pending",
+          orchestration_scope: "project_session",
+          source_conversation_ref: sourceConversationRef,
+          conversation_links: buildTaskConversationLinks(child)?.links || [],
+          actions: sourceConversationRef ? [{ id: "open_source_session", kind: "open_source_session", label: "返回全局任务", tone: "outline" }] : [],
+        },
+      });
+    }
+    if (target.type === "group" && child.group_id && child.group_session_id) {
+      appendGroupMessage(child.group_id, {
+        id: `global-task-intake-${child.id}`,
+        group_session_id: child.group_session_id,
+        role: "user",
+        content: childGoal,
+        timestamp: child.created_at,
+        task_id: child.id,
+        type: "global_task_dispatch_intake",
+        source_conversation_ref: sourceConversationRef,
+      });
+      appendGroupMessage(child.group_id, {
+        id: targetMessageId,
+        group_session_id: child.group_session_id,
+        role: "assistant",
+        agent: "group-main-agent",
+        content: `来源：全局 Agent\n\n已接收任务“${child.title}”。群聊主 Agent 将先制定用户可读计划，再安排项目 Agent 执行和 TestAgent 验收。`,
+        timestamp: child.created_at,
+        task_id: child.id,
+        type: "global_task_dispatch_queued",
+        source_conversation_ref: sourceConversationRef,
+        task_card: {
+          ...buildTaskCardView(child, [], []),
+          visible: true,
+          presentation: "plan",
+          phase: "queued",
+          phase_label: "准备制定计划",
+          actions: [
+            { id: "open_source_session", kind: "open_source_session", label: "返回全局任务", tone: "outline" },
+            ...(buildTaskCardView(child, [], []).actions || []).filter((action: any) => action.kind !== "open_source_session"),
+          ],
+        },
       });
     }
     targetHandoffs.push({ ...missionHandoffSummary, child_task_id: child.id, target_type: target.type, target_name: target.name || target.project || target.group_id || "" });

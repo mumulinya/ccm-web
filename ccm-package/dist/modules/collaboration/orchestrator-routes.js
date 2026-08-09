@@ -2,6 +2,8 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.handleOrchestratorRoutes = handleOrchestratorRoutes;
 const utils_1 = require("../../core/utils");
+const db_1 = require("../../core/db");
+const task_conversation_links_1 = require("../../system/task-conversation-links");
 const local_auth_1 = require("../system/local-auth");
 const storage_1 = require("./storage");
 const group_orchestrator_1 = require("./group-orchestrator");
@@ -437,6 +439,12 @@ function handleOrchestratorRoutes(req, res, parsed, ctx, deps) {
                 const taskId = String(payload.task_id || payload.taskId || payload.id || "");
                 if (!taskId)
                     return (0, utils_1.sendJson)(res, { error: "缺少任务 ID" }, 400);
+                const task = (0, db_1.loadTasks)().find((item) => String(item?.id || "") === taskId);
+                if (!task)
+                    return (0, utils_1.sendJson)(res, { error: "任务不存在" }, 404);
+                const guard = (0, task_conversation_links_1.validateTaskMutationGuard)(task, payload, { requireTarget: true });
+                if ("error" in guard)
+                    return (0, utils_1.sendJson)(res, { success: false, error: guard.error, code: guard.code, ...guard.details }, guard.status);
                 const result = deps.switchTaskExecutor(taskId, payload.runtime || payload.agent_type || payload.agentType, ctx, payload);
                 if (!result.success)
                     return (0, utils_1.sendJson)(res, { error: result.error }, result.status || 400);

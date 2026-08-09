@@ -1,6 +1,7 @@
-import { globalMissionConversationState, upsertGlobalMissionConversationNotification } from './useGlobalAgentSessions.js'
+import { globalMissionConversationState } from './useGlobalAgentSessions.js'
 import { getDeliveryReport } from '../utils/agentDisplay.js'
 import { visibleGlobalText } from '../utils/globalAgentExecutionStream.js'
+import { subscribeRuntimeEvents } from '../utils/runtimeEventBus.js'
 
 const missionStatusLabel = (mission) => {
   if (mission?.status === 'done') return '全部通过'
@@ -22,21 +23,40 @@ export const __globalMissionTrackingTestHooks = { missionStatusLabel, childStatu
 
 export function useGlobalMissionTracking(options = {}) {
   const missionPollTimers = new Map()
+  const missionRefreshDebounce = new Map()
   const sessions = options.sessions
   const fetchImpl = options.fetchImpl || fetch
   const setIntervalImpl = options.setIntervalImpl || setInterval
   const clearIntervalImpl = options.clearIntervalImpl || clearInterval
 
   const stopMissionTracking = (missionId) => {
-    const timer = missionPollTimers.get(missionId)
-    if (timer) clearIntervalImpl(timer)
+    const tracked = missionPollTimers.get(missionId)
+    if (tracked?.timer) clearIntervalImpl(tracked.timer)
+    const debounce = missionRefreshDebounce.get(missionId)
+    if (debounce) clearTimeout(debounce)
+    missionRefreshDebounce.delete(missionId)
     missionPollTimers.delete(missionId)
   }
 
   const stopAllMissionTracking = () => {
-    for (const timer of missionPollTimers.values()) clearIntervalImpl(timer)
+    for (const tracked of missionPollTimers.values()) if (tracked?.timer) clearIntervalImpl(tracked.timer)
+    for (const debounce of missionRefreshDebounce.values()) clearTimeout(debounce)
+    missionRefreshDebounce.clear()
     missionPollTimers.clear()
   }
+
+  const unsubscribeRuntime = subscribeRuntimeEvents(['task'], event => {
+    if (event?.type !== 'task.changed') return
+    const taskId = String(event?.data?.taskId || event?.data?.task_id || '')
+    for (const [missionId, tracked] of missionPollTimers.entries()) {
+      if (taskId && !tracked.taskIds?.has(taskId)) continue
+      if (missionRefreshDebounce.has(missionId)) continue
+      missionRefreshDebounce.set(missionId, setTimeout(() => {
+        missionRefreshDebounce.delete(missionId)
+        void tracked.refresh?.()
+      }, 120))
+    }
+  })
 
   const formatMissionDeliveryReport = (report, fallback) => {
     if (!report) return fallback
@@ -107,6 +127,11 @@ export function useGlobalMissionTracking(options = {}) {
         message.globalMission = data.mission
         message.globalMissionChildren = (data.children || []).map(task => ({ task, target: task.mission_target || null }))
         message.globalMissionSupervisor = data.supervisor || message.globalMissionSupervisor
+        message.globalMissionNavigation = data.navigation || message.globalMissionNavigation || null
+        message.globalMissionDelivery = data.delivery || message.globalMissionDelivery || null
+        message.globalMissionProjectionRevision = data.projectionRevision || message.globalMissionProjectionRevision || ''
+        const tracked = missionPollTimers.get(missionId)
+        if (tracked) tracked.taskIds = new Set([missionId, ...(data.children || []).map(task => String(task?.id || '')).filter(Boolean)])
         let currentRun = message.agenticRun || null
         if (message.agenticRun?.id) {
           try {
@@ -122,19 +147,9 @@ export function useGlobalMissionTracking(options = {}) {
         if (state !== 'active') {
           const content = notificationContent({ state, mission: data.mission, supervisor: data.supervisor, run: currentRun })
           if (content) message.content = content
-          const notification = upsertGlobalMissionConversationNotification(session.messages, {
-            missionId,
-            state,
-            content,
-            updatedAt: currentRun?.updated_at || data.supervisor?.updated_at || data.mission?.updated_at,
-            extra: {
-              globalMission: data.mission,
-              globalMissionChildren: (data.children || []).map(task => ({ task, target: task.mission_target || null })),
-              globalMissionSupervisor: data.supervisor || null,
-            },
-          })
+          const previousState = message.missionNotificationState
           message.missionNotificationState = state
-          if (notification.created && state === 'waiting_user') options.toast?.info?.('有一项全局任务需要你补充信息')
+          if (previousState !== state && state === 'waiting_user') options.toast?.info?.('有一项全局任务需要你补充信息')
           if (['completed', 'failed', 'cancelled'].includes(state)) {
             message.finalNotified = true
             message.terminalNotified = true
@@ -145,7 +160,9 @@ export function useGlobalMissionTracking(options = {}) {
         options.scrollToBottom?.()
       } catch {}
     }
-    missionPollTimers.set(missionId, setIntervalImpl(refresh, options.pollInterval || 4000))
+    const tracked = { refresh, taskIds: new Set([missionId]), timer: null }
+    tracked.timer = setIntervalImpl(refresh, options.pollInterval || 15000)
+    missionPollTimers.set(missionId, tracked)
     return refresh()
   }
 
@@ -153,6 +170,7 @@ export function useGlobalMissionTracking(options = {}) {
     trackGlobalMission,
     stopMissionTracking,
     stopAllMissionTracking,
+    disposeMissionTracking: () => { stopAllMissionTracking(); unsubscribeRuntime?.() },
     missionStatusLabel,
     childStatusLabel,
   }

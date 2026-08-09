@@ -12,6 +12,8 @@ export type UserVisibleAgentEvent = {
     scopeId: string;
     exactSessionId: string;
     generation: number;
+    anchorMessageId?: string;
+    originMessageId?: string;
     taskId?: string;
     workItemId?: string;
     agentRunId?: string;
@@ -63,6 +65,9 @@ export type UserVisibleAgentEvent = {
             dependencyWaitMs?: number;
             queueWaitMs?: number;
             otherMs?: number;
+            projectAgentWallMs?: number;
+            verificationMs?: number;
+            summaryMs?: number;
             stages?: {
                 preparationMs?: number;
                 projectAgentWallMs?: number;
@@ -75,13 +80,37 @@ export type UserVisibleAgentEvent = {
             text: string;
             modelCallIndex: number;
             relatedToolCallIds: string[];
+            batchId: string;
             milestoneChecksum: string;
+            source?: "agent_reported" | "runtime_structured" | "system_observed";
+            confidence?: "declared" | "observed";
+            sourceEventChecksum?: string;
         };
+        availableActions?: UserVisibleAgentAction[];
         requirementPlan?: UserVisibleRequirementPlanV1;
+        runtimeObservation?: {
+            eventType?: string;
+            source: "agent_reported" | "runtime_structured" | "system_observed";
+            confidence: "declared" | "observed";
+            runtime?: string;
+            runtimeVersion?: string;
+            sourceEventChecksum: string;
+            contentStored: false;
+        };
     };
     visibility: "default" | "transcript" | "technical";
     contentStored: false;
     createdAt: string;
+};
+export type UserVisibleAgentAction = {
+    id: string;
+    kind: "retry" | "resolve_permission" | "view_error" | "recheck" | "takeover";
+    label: string;
+    enabled: boolean;
+    disabledReason?: string;
+    revision?: number;
+    generation?: number;
+    bindingChecksum?: string;
 };
 export type UserVisibleRequirementPlanStepV1 = {
     id: string;

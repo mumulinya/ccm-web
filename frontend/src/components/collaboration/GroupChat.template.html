@@ -106,6 +106,7 @@
                   stage-grouped
                   presentation="live"
                   @open-file-change="openSingleFileChange"
+                  @execution-action="handleTaskCardAction(msg, $event)"
                 />
                 <CommandResultCard v-if="msg.type === 'command_result'" :result="msg.commandResult" />
                 <!-- 思考过程消息 -->
@@ -183,6 +184,7 @@
                   presentation="completed"
                   @open-file-change="openSingleFileChange"
                   @open-file-changes="openCodeChangeDrawer($event, { title: '群聊任务文件改动' })"
+                  @execution-action="handleTaskCardAction(msg, $event)"
                 />
                 </ConversationMessageShell>
               </template>
@@ -193,6 +195,7 @@
             </div>
           </div>
         </div>
+        <NewProgressIndicator :count="pendingGroupProgressCount" @activate="jumpToLatestGroupProgress" />
         <!-- 消息锚点导航条 (Codex 风格) -->
         <MessageNavigator
           :items="navMessages"

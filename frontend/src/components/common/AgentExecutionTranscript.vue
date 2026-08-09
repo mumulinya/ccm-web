@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import {
   activateExecutionTranscript,
   agentStatusCategory,
@@ -21,12 +21,14 @@ const props = defineProps({
   stageGrouped: { type: Boolean, default: false },
   presentation: { type: String, default: 'auto' },
 })
-const emit = defineEmits(['open-file-change', 'open-file-changes'])
+const emit = defineEmits(['open-file-change', 'open-file-changes', 'execution-action'])
 const stageMode = computed(() => props.stagePreview || props.stageGrouped)
 
 const now = ref(Date.now())
 const executionAnchor = ref(null)
 const transcriptExpanded = ref(false)
+const searchQuery = ref('')
+const searchCursor = ref(-1)
 const transcriptInstanceId = `cc-execution-${Math.random().toString(36).slice(2)}`
 let durationTimer = null
 let unregisterShortcut = null
@@ -42,6 +44,7 @@ onMounted(() => {
   activationHost?.addEventListener('mouseenter', activateTranscript)
   activationHost?.addEventListener('focusin', activateTranscript)
   durationTimer = window.setInterval(() => { now.value = Date.now() }, 1000)
+  restoreExpansionState()
 })
 onBeforeUnmount(() => {
   activationHost?.removeEventListener('mouseenter', activateTranscript)
@@ -51,6 +54,12 @@ onBeforeUnmount(() => {
 })
 
 const rows = computed(() => executionEventsForMessage(props.events, props.messages, props.messageIndex))
+const anchorMessage = computed(() => props.messages?.[props.messageIndex] || {})
+const expansionStorageKey = computed(() => {
+  const sessionId = rows.value[0]?.exactSessionId || anchorMessage.value?.exactSessionId || anchorMessage.value?.sessionId || 'session'
+  const messageId = anchorMessage.value?.id || anchorMessage.value?.messageId || anchorMessage.value?.timestamp || props.messageIndex
+  return `ccm:execution-expansion:${sessionId}:${messageId}`
+})
 const shouldRender = computed(() => shouldRenderExecutionTranscript(props.events, props.messages, props.messageIndex, transcriptExpanded.value))
 const currentGeneration = computed(() => rows.value.reduce((max, event) => Math.max(max, Number(event?.generation || 0)), 0))
 const resultEvent = computed(() => [...rows.value].reverse().find(event => event.eventType === 'result' && Number(event?.generation || 0) === currentGeneration.value))
@@ -152,6 +161,7 @@ const stageTimingSource = computed(() => {
   return [...rows.value].reverse().find(event => event?.detail?.timing)?.detail?.timing || {}
 })
 const expandedStages = reactive({})
+const expandedBatches = reactive({})
 const requirementPlanExpanded = ref(true)
 const planIsExpanded = computed(() => isTerminal.value ? requirementPlanExpanded.value && transcriptExpanded.value : requirementPlanExpanded.value)
 const toggleRequirementPlan = () => { requirementPlanExpanded.value = !requirementPlanExpanded.value }
@@ -202,6 +212,36 @@ const derivedStageDuration = stageRows => unionDuration(stageRows.flatMap(event 
   })
   return [...current, ...history]
 }))
+const batchKeyFor = progress => String(progress?.detail?.progress?.batchId || progress?.eventId || '')
+const batchIsExpanded = batch => expandedBatches[batch.key] === undefined ? true : expandedBatches[batch.key]
+const toggleBatch = batch => { expandedBatches[batch.key] = !batchIsExpanded(batch) }
+const groupedStageItems = stageRows => {
+  const progressRows = stageRows.filter(event => event?.eventType === 'assistant_progress')
+  const lifecycleRows = stageRows.filter(event => event?.eventType !== 'assistant_progress')
+  const claimed = new Set()
+  const batches = progressRows.map((progress, index) => {
+    const related = new Set(progress?.detail?.progress?.relatedToolCallIds || [])
+    const nextSequence = Number(progressRows[index + 1]?.sequence || Number.POSITIVE_INFINITY)
+    const children = lifecycleRows.filter(event => {
+      const matched = related.size
+        ? related.has(event?.toolCallId)
+        : Number(event?.sequence || 0) > Number(progress?.sequence || 0) && Number(event?.sequence || 0) < nextSequence
+      if (matched) claimed.add(event.eventId)
+      return matched
+    })
+    const key = batchKeyFor(progress)
+    return {
+      __progressBatch: true,
+      key,
+      progress,
+      children,
+      durationMs: derivedStageDuration(children),
+    }
+  })
+  const unclaimed = lifecycleRows.filter(event => !claimed.has(event.eventId))
+  return [...batches, ...unclaimed]
+    .sort((left, right) => Number((left.progress || left)?.sequence || 0) - Number((right.progress || right)?.sequence || 0))
+}
 const executionStageRows = computed(() => {
   if (!stageMode.value) {
     if (!requirementPlan.value) return visibleRows.value
@@ -231,7 +271,14 @@ const executionStageRows = computed(() => {
       summary: `${lifecycleRows.length} 项 · ${stageStatus}`,
       durationMs: Math.max(0, Number(stageTiming?.[stage.timingKey] || derivedStageDuration(stageRows))),
     }
-    return { stage, rows: [header, ...(stageIsExpanded(header) ? stageRows.map(event => ({ ...event, __stageChild: true, __stageKind: stage.kind })) : [])] }
+    const groupedRows = groupedStageItems(stageRows).flatMap(item => {
+      if (!item.__progressBatch) return [{ ...item, __stageChild: true, __stageKind: stage.kind }]
+      return [
+        { ...item, __stageChild: true, __stageKind: stage.kind },
+        ...(batchIsExpanded(item) ? item.children.map(event => ({ ...event, __stageChild: true, __batchChild: true, __stageKind: stage.kind, __batchKey: item.key })) : []),
+      ]
+    })
+    return { stage, rows: [header, ...(stageIsExpanded(header) ? groupedRows : [])] }
   })
   const projected = []
   let planInserted = false
@@ -253,6 +300,36 @@ const hydratedDetails = reactive({})
 const detailLoading = reactive({})
 const detailErrors = reactive({})
 const expandedRows = reactive({})
+
+const replaceReactiveFlags = (target, source) => {
+  Object.keys(target).forEach(key => delete target[key])
+  Object.entries(source && typeof source === 'object' ? source : {}).forEach(([key, value]) => { target[key] = value === true })
+}
+const restoreExpansionState = () => {
+  if (typeof sessionStorage === 'undefined') return
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(expansionStorageKey.value) || '{}')
+    transcriptExpanded.value = saved.transcriptExpanded === true
+    requirementPlanExpanded.value = saved.requirementPlanExpanded !== false
+    replaceReactiveFlags(expandedStages, saved.stages)
+    replaceReactiveFlags(expandedBatches, saved.batches)
+    replaceReactiveFlags(expandedRows, saved.rows)
+  } catch {}
+}
+const persistExpansionState = () => {
+  if (typeof sessionStorage === 'undefined') return
+  try {
+    sessionStorage.setItem(expansionStorageKey.value, JSON.stringify({
+      transcriptExpanded: transcriptExpanded.value,
+      requirementPlanExpanded: requirementPlanExpanded.value,
+      stages: { ...expandedStages },
+      batches: { ...expandedBatches },
+      rows: { ...expandedRows },
+    }))
+  } catch {}
+}
+watch(expansionStorageKey, restoreExpansionState)
+watch([transcriptExpanded, requirementPlanExpanded, expandedStages, expandedBatches, expandedRows], persistExpansionState, { deep: true })
 
 const eventTime = value => {
   const parsed = Date.parse(String(value || ''))
@@ -340,24 +417,27 @@ const batchDuration = batchRows => {
   return unionDuration(intervals)
 }
 const progressSegments = computed(() => {
-  const segments = []
-  let current = null
-  for (const event of rows.value) {
-    if (event?.eventType === 'assistant_progress') {
-      current = { progress: event, rows: [] }
-      segments.push(current)
-      continue
-    }
-    if (!current || ['turn_started', 'thinking_status', 'assistant_text_delta', 'result'].includes(event?.eventType)) continue
-    if (event?.eventType?.startsWith('tool_') || event?.eventType?.startsWith('agent_') || ['permission_required', 'context_compacted'].includes(event?.eventType)) current.rows.push(event)
-  }
+  const lifecycle = rows.value.filter(event => event?.eventType?.startsWith('tool_') || event?.eventType?.startsWith('agent_') || ['permission_required', 'context_compacted'].includes(event?.eventType))
+  const segments = assistantProgressRows.value.map((progress, index, all) => {
+    const relatedIds = new Set(progress?.detail?.progress?.relatedToolCallIds || [])
+    const nextSequence = Number(all[index + 1]?.sequence || Number.POSITIVE_INFINITY)
+    const matched = relatedIds.size
+      ? lifecycle.filter(event => relatedIds.has(event?.toolCallId))
+      : lifecycle.filter(event => Number(event?.sequence || 0) > Number(progress?.sequence || 0) && Number(event?.sequence || 0) < nextSequence)
+    return { progress, rows: matched }
+  })
   return segments.map((segment, index) => {
     const tools = segment.rows.filter(event => event?.eventType?.startsWith('tool_')).length
     const agents = segment.rows.filter(event => event?.eventType?.startsWith('agent_')).length
     const parts = []
     if (tools) parts.push(`运行了 ${tools} 个工具`)
     if (agents) parts.push(`${agents} 个 Agent 动作`)
-    return { ...segment, key: segment.progress?.eventId || `progress-${index}`, label: parts.join(' · '), durationMs: batchDuration(segment.rows) }
+    return {
+      ...segment,
+      key: segment.progress?.detail?.progress?.batchId || segment.progress?.eventId || `progress-${index}`,
+      label: parts.join(' · '),
+      durationMs: batchDuration(segment.rows),
+    }
   })
 })
 
@@ -388,7 +468,11 @@ const timingItems = computed(() => {
     ['总耗时', Number(timing.totalMs || turnDurationMs.value)],
     ['模型', Number(timing.modelMs)],
     ['工具', Number.isFinite(Number(timing.toolWallMs)) ? Number(timing.toolWallMs) : derivedToolWallMs.value],
-    ['等待', Number(timing.dependencyWaitMs)],
+    ['项目 Agent', Number(timing.projectAgentWallMs || timing.stages?.projectAgentWallMs)],
+    ['独立验收', Number(timing.verificationMs || timing.stages?.testAgentWallMs)],
+    ['主 Agent 总结', Number(timing.summaryMs || timing.stages?.mainAgentSummaryMs)],
+    ['排队等待', Number(timing.queueWaitMs)],
+    ['依赖等待', Number(timing.dependencyWaitMs)],
     ['其他处理', Number(timing.otherMs)],
   ]
   return items.filter(([, value]) => Number.isFinite(value) && value > 0)
@@ -427,6 +511,7 @@ const isRowExpandable = event => !!(event?.detail && (
   || legacyResult(event.detail.safeResult)
   || event.detail.fileChanges?.length
   || event.detail.evidenceIds?.length
+  || event.detail.runtimeObservation
   || (event.detail.usage && Object.keys(event.detail.usage).length)
 ))
 const isRowExpanded = event => isRowExpandable(event) && expandedRows[event.eventId] === true
@@ -511,7 +596,15 @@ const rehydrateDetail = async event => {
     })
     const response = await fetch(`/api/agent-execution/events/${encodeURIComponent(event.eventId)}/detail?${query}`, { method: 'POST', cache: 'no-store' })
     const payload = await response.json()
-    if (!response.ok || payload.success === false) throw new Error(payload.error || '读取当前详情失败')
+    if (!response.ok || payload.success === false) {
+      if (payload.freshness && event?.detail?.toolDisplay) {
+        hydratedDetails[event.eventId] = {
+          ...event.detail.toolDisplay,
+          result: { ...(event.detail.toolDisplay.result || {}), freshness: payload.freshness },
+        }
+      }
+      throw new Error(payload.error || '读取当前详情失败')
+    }
     hydratedDetails[event.eventId] = payload.toolDisplay
   } catch (error) {
     detailErrors[event.eventId] = error?.message || '读取当前详情失败'
@@ -527,6 +620,59 @@ const rowMeta = event => [
     : '',
   formatExecutionDuration(event?.display?.durationMs) ? `耗时 ${formatExecutionDuration(event.display.durationMs)}` : '',
 ].filter(Boolean).join(' · ')
+
+const searchableText = event => [
+  eventTitle(event), event?.display?.target, eventBusinessSummary(event), eventStatusLabel(event),
+  event?.detail?.agentDisplay?.projectName, event?.detail?.agentDisplay?.workItemTitle,
+  ...(event?.detail?.fileChanges || []).map(file => typeof file === 'string' ? file : file?.path),
+  event?.display?.summary,
+].filter(Boolean).join(' ').toLowerCase()
+const normalizedSearchQuery = computed(() => searchQuery.value.trim().toLowerCase())
+const searchMatches = computed(() => {
+  if (!normalizedSearchQuery.value) return []
+  return visibleRows.value.filter(event => searchableText(event).includes(normalizedSearchQuery.value))
+})
+const searchMatchIds = computed(() => new Set(searchMatches.value.map(event => event.eventId)))
+const eventMatchesSearch = event => !normalizedSearchQuery.value || searchMatchIds.value.has(event.eventId)
+const batchMatchesSearch = batch => !normalizedSearchQuery.value
+  || searchableText(batch.progress).includes(normalizedSearchQuery.value)
+  || batch.children?.some(eventMatchesSearch)
+const stageMatchesSearch = stageKind => !normalizedSearchQuery.value
+  || visibleRows.value.some(event => inferredStageKind(event) === stageKind && eventMatchesSearch(event))
+  || assistantProgressRows.value.some(event => inferredStageKind(event) === stageKind && searchableText(event).includes(normalizedSearchQuery.value))
+const focusSearchMatch = direction => {
+  if (!searchMatches.value.length) return
+  searchCursor.value = (searchCursor.value + direction + searchMatches.value.length) % searchMatches.value.length
+  const id = searchMatches.value[searchCursor.value]?.eventId
+  document.querySelector(`[data-execution-event-id="${CSS.escape(String(id || ''))}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+}
+const onSearchKeydown = event => {
+  if (event.key === 'Escape') { searchQuery.value = ''; searchCursor.value = 0; return }
+  if (event.key !== 'Enter') return
+  event.preventDefault()
+  focusSearchMatch(event.shiftKey ? -1 : 1)
+}
+watch(searchQuery, () => { searchCursor.value = -1 })
+
+const currentLifecycleEventId = computed(() => [...visibleRows.value]
+  .filter(event => Number(event?.generation || 0) === currentGeneration.value && ['running', 'waiting'].includes(String(event?.display?.status || '')))
+  .sort((left, right) => Number(right?.sequence || 0) - Number(left?.sequence || 0))[0]?.eventId || '')
+const isCurrentEvent = event => event?.eventId === currentLifecycleEventId.value
+const availableActions = event => Array.isArray(event?.detail?.availableActions) ? event.detail.availableActions : []
+const runAvailableAction = (event, action) => {
+  if (!action?.enabled) return
+  if (action.kind === 'view_error') {
+    expandedRows[event.eventId] = true
+    return
+  }
+  emit('execution-action', {
+    ...action,
+    task_id: event?.taskId,
+    taskId: event?.taskId,
+    workItemId: event?.workItemId,
+    eventId: event?.eventId,
+  })
+}
 </script>
 
 <template>
@@ -587,6 +733,14 @@ const rowMeta = event => [
       <div v-if="resultEvent && timingItems.length" class="cc-execution-timing" aria-label="本轮耗时统计">
         <span v-for="([label, value]) in timingItems" :key="label"><small>{{ label }}</small>{{ formatExecutionDuration(value) }}</span>
       </div>
+      <div v-if="transcriptExpanded" class="cc-execution-search" role="search">
+        <span>⌕</span>
+        <input v-model="searchQuery" type="search" placeholder="搜索工具、项目、文件或失败原因" @keydown="onSearchKeydown" />
+        <small v-if="normalizedSearchQuery">{{ searchMatches.length }} 个匹配</small>
+        <button v-if="searchMatches.length" type="button" title="上一个匹配" @click="focusSearchMatch(-1)">↑</button>
+        <button v-if="searchMatches.length" type="button" title="下一个匹配" @click="focusSearchMatch(1)">↓</button>
+        <button v-if="normalizedSearchQuery" type="button" title="清除搜索" @click="searchQuery = ''">×</button>
+      </div>
       <section v-if="stageMode && executionNavigatorItems.length" class="cc-requirement-navigator" aria-label="任务执行计划">
         <header><strong>执行计划</strong><span>{{ executionNavigatorCompleted }} / {{ executionNavigatorItems.length }}</span></header>
         <div>
@@ -599,8 +753,10 @@ const rowMeta = event => [
       <template v-for="event in executionStageRows" :key="event.key || event.eventId">
       <button
         v-if="event.__stageHeader"
+        v-show="stageMatchesSearch(event.kind)"
         type="button"
         class="cc-execution-stage-head"
+        :class="{ active: event.active }"
         :aria-expanded="stageIsExpanded(event)"
         @click="toggleStage(event)"
       >
@@ -609,6 +765,18 @@ const rowMeta = event => [
         <small>{{ event.summary }}</small>
         <span v-if="event.durationMs">{{ formatExecutionDuration(event.durationMs) }}</span>
       </button>
+      <section
+        v-else-if="event.__progressBatch"
+        v-show="batchMatchesSearch(event)"
+        class="cc-progress-batch-group stage-child"
+      >
+        <p class="cc-execution-stage-progress">{{ progressText(event.progress) }}</p>
+        <button v-if="event.children.length" type="button" class="cc-progress-batch-head" :aria-expanded="batchIsExpanded(event)" @click="toggleBatch(event)">
+          <span>{{ batchIsExpanded(event) ? '⌄' : '›' }}</span>
+          <strong>工具批次</strong>
+          <small>{{ event.children.length }} 项<span v-if="event.durationMs"> · {{ formatExecutionDuration(event.durationMs) }}</span></small>
+        </button>
+      </section>
       <article v-else-if="event.__requirementPlan" class="cc-requirement-plan" :class="requirementPlan?.status || 'ready'">
         <button type="button" class="cc-requirement-plan-head" :aria-expanded="planIsExpanded" @click="toggleRequirementPlan">
           <span class="cc-requirement-plan-icon">▤</span>
@@ -652,8 +820,15 @@ const rowMeta = event => [
           <button type="button" @click="toggleRequirementPlan">收起计划⌃</button>
         </footer>
       </article>
-      <p v-else-if="event.eventType === 'assistant_progress'" class="cc-execution-stage-progress">{{ progressText(event) }}</p>
-      <article v-else class="cc-execution-row" :class="[event.display?.status || 'running', { 'stage-child': event.__stageChild }]">
+      <p v-else-if="event.eventType === 'assistant_progress'" v-show="!normalizedSearchQuery || searchableText(event).includes(normalizedSearchQuery)" class="cc-execution-stage-progress">{{ progressText(event) }}</p>
+      <article
+        v-else
+        v-show="eventMatchesSearch(event)"
+        class="cc-execution-row"
+        :class="[event.display?.status || 'running', { 'stage-child': event.__stageChild, 'batch-child': event.__batchChild, current: isCurrentEvent(event), completed: event.display?.status === 'success' }]"
+        :data-execution-event-id="event.eventId"
+        :aria-current="isCurrentEvent(event) ? 'step' : undefined"
+      >
         <button
           type="button"
           class="cc-execution-row-summary"
@@ -712,6 +887,10 @@ const rowMeta = event => [
               <div class="cc-tool-result">
                 <b>结果</b>
                 <p>{{ toolDisplayFor(event).result?.summary || '工具执行完成' }}</p>
+                <p v-if="toolDisplayFor(event).result?.freshness === 'drifted'" class="cc-tool-freshness warning">当前内容已变化，下面展示的是重新读取的新版本；原执行结论摘要仍保留在上方。</p>
+                <p v-else-if="toolDisplayFor(event).result?.freshness === 'deleted'" class="cc-tool-freshness danger">权威来源已删除，当前详情不可读取。</p>
+                <p v-else-if="toolDisplayFor(event).result?.freshness === 'permission_revoked'" class="cc-tool-freshness danger">当前权限已撤销，无法重新读取详情。</p>
+                <p v-else-if="toolDisplayFor(event).result?.freshness === 'current'" class="cc-tool-freshness current">当前结果与权威来源一致。</p>
                 <div v-if="toolDisplayFor(event).result?.rows?.length" class="cc-tool-result-rows">
                   <div v-for="(row, rowIndex) in toolDisplayFor(event).result.rows" :key="rowIndex" class="cc-tool-result-row">
                     <span v-for="([label, value], valueIndex) in rowEntries(row)" :key="`${label}-${valueIndex}`">
@@ -750,6 +929,15 @@ const rowMeta = event => [
                 </li>
               </ul>
             </div>
+            <details v-if="event.detail.runtimeObservation" class="cc-runtime-observation">
+              <summary>运行时技术详情</summary>
+              <dl class="cc-tool-arguments">
+                <dt>来源</dt><dd>{{ event.detail.runtimeObservation.source }}</dd>
+                <dt>可信度</dt><dd>{{ event.detail.runtimeObservation.confidence }}</dd>
+                <template v-if="event.detail.runtimeObservation.runtime"><dt>运行时</dt><dd>{{ event.detail.runtimeObservation.runtime }} {{ event.detail.runtimeObservation.runtimeVersion || '' }}</dd></template>
+                <dt>事件校验</dt><dd>{{ event.detail.runtimeObservation.sourceEventChecksum }}</dd>
+              </dl>
+            </details>
             <div v-if="event.detail.evidenceIds?.length">
               <b>Evidence</b>
               <code>{{ event.detail.evidenceIds.join(' · ') }}</code>
@@ -758,6 +946,16 @@ const rowMeta = event => [
               <b>Usage</b>
               <pre>{{ safeJson(event.detail.usage) }}</pre>
             </div>
+        </div>
+        <div v-if="availableActions(event).length" class="cc-execution-actions" aria-label="可执行操作">
+          <button
+            v-for="action in availableActions(event)"
+            :key="action.id"
+            type="button"
+            :disabled="!action.enabled"
+            :title="action.disabledReason || action.label"
+            @click="runAvailableAction(event, action)"
+          >{{ action.label }}</button>
         </div>
       </article>
       </template>
@@ -820,6 +1018,11 @@ const rowMeta = event => [
 .cc-execution-timing { display: flex; flex-wrap: wrap; gap: 6px 14px; padding: 4px 10px 7px 35px; color: var(--text-secondary); font-size: 10px; }
 .cc-execution-timing span { display: inline-flex; align-items: baseline; gap: 4px; }
 .cc-execution-timing small { color: var(--text-muted); font-size: 9px; }
+.cc-execution-search { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto auto auto; align-items: center; gap: 6px; margin: 2px 10px 8px; padding: 6px 8px; border: 1px solid rgba(148, 163, 184, 0.16); border-radius: 7px; background: rgba(100, 116, 139, 0.04); }
+.cc-execution-search input { min-width: 0; border: 0; outline: 0; color: var(--text-primary); background: transparent; font-size: 10px; }
+.cc-execution-search small { color: var(--text-muted); font-size: 9px; white-space: nowrap; }
+.cc-execution-search button { width: 22px; height: 22px; border: 0; border-radius: 5px; color: var(--text-secondary); background: transparent; cursor: pointer; }
+.cc-execution-search button:hover { background: rgba(100, 116, 139, 0.1); }
 .cc-requirement-navigator { margin: 5px 10px 8px; padding: 9px 11px; border: 1px solid rgba(148, 163, 184, 0.13); border-radius: 8px; background: rgba(100, 116, 139, 0.035); }
 .cc-requirement-navigator header { display: flex; align-items: center; gap: 7px; margin-bottom: 7px; }
 .cc-requirement-navigator header strong { color: var(--text-primary); font-size: 11px; }
@@ -867,14 +1070,25 @@ const rowMeta = event => [
 .cc-execution-stage-head { width: 100%; display: grid; grid-template-columns: 16px auto minmax(0, 1fr) auto; align-items: center; gap: 7px; padding: 10px 10px 7px 18px; border: 0; color: var(--text-secondary); background: transparent; text-align: left; cursor: pointer; }
 .cc-execution-stage-head:not(:first-child) { margin-top: 3px; border-top: 1px solid rgba(100, 116, 139, 0.1); }
 .cc-execution-stage-head:hover { background: rgba(100, 116, 139, 0.045); }
+.cc-execution-stage-head.active { color: var(--text-primary); background: color-mix(in srgb, var(--primary-color, #ec4899) 6%, transparent); box-shadow: inset 2px 0 color-mix(in srgb, var(--primary-color, #ec4899) 70%, transparent); }
 .cc-execution-stage-head:focus-visible { outline: 2px solid color-mix(in srgb, var(--primary-color, #ec4899) 72%, transparent); outline-offset: -2px; }
 .cc-execution-stage-chevron { color: var(--text-muted); font-size: 15px; line-height: 1; }
 .cc-execution-stage-head strong { color: var(--text-primary); font-size: 12px; font-weight: 650; }
 .cc-execution-stage-head small { min-width: 0; color: var(--text-muted); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cc-execution-stage-head > span:last-child { color: var(--text-muted); font-size: 10px; white-space: nowrap; }
 .cc-execution-stage-progress { margin: 3px 12px 7px 35px; color: var(--text-primary); font-size: 12px; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; }
+.cc-progress-batch-group { margin-left: 22px; border-left: 1px solid color-mix(in srgb, var(--border-color, #94a3b8) 30%, transparent); }
+.cc-progress-batch-group .cc-execution-stage-progress { margin-left: 13px; }
+.cc-progress-batch-head { display: flex; align-items: center; gap: 7px; margin: 0 10px 5px 12px; padding: 4px 7px; border: 0; border-radius: 5px; color: var(--text-secondary); background: rgba(100, 116, 139, 0.045); cursor: pointer; }
+.cc-progress-batch-head strong { font-size: 10px; }
+.cc-progress-batch-head small { color: var(--text-muted); font-size: 9px; }
 .cc-execution-row { padding: 0; }
 .cc-execution-row.stage-child { margin-left: 22px; border-left: 1px solid color-mix(in srgb, var(--border-color, #94a3b8) 30%, transparent); }
+.cc-execution-row.batch-child { margin-left: 42px; }
+.cc-execution-row.completed { opacity: 0.7; }
+.cc-execution-row.completed:hover,
+.cc-execution-row.current { opacity: 1; }
+.cc-execution-row.current { background: color-mix(in srgb, var(--primary-color, #ec4899) 7%, transparent); box-shadow: inset 2px 0 color-mix(in srgb, var(--primary-color, #ec4899) 80%, transparent); }
 .cc-execution-row.stage-child + .cc-execution-row.stage-child { border-top-color: rgba(100, 116, 139, 0.055); }
 .cc-execution-row + .cc-execution-row { border-top: 1px solid rgba(100, 116, 139, 0.07); }
 .cc-execution-row-summary { width: 100%; display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; gap: 5px; align-items: start; padding: 6px 10px; border: 0; color: inherit; background: transparent; text-align: left; }
@@ -919,6 +1133,14 @@ const rowMeta = event => [
 .cc-tool-rehydrate:hover:not(:disabled) { background: rgba(100, 116, 139, 0.08); }
 .cc-tool-rehydrate:disabled { opacity: 0.55; cursor: wait; }
 .cc-tool-detail-error { color: #dc2626 !important; }
+.cc-tool-freshness { padding: 6px 8px; border-radius: 6px; font-size: 10px !important; }
+.cc-tool-freshness.current { color: #15803d; background: rgba(34, 197, 94, 0.1); }
+.cc-tool-freshness.warning { color: #b45309; background: rgba(245, 158, 11, 0.11); }
+.cc-tool-freshness.danger { color: #b91c1c; background: rgba(239, 68, 68, 0.1); }
+.cc-execution-actions { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 10px 8px 35px; }
+.cc-execution-actions button { padding: 4px 8px; border: 1px solid rgba(148, 163, 184, 0.24); border-radius: 6px; color: var(--text-secondary); background: transparent; font-size: 10px; cursor: pointer; }
+.cc-execution-actions button:hover:not(:disabled) { border-color: color-mix(in srgb, var(--primary-color, #ec4899) 55%, transparent); color: var(--text-primary); background: color-mix(in srgb, var(--primary-color, #ec4899) 7%, transparent); }
+.cc-execution-actions button:disabled { opacity: 0.45; cursor: not-allowed; }
 .cc-completion-files { width: 100%; margin: 5px 0 9px; overflow: hidden; border: 1px solid color-mix(in srgb, var(--border-color, #94a3b8) 42%, transparent); border-radius: 9px; background: color-mix(in srgb, var(--surface-subtle, #f8fafc) 88%, transparent); }
 .cc-completion-files.warning { border-color: color-mix(in srgb, #d97706 42%, transparent); }
 .cc-completion-files-head { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 10px 12px; border-bottom: 1px solid rgba(100, 116, 139, 0.12); }

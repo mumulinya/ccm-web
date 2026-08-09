@@ -332,10 +332,10 @@ export const AGENT_RUNTIMES: AgentRuntimeDescriptor[] = [
     id: "claudecode",
     aliases: ["claudecode", "claude-code", "claude_code", "cc", "claude"],
     label: "Claude Code",
-    commandLabel: "claude --permission-mode auto -p",
+    commandLabel: "claude --permission-mode auto --output-format stream-json --verbose -p",
     capabilities: {
       print: true,
-      streaming: false,
+      streaming: true,
       externalRunner: true,
       worktreeIsolation: true,
       sessionResume: true,
@@ -349,7 +349,7 @@ export const AGENT_RUNTIMES: AgentRuntimeDescriptor[] = [
       const metadata = readRuntimeLaunchMetadata(options);
       const selectedModel = getConfiguredDevelopmentAgentModel("claudecode");
       const modelArg = selectedModel ? ` --model ${quoteCmdArg(selectedModel)}` : "";
-      return `${pipeFileToCommand(msgFile, `claude --permission-mode ${getClaudePermissionMode()}${modelArg}`, options)}${formatStrictMcpConfigArg(options)}${formatPluginDirArg(metadata)}${formatAppendSystemPromptFileArg(options)}${sessionArg} -p`;
+      return `${pipeFileToCommand(msgFile, `claude --permission-mode ${getClaudePermissionMode()}${modelArg}`, options)}${formatStrictMcpConfigArg(options)}${formatPluginDirArg(metadata)}${formatAppendSystemPromptFileArg(options)}${sessionArg} --output-format stream-json --verbose -p`;
     },
   },
   {
@@ -359,7 +359,7 @@ export const AGENT_RUNTIMES: AgentRuntimeDescriptor[] = [
     commandLabel: "cursor-agent -p --force",
     capabilities: {
       print: true,
-      streaming: false,
+      streaming: true,
       externalRunner: true,
       worktreeIsolation: true,
       sessionResume: true,
@@ -374,7 +374,7 @@ export const AGENT_RUNTIMES: AgentRuntimeDescriptor[] = [
     commandLabel: "agy --print --output-format json",
     capabilities: {
       print: true,
-      streaming: false,
+      streaming: true,
       externalRunner: true,
       worktreeIsolation: true,
       sessionResume: true,
@@ -389,7 +389,7 @@ export const AGENT_RUNTIMES: AgentRuntimeDescriptor[] = [
     commandLabel: "codex exec --full-auto -",
     capabilities: {
       print: true,
-      streaming: false,
+      streaming: true,
       externalRunner: true,
       worktreeIsolation: true,
       sessionResume: true,
@@ -404,7 +404,7 @@ export const AGENT_RUNTIMES: AgentRuntimeDescriptor[] = [
     commandLabel: "opencode run --format json --auto",
     capabilities: {
       print: true,
-      streaming: false,
+      streaming: true,
       externalRunner: true,
       worktreeIsolation: true,
       sessionResume: false,
@@ -728,6 +728,23 @@ export function normalizeAgentCommandOutput(agentType: string, rawOutput: string
       usage,
       providerOutputContractEvidence,
     };
+  }
+
+  if (runtime === "claudecode") {
+    const messages: string[] = [];
+    let rawSessionId = "";
+    for (const line of raw.split(/\r?\n/)) {
+      const text = line.trim();
+      if (!text.startsWith("{")) continue;
+      try {
+        const event = JSON.parse(text);
+        rawSessionId = String(event.session_id || event.sessionId || rawSessionId || "");
+        const content = Array.isArray(event?.message?.content) ? event.message.content : [];
+        for (const item of content) if (item?.type === "text" && item.text) messages.push(String(item.text));
+        if (event.type === "result" && typeof event.result === "string" && event.result.trim()) messages.push(event.result.trim());
+      } catch {}
+    }
+    return { output: messages.length ? Array.from(new Set(messages)).join("\n\n") : raw, sessionId: rawSessionId, rawSessionId, usage, providerOutputContractEvidence };
   }
 
   if (!["codex", "cursor"].includes(runtime)) return { output: raw, sessionId: "", rawSessionId: "", usage, providerOutputContractEvidence };

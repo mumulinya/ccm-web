@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import ChatComposer from '../common/ChatComposer.vue'
 import SessionContextUsage from '../common/SessionContextUsage.vue'
 import PermissionApprovalCards from '../common/PermissionApprovalCards.vue'
@@ -19,6 +19,7 @@ import AgentQaMessage from '../agents/AgentQaMessage.vue'
 import GroupMainAgentStatusCard from './GroupMainAgentStatusCard.vue'
 import MainAgentDecisionCard from '../agents/MainAgentDecisionCard.vue'
 import AgentExecutionTranscript from '../common/AgentExecutionTranscript.vue'
+import NewProgressIndicator from '../common/NewProgressIndicator.vue'
 import GroupChatHeader from './GroupChatHeader.vue'
 import GroupChatSessionSidebar from './GroupChatSessionSidebar.vue'
 import GroupLogsModal from './GroupLogsModal.vue'
@@ -41,7 +42,7 @@ const props = defineProps({
   navigateTo: { type: Object, default: null },
   active: { type: Boolean, default: true },
 })
-const emit = defineEmits(['navigated'])
+const emit = defineEmits(['navigated', 'switch-tab', 'set-navigation'])
 
 const {
   GROUP_VISIBLE_INTERNAL_TEXT_PATTERN, GROUP_INTERNAL_PROTOCOL_FALLBACK, GROUP_STREAM_ERROR_FALLBACK,
@@ -49,6 +50,7 @@ const {
   highlightMsgIndex, groups, projects, currentGroup, messages, groupSessions, currentGroupSessionId, isGroupSessionDraft,
   groupMemory, mainAgentStatus, groupAgentQa, collaborationProtocol, groupMessagesEl, groupMessagesContentEl,
   isGroupMessagesPinnedToBottom, updateGroupMessageScrollState, scrollToBottom,
+  pendingGroupProgressCount, notifyGroupProgress, jumpToLatestGroupProgress, resetGroupPinnedScroll,
   attachGroupMessagesResizeObserver, detachGroupMessagesResizeObserver, navMessages, scrollToMessage,
   newMessage, slashNavigate, runGroupClientCommand, pendingDirectMemoryCommand, slash, focusGroupInput,
   messageFiles, messageMode, pendingGroupTaskInput,
@@ -108,12 +110,16 @@ const groupContextScopeId = computed(() => currentGroup.value?.id && currentGrou
 const {
   events: groupAgentExecutionEvents,
   enabled: groupAgentExecutionEnabled,
+  meaningfulRevision: groupMeaningfulRevision,
+  latestMeaningfulKey: groupLatestMeaningfulKey,
 } = useAgentExecutionEvents({
   scope: computed(() => 'group'),
   scopeId: computed(() => currentGroup.value?.id || ''),
   exactSessionId: currentGroupSessionId,
   active: computed(() => props.active !== false && !!currentGroup.value?.id && !!currentGroupSessionId.value),
 })
+watch(groupMeaningfulRevision, () => notifyGroupProgress({ key: groupLatestMeaningfulKey.value }))
+watch(currentGroupSessionId, () => resetGroupPinnedScroll())
 const {
   usage: groupContextUsage,
   loading: groupContextLoading,

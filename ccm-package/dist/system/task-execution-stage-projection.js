@@ -72,6 +72,10 @@ function appendGroupTaskResult(task, input) {
             timing: { totalMs: durationMs },
             evidenceIds: task?.delivery_summary?.verification || task?.verification || [],
             fileChanges: task?.delivery_summary?.actual_file_changes || task?.file_changes?.files || [],
+            ...(!successful ? { availableActions: [
+                    { id: "view_error", kind: "view_error", label: "查看错误", enabled: true, revision: number(task?.revision), generation: identity.generation },
+                    { id: "recheck", kind: "recheck", label: "重新核验", enabled: true, revision: number(task?.revision), generation: identity.generation },
+                ] } : {}),
         },
     });
 }
@@ -124,6 +128,10 @@ function appendTestAgentEvent(task, eventType, input) {
                 ...(durationMs > 0 ? { activeDurationMs: durationMs } : {}),
             },
             evidenceIds: Array.isArray(input?.evidenceIds) ? input.evidenceIds : [],
+            ...(eventType === "agent_failed" ? { availableActions: [
+                    { id: "view_error", kind: "view_error", label: "查看错误", enabled: true, revision: number(task?.revision), generation: identity.generation },
+                    { id: "recheck", kind: "recheck", label: "重新核验", enabled: true, revision: number(task?.revision), generation: identity.generation },
+                ] } : {}),
         },
     });
 }
@@ -170,6 +178,10 @@ function appendMainSummaryEvent(task, eventType, input) {
             },
             evidenceIds: Array.isArray(input?.evidenceIds) ? input.evidenceIds : [],
             fileChanges: Array.isArray(input?.fileChanges) ? input.fileChanges : [],
+            ...(eventType === "agent_failed" ? { availableActions: [
+                    { id: "view_error", kind: "view_error", label: "查看错误", enabled: true, revision: number(task?.revision), generation: identity.generation },
+                    { id: "takeover", kind: "takeover", label: "人工接管", enabled: true, revision: number(task?.revision), generation: identity.generation },
+                ] } : {}),
         },
     });
 }

@@ -2,6 +2,7 @@ import * as crypto from "crypto";
 import { withSqliteTaskStore } from "../core/task-store";
 import { captureRepoStateIdentity, recordEvidence } from "./unified-evidence-registry";
 import { appendUserVisibleAgentEvent } from "./user-visible-agent-events";
+import { markAgentReportedSemanticProgress } from "./agent-runtime-progress";
 
 export const AGENT_COMMUNICATION_ENVELOPE_SCHEMA = "ccm-agent-communication-envelope-v2";
 export const AGENT_DISPATCH_ACK_SCHEMA = "ccm-agent-dispatch-ack-v2";
@@ -38,6 +39,26 @@ function projectCommunicationEvent(envelope: any, eventType: "agent_started" | "
   const testAgent = /test.?agent/i.test(`${runtimeLabel} ${envelope.receiverAgentId || ""}`);
   const durationMs = Math.max(0, Number(input?.durationMs || input?.duration_ms || 0));
   const terminal = eventType === "agent_completed" || eventType === "agent_failed";
+  const actionIdentity = {
+    ...(Number.isFinite(Number(payload.taskRevision || payload.task_revision)) ? { revision: Math.max(0, Number(payload.taskRevision || payload.task_revision)) } : {}),
+    generation: Math.max(0, Number(envelope.generation || 0)),
+    ...(String(payload.bindingChecksum || payload.binding_checksum || "").trim()
+      ? { bindingChecksum: String(payload.bindingChecksum || payload.binding_checksum).trim() } : {}),
+  };
+  const recoveryRequired = /recovery_required|side.?effect.?unknown/i.test(`${phase} ${input?.status || ""}`);
+  const permissionRequired = /permission|authorization|denied/i.test(`${phase} ${input?.status || ""}`);
+  const safeRetry = input?.retryable === true && ["", "none", "not_started", "safe", "read_only"]
+    .includes(String(input?.sideEffectState || input?.side_effect_state || "").toLowerCase());
+  const availableActions = eventType !== "agent_failed" ? [] : recoveryRequired
+    ? [
+      { id: "recheck", kind: "recheck", label: "重新核验", enabled: true, ...actionIdentity },
+      { id: "takeover", kind: "takeover", label: "人工接管", enabled: true, ...actionIdentity },
+    ]
+    : [
+      ...(safeRetry ? [{ id: "retry", kind: "retry", label: "重试", enabled: true, ...actionIdentity }] : []),
+      ...(permissionRequired ? [{ id: "resolve_permission", kind: "resolve_permission", label: "处理授权", enabled: true, ...actionIdentity }] : []),
+      { id: "view_error", kind: "view_error", label: "查看错误", enabled: true, ...actionIdentity },
+    ];
   const startedAt = String(input?.startedAt || input?.started_at || payload.startedAt || payload.started_at || envelope.createdAt || envelope.created_at || "")
     || (durationMs > 0 ? new Date(Date.now() - durationMs).toISOString() : new Date().toISOString());
   return appendUserVisibleAgentEvent({
@@ -46,6 +67,10 @@ function projectCommunicationEvent(envelope: any, eventType: "agent_started" | "
     scopeId: envelope.scopeId,
     exactSessionId: envelope.exactSessionId,
     generation: envelope.generation,
+    ...(String(payload.anchorMessageId || payload.anchor_message_id || "").trim()
+      ? { anchorMessageId: String(payload.anchorMessageId || payload.anchor_message_id).trim() } : {}),
+    ...(String(payload.originMessageId || payload.origin_message_id || "").trim()
+      ? { originMessageId: String(payload.originMessageId || payload.origin_message_id).trim() } : {}),
     taskId: envelope.taskId,
     workItemId: envelope.workItemId,
     agentRunId: envelope.messageId,
@@ -93,6 +118,18 @@ function projectCommunicationEvent(envelope: any, eventType: "agent_started" | "
         ...(terminal ? { completedAt: new Date().toISOString() } : {}),
         ...(durationMs > 0 ? { activeDurationMs: durationMs } : {}),
       },
+      ...(input?.progressSource && String(input?.summary || "").trim() ? { progress: {
+        kind: "key_finding",
+        text: String(input.summary).slice(0, 600),
+        modelCallIndex: 0,
+        relatedToolCallIds: [],
+        batchId: `agent-report:${envelope.messageId}:${envelope.attempt || 1}`,
+        milestoneChecksum: String(input.receiptChecksum || checksum({ phase, summary: input.summary })).slice(0, 80),
+        source: input.progressSource,
+        confidence: "declared",
+        sourceEventChecksum: String(input.receiptChecksum || checksum({ phase, summary: input.summary })).slice(0, 80),
+      } } : {}),
+      ...(availableActions.length ? { availableActions } : {}),
     },
   });
 }
@@ -179,6 +216,10 @@ export const DEFAULT_AGENT_COMMUNICATION_POLICY = Object.freeze({
   agentMaxAttempts: 3,
   agentMaxParallelPerProject: 2,
   agentMaxParallelGlobal: 6,
+  agentRuntimeStructuredProgressEnabled: true,
+  strictPreExecutionAckEnabled: true,
+  agentProgressFallbackTimeoutMs: 60_000,
+  agentRawOutputRetentionMode: "ephemeral",
 });
 
 export function readAgentCommunicationPolicy(overrides: any = {}) {
@@ -197,6 +238,10 @@ export function readAgentCommunicationPolicy(overrides: any = {}) {
     agentMaxAttempts: Math.max(1, Math.min(3, integer(source.agentMaxAttempts, 3))),
     agentMaxParallelPerProject: Math.min(globalPerProject, Math.max(1, integer(source.agentMaxParallelPerProject, globalPerProject))),
     agentMaxParallelGlobal: Math.min(globalTotal, Math.max(1, integer(source.agentMaxParallelGlobal, globalTotal))),
+    agentRuntimeStructuredProgressEnabled: source.agentRuntimeStructuredProgressEnabled !== false,
+    strictPreExecutionAckEnabled: source.strictPreExecutionAckEnabled !== false,
+    agentProgressFallbackTimeoutMs: Math.max(15_000, Math.min(300_000, integer(source.agentProgressFallbackTimeoutMs, 60_000))),
+    agentRawOutputRetentionMode: "ephemeral" as const,
   };
 }
 
@@ -617,7 +662,7 @@ export function recordAgentCommunicationReceipt(messageId: string, receiptType: 
       generation: result.envelope?.generation,
       attempt: result.envelope?.attempt,
       leaseId: result.envelope?.leaseId,
-      producerAgentId: result.envelope?.senderAgentId,
+      producerAgentId: result.envelope?.receiverAgentId,
       repoStateIdentity,
     };
     for (const item of Array.isArray(receipt.verificationResults) ? receipt.verificationResults.slice(0, 80) : []) {
@@ -640,11 +685,13 @@ export function recordAgentCommunicationReceipt(messageId: string, receiptType: 
         : receiptType === "result" ? "verifying"
           : receipt.phase || result.envelope.state,
       receiptChecksum: result.receiptChecksum,
+      ...(receiptType === "progress" ? { progressSource: "agent_reported" } : {}),
       summary: receiptType === "result"
         ? `已提交结果，等待 CCM 验收${receipt.summary ? `：${text(receipt.summary, 240)}` : ""}`
         : receipt.summary || (receiptType === "dispatch_ack" ? "已确认工作单"
           : receiptType === "terminal" ? "CCM 已完成终态验收" : "执行进度已更新"),
     });
+    if (receiptType === "progress") markAgentReportedSemanticProgress(result.envelope.messageId, result.envelope.generation, result.envelope.attempt);
   }
   return result;
 }
@@ -941,6 +988,10 @@ export function submitAgentCommunicationResult(messageId: string, result: any = 
   let current = getAgentCommunication(messageId, { includeEvents: false, includeReceipts: false });
   if (!current) throw new Error("Agent Communication消息不存在");
   if (["runner_starting", "runner_started"].includes(current.state)) {
+    const payload = current.payload || {};
+    if (payload.strictPreExecutionAck === true || payload.strict_pre_execution_ack === true) {
+      throw new Error("新任务必须在执行前通过 acknowledge_assignment 完成真实ACK，Result不能补造ACK");
+    }
     ensureAgentCommunicationAcknowledged(messageId, result.ack || result);
     current = getAgentCommunication(messageId, { includeEvents: false, includeReceipts: false });
   }

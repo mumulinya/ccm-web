@@ -66,6 +66,7 @@ import {
   requestGroupSessionAgentCancellation,
 } from "./agents/execution-kernel";
 import { buildProjectConversationBrief, buildProjectExecutionBrief, buildProjectMemoryPacket, updateProjectMemoryFromReceipt } from "./projects/memory";
+import { validateTaskMutationGuard } from "./system/task-conversation-links";
 import {
   appendDirectAgentDispatchTranscript,
   completeDirectAgentDispatch,
@@ -1046,6 +1047,10 @@ function handleRequest(req: any, res: any) {
         const project = String(payload.project || "");
         const projectSessionId = String(payload.project_session_id || payload.projectSessionId || payload.session_id || "");
         const action = pathname.endsWith("/plan-confirm") ? "confirm_plan" : String(payload.action || "");
+        const guardedProjectTask = getProjectMainTask(taskId);
+        if (!guardedProjectTask) return sendJson(res, { success: false, error: "项目主 Agent 任务不存在" }, 404);
+        const guard = validateTaskMutationGuard(guardedProjectTask, payload, { requireTarget: ["confirm_plan", "resume_interrupted", "revise_plan"].includes(action) });
+        if ("error" in guard) return sendJson(res, { success: false, error: guard.error, code: guard.code, ...guard.details }, guard.status);
         const persistProjectTaskProjection = (taskInput: any, content: string, source: string) => {
           const task = projectMainTaskPublic(taskInput);
           upsertProjectSessionTaskMessage(project, projectSessionId, {

@@ -37,6 +37,7 @@ exports.OPERATION_REGISTRY_SCHEMA = void 0;
 exports.buildOperationFingerprint = buildOperationFingerprint;
 exports.reserveOperation = reserveOperation;
 exports.completeOperation = completeOperation;
+exports.listOperationRecords = listOperationRecords;
 exports.findReusableOperation = findReusableOperation;
 exports.attachOperationEvidence = attachOperationEvidence;
 exports.runOperationRegistrySelfTest = runOperationRegistrySelfTest;
@@ -127,6 +128,10 @@ function completeOperation(operationId, input = {}) {
         (0, atomic_json_file_1.writeJsonAtomic)(STORE_FILE, store);
     });
     return updated;
+}
+function listOperationRecords(filter = {}) {
+    const types = new Set(filter.operationTypes || []);
+    return readStore().records.filter(item => (!filter.target || item.target === filter.target) && (!types.size || types.has(item.operationType)) && (!filter.status || item.status === filter.status)).slice(-500);
 }
 function findReusableOperation(input) {
     const fingerprint = text(input?.fingerprint, 160) || buildOperationFingerprint(input);

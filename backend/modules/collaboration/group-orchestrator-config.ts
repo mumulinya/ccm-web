@@ -82,6 +82,10 @@ export function defaultOrchestratorConfig() {
     agentMaxAttempts: 3,
     agentMaxParallelPerProject: 2,
     agentMaxParallelGlobal: 6,
+    agentRuntimeStructuredProgressEnabled: true,
+    strictPreExecutionAckEnabled: true,
+    agentProgressFallbackTimeoutMs: 60_000,
+    agentRawOutputRetentionMode: "ephemeral",
     // TestAgent 验收链 V2 hardening defaults.  These are deliberately kept
     // separate from the legacy enabled/self-verification switch: the latter
     // chooses who verifies, while these fields constrain how verification is
@@ -290,6 +294,8 @@ export function saveOrchestratorConfig(updates: any) {
     ["notebookToolsEnabled", "notebook_tools_enabled"],
     ["ccStyleExecutionDisplayEnabled", "cc_style_execution_display_enabled"],
     ["ccStyleAgentProgressNarrationEnabled", "cc_style_agent_progress_narration_enabled"],
+    ["agentRuntimeStructuredProgressEnabled", "agent_runtime_structured_progress_enabled"],
+    ["strictPreExecutionAckEnabled", "strict_pre_execution_ack_enabled"],
   ] as const) {
     const raw = updates[camelKey] ?? updates[snakeKey];
     if (raw !== undefined) next[camelKey] = raw === true;
@@ -391,6 +397,7 @@ export function saveOrchestratorConfig(updates: any) {
     ["agentMaxAttempts", "agent_max_attempts", 1, 3, "Agent最大执行次数必须介于1和3"],
     ["agentMaxParallelPerProject", "agent_max_parallel_per_project", 1, 16, "单项目Agent并发必须介于1和16"],
     ["agentMaxParallelGlobal", "agent_max_parallel_global", 1, 64, "全局Agent并发必须介于1和64"],
+    ["agentProgressFallbackTimeoutMs", "agent_progress_fallback_timeout_ms", 15_000, 300_000, "Agent进度兜底时间必须介于15,000和300,000毫秒"],
   ] as const;
   for (const [camelKey, snakeKey, min, max, errorMessage] of agentCommunicationLimits) {
     const raw = updates[camelKey] ?? updates[snakeKey];
@@ -402,6 +409,12 @@ export function saveOrchestratorConfig(updates: any) {
   if (Number(next.agentHeartbeatLostTimeoutMs) <= Number(next.agentHeartbeatIntervalMs)) throw new Error("Agent失联超时必须大于心跳间隔");
   if (Number(next.agentLeaseTtlMs) <= Number(next.agentHeartbeatIntervalMs)) throw new Error("Agent租约必须大于心跳间隔");
   if (Number(next.agentMaxParallelGlobal) < Number(next.agentMaxParallelPerProject)) throw new Error("全局Agent并发不得小于单项目并发");
+  const rawOutputRetentionMode = updates.agentRawOutputRetentionMode ?? updates.agent_raw_output_retention_mode;
+  if (rawOutputRetentionMode !== undefined) {
+    const value = String(rawOutputRetentionMode || "ephemeral").trim().toLowerCase();
+    if (value !== "ephemeral") throw new Error("Agent原始输出保留模式目前只允许 ephemeral");
+    next.agentRawOutputRetentionMode = value;
+  }
 
   const testAgentPlannerFallbackMode = updates.testAgentPlannerFallbackMode ?? updates.test_agent_planner_fallback_mode;
   if (testAgentPlannerFallbackMode !== undefined) {

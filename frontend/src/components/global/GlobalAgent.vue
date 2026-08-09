@@ -120,6 +120,8 @@ const {
 const {
   events: globalAgentExecutionEvents,
   enabled: globalAgentExecutionEnabled,
+  meaningfulRevision: globalMeaningfulRevision,
+  latestMeaningfulKey: globalLatestMeaningfulKey,
 } = useAgentExecutionEvents({
   scope: computed(() => 'global'),
   scopeId: computed(() => 'global'),
@@ -340,7 +342,13 @@ const {
   scrollToBottom,
   attachResizeObserver: attachGlobalResizeObserver,
   detachResizeObserver: detachGlobalResizeObserver,
+  pendingUpdates: pendingGlobalProgressCount,
+  notifyContentUpdate: notifyGlobalProgress,
+  jumpToLatest: jumpToLatestGlobalProgress,
+  resetPinnedScroll: resetGlobalPinnedScroll,
 } = usePinnedScroll(chatBody, { observeRef: chatContentInner })
+watch(globalMeaningfulRevision, () => notifyGlobalProgress({ key: globalLatestMeaningfulKey.value }))
+watch(currentSessionId, () => resetGlobalPinnedScroll())
 const {
   qualitySnapshot,
   qualityLoading,
@@ -453,6 +461,7 @@ const handleSearchNavigation = async () => {
   await nextTick()
   const keyword = String(target.keyword || '').toLowerCase()
   let index = target.messageId ? messages.value.findIndex(message => String(message.id || message.message_id || message.messageId || '') === String(target.messageId)) : -1
+  if (index < 0 && target.missionId) index = messages.value.findIndex(message => String(message.globalMission?.id || message.missionId || message.mission_id || message.agenticRun?.mission_id || '') === String(target.missionId))
   if (index < 0 && Number.isInteger(target.messageIndex) && target.messageIndex >= 0 && target.messageIndex < messages.value.length) index = target.messageIndex
   if (index < 0 && keyword) index = messages.value.findIndex(message => String(message.content || '').toLowerCase().includes(keyword))
   if (index >= 0) {
@@ -811,6 +820,7 @@ function getVisibleGlobalMessageContent(msg, fallback = '这条消息已整理�
 const {
   trackGlobalMission,
   stopAllMissionTracking,
+  disposeMissionTracking,
   missionStatusLabel,
   childStatusLabel,
 } = useGlobalMissionTracking({
@@ -1130,7 +1140,7 @@ watch(() => props.active, (isActive) => {
 onUnmounted(() => {
   window.removeEventListener('resize', syncGlobalSidebarForViewport)
   stopGlobalBackgroundPolls()
-  stopAllMissionTracking()
+  disposeMissionTracking()
   detachGlobalResizeObserver()
   unsubscribeFeishuSessionEvents?.()
   unsubscribeFeishuSessionEvents = null
@@ -1456,6 +1466,8 @@ const handleGitCommitCardSubmit = async (msg) => {
         :handle-git-commit-card-submit="handleGitCommitCardSubmit"
         :zoom-image="zoomImage"
         :format-size="formatSize"
+        :pending-progress-count="pendingGlobalProgressCount"
+        :jump-to-latest-progress="jumpToLatestGlobalProgress"
         @edit-message="editGlobalUserMessage"
         @open-file-change="openSingleFileChange"
         @open-file-changes="openCodeChangeDrawer($event, { title: '全局任务文件改动' })"

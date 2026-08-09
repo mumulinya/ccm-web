@@ -7,6 +7,7 @@ import CommandResultCard from '../common/CommandResultCard.vue'
 import ConversationMessageShell from '../common/ConversationMessageShell.vue'
 import ConversationProcessingState from '../common/ConversationProcessingState.vue'
 import AgentExecutionTranscript from '../common/AgentExecutionTranscript.vue'
+import NewProgressIndicator from '../common/NewProgressIndicator.vue'
 import {
   buildGlobalStreamCurrentTodoSummary,
   globalDispatchLaunchRows,
@@ -62,6 +63,8 @@ defineProps({
   handleGitCommitCardSubmit: { type: Function, required: true },
   zoomImage: { type: Function, required: true },
   formatSize: { type: Function, required: true },
+  pendingProgressCount: { type: Number, default: 0 },
+  jumpToLatestProgress: { type: Function, required: true },
 })
 
 const emit = defineEmits(['edit-message', 'open-file-change', 'open-file-changes'])
@@ -104,6 +107,7 @@ const emit = defineEmits(['edit-message', 'open-file-change', 'open-file-changes
               stage-grouped
               presentation="live"
               @open-file-change="emit('open-file-change', $event)"
+              @execution-action="handleGlobalTaskAction(msg, $event)"
             />
             <div class="chat-bubble">
               <!-- 助手消息判定 -->
@@ -444,6 +448,7 @@ const emit = defineEmits(['edit-message', 'open-file-change', 'open-file-changes
               presentation="completed"
               @open-file-change="emit('open-file-change', $event)"
               @open-file-changes="emit('open-file-changes', $event)"
+              @execution-action="handleGlobalTaskAction(msg, $event)"
             />
           </ConversationMessageShell>
           
@@ -471,6 +476,7 @@ const emit = defineEmits(['edit-message', 'open-file-change', 'open-file-changes
           </ConversationMessageShell>
         </div>
       </div>
+      <NewProgressIndicator :count="pendingProgressCount" @activate="jumpToLatestProgress" />
 
       <MessageNavigator
         :items="navMessages"

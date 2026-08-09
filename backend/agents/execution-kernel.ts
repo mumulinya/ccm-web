@@ -784,6 +784,43 @@ export async function runManagedCommand(input: {
   });
 }
 
+export function disposeManagedCommandRawOutput(result: any) {
+  const outputFile = String(result?.outputFile || "").trim();
+  if (!outputFile) return { removed: false, bytes: Math.max(0, Number(result?.totalOutputBytes || 0)), checksum: "" };
+  let checksum = "";
+  let bytes = Math.max(0, Number(result?.totalOutputBytes || 0));
+  try {
+    const content = fs.readFileSync(outputFile);
+    bytes = content.length;
+    checksum = crypto.createHash("sha256").update(content).digest("hex");
+  } catch {}
+  try {
+    fs.rmSync(outputFile, { force: true });
+    return { removed: true, bytes, checksum };
+  } catch {
+    const retry = setTimeout(() => { try { fs.rmSync(outputFile, { force: true }); } catch {} }, 1_000);
+    retry.unref?.();
+    return { removed: false, bytes, checksum };
+  }
+}
+
+export function cleanupOrphanedManagedCommandOutputs(maxAgeMs = 60 * 60_000) {
+  if (!fs.existsSync(OUTPUTS_DIR)) return { scanned: 0, removed: 0 };
+  let scanned = 0;
+  let removed = 0;
+  for (const entry of fs.readdirSync(OUTPUTS_DIR, { withFileTypes: true })) {
+    if (!entry.isFile()) continue;
+    scanned += 1;
+    const file = path.join(OUTPUTS_DIR, entry.name);
+    try {
+      if (Date.now() - fs.statSync(file).mtimeMs < Math.max(60_000, maxAgeMs)) continue;
+      fs.rmSync(file, { force: true });
+      removed += 1;
+    } catch {}
+  }
+  return { scanned, removed };
+}
+
 export function persistBoundedOutput(taskId: string, content: string, maxBytes = 256 * 1024) {
   const text = String(content || "");
   if (Buffer.byteLength(text, "utf-8") <= maxBytes) return { content: text, persisted: false, path: "", bytes: Buffer.byteLength(text) };

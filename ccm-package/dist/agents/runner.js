@@ -52,6 +52,8 @@ const role_skills_1 = require("../skills/role-skills");
 const internal_skill_catalog_1 = require("../skills/internal-skill-catalog");
 const internal_mcp_runtime_1 = require("../integrations/internal-mcp-runtime");
 const execution_kernel_1 = require("./execution-kernel");
+const runtime_structured_events_1 = require("./runtime-structured-events");
+const agent_runtime_progress_1 = require("../system/agent-runtime-progress");
 const group_session_lifecycle_head_1 = require("../modules/collaboration/group-session-lifecycle-head");
 const provider_memory_channel_1 = require("./provider-memory-channel");
 const memory_context_consumption_receipt_1 = require("../integrations/memory-context-consumption-receipt");
@@ -65,6 +67,7 @@ function ensureDirs() {
         if (!fs.existsSync(dir))
             fs.mkdirSync(dir, { recursive: true });
     }
+    (0, execution_kernel_1.cleanupOrphanedManagedCommandOutputs)();
 }
 function writeHeartbeat(status = "idle", detail = "") {
     ensureDirs();
@@ -691,6 +694,8 @@ async function runRequest(file) {
     let memoryContextConsumptionRecovery = null;
     let memoryReceiptRecoveryProviderOutput = "";
     let runtimeSessionLifecycleValidation = null;
+    let runtimeEventParser = null;
+    let stopRuntimeProgressFallback = null;
     const lifecycleMonitor = initialSessionLifecycleValidation.required
         ? setInterval(() => {
             const validation = validateAgentRunnerSessionLifecycleFence(request);
@@ -740,6 +745,18 @@ async function runRequest(file) {
             error.code = "CCM_PROVIDER_MEMORY_CHANNEL_BLOCKED";
             throw error;
         }
+        const runtimeProgressIdentity = request.runtimeProgressContext || request.runtime_progress_context || null;
+        runtimeEventParser = runtimeProgressIdentity?.anchorMessageId && runtimeProgressIdentity?.agentRunId
+            ? (0, runtime_structured_events_1.createAgentRuntimeStructuredEventParser)({
+                runtime: agentType,
+                runtimeVersion: String(runtimeVersionSnapshot?.version || ""),
+                identity: runtimeProgressIdentity,
+                onEvent: agent_runtime_progress_1.projectAgentRuntimeStructuredEvent,
+            }) : null;
+        if (runtimeEventParser && request.agentRuntimeStructuredProgressEnabled !== false) {
+            const seedEvent = { ...runtimeProgressIdentity, runtime: agentType, runtimeVersion: runtimeVersionSnapshot?.version || "", schema: "ccm-agent-runtime-event-v1", eventId: `seed-${runtimeProgressIdentity.agentRunId}`, eventType: "status", progressSource: "system_observed", confidence: "observed", status: "running", sourceEventChecksum: "seed", createdAt: new Date().toISOString(), contentStored: false };
+            stopRuntimeProgressFallback = (0, agent_runtime_progress_1.startAgentProgressFallback)(seedEvent, Number(request.agentProgressFallbackTimeoutMs || 60_000));
+        }
         const managed = await (0, execution_kernel_1.runManagedCommand)({
             taskId,
             executionId,
@@ -748,8 +765,12 @@ async function runRequest(file) {
             timeoutMs,
             maxOutputBytes: Number(request.maxOutputBytes || 2 * 1024 * 1024),
             env: (0, execution_kernel_1.sanitizeExecutionEnv)((0, runtime_tool_sync_1.getRuntimeExecutionEnv)(agentType), request.envAllowlist || []),
+            onStdout: text => runtimeEventParser?.push(text),
         });
+        runtimeEventParser?.flush();
+        stopRuntimeProgressFallback?.();
         const normalizedOutput = (0, runtime_1.normalizeAgentCommandOutput)(agentType, String(managed.stdout || "").trim(), { runtimeVersionSnapshot });
+        const rawOutputReceipt = (0, execution_kernel_1.disposeManagedCommandRawOutput)(managed);
         const nativeContinuationEvidence = (0, native_continuation_1.buildNativeSessionContinuationEvidence)({
             provider: agentType,
             runnerRequestId: request.id,
@@ -930,12 +951,15 @@ async function runRequest(file) {
             cliAllowedTools,
             effectiveCliAllowedTools: cliAllowedTools.join(","),
             runnerVerification,
+            rawOutputReceipt: { ...rawOutputReceipt, contentStored: false },
             runner: "node",
             completed_at: new Date().toISOString(),
         });
         markRequest(file, { status: "done", completed_at: new Date().toISOString() });
     }
     catch (error) {
+        runtimeEventParser?.flush();
+        (0, execution_kernel_1.disposeManagedCommandRawOutput)(error);
         const failure = (0, execution_kernel_1.classifyExecutionFailure)(error);
         const cancelled = failure.failureClass === "cancelled";
         const output = failure.failureClass === "timeout" ? "Agent 响应超时" : failure.message.slice(0, 4000);
@@ -969,6 +993,7 @@ async function runRequest(file) {
             (0, execution_kernel_1.transitionExecution)(executionId, cancelled ? "cancelled" : "failed", output, { failure, failureClass: failure.failureClass });
     }
     finally {
+        stopRuntimeProgressFallback?.();
         if (lifecycleMonitor)
             clearInterval(lifecycleMonitor);
         try {

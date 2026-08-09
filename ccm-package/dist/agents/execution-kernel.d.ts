@@ -204,6 +204,15 @@ export declare function runManagedCommand(input: {
     commandLabel?: string;
     title?: string;
 }): Promise<any>;
+export declare function disposeManagedCommandRawOutput(result: any): {
+    removed: boolean;
+    bytes: number;
+    checksum: string;
+};
+export declare function cleanupOrphanedManagedCommandOutputs(maxAgeMs?: number): {
+    scanned: number;
+    removed: number;
+};
 export declare function persistBoundedOutput(taskId: string, content: string, maxBytes?: number): {
     content: string;
     persisted: boolean;

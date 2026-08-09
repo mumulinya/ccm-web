@@ -1,7 +1,7 @@
 {
   "name": "ccm",
   "private": true,
-  "version": "2.0.2",
+  "version": "2.0.3",
   "description": "CCM development workspace",
   "scripts": {
     "dev:frontend": "npm --prefix frontend run dev",
@@ -45,6 +45,7 @@
     "test:provider-context-cache": "npm run build:backend && node scripts/provider-neutral-context-cache-selftest.mjs",
     "test:vnext-gap": "npm run build:backend && node scripts/vnext-gap-selftest.mjs",
     "test:cc-level-tools": "npm run build:backend && node scripts/cc-level-tools-selftest.mjs",
+    "test:code-intelligence": "npm run build:backend && node scripts/code-intelligence-workbench-selftest.mjs",
     "test:cc-execution-display": "npm run build:backend && node scripts/user-visible-agent-events-selftest.mjs",
     "test:cc-execution-display:e2e": "npm run build:backend && node scripts/cc-execution-display-business-chain-selftest.mjs",
     "test:cc-execution-display:visual": "node scripts/cc-execution-display-render-regression.mjs",

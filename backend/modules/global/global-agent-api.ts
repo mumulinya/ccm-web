@@ -33,6 +33,7 @@ import {
 import { requestAccessPrincipal, requestIsReadOnly } from "../system/api-access-control";
 import { runGitCommand, tryGitCommand } from "../tools/git-workspace-runtime";
 import { listGlobalTerminalDeliveries, retryGlobalTerminalDelivery } from "../../agents/global/global-terminal-delivery";
+import { buildGlobalMissionSafeProjection, buildTaskConversationLinks } from "../../system/task-conversation-links";
 import { parseSecureMultipartRequest } from "../../system/secure-multipart";
 import { listGlobalDispatchTargets } from "../../system/automation-session-bindings";
 
@@ -708,7 +709,23 @@ export function createGlobalAgentApi(deps: any) {
       if (id) {
         const result = getGlobalDevelopmentMission(id);
         if (!result) return sendJson(res, { error: "全局任务不存在" }, 404);
-        sendJson(res, { success: true, ...result, supervisor: getGlobalMissionSupervisor(id) });
+        const supervisor = getGlobalMissionSupervisor(id);
+        const childNavigation = result.children.map((task: any) => buildTaskConversationLinks(task)).filter(Boolean);
+        const navigation = {
+          schema: "ccm-global-mission-navigation-v1",
+          source: buildTaskConversationLinks(result.mission)?.links?.find((item: any) => item.relation === "source") || null,
+          targets: childNavigation.flatMap((item: any) => item.links || []).filter((item: any) => item.relation === "target"),
+          contentStored: false,
+        };
+        const delivery = buildGlobalMissionSafeProjection(result.mission, result.children, supervisor);
+        const projectionRevision = crypto.createHash("sha256").update(JSON.stringify({
+          mission: result.mission?.id,
+          revision: result.mission?.revision,
+          updatedAt: result.mission?.updated_at,
+          supervisor: supervisor?.updated_at,
+          children: result.children.map((task: any) => [task.id, task.revision, task.status, task.updated_at]),
+        })).digest("hex");
+        sendJson(res, { success: true, ...result, supervisor, navigation, delivery, projectionRevision });
         return true;
       }
       const missions = refreshGlobalDevelopmentMissions();

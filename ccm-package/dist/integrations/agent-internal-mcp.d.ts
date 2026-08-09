@@ -17,6 +17,12 @@ export type TaskBoundInternalMcpInput = {
     memorySnapshotChecksum?: string;
     boundaryGeneration?: number;
     nativeGeneration?: number;
+    communicationMessageId?: string;
+    communicationGeneration?: number;
+    communicationAttempt?: number;
+    communicationLeaseId?: string;
+    anchorMessageId?: string;
+    originMessageId?: string;
     requestText?: string;
     memoryReadBudgetTokens?: number;
 };

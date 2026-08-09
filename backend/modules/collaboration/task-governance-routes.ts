@@ -15,6 +15,13 @@ import {
 import {
   requestTaskCancellation,
 } from "../../agents/execution-kernel";
+import { validateTaskMutationGuard } from "../../system/task-conversation-links";
+
+function rejectMutationConflict(res: ServerResponse, guard: ReturnType<typeof validateTaskMutationGuard>) {
+  if (!("error" in guard)) return false;
+  sendJson(res, { success: false, error: guard.error, code: guard.code, ...guard.details }, guard.status);
+  return true;
+}
 
 type TaskGovernanceDeps = {
   compactFormText: (value: any, fallback?: string) => string;
@@ -129,12 +136,14 @@ export function handleTaskGovernanceRoutes(
     req.on("data", (chunk) => body += chunk);
     req.on("end", () => {
       try {
-        const { task_id } = JSON.parse(body);
+        const payload = JSON.parse(body);
+        const { task_id } = payload;
         if (!task_id) return sendJson(res, { error: "缺少任务 ID" }, 400);
 
         const tasks = loadTasks();
         const task = tasks.find(t => t.id === task_id);
         if (!task) return sendJson(res, { error: "任务不存在" }, 404);
+        if (rejectMutationConflict(res, validateTaskMutationGuard(task, payload, { requireTarget: true }))) return;
 
         const queueResult = deps.enqueueTask(task_id, ctx);
         sendJson(res, { success: true, message: queueResult.message, queued: queueResult.queued, queue_result: queueResult, queue_status: deps.getQueueStatus() });
@@ -155,13 +164,15 @@ export function handleTaskGovernanceRoutes(
         if (!taskId) return sendJson(res, { error: "缺少任务 ID" }, 400);
         const operationKey = String(payload.idempotency_key || payload.idempotencyKey || payload.request_id || payload.requestId || "").trim();
         const task = loadTasks().find((item: any) => item.id === taskId);
+        if (!task) return sendJson(res, { error: "任务不存在" }, 404);
+        if (rejectMutationConflict(res, validateTaskMutationGuard(task, payload, { requireTarget: true }))) return;
         const operation = operationKey ? acquireIdempotency({ scope: "task-retry", key: `${taskId}:${operationKey}`, traceId: task?.trace_id, leaseMs: 60_000 }) : null;
         if (operation && !operation.acquired) return sendJson(res, { success: true, duplicate: true, ...(operation.record?.result || {}), trace_id: operation.traceId });
         const autoExecute = payload.auto_execute !== false && payload.autoExecute !== false;
         const result = deps.retryTask(taskId, ctx, payload.reason || payload.message || "", autoExecute);
         if (!result.success) {
           if (operationKey) failIdempotency("task-retry", `${taskId}:${operationKey}`, result.error || "重试失败");
-          return sendJson(res, { error: result.error }, result.status || 400);
+          return sendJson(res, { error: result.error, ...(result.code ? { code: result.code } : {}) }, result.status || 400);
         }
         if (operationKey) completeIdempotency("task-retry", `${taskId}:${operationKey}`, { task_id: taskId, queued: !!result.queue_result?.queued, retry_count: result.task?.retry_count });
         sendJson(res, result);

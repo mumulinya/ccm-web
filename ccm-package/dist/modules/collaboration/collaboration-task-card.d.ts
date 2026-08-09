@@ -225,6 +225,10 @@ export declare function buildTaskCardView(task: any, executions: any[], sessions
     visible: boolean;
     presentation: string;
     task_id: any;
+    revision: number;
+    generation: number;
+    conversation_links: import("../../system/task-conversation-links").TaskConversationLinkV1[];
+    conversationLinks: import("../../system/task-conversation-links").TaskConversationLinkV1[];
     task_thread_id: any;
     title: any;
     goal: any;

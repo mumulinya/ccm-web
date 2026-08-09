@@ -117,6 +117,7 @@
                 stage-grouped
                 presentation="live"
                 @open-file-change="openSingleFileChange"
+                @execution-action="handleProjectTaskAction(msg, $event)"
               />
               <CommandResultCard v-if="msg.type === 'command_result'" :result="msg.commandResult" />
               <!-- 思考过程消息 -->
@@ -152,11 +153,13 @@
                 presentation="completed"
                 @open-file-change="openSingleFileChange"
                 @open-file-changes="openCodeChangeDrawer($event, { title: '本轮文件改动', project: currentProject })"
+                @execution-action="handleProjectTaskAction(msg, $event)"
               />
             </ConversationMessageShell>
             </div>
           </template>
         </div>
+        <NewProgressIndicator :count="pendingProjectProgressCount" @activate="jumpToLatestProjectProgress" />
         <MessageNavigator
           :items="navMessages"
           :scroll-container="messagesEl"

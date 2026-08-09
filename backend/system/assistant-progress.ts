@@ -64,13 +64,30 @@ export function assistantProgressMilestoneChecksum(input: {
   text: string;
   modelCallIndex: number;
   relatedToolCallIds?: string[];
+  batchId?: string;
 }) {
   return crypto.createHash("sha256").update(JSON.stringify({
     kind: input.kind,
     text: input.text,
     modelCallIndex: Math.max(0, Number(input.modelCallIndex || 0)),
     relatedToolCallIds: [...new Set(input.relatedToolCallIds || [])].sort(),
+    batchId: String(input.batchId || "").trim(),
   })).digest("hex");
+}
+
+export function assistantProgressBatchId(input: {
+  turnId?: any;
+  generation?: any;
+  modelCallIndex?: any;
+  relatedToolCallIds?: string[];
+}) {
+  const toolIds = [...new Set(input.relatedToolCallIds || [])].filter(Boolean).sort();
+  return `batch_${crypto.createHash("sha256").update(JSON.stringify({
+    turnId: String(input.turnId || "turn").trim(),
+    generation: Math.max(0, Number(input.generation || 0)),
+    modelCallIndex: Math.max(0, Number(input.modelCallIndex || 0)),
+    toolIds,
+  })).digest("hex").slice(0, 24)}`;
 }
 
 export function assistantProgressNarrationEnabled(config: any) {

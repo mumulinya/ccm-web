@@ -10,11 +10,22 @@ import { getConfigs, getConfigInfo } from "../core/db";
 import { captureRepoStateIdentity, type RepoStateIdentity } from "./unified-evidence-registry";
 import { readJsonWithBackup, writeJsonAtomic } from "../core/atomic-json-file";
 import { languageServerManager } from "./lsp-client";
+import { publishRuntimeEvent } from "./runtime-events";
 
 export const CODE_INTELLIGENCE_RESULT_SCHEMA = "ccm-code-intelligence-result-v1" as const;
 const STORE_ROOT = path.join(process.env.CCM_CODE_INTELLIGENCE_DIR || path.join(os.homedir(), ".cc-connect"), "code-intelligence");
 const CUSTOM_SERVERS_FILE = path.join(STORE_ROOT, "custom-language-servers.json");
-const SOURCE_EXTENSIONS = new Set([".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"]);
+const TYPESCRIPT_EXTENSIONS = new Set([".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"]);
+const LANGUAGE_BY_EXTENSION: Record<string, string> = {
+  ".ts": "typescript", ".tsx": "typescript", ".mts": "typescript", ".cts": "typescript",
+  ".js": "javascript", ".jsx": "javascript", ".mjs": "javascript", ".cjs": "javascript",
+  ".vue": "vue", ".py": "python", ".go": "go", ".rs": "rust", ".java": "java",
+  ".kt": "kotlin", ".kts": "kotlin", ".c": "c", ".h": "c", ".cc": "cpp", ".cpp": "cpp",
+  ".cxx": "cpp", ".hpp": "cpp", ".m": "objective-c", ".mm": "objective-c", ".cs": "csharp",
+  ".php": "php", ".rb": "ruby", ".lua": "lua", ".html": "html", ".htm": "html",
+  ".css": "css", ".scss": "css", ".json": "json",
+};
+const SOURCE_EXTENSIONS = new Set(Object.keys(LANGUAGE_BY_EXTENSION));
 const IGNORED = new Set([".git", "node_modules", "dist", "build", "coverage", ".next", ".nuxt", ".output", "target"]);
 const MAX_FILES = 50_000;
 const MAX_FILE_BYTES = 4 * 1024 * 1024;
@@ -24,6 +35,9 @@ export type CodeLocation = {
   range: { startLine: number; startCharacter: number; endLine: number; endCharacter: number };
   symbol: string;
   kind: string;
+  container?: string;
+  language?: string;
+  serverId?: string;
 };
 
 export type CodeIntelligenceResult = {
@@ -33,8 +47,11 @@ export type CodeIntelligenceResult = {
   languageServer: string;
   repoStateIdentity: RepoStateIdentity;
   locations: CodeLocation[];
+  total: number;
   nextCursor: string;
   truncated: boolean;
+  freshness: "current" | "stale" | "unavailable";
+  staleReason?: string;
   resultChecksum: string;
   contentStored: false;
 };
@@ -45,6 +62,7 @@ type ProjectRuntime = {
   db: Database.Database;
   generation: number;
   versions: Map<string, string>;
+  indexedVersions: Map<string, string>;
   service: ts.LanguageService;
   lastIndexedAt: string;
   watcher?: fs.FSWatcher;
@@ -66,6 +84,7 @@ export type LanguageServerDescriptor = {
 const runtimes = new Map<string, ProjectRuntime>();
 const stoppedServers = new Set<string>();
 const watcherDebounce = new Map<string, NodeJS.Timeout>();
+const activeIndexRuns = new Map<string, any>();
 
 function attachIncrementalWatcher(runtime: ProjectRuntime) {
   try {
@@ -113,26 +132,37 @@ function relative(root: string, file: string) {
   return path.relative(root, file).replace(/\\/g, "/");
 }
 
-function scanSourceFiles(root: string) {
+const OTHER_CODE_EXTENSIONS = new Set([".swift", ".dart", ".scala", ".ex", ".exs", ".erl", ".hrl", ".fs", ".fsx", ".r", ".sol", ".zig", ".sh", ".ps1"]);
+
+function scanSourceInventory(root: string) {
   const files: string[] = [];
   const stack = [root];
+  let oversized = 0;
+  let unsupported = 0;
+  let skipped = 0;
   while (stack.length && files.length < MAX_FILES) {
     const directory = stack.pop()!;
     let entries: fs.Dirent[] = [];
     try { entries = fs.readdirSync(directory, { withFileTypes: true }); } catch { continue; }
     for (const entry of entries) {
-      if (entry.isSymbolicLink()) continue;
+      if (entry.isSymbolicLink()) { skipped += 1; continue; }
       const absolute = path.join(directory, entry.name);
       if (entry.isDirectory()) {
         if (!IGNORED.has(entry.name.toLowerCase())) stack.push(absolute);
-      } else if (entry.isFile() && SOURCE_EXTENSIONS.has(path.extname(entry.name).toLowerCase())) {
-        try { if (fs.statSync(absolute).size <= MAX_FILE_BYTES) files.push(absolute); } catch {}
+      } else if (entry.isFile()) {
+        const extension = path.extname(entry.name).toLowerCase();
+        if (SOURCE_EXTENSIONS.has(extension)) {
+          try { if (fs.statSync(absolute).size <= MAX_FILE_BYTES) files.push(absolute); else oversized += 1; } catch { skipped += 1; }
+        } else if (OTHER_CODE_EXTENSIONS.has(extension)) unsupported += 1;
       }
       if (files.length >= MAX_FILES) break;
     }
   }
-  return files.sort((a, b) => a.localeCompare(b));
+  if (files.length >= MAX_FILES && stack.length) skipped += 1;
+  return { files: files.sort((a, b) => a.localeCompare(b)), oversized, unsupported, skipped };
 }
+
+function scanSourceFiles(root: string) { return scanSourceInventory(root).files; }
 
 function openDatabase(project: string) {
   const directory = path.join(STORE_ROOT, safeId(project));
@@ -143,12 +173,14 @@ function openDatabase(project: string) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS files (
-      path TEXT PRIMARY KEY, hash TEXT NOT NULL, size INTEGER NOT NULL, mtime_ms REAL NOT NULL, indexed_at TEXT NOT NULL
+      path TEXT PRIMARY KEY, hash TEXT NOT NULL, size INTEGER NOT NULL, mtime_ms REAL NOT NULL, indexed_at TEXT NOT NULL,
+      language TEXT NOT NULL DEFAULT '', server_id TEXT NOT NULL DEFAULT ''
     );
     CREATE TABLE IF NOT EXISTS symbols (
       id INTEGER PRIMARY KEY AUTOINCREMENT, path TEXT NOT NULL, name TEXT NOT NULL, kind TEXT NOT NULL,
       start_line INTEGER NOT NULL, start_character INTEGER NOT NULL, end_line INTEGER NOT NULL, end_character INTEGER NOT NULL,
-      container TEXT NOT NULL DEFAULT '', symbol_checksum TEXT NOT NULL
+      container TEXT NOT NULL DEFAULT '', symbol_checksum TEXT NOT NULL,
+      language TEXT NOT NULL DEFAULT '', server_id TEXT NOT NULL DEFAULT ''
     );
     CREATE INDEX IF NOT EXISTS idx_symbols_name ON symbols(name COLLATE NOCASE);
     CREATE INDEX IF NOT EXISTS idx_symbols_path ON symbols(path);
@@ -158,7 +190,34 @@ function openDatabase(project: string) {
       source TEXT NOT NULL, message_checksum TEXT NOT NULL, message_preview TEXT NOT NULL, repo_state_checksum TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_diagnostics_path ON diagnostics(path);
+    CREATE TABLE IF NOT EXISTS index_runs (
+      run_id TEXT PRIMARY KEY, mode TEXT NOT NULL, state TEXT NOT NULL, reason TEXT NOT NULL DEFAULT '',
+      total_files INTEGER NOT NULL DEFAULT 0, processed_files INTEGER NOT NULL DEFAULT 0,
+      changed_files INTEGER NOT NULL DEFAULT 0, removed_files INTEGER NOT NULL DEFAULT 0,
+      failed_files INTEGER NOT NULL DEFAULT 0, started_at TEXT NOT NULL, completed_at TEXT NOT NULL DEFAULT '',
+      error_summary TEXT NOT NULL DEFAULT '', generation INTEGER NOT NULL DEFAULT 0
+    );
   `);
+  const columns = (table: string) => new Set((db.prepare(`PRAGMA table_info(${table})`).all() as any[]).map(row => String(row.name)));
+  const fileColumns = columns("files");
+  if (!fileColumns.has("language")) db.exec("ALTER TABLE files ADD COLUMN language TEXT NOT NULL DEFAULT ''");
+  if (!fileColumns.has("server_id")) db.exec("ALTER TABLE files ADD COLUMN server_id TEXT NOT NULL DEFAULT ''");
+  const symbolColumns = columns("symbols");
+  if (!symbolColumns.has("language")) db.exec("ALTER TABLE symbols ADD COLUMN language TEXT NOT NULL DEFAULT ''");
+  if (!symbolColumns.has("server_id")) db.exec("ALTER TABLE symbols ADD COLUMN server_id TEXT NOT NULL DEFAULT ''");
+  const legacyFiles = db.prepare("SELECT path, language, server_id FROM files WHERE language='' OR language='unknown'").all() as any[];
+  if (legacyFiles.length) {
+    const migrate = db.transaction(() => {
+      for (const row of legacyFiles) {
+        const extension = path.extname(String(row.path || "")).toLowerCase();
+        const language = LANGUAGE_BY_EXTENSION[extension] || "unknown";
+        const serverId = TYPESCRIPT_EXTENSIONS.has(extension) ? "typescript" : serverForLanguage(language)?.id || "";
+        db.prepare("UPDATE files SET language=?, server_id=? WHERE path=?").run(language, serverId, row.path);
+        db.prepare("UPDATE symbols SET language=?, server_id=? WHERE path=?").run(language, serverId, row.path);
+      }
+    });
+    migrate();
+  }
   return db;
 }
 
@@ -211,8 +270,14 @@ function collectSymbols(source: ts.SourceFile) {
 }
 
 function createRuntime(project: string, root: string, files: string[], db: Database.Database, generation: number) {
+  const typescriptFiles = files.filter(file => TYPESCRIPT_EXTENSIONS.has(path.extname(file).toLowerCase()));
   const versions = new Map<string, string>();
-  for (const file of files) versions.set(file, hash(fs.readFileSync(file)));
+  const indexedVersions = new Map<string, string>();
+  for (const file of files) {
+    const fileHash = hash(fs.readFileSync(file));
+    indexedVersions.set(file, fileHash);
+    if (typescriptFiles.includes(file)) versions.set(file, fileHash);
+  }
   const compilerOptions: ts.CompilerOptions = {
     allowJs: true,
     checkJs: false,
@@ -241,13 +306,14 @@ function createRuntime(project: string, root: string, files: string[], db: Datab
     useCaseSensitiveFileNames: () => ts.sys.useCaseSensitiveFileNames,
     getNewLine: () => ts.sys.newLine,
   };
-  return { project, root, db, generation, versions, service: ts.createLanguageService(host, ts.createDocumentRegistry()), lastIndexedAt: new Date().toISOString() } satisfies ProjectRuntime;
+  return { project, root, db, generation, versions, indexedVersions, service: ts.createLanguageService(host, ts.createDocumentRegistry()), lastIndexedAt: new Date().toISOString() } satisfies ProjectRuntime;
 }
 
 function indexProject(project: string, force = false) {
   const root = projectRoot(project);
   const db = openDatabase(project);
-  const files = scanSourceFiles(root);
+  const inventory = scanSourceInventory(root);
+  const files = inventory.files;
   const previousGeneration = Number(db.prepare("SELECT value FROM metadata WHERE key='generation'").pluck().get() || 0);
   const changed: string[] = [];
   const removed: string[] = [];
@@ -265,6 +331,17 @@ function indexProject(project: string, force = false) {
   const repoIdentity = captureRepoStateIdentity(root, changed.map(file => relative(root, file)));
   const repoChecksum = hash(repoIdentity);
   const transaction = db.transaction(() => {
+    // Backfill language metadata for indexes created before the multi-language
+    // schema existed. This deliberately does not force a source re-parse or
+    // advance the generation when the authoritative file bytes are unchanged.
+    for (const file of files) {
+      const rel = relative(root, file);
+      const extension = path.extname(file).toLowerCase();
+      const language = LANGUAGE_BY_EXTENSION[extension] || "unknown";
+      const serverId = TYPESCRIPT_EXTENSIONS.has(extension) ? "typescript" : serverForLanguage(language)?.id || "";
+      db.prepare("UPDATE files SET language=?, server_id=? WHERE path=?").run(language, serverId, rel);
+      db.prepare("UPDATE symbols SET language=?, server_id=? WHERE path=?").run(language, serverId, rel);
+    }
     for (const rel of removed) {
       db.prepare("DELETE FROM files WHERE path=?").run(rel);
       db.prepare("DELETE FROM symbols WHERE path=?").run(rel);
@@ -274,23 +351,29 @@ function indexProject(project: string, force = false) {
       const rel = relative(root, file);
       const content = fs.readFileSync(file, "utf8");
       const stat = fs.statSync(file);
-      const source = ts.createSourceFile(file, content, ts.ScriptTarget.Latest, true, scriptKind(file));
+      const extension = path.extname(file).toLowerCase();
+      const language = LANGUAGE_BY_EXTENSION[extension] || "unknown";
+      const serverId = TYPESCRIPT_EXTENSIONS.has(extension) ? "typescript" : serverForLanguage(language)?.id || "";
       db.prepare("DELETE FROM symbols WHERE path=?").run(rel);
       db.prepare("DELETE FROM diagnostics WHERE path=?").run(rel);
-      const insertSymbol = db.prepare("INSERT INTO symbols(path,name,kind,start_line,start_character,end_line,end_character,container,symbol_checksum) VALUES(?,?,?,?,?,?,?,?,?)");
-      for (const symbol of collectSymbols(source)) insertSymbol.run(rel, symbol.name, symbol.kind, symbol.range.startLine, symbol.range.startCharacter, symbol.range.endLine, symbol.range.endCharacter, symbol.container, hash({ rel, ...symbol }));
-      const diagnostics = [...runtime.service.getSyntacticDiagnostics(file), ...runtime.service.getSemanticDiagnostics(file)];
-      const insertDiagnostic = db.prepare("INSERT INTO diagnostics(path,start_line,start_character,end_line,end_character,severity,code,source,message_checksum,message_preview,repo_state_checksum) VALUES(?,?,?,?,?,?,?,?,?,?,?)");
-      for (const diagnostic of diagnostics.slice(0, 2000)) {
-        const range = lineRange(source, diagnostic.start || 0, diagnostic.length || 0);
-        const message = ts.flattenDiagnosticMessageText(diagnostic.messageText, " ").replace(/\s+/g, " ").trim();
-        insertDiagnostic.run(rel, range.startLine, range.startCharacter, range.endLine, range.endCharacter, diagnosticSeverity(diagnostic.category), String(diagnostic.code), "typescript", hash(message), message.slice(0, 500), repoChecksum);
+      if (TYPESCRIPT_EXTENSIONS.has(extension)) {
+        const source = ts.createSourceFile(file, content, ts.ScriptTarget.Latest, true, scriptKind(file));
+        const insertSymbol = db.prepare("INSERT INTO symbols(path,name,kind,start_line,start_character,end_line,end_character,container,symbol_checksum,language,server_id) VALUES(?,?,?,?,?,?,?,?,?,?,?)");
+        for (const symbol of collectSymbols(source)) insertSymbol.run(rel, symbol.name, symbol.kind, symbol.range.startLine, symbol.range.startCharacter, symbol.range.endLine, symbol.range.endCharacter, symbol.container, hash({ rel, ...symbol }), language, serverId);
+        const diagnostics = [...runtime.service.getSyntacticDiagnostics(file), ...runtime.service.getSemanticDiagnostics(file)];
+        const insertDiagnostic = db.prepare("INSERT INTO diagnostics(path,start_line,start_character,end_line,end_character,severity,code,source,message_checksum,message_preview,repo_state_checksum) VALUES(?,?,?,?,?,?,?,?,?,?,?)");
+        for (const diagnostic of diagnostics.slice(0, 2000)) {
+          const range = lineRange(source, diagnostic.start || 0, diagnostic.length || 0);
+          const message = ts.flattenDiagnosticMessageText(diagnostic.messageText, " ").replace(/\s+/g, " ").trim();
+          insertDiagnostic.run(rel, range.startLine, range.startCharacter, range.endLine, range.endCharacter, diagnosticSeverity(diagnostic.category), String(diagnostic.code), "typescript", hash(message), message.slice(0, 500), repoChecksum);
+        }
       }
-      db.prepare("INSERT INTO files(path,hash,size,mtime_ms,indexed_at) VALUES(?,?,?,?,?) ON CONFLICT(path) DO UPDATE SET hash=excluded.hash,size=excluded.size,mtime_ms=excluded.mtime_ms,indexed_at=excluded.indexed_at").run(rel, hash(content), stat.size, stat.mtimeMs, new Date().toISOString());
+      db.prepare("INSERT INTO files(path,hash,size,mtime_ms,indexed_at,language,server_id) VALUES(?,?,?,?,?,?,?) ON CONFLICT(path) DO UPDATE SET hash=excluded.hash,size=excluded.size,mtime_ms=excluded.mtime_ms,indexed_at=excluded.indexed_at,language=excluded.language,server_id=excluded.server_id").run(rel, hash(content), stat.size, stat.mtimeMs, new Date().toISOString(), language, serverId);
     }
     db.prepare("INSERT INTO metadata(key,value) VALUES('generation',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(String(generation));
     db.prepare("INSERT INTO metadata(key,value) VALUES('last_indexed_at',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(new Date().toISOString());
     db.prepare("INSERT INTO metadata(key,value) VALUES('root_checksum',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(hash(root));
+    db.prepare("INSERT INTO metadata(key,value) VALUES('coverage_inventory',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(JSON.stringify({ oversized: inventory.oversized, unsupported: inventory.unsupported, skipped: inventory.skipped }));
   });
   transaction();
   const previous = runtimes.get(project);
@@ -306,7 +389,7 @@ function ensureRuntime(project: string) {
   const current = runtimes.get(project);
   if (!current) return indexProject(project).runtime;
   const files = scanSourceFiles(current.root);
-  const drift = files.length !== current.versions.size || files.some(file => current.versions.get(file) !== hash(fs.readFileSync(file)));
+  const drift = files.length !== current.indexedVersions.size || files.some(file => current.indexedVersions.get(file) !== hash(fs.readFileSync(file)));
   return drift ? indexProject(project).runtime : current;
 }
 
@@ -319,6 +402,15 @@ function location(runtime: ProjectRuntime, fileName: string, start: number, leng
 
 function symbolAnchor(runtime: ProjectRuntime, args: any) {
   const requestedPath = String(args?.path || "").replace(/\\/g, "/");
+  if (requestedPath && Number(args?.line) > 0) {
+    const file = path.resolve(runtime.root, requestedPath);
+    const source = runtime.service.getProgram()?.getSourceFile(file);
+    if (source) {
+      const line = Math.max(0, Math.min(source.getLineAndCharacterOfPosition(source.getEnd()).line, Number(args.line) - 1));
+      const character = Math.max(0, Number(args?.character || 0));
+      return { file, position: source.getPositionOfLineAndCharacter(line, character), symbol: String(args?.symbol || "") };
+    }
+  }
   let row: any;
   if (requestedPath) row = runtime.db.prepare("SELECT * FROM symbols WHERE path=? AND name=? COLLATE NOCASE ORDER BY start_line,start_character LIMIT 1").get(requestedPath, String(args?.symbol || ""));
   if (!row) row = runtime.db.prepare("SELECT * FROM symbols WHERE name=? COLLATE NOCASE ORDER BY path,start_line,start_character LIMIT 1").get(String(args?.symbol || ""));
@@ -348,8 +440,10 @@ function finish(runtime: ProjectRuntime, locations: CodeLocation[], args: any): 
     languageServer: "typescript-language-service",
     repoStateIdentity: captureRepoStateIdentity(runtime.root, page.selected.map(item => item.path)),
     locations: page.selected,
+    total: unique.length,
     nextCursor: page.nextCursor,
     truncated: page.truncated,
+    freshness: "current" as const,
     contentStored: false as const,
   };
   return { ...base, resultChecksum: hash(base) };
@@ -394,12 +488,12 @@ function lspRangeLocation(root: string, item: any, fallbackSymbol: string, kind:
   };
 }
 
-function flattenDocumentSymbols(root: string, uri: string, rows: any[], output: CodeLocation[] = []) {
+function flattenDocumentSymbols(root: string, uri: string, rows: any[], output: CodeLocation[] = [], containers: string[] = []) {
   for (const row of Array.isArray(rows) ? rows : []) {
     const item = row?.location ? row : { ...row, uri };
     const found = lspRangeLocation(root, item, String(row?.name || ""), `symbol:${String(row?.kind || "")}`);
-    if (found) output.push(found);
-    if (Array.isArray(row?.children)) flattenDocumentSymbols(root, uri, row.children, output);
+    if (found) output.push({ ...found, container: containers.join(".") });
+    if (Array.isArray(row?.children)) flattenDocumentSymbols(root, uri, row.children, output, [...containers, String(row?.name || "")].filter(Boolean));
   }
   return output;
 }
@@ -411,9 +505,15 @@ function finishExternal(project: string, root: string, languageServer: string, g
   const base: any = {
     schema: CODE_INTELLIGENCE_RESULT_SCHEMA, project, indexGeneration: generation, languageServer,
     repoStateIdentity: captureRepoStateIdentity(root, page.selected.map(item => item.path)), locations: page.selected,
-    nextCursor: page.nextCursor, truncated: page.truncated, contentStored: false as const,
+    total: unique.length, nextCursor: page.nextCursor, truncated: page.truncated, freshness: "current" as const, contentStored: false as const,
   };
-  if (diagnostics) base.diagnostics = diagnostics;
+  if (diagnostics) {
+    const diagnosticPage = paginate(diagnostics, args);
+    base.diagnostics = diagnosticPage.selected;
+    base.total = diagnostics.length;
+    base.nextCursor = diagnosticPage.nextCursor;
+    base.truncated = diagnosticPage.truncated;
+  }
   return { ...base, resultChecksum: hash(base) } as CodeIntelligenceResult & { diagnostics?: any[] };
 }
 
@@ -433,12 +533,14 @@ async function executeExternalLspTool(project: string, tool: CodeIntelligenceToo
   let text = "";
   if (absolute) {
     text = fs.readFileSync(absolute, "utf8");
-    client.notify("textDocument/didOpen", { textDocument: { uri, languageId: language, version: 1, text } });
+    client.openDocument(uri, language, text, hash(text));
   }
   const symbol = String(args?.symbol || "");
   const rawOffset = symbol && text ? text.indexOf(symbol) : 0;
   const prefix = text.slice(0, Math.max(0, rawOffset));
-  const position = { line: prefix.split(/\r?\n/).length - 1, character: prefix.length - Math.max(prefix.lastIndexOf("\n") + 1, 0) };
+  const position = Number(args?.line) > 0
+    ? { line: Math.max(0, Number(args.line) - 1), character: Math.max(0, Number(args?.character || 0)) }
+    : { line: prefix.split(/\r?\n/).length - 1, character: prefix.length - Math.max(prefix.lastIndexOf("\n") + 1, 0) };
   const documentPosition = { textDocument: { uri }, position };
   let locations: CodeLocation[] = [];
   let diagnostics: any[] | undefined;
@@ -455,7 +557,7 @@ async function executeExternalLspTool(project: string, tool: CodeIntelligenceToo
     locations = rows.map(item => lspRangeLocation(root, { uri, range: item.range, name: String(item.code || "") }, String(item.code || ""), `diagnostic:${String(item.severity || "")}`)).filter(Boolean) as CodeLocation[];
     diagnostics = rows.map(item => ({ path: requestedPath, range: item.range, severity: item.severity, code: String(item.code || ""), source: String(item.source || descriptor.id), messageChecksum: hash(String(item.message || "")), messagePreview: String(item.message || "").replace(/\s+/g, " ").slice(0, 500), contentStored: false }));
   } else {
-    if (!uri || !symbol || rawOffset < 0) throw new Error("语义定位需要有效的path和symbol");
+    if (!uri || (!symbol && !(Number(args?.line) > 0)) || (symbol && rawOffset < 0 && !(Number(args?.line) > 0))) throw new Error("语义定位需要有效的path和symbol或精确行列");
     let method = "textDocument/definition"; let params: any = documentPosition; let kind = "definition";
     if (tool === "find_references") { method = "textDocument/references"; params = { ...documentPosition, context: { includeDeclaration: true } }; kind = "reference"; }
     if (tool === "find_implementations") { method = "textDocument/implementation"; kind = "implementation"; }
@@ -474,6 +576,7 @@ async function executeExternalLspTool(project: string, tool: CodeIntelligenceToo
       return lspRangeLocation(root, item, symbol, kind);
     }).filter(Boolean) as CodeLocation[];
   }
+  locations = locations.map(item => ({ ...item, language, serverId: descriptor.id }));
   return finishExternal(project, root, descriptor.id, getCodeIntelligenceProjectStatus(project).generation, locations, args, diagnostics);
 }
 
@@ -491,15 +594,19 @@ export async function executeCodeIntelligenceTool(project: string, tool: CodeInt
     const rows = tool === "document_symbols"
       ? runtime.db.prepare("SELECT * FROM symbols WHERE path=? AND name LIKE ? COLLATE NOCASE ORDER BY start_line,start_character").all(String(args?.path || "").replace(/\\/g, "/"), query)
       : runtime.db.prepare("SELECT * FROM symbols WHERE name LIKE ? COLLATE NOCASE ORDER BY name,path,start_line LIMIT 5000").all(query);
-    locations = (rows as any[]).map(row => ({ path: row.path, range: { startLine: row.start_line, startCharacter: row.start_character, endLine: row.end_line, endCharacter: row.end_character }, symbol: row.name, kind: row.kind }));
+    locations = (rows as any[]).map(row => ({ path: row.path, range: { startLine: row.start_line, startCharacter: row.start_character, endLine: row.end_line, endCharacter: row.end_character }, symbol: row.name, kind: row.kind, container: row.container || "", language: row.language || "", serverId: row.server_id || "typescript" }));
   } else if (tool === "read_code_diagnostics") {
-    const rows = args?.path
+    let rows: any[] = args?.path
       ? runtime.db.prepare("SELECT * FROM diagnostics WHERE path=? ORDER BY path,start_line,start_character").all(String(args.path).replace(/\\/g, "/"))
-      : runtime.db.prepare("SELECT * FROM diagnostics ORDER BY path,start_line,start_character LIMIT 5000").all();
-    locations = (rows as any[]).map(row => ({ path: row.path, range: { startLine: row.start_line, startCharacter: row.start_character, endLine: row.end_line, endCharacter: row.end_character }, symbol: row.code, kind: `diagnostic:${row.severity}` }));
+      : runtime.db.prepare("SELECT * FROM diagnostics ORDER BY path,start_line,start_character LIMIT 5000").all() as any[];
+    const severities = new Set((Array.isArray(args?.filters?.severity) ? args.filters.severity : []).map(String));
+    const sources = new Set((Array.isArray(args?.filters?.source) ? args.filters.source : []).map(String));
+    const filePattern = String(args?.filters?.filePattern || "").trim().toLowerCase();
+    rows = rows.filter(row => (!severities.size || severities.has(String(row.severity))) && (!sources.size || sources.has(String(row.source))) && (!filePattern || String(row.path).toLowerCase().includes(filePattern)));
+    locations = rows.map(row => ({ path: row.path, range: { startLine: row.start_line, startCharacter: row.start_character, endLine: row.end_line, endCharacter: row.end_character }, symbol: row.code, kind: `diagnostic:${row.severity}`, serverId: row.source || "typescript" }));
     const result = finish(runtime, locations, args) as any;
     const locationKeys = new Set(result.locations.map((item: CodeLocation) => `${item.path}:${item.range.startLine}:${item.range.startCharacter}:${item.symbol}`));
-    result.diagnostics = (rows as any[]).filter(row => locationKeys.has(`${row.path}:${row.start_line}:${row.start_character}:${row.code}`)).map(row => ({ path: row.path, range: { startLine: row.start_line, startCharacter: row.start_character, endLine: row.end_line, endCharacter: row.end_character }, severity: row.severity, code: row.code, source: row.source, messageChecksum: row.message_checksum, messagePreview: row.message_preview, contentStored: false }));
+    result.diagnostics = rows.filter(row => locationKeys.has(`${row.path}:${row.start_line}:${row.start_character}:${row.code}`)).map(row => ({ path: row.path, range: { startLine: row.start_line, startCharacter: row.start_character, endLine: row.end_line, endCharacter: row.end_character }, severity: row.severity, code: row.code, source: row.source, messageChecksum: row.message_checksum, messagePreview: row.message_preview, contentStored: false }));
     result.resultChecksum = hash({ ...result, resultChecksum: undefined });
     return result;
   } else {
@@ -538,6 +645,43 @@ export async function executeCodeIntelligenceTool(project: string, tool: CodeInt
   return finish(runtime, locations, args);
 }
 
+async function hydrateExternalIndex(project: string, relativeFiles: string[], onProgress?: (processed: number, failed: number) => void) {
+  const root = projectRoot(project);
+  const runtime = runtimes.get(project);
+  const db = runtime?.db || openDatabase(project);
+  let processed = 0;
+  let failed = 0;
+  try {
+    for (const relativePath of relativeFiles) {
+      const extension = path.extname(relativePath).toLowerCase();
+      if (TYPESCRIPT_EXTENSIONS.has(extension)) { processed += 1; onProgress?.(processed, failed); continue; }
+      const language = LANGUAGE_BY_EXTENSION[extension] || "";
+      const server = serverForLanguage(language);
+      if (!server || server.status !== "available") { processed += 1; onProgress?.(processed, failed); continue; }
+      try {
+        const symbols: any = await executeExternalLspTool(project, "document_symbols", { path: relativePath, limit: 5000 }, extension);
+        const diagnosticResult: any = await executeExternalLspTool(project, "read_code_diagnostics", { path: relativePath, limit: 5000 }, extension);
+        const repoChecksum = hash(diagnosticResult.repoStateIdentity || symbols.repoStateIdentity || {});
+        const transaction = db.transaction(() => {
+          db.prepare("DELETE FROM symbols WHERE path=?").run(relativePath);
+          db.prepare("DELETE FROM diagnostics WHERE path=?").run(relativePath);
+          const insertSymbol = db.prepare("INSERT INTO symbols(path,name,kind,start_line,start_character,end_line,end_character,container,symbol_checksum,language,server_id) VALUES(?,?,?,?,?,?,?,?,?,?,?)");
+          for (const item of symbols.locations || []) insertSymbol.run(relativePath, String(item.symbol || ""), String(item.kind || "symbol"), Number(item.range?.startLine || 1), Number(item.range?.startCharacter || 0), Number(item.range?.endLine || item.range?.startLine || 1), Number(item.range?.endCharacter || 0), String(item.container || ""), hash(item), language, server.id);
+          const insertDiagnostic = db.prepare("INSERT INTO diagnostics(path,start_line,start_character,end_line,end_character,severity,code,source,message_checksum,message_preview,repo_state_checksum) VALUES(?,?,?,?,?,?,?,?,?,?,?)");
+          for (const item of diagnosticResult.diagnostics || []) {
+            const severity = ({ 1: "error", 2: "warning", 3: "information", 4: "suggestion" } as any)[Number(item.severity)] || String(item.severity || "information");
+            insertDiagnostic.run(relativePath, Number(item.range?.start?.line ?? item.range?.startLine ?? 0) + (item.range?.start?.line !== undefined ? 1 : 0), Number(item.range?.start?.character ?? item.range?.startCharacter ?? 0), Number(item.range?.end?.line ?? item.range?.endLine ?? 0) + (item.range?.end?.line !== undefined ? 1 : 0), Number(item.range?.end?.character ?? item.range?.endCharacter ?? 0), severity, String(item.code || ""), String(item.source || server.id), String(item.messageChecksum || hash(item.messagePreview || "")), String(item.messagePreview || "").slice(0, 500), repoChecksum);
+          }
+        });
+        transaction();
+      } catch { failed += 1; }
+      processed += 1;
+      onProgress?.(processed, failed);
+    }
+  } finally { if (!runtime) db.close(); }
+  return { processed, failed };
+}
+
 const SERVER_MANIFEST: Array<Omit<LanguageServerDescriptor, "installed" | "discoveredPath" | "status" | "version" | "checksum">> = [
   { id: "typescript", languages: ["typescript", "javascript", "jsx", "tsx"], command: "tsserver", bundled: true, source: "bundled:typescript" },
   { id: "vue", languages: ["vue"], command: "vue-language-server", bundled: false, source: "npm:@vue/language-server" },
@@ -574,6 +718,10 @@ export function listLanguageServers(): LanguageServerDescriptor[] {
   });
 }
 
+function serverForLanguage(language: string) {
+  return listLanguageServers().find(item => item.languages.includes(language));
+}
+
 export function configureLanguageServer(id: string, input: any) {
   let descriptor = serverManifest().find(item => item.id === id);
   if (!descriptor && input?.command) {
@@ -599,7 +747,13 @@ export function previewLanguageServerInstall(id: string) {
 }
 
 export function listCodeIntelligenceProjects() {
-  return getConfigs().map(config => getCodeIntelligenceProjectStatus(String(config.name || ""))).filter(Boolean);
+  return getConfigs().map(config => {
+    const project = String(config.name || "");
+    try { return getCodeIntelligenceProjectStatus(project); }
+    catch (error: any) {
+      return { schema: "ccm-code-intelligence-project-v1", project, status: "unavailable", pathAvailable: false, errorCode: "PROJECT_PATH_UNAVAILABLE", errorSummary: String(error?.message || error).slice(0, 500), generation: 0, files: 0, symbols: 0, diagnostics: 0, languages: [], coverage: { supported: 0, missingServer: 0, unsupported: 0, oversized: 0, skipped: 0, total: 0 }, contentStored: false };
+    }
+  }).filter(Boolean);
 }
 
 export function getCodeIntelligenceProjectStatus(project: string) {
@@ -608,7 +762,7 @@ export function getCodeIntelligenceProjectStatus(project: string) {
   const dbFile = path.join(STORE_ROOT, safeId(project), "index.sqlite");
   let stored: any = { generation: 0, files: 0, symbols: 0, diagnostics: 0, lastIndexedAt: "" };
   if (fs.existsSync(dbFile)) {
-    const db = runtime?.db || new Database(dbFile, { readonly: true });
+    const db = runtime?.db || openDatabase(project);
     try {
       stored = {
         generation: Number(db.prepare("SELECT value FROM metadata WHERE key='generation'").pluck().get() || 0),
@@ -616,15 +770,144 @@ export function getCodeIntelligenceProjectStatus(project: string) {
         symbols: Number(db.prepare("SELECT COUNT(*) FROM symbols").pluck().get() || 0),
         diagnostics: Number(db.prepare("SELECT COUNT(*) FROM diagnostics").pluck().get() || 0),
         lastIndexedAt: String(db.prepare("SELECT value FROM metadata WHERE key='last_indexed_at'").pluck().get() || ""),
+        coverageInventory: (() => { try { return JSON.parse(String(db.prepare("SELECT value FROM metadata WHERE key='coverage_inventory'").pluck().get() || "{}")); } catch { return {}; } })(),
       };
     } finally { if (!runtime) db.close(); }
   }
-  return { schema: "ccm-code-intelligence-project-v1", project, rootChecksum: hash(root), status: runtime ? "ready" : stored.generation ? "stopped" : "not_indexed", languageServer: "typescript-language-service", ...stored, contentStored: false };
+  let languageRows: any[] = [];
+  if (fs.existsSync(dbFile)) {
+    const db = runtime?.db || openDatabase(project);
+    try { languageRows = db.prepare("SELECT language,server_id,COUNT(*) AS files FROM files GROUP BY language,server_id ORDER BY language").all() as any[]; }
+    finally { if (!runtime) db.close(); }
+  }
+  const servers = listLanguageServers();
+  const languages = languageRows.map(row => {
+    const server = servers.find(item => item.id === row.server_id) || serverForLanguage(String(row.language));
+    return { language: String(row.language || "unknown"), files: Number(row.files || 0), serverId: String(row.server_id || server?.id || ""), serverState: server?.status || "missing", semantic: server?.status === "available" };
+  });
+  const supported = languages.filter(item => item.semantic).reduce((sum, item) => sum + item.files, 0);
+  const missingServer = languages.filter(item => !item.semantic).reduce((sum, item) => sum + item.files, 0);
+  const latestRun = listCodeIntelligenceIndexRuns(project, 1)[0] || null;
+  const unsupported = Number(stored.coverageInventory?.unsupported || 0);
+  const oversized = Number(stored.coverageInventory?.oversized || 0);
+  const skipped = Number(stored.coverageInventory?.skipped || 0);
+  return { schema: "ccm-code-intelligence-project-v1", project, rootChecksum: hash(root), pathAvailable: true, status: runtime ? "ready" : stored.generation ? "stopped" : "not_indexed", languageServer: "typescript-language-service", ...stored, languages, coverage: { supported, missingServer, unsupported, oversized, skipped, total: supported + missingServer + unsupported + oversized }, latestRun, contentStored: false };
 }
 
 export function startCodeIntelligenceProject(project: string, force = false) {
   const result = indexProject(project, force);
   return { ...getCodeIntelligenceProjectStatus(project), changedFiles: result.changedFiles, removedFiles: result.removedFiles };
+}
+
+function indexRunRow(project: string, run: any) {
+  const db = openDatabase(project);
+  db.prepare(`INSERT INTO index_runs(run_id,mode,state,reason,total_files,processed_files,changed_files,removed_files,failed_files,started_at,completed_at,error_summary,generation)
+    VALUES(@runId,@mode,@state,@reason,@totalFiles,@processedFiles,@changedFiles,@removedFiles,@failedFiles,@startedAt,@completedAt,@errorSummary,@generation)
+    ON CONFLICT(run_id) DO UPDATE SET state=excluded.state,total_files=excluded.total_files,processed_files=excluded.processed_files,changed_files=excluded.changed_files,removed_files=excluded.removed_files,failed_files=excluded.failed_files,completed_at=excluded.completed_at,error_summary=excluded.error_summary,generation=excluded.generation`).run(run);
+  if (runtimes.get(project)?.db !== db) db.close();
+}
+
+export function startCodeIntelligenceIndexRun(project: string, mode: "start" | "reindex" | "repair", reason = "") {
+  projectRoot(project);
+  const run = { schema: "ccm-code-intelligence-index-run-v1", runId: `cir_${crypto.randomUUID()}`, project, mode, state: "queued", reason: String(reason || "").slice(0, 500), totalFiles: 0, processedFiles: 0, changedFiles: 0, removedFiles: 0, failedFiles: 0, startedAt: new Date().toISOString(), completedAt: "", errorSummary: "", generation: 0, contentStored: false };
+  activeIndexRuns.set(run.runId, run);
+  indexRunRow(project, run);
+  publishRuntimeEvent("project", "project.code_intelligence.index_queued", { project, runId: run.runId, mode });
+  setImmediate(async () => {
+    const current = activeIndexRuns.get(run.runId) || run;
+    try {
+      const root = projectRoot(project);
+      current.state = "running";
+      current.totalFiles = scanSourceFiles(root).length;
+      indexRunRow(project, current);
+      publishRuntimeEvent("project", "project.code_intelligence.index_running", { project, runId: run.runId, totalFiles: current.totalFiles });
+      const result = indexProject(project, mode !== "start");
+      const unchangedFiles = Math.max(0, current.totalFiles - result.changedFiles.length);
+      current.processedFiles = unchangedFiles;
+      indexRunRow(project, current);
+      const external = await hydrateExternalIndex(project, result.changedFiles, (processed, failed) => {
+        current.processedFiles = Math.min(current.totalFiles, unchangedFiles + processed);
+        current.failedFiles = failed;
+        indexRunRow(project, current);
+      });
+      Object.assign(current, { state: "completed", processedFiles: current.totalFiles, changedFiles: result.changedFiles.length, removedFiles: result.removedFiles.length, failedFiles: external.failed, generation: result.generation, completedAt: new Date().toISOString() });
+      indexRunRow(project, current);
+      publishRuntimeEvent("project", "project.code_intelligence.index_completed", { project, runId: run.runId, generation: result.generation, changedFiles: result.changedFiles.length, removedFiles: result.removedFiles.length });
+    } catch (error: any) {
+      Object.assign(current, { state: "failed", failedFiles: Math.max(1, Number(current.failedFiles || 0)), completedAt: new Date().toISOString(), errorSummary: String(error?.message || error).slice(0, 500) });
+      try { indexRunRow(project, current); } catch {}
+      publishRuntimeEvent("project", "project.code_intelligence.index_failed", { project, runId: run.runId, errorSummary: current.errorSummary });
+    } finally { activeIndexRuns.set(run.runId, current); }
+  });
+  return run;
+}
+
+export function getCodeIntelligenceIndexRun(runId: string) {
+  const active = activeIndexRuns.get(runId);
+  if (active) return active;
+  for (const config of getConfigs()) {
+    const project = String(config.name || "");
+    const dbFile = path.join(STORE_ROOT, safeId(project), "index.sqlite");
+    if (!fs.existsSync(dbFile)) continue;
+    try {
+      const db = openDatabase(project);
+      try {
+        const row: any = db.prepare("SELECT * FROM index_runs WHERE run_id=?").get(runId);
+        if (row) return normalizeIndexRun(project, row);
+      } finally { db.close(); }
+    } catch {}
+  }
+  return null;
+}
+
+function normalizeIndexRun(project: string, row: any) {
+  return { schema: "ccm-code-intelligence-index-run-v1", runId: row.run_id, project, mode: row.mode, state: row.state, reason: row.reason, totalFiles: Number(row.total_files || 0), processedFiles: Number(row.processed_files || 0), changedFiles: Number(row.changed_files || 0), removedFiles: Number(row.removed_files || 0), failedFiles: Number(row.failed_files || 0), startedAt: row.started_at, completedAt: row.completed_at, errorSummary: row.error_summary, generation: Number(row.generation || 0), contentStored: false };
+}
+
+export function listCodeIntelligenceIndexRuns(project: string, limit = 20) {
+  const dbFile = path.join(STORE_ROOT, safeId(project), "index.sqlite");
+  if (!fs.existsSync(dbFile)) return [];
+  const db = openDatabase(project);
+  try { return (db.prepare("SELECT * FROM index_runs ORDER BY started_at DESC LIMIT ?").all(Math.max(1, Math.min(100, limit))) as any[]).map(row => normalizeIndexRun(project, row)); }
+  finally { db.close(); }
+}
+
+export function listCodeIntelligenceFiles(project: string, input: { cursor?: string; limit?: number; language?: string; query?: string } = {}) {
+  projectRoot(project);
+  const dbFile = path.join(STORE_ROOT, safeId(project), "index.sqlite");
+  if (!fs.existsSync(dbFile)) return { files: [], total: 0, nextCursor: "", truncated: false, contentStored: false };
+  const offset = Math.max(0, Number.parseInt(String(input.cursor || "0"), 10) || 0);
+  const limit = Math.max(1, Math.min(500, Number(input.limit || 200)));
+  const language = String(input.language || "").trim();
+  const query = String(input.query || "").trim().toLowerCase();
+  const db = openDatabase(project);
+  try {
+    let rows = db.prepare("SELECT path,language,server_id,size,indexed_at FROM files ORDER BY path").all() as any[];
+    rows = rows.filter(row => (!language || row.language === language) && (!query || String(row.path).toLowerCase().includes(query)));
+    const selected = rows.slice(offset, offset + limit).map(row => ({ path: row.path, language: row.language, serverId: row.server_id, size: Number(row.size || 0), indexedAt: row.indexed_at }));
+    return { files: selected, total: rows.length, nextCursor: offset + selected.length < rows.length ? String(offset + selected.length) : "", truncated: offset + selected.length < rows.length, contentStored: false };
+  } finally { db.close(); }
+}
+
+export function readCodeIntelligenceSource(project: string, requestedPath: string, line = 1, context = 40) {
+  const root = projectRoot(project);
+  const absolute = path.resolve(root, String(requestedPath || "").replace(/\\/g, "/"));
+  const relativePath = relative(root, absolute);
+  if (!relativePath || relativePath.startsWith("../") || path.isAbsolute(relativePath)) throw new Error("源码位置越过项目边界");
+  const stat = fs.statSync(absolute);
+  if (!stat.isFile()) throw new Error("源码文件不存在");
+  if (stat.size > MAX_FILE_BYTES) throw new Error("源码文件超过4MB安全预览上限");
+  const buffer = fs.readFileSync(absolute);
+  if (buffer.includes(0)) throw new Error("二进制文件无法预览");
+  const text = buffer.toString("utf8");
+  const rows = text.split(/\r?\n/);
+  const targetLine = Math.max(1, Math.min(rows.length || 1, Number(line || 1)));
+  const radius = Math.max(5, Math.min(200, Number(context || 40)));
+  const startLine = Math.max(1, targetLine - radius);
+  const endLine = Math.min(rows.length, targetLine + radius);
+  const selected = rows.slice(startLine - 1, endLine).map((value, index) => ({ line: startLine + index, text: value }));
+  const repoStateIdentity = captureRepoStateIdentity(root, [relativePath]);
+  return { schema: "ccm-code-intelligence-source-preview-v1", project, path: relativePath, targetLine, startLine, endLine, totalLines: rows.length, lines: selected, revision: hash(buffer), repoStateIdentity, contentStored: false };
 }
 
 export function stopCodeIntelligence() {

@@ -200,6 +200,19 @@ const openGlobalChangesTab = () => {
 const handleGlobalTaskAction = async (msg, action) => {
   const card = getGlobalTaskCard(msg)
   try {
+    if (action.kind === 'open_target_session') {
+      const taskId = action.task_id || action.taskId || action.link?.taskId
+      if (!taskId) throw new Error('目标任务没有可定位的任务 ID')
+      const data = await requestJson(`/api/tasks/${encodeURIComponent(taskId)}/conversation-links`)
+      const link = (data.links || []).find(item => item.relation === 'target')
+      if (!link?.available) throw new Error(link?.unavailableReason || '目标自动化会话不存在或无权访问')
+      const target = link.scope === 'group'
+        ? { tab: 'groups', groupId: link.scopeId, groupSessionId: link.exactSessionId, messageId: link.messageId || '', taskId }
+        : { tab: 'projects', project: link.scopeId, sessionId: link.exactSessionId, messageId: link.messageId || '', taskId }
+      emit('set-navigation', target)
+      emit('switch-tab', target.tab)
+      return
+    }
     if (action.kind === 'view_changes') {
       openGlobalCodeChangeDrawer(msg, card, action)
       return
@@ -346,6 +359,8 @@ const handleGlobalTaskAction = async (msg, action) => {
         mission_id: missionId,
         operation,
         actor: 'global-agent-task-card',
+        expected_revision: card?.revision,
+        generation: card?.generation,
         ...extra,
       })
       applyGlobalMissionPayload(msg, data)
@@ -377,6 +392,19 @@ const handleGlobalTaskAction = async (msg, action) => {
       chatInput.value = card?.goal || card?.title || '重新执行这个全局任务'
       await nextTick()
       return sendMessage()
+    }
+    if (action.kind === 'recheck') {
+      if (missionId) return controlMission('resume', { reason: '用户从执行记录请求重新核验' })
+      toast.info('当前任务没有可重新核验的任务身份')
+      return
+    }
+    if (action.kind === 'takeover') {
+      if (!missionId) return toast.info('当前任务没有可接管的任务身份')
+      return controlMission('takeover', { reason: '用户从执行记录人工接管' })
+    }
+    if (action.kind === 'resolve_permission') {
+      emit('switch-tab', 'tools-config')
+      return
     }
     if (action.kind === 'resume') {
       return controlMission('resume', { reason: '用户从全局任务卡恢复' })
@@ -504,7 +532,7 @@ const executeManagementAction = async (action) => {
         await postJson('/api/tasks/update', { id, status: 'pending', status_detail: '由全局 Agent恢复' })
         result = await postJson('/api/tasks/queue', { task_id: id })
       } else if (operation === 'continue') result = await postJson('/api/tasks/continue', { id, message: params.message || '由全局 Agent继续推进', auto_execute: true })
-      else if (operation === 'retry') result = await postJson('/api/tasks/retry', { id, reason: params.message || '由全局 Agent发起重试', auto_execute: true })
+      else if (operation === 'retry') result = await postJson('/api/tasks/retry', { id, reason: params.message || '由全局 Agent发起重试', auto_execute: true, expected_revision: params.expected_revision ?? params.revision, generation: params.generation })
       else if (operation === 'queue') result = await postJson('/api/tasks/queue', { task_id: id })
       else if (operation === 'delete') result = await postJson('/api/tasks/delete', { id })
     } else if (action.type === 'manage_tool') {

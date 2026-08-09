@@ -94,13 +94,20 @@ const loadProjects = async () => {
     const data = await projectsApi.list()
     projects.value = data.projects || []
     if (!selectedProject.value && projects.value.length) {
-      selectedProject.value = projects.value[0].name
+      const requested = localStorage.getItem('ccm:code-changes:target-project') || ''
+      selectedProject.value = projects.value.some(item => item.name === requested) ? requested : projects.value[0].name
       await loadGitStatus()
     }
   } catch (error) {
     statusError.value = error.message || '项目列表加载失败'
     toast.error(statusError.value)
   }
+}
+
+const handleCodeChangesTarget = event => {
+  const project = String(event?.detail?.project || '').trim()
+  if (!project || !projects.value.some(item => item.name === project)) return
+  void changeProject(project)
 }
 
 const resetDiff = () => {
@@ -475,8 +482,8 @@ const openReplay = task => {
   window.dispatchEvent(new CustomEvent('trace-replay-target', { detail: target }))
 }
 
-onMounted(loadProjects)
-onBeforeUnmount(() => { statusController?.abort(); contextController?.abort(); diffController?.abort() })
+onMounted(() => { window.addEventListener('ccm-code-changes-target', handleCodeChangesTarget); void loadProjects() })
+onBeforeUnmount(() => { window.removeEventListener('ccm-code-changes-target', handleCodeChangesTarget); statusController?.abort(); contextController?.abort(); diffController?.abort() })
 </script>
 
 <template>

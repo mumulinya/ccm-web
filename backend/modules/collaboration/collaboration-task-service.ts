@@ -591,6 +591,24 @@ function createTaskWithScopedIdentity(task: any) {
   // Public production routes validate supplied session ids before task creation. Preserve
   // existing persisted/internal ids here so historical tasks can still be recovered.
   const taskProjectSessionId = String(projectSession?.sessionId || requestedProjectSessionId || "");
+  const sourceConversationRef = task.source_conversation_ref || task.sourceConversationRef || null;
+  const targetConversationRef = task.target_conversation_ref || task.targetConversationRef || (taskGroupSessionId
+    ? {
+        scope: "group",
+        scopeId: taskGroupId,
+        exactSessionId: taskGroupSessionId,
+        messageId: task.target_message_id || task.targetMessageId || "",
+        title: compactMemoryText(task.title || "群聊任务", 80),
+      }
+    : taskProjectSessionId && requestedProject
+      ? {
+          scope: "project",
+          scopeId: requestedProject,
+          exactSessionId: taskProjectSessionId,
+          messageId: task.target_message_id || task.targetMessageId || "",
+          title: compactMemoryText(task.title || "项目任务", 80),
+        }
+      : null);
   const suppliedClientMessageId = compactFormText(task.client_message_id || task.clientMessageId || task.workflow_meta?.intake?.client_message_id, "");
   const clientMessageId = suppliedClientMessageId
     || (explicitIdempotencyKey
@@ -667,6 +685,9 @@ function createTaskWithScopedIdentity(task: any) {
     project_session_id: taskProjectSessionId || null,
     automation_task_source: automationTaskSource || null,
     automation_session_binding_snapshot: bindingResolution?.snapshot || null,
+    source_conversation_ref: sourceConversationRef,
+    target_conversation_ref: targetConversationRef,
+    target_message_id: task.target_message_id || task.targetMessageId || null,
     project_main_run_id: task.project_main_run_id || task.projectMainRunId || null,
     request_origin: task.request_origin || task.requestOrigin || task.workflow_meta?.intake?.source || "task-dispatch",
     origin_session_id: task.origin_session_id || task.originSessionId || taskGroupSessionId || task.project_session_id || task.projectSessionId || null,
@@ -1795,6 +1816,9 @@ export function retryTask(id: string, ctx: CollabCtx, reason = "", autoExecute =
   const current = loadTasks().find(t => t.id === id);
   if (!current) return { success: false, status: 404, error: "任务不存在" };
   if (current.status === "done") return { success: false, status: 409, error: "已完成任务不能重试" };
+  if (String(current.acceptance_state || current.status || "").toLowerCase() === "recovery_required") {
+    return { success: false, status: 409, code: "TASK_RECOVERY_REVIEW_REQUIRED", error: "当前任务存在不确定副作用，只能先重新核验或人工接管，不能直接重跑" };
+  }
   const providerCircuitGate = require("./provider-task-circuit-breaker").getTaskProviderCircuitGate(current);
   if (providerCircuitGate.blocked) {
     const message = require("./provider-task-circuit-breaker").formatTaskProviderCircuitMessage(providerCircuitGate.circuit);

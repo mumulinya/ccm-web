@@ -15,6 +15,9 @@ import {
 } from "./internal-mcp-runtime";
 
 export const AGENT_COMMUNICATION_MCP_SERVER_NAME = "ccm__agent_communication";
+export const AGENT_COMMUNICATION_ACK_MCP_TOOL_ALIASES = [
+  "mcp__ccm__agent_communication__acknowledge_assignment",
+];
 const terminal = new Set(["completed", "done", "failed", "cancelled", "archived"]);
 
 function exactSessionId(context: InternalMcpTaskContext) {
@@ -69,13 +72,14 @@ const tools = [
 function result(value: any, isError = false) { return { content: [{ type: "text", text: JSON.stringify(value) }], isError }; }
 
 function identity(context: InternalMcpTaskContext, message: any) {
+  const signedCommunicationIdentity = !!context.communicationMessageId;
   return {
     taskId: context.taskId,
     workItemId: message?.workItemId || context.taskId,
     exactSessionId: exactSessionId(context),
-    generation: Number(message?.generation || context.nativeGeneration || 0),
-    attempt: Number(message?.attempt || 1),
-    leaseId: String(message?.leaseId || ""),
+    generation: Number(signedCommunicationIdentity ? context.communicationGeneration : message?.generation || context.nativeGeneration || 0),
+    attempt: Number(signedCommunicationIdentity ? context.communicationAttempt : message?.attempt || 1),
+    leaseId: String(signedCommunicationIdentity ? context.communicationLeaseId : message?.leaseId || ""),
     senderAgentId: senderAgentId(context),
     receiverAgentId: String(message?.senderAgentId || "ccm-main-agent"),
   };
@@ -84,8 +88,31 @@ function identity(context: InternalMcpTaskContext, message: any) {
 function messageFor(context: InternalMcpTaskContext, messageId: any) {
   const message = getAgentCommunication(String(messageId || ""), { includeEvents: false, includeReceipts: false });
   if (!message) throw new Error("Agent Communication消息不存在");
-  if (message.taskId !== context.taskId || message.exactSessionId !== exactSessionId(context) || message.receiverAgentId !== senderAgentId(context)) throw new Error("Agent Communication消息与当前任务会话不匹配");
+  assertAgentCommunicationMcpBinding(context, message, messageId);
   return message;
+}
+
+export function assertAgentCommunicationMcpBinding(context: InternalMcpTaskContext, message: any, messageId: any) {
+  if (message.taskId !== context.taskId || message.exactSessionId !== exactSessionId(context) || message.receiverAgentId !== senderAgentId(context)) throw new Error("Agent Communication消息与当前任务会话不匹配");
+  const strictIdentity = message.payload?.strictPreExecutionAck === true || message.payload?.strict_pre_execution_ack === true;
+  if (strictIdentity || context.communicationMessageId) {
+    if (!context.communicationMessageId || String(messageId || "") !== context.communicationMessageId) throw new Error("Agent Communication消息未绑定当前签名运行上下文");
+    if (Number(message.generation || 0) !== Number(context.communicationGeneration || 0)
+      || Number(message.attempt || 0) !== Number(context.communicationAttempt || 0)
+      || String(message.leaseId || "") !== String(context.communicationLeaseId || "")) {
+      throw new Error("Agent Communication执行身份已过期，请使用当前attempt重新启动");
+    }
+  }
+  return true;
+}
+
+export function runAgentCommunicationMcpBindingSelfTest() {
+  const message = { taskId: "task-1", exactSessionId: "session-1", receiverAgentId: "project-a", generation: 2, attempt: 3, leaseId: "lease-new", payload: { strictPreExecutionAck: true } };
+  const base: any = { taskId: "task-1", groupId: "", groupSessionId: "session-1", project: "project-a", role: "project-child-agent", workDir: "C:/tmp", baseWorkDir: "C:/tmp", communicationMessageId: "message-1", communicationGeneration: 2, communicationAttempt: 3, communicationLeaseId: "lease-new" };
+  let staleRejected = false;
+  try { assertAgentCommunicationMcpBinding({ ...base, communicationAttempt: 2, communicationLeaseId: "lease-old" }, message, "message-1"); }
+  catch { staleRejected = true; }
+  return { pass: assertAgentCommunicationMcpBinding(base, message, "message-1") === true && staleRejected };
 }
 
 function callTool(context: InternalMcpTaskContext, name: string, args: any) {

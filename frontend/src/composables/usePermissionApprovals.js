@@ -55,6 +55,9 @@ export function usePermissionApprovals({ scope, active, onApproved } = {}) {
         body: JSON.stringify({
           request_id: request.id,
           decision,
+          expected_revision: request.taskRevision ?? request.task_revision,
+          generation: request.taskGeneration ?? request.task_generation,
+          binding_checksum: request.bindingChecksum ?? request.binding_checksum,
           maxUses: 1,
           expiresInMinutes: 15,
         }),

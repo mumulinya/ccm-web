@@ -946,6 +946,8 @@ export const globalMissionTaskCard = (message = {}) => {
   const summary = mission.mission_summary || {}
   const missionDelivery = mission.delivery_summary || {}
   const supervisor = message.globalMissionSupervisor || {}
+  const missionNavigation = message.globalMissionNavigation || {}
+  const missionSafeDelivery = message.globalMissionDelivery || {}
   const finalReport = supervisor.final_report || mission.final_report || {}
   const deliveryReport = getUnifiedDeliveryReport(finalReport) || getUnifiedDeliveryReport(missionDelivery) || getUnifiedDeliveryReport(supervisor) || getUnifiedDeliveryReport(mission)
   const recoverySummary = buildRecoverySummary(mission) || buildRecoverySummary(supervisor)
@@ -965,6 +967,24 @@ export const globalMissionTaskCard = (message = {}) => {
       ? supervisorStatus
       : mission.status
   const basePresentation = taskPhasePresentation(presentationStatus, mission.status === 'done' ? 'completed' : 'executing')
+  const childAcceptanceStates = children.map(row => String(row.task?.acceptance_state || '').toLowerCase())
+  const childStatuses = children.map(row => String(row.task?.status || '').toLowerCase())
+  const supervisorOwnsPresentation = ['paused', 'waiting_user', 'manual_takeover', 'cancelled', 'failed', 'completed'].includes(String(supervisorStatus).toLowerCase())
+  const missionStagePresentation = mission.status === 'done' || supervisorOwnsPresentation
+    ? null
+    : childAcceptanceStates.some(state => ['reworking', 'implementation_rework'].includes(state))
+      ? { phase: 'reworking', label: '项目 Agent 正在返工', progress: 68 }
+      : childAcceptanceStates.some(state => ['test_agent_running', 'test_agent_recheck', 'verifying'].includes(state))
+        ? { phase: 'reviewing', label: 'TestAgent 正在独立验收', progress: 84 }
+        : children.length && childStatuses.every(status => status === 'done')
+          ? { phase: 'reviewing', label: '主 Agent 验收与总结', progress: 94 }
+          : childStatuses.some(status => ['running', 'in_progress'].includes(status))
+            ? { phase: 'executing', label: '项目 Agent 执行中', progress: 55 }
+            : children.length
+              ? { phase: 'queued', label: '任务已排队', progress: 20 }
+              : supervisorStatus
+                ? null
+                : { phase: 'planning', label: '正在制定计划', progress: 10 }
   const revisionNeedsReplan = lastContinuationKind === 'revise_goal'
     && mission.status !== 'done'
     && !['paused', 'waiting_user', 'manual_takeover', 'cancelled', 'failed', 'completed'].includes(String(supervisorStatus).toLowerCase())
@@ -972,7 +992,7 @@ export const globalMissionTaskCard = (message = {}) => {
     ? { phase: 'change_review', label: '等待整批审阅', progress: 95 }
     : revisionNeedsReplan
       ? { phase: 'planning', label: '重新规划中', progress: 35 }
-      : basePresentation
+      : missionStagePresentation || basePresentation
   const total = Number(summary.total || children.length || 0)
   const passed = Number(summary.passed || children.filter(row => row.task?.status === 'done').length || 0)
   const blocked = Number(summary.blocked || children.filter(row => ['blocked', 'failed'].includes(row.task?.status)).length || 0)
@@ -1049,9 +1069,10 @@ export const globalMissionTaskCard = (message = {}) => {
     ...(finalReport.file_changes || []),
     ...(finalReport.files_modified || finalReport.files || []),
     ...(deliveryReport?.files || []),
+    ...(missionSafeDelivery.files || []),
   ])
-  const verification = uniq(toList(finalReport.verification_results, finalReport.verification, deliveryReport?.verification))
-  const risks = uniq(toList(finalReport.risks, finalReport.remaining_items, deliveryReport?.risks))
+  const verification = uniq(toList(finalReport.verification_results, finalReport.verification, deliveryReport?.verification, missionSafeDelivery.verification))
+  const risks = uniq(toList(finalReport.risks, finalReport.remaining_items, deliveryReport?.risks, missionSafeDelivery.risks, missionSafeDelivery.remainingItems))
   const active = agents.filter(item => ['in_progress', 'running', 'pending'].includes(item.status)).map(item => `${item.name} 正在处理`)
   const actions = taskActions(presentation.phase, {
     viewChanges: files.length > 0,
@@ -1062,6 +1083,21 @@ export const globalMissionTaskCard = (message = {}) => {
     rollback: !!mission.rollback_available,
     saveKnowledge: true,
   })
+  const allTargetLinks = asArray(missionNavigation.targets)
+  const targetLinks = allTargetLinks.filter(link => link?.available !== false)
+  const unavailableTargetReasons = uniq(allTargetLinks
+    .filter(link => link?.available === false)
+    .map(link => `${link.title || (link.scope === 'group' ? '目标群聊' : '目标项目')}：${link.unavailableReason || '原会话无法定位'}`))
+  for (const link of targetLinks.slice(0, 4).reverse()) {
+    actions.unshift({
+      id: `open_target_session:${link.linkId || link.taskId || link.exactSessionId}`,
+      kind: 'open_target_session',
+      label: link.scope === 'group' ? '查看群聊任务' : '查看项目任务',
+      tone: 'outline',
+      task_id: link.taskId || '',
+      link,
+    })
+  }
   const requirementEpic = mission.workflow_type === 'requirement_epic' ? {
     schema: mission.decomposition_plan?.schema || mission.requirement_decomposition?.schema || 'ccm-requirement-decomposition-v1',
     content_hash: mission.requirement_content_hash || mission.decomposition_plan?.content_hash || '',
@@ -1173,6 +1209,9 @@ export const globalMissionTaskCard = (message = {}) => {
   return {
     version: 1,
     task_id: mission.id,
+    revision: Math.max(0, Number(mission.revision || 0)),
+    generation: Math.max(1, Number(mission.generation || mission.workflow_generation || 1)),
+    conversation_links: [missionNavigation.source, ...asArray(missionNavigation.targets)].filter(Boolean),
     title: mission.title || '跨项目开发任务',
     goal: mission.business_goal || mission.goal || mission.title || '',
     phase: presentation.phase,
@@ -1213,7 +1252,7 @@ export const globalMissionTaskCard = (message = {}) => {
     requirement_epic: requirementEpic,
     receipt_rework_summary: receiptReworkSummary,
     completed: uniq([passed ? `${passed}/${total || passed} 个执行目标已完成` : '', files.length ? `修改了 ${files.length} 个文件` : '', verification.length ? `${verification.length} 项检查已执行` : '']),
-    blockers: blocked ? [`${blocked} 个执行目标待补齐`] : risks.slice(0, 4),
+    blockers: blocked ? [`${blocked} 个执行目标待补齐`, ...unavailableTargetReasons].slice(0, 4) : uniq([...unavailableTargetReasons, ...risks]).slice(0, 4),
     next_action: nextAction,
     mainAgentDecision,
     main_agent_decision: mainAgentDecision,
@@ -1569,6 +1608,9 @@ export const projectExecutionTaskCard = (message = {}, project = '') => {
     next_action: nextAction,
     delivery: { headline: task.headline || (done ? projectDeliveryAccepted ? '项目执行成员已提交可验收结果。' : '项目执行成员已提交结果，仍需补齐验证或验收。' : ''), files, changes: asArray(message.fileChanges?.files), verification, risks: uniq([...risks, ...acceptanceRisks]), acceptance_passed: projectDeliveryAccepted && !failed },
     actions: [
+      ...((task.source_conversation_ref || task.sourceConversationRef || message.source_conversation_ref || message.sourceConversationRef)
+        ? [{ id: 'open_source_session', kind: 'open_source_session', label: '返回全局任务', tone: 'outline' }]
+        : []),
       ...asArray(task.actions),
       ...taskActions(presentation.phase, { viewChanges: files.length > 0, continue: !!taskId, cancel: !!taskId, retry: !!taskId, rollback: !!task.rollback_available, saveKnowledge: !message.streaming }),
       ...(!message.streaming && taskId ? [

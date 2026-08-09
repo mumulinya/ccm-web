@@ -401,6 +401,10 @@ function createAgentRunnerSupport(deps) {
             trustedMemoryEnvelopeChecksum: String(executionInfo?.trustedMemoryEnvelopeChecksum || ""),
             trustedMemoryEnvelopeSourceChecksum: String(executionInfo?.trustedMemoryEnvelopeSourceChecksum || ""),
             sessionLifecycleFence,
+            runtimeProgressContext: executionInfo?.runtimeProgressContext || executionInfo?.runtime_progress_context || null,
+            agentRuntimeStructuredProgressEnabled: executionInfo?.agentRuntimeStructuredProgressEnabled !== false,
+            agentProgressFallbackTimeoutMs: Math.max(15_000, Math.min(300_000, Number(executionInfo?.agentProgressFallbackTimeoutMs || 60_000))),
+            agentRawOutputRetentionMode: "ephemeral",
             toolScope: {
                 schema: "ccm-agent-runner-tool-scope-v1",
                 scope: groupId ? "group-project" : "project",
@@ -412,12 +416,14 @@ function createAgentRunnerSupport(deps) {
             runtimeToolSnapshotPath: runtimeToolPayload.runtimeToolSnapshotPath,
             runtimeToolSnapshotRequired: runtimeToolPayload.runtimeToolSnapshotRequired,
             skipVerification: executionInfo?.skipVerification === true,
-            cliAllowedTools: Array.from(new Set([
-                ...buildAgentCliAllowedTools(projectName, message),
-                ...(executionInfo?.memoryContextConsumptionReceiptRequired === true
-                    ? third_party_memory_snapshot_1.THIRD_PARTY_MEMORY_MCP_TOOL_ALIASES
-                    : []),
-            ])),
+            cliAllowedTools: Array.isArray(executionInfo?.cliAllowedTools)
+                ? Array.from(new Set(executionInfo.cliAllowedTools.map((item) => String(item || "").trim()).filter(Boolean)))
+                : Array.from(new Set([
+                    ...buildAgentCliAllowedTools(projectName, message),
+                    ...(executionInfo?.memoryContextConsumptionReceiptRequired === true
+                        ? third_party_memory_snapshot_1.THIRD_PARTY_MEMORY_MCP_TOOL_ALIASES
+                        : []),
+                ])),
             message,
             status: "pending",
             created_at: new Date().toISOString(),

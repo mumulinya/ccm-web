@@ -3,6 +3,10 @@
 import { createAgentRunnerSupport } from "./server-agent-runner-support";
 import { readThirdPartyMemoryUsageReports, THIRD_PARTY_MEMORY_MCP_TOOL_ALIASES } from "./integrations/third-party-memory-snapshot";
 import { updateProjectMemoryFromReceipt } from "./projects/memory";
+import { createAgentRuntimeStructuredEventParser } from "./agents/runtime-structured-events";
+import { disposeManagedCommandRawOutput } from "./agents/execution-kernel";
+import { projectAgentRuntimeStructuredEvent, startAgentProgressFallback } from "./system/agent-runtime-progress";
+import { redactSensitiveText } from "./core/credential-store";
 
 export function createAgentRunnerRuntime(deps: any) {
   const {
@@ -179,6 +183,7 @@ export function createAgentRunnerRuntime(deps: any) {
     let memoryContextConsumptionReceipt: any = null;
     let memoryContextConsumptionRecovery: any = null;
     let memoryReceiptRecoveryProviderOutput = "";
+    let stopRuntimeProgressFallback: null | (() => void) = null;
     if (durableDirectDispatch) {
       if (executionId) registerExternalRunnerRequest(executionId, durableDirectDispatch.id);
       workspaceTarget?.onRunnerRequestCreated?.(durableDirectDispatch.id);
@@ -186,6 +191,19 @@ export function createAgentRunnerRuntime(deps: any) {
   
     try {
       const runtimeVersionSnapshot = captureAgentRuntimeVersionSnapshot(agentType);
+      const runtimeProgressIdentity = workspaceTarget?.runtimeProgressContext || workspaceTarget?.runtime_progress_context || null;
+      const runtimeEventParser = runtimeProgressIdentity?.anchorMessageId && runtimeProgressIdentity?.agentRunId
+        ? createAgentRuntimeStructuredEventParser({
+          runtime: agentType,
+          runtimeVersion: runtimeVersionSnapshot?.version || runtimeVersionSnapshot?.runtimeVersion || "",
+          identity: runtimeProgressIdentity,
+          onEvent: projectAgentRuntimeStructuredEvent,
+        })
+        : null;
+      if (runtimeEventParser && workspaceTarget?.agentRuntimeStructuredProgressEnabled !== false) {
+        const seedEvent: any = { ...runtimeProgressIdentity, runtime: normalizeAgentRuntimeId(agentType), runtimeVersion: runtimeVersionSnapshot?.version || "", schema: "ccm-agent-runtime-event-v1", eventId: `seed-${runtimeProgressIdentity.agentRunId}`, eventType: "status", progressSource: "system_observed", confidence: "observed", status: "running", sourceEventChecksum: "seed", createdAt: new Date().toISOString(), contentStored: false };
+        stopRuntimeProgressFallback = startAgentProgressFallback(seedEvent, Number(workspaceTarget?.agentProgressFallbackTimeoutMs || 60_000));
+      }
       const providerMemoryChannel = prepareProviderMemoryChannel(agentType, message, {
         required: workspaceTarget?.trustedMemoryProviderChannelRequired === true,
         envelopeChecksum: workspaceTarget?.trustedMemoryEnvelopeChecksum || "",
@@ -198,6 +216,7 @@ export function createAgentRunnerRuntime(deps: any) {
       if (providerMemoryChannel.developerPrompt) fs.writeFileSync(memoryDeveloperInstructionsFile, providerMemoryChannel.developerPrompt, "utf-8");
       const cmd = buildAgentCommand(agentType, tmpMsg, {
         mcpConfigPath: workspaceTarget?.mcpConfigPath,
+        cliAllowedTools: Array.isArray(workspaceTarget?.cliAllowedTools) ? workspaceTarget.cliAllowedTools : undefined,
         appendSystemPromptFile: providerMemoryChannel.systemPrompt ? memorySystemPromptFile : "",
         developerInstructionsFile: providerMemoryChannel.developerPrompt ? memoryDeveloperInstructionsFile : "",
         ...(workspaceTarget?.agentSession || {}),
@@ -230,16 +249,19 @@ export function createAgentRunnerRuntime(deps: any) {
           if (durableDirectDispatch) markDirectAgentDispatchStarted(durableDirectDispatch.id, { runnerPid: pid, startedAt });
         },
         onStdout: (text) => {
-          if (durableDirectDispatch) appendDirectAgentDispatchTranscript(durableDirectDispatch.id, "stdout", { text });
+          runtimeEventParser?.push(text);
         },
         onStderr: (text) => {
-          if (durableDirectDispatch) appendDirectAgentDispatchTranscript(durableDirectDispatch.id, "stderr", { text });
+          // stderr remains ephemeral and is never interpreted as business progress.
         },
       });
+      runtimeEventParser?.flush();
       try { fs.unlinkSync(tmpMsg); } catch {}
       try { fs.unlinkSync(memorySystemPromptFile); } catch {}
       try { fs.unlinkSync(memoryDeveloperInstructionsFile); } catch {}
       const normalized = normalizeAgentCommandOutput(agentType, managed.stdout, { runtimeVersionSnapshot });
+      const rawOutputReceipt = disposeManagedCommandRawOutput(managed);
+      if (durableDirectDispatch) appendDirectAgentDispatchTranscript(durableDirectDispatch.id, "runtime_output_receipt", { bytes: rawOutputReceipt.bytes, checksum: rawOutputReceipt.checksum, truncated: !!managed.outputFile, removed: rawOutputReceipt.removed, contentStored: false });
       const nativeContinuationEvidence = buildNativeSessionContinuationEvidence({
         provider: normalizeAgentRuntimeId(agentType),
         runnerRequestId: durableDirectDispatch?.id || "",
@@ -299,6 +321,9 @@ export function createAgentRunnerRuntime(deps: any) {
             providerRuntimeVersionSnapshot: runtimeVersionSnapshot,
             trustedMemoryEnvelopeChecksum: workspaceTarget?.trustedMemoryEnvelopeChecksum || "",
             trustedMemoryEnvelopeSourceChecksum: workspaceTarget?.trustedMemoryEnvelopeSourceChecksum || "",
+            runtimeProgressContext: workspaceTarget?.runtimeProgressContext || workspaceTarget?.runtime_progress_context || null,
+            agentRuntimeStructuredProgressEnabled: workspaceTarget?.agentRuntimeStructuredProgressEnabled !== false,
+            agentProgressFallbackTimeoutMs: workspaceTarget?.agentProgressFallbackTimeoutMs || 60_000,
             providerWorkCompleted: true,
           }, async recoveryRequest => {
             fs.writeFileSync(memoryReceiptRecoveryPromptFile, recoveryRequest.prompt, "utf-8");
@@ -442,6 +467,7 @@ export function createAgentRunnerRuntime(deps: any) {
         });
         durableDirectDispatchCompleted = true;
       }
+      stopRuntimeProgressFallback?.();
       workspaceTarget?.onDone?.({
         runnerRequestId: durableDirectDispatch?.id || "",
         nativeSessionId: durableNativeSessionId,
@@ -473,6 +499,8 @@ export function createAgentRunnerRuntime(deps: any) {
       try { fs.unlinkSync(memoryReceiptRecoveryPromptFile); } catch {}
       return output;
     } catch (e: any) {
+      stopRuntimeProgressFallback?.();
+      disposeManagedCommandRawOutput(e);
       try { fs.unlinkSync(tmpMsg); } catch {}
       try { fs.unlinkSync(memorySystemPromptFile); } catch {}
       try { fs.unlinkSync(memoryDeveloperInstructionsFile); } catch {}
@@ -488,7 +516,7 @@ export function createAgentRunnerRuntime(deps: any) {
         completeDirectAgentDispatch(durableDirectDispatch.id, {
           success: false,
           error: String(e?.message || e),
-          output: String(e?.stdout || e?.stderr || e?.message || ""),
+          output: String(e?.message || "Agent执行失败").slice(0, 1000),
           exitCode: e?.exitCode,
           signal: e?.signal,
           nativeContinuationEvidence: failedDirectContinuationEvidence,
@@ -573,7 +601,7 @@ export function createAgentRunnerRuntime(deps: any) {
       }
       const output = e.killed || e.signal === "SIGTERM"
         ? `[${projectName}] Agent 响应超时，请稍后重试`
-        : `[${projectName}] Agent 错误: ${(e.stderr || e.message || "").substring(0, 200)}`;
+        : `[${projectName}] Agent 错误: ${redactSensitiveText(String(e.message || "第三方运行时执行失败")).replace(/[\r\n\t]+/g, " ").slice(0, 200)}`;
       workspaceTarget?.onDone?.({ runnerRequestId: durableDirectDispatch?.id || "", runnerStarted: durableDirectDispatchStarted, nativeSessionId: failedDirectContinuationEvidence.effectiveNativeSessionId, ...nativeContinuationDoneFields(failedDirectContinuationEvidence), memoryContextConsumptionRecovery: e?.memoryContextConsumptionRecovery || memoryContextConsumptionRecovery, isError: true, error: e?.message || String(e) });
       recordMetric(projectName, {
         ...metricContext,
@@ -608,10 +636,28 @@ export function createAgentRunnerRuntime(deps: any) {
       fs.mkdirSync(UPLOAD_DIR, { recursive: true });
     }
     fs.writeFileSync(tmpMsg, message, "utf-8");
-    const cmd = buildAgentCommand(agentType, tmpMsg, { mcpConfigPath: options.mcpConfigPath, ...(options.agentSession || {}) });
+    const cmd = buildAgentCommand(agentType, tmpMsg, {
+      mcpConfigPath: options.mcpConfigPath,
+      cliAllowedTools: Array.isArray(options.cliAllowedTools) ? options.cliAllowedTools : undefined,
+      ...(options.agentSession || {}),
+    });
     const taskId = String(options.taskId || options.executionId || `standalone-${projectName}-${Date.now()}`);
     const executionId = String(options.executionId || options.taskId || "");
     const launchRuntimeVersionSnapshot = captureAgentRuntimeVersionSnapshot(agentType);
+    const runtimeProgressIdentity = options.runtimeProgressContext || options.runtime_progress_context || null;
+    const runtimeEventParser = runtimeProgressIdentity?.anchorMessageId && runtimeProgressIdentity?.agentRunId
+      ? createAgentRuntimeStructuredEventParser({
+        runtime: agentType,
+        runtimeVersion: launchRuntimeVersionSnapshot?.version || launchRuntimeVersionSnapshot?.runtimeVersion || "",
+        identity: runtimeProgressIdentity,
+        onEvent: projectAgentRuntimeStructuredEvent,
+      })
+      : null;
+    let stopRuntimeProgressFallback: null | (() => void) = null;
+    if (runtimeEventParser && options.agentRuntimeStructuredProgressEnabled !== false) {
+      const seedEvent: any = { ...runtimeProgressIdentity, runtime: normalizeAgentRuntimeId(agentType), runtimeVersion: launchRuntimeVersionSnapshot?.version || "", schema: "ccm-agent-runtime-event-v1", eventId: `seed-${runtimeProgressIdentity.agentRunId}`, eventType: "status", progressSource: "system_observed", confidence: "observed", status: "running", sourceEventChecksum: "seed", createdAt: new Date().toISOString(), contentStored: false };
+      stopRuntimeProgressFallback = startAgentProgressFallback(seedEvent, Number(options.agentProgressFallbackTimeoutMs || 60_000));
+    }
     const metricContext = {
       scopeType: groupId ? "group" : "project",
       scopeId: groupId || projectName,
@@ -708,6 +754,9 @@ export function createAgentRunnerRuntime(deps: any) {
           sessionLifecycleFence: options.sessionLifecycleFence || options.session_lifecycle_fence || null,
           runtimeToolSnapshot: options.runtimeToolSnapshot || options.runtime_tool_snapshot || null,
           runtimeToolDispatchGate: options.runtimeToolDispatchGate || options.runtime_tool_dispatch_gate || options.dispatchGate || null,
+          runtimeProgressContext: options.runtimeProgressContext || options.runtime_progress_context || null,
+          agentRuntimeStructuredProgressEnabled: options.agentRuntimeStructuredProgressEnabled !== false,
+          agentProgressFallbackTimeoutMs: options.agentProgressFallbackTimeoutMs || 60_000,
           onRunnerRequestCreated: options.onRunnerRequestCreated,
           onToolEvent: (event: any) => pushWorkEvent(
             event.type === "tool_result" ? "tool_result" : "status",
@@ -919,18 +968,11 @@ export function createAgentRunnerRuntime(deps: any) {
         const text = chunk.toString("utf-8");
         if (!text) return;
         output += text;
-        if (durableGroupDispatch) appendDirectAgentDispatchTranscript(durableGroupDispatch.id, "stdout", { text });
-        const jsonSessionStream = ["codex", "cursor"].includes(normalizeAgentRuntimeId(agentType)) && !!options.agentSession?.persistSession;
-        if (!jsonSessionStream) {
-          pushWorkEvent("output", text);
-          writeSse(streamRes, { type: "chunk", agent: projectName, text });
-          broadcastPetSpeech(projectName, { role: "assistant", text, mode: "append", source: "group" });
-        }
+        runtimeEventParser?.push(text);
       });
   
       child.stderr.on("data", (chunk) => {
         const text = chunk.toString("utf-8");
-        if (durableGroupDispatch) appendDirectAgentDispatchTranscript(durableGroupDispatch.id, "stderr", { text });
         stderrOutput = (stderrOutput + text).slice(-12000);
         if (text.trim() && !output.trim()) {
           const runningText = `🧠 ${projectName} 运行中...`;
@@ -941,11 +983,20 @@ export function createAgentRunnerRuntime(deps: any) {
       });
   
       child.on("close", (code) => {
+        runtimeEventParser?.flush();
+        stopRuntimeProgressFallback?.();
         const failed = typeof code === "number" && code !== 0;
-        const text = failed ? (output.trim() || stderrOutput.trim() || `Agent 进程退出，exitCode=${code}`) : output.trim();
+        const text = failed
+          ? `第三方 Agent 执行失败（exitCode=${code ?? "unknown"}）：${redactSensitiveText(String(stderrOutput.trim() || "请展开安全错误摘要后重试")).replace(/[\r\n\t]+/g, " ").slice(0, 240)}`
+          : output.trim();
         finish(text, failed).catch((err) => finish(`❌ 错误: ${err.message}`, true));
       });
-      child.on("error", (err) => { finish(`❌ 错误: ${err.message}`, true).catch(() => {}); });
+      child.on("error", (err) => {
+        runtimeEventParser?.flush();
+        stopRuntimeProgressFallback?.();
+        const safeError = redactSensitiveText(String(err.message || "第三方 Agent 启动失败")).replace(/[\r\n\t]+/g, " ").slice(0, 240);
+        finish(`❌ 错误: ${safeError}`, true).catch(() => {});
+      });
     });
   }
   
@@ -986,7 +1037,11 @@ export function createAgentRunnerRuntime(deps: any) {
   
     const cmd = buildAgentCommand(agentType, tmpMsg, {
       mcpConfigPath: options.mcpConfigPath,
-      ...(options.memoryContextConsumptionReceiptRequired === true ? { cliAllowedTools: THIRD_PARTY_MEMORY_MCP_TOOL_ALIASES } : {}),
+      ...(Array.isArray(options.cliAllowedTools)
+        ? { cliAllowedTools: options.cliAllowedTools }
+        : options.memoryContextConsumptionReceiptRequired === true
+          ? { cliAllowedTools: THIRD_PARTY_MEMORY_MCP_TOOL_ALIASES }
+          : {}),
       ...taskAgentSessionOptions,
     });
   

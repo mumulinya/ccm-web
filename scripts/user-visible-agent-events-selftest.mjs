@@ -13,9 +13,12 @@ const projections = require('../ccm-package/dist/system/user-visible-agent-proje
 const taskStages = require('../ccm-package/dist/system/task-execution-stage-projection.js')
 const providerTools = require('../ccm-package/dist/system/provider-native-tools.js')
 const replyStyle = require('../ccm-package/dist/agents/conversational-reply-style.js')
+const runtimeEvents = require('../ccm-package/dist/agents/runtime-structured-events.js')
 
 const builtIn = events.runUserVisibleAgentEventSelfTest()
 assert.equal(builtIn.pass, true, JSON.stringify(builtIn, null, 2))
+const runtimeBuiltIn = runtimeEvents.runAgentRuntimeStructuredEventSelfTest()
+assert.equal(runtimeBuiltIn.pass, true, JSON.stringify(runtimeBuiltIn, null, 2))
 
 const identity = { scope: 'project', scopeId: 'demo', exactSessionId: 'session-visible-1', generation: 2 }
 const progress = events.appendAssistantProgress({
@@ -57,6 +60,7 @@ const listed = events.listUserVisibleAgentEvents({ ...identity, cursor: 0, limit
 assert.equal(listed.events.length, 3, '进度和工具事件必须持久化，重复进度按里程碑幂等去重')
 assert.equal(progress.eventType, 'assistant_progress')
 assert.equal(progress.detail?.progress?.text, '我先定位相关代码和配置，再根据结果继续判断。')
+assert.match(progress.detail?.progress?.batchId || '', /^batch_[a-f0-9]{24}$/, '进度说明必须绑定稳定工具批次')
 assert.equal(started.sequence, 2)
 assert.equal(completed.sequence, 3)
 assert.equal(listed.nextCursor, 3)
@@ -144,6 +148,8 @@ const normalizedAgentEvent = events.normalizeUserVisibleAgentEvent({
   eventId: 'visible-agent-progress',
   eventType: 'agent_progress',
   agentRunId: 'acm-safe-id',
+  anchorMessageId: 'assistant-message-safe-id',
+  originMessageId: 'global-origin-safe-id',
   parallelGroupId: 'agent-batch-safe-id',
   display: { title: 'smart-live-ui · Codex', status: 'waiting' },
   detail: {
@@ -153,6 +159,8 @@ const normalizedAgentEvent = events.normalizeUserVisibleAgentEvent({
   },
 }, 1)
 assert.equal(normalizedAgentEvent.agentRunId, 'acm-safe-id')
+assert.equal(normalizedAgentEvent.anchorMessageId, 'assistant-message-safe-id')
+assert.equal(normalizedAgentEvent.originMessageId, 'global-origin-safe-id')
 assert.equal(normalizedAgentEvent.detail?.agentDisplay?.projectName, 'smart-live-ui')
 assert.equal(normalizedAgentEvent.detail?.agentDisplay?.attempt, 2)
 assert.equal(normalizedAgentEvent.detail?.agentDisplay?.queuePosition, 3)
@@ -160,6 +168,21 @@ assert.equal(normalizedAgentEvent.detail?.executionStage?.kind, 'project_executi
 assert.equal(normalizedAgentEvent.detail?.executionStage?.activeDurationMs, 9000)
 assert.deepEqual(normalizedAgentEvent.detail?.fileChanges, [{ path: 'src/admin.ts', project: 'smart-live-ui', additions: 12, deletions: 3 }])
 assert.equal(JSON.stringify(normalizedAgentEvent).includes('SOURCE_DIFF_SENTINEL'), false, '源码Diff不得写入用户可见事件账本')
+const guardedFailure = events.normalizeUserVisibleAgentEvent({
+  ...identity,
+  eventId: 'guarded-failure-actions',
+  eventType: 'agent_failed',
+  taskId: 'task-guarded',
+  display: { title: 'Codex', status: 'failed', summary: '执行失败' },
+  detail: {
+    availableActions: [
+      { id: 'recheck', kind: 'recheck', label: '重新核验', enabled: true, revision: 7, generation: 2, bindingChecksum: 'safe-binding' },
+      { id: 'unsafe', kind: 'arbitrary_write', label: '危险操作', enabled: true },
+    ],
+  },
+})
+assert.deepEqual(guardedFailure.detail?.availableActions?.map(action => action.kind), ['recheck'], '前端只能收到后端白名单内的失败操作')
+assert.equal(guardedFailure.detail?.availableActions?.[0]?.revision, 7)
 const cappedFileEvent = events.normalizeUserVisibleAgentEvent({
   ...identity,
   eventId: 'visible-files-cap',
@@ -250,6 +273,14 @@ assert.match(progressTranscriptSource, /completionFilesVisible/, '文件变更�
 assert.match(progressTranscriptSource, /产生了.*未验收改动/, '失败或阻塞终态必须使用未验收改动警告语义')
 assert.match(progressTranscriptSource, /requirementPlan/, '统一执行流组件必须展示用户需求实施计划')
 assert.match(progressTranscriptSource, /cc-requirement-plan/, '需求实施计划必须使用独立的可折叠用户界面')
+assert.match(progressTranscriptSource, /batchId|__progressBatch/, '说明文字必须与对应工具批次精确绑定')
+assert.match(progressTranscriptSource, /sessionStorage/, '展开状态必须按会话消息保存在浏览器会话存储')
+assert.match(progressTranscriptSource, /搜索工具、项目、文件或失败原因/, '长执行记录必须支持当前消息内搜索')
+assert.match(progressTranscriptSource, /availableActions/, '失败操作必须来自后端授权动作')
+assert.match(progressTranscriptSource, /freshness === 'drifted'/, '权威结果变化必须给出漂移提示')
+const pinnedScrollSource = fs.readFileSync(new URL('../frontend/src/composables/usePinnedScroll.js', import.meta.url), 'utf8')
+assert.match(pinnedScrollSource, /pendingUpdates/, '用户离开底部时必须累计新进度')
+assert.match(pinnedScrollSource, /threshold = options\.threshold \|\| 120/, '自动跟随底部阈值必须为120px')
 
 const frontendExecution = await import('../frontend/src/utils/agentExecutionEvents.js')
 const at = offset => new Date(Date.UTC(2026, 7, 9, 10, 0, offset)).toISOString()

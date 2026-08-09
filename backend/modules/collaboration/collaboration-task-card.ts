@@ -31,6 +31,7 @@ import {
 import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
+import { buildTaskConversationLinks } from "../../system/task-conversation-links";
 import {
   spawnSync,
 } from "child_process";
@@ -1248,10 +1249,16 @@ export function buildUserChangeSummary(task: any, summary: any = {}, workers: an
 
 export function buildUserTaskActions(task: any, phase: string, executions: any[]) {
   const actions: any[] = [];
+  const conversationLinks = buildTaskConversationLinks(task);
+  const sourceLink = conversationLinks?.links?.find((item: any) => item.relation === "source" && item.available);
+  if (sourceLink) actions.push({ id: "open_source_session", label: "返回全局任务", kind: "open_source_session", tone: "outline" });
   const completed = String(task?.status || "") === "done" && hasStrongTaskAcceptanceEvidence(task, executions, task?.delivery_summary || {});
   const stopped = ["cancelled", "reverted"].includes(String(task?.status || "")) || ["cancelled", "reverted"].includes(phase);
-  const retryable = ["failed", "blocked", "environment_blocked", "recovery_required"].includes(phase)
-    || ["failed", "blocked"].includes(String(task?.status || ""));
+  const recoveryRequired = phase === "recovery_required" || task?.acceptance_state === "recovery_required";
+  const retryable = !recoveryRequired && (
+    ["failed", "blocked", "environment_blocked"].includes(phase)
+    || ["failed", "blocked"].includes(String(task?.status || ""))
+  );
   const terminal = completed || stopped || retryable;
   if (task?.intake_state === "awaiting_confirmation") {
     actions.push({ id: "confirm_plan", label: "确认执行", kind: "confirm_plan", tone: "primary" });
@@ -1268,7 +1275,10 @@ export function buildUserTaskActions(task: any, phase: string, executions: any[]
   if (task?.delivery_summary || task?.file_changes) actions.push({ id: "changes", label: "查看改动", kind: "view_changes", tone: "outline" });
   if (completed) actions.push({ id: "continue", label: "继续修改", kind: "continue", tone: "primary" });
   else if (!terminal) actions.push({ id: "supplement", label: "追加要求", kind: "continue", tone: "primary" });
-  if (task?.acceptance_state === "recovery_required") actions.push({ id: "resume_interrupted", label: "恢复任务", kind: "resume_interrupted", tone: "primary" });
+  if (recoveryRequired) {
+    actions.push({ id: "reconcile_delivery", label: "重新核验", kind: "reconcile_delivery", tone: "primary" });
+    actions.push({ id: "takeover", label: "人工接管", kind: "takeover", tone: "warning" });
+  }
   else if (retryable) actions.push({ id: "retry", label: "重新执行", kind: "retry", tone: "warning" });
   const checkpointIds = executions.flatMap((item: any) => Array.isArray(item.checkpointIds) ? item.checkpointIds : []).filter(Boolean);
   if (completed && checkpointIds.length) actions.push({ id: "rollback", label: "安全撤销", kind: "rollback", tone: "danger", checkpoint_ids: checkpointIds });
@@ -1578,11 +1588,16 @@ export function buildTaskCardView(task: any, executions: any[], sessions: any[])
   });
   const progressCheckpoints = displayStream.progress_checkpoints || displayStream.workchain?.progress_checkpoints || null;
   const runtimeStatus = buildTaskUserRuntimeStatus(task, { phase, statusDetail: summary.headline || task?.status_detail || "" });
+  const conversationLinks = buildTaskConversationLinks(task);
   return {
     version: 1,
     visible: visible && presentation !== "reply",
     presentation,
     task_id: task?.id || "",
+    revision: Math.max(0, Number(task?.revision || 0)),
+    generation: Math.max(1, Number(task?.generation || task?.workflow_generation || 1)),
+    conversation_links: conversationLinks?.links || [],
+    conversationLinks: conversationLinks?.links || [],
     task_thread_id: task?.task_thread_id || task?.taskThreadId || task?.root_task_id || task?.rootTaskId || task?.retry_of_task_id || task?.retryOfTaskId || task?.source_task_id || task?.sourceTaskId || task?.id || "",
     title: task?.title || "开发任务",
     goal: task?.business_goal || task?.goal || task?.title || "",

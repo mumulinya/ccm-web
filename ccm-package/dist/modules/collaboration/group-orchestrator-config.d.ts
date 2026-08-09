@@ -58,6 +58,10 @@ export declare function defaultOrchestratorConfig(): {
     agentMaxAttempts: number;
     agentMaxParallelPerProject: number;
     agentMaxParallelGlobal: number;
+    agentRuntimeStructuredProgressEnabled: boolean;
+    strictPreExecutionAckEnabled: boolean;
+    agentProgressFallbackTimeoutMs: number;
+    agentRawOutputRetentionMode: string;
     testAgentPlannerFallbackMode: string;
     testAgentIsolationMode: string;
     testAgentReadonlyCapabilityInjection: boolean;

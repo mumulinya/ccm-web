@@ -38,7 +38,11 @@ import {
   runManagedCommand,
   sanitizeExecutionEnv,
   transitionExecution,
+  disposeManagedCommandRawOutput,
+  cleanupOrphanedManagedCommandOutputs,
 } from "./execution-kernel";
+import { createAgentRuntimeStructuredEventParser } from "./runtime-structured-events";
+import { projectAgentRuntimeStructuredEvent, startAgentProgressFallback } from "../system/agent-runtime-progress";
 import { validateGroupSessionLifecycleRuntimeFence } from "../modules/collaboration/group-session-lifecycle-head";
 import {
   acknowledgeProviderMemoryChannelLaunch,
@@ -58,6 +62,7 @@ function ensureDirs() {
   for (const dir of [AGENT_RUNNER_DIR, REQUESTS_DIR, RESULTS_DIR, UPLOAD_DIR]) {
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   }
+  cleanupOrphanedManagedCommandOutputs();
 }
 
 function writeHeartbeat(status = "idle", detail = "") {
@@ -704,6 +709,8 @@ async function runRequest(file: string) {
   let memoryContextConsumptionRecovery: any = null;
   let memoryReceiptRecoveryProviderOutput = "";
   let runtimeSessionLifecycleValidation: any = null;
+  let runtimeEventParser: ReturnType<typeof createAgentRuntimeStructuredEventParser> | null = null;
+  let stopRuntimeProgressFallback: null | (() => void) = null;
   const lifecycleMonitor = initialSessionLifecycleValidation.required
     ? setInterval(() => {
         const validation = validateAgentRunnerSessionLifecycleFence(request);
@@ -748,6 +755,18 @@ async function runRequest(file: string) {
       error.code = "CCM_PROVIDER_MEMORY_CHANNEL_BLOCKED";
       throw error;
     }
+    const runtimeProgressIdentity = request.runtimeProgressContext || request.runtime_progress_context || null;
+    runtimeEventParser = runtimeProgressIdentity?.anchorMessageId && runtimeProgressIdentity?.agentRunId
+      ? createAgentRuntimeStructuredEventParser({
+        runtime: agentType,
+        runtimeVersion: String(runtimeVersionSnapshot?.version || ""),
+        identity: runtimeProgressIdentity,
+        onEvent: projectAgentRuntimeStructuredEvent,
+      }) : null;
+    if (runtimeEventParser && request.agentRuntimeStructuredProgressEnabled !== false) {
+      const seedEvent: any = { ...runtimeProgressIdentity, runtime: agentType, runtimeVersion: runtimeVersionSnapshot?.version || "", schema: "ccm-agent-runtime-event-v1", eventId: `seed-${runtimeProgressIdentity.agentRunId}`, eventType: "status", progressSource: "system_observed", confidence: "observed", status: "running", sourceEventChecksum: "seed", createdAt: new Date().toISOString(), contentStored: false };
+      stopRuntimeProgressFallback = startAgentProgressFallback(seedEvent, Number(request.agentProgressFallbackTimeoutMs || 60_000));
+    }
     const managed = await runManagedCommand({
       taskId,
       executionId,
@@ -756,8 +775,12 @@ async function runRequest(file: string) {
       timeoutMs,
       maxOutputBytes: Number(request.maxOutputBytes || 2 * 1024 * 1024),
       env: sanitizeExecutionEnv(getRuntimeExecutionEnv(agentType), request.envAllowlist || []),
+      onStdout: text => runtimeEventParser?.push(text),
     });
+    runtimeEventParser?.flush();
+    stopRuntimeProgressFallback?.();
     const normalizedOutput = normalizeAgentCommandOutput(agentType, String(managed.stdout || "").trim(), { runtimeVersionSnapshot });
+    const rawOutputReceipt = disposeManagedCommandRawOutput(managed);
     const nativeContinuationEvidence = buildNativeSessionContinuationEvidence({
       provider: agentType,
       runnerRequestId: request.id,
@@ -938,11 +961,14 @@ async function runRequest(file: string) {
       cliAllowedTools,
       effectiveCliAllowedTools: cliAllowedTools.join(","),
       runnerVerification,
+      rawOutputReceipt: { ...rawOutputReceipt, contentStored: false },
       runner: "node",
       completed_at: new Date().toISOString(),
     });
     markRequest(file, { status: "done", completed_at: new Date().toISOString() });
   } catch (error: any) {
+    runtimeEventParser?.flush();
+    disposeManagedCommandRawOutput(error);
     const failure = classifyExecutionFailure(error);
     const cancelled = failure.failureClass === "cancelled";
     const output = failure.failureClass === "timeout" ? "Agent 响应超时" : failure.message.slice(0, 4000);
@@ -974,6 +1000,7 @@ async function runRequest(file: string) {
     markRequest(file, { status: cancelled ? "cancelled" : "failed", completed_at: new Date().toISOString(), error: output });
     if (executionId) transitionExecution(executionId, cancelled ? "cancelled" : "failed", output, { failure, failureClass: failure.failureClass });
   } finally {
+    stopRuntimeProgressFallback?.();
     if (lifecycleMonitor) clearInterval(lifecycleMonitor);
     try { fs.unlinkSync(msgFile); } catch {}
     try { fs.unlinkSync(memorySystemPromptFile); } catch {}

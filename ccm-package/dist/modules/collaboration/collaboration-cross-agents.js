@@ -53,6 +53,7 @@ const collaboration_cross_agents_part_02_part_02_native_test_1 = require("./coll
 const execution_kernel_1 = require("../../agents/execution-kernel");
 const collaboration_agent_parallel_dispatch_1 = require("./collaboration-agent-parallel-dispatch");
 const agent_communication_v2_1 = require("../../system/agent-communication-v2");
+const agent_communication_mcp_1 = require("../../integrations/agent-communication-mcp");
 async function processCrossAgents(groupId, group, sourceProject, output, atMentions, configs, ctx, streamRes = null, depth = 0, seenMentions = new Set(), executionOrder = "parallel", planMessageId = "", taskId = "", deps) {
     const { addGroupLog, addTaskLog, admitChildTypedMemoryDelivery, appendAgentQaTrace, appendGroupMessage, appendTaskTimelineEvent, attachExecutionWorkspace, attachInvokedSkillsToReceipt, attachMemoryContextConsumptionChallenge, attachTaskAgentFinalDispatchPayloadGate, bindTaskAgentInvocationContext, bindTaskAgentInvocationMemoryDelivery, bindTaskAgentInvocationRunnerRequest, bindTaskAgentMemoryContextSnapshot, buildAckPreflightReview, buildAgentMemoryContextBundleWithManifestSelection, buildAgentMemoryPacket, buildAgentQaProtocolInstructions, buildAgentToolContext, buildChildAgentDevelopmentContract, buildChildAgentTaskText, buildChildAgentWorkerHandoff, buildChildAgentWorktreeNotice, buildCollaborationConflictPlan, orderMentionsForConflictPlan, buildCoordinatorCollaborationInstructions, buildCoordinatorReworkContinuationFallback, buildCoordinatorSharedFilesContext, buildFinalWorkerDispatchPayloadGate, buildGroupContextPacket, buildMemberCollaborationInstructions, buildNativeTestAgentPlanBlockedReceipt, buildNativeTestAgentReceipt, buildNativeTestAgentReviewSummary, buildNativeTestAgentRuntimeToolContext, buildPostReviewSpotCheckSummary, buildProjectExecutionBrief, buildProjectVerificationHints, buildRuntimeRecoveryCandidates, buildRuntimeRecoveryPrompt, buildTaskPreflightReasoning, buildTaskProviderSwitchRequests, buildWorkerContinuationHandoff, buildWorkflowMeta, checkTaskFailure, claimTaskWorkItemForAgent, commitChildTypedMemoryDelivery, commitTaskAgentSessionCapacityRevalidation, compactMemoryText, compactRuntimeToolAudit, completeTaskAgentInvocationEdge, coordinatorReworkRouteNeedsFreshVerifier, coordinatorReworkRouteRequiresStop, coordinatorReworkRouteUsesVerifier, createChildTypedMemoryDispatchWal, createExecutionCheckpoint, createMemoryContextConsumptionChallenge, dispatchTaskAgentInvocationEdge, emitAssignmentStatus, ensureExecution, escapeRegExp, evaluateAdvisoryPermissionBoundary, evaluateGreenContract, extractActionableMentions, extractAgentReceipt, extractRunnerVerificationEvidence, formatCollectedAgentOutput, formatNativeTestAgentOutput, formatNativeTestAgentPlanBlockedOutput, getAgentDependencyStateFromOutputs, getChildAgentIsolationMode, getCoordinatorActionMentions, getCoordinatorMember, getInitialWorkflowMeta, getMentionReworkRoute, getProjectAgentCapabilityProfile, getProjectExtraConfig, getReceiptAssignmentStatus, getRoutableMembers, getTaskAgentSessionOptions, getTaskById, getTestAgentHandoffPayload, getTestAgentHandoffProjectWorkDir, getTestAgentHandoffReviewSubject, getTestAgentHandoffWarnings, getWorkDirState, handleAgentQaRequests, inspectTaskAgentFinalDispatchReactiveCompactCircuitBreaker, isCoordinatorTestAgentName, isProviderPromptTooLongFailure, loadExecution, markChildTypedMemoryDispatchCommitted, markChildTypedMemoryDispatchStarted, markChildTypedMemoryRunnerReturned, memoryContextConsumptionReceiptFile, normalizeAgentRuntimeId, normalizeMentionTask, normalizePlanAssignments, openTaskAgentSession, prepareAgentRuntimeTools, prepareChildAgentWorkDir, prepareTaskAgentInvocationEdge, prepareTaskAgentSessionCapacityRevalidation, recordAgentRuntimeLifecycle, recordReplayRepairTimelineBindingsForMention, recordTaskAgentFinalDispatchReactiveCompactCircuitOutcome, recordTaskAgentMemoryContextDelivery, recordTaskAgentSessionTurn, recordWorkerContextProviderSwitchExecutionReceiptForCoordinator, recordWorkerContextProviderSwitchSessionBindingForCoordinator, recoverFinalWorkerDispatchPayload, renderGroupPostCompactDynamicContextDelta, renderGroupPostCompactInvokedSkillAttachments, renderGroupPostCompactPlanAttachment, renderMemoryContextForWorker, resolveMemberRuntime, runGroupOrchestrator, runMainAgentPostReviewSpotCheck, runTestAgentCliJob, runtimeToolDispatchBlockedMessage, runtimeToolDispatchBlockedReceipt, runtimeToolSnapshotFromAudit, shouldSwitchRuntime, stopWrongDirectionWorkerForCoordinatorRoute, stripAgentQaProtocolBlocks, summarizeNativeTestAgentExecutionPlan, summarizeReplayRepairTimelineBindingsForEvent, summarizeTaskAgentMemoryContextSnapshot, summarizeWorkerHandoffForUser, taskAgentInvocationMemoryOptions, taskAgentSessionLifecycleRunnerOptions, taskRequiresCodeChanges, taskRequiresVerification, transitionExecution, uniqueStrings, updateGroupMemory, updateGroupTaskInlineStatus, updateTask, updateTaskWorkItemFromReceipt, validateTestAgentHandoffRegisteredWorkDirs, verifyFinalWorkerDispatchPayloadGate, writeSse } = deps;
     const collectedOutputs = [];
@@ -766,6 +767,9 @@ async function executeMentionJob(mention, env) {
     const advisoryOnly = !!mention.advisoryOnly;
     const communicationAttempt = Math.max(1, memoryDeliveryAttemptSequence || 1);
     const communicationGeneration = Math.max(0, Number(sourceTask?.agent_communication_generation || sourceTask?.generation || 0));
+    const communicationPolicy = (0, agent_communication_v2_1.readAgentCommunicationPolicy)(sourceTask?.contextPolicy?.effective || sourceTask?.context_policy?.effective || sourceTask?.context_policy_effective || {});
+    const targetAnchorMessageId = String(sourceTask?.target_message_id || sourceTask?.targetMessageId || `task-message:${taskId}:${targetName}`);
+    const originMessageId = String(sourceTask?.origin_message_id || sourceTask?.originMessageId || sourceTask?.source_message_id || sourceTask?.sourceMessageId || "");
     const communicationDispatchInput = {
         taskId,
         workItemId: laneExecutionId || `${taskId}--${targetName}`,
@@ -789,6 +793,9 @@ async function executeMentionJob(mention, env) {
             worktreeRef: preparedWorkDir.mode === "worktree" ? preparedWorkDir.worktreePath || preparedWorkDir.workDir : "",
             advisoryOnly,
             verificationOnly: nativeTestAgentDispatch,
+            anchorMessageId: targetAnchorMessageId,
+            originMessageId,
+            strictPreExecutionAck: communicationPolicy.strictPreExecutionAckEnabled === true,
         },
         policy: sourceTask?.contextPolicy?.effective || sourceTask?.context_policy?.effective || sourceTask?.context_policy_effective || {},
     };
@@ -899,6 +906,12 @@ async function executeMentionJob(mention, env) {
             memorySnapshotChecksum: thirdPartyMemorySnapshot?.checksum || "",
             boundaryGeneration: thirdPartyMemorySnapshot?.boundaryGeneration || 0,
             nativeGeneration: thirdPartyMemorySnapshot?.nativeGeneration || 0,
+            communicationMessageId: communicationEnvelope?.messageId || "",
+            communicationGeneration: communicationEnvelope?.generation || 0,
+            communicationAttempt: communicationEnvelope?.attempt || 0,
+            communicationLeaseId: communicationEnvelope?.leaseId || "",
+            anchorMessageId: targetAnchorMessageId,
+            originMessageId,
             requestText: childTaskText,
             memoryReadBudgetTokens: thirdPartyMemorySnapshot?.autoCompactThreshold || 0,
         });
@@ -2330,6 +2343,44 @@ async function executeMentionJobTryA(mention, env) {
                     senderAgentId: communicationEnvelope.receiverAgentId,
                     receiverAgentId: communicationEnvelope.senderAgentId,
                 } : null;
+                const currentCommunication = communicationEnvelope?.messageId
+                    ? (0, agent_communication_v2_1.getAgentCommunication)(communicationEnvelope.messageId, { includeEvents: false, includeReceipts: false })
+                    : null;
+                const communicationPolicy = (0, agent_communication_v2_1.readAgentCommunicationPolicy)(sourceTask?.contextPolicy?.effective || sourceTask?.context_policy?.effective || sourceTask?.context_policy_effective || {});
+                const targetAnchorMessageId = String(currentCommunication?.payload?.anchorMessageId || currentCommunication?.payload?.anchor_message_id || responseMessageId || `task-message:${taskId}:${targetName}`);
+                const originMessageId = String(currentCommunication?.payload?.originMessageId || currentCommunication?.payload?.origin_message_id || "");
+                if (communicationEnvelope?.messageId && communicationPolicy.strictPreExecutionAckEnabled === true) {
+                    (0, agent_communication_v2_1.markAgentCommunicationRunnerStarted)(communicationEnvelope.messageId, { runtime: activeRuntime, runnerKind: "ack_preflight", summary: "正在进行执行前ACK预检" });
+                    const preflightSnapshot = tWorkDir ? ctx.createFileChangeSnapshot(tWorkDir) : null;
+                    await ctx.callAgent(targetName, [
+                        "[CCM执行前ACK预检]",
+                        `通信message_id：${communicationEnvelope.messageId}`,
+                        `任务目标：${String(childTaskText || "").slice(0, 500)}`,
+                        "禁止修改文件、运行构建、测试或执行其他业务工具。只能调用 ccm__agent_communication.acknowledge_assignment，成功后立即结束。",
+                    ].join("\n"), tWorkDir, activeRuntime, communicationPolicy.agentAckTimeoutMs, {
+                        groupId,
+                        allowedTools: toolContext.allowedTools,
+                        cliAllowedTools: agent_communication_mcp_1.AGENT_COMMUNICATION_ACK_MCP_TOOL_ALIASES,
+                        mcpConfigPath: runtimeToolContext.audit.mcpConfigPath,
+                        taskId,
+                        executionId: `${laneExecutionId}:ack-preflight`,
+                        taskAgentSessionId: activeTaskSession?.id || "",
+                        skipIndependentVerification: true,
+                        background: true,
+                        durableDispatch: false,
+                    });
+                    const preflightChanges = tWorkDir ? ctx.getFileChanges(targetName, preflightSnapshot) : null;
+                    if (Number(preflightChanges?.count || 0) > 0) {
+                        (0, agent_communication_v2_1.transitionAgentCommunication)(communicationEnvelope.messageId, "recovery_required", { eventType: "ack_preflight_side_effect", detail: { fileCount: preflightChanges.count, contentStored: false } });
+                        throw new Error("ACK预检产生了未授权文件副作用，已停止正式执行");
+                    }
+                    const acknowledged = (0, agent_communication_v2_1.getAgentCommunication)(communicationEnvelope.messageId, { includeEvents: false, includeReceipts: false });
+                    if (!acknowledged || !["acknowledged", "executing"].includes(String(acknowledged.state))) {
+                        if (acknowledged?.state === "runner_started")
+                            (0, agent_communication_v2_1.transitionAgentCommunication)(communicationEnvelope.messageId, "ack_timeout", { eventType: "ack_timeout", detail: { timeoutMs: communicationPolicy.agentAckTimeoutMs } });
+                        throw new Error("第三方 Agent 未在执行前完成真实ACK，正式Runner未启动");
+                    }
+                }
                 const attemptOutput = await ctx.callAgentForGroupStream(targetName, attemptPrompt, tWorkDir, activeRuntime, {
                     res: streamRes,
                     groupId,
@@ -2341,6 +2392,21 @@ async function executeMentionJobTryA(mention, env) {
                     executionId: laneExecutionId,
                     model: activeTaskSession?.modelId || "",
                     taskAgentSessionId: activeTaskSession?.id || "",
+                    runtimeProgressContext: communicationEnvelope ? {
+                        taskId: communicationEnvelope.taskId,
+                        workItemId: communicationEnvelope.workItemId,
+                        scope: communicationEnvelope.scope,
+                        scopeId: communicationEnvelope.scopeId,
+                        exactSessionId: communicationEnvelope.exactSessionId,
+                        anchorMessageId: targetAnchorMessageId,
+                        ...(originMessageId ? { originMessageId } : {}),
+                        agentRunId: communicationEnvelope.messageId,
+                        generation: communicationEnvelope.generation,
+                        attempt: communicationEnvelope.attempt,
+                        leaseId: communicationEnvelope.leaseId,
+                    } : null,
+                    agentRuntimeStructuredProgressEnabled: communicationPolicy.agentRuntimeStructuredProgressEnabled,
+                    agentProgressFallbackTimeoutMs: communicationPolicy.agentProgressFallbackTimeoutMs,
                     trustedMemoryProviderChannelRequired: activeMemoryContextSnapshot?.context?.memory_prompt_injection_proof?.trusted_envelope_bound === true,
                     trustedMemoryProviderAcknowledgementRequired: activeMemoryContextSnapshot?.context?.provider_memory_channel_acknowledgement_required === true,
                     memoryContextConsumptionReceiptRequired: activeMemoryContextSnapshot?.context?.memory_context_consumption_receipt_required === true,

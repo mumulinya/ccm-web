@@ -67,10 +67,11 @@ export function useProjectManager(props, emit) {
         await nextTick()
         sendMessage()
       } else if (target.sessionId) {
-        if (target.messageId || Number.isInteger(target.messageIndex) || target.keyword) {
+        if (target.messageId || target.taskId || Number.isInteger(target.messageIndex) || target.keyword) {
           await nextTick()
           const kw = String(target.keyword || '').toLowerCase()
           let idx = target.messageId ? messages.value.findIndex(m => String(m.id || m.message_id || m.messageId || '') === String(target.messageId)) : -1
+          if (idx < 0 && target.taskId) idx = messages.value.findIndex(m => String(m.task_id || m.taskExperience?.task_id || m.task?.id || '') === String(target.taskId))
           if (idx < 0 && Number.isInteger(target.messageIndex) && target.messageIndex >= 0 && target.messageIndex < messages.value.length) idx = target.messageIndex
           if (idx < 0 && kw) idx = messages.value.findIndex(m => (m.content || '').toLowerCase().includes(kw))
           if (idx !== -1) {
@@ -118,6 +119,10 @@ export function useProjectManager(props, emit) {
     scrollToBottom,
     attachResizeObserver: attachMessagesResizeObserver,
     detachResizeObserver: detachMessagesResizeObserver,
+    pendingUpdates: pendingProjectProgressCount,
+    notifyContentUpdate: notifyProjectProgress,
+    jumpToLatest: jumpToLatestProjectProgress,
+    resetPinnedScroll: resetProjectPinnedScroll,
   } = usePinnedScroll(messagesEl)
   const { navMessages } = useMessageNavigation(messages)
   const {
@@ -868,6 +873,15 @@ export function useProjectManager(props, emit) {
     if (!response.ok || payload.success === false || payload.error) throw new Error(payload.error || `操作失败 (${response.status})`)
     return payload
   }
+  const projectTaskMutationGuard = (card = {}) => {
+    const links = card.conversation_links || card.conversationLinks || []
+    const binding = links.find(item => item?.relation === 'target') || links.find(item => item?.relation === 'source') || {}
+    return {
+      expected_revision: Math.max(0, Number(card.revision || 0)),
+      generation: Math.max(1, Number(card.generation || card.workflow_generation || 1)),
+      ...(binding.bindingChecksum || binding.binding_checksum ? { binding_checksum: binding.bindingChecksum || binding.binding_checksum } : {}),
+    }
+  }
   const removeMessageFromCurrentSession = async (target) => {
     const index = messages.value.indexOf(target)
     if (index >= 0) messages.value.splice(index, 1)
@@ -886,10 +900,26 @@ export function useProjectManager(props, emit) {
     const isProjectRun = String(id || '').startsWith('pchat_')
     const isProjectMainTask = card?.orchestration_scope === 'project_session'
     const projectMainRunId = card?.project_main_run_id || msg?.projectRun?.id || ''
+    const mutationGuard = projectTaskMutationGuard(card)
     try {
+      if (action.kind === 'open_task_center') {
+        emit('switch-tab', 'tasks')
+        return
+      }
+      if (action.kind === 'open_source_session') {
+        const response = await fetch(`/api/tasks/${encodeURIComponent(id)}/conversation-links`)
+        const data = await response.json()
+        if (!response.ok || data.success === false) throw new Error(data.error || '无法读取原任务会话')
+        const link = (data.links || []).find(item => item.relation === 'source')
+        if (!link?.available) throw new Error(link?.unavailableReason || '原全局会话不存在或无权访问')
+        emit('set-navigation', { tab: 'global-agent', sessionId: link.exactSessionId, messageId: link.messageId || '', missionId: link.missionId || '' })
+        emit('switch-tab', 'global-agent')
+        return
+      }
       if (action.kind === 'confirm_plan') {
         const data = await postTaskAction('/api/projects/main-agent/plan-confirm', {
           task_id: id,
+          ...mutationGuard,
           project: currentProject.value,
           project_session_id: currentSession.value,
         })
@@ -907,6 +937,7 @@ export function useProjectManager(props, emit) {
           const data = await postTaskAction('/api/projects/main-agent/task-action', {
             action: 'revise_plan',
             task_id: id,
+            ...mutationGuard,
             project: currentProject.value,
             project_session_id: currentSession.value,
             feedback: requirement,
@@ -981,6 +1012,7 @@ export function useProjectManager(props, emit) {
         const data = await postTaskAction('/api/projects/main-agent/task-action', {
           action: action.kind,
           task_id: id,
+          ...mutationGuard,
           project: currentProject.value,
           project_session_id: currentSession.value,
           reason: action.kind === 'interrupt' ? '用户从项目任务卡停止当前执行' : undefined,
@@ -993,9 +1025,9 @@ export function useProjectManager(props, emit) {
         if (!id) return toast.info('当前项目直连执行暂未绑定任务，无法远程停止')
         if (!await confirmDialog(`确定永久取消任务“${card.title}”？历史会保留，但不会自动恢复。`)) return
         if (isProjectMainTask) {
-          await postTaskAction('/api/projects/main-agent/task-action', { action: 'cancel', task_id: id, project: currentProject.value, project_session_id: currentSession.value, reason: '用户从项目聊天任务卡永久取消' })
+          await postTaskAction('/api/projects/main-agent/task-action', { action: 'cancel', task_id: id, project: currentProject.value, project_session_id: currentSession.value, reason: '用户从项目聊天任务卡永久取消', ...mutationGuard })
         } else {
-          await postTaskAction(isProjectRun ? '/api/project-runs/cancel' : '/api/tasks/cancel', { id, reason: '用户从项目聊天任务卡永久取消' })
+          await postTaskAction(isProjectRun ? '/api/project-runs/cancel' : '/api/tasks/cancel', { id, reason: '用户从项目聊天任务卡永久取消', ...mutationGuard })
         }
       } else if (action.kind === 'retry') {
         if (isProjectRun || isProjectMainTask) {
@@ -1005,8 +1037,18 @@ export function useProjectManager(props, emit) {
           await sendMessage()
         } else {
           if (!id) return toast.info('当前任务没有可重试身份')
-          await postTaskAction('/api/tasks/retry', { id, reason: '用户从项目聊天任务卡重新执行', auto_execute: true })
+          await postTaskAction('/api/tasks/retry', { id, reason: '用户从项目聊天任务卡重新执行', auto_execute: true, ...mutationGuard })
         }
+      } else if (action.kind === 'recheck') {
+        if (!id) return toast.info('当前任务没有可核验身份')
+        await postTaskAction('/api/tasks/reconcile-delivery', { id, ...mutationGuard })
+      } else if (action.kind === 'takeover') {
+        if (!id) return toast.info('当前任务没有可接管身份')
+        if (!await confirmDialog(`确定人工接管“${card.title}”？系统会保留当前执行现场。`)) return
+        await postTaskAction('/api/tasks/update', { id, status: 'manual_takeover', acceptance_state: 'recovery_required', status_detail: '用户从项目会话人工接管', ...mutationGuard })
+      } else if (action.kind === 'resolve_permission') {
+        showTools.value = true
+        await loadProjectTools()
       } else if (action.kind === 'rollback') {
         if (!id) return toast.info('当前项目直连执行暂未绑定任务，无法安全撤销')
         if (!await confirmDialog(`确定安全撤销任务“${card.title}”的最近一轮改动？`)) return
@@ -1930,6 +1972,7 @@ export function useProjectManager(props, emit) {
     sessions, projectFeishuTargets, projectFeishuBindingSession, projectFeishuBindingOpen, projectFeishuBindingBusy,
     messages, messagesEl, chatInput, isMessagesPinnedToBottom, updateMessageScrollState,
     scrollToBottom, attachMessagesResizeObserver, detachMessagesResizeObserver, navMessages, codeChangeDrawer, openCodeChangeDrawer,
+    pendingProjectProgressCount, notifyProjectProgress, jumpToLatestProjectProgress, resetProjectPinnedScroll,
     openSingleFileChange, closeCodeChangeDrawer, slashNavigate, runProjectClientCommand, slash,
     chatFiles, diffViewer, pageInfo,
     agentOptions, loadAgentOptions, messageKeyMap, messageKeySeq, getMessageKey,

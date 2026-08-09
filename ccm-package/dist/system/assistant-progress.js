@@ -37,6 +37,7 @@ exports.normalizeAssistantProgressKind = normalizeAssistantProgressKind;
 exports.sanitizeAssistantProgressText = sanitizeAssistantProgressText;
 exports.buildAssistantProgressFallback = buildAssistantProgressFallback;
 exports.assistantProgressMilestoneChecksum = assistantProgressMilestoneChecksum;
+exports.assistantProgressBatchId = assistantProgressBatchId;
 exports.assistantProgressNarrationEnabled = assistantProgressNarrationEnabled;
 const crypto = __importStar(require("crypto"));
 const PROGRESS_KINDS = new Set([
@@ -103,7 +104,17 @@ function assistantProgressMilestoneChecksum(input) {
         text: input.text,
         modelCallIndex: Math.max(0, Number(input.modelCallIndex || 0)),
         relatedToolCallIds: [...new Set(input.relatedToolCallIds || [])].sort(),
+        batchId: String(input.batchId || "").trim(),
     })).digest("hex");
+}
+function assistantProgressBatchId(input) {
+    const toolIds = [...new Set(input.relatedToolCallIds || [])].filter(Boolean).sort();
+    return `batch_${crypto.createHash("sha256").update(JSON.stringify({
+        turnId: String(input.turnId || "turn").trim(),
+        generation: Math.max(0, Number(input.generation || 0)),
+        modelCallIndex: Math.max(0, Number(input.modelCallIndex || 0)),
+        toolIds,
+    })).digest("hex").slice(0, 24)}`;
 }
 function assistantProgressNarrationEnabled(config) {
     return config?.ccStyleAgentProgressNarrationEnabled !== false

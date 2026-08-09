@@ -27,6 +27,12 @@ export type TaskBoundInternalMcpInput = {
   memorySnapshotChecksum?: string;
   boundaryGeneration?: number;
   nativeGeneration?: number;
+  communicationMessageId?: string;
+  communicationGeneration?: number;
+  communicationAttempt?: number;
+  communicationLeaseId?: string;
+  anchorMessageId?: string;
+  originMessageId?: string;
   requestText?: string;
   memoryReadBudgetTokens?: number;
 };
@@ -51,6 +57,12 @@ export function buildTaskBoundInternalMcpServers(input: TaskBoundInternalMcpInpu
     memorySnapshotChecksum: input.memorySnapshotChecksum || "",
     boundaryGeneration: Number(input.boundaryGeneration || 0),
     nativeGeneration: Number(input.nativeGeneration || 0),
+    communicationMessageId: input.communicationMessageId || "",
+    communicationGeneration: Number(input.communicationGeneration || 0),
+    communicationAttempt: Math.max(0, Number(input.communicationAttempt || 0)),
+    communicationLeaseId: input.communicationLeaseId || "",
+    anchorMessageId: input.anchorMessageId || "",
+    originMessageId: input.originMessageId || "",
     requestText: input.requestText || "",
     memoryReadBudgetTokens: Number(input.memoryReadBudgetTokens || 0),
   };
@@ -124,6 +136,12 @@ export function buildProjectSessionBoundMemoryMcpServer(input: ProjectSessionBou
     memorySnapshotChecksum: input.memorySnapshotChecksum,
     boundaryGeneration: Number(input.boundaryGeneration || 0),
     nativeGeneration: Number(input.nativeGeneration || 0),
+    communicationMessageId: "",
+    communicationGeneration: 0,
+    communicationAttempt: 0,
+    communicationLeaseId: "",
+    anchorMessageId: "",
+    originMessageId: "",
     requestText: input.requestText || "",
     memoryReadBudgetTokens: Number(input.memoryReadBudgetTokens || 0),
   };

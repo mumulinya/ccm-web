@@ -1,6 +1,8 @@
 import type { IncomingMessage, ServerResponse } from "http";
 import type { UrlWithParsedQuery } from "url";
 import { sendJson } from "../../core/utils";
+import { loadTasks } from "../../core/db";
+import { validateTaskMutationGuard } from "../../system/task-conversation-links";
 import { resolveLocalAuthSession } from "../system/local-auth";
 import { loadGroups } from "./storage";
 import {
@@ -484,6 +486,10 @@ export function handleOrchestratorRoutes(
         const payload = body ? JSON.parse(body) : {};
         const taskId = String(payload.task_id || payload.taskId || payload.id || "");
         if (!taskId) return sendJson(res, { error: "缺少任务 ID" }, 400);
+        const task = loadTasks().find((item: any) => String(item?.id || "") === taskId);
+        if (!task) return sendJson(res, { error: "任务不存在" }, 404);
+        const guard = validateTaskMutationGuard(task, payload, { requireTarget: true });
+        if ("error" in guard) return sendJson(res, { success: false, error: guard.error, code: guard.code, ...guard.details }, guard.status);
         const result = deps.switchTaskExecutor(taskId, payload.runtime || payload.agent_type || payload.agentType, ctx, payload);
         if (!result.success) return sendJson(res, { error: result.error }, result.status || 400);
         sendJson(res, result);

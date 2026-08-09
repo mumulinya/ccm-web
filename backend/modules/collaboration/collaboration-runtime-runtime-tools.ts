@@ -616,6 +616,12 @@ export function prepareAgentRuntimeTools(
       memorySnapshotChecksum: options.memorySnapshotChecksum || "",
       boundaryGeneration: Number(options.boundaryGeneration || 0),
       nativeGeneration: Number(options.nativeGeneration || 0),
+      communicationMessageId: String(options.communicationMessageId || ""),
+      communicationGeneration: Number(options.communicationGeneration || 0),
+      communicationAttempt: Number(options.communicationAttempt || 0),
+      communicationLeaseId: String(options.communicationLeaseId || ""),
+      anchorMessageId: String(options.anchorMessageId || ""),
+      originMessageId: String(options.originMessageId || ""),
       requestText: options.requestText || "",
       memoryReadBudgetTokens: Number(options.memoryReadBudgetTokens || 0),
     })

@@ -168,6 +168,19 @@ export declare function retryTask(id: string, ctx: CollabCtx, reason?: string, a
     success: boolean;
     status: number;
     error: string;
+    code?: undefined;
+    reason?: undefined;
+    retry_after?: undefined;
+    remaining_ms?: undefined;
+    task?: undefined;
+    queued?: undefined;
+    queue_result?: undefined;
+    queue_status?: undefined;
+} | {
+    success: boolean;
+    status: number;
+    code: string;
+    error: string;
     reason?: undefined;
     retry_after?: undefined;
     remaining_ms?: undefined;
@@ -182,6 +195,7 @@ export declare function retryTask(id: string, ctx: CollabCtx, reason?: string, a
     reason: string;
     retry_after: any;
     remaining_ms: any;
+    code?: undefined;
     task?: undefined;
     queued?: undefined;
     queue_result?: undefined;
@@ -216,6 +230,7 @@ export declare function retryTask(id: string, ctx: CollabCtx, reason?: string, a
     };
     status?: undefined;
     error?: undefined;
+    code?: undefined;
     reason?: undefined;
     retry_after?: undefined;
     remaining_ms?: undefined;
