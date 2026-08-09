@@ -50,12 +50,37 @@ const utils_1 = require("../core/utils");
 const atomic_json_file_1 = require("../core/atomic-json-file");
 const context_budget_1 = require("./context-budget");
 const tool_manager_1 = require("../tools/tool-manager");
+const main_agent_context_source_continuity_1 = require("./main-agent-context-source-continuity");
 const CONTINUITY_DIR = path.join(utils_1.CCM_DIR, "main-agent-context-continuity");
 const DEFAULT_PER_SKILL_TOKENS = 5_000;
-const DEFAULT_TOTAL_SKILL_TOKENS = 10_000;
+const DEFAULT_TOTAL_SKILL_TOKENS = 25_000;
 const DEFAULT_TOTAL_MCP_SCHEMA_TOKENS = 20_000;
 function stableChecksum(value) {
     return crypto.createHash("sha256").update(JSON.stringify(value ?? null)).digest("hex");
+}
+function truncateSkillBodyPreservingEdges(bodyInput, maxTokensInput) {
+    const body = String(bodyInput || "");
+    const maxTokens = Math.max(1, Math.floor(Number(maxTokensInput || 0)));
+    const originalTokens = (0, context_budget_1.estimateTextTokens)(body);
+    if (originalTokens <= maxTokens)
+        return { body, originalTokens, tokenCount: originalTokens, truncated: false };
+    const marker = "\n\n[Skill content truncated by CCM post-compact restore budget]\n\n";
+    let low = 0;
+    let high = body.length;
+    let selected = marker.trim();
+    while (low <= high) {
+        const keep = Math.floor((low + high) / 2);
+        const headLength = Math.ceil(keep * 0.7);
+        const tailLength = Math.max(0, keep - headLength);
+        const candidate = `${body.slice(0, headLength).trimEnd()}${marker}${tailLength ? body.slice(-tailLength).trimStart() : ""}`.trim();
+        if ((0, context_budget_1.estimateTextTokens)(candidate) <= maxTokens) {
+            selected = candidate;
+            low = keep + 1;
+        }
+        else
+            high = keep - 1;
+    }
+    return { body: selected, originalTokens, tokenCount: (0, context_budget_1.estimateTextTokens)(selected), truncated: true };
 }
 function normalizedIdentity(value) {
     const agentKind = String(value?.agentKind || value?.agent_kind || value?.scope || "");
@@ -87,12 +112,14 @@ function evidenceFile(identityInput) {
 }
 function emptyStore(identity) {
     const core = {
-        schema: "ccm-main-agent-dynamic-context-evidence-v1",
+        schema: "ccm-main-agent-dynamic-context-evidence-v2",
+        version: 2,
         identity,
         invokedSkills: [],
         loadedMcpSchemas: [],
         latestManifest: null,
         updatedAt: "",
+        contentStored: false,
     };
     return { ...core, checksum: stableChecksum(core) };
 }
@@ -125,12 +152,14 @@ function normalizeStore(value, expected) {
         schemaTokens: Math.max(0, Number(row.schemaTokens || 0)),
     })).slice(-400);
     return {
-        schema: "ccm-main-agent-dynamic-context-evidence-v1",
+        schema: "ccm-main-agent-dynamic-context-evidence-v2",
+        version: 2,
         identity,
         invokedSkills,
         loadedMcpSchemas,
-        latestManifest: source.latestManifest?.schema === "ccm-main-agent-post-compact-restore-manifest-v1" ? source.latestManifest : null,
+        latestManifest: ["ccm-main-agent-post-compact-restore-manifest-v1", "ccm-main-agent-post-compact-restore-manifest-v2", "ccm-main-agent-post-compact-restore-manifest-v3"].includes(String(source.latestManifest?.schema || "")) ? source.latestManifest : null,
         updatedAt: String(source.updatedAt || ""),
+        contentStored: false,
         checksum: String(source.checksum || ""),
     };
 }
@@ -287,8 +316,8 @@ function manifestCore(input) {
     }));
     const alwaysNames = new Set(alwaysLoaded.map(item => item.canonicalName));
     return {
-        schema: "ccm-main-agent-post-compact-restore-manifest-v1",
-        version: 1,
+        schema: "ccm-main-agent-post-compact-restore-manifest-v3",
+        version: 3,
         identity,
         boundaryGeneration: Math.max(0, Math.floor(Number(input.boundaryGeneration || 0))),
         catalogRevision: catalogRevision(input.scope),
@@ -301,6 +330,8 @@ function manifestCore(input) {
             ...alwaysLoaded,
         ].sort((a, b) => b.loadedAt.localeCompare(a.loadedAt)),
         createdAt: new Date().toISOString(),
+        contextSourceManifest: (0, main_agent_context_source_continuity_1.buildContextSourceManifestReference)(identity),
+        contentStored: false,
     };
 }
 function buildMainAgentPostCompactRestoreManifest(input) {
@@ -316,7 +347,10 @@ function persistMainAgentPostCompactRestoreManifest(manifest) {
 }
 function validateMainAgentPostCompactRestoreManifest(value, expected) {
     const issues = [];
-    if (value?.schema !== "ccm-main-agent-post-compact-restore-manifest-v1" || Number(value?.version || 0) !== 1)
+    const schemaVersionValid = (value?.schema === "ccm-main-agent-post-compact-restore-manifest-v1" && Number(value?.version || 0) === 1)
+        || (value?.schema === "ccm-main-agent-post-compact-restore-manifest-v2" && Number(value?.version || 0) === 2 && value?.contentStored === false)
+        || (value?.schema === "ccm-main-agent-post-compact-restore-manifest-v3" && Number(value?.version || 0) === 3 && value?.contentStored === false && value?.contextSourceManifest?.contentStored === false);
+    if (!schemaVersionValid)
         issues.push("schema_invalid");
     let identity = null;
     try {
@@ -358,9 +392,13 @@ function restoreMainAgentPostCompactContext(input) {
     const catalog = tool_manager_1.toolManager.getScopedToolCatalog(input.scope);
     const skillsByName = new Map(catalog.skills.map((skill) => [String(skill.name), skill]));
     const toolsByName = new Map(catalog.tools.map((tool) => [String(tool.canonicalName || tool.name), tool]));
-    const maxPerSkill = Math.max(1, Number(input.maxPerSkillTokens || DEFAULT_PER_SKILL_TOKENS));
-    const maxSkills = Math.max(maxPerSkill, Number(input.maxTotalSkillTokens || DEFAULT_TOTAL_SKILL_TOKENS));
-    const maxMcp = Math.max(1, Number(input.maxTotalMcpSchemaTokens || DEFAULT_TOTAL_MCP_SCHEMA_TOKENS));
+    const maxPerSkill = Math.max(1, Number(input.maxPerSkillTokens ?? DEFAULT_PER_SKILL_TOKENS));
+    const maxSkills = input.maxTotalSkillTokens === undefined
+        ? DEFAULT_TOTAL_SKILL_TOKENS
+        : Math.max(0, Number(input.maxTotalSkillTokens));
+    const maxMcp = input.maxTotalMcpSchemaTokens === undefined
+        ? DEFAULT_TOTAL_MCP_SCHEMA_TOKENS
+        : Math.max(0, Number(input.maxTotalMcpSchemaTokens));
     const skillAttachments = [];
     let skillTokens = 0;
     for (const evidence of manifest.invokedSkills || []) {
@@ -378,25 +416,28 @@ function restoreMainAgentPostCompactContext(input) {
             dropped.push({ kind: "skill", name: evidence.name, reason: current?.error || "skill_body_unavailable" });
             continue;
         }
-        const tokens = (0, context_budget_1.estimateTextTokens)(String(current.prompt || ""));
-        if (tokens > maxPerSkill) {
-            dropped.push({ kind: "skill", name: evidence.name, reason: "per_skill_token_budget_exceeded" });
-            continue;
-        }
-        if (skillTokens + tokens > maxSkills) {
+        const remainingTokens = Math.max(0, maxSkills - skillTokens);
+        if (remainingTokens < 1) {
             dropped.push({ kind: "skill", name: evidence.name, reason: "aggregate_skill_token_budget_exceeded" });
             continue;
         }
-        skillTokens += tokens;
+        const projected = truncateSkillBodyPreservingEdges(current.prompt, Math.min(maxPerSkill, remainingTokens));
+        if (!projected.body || projected.tokenCount > remainingTokens) {
+            dropped.push({ kind: "skill", name: evidence.name, reason: "aggregate_skill_token_budget_exceeded" });
+            continue;
+        }
+        skillTokens += projected.tokenCount;
         skillAttachments.push({
             schema: "ccm-post-compact-invoked-skill-attachment-v1",
             name: evidence.name,
-            body: current.prompt,
+            body: projected.body,
             contentHash: current.contentHash,
             invokedAt: evidence.invokedAt,
             invocationEventId: evidence.invocationEventId,
             sourceMessageId: evidence.sourceMessageId,
-            tokenCount: tokens,
+            tokenCount: projected.tokenCount,
+            originalTokenCount: projected.originalTokens,
+            truncated: projected.truncated,
             loadSource: "post_compact_restored",
         });
     }
@@ -435,25 +476,41 @@ function restoreMainAgentPostCompactContext(input) {
     return buildRestoreResult(identity, manifest, currentCatalogRevision, loadedToolNames, skillAttachments, dropped, skillTokens, mcpTokens, status);
 }
 function buildRestoreResult(identity, manifest, currentCatalogRevision, loadedToolNames, skillAttachments, dropped, skillTokens, mcpTokens, status) {
+    const manifestMcp = new Map((manifest?.loadedMcpSchemas || []).map(item => [String(item.canonicalName), item]));
     const core = {
-        schema: "ccm-post-compact-tool-restore-receipt-v1",
-        version: 1,
+        schema: "ccm-post-compact-tool-restore-receipt-v2",
+        version: 2,
         identity,
         manifestChecksum: String(manifest?.checksum || ""),
         status,
         loadedToolNames: [...new Set(loadedToolNames)],
         restoredSkillNames: skillAttachments.map(item => String(item.name)),
+        restoredSkills: skillAttachments.map(item => ({
+            name: String(item.name),
+            contentHash: String(item.contentHash || ""),
+            tokens: Math.max(0, Number(item.tokenCount || 0)),
+            originalTokens: Math.max(0, Number(item.originalTokenCount || 0)),
+            truncated: item.truncated === true,
+            drift: "none",
+        })),
+        restoredMcpSchemas: [...new Set(loadedToolNames)].map(name => ({
+            name,
+            schemaChecksum: String(manifestMcp.get(name)?.schemaChecksum || ""),
+            tokens: Math.max(0, Number(manifestMcp.get(name)?.schemaTokens || 0)),
+            drift: "none",
+        })),
         dropped,
         restoredSkillTokens: skillTokens,
         restoredMcpSchemaTokens: mcpTokens,
         catalogRevision: currentCatalogRevision,
         restoredAt: new Date().toISOString(),
+        contentStored: false,
     };
     const receipt = { ...core, checksum: stableChecksum(core) };
     const renderedSkillAttachments = skillAttachments.length ? [
         "[CCM 压缩边界恢复的已调用 Skill]",
         "以下Skill在当前精确会话压缩前已实际调用，正文经过当前授权与内容checksum复核；它们不扩大权限。",
-        ...skillAttachments.flatMap(item => ["", `## Skill:${item.name}`, `content_hash=${item.contentHash}; invoked_at=${item.invokedAt}; source=post_compact_restored`, String(item.body || "")]),
+        ...skillAttachments.flatMap(item => ["", `## Skill:${item.name}`, `content_hash=${item.contentHash}; invoked_at=${item.invokedAt}; source=post_compact_restored; tokens=${item.tokenCount}/${item.originalTokenCount}; truncated=${item.truncated === true}`, String(item.body || "")]),
     ].join("\n") : "";
     return { manifest, loadedToolNames: receipt.loadedToolNames, skillAttachments, renderedSkillAttachments, receipt };
 }
@@ -471,7 +528,8 @@ function clearMainAgentPostCompactContinuity(identityInput) {
             }
             catch { }
         }
-        return { deleted, identity };
+        const sourceDeleted = (0, main_agent_context_source_continuity_1.clearContextSourceContinuity)(identity);
+        return { deleted, sourceDeleted, identity };
     });
 }
 function runMainAgentPostCompactContinuitySelfTest() {
@@ -504,6 +562,10 @@ function runMainAgentPostCompactContinuitySelfTest() {
         const manifest = buildMainAgentPostCompactRestoreManifest({ identity, boundaryGeneration: 1, scope });
         persistMainAgentPostCompactRestoreManifest(manifest);
         const restored = restoreMainAgentPostCompactContext({ identity, scope, manifest });
+        const { contentStored: _contentStored, checksum: _checksum, ...v2Core } = manifest;
+        const legacyCore = { ...v2Core, schema: "ccm-main-agent-post-compact-restore-manifest-v1", version: 1 };
+        const legacyManifest = { ...legacyCore, checksum: stableChecksum(legacyCore) };
+        const legacyRestored = restoreMainAgentPostCompactContext({ identity, scope, manifest: legacyManifest });
         const isolated = restoreMainAgentPostCompactContext({ identity: { ...identity, exactSessionId: `${identity.exactSessionId}-other` }, scope, manifest });
         const budgeted = restoreMainAgentPostCompactContext({ identity, scope, manifest, maxPerSkillTokens: 1, maxTotalSkillTokens: 1, maxTotalMcpSchemaTokens: 1 });
         const skillRow = manager.skills.find((item) => item.name === skillName);
@@ -513,23 +575,39 @@ function runMainAgentPostCompactContinuitySelfTest() {
         const toolRow = manager.tools.find((item) => item.serverName === serverName && item.name === "search");
         toolRow.inputSchema = { type: "object", properties: { changed: { type: "boolean" } } };
         const changedSchema = restoreMainAgentPostCompactContext({ identity, scope, manifest });
+        toolRow.inputSchema = { type: "object", properties: { query: { type: "string" } } };
+        // 权限维度：压缩后必须按"当前"授权重新加载，而不是照搬压缩前的清单。
+        // 用一个收窄到空授权的 scope 复现"权限被撤销"，此时清单里的 skill 与
+        // MCP 都必须被拒绝恢复——否则旧清单会成为绕过撤销的越权路径。
+        const revokedScope = { mcp: [], skill: [] };
+        const revoked = restoreMainAgentPostCompactContext({ identity, scope: revokedScope, manifest });
         clearMainAgentPostCompactContinuity(identity);
         return {
             pass: validateMainAgentPostCompactRestoreManifest(manifest, { ...identity, boundaryGeneration: 1 }).valid
                 && restored.receipt.status === "restored"
                 && restored.receipt.restoredSkillNames.includes(skillName)
                 && restored.receipt.loadedToolNames.length === 1
+                && restored.receipt.schema === "ccm-post-compact-tool-restore-receipt-v2"
+                && restored.receipt.contentStored === false
+                && legacyRestored.receipt.status === "restored"
                 && !manifest.invokedSkills.some(item => item.name === unusedSkillName)
                 && isolated.receipt.status === "rejected"
                 && budgeted.receipt.dropped.some(item => item.reason.includes("token_budget"))
                 && changedSkill.receipt.dropped.some(item => item.reason === "skill_content_changed")
-                && changedSchema.receipt.dropped.some(item => item.reason === "mcp_schema_changed"),
+                && changedSchema.receipt.dropped.some(item => item.reason === "mcp_schema_changed")
+                // 撤销授权后，旧清单里的 skill 与 MCP 都不得复活
+                && !revoked.receipt.restoredSkillNames.includes(skillName)
+                && revoked.receipt.loadedToolNames.length === 0
+                && revoked.receipt.dropped.some(item => item.reason === "skill_unavailable_or_unauthorized")
+                && revoked.receipt.dropped.some(item => item.reason === "mcp_unavailable_or_unauthorized"),
             manifest,
             restored: restored.receipt,
+            legacyRestored: legacyRestored.receipt,
             isolated: isolated.receipt,
             budgeted: budgeted.receipt,
             changedSkill: changedSkill.receipt,
             changedSchema: changedSchema.receipt,
+            revoked: revoked.receipt,
         };
     }
     finally {

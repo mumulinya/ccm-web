@@ -461,7 +461,7 @@ export function buildGroupCompactionModelRequest(messages: any[], memory: any, f
 你的摘要会替代压缩边界之前的原始消息，因此必须保真并支持主 Agent 无缝续跑。
 参考 Claude Code compaction：保留用户明确要求、意图变化、技术决策、文件/代码、错误与修复、已完成、未完成、当前工作和下一步。
 必须合并旧摘要，不能因为新消息覆盖仍有效的旧约束；已完成与待办冲突时，以时间较新的证据为准。
-不要编造文件变更、测试或完成状态。`;
+不要编造文件变更、测试或完成状态。未经验证的推测只能保留在 hypotheses，不能提升为 decisions 或 completedWork。`;
   const capacity = resolveGroupModelContextCapacity(config);
   const maxOutputTokens = Math.max(1_000, Math.min(
     GROUP_COMPACTION_MODEL_MAX_SUMMARY_TOKENS,
@@ -501,7 +501,7 @@ ${timeline.userMessages.join("\n") || "无"}
 ${timeline.timeline.join("\n") || "无"}
 
 返回以下 JSON，不要 Markdown：
-{"primaryRequest":"","userMessages":[],"keyConcepts":[],"filesAndCode":[],"errorsAndFixes":[],"decisions":[],"completedWork":[],"pendingTasks":[],"currentWork":"","nextStep":"","participantState":[],"taskStates":[]}`;
+{"primaryRequest":"","userMessages":[],"hypotheses":[],"keyConcepts":[],"filesAndCode":[],"errorsAndFixes":[],"decisions":[],"completedWork":[],"pendingTasks":[],"currentWork":"","nextStep":"","participantState":[],"taskStates":[]}`;
     return { summaryInputProjection, projectedValidationFallback, candidateUser };
   };
   for (let attempt = 0; attempt <= GROUP_COMPACTION_MAX_PTL_RETRIES; attempt += 1) {
@@ -1169,6 +1169,8 @@ export async function compactGroupConversationMemory(input: {
       ...(memory?.compactBoundary?.compactMetadata?.preCompactDiscoveredTools || []),
       ...(previousState?.preCompactDiscoveredTools || []),
     ],
+    invokedSkillSingleMaxTokens: input.config?.postCompactSkillPerItemMaxTokens || input.config?.post_compact_skill_per_item_max_tokens,
+    invokedSkillsTotalMaxTokens: input.config?.postCompactSkillTotalMaxTokens || input.config?.post_compact_skill_total_max_tokens,
     now,
   });
   const sharedSessionStartHookResults = await runSessionCompactionHooks("session_start", {

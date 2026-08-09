@@ -78,7 +78,25 @@ export declare function buildGlobalAgentToolRuntimeContext(auditContext?: ToolSc
     deferred_tool_names: string[];
     scope_identity: import("../../system/main-agent-post-compact-continuity").MainAgentContinuityIdentityV1;
     restored_skill_attachments: any[];
-    post_compact_restore_receipt: import("../../system/main-agent-post-compact-continuity").PostCompactToolRestoreReceiptV1;
+    post_compact_restore_receipt: import("../../system/main-agent-post-compact-continuity").PostCompactToolRestoreReceipt;
+    context_policy: {
+        override: Partial<import("../../tools/main-agent-context-policy").MainAgentContextPolicy>;
+        effective: {
+            mcpToolLoadingMode: import("../../tools/main-agent-context-policy").McpToolLoadingMode;
+            mcpToolAutoThresholdPercent: number;
+            skillCatalogBudgetPercent: number;
+            postCompactSkillPerItemMaxTokens: number;
+            postCompactSkillTotalMaxTokens: number;
+            contextSourceCatalogBudgetPercent: number;
+            contextSourceHydrationBudgetPercent: number;
+            postCompactSourcePerItemMaxTokens: number;
+            postCompactSourceTotalMaxTokens: number;
+            agentMaxParallelPerProject: number;
+            agentMaxParallelGlobal: number;
+        };
+        source: string;
+    };
+    context_budget: any;
     policy_prompt: string;
     mcp_prompt: string;
     updated_at: string;

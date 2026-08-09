@@ -58,6 +58,9 @@ try {
   assert.ok(toolContext.catalog.mcp.some(tool => tool.canonicalName === "mcp__ccm__docs__search_records"));
   assert.ok(!toolContext.catalog.mcp.some(tool => tool.canonicalName === "mcp__ccm__docs__update_record"));
   assert.ok(toolContext.catalog.rejectedMcp.some(tool => tool.canonicalName === "mcp__ccm__docs__update_record"));
+  assert.ok(toolContext.contextBudget.fixedReservedTokens > 0);
+  assert.ok(toolContext.contextBudget.reservedTokenBudget.currentUser > 0);
+  assert.ok(toolContext.contextBudget.finalSafetyRemainingTokens >= 0);
 
   const messages = llm.buildLlmCoordinatorMessages({
     group,
@@ -95,6 +98,13 @@ try {
   assert.ok(hydratedSnapshot.tokenBreakdown.mcpTools > 0);
   assert.ok(hydratedSnapshot.tokenBreakdown.mcpResults > 0);
   assert.ok(hydratedSnapshot.tokenBreakdown.recentMessages > 0);
+
+  const discoveryResults = await llm.executeGroupMainAgentToolRequests({
+    requests: [{ name: "tool_search", arguments: { name: "mcp__ccm__docs__search_records" }, reason: "加载延迟 MCP Schema" }],
+    toolContext,
+  });
+  assert.equal(discoveryResults[0]?.ok, true);
+  assert.ok(discoveryResults[0]?.output?.includes("inputSchema"));
 
   const normalized = llm.normalizeGroupMainToolRequests([
     { name: "mcp__ccm__docs__search_records", arguments: { query: "api" }, reason: "查接口" },
@@ -140,7 +150,7 @@ try {
     source: "group-chat",
     groupSessionId: "gcs_b",
   });
-  assert.equal(sibling.catalog.mcp.length, 0);
+  assert.ok(!sibling.catalog.mcp.some(tool => tool.server === "docs"));
   assert.ok(!sibling.scope.mcp.includes("docs"));
 
   console.log(JSON.stringify({
@@ -157,6 +167,7 @@ try {
       siblingGroupIsolated: true,
       contextComponentsClassified: true,
       dynamicMcpResultsClassified: true,
+      dynamicTokenAllocationVisible: true,
     },
   }, null, 2));
 } finally {

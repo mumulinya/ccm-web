@@ -55,6 +55,8 @@ const sessions_1 = require("./sessions");
 const runtime_events_1 = require("../../system/runtime-events");
 const credential_store_1 = require("../../core/credential-store");
 const tool_authorization_1 = require("../../tools/tool-authorization");
+const main_agent_context_policy_1 = require("../../tools/main-agent-context-policy");
+const group_orchestrator_config_1 = require("../collaboration/group-orchestrator-config");
 const project_lifecycle_1 = require("./project-lifecycle");
 const project_validation_1 = require("./project-validation");
 const project_git_1 = require("./project-git");
@@ -1633,6 +1635,7 @@ type = "${finalPlatform}"${platformOptionsToml}
         const inferredCommands = inferProjectVerificationCommands(getProjectWorkDir(project));
         const profile = normalizeProjectAgentProfile(configs[project] || {});
         const toolAuth = (0, tool_authorization_1.buildToolAuthorizationPayload)(configs[project]?.tools || {});
+        const contextPolicy = (0, main_agent_context_policy_1.resolveMainAgentContextPolicy)((0, group_orchestrator_config_1.loadOrchestratorConfig)(), configs[project]?.context_policy || configs[project]?.contextPolicy || {});
         (0, utils_1.sendJson)(res, {
             tools: toolAuth.tools,
             tool_audit: toolAuth.tool_audit,
@@ -1641,6 +1644,7 @@ type = "${finalPlatform}"${platformOptionsToml}
             verification_commands: configuredCommands,
             inferred_verification_commands: inferredCommands,
             verification_source: configuredCommands.length > 0 ? "configured" : (inferredCommands.length > 0 ? "inferred" : "missing"),
+            contextPolicy,
             ...profile,
         });
         return true;
@@ -1660,6 +1664,10 @@ type = "${finalPlatform}"${platformOptionsToml}
                 const previousTools = (0, tool_authorization_1.normalizeToolAuthorization)(configs[project].tools || {});
                 const normalizedTools = (0, tool_authorization_1.normalizeToolAuthorization)(tools);
                 configs[project].tools = normalizedTools;
+                if ((0, main_agent_context_policy_1.mainAgentContextPolicyUpdatePresent)(payload)) {
+                    configs[project].context_policy = (0, main_agent_context_policy_1.updateMainAgentContextPolicyOverride)(configs[project].context_policy || configs[project].contextPolicy || {}, (0, main_agent_context_policy_1.contextPolicyUpdateSource)(payload), (0, group_orchestrator_config_1.loadOrchestratorConfig)());
+                    delete configs[project].contextPolicy;
+                }
                 const commands = normalizeVerificationCommands(verification_commands || verificationCommands);
                 const profile = normalizeProjectAgentProfile(payload);
                 configs[project].verification_commands = commands;
@@ -1680,7 +1688,7 @@ type = "${finalPlatform}"${platformOptionsToml}
                     toolAudit: toolAuth.tool_audit,
                     authorizationReadiness: toolAuth.authorization_readiness,
                 });
-                (0, utils_1.sendJson)(res, { success: true, tools: toolAuth.tools, tool_audit: toolAuth.tool_audit, authorization_readiness: toolAuth.authorization_readiness, connection_preflight: toolAuth.connection_preflight, authorization_change: authorizationChange, verification_commands: commands, ...profile });
+                (0, utils_1.sendJson)(res, { success: true, tools: toolAuth.tools, tool_audit: toolAuth.tool_audit, authorization_readiness: toolAuth.authorization_readiness, connection_preflight: toolAuth.connection_preflight, authorization_change: authorizationChange, verification_commands: commands, contextPolicy: (0, main_agent_context_policy_1.resolveMainAgentContextPolicy)((0, group_orchestrator_config_1.loadOrchestratorConfig)(), configs[project].context_policy || {}), ...profile });
             }
             catch (e) {
                 (0, utils_1.sendJson)(res, { error: e.message }, 400);

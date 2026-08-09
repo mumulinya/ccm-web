@@ -4,7 +4,6 @@ export declare const CONTROL_DIR: string;
 export declare const CONTROL_FILE: string;
 export declare const AUDIT_FILE: string;
 export declare const METRICS_FILE: string;
-export declare const QUALITY_FILE: string;
 export declare const DISPATCH_RECOVERY_RESOLUTION_DIR: string;
 export declare const GROUP_MEMORY_DIR: string;
 export declare const GROUP_SESSION_SCOPED_MEMORY_DIR: string;

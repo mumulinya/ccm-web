@@ -440,7 +440,7 @@ function buildGroupCompactionModelRequest(messages, memory, fallback, config = {
 你的摘要会替代压缩边界之前的原始消息，因此必须保真并支持主 Agent 无缝续跑。
 参考 Claude Code compaction：保留用户明确要求、意图变化、技术决策、文件/代码、错误与修复、已完成、未完成、当前工作和下一步。
 必须合并旧摘要，不能因为新消息覆盖仍有效的旧约束；已完成与待办冲突时，以时间较新的证据为准。
-不要编造文件变更、测试或完成状态。`;
+不要编造文件变更、测试或完成状态。未经验证的推测只能保留在 hypotheses，不能提升为 decisions 或 completedWork。`;
     const capacity = (0, group_compaction_strategy_1.resolveGroupModelContextCapacity)(config);
     const maxOutputTokens = Math.max(1_000, Math.min(group_compaction_receipts_1.GROUP_COMPACTION_MODEL_MAX_SUMMARY_TOKENS, Number(config?.memoryCompactionMaxOutputTokens || config?.memory_compaction_max_output_tokens || group_compaction_receipts_1.GROUP_COMPACTION_MODEL_MAX_SUMMARY_TOKENS)));
     const providerSafeInput = Math.max(8_000, capacity.contextWindow - maxOutputTokens - group_compaction_receipts_1.GROUP_COMPACTION_MODEL_INPUT_SAFETY_TOKENS);
@@ -477,7 +477,7 @@ ${timeline.userMessages.join("\n") || "无"}
 ${timeline.timeline.join("\n") || "无"}
 
 返回以下 JSON，不要 Markdown：
-{"primaryRequest":"","userMessages":[],"keyConcepts":[],"filesAndCode":[],"errorsAndFixes":[],"decisions":[],"completedWork":[],"pendingTasks":[],"currentWork":"","nextStep":"","participantState":[],"taskStates":[]}`;
+{"primaryRequest":"","userMessages":[],"hypotheses":[],"keyConcepts":[],"filesAndCode":[],"errorsAndFixes":[],"decisions":[],"completedWork":[],"pendingTasks":[],"currentWork":"","nextStep":"","participantState":[],"taskStates":[]}`;
         return { summaryInputProjection, projectedValidationFallback, candidateUser };
     };
     for (let attempt = 0; attempt <= GROUP_COMPACTION_MAX_PTL_RETRIES; attempt += 1) {
@@ -786,6 +786,13 @@ async function compactGroupConversationMemory(input) {
         config: input.config,
         now,
     });
+    // 落盘投影：token 计量只保留分桶与校验和。原始 measurement 仍要交给压缩钩子，
+    // 所以另建投影而不是原地改写；modelVisiblePayload 内含整段 recentMessages，
+    // 落盘会让单个会话文件多出数 MB，且原文可从转录恢复。
+    const persistedTokenMeasurement = {
+        ...contextTokenMeasurement,
+        modelVisiblePayload: (0, session_compaction_core_1.modelVisiblePayloadAccounting)(contextTokenMeasurement.modelVisiblePayload),
+    };
     const warningOnlyMemory = {
         ...memory,
         compaction: {
@@ -795,8 +802,8 @@ async function compactGroupConversationMemory(input) {
             contextPressureWarning: preCompactWarning,
             compactWarning: preCompactWarning,
             lastPressureSampleAt: now,
-            tokenMeasurement: contextTokenMeasurement,
-            token_measurement: contextTokenMeasurement,
+            tokenMeasurement: persistedTokenMeasurement,
+            token_measurement: persistedTokenMeasurement,
             modelVisiblePayload: persistedTriggerAccounting,
             model_visible_payload: persistedTriggerAccounting,
         },
@@ -1130,6 +1137,8 @@ async function compactGroupConversationMemory(input) {
             ...(memory?.compactBoundary?.compactMetadata?.preCompactDiscoveredTools || []),
             ...(previousState?.preCompactDiscoveredTools || []),
         ],
+        invokedSkillSingleMaxTokens: input.config?.postCompactSkillPerItemMaxTokens || input.config?.post_compact_skill_per_item_max_tokens,
+        invokedSkillsTotalMaxTokens: input.config?.postCompactSkillTotalMaxTokens || input.config?.post_compact_skill_total_max_tokens,
         now,
     });
     const sharedSessionStartHookResults = await (0, session_compaction_core_1.runSessionCompactionHooks)("session_start", {
@@ -1230,7 +1239,7 @@ async function compactGroupConversationMemory(input) {
         true_post_compact_token_count: finalModelVisiblePayload.totalTokens,
         will_retrigger_next_turn: sharedPostCompactGate.providerCallAllowed !== true,
         payload_checksum: finalModelVisiblePayload.payloadChecksum,
-        model_visible_payload: finalModelVisiblePayload,
+        model_visible_payload: (0, session_compaction_core_1.modelVisiblePayloadAccounting)(finalModelVisiblePayload),
         shared_post_compact_gate: sharedPostCompactGate,
     };
     let formalRecompaction = {
@@ -1302,7 +1311,7 @@ async function compactGroupConversationMemory(input) {
                 true_post_compact_token_count: finalModelVisiblePayload.totalTokens,
                 will_retrigger_next_turn: sharedPostCompactGate.providerCallAllowed !== true,
                 payload_checksum: finalModelVisiblePayload.payloadChecksum,
-                model_visible_payload: finalModelVisiblePayload,
+                model_visible_payload: (0, session_compaction_core_1.modelVisiblePayloadAccounting)(finalModelVisiblePayload),
                 shared_post_compact_gate: sharedPostCompactGate,
             };
             formalRecompaction = {
@@ -1349,7 +1358,7 @@ async function compactGroupConversationMemory(input) {
         ptl_applied: ptlEmergency?.engaged === true,
         safe_render_chars: postCompactPayloadBudget.will_retrigger_next_turn === true ? 6000 : 14_000,
         payload_checksum: postCompactPayloadBudget.payload_checksum,
-        model_visible_payload: finalModelVisiblePayload,
+        model_visible_payload: (0, session_compaction_core_1.modelVisiblePayloadAccounting)(finalModelVisiblePayload),
         shared_gate: sharedPostCompactGate,
         formal_recompaction: formalRecompaction,
     };

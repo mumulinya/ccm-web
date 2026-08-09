@@ -34,6 +34,7 @@ import { projectExecutionTaskCard } from '../../utils/taskExperience.js'
 import { shouldShowProjectTaskCard } from '../../utils/projectChatPresentation.js'
 import { buildProjectSessionKnowledgePayload, buildProjectTaskKnowledgePayload, postKnowledgeCapture } from '../../utils/knowledgeCapture.js'
 import { subscribeRuntimeEvents } from '../../utils/runtimeEventBus.js'
+import { getEditableUserMessageText, hasMessageAttachments } from '../../utils/messageActions.js'
 
 export function useProjectManager(props, emit) {
   // 搜索跳转高亮
@@ -1125,6 +1126,23 @@ export function useProjectManager(props, emit) {
     return guidedTurn
   }
 
+  const editProjectUserMessage = async (message) => {
+    if (isStreaming.value) return toast.info('请先等待当前回复结束或停止执行，再编辑历史消息')
+    const text = getEditableUserMessageText(message)
+    if (!text) return toast.info('这条消息没有可重新发送的文字内容')
+    const hasDifferentDraft = !!chatInput.value.trim() && chatInput.value.trim() !== text
+    if ((hasDifferentDraft || chatFiles.value.length || pendingProjectParentRunId.value)
+      && !(await confirmDialog('编辑历史消息会替换当前输入框草稿，并退出当前任务补充状态。是否继续？'))) return
+    chatInput.value = text
+    chatFiles.value = []
+    pendingProjectParentRunId.value = ''
+    await nextTick()
+    document.getElementById('projectChatInput')?.focus?.()
+    toast.info(hasMessageAttachments(message)
+      ? '原消息文字已载入；历史附件不会自动复用，请重新添加附件后发送'
+      : '原消息已载入输入框，修改后发送即可重新请求')
+  }
+
   const sendMessage = async (options = {}) => {
     const queuedTurn = options?.queueTurn || null
     if (isStreaming.value && !queuedTurn) return submitProjectMessageWhileBusy()
@@ -1558,6 +1576,7 @@ export function useProjectManager(props, emit) {
   const projectWritablePaths = ref('')
   const projectForbiddenPaths = ref('')
   const projectDeliveryContract = ref('')
+  const projectContextPolicy = ref({ override: {}, effective: {}, source: 'global_default' })
 
   const normalizeProjectTools = (tools = {}) => ({
     mcp: Array.from(new Set((Array.isArray(tools.mcp) ? tools.mcp : []).map(item => String(item || '').trim()).filter(Boolean))),
@@ -1595,6 +1614,7 @@ export function useProjectManager(props, emit) {
     projectWritablePaths.value = Array.isArray(projData.writable_paths) ? projData.writable_paths.join('\n') : ''
     projectForbiddenPaths.value = Array.isArray(projData.forbidden_paths) ? projData.forbidden_paths.join('\n') : ''
     projectDeliveryContract.value = projData.delivery_contract || ''
+    projectContextPolicy.value = projData.contextPolicy || { override: {}, effective: {}, source: 'global_default' }
 
     allTools.value.mcp = optionsData.mcp || []
     allTools.value.skill = optionsData.skill || []
@@ -1623,7 +1643,8 @@ export function useProjectManager(props, emit) {
         capabilities: splitConfigLines(projectCapabilities.value),
         writable_paths: splitConfigLines(projectWritablePaths.value),
         forbidden_paths: splitConfigLines(projectForbiddenPaths.value),
-        delivery_contract: projectDeliveryContract.value.trim()
+        delivery_contract: projectDeliveryContract.value.trim(),
+        contextPolicy: projectContextPolicy.value?.override || {}
       })
     })
     const data = await res.json()
@@ -1632,6 +1653,7 @@ export function useProjectManager(props, emit) {
       projectToolAudit.value = data.tool_audit || null
       projectAuthorizationReadiness.value = data.authorization_readiness || null
       projectConnectionPreflight.value = data.connection_preflight || null
+      projectContextPolicy.value = data.contextPolicy || projectContextPolicy.value
       showTools.value = false
       if (data.authorization_readiness && data.authorization_readiness.dispatchReady === false) {
         toast.warning('工具配置已保存，但有授权项当前不可用')
@@ -1733,6 +1755,13 @@ export function useProjectManager(props, emit) {
       verificationCommands: projectVerificationCommands,
     }
     if (targets[field]) targets[field].value = value
+  }
+
+  const updateProjectContextPolicy = ({ field, value }) => {
+    projectContextPolicy.value = {
+      ...projectContextPolicy.value,
+      override: { ...(projectContextPolicy.value?.override || {}), [field]: value },
+    }
   }
 
   const toggleProjectTool = (type, name) => {
@@ -1912,14 +1941,14 @@ export function useProjectManager(props, emit) {
     saveCurrentProjectSessionKnowledge, getProjectTaskCard, postTaskAction, removeMessageFromCurrentSession, handleProjectTaskAction, isStreaming,
     pendingProjectParentRunId, streamController, activeProjectRunId, activeProjectMainTaskId, stoppingProjectTurn, makeProjectMessageId,
     projectTurnConversationId, projectTurnControl, projectComposerSendLabel, stopStreaming, drainProjectTurnQueue, guideProjectQueuedTurn, submitProjectMessageWhileBusy,
-    sendMessage, formatFileSize, onChatFilesSelected, removeChatFile, openFileDiff, openProjectChangesTab,
+    sendMessage, editProjectUserMessage, formatFileSize, onChatFilesSelected, removeChatFile, openFileDiff, openProjectChangesTab,
     closeFileDiff, currentSessionNew, autoNameSession, chatTarget, showLogsPanel, logsTitle, logsProfileId, logsKind, logsRuntimeProcess,
     openProjectRuntimeLogs, openFeishuQr, startFeishuQrSetup, openFolderBrowser, loadDrives,
     loadFolderContents, browseGoUp, createBrowseFolder, selectFolder, projectTools, allTools, projectToolAudit,
     projectAuthorizationReadiness, projectConnectionPreflight, projectToolVerification, projectVerificationCommands, inferredProjectVerificationCommands, projectVerificationSource,
-    projectResponsibility, projectCapabilities, projectWritablePaths, projectForbiddenPaths, projectDeliveryContract, normalizeProjectTools,
+    projectResponsibility, projectCapabilities, projectWritablePaths, projectForbiddenPaths, projectDeliveryContract, projectContextPolicy, normalizeProjectTools,
     projectTestTargets, projectTestAuth, projectTestTargetsLoading, projectTestTargetsSaving, loadProjectTestTargets, saveProjectTestTarget, deleteProjectTestTarget,
-    loadProjectTools, saveProjectTools, applyInferredVerificationCommands, updateProjectToolField, toggleProjectTool, projectFiles,
+    loadProjectTools, saveProjectTools, applyInferredVerificationCommands, updateProjectToolField, updateProjectContextPolicy, toggleProjectTool, projectFiles,
     showAddFile, showEditFile, editFileName, editFileContent, updateProjectSharedFileField, loadProjectSharedFiles,
     addProjectFile, submitAddProjectFile, editProjectFile, submitEditProjectFile, deleteProjectFile, handleInput,
     handleKeydown

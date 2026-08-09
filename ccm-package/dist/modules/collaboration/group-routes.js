@@ -65,6 +65,7 @@ const storage_1 = require("./storage");
 const logs_1 = require("./logs");
 const group_orchestrator_1 = require("./group-orchestrator");
 const tool_authorization_1 = require("../../tools/tool-authorization");
+const main_agent_context_policy_1 = require("../../tools/main-agent-context-policy");
 const delivery_report_1 = require("../../agents/delivery-report");
 const group_memory_compaction_1 = require("./group-memory-compaction");
 const model_capability_cache_1 = require("./model-capability-cache");
@@ -2253,7 +2254,7 @@ function handleBasicGroupRoutes(req, res, parsed, ctx, deps) {
         if (!group)
             return (0, utils_1.sendJson)(res, { error: "群聊不存在" }, 404);
         const toolAuth = (0, tool_authorization_1.buildToolAuthorizationPayload)(group.tools || {});
-        (0, utils_1.sendJson)(res, { tools: toolAuth.tools, tool_audit: toolAuth.tool_audit, authorization_readiness: toolAuth.authorization_readiness, connection_preflight: toolAuth.connection_preflight });
+        (0, utils_1.sendJson)(res, { tools: toolAuth.tools, tool_audit: toolAuth.tool_audit, authorization_readiness: toolAuth.authorization_readiness, connection_preflight: toolAuth.connection_preflight, contextPolicy: (0, main_agent_context_policy_1.resolveMainAgentContextPolicy)((0, group_orchestrator_1.loadOrchestratorConfig)(), group.context_policy || group.contextPolicy || {}) });
         return true;
     }
     if (pathname === "/api/groups/test-targets" && req.method === "GET") {
@@ -2306,13 +2307,18 @@ function handleBasicGroupRoutes(req, res, parsed, ctx, deps) {
         req.on("data", (chunk) => body += chunk);
         req.on("end", async () => {
             try {
-                const { group_id, tools } = JSON.parse(body);
+                const payload = JSON.parse(body);
+                const { group_id, tools } = payload;
                 const groups = (0, storage_1.loadGroups)();
                 const group = groups.find(g => g.id === group_id);
                 if (!group)
                     return (0, utils_1.sendJson)(res, { error: "群聊不存在" }, 404);
                 const previousTools = (0, tool_authorization_1.normalizeToolAuthorization)(group.tools || {});
                 group.tools = (0, tool_authorization_1.normalizeToolAuthorization)(tools);
+                if ((0, main_agent_context_policy_1.mainAgentContextPolicyUpdatePresent)(payload)) {
+                    group.context_policy = (0, main_agent_context_policy_1.updateMainAgentContextPolicyOverride)(group.context_policy || group.contextPolicy || {}, (0, main_agent_context_policy_1.contextPolicyUpdateSource)(payload), (0, group_orchestrator_1.loadOrchestratorConfig)());
+                    delete group.contextPolicy;
+                }
                 (0, storage_1.saveGroups)(groups);
                 const toolAuth = await (0, tool_authorization_1.buildFreshToolAuthorizationPayload)(group.tools);
                 const authorizationChange = (0, tool_authorization_1.recordToolAuthorizationChange)({
@@ -2325,7 +2331,7 @@ function handleBasicGroupRoutes(req, res, parsed, ctx, deps) {
                     toolAudit: toolAuth.tool_audit,
                     authorizationReadiness: toolAuth.authorization_readiness,
                 });
-                (0, utils_1.sendJson)(res, { success: true, tools: toolAuth.tools, tool_audit: toolAuth.tool_audit, authorization_readiness: toolAuth.authorization_readiness, connection_preflight: toolAuth.connection_preflight, authorization_change: authorizationChange });
+                (0, utils_1.sendJson)(res, { success: true, tools: toolAuth.tools, tool_audit: toolAuth.tool_audit, authorization_readiness: toolAuth.authorization_readiness, connection_preflight: toolAuth.connection_preflight, authorization_change: authorizationChange, contextPolicy: (0, main_agent_context_policy_1.resolveMainAgentContextPolicy)((0, group_orchestrator_1.loadOrchestratorConfig)(), group.context_policy || {}) });
             }
             catch (e) {
                 (0, utils_1.sendJson)(res, { error: e.message }, 400);

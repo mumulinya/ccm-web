@@ -145,11 +145,12 @@ export function verifyFinalWorkerDispatchPayloadGate(gate: any, expected: any = 
   if (!String(gate?.prompt_checksum || "")) issues.push("final_dispatch_prompt_checksum_missing");
   if (!Number(gate?.auto_compact_threshold || 0)) issues.push("final_dispatch_auto_compact_threshold_missing");
   if (!Number(gate?.estimated_total_input_tokens || 0)) issues.push("final_dispatch_token_count_missing");
-  if (!["ready", "recompact_required", "calibration_invalid"].includes(String(gate?.status || ""))) issues.push("final_dispatch_payload_gate_status_invalid");
+  if (!["ready", "recompact_required", "calibration_invalid", "bootstrap_limit_exceeded"].includes(String(gate?.status || ""))) issues.push("final_dispatch_payload_gate_status_invalid");
   const modelVisibleInputTokens = Number(gate?.model_visible_input_tokens || gate?.estimated_total_input_tokens || 0);
   if (gate?.status === "ready" && modelVisibleInputTokens >= Number(gate?.auto_compact_threshold || 0)) issues.push("final_dispatch_ready_above_threshold");
   if (gate?.status === "recompact_required" && modelVisibleInputTokens < Number(gate?.auto_compact_threshold || 0)) issues.push("final_dispatch_recompact_below_threshold");
   if (gate?.status === "calibration_invalid" && gate?.provider_call_allowed === true) issues.push("final_dispatch_invalid_calibration_allowed");
+  if (gate?.status === "bootstrap_limit_exceeded" && Number(gate?.estimated_prompt_tokens || 0) < Number(gate?.max_bootstrap_tokens || 0)) issues.push("final_dispatch_bootstrap_limit_status_invalid");
   const identities = [
     ["group_id", expected.groupId || expected.group_id],
     ["group_session_id", expected.groupSessionId || expected.group_session_id],
@@ -220,6 +221,9 @@ export function buildFinalWorkerDispatchPayloadGate(input: any = {}) {
   const estimatedPromptTokens = estimateTextTokens(renderedPrompt);
   const providerEnvelopeTokens = Math.max(0, Number(input.providerEnvelopeTokens || input.provider_envelope_tokens || 0));
   const requiredHydrationTokens = Math.max(0, Number(input.requiredHydrationTokens || input.required_hydration_tokens || 0));
+  const maxBootstrapTokens = Math.max(1_000, Number(input.maxBootstrapTokens || input.max_bootstrap_tokens || 32_000));
+  const bootstrapLimitEnforced = input.enforceBootstrapLimit === true || input.enforce_bootstrap_limit === true || requiredHydrationTokens > 0;
+  const bootstrapLimitExceeded = bootstrapLimitEnforced && estimatedPromptTokens >= maxBootstrapTokens;
   const estimatedTotalInputTokens = estimatedPromptTokens + providerEnvelopeTokens + requiredHydrationTokens;
   const providerUsageBaseline = input.providerUsageBaseline || input.provider_usage_baseline || null;
   const providerUsageBaselineVerification = providerUsageBaseline
@@ -247,6 +251,8 @@ export function buildFinalWorkerDispatchPayloadGate(input: any = {}) {
     : "estimated";
   const status = providerUsageBaselineStatus === "invalid"
     ? "calibration_invalid"
+    : bootstrapLimitExceeded
+      ? "bootstrap_limit_exceeded"
     : modelVisibleInputTokens >= autoCompactThreshold ? "recompact_required" : "ready";
   const core = {
     schema: FINAL_WORKER_DISPATCH_PAYLOAD_GATE_SCHEMA,
@@ -274,6 +280,9 @@ export function buildFinalWorkerDispatchPayloadGate(input: any = {}) {
     estimated_prompt_tokens: estimatedPromptTokens,
     provider_envelope_tokens: providerEnvelopeTokens,
     required_hydration_tokens: requiredHydrationTokens,
+    max_bootstrap_tokens: maxBootstrapTokens,
+    bootstrap_limit_enforced: bootstrapLimitEnforced,
+    bootstrap_limit_exceeded: bootstrapLimitExceeded,
     estimated_total_input_tokens: estimatedTotalInputTokens,
     model_visible_input_tokens: modelVisibleInputTokens,
     token_basis: providerUsageBaselineVerification.valid ? "provider_observed_baseline_plus_current_estimate" : "estimated_final_prompt",
@@ -291,6 +300,8 @@ export function buildFinalWorkerDispatchPayloadGate(input: any = {}) {
       ? "dispatch_ready"
       : status === "calibration_invalid"
         ? "fail_closed_invalid_provider_usage_baseline"
+        : status === "bootstrap_limit_exceeded"
+          ? "reduce_bootstrap_to_task_constraints_and_mcp_reference"
         : "rebuild_or_compact_final_prompt_before_provider_call",
     provider_call_allowed: status === "ready",
     checked_at: new Date().toISOString(),

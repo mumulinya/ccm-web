@@ -49,6 +49,9 @@ import {
 } from "./group-memory-index";
 import { resolveTrustedModelContextCapacity } from "./model-capability-cache";
 import { estimateTextTokens } from "../../system/context-budget";
+import { resolveAgentLoopBudget, shouldContinueAgentLoop } from "../../system/agent-loop-budget";
+import { appendToolProjection, appendUserVisibleAgentEvent, buildUserVisibleAgentResult } from "../../system/user-visible-agent-events";
+import { publishUserVisibleAssistantText } from "../../system/user-visible-agent-projections";
 import { buildModelVisiblePayloadSnapshot, modelVisibleFixedTokens } from "../../system/session-compaction-core";
 import { buildRoleSkillPrompt } from "../../skills/role-skills";
 import type { ToolScope } from "../../tools/tool-manager";
@@ -60,13 +63,15 @@ import {
   normalizeMainAgentToolRequests,
   type MainAgentToolRequest,
 } from "../../tools/main-agent-tool-runtime";
-import { getGroupAutoCompactThreshold } from "./group-compaction-strategy";
+import { getGroupAutoCompactThreshold, resolveGroupModelContextCapacity } from "./group-compaction-strategy";
+import { resolveMainAgentContextPolicy } from "../../tools/main-agent-context-policy";
 import {
   WORKFLOW_DECISION_GUIDANCE,
   normalizeWorkflowDecision,
   type WorkflowDecision,
 } from "../../agents/workflow-decision";
 import { createMainAgentTurnReceipt, normalizeMainAgentTurnDecision } from "../../agents/main-agent-turn";
+import { CONVERSATIONAL_REPLY_STYLE_GUIDANCE } from "../../agents/conversational-reply-style";
 import { searchAgentKnowledge } from "../knowledge/knowledge-access";
 import {
   normalizeTestAgentAcceptanceEvidencePlan,
@@ -154,6 +159,8 @@ export function buildGroupMainAgentToolContext(input: {
   loadedMainAgentTools?: string[];
 }): any {
   const group = normalizeGroupOrchestrator(input.group);
+  const orchestratorConfig = loadOrchestratorConfig();
+  const contextPolicy = resolveMainAgentContextPolicy(orchestratorConfig, group?.context_policy || group?.contextPolicy || {});
   const selectedRoleSkills = buildRoleSkillPrompt("group-main-agent", input.message, {
     source: input.source || "",
     phase: "planning",
@@ -178,6 +185,9 @@ export function buildGroupMainAgentToolContext(input: {
       allowedProjects: getRoutableMembers(group).map((member: any) => String(member?.project || "")).filter(Boolean),
     },
     loadedToolNames: input.loadedMainAgentTools || [],
+    contextPolicy: contextPolicy.effective,
+    contextWindow: resolveGroupModelContextCapacity(orchestratorConfig).contextWindow,
+    currentUserInput: input.message,
   });
   const builtinNames = new Set(GROUP_MAIN_BUILTIN_TOOLS.map(tool => tool.canonicalName));
   const mcp = [
@@ -197,6 +207,8 @@ export function buildGroupMainAgentToolContext(input: {
     message: input.message,
     groupSessionId: input.groupSessionId || input.group_session_id || "",
     selectedRoleSkills,
+    contextPolicy,
+    contextBudget: shared.contextBudget,
   };
 }
 
@@ -208,36 +220,95 @@ export async function executeGroupMainAgentToolRequests(input: {
   requests: GroupMainToolRequest[];
   toolContext: any;
   executeToolCall?: (name: string, args: any, scope?: ToolScope) => Promise<string>;
+  toolBatchSize?: number;
+  readOnlyParallelism?: number;
 }) {
-  const builtinRequests = input.requests.filter(request => GROUP_MAIN_BUILTIN_TOOLS.some(tool => tool.canonicalName === request.name));
-  const configuredRequests = input.requests.filter(request => !GROUP_MAIN_BUILTIN_TOOLS.some(tool => tool.canonicalName === request.name));
-  const builtinRows: any[] = [];
-  for (const request of builtinRequests.slice(0, 2)) {
+  const batchSize = Math.max(1, Math.min(8, Math.floor(Number(input.toolBatchSize || 2))));
+  const readOnlyParallelism = Math.max(1, Math.min(8, Math.floor(Number(input.readOnlyParallelism || 2))));
+  const requests = input.requests.slice(0, batchSize);
+  const executeOne = async (request: GroupMainToolRequest) => {
+    const groupId = String(input.toolContext?.group?.id || "");
+    const exactSessionId = String(input.toolContext?.groupSessionId || input.toolContext?.group_session_id || "");
+    const generation = Math.max(0, Number(input.toolContext?.scopeIdentity?.generation || 0));
+    const toolCallId = `gmtool_${crypto.createHash("sha256").update(JSON.stringify({ groupId, exactSessionId, name: request.name, arguments: request.arguments, at: Date.now(), nonce: crypto.randomBytes(4).toString("hex") })).digest("hex").slice(0, 24)}`;
     const startedAt = Date.now();
-    try {
-      let rawOutput: any;
-      if (request.name === "query_knowledge") {
-        const projects = getRoutableMembers(input.toolContext.group).map((member: any) => ({ name: String(member?.project || "") })).filter((item: any) => item.name);
-        rawOutput = await searchAgentKnowledge(String(request.arguments?.query || input.toolContext.message || ""), {
-          role: "group-main-agent",
-          groupId: String(input.toolContext.group?.id || ""),
-          projects,
-        }, { limit: 6 });
-      } else throw new Error(`未知群聊内置工具：${request.name}`);
-      const modelOutput = { context: rawOutput.context, citations: rawOutput.citations, retrievalMode: rawOutput.embeddingMode, indexGeneration: rawOutput.indexGeneration };
-      const output = JSON.stringify(modelOutput);
-      const outputTokens = estimateTextTokens(output);
-      builtinRows.push(outputTokens > 8_000
-        ? { name: request.name, itemName: request.name, toolKind: "mcp", ok: false, error: "GROUP_MAIN_TOOL_RESULT_EXCEEDS_8K_TOKEN_BUDGET", outputTokens, reason: request.reason }
-        : { name: request.name, itemName: request.name, toolKind: "internal_mcp", source: "ccm__knowledge_context", scope: "group", loaded: true, durationMs: Date.now() - startedAt, ok: true, output, rawOutput, outputTokens, resultChecksum: crypto.createHash("sha256").update(output).digest("hex"), reason: request.reason });
-    } catch (error: any) {
-      builtinRows.push({ name: request.name, itemName: request.name, toolKind: "mcp", ok: false, error: String(error?.message || error).slice(0, 1000), reason: request.reason });
+    if (groupId && exactSessionId) appendToolProjection({
+      scope: "group", scopeId: groupId, exactSessionId, generation,
+      eventType: "tool_started", toolName: request.name, toolCallId,
+      arguments: request.arguments || {}, parallelGroupId: input.toolContext?.parallelGroupId,
+      display: { summary: request.reason || "正在执行" },
+    });
+    const isBuiltin = GROUP_MAIN_BUILTIN_TOOLS.some(tool => tool.canonicalName === request.name);
+    let row: any;
+    if (!isBuiltin) {
+      try {
+        const rows = await executeMainAgentToolRequests({
+          ...input,
+          requests: [request],
+          resultTokenLimit: 8_000,
+          toolBatchSize: 1,
+          readOnlyParallelism,
+        });
+        row = rows[0];
+      } catch (error: any) {
+        row = { name: request.name, itemName: request.name, toolKind: "mcp", ok: false, error: String(error?.message || error).slice(0, 1000), reason: request.reason };
+      }
+    } else {
+      try {
+        let rawOutput: any;
+        if (request.name === "query_knowledge") {
+          const projects = getRoutableMembers(input.toolContext.group).map((member: any) => ({ name: String(member?.project || "") })).filter((item: any) => item.name);
+          rawOutput = await searchAgentKnowledge(String(request.arguments?.query || input.toolContext.message || ""), {
+            role: "group-main-agent",
+            groupId: String(input.toolContext.group?.id || ""),
+            projects,
+          }, { limit: 6, continuityIdentity: { agentKind: "group", scope: "group", scopeId: String(input.toolContext.group?.id || ""), exactSessionId: String(input.toolContext.groupSessionId || ""), generation: Number(input.toolContext.scopeIdentity?.generation || 0) } });
+        } else throw new Error(`未知群聊内置工具：${request.name}`);
+        const modelOutput = { context: rawOutput.context, citations: rawOutput.citations, retrievalMode: rawOutput.embeddingMode, indexGeneration: rawOutput.indexGeneration };
+        const output = JSON.stringify(modelOutput);
+        const outputTokens = estimateTextTokens(output);
+        row = outputTokens > 8_000
+          ? { name: request.name, itemName: request.name, toolKind: "mcp", ok: false, error: "GROUP_MAIN_TOOL_RESULT_EXCEEDS_8K_TOKEN_BUDGET", outputTokens, reason: request.reason }
+          : { name: request.name, itemName: request.name, toolKind: "internal_mcp", source: "ccm__knowledge_context", scope: "group", loaded: true, durationMs: Date.now() - startedAt, ok: true, output, rawOutput, outputTokens, resultChecksum: crypto.createHash("sha256").update(output).digest("hex"), reason: request.reason };
+      } catch (error: any) {
+        row = { name: request.name, itemName: request.name, toolKind: "mcp", ok: false, error: String(error?.message || error).slice(0, 1000), reason: request.reason };
+      }
     }
+    if (groupId && exactSessionId) appendToolProjection({
+      scope: "group", scopeId: groupId, exactSessionId, generation,
+      eventType: row?.ok === false ? "tool_failed" : "tool_completed",
+      toolName: request.name, toolCallId, arguments: request.arguments || {},
+      result: row, error: row?.ok === false ? row?.error || "工具执行失败" : "",
+      durationMs: Number(row?.durationMs || Date.now() - startedAt), outputTokens: Number(row?.outputTokens || 0),
+      parallelGroupId: input.toolContext?.parallelGroupId,
+      display: { summary: row?.ok === false ? row?.error || "工具执行失败" : "执行完成" },
+    });
+    return { ...row, toolCallId };
+  };
+  const isSafeReadOnly = (request: GroupMainToolRequest) => {
+    if (GROUP_MAIN_BUILTIN_TOOLS.some(tool => tool.canonicalName === request.name)) return true;
+    if (["tool_search", "invoke_skill"].includes(request.name)) return false;
+    const catalog = [
+      ...(input.toolContext?.catalog?.mcp || []),
+      ...(input.toolContext?.catalog?.loadedMcp || []),
+    ];
+    return isMainAgentReadOnlyMcpTool(catalog.find((tool: any) => request.name === tool?.canonicalName || request.name === tool?.name));
+  };
+  const rows: any[] = [];
+  for (let index = 0; index < requests.length;) {
+    if (!isSafeReadOnly(requests[index])) {
+      rows.push(await executeOne(requests[index]));
+      index += 1;
+      continue;
+    }
+    const readBatch: GroupMainToolRequest[] = [];
+    while (index < requests.length && isSafeReadOnly(requests[index]) && readBatch.length < readOnlyParallelism) {
+      readBatch.push(requests[index]);
+      index += 1;
+    }
+    rows.push(...await Promise.all(readBatch.map(executeOne)));
   }
-  const configuredRows = configuredRequests.length
-    ? await executeMainAgentToolRequests({ ...input, requests: configuredRequests, resultTokenLimit: 8_000 })
-    : [];
-  return [...builtinRows, ...configuredRows].map(row => row.error === "MAIN_AGENT_TOOL_NOT_AUTHORIZED"
+  return rows.map(row => row.error === "MAIN_AGENT_TOOL_NOT_AUTHORIZED"
     ? { ...row, error: "GROUP_MAIN_TOOL_NOT_AUTHORIZED" }
     : row.error === "MAIN_AGENT_TOOL_SCHEMA_NOT_LOADED"
       ? { ...row, error: "GROUP_MAIN_TOOL_SCHEMA_NOT_LOADED" }
@@ -647,6 +718,8 @@ export function buildLlmCoordinatorMessages(input: {
 
 ${WORKFLOW_DECISION_GUIDANCE}
 
+${CONVERSATIONAL_REPLY_STYLE_GUIDANCE}
+
 你必须先根据完整语义生成 workflowDecision，再决定回答、只读分析、直接派发、先计划或拆 Epic。不得用附件、关键词或文本长度机械触发任务/拆解。
 
 你可以使用大模型理解用户需求，但你不是项目开发 Agent：
@@ -657,6 +730,8 @@ ${WORKFLOW_DECISION_GUIDANCE}
 - 你的输出会被系统直接执行，targets 不是建议，而是真实派单。
 - 不要为了显得忙而分派；只有需要项目上下文、代码确认、修改、验证或跨项目联调时才分派。
 - Coordinator 不写代码、不直接操作项目文件系统、不运行命令；对于开发任务，必须先使用系统注入的只读源码证据完成影响分析、架构边界和工作项规划。Worker 负责重新读取当前源码、实现、验证和回执。
+- 工具结果会回到同一 Agent Loop；形成自包含工作单所需事实未齐时可以继续调用。互不依赖的只读请求可同轮并行；有副作用、权限变化或依赖关系的请求必须串行。
+- 对代码任务只做形成项目目标、WorkItem、验收标准、依赖和权限边界所必需的最小核实；材料足够后立即结束规划并派发项目 Agent，不在主 Agent 内继续做 Worker 的实现探索。
 - 如果系统注入了“只读项目分析上下文”，你可以基于这些已提供的项目配置、项目记忆、目录摘要和知识库召回回答用户；这不代表用户授权修改、运行命令或派发子 Agent。
 - 按本轮注入的 Skill 完成需求提炼、任务拆解和文档条款追踪；Skill 是执行方法，不是可忽略的参考材料。
 - 子 Agent 看不到完整对话，targets[].task 必须是自包含工作单；依赖关系和重规划条件必须有业务或技术依据。
@@ -1175,28 +1250,64 @@ export async function runLlmGroupOrchestrator(input: {
   const providedWorkflowDecision = input.workflowDecision || input.workflow_decision || null;
   const workflowDecision = providedWorkflowDecision
     ? normalizeWorkflowDecision(providedWorkflowDecision)
-    : normalizeWorkflowDecision({});
+    : null;
   const fallbackAnalysis = {
-    intent: workflowDecision.intentKind,
+    intent: workflowDecision?.intentKind || "conversation",
     summary: String(input.message || "").trim(),
     domains: [],
     deliverables: [],
     constraints: [],
     documentFindings: [],
-    missingInfo: workflowDecision.clarificationQuestions,
-    needsCoordination: workflowDecision.actionRequired,
+    missingInfo: workflowDecision?.clarificationQuestions || [],
+    needsCoordination: workflowDecision?.actionRequired === true,
     coordinationStrategy: "model_selected",
-    confidence: workflowDecision.confidence,
+    confidence: workflowDecision?.confidence ?? 0,
     workflowDecision,
   };
   const groupSessionId = String(input.groupSessionId || input.group_session_id || "").trim();
+  const visibleTurnId = String((input as any).turnId || (input as any).turn_id || `${group.id}:${groupSessionId}:${Date.now()}`);
+  if (group.id && groupSessionId) {
+    appendUserVisibleAgentEvent({
+      eventId: `group-turn:${visibleTurnId}:started`,
+      scope: "group", scopeId: String(group.id), exactSessionId: groupSessionId,
+      eventType: "turn_started",
+      display: { title: "群聊主 Agent", summary: "已开始处理当前请求", status: "running" },
+    });
+    appendUserVisibleAgentEvent({
+      eventId: `group-turn:${visibleTurnId}:thinking`,
+      scope: "group", scopeId: String(group.id), exactSessionId: groupSessionId,
+      eventType: "thinking_status",
+      display: { title: "正在思考", summary: "正在核对成员、上下文和协作计划", status: "running" },
+    });
+  }
   const anthropic = shouldUseAnthropic(config);
   let tokenUsage: LlmTokenUsage | null = null;
   let modelCallCount = 0;
   const retryNotices: any[] = [];
+  const loopBudget = resolveAgentLoopBudget({
+    enabled: config.dynamicAgentBudgetEnabled !== false,
+    adaptive: config.adaptiveAgentLoopEnabled !== false,
+    contextWindow: config.modelContextWindow || 200_000,
+    toolCallBudget: config.agentToolCallBudget || 6,
+    maxModelTurns: config.agentMaxModelTurns || 8,
+    toolBatchSize: config.agentToolBatchSize || 2,
+    readOnlyParallelism: config.agentReadOnlyParallelism || 2,
+    noProgressThreshold: config.agentLoopNoProgressThreshold || 3,
+    remainingSafeTokens: Math.floor((config.modelContextWindow || 200_000) * 0.65),
+  });
+  let toolCallCount = 0;
+  let toolRoundCount = 0;
+  let segmentToolCalls = 0;
+  let segmentModelTurns = 0;
+  let segmentStartedAt = Date.now();
+  let continuationSegments = 0;
+  let noProgressCount = 0;
+  let loopStopReason = "model_completed";
   const callPlanningModel = async (roundInput: any, round: number) => {
     modelCallCount += 1;
+    segmentModelTurns += 1;
     const messages = buildLlmCoordinatorMessages(roundInput);
+    const roundToolContext = buildGroupMainAgentToolContext(roundInput);
     const estimatedContextTokens = messages.reduce((sum: number, message: any) => {
       return sum + estimateTextTokens(String(message?.content || ""));
     }, 0);
@@ -1242,6 +1353,8 @@ export async function runLlmGroupOrchestrator(input: {
           httpErrorPrefix: "主 Agent API 调用失败",
           promptCacheTracking: { groupId: group.id, groupSessionId, source: round > 0 ? `group_main_tool_followup_${round}` : "group_main_planning" },
           onUsage: captureTokenUsage,
+          nativeTools: [...(roundToolContext.catalog.loadedMcp || roundToolContext.catalog.mcp || []).map((tool: any) => ({ ...tool, deferred: false })), ...(roundToolContext.catalog.discoverableMcp || []).map((tool: any) => ({ ...tool, deferred: true }))].map((tool: any) => ({ name: String(tool.canonicalName || tool.name || ""), description: String(tool.description || ""), inputSchema: tool.inputSchema || { type: "object", properties: {} }, deferred: tool.deferred === true })).filter((tool: any) => tool.name),
+          nativeToolReference: true,
         })
       : await callOpenAiCompatibleJson(config, {
           messages,
@@ -1255,6 +1368,8 @@ export async function runLlmGroupOrchestrator(input: {
           httpErrorPrefix: "主 Agent API 调用失败",
           promptCacheTracking: { groupId: group.id, groupSessionId, source: round > 0 ? `group_main_tool_followup_${round}` : "group_main_planning" },
           onUsage: captureTokenUsage,
+          nativeTools: [...(roundToolContext.catalog.loadedMcp || roundToolContext.catalog.mcp || []).map((tool: any) => ({ ...tool, deferred: false })), ...(roundToolContext.catalog.discoverableMcp || []).map((tool: any) => ({ ...tool, deferred: true }))].map((tool: any) => ({ name: String(tool.canonicalName || tool.name || ""), description: String(tool.description || ""), inputSchema: tool.inputSchema || { type: "object", properties: {} }, deferred: tool.deferred === true })).filter((tool: any) => tool.name),
+          nativeToolReference: true,
         });
     return { parsed, messages, providerPayload };
   };
@@ -1263,22 +1378,59 @@ export async function runLlmGroupOrchestrator(input: {
   const toolResults: any[] = [];
   const executed = new Set<string>();
   try {
-    for (let round = 0; round <= 2; round += 1) {
+    while (true) {
+      const round = toolRoundCount;
       const response = await callPlanningModel(planningInput, round);
       parsed = response.parsed;
       const requests = normalizeGroupMainToolRequests(parsed?.toolRequests || parsed?.tool_requests);
-      if (requests.length === 0) break;
-      if (round >= 2) throw new Error("GROUP_MAIN_TOOL_LOOP_MAX_ROUNDS");
+      if (requests.length === 0) {
+        loopStopReason = "model_completed";
+        break;
+      }
       const freshRequests = requests.filter(request => {
         const fingerprint = crypto.createHash("sha256").update(JSON.stringify({ name: request.name, arguments: request.arguments })).digest("hex");
-        if (executed.has(fingerprint)) return false;
-        executed.add(fingerprint);
-        return true;
+        return !executed.has(fingerprint);
       });
-      if (freshRequests.length === 0) throw new Error("GROUP_MAIN_TOOL_LOOP_DUPLICATE_REQUEST");
+      if (freshRequests.length === 0) {
+        noProgressCount += 1;
+        toolResults.push({
+          name: "loop_control",
+          ok: false,
+          error: "GROUP_MAIN_TOOL_LOOP_DUPLICATE_REQUEST",
+          reason: "相同工具和参数已经执行，请基于已有结果完成协调、调整计划或选择不同的工具。",
+        });
+        planningInput = { ...planningInput, mainAgentToolResults: toolResults };
+        if (noProgressCount >= loopBudget.noProgressThreshold) {
+          loopStopReason = "no_progress";
+          throw new Error("GROUP_MAIN_TOOL_LOOP_NO_PROGRESS");
+        }
+        toolRoundCount += 1;
+        continue;
+      }
+      if (loopBudget.mode === "bounded" && round >= loopBudget.maxToolRounds) throw new Error("GROUP_MAIN_TOOL_LOOP_MAX_ROUNDS");
+      const remainingToolCalls = loopBudget.mode === "bounded"
+        ? Math.max(0, loopBudget.toolCallBudget - toolCallCount)
+        : loopBudget.toolBatchSize;
+      if (!remainingToolCalls) throw new Error("GROUP_MAIN_TOOL_LOOP_TOOL_BUDGET");
       const toolContext = buildGroupMainAgentToolContext(planningInput);
-      const roundResults = await executeGroupMainAgentToolRequests({ requests: freshRequests, toolContext });
+      const selectedRequests = freshRequests.slice(0, Math.min(loopBudget.toolBatchSize, remainingToolCalls));
+      for (const request of selectedRequests) {
+        executed.add(crypto.createHash("sha256").update(JSON.stringify({ name: request.name, arguments: request.arguments })).digest("hex"));
+      }
+      const roundResults = await executeGroupMainAgentToolRequests({
+        requests: selectedRequests,
+        toolContext,
+        toolBatchSize: loopBudget.toolBatchSize,
+        readOnlyParallelism: loopBudget.readOnlyParallelism,
+      });
+      toolCallCount += roundResults.length;
+      segmentToolCalls += roundResults.length;
       toolResults.push(...roundResults);
+      noProgressCount = roundResults.some((row: any) => row?.ok === true) ? 0 : noProgressCount + 1;
+      if (noProgressCount >= loopBudget.noProgressThreshold) {
+        loopStopReason = "no_progress";
+        throw new Error("GROUP_MAIN_TOOL_LOOP_NO_PROGRESS");
+      }
       const knowledgeResult = [...roundResults].reverse().find((row: any) => row.name === "query_knowledge" && row.ok && row.rawOutput);
       planningInput = {
         ...planningInput,
@@ -1297,6 +1449,26 @@ export async function runLlmGroupOrchestrator(input: {
       const threshold = getGroupAutoCompactThreshold(config);
       if (hydratedPayload.totalTokens >= threshold) {
         throw new Error(`GROUP_MAIN_TOOL_RESULT_PAYLOAD_BLOCKED:${hydratedPayload.totalTokens}/${threshold}`);
+      }
+      toolRoundCount += 1;
+      const continuation = shouldContinueAgentLoop({
+        budget: loopBudget,
+        round: toolRoundCount,
+        modelTurns: segmentModelTurns,
+        toolCalls: segmentToolCalls,
+        elapsedMs: Date.now() - segmentStartedAt,
+        unresolvedCriteria: 1,
+        noProgressCount,
+      });
+      if (!continuation.continue) {
+        loopStopReason = continuation.reason;
+        throw new Error(`GROUP_MAIN_TOOL_LOOP_${continuation.reason.toUpperCase()}`);
+      }
+      if (continuation.resetSegment) {
+        continuationSegments += 1;
+        segmentToolCalls = 0;
+        segmentModelTurns = 0;
+        segmentStartedAt = Date.now();
       }
     }
   } catch (error: any) {
@@ -1321,6 +1493,28 @@ export async function runLlmGroupOrchestrator(input: {
     usage: tokenUsage,
     inputIdentity: { groupId: group.id, groupSessionId, message: input.message },
   });
+  if (group.id && groupSessionId && ["reply", "clarify"].includes(turnDecision.responseKind)) {
+    const reply = String(parsed?.reply || parsed?.content || parsed?.summary || "");
+    publishUserVisibleAssistantText({
+      scope: "group", scopeId: String(group.id), exactSessionId: groupSessionId,
+      taskId: String((input as any).taskId || (input as any).task_id || ""),
+      turnId: visibleTurnId, text: reply, title: "群聊主 Agent 回复",
+    });
+    appendUserVisibleAgentEvent({
+      eventId: `group-turn:${visibleTurnId}:result`,
+      scope: "group", scopeId: String(group.id), exactSessionId: groupSessionId,
+      eventType: turnDecision.responseKind === "clarify" ? "clarification_required" : "result",
+      display: {
+        title: turnDecision.responseKind === "clarify" ? "需要补充信息" : "回复完成",
+        summary: turnDecision.responseKind === "clarify" ? reply : "群聊主 Agent 已完成本轮回复",
+        status: turnDecision.responseKind === "clarify" ? "waiting" : "success",
+        toolUseCount: toolCallCount,
+        tokenCount: Number(tokenUsage?.totalTokens || 0),
+      },
+      result: buildUserVisibleAgentResult({ status: turnDecision.responseKind === "clarify" ? "waiting" : "success", text: reply, turns: modelCallCount, toolCalls: toolCallCount, usage: tokenUsage }),
+      usage: tokenUsage,
+    });
+  }
   return {
     ...buildCoordinatorResultFromAnalysis(group, input.message, analysis, targets, "llm-api", parsed, planningInput),
     usage: tokenUsage,
@@ -1332,10 +1526,16 @@ export async function runLlmGroupOrchestrator(input: {
       retries: retryNotices,
     },
     mainAgentToolUsage: {
-      schema: "ccm-group-main-tool-usage-v1",
+      schema: "ccm-group-main-tool-usage-v2",
       groupId: String(group.id || ""),
       groupSessionId,
-      calls: toolResults.length,
+      mode: loopBudget.mode,
+      modelCalls: modelCallCount,
+      toolRounds: toolRoundCount,
+      calls: toolCallCount,
+      continuationSegments,
+      noProgressCount,
+      stopReason: loopStopReason,
       results: toolResults.map(row => ({ name: row.name, ok: row.ok, outputTokens: row.outputTokens || 0, error: row.error || "" })),
     },
   };

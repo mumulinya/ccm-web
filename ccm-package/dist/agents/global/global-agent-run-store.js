@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.GLOBAL_AGENT_TOOL_SPECS = exports.activeRunObjects = exports.volatileRuns = exports.cancelRequests = exports.pauseRequests = exports.activeRuns = exports.LIGHT_UI_TOOL_NAMES = exports.GLOBAL_DISPATCH_TOOL_NAMES = exports.MAX_OBSERVATION_CHARS = exports.MAX_STORED_RUNS = exports.STORE_BACKUP = exports.STORE_FILE = exports.STORE_DIR = void 0;
+exports.GLOBAL_AGENT_TOOL_SPECS = exports.activeRunObjects = exports.volatileRuns = exports.cancelRequests = exports.pauseRequests = exports.activeRuns = exports.LIGHT_UI_TOOL_NAMES = exports.GLOBAL_DISPATCH_TOOL_NAMES = exports.RECENT_RUNS_KEPT_INTACT = exports.MAX_ARCHIVED_RUN_FIELD_BYTES = exports.MAX_OBSERVATION_CHARS = exports.MAX_STORED_RUNS = exports.STORE_BACKUP = exports.STORE_FILE = exports.STORE_DIR = void 0;
 exports.invalidateGlobalAgentRunStoreCache = invalidateGlobalAgentRunStoreCache;
 exports.destructiveOperation = destructiveOperation;
 exports.writeJsonAtomic = writeJsonAtomic;
@@ -62,11 +62,16 @@ const utils_1 = require("../../core/utils");
 const reliability_ledger_1 = require("../../system/reliability-ledger");
 const reasoning_loop_1 = require("../reasoning-loop");
 const workspace_readonly_tools_1 = require("../../tools/workspace-readonly-tools");
+const context_source_tool_result_projection_1 = require("../../system/context-source-tool-result-projection");
 exports.STORE_DIR = path.join(utils_1.CCM_DIR, "global-agent-runs");
 exports.STORE_FILE = path.join(exports.STORE_DIR, "runs.json");
 exports.STORE_BACKUP = `${exports.STORE_FILE}.bak`;
 exports.MAX_STORED_RUNS = 120;
 exports.MAX_OBSERVATION_CHARS = 4_000;
+/** 单条历史 run 的展示类字段落盘上限。仅约束已终态的旧 run，活跃 run 不受影响。 */
+exports.MAX_ARCHIVED_RUN_FIELD_BYTES = 32 * 1024;
+/** 展示类字段中最近保留多少条 run 不做归档收缩（按 updated_at 倒序）。 */
+exports.RECENT_RUNS_KEPT_INTACT = 12;
 exports.GLOBAL_DISPATCH_TOOL_NAMES = ["orchestrate_development", "create_requirement_epic", "send_group_cmd", "send_project_cmd", "create_task"];
 /** 浏览器 UI 副作用：按轻量 reply 展示，不挂交付脚手架 */
 exports.LIGHT_UI_TOOL_NAMES = ["play_music", "stop_music", "navigate"];
@@ -82,15 +87,19 @@ function invalidateGlobalAgentRunStoreCache() {
 function truncateStepObservation(step) {
     if (!step || typeof step !== "object" || step.observation === undefined)
         return step;
+    const persistedToolName = step?.tool?.name === "invoke_mcp"
+        ? (step?.tool?.arguments?.tool_name || step?.tool?.arguments?.toolName || step?.tool?.name)
+        : (step?.tool?.name || step?.tool);
+    const persistedObservation = (0, context_source_tool_result_projection_1.projectContextSourceToolResultForPersistence)(persistedToolName, step.observation);
     let serialized = "";
     try {
-        serialized = typeof step.observation === "string" ? step.observation : JSON.stringify(step.observation);
+        serialized = typeof persistedObservation === "string" ? persistedObservation : JSON.stringify(persistedObservation);
     }
     catch {
         serialized = String(step.observation);
     }
     if (serialized.length <= exports.MAX_OBSERVATION_CHARS)
-        return step;
+        return persistedObservation === step.observation ? step : { ...step, observation: persistedObservation };
     return {
         ...step,
         observation: {
@@ -99,6 +108,46 @@ function truncateStepObservation(step) {
             original_chars: serialized.length,
         },
     };
+}
+const ARCHIVED_RUN_BOUNDED_FIELDS = ["display_stream", "workchain", "final_report", "final_delivery_report", "reasoning_loop", "history"];
+const RUN_TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled", "canceled", "error", "timeout"]);
+/**
+ * 归档收缩：只对已终态且不在最近 N 条内的 run 生效。
+ * 超限字段替换为可识别的收缩标记而不是直接删除，让回放侧能明确告知用户
+ * "此处内容已归档收缩" ——而不是渲染成一片空白让人以为运行没有产出。
+ */
+function boundArchivedRunFields(run, keepIntact) {
+    if (keepIntact)
+        return run;
+    if (!RUN_TERMINAL_STATUSES.has(String(run?.status || "").toLowerCase()))
+        return run;
+    let next = run;
+    for (const field of ARCHIVED_RUN_BOUNDED_FIELDS) {
+        const value = next?.[field];
+        if (value === undefined || value === null)
+            continue;
+        let serialized = "";
+        try {
+            serialized = JSON.stringify(value) || "";
+        }
+        catch {
+            continue;
+        }
+        if (Buffer.byteLength(serialized) <= exports.MAX_ARCHIVED_RUN_FIELD_BYTES)
+            continue;
+        if (next === run)
+            next = { ...run };
+        next[field] = {
+            ccm_archived_shrunk: true,
+            schema: "ccm-archived-run-field-v1",
+            field,
+            original_bytes: Buffer.byteLength(serialized),
+            limit_bytes: exports.MAX_ARCHIVED_RUN_FIELD_BYTES,
+            note: "历史运行的展示内容已归档收缩，仅保留摘要预览。完整过程见该 run 的日志与转录。",
+            preview: serialized.slice(0, 2_000),
+        };
+    }
+    return next;
 }
 function destructiveOperation(args) {
     return ["delete", "remove", "remove_member", "purge", "drop"].includes(String(args?.operation || "").toLowerCase());
@@ -295,13 +344,20 @@ function saveRun(run, persist = true) {
     store.runs = store.runs
         .sort((a, b) => String(b.updated_at).localeCompare(String(a.updated_at)))
         .slice(0, exports.MAX_STORED_RUNS);
-    writeJsonAtomic(exports.STORE_FILE, store);
+    // 落盘投影：不改内存里的 run 对象，只收缩写入磁盘的历史副本。
+    // normalizeRun 同时服务 loadStore，收缩若下沉进去会把降级记录回灌进
+    // 内存缓存和 activeRunObjects，损坏正在执行的 run。
+    const persistedRuns = store.runs.map((item, index) => boundArchivedRunFields(item, index < exports.RECENT_RUNS_KEPT_INTACT || item.id === run.id));
+    writeJsonAtomic(exports.STORE_FILE, { ...store, runs: persistedRuns });
     let mtimeMs = Date.now();
     try {
         mtimeMs = fs.statSync(exports.STORE_FILE).mtimeMs;
     }
     catch { }
-    runStoreCache = { version: 1, runs: store.runs.slice(), mtimeMs };
+    // 缓存必须与磁盘一致：mtime 命中时 loadStore 直接返回缓存，若这里存未收缩的
+    // 副本，重启前后同一个 run 会读到两种内容。活跃 run 由 activeRunObjects 持有，
+    // 不依赖这份缓存。
+    runStoreCache = { version: 1, runs: persistedRuns.slice(), mtimeMs };
 }
 function getGlobalAgentRun(id) {
     return exports.activeRunObjects.get(id) || exports.volatileRuns.get(id) || loadStore().runs.find(run => run.id === id) || null;

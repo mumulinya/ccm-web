@@ -19,6 +19,8 @@ export declare function executeGroupMainAgentToolRequests(input: {
     requests: GroupMainToolRequest[];
     toolContext: any;
     executeToolCall?: (name: string, args: any, scope?: ToolScope) => Promise<string>;
+    toolBatchSize?: number;
+    readOnlyParallelism?: number;
 }): Promise<any[]>;
 export declare function attachLlmTokenUsage(error: any, usage: LlmTokenUsage | null): any;
 export declare function runLlmCoordinatorSummary(group: any, userMessage: string, outputs: string[], options?: any): Promise<{
@@ -76,10 +78,15 @@ export declare function buildLlmCoordinatorMessages(input: {
     mainAgentToolResults?: any[];
     main_agent_tool_results?: any[];
     workflowDecision?: WorkflowDecision | null;
-}): {
+}): ({
     role: string;
     content: string;
-}[];
+    contextBlockType?: undefined;
+} | {
+    role: string;
+    contextBlockType: string;
+    content: any;
+})[];
 export declare function buildLlmCoordinatorContextComponents(input: {
     group: any;
     message: string;
@@ -201,7 +208,13 @@ export declare function runLlmGroupOrchestrator(input: {
         schema: string;
         groupId: string;
         groupSessionId: string;
+        mode: import("../../system/agent-loop-budget").AgentLoopMode;
+        modelCalls: number;
+        toolRounds: number;
         calls: number;
+        continuationSegments: number;
+        noProgressCount: number;
+        stopReason: string;
         results: {
             name: any;
             ok: any;
@@ -253,7 +266,13 @@ export declare function runLlmGroupOrchestrator(input: {
         schema: string;
         groupId: string;
         groupSessionId: string;
+        mode: import("../../system/agent-loop-budget").AgentLoopMode;
+        modelCalls: number;
+        toolRounds: number;
         calls: number;
+        continuationSegments: number;
+        noProgressCount: number;
+        stopReason: string;
         results: {
             name: any;
             ok: any;

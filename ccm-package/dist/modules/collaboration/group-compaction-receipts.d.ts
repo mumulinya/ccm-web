@@ -72,6 +72,8 @@ export declare const GROUP_API_MICROCOMPACT_CLEARABLE_USES: string[];
 export type ConversationSummary = {
     primaryRequest: string;
     userMessages: string[];
+    /** Explicitly unverified assumptions. Items stay hypotheses across compaction. */
+    hypotheses: string[];
     keyConcepts: string[];
     filesAndCode: string[];
     errorsAndFixes: string[];

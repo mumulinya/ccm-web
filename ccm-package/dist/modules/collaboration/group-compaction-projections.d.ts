@@ -395,8 +395,8 @@ export declare function buildPostCompactReinjectionPlan(messages: any[], microCo
         skills: number;
         verification: number;
         taskStatuses: number;
-        invokedSkillSingleTokens: number;
-        invokedSkillsTotalTokens: number;
+        invokedSkillSingleTokens: any;
+        invokedSkillsTotalTokens: any;
         currentPlanTokens: number;
         dynamicContextTokens: number;
     };
@@ -515,8 +515,8 @@ export declare function buildGroupPartialCompactSidecarSegment(input: any): {
             skills: number;
             verification: number;
             taskStatuses: number;
-            invokedSkillSingleTokens: number;
-            invokedSkillsTotalTokens: number;
+            invokedSkillSingleTokens: any;
+            invokedSkillsTotalTokens: any;
             currentPlanTokens: number;
             dynamicContextTokens: number;
         };

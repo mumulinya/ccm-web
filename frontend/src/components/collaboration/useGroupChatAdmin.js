@@ -4,7 +4,7 @@ import { toast, confirmDialog } from '../../utils/toast.js'
 import { buildGroupConversationKnowledgePayload, postKnowledgeCapture } from '../../utils/knowledgeCapture.js'
 import { normalizeGroupTools } from './groupChatHelpers.js'
 
-export function useGroupChatAdmin({ currentGroup, groups, projects, messages, groupMemory, currentGroupSessionId, showCreate, showRename, showMembers, showTools, showTestTargets, showSharedFiles, showLogs, newGroupName, renameName, groupTools, groupAllTools, groupToolAudit, groupAuthorizationReadiness, groupConnectionPreflight, groupToolVerification, loadGroups, selectGroup }) {
+export function useGroupChatAdmin({ currentGroup, groups, projects, messages, groupMemory, currentGroupSessionId, showCreate, showRename, showMembers, showTools, showTestTargets, showSharedFiles, showLogs, newGroupName, renameName, groupTools, groupAllTools, groupToolAudit, groupAuthorizationReadiness, groupConnectionPreflight, groupToolVerification, groupContextPolicy, loadGroups, selectGroup }) {
   const updateCreateGroupProjectSelection = ({ name, selected }) => {
     const project = projects.value.find(p => p.name === name)
     if (project) project.selected = selected
@@ -212,6 +212,7 @@ export function useGroupChatAdmin({ currentGroup, groups, projects, messages, gr
     groupToolAudit.value = data.tool_audit || null
     groupAuthorizationReadiness.value = data.authorization_readiness || null
     groupConnectionPreflight.value = data.connection_preflight || null
+    groupContextPolicy.value = data.contextPolicy || { override: {}, effective: {}, source: 'global_default' }
     const verification = await fetch(`/api/tools/chain-verification?groupId=${encodeURIComponent(currentGroup.value.id)}`).then(r => r.json()).catch(() => ({ rows: [] }))
     groupToolVerification.value = verification.rows?.[0] || null
     showTools.value = true
@@ -237,7 +238,7 @@ export function useGroupChatAdmin({ currentGroup, groups, projects, messages, gr
     const res = await fetch('/api/groups/tools', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ group_id: currentGroup.value.id, tools: groupTools.value })
+      body: JSON.stringify({ group_id: currentGroup.value.id, tools: groupTools.value, contextPolicy: groupContextPolicy.value?.override || {} })
     })
     const data = await res.json()
     if (!data.success) {
@@ -248,11 +249,19 @@ export function useGroupChatAdmin({ currentGroup, groups, projects, messages, gr
     groupToolAudit.value = data.tool_audit || null
     groupAuthorizationReadiness.value = data.authorization_readiness || null
     groupConnectionPreflight.value = data.connection_preflight || null
+    groupContextPolicy.value = data.contextPolicy || groupContextPolicy.value
     showTools.value = false
     if (data.authorization_readiness && data.authorization_readiness.dispatchReady === false) {
       toast.warning('工具配置已保存，但有授权项当前不可用')
     } else {
       toast.success('工具配置已保存')
+    }
+  }
+
+  const updateGroupContextPolicy = ({ field, value }) => {
+    groupContextPolicy.value = {
+      ...groupContextPolicy.value,
+      override: { ...(groupContextPolicy.value?.override || {}), [field]: value },
     }
   }
 
@@ -436,6 +445,7 @@ export function useGroupChatAdmin({ currentGroup, groups, projects, messages, gr
     loadAvailableGroupTools,
     loadGroupTools,
     toggleGroupTool,
+    updateGroupContextPolicy,
     saveGroupTools,
     groupTestTargets,
     groupTestTargetProjects,

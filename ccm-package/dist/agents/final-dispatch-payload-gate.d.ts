@@ -67,6 +67,9 @@ export declare function buildFinalWorkerDispatchPayloadGate(input?: any): {
     estimated_prompt_tokens: number;
     provider_envelope_tokens: number;
     required_hydration_tokens: number;
+    max_bootstrap_tokens: number;
+    bootstrap_limit_enforced: boolean;
+    bootstrap_limit_exceeded: boolean;
     estimated_total_input_tokens: number;
     model_visible_input_tokens: number;
     token_basis: string;

@@ -5,9 +5,10 @@ import path from "node:path";
 import { createRequire } from "node:module";
 
 const root = path.resolve(import.meta.dirname, "..");
-const home = fs.mkdtempSync(path.join(os.tmpdir(), "ccm-third-party-memory-mcp-"));
-process.env.HOME = home;
-process.env.USERPROFILE = home;
+const taskStore = fs.mkdtempSync(path.join(os.tmpdir(), "ccm-third-party-memory-mcp-"));
+process.env.CCM_TASK_STORE_DIR = taskStore;
+process.env.CCM_INTERNAL_MCP_SECRET_FILE = path.join(taskStore, "private", "internal-mcp-context-secret");
+process.env.CCM_INTERNAL_MCP_AUDIT_FILE = path.join(taskStore, "tools", "internal-mcp-invocations.jsonl");
 
 const require = createRequire(import.meta.url);
 const { McpClient } = require(path.join(root, "ccm-package", "dist", "tools", "mcp-client.js"));
@@ -21,8 +22,9 @@ const { extractGroupSessionMemoryBinding } = require(path.join(root, "ccm-packag
 
 const project = "memory-mcp-project";
 const projectSessionId = "s1";
-const workDir = path.join(home, "workspace");
+const workDir = path.join(taskStore, "workspace");
 const contextPlanChecksum = "a".repeat(64);
+const nextContextPlanChecksum = "c".repeat(64);
 const contextIdentityChecksum = "b".repeat(64);
 fs.mkdirSync(workDir, { recursive: true });
 
@@ -79,6 +81,33 @@ function buildServer(snapshot) {
   return { config: servers.ccm__knowledge_context, challenge };
 }
 
+function directContext(snapshot, memoryReadBudgetTokens = 167000) {
+  return {
+    project,
+    projectSessionId,
+    groupId: "",
+    groupSessionId: "",
+    taskAgentSessionId: String(snapshot.identity?.taskAgentSessionId || ""),
+    memorySnapshotId: snapshot.id,
+    memorySnapshotChecksum: snapshot.checksum,
+    memoryReadBudgetTokens,
+  };
+}
+
+function hydrateDirect(snapshot) {
+  const context = directContext(snapshot);
+  snapshotModule.getThirdPartyMemoryManifest(context);
+  let cursor = 0;
+  while (cursor !== null) {
+    const page = snapshotModule.readThirdPartySessionContext(context, { view: "continuity", cursor, max_tokens: 2000 });
+    cursor = page.nextCursor;
+  }
+  if (snapshot.requiredMemoryItemIds.length) {
+    snapshotModule.readThirdPartyMemoryItems(context, snapshot.requiredMemoryItemIds);
+  }
+  snapshotModule.acknowledgeThirdPartyMemoryHydration(context);
+}
+
 async function connect(config) {
   const client = new McpClient(config.command, config.args, config.env);
   assert.equal(await client.connect(), true, JSON.stringify(client.getDiagnostics()));
@@ -97,6 +126,9 @@ try {
   assert.equal(first.mode, "precompact_full_raw");
   assert.ok(first.requiredSegmentIds.length > 1);
   const firstServer = buildServer(first);
+  const bootstrap = snapshotModule.buildThirdPartyMemoryBootstrap(first, firstServer.challenge);
+  assert.match(bootstrap, /max_bootstrap_tokens=32000/);
+  assert.doesNotMatch(bootstrap, /OLDEST_REQUIRED_CONTEXT|禁止修改生产密钥/);
   for (const runtime of ["codex", "claudecode", "cursor"]) {
     const audit = syncRuntimeToolsWithCatalog(workDir, runtime, { mcp: [], skill: [] }, {}, {
       internalMcpServers: { ccm__knowledge_context: firstServer.config },
@@ -134,9 +166,15 @@ try {
     cursor = page.body.nextCursor;
   }
   assert.match(allContent, /OLDEST_REQUIRED_CONTEXT/);
+  const repeatedPage = await call(client, "read_session_context", { view: "continuity", cursor: 0, max_tokens: 2000 });
+  assert.equal(repeatedPage.body.tokens, 0);
+  assert.equal(repeatedPage.body.segments.every(segment => segment.alreadyDelivered === true && segment.contentOmitted === true), true);
   const memory = await call(client, "read_memory_items", { ids: first.requiredMemoryItemIds });
   assert.notEqual(memory.raw.isError, true, memory.body.error);
   assert.match(JSON.stringify(memory.body.items), /禁止修改生产密钥/);
+  const repeatedMemory = await call(client, "read_memory_items", { ids: first.requiredMemoryItemIds });
+  assert.equal(repeatedMemory.body.totalTokens, 0);
+  assert.equal(repeatedMemory.body.items.every(item => item.alreadyDelivered === true && item.contentOmitted === true), true);
 
   const acknowledged = await call(client, "acknowledge_memory_context", {
     challenge_id: firstServer.challenge.challenge_id,
@@ -148,7 +186,7 @@ try {
   assert.notEqual(acknowledged.raw.isError, true, acknowledged.body.error);
   assert.equal(acknowledged.body.state, "loaded");
 
-  const usageRoot = path.join(home, ".cc-connect", "project-memory");
+  const usageRoot = path.join(taskStore, "project-memory");
   const beforeUsage = fs.existsSync(usageRoot) ? fs.readdirSync(usageRoot).length : 0;
   const usage = await call(client, "report_memory_usage", {
     snapshot_id: first.id,
@@ -169,18 +207,42 @@ try {
   assert.equal(mergedReceipt.projectMemory.decisions.length, 1);
   assert.equal(mergedReceipt.memoryMcpUsageReports.length, 1);
 
+  const contextPlanChanged = createSnapshot({ contextPlanChecksum: nextContextPlanChecksum });
+  assert.equal(contextPlanChanged.deliveryMode, "full");
+  assert.equal(contextPlanChanged.rehydrationRequired, true);
+  hydrateDirect(contextPlanChanged);
+
   const delta = createSnapshot({
     taskAgentSessionId: "tas_native_known",
     nativeSessionId: "codex_native_known_after_first_turn",
+    contextPlanChecksum: nextContextPlanChecksum,
     messages: [...messages, { id: "msg_16", role: "user", content: "ONLY_NEW_DELTA" }],
   });
   assert.equal(delta.deliveryMode, "delta");
   assert.deepEqual(delta.segments.filter(segment => segment.required).flatMap(segment => segment.messageIds), ["msg_16"]);
   assert.equal(delta.requiredMemoryItemIds.length, 0);
+  hydrateDirect(delta);
+
+  const memoryVersionChanged = createSnapshot({
+    taskAgentSessionId: "tas_native_known",
+    nativeSessionId: "codex_native_known_after_first_turn",
+    contextPlanChecksum: nextContextPlanChecksum,
+    messages: [...messages, { id: "msg_16", role: "user", content: "ONLY_NEW_DELTA" }],
+    memoryItems: [{ id: "project_required", version: 2, kind: "project_memory", source: project, required: true, content: "必须运行 npm test，禁止修改生产密钥。" }],
+  });
+  assert.equal(memoryVersionChanged.deliveryMode, "delta");
+  assert.deepEqual(memoryVersionChanged.requiredMemoryItemIds, ["project_required"]);
+  hydrateDirect(memoryVersionChanged);
+  const deliveredAudit = snapshotModule.inspectThirdPartyMemoryHydration(directContext(memoryVersionChanged));
+  assert.throws(() => snapshotModule.storeThirdPartyMemorySearchItems(
+    directContext(memoryVersionChanged, Number(deliveredAudit.ledger.deliveredTokens || 0) + 1),
+    [{ id: "over-budget-search", kind: "project_memory", source: project, content: "预算外增量".repeat(100) }],
+  ), /累计记忆读取达到模型容量门禁/);
 
   const compressed = createSnapshot({
     mode: "canonical_summary_recent_raw",
     boundaryGeneration: 1,
+    contextPlanChecksum: nextContextPlanChecksum,
     summary: { primaryRequest: "实现第三方记忆 MCP", decisions: ["签名作用域"] },
     summarySource: "model",
     messages: messages.slice(-6),
@@ -216,15 +278,27 @@ try {
   });
   assert.equal(gate.required_hydration_tokens, 166999);
   assert.equal(gate.status, "recompact_required");
+  const bootstrapGate = buildFinalWorkerDispatchPayloadGate({
+    renderedPrompt: "bootstrap ".repeat(2000),
+    requiredHydrationTokens: 1,
+    maxBootstrapTokens: 1000,
+    modelContextCapacity: { contextWindow: 200000, reservedOutputTokens: 20000, autoCompactBufferTokens: 13000, autoCompactThreshold: 167000 },
+    provider: "codex",
+  });
+  assert.equal(bootstrapGate.status, "bootstrap_limit_exceeded");
+  assert.equal(bootstrapGate.provider_call_allowed, false);
 
   const serverSource = fs.readFileSync(path.join(root, "backend", "server.ts"), "utf8");
   const runnerSource = fs.readFileSync(path.join(root, "backend", "server-agent-runner.ts"), "utf8");
   const groupSource = fs.readFileSync(path.join(root, "backend", "modules", "collaboration", "collaboration-cross-agents.ts"), "utf8");
   assert.match(serverSource, /buildProjectSessionBoundMemoryMcpServer/);
   assert.match(serverSource, /memoryDeliveryMode:\s*memoryMcpEnabled\s*\?\s*"mcp"/);
+  assert.match(serverSource, /memoryReadBudgetTokens = exactThreshold/);
+  assert.match(serverSource, /Bootstrap 超过独立 Token 门禁/);
   assert.match(runnerSource, /第三方 Agent 未完成必需记忆加载/);
   assert.match(groupSource, /buildGroupThirdPartyMemorySnapshot/);
   assert.match(groupSource, /requiredHydrationTokens:\s*thirdPartyMemoryMcpEnabled/);
+  assert.match(groupSource, /remaining_tokens_before_auto_compact/);
   assert.match(groupSource, /ccm-third-party-memory-mcp-reference-v1/);
   const bindingCore = { schema: "ccm-task-agent-group-session-memory-binding-v2", groupId: "g1", groupSessionId: "gcs_1", deliveryReady: true };
   const binding = { ...bindingCore, checksum: hashValue(bindingCore) };
@@ -235,12 +309,18 @@ try {
 
   console.log(JSON.stringify({
     pass: true,
-    checks: 49,
+    checks: 68,
     tools: tools.length,
     project_session_without_task_id: true,
     precompact_full_history_required: true,
     acknowledgement_requires_reads: true,
     same_generation_delta: true,
+    context_plan_change_rehydrates: true,
+    delivered_content_is_deduplicated: true,
+    memory_version_change_redelivers: true,
+    cumulative_hydration_budget_is_fail_closed: true,
+    final_payload_remaining_budget_is_bound_to_mcp: true,
+    bootstrap_is_minimal_and_independently_gated: true,
     compact_boundary_rehydrates: true,
     sibling_scope_rejected: true,
     candidate_write_is_controlled: true,
@@ -249,5 +329,5 @@ try {
   }, null, 2));
 } finally {
   for (const client of clients) client.disconnect();
-  fs.rmSync(home, { recursive: true, force: true });
+  fs.rmSync(taskStore, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 }

@@ -1,5 +1,6 @@
 <script setup>
 import AgentToolsModal from '../common/AgentToolsModal.vue'
+import ContextPolicyFields from '../common/ContextPolicyFields.vue'
 
 defineProps({
   groupName: { type: String, default: '' },
@@ -9,9 +10,10 @@ defineProps({
   authorizationReadiness: { type: Object, default: null },
   connectionPreflight: { type: Object, default: null },
   verificationStatus: { type: Object, default: null },
+  contextPolicy: { type: Object, default: () => ({ override: {}, effective: {} }) },
 })
 
-const emit = defineEmits(['close', 'save', 'toggle-tool'])
+const emit = defineEmits(['close', 'save', 'toggle-tool', 'update-context-policy'])
 </script>
 
 <template>
@@ -27,5 +29,7 @@ const emit = defineEmits(['close', 'save', 'toggle-tool'])
     @close="emit('close')"
     @save="emit('save')"
     @toggle-tool="(type, name) => emit('toggle-tool', type, name)"
-  />
+  >
+    <template #details><ContextPolicyFields :policy="contextPolicy" @update="emit('update-context-policy', $event)" /></template>
+  </AgentToolsModal>
 </template>

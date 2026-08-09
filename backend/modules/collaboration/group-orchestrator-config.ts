@@ -11,6 +11,10 @@ import {
 import { providerNeutralContextCacheCapability } from "../../system/provider-neutral-context-cache";
 import { providerCacheAdapterPublicSummary } from "../../system/provider-context-cache-adapters";
 import { readProviderCacheCapabilityState } from "../../system/provider-cache-capability-registry";
+import { readProviderNativeMicrocompactCapability } from "../../system/provider-native-microcompact-capability";
+import { readProviderNativeToolCapability } from "../../system/provider-native-tool-capability";
+import { probeProviderCacheCapability } from "../../system/provider-cache-capability-probe";
+import { readMainAgentContextPolicy } from "../../tools/main-agent-context-policy";
 
 export const COORDINATOR_PROJECT = "coordinator";
 
@@ -42,6 +46,63 @@ export function defaultOrchestratorConfig() {
     modelContextWindow: 0,
     modelAutoCompactTokenLimit: 0,
     providerContextCacheMode: "auto",
+    codeIntelligenceEnabled: true,
+    codeIndexStartPolicy: "on_demand",
+    codeIndexMaxConcurrentProjects: 1,
+    languageServerManagedInstallEnabled: true,
+    providerNativeToolsMode: "auto",
+    skillForkEnabled: true,
+    webToolsEnabled: true,
+    webFetchBrowserFallbackEnabled: true,
+    webSearchProviderOrder: ["mcp", "brave", "bing", "google"],
+    searchMcpUrl: "",
+    searchMcpToken: "",
+    braveSearchApiKey: "",
+    bingSearchApiKey: "",
+    googleCseApiKey: "",
+    googleCseId: "",
+    notebookToolsEnabled: true,
+    ccStyleExecutionDisplayEnabled: true,
+    mcpToolLoadingMode: "deferred",
+    mcpToolAutoThresholdPercent: 10,
+    skillCatalogBudgetPercent: 1,
+    postCompactSkillPerItemMaxTokens: 5_000,
+    postCompactSkillTotalMaxTokens: 25_000,
+    contextSourceCatalogBudgetPercent: 1,
+    contextSourceHydrationBudgetPercent: 10,
+    postCompactSourcePerItemMaxTokens: 5_000,
+    postCompactSourceTotalMaxTokens: 25_000,
+    agentCommunicationV2Enabled: true,
+    agentRunnerStartTimeoutMs: 60_000,
+    agentAckTimeoutMs: 30_000,
+    agentHeartbeatIntervalMs: 20_000,
+    agentHeartbeatLostTimeoutMs: 90_000,
+    agentLeaseTtlMs: 120_000,
+    agentMaxAttempts: 3,
+    agentMaxParallelPerProject: 2,
+    agentMaxParallelGlobal: 6,
+    // TestAgent 验收链 V2 hardening defaults.  These are deliberately kept
+    // separate from the legacy enabled/self-verification switch: the latter
+    // chooses who verifies, while these fields constrain how verification is
+    // prepared and persisted.
+    testAgentPlannerFallbackMode: "risk_based",
+    testAgentIsolationMode: "sandbox_preferred",
+    testAgentReadonlyCapabilityInjection: true,
+    testAgentSurfaceAuditMode: "strict",
+    testAgentRuntimeFingerprintEnabled: true,
+    testAgentPostReviewSpotCheckMode: "policy",
+    dynamicAgentBudgetEnabled: true,
+    unifiedEvidenceEnabled: true,
+    strictEvidenceFreshnessEnabled: false,
+    deltaRepairEnabled: true,
+    operationRegistryEnabled: true,
+    taskEventReducerShadowWriteEnabled: true,
+    adaptiveAgentLoopEnabled: true,
+    agentLoopNoProgressThreshold: 3,
+    agentToolBatchSize: 2,
+    agentReadOnlyParallelism: 2,
+    agentToolCallBudget: 6,
+    agentMaxModelTurns: 8,
     providerPromptCacheRetention: "in_memory",
     providerNativeCacheEnabled: false,
     providerNativeCacheFamily: "auto",
@@ -99,6 +160,18 @@ export function loadOrchestratorConfig() {
       try { writeStoredOrchestratorConfig({ ...stored, summaryReviewerApiKey: protectedReviewerKey }); } catch {}
       stored.summaryReviewerApiKey = protectedReviewerKey;
     }
+    for (const [field, credentialField] of [
+      ["searchMcpToken", "mcpToken"],
+      ["braveSearchApiKey", "braveApiKey"],
+      ["bingSearchApiKey", "bingApiKey"],
+      ["googleCseApiKey", "googleApiKey"],
+      ["googleCseId", "googleEngineId"],
+    ] as const) {
+      if (stored[field] && !isCredentialReference(stored[field])) {
+        stored[field] = protectCredential("web-search", credentialField, stored[field]);
+        try { writeStoredOrchestratorConfig(stored); } catch {}
+      }
+    }
     return {
       ...defaultOrchestratorConfig(),
       ...stored,
@@ -106,6 +179,11 @@ export function loadOrchestratorConfig() {
       memoryCompactionMode: "model-required",
       apiKey: stored.apiKey ? resolveCredential(stored.apiKey) : "",
       summaryReviewerApiKey: stored.summaryReviewerApiKey ? resolveCredential(stored.summaryReviewerApiKey) : "",
+      searchMcpToken: stored.searchMcpToken ? resolveCredential(stored.searchMcpToken) : "",
+      braveSearchApiKey: stored.braveSearchApiKey ? resolveCredential(stored.braveSearchApiKey) : "",
+      bingSearchApiKey: stored.bingSearchApiKey ? resolveCredential(stored.bingSearchApiKey) : "",
+      googleCseApiKey: stored.googleCseApiKey ? resolveCredential(stored.googleCseApiKey) : "",
+      googleCseId: stored.googleCseId ? resolveCredential(stored.googleCseId) : "",
     };
   } catch {
     return defaultOrchestratorConfig();
@@ -117,6 +195,11 @@ function persistOrchestratorConfig(config: any) {
     ...config,
     apiKey: config.apiKey ? protectCredential("unified-model", "apiKey", config.apiKey) : "",
     summaryReviewerApiKey: config.summaryReviewerApiKey ? protectCredential("summary-reviewer", "apiKey", config.summaryReviewerApiKey) : "",
+    searchMcpToken: config.searchMcpToken ? protectCredential("web-search", "mcpToken", config.searchMcpToken) : "",
+    braveSearchApiKey: config.braveSearchApiKey ? protectCredential("web-search", "braveApiKey", config.braveSearchApiKey) : "",
+    bingSearchApiKey: config.bingSearchApiKey ? protectCredential("web-search", "bingApiKey", config.bingSearchApiKey) : "",
+    googleCseApiKey: config.googleCseApiKey ? protectCredential("web-search", "googleApiKey", config.googleCseApiKey) : "",
+    googleCseId: config.googleCseId ? protectCredential("web-search", "googleEngineId", config.googleCseId) : "",
   };
   writeStoredOrchestratorConfig(stored);
 }
@@ -196,6 +279,167 @@ export function saveOrchestratorConfig(updates: any) {
     const value = String(providerContextCacheMode || "auto").trim().toLowerCase();
     if (!["auto", "native", "controlled", "off"].includes(value)) throw new Error("上下文缓存模式必须是 auto、native、controlled 或 off");
     next.providerContextCacheMode = value;
+  }
+  for (const [camelKey, snakeKey] of [
+    ["codeIntelligenceEnabled", "code_intelligence_enabled"],
+    ["languageServerManagedInstallEnabled", "language_server_managed_install_enabled"],
+    ["skillForkEnabled", "skill_fork_enabled"],
+    ["webToolsEnabled", "web_tools_enabled"],
+    ["webFetchBrowserFallbackEnabled", "web_fetch_browser_fallback_enabled"],
+    ["notebookToolsEnabled", "notebook_tools_enabled"],
+    ["ccStyleExecutionDisplayEnabled", "cc_style_execution_display_enabled"],
+  ] as const) {
+    const raw = updates[camelKey] ?? updates[snakeKey];
+    if (raw !== undefined) next[camelKey] = raw === true;
+  }
+  const codeIndexStartPolicy = updates.codeIndexStartPolicy ?? updates.code_index_start_policy;
+  if (codeIndexStartPolicy !== undefined) {
+    const value = String(codeIndexStartPolicy || "on_demand").trim().toLowerCase();
+    if (!["on_demand", "manual", "startup"].includes(value)) throw new Error("代码索引启动策略必须是 on_demand、manual 或 startup");
+    next.codeIndexStartPolicy = value;
+  }
+  const codeIndexMaxConcurrentProjects = updates.codeIndexMaxConcurrentProjects ?? updates.code_index_max_concurrent_projects;
+  if (codeIndexMaxConcurrentProjects !== undefined) {
+    const value = Number(codeIndexMaxConcurrentProjects);
+    if (!Number.isFinite(value) || value < 1 || value > 8) throw new Error("并行代码索引项目数必须介于1和8");
+    next.codeIndexMaxConcurrentProjects = Math.floor(value);
+  }
+  const providerNativeToolsMode = updates.providerNativeToolsMode ?? updates.provider_native_tools_mode;
+  if (providerNativeToolsMode !== undefined) {
+    const value = String(providerNativeToolsMode || "auto").trim().toLowerCase();
+    if (!["auto", "native", "json"].includes(value)) throw new Error("Provider原生工具模式必须是 auto、native 或 json");
+    next.providerNativeToolsMode = value;
+  }
+  const webSearchProviderOrder = updates.webSearchProviderOrder ?? updates.web_search_provider_order;
+  if (webSearchProviderOrder !== undefined) {
+    if (!Array.isArray(webSearchProviderOrder)) throw new Error("Web Search Provider顺序必须是数组");
+    const allowed = new Set(["mcp", "brave", "bing", "google"]);
+    const value = [...new Set(webSearchProviderOrder.map((item: any) => String(item || "").trim().toLowerCase().replace("google_cse", "google")).filter((item: string) => allowed.has(item)))];
+    if (!value.length) throw new Error("至少保留一个Web Search Provider");
+    next.webSearchProviderOrder = value;
+  }
+  const searchMcpUrl = updates.searchMcpUrl ?? updates.search_mcp_url;
+  if (searchMcpUrl !== undefined) {
+    if (searchMcpUrl === null) next.searchMcpUrl = "";
+    else {
+      const value = String(searchMcpUrl || "").trim();
+      if (value && !/^https:\/\//i.test(value)) throw new Error("Search MCP地址必须使用HTTPS");
+      if (value) next.searchMcpUrl = value;
+    }
+  }
+  for (const [camelKey, snakeKey] of [
+    ["searchMcpToken", "search_mcp_token"],
+    ["braveSearchApiKey", "brave_search_api_key"],
+    ["bingSearchApiKey", "bing_search_api_key"],
+    ["googleCseApiKey", "google_cse_api_key"],
+    ["googleCseId", "google_cse_id"],
+  ] as const) {
+    const raw = updates[camelKey] ?? updates[snakeKey];
+    if (raw !== undefined && String(raw || "").trim()) next[camelKey] = String(raw).trim();
+  }
+  const contextPolicy = readMainAgentContextPolicy({
+    mcpToolLoadingMode: updates.mcpToolLoadingMode ?? updates.mcp_tool_loading_mode ?? next.mcpToolLoadingMode,
+    mcpToolAutoThresholdPercent: updates.mcpToolAutoThresholdPercent ?? updates.mcp_tool_auto_threshold_percent ?? next.mcpToolAutoThresholdPercent,
+    skillCatalogBudgetPercent: updates.skillCatalogBudgetPercent ?? updates.skill_catalog_budget_percent ?? next.skillCatalogBudgetPercent,
+    postCompactSkillPerItemMaxTokens: updates.postCompactSkillPerItemMaxTokens ?? updates.post_compact_skill_per_item_max_tokens ?? next.postCompactSkillPerItemMaxTokens,
+    postCompactSkillTotalMaxTokens: updates.postCompactSkillTotalMaxTokens ?? updates.post_compact_skill_total_max_tokens ?? next.postCompactSkillTotalMaxTokens,
+    contextSourceCatalogBudgetPercent: updates.contextSourceCatalogBudgetPercent ?? updates.context_source_catalog_budget_percent ?? next.contextSourceCatalogBudgetPercent,
+    contextSourceHydrationBudgetPercent: updates.contextSourceHydrationBudgetPercent ?? updates.context_source_hydration_budget_percent ?? next.contextSourceHydrationBudgetPercent,
+    postCompactSourcePerItemMaxTokens: updates.postCompactSourcePerItemMaxTokens ?? updates.post_compact_source_per_item_max_tokens ?? next.postCompactSourcePerItemMaxTokens,
+    postCompactSourceTotalMaxTokens: updates.postCompactSourceTotalMaxTokens ?? updates.post_compact_source_total_max_tokens ?? next.postCompactSourceTotalMaxTokens,
+    agentMaxParallelPerProject: updates.agentMaxParallelPerProject ?? updates.agent_max_parallel_per_project ?? next.agentMaxParallelPerProject,
+    agentMaxParallelGlobal: updates.agentMaxParallelGlobal ?? updates.agent_max_parallel_global ?? next.agentMaxParallelGlobal,
+  });
+  Object.assign(next, contextPolicy);
+  const agentCommunicationV2Enabled = updates.agentCommunicationV2Enabled ?? updates.agent_communication_v2_enabled;
+  if (agentCommunicationV2Enabled !== undefined) next.agentCommunicationV2Enabled = agentCommunicationV2Enabled === true;
+  const dynamicAgentBudgetEnabled = updates.dynamicAgentBudgetEnabled ?? updates.dynamic_agent_budget_enabled;
+  if (dynamicAgentBudgetEnabled !== undefined) next.dynamicAgentBudgetEnabled = dynamicAgentBudgetEnabled === true;
+  const adaptiveAgentLoopEnabled = updates.adaptiveAgentLoopEnabled ?? updates.adaptive_agent_loop_enabled;
+  if (adaptiveAgentLoopEnabled !== undefined) next.adaptiveAgentLoopEnabled = adaptiveAgentLoopEnabled === true;
+  for (const [camelKey, snakeKey] of [
+    ["unifiedEvidenceEnabled", "unified_evidence_enabled"],
+    ["strictEvidenceFreshnessEnabled", "strict_evidence_freshness_enabled"],
+    ["deltaRepairEnabled", "delta_repair_enabled"],
+    ["operationRegistryEnabled", "operation_registry_enabled"],
+    ["taskEventReducerShadowWriteEnabled", "task_event_reducer_shadow_write_enabled"],
+  ] as const) {
+    const raw = updates[camelKey] ?? updates[snakeKey];
+    if (raw !== undefined) next[camelKey] = raw === true;
+  }
+  for (const [camelKey, snakeKey, min, max] of [
+    ["agentToolCallBudget", "agent_tool_call_budget", 1, 64],
+    ["agentMaxModelTurns", "agent_max_model_turns", 1, 32],
+    ["agentLoopNoProgressThreshold", "agent_loop_no_progress_threshold", 2, 10],
+    ["agentToolBatchSize", "agent_tool_batch_size", 1, 8],
+    ["agentReadOnlyParallelism", "agent_read_only_parallelism", 1, 8],
+  ] as const) {
+    const raw = updates[camelKey] ?? updates[snakeKey];
+    if (raw === undefined) continue;
+    const value = Number(raw);
+    if (!Number.isFinite(value) || value < min || value > max) throw new Error(`${camelKey} 必须介于 ${min} 和 ${max}`);
+    next[camelKey] = Math.floor(value);
+  }
+  const agentCommunicationLimits = [
+    ["agentRunnerStartTimeoutMs", "agent_runner_start_timeout_ms", 5_000, 300_000, "Agent Runner启动超时必须介于5,000和300,000毫秒"],
+    ["agentAckTimeoutMs", "agent_ack_timeout_ms", 5_000, 120_000, "Agent ACK超时必须介于5,000和120,000毫秒"],
+    ["agentHeartbeatIntervalMs", "agent_heartbeat_interval_ms", 5_000, 60_000, "Agent心跳间隔必须介于5,000和60,000毫秒"],
+    ["agentHeartbeatLostTimeoutMs", "agent_heartbeat_lost_timeout_ms", 15_000, 600_000, "Agent失联超时必须介于15,000和600,000毫秒"],
+    ["agentLeaseTtlMs", "agent_lease_ttl_ms", 15_000, 900_000, "Agent租约必须介于15,000和900,000毫秒"],
+    ["agentMaxAttempts", "agent_max_attempts", 1, 3, "Agent最大执行次数必须介于1和3"],
+    ["agentMaxParallelPerProject", "agent_max_parallel_per_project", 1, 16, "单项目Agent并发必须介于1和16"],
+    ["agentMaxParallelGlobal", "agent_max_parallel_global", 1, 64, "全局Agent并发必须介于1和64"],
+  ] as const;
+  for (const [camelKey, snakeKey, min, max, errorMessage] of agentCommunicationLimits) {
+    const raw = updates[camelKey] ?? updates[snakeKey];
+    if (raw === undefined) continue;
+    const value = Number(raw);
+    if (!Number.isFinite(value) || value < min || value > max) throw new Error(errorMessage);
+    next[camelKey] = Math.floor(value);
+  }
+  if (Number(next.agentHeartbeatLostTimeoutMs) <= Number(next.agentHeartbeatIntervalMs)) throw new Error("Agent失联超时必须大于心跳间隔");
+  if (Number(next.agentLeaseTtlMs) <= Number(next.agentHeartbeatIntervalMs)) throw new Error("Agent租约必须大于心跳间隔");
+  if (Number(next.agentMaxParallelGlobal) < Number(next.agentMaxParallelPerProject)) throw new Error("全局Agent并发不得小于单项目并发");
+
+  const testAgentPlannerFallbackMode = updates.testAgentPlannerFallbackMode ?? updates.test_agent_planner_fallback_mode;
+  if (testAgentPlannerFallbackMode !== undefined) {
+    const value = String(testAgentPlannerFallbackMode || "risk_based").trim().toLowerCase();
+    if (!["risk_based", "always", "never"].includes(value)) throw new Error("TestAgent规划降级策略必须是 risk_based、always 或 never");
+    next.testAgentPlannerFallbackMode = value;
+  }
+  const testAgentIsolationMode = updates.testAgentIsolationMode ?? updates.test_agent_isolation_mode;
+  if (testAgentIsolationMode !== undefined) {
+    const value = String(testAgentIsolationMode || "sandbox_preferred").trim().toLowerCase();
+    if (!["sandbox_preferred", "sandbox_required", "strict_allowlist"].includes(value)) throw new Error("TestAgent隔离策略无效");
+    // A caller may tighten isolation, but never use a config update to
+    // silently restore the legacy unrestricted execution path.
+    next.testAgentIsolationMode = value;
+  }
+  const testAgentReadonlyCapabilityInjection = updates.testAgentReadonlyCapabilityInjection
+    ?? updates.test_agent_readonly_capability_injection;
+  if (testAgentReadonlyCapabilityInjection !== undefined) {
+    next.testAgentReadonlyCapabilityInjection = testAgentReadonlyCapabilityInjection === true;
+  }
+  const testAgentSurfaceAuditMode = updates.testAgentSurfaceAuditMode ?? updates.test_agent_surface_audit_mode;
+  if (testAgentSurfaceAuditMode !== undefined) {
+    const value = String(testAgentSurfaceAuditMode || "strict").trim().toLowerCase();
+    if (!["strict", "warn"].includes(value)) throw new Error("TestAgent变更面审计策略必须是 strict 或 warn");
+    next.testAgentSurfaceAuditMode = value;
+  }
+  const testAgentRuntimeFingerprintEnabled = updates.testAgentRuntimeFingerprintEnabled
+    ?? updates.test_agent_runtime_fingerprint_enabled;
+  if (testAgentRuntimeFingerprintEnabled !== undefined) {
+    // Runtime freshness is a safety gate for high-risk work and cannot be
+    // disabled by a task-level override. The global switch remains useful for
+    // controlled diagnostics and legacy deployments.
+    next.testAgentRuntimeFingerprintEnabled = testAgentRuntimeFingerprintEnabled !== false;
+  }
+  const testAgentPostReviewSpotCheckMode = updates.testAgentPostReviewSpotCheckMode
+    ?? updates.test_agent_post_review_spot_check_mode;
+  if (testAgentPostReviewSpotCheckMode !== undefined) {
+    const value = String(testAgentPostReviewSpotCheckMode || "policy").trim().toLowerCase();
+    if (!["policy", "required", "off"].includes(value)) throw new Error("TestAgent完成前抽查策略必须是 policy、required 或 off");
+    next.testAgentPostReviewSpotCheckMode = value;
   }
   const providerPromptCacheRetention = updates.providerPromptCacheRetention ?? updates.provider_prompt_cache_retention;
   if (providerPromptCacheRetention !== undefined) {
@@ -350,14 +594,25 @@ export function saveOrchestratorConfig(updates: any) {
 }
 
 export function publicOrchestratorConfig(config = loadOrchestratorConfig()) {
-  const { apiKey, summaryReviewerApiKey, ...safe } = config;
+  const {
+    apiKey, summaryReviewerApiKey, searchMcpToken, braveSearchApiKey,
+    bingSearchApiKey, googleCseApiKey, googleCseId, searchMcpUrl, ...safe
+  } = config;
   return {
     ...safe,
     providerContextCache: providerNeutralContextCacheCapability(config),
     providerCacheCapability: readProviderCacheCapabilityState(config),
+    providerNativeMicrocompactCapability: readProviderNativeMicrocompactCapability(config),
+    providerNativeToolsCapability: readProviderNativeToolCapability(config),
     hasKey: !!apiKey,
     credentialProtected: !!apiKey,
     summaryReviewerHasKey: !!summaryReviewerApiKey,
+    webSearchProvidersConfigured: {
+      mcp: !!searchMcpUrl,
+      brave: !!braveSearchApiKey,
+      bing: !!bingSearchApiKey,
+      google: !!googleCseApiKey && !!googleCseId,
+    },
     consumers: ["global-agent", "group-main-agent", "project-main-agent", "music-agent"],
     boundary: buildGroupMainAgentBoundary("config"),
   };
@@ -409,6 +664,18 @@ export async function testUnifiedModelConnection() {
         defaultTimeoutMs: 15_000,
       });
     if (!String(content || "").trim()) throw new Error("模型返回了空响应");
+    let capabilityProbe: any = null;
+    const nativeCapabilityBeforeProbe = readProviderNativeMicrocompactCapability(config);
+    if (provider === "anthropic-compatible" && nativeCapabilityBeforeProbe.source !== "official_endpoint") {
+      try {
+        capabilityProbe = await probeProviderCacheCapability(config);
+      } catch (error: any) {
+        capabilityProbe = {
+          success: false,
+          reason: String(error?.message || error || "capability_probe_failed").replace(/[\r\n\t]+/g, " ").slice(0, 240),
+        };
+      }
+    }
     const latencyMs = Date.now() - startedAt;
     return {
       success: true,
@@ -418,6 +685,12 @@ export async function testUnifiedModelConnection() {
       model: config.model,
       message: `连接正常，响应耗时 ${latencyMs} ms`,
       contextCacheAdapter,
+      providerCacheCapability: readProviderCacheCapabilityState(config),
+      providerNativeMicrocompactCapability: readProviderNativeMicrocompactCapability(config),
+      capabilityProbe: capabilityProbe ? {
+        success: capabilityProbe.success,
+        receipt: capabilityProbe.receipt || null,
+      } : null,
       consumers: consumers.map(item => ({ ...item, ready: true })),
     };
   } catch (error: any) {
@@ -429,6 +702,8 @@ export async function testUnifiedModelConnection() {
       model: config.model || "",
       message: friendlyUnifiedModelError(error),
       contextCacheAdapter,
+      providerCacheCapability: readProviderCacheCapabilityState(config),
+      providerNativeMicrocompactCapability: readProviderNativeMicrocompactCapability(config),
       consumers: consumers.map(item => ({ ...item, ready: false })),
     };
   }

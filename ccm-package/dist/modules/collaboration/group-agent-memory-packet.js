@@ -66,35 +66,36 @@ const typed_memory_dispatch_wal_1 = require("./typed-memory-dispatch-wal");
 const group_post_turn_summary_1 = require("./group-post-turn-summary");
 const group_memory_context_1 = require("./group-memory-context");
 const group_memory_shared_1 = require("./group-memory-shared");
+const group_memory_shared_2 = require("./group-memory-shared");
 const group_memory_storage_1 = require("./group-memory-storage");
 function verifyGroupSessionMemoryModelExtractionDeliveryEvidenceForContext(evidence) {
     if (!evidence?.checksum || evidence.schema !== "ccm-group-session-memory-model-extraction-delivery-evidence-v1")
         return false;
     const payload = { ...evidence };
     delete payload.checksum;
-    return (0, group_memory_shared_1.hashSessionMemoryText)(JSON.stringify(payload), 64) === String(evidence.checksum || "");
+    return (0, group_memory_shared_2.hashSessionMemoryText)(JSON.stringify(payload), 64) === String(evidence.checksum || "");
 }
 function upsertAgentMemory(agentMemories = {}, item = {}) {
-    const normalized = (0, group_memory_shared_1.normalizeWorkerLedgerItem)(item);
-    const project = (0, group_memory_shared_1.normalizeAgentMemoryProject)(normalized.project);
+    const normalized = (0, group_memory_shared_2.normalizeWorkerLedgerItem)(item);
+    const project = (0, group_memory_shared_2.normalizeAgentMemoryProject)(normalized.project);
     if (!project || project === "unknown")
         return agentMemories || {};
-    const current = { ...(0, group_memory_shared_1.createEmptyAgentMemory)(project), ...((agentMemories || {})[project] || {}) };
+    const current = { ...(0, group_memory_shared_2.createEmptyAgentMemory)(project), ...((agentMemories || {})[project] || {}) };
     const entry = {
         time: normalized.time,
         taskId: normalized.taskId,
         status: normalized.status,
         receiptStatus: normalized.receiptStatus,
-        summary: (0, group_memory_shared_1.compactMemoryText)(normalized.summary, 420),
+        summary: (0, group_memory_shared_2.compactMemoryText)(normalized.summary, 420),
         filesChanged: normalized.filesChanged || [],
         verification: normalized.verification || [],
         blockers: normalized.blockers || [],
         needs: normalized.needs || [],
     };
-    const allReceipts = (0, group_memory_shared_1.uniqueByKey)([...(current.recentReceipts || []), entry], (x) => [x.taskId || "", x.status || "", x.receiptStatus || "", x.summary || ""].join("|"), 20);
+    const allReceipts = (0, group_memory_shared_2.uniqueByKey)([...(current.recentReceipts || []), entry], (x) => [x.taskId || "", x.status || "", x.receiptStatus || "", x.summary || ""].join("|"), 20);
     const older = allReceipts.slice(0, Math.max(0, allReceipts.length - 8));
     const recentReceipts = allReceipts.slice(-8);
-    const summaryParts = [current.summary || "", ...older.map((x) => (0, group_memory_shared_1.formatAgentMemoryReceipt)(x))].filter(Boolean);
+    const summaryParts = [current.summary || "", ...older.map((x) => (0, group_memory_shared_2.formatAgentMemoryReceipt)(x))].filter(Boolean);
     const files = Array.from(new Set([...(current.frequentFiles || []), ...(entry.filesChanged || [])].filter(Boolean))).slice(-20);
     const verification = Array.from(new Set([...(current.verificationHints || []), ...(entry.verification || [])].filter(Boolean))).slice(-20);
     const blockers = Array.from(new Set([...(current.blockers || []), ...(entry.blockers || [])].filter(Boolean))).slice(-20);
@@ -104,7 +105,7 @@ function upsertAgentMemory(agentMemories = {}, item = {}) {
         ...(agentMemories || {}),
         [project]: {
             project,
-            summary: (0, group_memory_shared_1.compactMemoryText)(summaryParts.join(" | "), 1800),
+            summary: (0, group_memory_shared_2.compactMemoryText)(summaryParts.join(" | "), 1800),
             recentReceipts,
             frequentFiles: files,
             verificationHints: verification,
@@ -120,7 +121,7 @@ function upsertAgentMemory(agentMemories = {}, item = {}) {
     };
 }
 function buildChildTypedMemoryRecallLedgerScope(targetProject, sessionBinding = {}, memory = {}, options = {}) {
-    const project = (0, group_memory_shared_1.normalizeAgentMemoryProject)(targetProject);
+    const project = (0, group_memory_shared_2.normalizeAgentMemoryProject)(targetProject);
     const taskAgentSessionId = String(sessionBinding?.task_agent_session_id
         || sessionBinding?.taskAgentSessionId
         || options.taskAgentSessionId
@@ -215,10 +216,10 @@ function truncateTypedMemoryDeliveryContent(source, limits) {
 function buildChildTypedMemoryDeliveryCapsule(input = {}, options = {}) {
     const recall = input.recall || input.typedMemoryRecall || input.typed_memory_recall || {};
     const allDocs = Array.isArray(recall.recalled) ? recall.recalled : [];
-    const maxDocuments = boundedTypedMemoryDeliveryInteger(options.maxDocuments ?? options.max_documents, group_memory_shared_1.TYPED_MEMORY_DELIVERY_HARD_MAX_DOCUMENTS, 1, group_memory_shared_1.TYPED_MEMORY_DELIVERY_HARD_MAX_DOCUMENTS);
-    const maxBytesPerDocument = boundedTypedMemoryDeliveryInteger(options.maxBytesPerDocument ?? options.max_bytes_per_document, group_memory_shared_1.TYPED_MEMORY_DELIVERY_HARD_MAX_BYTES_PER_DOCUMENT, 512, group_memory_shared_1.TYPED_MEMORY_DELIVERY_HARD_MAX_BYTES_PER_DOCUMENT);
-    const maxLinesPerDocument = boundedTypedMemoryDeliveryInteger(options.maxLinesPerDocument ?? options.max_lines_per_document, group_memory_shared_1.TYPED_MEMORY_DELIVERY_HARD_MAX_LINES_PER_DOCUMENT, 10, group_memory_shared_1.TYPED_MEMORY_DELIVERY_HARD_MAX_LINES_PER_DOCUMENT);
-    const maxSessionBytes = boundedTypedMemoryDeliveryInteger(options.maxSessionBytes ?? options.max_session_bytes, group_memory_shared_1.TYPED_MEMORY_DELIVERY_HARD_MAX_SESSION_BYTES, 4096, group_memory_shared_1.TYPED_MEMORY_DELIVERY_HARD_MAX_SESSION_BYTES);
+    const maxDocuments = boundedTypedMemoryDeliveryInteger(options.maxDocuments ?? options.max_documents, group_memory_shared_2.TYPED_MEMORY_DELIVERY_HARD_MAX_DOCUMENTS, 1, group_memory_shared_2.TYPED_MEMORY_DELIVERY_HARD_MAX_DOCUMENTS);
+    const maxBytesPerDocument = boundedTypedMemoryDeliveryInteger(options.maxBytesPerDocument ?? options.max_bytes_per_document, group_memory_shared_2.TYPED_MEMORY_DELIVERY_HARD_MAX_BYTES_PER_DOCUMENT, 512, group_memory_shared_2.TYPED_MEMORY_DELIVERY_HARD_MAX_BYTES_PER_DOCUMENT);
+    const maxLinesPerDocument = boundedTypedMemoryDeliveryInteger(options.maxLinesPerDocument ?? options.max_lines_per_document, group_memory_shared_2.TYPED_MEMORY_DELIVERY_HARD_MAX_LINES_PER_DOCUMENT, 10, group_memory_shared_2.TYPED_MEMORY_DELIVERY_HARD_MAX_LINES_PER_DOCUMENT);
+    const maxSessionBytes = boundedTypedMemoryDeliveryInteger(options.maxSessionBytes ?? options.max_session_bytes, group_memory_shared_2.TYPED_MEMORY_DELIVERY_HARD_MAX_SESSION_BYTES, 4096, group_memory_shared_2.TYPED_MEMORY_DELIVERY_HARD_MAX_SESSION_BYTES);
     const configuredMaxTokens = boundedTypedMemoryDeliveryInteger(options.maxTokens ?? options.max_tokens, 5000, 500, 20_000);
     const requestedModelContextWindow = Number(options.modelContextWindow ?? options.model_context_window ?? 0);
     const modelContextWindow = boundedTypedMemoryDeliveryInteger(requestedModelContextWindow > 0 ? requestedModelContextWindow : 200_000, 200_000, 32_000, 4_000_000);
@@ -260,7 +261,7 @@ function buildChildTypedMemoryDeliveryCapsule(input = {}, options = {}) {
             document_checksum: String(doc.checksum || doc.document_checksum || ""),
             type: String(doc.type || "project"),
             name: String(doc.name || ""),
-            description: (0, group_memory_shared_1.compactMemoryText)(doc.description || "", 260),
+            description: (0, group_memory_shared_2.compactMemoryText)(doc.description || "", 260),
             score: Number(doc.score || 0),
             stale: doc.freshness?.stale === true,
             content,
@@ -308,7 +309,7 @@ function buildChildTypedMemoryDeliveryCapsule(input = {}, options = {}) {
         version: 2,
         group_id: String(input.groupId || input.group_id || ""),
         group_session_id: String(input.groupSessionId || input.group_session_id || ""),
-        target_project: (0, group_memory_shared_1.normalizeAgentMemoryProject)(input.targetProject || input.target_project || "unknown"),
+        target_project: (0, group_memory_shared_2.normalizeAgentMemoryProject)(input.targetProject || input.target_project || "unknown"),
         task_id: String(input.taskId || input.task_id || ledgerScope.taskId || ledgerScope.task_id || ""),
         task_agent_session_id: String(input.taskAgentSessionId || input.task_agent_session_id || ledgerScope.taskAgentSessionId || ledgerScope.task_agent_session_id || ""),
         recall_scope: String(ledgerScope.scope || input.recallScope || input.recall_scope || ""),
@@ -468,9 +469,9 @@ function admitChildTypedMemoryDelivery(memoryBundle, options = {}) {
         return postTurnSummaryAdmission;
     const packetCapsuleInput = workerContextPacket.typed_memory_delivery_capsule
         || workerContextPacket.typedMemoryDeliveryCapsule
-        || (0, group_memory_shared_1.findMemoryArtifactBySchema)(packetMemory, "ccm-child-typed-memory-delivery-capsule-v1");
-    const leaseInput = (0, group_memory_shared_1.findMemoryArtifactBySchema)(packetMemory, "ccm-child-typed-memory-delivery-lease-v1")
-        || (0, group_memory_shared_1.findMemoryArtifactBySchema)(memoryBundle, "ccm-child-typed-memory-delivery-lease-v1");
+        || (0, group_memory_shared_2.findMemoryArtifactBySchema)(packetMemory, "ccm-child-typed-memory-delivery-capsule-v1");
+    const leaseInput = (0, group_memory_shared_2.findMemoryArtifactBySchema)(packetMemory, "ccm-child-typed-memory-delivery-lease-v1")
+        || (0, group_memory_shared_2.findMemoryArtifactBySchema)(memoryBundle, "ccm-child-typed-memory-delivery-lease-v1");
     if (!packetCapsuleInput?.schema && !leaseInput?.schema)
         return postTurnSummaryAdmission.required
             ? { ...postTurnSummaryAdmission, reason: "post_turn_summary_delivery_admitted_without_typed_memory" }
@@ -497,7 +498,7 @@ function admitChildTypedMemoryDelivery(memoryBundle, options = {}) {
     }
     const groupId = String(lease.group_id || "");
     const groupSessionId = String(lease.group_session_id || "");
-    const targetProject = (0, group_memory_shared_1.normalizeAgentMemoryProject)(lease.target_project || "unknown");
+    const targetProject = (0, group_memory_shared_2.normalizeAgentMemoryProject)(lease.target_project || "unknown");
     if (options.skipGroupSessionPresenceCheck !== true && options.skip_group_session_presence_check !== true) {
         const sessionManifest = (0, storage_1.listGroupChatSessions)(groupId);
         const sessionExists = (sessionManifest.sessions || []).some((session) => String(session.id || "") === groupSessionId);
@@ -573,7 +574,7 @@ function commitChildTypedMemoryDelivery(memoryBundle, options = {}) {
     const packetMemory = workerContextPacket.memory || memoryBundle;
     const packetCapsuleInput = workerContextPacket.typed_memory_delivery_capsule
         || workerContextPacket.typedMemoryDeliveryCapsule
-        || (0, group_memory_shared_1.findMemoryArtifactBySchema)(packetMemory, "ccm-child-typed-memory-delivery-capsule-v1");
+        || (0, group_memory_shared_2.findMemoryArtifactBySchema)(packetMemory, "ccm-child-typed-memory-delivery-capsule-v1");
     if (!packetCapsuleInput?.schema)
         return { committed: false, reason: "delivery_capsule_missing" };
     const expectedBinding = workerContextPacket.typed_memory_delivery_expected_binding
@@ -583,8 +584,8 @@ function commitChildTypedMemoryDelivery(memoryBundle, options = {}) {
     if (packetCapsule?.trusted_for_delivery !== true) {
         return { committed: false, reason: "delivery_capsule_not_trusted", validation_issues: packetCapsule?.validation_issues || [] };
     }
-    const leaseInput = (0, group_memory_shared_1.findMemoryArtifactBySchema)(packetMemory, "ccm-child-typed-memory-delivery-lease-v1")
-        || (0, group_memory_shared_1.findMemoryArtifactBySchema)(memoryBundle, "ccm-child-typed-memory-delivery-lease-v1");
+    const leaseInput = (0, group_memory_shared_2.findMemoryArtifactBySchema)(packetMemory, "ccm-child-typed-memory-delivery-lease-v1")
+        || (0, group_memory_shared_2.findMemoryArtifactBySchema)(memoryBundle, "ccm-child-typed-memory-delivery-lease-v1");
     const lease = (0, runtime_kernel_1.validateWorkerTypedMemoryDeliveryLease)(leaseInput, { capsule: packetCapsule });
     if (lease?.valid_for_commit !== true) {
         return { committed: false, reason: "delivery_lease_invalid", validation_issues: lease?.validation_issues || ["lease_missing"] };
@@ -617,19 +618,19 @@ function commitChildTypedMemoryDelivery(memoryBundle, options = {}) {
     }
     const groupId = String(lease.group_id || "");
     const groupSessionId = String(lease.group_session_id || "");
-    const targetProject = (0, group_memory_shared_1.normalizeAgentMemoryProject)(lease.target_project || "unknown");
+    const targetProject = (0, group_memory_shared_2.normalizeAgentMemoryProject)(lease.target_project || "unknown");
     const taskAgentSessionId = String(lease.task_agent_session_id || "");
     if (!groupId || !groupSessionId || !taskAgentSessionId || !String(taskAgentSessionId).startsWith("tas_")) {
         return { committed: false, reason: "delivery_identity_incomplete" };
     }
     const bundleGroup = String(memoryBundle.group_id || memoryBundle.groupId || groupId);
     const bundleGroupSession = String(memoryBundle.group_session_id || memoryBundle.groupSessionId || groupSessionId);
-    const bundleProject = (0, group_memory_shared_1.normalizeAgentMemoryProject)(memoryBundle.target_project || memoryBundle.targetProject || targetProject);
+    const bundleProject = (0, group_memory_shared_2.normalizeAgentMemoryProject)(memoryBundle.target_project || memoryBundle.targetProject || targetProject);
     if (bundleGroup !== groupId || bundleGroupSession !== groupSessionId || bundleProject !== targetProject) {
         return { committed: false, reason: "memory_bundle_identity_mismatch" };
     }
-    const recall = (0, group_memory_shared_1.findMemoryArtifactBySchema)(packetMemory, "ccm-group-typed-memory-recall-v1")
-        || (0, group_memory_shared_1.findMemoryArtifactBySchema)(memoryBundle, "ccm-group-typed-memory-recall-v1");
+    const recall = (0, group_memory_shared_2.findMemoryArtifactBySchema)(packetMemory, "ccm-group-typed-memory-recall-v1")
+        || (0, group_memory_shared_2.findMemoryArtifactBySchema)(memoryBundle, "ccm-group-typed-memory-recall-v1");
     if (!recall || recall.ignored === true)
         return { committed: false, reason: "typed_memory_recall_missing_or_ignored" };
     const typedMemoryScopeId = groupSessionId === "default" ? groupId : `${groupId}--${groupSessionId}`;
@@ -647,13 +648,13 @@ function commitChildTypedMemoryDelivery(memoryBundle, options = {}) {
     let manifestSelectorOutcome = null;
     const manifestSelection = memoryBundle.typedMemoryManifestSelection
         || memoryBundle.typed_memory_manifest_selection
-        || (0, group_memory_shared_1.findMemoryArtifactBySchema)(packetMemory, "ccm-group-typed-memory-manifest-selection-v1")
-        || (0, group_memory_shared_1.findMemoryArtifactBySchema)(memoryBundle, "ccm-group-typed-memory-manifest-selection-v1");
+        || (0, group_memory_shared_2.findMemoryArtifactBySchema)(packetMemory, "ccm-group-typed-memory-manifest-selection-v1")
+        || (0, group_memory_shared_2.findMemoryArtifactBySchema)(memoryBundle, "ccm-group-typed-memory-manifest-selection-v1");
     if (committedLease?.status === "committed" && manifestSelection?.schema) {
         const attachedOutcome = memoryBundle.typedMemoryManifestSelectorOutcome
             || memoryBundle.typed_memory_manifest_selector_outcome
-            || (0, group_memory_shared_1.findMemoryArtifactBySchema)(packetMemory, "ccm-group-typed-memory-manifest-selector-outcome-v1")
-            || (0, group_memory_shared_1.findMemoryArtifactBySchema)(memoryBundle, "ccm-group-typed-memory-manifest-selector-outcome-v1");
+            || (0, group_memory_shared_2.findMemoryArtifactBySchema)(packetMemory, "ccm-group-typed-memory-manifest-selector-outcome-v1")
+            || (0, group_memory_shared_2.findMemoryArtifactBySchema)(memoryBundle, "ccm-group-typed-memory-manifest-selector-outcome-v1");
         try {
             manifestSelectorOutcome = (0, group_memory_index_1.recordGroupTypedMemoryManifestSelectorOutcome)(typedMemoryScopeId, manifestSelection, {
                 stage: "committed",
@@ -677,7 +678,7 @@ function commitChildTypedMemoryDelivery(memoryBundle, options = {}) {
             return {
                 committed: false,
                 reason: "manifest_selector_outcome_commit_failed",
-                error: (0, group_memory_shared_1.compactMemoryText)(error?.message || error, 240),
+                error: (0, group_memory_shared_2.compactMemoryText)(error?.message || error, 240),
                 lease: committedLease,
                 stats,
                 ledger_file: ledger.file,
@@ -853,7 +854,7 @@ function recoverChildTypedMemoryDispatchWal(options = {}) {
                 && (0, agent_sessions_1.verifyMemoryContextDeliveryReceiptChecksum)(receipt)
                 && String(receipt.taskAgentSessionId || "") === String(record.task_agent_session_id || "")
                 && String(receipt.workerContextPacketId || "") === String(record.worker_context_packet_id || "");
-            if (!receiptValid || !(0, group_memory_shared_1.runnerRequestHasDurableReturnEvidence)(record)) {
+            if (!receiptValid || !(0, group_memory_shared_2.runnerRequestHasDurableReturnEvidence)(record)) {
                 record = (0, typed_memory_dispatch_wal_1.transitionTypedMemoryDispatchWal)(record, "uncertain_after_crash", { terminal_reason: receiptValid ? "runner_return_evidence_invalid" : "delivery_receipt_invalid" });
                 rows.push({ ticket_id: record.ticket_id, state: record.state, action: "marked_uncertain" });
                 continue;
@@ -893,6 +894,13 @@ function recoverChildTypedMemoryDispatchWal(options = {}) {
     };
 }
 function buildAgentMemoryPacket(groupId, targetProject, task = "", options = {}) {
-    return (0, group_memory_context_1.renderGroupMemoryContextBundle)((0, group_memory_context_1.buildAgentMemoryContextBundle)(groupId, targetProject, task, options));
+    const bundle = (0, group_memory_context_1.buildAgentMemoryContextBundle)(groupId, targetProject, task, options);
+    // bundle.rendered_text 是 buildAgentMemoryContextBundle 已经按 maxRenderedChars
+    // 算好的受限文本；此前这里重新整段渲染，把那份上限丢掉了，导致本函数成为
+    // 记忆注入里唯一不设上限的一条路径。
+    const bounded = String(bundle?.rendered_text || "");
+    if (bounded)
+        return bounded;
+    return (0, group_memory_shared_1.compactPreserveLines)((0, group_memory_context_1.renderGroupMemoryContextBundle)(bundle), Number(options.maxRenderedChars || 6000));
 }
 //# sourceMappingURL=group-agent-memory-packet.js.map

@@ -48,6 +48,12 @@ import {
   recordToolAuthorizationChange,
 } from "../../tools/tool-authorization";
 import {
+  contextPolicyUpdateSource,
+  mainAgentContextPolicyUpdatePresent,
+  resolveMainAgentContextPolicy,
+  updateMainAgentContextPolicyOverride,
+} from "../../tools/main-agent-context-policy";
+import {
   sanitizeMainAgentDeliveryText,
 } from "../../agents/delivery-report";
 import {
@@ -2420,7 +2426,7 @@ export function handleBasicGroupRoutes(
     const group = groups.find(g => g.id === groupId);
     if (!group) return sendJson(res, { error: "群聊不存在" }, 404);
     const toolAuth = buildToolAuthorizationPayload(group.tools || {});
-    sendJson(res, { tools: toolAuth.tools, tool_audit: toolAuth.tool_audit, authorization_readiness: toolAuth.authorization_readiness, connection_preflight: toolAuth.connection_preflight });
+    sendJson(res, { tools: toolAuth.tools, tool_audit: toolAuth.tool_audit, authorization_readiness: toolAuth.authorization_readiness, connection_preflight: toolAuth.connection_preflight, contextPolicy: resolveMainAgentContextPolicy(loadOrchestratorConfig(), group.context_policy || group.contextPolicy || {}) });
     return true;
   }
 
@@ -2472,12 +2478,21 @@ export function handleBasicGroupRoutes(
     req.on("data", (chunk) => body += chunk);
     req.on("end", async () => {
       try {
-        const { group_id, tools } = JSON.parse(body);
+        const payload = JSON.parse(body);
+        const { group_id, tools } = payload;
         const groups = loadGroups();
         const group = groups.find(g => g.id === group_id);
         if (!group) return sendJson(res, { error: "群聊不存在" }, 404);
         const previousTools = normalizeToolAuthorization(group.tools || {});
         group.tools = normalizeToolAuthorization(tools);
+        if (mainAgentContextPolicyUpdatePresent(payload)) {
+          group.context_policy = updateMainAgentContextPolicyOverride(
+            group.context_policy || group.contextPolicy || {},
+            contextPolicyUpdateSource(payload),
+            loadOrchestratorConfig(),
+          );
+          delete group.contextPolicy;
+        }
         saveGroups(groups);
         const toolAuth = await buildFreshToolAuthorizationPayload(group.tools);
         const authorizationChange = recordToolAuthorizationChange({
@@ -2490,7 +2505,7 @@ export function handleBasicGroupRoutes(
           toolAudit: toolAuth.tool_audit,
           authorizationReadiness: toolAuth.authorization_readiness,
         });
-        sendJson(res, { success: true, tools: toolAuth.tools, tool_audit: toolAuth.tool_audit, authorization_readiness: toolAuth.authorization_readiness, connection_preflight: toolAuth.connection_preflight, authorization_change: authorizationChange });
+        sendJson(res, { success: true, tools: toolAuth.tools, tool_audit: toolAuth.tool_audit, authorization_readiness: toolAuth.authorization_readiness, connection_preflight: toolAuth.connection_preflight, authorization_change: authorizationChange, contextPolicy: resolveMainAgentContextPolicy(loadOrchestratorConfig(), group.context_policy || {}) });
       } catch (e: any) {
         sendJson(res, { error: e.message }, 400);
       }

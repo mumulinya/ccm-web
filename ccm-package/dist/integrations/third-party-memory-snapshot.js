@@ -67,6 +67,7 @@ const SNAPSHOT_ROOT = path.join(utils_1.CCM_DIR, "third-party-memory-snapshots")
 const USAGE_ROOT = path.join(utils_1.CCM_DIR, "third-party-memory-usage");
 const DEFAULT_PAGE_TOKENS = 8_000;
 const MAX_PAGE_TOKENS = 20_000;
+const DEFAULT_MAX_BOOTSTRAP_TOKENS = 32_000;
 const RETAIN_PER_BINDING = 20;
 function canonical(value) {
     if (Array.isArray(value))
@@ -175,18 +176,25 @@ function buildMessageSegments(messagesInput, kind, pageTokens, required) {
     flush();
     return segments;
 }
-function normalizeMemoryItem(item, index) {
+function normalizeMemoryItem(item, index, defaultContextVersion = "") {
     const content = typeof item?.content === "string" ? item.content : JSON.stringify(item?.content || item || null);
     const kind = String(item?.kind || "memory");
+    const checksum = digest(content);
+    const version = Math.max(1, Math.floor(Number(item?.version || item?.memoryVersion || item?.memory_version || 1)));
+    const id = String(item?.id || `mem_${digest([kind, item?.source || "", content, index], 28)}`);
     return {
-        id: String(item?.id || `mem_${digest([kind, item?.source || "", content, index], 28)}`),
+        id,
+        version,
         kind,
         source: String(item?.source || "ccm"),
         required: item?.required !== false,
         stale: item?.stale === true,
         requiresVerification: item?.requiresVerification === true || item?.requires_verification === true,
         tokens: (0, context_budget_1.estimateTextTokens)(content),
-        checksum: digest(content),
+        checksum,
+        contentHash: checksum,
+        contextVersion: String(item?.contextVersion || item?.context_version || defaultContextVersion || ""),
+        deliveryKey: digest([id, version, checksum]),
         content,
     };
 }
@@ -210,6 +218,7 @@ function readLedger(snapshot) {
         manifestReadAt: "",
         readSegmentIds: [],
         readMemoryItemIds: [],
+        deliveredMemories: {},
         searchItems: {},
         reports: [],
         acknowledgedAt: "",
@@ -252,7 +261,6 @@ function createThirdPartyMemorySnapshot(input) {
     const mode = String(input.mode || "precompact_full_raw");
     const allVisibleMessages = (Array.isArray(input.messages) ? input.messages : []).map(normalizeMessage);
     const allArchiveMessages = (Array.isArray(input.archiveMessages) ? input.archiveMessages : []).map(normalizeMessage);
-    const memoryItems = (Array.isArray(input.memoryItems) ? input.memoryItems : []).map(normalizeMemoryItem);
     const previous = readLatestSnapshot(key);
     const previousLedger = previous ? readLedger(previous) : null;
     const contextBinding = input.groupId && input.groupSessionId
@@ -261,6 +269,8 @@ function createThirdPartyMemorySnapshot(input) {
     const contextPlanState = contextBinding.sessionId ? (0, provider_neutral_context_cache_1.readLatestProviderNeutralContextCacheState)(contextBinding) : null;
     const contextPlanChecksum = String(input.contextPlanChecksum || input.context_plan_checksum || contextPlanState?.contextPlanChecksum || contextPlanState?.planChecksum || "");
     const contextIdentityChecksum = String(input.contextIdentityChecksum || input.context_identity_checksum || contextPlanState?.contextIdentityChecksum || "");
+    const memoryItems = (Array.isArray(input.memoryItems) ? input.memoryItems : [])
+        .map((item, index) => normalizeMemoryItem(item, index, contextPlanChecksum));
     const sameLineage = previous
         && previousLedger?.acknowledgedAt
         && String(previous.provider || "") === String(input.provider || "")
@@ -269,14 +279,17 @@ function createThirdPartyMemorySnapshot(input) {
         && Number(previous.nativeGeneration || 0) === Number(input.nativeGeneration || 0)
         && Number(previous.boundaryGeneration || 0) === Number(input.boundaryGeneration || 0)
         && String(previous.mode || "") === mode
+        && String(previous.contextPlanChecksum || "") === contextPlanChecksum
         && (!previous.contextIdentityChecksum || !contextIdentityChecksum || String(previous.contextIdentityChecksum) === contextIdentityChecksum);
     const priorMessageIds = new Set(sameLineage ? previous.allMessageIds || [] : []);
-    const priorMemoryChecksums = new Set(sameLineage ? previous.allMemoryChecksums || [] : []);
+    const priorMemoryDeliveries = new Set(sameLineage
+        ? previous.allMemoryDeliveryKeys || previous.allMemoryChecksums || []
+        : []);
     const deliveryMode = sameLineage ? "delta" : "full";
     const requiredMessages = sameLineage
         ? allVisibleMessages.filter(message => !priorMessageIds.has(message.id))
         : allVisibleMessages;
-    const requiredMemoryItems = memoryItems.filter(item => item.required && (!sameLineage || !priorMemoryChecksums.has(item.checksum)));
+    const requiredMemoryItems = memoryItems.filter(item => item.required && (!sameLineage || !priorMemoryDeliveries.has(item.deliveryKey)));
     const segments = [];
     const summaryContent = input.summary ? (typeof input.summary === "string" ? input.summary : JSON.stringify(input.summary)) : "";
     const summaryChecksum = summaryContent ? digest(summaryContent) : "";
@@ -336,12 +349,14 @@ function createThirdPartyMemorySnapshot(input) {
         contextPlanBlockChanges: contextPlanState?.blockChanges || { kept: [], inserted: [], replaced: [], deleted: [] },
         allMessageIds: allVisibleMessages.map(message => message.id),
         allMemoryChecksums: memoryItems.map(item => item.checksum),
+        allMemoryDeliveryKeys: memoryItems.map(item => item.deliveryKey),
         segments,
         memoryItems,
         requiredSegmentIds,
         requiredMemoryItemIds,
         requiredHydrationTokens,
         pageTokens,
+        maxBootstrapTokens: Math.max(1_000, Number(input.maxBootstrapTokens || input.max_bootstrap_tokens || DEFAULT_MAX_BOOTSTRAP_TOKENS)),
         modelContextWindow: Number(input.modelContextWindow || input.model_context_window || 0),
         autoCompactThreshold: Number(input.autoCompactThreshold || input.auto_compact_threshold || 0),
         requestChecksum: digest(String(input.requestText || input.request_text || "")),
@@ -422,6 +437,7 @@ function getThirdPartyMemoryManifest(context) {
         boundaryGeneration: snapshot.boundaryGeneration,
         nativeGeneration: snapshot.nativeGeneration,
         requiredHydrationTokens: snapshot.requiredHydrationTokens,
+        maxBootstrapTokens: snapshot.maxBootstrapTokens || DEFAULT_MAX_BOOTSTRAP_TOKENS,
         messageCursor: snapshot.messageCursor,
         previousAcknowledgedCursor: snapshot.previousAcknowledgedCursor || "",
         confirmationCursor: snapshot.confirmationCursor || "",
@@ -434,7 +450,7 @@ function getThirdPartyMemoryManifest(context) {
         requiredSegmentIds: snapshot.requiredSegmentIds,
         requiredMemoryItemIds: snapshot.requiredMemoryItemIds,
         sessionSegments: snapshot.segments.map((segment) => ({ id: segment.id, kind: segment.kind, required: segment.required, tokens: segment.tokens, messageCount: segment.messageCount, overBudget: segment.overBudget })),
-        memoryItems: snapshot.memoryItems.map((item) => ({ id: item.id, kind: item.kind, source: item.source, required: item.required, tokens: item.tokens, stale: item.stale, requiresVerification: item.requiresVerification })),
+        memoryItems: snapshot.memoryItems.map((item) => ({ id: item.id, version: item.version, contentHash: item.contentHash || item.checksum, contextVersion: item.contextVersion || "", kind: item.kind, source: item.source, required: item.required, tokens: item.tokens, stale: item.stale, requiresVerification: item.requiresVerification })),
     };
 }
 function readThirdPartySessionContext(context, input = {}) {
@@ -460,7 +476,11 @@ function readThirdPartySessionContext(context, input = {}) {
             break;
     }
     const ledger = readLedger(snapshot);
-    reserveReadBudget(context, ledger, tokens);
+    const alreadyRead = new Set(ledger.readSegmentIds || []);
+    const deliveredTokens = selected
+        .filter(segment => !alreadyRead.has(segment.id))
+        .reduce((sum, segment) => sum + Number(segment.tokens || 0), 0);
+    reserveReadBudget(context, ledger, deliveredTokens);
     ledger.readSegmentIds = [...new Set([...(ledger.readSegmentIds || []), ...selected.map(segment => segment.id)])];
     writeLedger(snapshot, ledger);
     return {
@@ -471,8 +491,10 @@ function readThirdPartySessionContext(context, input = {}) {
         cursor,
         nextCursor: index < candidates.length ? index : null,
         hasMore: index < candidates.length,
-        tokens,
-        segments: selected.map(segment => ({ ...segment, content: JSON.parse(segment.content) })),
+        tokens: deliveredTokens,
+        segments: selected.map(segment => alreadyRead.has(segment.id)
+            ? { id: segment.id, kind: segment.kind, required: segment.required, messageIds: segment.messageIds, messageCount: segment.messageCount, tokens: 0, alreadyDelivered: true, contentOmitted: true }
+            : { ...segment, content: JSON.parse(segment.content) }),
     };
 }
 function readThirdPartyMemoryItems(context, ids) {
@@ -485,18 +507,45 @@ function readThirdPartyMemoryItems(context, ids) {
     const items = requested.map(id => pool.find((item) => item.id === id)).filter(Boolean);
     if (items.length !== requested.length)
         throw new Error("记忆条目不存在或不属于当前快照");
-    const totalTokens = items.reduce((sum, item) => sum + Number(item.tokens || (0, context_budget_1.estimateTextTokens)(item.content)), 0);
+    const deliveredMemories = ledger.deliveredMemories || {};
+    const isAlreadyDelivered = (item) => {
+        const proof = deliveredMemories[item.id];
+        return !!proof
+            && Number(proof.version || 0) === Number(item.version || 1)
+            && String(proof.contentHash || "") === String(item.contentHash || item.checksum || "");
+    };
+    const totalTokens = items
+        .filter(item => !isAlreadyDelivered(item))
+        .reduce((sum, item) => sum + Number(item.tokens || (0, context_budget_1.estimateTextTokens)(item.content)), 0);
     if (totalTokens > 20_000)
         throw new Error("本次记忆读取超过 20K token，请减少条目数量");
     reserveReadBudget(context, ledger, totalTokens);
     ledger.readMemoryItemIds = [...new Set([...(ledger.readMemoryItemIds || []), ...items.map((item) => item.id)])];
+    ledger.deliveredMemories = {
+        ...deliveredMemories,
+        ...Object.fromEntries(items.map((item) => [item.id, {
+                version: Number(item.version || 1),
+                contentHash: String(item.contentHash || item.checksum || ""),
+                contextVersion: String(item.contextVersion || ""),
+                deliveredAt: new Date().toISOString(),
+            }])),
+    };
     writeLedger(snapshot, ledger);
-    return { success: true, snapshotId: snapshot.id, snapshotChecksum: snapshot.checksum, totalTokens, items };
+    return {
+        success: true,
+        snapshotId: snapshot.id,
+        snapshotChecksum: snapshot.checksum,
+        totalTokens,
+        items: items.map((item) => isAlreadyDelivered(item)
+            ? { id: item.id, version: item.version, contentHash: item.contentHash || item.checksum, contextVersion: item.contextVersion || "", alreadyDelivered: true, contentOmitted: true }
+            : item),
+    };
 }
 function storeThirdPartyMemorySearchItems(context, itemsInput) {
     const snapshot = loadThirdPartyMemorySnapshot(context.memorySnapshotId, context.memorySnapshotChecksum);
     assertSnapshotContext(snapshot, context);
-    const items = (Array.isArray(itemsInput) ? itemsInput : []).slice(0, 12).map(normalizeMemoryItem);
+    const items = (Array.isArray(itemsInput) ? itemsInput : []).slice(0, 12)
+        .map((item, index) => normalizeMemoryItem(item, index, snapshot.contextPlanChecksum || ""));
     const ledger = readLedger(snapshot);
     reserveReadBudget(context, ledger, items.reduce((sum, item) => sum + (0, context_budget_1.estimateTextTokens)(item.content.slice(0, 800)), 0));
     ledger.searchItems = { ...(ledger.searchItems || {}), ...Object.fromEntries(items.map(item => [item.id, item])) };
@@ -627,16 +676,22 @@ function buildThirdPartyMemoryBootstrap(snapshot, challenge) {
     const v2Ack = snapshot.contextPlanChecksum && snapshot.confirmationCursor
         ? `，context_plan_checksum=${snapshot.contextPlanChecksum}，confirmation_cursor=${snapshot.confirmationCursor}`
         : "";
-    return [
+    const rendered = [
         "【CCM 第三方 Agent 记忆加载】",
         `- snapshot=${snapshot.id}`,
         `- checksum=${snapshot.checksum}`,
         `- mode=${snapshot.mode}; delivery=${snapshot.deliveryMode}; required_tokens=${snapshot.requiredHydrationTokens}`,
+        `- max_bootstrap_tokens=${snapshot.maxBootstrapTokens || DEFAULT_MAX_BOOTSTRAP_TOKENS}`,
         `- boundary_generation=${snapshot.boundaryGeneration}; native_generation=${snapshot.nativeGeneration}`,
         ...(snapshot.contextPlanChecksum ? [`- context_plan_checksum=${snapshot.contextPlanChecksum}; confirmation_cursor=${snapshot.confirmationCursor}`] : []),
         "- 执行任务前依次调用 ccm__knowledge_context/get_context_manifest、read_session_context 和 read_memory_items，直到所有 required 项读取完成。",
         `- 然后调用 ccm__knowledge_context/acknowledge_memory_context：challenge_id=${challenge?.challenge_id || ""}，snapshot_id=${snapshot.id}，snapshot_checksum=${snapshot.checksum}${v2Ack}。`,
         "- 未完成确认不得修改代码或提交交付；需要旧边界原文时使用 read_session_context(view=raw_archive)。",
     ].join("\n");
+    const tokens = (0, context_budget_1.estimateTextTokens)(rendered);
+    const maxTokens = Math.max(1_000, Number(snapshot.maxBootstrapTokens || DEFAULT_MAX_BOOTSTRAP_TOKENS));
+    if (tokens >= maxTokens)
+        throw new Error(`第三方 Agent Bootstrap 超过独立 Token 门禁：${tokens}/${maxTokens}`);
+    return rendered;
 }
 //# sourceMappingURL=third-party-memory-snapshot.js.map

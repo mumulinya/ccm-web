@@ -4,6 +4,10 @@ export declare const STORE_FILE: string;
 export declare const STORE_BACKUP: string;
 export declare const MAX_STORED_RUNS = 120;
 export declare const MAX_OBSERVATION_CHARS = 4000;
+/** 单条历史 run 的展示类字段落盘上限。仅约束已终态的旧 run，活跃 run 不受影响。 */
+export declare const MAX_ARCHIVED_RUN_FIELD_BYTES: number;
+/** 展示类字段中最近保留多少条 run 不做归档收缩（按 updated_at 倒序）。 */
+export declare const RECENT_RUNS_KEPT_INTACT = 12;
 export declare const GLOBAL_DISPATCH_TOOL_NAMES: string[];
 /** 浏览器 UI 副作用：按轻量 reply 展示，不挂交付脚手架 */
 export declare const LIGHT_UI_TOOL_NAMES: string[];

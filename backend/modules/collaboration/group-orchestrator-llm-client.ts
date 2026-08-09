@@ -24,6 +24,21 @@ import {
   detectProviderCacheFamily,
   resolveProviderContextCacheAdapter,
 } from "../../system/provider-context-cache-adapters";
+import {
+  isProviderNativeMicrocompactFieldRejection,
+  providerNativeMicrocompactAllowed,
+  recordProviderNativeMicrocompactCapability,
+} from "../../system/provider-native-microcompact-capability";
+import {
+  createAnthropicStreamTurnAccumulator,
+  createOpenAiStreamTurnAccumulator,
+  parseAnthropicAgentTurn,
+  parseGeminiAgentTurn,
+  parseOpenAiAgentTurn,
+  providerToolsRequestPatch,
+  turnForLegacyJsonLoop,
+} from "../../system/provider-native-tools";
+import { providerNativeToolReferenceAllowed, recordProviderNativeToolCapability } from "../../system/provider-native-tool-capability";
 
 export type LlmChatMessage = {
   role: string;
@@ -74,6 +89,9 @@ export type LlmCallOptions = {
   onRetry?: (notice: ModelCallRetryNotice) => void;
   retryProfile?: ModelRetryProfileId;
   signal?: AbortSignal;
+  nativeTools?: import("../../system/provider-native-tools").ProviderToolDefinition[];
+  nativeToolReference?: boolean;
+  onProviderAgentTurn?: (turn: import("../../system/provider-native-tools").ProviderAgentTurn) => void;
 };
 
 function createLlmAbortContext(options: LlmCallOptions, timeoutMs: number) {
@@ -180,15 +198,16 @@ async function prepareContextCache(config: any, options: LlmCallOptions, provide
     const officialAnthropic = /(?:^|\.)anthropic\.com$/i.test((() => {
       try { return new URL(String(config.apiUrl || "")).hostname; } catch { return ""; }
     })());
-    const nativeAllowed = requested === "native"
-      || config.supportsApiContextManagement === true
-      || config.supports_api_context_management === true
-      || requested === "auto" && officialAnthropic;
+    const nativeAllowed = providerNativeMicrocompactAllowed(config)
+      && (requested === "native" || requested === "auto" || officialAnthropic);
     if (nativeAllowed && requested !== "controlled" && requested !== "off") {
       const activeTokens = sourceMessages.reduce((sum: number, message: any) => sum + Math.max(0, Math.ceil(JSON.stringify(message?.content ?? "").length / 4)), 0);
       const maxInputTokens = Math.max(32_000, Number(config.modelContextWindow || config.model_context_window || 200_000));
       const targetInputTokens = Math.max(20_000, Math.min(maxInputTokens - 3_000, Number(config.modelAutoCompactTokenLimit || config.model_auto_compact_token_limit || Math.floor(maxInputTokens * 0.8))));
-      const editPlan = buildGroupApiMicroCompactEditPlan(sourceMessages, {
+      const planMessages = config.providerCacheProbeInProgress === true
+        ? [...sourceMessages, { role: "assistant", content: [{ type: "thinking", thinking: "CCM capability probe marker" }] }]
+        : sourceMessages;
+      const editPlan = buildGroupApiMicroCompactEditPlan(planMessages, {
         groupId: String(cacheOptions.scopeId || ""),
         activeTokens,
         maxInputTokens,
@@ -199,6 +218,13 @@ async function prepareContextCache(config: any, options: LlmCallOptions, provide
       const nativePlan = buildGroupApiMicrocompactNativeApplyPlan(editPlan, {
         groupId: String(cacheOptions.scopeId || ""),
         groupSessionId: String(cacheOptions.sessionId || ""),
+        scope: String(cacheOptions.scope || "other"),
+        scopeId: String(cacheOptions.scopeId || ""),
+        sessionId: String(cacheOptions.sessionId || ""),
+        generation: Number(cacheOptions.generation || 0),
+        boundaryGeneration: Number(cacheOptions.boundaryGeneration || 0),
+        model: String(config.model || ""),
+        apiUrl: String(config.apiUrl || ""),
         agentType: "anthropic-api",
         transport: "anthropic_api",
         provider: "anthropic",
@@ -797,6 +823,36 @@ function recordApiMicrocompactNativeAdapterTelemetry(options: LlmCallOptions, in
     executionReceipt = recordProviderNativeCompactExecutionReceipt(nativeInput);
   } catch {}
   const appliedReceipt = executionReceipt?.receipt;
+  const runtimeCapabilityConfig = (options as any)._providerNativeMicrocompactCapabilityConfig || {};
+  const capabilityConfig = {
+    ...runtimeCapabilityConfig,
+    apiUrl: runtimeCapabilityConfig.apiUrl || input.endpoint || "",
+    model: runtimeCapabilityConfig.model || input.model || "",
+    format: runtimeCapabilityConfig.format || "anthropic-compatible",
+    providerNativeCacheFamily: runtimeCapabilityConfig.providerNativeCacheFamily || "anthropic",
+    inferenceBackendKind: runtimeCapabilityConfig.inferenceBackendKind || "remote_api",
+  };
+  const providerOutcome = input?.responseBody?.context_management
+    || input?.responseBody?.contextManagement
+    || input?.responseBody?.usage?.context_management
+    || null;
+  const providerOutcomeVerified = !!providerOutcome
+    || Number(input?.responseBody?.usage?.cache_deleted_input_tokens || input?.responseBody?.usage?.cacheDeletedInputTokens || 0) > 0;
+  try {
+    if (input.ok === true && (providerOutcomeVerified || appliedReceipt?.strong_proof === true && appliedReceipt?.provider_outcome_verified === true)) {
+      recordProviderNativeMicrocompactCapability(capabilityConfig, {
+        status: "confirmed",
+        reason: "provider_context_management_outcome_verified",
+        providerRequestId: input.requestId,
+      });
+    } else if (input.ok === false && isProviderNativeMicrocompactFieldRejection(input.error)) {
+      recordProviderNativeMicrocompactCapability(capabilityConfig, {
+        status: "unsupported",
+        reason: input.error,
+        providerRequestId: input.requestId,
+      });
+    }
+  } catch {}
   if (executionReceipt?.verification?.valid === true
     && appliedReceipt?.status === "native_applied"
     && appliedReceipt?.strong_proof === true
@@ -822,6 +878,7 @@ async function callOpenAiCompatibleChatOnce(config: any, options: LlmCallOptions
   const streaming = options.stream === true || typeof options.onDelta === "function";
   let emitted = false;
   const cache = await prepareContextCache(config, options, "openai");
+  const nativePatch = options.nativeTools?.length && config.providerNativeToolsMode !== "json" ? providerToolsRequestPatch("openai", options.nativeTools) : { body: {}, headers: {} };
 
   const abort = createLlmAbortContext(options, resolveLlmTimeoutMs(config, options.defaultTimeoutMs || 30000, options.timeoutMs));
   try {
@@ -838,6 +895,7 @@ async function callOpenAiCompatibleChatOnce(config: any, options: LlmCallOptions
         ...(streaming ? { stream: true } : {}),
         ...buildOpenAiReasoningFields(callReasoningConfig(config, options)),
         ...(cache.adapterPatch?.body || {}),
+        ...nativePatch.body,
         messages: cache.messages,
       }),
       signal: abort.controller.signal,
@@ -846,10 +904,13 @@ async function callOpenAiCompatibleChatOnce(config: any, options: LlmCallOptions
       const text = await response.text();
       throw providerHttpError(options.httpErrorPrefix || "HTTP", response, text);
     }
+    if (options.nativeTools?.length) { try { recordProviderNativeToolCapability(config, "openai", "confirmed", "native_tools_accepted"); } catch {} }
     if (streaming) {
       let content = "";
       let usage: any = null;
+      const turnAccumulator = createOpenAiStreamTurnAccumulator();
       await consumeSseJson(response, event => {
+        turnAccumulator.push(event);
         const choice = event?.choices?.[0];
         const delta = emitStreamDelta(options, choice?.delta?.content ?? choice?.message?.content ?? "");
         if (delta) {
@@ -858,17 +919,22 @@ async function callOpenAiCompatibleChatOnce(config: any, options: LlmCallOptions
         }
         if (event?.usage) usage = event.usage;
       });
-      if (!content.trim()) throw new Error("模型返回空响应");
       const normalizedUsage = normalizeLlmTokenUsage(usage, "openai");
+      const providerTurn = turnAccumulator.finish(normalizedUsage);
+      options.onProviderAgentTurn?.(providerTurn);
+      content = turnForLegacyJsonLoop(providerTurn);
+      if (!content.trim()) throw new Error("模型返回空响应");
       reportTokenUsage(options, normalizedUsage);
       finishContextCache(options, cache.plan, { ok: true, usage: normalizedUsage, providerRequestId: providerRequestId(response), adapterEvidence: providerAdapterEvidence(cache) });
       return content;
     }
     const text = await response.text();
     const data = JSON.parse(text);
-    const content = String(data?.choices?.[0]?.message?.content || "");
-    if (!content.trim()) throw new Error("模型返回空响应");
     const normalizedUsage = normalizeLlmTokenUsage(data?.usage, "openai");
+    const providerTurn = parseOpenAiAgentTurn(data, normalizedUsage);
+    options.onProviderAgentTurn?.(providerTurn);
+    const content = turnForLegacyJsonLoop(providerTurn);
+    if (!content.trim()) throw new Error("模型返回空响应");
     reportTokenUsage(options, normalizedUsage);
     finishContextCache(options, cache.plan, { ok: true, usage: normalizedUsage, providerRequestId: providerRequestId(response), adapterEvidence: providerAdapterEvidence(cache) });
     return content;
@@ -923,6 +989,7 @@ async function callGeminiCompatibleChatOnce(config: any, options: LlmCallOptions
       temperature: options.temperature ?? resolveTemperature(config, 0.2),
       ...(options.maxTokens ? { maxOutputTokens: options.maxTokens } : {}),
     },
+    ...(options.nativeTools?.length && config.providerNativeToolsMode !== "json" ? providerToolsRequestPatch("gemini", options.nativeTools).body : {}),
   };
   const abort = createLlmAbortContext(options, resolveLlmTimeoutMs(config, options.defaultTimeoutMs || 30000, options.timeoutMs));
   let emitted = false;
@@ -937,26 +1004,34 @@ async function callGeminiCompatibleChatOnce(config: any, options: LlmCallOptions
       const detail = await response.text();
       throw providerHttpError(options.httpErrorPrefix || "Gemini HTTP", response, detail);
     }
+    if (options.nativeTools?.length) { try { recordProviderNativeToolCapability(config, "gemini", "confirmed", "native_tools_accepted"); } catch {} }
     if (streaming) {
       let content = "";
       let usage: any = null;
+      const nativeEvents: any[] = [];
       await consumeSseJson(response, payload => {
         for (const event of Array.isArray(payload) ? payload : [payload]) {
+          nativeEvents.push(event);
           const delta = emitStreamDelta(options, geminiResponseText(event));
           if (delta) { emitted = true; content += delta; }
           if (event?.usageMetadata || event?.usage) usage = event.usageMetadata || event.usage;
         }
       });
-      if (!content.trim()) throw new Error("模型返回空响应");
       const normalizedUsage = normalizeLlmTokenUsage(usage, "gemini");
+      const providerTurn = parseGeminiAgentTurn({ candidates: nativeEvents.flatMap(event => event?.candidates || []) }, normalizedUsage);
+      options.onProviderAgentTurn?.(providerTurn);
+      content = turnForLegacyJsonLoop(providerTurn);
+      if (!content.trim()) throw new Error("模型返回空响应");
       reportTokenUsage(options, normalizedUsage);
       finishContextCache(options, cache.plan, { ok: true, usage: normalizedUsage, providerRequestId: providerRequestId(response), adapterEvidence: providerAdapterEvidence(cache) });
       return content;
     }
     const data = JSON.parse(await response.text());
-    const content = geminiResponseText(data).trim();
-    if (!content) throw new Error("模型返回空响应");
     const normalizedUsage = normalizeLlmTokenUsage(data?.usageMetadata || data?.usage, "gemini");
+    const providerTurn = parseGeminiAgentTurn(data, normalizedUsage);
+    options.onProviderAgentTurn?.(providerTurn);
+    const content = turnForLegacyJsonLoop(providerTurn).trim();
+    if (!content) throw new Error("模型返回空响应");
     reportTokenUsage(options, normalizedUsage);
     finishContextCache(options, cache.plan, { ok: true, usage: normalizedUsage, providerRequestId: providerRequestId(response), adapterEvidence: providerAdapterEvidence(cache) });
     return content;
@@ -971,6 +1046,11 @@ async function callGeminiCompatibleChatOnce(config: any, options: LlmCallOptions
 async function callAnthropicCompatibleChatOnce(config: any, options: LlmCallOptions) {
   const endpoint = normalizeAnthropicMessagesUrl(config.apiUrl);
   assertLlmConfig(config, endpoint);
+  Object.defineProperty(options, "_providerNativeMicrocompactCapabilityConfig", {
+    value: config,
+    enumerable: false,
+    configurable: true,
+  });
   const streaming = options.stream === true || typeof options.onDelta === "function";
   let emitted = false;
 
@@ -990,6 +1070,8 @@ async function callAnthropicCompatibleChatOnce(config: any, options: LlmCallOpti
 
   const abort = createLlmAbortContext(options, resolveLlmTimeoutMs(config, options.defaultTimeoutMs || 30000, options.timeoutMs));
   try {
+    const useNativeToolReference = options.nativeToolReference === true && providerNativeToolReferenceAllowed(config);
+    const nativePatch = options.nativeTools?.length && config.providerNativeToolsMode !== "json" ? providerToolsRequestPatch("anthropic", options.nativeTools, useNativeToolReference) : { body: {}, headers: {} };
     const patched = applyApiMicrocompactNativeRequestPatch({
       model: config.model,
       max_tokens: options.maxTokens || 1500,
@@ -998,10 +1080,12 @@ async function callAnthropicCompatibleChatOnce(config: any, options: LlmCallOpti
       messages: userMessages,
       ...(streaming ? { stream: true } : {}),
       ...buildAnthropicThinkingFields(callReasoningConfig(config, options)),
+      ...nativePatch.body,
     }, {
       "Content-Type": "application/json",
       "x-api-key": config.apiKey,
       "anthropic-version": "2023-06-01",
+      ...nativePatch.headers,
     }, options);
     const cacheReferenceEditing = applyAnthropicCacheReferenceEditing(patched.body, config);
     patched.body = cacheReferenceEditing.body;
@@ -1032,6 +1116,7 @@ async function callAnthropicCompatibleChatOnce(config: any, options: LlmCallOpti
     }
     if (!response.ok) {
       const text = await response.text();
+      const httpError = providerHttpError(options.httpErrorPrefix || "HTTP", response, text);
       recordApiMicrocompactNativeAdapterTelemetry(options, {
         requestPatch: patched.requestPatch,
         requestBody: patched.body,
@@ -1044,14 +1129,19 @@ async function callAnthropicCompatibleChatOnce(config: any, options: LlmCallOpti
         requestId: providerRequestId(response),
         sentAt,
         ok: false,
-        error: `HTTP ${response.status}`,
+        error: httpError?.message || `HTTP ${response.status}`,
       });
-      throw providerHttpError(options.httpErrorPrefix || "HTTP", response, text);
+      throw httpError;
+    }
+    if (options.nativeTools?.length) {
+      try { recordProviderNativeToolCapability(config, "anthropic", "confirmed", useNativeToolReference ? "native_tools_and_tool_reference_accepted" : "native_tools_accepted"); } catch {}
     }
     if (streaming) {
       let content = "";
       let usage: any = {};
+      const turnAccumulator = createAnthropicStreamTurnAccumulator();
       await consumeSseJson(response, event => {
+        turnAccumulator.push(event);
         if (event?.usage) {
           usage = { ...usage, ...event.usage };
         }
@@ -1088,8 +1178,11 @@ async function callAnthropicCompatibleChatOnce(config: any, options: LlmCallOpti
         sentAt,
         ok: true,
       });
-      if (!content.trim()) throw new Error("模型返回空响应");
       const normalizedUsage = normalizeLlmTokenUsage(usage, "anthropic");
+      const providerTurn = turnAccumulator.finish(normalizedUsage);
+      options.onProviderAgentTurn?.(providerTurn);
+      content = turnForLegacyJsonLoop(providerTurn);
+      if (!content.trim()) throw new Error("模型返回空响应");
       reportTokenUsage(options, normalizedUsage);
       finishContextCache(options, cache.plan, { ok: true, usage: normalizedUsage, providerRequestId: providerRequestId(response), adapterEvidence: cacheReferenceEditing });
       return content;
@@ -1129,12 +1222,11 @@ async function callAnthropicCompatibleChatOnce(config: any, options: LlmCallOpti
       sentAt,
       ok: true,
     });
-    const content = (data?.content || [])
-      .map((part: any) => part?.type === "text" ? part.text : "")
-      .join("")
-      .trim();
-    if (!content) throw new Error("模型返回空响应");
     const normalizedUsage = normalizeLlmTokenUsage(data?.usage, "anthropic");
+    const providerTurn = parseAnthropicAgentTurn(data, normalizedUsage);
+    options.onProviderAgentTurn?.(providerTurn);
+    const content = turnForLegacyJsonLoop(providerTurn).trim();
+    if (!content) throw new Error("模型返回空响应");
     reportTokenUsage(options, normalizedUsage);
     finishContextCache(options, cache.plan, { ok: true, usage: normalizedUsage, providerRequestId: providerRequestId(response), adapterEvidence: cacheReferenceEditing });
     return content;
@@ -1182,25 +1274,65 @@ export function resolveLlmRetryOptions(config: any, options: LlmCallOptions, fal
 
 export async function callOpenAiCompatibleChat(config: any, options: LlmCallOptions) {
   if (shouldUseGemini(config)) return callGeminiCompatibleChat(config, options);
-  if (options.retry === false) return callOpenAiCompatibleChatOnce(config, options);
+  const callOnceWithNativeFallback = async (attemptOptions: LlmCallOptions) => {
+    try { return await callOpenAiCompatibleChatOnce(config, attemptOptions); }
+    catch (error: any) {
+      if (!attemptOptions.nativeTools?.length || error?.code === "CCM_MODEL_STREAM_INTERRUPTED_AFTER_DELTA" || !/(unknown|unsupported|unrecognized|invalid).{0,80}(tools?|tool_choice|function)|(?:tools?|tool_choice|function).{0,80}(unknown|unsupported|unrecognized|invalid)/i.test(String(error?.message || error))) throw error;
+      try { recordProviderNativeToolCapability(config, "openai", "unsupported", error); } catch {}
+      return callOpenAiCompatibleChatOnce(config, { ...attemptOptions, nativeTools: undefined, nativeToolReference: false, retry: false });
+    }
+  };
+  if (options.retry === false) return callOnceWithNativeFallback(options);
   return runModelCallWithRetry(
-    context => callOpenAiCompatibleChatOnce(config, { ...options, timeoutMs: context.attemptTimeoutMs, signal: context.signal, retry: false }),
+    context => callOnceWithNativeFallback({ ...options, timeoutMs: context.attemptTimeoutMs, signal: context.signal, retry: false }),
     resolveLlmRetryOptions(config, options, "OpenAI-compatible model call"),
   );
 }
 
 export async function callGeminiCompatibleChat(config: any, options: LlmCallOptions) {
-  if (options.retry === false) return callGeminiCompatibleChatOnce(config, options);
+  const callOnceWithNativeFallback = async (attemptOptions: LlmCallOptions) => {
+    try { return await callGeminiCompatibleChatOnce(config, attemptOptions); }
+    catch (error: any) {
+      if (!attemptOptions.nativeTools?.length || error?.code === "CCM_MODEL_STREAM_INTERRUPTED_AFTER_DELTA" || !/(unknown|unsupported|unrecognized|invalid).{0,80}(tools?|function)|(?:tools?|function).{0,80}(unknown|unsupported|unrecognized|invalid)/i.test(String(error?.message || error))) throw error;
+      try { recordProviderNativeToolCapability(config, "gemini", "unsupported", error); } catch {}
+      return callGeminiCompatibleChatOnce(config, { ...attemptOptions, nativeTools: undefined, nativeToolReference: false, retry: false });
+    }
+  };
+  if (options.retry === false) return callOnceWithNativeFallback(options);
   return runModelCallWithRetry(
-    context => callGeminiCompatibleChatOnce(config, { ...options, timeoutMs: context.attemptTimeoutMs, signal: context.signal, retry: false }),
+    context => callOnceWithNativeFallback({ ...options, timeoutMs: context.attemptTimeoutMs, signal: context.signal, retry: false }),
     resolveLlmRetryOptions(config, options, "Gemini-compatible model call"),
   );
 }
 
 export async function callAnthropicCompatibleChat(config: any, options: LlmCallOptions) {
-  if (options.retry === false) return callAnthropicCompatibleChatOnce(config, options);
+  const callOnceWithNativeFallback = async (attemptOptions: LlmCallOptions) => {
+    try {
+      return await callAnthropicCompatibleChatOnce(config, attemptOptions);
+    } catch (error: any) {
+      if (attemptOptions.nativeTools?.length && error?.code !== "CCM_MODEL_STREAM_INTERRUPTED_AFTER_DELTA" && /(unknown|unsupported|unrecognized|invalid).{0,80}(tools?|defer_loading|tool_reference)|(?:tools?|defer_loading|tool_reference).{0,80}(unknown|unsupported|unrecognized|invalid)/i.test(String(error?.message || error))) {
+        try { recordProviderNativeToolCapability(config, "anthropic", "unsupported", error); } catch {}
+        return callAnthropicCompatibleChatOnce(config, { ...attemptOptions, nativeTools: undefined, nativeToolReference: false, retry: false });
+      }
+      const nativePlan = getApiMicrocompactNativeApplyPlan(attemptOptions);
+      if (!nativePlan?.nativeApplyReady || error?.code === "CCM_MODEL_STREAM_INTERRUPTED_AFTER_DELTA" || !isProviderNativeMicrocompactFieldRejection(error)) throw error;
+      try {
+        recordProviderNativeMicrocompactCapability(config, { status: "unsupported", reason: error, source: "runtime_field_rejection" });
+      } catch {}
+      const binding = attemptOptions.providerContextCache || attemptOptions.provider_context_cache || {};
+      return callAnthropicCompatibleChatOnce({ ...config, providerContextCacheMode: "controlled" }, {
+        ...attemptOptions,
+        apiMicrocompactNativeApplyPlan: undefined,
+        api_microcompact_native_apply_plan: undefined,
+        providerContextCache: { ...binding, mode: "controlled" },
+        provider_context_cache: undefined,
+        retry: false,
+      });
+    }
+  };
+  if (options.retry === false) return callOnceWithNativeFallback(options);
   return runModelCallWithRetry(
-    context => callAnthropicCompatibleChatOnce(config, { ...options, timeoutMs: context.attemptTimeoutMs, signal: context.signal, retry: false }),
+    context => callOnceWithNativeFallback({ ...options, timeoutMs: context.attemptTimeoutMs, signal: context.signal, retry: false }),
     resolveLlmRetryOptions(config, options, "Anthropic-compatible model call"),
   );
 }
@@ -1208,14 +1340,14 @@ export async function callAnthropicCompatibleChat(config: any, options: LlmCallO
 export async function callOpenAiCompatibleJson(config: any, options: LlmCallOptions) {
   if (shouldUseGemini(config)) return callGeminiCompatibleJson(config, options);
   if (options.retry === false) {
-    const content = await callOpenAiCompatibleChatOnce(config, options);
+    const content = await callOpenAiCompatibleChat(config, { ...options, retry: false });
     const parsed = extractJsonObject(content);
     if (!parsed) throw new Error(options.invalidJsonMessage || "主 Agent API 未返回有效 JSON");
     return parsed;
   }
   return runModelCallWithRetry(async context => {
     let usage: LlmTokenUsage | null = null;
-    const content = await callOpenAiCompatibleChatOnce(config, {
+    const content = await callOpenAiCompatibleChat(config, {
       ...options,
       retry: false,
       timeoutMs: context.attemptTimeoutMs,
@@ -1231,14 +1363,14 @@ export async function callOpenAiCompatibleJson(config: any, options: LlmCallOpti
 
 export async function callGeminiCompatibleJson(config: any, options: LlmCallOptions) {
   if (options.retry === false) {
-    const content = await callGeminiCompatibleChatOnce(config, options);
+    const content = await callGeminiCompatibleChat(config, { ...options, retry: false });
     const parsed = extractJsonObject(content);
     if (!parsed) throw new Error(options.invalidJsonMessage || "主 Agent API 未返回有效 JSON");
     return parsed;
   }
   return runModelCallWithRetry(async context => {
     let usage: LlmTokenUsage | null = null;
-    const content = await callGeminiCompatibleChatOnce(config, {
+    const content = await callGeminiCompatibleChat(config, {
       ...options,
       retry: false,
       timeoutMs: context.attemptTimeoutMs,
@@ -1254,14 +1386,14 @@ export async function callGeminiCompatibleJson(config: any, options: LlmCallOpti
 
 export async function callAnthropicCompatibleJson(config: any, options: LlmCallOptions) {
   if (options.retry === false) {
-    const content = await callAnthropicCompatibleChatOnce(config, options);
+    const content = await callAnthropicCompatibleChat(config, { ...options, retry: false });
     const parsed = extractJsonObject(content);
     if (!parsed) throw new Error(options.invalidJsonMessage || "主 Agent API 未返回有效 JSON");
     return parsed;
   }
   return runModelCallWithRetry(async context => {
     let usage: LlmTokenUsage | null = null;
-    const content = await callAnthropicCompatibleChatOnce(config, {
+    const content = await callAnthropicCompatibleChat(config, {
       ...options,
       retry: false,
       timeoutMs: context.attemptTimeoutMs,

@@ -67,6 +67,8 @@ const db_1 = require("../../core/db");
 const context_budget_1 = require("../../system/context-budget");
 const tool_manager_1 = require("../../tools/tool-manager");
 const main_agent_post_compact_continuity_1 = require("../../system/main-agent-post-compact-continuity");
+const main_agent_context_policy_1 = require("../../tools/main-agent-context-policy");
+const user_visible_agent_projections_1 = require("../../system/user-visible-agent-projections");
 const runtime_1 = require("../../agents/runtime");
 const group_runtime_memory_admission_1 = require("./group-runtime-memory-admission");
 const group_memory_compaction_1 = require("./group-memory-compaction");
@@ -364,7 +366,10 @@ function buildGroupMemoryContext(memory) {
     addList("Worker scratchpad", memory.workerLedger || [], (item) => `${item.project || "unknown"} [${item.status || "unknown"}]：${item.summary || ""}${item.verification?.length ? `；验证：${item.verification.join("、")}` : ""}`);
     addList("开放问题", memory.openQuestions || [], (item) => String(item.question || item));
     addList("下一步", modelRuntime.nextActions, (item) => String(item.action || item));
-    return lines.join("\n");
+    // 条数由 slice(-6) 控制，但单条文本长度不受限；这里补一道总量上限，
+    // 与同类记忆渲染路径保持一致。上层 buildGroupContextPacket 会再按自己的
+    // 预算收缩一次，此处取更宽的值以免双重截断把内容切得过碎。
+    return (0, group_memory_shared_1.compactPreserveLines)(lines.join("\n"), 14_000);
 }
 function mergeVerifiedGroupPostCompactReinjection(groupId, groupSessionId, stored, rebuilt) {
     const previous = stored?.schema === "ccm-post-compact-reinjection-v1" ? stored : {};
@@ -836,8 +841,16 @@ async function runGroupMemoryAutoCompactionNow(groupId, options = {}) {
     try {
         const messages = (0, storage_1.getGroupMessages)(id, sessionId).filter((message) => !String(message?.content || "").startsWith("📤"));
         const memory = (0, group_memory_storage_1.loadGroupMemory)(id, sessionId);
+        const sourceMessagePrefixChecksum = crypto.createHash("sha256").update(JSON.stringify(messages)).digest("hex");
+        const sourceCompactionIdentityChecksum = crypto.createHash("sha256").update(JSON.stringify([
+            memory?.compactBoundary?.id || "",
+            memory?.compactBoundary?.boundaryGeneration || memory?.compactBoundary?.generation || 0,
+            memory?.compaction?.lastCompactedMessageId || "",
+            memory?.compaction?.summaryChecksum || "",
+        ])).digest("hex");
         const loadedConfig = (0, group_memory_shared_1.loadGroupMemoryCompactionConfig)(options.config || {});
         const groupRecord = options.group || (0, storage_1.loadGroups)().find((item) => String(item?.id || "") === id) || null;
+        const effectiveContextPolicy = (0, main_agent_context_policy_1.resolveMainAgentContextPolicy)(loadedConfig, groupRecord?.context_policy || groupRecord?.contextPolicy || {}).effective;
         const groupToolScope = {
             ...normalizeDynamicContextToolScope(groupRecord?.tools || {}),
             auditContext: { runtime: "group-main-agent", groupId: id, sessionId, source: "post-compact-restore" },
@@ -863,11 +876,14 @@ async function runGroupMemoryAutoCompactionNow(groupId, options = {}) {
             identity: dynamicToolIdentity,
             scope: groupToolScope,
             manifest: dynamicContextRestoreManifest,
+            maxPerSkillTokens: effectiveContextPolicy.postCompactSkillPerItemMaxTokens,
+            maxTotalSkillTokens: effectiveContextPolicy.postCompactSkillTotalMaxTokens,
         });
         const restoredMcpCatalog = tool_manager_1.toolManager.getScopedToolCatalog(groupToolScope).tools
             .filter((tool) => dynamicContextRestore.loadedToolNames.includes(String(tool.canonicalName || tool.name || "")));
         const config = {
             ...loadedConfig,
+            ...effectiveContextPolicy,
             recoveryContext: {
                 ...(loadedConfig?.recoveryContext || loadedConfig?.recovery_context || {}),
                 dynamicContextRestoreManifest,
@@ -921,6 +937,26 @@ async function runGroupMemoryAutoCompactionNow(groupId, options = {}) {
                 compacted: result.compacted === true,
                 boundaryId: result.boundary?.id || "",
             });
+        }
+        const currentMessages = (0, storage_1.getGroupMessages)(id, sessionId).filter((message) => !String(message?.content || "").startsWith("📤"));
+        const currentPrefixChecksum = currentMessages.length >= messages.length
+            ? crypto.createHash("sha256").update(JSON.stringify(currentMessages.slice(0, messages.length))).digest("hex")
+            : "";
+        const currentMemory = (0, group_memory_storage_1.loadGroupMemory)(id, sessionId);
+        const currentCompactionIdentityChecksum = crypto.createHash("sha256").update(JSON.stringify([
+            currentMemory?.compactBoundary?.id || "",
+            currentMemory?.compactBoundary?.boundaryGeneration || currentMemory?.compactBoundary?.generation || 0,
+            currentMemory?.compaction?.lastCompactedMessageId || "",
+            currentMemory?.compaction?.summaryChecksum || "",
+        ])).digest("hex");
+        if (currentPrefixChecksum !== sourceMessagePrefixChecksum || currentCompactionIdentityChecksum !== sourceCompactionIdentityChecksum) {
+            const sourceStateError = new Error("压缩输入在提交前被并发改写；候选摘要和 Boundary 已丢弃");
+            sourceStateError.code = "GROUP_COMPACTION_SOURCE_STATE_CHANGED";
+            sourceStateError.sourceMessageCount = messages.length;
+            sourceStateError.currentMessageCount = currentMessages.length;
+            sourceStateError.messagePrefixStable = currentPrefixChecksum === sourceMessagePrefixChecksum;
+            sourceStateError.compactionIdentityStable = currentCompactionIdentityChecksum === sourceCompactionIdentityChecksum;
+            throw sourceStateError;
         }
         const committed = (0, group_session_lifecycle_head_1.withGroupSessionLifecycleCommitFence)(compactionLifecycleFence, ({ validation: commitLifecycleValidation }) => {
             return (0, group_compaction_activity_1.withGroupCompactionActivityCommitFence)({
@@ -1142,7 +1178,9 @@ async function runGroupMemoryAutoCompactionNow(groupId, options = {}) {
                 return { success: true, compacted: !!result.compacted, boundary: boundaryWithPostCompactState, keepIndex: result.keepIndex, background, memory: saved, compactHead, typedMemoryScopeId, logDistillation, providerNativeCompactSessionCapacityReset, postCompactSessionStateReset, promptCacheCompactionNotification, circuitBreaker, lifecycleValidation: commitLifecycleValidation, lifecycleCommitProof };
             });
         });
-        return { ...committed.value, compactionActivity: committed.compactionActivity };
+        const committedResult = { ...committed.value, compactionActivity: committed.compactionActivity };
+        (0, user_visible_agent_projections_1.projectCommittedGroupCompaction)({ groupId: id, exactSessionId: sessionId, result: committedResult, reason: options.reason });
+        return committedResult;
     }
     catch (error) {
         if (error?.code === "GROUP_COMPACTION_CANCELLED" || compactionAbortController.signal.aborted) {
@@ -4682,8 +4720,10 @@ function buildGroupContextPacket(groupId, options = {}) {
         || memory.compactBoundary?.postCompactPayloadGate
         || memory.compactBoundary?.post_compact_restore?.postCompactPayloadGate
         || null;
+    // 正常路径此前直接返回未设上限的 rendered，只有 recompact_required 时才收缩。
+    // 沿用同类路径既有的 14_000 上限，避免单次注入无限增长。
     if (postCompactPayloadGate?.status !== "recompact_required")
-        return rendered;
+        return (0, group_memory_shared_1.compactPreserveLines)(rendered, 14_000);
     return (0, group_memory_shared_1.compactPreserveLines)(rendered, Math.max(4000, Number(postCompactPayloadGate.safe_render_chars || 6000)));
 }
 //# sourceMappingURL=group-memory-context.js.map

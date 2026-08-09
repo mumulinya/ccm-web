@@ -47,8 +47,10 @@ import {
   mergePersistentRequirements,
   mergeSafeConversationSummary,
   mergeUnique,
+  normalizeSummary,
   readGroupMemoryCompactionHookLedger,
   registerGroupMemoryCompactionHook,
+  renderConversationSummary,
   resolveGroupModelContextCapacity,
   verifyGroupCompactTransactionReceipt,
   verifyGroupPostCompactCleanupAudit,
@@ -1295,4 +1297,42 @@ export function runGroupSummaryExcludesBulkArtifactsSelfTest() {
     summaryChars: summaryText.length,
     sourceChars: messages.reduce((sum, message) => sum + String(message.content || "").length, 0),
   };
+}
+
+/** 审计文档不变量 20：未验证推测在摘要后仍保持 hypothesis 状态。 */
+export function runGroupHypothesisStatePreservationSelfTest() {
+  const hypothesis = "支付回调失败也许由网关时钟漂移导致";
+  const messages: any[] = [
+    { id: "hyp-0", role: "user", content: "排查支付回调失败，但没有确认根因" },
+    {
+      id: "hyp-1",
+      role: "assistant",
+      agent: "backend",
+      content: "目前只有候选原因，仍需查看时间同步日志。",
+      reasoning: { assumptionsToVerify: [hypothesis] },
+    },
+  ];
+  const fallback = buildDeterministicConversationSummary(messages, {});
+  const healthy = normalizeSummary({
+    ...fallback,
+    hypotheses: fallback.hypotheses,
+  }, createEmptyConversationSummary());
+  const promoted = normalizeSummary({
+    ...fallback,
+    decisions: [...fallback.decisions, fallback.hypotheses[0]],
+  }, createEmptyConversationSummary());
+  const healthyQuality = evaluateGroupMemorySummaryQuality(healthy, fallback, messages, {}, {});
+  const promotedQuality = evaluateGroupMemorySummaryQuality(promoted, fallback, messages, {}, {});
+  const rendered = renderConversationSummary(healthy, 14_000);
+  const checks = {
+    explicitAssumptionIsExtracted: fallback.hypotheses.some(item => item.includes(hypothesis)),
+    normalizedSummaryKeepsHypothesisField: healthy.hypotheses.some(item => item.includes(hypothesis)),
+    renderedSummaryLabelsHypothesisAsUnverified:
+      rendered.includes("待验证假设（不得视为事实）") && rendered.includes(hypothesis),
+    healthyHypothesisSummaryPasses: healthyQuality.pass === true,
+    promotedHypothesisIsRejected:
+      promotedQuality.pass === false
+      && promotedQuality.checks.some((check: any) => check.id === "hypotheses_not_promoted" && check.pass === false),
+  };
+  return { pass: Object.values(checks).every(Boolean), checks, fallback, healthyQuality, promotedQuality };
 }

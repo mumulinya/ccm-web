@@ -5,6 +5,7 @@ import { CCM_DIR } from "../core/utils";
 import { withFileLock, writeJsonAtomic } from "../core/atomic-json-file";
 import { estimateTextTokens } from "./context-budget";
 import { toolManager, type ToolScope } from "../tools/tool-manager";
+import { buildContextSourceManifestReference, clearContextSourceContinuity } from "./main-agent-context-source-continuity";
 
 export type MainAgentKind = "global" | "group" | "project";
 
@@ -50,6 +51,20 @@ export type MainAgentPostCompactRestoreManifestV1 = {
   checksum: string;
 };
 
+export type MainAgentPostCompactRestoreManifestV2 = Omit<MainAgentPostCompactRestoreManifestV1, "schema" | "version"> & {
+  schema: "ccm-main-agent-post-compact-restore-manifest-v2";
+  version: 2;
+  contentStored: false;
+};
+
+export type MainAgentPostCompactRestoreManifestV3 = Omit<MainAgentPostCompactRestoreManifestV2, "schema" | "version"> & {
+  schema: "ccm-main-agent-post-compact-restore-manifest-v3";
+  version: 3;
+  contextSourceManifest: ReturnType<typeof buildContextSourceManifestReference>;
+};
+
+export type MainAgentPostCompactRestoreManifest = MainAgentPostCompactRestoreManifestV1 | MainAgentPostCompactRestoreManifestV2 | MainAgentPostCompactRestoreManifestV3;
+
 export type PostCompactToolRestoreReceiptV1 = {
   schema: "ccm-post-compact-tool-restore-receipt-v1";
   version: 1;
@@ -66,23 +81,57 @@ export type PostCompactToolRestoreReceiptV1 = {
   checksum: string;
 };
 
-type ContinuityEvidenceStoreV1 = {
-  schema: "ccm-main-agent-dynamic-context-evidence-v1";
+export type PostCompactToolRestoreReceiptV2 = Omit<PostCompactToolRestoreReceiptV1, "schema" | "version"> & {
+  schema: "ccm-post-compact-tool-restore-receipt-v2";
+  version: 2;
+  restoredSkills: Array<{ name: string; contentHash: string; tokens: number; originalTokens: number; truncated: boolean; drift: "none" }>;
+  restoredMcpSchemas: Array<{ name: string; schemaChecksum: string; tokens: number; drift: "none" }>;
+  contentStored: false;
+};
+
+export type PostCompactToolRestoreReceipt = PostCompactToolRestoreReceiptV1 | PostCompactToolRestoreReceiptV2;
+
+type ContinuityEvidenceStore = {
+  schema: "ccm-main-agent-dynamic-context-evidence-v2";
+  version: 2;
   identity: MainAgentContinuityIdentityV1;
   invokedSkills: InvokedSkillContinuityV1[];
   loadedMcpSchemas: LoadedMcpSchemaContinuityV1[];
-  latestManifest: MainAgentPostCompactRestoreManifestV1 | null;
+  latestManifest: MainAgentPostCompactRestoreManifest | null;
   updatedAt: string;
+  contentStored: false;
   checksum: string;
 };
 
 const CONTINUITY_DIR = path.join(CCM_DIR, "main-agent-context-continuity");
 const DEFAULT_PER_SKILL_TOKENS = 5_000;
-const DEFAULT_TOTAL_SKILL_TOKENS = 10_000;
+const DEFAULT_TOTAL_SKILL_TOKENS = 25_000;
 const DEFAULT_TOTAL_MCP_SCHEMA_TOKENS = 20_000;
 
 function stableChecksum(value: any) {
   return crypto.createHash("sha256").update(JSON.stringify(value ?? null)).digest("hex");
+}
+
+function truncateSkillBodyPreservingEdges(bodyInput: any, maxTokensInput: number) {
+  const body = String(bodyInput || "");
+  const maxTokens = Math.max(1, Math.floor(Number(maxTokensInput || 0)));
+  const originalTokens = estimateTextTokens(body);
+  if (originalTokens <= maxTokens) return { body, originalTokens, tokenCount: originalTokens, truncated: false };
+  const marker = "\n\n[Skill content truncated by CCM post-compact restore budget]\n\n";
+  let low = 0;
+  let high = body.length;
+  let selected = marker.trim();
+  while (low <= high) {
+    const keep = Math.floor((low + high) / 2);
+    const headLength = Math.ceil(keep * 0.7);
+    const tailLength = Math.max(0, keep - headLength);
+    const candidate = `${body.slice(0, headLength).trimEnd()}${marker}${tailLength ? body.slice(-tailLength).trimStart() : ""}`.trim();
+    if (estimateTextTokens(candidate) <= maxTokens) {
+      selected = candidate;
+      low = keep + 1;
+    } else high = keep - 1;
+  }
+  return { body: selected, originalTokens, tokenCount: estimateTextTokens(selected), truncated: true };
 }
 
 function normalizedIdentity(value: any): MainAgentContinuityIdentityV1 {
@@ -114,14 +163,16 @@ function evidenceFile(identityInput: MainAgentContinuityIdentityV1) {
   return path.join(CONTINUITY_DIR, `${identity.agentKind}-${digest}.json`);
 }
 
-function emptyStore(identity: MainAgentContinuityIdentityV1): ContinuityEvidenceStoreV1 {
+function emptyStore(identity: MainAgentContinuityIdentityV1): ContinuityEvidenceStore {
   const core = {
-    schema: "ccm-main-agent-dynamic-context-evidence-v1" as const,
+    schema: "ccm-main-agent-dynamic-context-evidence-v2" as const,
+    version: 2 as const,
     identity,
     invokedSkills: [],
     loadedMcpSchemas: [],
     latestManifest: null,
     updatedAt: "",
+    contentStored: false as const,
   };
   return { ...core, checksum: stableChecksum(core) };
 }
@@ -154,12 +205,14 @@ function normalizeStore(value: any, expected: MainAgentContinuityIdentityV1) {
       schemaTokens: Math.max(0, Number(row.schemaTokens || 0)),
     })).slice(-400);
   return {
-    schema: "ccm-main-agent-dynamic-context-evidence-v1" as const,
+    schema: "ccm-main-agent-dynamic-context-evidence-v2" as const,
+    version: 2 as const,
     identity,
     invokedSkills,
     loadedMcpSchemas,
-    latestManifest: source.latestManifest?.schema === "ccm-main-agent-post-compact-restore-manifest-v1" ? source.latestManifest : null,
+    latestManifest: ["ccm-main-agent-post-compact-restore-manifest-v1", "ccm-main-agent-post-compact-restore-manifest-v2", "ccm-main-agent-post-compact-restore-manifest-v3"].includes(String(source.latestManifest?.schema || "")) ? source.latestManifest : null,
     updatedAt: String(source.updatedAt || ""),
+    contentStored: false as const,
     checksum: String(source.checksum || ""),
   };
 }
@@ -189,14 +242,14 @@ export function resolveMainAgentContinuityIdentity(identityInput: MainAgentConti
   return { ...identity, generation: latest.identity.generation };
 }
 
-function commitStore(store: ContinuityEvidenceStoreV1) {
+function commitStore(store: ContinuityEvidenceStore) {
   const core = { ...store, updatedAt: new Date().toISOString(), checksum: "" };
   const next = { ...core, checksum: stableChecksum({ ...core, checksum: undefined }) };
   writeJsonAtomic(evidenceFile(store.identity), next);
   return next;
 }
 
-function mutateStore(identityInput: MainAgentContinuityIdentityV1, operation: (store: ContinuityEvidenceStoreV1) => void) {
+function mutateStore(identityInput: MainAgentContinuityIdentityV1, operation: (store: ContinuityEvidenceStore) => void) {
   const identity = normalizedIdentity(identityInput);
   const file = evidenceFile(identity);
   return withFileLock(file, () => {
@@ -322,7 +375,7 @@ function manifestCore(input: {
   identity: MainAgentContinuityIdentityV1;
   boundaryGeneration: number;
   scope: ToolScope;
-  store: ContinuityEvidenceStoreV1;
+  store: ContinuityEvidenceStore;
 }) {
   const identity = normalizedIdentity(input.identity);
   const catalog = toolManager.getScopedToolCatalog(input.scope);
@@ -340,8 +393,8 @@ function manifestCore(input: {
   }));
   const alwaysNames = new Set(alwaysLoaded.map(item => item.canonicalName));
   return {
-    schema: "ccm-main-agent-post-compact-restore-manifest-v1" as const,
-    version: 1 as const,
+    schema: "ccm-main-agent-post-compact-restore-manifest-v3" as const,
+    version: 3 as const,
     identity,
     boundaryGeneration: Math.max(0, Math.floor(Number(input.boundaryGeneration || 0))),
     catalogRevision: catalogRevision(input.scope),
@@ -354,6 +407,8 @@ function manifestCore(input: {
       ...alwaysLoaded,
     ].sort((a, b) => b.loadedAt.localeCompare(a.loadedAt)),
     createdAt: new Date().toISOString(),
+    contextSourceManifest: buildContextSourceManifestReference(identity),
+    contentStored: false as const,
   };
 }
 
@@ -364,10 +419,10 @@ export function buildMainAgentPostCompactRestoreManifest(input: {
 }) {
   const identity = normalizedIdentity(input.identity);
   const core = manifestCore({ ...input, identity, store: readStore(identity) });
-  return { ...core, checksum: stableChecksum(core) } satisfies MainAgentPostCompactRestoreManifestV1;
+  return { ...core, checksum: stableChecksum(core) } satisfies MainAgentPostCompactRestoreManifestV3;
 }
 
-export function persistMainAgentPostCompactRestoreManifest(manifest: MainAgentPostCompactRestoreManifestV1) {
+export function persistMainAgentPostCompactRestoreManifest(manifest: MainAgentPostCompactRestoreManifest) {
   const validation = validateMainAgentPostCompactRestoreManifest(manifest);
   if (!validation.valid) throw new Error(`main_agent_restore_manifest_invalid:${validation.issues.join(",")}`);
   return mutateStore(manifest.identity, store => { store.latestManifest = manifest; });
@@ -375,7 +430,10 @@ export function persistMainAgentPostCompactRestoreManifest(manifest: MainAgentPo
 
 export function validateMainAgentPostCompactRestoreManifest(value: any, expected?: Partial<MainAgentContinuityIdentityV1> & { boundaryGeneration?: number }) {
   const issues: string[] = [];
-  if (value?.schema !== "ccm-main-agent-post-compact-restore-manifest-v1" || Number(value?.version || 0) !== 1) issues.push("schema_invalid");
+  const schemaVersionValid = (value?.schema === "ccm-main-agent-post-compact-restore-manifest-v1" && Number(value?.version || 0) === 1)
+    || (value?.schema === "ccm-main-agent-post-compact-restore-manifest-v2" && Number(value?.version || 0) === 2 && value?.contentStored === false)
+    || (value?.schema === "ccm-main-agent-post-compact-restore-manifest-v3" && Number(value?.version || 0) === 3 && value?.contentStored === false && value?.contextSourceManifest?.contentStored === false);
+  if (!schemaVersionValid) issues.push("schema_invalid");
   let identity: MainAgentContinuityIdentityV1 | null = null;
   try { identity = normalizedIdentity(value?.identity); } catch { issues.push("identity_invalid"); }
   if (identity && expected) {
@@ -393,14 +451,14 @@ export function validateMainAgentPostCompactRestoreManifest(value: any, expected
 export function restoreMainAgentPostCompactContext(input: {
   identity: MainAgentContinuityIdentityV1;
   scope: ToolScope;
-  manifest?: MainAgentPostCompactRestoreManifestV1 | null;
+  manifest?: MainAgentPostCompactRestoreManifest | null;
   maxPerSkillTokens?: number;
   maxTotalSkillTokens?: number;
   maxTotalMcpSchemaTokens?: number;
 }) {
   const identity = normalizedIdentity(input.identity);
   const manifest = input.manifest || readStore(identity).latestManifest;
-  const dropped: PostCompactToolRestoreReceiptV1["dropped"] = [];
+  const dropped: PostCompactToolRestoreReceipt["dropped"] = [];
   const currentCatalogRevision = catalogRevision(input.scope);
   const currentAuthorizationChecksum = authorizationChecksum(input.scope);
   if (!manifest) return buildRestoreResult(identity, null, currentCatalogRevision, [], [], dropped, 0, 0, "not_required");
@@ -412,9 +470,13 @@ export function restoreMainAgentPostCompactContext(input: {
   const catalog = toolManager.getScopedToolCatalog(input.scope);
   const skillsByName = new Map(catalog.skills.map((skill: any) => [String(skill.name), skill]));
   const toolsByName = new Map(catalog.tools.map((tool: any) => [String(tool.canonicalName || tool.name), tool]));
-  const maxPerSkill = Math.max(1, Number(input.maxPerSkillTokens || DEFAULT_PER_SKILL_TOKENS));
-  const maxSkills = Math.max(maxPerSkill, Number(input.maxTotalSkillTokens || DEFAULT_TOTAL_SKILL_TOKENS));
-  const maxMcp = Math.max(1, Number(input.maxTotalMcpSchemaTokens || DEFAULT_TOTAL_MCP_SCHEMA_TOKENS));
+  const maxPerSkill = Math.max(1, Number(input.maxPerSkillTokens ?? DEFAULT_PER_SKILL_TOKENS));
+  const maxSkills = input.maxTotalSkillTokens === undefined
+    ? DEFAULT_TOTAL_SKILL_TOKENS
+    : Math.max(0, Number(input.maxTotalSkillTokens));
+  const maxMcp = input.maxTotalMcpSchemaTokens === undefined
+    ? DEFAULT_TOTAL_MCP_SCHEMA_TOKENS
+    : Math.max(0, Number(input.maxTotalMcpSchemaTokens));
   const skillAttachments: any[] = [];
   let skillTokens = 0;
   for (const evidence of manifest.invokedSkills || []) {
@@ -423,19 +485,22 @@ export function restoreMainAgentPostCompactContext(input: {
     if (String(skill.contentHash || "") !== String(evidence.contentHash || "")) { dropped.push({ kind: "skill", name: evidence.name, reason: "skill_content_changed" }); continue; }
     const current = toolManager.getSkillContinuitySnapshot(evidence.name, input.scope);
     if (!current?.ok) { dropped.push({ kind: "skill", name: evidence.name, reason: current?.error || "skill_body_unavailable" }); continue; }
-    const tokens = estimateTextTokens(String(current.prompt || ""));
-    if (tokens > maxPerSkill) { dropped.push({ kind: "skill", name: evidence.name, reason: "per_skill_token_budget_exceeded" }); continue; }
-    if (skillTokens + tokens > maxSkills) { dropped.push({ kind: "skill", name: evidence.name, reason: "aggregate_skill_token_budget_exceeded" }); continue; }
-    skillTokens += tokens;
+    const remainingTokens = Math.max(0, maxSkills - skillTokens);
+    if (remainingTokens < 1) { dropped.push({ kind: "skill", name: evidence.name, reason: "aggregate_skill_token_budget_exceeded" }); continue; }
+    const projected = truncateSkillBodyPreservingEdges(current.prompt, Math.min(maxPerSkill, remainingTokens));
+    if (!projected.body || projected.tokenCount > remainingTokens) { dropped.push({ kind: "skill", name: evidence.name, reason: "aggregate_skill_token_budget_exceeded" }); continue; }
+    skillTokens += projected.tokenCount;
     skillAttachments.push({
       schema: "ccm-post-compact-invoked-skill-attachment-v1",
       name: evidence.name,
-      body: current.prompt,
+      body: projected.body,
       contentHash: current.contentHash,
       invokedAt: evidence.invokedAt,
       invocationEventId: evidence.invocationEventId,
       sourceMessageId: evidence.sourceMessageId,
-      tokenCount: tokens,
+      tokenCount: projected.tokenCount,
+      originalTokenCount: projected.originalTokens,
+      truncated: projected.truncated,
       loadSource: "post_compact_restored",
     });
   }
@@ -466,34 +531,50 @@ export function restoreMainAgentPostCompactContext(input: {
 
 function buildRestoreResult(
   identity: MainAgentContinuityIdentityV1,
-  manifest: MainAgentPostCompactRestoreManifestV1 | null,
+  manifest: MainAgentPostCompactRestoreManifest | null,
   currentCatalogRevision: string,
   loadedToolNames: string[],
   skillAttachments: any[],
-  dropped: PostCompactToolRestoreReceiptV1["dropped"],
+  dropped: PostCompactToolRestoreReceipt["dropped"],
   skillTokens: number,
   mcpTokens: number,
-  status: PostCompactToolRestoreReceiptV1["status"],
+  status: PostCompactToolRestoreReceipt["status"],
 ) {
+  const manifestMcp = new Map((manifest?.loadedMcpSchemas || []).map(item => [String(item.canonicalName), item]));
   const core = {
-    schema: "ccm-post-compact-tool-restore-receipt-v1" as const,
-    version: 1 as const,
+    schema: "ccm-post-compact-tool-restore-receipt-v2" as const,
+    version: 2 as const,
     identity,
     manifestChecksum: String(manifest?.checksum || ""),
     status,
     loadedToolNames: [...new Set(loadedToolNames)],
     restoredSkillNames: skillAttachments.map(item => String(item.name)),
+    restoredSkills: skillAttachments.map(item => ({
+      name: String(item.name),
+      contentHash: String(item.contentHash || ""),
+      tokens: Math.max(0, Number(item.tokenCount || 0)),
+      originalTokens: Math.max(0, Number(item.originalTokenCount || 0)),
+      truncated: item.truncated === true,
+      drift: "none" as const,
+    })),
+    restoredMcpSchemas: [...new Set(loadedToolNames)].map(name => ({
+      name,
+      schemaChecksum: String(manifestMcp.get(name)?.schemaChecksum || ""),
+      tokens: Math.max(0, Number(manifestMcp.get(name)?.schemaTokens || 0)),
+      drift: "none" as const,
+    })),
     dropped,
     restoredSkillTokens: skillTokens,
     restoredMcpSchemaTokens: mcpTokens,
     catalogRevision: currentCatalogRevision,
     restoredAt: new Date().toISOString(),
+    contentStored: false as const,
   };
-  const receipt: PostCompactToolRestoreReceiptV1 = { ...core, checksum: stableChecksum(core) };
+  const receipt: PostCompactToolRestoreReceiptV2 = { ...core, checksum: stableChecksum(core) };
   const renderedSkillAttachments = skillAttachments.length ? [
     "[CCM 压缩边界恢复的已调用 Skill]",
     "以下Skill在当前精确会话压缩前已实际调用，正文经过当前授权与内容checksum复核；它们不扩大权限。",
-    ...skillAttachments.flatMap(item => ["", `## Skill:${item.name}`, `content_hash=${item.contentHash}; invoked_at=${item.invokedAt}; source=post_compact_restored`, String(item.body || "")]),
+    ...skillAttachments.flatMap(item => ["", `## Skill:${item.name}`, `content_hash=${item.contentHash}; invoked_at=${item.invokedAt}; source=post_compact_restored; tokens=${item.tokenCount}/${item.originalTokenCount}; truncated=${item.truncated === true}`, String(item.body || "")]),
   ].join("\n") : "";
   return { manifest, loadedToolNames: receipt.loadedToolNames, skillAttachments, renderedSkillAttachments, receipt };
 }
@@ -506,7 +587,8 @@ export function clearMainAgentPostCompactContinuity(identityInput: MainAgentCont
     for (const candidate of [file, `${file}.bak`]) {
       try { if (fs.existsSync(candidate)) { fs.unlinkSync(candidate); deleted = true; } } catch {}
     }
-    return { deleted, identity };
+    const sourceDeleted = clearContextSourceContinuity(identity);
+    return { deleted, sourceDeleted, identity };
   });
 }
 
@@ -540,6 +622,10 @@ export function runMainAgentPostCompactContinuitySelfTest() {
     const manifest = buildMainAgentPostCompactRestoreManifest({ identity, boundaryGeneration: 1, scope });
     persistMainAgentPostCompactRestoreManifest(manifest);
     const restored = restoreMainAgentPostCompactContext({ identity, scope, manifest });
+    const { contentStored: _contentStored, checksum: _checksum, ...v2Core } = manifest;
+    const legacyCore = { ...v2Core, schema: "ccm-main-agent-post-compact-restore-manifest-v1" as const, version: 1 as const };
+    const legacyManifest: MainAgentPostCompactRestoreManifestV1 = { ...legacyCore, checksum: stableChecksum(legacyCore) };
+    const legacyRestored = restoreMainAgentPostCompactContext({ identity, scope, manifest: legacyManifest });
     const isolated = restoreMainAgentPostCompactContext({ identity: { ...identity, exactSessionId: `${identity.exactSessionId}-other` }, scope, manifest });
     const budgeted = restoreMainAgentPostCompactContext({ identity, scope, manifest, maxPerSkillTokens: 1, maxTotalSkillTokens: 1, maxTotalMcpSchemaTokens: 1 });
     const skillRow = manager.skills.find((item: any) => item.name === skillName);
@@ -561,6 +647,9 @@ export function runMainAgentPostCompactContinuitySelfTest() {
         && restored.receipt.status === "restored"
         && restored.receipt.restoredSkillNames.includes(skillName)
         && restored.receipt.loadedToolNames.length === 1
+        && restored.receipt.schema === "ccm-post-compact-tool-restore-receipt-v2"
+        && restored.receipt.contentStored === false
+        && legacyRestored.receipt.status === "restored"
         && !manifest.invokedSkills.some(item => item.name === unusedSkillName)
         && isolated.receipt.status === "rejected"
         && budgeted.receipt.dropped.some(item => item.reason.includes("token_budget"))
@@ -573,6 +662,7 @@ export function runMainAgentPostCompactContinuitySelfTest() {
         && revoked.receipt.dropped.some(item => item.reason === "mcp_unavailable_or_unauthorized"),
       manifest,
       restored: restored.receipt,
+      legacyRestored: legacyRestored.receipt,
       isolated: isolated.receipt,
       budgeted: budgeted.receipt,
       changedSkill: changedSkill.receipt,

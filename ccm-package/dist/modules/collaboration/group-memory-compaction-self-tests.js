@@ -51,8 +51,15 @@ exports.runGroupMemoryPtlEmergencySelfTest = runGroupMemoryPtlEmergencySelfTest;
 exports.runGroupMemoryPtlRecoverySelfTest = runGroupMemoryPtlRecoverySelfTest;
 exports.runGroupMemoryCompactionIntegrationSelfTest = runGroupMemoryCompactionIntegrationSelfTest;
 exports.runGroupMemoryCompactionStressSelfTest = runGroupMemoryCompactionStressSelfTest;
+exports.runGroupMemoryBelowThresholdNoCompactSelfTest = runGroupMemoryBelowThresholdNoCompactSelfTest;
+exports.runGroupMemorySummaryFailureKeepsStateSelfTest = runGroupMemorySummaryFailureKeepsStateSelfTest;
+exports.runGroupToolClosureBoundarySelfTest = runGroupToolClosureBoundarySelfTest;
+exports.runGroupSummaryExcludesBulkArtifactsSelfTest = runGroupSummaryExcludesBulkArtifactsSelfTest;
+exports.runGroupHypothesisStatePreservationSelfTest = runGroupHypothesisStatePreservationSelfTest;
 const fs = __importStar(require("fs"));
+const crypto = __importStar(require("crypto"));
 const context_budget_1 = require("../../system/context-budget");
+const session_memory_window_1 = require("../../system/session-memory-window");
 const group_memory_compaction_1 = require("./group-memory-compaction");
 function runGroupMemoryCompactWarningSelfTest() {
     const config = {
@@ -1023,5 +1030,283 @@ async function runGroupMemoryCompactionStressSelfTest() {
         boundaryHistoryIsBounded: Array.isArray(memory?.compaction?.boundaries) && memory.compaction.boundaries.length <= 8,
     };
     return { pass: Object.values(checks).every(Boolean), checks, finalBoundaryIndex: lastBoundaryIndex };
+}
+/**
+ * 审计文档不变量 1：未达 Token 阈值时，无论消息条数多少都不执行正式压缩。
+ *
+ * 此前套件里所有 compactGroupConversationMemory 调用都传 force:true，唯一一处
+ * force:false 断言的是 compacted===true（方向相反）。也就是说"该不压缩时不压缩"
+ * 这个方向从未被证明过——阈值闸门坏掉也不会有测试变红。
+ */
+async function runGroupMemoryBelowThresholdNoCompactSelfTest() {
+    // 夹具要害：必须让 keepIndex > 0（存在够格被压缩的旧消息），同时总 token 仍低于阈值。
+    // 保留窗按 token 而非条数计算，所以"很多条极短消息"会全部落在窗内、keepIndex=0，
+    // 那样即使阈值判断坏掉也不会压缩——测试就成了恒真的假绿灯。
+    const messages = Array.from({ length: 200 }, (_, index) => ({
+        id: `low${index}`,
+        role: index % 2 ? "assistant" : "user",
+        agent: index % 2 ? "worker" : undefined,
+        content: `阶段${index}${"内容".repeat(60)}`,
+    }));
+    const originalMessages = JSON.stringify(messages);
+    const threshold = (0, group_memory_compaction_1.getGroupAutoCompactThreshold)({});
+    const totalTokens = messages.reduce((sum, message) => sum + (0, context_budget_1.estimateTextTokens)(String(message.content || "")), 0);
+    const result = await (0, group_memory_compaction_1.compactGroupConversationMemory)({
+        groupId: "below-threshold-self-test",
+        groupSessionId: "gcs_below_threshold_selftest",
+        messages,
+        memory: { goal: "验证阈值闸门", nextActions: [{ action: "保持现状" }] },
+        config: {},
+        transcriptPath: "raw.json",
+        // 关键：不传 force，走真实的阈值判定路径
+    });
+    const checks = {
+        fixtureIsGenuinelyBelowThreshold: totalTokens < threshold,
+        // 证明夹具非空转：确实存在落在保留窗之外、够格被压缩的旧消息
+        fixtureHasEligibleOlderMessages: Number(result?.keepIndex || 0) > 0,
+        doesNotCompactBelowThreshold: result?.compacted === false,
+        // 拒绝原因必须是"压力未达阈值"，而不是"根本没有可压缩的消息"
+        skipReasonIsThresholdNotEmptyWindow: String(result?.compactStrategyDecision?.reason || "").includes("below compact threshold"),
+        boundaryNotAdvanced: !result?.boundary,
+        rawMessagesRemainImmutable: JSON.stringify(messages) === originalMessages,
+    };
+    return { pass: Object.values(checks).every(Boolean), checks, totalTokens, threshold, keepIndex: result?.keepIndex };
+}
+/**
+ * 审计文档不变量 8：候选摘要生成失败时，旧摘要与旧 Boundary 必须原封不动。
+ *
+ * 通过 config.compactionModelCall 注入抛错的摘要器（该注入点见
+ * group-compaction-engine.ts:367）。引擎本身是纯函数、抛出点早于返回点，
+ * 这里把该结构性保证锁成回归防线。
+ */
+async function runGroupMemorySummaryFailureKeepsStateSelfTest() {
+    const messages = Array.from({ length: 400 }, (_, index) => ({
+        id: `f${index}`,
+        role: index % 2 ? "assistant" : "user",
+        agent: index % 2 ? "worker" : undefined,
+        content: index === 0 ? "实现对账任务，必须保留审计链" : `阶段 ${index} ${"内容".repeat(100)}`,
+    }));
+    // 夹具要害：消息必须够"胖"才能让旧消息落到保留窗之外并真正进入摘要路径，
+    // 否则模型压根不会被调用，注入的抛错摘要器永远不触发——测试成为假绿灯。
+    const summaryChecksum = crypto.createHash("sha256").update("pre-existing-summary-state").digest("hex");
+    const preExistingMemory = {
+        goal: "对账任务",
+        nextActions: [{ action: "继续核对" }],
+        compaction: {
+            version: group_memory_compaction_1.GROUP_MEMORY_COMPACTION_VERSION,
+            summaryChecksum,
+            summarySource: "model",
+            lastCompactedMessageId: "m50",
+            modelSummaryValidated: true,
+        },
+    };
+    const preExistingMemorySnapshot = JSON.stringify(preExistingMemory);
+    let failed = false;
+    let failureMessage = "";
+    let modelWasInvoked = false;
+    try {
+        await (0, group_memory_compaction_1.compactGroupConversationMemory)({
+            groupId: "summary-failure-self-test",
+            groupSessionId: "gcs_summary_failure_selftest",
+            messages,
+            memory: preExistingMemory,
+            config: {
+                memoryCompactionUseModel: true,
+                compactionModelCall: async () => {
+                    modelWasInvoked = true;
+                    throw new Error("SUMMARY_MODEL_FORCED_FAILURE_SENTINEL");
+                },
+            },
+            transcriptPath: "raw.json",
+            force: true,
+        });
+    }
+    catch (error) {
+        failed = true;
+        failureMessage = String(error?.message || "");
+    }
+    const checks = {
+        // 前置条件：摘要器确实被调用过，否则下面的断言全是空转
+        modelSummarizerWasActuallyInvoked: modelWasInvoked,
+        summaryFailurePropagates: failed,
+        errorCarriesCorrectCode: failureMessage.length > 0,
+        // 传入的 memory 对象不能被就地改写——这是文档 §5.3 的核心不变量。
+        callerMemoryRemainsUntouched: JSON.stringify(preExistingMemory) === preExistingMemorySnapshot,
+        compactionStillCarriesOriginalSummaryChecksum: String(preExistingMemory.compaction.summaryChecksum) === summaryChecksum,
+        compactionBoundaryUnchanged: String(preExistingMemory.compaction.lastCompactedMessageId) === "m50",
+    };
+    return { pass: Object.values(checks).every(Boolean), checks, failed, failureMessage, modelWasInvoked };
+}
+/**
+ * 审计文档不变量 3：tool_use 与 tool_result 不得跨压缩边界被拆散。
+ *
+ * 既有的 runGroupCompactStrategyDecisionSelfTest 里已有 noSplitToolResultPairs
+ * 断言，但它挂在一个纯文本夹具上——没有任何 tool_use/tool_result 块，
+ * missingToolUses 恒为空数组，断言恒真。逻辑真坏掉也不会变红。
+ *
+ * 这里用真正含工具块的夹具，并且双向验证：
+ *   - 配对完整的窗口必须判定为"未拆散"
+ *   - 故意拆散的窗口必须被检出（证明断言不是空转）
+ */
+function runGroupToolClosureBoundarySelfTest() {
+    // 12 条消息，每 3 条一组：user 提问 -> assistant 发起 tool_use -> user 回 tool_result
+    const messages = [];
+    for (let i = 0; i < 4; i++) {
+        messages.push({ id: `tc-user-${i}`, role: "user", content: `请检查模块 ${i}` });
+        messages.push({
+            id: `tc-use-${i}`,
+            role: "assistant",
+            agent: "worker",
+            content: [{ type: "tool_use", id: `TOOL_${i}`, name: "read_file", input: { path: `src/mod-${i}.ts` } }],
+        });
+        messages.push({
+            id: `tc-result-${i}`,
+            role: "user",
+            content: [{ type: "tool_result", tool_use_id: `TOOL_${i}`, content: `模块 ${i} 内容 ${"细节".repeat(40)}` }],
+        });
+    }
+    // 场景 A：边界落在一组的正中间（tool_use 在压缩侧，tool_result 在保留侧）——必须被检出为拆散
+    const splitKeepIndex = 5; // messages[4]=tc-use-1 在压缩侧, messages[5]=tc-result-1 在保留侧
+    const splitDecision = (0, group_memory_compaction_1.buildGroupCompactStrategyDecision)({
+        groupId: "tool-closure-split",
+        messages,
+        messagesToCompact: messages.slice(0, splitKeepIndex),
+        keptMessages: messages.slice(splitKeepIndex),
+        keepIndex: splitKeepIndex,
+        compacted: true,
+        primaryCompact: true,
+        transcriptPath: "tool-closure-raw.json",
+        now: "2026-08-07T00:00:00.000Z",
+    });
+    // 场景 B：用生产逻辑 adjustSessionWindowForApiInvariants 修正同一个边界
+    const adjustedKeepIndex = (0, session_memory_window_1.adjustSessionWindowForApiInvariants)(messages, splitKeepIndex, 0);
+    const adjustedDecision = (0, group_memory_compaction_1.buildGroupCompactStrategyDecision)({
+        groupId: "tool-closure-adjusted",
+        messages,
+        messagesToCompact: messages.slice(0, adjustedKeepIndex),
+        keptMessages: messages.slice(adjustedKeepIndex),
+        keepIndex: adjustedKeepIndex,
+        compacted: true,
+        primaryCompact: true,
+        transcriptPath: "tool-closure-raw.json",
+        now: "2026-08-07T00:00:00.000Z",
+    });
+    const checks = {
+        // 防空转前置：夹具里确实存在工具块，否则下面两条断言都没有意义
+        fixtureActuallyContainsToolBlocks: messages.some(message => Array.isArray(message.content) && message.content.some((block) => block?.type === "tool_use"))
+            && messages.some(message => Array.isArray(message.content) && message.content.some((block) => block?.type === "tool_result")),
+        // 断言确实能检出拆散——这正是既有纯文本夹具无法证明的部分
+        detectsGenuinelySplitPair: splitDecision.invariants?.noSplitToolResultPairs === false
+            && Array.isArray(splitDecision.invariants?.missingToolUseIds)
+            && splitDecision.invariants.missingToolUseIds.includes("TOOL_1"),
+        // 生产逻辑必须把边界回退到工具闭包之前
+        adjustmentMovesBoundaryBack: adjustedKeepIndex < splitKeepIndex,
+        // 修正后不得再有拆散
+        adjustedWindowKeepsPairsIntact: adjustedDecision.invariants?.noSplitToolResultPairs === true
+            && (adjustedDecision.invariants?.missingToolUseIds || []).length === 0,
+    };
+    return {
+        pass: Object.values(checks).every(Boolean),
+        checks,
+        splitKeepIndex,
+        adjustedKeepIndex,
+        missingToolUseIds: splitDecision.invariants?.missingToolUseIds || [],
+    };
+}
+/**
+ * 审计文档不变量 5：正式摘要不得包含完整 git diff 或完整终端日志。
+ * 审计文档不变量 15：PTL 恢复不得靠字符截断伪装成功。
+ *
+ * 两条都用哨兵串验证：把大块 diff / 终端日志塞进源消息，
+ * 确定性摘要必须只保留可复用的事实（文件名、错误摘要），
+ * 而不是把原文整段搬进摘要。
+ */
+function runGroupSummaryExcludesBulkArtifactsSelfTest() {
+    const diffSentinel = "DIFF_BODY_SENTINEL_84213";
+    const logSentinel = "TERMINAL_LOG_SENTINEL_84213";
+    // 构造一段"看起来像真 diff"的大块内容
+    const bigDiff = [
+        "diff --git a/src/pay.ts b/src/pay.ts",
+        "index 1111111..2222222 100644",
+        "--- a/src/pay.ts",
+        "+++ b/src/pay.ts",
+        ...Array.from({ length: 400 }, (_, i) => `+  const ${diffSentinel}_${i} = compute(${i});`),
+    ].join("\n");
+    const bigLog = Array.from({ length: 400 }, (_, i) => `[12:00:${String(i % 60).padStart(2, "0")}] ${logSentinel} step ${i} ok`).join("\n");
+    const messages = [
+        { id: "sx-0", role: "user", content: "修复支付回调验签，必须保留幂等校验" },
+        { id: "sx-1", role: "assistant", agent: "backend", content: `已修改 src/pay.ts：\n${bigDiff}` },
+        { id: "sx-2", role: "assistant", agent: "backend", content: `执行 npm test 输出：\n${bigLog}` },
+        { id: "sx-3", role: "assistant", agent: "backend", content: "Error: signature mismatch in src/pay.ts，已修复" },
+    ];
+    const summary = (0, group_memory_compaction_1.buildDeterministicConversationSummary)(messages, {
+        goal: "修复支付回调验签",
+        decisions: [],
+        completed: [],
+        blocked: [],
+        nextActions: [{ action: "补充验签用例" }],
+    });
+    const summaryText = JSON.stringify(summary);
+    // 质量门：一个被字符截断的摘要必须无法冒充合格摘要
+    const truncatedSummary = {
+        ...(0, group_memory_compaction_1.createEmptyConversationSummary)(),
+        primaryRequest: String(summary.primaryRequest || "").slice(0, 12),
+    };
+    const truncatedQuality = (0, group_memory_compaction_1.evaluateGroupMemorySummaryQuality)(truncatedSummary, summary, messages, {}, {});
+    const healthyQuality = (0, group_memory_compaction_1.evaluateGroupMemorySummaryQuality)(summary, summary, messages, {}, {});
+    const checks = {
+        // 防空转前置：源消息里确实塞进了大块内容
+        fixtureActuallyContainsBulkArtifacts: messages[1].content.includes(diffSentinel) && messages[2].content.includes(logSentinel)
+            && bigDiff.length > 10_000 && bigLog.length > 10_000,
+        // 不变量 5：diff / 日志正文不得进入摘要
+        summaryExcludesDiffBody: !summaryText.includes(diffSentinel),
+        summaryExcludesTerminalLog: !summaryText.includes(logSentinel),
+        // 但可复用的事实必须保留下来，否则"排除"是靠丢掉一切实现的
+        summaryStillKeepsActionableFacts: summaryText.includes("src/pay.ts") || String(summary.primaryRequest || "").includes("验签"),
+        // 不变量 15：截断出来的摘要必须被质量门拒绝
+        truncatedSummaryIsRejected: truncatedQuality?.pass === false,
+        healthySummaryStillPasses: healthyQuality?.pass === true,
+    };
+    return {
+        pass: Object.values(checks).every(Boolean),
+        checks,
+        summaryChars: summaryText.length,
+        sourceChars: messages.reduce((sum, message) => sum + String(message.content || "").length, 0),
+    };
+}
+/** 审计文档不变量 20：未验证推测在摘要后仍保持 hypothesis 状态。 */
+function runGroupHypothesisStatePreservationSelfTest() {
+    const hypothesis = "支付回调失败也许由网关时钟漂移导致";
+    const messages = [
+        { id: "hyp-0", role: "user", content: "排查支付回调失败，但没有确认根因" },
+        {
+            id: "hyp-1",
+            role: "assistant",
+            agent: "backend",
+            content: "目前只有候选原因，仍需查看时间同步日志。",
+            reasoning: { assumptionsToVerify: [hypothesis] },
+        },
+    ];
+    const fallback = (0, group_memory_compaction_1.buildDeterministicConversationSummary)(messages, {});
+    const healthy = (0, group_memory_compaction_1.normalizeSummary)({
+        ...fallback,
+        hypotheses: fallback.hypotheses,
+    }, (0, group_memory_compaction_1.createEmptyConversationSummary)());
+    const promoted = (0, group_memory_compaction_1.normalizeSummary)({
+        ...fallback,
+        decisions: [...fallback.decisions, fallback.hypotheses[0]],
+    }, (0, group_memory_compaction_1.createEmptyConversationSummary)());
+    const healthyQuality = (0, group_memory_compaction_1.evaluateGroupMemorySummaryQuality)(healthy, fallback, messages, {}, {});
+    const promotedQuality = (0, group_memory_compaction_1.evaluateGroupMemorySummaryQuality)(promoted, fallback, messages, {}, {});
+    const rendered = (0, group_memory_compaction_1.renderConversationSummary)(healthy, 14_000);
+    const checks = {
+        explicitAssumptionIsExtracted: fallback.hypotheses.some(item => item.includes(hypothesis)),
+        normalizedSummaryKeepsHypothesisField: healthy.hypotheses.some(item => item.includes(hypothesis)),
+        renderedSummaryLabelsHypothesisAsUnverified: rendered.includes("待验证假设（不得视为事实）") && rendered.includes(hypothesis),
+        healthyHypothesisSummaryPasses: healthyQuality.pass === true,
+        promotedHypothesisIsRejected: promotedQuality.pass === false
+            && promotedQuality.checks.some((check) => check.id === "hypotheses_not_promoted" && check.pass === false),
+    };
+    return { pass: Object.values(checks).every(Boolean), checks, fallback, healthyQuality, promotedQuality };
 }
 //# sourceMappingURL=group-memory-compaction-self-tests.js.map

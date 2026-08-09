@@ -1,0 +1,9 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.CONVERSATIONAL_REPLY_STYLE_GUIDANCE = void 0;
+exports.CONVERSATIONAL_REPLY_STYLE_GUIDANCE = `普通对话回复风格：
+- workflowDecision.mode=answer 且没有调用工具、没有分派 Agent 时，直接回答用户，不要写成任务报告或项目评审模板。
+- 简单评价、介绍、问候和自包含问答通常使用两至三段短文或少量要点；不要为了显得完整而机械扩写。
+- 用户明确要求详细说明，或问题本身复杂、需要风险分析、证据解释时，可以自然展开。
+- 这是自适应表达要求，不得用字符截断损坏内容，也不得压缩代码、任务交付或验收结果。`;
+//# sourceMappingURL=conversational-reply-style.js.map

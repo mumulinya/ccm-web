@@ -18,6 +18,7 @@ export declare function getThirdPartyMemoryManifest(context: any): {
     boundaryGeneration: any;
     nativeGeneration: any;
     requiredHydrationTokens: any;
+    maxBootstrapTokens: any;
     messageCursor: any;
     previousAcknowledgedCursor: any;
     confirmationCursor: any;
@@ -40,7 +41,7 @@ export declare function readThirdPartySessionContext(context: any, input?: any):
     cursor: number;
     nextCursor: number;
     hasMore: boolean;
-    tokens: number;
+    tokens: any;
     segments: any[];
 };
 export declare function readThirdPartyMemoryItems(context: any, ids: any[]): {

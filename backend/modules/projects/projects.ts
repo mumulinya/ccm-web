@@ -19,6 +19,13 @@ import { getSessions, getSessionDetail, syncSessions } from "./sessions";
 import { publishRuntimeEvent } from "../../system/runtime-events";
 import { createPrivateRuntimeConfig, credentialStoreStatus, migrateConfigDirectory, migrateTomlCredentials, protectCredential, redactSensitiveText, resolveCredential, schedulePrivateRuntimeConfigCleanup } from "../../core/credential-store";
 import { buildFreshToolAuthorizationPayload, buildToolAuthorizationPayload, normalizeToolAuthorization, recordToolAuthorizationChange } from "../../tools/tool-authorization";
+import {
+  contextPolicyUpdateSource,
+  mainAgentContextPolicyUpdatePresent,
+  resolveMainAgentContextPolicy,
+  updateMainAgentContextPolicyOverride,
+} from "../../tools/main-agent-context-policy";
+import { loadOrchestratorConfig } from "../collaboration/group-orchestrator-config";
 import { archiveProject, getProjectLifecycleAudit, listArchivedProjects, previewProjectPurge, purgeArchivedProject, restoreProject } from "./project-lifecycle";
 import { PROJECT_AGENT_TYPES, validateAgentType, validateProjectName, validateProjectPlatform, validateSessionId, validateSharedFileName, validateWorkDirectory } from "./project-validation";
 import { cancelProjectClone, cleanupStaleProjectCloneArtifacts, cloneGitHubRepository, configureProjectRepositoryAsync, finalizeProjectCloneReceipt, getProjectCloneReceipt, inspectProjectGitAsync, rollbackProjectClone } from "./project-git";
@@ -1600,6 +1607,7 @@ type = "${finalPlatform}"${platformOptionsToml}
     const inferredCommands = inferProjectVerificationCommands(getProjectWorkDir(project));
     const profile = normalizeProjectAgentProfile(configs[project] || {});
     const toolAuth = buildToolAuthorizationPayload(configs[project]?.tools || {});
+    const contextPolicy = resolveMainAgentContextPolicy(loadOrchestratorConfig(), configs[project]?.context_policy || configs[project]?.contextPolicy || {});
     sendJson(res, {
       tools: toolAuth.tools,
       tool_audit: toolAuth.tool_audit,
@@ -1608,6 +1616,7 @@ type = "${finalPlatform}"${platformOptionsToml}
       verification_commands: configuredCommands,
       inferred_verification_commands: inferredCommands,
       verification_source: configuredCommands.length > 0 ? "configured" : (inferredCommands.length > 0 ? "inferred" : "missing"),
+      contextPolicy,
       ...profile,
     });
     return true;
@@ -1627,6 +1636,14 @@ type = "${finalPlatform}"${platformOptionsToml}
         const previousTools = normalizeToolAuthorization(configs[project].tools || {});
         const normalizedTools = normalizeToolAuthorization(tools);
         configs[project].tools = normalizedTools;
+        if (mainAgentContextPolicyUpdatePresent(payload)) {
+          configs[project].context_policy = updateMainAgentContextPolicyOverride(
+            configs[project].context_policy || configs[project].contextPolicy || {},
+            contextPolicyUpdateSource(payload),
+            loadOrchestratorConfig(),
+          );
+          delete configs[project].contextPolicy;
+        }
         const commands = normalizeVerificationCommands(verification_commands || verificationCommands);
         const profile = normalizeProjectAgentProfile(payload);
         configs[project].verification_commands = commands;
@@ -1647,7 +1664,7 @@ type = "${finalPlatform}"${platformOptionsToml}
           toolAudit: toolAuth.tool_audit,
           authorizationReadiness: toolAuth.authorization_readiness,
         });
-        sendJson(res, { success: true, tools: toolAuth.tools, tool_audit: toolAuth.tool_audit, authorization_readiness: toolAuth.authorization_readiness, connection_preflight: toolAuth.connection_preflight, authorization_change: authorizationChange, verification_commands: commands, ...profile });
+        sendJson(res, { success: true, tools: toolAuth.tools, tool_audit: toolAuth.tool_audit, authorization_readiness: toolAuth.authorization_readiness, connection_preflight: toolAuth.connection_preflight, authorization_change: authorizationChange, verification_commands: commands, contextPolicy: resolveMainAgentContextPolicy(loadOrchestratorConfig(), configs[project].context_policy || {}), ...profile });
       } catch (e: any) {
         sendJson(res, { error: e.message }, 400);
       }

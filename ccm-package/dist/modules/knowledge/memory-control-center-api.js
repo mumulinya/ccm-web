@@ -63,10 +63,12 @@ const utils_1 = require("../../core/utils");
 const db_1 = require("../../core/db");
 const memory_control_center_types_1 = require("./memory-control-center-types");
 const memory_control_center_controls_1 = require("./memory-control-center-controls");
+const main_agent_context_source_continuity_1 = require("../../system/main-agent-context-source-continuity");
 const group_compaction_projections_1 = require("../collaboration/group-compaction-projections");
 const group_compaction_strategy_1 = require("../collaboration/group-compaction-strategy");
 const group_orchestrator_config_1 = require("../collaboration/group-orchestrator-config");
 const group_compaction_activity_1 = require("../collaboration/group-compaction-activity");
+const group_compact_file_references_1 = require("../collaboration/group-compact-file-references");
 const group_memory_auto_compact_circuit_policy_1 = require("../collaboration/group-memory-auto-compact-circuit-policy");
 const group_prompt_cache_break_detection_1 = require("../collaboration/group-prompt-cache-break-detection");
 const session_model_context_1 = require("../../system/session-model-context");
@@ -954,6 +956,24 @@ function memoryCenterPostCompactUsage(scope, scopeId, memory, microCompactState)
     if (scope !== "group")
         return usage;
     const exact = parseGroupMemoryScopeId(scopeId, memory);
+    const nativeProof = (0, group_compact_file_references_1.buildGroupApiMicrocompactNativeApplyProofSummary)(exact.groupId, {
+        groupSessionId: exact.sessionId,
+        targetProject: String(memory?.compaction?.apiMicroCompactEditPlan?.target_project || memory?.compaction?.apiMicroCompactEditPlan?.targetProject || ""),
+        planChecksums: [
+            memory?.compaction?.apiMicroCompactEditPlan?.planChecksum,
+            memory?.compaction?.apiMicroCompactEditPlan?.plan_checksum,
+        ].filter(Boolean),
+    });
+    const nativeReceiptTotals = nativeProof?.platform_execution_receipts?.totals || {};
+    const nativeTelemetry = nativeProof?.request_telemetry || {};
+    usage.apiMicrocompactNativeApplyProof = {
+        ...nativeProof,
+        platformExecutionNativeAppliedCount: Number(nativeReceiptTotals.native_applied || 0),
+        platformExecutionRequestAcceptedCount: Number(nativeReceiptTotals.request_accepted || 0),
+        platformExecutionNoEditsAppliedCount: Number(nativeReceiptTotals.no_edits_applied || 0),
+        platformExecutionFailedCount: Number(nativeReceiptTotals.request_failed || nativeReceiptTotals.failed || 0),
+        requestTelemetryStrongCount: Number(nativeTelemetry.strong_verified_count || 0),
+    };
     const plan = memory?.compaction?.postCompactReinject
         || memory?.compactBoundary?.post_compact_restore?.reinjectionPlan
         || {};
@@ -1526,6 +1546,27 @@ function getMemoryCenterScope(scope, scopeId) {
     const policy = scope === "global" || scope === "global_session" ? require("../../agents/global/memory").getGlobalAgentMemoryPolicy() : null;
     const groupScope = scope === "group" ? parseGroupMemoryScopeId(scopeId, rawMemory) : null;
     const microCompactState = memoryCenterMicroCompactState(scope, scopeId, rawMemory);
+    let contextSourceContinuity = { budget: {}, receipts: [], latestRestore: null };
+    try {
+        if (scope === "global_session") {
+            const sessionId = scopeId.replace(/^session:/, "");
+            contextSourceContinuity = (0, main_agent_context_source_continuity_1.readContextSourceContinuity)({ agentKind: "global", scope: "global", scopeId: "global-agent", exactSessionId: sessionId, generation: Number(rawMemory?.compaction?.boundaryGeneration || 0) });
+        }
+        else if (scope === "project_session") {
+            const separator = scopeId.indexOf("::");
+            const project = separator >= 0 ? scopeId.slice(0, separator) : "";
+            const sessionId = separator >= 0 ? scopeId.slice(separator + 2) : "";
+            if (project && sessionId)
+                contextSourceContinuity = (0, main_agent_context_source_continuity_1.readContextSourceContinuity)({ agentKind: "project", scope: "project", scopeId: project, exactSessionId: sessionId, generation: Number(rawMemory?.compaction?.boundaryGeneration || 0) });
+        }
+        else if (scope === "group" && groupScope?.sessionId && groupScope.sessionId !== "default") {
+            contextSourceContinuity = (0, main_agent_context_source_continuity_1.readContextSourceContinuity)({ agentKind: "group", scope: "group", scopeId: groupScope.groupId, exactSessionId: groupScope.sessionId, generation: Number(rawMemory?.compaction?.boundaryGeneration || 0) });
+        }
+        else if (scope === "task_agent" && rawMemory?.project) {
+            contextSourceContinuity = (0, main_agent_context_source_continuity_1.readContextSourceContinuity)({ agentKind: "project", scope: "project", scopeId: String(rawMemory.project), exactSessionId: scopeId, generation: Number(rawMemory?.compaction?.boundaryGeneration || 0) });
+        }
+    }
+    catch { }
     return {
         scope, id: scopeId, file, backupExists: fs.existsSync(`${file}.bak`),
         groupId: groupScope?.groupId || "",
@@ -1534,6 +1575,7 @@ function getMemoryCenterScope(scope, scopeId) {
         summary: memorySummary(scope, scopeId, rawMemory, scopeId, { rebuildCurrentPayload: true }), alerts: healthAlerts(scope, scopeId, rawMemory),
         postCompactUsage: memoryCenterPostCompactUsage(scope, scopeId, rawMemory, microCompactState),
         providerContextCache: memoryCenterProviderContextCacheState(scope, scopeId, rawMemory),
+        contextSourceContinuity,
         memory: (0, memory_control_center_controls_1.applyMemoryControls)(scope, scopeId, rawMemory), rawMemory,
         itemGroups: collectItems(scope, scopeId, rawMemory),
     };

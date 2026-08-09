@@ -10,6 +10,10 @@ import { useSessionContextUsage } from '../../composables/useSessionContextUsage
 import { usePermissionApprovals } from '../../composables/usePermissionApprovals.js'
 import { MessageSquareText, Plus } from '@lucide/vue'
 import GlobalAgentFeishuBindingModal from '../global/GlobalAgentFeishuBindingModal.vue'
+import AgentExecutionTranscript from '../common/AgentExecutionTranscript.vue'
+import { useAgentExecutionEvents } from '../../composables/useAgentExecutionEvents.js'
+import { getCopyableMessageText } from '../../utils/messageActions.js'
+import { shouldShowCompactProcessingState } from '../../utils/agentExecutionEvents.js'
 
 const props = defineProps({
   navigateTo: { type: Object, default: null },
@@ -38,14 +42,14 @@ const {
   saveCurrentProjectSessionKnowledge, getProjectTaskCard, postTaskAction, removeMessageFromCurrentSession, handleProjectTaskAction, isStreaming,
   pendingProjectParentRunId, streamController, activeProjectRunId, stoppingProjectTurn, makeProjectMessageId,
   projectTurnConversationId, projectTurnControl, projectComposerSendLabel, stopStreaming, drainProjectTurnQueue, guideProjectQueuedTurn, submitProjectMessageWhileBusy,
-  sendMessage, formatFileSize, onChatFilesSelected, removeChatFile, openFileDiff, openProjectChangesTab,
+  sendMessage, editProjectUserMessage, formatFileSize, onChatFilesSelected, removeChatFile, openFileDiff, openProjectChangesTab,
   closeFileDiff, currentSessionNew, autoNameSession, chatTarget, showLogsPanel, logsTitle, logsProfileId, logsKind, logsRuntimeProcess,
   openProjectRuntimeLogs, openFeishuQr, startFeishuQrSetup, openFolderBrowser, loadDrives,
   loadFolderContents, browseGoUp, createBrowseFolder, selectFolder, projectTools, allTools, projectToolAudit,
   projectAuthorizationReadiness, projectConnectionPreflight, projectToolVerification, projectVerificationCommands, inferredProjectVerificationCommands, projectVerificationSource,
-  projectResponsibility, projectCapabilities, projectWritablePaths, projectForbiddenPaths, projectDeliveryContract, normalizeProjectTools,
+  projectResponsibility, projectCapabilities, projectWritablePaths, projectForbiddenPaths, projectDeliveryContract, projectContextPolicy, normalizeProjectTools,
   projectTestTargets, projectTestAuth, projectTestTargetsLoading, projectTestTargetsSaving, loadProjectTestTargets, saveProjectTestTarget, deleteProjectTestTarget,
-  loadProjectTools, saveProjectTools, applyInferredVerificationCommands, updateProjectToolField, toggleProjectTool, projectFiles,
+  loadProjectTools, saveProjectTools, applyInferredVerificationCommands, updateProjectToolField, updateProjectContextPolicy, toggleProjectTool, projectFiles,
   showAddFile, showEditFile, editFileName, editFileContent, updateProjectSharedFileField, loadProjectSharedFiles,
   addProjectFile, submitAddProjectFile, editProjectFile, submitEditProjectFile, deleteProjectFile, handleInput,
   handleKeydown
@@ -54,6 +58,15 @@ const {
 const projectContextScopeId = computed(() => currentProject.value && currentSession.value
   ? `${currentProject.value}::${currentSession.value}`
   : '')
+const {
+  events: projectAgentExecutionEvents,
+  enabled: projectAgentExecutionEnabled,
+} = useAgentExecutionEvents({
+  scope: computed(() => 'project'),
+  scopeId: currentProject,
+  exactSessionId: currentSession,
+  active: computed(() => props.active !== false && !!currentProject.value && !!currentSession.value),
+})
 const {
   usage: projectContextUsage,
   loading: projectContextLoading,

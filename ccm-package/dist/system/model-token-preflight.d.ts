@@ -8,6 +8,32 @@ type TokenCalibration = {
     updatedAt: string;
     checksum: string;
 };
+type TokenCalibrationSampleV2 = {
+    estimatedTokens: number;
+    observedTokens: number;
+    ratio: number;
+    positiveDriftTokens: number;
+    recordedAt: string;
+};
+type TokenCalibrationV2 = {
+    schema: "ccm-model-token-calibration-v2";
+    version: 2;
+    identityChecksum: string;
+    providerIdentityChecksum: string;
+    estimatorVersion: 2;
+    samples: number;
+    rejectedSamples: number;
+    factor: number;
+    p95Ratio: number;
+    p95PositiveDriftTokens: number;
+    recentSamples: TokenCalibrationSampleV2[];
+    lastEstimatedTokens: number;
+    lastObservedTokens: number;
+    lastAcceptedAt: string;
+    updatedAt: string;
+    contentStored: false;
+    checksum: string;
+};
 export declare function estimateModelTextTokens(value: any, config?: any): {
     schema: string;
     version: number;
@@ -17,6 +43,9 @@ export declare function estimateModelTextTokens(value: any, config?: any): {
     rawTokens: number;
     calibrationFactor: number;
     calibrationSamples: number;
+    calibrationRejectedSamples: number;
+    calibrationP95Ratio: number;
+    calibrationP95PositiveDriftTokens: number;
     calibratedTokens: number;
     safetyAdjustedTokens: number;
     safetyMargin: number;
@@ -40,14 +69,15 @@ export declare function estimateModelMessagesTokens(messagesInput: any[], config
 export declare function recordModelTokenCalibration(config: any, input: {
     estimatedTokens?: number;
     observedTokens?: number;
-}): TokenCalibration;
+}): TokenCalibrationV2;
 export declare function recordModelTokenCalibrationForIdentity(identityChecksum: string, input: {
     estimatedTokens?: number;
     observedTokens?: number;
-}): TokenCalibration;
+}): TokenCalibrationV2;
 export declare function readModelTokenCalibration(config: any): {
     identityChecksum: string;
-    calibration: TokenCalibration;
+    providerIdentityChecksum: string;
+    calibration: TokenCalibration | TokenCalibrationV2;
     contentStored: boolean;
 };
 export declare function runModelTokenPreflightSelfTest(): {

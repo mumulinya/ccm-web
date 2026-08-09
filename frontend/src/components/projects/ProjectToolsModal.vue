@@ -1,6 +1,7 @@
 <script setup>
 import { FileCheck2, ShieldCheck, TerminalSquare } from '@lucide/vue'
 import AgentToolsModal from '../common/AgentToolsModal.vue'
+import ContextPolicyFields from '../common/ContextPolicyFields.vue'
 
 const props = defineProps({
   projectName: { type: String, default: '' },
@@ -18,9 +19,10 @@ const props = defineProps({
   verificationCommands: { type: String, default: '' },
   inferredCommands: { type: Array, default: () => [] },
   verificationSource: { type: String, default: 'missing' },
+  contextPolicy: { type: Object, default: () => ({ override: {}, effective: {} }) },
 })
 
-const emit = defineEmits(['close', 'save', 'toggle-tool', 'apply-inferred', 'update-field'])
+const emit = defineEmits(['close', 'save', 'toggle-tool', 'apply-inferred', 'update-field', 'update-context-policy'])
 const updateField = (field, event) => emit('update-field', { field, value: event.target.value })
 </script>
 
@@ -39,6 +41,7 @@ const updateField = (field, event) => emit('update-field', { field, value: event
     @toggle-tool="(type, name) => emit('toggle-tool', type, name)"
   >
     <template #details>
+      <ContextPolicyFields :policy="contextPolicy" @update="emit('update-context-policy', $event)" />
       <section class="project-constraints">
         <div class="agent-delivery-state">
           <div :class="{ ready: authorizationReadiness?.dispatchReady !== false }">

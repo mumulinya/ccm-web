@@ -257,8 +257,8 @@ export declare function compactGroupConversationMemory(input: {
                 skills: number;
                 verification: number;
                 taskStatuses: number;
-                invokedSkillSingleTokens: number;
-                invokedSkillsTotalTokens: number;
+                invokedSkillSingleTokens: any;
+                invokedSkillsTotalTokens: any;
                 currentPlanTokens: number;
                 dynamicContextTokens: number;
             };
@@ -467,7 +467,21 @@ export declare function compactGroupConversationMemory(input: {
         ptl_applied: boolean;
         safe_render_chars: number;
         payload_checksum: any;
-        model_visible_payload: import("../../system/session-compaction-core").ModelVisiblePayloadSnapshot;
+        model_visible_payload: {
+            schema: string;
+            scope: import("../../system/session-compaction-core").SessionCompactionScope;
+            sessionId: string;
+            tokenBreakdown: {
+                [x: string]: number;
+            };
+            totalTokens: number;
+            payloadChecksum: string;
+            fixedContextChecksum: string;
+            pendingRequestChecksum: string;
+            loadedContextItems: import("../../system/session-compaction-core").LoadedContextItemsV1;
+            loadedContextItemsChecksum: string;
+            contentStored: boolean;
+        };
         shared_gate: any;
         formal_recompaction: any;
     };

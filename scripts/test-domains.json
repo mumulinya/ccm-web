@@ -25,9 +25,13 @@
       "tests": [
         "all-session-cc-compaction-alignment-selftest.mjs",
         "provider-neutral-context-cache-selftest.mjs",
+        "provider-native-microcompact-fallback-selftest.mjs",
         "context-engine-v2-selftest.mjs",
         "session-execution-ledger-selftest.mjs",
         "main-agent-post-compact-continuity-selftest.mjs",
+        "main-agent-context-source-continuity-selftest.mjs",
+        "context-source-persistence-promotion-selftest.mjs",
+        "main-agent-context-policy-calibration-selftest.mjs",
         "session-model-context-selftest.mjs",
       "memory-center-microcompact-display-selftest.mjs",
       "session-context-usage-ui-selftest.mjs",
@@ -35,6 +39,8 @@
       "group-compaction-invariant-selftest.mjs",
       "group-boundary-cursor-fence-selftest.mjs",
       "group-manual-auto-compact-parity-selftest.mjs",
+      "true-post-compact-payload-recompact-restart-selftest.mjs",
+      "group-compaction-concurrent-message-selftest.mjs",
       "session-memory-dynamic-window-selftest.mjs",
         "global-agent-model-session-compaction-selftest.mjs",
         "third-party-memory-mcp-hydration-selftest.mjs",
@@ -74,6 +80,8 @@
         "automatic-development-unified-task-v2-audit.mjs",
         "test-agent-browser-orchestration-selftest.mjs",
         "test-agent-production-hardening-selftest.mjs",
+        "test-agent-v2-hardening-selftest.mjs",
+        "test-agent-maintenance-selftest.mjs",
         "group-status-visibility-selftest.mjs",
         "ordinary-reply-visibility-selftest.mjs"
       ]
@@ -82,6 +90,7 @@
       "label": "第三方 Agent 与 MCP",
       "build": "backend",
       "tests": [
+        "agent-communication-v2-selftest.mjs",
         "global-agent-runtime-production-closure-selftest.mjs",
         "unified-model-retry-selftest.mjs",
         "model-semantic-routing-audit.mjs",
@@ -148,6 +157,7 @@
         "auto-dev-full-width-redesign-selftest.mjs",
         "auto-dev-selftest.mjs",
         "clipboard-attachments-selftest.mjs",
+        "message-edit-actions-selftest.mjs",
         "deferred-session-creation-selftest.mjs",
         "project-stream-message-layout-selftest.mjs",
         "unified-conversation-layout-selftest.mjs",
@@ -172,6 +182,7 @@
         "knowledge-embedding-v3-selftest.mjs",
         "knowledge-startup-model-prepare-selftest.mjs",
         "agent-knowledge-retrieval-selftest.mjs",
+        "knowledge-watcher-reconciliation-selftest.mjs",
         "conversation-search-selftest.mjs",
         "online-document-workflow-selftest.mjs"
       ]
@@ -255,6 +266,7 @@
     "local-auth-selftest.mjs",
     "session-memory-dynamic-window-selftest.mjs",
     "main-agent-post-compact-continuity-selftest.mjs",
+    "main-agent-context-source-continuity-selftest.mjs",
     "task-permission-broker-selftest.mjs",
     "group-test-targets-selftest.mjs",
     "project-main-agent-orchestration-selftest.mjs",

@@ -27,6 +27,8 @@ import {
   persistMainAgentPostCompactRestoreManifest,
   restoreMainAgentPostCompactContext,
 } from "../../system/main-agent-post-compact-continuity";
+import { resolveMainAgentContextPolicy } from "../../tools/main-agent-context-policy";
+import { projectCommittedGroupCompaction } from "../../system/user-visible-agent-projections";
 import {
   getPublicAgentRuntimes,
   normalizeAgentRuntimeId,
@@ -1083,8 +1085,19 @@ export async function runGroupMemoryAutoCompactionNow(groupId: string, options: 
   try {
     const messages = getGroupMessages(id, sessionId).filter((message: any) => !String(message?.content || "").startsWith("📤"));
     const memory = loadGroupMemory(id, sessionId);
+    const sourceMessagePrefixChecksum = crypto.createHash("sha256").update(JSON.stringify(messages)).digest("hex");
+    const sourceCompactionIdentityChecksum = crypto.createHash("sha256").update(JSON.stringify([
+      memory?.compactBoundary?.id || "",
+      memory?.compactBoundary?.boundaryGeneration || memory?.compactBoundary?.generation || 0,
+      memory?.compaction?.lastCompactedMessageId || "",
+      memory?.compaction?.summaryChecksum || "",
+    ])).digest("hex");
     const loadedConfig = loadGroupMemoryCompactionConfig(options.config || {});
     const groupRecord = options.group || loadGroups().find((item: any) => String(item?.id || "") === id) || null;
+    const effectiveContextPolicy = resolveMainAgentContextPolicy(
+      loadedConfig,
+      groupRecord?.context_policy || groupRecord?.contextPolicy || {},
+    ).effective;
     const groupToolScope = {
       ...normalizeDynamicContextToolScope(groupRecord?.tools || {}),
       auditContext: { runtime: "group-main-agent", groupId: id, sessionId, source: "post-compact-restore" },
@@ -1112,11 +1125,14 @@ export async function runGroupMemoryAutoCompactionNow(groupId: string, options: 
       identity: dynamicToolIdentity,
       scope: groupToolScope,
       manifest: dynamicContextRestoreManifest,
+      maxPerSkillTokens: effectiveContextPolicy.postCompactSkillPerItemMaxTokens,
+      maxTotalSkillTokens: effectiveContextPolicy.postCompactSkillTotalMaxTokens,
     });
     const restoredMcpCatalog = toolManager.getScopedToolCatalog(groupToolScope).tools
       .filter((tool: any) => dynamicContextRestore.loadedToolNames.includes(String(tool.canonicalName || tool.name || "")));
     const config = {
       ...loadedConfig,
+      ...effectiveContextPolicy,
       recoveryContext: {
         ...(loadedConfig?.recoveryContext || loadedConfig?.recovery_context || {}),
         dynamicContextRestoreManifest,
@@ -1167,6 +1183,26 @@ export async function runGroupMemoryAutoCompactionNow(groupId: string, options: 
         compacted: result.compacted === true,
         boundaryId: result.boundary?.id || "",
       });
+    }
+    const currentMessages = getGroupMessages(id, sessionId).filter((message: any) => !String(message?.content || "").startsWith("📤"));
+    const currentPrefixChecksum = currentMessages.length >= messages.length
+      ? crypto.createHash("sha256").update(JSON.stringify(currentMessages.slice(0, messages.length))).digest("hex")
+      : "";
+    const currentMemory = loadGroupMemory(id, sessionId);
+    const currentCompactionIdentityChecksum = crypto.createHash("sha256").update(JSON.stringify([
+      currentMemory?.compactBoundary?.id || "",
+      currentMemory?.compactBoundary?.boundaryGeneration || currentMemory?.compactBoundary?.generation || 0,
+      currentMemory?.compaction?.lastCompactedMessageId || "",
+      currentMemory?.compaction?.summaryChecksum || "",
+    ])).digest("hex");
+    if (currentPrefixChecksum !== sourceMessagePrefixChecksum || currentCompactionIdentityChecksum !== sourceCompactionIdentityChecksum) {
+      const sourceStateError: any = new Error("压缩输入在提交前被并发改写；候选摘要和 Boundary 已丢弃");
+      sourceStateError.code = "GROUP_COMPACTION_SOURCE_STATE_CHANGED";
+      sourceStateError.sourceMessageCount = messages.length;
+      sourceStateError.currentMessageCount = currentMessages.length;
+      sourceStateError.messagePrefixStable = currentPrefixChecksum === sourceMessagePrefixChecksum;
+      sourceStateError.compactionIdentityStable = currentCompactionIdentityChecksum === sourceCompactionIdentityChecksum;
+      throw sourceStateError;
     }
     const committed = withGroupSessionLifecycleCommitFence(compactionLifecycleFence, ({ validation: commitLifecycleValidation }) => {
     return withGroupCompactionActivityCommitFence({
@@ -1368,7 +1404,9 @@ export async function runGroupMemoryAutoCompactionNow(groupId: string, options: 
     return { success: true, compacted: !!result.compacted, boundary: boundaryWithPostCompactState, keepIndex: result.keepIndex, background, memory: saved, compactHead, typedMemoryScopeId, logDistillation, providerNativeCompactSessionCapacityReset, postCompactSessionStateReset, promptCacheCompactionNotification, circuitBreaker, lifecycleValidation: commitLifecycleValidation, lifecycleCommitProof };
     });
     });
-    return { ...committed.value, compactionActivity: committed.compactionActivity };
+    const committedResult = { ...committed.value, compactionActivity: committed.compactionActivity };
+    projectCommittedGroupCompaction({ groupId: id, exactSessionId: sessionId, result: committedResult, reason: options.reason });
+    return committedResult;
   } catch (error: any) {
     if (error?.code === "GROUP_COMPACTION_CANCELLED" || compactionAbortController.signal.aborted) {
       compactionWasCancelled = true;

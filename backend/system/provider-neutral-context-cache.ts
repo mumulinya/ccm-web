@@ -879,7 +879,11 @@ export function completeProviderNeutralContextCacheRequest(plan: any, input: { o
   }
   completion.tokenCalibration = calibration ? {
     samples: calibration.samples,
+    rejectedSamples: calibration.rejectedSamples || 0,
     factor: calibration.factor,
+    p95Ratio: calibration.p95Ratio || 1,
+    p95PositiveDriftTokens: calibration.p95PositiveDriftTokens || 0,
+    estimatorVersion: calibration.estimatorVersion || 1,
     updatedAt: calibration.updatedAt,
     checksum: calibration.checksum,
     contentStored: false,

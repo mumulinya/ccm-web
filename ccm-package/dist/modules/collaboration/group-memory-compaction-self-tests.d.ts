@@ -1,3 +1,4 @@
+import type { ConversationSummary } from "./group-memory-compaction";
 export declare function runGroupMemoryCompactWarningSelfTest(): {
     pass: boolean;
     checks: {
@@ -525,8 +526,8 @@ export declare function runGroupMemoryMicroCompactSelfTest(): {
             skills: number;
             verification: number;
             taskStatuses: number;
-            invokedSkillSingleTokens: number;
-            invokedSkillsTotalTokens: number;
+            invokedSkillSingleTokens: any;
+            invokedSkillsTotalTokens: any;
             currentPlanTokens: number;
             dynamicContextTokens: number;
         };
@@ -677,3 +678,103 @@ export declare function runGroupMemoryCompactionStressSelfTest(): Promise<{
     };
     finalBoundaryIndex: number;
 }>;
+/**
+ * 审计文档不变量 1：未达 Token 阈值时，无论消息条数多少都不执行正式压缩。
+ *
+ * 此前套件里所有 compactGroupConversationMemory 调用都传 force:true，唯一一处
+ * force:false 断言的是 compacted===true（方向相反）。也就是说"该不压缩时不压缩"
+ * 这个方向从未被证明过——阈值闸门坏掉也不会有测试变红。
+ */
+export declare function runGroupMemoryBelowThresholdNoCompactSelfTest(): Promise<{
+    pass: boolean;
+    checks: {
+        fixtureIsGenuinelyBelowThreshold: boolean;
+        fixtureHasEligibleOlderMessages: boolean;
+        doesNotCompactBelowThreshold: boolean;
+        skipReasonIsThresholdNotEmptyWindow: boolean;
+        boundaryNotAdvanced: boolean;
+        rawMessagesRemainImmutable: boolean;
+    };
+    totalTokens: number;
+    threshold: number;
+    keepIndex: any;
+}>;
+/**
+ * 审计文档不变量 8：候选摘要生成失败时，旧摘要与旧 Boundary 必须原封不动。
+ *
+ * 通过 config.compactionModelCall 注入抛错的摘要器（该注入点见
+ * group-compaction-engine.ts:367）。引擎本身是纯函数、抛出点早于返回点，
+ * 这里把该结构性保证锁成回归防线。
+ */
+export declare function runGroupMemorySummaryFailureKeepsStateSelfTest(): Promise<{
+    pass: boolean;
+    checks: {
+        modelSummarizerWasActuallyInvoked: boolean;
+        summaryFailurePropagates: boolean;
+        errorCarriesCorrectCode: boolean;
+        callerMemoryRemainsUntouched: boolean;
+        compactionStillCarriesOriginalSummaryChecksum: boolean;
+        compactionBoundaryUnchanged: boolean;
+    };
+    failed: boolean;
+    failureMessage: string;
+    modelWasInvoked: boolean;
+}>;
+/**
+ * 审计文档不变量 3：tool_use 与 tool_result 不得跨压缩边界被拆散。
+ *
+ * 既有的 runGroupCompactStrategyDecisionSelfTest 里已有 noSplitToolResultPairs
+ * 断言，但它挂在一个纯文本夹具上——没有任何 tool_use/tool_result 块，
+ * missingToolUses 恒为空数组，断言恒真。逻辑真坏掉也不会变红。
+ *
+ * 这里用真正含工具块的夹具，并且双向验证：
+ *   - 配对完整的窗口必须判定为"未拆散"
+ *   - 故意拆散的窗口必须被检出（证明断言不是空转）
+ */
+export declare function runGroupToolClosureBoundarySelfTest(): {
+    pass: boolean;
+    checks: {
+        fixtureActuallyContainsToolBlocks: boolean;
+        detectsGenuinelySplitPair: any;
+        adjustmentMovesBoundaryBack: boolean;
+        adjustedWindowKeepsPairsIntact: boolean;
+    };
+    splitKeepIndex: number;
+    adjustedKeepIndex: number;
+    missingToolUseIds: any;
+};
+/**
+ * 审计文档不变量 5：正式摘要不得包含完整 git diff 或完整终端日志。
+ * 审计文档不变量 15：PTL 恢复不得靠字符截断伪装成功。
+ *
+ * 两条都用哨兵串验证：把大块 diff / 终端日志塞进源消息，
+ * 确定性摘要必须只保留可复用的事实（文件名、错误摘要），
+ * 而不是把原文整段搬进摘要。
+ */
+export declare function runGroupSummaryExcludesBulkArtifactsSelfTest(): {
+    pass: boolean;
+    checks: {
+        fixtureActuallyContainsBulkArtifacts: boolean;
+        summaryExcludesDiffBody: boolean;
+        summaryExcludesTerminalLog: boolean;
+        summaryStillKeepsActionableFacts: boolean;
+        truncatedSummaryIsRejected: boolean;
+        healthySummaryStillPasses: boolean;
+    };
+    summaryChars: number;
+    sourceChars: any;
+};
+/** 审计文档不变量 20：未验证推测在摘要后仍保持 hypothesis 状态。 */
+export declare function runGroupHypothesisStatePreservationSelfTest(): {
+    pass: boolean;
+    checks: {
+        explicitAssumptionIsExtracted: boolean;
+        normalizedSummaryKeepsHypothesisField: boolean;
+        renderedSummaryLabelsHypothesisAsUnverified: boolean;
+        healthyHypothesisSummaryPasses: boolean;
+        promotedHypothesisIsRejected: boolean;
+    };
+    fallback: ConversationSummary;
+    healthyQuality: import("./group-compaction-receipts").GroupMemoryQualityReport;
+    promotedQuality: import("./group-compaction-receipts").GroupMemoryQualityReport;
+};

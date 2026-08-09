@@ -116,6 +116,18 @@ assert.equal(
 assert.equal(bulkArtifacts.checks.healthySummaryStillPasses, true, '正常摘要必须仍能通过质量门')
 assert.equal(bulkArtifacts.pass, true, JSON.stringify(bulkArtifacts.checks))
 
+// ---------------------------------------------------------------------------
+// 不变量 20：未验证推测在压缩后仍保持 hypothesis 状态
+// ---------------------------------------------------------------------------
+const hypothesisState = selfTests.runGroupHypothesisStatePreservationSelfTest()
+
+assert.equal(hypothesisState.checks.explicitAssumptionIsExtracted, true, '结构化待验证假设必须进入摘要')
+assert.equal(hypothesisState.checks.normalizedSummaryKeepsHypothesisField, true, 'normalize 后不得丢失 hypothesis 状态')
+assert.equal(hypothesisState.checks.renderedSummaryLabelsHypothesisAsUnverified, true, '模型可见摘要必须明确标注待验证假设')
+assert.equal(hypothesisState.checks.healthyHypothesisSummaryPasses, true, '正确保留假设的摘要应通过质量门')
+assert.equal(hypothesisState.checks.promotedHypothesisIsRejected, true, '把假设提升为决定/完成态时质量门必须拒绝')
+assert.equal(hypothesisState.pass, true, JSON.stringify(hypothesisState.checks))
+
 console.log(JSON.stringify({
   schema: 'ccm-group-compaction-invariant-selftest-v1',
   pass: true,
@@ -145,6 +157,10 @@ console.log(JSON.stringify({
       source_chars: bulkArtifacts.sourceChars,
       summary_chars: bulkArtifacts.summaryChars,
       checks: bulkArtifacts.checks,
+    },
+    hypothesis_state_preserved: {
+      pass: hypothesisState.pass,
+      checks: hypothesisState.checks,
     },
   },
 }, null, 2))

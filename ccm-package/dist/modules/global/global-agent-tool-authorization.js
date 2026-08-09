@@ -47,6 +47,9 @@ const tool_manager_1 = require("../../tools/tool-manager");
 const main_agent_tool_runtime_1 = require("../../tools/main-agent-tool-runtime");
 const workspace_readonly_tools_1 = require("../../tools/workspace-readonly-tools");
 const main_agent_post_compact_continuity_1 = require("../../system/main-agent-post-compact-continuity");
+const group_orchestrator_config_1 = require("../collaboration/group-orchestrator-config");
+const group_compaction_strategy_1 = require("../collaboration/group-compaction-strategy");
+const main_agent_context_policy_1 = require("../../tools/main-agent-context-policy");
 const tool_authorization_1 = require("../../tools/tool-authorization");
 const GLOBAL_AGENT_TOOL_AUTHORIZATION_FILE = path.join(utils_1.CCM_DIR, "global-agent-tool-authorization.json");
 function emptyStore() {
@@ -122,6 +125,8 @@ async function saveGlobalAgentToolAuthorization(input = {}) {
 }
 function buildGlobalAgentToolRuntimeContext(auditContext = {}, loadedToolNames = []) {
     const authorization = getGlobalAgentToolAuthorizationPayload();
+    const orchestratorConfig = (0, group_orchestrator_config_1.loadOrchestratorConfig)();
+    const contextPolicy = (0, main_agent_context_policy_1.resolveMainAgentContextPolicy)(orchestratorConfig);
     const shared = (0, main_agent_tool_runtime_1.buildMainAgentToolRuntimeContext)({
         configuredTools: authorization.tools,
         mcpPolicy: "all",
@@ -142,6 +147,8 @@ function buildGlobalAgentToolRuntimeContext(auditContext = {}, loadedToolNames =
             allowedProjects: [],
         },
         loadedToolNames,
+        contextPolicy: contextPolicy.effective,
+        contextWindow: (0, group_compaction_strategy_1.resolveGroupModelContextCapacity)(orchestratorConfig).contextWindow,
     });
     const catalog = { tools: shared.catalog.mcp, skills: shared.catalog.skills };
     return {
@@ -162,6 +169,8 @@ function buildGlobalAgentToolRuntimeContext(auditContext = {}, loadedToolNames =
         scope_identity: shared.scopeIdentity,
         restored_skill_attachments: shared.restoredSkillAttachments || [],
         post_compact_restore_receipt: shared.postCompactRestoreReceipt || null,
+        context_policy: contextPolicy,
+        context_budget: shared.contextBudget || null,
         policy_prompt: shared.policyPrompt,
         mcp_prompt: shared.mcpPrompt,
         updated_at: authorization.updated_at,

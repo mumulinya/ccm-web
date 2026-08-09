@@ -48,7 +48,7 @@ const path = __importStar(require("path"));
 const readline = __importStar(require("readline"));
 const CCM_DIR = path.join(os.homedir(), ".cc-connect");
 const SECRET_FILE = path.join(CCM_DIR, "private", "internal-mcp-context-secret");
-const AUDIT_FILE = path.join(CCM_DIR, "tools", "internal-mcp-invocations.jsonl");
+const AUDIT_FILE = path.resolve(process.env.CCM_INTERNAL_MCP_AUDIT_FILE || path.join(CCM_DIR, "tools", "internal-mcp-invocations.jsonl"));
 const CONTEXT_TTL_MS = 14 * 24 * 60 * 60_000;
 function ensureSecret() {
     const secretFile = path.resolve(String(process.env.CCM_INTERNAL_MCP_SECRET_FILE || SECRET_FILE));

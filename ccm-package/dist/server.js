@@ -104,6 +104,11 @@ const reliability_drills_1 = require("./system/reliability-drills");
 const soak_test_1 = require("./system/soak-test");
 const process_lifecycle_1 = require("./system/process-lifecycle");
 const runtime_events_1 = require("./system/runtime-events");
+const agent_communication_api_1 = require("./system/agent-communication-api");
+const code_intelligence_api_1 = require("./system/code-intelligence-api");
+const user_visible_agent_events_api_1 = require("./system/user-visible-agent-events-api");
+const agent_communication_v2_1 = require("./system/agent-communication-v2");
+const execution_kernel_2 = require("./agents/execution-kernel");
 const user_notifications_1 = require("./system/user-notifications");
 const session_compaction_hooks_1 = require("./system/session-compaction-hooks");
 const context_budget_1 = require("./system/context-budget");
@@ -112,6 +117,11 @@ const rag_1 = require("./modules/knowledge/rag");
 const knowledge_model_startup_1 = require("./modules/knowledge/knowledge-model-startup");
 const source_ingestion_1 = require("./modules/requirements/source-ingestion");
 const knowledge_access_1 = require("./modules/knowledge/knowledge-access");
+const group_orchestrator_config_1 = require("./modules/collaboration/group-orchestrator-config");
+const group_compaction_strategy_1 = require("./modules/collaboration/group-compaction-strategy");
+const main_agent_context_policy_1 = require("./tools/main-agent-context-policy");
+const main_agent_context_source_continuity_1 = require("./system/main-agent-context-source-continuity");
+const main_agent_post_compact_continuity_1 = require("./system/main-agent-post-compact-continuity");
 const slash_commands_1 = require("./modules/tools/slash-commands");
 const credential_store_1 = require("./core/credential-store");
 const feishu_reaction_feedback_1 = require("./integrations/feishu-reaction-feedback");
@@ -416,6 +426,12 @@ function handleRequest(req, res) {
     if ((0, feishu_reaction_feedback_1.handleFeishuReactionFeedbackApi)(pathname, req, res))
         return;
     if ((0, runtime_events_1.handleRuntimeEventsApi)(pathname, req, res, parsed))
+        return;
+    if ((0, user_visible_agent_events_api_1.handleUserVisibleAgentEventsApi)(pathname, req, res, parsed))
+        return;
+    if ((0, agent_communication_api_1.handleAgentCommunicationApi)(pathname, req, res, parsed, { retryTask: collaboration_1.retryTask, createCollabCtx }))
+        return;
+    if ((0, code_intelligence_api_1.handleCodeIntelligenceApi)(pathname, req, res))
         return;
     if ((0, user_notifications_1.handleUserNotificationsApi)(pathname, req, res, parsed))
         return;
@@ -1053,6 +1069,16 @@ function handleRequest(req, res) {
                     projectId: project,
                     originReceipt: projectFeishuOriginReceipt,
                 });
+                try {
+                    (0, sessions_1.applyProjectSessionProvisionalTitle)(project, exactProjectSessionId, {
+                        role: "user",
+                        content: finalMessage,
+                        files,
+                    });
+                }
+                catch (error) {
+                    console.warn(`[项目飞书会话] 临时命名失败 (${project}/${exactProjectSessionId})：${error?.message || error}`);
+                }
                 if ((0, project_session_agent_binding_1.isProjectSessionAgentDispatchActive)(project, exactProjectSessionId))
                     return enqueueCurrentProjectFeishuTurn();
             }
@@ -1147,11 +1173,29 @@ function handleRequest(req, res) {
                 (0, sessions_1.syncSessions)(project);
             const projectKnowledge = { context: "", citations: [], embeddingMode: "not_loaded", fallback: false };
             const projectConfigSnapshot = (0, db_1.loadProjectConfigs)()?.[project] || {};
+            const globalContextConfig = (0, group_orchestrator_config_1.loadOrchestratorConfig)();
+            const projectContextPolicy = (0, main_agent_context_policy_1.resolveMainAgentContextPolicy)(globalContextConfig, projectConfigSnapshot.context_policy || projectConfigSnapshot.contextPolicy || {}).effective;
+            const projectContextWindow = Number((0, group_compaction_strategy_1.resolveGroupModelContextCapacity)(globalContextConfig).effectiveContextWindow || 200_000);
+            const projectSourceBudget = (0, main_agent_context_source_continuity_1.calculateContextSourceBudget)({ contextWindow: projectContextWindow, catalogPercent: projectContextPolicy.contextSourceCatalogBudgetPercent, hydrationPercent: projectContextPolicy.contextSourceHydrationBudgetPercent });
             (0, shared_files_v2_1.migrateLegacySharedFilesV2)("project", project, projectConfigSnapshot.shared_files || [], "project-config-v1");
             const projectSharedFiles = (0, shared_files_v2_1.buildSharedFilesContextV2)("project", project, {
-                maxTokens: 32_000,
+                contextWindow: projectContextWindow,
+                hydrationBudgetPercent: projectContextPolicy.contextSourceHydrationBudgetPercent,
+                remainingSafeTokens: projectSourceBudget.hydrationTargetTokens,
+                explicitText: finalMessage,
                 title: "以下是当前项目已授权共享文件。规划、开发和验收必须引用对应文件与分片证据：",
             });
+            const projectSourceIdentity = exactProjectSessionId ? { agentKind: "project", scope: "project", scopeId: project, exactSessionId: exactProjectSessionId, generation: 0 } : null;
+            const projectSourceCatalog = (0, main_agent_context_source_continuity_1.buildContextSourceCatalog)({
+                sources: (0, main_agent_context_source_continuity_1.listContextSourceCatalogEntries)({ sharedScope: "project", sharedScopeId: project, knowledgeContext: { role: "project-agent", project } }),
+                maxTokens: projectSourceBudget.catalogTargetTokens,
+                explicitText: finalMessage,
+                recentReceipts: projectSourceIdentity ? (0, main_agent_context_source_continuity_1.readContextSourceContinuity)(projectSourceIdentity).receipts : [],
+            });
+            if (projectSourceIdentity) {
+                (0, main_agent_context_source_continuity_1.recordContextSourceCatalog)(projectSourceIdentity, projectSourceCatalog, projectSourceBudget);
+                (0, main_agent_context_source_continuity_1.recordSharedFileProjection)(projectSourceIdentity, projectSharedFiles, { ...projectSourceBudget, catalogUsedTokens: projectSourceCatalog.usedTokens, sharedFileTokens: projectSharedFiles.total_tokens, hydrationUsedTokens: projectSharedFiles.total_tokens });
+            }
             if (exactProjectSessionId) {
                 if (projectSharedFiles.files.length) {
                     const sharedToolCallId = `shared_${Date.now().toString(36)}_${Math.random().toString(16).slice(2, 8)}`;
@@ -1192,6 +1236,7 @@ function handleRequest(req, res) {
                 roleSkillPrompt: (0, role_skills_1.buildSelectedSkillUsageDirective)(selectedProjectRoleSkills),
             });
             let toolContext = buildCurrentProjectToolContext();
+            let projectRestoredSourceContext = "";
             if (toolContext.dispatchGate?.dispatchReady === false)
                 return sendRuntimeToolDispatchBlocked(res, toolContext);
             if (resolvedRuntime.switched) {
@@ -1207,7 +1252,7 @@ function handleRequest(req, res) {
                     projectCompaction = await (0, project_session_compaction_1.compactProjectSessionWithModel)(project, exactProjectSessionId, {
                         reason: "auto_model",
                         currentRequest: finalMessage,
-                        fixedContext: { project, workDir, agentType, runtimePrompt: toolContext.prompt, projectMemoryPacket, projectKnowledge: projectKnowledge.context, projectSharedFiles: projectSharedFiles.context },
+                        fixedContext: { project, workDir, agentType, runtimePrompt: toolContext.prompt, contextSourceCatalog: projectSourceCatalog.context, projectMemoryPacket, projectKnowledge: projectKnowledge.context, projectSharedFiles: projectSharedFiles.context },
                         tools: { allowedTools: toolContext.allowedTools, runtimeToolSnapshot: toolContext.runtimeToolSnapshot },
                         provider: agentType,
                     });
@@ -1277,27 +1322,62 @@ function handleRequest(req, res) {
                     projectMemoryMcp.ready = knowledgeMcp?.state === "synced";
                     if (projectMemoryMcp.ready) {
                         const threshold = Number(projectCompaction?.auto_compact_threshold || projectMemoryMcp.snapshot.autoCompactThreshold || 0);
+                        let providerUsageBiasTokens = Math.max(0, Number(projectCompaction?.before_tokens || projectCompaction?.token_measurement?.activeTokens || 0)
+                            - Number(projectCompaction?.model_visible_payload?.totalTokens || 0));
                         const hydratedPayloadTokens = Number(projectMemoryMcp.snapshot.requiredHydrationTokens || 0)
                             + (0, context_budget_1.estimateTextTokens)(toolContext.prompt)
                             + (0, context_budget_1.estimateTextTokens)(projectKnowledge.context)
                             + (0, context_budget_1.estimateTextTokens)(projectSharedFiles.context)
-                            + (0, context_budget_1.estimateTextTokens)(finalMessage);
+                            + (0, context_budget_1.estimateTextTokens)(finalMessage)
+                            + providerUsageBiasTokens;
                         if (threshold > 0 && hydratedPayloadTokens >= threshold && projectCompaction?.compacted !== true) {
                             projectCompaction = await (0, project_session_compaction_1.compactProjectSessionWithModel)(project, exactProjectSessionId, {
                                 force: true,
                                 reason: "third_party_memory_mcp_required_hydration",
                                 currentRequest: finalMessage,
-                                fixedContext: { project, workDir, agentType, runtimePrompt: toolContext.prompt, projectMemoryPacket, projectKnowledge: projectKnowledge.context, projectSharedFiles: projectSharedFiles.context },
+                                fixedContext: { project, workDir, agentType, runtimePrompt: toolContext.prompt, contextSourceCatalog: projectSourceCatalog.context, projectMemoryPacket, projectKnowledge: projectKnowledge.context, projectSharedFiles: projectSharedFiles.context },
                                 tools: { allowedTools: toolContext.allowedTools, runtimeToolSnapshot: toolContext.runtimeToolSnapshot },
                                 provider: agentType,
                             });
                             projectMemoryMcp = prepareProjectMemoryMcp();
                             toolContext = buildCurrentProjectToolContext(projectMemoryMcp.internalMcpServers);
                             projectMemoryMcp.ready = (toolContext.audit.internal_mcp || []).some((item) => item.name === "ccm__knowledge_context" && item.state === "synced");
-                            const postTokens = Number(projectMemoryMcp.snapshot.requiredHydrationTokens || 0) + (0, context_budget_1.estimateTextTokens)(toolContext.prompt) + (0, context_budget_1.estimateTextTokens)(projectKnowledge.context) + (0, context_budget_1.estimateTextTokens)(projectSharedFiles.context) + (0, context_budget_1.estimateTextTokens)(finalMessage);
+                            providerUsageBiasTokens = Math.max(0, Number(projectCompaction?.before_tokens || projectCompaction?.token_measurement?.activeTokens || 0)
+                                - Number(projectCompaction?.model_visible_payload?.totalTokens || 0));
+                            const postTokens = Number(projectMemoryMcp.snapshot.requiredHydrationTokens || 0) + (0, context_budget_1.estimateTextTokens)(toolContext.prompt) + (0, context_budget_1.estimateTextTokens)(projectKnowledge.context) + (0, context_budget_1.estimateTextTokens)(projectSharedFiles.context) + (0, context_budget_1.estimateTextTokens)(finalMessage) + providerUsageBiasTokens;
                             if (threshold > 0 && postTokens >= threshold)
                                 throw new Error(`项目记忆 MCP 必读上下文压缩后仍超过阈值：${postTokens}/${threshold}`);
                         }
+                        const exactThreshold = Number(projectCompaction?.auto_compact_threshold || projectMemoryMcp.snapshot.autoCompactThreshold || 0);
+                        const fixedTokens = (0, context_budget_1.estimateTextTokens)(toolContext.prompt)
+                            + (0, context_budget_1.estimateTextTokens)(projectKnowledge.context)
+                            + (0, context_budget_1.estimateTextTokens)(projectSharedFiles.context)
+                            + (0, context_budget_1.estimateTextTokens)(finalMessage)
+                            + providerUsageBiasTokens;
+                        const memoryReadBudgetTokens = exactThreshold > 0 ? Math.max(0, exactThreshold - fixedTokens) : 0;
+                        if (exactThreshold > 0 && Number(projectMemoryMcp.snapshot.requiredHydrationTokens || 0) >= memoryReadBudgetTokens) {
+                            throw new Error(`项目记忆 MCP 累计读取预算不足：required=${projectMemoryMcp.snapshot.requiredHydrationTokens || 0}; budget=${memoryReadBudgetTokens}`);
+                        }
+                        projectMemoryMcp.internalMcpServers = (0, agent_internal_mcp_1.buildProjectSessionBoundMemoryMcpServer)({
+                            project,
+                            projectSessionId: exactProjectSessionId,
+                            agentType,
+                            workDir,
+                            taskAgentSessionId: projectMemoryMcp.binding.task_agent_session_id || "",
+                            nativeSessionId: projectMemoryMcp.binding.native_session_id || "",
+                            memoryReceiptChallenge: projectMemoryMcp.challenge,
+                            memoryReceiptFile: (0, memory_context_consumption_receipt_1.memoryContextConsumptionReceiptFile)(projectMemoryMcp.challenge.challenge_id),
+                            memorySnapshotId: projectMemoryMcp.snapshot.id,
+                            memorySnapshotChecksum: projectMemoryMcp.snapshot.checksum,
+                            boundaryGeneration: projectMemoryMcp.snapshot.boundaryGeneration,
+                            nativeGeneration: projectMemoryMcp.snapshot.nativeGeneration,
+                            requestText: finalMessage,
+                            memoryReadBudgetTokens,
+                        });
+                        projectMemoryMcp.memoryReadBudgetTokens = memoryReadBudgetTokens;
+                        projectMemoryMcp.providerUsageBiasTokens = providerUsageBiasTokens;
+                        toolContext = buildCurrentProjectToolContext(projectMemoryMcp.internalMcpServers);
+                        projectMemoryMcp.ready = (toolContext.audit.internal_mcp || []).some((item) => item.name === "ccm__knowledge_context" && item.state === "synced");
                     }
                 }
                 catch (error) {
@@ -1306,7 +1386,19 @@ function handleRequest(req, res) {
             }
             if (toolContext.dispatchGate?.dispatchReady === false)
                 return sendRuntimeToolDispatchBlocked(res, toolContext);
-            const fullMessage = [toolContext.prompt, projectKnowledge.context, projectSharedFiles.context, finalMessage].filter(Boolean).join("\n\n");
+            const resolvedProjectSourceIdentity = projectSourceIdentity ? (0, main_agent_post_compact_continuity_1.resolveMainAgentContinuityIdentity)(projectSourceIdentity) : null;
+            if (resolvedProjectSourceIdentity && resolvedProjectSourceIdentity.generation > 0) {
+                projectRestoredSourceContext = (0, main_agent_context_source_continuity_1.restoreContextSources)({
+                    identity: resolvedProjectSourceIdentity,
+                    knowledgeContext: { role: "project-agent", project },
+                    explicitText: finalMessage,
+                    maxPerItemTokens: projectContextPolicy.postCompactSourcePerItemMaxTokens,
+                    maxTotalTokens: projectContextPolicy.postCompactSourceTotalMaxTokens,
+                    hydrationTargetTokens: projectSourceBudget.hydrationTargetTokens,
+                    remainingSafeTokens: projectSourceBudget.remainingSafeTokens,
+                }).context;
+            }
+            const fullMessage = [toolContext.prompt, projectSourceCatalog.context, projectRestoredSourceContext, projectKnowledge.context, projectSharedFiles.context, finalMessage].filter(Boolean).join("\n\n");
             const memoryMcpEnabled = projectMemoryMcp?.ready === true;
             const projectSessionContext = memoryMcpEnabled
                 ? (0, third_party_memory_snapshot_1.buildThirdPartyMemoryBootstrap)(projectMemoryMcp.snapshot, projectMemoryMcp.challenge)
@@ -1573,6 +1665,15 @@ function handleRequest(req, res) {
                                 }),
                                 `你是当前项目唯一的开发 Agent。项目主 Agent 分配给你的工作项如下：\n标题：${workItem.title}\n目标：${workItem.objective}\n验收标准：${workItem.acceptanceCriteria.join("；") || plan.acceptanceCriteria.join("；")}\n${reworkProblems.length ? `这是第 ${round} 轮返工，必须逐项解决 TestAgent 的真实失败证据：\n${reworkProblems.join("\n")}` : ""}\n请实际完成工作、运行适用验证，并在结尾准确列出变更文件、执行过的验证和仍存在的阻塞。不得自行宣布主任务最终验收通过。`,
                             ].filter(Boolean).join("\n\n");
+                            if (memoryMcpEnabled) {
+                                const bootstrapTokens = (0, context_budget_1.estimateTextTokens)(workerPrompt);
+                                const maxBootstrapTokens = Math.max(1_000, Number(projectMemoryMcp?.snapshot?.maxBootstrapTokens || 32_000));
+                                if (bootstrapTokens >= maxBootstrapTokens) {
+                                    throw new Error(`项目子 Agent Bootstrap 超过独立 Token 门禁：${bootstrapTokens}/${maxBootstrapTokens}`);
+                                }
+                                projectMemoryMcp.bootstrapTokens = bootstrapTokens;
+                                projectMemoryMcp.maxBootstrapTokens = maxBootstrapTokens;
+                            }
                             const output = await callAgent(project, workerPrompt, workDir, agentType, 300000, {
                                 background: true,
                                 taskId: task.id,
@@ -1623,6 +1724,13 @@ function handleRequest(req, res) {
                             agent: project,
                             accepted: true,
                             sourceKind: "accepted_project_main_agent_delivery",
+                            contextSourceIdentity: {
+                                agentKind: "project",
+                                scope: "project",
+                                scopeId: project,
+                                exactSessionId: String(projectRun.project_session_id || projectRun.session_id || projectRun.id),
+                                generation: Math.max(0, Number(projectRun.project_session_generation || projectRun.generation || 0)),
+                            },
                             actualFiles: execution.fileChanges?.files || [],
                             receipt: {
                                 status: "done",
@@ -1963,6 +2071,7 @@ function startServer(port, host = process.env.CCM_HOST || "127.0.0.1") {
         (0, model_capability_cache_1.stopModelCapabilityRefreshScheduler)();
         (0, runtime_tool_real_cli_matrix_1.stopRuntimeToolRealCliMatrixScheduler)();
         (0, task_permission_broker_1.stopTaskPermissionNotificationScheduler)();
+        (0, agent_communication_v2_1.stopAgentCommunicationWatchdog)();
         (0, soak_test_1.shutdownSoakMonitor)();
         if (!managedShutdownInProgress) {
             (0, task_store_1.closeSqliteTaskStore)();
@@ -1987,6 +2096,39 @@ function startServer(port, host = process.env.CCM_HOST || "127.0.0.1") {
             startupCollabCtx.broadcastPetSpeech?.("global-agent", { role: payload.role, text: payload.text, final: true, source: payload.source });
         });
         (0, task_permission_broker_1.startTaskPermissionNotificationScheduler)(startupCollabCtx);
+        (0, agent_communication_v2_1.startAgentCommunicationWatchdog)({
+            onSafeRetry: outcome => {
+                const reason = `Agent Communication ${outcome.toState}，确认无副作用后自动重试`;
+                try {
+                    (0, agent_communication_v2_1.performAgentCommunicationAction)(outcome.messageId, "retry", { reason, actor: "agent-communication-watchdog" });
+                    (0, execution_kernel_2.requestTaskCancellation)(outcome.taskId, reason, "agent-communication-watchdog");
+                }
+                catch (error) {
+                    console.warn(`[Agent Communication] 自动重试准备失败：${error?.message || error}`);
+                    return;
+                }
+                const deadline = Date.now() + 60_000;
+                const retryAfterRunnerStops = () => {
+                    const result = (0, collaboration_1.retryTask)(outcome.taskId, startupCollabCtx, reason, true);
+                    if (result?.success)
+                        return;
+                    if (Date.now() < deadline && [409, 429].includes(Number(result?.status || 0))) {
+                        const timer = setTimeout(retryAfterRunnerStops, 2_000);
+                        timer.unref?.();
+                        return;
+                    }
+                    try {
+                        (0, agent_communication_v2_1.performAgentCommunicationAction)(outcome.messageId, "takeover", {
+                            reason: `自动重试未能在60秒内安全重新入队：${String(result?.error || "unknown").slice(0, 300)}`,
+                            actor: "agent-communication-watchdog",
+                        });
+                    }
+                    catch { }
+                };
+                const timer = setTimeout(retryAfterRunnerStops, 250);
+                timer.unref?.();
+            },
+        });
         const petAutoStart = (0, pets_1.maybeAutoStartPet)(port);
         if (!petAutoStart.success) {
             console.warn(`[桌面宠物] 自动启动失败：${"error" in petAutoStart ? petAutoStart.error || "未知错误" : "未知错误"}`);
@@ -2086,6 +2228,7 @@ if (require.main === module) {
         (0, model_capability_cache_1.stopModelCapabilityRefreshScheduler)();
         (0, runtime_tool_real_cli_matrix_1.stopRuntimeToolRealCliMatrixScheduler)();
         (0, task_permission_broker_1.stopTaskPermissionNotificationScheduler)();
+        (0, agent_communication_v2_1.stopAgentCommunicationWatchdog)();
         (0, projects_1.stopFeishuChannelSupervisorForServer)();
         (0, projects_1.stopControlBotConnection)();
         const forceExit = setTimeout(() => process.exit(1), 15_000);

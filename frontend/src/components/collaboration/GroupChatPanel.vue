@@ -18,6 +18,7 @@ import AgentExecutionMessage from '../agents/AgentExecutionMessage.vue'
 import AgentQaMessage from '../agents/AgentQaMessage.vue'
 import GroupMainAgentStatusCard from './GroupMainAgentStatusCard.vue'
 import MainAgentDecisionCard from '../agents/MainAgentDecisionCard.vue'
+import AgentExecutionTranscript from '../common/AgentExecutionTranscript.vue'
 import GroupChatHeader from './GroupChatHeader.vue'
 import GroupChatSessionSidebar from './GroupChatSessionSidebar.vue'
 import GroupLogsModal from './GroupLogsModal.vue'
@@ -32,6 +33,9 @@ import AgentPipelineModal from '../agents/AgentPipelineModal.vue'
 import { useGroupChat } from './useGroupChat.js'
 import { useSessionContextUsage } from '../../composables/useSessionContextUsage.js'
 import { usePermissionApprovals } from '../../composables/usePermissionApprovals.js'
+import { useAgentExecutionEvents } from '../../composables/useAgentExecutionEvents.js'
+import { getCopyableMessageText } from '../../utils/messageActions.js'
+import { shouldShowCompactProcessingState } from '../../utils/agentExecutionEvents.js'
 
 const props = defineProps({
   navigateTo: { type: Object, default: null },
@@ -70,7 +74,7 @@ const {
   isAgentQaMessage, runAgentQaAction, appendAgentQaMessage,
   applyMainAgentProgressCheckpoint, groupMessageKeyMap, groupMessageKeySeq, getGroupMessageKey, showCreate,
   showRename, showMembers, showTools, showTestTargets, showSharedFiles, showLogs, groupTools, groupAllTools, groupToolAudit,
-  groupAuthorizationReadiness, groupConnectionPreflight, groupToolVerification, newGroupName, renameName,
+  groupAuthorizationReadiness, groupConnectionPreflight, groupToolVerification, groupContextPolicy, newGroupName, renameName,
   loadGroups, loadProjects, selectGroup, loadMessages,
   selectGroupSession, createGroupSession, renameGroupSession, archiveGroupSession, deleteGroupSession,
   createLocalMessageId, normalizeMessageContent, isEquivalentMessage, mergeIncomingMessage,
@@ -83,9 +87,9 @@ const {
   submitCreateGroup, submitRename, deleteGroup, clearGroupMessages, saveCurrentGroupConversationKnowledge,
   isStreaming, thinkingMessages, pendingGroupSendRetry, groupStreamController, activeGroupTaskId,
   stoppingGroupTurn, groupTurnConversationId, groupTurnControl, stopGroupCurrentWork, drainGroupTurnQueue, guideGroupQueuedTurn,
-  submitGroupMessageWhileBusy, groupSendRetrySignature, sendMessage, waitingCrossReply, pullNewMessages,
+  submitGroupMessageWhileBusy, groupSendRetrySignature, sendMessage, editGroupUserMessage, waitingCrossReply, pullNewMessages,
   logs, logFilter, logEventSource, logsResizeObserver, scrollLogsToBottom, loadLogs, startLogStream,
-  stopLogStream, clearLogs, normalizeGroupTools, loadAvailableGroupTools, loadGroupTools, toggleGroupTool,
+  stopLogStream, clearLogs, normalizeGroupTools, loadAvailableGroupTools, loadGroupTools, toggleGroupTool, updateGroupContextPolicy,
   saveGroupTools, groupTestTargets, groupTestTargetProjects, groupTestTargetsLoading, groupTestTargetsSaving,
   loadGroupTestTargets, saveGroupTestTarget, deleteGroupTestTarget, groupFiles, loadGroupFiles, addGroupFile, submitAddGroupFile, deleteGroupFile,
   getAvailableProjects, addGroupMember, removeGroupMember, groupPollTimer, lastGroupMsgCount,
@@ -101,6 +105,15 @@ const selectSessionFromSidebar = async (sessionId) => {
 const groupContextScopeId = computed(() => currentGroup.value?.id && currentGroupSessionId.value
   ? `${currentGroup.value.id}::${currentGroupSessionId.value}`
   : '')
+const {
+  events: groupAgentExecutionEvents,
+  enabled: groupAgentExecutionEnabled,
+} = useAgentExecutionEvents({
+  scope: computed(() => 'group'),
+  scopeId: computed(() => currentGroup.value?.id || ''),
+  exactSessionId: currentGroupSessionId,
+  active: computed(() => props.active !== false && !!currentGroup.value?.id && !!currentGroupSessionId.value),
+})
 const {
   usage: groupContextUsage,
   loading: groupContextLoading,

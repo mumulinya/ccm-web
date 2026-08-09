@@ -122,10 +122,15 @@ export type GroupOrchestratorInput = {
     onDelta?: (delta: string) => void;
 };
 export declare function measureGroupMainAgentPayload(input: any): {
-    messages: {
+    messages: ({
         role: string;
         content: string;
-    }[];
+        contextBlockType?: undefined;
+    } | {
+        role: string;
+        contextBlockType: string;
+        content: any;
+    })[];
     snapshot: import("../../system/session-compaction-core").ModelVisiblePayloadSnapshot;
     tokens: number;
 };
@@ -133,10 +138,15 @@ export declare function prepareExactGroupMainAgentInput(input: any, group: any, 
     input: any;
     compacted: boolean;
     measurement: {
-        messages: {
+        messages: ({
             role: string;
             content: string;
-        }[];
+            contextBlockType?: undefined;
+        } | {
+            role: string;
+            contextBlockType: string;
+            content: any;
+        })[];
         snapshot: import("../../system/session-compaction-core").ModelVisiblePayloadSnapshot;
         tokens: number;
     };
@@ -149,10 +159,15 @@ export declare function prepareExactGroupMainAgentInput(input: any, group: any, 
     compacted: boolean;
     projection: any;
     measurement: {
-        messages: {
+        messages: ({
             role: string;
             content: string;
-        }[];
+            contextBlockType?: undefined;
+        } | {
+            role: string;
+            contextBlockType: string;
+            content: any;
+        })[];
         snapshot: import("../../system/session-compaction-core").ModelVisiblePayloadSnapshot;
         tokens: number;
     };
@@ -252,7 +267,13 @@ export declare function runGroupOrchestratorCore(input: GroupOrchestratorInput):
         schema: string;
         groupId: string;
         groupSessionId: string;
+        mode: import("../../system/agent-loop-budget").AgentLoopMode;
+        modelCalls: number;
+        toolRounds: number;
         calls: number;
+        continuationSegments: number;
+        noProgressCount: number;
+        stopReason: string;
         results: {
             name: any;
             ok: any;
@@ -304,7 +325,13 @@ export declare function runGroupOrchestratorCore(input: GroupOrchestratorInput):
         schema: string;
         groupId: string;
         groupSessionId: string;
+        mode: import("../../system/agent-loop-budget").AgentLoopMode;
+        modelCalls: number;
+        toolRounds: number;
         calls: number;
+        continuationSegments: number;
+        noProgressCount: number;
+        stopReason: string;
         results: {
             name: any;
             ok: any;
@@ -377,7 +404,13 @@ export declare function runGroupOrchestratorCore(input: GroupOrchestratorInput):
         schema: string;
         groupId: string;
         groupSessionId: string;
+        mode: import("../../system/agent-loop-budget").AgentLoopMode;
+        modelCalls: number;
+        toolRounds: number;
         calls: number;
+        continuationSegments: number;
+        noProgressCount: number;
+        stopReason: string;
         results: {
             name: any;
             ok: any;
@@ -436,7 +469,13 @@ export declare function runGroupOrchestratorCore(input: GroupOrchestratorInput):
         schema: string;
         groupId: string;
         groupSessionId: string;
+        mode: import("../../system/agent-loop-budget").AgentLoopMode;
+        modelCalls: number;
+        toolRounds: number;
         calls: number;
+        continuationSegments: number;
+        noProgressCount: number;
+        stopReason: string;
         results: {
             name: any;
             ok: any;
@@ -482,6 +521,7 @@ export declare function runGroupOrchestratorCore(input: GroupOrchestratorInput):
     assignments: any[];
     runtime: string;
     providerFailure: {
+        kind: string;
         code: string;
         retryExhausted: boolean;
         attempts: number;
@@ -505,6 +545,11 @@ export declare function runGroupOrchestratorCore(input: GroupOrchestratorInput):
     };
     content: string;
 }>;
+export declare function classifyGroupOrchestratorFailure(error: any): {
+    kind: string;
+    title: string;
+    guidance: string;
+};
 export declare function summarizeGroupOrchestratorProviderError(error: any): string;
 export declare function streamCanonicalGroupReply(text: string, onDelta?: (delta: string) => void, maxChunkChars?: number): number;
 export declare function runGroupOrchestrator(input: GroupOrchestratorInput): Promise<any>;

@@ -416,13 +416,14 @@ onBeforeUnmount(clearApiKeyRevealTimer)
                   <span class="settings-field-hint">仅对支持推理的模型生效；OpenAI 兼容接口发送 reasoning_effort，Anthropic 兼容接口发送 thinking 预算。不支持的网关可先选「关闭」。</span>
                 </div>
                 <div class="settings-field">
-                  <label for="model-context-cache-mode">上下文缓存</label>
+                  <label for="model-context-cache-mode">上下文处理策略</label>
                   <select id="model-context-cache-mode" v-model="modelConfig.providerContextCacheMode" class="settings-input">
                     <option value="auto">自动选择</option>
                     <option value="native">优先 Provider 原生</option>
                     <option value="controlled">CCM 受控投影</option>
-                    <option value="off">关闭缓存适配</option>
+                    <option value="off">关闭 Provider 适配</option>
                   </select>
+                  <span class="settings-field-hint">Provider Prompt Cache 只复用计算；Anthropic 原生上下文编辑和 CCM 受控投影才会减少活动上下文。兼容端必须先通过能力验证。</span>
                 </div>
                 <div class="settings-field">
                   <label for="model-inference-backend">推理后端</label>
@@ -451,7 +452,7 @@ onBeforeUnmount(clearApiKeyRevealTimer)
                   <select id="model-native-cache-family" v-model="modelConfig.providerNativeCacheFamily" class="settings-input" @change="handleNativeCacheFamilyChange($event)">
                     <option value="auto">恢复自动跟随</option>
                     <option value="openai">OpenAI Prompt Cache</option>
-                    <option value="anthropic">Anthropic Context Management</option>
+                    <option value="anthropic">Anthropic Prompt Cache + Context Management</option>
                     <option value="gemini">Gemini Context Cache</option>
                     <option value="compatible">仅稳定前缀</option>
                   </select>

@@ -121,6 +121,9 @@ export function verifyProviderNativeCompactExecutionReceipt(receipt: any, expect
   const expectedChecksum = checksum(receiptIdentity(receipt));
   if (!receipt?.receipt_checksum || receipt.receipt_checksum !== expectedChecksum) issues.push("receipt_checksum");
   const bindings = [
+    ["scope", expected.scope],
+    ["scope_id", expected.scopeId || expected.scope_id],
+    ["session_id", expected.sessionId || expected.session_id],
     ["group_id", expected.groupId || expected.group_id],
     ["group_session_id", expected.groupSessionId || expected.group_session_id],
     ["task_agent_session_id", expected.taskAgentSessionId || expected.task_agent_session_id],
@@ -158,6 +161,9 @@ export function buildProviderNativeCompactExecutionReceipt(input: any = {}) {
   const betas = betaHeaders(input, requestPatch);
   const groupId = String(input.groupId || input.group_id || plan.groupId || plan.group_id || "").trim();
   const groupSessionId = String(input.groupSessionId || input.group_session_id || plan.groupSessionId || plan.group_session_id || "").trim();
+  const scope = String(input.scope || plan.scope || plan.contextIdentity?.scope || (groupId ? "group" : "other")).trim().toLowerCase() || "other";
+  const scopeId = String(input.scopeId || input.scope_id || plan.scopeId || plan.scope_id || plan.contextIdentity?.scopeId || groupId || "").trim();
+  const sessionId = String(input.sessionId || input.session_id || plan.sessionId || plan.session_id || plan.contextIdentity?.sessionId || groupSessionId || "default").trim() || "default";
   const taskAgentSessionId = String(input.taskAgentSessionId || input.task_agent_session_id || plan.taskAgentSessionId || plan.task_agent_session_id || "").trim();
   const nativeSessionId = String(input.nativeSessionId || input.native_session_id || plan.nativeSessionId || plan.native_session_id || "").trim();
   const executionId = String(input.executionId || input.execution_id || plan.executionId || plan.execution_id || "").trim();
@@ -205,14 +211,15 @@ export function buildProviderNativeCompactExecutionReceipt(input: any = {}) {
     snapshotChecksum: String(plan.memoryContextSnapshotChecksum || plan.memory_context_snapshot_checksum || "").trim(),
   };
   const gaps = [
-    !groupId ? "group_id" : "",
-    !groupSessionId ? "group_session_id" : "",
-    !taskAgentSessionId ? "task_agent_session_id" : "",
-    !nativeSessionId ? "native_session_id" : "",
-    !executionId ? "execution_id" : "",
-    !runnerRequestId ? "runner_request_id" : "",
-    !snapshotId ? "memory_context_snapshot_id" : "",
-    !snapshotChecksum ? "memory_context_snapshot_checksum" : "",
+    !scope ? "scope" : "",
+    !scopeId ? "scope_id" : "",
+    !sessionId ? "session_id" : "",
+    plan.sessionBindingRequired === true && !taskAgentSessionId ? "task_agent_session_id" : "",
+    plan.sessionBindingRequired === true && !nativeSessionId ? "native_session_id" : "",
+    plan.sessionBindingRequired === true && !executionId ? "execution_id" : "",
+    plan.sessionBindingRequired === true && !runnerRequestId ? "runner_request_id" : "",
+    plan.sessionBindingRequired === true && !snapshotId ? "memory_context_snapshot_id" : "",
+    plan.sessionBindingRequired === true && !snapshotChecksum ? "memory_context_snapshot_checksum" : "",
     !String(plan.apiEditPlanChecksum || plan.api_edit_plan_checksum || "").trim() ? "plan_checksum" : "",
     !String(plan.applyPlanChecksum || plan.apply_plan_checksum || "").trim() ? "apply_plan_checksum" : "",
     !expectedRequestPatchChecksum ? "request_patch_checksum" : "",
@@ -255,6 +262,11 @@ export function buildProviderNativeCompactExecutionReceipt(input: any = {}) {
     strong_proof: status === "native_applied",
     provider_outcome_verified: providerOutcomeVerified,
     telemetry_source: "native_request_adapter",
+    scope,
+    scope_id: scopeId,
+    session_id: sessionId,
+    generation: Math.max(0, Number(plan.generation || plan.contextIdentity?.generation || 0)),
+    boundary_generation: Math.max(0, Number(plan.boundaryGeneration || plan.contextIdentity?.boundaryGeneration || 0)),
     group_id: groupId,
     group_session_id: groupSessionId || "default",
     target_project: String(input.targetProject || input.target_project || plan.targetProject || plan.target_project || "").trim(),
@@ -310,6 +322,9 @@ export function buildProviderNativeCompactExecutionReceipt(input: any = {}) {
     created_at: new Date().toISOString(),
   };
   const receiptId = `pncer_${checksum({
+    scope,
+    scopeId,
+    sessionId,
     groupId,
     groupSessionId: base.group_session_id,
     executionId,
@@ -349,9 +364,9 @@ export function recordProviderNativeCompactExecutionReceipt(input: any = {}) {
     : buildProviderNativeCompactExecutionReceipt(input);
   const verification = verifyProviderNativeCompactExecutionReceipt(receipt);
   if (!verification.valid) return { recorded: false, verification, receipt };
-  const groupId = String(receipt.group_id || "").trim();
-  const groupSessionId = String(receipt.group_session_id || "default").trim() || "default";
-  if (!groupId) return { recorded: false, verification: { valid: false, issues: ["group_id"] }, receipt };
+  const groupId = String(receipt.group_id || receipt.scope_id || "").trim();
+  const groupSessionId = String(receipt.group_session_id || receipt.session_id || "default").trim() || "default";
+  if (!groupId) return { recorded: false, verification: { valid: false, issues: ["scope_id"] }, receipt };
   const file = getProviderNativeCompactExecutionReceiptLedgerFile(groupId, groupSessionId);
   const recorded = withFileLock(file, () => {
     const ledger = readProviderNativeCompactExecutionReceiptLedger(groupId, groupSessionId);

@@ -6,6 +6,9 @@ import { toolManager, type ToolScope } from "../../tools/tool-manager";
 import { buildMainAgentToolRuntimeContext } from "../../tools/main-agent-tool-runtime";
 import { executeWorkspaceReadonlyTool } from "../../tools/workspace-readonly-tools";
 import { recordMainAgentToolContinuityFromResult } from "../../system/main-agent-post-compact-continuity";
+import { loadOrchestratorConfig } from "../collaboration/group-orchestrator-config";
+import { resolveGroupModelContextCapacity } from "../collaboration/group-compaction-strategy";
+import { resolveMainAgentContextPolicy } from "../../tools/main-agent-context-policy";
 import {
   buildFreshToolAuthorizationPayload,
   buildToolAuthorizationPayload,
@@ -98,6 +101,8 @@ export async function saveGlobalAgentToolAuthorization(input: any = {}) {
 
 export function buildGlobalAgentToolRuntimeContext(auditContext: ToolScope["auditContext"] = {}, loadedToolNames: string[] = []) {
   const authorization = getGlobalAgentToolAuthorizationPayload();
+  const orchestratorConfig = loadOrchestratorConfig();
+  const contextPolicy = resolveMainAgentContextPolicy(orchestratorConfig);
   const shared = buildMainAgentToolRuntimeContext({
     configuredTools: authorization.tools,
     mcpPolicy: "all",
@@ -118,6 +123,8 @@ export function buildGlobalAgentToolRuntimeContext(auditContext: ToolScope["audi
       allowedProjects: [],
     },
     loadedToolNames,
+    contextPolicy: contextPolicy.effective,
+    contextWindow: resolveGroupModelContextCapacity(orchestratorConfig).contextWindow,
   });
   const catalog = { tools: shared.catalog.mcp, skills: shared.catalog.skills };
   return {
@@ -138,6 +145,8 @@ export function buildGlobalAgentToolRuntimeContext(auditContext: ToolScope["audi
     scope_identity: shared.scopeIdentity,
     restored_skill_attachments: shared.restoredSkillAttachments || [],
     post_compact_restore_receipt: shared.postCompactRestoreReceipt || null,
+    context_policy: contextPolicy,
+    context_budget: shared.contextBudget || null,
     policy_prompt: shared.policyPrompt,
     mcp_prompt: shared.mcpPrompt,
     updated_at: authorization.updated_at,

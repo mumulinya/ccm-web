@@ -1,4 +1,5 @@
 import { type ToolScope } from "../tools/tool-manager";
+import { buildContextSourceManifestReference } from "./main-agent-context-source-continuity";
 export type MainAgentKind = "global" | "group" | "project";
 export type MainAgentContinuityIdentityV1 = {
     agentKind: MainAgentKind;
@@ -38,6 +39,17 @@ export type MainAgentPostCompactRestoreManifestV1 = {
     createdAt: string;
     checksum: string;
 };
+export type MainAgentPostCompactRestoreManifestV2 = Omit<MainAgentPostCompactRestoreManifestV1, "schema" | "version"> & {
+    schema: "ccm-main-agent-post-compact-restore-manifest-v2";
+    version: 2;
+    contentStored: false;
+};
+export type MainAgentPostCompactRestoreManifestV3 = Omit<MainAgentPostCompactRestoreManifestV2, "schema" | "version"> & {
+    schema: "ccm-main-agent-post-compact-restore-manifest-v3";
+    version: 3;
+    contextSourceManifest: ReturnType<typeof buildContextSourceManifestReference>;
+};
+export type MainAgentPostCompactRestoreManifest = MainAgentPostCompactRestoreManifestV1 | MainAgentPostCompactRestoreManifestV2 | MainAgentPostCompactRestoreManifestV3;
 export type PostCompactToolRestoreReceiptV1 = {
     schema: "ccm-post-compact-tool-restore-receipt-v1";
     version: 1;
@@ -57,6 +69,26 @@ export type PostCompactToolRestoreReceiptV1 = {
     restoredAt: string;
     checksum: string;
 };
+export type PostCompactToolRestoreReceiptV2 = Omit<PostCompactToolRestoreReceiptV1, "schema" | "version"> & {
+    schema: "ccm-post-compact-tool-restore-receipt-v2";
+    version: 2;
+    restoredSkills: Array<{
+        name: string;
+        contentHash: string;
+        tokens: number;
+        originalTokens: number;
+        truncated: boolean;
+        drift: "none";
+    }>;
+    restoredMcpSchemas: Array<{
+        name: string;
+        schemaChecksum: string;
+        tokens: number;
+        drift: "none";
+    }>;
+    contentStored: false;
+};
+export type PostCompactToolRestoreReceipt = PostCompactToolRestoreReceiptV1 | PostCompactToolRestoreReceiptV2;
 export declare function resolveMainAgentContinuityIdentity(identityInput: MainAgentContinuityIdentityV1): {
     generation: any;
     agentKind: MainAgentKind;
@@ -75,11 +107,13 @@ export declare function recordMainAgentInvokedSkill(input: {
 }): {
     checksum: string;
     updatedAt: string;
-    schema: "ccm-main-agent-dynamic-context-evidence-v1";
+    schema: "ccm-main-agent-dynamic-context-evidence-v2";
+    version: 2;
     identity: MainAgentContinuityIdentityV1;
     invokedSkills: InvokedSkillContinuityV1[];
     loadedMcpSchemas: LoadedMcpSchemaContinuityV1[];
-    latestManifest: MainAgentPostCompactRestoreManifestV1 | null;
+    latestManifest: MainAgentPostCompactRestoreManifest | null;
+    contentStored: false;
 };
 export declare function recordMainAgentLoadedMcpSchemas(input: {
     identity: MainAgentContinuityIdentityV1;
@@ -88,12 +122,14 @@ export declare function recordMainAgentLoadedMcpSchemas(input: {
     loadEventId?: string;
     loadedAt?: string;
 }): {
-    schema: "ccm-main-agent-dynamic-context-evidence-v1";
+    schema: "ccm-main-agent-dynamic-context-evidence-v2";
+    version: 2;
     identity: MainAgentContinuityIdentityV1;
     invokedSkills: any;
     loadedMcpSchemas: any;
     latestManifest: any;
     updatedAt: string;
+    contentStored: false;
     checksum: string;
 };
 export declare function recordMainAgentToolContinuityFromResult(input: {
@@ -105,12 +141,14 @@ export declare function recordMainAgentToolContinuityFromResult(input: {
     eventId?: string;
     sourceMessageId?: string;
 }): {
-    schema: "ccm-main-agent-dynamic-context-evidence-v1";
+    schema: "ccm-main-agent-dynamic-context-evidence-v2";
+    version: 2;
     identity: MainAgentContinuityIdentityV1;
     invokedSkills: any;
     loadedMcpSchemas: any;
     latestManifest: any;
     updatedAt: string;
+    contentStored: false;
     checksum: string;
 };
 export declare function buildMainAgentPostCompactRestoreManifest(input: {
@@ -119,8 +157,8 @@ export declare function buildMainAgentPostCompactRestoreManifest(input: {
     scope: ToolScope;
 }): {
     checksum: string;
-    schema: "ccm-main-agent-post-compact-restore-manifest-v1";
-    version: 1;
+    schema: "ccm-main-agent-post-compact-restore-manifest-v3";
+    version: 3;
     identity: MainAgentContinuityIdentityV1;
     boundaryGeneration: number;
     catalogRevision: string;
@@ -128,15 +166,26 @@ export declare function buildMainAgentPostCompactRestoreManifest(input: {
     invokedSkills: InvokedSkillContinuityV1[];
     loadedMcpSchemas: LoadedMcpSchemaContinuityV1[];
     createdAt: string;
+    contextSourceManifest: {
+        checksum: string;
+        schema: "ccm-context-source-restore-manifest-reference-v1";
+        storeChecksum: string;
+        receiptIds: string[];
+        receiptCount: number;
+        contentStored: false;
+    };
+    contentStored: false;
 };
-export declare function persistMainAgentPostCompactRestoreManifest(manifest: MainAgentPostCompactRestoreManifestV1): {
+export declare function persistMainAgentPostCompactRestoreManifest(manifest: MainAgentPostCompactRestoreManifest): {
     checksum: string;
     updatedAt: string;
-    schema: "ccm-main-agent-dynamic-context-evidence-v1";
+    schema: "ccm-main-agent-dynamic-context-evidence-v2";
+    version: 2;
     identity: MainAgentContinuityIdentityV1;
     invokedSkills: InvokedSkillContinuityV1[];
     loadedMcpSchemas: LoadedMcpSchemaContinuityV1[];
-    latestManifest: MainAgentPostCompactRestoreManifestV1 | null;
+    latestManifest: MainAgentPostCompactRestoreManifest | null;
+    contentStored: false;
 };
 export declare function validateMainAgentPostCompactRestoreManifest(value: any, expected?: Partial<MainAgentContinuityIdentityV1> & {
     boundaryGeneration?: number;
@@ -148,27 +197,28 @@ export declare function validateMainAgentPostCompactRestoreManifest(value: any, 
 export declare function restoreMainAgentPostCompactContext(input: {
     identity: MainAgentContinuityIdentityV1;
     scope: ToolScope;
-    manifest?: MainAgentPostCompactRestoreManifestV1 | null;
+    manifest?: MainAgentPostCompactRestoreManifest | null;
     maxPerSkillTokens?: number;
     maxTotalSkillTokens?: number;
     maxTotalMcpSchemaTokens?: number;
 }): {
-    manifest: MainAgentPostCompactRestoreManifestV1;
+    manifest: MainAgentPostCompactRestoreManifest;
     loadedToolNames: string[];
     skillAttachments: any[];
     renderedSkillAttachments: string;
-    receipt: PostCompactToolRestoreReceiptV1;
+    receipt: PostCompactToolRestoreReceiptV2;
 };
 export declare function clearMainAgentPostCompactContinuity(identityInput: MainAgentContinuityIdentityV1): {
     deleted: boolean;
+    sourceDeleted: boolean;
     identity: MainAgentContinuityIdentityV1;
 };
 export declare function runMainAgentPostCompactContinuitySelfTest(): {
     pass: boolean;
     manifest: {
         checksum: string;
-        schema: "ccm-main-agent-post-compact-restore-manifest-v1";
-        version: 1;
+        schema: "ccm-main-agent-post-compact-restore-manifest-v3";
+        version: 3;
         identity: MainAgentContinuityIdentityV1;
         boundaryGeneration: number;
         catalogRevision: string;
@@ -176,10 +226,21 @@ export declare function runMainAgentPostCompactContinuitySelfTest(): {
         invokedSkills: InvokedSkillContinuityV1[];
         loadedMcpSchemas: LoadedMcpSchemaContinuityV1[];
         createdAt: string;
+        contextSourceManifest: {
+            checksum: string;
+            schema: "ccm-context-source-restore-manifest-reference-v1";
+            storeChecksum: string;
+            receiptIds: string[];
+            receiptCount: number;
+            contentStored: false;
+        };
+        contentStored: false;
     };
-    restored: PostCompactToolRestoreReceiptV1;
-    isolated: PostCompactToolRestoreReceiptV1;
-    budgeted: PostCompactToolRestoreReceiptV1;
-    changedSkill: PostCompactToolRestoreReceiptV1;
-    changedSchema: PostCompactToolRestoreReceiptV1;
+    restored: PostCompactToolRestoreReceiptV2;
+    legacyRestored: PostCompactToolRestoreReceiptV2;
+    isolated: PostCompactToolRestoreReceiptV2;
+    budgeted: PostCompactToolRestoreReceiptV2;
+    changedSkill: PostCompactToolRestoreReceiptV2;
+    changedSchema: PostCompactToolRestoreReceiptV2;
+    revoked: PostCompactToolRestoreReceiptV2;
 };

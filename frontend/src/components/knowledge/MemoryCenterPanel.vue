@@ -45,6 +45,15 @@ const config = ref({
   modelContextWindow: 0,
   modelAutoCompactTokenLimit: 0,
   providerContextCacheMode: 'auto',
+  mcpToolLoadingMode: 'deferred',
+  mcpToolAutoThresholdPercent: 10,
+  skillCatalogBudgetPercent: 1,
+  postCompactSkillPerItemMaxTokens: 5000,
+  postCompactSkillTotalMaxTokens: 25000,
+  contextSourceCatalogBudgetPercent: 1,
+  contextSourceHydrationBudgetPercent: 10,
+  postCompactSourcePerItemMaxTokens: 5000,
+  postCompactSourceTotalMaxTokens: 25000,
   typedMemoryDeliveryMaxDocuments: 5,
   typedMemoryDeliveryMaxTokens: 5000,
   sessionMemoryCompactMaxSectionTokens: 2000,
@@ -55,7 +64,41 @@ const config = ref({
   timeBasedMicrocompactEnabled: false,
   timeBasedMicrocompactGapMinutes: 60,
   timeBasedMicrocompactKeepRecent: 5,
+  agentCommunicationV2Enabled: true,
+  agentRunnerStartTimeoutMs: 60000,
+  agentAckTimeoutMs: 30000,
+  agentHeartbeatIntervalMs: 20000,
+  agentHeartbeatLostTimeoutMs: 90000,
+  agentLeaseTtlMs: 120000,
+  agentMaxAttempts: 3,
+  agentMaxParallelPerProject: 2,
+  agentMaxParallelGlobal: 6,
+  adaptiveAgentLoopEnabled: true,
+  dynamicAgentBudgetEnabled: true,
+  agentToolCallBudget: 6,
+  agentMaxModelTurns: 8,
+  agentLoopNoProgressThreshold: 3,
+  agentToolBatchSize: 2,
+  agentReadOnlyParallelism: 2,
+  codeIntelligenceEnabled: true,
+  codeIndexStartPolicy: 'on_demand',
+  codeIndexMaxConcurrentProjects: 1,
+  languageServerManagedInstallEnabled: true,
+  providerNativeToolsMode: 'auto',
+  skillForkEnabled: true,
+  webToolsEnabled: true,
+  webFetchBrowserFallbackEnabled: true,
+  webSearchProviderOrder: ['mcp', 'brave', 'bing', 'google'],
+  searchMcpUrl: '',
+  searchMcpToken: '',
+  braveSearchApiKey: '',
+  bingSearchApiKey: '',
+  googleCseApiKey: '',
+  googleCseId: '',
+  notebookToolsEnabled: true,
+  ccStyleExecutionDisplayEnabled: true,
 })
+const webSearchProvidersConfigured = ref({ mcp: false, brave: false, bing: false, google: false })
 const capacity = ref(null)
 const capabilities = ref([])
 const capabilityForm = ref({ provider: '', model: '', contextWindow: 200000, maxOutputTokens: 20000 })
@@ -137,7 +180,24 @@ const postCompactUsage = computed(() => detail.value?.postCompactUsage || null)
 const providerContextCacheState = computed(() => detail.value?.providerContextCache || detail.value?.summary?.providerContextCache || null)
 const contextEngineTrends = computed(() => detail.value?.summary?.contextEngineTrends || null)
 const contextEngineRecovery = computed(() => detail.value?.summary?.contextEngineRecovery || null)
+const contextSourceContinuity = computed(() => detail.value?.contextSourceContinuity || null)
 const recoveryDrilling = ref(false)
+const sourceMaintenancePreview = ref(null)
+const sourceMaintenanceJob = ref(null)
+const sourceMaintenanceLoading = ref(false)
+const sourceMaintenanceIdentity = computed(() => {
+  const generation = Number(contextSourceContinuity.value?.receipts?.[0]?.identity?.generation || 0)
+  if (selectedScope.value === 'global_session') return { scope: 'global', scopeId: 'global-agent', sessionId: String(selectedId.value).replace(/^session:/, ''), generation }
+  if (selectedScope.value === 'project_session') {
+    const split = String(selectedId.value).indexOf('::')
+    return split > 0 ? { scope: 'project', scopeId: String(selectedId.value).slice(0, split), sessionId: String(selectedId.value).slice(split + 2), generation } : null
+  }
+  if (selectedScope.value === 'group' && String(selectedId.value).includes('::')) {
+    const split = String(selectedId.value).indexOf('::')
+    return { scope: 'group', scopeId: String(selectedId.value).slice(0, split), sessionId: String(selectedId.value).slice(split + 2), generation }
+  }
+  return null
+})
 
 const typeLabels = {
   persistentRequirements: '长期要求', factAnchors: '事实', decisions: '决策', completed: '已完成',
@@ -229,6 +289,8 @@ async function selectScope(item) {
   selectedId.value = item.id
   query.value = ''
   showAudit.value = false
+  sourceMaintenancePreview.value = null
+  sourceMaintenanceJob.value = null
   await loadDetail()
 }
 
@@ -280,6 +342,48 @@ async function resetCompactCircuit() {
   } catch (error) {
     toast.error(error.message || '重置压缩熔断失败')
   }
+}
+
+async function previewSourceMaintenance() {
+  if (!sourceMaintenanceIdentity.value) return
+  sourceMaintenanceLoading.value = true
+  try {
+    sourceMaintenancePreview.value = await requestJson('/api/memory-center/context-source-maintenance/preview', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(sourceMaintenanceIdentity.value),
+    })
+    toast.success('历史来源收口预览已生成，尚未修改数据')
+  } catch (error) { toast.error(error.message || '预览失败') }
+  finally { sourceMaintenanceLoading.value = false }
+}
+
+async function applySourceMaintenance() {
+  if (!sourceMaintenancePreview.value || !sourceMaintenanceIdentity.value) return
+  const reason = window.prompt('执行历史来源收口的原因（必填，将创建备份）')
+  if (!reason?.trim() || !window.confirm('确认按当前 checksum 执行？若数据已变化，服务端会整体拒绝。')) return
+  sourceMaintenanceLoading.value = true
+  try {
+    sourceMaintenanceJob.value = await requestJson('/api/memory-center/context-source-maintenance/apply', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...sourceMaintenanceIdentity.value, planChecksum: sourceMaintenancePreview.value.planChecksum, reason: reason.trim(), actor: 'memory-center' }),
+    })
+    await loadDetail()
+    toast.success('历史来源收口已完成并创建可回滚备份')
+  } catch (error) { toast.error(error.message || '执行失败') }
+  finally { sourceMaintenanceLoading.value = false }
+}
+
+async function rollbackSourceMaintenance() {
+  if (!sourceMaintenanceJob.value?.jobId) return
+  const reason = window.prompt('回滚原因（必填）')
+  if (!reason?.trim() || !window.confirm('确认从该维护任务的备份恢复持久化数据？')) return
+  sourceMaintenanceLoading.value = true
+  try {
+    sourceMaintenanceJob.value = await requestJson('/api/memory-center/context-source-maintenance/rollback', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jobId: sourceMaintenanceJob.value.jobId, reason: reason.trim(), actor: 'memory-center' }),
+    })
+    await loadDetail()
+    toast.success('历史来源收口已回滚')
+  } catch (error) { toast.error(error.message || '回滚失败') }
+  finally { sourceMaintenanceLoading.value = false }
 }
 
 async function drillLatestRecovery() {
@@ -348,12 +452,22 @@ async function loadSettings() {
       requestJson('/api/groups/memory/capabilities'),
     ])
     const current = configData.config || {}
+    webSearchProvidersConfigured.value = current.webSearchProvidersConfigured || { mcp: false, brave: false, bing: false, google: false }
     config.value = {
       ...config.value,
       memoryContextPreset: current.memoryContextPreset || 'default',
       modelContextWindow: Number(current.modelContextWindow || 0),
       modelAutoCompactTokenLimit: Number(current.modelAutoCompactTokenLimit || 0),
       providerContextCacheMode: current.providerContextCacheMode || 'auto',
+      mcpToolLoadingMode: current.mcpToolLoadingMode || 'deferred',
+      mcpToolAutoThresholdPercent: Number(current.mcpToolAutoThresholdPercent ?? 10),
+      skillCatalogBudgetPercent: Number(current.skillCatalogBudgetPercent ?? 1),
+      postCompactSkillPerItemMaxTokens: Number(current.postCompactSkillPerItemMaxTokens || 5000),
+      postCompactSkillTotalMaxTokens: Number(current.postCompactSkillTotalMaxTokens || 25000),
+      contextSourceCatalogBudgetPercent: Number(current.contextSourceCatalogBudgetPercent ?? 1),
+      contextSourceHydrationBudgetPercent: Number(current.contextSourceHydrationBudgetPercent ?? 10),
+      postCompactSourcePerItemMaxTokens: Number(current.postCompactSourcePerItemMaxTokens || 5000),
+      postCompactSourceTotalMaxTokens: Number(current.postCompactSourceTotalMaxTokens || 25000),
       typedMemoryDeliveryMaxDocuments: Number(current.typedMemoryDeliveryMaxDocuments || 5),
       typedMemoryDeliveryMaxTokens: Number(current.typedMemoryDeliveryMaxTokens || 5000),
       sessionMemoryCompactMaxSectionTokens: Number(current.sessionMemoryCompactMaxSectionTokens || 2000),
@@ -364,6 +478,34 @@ async function loadSettings() {
       timeBasedMicrocompactEnabled: current.timeBasedMicrocompactEnabled === true,
       timeBasedMicrocompactGapMinutes: Number(current.timeBasedMicrocompactGapMinutes || 60),
       timeBasedMicrocompactKeepRecent: Number(current.timeBasedMicrocompactKeepRecent || 5),
+      agentCommunicationV2Enabled: current.agentCommunicationV2Enabled !== false,
+      agentRunnerStartTimeoutMs: Number(current.agentRunnerStartTimeoutMs || 60000),
+      agentAckTimeoutMs: Number(current.agentAckTimeoutMs || 30000),
+      agentHeartbeatIntervalMs: Number(current.agentHeartbeatIntervalMs || 20000),
+      agentHeartbeatLostTimeoutMs: Number(current.agentHeartbeatLostTimeoutMs || 90000),
+      agentLeaseTtlMs: Number(current.agentLeaseTtlMs || 120000),
+      agentMaxAttempts: Number(current.agentMaxAttempts || 3),
+      agentMaxParallelPerProject: Number(current.agentMaxParallelPerProject || 2),
+      agentMaxParallelGlobal: Number(current.agentMaxParallelGlobal || 6),
+      adaptiveAgentLoopEnabled: current.adaptiveAgentLoopEnabled !== false,
+      dynamicAgentBudgetEnabled: current.dynamicAgentBudgetEnabled !== false,
+      agentToolCallBudget: Number(current.agentToolCallBudget || 6),
+      agentMaxModelTurns: Number(current.agentMaxModelTurns || 8),
+      agentLoopNoProgressThreshold: Number(current.agentLoopNoProgressThreshold || 3),
+      agentToolBatchSize: Number(current.agentToolBatchSize || 2),
+      agentReadOnlyParallelism: Number(current.agentReadOnlyParallelism || 2),
+      codeIntelligenceEnabled: current.codeIntelligenceEnabled !== false,
+      codeIndexStartPolicy: current.codeIndexStartPolicy || 'on_demand',
+      codeIndexMaxConcurrentProjects: Number(current.codeIndexMaxConcurrentProjects || 1),
+      languageServerManagedInstallEnabled: current.languageServerManagedInstallEnabled !== false,
+      providerNativeToolsMode: current.providerNativeToolsMode || 'auto',
+      skillForkEnabled: current.skillForkEnabled !== false,
+      webToolsEnabled: current.webToolsEnabled !== false,
+      webFetchBrowserFallbackEnabled: current.webFetchBrowserFallbackEnabled !== false,
+      webSearchProviderOrder: Array.isArray(current.webSearchProviderOrder) ? current.webSearchProviderOrder : ['mcp', 'brave', 'bing', 'google'],
+      searchMcpUrl: '', searchMcpToken: '', braveSearchApiKey: '', bingSearchApiKey: '', googleCseApiKey: '', googleCseId: '',
+      notebookToolsEnabled: current.notebookToolsEnabled !== false,
+      ccStyleExecutionDisplayEnabled: current.ccStyleExecutionDisplayEnabled !== false,
     }
     capacity.value = capacityData
     capabilities.value = capabilityData.entries || []
@@ -392,6 +534,8 @@ async function saveSettings() {
     }
   }
   if (Number(value.sessionMemoryCompactMaxTotalTokens) < Number(value.sessionMemoryCompactMaxSectionTokens)) return toast.error('总记忆预算不能小于单章节预算')
+  if (Number(value.postCompactSkillTotalMaxTokens) < Number(value.postCompactSkillPerItemMaxTokens)) return toast.error('Skill 恢复总预算不能小于单个 Skill 预算')
+  if (Number(value.postCompactSourceTotalMaxTokens) < Number(value.postCompactSourcePerItemMaxTokens)) return toast.error('来源恢复总预算不能小于单个来源预算')
   saving.value = true
   try {
     await requestJson('/api/orchestrator/config', {
@@ -576,6 +720,33 @@ onMounted(() => loadOverview(false))
           </p>
           <MicroCompactStatusPanel v-if="isSessionDetail && microCompactState?.applicable" :state="microCompactState" />
           <PostCompactRecoveryPanel v-if="isSessionDetail" :usage="postCompactUsage" />
+          <section v-if="isSessionDetail && contextSourceContinuity" class="source-continuity-panel">
+            <h4>上下文来源连续性</h4>
+            <div class="summary-strip">
+              <span><small>来源目录</small><strong>{{ formatNumber(contextSourceContinuity.budget?.catalogUsedTokens) }} / {{ formatNumber(contextSourceContinuity.budget?.catalogTargetTokens) }}</strong></span>
+              <span><small>正文注入</small><strong>{{ formatNumber(contextSourceContinuity.budget?.hydrationUsedTokens) }} / {{ formatNumber(contextSourceContinuity.budget?.hydrationTargetTokens) }}</strong></span>
+              <span><small>知识 / 共享文件</small><strong>{{ formatNumber(contextSourceContinuity.budget?.knowledgeTokens) }} / {{ formatNumber(contextSourceContinuity.budget?.sharedFileTokens) }}</strong></span>
+              <span><small>恢复 / 安全余量</small><strong>{{ formatNumber(contextSourceContinuity.budget?.restoredTokens) }} / {{ formatNumber(contextSourceContinuity.budget?.remainingSafeTokens) }}</strong></span>
+            </div>
+            <p v-if="contextSourceContinuity.latestRestore" class="compact-history">最近恢复：{{ contextSourceContinuity.latestRestore.status }} · {{ contextSourceContinuity.latestRestore.restored?.length || 0 }} 个来源 · 跳过 {{ contextSourceContinuity.latestRestore.dropped?.length || 0 }} 个</p>
+            <div class="source-receipts">
+              <span v-for="receipt in (contextSourceContinuity.receipts || []).slice(0, 12)" :key="receipt.receiptId">
+                {{ receipt.sourceKind === 'knowledge' ? '知识' : '共享文件' }} · {{ receipt.documentName }} · {{ receipt.state }}<template v-if="receipt.promotionEvidence?.length"> · 已准入 {{ receipt.promotionEvidence.length }} 条（{{ receipt.promotionEvidence[0].memoryId }} · {{ String(receipt.promotionEvidence[0].admissionChecksum || '').slice(0, 12) }}）</template><template v-if="receipt.truncated"> · 已截断</template>
+              </span>
+            </div>
+            <div v-if="sourceMaintenanceIdentity" class="source-maintenance">
+              <div><strong>历史来源收口</strong><small>仅显式预览/确认后迁移；不会删除知识、共享文件或正式长期记忆。</small></div>
+              <button class="text-btn" :disabled="sourceMaintenanceLoading" @click="previewSourceMaintenance">{{ sourceMaintenanceLoading ? '处理中' : '预览' }}</button>
+              <template v-if="sourceMaintenancePreview">
+                <span>影响 {{ sourceMaintenancePreview.affectedRecordCount || 0 }} 处 · 预计移除 {{ formatNumber(sourceMaintenancePreview.estimatedRemovedBodyTokens) }} tokens · Promotion {{ sourceMaintenancePreview.promotionBackfillCount || 0 }} · 未确认 {{ sourceMaintenancePreview.unresolvedCount || 0 }}</span>
+                <button class="text-btn" :disabled="sourceMaintenanceLoading" @click="applySourceMaintenance">确认执行</button>
+              </template>
+              <template v-if="sourceMaintenanceJob?.jobId && sourceMaintenanceJob.status !== 'rolled_back'">
+                <span>维护任务 {{ sourceMaintenanceJob.jobId }}</span>
+                <button class="text-btn" :disabled="sourceMaintenanceLoading" @click="rollbackSourceMaintenance">回滚</button>
+              </template>
+            </div>
+          </section>
           <p v-if="isSessionDetail && providerContextCacheState?.applicable" class="compact-history">
             Context Engine {{ providerContextCacheState.contextEngineVersion === 2 ? 'V2' : '兼容 V1' }}：<strong>{{ providerContextCacheState.status === 'recorded' ? providerCacheModeLabel(providerContextCacheState) : '尚未产生请求回执' }}</strong>
             · 能力 {{ providerCapabilityLabel(providerContextCacheState) }}
@@ -650,7 +821,16 @@ onMounted(() => loadOverview(false))
         <div class="field-grid">
           <label><span>上下文窗口</span><input v-model.number="config.modelContextWindow" type="number" min="0" step="1000" :disabled="config.memoryContextPreset !== 'custom'" /></label>
           <label><span>自动压缩阈值</span><input v-model.number="config.modelAutoCompactTokenLimit" type="number" min="0" step="1000" :disabled="config.memoryContextPreset !== 'custom'" /></label>
-          <label><span>Provider 上下文缓存</span><select v-model="config.providerContextCacheMode"><option value="auto">自动选择</option><option value="native">优先原生</option><option value="controlled">CCM 受控投影</option><option value="off">关闭</option></select></label>
+          <label><span>Provider/CCM 上下文处理</span><select v-model="config.providerContextCacheMode"><option value="auto">自动选择</option><option value="native">优先 Provider 原生编辑</option><option value="controlled">CCM 受控压缩投影</option><option value="off">关闭 Provider 适配</option></select></label>
+          <label><span>MCP Schema 加载</span><select v-model="config.mcpToolLoadingMode"><option value="deferred">延迟加载（CC 默认）</option><option value="auto">按容量自动</option><option value="inline">全部内联</option></select></label>
+          <label><span>MCP 自动阈值（%）</span><input v-model.number="config.mcpToolAutoThresholdPercent" type="number" min="0" max="100" step="1" /></label>
+          <label><span>Skill 目录预算（%）</span><input v-model.number="config.skillCatalogBudgetPercent" type="number" min="0.1" max="10" step="0.1" /></label>
+          <label><span>单个 Skill 恢复预算</span><input v-model.number="config.postCompactSkillPerItemMaxTokens" type="number" min="500" max="20000" step="500" /></label>
+          <label><span>Skill 恢复总预算</span><input v-model.number="config.postCompactSkillTotalMaxTokens" type="number" min="1000" max="100000" step="1000" /></label>
+          <label><span>来源目录预算（%）</span><input v-model.number="config.contextSourceCatalogBudgetPercent" type="number" min="0.1" max="10" step="0.1" /></label>
+          <label><span>来源正文预算（%）</span><input v-model.number="config.contextSourceHydrationBudgetPercent" type="number" min="1" max="50" step="1" /></label>
+          <label><span>单个来源恢复预算</span><input v-model.number="config.postCompactSourcePerItemMaxTokens" type="number" min="500" max="20000" step="500" /></label>
+          <label><span>来源恢复总预算</span><input v-model.number="config.postCompactSourceTotalMaxTokens" type="number" min="1000" max="100000" step="1000" /></label>
           <label><span>每轮记忆文件</span><input v-model.number="config.typedMemoryDeliveryMaxDocuments" type="number" min="1" max="5" /></label>
           <label><span>记忆注入预算</span><input v-model.number="config.typedMemoryDeliveryMaxTokens" type="number" min="500" max="20000" step="100" /></label>
           <label><span>单章节预算</span><input v-model.number="config.sessionMemoryCompactMaxSectionTokens" type="number" min="250" max="20000" step="100" /></label>
@@ -663,6 +843,59 @@ onMounted(() => loadOverview(false))
         <label class="toggle-row"><input v-model="config.groupSessionAutoPruneEnabled" type="checkbox" /><span>自动清理过期归档会话</span></label>
         <label class="toggle-row"><input v-model="config.timeBasedMicrocompactEnabled" type="checkbox" /><span>启用旧工具结果空闲整理（Time-based Tool Result Microcompact）</span></label>
         <div v-if="capacity" class="runtime-strip"><span>摘要方式 <strong>模型</strong></span><span>上下文缓存 <strong>{{ config.providerContextCacheMode === 'native' ? '优先原生' : config.providerContextCacheMode === 'controlled' ? 'CCM 受控' : config.providerContextCacheMode === 'off' ? '关闭' : '自动' }}</strong></span><span>模型窗口 <strong>{{ formatNumber(capacity.capacity?.contextWindow) }}</strong></span><span>有效窗口 <strong>{{ formatNumber(capacity.capacity?.effectiveContextWindow) }}</strong></span><span>当前触发线 <strong>{{ formatNumber(capacity.effectiveAutoCompactThreshold) }}</strong></span></div>
+      </section>
+
+      <section class="settings-section">
+        <div class="section-head"><div><span class="eyebrow">CC-LEVEL TOOLS</span><h3>代码智能与原生工具</h3></div></div>
+        <div class="field-grid">
+          <label><span>索引启动策略</span><select v-model="config.codeIndexStartPolicy"><option value="on_demand">按需启动</option><option value="manual">仅手动</option><option value="startup">启动时建立</option></select></label>
+          <label><span>并行索引项目</span><input v-model.number="config.codeIndexMaxConcurrentProjects" type="number" min="1" max="8" /></label>
+          <label><span>Provider 原生工具</span><select v-model="config.providerNativeToolsMode"><option value="auto">自动探测与回退</option><option value="native">优先原生</option><option value="json">仅 CCM JSON Loop</option></select></label>
+          <label><span>Web Search Provider 顺序</span><input :value="config.webSearchProviderOrder.join(', ')" @change="config.webSearchProviderOrder = $event.target.value.split(',').map(item => item.trim()).filter(Boolean)" /></label>
+          <label><span>Search MCP HTTPS 地址</span><input v-model.trim="config.searchMcpUrl" type="url" :placeholder="webSearchProvidersConfigured.mcp ? '已配置；留空保持原值' : 'https://search.example/api'" /></label>
+          <label><span>Search MCP Token</span><input v-model.trim="config.searchMcpToken" type="password" :placeholder="webSearchProvidersConfigured.mcp ? '已安全保存；留空保持' : '未配置'" autocomplete="new-password" /></label>
+          <label><span>Brave Search Key</span><input v-model.trim="config.braveSearchApiKey" type="password" :placeholder="webSearchProvidersConfigured.brave ? '已安全保存；留空保持' : '未配置'" autocomplete="new-password" /></label>
+          <label><span>Bing Search Key</span><input v-model.trim="config.bingSearchApiKey" type="password" :placeholder="webSearchProvidersConfigured.bing ? '已安全保存；留空保持' : '未配置'" autocomplete="new-password" /></label>
+          <label><span>Google CSE Key</span><input v-model.trim="config.googleCseApiKey" type="password" :placeholder="webSearchProvidersConfigured.google ? '已安全保存；留空保持' : '未配置'" autocomplete="new-password" /></label>
+          <label><span>Google CSE ID</span><input v-model.trim="config.googleCseId" type="password" :placeholder="webSearchProvidersConfigured.google ? '已安全保存；留空保持' : '未配置'" autocomplete="new-password" /></label>
+        </div>
+        <label class="toggle-row"><input v-model="config.codeIntelligenceEnabled" type="checkbox" /><span>启用LSP与增量代码索引</span></label>
+        <label class="toggle-row"><input v-model="config.languageServerManagedInstallEnabled" type="checkbox" /><span>允许管理员预览并确认受管语言服务安装</span></label>
+        <label class="toggle-row"><input v-model="config.skillForkEnabled" type="checkbox" /><span>启用 Skill context: fork 隔离执行</span></label>
+        <label class="toggle-row"><input v-model="config.webToolsEnabled" type="checkbox" /><span>启用安全公开Web工具</span></label>
+        <label class="toggle-row"><input v-model="config.webFetchBrowserFallbackEnabled" type="checkbox" /><span>允许无Cookie临时浏览器渲染JS壳页面</span></label>
+        <label class="toggle-row"><input v-model="config.notebookToolsEnabled" type="checkbox" /><span>启用Notebook结构化检查与项目子Agent受管执行</span></label>
+        <label class="toggle-row"><input v-model="config.ccStyleExecutionDisplayEnabled" type="checkbox" /><span>启用 CC 风格用户可见执行流（全局/项目/群聊统一）</span></label>
+        <p class="compact-history">其他语言服务不会静默下载；搜索没有真实Provider时不注册；Notebook写入与执行必须绑定正式WorkItem、attempt和lease。</p>
+      </section>
+
+      <section class="settings-section">
+        <div class="section-head"><div><span class="eyebrow">MAIN AGENT LOOP</span><h3>主 Agent 自适应续环</h3></div></div>
+        <div class="field-grid">
+          <label><span>分段工具调用数</span><input v-model.number="config.agentToolCallBudget" type="number" min="1" max="64" step="1" /><small>自适应模式下只生成续环统计，不终止任务</small></label>
+          <label><span>分段模型轮次</span><input v-model.number="config.agentMaxModelTurns" type="number" min="1" max="32" step="1" /><small>自适应模式下到达后重置分段计数</small></label>
+          <label><span>无进展熔断阈值</span><input v-model.number="config.agentLoopNoProgressThreshold" type="number" min="2" max="10" step="1" /></label>
+          <label><span>每轮工具批量</span><input v-model.number="config.agentToolBatchSize" type="number" min="1" max="8" step="1" /></label>
+          <label><span>只读并行度</span><input v-model.number="config.agentReadOnlyParallelism" type="number" min="1" max="8" step="1" /></label>
+        </div>
+        <label class="toggle-row"><input v-model="config.adaptiveAgentLoopEnabled" type="checkbox" /><span>有新进展就继续，不用固定总轮数结束项目/群聊主 Agent</span></label>
+        <p class="compact-history">关闭后进入旧版 bounded 兼容模式，分段工具调用数和模型轮次会重新成为硬上限。无论哪种模式，上下文、权限、取消、重复失败和副作用安全门始终有效。</p>
+      </section>
+
+      <section class="settings-section">
+        <div class="section-head"><div><span class="eyebrow">AGENT COMMUNICATION V2</span><h3>第三方 Agent 通信与租约</h3></div></div>
+        <div class="field-grid">
+          <label><span>Runner 启动超时（ms）</span><input v-model.number="config.agentRunnerStartTimeoutMs" type="number" min="5000" max="300000" step="1000" /></label>
+          <label><span>ACK 超时（ms）</span><input v-model.number="config.agentAckTimeoutMs" type="number" min="5000" max="120000" step="1000" /></label>
+          <label><span>系统心跳间隔（ms）</span><input v-model.number="config.agentHeartbeatIntervalMs" type="number" min="5000" max="60000" step="1000" /></label>
+          <label><span>失联判定（ms）</span><input v-model.number="config.agentHeartbeatLostTimeoutMs" type="number" min="15000" max="600000" step="1000" /></label>
+          <label><span>租约时长（ms）</span><input v-model.number="config.agentLeaseTtlMs" type="number" min="15000" max="900000" step="1000" /></label>
+          <label><span>最大执行轮次</span><input v-model.number="config.agentMaxAttempts" type="number" min="1" max="3" step="1" /></label>
+          <label><span>单项目并发</span><input v-model.number="config.agentMaxParallelPerProject" type="number" min="1" max="16" step="1" /></label>
+          <label><span>全局并发</span><input v-model.number="config.agentMaxParallelGlobal" type="number" min="1" max="64" step="1" /></label>
+        </div>
+        <label class="toggle-row"><input v-model="config.agentCommunicationV2Enabled" type="checkbox" /><span>启用 Dispatch / ACK / Progress / Result / Terminal 证据链</span></label>
+        <p class="compact-history">第三方 Agent 只能提交 ACK、进度和 Result；Terminal 仅由 CCM 在正式验收后生成。项目/群聊只能降低并发上限，不能突破全局值。</p>
       </section>
 
       <section class="settings-section">
@@ -747,6 +980,10 @@ button:disabled { opacity: .55; cursor: not-allowed; }
 .compact-circuit-alert { max-width: 720px; margin: -6px 0 16px; padding: 9px 11px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; border-left: 3px solid #dc2626; background: color-mix(in srgb, var(--surface, #fff) 92%, #ef4444 8%); color: #b91c1c; font-size: 12px; }
 .compact-circuit-alert .text-btn { margin-left: auto; }
 .continuity-state { max-width: 720px; margin: 0 0 14px; padding: 9px 11px; border-left: 3px solid var(--border-strong); background: var(--surface-subtle); color: var(--text-secondary); font-size: 12px; }
+.source-continuity-panel{display:grid;gap:9px;margin:10px 0;padding:12px;border:1px solid var(--border-color);border-radius:10px;background:var(--surface-subtle)}
+.source-continuity-panel h4{margin:0;font-size:13px;color:var(--text-primary)}
+.source-receipts{display:flex;flex-wrap:wrap;gap:6px}.source-receipts span{padding:5px 8px;border:1px solid var(--border-color);border-radius:999px;color:var(--text-secondary);font-size:10px}
+.source-maintenance{display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding-top:8px;border-top:1px dashed var(--border-color);color:var(--text-secondary);font-size:11px}.source-maintenance>div{display:grid;gap:2px;margin-right:auto}.source-maintenance strong{color:var(--text-primary);font-size:12px}.source-maintenance small{font-size:10px}
 .alert-list { margin-bottom: 14px; }.alert-list p { margin: 0 0 6px; padding: 9px 11px; display: flex; gap: 8px; align-items: center; background: var(--warning-soft); color: var(--accent-yellow); border-left: 3px solid var(--accent-yellow); font-size: 12px; }
 .search-box { max-width: 420px; height: 38px; padding: 0 11px; display: flex; align-items: center; gap: 8px; border: 1px solid var(--border-color); background: var(--control-bg); }.search-box input { width: 100%; border: 0; outline: 0; background: transparent; }
 .memory-section { margin-top: 24px; }.memory-section h4 { margin: 0 0 7px; font-size: 13px; }.memory-section h4 span { color: #7b8781; font-weight: 500; }

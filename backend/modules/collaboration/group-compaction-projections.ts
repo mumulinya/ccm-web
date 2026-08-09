@@ -350,6 +350,7 @@ export function mergeSafeConversationSummary(previous: ConversationSummary, fall
   return {
     primaryRequest: fallback.primaryRequest || safeModel.primaryRequest || previous.primaryRequest,
     userMessages: mergeUnique(previous.userMessages, fallback.userMessages, 40, 900),
+    hypotheses: mergeUnique(previous.hypotheses, [...grounded(safeModel.hypotheses), ...fallback.hypotheses], 30, 700),
     keyConcepts: mergeUnique(previous.keyConcepts, [...grounded(safeModel.keyConcepts), ...fallback.keyConcepts], 24, 400),
     filesAndCode: mergeUnique(previous.filesAndCode, [...grounded(safeModel.filesAndCode), ...fallback.filesAndCode], 40, 500),
     errorsAndFixes: mergeUnique(previous.errorsAndFixes, [...grounded(safeModel.errorsAndFixes), ...fallback.errorsAndFixes], 30, 700),
@@ -366,7 +367,7 @@ export function mergeSafeConversationSummary(previous: ConversationSummary, fall
 export function validateSummaryPreservesFallback(summary: ConversationSummary, fallback: ConversationSummary) {
   const missing: string[] = [];
   const arrayKeys: Array<keyof ConversationSummary> = [
-    "userMessages", "filesAndCode", "errorsAndFixes", "decisions", "completedWork", "pendingTasks", "taskStates",
+    "userMessages", "hypotheses", "filesAndCode", "errorsAndFixes", "decisions", "completedWork", "pendingTasks", "taskStates",
   ];
   for (const key of arrayKeys) {
     const actual = new Set((summary[key] as string[] || []).map(item => String(item)));
@@ -533,6 +534,28 @@ export function evaluateGroupMemorySummaryQuality(
     severity: "high",
     detail: sweepingCompletionClaims.length === 0 ? "没有发现未由原始消息支撑的全量完成/上线类结论。" : "摘要包含原始消息无法支撑的全量完成/上线类结论。",
     evidence: sweepingCompletionClaims,
+  });
+
+  const normalizedFactClaims = [
+    ...normalizedSummary.decisions,
+    ...normalizedSummary.completedWork,
+  ];
+  const promotedHypotheses = normalizedFallback.hypotheses
+    .filter(hypothesis => normalizedFactClaims.some(claim => {
+      const hypothesisText = compactText(hypothesis, 1200).toLowerCase();
+      const claimText = compactText(claim, 1200).toLowerCase();
+      return !!hypothesisText && (claimText.includes(hypothesisText) || hypothesisText.includes(claimText));
+    }))
+    .slice(0, 12);
+  addQualityCheck(checks, {
+    id: "hypotheses_not_promoted",
+    label: "未验证假设没有被提升为事实",
+    pass: promotedHypotheses.length === 0,
+    severity: "fatal",
+    detail: promotedHypotheses.length === 0
+      ? "待验证假设仍保留在独立 hypothesis 状态。"
+      : "摘要把待验证假设写入了决定或完成态。",
+    evidence: promotedHypotheses,
   });
 
   const sourceHasText = (messages || []).some(message => messageContent(message));
@@ -1994,6 +2017,13 @@ export function buildGroupApiMicrocompactNativeApplyPlan(apiEditPlan: any = {}, 
     || ""
   ).trim();
   const groupSessionId = String(options.groupSessionId || options.group_session_id || sessionBinding?.group_session_id || sessionBinding?.groupSessionId || "").trim();
+  const scope = String(options.scope || (options.groupId || options.group_id ? "group" : "other")).trim().toLowerCase() || "other";
+  const scopeId = String(options.scopeId || options.scope_id || options.groupId || options.group_id || apiEditPlan?.groupId || apiEditPlan?.group_id || "").trim();
+  const sessionId = String(options.sessionId || options.session_id || groupSessionId || "default").trim() || "default";
+  const generation = Math.max(0, Math.floor(Number(options.generation || 0)));
+  const boundaryGeneration = Math.max(0, Math.floor(Number(options.boundaryGeneration || options.boundary_generation || 0)));
+  const model = String(options.model || "").trim();
+  const endpoint = String(options.apiUrl || options.api_url || options.endpoint || "").trim();
   const executionId = String(options.executionId || options.execution_id || sessionBinding?.execution_id || sessionBinding?.executionId || "").trim();
   const runnerRequestId = String(options.runnerRequestId || options.runner_request_id || options.externalRunnerRequestId || options.external_runner_request_id || "").trim();
   const memoryContextSnapshotId = String(options.memoryContextSnapshotId || options.memory_context_snapshot_id || "").trim();
@@ -2030,6 +2060,23 @@ export function buildGroupApiMicrocompactNativeApplyPlan(apiEditPlan: any = {}, 
     groupSessionId,
     group_session_id: groupSessionId,
     targetProject: String(options.targetProject || options.target_project || apiEditPlan?.targetProject || apiEditPlan?.target_project || ""),
+    contextIdentity: {
+      schema: "ccm-provider-native-microcompact-context-identity-v2",
+      version: 2,
+      scope,
+      scopeId,
+      sessionId,
+      generation,
+      boundaryGeneration,
+      provider,
+      model,
+      endpointFingerprint: endpoint ? crypto.createHash("sha256").update(endpoint).digest("hex").slice(0, 40) : "",
+    },
+    scope,
+    scopeId,
+    sessionId,
+    generation,
+    boundaryGeneration,
     apiEditPlanChecksum: String(apiEditPlan?.planChecksum || apiEditPlan?.plan_checksum || ""),
     executor: {
       agentType,
@@ -2183,6 +2230,7 @@ export function createEmptyConversationSummary(): ConversationSummary {
   return {
     primaryRequest: "",
     userMessages: [],
+    hypotheses: [],
     keyConcepts: [],
     filesAndCode: [],
     errorsAndFixes: [],
@@ -2787,8 +2835,10 @@ export function verifyGroupPostCompactInvokedSkillAttachmentReceipt(receipt: any
   if (String(receipt?.scope_id || "") !== `${String(receipt?.group_id || "")}::${String(receipt?.group_session_id || "")}`) issues.push("post_compact_invoked_skill_attachment_scope_invalid");
   if (receipt?.exact_session_only !== true || receipt?.cross_session_fallback_allowed !== false) issues.push("post_compact_invoked_skill_attachment_isolation_invalid");
   if (receipt?.body_free !== true) issues.push("post_compact_invoked_skill_attachment_receipt_body_policy_invalid");
-  if (Number(receipt?.single_skill_max_tokens || 0) !== GROUP_POST_COMPACT_INVOKED_SKILL_MAX_TOKENS) issues.push("post_compact_invoked_skill_attachment_single_budget_invalid");
-  if (Number(receipt?.total_max_tokens || 0) !== GROUP_POST_COMPACT_INVOKED_SKILLS_TOTAL_MAX_TOKENS) issues.push("post_compact_invoked_skill_attachment_total_budget_invalid");
+  const singleBudget = Number(receipt?.single_skill_max_tokens || 0);
+  const totalBudget = Number(receipt?.total_max_tokens || 0);
+  if (singleBudget < 500 || singleBudget > 20_000) issues.push("post_compact_invoked_skill_attachment_single_budget_invalid");
+  if (totalBudget < singleBudget || totalBudget > 100_000) issues.push("post_compact_invoked_skill_attachment_total_budget_invalid");
   if (Number(receipt?.attached_token_count || 0) > Number(receipt?.total_max_tokens || 0)) issues.push("post_compact_invoked_skill_attachment_budget_exceeded");
   const forbiddenKeys = new Set(["body", "content", "prompt", "markdown", "attachments", "attachment_bodies"]);
   const visit = (value: any): boolean => {
@@ -2823,8 +2873,8 @@ export function buildGroupPostCompactInvokedSkillAttachmentProjection(messages: 
   const groupId = String(options.groupId || options.group_id || "").trim();
   const groupSessionId = String(options.groupSessionId || options.group_session_id || "").trim();
   if (!groupId || !groupSessionId.startsWith("gcs_")) throw new Error("exact_group_session_required_for_post_compact_invoked_skill_attachment");
-  const singleSkillMaxTokens = Math.max(1, Math.min(GROUP_POST_COMPACT_INVOKED_SKILL_MAX_TOKENS, Number(options.singleSkillMaxTokens || options.single_skill_max_tokens || GROUP_POST_COMPACT_INVOKED_SKILL_MAX_TOKENS)));
-  const totalMaxTokens = Math.max(1, Math.min(GROUP_POST_COMPACT_INVOKED_SKILLS_TOTAL_MAX_TOKENS, Number(options.totalMaxTokens || options.total_max_tokens || GROUP_POST_COMPACT_INVOKED_SKILLS_TOTAL_MAX_TOKENS)));
+  const singleSkillMaxTokens = Math.max(500, Math.min(20_000, Number(options.singleSkillMaxTokens || options.single_skill_max_tokens || GROUP_POST_COMPACT_INVOKED_SKILL_MAX_TOKENS)));
+  const totalMaxTokens = Math.max(singleSkillMaxTokens, Math.min(100_000, Number(options.totalMaxTokens || options.total_max_tokens || GROUP_POST_COMPACT_INVOKED_SKILLS_TOTAL_MAX_TOKENS)));
   const catalog = Array.isArray(options.skillCatalog || options.skill_catalog) ? (options.skillCatalog || options.skill_catalog) : loadSkills();
   const invocations = collectExactSessionInvokedSkills(messages);
   const attachments: any[] = [];
@@ -3733,8 +3783,8 @@ export function buildPostCompactReinjectionPlan(messages: any[], microCompact: a
       skills: skillBudget,
       verification: verificationBudget,
       taskStatuses: taskStatusBudget,
-      invokedSkillSingleTokens: GROUP_POST_COMPACT_INVOKED_SKILL_MAX_TOKENS,
-      invokedSkillsTotalTokens: GROUP_POST_COMPACT_INVOKED_SKILLS_TOTAL_MAX_TOKENS,
+      invokedSkillSingleTokens: invokedSkillAttachmentProjection?.receipt?.single_skill_max_tokens || GROUP_POST_COMPACT_INVOKED_SKILL_MAX_TOKENS,
+      invokedSkillsTotalTokens: invokedSkillAttachmentProjection?.receipt?.total_max_tokens || GROUP_POST_COMPACT_INVOKED_SKILLS_TOTAL_MAX_TOKENS,
       currentPlanTokens: GROUP_POST_COMPACT_PLAN_MAX_TOKENS,
       dynamicContextTokens: GROUP_POST_COMPACT_DYNAMIC_CONTEXT_MAX_TOKENS,
     },
@@ -4097,6 +4147,8 @@ export function buildGroupPartialCompactSidecarSegment(input: any) {
       input.memory?.compaction?.postCompactReinject?.dynamicContextDeltaAttachment,
       input.memory?.compactBoundary?.post_compact_restore?.reinjectionPlan?.dynamicContextDeltaAttachment,
     ].filter(Boolean),
+    invokedSkillSingleMaxTokens: input.config?.postCompactSkillPerItemMaxTokens || input.config?.post_compact_skill_per_item_max_tokens,
+    invokedSkillsTotalMaxTokens: input.config?.postCompactSkillTotalMaxTokens || input.config?.post_compact_skill_total_max_tokens,
     now: input.now,
   });
   const sourceTokens = messagesToSummarize.reduce((sum: number, message: any) => sum + estimateGroupMessageTokens(message), 0);
@@ -4210,6 +4262,7 @@ export function memorySeed(memory: any) {
 export function buildDeterministicConversationSummary(messages: any[], memory: any, previous: any = {}): ConversationSummary {
   const base = { ...createEmptyConversationSummary(), ...(previous || {}) } as ConversationSummary;
   const users: string[] = [];
+  const hypotheses: string[] = [];
   const files: string[] = [];
   const errors: string[] = [];
   const decisions: string[] = [];
@@ -4226,6 +4279,22 @@ export function buildDeterministicConversationSummary(messages: any[], memory: a
     const id = messageIdentity(message, index);
     const actor = message?.role === "user" ? `用户 -> ${message?.target || "all"}` : message?.agent || message?.role || "Agent";
     if (message?.role === "user") users.push(`#${id} ${compactText(content, 900)}`);
+    const reasoningSources = [
+      message?.reasoning,
+      message?.taskReasoning?.reasoning,
+      message?.task_reasoning?.reasoning,
+      message?.decision_summary?.reasoning,
+      message?.receipt,
+      message?.delivery_summary,
+    ];
+    for (const reasoning of reasoningSources) {
+      hypotheses.push(...stringArray(
+        reasoning?.assumptionsToVerify
+          || reasoning?.assumptions_to_verify
+          || reasoning?.hypotheses,
+        20,
+      ).map(item => `#${id} ${compactText(item, 650)}`));
+    }
     files.push(...extractFiles(message));
     runtimeFacts.push(...extractRuntimeSkillFacts(message));
     const structuredStatus = String(message?.receipt?.status || message?.delivery_summary?.status || message?.status || "").toLowerCase();
@@ -4254,6 +4323,7 @@ export function buildDeterministicConversationSummary(messages: any[], memory: a
   return {
     primaryRequest: compactText(messageContent(latestUser) || base.primaryRequest || memory?.goal, 1200),
     userMessages: mergeUnique(base.userMessages, users, 40, 900),
+    hypotheses: mergeUnique(base.hypotheses, hypotheses, 30, 700),
     keyConcepts: mergeUnique(base.keyConcepts, runtimeFacts, 24, 400),
     filesAndCode: mergeUnique(base.filesAndCode, files, 40, 500),
     errorsAndFixes: mergeUnique(base.errorsAndFixes, errors, 30, 700),
@@ -4272,6 +4342,7 @@ export function normalizeSummary(value: any, fallback: ConversationSummary): Con
   return {
     primaryRequest: compactText(raw.primaryRequest || raw.primary_request || fallback.primaryRequest, 1200),
     userMessages: mergeUnique([], raw.userMessages || raw.user_messages || fallback.userMessages, 40, 900),
+    hypotheses: mergeUnique([], raw.hypotheses || raw.assumptionsToVerify || raw.assumptions_to_verify || fallback.hypotheses, 30, 700),
     keyConcepts: mergeUnique([], raw.keyConcepts || raw.key_concepts || fallback.keyConcepts, 24, 400),
     filesAndCode: mergeUnique([], raw.filesAndCode || raw.files_and_code || fallback.filesAndCode, 40, 500),
     errorsAndFixes: mergeUnique([], raw.errorsAndFixes || raw.errors_and_fixes || fallback.errorsAndFixes, 30, 700),
@@ -4298,6 +4369,7 @@ export function renderConversationSummary(summary: any, maxChars = 14_000) {
     for (const item of items.slice(-limit)) lines.push(`  - ${item}`);
   };
   add("用户历史要求", normalized.userMessages, 14);
+  add("待验证假设（不得视为事实）", normalized.hypotheses, 10);
   add("关键概念/约束", normalized.keyConcepts, 10);
   add("文件与代码", normalized.filesAndCode, 12);
   add("错误与修复", normalized.errorsAndFixes, 10);

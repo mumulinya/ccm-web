@@ -22,6 +22,59 @@ export declare function defaultOrchestratorConfig(): {
     modelContextWindow: number;
     modelAutoCompactTokenLimit: number;
     providerContextCacheMode: string;
+    codeIntelligenceEnabled: boolean;
+    codeIndexStartPolicy: string;
+    codeIndexMaxConcurrentProjects: number;
+    languageServerManagedInstallEnabled: boolean;
+    providerNativeToolsMode: string;
+    skillForkEnabled: boolean;
+    webToolsEnabled: boolean;
+    webFetchBrowserFallbackEnabled: boolean;
+    webSearchProviderOrder: string[];
+    searchMcpUrl: string;
+    searchMcpToken: string;
+    braveSearchApiKey: string;
+    bingSearchApiKey: string;
+    googleCseApiKey: string;
+    googleCseId: string;
+    notebookToolsEnabled: boolean;
+    ccStyleExecutionDisplayEnabled: boolean;
+    mcpToolLoadingMode: string;
+    mcpToolAutoThresholdPercent: number;
+    skillCatalogBudgetPercent: number;
+    postCompactSkillPerItemMaxTokens: number;
+    postCompactSkillTotalMaxTokens: number;
+    contextSourceCatalogBudgetPercent: number;
+    contextSourceHydrationBudgetPercent: number;
+    postCompactSourcePerItemMaxTokens: number;
+    postCompactSourceTotalMaxTokens: number;
+    agentCommunicationV2Enabled: boolean;
+    agentRunnerStartTimeoutMs: number;
+    agentAckTimeoutMs: number;
+    agentHeartbeatIntervalMs: number;
+    agentHeartbeatLostTimeoutMs: number;
+    agentLeaseTtlMs: number;
+    agentMaxAttempts: number;
+    agentMaxParallelPerProject: number;
+    agentMaxParallelGlobal: number;
+    testAgentPlannerFallbackMode: string;
+    testAgentIsolationMode: string;
+    testAgentReadonlyCapabilityInjection: boolean;
+    testAgentSurfaceAuditMode: string;
+    testAgentRuntimeFingerprintEnabled: boolean;
+    testAgentPostReviewSpotCheckMode: string;
+    dynamicAgentBudgetEnabled: boolean;
+    unifiedEvidenceEnabled: boolean;
+    strictEvidenceFreshnessEnabled: boolean;
+    deltaRepairEnabled: boolean;
+    operationRegistryEnabled: boolean;
+    taskEventReducerShadowWriteEnabled: boolean;
+    adaptiveAgentLoopEnabled: boolean;
+    agentLoopNoProgressThreshold: number;
+    agentToolBatchSize: number;
+    agentReadOnlyParallelism: number;
+    agentToolCallBudget: number;
+    agentMaxModelTurns: number;
     providerPromptCacheRetention: string;
     providerNativeCacheEnabled: boolean;
     providerNativeCacheFamily: string;
@@ -101,11 +154,163 @@ export declare function testUnifiedModelConnection(): Promise<{
         }[];
         falseNativeClaimsForbidden: boolean;
     };
+    providerCacheCapability: {
+        schema: string;
+        version: number;
+        identity: {
+            identityChecksum: string;
+            interfaceFingerprint: string;
+            interfaceProtocol: string;
+            cacheFamily: string;
+            model: string;
+            inferenceBackendKind: import("../../system/provider-cache-capability-registry").InferenceBackendKind;
+        };
+        status: import("../../system/provider-cache-capability-registry").ProviderCacheCapabilityStatus;
+        evidence: import("../../system/provider-cache-capability-registry").ProviderCacheCapabilityEvidenceV1;
+        latestAttempt: import("../../system/provider-cache-capability-registry").ProviderCacheCapabilityEvidenceV1;
+        expired: boolean;
+        contentStored: boolean;
+    };
+    providerNativeMicrocompactCapability: {
+        schema: string;
+        version: number;
+        identity: {
+            identityChecksum: string;
+            interfaceFingerprint: string;
+            interfaceProtocol: string;
+            cacheFamily: string;
+            model: string;
+            inferenceBackendKind: import("../../system/provider-cache-capability-registry").InferenceBackendKind;
+        };
+        status: "confirmed";
+        source: string;
+        evidence: any;
+        contentStored: boolean;
+        expired?: undefined;
+    } | {
+        schema: string;
+        version: number;
+        identity: {
+            identityChecksum: string;
+            interfaceFingerprint: string;
+            interfaceProtocol: string;
+            cacheFamily: string;
+            model: string;
+            inferenceBackendKind: import("../../system/provider-cache-capability-registry").InferenceBackendKind;
+        };
+        status: import("../../system/provider-native-microcompact-capability").ProviderNativeMicrocompactStatus;
+        source: any;
+        evidence: any;
+        expired: boolean;
+        contentStored: boolean;
+    };
+    capabilityProbe: {
+        success: any;
+        receipt: any;
+    };
     consumers: {
         ready: boolean;
         id: string;
         label: string;
     }[];
+} | {
+    success: boolean;
+    checkedAt: string;
+    latencyMs: number;
+    provider: string;
+    model: any;
+    message: string;
+    contextCacheAdapter: {
+        schema: string;
+        version: number;
+        active: {
+            schema: string;
+            version: number;
+            family: import("../../system/provider-context-cache-adapters").ProviderCacheFamily;
+            adapter: import("../../system/provider-context-cache-adapters").ProviderCacheAdapterKind;
+            providerNative: boolean;
+            providerManagedKvCache: boolean;
+            requestLayerOwned: boolean;
+            capabilitySource: string;
+            capabilityStatus: string;
+            capabilityEvidenceId: any;
+            capabilityEvidenceExpiresAt: any;
+            capabilityReason: any;
+            requestedMode: string;
+            supportsPromptCacheKey: boolean;
+            supportsPromptCacheRetention: boolean;
+            supportsImplicitCache: boolean;
+            supportsContextManagement: boolean;
+            supportsCacheReferenceEdits: boolean;
+            customCompatibleEndpoint: boolean;
+            safeToSendProviderFields: boolean;
+            forcedWithoutEvidence: boolean;
+            unsupportedEvidenceBlocksForce: boolean;
+        };
+        adapters: {
+            family: string;
+            mode: string;
+            fields: string[];
+            guarded: boolean;
+        }[];
+        falseNativeClaimsForbidden: boolean;
+    };
+    providerCacheCapability: {
+        schema: string;
+        version: number;
+        identity: {
+            identityChecksum: string;
+            interfaceFingerprint: string;
+            interfaceProtocol: string;
+            cacheFamily: string;
+            model: string;
+            inferenceBackendKind: import("../../system/provider-cache-capability-registry").InferenceBackendKind;
+        };
+        status: import("../../system/provider-cache-capability-registry").ProviderCacheCapabilityStatus;
+        evidence: import("../../system/provider-cache-capability-registry").ProviderCacheCapabilityEvidenceV1;
+        latestAttempt: import("../../system/provider-cache-capability-registry").ProviderCacheCapabilityEvidenceV1;
+        expired: boolean;
+        contentStored: boolean;
+    };
+    providerNativeMicrocompactCapability: {
+        schema: string;
+        version: number;
+        identity: {
+            identityChecksum: string;
+            interfaceFingerprint: string;
+            interfaceProtocol: string;
+            cacheFamily: string;
+            model: string;
+            inferenceBackendKind: import("../../system/provider-cache-capability-registry").InferenceBackendKind;
+        };
+        status: "confirmed";
+        source: string;
+        evidence: any;
+        contentStored: boolean;
+        expired?: undefined;
+    } | {
+        schema: string;
+        version: number;
+        identity: {
+            identityChecksum: string;
+            interfaceFingerprint: string;
+            interfaceProtocol: string;
+            cacheFamily: string;
+            model: string;
+            inferenceBackendKind: import("../../system/provider-cache-capability-registry").InferenceBackendKind;
+        };
+        status: import("../../system/provider-native-microcompact-capability").ProviderNativeMicrocompactStatus;
+        source: any;
+        evidence: any;
+        expired: boolean;
+        contentStored: boolean;
+    };
+    consumers: {
+        ready: boolean;
+        id: string;
+        label: string;
+    }[];
+    capabilityProbe?: undefined;
 }>;
 export declare function buildGroupMainAgentBoundary(planner?: string): {
     layer: string;

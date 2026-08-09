@@ -91,9 +91,14 @@
               :key="getMessageKey(msg)"
               :id="'msg-' + i"
               :role="msg.role"
+              :compact="msg.role === 'thinking'"
               :timestamp="msg.timestamp || msg.created_at || msg.createdAt"
               :structured="!!getProjectTaskCard(msg) || (Array.isArray(msg.workEvents) && msg.workEvents.length > 0) || Number(msg.fileChanges?.count || 0) > 0"
               :streaming="!!msg.streaming || (isStreaming && i === messages.length - 1)"
+              :copy-text="getCopyableMessageText(msg, (!getProjectTaskCard(msg) && !(Array.isArray(msg.workEvents) && msg.workEvents.length) && !Number(msg.fileChanges?.count || 0)) ? msg.content : '')"
+              :editable="msg.role === 'user' && !!String(msg.content || '').trim()"
+              :edit-disabled="isStreaming"
+              @edit="editProjectUserMessage(msg)"
               class="message"
               :class="[
                 msg.role,
@@ -103,13 +108,22 @@
                 },
               ]"
             >
+              <AgentExecutionTranscript
+                :events="projectAgentExecutionEvents"
+                :enabled="projectAgentExecutionEnabled"
+                :messages="messages"
+                :message-index="i"
+              />
               <CommandResultCard v-if="msg.type === 'command_result'" :result="msg.commandResult" />
               <!-- 思考过程消息 -->
-              <ConversationProcessingState
-                v-else-if="msg.role === 'thinking'"
-                :title="msg.messageMode === 'task' ? '项目主 Agent 正在推进任务' : '项目主 Agent 正在组织回复'"
-                :detail="msg.content || (msg.messageMode === 'task' ? '正在读取项目上下文并更新执行计划。' : '完成后会在当前会话继续回复。')"
-              />
+              <template v-else-if="msg.role === 'thinking'">
+                <ConversationProcessingState
+                  v-if="shouldShowCompactProcessingState(projectAgentExecutionEvents, messages, i)"
+                  compact
+                  title="正在思考…"
+                  detail=""
+                />
+              </template>
               <!-- 用户消息 -->
               <div v-else-if="msg.role === 'user'" class="bubble">
                 <div>{{ msg.content }}</div>
@@ -300,7 +314,9 @@
       :verification-commands="projectVerificationCommands"
       :inferred-commands="inferredProjectVerificationCommands"
       :verification-source="projectVerificationSource"
+      :context-policy="projectContextPolicy"
       @update-field="updateProjectToolField"
+      @update-context-policy="updateProjectContextPolicy"
       @toggle-tool="toggleProjectTool"
       @apply-inferred="applyInferredVerificationCommands"
       @save="saveProjectTools"

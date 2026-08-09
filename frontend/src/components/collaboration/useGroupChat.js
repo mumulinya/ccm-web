@@ -13,6 +13,7 @@ import { useConversationTurnControl } from '../../composables/useConversationTur
 import { notifySessionContextUsage } from '../../composables/useSessionContextUsage.js'
 import { buildGroupConversationKnowledgePayload, postKnowledgeCapture } from '../../utils/knowledgeCapture.js'
 import { normalizeTestAgentExecutionPlanSummary, sanitizeUserFacingStructure } from '../../utils/agentDisplay.js'
+import { getEditableUserMessageText, hasMessageAttachments } from '../../utils/messageActions.js'
 import {
   GROUP_VISIBLE_INTERNAL_TEXT_PATTERN,
   GROUP_INTERNAL_PROTOCOL_FALLBACK,
@@ -472,6 +473,7 @@ export function useGroupChat(props, emit) {
   const groupAuthorizationReadiness = ref(null)
   const groupConnectionPreflight = ref(null)
   const groupToolVerification = ref(null)
+  const groupContextPolicy = ref({ override: {}, effective: {}, source: 'global_default' })
 
   // 表单
   const newGroupName = ref('')
@@ -510,7 +512,7 @@ export function useGroupChat(props, emit) {
     updateCreateGroupProjectSelection, submitCreateGroup, submitRename, deleteGroup,
     clearGroupMessages, saveCurrentGroupConversationKnowledge, logs, logFilter, logEventSource,
     logsResizeObserver, scrollLogsToBottom, loadLogs, startLogStream, stopLogStream, clearLogs,
-    loadAvailableGroupTools, loadGroupTools, toggleGroupTool, saveGroupTools, groupTestTargets,
+    loadAvailableGroupTools, loadGroupTools, toggleGroupTool, updateGroupContextPolicy, saveGroupTools, groupTestTargets,
     groupTestTargetProjects, groupTestTargetsLoading, groupTestTargetsSaving, loadGroupTestTargets,
     saveGroupTestTarget, deleteGroupTestTarget, groupFiles,
     loadGroupFiles, addGroupFile, submitAddGroupFile, deleteGroupFile, getAvailableProjects,
@@ -537,6 +539,7 @@ export function useGroupChat(props, emit) {
     groupAuthorizationReadiness,
     groupConnectionPreflight,
     groupToolVerification,
+    groupContextPolicy,
     loadGroups: (...args) => loadGroups(...args),
     selectGroup: (...args) => selectGroup(...args),
   })
@@ -589,6 +592,28 @@ export function useGroupChat(props, emit) {
     focusGroupInput,
     scrollToBottom,
   })
+
+  const editGroupUserMessage = async (message) => {
+    if (isStreaming.value) return toast.info('请先等待当前回复结束或停止执行，再编辑历史消息')
+    const text = getEditableUserMessageText(message)
+    if (!text) return toast.info('这条消息没有可重新发送的文字内容')
+    const hasDifferentDraft = !!newMessage.value.trim() && newMessage.value.trim() !== text
+    const hasDirectedInput = !!pendingGroupTaskInput.value || !!pendingGroupClarificationInput.value || !!pendingDirectMemoryCommand.value
+    if ((hasDifferentDraft || messageFiles.value.length || hasDirectedInput)
+      && !(await confirmDialog('编辑历史消息会替换当前输入框草稿，并退出正在进行的任务补充或澄清输入。是否继续？'))) return
+    newMessage.value = text
+    messageFiles.value = []
+    pendingGroupTaskInput.value = null
+    pendingGroupClarificationInput.value = null
+    pendingDirectMemoryCommand.value = null
+    const originalMode = String(message.messageMode || message.message_mode || 'conversation')
+    messageMode.value = ['conversation', 'project_analysis', 'project_task'].includes(originalMode) ? originalMode : 'conversation'
+    await nextTick()
+    focusGroupInput()
+    toast.info(hasMessageAttachments(message)
+      ? '原消息文字已载入；历史附件不会自动复用，请重新添加附件后发送'
+      : '原消息已载入输入框，修改后发送即可重新请求')
+  }
 
   // 加载数据
   loadGroups = async () => {
@@ -886,7 +911,7 @@ export function useGroupChat(props, emit) {
     appendAgentWorkEvent, isAgentQaMessage, runAgentQaAction, appendAgentQaMessage,
     applyMainAgentProgressCheckpoint, groupMessageKeyMap, groupMessageKeySeq, getGroupMessageKey, showCreate,
     showRename, showMembers, showTools, showTestTargets, showSharedFiles, showLogs, groupTools, groupAllTools, groupToolAudit,
-    groupAuthorizationReadiness, groupConnectionPreflight, groupToolVerification, newGroupName, renameName,
+    groupAuthorizationReadiness, groupConnectionPreflight, groupToolVerification, groupContextPolicy, newGroupName, renameName,
     loadGroups, loadProjects, selectGroup, loadMessages,
     selectGroupSession, createGroupSession, renameGroupSession, archiveGroupSession, deleteGroupSession,
     createLocalMessageId, normalizeMessageContent, isEquivalentMessage, mergeIncomingMessage,
@@ -899,9 +924,9 @@ export function useGroupChat(props, emit) {
     submitCreateGroup, submitRename, deleteGroup, clearGroupMessages, saveCurrentGroupConversationKnowledge,
     isStreaming, thinkingMessages, pendingGroupSendRetry, groupStreamController, activeGroupTaskId,
     stoppingGroupTurn, groupTurnConversationId, groupTurnControl, stopGroupCurrentWork, drainGroupTurnQueue, guideGroupQueuedTurn,
-    submitGroupMessageWhileBusy, groupSendRetrySignature, sendMessage, waitingCrossReply, pullNewMessages,
+    submitGroupMessageWhileBusy, groupSendRetrySignature, sendMessage, editGroupUserMessage, waitingCrossReply, pullNewMessages,
     logs, logFilter, logEventSource, logsResizeObserver, scrollLogsToBottom, loadLogs, startLogStream,
-    stopLogStream, clearLogs, normalizeGroupTools, loadAvailableGroupTools, loadGroupTools, toggleGroupTool,
+    stopLogStream, clearLogs, normalizeGroupTools, loadAvailableGroupTools, loadGroupTools, toggleGroupTool, updateGroupContextPolicy,
     saveGroupTools, groupTestTargets, groupTestTargetProjects, groupTestTargetsLoading, groupTestTargetsSaving,
     loadGroupTestTargets, saveGroupTestTarget, deleteGroupTestTarget, groupFiles, loadGroupFiles, addGroupFile, submitAddGroupFile, deleteGroupFile,
     getAvailableProjects, addGroupMember, removeGroupMember, groupPollTimer, lastGroupMsgCount,
