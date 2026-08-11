@@ -1,9 +1,14 @@
 import * as crypto from "crypto";
 import * as fs from "fs";
 import * as path from "path";
-import { ChildProcess, spawn, spawnSync } from "child_process";
-import { CCM_DIR } from "../core/utils";
+import * as os from "os";
+import { ChildProcess, execFile, spawn, spawnSync } from "child_process";
 import { publishRuntimeEvent } from "../system/runtime-events";
+
+// Keep the execution kernel independent from core/utils. That module imports
+// the database, which imports this kernel for metrics; importing CCM_DIR from
+// it here would leave CCM_DIR undefined during ACP child-process startup.
+const CCM_DIR = path.resolve(process.env.CCM_TASK_STORE_DIR || path.join(os.homedir(), ".cc-connect"));
 
 export type ExecutionState =
   | "queued"
@@ -125,6 +130,7 @@ const CANCELLATIONS_DIR = path.join(KERNEL_DIR, "cancellations");
 const AGENT_RUNNER_REQUESTS_DIR = path.join(CCM_DIR, "agent-runner", "requests");
 const activeProcesses = new Map<string, Set<ChildProcess>>();
 const activeAgentRuns = new Map<string, any>();
+const completedAgentRunResources = new Map<string, any>();
 const MAX_EVENTS = 300;
 
 function now() { return new Date().toISOString(); }
@@ -437,13 +443,74 @@ function publicActiveAgentRun(run: any) {
     commandLabel: run.commandLabel || "",
     title: run.title || "",
     cancellable: true,
+    resources: run.resources ? {
+      sampledAt: run.resources.sampledAt || "",
+      cpuPercent: Number(run.resources.cpuPercent || 0),
+      rssBytes: Number(run.resources.rssBytes || 0),
+      childProcessCount: Number(run.resources.childProcessCount || 0),
+      peakCpuPercent: Number(run.resources.peakCpuPercent || 0),
+      peakRssBytes: Number(run.resources.peakRssBytes || 0),
+      peakChildProcessCount: Number(run.resources.peakChildProcessCount || 0),
+    } : null,
   };
+}
+
+function resourceSummary(run: any) {
+  return {
+    peakCpuPercent: Number(run?.resources?.peakCpuPercent || 0),
+    peakRssBytes: Number(run?.resources?.peakRssBytes || 0),
+    peakChildProcessCount: Number(run?.resources?.peakChildProcessCount || 0),
+  };
+}
+
+function sampleAgentRunResources(run: any) {
+  const pid = Number(run?.pid || 0);
+  if (!Number.isInteger(pid) || pid <= 0 || run.resourceSamplePending) return;
+  run.resourceSamplePending = true;
+  const finish = (cpuSeconds: number, rssBytes: number, childProcessCount: number, directCpuPercent = 0) => {
+    const sampledAtMs = Date.now();
+    const previousAt = Number(run.resources?.previousSampleAt || 0);
+    const previousCpu = Number(run.resources?.previousCpuSeconds || 0);
+    const elapsedMs = previousAt ? Math.max(1, sampledAtMs - previousAt) : 0;
+    const cpuPercent = directCpuPercent > 0
+      ? directCpuPercent
+      : elapsedMs > 0 && cpuSeconds >= previousCpu
+        ? Math.max(0, ((cpuSeconds - previousCpu) * 100_000) / elapsedMs / Math.max(1, os.cpus().length))
+        : 0;
+    run.resources = {
+      ...(run.resources || {}),
+      sampledAt: new Date(sampledAtMs).toISOString(),
+      cpuPercent: Number(cpuPercent.toFixed(1)),
+      rssBytes: Math.max(0, Math.floor(rssBytes)),
+      childProcessCount: Math.max(1, Math.floor(childProcessCount || 1)),
+      peakCpuPercent: Math.max(Number(run.resources?.peakCpuPercent || 0), cpuPercent),
+      peakRssBytes: Math.max(Number(run.resources?.peakRssBytes || 0), rssBytes),
+      peakChildProcessCount: Math.max(Number(run.resources?.peakChildProcessCount || 0), childProcessCount || 1),
+      previousSampleAt: sampledAtMs,
+      previousCpuSeconds: cpuSeconds,
+    };
+    run.updatedAt = run.resources.sampledAt;
+    run.resourceSamplePending = false;
+  };
+  if (process.platform === "win32") {
+    const script = `$root=${pid};$rows=Get-CimInstance Win32_Process|Select-Object ProcessId,ParentProcessId;$ids=New-Object System.Collections.Generic.List[int];$ids.Add($root);for($i=0;$i -lt $ids.Count;$i++){foreach($row in $rows){if([int]$row.ParentProcessId -eq $ids[$i] -and -not $ids.Contains([int]$row.ProcessId)){$ids.Add([int]$row.ProcessId)}}};$ps=@(Get-Process -Id $ids -ErrorAction SilentlyContinue);[pscustomobject]@{cpu=(($ps|Measure-Object CPU -Sum).Sum);rss=(($ps|Measure-Object WorkingSet64 -Sum).Sum);count=$ps.Count}|ConvertTo-Json -Compress`;
+    execFile("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], { windowsHide: true, timeout: 4_000 }, (error, stdout) => {
+      if (error) { run.resourceSamplePending = false; return; }
+      try { const row = JSON.parse(String(stdout || "{}")); finish(Number(row.cpu || 0), Number(row.rss || 0), Number(row.count || 1)); } catch { run.resourceSamplePending = false; }
+    });
+    return;
+  }
+  execFile("ps", ["-p", String(pid), "-o", "%cpu=,rss="], { timeout: 3_000 }, (error, stdout) => {
+    if (error) { run.resourceSamplePending = false; return; }
+    const values = String(stdout || "").trim().split(/\s+/).map(Number);
+    finish(0, Number(values[1] || 0) * 1024, 1, Number(values[0] || 0) / Math.max(1, os.cpus().length));
+  });
 }
 
 function registerActiveAgentRun(taskId: string, executionId: string, child: ChildProcess, meta: any = {}) {
   const runId = String(meta.runId || `run-${safePart(taskId || executionId || "standalone")}-${Date.now().toString(36)}-${crypto.randomBytes(3).toString("hex")}`);
   const at = now();
-  const run = {
+  const run: any = {
     id: runId,
     taskId: String(taskId || ""),
     executionId: String(executionId || ""),
@@ -461,6 +528,9 @@ function registerActiveAgentRun(taskId: string, executionId: string, child: Chil
     child,
   };
   activeAgentRuns.set(runId, run);
+  sampleAgentRunResources(run);
+  run.resourceTimer = setInterval(() => sampleAgentRunResources(run), 5_000);
+  run.resourceTimer.unref?.();
   publishRuntimeEvent("agent", "agent.started", {
     runId,
     taskId: run.taskId,
@@ -476,6 +546,10 @@ function finishActiveAgentRun(runId: string, status = "finished") {
   if (!run) return;
   run.status = status;
   run.updatedAt = now();
+  if (run.resourceTimer) clearInterval(run.resourceTimer);
+  const summary = resourceSummary(run);
+  for (const key of [run.executionId, run.taskId].filter(Boolean)) completedAgentRunResources.set(String(key), summary);
+  while (completedAgentRunResources.size > 300) completedAgentRunResources.delete(completedAgentRunResources.keys().next().value as string);
   activeAgentRuns.delete(runId);
   publishRuntimeEvent("agent", "agent.finished", {
     runId,
@@ -484,6 +558,16 @@ function finishActiveAgentRun(runId: string, status = "finished") {
     status,
     source: run.source,
   });
+}
+
+export function metricAgentResourceSummary(taskId = "", executionId = "") {
+  const active = Array.from(activeAgentRuns.values()).find(run => (
+    (executionId && run.executionId === executionId) || (taskId && run.taskId === taskId)
+  ));
+  if (active) return resourceSummary(active);
+  return completedAgentRunResources.get(String(executionId || ""))
+    || completedAgentRunResources.get(String(taskId || ""))
+    || null;
 }
 
 export function listActiveAgentRuns(filters: any = {}) {

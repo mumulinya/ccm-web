@@ -1,6 +1,7 @@
 <script setup>
 import { computed } from 'vue'
 import TaskExperienceCard from '../tasks/TaskExperienceCard.vue'
+import ConversationProcessingState from '../common/ConversationProcessingState.vue'
 
 const props = defineProps({
   message: {
@@ -15,6 +16,7 @@ const props = defineProps({
     type: Boolean,
     default: false
   },
+  suppressThinking: { type: Boolean, default: false },
   hideFileChanges: { type: Boolean, default: false },
 })
 
@@ -55,6 +57,9 @@ const workEventTone = (kind) => {
 const hasFileChanges = computed(() => (
   props.message?.fileChanges?.count > 0 && Array.isArray(props.message?.fileChanges?.files)
 ))
+const showThinking = computed(() => (
+  !props.suppressThinking && !props.taskCard && props.message?.streaming && !String(props.message?.content || '').trim()
+))
 </script>
 
 <template>
@@ -66,7 +71,13 @@ const hasFileChanges = computed(() => (
     :busy="!!message.streaming || !!message.taskActionBusy"
     @action="emit('task-action', $event)"
   />
-  <div v-else>{{ message.content }}</div>
+  <ConversationProcessingState
+    v-else-if="showThinking"
+    compact
+    title="正在思考…"
+    detail="正在理解你的问题并检查项目上下文"
+  />
+  <div v-else class="streamed-answer">{{ message.content }}</div>
   <span v-if="isLastStreaming" class="stream-cursor">▌</span>
 
   <details v-if="workEvents.length && !taskCard && isTaskMessage" class="agent-work-events">

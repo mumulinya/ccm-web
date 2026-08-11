@@ -4,7 +4,7 @@ import DesktopPet from './DesktopPet.vue'
 
 const emit = defineEmits(['navigate'])
 
-const config = ref({ revision: 0, configs: {}, positions: {}, settings: { webFallback: true } })
+const config = ref({ revision: 0, configs: {}, positions: {}, settings: { webFallback: true, agentProgressMode: 'milestones' } })
 const agents = ref([])
 const agentState = ref('idle')
 const notification = ref(null)
@@ -33,16 +33,20 @@ const acknowledge = async item => {
   } catch {}
 }
 
-const showNotification = item => {
+const showPetMessage = (item, durable = false) => {
   if (!item || !shouldShow.value) return
   notification.value = item
-  agentState.value = item.role === 'ask' ? 'waiting' : item.role === 'error' ? 'error' : 'notification'
+  agentState.value = item.pet_state || item.milestone?.petState
+    || (item.role === 'ask' ? 'waiting' : item.role === 'error' ? 'error' : item.role === 'assistant' ? 'happy' : 'notification')
+  if (!durable) return
   window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
     if (document.visibilityState === 'visible' && notification.value?.delivery_id === item.delivery_id) {
       void acknowledge(item)
     }
   }))
 }
+
+const showNotification = item => showPetMessage(item, true)
 
 const loadBootstrap = async () => {
   const response = await fetch('/api/pets/runtime/bootstrap')
@@ -93,6 +97,15 @@ const connectStream = () => {
         agentState.value = data.state || 'idle'
       } else if (data.type === 'notification') {
         showNotification(data.notification)
+      } else if (data.type === 'speech' && data.milestone?.schema === 'ccm-pet-agent-milestone-v1') {
+        showPetMessage({
+          ...data,
+          title: data.title || data.milestone.title,
+          summary: data.text || data.milestone.summary,
+          pet_state: data.pet_state || data.milestone.petState,
+          hold_ms: data.hold_ms || 8_000,
+          action: data.action || data.milestone.action || {},
+        })
       } else if (data.type === 'config') {
         void loadBootstrap()
       }

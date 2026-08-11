@@ -33,11 +33,12 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.shouldCloseTaskAgentSessions = exports.reconcileTaskAgentSessions = exports.purgeTaskAgentSessions = exports.pruneTaskAgentMemoryContextSnapshots = exports.suspendTaskAgentSessions = exports.closeTaskAgentSessions = exports.runTaskAgentSessionModelIdentitySelfTest = exports.acknowledgeTaskAgentSessionCapacityRevalidation = exports.commitTaskAgentSessionCapacityRevalidation = exports.prepareTaskAgentSessionCapacityRevalidation = exports.verifyTaskAgentSessionCapacityRevalidationCommitReceipt = exports.verifyTaskAgentSessionCapacityRevalidationProof = exports.markTaskAgentSessionsForCapacityDowngrade = exports.listTaskAgentSessions = exports.getTaskAgentSessionContinuity = exports.getTaskAgentSessionOptions = exports.reopenTaskAgentSessions = exports.advanceTaskAgentSession = exports.recordTaskAgentFinalDispatchReactiveCompactCircuitOutcome = exports.inspectTaskAgentFinalDispatchReactiveCompactCircuitBreaker = exports.verifyTaskAgentFinalDispatchReactiveCompactCircuitBreaker = exports.recordTaskAgentSessionTurn = exports.openTaskAgentSession = exports.verifyTaskAgentMemoryTransportUsageCohortReport = exports.buildTaskAgentMemoryTransportUsageCohortReport = exports.TASK_AGENT_MEMORY_TRANSPORT_USAGE_COHORT_SCHEMA = exports.TASK_AGENT_MEMORY_TRANSPORT_USAGE_COHORT_MINIMUM_SAMPLES = exports.buildTaskAgentMemoryContextSnapshotInventory = exports.listTaskAgentMemoryContextSnapshots = exports.readTaskAgentMemoryContextDeliveryReceipt = exports.recordTaskAgentMemoryContextDelivery = exports.attachTaskAgentFinalDispatchPayloadGate = exports.bindTaskAgentMemoryContextSnapshot = exports.prepareTaskAgentMemoryEntrySyncContextWithRetry = exports.verifyTaskAgentMemoryEntryRenderContentionReceipt = exports.prepareTaskAgentMemoryEntrySyncContext = exports.verifyMemoryContextDeliveryReceiptChecksum = exports.verifyTaskAgentMemorySnapshotSyncCommit = exports.verifyTaskAgentMemoryPromptInjectionProof = exports.verifyTaskAgentMemorySnapshotSyncDecision = exports.FINAL_DISPATCH_REACTIVE_COMPACT_MAX_CONSECUTIVE_FAILURES = void 0;
+exports.shouldCloseTaskAgentSessions = exports.reconcileTaskAgentSessions = exports.purgeTaskAgentSessions = exports.pruneTaskAgentMemoryContextSnapshots = exports.suspendTaskAgentSessions = exports.closeTaskAgentSessions = exports.runTaskAgentSessionModelIdentitySelfTest = exports.acknowledgeTaskAgentSessionCapacityRevalidation = exports.commitTaskAgentSessionCapacityRevalidation = exports.prepareTaskAgentSessionCapacityRevalidation = exports.verifyTaskAgentSessionCapacityRevalidationCommitReceipt = exports.verifyTaskAgentSessionCapacityRevalidationProof = exports.markTaskAgentSessionsForCapacityDowngrade = exports.listTaskAgentSessions = exports.getTaskAgentSessionContinuity = exports.getTaskAgentSessionOptions = exports.reopenTaskAgentSessions = exports.advanceTaskAgentSession = exports.recordTaskAgentFinalDispatchReactiveCompactCircuitOutcome = exports.inspectTaskAgentFinalDispatchReactiveCompactCircuitBreaker = exports.verifyTaskAgentFinalDispatchReactiveCompactCircuitBreaker = exports.recordTaskAgentSessionTurn = exports.openTaskAgentSession = exports.verifyTaskAgentMemoryTransportUsageCohortReport = exports.buildTaskAgentMemoryTransportUsageCohortReport = exports.TASK_AGENT_MEMORY_TRANSPORT_USAGE_COHORT_SCHEMA = exports.TASK_AGENT_MEMORY_TRANSPORT_USAGE_COHORT_MINIMUM_SAMPLES = exports.buildTaskAgentMemoryContextSnapshotInventory = exports.listTaskAgentMemoryContextSnapshots = exports.readTaskAgentMemoryContextDeliveryReceipt = exports.recordTaskAgentMemoryContextDelivery = exports.attachTaskAgentFinalDispatchPayloadGate = exports.bindTaskAgentMemoryContextSnapshot = exports.prepareTaskAgentMemoryEntrySyncContextWithRetry = exports.verifyTaskAgentMemoryEntryRenderContentionReceipt = exports.prepareTaskAgentMemoryEntrySyncContext = exports.verifyMemoryContextDeliveryReceiptChecksum = exports.verifyTaskAgentMemorySnapshotSyncCommit = exports.verifyTaskAgentMemoryPromptInjectionProof = exports.verifyTaskAgentMemorySnapshotSyncDecision = exports.buildTaskAgentContinuityBinding = exports.FINAL_DISPATCH_REACTIVE_COMPACT_MAX_CONSECUTIVE_FAILURES = void 0;
 exports.runTaskAgentSessionSelfTest = runTaskAgentSessionSelfTest;
 // Public compatibility facade. Implementations live in focused modules.
 var agent_sessions_shared_1 = require("./agent-sessions-shared");
 Object.defineProperty(exports, "FINAL_DISPATCH_REACTIVE_COMPACT_MAX_CONSECUTIVE_FAILURES", { enumerable: true, get: function () { return agent_sessions_shared_1.FINAL_DISPATCH_REACTIVE_COMPACT_MAX_CONSECUTIVE_FAILURES; } });
+Object.defineProperty(exports, "buildTaskAgentContinuityBinding", { enumerable: true, get: function () { return agent_sessions_shared_1.buildTaskAgentContinuityBinding; } });
 Object.defineProperty(exports, "verifyTaskAgentMemorySnapshotSyncDecision", { enumerable: true, get: function () { return agent_sessions_shared_1.verifyTaskAgentMemorySnapshotSyncDecision; } });
 Object.defineProperty(exports, "verifyTaskAgentMemoryPromptInjectionProof", { enumerable: true, get: function () { return agent_sessions_shared_1.verifyTaskAgentMemoryPromptInjectionProof; } });
 Object.defineProperty(exports, "verifyTaskAgentMemorySnapshotSyncCommit", { enumerable: true, get: function () { return agent_sessions_shared_1.verifyTaskAgentMemorySnapshotSyncCommit; } });
@@ -87,6 +88,7 @@ Object.defineProperty(exports, "shouldCloseTaskAgentSessions", { enumerable: tru
 const crypto = __importStar(require("crypto"));
 const fs = __importStar(require("fs"));
 const runtime_1 = require("../agents/runtime");
+const agent_sessions_shared_2 = require("./agent-sessions-shared");
 const agent_sessions_resume_2 = require("./agent-sessions-resume");
 const agent_sessions_bind_2 = require("./agent-sessions-bind");
 const agent_sessions_inventory_2 = require("./agent-sessions-inventory");
@@ -130,6 +132,56 @@ function runTaskAgentSessionSelfTest() {
         permissionDriftRebuildsNativeSession: (() => {
             const drifted = (0, agent_sessions_resume_2.advanceTaskAgentSession)({ ...claude, id: "codex-drift", agentType: "codex", nativeSessionId: "codex-readonly", turnCount: 3 }, { success: false, error: "sandbox read-only", permissionDrift: true });
             return drifted.resumeMode === "native" && drifted.nativeSessionId === "" && drifted.turnCount === 0 && drifted.nativeSessionHistory?.includes("codex-readonly") && drifted.permissionDriftCount === 1;
+        })(),
+        conversationContinuityReusesNativeSession: (() => {
+            const firstTaskId = `task-agent-continuity-first-${process.pid}-${Date.now().toString(36)}`;
+            const secondTaskId = `${firstTaskId}-next`;
+            const binding = (0, agent_sessions_shared_2.buildTaskAgentContinuityBinding)({
+                scope: "project",
+                scopeId: "project-continuity-selftest",
+                exactSessionId: "project-session-continuity-selftest",
+                project: "frontend",
+                agentType: "claudecode",
+            });
+            if (!binding)
+                return false;
+            try {
+                const first = (0, agent_sessions_resume_2.openTaskAgentSession)({ scopeId: firstTaskId, taskId: firstTaskId, groupId: "", project: "frontend", agentType: "claudecode", continuity: binding });
+                const progressed = (0, agent_sessions_resume_2.recordTaskAgentSessionTurn)(first.id, { success: true });
+                (0, agent_sessions_purge_2.closeTaskAgentSessions)({ taskId: firstTaskId }, "selftest complete");
+                const second = (0, agent_sessions_resume_2.openTaskAgentSession)({ scopeId: secondTaskId, taskId: secondTaskId, groupId: "", project: "frontend", agentType: "claudecode", continuity: binding });
+                return second.continuityMode === "reused"
+                    && second.nativeSessionId === progressed?.nativeSessionId
+                    && (0, agent_sessions_resume_2.getTaskAgentSessionOptions)(second).resumeSession === true;
+            }
+            finally {
+                (0, agent_sessions_purge_2.purgeTaskAgentSessions)(firstTaskId);
+                (0, agent_sessions_purge_2.purgeTaskAgentSessions)(secondTaskId);
+            }
+        })(),
+        conversationContinuityIsolatesParallelTasks: (() => {
+            const firstTaskId = `task-agent-continuity-parallel-${process.pid}-${Date.now().toString(36)}`;
+            const secondTaskId = `${firstTaskId}-next`;
+            const binding = (0, agent_sessions_shared_2.buildTaskAgentContinuityBinding)({
+                scope: "group",
+                scopeId: "group-continuity-selftest",
+                exactSessionId: "gcs_continuity_selftest",
+                project: "frontend",
+                agentType: "claudecode",
+            });
+            if (!binding)
+                return false;
+            try {
+                const first = (0, agent_sessions_resume_2.openTaskAgentSession)({ scopeId: firstTaskId, taskId: firstTaskId, groupId: "group-continuity-selftest", project: "frontend", agentType: "claudecode", continuity: binding });
+                const parallel = (0, agent_sessions_resume_2.openTaskAgentSession)({ scopeId: secondTaskId, taskId: secondTaskId, groupId: "group-continuity-selftest", project: "frontend", agentType: "claudecode", continuity: binding });
+                return parallel.continuityMode === "isolated_branch"
+                    && !!parallel.continuityBranchId
+                    && parallel.nativeSessionId !== first.nativeSessionId;
+            }
+            finally {
+                (0, agent_sessions_purge_2.purgeTaskAgentSessions)(firstTaskId);
+                (0, agent_sessions_purge_2.purgeTaskAgentSessions)(secondTaskId);
+            }
         })(),
         taskAgentMemoryContextSnapshotBindsSession: (() => {
             const taskId = `task-agent-memory-snapshot-selftest-${process.pid}-${Date.now().toString(36)}`;

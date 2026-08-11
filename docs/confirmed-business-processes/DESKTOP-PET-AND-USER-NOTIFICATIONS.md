@@ -2,30 +2,32 @@
 
 ## 1. 事件进入
 
-任务终态、权限申请、Agent正式完成或失败以及需要用户处理的结构化事件进入通知运行时。服务端先确定用户、作用域、精确会话、任务和操作入口，再生成稳定幂等键。同一事件并发到达只会形成一条用户通知。
+任务终态、权限申请、Agent正式完成或失败以及需要用户处理的结构化事件进入通知运行时。普通Agent过程事件先进入里程碑投影器。服务端校验用户、作用域、精确会话、消息锚点、任务、generation和attempt，再生成稳定幂等键。
 
-普通过程文本、Token流、原始工具结果和Agent内部协议不会创建宠物通知。
+默认只播报制定计划、开始实现、关键发现、阻塞、验收、返工、复验和主Agent总结。普通Read/Grep、Token流、心跳、原始工具结果、stdout和Agent内部协议不会创建宠物消息。
 
 ## 2. 内容投影
 
-服务端生成`PetNotificationProjectionV2`：
+服务端按用途生成`PetAgentMilestoneV1`或`PetNotificationProjectionV2`：
 
 1. 根据结构化类型确定`status | ask | error | assistant`，不从问号或关键词猜测。
 2. 标题限制80字，摘要限制240字。
 3. 递归去除密钥、认证头、Cookie、本地路径、内部ID协议和错误栈。
-4. 操作只保留会话、任务、项目、群聊和权限定位字段。
+4. 操作只保留会话、消息锚点、任务、项目、群聊、generation和权限定位字段。
 
 桌宠常见消息包括：
 
 - 任务已完成，可打开任务回放；
 - 任务失败或阻塞，可查看原因；
 - 需要权限确认，可进入精确审批；
-- Agent已完成正式回复；
+- 第三方Agent已提交结果，等待CCM验收；
+- TestAgent未通过，返回原项目Agent返工；
+- Terminal Gate通过后任务正式完成；
 - 任务等待用户补充资料。
 
 ## 3. 持久化与渠道
 
-通知和各渠道投递记录在同一SQLite事务中创建。网页通知渠道创建后可在通知中心读取；Electron和网页宠物保持待投递，飞书继续由原精确会话投递链处理。
+需要用户处理、失败、取消和正式终态的通知及各渠道投递记录在同一SQLite事务中创建。普通关键进度只走当前在线宠物SSE，不写通知中心，也不会在用户下次上线时补播过时进度。
 
 通知中心提供未读计数、筛选、分页、单条已读、全部已读、取消提醒和点击定位。已展示不自动标记已读。
 
@@ -55,7 +57,7 @@
 
 权限申请创建活动通知并链接精确审批记录。用户批准或拒绝后，通知转为已解决，同时停止尚未展示的宠物投递。
 
-任务进入`done | failed | blocked | cancelled | waiting`时创建对应通知。任务结果仍以canonical任务、验收回执和任务回放为事实来源，通知失败不改变任务终态。
+第三方Agent提交Result时只显示“等待CCM验收”。任务进入`done | failed | blocked | cancelled | waiting`时创建对应持久通知；只有Terminal Gate通过的`done/completed`才能显示“任务已完成”。任务结果仍以canonical任务、验收回执和任务回放为事实来源。
 
 ## 7. 失败与恢复
 
@@ -73,6 +75,7 @@
 ## 9. 验收证据
 
 - `scripts/user-notification-pet-production-selftest.mjs`验证幂等、用户隔离、脱敏、待投递、原子领取和展示确认。
+- `scripts/pet-agent-milestone-selftest.mjs`验证Result/Terminal语义、精确锚点、无正文投影和旧Runner输出隔离。
 - `scripts/task-permission-broker-selftest.mjs`验证权限通知、精确飞书来源和V2通知回执。
 - Backend TypeScript、Frontend生产构建和Electron脚本语法检查必须通过。
 - 测试使用本地SQLite与Mock链路，付费Provider调用为0。

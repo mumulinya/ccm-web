@@ -12,6 +12,7 @@ import {
   sendJson,
 } from "../../core/utils";
 import { requestIsReadOnly } from "../system/api-access-control";
+import { hasResourceAccess } from "../system/access-policy";
 import { parseSecureMultipartRequest } from "../../system/secure-multipart";
 import {
   getConfigInfo,
@@ -70,6 +71,7 @@ import {
 import {
   buildExactGroupSessionModelContextPacket,
 } from "./group-session-model-context";
+import { appendUserVisibleRequirementPlan } from "../../system/user-visible-agent-events";
 
 // ===== merged from group-live-routes-part-01.ts =====
 
@@ -117,6 +119,69 @@ export type GroupLiveRoutesDeps = {
   extractActionableMentions: (text: string, group: any, sourceProject: string) => any[];
   extractAgentReceipt: (text: string, project: string) => any;
 };
+
+const GROUP_MODEL_RESUME_TEXT = /^(?:继续|重试|再试(?:一次)?|重新尝试|接着来|恢复执行|resume|retry)[。！!,.，\s]*$/i;
+
+export function resolveGroupModelRecovery(messages: any[] = [], input: any = {}) {
+  const requestedId = String(input?.resumeMessageId || input?.resume_message_id || "").trim();
+  const text = String(input?.message || "").trim();
+  if (!requestedId && !GROUP_MODEL_RESUME_TEXT.test(text)) return null;
+  let failureIndex = requestedId
+    ? messages.findIndex((item: any) => String(item?.id || item?.message_id || "") === requestedId)
+    : -1;
+  if (failureIndex < 0) {
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      const item = messages[index];
+      const runtime = String(item?.runtime || "").toLowerCase();
+      const recoveryState = String(item?.recovery?.state || "").toLowerCase();
+      if (item?.role === "assistant" && ["llm-error", "llm-not-configured"].includes(runtime)
+        && !["recovered", "cancelled"].includes(recoveryState)) {
+        failureIndex = index;
+        break;
+      }
+      if (item?.role === "assistant" && String(item?.content || "").trim()) break;
+    }
+  }
+  if (failureIndex < 0) return null;
+  const failure = messages[failureIndex];
+  if (failure?.role !== "assistant" || !["llm-error", "llm-not-configured"].includes(String(failure?.runtime || "").toLowerCase())) return null;
+  let originalUser: any = null;
+  const originalUserId = String(failure?.recovery?.originalUserMessageId || failure?.recovery?.original_user_message_id || "");
+  if (originalUserId) originalUser = messages.find((item: any) => String(item?.id || "") === originalUserId);
+  if (!originalUser) {
+    for (let index = failureIndex - 1; index >= 0; index -= 1) {
+      if (messages[index]?.role === "user") { originalUser = messages[index]; break; }
+    }
+  }
+  if (!originalUser || !String(originalUser.content || "").trim()) return null;
+  const anchorMessageId = String(
+    failure?.execution_anchor_message_id
+      || failure?.executionAnchorMessageId
+      || failure?.recovery?.anchorMessageId
+      || failure?.recovery?.anchor_message_id
+      || failure?.id,
+  ).trim();
+  return {
+    failureMessageId: String(failure?.id || ""),
+    anchorMessageId,
+    originalUserMessageId: String(originalUser?.id || ""),
+    originalMessage: String(originalUser.content || "").trim(),
+    attempt: Math.max(2, Number(failure?.recovery?.attempt || 1) + 1),
+  };
+}
+
+function updateGroupModelRecoveryMessages(groupId: string, sessionId: string, anchorMessageId: string, state: string, patch: any = {}) {
+  if (!groupId || !sessionId || !anchorMessageId) return;
+  const stored = getGroupMessages(groupId, sessionId);
+  let changed = false;
+  const next = stored.map((item: any) => {
+    const itemAnchor = String(item?.execution_anchor_message_id || item?.executionAnchorMessageId || item?.recovery?.anchorMessageId || item?.recovery?.anchor_message_id || item?.id || "");
+    if (item?.role !== "assistant" || !["llm-error", "llm-not-configured"].includes(String(item?.runtime || "").toLowerCase()) || itemAnchor !== anchorMessageId) return item;
+    changed = true;
+    return { ...item, recovery: { ...(item.recovery || {}), state, ...patch } };
+  });
+  if (changed) saveGroupMessages(groupId, next, sessionId);
+}
 
 export function compactGroupLiveText(value: any, max = 180) {
   const text = String(value || "").replace(/\s+/g, " ").trim();
@@ -530,13 +595,19 @@ export async function handleGroupLiveRoutesSendPreface(
           sendJson(res, { error: pendingClarification.error }, pendingClarification.status || 404); return { done: true as const };
         }
         const clarificationContext = pendingClarification.context;
+        const modelRecovery = !clarificationContext && !explicitContinuationTask
+          ? resolveGroupModelRecovery(getGroupMessages(group_id, groupSessionId), {
+              message: userMessage,
+              resumeMessageId: payload.resume_interruption_message_id || payload.resumeInterruptionMessageId,
+            })
+          : null;
         const clarificationOriginalMessage = String(clarificationContext?.original_user_message || clarificationContext?.originalUserMessage || clarificationContext?.original_message || clarificationContext?.originalMessage || "").trim();
         const effectiveUserMessage = clarificationContext
           ? `${clarificationOriginalMessage || "原始请求"}\n补充说明：${userMessage || "请结合本次附件"}`.trim()
-          : userMessage;
+          : modelRecovery?.originalMessage || userMessage;
         const messageForAgent = clarificationContext
           ? buildGroupClarificationContinuationMessage(clarificationContext, incomingMessageForAgent)
-          : incomingMessageForAgent;
+          : modelRecovery?.originalMessage || incomingMessageForAgent;
 
         const requestedTarget = String(clarificationContext?.target_project || clarificationContext?.targetProject || target_project || "").trim();
         const routing = selectGroupTargets(group, requestedTarget);
@@ -555,6 +626,10 @@ export async function handleGroupLiveRoutesSendPreface(
         const messageMode = String(clarificationContext?.message_mode || clarificationContext?.messageMode || payload.message_mode || payload.messageMode || "conversation").trim().toLowerCase();
         const messageTraceId = ensureTraceId(payload.trace_id || payload.traceId || clarificationContext?.trace_id || clarificationContext?.traceId, "group");
         const forceProjectTask = groupLiveFlag(payload.force_task ?? payload.forceTask, groupLiveFlag(clarificationContext?.force_task ?? clarificationContext?.forceTask, false));
+        const incomingUserMessageId = client_message_id ? String(client_message_id) : "m" + Date.now().toString(36);
+        const requestExecutionAnchorMessageId = String(modelRecovery?.anchorMessageId || incomingUserMessageId);
+        const requestRecoveryAttempt = Math.max(1, Number(modelRecovery?.attempt || 1));
+        const requestTurnId = `${requestExecutionAnchorMessageId}:attempt:${requestRecoveryAttempt}:${incomingUserMessageId}`;
         const exactSessionContext = buildExactGroupSessionModelContextPacket(group_id, { groupSessionId }).rendered;
         let taskIntent = await classifyGroupProjectTaskIntentWithAgent({
             group,
@@ -565,6 +640,8 @@ export async function handleGroupLiveRoutesSendPreface(
             forceProjectTask: forceProjectTask || !!explicitContinuationTask,
             sharedFilesContext: uploadedFilesContext,
             groupSessionId,
+            turnId: requestTurnId,
+            anchorMessageId: requestExecutionAnchorMessageId,
             context: exactSessionContext,
           });
         if (readOnly && taskIntent?.workflowDecision?.actionRequired === true) {
@@ -623,7 +700,7 @@ export async function handleGroupLiveRoutesSendPreface(
         }
 
         const userMsg = {
-          id: client_message_id ? String(client_message_id) : "m" + Date.now().toString(36),
+          id: incomingUserMessageId,
           role: "user",
           target: routing.targetLabel,
           content: userMessageForHistory,
@@ -631,12 +708,23 @@ export async function handleGroupLiveRoutesSendPreface(
           trace_id: messageTraceId,
           ...(groupSessionId ? { group_session_id: groupSessionId } : {}),
           ...(continuationTask ? { task_id: continuationTask.id } : {}),
+          ...(modelRecovery ? {
+            resumes_message_id: modelRecovery.failureMessageId,
+            execution_anchor_message_id: modelRecovery.anchorMessageId,
+          } : {}),
           ...(clarificationContext ? {
             clarification_request_id: clarificationRequestId || clarificationContext.id || clarificationContext.request_id || "",
             clarification_response_to: pendingClarification.message?.id || clarificationMessageId,
           } : {}),
         };
         appendGroupMessage(group_id, userMsg);
+        if (modelRecovery) updateGroupModelRecoveryMessages(
+          group_id,
+          groupSessionId,
+          modelRecovery.anchorMessageId,
+          "retrying",
+          { retryingAt: new Date().toISOString(), attempt: modelRecovery.attempt },
+        );
         for (const member of targetMembers) {
           ctx.broadcastPetSpeech(member.project, { role: "user", text: userMessageForHistory, final: true, source: "group" });
         }
@@ -792,7 +880,8 @@ export async function handleGroupLiveRoutesSendPreface(
     effectiveUserMessage, routing, isBroadcast, isOrchestrated, targetMembers, messageMode, messageTraceId,
     forceProjectTask, taskIntent, statusFollowupRequest, persistentTaskRequest, projectAnalysisRequest,
     continuationKind, continuationTask, groupOperationKey, userMsg, clarificationContext, clarificationRequestId,
-    pendingClarification, clarificationMessageId, explicitContinuationTask, explicitContinuationKind, client_message_id, configs,
+    pendingClarification, clarificationMessageId, explicitContinuationTask, explicitContinuationKind, client_message_id, configs, modelRecovery,
+    requestExecutionAnchorMessageId, requestRecoveryAttempt, requestTurnId,
   };
 }
 
@@ -875,6 +964,10 @@ export function handleGroupLiveRoutes(
       let explicitContinuationKind = "";
       let client_message_id = "";
       let configs: any;
+      let modelRecovery: any;
+      let requestExecutionAnchorMessageId = "";
+      let requestRecoveryAttempt = 1;
+      let requestTurnId = "";
       try {
         const preface = await handleGroupLiveRoutesSendPreface(payload, uploadedFiles, ctx, deps, res, requestIsReadOnly(req));
         if (preface.done) return;
@@ -917,7 +1010,15 @@ export function handleGroupLiveRoutes(
           explicitContinuationKind,
           client_message_id,
           configs,
+          modelRecovery,
+          requestExecutionAnchorMessageId,
+          requestRecoveryAttempt,
+          requestTurnId,
         } = preface as Exclude<typeof preface, { done: true }>);
+        const principal = (req as any).ccmAuth;
+        if (principal?.kind === "browser" && principal.role !== "admin" && !hasResourceAccess(principal.userId, principal.role, "group", String(group_id || ""), persistentTaskRequest ? "use" : "use")) {
+          throw new Error("当前账户没有该群聊的访问权限");
+        }
         // 项目任务模式会创建持久工单。后续执行由可恢复任务队列持有，不依赖本次 SSE 连接。
         if (persistentTaskRequest) {
           addGroupLog(group_id, "info", "project_task_preflight", "正在核对项目执行成员与工作目录");
@@ -1151,6 +1252,43 @@ export function handleGroupLiveRoutes(
           };
 
           const receiptMessageId = "m" + Date.now().toString(36) + "mission";
+          task = updateTask(task.id, {
+            target_message_id: receiptMessageId,
+            anchor_message_id: receiptMessageId,
+            user_visible_plan_revision: 1,
+          }) || task;
+          const intakePlanSteps = (Array.isArray(planModePreflight?.steps) ? planModePreflight.steps : [])
+            .map((step: any, index: number) => ({
+              id: String(step?.id || `step_${index + 1}`),
+              title: String(step?.label || step?.title || `实施步骤 ${index + 1}`),
+              description: String(step?.detail || "按当前任务计划完成该步骤。"),
+              outcome: String(step?.outcome || "完成后进入下一步骤。"),
+              project: String(step?.project || ""),
+              dependsOn: Array.isArray(step?.dependsOn || step?.depends_on) ? (step.dependsOn || step.depends_on) : [],
+              status: step?.status || "pending",
+            }));
+          if (intakePlanSteps.length) appendUserVisibleRequirementPlan({
+            eventId: `group-task:${task.id}:requirement-plan:1:intake`,
+            scope: "group",
+            scopeId: String(group_id),
+            exactSessionId: groupSessionId,
+            anchorMessageId: receiptMessageId,
+            generation: Math.max(0, Number(task?.generation || 0)),
+            taskId: String(task.id),
+            plan: {
+              planId: String(task.id),
+              revision: 1,
+              title: String(task.title || "需求实施计划"),
+              goal: String(task.business_goal || effectiveUserMessage || task.title || "完成当前群聊任务。"),
+              steps: intakePlanSteps,
+              scope: planModePreflight?.impact_scope?.projects || [],
+              expectedResults: planModePreflight?.acceptance || [],
+              exclusions: planModePreflight?.permission_boundaries || [],
+              status: planModePreflight.requires_confirmation ? "ready" : "executing",
+              createdAt: now,
+              updatedAt: now,
+            },
+          });
           const understoodGoal = compactMemoryText(effectiveUserMessage || task.title, 180).replace(/[。.!！]+$/g, "");
           const receiptContent = planModePreflight.requires_confirmation
             ? `我先按只读方式看了一轮：${understoodGoal}。这个需求${planModePreflight.risk?.summary ? `因为「${planModePreflight.risk.summary}」` : "需要先确认范围"}，我已经整理好执行前计划。你确认后，我再安排执行成员开始修改。`
@@ -1329,6 +1467,27 @@ export function handleGroupLiveRoutes(
           const context = buildExactGroupSessionModelContextPacket(group_id, { groupSessionId }).rendered;
           const sharedFilesContext = buildCoordinatorSharedFilesContext(ctx, group, { groupSessionId, message: messageForAgent });
           const projectAnalysisContext = projectAnalysisRequest ? buildGroupProjectAnalysisContext(group, messageForAgent, ctx, configs) : "";
+          const responseMessageId = "m" + Date.now().toString(36) + "coord" + crypto.randomBytes(2).toString("hex");
+          const executionAnchorMessageId = String(requestExecutionAnchorMessageId || modelRecovery?.anchorMessageId || responseMessageId);
+          const recoveryAttempt = Math.max(1, Number(requestRecoveryAttempt || modelRecovery?.attempt || 1));
+          const visibleTurnId = String(requestTurnId || `${executionAnchorMessageId}:attempt:${recoveryAttempt}:${responseMessageId}`);
+          let coordinatorDeltaEmitted = false;
+          const streamBufferedCoordinatorReply = async (content: string) => {
+            const characters = Array.from(String(content || ""));
+            const chunkSize = characters.length > 2400 ? 36 : characters.length > 800 ? 24 : 16;
+            for (let offset = 0; offset < characters.length; offset += chunkSize) {
+              if (res.destroyed || res.writableEnded) break;
+              writeSse(res, {
+                type: "chunk",
+                agent: coordinator.project,
+                text: characters.slice(offset, offset + chunkSize).join(""),
+              });
+              (res as any).flush?.();
+              if (offset + chunkSize < characters.length) {
+                await new Promise(resolve => setTimeout(resolve, 14));
+              }
+            }
+          };
           const coordinatorResult = await runGroupOrchestrator({
             group,
             message: projectAnalysisRequest
@@ -1337,11 +1496,15 @@ export function handleGroupLiveRoutes(
             context: projectAnalysisRequest ? `${context}\n\n${projectAnalysisContext}` : context,
             source: "user",
             groupSessionId,
+            turnId: visibleTurnId,
+            anchorMessageId: executionAnchorMessageId,
+            recoveryAttempt,
             workflowDecision: taskIntent?.workflowDecision || null,
             mainAgentFirstTurnResult: taskIntent?.mainAgentFirstTurnResult || taskIntent?.coordinatorResult || null,
             sharedFilesContext: [sharedFilesContext, projectAnalysisContext].filter(Boolean).join("\n\n"),
             onDelta: delta => {
               if (!delta) return;
+              coordinatorDeltaEmitted = true;
               writeSse(res, {
                 type: "chunk",
                 agent: coordinator.project,
@@ -1359,8 +1522,31 @@ export function handleGroupLiveRoutes(
           }
 
           try {
-            const responseMessageId = "m" + Date.now().toString(36) + "coord" + crypto.randomBytes(2).toString("hex");
             const outputText = coordinatorResult.content;
+            if (!coordinatorDeltaEmitted && String(outputText || "").trim()) {
+              await streamBufferedCoordinatorReply(outputText);
+            }
+            const coordinatorRuntime = String((coordinatorResult as any).runtime || "");
+            const providerFailure = (coordinatorResult as any).providerFailure || null;
+            const providerFailureTechnical = (coordinatorResult as any).providerFailureTechnical || null;
+            const interrupted = ["llm-error", "llm-not-configured"].includes(coordinatorRuntime);
+            const recovery = interrupted ? {
+              schema: "ccm-group-model-recovery-v1",
+              state: "interrupted",
+              resumable: true,
+              anchorMessageId: executionAnchorMessageId,
+              originalUserMessageId: modelRecovery?.originalUserMessageId || userMsg.id,
+              attempt: recoveryAttempt,
+              contentStored: false,
+            } : modelRecovery ? {
+              schema: "ccm-group-model-recovery-v1",
+              state: "recovered",
+              resumable: false,
+              anchorMessageId: executionAnchorMessageId,
+              originalUserMessageId: modelRecovery.originalUserMessageId,
+              attempt: recoveryAttempt,
+              contentStored: false,
+            } : null;
             const rawPlanAssignments = normalizePlanAssignments((coordinatorResult as any).assignments || []);
             const planAssignments = conversationalOnly || projectAnalysisRequest ? [] : rawPlanAssignments;
             const dispatchPolicy = projectAnalysisRequest
@@ -1426,6 +1612,10 @@ export function handleGroupLiveRoutes(
               assignments: planAssignments,
               executionOrder: conversationalOnly ? "none" : ((coordinatorResult as any).executionOrder || "parallel"),
               runtime: (coordinatorResult as any).runtime || "",
+              providerFailure,
+              providerFailureTechnical,
+              recovery,
+              executionAnchorMessageId,
               dispatchPolicy,
               coordinationPlan: conversationalOnly ? null : ((coordinatorResult as any).coordinationPlan || null),
               workflow: workflowMeta,
@@ -1447,6 +1637,10 @@ export function handleGroupLiveRoutes(
               assignments: planAssignments,
               executionOrder: conversationalOnly ? "none" : ((coordinatorResult as any).executionOrder || "parallel"),
               runtime: (coordinatorResult as any).runtime || "",
+              providerFailure,
+              providerFailureTechnical,
+              recovery,
+              execution_anchor_message_id: executionAnchorMessageId,
               dispatchPolicy,
               coordinationPlan: conversationalOnly ? null : ((coordinatorResult as any).coordinationPlan || null),
               workflow: workflowMeta,
@@ -1456,6 +1650,13 @@ export function handleGroupLiveRoutes(
               clarificationContext: clarificationContextRecord,
               clarification_context: clarificationContextRecord,
             });
+            if (modelRecovery && !interrupted) updateGroupModelRecoveryMessages(
+              group_id,
+              groupSessionId,
+              executionAnchorMessageId,
+              "recovered",
+              { recoveredAt: new Date().toISOString(), recoveredByMessageId: responseMessageId },
+            );
             if (clarificationContext) resolveStoredGroupClarification(group_id, pendingClarification, userMsg.id, groupSessionId);
             updateGroupMemory(group_id, {
               groupSessionId,

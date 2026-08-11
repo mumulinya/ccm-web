@@ -395,7 +395,8 @@ watch([selectedFile, mode], () => {
 .diff-toolbar strong { display: block; max-width: 460px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
 .diff-toolbar span { margin-left: 8px; color: #b45309; font-size: 12px; }
 .diff-actions { display: flex; gap: 6px; align-items: center; }
-.diff-actions input { width: 180px; padding: 6px 9px; border: 1px solid #cbd5e1; border-radius: 8px; }
+.diff-actions input { width:180px; height:var(--control-height,34px); padding:0 var(--control-padding-x,10px); border:1px solid var(--border-color); border-radius:var(--radius-md,6px); background:var(--control-bg); color:var(--text-primary); outline:none; }
+.diff-actions input:focus { border-color:var(--accent-blue); box-shadow:var(--focus-ring); }
 .diff-actions button { padding: 6px 9px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--surface-raised); color: var(--text-secondary); cursor: pointer; }
 .diff-actions button.active { border-color: #2563eb; background: #dbeafe; color: #1d4ed8; }
 .diff-actions button:disabled { opacity: .45; cursor: not-allowed; }

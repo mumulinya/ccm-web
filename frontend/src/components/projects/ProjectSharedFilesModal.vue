@@ -170,15 +170,35 @@ const updateField = (field, event) => emit('update-field', { field, value: event
 
 .file-editor-modal textarea {
   width: 100%;
-  padding: 12px;
+  box-sizing: border-box;
+  min-height: 180px;
+  padding: 9px var(--control-padding-x, 10px);
   border: 1px solid var(--border-color);
-  border-radius: 8px;
+  border-radius: var(--radius-md, 6px);
   background: var(--control-bg);
   color: var(--text-primary);
   font-family: monospace;
   font-size: 13px;
   resize: vertical;
   outline: none;
+}
+
+.file-editor-modal input {
+  width: 100%;
+  height: var(--control-height, 34px);
+  box-sizing: border-box;
+  padding: 0 var(--control-padding-x, 10px);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md, 6px);
+  background: var(--control-bg);
+  color: var(--text-primary);
+  outline: none;
+}
+
+.file-editor-modal input:focus,
+.file-editor-modal textarea:focus {
+  border-color: var(--accent-blue);
+  box-shadow: var(--focus-ring);
 }
 
 @media (max-width: 640px) {

@@ -37,6 +37,15 @@ events.appendAssistantProgress({
   modelCallIndex: 1,
   relatedToolCallIds: ['tool-1'],
 })
+const semanticDuplicate = events.appendAssistantProgress({
+  ...identity,
+  turnId: 'turn-visible-1',
+  text: '我先定位相关代码和配置，再根据结果继续判断。',
+  kind: 'before_tools',
+  modelCallIndex: 1,
+  relatedToolCallIds: ['tool-replayed-with-new-id'],
+})
+assert.equal(semanticDuplicate.eventId, progress.eventId, '重复读取批次更换toolCallId后也不应重复播报同一业务说明')
 const started = events.appendToolProjection({
   ...identity,
   eventId: 'visible-tool-start',
@@ -138,6 +147,14 @@ const timedResult = events.appendUserVisibleAgentEvent({
   }),
   detail: { timing: { totalMs: 43000, modelMs: 41000, toolWallMs: 100, otherMs: 1900 } },
 })
+events.appendAssistantProgress({
+  ...identity,
+  turnId: 'turn-visible-1',
+  text: '这条迟到进度不应在Result之后进入账本。',
+  kind: 'key_finding',
+  modelCallIndex: 9,
+})
+assert.equal(events.listUserVisibleAgentEvents({ ...identity, cursor: timedResult.sequence, limit: 20 }).events.length, 0, 'Result后不得追加运行中说明')
 assert.equal(timedResult.display.tokenType, 'provider_total')
 assert.equal(timedResult.display.tokenAccuracy, 'reported')
 assert.deepEqual(timedResult.detail?.timing, { totalMs: 43000, modelMs: 41000, toolWallMs: 100, otherMs: 1900 })
@@ -278,6 +295,9 @@ assert.match(progressTranscriptSource, /sessionStorage/, '展开状态必须按�
 assert.match(progressTranscriptSource, /搜索工具、项目、文件或失败原因/, '长执行记录必须支持当前消息内搜索')
 assert.match(progressTranscriptSource, /availableActions/, '失败操作必须来自后端授权动作')
 assert.match(progressTranscriptSource, /freshness === 'drifted'/, '权威结果变化必须给出漂移提示')
+assert.match(progressTranscriptSource, /cc-live-execution-status/, '运行态必须显示Codex风格的处理时间和当前阶段')
+assert.match(progressTranscriptSource, /liveRowLabel/, '运行态工具必须使用正在运行或已完成的紧凑文案')
+assert.match(progressTranscriptSource, /isLivePresentation/, '运行态与完成态必须使用同一账本的不同投影')
 const pinnedScrollSource = fs.readFileSync(new URL('../frontend/src/composables/usePinnedScroll.js', import.meta.url), 'utf8')
 assert.match(pinnedScrollSource, /pendingUpdates/, '用户离开底部时必须累计新进度')
 assert.match(pinnedScrollSource, /threshold = options\.threshold \|\| 120/, '自动跟随底部阈值必须为120px')

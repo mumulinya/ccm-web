@@ -92,7 +92,8 @@ const emit = defineEmits(['update:actionPetType', 'reset-errors', 'image-error',
 .asset-toolbar { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; padding: 16px 18px; background: var(--surface-subtle); border: 1px solid var(--border-color); border-radius: 14px; }
 .asset-select-wrap { display: flex; flex-direction: column; gap: 8px; min-width: 220px; }
 .asset-select-wrap label { font-size: 12px; color: var(--text-muted); font-weight: 600; }
-.asset-select-wrap select { width: 240px; padding: 9px 12px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--control-bg); color: var(--text-primary); outline: none; }
+.asset-select-wrap select { width:240px; height:var(--control-height,34px); padding:0 30px 0 var(--control-padding-x,10px); border-radius:var(--radius-md,6px); border:1px solid var(--border-color); background:var(--control-bg); color:var(--text-primary); outline:none; }
+.asset-select-wrap select:focus { border-color:var(--accent-blue); box-shadow:var(--focus-ring); }
 .asset-count { padding: 6px 10px; border-radius: 999px; background: rgba(59, 130, 246, 0.08); color: var(--accent-blue); font-size: 12px; font-weight: 700; }
 .asset-readonly-notice { padding: 12px 14px; border-radius: 12px; background: rgba(245, 158, 11, 0.1); color: #b45309; font-size: 12px; font-weight: 600; line-height: 1.5; }
 .asset-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }

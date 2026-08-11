@@ -84,10 +84,12 @@ function createPetSpeechNotification(input) {
     const summary = sanitizePetNotificationText(input.text);
     if (!summary || role === "user")
         return [];
-    const notificationType = role === "attention" || role === "ask"
+    const explicitType = compact(input.notification_type, 64);
+    const notificationType = explicitType || (role === "attention" || role === "ask"
         ? "needs_user"
-        : role === "error" ? "agent_failed" : "agent_completed";
-    const severity = role === "error" ? "error" : notificationType === "needs_user" ? "warning" : "success";
+        : role === "error" ? "agent_failed" : "agent_message");
+    const severity = input.severity
+        || (role === "error" ? "error" : notificationType === "needs_user" ? "warning" : input.terminal === true ? "success" : "info");
     return createUserNotification({
         source_type: "agent_event",
         source_channel: source,
@@ -97,7 +99,7 @@ function createPetSpeechNotification(input) {
         task_id: input.task_id,
         notification_type: notificationType,
         severity,
-        title: notificationType === "needs_user" ? "需要你处理" : role === "error" ? "Agent执行失败" : "Agent已完成",
+        title: input.title || (notificationType === "needs_user" ? "需要你处理" : role === "error" ? "Agent执行失败" : input.terminal === true ? "任务已完成" : "Agent消息"),
         summary,
         action: input.action || {
             kind: input.task_id ? "task" : "agent",
@@ -112,7 +114,10 @@ function normalizeAction(value) {
     if (!value || typeof value !== "object" || Array.isArray(value))
         return {};
     const action = {};
-    for (const key of ["kind", "tab", "scope_type", "scope_id", "session_id", "task_id", "permission_id", "project_id", "group_id"]) {
+    for (const key of [
+        "kind", "tab", "scope_type", "scope_id", "session_id", "task_id", "permission_id", "project_id", "group_id",
+        "anchor_message_id", "origin_message_id", "generation",
+    ]) {
         const text = compact(value[key], 160);
         if (text)
             action[key] = text;

@@ -8,10 +8,32 @@ export type TaskInterruptionReason =
   | "temporary_network"
   | "provider_overload"
   | "provider_unavailable"
+  | "model_stream_interrupted"
+  | "agent_runtime_unavailable"
   | "service_restart"
   | "lease_lost"
   | "service_draining"
   | "unknown";
+
+export type TaskResumeCheckpointV1 = {
+  phase: string;
+  workItemId?: string;
+  reviewRound?: number;
+  planChecksum: string;
+  workspaceChecksum?: string;
+  completedWorkItemIds: string[];
+  summaryPending?: boolean;
+};
+
+export type TaskRecoveryScheduleV1 = {
+  mode: "safe_auto" | "manual";
+  state: "waiting_provider" | "waiting_agent" | "validating" | "queued" | "needs_user";
+  attempt: number;
+  maxAttempts: number;
+  nextRetryAt?: string;
+};
+
+export const TASK_RECOVERY_BACKOFF_MS = [30_000, 120_000, 300_000] as const;
 
 export type TaskInterruptionReceiptV1 = {
   schema: "ccm-task-interruption-receipt-v1";
@@ -22,6 +44,8 @@ export type TaskInterruptionReceiptV1 = {
   reason: string;
   actor: string;
   checkpoint: string;
+  resume_checkpoint?: TaskResumeCheckpointV1;
+  recovery?: TaskRecoveryScheduleV1;
   execution_attempt: number;
   workspace_checksum: string;
   task_agent_sessions: Array<{
@@ -75,7 +99,36 @@ function sessionProjection(taskId: string) {
 }
 
 function transientReason(reason: TaskInterruptionReason) {
-  return ["temporary_network", "provider_overload", "service_restart", "lease_lost"].includes(reason);
+  return [
+    "temporary_network",
+    "provider_overload",
+    "provider_unavailable",
+    "model_stream_interrupted",
+    "agent_runtime_unavailable",
+    "service_restart",
+    "lease_lost",
+  ].includes(reason);
+}
+
+function recoveryWaitingState(reason: TaskInterruptionReason): TaskRecoveryScheduleV1["state"] {
+  return reason === "agent_runtime_unavailable" ? "waiting_agent" : "waiting_provider";
+}
+
+export function buildTaskRecoverySchedule(input: {
+  reasonCode: TaskInterruptionReason;
+  attempt?: number;
+  autoResumeAllowed?: boolean;
+  now?: number;
+}): TaskRecoveryScheduleV1 {
+  const attempt = Math.max(0, Math.min(TASK_RECOVERY_BACKOFF_MS.length, Number(input.attempt || 0)));
+  const safeAuto = input.autoResumeAllowed === true && attempt < TASK_RECOVERY_BACKOFF_MS.length;
+  return {
+    mode: safeAuto ? "safe_auto" : "manual",
+    state: safeAuto ? recoveryWaitingState(input.reasonCode) : "needs_user",
+    attempt,
+    maxAttempts: TASK_RECOVERY_BACKOFF_MS.length,
+    ...(safeAuto ? { nextRetryAt: new Date((input.now ?? Date.now()) + TASK_RECOVERY_BACKOFF_MS[attempt]).toISOString() } : {}),
+  };
 }
 
 export function buildTaskInterruptionReceipt(input: {
@@ -86,6 +139,8 @@ export function buildTaskInterruptionReceipt(input: {
   checkpoint?: string;
   sideEffectState?: "none" | "committed" | "uncertain";
   workspaceChecksum?: string;
+  resumeCheckpoint?: TaskResumeCheckpointV1;
+  recovery?: TaskRecoveryScheduleV1;
   processTerminationProven?: boolean;
 }) {
   const taskId = String(input.task?.id || input.task?.task_id || "").trim();
@@ -93,12 +148,14 @@ export function buildTaskInterruptionReceipt(input: {
   const reasonCode = input.reasonCode || "unknown";
   const sideEffectState = input.sideEffectState || "uncertain";
   const sessions = sessionProjection(taskId);
+  const recoveryAttempt = Math.max(0, Number(input.task?.recovery?.attempt || 0));
   const nativeIdentityProven = sessions.every(row => row.resume_mode !== "native" || !!row.native_session_id);
   const recoverable = reasonCode !== "unknown" && input.processTerminationProven !== false;
   const autoResumeAllowed = recoverable
     && transientReason(reasonCode)
     && sideEffectState !== "uncertain"
-    && nativeIdentityProven;
+    && nativeIdentityProven
+    && recoveryAttempt < TASK_RECOVERY_BACKOFF_MS.length;
   const raw: Omit<TaskInterruptionReceiptV1, "checksum"> = {
     schema: "ccm-task-interruption-receipt-v1",
     version: 1,
@@ -108,12 +165,18 @@ export function buildTaskInterruptionReceipt(input: {
     reason: String(input.reason || "任务执行已中断").slice(0, 500),
     actor: String(input.actor || "ccm").slice(0, 120),
     checkpoint: String(input.checkpoint || input.task?.acceptance_state || input.task?.status || "unknown").slice(0, 120),
+    ...(input.resumeCheckpoint ? { resume_checkpoint: input.resumeCheckpoint } : {}),
     execution_attempt: Math.max(0, Number(input.task?.execution_attempt || input.task?.project_main_execution?.attempt || 0)),
     workspace_checksum: String(input.workspaceChecksum || input.task?.workspace_snapshot_checksum || input.task?.workspace_evidence?.checksum || ""),
     task_agent_sessions: sessions,
     side_effect_state: sideEffectState,
     recoverable,
     auto_resume_allowed: autoResumeAllowed,
+    recovery: input.recovery || buildTaskRecoverySchedule({
+      reasonCode,
+      attempt: recoveryAttempt,
+      autoResumeAllowed,
+    }),
     interrupted_at: new Date().toISOString(),
   };
   return { ...raw, checksum: receiptChecksum(raw) };
@@ -147,6 +210,11 @@ export function buildTaskRecoveryDecision(task: any, receiptInput?: TaskInterrup
     authorization_valid: options.authorizationValid !== false,
     runtime_valid: options.runtimeValid !== false,
     native_identity_valid: Array.isArray(receipt?.task_agent_sessions) && receipt.task_agent_sessions.every(row => row.resume_mode !== "native" || !!row.native_session_id),
+    checkpoint_valid: !receipt?.resume_checkpoint || (
+      !!String(receipt.resume_checkpoint.phase || "").trim()
+      && !!String(receipt.resume_checkpoint.planChecksum || "").trim()
+      && Array.isArray(receipt.resume_checkpoint.completedWorkItemIds)
+    ),
   };
   let mode: TaskRecoveryDecisionV1["mode"] = "reject";
   let reasonCode = "receipt_invalid";
@@ -159,7 +227,8 @@ export function buildTaskRecoveryDecision(task: any, receiptInput?: TaskInterrup
       && checks.workspace_unchanged
       && checks.authorization_valid
       && checks.runtime_valid
-      && checks.native_identity_valid;
+      && checks.native_identity_valid
+      && checks.checkpoint_valid;
     if (!safetyReady) {
       mode = "manual";
       reasonCode = "safety_revalidation_required";

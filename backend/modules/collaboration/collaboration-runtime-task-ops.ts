@@ -468,6 +468,11 @@ export function retryRuntimeFailedTasks(ctx: CollabCtx, options: any = {}) {
   const candidates = loadTasks()
     .filter(isRecoverableRuntimeFailure)
     .filter((task: any) => taskMatchesAgentProbeTarget(task, probeTarget))
+    .filter((task: any) => {
+      const recovery = task?.recovery || task?.interruption_receipt?.recovery || {};
+      if (recovery.mode === "manual" || recovery.state === "needs_user") return false;
+      return !recovery.nextRetryAt || Date.parse(recovery.nextRetryAt) <= Date.now();
+    })
     .sort((a: any, b: any) => Date.parse(a.updated_at || a.created_at || "") - Date.parse(b.updated_at || b.created_at || ""))
     .slice(0, limit);
   if (dryRun) {

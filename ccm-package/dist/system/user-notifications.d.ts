@@ -64,6 +64,10 @@ export declare function createPetSpeechNotification(input: {
     exact_session_id?: string;
     action?: Record<string, any>;
     dedupe_key?: string;
+    notification_type?: string;
+    title?: string;
+    severity?: UserNotificationSeverity;
+    terminal?: boolean;
 }): UserNotificationV2[];
 export declare function createUserNotification(input: {
     recipient_user_ids?: string[];

@@ -32,6 +32,19 @@ function checksum(value: any) {
   return crypto.createHash("sha256").update(JSON.stringify(canonical(value))).digest("hex");
 }
 
+function safeTerminalSummary(value: any) {
+  return String(value || "")
+    .replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, "")
+    .replace(/(?:authorization|api[\s_-]?key|access[\s_-]?token|secret|cookie|password)\s*[:=]\s*[^\s,;]+/gi, "[敏感字段]=[已隐藏]")
+    .replace(/\b(?:sk|rk|pk)-[A-Za-z0-9_-]{12,}\b/g, "[密钥已隐藏]")
+    .replace(/\b[A-Za-z]:[\\/][^\r\n,;]+/g, "[本地路径]")
+    .replace(/\/(?:home|Users|root|tmp|var)\/[^\r\n,;]+/g, "[本地路径]")
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 500);
+}
+
 function recordChecksum(value: any) {
   const payload = { ...(value || {}) };
   delete payload.record_checksum;
@@ -281,6 +294,8 @@ export function completeDirectAgentDispatch(id: string, input: any = {}) {
   if (!current?.checksum_valid || current.schema !== DIRECT_AGENT_DISPATCH_REQUEST_SCHEMA) return null;
   const completedAt = String(input.completedAt || input.completed_at || new Date().toISOString());
   const output = String(input.output || input.error || "");
+  const outputChecksum = crypto.createHash("sha256").update(output).digest("hex");
+  const outputBytes = Buffer.byteLength(output, "utf-8");
   const success = input.success === true;
   const result = writeRecord(resultFile(id), {
     schema: DIRECT_AGENT_DISPATCH_RESULT_SCHEMA,
@@ -288,9 +303,12 @@ export function completeDirectAgentDispatch(id: string, input: any = {}) {
     id,
     transport: "server_direct_cli",
     success,
-    error: success ? "" : String(input.error || output || "direct CLI failed"),
-    output,
-    output_checksum: crypto.createHash("sha256").update(output).digest("hex"),
+    error: success ? "" : safeTerminalSummary(input.error || output || "direct CLI failed"),
+    output: "",
+    output_summary: safeTerminalSummary(success ? input.summary || "第三方 Agent 已提交结构化结果" : input.error || output),
+    output_bytes: outputBytes,
+    output_checksum: outputChecksum,
+    contentStored: false,
     nativeSessionId: String(input.nativeSessionId || input.native_session_id || ""),
     nativeContinuationEvidence: input.nativeContinuationEvidence || input.native_continuation_evidence || null,
     nativeModelCapabilityReceipt: input.nativeModelCapabilityReceipt || input.native_model_capability_receipt || null,

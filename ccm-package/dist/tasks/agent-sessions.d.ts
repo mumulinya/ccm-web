@@ -1,4 +1,4 @@
-export { FINAL_DISPATCH_REACTIVE_COMPACT_MAX_CONSECUTIVE_FAILURES, TaskAgentMemoryContextSnapshotRef, TaskAgentSession, verifyTaskAgentMemorySnapshotSyncDecision, verifyTaskAgentMemoryPromptInjectionProof, verifyTaskAgentMemorySnapshotSyncCommit, verifyMemoryContextDeliveryReceiptChecksum } from "./agent-sessions-shared";
+export { FINAL_DISPATCH_REACTIVE_COMPACT_MAX_CONSECUTIVE_FAILURES, TaskAgentMemoryContextSnapshotRef, TaskAgentSession, buildTaskAgentContinuityBinding, verifyTaskAgentMemorySnapshotSyncDecision, verifyTaskAgentMemoryPromptInjectionProof, verifyTaskAgentMemorySnapshotSyncCommit, verifyMemoryContextDeliveryReceiptChecksum } from "./agent-sessions-shared";
 export { prepareTaskAgentMemoryEntrySyncContext, verifyTaskAgentMemoryEntryRenderContentionReceipt, prepareTaskAgentMemoryEntrySyncContextWithRetry, bindTaskAgentMemoryContextSnapshot, attachTaskAgentFinalDispatchPayloadGate } from "./agent-sessions-bind";
 export { recordTaskAgentMemoryContextDelivery, readTaskAgentMemoryContextDeliveryReceipt, } from "./agent-sessions-delivery";
 export { listTaskAgentMemoryContextSnapshots, buildTaskAgentMemoryContextSnapshotInventory, } from "./agent-sessions-inventory";
@@ -24,6 +24,8 @@ export declare function runTaskAgentSessionSelfTest(): {
         invalidNativeSessionCreatesRecoveryPath: boolean;
         runtimeSnapshotPersistsAcrossTurns: boolean;
         permissionDriftRebuildsNativeSession: boolean;
+        conversationContinuityReusesNativeSession: boolean;
+        conversationContinuityIsolatesParallelTasks: boolean;
         taskAgentMemoryContextSnapshotBindsSession: boolean;
     };
 };

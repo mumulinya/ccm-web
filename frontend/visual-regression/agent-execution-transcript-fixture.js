@@ -1,10 +1,11 @@
 import { createApp } from 'vue/dist/vue.esm-bundler.js'
 import AgentExecutionTranscript from '../src/components/common/AgentExecutionTranscript.vue'
+import ActiveTaskPlanDock from '../src/components/common/ActiveTaskPlanDock.vue'
 import ConversationProcessingState from '../src/components/common/ConversationProcessingState.vue'
 
 const fixtureAnchor = Date.now() - 25_000
 const at = offset => new Date(fixtureAnchor + (offset * 1000)).toISOString()
-const base = { schema:'ccm-user-visible-agent-event-v1', scope:'project', scopeId:'demo', exactSessionId:'session-demo', generation:1, contentStored:false, visibility:'default' }
+const base = { schema:'ccm-user-visible-agent-event-v1', scope:'project', scopeId:'demo', exactSessionId:'session-demo', anchorMessageId:'fixture-message', generation:1, contentStored:false, visibility:'default' }
 const rows = [
   { ...base, eventId:'turn', sequence:1, eventType:'turn_started', display:{ title:'项目主 Agent', summary:'正在准备上下文', status:'running' }, createdAt:at(1) },
   { ...base, eventId:'thinking', sequence:2, eventType:'thinking_status', display:{ title:'正在思考', summary:'正在核对验收条件', status:'running', durationMs:800 }, createdAt:at(2) },
@@ -21,7 +22,11 @@ const rows = [
     { id:'step_4', title:'独立测试并交付', description:'验证主要流程，未通过时返回原项目 Agent 修正。', outcome:'提供测试结论、修改文件和交付说明', project:'TestAgent', dependsOn:['step_3'], status:'pending' },
   ], scope:['后台管理页面','业务接口','权限与状态处理'], expectedResults:['运营人员可以管理商家、商品和订单','页面数据与后端业务状态保持一致','关键流程通过独立测试'], exclusions:['不执行生产发布或数据迁移'], status:'executing', createdAt:at(4.2), updatedAt:at(4.2), planChecksum:'fixture-plan-initial', contentStored:false } } },
   { ...base, eventId:'worker-start', agentRunId:'agent-run-worker', parallelGroupId:'agent-parallel-1', sequence:7, eventType:'agent_started', taskId:'fixture-task', workItemId:'worker', display:{ title:'smart-live-ui · Codex', target:'实现后台前端', summary:'正在执行', status:'running' }, createdAt:at(5), detail:{ agentDisplay:{ projectId:'smart-live-ui', projectName:'smart-live-ui', runtimeLabel:'Codex', workItemTitle:'实现后台前端', phase:'executing', attempt:1, isParallel:true } } },
+  { ...base, eventId:'worker-build-start', agentRunId:'agent-run-worker', parentEventId:'worker-start', toolCallId:'worker-build', sequence:7.2, eventType:'tool_started', taskId:'fixture-task', workItemId:'worker', display:{ title:'Maven 构建', target:'smart-live-ui', summary:'正在验证项目构建', status:'running' }, createdAt:at(5.1), detail:{ toolDisplay:{ tool:{ name:'maven_build', label:'Maven 构建' }, arguments:[{ label:'项目', value:'smart-live-ui' }], result:{ summary:'正在执行项目构建' } } } },
+  { ...base, eventId:'worker-build-complete', agentRunId:'agent-run-worker', parentEventId:'worker-start', toolCallId:'worker-build', sequence:7.5, eventType:'tool_completed', taskId:'fixture-task', workItemId:'worker', display:{ title:'Maven 构建', target:'smart-live-ui', summary:'项目构建通过', status:'success', durationMs:4100 }, createdAt:at(5.5), detail:{ toolDisplay:{ tool:{ name:'maven_build', label:'Maven 构建' }, arguments:[{ label:'项目', value:'smart-live-ui' }], result:{ summary:'项目构建通过', freshness:'current' } } } },
+  { ...base, eventId:'worker-log-start', agentRunId:'agent-run-worker', parentEventId:'worker-start', toolCallId:'worker-log', sequence:7.8, eventType:'tool_started', taskId:'fixture-task', workItemId:'worker', display:{ title:'读取项目日志', target:'smart-live-ui', summary:'正在检查运行日志', status:'running' }, createdAt:at(5.7), detail:{ toolDisplay:{ tool:{ name:'shell_read_runtime_log', label:'读取项目日志' }, arguments:[{ label:'项目', value:'smart-live-ui' }], result:{ summary:'正在检查运行日志' } } } },
   { ...base, eventId:'worker-result', agentRunId:'agent-run-worker', parallelGroupId:'agent-parallel-1', sequence:8, eventType:'agent_progress', taskId:'fixture-task', workItemId:'worker', display:{ title:'smart-live-ui · Codex', target:'实现后台前端', summary:'已提交结果，等待 CCM 验收', status:'waiting', toolUseCount:4, tokenCount:1820 }, createdAt:at(6), detail:{ agentDisplay:{ projectId:'smart-live-ui', projectName:'smart-live-ui', runtimeLabel:'Codex', workItemTitle:'实现后台前端', phase:'verifying', attempt:1, isParallel:true } } },
+  { ...base, eventId:'worker-log-complete', agentRunId:'agent-run-worker', parentEventId:'worker-start', toolCallId:'worker-log', sequence:8.2, eventType:'tool_completed', taskId:'fixture-task', workItemId:'worker', display:{ title:'读取项目日志', target:'smart-live-ui', summary:'未发现启动错误', status:'success', durationMs:2600 }, createdAt:at(6.2), detail:{ toolDisplay:{ tool:{ name:'shell_read_runtime_log', label:'读取项目日志' }, arguments:[{ label:'项目', value:'smart-live-ui' }], result:{ summary:'未发现启动错误', freshness:'current' } } } },
   { ...base, eventId:'worker-terminal', agentRunId:'agent-run-worker', parallelGroupId:'agent-parallel-1', sequence:9, eventType:'agent_completed', taskId:'fixture-task', workItemId:'worker', display:{ title:'smart-live-ui · Codex', target:'实现后台前端', summary:'CCM 已完成终态验收', status:'success', durationMs:9300 }, createdAt:at(7), detail:{ agentDisplay:{ projectId:'smart-live-ui', projectName:'smart-live-ui', runtimeLabel:'Codex', workItemTitle:'实现后台前端', phase:'completed', attempt:1, isParallel:true }, fileChanges:[{ path:'src/feature.ts' }], evidenceIds:['evidence-worker'] } },
   { ...base, eventId:'test-terminal', sequence:10, eventType:'agent_completed', taskId:'fixture-task', workItemId:'test', display:{ title:'TestAgent', summary:'独立验收通过', status:'success', durationMs:4200 }, createdAt:at(8), detail:{ evidenceIds:['evidence-test'] } },
   { ...base, eventId:'progress-before-summary', sequence:10.2, eventType:'assistant_progress', taskId:'fixture-task', display:{ title:'项目主 Agent', summary:'独立验收已经通过，我正在做最后的差异核对并整理交付总结。', status:'running' }, createdAt:at(8.1), detail:{ progress:{ kind:'before_summary', text:'独立验收已经通过，我正在做最后的差异核对并整理交付总结。', modelCallIndex:3, relatedToolCallIds:[], milestoneChecksum:'fixture-progress-summary' } } },
@@ -40,29 +45,44 @@ const rows = [
     { project:'smart-live-ui', path:'docs/FEATURE.md', status:'added', additions:31, deletions:0 },
   ], usage:{ inputTokens:1940, outputTokens:540 }, timing:{ totalMs:16800, modelMs:9100, toolWallMs:1250, dependencyWaitMs:4200, otherMs:2250 } } },
 ]
-const runningRows = rows.filter(event => event.sequence <= 8)
+const queuedPlanRow = {
+  ...base,
+  anchorMessageId:'queued-fixture-message',
+  eventId:'queued-requirement-plan',
+  sequence:8.5,
+  eventType:'requirement_plan',
+  taskId:'queued-fixture-task',
+  display:{ title:'需求实施计划', summary:'补充项目启动识别能力', status:'running' },
+  createdAt:at(8.5),
+  detail:{ requirementPlan:{ schema:'ccm-user-visible-requirement-plan-v1', planId:'queued-fixture-task', revision:1, title:'需求实施计划', goal:'补充项目启动识别能力。', steps:[
+    { id:'queued_step_1', title:'检查项目类型', description:'读取项目配置', outcome:'识别启动方式', project:'wine_machine', dependsOn:[], status:'running' },
+    { id:'queued_step_2', title:'验证启动命令', description:'执行安全验证', outcome:'确认可以运行', project:'wine_machine', dependsOn:['queued_step_1'], status:'pending' },
+  ], scope:['wine_machine'], expectedResults:[], exclusions:[], status:'executing', createdAt:at(8.5), updatedAt:at(8.5), planChecksum:'queued-plan', contentStored:false } },
+}
+const runningRows = [...rows.filter(event => event.sequence <= 8), queuedPlanRow]
 const messages = [
   { role:'user', content:'完成这个功能', timestamp:at(0) },
-  { role:'assistant', content:'代码修改和独立验收均已通过。', timestamp:at(10), taskId:'fixture-task' },
+  { id:'fixture-message', role:'assistant', content:'代码修改和独立验收均已通过。', timestamp:at(10), taskId:'fixture-task' },
 ]
 const conversationRows = [
-  { ...base, eventId:'conversation-turn', sequence:1, eventType:'turn_started', display:{ title:'项目主 Agent', summary:'已开始处理', status:'running' }, createdAt:at(21) },
-  { ...base, eventId:'conversation-thinking', sequence:2, eventType:'thinking_status', display:{ title:'正在思考', summary:'正在组织回复', status:'running', durationMs:500 }, createdAt:at(22) },
-  { ...base, eventId:'conversation-result', sequence:3, eventType:'result', display:{ title:'回复完成', summary:'普通对话已完成', status:'success', toolUseCount:0, tokenCount:180 }, createdAt:at(23) },
+  { ...base, anchorMessageId:'conversation-message', eventId:'conversation-turn', sequence:1, eventType:'turn_started', display:{ title:'项目主 Agent', summary:'已开始处理', status:'running' }, createdAt:at(21) },
+  { ...base, anchorMessageId:'conversation-message', eventId:'conversation-thinking', sequence:2, eventType:'thinking_status', display:{ title:'正在思考', summary:'正在组织回复', status:'running', durationMs:500 }, createdAt:at(22) },
+  { ...base, anchorMessageId:'conversation-message', eventId:'conversation-result', sequence:3, eventType:'result', display:{ title:'回复完成', summary:'普通对话已完成', status:'success', toolUseCount:0, tokenCount:180 }, createdAt:at(23) },
 ]
 const conversationMessages = [
   { role:'user', content:'你觉得这个项目怎么样', timestamp:at(20) },
-  { role:'assistant', content:'整体方向不错。', timestamp:at(24) },
+  { id:'conversation-message', role:'assistant', content:'整体方向不错。', timestamp:at(24) },
 ]
 
 createApp({
-  components:{ AgentExecutionTranscript, ConversationProcessingState },
+  components:{ AgentExecutionTranscript, ActiveTaskPlanDock, ConversationProcessingState },
   data:() => ({ rows, runningRows, messages, conversationRows, conversationMessages, openedFile:'', openedBatch:0 }),
   template:`<main>
     <h1 class="fixture-title">项目会话</h1>
     <section class="message pending-message"><ConversationProcessingState compact title="正在思考…" detail="" /></section>
     <section class="message ordinary-message"><AgentExecutionTranscript :events="conversationRows" :messages="conversationMessages" :message-index="1" presentation="completed" /><p class="answer">整体方向不错。</p></section>
     <section class="message running-task-message"><AgentExecutionTranscript :events="runningRows" :messages="messages" :message-index="1" stage-grouped presentation="live" /></section>
+    <section class="composer-fixture"><ActiveTaskPlanDock :events="runningRows" :messages="messages" exact-session-id="session-demo" /></section>
     <section class="message task-message">
       <p class="answer">代码修改和独立验收均已通过。</p>
       <AgentExecutionTranscript :events="rows" :messages="messages" :message-index="1" stage-grouped presentation="completed" @open-file-change="openedFile = $event.path" @open-file-changes="openedBatch = $event.count" />

@@ -20,6 +20,7 @@ import {
   PawPrint,
   Search,
   Settings2,
+  ShieldCheck,
   SlidersHorizontal,
   Sparkles,
   SquareTerminal,
@@ -27,6 +28,7 @@ import {
   Trash2,
   Wrench,
   Workflow,
+  Users,
   X,
 } from '@lucide/vue'
 import UsabilityWorkbench from './components/common/UsabilityWorkbench.vue'
@@ -190,6 +192,8 @@ const PAGE_LOADERS = {
   'cleanup-center': () => import('./components/system/cleanup/CleanupCenter.vue'),
   'trace-replay': () => import('./components/system/TraceReplay.vue'),
   'code-intelligence': () => import('./components/tools/CodeIntelligence.vue'),
+  'user-management': () => import('./components/system/AccessManagement.vue'),
+  'permission-management': () => import('./components/system/AccessManagement.vue'),
 }
 const ProjectManager = definePageComponent('projects', PAGE_LOADERS.projects)
 const GroupChat = definePageComponent('groups', PAGE_LOADERS.groups)
@@ -212,6 +216,8 @@ const MemoryCenter = definePageComponent('memory-center', PAGE_LOADERS['memory-c
 const CleanupCenter = definePageComponent('cleanup-center', PAGE_LOADERS['cleanup-center'])
 const TraceReplay = definePageComponent('trace-replay', PAGE_LOADERS['trace-replay'])
 const CodeIntelligence = definePageComponent('code-intelligence', PAGE_LOADERS['code-intelligence'])
+const UserManagement = definePageComponent('user-management', PAGE_LOADERS['user-management'])
+const PermissionManagement = definePageComponent('permission-management', PAGE_LOADERS['permission-management'])
 
 const currentTab = ref('')
 const musicPlayerActivated = ref(false)
@@ -605,7 +611,7 @@ const DEFAULT_TABS = [
   { id: 'tasks', icon: '📋', label: '任务派发' },
   { id: 'trace-replay', icon: '🔁', label: '任务回放' },
   { id: 'code-intelligence', icon: '🧭', label: '代码智能' },
-  { id: 'autodev', icon: '🧭', label: '自动开发' },
+  { id: 'autodev', icon: '🧭', label: '自动开发运营' },
   { id: 'knowledge', icon: '📖', label: '知识库与文档' },
   { id: 'memory-center', icon: '🧠', label: '记忆控制中心' },
   { id: 'cleanup-center', icon: '🧹', label: '清理中心' },
@@ -616,6 +622,8 @@ const DEFAULT_TABS = [
   { id: 'music', icon: '🎵', label: '音乐播放' },
   { id: 'settings', icon: '⚙️', label: '系统设置' },
   { id: 'menumanager', icon: '📋', label: '菜单管理' },
+  { id: 'user-management', icon: '👥', label: '用户管理' },
+  { id: 'permission-management', icon: '🛡️', label: '权限管理' },
 ]
 
 const TAB_ICONS = {
@@ -640,6 +648,8 @@ const TAB_ICONS = {
   music: Music2,
   settings: Settings2,
   menumanager: Menu,
+  'user-management': Users,
+  'permission-management': ShieldCheck,
 }
 
 const GROUP_ICONS = {
@@ -652,18 +662,30 @@ const GROUP_ICONS = {
 }
 const CONFIGURABLE_ICONS = {
   Activity, Bot, BookOpen, Brain, Clock3, FileDiff, FolderKanban, History, LayoutDashboard,
-  Link, ListTodo, Menu, MessageSquare, Music2, PawPrint, Search, Settings2, SlidersHorizontal,
+  Link, ListTodo, Menu, MessageSquare, Music2, PawPrint, Search, Settings2, ShieldCheck, SlidersHorizontal, Users,
   Sparkles, SquareTerminal, Trash2, Wrench, Workflow,
 }
 
 const menuConfig = ref(loadMenuConfiguration(DEFAULT_TABS))
 const navigationState = ref(null)
-const authRole = window.__CCM_AUTH__?.user?.role || 'viewer'
-const ADMIN_ONLY_TABS = new Set(['tools', 'cleanup-center', 'terminal'])
-const roleFilteredTabs = source => source.map(tab => ({
-  ...tab,
-  disabledReason: authRole !== 'admin' && ADMIN_ONLY_TABS.has(tab.id) ? '需要 Admin 权限' : '',
-}))
+const authRole = window.__CCM_AUTH__?.user?.role || 'user'
+const authFeatures = new Set(window.__CCM_AUTH__?.access?.features || [])
+const TAB_FEATURES = {
+  dashboard: 'workbench', 'global-agent': 'workbench', tasks: 'workbench', 'trace-replay': 'workbench',
+  projects: 'resource_workspace', groups: 'resource_workspace', changes: 'developer_tools',
+  'code-intelligence': 'developer_tools', autodev: 'developer_tools', knowledge: 'knowledge',
+  'memory-center': 'memory', pets: 'personal', music: 'personal', search: 'personal', terminal: 'terminal_ops',
+  tools: 'tool_ops', cron: 'schedule_ops', metrics: 'maintenance_ops', 'cleanup-center': 'maintenance_ops',
+  settings: 'platform_settings', menumanager: 'menu_ops',
+}
+const roleFilteredTabs = source => {
+  const filtered = source.filter(tab => {
+  if (tab.id === 'user-management' || tab.id === 'permission-management') return authRole === 'admin'
+  const feature = TAB_FEATURES[tab.id]
+  return authRole === 'admin' || !feature || authFeatures.has(feature)
+  }).map(tab => ({ ...tab, disabledReason: '' }))
+  return filtered.length ? filtered : [{ id: 'access-required', icon: '🔒', label: '等待权限' }]
+}
 const tabs = ref(roleFilteredTabs(buildConfiguredTabs(DEFAULT_TABS, menuConfig.value)))
 // URL中的tab是当前页面的权威位置；只有没有导航目标时才使用工作台首页。
 const startupNavigationTarget = readNavigationTargetFromUrl()
@@ -761,6 +783,44 @@ const handleNotificationNavigate = (action = {}) => {
       permissionId: action.permission_id || '',
     }
     switchTab('tasks')
+    return
+  }
+  const anchorMessageId = action.anchor_message_id || ''
+  const originMessageId = action.origin_message_id || ''
+  const generation = Number(action.generation || 0)
+  if (anchorMessageId && (action.project_id || action.scope_type === 'project')) {
+    navigateTo.value = {
+      tab: 'projects',
+      project: action.project_id || action.scope_id || '',
+      sessionId: action.session_id || '',
+      messageId: anchorMessageId,
+      originMessageId,
+      generation,
+    }
+    switchTab('projects')
+    return
+  }
+  if (anchorMessageId && (action.group_id || action.scope_type === 'group')) {
+    navigateTo.value = {
+      tab: 'groups',
+      groupId: action.group_id || action.scope_id || '',
+      groupSessionId: action.session_id || '',
+      messageId: anchorMessageId,
+      originMessageId,
+      generation,
+    }
+    switchTab('groups')
+    return
+  }
+  if (anchorMessageId && action.scope_type === 'global') {
+    navigateTo.value = {
+      tab: 'global-agent',
+      sessionId: action.session_id || '',
+      messageId: anchorMessageId,
+      originMessageId,
+      generation,
+    }
+    switchTab('global-agent')
     return
   }
   if (kind === 'task' || action.task_id) {
@@ -981,22 +1041,25 @@ const closeTab = (tabId, event) => {
         <div v-if="isTabOpen('pets')" v-show="currentTab === 'pets'" class="tab-pane pet-tab-pane"><PetMenu :active="currentTab === 'pets'" :agents="petAgents" :projects="projects" @agents-updated="refreshMusicPetAgent" /></div>
         <div v-if="isTabOpen('changes')" v-show="currentTab === 'changes'" class="tab-pane code-changes-pane"><CodeChanges /></div>
         <div v-if="isTabOpen('tasks')" v-show="currentTab === 'tasks'" class="tab-pane"><TaskManager :navigate-to="navigateTo" @navigated="navigateTo = null" @navigate="handleWorkbenchNavigate" @resume-project-permission="resumeProjectPermission" /></div>
-        <div v-if="isTabOpen('trace-replay')" v-show="currentTab === 'trace-replay'" class="tab-pane"><TraceReplay :navigate-to="navigateTo" /></div>
+        <div v-if="isTabOpen('trace-replay')" v-show="currentTab === 'trace-replay'" class="tab-pane"><TraceReplay :navigate-to="navigateTo" @navigate="handleWorkbenchNavigate" /></div>
         <div v-if="isTabOpen('code-intelligence')" v-show="currentTab === 'code-intelligence'" class="tab-pane"><CodeIntelligence @navigate="handleCodeIntelligenceNavigate" /></div>
         <div v-if="isTabOpen('autodev')" v-show="currentTab === 'autodev'" class="tab-pane"><AutoDevOps @navigate="handleWorkbenchNavigate" /></div>
         <div v-if="isTabOpen('knowledge')" v-show="currentTab === 'knowledge'" class="tab-pane"><KnowledgeBase /></div>
         <div v-if="isTabOpen('memory-center')" v-show="currentTab === 'memory-center'" class="tab-pane"><MemoryCenter /></div>
         <div v-if="isTabOpen('cleanup-center')" v-show="currentTab === 'cleanup-center'" class="tab-pane"><CleanupCenter @navigate="switchTab" /></div>
-        <div v-if="isTabOpen('cron')" v-show="currentTab === 'cron'" class="tab-pane"><CronJobs @navigate="handleWorkbenchNavigate" /></div>
+        <div v-if="isTabOpen('cron')" v-show="currentTab === 'cron'" class="tab-pane"><CronJobs :navigate-to="navigateTo" @navigated="navigateTo = null" @navigate="handleWorkbenchNavigate" /></div>
         <div v-if="isTabOpen('terminal')" v-show="currentTab === 'terminal'" class="tab-pane"><Terminal @analyze-output="handleTerminalAnalysis" /></div>
         <div v-if="isTabOpen('dashboard')" v-show="currentTab === 'dashboard'" class="tab-pane scrollable-pane"><UsabilityWorkbench @navigate="handleWorkbenchNavigate" /></div>
+        <div v-if="isTabOpen('access-required')" v-show="currentTab === 'access-required'" class="tab-pane"><section class="access-required"><div class="access-required-icon"><ShieldCheck :size="30" /></div><h1>等待管理员授权</h1><p>当前账户尚未分配可使用的功能或项目。请联系管理员完成权限配置。</p><button type="button" @click="reloadCurrentPage">刷新权限</button></section></div>
         <div v-if="isTabOpen('metrics')" v-show="currentTab === 'metrics'" class="tab-pane"><AgentMetrics :active="currentTab === 'metrics'" @navigate="handleWorkbenchNavigate" /></div>
         <div v-if="isTabOpen('search')" v-show="currentTab === 'search'" class="tab-pane"><SearchHistory @go-to="goToResult" /></div>
         <!-- Load the audio engine on first use; keep it mounted afterwards for cross-page playback. -->
         <div v-if="musicPlayerActivated" v-show="currentTab === 'music'" class="tab-pane"><MusicPlayer :active="currentTab === 'music'" :agent-label="musicPetLabel" /></div>
         <MusicRemoteHost @switch-tab="switchTab" />
-        <div v-if="isTabOpen('settings')" v-show="currentTab === 'settings'" class="tab-pane"><Settings /></div>
+        <div v-if="isTabOpen('settings')" v-show="currentTab === 'settings'" class="tab-pane"><Settings :navigate-to="navigateTo" @navigated="navigateTo = null" /></div>
         <div v-if="isTabOpen('menumanager')" v-show="currentTab === 'menumanager'" class="tab-pane"><MenuManager :tabs="tabs" :config="menuConfig" :navigation-state="navigationState" :auth-role="authRole" @update-config="updateMenuConfiguration" /></div>
+        <div v-if="isTabOpen('user-management')" v-show="currentTab === 'user-management'" class="tab-pane access-tab-pane"><UserManagement mode="users" @open-permissions="switchTab('permission-management')" /></div>
+        <div v-if="isTabOpen('permission-management')" v-show="currentTab === 'permission-management'" class="tab-pane access-tab-pane"><PermissionManagement mode="permissions" @open-users="switchTab('user-management')" /></div>
         <PageLoadingOverlay
           v-if="activePageLoadState.loading"
           :page-id="currentTab"
@@ -1333,6 +1396,11 @@ const closeTab = (tabId, event) => {
   overflow: hidden;
 }
 
+.tab-pane.access-tab-pane {
+  min-height: 0;
+  overflow: hidden;
+}
+
 .tab-pane.pet-tab-pane {
   overflow-x: hidden;
   overflow-y: auto;
@@ -1563,5 +1631,9 @@ const closeTab = (tabId, event) => {
 .group-arrow.collapsed { transform: rotate(-90deg); }
 .group-icon { flex: 0 0 auto; opacity: 0.82; }
 .nav-group-items { display: flex; flex-direction: column; gap: 2px; }
+.access-required { min-height: 55vh; display: grid; place-content: center; justify-items: center; gap: 12px; text-align: center; color: var(--text-primary); }
+.access-required-icon { width: 64px; height: 64px; display: grid; place-items: center; border-radius: 12px; background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
+.access-required p { max-width: 420px; color: var(--text-muted); margin: 0; }
+.access-required button { border: 1px solid var(--border-color); background: var(--control-bg); color: var(--text-primary); border-radius: 6px; padding: 9px 14px; cursor: pointer; }
 
 </style>

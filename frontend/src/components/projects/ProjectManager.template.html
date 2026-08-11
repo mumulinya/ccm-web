@@ -121,9 +121,9 @@
               />
               <CommandResultCard v-if="msg.type === 'command_result'" :result="msg.commandResult" />
               <!-- 思考过程消息 -->
-              <template v-else-if="msg.role === 'thinking'">
-                <ConversationProcessingState
-                  v-if="shouldShowCompactProcessingState(projectAgentExecutionEvents, messages, i)"
+                <template v-else-if="msg.role === 'thinking'">
+                  <ConversationProcessingState
+                  v-if="!projectTaskExecutionActive && shouldShowCompactProcessingState(projectAgentExecutionEvents, messages, i)"
                   compact
                   title="正在思考…"
                   detail=""
@@ -134,10 +134,11 @@
                 <div>{{ msg.content }}</div>
               </div>
               <!-- Agent 回复 -->
-              <div v-else class="bubble">
-                <ProjectAgentMessage
-                  :message="msg"
-                  :task-card="getProjectTaskCard(msg)"
+               <div v-else-if="!(msg.role === 'assistant' && msg.streaming && !String(msg.content || '').trim() && projectTaskExecutionActive)" class="bubble">
+                 <ProjectAgentMessage
+                   :message="msg"
+                   :task-card="getProjectTaskCard(msg)"
+                   :suppress-thinking="projectTaskExecutionActive"
                   :is-last-streaming="isStreaming && i === messages.length - 1"
                   :hide-file-changes="hasTerminalExecutionForMessage(projectAgentExecutionEvents, messages, i)"
                   @task-action="handleProjectTaskAction(msg, $event)"
@@ -172,8 +173,16 @@
           @approve="approveProjectPermission"
           @reject="rejectProjectPermission"
         />
+        <ActiveTaskPlanDock
+          :events="projectAgentExecutionEvents"
+          :messages="messages"
+          :exact-session-id="currentSession || ''"
+          :active="projectAgentExecutionEnabled && !!currentProject && !!currentSession"
+          @locate="locateProjectPlanStep"
+          @execution-action="handleProjectPlanAction"
+        />
         <ConversationTurnControls
-          :busy="isStreaming"
+          :busy="projectTurnBusy"
           :turns="projectTurnControl.turns.value"
           :stopping="stoppingProjectTurn"
           @stop="stopStreaming"
@@ -189,7 +198,7 @@
           :files="chatFiles"
           :slash="slash"
           :disabled="!currentProject || !hasProjectConversation"
-          :busy="isStreaming"
+          :busy="projectTurnBusy"
           :allow-input-while-busy="true"
           @files-selected="onChatFilesSelected"
           @remove-file="removeChatFile"

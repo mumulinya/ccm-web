@@ -1,4 +1,5 @@
 <script setup>
+import { computed } from 'vue'
 import EmptyState from '../common/EmptyState.vue'
 import LoadingSkeleton from '../common/LoadingSkeleton.vue'
 import TaskExperienceCard from '../tasks/TaskExperienceCard.vue'
@@ -30,7 +31,7 @@ import {
 } from '../../utils/globalAgentAttachments.js'
 import { getCopyableMessageText } from '../../utils/messageActions.js'
 
-defineProps({
+const props = defineProps({
   messages: { type: Array, default: () => [] },
   executionEvents: { type: Array, default: () => [] },
   executionEventsEnabled: { type: Boolean, default: true },
@@ -68,6 +69,29 @@ defineProps({
 })
 
 const emit = defineEmits(['edit-message', 'open-file-change', 'open-file-changes'])
+const isTaskExecutionMessage = (msg) => !!(
+  (typeof getGlobalTaskCard === 'function' && getGlobalTaskCard(msg))
+  || msg?.globalMission
+  || msg?.globalMissionSupervisor
+  || msg?.agenticRun?.mission_id
+  || msg?.agenticRun?.supervisor_id
+  || msg?.type === 'global_mission'
+)
+
+const globalTaskExecutionActive = computed(() => (
+  props.isSending && props.messages.some((message) => {
+    if (!isTaskExecutionMessage(message)) return false
+    const status = String(
+      message?.taskExperience?.status
+      || message?.taskExperience?.phase
+      || message?.task?.status
+      || message?.task?.phase
+      || message?.agenticRun?.status
+      || '',
+    ).toLowerCase()
+    return !['completed', 'done', 'succeeded', 'failed', 'cancelled', 'canceled', 'reverted'].includes(status)
+  })
+))
 </script>
 
 <template>
@@ -109,7 +133,7 @@ const emit = defineEmits(['edit-message', 'open-file-change', 'open-file-changes
               @open-file-change="emit('open-file-change', $event)"
               @execution-action="handleGlobalTaskAction(msg, $event)"
             />
-            <div class="chat-bubble">
+             <div v-if="!(msg.role === 'assistant' && msg.streaming && !String(msg.content || '').trim() && isTaskExecutionMessage(msg))" class="chat-bubble">
               <!-- 助手消息判定 -->
               <template v-if="msg.role === 'assistant'">
                 <div
@@ -124,8 +148,16 @@ const emit = defineEmits(['edit-message', 'open-file-change', 'open-file-changes
                   :data-run-id="msg.agenticRun?.id || undefined"
                   aria-live="polite"
                 >
-                  <span class="stream-dot" :class="{ active: msg.streaming }"></span>
-                  <span>{{ msg.streaming ? '正在回复...' : '回复已完成' }}</span>
+                   <ConversationProcessingState
+                     v-if="msg.streaming && !String(msg.content || '').trim() && !isTaskExecutionMessage(msg)"
+                    compact
+                    title="正在思考…"
+                    detail="正在理解你的问题并整理当前上下文"
+                  />
+                  <template v-else>
+                    <span class="stream-dot" :class="{ active: msg.streaming }"></span>
+                    <span>{{ msg.streaming ? '正在回复...' : '回复已完成' }}</span>
+                  </template>
                 </div>
                 <div
                   v-else-if="msg.type === 'global_stream'"
@@ -323,7 +355,7 @@ const emit = defineEmits(['edit-message', 'open-file-change', 'open-file-changes
                     <!-- 提交注释框 -->
                     <div style="margin-bottom: 12px;">
                       <label style="display: block; font-size: 13px; color: #aaa; margin-bottom: 6px;">提交注释 (Commit Message)</label>
-                      <textarea v-model="msg.commitMessage" placeholder="输入提交注释..." style="width: 100%; height: 60px; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); color: #fff; padding: 8px; border-radius: 6px; font-size: 13px; resize: none; font-family: inherit;"></textarea>
+                      <textarea v-model="msg.commitMessage" class="global-commit-message" placeholder="输入提交注释..."></textarea>
                     </div>
 
                     <!-- 提交控制 -->
@@ -466,7 +498,7 @@ const emit = defineEmits(['edit-message', 'open-file-change', 'open-file-changes
           
           <!-- 正在分析状态 -->
           <ConversationMessageShell
-            v-if="isSending && (!currentSession?.messages?.length || currentSession.messages[currentSession.messages.length - 1].role !== 'assistant')"
+            v-if="isSending && !globalTaskExecutionActive && (!currentSession?.messages?.length || currentSession.messages[currentSession.messages.length - 1].role !== 'assistant')"
             role="assistant"
             compact
             streaming

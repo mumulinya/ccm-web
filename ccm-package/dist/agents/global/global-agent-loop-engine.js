@@ -161,6 +161,7 @@ function emit(runtime, event, run) {
             scope: "global",
             scopeId: "global",
             exactSessionId: run.session_id,
+            anchorMessageId: `gam_${String(run.id || "result")}_assistant`,
             generation: Math.max(0, Number(run.resume_count || 0)),
             taskId: run.mission_id || run.id,
             eventType,
@@ -208,9 +209,39 @@ function appendGlobalRequirementPlan(run, decision, terminalStatus) {
     const actionRequired = workflowValue?.actionRequired === true || workflowValue?.action_required === true;
     if (!planSteps.length || (!actionRequired && !terminalStatus && !current))
         return null;
+    const runtimeDebug = (0, runtime_1.buildGlobalAgentSessionDebug)(run);
+    const runtimeTodos = Array.isArray(runtimeDebug?.todos) ? runtimeDebug.todos : [];
+    const todoByTitle = new Map(runtimeTodos.map((todo) => [String(todo?.text || "").trim(), String(todo?.status || "")]));
+    const currentByTitle = new Map((Array.isArray(current?.steps) ? current.steps : []).map((step) => [String(step?.title || "").trim(), String(step?.status || "pending")]));
+    const blockedStepIndex = Math.max(0, planSteps.findIndex((title) => {
+        const todoStatus = todoByTitle.get(title);
+        const previous = currentByTitle.get(title);
+        return todoStatus === "blocked" || todoStatus === "in_progress" || previous === "running" || previous === "blocked";
+    }));
+    const stepStatuses = planSteps.map((title, index) => {
+        if (terminalStatus === "completed")
+            return "completed";
+        if (terminalStatus === "blocked") {
+            if (index === blockedStepIndex)
+                return "blocked";
+            return index < blockedStepIndex ? "completed" : "pending";
+        }
+        const todoStatus = todoByTitle.get(title);
+        if (todoStatus === "done")
+            return "completed";
+        if (todoStatus === "blocked")
+            return "blocked";
+        if (todoStatus === "in_progress")
+            return "running";
+        const previous = currentByTitle.get(title);
+        if (previous && previous !== "blocked")
+            return previous;
+        return index === 0 ? "running" : "pending";
+    });
     const stablePlan = {
         goal: String(run.original_user_message || run.user_message || "完成当前任务。"),
         steps: planSteps,
+        stepStatuses,
         scope: Array.isArray(workflowValue?.impactScope || workflowValue?.impact_scope) ? (workflowValue.impactScope || workflowValue.impact_scope).map(String) : [],
     };
     const checksum = crypto.createHash("sha256").update(JSON.stringify(stablePlan)).digest("hex");
@@ -229,7 +260,7 @@ function appendGlobalRequirementPlan(run, decision, terminalStatus) {
             description: title,
             outcome: "完成后进入下一阶段，并保留可验证的结果。",
             dependsOn: index > 0 ? [`step_${index}`] : [],
-            status: terminalStatus === "completed" ? "completed" : terminalStatus === "blocked" ? "blocked" : index === 0 ? "running" : "pending",
+            status: stepStatuses[index],
         })),
         scope: stablePlan.scope,
         expectedResults: Array.isArray(decision?.completion?.evidence) ? decision.completion.evidence : [],
@@ -246,10 +277,16 @@ function appendGlobalRequirementPlan(run, decision, terminalStatus) {
         scope: "global",
         scopeId: "global",
         exactSessionId: run.session_id,
+        anchorMessageId: `gam_${String(run.id || "result")}_assistant`,
         generation: Math.max(0, Number(run.resume_count || 0)),
         taskId: run.mission_id || run.id,
         plan,
     });
+}
+function markGlobalAgentToolTodo(run, tool, status, text = "") {
+    const todos = (0, runtime_1.markGlobalAgentToolTodo)(run, tool, status, text);
+    appendGlobalRequirementPlan(run, null);
+    return todos;
 }
 function classifyGlobalAgentUserSteer(message, requestedKind = "auto") {
     const requested = String(requestedKind || "auto").trim().toLowerCase();
@@ -1060,7 +1097,7 @@ async function continueLoop(run, runtime) {
                 emit(runtime, { type: "decision", step }, run);
                 (0, runtime_1.recordGlobalAgentRuntimeOutput)(run, { type: "decision", state: decision.state, message: step.message, intent: quality.intent });
                 if (decision.state === "needs_confirmation") {
-                    (0, runtime_1.markGlobalAgentToolTodo)(run, "", "blocked", decision.message || "等待用户澄清");
+                    markGlobalAgentToolTodo(run, "", "blocked", decision.message || "等待用户澄清");
                     (0, reasoning_loop_1.setReasoningAssertion)(run.reasoning_loop, { id: "clarification", label: "目标与影响范围已澄清", kind: "intent", status: "blocked", reason: decision.message });
                     (0, reasoning_loop_1.recordReasoningDeviation)(run.reasoning_loop, "ambiguous_intent", decision.message || normalizedIntent.reason, "warning");
                     run.status = "waiting_clarification";
@@ -1118,10 +1155,10 @@ async function continueLoop(run, runtime) {
                         parts.push(`风险：\n- ${completion.risks.join("\n- ")}`);
                     if (includeDeliveryDetails && completion.next_action)
                         parts.push(`下一步：${completion.next_action}`);
-                    (0, runtime_1.markGlobalAgentToolTodo)(run, "", "done", "本轮回复已整理");
+                    markGlobalAgentToolTodo(run, "", "done", "本轮回复已整理");
                     return completeRun(run, runtime, "completed", parts.filter(Boolean).join("\n\n"));
                 }
-                (0, runtime_1.markGlobalAgentToolTodo)(run, "", "blocked", "非终态决策缺少工具");
+                markGlobalAgentToolTodo(run, "", "blocked", "非终态决策缺少工具");
                 return completeRun(run, runtime, "failed", "当前决策还没有可执行动作，我已停止并保留排障信息。", "non_terminal_without_tool");
             }
             let args;
@@ -1158,7 +1195,7 @@ async function continueLoop(run, runtime) {
             run.shadow_mode = quality.policy.shadowMode;
             step.decision = quality;
             if (quality.requiresClarification) {
-                (0, runtime_1.markGlobalAgentToolTodo)(run, decision.tool.name, "blocked", quality.clarificationQuestion);
+                markGlobalAgentToolTodo(run, decision.tool.name, "blocked", quality.clarificationQuestion);
                 (0, reasoning_loop_1.setReasoningAssertion)(run.reasoning_loop, { id: "clarification", label: "目标、授权与影响范围已澄清", kind: "intent", status: "blocked", reason: quality.clarificationReasons.join("；") });
                 (0, reasoning_loop_1.recordReasoningDeviation)(run.reasoning_loop, "decision_quality_gap", quality.clarificationReasons.join("；"), "warning");
                 run.steps.push(step);
@@ -1181,7 +1218,7 @@ async function continueLoop(run, runtime) {
                 return run;
             }
             if (quality.shadowed) {
-                (0, runtime_1.markGlobalAgentToolTodo)(run, decision.tool.name, "done", `影子模式记录 ${decision.tool.name}`);
+                markGlobalAgentToolTodo(run, decision.tool.name, "done", `影子模式记录 ${decision.tool.name}`);
                 (0, runtime_1.recordGlobalAgentRuntimeOutput)(run, { type: "tool_shadowed", tool: decision.tool.name, risk, arguments: args });
                 step.observation = { success: true, shadowed: true, executed: false, proposed_tool: decision.tool.name, arguments: args };
                 run.steps.push(step);
@@ -1211,14 +1248,14 @@ async function continueLoop(run, runtime) {
             if (priorSame >= 2) {
                 step.error = "检测到重复工具调用，已阻止死循环";
                 run.steps.push(step);
-                (0, runtime_1.markGlobalAgentToolTodo)(run, decision.tool.name, "blocked", step.error);
+                markGlobalAgentToolTodo(run, decision.tool.name, "blocked", step.error);
                 return completeRun(run, runtime, "failed", step.error, "duplicate_tool_loop");
             }
             const permission = (0, runtime_1.evaluateGlobalAgentPermission)({ run, tool: decision.tool.name, args, risk, signature });
             if (permission.denied) {
                 step.error = `权限规则拒绝执行 ${decision.tool.name}${permission.rule?.reason ? `：${permission.rule.reason}` : ""}`;
                 run.steps.push(step);
-                (0, runtime_1.markGlobalAgentToolTodo)(run, decision.tool.name, "blocked", step.error);
+                markGlobalAgentToolTodo(run, decision.tool.name, "blocked", step.error);
                 (0, runtime_1.recordGlobalAgentRuntimeOutput)(run, { type: "permission_denied", tool: decision.tool.name, risk, rule: permission.rule });
                 return completeRun(run, runtime, "failed", step.error, "permission_denied");
             }
@@ -1292,14 +1329,14 @@ async function continueLoop(run, runtime) {
                     planMode: run.plan_mode || null,
                 }, run);
                 (0, runtime_1.recordGlobalAgentRuntimeOutput)(run, { type: "confirmation_required", tool: decision.tool.name, risk, signature, permission });
-                (0, runtime_1.markGlobalAgentToolTodo)(run, decision.tool.name, "blocked", run.final_reply);
+                markGlobalAgentToolTodo(run, decision.tool.name, "blocked", run.final_reply);
                 return run;
             }
             const preHooks = (0, runtime_1.runGlobalAgentHooks)("pre_tool_use", { run, tool: decision.tool.name, args, risk });
             if (preHooks.blocked) {
                 step.error = `Hook 阻止执行 ${decision.tool.name}${preHooks.message ? `：${preHooks.message}` : ""}`;
                 run.steps.push(step);
-                (0, runtime_1.markGlobalAgentToolTodo)(run, decision.tool.name, "blocked", step.error);
+                markGlobalAgentToolTodo(run, decision.tool.name, "blocked", step.error);
                 (0, runtime_1.recordGlobalAgentRuntimeOutput)(run, { type: "hook_blocked", phase: "pre_tool_use", tool: decision.tool.name, risk, hooks: preHooks.fired });
                 (0, reliability_ledger_1.appendTraceEvent)(run.trace_id, { id: `${run.id}:hook_blocked:${signature}`, type: "global_agent.hook_blocked", status: "warning", message: step.error, data: { tool: decision.tool.name, risk, hooks: preHooks.fired } });
                 return completeRun(run, runtime, "failed", step.error, "hook_blocked");
@@ -1323,9 +1360,12 @@ async function continueLoop(run, runtime) {
             catch { }
             if ((0, assistant_progress_1.assistantProgressNarrationEnabled)(progressConfig)) {
                 const previousMessage = [...run.steps].reverse().find(item => item.tool)?.message || "";
-                const decisionProgress = (0, user_facing_text_1.sanitizeMainAgentUserFacingText)(String(decision.message || "")).slice(0, 600);
+                const decisionProgress = (0, assistant_progress_1.sanitizeAssistantProgressText)((0, user_facing_text_1.sanitizeMainAgentUserFacingText)(String(decision.message || "")));
                 const progressText = run.tool_calls === 0
-                    ? (decisionProgress || (0, assistant_progress_1.buildAssistantProgressFallback)([{ name: decision.tool.name }]))
+                    ? (decisionProgress || (0, assistant_progress_1.buildAssistantProgressFallback)([{ name: decision.tool.name }], {
+                        target: decision.intent?.target_refs?.[0] || decision.tool.name,
+                        goal: run.user_message,
+                    }))
                     : (decisionProgress && decisionProgress !== previousMessage ? decisionProgress : "");
                 if (progressText)
                     (0, user_visible_agent_events_1.appendAssistantProgress)({
@@ -1340,7 +1380,7 @@ async function continueLoop(run, runtime) {
                         title: "全局 Agent",
                     });
             }
-            (0, runtime_1.markGlobalAgentToolTodo)(run, decision.tool.name, "in_progress", step.message || `执行 ${decision.tool.name}`);
+            markGlobalAgentToolTodo(run, decision.tool.name, "in_progress", step.message || `执行 ${decision.tool.name}`);
             (0, runtime_1.recordGlobalAgentRuntimeOutput)(run, { type: "tool_started", tool: decision.tool.name, risk, arguments: args });
             emit(runtime, { type: "tool_started", tool: step.tool, message: step.message }, run);
             emit(runtime, { type: "tool_activity", phase: "started", tool: decision.tool.name, risk, step: step.index }, run);
@@ -1375,7 +1415,7 @@ async function continueLoop(run, runtime) {
                         reason: question,
                     });
                     (0, reasoning_loop_1.recordReasoningDeviation)(run.reasoning_loop, "tool_precondition_missing", question, "warning");
-                    (0, runtime_1.markGlobalAgentToolTodo)(run, decision.tool.name, "blocked", question);
+                    markGlobalAgentToolTodo(run, decision.tool.name, "blocked", question);
                     run.steps.push(step);
                     run.pending_tool = null;
                     run.status = "waiting_clarification";
@@ -1467,7 +1507,7 @@ async function continueLoop(run, runtime) {
                 });
                 (0, runtime_1.runGlobalAgentHooks)("post_tool_use", { run, tool: decision.tool.name, args, risk, observation: persistentObservation });
                 (0, runtime_1.recordGlobalAgentRuntimeOutput)(run, { type: "tool_completed", tool: decision.tool.name, sourceToolName: decision.tool.name === "invoke_mcp" ? (args?.tool_name || args?.toolName || "") : "", risk, duration_ms: step.duration_ms, observation: step.observation });
-                (0, runtime_1.markGlobalAgentToolTodo)(run, decision.tool.name, toolSucceeded ? "done" : "blocked", toolSucceeded ? `${decision.tool.name} 完成` : String(result?.error || `${decision.tool.name} 返回失败`));
+                markGlobalAgentToolTodo(run, decision.tool.name, toolSucceeded ? "done" : "blocked", toolSucceeded ? `${decision.tool.name} 完成` : String(result?.error || `${decision.tool.name} 返回失败`));
                 emit(runtime, { type: "tool_completed", tool: step.tool, observation: step.observation }, run);
                 if (!toolSucceeded && (0, assistant_progress_1.assistantProgressNarrationEnabled)(progressConfig))
                     (0, user_visible_agent_events_1.appendAssistantProgress)({
@@ -1510,7 +1550,7 @@ async function continueLoop(run, runtime) {
                 });
                 (0, runtime_1.runGlobalAgentHooks)("post_tool_use", { run, tool: decision.tool.name, args, risk, observation: step.observation });
                 (0, runtime_1.recordGlobalAgentRuntimeOutput)(run, { type: "tool_failed", tool: decision.tool.name, risk, duration_ms: step.duration_ms, error: step.error });
-                (0, runtime_1.markGlobalAgentToolTodo)(run, decision.tool.name, "blocked", step.error);
+                markGlobalAgentToolTodo(run, decision.tool.name, "blocked", step.error);
                 emit(runtime, { type: "tool_failed", tool: step.tool, error: step.error }, run);
                 if ((0, assistant_progress_1.assistantProgressNarrationEnabled)(progressConfig))
                     (0, user_visible_agent_events_1.appendAssistantProgress)({
@@ -1694,7 +1734,7 @@ async function resumeGlobalAgentRun(id, runtime, options = {}) {
             const preHooks = (0, runtime_1.runGlobalAgentHooks)("pre_tool_use", { run, tool: pending.name, args: pending.arguments, risk: pending.risk });
             if (preHooks.blocked)
                 throw new Error(`Hook 阻止执行 ${pending.name}${preHooks.message ? `：${preHooks.message}` : ""}`);
-            (0, runtime_1.markGlobalAgentToolTodo)(run, pending.name, "in_progress", `确认后执行 ${pending.name}`);
+            markGlobalAgentToolTodo(run, pending.name, "in_progress", `确认后执行 ${pending.name}`);
             (0, runtime_1.recordGlobalAgentRuntimeOutput)(run, { type: "tool_started", tool: pending.name, risk: pending.risk, confirmed: true, arguments: pending.arguments });
             emit(runtime, { type: "tool_started", tool: pending, confirmed: true }, run);
             const result = await runtime.executeTool(pending.name, pending.arguments, run, activeRunAbortControllers.get(run.id)?.signal);
@@ -1720,7 +1760,7 @@ async function resumeGlobalAgentRun(id, runtime, options = {}) {
             (0, reliability_ledger_1.appendTraceEvent)(run.trace_id, { id: `${run.id}:tool_confirmed:${pending.signature}`, type: "global_agent.tool_completed", status: "ok", message: `${pending.name} 确认后执行完成`, data: { tool: pending.name, risk: pending.risk } });
             (0, runtime_1.runGlobalAgentHooks)("post_tool_use", { run, tool: pending.name, args: pending.arguments, risk: pending.risk, observation: persistentObservation });
             (0, runtime_1.recordGlobalAgentRuntimeOutput)(run, { type: "tool_completed", tool: pending.name, sourceToolName: pending.name === "invoke_mcp" ? (pending.arguments?.tool_name || pending.arguments?.toolName || "") : "", risk: pending.risk, confirmed: true, observation: compactObservation(result) });
-            (0, runtime_1.markGlobalAgentToolTodo)(run, pending.name, result?.success === false || result?.error ? "blocked" : "done", result?.error || `${pending.name} 确认后执行完成`);
+            markGlobalAgentToolTodo(run, pending.name, result?.success === false || result?.error ? "blocked" : "done", result?.error || `${pending.name} 确认后执行完成`);
             emit(runtime, { type: "tool_completed", tool: pending, observation: result, confirmed: true }, run);
             if (!(result?.success === false || result?.error) && step)
                 emitGlobalDispatchLaunchProgress(runtime, run, step);
@@ -1745,7 +1785,7 @@ async function resumeGlobalAgentRun(id, runtime, options = {}) {
             (0, reliability_ledger_1.appendTraceEvent)(run.trace_id, { id: `${run.id}:tool_confirmed_failed:${pending.signature}`, type: "global_agent.tool_failed", status: "error", message: error?.message || String(error), data: { tool: pending.name, risk: pending.risk } });
             (0, runtime_1.runGlobalAgentHooks)("post_tool_use", { run, tool: pending.name, args: pending.arguments, risk: pending.risk, observation: { success: false, error: error?.message || String(error) } });
             (0, runtime_1.recordGlobalAgentRuntimeOutput)(run, { type: "tool_failed", tool: pending.name, risk: pending.risk, confirmed: true, error: error?.message || String(error) });
-            (0, runtime_1.markGlobalAgentToolTodo)(run, pending.name, "blocked", error?.message || String(error));
+            markGlobalAgentToolTodo(run, pending.name, "blocked", error?.message || String(error));
         }
         run.pending_tool = null;
         run.updated_at = nowIso(runtime);

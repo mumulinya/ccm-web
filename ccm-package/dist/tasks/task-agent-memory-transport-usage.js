@@ -186,6 +186,10 @@ function buildTaskAgentMemoryTransportUsageReceipt(input = {}) {
         provider_runtime_identity_checksum: String(usageProvenance.provider_runtime_identity_checksum || ""),
         usage_provenance: usageProvenance,
         transport_mode: String(input.transportMode || "legacy"),
+        session_continuity_mode: ["fresh", "reused", "isolated_branch"].includes(String(input.sessionContinuityMode || ""))
+            ? String(input.sessionContinuityMode)
+            : "task_scoped",
+        native_session_reused: input.nativeSessionReused === true,
         plan_checksum: String(input.planChecksum || ""),
         manifest_checksum: String(input.manifestChecksum || ""),
         input_tokens: accountedInputTokens,
@@ -228,6 +232,10 @@ function verifyTaskAgentMemoryTransportUsageReceipt(receipt, expected = {}) {
         issues.push("memory_transport_usage_snapshot_missing");
     if (!new Set(["full", "delta", "continuation", "legacy"]).has(String(receipt?.transport_mode || "")))
         issues.push("memory_transport_usage_mode_invalid");
+    if (!new Set(["task_scoped", "fresh", "reused", "isolated_branch"]).has(String(receipt?.session_continuity_mode || "task_scoped")))
+        issues.push("memory_transport_usage_continuity_mode_invalid");
+    if (receipt?.native_session_reused !== undefined && typeof receipt.native_session_reused !== "boolean")
+        issues.push("memory_transport_usage_native_session_reused_invalid");
     for (const field of ["input_tokens", "direct_input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens", "provider_total_tokens", "accounted_total_tokens", "final_prompt_estimated_tokens", "memory_transport_estimated_tokens"]) {
         if (!Number.isFinite(Number(receipt?.[field])) || Number(receipt?.[field]) < 0)
             issues.push(`memory_transport_usage_${field}_invalid`);

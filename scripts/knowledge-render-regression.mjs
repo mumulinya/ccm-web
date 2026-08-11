@@ -2,14 +2,17 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { chromium } from 'playwright'
+import { startPlaywrightAppServer } from './playwright-app-server.mjs'
 
 const root = path.resolve(import.meta.dirname, '..')
-const baseUrl = String(process.env.CCM_BASE_URL || 'http://127.0.0.1:3082').replace(/\/+$/, '')
+const appHost = process.env.CCM_BASE_URL ? null : await startPlaywrightAppServer(root, { port: 3082 })
+const baseUrl = String(process.env.CCM_BASE_URL || appHost.baseUrl).replace(/\/+$/, '')
 const outputDir = path.join(root, 'scratch', 'knowledge-render-regression')
 fs.mkdirSync(outputDir, { recursive: true })
 
-const documentsResponse = await fetch(`${baseUrl}/api/rag/documents`)
-const documentsData = await documentsResponse.json()
+const documentsData = process.env.CCM_BASE_URL
+  ? await fetch(`${baseUrl}/api/rag/documents`).then(response => response.json())
+  : { success: true, documents: [], status: { state: 'ready', chunks: 1 } }
 const sourceDocument = documentsData.documents?.[0] || {
   name: 'knowledge-render-fixture.md',
   title: '知识页面回归测试资料',
@@ -43,7 +46,7 @@ const runViewport = async (name, viewport) => {
   await page.route('**/api/auth/session', route => route.fulfill({
     status: 200,
     contentType: 'application/json',
-    body: JSON.stringify({ success: true, authenticated: true, user: { username: 'knowledge-render-selftest' } })
+    body: JSON.stringify({ success: true, authenticated: true, user: { username: 'knowledge-render-selftest', role: 'admin' } })
   }))
   await page.route('https://fonts.googleapis.com/**', route => route.fulfill({
     status: 200,
@@ -143,6 +146,7 @@ try {
   process.exitCode = 1
 } finally {
   await browser.close()
+  if (appHost) await appHost.server.close()
   fs.writeFileSync(path.join(outputDir, 'report.json'), JSON.stringify(report, null, 2))
   console.log(JSON.stringify(report, null, 2))
 }

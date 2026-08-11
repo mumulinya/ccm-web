@@ -84,6 +84,7 @@ const group_orchestrator_prompts_1 = require("./group-orchestrator-prompts");
 const group_orchestrator_coded_1 = require("./group-orchestrator-coded");
 const main_agent_context_source_continuity_1 = require("../../system/main-agent-context-source-continuity");
 const group_orchestrator_llm_1 = require("./group-orchestrator-llm");
+const user_visible_agent_events_1 = require("../../system/user-visible-agent-events");
 exports.GROUP_MEMORY_REPLAY_REPAIR_WORK_ITEMS_DIR = path.join(group_orchestrator_config_1.CCM_DIR, "group-memory-replay-repair-work-items");
 exports.GROUP_MEMORY_REPLAY_REPAIR_DISPATCH_PLANS_DIR = path.join(group_orchestrator_config_1.CCM_DIR, "group-memory-replay-repair-dispatch-plans");
 exports.GROUP_MEMORY_REPLAY_REPAIR_DISPATCH_BINDINGS_DIR = path.join(group_orchestrator_config_1.CCM_DIR, "group-memory-replay-repair-dispatch-bindings");
@@ -657,14 +658,20 @@ async function runGroupOrchestratorCore(input) {
             assignments: [],
             runtime: "llm-not-configured",
             agentBoundary: (0, group_orchestrator_config_1.buildGroupMainAgentBoundary)("llm-not-configured"),
-            content: [
-                "主 Agent 暂时不能开始协调：大模型 API 未配置完整。",
-                "",
-                `原因：${configIssue}`,
-                "",
-                "请到 设置 -> 群聊主 Agent 模型配置 中填写 Base URL、API Key 和模型名。",
-                "配置完成后，主 Agent 会先调用大模型理解需求，再分派给项目 Agent。"
-            ].join("\n"),
+            providerFailure: {
+                kind: "configuration",
+                code: "CCM_MODEL_NOT_CONFIGURED",
+                safeSummary: String(configIssue).slice(0, 220),
+                contentStored: false,
+            },
+            providerFailureTechnical: {
+                schema: "ccm-model-failure-technical-v1",
+                category: "configuration",
+                code: "CCM_MODEL_NOT_CONFIGURED",
+                safeSummary: String(configIssue).slice(0, 220),
+                contentStored: false,
+            },
+            content: "大模型尚未配置，本次请求未开始。\n请完成模型配置后重试。",
         };
     }
     let reactiveCompactOwnership = null;
@@ -816,64 +823,104 @@ async function runGroupOrchestratorCore(input) {
         }
         const failure = classifyGroupOrchestratorFailure(error);
         const providerErrorSummary = summarizeGroupOrchestratorProviderError(error);
+        const visibleTurnId = String(input.turnId || input.turn_id || `${group.id}:${groupSessionId}:${Date.now()}`);
+        const anchorMessageId = String(input.anchorMessageId || input.anchor_message_id || "").trim();
+        const elapsedMs = Math.max(0, Number(error?.elapsedMs) || 0);
+        const providerFailure = {
+            kind: failure.kind,
+            code: String(error?.code || "CCM_MODEL_CALL_FAILED"),
+            retryExhausted: String(error?.code || "") === "CCM_MODEL_RETRY_EXHAUSTED",
+            attempts: Math.max(0, Number(error?.attempts) || 0),
+            maxAttempts: Math.max(0, Number(error?.maxAttempts) || 0),
+            elapsedMs,
+            attemptTimeoutMs: Math.max(0, Number(error?.attemptTimeoutMs) || 0),
+            totalTimeoutMs: Math.max(0, Number(error?.totalTimeoutMs) || 0),
+            safeSummary: providerErrorSummary,
+            contentStored: false,
+        };
+        if (group.id && groupSessionId)
+            (0, user_visible_agent_events_1.appendUserVisibleAgentEvent)({
+                eventId: `group-turn:${visibleTurnId}:interrupted`,
+                scope: "group",
+                scopeId: String(group.id),
+                exactSessionId: groupSessionId,
+                ...(anchorMessageId ? { anchorMessageId } : {}),
+                eventType: "result",
+                display: {
+                    title: "执行已中断",
+                    summary: failure.userSummary,
+                    status: "failed",
+                    ...(elapsedMs ? { durationMs: elapsedMs } : {}),
+                },
+                detail: {
+                    safeResult: providerFailure,
+                    availableActions: [
+                        { id: "retry-model-call", kind: "retry", label: "立即重试", enabled: true },
+                        { id: "view-model-error", kind: "view_error", label: "查看技术详情", enabled: true },
+                    ],
+                },
+                error: providerFailure.code,
+            });
         return {
             agent: coordinator.project,
             delegated: [],
             assignments: [],
             runtime: "llm-error",
-            providerFailure: {
-                kind: failure.kind,
-                code: String(error?.code || "CCM_MODEL_CALL_FAILED"),
-                retryExhausted: String(error?.code || "") === "CCM_MODEL_RETRY_EXHAUSTED",
-                attempts: Math.max(0, Number(error?.attempts) || 0),
-                maxAttempts: Math.max(0, Number(error?.maxAttempts) || 0),
-                elapsedMs: Math.max(0, Number(error?.elapsedMs) || 0),
-                attemptTimeoutMs: Math.max(0, Number(error?.attemptTimeoutMs) || 0),
-                totalTimeoutMs: Math.max(0, Number(error?.totalTimeoutMs) || 0),
+            providerFailure,
+            providerFailureTechnical: {
+                schema: "ccm-model-failure-technical-v1",
+                category: failure.kind,
+                code: providerFailure.code,
+                attempts: providerFailure.attempts,
+                maxAttempts: providerFailure.maxAttempts,
+                elapsedMs: providerFailure.elapsedMs,
+                retryExhausted: providerFailure.retryExhausted,
+                safeSummary: providerErrorSummary,
+                contentStored: false,
             },
             usage: error?.usage || null,
             contextRecovery: reactiveCompactOwnership ? { type: "reactive-compact-not-retried", ownership: reactiveCompactOwnership } : undefined,
             agentBoundary: (0, group_orchestrator_config_1.buildGroupMainAgentBoundary)("llm-error"),
-            content: [
-                failure.title,
-                "",
-                `错误：${providerErrorSummary}`,
-                "",
-                failure.guidance,
-            ].join("\n"),
+            content: [failure.userSummary, failure.userGuidance].filter(Boolean).join("\n"),
         };
     }
 }
 function classifyGroupOrchestratorFailure(error) {
+    const withLegacyGuidance = (failure) => ({
+        ...failure,
+        // Existing integrations still read this alias while the public projection
+        // uses userGuidance. Keep both fields synchronized during the migration.
+        guidance: failure.userGuidance,
+    });
     const code = String(error?.code || "").trim();
     const raw = String(error?.message || error || "").trim();
     if (code === "CCM_WORKFLOW_DECISION_INVALID"
         || /无效工作流|workflowDecision|workflow_decision|结构化工作流|有效 JSON|合法 JSON/i.test(raw)) {
-        return {
+        return withLegacyGuidance({
             kind: "workflow_contract",
-            title: "主 Agent 返回的工作流格式未通过校验，本轮不分派子 Agent。",
-            guidance: "这不是 API Key 或网络故障。请重试；如果持续出现，请检查当前模型或兼容端是否遵循 CCM 的结构化 JSON 工作流契约。",
-        };
+            userSummary: "主 Agent 没有生成可执行计划，本次请求未完成。",
+            userGuidance: "请重试；如果仍然失败，请检查当前模型配置。",
+        });
     }
     if (/CONTEXT|COMPACT|上下文|容量|prompt.{0,20}(?:long|large)|too.{0,10}long/i.test(`${code} ${raw}`)) {
-        return {
+        return withLegacyGuidance({
             kind: "context",
-            title: "主 Agent 上下文准备或压缩失败，本轮不分派子 Agent。",
-            guidance: "请查看当前会话容量和压缩状态；不要把这类错误误判为 API Key 失效。",
-        };
+            userSummary: "当前会话上下文整理失败，本次请求未完成。",
+            userGuidance: "请重试，或先压缩当前会话上下文。",
+        });
     }
     if (/^CCM_MODEL_|HTTP\s+\d{3}|fetch|network|socket|timeout|timed out|ECONN|ENOTFOUND|模型返回空响应|Provider/i.test(`${code} ${raw}`)) {
-        return {
+        return withLegacyGuidance({
             kind: "provider",
-            title: "主 Agent 大模型调用失败，本轮不分派子 Agent。",
-            guidance: "请检查主 Agent API 配置、网络、模型名或 Key 是否有效。",
-        };
+            userSummary: "大模型暂时不可用，本次请求未完成。",
+            userGuidance: "请检查模型配置或网络后重试。",
+        });
     }
-    return {
+    return withLegacyGuidance({
         kind: "internal",
-        title: "主 Agent 内部处理失败，本轮不分派子 Agent。",
-        guidance: "请查看本轮 Trace 和服务日志定位内部处理阶段；不要先修改可正常使用的 Provider 配置。",
-    };
+        userSummary: "主 Agent 暂时无法处理，本次请求未完成。",
+        userGuidance: "请重试；如果仍然失败，请查看技术详情。",
+    });
 }
 function summarizeGroupOrchestratorProviderError(error) {
     const raw = String(error?.message || error || "主 Agent Provider 调用失败").trim();

@@ -25,6 +25,7 @@ import {
 } from "./task-store";
 import { readJsonWithBackup, withFileLock, writeJsonAtomic } from "./atomic-json-file";
 import { ensureLegacyMetricsMigrated, recordMetricV3 } from "../system/metrics-v3";
+import { metricAgentResourceSummary } from "../agents/execution-kernel";
 
 const CCM_DIR = path.join(os.homedir(), ".cc-connect");
 const CONFIGS_DIR = path.join(CCM_DIR, "configs");
@@ -519,8 +520,16 @@ export function saveMetrics(metrics: any) {
 
 export function recordMetric(agent: string, data: any) {
   try {
+    const metricData = { ...(data || {}) };
+    try {
+      const resources = metricAgentResourceSummary(
+        String(metricData.taskId || metricData.task_id || ""),
+        String(metricData.executionId || metricData.execution_id || ""),
+      );
+      if (resources && !metricData.resources) metricData.resources = resources;
+    } catch {}
     ensureLegacyMetricsMigrated(loadMetrics());
-    recordMetricV3(agent, data);
+    recordMetricV3(agent, metricData);
     return true;
   } catch (error: any) {
     console.warn("[性能指标] 写入失败:", error?.message || error);

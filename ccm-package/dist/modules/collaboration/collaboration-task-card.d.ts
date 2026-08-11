@@ -43,6 +43,11 @@ export declare function buildMainAgentRecoverySummary(task: any, phase: string, 
         decision_reason: any;
         authorization_preserved: boolean;
         authorization_evidence: any;
+        recovery_state: any;
+        recovery_attempt: number;
+        recovery_max_attempts: number;
+        resume_phase: any;
+        skipped_work_item_count: number;
     };
 };
 export declare function taskCardPhase(task: any, executions: any[]): string;
@@ -6190,6 +6195,11 @@ export declare function buildTaskCardView(task: any, executions: any[], sessions
             decision_reason: any;
             authorization_preserved: boolean;
             authorization_evidence: any;
+            recovery_state: any;
+            recovery_attempt: number;
+            recovery_max_attempts: number;
+            resume_phase: any;
+            skipped_work_item_count: number;
         };
     };
     recoverySummary: {
@@ -6216,6 +6226,11 @@ export declare function buildTaskCardView(task: any, executions: any[], sessions
             decision_reason: any;
             authorization_preserved: boolean;
             authorization_evidence: any;
+            recovery_state: any;
+            recovery_attempt: number;
+            recovery_max_attempts: number;
+            resume_phase: any;
+            skipped_work_item_count: number;
         };
     };
     continuation_status: {
@@ -6482,6 +6497,11 @@ export declare function buildTaskCardView(task: any, executions: any[], sessions
                 decision_reason: any;
                 authorization_preserved: boolean;
                 authorization_evidence: any;
+                recovery_state: any;
+                recovery_attempt: number;
+                recovery_max_attempts: number;
+                resume_phase: any;
+                skipped_work_item_count: number;
             };
         };
         continuation_state: any;
@@ -10884,7 +10904,7 @@ export declare function buildUserContinuationStatus(task: any, phase?: string): 
 export declare function shouldResumeAfterGoalRevisionInterruption(task: any, executionFollowupRevision?: number): boolean;
 export declare function buildGoalRevisionInterruptedStatus(pending?: any[]): string;
 export declare function shouldShowUserTaskCard(task: any, summary?: any, executions?: any[]): boolean;
-export declare function timelineStatusForUser(item: any): "done" | "pending" | "failed" | "active" | "warning";
+export declare function timelineStatusForUser(item: any): "done" | "pending" | "failed" | "warning" | "active";
 export declare function timelineLabelForUser(item: any): string;
 export declare function buildUserWorkflowTimeline(task: any, summary: any, phase: string): any;
 export declare function buildUserAgentQuestionRows(summary: any): any;
@@ -10899,7 +10919,7 @@ export declare function buildUserWorkOrderPreview(task: any, summary?: any, plan
     summary: string;
     orders: any;
 };
-export declare function executionStoryStatus(conditionDone: boolean, conditionActive: boolean, phase: string): "done" | "pending" | "failed" | "active" | "warning";
+export declare function executionStoryStatus(conditionDone: boolean, conditionActive: boolean, phase: string): "done" | "pending" | "failed" | "warning" | "active";
 export declare function buildUserExecutionStory(task: any, summary?: any, executions?: any[], phase?: string, workOrderPreview?: any): {
     title: string;
     style: string;

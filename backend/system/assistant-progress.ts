@@ -9,20 +9,34 @@ export type AssistantProgressKind =
   | "verification"
   | "before_summary";
 
+export const USER_VISIBLE_PROGRESS_MAX_CHARS = 120;
+
 const PROGRESS_KINDS = new Set<AssistantProgressKind>([
   "before_tools", "key_finding", "direction_change", "blocker",
   "rework", "verification", "before_summary",
 ]);
 const SECRET_VALUE = /((?:api[_-]?key|access[_-]?token|refresh[_-]?token|authorization|cookie|password|passwd|secret|credential)\s*[:=]\s*["']?)[^\s,"'}]{6,}/gi;
-const INTERNAL_PROTOCOL = /(?:CCM_AGENT_RECEIPT|CCM_AGENT_REQUESTS|scratchpad|system[_ -]?prompt|native[_ -]?session|lease[_ -]?id|generation[_ -]?fence|trace[_ -]?id)/i;
+const INTERNAL_PROTOCOL = /(?:CCM_AGENT_RECEIPT|CCM_AGENT_REQUESTS|scratchpad|system[_ -]?prompt|native[_ -]?session|lease[_ -]?id|generation[_ -]?fence|trace[_ -]?id|workflowDecision|workflow_decision|dispatchPolicy|dispatch_policy|authorizationDirective|selectedSkills|requiresCodeChanges|requiresIndependentReview|memoryPolicy)/i;
 const RAW_JSON = /^\s*[\[{][\s\S]*[\]}]\s*$/;
+const RAW_OR_TRUNCATED_STRUCTURE = /^\s*[\[{](?=[\s\S]{0,160}["']?[A-Za-z_$][\w$-]*["']?\s*:)/;
 
 export function normalizeAssistantProgressKind(value: any, fallback: AssistantProgressKind = "before_tools"): AssistantProgressKind {
   const kind = String(value || "").trim().toLowerCase() as AssistantProgressKind;
   return PROGRESS_KINDS.has(kind) ? kind : fallback;
 }
 
-export function sanitizeAssistantProgressText(value: any, max = 600) {
+function firstSentences(value: string, maxSentences = 2) {
+  let sentenceCount = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    if (!/[。！？!?]/.test(value[index])) continue;
+    sentenceCount += 1;
+    if (sentenceCount >= maxSentences) return value.slice(0, index + 1).trim();
+  }
+  return value;
+}
+
+export function sanitizeAssistantProgressText(value: any, max = USER_VISIBLE_PROGRESS_MAX_CHARS) {
+  const safeMax = Math.max(1, Math.min(USER_VISIBLE_PROGRESS_MAX_CHARS, Number(max || USER_VISIBLE_PROGRESS_MAX_CHARS)));
   let text = String(value ?? "")
     .replace(/```[\s\S]*?```/g, " ")
     .replace(SECRET_VALUE, "$1[redacted]")
@@ -31,12 +45,12 @@ export function sanitizeAssistantProgressText(value: any, max = 600) {
     .replace(/[\0\r\n\t]+/g, " ")
     .replace(/\s{2,}/g, " ")
     .trim();
-  if (!text || RAW_JSON.test(text) || INTERNAL_PROTOCOL.test(text)) return "";
+  if (!text || RAW_JSON.test(text) || RAW_OR_TRUNCATED_STRUCTURE.test(text) || INTERNAL_PROTOCOL.test(text)) return "";
   text = text.replace(/^(?:thinking|reasoning|analysis)\s*[:：]\s*/i, "").trim();
-  return text.slice(0, Math.max(1, max));
+  return firstSentences(text).slice(0, safeMax).trim();
 }
 
-function toolFamily(nameInput: any) {
+export function assistantProgressToolFamily(nameInput: any) {
   const name = String(nameInput || "").toLowerCase();
   if (/grep|glob|search|find_|symbol|diagnostic/.test(name)) return "search";
   if (/read|list_directory|workspace/.test(name)) return "read";
@@ -47,16 +61,50 @@ function toolFamily(nameInput: any) {
   return "tool";
 }
 
-export function buildAssistantProgressFallback(requests: any[]) {
+function safeSubject(value: any, max = 42) {
+  return sanitizeAssistantProgressText(value, max)
+    .replace(/^[“”"'「」『』]+|[“”"'「」『』]+$/g, "")
+    .replace(/[。！？!?]+$/g, "")
+    .trim();
+}
+
+export function buildAssistantProgressFallback(requests: any[], context: { target?: any; goal?: any } = {}) {
   const rows = Array.isArray(requests) ? requests : [];
-  const families = new Set(rows.map(row => toolFamily(row?.name || row?.toolName || row?.tool)));
-  if (families.has("agent")) return "我先整理当前目标和验收边界，再把需要执行的部分交给对应项目 Agent。";
-  if (families.has("verify")) return "我先运行相关检查，确认当前结果是否满足验收要求。";
-  if (families.has("knowledge")) return "我先检索当前作用域的知识与来源，核对回答所需的事实。";
-  if (families.has("git")) return "我先检查当前代码状态和变更记录，确认实际影响范围。";
-  if (families.has("search")) return "我先定位相关代码、符号和配置，再根据结果继续判断。";
-  if (families.has("read")) return "我先检查相关项目结构和当前配置。";
-  return "我先核对完成当前请求所需的信息。";
+  const families = new Set(rows.map(row => assistantProgressToolFamily(row?.name || row?.toolName || row?.tool)));
+  const target = safeSubject(context.target, 36);
+  const goal = safeSubject(context.goal, 44);
+  const subject = target ? `“${target}”` : goal ? `“${goal}”` : "当前任务";
+  if (families.has("agent")) return sanitizeAssistantProgressText(`我先整理${subject}的目标和验收边界，再交给对应项目 Agent 执行。`);
+  if (families.has("verify")) return sanitizeAssistantProgressText(`我先验证${subject}的当前结果，确认是否满足验收要求。`);
+  if (families.has("knowledge")) return sanitizeAssistantProgressText(`我先检索${subject}相关的知识和来源，核对回答所需事实。`);
+  if (families.has("git")) return sanitizeAssistantProgressText(`我先检查${subject}的代码状态和变更记录，确认实际影响范围。`);
+  if (families.has("search")) return sanitizeAssistantProgressText(`我先定位${subject}相关的代码、符号和配置，再根据结果继续判断。`);
+  if (families.has("read")) return sanitizeAssistantProgressText(`我先检查${subject}的项目结构和当前配置。`);
+  return sanitizeAssistantProgressText(`我先核对完成${subject}所需的信息。`);
+}
+
+export type AssistantProgressValidationContext = {
+  firstBatch?: boolean;
+  hasSuccessfulObservation?: boolean;
+  hasFailure?: boolean;
+  directionChanged?: boolean;
+  attempt?: number;
+  verificationActive?: boolean;
+  summaryReady?: boolean;
+  terminal?: boolean;
+};
+
+export function validateAssistantProgressKind(value: any, context: AssistantProgressValidationContext = {}) {
+  const requested = normalizeAssistantProgressKind(value, context.firstBatch ? "before_tools" : "key_finding");
+  if (context.terminal) return null;
+  if (requested === "before_tools") return context.firstBatch ? requested : (context.hasSuccessfulObservation ? "key_finding" : null);
+  if (requested === "blocker") return context.hasFailure ? requested : (context.hasSuccessfulObservation ? "key_finding" : null);
+  if (requested === "direction_change") return context.directionChanged ? requested : (context.hasSuccessfulObservation ? "key_finding" : null);
+  if (requested === "rework") return Number(context.attempt || 1) > 1 || context.hasFailure ? requested : null;
+  if (requested === "verification") return context.verificationActive ? requested : (context.hasSuccessfulObservation ? "key_finding" : null);
+  if (requested === "before_summary") return context.summaryReady ? requested : null;
+  if (requested === "key_finding") return context.hasSuccessfulObservation ? requested : null;
+  return requested;
 }
 
 export function assistantProgressMilestoneChecksum(input: {

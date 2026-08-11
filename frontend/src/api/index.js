@@ -86,12 +86,14 @@ export const conversationTurnsApi = {
     params.set('limit', String(limit))
     return api(`/api/conversation-turns?${params.toString()}`)
   },
-  enqueue: (data) => api('/api/conversation-turns/enqueue', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
+  enqueue: (data) => api('/api/conversation-turns/enqueue', data instanceof FormData
+    ? { method: 'POST', body: data }
+    : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
   claim: (data) => api('/api/conversation-turns/claim', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
   settle: (data) => api('/api/conversation-turns/settle', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
-  cancel: (id, reason = '') => api('/api/conversation-turns/cancel', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, reason }) }),
-  guide: (id) => api('/api/conversation-turns/guide', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) }),
-  retry: (id) => api('/api/conversation-turns/retry', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) }),
+  cancel: (id, reason = '', revision) => api('/api/conversation-turns/cancel', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, reason, revision }) }),
+  guide: (id, revision) => api('/api/conversation-turns/guide', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, revision }) }),
+  retry: (id, revision) => api('/api/conversation-turns/retry', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, revision }) }),
 };
 
 // 任务相关 API

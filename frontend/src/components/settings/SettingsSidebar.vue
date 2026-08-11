@@ -5,7 +5,8 @@ import { Bell, Bot, FlaskConical, Info, Palette, ShieldCheck, Terminal } from '@
 const props = defineProps({
   activeSection: { type: String, default: 'channels' },
   version: { type: String, default: '' },
-  role: { type: String, default: 'viewer' }
+  role: { type: String, default: 'viewer' },
+  features: { type: Array, default: () => [] }
 })
 
 const emit = defineEmits(['update:activeSection'])
@@ -19,7 +20,10 @@ const allSections = [
   { key: 'security', icon: ShieldCheck, label: '账户与安全', description: '登录、注册和密码' },
   { key: 'system', icon: Info, label: '系统与重置', description: '运行信息和本地偏好' }
 ]
-const sections = computed(() => props.role === 'admin' ? allSections : allSections.filter(section => ['experience', 'security'].includes(section.key)))
+const platformSections = new Set(['channels', 'models', 'agent-providers', 'test-agent', 'system'])
+const sections = computed(() => props.role === 'admin'
+  ? allSections
+  : allSections.filter(section => ['experience', 'security'].includes(section.key) || (platformSections.has(section.key) && props.features.includes('platform_settings'))))
 </script>
 
 <template>

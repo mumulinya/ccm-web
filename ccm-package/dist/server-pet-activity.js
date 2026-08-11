@@ -75,10 +75,18 @@ function createPetActivityRuntime(deps) {
         return { session, options: getTaskAgentSessionOptions(session) };
     }
     function broadcastPetSpeech(agent, payload = {}) {
+        const source = payload.source || "project";
+        const isMusic = agent === MUSIC_PET_AGENT_NAME;
+        const isGlobal = agent === GLOBAL_PET_AGENT_NAME;
+        const agentWorkflowSource = ["project", "group", "global", "test-agent", "workspace-group"].includes(String(source));
+        // Agent业务过程只能从统一里程碑投影进入宠物。旧Runner直连的自由格式
+        // stdout/finalText仍可供执行链自身消费，但不得再冒充用户可见宠物进度或终态。
+        if (!isMusic && agentWorkflowSource && payload.petMilestone !== true)
+            return;
         const text = sanitizePetNotificationText(payload.text == null ? "" : String(payload.text));
         if (!agent || (!text.trim() && !payload.final))
             return;
-        const speechKey = `${agent}:${payload.source || "project"}`;
+        const speechKey = `${agent}:${source}`;
         if (payload.mode === "append" && text) {
             petSpeechBuffers.set(speechKey, sanitizePetNotificationText(`${petSpeechBuffers.get(speechKey) || ""}${text}`));
         }
@@ -86,12 +94,9 @@ function createPetActivityRuntime(deps) {
             petSpeechBuffers.set(speechKey, text);
         }
         const finalText = payload.final ? (text || petSpeechBuffers.get(speechKey) || "") : text;
-        const source = payload.source || "project";
-        const isMusic = agent === MUSIC_PET_AGENT_NAME;
-        const isGlobal = agent === GLOBAL_PET_AGENT_NAME;
         const resolved = !isMusic && !isGlobal ? globalPetActivityCoordinator.resolve() : null;
         const actorDisplayName = isMusic ? getMusicPetAgentLabel() : isGlobal ? getPetConfigLabel(GLOBAL_PET_AGENT_NAME, "全局 Agent") : (resolved?.displayName || agent);
-        const visibleText = isMusic || isGlobal || !finalText.trim() || finalText.trim().startsWith(`${actorDisplayName}：`)
+        const visibleText = payload.petMilestone === true || isMusic || isGlobal || !finalText.trim() || finalText.trim().startsWith(`${actorDisplayName}：`)
             ? finalText
             : `${actorDisplayName}：${finalText}`;
         if (payload.final && payload.role !== "user") {
@@ -106,6 +111,10 @@ function createPetActivityRuntime(deps) {
                 exact_session_id: payload.exact_session_id || payload.session_id || payload.sessionId,
                 action: payload.action,
                 dedupe_key: payload.dedupe_key || payload.dedupeKey,
+                notification_type: payload.notification_type || payload.notificationType,
+                title: payload.title,
+                severity: payload.severity,
+                terminal: payload.terminal === true,
             });
         }
         const event = {
@@ -115,10 +124,15 @@ function createPetActivityRuntime(deps) {
             actorKind: isMusic ? "music" : isGlobal ? "global" : (resolved?.actorKind || "project"),
             displayName: actorDisplayName,
             role: payload.role || "assistant",
+            title: sanitizePetNotificationText(payload.title || actorDisplayName, 80),
             text: sanitizePetNotificationText(visibleText),
             mode: payload.mode || "replace",
             final: !!payload.final,
             source,
+            pet_state: String(payload.petState || payload.pet_state || ""),
+            hold_ms: Math.max(1_000, Math.min(30_000, Number(payload.holdMs || payload.hold_ms || 8_000))),
+            action: payload.action && typeof payload.action === "object" ? payload.action : {},
+            milestone: payload.milestone?.schema === "ccm-pet-agent-milestone-v1" ? payload.milestone : undefined,
             timestamp: new Date().toISOString(),
         };
         for (const client of petStatusClients)

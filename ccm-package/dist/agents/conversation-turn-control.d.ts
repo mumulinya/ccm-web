@@ -2,12 +2,21 @@ import type { IncomingMessage, ServerResponse } from "http";
 export type ConversationTurnScope = "global" | "group" | "project" | "feishu";
 export type ConversationTurnMode = "steer" | "queue";
 export type ConversationTurnStatus = "queued" | "applied" | "sending" | "completed" | "failed" | "cancelled";
+export type ConversationTurnKind = "user_message" | "task_dispatch";
+export type ConversationTurnSource = "web" | "workbench" | "global_agent" | "schedule";
 export type ConversationTurnRecord = {
     id: string;
+    revision: number;
     request_id: string;
     scope: ConversationTurnScope;
     conversation_id: string;
     mode: ConversationTurnMode;
+    kind: ConversationTurnKind;
+    source: ConversationTurnSource;
+    task_id: string;
+    mission_id: string;
+    occurrence_id: string;
+    owner_id: string;
     message: string;
     attachments: any[];
     status: ConversationTurnStatus;
@@ -44,41 +53,89 @@ export declare class ConversationTurnControlStore {
         generation: number;
         updated_at: string;
         turns: {
-            position: number;
             id: string;
-            request_id: string;
+            revision: number;
             scope: ConversationTurnScope;
             conversation_id: string;
+            kind: ConversationTurnKind;
+            source: ConversationTurnSource;
+            task_id: string;
+            mission_id: string;
+            occurrence_id: string;
             mode: ConversationTurnMode;
-            message: string;
-            attachments: any[];
             status: ConversationTurnStatus;
-            active_run_id: string;
-            metadata: Record<string, any>;
+            messagePreview: string;
+            attachmentRefs: {
+                id: string;
+                name: string;
+                size: number;
+                checksum: string;
+                contentType: string;
+                url: string;
+            }[];
+            position: number;
             retry_count: number;
             recovery_count: number;
             error: string;
-            result: any;
             created_at: string;
             updated_at: string;
-            claimed_at: string;
-            settled_at: string;
-            lease_id: string;
-            lease_expires_at: string;
-            run_id: string;
-            checkpoint: string;
-            semantic_decision_receipt: any;
+            contentStored: boolean;
+            canMutate: boolean;
         }[];
+    };
+    /** Server-only view used by queue executors. Never return this projection from an HTTP API. */
+    listInternal(input?: any): {
+        generation: number;
+        updated_at: string;
+        turns: ConversationTurnRecord[];
     };
     claim(input: any): ConversationTurnRecord;
     settle(input: any): ConversationTurnRecord;
-    defer(id: string, reason?: string): ConversationTurnRecord;
-    cancel(id: string, reason?: string): ConversationTurnRecord;
-    guide(id: string): ConversationTurnRecord;
-    retry(id: string): ConversationTurnRecord;
+    defer(id: string, reason?: string, expectedRevision?: number): ConversationTurnRecord;
+    cancel(id: string, reason?: string, expectedRevision?: number): ConversationTurnRecord;
+    guide(id: string, expectedRevision?: number): ConversationTurnRecord;
+    retry(id: string, expectedRevision?: number): ConversationTurnRecord;
     heartbeat(input: any): ConversationTurnRecord;
+    syncTaskDispatch(task: any): ConversationTurnRecord;
 }
 export declare const conversationTurnControl: ConversationTurnControlStore;
+export declare function admitTaskDispatchTurn(task: any): ConversationTurnRecord | {
+    id: string;
+    revision: number;
+    scope: ConversationTurnScope;
+    conversation_id: string;
+    kind: ConversationTurnKind;
+    source: ConversationTurnSource;
+    task_id: string;
+    mission_id: string;
+    occurrence_id: string;
+    mode: ConversationTurnMode;
+    status: ConversationTurnStatus;
+    messagePreview: string;
+    attachmentRefs: {
+        id: string;
+        name: string;
+        size: number;
+        checksum: string;
+        contentType: string;
+        url: string;
+    }[];
+    position: number;
+    retry_count: number;
+    recovery_count: number;
+    error: string;
+    created_at: string;
+    updated_at: string;
+    contentStored: boolean;
+    canMutate: boolean;
+};
+export declare function reconcileTaskDispatchTurns(): {
+    admitted: number;
+};
+export declare function startWebConversationTurnRecoveryForServer(baseUrl: string): {
+    started: boolean;
+};
+export declare function stopWebConversationTurnRecoveryForServer(): void;
 export declare function handleConversationTurnControlApi(pathname: string, req: IncomingMessage, res: ServerResponse, parsed: any): boolean;
 export declare function runConversationTurnControlSelfTest(): {
     pass: boolean;
@@ -89,5 +146,7 @@ export declare function runConversationTurnControlSelfTest(): {
         restartRecovery: boolean;
         terminalStates: boolean;
         persistedSchema: boolean;
+        safeAttachmentProjection: boolean;
+        completedAttachmentCleanup: boolean;
     };
 };

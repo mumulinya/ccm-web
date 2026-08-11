@@ -152,6 +152,10 @@ export declare function createAgentRunnerSupport(deps: any): {
     };
     sendRuntimeToolDispatchBlocked: (res: any, toolContext: any) => any;
     ensureAgentRunnerDirs: () => void;
+    cleanupAgentRunnerEphemeralResults: (maxAgeMs?: number) => {
+        removed: number;
+        contentStored: boolean;
+    };
     createAgentRunnerRequest: (projectName: string, message: string, workDir: string, agentType: string, timeoutMs: number, allowedTools?: any, mcpConfigPath?: string, agentSession?: any, executionInfo?: any) => {
         id: string;
         requestFile: any;

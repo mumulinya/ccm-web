@@ -353,7 +353,10 @@ function updateGlobalAgentTodoLedger(run, plan = [], activeTool = "") {
 }
 function markGlobalAgentToolTodo(run, tool, status, text = "") {
     const state = getRunState(run);
-    const target = state.todos.find(todo => todo.status === "in_progress") || state.todos.find(todo => todo.tool === tool) || null;
+    const target = state.todos.find(todo => todo.status === "in_progress")
+        || state.todos.find(todo => todo.status === "pending")
+        || state.todos.find(todo => todo.tool === tool)
+        || null;
     if (target) {
         target.status = status;
         target.tool = tool || target.tool;

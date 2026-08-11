@@ -93,6 +93,7 @@ const existingBackendTask = collaboration.createTask({
   workflow_type: 'general',
   auto_execute: true,
   child_agent_isolation: 'worktree',
+  allowed_paths: ['src/existing-task.ts'],
   requires_code_changes: true,
   requires_verification: true,
 })
@@ -151,6 +152,28 @@ const ctx = {
     return []
   },
   async callAgent(project, prompt, workDir, agentType, _timeoutMs, options = {}) {
+    if (String(options.executionId || '').endsWith(':ack-preflight')) {
+      const envelope = agentCommunication.listAgentCommunications({ taskId: options.taskId, limit: 10 })
+        .find(item => item.messageType === 'task_dispatch')
+      assert.ok(envelope?.messageId, 'ACK preflight requires a task-dispatch envelope')
+      const acknowledged = agentCommunication.recordAgentCommunicationReceipt(envelope.messageId, 'dispatch_ack', {
+        taskId: envelope.taskId,
+        workItemId: envelope.workItemId,
+        exactSessionId: envelope.exactSessionId,
+        generation: envelope.generation,
+        attempt: envelope.attempt,
+        leaseId: envelope.leaseId,
+        senderAgentId: envelope.receiverAgentId,
+        receiverAgentId: envelope.senderAgentId,
+      }, {
+        status: 'acknowledged',
+        understood_goal: '已理解当前协作工作项',
+        planned_scope: ['authorized implementation'],
+        verification_plan: ['declared project verification'],
+      })
+      assert.equal(acknowledged.accepted, true, 'preflight ACK should be accepted')
+      return 'CCM_AGENT_ACKNOWLEDGED'
+    }
     calls.push({ project, prompt, workDir, agentType, taskId: options.taskId, session: options.agentSession, transport: 'task-queue' })
     if (project !== 'backend-agent') throw new Error(`unexpected queued project ${project}`)
     if (options.taskId === existingBackendTask.id) {
@@ -233,6 +256,10 @@ const refreshedParent = tasks.find(task => task.id === parent.id)
 assert.equal(dependency.workflow_type, 'agent_coordination_dependency')
 assert.equal(dependency.status, 'done')
 assert.equal(dependency.target_project, 'backend-agent')
+assert.equal(dependency.acceptance_mode, 'main_agent_self_verification')
+assert.equal(dependency.test_agent_enabled, false)
+assert.equal(dependency.test_agent_review, null)
+assert.equal(dependency.main_agent_self_verification?.canAccept, true)
 assert.equal(dependency.receipt.filesChanged.includes('src/orders-api.ts'), true)
 const dependencyCommunication = agentCommunication.listAgentCommunications({ taskId: dependency.id, limit: 20 }).find(item => item.messageType === 'task_dispatch')
 assert.ok(dependencyCommunication?.messageId, 'dependency dispatch evidence missing')

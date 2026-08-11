@@ -131,10 +131,12 @@ const emit = defineEmits([
 }
 .form-input,
 .form-select {
-  padding: 8px 12px;
-  border: 1px solid rgba(0, 0, 0, 0.08);
-  border-radius: 8px;
-  background: var(--surface-subtle);
+  height: var(--control-height-lg, 36px);
+  box-sizing: border-box;
+  padding: 0 var(--control-padding-x, 10px);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md, 6px);
+  background: var(--control-bg);
   font-size: 13.5px;
   outline: none;
   color: var(--text-primary, #0f172a);
@@ -144,10 +146,11 @@ const emit = defineEmits([
 }
 .form-input:focus {
   border-color: var(--accent-blue, #3b82f6);
-  background: var(--surface-raised);
+  box-shadow: var(--focus-ring);
 }
+.form-select:focus { border-color:var(--accent-blue); box-shadow:var(--focus-ring); }
 .color-picker-input {
-  height: 38px;
+  height: var(--control-height-lg, 36px);
   padding: 4px !important;
   cursor: pointer;
 }
@@ -159,7 +162,7 @@ const emit = defineEmits([
 }
 :global([data-theme="dark"] .form-input),
 :global([data-theme="dark"] .form-select){
-  background: var(--bg-secondary, #0f172a) !important;
+  background: var(--control-bg, #0f172a) !important;
   border-color: var(--border-color, rgba(255, 255, 255, 0.08)) !important;
   color: var(--text-primary, #f8fafc) !important;
 }

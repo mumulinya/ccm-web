@@ -36,6 +36,7 @@ import { listGlobalTerminalDeliveries, retryGlobalTerminalDelivery } from "../..
 import { buildGlobalMissionSafeProjection, buildTaskConversationLinks } from "../../system/task-conversation-links";
 import { parseSecureMultipartRequest } from "../../system/secure-multipart";
 import { listGlobalDispatchTargets } from "../../system/automation-session-bindings";
+import { hasResourceAccess } from "../system/access-policy";
 
 function normalizeGlobalRequestedTargets(value: any, message = "") {
   let rows = value;
@@ -159,6 +160,10 @@ export function createGlobalAgentApi(deps: any) {
     drainingGlobalWebTurns.add(sessionId);
     try {
       while (true) {
+        const occupied = listGlobalAgentRuns({ sessionId, limit: 20 })
+          .some((run: any) => ["running", "executing", "supervising", "paused", "waiting_clarification", "waiting_user", "blocked", "interrupted", "recovering"]
+            .includes(String(run?.status || "").toLowerCase()));
+        if (occupied) break;
         const turn = conversationTurnControl.claim({ scope: "global", conversation_id: sessionId });
         if (!turn) break;
         const metadata = turn.metadata?.global_context_v2 || {};
@@ -220,6 +225,16 @@ export function createGlobalAgentApi(deps: any) {
     parsed: any,
     ctx: CollabCtx
   ): boolean {
+    if (pathname === "/api/global-agent/dispatch-targets" && req.method === "GET") {
+      const principal = requestAccessPrincipal(req);
+      const targets = listGlobalDispatchTargets().filter((item: any) => {
+        if (principal?.kind !== "browser" || principal.role === "admin") return true;
+        const type = String(item.scope || "").toLowerCase() === "group" ? "group" : "project";
+        return hasResourceAccess(principal.userId, principal.role, type, String(item.scopeId || ""), "use");
+      });
+      sendJson(res, { success: true, targets });
+      return true;
+    }
     if (pathname === "/api/global-agent/history" && req.method === "POST") {
       let body = "";
       req.on("data", (chunk: any) => body += chunk);
@@ -1288,6 +1303,7 @@ export function createGlobalAgentApi(deps: any) {
         let reliabilityOperationAcquired = false;
         let streamRequestId = "";
         let streamSequence = 0;
+        let visibleTextEmitted = false;
         let activeTurn: any = null;
         let activeSessionId = "";
         if (isStream) {
@@ -1301,11 +1317,24 @@ export function createGlobalAgentApi(deps: any) {
         }
         const emit = (event: any) => {
           if (!isStream || res.writableEnded) return;
+          if (event?.type === "text" && String(event?.text || "").trim()) visibleTextEmitted = true;
           const ui = event?.ui === undefined ? buildGlobalAgentEventUi(event) : event.ui;
           const sequence = ++streamSequence;
           const eventId = String(event?.event_id || event?.eventId || `${streamRequestId || "global-stream"}:${sequence}`);
           const payloadWithOrder = { ...event, event_id: eventId, eventId, sequence, ...(ui ? { ui } : {}) };
           res.write(`data: ${JSON.stringify(payloadWithOrder)}\n\n`);
+          (res as any).flush?.();
+        };
+        const streamBufferedGlobalReply = async (content: string) => {
+          const characters = Array.from(String(content || ""));
+          const chunkSize = characters.length > 2400 ? 36 : characters.length > 800 ? 24 : 16;
+          for (let offset = 0; offset < characters.length; offset += chunkSize) {
+            if (res.destroyed || res.writableEnded) break;
+            emit({ type: "text", text: characters.slice(offset, offset + chunkSize).join("") });
+            if (offset + chunkSize < characters.length) {
+              await new Promise(resolve => setTimeout(resolve, 14));
+            }
+          }
         };
         try {
           let message = String(payload.message || "").trim();
@@ -1324,6 +1353,17 @@ export function createGlobalAgentApi(deps: any) {
             ? `请处理已上传的 ${files.length} 份资料：${files.map((file: any) => file.filename || "附件").join("、")}`
             : message);
           const requestedTargetRefs = normalizeGlobalRequestedTargets(payload.target_refs || payload.targetRefs, originalMessage || message);
+          const requestPrincipal = requestAccessPrincipal(req);
+          if (requestPrincipal?.kind === "browser" && requestPrincipal.role !== "admin") {
+            const forbidden = requestedTargetRefs.find((target: any) => !hasResourceAccess(
+              requestPrincipal.userId,
+              requestPrincipal.role,
+              String(target.scope || "") === "group" ? "group" : "project",
+              String(target.scopeId || ""),
+              "use",
+            ));
+            if (forbidden) throw new Error("当前账户没有所选项目或群聊的任务派发权限");
+          }
           const sourceFiles = serializeGlobalRequestAttachments(files);
           if (!message) throw new Error("消息不能为空");
           let history: any[] = [];
@@ -1410,6 +1450,9 @@ export function createGlobalAgentApi(deps: any) {
               }
             },
           });
+          if (isStream && !visibleTextEmitted && String(run.final_reply || "").trim()) {
+            await streamBufferedGlobalReply(run.final_reply);
+          }
           conversationTurnControl.settle({
             id: activeTurn.id,
             status: run.status === "failed" ? "failed" : "completed",

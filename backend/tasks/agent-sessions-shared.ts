@@ -218,6 +218,18 @@ export type TaskAgentSession = {
   modelCapabilityCheckedAt?: string;
   modelIdentityHistory?: any[];
   providerContractId?: string;
+  /**
+   * The durable third-party conversation is scoped to the visible parent
+   * conversation, target project, and runtime. Task records remain separate
+   * so receipts and leases cannot cross task boundaries.
+   */
+  continuityKey?: string;
+  continuityScope?: "project" | "group" | "global";
+  continuityExactSessionId?: string;
+  continuityGeneration?: number;
+  continuityMode?: "reused" | "fresh" | "isolated_branch";
+  continuitySourceSessionId?: string;
+  continuityBranchId?: string;
   pendingProviderContractId?: string;
   providerRuntimeVersion?: string;
   providerRuntimeIdentityChecksum?: string;
@@ -301,6 +313,29 @@ export function safeStringify(value: any) {
 
 export function hashValue(value: any, len = 24) {
   return crypto.createHash("sha256").update(typeof value === "string" ? value : safeStringify(value)).digest("hex").slice(0, len);
+}
+
+export function buildTaskAgentContinuityBinding(input: {
+  scope: "project" | "group" | "global";
+  scopeId: string;
+  exactSessionId: string;
+  project: string;
+  agentType: string;
+}) {
+  const scope = input.scope;
+  const scopeId = String(input.scopeId || "").trim();
+  const exactSessionId = String(input.exactSessionId || "").trim();
+  const project = String(input.project || "").trim();
+  const agentType = normalizeAgentRuntimeId(input.agentType);
+  if (!scopeId || !exactSessionId || !project || !agentType) return null;
+  return {
+    key: `tac_${hashValue([scope, scopeId, exactSessionId, project, agentType], 28)}`,
+    scope,
+    scopeId,
+    exactSessionId,
+    project,
+    agentType,
+  } as const;
 }
 
 

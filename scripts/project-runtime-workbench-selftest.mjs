@@ -65,10 +65,11 @@ try {
     { id: 'runtime_two', label: '服务二', projectId: project, modulePath: '.', projectType: 'custom', environment: 'test', runCommand: 'node server-b.js', buildCommand: '', artifactPatterns: [], source: 'manual', enabled: true, detectedChecksum: '' },
     { id: 'runtime_recovery', label: 'Spring 恢复夹具', projectId: project, modulePath: '.', projectType: 'maven', environment: 'test', runCommand: 'node recover-run.js', prepareCommand: 'node recover-prepare.js', buildCommand: '', artifactPatterns: [], source: 'manual', enabled: true, detectedChecksum: '' },
   ]
-  runtime.saveProjectDisplayName(project, '运行工作台自测')
+  const displayName = `运行工作台自测-${process.pid}`
+  runtime.saveProjectDisplayName(project, displayName)
   const configured = runtime.saveProjectRuntimeConfig(project, { profiles })
   assert.equal(configured.selected_profile_id, 'runtime_one')
-  assert.equal(runtime.projectDisplayName(project), '运行工作台自测')
+  assert.equal(runtime.projectDisplayName(project), displayName)
   assert.throws(() => runtime.saveProjectRuntimeConfig(project, { profiles: [{ ...profiles[0], runCommand: 'java -jar target/app.jar' }] }), /必须运行源码/)
 
   const streamedLogEvents = []
@@ -140,7 +141,8 @@ try {
   const slashSource = fs.readFileSync(path.join(process.cwd(), 'backend/modules/tools/slash-commands.ts'), 'utf8')
   assert.match(apiSource, /runtimeAction:[\s\S]*\/api\/projects\/runtime\/action/)
   assert.match(templateSource, /<ProjectRuntimeBar/)
-  assert.match(headerSource, /连接 Agent/)
+  assert.match(headerSource, /channelLabel/)
+  assert.match(headerSource, /飞书通道/)
   assert.match(globalActionSource, /\/api\/projects\/runtime\/action/)
   assert.match(projectRoutesSource, /\/api\/projects\/runtime\/log-stream/)
   assert.match(projectRoutesSource, /\/api\/projects\/runtime\/shutdown/)

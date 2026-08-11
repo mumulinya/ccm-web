@@ -49,6 +49,7 @@ const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const atomic_json_file_1 = require("../../core/atomic-json-file");
 const utils_1 = require("../../core/utils");
+const access_policy_1 = require("./access-policy");
 const AUTH_DIR = path.join(utils_1.CCM_DIR, "auth");
 const USERS_FILE = path.join(AUTH_DIR, "users.json");
 const SESSIONS_FILE = path.join(AUTH_DIR, "sessions.json");
@@ -62,8 +63,7 @@ const SETUP_TTL_MS = 24 * 60 * 60 * 1000;
 const SCRYPT_KEY_BYTES = 64;
 const MAX_RATE_ENTRIES = 5_000;
 const ROLE_CAPABILITIES = {
-    viewer: ["read", "chat.read_only"],
-    operator: ["read", "chat.read_only", "task.execute", "project.runtime", "project.git", "attachment.manage"],
+    user: ["read", "chat.read_only"],
     admin: ["read", "chat.read_only", "task.execute", "project.runtime", "project.git", "attachment.manage", "project.define", "terminal.manage", "agent.credentials", "tools.manage", "cleanup.permanent", "permission.high_risk", "security.manage"],
 };
 let usersReadCache = null;
@@ -81,11 +81,11 @@ catch (error) {
     return String(error?.code || "") === "ENOENT" ? { mtimeMs: -1, size: -1 } : null;
 } }
 function normalizedUsername(value) { return String(value || "").normalize("NFKC").trim().toLocaleLowerCase("en-US"); }
-function normalizeRole(value) { return value === "admin" || value === "operator" ? value : "viewer"; }
+function normalizeRole(value) { return value === "admin" ? "admin" : "user"; }
 function normalizeLoginTheme(value) { return ["command", "minimal", "light"].includes(String(value || "")) ? value : "command"; }
 function validateLoginTheme(value) { const theme = String(value || ""); if (!["command", "minimal", "light"].includes(theme))
     throw new Error("登录主题无效"); return theme; }
-function validateRole(value) { if (!['viewer', 'operator', 'admin'].includes(String(value || '')))
+function validateRole(value) { if (!['user', 'admin'].includes(String(value || '')))
     throw new Error("账户角色无效"); return value; }
 function validateUsername(value) { const username = String(value || "").normalize("NFKC").trim(); if (!/^[\p{L}\p{N}_.-]{3,32}$/u.test(username))
     throw new Error("用户名需为 3～32 个字符，只能包含文字、数字、点、下划线或短横线"); return username; }
@@ -378,7 +378,7 @@ function listActiveLocalAuthUsers() {
 function listActiveAdminUserIds() {
     return listActiveLocalAuthUsers().filter(user => user.role === "admin").map(user => user.id);
 }
-function localAuthPublicState(req) { const users = peekUsers(); const auth = resolveLocalAuthSession(req); return { authenticated: !!auth, registration_enabled: users.registrationEnabled, first_install: users.users.length === 0, login_theme: users.loginTheme, user: publicUser(auth?.user), capabilities: auth?.capabilities || [], csrf: auth?.session.csrfToken || null, session_error: req.ccmSessionError || null, session: auth ? { id: auth.session.id, created_at: auth.session.createdAt, last_seen_at: auth.session.lastSeenAt, expires_at: auth.session.expiresAt } : null }; }
+function localAuthPublicState(req) { const users = peekUsers(); const auth = resolveLocalAuthSession(req); const access = auth ? (0, access_policy_1.getEffectiveAccess)(auth.user.id, auth.user.role) : { policyRevision: 0, features: [], resources: [] }; return { authenticated: !!auth, registration_enabled: users.registrationEnabled, first_install: users.users.length === 0, login_theme: users.loginTheme, user: publicUser(auth?.user), capabilities: auth?.capabilities || [], access, csrf: auth?.session.csrfToken || null, session_error: req.ccmSessionError || null, session: auth ? { id: auth.session.id, created_at: auth.session.createdAt, last_seen_at: auth.session.lastSeenAt, expires_at: auth.session.expiresAt } : null }; }
 function activeAdmins(store) { return store.users.filter(item => item.role === "admin" && !item.disabledAt); }
 function auditUser(user, action, actorId) { user.securityAudit = [...(user.securityAudit || []).slice(-49), { at: now(), action, ...(actorId ? { actorId } : {}) }]; user.updatedAt = now(); }
 function revokeUserSessions(userId, reason, exceptSessionId = "") { (0, atomic_json_file_1.withFileLock)(SESSIONS_FILE, () => { const store = readSessionsUnlocked(); for (const session of store.sessions)
@@ -403,7 +403,7 @@ function handleLocalAuthApi(pathname, req, res) {
             recordLoginFailure(req, username);
             return (0, utils_1.sendJson)(res, { success: false, error: "用户名或密码不正确" }, 401);
         } if (user.disabledAt)
-            return (0, utils_1.sendJson)(res, { success: false, error: "账户已被禁用", code: "ACCOUNT_DISABLED" }, 403); clearAccountFailures(req, username); const session = createSession(req, res, user); const state = loadUsers(); (0, utils_1.sendJson)(res, { success: true, user: publicUser(user), session, csrf: session.csrf, capabilities: roleCapabilities(user.role), registration_enabled: state.registrationEnabled, first_install: false, login_theme: state.loginTheme }); }).catch((error) => { if (error?.retryAfter)
+            return (0, utils_1.sendJson)(res, { success: false, error: "账户已被禁用", code: "ACCOUNT_DISABLED" }, 403); clearAccountFailures(req, username); const session = createSession(req, res, user); const state = loadUsers(); (0, utils_1.sendJson)(res, { success: true, user: publicUser(user), session, csrf: session.csrf, capabilities: roleCapabilities(user.role), access: (0, access_policy_1.getEffectiveAccess)(user.id, user.role), registration_enabled: state.registrationEnabled, first_install: false, login_theme: state.loginTheme }); }).catch((error) => { if (error?.retryAfter)
             res.setHeader("Retry-After", String(error.retryAfter)); (0, utils_1.sendJson)(res, { success: false, error: error?.message || "登录失败" }, error?.retryAfter ? 429 : 400); });
         return true;
     }
@@ -411,8 +411,8 @@ function handleLocalAuthApi(pathname, req, res) {
         void readJsonBody(req).then(payload => { const username = validateUsername(payload.username); const password = validatePassword(payload.password); let firstInstall = false; const user = (0, atomic_json_file_1.withFileLock)(USERS_FILE, () => { const store = readUsersUnlocked(); firstInstall = store.users.length === 0; if (!firstInstall && !store.registrationEnabled)
             throw new Error("当前未开放注册"); if (store.users.some(item => item.normalizedUsername === normalizedUsername(username)))
             throw new Error("用户名已存在"); if (firstInstall)
-            consumeSetupCode(payload.setup_code); const createdAt = now(); const created = { id: `usr_${crypto.randomUUID()}`, username, normalizedUsername: normalizedUsername(username), role: firstInstall ? "admin" : "viewer", password: hashPassword(password), createdAt, updatedAt: createdAt, securityAudit: [{ at: createdAt, action: firstInstall ? "first_admin_created" : "registered" }] }; store.users.push(created); store.onboardingCompleted = true; if (firstInstall)
-            store.registrationEnabled = false; saveUsers(store); return created; }); const session = createSession(req, res, user); const state = loadUsers(); (0, utils_1.sendJson)(res, { success: true, user: publicUser(user), session, csrf: session.csrf, capabilities: roleCapabilities(user.role), registration_enabled: state.registrationEnabled, first_install: false, login_theme: state.loginTheme }, 201); }).catch((error) => { const message = error?.message || "注册失败"; (0, utils_1.sendJson)(res, { success: false, error: message }, /未开放|安装码/.test(message) ? 403 : 400); });
+            consumeSetupCode(payload.setup_code); const createdAt = now(); const created = { id: `usr_${crypto.randomUUID()}`, username, normalizedUsername: normalizedUsername(username), role: firstInstall ? "admin" : "user", password: hashPassword(password), createdAt, updatedAt: createdAt, securityAudit: [{ at: createdAt, action: firstInstall ? "first_admin_created" : "registered" }] }; store.users.push(created); store.onboardingCompleted = true; if (firstInstall)
+            store.registrationEnabled = false; saveUsers(store); return created; }); const session = createSession(req, res, user); const state = loadUsers(); (0, utils_1.sendJson)(res, { success: true, user: publicUser(user), session, csrf: session.csrf, capabilities: roleCapabilities(user.role), access: (0, access_policy_1.getEffectiveAccess)(user.id, user.role), registration_enabled: state.registrationEnabled, first_install: false, login_theme: state.loginTheme }, 201); }).catch((error) => { const message = error?.message || "注册失败"; (0, utils_1.sendJson)(res, { success: false, error: message }, /未开放|安装码/.test(message) ? 403 : 400); });
         return true;
     }
     if (pathname === "/api/auth/logout" && req.method === "POST") {
@@ -456,7 +456,24 @@ function handleLocalAuthApi(pathname, req, res) {
         const auth = requireUser(req, res, true);
         if (!auth)
             return true;
-        (0, utils_1.sendJson)(res, { success: true, users: loadUsers().users.map(publicUser) });
+        (0, utils_1.sendJson)(res, { success: true, users: loadUsers().users.map(user => ({ ...publicUser(user), access: (0, access_policy_1.getEffectiveAccess)(user.id, user.role) })) });
+        return true;
+    }
+    if (pathname === "/api/auth/users" && req.method === "POST") {
+        const auth = requireUser(req, res, true);
+        if (!auth)
+            return true;
+        void readJsonBody(req).then(payload => { const username = validateUsername(payload.username); const password = validatePassword(payload.password); const created = (0, atomic_json_file_1.withFileLock)(USERS_FILE, () => { const store = readUsersUnlocked(); if (store.users.some(item => item.normalizedUsername === normalizedUsername(username)))
+            throw new Error("用户名已存在"); const createdAt = now(); const user = { id: `usr_${crypto.randomUUID()}`, username, normalizedUsername: normalizedUsername(username), role: "user", password: hashPassword(password), createdAt, updatedAt: createdAt, securityAudit: [{ at: createdAt, action: "admin_created", actorId: auth.user.id }] }; store.users.push(user); saveUsers(store); return user; }); (0, utils_1.sendJson)(res, { success: true, user: publicUser(created) }, 201); }).catch((error) => (0, utils_1.sendJson)(res, { success: false, error: error?.message || "创建用户失败" }, 400));
+        return true;
+    }
+    const resetPasswordMatch = pathname.match(/^\/api\/auth\/users\/([^/]+)\/password-reset$/);
+    if (resetPasswordMatch && req.method === "POST") {
+        const auth = requireUser(req, res, true);
+        if (!auth)
+            return true;
+        void readJsonBody(req).then(payload => { const userId = decodeURIComponent(resetPasswordMatch[1]); const next = validatePassword(payload.password); (0, atomic_json_file_1.withFileLock)(USERS_FILE, () => { const store = readUsersUnlocked(); const target = store.users.find(item => item.id === userId); if (!target)
+            throw new Error("用户不存在"); target.password = hashPassword(next); auditUser(target, "password_reset", auth.user.id); saveUsers(store); }); revokeUserSessions(userId, "admin_password_reset"); (0, utils_1.sendJson)(res, { success: true }); }).catch((error) => (0, utils_1.sendJson)(res, { success: false, error: error?.message || "重置密码失败" }, 400));
         return true;
     }
     const userMatch = pathname.match(/^\/api\/auth\/users\/([^/]+)\/(role|status|sessions\/revoke)$/);
@@ -496,6 +513,7 @@ function handleLocalAuthApi(pathname, req, res) {
             (0, atomic_json_file_1.withFileLock)(USERS_FILE, () => { const store = readUsersUnlocked(); const target = store.users.find(item => item.id === userId); if (!target)
                 throw new Error("用户不存在"); if (target.role === "admin" && !target.disabledAt && activeAdmins(store).length <= 1)
                 throw new Error("不能删除最后一个有效管理员"); store.users = store.users.filter(item => item.id !== userId); saveUsers(store); });
+            (0, access_policy_1.removeUserAccess)(userId, auth.user.id);
             revokeUserSessions(userId, "account_deleted");
             (0, utils_1.sendJson)(res, { success: true });
         }

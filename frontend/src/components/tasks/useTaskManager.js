@@ -128,10 +128,123 @@ export function useTaskManager(props, emit) {
     projectId: '',
     priority: 'normal',
     autoExecute: true,
+    taskTemplateId: '',
+    templateVariables: {},
+    templateName: '',
+    deadlineAt: '',
+    dependencyTaskIds: [],
+    sourceCronJobId: '',
     clientMessageId: createTaskClientMessageId('standard'),
     files: [],
     existingAttachments: []
   })
+  const taskTemplates = ref([])
+  const taskPreflight = ref(null)
+  const taskPreflightLoading = ref(false)
+  const selectedTaskTemplate = computed(() => taskTemplates.value.find(item => item.id === newTask.value.taskTemplateId) || null)
+
+  const blankTaskDraft = () => ({
+    title: '', description: '', assignType: 'group', groupId: groups.value[0]?.id || '',
+    projectId: projects.value[0]?.name || '', priority: 'normal', autoExecute: true,
+    taskTemplateId: '', templateVariables: {}, templateName: '', deadlineAt: '',
+    dependencyTaskIds: [], sourceCronJobId: '', clientMessageId: createTaskClientMessageId('standard'),
+    files: [], existingAttachments: []
+  })
+
+  const loadTaskTemplates = async () => {
+    try {
+      const response = await fetch('/api/task-templates')
+      const data = await response.json()
+      taskTemplates.value = response.ok ? (data.templates || []) : []
+    } catch { taskTemplates.value = [] }
+  }
+
+  const applySelectedTaskTemplate = () => {
+    const template = selectedTaskTemplate.value
+    taskPreflight.value = null
+    if (!template) return
+    newTask.value.priority = template.priority || newTask.value.priority
+    if (template.targetType === 'group' && template.targetId) {
+      newTask.value.assignType = 'group'
+      newTask.value.groupId = template.targetId
+    } else if (template.targetType === 'project' && template.targetId) {
+      newTask.value.assignType = 'project'
+      newTask.value.projectId = template.targetId
+    }
+    newTask.value.templateVariables = Object.fromEntries((template.variables || []).map(item => [item.key, item.defaultValue || '']))
+  }
+
+  const buildTaskDraftPayload = (confirmed = false) => ({
+    title: newTask.value.title,
+    description: newTask.value.description,
+    target_project: newTask.value.assignType === 'project' ? newTask.value.projectId : 'coordinator',
+    group_id: newTask.value.assignType === 'group' ? newTask.value.groupId : null,
+    priority: newTask.value.priority,
+    assign_type: newTask.value.assignType,
+    auto_execute: newTask.value.autoExecute,
+    queue_scope: 'conversation_serial',
+    client_message_id: newTask.value.clientMessageId || createTaskClientMessageId('standard'),
+    source_channel: newTask.value.sourceCronJobId ? 'cron-copy' : 'task-dispatch',
+    cron_job_id: newTask.value.sourceCronJobId || undefined,
+    target_scope: newTask.value.assignType === 'group' ? 'group_session' : 'project_session',
+    template_id: newTask.value.taskTemplateId || undefined,
+    template_variables: { ...(newTask.value.templateVariables || {}) },
+    deadline_at: newTask.value.deadlineAt ? new Date(newTask.value.deadlineAt).toISOString() : undefined,
+    dependency_task_ids: [...(newTask.value.dependencyTaskIds || [])],
+    preflight_confirmed: confirmed,
+  })
+
+  const runTaskPreflight = async () => {
+    taskPreflightLoading.value = true
+    try {
+      const response = await fetch('/api/tasks/preflight', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(buildTaskDraftPayload(false))
+      })
+      const data = await response.json()
+      taskPreflight.value = data.preflight || null
+      return taskPreflight.value
+    } catch (error) {
+      taskPreflight.value = { allowed: false, errors: [{ message: error.message || '预检服务不可用' }], warnings: [] }
+      return taskPreflight.value
+    } finally { taskPreflightLoading.value = false }
+  }
+
+  const saveCurrentTaskTemplate = async () => {
+    const name = newTask.value.templateName.trim()
+    if (!name) return toast.warning('请输入模板名称')
+    if (!newTask.value.title.trim()) return toast.warning('请输入任务标题')
+    const instructions = newTask.value.description.trim() || newTask.value.title.trim()
+    try {
+      const response = await fetch('/api/task-templates', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name, title: newTask.value.title, instructions, priority: newTask.value.priority,
+          targetType: newTask.value.assignType,
+          targetId: newTask.value.assignType === 'group' ? newTask.value.groupId : newTask.value.projectId,
+          variables: []
+        })
+      })
+      const data = await response.json()
+      if (!response.ok || !data.success) throw new Error(data.error || '保存模板失败')
+      await loadTaskTemplates()
+      newTask.value.taskTemplateId = data.template?.id || ''
+      toast.success('任务模板已保存')
+    } catch (error) { toast.error(error.message) }
+  }
+
+  const convertTaskToCron = () => {
+    emit('navigate', { tab: 'cron', createCronDraft: {
+      name: newTask.value.title,
+      prompt: newTask.value.description,
+      targetType: newTask.value.assignType,
+      project: newTask.value.projectId,
+      groupId: newTask.value.groupId,
+      priority: newTask.value.priority,
+      taskTemplateId: newTask.value.taskTemplateId,
+      templateVariables: { ...(newTask.value.templateVariables || {}) }
+    } })
+  }
 
   const addTaskFiles = (incoming) => {
     const rows = Array.from(incoming || []).filter(file => file?.name)
@@ -545,44 +658,32 @@ export function useTaskManager(props, emit) {
 
   // 创建任务
   const submitCreateTask = async () => {
-    if (!newTask.value.title) { alert('请输入任务标题'); return }
+    if (!newTask.value.title && !newTask.value.taskTemplateId) { toast.warning('请输入任务标题或选择模板'); return }
     if (newTask.value.assignType === 'group' && !newTask.value.groupId) { toast.warning('请选择群聊'); return }
     if (newTask.value.assignType === 'project' && !newTask.value.projectId) { toast.warning('请选择项目 Agent'); return }
 
-    const payload = {
-      title: newTask.value.title,
-      description: newTask.value.description,
-      target_project: newTask.value.assignType === 'project' ? newTask.value.projectId : 'coordinator',
-      group_id: newTask.value.assignType === 'group' ? newTask.value.groupId : null,
-      priority: newTask.value.priority,
-      assign_type: newTask.value.assignType,
-      auto_execute: newTask.value.autoExecute,
-      queue_scope: 'conversation_serial',
-      client_message_id: newTask.value.clientMessageId || createTaskClientMessageId('standard'),
-      source_channel: 'task-dispatch',
-      target_scope: newTask.value.assignType === 'group' ? 'group_session' : 'project_session'
+    const preflight = await runTaskPreflight()
+    if (!preflight?.allowed) {
+      toast.error((preflight?.errors || []).map(item => item.message).join('；') || '任务未通过执行前预检')
+      return
     }
+    let confirmed = false
+    if (preflight.requiresConfirmation) {
+      confirmed = await confirmDialog(`${(preflight.warnings || []).map(item => `• ${item.message}`).join('\n')}\n\n仍要创建这个任务吗？`)
+      if (!confirmed) return
+    }
+    const payload = buildTaskDraftPayload(confirmed)
     const requestPayload = editingTaskId.value ? { id: editingTaskId.value, ...payload } : payload
     requestPayload.retained_attachment_ids = newTask.value.existingAttachments.map(item => item.id)
     const form = new FormData()
     form.append('payload', JSON.stringify(requestPayload))
     newTask.value.files.forEach(file => form.append('files', file, file.name))
-    const res = editingTaskId.value ? await tasksApi.update(form) : await tasksApi.create(form)
-
-    if (res.success) {
+    try {
+      const res = editingTaskId.value ? await tasksApi.update(form) : await tasksApi.create(form)
+      if (res.success) {
       showCreate.value = false
-      newTask.value = {
-        title: '',
-        description: '',
-        assignType: 'group',
-        groupId: groups.value[0]?.id || '',
-        projectId: projects.value[0]?.name || '',
-        priority: 'normal',
-        autoExecute: true,
-        clientMessageId: createTaskClientMessageId('standard'),
-        files: [],
-        existingAttachments: []
-      }
+      newTask.value = blankTaskDraft()
+      taskPreflight.value = null
       refreshTaskWork()
       if (res.task?.source_attachment_warnings?.length) {
         toast.warning(`任务已保存，但有 ${res.task.source_attachment_warnings.length} 个附件未完整解析；执行 Agent 会按原文件路径继续核验`)
@@ -590,9 +691,8 @@ export function useTaskManager(props, emit) {
         toast.success(editingTaskId.value ? '任务修改成功' : res.queued ? '任务已创建并加入执行队列' : '任务创建成功')
       }
       editingTaskId.value = ''
-    } else {
-      toast.error('创建失败: ' + (res.error || '未知错误'))
-    }
+      } else toast.error('创建失败: ' + (res.error || '未知错误'))
+    } catch (error) { toast.error(error.message || '创建任务失败') }
   }
 
   const buildDailyDevCreatePayload = (forceQualityGate = false) => ({
@@ -673,7 +773,8 @@ export function useTaskManager(props, emit) {
 
   const openCreateTask = () => {
     editingTaskId.value = ''
-    newTask.value = { title: '', description: '', assignType: 'group', groupId: groups.value[0]?.id || '', projectId: projects.value[0]?.name || '', priority: 'normal', autoExecute: true, clientMessageId: createTaskClientMessageId('standard'), files: [], existingAttachments: [] }
+    newTask.value = blankTaskDraft()
+    taskPreflight.value = null
     showCreate.value = true
   }
 
@@ -683,6 +784,9 @@ export function useTaskManager(props, emit) {
       title: task.title || '', description: task.description || '', assignType: task.assign_type || 'group',
       groupId: task.group_id || groups.value[0]?.id || '', projectId: task.target_project || projects.value[0]?.name || '',
       priority: task.priority || 'normal', autoExecute: task.auto_execute !== false,
+      taskTemplateId: task.task_template_id || '', templateVariables: { ...(task.task_template_variables || {}) },
+      templateName: '', deadlineAt: task.deadline_at ? new Date(task.deadline_at).toISOString().slice(0, 16) : '',
+      dependencyTaskIds: [...(task.mission_dependencies || [])], sourceCronJobId: task.cron_job_id || '',
       clientMessageId: task.client_message_id || createTaskClientMessageId('standard'),
       files: [], existingAttachments: Array.isArray(task.source_attachments) ? [...task.source_attachments] : [],
     }
@@ -1162,6 +1266,14 @@ export function useTaskManager(props, emit) {
   }
 
   watch(() => props.navigateTo, async (target) => {
+    if (target?.tab === 'tasks' && target.createTaskDraft) {
+      editingTaskId.value = ''
+      newTask.value = { ...blankTaskDraft(), ...target.createTaskDraft, files: [], existingAttachments: [] }
+      taskPreflight.value = null
+      showCreate.value = true
+      emit('navigated')
+      return
+    }
     if (!target?.taskId || target.tab !== 'tasks') return
     await loadTasks()
     const task = tasks.value.find(item => item.id === target.taskId)
@@ -1174,6 +1286,7 @@ export function useTaskManager(props, emit) {
     loadTasks()
     loadGroups()
     loadProjects()
+    loadTaskTemplates()
     loadOrchestratorDiagnostics()
     loadExecutionDashboard()
     unsubscribeRuntimeEvents = subscribeRuntimeEvents(['task', 'permission', 'agent', 'feishu'], event => {
@@ -1212,6 +1325,8 @@ export function useTaskManager(props, emit) {
     backlogBulkDispatchResult, backlogImportLoading, backlogImportResult, backlogStatusLabel, formatBacklogTime, backlogState,
     backlogCount, backlogQualityText, backlogLatestHistory, backlogCanDispatch, backlogCanRestoreReady, loadDailyDevBacklogs,
     openBacklog, updateBacklogStatus, dispatchBacklog, dispatchReadyBacklogs, importSharedDocsToBacklog, newTask,
+    taskTemplates, selectedTaskTemplate, taskPreflight, taskPreflightLoading, loadTaskTemplates, applySelectedTaskTemplate,
+    runTaskPreflight, saveCurrentTaskTemplate, convertTaskToCron,
     addTaskFiles, handleTaskPaste, removeExistingTaskAttachment,
     defaultDailyDevTask, dailyDevTask, updateDailyDevTaskField, loadTasks, toggleTaskSelection, loadGroups,
     loadProjects, loadOrchestratorDiagnostics, refreshTaskWork, formatDuration, visibleReportText, visibleReportObject,

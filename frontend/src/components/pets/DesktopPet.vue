@@ -21,6 +21,7 @@ const y = ref(props.initialY ?? (window.innerHeight - 160 - Math.random() * 100)
 const isDragging = ref(false)
 const dragOffset = ref({ x: 0, y: 0 })
 const showBubble = ref(false)
+const bubbleTitle = ref('')
 const bubbleText = ref('')
 const bubbleTimer = ref(null)
 
@@ -107,6 +108,7 @@ const displayLabel = computed(() => {
 
 const showRandomBubble = () => {
   const msgs = stateMessages.value
+  bubbleTitle.value = ''
   bubbleText.value = msgs[Math.floor(Math.random() * msgs.length)]
   showBubble.value = true
   if (bubbleTimer.value) clearTimeout(bubbleTimer.value)
@@ -186,10 +188,12 @@ const onTouchEnd = () => {
 
 watch(() => props.notification, notification => {
   if (!notification) return
-  bubbleText.value = [notification.title, notification.summary].filter(Boolean).join('：')
+  bubbleTitle.value = String(notification.title || notification.milestone?.title || '').trim()
+  bubbleText.value = String(notification.summary || notification.text || notification.milestone?.summary || '').trim()
   showBubble.value = true
   if (bubbleTimer.value) clearTimeout(bubbleTimer.value)
-  bubbleTimer.value = setTimeout(() => { showBubble.value = false }, notification.role === 'ask' ? 30_000 : 12_000)
+  const holdMs = Number(notification.hold_ms || notification.holdMs)
+  bubbleTimer.value = setTimeout(() => { showBubble.value = false }, Number.isFinite(holdMs) ? Math.max(1_000, Math.min(30_000, holdMs)) : notification.role === 'ask' ? 30_000 : notification.role === 'error' ? 18_000 : 12_000)
 }, { immediate: true })
 
 onUnmounted(() => {
@@ -213,6 +217,7 @@ onUnmounted(() => {
     <!-- 气泡 -->
     <transition name="bubble">
       <div v-if="showBubble" class="pet-bubble">
+        <strong v-if="bubbleTitle">{{ bubbleTitle }}</strong>
         <span>{{ bubbleText }}</span>
         <div class="bubble-arrow"></div>
       </div>
@@ -258,6 +263,15 @@ onUnmounted(() => {
   text-align: center;
   box-shadow: 0 4px 12px rgba(0,0,0,0.3);
   pointer-events: none;
+}
+.pet-bubble strong,
+.pet-bubble span {
+  display: block;
+}
+.pet-bubble strong {
+  margin-bottom: 2px;
+  font-size: 11px;
+  color: var(--accent-primary, #f472b6);
 }
 
 .bubble-arrow {

@@ -308,7 +308,8 @@ export async function recoverMemoryContextConsumptionReceipt(input: any, execute
       status: recovered ? "recovered" : "blocked",
       suppress_task_replay: !recovered,
       issues: [...new Set(issues)],
-      recovery_output_checksum: digest(String(result?.output || result?.stdout || "")),
+      recovery_output_checksum: String(result?.output_checksum || result?.outputChecksum || "")
+        || digest(String(result?.output || result?.stdout || "")),
       recovery_native_continuation_evidence: recoveryContinuation,
       receipt_signature: recovered ? receipt.receiptSignature : "",
       completed_at: new Date().toISOString(),

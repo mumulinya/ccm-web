@@ -28,6 +28,7 @@ const emit = defineEmits(['close', 'submit', 'update:name'])
 .group-rename-modal { min-width: 420px; }
 .form-group { margin-bottom: 18px; }
 .form-group label { display: block; font-size: 12.5px; color: var(--text-secondary); margin-bottom: 8px; font-weight: 500; }
-.form-group input { width: 100%; padding: 10px 14px; border-radius: 10px; border: 1px solid var(--border-color); background: var(--control-bg); color: var(--text-primary); font-size: 13px; outline: none; }
+.form-group input { width:100%; height:var(--control-height-lg,36px); box-sizing:border-box; padding:0 var(--control-padding-x,10px); border-radius:var(--radius-md,6px); border:1px solid var(--border-color); background:var(--control-bg); color:var(--text-primary); font-size:12px; outline:none; }
+.form-group input:focus { border-color:var(--accent-blue); box-shadow:var(--focus-ring); }
 .form-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 24px; }
 </style>

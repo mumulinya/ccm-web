@@ -107,6 +107,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown))
             <input :value="form.work_dir" autocomplete="off" :placeholder="githubSource ? '例如 D:\projects\repository（目录需不存在或为空）' : mode === 'create' ? '例如 D:\projects\my-app' : '选择项目代码目录'" @input="updateField('work_dir', $event)">
             <button type="button" class="project-secondary-button browse-button" @click.prevent="emit('browse', 'work_dir')"><FolderOpen :size="16" /> 浏览</button>
           </div>
+          <small v-if="mode === 'create' && !githubSource">选择文件夹后，将使用末级文件夹名称自动填写项目 ID 和显示名称；已手动填写的内容不会被覆盖。</small>
         </label>
 
         <div class="project-field-grid">
@@ -376,13 +377,13 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown))
 .project-field select {
   width: 100%;
   min-width: 0;
-  height: 40px;
+  height: var(--control-height-lg, 36px);
   box-sizing: border-box;
   padding: 0 12px;
   border: 1px solid var(--border-color);
   border-radius: 6px;
   outline: none;
-  background: var(--surface, var(--bg-primary));
+  background: var(--control-bg, var(--surface, var(--bg-primary)));
   color: var(--text-primary);
   font: inherit;
   font-size: 13px;
@@ -392,7 +393,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown))
 .project-field input:focus,
 .project-field select:focus {
   border-color: var(--accent-blue);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-blue) 12%, transparent);
+  box-shadow: var(--focus-ring);
 }
 
 .project-directory-field input {

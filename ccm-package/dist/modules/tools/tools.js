@@ -78,6 +78,8 @@ const global_agent_tool_authorization_1 = require("../global/global-agent-tool-a
 const main_agent_tool_runtime_1 = require("../../tools/main-agent-tool-runtime");
 const workspace_readonly_tools_1 = require("../../tools/workspace-readonly-tools");
 const metrics_v3_1 = require("../../system/metrics-v3");
+const execution_kernel_1 = require("../../agents/execution-kernel");
+const access_policy_1 = require("../system/access-policy");
 // ===== merged from tools-part-01-part-01.ts =====
 const { toolManager } = require("../../tools/tool-manager");
 const TOOL_CATALOG_AUDIT_FILE = path.join(os.homedir(), ".cc-connect", "tools", "catalog-operations.jsonl");
@@ -2050,6 +2052,13 @@ function handleToolsAndMetricsApi(pathname, req, res, parsed) {
         (0, metrics_v3_1.ensureLegacyMetricsMigrated)((0, db_1.loadMetrics)());
         const scopeType = String(parsed.query.scope_type || parsed.query.scopeType || "");
         const scopeId = String(parsed.query.scope_id || parsed.query.scopeId || "");
+        const metricsPrincipal = req.ccmAuth;
+        if (metricsPrincipal?.kind === "browser" && metricsPrincipal.role !== "admin" && ["project", "group"].includes(scopeType)) {
+            if (!(0, access_policy_1.hasResourceAccess)(String(metricsPrincipal.userId || ""), String(metricsPrincipal.role || "user"), scopeType, scopeId, "use")) {
+                (0, utils_1.sendJson)(res, { success: false, error: "当前账户没有该监控范围的访问权限", code: "RESOURCE_ACCESS_DENIED" }, 403);
+                return true;
+            }
+        }
         const result = (0, metrics_v3_1.queryMetricEventsV3)({
             scopeType,
             scopeId,
@@ -2066,8 +2075,15 @@ function handleToolsAndMetricsApi(pathname, req, res, parsed) {
     if (pathname === "/api/metrics" && req.method === "GET") {
         (0, metrics_v3_1.ensureLegacyMetricsMigrated)((0, db_1.loadMetrics)());
         (0, metrics_v3_1.pruneMetricEventsV3)();
-        const metrics = (0, metrics_v3_1.loadMetricsDashboardV3)();
-        const groups = (0, storage_1.loadGroups)().map((group) => {
+        const rawMetrics = (0, metrics_v3_1.loadMetricsDashboardV3)();
+        const principal = req.ccmAuth;
+        const userId = String(principal?.userId || "");
+        const userRole = String(principal?.role || "admin");
+        const allGroups = (0, storage_1.loadGroups)();
+        const visibleGroups = principal?.kind === "browser"
+            ? (0, access_policy_1.filterAccessibleResources)(allGroups, userId, userRole, "group", (group) => String(group.id || ""))
+            : allGroups;
+        const groups = visibleGroups.map((group) => {
             const members = Array.isArray(group.members) ? group.members : [];
             const coordinator = members.find((member) => member.role === "coordinator") || members[0] || {};
             return {
@@ -2080,12 +2096,34 @@ function handleToolsAndMetricsApi(pathname, req, res, parsed) {
                 })).filter((member) => member.project),
             };
         });
-        const projects = Object.entries((0, db_1.loadProjectConfigs)()).map(([id, project]) => ({
+        const allProjects = Object.entries((0, db_1.loadProjectConfigs)());
+        const visibleProjects = principal?.kind === "browser"
+            ? (0, access_policy_1.filterAccessibleResources)(allProjects, userId, userRole, "project", ([id]) => id)
+            : allProjects;
+        const projects = visibleProjects.map(([id, project]) => ({
             id,
             name: String(project?.display_name || project?.displayName || project?.name || id),
             agent: String(project?.agent || project?.agent_type || "project-agent"),
             scopeKey: `project:${id}`,
         }));
+        const allowedGroupIds = new Set(groups.map((group) => group.id));
+        const allowedProjectIds = new Set(projects.map((project) => project.id));
+        const metrics = principal?.kind === "browser" && userRole !== "admin"
+            ? {
+                ...rawMetrics,
+                scopes: Object.fromEntries(Object.entries(rawMetrics.scopes || {}).filter(([key]) => (key === "global:global"
+                    || (key.startsWith("group:") && allowedGroupIds.has(key.slice(6)))
+                    || (key.startsWith("project:") && allowedProjectIds.has(key.slice(8)))))),
+                coverage: (rawMetrics.coverage || []).filter((row) => (row.scopeType === "global"
+                    || (row.scopeType === "group" && allowedGroupIds.has(row.scopeId))
+                    || (row.scopeType === "project" && allowedProjectIds.has(row.scopeId)))),
+                agents: {},
+                daily: {},
+            }
+            : rawMetrics;
+        const agentResources = (0, execution_kernel_1.listActiveAgentRuns)().filter((run) => (userRole === "admin"
+            || !principal?.kind
+            || (run.project && (0, access_policy_1.hasResourceAccess)(userId, userRole, "project", run.project, "use"))));
         (0, utils_1.sendJson)(res, {
             metrics,
             catalog: {
@@ -2106,6 +2144,7 @@ function handleToolsAndMetricsApi(pathname, req, res, parsed) {
                 },
             },
             system: buildLivePerformanceSnapshot(),
+            agentResources,
         });
         return true;
     }

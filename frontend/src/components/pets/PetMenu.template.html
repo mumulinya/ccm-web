@@ -24,6 +24,13 @@
         <span><strong>网页宠物兜底</strong><small>Electron 离线时由网页宠物继续显示持久通知</small></span>
         <input type="checkbox" :checked="petSettings.webFallback" @change="updatePetSetting('webFallback', $event.target.checked)">
       </label>
+      <label>
+        <span><strong>Agent 进度播报</strong><small>关键里程碑会实时显示；不会逐工具播报或展示原始输出</small></span>
+        <select :value="petSettings.agentProgressMode" @change="updatePetSetting('agentProgressMode', $event.target.value)">
+          <option value="milestones">关键里程碑</option>
+          <option value="terminal_only">仅需处理与终态</option>
+        </select>
+      </label>
     </section>
 
     <section class="companion-overview" aria-label="当前工作伴侣">

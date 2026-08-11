@@ -39,7 +39,9 @@ const projectToolUiChecks = {
   operationalOverviewIsDefault: /const currentFilter = ref\('overview'\)/.test(toolsConfigPanelSource) && /<ToolControlOverview/.test(toolsConfigTemplateSource),
   mcpEditorSupportsPreSaveTest: /catalogImpact/.test(mcpEditorSource) && /保存前测试/.test(mcpEditorSource),
   skillMarkdownAllowsOnlyWebLinks: /\['http:', 'https:'\]/.test(skillMarkdownSource) && /rel="noopener noreferrer"/.test(skillMarkdownSource),
-  mcpListIsRedactedForBrowser: /loadMcpTools\(\)\.filter\(tool => !isInternalMcpName\(tool\?\.name\)\)\.map\(redactMcpToolForDisplay\)/.test(toolsBackendSource),
+  mcpListIsRedactedForBrowser: /loadMcpTools\(\)\.filter\(tool => !isInternalMcpName\(tool\?\.name\)\)/.test(toolsBackendSource)
+    && /catalog\.map\(tool => withSafeMcpRuntime\(tool, runtimeByServer\)\)/.test(toolsBackendSource)
+    && /\.\.\.redactMcpToolForDisplay\(tool\)/.test(toolsBackendSource),
   catalogMutationHasRollbackAndResync: /rollbackCatalogMutation/.test(toolsBackendSource) && /completeToolCatalogMutationLifecycle/.test(toolsBackendSource),
   mcpEnvironmentUsesCredentialStore: /protectCredential\(scope, `env\.\$\{key\}`/.test(dbSource),
   feishuMcpUsesSettingsCredentialFallback: /control_bot_app_id \|\| feishu\?\.app_id/.test(dbSource),

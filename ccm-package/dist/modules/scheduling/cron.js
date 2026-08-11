@@ -64,14 +64,17 @@ exports.handleCronApi = handleCronApi;
 const utils_1 = require("../../core/utils");
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
+const crypto = __importStar(require("crypto"));
 const db_1 = require("../../core/db");
 const atomic_json_file_1 = require("../../core/atomic-json-file");
 const collaboration_1 = require("../collaboration/collaboration");
 const reliability_ledger_1 = require("../../system/reliability-ledger");
 const cron_job_store_1 = require("./cron-job-store");
+const cron_control_plane_1 = require("./cron-control-plane");
 const cron_dev_reports_1 = require("./cron-dev-reports");
 const work_journal_1 = require("./work-journal");
 const storage_1 = require("../collaboration/storage");
+const task_intake_preflight_1 = require("../collaboration/task-intake-preflight");
 const feishu_channel_1 = require("../collaboration/feishu-channel");
 const feishu_1 = require("../collaboration/feishu");
 const test_agent_runner_1 = require("../collaboration/test-agent-runner");
@@ -420,6 +423,9 @@ function runConflictResolutionMemoryMaintenanceSchedulerTick(options = {}) {
     return report;
 }
 function buildTaskFromCronJob(job, trigger) {
+    const templateProjection = (0, cron_control_plane_1.resolveCronTemplate)(job);
+    const taskTitle = templateProjection.title || job.name;
+    job = { ...job, prompt: templateProjection.instructions || job.prompt };
     const targetType = (0, cron_job_store_1.normalizeTargetType)(job);
     const workflowType = targetType === "group" ? (job.workflow_type || job.workflowType || "general") : "general";
     const requiresCodeChanges = workflowType === "daily_dev"
@@ -505,6 +511,9 @@ function buildTaskFromCronJob(job, trigger) {
             },
             cron_job_id: job.id,
             cron_trigger: trigger,
+            task_template_id: templateProjection.template?.id || null,
+            task_template_revision: templateProjection.template?.revision || null,
+            template_variables: templateProjection.rendered?.values || null,
         };
     };
     if (workflowType === "daily_dev" && targetType === "group") {
@@ -561,7 +570,7 @@ function buildTaskFromCronJob(job, trigger) {
         job.prompt,
     ].filter(line => line !== "").join("\n");
     const draft = {
-        title: `[定时] ${job.name}`,
+        title: `[定时] ${taskTitle}`,
         description,
         target_project: targetType === "group" ? "coordinator" : job.project,
         group_id: targetType === "group" ? job.group_id : null,
@@ -580,6 +589,9 @@ function buildTaskFromCronJob(job, trigger) {
         source_attachment_warnings: Array.isArray(job.source_attachment_warnings) ? [...job.source_attachment_warnings] : [],
         cron_job_id: job.id,
         cron_trigger: trigger,
+        task_template_id: templateProjection.template?.id || null,
+        task_template_revision: templateProjection.template?.revision || null,
+        template_variables: templateProjection.rendered?.values || null,
     };
     return { drafts: [draft], meta: cronMeta };
 }
@@ -727,7 +739,6 @@ function publicCronTaskSummary(task, artifactRuns) {
         status: String(task?.status || "pending"),
         phase: String(task?.collaboration_state?.phase || task?.phase || ""),
         status_detail: cronFriendlyText(task?.status_detail || delivery?.detail || delivery?.headline || task?.result, "等待主 Agent 更新进度", 180),
-        trace_id: String(task?.trace_id || ""),
         group_id: String(task?.group_id || ""),
         todo,
         main_agent: {
@@ -752,6 +763,14 @@ function publicCronJobs(rawJobs) {
         last_result: cronFriendlyText(job.last_result, "暂无结果", 220),
         run_history: (job.run_history || []).map((run) => ({
             ...run,
+            meta: {
+                recovered_misfire: run.meta?.recovered_misfire === true,
+                overlap_policy: String(run.meta?.overlap_policy || ""),
+                overlap_action: String(run.meta?.overlap_action || ""),
+                overlap_reason: cronFriendlyText(run.meta?.overlap_reason, "", 160),
+                missed_by_minutes: Number(run.meta?.missed_by_minutes || 0),
+                misfire_policy: String(run.meta?.misfire_policy || ""),
+            },
             result: cronFriendlyText(run.result, "等待执行结果", 220),
             task_states: Object.fromEntries(Object.entries(run.task_states || {}).map(([taskId, state]) => [taskId, {
                     status: String(state?.status || ""),
@@ -880,12 +899,22 @@ function syncCronTaskStatus(task, status, result = "") {
     }
     (0, cron_job_store_1.patchCronJob)(cronJobId, patch);
     if (syncedRun?.status === "failed") {
-        const retried = scheduleFailedCronRunRetry((0, db_1.loadCronJobs)().find(item => item.id === cronJobId), syncedRun);
+        const latestJob = (0, db_1.loadCronJobs)().find(item => item.id === cronJobId);
+        const transitionedToFailure = matchedRun?.status !== "failed";
+        const failure = transitionedToFailure ? (0, cron_control_plane_1.cronFailureDecision)(latestJob || job) : { paused: false, patch: {} };
+        const failedJob = transitionedToFailure ? (0, cron_job_store_1.patchCronJob)(cronJobId, {
+            ...failure.patch,
+            last_status: failure.paused ? "paused_failure" : "failed",
+            last_result: failure.paused ? `${resultText || "任务执行失败"}；${failure.patch.paused_reason || "已自动暂停"}` : (resultText || "任务执行失败"),
+        }) : latestJob;
+        const retried = failure.paused ? syncedRun : scheduleFailedCronRunRetry(failedJob, syncedRun);
         notifyCronRun(cronJobId, syncedRun.id, "failed");
-        if (!retried?.next_retry_at)
+        if (!retried?.next_retry_at && !failure.paused)
             (0, cron_job_store_1.patchCronJob)(cronJobId, { last_status: "failed", last_result: resultText || "任务执行失败" });
     }
     else if (syncedRun?.status === "done") {
+        if (matchedRun?.status !== "done")
+            (0, cron_job_store_1.patchCronJob)(cronJobId, (0, cron_control_plane_1.cronSuccessPatch)());
         notifyCronRun(cronJobId, syncedRun.id, "done");
     }
     else if (syncedRun?.status === "waiting") {
@@ -925,16 +954,41 @@ async function runCronJobCore(id, ctx, trigger, reliability = null, options = {}
     const normalizedJob = (0, cron_job_store_1.normalizeCronJob)(job);
     const scheduledFor = options.scheduledFor || (trigger === "schedule" || trigger === "recovery" ? job.next_run : null);
     const nextRun = (0, cron_job_store_1.computeNextRun)(job.schedule, now, normalizedJob.timezone);
+    const target = (0, cron_control_plane_1.cronTarget)(job);
+    const occurrenceId = String(options.occurrenceId || (0, cron_job_store_1.cronOccurrenceId)(id, scheduledFor ? (0, cron_control_plane_1.occurrenceSlot)(job, scheduledFor) : options.manualRequestId || now.toISOString(), target.type, target.id));
+    const existingOccurrence = normalizedJob.run_history.find((run) => String(run.occurrence_id || "") === occurrenceId);
+    if (existingOccurrence)
+        return { success: true, duplicate: true, skipped: true, message: "相同计划周期已经创建运行记录", run: existingOccurrence };
+    const authorization = (0, cron_control_plane_1.cronExecutionAuthorization)(job);
+    if (!authorization.allowed) {
+        const result = authorization.reason || "定时任务执行权限已失效";
+        const run = (0, cron_job_store_1.appendCronRun)(id, { trigger, occurrence_id: occurrenceId, scheduled_for: scheduledFor, started_at: now.toISOString(), completed_at: now.toISOString(), status: "waiting", result, meta: { authorization: { allowed: false, reason: result } } });
+        (0, cron_job_store_1.patchCronJob)(id, { enabled: false, next_run: null, last_status: "waiting", last_result: result, paused_reason: result });
+        return { success: false, needs_user: true, code: "CRON_TARGET_ACCESS_REVOKED", error: result, run };
+    }
+    const overlap = ["retry", "resume"].includes(trigger) ? { action: "proceed", activeRuns: [], dependencyTaskIds: [], parallelSafe: false } : (0, cron_control_plane_1.resolveCronOverlap)(job);
+    if (overlap.action === "skip" || overlap.action === "needs_user") {
+        const status = overlap.action === "skip" ? "skipped" : "waiting";
+        const result = overlap.reason || (status === "skipped" ? "上一轮尚未完成，本轮已跳过" : "上一轮需要人工处理");
+        const run = (0, cron_job_store_1.appendCronRun)(id, { trigger, occurrence_id: occurrenceId, scheduled_for: scheduledFor, started_at: now.toISOString(), completed_at: status === "skipped" ? now.toISOString() : null, status, result, meta: { overlap_policy: normalizedJob.overlap_policy, active_run_ids: overlap.activeRuns.map((item) => item.id) } });
+        (0, cron_job_store_1.patchCronJob)(id, { last_run: now.toISOString(), last_scheduled_at: scheduledFor || null, last_status: status, last_result: result, next_run: nextRun, run_count: Number(job.run_count || 0) + 1 });
+        return { success: status === "skipped", skipped: status === "skipped", needs_user: status === "waiting", message: result, run };
+    }
+    if (overlap.action === "cancel_previous") {
+        for (const activeRun of overlap.activeRuns)
+            cancelCronRun(id, activeRun.id, "新一轮已按定时任务并发策略安全替换上一轮");
+    }
     exports.runningCronJobs.add(id);
     const cronRun = (0, cron_job_store_1.appendCronRun)(id, {
         trigger,
+        occurrence_id: occurrenceId,
         started_at: now.toISOString(),
         status: "triggering",
         result: "正在创建并派发任务...",
         parent_run_id: options.parentRunId || "",
         attempt: options.attempt || 1,
         scheduled_for: scheduledFor,
-        meta: { reliability_trace_id: reliability?.traceId || "", recovered_misfire: trigger === "recovery" },
+        meta: { reliability_trace_id: reliability?.traceId || "", recovered_misfire: trigger === "recovery", overlap_policy: normalizedJob.overlap_policy, overlap_action: overlap.action, overlap_reason: overlap.reason || "" },
     });
     if (!cronRun) {
         exports.runningCronJobs.delete(id);
@@ -984,11 +1038,35 @@ async function runCronJobCore(id, ctx, trigger, reliability = null, options = {}
         taskDrafts = taskDrafts.map((draft) => ({
             ...draft,
             cron_run_id: cronRun.id,
+            cron_occurrence_id: occurrenceId,
+            cron_scheduled_for: scheduledFor || null,
+            mission_dependencies: overlap.action === "queue" ? [...new Set([...(draft.mission_dependencies || []), ...overlap.dependencyTaskIds])] : (draft.mission_dependencies || []),
+            queue_scope: overlap.parallelSafe ? "isolated_parallel" : (draft.queue_scope || "conversation_serial"),
+            child_agent_isolation: overlap.parallelSafe ? "worktree" : (draft.child_agent_isolation || ""),
             workflow_meta: {
                 ...(draft?.workflow_meta || {}),
                 cron_run_id: cronRun.id,
+                cron_occurrence_id: occurrenceId,
+                cron_scheduled_for: scheduledFor || null,
+                cron_overlap: { policy: normalizedJob.overlap_policy, action: overlap.action, dependency_task_ids: overlap.dependencyTaskIds || [], parallel_safe: overlap.parallelSafe === true },
             },
         }));
+        for (const draft of taskDrafts) {
+            const preflight = (0, task_intake_preflight_1.buildTaskPreflight)({ ...draft, source_channel: "schedule" }, {
+                ccmAuth: {
+                    kind: authorization.legacy ? "system" : "browser",
+                    userId: authorization.ownerId,
+                    role: authorization.role === "system" ? "admin" : authorization.role,
+                },
+            });
+            const blockingWarning = preflight.warnings.find((item) => ["WORKSPACE_DIRTY", "AGENT_RUNTIME_UNAVAILABLE", "GROUP_AGENT_UNAVAILABLE"].includes(item.code));
+            if (!preflight.allowed || blockingWarning) {
+                const error = new Error(preflight.errors[0]?.message || blockingWarning?.message || "定时任务执行前预检未通过");
+                error.code = preflight.errors[0]?.code || blockingWarning?.code || "CRON_PREFLIGHT_FAILED";
+                error.needsUser = true;
+                throw error;
+            }
+        }
         if (reliability?.operationKey) {
             taskDrafts = taskDrafts.map((draft, index) => ({
                 ...draft,
@@ -1115,12 +1193,21 @@ async function runCronJobCore(id, ctx, trigger, reliability = null, options = {}
                 result: `定时任务创建失败，已恢复为 ready：${e.message}`,
             });
         }
+        if (e?.needsUser === true) {
+            const result = `执行前预检需要处理：${e.message}`;
+            const updated = (0, cron_job_store_1.patchCronJob)(id, { enabled: false, next_run: null, last_status: "waiting", last_result: result, paused_reason: result });
+            const run = (0, cron_job_store_1.patchCronRun)(id, cronRun.id, { status: "waiting", result, completed_at: null, meta: { ...cronMeta, preflight_code: e.code || "CRON_PREFLIGHT_FAILED" } });
+            notifyCronRun(id, cronRun.id, "waiting");
+            return { success: false, needs_user: true, code: e.code || "CRON_PREFLIGHT_FAILED", error: result, job: updated, run };
+        }
+        const failure = (0, cron_control_plane_1.cronFailureDecision)((0, db_1.loadCronJobs)().find(item => item.id === id) || job);
         const updated = (0, cron_job_store_1.patchCronJob)(id, {
-            last_status: "failed",
+            ...failure.patch,
+            last_status: failure.paused ? "paused_failure" : "failed",
             last_result: e.message,
             last_run_meta: cronMeta,
             run_count: Number(job.run_count || 0) + 1,
-            next_run: nextRun,
+            next_run: failure.paused ? null : nextRun,
         });
         let run = (0, cron_job_store_1.patchCronRun)(id, cronRun.id, {
             status: "failed",
@@ -1128,7 +1215,7 @@ async function runCronJobCore(id, ctx, trigger, reliability = null, options = {}
             completed_at: new Date().toISOString(),
             meta: cronMeta,
         });
-        run = scheduleFailedCronRunRetry(updated, run);
+        run = failure.paused ? run : scheduleFailedCronRunRetry(updated, run);
         notifyCronRun(id, cronRun.id, "failed");
         return { success: false, error: e.message, job: updated, run };
     }
@@ -1335,9 +1422,20 @@ async function tickCronSchedulerCore(ctx) {
                 notifyCronRun(job.id, run.id, "done");
             continue;
         }
-        const result = await runCronJob(job.id, ctx, shouldRecover ? "recovery" : "schedule", { scheduledFor });
-        if (!result?.success)
-            console.error("[Cron]", job.name, result?.error || result?.message);
+        if (shouldRecover && job.misfire_policy === "confirm") {
+            const pending = (0, cron_control_plane_1.missedCronOccurrences)(job, now);
+            const reason = `停机期间错过 ${pending.length || 1} 个执行时间，等待用户确认是否补跑`;
+            (0, cron_job_store_1.patchCronJob)(job.id, { pending_misfires: pending.length ? pending : [scheduledFor], last_status: "waiting_confirmation", last_result: reason, next_run: (0, cron_job_store_1.computeNextRun)(job.schedule, now, job.timezone) });
+            continue;
+        }
+        const occurrences = shouldRecover && job.misfire_policy === "catch_up"
+            ? (0, cron_control_plane_1.missedCronOccurrences)(job, now)
+            : [shouldRecover && job.misfire_policy === "run_once" ? ((0, cron_control_plane_1.latestMissedCronOccurrence)(job, now) || scheduledFor) : scheduledFor];
+        for (const occurrence of occurrences) {
+            const result = await runCronJob(job.id, ctx, shouldRecover ? "recovery" : "schedule", { scheduledFor: occurrence });
+            if (!result?.success && !result?.skipped)
+                console.error("[Cron]", job.name, result?.error || result?.message);
+        }
     }
     await (0, cron_dev_reports_1.tickAutoDevReportNotifications)(now);
     await (0, feishu_channel_1.tickFeishuNotificationOutbox)(now);
@@ -1440,18 +1538,47 @@ function handleCronApi(pathname, req, res, parsed, ctx) {
         const includeArchived = String(parsed.query.include_archived || parsed.query.includeArchived || "") === "true";
         const onlyArchived = String(parsed.query.archived || "") === "true";
         const allJobs = (0, db_1.loadCronJobs)();
-        const jobs = onlyArchived ? allJobs.filter(job => job.archived || job.deleted_at) : includeArchived ? allJobs : allJobs.filter(job => !job.archived && !job.deleted_at);
-        (0, utils_1.sendJson)(res, { jobs: publicCronJobs(jobs), archived_count: allJobs.filter(job => job.archived || job.deleted_at).length, scheduler: schedulerStatus() });
+        const visibleJobs = allJobs.filter(job => (0, cron_control_plane_1.canViewCronJob)(req, job));
+        const jobs = onlyArchived ? visibleJobs.filter(job => job.archived || job.deleted_at) : includeArchived ? visibleJobs : visibleJobs.filter(job => !job.archived && !job.deleted_at);
+        (0, utils_1.sendJson)(res, { jobs: publicCronJobs(jobs), archived_count: visibleJobs.filter(job => job.archived || job.deleted_at).length, scheduler: schedulerStatus() });
+        return true;
+    }
+    const runHistoryMatch = pathname.match(/^\/api\/cron\/([^/]+)\/runs$/);
+    if (runHistoryMatch && req.method === "GET") {
+        const job = (0, db_1.loadCronJobs)().find(item => item.id === decodeURIComponent(runHistoryMatch[1]));
+        if (!job || !(0, cron_control_plane_1.canViewCronJob)(req, job)) {
+            (0, utils_1.sendJson)(res, { success: false, error: "定时任务不存在" }, 404);
+            return true;
+        }
+        const view = publicCronJobs([job])[0];
+        (0, utils_1.sendJson)(res, { success: true, job_id: job.id, revision: (0, cron_job_store_1.normalizeCronJob)(job).revision, runs: view?.run_history || [] });
         return true;
     }
     if (pathname === "/api/cron/status" && req.method === "GET") {
         (0, utils_1.sendJson)(res, schedulerStatus());
         return true;
     }
+    if (pathname === "/api/cron/preview" && req.method === "POST") {
+        readJsonBody(req, (payload) => {
+            try {
+                (0, cron_control_plane_1.assertCronTargetAccess)(req, payload, "use");
+                (0, cron_control_plane_1.assertCronTemplateAccess)(req, payload);
+                (0, cron_job_store_1.validateCronJobPayload)(payload);
+                (0, utils_1.sendJson)(res, { success: true, preview: (0, cron_control_plane_1.previewCronSchedule)(payload, 5) });
+            }
+            catch (error) {
+                (0, utils_1.sendJson)(res, { success: false, error: error.message, code: error.code }, error.status || 400);
+            }
+        }, (error) => (0, utils_1.sendJson)(res, { success: false, error: error.message }, 400));
+        return true;
+    }
     if (pathname === "/api/cron/create" && req.method === "POST") {
         const handleCreate = async (payload, files = []) => {
             try {
-                let jobPayload = payload || {};
+                const actor = (0, cron_control_plane_1.cronPrincipal)(req);
+                let jobPayload = { ...(payload || {}), owner_id: actor.userId };
+                (0, cron_control_plane_1.assertCronTargetAccess)(req, jobPayload, "use");
+                (0, cron_control_plane_1.assertCronTemplateAccess)(req, jobPayload);
                 if (files.length) {
                     const attachments = await (0, task_attachments_1.buildTaskAttachmentMutation)({ files, retainedIds: [], userText: `${jobPayload.name || ""}\n${jobPayload.prompt || ""}` });
                     jobPayload = {
@@ -1489,10 +1616,22 @@ function handleCronApi(pathname, req, res, parsed, ctx) {
         const handleUpdate = async (payload, files = [], multipart = false) => {
             try {
                 const { id, retained_attachment_ids, retainedAttachmentIds, ...incomingUpdates } = payload || {};
+                if (incomingUpdates.enabled === true) {
+                    incomingUpdates.consecutive_failures = 0;
+                    incomingUpdates.paused_reason = "";
+                }
                 let updates = incomingUpdates;
                 const current = (0, db_1.loadCronJobs)().find((item) => item.id === id);
                 if (!current)
                     return (0, utils_1.sendJson)(res, { error: "定时任务不存在" }, 404);
+                (0, cron_control_plane_1.assertCronManage)(req, current);
+                if (Number(payload.revision) !== (0, cron_job_store_1.normalizeCronJob)(current).revision)
+                    return (0, utils_1.sendJson)(res, { success: false, error: "定时任务已经发生变化，请刷新后重试", code: "CRON_REVISION_CONFLICT" }, 409);
+                const actor = (0, cron_control_plane_1.cronPrincipal)(req);
+                if (String(current.owner_id || current.ownerId || "legacy-system") === "legacy-system" && !actor.admin)
+                    incomingUpdates.owner_id = actor.userId;
+                (0, cron_control_plane_1.assertCronTargetAccess)(req, { ...current, ...incomingUpdates }, "use");
+                (0, cron_control_plane_1.assertCronTemplateAccess)(req, { ...current, ...incomingUpdates });
                 if (multipart) {
                     const attachments = await (0, task_attachments_1.buildTaskAttachmentMutation)({
                         files,
@@ -1539,6 +1678,12 @@ function handleCronApi(pathname, req, res, parsed, ctx) {
     if (pathname === "/api/cron/delete" && req.method === "POST") {
         readJsonBody(req, (payload) => {
             try {
+                const current = (0, db_1.loadCronJobs)().find((item) => item.id === payload.id);
+                if (!current)
+                    return (0, utils_1.sendJson)(res, { error: "定时任务不存在" }, 404);
+                (0, cron_control_plane_1.assertCronManage)(req, current);
+                if (Number(payload.revision) !== (0, cron_job_store_1.normalizeCronJob)(current).revision)
+                    return (0, utils_1.sendJson)(res, { success: false, error: "定时任务已经发生变化，请刷新后重试", code: "CRON_REVISION_CONFLICT" }, 409);
                 const job = (0, cron_job_store_1.deleteCronJob)(payload.id);
                 if (!job)
                     return (0, utils_1.sendJson)(res, { error: "定时任务不存在" }, 404);
@@ -1553,6 +1698,12 @@ function handleCronApi(pathname, req, res, parsed, ctx) {
     if (pathname === "/api/cron/restore" && req.method === "POST") {
         readJsonBody(req, (payload) => {
             try {
+                const current = (0, db_1.loadCronJobs)().find((item) => item.id === payload.id);
+                if (!current)
+                    return (0, utils_1.sendJson)(res, { error: "定时任务不存在" }, 404);
+                (0, cron_control_plane_1.assertCronManage)(req, current);
+                if (Number(payload.revision) !== (0, cron_job_store_1.normalizeCronJob)(current).revision)
+                    return (0, utils_1.sendJson)(res, { success: false, error: "定时任务已经发生变化，请刷新后重试", code: "CRON_REVISION_CONFLICT" }, 409);
                 const job = (0, cron_job_store_1.restoreCronJob)(payload.id);
                 if (!job)
                     return (0, utils_1.sendJson)(res, { error: "定时任务不存在" }, 404);
@@ -1567,6 +1718,12 @@ function handleCronApi(pathname, req, res, parsed, ctx) {
     if (pathname === "/api/cron/purge" && req.method === "POST") {
         readJsonBody(req, (payload) => {
             try {
+                const current = (0, db_1.loadCronJobs)().find((item) => item.id === payload.id);
+                if (!current)
+                    return (0, utils_1.sendJson)(res, { error: "定时任务不存在" }, 404);
+                (0, cron_control_plane_1.assertCronManage)(req, current);
+                if (Number(payload.revision) !== (0, cron_job_store_1.normalizeCronJob)(current).revision)
+                    return (0, utils_1.sendJson)(res, { success: false, error: "定时任务已经发生变化，请刷新后重试", code: "CRON_REVISION_CONFLICT" }, 409);
                 const job = (0, cron_job_store_1.purgeCronJob)(payload.id);
                 if (!job)
                     return (0, utils_1.sendJson)(res, { error: "定时任务不存在" }, 404);
@@ -1589,6 +1746,12 @@ function handleCronApi(pathname, req, res, parsed, ctx) {
                     return (0, utils_1.sendJson)(res, { error: "不支持的批量操作" }, 400);
                 const results = ids.map((id) => {
                     try {
+                        const current = (0, db_1.loadCronJobs)().find((item) => item.id === id);
+                        if (!current)
+                            throw new Error("定时任务不存在");
+                        (0, cron_control_plane_1.assertCronManage)(req, current);
+                        if (Number(payload.revisions?.[id]) !== (0, cron_job_store_1.normalizeCronJob)(current).revision)
+                            throw new Error("定时任务已经发生变化，请刷新后重试");
                         const job = action === "archive" ? (0, cron_job_store_1.deleteCronJob)(id)
                             : action === "restore" ? (0, cron_job_store_1.restoreCronJob)(id)
                                 : action === "purge" ? (0, cron_job_store_1.purgeCronJob)(id)
@@ -1609,7 +1772,18 @@ function handleCronApi(pathname, req, res, parsed, ctx) {
     }
     if (pathname === "/api/cron/run" && req.method === "POST") {
         readJsonBody(req, (payload) => {
-            runCronJob(payload.id, ctx, "manual")
+            const job = (0, db_1.loadCronJobs)().find((item) => item.id === payload.id);
+            if (!job || !(0, cron_control_plane_1.canManageCronJob)(req, job))
+                return (0, utils_1.sendJson)(res, { success: false, error: "定时任务不存在或无权运行" }, 404);
+            if (Number(payload.revision) !== (0, cron_job_store_1.normalizeCronJob)(job).revision)
+                return (0, utils_1.sendJson)(res, { success: false, error: "定时任务已经发生变化，请刷新后重试", code: "CRON_REVISION_CONFLICT" }, 409);
+            try {
+                (0, cron_control_plane_1.assertCronTargetAccess)(req, job, "use");
+            }
+            catch (error) {
+                return (0, utils_1.sendJson)(res, { success: false, error: error.message, code: error.code }, error.status || 403);
+            }
+            runCronJob(payload.id, ctx, "manual", { manualRequestId: String(payload.operation_key || payload.operationKey || crypto.randomUUID()) })
                 .then((result) => {
                 const status = result.success ? 200 : 400;
                 (0, utils_1.sendJson)(res, result, status);
@@ -1656,6 +1830,17 @@ function handleCronApi(pathname, req, res, parsed, ctx) {
             const runId = String(payload.run_id || payload.runId || "");
             if (!jobId || !runId)
                 return (0, utils_1.sendJson)(res, { error: "缺少定时任务或运行标识" }, 400);
+            const job = (0, db_1.loadCronJobs)().find((item) => item.id === jobId);
+            if (!job || !(0, cron_control_plane_1.canManageCronJob)(req, job))
+                return (0, utils_1.sendJson)(res, { success: false, error: "定时任务不存在或无权操作" }, 404);
+            if (Number(payload.revision) !== (0, cron_job_store_1.normalizeCronJob)(job).revision)
+                return (0, utils_1.sendJson)(res, { success: false, error: "定时任务已经发生变化，请刷新后重试", code: "CRON_REVISION_CONFLICT" }, 409);
+            try {
+                (0, cron_control_plane_1.assertCronTargetAccess)(req, job, "use");
+            }
+            catch (error) {
+                return (0, utils_1.sendJson)(res, { success: false, error: error.message, code: error.code }, error.status || 403);
+            }
             if (pathname.endsWith("/cancel")) {
                 try {
                     (0, utils_1.sendJson)(res, cancelCronRun(jobId, runId, String(payload.reason || "用户取消本轮定时任务")));
@@ -1669,6 +1854,35 @@ function handleCronApi(pathname, req, res, parsed, ctx) {
                 .then(result => (0, utils_1.sendJson)(res, result, result?.success === false ? 409 : 200))
                 .catch((error) => (0, utils_1.sendJson)(res, { error: error.message }, 409));
         }, (e) => (0, utils_1.sendJson)(res, { error: e.message }, 400));
+        return true;
+    }
+    if (pathname === "/api/cron/misfire/confirm" && req.method === "POST") {
+        readJsonBody(req, (payload) => {
+            const job = (0, db_1.loadCronJobs)().find((item) => item.id === String(payload.id || payload.job_id || payload.jobId || ""));
+            if (!job || !(0, cron_control_plane_1.canManageCronJob)(req, job))
+                return (0, utils_1.sendJson)(res, { success: false, error: "定时任务不存在或无权操作" }, 404);
+            if (Number(payload.revision) !== (0, cron_job_store_1.normalizeCronJob)(job).revision)
+                return (0, utils_1.sendJson)(res, { success: false, error: "定时任务已经发生变化，请刷新后重试", code: "CRON_REVISION_CONFLICT" }, 409);
+            try {
+                (0, cron_control_plane_1.assertCronTargetAccess)(req, job, "use");
+            }
+            catch (error) {
+                return (0, utils_1.sendJson)(res, { success: false, error: error.message, code: error.code }, error.status || 403);
+            }
+            const pending = (Array.isArray(job.pending_misfires) ? job.pending_misfires : []).map(String).filter(Boolean);
+            const decision = String(payload.decision || "");
+            const shouldRun = decision ? decision === "run" : payload.run !== false;
+            const selected = !shouldRun ? [] : ((decision === "run" || payload.mode === "all") ? pending.slice(0, (0, cron_job_store_1.normalizeCronJob)(job).catch_up_limit) : pending.slice(-1));
+            (0, cron_job_store_1.patchCronJob)(job.id, { pending_misfires: [], last_status: selected.length ? "recovery_queued" : "skipped", last_result: selected.length ? `已确认补跑 ${selected.length} 轮` : "已确认跳过停机期间错过的执行" });
+            if (!selected.length)
+                return (0, utils_1.sendJson)(res, { success: true, skipped: true });
+            selected.reduce((chain, scheduledFor) => chain.then(async (results) => {
+                results.push(await runCronJob(job.id, ctx, "recovery", { scheduledFor }));
+                return results;
+            }), Promise.resolve([]))
+                .then(results => (0, utils_1.sendJson)(res, { success: results.every((item) => item?.success !== false || item?.skipped), results }))
+                .catch((error) => (0, utils_1.sendJson)(res, { success: false, error: error.message }, 409));
+        }, (error) => (0, utils_1.sendJson)(res, { success: false, error: error.message }, 400));
         return true;
     }
     if (pathname === "/api/auto-dev/work-journal/audit" && req.method === "GET") {

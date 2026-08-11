@@ -163,9 +163,9 @@
 .modal-close { position: absolute; top: 16px; right: 16px; width: 28px; height: 28px; border-radius: 6px; border: 1px solid rgba(0, 0, 0, 0.05); background: rgba(0,0,0,0.02); color: var(--text-secondary); cursor: pointer; }
 .form-group { margin-bottom: 16px; }
 .form-group label { display: block; font-size: 13px; color: var(--text-secondary); margin-bottom: 8px; }
-.form-group input, .form-group select, .form-group textarea { width: 100%; padding: 10px 14px; border-radius: 8px; border: 1px solid rgba(0, 0, 0, 0.08); background: var(--surface); color: var(--text-primary); font-size: 13px; outline: none; }
-.form-group textarea { resize: vertical; line-height: 1.5; min-height: 76px; }
-.form-group input:focus, .form-group select:focus, .form-group textarea:focus { border-color: rgba(59, 130, 246, 0.3); box-shadow: 0 0 12px rgba(59, 130, 246, 0.12); }
+.form-group input, .form-group select, .form-group textarea { width: 100%; box-sizing: border-box; min-height: var(--control-height, 34px); padding: 0 var(--control-padding-x, 10px); border-radius: var(--radius-md, 6px); border: 1px solid var(--border-color); background: var(--control-bg); color: var(--text-primary); font-size: 12px; outline: none; transition: border-color .15s ease, box-shadow .15s ease; }
+.form-group textarea { padding-block: 9px; resize: vertical; line-height: 1.5; min-height: 84px; }
+.form-group input:focus, .form-group select:focus, .form-group textarea:focus { border-color: var(--accent-blue); box-shadow: var(--focus-ring); }
 .continue-hint { margin-top: 6px; color: var(--text-muted); font-size: 11px; line-height: 1.45; }
 .form-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px; }
 .continue-modal { min-width: min(620px, calc(100vw - 32px)) !important; }
@@ -333,3 +333,24 @@
   border-radius: var(--radius-xl, 12px) !important;
   box-shadow: var(--shadow-lg) !important;
 }
+.task-create-modal { width: min(980px, calc(100vw - 40px)); max-height: min(820px, calc(100vh - 40px)); overflow-y: auto; }
+.task-create-lead { margin: 4px 0 18px; color: var(--text-muted); font-size: 12px; }
+.task-create-grid { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(260px, .75fr); gap: 18px; align-items: start; }
+.task-create-form { min-width: 0; }
+.task-template-variables, .task-create-inline { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 12px; }
+.task-create-inline select[multiple] { min-height: 70px; padding: 6px; }
+.template-save-row { display: grid; grid-template-columns: minmax(130px, 1fr) auto auto; gap: 8px; align-items: center; margin-top: 10px; }
+.task-preflight-panel { position: sticky; top: 0; padding: 14px; border: 1px solid var(--border-color); border-radius: var(--radius-lg, 10px); background: color-mix(in srgb, var(--accent-blue) 4%, var(--surface)); }
+.task-preflight-panel.blocked { border-color: color-mix(in srgb, var(--accent-red) 35%, var(--border-color)); }
+.task-preflight-heading { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.preflight-state { margin: 12px 0; padding: 8px 10px; border-radius: 7px; font-size: 12px; font-weight: 700; }
+.preflight-state.ready { color: var(--accent-green); background: color-mix(in srgb, var(--accent-green) 10%, transparent); }
+.preflight-state.blocked { color: var(--accent-red); background: color-mix(in srgb, var(--accent-red) 9%, transparent); }
+.preflight-facts { display: grid; gap: 7px; margin: 0; }
+.preflight-facts div { display: flex; justify-content: space-between; gap: 12px; font-size: 11px; }
+.preflight-facts dt { color: var(--text-muted); }.preflight-facts dd { margin: 0; text-align: right; color: var(--text-primary); }
+.preflight-final { margin-top: 12px; padding: 10px; border-radius: 8px; background: var(--surface); border: 1px solid var(--border-color); }
+.preflight-final p { margin: 6px 0 0; max-height: 130px; overflow: auto; white-space: pre-wrap; color: var(--text-secondary); font-size: 11px; line-height: 1.5; }
+.preflight-message { margin: 8px 0 0; font-size: 11px; line-height: 1.45; }.preflight-message.error { color: var(--accent-red); }.preflight-message.warning { color: var(--accent-yellow, #b45309); }
+.preflight-empty { padding: 22px 2px 8px; color: var(--text-muted); font-size: 11px; line-height: 1.6; }
+@media (max-width: 820px) { .task-create-grid { grid-template-columns: 1fr; }.task-preflight-panel { position: static; }.task-template-variables, .task-create-inline { grid-template-columns: 1fr; }.template-save-row { grid-template-columns: 1fr; } }

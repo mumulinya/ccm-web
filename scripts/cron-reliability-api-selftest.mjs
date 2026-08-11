@@ -49,8 +49,12 @@ const { startServer } = require('../ccm-package/dist/server.js')
 const { loadTasks } = require('../ccm-package/dist/core/db.js')
 const server = startServer(0)
 
+let authSession = null
 const request = async (port, pathname, body) => {
-  const response = await fetch(`http://127.0.0.1:${port}${pathname}`, body === undefined ? undefined : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+  const headers = { ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) }
+  if (authSession?.cookie) headers.Cookie = authSession.cookie
+  if (body !== undefined && authSession?.csrf) headers['X-CCM-CSRF'] = authSession.csrf
+  const response = await fetch(`http://127.0.0.1:${port}${pathname}`, body === undefined ? { headers } : { method: 'POST', headers, body: JSON.stringify(body) })
   const data = await response.json().catch(() => ({}))
   return { response, data }
 }
@@ -62,6 +66,14 @@ try {
     server.once('error', reject)
   })
   const port = server.address().port
+  await request(port, '/api/auth/session')
+  const setupCode = fs.readFileSync(path.join(ccmDir, 'auth', 'setup-code.txt'), 'utf8').trim()
+  const registration = await request(port, '/api/auth/register', { username: 'cron-admin', password: 'Cron-Admin-123!', setup_code: setupCode })
+  assert.equal(registration.response.status, 201)
+  authSession = {
+    cookie: String(registration.response.headers.get('set-cookie') || '').split(';')[0],
+    csrf: registration.data.csrf || registration.data.session?.csrf,
+  }
   await new Promise(resolve => setTimeout(resolve, 700))
 
   let list = (await request(port, '/api/cron')).data
@@ -80,15 +92,17 @@ try {
   assert.equal(created.data.job.retry_limit, 4)
   assert.deepEqual(created.data.job.notify_on, ['failed', 'done'])
 
-  const invalid = await request(port, '/api/cron/update', { id: created.data.job.id, timezone: 'Mars/Base' })
+  const invalid = await request(port, '/api/cron/update', { id: created.data.job.id, revision: created.data.job.revision, timezone: 'Mars/Base' })
   assert.equal(invalid.response.status, 400)
 
-  const retried = await request(port, '/api/cron/run/retry', { job_id: 'job-controls', run_id: 'run-failed' })
+  const controlsBeforeRetry = list.jobs.find(job => job.id === 'job-controls')
+  const retried = await request(port, '/api/cron/run/retry', { job_id: 'job-controls', run_id: 'run-failed', revision: controlsBeforeRetry.revision })
   assert.equal(retried.response.ok, true)
   assert.equal(retried.data.run.parent_run_id, 'run-failed')
   assert.equal(retried.data.run.attempt, 2)
 
-  const cancelled = await request(port, '/api/cron/run/cancel', { job_id: 'job-controls', run_id: 'run-active' })
+  list = (await request(port, '/api/cron')).data
+  const cancelled = await request(port, '/api/cron/run/cancel', { job_id: 'job-controls', run_id: 'run-active', revision: list.jobs.find(job => job.id === 'job-controls').revision })
   assert.equal(cancelled.response.ok, true)
   assert.equal(cancelled.data.run.status, 'cancelled')
   await new Promise(resolve => setTimeout(resolve, 100))
@@ -103,5 +117,5 @@ try {
   console.log(JSON.stringify({ pass: true, port, misfire: misfire.run_history[0].status, crashRecovery: crash.run_history[0].status, automaticRetry: true, retryAttempt: retried.data.run.attempt, cancelledTask: 'task-active' }, null, 2))
 } finally {
   await new Promise(resolve => server.close(() => resolve()))
-  fs.rmSync(root, { recursive: true, force: true })
+  try { fs.rmSync(root, { recursive: true, force: true }) } catch {}
 }

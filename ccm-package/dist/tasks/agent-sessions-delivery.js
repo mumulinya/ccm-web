@@ -230,6 +230,8 @@ function recordTaskAgentMemoryContextDelivery(sessionId, input = {}) {
             providerRuntimeIdentityChecksum: String(input.providerRuntimeIdentityChecksum || input.nativeContinuationEvidence?.providerRuntimeIdentityChecksum || current.providerRuntimeIdentityChecksum || ""),
             providerUsageProvenance: input.providerUsageProvenance || input.providerUsage?.provenance || null,
             transportMode: memoryTransportMode,
+            sessionContinuityMode: current.continuityMode || "task_scoped",
+            nativeSessionReused: current.continuityMode === "reused",
             planChecksum: String(memoryEntryPlan?.plan_checksum || ""),
             manifestChecksum: String(memoryEntryPlan?.current_manifest?.manifest_checksum || ""),
             finalPromptEstimatedTokens,

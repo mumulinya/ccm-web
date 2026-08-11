@@ -255,12 +255,20 @@ function notifyPersistentNotification(notification) {
     ? preferred
     : petWindows.has('global-agent') ? 'global-agent' : petWindows.keys().next().value;
   if (!agent) return false;
-  const text = [notification.title, notification.summary].filter(Boolean).join('\n');
+  const type = String(notification?.notification_type || '');
+  const severity = String(notification?.severity || 'info');
+  const role = notification.role || (type === 'needs_user' ? 'ask' : ['error', 'critical'].includes(severity) ? 'error' : 'status');
+  const petState = type === 'task_completed' ? 'happy'
+    : type === 'needs_user' ? 'waiting'
+      : ['error', 'critical'].includes(severity) ? 'error' : 'reviewing';
   notifySpeech(agent, {
-    role: notification.role || 'status',
-    text,
+    role,
+    title: notification.title || '',
+    text: notification.summary || notification.title || '',
     final: true,
     mode: 'replace',
+    pet_state: petState,
+    hold_ms: type === 'needs_user' ? 30000 : ['error', 'critical'].includes(severity) ? 18000 : 12000,
     notification_id: notification.notification_id,
     delivery_id: notification.delivery_id,
     action: notification.action || {},
@@ -650,6 +658,9 @@ function notificationActionUrl(action) {
   const taskId = String(safe.task_id || '').trim();
   const permissionId = String(safe.permission_id || '').trim();
   const sessionId = String(safe.session_id || '').trim();
+  const anchorMessageId = String(safe.anchor_message_id || '').trim();
+  const originMessageId = String(safe.origin_message_id || '').trim();
+  const generation = String(safe.generation || '').trim();
   const scopeId = String(safe.scope_id || '').trim();
   const projectId = String(safe.project_id || '').trim();
   const groupId = String(safe.group_id || '').trim();
@@ -657,6 +668,12 @@ function notificationActionUrl(action) {
   if (permissionId) {
     tab = 'tasks';
     query.set('permission_id', permissionId);
+  } else if (anchorMessageId && (projectId || safe.scope_type === 'project')) {
+    tab = 'projects';
+  } else if (anchorMessageId && (groupId || safe.scope_type === 'group')) {
+    tab = 'groups';
+  } else if (anchorMessageId && safe.scope_type === 'global') {
+    tab = 'global-agent';
   } else if (taskId) {
     tab = 'trace-replay';
   } else if (projectId || safe.scope_type === 'project') {
@@ -669,6 +686,9 @@ function notificationActionUrl(action) {
   query.set('tab', tab);
   if (taskId) query.set('task_id', taskId);
   if (sessionId) query.set('session_id', sessionId);
+  if (anchorMessageId) query.set('anchor_message_id', anchorMessageId);
+  if (originMessageId) query.set('origin_message_id', originMessageId);
+  if (generation) query.set('generation', generation);
   if (projectId) query.set('project', projectId);
   if (groupId) query.set('group', groupId);
   if (scopeId) query.set('scope_id', scopeId);

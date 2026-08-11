@@ -11,7 +11,7 @@ export function usePetMenu(props, emit) {
   const agentLabelDraft = ref('')
   const desktopPetRunning = ref(false)
   const petConfigRevision = ref(0)
-  const petSettings = ref({ autoStart: false, webFallback: true })
+  const petSettings = ref({ autoStart: false, webFallback: true, agentProgressMode: 'milestones' })
   const petConfigs = ref({})
   const petPositions = ref({})
   const actionPetType = ref('yuexinmiao')
@@ -51,6 +51,7 @@ export function usePetMenu(props, emit) {
       petSettings.value = {
         autoStart: data.settings?.autoStart === true,
         webFallback: data.settings?.webFallback !== false,
+        agentProgressMode: data.settings?.agentProgressMode === 'terminal_only' ? 'terminal_only' : 'milestones',
       }
       customPetTypes.value = data.customTypes || []
       petConfigs.value = normalizePetConfigs(data.configs || {})
@@ -117,7 +118,12 @@ export function usePetMenu(props, emit) {
 
   const updatePetSetting = async (key, value) => {
     const previous = { ...petSettings.value }
-    petSettings.value = { ...petSettings.value, [key]: value === true }
+    petSettings.value = {
+      ...petSettings.value,
+      [key]: key === 'agentProgressMode'
+        ? (value === 'terminal_only' ? 'terminal_only' : 'milestones')
+        : value === true,
+    }
     if (await saveConfigs()) return
     petSettings.value = previous
   }

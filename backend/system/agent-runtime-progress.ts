@@ -48,6 +48,7 @@ function base(event: AgentRuntimeStructuredEvent) {
 export function projectAgentRuntimeStructuredEvent(event: AgentRuntimeStructuredEvent) {
   const { state } = stateFor(event);
   if (event.eventType === "assistant_progress") {
+    if (event.assistantRole === "final") return null;
     state.lastSemanticAt = Date.now();
     return appendUserVisibleAgentEvent({
       ...base(event),
@@ -57,7 +58,7 @@ export function projectAgentRuntimeStructuredEvent(event: AgentRuntimeStructured
         kind: "key_finding",
         text: event.safeSummary || "Agent 正在执行任务。",
         modelCallIndex: 0,
-        relatedToolCallIds: [],
+        relatedToolCallIds: event.relatedToolCallIds || [],
         batchId: `agent-runtime:${event.agentRunId}:${event.attempt}`,
         milestoneChecksum: event.sourceEventChecksum,
         source: event.progressSource,
@@ -141,4 +142,3 @@ export function stopAgentProgressFallback(keyOrRunId: string, generation?: numbe
   if (state?.timer) clearInterval(state.timer);
   observed.delete(key);
 }
-

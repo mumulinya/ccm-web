@@ -118,6 +118,12 @@ export type GroupOrchestratorInput = {
     task_id?: string;
     executionId?: string;
     execution_id?: string;
+    turnId?: string;
+    turn_id?: string;
+    anchorMessageId?: string;
+    anchor_message_id?: string;
+    recoveryAttempt?: number;
+    recovery_attempt?: number;
     groupSessionId?: string;
     group_session_id?: string;
     workerContextUsageOptions?: any;
@@ -394,8 +400,24 @@ export declare function runGroupOrchestratorCore(input: GroupOrchestratorInput):
         runtime: string;
         responsibility: string;
     };
+    providerFailure: {
+        kind: string;
+        code: string;
+        safeSummary: string;
+        contentStored: boolean;
+    };
+    providerFailureTechnical: {
+        schema: string;
+        category: string;
+        code: string;
+        safeSummary: string;
+        contentStored: boolean;
+        attempts?: undefined;
+        maxAttempts?: undefined;
+        elapsedMs?: undefined;
+        retryExhausted?: undefined;
+    };
     content: string;
-    providerFailure?: undefined;
     usage?: undefined;
     contextRecovery?: undefined;
 } | {
@@ -463,6 +485,7 @@ export declare function runGroupOrchestratorCore(input: GroupOrchestratorInput):
     executionOrder?: undefined;
     coordinationStrategy?: undefined;
     providerFailure?: undefined;
+    providerFailureTechnical?: undefined;
 } | {
     usage: LlmTokenUsage;
     contextRecovery: {
@@ -528,6 +551,7 @@ export declare function runGroupOrchestratorCore(input: GroupOrchestratorInput):
     coordinationStrategy: string;
     content: string;
     providerFailure?: undefined;
+    providerFailureTechnical?: undefined;
 } | {
     agent: any;
     delegated: any[];
@@ -542,6 +566,19 @@ export declare function runGroupOrchestratorCore(input: GroupOrchestratorInput):
         elapsedMs: number;
         attemptTimeoutMs: number;
         totalTimeoutMs: number;
+        safeSummary: string;
+        contentStored: boolean;
+    };
+    providerFailureTechnical: {
+        schema: string;
+        category: string;
+        code: string;
+        attempts: number;
+        maxAttempts: number;
+        elapsedMs: number;
+        retryExhausted: boolean;
+        safeSummary: string;
+        contentStored: boolean;
     };
     usage: any;
     contextRecovery: {
@@ -560,7 +597,9 @@ export declare function runGroupOrchestratorCore(input: GroupOrchestratorInput):
 }>;
 export declare function classifyGroupOrchestratorFailure(error: any): {
     kind: string;
-    title: string;
+    userSummary: string;
+    userGuidance: string;
+} & {
     guidance: string;
 };
 export declare function summarizeGroupOrchestratorProviderError(error: any): string;

@@ -15,7 +15,7 @@ import {
 } from "../runtime-kernel";
 import { projectContextSourceToolResultForPersistence } from "../../system/context-source-tool-result-projection";
 import { appendAssistantProgress, appendToolProjection, appendUserVisibleAgentEvent, appendUserVisibleRequirementPlan, buildUserVisibleAgentResult } from "../../system/user-visible-agent-events";
-import { assistantProgressNarrationEnabled, buildAssistantProgressFallback } from "../../system/assistant-progress";
+import { assistantProgressNarrationEnabled, buildAssistantProgressFallback, sanitizeAssistantProgressText } from "../../system/assistant-progress";
 import { loadOrchestratorConfig } from "../../modules/collaboration/group-orchestrator-config";
 import { publishUserVisibleAssistantText } from "../../system/user-visible-agent-projections";
 import {
@@ -42,9 +42,10 @@ import {
 } from "../reasoning-loop";
 import {
   buildGlobalAgentToolDefinitions,
+  buildGlobalAgentSessionDebug,
   evaluateGlobalAgentPermission,
   initializeGlobalAgentRuntimeRun,
-  markGlobalAgentToolTodo,
+  markGlobalAgentToolTodo as markRuntimeGlobalAgentToolTodo,
   recordGlobalAgentRuntimeOutput,
   runGlobalAgentHooks,
   updateGlobalAgentTodoLedger,
@@ -183,6 +184,7 @@ export function emit(runtime: GlobalAgentLoopRuntime, event: any, run: GlobalAge
       scope: "global",
       scopeId: "global",
       exactSessionId: run.session_id,
+      anchorMessageId: `gam_${String(run.id || "result")}_assistant`,
       generation: Math.max(0, Number(run.resume_count || 0)),
       taskId: run.mission_id || run.id,
       eventType,
@@ -227,9 +229,33 @@ function appendGlobalRequirementPlan(run: GlobalAgentRun, decision: GlobalAgentD
   const workflowValue: any = workflow;
   const actionRequired = workflowValue?.actionRequired === true || workflowValue?.action_required === true;
   if (!planSteps.length || (!actionRequired && !terminalStatus && !current)) return null;
+  const runtimeDebug = buildGlobalAgentSessionDebug(run);
+  const runtimeTodos = Array.isArray(runtimeDebug?.todos) ? runtimeDebug.todos : [];
+  const todoByTitle = new Map(runtimeTodos.map((todo: any) => [String(todo?.text || "").trim(), String(todo?.status || "")]));
+  const currentByTitle = new Map((Array.isArray(current?.steps) ? current.steps : []).map((step: any) => [String(step?.title || "").trim(), String(step?.status || "pending")]));
+  const blockedStepIndex = Math.max(0, planSteps.findIndex((title: string) => {
+    const todoStatus = todoByTitle.get(title);
+    const previous = currentByTitle.get(title);
+    return todoStatus === "blocked" || todoStatus === "in_progress" || previous === "running" || previous === "blocked";
+  }));
+  const stepStatuses = planSteps.map((title: string, index: number) => {
+    if (terminalStatus === "completed") return "completed";
+    if (terminalStatus === "blocked") {
+      if (index === blockedStepIndex) return "blocked";
+      return index < blockedStepIndex ? "completed" : "pending";
+    }
+    const todoStatus = todoByTitle.get(title);
+    if (todoStatus === "done") return "completed";
+    if (todoStatus === "blocked") return "blocked";
+    if (todoStatus === "in_progress") return "running";
+    const previous = currentByTitle.get(title);
+    if (previous && previous !== "blocked") return previous;
+    return index === 0 ? "running" : "pending";
+  });
   const stablePlan = {
     goal: String(run.original_user_message || run.user_message || "完成当前任务。"),
     steps: planSteps,
+    stepStatuses,
     scope: Array.isArray(workflowValue?.impactScope || workflowValue?.impact_scope) ? (workflowValue.impactScope || workflowValue.impact_scope).map(String) : [],
   };
   const checksum = crypto.createHash("sha256").update(JSON.stringify(stablePlan)).digest("hex");
@@ -247,7 +273,7 @@ function appendGlobalRequirementPlan(run: GlobalAgentRun, decision: GlobalAgentD
       description: title,
       outcome: "完成后进入下一阶段，并保留可验证的结果。",
       dependsOn: index > 0 ? [`step_${index}`] : [],
-      status: terminalStatus === "completed" ? "completed" : terminalStatus === "blocked" ? "blocked" : index === 0 ? "running" : "pending",
+      status: stepStatuses[index],
     })),
     scope: stablePlan.scope,
     expectedResults: Array.isArray(decision?.completion?.evidence) ? decision!.completion!.evidence : [],
@@ -264,10 +290,17 @@ function appendGlobalRequirementPlan(run: GlobalAgentRun, decision: GlobalAgentD
     scope: "global",
     scopeId: "global",
     exactSessionId: run.session_id,
+    anchorMessageId: `gam_${String(run.id || "result")}_assistant`,
     generation: Math.max(0, Number(run.resume_count || 0)),
     taskId: run.mission_id || run.id,
     plan,
   });
+}
+
+function markGlobalAgentToolTodo(run: GlobalAgentRun, tool: string, status: any, text = "") {
+  const todos = markRuntimeGlobalAgentToolTodo(run, tool, status, text);
+  appendGlobalRequirementPlan(run, null);
+  return todos;
 }
 
 export function classifyGlobalAgentUserSteer(message: string, requestedKind: string = "auto"): GlobalAgentUserSteerKind {
@@ -1351,9 +1384,12 @@ async function continueLoop(run: GlobalAgentRun, runtime: GlobalAgentLoopRuntime
       try { progressConfig = loadOrchestratorConfig(); } catch {}
       if (assistantProgressNarrationEnabled(progressConfig)) {
         const previousMessage = [...run.steps].reverse().find(item => item.tool)?.message || "";
-        const decisionProgress = sanitizeMainAgentUserFacingText(String(decision.message || "")).slice(0, 600);
+        const decisionProgress = sanitizeAssistantProgressText(sanitizeMainAgentUserFacingText(String(decision.message || "")));
         const progressText = run.tool_calls === 0
-          ? (decisionProgress || buildAssistantProgressFallback([{ name: decision.tool.name }]))
+          ? (decisionProgress || buildAssistantProgressFallback([{ name: decision.tool.name }], {
+            target: decision.intent?.target_refs?.[0] || decision.tool.name,
+            goal: run.user_message,
+          }))
           : (decisionProgress && decisionProgress !== previousMessage ? decisionProgress : "");
         if (progressText) appendAssistantProgress({
           scope: "global", scopeId: "global", exactSessionId: run.session_id,

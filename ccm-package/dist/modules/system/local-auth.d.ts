@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "http";
-export type AuthRole = "admin" | "operator" | "viewer";
+export type AuthRole = "admin" | "user";
 type LoginTheme = "command" | "minimal" | "light";
 export type AuthCapability = "read" | "chat.read_only" | "task.execute" | "project.runtime" | "project.git" | "attachment.manage" | "project.define" | "terminal.manage" | "agent.credentials" | "tools.manage" | "cleanup.permanent" | "permission.high_risk" | "security.manage";
 type StoredUser = {
@@ -72,6 +72,16 @@ export declare function localAuthPublicState(req: IncomingMessage): {
         updated_at: string;
     };
     capabilities: AuthCapability[];
+    access: {
+        policyRevision: number;
+        features: import("./access-policy").FeatureModule[];
+        resources: {
+            resourceType: import("./access-policy").ResourceType;
+            resourceId: string;
+            level: import("./access-policy").ResourceLevel;
+            revision: number;
+        }[];
+    };
     csrf: string;
     session_error: any;
     session: {

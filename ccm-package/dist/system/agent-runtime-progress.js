@@ -71,6 +71,8 @@ function base(event) {
 function projectAgentRuntimeStructuredEvent(event) {
     const { state } = stateFor(event);
     if (event.eventType === "assistant_progress") {
+        if (event.assistantRole === "final")
+            return null;
         state.lastSemanticAt = Date.now();
         return (0, user_visible_agent_events_1.appendUserVisibleAgentEvent)({
             ...base(event),
@@ -80,7 +82,7 @@ function projectAgentRuntimeStructuredEvent(event) {
                     kind: "key_finding",
                     text: event.safeSummary || "Agent 正在执行任务。",
                     modelCallIndex: 0,
-                    relatedToolCallIds: [],
+                    relatedToolCallIds: event.relatedToolCallIds || [],
                     batchId: `agent-runtime:${event.agentRunId}:${event.attempt}`,
                     milestoneChecksum: event.sourceEventChecksum,
                     source: event.progressSource,

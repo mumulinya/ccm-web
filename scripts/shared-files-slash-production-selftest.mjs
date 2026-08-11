@@ -57,7 +57,7 @@ try {
   assert.match(slash, /scope=group&scope_id=\$GROUP_ID/, '群聊 /files 必须绑定精确群聊作用域')
   assert.match(slash, /authorizedSkillNames/, 'Skill命令必须经过作用域授权')
   assert.doesNotMatch(slash, /customFile:\s*CUSTOM_COMMANDS_FILE|auditFile:\s*AUDIT_FILE/, '公开摘要不能泄露本地路径')
-  assert.match(access, /slash-commands\\\/\(\?:resolve\|confirm\)/, '斜杠解析和确认必须进入中央RBAC')
+  assert.match(access, /slash-commands\\\/\(\?:resolve\|confirm\|records\)/, '斜杠解析、确认和本地记录必须进入中央RBAC')
   assert.match(agentic, /global_shared_files/, '全局Agent必须消费全局共享文件')
   assert.match(projectServer, /projectSharedFiles\.context/, '项目主Agent与子Agent链必须消费项目共享文件')
   assert.match(groupRuntime, /buildSharedFilesContextV2\("group"/, '群聊主Agent必须消费群聊共享文件')

@@ -1,3 +1,4 @@
+import * as crypto from "crypto";
 import {
   loadCronJobs,
   saveCronJobs,
@@ -7,9 +8,16 @@ export const CRON_RUN_HISTORY_LIMIT = 40;
 export const DEFAULT_CRON_TIMEZONE = "Asia/Shanghai";
 
 const CRON_RUN_TERMINAL_STATUSES = new Set(["done", "failed", "skipped", "cancelled"]);
+const OVERLAP_POLICIES = new Set(["queue", "skip", "parallel_safe", "cancel_previous"]);
+const MISFIRE_POLICIES = new Set(["run_once", "skip", "catch_up", "confirm"]);
 
 function cronRunId() {
   return `cron-run-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+export function cronOccurrenceId(jobId: any, scheduledFor: any, targetType: any, targetId: any) {
+  const value = [String(jobId || ""), String(scheduledFor || "manual"), String(targetType || "project"), String(targetId || "")].join("\n");
+  return `occ_${crypto.createHash("sha256").update(value).digest("hex").slice(0, 28)}`;
 }
 
 function normalizedTaskIds(value: any) {
@@ -58,6 +66,7 @@ export function normalizeCronRunHistory(job: any) {
         scheduled_for: run.scheduled_for || null,
         next_retry_at: run.next_retry_at || null,
         notifications: run.notifications && typeof run.notifications === "object" ? run.notifications : {},
+        occurrence_id: String(run.occurrence_id || run.occurrenceId || ""),
       };
     })
     .sort((left: any, right: any) => String(right.started_at || "").localeCompare(String(left.started_at || "")))
@@ -257,12 +266,22 @@ export function normalizeCronJob(job: any) {
       ? Math.max(1, Math.min(20, Number(job.gap_continue_limit || job.gapContinueLimit || 3)))
       : 0,
     run_count: Number(job.run_count || 0),
+    owner_id: String(job.owner_id || job.ownerId || "legacy-system"),
+    revision: Math.max(1, Math.floor(Number(job.revision || 1))),
+    task_template_id: String(job.task_template_id || job.taskTemplateId || ""),
+    template_variables: job.template_variables && typeof job.template_variables === "object" ? job.template_variables : (job.templateVariables && typeof job.templateVariables === "object" ? job.templateVariables : {}),
     run_history: normalizeCronRunHistory(job),
     timezone,
     retry_limit: Math.max(0, Math.min(10, Number(job.retry_limit ?? job.retryLimit ?? 2))),
     retry_interval_minutes: Math.max(1, Math.min(1440, Number(job.retry_interval_minutes ?? job.retryIntervalMinutes ?? 10))),
-    misfire_policy: ["run_once", "skip"].includes(String(job.misfire_policy || job.misfirePolicy)) ? String(job.misfire_policy || job.misfirePolicy) : "run_once",
+    overlap_policy: OVERLAP_POLICIES.has(String(job.overlap_policy || job.overlapPolicy)) ? String(job.overlap_policy || job.overlapPolicy) : "queue",
+    misfire_policy: MISFIRE_POLICIES.has(String(job.misfire_policy || job.misfirePolicy)) ? String(job.misfire_policy || job.misfirePolicy) : "run_once",
     misfire_grace_minutes: Math.max(1, Math.min(10080, Number(job.misfire_grace_minutes ?? job.misfireGraceMinutes ?? 1440))),
+    catch_up_limit: Math.max(1, Math.min(20, Number(job.catch_up_limit ?? job.catchUpLimit ?? 5))),
+    consecutive_failure_limit: Math.max(1, Math.min(20, Number(job.consecutive_failure_limit ?? job.consecutiveFailureLimit ?? 3))),
+    consecutive_failures: Math.max(0, Number(job.consecutive_failures ?? job.consecutiveFailures ?? 0)),
+    paused_reason: String(job.paused_reason || job.pausedReason || ""),
+    pending_misfires: Array.isArray(job.pending_misfires || job.pendingMisfires) ? (job.pending_misfires || job.pendingMisfires).slice(0, 20) : [],
     notification_enabled: job.notification_enabled === true || job.notificationEnabled === true,
     notify_on: [...new Set((Array.isArray(job.notify_on) ? job.notify_on : Array.isArray(job.notifyOn) ? job.notifyOn : ["failed", "waiting", "done"]).map(String).filter(value => ["started", "done", "failed", "waiting", "recovered", "cancelled"].includes(value)))],
     source_attachments: Array.isArray(job.source_attachments || job.sourceAttachments) ? (job.source_attachments || job.sourceAttachments) : [],
@@ -281,6 +300,7 @@ export function patchCronJob(id: string, updates: any) {
   jobs[idx] = {
     ...jobs[idx],
     ...updates,
+    revision: Math.max(1, Number(jobs[idx].revision || 1)) + 1,
     updated_at: new Date().toISOString(),
   };
   saveCronJobs(jobs);
@@ -309,9 +329,11 @@ export function appendCronRun(jobId: string, input: any = {}) {
     scheduled_for: input.scheduled_for || null,
     next_retry_at: input.next_retry_at || null,
     notifications: input.notifications && typeof input.notifications === "object" ? input.notifications : {},
+    occurrence_id: String(input.occurrence_id || input.occurrenceId || ""),
   };
   jobs[index] = {
     ...jobs[index],
+    revision: Math.max(1, Number(jobs[index].revision || 1)) + 1,
     run_history: [run, ...normalizeCronRunHistory(jobs[index]).filter((item: any) => item.id !== run.id)].slice(0, CRON_RUN_HISTORY_LIMIT),
     updated_at: new Date().toISOString(),
   };
@@ -335,7 +357,7 @@ export function patchCronRun(jobId: string, runId: string, updates: any = {}) {
     updated_at: new Date().toISOString(),
   };
   history[runIndex] = next;
-  jobs[jobIndex] = { ...jobs[jobIndex], run_history: history.slice(0, CRON_RUN_HISTORY_LIMIT), updated_at: next.updated_at };
+  jobs[jobIndex] = { ...jobs[jobIndex], revision: Math.max(1, Number(jobs[jobIndex].revision || 1)) + 1, run_history: history.slice(0, CRON_RUN_HISTORY_LIMIT), updated_at: next.updated_at };
   saveCronJobs(jobs);
   return next;
 }
@@ -393,7 +415,7 @@ export function runCronRunHistoryContractSelfTest() {
 export function validateCronJobPayload(job: any) {
   if (!String(job.name || "").trim()) throw new Error("请输入定时任务名称");
   if (!String(job.schedule || "").trim()) throw new Error("请输入 Cron 表达式");
-  if (!String(job.prompt || "").trim()) throw new Error("请输入执行提示词");
+  if (!String(job.prompt || "").trim() && !String(job.task_template_id || job.taskTemplateId || "").trim()) throw new Error("请输入执行提示词或选择任务模板");
   validateCronExpression(job.schedule);
   normalizeCronTimezone(job.timezone);
 
@@ -424,8 +446,17 @@ export function createCronJob(job: any) {
     timezone,
     retry_limit: Math.max(0, Math.min(10, Number(job.retry_limit ?? job.retryLimit ?? 2))),
     retry_interval_minutes: Math.max(1, Math.min(1440, Number(job.retry_interval_minutes ?? job.retryIntervalMinutes ?? 10))),
-    misfire_policy: ["run_once", "skip"].includes(String(job.misfire_policy || job.misfirePolicy)) ? String(job.misfire_policy || job.misfirePolicy) : "run_once",
+    overlap_policy: OVERLAP_POLICIES.has(String(job.overlap_policy || job.overlapPolicy)) ? String(job.overlap_policy || job.overlapPolicy) : "queue",
+    misfire_policy: MISFIRE_POLICIES.has(String(job.misfire_policy || job.misfirePolicy)) ? String(job.misfire_policy || job.misfirePolicy) : "run_once",
     misfire_grace_minutes: Math.max(1, Math.min(10080, Number(job.misfire_grace_minutes ?? job.misfireGraceMinutes ?? 1440))),
+    catch_up_limit: Math.max(1, Math.min(20, Number(job.catch_up_limit ?? job.catchUpLimit ?? 5))),
+    consecutive_failure_limit: Math.max(1, Math.min(20, Number(job.consecutive_failure_limit ?? job.consecutiveFailureLimit ?? 3))),
+    consecutive_failures: 0,
+    paused_reason: "",
+    owner_id: String(job.owner_id || job.ownerId || "legacy-system"),
+    revision: 1,
+    task_template_id: String(job.task_template_id || job.taskTemplateId || ""),
+    template_variables: job.template_variables && typeof job.template_variables === "object" ? job.template_variables : (job.templateVariables && typeof job.templateVariables === "object" ? job.templateVariables : {}),
     notification_enabled: job.notification_enabled === true || job.notificationEnabled === true,
     notify_on: [...new Set((Array.isArray(job.notify_on) ? job.notify_on : Array.isArray(job.notifyOn) ? job.notifyOn : ["failed", "waiting", "done"]).map(String).filter(value => ["started", "done", "failed", "waiting", "recovered", "cancelled"].includes(value)))],
     source_attachments: Array.isArray(job.source_attachments || job.sourceAttachments) ? (job.source_attachments || job.sourceAttachments) : [],
@@ -483,8 +514,17 @@ export function updateCronJob(id: string, updates: any) {
   draft.timezone = normalizeCronTimezone(draft.timezone);
   draft.retry_limit = Math.max(0, Math.min(10, Number(draft.retry_limit ?? draft.retryLimit ?? 2)));
   draft.retry_interval_minutes = Math.max(1, Math.min(1440, Number(draft.retry_interval_minutes ?? draft.retryIntervalMinutes ?? 10)));
-  draft.misfire_policy = ["run_once", "skip"].includes(String(draft.misfire_policy || draft.misfirePolicy)) ? String(draft.misfire_policy || draft.misfirePolicy) : "run_once";
+  draft.overlap_policy = OVERLAP_POLICIES.has(String(draft.overlap_policy || draft.overlapPolicy)) ? String(draft.overlap_policy || draft.overlapPolicy) : "queue";
+  draft.misfire_policy = MISFIRE_POLICIES.has(String(draft.misfire_policy || draft.misfirePolicy)) ? String(draft.misfire_policy || draft.misfirePolicy) : "run_once";
   draft.misfire_grace_minutes = Math.max(1, Math.min(10080, Number(draft.misfire_grace_minutes ?? draft.misfireGraceMinutes ?? 1440)));
+  draft.catch_up_limit = Math.max(1, Math.min(20, Number(draft.catch_up_limit ?? draft.catchUpLimit ?? 5)));
+  draft.consecutive_failure_limit = Math.max(1, Math.min(20, Number(draft.consecutive_failure_limit ?? draft.consecutiveFailureLimit ?? 3)));
+  draft.consecutive_failures = Math.max(0, Number(draft.consecutive_failures ?? draft.consecutiveFailures ?? 0));
+  draft.paused_reason = String(draft.paused_reason || draft.pausedReason || "");
+  draft.owner_id = String(draft.owner_id || draft.ownerId || current.owner_id || current.ownerId || "legacy-system");
+  draft.revision = Math.max(1, Number(current.revision || 1)) + 1;
+  draft.task_template_id = String(draft.task_template_id || draft.taskTemplateId || "");
+  draft.template_variables = draft.template_variables && typeof draft.template_variables === "object" ? draft.template_variables : (draft.templateVariables && typeof draft.templateVariables === "object" ? draft.templateVariables : {});
   draft.notification_enabled = draft.notification_enabled === true || draft.notificationEnabled === true;
   draft.notify_on = [...new Set((Array.isArray(draft.notify_on) ? draft.notify_on : Array.isArray(draft.notifyOn) ? draft.notifyOn : ["failed", "waiting", "done"]).map(String).filter(value => ["started", "done", "failed", "waiting", "recovered", "cancelled"].includes(value)))];
   draft.backlog_batch_limit = Math.max(1, Math.min(20, Number(draft.backlog_batch_limit || draft.backlogBatchLimit || 1)));
@@ -517,7 +557,7 @@ export function deleteCronJob(id: string) {
   const index = jobs.findIndex(j => j.id === id);
   if (index < 0) return null;
   const now = new Date().toISOString();
-  jobs[index] = { ...jobs[index], enabled_before_archive: jobs[index].enabled !== false, enabled: false, archived: true, archived_at: now, deleted_at: now, next_run: null, updated_at: now };
+  jobs[index] = { ...jobs[index], revision: Math.max(1, Number(jobs[index].revision || 1)) + 1, enabled_before_archive: jobs[index].enabled !== false, enabled: false, archived: true, archived_at: now, deleted_at: now, next_run: null, updated_at: now };
   saveCronJobs(jobs);
   return jobs[index];
 }
@@ -528,7 +568,7 @@ export function restoreCronJob(id: string) {
   if (index < 0) return null;
   const now = new Date().toISOString();
   const enabled = jobs[index].enabled_before_archive !== false;
-  jobs[index] = { ...jobs[index], archived: false, archived_at: null, deleted_at: null, enabled, restored_at: now, updated_at: now, next_run: enabled ? computeNextRun(jobs[index].schedule, new Date(), normalizeCronTimezone(jobs[index].timezone)) : null };
+  jobs[index] = { ...jobs[index], revision: Math.max(1, Number(jobs[index].revision || 1)) + 1, archived: false, archived_at: null, deleted_at: null, enabled, restored_at: now, updated_at: now, next_run: enabled ? computeNextRun(jobs[index].schedule, new Date(), normalizeCronTimezone(jobs[index].timezone)) : null };
   saveCronJobs(jobs);
   return jobs[index];
 }

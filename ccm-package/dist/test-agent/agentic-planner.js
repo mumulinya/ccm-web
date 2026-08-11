@@ -184,6 +184,7 @@ async function callDefaultFollowupPlanner(input) {
         http: input.httpResults.map((item) => ({ project: item.project, name: item.name, status: item.status, error: cleanText(item.error, 800) })),
         browser: input.browserResults.map((item) => ({ project: item.project, name: item.name, status: item.status, errors: Array.isArray(item.steps) ? item.steps.filter((step) => step.status === "failed").map((step) => cleanText(step.error || step.detail, 500)).slice(0, 6) : [] })),
     };
+    let providerUsage = null;
     const options = {
         system: followupSystemPrompt(),
         messages: [{ role: "user", content: JSON.stringify({
@@ -196,10 +197,12 @@ async function callDefaultFollowupPlanner(input) {
         maxTokens: 2400,
         defaultTimeoutMs: 60_000,
         invalidJsonMessage: "TestAgent 失败复核模型未返回有效 JSON",
+        onUsage: (usage) => { providerUsage = usage; },
     };
-    return (0, group_orchestrator_llm_client_1.shouldUseAnthropic)(config)
+    const result = (0, group_orchestrator_llm_client_1.shouldUseAnthropic)(config)
         ? await (0, group_orchestrator_llm_client_1.callAnthropicCompatibleJson)(config, options)
         : await (0, group_orchestrator_llm_client_1.callOpenAiCompatibleJson)(config, options);
+    return { ...result, providerUsage };
 }
 async function callDefaultPlanner(input) {
     const semanticInput = {
@@ -530,7 +533,7 @@ async function planAgenticTestFollowup(input, runtime) {
             return { ...project, verificationCommands: commands, httpChecks: [], adversarialHttpChecks: [], browserChecks, adversarialBrowserChecks: [] };
         });
         if (!additions.length)
-            return { workOrder: null, metadata: { status: "no_safe_followup", summary: cleanText(plan?.summary, 1000) } };
+            return { workOrder: null, metadata: { status: "no_safe_followup", summary: cleanText(plan?.summary, 1000), providerUsage: plan?.providerUsage || null } };
         const normalized = (0, work_order_1.normalizeTestAgentWorkOrder)({
             ...input.workOrder,
             requiredChecks: [
@@ -554,6 +557,7 @@ async function planAgenticTestFollowup(input, runtime) {
                 summary: cleanText(plan?.summary, 1200),
                 additions,
                 browserChecksTotal: browserCheckTotal,
+                providerUsage: plan?.providerUsage || null,
                 readOnly: true,
                 maxRounds: 1,
             },

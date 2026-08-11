@@ -95,6 +95,8 @@ export interface BrowserToolCallRecord {
 }
 
 export interface TestAgentRuntimeOptions extends Partial<TestAgentOptions> {
+  /** Record one safe performance metric for this TestAgent invocation. */
+  recordMetrics?: boolean;
   /** Ephemeral native TestAgent capability prompt; never persist this field. */
   readonlyCapabilityPrompt?: string;
   readonlyCapabilityManifest?: Record<string, any>;

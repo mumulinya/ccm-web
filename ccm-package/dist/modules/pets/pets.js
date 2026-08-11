@@ -84,7 +84,7 @@ function emptyPetConfig() {
         configs: {},
         positions: {},
         customTypes: [],
-        settings: { autoStart: false, webFallback: true },
+        settings: { autoStart: false, webFallback: true, agentProgressMode: "milestones" },
         updatedAt: new Date(0).toISOString(),
     };
 }
@@ -99,6 +99,7 @@ function normalizePetConfig(value) {
         settings: {
             autoStart: value?.settings?.autoStart === true,
             webFallback: value?.settings?.webFallback !== false,
+            agentProgressMode: value?.settings?.agentProgressMode === "terminal_only" ? "terminal_only" : "milestones",
         },
         updatedAt: String(value?.updatedAt || fallback.updatedAt),
     };
@@ -144,6 +145,12 @@ function mergePetConfigPatch(current, patch) {
             next.settings.autoStart = patch.settings.autoStart;
         if (typeof patch.settings.webFallback === "boolean")
             next.settings.webFallback = patch.settings.webFallback;
+        if (patch.settings.agentProgressMode !== undefined) {
+            const mode = String(patch.settings.agentProgressMode || "milestones");
+            if (!["milestones", "terminal_only"].includes(mode))
+                throw new Error("宠物 Agent 进度模式无效");
+            next.settings.agentProgressMode = mode;
+        }
     }
     if (Array.isArray(patch?.customTypes))
         next.customTypes = patch.customTypes;

@@ -988,16 +988,20 @@ function showSpeech(data = {}) {
   const streaming = mode === 'append' && !data.final;
 
   setSpeechTone(displayRole, streaming);
-  const label = getSpeechLabel(displayRole);
+  const label = cleanSpeechText(data.title || '') || getSpeechLabel(displayRole);
   speechLabel.textContent = label;
   speechLabel.hidden = !label;
   speechText.textContent = speechBuffer;
   speech.classList.remove('hidden');
   nameEl.classList.add('suppressed-by-speech');
-  applySpeechState(displayRole, streaming, !!data.final);
+  if (data.pet_state) applyState(String(data.pet_state));
+  else applySpeechState(displayRole, streaming, !!data.final);
 
   if (speechTimer) clearTimeout(speechTimer);
-  speechTimer = setTimeout(hideSpeech, getSpeechHold(displayRole, !!data.final));
+  const explicitHold = Number(data.hold_ms || data.holdMs);
+  speechTimer = setTimeout(hideSpeech, Number.isFinite(explicitHold)
+    ? Math.max(1000, Math.min(30000, explicitHold))
+    : getSpeechHold(displayRole, !!data.final));
 }
 
 function applySpeechState(role, streaming, isFinal) {

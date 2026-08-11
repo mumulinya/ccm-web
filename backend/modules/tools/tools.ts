@@ -98,6 +98,8 @@ import {
   queryMetricEventsV3,
   resetMetricsV3,
 } from "../../system/metrics-v3";
+import { listActiveAgentRuns } from "../../agents/execution-kernel";
+import { filterAccessibleResources, hasResourceAccess } from "../system/access-policy";
 
 // ===== merged from tools-part-01-part-01.ts =====
 
@@ -2100,6 +2102,13 @@ export function handleToolsAndMetricsApi(pathname: string, req: any, res: any, p
     ensureLegacyMetricsMigrated(loadMetrics());
     const scopeType = String(parsed.query.scope_type || parsed.query.scopeType || "");
     const scopeId = String(parsed.query.scope_id || parsed.query.scopeId || "");
+    const metricsPrincipal = (req as any).ccmAuth;
+    if (metricsPrincipal?.kind === "browser" && metricsPrincipal.role !== "admin" && ["project", "group"].includes(scopeType)) {
+      if (!hasResourceAccess(String(metricsPrincipal.userId || ""), String(metricsPrincipal.role || "user"), scopeType as any, scopeId, "use")) {
+        sendJson(res, { success: false, error: "当前账户没有该监控范围的访问权限", code: "RESOURCE_ACCESS_DENIED" }, 403);
+        return true;
+      }
+    }
     const result = queryMetricEventsV3({
       scopeType,
       scopeId,
@@ -2117,8 +2126,15 @@ export function handleToolsAndMetricsApi(pathname: string, req: any, res: any, p
   if (pathname === "/api/metrics" && req.method === "GET") {
     ensureLegacyMetricsMigrated(loadMetrics());
     pruneMetricEventsV3();
-    const metrics = loadMetricsDashboardV3();
-    const groups = loadGroups().map((group: any) => {
+    const rawMetrics = loadMetricsDashboardV3();
+    const principal = (req as any).ccmAuth;
+    const userId = String(principal?.userId || "");
+    const userRole = String(principal?.role || "admin");
+    const allGroups = loadGroups();
+    const visibleGroups = principal?.kind === "browser"
+      ? filterAccessibleResources(allGroups, userId, userRole, "group", (group: any) => String(group.id || ""))
+      : allGroups;
+    const groups = visibleGroups.map((group: any) => {
       const members = Array.isArray(group.members) ? group.members : [];
       const coordinator = members.find((member: any) => member.role === "coordinator") || members[0] || {};
       return {
@@ -2131,12 +2147,40 @@ export function handleToolsAndMetricsApi(pathname: string, req: any, res: any, p
         })).filter((member: any) => member.project),
       };
     });
-    const projects = Object.entries(loadProjectConfigs()).map(([id, project]: [string, any]) => ({
+    const allProjects = Object.entries(loadProjectConfigs());
+    const visibleProjects = principal?.kind === "browser"
+      ? filterAccessibleResources(allProjects, userId, userRole, "project", ([id]: [string, any]) => id)
+      : allProjects;
+    const projects = visibleProjects.map(([id, project]: [string, any]) => ({
       id,
       name: String(project?.display_name || project?.displayName || project?.name || id),
       agent: String(project?.agent || project?.agent_type || "project-agent"),
       scopeKey: `project:${id}`,
     }));
+    const allowedGroupIds = new Set(groups.map((group: any) => group.id));
+    const allowedProjectIds = new Set(projects.map((project: any) => project.id));
+    const metrics = principal?.kind === "browser" && userRole !== "admin"
+      ? {
+          ...rawMetrics,
+          scopes: Object.fromEntries(Object.entries(rawMetrics.scopes || {}).filter(([key]: [string, any]) => (
+            key === "global:global"
+            || (key.startsWith("group:") && allowedGroupIds.has(key.slice(6)))
+            || (key.startsWith("project:") && allowedProjectIds.has(key.slice(8)))
+          ))),
+          coverage: (rawMetrics.coverage || []).filter((row: any) => (
+            row.scopeType === "global"
+            || (row.scopeType === "group" && allowedGroupIds.has(row.scopeId))
+            || (row.scopeType === "project" && allowedProjectIds.has(row.scopeId))
+          )),
+          agents: {},
+          daily: {},
+        }
+      : rawMetrics;
+    const agentResources = listActiveAgentRuns().filter((run: any) => (
+      userRole === "admin"
+      || !principal?.kind
+      || (run.project && hasResourceAccess(userId, userRole, "project", run.project, "use"))
+    ));
     sendJson(res, {
       metrics,
       catalog: {
@@ -2157,6 +2201,7 @@ export function handleToolsAndMetricsApi(pathname: string, req: any, res: any, p
         },
       },
       system: buildLivePerformanceSnapshot(),
+      agentResources,
     });
     return true;
   }

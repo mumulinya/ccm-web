@@ -61,6 +61,7 @@ const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const crypto = __importStar(require("crypto"));
 const utils_1 = require("../../core/utils");
+const access_policy_1 = require("../system/access-policy");
 const db_1 = require("../../core/db");
 const storage_1 = require("./storage");
 const logs_1 = require("./logs");
@@ -2143,7 +2144,12 @@ function runGroupStatusFollowupSelfTest() {
 function handleBasicGroupRoutes(req, res, parsed, ctx, deps) {
     const pathname = parsed.pathname;
     if (pathname === "/api/groups" && req.method === "GET") {
-        (0, utils_1.sendJson)(res, { groups: (0, storage_1.loadGroups)().map(group_test_targets_1.publicGroupWithoutTestTargetSecrets) });
+        const groups = (0, storage_1.loadGroups)().map(group_test_targets_1.publicGroupWithoutTestTargetSecrets);
+        const principal = req.ccmAuth;
+        const visibleGroups = principal?.kind === "browser"
+            ? (0, access_policy_1.filterAccessibleResources)(groups, principal.userId, principal.role, "group", item => String(item.id || ""))
+            : groups;
+        (0, utils_1.sendJson)(res, { groups: visibleGroups });
         return true;
     }
     if (pathname === "/api/groups/create" && req.method === "POST") {

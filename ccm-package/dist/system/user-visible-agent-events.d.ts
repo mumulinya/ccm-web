@@ -87,6 +87,29 @@ export type UserVisibleAgentEvent = {
             sourceEventChecksum?: string;
         };
         availableActions?: UserVisibleAgentAction[];
+        replayLink?: {
+            schema: "ccm-task-event-link-v1";
+            taskId: string;
+            replayEventId?: string;
+            scope: "global" | "project" | "group";
+            scopeId: string;
+            exactSessionId: string;
+            anchorMessageId: string;
+            generation: number;
+            attempt: number;
+            planStepId?: string;
+            workItemId?: string;
+            batchId?: string;
+            evidenceIds?: string[];
+            contentStored: false;
+        };
+        causalRefs?: {
+            planStepId?: string;
+            workItemId?: string;
+            dependencyIds?: string[];
+            criterionIds?: string[];
+            evidenceIds?: string[];
+        };
         requirementPlan?: UserVisibleRequirementPlanV1;
         runtimeObservation?: {
             eventType?: string;
@@ -187,6 +210,10 @@ export declare function runUserVisibleAgentEventSelfTest(): {
         secretRedacted: boolean;
         bodyProjected: boolean;
         noContent: boolean;
+        replayLinkSafe: boolean;
+        causalRefsSafe: boolean;
+        progressLengthBounded: boolean;
+        internalProgressRejected: boolean;
     };
     event: UserVisibleAgentEvent;
 };

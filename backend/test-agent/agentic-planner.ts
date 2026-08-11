@@ -198,6 +198,7 @@ async function callDefaultFollowupPlanner(input: AgenticTestFollowupInput): Prom
     http: input.httpResults.map((item: any) => ({ project: item.project, name: item.name, status: item.status, error: cleanText(item.error, 800) })),
     browser: input.browserResults.map((item: any) => ({ project: item.project, name: item.name, status: item.status, errors: Array.isArray(item.steps) ? item.steps.filter((step: any) => step.status === "failed").map((step: any) => cleanText(step.error || step.detail, 500)).slice(0, 6) : [] })),
   };
+  let providerUsage: any = null;
   const options = {
     system: followupSystemPrompt(),
     messages: [{ role: "user", content: JSON.stringify({
@@ -210,10 +211,12 @@ async function callDefaultFollowupPlanner(input: AgenticTestFollowupInput): Prom
     maxTokens: 2400,
     defaultTimeoutMs: 60_000,
     invalidJsonMessage: "TestAgent 失败复核模型未返回有效 JSON",
+    onUsage: (usage: any) => { providerUsage = usage; },
   };
-  return shouldUseAnthropic(config)
+  const result = shouldUseAnthropic(config)
     ? await callAnthropicCompatibleJson(config, options)
     : await callOpenAiCompatibleJson(config, options);
+  return { ...result, providerUsage } as AgenticTestFollowupPlan;
 }
 
 async function callDefaultPlanner(input: AgenticTestPlanningInput): Promise<AgenticTestPlan> {
@@ -559,7 +562,7 @@ export async function planAgenticTestFollowup(
       }
       return { ...project, verificationCommands: commands, httpChecks: [], adversarialHttpChecks: [], browserChecks, adversarialBrowserChecks: [] };
     });
-    if (!additions.length) return { workOrder: null, metadata: { status: "no_safe_followup", summary: cleanText(plan?.summary, 1000) } };
+    if (!additions.length) return { workOrder: null, metadata: { status: "no_safe_followup", summary: cleanText(plan?.summary, 1000), providerUsage: (plan as any)?.providerUsage || null } };
     const normalized = normalizeTestAgentWorkOrder({
       ...input.workOrder,
       requiredChecks: [
@@ -583,6 +586,7 @@ export async function planAgenticTestFollowup(
         summary: cleanText(plan?.summary, 1200),
         additions,
         browserChecksTotal: browserCheckTotal,
+        providerUsage: (plan as any)?.providerUsage || null,
         readOnly: true,
         maxRounds: 1,
       },

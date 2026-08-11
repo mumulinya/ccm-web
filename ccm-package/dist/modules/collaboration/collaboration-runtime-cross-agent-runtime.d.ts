@@ -54,6 +54,24 @@ export declare function retryAgentQaItem(id: string, ctx: CollabCtx, streamRes?:
     };
     error?: undefined;
 }>;
+export declare function decideCoordinationDependencyDispatch(input: {
+    targetProject: string;
+    requestedWritePaths?: any[];
+    parentTaskId?: string;
+    groupId?: string;
+}): {
+    queueScope: string;
+    childAgentIsolation: string;
+    executionMode: string;
+    safeProjection: {
+        decision: string;
+        reason: string;
+        active_writer_count: number;
+        content_stored: boolean;
+    };
+    statusDetail: string;
+    progressText: string;
+};
 export declare function handleAgentQaRequests(input: {
     groupId: string;
     group: any;
@@ -94,6 +112,18 @@ export declare function evaluateCoordinationTaskEvidence(task: any, request: any
     score: number;
     gaps: string[];
     workspace_files: any;
+    main_agent_verification: {
+        accepted: boolean;
+        checksum: string;
+        verification: string[];
+        content_stored: boolean;
+    };
+    branch_fresh: boolean;
+    branch_freshness: {
+        fresh: boolean;
+        reason: string;
+        content_stored: boolean;
+    };
     evidence: string[];
     reason: string;
     files_changed: string[];

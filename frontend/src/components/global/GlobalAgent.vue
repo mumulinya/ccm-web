@@ -10,6 +10,7 @@ import SlashCommandMenu from '../common/SlashCommandMenu.vue'
 import SlashCommandPanel from '../common/SlashCommandPanel.vue'
 import SessionContextUsage from '../common/SessionContextUsage.vue'
 import PermissionApprovalCards from '../common/PermissionApprovalCards.vue'
+import ActiveTaskPlanDock from '../common/ActiveTaskPlanDock.vue'
 import GlobalAgentSessionSidebar from './GlobalAgentSessionSidebar.vue'
 import GlobalAgentFeishuBindingModal from './GlobalAgentFeishuBindingModal.vue'
 import GlobalAgentMessageList from './GlobalAgentMessageList.vue'
@@ -385,7 +386,7 @@ const {
   toggleReport,
   isReportOpen,
 } = useGlobalAgentAttachments({
-  canAttach: () => !isSending.value && !pendingGlobalMissionInput.value,
+  canAttach: () => !pendingGlobalMissionInput.value,
   onFilesPasted: (files) => toast.success(`已粘贴 ${files.length} 个附件`),
   onToggleReport: () => nextTick(() => {
     scrollToBottom(true)
@@ -411,8 +412,26 @@ const isSupervisionContinuationInput = computed(() => {
 })
 
 const activeGlobalExecutionConfirmed = ref(false)
-const globalTurnBusy = computed(() => isSending.value)
-const globalActiveRunId = computed(() => activeGlobalRunId.value || currentSupervisedRunMessage.value?.agenticRun?.id || '')
+const globalConversationTask = computed(() => {
+  const rows = Array.isArray(messages.value) ? messages.value : []
+  return [...rows].reverse().find(message => {
+    const mission = message?.globalMission || message?.global_mission || null
+    const run = message?.agenticRun || message?.agentic_run || null
+    const missionStatus = String(mission?.status || '').toLowerCase()
+    const runStatus = String(run?.status || '').toLowerCase()
+    if (mission?.id && !['done', 'completed', 'success', 'failed', 'cancelled', 'canceled', 'archived'].includes(missionStatus)) return true
+    return !!run?.id && [
+      'queued', 'running', 'executing', 'supervising', 'paused', 'waiting', 'waiting_user',
+      'waiting_clarification', 'blocked', 'interrupted', 'recovering', 'waiting_provider', 'waiting_agent',
+    ].includes(runStatus)
+  }) || null
+})
+const globalTurnBusy = computed(() => isSending.value || !!globalConversationTask.value)
+const globalActiveRunId = computed(() => activeGlobalRunId.value
+  || currentSupervisedRunMessage.value?.agenticRun?.id
+  || globalConversationTask.value?.agenticRun?.id
+  || globalConversationTask.value?.agentic_run?.id
+  || '')
 const globalTurnControl = useConversationTurnControl({
   scope: 'global',
   conversationId: currentSessionId,
@@ -480,7 +499,6 @@ watch(() => props.navigateTo, () => {
 const globalInputPlaceholder = computed(() => {
   if (pendingGlobalMissionInput.value) return '补充当前任务需要的信息，发送后会继续原任务...'
   if (pendingGlobalClarificationInput.value) return '回答主 Agent 刚才的问题，发送后会接着原请求继续...'
-  if (isSending.value && !activeGlobalExecutionConfirmed.value) return '正在回复...'
   if (!globalTurnBusy.value) {
     return isSupervisionContinuationInput.value
       ? '补充要求或调整当前任务...'
@@ -493,15 +511,13 @@ const globalSendButtonLabel = computed(() => {
   if (isSteering.value) return '接收中'
   if (pendingGlobalMissionInput.value) return '提交并继续'
   if (pendingGlobalClarificationInput.value) return '提交补充'
-  if (globalTurnBusy.value && !activeGlobalExecutionConfirmed.value) return '回复中'
   if (globalTurnBusy.value) return '排队'
   return isSupervisionContinuationInput.value ? '更新任务' : '发送'
 })
 
 const canSendGlobalMessage = computed(() => {
   if (isSteering.value) return false
-  if (globalTurnBusy.value && !activeGlobalExecutionConfirmed.value) return false
-  if (globalTurnBusy.value) return !!chatInput.value.trim()
+  if (globalTurnBusy.value) return !!chatInput.value.trim() || selectedFiles.value.length > 0
   return !!chatInput.value.trim() || selectedFiles.value.length > 0
 })
 
@@ -1027,6 +1043,14 @@ const {
   getActionParam, normalizeMusicAction, systemResultMessage, confirmDialog,
 })
 
+const locateGlobalPlanStep = ({ messageIndex }) => {
+  if (Number.isInteger(messageIndex) && messageIndex >= 0) scrollToMessage(messageIndex)
+}
+const handleGlobalPlanAction = ({ messageIndex, action }) => {
+  const message = Number.isInteger(messageIndex) && messageIndex >= 0 ? messages.value[messageIndex] : {}
+  return handleGlobalTaskAction(message || {}, action)
+}
+
 onMounted(() => {
   window.addEventListener('resize', syncGlobalSidebarForViewport)
   syncGlobalSidebarForViewport()
@@ -1498,16 +1522,6 @@ const handleGitCommitCardSubmit = async (msg) => {
           </div>
         </div>
 
-        <ConversationTurnControls
-          :busy="globalTurnBusy"
-          :turns="globalTurnControl.turns.value"
-          :stopping="stoppingGlobalTurn"
-          compact
-          @stop="stopGlobalCurrentWork"
-          @cancel="globalTurnControl.cancel"
-          @guide="guideGlobalQueuedTurn"
-          @retry="(turn) => globalTurnControl.retry(turn).then(() => drainGlobalTurnQueue())"
-        />
         <div v-if="!pendingGlobalMissionInput" class="global-dispatch-target-picker">
           <span class="global-dispatch-target-label">任务投放目标</span>
           <div class="global-dispatch-target-options">
@@ -1528,7 +1542,25 @@ const handleGitCommitCardSubmit = async (msg) => {
           </div>
         </div>
         <OnlineDocumentReferences :text="chatInput" compact pending-label="发送后读取" />
-                <div class="input-wrapper" :class="{ 'steering-mode': (isSending && !!activeGlobalRunId) || isSupervisionContinuationInput }">
+        <ActiveTaskPlanDock
+          :events="globalAgentExecutionEvents"
+          :messages="messages"
+          :exact-session-id="currentSessionId || ''"
+          :active="globalAgentExecutionEnabled && !!currentSessionId && !isCurrentSessionDraft"
+          @locate="locateGlobalPlanStep"
+          @execution-action="handleGlobalPlanAction"
+        />
+        <ConversationTurnControls
+          :busy="globalTurnBusy"
+          :turns="globalTurnControl.turns.value"
+          :stopping="stoppingGlobalTurn"
+          compact
+          @stop="stopGlobalCurrentWork"
+          @cancel="globalTurnControl.cancel"
+          @guide="guideGlobalQueuedTurn"
+          @retry="(turn) => globalTurnControl.retry(turn).then(() => drainGlobalTurnQueue())"
+        />
+        <div class="input-wrapper" :class="{ 'steering-mode': (isSending && !!activeGlobalRunId) || isSupervisionContinuationInput }">
           <input 
             type="file" 
             ref="fileInput" 
@@ -1536,13 +1568,13 @@ const handleGitCommitCardSubmit = async (msg) => {
             style="display: none" 
             @change="handleFileChange"
             accept="image/*,.txt,.md,.json,.csv,.pdf,.docx,.pptx,.xlsx"
-            :disabled="isSending || !!pendingGlobalMissionInput"
+            :disabled="!!pendingGlobalMissionInput"
           />
           <button
             class="attach-btn"
             @click="triggerFileUpload"
-            :title="pendingGlobalMissionInput ? '当前正在补充任务条件，请先提交文字信息' : isSending ? '当前任务执行中，附件请在下一条消息发送' : '上传图片或文件附件'"
-            :disabled="isSending || !!pendingGlobalMissionInput"
+            :title="pendingGlobalMissionInput ? '当前正在补充任务条件，请先提交文字信息' : globalTurnBusy ? '为下一条待处理消息添加附件' : '上传图片或文件附件'"
+            :disabled="!!pendingGlobalMissionInput"
           >
             <svg class="icon-attach" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/>

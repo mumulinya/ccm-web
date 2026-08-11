@@ -52,7 +52,7 @@ const onFilesSelected = (event) => {
 }
 
 const onPaste = (event) => {
-  if (props.disabled || props.busy) return
+  if (props.disabled || (props.busy && !props.allowInputWhileBusy)) return
   const files = extractClipboardAttachmentFiles(event)
   if (!files.length) return
 
@@ -73,7 +73,7 @@ const onInput = (event) => {
   <div class="chat-composer">
     <slot name="prefix" />
     <input ref="fileInput" type="file" multiple class="hidden-file-input" :accept="props.accept" @change="onFilesSelected">
-    <button class="composer-button" type="button" :disabled="props.disabled || props.busy" :title="props.attachTitle" @click="chooseFiles">📎</button>
+    <button class="composer-button" type="button" :disabled="props.disabled || (props.busy && !props.allowInputWhileBusy)" :title="props.attachTitle" @click="chooseFiles">📎</button>
     <div class="chat-input-wrap" :class="{ 'has-context-usage': !!slots.context }">
       <AttachmentChips :files="props.files" @remove="emit('remove-file', $event)" />
       <OnlineDocumentReferences :text="props.modelValue" compact />
@@ -107,7 +107,7 @@ const onInput = (event) => {
         <slot name="context" />
       </div>
     </div>
-    <button :class="['send-button', { stopping: props.busy && !props.allowInputWhileBusy }]" type="button" :disabled="props.disabled || (props.busy && props.allowInputWhileBusy && !props.modelValue.trim())" @click="emit(props.busy && !props.allowInputWhileBusy ? 'stop' : 'send')">
+    <button :class="['send-button', { stopping: props.busy && !props.allowInputWhileBusy }]" type="button" :disabled="props.disabled || (props.busy && props.allowInputWhileBusy && !props.modelValue.trim() && !props.files.length)" @click="emit(props.busy && !props.allowInputWhileBusy ? 'stop' : 'send')">
       {{ props.busy && !props.allowInputWhileBusy ? '停止' : props.sendLabel }}
     </button>
   </div>

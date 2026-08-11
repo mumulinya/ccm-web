@@ -4,7 +4,7 @@ export type ProjectRuntimeProfileV1 = {
     label: string;
     projectId: string;
     modulePath: string;
-    projectType: "node" | "maven" | "gradle" | "go" | "rust" | "dotnet" | "custom";
+    projectType: "node" | "maven" | "gradle" | "go" | "rust" | "dotnet" | "python" | "php" | "ruby" | "elixir" | "dart" | "deno" | "swift" | "docker" | "make" | "cmake" | "jvm" | "custom";
     environment: string;
     runCommand: string;
     prepareCommand?: string;
@@ -156,6 +156,7 @@ export declare function getProjectRuntimeLogs(project: string, profileId: unknow
     profileId: string;
     kind: "run" | "build";
     logs: string;
+    logWriteError: string;
     truncated?: undefined;
 } | {
     project: string;
@@ -163,6 +164,7 @@ export declare function getProjectRuntimeLogs(project: string, profileId: unknow
     kind: "run" | "build";
     logs: string;
     truncated: boolean;
+    logWriteError: string;
 };
 export declare function getProjectRuntimeLogsAsync(project: string, profileId: unknown, kind: unknown, lines?: number): Promise<{
     project: string;
@@ -170,6 +172,7 @@ export declare function getProjectRuntimeLogsAsync(project: string, profileId: u
     kind: "run" | "build";
     logs: string;
     truncated: boolean;
+    logWriteError: string;
 }>;
 export declare function subscribeProjectRuntimeLogs(project: string, profileId: unknown, kind: unknown, listener: (event: RuntimeLogEvent) => void): () => void;
 export declare function getProjectRuntimeSnapshot(project: string): any;

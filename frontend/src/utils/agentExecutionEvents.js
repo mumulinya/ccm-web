@@ -1,35 +1,3 @@
-let shortcutInstalled = false
-let activeExecutionTranscriptId = ''
-const executionTranscriptToggles = new Map()
-
-export function installExecutionTranscriptShortcut() {
-  if (shortcutInstalled || typeof window === 'undefined') return
-  shortcutInstalled = true
-  window.addEventListener('keydown', event => {
-    if (!(event.ctrlKey || event.metaKey) || String(event.key || '').toLowerCase() !== 'o' || event.altKey) return
-    const toggle = executionTranscriptToggles.get(activeExecutionTranscriptId)
-    if (!toggle) return
-    event.preventDefault()
-    toggle()
-  })
-}
-
-export function registerExecutionTranscriptShortcut(id, toggle) {
-  const key = String(id || '')
-  if (!key || typeof toggle !== 'function') return () => {}
-  executionTranscriptToggles.set(key, toggle)
-  installExecutionTranscriptShortcut()
-  return () => {
-    executionTranscriptToggles.delete(key)
-    if (activeExecutionTranscriptId === key) activeExecutionTranscriptId = ''
-  }
-}
-
-export function activateExecutionTranscript(id) {
-  const key = String(id || '')
-  if (executionTranscriptToggles.has(key)) activeExecutionTranscriptId = key
-}
-
 const time = value => {
   const parsed = Date.parse(String(value || ''))
   return Number.isFinite(parsed) ? parsed : 0
@@ -44,6 +12,15 @@ const safeLegacyExecutionSummary = value => {
     return 'Agent 正在处理内部执行步骤。'
   }
   return text
+}
+
+const INTERNAL_STRUCTURED_PROGRESS = /(?:workflowDecision|workflow_decision|dispatchPolicy|dispatch_policy|authorizationDirective|selectedSkills|requiresCodeChanges|requiresIndependentReview|memoryPolicy|CCM_AGENT_RECEIPT|system[_ -]?prompt|lease[_ -]?id|trace[_ -]?id)/i
+const RAW_OR_TRUNCATED_PROGRESS = /^\s*[\[{](?=[\s\S]{0,160}["']?[A-Za-z_$][\w$-]*["']?\s*:)/
+
+export const isUnsafeExecutionProgress = event => {
+  if (String(event?.eventType || '') !== 'assistant_progress') return false
+  const text = String(event?.detail?.progress?.text || event?.display?.summary || '').trim()
+  return !text || INTERNAL_STRUCTURED_PROGRESS.test(text) || RAW_OR_TRUNCATED_PROGRESS.test(text)
 }
 
 const legacyEvent = (event, index, prefix) => {
@@ -257,11 +234,20 @@ export function coalesceExecutionEvents(events) {
 export function executionEventsForMessage(events, messages, index) {
   const message = messages?.[index]
   if (!isExecutionAnchor(messages, index)) return []
+  if (['retrying', 'recovered', 'superseded'].includes(String(message?.recovery?.state || '').toLowerCase())) return []
   const orderedEvents = (Array.isArray(events) ? events : [])
     .filter(Boolean)
     .sort((left, right) => Number(left.sequence || 0) - Number(right.sequence || 0) || time(left.createdAt) - time(right.createdAt))
   const messageTime = time(message?.timestamp || message?.createdAt || message?.created_at)
-  const messageId = String(message?.id || message?.uuid || message?.message_id || message?.messageId || '')
+  const messageId = String(
+    message?.execution_anchor_message_id
+      || message?.executionAnchorMessageId
+      || message?.id
+      || message?.uuid
+      || message?.message_id
+      || message?.messageId
+      || '',
+  )
   const anchoredEvents = messageId
     ? orderedEvents.filter(event => String(event?.anchorMessageId || event?.anchor_message_id || '') === messageId)
     : []
@@ -313,7 +299,7 @@ export function executionEventsForMessage(events, messages, index) {
     ? [...new Map([...(lifecycleEvents || []), ...timeBoundEvents, ...taskEvents].map(event => [event.eventId, event])).values()]
     : lifecycleEvents || timeBoundEvents
   const merged = [...current, ...legacyExecutionEvents(message)]
-  return coalesceExecutionEvents(merged)
+  return coalesceExecutionEvents(merged).filter(event => !isUnsafeExecutionProgress(event))
 }
 
 const meaningfulExecutionTypes = new Set([

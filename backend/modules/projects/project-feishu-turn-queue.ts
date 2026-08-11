@@ -130,7 +130,7 @@ export async function drainProjectFeishuTurns(baseUrl: string, project: string, 
 export function startProjectFeishuTurnRecoveryForServer(baseUrl: string) {
   if (recoveryTimer) return { started: false };
   const tick = () => {
-    const queued = conversationTurnControl.list({ scope: "project", statuses: "queued", limit: 500 }).turns
+    const queued = conversationTurnControl.listInternal({ scope: "project", statuses: "queued", limit: 500 }).turns
       .filter((turn) => turn.metadata?.kind === "project_feishu_turn_v2");
     const exactScopes = new Map<string, { project: string; sessionId: string }>();
     for (const turn of queued) {

@@ -10,6 +10,7 @@ type PetConfigV2 = {
     settings: {
         autoStart: boolean;
         webFallback: boolean;
+        agentProgressMode: "milestones" | "terminal_only";
     };
     updatedAt: string;
 };

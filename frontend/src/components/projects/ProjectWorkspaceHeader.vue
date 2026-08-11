@@ -16,6 +16,19 @@ const emit = defineEmits(['update:modelValue', 'select', 'start', 'stop', 'switc
 const menuOpen = ref(false)
 const project = computed(() => props.projects.find((item) => item.name === props.modelValue) || null)
 const connected = computed(() => project.value?.agent_connection?.running || project.value?.running)
+const channelLabel = computed(() => {
+  const platform = String(project.value?.platform || '').trim().toLowerCase()
+  return {
+    feishu: '飞书通道',
+    '飞书': '飞书通道',
+    lark: 'Lark 通道',
+    'lark 通道': 'Lark 通道',
+    weixin: '微信通道',
+    telegram: 'Telegram 通道',
+    slack: 'Slack 通道',
+    discord: 'Discord 通道',
+  }[platform] || '协作通道'
+})
 const chooseProject = name => {
   menuOpen.value = false
   emit('update:modelValue', name)
@@ -34,7 +47,7 @@ const runAction = (name) => {
       <ProjectGroupedSelector :projects="projects" :model-value="modelValue" @select="chooseProject" />
       <div v-if="project" :class="['project-status', connected ? 'running' : 'stopped']">
         <span class="status-dot"></span>
-        <span><strong>{{ connected ? '协作已连接' : '协作未连接' }}</strong><small>{{ project.agent || '未配置 Agent' }} · {{ project.session_count || 0 }} 个会话</small></span>
+        <span><strong>{{ channelLabel }}{{ connected ? '已连接' : '未连接' }}</strong><small>{{ project.agent || '未配置 Agent' }} · {{ project.session_count || 0 }} 个会话</small></span>
       </div>
       <span v-if="project" class="main-agent-label"><Bot :size="13" />项目主 Agent</span>
     </div>
@@ -44,16 +57,16 @@ const runAction = (name) => {
         v-if="connected"
         class="primary stop"
         :disabled="!!busyAction"
-        title="断开项目 Agent 与协作通道"
+        :title="`断开项目${channelLabel}`"
         @click="emit('stop', project)"
-      ><Square :size="15" />{{ busyAction === 'stop' ? '正在断开' : '断开 Agent' }}</button>
+      ><Square :size="15" />{{ busyAction === 'stop' ? '正在断开' : `断开${channelLabel}` }}</button>
       <button
         v-else-if="project"
         class="primary"
         :disabled="!!busyAction"
-        title="连接项目 Agent 与协作通道"
+        :title="`连接项目${channelLabel}`"
         @click="emit('start', project)"
-      ><Play :size="15" />{{ busyAction === 'start' ? '正在连接' : '连接 Agent' }}</button>
+      ><Play :size="15" />{{ busyAction === 'start' ? '正在连接' : `连接${channelLabel}` }}</button>
 
       <button v-if="project" class="tool-shortcut" :class="{ warning: !toolsReady }" title="配置当前项目会话可用的 MCP 与 Skill" @click="emit('tools', project)">
         <Wrench :size="16" /><span>工具</span><small>{{ Number(toolCounts.mcp || 0) + Number(toolCounts.skill || 0) }}</small>

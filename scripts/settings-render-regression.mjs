@@ -22,6 +22,21 @@ const adminSession = {
   csrf: 'settings-render-csrf',
   capabilities: ['read', 'chat.read_only', 'task.execute', 'project.runtime', 'project.git', 'attachment.manage', 'project.define', 'terminal.manage', 'agent.credentials', 'tools.manage', 'cleanup.permanent', 'permission.high_risk', 'security.manage'],
 }
+const accessUsers = [
+  { id: 'admin-1', username: 'settings-selftest', role: 'admin', disabled_at: null },
+  { id: 'user-1', username: 'design-reviewer', role: 'user', disabled_at: null },
+  { id: 'user-2', username: 'release-operator', role: 'user', disabled_at: '2026-07-20T08:00:00.000Z' },
+]
+const accessModules = [
+  { id: 'workbench', label: '工作协作', description: '工作台、全局助手、任务派发与任务回放' },
+  { id: 'resource_workspace', label: '项目与群聊', description: '项目管理和群聊协作' },
+  { id: 'developer_tools', label: '开发工具', description: '代码协作、代码智能和自动开发运营' },
+  { id: 'knowledge', label: '知识库', description: '知识库与文档' },
+  { id: 'memory', label: '记忆中心', description: '记忆控制中心' },
+  { id: 'terminal_ops', label: '终端与日志', description: '终端工作台和项目日志' },
+  { id: 'tool_ops', label: '工具与 MCP', description: '工具配置、MCP、技能和市场' },
+  { id: 'platform_settings', label: '平台设置', description: '渠道、模型、开发 Agent 和 TestAgent 设置' },
+]
 const mockBaseApi = async page => {
   await page.route('https://fonts.googleapis.com/**', route => route.fulfill({ status: 200, contentType: 'text/css', body: '' }))
   await page.route('**/*', route => {
@@ -30,8 +45,13 @@ const mockBaseApi = async page => {
     const acceptsEvents = String(route.request().headers().accept || '').includes('text/event-stream')
     if (acceptsEvents) return route.fulfill({ status: 200, contentType: 'text/event-stream', body: 'event: ready\ndata: {"type":"ready"}\n\n' })
     if (pathname === '/api/auth/session') return route.fulfill(json(adminSession))
+    if (pathname === '/api/auth/users') return route.fulfill(json({ success: true, users: accessUsers }))
+    if (pathname === '/api/admin/feature-access') return route.fulfill(json({ success: true, revision: 4, modules: accessModules, grants: [{ userId: 'user-1', modules: ['workbench', 'resource_workspace', 'developer_tools'] }] }))
+    if (pathname === '/api/admin/resource-access') return route.fulfill(json({ success: true, revision: 4, grants: [{ grantId: 'grant-1', userId: 'user-1', resourceType: 'project', resourceId: 'smart-live-ui', level: 'manage' }, { grantId: 'grant-2', userId: 'user-1', resourceType: 'group', resourceId: 'group-1', level: 'use' }] }))
+    if (pathname === '/api/admin/access-audit') return route.fulfill(json({ success: true, events: [{ eventId: 'audit-1', occurredAt: '2026-07-23T06:00:00.000Z', action: '更新功能权限', kind: 'feature', targetUserId: 'user-1' }] }))
     if (pathname === '/api/music/playback/commands/head') return route.fulfill(json({ success: true, command: null }))
-    if (pathname === '/api/projects') return route.fulfill(json({ success: true, projects: [] }))
+    if (pathname === '/api/projects') return route.fulfill(json({ success: true, projects: [{ name: 'smart-live-ui', display_name: '智评生活前端' }, { name: 'smart-live-api', display_name: '智评生活服务端' }] }))
+    if (pathname === '/api/groups') return route.fulfill(json({ success: true, groups: [{ id: 'group-1', name: '智评生活开发群' }] }))
     if (pathname === '/api/pets/agents') return route.fulfill(json({ success: true, agents: [] }))
     if (pathname === '/api/system/settings-status') return route.fulfill(json({ success: true, version: '1.0.24', service: { status: 'online', pid: 1234, uptimeSeconds: 7200, startedAt: '2026-07-23T06:00:00.000Z' }, credentials: { protected: true, backend: 'AES-256-GCM', entries: 2 } }))
     if (pathname === '/api/feishu/config') return route.fulfill(json({ success: true, enabled: false, control_bot_enabled: false }))
@@ -106,6 +126,81 @@ const screenshot = async (page, name) => {
   report.screenshots.push(file)
 }
 
+const assertAccessControls = async (page, name) => {
+  const metrics = await page.evaluate(() => {
+    const root = document.querySelector('.access-page')
+    const controls = Array.from(root.querySelectorAll('input:not([type="checkbox"]), select'))
+      .filter(element => getComputedStyle(element).display !== 'none')
+      .map(element => {
+        const style = getComputedStyle(element)
+        const rect = element.getBoundingClientRect()
+        return { tag: element.tagName, height: rect.height, radius: Number.parseFloat(style.borderRadius), width: rect.width }
+      })
+    return {
+      pageClientWidth: root.clientWidth,
+      pageScrollWidth: root.scrollWidth,
+      pageClientHeight: root.clientHeight,
+      pageScrollHeight: root.scrollHeight,
+      controls,
+    }
+  })
+  assert.equal(metrics.pageScrollWidth, metrics.pageClientWidth, `${name} has horizontal overflow`)
+  assert.ok(metrics.controls.length > 0, `${name} should render form controls`)
+  assert.equal(metrics.controls.every(item => item.height >= 33 && item.height <= 36), true, JSON.stringify(metrics.controls))
+  assert.equal(metrics.controls.every(item => item.radius >= 5 && item.radius <= 8), true, JSON.stringify(metrics.controls))
+  report.checks.push({ name: `${name} uses canonical form controls without horizontal overflow`, pass: true, details: metrics })
+}
+
+const runAccessManagement = async (viewport, prefix) => {
+  const context = await browser.newContext({ viewport })
+  const page = await context.newPage()
+  page.on('pageerror', error => report.errors.push(`${prefix} access page: ${error.message}`))
+  page.on('console', message => { if (message.type() === 'error') report.errors.push(`${prefix} access console: ${message.text()}`) })
+  await mockBaseApi(page)
+
+  await page.goto(`${baseUrl}/?tab=user-management`, { waitUntil: 'domcontentloaded', timeout: 30_000 })
+  await page.locator('.access-page').waitFor()
+  await page.locator('[data-page-loading="user-management"]').waitFor({ state: 'detached', timeout: 10_000 })
+  await page.getByText('成员账号', { exact: true }).waitFor()
+  await assertAccessControls(page, `${prefix} user management`)
+  await screenshot(page, `${prefix}-user-management`)
+
+  await page.goto(`${baseUrl}/?tab=permission-management`, { waitUntil: 'domcontentloaded', timeout: 30_000 })
+  await page.locator('.access-page').waitFor()
+  await page.locator('[data-page-loading="permission-management"]').waitFor({ state: 'detached', timeout: 10_000 })
+  await page.getByText('项目与群聊范围', { exact: true }).waitFor()
+  await assertAccessControls(page, `${prefix} permission management`)
+  await screenshot(page, `${prefix}-permission-management`)
+  const scroll = await page.evaluate(() => {
+    const root = document.querySelector('.access-page')
+    const before = root.scrollTop
+    root.scrollTop = root.scrollHeight
+    return { before, after: root.scrollTop, max: Math.max(0, root.scrollHeight - root.clientHeight) }
+  })
+  if (scroll.max > 1) assert.ok(scroll.after > scroll.before, `${prefix} permission page cannot scroll vertically: ${JSON.stringify(scroll)}`)
+  assert.ok(Math.abs(scroll.after - scroll.max) <= 2, `${prefix} permission page did not reach its bottom: ${JSON.stringify(scroll)}`)
+  report.checks.push({ name: `${prefix} permission management has a working vertical scroll owner`, pass: true, details: scroll })
+  await screenshot(page, `${prefix}-permission-management-bottom`)
+  if (prefix === 'desktop') {
+    await page.getByRole('button', { name: '切换深色' }).click()
+    await page.waitForFunction(() => document.documentElement.dataset.theme === 'dark')
+    await page.waitForTimeout(220)
+    const darkControls = await page.evaluate(() => Array.from(document.querySelectorAll('.access-page select')).map(element => {
+      const style = getComputedStyle(element)
+      const channels = value => (value.match(/\d+(?:\.\d+)?/g) || []).slice(0, 3).map(Number)
+      const luminance = value => {
+        const [red = 0, green = 0, blue = 0] = channels(value)
+        return (red * .2126) + (green * .7152) + (blue * .0722)
+      }
+      return { background: style.backgroundColor, color: style.color, border: style.borderColor, backgroundLuminance: luminance(style.backgroundColor), colorLuminance: luminance(style.color) }
+    }))
+    assert.equal(darkControls.every(item => item.backgroundLuminance < 80 && item.colorLuminance > 150), true, JSON.stringify(darkControls))
+    report.checks.push({ name: 'permission management controls use theme tokens in dark mode', pass: true, details: darkControls })
+    await screenshot(page, 'desktop-permission-management-dark')
+  }
+  await context.close()
+}
+
 const runDesktop = async () => {
   const context = await browser.newContext({ viewport: { width: 1536, height: 830 } })
   const page = await context.newPage()
@@ -178,6 +273,43 @@ const runDesktop = async () => {
   report.checks.push({ name: 'native cache controls stay in separate rows without horizontal overflow', pass: true, details: nativeCacheLayout })
   await screenshot(page, 'desktop-models-native-cache')
   await page.evaluate(() => {
+    const settingsPage = document.querySelector('.settings-page')
+    settingsPage.scrollTop = settingsPage.scrollHeight
+  })
+  const scrollBeforeSave = await page.evaluate(() => {
+    const settingsPage = document.querySelector('.settings-page')
+    const outerPage = document.querySelector('.tab-pane.scrollable-pane')
+    return {
+      distanceFromBottom: Math.max(0, settingsPage.scrollHeight - settingsPage.clientHeight - settingsPage.scrollTop),
+      outerScrollTop: outerPage?.scrollTop || 0,
+    }
+  })
+  await page.getByRole('button', { name: '保存配置', exact: true }).click()
+  await page.waitForTimeout(100)
+  const savedAdvancedLayout = await page.evaluate(() => {
+    const details = document.querySelector('.settings-details')
+    const settingsPage = document.querySelector('.settings-page')
+    const outerPage = document.querySelector('.tab-pane.scrollable-pane')
+    const saveButton = Array.from(document.querySelectorAll('button')).find(item => item.textContent?.trim() === '保存配置')
+    const pageRect = settingsPage.getBoundingClientRect()
+    const buttonRect = saveButton.getBoundingClientRect()
+    return {
+      detailsOpen: details.open,
+      scrollTop: settingsPage.scrollTop,
+      maxScrollTop: Math.max(0, settingsPage.scrollHeight - settingsPage.clientHeight),
+      distanceFromBottom: Math.max(0, settingsPage.scrollHeight - settingsPage.clientHeight - settingsPage.scrollTop),
+      saveButtonVisible: buttonRect.bottom >= pageRect.top && buttonRect.top <= pageRect.bottom,
+      outerScrollTop: outerPage?.scrollTop || 0,
+    }
+  })
+  assert.equal(savedAdvancedLayout.detailsOpen, true, JSON.stringify(savedAdvancedLayout))
+  assert.equal(savedAdvancedLayout.scrollTop <= savedAdvancedLayout.maxScrollTop + 1, true, JSON.stringify(savedAdvancedLayout))
+  assert.equal(savedAdvancedLayout.saveButtonVisible, true, JSON.stringify(savedAdvancedLayout))
+  assert.ok(Math.abs(savedAdvancedLayout.distanceFromBottom - scrollBeforeSave.distanceFromBottom) <= 2, JSON.stringify({ scrollBeforeSave, savedAdvancedLayout }))
+  assert.equal(savedAdvancedLayout.outerScrollTop, scrollBeforeSave.outerScrollTop, JSON.stringify({ scrollBeforeSave, savedAdvancedLayout }))
+  report.checks.push({ name: 'saving advanced model settings preserves the settings scroll anchor', pass: true, details: savedAdvancedLayout })
+  await screenshot(page, 'desktop-models-after-advanced-save')
+  await page.evaluate(() => {
     const scrollers = [document.querySelector('.settings-page'), document.querySelector('.tab-pane.scrollable-pane')].filter(Boolean)
     for (const scroller of scrollers) scroller.scrollTop = scroller.scrollHeight
   })
@@ -209,6 +341,19 @@ const runDesktop = async () => {
   assert.equal(await page.getByText('恢复界面默认设置', { exact: true }).count(), 1)
   await assertLayout(page, 'desktop system')
   await screenshot(page, 'desktop-system')
+
+  await page.getByRole('button', { name: /TestAgent/ }).click()
+  await page.locator('[data-settings-panel="test-agent"]').waitFor()
+  const testAgentControls = await page.evaluate(() => Array.from(document.querySelectorAll('.test-agent-hardening-grid select')).map(element => {
+    const style = getComputedStyle(element)
+    const rect = element.getBoundingClientRect()
+    return { height: rect.height, radius: Number.parseFloat(style.borderRadius), background: style.backgroundColor }
+  }))
+  assert.equal(testAgentControls.length, 4)
+  assert.equal(testAgentControls.every(item => item.height === 34 && item.radius === 6), true, JSON.stringify(testAgentControls))
+  report.checks.push({ name: 'TestAgent hardening selects use canonical control dimensions', pass: true, details: testAgentControls })
+  await assertLayout(page, 'desktop test agent')
+  await screenshot(page, 'desktop-test-agent')
   await context.close()
 }
 
@@ -232,6 +377,8 @@ const runMobile = async () => {
 try {
   await runDesktop()
   await runMobile()
+  await runAccessManagement({ width: 1536, height: 830 }, 'desktop')
+  await runAccessManagement({ width: 390, height: 844 }, 'mobile')
   assert.deepEqual(report.errors, [])
   report.pass = true
 } catch (error) {

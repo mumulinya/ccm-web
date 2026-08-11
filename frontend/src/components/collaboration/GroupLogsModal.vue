@@ -67,7 +67,8 @@ const filteredLogs = computed(() => (
 .modal-title-gradient { margin: 0 0 16px; font-size: 16px; color: var(--text-primary); }
 .modal-toolbar-row { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
 .spacer { flex: 1; }
-.custom-select-logs { padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--control-bg); color: var(--text-primary); }
+.custom-select-logs { height:var(--control-height,34px); padding:0 30px 0 var(--control-padding-x,10px); border-radius:var(--radius-md,6px); border:1px solid var(--border-color); background:var(--control-bg); color:var(--text-primary); outline:none; }
+.custom-select-logs:focus { border-color:var(--accent-blue); box-shadow:var(--focus-ring); }
 .total-badge { font-size: 11px; color: var(--text-muted); padding: 4px 8px; border-radius: 999px; background: rgba(15, 23, 42, 0.05); }
 .group-logs-content { flex: 1; overflow-y: auto; min-height: 220px; max-height: 52vh; padding-right: 4px; }
 .logs-inner { display: flex; flex-direction: column; gap: 10px; width: 100%; }

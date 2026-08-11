@@ -176,7 +176,7 @@ try {
   assert.doesNotMatch(source, /input\.compact === false \? null : compactGlobalAgentSession\(sessionId\)/);
   assert.match(apiSource, /\/api\/global-agent\/memory\/compact/);
   assert.match(apiSource, /loadGlobalAgentHistoryStore\(\)\.sessions/);
-  assert.match(slashSource, /name:\s*"compact"[\s\S]*?scopes:\s*\["global",\s*"group"\]/);
+  assert.match(slashSource, /name:\s*"compact"[\s\S]*?scopes:\s*\["global",\s*"project",\s*"group"\]/);
   assert.match(frontendSource, /compactSession:\s*async/);
   assert.match(frontendSource, /const sessionId = currentSessionId\.value[\s\S]*session_id:\s*sessionId/);
 

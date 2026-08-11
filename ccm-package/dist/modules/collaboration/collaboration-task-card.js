@@ -415,28 +415,35 @@ function buildMainAgentRecoverySummary(task, phase, sessions = [], workItems = [
         ...gapItems.map(taskCardGapLabel),
     ]).slice(0, 6);
     const mode = recovery.mode || (recovery.pending_since ? "manual_startup_recovery" : recovery.revalidated_at ? "manual_resume" : recovery.recovered_at ? "startup_auto_recovery" : "runtime_recovery");
-    const status = task?.recovery_pending === true || phase === "needs_user"
-        ? "needs_user"
-        : ["completed", "cancelled", "reverted"].includes(phase)
-            ? "recorded"
-            : "active";
+    const safeAutoWaiting = recovery.mode === "safe_auto" && ["waiting_provider", "waiting_agent", "validating", "queued"].includes(String(recovery.state || ""));
+    const status = safeAutoWaiting
+        ? "active"
+        : task?.recovery_pending === true || phase === "needs_user"
+            ? "needs_user"
+            : ["completed", "cancelled", "reverted"].includes(phase)
+                ? "recorded"
+                : "active";
     return {
         schema: "ccm-main-agent-recovery-summary-v1",
         title: "恢复接续",
         status,
         mode,
-        status_label: status === "needs_user"
-            ? "待确认"
-            : mode === "startup_auto_recovery"
-                ? "已自动接上"
-                : status === "recorded"
-                    ? "已记录"
-                    : "已接上",
-        headline: status === "needs_user"
-            ? recovery.requires_user === true && recovery.user_headline
-                ? recovery.user_headline
-                : "检测到上次任务没有完整收尾，我已暂停并等待你确认是否继续。"
-            : recovery.user_headline || "我已接上上次任务上下文，重新核对目标、当前状态和验收条件后继续推进。",
+        status_label: safeAutoWaiting
+            ? "等待自动恢复"
+            : status === "needs_user"
+                ? "待确认"
+                : mode === "startup_auto_recovery"
+                    ? "已自动接上"
+                    : status === "recorded"
+                        ? "已记录"
+                        : "已接上",
+        headline: safeAutoWaiting
+            ? (task?.status_detail || "执行通道暂时不可用，任务现场已保留，将从最近检查点自动继续。")
+            : status === "needs_user"
+                ? recovery.requires_user === true && recovery.user_headline
+                    ? recovery.user_headline
+                    : "检测到上次任务没有完整收尾，我已暂停并等待你确认是否继续。"
+                : recovery.user_headline || "我已接上上次任务上下文，重新核对目标、当前状态和验收条件后继续推进。",
         revalidated: {
             goal: latestCheck.goal_revalidated === true,
             state: latestCheck.state_revalidated === true,
@@ -445,13 +452,16 @@ function buildMainAgentRecoverySummary(task, phase, sessions = [], workItems = [
         preserved: (0, collaboration_1.uniqueStrings)([
             ...(recovery.authorization_preserved === true ? ["已保留你之前确认的执行授权"] : []),
             ...preserved,
+            ...(task?.resume_checkpoint?.completedWorkItemIds?.length ? [`已确认 ${task.resume_checkpoint.completedWorkItemIds.length} 个工作项无需重复执行`] : []),
         ]),
         remaining_gaps: remainingGaps,
-        next_action: status === "needs_user"
-            ? recovery.user_next_action || "确认继续后会复用原任务、执行队列和可恢复会话。"
-            : remainingGaps.length
-                ? "继续处理恢复后仍未满足的验收缺口。"
-                : recovery.user_next_action || "继续使用恢复后的上下文执行并等待验收。",
+        next_action: safeAutoWaiting
+            ? recovery.nextRetryAt ? `将在 ${recovery.nextRetryAt} 后尝试接上原任务。` : "通道恢复后会接上原任务。"
+            : status === "needs_user"
+                ? recovery.user_next_action || "确认继续后会复用原任务、执行队列和可恢复会话。"
+                : remainingGaps.length
+                    ? "继续处理恢复后仍未满足的验收缺口。"
+                    : recovery.user_next_action || "继续使用恢复后的上下文执行并等待验收。",
         technical: {
             recovery_checks: checks.length,
             lease_recovery_count: Number(task?.execution_lease?.recovery_count || recovery.lease_recovery_count || 0),
@@ -461,6 +471,11 @@ function buildMainAgentRecoverySummary(task, phase, sessions = [], workItems = [
             decision_reason: recovery.decision_reason || "",
             authorization_preserved: recovery.authorization_preserved === true,
             authorization_evidence: Array.isArray(recovery.authorization_evidence) ? recovery.authorization_evidence : [],
+            recovery_state: recovery.state || "",
+            recovery_attempt: Number(recovery.attempt || 0),
+            recovery_max_attempts: Number(recovery.maxAttempts || 3),
+            resume_phase: task?.resume_checkpoint?.phase || task?.interruption_receipt?.resume_checkpoint?.phase || "",
+            skipped_work_item_count: Number(task?.resume_checkpoint?.completedWorkItemIds?.length || task?.interruption_receipt?.resume_checkpoint?.completedWorkItemIds?.length || 0),
         },
     };
 }

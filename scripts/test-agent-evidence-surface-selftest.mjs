@@ -1,10 +1,12 @@
 import assert from "node:assert/strict"
 import path from "node:path"
+import { pathToFileURL } from "node:url"
 
 const root = path.resolve(import.meta.dirname, "..")
-const projection = await import(path.join(root, "ccm-package", "dist", "test-agent", "evidence-projection.js"))
-const surface = await import(path.join(root, "ccm-package", "dist", "test-agent", "surface-audit.js"))
-const runtime = await import(path.join(root, "ccm-package", "dist", "test-agent", "runtime-fingerprint.js"))
+const load = (...parts) => import(pathToFileURL(path.join(root, "ccm-package", "dist", ...parts)).href)
+const projection = await load("test-agent", "evidence-projection.js")
+const surface = await load("test-agent", "surface-audit.js")
+const runtime = await load("test-agent", "runtime-fingerprint.js")
 
 const results = {
   projection: projection.runTestAgentEvidenceProjectionSelfTest(),

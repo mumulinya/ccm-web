@@ -93,9 +93,11 @@ const emit = defineEmits(['close', 'submit', 'update:label', 'update:type'])
 }
 .form-input,
 .form-select {
-  padding: 8px 12px;
-  border: 1px solid rgba(0, 0, 0, 0.08);
-  border-radius: 8px;
+  height: var(--control-height-lg, 36px);
+  box-sizing: border-box;
+  padding: 0 var(--control-padding-x, 10px);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md, 6px);
   background: var(--control-bg);
   font-size: 13.5px;
   outline: none;
@@ -106,8 +108,9 @@ const emit = defineEmits(['close', 'submit', 'update:label', 'update:type'])
 }
 .form-input:focus {
   border-color: var(--accent-blue, #3b82f6);
-  background: var(--surface-raised);
+  box-shadow: var(--focus-ring);
 }
+.form-select:focus { border-color:var(--accent-blue); box-shadow:var(--focus-ring); }
 .modal-footer-btns {
   display: flex;
   justify-content: flex-end;
@@ -116,7 +119,7 @@ const emit = defineEmits(['close', 'submit', 'update:label', 'update:type'])
 }
 :global([data-theme="dark"] .form-input),
 :global([data-theme="dark"] .form-select){
-  background: var(--bg-secondary, #0f172a) !important;
+  background: var(--control-bg, #0f172a) !important;
   border-color: var(--border-color, rgba(255, 255, 255, 0.08)) !important;
   color: var(--text-primary, #f8fafc) !important;
 }

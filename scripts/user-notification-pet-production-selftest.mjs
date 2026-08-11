@@ -78,12 +78,36 @@ try {
   assert.equal(notifications.unreadUserNotificationCount('usr_notification_admin'), 0)
   assert.equal(notifications.runUserNotificationSelfTest().pass, true)
 
+  const neutral = notifications.createPetSpeechNotification({
+    agent: 'project-a',
+    role: 'assistant',
+    text: '第三方 Agent 原始最终文本',
+    source: 'project',
+    task_id: 'task-neutral',
+    scope_id: 'project-a',
+    exact_session_id: 'session-a',
+    dedupe_key: 'neutral-agent-message',
+  })
+  assert.equal(neutral[0].notification_type, 'agent_message')
+  assert.notEqual(neutral[0].title, 'Agent已完成')
+  assert.deepEqual(notifications.projectPetNotification({
+    ...neutral[0],
+    action: {
+      kind: 'task', task_id: 'task-neutral', scope_type: 'project', scope_id: 'project-a',
+      session_id: 'session-a', anchor_message_id: 'anchor-a', origin_message_id: 'origin-a', generation: '3',
+    },
+  }, {
+    delivery_id: 'delivery-neutral', notification_id: neutral[0].notification_id, channel: 'desktop_pet', state: 'pending',
+    client_id: '', attempt_count: 0, next_attempt_at: '', claimed_at: '', delivered_at: '', failed_at: '', last_error: '',
+    created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+  }).action.anchor_message_id, 'anchor-a')
+
   const db = observability.getObservabilityDatabase()
-  assert.equal(Number(db.prepare('SELECT COUNT(*) count FROM user_notifications_v2').get().count), 1)
-  assert.equal(Number(db.prepare("SELECT COUNT(*) count FROM user_notification_deliveries_v2 WHERE state='delivered'").get().count), 2)
+  assert.equal(Number(db.prepare('SELECT COUNT(*) count FROM user_notifications_v2').get().count), 2)
+  assert.equal(Number(db.prepare("SELECT COUNT(*) count FROM user_notification_deliveries_v2 WHERE state='delivered'").get().count), 3)
   console.log(JSON.stringify({
     pass: true,
-    checks: 13,
+    checks: 16,
     notification_id: first[0].notification_id,
     paid_provider_calls: 0,
   }, null, 2))

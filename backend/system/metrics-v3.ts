@@ -43,13 +43,31 @@ function normalizedEvent(agentInput: string, data: any, now: Date | string | num
   const scopeId = groupId || (scopeType === "global" ? "global" : projectId || "unassigned");
   const role = String(data.role || data.agentRole || data.agent_role || (scopeType === "global" ? "global_agent" : scopeType === "group" ? "member_agent" : "project_agent"));
   const status = normalizedStatus(data);
-  const inputTokens = finite(data.inputTokens ?? data.input_tokens ?? data.usage?.inputTokens ?? data.usage?.input_tokens);
-  const outputTokens = finite(data.outputTokens ?? data.output_tokens ?? data.usage?.outputTokens ?? data.usage?.output_tokens);
-  const totalCostUsd = finite(data.totalCostUsd ?? data.total_cost_usd ?? data.costUsd ?? data.cost_usd ?? data.usage?.totalCostUsd ?? data.usage?.total_cost_usd ?? data.totalCost);
-  const executionIdentity = String(data.executionId || data.execution_id || "").trim();
-  const stableIdentity = executionIdentity
-    ? [executionIdentity, data.source || data.metricSource || data.metric_source, status].filter(Boolean).join(":")
+  const usage = data.usage && typeof data.usage === "object" ? data.usage : {};
+  const timing = data.timing && typeof data.timing === "object" ? data.timing : {};
+  const resources = data.resources && typeof data.resources === "object" ? data.resources : {};
+  const inputTokens = finite(data.inputTokens ?? data.input_tokens ?? usage.inputTokens ?? usage.input_tokens);
+  const outputTokens = finite(data.outputTokens ?? data.output_tokens ?? usage.outputTokens ?? usage.output_tokens);
+  const cacheCreationInputTokens = finite(data.cacheCreationInputTokens ?? data.cache_creation_input_tokens ?? usage.cacheCreationInputTokens ?? usage.cache_creation_input_tokens);
+  const cacheReadInputTokens = finite(data.cacheReadInputTokens ?? data.cache_read_input_tokens ?? usage.cacheReadInputTokens ?? usage.cache_read_input_tokens);
+  const directInputTokens = finite(data.directInputTokens ?? data.direct_input_tokens ?? usage.directInputTokens ?? usage.direct_input_tokens)
+    || Math.max(0, inputTokens - (usage.cacheReadIncludedInInput === true ? cacheReadInputTokens : 0));
+  const providerTotalTokens = finite(data.providerTotalTokens ?? data.provider_total_tokens ?? usage.providerTotalTokens ?? usage.provider_total_tokens ?? usage.totalTokens ?? usage.total_tokens)
+    || inputTokens + outputTokens;
+  const totalCostUsd = finite(data.totalCostUsd ?? data.total_cost_usd ?? data.costUsd ?? data.cost_usd ?? usage.totalCostUsd ?? usage.total_cost_usd ?? data.totalCost);
+  const reported = usage.reported === true || inputTokens > 0 || outputTokens > 0 || providerTotalTokens > 0 || totalCostUsd > 0;
+  const requestedUsageSource = String(data.usageSource || data.usage_source || usage.source || "").trim();
+  const usageSource = requestedUsageSource === "local_no_model"
+    ? "local_no_model"
+    : reported ? "provider_reported" : "unreported";
+  const usageMissingReason = usageSource === "unreported"
+    ? String(data.usageMissingReason || data.usage_missing_reason || usage.missingReason || usage.missing_reason || "runtime_unreported").trim()
     : "";
+  const executionIdentity = String(data.executionId || data.execution_id || "").trim();
+  const usageAnchorId = String(data.usageAnchorId || data.usage_anchor_id || usage.anchorId || usage.anchor_id || "").trim();
+  const stableIdentity = usageAnchorId || (executionIdentity
+    ? [executionIdentity, data.source || data.metricSource || data.metric_source, status].filter(Boolean).join(":")
+    : "");
   // A task can legitimately contain many model/tool calls with the same role and
   // status. Only an explicit event ID or exact execution ID is safe to dedupe.
   const eventId = String(data.eventId || data.event_id || (stableIdentity
@@ -60,11 +78,22 @@ function normalizedEvent(agentInput: string, data: any, now: Date | string | num
     agent, role, source: String(data.source || data.metricSource || data.metric_source || "agent-execution"),
     runtime: String(data.runtime || data.agentType || data.agent_type || ""), status,
     durationMs: finite(data.durationMs ?? data.duration_ms), fileChangeCount: finite(data.fileChangeCount ?? data.file_change_count),
-    inputTokens, outputTokens, totalCostUsd,
+    inputTokens, outputTokens, directInputTokens, cacheCreationInputTokens, cacheReadInputTokens,
+    providerTotalTokens, totalCostUsd, usageSource, usageMissingReason,
+    usageBreakdownAvailable: inputTokens > 0 || outputTokens > 0,
+    modelMs: finite(data.modelMs ?? data.model_ms ?? timing.modelMs ?? timing.model_ms),
+    toolWallMs: finite(data.toolWallMs ?? data.tool_wall_ms ?? timing.toolWallMs ?? timing.tool_wall_ms),
+    queueWaitMs: finite(data.queueWaitMs ?? data.queue_wait_ms ?? timing.queueWaitMs ?? timing.queue_wait_ms),
+    dependencyWaitMs: finite(data.dependencyWaitMs ?? data.dependency_wait_ms ?? timing.dependencyWaitMs ?? timing.dependency_wait_ms),
+    verificationMs: finite(data.verificationMs ?? data.verification_ms ?? timing.verificationMs ?? timing.verification_ms),
+    summaryMs: finite(data.summaryMs ?? data.summary_ms ?? timing.summaryMs ?? timing.summary_ms),
+    peakCpuPercent: finite(data.peakCpuPercent ?? data.peak_cpu_percent ?? resources.peakCpuPercent ?? resources.peak_cpu_percent),
+    peakRssBytes: finite(data.peakRssBytes ?? data.peak_rss_bytes ?? resources.peakRssBytes ?? resources.peak_rss_bytes),
+    peakChildProcessCount: finite(data.peakChildProcessCount ?? data.peak_child_process_count ?? resources.peakChildProcessCount ?? resources.peak_child_process_count),
     traceId: String(data.traceId || data.trace_id || ""), taskId: String(data.taskId || data.task_id || ""),
     executionId: String(data.executionId || data.execution_id || ""),
     error: status === "completed" ? "" : String(sanitizeTraceValue(String(data.error || data.message || ""))).slice(0, 300),
-    usageReported: inputTokens > 0 || outputTokens > 0 || totalCostUsd > 0,
+    usageReported: usageSource === "provider_reported",
   };
 }
 
@@ -75,35 +104,62 @@ function updateAggregate(db: any, event: any, bucketDate: string) {
   if (samples.length > SAMPLE_LIMIT) samples.splice(0, samples.length - SAMPLE_LIMIT);
   db.prepare(`INSERT INTO metric_aggregates_v3(
     bucket_date, scope_type, scope_id, role, agent, calls, successes, failures, blocked, cancelled, unknown,
-    total_ms, total_file_changes, last_file_change_count, input_tokens, output_tokens, total_cost_usd,
-    usage_reported_calls, duration_samples_json, last_call
-  ) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    total_ms, total_file_changes, last_file_change_count, input_tokens, output_tokens,
+    direct_input_tokens, cache_creation_input_tokens, cache_read_input_tokens, provider_total_tokens, total_cost_usd,
+    usage_reported_calls, local_no_model_calls, unreported_calls,
+    model_ms, tool_wall_ms, queue_wait_ms, dependency_wait_ms, verification_ms, summary_ms,
+    peak_cpu_percent, peak_rss_bytes, peak_child_process_count, duration_samples_json, last_call
+  ) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   ON CONFLICT(bucket_date, scope_type, scope_id, role, agent) DO UPDATE SET
     calls=calls+1, successes=successes+excluded.successes, failures=failures+excluded.failures,
     blocked=blocked+excluded.blocked, cancelled=cancelled+excluded.cancelled, unknown=unknown+excluded.unknown,
     total_ms=total_ms+excluded.total_ms, total_file_changes=total_file_changes+excluded.total_file_changes,
     last_file_change_count=excluded.last_file_change_count, input_tokens=input_tokens+excluded.input_tokens,
-    output_tokens=output_tokens+excluded.output_tokens, total_cost_usd=total_cost_usd+excluded.total_cost_usd,
+    output_tokens=output_tokens+excluded.output_tokens, direct_input_tokens=direct_input_tokens+excluded.direct_input_tokens,
+    cache_creation_input_tokens=cache_creation_input_tokens+excluded.cache_creation_input_tokens,
+    cache_read_input_tokens=cache_read_input_tokens+excluded.cache_read_input_tokens,
+    provider_total_tokens=provider_total_tokens+excluded.provider_total_tokens,
+    total_cost_usd=total_cost_usd+excluded.total_cost_usd,
     usage_reported_calls=usage_reported_calls+excluded.usage_reported_calls,
+    local_no_model_calls=local_no_model_calls+excluded.local_no_model_calls,
+    unreported_calls=unreported_calls+excluded.unreported_calls,
+    model_ms=model_ms+excluded.model_ms, tool_wall_ms=tool_wall_ms+excluded.tool_wall_ms,
+    queue_wait_ms=queue_wait_ms+excluded.queue_wait_ms, dependency_wait_ms=dependency_wait_ms+excluded.dependency_wait_ms,
+    verification_ms=verification_ms+excluded.verification_ms, summary_ms=summary_ms+excluded.summary_ms,
+    peak_cpu_percent=MAX(peak_cpu_percent,excluded.peak_cpu_percent),
+    peak_rss_bytes=MAX(peak_rss_bytes,excluded.peak_rss_bytes),
+    peak_child_process_count=MAX(peak_child_process_count,excluded.peak_child_process_count),
     duration_samples_json=excluded.duration_samples_json, last_call=excluded.last_call`).run(
     bucketDate, event.scopeType, event.scopeId, event.role, event.agent,
     event.status === "completed" ? 1 : 0, event.status === "failed" ? 1 : 0,
     event.status === "blocked" ? 1 : 0, event.status === "cancelled" ? 1 : 0, event.status === "unknown" ? 1 : 0,
     event.durationMs, event.fileChangeCount, event.fileChangeCount, event.inputTokens, event.outputTokens,
-    event.totalCostUsd, event.usageReported ? 1 : 0, JSON.stringify(samples), event.at,
+    event.directInputTokens, event.cacheCreationInputTokens, event.cacheReadInputTokens, event.providerTotalTokens,
+    event.totalCostUsd, event.usageReported ? 1 : 0, event.usageSource === "local_no_model" ? 1 : 0,
+    event.usageSource === "unreported" ? 1 : 0,
+    event.modelMs, event.toolWallMs, event.queueWaitMs, event.dependencyWaitMs, event.verificationMs, event.summaryMs,
+    event.peakCpuPercent, event.peakRssBytes, event.peakChildProcessCount, JSON.stringify(samples), event.at,
   );
 }
 
 function insertEvent(db: any, event: any) {
   const result = db.prepare(`INSERT OR IGNORE INTO metric_events_v3(
     event_id, at, date_key, timezone, scope_type, scope_id, group_id, project_id, agent, role, source,
-    runtime, status, duration_ms, file_change_count, input_tokens, output_tokens, total_cost_usd,
+    runtime, status, duration_ms, file_change_count, input_tokens, output_tokens,
+    direct_input_tokens, cache_creation_input_tokens, cache_read_input_tokens, provider_total_tokens, total_cost_usd,
+    usage_source, usage_missing_reason, usage_breakdown_available,
+    model_ms, tool_wall_ms, queue_wait_ms, dependency_wait_ms, verification_ms, summary_ms,
+    peak_cpu_percent, peak_rss_bytes, peak_child_process_count,
     trace_id, task_id, execution_id, error, usage_reported, created_at
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
     event.eventId, event.at, event.dateKey, event.timezone, event.scopeType, event.scopeId, event.groupId,
     event.projectId, event.agent, event.role, event.source, event.runtime, event.status, event.durationMs,
-    event.fileChangeCount, event.inputTokens, event.outputTokens, event.totalCostUsd, event.traceId,
-    event.taskId, event.executionId, event.error, event.usageReported ? 1 : 0, new Date().toISOString(),
+    event.fileChangeCount, event.inputTokens, event.outputTokens, event.directInputTokens,
+    event.cacheCreationInputTokens, event.cacheReadInputTokens, event.providerTotalTokens, event.totalCostUsd,
+    event.usageSource, event.usageMissingReason, event.usageBreakdownAvailable ? 1 : 0,
+    event.modelMs, event.toolWallMs, event.queueWaitMs, event.dependencyWaitMs, event.verificationMs, event.summaryMs,
+    event.peakCpuPercent, event.peakRssBytes, event.peakChildProcessCount,
+    event.traceId, event.taskId, event.executionId, event.error, event.usageReported ? 1 : 0, new Date().toISOString(),
   );
   if (result.changes !== 1) return false;
   updateAggregate(db, event, "");
@@ -157,8 +213,15 @@ function aggregateView(row: any) {
     totalMs: Number(row.total_ms || 0), avgMs: Number(row.calls || 0) ? Math.round(Number(row.total_ms || 0) / Number(row.calls || 1)) : 0,
     totalFileChanges: Number(row.total_file_changes || 0), lastFileChangeCount: Number(row.last_file_change_count || 0),
     inputTokens: Number(row.input_tokens || 0), outputTokens: Number(row.output_tokens || 0),
+    directInputTokens: Number(row.direct_input_tokens || 0), cacheCreationInputTokens: Number(row.cache_creation_input_tokens || 0),
+    cacheReadInputTokens: Number(row.cache_read_input_tokens || 0), providerTotalTokens: Number(row.provider_total_tokens || 0),
     totalCostUsd: Number(row.total_cost_usd || 0), totalCost: Number(row.total_cost_usd || 0),
-    usageReportedCalls: Number(row.usage_reported_calls || 0), durationsMs: samples, lastCall: row.last_call || null,
+    usageReportedCalls: Number(row.usage_reported_calls || 0), localNoModelCalls: Number(row.local_no_model_calls || 0),
+    unreportedCalls: Number(row.unreported_calls || 0),
+    modelMs: Number(row.model_ms || 0), toolWallMs: Number(row.tool_wall_ms || 0), queueWaitMs: Number(row.queue_wait_ms || 0),
+    dependencyWaitMs: Number(row.dependency_wait_ms || 0), verificationMs: Number(row.verification_ms || 0), summaryMs: Number(row.summary_ms || 0),
+    peakCpuPercent: Number(row.peak_cpu_percent || 0), peakRssBytes: Number(row.peak_rss_bytes || 0),
+    peakChildProcessCount: Number(row.peak_child_process_count || 0), durationsMs: samples, lastCall: row.last_call || null,
   };
 }
 
@@ -179,6 +242,12 @@ export function loadMetricsDashboardV3() {
       ((scope.dailyRoles[row.bucket_date] ||= {})[row.role] ||= {})[row.agent] = view;
     }
   }
+  const coverageRows = getObservabilityDatabase().prepare(`SELECT scope_type, scope_id, role, agent, runtime, usage_source, usage_missing_reason, COUNT(*) calls
+    FROM metric_events_v3 GROUP BY scope_type, scope_id, role, agent, runtime, usage_source, usage_missing_reason`).all() as any[];
+  metrics.coverage = coverageRows.map(row => ({
+    scopeType: row.scope_type, scopeId: row.scope_id, role: row.role, agent: row.agent, runtime: row.runtime,
+    usageSource: row.usage_source || "unreported", missingReason: row.usage_missing_reason || "", calls: Number(row.calls || 0),
+  }));
   return metrics;
 }
 
@@ -223,7 +292,13 @@ export function queryMetricEventsV3(filters: any = {}) {
     scopeId: row.scope_id, groupId: row.group_id, projectId: row.project_id, agent: row.agent, role: row.role,
     source: row.source, runtime: row.runtime, status: row.status, resolvedStatus: row.status,
     success: row.status === "completed", durationMs: Number(row.duration_ms || 0), fileChangeCount: Number(row.file_change_count || 0),
-    inputTokens: Number(row.input_tokens || 0), outputTokens: Number(row.output_tokens || 0), totalCostUsd: Number(row.total_cost_usd || 0),
+    inputTokens: Number(row.input_tokens || 0), outputTokens: Number(row.output_tokens || 0),
+    directInputTokens: Number(row.direct_input_tokens || 0), cacheCreationInputTokens: Number(row.cache_creation_input_tokens || 0),
+    cacheReadInputTokens: Number(row.cache_read_input_tokens || 0), providerTotalTokens: Number(row.provider_total_tokens || 0),
+    totalCostUsd: Number(row.total_cost_usd || 0), usageSource: row.usage_source || "unreported",
+    usageMissingReason: row.usage_missing_reason || "", usageBreakdownAvailable: row.usage_breakdown_available === 1,
+    timing: { modelMs: Number(row.model_ms || 0), toolWallMs: Number(row.tool_wall_ms || 0), queueWaitMs: Number(row.queue_wait_ms || 0), dependencyWaitMs: Number(row.dependency_wait_ms || 0), verificationMs: Number(row.verification_ms || 0), summaryMs: Number(row.summary_ms || 0) },
+    resources: { peakCpuPercent: Number(row.peak_cpu_percent || 0), peakRssBytes: Number(row.peak_rss_bytes || 0), peakChildProcessCount: Number(row.peak_child_process_count || 0) },
     traceId: row.trace_id, taskId: row.task_id, executionId: row.execution_id, error: row.error,
     usageReported: row.usage_reported === 1,
   }));

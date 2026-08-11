@@ -1,5 +1,6 @@
 <script setup>
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import MetricsScopePicker from './MetricsScopePicker.vue'
 
 const emit = defineEmits(['navigate'])
 
@@ -26,6 +27,7 @@ const emptyPayload = () => ({
     legacyUnscoped: {},
   },
   system: null,
+  agentResources: [],
 })
 
 const payload = ref(emptyPayload())
@@ -44,9 +46,6 @@ const navigatingEventId = ref('')
 const error = ref('')
 const loadedAt = ref(null)
 const activeRuns = ref([])
-const scopeQuery = ref('')
-const scopeMenuOpen = ref(false)
-const scopeInputRef = ref(null)
 const executionStatus = ref(localStorage.getItem('metrics-execution-status') || 'all')
 const executionPage = ref(1)
 const executionPageSize = ref(Number(localStorage.getItem('metrics-execution-page-size') || 20))
@@ -90,6 +89,7 @@ const formatTokens = (value) => {
   if (tokens >= 1000) return `${(tokens / 1000).toFixed(1)}K`
   return formatNumber(tokens)
 }
+const formatCost = (value) => safeNumber(value) > 0 ? `$${safeNumber(value).toFixed(4)}` : '未提供'
 const formatTime = (value, fallback = '暂无记录') => {
   if (!value) return fallback
   const date = new Date(value)
@@ -248,6 +248,7 @@ const loadMetrics = async ({ silent = false } = {}) => {
       metrics: data.metrics || data || emptyPayload().metrics,
       catalog,
       system: data.system || null,
+      agentResources: Array.isArray(data.agentResources) ? data.agentResources : [],
     }
     loadedAt.value = new Date()
     const ids = [
@@ -292,11 +293,11 @@ const activeScope = computed(() => {
   if (!selectedGroupId.value) return null
   return payload.value.metrics?.scopes?.[`group:${selectedGroupId.value}`] || null
 })
-const mainRoleKey = computed(() => (isGlobalScope.value ? 'global_agent' : (isProjectScope.value ? 'project_agent' : 'main_agent')))
+const mainRoleKey = computed(() => (isGlobalScope.value ? 'global_agent' : 'main_agent'))
 const coordinatorName = computed(() => (
   isGlobalScope.value
     ? (globalCatalog.value.agent || 'global-agent')
-    : (isProjectScope.value ? selectedProjectId.value : (selectedGroup.value?.coordinator || 'coordinator'))
+    : (isProjectScope.value ? 'project-main-agent' : (selectedGroup.value?.coordinator || 'coordinator'))
 ))
 const scopeDisplayName = computed(() => (
   isGlobalScope.value
@@ -305,32 +306,24 @@ const scopeDisplayName = computed(() => (
 ))
 const mainAgentLabel = computed(() => (isGlobalScope.value ? '全局 Agent' : (isProjectScope.value ? '项目 Agent' : '群聊主 Agent')))
 const emptyAggregate = () => ({
-  calls: 0, successes: 0, failures: 0, totalMs: 0, durationsMs: [], inputTokens: 0, outputTokens: 0, usageReportedCalls: 0, lastCall: null,
+  calls: 0, successes: 0, failures: 0, totalMs: 0, durationsMs: [], inputTokens: 0, outputTokens: 0,
+  directInputTokens: 0, cacheCreationInputTokens: 0, cacheReadInputTokens: 0, providerTotalTokens: 0,
+  totalCostUsd: 0, usageReportedCalls: 0, localNoModelCalls: 0, unreportedCalls: 0,
+  modelMs: 0, toolWallMs: 0, queueWaitMs: 0, dependencyWaitMs: 0, verificationMs: 0, summaryMs: 0,
+  peakCpuPercent: 0, peakRssBytes: 0, peakChildProcessCount: 0, lastCall: null,
 })
 const mainAggregate = computed(() => (
   activeScope.value?.roles?.[mainRoleKey.value]?.[coordinatorName.value]
+  || (isProjectScope.value ? activeScope.value?.roles?.main_agent?.[selectedProjectId.value] : null)
   || (isGlobalScope.value ? activeScope.value?.agents?.[coordinatorName.value] : null)
   || emptyAggregate()
 ))
 
 const scopeOptions = computed(() => ([
-  { id: GLOBAL_SCOPE_ID, name: '全局', hint: '全局助手', type: 'global' },
-  ...groups.value.map(group => ({ id: group.id, name: group.name || group.id, hint: `群聊 · ${group.id}`, type: 'group' })),
-  ...projects.value.map(project => ({ id: `project:${project.id}`, name: project.name || project.id, hint: `项目 · ${project.id}`, type: 'project' })),
+  { id: GLOBAL_SCOPE_ID, name: '全局 Agent', hint: '全局主 Agent', summary: '查看全局会话的模型调用与资源用量', agent: globalCatalog.value.agent, type: 'global' },
+  ...groups.value.map(group => ({ id: group.id, name: group.name || group.id, hint: `群聊 · ${group.id}`, summary: `${group.members?.length || 0} 个项目成员 · ${group.coordinator || '主 Agent'}`, agent: group.coordinator, type: 'group' })),
+  ...projects.value.map(project => ({ id: `project:${project.id}`, name: project.name || project.id, hint: `项目 · ${project.id}`, summary: `${project.agent || '项目 Agent'} · ${project.id}`, agent: project.agent, type: 'project' })),
 ]))
-const filteredScopeOptions = computed(() => {
-  const query = String(scopeQuery.value || '').trim().toLowerCase()
-  if (!query) return scopeOptions.value
-  return scopeOptions.value.filter((option) => (
-    String(option.name || '').toLowerCase().includes(query)
-    || String(option.hint || '').toLowerCase().includes(query)
-    || String(option.id || '').toLowerCase().includes(query)
-  ))
-})
-const selectedScopeLabel = computed(() => {
-  const option = scopeOptions.value.find(item => item.id === selectedGroupId.value)
-  return option?.name || scopeDisplayName.value
-})
 
 const loadExecutionEvents = async () => {
   if (!hasScopeSelection.value) return
@@ -377,31 +370,6 @@ const loadExecutionEvents = async () => {
   }
 }
 
-const openScopeMenu = async () => {
-  scopeMenuOpen.value = true
-  scopeQuery.value = ''
-  await nextTick()
-  scopeInputRef.value?.focus?.()
-}
-const closeScopeMenu = () => {
-  scopeMenuOpen.value = false
-  scopeQuery.value = ''
-}
-const selectScope = (id) => {
-  selectedGroupId.value = id
-  closeScopeMenu()
-}
-const onScopeKeydown = (event) => {
-  if (event.key === 'Escape') {
-    closeScopeMenu()
-    return
-  }
-  if (event.key === 'Enter') {
-    const first = filteredScopeOptions.value[0]
-    if (first) selectScope(first.id)
-  }
-}
-
 const rangeKeys = computed(() => {
   if (rangeDays.value === CUSTOM_RANGE_DAYS) {
     const [fromYear, fromMonth, fromDay] = appliedCustomDateFrom.value.split('-').map(Number)
@@ -430,6 +398,7 @@ const rangeKeys = computed(() => {
 
 const trend = computed(() => rangeKeys.value.map((key) => {
   const aggregate = activeScope.value?.dailyRoles?.[key]?.[mainRoleKey.value]?.[coordinatorName.value]
+    || (isProjectScope.value ? activeScope.value?.dailyRoles?.[key]?.main_agent?.[selectedProjectId.value] : null)
     || (isGlobalScope.value ? activeScope.value?.daily?.[key]?.[coordinatorName.value] : null)
     || {}
   return {
@@ -442,7 +411,22 @@ const trend = computed(() => rangeKeys.value.map((key) => {
     durations: Array.isArray(aggregate.durationsMs) ? aggregate.durationsMs : [],
     inputTokens: safeNumber(aggregate.inputTokens),
     outputTokens: safeNumber(aggregate.outputTokens),
+    cacheCreationInputTokens: safeNumber(aggregate.cacheCreationInputTokens),
+    cacheReadInputTokens: safeNumber(aggregate.cacheReadInputTokens),
+    providerTotalTokens: safeNumber(aggregate.providerTotalTokens),
+    totalCostUsd: safeNumber(aggregate.totalCostUsd),
     usageReportedCalls: safeNumber(aggregate.usageReportedCalls),
+    localNoModelCalls: safeNumber(aggregate.localNoModelCalls),
+    unreportedCalls: safeNumber(aggregate.unreportedCalls),
+    modelMs: safeNumber(aggregate.modelMs),
+    toolWallMs: safeNumber(aggregate.toolWallMs),
+    queueWaitMs: safeNumber(aggregate.queueWaitMs),
+    dependencyWaitMs: safeNumber(aggregate.dependencyWaitMs),
+    verificationMs: safeNumber(aggregate.verificationMs),
+    summaryMs: safeNumber(aggregate.summaryMs),
+    peakCpuPercent: safeNumber(aggregate.peakCpuPercent),
+    peakRssBytes: safeNumber(aggregate.peakRssBytes),
+    peakChildProcessCount: safeNumber(aggregate.peakChildProcessCount),
   }
 }))
 
@@ -454,14 +438,35 @@ const rangeStats = computed(() => {
     result.totalMs += day.totalMs
     result.inputTokens += day.inputTokens
     result.outputTokens += day.outputTokens
+    result.cacheCreationInputTokens += day.cacheCreationInputTokens
+    result.cacheReadInputTokens += day.cacheReadInputTokens
+    result.providerTotalTokens += day.providerTotalTokens
+    result.totalCostUsd += day.totalCostUsd
     result.usageReportedCalls += day.usageReportedCalls
+    result.localNoModelCalls += day.localNoModelCalls
+    result.unreportedCalls += day.unreportedCalls
+    result.modelMs += day.modelMs
+    result.toolWallMs += day.toolWallMs
+    result.queueWaitMs += day.queueWaitMs
+    result.dependencyWaitMs += day.dependencyWaitMs
+    result.verificationMs += day.verificationMs
+    result.summaryMs += day.summaryMs
+    result.peakCpuPercent = Math.max(result.peakCpuPercent, day.peakCpuPercent)
+    result.peakRssBytes = Math.max(result.peakRssBytes, day.peakRssBytes)
+    result.peakChildProcessCount = Math.max(result.peakChildProcessCount, day.peakChildProcessCount)
     result.durations.push(...day.durations)
     return result
-  }, { calls: 0, successes: 0, failures: 0, totalMs: 0, inputTokens: 0, outputTokens: 0, usageReportedCalls: 0, durations: [] })
+  }, {
+    calls: 0, successes: 0, failures: 0, totalMs: 0, inputTokens: 0, outputTokens: 0,
+    cacheCreationInputTokens: 0, cacheReadInputTokens: 0, providerTotalTokens: 0, totalCostUsd: 0,
+    usageReportedCalls: 0, localNoModelCalls: 0, unreportedCalls: 0,
+    modelMs: 0, toolWallMs: 0, queueWaitMs: 0, dependencyWaitMs: 0, verificationMs: 0, summaryMs: 0,
+    peakCpuPercent: 0, peakRssBytes: 0, peakChildProcessCount: 0, durations: [],
+  })
   summary.successRate = summary.calls ? (summary.successes / summary.calls) * 100 : 0
   summary.avgMs = summary.calls ? summary.totalMs / summary.calls : 0
   summary.p95Ms = percentile(summary.durations, 0.95)
-  summary.totalTokens = summary.inputTokens + summary.outputTokens
+  summary.totalTokens = summary.providerTotalTokens || summary.inputTokens + summary.outputTokens
   summary.usageCoverage = summary.calls ? (summary.usageReportedCalls / summary.calls) * 100 : 0
   return summary
 })
@@ -622,11 +627,44 @@ const trendPoints = computed(() => trend.value.map(day => ({
   successHeight: day.calls ? (day.successes / day.calls) * 100 : 0,
 })))
 
+const aggregateRoleForRange = (role, agent) => {
+  const result = emptyAggregate()
+  for (const key of rangeKeys.value) {
+    const row = activeScope.value?.dailyRoles?.[key]?.[role]?.[agent]
+    if (!row) continue
+    for (const field of ['calls', 'successes', 'failures', 'totalMs', 'inputTokens', 'outputTokens', 'directInputTokens', 'cacheCreationInputTokens', 'cacheReadInputTokens', 'providerTotalTokens', 'totalCostUsd', 'usageReportedCalls', 'localNoModelCalls', 'unreportedCalls', 'modelMs', 'toolWallMs', 'queueWaitMs', 'dependencyWaitMs', 'verificationMs', 'summaryMs']) {
+      result[field] = safeNumber(result[field]) + safeNumber(row[field])
+    }
+    result.peakCpuPercent = Math.max(safeNumber(result.peakCpuPercent), safeNumber(row.peakCpuPercent))
+    result.peakRssBytes = Math.max(safeNumber(result.peakRssBytes), safeNumber(row.peakRssBytes))
+    result.peakChildProcessCount = Math.max(safeNumber(result.peakChildProcessCount), safeNumber(row.peakChildProcessCount))
+    result.durationsMs.push(...(Array.isArray(row.durationsMs) ? row.durationsMs : []))
+    if (!result.lastCall || String(row.lastCall || '') > String(result.lastCall)) result.lastCall = row.lastCall || result.lastCall
+  }
+  return result
+}
+const selectedCoverage = computed(() => (payload.value.metrics?.coverage || []).filter(row => (
+  row.scopeType === (isGlobalScope.value ? 'global' : (isProjectScope.value ? 'project' : 'group'))
+  && row.scopeId === (isGlobalScope.value ? 'global' : (isProjectScope.value ? selectedProjectId.value : selectedGroupId.value))
+)))
+const coverageFor = (role, agent) => selectedCoverage.value.filter(row => row.role === role && row.agent === agent)
+const usageDetail = (aggregate, role, agent) => {
+  const coverage = coverageFor(role, agent)
+  return {
+    reported: safeNumber(aggregate.usageReportedCalls),
+    local: safeNumber(aggregate.localNoModelCalls),
+    missing: safeNumber(aggregate.unreportedCalls),
+    runtimes: [...new Set(coverage.map(row => row.runtime).filter(Boolean))],
+    missingReasons: [...new Set(coverage.filter(row => row.usageSource === 'unreported').map(row => row.missingReason).filter(Boolean))],
+  }
+}
+
 const agentRows = computed(() => {
   if (isGlobalScope.value) {
-    const aggregate = mainAggregate.value || {}
+    const aggregate = aggregateRoleForRange('global_agent', coordinatorName.value)
     const calls = safeNumber(aggregate.calls)
     const successes = safeNumber(aggregate.successes)
+    const usage = usageDetail(aggregate, 'global_agent', coordinatorName.value)
     return [{
       project: coordinatorName.value,
       isMain: true,
@@ -634,31 +672,39 @@ const agentRows = computed(() => {
       calls,
       failures: safeNumber(aggregate.failures),
       successRate: calls ? (successes / calls) * 100 : 0,
-      avgMs: safeNumber(aggregate.avgMs),
+      avgMs: calls ? safeNumber(aggregate.totalMs) / calls : 0,
       p95Ms: percentile(Array.isArray(aggregate.durationsMs) ? aggregate.durationsMs : [], 0.95),
       lastCall: aggregate.lastCall || null,
-      tokens: safeNumber(aggregate.inputTokens) + safeNumber(aggregate.outputTokens),
+      tokens: safeNumber(aggregate.providerTotalTokens) || safeNumber(aggregate.inputTokens) + safeNumber(aggregate.outputTokens),
       usageReportedCalls: safeNumber(aggregate.usageReportedCalls),
+      cacheTokens: safeNumber(aggregate.cacheCreationInputTokens) + safeNumber(aggregate.cacheReadInputTokens),
+      costUsd: safeNumber(aggregate.totalCostUsd),
+      usage,
     }]
   }
   if (isProjectScope.value) {
     const rows = []
     for (const [role, agents] of Object.entries(activeScope.value?.roles || {})) {
       for (const [agent, aggregate] of Object.entries(agents || {})) {
-        const calls = safeNumber(aggregate?.calls)
-        const successes = safeNumber(aggregate?.successes)
+        const ranged = aggregateRoleForRange(role, agent)
+        const calls = safeNumber(ranged?.calls)
+        const successes = safeNumber(ranged?.successes)
+        const usage = usageDetail(ranged, role, agent)
         rows.push({
           project: agent,
-          isMain: role === 'project_agent' || role === 'main_agent',
-          roleLabel: role === 'project_agent' || role === 'main_agent' ? '项目主 Agent' : (role === 'test_agent' ? 'TestAgent' : '开发 Agent'),
+          isMain: role === 'main_agent',
+          roleLabel: role === 'main_agent' ? '项目主 Agent' : (role === 'test_agent' ? 'TestAgent' : (role === 'project_agent' ? '项目子 Agent' : '成员 Agent')),
           calls,
-          failures: safeNumber(aggregate?.failures),
+          failures: safeNumber(ranged?.failures),
           successRate: calls ? (successes / calls) * 100 : 0,
-          avgMs: safeNumber(aggregate?.avgMs),
-          p95Ms: percentile(Array.isArray(aggregate?.durationsMs) ? aggregate.durationsMs : [], 0.95),
-          lastCall: aggregate?.lastCall || null,
-          tokens: safeNumber(aggregate?.inputTokens) + safeNumber(aggregate?.outputTokens),
-          usageReportedCalls: safeNumber(aggregate?.usageReportedCalls),
+          avgMs: calls ? safeNumber(ranged?.totalMs) / calls : 0,
+          p95Ms: percentile(Array.isArray(ranged?.durationsMs) ? ranged.durationsMs : [], 0.95),
+          lastCall: ranged?.lastCall || null,
+          tokens: safeNumber(ranged?.providerTotalTokens) || safeNumber(ranged?.inputTokens) + safeNumber(ranged?.outputTokens),
+          usageReportedCalls: safeNumber(ranged?.usageReportedCalls),
+          cacheTokens: safeNumber(ranged?.cacheCreationInputTokens) + safeNumber(ranged?.cacheReadInputTokens),
+          costUsd: safeNumber(ranged?.totalCostUsd),
+          usage,
         })
       }
     }
@@ -669,9 +715,8 @@ const agentRows = computed(() => {
   const metricOnly = Object.keys(activeScope.value?.agents || {}).filter(agent => !known.has(agent)).map(project => ({ project, role: 'member' }))
   return [...catalogMembers, ...metricOnly].map((member) => {
     const isMain = member.project === coordinatorName.value || member.role === 'coordinator'
-    const aggregate = isMain
-      ? activeScope.value?.roles?.main_agent?.[member.project] || {}
-      : activeScope.value?.roles?.member_agent?.[member.project] || activeScope.value?.agents?.[member.project] || {}
+    const role = isMain ? 'main_agent' : 'member_agent'
+    const aggregate = aggregateRoleForRange(role, member.project)
     const calls = safeNumber(aggregate.calls)
     const successes = safeNumber(aggregate.successes)
     return {
@@ -681,14 +726,42 @@ const agentRows = computed(() => {
       calls,
       failures: safeNumber(aggregate.failures),
       successRate: calls ? (successes / calls) * 100 : 0,
-      avgMs: safeNumber(aggregate.avgMs),
+      avgMs: calls ? safeNumber(aggregate.totalMs) / calls : 0,
       p95Ms: percentile(Array.isArray(aggregate.durationsMs) ? aggregate.durationsMs : [], 0.95),
       lastCall: aggregate.lastCall || null,
-      tokens: safeNumber(aggregate.inputTokens) + safeNumber(aggregate.outputTokens),
+      tokens: safeNumber(aggregate.providerTotalTokens) || safeNumber(aggregate.inputTokens) + safeNumber(aggregate.outputTokens),
       usageReportedCalls: safeNumber(aggregate.usageReportedCalls),
+      cacheTokens: safeNumber(aggregate.cacheCreationInputTokens) + safeNumber(aggregate.cacheReadInputTokens),
+      costUsd: safeNumber(aggregate.totalCostUsd),
+      usage: usageDetail(aggregate, role, member.project),
     }
   }).sort((a, b) => Number(b.isMain) - Number(a.isMain) || b.calls - a.calls || a.project.localeCompare(b.project))
 })
+
+const usageCoverageRows = computed(() => agentRows.value.map(row => ({
+  ...row,
+  coverage: row.calls ? (row.usage.reported / row.calls) * 100 : 0,
+})))
+const agentResources = computed(() => (payload.value.agentResources || []).filter((run) => {
+  if (isGlobalScope.value) return true
+  if (isProjectScope.value) return run.project === selectedProjectId.value
+  return selectedGroup.value?.members?.some(member => member.project === run.project)
+}))
+const phaseTimingRows = computed(() => ([
+  { label: '模型调用', value: rangeStats.value.modelMs },
+  { label: '工具执行', value: rangeStats.value.toolWallMs },
+  { label: '排队等待', value: rangeStats.value.queueWaitMs },
+  { label: '依赖等待', value: rangeStats.value.dependencyWaitMs },
+  { label: '验证验收', value: rangeStats.value.verificationMs },
+  { label: '总结交付', value: rangeStats.value.summaryMs },
+]).filter(item => safeNumber(item.value) > 0))
+const missingReasonLabel = reason => ({
+  runtime_unreported: '运行时未返回 usage',
+  unsupported_protocol: '当前协议不支持 usage',
+  format_drift: 'Provider usage 格式已变化',
+  failed_before_provider: '请求在到达 Provider 前失败',
+  historical_unavailable: '历史记录未提供',
+}[reason] || reason || '未提供原因')
 
 const system = computed(() => payload.value.system || {})
 const hasSystem = computed(() => !!payload.value.system?.process)
@@ -714,8 +787,8 @@ const sourceLabel = (source) => ({
 
 const eventRoleLabel = (role) => {
   if (role === 'global_agent') return '全局 Agent'
-  if (role === 'main_agent') return '群聊主 Agent'
-  if (role === 'project_agent') return '项目主 Agent'
+  if (role === 'main_agent') return isProjectScope.value ? '项目主 Agent' : '群聊主 Agent'
+  if (role === 'project_agent') return '项目子 Agent'
   if (role === 'test_agent') return 'TestAgent'
   return '成员 Agent'
 }
@@ -746,12 +819,6 @@ const restartPoller = () => {
 const onStorage = (event) => {
   if (event.key === 'app-polling-interval') restartPoller()
 }
-const onDocumentPointerDown = (event) => {
-  if (!scopeMenuOpen.value) return
-  const root = event.target?.closest?.('.scope-combobox')
-  if (!root) closeScopeMenu()
-}
-
 watch(selectedGroupId, (value) => {
   if (value) localStorage.setItem('metrics-selected-group', value)
   if (props.active !== false) loadActiveRuns()
@@ -790,12 +857,10 @@ onMounted(async () => {
   await loadMetrics()
   restartPoller()
   window.addEventListener('storage', onStorage)
-  document.addEventListener('pointerdown', onDocumentPointerDown)
 })
 onUnmounted(() => {
   if (poller) clearInterval(poller)
   window.removeEventListener('storage', onStorage)
-  document.removeEventListener('pointerdown', onDocumentPointerDown)
 })
 </script>
 
@@ -808,35 +873,9 @@ onUnmounted(() => {
         <p>按范围查看全局、群聊和项目 Agent 指标，并保留开发与验收角色的真实执行明细。</p>
       </div>
       <div class="toolbar">
-        <label class="scope-combobox">
+        <label class="scope-control">
           <span>范围</span>
-          <button type="button" class="scope-trigger" :aria-expanded="scopeMenuOpen" @click="scopeMenuOpen ? closeScopeMenu() : openScopeMenu()">
-            <strong>{{ selectedScopeLabel }}</strong>
-            <i>▾</i>
-          </button>
-          <div v-if="scopeMenuOpen" class="scope-menu">
-            <input
-              ref="scopeInputRef"
-              v-model="scopeQuery"
-              type="search"
-              placeholder="搜索全局、群聊或项目"
-              @keydown="onScopeKeydown"
-            >
-            <div class="scope-options">
-              <button
-                v-for="option in filteredScopeOptions"
-                :key="option.id"
-                type="button"
-                class="scope-option"
-                :class="{ active: option.id === selectedGroupId }"
-                @click="selectScope(option.id)"
-              >
-                <strong>{{ option.name }}</strong>
-                <small>{{ option.hint }}</small>
-              </button>
-              <div v-if="!filteredScopeOptions.length" class="scope-empty">无匹配范围</div>
-            </div>
-          </div>
+          <MetricsScopePicker v-model="selectedGroupId" :options="scopeOptions" />
         </label>
         <label>
           <span>时间范围</span>
@@ -931,6 +970,22 @@ onUnmounted(() => {
           <strong>{{ rangeStats.usageReportedCalls ? `${formatTokens(rangeStats.inputTokens)} / ${formatTokens(rangeStats.outputTokens)}` : '—' }}</strong>
           <p>{{ rangeStats.usageReportedCalls ? '输入 Token / 输出 Token' : '等待提供商返回真实 Token 用量' }}</p>
         </article>
+        <article class="kpi-card">
+          <div class="kpi-head"><span>缓存 Token</span><i>07</i></div>
+          <strong>{{ rangeStats.usageReportedCalls ? formatTokens(rangeStats.cacheCreationInputTokens + rangeStats.cacheReadInputTokens) : '—' }}</strong>
+          <p v-if="rangeStats.usageReportedCalls">写入 {{ formatTokens(rangeStats.cacheCreationInputTokens) }} · 命中 {{ formatTokens(rangeStats.cacheReadInputTokens) }}</p>
+          <p v-else>Provider 未提供缓存用量</p>
+        </article>
+        <article class="kpi-card">
+          <div class="kpi-head"><span>Provider 真实费用</span><i>08</i></div>
+          <strong>{{ formatCost(rangeStats.totalCostUsd) }}</strong>
+          <p>{{ rangeStats.totalCostUsd ? '仅统计 Provider 明确返回的费用' : '不根据模型价格估算' }}</p>
+        </article>
+        <article class="kpi-card">
+          <div class="kpi-head"><span>Agent 资源峰值</span><i>09</i></div>
+          <strong>{{ rangeStats.peakRssBytes ? formatBytes(rangeStats.peakRssBytes) : '—' }}</strong>
+          <p>{{ rangeStats.peakCpuPercent ? `CPU ${rangeStats.peakCpuPercent.toFixed(1)}% · ${rangeStats.peakChildProcessCount} 个进程` : '等待托管 Agent 进程采样' }}</p>
+        </article>
       </section>
 
       <section class="bucket-strip">
@@ -989,6 +1044,63 @@ onUnmounted(() => {
         </article>
       </section>
 
+      <section class="observability-detail-grid">
+        <article class="panel coverage-panel">
+          <div class="panel-head">
+            <div><span class="panel-kicker">USAGE COMPLETENESS</span><h3>Token 用量完整度</h3></div>
+            <span class="panel-note">真实回执 {{ formatNumber(rangeStats.usageReportedCalls) }} / {{ formatNumber(rangeStats.calls) }} 次</span>
+          </div>
+          <div v-if="usageCoverageRows.length" class="coverage-list">
+            <div v-for="row in usageCoverageRows" :key="`${row.roleLabel}:${row.project}`" class="coverage-row">
+              <div class="coverage-agent">
+                <strong>{{ row.project }}</strong>
+                <span>{{ row.roleLabel }}<template v-if="row.usage.runtimes.length"> · {{ row.usage.runtimes.join(' / ') }}</template></span>
+              </div>
+              <div class="coverage-meter" :title="`真实 usage ${row.usage.reported}/${row.calls}`"><i :style="{ width: `${Math.min(100, row.coverage)}%` }"></i></div>
+              <strong>{{ row.calls ? formatPercent(row.coverage) : '—' }}</strong>
+              <div class="coverage-detail">
+                <span v-if="row.usage.reported" class="coverage-ok">已报告 {{ row.usage.reported }}</span>
+                <span v-if="row.usage.local" class="coverage-local">本地验证 {{ row.usage.local }}</span>
+                <span v-if="row.usage.missing" class="coverage-missing">未提供 {{ row.usage.missing }}</span>
+                <small v-if="row.usage.missingReasons.length">{{ row.usage.missingReasons.map(missingReasonLabel).join('；') }}</small>
+              </div>
+            </div>
+          </div>
+          <div v-else class="runtime-empty">当前范围尚无 Agent 调用记录。</div>
+        </article>
+
+        <article class="panel phase-panel">
+          <div class="panel-head">
+            <div><span class="panel-kicker">WALL CLOCK BREAKDOWN</span><h3>阶段耗时分解</h3></div>
+            <span class="panel-note">缺少可靠数据的阶段不显示</span>
+          </div>
+          <div v-if="phaseTimingRows.length" class="phase-list">
+            <div v-for="item in phaseTimingRows" :key="item.label">
+              <span>{{ item.label }}</span>
+              <strong>{{ formatDuration(item.value) }}</strong>
+              <i :style="{ width: `${Math.min(100, rangeStats.totalMs ? (item.value / rangeStats.totalMs) * 100 : 0)}%` }"></i>
+            </div>
+          </div>
+          <div v-else class="runtime-empty">当前调用尚未返回可分解的阶段耗时。</div>
+        </article>
+      </section>
+
+      <section v-if="agentResources.length" class="panel agent-resource-panel">
+        <div class="panel-head">
+          <div><span class="panel-kicker">ACTIVE AGENT PROCESSES</span><h3>当前 Agent 进程资源</h3></div>
+          <span class="live-dot">{{ agentResources.length }} RUNNING</span>
+        </div>
+        <div class="agent-resource-list">
+          <div v-for="run in agentResources" :key="run.id" class="agent-resource-row">
+            <div><strong>{{ run.project || run.agentType || 'Agent' }}</strong><span>{{ run.commandLabel || run.source || '托管运行时' }}</span></div>
+            <span>CPU <strong>{{ safeNumber(run.resources?.cpuPercent).toFixed(1) }}%</strong></span>
+            <span>RSS <strong>{{ formatBytes(run.resources?.rssBytes) }}</strong></span>
+            <span>子进程 <strong>{{ formatNumber(run.resources?.childProcessCount) }}</strong></span>
+            <span>已运行 <strong>{{ formatDuration(run.ageMs) }}</strong></span>
+          </div>
+        </div>
+      </section>
+
       <section v-if="reliability || reliabilityError" class="panel reliability-panel">
         <div class="panel-head">
           <div><span class="panel-kicker">RELIABILITY DRILLS</span><h3>可靠性演练与恢复</h3></div>
@@ -1024,6 +1136,9 @@ onUnmounted(() => {
                 <th>平均耗时</th>
                 <th>P95</th>
                 <th>Token</th>
+                <th>用量覆盖</th>
+                <th>缓存 Token</th>
+                <th>真实费用</th>
                 <th>最后调用</th>
               </tr>
             </thead>
@@ -1035,7 +1150,10 @@ onUnmounted(() => {
                 <td><span :class="['rate', agent.calls && agent.successRate < 80 ? 'bad' : '']">{{ agent.calls ? formatPercent(agent.successRate) : '—' }}</span></td>
                 <td>{{ formatDuration(agent.avgMs) }}</td>
                 <td>{{ formatDuration(agent.p95Ms) }}</td>
-                <td>{{ agent.usageReportedCalls ? formatTokens(agent.tokens) : '未提供' }}</td>
+                <td>{{ agent.usageReportedCalls ? formatTokens(agent.tokens) : (agent.usage.local ? '本地验证，无模型 Token' : '未提供') }}</td>
+                <td>{{ agent.calls ? `${agent.usage.reported}/${agent.calls}` : '—' }}</td>
+                <td>{{ agent.usageReportedCalls ? formatTokens(agent.cacheTokens) : '—' }}</td>
+                <td>{{ formatCost(agent.costUsd) }}</td>
                 <td><span :title="formatTime(agent.lastCall)">{{ formatRelativeTime(agent.lastCall) }}</span></td>
               </tr>
             </tbody>
@@ -1109,6 +1227,9 @@ onUnmounted(() => {
             <div class="event-metrics">
               <span>{{ formatDuration(event.durationMs) }}</span>
               <span v-if="event.usageReported">{{ formatTokens(safeNumber(event.inputTokens) + safeNumber(event.outputTokens)) }} Token</span>
+              <span v-else-if="event.usageSource === 'local_no_model'">本地验证，无模型 Token</span>
+              <span v-else :title="missingReasonLabel(event.usageMissingReason)">Token 未提供</span>
+              <span v-if="safeNumber(event.totalCostUsd)">{{ formatCost(event.totalCostUsd) }}</span>
               <span v-if="event.fileChangeCount">{{ event.fileChangeCount }} 个文件</span>
             </div>
             <code v-if="event.traceId || event.executionId || event.taskId" :title="event.traceId || event.executionId || event.taskId">
@@ -1147,7 +1268,7 @@ onUnmounted(() => {
 <style scoped>
 .metrics-page{height:100%;overflow:auto;padding:24px 28px 40px;background:linear-gradient(180deg,var(--bg-secondary),var(--bg-primary));color:var(--text-primary)}
 .page-header{display:flex;align-items:flex-end;justify-content:space-between;gap:24px;margin-bottom:20px}.eyebrow,.panel-kicker{display:block;color:var(--accent-blue);font-size:9px;font-weight:900;letter-spacing:.16em}.page-header h2{margin:5px 0 4px;font-size:23px;letter-spacing:-.03em}.page-header p{margin:0;color:var(--text-muted);font-size:12px}.toolbar{display:flex;align-items:flex-end;gap:9px;flex-wrap:wrap;justify-content:flex-end}.toolbar label{display:flex;flex-direction:column;gap:5px}.toolbar label span{color:var(--text-muted);font-size:9px;font-weight:800}.toolbar select,.toolbar input[type=date],.refresh-btn,.scope-trigger,.apply-range-btn{height:35px;border:1px solid var(--border-color);border-radius:9px;background:var(--bg-card);color:var(--text-primary);font-size:11px;font-weight:700;outline:none}.toolbar select{min-width:100px;padding:0 30px 0 10px}.toolbar input[type=date]{box-sizing:border-box;width:132px;padding:0 9px;color-scheme:light dark}.custom-date-range{position:relative;display:flex;align-items:flex-end;gap:7px;padding-left:9px;border-left:1px solid var(--border-color)}.custom-date-range>i{height:35px;display:flex;align-items:center;color:var(--text-muted);font-size:10px;font-style:normal}.apply-range-btn{padding:0 12px;cursor:pointer}.apply-range-btn:hover:not(:disabled){border-color:var(--accent-blue);color:var(--accent-blue)}.apply-range-btn:disabled{opacity:.5;cursor:not-allowed}.custom-range-error{position:absolute;top:100%;right:0;margin-top:3px;color:var(--danger,#ef4444);font-size:9px;white-space:nowrap}.refresh-btn{display:flex;align-items:center;gap:5px;padding:0 13px;cursor:pointer}.refresh-btn:hover{border-color:var(--border-strong);color:var(--accent-blue)}.refresh-btn:disabled{opacity:.6;cursor:wait}.spinning{display:inline-block;animation:spin .8s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
-.scope-combobox{position:relative;min-width:180px}.scope-trigger{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;min-width:180px;padding:0 10px;cursor:pointer;text-align:left}.scope-trigger strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px}.scope-trigger i{font-style:normal;color:var(--text-muted)}.scope-menu{position:absolute;top:calc(100% + 4px);left:0;z-index:20;width:min(280px,70vw);border:1px solid var(--border-color);border-radius:10px;background:var(--bg-card);box-shadow:var(--shadow-md);padding:8px}.scope-menu input{width:100%;height:32px;border:1px solid var(--border-color);border-radius:8px;background:var(--bg-secondary);color:var(--text-primary);padding:0 10px;font-size:11px;outline:none}.scope-options{margin-top:6px;max-height:220px;overflow:auto}.scope-option{display:flex;flex-direction:column;align-items:flex-start;gap:2px;width:100%;border:0;background:transparent;color:var(--text-primary);padding:8px 8px;border-radius:8px;cursor:pointer;text-align:left}.scope-option:hover,.scope-option.active{background:var(--accent-soft)}.scope-option strong{font-size:11px}.scope-option small{color:var(--text-muted);font-size:9px}.scope-empty{padding:14px 8px;text-align:center;color:var(--text-muted);font-size:10px}
+.scope-control{min-width:240px}.toolbar select,.toolbar input[type=date],.refresh-btn,.apply-range-btn{height:var(--control-height,34px);border-radius:var(--radius-md,6px);background:var(--control-bg)}.toolbar select:focus,.toolbar input[type=date]:focus,.apply-range-btn:focus{border-color:var(--accent-blue);box-shadow:var(--focus-ring)}
 .state-banner,.scope-strip,.legacy-notice,.panel,.kpi-card,.empty-state,.bucket-strip{border:1px solid var(--border-color);background:var(--bg-card);box-shadow:var(--shadow-sm)}.state-banner{display:flex;justify-content:space-between;align-items:center;padding:14px 16px;border-radius:12px;margin-bottom:16px}.state-banner div{display:flex;flex-direction:column;gap:3px}.state-banner strong{font-size:12px}.state-banner span{font-size:11px;color:var(--text-muted)}.state-banner button{border:0;border-radius:8px;background:var(--accent-blue);color:white;padding:7px 12px}.error-state{border-color:color-mix(in srgb,var(--accent-red) 32%,transparent);background:var(--danger-soft)}
 .loading-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.skeleton{height:128px;border-radius:14px;background:linear-gradient(90deg,var(--bg-tertiary),var(--bg-card),var(--bg-tertiary));background-size:220% 100%;animation:shimmer 1.4s infinite}@keyframes shimmer{to{background-position:-220% 0}}.empty-state{border-radius:16px;padding:70px 20px;text-align:center}.empty-icon{font-size:38px;color:var(--accent-blue)}.empty-state h3{font-size:16px;margin:12px 0 7px}.empty-state p{font-size:12px;color:var(--text-muted)}
 .scope-strip{display:grid;grid-template-columns:minmax(210px,1fr) minmax(270px,1.4fr) auto;align-items:center;gap:18px;border-radius:14px;padding:13px 15px;margin-bottom:10px}.scope-main,.scope-status{display:flex;align-items:center;gap:10px}.scope-avatar{display:grid;place-items:center;width:34px;height:34px;border-radius:10px;background:linear-gradient(145deg,#2563eb,#7c3aed);color:#fff;font-weight:900}.scope-main div,.scope-status{min-width:0}.scope-main div{display:flex;flex-direction:column;gap:2px}.scope-main strong{font-size:12.5px}.scope-main div span,.scope-status span{color:var(--text-muted);font-size:10px}.scope-status{display:grid;grid-template-columns:auto auto 1fr}.scope-status i{width:8px;height:8px;border-radius:50%;background:#94a3b8}.scope-status.live i{background:#10b981;box-shadow:0 0 0 4px rgba(16,185,129,.12)}.scope-status.idle i{background:#3b82f6}.scope-status.stale i{background:#f59e0b}.scope-status strong{font-size:11px}.scope-status span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.scope-meta{display:flex;flex-direction:column;align-items:flex-end;gap:3px}.scope-meta span{font-size:9px;color:var(--text-muted)}.scope-meta code{font-size:9px;color:var(--accent-blue);background:var(--accent-soft);padding:3px 6px;border-radius:5px}.legacy-notice{display:flex;justify-content:space-between;gap:15px;margin-bottom:14px;padding:9px 13px;border-radius:10px;border-color:color-mix(in srgb,var(--accent-yellow) 28%,transparent);background:var(--warning-soft);color:var(--accent-yellow);font-size:10px}.legacy-notice small{white-space:nowrap;font-weight:800}
@@ -1156,8 +1277,10 @@ onUnmounted(() => {
 .overview-grid{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(330px,1fr);gap:13px;margin-bottom:13px}.panel{border-radius:14px;overflow:hidden}.panel-head{display:flex;align-items:center;justify-content:space-between;gap:15px;padding:14px 16px;border-bottom:1px solid rgba(148,163,184,.13)}.panel-head h3{font-size:12.5px;margin:3px 0 0}.panel-note{font-size:9.5px;color:var(--text-muted)}.legend{display:flex;gap:12px;color:var(--text-muted);font-size:9px}.legend span{display:flex;align-items:center;gap:5px}.legend i{width:7px;height:7px;border-radius:2px}.legend .ok{background:#2563eb}.legend .fail{background:#ef4444}.chart{position:relative;display:flex;align-items:flex-end;gap:6px;height:190px;padding:25px 16px 13px}.chart-column{display:flex;flex:1;min-width:0;height:100%;flex-direction:column;align-items:center}.chart-value{height:15px;font:8px ui-monospace,monospace;color:var(--text-muted)}.bar-track{display:flex;align-items:flex-end;width:min(70%,28px);height:125px;border-radius:5px;background:rgba(148,163,184,.08);overflow:hidden}.bar-total{position:relative;width:100%;min-height:2px;background:#ef4444;border-radius:4px 4px 0 0;overflow:hidden;transition:height .3s}.bar-success{position:absolute;left:0;right:0;bottom:0;background:linear-gradient(180deg,#60a5fa,#2563eb)}.chart-label{margin-top:7px;color:var(--text-muted);font-size:8px;white-space:nowrap}.chart-empty{margin:-112px 0 83px;text-align:center;color:var(--text-muted);font-size:10px;pointer-events:none}.live-dot{font-size:8px;font-weight:900;letter-spacing:.12em;color:#059669;background:rgba(16,185,129,.1);border-radius:99px;padding:5px 8px}.runtime-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:0;padding:7px 16px 13px}.runtime-grid>div{min-height:69px;padding:11px 8px;border-bottom:1px solid rgba(148,163,184,.1)}.runtime-grid>div:nth-last-child(-n+2){border-bottom:0}.runtime-grid span{display:block;color:var(--text-muted);font-size:9px}.runtime-grid strong{display:block;margin-top:5px;font-size:15px}.runtime-grid strong.sample-time{font-size:10px;margin-top:8px}.runtime-grid small{display:block;margin-top:5px;color:var(--text-muted);font-size:8px}.meter{height:3px;margin-top:7px;border-radius:3px;background:rgba(148,163,184,.14);overflow:hidden}.meter i{display:block;height:100%;background:linear-gradient(90deg,#2563eb,#8b5cf6);border-radius:inherit}
 .agent-panel,.event-panel,.reliability-panel{margin-bottom:13px}.reliability-actions{display:flex;gap:7px}.reliability-actions button{height:30px;padding:0 10px;border:1px solid var(--border-color);border-radius:7px;background:var(--bg-card);color:var(--text-secondary);font-size:9px;font-weight:800;cursor:pointer}.reliability-actions button:hover:not(:disabled){border-color:var(--accent-blue);color:var(--accent-blue)}.reliability-actions button:disabled{opacity:.5}.reliability-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:1px;background:var(--border-color)}.reliability-grid>div{min-width:0;padding:13px 15px;background:var(--bg-card);display:flex;flex-direction:column;gap:3px}.reliability-grid span,.reliability-grid small{color:var(--text-muted);font-size:9px}.reliability-grid strong{font-size:13px}.table-wrap{overflow-x:auto}table{width:100%;border-collapse:collapse;min-width:790px}th,td{padding:10px 14px;text-align:left;border-bottom:1px solid var(--border-color);font-size:10px;white-space:nowrap}th{color:var(--text-muted);font-size:8.5px;text-transform:uppercase;letter-spacing:.05em;background:var(--panel-muted)}td strong{font-size:10.5px}tbody tr:last-child td{border-bottom:0}tbody tr:hover{background:var(--accent-soft)}.role-badge,.status-badge{display:inline-flex;border-radius:99px;padding:3px 7px;background:var(--panel-muted);color:var(--text-muted);font-size:8px;font-weight:800}.role-badge.main{background:var(--accent-soft);color:var(--accent-blue)}.status-badge.success{background:rgba(16,185,129,.12);color:#059669}.status-badge.failed{background:rgba(239,68,68,.12);color:#dc2626}.status-badge.cancelled{background:rgba(148,163,184,.16);color:#64748b}.status-badge.blocked{background:rgba(245,158,11,.14);color:#b45309}.status-badge.unknown{background:rgba(59,130,246,.1);color:#2563eb}.rate{color:var(--accent-green);font-weight:800}.rate.bad{color:var(--accent-red)}
 .runtime-empty{display:grid;place-items:center;min-height:220px;padding:30px;text-align:center;color:var(--text-muted);font-size:10px}
+.observability-detail-grid{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(300px,.85fr);gap:13px;margin-bottom:13px}.coverage-list{padding:7px 14px 12px}.coverage-row{display:grid;grid-template-columns:minmax(150px,1.1fr) minmax(90px,.8fr) 44px minmax(190px,1.3fr);align-items:center;gap:12px;padding:10px 2px;border-bottom:1px solid rgba(148,163,184,.12)}.coverage-row:last-child{border-bottom:0}.coverage-agent{min-width:0;display:flex;flex-direction:column;gap:2px}.coverage-agent strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10.5px}.coverage-agent span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-muted);font-size:8.5px}.coverage-meter{height:5px;border-radius:99px;background:var(--panel-muted);overflow:hidden}.coverage-meter i{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,#2563eb,#22c55e)}.coverage-row>strong{text-align:right;font-size:10px}.coverage-detail{display:flex;align-items:center;flex-wrap:wrap;gap:5px}.coverage-detail span{padding:3px 6px;border-radius:99px;font-size:8px;font-weight:800}.coverage-ok{background:rgba(16,185,129,.12);color:#059669}.coverage-local{background:rgba(59,130,246,.12);color:#2563eb}.coverage-missing{background:rgba(245,158,11,.14);color:#b45309}.coverage-detail small{width:100%;color:var(--text-muted);font-size:8px}.phase-list{padding:11px 16px 15px}.phase-list>div{position:relative;display:grid;grid-template-columns:1fr auto;gap:10px;padding:9px 0 12px}.phase-list span{color:var(--text-muted);font-size:9px}.phase-list strong{font-size:10px}.phase-list i{position:absolute;left:0;bottom:4px;height:3px;border-radius:99px;background:linear-gradient(90deg,#2563eb,#8b5cf6)}.agent-resource-panel{margin-bottom:13px}.agent-resource-list{padding:5px 16px 11px}.agent-resource-row{display:grid;grid-template-columns:minmax(180px,1fr) repeat(4,auto);align-items:center;gap:20px;padding:11px 1px;border-bottom:1px solid rgba(148,163,184,.12)}.agent-resource-row:last-child{border-bottom:0}.agent-resource-row>div{display:flex;flex-direction:column;gap:2px}.agent-resource-row>div strong{font-size:10.5px}.agent-resource-row>div span,.agent-resource-row>span{color:var(--text-muted);font-size:8.5px}.agent-resource-row>span strong{margin-left:3px;color:var(--text-primary);font-size:9.5px}
 .event-controls{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 16px;border-bottom:1px solid rgba(148,163,184,.12);background:var(--panel-muted)}.event-status-tabs{display:flex;align-items:center;gap:4px}.event-status-tabs button{height:29px;border:1px solid transparent;border-radius:7px;background:transparent;color:var(--text-muted);padding:0 9px;font-size:9.5px;font-weight:800;cursor:pointer}.event-status-tabs button span{margin-left:3px;font:8.5px ui-monospace,monospace;opacity:.72}.event-status-tabs button:hover{color:var(--text-primary);background:var(--bg-card)}.event-status-tabs button.active{border-color:var(--border-strong);background:var(--bg-card);color:var(--accent-blue);box-shadow:var(--shadow-sm)}.page-size-control{display:flex;align-items:center;gap:6px;color:var(--text-muted);font-size:9px}.page-size-control select{height:29px;border:1px solid var(--border-color);border-radius:7px;background:var(--bg-card);color:var(--text-primary);padding:0 24px 0 8px;font-size:9.5px;outline:none}
+.page-size-control select{height:var(--control-height-sm,28px);border-radius:var(--radius-md,6px);background:var(--control-bg);font-size:10.5px}.page-size-control select:focus{border-color:var(--accent-blue);box-shadow:var(--focus-ring)}
 .event-list{padding:2px 14px 8px;transition:opacity .18s}.event-list.loading{opacity:.55;pointer-events:none}.event-row{display:grid;grid-template-columns:27px minmax(0,1fr) auto minmax(80px,140px);align-items:center;gap:10px;padding:10px 8px;margin:0 -6px;border-radius:8px;border-bottom:1px solid rgba(148,163,184,.1)}.event-row:last-child{border-bottom:0}.event-row.is-clickable{cursor:pointer}.event-row.is-clickable:hover{background:var(--accent-soft)}.event-row.is-failed{background:rgba(239,68,68,.05);box-shadow:inset 3px 0 0 #ef4444}.event-row.is-cancelled{background:rgba(148,163,184,.06);box-shadow:inset 3px 0 0 #94a3b8}.event-row.is-blocked{background:rgba(245,158,11,.06);box-shadow:inset 3px 0 0 #f59e0b}.event-row.is-unknown{background:rgba(59,130,246,.04);box-shadow:inset 3px 0 0 #60a5fa}.event-row.is-navigating{opacity:.65}.event-state{display:grid;place-items:center;width:22px;height:22px;border-radius:7px;font-size:10px;font-weight:900}.event-state.success{background:rgba(16,185,129,.1);color:#059669}.event-state.failed{background:rgba(239,68,68,.1);color:#dc2626}.event-state.cancelled{background:rgba(148,163,184,.16);color:#64748b}.event-state.blocked{background:rgba(245,158,11,.14);color:#b45309}.event-state.unknown{background:rgba(59,130,246,.1);color:#2563eb}.event-main{min-width:0}.event-main>div{display:flex;align-items:center;gap:7px;flex-wrap:wrap}.event-main strong{font-size:10.5px}.event-main>div>span:last-child{color:var(--text-muted);font-size:9px}.event-main p{margin:3px 0 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-muted);font-size:9px}.event-main p.event-error{color:#dc2626;font-weight:700}.event-main p.event-time{font-variant-numeric:tabular-nums}.event-metrics{display:flex;flex-direction:column;align-items:flex-end;gap:3px;font-size:9px;color:var(--text-secondary)}.event-row code{overflow:hidden;text-overflow:ellipsis;color:var(--text-muted);font-size:8px;background:rgba(100,116,139,.06);padding:4px 6px;border-radius:5px}.event-empty,.event-loading{padding:38px;text-align:center;color:var(--text-muted);font-size:10px}.event-load-error{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:10px 14px 0;padding:10px 12px;border:1px solid color-mix(in srgb,var(--accent-red) 30%,transparent);border-radius:8px;background:var(--danger-soft);color:var(--accent-red);font-size:9.5px}.event-load-error button{border:1px solid currentColor;border-radius:6px;background:transparent;color:inherit;padding:4px 8px;cursor:pointer}.event-pagination{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:10px 16px;border-top:1px solid rgba(148,163,184,.12);color:var(--text-muted);font-size:9px}.event-pagination>div{display:flex;align-items:center;gap:5px}.event-pagination button{height:27px;border:1px solid var(--border-color);border-radius:6px;background:var(--bg-card);color:var(--text-secondary);padding:0 8px;font-size:9px;cursor:pointer}.event-pagination button:hover:not(:disabled){border-color:var(--border-strong);color:var(--accent-blue)}.event-pagination button:disabled{opacity:.4;cursor:not-allowed}.event-pagination strong{min-width:52px;text-align:center;color:var(--text-primary);font:9px ui-monospace,monospace}.page-foot{display:flex;justify-content:space-between;padding:2px 3px;color:var(--text-muted);font-size:8.5px}
-@media(max-width:1050px){.page-header{align-items:flex-start;flex-direction:column}.toolbar{width:100%;flex-wrap:wrap}.scope-combobox{flex:1}.scope-trigger{width:100%}.scope-strip{grid-template-columns:1fr 1fr}.scope-meta{display:none}.overview-grid{grid-template-columns:1fr}.kpi-grid{grid-template-columns:repeat(2,1fr)}}
-@media(max-width:700px){.metrics-page{padding:16px 14px 32px}.toolbar{align-items:stretch}.toolbar label{flex:1}.toolbar select,.scope-trigger{width:100%;min-width:0}.custom-date-range{width:100%;box-sizing:border-box;padding:9px 0 0;border-left:0;border-top:1px solid var(--border-color);display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr) auto}.custom-date-range label{min-width:0}.toolbar .custom-date-range input[type=date]{width:100%}.custom-range-error{position:static;grid-column:1/-1;margin:0}.refresh-btn{align-self:flex-end}.scope-strip{grid-template-columns:1fr}.scope-status{grid-template-columns:auto auto;}.scope-status span{grid-column:2;white-space:normal}.kpi-grid{grid-template-columns:1fr}.chart{gap:2px;padding-left:8px;padding-right:8px}.chart-label{font-size:7px;transform:rotate(-45deg);transform-origin:center}.runtime-grid,.reliability-grid{grid-template-columns:1fr}.runtime-grid>div{border-bottom:1px solid rgba(148,163,184,.1)!important}.event-controls,.event-pagination{align-items:stretch;flex-direction:column}.event-status-tabs{display:grid;grid-template-columns:repeat(3,1fr)}.event-status-tabs button{padding:0 5px}.page-size-control{justify-content:flex-end}.event-pagination>div{justify-content:space-between}.event-row{grid-template-columns:27px minmax(0,1fr) auto}.event-row code{display:none}}
+@media(max-width:1050px){.page-header{align-items:flex-start;flex-direction:column}.toolbar{width:100%;flex-wrap:wrap}.scope-control{flex:1}.scope-strip{grid-template-columns:1fr 1fr}.scope-meta{display:none}.overview-grid,.observability-detail-grid{grid-template-columns:1fr}.kpi-grid{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:700px){.metrics-page{padding:16px 14px 32px}.toolbar{align-items:stretch}.toolbar label{flex:1}.scope-control{flex-basis:100%}.toolbar select{width:100%;min-width:0}.custom-date-range{width:100%;box-sizing:border-box;padding:9px 0 0;border-left:0;border-top:1px solid var(--border-color);display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr) auto}.custom-date-range label{min-width:0}.toolbar .custom-date-range input[type=date]{width:100%}.custom-range-error{position:static;grid-column:1/-1;margin:0}.refresh-btn{align-self:flex-end}.scope-strip{grid-template-columns:1fr}.scope-status{grid-template-columns:auto auto;}.scope-status span{grid-column:2;white-space:normal}.kpi-grid{grid-template-columns:1fr}.chart{gap:2px;padding-left:8px;padding-right:8px}.chart-label{font-size:7px;transform:rotate(-45deg);transform-origin:center}.runtime-grid,.reliability-grid{grid-template-columns:1fr}.runtime-grid>div{border-bottom:1px solid rgba(148,163,184,.1)!important}.coverage-row{grid-template-columns:minmax(0,1fr) 70px 36px}.coverage-detail{grid-column:1/-1}.agent-resource-row{grid-template-columns:1fr 1fr;gap:8px 16px}.agent-resource-row>div{grid-column:1/-1}.event-controls,.event-pagination{align-items:stretch;flex-direction:column}.event-status-tabs{display:grid;grid-template-columns:repeat(3,1fr)}.event-status-tabs button{padding:0 5px}.page-size-control{justify-content:flex-end}.event-pagination>div{justify-content:space-between}.event-row{grid-template-columns:27px minmax(0,1fr) auto}.event-row code{display:none}}
 </style>

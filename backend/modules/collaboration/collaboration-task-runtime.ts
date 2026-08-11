@@ -9,6 +9,7 @@ import * as crypto from "crypto";
 import { spawnSync } from "child_process";
 
 import * as os from "os";
+import { isAgentRuntimeAvailable } from "../../agents/runtime";
 import {
   bridgeLegacyAgentCommunication,
   getAgentCommunication,
@@ -1242,15 +1243,21 @@ export function runAgentRecoveryMonitorOnce(ctx: CollabCtx, options: any = {}) {
   }
 
   setAgentRecoveryProbeInFlight(true);
-  const timeoutMs = Number(options.timeout_ms || options.timeoutMs || AGENT_RECOVERY_PROBE_TIMEOUT_MS);
   const probeGroups = getAgentRecoveryProbeGroups();
   return Promise.all(probeGroups.map(async (group: any) => {
-    const probe = await runAgentCliProbe({
-      ...options,
-      ...group.probe_payload,
-      timeout_ms: timeoutMs,
-      source: "agent-recovery-monitor",
-    }, ctx);
+    // Recovery health checks must remain side-effect free. Do not launch an
+    // Agent/model probe here: the queued task's normal ACK + first model call
+    // is the half-open recovery attempt.
+    const agentType = String(group?.probe_target?.agentType || group?.probe_payload?.agent_type || group?.probe_payload?.agentType || "claudecode");
+    const available = isAgentRuntimeAvailable(agentType);
+    const probe = {
+      success: available,
+      observed: true,
+      paid_provider_called: false,
+      business_write_performed: false,
+      agent_type: agentType,
+      message: available ? "本地 Agent CLI 与配置可用，允许任务自身执行半开恢复" : "本地 Agent CLI 或配置仍不可用",
+    };
     if (!probe?.success) {
       return {
         success: false,

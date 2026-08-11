@@ -59,11 +59,20 @@ try {
   const drifted = interruption.buildTaskRecoveryDecision({ ...task, interruption_receipt: restartReceipt }, restartReceipt, { workspaceChecksum: "workspace-v2", authorizationValid: true, runtimeValid: true });
   assert.equal(drifted.mode, "manual", "workspace drift must fail closed to user confirmation");
 
+  const resumeCheckpoint = { phase: "test_agent_running", reviewRound: 2, planChecksum: "plan-v1", workspaceChecksum: "workspace-v1", completedWorkItemIds: ["work-a"], summaryPending: false };
+  const streamReceipt = interruption.buildTaskInterruptionReceipt({ task, reasonCode: "model_stream_interrupted", reason: "stream closed after delta", actor: "selftest", checkpoint: "test_agent_running", sideEffectState: "committed", workspaceChecksum: "workspace-v1", resumeCheckpoint, processTerminationProven: true });
+  assert.equal(streamReceipt.auto_resume_allowed, true, "a stream interruption with a committed checkpoint is recoverable");
+  assert.deepEqual(streamReceipt.resume_checkpoint.completedWorkItemIds, ["work-a"]);
+  const schedules = [0, 1, 2, 3].map(attempt => interruption.buildTaskRecoverySchedule({ reasonCode: "provider_unavailable", attempt, autoResumeAllowed: true, now: 0 }));
+  assert.deepEqual(schedules.slice(0, 3).map(item => Date.parse(item.nextRetryAt)), [30_000, 120_000, 300_000]);
+  assert.equal(schedules[3].mode, "manual", "the fourth recovery cycle must require a user");
+  assert.equal(schedules[3].state, "needs_user");
+
   sessions.closeTaskAgentSessions({ taskId }, "selftest permanent cancel");
   assert.equal(sessions.listTaskAgentSessions({ taskId })[0].status, "closed", "permanent cancel closes but does not delete session history");
   assert.equal(sessions.listTaskAgentSessions({ taskId }).length, 1);
 
-  console.log(JSON.stringify({ pass: true, checks: { suspended_session_preserved: true, native_session_preserved: true, user_interrupt_manual: true, execution_attempt_reopened: true, safe_restart_auto: true, workspace_drift_manual: true, permanent_cancel_keeps_history: true, paid_provider_calls: 0 } }, null, 2));
+  console.log(JSON.stringify({ pass: true, checks: { suspended_session_preserved: true, native_session_preserved: true, user_interrupt_manual: true, execution_attempt_reopened: true, safe_restart_auto: true, stream_checkpoint_auto: true, recovery_backoff_30s_2m_5m: true, fourth_attempt_manual: true, workspace_drift_manual: true, permanent_cancel_keeps_history: true, paid_provider_calls: 0 } }, null, 2));
 } finally {
   fs.rmSync(tempRoot, { recursive: true, force: true });
 }

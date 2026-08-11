@@ -48,6 +48,7 @@ const path = __importStar(require("path"));
 const crypto = __importStar(require("crypto"));
 const child_process_1 = require("child_process");
 const utils_1 = require("../../core/utils");
+const access_policy_1 = require("../system/access-policy");
 const db_1 = require("../../core/db");
 const runtime_1 = require("../../agents/runtime");
 const agent_provider_settings_1 = require("../system/agent-provider-settings");
@@ -164,6 +165,27 @@ function buildProjectFeishuAcpRuntimeConfig(content, projectName, port) {
     runtimeContent = (0, cc_connect_feishu_runtime_config_1.disableBlockingFeishuReaction)(runtimeContent);
     runtimeContent = (0, cc_connect_feishu_runtime_config_1.disableVisibleCcConnectIdleRotation)(runtimeContent);
     return applyCcConnectTurnGuards(runtimeContent, { idleTimeoutMins: 4, maxTurnTimeMins: 4, resetOnIdleMins: 0 });
+}
+function projectTransportLabel(content) {
+    const match = String(content || '').match(/\[\[projects\.platforms\]\][\s\S]*?type\s*=\s*"([^"]+)"/i);
+    const type = String(match?.[1] || '').trim().toLowerCase();
+    return {
+        feishu: '飞书通道',
+        lark: 'Lark 通道',
+        weixin: '微信通道',
+        telegram: 'Telegram 通道',
+        slack: 'Slack 通道',
+        discord: 'Discord 通道',
+    }[type] || '协作通道';
+}
+function projectTransportLabelFor(projectName) {
+    try {
+        const config = (0, db_1.getConfigs)().find((item) => item.name === projectName);
+        return config ? projectTransportLabel(fs.readFileSync(config.path, 'utf-8')) : '协作通道';
+    }
+    catch {
+        return '协作通道';
+    }
 }
 function getLogs(projectName, lines = 100) {
     const logFile = path.join(utils_1.LOG_DIR, `${(0, project_validation_1.validateProjectName)(projectName)}.log`);
@@ -627,6 +649,7 @@ async function startProject(projectName, agentType, port, discoveredPid = 0) {
     if (!config)
         return { success: false, error: "项目不存在" };
     let content = fs.readFileSync(config.path, "utf-8");
+    const channelLabel = projectTransportLabel(content);
     if (agentType) {
         content = content.replace(/(\[projects\.agent\]\s*\n\s*type\s*=\s*)"[^"]+"/g, `$1"${agentType}"`);
     }
@@ -640,7 +663,7 @@ async function startProject(projectName, agentType, port, discoveredPid = 0) {
     }
     const expected = buildChannelRuntimeIdentity(`project-${projectName}`, "project", projectName, runningPid, port, content, adapterPath);
     if (runningPid && managedChannelProcessIsCurrent(runningPid, expected)) {
-        return { success: true, running: true, pid: runningPid, endpoint_current: true, build_current: true, message: "项目 Agent 通道已连接" };
+        return { success: true, running: true, pid: runningPid, endpoint_current: true, build_current: true, message: `项目${channelLabel}已连接` };
     }
     const recycled = !!runningPid;
     if (runningPid) {
@@ -667,10 +690,11 @@ async function startProject(projectName, agentType, port, discoveredPid = 0) {
         fs.unlinkSync(channelDisabledFile(`project-${projectName}`));
     }
     catch { }
-    return { success: true, running: true, pid: child.pid, endpoint_current: true, build_current: true, recycled, message: recycled ? "项目 Agent 通道已更新并重新连接" : "项目 Agent 通道已连接" };
+    return { success: true, running: true, pid: child.pid, endpoint_current: true, build_current: true, recycled, message: recycled ? `项目${channelLabel}已更新并重新连接` : `项目${channelLabel}已连接` };
 }
 async function stopProject(projectName, explicit = true) {
     projectName = (0, project_validation_1.validateProjectName)((0, project_runtime_1.resolveProjectIdentifier)(projectName));
+    const channelLabel = projectTransportLabelFor(projectName);
     const pid = (0, db_1.getPid)(projectName);
     const owned = !!pid && managedChannelProcessLooksOwned(Number(pid));
     const channelStopReceipt = pid && owned ? await (0, managed_process_tree_1.terminateManagedProcessTree)(Number(pid), { gracefulTimeoutMs: 5_000, forceTimeoutMs: 3_000 }) : null;
@@ -691,9 +715,9 @@ async function stopProject(projectName, explicit = true) {
     const runtimeStop = explicit ? await (0, project_runtime_1.stopAllProjectRuntimes)(projectName) : null;
     const channelMessage = pid
         ? (owned
-            ? (channelStopped ? "项目 Agent 通道已断开" : "项目 Agent 通道停止失败，进程仍可能运行")
-            : "项目 Agent PID 已失效，未终止无法证明归属的进程")
-        : "项目 Agent 通道未运行";
+            ? (channelStopped ? `项目${channelLabel}已断开` : `项目${channelLabel}停止失败，进程仍可能运行`)
+            : `项目${channelLabel} PID 已失效，未终止无法证明归属的进程`)
+        : `项目${channelLabel}未运行`;
     const runtimeMessage = runtimeStop
         ? `；已停止 ${runtimeStop.stoppedProcesses} 个源码运行进程${runtimeStop.stoppedBuilds ? `和 ${runtimeStop.stoppedBuilds} 个构建任务` : ""}`
         : "";
@@ -704,7 +728,7 @@ async function stopProject(projectName, explicit = true) {
         channel_stop_receipt: channelStopReceipt,
         runtime_stop: runtimeStop,
         error: !channelStopped
-            ? channelStopReceipt?.error || "项目 Agent 通道进程树未能完整终止"
+            ? channelStopReceipt?.error || `项目${channelLabel}进程树未能完整终止`
             : (runtimeStop?.failures?.length ? `项目通道已断开，但有 ${runtimeStop.failures.length} 个源码进程无法证明归属，未强制终止` : undefined),
         message: `${channelMessage}${runtimeMessage}`,
     };
@@ -909,6 +933,7 @@ function applyInferredVerificationCommands(options = {}) {
     };
 }
 function handleProjectsApi(pathname, req, res, parsed, ctx) {
+    const allowProject = (project, level = "use") => (0, access_policy_1.authorizeResource)(req, res, "project", project, level);
     if (pathname === "/api/projects/clone/status" && req.method === "GET") {
         const id = String(parsed.query.id || "").trim();
         const receipt = (0, project_git_1.getProjectCloneReceipt)(id);
@@ -959,7 +984,11 @@ function handleProjectsApi(pathname, req, res, parsed, ctx) {
                 stateDetail: agentState.detail,
             };
         });
-        (0, utils_1.sendJson)(res, { projects });
+        const principal = req.ccmAuth;
+        const visibleProjects = principal?.kind === "browser"
+            ? (0, access_policy_1.filterAccessibleResources)(projects, principal.userId, principal.role, "project", item => String(item.name || ""))
+            : projects;
+        (0, utils_1.sendJson)(res, { projects: visibleProjects });
         return true;
     }
     // 2. 获取可用 Agent 类型
@@ -983,6 +1012,8 @@ function handleProjectsApi(pathname, req, res, parsed, ctx) {
         req.on("end", async () => {
             try {
                 const { project, agent } = JSON.parse(body);
+                if (!allowProject(project, "manage"))
+                    return;
                 (0, utils_1.sendJson)(res, await startProject(project, agent, ctx.PORT));
             }
             catch (e) {
@@ -998,6 +1029,8 @@ function handleProjectsApi(pathname, req, res, parsed, ctx) {
         req.on("end", async () => {
             try {
                 const { project } = JSON.parse(body);
+                if (!allowProject(project, "manage"))
+                    return;
                 (0, utils_1.sendJson)(res, await stopProject(project));
             }
             catch (e) {
@@ -1014,6 +1047,8 @@ function handleProjectsApi(pathname, req, res, parsed, ctx) {
             try {
                 const payload = JSON.parse(body || "{}");
                 const action = String(payload.action || "");
+                if (!allowProject(payload.project, "manage"))
+                    return;
                 if (action === "connect")
                     (0, utils_1.sendJson)(res, await startProject(payload.project, payload.agent, ctx.PORT));
                 else if (action === "disconnect")
@@ -1029,6 +1064,8 @@ function handleProjectsApi(pathname, req, res, parsed, ctx) {
     }
     if (pathname === "/api/projects/runtime" && req.method === "GET") {
         try {
+            if (!allowProject(parsed.query?.project, "manage"))
+                return true;
             (0, utils_1.sendJson)(res, (0, project_runtime_1.getProjectRuntimeSnapshot)(parsed.query?.project));
         }
         catch (e) {
@@ -1037,6 +1074,8 @@ function handleProjectsApi(pathname, req, res, parsed, ctx) {
         return true;
     }
     if (pathname === "/api/projects/runtime/logs" && req.method === "GET") {
+        if (!allowProject(parsed.query?.project, "manage"))
+            return true;
         (0, project_runtime_1.getProjectRuntimeLogsAsync)(parsed.query?.project, parsed.query?.profile_id, parsed.query?.kind, Number(parsed.query?.lines || 300))
             .then(result => (0, utils_1.sendJson)(res, result))
             .catch((e) => (0, utils_1.sendJson)(res, { success: false, error: e.message }, 400));
@@ -1045,6 +1084,8 @@ function handleProjectsApi(pathname, req, res, parsed, ctx) {
     if (pathname === "/api/projects/runtime/log-stream" && req.method === "GET") {
         try {
             const project = String(parsed.query?.project || "");
+            if (!allowProject(project, "manage"))
+                return true;
             const profileId = String(parsed.query?.profile_id || "");
             const kind = String(parsed.query?.kind || "run");
             // Validate the exact binding before opening the SSE response. Otherwise a
@@ -1120,6 +1161,8 @@ function handleProjectsApi(pathname, req, res, parsed, ctx) {
                 return;
             try {
                 const payload = JSON.parse(body || "{}");
+                if (!allowProject(payload.project, "manage"))
+                    return;
                 if (pathname.endsWith("/rescan"))
                     (0, utils_1.sendJson)(res, (0, project_runtime_1.rescanProjectRuntimeProfiles)(payload.project));
                 else if (pathname.endsWith("/config"))
@@ -1292,6 +1335,8 @@ type = "${finalPlatform}"${platformOptionsToml}
         req.on("end", async () => {
             try {
                 const { name, display_name, work_dir, agent, platform, repository_url, initialize_repository, test_auth } = JSON.parse(body);
+                if (!allowProject(name, "manage"))
+                    return;
                 const safeName = (0, project_validation_1.validateProjectName)(name);
                 const safeWorkDir = (0, project_validation_1.validateWorkDirectory)(work_dir);
                 const safeAgent = (0, project_validation_1.validateAgentType)(agent);
@@ -1351,6 +1396,8 @@ type = "${finalPlatform}"${platformOptionsToml}
         req.on("end", () => {
             try {
                 const { name } = JSON.parse(body);
+                if (!allowProject(name, "manage"))
+                    return;
                 const safeName = (0, project_validation_1.validateProjectName)(name);
                 const runtime = (0, project_runtime_1.getProjectRuntimeSummary)(safeName);
                 if ((0, db_1.isRunning)(safeName) || runtime.running_count || runtime.unknown_count || runtime.building_count) {
@@ -1389,6 +1436,8 @@ type = "${finalPlatform}"${platformOptionsToml}
         req.on("end", () => {
             try {
                 const { name } = JSON.parse(body || "{}");
+                if (!allowProject(name, "manage"))
+                    return;
                 const safeName = (0, project_validation_1.validateProjectName)(name);
                 const runtime = (0, project_runtime_1.getProjectRuntimeSummary)(safeName);
                 if ((0, db_1.isRunning)(safeName) || runtime.running_count || runtime.unknown_count || runtime.building_count)
@@ -1406,7 +1455,10 @@ type = "${finalPlatform}"${platformOptionsToml}
         req.on("data", (chunk) => body += chunk);
         req.on("end", () => {
             try {
-                (0, utils_1.sendJson)(res, (0, project_lifecycle_1.restoreProject)(JSON.parse(body || "{}").name));
+                const payload = JSON.parse(body || "{}");
+                if (!allowProject(payload.name, "manage"))
+                    return;
+                (0, utils_1.sendJson)(res, (0, project_lifecycle_1.restoreProject)(payload.name));
             }
             catch (e) {
                 (0, utils_1.sendJson)(res, { success: false, error: e.message }, 400);
@@ -1419,7 +1471,10 @@ type = "${finalPlatform}"${platformOptionsToml}
         req.on("data", (chunk) => body += chunk);
         req.on("end", () => {
             try {
-                (0, utils_1.sendJson)(res, (0, project_lifecycle_1.previewProjectPurge)(JSON.parse(body || "{}").name));
+                const payload = JSON.parse(body || "{}");
+                if (!allowProject(payload.name, "manage"))
+                    return;
+                (0, utils_1.sendJson)(res, (0, project_lifecycle_1.previewProjectPurge)(payload.name));
             }
             catch (e) {
                 (0, utils_1.sendJson)(res, { success: false, error: e.message }, 400);
@@ -1433,6 +1488,8 @@ type = "${finalPlatform}"${platformOptionsToml}
         req.on("end", () => {
             try {
                 const payload = JSON.parse(body || "{}");
+                if (!allowProject(payload.name, "manage"))
+                    return;
                 (0, utils_1.sendJson)(res, (0, project_lifecycle_1.purgeArchivedProject)(payload.name, payload.preview_token));
             }
             catch (e) {
@@ -1630,6 +1687,8 @@ type = "${finalPlatform}"${platformOptionsToml}
             (0, utils_1.sendJson)(res, { error: e.message }, 400);
             return true;
         }
+        if (!allowProject(project, "manage"))
+            return true;
         const configs = (0, db_1.loadProjectConfigs)();
         const configuredCommands = normalizeVerificationCommands(configs[project]?.verification_commands || configs[project]?.verificationCommands || []);
         const inferredCommands = inferProjectVerificationCommands(getProjectWorkDir(project));
@@ -1658,6 +1717,8 @@ type = "${finalPlatform}"${platformOptionsToml}
                 const payload = JSON.parse(body);
                 const { tools, verification_commands, verificationCommands } = payload;
                 const project = requireActiveProjectName(payload.project);
+                if (!allowProject(project, "manage"))
+                    return;
                 const configs = (0, db_1.loadProjectConfigs)();
                 if (!configs[project])
                     configs[project] = {};
@@ -1703,6 +1764,9 @@ type = "${finalPlatform}"${platformOptionsToml}
         req.on("end", () => {
             try {
                 const payload = body ? JSON.parse(body) : {};
+                const requested = Array.isArray(payload.projects) ? payload.projects : [];
+                if (requested.some((project) => !allowProject(project, "manage")))
+                    return;
                 (0, utils_1.sendJson)(res, applyInferredVerificationCommands({
                     projects: Array.isArray(payload.projects) ? payload.projects.map(project_validation_1.validateProjectName) : payload.projects,
                     overwrite: payload.overwrite,
@@ -1724,6 +1788,8 @@ type = "${finalPlatform}"${platformOptionsToml}
             (0, utils_1.sendJson)(res, { error: e.message }, 400);
             return true;
         }
+        if (!allowProject(project, "manage"))
+            return true;
         const configs = (0, db_1.loadProjectConfigs)();
         (0, shared_files_v2_1.migrateLegacySharedFilesV2)("project", project, configs[project]?.shared_files || [], "project-config-v1");
         (0, utils_1.sendJson)(res, { files: (0, shared_files_v2_1.listSharedFilesV2)("project", project) });
@@ -1737,6 +1803,8 @@ type = "${finalPlatform}"${platformOptionsToml}
             try {
                 const payload = JSON.parse(body);
                 const project = requireActiveProjectName(payload.project);
+                if (!allowProject(project, "manage"))
+                    return;
                 const name = (0, project_validation_1.validateSharedFileName)(payload.name);
                 const content = String(payload.content || "");
                 if (Buffer.byteLength(content, "utf-8") > 1024 * 1024)
@@ -1758,6 +1826,8 @@ type = "${finalPlatform}"${platformOptionsToml}
             try {
                 const payload = JSON.parse(body);
                 const project = requireActiveProjectName(payload.project);
+                if (!allowProject(project, "manage"))
+                    return;
                 const name = (0, project_validation_1.validateSharedFileName)(payload.name);
                 const file = (0, shared_files_v2_1.listSharedFilesV2)("project", project).find((item) => item.name === name);
                 if (file)
@@ -1827,6 +1897,8 @@ type = "${finalPlatform}"${platformOptionsToml}
     if (sessionsMatch && req.method === "GET") {
         try {
             const projectName = requireActiveProjectName(decodeURIComponent(sessionsMatch[1]));
+            if (!allowProject(projectName, "use"))
+                return true;
             (0, utils_1.sendJson)(res, { sessions: (0, sessions_1.getSessions)(projectName) });
         }
         catch (e) {
@@ -1839,6 +1911,8 @@ type = "${finalPlatform}"${platformOptionsToml}
     if (sessionDetailMatch && req.method === "GET") {
         try {
             const projectName = requireActiveProjectName(decodeURIComponent(sessionDetailMatch[1]));
+            if (!allowProject(projectName, "use"))
+                return true;
             const sessionId = (0, project_validation_1.validateSessionId)(decodeURIComponent(sessionDetailMatch[2]));
             const detail = (0, sessions_1.getSessionDetail)(projectName, sessionId);
             if (detail)
@@ -1856,6 +1930,8 @@ type = "${finalPlatform}"${platformOptionsToml}
     if (logsMatch && req.method === "GET") {
         try {
             const projectName = requireActiveProjectName(decodeURIComponent(logsMatch[1]));
+            if (!allowProject(projectName, "manage"))
+                return true;
             const lines = Math.max(1, Math.min(2000, parseInt(parsed.query?.lines) || 100));
             (0, utils_1.sendJson)(res, { logs: getLogs(projectName, lines) });
         }

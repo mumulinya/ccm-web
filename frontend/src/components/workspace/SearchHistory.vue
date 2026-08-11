@@ -426,7 +426,8 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 .filter-grid { display:grid; grid-template-columns:repeat(6,minmax(110px,1fr)); gap:10px; min-width:0; }
 .filter-panel label { gap:6px; }
 .filter-panel label span { font-size:10px; }
-.filter-panel input,.filter-panel select { min-height:36px; border-radius:6px; background:var(--surface); }
+.filter-panel input,.filter-panel select { min-height:var(--control-height,34px);padding:0 var(--control-padding-x,10px);border-radius:var(--radius-md,6px);background:var(--control-bg);outline:0;transition:border-color .15s ease,box-shadow .15s ease; }
+.filter-panel input:focus,.filter-panel select:focus{border-color:var(--accent-blue);box-shadow:var(--focus-ring)}
 .filter-actions { align-items:end; }
 .filter-actions .apply-filter { min-height:36px; display:inline-flex; align-items:center; gap:6px; white-space:nowrap; border-radius:6px; }
 .search-content { background:var(--bg-secondary); scrollbar-gutter:stable; }

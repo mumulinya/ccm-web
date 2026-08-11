@@ -112,7 +112,7 @@
                 <!-- 思考过程消息 -->
                 <template v-else-if="msg.role === 'thinking'">
                   <ConversationProcessingState
-                    v-if="shouldShowCompactProcessingState(groupAgentExecutionEvents, messages, i)"
+                    v-if="!groupTaskExecutionActive && shouldShowCompactProcessingState(groupAgentExecutionEvents, messages, i)"
                     compact
                     title="正在思考…"
                     detail=""
@@ -139,6 +139,12 @@
                   :highlight-mentions="highlightMentions"
                   :get-agent-display-name="getAgentDisplayName"
                   @action="runAgentQaAction(msg, $event)"
+                />
+                <ConversationProcessingState
+                  v-else-if="msg.role === 'assistant' && msg.streaming && !String(msg.content || '').trim() && !groupTaskExecutionActive"
+                  compact
+                  title="正在思考…"
+                  :detail="msg.processingDetail || '正在理解你的问题并检查群聊上下文'"
                 />
                 <!-- Agent 回复 -->
                 <AgentExecutionMessage
@@ -174,6 +180,7 @@
                   @task-action="handleTaskCardAction(msg, $event)"
                   @open-pipeline="openPipelineViewer(msg)"
                   @open-file-diff="openFileDiff"
+                  @failure-action="handleGroupModelFailureAction(msg, i, $event)"
                 />
                 <AgentExecutionTranscript
                   :events="groupAgentExecutionEvents"
@@ -221,8 +228,16 @@
         <!-- 输入栏 -->
         <div v-if="currentGroup" class="composer-region">
           <div class="composer-inner">
+            <ActiveTaskPlanDock
+              :events="groupAgentExecutionEvents"
+              :messages="messages"
+              :exact-session-id="currentGroupSessionId || ''"
+              :active="groupAgentExecutionEnabled && !!currentGroupSessionId"
+              @locate="locateGroupPlanStep"
+              @execution-action="handleGroupPlanAction"
+            />
             <ConversationTurnControls
-              :busy="isStreaming"
+              :busy="groupTurnBusy"
               :turns="groupTurnControl.turns.value"
               :stopping="stoppingGroupTurn"
               @stop="stopGroupCurrentWork()"
@@ -234,9 +249,9 @@
               v-model="newMessage"
               input-id="groupChatInput"
               :placeholder="groupComposerPlaceholder"
-              :send-label="isStreaming ? '排队' : groupComposerSendLabel"
+              :send-label="groupTurnBusy ? '排队' : groupComposerSendLabel"
               :disabled="false"
-              :busy="isStreaming"
+              :busy="groupTurnBusy"
               :allow-input-while-busy="true"
               :files="messageFiles"
               :slash="slash"

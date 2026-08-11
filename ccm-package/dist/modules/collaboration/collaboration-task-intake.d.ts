@@ -49,6 +49,10 @@ export declare function classifyGroupProjectTaskIntentWithAgent(input: {
     groupSessionId?: string;
     group_session_id?: string;
     context?: string;
+    turnId?: string;
+    turn_id?: string;
+    anchorMessageId?: string;
+    anchor_message_id?: string;
 }): Promise<any>;
 export declare function shouldUseProjectAnalysisMode(input: {
     isOrchestrated?: boolean;

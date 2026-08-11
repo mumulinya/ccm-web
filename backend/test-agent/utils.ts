@@ -113,7 +113,12 @@ const VERIFICATION_EXECUTABLES = new Set([
   "node", "npm", "pnpm", "yarn", "bun", "npx",
   "python", "python3", "py", "pytest",
   "cargo", "go", "dotnet", "mvn", "mvnw", "gradle", "gradlew",
-  "make", "cmake", "git",
+  "php", "composer", "ruby", "bundle", "bundler", "rake", "rails", "perl",
+  "lua", "luajit", "deno", "uv", "poetry", "pipenv", "flask", "uvicorn", "gunicorn",
+  "java", "javac", "kotlin", "kotlinc", "swift", "dart", "flutter",
+  "mix", "elixir", "erl", "rebar3", "sbt", "scala", "scalac", "lein", "clojure", "clj",
+  "zig", "gcc", "g++", "clang", "clang++", "msbuild", "make", "cmake", "meson", "ninja",
+  "docker", "podman", "bazel", "bazelisk", "just", "task", "git",
 ]);
 
 const SAFE_PARENT_ENV_KEYS = new Set([
@@ -169,7 +174,12 @@ export function verificationCommandInvocation(command: string) {
   if (parsed.error || !parsed.tokens.length) return { executable: "", args: [] as string[], requiresShell: false, error: parsed.error || "empty command" };
   const executable = parsed.tokens[0];
   const requiresShell = process.platform === "win32"
-    && ["npm", "pnpm", "yarn", "bun", "npx", "mvn", "mvnw", "gradle", "gradlew"].includes(normalizedExecutable(executable));
+    && [
+      "npm", "pnpm", "yarn", "bun", "npx", "mvn", "mvnw", "gradle", "gradlew",
+      "composer", "bundle", "bundler", "rake", "rails", "poetry", "pipenv", "flask",
+      "uvicorn", "gunicorn", "flutter", "dart", "mix", "rebar3", "sbt", "lein", "clojure", "clj",
+      "msbuild", "cmake", "meson", "ninja", "docker", "podman", "bazel", "bazelisk", "just", "task",
+    ].includes(normalizedExecutable(executable));
   return { executable, args: parsed.tokens.slice(1), requiresShell, error: "" };
 }
 

@@ -1,6 +1,40 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.DEFAULT_CRON_TIMEZONE = exports.CRON_RUN_HISTORY_LIMIT = void 0;
+exports.cronOccurrenceId = cronOccurrenceId;
 exports.normalizeCronRunHistory = normalizeCronRunHistory;
 exports.aggregateCronRunStatus = aggregateCronRunStatus;
 exports.pad2 = pad2;
@@ -26,12 +60,19 @@ exports.updateCronJob = updateCronJob;
 exports.deleteCronJob = deleteCronJob;
 exports.restoreCronJob = restoreCronJob;
 exports.purgeCronJob = purgeCronJob;
+const crypto = __importStar(require("crypto"));
 const db_1 = require("../../core/db");
 exports.CRON_RUN_HISTORY_LIMIT = 40;
 exports.DEFAULT_CRON_TIMEZONE = "Asia/Shanghai";
 const CRON_RUN_TERMINAL_STATUSES = new Set(["done", "failed", "skipped", "cancelled"]);
+const OVERLAP_POLICIES = new Set(["queue", "skip", "parallel_safe", "cancel_previous"]);
+const MISFIRE_POLICIES = new Set(["run_once", "skip", "catch_up", "confirm"]);
 function cronRunId() {
     return `cron-run-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+function cronOccurrenceId(jobId, scheduledFor, targetType, targetId) {
+    const value = [String(jobId || ""), String(scheduledFor || "manual"), String(targetType || "project"), String(targetId || "")].join("\n");
+    return `occ_${crypto.createHash("sha256").update(value).digest("hex").slice(0, 28)}`;
 }
 function normalizedTaskIds(value) {
     return [...new Set((Array.isArray(value) ? value : [value]).map(item => String(item || "").trim()).filter(Boolean))];
@@ -78,6 +119,7 @@ function normalizeCronRunHistory(job) {
             scheduled_for: run.scheduled_for || null,
             next_retry_at: run.next_retry_at || null,
             notifications: run.notifications && typeof run.notifications === "object" ? run.notifications : {},
+            occurrence_id: String(run.occurrence_id || run.occurrenceId || ""),
         };
     })
         .sort((left, right) => String(right.started_at || "").localeCompare(String(left.started_at || "")))
@@ -272,12 +314,22 @@ function normalizeCronJob(job) {
             ? Math.max(1, Math.min(20, Number(job.gap_continue_limit || job.gapContinueLimit || 3)))
             : 0,
         run_count: Number(job.run_count || 0),
+        owner_id: String(job.owner_id || job.ownerId || "legacy-system"),
+        revision: Math.max(1, Math.floor(Number(job.revision || 1))),
+        task_template_id: String(job.task_template_id || job.taskTemplateId || ""),
+        template_variables: job.template_variables && typeof job.template_variables === "object" ? job.template_variables : (job.templateVariables && typeof job.templateVariables === "object" ? job.templateVariables : {}),
         run_history: normalizeCronRunHistory(job),
         timezone,
         retry_limit: Math.max(0, Math.min(10, Number(job.retry_limit ?? job.retryLimit ?? 2))),
         retry_interval_minutes: Math.max(1, Math.min(1440, Number(job.retry_interval_minutes ?? job.retryIntervalMinutes ?? 10))),
-        misfire_policy: ["run_once", "skip"].includes(String(job.misfire_policy || job.misfirePolicy)) ? String(job.misfire_policy || job.misfirePolicy) : "run_once",
+        overlap_policy: OVERLAP_POLICIES.has(String(job.overlap_policy || job.overlapPolicy)) ? String(job.overlap_policy || job.overlapPolicy) : "queue",
+        misfire_policy: MISFIRE_POLICIES.has(String(job.misfire_policy || job.misfirePolicy)) ? String(job.misfire_policy || job.misfirePolicy) : "run_once",
         misfire_grace_minutes: Math.max(1, Math.min(10080, Number(job.misfire_grace_minutes ?? job.misfireGraceMinutes ?? 1440))),
+        catch_up_limit: Math.max(1, Math.min(20, Number(job.catch_up_limit ?? job.catchUpLimit ?? 5))),
+        consecutive_failure_limit: Math.max(1, Math.min(20, Number(job.consecutive_failure_limit ?? job.consecutiveFailureLimit ?? 3))),
+        consecutive_failures: Math.max(0, Number(job.consecutive_failures ?? job.consecutiveFailures ?? 0)),
+        paused_reason: String(job.paused_reason || job.pausedReason || ""),
+        pending_misfires: Array.isArray(job.pending_misfires || job.pendingMisfires) ? (job.pending_misfires || job.pendingMisfires).slice(0, 20) : [],
         notification_enabled: job.notification_enabled === true || job.notificationEnabled === true,
         notify_on: [...new Set((Array.isArray(job.notify_on) ? job.notify_on : Array.isArray(job.notifyOn) ? job.notifyOn : ["failed", "waiting", "done"]).map(String).filter(value => ["started", "done", "failed", "waiting", "recovered", "cancelled"].includes(value)))],
         source_attachments: Array.isArray(job.source_attachments || job.sourceAttachments) ? (job.source_attachments || job.sourceAttachments) : [],
@@ -296,6 +348,7 @@ function patchCronJob(id, updates) {
     jobs[idx] = {
         ...jobs[idx],
         ...updates,
+        revision: Math.max(1, Number(jobs[idx].revision || 1)) + 1,
         updated_at: new Date().toISOString(),
     };
     (0, db_1.saveCronJobs)(jobs);
@@ -324,9 +377,11 @@ function appendCronRun(jobId, input = {}) {
         scheduled_for: input.scheduled_for || null,
         next_retry_at: input.next_retry_at || null,
         notifications: input.notifications && typeof input.notifications === "object" ? input.notifications : {},
+        occurrence_id: String(input.occurrence_id || input.occurrenceId || ""),
     };
     jobs[index] = {
         ...jobs[index],
+        revision: Math.max(1, Number(jobs[index].revision || 1)) + 1,
         run_history: [run, ...normalizeCronRunHistory(jobs[index]).filter((item) => item.id !== run.id)].slice(0, exports.CRON_RUN_HISTORY_LIMIT),
         updated_at: new Date().toISOString(),
     };
@@ -351,7 +406,7 @@ function patchCronRun(jobId, runId, updates = {}) {
         updated_at: new Date().toISOString(),
     };
     history[runIndex] = next;
-    jobs[jobIndex] = { ...jobs[jobIndex], run_history: history.slice(0, exports.CRON_RUN_HISTORY_LIMIT), updated_at: next.updated_at };
+    jobs[jobIndex] = { ...jobs[jobIndex], revision: Math.max(1, Number(jobs[jobIndex].revision || 1)) + 1, run_history: history.slice(0, exports.CRON_RUN_HISTORY_LIMIT), updated_at: next.updated_at };
     (0, db_1.saveCronJobs)(jobs);
     return next;
 }
@@ -409,8 +464,8 @@ function validateCronJobPayload(job) {
         throw new Error("请输入定时任务名称");
     if (!String(job.schedule || "").trim())
         throw new Error("请输入 Cron 表达式");
-    if (!String(job.prompt || "").trim())
-        throw new Error("请输入执行提示词");
+    if (!String(job.prompt || "").trim() && !String(job.task_template_id || job.taskTemplateId || "").trim())
+        throw new Error("请输入执行提示词或选择任务模板");
     validateCronExpression(job.schedule);
     normalizeCronTimezone(job.timezone);
     const targetType = normalizeTargetType(job);
@@ -441,8 +496,17 @@ function createCronJob(job) {
         timezone,
         retry_limit: Math.max(0, Math.min(10, Number(job.retry_limit ?? job.retryLimit ?? 2))),
         retry_interval_minutes: Math.max(1, Math.min(1440, Number(job.retry_interval_minutes ?? job.retryIntervalMinutes ?? 10))),
-        misfire_policy: ["run_once", "skip"].includes(String(job.misfire_policy || job.misfirePolicy)) ? String(job.misfire_policy || job.misfirePolicy) : "run_once",
+        overlap_policy: OVERLAP_POLICIES.has(String(job.overlap_policy || job.overlapPolicy)) ? String(job.overlap_policy || job.overlapPolicy) : "queue",
+        misfire_policy: MISFIRE_POLICIES.has(String(job.misfire_policy || job.misfirePolicy)) ? String(job.misfire_policy || job.misfirePolicy) : "run_once",
         misfire_grace_minutes: Math.max(1, Math.min(10080, Number(job.misfire_grace_minutes ?? job.misfireGraceMinutes ?? 1440))),
+        catch_up_limit: Math.max(1, Math.min(20, Number(job.catch_up_limit ?? job.catchUpLimit ?? 5))),
+        consecutive_failure_limit: Math.max(1, Math.min(20, Number(job.consecutive_failure_limit ?? job.consecutiveFailureLimit ?? 3))),
+        consecutive_failures: 0,
+        paused_reason: "",
+        owner_id: String(job.owner_id || job.ownerId || "legacy-system"),
+        revision: 1,
+        task_template_id: String(job.task_template_id || job.taskTemplateId || ""),
+        template_variables: job.template_variables && typeof job.template_variables === "object" ? job.template_variables : (job.templateVariables && typeof job.templateVariables === "object" ? job.templateVariables : {}),
         notification_enabled: job.notification_enabled === true || job.notificationEnabled === true,
         notify_on: [...new Set((Array.isArray(job.notify_on) ? job.notify_on : Array.isArray(job.notifyOn) ? job.notifyOn : ["failed", "waiting", "done"]).map(String).filter(value => ["started", "done", "failed", "waiting", "recovered", "cancelled"].includes(value)))],
         source_attachments: Array.isArray(job.source_attachments || job.sourceAttachments) ? (job.source_attachments || job.sourceAttachments) : [],
@@ -499,8 +563,17 @@ function updateCronJob(id, updates) {
     draft.timezone = normalizeCronTimezone(draft.timezone);
     draft.retry_limit = Math.max(0, Math.min(10, Number(draft.retry_limit ?? draft.retryLimit ?? 2)));
     draft.retry_interval_minutes = Math.max(1, Math.min(1440, Number(draft.retry_interval_minutes ?? draft.retryIntervalMinutes ?? 10)));
-    draft.misfire_policy = ["run_once", "skip"].includes(String(draft.misfire_policy || draft.misfirePolicy)) ? String(draft.misfire_policy || draft.misfirePolicy) : "run_once";
+    draft.overlap_policy = OVERLAP_POLICIES.has(String(draft.overlap_policy || draft.overlapPolicy)) ? String(draft.overlap_policy || draft.overlapPolicy) : "queue";
+    draft.misfire_policy = MISFIRE_POLICIES.has(String(draft.misfire_policy || draft.misfirePolicy)) ? String(draft.misfire_policy || draft.misfirePolicy) : "run_once";
     draft.misfire_grace_minutes = Math.max(1, Math.min(10080, Number(draft.misfire_grace_minutes ?? draft.misfireGraceMinutes ?? 1440)));
+    draft.catch_up_limit = Math.max(1, Math.min(20, Number(draft.catch_up_limit ?? draft.catchUpLimit ?? 5)));
+    draft.consecutive_failure_limit = Math.max(1, Math.min(20, Number(draft.consecutive_failure_limit ?? draft.consecutiveFailureLimit ?? 3)));
+    draft.consecutive_failures = Math.max(0, Number(draft.consecutive_failures ?? draft.consecutiveFailures ?? 0));
+    draft.paused_reason = String(draft.paused_reason || draft.pausedReason || "");
+    draft.owner_id = String(draft.owner_id || draft.ownerId || current.owner_id || current.ownerId || "legacy-system");
+    draft.revision = Math.max(1, Number(current.revision || 1)) + 1;
+    draft.task_template_id = String(draft.task_template_id || draft.taskTemplateId || "");
+    draft.template_variables = draft.template_variables && typeof draft.template_variables === "object" ? draft.template_variables : (draft.templateVariables && typeof draft.templateVariables === "object" ? draft.templateVariables : {});
     draft.notification_enabled = draft.notification_enabled === true || draft.notificationEnabled === true;
     draft.notify_on = [...new Set((Array.isArray(draft.notify_on) ? draft.notify_on : Array.isArray(draft.notifyOn) ? draft.notifyOn : ["failed", "waiting", "done"]).map(String).filter(value => ["started", "done", "failed", "waiting", "recovered", "cancelled"].includes(value)))];
     draft.backlog_batch_limit = Math.max(1, Math.min(20, Number(draft.backlog_batch_limit || draft.backlogBatchLimit || 1)));
@@ -532,7 +605,7 @@ function deleteCronJob(id) {
     if (index < 0)
         return null;
     const now = new Date().toISOString();
-    jobs[index] = { ...jobs[index], enabled_before_archive: jobs[index].enabled !== false, enabled: false, archived: true, archived_at: now, deleted_at: now, next_run: null, updated_at: now };
+    jobs[index] = { ...jobs[index], revision: Math.max(1, Number(jobs[index].revision || 1)) + 1, enabled_before_archive: jobs[index].enabled !== false, enabled: false, archived: true, archived_at: now, deleted_at: now, next_run: null, updated_at: now };
     (0, db_1.saveCronJobs)(jobs);
     return jobs[index];
 }
@@ -543,7 +616,7 @@ function restoreCronJob(id) {
         return null;
     const now = new Date().toISOString();
     const enabled = jobs[index].enabled_before_archive !== false;
-    jobs[index] = { ...jobs[index], archived: false, archived_at: null, deleted_at: null, enabled, restored_at: now, updated_at: now, next_run: enabled ? computeNextRun(jobs[index].schedule, new Date(), normalizeCronTimezone(jobs[index].timezone)) : null };
+    jobs[index] = { ...jobs[index], revision: Math.max(1, Number(jobs[index].revision || 1)) + 1, archived: false, archived_at: null, deleted_at: null, enabled, restored_at: now, updated_at: now, next_run: enabled ? computeNextRun(jobs[index].schedule, new Date(), normalizeCronTimezone(jobs[index].timezone)) : null };
     (0, db_1.saveCronJobs)(jobs);
     return jobs[index];
 }

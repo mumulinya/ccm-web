@@ -105,7 +105,23 @@ function createSchema(db: Database.Database) {
       file_change_count INTEGER NOT NULL DEFAULT 0,
       input_tokens INTEGER NOT NULL DEFAULT 0,
       output_tokens INTEGER NOT NULL DEFAULT 0,
+      direct_input_tokens INTEGER NOT NULL DEFAULT 0,
+      cache_creation_input_tokens INTEGER NOT NULL DEFAULT 0,
+      cache_read_input_tokens INTEGER NOT NULL DEFAULT 0,
+      provider_total_tokens INTEGER NOT NULL DEFAULT 0,
       total_cost_usd REAL NOT NULL DEFAULT 0,
+      usage_source TEXT NOT NULL DEFAULT 'unreported',
+      usage_missing_reason TEXT NOT NULL DEFAULT 'historical_unavailable',
+      usage_breakdown_available INTEGER NOT NULL DEFAULT 0,
+      model_ms INTEGER NOT NULL DEFAULT 0,
+      tool_wall_ms INTEGER NOT NULL DEFAULT 0,
+      queue_wait_ms INTEGER NOT NULL DEFAULT 0,
+      dependency_wait_ms INTEGER NOT NULL DEFAULT 0,
+      verification_ms INTEGER NOT NULL DEFAULT 0,
+      summary_ms INTEGER NOT NULL DEFAULT 0,
+      peak_cpu_percent REAL NOT NULL DEFAULT 0,
+      peak_rss_bytes INTEGER NOT NULL DEFAULT 0,
+      peak_child_process_count INTEGER NOT NULL DEFAULT 0,
       trace_id TEXT NOT NULL DEFAULT '',
       task_id TEXT NOT NULL DEFAULT '',
       execution_id TEXT NOT NULL DEFAULT '',
@@ -135,8 +151,23 @@ function createSchema(db: Database.Database) {
       last_file_change_count INTEGER NOT NULL DEFAULT 0,
       input_tokens INTEGER NOT NULL DEFAULT 0,
       output_tokens INTEGER NOT NULL DEFAULT 0,
+      direct_input_tokens INTEGER NOT NULL DEFAULT 0,
+      cache_creation_input_tokens INTEGER NOT NULL DEFAULT 0,
+      cache_read_input_tokens INTEGER NOT NULL DEFAULT 0,
+      provider_total_tokens INTEGER NOT NULL DEFAULT 0,
       total_cost_usd REAL NOT NULL DEFAULT 0,
       usage_reported_calls INTEGER NOT NULL DEFAULT 0,
+      local_no_model_calls INTEGER NOT NULL DEFAULT 0,
+      unreported_calls INTEGER NOT NULL DEFAULT 0,
+      model_ms INTEGER NOT NULL DEFAULT 0,
+      tool_wall_ms INTEGER NOT NULL DEFAULT 0,
+      queue_wait_ms INTEGER NOT NULL DEFAULT 0,
+      dependency_wait_ms INTEGER NOT NULL DEFAULT 0,
+      verification_ms INTEGER NOT NULL DEFAULT 0,
+      summary_ms INTEGER NOT NULL DEFAULT 0,
+      peak_cpu_percent REAL NOT NULL DEFAULT 0,
+      peak_rss_bytes INTEGER NOT NULL DEFAULT 0,
+      peak_child_process_count INTEGER NOT NULL DEFAULT 0,
       duration_samples_json TEXT NOT NULL DEFAULT '[]',
       last_call TEXT NOT NULL DEFAULT '',
       PRIMARY KEY(bucket_date, scope_type, scope_id, role, agent)
@@ -538,6 +569,48 @@ function createSchema(db: Database.Database) {
       updated_at TEXT NOT NULL
     );
   `);
+
+  const ensureColumns = (table: string, columns: Record<string, string>) => {
+    const existing = new Set((db.prepare(`PRAGMA table_info(${table})`).all() as any[]).map(row => String(row.name || "")));
+    for (const [name, definition] of Object.entries(columns)) {
+      if (!existing.has(name)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${definition}`);
+    }
+  };
+  ensureColumns("metric_events_v3", {
+    direct_input_tokens: "INTEGER NOT NULL DEFAULT 0",
+    cache_creation_input_tokens: "INTEGER NOT NULL DEFAULT 0",
+    cache_read_input_tokens: "INTEGER NOT NULL DEFAULT 0",
+    provider_total_tokens: "INTEGER NOT NULL DEFAULT 0",
+    usage_source: "TEXT NOT NULL DEFAULT 'unreported'",
+    usage_missing_reason: "TEXT NOT NULL DEFAULT 'historical_unavailable'",
+    usage_breakdown_available: "INTEGER NOT NULL DEFAULT 0",
+    model_ms: "INTEGER NOT NULL DEFAULT 0",
+    tool_wall_ms: "INTEGER NOT NULL DEFAULT 0",
+    queue_wait_ms: "INTEGER NOT NULL DEFAULT 0",
+    dependency_wait_ms: "INTEGER NOT NULL DEFAULT 0",
+    verification_ms: "INTEGER NOT NULL DEFAULT 0",
+    summary_ms: "INTEGER NOT NULL DEFAULT 0",
+    peak_cpu_percent: "REAL NOT NULL DEFAULT 0",
+    peak_rss_bytes: "INTEGER NOT NULL DEFAULT 0",
+    peak_child_process_count: "INTEGER NOT NULL DEFAULT 0",
+  });
+  ensureColumns("metric_aggregates_v3", {
+    direct_input_tokens: "INTEGER NOT NULL DEFAULT 0",
+    cache_creation_input_tokens: "INTEGER NOT NULL DEFAULT 0",
+    cache_read_input_tokens: "INTEGER NOT NULL DEFAULT 0",
+    provider_total_tokens: "INTEGER NOT NULL DEFAULT 0",
+    local_no_model_calls: "INTEGER NOT NULL DEFAULT 0",
+    unreported_calls: "INTEGER NOT NULL DEFAULT 0",
+    model_ms: "INTEGER NOT NULL DEFAULT 0",
+    tool_wall_ms: "INTEGER NOT NULL DEFAULT 0",
+    queue_wait_ms: "INTEGER NOT NULL DEFAULT 0",
+    dependency_wait_ms: "INTEGER NOT NULL DEFAULT 0",
+    verification_ms: "INTEGER NOT NULL DEFAULT 0",
+    summary_ms: "INTEGER NOT NULL DEFAULT 0",
+    peak_cpu_percent: "REAL NOT NULL DEFAULT 0",
+    peak_rss_bytes: "INTEGER NOT NULL DEFAULT 0",
+    peak_child_process_count: "INTEGER NOT NULL DEFAULT 0",
+  });
 }
 
 export function getObservabilityDatabase(): any {

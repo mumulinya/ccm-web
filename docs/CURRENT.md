@@ -1,5 +1,9 @@
 # CCM 当前状态
 
+- 原“自动开发”页面已明确命名为“自动开发运营”：它负责链路就绪检查、批量接活与续跑、无人值守运行、活动/阻塞汇总和日报周报；具体任务的创建、计划、项目 Agent、TestAgent、返工、权限、交付与回放继续由“任务派发”统一承载。`/autodev`路由保持兼容，命令同时接受“自动开发运营、自动开发、无人值守开发”。
+
+- 任务回放已升级为面向用户的V4工作台：任务列表直接显示当前阶段和待处理数量；详情先展示任务结果、下一步、六章任务故事、逐项验收矩阵、问题解决状态、轮次历史和最终交付，完整时间线在运行中展开、终态后默认折叠。Evidence绑定当前代码状态，陈旧或缺少结构化覆盖时明确显示，不从自由文本猜测通过；来源/目标会话可双向导航，Provider、generation、lease、checksum等仍位于独立技术详情。完整流程见[会话搜索与任务回放完整流程（任务回放V4）](./confirmed-business-processes/CONVERSATION-SEARCH-AND-TASK-REPLAY-V3.md)。
+
 - 全局、项目和群聊三类会话已统一为 CC 风格用户可见执行流：运行中直接显示安全进度说明、工具、面向用户的需求实施计划、项目 Agent、TestAgent 与返工状态，不显示“执行记录”入口；同一工具或 Agent 原行更新。需求计划位于准备检索和项目 Agent 之间，只描述目标、业务步骤、范围、预期结果与不处理项，不暴露内部文件级 Handoff；重规划递增版本并保留历史。只有权威 Result 到达后才切换为“最终回答 → 最终文件变更卡 → 折叠执行记录”，展开记录后仍可查看最终计划及修订历史，`Ctrl+O`只控制当前已完成消息。最终文件集合绑定当前 generation 和 accepted attempt，按项目与路径去重；默认显示3项、卡内最多40项、事件最多100项无正文元数据，点击文件或审核会从当前权威 Git 工作区重新读取 Diff。TestAgent 未通过会返回原项目 Agent 增量返工，复验和主 Agent Terminal Gate通过前不会出现成功完成卡。普通零工具问答仍只有“正在思考 → 最终回答”。系统 Prompt、密钥、源码 Diff、知识/网页/Notebook 正文及工具大输出不会进入事件 API。完整流程见[CC 风格用户可见执行流](./confirmed-business-processes/CC-STYLE-USER-VISIBLE-EXECUTION-FLOW.md)。
 
 - 音乐统一搜索与AI点歌已扩展为四源：本地、网易、B站和抖音。抖音优先使用官方视频搜索OpenAPI，未开通能力时先用无需登录的隔离浏览器会话读取公开内容，只有平台明确拦截时才允许用户主动登录；两条通道都如实上报`login_required | risk_controlled | capability_unavailable`，不把平台错误伪装成空结果；登录等待有10分钟上限，凭据只以`secretProtected`布尔值对外投影。视频转音频使用按需获取、SHA256校验的固定版本`yt-dlp`，以`shell:false`执行并强制单视频模式，Cookie写入仅所有者可读的临时文件并在结束时删除；下载任务只保存`awemeId`和规范化页面地址，执行时重新解析媒体地址，取消会同时中止解析与ffmpeg。只处理用户有权访问的公开内容，私密、付费、地区限制、DRM和直播一律拒绝。完整流程见[音乐曲库、媒体平台与统一播放器V4](./confirmed-business-processes/MUSIC-LIBRARY-MEDIA-PLATFORM-V4.md)。

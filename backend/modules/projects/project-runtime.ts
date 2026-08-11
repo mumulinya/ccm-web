@@ -6,7 +6,7 @@ import { CCM_DIR, LOG_DIR } from "../../core/utils";
 import { acquireFileLock, releaseFileLock, withFileLock, writeJsonAtomic } from "../../core/atomic-json-file";
 import { getConfigs, getConfigInfo, loadProjectConfigs, saveProjectConfigs } from "../../core/db";
 import { publishRuntimeEvent } from "../../system/runtime-events";
-import { buildTestAgentSubprocessEnv, verificationCommandInvocation } from "../../test-agent/utils";
+import { buildTestAgentSubprocessEnv, splitVerificationCommand, verificationCommandInvocation } from "../../test-agent/utils";
 import { resolveContainedPath, validateProjectName, validateWorkDirectory } from "./project-validation";
 import { ManagedProcessStopReceiptV2, terminateManagedProcessTree } from "../../system/managed-process-tree";
 
@@ -15,7 +15,7 @@ export type ProjectRuntimeProfileV1 = {
   label: string;
   projectId: string;
   modulePath: string;
-  projectType: "node" | "maven" | "gradle" | "go" | "rust" | "dotnet" | "custom";
+  projectType: "node" | "maven" | "gradle" | "go" | "rust" | "dotnet" | "python" | "php" | "ruby" | "elixir" | "dart" | "deno" | "swift" | "docker" | "make" | "cmake" | "jvm" | "custom";
   environment: string;
   runCommand: string;
   prepareCommand?: string;
@@ -72,8 +72,8 @@ const STATE_FILE = path.join(RUNTIME_DIR, "state.json");
 const RUNTIME_LOG_DIR = path.join(LOG_DIR, "project-runtime");
 // Bump when detected profile fields or command recovery behavior changes so
 // existing projects are lazily rescanned without overwriting manual profiles.
-const RUNTIME_DETECTOR_VERSION = 5;
-const EXCLUDED_DIRS = new Set([".git", "node_modules", "target", "dist", "build", ".idea", ".vscode", "coverage"]);
+const RUNTIME_DETECTOR_VERSION = 6;
+const EXCLUDED_DIRS = new Set([".git", "node_modules", "vendor", ".venv", "venv", "__pycache__", "target", "dist", "build", ".idea", ".vscode", "coverage"]);
 const PROFILE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const DEFAULT_JAVA_TOOLCHAIN: ProjectJavaToolchainV1 = {
   schema: "ccm-project-java-toolchain-v1",
@@ -88,9 +88,9 @@ const DEFAULT_JAVA_TOOLCHAIN: ProjectJavaToolchainV1 = {
 const liveProcesses = new Map<string, ChildProcess>();
 const liveBuilds = new Map<string, ChildProcess>();
 const runtimeActionSingleflight = new Map<string, Promise<any>>();
+const executableAvailabilityCache = new Map<string, { ready: boolean; expiresAt: number }>();
 type RuntimeLogEvent = { type: "reset" | "chunk"; content: string };
 const runtimeLogListeners = new Map<string, Set<(event: RuntimeLogEvent) => void>>();
-const runtimeLogWriteQueues = new Map<string, Promise<void>>();
 const runtimeLogFailures = new Map<string, string>();
 
 function ensureRuntimeDirs() {
@@ -221,6 +221,22 @@ function packageManagerFor(dir: string, manifest: any) {
   return "npm";
 }
 
+function commandAvailableOnPath(command: string) {
+  const key = `${process.platform}:${command}`;
+  const cached = executableAvailabilityCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) return cached.ready;
+  const locator = process.platform === "win32" ? "where.exe" : "which";
+  const result = spawnSync(locator, [command], { windowsHide: true, timeout: 3000, stdio: "ignore" });
+  const ready = result.status === 0;
+  executableAvailabilityCache.set(key, { ready, expiresAt: Date.now() + 30_000 });
+  return ready;
+}
+
+function detectedPythonExecutable() {
+  const candidates = process.platform === "win32" ? ["py", "python", "python3"] : ["python3", "python"];
+  return candidates.find(commandAvailableOnPath) || candidates[0];
+}
+
 function detectNodeProfiles(project: string, root: string, dir: string): ProjectRuntimeProfileV1[] {
   const file = path.join(dir, "package.json");
   if (!fs.existsSync(file)) return [];
@@ -349,6 +365,211 @@ function detectGradleProfiles(project: string, root: string, dir: string): Proje
   })];
 }
 
+function readTextIfPresent(file: string, maxBytes = 256_000) {
+  try {
+    if (!fs.statSync(file).isFile()) return "";
+    const handle = fs.openSync(file, "r");
+    try {
+      const length = Math.min(maxBytes, fs.fstatSync(handle).size);
+      const buffer = Buffer.alloc(length);
+      fs.readSync(handle, buffer, 0, length, 0);
+      return buffer.toString("utf-8");
+    } finally { fs.closeSync(handle); }
+  } catch { return ""; }
+}
+
+function readJsonIfPresent(file: string) {
+  try { return JSON.parse(readTextIfPresent(file)); } catch { return null; }
+}
+
+function moduleLabel(project: string, root: string, dir: string, suffix: string) {
+  const modulePath = relativeModule(root, dir);
+  return `${modulePath === "." ? project : modulePath} · ${suffix}`;
+}
+
+function detectPythonProfiles(project: string, root: string, dir: string): ProjectRuntimeProfileV1[] {
+  const manifests = ["pyproject.toml", "requirements.txt", "Pipfile", "setup.py", "setup.cfg"];
+  const entries = ["manage.py", "main.py", "app.py", "run.py", "server.py"];
+  if (![...manifests, ...entries].some(name => fs.existsSync(path.join(dir, name)))) return [];
+  const modulePath = relativeModule(root, dir);
+  const python = detectedPythonExecutable();
+  let runCommand = "";
+  let environment = "default";
+  if (fs.existsSync(path.join(dir, "manage.py"))) {
+    runCommand = `${python} manage.py runserver`;
+    environment = "django";
+  } else {
+    for (const entry of entries.slice(1)) {
+      const file = path.join(dir, entry);
+      if (!fs.existsSync(file)) continue;
+      const source = readTextIfPresent(file);
+      const moduleName = entry.replace(/\.py$/i, "");
+      if (/\bFastAPI\s*\(/.test(source) && /\bapp\s*=/.test(source)) {
+        runCommand = `${python} -m uvicorn ${moduleName}:app`;
+        environment = "fastapi";
+      } else if (/\bFlask\s*\(/.test(source) && /\bapp\s*=/.test(source) && !/app\.run\s*\(/.test(source)) {
+        runCommand = `${python} -m flask --app ${moduleName} run`;
+        environment = "flask";
+      } else {
+        runCommand = `${python} ${entry}`;
+        environment = moduleName;
+      }
+      break;
+    }
+  }
+  return [makeDetectedProfile({
+    label: moduleLabel(project, root, dir, runCommand ? "Python" : "Python 构建"),
+    projectId: project,
+    modulePath,
+    projectType: "python",
+    environment,
+    runCommand,
+    buildCommand: `${python} -m compileall .`,
+    artifactPatterns: ["dist", "build"],
+  })];
+}
+
+function detectPhpProfiles(project: string, root: string, dir: string): ProjectRuntimeProfileV1[] {
+  const composerFile = path.join(dir, "composer.json");
+  const artisan = fs.existsSync(path.join(dir, "artisan"));
+  if (!artisan && !fs.existsSync(composerFile) && !fs.existsSync(path.join(dir, "index.php"))) return [];
+  const manifest = readJsonIfPresent(composerFile) || {};
+  const scripts = manifest?.scripts && typeof manifest.scripts === "object" ? manifest.scripts : {};
+  const runScript = ["dev", "start", "serve"].find(name => scripts[name]);
+  const buildScript = ["build", "compile"].find(name => scripts[name]);
+  const hasPublic = fs.existsSync(path.join(dir, "public"));
+  return [makeDetectedProfile({
+    label: moduleLabel(project, root, dir, artisan ? "Laravel" : "PHP"),
+    projectId: project,
+    modulePath: relativeModule(root, dir),
+    projectType: "php",
+    environment: artisan ? "laravel" : "default",
+    runCommand: artisan ? "php artisan serve" : runScript ? `composer run ${runScript}` : `php -S 127.0.0.1:8000${hasPublic ? " -t public" : ""}`,
+    buildCommand: buildScript ? `composer run ${buildScript}` : "",
+    artifactPatterns: ["public/build", "dist", "build"],
+  })];
+}
+
+function detectRubyProfiles(project: string, root: string, dir: string): ProjectRuntimeProfileV1[] {
+  const gemfile = path.join(dir, "Gemfile");
+  if (!fs.existsSync(gemfile) && !fs.existsSync(path.join(dir, "config.ru"))) return [];
+  const rails = fs.existsSync(path.join(dir, "bin", "rails")) || /\brails\b/i.test(readTextIfPresent(gemfile));
+  return [makeDetectedProfile({
+    label: moduleLabel(project, root, dir, rails ? "Ruby on Rails" : "Ruby"),
+    projectId: project,
+    modulePath: relativeModule(root, dir),
+    projectType: "ruby",
+    environment: rails ? "rails" : "rack",
+    runCommand: rails ? "bundle exec rails server" : "bundle exec rackup",
+    buildCommand: fs.existsSync(path.join(dir, "Rakefile")) ? "bundle exec rake build" : "",
+    artifactPatterns: ["pkg", "public/assets"],
+  })];
+}
+
+function detectElixirProfiles(project: string, root: string, dir: string): ProjectRuntimeProfileV1[] {
+  const file = path.join(dir, "mix.exs");
+  if (!fs.existsSync(file)) return [];
+  const content = readTextIfPresent(file);
+  const phoenix = /:phoenix|Phoenix\./.test(content) || fs.existsSync(path.join(dir, "lib", `${path.basename(dir)}_web`));
+  return [makeDetectedProfile({
+    label: moduleLabel(project, root, dir, phoenix ? "Phoenix" : "Elixir"),
+    projectId: project,
+    modulePath: relativeModule(root, dir),
+    projectType: "elixir",
+    environment: phoenix ? "phoenix" : "default",
+    runCommand: phoenix ? "mix phx.server" : "mix run --no-halt",
+    buildCommand: "mix compile",
+    artifactPatterns: ["_build"],
+  })];
+}
+
+function detectDartProfiles(project: string, root: string, dir: string): ProjectRuntimeProfileV1[] {
+  if (!fs.existsSync(path.join(dir, "pubspec.yaml"))) return [];
+  const flutter = fs.existsSync(path.join(dir, "lib", "main.dart")) && (
+    fs.existsSync(path.join(dir, "android")) || fs.existsSync(path.join(dir, "ios")) || fs.existsSync(path.join(dir, "web"))
+  );
+  return [makeDetectedProfile({
+    label: moduleLabel(project, root, dir, flutter ? "Flutter" : "Dart"),
+    projectId: project,
+    modulePath: relativeModule(root, dir),
+    projectType: "dart",
+    environment: flutter ? "flutter" : "default",
+    runCommand: flutter ? "flutter run" : "dart run",
+    buildCommand: flutter ? "flutter build web" : "dart compile exe bin/main.dart",
+    artifactPatterns: flutter ? ["build/web"] : ["bin/main.exe", "bin/main"],
+  })];
+}
+
+function detectDenoProfiles(project: string, root: string, dir: string): ProjectRuntimeProfileV1[] {
+  const file = ["deno.json", "deno.jsonc"].map(name => path.join(dir, name)).find(candidate => fs.existsSync(candidate));
+  if (!file) return [];
+  const manifest = path.extname(file) === ".json" ? readJsonIfPresent(file) : null;
+  const tasks = manifest?.tasks && typeof manifest.tasks === "object" ? manifest.tasks : {};
+  const runTask = ["dev", "start", "serve"].find(name => tasks[name]);
+  const buildTask = ["build", "compile"].find(name => tasks[name]);
+  const entry = ["main.ts", "main.js", "mod.ts", "server.ts"].find(name => fs.existsSync(path.join(dir, name)));
+  return [makeDetectedProfile({
+    label: moduleLabel(project, root, dir, "Deno"),
+    projectId: project,
+    modulePath: relativeModule(root, dir),
+    projectType: "deno",
+    environment: "default",
+    runCommand: runTask ? `deno task ${runTask}` : entry ? `deno run --allow-net --allow-read ${entry}` : "",
+    buildCommand: buildTask ? `deno task ${buildTask}` : "",
+    artifactPatterns: ["dist", "build"],
+  })];
+}
+
+function detectJvmProfiles(project: string, root: string, dir: string): ProjectRuntimeProfileV1[] {
+  const sbt = fs.existsSync(path.join(dir, "build.sbt"));
+  const lein = fs.existsSync(path.join(dir, "project.clj"));
+  const clj = fs.existsSync(path.join(dir, "deps.edn"));
+  if (!sbt && !lein && !clj) return [];
+  const type = sbt ? "Scala / sbt" : lein ? "Clojure / Leiningen" : "Clojure CLI";
+  return [makeDetectedProfile({
+    label: moduleLabel(project, root, dir, type),
+    projectId: project,
+    modulePath: relativeModule(root, dir),
+    projectType: "jvm",
+    environment: "default",
+    runCommand: sbt ? "sbt run" : lein ? "lein run" : "clojure -M -m main",
+    buildCommand: sbt ? "sbt package" : lein ? "lein uberjar" : "",
+    artifactPatterns: ["target"],
+  })];
+}
+
+function detectUniversalRootProfiles(project: string, root: string): ProjectRuntimeProfileV1[] {
+  const profiles: ProjectRuntimeProfileV1[] = [];
+  const compose = ["compose.yaml", "compose.yml", "docker-compose.yaml", "docker-compose.yml"].find(name => fs.existsSync(path.join(root, name)));
+  if (compose) profiles.push(makeDetectedProfile({
+    label: `${project} · Docker Compose`, projectId: project, modulePath: ".", projectType: "docker", environment: "default",
+    runCommand: `docker compose -f ${compose} up`, buildCommand: `docker compose -f ${compose} build`, artifactPatterns: [],
+  }));
+
+  if (fs.existsSync(path.join(root, "Package.swift"))) profiles.push(makeDetectedProfile({
+    label: `${project} · Swift Package`, projectId: project, modulePath: ".", projectType: "swift", environment: "default",
+    runCommand: "swift run", buildCommand: "swift build -c release", artifactPatterns: [".build/release"],
+  }));
+
+  if (fs.existsSync(path.join(root, "CMakeLists.txt"))) profiles.push(makeDetectedProfile({
+    label: `${project} · CMake`, projectId: project, modulePath: ".", projectType: "cmake", environment: "default",
+    runCommand: "", prepareCommand: "cmake -S . -B build", buildCommand: "cmake --build build", artifactPatterns: ["build"],
+  }));
+
+  const makefile = ["Makefile", "makefile", "GNUmakefile"].find(name => fs.existsSync(path.join(root, name)));
+  if (makefile) {
+    const content = readTextIfPresent(path.join(root, makefile));
+    const target = ["run", "start", "serve", "dev"].find(name => new RegExp(`^${name}\\s*:`, "m").test(content));
+    const buildTarget = ["build", "all", "compile"].find(name => new RegExp(`^${name}\\s*:`, "m").test(content));
+    if (target || buildTarget) profiles.push(makeDetectedProfile({
+      label: `${project} · Make`, projectId: project, modulePath: ".", projectType: "make", environment: "default",
+      runCommand: target ? `make ${target}` : "", buildCommand: buildTarget ? `make ${buildTarget}` : "", artifactPatterns: ["build", "dist", "bin"],
+    }));
+  }
+
+  return profiles;
+}
+
 function detectSimpleRootProfiles(project: string, root: string): ProjectRuntimeProfileV1[] {
   if (fs.existsSync(path.join(root, "go.mod"))) return [makeDetectedProfile({ label: `${project} · Go`, projectId: project, modulePath: ".", projectType: "go", environment: "default", runCommand: "go run .", buildCommand: "go build ./...", artifactPatterns: [], })];
   if (fs.existsSync(path.join(root, "Cargo.toml"))) return [makeDetectedProfile({ label: `${project} · Rust`, projectId: project, modulePath: ".", projectType: "rust", environment: "default", runCommand: "cargo run", buildCommand: "cargo build --release", artifactPatterns: ["target/release"], })];
@@ -365,8 +586,16 @@ export function detectProjectRuntimeProfilesAt(project: string, workDir: string)
     profiles.push(...detectNodeProfiles(safeProject, safeWorkDir, dir));
     profiles.push(...detectMavenProfiles(safeProject, safeWorkDir, dir));
     profiles.push(...detectGradleProfiles(safeProject, safeWorkDir, dir));
+    profiles.push(...detectPythonProfiles(safeProject, safeWorkDir, dir));
+    profiles.push(...detectPhpProfiles(safeProject, safeWorkDir, dir));
+    profiles.push(...detectRubyProfiles(safeProject, safeWorkDir, dir));
+    profiles.push(...detectElixirProfiles(safeProject, safeWorkDir, dir));
+    profiles.push(...detectDartProfiles(safeProject, safeWorkDir, dir));
+    profiles.push(...detectDenoProfiles(safeProject, safeWorkDir, dir));
+    profiles.push(...detectJvmProfiles(safeProject, safeWorkDir, dir));
   }
   profiles.push(...detectSimpleRootProfiles(safeProject, safeWorkDir));
+  profiles.push(...detectUniversalRootProfiles(safeProject, safeWorkDir));
   const unique = new Map<string, ProjectRuntimeProfileV1>();
   for (const profile of profiles) if (!unique.has(profile.id)) unique.set(profile.id, profile);
   return [...unique.values()];
@@ -377,12 +606,66 @@ export function detectProjectRuntimeProfiles(project: string): ProjectRuntimePro
   return detectProjectRuntimeProfilesAt(safeProject, workDir);
 }
 
+function projectRuntimeCommandInvocation(command: string, cwd: string) {
+  let invocation = verificationCommandInvocation(command);
+  // A project-local launcher is the language-neutral escape hatch. It cannot
+  // leave the authorized module directory and the command line still cannot
+  // contain shell operators or command substitution.
+  if (invocation.error && !/[\r\n;&|<>`]/.test(command) && !/\$\(/.test(command)) {
+    const parsed = splitVerificationCommand(command);
+    const requested = String(parsed.tokens[0] || "");
+    if (!parsed.error && /^(?:\.\/|\.\\)/.test(requested)) {
+      const localExecutable = resolveContainedPath(cwd, requested.replace(/^[.][\\/]/, ""));
+      try {
+        if (fs.statSync(localExecutable).isFile()) {
+          invocation = {
+            executable: localExecutable,
+            args: parsed.tokens.slice(1),
+            requiresShell: process.platform === "win32" && /\.(?:cmd|bat)$/i.test(localExecutable),
+            error: "",
+          };
+        }
+      } catch {}
+    }
+  }
+  return invocation;
+}
+
+function projectRuntimeCommandReadiness(project: string, profile: ProjectRuntimeProfileV1, command: string) {
+  if (!command) return { configured: false, ready: false, executable: "", reason: "未配置命令" };
+  const { workDir } = projectConfig(project);
+  const cwd = resolveContainedPath(workDir, profile.modulePath);
+  const invocation = projectRuntimeCommandInvocation(command, cwd);
+  if (invocation.error) return { configured: true, ready: false, executable: "", reason: invocation.error };
+  let executable = invocation.executable;
+  const base = path.basename(executable).toLowerCase().replace(/\.(?:exe|cmd|bat)$/i, "");
+  if (profile.projectType === "maven" && ["mvn", "mvnw"].includes(base)) {
+    try { executable = resolveProjectJavaToolchainExecution(project).mavenExecutable; }
+    catch (error: any) {
+      return { configured: true, ready: false, executable: base, reason: String(error?.message || "Maven工具链不可用") };
+    }
+  }
+  let ready = false;
+  if (path.isAbsolute(executable)) ready = fs.existsSync(executable);
+  else if (/[\\/]/.test(executable)) {
+    try { ready = fs.existsSync(resolveContainedPath(cwd, executable.replace(/^[.][\\/]/, ""))); } catch { ready = false; }
+  } else {
+    ready = commandAvailableOnPath(executable);
+  }
+  return {
+    configured: true,
+    ready,
+    executable: path.basename(executable),
+    reason: ready ? "" : `本机未找到运行器 ${path.basename(executable)}`,
+  };
+}
+
 function validateProfile(project: string, profile: any): ProjectRuntimeProfileV1 {
   const safeProject = validateProjectName(project);
   const id = String(profile?.id || "").trim();
   if (!PROFILE_ID_PATTERN.test(id)) throw new Error("运行配置 ID 无效");
   const projectType = String(profile?.projectType || "custom") as ProjectRuntimeProfileV1["projectType"];
-  if (!["node", "maven", "gradle", "go", "rust", "dotnet", "custom"].includes(projectType)) throw new Error("运行配置类型无效");
+  if (!["node", "maven", "gradle", "go", "rust", "dotnet", "python", "php", "ruby", "elixir", "dart", "deno", "swift", "docker", "make", "cmake", "jvm", "custom"].includes(projectType)) throw new Error("运行配置类型无效");
   const modulePath = String(profile?.modulePath || ".").trim().replace(/\\/g, "/") || ".";
   const { workDir } = projectConfig(safeProject);
   const moduleDir = resolveContainedPath(workDir, modulePath);
@@ -394,8 +677,8 @@ function validateProfile(project: string, profile: any): ProjectRuntimeProfileV1
     throw new Error("Java 项目的启动命令必须运行源码（Maven spring-boot:run 或 Gradle bootRun/run）；java -jar 仅用于已构建产物，不属于源码启动");
   }
   for (const command of [runCommand, prepareCommand, buildCommand].filter(Boolean)) {
-    const invocation = verificationCommandInvocation(command);
-    if (invocation.error) throw new Error(`运行命令不安全：${invocation.error}`);
+    const invocation = projectRuntimeCommandInvocation(command, moduleDir);
+    if (invocation.error) throw new Error(`运行命令不安全：${invocation.error}。未知语言可使用项目目录内的 ./run 或 .\\run.cmd 启动器`);
   }
   const artifactPatterns = Array.isArray(profile?.artifactPatterns) ? profile.artifactPatterns.map((item: any) => String(item || "").trim().replace(/\\/g, "/")).filter(Boolean).slice(0, 12) : [];
   if (artifactPatterns.some((pattern: string) => path.isAbsolute(pattern) || pattern.split("/").includes(".."))) throw new Error("产物路径不能超出项目目录");
@@ -643,45 +926,35 @@ function redactOutput(value: any) {
     .replace(/\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/g, "[AWS KEY REDACTED]");
 }
 
-function queueLogWrite(file: string, operation: () => Promise<void>) {
-  const previous = runtimeLogWriteQueues.get(file) || Promise.resolve();
-  const next = previous.catch(() => {}).then(operation).catch(error => {
-    runtimeLogFailures.set(file, String(error?.message || error || "日志写入失败").slice(0, 500));
-  }).finally(() => {
-    if (runtimeLogWriteQueues.get(file) === next) runtimeLogWriteQueues.delete(file);
-  });
-  runtimeLogWriteQueues.set(file, next);
-}
-
 function appendLog(file: string, chunk: any) {
   ensureRuntimeDirs();
   const max = 4 * 1024 * 1024;
   const content = redactOutput(chunk);
-  for (const listener of runtimeLogListeners.get(file) || []) listener({ type: "chunk", content });
-  queueLogWrite(file, async () => {
-    let size = 0;
-    try { size = (await fs.promises.stat(file)).size; } catch {}
+  if (!content) return;
+  try {
+    const size = fs.existsSync(file) ? fs.statSync(file).size : 0;
     if (size > max) {
-      const handle = await fs.promises.open(file, "r");
-      try {
-        const keep = Math.floor(max / 2);
-        const buffer = Buffer.alloc(Math.min(size, keep));
-        await handle.read(buffer, 0, buffer.length, Math.max(0, size - buffer.length));
-        await fs.promises.writeFile(file, buffer);
-      } finally { await handle.close(); }
+      const existing = fs.readFileSync(file);
+      fs.writeFileSync(file, existing.subarray(Math.max(0, existing.length - Math.floor(max / 2))));
     }
-    await fs.promises.appendFile(file, content, "utf-8");
+    // 运行日志必须在事件发送前落盘，避免首次打开控制台或 SSE 快照读到空文件。
+    fs.appendFileSync(file, content, "utf-8");
     runtimeLogFailures.delete(file);
-  });
+    for (const listener of runtimeLogListeners.get(file) || []) listener({ type: "chunk", content });
+  } catch (error: any) {
+    runtimeLogFailures.set(file, String(error?.message || error || "日志写入失败").slice(0, 500));
+  }
 }
 
 function replaceLog(file: string, content: string) {
   const safeContent = redactOutput(content);
-  for (const listener of runtimeLogListeners.get(file) || []) listener({ type: "reset", content: safeContent });
-  queueLogWrite(file, async () => {
-    await fs.promises.writeFile(file, safeContent, "utf-8");
+  try {
+    fs.writeFileSync(file, safeContent, "utf-8");
     runtimeLogFailures.delete(file);
-  });
+    for (const listener of runtimeLogListeners.get(file) || []) listener({ type: "reset", content: safeContent });
+  } catch (error: any) {
+    runtimeLogFailures.set(file, String(error?.message || error || "日志初始化失败").slice(0, 500));
+  }
 }
 
 function attachProcessLogs(child: ChildProcess, file: string, profile: ProjectRuntimeProfileV1, observe?: (content: string) => void) {
@@ -910,8 +1183,8 @@ export function testProjectJavaToolchain(project: string, input?: any) {
 function spawnProfileCommand(project: string, profile: ProjectRuntimeProfileV1, command: string) {
   const { workDir } = projectConfig(project);
   const cwd = resolveContainedPath(workDir, profile.modulePath);
-  const invocation = verificationCommandInvocation(command);
-  if (invocation.error) throw new Error(`命令被安全策略拒绝：${invocation.error}`);
+  const invocation = projectRuntimeCommandInvocation(command, cwd);
+  if (invocation.error) throw new Error(`命令被安全策略拒绝：${invocation.error}。未知语言可使用项目目录内的 ./run 或 .\\run.cmd 启动器`);
   const toolchain = resolveProjectJavaToolchainExecution(project);
   let executable = invocation.executable;
   let args = [...invocation.args];
@@ -1053,6 +1326,8 @@ export function startProjectRuntime(project: string, profileId?: unknown) {
   const safeProject = projectConfig(project).project;
   const profile = profileForAction(safeProject, profileId);
   if (!profile.runCommand) throw new Error("当前运行配置没有启动命令");
+  const readiness = projectRuntimeCommandReadiness(safeProject, profile, profile.runCommand);
+  if (!readiness.ready) throw new Error(`${readiness.reason || "项目运行器不可用"}，请安装对应语言运行时或修改运行配置`);
   const key = runtimeKey(safeProject, profile.id);
   const initialState = normalizeProcessStates(safeProject, readState());
   const previous = initialState.processes[key];
@@ -1147,6 +1422,7 @@ export async function stopProjectRuntime(project: string, profileId?: unknown) {
   if (row.status === "unknown" || !liveProcesses.has(key)) throw new Error(row.error || "无法证明 PID 归属，已拒绝停止");
   row.stoppedAt = new Date().toISOString();
   row.stopReason = "user";
+  row.exitCode = null;
   row.status = "stopping";
   writeState(state);
   publishRuntimeEvent("project", "project.runtime.stopping", { project: safeProject, profileId: profile.id, status: "stopping" });
@@ -1255,42 +1531,82 @@ export function buildProjectRuntime(project: string, profileId?: unknown) {
   const { project: safeProject, workDir } = projectConfig(project);
   const profile = profileForAction(safeProject, profileId);
   if (!profile.buildCommand) throw new Error("当前运行配置没有构建命令");
+  const readiness = projectRuntimeCommandReadiness(safeProject, profile, profile.projectType === "cmake" && profile.prepareCommand ? profile.prepareCommand : profile.buildCommand);
+  if (!readiness.ready) throw new Error(`${readiness.reason || "项目构建工具不可用"}，请安装对应语言工具链或修改运行配置`);
   const key = runtimeKey(safeProject, profile.id);
   if (liveBuilds.has(key)) throw new Error("当前运行配置正在构建");
   const persistedBuild = readState().builds[key];
   if (["building", "cancelling"].includes(persistedBuild?.status || "") && processExists(Number(persistedBuild?.pid || 0))) {
     throw new Error("当前运行配置正在构建或停止构建");
   }
-  const { child } = spawnProfileCommand(safeProject, profile, profile.buildCommand);
   const file = logFile(safeProject, profile.id, "build");
   const startedAt = Date.now();
   replaceLog(file, `[${new Date(startedAt).toISOString()}] BUILD ${profile.label}\n`);
-  attachProcessLogs(child, file, profile);
   const state = readState();
-  const row: RuntimeBuildState = { project: safeProject, profileId: profile.id, status: "building", pid: Number(child.pid || 0), managerPid: process.pid, startedAt: new Date(startedAt).toISOString() };
+  const row: RuntimeBuildState = { project: safeProject, profileId: profile.id, status: "building", pid: 0, managerPid: process.pid, startedAt: new Date(startedAt).toISOString() };
+  const commands = profile.projectType === "cmake" && profile.prepareCommand
+    ? [{ phase: "configure", command: profile.prepareCommand }, { phase: "build", command: profile.buildCommand }]
+    : [{ phase: "build", command: profile.buildCommand }];
+  const launch = (index: number) => {
+    const item = commands[index];
+    if (item.phase === "configure") appendLog(file, `[CCM] 正在配置 CMake 构建目录\n`);
+    else if (index > 0) appendLog(file, `[CCM] 配置完成，开始构建\n`);
+    const { child } = spawnProfileCommand(safeProject, profile, item.command);
+    row.pid = Number(child.pid || 0);
+    const latest = readState();
+    latest.builds[key] = { ...row };
+    writeState(latest);
+    liveBuilds.set(key, child);
+    attachProcessLogs(child, file, profile);
+    child.on("error", error => appendLog(file, `\n[ERROR] ${error.message}\n`));
+    child.on("close", code => {
+      if (liveBuilds.get(key) === child) liveBuilds.delete(key);
+      const currentState = readState();
+      const current = currentState.builds[key] || row;
+      const cancelled = current.status === "cancelling" || /已停止|停止失败/.test(String(current.error || ""));
+      if (!cancelled && code === 0 && index + 1 < commands.length) {
+        try { launch(index + 1); }
+        catch (error: any) {
+          current.status = "failed";
+          current.finishedAt = new Date().toISOString();
+          current.error = String(error?.message || error || "后续构建命令启动失败");
+          currentState.builds[key] = current;
+          writeState(currentState);
+          appendLog(file, `\n[ERROR] ${current.error}\n`);
+          publishRuntimeEvent("project", "project.runtime.build_failed", { project: safeProject, profileId: profile.id, status: current.status });
+        }
+        return;
+      }
+      current.status = cancelled ? "failed" : code === 0 ? "succeeded" : "failed";
+      current.exitCode = cancelled ? null : code;
+      current.finishedAt = new Date().toISOString();
+      current.artifacts = !cancelled && code === 0 ? collectArtifacts(workDir, profile.artifactPatterns, startedAt) : [];
+      currentState.builds[key] = current;
+      writeState(currentState);
+      publishRuntimeEvent("project", code === 0 && !cancelled ? "project.runtime.build_succeeded" : "project.runtime.build_failed", { project: safeProject, profileId: profile.id, status: current.status });
+    });
+  };
   state.builds[key] = row;
   writeState(state);
-  liveBuilds.set(key, child);
-  child.on("close", code => {
-    if (liveBuilds.get(key) === child) liveBuilds.delete(key);
-    const latest = readState();
-    const current = latest.builds[key] || row;
-    const cancelled = current.status === "cancelling" || /已停止|停止失败/.test(String(current.error || ""));
-    current.status = cancelled ? "failed" : code === 0 ? "succeeded" : "failed";
-    current.exitCode = cancelled ? null : code;
-    current.finishedAt = new Date().toISOString();
-    current.artifacts = !cancelled && code === 0 ? collectArtifacts(workDir, profile.artifactPatterns, startedAt) : [];
-    latest.builds[key] = current;
-    writeState(latest);
-    publishRuntimeEvent("project", code === 0 ? "project.runtime.build_succeeded" : "project.runtime.build_failed", { project: safeProject, profileId: profile.id, status: current.status });
-  });
+  try { launch(0); }
+  catch (error: any) {
+    const failedState = readState();
+    failedState.builds[key] = {
+      ...row,
+      status: "failed",
+      finishedAt: new Date().toISOString(),
+      error: String(error?.message || error || "构建命令启动失败"),
+    };
+    writeState(failedState);
+    throw error;
+  }
   publishRuntimeEvent("project", "project.runtime.build_started", { project: safeProject, profileId: profile.id, status: "building" });
   return { success: true, profile, build: row };
 }
 
 export function getProjectRuntimeLogs(project: string, profileId: unknown, kind: unknown, lines = 300) {
   const { safeProject, profileId: id, safeKind, file } = runtimeLogTarget(project, profileId, kind);
-  if (!fs.existsSync(file)) return { project: safeProject, profileId: id, kind: safeKind, logs: "" };
+  if (!fs.existsSync(file)) return { project: safeProject, profileId: id, kind: safeKind, logs: "", logWriteError: "" };
   const maxBytes = 1024 * 1024;
   const size = fs.statSync(file).size;
   const length = Math.min(size, maxBytes);
@@ -1299,7 +1615,7 @@ export function getProjectRuntimeLogs(project: string, profileId: unknown, kind:
   try { fs.readSync(handle, buffer, 0, length, Math.max(0, size - length)); }
   finally { fs.closeSync(handle); }
   const content = buffer.toString("utf-8").replace(/^\uFFFD+/, "").split(/\r?\n/).slice(-Math.max(1, Math.min(2000, Number(lines) || 300))).join("\n");
-  return { project: safeProject, profileId: id, kind: safeKind, logs: content, truncated: size > length };
+  return { project: safeProject, profileId: id, kind: safeKind, logs: content, truncated: size > length, logWriteError: runtimeLogFailures.has(file) ? "运行日志写入失败，请重启项目运行" : "" };
 }
 
 export async function getProjectRuntimeLogsAsync(project: string, profileId: unknown, kind: unknown, lines = 300) {
@@ -1313,10 +1629,10 @@ export async function getProjectRuntimeLogsAsync(project: string, profileId: unk
       const buffer = Buffer.alloc(length);
       await handle.read(buffer, 0, length, Math.max(0, stat.size - length));
       const content = buffer.toString("utf-8").replace(/^\uFFFD+/, "").split(/\r?\n/).slice(-Math.max(1, Math.min(2000, Number(lines) || 300))).join("\n");
-      return { project: safeProject, profileId: id, kind: safeKind, logs: content, truncated: stat.size > length };
+      return { project: safeProject, profileId: id, kind: safeKind, logs: content, truncated: stat.size > length, logWriteError: runtimeLogFailures.has(file) ? "运行日志写入失败，请重启项目运行" : "" };
     } finally { await handle.close(); }
   } catch (error: any) {
-    if (String(error?.code || "") === "ENOENT") return { project: safeProject, profileId: id, kind: safeKind, logs: "", truncated: false };
+    if (String(error?.code || "") === "ENOENT") return { project: safeProject, profileId: id, kind: safeKind, logs: "", truncated: false, logWriteError: "" };
     throw error;
   }
 }
@@ -1341,7 +1657,11 @@ export function getProjectRuntimeSnapshot(project: string) {
     success: true,
     project: safeProject,
     display_name: projectDisplayName(safeProject),
-    profiles: config.profiles,
+    profiles: config.profiles.map(profile => ({
+      ...profile,
+      run_readiness: projectRuntimeCommandReadiness(safeProject, profile, profile.runCommand),
+      build_readiness: projectRuntimeCommandReadiness(safeProject, profile, profile.buildCommand),
+    })),
     selected_profile_id: config.selectedProfileId,
     toolchain: config.toolchain,
     toolchain_candidates: toolchainCandidates,

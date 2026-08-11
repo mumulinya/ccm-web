@@ -42,7 +42,13 @@ export function useGroupChatMessaging({ messages, currentGroup, currentGroupSess
 
   const mergeIncomingMessage = (msg) => {
     if (!msg || msg.content?.startsWith('📤')) return false
-    const existingIndex = messages.value.findIndex(m => (msg.id && m.id === msg.id) || isEquivalentMessage(m, msg))
+    const incomingExecutionAnchor = String(msg.execution_anchor_message_id || msg.executionAnchorMessageId || '')
+    const existingIndex = messages.value.findIndex(m => {
+      if (msg.id && m.id === msg.id) return true
+      const currentExecutionAnchor = String(m.execution_anchor_message_id || m.executionAnchorMessageId || '')
+      if (incomingExecutionAnchor && currentExecutionAnchor === incomingExecutionAnchor) return true
+      return isEquivalentMessage(m, msg)
+    })
     if (existingIndex >= 0) {
       const current = messages.value[existingIndex]
       // 重连或轮询可能带回旧代次的投影；旧 generation 只能留在后端审计，不能覆盖当前卡片。

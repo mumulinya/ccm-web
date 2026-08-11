@@ -190,12 +190,23 @@ try {
   ok(walDeletion.typedMemoryDispatchWalArtifacts.deletedFiles >= 1, "group session deletion must remove typed-memory dispatch WAL directory");
   equal(fs.existsSync(cancelledWal.file), false, "deleted group session must leave no dispatch WAL file");
 
-  const serverSource = fs.readFileSync(path.join(root, "backend", "server.ts"), "utf-8");
+  // 启动恢复已抽到 server-bootstrap.ts；保留 server.ts 兼容读取以覆盖旧发行版。
+  const serverSource = ["server-bootstrap.ts", "server.ts"]
+    .map(name => fs.readFileSync(path.join(root, "backend", name), "utf-8"))
+    .join("\n");
   const walRecoveryIndex = serverSource.indexOf("recoverChildTypedMemoryDispatchWal()")
   const invocationRecoveryIndex = serverSource.indexOf("reconcileTaskAgentInvocationRecovery()")
   const queueResumeIndex = serverSource.indexOf("resumeTaskQueues(startupCollabCtx)")
   ok(walRecoveryIndex >= 0 && walRecoveryIndex < invocationRecoveryIndex && invocationRecoveryIndex < queueResumeIndex, "startup must recover WAL then invocation lineage before queue resume");
-  const collaborationSource = fs.readFileSync(path.join(root, "backend", "modules", "collaboration", "collaboration.ts"), "utf-8");
+  // 协作执行路径已按职责拆分到 collaboration-cross-agents、task-executor 和 routes。
+  const collaborationSource = [
+    "collaboration.ts",
+    "collaboration-cross-agents.ts",
+    "collaboration-task-executor.ts",
+    "collaboration-routes.ts",
+  ].map(name => {
+    try { return fs.readFileSync(path.join(root, "backend", "modules", "collaboration", name), "utf-8"); } catch { return ""; }
+  }).join("\n");
   for (const marker of ["typedMemoryDispatchWalRecord", "directTypedMemoryDispatchWalRecord", "autoAssignTypedMemoryDispatchWalRecord"]) {
     ok(collaborationSource.includes(`typedMemoryDispatchWalRecord: ${marker}?.record_checksum`) || collaborationSource.includes(`typedMemoryDispatchWalRecordChecksum: ${marker}?.record_checksum`), `${marker} must bind WAL checksum into invocation edge`);
   }

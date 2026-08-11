@@ -14,6 +14,7 @@ import {
   sendJson,
   GROUP_MESSAGES_DIR,
 } from "../../core/utils";
+import { filterAccessibleResources } from "../system/access-policy";
 import {
   getConfigs,
   loadTasks,
@@ -2324,7 +2325,12 @@ export function handleBasicGroupRoutes(
   const pathname = parsed.pathname;
 
   if (pathname === "/api/groups" && req.method === "GET") {
-    sendJson(res, { groups: loadGroups().map(publicGroupWithoutTestTargetSecrets) });
+    const groups = loadGroups().map(publicGroupWithoutTestTargetSecrets);
+    const principal = (req as any).ccmAuth;
+    const visibleGroups = principal?.kind === "browser"
+      ? filterAccessibleResources(groups, principal.userId, principal.role, "group", item => String(item.id || ""))
+      : groups;
+    sendJson(res, { groups: visibleGroups });
     return true;
   }
 

@@ -54,6 +54,7 @@ const global_terminal_delivery_1 = require("../../agents/global/global-terminal-
 const task_conversation_links_1 = require("../../system/task-conversation-links");
 const secure_multipart_1 = require("../../system/secure-multipart");
 const automation_session_bindings_1 = require("../../system/automation-session-bindings");
+const access_policy_1 = require("../system/access-policy");
 function normalizeGlobalRequestedTargets(value, message = "") {
     let rows = value;
     if (typeof rows === "string") {
@@ -190,6 +191,11 @@ function createGlobalAgentApi(deps) {
         drainingGlobalWebTurns.add(sessionId);
         try {
             while (true) {
+                const occupied = listGlobalAgentRuns({ sessionId, limit: 20 })
+                    .some((run) => ["running", "executing", "supervising", "paused", "waiting_clarification", "waiting_user", "blocked", "interrupted", "recovering"]
+                    .includes(String(run?.status || "").toLowerCase()));
+                if (occupied)
+                    break;
                 const turn = conversationTurnControl.claim({ scope: "global", conversation_id: sessionId });
                 if (!turn)
                     break;
@@ -249,6 +255,17 @@ function createGlobalAgentApi(deps) {
         globalWebTurnRecoveryTimer = null;
     };
     function handleGlobalAgentApi(pathname, req, res, parsed, ctx) {
+        if (pathname === "/api/global-agent/dispatch-targets" && req.method === "GET") {
+            const principal = (0, api_access_control_1.requestAccessPrincipal)(req);
+            const targets = (0, automation_session_bindings_1.listGlobalDispatchTargets)().filter((item) => {
+                if (principal?.kind !== "browser" || principal.role === "admin")
+                    return true;
+                const type = String(item.scope || "").toLowerCase() === "group" ? "group" : "project";
+                return (0, access_policy_1.hasResourceAccess)(principal.userId, principal.role, type, String(item.scopeId || ""), "use");
+            });
+            sendJson(res, { success: true, targets });
+            return true;
+        }
         if (pathname === "/api/global-agent/history" && req.method === "POST") {
             let body = "";
             req.on("data", (chunk) => body += chunk);
@@ -1332,6 +1349,7 @@ function createGlobalAgentApi(deps) {
                 let reliabilityOperationAcquired = false;
                 let streamRequestId = "";
                 let streamSequence = 0;
+                let visibleTextEmitted = false;
                 let activeTurn = null;
                 let activeSessionId = "";
                 if (isStream) {
@@ -1347,11 +1365,26 @@ function createGlobalAgentApi(deps) {
                 const emit = (event) => {
                     if (!isStream || res.writableEnded)
                         return;
+                    if (event?.type === "text" && String(event?.text || "").trim())
+                        visibleTextEmitted = true;
                     const ui = event?.ui === undefined ? buildGlobalAgentEventUi(event) : event.ui;
                     const sequence = ++streamSequence;
                     const eventId = String(event?.event_id || event?.eventId || `${streamRequestId || "global-stream"}:${sequence}`);
                     const payloadWithOrder = { ...event, event_id: eventId, eventId, sequence, ...(ui ? { ui } : {}) };
                     res.write(`data: ${JSON.stringify(payloadWithOrder)}\n\n`);
+                    res.flush?.();
+                };
+                const streamBufferedGlobalReply = async (content) => {
+                    const characters = Array.from(String(content || ""));
+                    const chunkSize = characters.length > 2400 ? 36 : characters.length > 800 ? 24 : 16;
+                    for (let offset = 0; offset < characters.length; offset += chunkSize) {
+                        if (res.destroyed || res.writableEnded)
+                            break;
+                        emit({ type: "text", text: characters.slice(offset, offset + chunkSize).join("") });
+                        if (offset + chunkSize < characters.length) {
+                            await new Promise(resolve => setTimeout(resolve, 14));
+                        }
+                    }
                 };
                 try {
                     let message = String(payload.message || "").trim();
@@ -1370,6 +1403,12 @@ function createGlobalAgentApi(deps) {
                         ? `请处理已上传的 ${files.length} 份资料：${files.map((file) => file.filename || "附件").join("、")}`
                         : message);
                     const requestedTargetRefs = normalizeGlobalRequestedTargets(payload.target_refs || payload.targetRefs, originalMessage || message);
+                    const requestPrincipal = (0, api_access_control_1.requestAccessPrincipal)(req);
+                    if (requestPrincipal?.kind === "browser" && requestPrincipal.role !== "admin") {
+                        const forbidden = requestedTargetRefs.find((target) => !(0, access_policy_1.hasResourceAccess)(requestPrincipal.userId, requestPrincipal.role, String(target.scope || "") === "group" ? "group" : "project", String(target.scopeId || ""), "use"));
+                        if (forbidden)
+                            throw new Error("当前账户没有所选项目或群聊的任务派发权限");
+                    }
                     const sourceFiles = (0, global_agent_attachments_1.serializeGlobalRequestAttachments)(files);
                     if (!message)
                         throw new Error("消息不能为空");
@@ -1466,6 +1505,9 @@ function createGlobalAgentApi(deps) {
                             }
                         },
                     });
+                    if (isStream && !visibleTextEmitted && String(run.final_reply || "").trim()) {
+                        await streamBufferedGlobalReply(run.final_reply);
+                    }
                     conversationTurnControl.settle({
                         id: activeTurn.id,
                         status: run.status === "failed" ? "failed" : "completed",

@@ -21,6 +21,12 @@ const defaultToolchain = () => ({
   offline: false,
 })
 const toolchain = ref(defaultToolchain())
+const runtimeTypes = [
+  ['custom', '自定义 / 其他'], ['node', 'Node.js'], ['python', 'Python'], ['maven', 'Java · Maven'],
+  ['gradle', 'Java · Gradle'], ['go', 'Go'], ['rust', 'Rust'], ['dotnet', '.NET'], ['php', 'PHP'],
+  ['ruby', 'Ruby'], ['elixir', 'Elixir'], ['dart', 'Dart / Flutter'], ['deno', 'Deno'], ['swift', 'Swift'],
+  ['docker', 'Docker Compose'], ['make', 'Make'], ['cmake', 'CMake'], ['jvm', 'Scala / Clojure'],
+]
 
 watch(() => props.snapshot, value => {
   profiles.value = JSON.parse(JSON.stringify(value?.profiles || []))
@@ -31,6 +37,7 @@ watch(() => props.snapshot, value => {
 const jdkCandidates = computed(() => props.snapshot?.toolchain_candidates?.jdk || [])
 const mavenCandidates = computed(() => props.snapshot?.toolchain_candidates?.maven || [])
 const wrapperAvailable = computed(() => props.snapshot?.toolchain_candidates?.wrapper?.available === true)
+const hasJavaProfiles = computed(() => profiles.value.some(profile => ['maven', 'gradle'].includes(profile.projectType)))
 
 const addProfile = () => {
   const id = `manual_${Date.now().toString(36)}`
@@ -65,7 +72,7 @@ const resultText = result => String(result?.output || result?.error || '未返�
         <button @click="addProfile"><Plus :size="15" />添加配置</button>
       </div>
 
-      <section class="toolchain-panel">
+      <section v-if="hasJavaProfiles" class="toolchain-panel">
         <div class="toolchain-heading">
           <div class="toolchain-icon"><Cpu :size="18" /></div>
           <div>
@@ -152,9 +159,9 @@ const resultText = result => String(result?.output || result?.error || '未返�
           </div>
           <div class="field-grid">
             <label>名称<input v-model="profile.label" maxlength="100"></label>
-            <label>类型
+            <label>项目类型
               <select v-model="profile.projectType">
-                <option v-for="type in ['node','maven','gradle','go','rust','dotnet','custom']" :key="type" :value="type">{{ type }}</option>
+                <option v-for="type in runtimeTypes" :key="type[0]" :value="type[0]">{{ type[1] }}</option>
               </select>
             </label>
             <label>模块目录<input v-model="profile.modulePath" placeholder="."></label>
@@ -163,6 +170,7 @@ const resultText = result => String(result?.output || result?.error || '未返�
           <label>启动命令<input v-model="profile.runCommand" spellcheck="false" placeholder="例如 npm run dev"></label>
           <label>构建命令<input v-model="profile.buildCommand" spellcheck="false" placeholder="例如 npm run build 或 mvn package"></label>
           <label>产物路径<input :value="(profile.artifactPatterns || []).join(', ')" spellcheck="false" placeholder="dist, target/*.jar" @input="profile.artifactPatterns = $event.target.value.split(',').map(item => item.trim()).filter(Boolean)"></label>
+          <p class="profile-help">支持任意已安装的常见语言运行器；其他语言可把启动器放在项目目录内，并填写 <code>./run</code> 或 <code>.\\run.cmd</code>。命令始终在所选模块目录中运行。</p>
         </article>
       </div>
 
@@ -203,10 +211,13 @@ header > div { flex:1; min-width:0; } h3 { margin:0; font-size:16px; } p { margi
 .profile.stale { border-color:#f59e0b; }
 .profile-top { display:flex; align-items:center; gap:10px; margin-bottom:10px; color:var(--text-muted); font-size:11px; }
 .profile-top .danger { margin-left:auto; color:#dc2626; }
+.profile-help { margin:1px 0 0; color:var(--text-muted); font-size:9.5px; line-height:1.5; }
+.profile-help code { padding:1px 4px; border-radius:4px; background:var(--bg-secondary); color:var(--text-secondary); }
 .enabled { display:flex; flex-direction:row; align-items:center; gap:6px; }
 .field-grid { display:grid; grid-template-columns:minmax(0,2fr) minmax(110px,1fr) minmax(0,1.5fr) minmax(110px,1fr); gap:9px; }
 label { display:flex; flex-direction:column; gap:5px; margin-bottom:9px; color:var(--text-secondary); font-size:11px; font-weight:650; }
-input,select { width:100%; height:34px; padding:0 9px; border:1px solid var(--border-color); border-radius:6px; background:var(--surface); color:var(--text-primary); font:inherit; font-weight:500; }
+input,select { width:100%; height:var(--control-height,34px); padding:0 var(--control-padding-x,10px); border:1px solid var(--border-color); border-radius:var(--radius-md,6px); background:var(--control-bg); color:var(--text-primary); font:inherit; font-weight:500; outline:0; transition:border-color .15s ease,box-shadow .15s ease; }
+input:focus,select:focus { border-color:var(--accent-blue); box-shadow:var(--focus-ring); }
 input:disabled,select:disabled { opacity:.55; cursor:not-allowed; background:var(--bg-secondary); }
 button { height:34px; display:inline-flex; align-items:center; justify-content:center; gap:6px; padding:0 11px; border:1px solid var(--border-color); border-radius:6px; background:var(--surface); color:var(--text-primary); cursor:pointer; }
 button.icon { width:34px; padding:0; } button:disabled { opacity:.45; cursor:not-allowed; } button.primary { border-color:#2563eb; background:#2563eb; color:white; }

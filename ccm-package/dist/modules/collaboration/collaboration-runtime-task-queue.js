@@ -185,7 +185,9 @@ exports.TASK_WATCHDOG_STALE_MS = 15 * 60 * 1000;
 exports.TASK_WATCHDOG_GAP_REWORK_COOLDOWN_MS = 60 * 1000;
 exports.TASK_WATCHDOG_GAP_REWORK_MAX = 3;
 exports.TASK_WATCHDOG_RECOVERY_MAX = 3;
-exports.AGENT_RECOVERY_PROBE_INTERVAL_MS = 5 * 60 * 1000;
+// Side-effect-free local readiness scheduler. Recovery tasks carry their own
+// 30s/2m/5m due time; this short tick only notices that the due time arrived.
+exports.AGENT_RECOVERY_PROBE_INTERVAL_MS = 5 * 1000;
 exports.AGENT_RECOVERY_PROBE_TIMEOUT_MS = 45 * 1000;
 exports.AGENT_PROBE_SUCCESS_FRESH_MS = 30 * 60 * 1000;
 exports.AGENT_PROBE_FAILURE_BLOCK_MS = 15 * 60 * 1000;

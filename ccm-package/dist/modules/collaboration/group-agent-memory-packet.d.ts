@@ -261,6 +261,8 @@ export declare function recoverDeliveryReceiptFromRunnerWal(record: any): {
                 captured_at: string;
             };
             transport_mode: string;
+            session_continuity_mode: string;
+            native_session_reused: boolean;
             plan_checksum: string;
             manifest_checksum: string;
             input_tokens: number;

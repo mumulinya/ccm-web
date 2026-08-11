@@ -37,9 +37,49 @@ function parseToolName(input) {
         inspect_notebook: "Inspect notebook", web_search: "Web search", web_fetch: "Web fetch",
     };
     const label = labels[normalized] || operation.replace(/[_-]+/g, " ").replace(/^./, character => character.toUpperCase());
+    const userLabels = {
+        list_directory: "查找目录", glob_files: "查找文件", grep_text: "搜索代码", read_file: "读取文件",
+        read_project_config: "读取项目配置", read_git_status: "检查 Git 状态", read_git_diff: "查看 Git 差异", read_git_history: "查看 Git 历史",
+        read_runtime_status: "读取运行状态", read_runtime_logs: "读取项目日志", workspace_symbols: "查找工作区符号", document_symbols: "查找文件符号",
+        find_definition: "查找定义", find_references: "查找引用", find_implementations: "查找实现", find_type_definition: "查找类型定义",
+        find_incoming_calls: "查找调用方", find_outgoing_calls: "查找被调用项", read_code_diagnostics: "读取代码诊断",
+        query_knowledge: "搜索知识库", tool_search: "搜索工具", invoke_skill: "运行技能", inspect_notebook: "检查 Notebook",
+        web_search: "搜索网页", web_fetch: "读取网页",
+    };
+    let family = "other";
+    if (/dispatch|test_agent|agent_/i.test(canonicalName))
+        family = "agent";
+    else if (/test|build|lint|typecheck|verify|verification|maven|gradle/.test(normalized))
+        family = "verify";
+    else if (/git|diff|commit|branch|status/.test(normalized))
+        family = "git";
+    else if (/find_definition|find_references|find_implementations|find_type_definition|find_incoming_calls|find_outgoing_calls|workspace_symbols|document_symbols|diagnostic/.test(normalized))
+        family = "symbol";
+    else if (/glob|grep|search|find_files|query_knowledge|tool_search/.test(normalized))
+        family = "search";
+    else if (/read|list|inspect_notebook/.test(normalized))
+        family = "read";
+    else if (/bash|powershell|shell|command|terminal|exec|run_terminal/.test(normalized))
+        family = "terminal";
+    else if (/mcp|http|request|external|browser|web_/.test(normalized) || serverLabel)
+        family = "external";
+    const userLabel = userLabels[normalized]
+        || (family === "verify" ? (/maven/.test(normalized) ? "运行 Maven 构建" : /gradle/.test(normalized) ? "运行 Gradle 构建" : `运行 ${label}`)
+            : family === "terminal" ? "运行项目命令"
+                : family === "git" ? "检查 Git 状态"
+                    : family === "agent" ? "执行 Agent 操作"
+                        : family === "external" ? "调用外部工具" : label);
     const category = /dispatch|test_agent|agent_/i.test(canonicalName)
         ? "agent" : normalized === "invoke_skill" ? "skill" : serverLabel ? "mcp" : "builtin";
-    return { canonicalName, operation: normalized, label, serverLabel, category };
+    return { canonicalName, operation: normalized, label, userLabel, family, serverLabel, category };
+}
+function redactedCommand(args) {
+    const value = args.command ?? args.script ?? args.shellCommand ?? args.shell_command ?? args.cmd;
+    if (value == null)
+        return "";
+    return cleanText(value, 1_000)
+        .replace(/(^|\s)([A-Z_][A-Z0-9_]*(?:=|:))[^\s]+/g, "$1$2[redacted]")
+        .replace(/((?:password|passwd|token|secret|api[_-]?key|access[_-]?key)\s*[:=]\s*)[^\s]+/gi, "$1[redacted]");
 }
 const argumentLabels = {
     project_id: "项目", projectId: "项目", path: "路径", pattern: "检索内容", query: "查询",
@@ -164,11 +204,16 @@ function buildToolDisplayDetail(input) {
     return {
         schema: TOOL_DISPLAY_SCHEMA,
         tool: {
+            name: parsed.canonicalName,
             label: parsed.label,
+            userLabel: parsed.userLabel,
+            family: parsed.family,
             category: parsed.category,
             ...(parsed.serverLabel ? { serverLabel: parsed.serverLabel } : {}),
             ...(targetFromArgs(args) ? { target: targetFromArgs(args) } : {}),
         },
+        ...(input.includeTechnicalCommand && parsed.family === "terminal" && redactedCommand(args)
+            ? { sensitiveCommand: redactedCommand(args) } : {}),
         arguments: Object.entries(args).slice(0, 40).map(([key, value]) => ({
             label: argumentLabels[key] || key.replace(/_/g, " "),
             value: SECRET_KEYS.test(key) ? "[redacted]" : safeValue(value),

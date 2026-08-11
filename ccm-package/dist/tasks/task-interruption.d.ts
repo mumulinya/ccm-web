@@ -1,4 +1,21 @@
-export type TaskInterruptionReason = "user_interrupt" | "temporary_network" | "provider_overload" | "provider_unavailable" | "service_restart" | "lease_lost" | "service_draining" | "unknown";
+export type TaskInterruptionReason = "user_interrupt" | "temporary_network" | "provider_overload" | "provider_unavailable" | "model_stream_interrupted" | "agent_runtime_unavailable" | "service_restart" | "lease_lost" | "service_draining" | "unknown";
+export type TaskResumeCheckpointV1 = {
+    phase: string;
+    workItemId?: string;
+    reviewRound?: number;
+    planChecksum: string;
+    workspaceChecksum?: string;
+    completedWorkItemIds: string[];
+    summaryPending?: boolean;
+};
+export type TaskRecoveryScheduleV1 = {
+    mode: "safe_auto" | "manual";
+    state: "waiting_provider" | "waiting_agent" | "validating" | "queued" | "needs_user";
+    attempt: number;
+    maxAttempts: number;
+    nextRetryAt?: string;
+};
+export declare const TASK_RECOVERY_BACKOFF_MS: readonly [30000, 120000, 300000];
 export type TaskInterruptionReceiptV1 = {
     schema: "ccm-task-interruption-receipt-v1";
     version: 1;
@@ -8,6 +25,8 @@ export type TaskInterruptionReceiptV1 = {
     reason: string;
     actor: string;
     checkpoint: string;
+    resume_checkpoint?: TaskResumeCheckpointV1;
+    recovery?: TaskRecoveryScheduleV1;
     execution_attempt: number;
     workspace_checksum: string;
     task_agent_sessions: Array<{
@@ -35,6 +54,12 @@ export type TaskRecoveryDecisionV1 = {
     decided_at: string;
     checksum: string;
 };
+export declare function buildTaskRecoverySchedule(input: {
+    reasonCode: TaskInterruptionReason;
+    attempt?: number;
+    autoResumeAllowed?: boolean;
+    now?: number;
+}): TaskRecoveryScheduleV1;
 export declare function buildTaskInterruptionReceipt(input: {
     task: any;
     reasonCode?: TaskInterruptionReason;
@@ -43,18 +68,22 @@ export declare function buildTaskInterruptionReceipt(input: {
     checkpoint?: string;
     sideEffectState?: "none" | "committed" | "uncertain";
     workspaceChecksum?: string;
+    resumeCheckpoint?: TaskResumeCheckpointV1;
+    recovery?: TaskRecoveryScheduleV1;
     processTerminationProven?: boolean;
 }): {
     checksum: string;
     version: 1;
     task_id: string;
     reason: string;
-    schema: "ccm-task-interruption-receipt-v1";
     recoverable: boolean;
+    recovery?: TaskRecoveryScheduleV1;
+    schema: "ccm-task-interruption-receipt-v1";
     actor: string;
     receipt_id: string;
     reason_code: TaskInterruptionReason;
     checkpoint: string;
+    resume_checkpoint?: TaskResumeCheckpointV1;
     execution_attempt: number;
     workspace_checksum: string;
     task_agent_sessions: Array<{
@@ -75,12 +104,14 @@ export declare function interruptTaskExecution(input: Parameters<typeof buildTas
         version: 1;
         task_id: string;
         reason: string;
-        schema: "ccm-task-interruption-receipt-v1";
         recoverable: boolean;
+        recovery?: TaskRecoveryScheduleV1;
+        schema: "ccm-task-interruption-receipt-v1";
         actor: string;
         receipt_id: string;
         reason_code: TaskInterruptionReason;
         checkpoint: string;
+        resume_checkpoint?: TaskResumeCheckpointV1;
         execution_attempt: number;
         workspace_checksum: string;
         task_agent_sessions: Array<{

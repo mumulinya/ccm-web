@@ -42,16 +42,16 @@ const os = __importStar(require("os"));
 const utils_1 = require("../../core/utils");
 const local_auth_1 = require("./local-auth");
 const internal_api_auth_1 = require("./internal-api-auth");
+const access_policy_1 = require("./access-policy");
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
+// Routes here expose account or credential material and are never delegated.
+// Other settings, terminal, tool and maintenance routes are guarded by their
+// feature module so an administrator can explicitly grant those capabilities.
 const ADMIN_GET = [
-    /^\/api\/auth\/(?:users|sessions)(?:\/|$)/,
-    /^\/api\/(?:terminal|logs|security|credentials|cleanup)(?:\/|$)/,
-    /^\/api\/(?:settings|orchestrator|agent-provider|development-agents)(?:\/|$)/,
-    /^\/api\/system\/settings-status(?:\/|$)/,
-    /^\/api\/tools\/(?:marketplace|catalog|authorization-inventory)(?:\/|$)/,
+    /^\/api\/auth\/users(?:\/|$)/,
+    /^\/api\/(?:security\/credentials|credentials)(?:\/|$)/,
+    // Marketplace and Smithery installation endpoints remain administrator-only.
     /^\/api\/(?:marketplace|smithery)(?:\/|$)/,
-    /^\/api\/reliability(?:\/|$)/,
-    /^\/api\/navigation\/default(?:\/|$)/,
 ];
 const OPERATOR_GET = [
     /^\/api\/metrics\/events(?:\/|$)/,
@@ -94,6 +94,8 @@ const OPERATOR_MUTATIONS = [
     /^\/api\/music\/(?:chat|search|playback|remote-command|queue|history|playlists)(?:\/|$)/,
 ];
 const ADMIN_ONLY_MUTATIONS = [
+    /^\/api\/projects\/(?:create|delete)(?:\/|$)/,
+    /^\/api\/groups\/(?:create|delete)(?:\/|$)/,
     /^\/api\/tasks\/permission-requests\/(?:decide|approve|reject)(?:\/|$)/,
     /^\/api\/permissions(?:\/|$)/,
     /^\/api\/tasks\/(?:purge|logs\/clear|runtime-debt\/cleanup)(?:\/|$)/,
@@ -139,25 +141,23 @@ function authorizeApiRequest(req, res, pathnameWithQuery) {
     const role = auth.user.role;
     let allowed = role === "admin";
     let readOnly = false;
-    if (SAFE_METHODS.has(method)) {
-        allowed = role === "admin"
-            || (!matches(ADMIN_GET, pathname) && (!matches(OPERATOR_GET, pathname) || role === "operator"));
+    if (!allowed && matches(SELF_SERVICE_MUTATIONS, pathname))
+        allowed = true;
+    // Project/group lists are a filtered resource picker shared by the workspace,
+    // code tools and terminal.  Returning only granted resources lets those
+    // modules work independently without exposing the full inventory.
+    if (!allowed && method === "GET" && /^\/api\/(?:projects|groups)(?:\/)?$/.test(pathname)) {
+        allowed = ["resource_workspace", "developer_tools", "terminal_ops", "workbench"].some(module => (0, access_policy_1.hasFeatureAccess)(auth.user.id, role, module));
     }
-    else if (matches(SELF_SERVICE_MUTATIONS, pathname))
-        allowed = true;
-    else if (role === "operator" && !matches(ADMIN_ONLY_MUTATIONS, pathname) && matches(OPERATOR_MUTATIONS, pathname))
-        allowed = true;
-    else if (role === "viewer" && matches(VIEWER_CHAT, pathname)) {
-        allowed = true;
-        readOnly = true;
+    if (!allowed && /^\/api\/task-templates(?:\/|$)/.test(pathname)) {
+        allowed = ["workbench", "schedule_ops"].some(module => (0, access_policy_1.hasFeatureAccess)(auth.user.id, role, module));
     }
-    if (allowed && role === "operator") {
-        const requirement = CAPABILITY_BY_OPERATOR_ROUTE.find(item => item.pattern.test(pathname));
-        if (requirement && !auth.capabilities.includes(requirement.capability))
-            allowed = false;
+    if (!allowed && !matches(ADMIN_GET, pathname) && !matches(ADMIN_ONLY_MUTATIONS, pathname)) {
+        const feature = (0, access_policy_1.featureForApi)(pathname);
+        allowed = !!feature && (0, access_policy_1.hasFeatureAccess)(auth.user.id, role, feature);
     }
     if (!allowed) {
-        (0, utils_1.sendJson)(res, { success: false, error: role === "viewer" ? "当前账户仅允许查看和只读问答" : "当前账户没有执行此操作的权限", code: "RBAC_FORBIDDEN", required_role: role === "viewer" ? "operator" : "admin" }, 403);
+        (0, utils_1.sendJson)(res, { success: false, error: "当前账户没有使用此功能的权限", code: "FEATURE_ACCESS_DENIED" }, 403);
         return false;
     }
     req.ccmAuth = { kind: "browser", userId: auth.user.id, role, capabilities: auth.capabilities, sessionId: auth.session.id, readOnly };

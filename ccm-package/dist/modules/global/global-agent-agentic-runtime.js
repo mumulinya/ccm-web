@@ -100,6 +100,10 @@ function createGlobalAgentAgenticRuntime(deps) {
         "memory_context_boundary",
         "context_source_manifest",
         "context_boundary_proof",
+        // Routing-only target hints are part of the global context contract. They
+        // contain names and scoped ids only; the boundary validator must allow the
+        // same projection that buildAgenticContext emits.
+        "requested_dispatch_targets",
     ]);
     function globalAgentContextProofPayload(context = {}) {
         const payload = { ...(context || {}) };
@@ -542,7 +546,7 @@ function createGlobalAgentAgenticRuntime(deps) {
             }
             return {
                 state: "answer",
-                message: "当前统一大模型不可用。我不会依据关键词擅自操作项目；请先检查统一大模型配置后再试。",
+                message: "大模型暂时不可用，本次请求未开始。请检查模型配置或网络后重试。",
                 tool: null,
                 intent: {
                     category: "question",
@@ -565,7 +569,7 @@ function createGlobalAgentAgenticRuntime(deps) {
         if (fallbackRisk !== "read" && !deterministicUiTools.has(toolName)) {
             return {
                 state: "answer",
-                message: "当前统一大模型不可用。规则兜底只允许只读查询和界面动作，不会依据关键词执行任何数据写入、任务派发或项目修改。请恢复统一大模型配置后再执行该操作。",
+                message: "大模型暂时不可用，本次操作未开始。请检查模型配置或网络后重试。",
                 tool: null,
                 intent: { category: "ambiguous", goal: run.user_message, action_required: false, confidence: 0.2, authorization_basis: "none", reason: "模型不可用，禁止关键词规则代替语义决策执行写操作" },
             };

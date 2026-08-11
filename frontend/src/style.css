@@ -1169,9 +1169,7 @@ textarea {
 }
 
 /* Native browser controls must follow the selected CCM theme as well. */
-input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]),
-textarea,
-select {
+:where(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]), textarea, select) {
   border-color: var(--border-color);
   background-color: var(--control-bg);
   color: var(--text-primary);
@@ -1437,31 +1435,44 @@ button:disabled {
   padding: 0;
 }
 
-input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
-select,
-textarea,
-.select,
-.commit-input,
-.search-input {
+:where(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), select, textarea, .select, .commit-input, .search-input) {
   min-height: 34px;
-  background: var(--surface);
+  box-sizing: border-box;
+  padding: 0 var(--control-padding-x, 10px);
+  background: var(--control-bg);
   color: var(--text-primary);
   border: 1px solid var(--border-color);
-  border-radius: 6px;
+  border-radius: var(--radius-md, 6px);
   box-shadow: none;
   outline: none;
   backdrop-filter: none;
   font-size: 13px;
+  transition: border-color .15s ease, background-color .15s ease, box-shadow .15s ease;
 }
 
-input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):focus,
-select:focus,
-textarea:focus,
-.select:focus,
-.commit-input:focus,
-.search-input:focus {
+:where(textarea) {
+  min-height: 76px;
+  padding-block: 9px;
+  line-height: 1.5;
+}
+
+:where(select) {
+  padding-right: 30px;
+}
+
+:where(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):focus, select:focus, textarea:focus, .select:focus, .commit-input:focus, .search-input:focus) {
   border-color: var(--accent-blue);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-blue) 18%, transparent);
+  box-shadow: var(--focus-ring, 0 0 0 3px color-mix(in srgb, var(--accent-blue) 18%, transparent));
+}
+
+:where(input:not([type="checkbox"]):not([type="radio"]):read-only, textarea:read-only) {
+  background: var(--panel-muted);
+  color: var(--text-secondary);
+}
+
+:where(input[aria-invalid="true"], select[aria-invalid="true"], textarea[aria-invalid="true"]) {
+  border-color: var(--accent-red);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-red) 14%, transparent);
 }
 
 label,
@@ -1925,12 +1936,7 @@ label,
   color: #c3d4c4;
 }
 
-[data-theme="dark"] input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
-[data-theme="dark"] select,
-[data-theme="dark"] textarea,
-[data-theme="dark"] .select,
-[data-theme="dark"] .commit-input,
-[data-theme="dark"] .search-input {
+[data-theme="dark"] :where(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), select, textarea, .select, .commit-input, .search-input) {
   background: var(--control-bg);
 }
 

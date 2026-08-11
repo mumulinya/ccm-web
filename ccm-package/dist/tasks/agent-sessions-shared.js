@@ -41,6 +41,7 @@ exports.saveStore = saveStore;
 exports.createNativeSessionId = createNativeSessionId;
 exports.safeStringify = safeStringify;
 exports.hashValue = hashValue;
+exports.buildTaskAgentContinuityBinding = buildTaskAgentContinuityBinding;
 exports.safeReadJson = safeReadJson;
 exports.writeJsonAtomic = writeJsonAtomic;
 exports.sleepForStoreLock = sleepForStoreLock;
@@ -183,6 +184,23 @@ function safeStringify(value) {
 }
 function hashValue(value, len = 24) {
     return crypto.createHash("sha256").update(typeof value === "string" ? value : safeStringify(value)).digest("hex").slice(0, len);
+}
+function buildTaskAgentContinuityBinding(input) {
+    const scope = input.scope;
+    const scopeId = String(input.scopeId || "").trim();
+    const exactSessionId = String(input.exactSessionId || "").trim();
+    const project = String(input.project || "").trim();
+    const agentType = (0, runtime_1.normalizeAgentRuntimeId)(input.agentType);
+    if (!scopeId || !exactSessionId || !project || !agentType)
+        return null;
+    return {
+        key: `tac_${hashValue([scope, scopeId, exactSessionId, project, agentType], 28)}`,
+        scope,
+        scopeId,
+        exactSessionId,
+        project,
+        agentType,
+    };
 }
 function safeReadJson(file, fallback = null) {
     try {

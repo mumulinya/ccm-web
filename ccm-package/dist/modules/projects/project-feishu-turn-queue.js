@@ -138,7 +138,7 @@ function startProjectFeishuTurnRecoveryForServer(baseUrl) {
     if (recoveryTimer)
         return { started: false };
     const tick = () => {
-        const queued = conversation_turn_control_1.conversationTurnControl.list({ scope: "project", statuses: "queued", limit: 500 }).turns
+        const queued = conversation_turn_control_1.conversationTurnControl.listInternal({ scope: "project", statuses: "queued", limit: 500 }).turns
             .filter((turn) => turn.metadata?.kind === "project_feishu_turn_v2");
         const exactScopes = new Map();
         for (const turn of queued) {

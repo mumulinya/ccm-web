@@ -113,6 +113,18 @@ export type TaskAgentSession = {
     modelCapabilityCheckedAt?: string;
     modelIdentityHistory?: any[];
     providerContractId?: string;
+    /**
+     * The durable third-party conversation is scoped to the visible parent
+     * conversation, target project, and runtime. Task records remain separate
+     * so receipts and leases cannot cross task boundaries.
+     */
+    continuityKey?: string;
+    continuityScope?: "project" | "group" | "global";
+    continuityExactSessionId?: string;
+    continuityGeneration?: number;
+    continuityMode?: "reused" | "fresh" | "isolated_branch";
+    continuitySourceSessionId?: string;
+    continuityBranchId?: string;
     pendingProviderContractId?: string;
     providerRuntimeVersion?: string;
     providerRuntimeIdentityChecksum?: string;
@@ -144,6 +156,20 @@ export declare function saveStore(store: any): void;
 export declare function createNativeSessionId(agentType: string): "" | `${string}-${string}-${string}-${string}-${string}`;
 export declare function safeStringify(value: any): string;
 export declare function hashValue(value: any, len?: number): string;
+export declare function buildTaskAgentContinuityBinding(input: {
+    scope: "project" | "group" | "global";
+    scopeId: string;
+    exactSessionId: string;
+    project: string;
+    agentType: string;
+}): {
+    readonly key: `tac_${string}`;
+    readonly scope: "global" | "group" | "project";
+    readonly scopeId: string;
+    readonly exactSessionId: string;
+    readonly project: string;
+    readonly agentType: "claudecode" | "codex" | "cursor" | "gemini" | "opencode" | "qoder";
+};
 export declare function safeReadJson(file: string, fallback?: any): any;
 export declare function writeJsonAtomic(file: string, value: any): void;
 export type TaskAgentSessionStoreLock = {

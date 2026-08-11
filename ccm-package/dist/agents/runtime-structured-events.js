@@ -38,6 +38,7 @@ exports.createAgentRuntimeStructuredEventParser = createAgentRuntimeStructuredEv
 exports.runAgentRuntimeStructuredEventSelfTest = runAgentRuntimeStructuredEventSelfTest;
 const crypto = __importStar(require("crypto"));
 const runtime_1 = require("./runtime");
+const assistant_progress_1 = require("../system/assistant-progress");
 exports.AGENT_RUNTIME_EVENT_SCHEMA = "ccm-agent-runtime-event-v1";
 const MAX_BUFFER = 256 * 1024;
 const MAX_SUMMARY = 600;
@@ -79,12 +80,25 @@ function safeAssistantText(event) {
         "text", "message.text", "message.content", "item.text", "item.content", "part.text", "response",
     ]);
     if (typeof raw === "string")
-        return compact(raw);
+        return (0, assistant_progress_1.sanitizeAssistantProgressText)(raw);
     if (Array.isArray(raw)) {
-        return compact(raw.filter(item => !HIDDEN_EVENT_PATTERN.test(String(item?.type || "")))
+        return (0, assistant_progress_1.sanitizeAssistantProgressText)(raw.filter(item => !HIDDEN_EVENT_PATTERN.test(String(item?.type || "")))
             .map(item => item?.text || item?.content || "").filter(Boolean).join(" "));
     }
     return "";
+}
+function assistantRoleFor(event, hasRelatedTools) {
+    const explicit = compact(event?.assistantRole || event?.assistant_role || event?.message?.assistantRole, 40).toLowerCase();
+    if (explicit === "final")
+        return "final";
+    if (explicit === "progress")
+        return "progress";
+    const type = compact(event?.type || event?.event || event?.kind, 120).toLowerCase();
+    const status = compact(event?.status || event?.message?.status || event?.item?.status, 80).toLowerCase();
+    if (!hasRelatedTools && (/^(?:result|final|turn\.completed|response\.completed)$/.test(type)
+        || (/^(?:message\.completed|item\.completed)$/.test(type) && /complete|success|done/.test(status))))
+        return "final";
+    return "progress";
 }
 function toolDescriptor(event) {
     const type = compact(event?.type || event?.event || event?.kind, 120).toLowerCase();
@@ -172,7 +186,8 @@ function createAgentRuntimeStructuredEventParser(options) {
     let buffer = "";
     let index = 0;
     const seen = new Set();
-    const emit = (rawLine, rawEvent) => {
+    let pendingAssistant = [];
+    const emit = (rawLine, rawEvent, relatedToolCallIds = [], assistantRole) => {
         const sourceEventChecksum = checksum(rawLine);
         if (seen.has(sourceEventChecksum))
             return;
@@ -211,10 +226,23 @@ function createAgentRuntimeStructuredEventParser(options) {
         }
         const assistantText = safeAssistantText(rawEvent);
         if (assistantText) {
-            options.onEvent({ ...base, eventType: "assistant_progress", safeSummary: assistantText, status: "running", confidence: "declared" });
+            options.onEvent({
+                ...base,
+                eventType: "assistant_progress",
+                assistantRole: assistantRole || assistantRoleFor(rawEvent, relatedToolCallIds.length > 0),
+                relatedToolCallIds,
+                safeSummary: assistantText,
+                status: "running",
+                confidence: "declared",
+            });
             return;
         }
         index += 1;
+    };
+    const flushPendingAssistant = (relatedToolCallIds = []) => {
+        for (const pending of pendingAssistant)
+            emit(pending.rawLine, pending.event, relatedToolCallIds, "progress");
+        pendingAssistant = [];
     };
     const consumeLine = (line) => {
         const text = line.trim().replace(/^data:\s*/i, "");
@@ -222,8 +250,27 @@ function createAgentRuntimeStructuredEventParser(options) {
             return;
         try {
             const parsed = JSON.parse(text);
-            for (const expanded of expandStructuredEvents(parsed))
-                emit(JSON.stringify(expanded), expanded);
+            const expandedEvents = expandStructuredEvents(parsed);
+            const relatedToolCallIds = [...new Set(expandedEvents.map(event => toolDescriptor(event)?.callId).filter(Boolean))];
+            const role = assistantRoleFor(parsed, relatedToolCallIds.length > 0);
+            const assistantEvents = expandedEvents
+                .map((event, eventIndex) => ({ event, eventIndex, text: safeAssistantText(event) }))
+                .filter(item => !!item.text);
+            if (relatedToolCallIds.length)
+                flushPendingAssistant(relatedToolCallIds);
+            else if (!assistantEvents.length || role === "final")
+                flushPendingAssistant();
+            if (assistantEvents.length && !relatedToolCallIds.length && role === "progress") {
+                pendingAssistant.push(...assistantEvents.map(item => ({ rawLine: `${text}#${item.eventIndex}`, event: item.event })));
+                for (const [eventIndex, expanded] of expandedEvents.entries()) {
+                    if (!safeAssistantText(expanded))
+                        emit(`${text}#${eventIndex}`, expanded, [], role);
+                }
+                return;
+            }
+            for (const [eventIndex, expanded] of expandedEvents.entries()) {
+                emit(`${text}#${eventIndex}`, expanded, relatedToolCallIds, role);
+            }
         }
         catch {
             // Free-form stdout is intentionally ignored. It can still be normalized
@@ -241,6 +288,7 @@ function createAgentRuntimeStructuredEventParser(options) {
         flush() {
             if (buffer.trim())
                 consumeLine(buffer);
+            flushPendingAssistant();
             buffer = "";
         },
         stats() { return { runtime, seen: seen.size, pendingBytes: Buffer.byteLength(buffer), index }; },
@@ -259,7 +307,7 @@ function runAgentRuntimeStructuredEventSelfTest() {
         ["cursor", ['{"type":"assistant","text":"检查引用。"}', '{"type":"tool_started","id":"cursor-tool","name":"Grep","arguments":{"query":"symbol"}}']],
         ["gemini", ['{"type":"response","response":{"candidates":[{"content":{"parts":[{"text":"读取配置。"},{"functionCall":{"id":"gemini-tool","name":"read_file","args":{"path":"config.json"}}}]}}]}}']],
         ["opencode", ['{"type":"text","role":"assistant","text":"定位模块。"}', '{"type":"tool","id":"opencode-tool","name":"glob","status":"running"}']],
-        ["qoder", ['{"type":"assistant","text":"准备修改。"}', '{"type":"tool","id":"qoder-tool","name":"read","status":"running"}']],
+        ["qoder", ['{"type":"assistant","text":"准备修改。"}', '{"type":"tool","id":"qoder-tool","name":"read","status":"running"}', '{"type":"result","role":"assistant","text":"最终交付不应成为进度。"}']],
     ];
     for (const [runtime, lines] of fixtures) {
         const parser = createAgentRuntimeStructuredEventParser({ runtime, identity: { ...identity, agentRunId: `acm-${runtime}` }, onEvent: event => events.push(event) });
@@ -274,6 +322,10 @@ function runAgentRuntimeStructuredEventSelfTest() {
         pass: runtimeSet.size === 6
             && [...runtimeSet].every(runtime => events.some(event => event.runtime === runtime && event.eventType === "tool_started"))
             && [...runtimeSet].every(runtime => events.some(event => event.runtime === runtime && event.eventType === "assistant_progress"))
+            && events.some(event => event.runtime === "claudecode" && event.relatedToolCallIds?.includes("claude-tool"))
+            && events.some(event => event.runtime === "gemini" && event.relatedToolCallIds?.includes("gemini-tool"))
+            && !events.some(event => event.safeSummary?.includes("最终交付") && event.assistantRole !== "final")
+            && events.filter(event => event.eventType === "assistant_progress").every(event => (event.safeSummary || "").length <= 120)
             && !JSON.stringify(events).includes("SECRET_CHAIN_OF_THOUGHT"),
         events,
     };

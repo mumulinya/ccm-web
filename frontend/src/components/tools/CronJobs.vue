@@ -1,9 +1,10 @@
 <script setup>
 import CronJobsPanel from './CronJobsPanel.vue'
 
-const emit = defineEmits(['navigate'])
+defineProps({ navigateTo: { type: Object, default: null } })
+const emit = defineEmits(['navigate', 'navigated'])
 </script>
 
 <template>
-  <CronJobsPanel @navigate="emit('navigate', $event)" />
+  <CronJobsPanel :navigate-to="navigateTo" @navigate="emit('navigate', $event)" @navigated="emit('navigated')" />
 </template>

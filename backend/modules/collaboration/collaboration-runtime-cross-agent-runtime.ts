@@ -931,6 +931,86 @@ export async function retryAgentQaItem(id: string, ctx: CollabCtx, streamRes: an
   return { success: true, item: wakeup.resumed ? wakeup.item : completed, wakeup };
 }
 
+function normalizedCoordinationWritePaths(value: any): string[] {
+  const values = Array.isArray(value) ? value : [];
+  const paths = values
+    .map(item => String(typeof item === "string" ? item : item?.path || "").replace(/\\\\/g, "/").replace(/^\.\//, "").replace(/\/+/g, "/").trim())
+    .filter(Boolean);
+  // A repository-wide or omitted scope is deliberately treated as unknown. It
+  // must not be used to justify concurrent writes from a second worktree.
+  if (!paths.length || paths.some(item => item === "." || item === "*")) return [];
+  return uniqueStrings(paths).slice(0, 80);
+}
+
+function coordinationWriteScopesOverlap(left: string[], right: string[]) {
+  return left.some(leftPath => right.some(rightPath =>
+    leftPath === rightPath || leftPath.startsWith(`${rightPath}/`) || rightPath.startsWith(`${leftPath}/`)
+  ));
+}
+
+function getCoordinationProjectWorktreeReadiness(targetProject: string) {
+  const config = getConfigs().find((item: any) => String(item?.name || "") === String(targetProject || ""));
+  const workDir = config ? String(getConfigInfo(config.path)?.[0]?.workDir || "").trim() : "";
+  if (!workDir || !fs.existsSync(workDir)) return { ready: false, code: "project_workdir_unavailable" };
+  const inside = spawnSync("git", ["rev-parse", "--is-inside-work-tree"], { cwd: workDir, encoding: "utf-8", windowsHide: true });
+  if (inside.status !== 0 || String(inside.stdout || "").trim() !== "true") return { ready: false, code: "worktree_not_supported" };
+  const status = spawnSync("git", ["status", "--porcelain=v1", "--untracked-files=all"], { cwd: workDir, encoding: "utf-8", windowsHide: true });
+  if (status.status !== 0) return { ready: false, code: "repository_status_unavailable" };
+  if (String(status.stdout || "").trim()) return { ready: false, code: "repository_dirty" };
+  const supported = spawnSync("git", ["worktree", "list", "--porcelain"], { cwd: workDir, encoding: "utf-8", windowsHide: true });
+  return supported.status === 0 ? { ready: true, code: "ready" } : { ready: false, code: "worktree_not_supported" };
+}
+
+export function decideCoordinationDependencyDispatch(input: {
+  targetProject: string;
+  requestedWritePaths?: any[];
+  parentTaskId?: string;
+  groupId?: string;
+}) {
+  const requestedPaths = normalizedCoordinationWritePaths(input.requestedWritePaths);
+  const activeStatuses = new Set(["pending", "queued", "in_progress", "reviewing", "reworking", "waiting"]);
+  const activeWriters = loadTasks().filter((task: any) =>
+    String(task?.id || "") !== String(input.parentTaskId || "")
+    && String(task?.target_project || "") === String(input.targetProject || "")
+    && activeStatuses.has(String(task?.status || "").toLowerCase())
+    && task?.requires_code_changes !== false
+  );
+  if (!activeWriters.length) {
+    return {
+      queueScope: "project_serial",
+      childAgentIsolation: "shared",
+      executionMode: "serial_continuation",
+      safeProjection: { decision: "serial", reason: "no_active_writer", active_writer_count: 0, content_stored: false },
+      statusDetail: `正在为 ${input.targetProject} 准备协作工作项`,
+      progressText: `${input.targetProject} 将在可用执行通道中处理依赖`,
+    };
+  }
+  const activeScopes = activeWriters.map((task: any) => normalizedCoordinationWritePaths(
+    task?.allowed_paths || task?.workflow_meta?.requested_write_paths || task?.workflow_meta?.requestedWritePaths
+  ));
+  const scopesKnownAndDisjoint = requestedPaths.length > 0
+    && activeScopes.every(scope => scope.length > 0 && !coordinationWriteScopesOverlap(requestedPaths, scope));
+  const worktree = scopesKnownAndDisjoint ? getCoordinationProjectWorktreeReadiness(input.targetProject) : { ready: false, code: "write_scope_conflict_or_unknown" };
+  if (scopesKnownAndDisjoint && worktree.ready) {
+    return {
+      queueScope: "isolated_parallel",
+      childAgentIsolation: "worktree",
+      executionMode: "isolated_dependency_branch",
+      safeProjection: { decision: "isolated_parallel", reason: "disjoint_verified_scopes", active_writer_count: activeWriters.length, content_stored: false },
+      statusDetail: `正在为 ${input.targetProject} 准备独立工作区`,
+      progressText: `${input.targetProject} 将在独立工作区处理依赖，不会打断当前任务`,
+    };
+  }
+  return {
+    queueScope: "project_serial",
+    childAgentIsolation: "shared",
+    executionMode: "queued_continuation",
+    safeProjection: { decision: "serial", reason: worktree.code, active_writer_count: activeWriters.length, content_stored: false },
+    statusDetail: `等待 ${input.targetProject} 当前任务完成后处理依赖`,
+    progressText: `等待 ${input.targetProject} 当前任务完成后处理依赖`,
+  };
+}
+
 export async function handleAgentQaRequests(input: {
   groupId: string;
   group: any;
@@ -1133,6 +1213,12 @@ export async function handleAgentQaRequests(input: {
 
     if (request.kind === "implementation" && arbitration.decision === "ask_agent") {
       const coordinator = getCoordinatorMember(input.group)?.project || "coordinator";
+      const dependencyDispatch = decideCoordinationDependencyDispatch({
+        targetProject: request.targetName,
+        requestedWritePaths: request.requested_write_paths || [],
+        parentTaskId: input.taskId || "",
+        groupId: input.groupId,
+      });
       const dependencyTask = createTask({
         title: `协作依赖：${compactMemoryText(request.question || request.reason, 80)}`,
         description: [
@@ -1154,9 +1240,9 @@ export async function handleAgentQaRequests(input: {
         parent_task_id: input.taskId || null,
         priority: sourceTask?.priority || "normal",
         auto_execute: true,
-        queue_scope: "isolated_parallel",
-        child_agent_isolation: "worktree",
-        branch_policy: "worktree",
+        queue_scope: dependencyDispatch.queueScope,
+        child_agent_isolation: dependencyDispatch.childAgentIsolation,
+        branch_policy: dependencyDispatch.childAgentIsolation === "worktree" ? "worktree" : "shared",
         commit_policy: "verified_commit",
         allowed_paths: request.requested_write_paths?.length ? request.requested_write_paths : ["."],
         requires_code_changes: true,
@@ -1164,6 +1250,8 @@ export async function handleAgentQaRequests(input: {
         route_decision: routeDecision,
         requires_verification: true,
         requires_independent_review: false,
+        acceptance_mode: "main_agent_self_verification",
+        test_agent_enabled: false,
         idempotency_key: `group-coordination:${request.coordination_request_id || qa.id}`,
         workflow_meta: {
           coordination_request_id: request.coordination_request_id || "",
@@ -1171,12 +1259,13 @@ export async function handleAgentQaRequests(input: {
           dispatched_by: "group_main_agent",
           requested_write_paths: request.requested_write_paths || [],
           required_capabilities: request.required_capabilities || [],
-          execution_mode: "parallel_isolated_native_session",
+          execution_mode: dependencyDispatch.executionMode,
+          dependency_dispatch: dependencyDispatch.safeProjection,
           source_task_agent_session_id: input.sourceTaskAgentSessionId || "",
           source_native_session_id: input.sourceNativeSessionId || "",
         },
       });
-      updateTask(dependencyTask.id, { status: "pending", status_detail: `正在为 ${request.targetName} 准备独立会话和工作区` });
+      updateTask(dependencyTask.id, { status: "pending", status_detail: dependencyDispatch.statusDetail });
       if (sourceTask) updateTask(sourceTask.id, {
         child_task_ids: uniqueStrings([...(Array.isArray(sourceTask.child_task_ids) ? sourceTask.child_task_ids : []), dependencyTask.id]),
         collaboration_state: {
@@ -1208,8 +1297,8 @@ export async function handleAgentQaRequests(input: {
         ...qa,
         status: "queued",
         work_item_task_id: dependencyTask.id,
-        execution_mode: "parallel_isolated_native_session",
-        audit: [...(Array.isArray(qa.audit) ? qa.audit : []), { at: new Date().toISOString(), type: "parallel_work_item_queued", detail: `已为 ${request.targetName} 准备独立会话执行通道` }].slice(-30),
+        execution_mode: dependencyDispatch.executionMode,
+        audit: [...(Array.isArray(qa.audit) ? qa.audit : []), { at: new Date().toISOString(), type: dependencyDispatch.queueScope === "isolated_parallel" ? "parallel_work_item_queued" : "serial_work_item_queued", detail: dependencyDispatch.progressText }].slice(-30),
       });
       const queueResult = enqueueTask(dependencyTask.id, input.ctx);
       updateGroupCoordinationRequest(request.coordination_request_id, {
@@ -1217,23 +1306,32 @@ export async function handleAgentQaRequests(input: {
         resolution: {
           target_project: request.targetName,
           work_item_task_id: dependencyTask.id,
-          execution_mode: "parallel_isolated_native_session",
+          execution_mode: dependencyDispatch.executionMode,
+          dispatch: dependencyDispatch.safeProjection,
           queue: queueResult,
         },
-        auditType: queueResult.queued ? "parallel_work_item_queued" : "parallel_work_item_waiting",
+        auditType: queueResult.queued
+          ? dependencyDispatch.queueScope === "isolated_parallel" ? "parallel_work_item_queued" : "serial_work_item_queued"
+          : "work_item_waiting",
         auditDetail: queueResult.queued
-          ? `已为 ${request.targetName} 创建独立第三方 Agent 会话执行通道，不等待其现有会话结束`
+          ? dependencyDispatch.progressText
           : queueResult.message || `等待 ${request.targetName} 执行通道就绪`,
       });
-      emitAgentQaEvent(input.streamRes, "progress", queuedQa, queueResult.queued ? `${request.targetName} 的独立协作会话正在启动` : queueResult.message || "协作会话等待启动");
+      emitAgentQaEvent(input.streamRes, "progress", queuedQa, queueResult.queued ? dependencyDispatch.progressText : queueResult.message || "协作会话等待启动");
       if (input.taskId) appendTaskTimelineEvent(input.taskId, {
-        type: queueResult.queued ? "coordination_parallel_session_queued" : "coordination_parallel_session_waiting",
-        title: queueResult.queued ? `${request.targetName} 的独立协作会话正在启动` : `${request.targetName} 的执行通道暂未就绪`,
-        detail: queueResult.queued ? "该工作项使用独立 worktree 和原生会话并行执行，不会打断正在工作的会话" : queueResult.message || "等待执行通道恢复",
+        type: queueResult.queued
+          ? dependencyDispatch.queueScope === "isolated_parallel" ? "coordination_parallel_session_queued" : "coordination_serial_session_queued"
+          : "coordination_session_waiting",
+        title: queueResult.queued ? dependencyDispatch.progressText : `${request.targetName} 的执行通道暂未就绪`,
+        detail: queueResult.queued
+          ? dependencyDispatch.queueScope === "isolated_parallel"
+            ? "该工作项使用独立工作区并行执行，不会打断正在工作的任务"
+            : "当前修改范围或仓库状态不适合并行写入，主 Agent 将在当前任务结束后继续处理"
+          : queueResult.message || "等待执行通道恢复",
         status: queueResult.queued ? "active" : "warn",
         phase: "waiting_dependency",
         agent: coordinator,
-        data: { coordination_request_id: request.coordination_request_id, work_item_task_id: dependencyTask.id, target_project: request.targetName, execution_mode: "parallel_isolated_native_session", queue: queueResult },
+        data: { coordination_request_id: request.coordination_request_id, work_item_task_id: dependencyTask.id, target_project: request.targetName, execution_mode: dependencyDispatch.executionMode, dispatch: dependencyDispatch.safeProjection, queue: queueResult },
       });
       continue;
     }
@@ -1524,8 +1622,35 @@ function inspectCoordinationWorkspaceChanges(execution: any) {
   return files;
 }
 
+function inspectCoordinationBranchFreshness(execution: any) {
+  const workspace = execution?.workspace || {};
+  if (workspace?.mode !== "worktree") return { fresh: true, reason: "serial_workspace" };
+  const originalWorkDir = String(workspace?.originalWorkDir || "").trim();
+  const baseBranch = String(workspace?.baseBranch || "").trim();
+  const baseHead = String(workspace?.baseHead || "").trim();
+  if (!originalWorkDir || !baseBranch || !baseHead || !fs.existsSync(originalWorkDir)) return { fresh: false, reason: "base_identity_missing" };
+  const current = spawnSync("git", ["rev-parse", baseBranch], { cwd: originalWorkDir, encoding: "utf-8", windowsHide: true });
+  if (current.status !== 0) return { fresh: false, reason: "base_identity_unavailable" };
+  return String(current.stdout || "").trim() === baseHead
+    ? { fresh: true, reason: "base_unchanged" }
+    : { fresh: false, reason: "base_repo_drifted" };
+}
+
 export function evaluateCoordinationTaskEvidence(task: any, request: any, receipt: any, execution: any) {
   const base = evaluateCoordinationImplementationReceipt(receipt, request);
+  const mainAgentVerification = task?.main_agent_self_verification
+    || execution?.data?.main_agent_self_verification
+    || execution?.mainAgentSelfVerification
+    || execution?.main_agent_self_verification
+    || null;
+  const mainAgentVerificationPassed = mainAgentVerification?.canAccept === true
+    && mainAgentVerification?.deterministic_gate?.pass === true;
+  const branchFreshness = inspectCoordinationBranchFreshness(execution);
+  const mainAgentVerificationCommands = uniqueStrings((Array.isArray(mainAgentVerification?.verification_results)
+    ? mainAgentVerification.verification_results
+    : [])
+    .filter((item: any) => item?.status === "passed" && Number(item?.exit_code ?? 0) === 0)
+    .map((item: any) => item.command || item.id)).slice(0, 40);
   const inspectedWorkspaceFiles = inspectCoordinationWorkspaceChanges(execution);
   const persistedAcceptance = task?.coordination_acceptance || request?.resolution?.acceptance || execution?.data?.coordination_acceptance || {};
   const workspaceFiles = inspectedWorkspaceFiles.length
@@ -1539,10 +1664,13 @@ export function evaluateCoordinationTaskEvidence(task: any, request: any, receip
   const declaredMatch = !requiresFiles || declaredFiles.some((file: string) => actualFiles.includes(file));
   const gaps = uniqueStrings([
     ...(base.gaps || []),
+    !mainAgentVerification ? "缺少群聊主 Agent 验收回执" : "",
+    mainAgentVerification && !mainAgentVerificationPassed ? "群聊主 Agent 验收未通过确定性门禁" : "",
+    !branchFreshness.fresh ? "权威项目状态已漂移，不能安全合并" : "",
     requiresFiles && !actualFiles.length ? "独立 worktree 未检测到真实代码差异" : "",
     requiresFiles && actualFiles.length > 0 && !declaredMatch ? "结果说明中的文件与 worktree 实际差异不一致" : "",
   ]).filter(Boolean);
-  const accepted = base.accepted && gaps.length === 0;
+  const accepted = base.accepted && mainAgentVerificationPassed && branchFreshness.fresh && gaps.length === 0;
   return {
     ...base,
     status: accepted ? "accepted" : "needs_evidence",
@@ -1550,7 +1678,15 @@ export function evaluateCoordinationTaskEvidence(task: any, request: any, receip
     score: accepted ? 100 : Math.min(Number(base.score || 0), Math.max(0, 100 - gaps.length * 25)),
     gaps,
     workspace_files: workspaceFiles,
-    evidence: uniqueStrings([...(base.evidence || []), ...actualFiles]).slice(0, 120),
+    main_agent_verification: mainAgentVerification ? {
+      accepted: mainAgentVerificationPassed,
+      checksum: String(mainAgentVerification?.checksum || ""),
+      verification: mainAgentVerificationCommands,
+      content_stored: false,
+    } : null,
+    branch_fresh: branchFreshness.fresh,
+    branch_freshness: { fresh: branchFreshness.fresh, reason: branchFreshness.reason, content_stored: false },
+    evidence: uniqueStrings([...(base.evidence || []), ...actualFiles, ...mainAgentVerificationCommands]).slice(0, 120),
     reason: accepted
       ? "正式工作项已完成，真实代码差异和验证证据均通过群聊主 Agent 验收"
       : `正式工作项尚未通过验收：${gaps.join("；")}`,
@@ -1584,8 +1720,10 @@ export function markGroupCoordinationDependencyStarted(task: any, workspace: any
   const request = getCoordinationRequestForTask(task);
   if (!request || ["resumed", "failed", "cancelled", "timeout"].includes(request.status)) return request;
   const qa = getCoordinationQaForRequest(request.id);
+  const isolatedWorktree = workspace?.mode === "worktree" && task?.queue_scope === "isolated_parallel";
+  const startAuditType = isolatedWorktree ? "parallel_session_started" : "serial_session_started";
   const execution = {
-    mode: "parallel_isolated_native_session",
+    mode: isolatedWorktree ? "isolated_dependency_branch" : "queued_continuation",
     target_project: task.target_project || request.target_hint || "",
     work_item_task_id: task.id,
     task_agent_session_id: session?.id || "",
@@ -1600,23 +1738,25 @@ export function markGroupCoordinationDependencyStarted(task: any, workspace: any
   updateGroupCoordinationRequest(request.id, {
     status: "executing",
     resolution: { ...(request.resolution || {}), execution },
-    auditType: coordinationAuditHas(request, "parallel_session_started") ? "parallel_session_heartbeat" : "parallel_session_started",
-    auditDetail: `${task.target_project} 已在独立第三方 Agent 会话和 worktree 中并行执行`,
+    auditType: coordinationAuditHas(request, startAuditType) ? `${startAuditType}_heartbeat` : startAuditType,
+    auditDetail: isolatedWorktree
+      ? `${task.target_project} 已在独立工作区中并行执行协作依赖`
+      : `${task.target_project} 已在原有执行通道中开始处理已排队的协作依赖`,
   });
-  if (!coordinationAuditHas(request, "parallel_session_started")) {
+  if (!coordinationAuditHas(request, startAuditType)) {
     const runningQa = qa ? upsertAgentQaItem({
       ...qa,
       status: "executing",
       execution_mode: execution.mode,
       coordination_execution: execution,
       work_item_task_id: task.id,
-      audit: [...(Array.isArray(qa.audit) ? qa.audit : []), { at: execution.started_at, type: "parallel_session_started", detail: `${task.target_project} 已在独立会话开始实现` }].slice(-30),
+      audit: [...(Array.isArray(qa.audit) ? qa.audit : []), { at: execution.started_at, type: isolatedWorktree ? "parallel_session_started" : "serial_session_started", detail: isolatedWorktree ? `${task.target_project} 已在独立工作区开始实现` : `${task.target_project} 已开始处理排队的协作依赖` }].slice(-30),
     }) : null;
-    if (runningQa) appendGroupMessage(task.group_id, buildAgentQaMessage("progress", runningQa, `${task.target_project} 已在独立会话并行处理`));
+    if (runningQa) appendGroupMessage(task.group_id, buildAgentQaMessage("progress", runningQa, isolatedWorktree ? `${task.target_project} 正在独立工作区执行` : `${task.target_project} 已开始处理协作依赖`));
     if (task.parent_task_id) appendTaskTimelineEvent(task.parent_task_id, {
-      type: "coordination_parallel_session_started",
-      title: `${task.target_project} 已在独立会话开始处理`,
-      detail: "该协作工作项与目标 Agent 的原有会话并行运行，完成后由主 Agent 验收和合并",
+      type: isolatedWorktree ? "coordination_parallel_session_started" : "coordination_serial_session_started",
+      title: isolatedWorktree ? `${task.target_project} 已在独立工作区开始处理` : `${task.target_project} 已开始处理协作依赖`,
+      detail: isolatedWorktree ? "该协作工作项与目标 Agent 的原有任务并行运行，完成后由群聊主 Agent 验收和合并" : "当前任务已结束，协作依赖现在由目标 Agent 串行处理",
       status: "active",
       phase: "waiting_dependency",
       agent: task.target_project,
@@ -1624,14 +1764,14 @@ export function markGroupCoordinationDependencyStarted(task: any, workspace: any
     });
     appendTaskTimelineEvent(task.id, {
       type: "coordination_isolated_workspace_ready",
-      title: "独立会话和工作区已准备",
-      detail: `${session?.agentType || "第三方 Agent"} 已启动，代码修改已与其他会话隔离`,
+      title: isolatedWorktree ? "独立工作区已准备" : "协作任务已开始",
+      detail: isolatedWorktree ? `${session?.agentType || "第三方 Agent"} 已启动，代码修改已与其他会话隔离` : `${session?.agentType || "第三方 Agent"} 已在安全串行通道开始处理`,
       status: "ok",
       phase: "executing",
       agent: task.target_project,
       data: execution,
     });
-    safeAddGroupLog(task.group_id, "info", "agent_coordination", `${task.target_project} 已在独立会话并行处理协作依赖`, { coordination_request_id: request.id, execution });
+    safeAddGroupLog(task.group_id, "info", "agent_coordination", isolatedWorktree ? `${task.target_project} 已在独立工作区并行处理协作依赖` : `${task.target_project} 已开始串行处理协作依赖`, { coordination_request_id: request.id, execution });
   }
   return execution;
 }

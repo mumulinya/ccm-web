@@ -25,9 +25,28 @@ import { testAgentPlanningIsBlocked, resolveTestAgentHardeningPolicy } from "./p
 import { prepareTestAgentIsolation, type TestAgentIsolationSession } from "./isolation";
 import { buildTestAgentReadonlyCapabilityManifest } from "./readonly-capabilities";
 import { applyTestAgentIsolationExecutionGate } from "./isolation-execution-gate";
+import { recordMetric } from "../core/db";
+
+function mergeProviderUsage(rows: any[]) {
+  const total = rows.filter(row => row && typeof row === "object").reduce((sum: any, row: any) => {
+    sum.inputTokens += Number(row.inputTokens || row.input_tokens || 0);
+    sum.outputTokens += Number(row.outputTokens || row.output_tokens || 0);
+    sum.directInputTokens += Number(row.directInputTokens || row.direct_input_tokens || 0);
+    sum.cacheCreationInputTokens += Number(row.cacheCreationInputTokens || row.cache_creation_input_tokens || 0);
+    sum.cacheReadInputTokens += Number(row.cacheReadInputTokens || row.cache_read_input_tokens || 0);
+    sum.providerTotalTokens += Number(row.providerTotalTokens || row.provider_total_tokens || row.totalTokens || row.total_tokens || 0);
+    sum.totalCostUsd += Number(row.totalCostUsd || row.total_cost_usd || row.costUsd || row.cost_usd || 0);
+    return sum;
+  }, { inputTokens: 0, outputTokens: 0, directInputTokens: 0, cacheCreationInputTokens: 0, cacheReadInputTokens: 0, providerTotalTokens: 0, totalCostUsd: 0 });
+  const reported = total.inputTokens > 0 || total.outputTokens > 0 || total.providerTotalTokens > 0 || total.totalCostUsd > 0;
+  return reported
+    ? { ...total, totalTokens: total.providerTotalTokens || total.inputTokens + total.outputTokens, reported: true, source: "provider_reported" }
+    : { source: "local_no_model", reported: false };
+}
 
 export async function runTestAgent(input: TestAgentWorkOrder, options: TestAgentRuntimeOptions = {}): Promise<TestAgentReport> {
   const startedAt = nowIso();
+  const providerUsages: any[] = [];
   const normalized = normalizeTestAgentWorkOrder(input, options);
   let isolatedSession: TestAgentIsolationSession | null = null;
   let planningInput = normalized.workOrder;
@@ -75,6 +94,7 @@ export async function runTestAgent(input: TestAgentWorkOrder, options: TestAgent
     });
   }
   const agentic = await applyAgenticTestPlanning(planningInput, planningRuntimeOptions, normalized.issues);
+  providerUsages.push((agentic.workOrder.metadata as any)?.semanticDecisionReceipt?.usage);
   const planned = planVerificationCommands(agentic.workOrder, [...normalized.issues, ...agentic.issues]);
   const isolationGate = applyTestAgentIsolationExecutionGate(planned.workOrder, isolatedSession);
   const workOrder = isolationGate.workOrder;
@@ -174,6 +194,7 @@ export async function runTestAgent(input: TestAgentWorkOrder, options: TestAgent
     httpResults = await runHttpVerification(executionWorkOrder);
     browserResults = await runBrowserVerification(executionWorkOrder, runtimeOptions);
     const followup = await planAgenticTestFollowup({ workOrder, commandResults, httpResults, browserResults }, runtimeOptions);
+    providerUsages.push((followup.metadata as any)?.providerUsage);
     workOrder.metadata = { ...workOrder.metadata, agenticFollowup: followup.metadata };
     if (followup.issue) issues.push(followup.issue);
     if (followup.workOrder) {
@@ -283,5 +304,27 @@ export async function runTestAgent(input: TestAgentWorkOrder, options: TestAgent
   });
   const written = writeTestAgentArtifacts(report);
   pruneTestAgentArtifacts({ excludeDirs: [written.artifactDir] });
+  if (options.recordMetrics !== false) {
+    const project = written.metadata?.project || workOrder.projects[0]?.name || "test-agent";
+    const groupId = String(written.groupId || workOrder.groupId || "");
+    recordMetric("test-agent", {
+      status: written.status === "passed" ? "completed" : written.status === "blocked" ? "blocked" : "failed",
+      success: written.status === "passed",
+      durationMs: written.durationMs,
+      scopeType: groupId ? "group" : "project",
+      scopeId: groupId || project,
+      groupId,
+      projectId: project,
+      role: "test_agent",
+      source: "native-test-agent",
+      runtime: providerUsages.some(Boolean) ? "native-test-agent+model-planner" : "native-test-agent",
+      taskId: written.taskId || workOrder.taskId,
+      executionId: written.id || workOrder.id,
+      usageAnchorId: `test-agent:${written.id || workOrder.id}`,
+      usage: mergeProviderUsage(providerUsages),
+      timing: { totalMs: written.durationMs, verificationMs: written.durationMs },
+      error: written.status === "passed" ? "" : written.summary,
+    });
+  }
   return written;
 }

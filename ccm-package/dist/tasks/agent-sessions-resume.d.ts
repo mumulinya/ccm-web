@@ -1,10 +1,11 @@
-import { TaskAgentSession } from "./agent-sessions-shared";
+import { TaskAgentSession, buildTaskAgentContinuityBinding } from "./agent-sessions-shared";
 export declare function openTaskAgentSession(input: {
     scopeId: string;
     taskId?: string;
     groupId: string;
     project: string;
     agentType: string;
+    continuity?: ReturnType<typeof buildTaskAgentContinuityBinding>;
 }): any;
 export declare function recordTaskAgentSessionTurn(sessionId: string, result?: {
     nativeSessionId?: string;
@@ -50,6 +51,10 @@ export declare function getTaskAgentSessionOptions(session: TaskAgentSession): {
 export declare function getTaskAgentSessionContinuity(session: TaskAgentSession): {
     mode: "native" | "scratchpad";
     native: boolean;
+    conversationBound: boolean;
+    continuityGeneration: number;
+    continuityMode: "fresh" | "reused" | "isolated_branch";
+    isolatedBranch: boolean;
     degraded: boolean;
     reason: string;
     turnCount: number;

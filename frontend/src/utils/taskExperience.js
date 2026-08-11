@@ -118,6 +118,8 @@ const buildRecoverySummary = (source = {}) => {
   const reasoning = source.reasoning_loop || source.reasoningLoop || {}
   const checks = asArray(reasoning.recovery_checks || reasoning.recoveryChecks)
   const recovery = source.recovery || {}
+  const checkpoint = source.resume_checkpoint || source.resumeCheckpoint || source.interruption_receipt?.resume_checkpoint || {}
+  const safeAutoWaiting = recovery.mode === 'safe_auto' && ['waiting_provider', 'waiting_agent', 'validating', 'queued'].includes(String(recovery.state || ''))
   const resumeCount = Number(source.resume_count || source.resumeCount || recovery.lease_recovery_count || 0)
   if (!checks.length && !resumeCount && !source.recovery_pending && !recovery.recovered_at && !recovery.revalidated_at) return null
   const latest = checks[checks.length - 1] || {}
@@ -125,9 +127,11 @@ const buildRecoverySummary = (source = {}) => {
   return {
     schema: 'ccm-main-agent-recovery-summary-v1',
     title: '恢复接续',
-    status: source.recovery_pending ? 'needs_user' : ['completed', 'done', 'failed', 'cancelled'].includes(String(source.status || '')) ? 'recorded' : 'active',
+    status: safeAutoWaiting ? 'active' : source.recovery_pending ? 'needs_user' : ['completed', 'done', 'failed', 'cancelled'].includes(String(source.status || '')) ? 'recorded' : 'active',
     mode: recovery.mode || (resumeCount ? 'resume' : 'recovery'),
-    headline: source.recovery_pending
+    headline: safeAutoWaiting
+      ? (source.status_detail || source.statusDetail || '执行通道暂时不可用，任务现场已保留，将从最近检查点自动继续。')
+      : source.recovery_pending
       ? '检测到上次任务没有完整收尾，我已暂停并等待你确认是否继续。'
       : '我已接上上次任务上下文，重新核对目标、当前状态和验收条件后继续推进。',
     revalidated: {
@@ -138,14 +142,22 @@ const buildRecoverySummary = (source = {}) => {
     preserved: uniq([
       resumeCount ? `恢复 ${resumeCount} 次运行上下文` : '',
       source.work_items?.length || source.workItems?.length ? `恢复 ${source.work_items?.length || source.workItems?.length} 个执行队列工作项` : '',
+      checkpoint.completedWorkItemIds?.length || checkpoint.completedWorkItemCount ? `已确认 ${checkpoint.completedWorkItemIds?.length || checkpoint.completedWorkItemCount} 个工作项无需重复执行` : '',
     ]),
     remaining_gaps: remaining.slice(0, 6),
-    next_action: remaining.length ? '继续处理恢复后仍未满足的验收缺口。' : '继续使用恢复后的上下文执行并等待验收。',
+    next_action: safeAutoWaiting
+      ? recovery.nextRetryAt ? `将在 ${recovery.nextRetryAt} 后尝试接上原任务。` : '通道恢复后会接上原任务。'
+      : remaining.length ? '继续处理恢复后仍未满足的验收缺口。' : '继续使用恢复后的上下文执行并等待验收。',
     technical: {
       recovery_checks: checks.length,
       lease_recovery_count: resumeCount,
       previous_status: recovery.previous_status || '',
       recovered_at: recovery.recovered_at || recovery.revalidated_at || '',
+      recovery_state: recovery.state || '',
+      recovery_attempt: Number(recovery.attempt || 0),
+      recovery_max_attempts: Number(recovery.maxAttempts || 3),
+      resume_phase: checkpoint.phase || '',
+      skipped_work_item_count: Number(checkpoint.completedWorkItemIds?.length || checkpoint.completedWorkItemCount || 0),
     },
   }
 }

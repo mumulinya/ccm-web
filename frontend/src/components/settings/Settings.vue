@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, ref } from 'vue'
+import { onMounted, ref, watch } from 'vue'
 import { CircleCheck, Settings2 } from '@lucide/vue'
 import SettingsSidebar from './SettingsSidebar.vue'
 import SettingsFeishuPanel from './SettingsFeishuPanel.vue'
@@ -11,8 +11,12 @@ import SettingsSecurityPanel from './SettingsSecurityPanel.vue'
 import SettingsTestAgentPanel from './SettingsTestAgentPanel.vue'
 import './settings.css'
 
-const authRole = window.__CCM_AUTH__?.user?.role || 'viewer'
-const activeSection = ref(authRole === 'admin' ? 'channels' : 'security')
+const authRole = window.__CCM_AUTH__?.user?.role || 'user'
+const props = defineProps({ navigateTo: { type: Object, default: null } })
+const emit = defineEmits(['navigated'])
+const authFeatures = new Set(window.__CCM_AUTH__?.access?.features || [])
+const canPlatformSettings = authRole === 'admin' || authFeatures.has('platform_settings')
+const activeSection = ref(canPlatformSettings ? 'channels' : 'security')
 const systemStatus = ref(null)
 
 const loadSystemStatus = async () => {
@@ -23,7 +27,19 @@ const loadSystemStatus = async () => {
   } catch {}
 }
 
-onMounted(loadSystemStatus)
+const applyNavigation = target => {
+  if (target?.tab !== 'settings') return
+  const requested = String(target.section || '')
+  const allowed = new Set(['channels', 'models', 'agent-providers', 'test-agent', 'experience', 'security', 'system'])
+  if (allowed.has(requested) && (canPlatformSettings || requested === 'security')) activeSection.value = requested
+  emit('navigated')
+}
+
+watch(() => props.navigateTo, applyNavigation, { deep: true })
+onMounted(() => {
+  loadSystemStatus()
+  applyNavigation(props.navigateTo)
+})
 </script>
 
 <template>
@@ -47,6 +63,7 @@ onMounted(loadSystemStatus)
         v-model:active-section="activeSection"
         :version="systemStatus?.version || ''"
         :role="authRole"
+        :features="[...authFeatures]"
       />
       <main class="settings-content">
         <SettingsFeishuPanel v-if="activeSection === 'channels' && authRole === 'admin'" />

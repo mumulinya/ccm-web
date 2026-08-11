@@ -15,6 +15,7 @@ exports.startAgentRecoveryMonitor = startAgentRecoveryMonitor;
 exports.stopAgentRecoveryMonitor = stopAgentRecoveryMonitor;
 exports.startTaskWatchdog = startTaskWatchdog;
 exports.stopTaskWatchdog = stopTaskWatchdog;
+const runtime_1 = require("../../agents/runtime");
 const agent_communication_v2_1 = require("../../system/agent-communication-v2");
 const db_1 = require("../../core/db");
 const provider_task_circuit_breaker_1 = require("./provider-task-circuit-breaker");
@@ -754,15 +755,21 @@ function runAgentRecoveryMonitorOnce(ctx, options = {}) {
         return Promise.resolve({ success: true, skipped: true, reason: "执行通道探针正在运行", work });
     }
     (0, collaboration_1.setAgentRecoveryProbeInFlight)(true);
-    const timeoutMs = Number(options.timeout_ms || options.timeoutMs || collaboration_1.AGENT_RECOVERY_PROBE_TIMEOUT_MS);
     const probeGroups = (0, collaboration_1.getAgentRecoveryProbeGroups)();
     return Promise.all(probeGroups.map(async (group) => {
-        const probe = await (0, collaboration_1.runAgentCliProbe)({
-            ...options,
-            ...group.probe_payload,
-            timeout_ms: timeoutMs,
-            source: "agent-recovery-monitor",
-        }, ctx);
+        // Recovery health checks must remain side-effect free. Do not launch an
+        // Agent/model probe here: the queued task's normal ACK + first model call
+        // is the half-open recovery attempt.
+        const agentType = String(group?.probe_target?.agentType || group?.probe_payload?.agent_type || group?.probe_payload?.agentType || "claudecode");
+        const available = (0, runtime_1.isAgentRuntimeAvailable)(agentType);
+        const probe = {
+            success: available,
+            observed: true,
+            paid_provider_called: false,
+            business_write_performed: false,
+            agent_type: agentType,
+            message: available ? "本地 Agent CLI 与配置可用，允许任务自身执行半开恢复" : "本地 Agent CLI 或配置仍不可用",
+        };
         if (!probe?.success) {
             return {
                 success: false,

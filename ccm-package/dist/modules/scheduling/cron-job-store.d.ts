@@ -1,5 +1,6 @@
 export declare const CRON_RUN_HISTORY_LIMIT = 40;
 export declare const DEFAULT_CRON_TIMEZONE = "Asia/Shanghai";
+export declare function cronOccurrenceId(jobId: any, scheduledFor: any, targetType: any, targetId: any): string;
 export declare function normalizeCronRunHistory(job: any): any;
 export declare function aggregateCronRunStatus(taskStates: Record<string, any>, fallback?: string): string;
 export declare function pad2(value: number): string;
@@ -44,6 +45,7 @@ export declare function appendCronRun(jobId: string, input?: any): {
     scheduled_for: any;
     next_retry_at: any;
     notifications: any;
+    occurrence_id: string;
 };
 export declare function patchCronRun(jobId: string, runId: string, updates?: any): any;
 export declare function findCronRunForTask(job: any, taskId: string, preferredRunId?: string): any;
@@ -76,8 +78,17 @@ export declare function createCronJob(job: any): {
     timezone: string;
     retry_limit: number;
     retry_interval_minutes: number;
+    overlap_policy: string;
     misfire_policy: string;
     misfire_grace_minutes: number;
+    catch_up_limit: number;
+    consecutive_failure_limit: number;
+    consecutive_failures: number;
+    paused_reason: string;
+    owner_id: string;
+    revision: number;
+    task_template_id: string;
+    template_variables: any;
     notification_enabled: boolean;
     notify_on: unknown[];
     source_attachments: any;

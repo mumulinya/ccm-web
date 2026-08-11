@@ -51,7 +51,11 @@ type PetConfigV2 = {
   configs: Record<string, any>;
   positions: Record<string, { x: number; y: number }>;
   customTypes: any[];
-  settings: { autoStart: boolean; webFallback: boolean };
+  settings: {
+    autoStart: boolean;
+    webFallback: boolean;
+    agentProgressMode: "milestones" | "terminal_only";
+  };
   updatedAt: string;
 };
 
@@ -62,7 +66,7 @@ function emptyPetConfig(): PetConfigV2 {
     configs: {},
     positions: {},
     customTypes: [],
-    settings: { autoStart: false, webFallback: true },
+    settings: { autoStart: false, webFallback: true, agentProgressMode: "milestones" },
     updatedAt: new Date(0).toISOString(),
   };
 }
@@ -78,6 +82,7 @@ function normalizePetConfig(value: any): PetConfigV2 {
     settings: {
       autoStart: value?.settings?.autoStart === true,
       webFallback: value?.settings?.webFallback !== false,
+      agentProgressMode: value?.settings?.agentProgressMode === "terminal_only" ? "terminal_only" : "milestones",
     },
     updatedAt: String(value?.updatedAt || fallback.updatedAt),
   };
@@ -117,6 +122,11 @@ function mergePetConfigPatch(current: PetConfigV2, patch: any): PetConfigV2 {
   if (patch?.settings && typeof patch.settings === "object" && !Array.isArray(patch.settings)) {
     if (typeof patch.settings.autoStart === "boolean") next.settings.autoStart = patch.settings.autoStart;
     if (typeof patch.settings.webFallback === "boolean") next.settings.webFallback = patch.settings.webFallback;
+    if (patch.settings.agentProgressMode !== undefined) {
+      const mode = String(patch.settings.agentProgressMode || "milestones");
+      if (!["milestones", "terminal_only"].includes(mode)) throw new Error("宠物 Agent 进度模式无效");
+      next.settings.agentProgressMode = mode as PetConfigV2["settings"]["agentProgressMode"];
+    }
   }
   if (Array.isArray(patch?.customTypes)) next.customTypes = patch.customTypes;
   next.revision = current.revision + 1;

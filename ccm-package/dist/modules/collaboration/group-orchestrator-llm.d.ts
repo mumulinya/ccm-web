@@ -13,6 +13,8 @@ export declare function buildGroupMainAgentToolContext(input: {
     group_session_id?: string;
     workflowDecision?: WorkflowDecision | null;
     loadedMainAgentTools?: string[];
+    anchorMessageId?: string;
+    anchor_message_id?: string;
 }): any;
 export declare function normalizeGroupMainToolRequests(value: any): GroupMainToolRequest[];
 export declare function executeGroupMainAgentToolRequests(input: {
@@ -196,6 +198,10 @@ export declare function runLlmGroupOrchestrator(input: {
     projectSourceEvidence?: any;
     project_source_evidence?: any;
     onRetry?: (notice: any) => void;
+    turnId?: string;
+    turn_id?: string;
+    anchorMessageId?: string;
+    anchor_message_id?: string;
 }): Promise<{
     usage: LlmTokenUsage;
     mainAgentTurnDecision: import("../../agents/main-agent-turn").MainAgentTurnDecisionV1;

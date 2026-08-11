@@ -1,8 +1,8 @@
-import { ref, onMounted, onBeforeUnmount, computed } from 'vue'
+import { ref, onMounted, onBeforeUnmount, computed, watch } from 'vue'
 import { projectsApi, groupsApi } from '../../api/index.js'
 import { toast, confirmDialog } from '../../utils/toast.js'
 
-export function useCronJobs(emit) {
+export function useCronJobs(props, emit) {
 
 const jobs = ref([])
 const projects = ref([])
@@ -20,7 +20,11 @@ const statusFilter = ref('all')
 const targetFilter = ref('all')
 const selectedJobIds = ref(new Set())
 const bulkLoading = ref(false)
+const templates = ref([])
+const cronPreview = ref(null)
+const previewLoading = ref(false)
 let refreshTimer = null
+let previewTimer = null
 
 const selectedRunJob = computed(() => jobs.value.find(job => job.id === selectedRunJobId.value) || null)
 const filteredJobs = computed(() => jobs.value.filter(job => {
@@ -33,9 +37,10 @@ const filteredJobs = computed(() => jobs.value.filter(job => {
 }))
 const enabledJobCount = computed(() => jobs.value.filter(job => job.enabled !== false).length)
 const disabledJobCount = computed(() => jobs.value.filter(job => job.enabled === false).length)
-const issueJobCount = computed(() => jobs.value.filter(job => ['failed', 'invalid_schedule', 'retry_waiting'].includes(job.last_status)).length)
+const issueJobCount = computed(() => jobs.value.filter(job => ['failed', 'invalid_schedule', 'retry_waiting', 'paused_failure', 'waiting'].includes(job.last_status)).length)
 const activeRunCount = computed(() => jobs.value.filter(job => isJobRunning(job.id) || ['running', 'triggering', 'running_task'].includes(job.last_status)).length)
 const allFilteredSelected = computed(() => filteredJobs.value.length > 0 && filteredJobs.value.every(job => selectedJobIds.value.has(job.id)))
+const selectedTemplate = computed(() => templates.value.find(item => item.id === newJob.value.taskTemplateId) || null)
 
 const newJob = ref({
   name: '',
@@ -62,6 +67,12 @@ const newJob = ref({
   retryIntervalMinutes: 10,
   misfirePolicy: 'run_once',
   misfireGraceMinutes: 1440,
+  catchUpLimit: 5,
+  overlapPolicy: 'queue',
+  consecutiveFailureLimit: 3,
+  taskTemplateId: '',
+  templateVariables: {},
+  revision: null,
   notificationEnabled: false,
   notifyOn: ['failed', 'waiting', 'done'],
   prompt: '',
@@ -118,6 +129,12 @@ const defaultJob = () => ({
   retryIntervalMinutes: 10,
   misfirePolicy: 'run_once',
   misfireGraceMinutes: 1440,
+  catchUpLimit: 5,
+  overlapPolicy: 'queue',
+  consecutiveFailureLimit: 3,
+  taskTemplateId: '',
+  templateVariables: {},
+  revision: null,
   notificationEnabled: false,
   notifyOn: ['failed', 'waiting', 'done'],
   prompt: '',
@@ -225,6 +242,7 @@ const scheduleFormFromCron = (schedule) => {
 const openCreateJob = () => {
   editingId.value = ''
   newJob.value = defaultJob()
+  cronPreview.value = null
   showCreate.value = true
 }
 
@@ -248,6 +266,12 @@ const editJob = (job) => {
     retryIntervalMinutes: Number(job.retry_interval_minutes || 10),
     misfirePolicy: job.misfire_policy || 'run_once',
     misfireGraceMinutes: Number(job.misfire_grace_minutes || 1440),
+    catchUpLimit: Number(job.catch_up_limit || 5),
+    overlapPolicy: job.overlap_policy || 'queue',
+    consecutiveFailureLimit: Number(job.consecutive_failure_limit || 3),
+    taskTemplateId: job.task_template_id || '',
+    templateVariables: { ...(job.template_variables || {}) },
+    revision: Number(job.revision || 1),
     notificationEnabled: job.notification_enabled === true,
     notifyOn: Array.isArray(job.notify_on) ? [...job.notify_on] : ['failed', 'waiting', 'done'],
     prompt: job.prompt || '',
@@ -283,6 +307,29 @@ const loadGroups = async () => {
   }
 }
 
+const loadTemplates = async () => {
+  try {
+    const data = await readResponse(await fetch('/api/task-templates'))
+    templates.value = data.templates || []
+  } catch {
+    templates.value = []
+  }
+}
+
+const applyCronTemplate = () => {
+  const template = selectedTemplate.value
+  if (!template) return
+  newJob.value.priority = template.priority || newJob.value.priority
+  if (template.targetType === 'group' && template.targetId) {
+    newJob.value.targetType = 'group'
+    newJob.value.groupId = template.targetId
+  } else if (template.targetType === 'project' && template.targetId) {
+    newJob.value.targetType = 'project'
+    newJob.value.project = template.targetId
+  }
+  newJob.value.templateVariables = Object.fromEntries((template.variables || []).map(item => [item.key, item.defaultValue || '']))
+}
+
 const targetLabel = (job) => {
   if (job.target_type === 'group') {
     return groups.value.find(g => g.id === job.group_id)?.name || job.group_id || '群聊'
@@ -314,6 +361,8 @@ const statusLabel = (status) => ({
   queued: '已入队',
   waiting: '等待执行',
   retry_waiting: '等待重试',
+  recovery_queued: '补跑排队中',
+  paused_failure: '连续失败已暂停',
   done: '已完成',
   cancelled: '已取消',
   skipped: '已跳过',
@@ -375,7 +424,7 @@ const handleRunControl = async ({ action, run }) => {
   const label = action === 'cancel' ? '取消本轮运行' : action === 'resume' ? '继续本轮运行' : '重试本轮运行'
   if (action === 'cancel' && !await confirmDialog('确定取消本轮运行及其未完成任务？')) return
   try {
-    await readResponse(await fetch(`/api/cron/run/${action}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ job_id: selectedRunJob.value.id, run_id: run.id }) }))
+    await readResponse(await fetch(`/api/cron/run/${action}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ job_id: selectedRunJob.value.id, run_id: run.id, revision: selectedRunJob.value.revision }) }))
     await loadJobs()
     toast.success(`${label}请求已处理`)
   } catch (error) { toast.error(error.message) }
@@ -400,7 +449,8 @@ const runBulkAction = async (action) => {
   if (action === 'archive' && !await confirmDialog(`确定归档选中的 ${ids.length} 个定时任务？`)) return
   bulkLoading.value = true
   try {
-    const data = await readResponse(await fetch('/api/cron/bulk', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids, action }) }))
+    const revisions = Object.fromEntries(jobs.value.filter(job => ids.includes(job.id)).map(job => [job.id, job.revision]))
+    const data = await readResponse(await fetch('/api/cron/bulk', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids, action, revisions }) }))
     const succeeded = (data.results || []).filter(item => item.success).length
     selectedJobIds.value = new Set()
     await loadJobs()
@@ -415,10 +465,11 @@ const refreshJobsAndDiagnostics = async () => {
 
 const toggleJob = async (id, enabled) => {
   try {
+    const job = jobs.value.find(item => item.id === id)
     const res = await fetch('/api/cron/update', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id, enabled })
+      body: JSON.stringify({ id, enabled, revision: job?.revision })
     })
     const data = await readResponse(res)
     await loadJobs()
@@ -435,7 +486,11 @@ const runJob = async (id) => {
     const res = await fetch('/api/cron/run', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id })
+      body: JSON.stringify({
+        id,
+        revision: jobs.value.find(item => item.id === id)?.revision,
+        operation_key: globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`
+      })
     })
     const data = await readResponse(res)
     toast.success(data.queued ? '定时任务已创建并加入队列' : data.message || '定时任务已触发')
@@ -449,6 +504,35 @@ const runJob = async (id) => {
   }
 }
 
+const copyJobToDispatch = (job) => {
+  emit('navigate', {
+    tab: 'tasks',
+    createTaskDraft: {
+      title: job.name || '',
+      description: job.prompt || '',
+      assignType: job.target_type === 'group' ? 'group' : 'project',
+      groupId: job.group_id || '',
+      projectId: job.project || '',
+      priority: job.priority || 'normal',
+      taskTemplateId: job.task_template_id || '',
+      templateVariables: { ...(job.template_variables || {}) },
+      sourceCronJobId: job.id,
+    }
+  })
+}
+
+const handleMisfire = async (job, decision) => {
+  try {
+    await readResponse(await fetch('/api/cron/misfire/confirm', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: job.id, revision: job.revision, decision })
+    }))
+    await loadJobs()
+    toast.success(decision === 'run' ? '已开始按补跑上限执行' : '已跳过待确认的补跑')
+  } catch (error) { toast.error(error.message) }
+}
+
 const deleteJob = async (id) => {
   const confirmed = await confirmDialog('确定删除此定时任务？它会停止调度并移入归档，可稍后恢复。')
   if (!confirmed) return
@@ -456,7 +540,7 @@ const deleteJob = async (id) => {
     const res = await fetch('/api/cron/delete', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id })
+      body: JSON.stringify({ id, revision: jobs.value.find(item => item.id === id)?.revision })
     })
     await readResponse(res)
     await loadJobs()
@@ -468,7 +552,7 @@ const deleteJob = async (id) => {
 
 const restoreJob = async (id) => {
   try {
-    await readResponse(await fetch('/api/cron/restore', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) }))
+    await readResponse(await fetch('/api/cron/restore', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, revision: jobs.value.find(item => item.id === id)?.revision }) }))
     await loadJobs(); toast.success('定时任务已恢复')
   } catch (e) { toast.error(e.message) }
 }
@@ -476,14 +560,62 @@ const restoreJob = async (id) => {
 const purgeJob = async (id) => {
   if (!await confirmDialog('永久清除此定时任务？此操作无法恢复。')) return
   try {
-    await readResponse(await fetch('/api/cron/purge', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) }))
+    await readResponse(await fetch('/api/cron/purge', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, revision: jobs.value.find(item => item.id === id)?.revision }) }))
     await loadJobs(); toast.success('定时任务已永久清除')
   } catch (e) { toast.error(e.message) }
 }
 
+const buildJobPayload = () => {
+  const schedule = buildSchedule()
+  return {
+    name: newJob.value.name,
+    target_type: newJob.value.targetType,
+    project: newJob.value.targetType === 'project' ? newJob.value.project : '',
+    group_id: newJob.value.targetType === 'group' ? newJob.value.groupId : null,
+    schedule,
+    priority: newJob.value.priority,
+    workflow_type: newJob.value.targetType === 'group' ? newJob.value.workflowType : 'general',
+    requires_code_changes: newJob.value.targetType === 'group' && newJob.value.workflowType === 'daily_dev' ? newJob.value.requiresCodeChanges : false,
+    backlog_batch_limit: newJob.value.targetType === 'group' && newJob.value.workflowType === 'daily_dev' ? Math.max(1, Math.min(20, Number(newJob.value.backlogBatchLimit || 1))) : 1,
+    import_shared_docs: newJob.value.targetType === 'group' && newJob.value.workflowType === 'daily_dev' ? newJob.value.importSharedDocs : false,
+    continue_gaps: newJob.value.targetType === 'group' && newJob.value.workflowType === 'daily_dev' ? newJob.value.continueGaps : false,
+    gap_continue_limit: newJob.value.targetType === 'group' && newJob.value.workflowType === 'daily_dev' ? Math.max(1, Math.min(20, Number(newJob.value.gapContinueLimit || 3))) : 0,
+    timezone: newJob.value.timezone,
+    retry_limit: Math.max(0, Math.min(10, Number(newJob.value.retryLimit || 0))),
+    retry_interval_minutes: Math.max(1, Math.min(1440, Number(newJob.value.retryIntervalMinutes || 10))),
+    overlap_policy: newJob.value.overlapPolicy,
+    misfire_policy: newJob.value.misfirePolicy,
+    misfire_grace_minutes: Math.max(1, Math.min(10080, Number(newJob.value.misfireGraceMinutes || 1440))),
+    catch_up_limit: Math.max(1, Math.min(20, Number(newJob.value.catchUpLimit || 5))),
+    consecutive_failure_limit: Math.max(1, Math.min(20, Number(newJob.value.consecutiveFailureLimit || 3))),
+    task_template_id: newJob.value.taskTemplateId || '',
+    template_variables: { ...(newJob.value.templateVariables || {}) },
+    notification_enabled: newJob.value.notificationEnabled,
+    notify_on: newJob.value.notifyOn,
+    prompt: newJob.value.prompt,
+    revision: newJob.value.revision
+  }
+}
+
+const refreshCronPreview = async () => {
+  if (!showCreate.value) return
+  const payload = buildJobPayload()
+  if (!payload.name || !payload.schedule || (!payload.prompt && !payload.task_template_id) || (!payload.project && !payload.group_id)) {
+    cronPreview.value = null
+    return
+  }
+  previewLoading.value = true
+  try {
+    const data = await readResponse(await fetch('/api/cron/preview', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }))
+    cronPreview.value = data.preview || null
+  } catch (error) {
+    cronPreview.value = { valid: false, scheduleError: error.message, nextRuns: [] }
+  } finally { previewLoading.value = false }
+}
+
 const submitCreate = async () => {
   const schedule = buildSchedule()
-  if (!newJob.value.name || !schedule || !newJob.value.prompt) {
+  if (!newJob.value.name || !schedule || (!newJob.value.prompt && !newJob.value.taskTemplateId)) {
     toast.warning('请填写完整信息')
     return
   }
@@ -496,38 +628,7 @@ const submitCreate = async () => {
     return
   }
 
-  const payload = {
-    name: newJob.value.name,
-    target_type: newJob.value.targetType,
-    project: newJob.value.targetType === 'project' ? newJob.value.project : '',
-    group_id: newJob.value.targetType === 'group' ? newJob.value.groupId : null,
-    schedule,
-    priority: newJob.value.priority,
-    workflow_type: newJob.value.targetType === 'group' ? newJob.value.workflowType : 'general',
-    requires_code_changes: newJob.value.targetType === 'group' && newJob.value.workflowType === 'daily_dev'
-      ? newJob.value.requiresCodeChanges
-      : false,
-    backlog_batch_limit: newJob.value.targetType === 'group' && newJob.value.workflowType === 'daily_dev'
-      ? Math.max(1, Math.min(20, Number(newJob.value.backlogBatchLimit || 1)))
-      : 1,
-    import_shared_docs: newJob.value.targetType === 'group' && newJob.value.workflowType === 'daily_dev'
-      ? newJob.value.importSharedDocs
-      : false,
-    continue_gaps: newJob.value.targetType === 'group' && newJob.value.workflowType === 'daily_dev'
-      ? newJob.value.continueGaps
-      : false,
-    gap_continue_limit: newJob.value.targetType === 'group' && newJob.value.workflowType === 'daily_dev'
-      ? Math.max(1, Math.min(20, Number(newJob.value.gapContinueLimit || 3)))
-      : 0,
-    timezone: newJob.value.timezone,
-    retry_limit: Math.max(0, Math.min(10, Number(newJob.value.retryLimit || 0))),
-    retry_interval_minutes: Math.max(1, Math.min(1440, Number(newJob.value.retryIntervalMinutes || 10))),
-    misfire_policy: newJob.value.misfirePolicy,
-    misfire_grace_minutes: Math.max(1, Math.min(10080, Number(newJob.value.misfireGraceMinutes || 1440))),
-    notification_enabled: newJob.value.notificationEnabled,
-    notify_on: newJob.value.notifyOn,
-    prompt: newJob.value.prompt
-  }
+  const payload = buildJobPayload()
 
   try {
     const requestPayload = editingId.value ? { id: editingId.value, ...payload } : payload
@@ -536,7 +637,7 @@ const submitCreate = async () => {
     form.append('payload', JSON.stringify(requestPayload))
     newJob.value.files.forEach(file => form.append('files', file, file.name))
     const res = await fetch(editingId.value ? '/api/cron/update' : '/api/cron/create', { method: 'POST', body: form })
-    await readResponse(res)
+    const data = await readResponse(res)
     showCreate.value = false
     newJob.value = defaultJob()
     await loadJobs()
@@ -551,14 +652,43 @@ const submitCreate = async () => {
   }
 }
 
+watch(newJob, () => {
+  if (!showCreate.value) return
+  clearTimeout(previewTimer)
+  previewTimer = setTimeout(refreshCronPreview, 350)
+}, { deep: true })
+
+const applyCronNavigation = async target => {
+  if (target?.tab !== 'cron') return
+  if (target.createCronDraft) {
+    editingId.value = ''
+    newJob.value = { ...defaultJob(), ...target.createCronDraft, files: [], existingAttachments: [], revision: null }
+    cronPreview.value = null
+    showCreate.value = true
+    emit('navigated')
+    return
+  }
+  if (target.cronJobId) {
+    if (!jobs.value.length) await loadJobs()
+    const job = jobs.value.find(item => item.id === target.cronJobId)
+    if (job) selectedRunJobId.value = job.id
+    else toast.warning('所属定时规则不存在或无权访问')
+    emit('navigated')
+  }
+}
+
+watch(() => props?.navigateTo, target => { void applyCronNavigation(target) }, { deep: true, immediate: true })
+
 onMounted(async () => {
-  await Promise.all([loadProjects(), loadGroups()])
+  await Promise.all([loadProjects(), loadGroups(), loadTemplates()])
   await refreshJobsAndDiagnostics()
+  await applyCronNavigation(props?.navigateTo)
   refreshTimer = setInterval(refreshJobsAndDiagnostics, 30000)
 })
 
 onBeforeUnmount(() => {
   if (refreshTimer) clearInterval(refreshTimer)
+  if (previewTimer) clearTimeout(previewTimer)
 })
 
   return {
@@ -578,6 +708,10 @@ onBeforeUnmount(() => {
     targetFilter,
     selectedJobIds,
     bulkLoading,
+    templates,
+    cronPreview,
+    previewLoading,
+    selectedTemplate,
     refreshTimer,
     selectedRunJob,
     filteredJobs,
@@ -606,6 +740,8 @@ onBeforeUnmount(() => {
     loadOrchestratorDiagnostics,
     loadProjects,
     loadGroups,
+    loadTemplates,
+    applyCronTemplate,
     targetLabel,
     scheduleLabel,
     statusLabel,
@@ -629,6 +765,10 @@ onBeforeUnmount(() => {
     deleteJob,
     restoreJob,
     purgeJob,
+    copyJobToDispatch,
+    handleMisfire,
+    buildJobPayload,
+    refreshCronPreview,
     submitCreate
   }
 }

@@ -240,11 +240,10 @@ const getSvgUrl = computed(() => {
 const fallbackSvgUrl = computed(() => {
   const t = normalizePetType(props.type)
   const spec = specialStateFiles[t]
-  if (spec?.files?.idle) {
-    const prefix = spec.dir ? `${spec.dir}/` : ''
-    return `/pets/${prefix}${spec.files.idle}`
-  }
-  return isGeneratedSvg.value ? `/pets/${t}-idle.svg` : `/pets/${t}.svg`
+  // Optional skins may be previewed before their full asset pack is
+  // downloaded. The small bundled icon is always available in npm builds.
+  if (spec?.files?.idle && t === 'yuexinmiao') return `/pets/${spec.files.idle}`
+  return `/pets/${t}.svg`
 })
 
 const handleImageError = (event) => {

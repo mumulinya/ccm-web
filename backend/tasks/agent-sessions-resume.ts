@@ -51,6 +51,7 @@ import {
 import {
   FINAL_DISPATCH_REACTIVE_COMPACT_MAX_CONSECUTIVE_FAILURES,
   TaskAgentSession,
+  buildTaskAgentContinuityBinding,
   capacityRevalidationCommitChecksum,
   capacityRevalidationGateChecksum,
   capacityRevalidationGroupSessionId,
@@ -72,10 +73,12 @@ export function openTaskAgentSession(input: {
   groupId: string;
   project: string;
   agentType: string;
+  continuity?: ReturnType<typeof buildTaskAgentContinuityBinding>;
 }) {
   return withTaskAgentSessionStoreLock(() => {
     const store = loadStore();
     const runtime = normalizeAgentRuntimeId(input.agentType);
+  const continuity = input.continuity?.agentType === runtime ? input.continuity : null;
   const existing = [...store.sessions].reverse().find((item: TaskAgentSession) =>
     item.status === "open"
     && item.scopeId === input.scopeId
@@ -96,6 +99,17 @@ export function openTaskAgentSession(input: {
   }
 
   const now = new Date().toISOString();
+  const continuitySessions = continuity
+    ? [...store.sessions].reverse().filter((item: TaskAgentSession) => item.continuityKey === continuity.key && item.agentType === runtime)
+    : [];
+  const activeSibling = continuitySessions.find((item: TaskAgentSession) => item.status === "open" && item.taskId !== String(input.taskId || ""));
+  const reusableSource = activeSibling
+    ? null
+    : continuitySessions.find((item: TaskAgentSession) => item.resumeMode === "native" && !!item.nativeSessionId);
+  const priorGeneration = continuitySessions.reduce((max: number, item: TaskAgentSession) => Math.max(max, Number(item.continuityGeneration || 0)), 0);
+  const continuityMode: TaskAgentSession["continuityMode"] = activeSibling
+    ? "isolated_branch"
+    : reusableSource ? "reused" : "fresh";
   const session: TaskAgentSession = {
     id: `tas_${Date.now().toString(36)}_${crypto.randomBytes(3).toString("hex")}`,
     scopeId: String(input.scopeId || input.taskId || "").trim(),
@@ -103,10 +117,10 @@ export function openTaskAgentSession(input: {
     groupId: String(input.groupId || "").trim(),
     project: String(input.project || "").trim(),
     agentType: runtime,
-    nativeSessionId: createNativeSessionId(runtime),
-    resumeMode: getAgentRuntime(runtime).capabilities.sessionResume ? "native" : "scratchpad",
+    nativeSessionId: reusableSource?.nativeSessionId || createNativeSessionId(runtime),
+    resumeMode: reusableSource?.resumeMode || (getAgentRuntime(runtime).capabilities.sessionResume ? "native" : "scratchpad"),
     status: "open",
-    turnCount: 0,
+    turnCount: reusableSource ? Number(reusableSource.turnCount || 0) : 0,
     lastTurnSucceeded: null,
     createdAt: now,
     lastUsedAt: now,
@@ -117,6 +131,13 @@ export function openTaskAgentSession(input: {
     nativeSessionHistory: [],
     lastNativeRecoveryAt: "",
     lastError: "",
+    continuityKey: continuity?.key || "",
+    continuityScope: continuity?.scope,
+    continuityExactSessionId: continuity?.exactSessionId || "",
+    continuityGeneration: reusableSource ? Number(reusableSource.continuityGeneration || 1) : priorGeneration + 1,
+    continuityMode,
+    continuitySourceSessionId: reusableSource?.id || activeSibling?.id || "",
+    continuityBranchId: activeSibling ? `tab_${crypto.randomBytes(8).toString("hex")}` : "",
   };
   store.sessions.push(session);
   saveStore(store);
@@ -403,6 +424,10 @@ export function getTaskAgentSessionContinuity(session: TaskAgentSession) {
   return {
     mode: session.resumeMode,
     native: session.resumeMode === "native" && !!session.nativeSessionId,
+    conversationBound: !!session.continuityKey,
+    continuityGeneration: Number(session.continuityGeneration || 0),
+    continuityMode: session.continuityMode || "fresh",
+    isolatedBranch: session.continuityMode === "isolated_branch",
     degraded: session.resumeMode === "scratchpad" && getAgentRuntime(session.agentType).capabilities.sessionResume,
     reason: session.lastError || "",
     turnCount: session.turnCount,

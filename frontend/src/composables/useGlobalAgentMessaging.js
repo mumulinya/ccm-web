@@ -18,6 +18,36 @@ export function useGlobalAgentMessaging(context) {
     GLOBAL_RESULT_VISIBLE_FALLBACK, trackGlobalMission, emit,
   } = context
 
+  const reconcileAuthoritativeGlobalRunMessage = async (message) => {
+    const runId = String(message?.agenticRun?.id || activeGlobalRunId.value || '')
+    if (!message || !runId) return false
+    try {
+      const response = await fetch(`/api/global-agent/runs?id=${encodeURIComponent(runId)}`, {
+        cache: 'no-store',
+        headers: { Accept: 'application/json' },
+      })
+      const payload = await response.json().catch(() => ({}))
+      if (!response.ok || payload.success === false || !payload.run) return false
+      const status = String(payload.run.status || '').toLowerCase()
+      if (!['completed', 'failed', 'cancelled', 'waiting_confirmation', 'waiting_clarification', 'blocked', 'paused', 'supervising'].includes(status)) return false
+      const run = mergeGlobalRunTestAgentExecutionPlan(payload.run, message.agenticRun || {})
+      message.agenticRun = run
+      message.content = sanitizeGlobalVisibleStreamText(
+        run.final_reply || GLOBAL_RESULT_VISIBLE_FALLBACK,
+        GLOBAL_RESULT_VISIBLE_FALLBACK,
+        8000,
+      )
+      message.streaming = false
+      message.type = status === 'failed' || status === 'cancelled'
+        ? 'global_agent_error'
+        : 'global_agent_result'
+      activeGlobalRunMessage.value = message
+      return true
+    } catch {
+      return false
+    }
+  }
+
 const sendGlobalRunSteer = async (options = {}) => {
   const userText = String(options.userText ?? chatInput.value).trim()
   const runId = options.runId || activeGlobalRunId.value
@@ -148,7 +178,8 @@ watch(
 
 const submitGlobalMessageWhileBusy = async () => {
   const message = chatInput.value.trim()
-  if (!message) return
+  const queuedFiles = [...selectedFiles.value]
+  if (!message && !queuedFiles.length) return
   const requestedMode = globalTurnControl.mode.value
   const supervisedMessage = currentSupervisedRunMessage.value
   const activeMessage = activeGlobalRunMessage.value?.agenticRun?.id === activeGlobalRunId.value
@@ -164,11 +195,13 @@ const submitGlobalMessageWhileBusy = async () => {
   const effectiveMode = requestedMode === 'steer' && canSteer ? 'steer' : 'queue'
   const turn = await globalTurnControl.enqueue({
     message,
+    attachments: queuedFiles,
     mode: effectiveMode,
     activeRunId: runId,
     metadata: { session_id: currentSessionId.value, requested_mode: requestedMode, target_refs: [...(selectedGlobalTargetRefs?.value || [])] },
   })
   chatInput.value = ''
+  selectedFiles.value = []
   if (selectedGlobalTargetKeys) selectedGlobalTargetKeys.value = []
   if (effectiveMode === 'steer') {
     const result = await sendGlobalRunSteer({ userText: message, runId, agentMsg: targetMessage || undefined, supervision })
@@ -199,18 +232,17 @@ const guideGlobalQueuedTurn = async (turn) => {
     return guidedTurn
   }
 
-  const result = await sendGlobalRunSteer({
-    userText: guidedTurn.message,
-    runId,
-    agentMsg: targetMessage || undefined,
-    supervision,
+  await globalTurnControl.apply(guidedTurn, async claimed => {
+    const result = await sendGlobalRunSteer({
+      userText: claimed.message,
+      runId,
+      agentMsg: targetMessage || undefined,
+      supervision,
+    })
+    if (!result?.success) throw new Error(result?.error || '引导没有接入当前工作')
+    return { run_id: runId, continuation_task_id: targetMessage?.task_id || targetMessage?.taskId || '' }
   })
-  await globalTurnControl.settle(
-    guidedTurn,
-    result?.success ? 'applied' : 'failed',
-    result?.success ? {} : { error: result?.error || '引导没有接入当前工作' },
-  )
-  if (result?.success) toast.success('这条消息已纳入当前工作')
+  toast.success('这条消息已纳入当前工作')
   return guidedTurn
 }
 
@@ -332,7 +364,7 @@ const sendMessage = async (options = {}) => {
     ? (Array.isArray(queuedTurn.metadata?.target_refs) ? queuedTurn.metadata.target_refs : [])
     : [...(selectedGlobalTargetRefs?.value || [])]
   const clarificationTarget = pendingGlobalClarificationInput.value
-  const attachedFiles = queuedTurn ? [] : [...selectedFiles.value]
+  const attachedFiles = queuedTurn ? [...(queuedTurn.files || [])] : [...selectedFiles.value]
   const retrySignature = globalRequestRetrySignature({
     sessionId: currentSessionId.value,
     message: userText,
@@ -395,6 +427,12 @@ const sendMessage = async (options = {}) => {
     activeGlobalRunId.value = ''
     activeGlobalExecutionConfirmed.value = false
     const agentMsgAdded = { value: false }
+    // Keep the complete assistant turn in one message from the first frame.
+    // The message list renders this empty streaming envelope as “正在思考…”,
+    // then updates the same row as safe SSE text arrives.
+    ensureGlobalStreamMessage(agentMsg, agentMsgAdded)
+    saveHistory()
+    scrollToBottom()
     
     let res
     if (attachedFiles.length > 0) {
@@ -448,6 +486,14 @@ const sendMessage = async (options = {}) => {
     const seenGlobalStreamEventIds = new Set()
     let globalResultReceived = false
     let globalStreamFailed = false
+
+    const reconcileAuthoritativeGlobalRun = async () => {
+      const reconciled = await reconcileAuthoritativeGlobalRunMessage(agentMsg)
+      if (reconciled) {
+        globalResultReceived = true
+      }
+      return reconciled
+    }
 
     const handleGlobalSseEvent = (rawEvent) => {
       const dataText = rawEvent
@@ -559,6 +605,17 @@ const sendMessage = async (options = {}) => {
           agentMsg.type = 'global_agent_error'
         } else if (data.type !== 'done') {
           ensureGlobalStreamMessage(agentMsg, agentMsgAdded)
+          const streamedRunId = String(data.run_id || data.runId || '')
+          if (streamedRunId) {
+            agentMsg.id = agentMsg.id || `gam_${streamedRunId}_assistant`
+            agentMsg.agenticRun = mergeGlobalRunTestAgentExecutionPlan({
+              id: streamedRunId,
+              status: data.status || 'running',
+              phase: data.phase || 'plan',
+            }, agentMsg.agenticRun || {})
+            activeGlobalRunId.value = streamedRunId
+            activeGlobalRunMessage.value = agentMsg
+          }
           if (appendGlobalStreamEvent(agentMsg, data)) scrollToBottom()
         } else {
           agentMsg.streaming = false
@@ -583,6 +640,15 @@ const sendMessage = async (options = {}) => {
     sseBuffer += decoder.decode()
     if (sseBuffer.trim()) handleGlobalSseEvent(sseBuffer)
 
+    // A proxy/browser may close the event stream after the backend has already
+    // persisted the terminal run but before the final result packet reaches the
+    // page. Re-read that authoritative run so the thinking envelope cannot be
+    // left behind until a manual refresh.
+    if (!globalResultReceived && agentMsg.streaming) {
+      const reconciled = await reconcileAuthoritativeGlobalRun()
+      if (!reconciled) agentMsg.streaming = false
+    }
+
     if (globalResultReceived && pendingGlobalRequestRetry.value?.requestId === requestId) {
       pendingGlobalRequestRetry.value = null
     } else if (globalStreamFailed && !chatInput.value.trim()) {
@@ -598,6 +664,12 @@ const sendMessage = async (options = {}) => {
     if (currentSession.value) {
       const last = currentSession.value.messages[currentSession.value.messages.length - 1]
       if (last?.type === 'global_stream' && last.streaming) {
+        if (!stopped && await reconcileAuthoritativeGlobalRunMessage(last)) {
+          pendingGlobalRequestRetry.value = null
+          saveHistory()
+          scrollToBottom()
+          return { success: true, error: '', runId: last.agenticRun?.id || '' }
+        }
         last.streaming = false
         last.type = 'global_agent_error'
         last.content = stopped ? '本次处理已停止，你可以调整需求后继续。' : `❌ 连接服务器失败：${err.message || '请检查网络或配置'}`

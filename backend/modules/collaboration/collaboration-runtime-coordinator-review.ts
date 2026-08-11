@@ -1424,25 +1424,80 @@ export async function processTargetQueue(targetKey: string, ctx: CollabCtx, test
       addTaskLog(taskId, "response", `Agent 响应:\n${result.substring(0, 1000)}`);
 
       if (task.workflow_type === "agent_coordination_dependency") {
-        const coordinationRequest = getCoordinationRequestForTask(task);
-        const coordinationReceipt = execution.receipt || null;
-        const coordinationKernel = loadExecution(task.id);
+        // executeTask persists the group-main verification receipt. Reloading
+        // avoids accepting a stale task object before the dependency merge.
+        const currentCoordinationTask = loadTasks().find((item: any) => item.id === task.id) || task;
+        const coordinationRequest = getCoordinationRequestForTask(currentCoordinationTask);
+        const coordinationReceipt = currentCoordinationTask.receipt || execution.receipt || null;
+        const coordinationKernel = loadExecution(currentCoordinationTask.id);
         const coordinationAcceptance: any = coordinationRequest
-          ? evaluateCoordinationTaskEvidence(task, coordinationRequest, coordinationReceipt, coordinationKernel)
-          : buildRejectedCoordinationAcceptance(task, {}, coordinationReceipt, "找不到协调请求记录");
+          ? evaluateCoordinationTaskEvidence(currentCoordinationTask, coordinationRequest, coordinationReceipt, coordinationKernel)
+          : buildRejectedCoordinationAcceptance(currentCoordinationTask, {}, coordinationReceipt, "找不到协调请求记录");
         const workspaceFiles = coordinationAcceptance.workspace_files || [];
         const green = evaluateGreenContract({
           receipt: coordinationReceipt,
           fileChanges: workspaceFiles,
-          requiresChanges: taskRequiresCodeChanges(task),
-          requiresVerification: task.requires_verification !== false,
+          requiresChanges: taskRequiresCodeChanges(currentCoordinationTask),
+          requiresVerification: currentCoordinationTask.requires_verification !== false,
           workspacePassed: coordinationAcceptance.accepted,
-          branchFresh: true,
+          branchFresh: coordinationAcceptance.branch_fresh === true,
           reviewPassed: coordinationAcceptance.accepted,
           requiredLevel: coordinationKernel?.workspace?.mode === "worktree" ? "merge_ready" : "project",
         });
+        const priorRework = currentCoordinationTask?.workflow_meta?.coordination_dependency_rework || {};
+        const reworkRound = Math.max(0, Number(priorRework.round || 0));
+        const maxReworkRounds = Math.min(5, Math.max(0, Number(priorRework.max_rounds ?? process.env.CCM_COORDINATION_DEPENDENCY_REWORK_MAX ?? 2)));
+        const shouldRework = !coordinationAcceptance.accepted
+          && !!currentCoordinationTask?.main_agent_self_verification
+          && reworkRound < maxReworkRounds;
+        if (shouldRework) {
+          const nextRound = reworkRound + 1;
+          const reworkDetail = `群聊主 Agent 验收未通过，已返回 ${currentCoordinationTask.target_project} 进行第 ${nextRound}/${maxReworkRounds} 轮增量返工`;
+          const reworkTask = updateTask(currentCoordinationTask.id, {
+            status: "pending",
+            acceptance_state: "reworking",
+            status_detail: reworkDetail,
+            test_agent_enabled: false,
+            workflow_meta: {
+              ...(currentCoordinationTask.workflow_meta || {}),
+              coordination_dependency_rework: {
+                round: nextRound,
+                max_rounds: maxReworkRounds,
+                instruction: coordinationAcceptance.reason,
+                requested_at: new Date().toISOString(),
+                verifier: "group_main_agent",
+              },
+            },
+          }) || currentCoordinationTask;
+          transitionExecution(currentCoordinationTask.id, "reviewing", reworkDetail, {
+            green,
+            receipt: coordinationReceipt,
+            fileChanges: { files: workspaceFiles },
+            runnerVerification: { status: "failed", verification: coordinationAcceptance.verification || [] },
+            outputPreview: result,
+            data: { coordination_acceptance: coordinationAcceptance, rework: { round: nextRound, max_rounds: maxReworkRounds } },
+          });
+          appendTaskTimelineEvent(currentCoordinationTask.id, {
+            type: "group_main_dependency_rework_queued",
+            title: `群聊主 Agent 验收未通过，${currentCoordinationTask.target_project} 正在返工`,
+            detail: coordinationAcceptance.reason,
+            status: "warn",
+            phase: "reworking",
+            agent: "group-main-agent",
+            data: { round: nextRound, max_rounds: maxReworkRounds, test_agent_created: false },
+          });
+          updateGroupTaskInlineStatus(reworkTask, "pending", reworkDetail);
+          settleTaskAgentCommunication(currentCoordinationTask.id, "rejected", {
+            summary: reworkDetail,
+            verificationResults: coordinationAcceptance.verification || [],
+            result: { ...(coordinationReceipt || {}), filesChanged: workspaceFiles },
+          });
+          await ctx.onTaskStatusChange?.(reworkTask, "waiting", reworkDetail);
+          enqueueFollowupAfterRound = true;
+          continue;
+        }
         const completedAt = new Date().toISOString();
-        transitionExecution(task.id, coordinationAcceptance.accepted ? "succeeded" : "failed", coordinationAcceptance.reason, {
+        transitionExecution(currentCoordinationTask.id, coordinationAcceptance.accepted ? "succeeded" : "failed", coordinationAcceptance.reason, {
           green,
           receipt: coordinationReceipt,
           fileChanges: { files: workspaceFiles },
@@ -1450,7 +1505,7 @@ export async function processTargetQueue(targetKey: string, ctx: CollabCtx, test
           outputPreview: result,
           data: { coordination_acceptance: coordinationAcceptance },
         });
-        const settledTask = updateTask(task.id, {
+        const settledTask = updateTask(currentCoordinationTask.id, {
           status: coordinationAcceptance.accepted ? "done" : "failed",
           result: result.substring(0, 500),
           final_report: execution.report || result,
@@ -1460,16 +1515,16 @@ export async function processTargetQueue(targetKey: string, ctx: CollabCtx, test
           coordination_acceptance: coordinationAcceptance,
           completed_at: coordinationAcceptance.accepted ? completedAt : undefined,
           failed_at: coordinationAcceptance.accepted ? undefined : completedAt,
-          execution_kernel: { execution_id: task.id, state: coordinationAcceptance.accepted ? "succeeded" : "failed", green, updated_at: completedAt },
-        }) || task;
-        settleTaskAgentCommunication(task.id, coordinationAcceptance.accepted ? "accepted" : "failed", {
+          execution_kernel: { execution_id: currentCoordinationTask.id, state: coordinationAcceptance.accepted ? "succeeded" : "failed", green, updated_at: completedAt },
+        }) || currentCoordinationTask;
+        settleTaskAgentCommunication(currentCoordinationTask.id, coordinationAcceptance.accepted ? "accepted" : "failed", {
           summary: coordinationAcceptance.reason,
           verificationResults: coordinationAcceptance.verification || [],
           result: { ...(execution.receipt || {}), filesChanged: workspaceFiles },
         });
-        closeTaskAgentSessions({ taskId, groupId: task.group_id || undefined }, coordinationAcceptance.accepted ? "协作工作项已交付，等待主 Agent 合并" : "协作工作项未通过证据门禁");
+        closeTaskAgentSessions({ taskId, groupId: currentCoordinationTask.group_id || undefined }, coordinationAcceptance.accepted ? "协作工作项已交付，等待群聊主 Agent 合并" : "协作工作项未通过群聊主 Agent 验收");
         updateGroupTaskInlineStatus(settledTask, coordinationAcceptance.accepted ? "done" : "failed", coordinationAcceptance.reason);
-        addTaskLog(task.id, coordinationAcceptance.accepted ? "success" : "warning", coordinationAcceptance.reason);
+        addTaskLog(currentCoordinationTask.id, coordinationAcceptance.accepted ? "success" : "warning", coordinationAcceptance.reason);
         await ctx.onTaskStatusChange?.(settledTask, coordinationAcceptance.accepted ? "done" : "failed", coordinationAcceptance.reason);
         continue;
       }
@@ -1795,16 +1850,22 @@ export async function processTargetQueue(targetKey: string, ctx: CollabCtx, test
         continue;
       }
       const retryExhausted = String(error?.code || "") === "CCM_MODEL_RETRY_EXHAUSTED";
-      const temporaryInterruption = retryExhausted
-        || ["network", "timeout", "provider", "lease_lost"].includes(String(failure.failureClass || ""));
+      const streamInterrupted = String(error?.code || "") === "CCM_MODEL_STREAM_INTERRUPTED_AFTER_DELTA";
+      const temporaryInterruption = retryExhausted || streamInterrupted
+        || ["network", "gateway_routing", "timeout", "provider", "infra", "lease_lost"].includes(String(failure.failureClass || ""));
       if (!cancelled && temporaryInterruption) {
         const reasonCode = String(failure.failureClass || "") === "lease_lost"
           ? "lease_lost"
+          : streamInterrupted
+            ? "model_stream_interrupted"
+            : String(failure.failureClass || "") === "infra"
+              ? "agent_runtime_unavailable"
           : retryExhausted
             ? "provider_unavailable"
-            : String(failure.failureClass || "") === "network"
+            : ["network", "gateway_routing", "timeout"].includes(String(failure.failureClass || ""))
               ? "temporary_network"
               : "provider_overload";
+        const resumeCheckpoint = latestWithFollowups.resume_checkpoint || latestWithFollowups.interruption_receipt?.resume_checkpoint || undefined;
         const interruption = interruptTaskExecution({
           task: latestWithFollowups,
           reasonCode: reasonCode as any,
@@ -1812,20 +1873,23 @@ export async function processTargetQueue(targetKey: string, ctx: CollabCtx, test
           actor: "group-task-runtime",
           checkpoint: latestWithFollowups.acceptance_state || "executing",
           workspaceChecksum: latestWithFollowups.workspace_snapshot_checksum || latestWithFollowups.workspace_evidence?.checksum || "",
-          sideEffectState: latestWithFollowups.git_commit_receipt || latestWithFollowups.deployment_receipt ? "uncertain" : "none",
+          resumeCheckpoint,
+          sideEffectState: resumeCheckpoint?.workspaceChecksum && resumeCheckpoint.workspaceChecksum === (latestWithFollowups.workspace_snapshot_checksum || latestWithFollowups.workspace_evidence?.checksum || "") ? "committed" : "uncertain",
         });
+        const recovery = interruption.receipt.recovery;
         const interruptedTask = updateTask(taskId, {
           status: "blocked",
           acceptance_state: "recovery_required",
-          auto_execute: false,
-          is_paused: true,
-          paused: true,
+          auto_execute: interruption.receipt.auto_resume_allowed,
+          is_paused: !interruption.receipt.auto_resume_allowed,
+          paused: !interruption.receipt.auto_resume_allowed,
           recovery_pending: true,
+          recovery,
           interruption_receipt: interruption.receipt,
           interrupted_at: interruption.receipt.interrupted_at,
-          status_detail: retryExhausted
-            ? "模型重试预算已耗尽，当前执行已停止；任务和子 Agent 会话已保留"
-            : "网络或运行环境中断，当前执行已停止；任务和子 Agent 会话已保留",
+          status_detail: interruption.receipt.auto_resume_allowed
+            ? `${reasonCode === "agent_runtime_unavailable" ? "项目 Agent 执行通道暂时不可用" : "模型或网络暂时不可用"}，任务现场已保留；将在安全退避后从“${resumeCheckpoint?.phase || latestWithFollowups.acceptance_state || "当前"}”阶段继续`
+            : "当前执行已中断，任务现场和子 Agent 会话已保留；需要重新核验或人工接管",
         }) || latestWithFollowups;
         updateGroupTaskInlineStatus(interruptedTask, "blocked", interruptedTask.status_detail);
         finalizeTaskKernel(task, buildTaskExecutionResult("waiting", interruptedTask.status_detail, { detail: interruptedTask.status_detail }), interruptedTask.delivery_summary || null, "cancelled", interruptedTask.status_detail);
@@ -2109,7 +2173,12 @@ export function recoverAgentExecutionBlockedTasks(ctx: CollabCtx, reason = "执�
   const probeTarget = options.probeTarget || options.probe_target || null;
   const candidates = (Array.isArray(options.taskSnapshot) ? options.taskSnapshot : loadTasks())
     .filter(isAgentExecutionBlockedPendingTask)
-    .filter((task: any) => taskMatchesAgentProbeTarget(task, probeTarget));
+    .filter((task: any) => taskMatchesAgentProbeTarget(task, probeTarget))
+    .filter((task: any) => {
+      const recovery = task?.recovery || task?.interruption_receipt?.recovery || {};
+      if (recovery.mode === "manual" || recovery.state === "needs_user") return false;
+      return !recovery.nextRetryAt || Date.parse(recovery.nextRetryAt) <= Date.now();
+    });
   const results: any[] = [];
   for (const task of candidates) {
     const readiness = getTaskAgentExecutionReadiness(task);
@@ -2121,6 +2190,15 @@ export function recoverAgentExecutionBlockedTasks(ctx: CollabCtx, reason = "执�
       status: "pending",
       status_detail: reason,
       execution_readiness: null,
+      recovery_pending: false,
+      recovery: {
+        ...(task.recovery || task.interruption_receipt?.recovery || {}),
+        mode: "safe_auto",
+        state: "queued",
+        attempt: Math.max(0, Number(task?.recovery?.attempt || task?.interruption_receipt?.recovery?.attempt || 0)) + 1,
+        recovered_at: new Date().toISOString(),
+        nextRetryAt: undefined,
+      },
       recovered_after_agent_probe_at: new Date().toISOString(),
     });
     addTaskLog(task.id, "info", reason);

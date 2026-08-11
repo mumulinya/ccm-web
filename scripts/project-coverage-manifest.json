@@ -80,6 +80,14 @@
           "id": "auth",
           "component": "frontend/src/components/auth/AuthPage.vue",
           "entryType": "standalone"
+        },
+        {
+          "id": "user-management",
+          "component": "frontend/src/components/system/AccessManagement.vue"
+        },
+        {
+          "id": "permission-management",
+          "component": "frontend/src/components/system/AccessManagement.vue"
         }
       ],
       "backendRoots": [
@@ -92,7 +100,8 @@
         "backend/modules/system/internal-api-auth.ts"
       ],
       "apiPrefixes": [
-        "/api/auth"
+        "/api/auth",
+        "/api/admin"
       ],
       "cliCommands": [
         "setup-code"
@@ -200,7 +209,8 @@
         "/api/groups",
         "/api/send",
         "/api/send-stream",
-        "/api/tasks"
+        "/api/tasks",
+        "/api/task-templates"
       ],
       "cliCommands": [],
       "testDomains": [
@@ -762,7 +772,8 @@
       ],
       "productionEntrypoints": [
         "backend/modules/search/conversation-search.ts",
-        "backend/modules/collaboration/task-replay.ts"
+        "backend/modules/collaboration/task-replay.ts",
+        "backend/modules/collaboration/task-replay-presentation.ts"
       ],
       "apiPrefixes": [
         "/api/conversations",

@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@lucide/vue": "^1.24.0",
+    "@tanstack/vue-virtual": "^3.13.35",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/addon-search": "^0.16.0",
     "@xterm/addon-web-links": "^0.12.0",

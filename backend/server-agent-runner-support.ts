@@ -459,6 +459,27 @@ export function createAgentRunnerSupport(deps: any) {
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     }
   }
+
+  function cleanupAgentRunnerEphemeralResults(maxAgeMs = 24 * 60 * 60 * 1000) {
+    ensureAgentRunnerDirs();
+    const now = Date.now();
+    let removed = 0;
+    for (const name of fs.readdirSync(AGENT_RUNNER_RESULTS_DIR)) {
+      if (!/^[a-zA-Z0-9_.-]+\.json$/.test(String(name || ""))) continue;
+      const file = path.join(AGENT_RUNNER_RESULTS_DIR, name);
+      try {
+        const stat = fs.statSync(file);
+        if (!stat.isFile() || now - stat.mtimeMs < Math.max(60_000, maxAgeMs)) continue;
+        fs.unlinkSync(file);
+        removed += 1;
+      } catch {}
+    }
+    return { removed, contentStored: false };
+  }
+
+  // 外部Runner结果可能含用于一次性归一化的stdout。服务恢复时清理已无人
+  // 等待的过期结果；活跃/刚结束任务仍保留一个恢复窗口。
+  cleanupAgentRunnerEphemeralResults();
   
   
   
@@ -530,7 +551,11 @@ export function createAgentRunnerSupport(deps: any) {
     while (Date.now() - started < Math.max(1000, timeoutMs || 300000)) {
       if (fs.existsSync(resultFile)) {
         try {
-          return JSON.parse(fs.readFileSync(resultFile, "utf-8").replace(/^\uFEFF/, ""));
+          const result = JSON.parse(fs.readFileSync(resultFile, "utf-8").replace(/^\uFEFF/, ""));
+          // 外部Runner结果中的原始stdout只用于本次归一化。读取进内存后立即
+          // 删除临时结果文件，后续持久恢复使用无正文direct-dispatch证据。
+          try { fs.unlinkSync(resultFile); } catch {}
+          return result;
         } catch {}
       }
       await new Promise(resolve => setTimeout(resolve, pollMs));
@@ -759,6 +784,7 @@ export function createAgentRunnerSupport(deps: any) {
     buildProjectToolContext,
     sendRuntimeToolDispatchBlocked,
     ensureAgentRunnerDirs,
+    cleanupAgentRunnerEphemeralResults,
     createAgentRunnerRequest,
     waitForAgentRunnerResult,
     recordNativeCapacityRefreshOutcome,

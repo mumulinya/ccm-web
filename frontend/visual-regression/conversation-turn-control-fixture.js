@@ -15,25 +15,25 @@ document.head.appendChild(style)
 createApp({
   components: { ConversationTurnControls, ChatComposer },
   setup() {
-    const mode = ref('steer')
     const input = ref('请把异常重试也纳入当前实现')
     const stopCount = ref(0)
+    const guideCount = ref(0)
     const retryCount = ref(0)
     const cancelCount = ref(0)
     const turns = ref([
-      { id:'q1', status:'queued', position:1, message:'完成后生成一份用户可读总结' },
-      { id:'q2', status:'queued', position:2, message:'再检查一次移动端布局是否溢出' },
-      { id:'q3', status:'failed', position:0, message:'失败消息可以重新排队' },
+      { id:'q1', revision:1, kind:'user_message', source:'web', mode:'queue', status:'queued', position:1, messagePreview:'完成后生成一份用户可读总结' },
+      { id:'q2', revision:1, kind:'task_dispatch', source:'schedule', task_id:'task-scheduled', mode:'queue', status:'queued', position:2, messagePreview:'每天检查一次移动端布局是否溢出' },
+      { id:'q3', revision:2, kind:'user_message', source:'web', mode:'queue', status:'failed', position:3, messagePreview:'失败消息可以重新排队' },
     ])
-    return { mode, input, turns, stopCount, retryCount, cancelCount }
+    return { input, turns, stopCount, guideCount, retryCount, cancelCount }
   },
   template: `
     <main class="fixture">
       <section id="busy-case" class="case">
         <h2>Agent 工作中</h2>
-        <ConversationTurnControls v-model:mode="mode" :busy="true" :turns="turns" @stop="stopCount++" @retry="retryCount++" @cancel="cancelCount++" />
-        <ChatComposer v-model="input" :busy="true" :allow-input-while-busy="true" :send-label="mode === 'steer' ? '引导' : '排队'" />
-        <output id="events">{{ mode }}|{{ stopCount }}|{{ retryCount }}|{{ cancelCount }}</output>
+        <ConversationTurnControls :busy="true" :turns="turns" @stop="stopCount++" @guide="guideCount++" @retry="retryCount++" @cancel="cancelCount++" />
+        <ChatComposer v-model="input" :busy="true" :allow-input-while-busy="true" send-label="发送" />
+        <output id="events">{{ guideCount }}|{{ stopCount }}|{{ retryCount }}|{{ cancelCount }}</output>
       </section>
       <section id="idle-case" class="case">
         <h2>空闲且没有队列</h2>

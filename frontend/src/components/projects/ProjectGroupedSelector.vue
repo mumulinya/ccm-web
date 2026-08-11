@@ -236,7 +236,8 @@ button:disabled { opacity:.5; cursor:not-allowed; }
 .project-row-icon { width:25px; height:25px; flex:0 0 auto; display:grid; place-items:center; border:1px solid var(--border-color); border-radius:5px; color:var(--accent-blue); background:var(--surface-raised); }
 .project-picker-select i { width:6px; height:6px; margin-left:auto; flex:0 0 auto; border-radius:50%; background:var(--text-muted); opacity:.45; }
 .project-picker-select i.running { background:#16a34a; opacity:1; box-shadow:0 0 0 3px color-mix(in srgb,#16a34a 12%,transparent); }
-.project-picker-row select { width:110px; height:28px; margin-right:5px; padding:0 22px 0 7px; border:1px solid var(--border-color); border-radius:5px; outline:0; background:var(--surface-raised); color:var(--text-secondary); font-size:9px; }
+.project-picker-row select { width:118px; height:32px; margin-right:5px; padding:0 26px 0 9px; border:1px solid var(--border-color); border-radius:var(--radius-md,6px); outline:0; background:var(--control-bg); color:var(--text-secondary); font-size:11px; }
+.project-picker-row select:focus { border-color:var(--accent-blue); box-shadow:var(--focus-ring); }
 .folder-rename,.project-folder-create { display:flex; align-items:center; gap:7px; margin:0 7px 5px 31px; padding:4px 5px 4px 9px; border:1px solid var(--accent-blue); border-radius:6px; background:var(--surface-raised); }
 .folder-rename button,.project-folder-create button { width:26px; height:26px; flex:0 0 auto; border:0; background:transparent; color:var(--accent-blue); }
 .project-folder-create { margin:0 10px 8px; }

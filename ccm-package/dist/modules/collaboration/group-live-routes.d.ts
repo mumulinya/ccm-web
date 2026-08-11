@@ -48,6 +48,13 @@ export type GroupLiveRoutesDeps = {
     extractActionableMentions: (text: string, group: any, sourceProject: string) => any[];
     extractAgentReceipt: (text: string, project: string) => any;
 };
+export declare function resolveGroupModelRecovery(messages?: any[], input?: any): {
+    failureMessageId: string;
+    anchorMessageId: string;
+    originalUserMessageId: string;
+    originalMessage: string;
+    attempt: number;
+};
 export declare function compactGroupLiveText(value: any, max?: number): string;
 export declare function groupLiveFlag(value: any, fallback?: boolean): boolean;
 export declare function resolveExplicitGroupContinuationTask(tasks: any[], groupId: string, taskId: string): {
@@ -202,6 +209,10 @@ export declare function handleGroupLiveRoutesSendPreface(payload: any, uploadedF
     explicitContinuationKind?: undefined;
     client_message_id?: undefined;
     configs?: undefined;
+    modelRecovery?: undefined;
+    requestExecutionAnchorMessageId?: undefined;
+    requestRecoveryAttempt?: undefined;
+    requestTurnId?: undefined;
 } | {
     done: false;
     payload: any;
@@ -245,6 +256,8 @@ export declare function handleGroupLiveRoutesSendPreface(payload: any, uploadedF
     userMsg: {
         clarification_request_id?: any;
         clarification_response_to?: any;
+        resumes_message_id?: string;
+        execution_anchor_message_id?: string;
         task_id?: any;
         group_session_id?: string;
         id: string;
@@ -267,5 +280,15 @@ export declare function handleGroupLiveRoutesSendPreface(payload: any, uploadedF
     explicitContinuationKind: string;
     client_message_id: any;
     configs: any[];
+    modelRecovery: {
+        failureMessageId: string;
+        anchorMessageId: string;
+        originalUserMessageId: string;
+        originalMessage: string;
+        attempt: number;
+    };
+    requestExecutionAnchorMessageId: string;
+    requestRecoveryAttempt: number;
+    requestTurnId: string;
 }>;
 export declare function handleGroupLiveRoutes(req: IncomingMessage, res: ServerResponse, parsed: UrlWithParsedQuery, ctx: any, deps: GroupLiveRoutesDeps): boolean;

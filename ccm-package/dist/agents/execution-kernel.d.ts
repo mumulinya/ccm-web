@@ -102,6 +102,7 @@ export declare function transitionExecution(executionId: string, state: Executio
 export declare function beginExecutionAttempt(executionId: string, message?: string): ExecutionRecord;
 export declare function attachExecutionWorkspace(executionId: string, workspace: any): ExecutionRecord;
 export declare function registerExternalRunnerRequest(executionId: string, requestId: string): void;
+export declare function metricAgentResourceSummary(taskId?: string, executionId?: string): any;
 export declare function listActiveAgentRuns(filters?: any): {
     id: any;
     taskId: any;
@@ -119,6 +120,15 @@ export declare function listActiveAgentRuns(filters?: any): {
     commandLabel: any;
     title: any;
     cancellable: boolean;
+    resources: {
+        sampledAt: any;
+        cpuPercent: number;
+        rssBytes: number;
+        childProcessCount: number;
+        peakCpuPercent: number;
+        peakRssBytes: number;
+        peakChildProcessCount: number;
+    };
 }[];
 export declare function cancelActiveAgentRun(input?: any): {
     success: boolean;
@@ -149,6 +159,15 @@ export declare function cancelActiveAgentRun(input?: any): {
         commandLabel: any;
         title: any;
         cancellable: boolean;
+        resources: {
+            sampledAt: any;
+            cpuPercent: number;
+            rssBytes: number;
+            childProcessCount: number;
+            peakCpuPercent: number;
+            peakRssBytes: number;
+            peakChildProcessCount: number;
+        };
     }[];
 };
 export declare function trackManagedChildProcess(taskId: string, executionId: string, child: ChildProcess, meta?: any): () => void;

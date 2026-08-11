@@ -3,12 +3,12 @@
       <div class="command-title">
         <span class="command-eyebrow">Agent Automation</span>
         <div class="title-line">
-          <h3>自动开发控制台</h3>
+          <h3>自动开发运营</h3>
           <span :class="['readiness-badge', readinessTone]">
             {{ readinessTone === 'ready' ? '可运行' : readinessTone === 'partial' ? '需关注' : readinessTone === 'checking' ? '检查中' : '暂不可用' }}
           </span>
         </div>
-        <p>主 Agent 认领需求、派发项目子 Agent，并在验收后生成报告。</p>
+        <p>批量接活、续跑和无人值守开发；具体任务的执行、验收与操作统一进入任务派发。</p>
       </div>
       <div class="command-actions">
         <button class="btn btn-outline" :disabled="isBusy" title="重新读取自动开发状态" @click="refreshAll">
@@ -69,7 +69,7 @@
                   <span class="eyebrow">最近一次手动运行</span>
                   <h4>{{ friendlyAction(latestRun.outcome?.message || '运行已完成') }}</h4>
                 </div>
-                <button class="text-action" @click="emit('navigate', { tab: 'tasks' })">查看任务</button>
+                <button class="text-action" @click="emit('navigate', { tab: 'tasks' })">进入任务派发</button>
               </div>
               <div class="run-stats">
                 <span>续跑 <strong>{{ latestRun.continued || 0 }}</strong></span>

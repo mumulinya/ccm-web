@@ -1,5 +1,5 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import MainAgentDecisionCard from './MainAgentDecisionCard.vue'
 import TaskCollaborationCard from '../collaboration/TaskCollaborationCard.vue'
 import AgentWorkEventDetails from './AgentWorkEventDetails.vue'
@@ -35,7 +35,7 @@ const props = defineProps({
   getAgentDisplayName: { type: Function, default: (value) => value || 'Agent' },
 })
 
-const emit = defineEmits(['step-action', 'task-action', 'open-pipeline', 'open-file-diff'])
+const emit = defineEmits(['step-action', 'task-action', 'open-pipeline', 'open-file-diff', 'failure-action'])
 
 const deliverySummary = () => props.msg.delivery_summary || props.msg.deliverySummary || null
 const clarificationSummary = () => props.msg.clarification_summary || props.msg.clarificationSummary || null
@@ -48,6 +48,16 @@ const textOnly = computed(() => !(
   || props.workEvents.length
   || Number(props.msg?.fileChanges?.count || 0) > 0
 ))
+const technicalOpen = ref(false)
+const failureTechnical = computed(() => props.msg?.providerFailureTechnical || props.msg?.provider_failure_technical || null)
+const isRecoverableModelFailure = computed(() => (
+  ['llm-error', 'llm-not-configured'].includes(String(props.msg?.runtime || '').toLowerCase())
+))
+const formatDuration = value => {
+  const ms = Number(value || 0)
+  if (!Number.isFinite(ms) || ms <= 0) return ''
+  return ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)}s`
+}
 </script>
 
 <template>
@@ -66,6 +76,21 @@ const textOnly = computed(() => !(
       </span>
     </div>
     <div v-if="(displayContent || msg.content) && !primaryTaskCard" class="agent-message-content" v-html="highlightMentions(displayContent || msg.content)"></div>
+    <div v-if="isRecoverableModelFailure" class="model-failure-actions">
+      <button type="button" class="model-failure-primary" @click="emit('failure-action', 'retry')">立即重试</button>
+      <button type="button" @click="emit('failure-action', 'settings')">检查模型配置</button>
+      <button type="button" :aria-expanded="technicalOpen" @click="technicalOpen = !technicalOpen">
+        {{ technicalOpen ? '收起技术详情' : '查看技术详情' }}
+      </button>
+    </div>
+    <div v-if="isRecoverableModelFailure && technicalOpen" class="model-failure-technical">
+      <div><span>错误类型</span><strong>{{ failureTechnical?.category || msg.providerFailure?.kind || 'provider' }}</strong></div>
+      <div><span>错误代码</span><code>{{ failureTechnical?.code || msg.providerFailure?.code || 'CCM_MODEL_CALL_FAILED' }}</code></div>
+      <div v-if="Number(failureTechnical?.attempts || msg.providerFailure?.attempts || 0) > 0"><span>调用尝试</span><strong>{{ failureTechnical?.attempts || msg.providerFailure?.attempts }} 次</strong></div>
+      <div v-if="formatDuration(failureTechnical?.elapsedMs || msg.providerFailure?.elapsedMs)"><span>耗时</span><strong>{{ formatDuration(failureTechnical?.elapsedMs || msg.providerFailure?.elapsedMs) }}</strong></div>
+      <p v-if="failureTechnical?.safeSummary || msg.providerFailure?.safeSummary">{{ failureTechnical?.safeSummary || msg.providerFailure?.safeSummary }}</p>
+      <small>这里只显示已脱敏诊断，不包含 API Key、Prompt 或原始响应。</small>
+    </div>
     <div v-if="clarificationSummary()" class="clarification-summary" :class="clarificationSummary().status">
       <div class="clarification-head">
         <strong>{{ clarificationSummary().title || '需要你补充信息' }}</strong>
@@ -272,6 +297,48 @@ const textOnly = computed(() => !(
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+.model-failure-actions {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 12px;
+}
+.model-failure-actions button {
+  min-height: 30px;
+  padding: 0 11px;
+  border: 1px solid var(--border-color, #d8dee8);
+  border-radius: 7px;
+  background: var(--bg-primary, #fff);
+  color: var(--text-secondary, #475569);
+  font-size: 11.5px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.model-failure-actions .model-failure-primary {
+  border-color: var(--accent-blue, #2563eb);
+  background: var(--accent-blue, #2563eb);
+  color: #fff;
+}
+.model-failure-technical {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  gap: 7px;
+  margin-top: 9px;
+  padding: 10px 11px;
+  border: 1px solid rgba(148, 163, 184, .28);
+  border-radius: 8px;
+  background: rgba(148, 163, 184, .07);
+  color: var(--text-secondary, #475569);
+  font-size: 11px;
+}
+.model-failure-technical > div { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+.model-failure-technical span { color: var(--text-muted, #94a3b8); }
+.model-failure-technical code { overflow-wrap: anywhere; color: var(--text-primary, #0f172a); }
+.model-failure-technical p { margin: 2px 0 0; line-height: 1.5; overflow-wrap: anywhere; }
+.model-failure-technical small { color: var(--text-muted, #94a3b8); line-height: 1.4; }
 .clarification-summary {
   position: relative;
   z-index: 1;

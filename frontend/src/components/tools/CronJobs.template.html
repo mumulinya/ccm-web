@@ -109,6 +109,8 @@
               <span v-if="job.workflow_type === 'daily_dev' && job.continue_gaps !== false">自动续跑缺口</span>
               <span v-if="job.notification_enabled">已开启通知</span>
               <span v-if="job.source_attachments?.length">附件 {{ job.source_attachments.length }} 个</span>
+              <span>并发：{{ { queue: '排队', skip: '跳过', parallel_safe: '安全并行', cancel_previous: '取消上一轮' }[job.overlap_policy] || '排队' }}</span>
+              <span v-if="job.consecutive_failures">连续失败 {{ job.consecutive_failures }}/{{ job.consecutive_failure_limit || 3 }}</span>
             </div>
             <p v-if="job.workflow_type === 'daily_dev' && isExecutionBlocked()" class="job-runtime-warning"><TriangleAlert :size="14" />执行通道阻塞，触发后会等待复检通过</p>
           </div>
@@ -130,6 +132,12 @@
             <p><span>下次</span>{{ formatTimeInZone(job.next_run, job.timezone) }}</p>
             <div v-if="cronRunMetaItems(job).length" class="cron-meta-row"><span v-for="item in cronRunMetaItems(job)" :key="item">{{ item }}</span></div>
             <small class="result-text" :title="job.last_result">{{ job.last_result || '暂无运行结果' }}</small>
+            <p v-if="job.paused_reason" class="job-runtime-warning"><TriangleAlert :size="14" />{{ job.paused_reason }}</p>
+            <div v-if="job.pending_misfires?.length" class="misfire-actions">
+              <span>有 {{ job.pending_misfires.length }} 次错过执行等待确认</span>
+              <button class="text-command" @click="handleMisfire(job, 'run')">限量补跑</button>
+              <button class="text-command" @click="handleMisfire(job, 'skip')">全部跳过</button>
+            </div>
           </div>
 
           <div class="cron-job-controls">
@@ -140,6 +148,7 @@
             <div class="primary-row-actions">
               <button class="btn btn-outline btn-sm" @click="openRunHistory(job)"><History :size="14" />运行记录</button>
               <button v-if="!showArchived" class="btn btn-secondary btn-sm" :disabled="isJobRunning(job.id)" @click="runJob(job.id)"><Play :size="14" />{{ isJobRunning(job.id) ? '运行中' : '立即运行' }}</button>
+              <button v-if="!showArchived" class="btn btn-outline btn-sm" @click="copyJobToDispatch(job)">复制为单次任务</button>
               <button v-if="showArchived" class="btn btn-primary btn-sm" @click="restoreJob(job.id)"><RotateCcw :size="14" />恢复</button>
             </div>
             <div class="secondary-row-actions">
@@ -169,6 +178,20 @@
         </header>
         <div class="modal-body">
         <div class="form-section-title first">基础信息</div>
+        <div class="form-group">
+          <label>任务模板</label>
+          <select v-model="newJob.taskTemplateId" @change="applyCronTemplate">
+            <option value="">不使用模板，直接填写执行内容</option>
+            <option v-for="item in templates" :key="item.id" :value="item.id">{{ item.name }}</option>
+          </select>
+          <div class="field-hint">模板与任务派发共用；每次触发仍会创建独立任务实例。</div>
+        </div>
+        <div v-if="selectedTemplate?.variables?.length" class="template-variable-grid">
+          <div v-for="variable in selectedTemplate.variables" :key="variable.key" class="form-group">
+            <label>{{ variable.label }}<span v-if="variable.required"> *</span></label>
+            <input v-model="newJob.templateVariables[variable.key]" :placeholder="variable.defaultValue || `填写 ${variable.label}`">
+          </div>
+        </div>
         <div class="form-group">
           <label>任务名称</label>
           <input v-model="newJob.name" placeholder="如 每日代码检查">
@@ -216,11 +239,23 @@
           </div>
           <div class="form-group">
             <label>错过执行时间</label>
-            <select v-model="newJob.misfirePolicy"><option value="run_once">恢复后补跑一次</option><option value="skip">记录并跳过</option></select>
+            <select v-model="newJob.misfirePolicy"><option value="run_once">恢复后补跑最近一次</option><option value="skip">记录并跳过</option><option value="catch_up">限量逐轮补跑</option><option value="confirm">等待人工确认</option></select>
           </div>
-          <div v-if="newJob.misfirePolicy === 'run_once'" class="form-group">
+          <div v-if="newJob.misfirePolicy !== 'skip'" class="form-group">
             <label>最长补跑窗口（分钟）</label>
             <input v-model.number="newJob.misfireGraceMinutes" type="number" min="1" max="10080">
+          </div>
+          <div v-if="newJob.misfirePolicy === 'catch_up' || newJob.misfirePolicy === 'confirm'" class="form-group">
+            <label>单次最多补跑</label>
+            <input v-model.number="newJob.catchUpLimit" type="number" min="1" max="20">
+          </div>
+          <div class="form-group">
+            <label>上一轮未完成时</label>
+            <select v-model="newJob.overlapPolicy"><option value="queue">排队等待（推荐）</option><option value="skip">跳过本轮</option><option value="parallel_safe">安全隔离并行</option><option value="cancel_previous">安全取消上一轮</option></select>
+          </div>
+          <div class="form-group">
+            <label>连续失败自动暂停</label>
+            <input v-model.number="newJob.consecutiveFailureLimit" type="number" min="1" max="20">
           </div>
         </div>
         <div class="form-group">
@@ -328,7 +363,7 @@
             <label>执行提示词</label>
             <button class="btn btn-secondary btn-sm" @click="applyDailyDevPrompt">套用日常开发模板</button>
           </div>
-          <textarea v-model="newJob.prompt" rows="4" placeholder="告诉 Agent 到点后要做什么"></textarea>
+          <textarea v-model="newJob.prompt" rows="4" :disabled="!!newJob.taskTemplateId" :placeholder="newJob.taskTemplateId ? '执行内容由所选模板生成' : '告诉 Agent 到点后要做什么'"></textarea>
         </div>
         <div class="form-group">
           <TaskAttachmentPicker
@@ -339,6 +374,13 @@
             @remove-existing="removeExistingCronAttachment"
           />
         </div>
+        <section v-if="cronPreview" class="cron-final-preview" :class="{ invalid: cronPreview.valid === false }">
+          <div class="cron-final-preview-title"><strong>执行前预览</strong><span v-if="previewLoading">正在校验…</span><span v-else>{{ cronPreview.valid === false ? '需要修正' : '可以保存' }}</span></div>
+          <p v-if="cronPreview.renderedTask?.title"><b>{{ cronPreview.renderedTask.title }}</b></p>
+          <p v-if="cronPreview.renderedTask?.instructions">{{ cronPreview.renderedTask.instructions }}</p>
+          <p v-if="cronPreview.scheduleError" class="error-text">{{ cronPreview.scheduleError }}</p>
+          <div v-if="cronPreview.nextRuns?.length" class="next-run-list"><span v-for="run in cronPreview.nextRuns" :key="run">{{ formatTimeInZone(run, newJob.timezone) }}</span></div>
+        </section>
         </div>
         <div class="form-actions">
           <button class="btn btn-cancel" @click="showCreate = false">取消</button>

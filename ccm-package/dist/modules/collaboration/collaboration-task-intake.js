@@ -220,6 +220,8 @@ async function classifyGroupProjectTaskIntentWithAgent(input) {
             message: input.message,
             source: "group-chat-main-first-turn",
             groupSessionId: input.groupSessionId || input.group_session_id || "",
+            turnId: input.turnId || input.turn_id || "",
+            anchorMessageId: input.anchorMessageId || input.anchor_message_id || "",
             context: input.context || "",
             sharedFilesContext: input.sharedFilesContext || "",
             extraInstructions: input.forceProjectTask

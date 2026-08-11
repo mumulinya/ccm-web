@@ -269,7 +269,10 @@ async function captureRepositoryIdentity(workDir, projectId = "") {
 async function captureWorkspaceSnapshot(workDir, projectId = "", statusRaw) {
     const repository = await captureRepositoryIdentity(workDir, projectId);
     const raw = statusRaw === undefined
-        ? (await runGitCommand(repository.repository_root, ["status", "--porcelain=v1", "-z", "--untracked-files=normal"])).stdout
+        // Ask Git for individual untracked files. With `normal`, an untracked
+        // directory is returned as one directory entry and file evidence rejects
+        // it because evidence and diff operations are file-scoped.
+        ? (await runGitCommand(repository.repository_root, ["status", "--porcelain=v1", "-z", "--untracked-files=all"])).stdout
         : statusRaw;
     const indexPathRaw = (await tryGitCommand(repository.repository_root, ["rev-parse", "--git-path", "index"])).output;
     const indexPath = indexPathRaw ? (path.isAbsolute(indexPathRaw) ? indexPathRaw : path.resolve(repository.repository_root, indexPathRaw)) : "";

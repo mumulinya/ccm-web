@@ -105,7 +105,7 @@ function assertCommandRole(req: any, command: SlashCommand) {
   const principal = principalIdentity(req);
   if (!confirmationRequired(command)) return;
   if (command.risk === "high" && principal.role !== "admin") throw new Error("该高风险命令只能由 Admin 确认");
-  if (command.action.type === "mutation" && !["admin", "operator", "internal"].includes(principal.role)) throw new Error("当前账户无权执行本地修改命令");
+  if (command.action.type === "mutation" && !["admin", "user", "operator", "internal"].includes(principal.role)) throw new Error("当前账户无权执行本地修改命令");
 }
 
 function createConfirmationChallenge(req: any, scope: SlashCommandScope, command: SlashCommand, invocation: any, context: any) {
@@ -152,7 +152,7 @@ const COMMANDS: SlashCommand[] = [
   { name: "changes", aliases: ["代码协作", "代码变更"], description: "打开代码协作工作台", category: "导航", icon: "±", scopes: ["global", "project", "group"], risk: "safe", source: "ccm", action: { type: "navigate", tab: "changes" } },
   { name: "terminal", aliases: ["终端工作台", "内置终端", "终端"], description: "打开持久 PTY 终端工作台", category: "导航", icon: ">_", scopes: ["global", "project"], risk: "safe", source: "ccm", action: { type: "navigate", tab: "terminal" } },
   { name: "cleanup", aliases: ["清理中心"], description: "打开受控清理中心", category: "导航", icon: "⌫", scopes: ["global"], risk: "safe", source: "ccm", action: { type: "navigate", tab: "cleanup-center" } },
-  { name: "autodev", aliases: ["自动开发"], description: "打开自动开发工作流", category: "导航", icon: "▶", scopes: ["global", "project", "group"], risk: "safe", source: "ccm", action: { type: "navigate", tab: "autodev" } },
+  { name: "autodev", aliases: ["自动开发运营", "自动开发", "无人值守开发"], description: "打开自动开发运营、批量接活与工作复盘", category: "导航", icon: "▶", scopes: ["global", "project", "group"], risk: "safe", source: "ccm", action: { type: "navigate", tab: "autodev" } },
   { name: "music", aliases: ["音乐"], description: "打开音乐 Agent", category: "导航", icon: "♪", scopes: ["global", "project", "group"], risk: "safe", source: "ccm", action: { type: "navigate", tab: "music" } },
   { name: "compact", aliases: ["压缩"], description: "立即用模型压缩当前 Agent 会话，可附加摘要侧重点", argumentHint: "[摘要要求]", category: "记忆", icon: "⇲", scopes: ["global", "project", "group"], requiresContext: true, risk: "guarded", source: "ccm", action: { type: "client", clientAction: "compact_session" } },
   { name: "remember", aliases: ["记住"], description: "把明确事实或偏好写入正确的记忆作用域", category: "记忆", icon: "+", scopes: ["global", "project", "group"], argumentHint: "<要记住的内容>", requiresArgs: true, risk: "guarded", source: "ccm", action: { type: "prompt", prompt: "请判断以下内容应属于全局、项目还是群聊记忆，说明作用域后写入；若含临时信息或敏感信息则不要长期保存：$ARGS" } },

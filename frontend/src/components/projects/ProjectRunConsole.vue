@@ -154,8 +154,8 @@ const loadSnapshot = async (params, generation, quiet = false) => {
     if (!response.ok || payload.success === false) throw new Error(payload.error || `读取日志失败（HTTP ${response.status}）`)
     const content = String(payload.logs || '')
     if (content !== renderedContent) reset(content)
-    snapshotState.value = content ? 'ready' : 'empty'
-    connectionError.value = ''
+    snapshotState.value = content ? 'ready' : payload.logWriteError ? 'failed' : 'empty'
+    connectionError.value = String(payload.logWriteError || '')
     return true
   } catch (error) {
     if (error?.name === 'AbortError') return false
@@ -354,7 +354,7 @@ header { min-height:42px; flex:0 0 42px; display:flex; align-items:center; gap:1
 .console-actions button:hover,.console-actions button.active { border-color:#3b4350; background:#272b33; color:#d7dae0; }
 .console-actions button:disabled { opacity:.4; cursor:not-allowed; }
 .terminal-host { min-height:0; flex:1; padding:8px 6px 7px 10px; overflow:hidden; }
-.console-placeholder { position:absolute; inset:42px 0 0; display:grid; place-items:center; pointer-events:none; background:#111318; color:#7f8797; font:11px 'JetBrains Mono',Consolas,monospace; }
+.console-placeholder { position:absolute; z-index:2; inset:42px 0 0; display:grid; place-items:center; pointer-events:none; background:#111318; color:#7f8797; font:11px 'JetBrains Mono',Consolas,monospace; }
 .terminal-host :deep(.xterm-viewport) { scrollbar-color:#454b57 #111318; }
 @media(max-width:760px){
   .run-console{

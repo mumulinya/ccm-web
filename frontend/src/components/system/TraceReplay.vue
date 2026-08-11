@@ -2,14 +2,19 @@
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import AgentCodeChangeDrawer from '../agents/AgentCodeChangeDrawer.vue'
 import TaskReplayDelivery from '../replay/TaskReplayDelivery.vue'
+import TaskReplayExecutiveSummary from '../replay/TaskReplayExecutiveSummary.vue'
+import TaskReplayChapters from '../replay/TaskReplayChapters.vue'
+import TaskReplayAcceptanceMatrix from '../replay/TaskReplayAcceptanceMatrix.vue'
 import TaskReplayEvidence from '../replay/TaskReplayEvidence.vue'
 import TaskReplayPlanBoard from '../replay/TaskReplayPlanBoard.vue'
 import TaskReplayTimeline from '../replay/TaskReplayTimeline.vue'
+import TaskReplayInsights from '../replay/TaskReplayInsights.vue'
 import { subscribeRuntimeEvents } from '../../utils/runtimeEventBus.js'
 import { compactTaskReplayEvents, replayCompactionStats } from '../../utils/taskReplayEventCompaction.js'
 import { isReplayDiagnosticEvent, replayEventSummary, replayEventTitle } from '../../utils/taskReplayPresentation.js'
 
 const props = defineProps({ navigateTo: { type: Object, default: null } })
+const emit = defineEmits(['navigate'])
 const loading = ref(false)
 const error = ref('')
 const taskId = ref('')
@@ -30,7 +35,10 @@ const pendingReplayTarget = ref(null)
 const issuePosition = ref(-1)
 const includeSystemEvents = ref(false)
 const timelineMode = ref('key')
+const chapterFilter = ref('all')
 const codeChangeDrawer = ref({ visible: false, title: '', subtitle: '', project: '', files: [] })
+const freshness = ref(null)
+const freshnessLoading = ref(false)
 const indexPage = ref(1)
 const indexFilters = reactive({ project: '', groupId: '', status: '', range: 'all' })
 const loadingOlder = ref(false)
@@ -61,6 +69,9 @@ const visibleTaskRows = computed(() => taskRows.value)
 const indexFacets = computed(() => index.value?.facets || { projects: [], groups: [], statuses: [] })
 const eventPage = computed(() => replay.value?.event_page || { offset: 0, returned: allEvents.value.length, total: allEvents.value.length, has_previous: false, has_more: false })
 const allEvents = computed(() => replay.value?.events || [])
+const presentation = computed(() => replay.value?.presentation || null)
+const canManageReplay = computed(() => replay.value?.replay_capabilities?.technical_events !== false)
+const CHAPTER_STAGES = { requirement: ['intake'], planning: ['planning'], implementation: ['dispatch', 'execution', 'change'], verification: ['test', 'review'], rework: ['rework'], delivery: ['completion'] }
 const issueEvents = computed(() => allEvents.value.filter(item => ['failed', 'blocked', 'warning'].includes(item.status)))
 const diagnosticEventCount = computed(() => Math.max(
   Number(replay.value?.summary?.technical_event_count || 0),
@@ -70,6 +81,7 @@ const overviewKeyEventCount = computed(() => compactTaskReplayEvents(allEvents.v
 const visibleEvents = computed(() => {
   const needle = search.value.trim().toLowerCase()
   return allEvents.value.filter(item => {
+    if (chapterFilter.value !== 'all' && !(CHAPTER_STAGES[chapterFilter.value] || []).includes(item.stage)) return false
     if (!includeSystemEvents.value && isReplayDiagnosticEvent(item)) return false
     if (stageFilter.value !== 'all' && item.stage !== stageFilter.value) return false
     if (statusFilter.value !== 'all' && item.status !== statusFilter.value) return false
@@ -114,6 +126,98 @@ const dateLabel = (value) => {
   return Number.isNaN(date.getTime()) ? '时间未知' : date.toLocaleString('zh-CN', { hour12: false })
 }
 const retentionLabel = (key) => ({ task_record: '任务记录', trace: '完整执行记录', test_agent: 'TestAgent（独立验收）证据' }[key] || key)
+const freshnessLabel = value => ({ current: '与当前代码一致', drifted: '当前代码已变化', deleted: '文件已删除', permission_revoked: '权限已撤销', unavailable: '当前不可读取', unknown: '缺少可比较基线' }[value] || value || '尚未检查')
+const selectChapter = chapter => {
+  chapterFilter.value = chapter?.kind || 'all'
+  stageFilter.value = 'all'
+  preset.value = 'all'
+  requestAnimationFrame(() => document.querySelector('.full-replay-timeline')?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
+}
+const openConversationLink = link => {
+  if (!link || link.available === false) return
+  const common = { sessionId: link.exactSessionId || '', messageId: link.messageId || '' }
+  if (link.scope === 'group') emit('navigate', { tab: 'groups', groupId: link.scopeId, groupSessionId: link.exactSessionId || '', ...common })
+  else if (link.scope === 'project') emit('navigate', { tab: 'projects', project: link.scopeId, ...common })
+  else emit('navigate', { tab: 'global-agent', ...common })
+}
+
+const navigateToExecution = async eventLink => {
+  const targetTaskId = String(eventLink?.taskId || taskId.value || '')
+  if (!targetTaskId) return
+  try {
+    const response = await fetch(`/api/tasks/${encodeURIComponent(targetTaskId)}/conversation-links`, { cache: 'no-store' })
+    const data = await response.json()
+    if (!response.ok || data.success === false) throw new Error(data.error || '执行现场链接不可用')
+    const links = data.links || []
+    const matched = links.find(link => link.available !== false && link.scope === eventLink.scope && link.exactSessionId === eventLink.exactSessionId)
+      || links.find(link => link.available !== false && link.scope === eventLink.scope)
+    if (!matched) throw new Error('原会话无法定位，请从任务中心打开')
+    openConversationLink({ ...matched, messageId: eventLink.anchorMessageId || matched.messageId })
+  } catch (e) {
+    error.value = e?.message || '执行现场暂时无法打开'
+  }
+}
+
+const focusReplayEvent = async eventId => {
+  if (!eventId) return
+  let rounds = 0
+  while (!allEvents.value.some(item => item.id === eventId) && eventPage.value.has_previous && rounds < 30) {
+    await loadOlderEvents()
+    rounds += 1
+  }
+  focusedEventId.value = eventId
+  timelineMode.value = 'raw'
+  requestAnimationFrame(() => {
+    const details = document.querySelector('.full-replay-timeline')
+    if (details) details.open = true
+    document.getElementById(`replay-event-${eventId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  })
+}
+
+const handleReplayAction = action => {
+  const task = replay.value?.tasks?.find(item => item.id === action.taskId)
+  const link = (replay.value?.navigation || []).find(item => item.available !== false && (!task || item.scopeId === task.group_id || item.scopeId === task.project))
+  if (link) openConversationLink(link)
+  else {
+    preset.value = 'issues'
+    requestAnimationFrame(() => document.querySelector('.full-replay-timeline')?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
+  }
+}
+
+const loadFreshness = async () => {
+  if (!taskId.value || freshnessLoading.value) return
+  freshnessLoading.value = true
+  try {
+    const response = await fetch(`/api/tasks/replay/freshness?task_id=${encodeURIComponent(taskId.value)}`, { cache: 'no-store' })
+    const data = await response.json()
+    if (!response.ok || data.success === false) throw new Error(data.error || '当前代码状态读取失败')
+    freshness.value = data.freshness
+  } catch (e) { error.value = e?.message || '当前代码状态读取失败' }
+  finally { freshnessLoading.value = false }
+}
+
+const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]))
+const printUserReport = async () => {
+  const response = await fetch(`/api/tasks/replay/export?task_id=${encodeURIComponent(taskId.value)}&format=user_report`, { cache: 'no-store' })
+  const data = await response.json()
+  if (!response.ok || data.success === false) { error.value = data.error || '用户报告生成失败'; return }
+  const report = data.report || {}
+  const sections = (report.requirementsAndDelivery || []).map(row => `<section><h2>需求与交付</h2><p>${escapeHtml(row.businessGoal)}</p><h3>最终结果</h3><p>${escapeHtml(row.finalReport)}</p><h3>验收标准</h3><ul>${(row.acceptanceCriteria || []).map(item => `<li>${escapeHtml(item)}</li>`).join('')}</ul></section>`).join('')
+  const plan = (report.plan || []).map(row => `<section><h2>${escapeHtml(row.title || '执行计划')}</h2><ol>${(row.steps || []).map(step => `<li><b>${escapeHtml(step.title)}</b><span>${escapeHtml(step.detail || '')}</span></li>`).join('')}</ol></section>`).join('')
+  const popup = window.open('', '_blank')
+  if (!popup) { error.value = '浏览器阻止了打印窗口，请允许弹出窗口后重试'; return }
+  popup.document.write(`<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>${escapeHtml(report.title || 'CCM任务报告')}</title><style>body{font:14px/1.65 system-ui,sans-serif;max-width:900px;margin:40px auto;color:#17211d}header{border-bottom:2px solid #17211d;padding-bottom:16px}h1{font-size:26px;margin:0}h2{font-size:18px;margin-top:28px}h3{font-size:14px}p{white-space:pre-wrap}li span{display:block;color:#66736d}.meta{color:#66736d;font-size:12px}@media print{body{margin:0}.no-print{display:none}}</style></head><body><header><h1>${escapeHtml(report.title || '任务交付报告')}</h1><p>${escapeHtml(report.goal || '')}</p><div class="meta">状态：${escapeHtml(report.status)} · 生成时间：${escapeHtml(report.generatedAt)}</div></header>${sections}${plan}<section><h2>验收结果</h2><ul>${(report.acceptance || []).map(row => `<li>${escapeHtml(row.description)} — ${escapeHtml(row.status)}</li>`).join('')}</ul></section><script>window.addEventListener('load',()=>setTimeout(()=>window.print(),120))<\/script></body></html>`)
+  popup.document.close()
+}
+const downloadAuditJson = async () => {
+  const response = await fetch(`/api/tasks/replay/export?task_id=${encodeURIComponent(taskId.value)}&format=audit_json`, { cache: 'no-store' })
+  if (!response.ok) { const data = await response.json().catch(() => ({})); error.value = data.error || '审计 JSON 导出失败'; return }
+  const blob = await response.blob()
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url; anchor.download = `ccm-task-audit-${taskId.value}.json`; anchor.click()
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+}
 
 const indexDateRange = () => {
   const days = Number(indexFilters.range || 0)
@@ -179,6 +283,25 @@ const mergeEvents = (...groups) => {
 const applyReplayPayload = (nextReplay, events, page = nextReplay?.event_page) => {
   replay.value = { ...(replay.value || {}), ...nextReplay, events, event_page: page }
 }
+const replayViewStorageKey = id => `ccm:task-replay-view:${id}`
+const saveReplayViewState = () => {
+  if (!taskId.value || !replay.value) return
+  const state = { search: search.value, stage: stageFilter.value, status: statusFilter.value, actor: actorFilter.value, task: taskFilter.value, preset: preset.value, chapter: chapterFilter.value, event: focusedEventId.value, evidence: focusedEvidenceId.value, timeline: timelineMode.value, scrollTop: document.querySelector('.task-replay-page')?.scrollTop || 0 }
+  try { sessionStorage.setItem(replayViewStorageKey(taskId.value), JSON.stringify(state)) } catch {}
+  const url = new URL(window.location.href)
+  const values = { replay_event: state.event, replay_preset: state.preset === 'all' ? '' : state.preset, replay_stage: state.stage === 'all' ? '' : state.stage, replay_query: state.search }
+  for (const [key, value] of Object.entries(values)) value ? url.searchParams.set(key, value) : url.searchParams.delete(key)
+  window.history.replaceState(window.history.state, '', url)
+}
+const restoreReplayViewState = () => {
+  let state = null
+  try { state = JSON.parse(sessionStorage.getItem(replayViewStorageKey(taskId.value)) || 'null') } catch {}
+  const url = new URL(window.location.href)
+  state = { ...(state || {}), ...(url.searchParams.get('replay_event') ? { event: url.searchParams.get('replay_event') } : {}), ...(url.searchParams.get('replay_preset') ? { preset: url.searchParams.get('replay_preset') } : {}), ...(url.searchParams.get('replay_stage') ? { stage: url.searchParams.get('replay_stage') } : {}), ...(url.searchParams.get('replay_query') ? { search: url.searchParams.get('replay_query') } : {}) }
+  if (!state) return
+  search.value = state.search || ''; stageFilter.value = state.stage || 'all'; statusFilter.value = state.status || 'all'; actorFilter.value = state.actor || 'all'; taskFilter.value = state.task || 'all'; preset.value = state.preset || 'all'; chapterFilter.value = state.chapter || 'all'; focusedEventId.value = state.event || ''; focusedEvidenceId.value = state.evidence || ''; timelineMode.value = state.timeline || 'key'
+  requestAnimationFrame(() => { const page = document.querySelector('.task-replay-page'); if (page && Number.isFinite(Number(state.scrollTop))) page.scrollTop = Number(state.scrollTop) })
+}
 
 const syntheticLegacyReplay = (payload) => {
   const rows = Array.isArray(payload?.replays) ? payload.replays : payload ? [payload] : []
@@ -212,6 +335,7 @@ const loadReplay = async (id = taskId.value) => {
   error.value = ''
   focusedEventId.value = ''
   focusedEvidenceId.value = ''
+  freshness.value = null
   try {
     if (!selected && traceId.value.trim()) {
       if (!index.value) await loadIndex()
@@ -234,8 +358,9 @@ const loadReplay = async (id = taskId.value) => {
     replay.value = data.replay
     lastLiveUpdateAt.value = new Date().toISOString()
     traceId.value = data.replay?.tasks?.find(item => item.id === selected)?.trace_id || data.replay?.tasks?.[0]?.trace_id || traceId.value
-    stageFilter.value = 'all'; statusFilter.value = 'all'; actorFilter.value = 'all'; taskFilter.value = 'all'; preset.value = 'all'; search.value = ''; includeSystemEvents.value = false; timelineMode.value = 'key'
-    applyReplayFocus(pendingReplayTarget.value)
+    stageFilter.value = 'all'; chapterFilter.value = 'all'; statusFilter.value = 'all'; actorFilter.value = 'all'; taskFilter.value = 'all'; preset.value = 'all'; search.value = ''; includeSystemEvents.value = false; timelineMode.value = 'key'
+    if (pendingReplayTarget.value) applyReplayFocus(pendingReplayTarget.value)
+    else restoreReplayViewState()
     pendingReplayTarget.value = null
   } catch (e) {
     if (e?.name === 'AbortError') return
@@ -450,6 +575,7 @@ onUnmounted(() => {
 watch(() => props.navigateTo, (target) => { if (target?.tab === 'trace-replay' && applyReplayTarget(target)) loadReplay() })
 watch([listSearch, () => indexFilters.project, () => indexFilters.groupId, () => indexFilters.status, () => indexFilters.range], scheduleIndexReload)
 watch([search, stageFilter, statusFilter, actorFilter, taskFilter, preset, includeSystemEvents], scheduleEventReload)
+watch([search, stageFilter, statusFilter, actorFilter, taskFilter, preset, chapterFilter, focusedEventId, focusedEvidenceId, timelineMode], saveReplayViewState)
 </script>
 
 <template>
@@ -487,7 +613,7 @@ watch([search, stageFilter, statusFilter, actorFilter, taskFilter, preset, inclu
         <button v-for="item in visibleTaskRows" :key="item.id" type="button" class="replay-index-row" @click="loadReplay(item.id)">
           <span :class="['task-state-dot', item.status]"></span>
           <span class="task-index-copy"><strong>{{ item.title }}</strong><small>{{ item.goal || '未记录任务目标' }}</small><span class="task-index-tags"><em v-if="item.group_name">{{ item.group_name }}</em><em v-for="project in item.projects || []" :key="project">{{ project }}</em></span></span>
-          <span class="task-index-meta"><em>{{ statusLabel(item.status) }}</em><small>{{ item.child_count }} 个子任务 · {{ dateLabel(item.updated_at) }}</small></span>
+          <span class="task-index-meta"><em>{{ item.current_stage_label || statusLabel(item.status) }}</em><small><b v-if="item.unresolved_issue_count">{{ item.unresolved_issue_count }} 项待处理 · </b>{{ item.child_count }} 个子任务 · {{ dateLabel(item.updated_at) }}</small></span>
         </button>
         <div v-if="!visibleTaskRows.length" class="replay-loading">没有匹配的任务</div>
       </div>
@@ -506,12 +632,40 @@ watch([search, stageFilter, statusFilter, actorFilter, taskFilter, preset, inclu
           <div class="overview-state"><span :class="['overview-status', replay.status]">{{ statusLabel(replay.status) }}</span><span :class="['live-state', { active: isReplayRunning }]">{{ liveRefreshing ? '正在同步' : isReplayRunning ? '实时更新' : '记录已完成' }}</span></div>
         </div>
         <div v-if="replay.legacy" class="legacy-notice">这条旧记录没有完整任务关联，因此只能显示系统仍保留的诊断事件。</div>
+      </div>
+
+      <TaskReplayExecutiveSummary v-if="presentation" :presentation="presentation" :navigation="replay.navigation || []" @navigate="openConversationLink" />
+      <section v-if="replay.schedule_origin" class="schedule-origin-card">
+        <div><strong>由定时规则生成</strong><span>计划时间 {{ dateLabel(replay.schedule_origin.scheduledFor) }} · {{ replay.schedule_origin.trigger === 'manual' ? '立即运行' : replay.schedule_origin.trigger === 'recovery' ? '停机补跑' : '计划触发' }}</span></div>
+        <button type="button" @click="emit('navigate', { tab: 'cron', cronJobId: replay.schedule_origin.cronJobId, cronRunId: replay.schedule_origin.cronRunId })">返回定时任务运行记录</button>
+      </section>
+
+      <div class="replay-report-actions">
+        <button type="button" @click="printUserReport">打印用户报告 / 保存 PDF</button>
+        <button type="button" :disabled="freshnessLoading" @click="loadFreshness">{{ freshnessLoading ? '正在校验…' : '校验当前代码状态' }}</button>
+        <button v-if="canManageReplay" type="button" @click="downloadAuditJson">导出安全审计 JSON</button>
+      </div>
+
+      <TaskReplayInsights v-if="presentation" :presentation="presentation" section="overview" @focus-event="focusReplayEvent" @handle-action="handleReplayAction" />
+
+      <section v-if="freshness" class="replay-freshness">
+        <header><div><strong>历史证据与当前代码</strong><small>保留执行时结论，同时重新读取当前权威仓库状态</small></div><em>{{ dateLabel(freshness.checkedAt) }}</em></header>
+        <div class="freshness-grid">
+          <article v-for="row in freshness.projects || []" :key="row.project" :class="row.freshness">
+            <strong>{{ row.project }}</strong><b>{{ freshnessLabel(row.freshness) }}</b><small>{{ row.files?.length || 0 }} 个交付文件</small>
+          </article>
+          <article v-if="!(freshness.projects || []).length"><strong>没有项目文件证据</strong><b>无需校验仓库</b></article>
+        </div>
+      </section>
+
+      <details class="replay-summary-metrics">
+        <summary>任务统计与资源使用</summary>
         <dl class="overview-metrics">
           <div><dt>总耗时</dt><dd>{{ durationLabel }}</dd></div>
           <div><dt>关键节点</dt><dd>{{ overviewKeyEventCount }}</dd></div>
           <div><dt>执行任务</dt><dd>{{ Math.max(0, (replay.summary?.task_count || 1) - 1) }}</dd></div>
           <div><dt>TestAgent（独立验收）</dt><dd>{{ replay.summary?.test_run_count || 0 }}</dd></div>
-          <div :class="{ attention: replay.summary?.issue_count }"><dt>需处理</dt><dd>{{ replay.summary?.issue_count || 0 }}</dd></div>
+          <div :class="{ attention: presentation?.outcome?.unresolvedIssueCount || replay.summary?.issue_count }"><dt>当前未解决</dt><dd>{{ presentation?.outcome?.unresolvedIssueCount ?? replay.summary?.issue_count ?? 0 }}</dd></div>
           <div><dt>验证材料</dt><dd>{{ replay.summary?.evidence_count || 0 }}</dd></div>
         </dl>
         <div class="replay-consumption">
@@ -519,9 +673,41 @@ watch([search, stageFilter, statusFilter, actorFilter, taskFilter, preset, inclu
           <span><small>Provider 重试</small><b>{{ usageLabel(replay.summary?.provider_retry_count, '次') }}</b></span>
           <span><small>TestAgent 轮次</small><b>{{ usageLabel(replay.summary?.test_run_count, '轮') }}</b></span>
           <span><small>已记录 Token</small><b>{{ usageLabel(replay.summary?.token_count) }}</b></span>
-          <p>仅统计任务记录中实际保存的数据，缺失项不会估算。</p>
+          <p>只显示任务账本中实际记录的数据，缺失项不会估算。</p>
         </div>
-      </div>
+      </details>
+
+      <TaskReplayAcceptanceMatrix v-if="presentation" :rows="presentation.acceptanceMatrix || []" @open-evidence="openEvidence" />
+
+      <TaskReplayInsights v-if="presentation" :presentation="presentation" section="attempts" />
+
+      <TaskReplayDelivery :deliveries="replay.deliveries || []" :tasks="replay.tasks || []" />
+
+      <TaskReplayPlanBoard :plans="replay.plans || []" :work-items="replay.work_items || []" :tasks="replay.tasks || []" @open-evidence="openEvidence" />
+
+      <section v-if="presentation?.recoveryJourney?.length" class="recovery-journey" aria-label="中断与恢复记录">
+        <header><div><strong>中断与恢复</strong><span>区分模型重试、任务中断和检查点续接</span></div><em>{{ presentation.recoveryJourney.length }} 次</em></header>
+        <article v-for="(row, index) in presentation.recoveryJourney" :key="`${row.taskId}:${row.interruptedAt}:${index}`">
+          <span :class="['recovery-dot', row.result]"></span>
+          <div>
+            <strong>{{ row.reasonLabel }}</strong>
+            <p>现场已保留，从“{{ row.resumePhase || '当前阶段' }}”继续<span v-if="row.completedWorkItemCount">；跳过 {{ row.completedWorkItemCount }} 个已完成工作项</span></p>
+            <small>{{ row.mode === 'safe_auto' ? `安全自动恢复 · 第 ${row.attempt + 1}/${row.maxAttempts} 轮` : '人工恢复门禁' }}<span v-if="row.recoveredAt"> · 已接上原任务</span><span v-else-if="row.nextRetryAt"> · 下次 {{ dateLabel(row.nextRetryAt) }}</span></small>
+          </div>
+          <b>{{ row.result === 'resumed' ? '已恢复' : row.result === 'needs_user' ? '需要处理' : '等待恢复' }}</b>
+        </article>
+      </section>
+
+      <TaskReplayChapters
+        v-if="presentation"
+        :chapters="presentation.chapters || []"
+        :attempts="[]"
+        :issues="presentation.issues || []"
+        @select="selectChapter"
+      />
+
+      <details class="full-replay-timeline" :open="isReplayRunning">
+        <summary><span><strong>完整时间线</strong><small>{{ replay.summary?.event_count || 0 }} 条记录 · 总耗时 {{ durationLabel }}</small></span><em>{{ isReplayRunning ? '任务运行中，实时更新' : '展开查看完整过程' }}</em></summary>
 
       <nav v-if="replay.phases?.length" class="phase-strip" aria-label="任务阶段">
         <button v-for="phase in replay.phases" :key="phase.id" type="button" :class="[phase.status, { active: stageFilter === phase.id }]" @click="selectPhase(phase)">
@@ -534,12 +720,13 @@ watch([search, stageFilter, statusFilter, actorFilter, taskFilter, preset, inclu
           <button v-for="item in [{id:'all',label:'全部'},{id:'failed',label:'只看失败'},{id:'issues',label:'问题'},{id:'test',label:'TestAgent 验收'},{id:'browser',label:'页面验证'},{id:'changes',label:'改动与返工'}]" :key="item.id" type="button" :class="{ active: preset === item.id }" @click="setPreset(item.id)">{{ item.label }}</button>
         </div>
         <input v-model="search" class="event-search" placeholder="搜索事件内容" />
+        <button v-if="chapterFilter !== 'all'" type="button" class="clear-filters" @click="chapterFilter = 'all'">清除章节筛选</button>
         <select v-model="actorFilter" aria-label="参与者">
           <option value="all">全部参与者</option><option value="global_agent">全局主 Agent</option><option value="group_agent">群聊主 Agent</option><option value="project_agent">项目执行 Agent</option><option value="test_agent">TestAgent（独立验收）</option><option value="user">用户</option><option value="system">系统</option>
         </select>
         <select v-model="statusFilter" aria-label="状态"><option value="all">全部状态</option><option value="failed">失败</option><option value="blocked">受阻</option><option value="warning">注意</option><option value="running">进行中</option><option value="passed">通过</option></select>
         <select v-if="replay.tasks?.length > 1" v-model="taskFilter" aria-label="任务"><option value="all">全部父子任务</option><option v-for="item in replay.tasks" :key="item.id" :value="item.id">{{ item.project || item.title }}</option></select>
-        <label class="system-event-toggle" :title="`显示内部事件编号、持久化、租约和运行诊断记录`"><input v-model="includeSystemEvents" type="checkbox" /><span>排障记录<em v-if="diagnosticEventCount">{{ diagnosticEventCount }}</em></span></label>
+        <label v-if="canManageReplay" class="system-event-toggle" :title="`显示内部事件编号、持久化、租约和运行诊断记录`"><input v-model="includeSystemEvents" type="checkbox" /><span>排障记录<em v-if="diagnosticEventCount">{{ diagnosticEventCount }}</em></span></label>
         <div class="issue-nav">
           <button type="button" :disabled="!issueEvents.length" title="上一个问题" @click="focusIssue(-1)">上一项</button>
           <span>{{ issueEvents.length ? `${Math.max(0, issuePosition) + 1}/${issueEvents.length}` : '无问题' }}</span>
@@ -553,10 +740,6 @@ watch([search, stageFilter, statusFilter, actorFilter, taskFilter, preset, inclu
         </button>
       </div>
 
-      <TaskReplayDelivery :deliveries="replay.deliveries || []" :tasks="replay.tasks || []" />
-
-      <TaskReplayPlanBoard :plans="replay.plans || []" :work-items="replay.work_items || []" :tasks="replay.tasks || []" @open-evidence="openEvidence" />
-
       <div class="replay-workspace">
         <main>
           <div class="timeline-head">
@@ -568,13 +751,14 @@ watch([search, stageFilter, statusFilter, actorFilter, taskFilter, preset, inclu
           </div>
           <div v-if="timelineMode === 'key' && timelineStats.merged" class="timeline-compaction-note">已整理 {{ timelineStats.merged }} 条重复状态更新；需要时可展开合并记录或切换到全部记录。</div>
           <button v-if="eventPage.has_previous" type="button" class="load-older" :disabled="loadingOlder" @click="loadOlderEvents">{{ loadingOlder ? '正在读取…' : `加载更早记录（前面还有 ${eventPage.offset} 条）` }}</button>
-          <TaskReplayTimeline :events="timelineEvents" :focused-event-id="focusedEventId" :show-raw-groups="timelineMode === 'key'" @open-evidence="openEvidence" />
+          <TaskReplayTimeline :events="timelineEvents" :focused-event-id="focusedEventId" :show-raw-groups="timelineMode === 'key'" @open-evidence="openEvidence" @return-execution="navigateToExecution" />
         </main>
         <TaskReplayEvidence :evidence="replay.evidence || []" :focused-evidence-id="focusedEvidenceId" @open-code-changes="openCodeChanges" />
       </div>
+      </details>
 
       <details class="retention-details">
-        <summary>记录保留与排查说明</summary>
+        <summary>技术详情与记录保留</summary>
         <div><p>任务时间线会保留到任务被永久删除。TestAgent（独立验收）的截图、报告和日志默认保留 14 天，并受运行次数及总容量限制。</p><dl><template v-for="(value, key) in replay.retention || {}" :key="key"><dt>{{ retentionLabel(key) }}</dt><dd>{{ value.policy }}<span v-if="value.earliest_expiry"> · 最早于 {{ dateLabel(value.earliest_expiry) }} 到期</span></dd></template></dl></div>
       </details>
     </template>
@@ -594,10 +778,16 @@ watch([search, stageFilter, statusFilter, actorFilter, taskFilter, preset, inclu
 .replay-toolbar { display:flex; justify-content:space-between; align-items:end; gap:16px; padding-bottom:14px; border-bottom:1px solid var(--border-color); }.toolbar-title strong { display:block; font-size:18px; }.toolbar-title span { display:block; margin-top:3px; color:var(--text-muted); font-size:12px; }.toolbar-diagnostic-lookup { position:relative; }.toolbar-diagnostic-lookup>summary { min-height:34px; display:flex; align-items:center; padding:0 10px; border:1px solid var(--border-color); border-radius:6px; background:var(--surface); color:var(--text-muted); font-size:11px; font-weight:750; cursor:pointer; list-style:none; }.toolbar-diagnostic-lookup>summary::-webkit-details-marker { display:none; }.toolbar-diagnostic-lookup[open]>summary { border-color:var(--accent-blue); color:var(--accent-blue); }.toolbar-diagnostic-lookup .toolbar-lookup { position:absolute; z-index:20; top:calc(100% + 6px); right:0; min-width:270px; padding:8px; border:1px solid var(--border-color); border-radius:7px; background:var(--surface); box-shadow:0 12px 28px rgba(0,0,0,.16); }.toolbar-lookup { display:flex; align-items:center; gap:6px; }.toolbar-lookup>span { color:var(--text-muted); font-size:11px; }.toolbar-lookup input,.replay-index-head input,.event-search,.replay-controls select { height:34px; min-width:0; border:1px solid var(--border-color); border-radius:6px; padding:0 9px; background:var(--surface); color:var(--text-primary); font-size:12px; }.toolbar-lookup input { width:170px; }.toolbar-lookup button,.back-button { height:34px; padding:0 12px; border:1px solid var(--accent-blue); border-radius:6px; background:var(--accent-blue); color:#fff; font-size:12px; font-weight:750; cursor:pointer; }.toolbar-lookup button:disabled { opacity:.6; }
 .replay-error,.legacy-notice { margin-top:12px; padding:10px 12px; border:1px solid #fecaca; border-radius:8px; background:#fef2f2; color:#991b1b; font-size:12px; }.legacy-notice { margin:12px 0 0; border-color:#fde68a; background:#fffbeb; color:#92400e; }
 .replay-index-head { display:flex; justify-content:space-between; align-items:center; gap:14px; padding:18px 0 10px; }.replay-index-head>div strong { display:block; font-size:14px; }.replay-index-head>div span { display:block; margin-top:2px; color:var(--text-muted); font-size:11px; }.replay-index-head input { width:min(330px,45vw); }.replay-index-list { border-top:1px solid var(--border-color); }.replay-index-row { display:grid; width:100%; grid-template-columns:10px minmax(0,1fr) auto; gap:12px; align-items:center; padding:13px 4px; border:0; border-bottom:1px solid var(--border-color); background:transparent; color:inherit; text-align:left; cursor:pointer; }.replay-index-row:hover { background:var(--bg-secondary); }.task-state-dot { width:8px; height:8px; border-radius:50%; background:#94a3b8; }.task-state-dot.done,.task-state-dot.completed { background:#16a34a; }.task-state-dot.in_progress,.task-state-dot.running { background:#2563eb; }.task-state-dot.failed,.task-state-dot.blocked { background:#dc2626; }.task-index-copy { min-width:0; }.task-index-copy strong,.task-index-copy small { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }.task-index-copy strong { font-size:13px; }.task-index-copy small { margin-top:3px; color:var(--text-muted); font-size:11px; }.task-index-meta { text-align:right; }.task-index-meta em,.task-index-meta small { display:block; }.task-index-meta em { color:var(--text-secondary); font-size:11px; font-style:normal; font-weight:750; }.task-index-meta small { margin-top:3px; color:var(--text-muted); font-size:10px; }.replay-loading { padding:50px 12px; color:var(--text-muted); text-align:center; font-size:13px; }
+.task-index-meta b { color:var(--accent-yellow); font-weight:750; }
 .clear-filters { height:30px; padding:0 10px; border:1px solid var(--border-color); border-radius:6px; background:var(--surface); color:var(--text-secondary); font-size:11px; cursor:pointer; }
 .replay-index-filters { display:grid; grid-template-columns:minmax(210px,1.7fr) repeat(4,minmax(120px,1fr)); gap:8px; padding:10px; border:1px solid var(--border-color); border-radius:8px; background:var(--surface); }.replay-index-filters label { display:grid; min-width:0; gap:4px; }.replay-index-filters label>span { color:var(--text-muted); font-size:10px; font-weight:700; }.replay-index-filters input,.replay-index-filters select { width:100%; height:34px; min-width:0; border:1px solid var(--border-color); border-radius:6px; padding:0 9px; background:var(--bg-primary); color:var(--text-primary); font-size:11px; }.task-index-tags { display:flex; flex-wrap:wrap; gap:4px; margin-top:6px; }.task-index-tags em { padding:2px 5px; border-radius:4px; background:var(--bg-secondary); color:var(--text-muted); font-size:9px; font-style:normal; }.index-pagination { display:flex; justify-content:center; align-items:center; gap:10px; padding:14px 0 2px; }.index-pagination button { height:30px; padding:0 10px; border:1px solid var(--border-color); border-radius:6px; background:var(--surface); color:var(--text-secondary); font-size:11px; cursor:pointer; }.index-pagination button:disabled { opacity:.45; cursor:default; }.index-pagination span { color:var(--text-muted); font-size:10px; }
 .replay-overview { padding:16px 0 12px; }.overview-heading { display:grid; grid-template-columns:auto minmax(0,1fr) auto; align-items:start; gap:14px; }.back-button { height:30px; border-color:var(--border-color); background:transparent; color:var(--text-secondary); }.overview-heading>div>span { color:var(--text-muted); font-size:11px; font-weight:750; }.overview-heading h1 { margin:2px 0 0; font-size:20px; line-height:1.35; overflow-wrap:anywhere; }.overview-heading p { max-width:850px; margin:5px 0 0; color:var(--text-secondary); font-size:12px; line-height:1.55; white-space:pre-wrap; }.overview-status { padding:4px 8px; border-radius:5px; background:var(--bg-secondary); color:var(--text-secondary); font-size:11px; font-weight:800; }.overview-status.done,.overview-status.completed { background:#dcfce7; color:#166534; }.overview-status.failed,.overview-status.blocked { background:#fee2e2; color:#991b1b; }.overview-metrics { display:grid; grid-template-columns:repeat(6,minmax(90px,1fr)); margin:15px 0 0; border:1px solid var(--border-color); border-radius:8px; overflow:hidden; background:var(--surface); }.overview-metrics>div { padding:10px 12px; border-right:1px solid var(--border-color); }.overview-metrics>div:last-child { border-right:0; }.overview-metrics>div.attention { background:#fffbeb; }.overview-metrics dt { color:var(--text-muted); font-size:10px; }.overview-metrics dd { margin:4px 0 0; font-size:16px; font-weight:800; }
 .replay-consumption { display:flex; flex-wrap:wrap; align-items:center; gap:1px; margin-top:8px; overflow:hidden; border:1px solid var(--border-color); border-radius:7px; background:var(--border-color); }.replay-consumption span { min-width:110px; display:grid; flex:1; gap:2px; padding:8px 10px; background:var(--surface); }.replay-consumption small { color:var(--text-muted); font-size:9.5px; }.replay-consumption b { color:var(--text-secondary); font-size:11px; }.replay-consumption p { flex-basis:100%; margin:0; padding:7px 10px; background:var(--panel-muted); color:var(--text-muted); font-size:9.5px; }
+.replay-summary-metrics { margin:0 0 14px; border:1px solid var(--border-color); border-radius:8px; background:var(--surface); }.replay-summary-metrics>summary { padding:10px 12px; color:var(--text-muted); font-size:10px; font-weight:750; cursor:pointer; }.replay-summary-metrics .overview-metrics { margin:0 12px 9px; }.replay-summary-metrics .replay-consumption { margin:0 12px 12px; }
+.replay-report-actions{display:flex;flex-wrap:wrap;gap:7px;margin:-4px 0 14px}.replay-report-actions button{height:32px;padding:0 10px;border:1px solid var(--border-color);border-radius:6px;background:var(--surface);color:var(--text-secondary);font-size:10.5px;font-weight:750;cursor:pointer}.replay-report-actions button:first-child{border-color:var(--accent-blue);color:var(--accent-blue)}.replay-report-actions button:disabled{opacity:.55;cursor:not-allowed}.replay-freshness{margin:0 0 14px;border:1px solid var(--border-color);border-radius:8px;background:var(--surface);overflow:hidden}.replay-freshness>header{display:flex;justify-content:space-between;gap:12px;align-items:center;padding:10px 12px;border-bottom:1px solid var(--border-color)}.replay-freshness>header strong,.replay-freshness>header small{display:block}.replay-freshness>header strong{font-size:12px}.replay-freshness>header small,.replay-freshness>header em{margin-top:2px;color:var(--text-muted);font-size:9.5px;font-style:normal}.freshness-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:1px;background:var(--border-color)}.freshness-grid article{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 8px;padding:10px 12px;background:var(--surface)}.freshness-grid strong{font-size:11px}.freshness-grid b{color:var(--text-secondary);font-size:9.5px}.freshness-grid article.drifted b,.freshness-grid article.deleted b,.freshness-grid article.permission_revoked b{color:var(--accent-yellow)}.freshness-grid article.current b{color:var(--accent-green)}.freshness-grid small{grid-column:1/-1;color:var(--text-muted);font-size:9px}
+.schedule-origin-card{display:flex;justify-content:space-between;align-items:center;gap:14px;margin:-4px 0 14px;padding:10px 12px;border:1px solid var(--border-color);border-radius:8px;background:var(--surface)}.schedule-origin-card strong,.schedule-origin-card span{display:block}.schedule-origin-card strong{font-size:11px}.schedule-origin-card span{margin-top:3px;color:var(--text-muted);font-size:9.5px}.schedule-origin-card button{height:30px;padding:0 10px;border:1px solid var(--accent-blue);border-radius:6px;background:transparent;color:var(--accent-blue);font-size:10px;font-weight:750;cursor:pointer}
+.recovery-journey { margin:0 0 14px; overflow:hidden; border:1px solid var(--border-color); border-radius:8px; background:var(--surface); }.recovery-journey>header { display:flex; justify-content:space-between; align-items:center; padding:10px 12px; border-bottom:1px solid var(--border-color); }.recovery-journey>header strong,.recovery-journey>header span { display:block; }.recovery-journey>header strong { font-size:12px; }.recovery-journey>header span { margin-top:2px; color:var(--text-muted); font-size:9.5px; }.recovery-journey>header em { color:var(--text-muted); font-size:10px; font-style:normal; }.recovery-journey article { display:grid; grid-template-columns:8px minmax(0,1fr) auto; gap:10px; align-items:start; padding:10px 12px; border-bottom:1px solid var(--border-color); }.recovery-journey article:last-child { border-bottom:0; }.recovery-dot { width:7px; height:7px; margin-top:4px; border-radius:50%; background:var(--accent-yellow); }.recovery-dot.resumed { background:var(--accent-green); }.recovery-dot.needs_user { background:var(--accent-red); }.recovery-journey article strong { display:block; font-size:11px; }.recovery-journey article p { margin:3px 0; color:var(--text-secondary); font-size:10.5px; }.recovery-journey article small { color:var(--text-muted); font-size:9.5px; }.recovery-journey article>b { padding:3px 6px; border-radius:4px; background:var(--bg-secondary); color:var(--text-secondary); font-size:9.5px; }
+.full-replay-timeline { margin-top:14px; border:1px solid var(--border-color); border-radius:9px; background:var(--surface); overflow:hidden; }.full-replay-timeline>summary { display:flex; justify-content:space-between; gap:16px; align-items:center; padding:12px 14px; cursor:pointer; list-style:none; }.full-replay-timeline>summary::-webkit-details-marker { display:none; }.full-replay-timeline>summary strong { display:block; font-size:13px; }.full-replay-timeline>summary small { display:block; margin-top:2px; color:var(--text-muted); font-size:10px; }.full-replay-timeline>summary em { color:var(--text-muted); font-size:10px; font-style:normal; }.full-replay-timeline>.phase-strip,.full-replay-timeline>.replay-controls,.full-replay-timeline>.task-family-strip,.full-replay-timeline>.replay-workspace { margin-left:13px; margin-right:13px; }.full-replay-timeline>.replay-workspace { margin-bottom:13px; }
 .overview-state { display:grid; justify-items:end; gap:6px; }.overview-state .overview-status { display:inline-flex; margin:0; }.overview-state .live-state { display:flex; align-items:center; gap:5px; color:var(--text-muted); font-size:10px; font-weight:700; }.overview-state .live-state::before { content:''; width:6px; height:6px; border-radius:50%; background:#94a3b8; }.overview-state .live-state.active::before { background:#16a34a; box-shadow:0 0 0 3px rgba(22,163,74,.12); }
 .phase-strip { display:flex; overflow:auto; border-block:1px solid var(--border-color); background:var(--surface); }.phase-strip button { display:grid; flex:1 0 82px; grid-template-columns:8px minmax(0,1fr) auto; gap:6px; align-items:center; min-height:42px; padding:0 9px; border:0; border-right:1px solid var(--border-color); background:transparent; color:var(--text-secondary); cursor:pointer; }.phase-strip button.active { background:var(--accent-soft); color:var(--accent-blue); }.phase-strip button>span { width:7px; height:7px; border-radius:50%; background:#94a3b8; }.phase-strip button.passed>span { background:#16a34a; }.phase-strip button.running>span { background:#2563eb; }.phase-strip button.warning>span,.phase-strip button.blocked>span { background:#d97706; }.phase-strip button.failed>span { background:#dc2626; }.phase-strip strong { font-size:11px; }.phase-strip small { color:var(--text-muted); font-size:9px; }
 .replay-controls { display:flex; flex-wrap:wrap; align-items:center; gap:7px; padding:12px 0; }.preset-control { display:flex; border:1px solid var(--border-color); border-radius:6px; overflow:hidden; }.preset-control button { height:32px; padding:0 9px; border:0; border-right:1px solid var(--border-color); background:var(--surface); color:var(--text-secondary); font-size:11px; cursor:pointer; }.preset-control button:last-child { border-right:0; }.preset-control button.active { background:var(--accent-blue); color:#fff; }.event-search { flex:1; min-width:160px; }.replay-controls select { max-width:150px; }.issue-nav { display:flex; align-items:center; gap:5px; margin-left:auto; }.issue-nav button { height:30px; padding:0 8px; border:1px solid var(--border-color); border-radius:5px; background:var(--surface); color:var(--text-secondary); font-size:10px; cursor:pointer; }.issue-nav button:disabled { opacity:.45; }.issue-nav span { min-width:44px; color:var(--text-muted); font-size:10px; text-align:center; }
@@ -609,7 +799,7 @@ watch([search, stageFilter, statusFilter, actorFilter, taskFilter, preset, inclu
 .load-older { display:block; width:calc(100% - 122px); height:32px; margin:0 0 8px 122px; border:1px dashed var(--border-color); border-radius:6px; background:var(--surface); color:var(--text-secondary); font-size:11px; cursor:pointer; }.load-older:hover { border-color:var(--accent-blue); color:var(--accent-blue); }.load-older:disabled { opacity:.55; cursor:default; }
 .retention-details { margin-top:16px; border-top:1px solid var(--border-color); padding-top:10px; }.retention-details summary { color:var(--text-muted); font-size:11px; font-weight:700; cursor:pointer; }.retention-details>div { padding:9px 0; color:var(--text-secondary); font-size:11px; line-height:1.55; }.retention-details p { margin:0 0 7px; }.retention-details dl { display:grid; grid-template-columns:110px minmax(0,1fr); gap:4px 10px; margin:0; }.retention-details dt { color:var(--text-muted); }.retention-details dd { margin:0; }.retention-details span { color:var(--text-muted); }
 @media (max-width:1100px) { .replay-toolbar { align-items:start; }.toolbar-lookup { flex-wrap:wrap; justify-content:end; }.replay-index-filters { grid-template-columns:repeat(2,minmax(0,1fr)); }.index-search { grid-column:1/-1; }.overview-metrics { grid-template-columns:repeat(3,1fr); }.overview-metrics>div:nth-child(3) { border-right:0; }.overview-metrics>div:nth-child(-n+3) { border-bottom:1px solid var(--border-color); }.replay-workspace { grid-template-columns:1fr; }.timeline-head { padding-left:0; }.timeline-compaction-note { margin-left:0; }.load-older { width:100%; margin-left:0; } }
-@media (max-width:720px) { .task-replay-page { padding:12px; }.replay-toolbar { display:grid; }.toolbar-diagnostic-lookup { justify-self:start; }.toolbar-diagnostic-lookup .toolbar-lookup { right:auto; left:0; width:min(320px,calc(100vw - 24px)); }.toolbar-lookup { display:grid; grid-template-columns:minmax(0,1fr) auto; }.toolbar-lookup input { width:100%; }.overview-heading { grid-template-columns:1fr auto; }.overview-heading .back-button { grid-column:1/-1; justify-self:start; }.overview-metrics { grid-template-columns:repeat(2,1fr); }.overview-metrics>div { border-bottom:1px solid var(--border-color); }.overview-metrics>div:nth-child(2n) { border-right:0; }.overview-metrics>div:nth-last-child(-n+2) { border-bottom:0; }.replay-index-head { display:flex; }.replay-index-filters { grid-template-columns:1fr; }.index-search { grid-column:auto; }.replay-index-row { grid-template-columns:10px minmax(0,1fr); }.task-index-meta { grid-column:2; display:flex; justify-content:space-between; text-align:left; }.preset-control { width:100%; overflow:auto; }.preset-control button { flex:1 0 auto; }.event-search { flex-basis:100%; }.issue-nav { margin-left:0; }.retention-details dl { grid-template-columns:1fr; }.timeline-head { align-items:stretch; gap:8px; }.timeline-mode { align-self:start; }.timeline-mode button { padding-inline:7px; } }
+@media (max-width:720px) { .task-replay-page { padding:12px; }.replay-toolbar { display:grid; }.toolbar-diagnostic-lookup { justify-self:start; }.toolbar-diagnostic-lookup .toolbar-lookup { right:auto; left:0; width:min(320px,calc(100vw - 24px)); }.toolbar-lookup { display:grid; grid-template-columns:minmax(0,1fr) auto; }.toolbar-lookup input { width:100%; }.overview-heading { grid-template-columns:1fr auto; }.overview-heading .back-button { grid-column:1/-1; justify-self:start; }.overview-metrics { grid-template-columns:repeat(2,1fr); }.overview-metrics>div { border-bottom:1px solid var(--border-color); }.overview-metrics>div:nth-child(2n) { border-right:0; }.overview-metrics>div:nth-last-child(-n+2) { border-bottom:0; }.replay-index-head { display:flex; }.replay-index-filters { grid-template-columns:1fr; }.index-search { grid-column:auto; }.replay-index-row { grid-template-columns:10px minmax(0,1fr); }.task-index-meta { grid-column:2; display:flex; justify-content:space-between; text-align:left; }.preset-control { width:100%; overflow:auto; }.event-search { flex-basis:100%; }.issue-nav { margin-left:0; }.retention-details dl { grid-template-columns:1fr; }.timeline-head { align-items:stretch; gap:8px; }.timeline-mode { align-self:start; }.timeline-mode button { padding-inline:7px; }.full-replay-timeline>summary { display:grid; gap:5px; }.full-replay-timeline>.phase-strip,.full-replay-timeline>.replay-controls,.full-replay-timeline>.task-family-strip,.full-replay-timeline>.replay-workspace { margin-left:8px; margin-right:8px; } }
 .replay-error { border-color:color-mix(in srgb,var(--accent-red) 35%,var(--border-color)); background:var(--danger-soft); color:var(--accent-red); }
 .legacy-notice { border-color:color-mix(in srgb,var(--accent-yellow) 35%,var(--border-color)); background:var(--warning-soft); color:var(--accent-yellow); }
 .overview-status.done,.overview-status.completed { background:var(--success-soft); color:var(--accent-green); }

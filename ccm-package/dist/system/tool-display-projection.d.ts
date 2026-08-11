@@ -1,12 +1,17 @@
 declare const TOOL_DISPLAY_SCHEMA: "ccm-tool-display-detail-v1";
+export type ToolDisplayFamily = "read" | "search" | "symbol" | "git" | "verify" | "terminal" | "agent" | "external" | "other";
 export type ToolDisplayDetailV1 = {
     schema: typeof TOOL_DISPLAY_SCHEMA;
     tool: {
+        name?: string;
         label: string;
+        userLabel?: string;
+        family?: ToolDisplayFamily;
         category: "builtin" | "mcp" | "skill" | "agent";
         serverLabel?: string;
         target?: string;
     };
+    sensitiveCommand?: string;
     arguments: Array<{
         label: string;
         value: unknown;
@@ -33,6 +38,7 @@ export declare function buildToolDisplayDetail(input: {
     transientBody?: boolean;
     freshness?: ToolDisplayDetailV1["result"]["freshness"];
     authoritativeRevision?: string;
+    includeTechnicalCommand?: boolean;
 }): ToolDisplayDetailV1;
 export declare function isWorkspaceReadonlyToolName(value: any): boolean;
 export {};

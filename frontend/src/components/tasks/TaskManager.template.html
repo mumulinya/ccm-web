@@ -338,16 +338,32 @@
 
     <!-- 新建任务弹窗 -->
     <div v-if="showCreate" class="modal-overlay" @click.self="showCreate = false" @paste.capture="handleTaskPaste">
-      <div class="modal" style="min-width:500px">
+      <div class="modal task-create-modal">
         <button class="modal-close" @click="showCreate = false">&times;</button>
-        <h3>{{ editingTaskId ? '编辑任务' : '📋 新建任务' }}</h3>
+        <h3>{{ editingTaskId ? '编辑任务' : '新建单次任务' }}</h3>
+        <p class="task-create-lead">填写用户目标，提交前会检查目标权限、自动化会话、Agent、项目路径和工作区状态。</p>
+        <div class="task-create-grid">
+        <section class="task-create-form">
+        <div class="form-group">
+          <label>从任务模板开始</label>
+          <select v-model="newTask.taskTemplateId" @change="applySelectedTaskTemplate">
+            <option value="">不使用模板</option>
+            <option v-for="item in taskTemplates" :key="item.id" :value="item.id">{{ item.name }}</option>
+          </select>
+        </div>
+        <div v-if="selectedTaskTemplate?.variables?.length" class="task-template-variables">
+          <div v-for="variable in selectedTaskTemplate.variables" :key="variable.key" class="form-group">
+            <label>{{ variable.label }}<span v-if="variable.required"> *</span></label>
+            <input v-model="newTask.templateVariables[variable.key]" :placeholder="variable.defaultValue || `填写 ${variable.label}`">
+          </div>
+        </div>
         <div class="form-group">
           <label>任务标题</label>
-          <input v-model="newTask.title" placeholder="简要描述任务">
+          <input v-model="newTask.title" :disabled="!!newTask.taskTemplateId" :placeholder="newTask.taskTemplateId ? '由模板生成' : '简要描述任务'">
         </div>
         <div class="form-group">
           <label>详细描述</label>
-          <textarea v-model="newTask.description" rows="3" style="width:100%;padding:10px 12px;border-radius:8px;border:1px solid var(--border-color);background:rgba(255,255,255,0.85);color:var(--text-primary);font-size:13px;resize:vertical;outline:none" placeholder="可选，详细描述任务需求"></textarea>
+          <textarea v-model="newTask.description" rows="4" :disabled="!!newTask.taskTemplateId" :placeholder="newTask.taskTemplateId ? '由模板生成' : '描述业务要求、预期结果和验收条件'"></textarea>
         </div>
         <div class="form-group">
           <TaskAttachmentPicker
@@ -385,11 +401,46 @@
             <option value="low">⚪ 低</option>
           </select>
         </div>
+        <div class="task-create-inline">
+          <div class="form-group">
+            <label>截止时间（可选）</label>
+            <input v-model="newTask.deadlineAt" type="datetime-local">
+          </div>
+          <div class="form-group">
+            <label>前置依赖（可选）</label>
+            <select v-model="newTask.dependencyTaskIds" multiple>
+              <option v-for="task in tasks.filter(item => item.id !== editingTaskId).slice(0, 50)" :key="task.id" :value="task.id">{{ task.title }} · {{ task.status }}</option>
+            </select>
+          </div>
+        </div>
         <div class="form-group">
           <label style="display:flex;align-items:center;gap:8px">
             <input type="checkbox" v-model="newTask.autoExecute" style="accent-color:var(--accent-blue)">
             创建后立即加入执行队列
           </label>
+        </div>
+        <div class="template-save-row">
+          <input v-model="newTask.templateName" placeholder="模板名称">
+          <button class="btn btn-cancel" type="button" @click="saveCurrentTaskTemplate">保存为模板</button>
+          <button v-if="!editingTaskId" class="btn btn-cancel" type="button" @click="convertTaskToCron">转换为定时任务</button>
+        </div>
+        </section>
+        <aside class="task-preflight-panel" :class="{ blocked: taskPreflight && !taskPreflight.allowed }">
+          <div class="task-preflight-heading"><strong>执行前预检</strong><button class="btn btn-cancel" type="button" :disabled="taskPreflightLoading" @click="runTaskPreflight">{{ taskPreflightLoading ? '检查中…' : '重新检查' }}</button></div>
+          <template v-if="taskPreflight">
+            <div class="preflight-state" :class="taskPreflight.allowed ? 'ready' : 'blocked'">{{ taskPreflight.allowed ? '可以创建任务' : '暂时不能创建' }}</div>
+            <dl class="preflight-facts">
+              <div><dt>自动化会话</dt><dd>{{ taskPreflight.automationSession?.state === 'reuse' ? '复用现有绑定' : '提交时自动创建' }}</dd></div>
+              <div><dt>Agent</dt><dd>{{ taskPreflight.agent?.ready ? '可用' : taskPreflight.agent?.enabled ? '等待恢复' : '未启用' }}</dd></div>
+              <div><dt>验收方式</dt><dd>{{ taskPreflight.testAgent?.enabled ? 'TestAgent 独立验收' : '主 Agent 自验' }}</dd></div>
+              <div v-if="taskPreflight.workspace"><dt>工作区</dt><dd>{{ taskPreflight.workspace.clean === false ? '存在未提交改动' : taskPreflight.workspace.git ? 'Git 状态正常' : '非 Git 或不可检测' }}</dd></div>
+            </dl>
+            <div v-if="taskPreflight.finalTask" class="preflight-final"><strong>{{ taskPreflight.finalTask.title }}</strong><p>{{ taskPreflight.finalTask.instructions }}</p></div>
+            <p v-for="item in taskPreflight.errors" :key="item.code" class="preflight-message error">{{ item.message }}</p>
+            <p v-for="item in taskPreflight.warnings" :key="item.code" class="preflight-message warning">{{ item.message }}</p>
+          </template>
+          <div v-else class="preflight-empty">填写任务和目标后点击“重新检查”，提交时也会强制执行同一套后端预检。</div>
+        </aside>
         </div>
         <div class="form-actions">
           <button class="btn btn-cancel" @click="showCreate = false">取消</button>

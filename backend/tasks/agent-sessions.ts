@@ -3,6 +3,7 @@ export {
   FINAL_DISPATCH_REACTIVE_COMPACT_MAX_CONSECUTIVE_FAILURES,
   TaskAgentMemoryContextSnapshotRef,
   TaskAgentSession,
+  buildTaskAgentContinuityBinding,
   verifyTaskAgentMemorySnapshotSyncDecision,
   verifyTaskAgentMemoryPromptInjectionProof,
   verifyTaskAgentMemorySnapshotSyncCommit,
@@ -60,16 +61,17 @@ export {
 import * as crypto from "crypto";
 import * as fs from "fs";
 import { getAgentRuntime } from "../agents/runtime";
-import type { TaskAgentSession } from "./agent-sessions-shared";
+import { buildTaskAgentContinuityBinding, type TaskAgentSession } from "./agent-sessions-shared";
 import {
   openTaskAgentSession,
+  recordTaskAgentSessionTurn,
   advanceTaskAgentSession,
   getTaskAgentSessionOptions,
   getTaskAgentSessionContinuity,
 } from "./agent-sessions-resume";
 import { bindTaskAgentMemoryContextSnapshot } from "./agent-sessions-bind";
 import { listTaskAgentMemoryContextSnapshots } from "./agent-sessions-inventory";
-import { purgeTaskAgentSessions, shouldCloseTaskAgentSessions } from "./agent-sessions-purge";
+import { closeTaskAgentSessions, purgeTaskAgentSessions, shouldCloseTaskAgentSessions } from "./agent-sessions-purge";
 
 export function runTaskAgentSessionSelfTest() {
   const claude = {
@@ -110,6 +112,52 @@ export function runTaskAgentSessionSelfTest() {
       permissionDriftRebuildsNativeSession: (() => {
         const drifted = advanceTaskAgentSession({ ...claude, id: "codex-drift", agentType: "codex", nativeSessionId: "codex-readonly", turnCount: 3 } as TaskAgentSession, { success: false, error: "sandbox read-only", permissionDrift: true });
         return drifted.resumeMode === "native" && drifted.nativeSessionId === "" && drifted.turnCount === 0 && drifted.nativeSessionHistory?.includes("codex-readonly") && drifted.permissionDriftCount === 1;
+      })(),
+      conversationContinuityReusesNativeSession: (() => {
+        const firstTaskId = `task-agent-continuity-first-${process.pid}-${Date.now().toString(36)}`;
+        const secondTaskId = `${firstTaskId}-next`;
+        const binding = buildTaskAgentContinuityBinding({
+          scope: "project",
+          scopeId: "project-continuity-selftest",
+          exactSessionId: "project-session-continuity-selftest",
+          project: "frontend",
+          agentType: "claudecode",
+        });
+        if (!binding) return false;
+        try {
+          const first = openTaskAgentSession({ scopeId: firstTaskId, taskId: firstTaskId, groupId: "", project: "frontend", agentType: "claudecode", continuity: binding });
+          const progressed = recordTaskAgentSessionTurn(first.id, { success: true });
+          closeTaskAgentSessions({ taskId: firstTaskId }, "selftest complete");
+          const second = openTaskAgentSession({ scopeId: secondTaskId, taskId: secondTaskId, groupId: "", project: "frontend", agentType: "claudecode", continuity: binding });
+          return second.continuityMode === "reused"
+            && second.nativeSessionId === progressed?.nativeSessionId
+            && getTaskAgentSessionOptions(second).resumeSession === true;
+        } finally {
+          purgeTaskAgentSessions(firstTaskId);
+          purgeTaskAgentSessions(secondTaskId);
+        }
+      })(),
+      conversationContinuityIsolatesParallelTasks: (() => {
+        const firstTaskId = `task-agent-continuity-parallel-${process.pid}-${Date.now().toString(36)}`;
+        const secondTaskId = `${firstTaskId}-next`;
+        const binding = buildTaskAgentContinuityBinding({
+          scope: "group",
+          scopeId: "group-continuity-selftest",
+          exactSessionId: "gcs_continuity_selftest",
+          project: "frontend",
+          agentType: "claudecode",
+        });
+        if (!binding) return false;
+        try {
+          const first = openTaskAgentSession({ scopeId: firstTaskId, taskId: firstTaskId, groupId: "group-continuity-selftest", project: "frontend", agentType: "claudecode", continuity: binding });
+          const parallel = openTaskAgentSession({ scopeId: secondTaskId, taskId: secondTaskId, groupId: "group-continuity-selftest", project: "frontend", agentType: "claudecode", continuity: binding });
+          return parallel.continuityMode === "isolated_branch"
+            && !!parallel.continuityBranchId
+            && parallel.nativeSessionId !== first.nativeSessionId;
+        } finally {
+          purgeTaskAgentSessions(firstTaskId);
+          purgeTaskAgentSessions(secondTaskId);
+        }
       })(),
       taskAgentMemoryContextSnapshotBindsSession: (() => {
         const taskId = `task-agent-memory-snapshot-selftest-${process.pid}-${Date.now().toString(36)}`;

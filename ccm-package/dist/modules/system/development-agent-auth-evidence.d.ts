@@ -27,7 +27,7 @@ export declare function recordDevelopmentAgentAuthEvidence(input: {
     schema: "ccm-development-agent-auth-evidence-v2";
     version: 2;
     provider: string;
-    status: "failed" | "degraded" | "credential_detected" | "verified" | "expired" | "revoked";
+    status: "failed" | "expired" | "degraded" | "credential_detected" | "verified" | "revoked";
     source: "native_status" | "model_challenge" | "api_challenge" | "credential_file";
     accountFingerprint: string;
     model: string;
@@ -60,7 +60,7 @@ export declare function revokeDevelopmentAgentAuthEvidence(provider: string, det
     schema: "ccm-development-agent-auth-evidence-v2";
     version: 2;
     provider: string;
-    status: "failed" | "degraded" | "credential_detected" | "verified" | "expired" | "revoked";
+    status: "failed" | "expired" | "degraded" | "credential_detected" | "verified" | "revoked";
     source: "native_status" | "model_challenge" | "api_challenge" | "credential_file";
     accountFingerprint: string;
     model: string;

@@ -12,6 +12,7 @@ const loginTheme = ref('command')
 const user = ref(null)
 let csrfToken = ''
 let capabilities = []
+let access = { features: [], resources: [], policyRevision: 0 }
 const authSlow = ref(false)
 let authSlowTimer = null
 const LOGIN_PATH = '/login'
@@ -83,7 +84,8 @@ const applySession = data => {
   user.value = data?.user || null
   csrfToken = String(data?.csrf || data?.session?.csrf || '')
   capabilities = Array.isArray(data?.capabilities) ? data.capabilities : []
-  window.__CCM_AUTH__ = { user: user.value, capabilities, csrf: csrfToken }
+  access = data?.access || { features: [], resources: [], policyRevision: 0 }
+  window.__CCM_AUTH__ = { user: user.value, capabilities, access, csrf: csrfToken }
   document.documentElement.setAttribute('data-auth-role', user.value?.role || 'anonymous')
   window.dispatchEvent(new CustomEvent('ccm-auth-changed', { detail: window.__CCM_AUTH__ }))
 }
@@ -111,7 +113,7 @@ const loadSession = async () => {
 }
 
 const handleAuthenticated = data => {
-  applySession({ authenticated: true, registration_enabled: data.registration_enabled, first_install: data.first_install, login_theme: data.login_theme, user: data.user, csrf: data.csrf, capabilities: data.capabilities })
+  applySession({ authenticated: true, registration_enabled: data.registration_enabled, first_install: data.first_install, login_theme: data.login_theme, user: data.user, csrf: data.csrf, capabilities: data.capabilities, access: data.access })
   restoreAuthenticatedRoute()
 }
 

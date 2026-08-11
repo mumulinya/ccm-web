@@ -362,6 +362,7 @@ function normalizeWebSessionMessage(message: any) {
     "agenticRun",
     "managementReceipt",
     "provider_usage",
+    "interruption",
     "source",
     "type",
     "commandResult",

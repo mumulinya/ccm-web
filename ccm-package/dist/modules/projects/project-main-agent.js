@@ -88,6 +88,7 @@ const assistant_progress_1 = require("../../system/assistant-progress");
 const slash_command_session_state_1 = require("../../system/slash-command-session-state");
 const test_agent_runner_1 = require("../collaboration/test-agent-runner");
 const execution_kernel_1 = require("../../agents/execution-kernel");
+const unified_evidence_registry_1 = require("../../system/unified-evidence-registry");
 const agent_sessions_purge_1 = require("../../tasks/agent-sessions-purge");
 const task_interruption_1 = require("../../tasks/task-interruption");
 function projectMainToolCallId(projectSessionId, toolName) {
@@ -179,7 +180,14 @@ function reconcileInterruptedProjectMainTasks() {
         }
         const detail = "服务重启中断了项目主 Agent 编排；任务、源码证据和子 Agent 会话均已保留，正在执行安全恢复检查";
         const now = new Date().toISOString();
-        const sideEffectState = Array.isArray(task.worker_outputs) && task.worker_outputs.length ? "uncertain" : "none";
+        const resumeCheckpoint = task.resume_checkpoint || task.interruption_receipt?.resume_checkpoint || null;
+        let observedWorkspaceChecksum = "";
+        try {
+            observedWorkspaceChecksum = projectMainWorkspaceChecksum(projectWorkDir((0, project_validation_1.validateProjectName)(task.target_project)), Array.isArray(task.worker_outputs) ? task.worker_outputs : []);
+        }
+        catch { }
+        const workspaceMatchesCheckpoint = !!resumeCheckpoint?.workspaceChecksum && resumeCheckpoint.workspaceChecksum === observedWorkspaceChecksum;
+        const sideEffectState = workspaceMatchesCheckpoint ? "committed" : "uncertain";
         const interruptionReceipt = (0, task_interruption_1.buildTaskInterruptionReceipt)({
             task,
             reasonCode: "service_restart",
@@ -187,6 +195,8 @@ function reconcileInterruptedProjectMainTasks() {
             actor: "startup-recovery",
             checkpoint: String(task.acceptance_state || task.status || "unknown"),
             sideEffectState,
+            workspaceChecksum: observedWorkspaceChecksum,
+            resumeCheckpoint: resumeCheckpoint || undefined,
             processTerminationProven: true,
         });
         const recoveryDecision = (0, task_interruption_1.buildTaskRecoveryDecision)(task, interruptionReceipt, { authorizationValid: true, runtimeValid: true });
@@ -195,10 +205,11 @@ function reconcileInterruptedProjectMainTasks() {
             status: "blocked",
             acceptance_state: "recovery_required",
             status_detail: detail,
-            auto_execute: false,
-            is_paused: true,
-            paused: true,
+            auto_execute: interruptionReceipt.auto_resume_allowed,
+            is_paused: !interruptionReceipt.auto_resume_allowed,
+            paused: !interruptionReceipt.auto_resume_allowed,
             recovery_pending: true,
+            recovery: interruptionReceipt.recovery,
             interruption_receipt: interruptionReceipt,
             recovery_decision: recoveryDecision,
             project_main_execution: {
@@ -275,7 +286,7 @@ function projectRequirementPlanProjection(plan, input) {
             outcome: item.acceptanceCriteria?.[0] || plan.acceptanceCriteria?.[index] || "完成后进入下一步检查。",
             project: plan.project,
             dependsOn: item.dependsOn || [],
-            status: item.status || "pending",
+            status: input.stepStatuses?.[String(item.id || `step_${index + 1}`)] || item.status || "pending",
         })),
         scope: [`${plan.project} 项目`, ...plan.workItems.map(item => item.title).filter(Boolean)],
         expectedResults: plan.acceptanceCriteria,
@@ -759,14 +770,19 @@ async function runProjectMainAgentFirstTurn(input) {
             return;
         const inputTokens = Number(tokenUsage?.inputTokens || 0) + Number(usage.inputTokens || usage.input_tokens || 0);
         const outputTokens = Number(tokenUsage?.outputTokens || 0) + Number(usage.outputTokens || usage.output_tokens || 0);
+        const providerTotalTokens = Number(tokenUsage?.providerTotalTokens || 0)
+            + Number(usage.providerTotalTokens || usage.provider_total_tokens || usage.totalTokens || usage.total_tokens || 0);
         tokenUsage = {
             inputTokens,
             outputTokens,
-            totalTokens: inputTokens + outputTokens,
+            totalTokens: providerTotalTokens || inputTokens + outputTokens,
+            providerTotalTokens,
             directInputTokens: Number(tokenUsage?.directInputTokens || 0) + Number(usage.directInputTokens || usage.direct_input_tokens || 0),
             cacheCreationInputTokens: Number(tokenUsage?.cacheCreationInputTokens || 0) + Number(usage.cacheCreationInputTokens || usage.cache_creation_input_tokens || 0),
             cacheReadInputTokens: Number(tokenUsage?.cacheReadInputTokens || 0) + Number(usage.cacheReadInputTokens || usage.cache_read_input_tokens || 0),
-            reported: true,
+            totalCostUsd: Number(tokenUsage?.totalCostUsd || 0) + Number(usage.totalCostUsd || usage.total_cost_usd || usage.costUsd || usage.cost_usd || 0),
+            source: "provider_reported",
+            reported: usage.reported !== false,
         };
     };
     const sessionDirective = (0, slash_command_session_state_1.renderSlashCommandSessionDirective)("project", project, projectSessionId);
@@ -949,15 +965,24 @@ JSON：{"responseType":"reply|tool_calls|clarify|plan|dispatch","reply":"给用�
         const selectedRequests = freshRequests.slice(0, remainingToolCalls);
         const preparedToolCallIds = selectedRequests.map(request => projectMainToolCallId(projectSessionId, request.name));
         if ((0, assistant_progress_1.assistantProgressNarrationEnabled)(budgetConfig)) {
-            const explicitProgress = cleanText(parsed?.progressUpdate || parsed?.progress_update, 600);
-            const progressText = explicitProgress || (round === 0 ? (0, assistant_progress_1.buildAssistantProgressFallback)(selectedRequests) : "");
+            const explicitProgress = (0, assistant_progress_1.sanitizeAssistantProgressText)(parsed?.progressUpdate || parsed?.progress_update || "");
+            const progressKind = (0, assistant_progress_1.validateAssistantProgressKind)(parsed?.progressKind || parsed?.progress_kind || (round === 0 ? "before_tools" : "key_finding"), {
+                firstBatch: round === 0,
+                hasSuccessfulObservation: toolResults.some(row => row?.ok === true),
+                hasFailure: toolResults.some(row => row?.ok === false),
+                directionChanged: round > 0 && toolResults.some(row => row?.ok === false),
+                attempt: Number(toolContext.scopeIdentity?.attempt || 1),
+                verificationActive: selectedRequests.some(request => /test|build|lint|typecheck|verify|verification/i.test(String(request?.name || ""))),
+            });
+            const fallbackProgress = round === 0 ? (0, assistant_progress_1.buildAssistantProgressFallback)(selectedRequests, { target: project, goal: input.userMessage }) : "";
+            const progressText = progressKind ? (explicitProgress || fallbackProgress) : fallbackProgress;
             if (progressText)
                 (0, user_visible_agent_events_1.appendAssistantProgress)({
                     scope: "project", scopeId: project, exactSessionId: projectSessionId,
                     generation: Number(toolContext.scopeIdentity?.generation || 0),
                     turnId: visibleTurnId,
                     text: progressText,
-                    kind: parsed?.progressKind || parsed?.progress_kind || (round === 0 ? "before_tools" : "key_finding"),
+                    kind: progressKind || "before_tools",
                     modelCallIndex: modelCallCount,
                     relatedToolCallIds: preparedToolCallIds,
                     title: "项目主 Agent",
@@ -1134,6 +1159,15 @@ JSON：{"responseType":"reply|tool_calls|clarify|plan|dispatch","reply":"给用�
         toolResults,
         turnDecision,
         turnReceipt,
+        metric: {
+            durationMs: Math.max(0, Date.now() - visibleTurnStartedAt),
+            modelMs: modelDurationMs,
+            toolWallMs: toolWallDurationMs,
+            usage: tokenUsage || { source: "unreported", missingReason: "runtime_unreported" },
+            modelCalls: modelCallCount,
+            toolCalls: toolCallCount,
+            usageAnchorId: `project-main:${projectSessionId}:${visibleTurnId}`,
+        },
         mainAgentToolUsage: {
             schema: "ccm-project-main-tool-usage-v2",
             mode: loopBudget.mode,
@@ -1382,6 +1416,35 @@ async function answerAsProjectMainAgent(input) {
         contextComponents,
     }, onVisibleDelta), 12000);
 }
+function projectMainResumePlanChecksum(plan) {
+    return crypto.createHash("sha256").update(JSON.stringify({
+        project: plan.project,
+        projectSessionId: plan.projectSessionId,
+        title: plan.title,
+        summary: plan.summary,
+        acceptanceCriteria: plan.acceptanceCriteria,
+        workItems: plan.workItems.map(item => ({
+            id: item.id,
+            title: item.title,
+            objective: item.objective,
+            acceptanceCriteria: item.acceptanceCriteria,
+            dependsOn: item.dependsOn || [],
+            repairOfWorkItemId: item.repairOfWorkItemId || "",
+        })),
+    })).digest("hex");
+}
+function projectMainWorkspaceChecksum(workDir, results = []) {
+    const declaredFiles = results.flatMap(result => {
+        const fileChanges = result?.fileChanges?.files || result?.fileChanges || [];
+        return Array.isArray(fileChanges) ? fileChanges.map((item) => String(item?.path || item || "")).filter(Boolean) : [];
+    });
+    try {
+        return (0, unified_evidence_registry_1.repoStateFingerprint)((0, unified_evidence_registry_1.captureRepoStateIdentity)(workDir, declaredFiles));
+    }
+    catch {
+        return "";
+    }
+}
 function createProjectMainTask(input) {
     const independentTestAgentEnabled = input.plan.acceptanceMode === "test_agent";
     const planMode = projectMainPlanMode(input.plan, input.workflowDecision);
@@ -1415,6 +1478,7 @@ function createProjectMainTask(input) {
         idempotency_key: `project-main:${input.project}:${input.projectSessionId}:${input.projectMainRunId}`,
     });
     const updated = (0, collaboration_task_service_1.updateTask)(task.id, {
+        anchor_message_id: `project-main-task:${task.id}`,
         status: input.plan.requiresConfirmation ? "paused" : "pending",
         status_detail: input.plan.requiresConfirmation ? "项目主 Agent 已生成计划，等待用户确认" : "项目主 Agent 计划已就绪，等待进入会话串行队列",
         acceptance_state: "pending",
@@ -1431,6 +1495,7 @@ function createProjectMainTask(input) {
         scope: "project",
         scopeId: input.project,
         exactSessionId: input.projectSessionId,
+        anchorMessageId: `project-main-task:${updated.id}`,
         generation: 0,
         taskId: String(updated.id),
         plan: projectRequirementPlanProjection(input.plan, {
@@ -1648,9 +1713,16 @@ function resumeInterruptedProjectMainTask(taskId, projectInput, projectSessionId
     const projectSessionId = (0, project_validation_1.validateSessionId)(projectSessionIdInput);
     if (task.target_project !== project || task.project_session_id !== projectSessionId)
         throw new Error("任务不属于当前项目会话");
-    const recovery = (0, task_interruption_1.resumeInterruptedTaskExecution)(task, { userRequested: true, authorizationValid: true, runtimeValid: true });
+    const checkpoint = task.resume_checkpoint || task.interruption_receipt?.resume_checkpoint || null;
+    const persistedPlan = task.workflow_meta?.project_main_plan;
+    if (checkpoint?.planChecksum && persistedPlan && projectMainResumePlanChecksum(persistedPlan) !== checkpoint.planChecksum) {
+        throw Object.assign(new Error("当前执行计划已变化，不能自动续接；请重新核验后再处理"), { code: "recovery_plan_drift" });
+    }
+    const workspaceChecksum = projectMainWorkspaceChecksum(projectWorkDir(project), Array.isArray(task.worker_outputs) ? task.worker_outputs : []);
+    const recovery = (0, task_interruption_1.resumeInterruptedTaskExecution)(task, { userRequested: true, workspaceChecksum, authorizationValid: true, runtimeValid: true });
     if (!recovery.resumed)
         throw Object.assign(new Error(recovery.decision.reason), { code: "recovery_gate_failed", recovery_decision: recovery.decision });
+    const recoveryAttempt = Math.max(0, Number(task.recovery?.attempt || task.interruption_receipt?.recovery?.attempt || 0)) + 1;
     const updated = (0, collaboration_task_service_1.updateTask)(task.id, {
         status: "pending",
         acceptance_state: task.interruption_receipt?.checkpoint || "planned",
@@ -1659,6 +1731,13 @@ function resumeInterruptedProjectMainTask(taskId, projectInput, projectSessionId
         is_paused: false,
         paused: false,
         recovery_pending: false,
+        recovery: {
+            mode: "safe_auto",
+            state: "queued",
+            attempt: recoveryAttempt,
+            maxAttempts: 3,
+            recovered_at: new Date().toISOString(),
+        },
         recovery_decision: recovery.decision,
         execution_attempt: Math.max(0, Number(task.execution_attempt || 0)) + 1,
         resumed_at: new Date().toISOString(),
@@ -1780,6 +1859,7 @@ async function reviseProjectMainTask(input) {
             scope: "project",
             scopeId: project,
             exactSessionId: projectSessionId,
+            anchorMessageId: String(task.anchor_message_id || `project-main-task:${task.id}`),
             generation: Math.max(0, Number(task.execution_generation || task.generation || 0)),
             taskId: String(task.id),
             plan: projectRequirementPlanProjection(revisedPlan, {
@@ -1973,9 +2053,64 @@ async function executeProjectMainTask(input) {
             reason: data.summary || data.work_item?.title || "",
         });
     };
-    const results = [];
-    let latestReview = null;
+    const persistedAtResume = getProjectMainTask(taskId) || input.task;
+    const persistedCheckpoint = persistedAtResume?.resume_checkpoint || persistedAtResume?.interruption_receipt?.resume_checkpoint || null;
+    const computedResumePlanChecksum = projectMainResumePlanChecksum(input.plan);
+    const checkpointMatchesPlan = !!persistedCheckpoint && persistedCheckpoint.planChecksum === computedResumePlanChecksum;
+    const persistedWorkItems = new Map((Array.isArray(persistedAtResume?.work_items) ? persistedAtResume.work_items : []).map((item) => [String(item?.id || ""), item]));
+    input.plan.workItems = input.plan.workItems.map(item => ({ ...item, ...(persistedWorkItems.get(String(item.id)) || {}) }));
+    const completedWorkItemIds = new Set(checkpointMatchesPlan && Array.isArray(persistedCheckpoint.completedWorkItemIds)
+        ? persistedCheckpoint.completedWorkItemIds.map(String)
+        : []);
+    const persistedResults = Array.isArray(persistedAtResume?.worker_outputs) ? persistedAtResume.worker_outputs : [];
+    const results = checkpointMatchesPlan
+        ? persistedResults.filter((result) => result?.success === true && completedWorkItemIds.has(String(result?.workItemId || "")))
+        : [];
+    let latestReview = checkpointMatchesPlan
+        ? persistedAtResume?.test_agent_review || persistedAtResume?.main_agent_self_verification || null
+        : null;
+    const resumeSummaryOnly = checkpointMatchesPlan
+        && persistedCheckpoint?.summaryPending === true
+        && latestReview?.canAccept === true;
     const independentTestAgentEnabled = acceptancePolicy.mode === "test_agent";
+    let visiblePlanRevision = Math.max(1, Number(Array.isArray(persistedAtResume?.plan_revisions) ? persistedAtResume.plan_revisions.length + 1 : 1));
+    const emitVisiblePlanState = (status = "executing", activeWorkItemId = "") => {
+        visiblePlanRevision += 1;
+        const stepStatuses = {};
+        for (const completedId of completedWorkItemIds)
+            stepStatuses[String(completedId)] = "completed";
+        if (activeWorkItemId)
+            stepStatuses[String(activeWorkItemId)] = "running";
+        return (0, user_visible_agent_events_1.appendUserVisibleRequirementPlan)({
+            eventId: `project-task:${taskId}:requirement-plan:${visiblePlanRevision}:${status}`,
+            scope: "project",
+            scopeId: project,
+            exactSessionId: input.plan.projectSessionId,
+            anchorMessageId: String(persistedAtResume?.anchor_message_id || `project-main-task:${taskId}`),
+            generation: executionGeneration,
+            taskId,
+            plan: projectRequirementPlanProjection(input.plan, {
+                planId: taskId,
+                revision: visiblePlanRevision,
+                status,
+                stepStatuses,
+            }),
+        });
+    };
+    const persistResumeCheckpoint = (phase, options = {}) => {
+        const workspaceChecksum = projectMainWorkspaceChecksum(workDir, results);
+        const resumeCheckpoint = {
+            phase,
+            ...(options.workItemId ? { workItemId: options.workItemId } : {}),
+            ...(Number.isFinite(Number(options.reviewRound)) ? { reviewRound: Number(options.reviewRound) } : {}),
+            planChecksum: computedResumePlanChecksum,
+            ...(workspaceChecksum ? { workspaceChecksum } : {}),
+            completedWorkItemIds: Array.from(completedWorkItemIds),
+            ...(options.summaryPending ? { summaryPending: true } : {}),
+        };
+        (0, collaboration_task_service_1.updateTask)(taskId, { resume_checkpoint: resumeCheckpoint, workspace_snapshot_checksum: workspaceChecksum });
+        return resumeCheckpoint;
+    };
     const assertNotCancelled = () => {
         if (taskAbortController.signal.aborted)
             throw Object.assign(new Error("项目主 Agent 当前执行已中断"), { code: "CCM_MODEL_CALL_CANCELLED" });
@@ -1986,13 +2121,31 @@ async function executeProjectMainTask(input) {
             throw new Error("项目主 Agent 任务已取消");
     };
     try {
-        (0, collaboration_task_service_1.updateTask)(taskId, { status: "in_progress", intake_state: "confirmed", acceptance_state: "executing", status_detail: "项目主 Agent 正在安排开发 Agent" });
+        (0, collaboration_task_service_1.updateTask)(taskId, { status: "in_progress", intake_state: "confirmed", acceptance_state: "executing", status_detail: checkpointMatchesPlan ? "已接上原任务，正在从最近检查点继续" : "项目主 Agent 正在安排开发 Agent" });
+        if (checkpointMatchesPlan)
+            (0, logs_1.appendTaskTimelineEvent)(taskId, {
+                type: "project_main_checkpoint_resumed",
+                title: "已接上原任务",
+                detail: `从“${persistedCheckpoint.phase}”阶段继续；已完成工作项不会重复执行`,
+                status: "ok",
+                phase: persistedCheckpoint.phase,
+                agent: "project-main-agent",
+                data: { completed_work_item_ids: Array.from(completedWorkItemIds) },
+            });
         emit("planning", { status: "completed", plan: input.plan });
         for (const item of input.plan.workItems) {
             assertNotCancelled();
+            if (completedWorkItemIds.has(String(item.id)) && results.some(result => result.workItemId === item.id && result.success)) {
+                item.status = item.status === "completed" ? "completed" : "awaiting_review";
+                emitVisiblePlanState("executing");
+                (0, logs_1.appendTaskTimelineEvent)(taskId, { type: "project_worker_resume_skipped", title: `${item.title}已从检查点恢复`, detail: "该工作项的提交和证据仍有效，本次不重复执行", status: "ok", phase: "executing", agent: project, data: { work_item_id: item.id } });
+                emit("work_item", { status: "resumed_skipped", work_item: item });
+                continue;
+            }
             executionPhase = "executing";
             persistExecutionState();
             item.status = "running";
+            emitVisiblePlanState("executing", String(item.id));
             item.attempts += 1;
             (0, collaboration_task_service_1.updateTask)(taskId, { work_items: input.plan.workItems, status_detail: `开发 Agent 正在执行：${item.title}` });
             (0, logs_1.appendTaskTimelineEvent)(taskId, { type: "project_worker_started", title: item.title, detail: item.objective, status: "active", phase: "executing", agent: project, data: { work_item_id: item.id } });
@@ -2018,6 +2171,7 @@ async function executeProjectMainTask(input) {
                 throw error;
             }
             assertNotCancelled();
+            result = { ...result, workItemId: item.id, reviewRound: 0 };
             results.push(result);
             item.output = result.output;
             item.fileChanges = result.fileChanges;
@@ -2027,6 +2181,9 @@ async function executeProjectMainTask(input) {
             emit("work_item", { status: result.success ? "awaiting_review" : "failed", work_item: item });
             if (!result.success)
                 throw new Error(result.error || "开发 Agent 执行失败");
+            completedWorkItemIds.add(String(item.id));
+            emitVisiblePlanState("executing");
+            persistResumeCheckpoint("awaiting_test_agent", { workItemId: item.id });
         }
         const requiresAcceptanceReview = aggregateFileChanges(results).count > 0
             || input.task.requires_code_changes === true
@@ -2035,7 +2192,7 @@ async function executeProjectMainTask(input) {
         const requiresTestAgent = requiresAcceptanceReview && independentTestAgentEnabled;
         if (!requiresAcceptanceReview)
             latestReview = { canAccept: true, status: "not_required", mode: "not_required" };
-        if (requiresAcceptanceReview && !independentTestAgentEnabled) {
+        if (requiresAcceptanceReview && !independentTestAgentEnabled && !resumeSummaryOnly) {
             executionPhase = "main_agent_self_verifying";
             persistExecutionState();
             (0, collaboration_task_service_1.updateTask)(taskId, { status: "reviewing", acceptance_state: "main_agent_self_verifying", status_detail: "TestAgent 已关闭，项目主 Agent 正在执行一次自验" });
@@ -2052,10 +2209,11 @@ async function executeProjectMainTask(input) {
             (0, collaboration_task_service_1.updateTask)(taskId, { test_agent_review: null, main_agent_self_verification: latestReview, acceptance_state: latestReview.canAccept ? "main_agent_self_verified" : "main_agent_self_verification_failed" });
             (0, logs_1.appendTaskTimelineEvent)(taskId, { type: "project_main_self_verification_finished", title: latestReview.canAccept ? "项目主 Agent 自验通过" : "项目主 Agent 自验未通过", detail: latestReview.report.summary, status: latestReview.canAccept ? "ok" : "warn", phase: "reviewing", agent: "project-main-agent", data: { review: latestReview } });
             emit("testing", { status: latestReview.canAccept ? "passed" : "needs_user", mode: "main_agent_self_verification", round: 1, review: latestReview });
+            persistResumeCheckpoint("main_agent_self_verified", { reviewRound: 1, summaryPending: latestReview.canAccept === true });
         }
         // 本次编排是一个完整的验收周期：round 从 1 重新计数，累计值在既有基线上按实际复核次数递增。
         const reviewRoundTotalBase = Math.max(0, Number((getProjectMainTask(taskId) || input.task)?.review_round_total || 0));
-        for (let round = 1; requiresTestAgent && round <= rework_policy_1.AUTO_REWORK_MAX_ROUNDS; round += 1) {
+        for (let round = 1; requiresTestAgent && !resumeSummaryOnly && round <= rework_policy_1.AUTO_REWORK_MAX_ROUNDS; round += 1) {
             assertNotCancelled();
             executionPhase = "test_agent_running";
             persistExecutionState();
@@ -2112,6 +2270,7 @@ async function executeProjectMainTask(input) {
             });
             (0, logs_1.appendTaskTimelineEvent)(taskId, { type: "project_test_agent_finished", title: latestReview.canAccept ? "TestAgent 验收通过" : "TestAgent 发现验收缺口", detail: latestReview.canAccept ? "证据门禁已通过" : (0, project_test_agent_gate_1.projectTestAgentProblems)(latestReview).join("；"), status: latestReview.canAccept ? "ok" : "warn", phase: "reviewing", agent: "test-agent", data: { round, report: latestReview.report, verdict: latestReview.verdict } });
             emit("testing", { status: latestReview.canAccept ? "passed" : reviewDecision.route, round, test_agent: latestReview });
+            persistResumeCheckpoint(nextAcceptanceState, { reviewRound: round, summaryPending: latestReview.canAccept === true });
             if (latestReview.canAccept)
                 break;
             if (round >= rework_policy_1.AUTO_REWORK_MAX_ROUNDS)
@@ -2191,11 +2350,13 @@ async function executeProjectMainTask(input) {
             });
             executionPhase = "reworking";
             persistExecutionState();
+            emitVisiblePlanState("executing", String(reworkItem.id));
             emit("reworking", { status: "running", round, problems, work_item: reworkItem });
             (0, collaboration_task_service_1.updateTask)(taskId, { status: "in_progress", acceptance_state: "reworking", status_detail: `开发 Agent 正在修复第 ${round} 轮验收缺口` });
             (0, logs_1.appendTaskTimelineEvent)(taskId, { type: "project_rework_started", title: reworkItem.title, detail: problems.join("；"), status: "active", phase: "reworking", agent: project });
-            const rework = await input.executeWorker(reworkItem, round, problems);
+            let rework = await input.executeWorker(reworkItem, round, problems);
             assertNotCancelled();
+            rework = { ...rework, workItemId: reworkItem.id, reviewRound: round };
             results.push(rework);
             reworkItem.output = rework.output;
             reworkItem.fileChanges = rework.fileChanges;
@@ -2207,6 +2368,9 @@ async function executeProjectMainTask(input) {
             emit("reworking", { status: rework.success ? "awaiting_review" : "failed", round, work_item: reworkItem });
             if (!rework.success)
                 break;
+            completedWorkItemIds.add(String(reworkItem.id));
+            emitVisiblePlanState("executing");
+            persistResumeCheckpoint("awaiting_test_agent", { workItemId: reworkItem.id, reviewRound: round });
         }
         const accepted = latestReview?.canAccept === true;
         const finalReviewDecision = latestReview?.decision || (0, test_agent_review_policy_1.classifyTestAgentReview)(latestReview);
@@ -2230,6 +2394,7 @@ async function executeProjectMainTask(input) {
         emit("accepting", { status: accepted ? "running" : "blocked", test_agent: independentTestAgentEnabled ? latestReview : null, main_agent_self_verification: independentTestAgentEnabled ? null : latestReview });
         const mainSummaryStartedAt = new Date().toISOString();
         if (accepted) {
+            persistResumeCheckpoint("main_agent_accepting", { reviewRound: Number((getProjectMainTask(taskId) || input.task)?.review_round || 0), summaryPending: true });
             (0, user_visible_agent_events_1.appendAssistantProgress)({
                 scope: "project",
                 scopeId: project,
@@ -2356,23 +2521,14 @@ async function executeProjectMainTask(input) {
                 finished_at: new Date().toISOString(),
                 review_cycle_id: reviewCycleId,
             },
+            resume_checkpoint: null,
+            recovery: null,
+            recovery_pending: false,
+            auto_execute: false,
         }) || input.task;
         (0, logs_1.appendTaskTimelineEvent)(taskId, { type: "project_main_final_acceptance", title: accepted ? "项目主 Agent 最终验收通过" : "项目主 Agent 阻止提前交付", detail: summary, status: accepted ? "ok" : "warn", phase: accepted ? "completed" : "blocked", agent: "project-main-agent" });
         emit(accepted ? "accepting" : "blocked", { status: accepted ? "completed" : "blocked", summary, file_changes: fileChanges });
-        const visiblePlanRevision = Math.max(1, Number(Array.isArray(finalTask?.plan_revisions) ? finalTask.plan_revisions.length + 1 : 1));
-        (0, user_visible_agent_events_1.appendUserVisibleRequirementPlan)({
-            eventId: `project-task:${taskId}:requirement-plan:${visiblePlanRevision}:${accepted ? "completed" : "blocked"}`,
-            scope: "project",
-            scopeId: project,
-            exactSessionId: input.plan.projectSessionId,
-            generation: executionGeneration,
-            taskId,
-            plan: projectRequirementPlanProjection(input.plan, {
-                planId: taskId,
-                revision: visiblePlanRevision,
-                status: accepted ? "completed" : "blocked",
-            }),
-        });
+        emitVisiblePlanState(accepted ? "completed" : "blocked");
         const visibleResult = (0, user_visible_agent_events_1.buildUserVisibleAgentResult)({
             status: accepted ? "success" : "blocked",
             text: summary,
@@ -2386,6 +2542,7 @@ async function executeProjectMainTask(input) {
             scope: "project",
             scopeId: project,
             exactSessionId: input.plan.projectSessionId,
+            anchorMessageId: String(finalTask?.anchor_message_id || `project-main-task:${taskId}`),
             generation: executionGeneration,
             taskId,
             eventType: "result",
@@ -2412,24 +2569,58 @@ async function executeProjectMainTask(input) {
         const cancelled = currentTask?.status === "cancelled" || /已取消/.test(String(error?.message || ""));
         const lostLease = leaseLost || /租约已丢失/.test(String(error?.message || ""));
         const retryExhausted = String(error?.code || "") === "CCM_MODEL_RETRY_EXHAUSTED";
+        const streamInterrupted = String(error?.code || "") === "CCM_MODEL_STREAM_INTERRUPTED_AFTER_DELTA";
+        const failure = (0, execution_kernel_1.classifyExecutionFailure)(error);
+        const agentUnavailable = failure.failureClass === "infra" || /agent|runner|cli/i.test(String(error?.code || "")) && failure.recoverable;
+        const recoverableRuntimeFailure = lostLease || retryExhausted || streamInterrupted || (failure.recoverable && ["provider", "gateway_routing", "infra", "timeout"].includes(failure.failureClass));
         let interrupted = currentTask?.acceptance_state === "recovery_required" || currentTask?.interruption_receipt?.schema === "ccm-task-interruption-receipt-v1";
-        if (!cancelled && !interrupted && (lostLease || retryExhausted)) {
+        if (!cancelled && !interrupted && recoverableRuntimeFailure) {
+            // Never manufacture a new trusted workspace checkpoint after an error:
+            // the failing worker may already have performed an unobserved write.
+            const resumeCheckpoint = currentTask?.resume_checkpoint || {
+                phase: executionPhase,
+                ...(Number(currentTask?.review_round || 0) ? { reviewRound: Number(currentTask.review_round) } : {}),
+                planChecksum: computedResumePlanChecksum,
+                completedWorkItemIds: Array.from(completedWorkItemIds),
+                ...(executionPhase === "main_agent_accepting" ? { summaryPending: true } : {}),
+            };
+            const currentWorkspaceChecksum = projectMainWorkspaceChecksum(workDir, results);
+            const workspaceMatchesCheckpoint = !!resumeCheckpoint?.workspaceChecksum && resumeCheckpoint.workspaceChecksum === currentWorkspaceChecksum;
+            const reasonCode = lostLease
+                ? "lease_lost"
+                : streamInterrupted
+                    ? "model_stream_interrupted"
+                    : agentUnavailable
+                        ? "agent_runtime_unavailable"
+                        : "provider_unavailable";
             const interruption = (0, task_interruption_1.interruptTaskExecution)({
                 task: currentTask,
-                reasonCode: lostLease ? "lease_lost" : "provider_unavailable",
+                reasonCode,
                 reason: summary,
                 actor: "project-main-agent-runtime",
                 checkpoint: executionPhase,
-                sideEffectState: results.length ? "uncertain" : "none",
+                sideEffectState: workspaceMatchesCheckpoint ? "committed" : "uncertain",
+                workspaceChecksum: currentWorkspaceChecksum,
+                resumeCheckpoint,
             });
+            const recovery = interruption.receipt.recovery || (0, task_interruption_1.buildTaskRecoverySchedule)({
+                reasonCode,
+                attempt: Number(currentTask?.recovery?.attempt || 0),
+                autoResumeAllowed: interruption.receipt.auto_resume_allowed,
+            });
+            const waitingSeconds = recovery.nextRetryAt ? Math.max(0, Math.ceil((Date.parse(recovery.nextRetryAt) - Date.now()) / 1000)) : 0;
             currentTask = (0, collaboration_task_service_1.updateTask)(taskId, {
                 status: "blocked",
                 acceptance_state: "recovery_required",
-                status_detail: summary,
+                status_detail: recovery.mode === "safe_auto"
+                    ? `${reasonCode === "agent_runtime_unavailable" ? "项目 Agent 执行通道暂时不可用" : "模型暂时不可用"}，任务现场已保留，将在 ${waitingSeconds} 秒后从“${executionPhase}”阶段自动恢复`
+                    : `${summary}；现场已保留，需要重新核验或人工接管`,
                 auto_execute: interruption.receipt.auto_resume_allowed,
-                is_paused: true,
-                paused: true,
+                is_paused: !interruption.receipt.auto_resume_allowed,
+                paused: !interruption.receipt.auto_resume_allowed,
                 recovery_pending: true,
+                recovery,
+                resume_checkpoint: resumeCheckpoint,
                 interruption_receipt: interruption.receipt,
             }) || currentTask;
             interrupted = true;
@@ -2469,33 +2660,49 @@ async function executeProjectMainTask(input) {
         });
         const unacceptedFileChanges = aggregateFileChanges(results);
         emit(interrupted ? "interrupted" : "blocked", { status: interrupted || lostLease ? "blocked" : "failed", summary, recovery_required: interrupted });
-        (0, user_visible_agent_events_1.appendUserVisibleAgentEvent)({
-            eventId: `project-task:${taskId}:result:${interrupted || lostLease ? "blocked" : "failed"}`,
-            scope: "project",
-            scopeId: project,
-            exactSessionId: input.plan.projectSessionId,
-            generation: executionGeneration,
-            taskId,
-            eventType: "result",
-            error: interrupted || lostLease ? "" : summary,
-            display: {
-                title: interrupted || lostLease ? "任务已暂停" : "任务执行失败",
-                target: input.plan.title,
-                summary,
-                status: interrupted || lostLease ? "waiting" : "failed",
-                durationMs: Math.max(0, Date.now() - Date.parse(executionStartedAt)),
-            },
-            result: (0, user_visible_agent_events_1.buildUserVisibleAgentResult)({
-                status: interrupted || lostLease ? "blocked" : "failed",
-                text: summary,
-                unfinished: [summary],
+        if (interrupted || lostLease)
+            (0, user_visible_agent_events_1.appendAssistantProgress)({
+                eventId: `project-task:${taskId}:interrupted:${Date.now()}`,
+                scope: "project",
+                scopeId: project,
+                exactSessionId: input.plan.projectSessionId,
+                generation: executionGeneration,
+                taskId,
+                turnId: `project-task:${taskId}`,
+                text: String(task?.status_detail || "执行已中断，现场已保留；通道恢复后将从最近检查点继续。"),
+                kind: "blocker",
+                modelCallIndex: 0,
+                relatedToolCallIds: [],
+                title: "项目主 Agent",
+            });
+        else
+            (0, user_visible_agent_events_1.appendUserVisibleAgentEvent)({
+                eventId: `project-task:${taskId}:result:${interrupted || lostLease ? "blocked" : "failed"}`,
+                scope: "project",
+                scopeId: project,
+                exactSessionId: input.plan.projectSessionId,
+                generation: executionGeneration,
+                taskId,
+                eventType: "result",
+                error: interrupted || lostLease ? "" : summary,
+                display: {
+                    title: interrupted || lostLease ? "任务已暂停" : "任务执行失败",
+                    target: input.plan.title,
+                    summary,
+                    status: interrupted || lostLease ? "waiting" : "failed",
+                    durationMs: Math.max(0, Date.now() - Date.parse(executionStartedAt)),
+                },
+                result: (0, user_visible_agent_events_1.buildUserVisibleAgentResult)({
+                    status: interrupted || lostLease ? "blocked" : "failed",
+                    text: summary,
+                    unfinished: [summary],
+                    fileChanges: unacceptedFileChanges.files,
+                }),
                 fileChanges: unacceptedFileChanges.files,
-            }),
-            fileChanges: unacceptedFileChanges.files,
-            detail: {
-                timing: { totalMs: Math.max(0, Date.now() - Date.parse(executionStartedAt)) },
-            },
-        });
+                detail: {
+                    timing: { totalMs: Math.max(0, Date.now() - Date.parse(executionStartedAt)) },
+                },
+            });
         return { task, status: interrupted || lostLease ? "blocked" : "failed", summary, fileChanges: unacceptedFileChanges, verification: [], risks: [summary], testAgent: independentTestAgentEnabled ? latestReview : null };
     }
     finally {
@@ -2572,8 +2779,23 @@ function projectMainTaskPublic(task) {
             checkpoint: task.interruption_receipt.checkpoint,
             recoverable: task.interruption_receipt.recoverable === true,
             auto_resume_allowed: task.interruption_receipt.auto_resume_allowed === true,
+            resume_checkpoint: task.interruption_receipt.resume_checkpoint ? {
+                phase: task.interruption_receipt.resume_checkpoint.phase,
+                workItemId: task.interruption_receipt.resume_checkpoint.workItemId || "",
+                reviewRound: Number(task.interruption_receipt.resume_checkpoint.reviewRound || 0),
+                completedWorkItemCount: Array.isArray(task.interruption_receipt.resume_checkpoint.completedWorkItemIds) ? task.interruption_receipt.resume_checkpoint.completedWorkItemIds.length : 0,
+                summaryPending: task.interruption_receipt.resume_checkpoint.summaryPending === true,
+            } : null,
+            recovery: task.interruption_receipt.recovery || null,
             interrupted_at: task.interruption_receipt.interrupted_at,
             checksum: task.interruption_receipt.checksum,
+        } : null,
+        recovery: task.recovery ? {
+            mode: task.recovery.mode || "manual",
+            state: task.recovery.state || "needs_user",
+            attempt: Number(task.recovery.attempt || 0),
+            maxAttempts: Number(task.recovery.maxAttempts || 3),
+            nextRetryAt: task.recovery.nextRetryAt || "",
         } : null,
         recovery_decision: task.recovery_decision || null,
         actions: task.status === "paused"
@@ -2582,7 +2804,13 @@ function projectMainTaskPublic(task) {
                 ? [{ id: "interrupt", kind: "interrupt", label: "停止当前执行", tone: "danger" }, { id: "cancel", kind: "cancel", label: "永久取消", tone: "outline" }]
                 : ["failed", "blocked", "environment_blocked", "recovery_required"].includes(runtimeStatus.phase)
                     ? task.acceptance_state === "recovery_required"
-                        ? [{ id: "resume_interrupted", kind: "resume_interrupted", label: "恢复任务", tone: "primary" }, { id: "cancel", kind: "cancel", label: "永久取消", tone: "outline" }]
+                        ? [
+                            { id: "resume_interrupted", kind: "resume_interrupted", label: task.recovery?.mode === "safe_auto" ? "立即重试" : "恢复任务", tone: "primary" },
+                            { id: "open_project_settings", kind: "open_project_settings", label: "处理配置", tone: "outline" },
+                            { id: "recheck", kind: "recheck", label: "重新核验", tone: "outline" },
+                            { id: "takeover", kind: "takeover", label: "人工接管", tone: "outline" },
+                            { id: "cancel", kind: "cancel", label: "永久取消", tone: "outline" },
+                        ]
                         : [{ id: "retry", kind: "retry", label: "重新执行", tone: "primary" }]
                     : [],
     };

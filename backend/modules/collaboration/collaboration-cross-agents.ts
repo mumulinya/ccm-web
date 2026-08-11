@@ -28,11 +28,11 @@ import {
   buildProjectMemoryPacket,
 } from "../../projects/memory";
 import {
-  buildThirdPartyMemoryBootstrap,
   createThirdPartyMemorySnapshot,
   mergeThirdPartyMemoryUsageIntoReceipt,
 } from "../../integrations/third-party-memory-snapshot";
 import {
+  buildTaskAgentContinuityBinding,
   extractGroupSessionMemoryBinding,
 } from "../../tasks/agent-sessions-shared";
 import {
@@ -597,12 +597,23 @@ export async function executeMentionJob(mention: any, env: CrossAgentEnv): Promi
           streamRes,
         })
       : null;
+    const requestedContinuitySessionId = String(sourceTask?.group_session_id || sourceTask?.groupSessionId || "");
+    const taskContinuity = requestedContinuitySessionId.startsWith("gcs_")
+      ? buildTaskAgentContinuityBinding({
+          scope: "group",
+          scopeId: groupId,
+          exactSessionId: requestedContinuitySessionId,
+          project: targetName,
+          agentType: tAgentType,
+        })
+      : null;
     let activeTaskSession = taskId && !nativeTestAgentDispatch ? openTaskAgentSession({
       scopeId: taskId,
       taskId,
       groupId,
       project: targetName,
       agentType: tAgentType,
+      continuity: taskContinuity,
     }) : null;
     const providerSwitchSessionBinding = approvedSwitchAgentType
       ? recordWorkerContextProviderSwitchSessionBindingForCoordinator(groupId, {
@@ -853,6 +864,8 @@ export async function executeMentionJob(mention: any, env: CrossAgentEnv): Promi
         assignments: planAssignments,
         executionOrder: (result as any).executionOrder || "parallel",
         runtime: (result as any).runtime || "",
+        providerFailure: (result as any).providerFailure || null,
+        providerFailureTechnical: (result as any).providerFailureTechnical || null,
         dispatchPolicy,
         coordinationPlan: (result as any).coordinationPlan || null,
         workflow: workflowMeta,
@@ -866,6 +879,8 @@ export async function executeMentionJob(mention: any, env: CrossAgentEnv): Promi
         assignments: planAssignments,
         executionOrder: (result as any).executionOrder || "parallel",
         runtime: (result as any).runtime || "",
+        providerFailure: (result as any).providerFailure || null,
+        providerFailureTechnical: (result as any).providerFailureTechnical || null,
         dispatchPolicy,
         coordinationPlan: (result as any).coordinationPlan || null,
         workflow: workflowMeta,
@@ -1057,7 +1072,7 @@ export async function executeMentionJob(mention: any, env: CrossAgentEnv): Promi
       required_hydration_tokens: Number(thirdPartyMemorySnapshot?.requiredHydrationTokens || 0),
       group_session_memory_binding: extractGroupSessionMemoryBinding(groupMemoryBundle),
       memory_consumption_challenge: memoryConsumptionChallenge,
-      rendered_text: buildThirdPartyMemoryBootstrap(thirdPartyMemorySnapshot, memoryConsumptionChallenge),
+      rendered_text: "父会话的授权上下文可通过签名 ccm__knowledge_context MCP 按需读取；不要假设其正文已注入当前 Prompt。",
     });
     if (thirdPartyMemoryMcpEnabled) workerMemoryContext = buildMemoryMcpReference();
     if (runtimeToolContext.dispatchBlocked) {
@@ -1177,7 +1192,7 @@ export async function executeMentionJob(mention: any, env: CrossAgentEnv): Promi
       const renderedRuntimeToolContext = renderOptions.runtimeToolContext ?? runtimeToolContext;
       const renderedDevelopmentContract = renderOptions.developmentContract ?? developmentContract;
       const renderedWorkerMemoryPacket = renderOptions.workerMemoryPacket ?? (thirdPartyMemoryMcpEnabled
-        ? buildThirdPartyMemoryBootstrap(thirdPartyMemorySnapshot, memoryConsumptionChallenge)
+        ? "[父会话记忆]\n请在确有需要时通过签名 ccm__knowledge_context MCP 读取相关摘要、已验证决策或任务状态。"
         : workerMemoryPacket);
       const renderedTaskSession = renderOptions.activeTaskSession ?? activeTaskSession;
       return `你正在 CCM 群聊中被 @ 请求协作。${collaborationInstructions}${buildAgentQaProtocolInstructions(targetName, memberList)}${toolContext.prompt}${renderedRuntimeToolContext.prompt}
@@ -1211,9 +1226,11 @@ ${renderedTaskSession ? `[任务级原生会话]
 - 会话记录：${renderedTaskSession.id}
 - 当前轮次：${renderedTaskSession.turnCount + 1}
 - 续跑模式：${renderedTaskSession.resumeMode === "native" ? "恢复同一个 CLI 原生会话" : "平台 scratchpad 续跑"}
-- 此会话只在主 Agent 最终验收完成后关闭；返工必须承接上一轮结论，不得从零重做。` : ""}
+- 本任务记录在最终验收后结束；同一父会话后续任务会按连续性策略复用原生会话。返工必须承接上一轮结论，不得从零重做。` : ""}
 
-以下是当前精确群聊会话连续性（压缩前为完整原文，压缩后为正式摘要与动态近期完整原文）：
+${thirdPartyMemoryMcpEnabled
+  ? "父会话上下文未重复注入；如需历史需求、已验证决策或任务状态，请通过签名 ccm__knowledge_context MCP 按需读取。"
+  : "以下是当前精确群聊会话连续性（压缩前为完整原文，压缩后为正式摘要与动态近期完整原文）："}
 ${recentGroupContext}
 
 ${sourceProject} 刚才 @ 了你，请根据上下文回复他的请求：
@@ -1869,7 +1886,16 @@ export async function executeMentionJobTryA(mention: any, env: CrossAgentEnv): P
           const previousRuntime = runtimeCandidates[attemptIndex - 1];
           const sameRuntimeResume = activeRuntime === previousRuntime;
           if (!sameRuntimeResume) {
-            activeTaskSession = taskId ? openTaskAgentSession({ scopeId: taskId, taskId, groupId, project: targetName, agentType: activeRuntime }) : null;
+            activeTaskSession = taskId ? openTaskAgentSession({
+              scopeId: taskId,
+              taskId,
+              groupId,
+              project: targetName,
+              agentType: activeRuntime,
+              continuity: activeGroupSessionId.startsWith("gcs_")
+                ? buildTaskAgentContinuityBinding({ scope: "group", scopeId: groupId, exactSessionId: activeGroupSessionId, project: targetName, agentType: activeRuntime })
+                : null,
+            }) : null;
           }
           const retryAttemptSequence = activeTaskSession ? activeTaskSession.turnCount + 1 : memoryDeliveryAttemptSequence;
           memoryConsumptionChallenge = activeTaskSession && !advisoryOnly

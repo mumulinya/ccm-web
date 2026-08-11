@@ -26,6 +26,8 @@ const {
   backlogBulkDispatchResult, backlogImportLoading, backlogImportResult, backlogStatusLabel, formatBacklogTime, backlogState,
   backlogCount, backlogQualityText, backlogLatestHistory, backlogCanDispatch, backlogCanRestoreReady, loadDailyDevBacklogs,
   openBacklog, updateBacklogStatus, dispatchBacklog, dispatchReadyBacklogs, importSharedDocsToBacklog, newTask,
+  taskTemplates, selectedTaskTemplate, taskPreflight, taskPreflightLoading, loadTaskTemplates, applySelectedTaskTemplate,
+  runTaskPreflight, saveCurrentTaskTemplate, convertTaskToCron,
   addTaskFiles, handleTaskPaste, removeExistingTaskAttachment,
   defaultDailyDevTask, dailyDevTask, updateDailyDevTaskField, loadTasks, toggleTaskSelection, loadGroups,
   loadProjects, loadOrchestratorDiagnostics, refreshTaskWork, formatDuration, visibleReportText, visibleReportObject,

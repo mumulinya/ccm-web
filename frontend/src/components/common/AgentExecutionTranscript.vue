@@ -1,16 +1,15 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import {
-  activateExecutionTranscript,
   agentStatusCategory,
   completionFileChangesForRows,
   eventStatusLabel,
   executionEventsForMessage,
   formatExecutionDuration,
   formatExecutionDurationLong,
-  registerExecutionTranscriptShortcut,
   shouldRenderExecutionTranscript,
 } from '../../utils/agentExecutionEvents.js'
+import { agentProgressBatchPresentation, longRunningToolDuration } from '../../utils/agentProgressPresentation.js'
 
 const props = defineProps({
   events: { type: Array, default: () => [] },
@@ -29,27 +28,15 @@ const executionAnchor = ref(null)
 const transcriptExpanded = ref(false)
 const searchQuery = ref('')
 const searchCursor = ref(-1)
-const transcriptInstanceId = `cc-execution-${Math.random().toString(36).slice(2)}`
 let durationTimer = null
-let unregisterShortcut = null
-let activationHost = null
-const activateTranscript = () => activateExecutionTranscript(transcriptInstanceId)
-const toggleTranscript = () => {
-  activateTranscript()
-  transcriptExpanded.value = !transcriptExpanded.value
-}
+const toggleTranscript = () => { transcriptExpanded.value = !transcriptExpanded.value }
 onMounted(() => {
-  unregisterShortcut = registerExecutionTranscriptShortcut(transcriptInstanceId, toggleTranscript)
-  activationHost = executionAnchor.value?.parentElement || null
-  activationHost?.addEventListener('mouseenter', activateTranscript)
-  activationHost?.addEventListener('focusin', activateTranscript)
   durationTimer = window.setInterval(() => { now.value = Date.now() }, 1000)
+  window.addEventListener('ccm:locate-execution-event', locateExecutionEvent)
   restoreExpansionState()
 })
 onBeforeUnmount(() => {
-  activationHost?.removeEventListener('mouseenter', activateTranscript)
-  activationHost?.removeEventListener('focusin', activateTranscript)
-  unregisterShortcut?.()
+  window.removeEventListener('ccm:locate-execution-event', locateExecutionEvent)
   if (durationTimer) window.clearInterval(durationTimer)
 })
 
@@ -64,6 +51,8 @@ const shouldRender = computed(() => shouldRenderExecutionTranscript(props.events
 const currentGeneration = computed(() => rows.value.reduce((max, event) => Math.max(max, Number(event?.generation || 0)), 0))
 const resultEvent = computed(() => [...rows.value].reverse().find(event => event.eventType === 'result' && Number(event?.generation || 0) === currentGeneration.value))
 const isTerminal = computed(() => !!resultEvent.value)
+const isLivePresentation = computed(() => props.presentation === 'live' && !isTerminal.value)
+const terminalAt = computed(() => eventTime(resultEvent.value?.createdAt))
 const presentationVisible = computed(() => {
   if (props.presentation === 'live') return !isTerminal.value
   if (props.presentation === 'completed') return isTerminal.value
@@ -71,12 +60,17 @@ const presentationVisible = computed(() => {
 })
 const compacted = computed(() => !transcriptExpanded.value && isTerminal.value)
 const assistantProgressRows = computed(() => rows.value.filter(event => event.eventType === 'assistant_progress'))
+const currentProgressEventId = computed(() => isTerminal.value ? '' : assistantProgressRows.value.at(-1)?.eventId || '')
 const requirementPlanEvents = computed(() => rows.value.filter(event => event.eventType === 'requirement_plan' && event?.detail?.requirementPlan))
 const latestRequirementPlanEvent = computed(() => [...requirementPlanEvents.value].sort((left, right) => (
   Number(left?.detail?.requirementPlan?.revision || 1) - Number(right?.detail?.requirementPlan?.revision || 1)
   || Number(left?.sequence || 0) - Number(right?.sequence || 0)
 )).at(-1) || null)
 const requirementPlan = computed(() => latestRequirementPlanEvent.value?.detail?.requirementPlan || null)
+const livePlanDockEligible = computed(() => !!(
+  latestRequirementPlanEvent.value?.taskId
+  && latestRequirementPlanEvent.value?.anchorMessageId
+))
 const requirementPlanHistory = computed(() => requirementPlanEvents.value.filter(event => event.eventId !== latestRequirementPlanEvent.value?.eventId))
 const visibleRows = computed(() => rows.value.filter(event => !['turn_started', 'assistant_text_delta', 'assistant_progress', 'requirement_plan', 'result'].includes(event.eventType)))
 const stageSourceRows = computed(() => rows.value.filter(event => !['turn_started', 'assistant_text_delta', 'thinking_status', 'requirement_plan', 'result'].includes(event.eventType)))
@@ -165,22 +159,45 @@ const expandedBatches = reactive({})
 const requirementPlanExpanded = ref(true)
 const planIsExpanded = computed(() => isTerminal.value ? requirementPlanExpanded.value && transcriptExpanded.value : requirementPlanExpanded.value)
 const toggleRequirementPlan = () => { requirementPlanExpanded.value = !requirementPlanExpanded.value }
-const stageIsExpanded = stage => expandedStages[stage.kind] === undefined
-  ? true
-  : expandedStages[stage.kind]
+const stageIsExpanded = stage => {
+  if (expandedStages[stage.kind] !== undefined) return expandedStages[stage.kind]
+  if (!isLivePresentation.value) return true
+  return stage.active === true || stageLifecycleStatus(stage.kind) === 'running'
+}
 const toggleStage = stage => {
   expandedStages[stage.kind] = !stageIsExpanded(stage)
+}
+const owningAgentFor = event => {
+  const runId = String(event?.agentRunId || event?.detail?.agentRunId || '')
+  if (!runId) return null
+  return agentRows.value.find(agent => String(agent?.agentRunId || agent?.detail?.agentRunId || '') === runId) || null
 }
 const inferredStageKind = event => {
   const explicit = String(event?.detail?.executionStage?.kind || '')
   if (stageDefinitions.some(stage => stage.kind === explicit)) return explicit
   if (event?.eventType === 'assistant_progress') {
+    const relatedIds = new Set(event?.detail?.progress?.relatedToolCallIds || [])
+    const relatedTool = toolRows.value.find(tool => relatedIds.has(tool?.toolCallId))
+    const owner = owningAgentFor(relatedTool || event)
+    const ownerLabel = String(owner?.detail?.agentDisplay?.runtimeLabel || owner?.display?.title || '')
+    const ownerStage = String(owner?.detail?.executionStage?.kind || '')
+    if (ownerStage === 'main_agent_summary') return 'main_agent_summary'
+    if (ownerStage === 'independent_verification' || /test.?agent/i.test(ownerLabel)) return 'independent_verification'
+    if (owner) return 'project_execution'
     const progressKind = String(event?.detail?.progress?.kind || '')
     if (progressKind === 'verification') return 'independent_verification'
     if (progressKind === 'before_summary') return 'main_agent_summary'
     if (progressKind === 'rework') return 'project_execution'
   }
-  if (String(event?.eventType || '').startsWith('tool_')) return 'preparation'
+  if (String(event?.eventType || '').startsWith('tool_')) {
+    const owner = owningAgentFor(event)
+    const ownerLabel = String(owner?.detail?.agentDisplay?.runtimeLabel || owner?.display?.title || '')
+    const ownerStage = String(owner?.detail?.executionStage?.kind || '')
+    if (ownerStage === 'main_agent_summary') return 'main_agent_summary'
+    if (ownerStage === 'independent_verification' || /test.?agent/i.test(ownerLabel)) return 'independent_verification'
+    if (owner) return 'project_execution'
+    return 'preparation'
+  }
   const agentLabel = String(event?.detail?.agentDisplay?.runtimeLabel || event?.display?.title || '')
   if (/test.?agent/i.test(agentLabel)) return 'independent_verification'
   if (String(event?.eventType || '').startsWith('agent_')) return 'project_execution'
@@ -202,9 +219,14 @@ const unionDuration = intervals => {
 const derivedStageDuration = stageRows => unionDuration(stageRows.flatMap(event => {
   const stage = event?.detail?.executionStage || {}
   const started = eventTime(stage.startedAt || event?.createdAt)
+  const terminalBoundary = isTerminal.value ? eventTime(resultEvent.value?.createdAt) : 0
+  if (!started || (terminalBoundary && started > terminalBoundary)) return []
   const duration = Math.max(0, Number(stage.activeDurationMs || event?.display?.durationMs || 0))
   const completed = eventTime(stage.completedAt)
-  const current = started ? [[started, completed || started + (duration || (event?.display?.status === 'running' ? Math.max(0, now.value - started) : 0))]] : []
+  const live = ['running', 'waiting'].includes(String(event?.display?.status || ''))
+  const inferredEnd = completed || (duration ? started + duration : live ? (terminalBoundary || now.value) : started)
+  const ended = terminalBoundary ? Math.min(inferredEnd, terminalBoundary) : inferredEnd
+  const current = [[started, Math.max(started, ended)]]
   const history = (event?.detail?.agentAttemptHistory || []).map(attempt => {
     const attemptStarted = eventTime(attempt?.startedAt || attempt?.createdAt)
     const attemptDuration = Math.max(0, Number(attempt?.durationMs || 0))
@@ -213,7 +235,7 @@ const derivedStageDuration = stageRows => unionDuration(stageRows.flatMap(event 
   return [...current, ...history]
 }))
 const batchKeyFor = progress => String(progress?.detail?.progress?.batchId || progress?.eventId || '')
-const batchIsExpanded = batch => expandedBatches[batch.key] === undefined ? true : expandedBatches[batch.key]
+const batchIsExpanded = batch => expandedBatches[batch.key] === undefined ? !isLivePresentation.value : expandedBatches[batch.key]
 const toggleBatch = batch => { expandedBatches[batch.key] = !batchIsExpanded(batch) }
 const groupedStageItems = stageRows => {
   const progressRows = stageRows.filter(event => event?.eventType === 'assistant_progress')
@@ -235,6 +257,7 @@ const groupedStageItems = stageRows => {
       key,
       progress,
       children,
+      presentation: agentProgressBatchPresentation(children, { now: now.value, terminalAt: terminalAt.value }),
       durationMs: derivedStageDuration(children),
     }
   })
@@ -242,9 +265,33 @@ const groupedStageItems = stageRows => {
   return [...batches, ...unclaimed]
     .sort((left, right) => Number((left.progress || left)?.sequence || 0) - Number((right.progress || right)?.sequence || 0))
 }
+const liveOrderedStageItems = items => {
+  if (!isLivePresentation.value) return items
+  const groupStarts = new Map()
+  for (const item of items) {
+    const event = item?.progress || item
+    const runId = String(event?.agentRunId || event?.detail?.agentRunId || '')
+    if (!runId) continue
+    const sequence = Number(event?.sequence || 0)
+    groupStarts.set(runId, Math.min(groupStarts.get(runId) ?? sequence, sequence))
+  }
+  return [...items].sort((left, right) => {
+    const eventFor = item => item?.progress || item
+    const orderFor = item => {
+      const event = eventFor(item)
+      const runId = String(event?.agentRunId || event?.detail?.agentRunId || '')
+      const sequence = Number(event?.sequence || 0)
+      if (!runId) return sequence
+      const start = groupStarts.get(runId) ?? sequence
+      return String(event?.eventType || '').startsWith('agent_') ? start - 0.01 : sequence
+    }
+    return orderFor(left) - orderFor(right)
+  })
+}
 const executionStageRows = computed(() => {
+  const includeRequirementPlan = !!requirementPlan.value && !(isLivePresentation.value && livePlanDockEligible.value)
   if (!stageMode.value) {
-    if (!requirementPlan.value) return visibleRows.value
+    if (!includeRequirementPlan) return visibleRows.value
     const projected = [...visibleRows.value]
     const firstAgentIndex = projected.findIndex(event => event?.eventType?.startsWith('agent_'))
     projected.splice(firstAgentIndex >= 0 ? firstAgentIndex : projected.length, 0, {
@@ -260,7 +307,7 @@ const executionStageRows = computed(() => {
     if (!stageRows.length) return { stage, rows: [] }
     const lifecycleRows = stageRows.filter(event => event?.eventType !== 'assistant_progress')
     const failed = lifecycleRows.some(event => event?.display?.status === 'failed')
-    const active = lifecycleRows.some(event => ['running', 'waiting'].includes(String(event?.display?.status || '')))
+    const active = !isTerminal.value && lifecycleRows.some(event => ['running', 'waiting'].includes(String(event?.display?.status || '')))
     const stageStatus = failed ? '失败' : active ? '进行中' : '完成'
     const header = {
       __stageHeader: true,
@@ -271,35 +318,59 @@ const executionStageRows = computed(() => {
       summary: `${lifecycleRows.length} 项 · ${stageStatus}`,
       durationMs: Math.max(0, Number(stageTiming?.[stage.timingKey] || derivedStageDuration(stageRows))),
     }
-    const groupedRows = groupedStageItems(stageRows).flatMap(item => {
-      if (!item.__progressBatch) return [{ ...item, __stageChild: true, __stageKind: stage.kind }]
+    const groupedRows = liveOrderedStageItems(groupedStageItems(stageRows)).flatMap(item => {
+      if (!item.__progressBatch) return [{ ...item, __stageChild: true, __agentChild: !!owningAgentFor(item), __stageKind: stage.kind }]
       return [
         { ...item, __stageChild: true, __stageKind: stage.kind },
-        ...(batchIsExpanded(item) ? item.children.map(event => ({ ...event, __stageChild: true, __batchChild: true, __stageKind: stage.kind, __batchKey: item.key })) : []),
+        ...(batchIsExpanded(item) ? item.children.map(event => ({ ...event, __stageChild: true, __batchChild: true, __agentChild: !!owningAgentFor(event), __stageKind: stage.kind, __batchKey: item.key })) : []),
       ]
     })
+    // The live construction view shows the actual business narration, Agent,
+    // tool and verification rows directly. Stage directories (“准备与检索 / 项目
+    // Agent / 独立验收 / 主 Agent 验收与总结”) belong to the completed transcript
+    // only, where they provide useful historical grouping.
+    if (isLivePresentation.value) {
+      return { stage, rows: groupedRows }
+    }
     return { stage, rows: [header, ...(stageIsExpanded(header) ? groupedRows : [])] }
   })
   const projected = []
   let planInserted = false
   for (const block of stageBlocks) {
-    if (!planInserted && block.stage.kind === 'project_execution' && requirementPlan.value) {
+    if (!planInserted && block.stage.kind === 'project_execution' && includeRequirementPlan) {
       projected.push({ __requirementPlan: true, key: `requirement-plan:${requirementPlan.value.planId}:${requirementPlan.value.revision}`, event: latestRequirementPlanEvent.value })
       planInserted = true
     }
     projected.push(...block.rows)
-    if (!planInserted && block.stage.kind === 'preparation' && requirementPlan.value && block.rows.length) {
+    if (!planInserted && block.stage.kind === 'preparation' && includeRequirementPlan && block.rows.length) {
       projected.push({ __requirementPlan: true, key: `requirement-plan:${requirementPlan.value.planId}:${requirementPlan.value.revision}`, event: latestRequirementPlanEvent.value })
       planInserted = true
     }
   }
-  if (!planInserted && requirementPlan.value) projected.unshift({ __requirementPlan: true, key: `requirement-plan:${requirementPlan.value.planId}:${requirementPlan.value.revision}`, event: latestRequirementPlanEvent.value })
+  if (!planInserted && includeRequirementPlan) projected.unshift({ __requirementPlan: true, key: `requirement-plan:${requirementPlan.value.planId}:${requirementPlan.value.revision}`, event: latestRequirementPlanEvent.value })
   return projected
 })
 const hydratedDetails = reactive({})
 const detailLoading = reactive({})
 const detailErrors = reactive({})
 const expandedRows = reactive({})
+
+const locateExecutionEvent = browserEvent => {
+  const detail = browserEvent?.detail || {}
+  const target = rows.value.find(event => String(event?.eventId || '') === String(detail.eventId || ''))
+    || rows.value.find(event => String(event?.detail?.causalRefs?.planStepId || event?.detail?.replayLink?.planStepId || '') === String(detail.planStepId || ''))
+  if (!target) return
+  if (isTerminal.value) transcriptExpanded.value = true
+  if (target.eventType === 'requirement_plan') requirementPlanExpanded.value = true
+  const stageKind = inferredStageKind(target)
+  if (stageKind) expandedStages[stageKind] = true
+  const progressOwner = assistantProgressRows.value.find(progress => (
+    (progress?.detail?.progress?.relatedToolCallIds || []).includes(target?.toolCallId)
+    || progress?.eventId === target?.parentEventId
+  ))
+  if (progressOwner) expandedBatches[batchKeyFor(progressOwner)] = true
+  if (target.eventId) expandedRows[target.eventId] = true
+}
 
 const replaceReactiveFlags = (target, source) => {
   Object.keys(target).forEach(key => delete target[key])
@@ -345,6 +416,13 @@ const turnDurationMs = computed(() => {
 })
 const turnDurationLabel = computed(() => formatExecutionDurationLong(turnDurationMs.value))
 const totalDurationLabel = computed(() => turnDurationLabel.value.replace(/^耗时/, '总耗时'))
+const processedDurationLabel = computed(() => {
+  const totalSeconds = Math.max(0, Math.round(turnDurationMs.value / 1000))
+  const minutes = Math.floor(totalSeconds / 60)
+  const seconds = totalSeconds % 60
+  if (!minutes) return `${Math.max(1, seconds)}秒`
+  return seconds ? `${minutes}分${seconds}秒` : `${minutes}分钟`
+})
 
 const completionFiles = computed(() => completionFileChangesForRows(rows.value))
 const completionFilesExpanded = ref(false)
@@ -388,6 +466,7 @@ const stageLifecycleStatus = kind => {
   const stageRows = stageSourceRows.value.filter(event => inferredStageKind(event) === kind && event?.eventType !== 'assistant_progress')
   if (!stageRows.length) return 'pending'
   if (stageRows.some(event => event?.display?.status === 'failed')) return 'blocked'
+  if (isTerminal.value && resultEvent.value?.display?.status === 'success') return 'completed'
   if (stageRows.some(event => ['running', 'waiting'].includes(String(event?.display?.status || '')))) return 'running'
   return 'completed'
 }
@@ -429,14 +508,18 @@ const progressSegments = computed(() => {
   return segments.map((segment, index) => {
     const tools = segment.rows.filter(event => event?.eventType?.startsWith('tool_')).length
     const agents = segment.rows.filter(event => event?.eventType?.startsWith('agent_')).length
+    const presentation = agentProgressBatchPresentation(segment.rows, { now: now.value, terminalAt: terminalAt.value })
     const parts = []
-    if (tools) parts.push(`运行了 ${tools} 个工具`)
-    if (agents) parts.push(`${agents} 个 Agent 动作`)
+    if (tools) parts.push(presentation.label)
+    if (!tools && agents) parts.push(presentation.label)
+    if (presentation.count) parts.push(`${presentation.count}项`)
+    if (presentation.failed) parts.push(`${presentation.failed}项失败`)
     return {
       ...segment,
       key: segment.progress?.detail?.progress?.batchId || segment.progress?.eventId || `progress-${index}`,
       label: parts.join(' · '),
-      durationMs: batchDuration(segment.rows),
+      durationMs: presentation.durationMs || batchDuration(segment.rows),
+      running: presentation.running,
     }
   })
 })
@@ -529,6 +612,8 @@ const legacyToolIdentity = event => {
     find_definition: 'Find definition', find_references: 'Find references', find_implementations: 'Find implementations',
     find_type_definition: 'Find type definition', find_incoming_calls: 'Incoming calls', find_outgoing_calls: 'Outgoing calls',
     read_code_diagnostics: 'Diagnostics', read_git_status: 'Git status', read_git_diff: 'Git diff', read_git_history: 'Git history',
+    shell_read_runtime_log: '读取项目日志', shell_read_runtime_logs: '读取项目日志',
+    maven_build: '运行 Maven 构建', gradle_build: '运行 Gradle 构建', run_terminal: '运行项目命令',
   }
   return { label: labels[operation] || raw, serverLabel: parts[0] === 'mcp' ? parts.at(-2) : '' }
 }
@@ -539,7 +624,7 @@ const eventTitle = event => {
     if (display?.projectName) return [display.projectName, display.runtimeLabel].filter(Boolean).join(' · ')
     return event?.display?.title || 'Agent'
   }
-  return toolDisplayFor(event)?.tool?.label || legacyToolIdentity(event).label
+  return toolDisplayFor(event)?.tool?.userLabel || toolDisplayFor(event)?.tool?.label || legacyToolIdentity(event).label
 }
 const eventBusinessSummary = event => {
   const projected = String(toolDisplayFor(event)?.result?.summary || '').trim()
@@ -613,13 +698,34 @@ const rehydrateDetail = async event => {
   }
 }
 
-const rowMeta = event => [
+const rowMeta = event => {
+  const liveDuration = longRunningToolDuration(event, { now: now.value, terminalAt: terminalAt.value })
+  return [
   event?.display?.toolUseCount ? `${event.display.toolUseCount} tool uses` : '',
   event?.display?.tokenCount
     ? `${event.display.tokenType === 'provider_total' ? '本轮' : event.eventType?.startsWith('tool_') ? '结果' : ''}${event.display.tokenAccuracy === 'reported' ? '' : '约'} ${event.display.tokenCount} tokens`.trim()
     : '',
-  formatExecutionDuration(event?.display?.durationMs) ? `耗时 ${formatExecutionDuration(event.display.durationMs)}` : '',
+  liveDuration ? `仍在运行 · ${formatExecutionDuration(liveDuration)}` : formatExecutionDuration(event?.display?.durationMs) ? `耗时 ${formatExecutionDuration(event.display.durationMs)}` : '',
 ].filter(Boolean).join(' · ')
+}
+
+const liveRowLabel = event => {
+  const title = eventTitle(event)
+  if (String(event?.eventType || '').startsWith('agent_')) return title
+  const status = String(event?.display?.status || 'running')
+  const duration = formatExecutionDuration(event?.display?.durationMs)
+  if (status === 'success') return duration ? `已在 ${duration} 内完成 ${title}` : `已完成 ${title}`
+  if (status === 'failed') return `${title}运行失败`
+  if (status === 'waiting') return `${title}正在等待`
+  return `正在运行 ${title}`
+}
+
+const liveRowMeta = event => {
+  const liveDuration = longRunningToolDuration(event, { now: now.value, terminalAt: terminalAt.value })
+  if (liveDuration) return `已运行 ${formatExecutionDuration(liveDuration)}`
+  if (String(event?.eventType || '').startsWith('agent_')) return rowMeta(event)
+  return ''
+}
 
 const searchableText = event => [
   eventTitle(event), event?.display?.target, eventBusinessSummary(event), eventStatusLabel(event),
@@ -673,12 +779,39 @@ const runAvailableAction = (event, action) => {
     eventId: event?.eventId,
   })
 }
+const replayTarget = computed(() => {
+  const event = resultEvent.value || [...rows.value].reverse().find(row => row?.taskId)
+  const link = event?.detail?.replayLink || {}
+  const taskId = String(link.taskId || event?.taskId || '')
+  if (!taskId) return null
+  return {
+    kind: 'view_trace',
+    task_id: taskId,
+    event_id: link.replayEventId || event?.eventId || '',
+    generation: Number(link.generation ?? event?.generation ?? 0),
+    attempt: Number(link.attempt ?? event?.detail?.agentDisplay?.attempt ?? 1),
+    plan_step_id: link.planStepId || event?.detail?.causalRefs?.planStepId || '',
+    work_item_id: link.workItemId || event?.workItemId || event?.detail?.causalRefs?.workItemId || '',
+    batch_id: link.batchId || event?.detail?.progress?.batchId || '',
+  }
+})
+const openReplay = () => {
+  if (replayTarget.value) emit('execution-action', replayTarget.value)
+}
+const liveStageLabel = computed(() => executionStageRows.value.find(item => item?.__stageHeader && item.active)?.label || '')
 </script>
 
 <template>
   <div v-if="enabled && presentationVisible" ref="executionAnchor" class="cc-execution-anchor">
+  <header v-if="isLivePresentation && shouldRender" class="cc-live-execution-status" aria-live="polite">
+    <span>已处理 {{ processedDurationLabel }}</span>
+    <template v-if="liveStageLabel">
+      <span aria-hidden="true">·</span>
+      <strong>{{ liveStageLabel }}</strong>
+    </template>
+  </header>
   <div v-if="hasProgressFlow && !stageMode && (!isTerminal || transcriptExpanded)" class="cc-progress-flow" aria-label="Agent 进度说明">
-    <div v-for="segment in progressSegments" :key="segment.key" class="cc-progress-segment">
+    <div v-for="segment in progressSegments" :key="segment.key" class="cc-progress-segment" :class="{ current: segment.progress?.eventId === currentProgressEventId, completed: segment.progress?.eventId !== currentProgressEventId }">
       <p v-if="progressText(segment.progress)" class="cc-progress-text">{{ progressText(segment.progress) }}</p>
       <button v-if="segment.label" type="button" class="cc-progress-batch" :aria-expanded="transcriptExpanded" @click="toggleTranscript">
         <span class="cc-progress-batch-icon">⌘</span>
@@ -717,7 +850,7 @@ const runAvailableAction = (event, action) => {
     <button v-if="completionFiles.length > 40 && completionFilesExpanded" type="button" class="cc-completion-files-all" @click="openAllFileChanges">查看全部 {{ completionFiles.length }} 个文件</button>
   </section>
 
-  <section v-if="shouldRender && (hasExecutionRows || assistantProgressRows.length || transcriptExpanded) && (!hasProgressFlow || stageMode || transcriptExpanded)" class="cc-execution" :class="{ complete: isTerminal, expanded: transcriptExpanded, live: !isTerminal }" @mouseenter="activateTranscript" @focusin="activateTranscript">
+  <section v-if="shouldRender && (hasExecutionRows || assistantProgressRows.length || transcriptExpanded) && (!hasProgressFlow || stageMode || transcriptExpanded)" class="cc-execution" :class="{ complete: isTerminal, expanded: transcriptExpanded, live: isLivePresentation }" :aria-label="isLivePresentation ? 'Agent 实时执行进度' : '执行记录'">
     <button v-if="isTerminal" class="cc-execution-head" type="button" @click="toggleTranscript">
       <span class="cc-execution-chevron">{{ transcriptExpanded ? '⌄' : '›' }}</span>
       <strong>执行记录</strong>
@@ -726,8 +859,8 @@ const runAvailableAction = (event, action) => {
         <template v-for="item in executionSummaryItems" :key="item"><span> · </span><span>{{ item }}</span></template>
       </span>
       <span v-if="totalDurationLabel" class="cc-execution-duration">{{ totalDurationLabel }}</span>
-      <kbd>Ctrl+O</kbd>
     </button>
+    <button v-if="isTerminal && replayTarget" type="button" class="cc-execution-replay-link" @click="openReplay">在任务回放中查看</button>
 
     <div v-if="!compacted" class="cc-execution-rows">
       <div v-if="resultEvent && timingItems.length" class="cc-execution-timing" aria-label="本轮耗时统计">
@@ -741,7 +874,7 @@ const runAvailableAction = (event, action) => {
         <button v-if="searchMatches.length" type="button" title="下一个匹配" @click="focusSearchMatch(1)">↓</button>
         <button v-if="normalizedSearchQuery" type="button" title="清除搜索" @click="searchQuery = ''">×</button>
       </div>
-      <section v-if="stageMode && executionNavigatorItems.length" class="cc-requirement-navigator" aria-label="任务执行计划">
+      <section v-if="stageMode && executionNavigatorItems.length && !isLivePresentation" class="cc-requirement-navigator" aria-label="任务执行计划">
         <header><strong>执行计划</strong><span>{{ executionNavigatorCompleted }} / {{ executionNavigatorItems.length }}</span></header>
         <div>
           <span v-for="item in executionNavigatorItems" :key="item.id" class="cc-requirement-nav-item" :class="item.status">
@@ -756,7 +889,7 @@ const runAvailableAction = (event, action) => {
         v-show="stageMatchesSearch(event.kind)"
         type="button"
         class="cc-execution-stage-head"
-        :class="{ active: event.active }"
+        :class="{ active: event.active, completed: !event.active && event.summary?.includes('完成'), failed: event.summary?.includes('失败') }"
         :aria-expanded="stageIsExpanded(event)"
         @click="toggleStage(event)"
       >
@@ -769,19 +902,21 @@ const runAvailableAction = (event, action) => {
         v-else-if="event.__progressBatch"
         v-show="batchMatchesSearch(event)"
         class="cc-progress-batch-group stage-child"
+        :class="{ current: event.progress?.eventId === currentProgressEventId, completed: event.progress?.eventId !== currentProgressEventId }"
+        :aria-current="event.progress?.eventId === currentProgressEventId ? 'step' : undefined"
       >
         <p class="cc-execution-stage-progress">{{ progressText(event.progress) }}</p>
         <button v-if="event.children.length" type="button" class="cc-progress-batch-head" :aria-expanded="batchIsExpanded(event)" @click="toggleBatch(event)">
           <span>{{ batchIsExpanded(event) ? '⌄' : '›' }}</span>
-          <strong>工具批次</strong>
-          <small>{{ event.children.length }} 项<span v-if="event.durationMs"> · {{ formatExecutionDuration(event.durationMs) }}</span></small>
+          <strong>{{ event.presentation?.label || '工具批次' }}</strong>
+          <small>{{ event.presentation?.count || event.children.length }} 项<span v-if="event.presentation?.failed"> · {{ event.presentation.failed }} 项失败</span><span v-if="event.presentation?.durationMs || event.durationMs"> · {{ formatExecutionDuration(event.presentation?.durationMs || event.durationMs) }}</span></small>
         </button>
       </section>
       <article v-else-if="event.__requirementPlan" class="cc-requirement-plan" :class="requirementPlan?.status || 'ready'">
         <button type="button" class="cc-requirement-plan-head" :aria-expanded="planIsExpanded" @click="toggleRequirementPlan">
           <span class="cc-requirement-plan-icon">▤</span>
           <span class="cc-requirement-plan-title">
-            <strong>{{ requirementPlan?.title || '需求实施计划' }}</strong>
+            <strong>{{ isLivePresentation ? `${requirementPlan?.title || '实施计划'} · ${effectivePlanSteps.length}步` : requirementPlan?.title || '需求实施计划' }}</strong>
             <small>根据你的需求和现有项目整理 · 版本 {{ requirementPlan?.revision || 1 }}</small>
           </span>
           <span class="cc-requirement-plan-status">{{ planStatusLabel }}</span>
@@ -820,12 +955,12 @@ const runAvailableAction = (event, action) => {
           <button type="button" @click="toggleRequirementPlan">收起计划⌃</button>
         </footer>
       </article>
-      <p v-else-if="event.eventType === 'assistant_progress'" v-show="!normalizedSearchQuery || searchableText(event).includes(normalizedSearchQuery)" class="cc-execution-stage-progress">{{ progressText(event) }}</p>
+      <p v-else-if="event.eventType === 'assistant_progress'" v-show="!normalizedSearchQuery || searchableText(event).includes(normalizedSearchQuery)" class="cc-execution-stage-progress" :class="{ current: event.eventId === currentProgressEventId }" :aria-current="event.eventId === currentProgressEventId ? 'step' : undefined">{{ progressText(event) }}</p>
       <article
         v-else
         v-show="eventMatchesSearch(event)"
         class="cc-execution-row"
-        :class="[event.display?.status || 'running', { 'stage-child': event.__stageChild, 'batch-child': event.__batchChild, current: isCurrentEvent(event), completed: event.display?.status === 'success' }]"
+        :class="[event.display?.status || 'running', { 'stage-child': event.__stageChild, 'batch-child': event.__batchChild, 'agent-child': event.__agentChild, current: isCurrentEvent(event), completed: event.display?.status === 'success' }]"
         :data-execution-event-id="event.eventId"
         :aria-current="isCurrentEvent(event) ? 'step' : undefined"
       >
@@ -839,12 +974,12 @@ const runAvailableAction = (event, action) => {
           <span class="cc-execution-mark">{{ statusMark(event) }}</span>
           <div class="cc-execution-main">
             <div class="cc-execution-title">
-              <strong>{{ eventTitle(event) }}</strong>
+              <strong>{{ isLivePresentation ? liveRowLabel(event) : eventTitle(event) }}</strong>
               <code v-if="event.display?.target" :title="event.display.target">{{ event.display.target }}</code>
-              <span>{{ eventStatusLabel(event) }}</span>
+              <span v-if="!isLivePresentation">{{ eventStatusLabel(event) }}</span>
             </div>
-            <p v-if="eventBusinessSummary(event)">{{ eventBusinessSummary(event) }}</p>
-            <small v-if="rowMeta(event)">{{ rowMeta(event) }}</small>
+            <p v-if="eventBusinessSummary(event) && (!isLivePresentation || String(event?.eventType || '').startsWith('agent_'))">{{ eventBusinessSummary(event) }}</p>
+            <small v-if="isLivePresentation ? liveRowMeta(event) : rowMeta(event)">{{ isLivePresentation ? liveRowMeta(event) : rowMeta(event) }}</small>
           </div>
           <span v-if="isRowExpandable(event)" class="cc-execution-row-chevron">{{ isRowExpanded(event) ? '⌃' : '⌄' }}</span>
         </button>
@@ -873,8 +1008,12 @@ const runAvailableAction = (event, action) => {
             </template>
             <template v-else-if="toolDisplayFor(event)">
               <div class="cc-tool-identity">
-                <b>{{ toolDisplayFor(event).tool?.label || event.display?.title }}</b>
+                <b>{{ toolDisplayFor(event).tool?.userLabel || toolDisplayFor(event).tool?.label || event.display?.title }}</b>
                 <span v-if="toolDisplayFor(event).tool?.serverLabel">MCP · {{ toolDisplayFor(event).tool.serverLabel }}</span>
+              </div>
+              <div v-if="toolDisplayFor(event).sensitiveCommand" class="cc-tool-command-detail">
+                <b>脱敏命令</b>
+                <pre>{{ toolDisplayFor(event).sensitiveCommand }}</pre>
               </div>
               <div v-if="toolDisplayFor(event).arguments?.length">
                 <b>参数</b>
@@ -977,6 +1116,8 @@ const runAvailableAction = (event, action) => {
 .cc-execution.live .cc-execution-rows { border-top: 0; padding-top: 0; }
 .cc-execution-anchor { width: 100%; min-width: 0; }
 .cc-execution-anchor:empty { height: 0; }
+.cc-live-execution-status { display: flex; align-items: center; gap: 7px; margin: 0 0 9px; padding: 0 1px 8px; border-bottom: 1px solid color-mix(in srgb, var(--border-color, #94a3b8) 24%, transparent); color: var(--text-muted); font-size: 11px; line-height: 1.4; }
+.cc-live-execution-status strong { min-width: 0; overflow: hidden; color: var(--text-secondary); font-size: 11px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .cc-progress-flow { display: grid; gap: 9px; margin: 0 0 8px; }
 .cc-progress-overview { width: 100%; display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto; align-items: center; gap: 7px; padding: 4px 1px; border: 0; color: var(--text-secondary); background: transparent; text-align: left; cursor: pointer; }
 .cc-progress-overview:hover { color: var(--text-primary); }
@@ -984,8 +1125,10 @@ const runAvailableAction = (event, action) => {
 .cc-progress-overview strong { font-size: 12px; }
 .cc-progress-overview small { justify-self: end; color: var(--text-muted); font-size: 10px; }
 .cc-progress-overview kbd { padding: 2px 5px; border: 1px solid rgba(100, 116, 139, 0.25); border-radius: 4px; color: var(--text-muted); font-size: 9px; font-family: inherit; }
-.cc-progress-segment { display: grid; gap: 5px; }
-.cc-progress-text { margin: 0; color: var(--text-primary); font-size: 12px; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; }
+.cc-progress-segment { display: grid; gap: 5px; padding-left: 8px; border-left: 2px solid transparent; }
+.cc-progress-segment.completed { opacity: 0.72; }
+.cc-progress-segment.current { border-left-color: color-mix(in srgb, var(--primary-color, #ec4899) 75%, transparent); background: color-mix(in srgb, var(--primary-color, #ec4899) 4%, transparent); }
+.cc-progress-text { display: -webkit-box; margin: 0; overflow: hidden; color: var(--text-primary); font-size: 12px; line-height: 1.65; white-space: normal; overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .cc-progress-batch { width: fit-content; max-width: 100%; display: inline-flex; align-items: center; gap: 7px; padding: 3px 1px; border: 0; color: var(--text-muted); background: transparent; font-size: 11px; text-align: left; cursor: pointer; }
 .cc-progress-batch:hover { color: var(--text-secondary); }
 .cc-progress-batch:focus-visible { outline: 2px solid color-mix(in srgb, var(--primary-color, #ec4899) 72%, transparent); outline-offset: 2px; border-radius: 3px; }
@@ -1012,8 +1155,9 @@ const runAvailableAction = (event, action) => {
 .cc-execution-head strong { color: var(--text-primary); font-size: 12px; }
 .cc-execution-chevron { color: var(--text-muted); font-size: 18px; line-height: 1; }
 .cc-execution-summary { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+.cc-execution-replay-link { display:block; margin:-2px 10px 8px 35px; padding:0; border:0; background:transparent; color:var(--accent-blue); font-size:10px; font-weight:750; cursor:pointer; }
+.cc-execution-replay-link:hover { text-decoration:underline; }
 .cc-execution-duration { color: var(--text-secondary); font-size: 10px; white-space: nowrap; }
-.cc-execution-head kbd { padding: 2px 5px; border: 1px solid rgba(100, 116, 139, 0.25); border-radius: 4px; color: var(--text-muted); font-size: 9px; font-family: inherit; }
 .cc-execution-rows { border-top: 1px solid rgba(100, 116, 139, 0.13); padding: 5px 0; }
 .cc-execution-timing { display: flex; flex-wrap: wrap; gap: 6px 14px; padding: 4px 10px 7px 35px; color: var(--text-secondary); font-size: 10px; }
 .cc-execution-timing span { display: inline-flex; align-items: baseline; gap: 4px; }
@@ -1076,13 +1220,24 @@ const runAvailableAction = (event, action) => {
 .cc-execution-stage-head strong { color: var(--text-primary); font-size: 12px; font-weight: 650; }
 .cc-execution-stage-head small { min-width: 0; color: var(--text-muted); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cc-execution-stage-head > span:last-child { color: var(--text-muted); font-size: 10px; white-space: nowrap; }
-.cc-execution-stage-progress { margin: 3px 12px 7px 35px; color: var(--text-primary); font-size: 12px; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; }
+.cc-execution-stage-progress { display: -webkit-box; margin: 3px 12px 7px 35px; overflow: hidden; color: var(--text-primary); font-size: 12px; line-height: 1.65; white-space: normal; overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.cc-execution-stage-progress.current { padding-left: 7px; border-left: 2px solid color-mix(in srgb, var(--primary-color, #ec4899) 75%, transparent); background: color-mix(in srgb, var(--primary-color, #ec4899) 4%, transparent); }
 .cc-progress-batch-group { margin-left: 22px; border-left: 1px solid color-mix(in srgb, var(--border-color, #94a3b8) 30%, transparent); }
+.cc-progress-batch-group.completed { opacity: 0.72; }
+.cc-progress-batch-group.current { opacity: 1; border-left-color: color-mix(in srgb, var(--primary-color, #ec4899) 70%, transparent); background: color-mix(in srgb, var(--primary-color, #ec4899) 3%, transparent); }
 .cc-progress-batch-group .cc-execution-stage-progress { margin-left: 13px; }
 .cc-progress-batch-head { display: flex; align-items: center; gap: 7px; margin: 0 10px 5px 12px; padding: 4px 7px; border: 0; border-radius: 5px; color: var(--text-secondary); background: rgba(100, 116, 139, 0.045); cursor: pointer; }
 .cc-progress-batch-head strong { font-size: 10px; }
 .cc-progress-batch-head small { color: var(--text-muted); font-size: 9px; }
 .cc-execution-row { padding: 0; }
+.cc-execution-row,
+.cc-progress-batch-group,
+.cc-requirement-plan,
+.cc-execution-stage-head,
+.cc-execution-stage-progress {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 52px;
+}
 .cc-execution-row.stage-child { margin-left: 22px; border-left: 1px solid color-mix(in srgb, var(--border-color, #94a3b8) 30%, transparent); }
 .cc-execution-row.batch-child { margin-left: 42px; }
 .cc-execution-row.completed { opacity: 0.7; }
@@ -1121,6 +1276,9 @@ const runAvailableAction = (event, action) => {
 .cc-tool-identity { display: flex; align-items: center; gap: 8px; }
 .cc-tool-identity b { margin: 0; color: var(--text-primary); font-size: 12px; }
 .cc-tool-identity span { color: var(--text-muted); font-size: 10px; }
+.cc-tool-command-detail { margin-top: 8px; }
+.cc-tool-command-detail b { display: block; margin-bottom: 4px; color: var(--text-muted); font-size: 10px; }
+.cc-tool-command-detail pre { margin: 0; max-height: 120px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-secondary); font: 10px/1.45 Consolas, monospace; }
 .cc-tool-arguments { display: grid; grid-template-columns: minmax(80px, auto) minmax(0, 1fr); gap: 3px 10px; margin: 0; }
 .cc-tool-arguments dt { color: var(--text-muted); font-size: 10px; }
 .cc-tool-arguments dd { margin: 0; color: var(--text-secondary); font: 10px/1.45 Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -1166,6 +1324,73 @@ const runAvailableAction = (event, action) => {
 .cc-completion-files-more,
 .cc-completion-files-all { padding: 8px 12px; border: 0; color: var(--text-muted); background: transparent; font-size: 10px; cursor: pointer; text-align: left; }
 .cc-completion-files-all { float: right; }
+
+/* Live projection: a compact construction view backed by the same durable ledger. */
+.cc-execution.live { margin-bottom: 8px; overflow: visible; }
+.cc-execution.live .cc-execution-stage-head { grid-template-columns: 14px auto minmax(0, 1fr) auto; min-height: 32px; padding: 6px 1px; border-top: 1px solid color-mix(in srgb, var(--border-color, #94a3b8) 18%, transparent); border-radius: 0; }
+.cc-execution.live .cc-execution-stage-head:first-child { border-top: 0; }
+.cc-execution.live .cc-execution-stage-head:hover { background: color-mix(in srgb, var(--surface-subtle, #f8fafc) 45%, transparent); }
+.cc-execution.live .cc-execution-stage-head.active { background: transparent; box-shadow: none; }
+.cc-execution.live .cc-execution-stage-head.active strong { color: var(--text-primary); }
+.cc-execution.live .cc-execution-stage-head.completed { opacity: 0.62; }
+.cc-execution.live .cc-execution-stage-head.failed { opacity: 1; }
+.cc-execution.live .cc-execution-stage-head strong { font-size: 11px; font-weight: 650; }
+.cc-execution.live .cc-execution-stage-head small,
+.cc-execution.live .cc-execution-stage-head > span:last-child { font-size: 9px; }
+.cc-execution.live .cc-execution-stage-progress { margin: 7px 2px 8px 21px; padding: 0; border-left: 0; background: transparent; font-size: 12px; line-height: 1.55; }
+.cc-execution.live .cc-execution-stage-progress.current { padding-left: 0; border-left: 0; background: transparent; }
+.cc-execution.live .cc-progress-batch-group { margin: 0 0 3px 20px; border-left: 0; background: transparent; }
+.cc-execution.live .cc-progress-batch-group.completed { opacity: 0.72; }
+.cc-execution.live .cc-progress-batch-group.current { border-left: 0; background: transparent; }
+.cc-execution.live .cc-progress-batch-group .cc-execution-stage-progress { margin-left: 0; }
+.cc-execution.live .cc-progress-batch-head { width: calc(100% - 2px); display: grid; grid-template-columns: 13px minmax(0, 1fr) auto; gap: 7px; margin: 0; padding: 4px 1px; border-radius: 4px; background: transparent; text-align: left; }
+.cc-execution.live .cc-progress-batch-head:hover { background: rgba(100, 116, 139, 0.055); }
+.cc-execution.live .cc-progress-batch-head strong { overflow: hidden; color: var(--text-secondary); font-size: 10px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.cc-execution.live .cc-progress-batch-head small { font-size: 9px; white-space: nowrap; }
+.cc-execution.live .cc-execution-row.stage-child { margin-left: 20px; border-left: 0; }
+.cc-execution.live .cc-execution-row.batch-child { margin-left: 20px; }
+.cc-execution.live .cc-execution-row.agent-child { margin-left: 38px; }
+.cc-execution.live .cc-execution-row + .cc-execution-row { border-top: 0; }
+.cc-execution.live .cc-execution-row-summary { grid-template-columns: 18px minmax(0, 1fr) auto; align-items: center; min-height: 30px; gap: 6px; padding: 4px 1px; border-radius: 4px; }
+.cc-execution.live .cc-execution-row-summary.expandable:hover { background: rgba(100, 116, 139, 0.055); }
+.cc-execution.live .cc-execution-mark { width: 16px; height: 16px; border: 1px solid color-mix(in srgb, var(--border-color, #94a3b8) 45%, transparent); border-radius: 4px; color: var(--text-muted); background: transparent; font-size: 9px; }
+.cc-execution.live .cc-execution-row.current .cc-execution-mark { color: var(--primary-color, #2563eb); border-color: color-mix(in srgb, var(--primary-color, #2563eb) 45%, transparent); animation: cc-live-pulse 1.35s ease-in-out infinite; }
+.cc-execution.live .cc-execution-row.current { background: transparent; box-shadow: none; }
+.cc-execution.live .cc-execution-row.completed { opacity: 0.64; }
+.cc-execution.live .cc-execution-row.completed:hover { opacity: 1; }
+.cc-execution.live .cc-execution-title { gap: 6px; flex-wrap: nowrap; }
+.cc-execution.live .cc-execution-title strong { min-width: 0; overflow: hidden; color: var(--text-secondary); font-size: 11px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.cc-execution.live .cc-execution-title code { max-width: 42%; flex: 0 1 auto; color: var(--text-muted); font-size: 9px; }
+.cc-execution.live .cc-execution-main p { margin-top: 2px; font-size: 10px; }
+.cc-execution.live .cc-execution-main small { margin-top: 2px; font-size: 9px; }
+.cc-execution.live .cc-execution-row-chevron { min-width: 20px; min-height: 20px; }
+.cc-execution.live .cc-execution-detail { margin: 3px 1px 8px 23px; padding: 9px 10px; border: 1px solid color-mix(in srgb, var(--border-color, #94a3b8) 24%, transparent); border-radius: 7px; background: color-mix(in srgb, var(--surface-subtle, #f8fafc) 72%, transparent); }
+.cc-execution.live .cc-execution-actions { margin-left: 23px; }
+
+.cc-execution.live .cc-requirement-plan { margin: 5px 0 7px 20px; border: 0; border-radius: 0; background: transparent; }
+.cc-execution.live .cc-requirement-plan-head { grid-template-columns: minmax(0, 1fr) auto 18px; gap: 7px; min-height: 31px; padding: 5px 1px; }
+.cc-execution.live .cc-requirement-plan-head:hover { background: rgba(100, 116, 139, 0.045); }
+.cc-execution.live .cc-requirement-plan-icon { display: none; }
+.cc-execution.live .cc-requirement-plan-title strong { font-size: 11px; font-weight: 650; }
+.cc-execution.live .cc-requirement-plan-title small { display: none; }
+.cc-execution.live .cc-requirement-plan-status { padding: 0; color: var(--text-muted); background: transparent; font-size: 9px; }
+.cc-execution.live .cc-requirement-plan-body { display: block; border-top: 0; }
+.cc-execution.live .cc-requirement-plan-main { padding: 1px 0 5px 1px; border: 0; }
+.cc-execution.live .cc-requirement-plan-main > section:first-child,
+.cc-execution.live .cc-requirement-plan-side,
+.cc-execution.live .cc-requirement-plan-foot,
+.cc-execution.live .cc-requirement-plan-main h4 { display: none; }
+.cc-execution.live .cc-requirement-plan-body section + section { margin-top: 0; }
+.cc-execution.live .cc-requirement-plan-steps { gap: 1px; }
+.cc-execution.live .cc-requirement-plan-steps li { grid-template-columns: 18px minmax(0, 1fr) auto; gap: 6px; padding: 3px 0; border: 0; border-radius: 0; background: transparent; }
+.cc-execution.live .cc-requirement-step-mark { width: 16px; height: 16px; border-radius: 50%; font-size: 8px; }
+.cc-execution.live .cc-requirement-plan-steps strong { font-size: 10px; font-weight: 550; }
+.cc-execution.live .cc-requirement-plan-steps p,
+.cc-execution.live .cc-requirement-plan-steps small { display: none; }
+.cc-execution.live .cc-requirement-step-project { align-self: center; font-size: 8px; }
+
+@keyframes cc-live-pulse { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .cc-execution.live .cc-execution-row.current .cc-execution-mark { animation: none; } }
 @media (max-width: 720px) {
   .cc-progress-overview { grid-template-columns: auto auto minmax(0, 1fr); }
   .cc-progress-overview kbd { display: none; }
@@ -1187,5 +1412,17 @@ const runAvailableAction = (event, action) => {
   .cc-completion-files-head { grid-template-columns: 30px minmax(0, 1fr) auto; padding: 9px; }
   .cc-completion-file-row { align-items: start; padding: 7px 9px; }
   .cc-completion-file-path { white-space: normal; overflow-wrap: anywhere; }
+  .cc-live-execution-status { margin-bottom: 6px; }
+  .cc-execution.live .cc-execution-stage-head { grid-template-columns: 13px auto minmax(0, 1fr); }
+  .cc-execution.live .cc-execution-stage-head > span:last-child { grid-column: 2 / -1; margin-left: 0; }
+  .cc-execution.live .cc-execution-row.stage-child,
+  .cc-execution.live .cc-execution-row.batch-child,
+  .cc-execution.live .cc-progress-batch-group,
+  .cc-execution.live .cc-requirement-plan { margin-left: 14px; }
+  .cc-execution.live .cc-execution-row.agent-child { margin-left: 28px; }
+  .cc-execution.live .cc-execution-title code { max-width: 34%; }
+  .cc-execution.live .cc-execution-detail { margin-left: 0; }
+  .cc-execution.live .cc-requirement-plan-steps li { grid-template-columns: 18px minmax(0, 1fr); }
+  .cc-execution.live .cc-requirement-step-project { grid-column: 2; }
 }
 </style>

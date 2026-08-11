@@ -11,7 +11,7 @@ const agent_runtime_progress_1 = require("./system/agent-runtime-progress");
 const credential_store_1 = require("./core/credential-store");
 function createAgentRunnerRuntime(deps) {
     const { normalizeToolSelection, hasToolSelection, buildAgentRunnerRuntimeToolPayload, normalizeVerificationCommands, extractVerificationCommandsFromMessage, buildAgentCliAllowedTools, isSpawnPermissionError, nativeContinuationDoneFields, callAgentViaExternalRunner, getProjectToolSelection, findRuntimeToolSnapshotPath, readJsonFileSafe, runtimeToolSnapshotFromAudit, normalizeAgentRunnerRuntimeToolSnapshot, getProjectVerificationCommandsForRunner, runIndependentProjectVerification, buildProjectToolContext, sendRuntimeToolDispatchBlocked, ensureAgentRunnerDirs, createAgentRunnerRequest, waitForAgentRunnerResult, recordNativeCapacityRefreshOutcome, callAgentViaExternalRunnerRaw, runManagedAgentContinuation, continueAgentToolCalls, } = (0, server_agent_runner_support_1.createAgentRunnerSupport)(deps);
-    const { AGENT_RUNNER_DIR, AGENT_RUNNER_REQUESTS_DIR, AGENT_RUNNER_RESULTS_DIR, UPLOAD_DIR, acknowledgeProviderMemoryChannelLaunch, appendDirectAgentDispatchTranscript, bindProjectRunAgentSession, bindProviderMemoryChannelLaunch, broadcastPetSpeech, buildAgentCommand, buildNativeSessionContinuationEvidence, buildProjectConversationBrief, buildProjectExecutionBrief, buildRuntimeToolDispatchGate, buildRuntimeToolSyncPrompt, buildToolAuthorizationPayload, captureAgentRuntimeVersionSnapshot, completeDirectAgentDispatch, createDirectAgentDispatchRequest, createFileChangeSnapshot, createProjectChatRun, detectAgentCommandFailure, extractNativeModelCapabilityReceipt, extractProviderToolAccessEvidence, fs, getAgentCommandLabel, getAgentRunActivityDuration, getAgentRuntime, getFileChanges, getRuntimeExecutionEnv, isSafeVerificationCommand, loadProjectConfigs, markDirectAgentDispatchStarted, normalizeAgentCommandOutput, normalizeAgentRuntimeId, path, persistBoundedOutput, prepareProviderMemoryChannel, publicProjectChatRun, readMemoryContextConsumptionReceipt, recordMetric, recordProjectSessionProviderUsage, recordModelCapabilityRefreshOutcome, recordRuntimeToolSyncAudit, recordTaskAgentSessionTurn, recordVerifiedNativeModelCapabilityReceipt, recoverMemoryContextConsumptionReceipt, registerExternalRunnerRequest, runManagedCommand, runToolCallLoop, sanitizeExecutionEnv, saveProjectChatRuns, sendJson, setAgentActivity, spawn, syncRuntimeTools, terminateManagedChildProcess, toolManager, trackManagedChildProcess, verifyNativeSessionContinuationEvidence, verifyProviderMemoryChannelEvidence, writeSse } = deps;
+    const { AGENT_RUNNER_DIR, AGENT_RUNNER_REQUESTS_DIR, AGENT_RUNNER_RESULTS_DIR, UPLOAD_DIR, acknowledgeProviderMemoryChannelLaunch, appendDirectAgentDispatchTranscript, bindProjectRunAgentSession, bindProviderMemoryChannelLaunch, buildAgentCommand, buildNativeSessionContinuationEvidence, buildProjectConversationBrief, buildProjectExecutionBrief, buildRuntimeToolDispatchGate, buildRuntimeToolSyncPrompt, buildToolAuthorizationPayload, captureAgentRuntimeVersionSnapshot, completeDirectAgentDispatch, createDirectAgentDispatchRequest, createFileChangeSnapshot, createProjectChatRun, detectAgentCommandFailure, extractNativeModelCapabilityReceipt, extractProviderToolAccessEvidence, fs, getAgentCommandLabel, getAgentRunActivityDuration, getAgentRuntime, getFileChanges, getRuntimeExecutionEnv, isSafeVerificationCommand, loadProjectConfigs, markDirectAgentDispatchStarted, normalizeAgentCommandOutput, normalizeAgentRuntimeId, path, persistBoundedOutput, prepareProviderMemoryChannel, publicProjectChatRun, readMemoryContextConsumptionReceipt, recordMetric, recordProjectSessionProviderUsage, recordModelCapabilityRefreshOutcome, recordRuntimeToolSyncAudit, recordTaskAgentSessionTurn, recordVerifiedNativeModelCapabilityReceipt, recoverMemoryContextConsumptionReceipt, registerExternalRunnerRequest, runManagedCommand, runToolCallLoop, sanitizeExecutionEnv, saveProjectChatRuns, sendJson, setAgentActivity, spawn, syncRuntimeTools, terminateManagedChildProcess, toolManager, trackManagedChildProcess, verifyNativeSessionContinuationEvidence, verifyProviderMemoryChannelEvidence, writeSse } = deps;
     const usageWithProvenance = (usage, runnerKind, continuationEvidence, runtimeVersionSnapshot = null) => {
         if (!usage || typeof usage !== "object")
             return usage || null;
@@ -415,9 +415,8 @@ function createAgentRunnerRuntime(deps) {
                 usage: deliveryUsage,
             });
             if (!background) {
-                broadcastPetSpeech(projectName, { role: "assistant", text: output, final: true, source: "project" });
-                setAgentActivity(projectName, "happy", "任务完成");
-                setTimeout(() => setAgentActivity(projectName, "idle", "空闲"), 10000);
+                // 第三方Runner只说明结果已提交，不能绕过Terminal Gate宣布完成。
+                setAgentActivity(projectName, "reviewing", "已提交结果，等待 CCM 验收");
             }
             try {
                 fs.unlinkSync(memoryReceiptRecoveryPromptFile);
@@ -509,9 +508,7 @@ function createAgentRunnerRuntime(deps) {
                         usage: deliveryUsage,
                     });
                     if (!background) {
-                        broadcastPetSpeech(projectName, { role: "assistant", text: runner.output, final: true, source: "project" });
-                        setAgentActivity(projectName, "happy", "外部 Runner 任务完成");
-                        setTimeout(() => setAgentActivity(projectName, "idle", "空闲"), 10000);
+                        setAgentActivity(projectName, "reviewing", "已提交结果，等待 CCM 验收");
                     }
                     return runner.output;
                 }
@@ -530,10 +527,12 @@ function createAgentRunnerRuntime(deps) {
                         success: false,
                         durationMs: Date.now() - startedAt,
                         fileChangeCount: getFileChanges(projectName, changeSnapshot)?.count || 0,
+                        usage: runnerError?.usage
+                            ? usageWithProvenance(runnerError.usage, "external_agent_runner", failedContinuationEvidence)
+                            : { source: "unreported", missingReason: runnerError?.runnerStarted === true ? "runtime_unreported" : "failed_before_provider" },
                         error: runnerError?.message || String(runnerError),
                     });
                     if (!background) {
-                        broadcastPetSpeech(projectName, { role: "error", text: output, final: true, source: "project" });
                         setAgentActivity(projectName, "error", "外部 Runner 错误");
                     }
                     return output;
@@ -548,10 +547,12 @@ function createAgentRunnerRuntime(deps) {
                 success: false,
                 durationMs: Date.now() - startedAt,
                 fileChangeCount: getFileChanges(projectName, changeSnapshot)?.count || 0,
+                usage: e?.usage
+                    ? usageWithProvenance(e.usage, "direct_cli", failedDirectContinuationEvidence)
+                    : { source: "unreported", missingReason: durableDirectDispatchStarted ? "runtime_unreported" : "failed_before_provider" },
                 error: e?.message || String(e),
             });
             if (!background) {
-                broadcastPetSpeech(projectName, { role: "error", text: output, final: true, source: "project" });
                 setAgentActivity(projectName, "error", "错误");
             }
             return output;
@@ -643,7 +644,6 @@ function createAgentRunnerRuntime(deps) {
         const thinkingText = `🧠 ${projectName} 正在思考...`;
         pushWorkEvent("status", thinkingText);
         writeSse(streamRes, { type: "status", text: thinkingText, agent: projectName });
-        broadcastPetSpeech(projectName, { role: "status", text: `${projectName} 正在思考...`, source: "group" });
         return new Promise((resolve) => {
             let child = null;
             let stopTracking = () => { };
@@ -713,9 +713,7 @@ function createAgentRunnerRuntime(deps) {
                     }
                     catch { }
                     writeSse(streamRes, { type: "agent_done", agent: projectName, text: runner.output, fileChanges, messageId: options.messageId, workEvents });
-                    broadcastPetSpeech(projectName, { role: "assistant", text: runner.output, final: true, source: "group" });
-                    setAgentActivity(projectName, "happy", "外部 Runner 回复完成");
-                    setTimeout(() => setAgentActivity(projectName, "idle", "空闲"), 10000);
+                    setAgentActivity(projectName, "reviewing", "已提交结果，等待 CCM 验收");
                     resolve(runner.output);
                 })
                     .catch((runnerError) => {
@@ -725,6 +723,9 @@ function createAgentRunnerRuntime(deps) {
                         success: false,
                         durationMs: Date.now() - startedAt,
                         fileChangeCount: getFileChanges(projectName, changeSnapshot)?.count || 0,
+                        usage: runnerError?.usage
+                            ? usageWithProvenance(runnerError.usage, "external_agent_runner", null)
+                            : { source: "unreported", missingReason: runnerError?.runnerStarted === true ? "runtime_unreported" : "failed_before_provider" },
                         error: runnerError?.message || String(runnerError),
                     });
                     try {
@@ -742,7 +743,6 @@ function createAgentRunnerRuntime(deps) {
                     }
                     catch { }
                     writeSse(streamRes, { type: "agent_done", agent: projectName, text, messageId: options.messageId, workEvents });
-                    broadcastPetSpeech(projectName, { role: "error", text, final: true, source: "group" });
                     setAgentActivity(projectName, "error", "外部 Runner 错误");
                     resolve(text);
                 });
@@ -902,9 +902,7 @@ function createAgentRunnerRuntime(deps) {
                 }
                 catch { }
                 writeSse(streamRes, { type: "agent_done", agent: projectName, text: finalText, fileChanges, messageId: options.messageId, workEvents });
-                broadcastPetSpeech(projectName, { role: isError ? "error" : "assistant", text: finalText, final: true, source: "group" });
-                setAgentActivity(projectName, isError ? "error" : "happy", isError ? "错误" : "群聊回复完成");
-                setTimeout(() => setAgentActivity(projectName, "idle", "空闲"), 10000);
+                setAgentActivity(projectName, isError ? "error" : "reviewing", isError ? "执行出错，等待 CCM 处理" : "已提交结果，等待 CCM 验收");
                 resolve(finalText);
             };
             child.stdout.on("data", (chunk) => {
@@ -921,7 +919,6 @@ function createAgentRunnerRuntime(deps) {
                     const runningText = `🧠 ${projectName} 运行中...`;
                     pushWorkEvent("status", runningText);
                     writeSse(streamRes, { type: "status", text: runningText, agent: projectName });
-                    broadcastPetSpeech(projectName, { role: "status", text: `${projectName} 运行中...`, source: "group" });
                 }
             });
             child.on("close", (code) => {
@@ -1025,7 +1022,6 @@ function createAgentRunnerRuntime(deps) {
         // 发送状态事件
         pushProjectWorkEvent("status", "Agent 正在思考...");
         send({ type: "status", text: "Agent 正在思考..." });
-        broadcastPetSpeech(projectName, { role: "status", text: "Agent 正在思考...", source: "project" });
         setAgentActivity(projectName, "working", showTaskExperience ? "正在处理任务" : "正在回复", null, getAgentRunActivityDuration(300000));
         const child = spawn(cmd, [], {
             shell: true,
@@ -1071,7 +1067,6 @@ function createAgentRunnerRuntime(deps) {
                 return;
             pushProjectWorkEvent("output", text);
             send({ type: "chunk", text });
-            broadcastPetSpeech(projectName, { role: "assistant", text, mode: "append", source: "project" });
         });
         child.stderr.on("data", (chunk) => {
             const text = chunk.toString("utf-8");
@@ -1081,7 +1076,6 @@ function createAgentRunnerRuntime(deps) {
                 lastStderrStatusAt = now;
                 pushProjectWorkEvent("status", "Agent 处理中...");
                 send({ type: "status", text: "Agent 处理中..." });
-                broadcastPetSpeech(projectName, { role: "status", text: "Agent 处理中...", source: "project" });
             }
         });
         child.on("close", (code) => {
@@ -1111,6 +1105,7 @@ function createAgentRunnerRuntime(deps) {
                 });
                 const projectUsageAnchorId = `pmsg_${String(projectRun.id || "result")}_assistant`;
                 const projectProviderUsage = usageWithProvenance(normalized.usage, "direct_cli", nativeContinuationEvidence, runtimeVersionSnapshot);
+                projectRun.provider_usage = projectProviderUsage || null;
                 if (projectRun.project_session_id && projectProviderUsage) {
                     recordProjectSessionProviderUsage(projectName, projectRun.project_session_id, {
                         usage: projectProviderUsage,
@@ -1172,7 +1167,12 @@ function createAgentRunnerRuntime(deps) {
                     recordMetric(projectName, {
                         success: false,
                         durationMs: Date.now() - startedAt,
-                        fileChangeCount: fileChanges?.count || 0
+                        fileChangeCount: fileChanges?.count || 0,
+                        scopeType: "project", projectId: projectName, role: "project_agent",
+                        source: "project-agent-stream", runtime: agentType,
+                        taskId: projectRun.id, executionId: projectRun.id,
+                        usageAnchorId: projectUsageAnchorId,
+                        usage: projectProviderUsage || { source: "unreported", missingReason: "runtime_unreported" },
                     });
                     setAgentActivity(projectName, "error", "执行失败");
                     pushProjectWorkEvent("error", nativeFailure.message || "Agent 执行失败", { final: true, fileChanges });
@@ -1228,9 +1228,7 @@ function createAgentRunnerRuntime(deps) {
                 if (toolAppend) {
                     pushProjectWorkEvent("output", toolAppend);
                     send({ type: "chunk", text: toolAppend });
-                    broadcastPetSpeech(projectName, { role: "assistant", text: toolAppend, mode: "append", source: "project" });
                 }
-                broadcastPetSpeech(projectName, { role: "assistant", text: "", mode: "append", final: true, source: "project" });
                 const fileChanges = getFileChanges(projectName, changeSnapshot);
                 if (showTaskExperience && options.memorySnapshotId) {
                     const reports = (0, third_party_memory_snapshot_1.readThirdPartyMemoryUsageReports)(options.memorySnapshotId, options.memorySnapshotChecksum || "");
@@ -1295,10 +1293,14 @@ function createAgentRunnerRuntime(deps) {
                 recordMetric(projectName, {
                     success: true,
                     durationMs: Date.now() - startedAt,
-                    fileChangeCount: fileChanges?.count || 0
+                    fileChangeCount: fileChanges?.count || 0,
+                    scopeType: "project", projectId: projectName, role: "project_agent",
+                    source: "project-agent-stream", runtime: agentType,
+                    taskId: projectRun.id, executionId: projectRun.id,
+                    usageAnchorId: projectUsageAnchorId,
+                    usage: projectProviderUsage || { source: "unreported", missingReason: "runtime_unreported" },
                 });
-                setAgentActivity(projectName, "happy", "任务完成");
-                setTimeout(() => setAgentActivity(projectName, "idle", "空闲"), 10000);
+                setAgentActivity(projectName, "reviewing", "已提交结果，等待 CCM 验收");
                 pushProjectWorkEvent("done", "执行完成", { final: true, fileChanges });
                 send({ type: "done", fileChanges, workEvents, provider_usage: projectProviderUsage, usage_anchor_id: projectUsageAnchorId, memory_context_consumption_receipt: projectMemoryConsumptionReceipt, run: publicProjectChatRun(projectRun), taskExperience: {
                         task_id: projectRun.id,
@@ -1321,6 +1323,17 @@ function createAgentRunnerRuntime(deps) {
                 projectRun.resume_mode = failedSession.resumeMode || projectRun.resume_mode || "";
                 projectRun.updated_at = new Date().toISOString();
                 saveProjectChatRuns();
+                recordMetric(projectName, {
+                    success: false,
+                    durationMs: Date.now() - startedAt,
+                    fileChangeCount: getFileChanges(projectName, changeSnapshot)?.count || 0,
+                    scopeType: "project", projectId: projectName, role: "project_agent",
+                    source: "project-agent-stream", runtime: agentType,
+                    taskId: projectRun.id, executionId: projectRun.id,
+                    usageAnchorId: `pmsg_${String(projectRun.id || "result")}_assistant`,
+                    usage: projectRun.provider_usage || { source: "unreported", missingReason: "runtime_unreported" },
+                    error: err?.message || String(err),
+                });
                 send({ type: "error", text: err.message, workEvents, run: publicProjectChatRun(projectRun), taskExperience: {
                         task_id: projectRun.id,
                         trace_id: projectRun.trace_id,
@@ -1372,9 +1385,13 @@ function createAgentRunnerRuntime(deps) {
             recordMetric(projectName, {
                 success: false,
                 durationMs: Date.now() - startedAt,
-                fileChangeCount: getFileChanges(projectName, changeSnapshot)?.count || 0
+                fileChangeCount: getFileChanges(projectName, changeSnapshot)?.count || 0,
+                scopeType: "project", projectId: projectName, role: "project_agent",
+                source: "project-agent-stream", runtime: agentType,
+                taskId: projectRun.id, executionId: projectRun.id,
+                usageAnchorId: `pmsg_${String(projectRun.id || "result")}_assistant`,
+                usage: projectRun.provider_usage || { source: "unreported", missingReason: "failed_before_provider" },
             });
-            broadcastPetSpeech(projectName, { role: "error", text: err.message, final: true, source: "project" });
             setAgentActivity(projectName, "error", "错误");
             res.end();
         });
@@ -1410,6 +1427,17 @@ function createAgentRunnerRuntime(deps) {
                     parent_run_id: projectRun.parent_run_id || "",
                     rollback_available: !!projectRun.checkpoint_id,
                 } });
+            recordMetric(projectName, {
+                success: false,
+                durationMs: Date.now() - startedAt,
+                fileChangeCount: getFileChanges(projectName, changeSnapshot)?.count || 0,
+                scopeType: "project", projectId: projectName, role: "project_agent",
+                source: "project-agent-stream", runtime: agentType,
+                taskId: projectRun.id, executionId: projectRun.id,
+                usageAnchorId: `pmsg_${String(projectRun.id || "result")}_assistant`,
+                usage: projectRun.provider_usage || { source: "unreported", missingReason: "runtime_unreported" },
+                error: "Agent 响应超时",
+            });
             res.end();
         }, 300000);
     }

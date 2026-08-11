@@ -163,19 +163,47 @@ const toggleApiKeyVisibility = async () => {
   }
 }
 
+const getSettingsScrollHost = (element) => element?.closest?.('.settings-page') || null
+
+const keepElementVisibleInSettings = (element, padding = 16) => {
+  const host = getSettingsScrollHost(element)
+  if (!host || !element) return
+  const hostRect = host.getBoundingClientRect()
+  const elementRect = element.getBoundingClientRect()
+  const maxScrollTop = Math.max(0, host.scrollHeight - host.clientHeight)
+  if (elementRect.top < hostRect.top + padding) {
+    host.scrollTop = Math.max(0, host.scrollTop - (hostRect.top + padding - elementRect.top))
+  } else if (elementRect.bottom > hostRect.bottom - padding) {
+    host.scrollTop = Math.min(maxScrollTop, host.scrollTop + elementRect.bottom - (hostRect.bottom - padding))
+  }
+}
+
+const captureSettingsScroll = () => {
+  const host = document.querySelector('.settings-page')
+  if (!host) return null
+  const distanceFromBottom = Math.max(0, host.scrollHeight - host.clientHeight - host.scrollTop)
+  return {
+    host,
+    scrollTop: host.scrollTop,
+    distanceFromBottom,
+    nearBottom: distanceFromBottom <= 180,
+  }
+}
+
+const restoreSettingsScroll = async (snapshot) => {
+  if (!snapshot?.host?.isConnected) return
+  await nextTick()
+  const maxScrollTop = Math.max(0, snapshot.host.scrollHeight - snapshot.host.clientHeight)
+  snapshot.host.scrollTop = snapshot.nearBottom
+    ? Math.max(0, maxScrollTop - snapshot.distanceFromBottom)
+    : Math.min(snapshot.scrollTop, maxScrollTop)
+}
+
 const handleAdvancedToggle = async (event) => {
   const details = event.currentTarget
   if (details?.open) return
   await nextTick()
-  let parent = details?.parentElement
-  while (parent) {
-    const overflowY = window.getComputedStyle(parent).overflowY
-    if (overflowY === 'auto' || overflowY === 'scroll') {
-      parent.scrollTop = Math.min(parent.scrollTop, Math.max(0, parent.scrollHeight - parent.clientHeight))
-    }
-    parent = parent.parentElement
-  }
-  details?.querySelector('summary')?.scrollIntoView({ behavior: 'auto', block: 'nearest', inline: 'nearest' })
+  keepElementVisibleInSettings(details?.querySelector('summary'))
 }
 
 const loadModelConfig = async () => {
@@ -192,6 +220,7 @@ const loadModelConfig = async () => {
 }
 
 const saveModelConfig = async (silent = false) => {
+  const scrollSnapshot = captureSettingsScroll()
   loading.value = true
   const payload = { ...modelConfig.value }
   if (!payload.apiKey || (revealedStoredApiKey.value && payload.apiKey === revealedStoredApiKey.value)) delete payload.apiKey
@@ -202,8 +231,11 @@ const saveModelConfig = async (silent = false) => {
     })
     const data = await response.json()
     if (!response.ok || !data.success) throw new Error(data.error || '保存失败')
+    const userMovedDuringSave = scrollSnapshot?.host?.isConnected
+      && Math.abs(scrollSnapshot.host.scrollTop - scrollSnapshot.scrollTop) > 48
     hideApiKey()
     modelConfig.value = { ...modelConfig.value, ...data.config, apiKey: '', summaryReviewerApiKey: '' }
+    if (!userMovedDuringSave) await restoreSettingsScroll(scrollSnapshot)
     if (!silent) toast.success('统一大模型配置已保存')
     return true
   } catch (error) {

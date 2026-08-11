@@ -48,6 +48,8 @@ const utils_1 = require("../../core/utils");
 const secure_multipart_1 = require("../../system/secure-multipart");
 const automation_session_bindings_1 = require("../../system/automation-session-bindings");
 const task_conversation_links_1 = require("../../system/task-conversation-links");
+const access_policy_1 = require("../system/access-policy");
+const task_intake_preflight_1 = require("./task-intake-preflight");
 const source_ingestion_1 = require("../requirements/source-ingestion");
 const source_evidence_v2_1 = require("../requirements/source-evidence-v2");
 const requirement_epic_self_tests_1 = require("../requirements/requirement-epic-self-tests");
@@ -214,9 +216,29 @@ function configureCollaborationRouteExecutors(ctx) {
     });
 }
 function handleCollaborationApiReplayAndExecutionRoutes(pathname, req, res, parsed, ctx) {
+    const taskForRead = (taskId, required = "use") => {
+        const task = (0, db_1.loadTasks)().find((item) => String(item?.id || "") === String(taskId || ""));
+        if (!task)
+            return { task: null, allowed: false };
+        return { task, allowed: (0, access_policy_1.hasTaskResourceAccess)(task, req.ccmAuth, required) };
+    };
+    const rejectTaskRead = (taskId, required = "use") => {
+        const access = taskForRead(taskId, required);
+        if (!access.task) {
+            (0, utils_1.sendJson)(res, { success: false, error: "任务不存在" }, 404);
+            return null;
+        }
+        if (!access.allowed) {
+            (0, utils_1.sendJson)(res, { success: false, error: "当前账户没有该任务的访问权限", code: "RESOURCE_ACCESS_DENIED" }, 403);
+            return null;
+        }
+        return access.task;
+    };
     const conversationLinksMatch = pathname.match(/^\/api\/tasks\/([^/]+)\/conversation-links$/);
     if (conversationLinksMatch && req.method === "GET") {
         const taskId = decodeURIComponent(conversationLinksMatch[1] || "").trim();
+        if (!rejectTaskRead(taskId))
+            return true;
         const projection = (0, task_conversation_links_1.buildTaskConversationLinks)(taskId);
         if (!projection) {
             (0, utils_1.sendJson)(res, { success: false, error: "任务不存在" }, 404);
@@ -233,6 +255,8 @@ function handleCollaborationApiReplayAndExecutionRoutes(pathname, req, res, pars
             (0, utils_1.sendJson)(res, { error: "缺少任务、运行或证据 ID" }, 400);
             return true;
         }
+        if (!rejectTaskRead(taskId))
+            return true;
         const artifact = (0, task_replay_1.resolveTaskReplayArtifact)({ taskId, runId, artifactId });
         if (!artifact) {
             (0, utils_1.sendJson)(res, { error: "证据不存在、已过期或不属于该任务" }, 404);
@@ -262,24 +286,78 @@ function handleCollaborationApiReplayAndExecutionRoutes(pathname, req, res, pars
         }
         return true;
     }
+    if (pathname === "/api/tasks/replay/freshness" && req.method === "GET") {
+        const taskId = String(parsed.query.task_id || parsed.query.taskId || "").trim();
+        if (!taskId) {
+            (0, utils_1.sendJson)(res, { success: false, error: "缺少任务 ID" }, 400);
+            return true;
+        }
+        if (!rejectTaskRead(taskId))
+            return true;
+        const freshness = (0, task_replay_1.buildTaskReplayFreshness)(taskId);
+        if (!freshness) {
+            (0, utils_1.sendJson)(res, { success: false, error: "任务不存在" }, 404);
+            return true;
+        }
+        res.setHeader("Cache-Control", "private, no-store");
+        (0, utils_1.sendJson)(res, { success: true, freshness });
+        return true;
+    }
+    if (pathname === "/api/tasks/replay/export" && req.method === "GET") {
+        const taskId = String(parsed.query.task_id || parsed.query.taskId || "").trim();
+        const format = String(parsed.query.format || "user_report").trim();
+        if (!taskId) {
+            (0, utils_1.sendJson)(res, { success: false, error: "缺少任务 ID" }, 400);
+            return true;
+        }
+        const required = format === "audit_json" ? "manage" : "use";
+        if (!rejectTaskRead(taskId, required))
+            return true;
+        if (!['user_report', 'audit_json'].includes(format)) {
+            (0, utils_1.sendJson)(res, { success: false, error: "不支持的导出格式" }, 400);
+            return true;
+        }
+        const payload = format === "audit_json" ? (0, task_replay_1.buildTaskReplayAuditExport)(taskId) : (0, task_replay_1.buildTaskReplayUserReport)(taskId);
+        if (!payload) {
+            (0, utils_1.sendJson)(res, { success: false, error: "任务不存在" }, 404);
+            return true;
+        }
+        res.writeHead(200, {
+            "Content-Type": "application/json; charset=utf-8",
+            "Cache-Control": "private, no-store",
+            "Content-Disposition": format === "audit_json" ? `attachment; filename="ccm-task-audit-${encodeURIComponent(taskId)}.json"` : "inline",
+            "X-Content-Type-Options": "nosniff",
+        });
+        res.end(JSON.stringify({ success: true, report: payload }));
+        return true;
+    }
     if ((pathname === "/api/tasks/replay" || pathname === "/api/tasks/replay/events") && req.method === "GET") {
         const taskId = String(parsed.query.id || parsed.query.task_id || parsed.query.taskId || "").trim();
         if (!taskId) {
             const requestedLimit = Number(parsed.query.limit || 40);
             const requestedPage = Number(parsed.query.page || 1);
             const limit = Number.isFinite(requestedLimit) ? Math.max(1, Math.min(100, requestedLimit)) : 40;
-            (0, utils_1.sendJson)(res, { success: true, index: (0, task_replay_1.buildTaskReplayIndex)({
-                    page: Number.isFinite(requestedPage) ? Math.max(1, requestedPage) : 1,
-                    limit,
-                    query: String(parsed.query.q || parsed.query.query || ""),
-                    project: String(parsed.query.project || ""),
-                    groupId: String(parsed.query.group_id || parsed.query.groupId || ""),
-                    status: String(parsed.query.status || ""),
-                    dateFrom: String(parsed.query.date_from || parsed.query.dateFrom || ""),
-                    dateTo: String(parsed.query.date_to || parsed.query.dateTo || ""),
-                }) });
+            const principal = req.ccmAuth;
+            const sourceTasks = (0, db_1.loadTasks)();
+            const visibleTasks = principal?.kind === "browser" && principal.role !== "admin"
+                ? sourceTasks.filter((task) => (0, access_policy_1.hasTaskResourceAccess)(task, principal, "use"))
+                : sourceTasks;
+            const index = (0, task_replay_1.buildTaskReplayIndexFromRecords)(visibleTasks, (0, storage_1.loadGroups)(), {
+                page: Number.isFinite(requestedPage) ? Math.max(1, requestedPage) : 1,
+                limit,
+                query: String(parsed.query.q || parsed.query.query || ""),
+                project: String(parsed.query.project || ""),
+                groupId: String(parsed.query.group_id || parsed.query.groupId || ""),
+                status: String(parsed.query.status || ""),
+                dateFrom: String(parsed.query.date_from || parsed.query.dateFrom || ""),
+                dateTo: String(parsed.query.date_to || parsed.query.dateTo || ""),
+            });
+            (0, utils_1.sendJson)(res, { success: true, index });
             return true;
         }
+        if (!rejectTaskRead(taskId))
+            return true;
+        const canManage = taskForRead(taskId, "manage").allowed;
         const hasEventPage = parsed.query.event_limit != null || parsed.query.eventLimit != null;
         const requestedEventOffset = Number(parsed.query.event_offset || parsed.query.eventOffset || 0);
         const requestedEventLimit = Number(parsed.query.event_limit || parsed.query.eventLimit || 160);
@@ -295,14 +373,14 @@ function handleCollaborationApiReplayAndExecutionRoutes(pathname, req, res, pars
             task: String(parsed.query.event_task_id || parsed.query.eventTaskId || ""),
             query: String(parsed.query.event_query || parsed.query.eventQuery || ""),
             preset: String(parsed.query.preset || ""),
-            includeSystemEvents: ["1", "true", "yes"].includes(String(parsed.query.include_system_events || parsed.query.includeSystemEvents || "").toLowerCase()),
+            includeSystemEvents: canManage && ["1", "true", "yes"].includes(String(parsed.query.include_system_events || parsed.query.includeSystemEvents || "").toLowerCase()),
             includeDetails: pathname !== "/api/tasks/replay/events",
         } : {});
         if (!replay) {
             (0, utils_1.sendJson)(res, { error: "任务不存在" }, 404);
             return true;
         }
-        (0, utils_1.sendJson)(res, { success: true, replay });
+        (0, utils_1.sendJson)(res, { success: true, replay: (0, task_replay_1.projectTaskReplayForAccess)(replay, canManage) });
         return true;
     }
     if (pathname === "/api/tasks/replay/self-test" && req.method === "GET") {
@@ -315,6 +393,8 @@ function handleCollaborationApiReplayAndExecutionRoutes(pathname, req, res, pars
             (0, utils_1.sendJson)(res, { error: "缺少任务 ID" }, 400);
             return true;
         }
+        if (!rejectTaskRead(taskId))
+            return true;
         const chain = (0, collaboration_1.buildTaskEntityChain)(taskId);
         if (!chain) {
             (0, utils_1.sendJson)(res, { error: "任务不存在" }, 404);
@@ -331,7 +411,12 @@ function handleCollaborationApiReplayAndExecutionRoutes(pathname, req, res, pars
     if (pathname === "/api/tasks/executions" && req.method === "GET") {
         const executionId = String(parsed.query.execution_id || parsed.query.executionId || "");
         const taskId = String(parsed.query.task_id || parsed.query.taskId || "");
-        (0, utils_1.sendJson)(res, { success: true, execution: executionId ? (0, execution_kernel_1.loadExecution)(executionId) : null, executions: executionId ? [] : (0, execution_kernel_1.listExecutions)(taskId ? { taskId } : {}) });
+        if (taskId && !rejectTaskRead(taskId))
+            return true;
+        const execution = executionId ? (0, execution_kernel_1.loadExecution)(executionId) : null;
+        if (execution?.taskId && !rejectTaskRead(String(execution.taskId)))
+            return true;
+        (0, utils_1.sendJson)(res, { success: true, execution, executions: executionId ? [] : (0, execution_kernel_1.listExecutions)(taskId ? { taskId } : {}) });
         return true;
     }
     if (pathname === "/api/tasks/native-sessions" && req.method === "GET") {
@@ -340,6 +425,8 @@ function handleCollaborationApiReplayAndExecutionRoutes(pathname, req, res, pars
             (0, utils_1.sendJson)(res, { error: "缺少任务 ID" }, 400);
             return true;
         }
+        if (!rejectTaskRead(taskId, "manage"))
+            return true;
         const sessions = (0, agent_sessions_1.listTaskAgentSessions)({ taskId }).map(session => ({ ...session, continuity: (0, agent_sessions_1.getTaskAgentSessionContinuity)(session) }));
         (0, utils_1.sendJson)(res, { success: true, task_id: taskId, sessions });
         return true;
@@ -743,7 +830,11 @@ function handleCollaborationApiReplayAndExecutionRoutes(pathname, req, res, pars
         const tasks = onlyArchived
             ? allTasks.filter((task) => task.archived || task.deleted_at)
             : includeArchived ? allTasks : allTasks.filter((task) => !task.archived && !task.deleted_at);
-        (0, utils_1.sendJson)(res, { tasks, archived_count: allTasks.filter((task) => task.archived || task.deleted_at).length });
+        const principal = req.ccmAuth;
+        const visibleTasks = principal?.kind === "browser" && principal.role !== "admin"
+            ? tasks.filter((task) => (0, access_policy_1.hasTaskResourceAccess)(task, principal, "use"))
+            : tasks;
+        (0, utils_1.sendJson)(res, { tasks: visibleTasks, archived_count: visibleTasks.filter((task) => task.archived || task.deleted_at).length });
         return true;
     }
     if (pathname === "/api/tasks/requirement-epic/self-test" && req.method === "GET") {
@@ -1585,6 +1676,36 @@ function handleCollaborationApiIntakeRoutesPartB(pathname, req, res, parsed, ctx
             let persistedTask = null;
             try {
                 let taskPayload = payload || {};
+                const preflight = (0, task_intake_preflight_1.buildTaskPreflight)(taskPayload, req);
+                if (!preflight.allowed) {
+                    (0, task_attachments_1.removeUploadedFiles)(files);
+                    return (0, utils_1.sendJson)(res, { success: false, error: preflight.errors[0]?.message || "任务预检未通过", code: preflight.errors[0]?.code || "TASK_PREFLIGHT_FAILED", preflight }, 422);
+                }
+                if (preflight.requiresConfirmation && taskPayload.preflight_confirmed !== true && taskPayload.preflightConfirmed !== true) {
+                    (0, task_attachments_1.removeUploadedFiles)(files);
+                    return (0, utils_1.sendJson)(res, { success: false, needs_confirmation: true, error: "任务存在重复或工作区风险，请确认后再提交", code: "TASK_PREFLIGHT_CONFIRMATION_REQUIRED", preflight }, 409);
+                }
+                taskPayload = {
+                    ...taskPayload,
+                    title: preflight.finalTask.title,
+                    description: preflight.finalTask.instructions,
+                    priority: preflight.finalTask.priority,
+                    deadline_at: preflight.finalTask.deadlineAt,
+                    mission_dependencies: preflight.finalTask.dependencyIds,
+                    task_template_id: preflight.template?.id || null,
+                    task_template_revision: preflight.template?.revision || null,
+                    template_variables: preflight.template?.rendered?.values || null,
+                    intake_preflight: {
+                        schema: preflight.schema,
+                        checked_at: preflight.checkedAt,
+                        target: preflight.target,
+                        automation_session: preflight.automationSession,
+                        agent: preflight.agent,
+                        test_agent: preflight.testAgent,
+                        warning_codes: preflight.warnings.map((item) => item.code),
+                        contentStored: false,
+                    },
+                };
                 if (files.length) {
                     const attachments = await (0, task_attachments_1.buildTaskAttachmentMutation)({
                         files,
@@ -1615,6 +1736,14 @@ function handleCollaborationApiIntakeRoutesPartB(pathname, req, res, parsed, ctx
                         exact_session_id: taskPayload.exact_session_id || taskPayload.exactSessionId || (assignType === "group" ? taskPayload.group_session_id || taskPayload.groupSessionId : taskPayload.project_session_id || taskPayload.projectSessionId) || "",
                         client_message_id: taskPayload.client_message_id || taskPayload.clientMessageId || `standard_${crypto.randomUUID()}`,
                     };
+                }
+                const principal = req.ccmAuth;
+                if (principal?.kind === "browser" && principal.role !== "admin") {
+                    const isGroup = assignType === "group";
+                    const targetId = String(isGroup ? taskPayload.group_id || taskPayload.groupId || taskPayload.target_id || taskPayload.targetId : taskPayload.target_project || taskPayload.targetProject || taskPayload.target_id || taskPayload.targetId || "").trim();
+                    if (!targetId || !(0, access_policy_1.hasResourceAccess)(principal.userId, principal.role, isGroup ? "group" : "project", targetId, "use")) {
+                        throw new Error("当前账户没有所选项目或群聊的任务派发权限");
+                    }
                 }
                 const task = (0, collaboration_1.createTask)(taskPayload);
                 persistedTask = task;

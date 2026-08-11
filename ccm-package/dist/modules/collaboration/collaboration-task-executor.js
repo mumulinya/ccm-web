@@ -12,6 +12,8 @@ const task_acceptance_policy_1 = require("./task-acceptance-policy");
 const db_1 = require("../../core/db");
 const agent_communication_v2_1 = require("../../system/agent-communication-v2");
 const agent_communication_mcp_1 = require("../../integrations/agent-communication-mcp");
+const agent_sessions_1 = require("../../tasks/agent-sessions");
+const user_visible_agent_events_1 = require("../../system/user-visible-agent-events");
 function groupPlanningProjectRefs(task) {
     return Array.from(new Set([
         ...(Array.isArray(task?.workflow_decision?.targetRefs) ? task.workflow_decision.targetRefs : []),
@@ -136,6 +138,65 @@ async function executeTask(task, ctx, deps) {
         if (!group)
             throw new Error("群聊不存在");
         const coordinatorProject = getCoordinatorMember(group).project;
+        const appendGroupTaskPlanState = (phase) => {
+            const latestTask = loadTasks().find((item) => item.id === task.id) || task;
+            const planMode = latestTask?.workflow_meta?.plan_mode || latestTask?.workflow_meta?.intake?.plan_mode || latestTask?.intake_draft || {};
+            const sourceSteps = Array.isArray(planMode?.steps) ? planMode.steps : [];
+            if (!sourceSteps.length)
+                return null;
+            const normalized = sourceSteps.map((step, index) => ({
+                id: String(step?.id || `step_${index + 1}`),
+                title: String(step?.label || step?.title || `实施步骤 ${index + 1}`),
+                description: String(step?.detail || "按当前计划完成该步骤。"),
+                outcome: String(step?.outcome || "完成后进入下一阶段。"),
+                project: String(step?.project || ""),
+                dependsOn: Array.isArray(step?.dependsOn || step?.depends_on) ? (step.dependsOn || step.depends_on) : [],
+                status: String(step?.status || "pending"),
+            }));
+            const completedStatus = (value) => ["completed", "done", "success", "succeeded"].includes(value.toLowerCase());
+            let activeAssigned = false;
+            const steps = normalized.map((step) => {
+                if (phase === "completed")
+                    return { ...step, status: "completed" };
+                if (phase === "reviewing")
+                    return { ...step, status: step.id === "verify_and_summarize" || step.id === "verify_and_reply" ? "running" : "completed" };
+                if (phase === "dispatching") {
+                    if (step.id === "dispatch_sub_agents")
+                        return { ...step, status: "running" };
+                    if (["understand_goal", "read_only_explore", "confirm_boundary"].includes(step.id))
+                        return { ...step, status: "completed" };
+                }
+                if (phase === "blocked" && !activeAssigned && !completedStatus(step.status)) {
+                    activeAssigned = true;
+                    return { ...step, status: "blocked" };
+                }
+                return step;
+            });
+            const revision = Math.max(1, Number(latestTask?.user_visible_plan_revision || 1) + 1);
+            updateTask(task.id, { user_visible_plan_revision: revision });
+            return (0, user_visible_agent_events_1.appendUserVisibleRequirementPlan)({
+                eventId: `group-task:${task.id}:requirement-plan:${revision}:${phase}`,
+                scope: "group",
+                scopeId: String(task.group_id),
+                exactSessionId: String(latestTask?.group_session_id || latestTask?.groupSessionId || ""),
+                anchorMessageId: String(latestTask?.anchor_message_id || latestTask?.target_message_id || `task-message:${task.id}`),
+                generation: Math.max(0, Number(latestTask?.generation || 0)),
+                taskId: String(task.id),
+                plan: {
+                    planId: String(task.id),
+                    revision,
+                    title: String(latestTask?.title || "需求实施计划"),
+                    goal: String(latestTask?.business_goal || latestTask?.title || "完成当前群聊任务。"),
+                    steps,
+                    scope: planMode?.impact_scope?.projects || [],
+                    expectedResults: planMode?.acceptance || [],
+                    exclusions: planMode?.permission_boundaries || [],
+                    status: phase === "completed" ? "completed" : phase === "blocked" ? "blocked" : "executing",
+                    createdAt: String(latestTask?.created_at || new Date().toISOString()),
+                    updatedAt: new Date().toISOString(),
+                },
+            });
+        };
         const message = buildQueuedGroupTaskMessage(task);
         appendTaskTimelineEvent(task.id, { type: "queued_group_task", title: "任务进入群聊主 Agent", detail: task.title || "", status: "active", phase: "intake", agent: coordinatorProject, data: { group_id: task.group_id } });
         appendGroupMessage(task.group_id, {
@@ -324,6 +385,7 @@ async function executeTask(task, ctx, deps) {
             test_agent_verification_profile: semanticReasoning.verificationProfile || null,
             workflow_decision: coordinatorResult.analysis?.workflowDecision || task.workflow_decision || null,
         });
+        appendGroupTaskPlanState("planning");
         appendTaskTimelineEvent(task.id, { type: "reasoning_plan", title: `主 Agent 推理计划 v${taskReasoning.plan_version}`, detail: `事实 ${(semanticReasoning.knownFacts || []).length} · 假设 ${(semanticReasoning.assumptionsToVerify || []).length} · 断言 ${(semanticReasoning.verificationAssertions || []).length}`, status: "ok", phase: "planning", agent: coordinatorProject, data: { plan_version: taskReasoning.plan_version, reasoning: semanticReasoning } });
         const coordinatorRuntime = String(coordinatorResult.runtime || "");
         if (coordinatorRuntime === "llm-error") {
@@ -516,7 +578,9 @@ async function executeTask(task, ctx, deps) {
                     },
                 });
             }
+            appendGroupTaskPlanState("dispatching");
             crossOutputs = await processCrossAgents(task.group_id, group, coordinatorProject, coordinatorOutput, validMentions, configs, ctx, null, 0, new Set(), coordinatorResult.executionOrder || "parallel", coordinatorMessageId, task.id);
+            appendGroupTaskPlanState("reviewing");
             reviewResult = await runCoordinatorReviewLoop({
                 groupId: task.group_id,
                 group,
@@ -534,7 +598,9 @@ async function executeTask(task, ctx, deps) {
         }
         const outputText = [...coordinatorTranscript, ...crossOutputs, reviewResult?.content || ""].filter(Boolean).join("\n\n---\n\n");
         const latestTask = loadTasks().find((item) => item.id === task.id) || task;
-        return getGroupTaskExecutionStatus(reviewResult, coordinatorResult, outputText, latestTask);
+        const executionResult = getGroupTaskExecutionStatus(reviewResult, coordinatorResult, outputText, latestTask);
+        appendGroupTaskPlanState(executionResult.status === "done" ? "completed" : "blocked");
+        return executionResult;
     }
     else {
         const config = configs.find(c => c.name === task.target_project);
@@ -621,21 +687,31 @@ async function executeTask(task, ctx, deps) {
         }
         appendTaskTimelineEvent(task.id, { type: "sandbox_rehearsal", title: "任务前沙盘演练", detail: `${directSandboxRehearsal.impact_scope.areas.join("、")}；直接派发给 ${task.target_project}`, status: "ok", phase: "planning", agent: task.target_project, data: directSandboxRehearsal });
         const changeSnapshot = workDir ? ctx.createFileChangeSnapshot(workDir) : null;
-        const reworkInstruction = String(task?.workflow_meta?.project_test_rework?.instruction || "").trim();
+        const coordinationReworkInstruction = task?.workflow_type === "agent_coordination_dependency"
+            ? String(task?.workflow_meta?.coordination_dependency_rework?.instruction || "").trim()
+            : "";
+        const reworkInstruction = coordinationReworkInstruction || String(task?.workflow_meta?.project_test_rework?.instruction || "").trim();
         const directTaskText = buildChildAgentTaskText([
             `${task.title}\n${task.description || ""}`,
-            reworkInstruction ? `[TestAgent 返工要求]\n${reworkInstruction}` : "",
+            reworkInstruction ? `[${coordinationReworkInstruction ? "群聊主 Agent 验收返工要求" : "TestAgent 返工要求"}]\n${reworkInstruction}` : "",
         ].filter(Boolean).join("\n\n"), task);
+        const directGroupSessionId = String(task.group_session_id || task.groupSessionId || "");
+        const directProjectSessionId = String(task.project_session_id || task.projectSessionId || "");
+        const directContinuity = directGroupSessionId
+            ? (0, agent_sessions_1.buildTaskAgentContinuityBinding)({ scope: "group", scopeId: String(task.group_id || ""), exactSessionId: directGroupSessionId, project: task.target_project, agentType })
+            : directProjectSessionId
+                ? (0, agent_sessions_1.buildTaskAgentContinuityBinding)({ scope: "project", scopeId: task.target_project, exactSessionId: directProjectSessionId, project: task.target_project, agentType })
+                : null;
         let directTaskSession = openTaskAgentSession({
             scopeId: task.id,
             taskId: task.id,
             groupId: task.group_id || "",
             project: task.target_project,
             agentType,
+            continuity: directContinuity,
         });
         markGroupCoordinationDependencyStarted(task, preparedWorkDir, directTaskSession);
         const directMemoryDeliveryAttemptSequence = directTaskSession ? directTaskSession.turnCount + 1 : 0;
-        const directGroupSessionId = String(task.group_session_id || task.groupSessionId || "");
         const communicationScope = task.group_id ? "group" : task.global_mission_id ? "global" : "project";
         const communicationScopeId = String(task.group_id || task.global_mission_id || task.target_project);
         const communicationExactSessionId = directGroupSessionId || String(task.project_session_id || task.projectSessionId || task.id);
@@ -1388,8 +1464,21 @@ ${requirementEpicExecutionBoundary(task)}
         const independentTestAgentEnabled = acceptancePolicy?.mode === "test_agent";
         let projectReview = null;
         if (requiresProjectReview && !independentTestAgentEnabled) {
-            updateTask(task.id, { status: "reviewing", acceptance_state: "main_agent_self_verifying", status_detail: "TestAgent 已关闭，项目主 Agent 正在执行一次自验" });
-            appendTaskTimelineEvent(task.id, { type: "project_main_self_verification_started", title: "项目主 Agent 开始自验", detail: "TestAgent 已关闭，本轮不产生独立验收结论", status: "active", phase: "reviewing", agent: task.target_project });
+            const coordinationDependency = task.workflow_type === "agent_coordination_dependency";
+            const verifierLabel = coordinationDependency ? "群聊主 Agent" : "项目主 Agent";
+            updateTask(task.id, {
+                status: "reviewing",
+                acceptance_state: "main_agent_self_verifying",
+                status_detail: coordinationDependency ? "群聊主 Agent 正在核对文件变化和项目验证" : "TestAgent 已关闭，项目主 Agent 正在执行一次自验",
+            });
+            appendTaskTimelineEvent(task.id, {
+                type: coordinationDependency ? "group_main_dependency_verification_started" : "project_main_self_verification_started",
+                title: `${verifierLabel} 开始验收`,
+                detail: coordinationDependency ? "此协作依赖只由群聊主 Agent 验收，不创建 TestAgent 记录" : "TestAgent 已关闭，本轮不产生独立验收结论",
+                status: "active",
+                phase: "reviewing",
+                agent: coordinationDependency ? "group-main-agent" : task.target_project,
+            });
             projectReview = await (0, main_agent_self_verification_1.runMainAgentSelfVerification)({
                 task: loadTasks().find((item) => item.id === task.id) || task,
                 policy: acceptancePolicy,
@@ -1405,7 +1494,15 @@ ${requirementEpicExecutionBoundary(task)}
                 workerOutputs: [output],
             });
             updateTask(task.id, { test_agent_review: null, main_agent_self_verification: projectReview, acceptance_state: projectReview.canAccept ? "main_agent_self_verified" : "main_agent_self_verification_failed" });
-            appendTaskTimelineEvent(task.id, { type: "project_main_self_verification_finished", title: projectReview.canAccept ? "项目主 Agent 自验通过" : "项目主 Agent 自验未通过", detail: projectReview.report.summary, status: projectReview.canAccept ? "ok" : "warn", phase: "reviewing", agent: task.target_project, data: { review: projectReview } });
+            appendTaskTimelineEvent(task.id, {
+                type: coordinationDependency ? "group_main_dependency_verification_finished" : "project_main_self_verification_finished",
+                title: projectReview.canAccept ? `${verifierLabel} 验收通过` : `${verifierLabel} 验收未通过`,
+                detail: projectReview.report.summary,
+                status: projectReview.canAccept ? "ok" : "warn",
+                phase: "reviewing",
+                agent: coordinationDependency ? "group-main-agent" : task.target_project,
+                data: { review: projectReview, test_agent_created: false },
+            });
             if (!projectReview.canAccept) {
                 return { ...result, status: "blocked", detail: projectReview.report.summary, review: projectReview, testAgent: null, mainAgentSelfVerification: projectReview, ...coordination };
             }
@@ -1542,9 +1639,9 @@ ${requirementEpicExecutionBoundary(task)}
             main_agent_final_acceptance: mainAgentFinalAcceptance,
         });
         const acceptedResult = requiresProjectReview
-            ? { ...result, status: "done", detail: independentTestAgentEnabled ? "TestAgent 与项目主 Agent 验收通过" : "项目主 Agent 自验通过", review: projectReview, testAgent: independentTestAgentEnabled ? projectReview : null, mainAgentSelfVerification: independentTestAgentEnabled ? null : projectReview, mainAgentFinalAcceptance }
+            ? { ...result, status: "done", detail: independentTestAgentEnabled ? "TestAgent 与项目主 Agent 验收通过" : task.workflow_type === "agent_coordination_dependency" ? "群聊主 Agent 验收通过" : "项目主 Agent 自验通过", review: projectReview, testAgent: independentTestAgentEnabled ? projectReview : null, mainAgentSelfVerification: independentTestAgentEnabled ? null : projectReview, mainAgentFinalAcceptance }
             : result;
-        transitionExecution(task.id, acceptedResult.status === "done" ? "reviewing" : "failed", acceptedResult.status === "done" ? independentTestAgentEnabled ? "项目 Agent 已交付并通过独立验收" : "项目 Agent 已交付并通过主 Agent 自验" : acceptedResult.detail, {
+        transitionExecution(task.id, acceptedResult.status === "done" ? "reviewing" : "failed", acceptedResult.status === "done" ? independentTestAgentEnabled ? "项目 Agent 已交付并通过独立验收" : task.workflow_type === "agent_coordination_dependency" ? "协作依赖已交付，等待群聊主 Agent 合并" : "项目 Agent 已交付并通过主 Agent 自验" : acceptedResult.detail, {
             green,
             receipt,
             fileChanges,

@@ -71,6 +71,8 @@ export type ProjectMainPlanRevisionV1 = {
     };
 };
 export type ProjectMainWorkerResult = {
+    workItemId?: string;
+    reviewRound?: number;
     success: boolean;
     output: string;
     fileChanges: any;
@@ -108,6 +110,15 @@ export declare function runProjectMainAgentFirstTurn(input: {
     toolResults: any[];
     turnDecision: import("../../agents/main-agent-turn").MainAgentTurnDecisionV1;
     turnReceipt: import("../../agents/main-agent-turn").MainAgentTurnReceiptV1;
+    metric: {
+        durationMs: number;
+        modelMs: number;
+        toolWallMs: number;
+        usage: any;
+        modelCalls: number;
+        toolCalls: number;
+        usageAnchorId: string;
+    };
     mainAgentToolUsage: {
         schema: string;
         mode: import("../../system/agent-loop-budget").AgentLoopMode;
@@ -290,8 +301,23 @@ export declare function projectMainTaskPublic(task: any): {
         checkpoint: any;
         recoverable: boolean;
         auto_resume_allowed: boolean;
+        resume_checkpoint: {
+            phase: any;
+            workItemId: any;
+            reviewRound: number;
+            completedWorkItemCount: any;
+            summaryPending: boolean;
+        };
+        recovery: any;
         interrupted_at: any;
         checksum: any;
+    };
+    recovery: {
+        mode: any;
+        state: any;
+        attempt: number;
+        maxAttempts: number;
+        nextRetryAt: any;
     };
     recovery_decision: any;
     actions: {

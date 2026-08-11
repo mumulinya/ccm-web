@@ -149,11 +149,11 @@ const submitPath = () => {
 .tags-field { grid-column: 1 / -1; }
 label { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
 label > span { color: var(--text-secondary, #64748b); font-size: 10.5px; font-weight: 600; }
-input, select { width: 100%; height: 34px; box-sizing: border-box; border: 1px solid var(--border-color, #dbe2ea); border-radius: 6px; padding: 0 9px; outline: none; background: var(--bg-primary, #f8fafc); color: var(--text-primary, #0f172a); font: inherit; font-size: 12px; }
-input:focus, select:focus { border-color: #2563eb; box-shadow: 0 0 0 2px rgba(37,99,235,.1); }
+input, select { width: 100%; height: var(--control-height,34px); box-sizing: border-box; border: 1px solid var(--border-color, #dbe2ea); border-radius: var(--radius-md,6px); padding: 0 var(--control-padding-x,10px); outline: none; background: var(--control-bg); color: var(--text-primary, #0f172a); font: inherit; font-size: 12px; transition:border-color .15s ease,box-shadow .15s ease; }
+input:focus, select:focus { border-color: var(--accent-blue); box-shadow: var(--focus-ring); }
 .source-body, .url-form, .directory-form { padding: 14px 18px 18px; }
 .hidden-input { display: none; }
-.drop-zone { width: 100%; min-height: 132px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; border: 1px dashed #94a3b8; border-radius: 7px; background: var(--bg-primary, #f8fafc); color: var(--text-primary, #0f172a); cursor: pointer; }
+.drop-zone { width: 100%; min-height: 132px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; border: 1px dashed var(--border-strong); border-radius: var(--radius-lg,8px); background: var(--panel-muted); color: var(--text-primary, #0f172a); cursor: pointer; }
 .drop-zone:hover, .drop-zone.dragging { border-color: #2563eb; background: rgba(37,99,235,.04); }
 .drop-zone.disabled { opacity: .55; cursor: not-allowed; }
 .upload-symbol { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 50%; background: #dbeafe; color: #1d4ed8; font-size: 18px; }

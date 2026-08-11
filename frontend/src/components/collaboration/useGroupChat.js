@@ -626,6 +626,25 @@ export function useGroupChat(props, emit) {
       : '原消息已载入输入框，修改后发送即可重新请求')
   }
 
+  const handleGroupModelFailureAction = async (message, messageIndex, action) => {
+    if (action === 'settings') {
+      emit('set-navigation', { tab: 'settings', section: 'models', source: 'group-model-failure' })
+      emit('switch-tab', 'settings')
+      return
+    }
+    if (action !== 'retry') return
+    if (isStreaming.value) return toast.info('请先等待当前请求结束或停止执行')
+    const originalUserId = String(message?.recovery?.originalUserMessageId || message?.recovery?.original_user_message_id || '')
+    const originalUser = originalUserId
+      ? messages.value.find(item => String(item?.id || '') === originalUserId)
+      : [...messages.value.slice(0, Math.max(0, Number(messageIndex) || 0))].reverse().find(item => item?.role === 'user')
+    if (!originalUser) return toast.warning('没有找到可恢复的原始请求，请重新发送需求')
+    newMessage.value = '继续'
+    messageFiles.value = []
+    await nextTick()
+    return sendMessage({ resumeInterruption: message })
+  }
+
   // 加载数据
   loadGroups = async () => {
     const data = await groupsApi.list()
@@ -963,7 +982,7 @@ export function useGroupChat(props, emit) {
     submitCreateGroup, submitRename, deleteGroup, clearGroupMessages, saveCurrentGroupConversationKnowledge,
     isStreaming, thinkingMessages, pendingGroupSendRetry, groupStreamController, activeGroupTaskId,
     stoppingGroupTurn, groupTurnConversationId, groupTurnControl, stopGroupCurrentWork, drainGroupTurnQueue, guideGroupQueuedTurn,
-    submitGroupMessageWhileBusy, groupSendRetrySignature, sendMessage, editGroupUserMessage, waitingCrossReply, pullNewMessages,
+    submitGroupMessageWhileBusy, groupSendRetrySignature, sendMessage, editGroupUserMessage, handleGroupModelFailureAction, waitingCrossReply, pullNewMessages,
     logs, logFilter, logEventSource, logsResizeObserver, scrollLogsToBottom, loadLogs, startLogStream,
     stopLogStream, clearLogs, normalizeGroupTools, loadAvailableGroupTools, loadGroupTools, toggleGroupTool, updateGroupContextPolicy,
     saveGroupTools, groupTestTargets, groupTestTargetProjects, groupTestTargetsLoading, groupTestTargetsSaving,

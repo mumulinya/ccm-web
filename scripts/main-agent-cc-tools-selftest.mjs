@@ -41,6 +41,8 @@ assert.equal(listing.items.some(item => item.name === "src"), true);
 assert.equal(listing.items.some(item => item.name === ".env"), false);
 const listingDisplay = toolDisplay.buildToolDisplayDetail({ toolName: "mcp__ccm__ccm_workspace_readonly__list_directory", arguments: { project_id: "alpha", path: "", limit: 20 }, result: listing });
 assert.equal(listingDisplay.tool.label, "List directory");
+assert.equal(listingDisplay.tool.family, "read");
+assert.equal(listingDisplay.tool.userLabel, "查找目录");
 assert.equal(listingDisplay.tool.serverLabel, "ccm_workspace_readonly");
 assert.equal(listingDisplay.result.rows.some(item => item.name === "src"), true);
 const glob = await workspace.executeWorkspaceReadonlyTool("glob_files", { pattern: "**/*.ts", limit: 20 }, token);
@@ -51,6 +53,8 @@ const firstRead = await workspace.executeWorkspaceReadonlyTool("read_file", { pa
 assert.equal(firstRead.lines.length, 1);
 assert.equal(firstRead.truncated, true);
 const persistedReadDisplay = toolDisplay.buildToolDisplayDetail({ toolName: "mcp__ccm__ccm_workspace_readonly__read_file", arguments: { path: "src/service.ts", offset: 1, limit: 1 }, result: firstRead });
+assert.equal(persistedReadDisplay.tool.family, "read");
+assert.equal(persistedReadDisplay.tool.userLabel, "读取文件");
 assert.equal(JSON.stringify(persistedReadDisplay).includes("export function alpha"), false);
 assert.equal(persistedReadDisplay.result.rehydratable, true);
 const rehydratedReadDisplay = await eventApi.rehydrateReadonlyToolDetail({
@@ -59,6 +63,13 @@ const rehydratedReadDisplay = await eventApi.rehydrateReadonlyToolDetail({
   detail: { safeArguments: { path: "src/service.ts", offset: 1, limit: 1 } },
 });
 assert.equal(JSON.stringify(rehydratedReadDisplay).includes("export function alpha"), true);
+const searchDisplay = toolDisplay.buildToolDisplayDetail({ toolName: "mcp__ccm__ccm_workspace_readonly__grep_text", arguments: { pattern: "alpha" }, result: { lines: [], total: 0 } });
+assert.equal(searchDisplay.tool.family, "search");
+assert.equal(searchDisplay.tool.userLabel, "搜索代码");
+const terminalDisplay = toolDisplay.buildToolDisplayDetail({ toolName: "run_terminal", arguments: { command: "npm test TOKEN=super-secret" }, includeTechnicalCommand: true });
+assert.equal(terminalDisplay.tool.family, "terminal");
+assert.equal(terminalDisplay.tool.userLabel, "运行项目命令");
+assert.equal(String(terminalDisplay.sensitiveCommand).includes("super-secret"), false);
 await assert.rejects(() => eventApi.rehydrateReadonlyToolDetail({
   scope: "project", scopeId: "alpha", exactSessionId: "pchat-alpha", generation: 3,
   toolName: "mcp__external__write_file", toolCallId: "write-call", detail: { safeArguments: { path: "src/service.ts" } },

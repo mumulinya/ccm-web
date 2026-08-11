@@ -59,6 +59,7 @@ function openTaskAgentSession(input) {
     return (0, agent_sessions_shared_1.withTaskAgentSessionStoreLock)(() => {
         const store = (0, agent_sessions_shared_1.loadStore)();
         const runtime = (0, runtime_1.normalizeAgentRuntimeId)(input.agentType);
+        const continuity = input.continuity?.agentType === runtime ? input.continuity : null;
         const existing = [...store.sessions].reverse().find((item) => item.status === "open"
             && item.scopeId === input.scopeId
             && item.groupId === input.groupId
@@ -76,6 +77,17 @@ function openTaskAgentSession(input) {
             return existing;
         }
         const now = new Date().toISOString();
+        const continuitySessions = continuity
+            ? [...store.sessions].reverse().filter((item) => item.continuityKey === continuity.key && item.agentType === runtime)
+            : [];
+        const activeSibling = continuitySessions.find((item) => item.status === "open" && item.taskId !== String(input.taskId || ""));
+        const reusableSource = activeSibling
+            ? null
+            : continuitySessions.find((item) => item.resumeMode === "native" && !!item.nativeSessionId);
+        const priorGeneration = continuitySessions.reduce((max, item) => Math.max(max, Number(item.continuityGeneration || 0)), 0);
+        const continuityMode = activeSibling
+            ? "isolated_branch"
+            : reusableSource ? "reused" : "fresh";
         const session = {
             id: `tas_${Date.now().toString(36)}_${crypto.randomBytes(3).toString("hex")}`,
             scopeId: String(input.scopeId || input.taskId || "").trim(),
@@ -83,10 +95,10 @@ function openTaskAgentSession(input) {
             groupId: String(input.groupId || "").trim(),
             project: String(input.project || "").trim(),
             agentType: runtime,
-            nativeSessionId: (0, agent_sessions_shared_1.createNativeSessionId)(runtime),
-            resumeMode: (0, runtime_1.getAgentRuntime)(runtime).capabilities.sessionResume ? "native" : "scratchpad",
+            nativeSessionId: reusableSource?.nativeSessionId || (0, agent_sessions_shared_1.createNativeSessionId)(runtime),
+            resumeMode: reusableSource?.resumeMode || ((0, runtime_1.getAgentRuntime)(runtime).capabilities.sessionResume ? "native" : "scratchpad"),
             status: "open",
-            turnCount: 0,
+            turnCount: reusableSource ? Number(reusableSource.turnCount || 0) : 0,
             lastTurnSucceeded: null,
             createdAt: now,
             lastUsedAt: now,
@@ -97,6 +109,13 @@ function openTaskAgentSession(input) {
             nativeSessionHistory: [],
             lastNativeRecoveryAt: "",
             lastError: "",
+            continuityKey: continuity?.key || "",
+            continuityScope: continuity?.scope,
+            continuityExactSessionId: continuity?.exactSessionId || "",
+            continuityGeneration: reusableSource ? Number(reusableSource.continuityGeneration || 1) : priorGeneration + 1,
+            continuityMode,
+            continuitySourceSessionId: reusableSource?.id || activeSibling?.id || "",
+            continuityBranchId: activeSibling ? `tab_${crypto.randomBytes(8).toString("hex")}` : "",
         };
         store.sessions.push(session);
         (0, agent_sessions_shared_1.saveStore)(store);
@@ -394,6 +413,10 @@ function getTaskAgentSessionContinuity(session) {
     return {
         mode: session.resumeMode,
         native: session.resumeMode === "native" && !!session.nativeSessionId,
+        conversationBound: !!session.continuityKey,
+        continuityGeneration: Number(session.continuityGeneration || 0),
+        continuityMode: session.continuityMode || "fresh",
+        isolatedBranch: session.continuityMode === "isolated_branch",
         degraded: session.resumeMode === "scratchpad" && (0, runtime_1.getAgentRuntime)(session.agentType).capabilities.sessionResume,
         reason: session.lastError || "",
         turnCount: session.turnCount,

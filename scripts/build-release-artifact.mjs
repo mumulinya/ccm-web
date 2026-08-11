@@ -104,7 +104,7 @@ const petPackOutput = JSON.parse(run(npmCommand, [...npmPrefix, 'pack', petPacka
 const petPacked = petPackOutput[0]
 const petTarball = path.join(outputRoot, petPacked.filename)
 
-const budgets = { compressed_bytes: 20 * 1024 * 1024, unpacked_bytes: 35 * 1024 * 1024, entries: 700 }
+const budgets = { compressed_bytes: 20 * 1024 * 1024, unpacked_bytes: 35 * 1024 * 1024, entries: 800 }
 const actual = {
   compressed_bytes: fs.statSync(tarball).size,
   unpacked_bytes: Number(packed.unpackedSize || 0),

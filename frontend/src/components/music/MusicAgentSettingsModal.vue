@@ -251,26 +251,28 @@ const emit = defineEmits(['close', 'save', 'update-proxy', 'update-weather-locat
 
 .field input {
   width: 100%;
+  height: var(--control-height-lg, 36px);
   box-sizing: border-box;
-  padding: 10px 12px;
+  padding: 0 var(--control-padding-x, 10px);
   border: 1px solid rgba(165, 139, 255, 0.18);
-  border-radius: 10px;
+  border-radius: var(--radius-md, 6px);
   outline: none;
   background: rgba(7, 5, 16, 0.72);
   color: #f5f0ff;
   font-size: 13px;
 }
+.field input:focus{border-color:#65d6df;box-shadow:0 0 0 3px rgba(101,214,223,.12)}
 
 .settings-section { display: grid; gap: 2px; overflow: hidden; border: 1px solid rgba(165,139,255,.14); border-radius: 8px; background: rgba(255,255,255,.018); }
 .section-heading { padding: 12px; display: flex; align-items: center; gap: 9px; border-bottom: 1px solid rgba(165,139,255,.12); color: #cfc2fb; }
 .section-heading > div { display: flex; flex-direction: column; gap: 2px; }.section-heading strong { font-size: 12px; }.section-heading span { color: #897ca5; font-size: 10px; }
 .setting-row { min-height: 54px; padding: 8px 12px; display: flex; align-items: center; justify-content: space-between; gap: 14px; border-bottom: 1px solid rgba(165,139,255,.07); }
 .setting-row:last-of-type { border-bottom: 0; }.setting-row > span { min-width: 0; display: flex; flex-direction: column; gap: 3px; }.setting-row strong { display: inline-flex; align-items: center; gap: 5px; color: #ddd4f5; font-size: 11px; }.setting-row small { color: #837799; font-size: 9px; line-height: 1.45; }
-.setting-row select { max-width: 170px; height: 31px; border: 1px solid rgba(165,139,255,.18); border-radius: 5px; color: #ded4f6; background: #100d1d; font-size: 10px; }
+.setting-row select { max-width: 170px; height: var(--control-height,34px); padding:0 28px 0 var(--control-padding-x,10px);border: 1px solid rgba(165,139,255,.18); border-radius: var(--radius-md,6px); color: #ded4f6; background: #100d1d; font-size: 10px;outline:0 }.setting-row select:focus{border-color:#65d6df;box-shadow:0 0 0 3px rgba(101,214,223,.12)}
 .setting-row.vertical { align-items: stretch; flex-direction: column; gap: 7px; }.setting-row input[type="range"] { width: 100%; accent-color: #7fdce5; }
 .switch-row input[type="checkbox"] { width: 34px; height: 18px; accent-color: #65d6df; cursor: pointer; }
 .model-call { box-shadow: inset 2px 0 0 rgba(83,205,215,.3); }.model-note { margin: 0; padding: 9px 12px; color: #6f8794; background: rgba(83,205,215,.035); font-size: 9px; line-height: 1.55; }
-.inline-actions { display: flex; align-items: center; gap: 6px; }.inline-actions button, .inline-command { min-height: 30px; padding: 0 9px; display: inline-flex; align-items: center; justify-content: center; gap: 5px; border: 1px solid rgba(165,139,255,.2); border-radius: 5px; color: #d8ccff; background: rgba(165,139,255,.05); cursor: pointer; }.inline-actions button:first-child { width: 30px; padding: 0; }.douyin-official-fields { padding: 10px 12px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }.douyin-official-fields label { min-width: 0; display: grid; gap: 5px; color: #9488aa; font-size: 9px; }.douyin-official-fields input { min-width: 0; height: 32px; padding: 0 9px; border: 1px solid rgba(165,139,255,.16); border-radius: 5px; color: #e9e2fa; background: #0d0a18; }
+.inline-actions { display: flex; align-items: center; gap: 6px; }.inline-actions button, .inline-command { min-height: 30px; padding: 0 9px; display: inline-flex; align-items: center; justify-content: center; gap: 5px; border: 1px solid rgba(165,139,255,.2); border-radius: var(--radius-md,6px); color: #d8ccff; background: rgba(165,139,255,.05); cursor: pointer; }.inline-actions button:first-child { width: 30px; padding: 0; }.douyin-official-fields { padding: 10px 12px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }.douyin-official-fields label { min-width: 0; display: grid; gap: 5px; color: #9488aa; font-size: 9px; }.douyin-official-fields input { min-width: 0; height: var(--control-height,34px); padding: 0 var(--control-padding-x,10px); border: 1px solid rgba(165,139,255,.16); border-radius: var(--radius-md,6px); color: #e9e2fa; background: #0d0a18;outline:0 }.douyin-official-fields input:focus{border-color:#65d6df;box-shadow:0 0 0 3px rgba(101,214,223,.12)}
 
 .hint {
   font-size: 11px;

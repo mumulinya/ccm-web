@@ -18,7 +18,9 @@
   --space-5: 20px;
   --space-6: 24px;
   --control-height: 34px;
+  --control-height-lg: 36px;
   --control-height-sm: 28px;
+  --control-padding-x: 10px;
   --shell-nav-width: 232px;
   --shell-header-height: 48px;
   --focus-ring: 0 0 0 3px color-mix(in srgb, var(--accent-blue) 20%, transparent);
@@ -79,19 +81,22 @@ samp {
 .ds-select,
 .ds-textarea {
   min-height: var(--control-height);
-  padding: 0 12px;
+  box-sizing: border-box;
+  padding: 0 var(--control-padding-x);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
-  background: var(--surface);
+  background: var(--control-bg);
   color: var(--text-primary);
   font-size: var(--font-size-md);
   box-shadow: none;
   outline: none;
+  transition: border-color .15s ease, background-color .15s ease, box-shadow .15s ease;
 }
 
 .ds-textarea {
   min-height: 88px;
-  padding: 10px 12px;
+  padding: 9px var(--control-padding-x);
+  line-height: 1.5;
   resize: vertical;
 }
 
@@ -101,6 +106,21 @@ samp {
 .ds-textarea:focus {
   border-color: var(--accent-blue);
   box-shadow: var(--focus-ring);
+}
+
+.ds-control:read-only,
+.ds-input:read-only,
+.ds-textarea:read-only {
+  background: var(--panel-muted);
+  color: var(--text-secondary);
+}
+
+.ds-control[aria-invalid="true"],
+.ds-input[aria-invalid="true"],
+.ds-select[aria-invalid="true"],
+.ds-textarea[aria-invalid="true"] {
+  border-color: var(--accent-red);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-red) 14%, transparent);
 }
 
 .ds-btn {

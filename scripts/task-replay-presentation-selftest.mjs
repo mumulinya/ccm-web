@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import fs from 'node:fs'
 import {
   isReplayDiagnosticEvent,
   replayActorLabel,
@@ -45,5 +46,18 @@ assert.equal(replayTechnicalLabel('semantic_decision'), '模型语义决策回�
 assert.equal(replayTechnicalLabel('criterion_coverage'), '验收标准覆盖')
 assert.equal(replayTechnicalLabel('unplanned_criteria'), '未规划验收标准')
 assert.equal(sanitizeReplayText('TestAgent 读取工作项回执与作用域'), 'TestAgent（独立验收） 读取执行步骤执行结果与任务来源')
+
+const traceReplay = fs.readFileSync(new URL('../frontend/src/components/system/TraceReplay.vue', import.meta.url), 'utf8')
+const executive = fs.readFileSync(new URL('../frontend/src/components/replay/TaskReplayExecutiveSummary.vue', import.meta.url), 'utf8')
+const chapters = fs.readFileSync(new URL('../frontend/src/components/replay/TaskReplayChapters.vue', import.meta.url), 'utf8')
+const matrix = fs.readFileSync(new URL('../frontend/src/components/replay/TaskReplayAcceptanceMatrix.vue', import.meta.url), 'utf8')
+assert.match(traceReplay, /TaskReplayExecutiveSummary/)
+assert.match(traceReplay, /full-replay-timeline/)
+assert.match(executive, /当前阶段/)
+assert.match(executive, /未解决问题/)
+assert.match(chapters, /任务过程/)
+assert.match(chapters, /第 \{\{ row\.attempt \}\} 轮/)
+assert.match(matrix, /任务是否完成，以当前有效证据为准/)
+assert.match(matrix, /需重新核验/)
 
 console.log('task replay presentation self-test passed')

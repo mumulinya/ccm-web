@@ -21,6 +21,29 @@ export interface TaskReplayEvent {
     project: string;
     source: string;
     evidence_ids: string[];
+    replay_link?: {
+        schema: "ccm-task-event-link-v1";
+        taskId: string;
+        replayEventId?: string;
+        scope: "global" | "project" | "group";
+        scopeId: string;
+        exactSessionId: string;
+        anchorMessageId: string;
+        generation: number;
+        attempt: number;
+        planStepId?: string;
+        workItemId?: string;
+        batchId?: string;
+        evidenceIds?: string[];
+        contentStored: false;
+    };
+    causal_refs?: {
+        planStepId?: string;
+        workItemId?: string;
+        dependencyIds?: string[];
+        criterionIds?: string[];
+        evidenceIds?: string[];
+    };
     technical?: Record<string, any>;
 }
 export interface TaskReplayEventPageOptions {
@@ -72,6 +95,53 @@ export declare function paginateReplayEventsForView(allEvents: TaskReplayEvent[]
     };
 };
 export declare function buildCompleteTaskReplay(taskId: string, options?: TaskReplayEventPageOptions): any;
+export declare function buildTaskReplayFreshness(taskId: string): {
+    schema: string;
+    taskId: string;
+    checkedAt: string;
+    projects: any[];
+    evidence: {
+        evidenceId: string;
+        type: import("../../system/unified-evidence-registry").EvidenceType;
+        freshness: string;
+        expiresAt: string;
+        sourceChecksum: string;
+    }[];
+    contentStored: boolean;
+};
+export declare function buildTaskReplayUserReport(taskId: string): {
+    schema: string;
+    generatedAt: string;
+    taskId: any;
+    title: any;
+    goal: any;
+    status: any;
+    result: any;
+    integrity: any;
+    requirementsAndDelivery: any;
+    plan: any;
+    attempts: any;
+    acceptance: any;
+    fileStatistics: any;
+    contentStored: boolean;
+};
+export declare function buildTaskReplayAuditExport(taskId: string): {
+    schema: string;
+    generatedAt: string;
+    taskId: any;
+    sourceChecksum: any;
+    status: any;
+    acceptanceState: any;
+    integrity: any;
+    attempts: any;
+    actionCenter: any;
+    tasks: any;
+    events: any;
+    evidence: any;
+    retention: any;
+    contentStored: boolean;
+};
+export declare function projectTaskReplayForAccess(replay: any, canManage: boolean): any;
 export declare function buildTaskReplayIndex(input?: number | TaskReplayIndexOptions): {
     schema: string;
     generated_at: string;
@@ -170,8 +240,11 @@ export declare function runTaskReplayContractSelfTest(): {
         narrative_event_always_visible: boolean;
         execution_state_readable: boolean;
         delivery_anchors_visible: boolean;
+        user_readable_v5: boolean;
         duplicate_events_merged: boolean;
         redundant_summary_dropped: boolean;
+        replay_event_linked: boolean;
+        business_projection_hides_technical: boolean;
     };
     plan_checks: {
         plan_mode_view_built: boolean;
@@ -201,5 +274,15 @@ export declare function runTaskReplayContractSelfTest(): {
         verification_gap_kept: boolean;
         empty_task_has_no_delivery: boolean;
         delivery_text_redacted: boolean;
+    };
+    presentation_checks: {
+        schema: boolean;
+        six_chapters: boolean;
+        acceptance_verified: boolean;
+        historical_failure_resolved: boolean;
+        attempt_preserved: boolean;
+        integrity_present: boolean;
+        causal_chain_present: boolean;
+        no_content: boolean;
     };
 };

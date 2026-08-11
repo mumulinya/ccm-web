@@ -152,6 +152,7 @@ function buildGroupMainAgentToolContext(input) {
         group,
         message: input.message,
         groupSessionId: input.groupSessionId || input.group_session_id || "",
+        anchorMessageId: input.anchorMessageId || input.anchor_message_id || "",
         selectedRoleSkills,
         contextPolicy,
         contextBudget: shared.contextBudget,
@@ -172,11 +173,13 @@ async function executeGroupMainAgentToolRequests(input) {
         const groupId = String(input.toolContext?.group?.id || "");
         const exactSessionId = String(input.toolContext?.groupSessionId || input.toolContext?.group_session_id || "");
         const generation = Math.max(0, Number(input.toolContext?.scopeIdentity?.generation || 0));
+        const anchorMessageId = String(input.toolContext?.anchorMessageId || input.toolContext?.anchor_message_id || "").trim();
         const toolCallId = preparedIds.get(request) || `gmtool_${crypto.createHash("sha256").update(JSON.stringify({ groupId, exactSessionId, name: request.name, arguments: request.arguments, at: Date.now(), nonce: crypto.randomBytes(4).toString("hex") })).digest("hex").slice(0, 24)}`;
         const startedAt = Date.now();
         if (groupId && exactSessionId)
             (0, user_visible_agent_events_1.appendToolProjection)({
                 scope: "group", scopeId: groupId, exactSessionId, generation,
+                ...(anchorMessageId ? { anchorMessageId } : {}),
                 eventType: "tool_started", toolName: request.name, toolCallId,
                 arguments: request.arguments || {}, parallelGroupId: parallelGroupId || undefined,
                 display: { summary: request.reason || "正在执行" },
@@ -225,6 +228,7 @@ async function executeGroupMainAgentToolRequests(input) {
         if (groupId && exactSessionId)
             (0, user_visible_agent_events_1.appendToolProjection)({
                 scope: "group", scopeId: groupId, exactSessionId, generation,
+                ...(anchorMessageId ? { anchorMessageId } : {}),
                 eventType: row?.ok === false ? "tool_failed" : "tool_completed",
                 toolName: request.name, toolCallId, arguments: request.arguments || {},
                 result: row, error: row?.ok === false ? row?.error || "工具执行失败" : "",
@@ -1096,6 +1100,9 @@ function buildCoordinatorResultFromAnalysis(group, message, analysis, targets, r
             scope: "group",
             scopeId: String(group.id),
             exactSessionId: visibleGroupSessionId,
+            ...(String(options.anchorMessageId || options.anchor_message_id || "").trim()
+                ? { anchorMessageId: String(options.anchorMessageId || options.anchor_message_id).trim() }
+                : {}),
             generation: Math.max(0, Number(options.generation || options.executionGeneration || 0)),
             taskId: visiblePlanId,
             plan: groupRequirementPlanProjection({
@@ -1165,17 +1172,20 @@ async function runLlmGroupOrchestrator(input) {
     const config = { ...baseConfig, model: sessionPreferences.model || baseConfig.model, reasoningEffort: sessionPreferences.effort || baseConfig.reasoningEffort };
     const sessionDirective = (0, slash_command_session_state_1.renderSlashCommandSessionDirective)("group", String(group.id), groupSessionId);
     const visibleTurnId = String(input.turnId || input.turn_id || `${group.id}:${groupSessionId}:${Date.now()}`);
+    const visibleAnchorMessageId = String(input.anchorMessageId || input.anchor_message_id || "").trim();
     const visibleTurnStartedAt = Date.now();
     if (group.id && groupSessionId) {
         (0, user_visible_agent_events_1.appendUserVisibleAgentEvent)({
             eventId: `group-turn:${visibleTurnId}:started`,
             scope: "group", scopeId: String(group.id), exactSessionId: groupSessionId,
+            ...(visibleAnchorMessageId ? { anchorMessageId: visibleAnchorMessageId } : {}),
             eventType: "turn_started",
             display: { title: "群聊主 Agent", summary: "已开始处理当前请求", status: "running" },
         });
         (0, user_visible_agent_events_1.appendUserVisibleAgentEvent)({
             eventId: `group-turn:${visibleTurnId}:thinking`,
             scope: "group", scopeId: String(group.id), exactSessionId: groupSessionId,
+            ...(visibleAnchorMessageId ? { anchorMessageId: visibleAnchorMessageId } : {}),
             eventType: "thinking_status",
             display: { title: "正在思考", summary: "正在核对成员、上下文和协作计划", status: "running" },
         });
@@ -1336,15 +1346,27 @@ async function runLlmGroupOrchestrator(input) {
                 nonce: crypto.randomBytes(4).toString("hex"),
             })).digest("hex").slice(0, 24)}`);
             if ((0, assistant_progress_1.assistantProgressNarrationEnabled)(config)) {
-                const explicitProgress = String(parsed?.progressUpdate || parsed?.progress_update || "").trim().slice(0, 600);
-                const progressText = explicitProgress || (round === 0 ? (0, assistant_progress_1.buildAssistantProgressFallback)(selectedRequests) : "");
+                const explicitProgress = (0, assistant_progress_1.sanitizeAssistantProgressText)(parsed?.progressUpdate || parsed?.progress_update || "", 600);
+                const progressKind = (0, assistant_progress_1.validateAssistantProgressKind)(parsed?.progressKind || parsed?.progress_kind || (round === 0 ? "before_tools" : "key_finding"), {
+                    firstBatch: round === 0,
+                    hasSuccessfulObservation: toolResults.some((row) => row?.ok === true),
+                    hasFailure: toolResults.some((row) => row?.ok === false),
+                    directionChanged: round > 0 && toolResults.some((row) => row?.ok === false),
+                    attempt: Number(toolContext.scopeIdentity?.attempt || 1),
+                    verificationActive: selectedRequests.some(request => /test|build|lint|typecheck|verify|verification/i.test(String(request?.name || ""))),
+                });
+                const fallbackProgress = round === 0
+                    ? (0, assistant_progress_1.buildAssistantProgressFallback)(selectedRequests, { target: group.name || group.id, goal: input.message })
+                    : "";
+                const progressText = progressKind ? (explicitProgress || fallbackProgress) : fallbackProgress;
                 if (progressText)
                     (0, user_visible_agent_events_1.appendAssistantProgress)({
                         scope: "group", scopeId: String(group.id), exactSessionId: groupSessionId,
+                        ...(visibleAnchorMessageId ? { anchorMessageId: visibleAnchorMessageId } : {}),
                         generation: Number(toolContext.scopeIdentity?.generation || 0),
                         turnId: visibleTurnId,
                         text: progressText,
-                        kind: parsed?.progressKind || parsed?.progress_kind || (round === 0 ? "before_tools" : "key_finding"),
+                        kind: progressKind || "before_tools",
                         modelCallIndex: modelCallCount,
                         relatedToolCallIds: preparedToolCallIds,
                         title: "群聊主 Agent",
@@ -1368,6 +1390,7 @@ async function runLlmGroupOrchestrator(input) {
             if ((0, assistant_progress_1.assistantProgressNarrationEnabled)(config) && roundResults.length && roundResults.every((row) => row?.ok !== true)) {
                 (0, user_visible_agent_events_1.appendAssistantProgress)({
                     scope: "group", scopeId: String(group.id), exactSessionId: groupSessionId,
+                    ...(visibleAnchorMessageId ? { anchorMessageId: visibleAnchorMessageId } : {}),
                     generation: Number(toolContext.scopeIdentity?.generation || 0),
                     turnId: visibleTurnId,
                     text: "当前工具批次没有取得有效结果，我会根据错误调整检查方向，不会机械重复同一请求。",
@@ -1475,6 +1498,7 @@ async function runLlmGroupOrchestrator(input) {
         (0, user_visible_agent_events_1.appendUserVisibleAgentEvent)({
             eventId: `group-turn:${visibleTurnId}:result`,
             scope: "group", scopeId: String(group.id), exactSessionId: groupSessionId,
+            ...(visibleAnchorMessageId ? { anchorMessageId: visibleAnchorMessageId } : {}),
             eventType: turnDecision.responseKind === "clarify" ? "clarification_required" : "result",
             display: {
                 title: turnDecision.responseKind === "clarify" ? "需要补充信息" : "回复完成",

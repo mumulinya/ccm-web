@@ -299,14 +299,47 @@ export function useProjectManager(props, emit) {
     git_status: null
   })
 
+  // 记录由目录或仓库自动推导的值。用户手动修改后，后续选择目录不再覆盖；
+  // 如果用户尚未修改自动值，则重新选择目录时可以自然地同步更新。
+  const autoProjectIdentity = {
+    name: '',
+    display_name: ''
+  }
+
+  const folderBaseName = (value) => String(value || '')
+    .trim()
+    .replace(/[\\/]+$/, '')
+    .split(/[\\/]/)
+    .pop()
+    ?.trim() || ''
+
+  const applyAutomaticProjectIdentity = (identity) => {
+    const nextIdentity = String(identity || '').trim()
+    if (!showCreate.value || !nextIdentity) return
+
+    const currentName = String(form.value.name || '').trim()
+    if (!currentName || currentName === autoProjectIdentity.name) {
+      form.value.name = nextIdentity
+      autoProjectIdentity.name = nextIdentity
+    }
+
+    const currentDisplayName = String(form.value.display_name || '').trim()
+    if (!currentDisplayName || currentDisplayName === autoProjectIdentity.display_name) {
+      form.value.display_name = nextIdentity
+      autoProjectIdentity.display_name = nextIdentity
+    }
+  }
+
   const updateProjectFormField = ({ field, value }) => {
     if (!field) return
     form.value[field] = value
+    if ((field === 'name' || field === 'display_name') && String(value || '').trim() !== autoProjectIdentity[field]) {
+      autoProjectIdentity[field] = ''
+    }
     if (field === 'repository_url' && showCreate.value && !String(form.value.name || '').trim()) {
       const match = String(value || '').trim().match(/[/:]([^/:]+?)(?:\.git)?$/)
       if (match?.[1]) {
-        form.value.name = match[1]
-        if (!String(form.value.display_name || '').trim()) form.value.display_name = match[1]
+        applyAutomaticProjectIdentity(match[1])
       }
     }
   }
@@ -433,7 +466,7 @@ export function useProjectManager(props, emit) {
 
   // 选择项目
   const selectProject = async (name) => {
-    if (isStreaming.value) stopStreaming()
+    if (isStreaming.value) detachProjectStream()
     showLogsPanel.value = false
     currentProject.value = name
     currentSession.value = null
@@ -520,10 +553,26 @@ export function useProjectManager(props, emit) {
     if (wasPinned) nextTick(() => scrollToBottom({ force: true }))
     return true
   }
+  const reconcileProjectConversationReply = async (project, sessionId, messageId) => {
+    if (!project || !sessionId || !messageId) return false
+    const detail = await sessionsApi.detail(project, sessionId)
+    if (project !== currentProject.value || sessionId !== currentSession.value) return false
+    const authoritative = (detail.history || []).find(message => String(message?.id || '') === String(messageId))
+    const mode = String(authoritative?.messageMode || authoritative?.message_mode || 'conversation')
+    if (!authoritative || mode === 'task' || !String(authoritative.content || '').trim()) return false
+    const local = messages.value.find(message => String(message?.id || '') === String(messageId))
+    if (!local) return false
+    Object.assign(local, authoritative, {
+      messageMode: mode,
+      streaming: false,
+      interruption: null,
+    })
+    return true
+  }
 
   // 选择会话
   const selectSession = async (sessionId, newSession = false) => {
-    if (isStreaming.value) stopStreaming()
+    if (isStreaming.value) detachProjectStream()
     const project = currentProject.value
     currentSession.value = sessionId
     currentSessionDraft.value = false
@@ -536,13 +585,31 @@ export function useProjectManager(props, emit) {
   }
 
   // 启动项目
+  const projectChannelLabel = name => {
+    const platform = String(projects.value.find(item => item.name === name)?.platform || '').trim().toLowerCase()
+    return ({
+      feishu: '飞书通道',
+      '飞书': '飞书通道',
+      lark: 'Lark 通道',
+      'lark 通道': 'Lark 通道',
+      weixin: '微信通道',
+      telegram: 'Telegram 通道',
+      slack: 'Slack 通道',
+      discord: 'Discord 通道',
+    })[platform] || '协作通道'
+  }
+  const channelToastMessage = (message, name, fallback) => {
+    const text = String(message || '').trim()
+    return (text ? text.replace(/^项目 Agent 通道/, `项目${projectChannelLabel(name)}`) : '') || fallback
+  }
+
   const startProject = async (name) => {
     if (!name || projectActionBusy.value) return
     projectActionBusy.value = 'start'
     try {
       const result = await projectsApi.agentConnection(name, 'connect')
       await loadProjects()
-      toast.success(result.message || 'Agent 与协作通道已连接')
+      toast.success(channelToastMessage(result.message, name, `${projectChannelLabel(name)}已连接`))
     } catch (error) { toast.error(error?.message || 'Agent 连接失败') }
     finally { projectActionBusy.value = '' }
   }
@@ -554,7 +621,7 @@ export function useProjectManager(props, emit) {
     try {
       const result = await projectsApi.agentConnection(name, 'disconnect')
       await loadProjects()
-      toast.success(result.message || 'Agent 与协作通道已断开')
+      toast.success(channelToastMessage(result.message, name, `${projectChannelLabel(name)}已断开`))
     } catch (error) { toast.error(error?.message || 'Agent 断开失败') }
     finally { projectActionBusy.value = '' }
   }
@@ -594,6 +661,8 @@ export function useProjectManager(props, emit) {
       repository_url: '', repository_original_url: '', repository_branch: '', initialize_repository: false, git_loading: false, git_status: null,
       clone_request_id: `clone_${crypto.randomUUID().replace(/-/g, '')}`
     }
+    autoProjectIdentity.name = ''
+    autoProjectIdentity.display_name = ''
     projectCreateBusy.value = false
     projectCloneStatus.value = null
     showCreate.value = true
@@ -786,7 +855,7 @@ export function useProjectManager(props, emit) {
     }
     const resolvedSource = source === 'feishu' ? 'feishu' : 'web'
     if (resolvedSource === 'web') {
-      if (isStreaming.value) await stopStreaming()
+      if (isStreaming.value) detachProjectStream()
       currentSession.value = null
       currentSessionDraft.value = true
       currentSessionNew.value = true
@@ -1085,10 +1154,18 @@ export function useProjectManager(props, emit) {
   const isStreaming = ref(false)
   const pendingProjectParentRunId = ref('')
   const streamController = ref(null)
+  const explicitlyStoppedStreams = new WeakSet()
+  const detachedStreams = new WeakSet()
   const activeProjectRunId = ref('')
   const activeProjectMainTaskId = ref('')
   const stoppingProjectTurn = ref(false)
   const makeProjectMessageId = () => `pmsg_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
+  const projectConversationTask = computed(() => [...messages.value].reverse().map(message => getProjectTaskCard(message)).find(card => {
+    if (!card || card.orchestration_scope !== 'project_session') return false
+    return !['done', 'completed', 'success', 'accepted', 'failed', 'cancelled', 'canceled', 'archived'].includes(String(card.status || '').toLowerCase())
+  }) || null)
+  const projectCurrentTaskId = computed(() => activeProjectMainTaskId.value || projectConversationTask.value?.task_id || '')
+  const projectTurnBusy = computed(() => isStreaming.value || !!projectConversationTask.value)
 
   const projectTurnConversationId = computed(() => currentProject.value && currentSession.value
     ? `${currentProject.value}:${currentSession.value}`
@@ -1096,28 +1173,41 @@ export function useProjectManager(props, emit) {
   const projectTurnControl = useConversationTurnControl({
     scope: 'project',
     conversationId: projectTurnConversationId,
-    busy: isStreaming,
+    busy: projectTurnBusy,
   })
-  const projectComposerSendLabel = computed(() => isStreaming.value
+  const projectComposerSendLabel = computed(() => projectTurnBusy.value
     ? '排队'
     : '发送')
 
-  const stopStreaming = async () => {
+  const stopStreaming = async ({ preserveTask = false } = {}) => {
     if (!isStreaming.value || stoppingProjectTurn.value) return
     stoppingProjectTurn.value = true
     try {
       if (activeProjectMainTaskId.value) {
-        await postTaskAction('/api/tasks/cancel', {
-          id: activeProjectMainTaskId.value,
-          reason: '用户从项目会话停止当前项目主 Agent 任务',
-        }).catch((error) => toast.warning(error?.message || '后端停止请求未完成，正在中断当前连接'))
+        if (preserveTask) {
+          await postTaskAction('/api/projects/main-agent/task-action', {
+            action: 'interrupt',
+            task_id: activeProjectMainTaskId.value,
+            project: currentProject.value,
+            project_session_id: currentSession.value,
+            reason: '用户调整当前项目任务方向，保留现场后续接',
+          }).catch((error) => toast.warning(error?.message || '当前任务尚未到达安全中断点，消息仍保留在队首'))
+        } else {
+          await postTaskAction('/api/tasks/cancel', {
+            id: activeProjectMainTaskId.value,
+            reason: '用户从项目会话停止当前项目主 Agent 任务',
+          }).catch((error) => toast.warning(error?.message || '后端停止请求未完成，正在中断当前连接'))
+        }
       } else if (activeProjectRunId.value) {
         await postTaskAction('/api/project-runs/cancel', {
           id: activeProjectRunId.value,
           reason: '用户从项目会话停止当前工作',
         }).catch((error) => toast.warning(error?.message || '后端停止请求未完成，正在中断当前连接'))
       }
-      streamController.value?.abort()
+      if (streamController.value) {
+        explicitlyStoppedStreams.add(streamController.value)
+        streamController.value.abort()
+      }
     } finally {
       stoppingProjectTurn.value = false
     }
@@ -1129,7 +1219,7 @@ export function useProjectManager(props, emit) {
     return { run_id: result?.runId || '' }
   })
   watch(
-    () => [projectTurnConversationId.value, isStreaming.value, projectTurnControl.turns.value.filter(turn => turn.status === 'queued').length],
+    () => [projectTurnConversationId.value, projectTurnBusy.value, projectTurnControl.turns.value.filter(turn => turn.status === 'queued').length],
     ([conversationId, busy, queued]) => {
       if (conversationId && !busy && queued) window.setTimeout(() => drainProjectTurnQueue().catch(() => {}), 0)
     },
@@ -1138,26 +1228,25 @@ export function useProjectManager(props, emit) {
 
   const submitProjectMessageWhileBusy = async () => {
     const message = chatInput.value.trim()
-    if (!message) return
-    if (chatFiles.value.length) {
-      toast.info('工作中的排队消息暂不保存本地附件，请停止当前工作后连同附件发送')
-      return
-    }
+    if (!message && !chatFiles.value.length) return
     const requestedMode = projectTurnControl.mode.value
     const turn = await projectTurnControl.enqueue({
       message,
+      attachments: [...chatFiles.value],
       mode: requestedMode,
       activeRunId: activeProjectRunId.value,
       metadata: {
         project: currentProject.value,
         session_id: currentSession.value,
-        parent_run_id: activeProjectRunId.value,
+        parent_run_id: activeProjectMainTaskId.value || activeProjectRunId.value,
+        continuation_task_id: activeProjectMainTaskId.value,
         requested_mode: requestedMode,
       },
     })
     chatInput.value = ''
+    chatFiles.value = []
     toast.success(requestedMode === 'steer' ? '已接收引导，正在安全停止当前执行后继续' : '已加入队列，当前回复结束后会自动发送')
-    if (requestedMode === 'steer') await stopStreaming()
+    if (requestedMode === 'steer') await stopStreaming({ preserveTask: true })
     window.setTimeout(() => drainProjectTurnQueue().catch(() => {}), 0)
     return turn
   }
@@ -1166,9 +1255,35 @@ export function useProjectManager(props, emit) {
     if (!turn?.id) return
     const guidedTurn = await projectTurnControl.guide(turn)
     toast.success('这条消息已移到队首，将作为当前任务的补充要求')
-    if (isStreaming.value) await stopStreaming()
-    window.setTimeout(() => drainProjectTurnQueue().catch(() => {}), 0)
+    const currentTaskId = projectCurrentTaskId.value
+    if (isStreaming.value) {
+      await stopStreaming({ preserveTask: true })
+    } else if (currentTaskId) {
+      await postTaskAction('/api/projects/main-agent/task-action', {
+        action: 'interrupt',
+        task_id: currentTaskId,
+        project: currentProject.value,
+        project_session_id: currentSession.value,
+        reason: '用户调整当前项目任务方向，保留现场后续接',
+      })
+      pendingProjectParentRunId.value = currentTaskId
+    }
+    await projectTurnControl.apply(guidedTurn, async claimed => {
+      const result = await sendMessage({ queueTurn: claimed })
+      if (result?.success === false) throw new Error(result.error || '调整方向没有接入当前任务')
+      return { run_id: result?.runId || '', continuation_task_id: currentTaskId }
+    })
     return guidedTurn
+  }
+
+  // Leaving the page or switching project/session only detaches the browser
+  // stream. It must never be interpreted as a user cancellation: the backend
+  // continues the run and persists the authoritative reply into the session.
+  const detachProjectStream = () => {
+    const controller = streamController.value
+    if (!controller) return
+    detachedStreams.add(controller)
+    controller.abort()
   }
 
   const editProjectUserMessage = async (message) => {
@@ -1188,9 +1303,21 @@ export function useProjectManager(props, emit) {
       : '原消息已载入输入框，修改后发送即可重新请求')
   }
 
+  const isProjectContinuationPrompt = value => /^(继续|继续处理|接着做|接着处理|从中断处继续|从上次继续)[。.!！\s]*$/u.test(String(value || '').trim())
+  const isRecoverableProjectAssistantMessage = message => {
+    if (!message || message.role !== 'assistant') return false
+    if (message.interruption?.recoverable === true) return true
+    return /(?:连接暂时中断|执行暂时中断|现场已保留|本次处理已停止，你可以调整需求后重新发送)/.test(String(message.content || ''))
+  }
+  const latestRecoverableProjectAssistantMessage = value => {
+    if (!isProjectContinuationPrompt(value)) return null
+    const latestAssistant = [...messages.value].reverse().find(message => message?.role === 'assistant') || null
+    return isRecoverableProjectAssistantMessage(latestAssistant) ? latestAssistant : null
+  }
+
   const sendMessage = async (options = {}) => {
     const queuedTurn = options?.queueTurn || null
-    if (isStreaming.value && !queuedTurn) return submitProjectMessageWhileBusy()
+    if (projectTurnBusy.value && !queuedTurn) return submitProjectMessageWhileBusy()
     if ((!queuedTurn && !chatInput.value.trim() && chatFiles.value.length === 0) || !currentProject.value) return
     if (!currentSession.value && currentSessionDraft.value) {
       try {
@@ -1207,8 +1334,14 @@ export function useProjectManager(props, emit) {
     const projectAtSend = queuedTurn?.metadata?.project || currentProject.value
     const sessionAtSend = queuedTurn?.metadata?.session_id || currentSession.value
     const msg = queuedTurn ? String(queuedTurn.message || '').trim() : chatInput.value.trim()
-    const filesToSend = queuedTurn ? [] : [...chatFiles.value]
-    const parentRunId = queuedTurn?.metadata?.parent_run_id || pendingProjectParentRunId.value
+    const filesToSend = queuedTurn ? [...(queuedTurn.files || [])] : [...chatFiles.value]
+    const resumableMessage = queuedTurn ? null : latestRecoverableProjectAssistantMessage(msg)
+    const parentRunId = queuedTurn?.metadata?.parent_run_id
+      || pendingProjectParentRunId.value
+      || resumableMessage?.projectRun?.id
+      || resumableMessage?.task_id
+      || resumableMessage?.interruption?.parent_run_id
+      || ''
     pendingProjectParentRunId.value = ''
     chatInput.value = ''
     chatFiles.value = []
@@ -1221,11 +1354,22 @@ export function useProjectManager(props, emit) {
 
     scrollToBottom({ force: true })
 
-    const agentMsg = { id: makeProjectMessageId(), role: 'assistant', content: '', workEvents: [], requestText: msg, messageMode: 'conversation', streaming: true, timestamp: new Date().toISOString() }
+    const agentMsg = resumableMessage || { id: makeProjectMessageId(), role: 'assistant', content: '', workEvents: [], requestText: msg, messageMode: 'conversation', streaming: true, timestamp: new Date().toISOString() }
+    if (resumableMessage) {
+      agentMsg.content = ''
+      agentMsg.streaming = true
+      agentMsg.requestText = resumableMessage.requestText || msg
+      agentMsg.interruption = {
+        ...(resumableMessage.interruption || {}),
+        recoverable: true,
+        state: 'resuming',
+        resumed_at: new Date().toISOString(),
+      }
+    }
     const controller = new AbortController()
     streamController.value = controller
     isStreaming.value = true
-    let agentMsgAdded = false
+    let agentMsgAdded = !!resumableMessage
     let responseAccepted = false
     let userPersisted = false
     let backendError = ''
@@ -1236,6 +1380,10 @@ export function useProjectManager(props, emit) {
       messages.value.push(agentMsg)
       agentMsgAdded = true
     }
+    // Render the assistant turn immediately. The message component shows a
+    // compact thinking state until the first safe response chunk arrives.
+    addAgentMessage()
+    scrollToBottom({ force: true })
     const handleSseEvent = (rawEvent) => {
       const dataText = rawEvent
         .split(/\r?\n/)
@@ -1295,6 +1443,8 @@ export function useProjectManager(props, emit) {
           agentMsg.task_id = data.taskExperience?.task_id || data.run?.id || agentMsg.task_id
           agentMsg.taskExperience = data.taskExperience || agentMsg.taskExperience
           agentMsg.workEvents = data.workEvents || agentMsg.workEvents
+          agentMsg.interruption = null
+          agentMsg.streaming = false
         } else if (data.type === 'error') {
           if (data.message_id) agentMsg.id = data.message_id
           addAgentMessage()
@@ -1318,17 +1468,26 @@ export function useProjectManager(props, emit) {
         formData.append('message', msg)
         formData.append('session_id', sessionAtSend)
         if (parentRunId) formData.append('parent_run_id', parentRunId)
+        formData.append('client_message_id', userMsg.id)
+        formData.append('assistant_message_id', agentMsg.id)
         filesToSend.forEach(file => formData.append('files', file))
         res = await fetch('/api/send-stream', { method: 'POST', body: formData, signal: controller.signal })
       } else {
         res = await fetch('/api/send-stream', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ project: projectAtSend, session_id: sessionAtSend, message: msg, parent_run_id: parentRunId }),
+          headers: { 'Content-Type': 'application/json', 'X-Client-Message-ID': userMsg.id },
+          body: JSON.stringify({ project: projectAtSend, session_id: sessionAtSend, message: msg, parent_run_id: parentRunId, client_message_id: userMsg.id, assistant_message_id: agentMsg.id }),
           signal: controller.signal,
         })
       }
-      if (!res.ok || !res.body) throw new Error(`发送失败（HTTP ${res.status}）`)
+      if (!res.ok || !res.body) {
+        let payload = null
+        try { payload = await res.json() } catch {}
+        const requestFailure = new Error(payload?.error || `发送失败（HTTP ${res.status}）`)
+        requestFailure.code = payload?.code || ''
+        requestFailure.status = res.status
+        throw requestFailure
+      }
       responseAccepted = true
 
       const reader = res.body.getReader()
@@ -1346,19 +1505,30 @@ export function useProjectManager(props, emit) {
       if (sseBuffer.trim()) handleSseEvent(sseBuffer)
       if (backendError) throw new Error(backendError)
     } catch (error) {
-      const stopped = error?.name === 'AbortError'
+      const stopped = explicitlyStoppedStreams.has(controller)
+      const detached = detachedStreams.has(controller)
+      const streamInterrupted = error?.name === 'AbortError' && !stopped
       requestError = stopped ? '当前工作已停止' : (error?.message || '连接中断')
       addAgentMessage()
-      if (stopped) {
+      if (error?.code === 'PROJECT_SESSION_TURN_ACTIVE') {
+        agentMsg.interruption = { recoverable: true, reason_code: 'background_run_active', state: 'background_running', parent_run_id: parentRunId || '', anchor_message_id: agentMsg.id }
+        agentMsg.content = '原任务仍在后台继续，不需要重新启动；完成后会自动更新这条消息。'
+      } else if (stopped) {
+        agentMsg.interruption = { recoverable: true, reason_code: 'user_interrupted', state: 'waiting_user', parent_run_id: parentRunId || '' }
         agentMsg.content = agentMsg.content
           ? `${agentMsg.content}\n\n本次处理已停止，已保留上面的回复。`
-          : '本次处理已停止，你可以调整需求后重新发送。'
+          : '当前执行已暂停，现场已保留。发送“继续”即可从这里接上。'
+      } else if (streamInterrupted || detached) {
+        agentMsg.interruption = { recoverable: true, reason_code: 'client_stream_interrupted', state: 'background_running', parent_run_id: parentRunId || '', anchor_message_id: agentMsg.id }
+        agentMsg.content = agentMsg.content
+          ? `${agentMsg.content}\n\n页面连接暂时中断，后台仍在继续；完成后会自动更新这条消息。`
+          : '页面连接暂时中断，任务仍在后台继续；完成后会自动更新这条消息。'
       } else {
         const detail = error?.message || '连接中断'
         agentMsg.content = agentMsg.content
           ? `${agentMsg.content}\n\n连接中断，已保留收到的内容。你可以继续追问或重新发送。`
           : `这次没有完成：${detail}。请检查项目 Agent 状态后重试。`
-        if (!responseAccepted) {
+        if (!responseAccepted && !resumableMessage) {
           chatInput.value = msg
           chatFiles.value = filesToSend
         }
@@ -1373,13 +1543,13 @@ export function useProjectManager(props, emit) {
       const hasAgentResult = agentMsg.content || agentMsg.taskExperience || agentMsg.workEvents.length
       if (hasAgentResult) {
         addAgentMessage()
-        const serverOwnedTaskMessage = agentMsg.messageMode === 'task' && !!agentMsg.task_id
+        const serverOwnedTaskMessage = (agentMsg.messageMode === 'task' && !!agentMsg.task_id) || !!resumableMessage
         if (userPersisted && !serverOwnedTaskMessage) {
           try {
             await sessionsApi.saveMessage({
               project: projectAtSend,
               sessionId: sessionAtSend,
-              message: { id: agentMsg.id, role: 'assistant', content: agentMsg.content, requestText: agentMsg.requestText, messageMode: agentMsg.messageMode, task_id: agentMsg.task_id || '', taskExperience: agentMsg.taskExperience || null, timestamp: agentMsg.timestamp, fileChanges: agentMsg.fileChanges || null, workEvents: agentMsg.workEvents || [], provider_usage: agentMsg.provider_usage || null }
+              message: { id: agentMsg.id, role: 'assistant', content: agentMsg.content, requestText: agentMsg.requestText, messageMode: agentMsg.messageMode, task_id: agentMsg.task_id || '', taskExperience: agentMsg.taskExperience || null, timestamp: agentMsg.timestamp, fileChanges: agentMsg.fileChanges || null, workEvents: agentMsg.workEvents || [], provider_usage: agentMsg.provider_usage || null, interruption: agentMsg.interruption || null }
             })
           } catch (error) { toast.warning('回复已显示，但会话保存失败，请刷新后确认') }
         }
@@ -1393,6 +1563,50 @@ export function useProjectManager(props, emit) {
     }
     return { success: !requestError && !backendError, error: requestError || backendError, runId: agentMsg.projectRun?.id || '' }
   }
+
+  const scheduledAutoRecoveries = new Map()
+  const scheduleProjectAutoRecovery = (message) => {
+    const card = getProjectTaskCard(message)
+    const recovery = card?.recovery || card?.interruption_receipt?.recovery || {}
+    const taskId = card?.task_id || message?.task_id || ''
+    if (!taskId || card?.orchestration_scope !== 'project_session' || recovery.mode !== 'safe_auto' || !recovery.nextRetryAt) return
+    if (!['waiting_provider', 'waiting_agent'].includes(String(recovery.state || ''))) return
+    const key = `${taskId}:${recovery.attempt || 0}:${recovery.nextRetryAt}`
+    if (scheduledAutoRecoveries.has(key)) return
+    const delay = Math.max(0, Math.min(2_147_000_000, Date.parse(recovery.nextRetryAt) - Date.now()))
+    const timer = window.setTimeout(async () => {
+      scheduledAutoRecoveries.delete(key)
+      if (isStreaming.value || currentProject.value !== card.project || currentSession.value !== card.project_session_id) return
+      try {
+        const data = await postTaskAction('/api/projects/main-agent/task-action', {
+          action: 'resume_interrupted',
+          task_id: taskId,
+          ...projectTaskMutationGuard(card),
+          project: currentProject.value,
+          project_session_id: currentSession.value,
+        })
+        pendingProjectParentRunId.value = data.resume_parent_run_id || taskId
+        chatInput.value = '请从最近保存的安全检查点继续当前任务。'
+        await nextTick()
+        const result = await sendMessage()
+        if (result?.success === false) throw new Error(result.error || '自动恢复没有启动')
+        toast.info('执行通道已进入半开恢复，正在接上原任务')
+      } catch (error) {
+        await refreshCurrentProjectSession(currentSession.value).catch(() => {})
+        console.warn('[项目任务自动恢复]', error?.message || error)
+      }
+    }, delay)
+    scheduledAutoRecoveries.set(key, timer)
+  }
+  watch(
+    () => messages.value.map(message => {
+      const card = getProjectTaskCard(message)
+      const recovery = card?.recovery || card?.interruption_receipt?.recovery || {}
+      return `${card?.task_id || message?.task_id || ''}|${recovery.mode || ''}|${recovery.state || ''}|${recovery.attempt || 0}|${recovery.nextRetryAt || ''}`
+    }).join('\n'),
+    () => messages.value.forEach(scheduleProjectAutoRecovery),
+    { immediate: true },
+  )
 
   const formatFileSize = (size) => {
     if (!size) return '0 B'
@@ -1601,7 +1815,10 @@ export function useProjectManager(props, emit) {
 
   const selectFolder = () => {
     if (browseTarget.value && browsePath.value) {
-      form.value.work_dir = browsePath.value
+      form.value[browseTarget.value] = browsePath.value
+      if (browseTarget.value === 'work_dir' && form.value.source_type !== 'github') {
+        applyAutomaticProjectIdentity(folderBaseName(browsePath.value))
+      }
     }
     showFolderBrowser.value = false
   }
@@ -1905,7 +2122,21 @@ export function useProjectManager(props, emit) {
       if (event?.type === 'project.session_messages_changed') {
         const eventSessionId = String(event?.data?.sessionId || event?.data?.session_id || '')
         const eventTaskId = String(event?.data?.taskId || event?.data?.task_id || '')
-        if (isStreaming.value && (!eventTaskId || eventTaskId === activeProjectMainTaskId.value || eventSessionId === currentSession.value)) return
+        const eventMessageId = String(event?.data?.messageId || event?.data?.message_id || '')
+        if (isStreaming.value && eventSessionId === currentSession.value) {
+          // Conversation/project-analysis replies are persisted before the SSE
+          // response closes. Merge that authoritative result into the existing
+          // placeholder so a delayed terminal packet cannot leave the UI stuck
+          // on “正在思考…”. Task projections remain on their live path.
+          if (!eventTaskId && eventMessageId) {
+            window.clearTimeout(projectSessionRefreshTimer)
+            projectSessionRefreshTimer = window.setTimeout(() => {
+              void reconcileProjectConversationReply(eventProject, eventSessionId, eventMessageId)
+            }, 60)
+          }
+          return
+        }
+        if (isStreaming.value && eventTaskId === activeProjectMainTaskId.value) return
         window.clearTimeout(projectSessionRefreshTimer)
         projectSessionRefreshTimer = window.setTimeout(() => {
           void refreshCurrentProjectSession(eventSessionId)
@@ -1943,7 +2174,7 @@ export function useProjectManager(props, emit) {
 
   onUnmounted(() => {
     projectRuntimeLoadController?.abort()
-    stopStreaming()
+    detachProjectStream()
     unsubscribeProjectRuntime?.()
     window.clearTimeout(loadProjectRuntime._eventTimer)
     window.clearTimeout(projectSessionRefreshTimer)
@@ -1986,7 +2217,7 @@ export function useProjectManager(props, emit) {
     openSwitchAgent, switchAgent, startProjectWithAgent, createSession, openProjectFeishuBinding, updateProjectFeishuBinding, renameSession, deleteSession,
     saveCurrentProjectSessionKnowledge, getProjectTaskCard, postTaskAction, removeMessageFromCurrentSession, handleProjectTaskAction, isStreaming,
     pendingProjectParentRunId, streamController, activeProjectRunId, activeProjectMainTaskId, stoppingProjectTurn, makeProjectMessageId,
-    projectTurnConversationId, projectTurnControl, projectComposerSendLabel, stopStreaming, drainProjectTurnQueue, guideProjectQueuedTurn, submitProjectMessageWhileBusy,
+    projectTurnConversationId, projectTurnControl, projectTurnBusy, projectComposerSendLabel, stopStreaming, drainProjectTurnQueue, guideProjectQueuedTurn, submitProjectMessageWhileBusy,
     sendMessage, editProjectUserMessage, formatFileSize, onChatFilesSelected, removeChatFile, openFileDiff, openProjectChangesTab,
     closeFileDiff, currentSessionNew, autoNameSession, chatTarget, showLogsPanel, logsTitle, logsProfileId, logsKind, logsRuntimeProcess,
     openProjectRuntimeLogs, openFeishuQr, startFeishuQrSetup, openFolderBrowser, loadDrives,

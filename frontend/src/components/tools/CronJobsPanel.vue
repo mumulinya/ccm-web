@@ -24,7 +24,8 @@ import {
 } from '@lucide/vue'
 import { useCronJobs } from './useCronJobs.js'
 
-const emit = defineEmits(['navigate'])
+const props = defineProps({ navigateTo: { type: Object, default: null } })
+const emit = defineEmits(['navigate', 'navigated'])
 
 const {
   jobs,
@@ -43,6 +44,10 @@ const {
   targetFilter,
   selectedJobIds,
   bulkLoading,
+  templates,
+  cronPreview,
+  previewLoading,
+  selectedTemplate,
   refreshTimer,
   selectedRunJob,
   filteredJobs,
@@ -71,6 +76,8 @@ const {
   loadOrchestratorDiagnostics,
   loadProjects,
   loadGroups,
+  loadTemplates,
+  applyCronTemplate,
   targetLabel,
   scheduleLabel,
   statusLabel,
@@ -94,8 +101,12 @@ const {
   deleteJob,
   restoreJob,
   purgeJob,
+  copyJobToDispatch,
+  handleMisfire,
+  buildJobPayload,
+  refreshCronPreview,
   submitCreate
-} = useCronJobs(emit)
+} = useCronJobs(props, emit)
 </script>
 
 <template src="./CronJobs.template.html"></template>

@@ -76,7 +76,10 @@ import {
 import {
   conversationTurnControl,
   handleConversationTurnControlApi,
+  reconcileTaskDispatchTurns,
   runConversationTurnControlSelfTest,
+  startWebConversationTurnRecoveryForServer,
+  stopWebConversationTurnRecoveryForServer,
 } from "./agents/conversation-turn-control";
 import { parseSecureMultipartRequest } from "./system/secure-multipart";
 
@@ -173,12 +176,14 @@ import { startConversationSearchIndexScheduler, stopConversationSearchIndexSched
 import { handleGitApi } from "./modules/tools/git";
 import { handleMarketplaceApi, recoverMarketplaceProductionState } from "./modules/tools/marketplace";
 import { handleCronApi, startCronScheduler, stopCronScheduler, syncCronTaskStatus } from "./modules/scheduling/cron";
+import { handleTaskTemplateApi } from "./modules/collaboration/task-templates";
+import { handleTaskPreflightApi } from "./modules/collaboration/task-intake-preflight";
 import { handleToolsAndMetricsApi } from "./modules/tools/tools";
 import { handleSharedFilesV2Api } from "./modules/tools/shared-files-api";
 import { buildSharedFilesContextV2, migrateLegacySharedFilesV2 } from "./modules/tools/shared-files-v2";
 import { stopAllTerminalRuns } from "./modules/tools/terminal";
 import { projectDisplayName, stopManagedProjectRuntimesForShutdown } from "./modules/projects/project-runtime";
-import { handlePetsApi, maybeAutoStartPet } from "./modules/pets/pets";
+import { handlePetsApi, maybeAutoStartPet, readPetConfig } from "./modules/pets/pets";
 import { GlobalPetActivityCoordinator } from "./modules/pets/pet-activity-coordinator";
 import { handleMusicApi } from "./modules/music/music";
 import {
@@ -256,6 +261,7 @@ import { handleNavigationConfigApi } from "./modules/system/navigation-config";
 import { handleSystemSettingsApi } from "./modules/system/settings";
 import { refreshAgentProviderStatusesAsync } from "./modules/system/agent-provider-settings";
 import { handleLocalAuthApi } from "./modules/system/local-auth";
+import { authorizeResourceQuery, handleAccessPolicyApi } from "./modules/system/access-policy";
 import { applySecurityHeaders, authorizeApiRequest, requestIsReadOnly, validateRequestHost } from "./modules/system/api-access-control";
 import { buildSelectedSkillUsageDirective, ensureRoleSkillsInstalled, selectRoleSkills } from "./skills/role-skills";
 import {
@@ -301,6 +307,7 @@ import {
   recordProjectSessionProviderUsage,
 } from "./modules/projects/project-session-compaction";
 import { createPetActivityRuntime } from "./server-pet-activity";
+import { createPetAgentMilestoneProjector } from "./system/pet-agent-milestones";
 import { resolveDownloadedPetAsset } from "./modules/pets/pet-asset-pack";
 import { createAgentRunnerRuntime } from "./server-agent-runner";
 import { sendFile } from "./server-static";
@@ -352,6 +359,47 @@ const {
   createPetSpeechNotification,
   sanitizePetNotificationText,
   url
+});
+
+const petAgentMilestoneProjector = createPetAgentMilestoneProjector({
+  getMode: () => readPetConfig().settings.agentProgressMode,
+  fallbackTimeoutMs: 60_000,
+  emit: milestone => {
+    const role = milestone.petState === "error" ? "error" : milestone.petState === "waiting" ? "ask" : "status";
+    broadcastPetSpeech(milestone.projectName || milestone.scopeId || "global-agent", {
+      role,
+      title: milestone.title,
+      text: milestone.summary,
+      mode: "replace",
+      source: "agent-milestone",
+      petState: milestone.petState,
+      holdMs: role === "ask" ? 30_000 : role === "error" ? 18_000 : 8_000,
+      action: milestone.action,
+      petMilestone: true,
+      milestone,
+    });
+  },
+  persist: milestone => {
+    createUserNotification({
+      source_type: "pet_agent_milestone",
+      source_channel: milestone.scope,
+      scope_type: milestone.scope,
+      scope_id: milestone.scopeId,
+      exact_session_id: milestone.exactSessionId,
+      task_id: milestone.taskId,
+      notification_type: milestone.kind === "completed" ? "task_completed"
+        : milestone.kind === "failed" ? "task_failed"
+          : milestone.kind === "cancelled" ? "task_cancelled" : "needs_user",
+      severity: milestone.kind === "completed" ? "success"
+        : milestone.kind === "failed" ? "error"
+          : milestone.kind === "cancelled" ? "info" : "warning",
+      state: milestone.kind === "needs_user" ? "active" : "resolved",
+      title: milestone.title,
+      summary: milestone.summary,
+      action: milestone.action,
+      dedupe_key: milestone.dedupeKey,
+    });
+  },
 });
 
 // === Agent 并行/同步调用底座 ===
@@ -464,6 +512,8 @@ function createCollabCtx() {
           || task?.group_session_id
           || "",
         );
+        const anchorMessageId = String(task?.anchor_message_id || task?.anchorMessageId || task?.message_id || task?.messageId || "");
+        const originMessageId = String(task?.origin_message_id || task?.originMessageId || task?.source_message_id || task?.sourceMessageId || "");
         try {
           createUserNotification({
             recipient_user_ids: [
@@ -491,8 +541,11 @@ function createCollabCtx() {
               session_id: exactSessionId,
               project_id: projectId,
               group_id: groupId,
+              anchor_message_id: anchorMessageId,
+              origin_message_id: originMessageId,
+              generation: String(task?.generation || task?.session_generation || 0),
             },
-            dedupe_key: `task-terminal:${task?.id || "unknown"}:${normalizedStatus}`,
+            dedupe_key: `task-terminal:${task?.id || "unknown"}:${needsUser ? "needs_user" : isSuccess ? "completed" : normalizedStatus}`,
           });
         } catch (error: any) {
           console.warn("[用户通知]", error?.message || error);
@@ -532,6 +585,8 @@ function handleRequest(req: any, res: any) {
 
   if (handleLocalAuthApi(pathname, req, res)) return;
   if (pathname.startsWith("/api/") && !authorizeApiRequest(req, res, String(req.url || pathname))) return;
+  if (handleAccessPolicyApi(pathname, req, res)) return;
+  if (pathname.startsWith("/api/") && !authorizeResourceQuery(req, res, parsed)) return;
 
   if (pathname === "/api/internal/lifecycle/identity" && req.method === "GET") {
     if (req.ccmAuth?.kind !== "internal" || req.ccmAuth?.caller !== "ccm-cli") {
@@ -775,6 +830,7 @@ function handleRequest(req: any, res: any) {
   }
   if (pathname.startsWith("/assets/") || pathname.startsWith("/public/") ||
       pathname.startsWith("/css/") || pathname.startsWith("/js/") ||
+      pathname.startsWith("/pets/") ||
       pathname === "/favicon.svg" || pathname === "/icons.svg" || pathname === "/favicon.ico") {
     const filePath = path.join(PUBLIC_DIR, pathname.startsWith("/public/") ? pathname.replace("/public/", "") : pathname);
     if (fs.existsSync(filePath)) {
@@ -1132,7 +1188,7 @@ function handleRequest(req: any, res: any) {
   // === 流式发送消息给 Agent（SSE）===
   if (pathname === "/api/send-stream" && req.method === "POST") {
     const contentType = req.headers["content-type"] || "";
-    const handleStreamSend = async (project: string, message: string, files: any[] = [], parentRunId = "", projectSessionId = "", source = "web", platformContext: any = {}) => {
+    const handleStreamSend = async (project: string, message: string, files: any[] = [], parentRunId = "", projectSessionId = "", source = "web", platformContext: any = {}, clientMessageId = "", assistantMessageId = "") => {
       let projectFeishuEnvelope: any = null;
       if (source === "feishu") {
         if (String(platformContext?.target_type || "project_agent") !== "project_agent") {
@@ -1177,6 +1233,12 @@ function handleRequest(req: any, res: any) {
       if (exactProjectSessionId && !getSessionDetail(project, exactProjectSessionId)) {
         return sendJson(res, { error: "项目会话不存在" }, 404);
       }
+      const safeClientMessageId = /^[A-Za-z0-9:_-]{1,180}$/.test(String(clientMessageId || "").trim())
+        ? String(clientMessageId).trim()
+        : String(req.headers?.["x-client-message-id"] || "").trim();
+      const safeAssistantMessageId = /^[A-Za-z0-9:_-]{1,180}$/.test(String(assistantMessageId || "").trim())
+        ? String(assistantMessageId).trim()
+        : `project-reply:${Date.now().toString(36)}:${Math.random().toString(16).slice(2, 10)}`;
       let projectFeishuDestination: any = null;
       let projectFeishuOriginReceipt: any = null;
       const enqueueCurrentProjectFeishuTurn = () => {
@@ -1258,21 +1320,103 @@ function handleRequest(req: any, res: any) {
           return sendJson(res, { error: "续跑来源不属于当前项目会话" }, 409);
         }
       }
+      const dispatchLease = exactProjectSessionId ? acquireProjectSessionAgentDispatch(project, exactProjectSessionId) : { acquired: true, scopeId: "" };
+      const dispatchScope = dispatchLease.scopeId;
+      if (!dispatchLease.acquired) {
+        if (source === "feishu") return enqueueCurrentProjectFeishuTurn();
+        return sendJson(res, { error: "当前项目会话仍在处理上一条消息，请等待原消息完成后再继续", code: "PROJECT_SESSION_TURN_ACTIVE" }, 409);
+      }
+      let released = false;
+      let retainDispatchAfterResponse = false;
+      const releaseDispatch = () => {
+        if (retainDispatchAfterResponse || released || !dispatchScope) return;
+        released = true;
+        releaseProjectSessionAgentDispatch(dispatchScope);
+        if (source === "feishu" && exactProjectSessionId) {
+          setImmediate(() => void drainProjectFeishuTurns(`http://127.0.0.1:${PORT}`, project, exactProjectSessionId));
+        }
+      };
+      const persistConversationReply = (content: string, mode = "conversation") => {
+        if (!exactProjectSessionId || !String(content || "").trim()) return;
+        try {
+          upsertProjectSessionTaskMessage(project, exactProjectSessionId, {
+            id: safeAssistantMessageId,
+            role: "assistant",
+            content: String(content || ""),
+            requestText: message,
+            timestamp: new Date().toISOString(),
+            messageMode: mode,
+            type: "project_main_reply",
+            task_id: "",
+            run_id: "",
+            interruption: null,
+            source: source === "feishu" ? "feishu-project-main-agent-reply" : "web-project-main-agent-reply",
+          });
+        } catch (error: any) {
+          console.warn(`[项目会话] 权威回复持久化失败 (${project}/${exactProjectSessionId})：${error?.message || error}`);
+        }
+      };
+      const streamBufferedConversationReply = async (content: string) => {
+        const characters = Array.from(String(content || ""));
+        const chunkSize = characters.length > 2400 ? 36 : characters.length > 800 ? 24 : 16;
+        for (let offset = 0; offset < characters.length; offset += chunkSize) {
+          if (res.destroyed || res.writableEnded) break;
+          writeSse(res, {
+            type: "chunk",
+            text: characters.slice(offset, offset + chunkSize).join(""),
+            agent: "project-main-agent",
+          });
+          (res as any).flush?.();
+          if (offset + chunkSize < characters.length) {
+            await new Promise(resolve => setTimeout(resolve, 14));
+          }
+        }
+      };
       let projectFirstTurn: any;
+      const projectMainMetricStartedAt = Date.now();
       try {
         projectFirstTurn = await runProjectMainAgentFirstTurn({
           project,
           projectSessionId: exactProjectSessionId,
           userMessage: finalMessage,
-          turnId: String((sourceIngestion as any)?.client_message_id || req.headers?.["x-client-message-id"] || ""),
+          turnId: String((sourceIngestion as any)?.client_message_id || safeClientMessageId || ""),
           sourceCount: Number(sourceIngestion?.source_count || sourceIngestion?.sources?.length || files?.length || 0),
         });
       } catch (error: any) {
+        recordMetric("project-main-agent", {
+          success: false,
+          durationMs: Date.now() - projectMainMetricStartedAt,
+          fileChangeCount: 0,
+          scopeType: "project", projectId: project, role: "main_agent",
+          source: "project-main-turn", runtime: "main-agent-model",
+          taskId: String(parentRunId || ""),
+          executionId: String((sourceIngestion as any)?.client_message_id || safeClientMessageId || ""),
+          usageAnchorId: `project-main:${exactProjectSessionId}:${String((sourceIngestion as any)?.client_message_id || safeClientMessageId || Date.now())}`,
+          usage: error?.usage || { source: "unreported", missingReason: "failed_before_provider" },
+          error: error?.message || String(error),
+        });
+        releaseDispatch();
         return sendJson(res, {
           success: false,
           error: `统一大模型无法形成可靠工作流决策，本轮未启动项目 Agent：${error?.message || error}`,
         }, 503);
       }
+      recordMetric("project-main-agent", {
+        success: true,
+        durationMs: Number(projectFirstTurn.metric?.durationMs || Date.now() - projectMainMetricStartedAt),
+        fileChangeCount: 0,
+        scopeType: "project", projectId: project, role: "main_agent",
+        source: "project-main-turn", runtime: "main-agent-model",
+        taskId: String(parentRunId || ""),
+        executionId: String((sourceIngestion as any)?.client_message_id || safeClientMessageId || projectFirstTurn.metric?.usageAnchorId || ""),
+        usageAnchorId: projectFirstTurn.metric?.usageAnchorId,
+        usage: projectFirstTurn.metric?.usage || projectFirstTurn.turnReceipt?.usage || { source: "unreported", missingReason: "runtime_unreported" },
+        timing: {
+          totalMs: Number(projectFirstTurn.metric?.durationMs || 0),
+          modelMs: Number(projectFirstTurn.metric?.modelMs || 0),
+          toolWallMs: Number(projectFirstTurn.metric?.toolWallMs || 0),
+        },
+      });
       const chatIntent = {
         mode: projectFirstTurn.responseType === "reply" || projectFirstTurn.responseType === "clarify"
           ? "conversation"
@@ -1283,32 +1427,27 @@ function handleRequest(req: any, res: any) {
         ? String(projectFirstTurn.reply || "").trim()
         : "";
       if (directProjectReply) {
-        res.writeHead(200, {
-          "Content-Type": "text/event-stream",
-          "Cache-Control": "no-cache, no-transform",
-          "Connection": "keep-alive",
-          "Access-Control-Allow-Origin": "*",
-          "X-Accel-Buffering": "no",
-        });
-        if (typeof res.flushHeaders === "function") res.flushHeaders();
-        writeSse(res, { type: "turn_decision", decision: projectFirstTurn.turnDecision, receipt: projectFirstTurn.turnReceipt });
-        for (const item of projectFirstTurn.toolResults || []) writeSse(res, { type: "tool_activity", phase: item.ok === false ? "failed" : "completed", tool: item.name, scope: item.scope || "project", source: item.source || item.toolKind || "", loaded: item.loaded !== false, output_tokens: item.outputTokens || 0, duration_ms: item.durationMs || 0, result_checksum: item.resultChecksum || "", error: item.error || "" });
-        writeSse(res, { type: "presentation", message_mode: "conversation", show_task_card: false, main_agent: "project", direct_reply_fast_path: true });
-        writeSse(res, { type: "chunk", text: directProjectReply, agent: "project-main-agent" });
-        writeSse(res, { type: "done", message_mode: "conversation", main_agent: "project", taskExperience: null, direct_reply_fast_path: true });
-        recordMetric("project-main-agent", {
-          success: true,
-          durationMs: 0,
-          fileChangeCount: 0,
-          scopeType: "project",
-          projectId: project,
-          role: "main_agent",
-          source: source === "feishu" ? "project-feishu-direct-reply" : "project-direct-reply",
-          runtime: "main-first-turn",
-          usage: projectFirstTurn.turnReceipt?.usage || null,
-        });
+        persistConversationReply(directProjectReply, "conversation");
+        if (!res.destroyed && !res.writableEnded) {
+          res.writeHead(200, {
+            "Content-Type": "text/event-stream",
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+            "Access-Control-Allow-Origin": "*",
+            "X-Accel-Buffering": "no",
+          });
+          if (typeof res.flushHeaders === "function") res.flushHeaders();
+          writeSse(res, { type: "turn_decision", decision: projectFirstTurn.turnDecision, receipt: projectFirstTurn.turnReceipt });
+          for (const item of projectFirstTurn.toolResults || []) writeSse(res, { type: "tool_activity", phase: item.ok === false ? "failed" : "completed", tool: item.name, scope: item.scope || "project", source: item.source || item.toolKind || "", loaded: item.loaded !== false, output_tokens: item.outputTokens || 0, duration_ms: item.durationMs || 0, result_checksum: item.resultChecksum || "", error: item.error || "" });
+          writeSse(res, { type: "presentation", message_mode: "conversation", show_task_card: false, main_agent: "project", direct_reply_fast_path: true });
+          await streamBufferedConversationReply(directProjectReply);
+          if (!res.destroyed && !res.writableEnded) {
+            writeSse(res, { type: "done", message_id: safeAssistantMessageId, message_mode: "conversation", main_agent: "project", taskExperience: null, direct_reply_fast_path: true });
+          }
+        }
         scheduleFeishuSessionTitle(directProjectReply);
-        res.end();
+        releaseDispatch();
+        if (!res.writableEnded && !res.destroyed) res.end();
         return;
       }
       const info = getConfigInfo(config.path);
@@ -1383,7 +1522,10 @@ function handleRequest(req: any, res: any) {
       });
       let toolContext = buildCurrentProjectToolContext();
       let projectRestoredSourceContext = "";
-      if (toolContext.dispatchGate?.dispatchReady === false) return sendRuntimeToolDispatchBlocked(res, toolContext);
+      if (toolContext.dispatchGate?.dispatchReady === false) {
+        releaseDispatch();
+        return sendRuntimeToolDispatchBlocked(res, toolContext);
+      }
       if (resolvedRuntime.switched) {
         toolContext.workEvent.text = `${project} 执行器自动切换：配置为 ${resolvedRuntime.preferred}，当前可用执行器为 ${agentType}；候选链 ${resolvedRuntime.chain.join(" → ")}`;
         (toolContext.workEvent as any).runtimeFallback = resolvedRuntime;
@@ -1402,9 +1544,11 @@ function handleRequest(req: any, res: any) {
             provider: agentType,
           });
           if (projectCompaction?.reason === "circuit_breaker") {
+            releaseDispatch();
             return sendJson(res, { error: "项目会话记忆压缩已熔断，本轮未启动第三方 Agent", consecutive_failures: projectCompaction.consecutive_failures || 3 }, 503);
           }
         } catch (error: any) {
+          releaseDispatch();
           return sendJson(res, { error: `项目会话自动压缩失败，本轮未启动第三方 Agent：${error?.message || error}` }, 503);
         }
       }
@@ -1524,10 +1668,14 @@ function handleRequest(req: any, res: any) {
             projectMemoryMcp.ready = (toolContext.audit.internal_mcp || []).some((item: any) => item.name === "ccm__knowledge_context" && item.state === "synced");
           }
         } catch (error: any) {
+          releaseDispatch();
           return sendJson(res, { error: `项目会话记忆 MCP 准备失败，本轮未启动第三方 Agent：${error?.message || error}` }, 503);
         }
       }
-      if (toolContext.dispatchGate?.dispatchReady === false) return sendRuntimeToolDispatchBlocked(res, toolContext);
+      if (toolContext.dispatchGate?.dispatchReady === false) {
+        releaseDispatch();
+        return sendRuntimeToolDispatchBlocked(res, toolContext);
+      }
       const resolvedProjectSourceIdentity = projectSourceIdentity ? resolveMainAgentContinuityIdentity(projectSourceIdentity) : null;
       if (resolvedProjectSourceIdentity && resolvedProjectSourceIdentity.generation > 0) {
         projectRestoredSourceContext = restoreContextSources({
@@ -1545,37 +1693,23 @@ function handleRequest(req: any, res: any) {
       const projectSessionContext = memoryMcpEnabled
         ? buildThirdPartyMemoryBootstrap(projectMemoryMcp.snapshot, projectMemoryMcp.challenge)
         : exactProjectSessionId ? buildProjectSessionPostCompactContext(project, exactProjectSessionId, agentType, { currentRequest: finalMessage }) : "";
-      const dispatchLease = exactProjectSessionId ? acquireProjectSessionAgentDispatch(project, exactProjectSessionId) : { acquired: true, scopeId: "" };
-      const dispatchScope = dispatchLease.scopeId;
-      if (!dispatchLease.acquired) {
-        if (source === "feishu") return enqueueCurrentProjectFeishuTurn();
-        return sendJson(res, { error: "当前项目会话已有 Agent 工作正在执行，请排队或等待本轮完成" }, 409);
-      }
       if (requestIsReadOnly(req) && chatIntent.mode === "task") {
-        return sendJson(res, { success: false, error: "当前 Viewer 账户仅允许项目只读问答；这条需求需要执行开发任务，请联系 Operator 或 Admin", code: "VIEWER_EXECUTION_FORBIDDEN" }, 403);
+        releaseDispatch();
+        return sendJson(res, { success: false, error: "当前账户仅允许项目只读问答；这条需求需要项目管理权限", code: "PROJECT_EXECUTION_FORBIDDEN" }, 403);
       }
-      let released = false;
-      let retainDispatchAfterResponse = false;
-      const releaseDispatch = () => {
-        if (retainDispatchAfterResponse || released || !dispatchScope) return;
-        released = true;
-        releaseProjectSessionAgentDispatch(dispatchScope);
-        if (source === "feishu" && exactProjectSessionId) {
-          setImmediate(() => void drainProjectFeishuTurns(`http://127.0.0.1:${PORT}`, project, exactProjectSessionId));
-        }
-      };
       res.once?.("finish", releaseDispatch);
-      res.once?.("close", releaseDispatch);
       try {
-        res.writeHead(200, {
-          "Content-Type": "text/event-stream",
-          "Cache-Control": "no-cache, no-transform",
-          "Connection": "keep-alive",
-          "Access-Control-Allow-Origin": "*",
-          "X-Accel-Buffering": "no",
-        });
-        if (typeof res.flushHeaders === "function") res.flushHeaders();
-        let responseDetached = false;
+        let responseDetached = !!(res.writableEnded || res.destroyed);
+        if (!responseDetached) {
+          res.writeHead(200, {
+            "Content-Type": "text/event-stream",
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+            "Access-Control-Allow-Origin": "*",
+            "X-Accel-Buffering": "no",
+          });
+          if (typeof res.flushHeaders === "function") res.flushHeaders();
+        }
         const send = (data: any) => {
           if (!responseDetached && !res.writableEnded && !res.destroyed) writeSse(res, data);
         };
@@ -1616,9 +1750,11 @@ function handleRequest(req: any, res: any) {
             },
           });
           if (answer && !streamedAnswer) send({ type: "chunk", text: answer, agent: "project-main-agent" });
+          persistConversationReply(answer, chatIntent.mode);
           scheduleFeishuSessionTitle(answer);
-          send({ type: "done", message_mode: chatIntent.mode, main_agent: "project", taskExperience: null });
+          send({ type: "done", message_id: safeAssistantMessageId, message_mode: chatIntent.mode, main_agent: "project", taskExperience: null });
           clearInterval(heartbeat);
+          releaseDispatch();
           res.end();
           return;
         }
@@ -1706,6 +1842,7 @@ function handleRequest(req: any, res: any) {
           send({ type: "chunk", text: planText, agent: "project-main-agent" });
           send({ type: "done", message_id: taskMessageId, message_mode: "task", run: publicProjectChatRun(projectRun), workEvents: [], taskExperience: taskExperience() });
           clearInterval(heartbeat);
+          releaseDispatch();
           res.end();
           return;
         }
@@ -1923,6 +2060,7 @@ function handleRequest(req: any, res: any) {
           retainDispatchAfterResponse = false;
           releaseDispatch();
         } else {
+          releaseDispatch();
           res.end();
         }
       } catch (error) {
@@ -1958,6 +2096,8 @@ function handleRequest(req: any, res: any) {
             String((fields as any).session_id || (fields as any).sessionId || ""),
             String((fields as any).source || "web"),
             {},
+            String((fields as any).client_message_id || (fields as any).clientMessageId || ""),
+            String((fields as any).assistant_message_id || (fields as any).assistantMessageId || ""),
           );
         } catch (e: any) {
           sendJson(res, { error: e.message }, 400);
@@ -1970,8 +2110,8 @@ function handleRequest(req: any, res: any) {
     req.on("data", (chunk) => body += chunk);
     req.on("end", () => {
       try {
-        const { project, message, files, parent_run_id, parentRunId, session_id, sessionId, source, platform_context, platformContext } = JSON.parse(body);
-        void handleStreamSend(project, message, Array.isArray(files) ? files : [], String(parent_run_id || parentRunId || ""), String(session_id || sessionId || ""), String(source || "web"), platform_context || platformContext || {});
+        const { project, message, files, parent_run_id, parentRunId, session_id, sessionId, source, platform_context, platformContext, client_message_id, clientMessageId, assistant_message_id, assistantMessageId } = JSON.parse(body);
+        void handleStreamSend(project, message, Array.isArray(files) ? files : [], String(parent_run_id || parentRunId || ""), String(session_id || sessionId || ""), String(source || "web"), platform_context || platformContext || {}, String(client_message_id || clientMessageId || ""), String(assistant_message_id || assistantMessageId || ""));
       } catch (e: any) {
         sendJson(res, { error: e.message }, 400);
       }
@@ -2060,6 +2200,8 @@ function handleRequest(req: any, res: any) {
     sendJson(res, { success: false, error: "对话模板功能已移除，请使用 Skill、斜杠命令或共享文件", code: "TEMPLATE_FEATURE_REMOVED" }, 410);
     return;
   }
+  if (handleTaskTemplateApi(pathname, req, res)) return;
+  if (handleTaskPreflightApi(pathname, req, res)) return;
   if (handleCronApi(pathname, req, res, parsed, collabCtx)) return;
   if (handleSharedFilesV2Api(pathname, req, res, parsed)) return;
   if (handleToolsAndMetricsApi(pathname, req, res, parsed)) return;
@@ -2189,6 +2331,7 @@ function startServer(port: number, host = process.env.CCM_HOST || "127.0.0.1") {
     stopGlobalWebTurnRecoveryForServer();
     stopFeishuConversationTurnRecoveryForServer();
     stopProjectFeishuTurnRecoveryForServer();
+    stopWebConversationTurnRecoveryForServer();
     stopReliabilityDrillScheduler();
     stopStorageIndexScheduler();
     stopConversationSearchIndexScheduler();
@@ -2198,6 +2341,7 @@ function startServer(port: number, host = process.env.CCM_HOST || "127.0.0.1") {
     stopRuntimeToolRealCliMatrixScheduler();
     stopTaskPermissionNotificationScheduler();
     stopAgentCommunicationWatchdog();
+    petAgentMilestoneProjector.stop();
     shutdownSoakMonitor();
     if (!managedShutdownInProgress) {
       closeSqliteTaskStore();
@@ -2284,6 +2428,8 @@ function startServer(port: number, host = process.env.CCM_HOST || "127.0.0.1") {
         startFeishuConversationTurnRecoveryForServer(`http://127.0.0.1:${port}`, startupCollabCtx);
       });
     startProjectFeishuTurnRecoveryForServer(`http://127.0.0.1:${port}`);
+    reconcileTaskDispatchTurns();
+    startWebConversationTurnRecoveryForServer(`http://127.0.0.1:${port}`);
     try {
       const feishuConfig = loadFeishuConfig();
       const hasControlBotCredentials = !!((feishuConfig.control_bot_app_id || feishuConfig.app_id) && (feishuConfig.control_bot_app_secret || feishuConfig.app_secret));
@@ -2336,6 +2482,7 @@ if (require.main === module) {
     stopGlobalWebTurnRecoveryForServer();
     stopFeishuConversationTurnRecoveryForServer();
     stopProjectFeishuTurnRecoveryForServer();
+    stopWebConversationTurnRecoveryForServer();
     stopReliabilityDrillScheduler();
     stopStorageIndexScheduler();
     stopConversationSearchIndexScheduler();
@@ -2345,6 +2492,7 @@ if (require.main === module) {
     stopRuntimeToolRealCliMatrixScheduler();
     stopTaskPermissionNotificationScheduler();
     stopAgentCommunicationWatchdog();
+    petAgentMilestoneProjector.stop();
     stopFeishuChannelSupervisorForServer();
     stopControlBotConnection();
     const forceExit = setTimeout(() => process.exit(1), 15_000);

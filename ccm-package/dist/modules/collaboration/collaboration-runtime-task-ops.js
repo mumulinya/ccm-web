@@ -78,6 +78,12 @@ function retryRuntimeFailedTasks(ctx, options = {}) {
     const candidates = (0, db_1.loadTasks)()
         .filter(collaboration_runtime_task_queue_1.isRecoverableRuntimeFailure)
         .filter((task) => (0, collaboration_runtime_coordinator_review_1.taskMatchesAgentProbeTarget)(task, probeTarget))
+        .filter((task) => {
+        const recovery = task?.recovery || task?.interruption_receipt?.recovery || {};
+        if (recovery.mode === "manual" || recovery.state === "needs_user")
+            return false;
+        return !recovery.nextRetryAt || Date.parse(recovery.nextRetryAt) <= Date.now();
+    })
         .sort((a, b) => Date.parse(a.updated_at || a.created_at || "") - Date.parse(b.updated_at || b.created_at || ""))
         .slice(0, limit);
     if (dryRun) {

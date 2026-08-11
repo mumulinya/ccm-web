@@ -8,7 +8,8 @@ const template = fs.readFileSync(path.join(root, 'frontend/src/components/tools/
 const styles = fs.readFileSync(path.join(root, 'frontend/src/components/tools/AutoDevOps.css'), 'utf8')
 
 const checks = [
-  ['控制台标题', template, '自动开发控制台'],
+  ['控制台标题', template, '自动开发运营'],
+  ['任务派发边界', template, '具体任务的执行、验收与操作统一进入任务派发'],
   ['标签图标', template, 'viewIcons[view.id]'],
   ['运行操作图标', template, '<Play :size="15"'],
   ['链路状态图标', template, 'readiness-icon'],

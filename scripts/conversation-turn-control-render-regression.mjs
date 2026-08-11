@@ -34,20 +34,21 @@ try {
   await page.goto(`http://127.0.0.1:${port}/visual-regression/conversation-turn-control-fixture.html`, { waitUntil:'networkidle' })
   const busy = page.locator('#busy-case')
   const idle = page.locator('#idle-case')
-  if (!(await busy.getByText('引导当前').isVisible())) throw new Error('引导当前不可见')
-  if (!(await busy.getByText('排队下一条').isVisible())) throw new Error('排队下一条不可见')
+  if (!(await busy.getByText('调整方向').isVisible())) throw new Error('调整方向不可见')
+  if (!(await busy.getByText('另有 2 条待处理消息').isVisible())) throw new Error('待处理消息数量不可见')
   if (!(await busy.getByTitle('停止当前工作').isVisible())) throw new Error('停止按钮不可见')
   if (await idle.locator('[data-testid="conversation-turn-controls"]').count()) throw new Error('空闲普通对话不应显示会话控制条')
   const textarea = busy.locator('textarea')
   if (await textarea.isDisabled()) throw new Error('Agent 工作中输入框必须可编辑')
-  await busy.getByText('排队下一条').click()
-  if ((await busy.locator('#events').textContent()).split('|')[0] !== 'queue') throw new Error('排队模式未切换')
+  await busy.getByText('调整方向').click()
+  await busy.getByText('另有 2 条待处理消息').click()
+  if (!(await busy.getByText('来自定时任务').isVisible())) throw new Error('外部任务来源不可见')
   await busy.getByTitle('停止当前工作').click()
   await busy.getByRole('button', { name:'重新排队' }).click()
-  await busy.getByRole('button', { name:'取消这条消息' }).first().click()
+  await busy.getByTitle('删除这条待处理消息').first().click()
   const events = await busy.locator('#events').textContent()
-  if (events !== 'queue|1|1|1') throw new Error(`控件事件错误：${events}`)
-  const boxes = await busy.locator('.turn-control-toolbar, .turn-queue, .chat-composer').evaluateAll(elements => elements.map(el => {
+  if (events !== '1|1|1|1') throw new Error(`控件事件错误：${events}`)
+  const boxes = await busy.locator('.turn-queue, .chat-composer').evaluateAll(elements => elements.map(el => {
     const r = el.getBoundingClientRect(); return { left:r.left, right:r.right, top:r.top, bottom:r.bottom, width:r.width }
   }))
   if (boxes.some(box => box.left < 0 || box.right > 1180 || box.width <= 0)) throw new Error(`桌面布局溢出：${JSON.stringify(boxes)}`)
@@ -55,7 +56,7 @@ try {
   await page.setViewportSize({ width: 390, height: 844 })
   await page.reload({ waitUntil:'networkidle' })
   const mobileBusy = page.locator('#busy-case')
-  const mobileBoxes = await mobileBusy.locator('.turn-control-toolbar, .turn-queue, .chat-composer').evaluateAll(elements => elements.map(el => {
+  const mobileBoxes = await mobileBusy.locator('.turn-queue, .chat-composer').evaluateAll(elements => elements.map(el => {
     const r = el.getBoundingClientRect(); return { left:r.left, right:r.right, top:r.top, bottom:r.bottom, width:r.width }
   }))
   if (mobileBoxes.some(box => box.left < 0 || box.right > 390 || box.width <= 0)) throw new Error(`移动端布局溢出：${JSON.stringify(mobileBoxes)}`)

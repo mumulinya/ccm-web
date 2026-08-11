@@ -668,6 +668,10 @@ export async function classifyGroupProjectTaskIntentWithAgent(input: {
   groupSessionId?: string;
   group_session_id?: string;
   context?: string;
+  turnId?: string;
+  turn_id?: string;
+  anchorMessageId?: string;
+  anchor_message_id?: string;
 }) {
   const fallback = {
     executable: false,
@@ -682,6 +686,8 @@ export async function classifyGroupProjectTaskIntentWithAgent(input: {
       message: input.message,
       source: "group-chat-main-first-turn",
       groupSessionId: input.groupSessionId || input.group_session_id || "",
+      turnId: input.turnId || input.turn_id || "",
+      anchorMessageId: input.anchorMessageId || input.anchor_message_id || "",
       context: input.context || "",
       sharedFilesContext: input.sharedFilesContext || "",
       extraInstructions: input.forceProjectTask

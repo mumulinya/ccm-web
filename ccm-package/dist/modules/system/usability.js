@@ -337,7 +337,7 @@ function pageMeta(total, pageSize) {
 }
 function workbenchCapabilities(principal) {
     const capabilities = new Set(Array.isArray(principal?.capabilities) ? principal.capabilities : []);
-    const role = principal?.role || "viewer";
+    const role = principal?.role || "user";
     return {
         role,
         task_execute: role === "admin" || capabilities.has("task.execute"),
@@ -345,8 +345,8 @@ function workbenchCapabilities(principal) {
         project_git: role === "admin" || capabilities.has("project.git"),
         cron_manage: role === "admin",
         required_roles: {
-            task_execute: "operator",
-            project_runtime: "operator",
+            task_execute: "user",
+            project_runtime: "user",
             cron_manage: "admin",
         },
     };

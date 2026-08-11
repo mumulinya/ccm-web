@@ -45,6 +45,9 @@ export const buildGroupStreamErrorText = (value) => `这次没有完成：${sani
 export function getVisibleGroupMessageContent(msg, fallback = '我已整理这条消息。') {
   if (!msg) return ''
   if (msg.role === 'user') return String(msg.content || '')
+  const runtime = String(msg.runtime || '').toLowerCase()
+  if (runtime === 'llm-error') return '大模型暂时不可用，本次请求未完成。\n请检查模型配置或网络后重试。'
+  if (runtime === 'llm-not-configured') return '大模型尚未配置，本次请求未开始。\n请完成模型配置后重试。'
   const card = msg?.taskCard || msg?.task_card || msg?.taskRuntime?.taskCard || msg?.taskRuntime?.task_card || null
   const presentation = classifyGroupTaskCardPresentation(card, msg)
   const raw = presentation === PRESENTATION_REPLY
@@ -101,6 +104,7 @@ export const getWorkPanelState = (msg) => {
 
 export const getAgentMessageStatus = (msg) => {
   if (msg?.agent === 'system') return { tone: 'fail', label: '系统' }
+  if (['llm-error', 'llm-not-configured'].includes(String(msg?.runtime || '').toLowerCase())) return { tone: 'fail', label: '已中断' }
   const state = getWorkPanelState(msg)
   if (getWorkEvents(msg).length) return state
   if (msg?.streaming) return { tone: 'running', label: '思考中' }

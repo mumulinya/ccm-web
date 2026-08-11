@@ -559,15 +559,20 @@
 .report-toolbar select,
 .field-row input[type='time'],
 .field-row select {
-  min-height: 36px;
-  padding: 7px 10px;
+  min-height: var(--control-height-lg, 36px);
+  padding: 0 var(--control-padding-x, 10px);
   border: 1px solid var(--border-color);
-  border-radius: 6px;
+  border-radius: var(--radius-md, 6px);
   color: var(--text-primary);
-  background: var(--surface);
+  background: var(--control-bg);
   font: inherit;
   font-size: 12px;
+  outline: 0;
+  transition: border-color .15s ease, box-shadow .15s ease;
 }
+.report-toolbar select:focus,
+.field-row input[type='time']:focus,
+.field-row select:focus { border-color: var(--accent-blue); box-shadow: var(--focus-ring); }
 
 .report-surface {
   min-height: 460px;

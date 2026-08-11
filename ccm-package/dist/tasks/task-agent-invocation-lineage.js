@@ -1506,7 +1506,7 @@ function reconcileTaskAgentInvocationRecovery(options = {}) {
                 nativeModelCapabilityReceipt: direct.result.nativeModelCapabilityReceipt || null,
                 nativeModelCapabilityRecord: direct.result.nativeModelCapabilityRecord || null,
                 runnerRequestId: edge.runner_request_id,
-                output: direct.result.output || direct.result.error || "",
+                resultChecksum: direct.result.output_checksum || "",
                 error: direct.result.error || "",
                 reason: direct.result.success === true ? "startup_runner_result_recovered" : "startup_runner_failure_recovered",
                 recoveryOutcome: direct.result.success === true ? "recovered_completed" : "recovered_failed",

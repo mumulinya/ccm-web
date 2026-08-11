@@ -93,7 +93,8 @@ header p { margin: 4px 0 0; color: var(--text-muted); font-size: 11px; }
 header button { width: 32px; height: 32px; display: grid; place-items: center; border: 0; background: transparent; color: var(--text-secondary); cursor: pointer; }
 .editor-body { display: grid; gap: 14px; padding: 18px; overflow: auto; }
 label { display: grid; gap: 6px; color: var(--text-secondary); font-size: 12px; }
-input, textarea { width: 100%; box-sizing: border-box; border: 1px solid var(--border-color, rgba(0,0,0,.1)); border-radius: 6px; padding: 9px 10px; background: var(--bg-secondary, rgba(255,255,255,.7)); color: var(--text-primary); font: inherit; resize: vertical; }
+input, textarea { width: 100%; box-sizing: border-box; border: 1px solid var(--border-color, rgba(0,0,0,.1)); border-radius: var(--radius-md,6px); padding: 9px var(--control-padding-x,10px); background: var(--control-bg); color: var(--text-primary); font: inherit; resize: vertical; outline:0; transition:border-color .15s ease,box-shadow .15s ease; }
+input:not([type="checkbox"]){height:var(--control-height,34px);padding-block:0}textarea{min-height:76px;line-height:1.5}input:focus,textarea:focus{border-color:var(--accent-blue);box-shadow:var(--focus-ring)}
 .mono { font-family: 'Share Tech Mono', monospace; }
 small { color: var(--text-muted); overflow-wrap: anywhere; }
 .clear-env { grid-template-columns: auto 1fr; align-items: center; }

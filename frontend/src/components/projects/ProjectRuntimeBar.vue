@@ -26,6 +26,8 @@ const active = computed(() => starting.value || running.value || stopping.value)
 const unknown = computed(() => processState.value.status === 'unknown')
 const building = computed(() => ['building', 'cancelling'].includes(buildState.value?.status))
 const buildLabel = computed(() => ['maven', 'gradle'].includes(selected.value?.projectType) ? '打包 JAR' : '构建')
+const runReady = computed(() => selected.value?.run_readiness?.ready !== false)
+const buildReady = computed(() => selected.value?.build_readiness?.ready !== false)
 const durationText = computed(() => {
   if (!running.value || !processState.value.startedAt) return ''
   const seconds = Math.max(0, Math.floor((now.value - new Date(processState.value.startedAt).getTime()) / 1000))
@@ -39,6 +41,7 @@ const statusText = computed(() => {
   if (starting.value) return '正在准备项目依赖'
   if (running.value) return `运行中${durationText.value ? ` ${durationText.value}` : ''}${processState.value.pid ? ` · PID ${processState.value.pid}` : ''}`
   if (processState.value.status === 'failed') return '运行失败'
+  if (selected.value?.runCommand && !runReady.value) return selected.value?.run_readiness?.reason || '运行环境不可用'
   return '未运行'
 })
 </script>
@@ -56,7 +59,7 @@ const statusText = computed(() => {
         <span>运行配置</span>
         <select :value="selected?.id || ''" @change="emit('update:selectedProfileId', $event.target.value)">
           <option v-for="profile in profiles" :key="profile.id" :value="profile.id">
-            {{ profile.label }} · {{ profile.projectType }}{{ profile.environment !== 'default' ? ` · ${profile.environment}` : '' }} · {{ profile.runCommand ? '可启动' : '仅构建' }}
+            {{ profile.label }} · {{ profile.projectType }}{{ profile.environment !== 'default' ? ` · ${profile.environment}` : '' }} · {{ profile.runCommand ? (profile.run_readiness?.ready === false ? `缺少 ${profile.run_readiness.executable || '运行环境'}` : '可启动') : '仅构建' }}
           </option>
         </select>
       </label>
@@ -67,10 +70,10 @@ const statusText = computed(() => {
       </div>
 
       <div class="runtime-actions">
-        <button v-if="!active" class="primary" :disabled="!!busyAction || unknown || !selected?.runCommand" title="启动所选源码项目" @click="emit('action', 'start')"><Play :size="15" />{{ busyAction === 'start' ? '启动中' : '启动' }}</button>
+        <button v-if="!active" class="primary" :disabled="!!busyAction || unknown || !selected?.runCommand || !runReady" :title="runReady ? '启动所选源码项目' : selected?.run_readiness?.reason" @click="emit('action', 'start')"><Play :size="15" />{{ busyAction === 'start' ? '启动中' : '启动' }}</button>
         <button v-else class="pause" :disabled="!!busyAction || stopping" :title="starting ? '停止依赖准备' : '暂停所选源码项目'" @click="emit('action', 'stop')"><Pause :size="15" />{{ stopping || busyAction === 'stop' ? '停止中' : starting ? '停止准备' : '暂停' }}</button>
-        <button :disabled="!!busyAction || starting || unknown || !selected?.runCommand" title="重新运行所选源码项目" @click="emit('action', 'restart')"><RotateCcw :size="15" /></button>
-        <button :disabled="!!busyAction || building || !selected?.buildCommand" :title="buildLabel" @click="emit('action', 'build')"><Box :size="15" />{{ building ? '构建中' : buildLabel }}</button>
+        <button :disabled="!!busyAction || starting || unknown || !selected?.runCommand || !runReady" :title="runReady ? '重新运行所选源码项目' : selected?.run_readiness?.reason" @click="emit('action', 'restart')"><RotateCcw :size="15" /></button>
+        <button :disabled="!!busyAction || building || !selected?.buildCommand || !buildReady" :title="buildReady ? buildLabel : selected?.build_readiness?.reason" @click="emit('action', 'build')"><Box :size="15" />{{ building ? '构建中' : buildLabel }}</button>
         <button title="查看运行日志" @click="emit('logs', 'run')"><FileText :size="15" /></button>
         <button title="运行配置" @click="emit('configure')"><Settings2 :size="15" /></button>
       </div>
@@ -83,7 +86,7 @@ const statusText = computed(() => {
     </template>
 
     <div v-else class="runtime-empty">
-      <span>没有识别到可靠的运行命令</span>
+      <span>暂未自动识别启动入口，可扫描或配置任意语言命令</span>
       <button @click="emit('rescan')"><RefreshCw :size="14" />重新扫描</button>
       <button @click="emit('configure')"><Settings2 :size="14" />手动配置</button>
     </div>

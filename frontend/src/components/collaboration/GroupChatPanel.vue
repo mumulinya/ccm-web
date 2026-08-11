@@ -19,6 +19,7 @@ import AgentQaMessage from '../agents/AgentQaMessage.vue'
 import GroupMainAgentStatusCard from './GroupMainAgentStatusCard.vue'
 import MainAgentDecisionCard from '../agents/MainAgentDecisionCard.vue'
 import AgentExecutionTranscript from '../common/AgentExecutionTranscript.vue'
+import ActiveTaskPlanDock from '../common/ActiveTaskPlanDock.vue'
 import NewProgressIndicator from '../common/NewProgressIndicator.vue'
 import GroupChatHeader from './GroupChatHeader.vue'
 import GroupChatSessionSidebar from './GroupChatSessionSidebar.vue'
@@ -89,7 +90,7 @@ const {
   submitCreateGroup, submitRename, deleteGroup, clearGroupMessages, saveCurrentGroupConversationKnowledge,
   isStreaming, thinkingMessages, pendingGroupSendRetry, groupStreamController, activeGroupTaskId,
   stoppingGroupTurn, groupTurnConversationId, groupTurnControl, stopGroupCurrentWork, drainGroupTurnQueue, guideGroupQueuedTurn,
-  submitGroupMessageWhileBusy, groupSendRetrySignature, sendMessage, editGroupUserMessage, waitingCrossReply, pullNewMessages,
+  submitGroupMessageWhileBusy, groupSendRetrySignature, sendMessage, editGroupUserMessage, handleGroupModelFailureAction, waitingCrossReply, pullNewMessages,
   logs, logFilter, logEventSource, logsResizeObserver, scrollLogsToBottom, loadLogs, startLogStream,
   stopLogStream, clearLogs, normalizeGroupTools, loadAvailableGroupTools, loadGroupTools, toggleGroupTool, updateGroupContextPolicy,
   saveGroupTools, groupTestTargets, groupTestTargetProjects, groupTestTargetsLoading, groupTestTargetsSaving,
@@ -118,8 +119,25 @@ const {
   exactSessionId: currentGroupSessionId,
   active: computed(() => props.active !== false && !!currentGroup.value?.id && !!currentGroupSessionId.value),
 })
+const groupTaskExecutionActive = computed(() => {
+  if (activeGroupTaskId.value) return true
+  return messages.value.some(message => {
+    const taskId = String(getMessageTaskId(message) || '')
+    if (!taskId) return false
+    const runtime = getTaskRuntime(message) || message?.task || message?.taskCard || {}
+    const status = String(runtime?.status || runtime?.phase || '').toLowerCase()
+    return !['completed', 'done', 'succeeded', 'failed', 'cancelled', 'canceled', 'reverted'].includes(status)
+  })
+})
 watch(groupMeaningfulRevision, () => notifyGroupProgress({ key: groupLatestMeaningfulKey.value }))
 watch(currentGroupSessionId, () => resetGroupPinnedScroll())
+const locateGroupPlanStep = ({ messageIndex }) => {
+  if (Number.isInteger(messageIndex) && messageIndex >= 0) scrollToMessage(messageIndex)
+}
+const handleGroupPlanAction = ({ messageIndex, action }) => {
+  const message = Number.isInteger(messageIndex) && messageIndex >= 0 ? messages.value[messageIndex] : {}
+  return handleTaskCardAction(message || {}, action)
+}
 const {
   usage: groupContextUsage,
   loading: groupContextLoading,

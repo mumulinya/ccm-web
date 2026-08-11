@@ -11,6 +11,7 @@ import { usePermissionApprovals } from '../../composables/usePermissionApprovals
 import { MessageSquareText, Plus } from '@lucide/vue'
 import GlobalAgentFeishuBindingModal from '../global/GlobalAgentFeishuBindingModal.vue'
 import AgentExecutionTranscript from '../common/AgentExecutionTranscript.vue'
+import ActiveTaskPlanDock from '../common/ActiveTaskPlanDock.vue'
 import NewProgressIndicator from '../common/NewProgressIndicator.vue'
 import { useAgentExecutionEvents } from '../../composables/useAgentExecutionEvents.js'
 import { getCopyableMessageText } from '../../utils/messageActions.js'
@@ -42,7 +43,7 @@ const {
   deleteProject, handleArchiveNotify, openCreateModal, submitCreate, cancelProjectClone, openEditModal, submitEdit, loadProjectGitStatus,
   openSwitchAgent, switchAgent, startProjectWithAgent, createSession, openProjectFeishuBinding, updateProjectFeishuBinding, renameSession, deleteSession,
   saveCurrentProjectSessionKnowledge, getProjectTaskCard, postTaskAction, removeMessageFromCurrentSession, handleProjectTaskAction, isStreaming,
-  pendingProjectParentRunId, streamController, activeProjectRunId, stoppingProjectTurn, makeProjectMessageId,
+  pendingProjectParentRunId, streamController, activeProjectRunId, activeProjectMainTaskId, stoppingProjectTurn, makeProjectMessageId,
   projectTurnConversationId, projectTurnControl, projectComposerSendLabel, stopStreaming, drainProjectTurnQueue, guideProjectQueuedTurn, submitProjectMessageWhileBusy,
   sendMessage, editProjectUserMessage, formatFileSize, onChatFilesSelected, removeChatFile, openFileDiff, openProjectChangesTab,
   closeFileDiff, currentSessionNew, autoNameSession, chatTarget, showLogsPanel, logsTitle, logsProfileId, logsKind, logsRuntimeProcess,
@@ -71,8 +72,24 @@ const {
   exactSessionId: currentSession,
   active: computed(() => props.active !== false && !!currentProject.value && !!currentSession.value),
 })
+const projectTaskExecutionActive = computed(() => {
+  if (activeProjectRunId.value || activeProjectMainTaskId.value) return true
+  return messages.value.some(message => {
+    const taskId = String(message?.task_id || message?.taskId || message?.taskExperience?.task_id || '')
+    if (!taskId) return false
+    const status = String(message?.taskExperience?.status || message?.taskExperience?.phase || '').toLowerCase()
+    return !['completed', 'done', 'succeeded', 'failed', 'cancelled', 'canceled', 'reverted'].includes(status)
+  })
+})
 watch(projectMeaningfulRevision, () => notifyProjectProgress({ key: projectLatestMeaningfulKey.value }))
 watch(currentSession, () => resetProjectPinnedScroll())
+const locateProjectPlanStep = ({ messageIndex }) => {
+  if (Number.isInteger(messageIndex) && messageIndex >= 0) scrollToMessage(messageIndex)
+}
+const handleProjectPlanAction = ({ messageIndex, action }) => {
+  const message = Number.isInteger(messageIndex) && messageIndex >= 0 ? messages.value[messageIndex] : {}
+  return handleProjectTaskAction(message || {}, action)
+}
 const {
   usage: projectContextUsage,
   loading: projectContextLoading,

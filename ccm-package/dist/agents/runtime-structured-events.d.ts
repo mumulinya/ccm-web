@@ -22,6 +22,8 @@ export interface AgentRuntimeStructuredEvent extends AgentRuntimeEventIdentity {
     runtimeVersion: string;
     eventType: AgentRuntimeStructuredEventType;
     toolCallId?: string;
+    assistantRole?: "progress" | "final";
+    relatedToolCallIds?: string[];
     progressSource: AgentRuntimeProgressSource;
     confidence: "declared" | "observed";
     safeSummary?: string;

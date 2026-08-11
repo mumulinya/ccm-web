@@ -120,17 +120,23 @@ export function useGroupChatStream({
   const groupStreamController = ref(null)
   const activeGroupTaskId = ref('')
   const stoppingGroupTurn = ref(false)
+  const groupConversationTask = computed(() => [...messages.value].reverse().map(message => getTaskCard(message)).find(card => {
+    if (!card) return false
+    return !['done', 'completed', 'success', 'accepted', 'failed', 'cancelled', 'canceled', 'archived'].includes(String(card.status || '').toLowerCase())
+  }) || null)
+  const groupCurrentTaskId = computed(() => activeGroupTaskId.value || groupConversationTask.value?.task_id || groupConversationTask.value?.id || mainAgentStatus.value?.task_id || '')
+  const groupTurnBusy = computed(() => isStreaming.value || !!groupConversationTask.value || ['planning', 'dispatching', 'executing', 'reviewing', 'reworking', 'waiting_user', 'blocked', 'interrupted'].includes(String(mainAgentStatus.value?.phase || '').toLowerCase()))
   const groupTurnConversationId = computed(() => currentGroup.value?.id && currentGroupSessionId.value
     ? `${currentGroup.value.id}:${currentGroupSessionId.value}`
     : '')
   const groupTurnControl = useConversationTurnControl({
     scope: 'group',
     conversationId: groupTurnConversationId,
-    busy: isStreaming,
+    busy: groupTurnBusy,
   })
 
   const stopGroupCurrentWork = async ({ preserveTask = false } = {}) => {
-    if (!isStreaming.value || stoppingGroupTurn.value) return
+    if ((!isStreaming.value && !(preserveTask && groupCurrentTaskId.value)) || stoppingGroupTurn.value) return
     stoppingGroupTurn.value = true
     try {
       const groupId = currentGroup.value?.id
@@ -143,7 +149,7 @@ export function useGroupChatStream({
             scope: 'group',
             group_id: groupId,
             group_session_id: sessionId,
-            task_id: activeGroupTaskId.value,
+            task_id: groupCurrentTaskId.value,
             reason: preserveTask ? '用户引导当前群聊任务，停止旧执行后续接' : '用户停止群聊主 Agent 当前工作',
             actor: preserveTask ? 'group-chat-steer' : 'group-chat-stop',
           }),
@@ -168,7 +174,7 @@ export function useGroupChatStream({
     return { task_id: result?.taskId || '' }
   })
   watch(
-    () => [groupTurnConversationId.value, isStreaming.value, groupTurnControl.turns.value.filter(turn => turn.status === 'queued').length],
+    () => [groupTurnConversationId.value, groupTurnBusy.value, groupTurnControl.turns.value.filter(turn => turn.status === 'queued').length],
     ([conversationId, busy, queued]) => {
       if (conversationId && !busy && queued) window.setTimeout(() => drainGroupTurnQueue().catch(() => {}), 0)
     },
@@ -177,14 +183,11 @@ export function useGroupChatStream({
 
   const submitGroupMessageWhileBusy = async () => {
     const message = newMessage.value.trim()
-    if (!message) return
-    if (messageFiles.value.length) {
-      toast.info('工作中的排队消息暂不保存本地附件，请停止当前工作后连同附件发送')
-      return
-    }
+    if (!message && !messageFiles.value.length) return
     const requestedMode = groupTurnControl.mode.value
     await groupTurnControl.enqueue({
       message,
+      attachments: [...messageFiles.value],
       mode: requestedMode,
       activeRunId: activeGroupTaskId.value,
       metadata: {
@@ -196,6 +199,7 @@ export function useGroupChatStream({
       },
     })
     newMessage.value = ''
+    messageFiles.value = []
     toast.success(requestedMode === 'steer' ? '已接收引导，正在停止旧执行并沿用当前任务继续' : '已加入队列，当前协作结束后会自动发送')
     if (requestedMode === 'steer') await stopGroupCurrentWork({ preserveTask: true })
     window.setTimeout(() => drainGroupTurnQueue().catch(() => {}), 0)
@@ -205,14 +209,20 @@ export function useGroupChatStream({
     if (!turn?.id) return
     const guidedTurn = await groupTurnControl.guide(turn)
     toast.success('这条消息已移到队首，将作为当前任务的补充要求')
-    if (isStreaming.value) await stopGroupCurrentWork({ preserveTask: true })
-    window.setTimeout(() => drainGroupTurnQueue().catch(() => {}), 0)
+    const currentTaskId = groupCurrentTaskId.value
+    await stopGroupCurrentWork({ preserveTask: true })
+    await groupTurnControl.apply(guidedTurn, async claimed => {
+      const result = await sendMessage({ queueTurn: claimed })
+      if (result?.success === false) throw new Error(result.error || '调整方向没有接入当前任务')
+      return { task_id: result?.taskId || currentTaskId, continuation_task_id: currentTaskId }
+    })
     return guidedTurn
   }
 
   const sendMessage = async (options = {}) => {
     const queuedTurn = options?.queueTurn || null
-    if (isStreaming.value && !queuedTurn) return submitGroupMessageWhileBusy()
+    const resumeInterruption = options?.resumeInterruption || null
+    if (groupTurnBusy.value && !queuedTurn) return submitGroupMessageWhileBusy()
     if ((!queuedTurn && !newMessage.value.trim() && messageFiles.value.length === 0) || !currentGroup.value) return
     if (!currentGroupSessionId.value) {
       try {
@@ -227,7 +237,7 @@ export function useGroupChatStream({
       return { success: false, error: '当前群聊会话尚未创建' }
     }
     const msg = queuedTurn ? String(queuedTurn.message || '').trim() : newMessage.value.trim()
-    const filesToSend = queuedTurn ? [] : [...messageFiles.value]
+    const filesToSend = queuedTurn ? [...(queuedTurn.files || [])] : [...messageFiles.value]
     const taskSupplementTarget = isTaskSupplementMode.value ? { ...pendingGroupTaskInput.value } : null
     const clarificationResponseTarget = !taskSupplementTarget && isClarificationResponseMode.value
       ? { ...pendingGroupClarificationInput.value }
@@ -290,21 +300,23 @@ export function useGroupChatStream({
     }
     scrollToBottom()
 
-    // 创建思考过程消息
-    const thinkingMsg = {
-      role: 'thinking',
-      content: '',
-      timestamp: new Date().toISOString()
-    }
-    messages.value.push(thinkingMsg)
-
-    // 创建 Agent 回复消息
+    // Create the authoritative assistant envelope immediately. It renders as
+    // “正在思考…” until the first safe chunk arrives, then the same row streams
+    // the coordinator reply instead of replacing a separate thinking message.
     const agentMsg = {
+      id: `group-reply:${clientMessageId}`,
       role: 'assistant',
       agent: 'coordinator',
       content: '',
+      processingDetail: '正在理解你的问题并检查群聊上下文',
+      // The server persists the final assistant reply with this anchor. Keeping
+      // it on the optimistic envelope lets runtime-event/poll recovery replace
+      // the same row even when the terminal SSE packet is lost.
+      execution_anchor_message_id: clientMessageId,
+      streaming: true,
       timestamp: new Date().toISOString()
     }
+    messages.value.push(agentMsg)
 
     isStreaming.value = true
     thinkingMessages.value = []
@@ -315,7 +327,8 @@ export function useGroupChatStream({
     const agentStreamRawBuffers = {}
     const agentStreamHiddenBuffers = {}
     let hasMention = false
-    let agentMsgAdded = false
+    let agentMsgAdded = true
+    let primaryStreamAgentKey = ''
     let singleStreamRawBuffer = ''
     let singleStreamHiddenBuffer = false
 
@@ -327,6 +340,7 @@ export function useGroupChatStream({
       payload.append('message', msg)
       payload.append('client_message_id', clientMessageId)
       payload.append('message_mode', directedInputFields?.message_mode || queuedTurn?.metadata?.message_mode || messageMode.value)
+      if (resumeInterruption?.id) payload.append('resume_interruption_message_id', String(resumeInterruption.id))
       if (directedInputFields) {
         Object.entries(directedInputFields)
           .filter(([key]) => key !== 'message_mode')
@@ -340,6 +354,7 @@ export function useGroupChatStream({
         message: msg,
         client_message_id: clientMessageId,
         message_mode: queuedTurn?.metadata?.message_mode || messageMode.value,
+        ...(resumeInterruption?.id ? { resume_interruption_message_id: String(resumeInterruption.id) } : {}),
         ...(directedInputFields || {})
       }
     }
@@ -357,9 +372,9 @@ export function useGroupChatStream({
       }
       const optimisticIdx = messages.value.findIndex(item => item.id === clientMessageId)
       if (optimisticIdx !== -1) messages.value.splice(optimisticIdx, 1)
+      const assistantIdx = messages.value.indexOf(agentMsg)
+      if (assistantIdx !== -1) messages.value.splice(assistantIdx, 1)
       isStreaming.value = false
-      const thinkingIdx = messages.value.indexOf(thinkingMsg)
-      if (thinkingIdx !== -1) messages.value.splice(thinkingIdx, 1)
       if (!stopped) toast.error(error?.message || '消息提交失败，请检查后重试')
       nextTick(focusGroupInput)
       if (groupStreamController.value === controller) groupStreamController.value = null
@@ -382,15 +397,14 @@ export function useGroupChatStream({
         if (eventId) seenStreamEventIds.add(eventId)
         if (data.type === 'status') {
           applyMainAgentProgressCheckpoint(data)
-          // 更新思考状态
-          thinkingMsg.content = sanitizeGroupVisibleText(data.text, '我正在整理当前进展。', 600)
+          agentMsg.processingDetail = sanitizeGroupVisibleText(data.text, '我正在整理当前进展。', 120)
           if (String(data.text || '').includes('分派') || String(data.text || '').includes('等待')) {
             waitingCrossReply.value = true
           }
           scrollToBottom()
         } else if (data.type === 'test_agent_execution_plan_ready') {
           applyTestAgentExecutionPlanReady(data)
-          thinkingMsg.content = sanitizeGroupVisibleText(data.detail || 'TestAgent 复核计划已生成。', 'TestAgent 复核计划已整理。', 600)
+          agentMsg.processingDetail = sanitizeGroupVisibleText(data.detail || 'TestAgent 复核计划已生成。', 'TestAgent 复核计划已整理。', 120)
           waitingCrossReply.value = true
           scrollToBottom()
         } else if (data.type === 'test_agent_review_ready') {
@@ -399,12 +413,12 @@ export function useGroupChatStream({
           const rejected = result === false || result?.mode === 'rejected'
           const payload = getTestAgentReviewPayload(data)
           const headline = payload?.summary?.headline || data.detail || 'TestAgent 独立复核结论已整理。'
-          thinkingMsg.content = sanitizeGroupVisibleText(
+          agentMsg.processingDetail = sanitizeGroupVisibleText(
             rejected
               ? `${headline}（未绑定到现有任务卡）`
               : headline,
             'TestAgent 独立复核结论已整理。',
-            600,
+            120,
           )
           if (attached) waitingCrossReply.value = true
           scrollToBottom()
@@ -453,7 +467,7 @@ export function useGroupChatStream({
               },
             }
           }
-          thinkingMsg.content = sanitizeGroupVisibleText(data.text || '补充信息已收到，正在沿用原任务继续处理。', '补充信息已收到，正在沿用原任务继续处理。', 600)
+          agentMsg.processingDetail = sanitizeGroupVisibleText(data.text || '补充信息已收到，正在沿用原任务继续处理。', '补充信息已收到，正在沿用原任务继续处理。', 120)
           waitingCrossReply.value = true
           scrollToBottom()
         } else if (data.type === 'main_agent_decision') {
@@ -511,16 +525,22 @@ export function useGroupChatStream({
           // 流式 chunk：为每个 Agent 创建独立的流式消息
           const agentKey = data.agent
           if (!agentStreamMsgs[agentKey]) {
-            const streamMsg = {
-              role: 'assistant',
-              agent: agentKey,
-              content: '',
-              streaming: true,
-              workEvents: [],
-              timestamp: new Date().toISOString()
+            const reusePrimaryEnvelope = !primaryStreamAgentKey && agentMsgAdded
+            const streamMsg = reusePrimaryEnvelope ? agentMsg : {
+                role: 'assistant',
+                agent: agentKey,
+                content: '',
+                streaming: true,
+                workEvents: [],
+                timestamp: new Date().toISOString()
+              }
+            if (reusePrimaryEnvelope) {
+              primaryStreamAgentKey = agentKey
+              streamMsg.agent = agentKey
+              streamMsg.processingDetail = ''
             }
             agentStreamMsgs[agentKey] = streamMsg
-            messages.value.push(streamMsg)
+            if (!reusePrimaryEnvelope) messages.value.push(streamMsg)
           }
           const chunkText = String(data.text || '')
           const nextRaw = `${agentStreamRawBuffers[agentKey] || ''}${chunkText}`
@@ -539,7 +559,13 @@ export function useGroupChatStream({
         } else if (data.type === 'agent_done') {
           // 某个 Agent 完成：用最终完整内容替换流式消息
           const agentKey = data.agent
-          const streamMsg = agentStreamMsgs[agentKey]
+          let streamMsg = agentStreamMsgs[agentKey]
+          if (!streamMsg && !primaryStreamAgentKey && agentMsgAdded) {
+            primaryStreamAgentKey = primaryStreamAgentKey || agentKey
+            agentMsg.agent = agentKey
+            streamMsg = agentMsg
+            agentStreamMsgs[agentKey] = streamMsg
+          }
           const finalText = sanitizeGroupVisibleText(data.text || agentStreamRawBuffers[agentKey], '执行成员已提交结果说明，我正在汇总验收。', 3000)
           if (streamMsg) {
             if (data.messageId) streamMsg.id = data.messageId
@@ -548,6 +574,10 @@ export function useGroupChatStream({
             if (Array.isArray(data.assignments)) streamMsg.assignments = data.assignments
             streamMsg.executionOrder = data.executionOrder || streamMsg.executionOrder || ''
             streamMsg.runtime = data.runtime || streamMsg.runtime || ''
+            streamMsg.providerFailure = data.providerFailure || streamMsg.providerFailure || null
+            streamMsg.providerFailureTechnical = data.providerFailureTechnical || streamMsg.providerFailureTechnical || null
+            streamMsg.recovery = data.recovery || streamMsg.recovery || null
+            streamMsg.execution_anchor_message_id = data.executionAnchorMessageId || data.execution_anchor_message_id || streamMsg.execution_anchor_message_id || ''
             streamMsg.dispatchPolicy = data.dispatchPolicy || streamMsg.dispatchPolicy || null
             streamMsg.coordinationPlan = data.coordinationPlan || streamMsg.coordinationPlan || null
             streamMsg.workflow = data.workflow || streamMsg.workflow
@@ -572,6 +602,10 @@ export function useGroupChatStream({
                 assignments: data.assignments || null,
                 executionOrder: data.executionOrder || '',
                 runtime: data.runtime || '',
+                providerFailure: data.providerFailure || null,
+                providerFailureTechnical: data.providerFailureTechnical || null,
+                recovery: data.recovery || null,
+                execution_anchor_message_id: data.executionAnchorMessageId || data.execution_anchor_message_id || '',
                 dispatchPolicy: data.dispatchPolicy || null,
                 coordinationPlan: data.coordinationPlan || null,
                 workflow: data.workflow || null,
@@ -617,11 +651,10 @@ export function useGroupChatStream({
           scrollToBottom()
         } else if (data.type === 'done') {
           isStreaming.value = false
+          agentMsg.streaming = false
           if (currentGroup.value?.id && currentGroupSessionId.value) {
             notifySessionContextUsage('group', `${currentGroup.value.id}::${currentGroupSessionId.value}`, { reason: 'provider_usage_updated' })
           }
-          const thinkingIdx = messages.value.indexOf(thinkingMsg)
-          if (thinkingIdx !== -1) messages.value.splice(thinkingIdx, 1)
           // 附加文件变更到当前 Agent 消息
           if (data.messageId) {
             agentMsg.id = data.messageId
@@ -630,12 +663,9 @@ export function useGroupChatStream({
             agentMsg.fileChanges = data.fileChanges
           }
         } else if (data.type === 'error') {
-          messages.value.push({
-            role: 'assistant',
-            agent: 'system',
-            content: buildGroupStreamErrorText(data.text),
-            timestamp: new Date().toISOString()
-          })
+          agentMsg.agent = 'system'
+          agentMsg.content = buildGroupStreamErrorText(data.text)
+          agentMsg.streaming = false
           streamFailed = true
           isStreaming.value = false
         }
@@ -671,9 +701,8 @@ export function useGroupChatStream({
     }
 
     isStreaming.value = false
+    agentMsg.streaming = false
     if (groupStreamController.value === controller) groupStreamController.value = null
-    const thinkingIdx = messages.value.indexOf(thinkingMsg)
-    if (thinkingIdx !== -1) messages.value.splice(thinkingIdx, 1)
 
     // 既然所有协作已经在同一个 SSE 请求中同步完成，重置等待标志，并主动拉取一次做最终同步
     waitingCrossReply.value = false
@@ -724,6 +753,7 @@ export function useGroupChatStream({
     pendingGroupSendRetry,
     groupStreamController,
     activeGroupTaskId,
+    groupTurnBusy,
     stoppingGroupTurn,
     groupTurnConversationId,
     groupTurnControl,

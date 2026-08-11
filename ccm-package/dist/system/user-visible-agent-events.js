@@ -61,7 +61,7 @@ const STORE_ROOT = path.resolve(process.env.CCM_USER_VISIBLE_AGENT_EVENT_DIR || 
 const MAX_EVENTS_PER_SESSION = 3_000;
 const listeners = new Set();
 const SECRET_KEY = /(?:^|_)(?:api[_-]?key|access[_-]?token|refresh[_-]?token|authorization|cookie|password|passwd|secret|credential|private[_-]?key)(?:$|_)/i;
-const BODY_KEY = /^(?:prompt|systemPrompt|system_prompt|rawPrompt|raw_prompt|body|content|text|output|rawOutput|raw_output|context|sourceCode|source_code|webpage|html|notebookOutput|notebook_output)$/i;
+const BODY_KEY = /^(?:prompt|systemPrompt|system_prompt|rawPrompt|raw_prompt|body|content|text|output|rawOutput|raw_output|context|sourceCode|source_code|webpage|html|notebookOutput|notebook_output|command|script|shellCommand|shell_command|cmd|env|environment)$/i;
 const NATIVE_ID_KEY = /(?:native[_-]?session|provider[_-]?request[_-]?id|lease[_-]?id|trace[_-]?id)/i;
 const INLINE_SECRET = /((?:api[_-]?key|access[_-]?token|refresh[_-]?token|authorization|cookie|password|passwd|secret|credential)\s*[:=]\s*["']?)[^\s,"'}]{6,}/gi;
 function now() { return new Date().toISOString(); }
@@ -282,6 +282,21 @@ function readStore(scope, scopeId, exactSessionId) {
     };
     if (store.checksum && store.checksum !== storeChecksum(store))
         return fallback;
+    const safeEvents = store.events.filter(item => projectSafeStoredEvent(item) !== null);
+    if (safeEvents.length !== store.events.length) {
+        const repaired = {
+            ...store,
+            events: safeEvents,
+            updatedAt: now(),
+            checksum: "",
+        };
+        repaired.checksum = storeChecksum(repaired);
+        try {
+            (0, atomic_json_file_1.writeJsonAtomic)(file, repaired);
+        }
+        catch { }
+        return repaired;
+    }
     return store;
 }
 function toolPresentation(toolNameInput, args = {}) {
@@ -359,6 +374,15 @@ function normalizeUserVisibleAgentEvent(input, sequence = 0) {
             ? { tokenAccuracy: String(input?.display?.tokenAccuracy || input?.tokenAccuracy || input?.token_accuracy) } : {}),
     };
     const detailSource = input?.detail || {};
+    const taskIdentity = compactText(input?.taskId || input?.task_id, 240);
+    const anchorIdentity = compactText(input?.anchorMessageId || input?.anchor_message_id, 240);
+    const workItemIdentity = compactText(input?.workItemId || input?.work_item_id || detailSource?.causalRefs?.workItemId || detailSource?.causal_refs?.work_item_id, 240);
+    const planStepIdentity = compactText(detailSource?.causalRefs?.planStepId || detailSource?.causal_refs?.plan_step_id || input?.planStepId || input?.plan_step_id, 160);
+    const batchIdentity = compactText(detailSource?.progress?.batchId || detailSource?.progress?.batch_id || detailSource?.replayLink?.batchId || detailSource?.replay_link?.batch_id, 160);
+    const causalEvidenceIds = uniqueStrings(detailSource.evidenceIds || input?.evidenceIds || input?.evidence_ids, 64);
+    const dependencyIds = uniqueStrings(detailSource?.causalRefs?.dependencyIds || detailSource?.causal_refs?.dependency_ids || input?.dependencyIds || input?.dependency_ids, 40);
+    const criterionIds = uniqueStrings(detailSource?.causalRefs?.criterionIds || detailSource?.causal_refs?.criterion_ids || input?.criterionIds || input?.criterion_ids, 40);
+    const eventAttempt = Math.max(1, Number(detailSource?.agentDisplay?.attempt || detailSource?.executionStage?.attempt || input?.attempt || 1));
     const detail = {
         ...(args && Object.keys(args).length ? { safeArguments: sanitizeUserVisibleAgentDetail(args) } : {}),
         ...(detailSource.safeResult != null || input?.observation != null || input?.result != null
@@ -437,6 +461,29 @@ function normalizeUserVisibleAgentEvent(input, sequence = 0) {
         ...(sanitizeAvailableActions(detailSource.availableActions || detailSource.available_actions).length
             ? { availableActions: sanitizeAvailableActions(detailSource.availableActions || detailSource.available_actions) }
             : {}),
+        ...(taskIdentity && anchorIdentity ? { replayLink: {
+                schema: "ccm-task-event-link-v1",
+                taskId: taskIdentity,
+                ...(compactText(input?.eventId || input?.event_id, 240) ? { replayEventId: compactText(input?.eventId || input?.event_id, 240) } : {}),
+                scope,
+                scopeId,
+                exactSessionId,
+                anchorMessageId: anchorIdentity,
+                generation: Math.max(0, Number(input?.generation || 0)),
+                attempt: eventAttempt,
+                ...(planStepIdentity ? { planStepId: planStepIdentity } : {}),
+                ...(workItemIdentity ? { workItemId: workItemIdentity } : {}),
+                ...(batchIdentity ? { batchId: batchIdentity } : {}),
+                ...(causalEvidenceIds.length ? { evidenceIds: causalEvidenceIds } : {}),
+                contentStored: false,
+            } } : {}),
+        ...((planStepIdentity || workItemIdentity || dependencyIds.length || criterionIds.length || causalEvidenceIds.length) ? { causalRefs: {
+                ...(planStepIdentity ? { planStepId: planStepIdentity } : {}),
+                ...(workItemIdentity ? { workItemId: workItemIdentity } : {}),
+                ...(dependencyIds.length ? { dependencyIds } : {}),
+                ...(criterionIds.length ? { criterionIds } : {}),
+                ...(causalEvidenceIds.length ? { evidenceIds: causalEvidenceIds } : {}),
+            } } : {}),
         ...(sanitizeUserVisibleRequirementPlan(detailSource.requirementPlan || detailSource.requirement_plan)
             ? { requirementPlan: sanitizeUserVisibleRequirementPlan(detailSource.requirementPlan || detailSource.requirement_plan) }
             : {}),
@@ -494,6 +541,10 @@ function appendUserVisibleAgentEvent(input) {
     let appended = false;
     (0, atomic_json_file_1.withFileLock)(file, () => {
         const store = readStore(initial.scope, initial.scopeId, initial.exactSessionId);
+        if (initial.eventType === "assistant_progress" && store.events.some(item => item.eventType === "result"
+            && Number(item.generation || 0) === Number(initial.generation || 0)
+            && (!initial.taskId || !item.taskId || item.taskId === initial.taskId)))
+            return;
         const existing = store.events.find(item => item.eventId === initial.eventId);
         if (existing) {
             event = existing;
@@ -533,8 +584,16 @@ function appendAssistantProgress(input) {
     });
     const milestoneChecksum = (0, assistant_progress_1.assistantProgressMilestoneChecksum)({ kind, text, modelCallIndex, relatedToolCallIds, batchId });
     const repeatableKind = kind === "before_tools" || kind === "key_finding";
+    const semanticFingerprint = hash({
+        kind,
+        text: text.toLowerCase(),
+        generation: Math.max(0, Number(input?.generation || 0)),
+        attempt: Math.max(1, Number(input?.attempt || input?.detail?.technical?.attempt || 1)),
+        target: compactText(input?.businessTarget || input?.target || input?.display?.target, 120).toLowerCase(),
+        stage: compactText(input?.detail?.executionStage?.kind, 80).toLowerCase(),
+    }).slice(0, 16);
     const eventId = compactText(input?.eventId || input?.event_id, 240)
-        || `assistant-progress:${turnIdentity}:${repeatableKind ? `${kind}:${hash({ text: text.toLowerCase(), relatedToolCallIds }).slice(0, 16)}` : `${modelCallIndex}:${milestoneChecksum.slice(0, 20)}`}`;
+        || `assistant-progress:${turnIdentity}:${repeatableKind ? `${kind}:${semanticFingerprint}` : `${modelCallIndex}:${milestoneChecksum.slice(0, 20)}`}`;
     return appendUserVisibleAgentEvent({
         ...input,
         eventId,
@@ -570,6 +629,24 @@ function appendUserVisibleRequirementPlan(input) {
         visibility: "default",
     });
 }
+function projectSafeStoredEvent(event) {
+    if (!event || event.eventType !== "assistant_progress")
+        return event;
+    const progress = event.detail?.progress;
+    const safeText = (0, assistant_progress_1.sanitizeAssistantProgressText)(progress?.text || event.display?.summary || "", 600);
+    if (!safeText)
+        return null;
+    if (safeText === progress?.text && safeText === event.display?.summary)
+        return event;
+    return {
+        ...event,
+        display: { ...event.display, summary: safeText },
+        detail: {
+            ...(event.detail || {}),
+            progress: progress ? { ...progress, text: safeText } : progress,
+        },
+    };
+}
 function listUserVisibleAgentEvents(filter) {
     const scope = normalizeScope(filter?.scope);
     const scopeId = compactText(filter?.scopeId || filter?.scope_id || (scope === "global" ? "global" : ""), 240);
@@ -579,12 +656,16 @@ function listUserVisibleAgentEvents(filter) {
     const cursor = Math.max(0, Number(filter?.cursor || filter?.after || 0));
     const limit = Math.max(1, Math.min(500, Number(filter?.limit || 200)));
     const store = readStore(scope, scopeId, exactSessionId);
-    const rows = store.events.filter(item => item.sequence > cursor).slice(0, limit);
+    const scanned = store.events.filter(item => item.sequence > cursor).slice(0, limit);
+    const rows = scanned
+        .map(projectSafeStoredEvent)
+        .filter(Boolean);
+    const nextCursor = scanned.at(-1)?.sequence || cursor;
     return {
         schema: "ccm-user-visible-agent-event-list-v1",
         events: rows,
-        nextCursor: rows.at(-1)?.sequence || cursor,
-        hasMore: store.events.some(item => item.sequence > (rows.at(-1)?.sequence || cursor)),
+        nextCursor,
+        hasMore: store.events.some(item => item.sequence > nextCursor),
         contentStored: false,
     };
 }
@@ -594,7 +675,7 @@ function getUserVisibleAgentEvent(filter, eventId) {
     const exactSessionId = compactText(filter?.exactSessionId || filter?.exact_session_id || filter?.sessionId || filter?.session_id, 240);
     if (!scopeId || !exactSessionId)
         throw new Error("查询工具详情必须指定scope、scopeId和exactSessionId");
-    return readStore(scope, scopeId, exactSessionId).events.find(item => item.eventId === compactText(eventId, 240)) || null;
+    return projectSafeStoredEvent(readStore(scope, scopeId, exactSessionId).events.find(item => item.eventId === compactText(eventId, 240)) || null);
 }
 function subscribeUserVisibleAgentEvents(handler) {
     listeners.add(handler);
@@ -633,7 +714,7 @@ function appendToolProjection(input) {
     const toolName = input?.toolName || input?.tool_name || input?.tool?.name || input?.tool || "";
     const args = input?.arguments || input?.args || input?.detail?.safeArguments || {};
     const rawResult = input?.observation ?? input?.result ?? input?.detail?.safeResult;
-    const toolDisplay = (0, tool_display_projection_1.buildToolDisplayDetail)({ toolName, arguments: args, result: rawResult, error: input?.error });
+    const toolDisplay = (0, tool_display_projection_1.buildToolDisplayDetail)({ toolName, arguments: args, result: rawResult, error: input?.error, includeTechnicalCommand: true });
     const eventType = normalizeEventType(input?.error ? "tool_failed" : input?.eventType || input?.type);
     const terminal = eventType === "tool_completed" || eventType === "tool_failed";
     const explicitTokens = Number(input?.display?.tokenCount ?? input?.tokenCount ?? input?.token_count ?? input?.outputTokens);
@@ -702,12 +783,23 @@ function runUserVisibleAgentEventSelfTest() {
         detail: { safeResult: { content: "SOURCE_SENTINEL", count: 2 } },
     }, 1);
     const serialized = JSON.stringify(event);
+    const linked = normalizeUserVisibleAgentEvent({
+        scope: "group", scopeId: "group-1", exactSessionId: "session-2", anchorMessageId: "message-1",
+        taskId: "task-1", workItemId: "work-1", generation: 3, attempt: 2, eventType: "agent_progress",
+        detail: { progress: { kind: "key_finding", text: "完成接口定位", modelCallIndex: 1, relatedToolCallIds: [], batchId: "batch-1", milestoneChecksum: "sum" }, causalRefs: { planStepId: "step-1", dependencyIds: ["dep-1"] } },
+    }, 2);
+    const longProgress = (0, assistant_progress_1.sanitizeAssistantProgressText)(`我会先检查当前项目结构和配置，再定位实际启动入口。${"这是不应继续展示的冗长说明。".repeat(20)}`);
+    const protocolProgress = (0, assistant_progress_1.sanitizeAssistantProgressText)('{"workflowDecision":{"mode":"project_analysis"},"selectedSkills":[]}');
     const checks = {
         schema: event.schema === exports.USER_VISIBLE_AGENT_EVENT_SCHEMA,
         ccLabel: event.display.title === "Find definition",
         secretRedacted: !serialized.includes("SENTINEL"),
         bodyProjected: !serialized.includes("SOURCE_SENTINEL") && serialized.includes("contentChecksum"),
         noContent: event.contentStored === false,
+        replayLinkSafe: linked.detail?.replayLink?.schema === "ccm-task-event-link-v1" && linked.detail.replayLink.anchorMessageId === "message-1" && linked.detail.replayLink.attempt === 2 && linked.detail.replayLink.contentStored === false,
+        causalRefsSafe: linked.detail?.causalRefs?.planStepId === "step-1" && linked.detail.causalRefs.dependencyIds?.[0] === "dep-1",
+        progressLengthBounded: longProgress.length <= 120 && longProgress.split(/[。！？!?]/).filter(Boolean).length <= 2,
+        internalProgressRejected: protocolProgress === "",
     };
     return { pass: Object.values(checks).every(Boolean), checks, event };
 }

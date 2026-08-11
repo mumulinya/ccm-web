@@ -89,6 +89,7 @@ const runtime_events_1 = require("../system/runtime-events");
 const task_store_1 = require("./task-store");
 const atomic_json_file_1 = require("./atomic-json-file");
 const metrics_v3_1 = require("../system/metrics-v3");
+const execution_kernel_1 = require("../agents/execution-kernel");
 const CCM_DIR = path.join(os.homedir(), ".cc-connect");
 const CONFIGS_DIR = path.join(CCM_DIR, "configs");
 const PID_DIR = path.join(CCM_DIR, "pids");
@@ -593,8 +594,15 @@ function saveMetrics(metrics) {
 }
 function recordMetric(agent, data) {
     try {
+        const metricData = { ...(data || {}) };
+        try {
+            const resources = (0, execution_kernel_1.metricAgentResourceSummary)(String(metricData.taskId || metricData.task_id || ""), String(metricData.executionId || metricData.execution_id || ""));
+            if (resources && !metricData.resources)
+                metricData.resources = resources;
+        }
+        catch { }
         (0, metrics_v3_1.ensureLegacyMetricsMigrated)(loadMetrics());
-        (0, metrics_v3_1.recordMetricV3)(agent, data);
+        (0, metrics_v3_1.recordMetricV3)(agent, metricData);
         return true;
     }
     catch (error) {
