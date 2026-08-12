@@ -4,7 +4,7 @@ import { normalizeToolAuthorization, type ToolGrantSet } from "./tool-authorizat
 import { toolManager, type ToolScope } from "./tool-manager";
 import type { LoadedContextItemsV1 } from "../system/session-compaction-core";
 import {
-  WORKSPACE_READONLY_TOOL_DEFINITIONS_V2,
+  WORKSPACE_READONLY_TOOL_DEFINITIONS_V3,
   executeWorkspaceReadonlyTool,
   sealScopedToolCapability,
   type MainAgentScopeKind,
@@ -26,6 +26,8 @@ import {
 import { recordToolSearchSuccess, searchTools } from "./tool-search-index";
 import { executeSkillFork } from "../system/skill-fork-runtime";
 import { boundedToolResultLimit, MAIN_AGENT_TOOL_RESULT_LIMIT_ERROR } from "./cc-tool-result-limits";
+import { attachTransientModelBlocks, transientModelBlocks } from "../system/transient-model-content";
+import { createWorkspaceReadContextLedger, type WorkspaceReadContextLedger } from "./workspace-read-context";
 
 export type MainAgentToolRequest = {
   name: string;
@@ -54,6 +56,7 @@ export type MainAgentToolRuntimeContext = {
   postCompactRestoreReceipt?: PostCompactToolRestoreReceipt;
   contextPolicy?: MainAgentContextPolicy;
   contextBudget?: any;
+  workspaceReadContext?: WorkspaceReadContextLedger;
 };
 
 export type MainAgentNativeToolV2 = {
@@ -79,6 +82,33 @@ export const MAIN_AGENT_NATIVE_TOOLS_V2: MainAgentNativeToolV2[] = [
 
 function uniqueNames(values: any[] = []) {
   return Array.from(new Set(values.map(value => String(value || "").trim()).filter(Boolean)));
+}
+
+function isWorkspaceReadonlyDefinition(tool: any) {
+  return String(tool?.server || "") === "ccm__workspace_readonly";
+}
+
+// The workspace implementation remains an internal MCP boundary, but the
+// model-facing contract deliberately looks like a first-class file tool. This
+// keeps provider prompts and user-visible events stable without leaking the
+// transport/server identity into ordinary execution UX.
+function mainAgentCallableToolName(tool: any) {
+  return isWorkspaceReadonlyDefinition(tool)
+    ? String(tool?.name || "")
+    : String(tool?.canonicalName || tool?.name || "");
+}
+
+function renderWorkspaceToolPrompt(label: string, tools: any[], deferred = false) {
+  if (!tools.length) return "";
+  return [
+    `${label}${deferred ? "可按需加载的" : "可直接使用的"}工作区工具：`,
+    ...tools.map(tool => deferred
+      ? `- ${mainAgentCallableToolName(tool)}`
+      : `- ${mainAgentCallableToolName(tool)}: ${tool.description || tool.name}; 参数 Schema=${JSON.stringify(tool.inputSchema || {})}`),
+    deferred
+      ? "这些是 CCM 提供的安全文件能力；调用前先使用 tool_search 加载 Schema，加载后仍使用上面的短名称。"
+      : "这些工具由 CCM 在授权项目边界内执行；直接使用短名称，不要使用内部 MCP canonicalName，也不要改用终端命令读取普通文件。读取结果出现continuation时，仅当当前问题需要的证据尚未覆盖才使用nextOffset和checksum继续读取，不要盲目读到文件末尾；PATH_NOT_FOUND只有唯一高可信建议时才可重试。",
+  ].join("\n");
 }
 
 export function isMainAgentReadOnlyMcpTool(tool: any) {
@@ -162,15 +192,22 @@ export function buildMainAgentToolRuntimeContext(input: {
       });
     }
   }
-  const capabilityToken = input.scopeIdentity ? sealScopedToolCapability({
+  // A group without project members has no workspace authority.  Issuing a
+  // capability in that state exposed project tools that can only fail because
+  // no precise project_id can be selected.
+  const workspaceAvailable = !!input.scopeIdentity && (
+    input.scopeIdentity.scope !== "group"
+    || (input.scopeIdentity.allowedProjects || []).some(project => String(project || "").trim())
+  );
+  const capabilityToken = workspaceAvailable && input.scopeIdentity ? sealScopedToolCapability({
     scope: input.scopeIdentity.scope,
     scopeId: input.scopeIdentity.scopeId,
     exactSessionId: input.scopeIdentity.exactSessionId,
     generation: Number(continuityIdentity?.generation || input.scopeIdentity.generation || 0),
     allowedProjects: input.scopeIdentity.allowedProjects || [],
   }) : "";
-  const workspaceBase = capabilityToken ? WORKSPACE_READONLY_TOOL_DEFINITIONS_V2.filter(tool => tool.loadPolicy === "base") : [];
-  const workspaceSearch = capabilityToken ? WORKSPACE_READONLY_TOOL_DEFINITIONS_V2.filter(tool => tool.loadPolicy === "search") : [];
+  const workspaceBase = capabilityToken ? WORKSPACE_READONLY_TOOL_DEFINITIONS_V3.filter(tool => tool.loadPolicy === "base") : [];
+  const workspaceSearch = capabilityToken ? WORKSPACE_READONLY_TOOL_DEFINITIONS_V3.filter(tool => tool.loadPolicy === "search") : [];
   const configuredMcp = readOnly ? scoped.tools.filter(isMainAgentReadOnlyMcpTool) : scoped.tools;
   const requestedLoaded = new Set(uniqueNames([
     ...(input.loadedToolNames || []),
@@ -217,13 +254,19 @@ export function buildMainAgentToolRuntimeContext(input: {
     ...MAIN_AGENT_NATIVE_TOOLS_V2.filter(tool => tool.loadPolicy === "base").map(tool => `- ${tool.name}: ${tool.description}`),
     "ask_user_question、update_todo、enter_plan_mode和exit_plan_mode由本轮结构化responseType/plan字段驱动，不要把它们放进toolRequests；invoke_skill与tool_search才通过toolRequests进入工具循环。",
   ].join("\n");
-  const mcpPrompt = mcp.length ? [
+  const loadedWorkspace = mcp.filter(isWorkspaceReadonlyDefinition);
+  const loadedExtensions = mcp.filter(tool => !isWorkspaceReadonlyDefinition(tool));
+  const deferredWorkspace = discoverableMcp.filter(isWorkspaceReadonlyDefinition);
+  const deferredExtensions = discoverableMcp.filter(tool => !isWorkspaceReadonlyDefinition(tool));
+  const workspacePrompt = renderWorkspaceToolPrompt(label, loadedWorkspace);
+  const mcpPrompt = loadedExtensions.length ? [
     `${label}已授权的${readOnly ? "只读" : ""} MCP 工具（必须使用 canonicalName）：`,
-    ...mcp.map(tool => `- ${tool.canonicalName}: ${tool.description || tool.name}; 参数 Schema=${JSON.stringify(tool.inputSchema || {})}`),
+    ...loadedExtensions.map(tool => `- ${tool.canonicalName}: ${tool.description || tool.name}; 参数 Schema=${JSON.stringify(tool.inputSchema || {})}`),
   ].join("\n") : "";
-  const deferredMcpPrompt = discoverableMcp.length ? [
+  const deferredWorkspacePrompt = renderWorkspaceToolPrompt(label, deferredWorkspace, true);
+  const deferredMcpPrompt = deferredExtensions.length ? [
     `${label}已授权但尚未加载 Schema 的 MCP/低频工具：`,
-    ...discoverableMcp.map(tool => `- ${tool.canonicalName || tool.name}`),
+    ...deferredExtensions.map(tool => `- ${tool.canonicalName || tool.name}`),
     "这些名称仅用于发现，不代表 Schema 已进入本轮上下文。调用前必须先使用 tool_search；tool_search 返回的完整 Schema 会保留在当前 Run 的后续轮次。",
   ].join("\n") : "";
   const skillCatalog = buildDynamicSkillCatalogPrompt({
@@ -241,7 +284,9 @@ export function buildMainAgentToolRuntimeContext(input: {
   ];
   const policyPrompt = [
     nativePrompt,
+    workspacePrompt,
     mcpPrompt,
+    deferredWorkspacePrompt,
     deferredMcpPrompt,
     skillPrompt,
     restored?.renderedSkillAttachments || "",
@@ -249,7 +294,7 @@ export function buildMainAgentToolRuntimeContext(input: {
     unavailable.length ? "部分已配置工具当前不可用；不得声称已经调用。" : "",
     discoverableMcp.length ? `延迟工具不会预先占用完整 Schema Token；需要时先调用 tool_search，按名称或能力描述加载。` : "",
     inlineSafetyDowngraded ? `MCP完整定义超过本轮安全容量，已从${contextPolicy.mcpToolLoadingMode}安全降级为deferred。` : "",
-    `需要工具数据时在 toolRequests 中请求。MCP优先使用上面列出的 canonicalName；CCM内部只读工具也接受短名称。Skill只能使用 invoke_skill，并在 arguments.name 中填写已列出的 Skill。工具结果由CCM执行后重新交给模型，不得把请求本身视为完成。`,
+    `需要工具数据时在 toolRequests 中请求。工作区文件工具只使用短名称；扩展 MCP 使用上面列出的 canonicalName。Skill只能使用 invoke_skill，并在 arguments.name 中填写已列出的 Skill。工具结果由CCM执行后重新交给模型，不得把请求本身视为完成。`,
   ].filter(Boolean).join("\n\n");
   const contextBudget = {
     contextWindow,
@@ -292,7 +337,7 @@ export function buildMainAgentToolRuntimeContext(input: {
       native: MAIN_AGENT_NATIVE_TOOLS_V2,
     },
     toolAudit,
-    mcpPrompt: [mcpPrompt, deferredMcpPrompt].filter(Boolean).join("\n\n"),
+    mcpPrompt: [workspacePrompt, mcpPrompt, deferredWorkspacePrompt, deferredMcpPrompt].filter(Boolean).join("\n\n"),
     skillPrompt,
     policyPrompt,
     checksum,
@@ -305,22 +350,33 @@ export function buildMainAgentToolRuntimeContext(input: {
     postCompactRestoreReceipt: restored?.receipt,
     contextPolicy,
     contextBudget,
+    workspaceReadContext: continuityIdentity ? createWorkspaceReadContextLedger({
+      scope: continuityIdentity.scope,
+      scopeId: continuityIdentity.scopeId,
+      exactSessionId: continuityIdentity.exactSessionId,
+      generation: continuityIdentity.generation,
+    }) : undefined,
   };
 }
 
 function refreshMainAgentToolPromptState(toolContext: MainAgentToolRuntimeContext) {
   const label = String((toolContext.scope.auditContext as any)?.runtime || "主 Agent");
   const loadedMcp = toolContext.catalog.loadedMcp || toolContext.catalog.mcp;
-  const loadedPrompt = loadedMcp.length ? [
+  const workspacePrompt = renderWorkspaceToolPrompt(label, loadedMcp.filter(isWorkspaceReadonlyDefinition));
+  const extensionTools = loadedMcp.filter(tool => !isWorkspaceReadonlyDefinition(tool));
+  const loadedPrompt = extensionTools.length ? [
     `${label}当前已加载 Schema 的 MCP 工具（必须使用 canonicalName）：`,
-    ...loadedMcp.map((tool: any) => `- ${tool.canonicalName}: ${tool.description || tool.name}; 参数 Schema=${JSON.stringify(tool.inputSchema || {})}`),
+    ...extensionTools.map((tool: any) => `- ${tool.canonicalName}: ${tool.description || tool.name}; 参数 Schema=${JSON.stringify(tool.inputSchema || {})}`),
   ].join("\n") : "";
-  const deferredPrompt = (toolContext.catalog.discoverableMcp || []).length ? [
+  const discoverable = toolContext.catalog.discoverableMcp || [];
+  const deferredWorkspacePrompt = renderWorkspaceToolPrompt(label, discoverable.filter(isWorkspaceReadonlyDefinition), true);
+  const deferredExtensions = discoverable.filter(tool => !isWorkspaceReadonlyDefinition(tool));
+  const deferredPrompt = deferredExtensions.length ? [
     `${label}已授权但尚未加载 Schema 的 MCP/低频工具：`,
-    ...(toolContext.catalog.discoverableMcp || []).map((tool: any) => `- ${tool.canonicalName || tool.name}`),
+    ...deferredExtensions.map((tool: any) => `- ${tool.canonicalName || tool.name}`),
     "调用前必须先使用 tool_search 加载完整功能说明和参数 Schema。",
   ].join("\n") : "";
-  toolContext.mcpPrompt = [loadedPrompt, deferredPrompt].filter(Boolean).join("\n\n");
+  toolContext.mcpPrompt = [workspacePrompt, loadedPrompt, deferredWorkspacePrompt, deferredPrompt].filter(Boolean).join("\n\n");
   toolContext.loadedToolNames = uniqueNames(loadedMcp.map((tool: any) => tool.canonicalName || tool.name));
   toolContext.deferredToolNames = uniqueNames((toolContext.catalog.discoverableMcp || []).map((tool: any) => tool.canonicalName || tool.name));
   const marker = "[CCM ToolSearch 本轮已加载 Schema]";
@@ -439,6 +495,7 @@ export async function executeMainAgentToolRequests(input: {
   resultTokenLimit?: number;
   toolBatchSize?: number;
   readOnlyParallelism?: number;
+  abortSignal?: AbortSignal;
 }) {
   const loadedMcp = input.toolContext.catalog.loadedMcp || input.toolContext.catalog.mcp;
   const workspaceTools = [...input.toolContext.catalog.mcp, ...loadedMcp, ...(input.toolContext.catalog.discoverableMcp || [])]
@@ -471,7 +528,19 @@ export async function executeMainAgentToolRequests(input: {
       const selectedNames = new Set(candidates.map((tool: any) => String(tool.canonicalName || "")));
       input.toolContext.catalog.discoverableMcp = discoverable.filter((tool: any) => !selectedNames.has(String(tool.canonicalName || "")));
       refreshMainAgentToolPromptState(input.toolContext);
-      const output = { schema: "ccm-main-agent-tool-search-v2", query: rawQuery, tools: ranked.map((item: any) => ({ name: item.tool.name, canonicalName: item.tool.canonicalName, description: item.tool.description, inputSchema: item.tool.inputSchema, checksum: item.schemaChecksum, score: Number(item.score.toFixed(3)), matchReasons: item.reasons })) };
+      const output = {
+        schema: "ccm-main-agent-tool-search-v2",
+        query: rawQuery,
+        tools: ranked.map((item: any) => ({
+          name: mainAgentCallableToolName(item.tool),
+          ...(isWorkspaceReadonlyDefinition(item.tool) ? {} : { canonicalName: item.tool.canonicalName }),
+          description: item.tool.description,
+          inputSchema: item.tool.inputSchema,
+          checksum: item.schemaChecksum,
+          score: Number(item.score.toFixed(3)),
+          matchReasons: item.reasons,
+        })),
+      };
       recordMainAgentToolContinuityFromResult({
         identity: input.toolContext.scopeIdentity,
         requestName: request.name,
@@ -504,7 +573,10 @@ export async function executeMainAgentToolRequests(input: {
     const startedAt = Date.now();
     try {
       let rawOutput = workspaceTool
-        ? await executeWorkspaceReadonlyTool(workspaceTool.name, request.arguments, String(input.toolContext.capabilityToken || ""))
+        ? await executeWorkspaceReadonlyTool(workspaceTool.name, request.arguments, String(input.toolContext.capabilityToken || ""), 3, {
+            signal: input.abortSignal,
+            readContext: input.toolContext.workspaceReadContext,
+          })
         : await execute(request.name, request.arguments, input.toolContext.scope);
       if (skillName && rawOutput?.executionMode === "fork") {
         const parentIdentity = input.toolContext.scopeIdentity;
@@ -517,12 +589,16 @@ export async function executeMainAgentToolRequests(input: {
           executeTool: (name, args) => {
             const forkWorkspaceTool = workspaceByName.get(name);
             return forkWorkspaceTool
-              ? executeWorkspaceReadonlyTool(forkWorkspaceTool.name, args, String(input.toolContext.capabilityToken || ""))
+              ? executeWorkspaceReadonlyTool(forkWorkspaceTool.name, args, String(input.toolContext.capabilityToken || ""), 3, {
+                  signal: input.abortSignal,
+                  readContext: input.toolContext.workspaceReadContext,
+                })
               : execute(name, args, input.toolContext.scope);
           },
         });
       }
       if (!skillName) recordToolSearchSuccess(request.name);
+      const transientBlocks = transientModelBlocks(rawOutput);
       const output = typeof rawOutput === "string" ? rawOutput : JSON.stringify(rawOutput);
       const outputTokens = estimateTextTokens(output);
       const resultTokenLimit = boundedToolResultLimit(input.resultTokenLimit);
@@ -540,11 +616,12 @@ export async function executeMainAgentToolRequests(input: {
         eventId: callId,
         sourceMessageId: String((input.toolContext.scope.auditContext as any)?.userMessageId || ""),
       });
-      return { name: request.name, itemName, toolKind, source: workspaceTool ? "ccm__workspace_readonly" : toolKind, loaded: true, scope: input.toolContext.capabilityToken ? "scoped_session" : "configured_scope", durationMs: Date.now() - startedAt, aliases, ok: !/^\[(?:错误|工具错误)\]/.test(output), output, outputTokens, resultChecksum: contextItemChecksum(rawOutput), reason: request.reason };
+      return attachTransientModelBlocks({ name: request.name, itemName, toolKind, source: workspaceTool ? "ccm__workspace_readonly" : toolKind, loaded: true, scope: input.toolContext.capabilityToken ? "scoped_session" : "configured_scope", durationMs: Date.now() - startedAt, aliases, ok: !/^\[(?:错误|工具错误)\]/.test(output), output, outputTokens, resultChecksum: contextItemChecksum(rawOutput), reason: request.reason }, transientBlocks);
     } catch (error: any) {
       const detail = String(error?.message || error || "工具调用失败").slice(0, 1000);
-      input.onResult?.(request, callId, null, detail);
-      return { name: request.name, itemName, toolKind, source: workspaceTool ? "ccm__workspace_readonly" : toolKind, loaded: true, scope: input.toolContext.capabilityToken ? "scoped_session" : "configured_scope", durationMs: Date.now() - startedAt, aliases, ok: false, error: detail, resultChecksum: contextItemChecksum(detail), reason: request.reason };
+      const structured = error?.workspaceResult && typeof error.workspaceResult === "object" ? error.workspaceResult : null;
+      input.onResult?.(request, callId, structured, detail);
+      return { name: request.name, itemName, toolKind, source: workspaceTool ? "ccm__workspace_readonly" : toolKind, loaded: true, scope: input.toolContext.capabilityToken ? "scoped_session" : "configured_scope", durationMs: Date.now() - startedAt, aliases, ok: false, error: detail, ...(structured ? { output: JSON.stringify(structured), outputTokens: estimateTextTokens(JSON.stringify(structured)) } : {}), resultChecksum: contextItemChecksum(structured || detail), reason: request.reason };
     }
   };
 

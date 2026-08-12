@@ -126,11 +126,13 @@ function classifyTaskPermissionRequest(context, input) {
         reasons.push(risk === "low" ? "操作限制在目标项目的日常开发范围" : "需要群聊主 Agent 判断必要性与影响范围");
     return { operation, command, paths, hosts, risk, reasons };
 }
-async function askGroupMainAgent(context, request) {
+async function askMainAgent(context, request) {
     const config = (0, group_orchestrator_config_1.loadOrchestratorConfig)();
+    const actor = context.groupId ? "group-main-agent" : "project-main-agent";
+    const reviewerLabel = context.groupId ? "群聊主 Agent" : "项目主 Agent";
     if (!config?.apiKey || !config?.apiUrl || !config?.model)
-        return { decision: "user", reason: "群聊主 Agent 模型未配置，无法可靠审批" };
-    const system = `你是 CCM 群聊主 Agent 的权限审批器。你只能审批当前目标项目内、完成当前任务确有必要、影响可恢复的操作。
+        return { decision: "user", reason: `${reviewerLabel}模型未配置，无法可靠审批`, actor };
+    const system = `你是 CCM ${reviewerLabel}的项目子 Agent 权限审批器。你只能审批当前目标项目内、完成当前任务确有必要、影响可恢复的操作。
 以下情况必须 decision=user：发布软件包、生产部署、强制推送或覆盖历史、读取/导出密钥、系统提权、项目目录外操作、破坏性数据库迁移、明显费用或你无法判断。
 不需要额外权限的请求应 decision=reject。允许的中风险请求可 decision=approve。只返回 JSON：{"decision":"approve|user|reject","reason":"依据","maxUses":1,"expiresInMinutes":15}`;
     const user = JSON.stringify({
@@ -153,9 +155,9 @@ async function askGroupMainAgent(context, request) {
             maxTokens: 300,
             defaultTimeoutMs: 20000,
             providerContextCache: {
-                scope: context.bindingKind === "project_session" ? "project" : "group",
-                scopeId: context.bindingKind === "project_session" ? context.project : context.groupId,
-                sessionId: context.bindingKind === "project_session" ? context.projectSessionId : context.groupSessionId,
+                scope: context.groupId ? "group" : "project",
+                scopeId: context.groupId || context.project,
+                sessionId: context.groupId ? context.groupSessionId : (context.projectSessionId || context.taskId),
                 source: "main_agent_permission_review",
             },
         };
@@ -163,10 +165,10 @@ async function askGroupMainAgent(context, request) {
             ? await (0, group_orchestrator_llm_client_1.callAnthropicCompatibleJson)(config, options)
             : await (0, group_orchestrator_llm_client_1.callOpenAiCompatibleJson)(config, options);
         const decision = ["approve", "user", "reject"].includes(String(parsed?.decision || "")) ? String(parsed.decision) : "user";
-        return { decision, reason: clean(parsed?.reason || "群聊主 Agent 未提供可核验理由", 600), maxUses: Math.max(1, Math.min(3, Number(parsed?.maxUses || 1))), expiresInMinutes: Math.max(5, Math.min(30, Number(parsed?.expiresInMinutes || 15))) };
+        return { decision, reason: clean(parsed?.reason || `${reviewerLabel}未提供可核验理由`, 600), maxUses: Math.max(1, Math.min(3, Number(parsed?.maxUses || 1))), expiresInMinutes: Math.max(5, Math.min(30, Number(parsed?.expiresInMinutes || 15))), actor };
     }
     catch (error) {
-        return { decision: "user", reason: `群聊主 Agent 无法完成权限判断：${clean(error?.message || error, 300)}` };
+        return { decision: "user", reason: `${reviewerLabel}无法完成权限判断：${clean(error?.message || error, 300)}`, actor };
     }
 }
 function currentTask(context) {
@@ -248,13 +250,43 @@ async function requestTaskPermission(context, input) {
         throw new Error("权限申请必须说明与当前任务的关系");
     const effectiveTaskId = String(context.taskId || task.id);
     const origin = permissionOrigin(task, context);
-    const identity = hash([effectiveTaskId, context.groupId, context.groupSessionId, context.project, context.projectSessionId, context.taskAgentSessionId, context.nativeSessionId, classified.operation, classified.command, classified.paths, classified.hosts]);
+    const approvalScope = input?.approvalScope === "task" ? "task" : "operation";
+    const approvalTaskKey = approvalScope === "task"
+        ? String(task?.task_thread_id || task?.taskThreadId || task?.root_task_id || task?.rootTaskId || task?.retry_of_task_id || task?.retryOfTaskId || effectiveTaskId)
+        : effectiveTaskId;
+    const approvedProjectIds = list(input?.approvedProjectIds || [context.project], 50, 240);
+    const approvedPaths = list(input?.approvedPaths || input?.paths || [], 100, 600);
+    const identity = approvalScope === "task"
+        ? hash([approvalTaskKey, "task-edit-approval", approvedProjectIds.sort(), approvedPaths.sort(), Number(input?.permissionPolicyRevision || 0)])
+        : hash([effectiveTaskId, context.groupId, context.groupSessionId, context.project, context.projectSessionId, context.taskAgentSessionId, context.nativeSessionId, classified.operation, classified.command, classified.paths, classified.hosts]);
     const existing = readStore().find(item => item.checksum === identity && !["expired", "consumed"].includes(item.state));
-    if (existing)
+    if (existing) {
+        if (existing.state === "rejected") {
+            const repeated = (0, atomic_json_file_1.withFileLock)(STORE_FILE, () => {
+                const requests = readStore();
+                const index = requests.findIndex(item => item.id === existing.id);
+                if (index < 0)
+                    return existing;
+                requests[index] = {
+                    ...requests[index],
+                    repeatCount: Math.max(1, Number(requests[index].repeatCount || 0) + 1),
+                    lastRequestedAt: now(),
+                    autoRetryBlocked: true,
+                };
+                writeStore(requests);
+                return requests[index];
+            });
+            return publicRequest(repeated);
+        }
         return publicRequest(existing);
+    }
     let decision;
-    if (classified.risk === "high")
+    if (input?.forceUserDecision === true)
+        decision = { decision: "user", reason: clean(input?.decisionReason || "当前会话要求在首次代码修改前征得用户同意", 600) };
+    else if (classified.risk === "high")
         decision = { decision: "user", reason: classified.reasons.join("；") };
+    else if (input?.forceMainAgentReview === true)
+        decision = await askMainAgent(context, { ...classified, reason });
     else if (!context.groupId)
         decision = classified.risk === "low"
             ? { decision: "approve", reason: "独立项目的项目内日常开发策略允许", maxUses: 1, expiresInMinutes: 15, actor: "project-policy" }
@@ -262,7 +294,7 @@ async function requestTaskPermission(context, input) {
     else if (classified.risk === "low")
         decision = { decision: "approve", reason: "群聊主 Agent 的项目内日常开发策略允许", maxUses: 1, expiresInMinutes: 15, actor: "group-main-policy" };
     else
-        decision = await askGroupMainAgent(context, { ...classified, reason });
+        decision = await askMainAgent(context, { ...classified, reason });
     const createdAt = now();
     const approved = decision.decision === "approve";
     const state = approved ? "approved" : decision.decision === "reject" ? "rejected" : "awaiting_user";
@@ -291,14 +323,22 @@ async function requestTaskPermission(context, input) {
         risk: classified.risk,
         riskReasons: classified.reasons,
         state,
-        decidedBy: approved ? (decision.actor || "group-main-agent") : state === "rejected" ? "group-main-agent" : "system",
+        decidedBy: approved ? (decision.actor || "group-main-agent") : state === "rejected" ? (decision.actor || "group-main-agent") : "system",
         decisionReason: clean(decision.reason, 800),
         createdAt,
         decidedAt: state === "awaiting_user" ? "" : createdAt,
-        expiresAt: approved ? new Date(Date.now() + Math.max(5, Math.min(30, Number(decision.expiresInMinutes || 15))) * 60_000).toISOString() : "",
-        maxUses: approved ? Math.max(1, Math.min(3, Number(decision.maxUses || 1))) : 0,
+        expiresAt: approved ? new Date(Date.now() + (approvalScope === "task" ? 7 * 24 * 60 : Math.max(5, Math.min(30, Number(decision.expiresInMinutes || 15)))) * 60_000).toISOString() : "",
+        maxUses: approved ? (approvalScope === "task" ? 10_000 : Math.max(1, Math.min(3, Number(decision.maxUses || 1)))) : 0,
         usedCount: 0,
         checksum: identity,
+        repeatCount: 0,
+        lastRequestedAt: createdAt,
+        autoRetryBlocked: state === "rejected",
+        approvalScope,
+        permissionPolicyRevision: Math.max(0, Number(input?.permissionPolicyRevision || 0)),
+        approvedProjectIds,
+        approvedPaths,
+        approvalTaskKey,
     };
     return persist(request);
 }
@@ -338,8 +378,9 @@ function decideTaskPermission(requestId, input) {
             decidedBy: "local-user",
             decisionReason: clean(input?.reason || (decision === "approve" ? "用户明确批准" : "用户拒绝"), 800),
             decidedAt,
-            expiresAt: decision === "approve" ? new Date(Date.now() + Math.max(5, Math.min(30, Number(input?.expiresInMinutes || 15))) * 60_000).toISOString() : "",
-            maxUses: decision === "approve" ? Math.max(1, Math.min(3, Number(input?.maxUses || 1))) : 0,
+            expiresAt: decision === "approve" ? new Date(Date.now() + (current.approvalScope === "task" ? 7 * 24 * 60 : Math.max(5, Math.min(30, Number(input?.expiresInMinutes || 15)))) * 60_000).toISOString() : "",
+            maxUses: decision === "approve" ? (current.approvalScope === "task" ? 10_000 : Math.max(1, Math.min(3, Number(input?.maxUses || 1)))) : 0,
+            autoRetryBlocked: decision === "reject",
         };
         writeStore(requests);
         return requests[index];

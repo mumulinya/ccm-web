@@ -2164,6 +2164,7 @@ function formatSkillAliasNotice(audit: RuntimeToolSyncAudit) {
 export function buildRuntimeToolSyncPrompt(audit: RuntimeToolSyncAudit) {
   const missing = [...audit.missing.mcp.map(name => `MCP:${name}`), ...audit.missing.skill.map(name => `Skill:${name}`)];
   const authorizationNotice = formatAuthorizationReadinessNotice(audit);
+  const nativeFileToolNotice = "\n[CCM 文件操作]\n读取文件、查找文件和搜索代码时，优先使用当前 Agent Runtime 的原生文件工具（例如 Read、Glob、Grep 或等价能力）；不要为普通只读操作改用 Shell。MCP 主要用于 CCM 授权的协作、知识、权限和外部服务能力。原生能力不可用时，才使用已授权的安全替代工具。\n";
   if (audit.mode === "native-and-proxy") {
     const missingNotice = missing.length ? ` 未找到或未启用：${missing.join("、")}。` : "";
     const warningNotice = audit.warnings.length ? ` 运行提示：${audit.warnings.join("；")}。` : "";
@@ -2171,13 +2172,13 @@ export function buildRuntimeToolSyncPrompt(audit: RuntimeToolSyncAudit) {
     const scoped = (audit.permission_rules || []).filter(rule => rule.kind === "mcp" && rule.scope === "tool").length;
     const nativeMcp = nativeMcpNamesFromAudit(audit).length;
     const proxyOnlyMcp = proxyOnlyMcpNamesFromAudit(audit).length;
-    return `\n[CCM Runtime 工具同步]\n已将授权工具交付给 ${audit.runtime}（隔离：${audit.isolation || "project-scope"}）：原生 MCP ${nativeMcp} 个，代理 MCP ${proxyOnlyMcp} 个，Skill ${audit.synced.skill.length} 个，工具级授权 ${scoped} 条。snapshot=${audit.snapshotId || ""}${audit.reusedSnapshot ? "（复用）" : ""}。${missingNotice}${authorizationNotice}${warningNotice}${skillAliasNotice}工具级 MCP 授权必须通过 CCM 平台代执行协议调用，不得绕过授权快照或调用未授权 MCP/Skill。若使用 Skill，请在 CCM_AGENT_RECEIPT.memoryUsed 中写入 Skill:<name>。\n`;
+    return `${nativeFileToolNotice}\n[CCM Runtime 工具同步]\n已将授权工具交付给 ${audit.runtime}（隔离：${audit.isolation || "project-scope"}）：原生 MCP ${nativeMcp} 个，代理 MCP ${proxyOnlyMcp} 个，Skill ${audit.synced.skill.length} 个，工具级授权 ${scoped} 条。snapshot=${audit.snapshotId || ""}${audit.reusedSnapshot ? "（复用）" : ""}。${missingNotice}${authorizationNotice}${warningNotice}${skillAliasNotice}工具级 MCP 授权必须通过 CCM 平台代执行协议调用，不得绕过授权快照或调用未授权 MCP/Skill。若使用 Skill，请在 CCM_AGENT_RECEIPT.memoryUsed 中写入 Skill:<name>。\n`;
   }
   if (audit.mode === "ccm-proxy-only") {
     const skillAliasNotice = formatSkillAliasNotice(audit);
-    return `\n[CCM Runtime 工具同步]\n当前 ${audit.runtime} 使用 CCM 平台代执行协议；仅可调用本提示中授权的 MCP/Skill，不得自行扩展权限。${authorizationNotice}${skillAliasNotice}若使用 Skill，请在 CCM_AGENT_RECEIPT.memoryUsed 中写入 Skill:<name>。\n`;
+    return `${nativeFileToolNotice}\n[CCM Runtime 工具同步]\n当前 ${audit.runtime} 使用 CCM 平台代执行协议；仅可调用本提示中授权的 MCP/Skill，不得自行扩展权限。${authorizationNotice}${skillAliasNotice}若使用 Skill，请在 CCM_AGENT_RECEIPT.memoryUsed 中写入 Skill:<name>。\n`;
   }
-  return `\n[CCM Runtime 工具同步失败]\n原生工具配置未完成，请仅使用 CCM 平台代执行协议。${audit.errors.join("；")}${missing.length ? `；缺失：${missing.join("、")}` : ""}${authorizationNotice}\n`;
+  return `${nativeFileToolNotice}\n[CCM Runtime 工具同步失败]\n原生工具配置未完成，请仅使用 CCM 平台代执行协议。${audit.errors.join("；")}${missing.length ? `；缺失：${missing.join("、")}` : ""}${authorizationNotice}\n`;
 }
 
 export function detectInvokedSkillsFromText(text: string, allowedTools: any = {}, skills: any[] = loadSkills()): RuntimeInvokedSkill[] {

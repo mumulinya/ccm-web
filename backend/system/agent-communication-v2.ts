@@ -109,7 +109,9 @@ function projectCommunicationEvent(envelope: any, eventType: "agent_started" | "
         isParallel: !!parallelGroupId,
       },
       executionStage: {
-        kind: testAgent ? "independent_verification" : "project_execution",
+        kind: envelope.scope === "global"
+          ? "coordination_dispatch"
+          : testAgent ? "independent_verification" : "project_execution",
         stageRunId: envelope.messageId,
         ...(String(payload.reviewCycleId || payload.review_cycle_id || "").trim()
           ? { reviewCycleId: String(payload.reviewCycleId || payload.review_cycle_id) } : {}),

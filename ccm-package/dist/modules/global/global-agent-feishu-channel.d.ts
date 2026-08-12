@@ -17,7 +17,7 @@ export declare function createGlobalAgentFeishuChannel(deps: any): {
         turn_id?: string;
     }) => Promise<any>;
     parseFeishuConversationTurnCommand: (value: any) => {
-        kind: "normal" | "steer" | "queue" | "stop";
+        kind: "normal" | "steer" | "queue" | "stop" | "aside";
         message: string;
     };
     drainFeishuConversationTurns: (baseUrl: string, ctx: CollabCtx, conversationId: string, payload: any) => Promise<void>;
@@ -28,13 +28,38 @@ export declare function createGlobalAgentFeishuChannel(deps: any): {
     processFeishuControlledMessage: (baseUrl: string, ctx: CollabCtx, text: string, payload: any, options?: any) => Promise<{
         reply: string;
         denied: boolean;
+        ephemeral: boolean;
+        content_stored?: undefined;
+        report_sent?: undefined;
+        turn_id?: undefined;
+    } | {
+        reply: string;
+        ephemeral: boolean;
+        denied?: undefined;
+        content_stored?: undefined;
+        report_sent?: undefined;
+        turn_id?: undefined;
+    } | {
+        reply: string;
+        ephemeral: boolean;
+        content_stored: boolean;
+        denied?: undefined;
+        report_sent?: undefined;
+        turn_id?: undefined;
+    } | {
+        reply: string;
+        denied: boolean;
         report_sent: boolean;
+        ephemeral?: undefined;
+        content_stored?: undefined;
         turn_id?: undefined;
     } | {
         report_sent: boolean;
         reply: string;
         stopped_run_id: any;
         denied?: undefined;
+        ephemeral?: undefined;
+        content_stored?: undefined;
         turn_id?: undefined;
     } | {
         report_sent: boolean;
@@ -42,6 +67,8 @@ export declare function createGlobalAgentFeishuChannel(deps: any): {
         turn: any;
         run_id: any;
         denied?: undefined;
+        ephemeral?: undefined;
+        content_stored?: undefined;
         turn_id?: undefined;
     } | {
         report_sent: boolean;
@@ -51,11 +78,15 @@ export declare function createGlobalAgentFeishuChannel(deps: any): {
         position: any;
         turn: any;
         denied?: undefined;
+        ephemeral?: undefined;
+        content_stored?: undefined;
         turn_id?: undefined;
     } | {
         reply: any;
         turn_id: any;
         denied?: undefined;
+        ephemeral?: undefined;
+        content_stored?: undefined;
         report_sent?: undefined;
     }>;
     processFeishuCardAction: (baseUrl: string, payload: any, ctx?: CollabCtx) => Promise<{
@@ -88,6 +119,7 @@ export declare function createGlobalAgentFeishuChannel(deps: any): {
             stop: boolean;
             steer: boolean;
             queue: boolean;
+            aside: boolean;
             ordinaryDefaultsToNormal: boolean;
         };
     };

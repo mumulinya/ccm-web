@@ -33,6 +33,8 @@ import { notifySessionContextUsage } from '../../composables/useSessionContextUs
 import { projectExecutionTaskCard } from '../../utils/taskExperience.js'
 import { shouldShowProjectTaskCard } from '../../utils/projectChatPresentation.js'
 import { buildProjectSessionKnowledgePayload, buildProjectTaskKnowledgePayload, postKnowledgeCapture } from '../../utils/knowledgeCapture.js'
+import { resolveTaskMutationGuard, taskMutationGuardFromSource } from '../../utils/taskMutationGuard.js'
+import { stopTaskWithPreview } from '../../utils/taskStopFlow.js'
 import { subscribeRuntimeEvents } from '../../utils/runtimeEventBus.js'
 import { getEditableUserMessageText, hasMessageAttachments } from '../../utils/messageActions.js'
 
@@ -942,15 +944,6 @@ export function useProjectManager(props, emit) {
     if (!response.ok || payload.success === false || payload.error) throw new Error(payload.error || `操作失败 (${response.status})`)
     return payload
   }
-  const projectTaskMutationGuard = (card = {}) => {
-    const links = card.conversation_links || card.conversationLinks || []
-    const binding = links.find(item => item?.relation === 'target') || links.find(item => item?.relation === 'source') || {}
-    return {
-      expected_revision: Math.max(0, Number(card.revision || 0)),
-      generation: Math.max(1, Number(card.generation || card.workflow_generation || 1)),
-      ...(binding.bindingChecksum || binding.binding_checksum ? { binding_checksum: binding.bindingChecksum || binding.binding_checksum } : {}),
-    }
-  }
   const removeMessageFromCurrentSession = async (target) => {
     const index = messages.value.indexOf(target)
     if (index >= 0) messages.value.splice(index, 1)
@@ -969,8 +962,10 @@ export function useProjectManager(props, emit) {
     const isProjectRun = String(id || '').startsWith('pchat_')
     const isProjectMainTask = card?.orchestration_scope === 'project_session'
     const projectMainRunId = card?.project_main_run_id || msg?.projectRun?.id || ''
-    const mutationGuard = projectTaskMutationGuard(card)
     try {
+      const mutationGuard = isProjectRun
+        ? taskMutationGuardFromSource(card)
+        : await resolveTaskMutationGuard(id, card)
       if (action.kind === 'open_task_center') {
         emit('switch-tab', 'tasks')
         return
@@ -1092,11 +1087,18 @@ export function useProjectManager(props, emit) {
         toast.success(action.kind === 'interrupt' ? '当前执行已停止，恢复现场已保留' : '已恢复原任务和子 Agent 会话')
       } else if (action.kind === 'cancel') {
         if (!id) return toast.info('当前项目直连执行暂未绑定任务，无法远程停止')
-        if (!await confirmDialog(`确定永久取消任务“${card.title}”？历史会保留，但不会自动恢复。`)) return
-        if (isProjectMainTask) {
-          await postTaskAction('/api/projects/main-agent/task-action', { action: 'cancel', task_id: id, project: currentProject.value, project_session_id: currentSession.value, reason: '用户从项目聊天任务卡永久取消', ...mutationGuard })
+        if (isProjectRun) {
+          if (!await confirmDialog(`确定停止任务“${card.title}”？历史和检查点会保留。`)) return
+          await postTaskAction('/api/project-runs/cancel', { id, reason: '用户从项目聊天任务卡停止任务', ...mutationGuard })
         } else {
-          await postTaskAction(isProjectRun ? '/api/project-runs/cancel' : '/api/tasks/cancel', { id, reason: '用户从项目聊天任务卡永久取消', ...mutationGuard })
+          const result = await stopTaskWithPreview({ ...card, id }, {
+            reason: '用户从项目聊天任务卡停止任务', actor: 'project-task-card',
+            onConflict: () => toast.info('任务状态已更新，请重新确认停止范围'),
+          })
+          if (!result) return
+          toast.success(result.running ? '正在安全停止任务' : result.undoAvailable ? '任务已停止，可在 10 秒内撤销' : '任务已停止')
+          await refreshCurrentProjectSession(currentSession.value)
+          return
         }
       } else if (action.kind === 'retry') {
         if (isProjectRun || isProjectMainTask) {
@@ -1581,7 +1583,7 @@ export function useProjectManager(props, emit) {
         const data = await postTaskAction('/api/projects/main-agent/task-action', {
           action: 'resume_interrupted',
           task_id: taskId,
-          ...projectTaskMutationGuard(card),
+          ...(await resolveTaskMutationGuard(taskId, card)),
           project: currentProject.value,
           project_session_id: currentSession.value,
         })

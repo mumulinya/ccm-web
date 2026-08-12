@@ -1,12 +1,21 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import MetricsScopePicker from './MetricsScopePicker.vue'
+import WorkspacePageShell from '../common/WorkspacePageShell.vue'
 
 const emit = defineEmits(['navigate'])
 
 const props = defineProps({
   active: { type: Boolean, default: true },
 })
+const metricsView = ref(sessionStorage.getItem('ccm:metrics-layout:v1:view') || 'overview')
+const metricsViews = [
+  { id: 'overview', label: '概览' },
+  { id: 'token', label: 'Token' },
+  { id: 'performance', label: '性能' },
+  { id: 'executions', label: '执行记录' },
+]
+watch(metricsView, value => sessionStorage.setItem('ccm:metrics-layout:v1:view', value))
 
 const GLOBAL_SCOPE_ID = '__global__'
 const CUSTOM_RANGE_DAYS = -1
@@ -865,31 +874,24 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="metrics-page">
-    <header class="page-header">
-      <div>
-        <div class="eyebrow">AGENT OBSERVABILITY</div>
-        <h2>Agent 性能监控</h2>
-        <p>按范围查看全局、群聊和项目 Agent 指标，并保留开发与验收角色的真实执行明细。</p>
+  <WorkspacePageShell
+    v-model:active-view="metricsView"
+    title="Agent 性能监控"
+    description="按全局、群聊和项目查看真实用量、资源与执行表现"
+    :views="metricsViews"
+    storage-key="ccm:metrics-layout:v1"
+  >
+    <template #status>
+      <div class="toolbar metrics-shared-toolbar">
+        <label class="scope-control"><span>范围</span><MetricsScopePicker v-model="selectedGroupId" :options="scopeOptions" /></label>
+        <label><span>时间</span><select v-model.number="rangeDays"><option :value="1">今天</option><option :value="7">近 7 天</option><option :value="14">近 14 天</option><option :value="30">近 30 天</option><option :value="90">近 90 天</option><option :value="0">全部历史</option><option :value="CUSTOM_RANGE_DAYS">自定义</option></select></label>
+        <button class="refresh-btn" :disabled="refreshing" @click="loadMetrics({ silent: true })"><span :class="{ spinning: refreshing }">↻</span>{{ refreshing ? '刷新中' : '刷新' }}</button>
       </div>
+    </template>
+  <div class="metrics-page">
+    <div v-if="rangeDays === CUSTOM_RANGE_DAYS" class="custom-range-inline">
       <div class="toolbar">
-        <label class="scope-control">
-          <span>范围</span>
-          <MetricsScopePicker v-model="selectedGroupId" :options="scopeOptions" />
-        </label>
-        <label>
-          <span>时间范围</span>
-          <select v-model.number="rangeDays">
-            <option :value="1">今天</option>
-            <option :value="7">近 7 天</option>
-            <option :value="14">近 14 天</option>
-            <option :value="30">近 30 天</option>
-            <option :value="90">近 90 天</option>
-            <option :value="0">全部历史</option>
-            <option :value="CUSTOM_RANGE_DAYS">自定义日期</option>
-          </select>
-        </label>
-        <div v-if="rangeDays === CUSTOM_RANGE_DAYS" class="custom-date-range">
+        <div class="custom-date-range">
           <label>
             <span>开始日期</span>
             <input v-model="customDateFrom" type="date" :max="customDateTo || defaultCustomEnd">
@@ -902,11 +904,8 @@ onUnmounted(() => {
           <button class="apply-range-btn" type="button" :disabled="!!customRangeError" :title="customRangeError || '按选择日期统计'" @click="applyCustomRange">应用</button>
           <small v-if="customRangeError" class="custom-range-error">{{ customRangeError }}</small>
         </div>
-        <button class="refresh-btn" :disabled="refreshing" @click="loadMetrics({ silent: true })">
-          <span :class="{ spinning: refreshing }">↻</span>{{ refreshing ? '刷新中' : '刷新' }}
-        </button>
       </div>
-    </header>
+    </div>
 
     <div v-if="error" class="state-banner error-state">
       <div><strong>性能指标加载失败</strong><span>{{ error }}</span></div>
@@ -938,7 +937,7 @@ onUnmounted(() => {
         <small>{{ legacyNotice }} 个旧 Agent 记录</small>
       </div>
 
-      <section class="kpi-grid">
+      <section v-if="metricsView === 'overview'" class="kpi-grid">
         <article class="kpi-card primary">
           <div class="kpi-head"><span>{{ mainAgentLabel }}调用</span><i>01</i></div>
           <strong>{{ formatNumber(rangeStats.calls) }}</strong>
@@ -988,7 +987,7 @@ onUnmounted(() => {
         </article>
       </section>
 
-      <section class="bucket-strip">
+      <section v-if="metricsView === 'overview'" class="bucket-strip">
         <div class="bucket-block">
           <span class="bucket-kicker">终态分桶 · {{ rangeLabel }}</span>
           <div class="bucket-chips">
@@ -1010,7 +1009,7 @@ onUnmounted(() => {
         </div>
       </section>
 
-      <section class="overview-grid">
+      <section v-if="metricsView === 'overview' || metricsView === 'performance'" class="overview-grid">
         <article class="panel trend-panel">
           <div class="panel-head">
             <div><span class="panel-kicker">{{ isGlobalScope ? 'GLOBAL AGENT TREND' : (isProjectScope ? 'PROJECT AGENT TREND' : 'MAIN AGENT TREND') }}</span><h3>{{ mainAgentLabel }}调用趋势</h3></div>
@@ -1044,8 +1043,8 @@ onUnmounted(() => {
         </article>
       </section>
 
-      <section class="observability-detail-grid">
-        <article class="panel coverage-panel">
+      <section v-if="metricsView === 'token' || metricsView === 'performance'" class="observability-detail-grid">
+        <article v-if="metricsView === 'token'" class="panel coverage-panel">
           <div class="panel-head">
             <div><span class="panel-kicker">USAGE COMPLETENESS</span><h3>Token 用量完整度</h3></div>
             <span class="panel-note">真实回执 {{ formatNumber(rangeStats.usageReportedCalls) }} / {{ formatNumber(rangeStats.calls) }} 次</span>
@@ -1069,7 +1068,7 @@ onUnmounted(() => {
           <div v-else class="runtime-empty">当前范围尚无 Agent 调用记录。</div>
         </article>
 
-        <article class="panel phase-panel">
+        <article v-if="metricsView === 'performance'" class="panel phase-panel">
           <div class="panel-head">
             <div><span class="panel-kicker">WALL CLOCK BREAKDOWN</span><h3>阶段耗时分解</h3></div>
             <span class="panel-note">缺少可靠数据的阶段不显示</span>
@@ -1085,7 +1084,7 @@ onUnmounted(() => {
         </article>
       </section>
 
-      <section v-if="agentResources.length" class="panel agent-resource-panel">
+      <section v-if="metricsView === 'performance' && agentResources.length" class="panel agent-resource-panel">
         <div class="panel-head">
           <div><span class="panel-kicker">ACTIVE AGENT PROCESSES</span><h3>当前 Agent 进程资源</h3></div>
           <span class="live-dot">{{ agentResources.length }} RUNNING</span>
@@ -1101,7 +1100,7 @@ onUnmounted(() => {
         </div>
       </section>
 
-      <section v-if="reliability || reliabilityError" class="panel reliability-panel">
+      <section v-if="metricsView === 'performance' && (reliability || reliabilityError)" class="panel reliability-panel">
         <div class="panel-head">
           <div><span class="panel-kicker">RELIABILITY DRILLS</span><h3>可靠性演练与恢复</h3></div>
           <div class="reliability-actions">
@@ -1117,7 +1116,7 @@ onUnmounted(() => {
         </div>
       </section>
 
-      <section class="panel agent-panel">
+      <section v-if="metricsView === 'token'" class="panel agent-panel">
         <div class="panel-head">
           <div>
             <span class="panel-kicker">{{ isGlobalScope ? 'GLOBAL AGENT' : (isProjectScope ? 'PROJECT AGENTS' : 'GROUP AGENTS') }}</span>
@@ -1161,7 +1160,7 @@ onUnmounted(() => {
         </div>
       </section>
 
-      <section class="panel event-panel">
+      <section v-if="metricsView === 'executions'" class="panel event-panel">
         <div class="panel-head">
           <div>
             <span class="panel-kicker">RECENT EXECUTIONS</span>
@@ -1263,10 +1262,12 @@ onUnmounted(() => {
       </footer>
     </template>
   </div>
+  </WorkspacePageShell>
 </template>
 
 <style scoped>
-.metrics-page{height:100%;overflow:auto;padding:24px 28px 40px;background:linear-gradient(180deg,var(--bg-secondary),var(--bg-primary));color:var(--text-primary)}
+.metrics-page{min-height:100%;padding:18px 28px 40px;background:linear-gradient(180deg,var(--bg-secondary),var(--bg-primary));color:var(--text-primary)}
+.metrics-shared-toolbar{align-items:center}.metrics-shared-toolbar label{flex-direction:row;align-items:center}.metrics-shared-toolbar label span{white-space:nowrap}.custom-range-inline{display:flex;justify-content:flex-end;margin-bottom:12px}
 .page-header{display:flex;align-items:flex-end;justify-content:space-between;gap:24px;margin-bottom:20px}.eyebrow,.panel-kicker{display:block;color:var(--accent-blue);font-size:9px;font-weight:900;letter-spacing:.16em}.page-header h2{margin:5px 0 4px;font-size:23px;letter-spacing:-.03em}.page-header p{margin:0;color:var(--text-muted);font-size:12px}.toolbar{display:flex;align-items:flex-end;gap:9px;flex-wrap:wrap;justify-content:flex-end}.toolbar label{display:flex;flex-direction:column;gap:5px}.toolbar label span{color:var(--text-muted);font-size:9px;font-weight:800}.toolbar select,.toolbar input[type=date],.refresh-btn,.scope-trigger,.apply-range-btn{height:35px;border:1px solid var(--border-color);border-radius:9px;background:var(--bg-card);color:var(--text-primary);font-size:11px;font-weight:700;outline:none}.toolbar select{min-width:100px;padding:0 30px 0 10px}.toolbar input[type=date]{box-sizing:border-box;width:132px;padding:0 9px;color-scheme:light dark}.custom-date-range{position:relative;display:flex;align-items:flex-end;gap:7px;padding-left:9px;border-left:1px solid var(--border-color)}.custom-date-range>i{height:35px;display:flex;align-items:center;color:var(--text-muted);font-size:10px;font-style:normal}.apply-range-btn{padding:0 12px;cursor:pointer}.apply-range-btn:hover:not(:disabled){border-color:var(--accent-blue);color:var(--accent-blue)}.apply-range-btn:disabled{opacity:.5;cursor:not-allowed}.custom-range-error{position:absolute;top:100%;right:0;margin-top:3px;color:var(--danger,#ef4444);font-size:9px;white-space:nowrap}.refresh-btn{display:flex;align-items:center;gap:5px;padding:0 13px;cursor:pointer}.refresh-btn:hover{border-color:var(--border-strong);color:var(--accent-blue)}.refresh-btn:disabled{opacity:.6;cursor:wait}.spinning{display:inline-block;animation:spin .8s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
 .scope-control{min-width:240px}.toolbar select,.toolbar input[type=date],.refresh-btn,.apply-range-btn{height:var(--control-height,34px);border-radius:var(--radius-md,6px);background:var(--control-bg)}.toolbar select:focus,.toolbar input[type=date]:focus,.apply-range-btn:focus{border-color:var(--accent-blue);box-shadow:var(--focus-ring)}
 .state-banner,.scope-strip,.legacy-notice,.panel,.kpi-card,.empty-state,.bucket-strip{border:1px solid var(--border-color);background:var(--bg-card);box-shadow:var(--shadow-sm)}.state-banner{display:flex;justify-content:space-between;align-items:center;padding:14px 16px;border-radius:12px;margin-bottom:16px}.state-banner div{display:flex;flex-direction:column;gap:3px}.state-banner strong{font-size:12px}.state-banner span{font-size:11px;color:var(--text-muted)}.state-banner button{border:0;border-radius:8px;background:var(--accent-blue);color:white;padding:7px 12px}.error-state{border-color:color-mix(in srgb,var(--accent-red) 32%,transparent);background:var(--danger-soft)}

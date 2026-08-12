@@ -834,7 +834,7 @@ const globalAgentFeishuChannel = createGlobalAgentFeishuChannel({
 })
 
 const { normalizeFeishuEventPayload, verifyFeishuEventToken, extractFeishuMessageText, extractCcConnectHookText, processFeishuGlobalAgentMessage, processFeishuControlledMessage, processFeishuCardAction } = globalAgentFeishuChannel
-type FeishuTurnCommand = { kind: "normal" | "steer" | "queue" | "stop"; message: string }
+type FeishuTurnCommand = { kind: "normal" | "steer" | "queue" | "stop" | "aside"; message: string }
 export function parseFeishuConversationTurnCommand(value: any): FeishuTurnCommand { return globalAgentFeishuChannel.parseFeishuConversationTurnCommand(value) }
 export function startFeishuConversationTurnRecoveryForServer(baseUrl: string, ctx: CollabCtx) { return globalAgentFeishuChannel.startFeishuConversationTurnRecoveryForServer(baseUrl, ctx) }
 export function stopFeishuConversationTurnRecoveryForServer() { return globalAgentFeishuChannel.stopFeishuConversationTurnRecoveryForServer() }

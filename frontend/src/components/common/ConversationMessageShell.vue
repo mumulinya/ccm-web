@@ -1,6 +1,6 @@
 <script setup>
-import { computed, ref } from 'vue'
-import { Copy, Pencil } from '@lucide/vue'
+import { computed, onBeforeUnmount, ref } from 'vue'
+import { Check, Copy, Pencil, RotateCcw } from '@lucide/vue'
 import ChatAvatar from './ChatAvatar.vue'
 import MessageTimestamp from './MessageTimestamp.vue'
 
@@ -16,18 +16,23 @@ const props = defineProps({
   copyText: { type: String, default: '' },
   editable: Boolean,
   editDisabled: Boolean,
+  rewindable: Boolean,
+  rewindDisabled: Boolean,
 })
 
-const emit = defineEmits(['edit'])
+const emit = defineEmits(['edit', 'rewind'])
 
 const normalizedRole = computed(() => (
   ['user', 'operator'].includes(String(props.role || '').toLowerCase()) ? 'user' : 'assistant'
 ))
 
-const copied = ref(false)
+const copyState = ref('idle')
 let copiedTimer = null
 const hasCopyText = computed(() => !!String(props.copyText || '').trim())
-const hasActions = computed(() => hasCopyText.value || props.editable)
+const hasActions = computed(() => hasCopyText.value || props.editable || props.rewindable)
+const copied = computed(() => copyState.value === 'copied')
+const copyFailed = computed(() => copyState.value === 'failed')
+const copyLabel = computed(() => copied.value ? '已复制' : copyFailed.value ? '复制失败' : (props.streaming ? '复制当前内容' : '复制'))
 
 const fallbackCopy = (text) => {
   const textarea = document.createElement('textarea')
@@ -46,15 +51,26 @@ const copyMessage = async () => {
   const text = String(props.copyText || '').trim()
   if (!text) return
   try {
-    if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(text)
-    else fallbackCopy(text)
-    copied.value = true
+    if (navigator.clipboard?.writeText) {
+      try {
+        await navigator.clipboard.writeText(text)
+      } catch {
+        fallbackCopy(text)
+      }
+    } else fallbackCopy(text)
+    copyState.value = 'copied'
     if (copiedTimer) window.clearTimeout(copiedTimer)
-    copiedTimer = window.setTimeout(() => { copied.value = false }, 1400)
+    copiedTimer = window.setTimeout(() => { copyState.value = 'idle' }, 1400)
   } catch {
-    copied.value = false
+    copyState.value = 'failed'
+    if (copiedTimer) window.clearTimeout(copiedTimer)
+    copiedTimer = window.setTimeout(() => { copyState.value = 'idle' }, 1800)
   }
 }
+
+onBeforeUnmount(() => {
+  if (copiedTimer) window.clearTimeout(copiedTimer)
+})
 </script>
 
 <template>
@@ -87,12 +103,26 @@ const copyMessage = async () => {
           <button
             v-if="hasCopyText"
             type="button"
-            class="conversation-message__action"
-            :title="copied ? '已复制' : '复制消息'"
-            :aria-label="copied ? '已复制消息' : '复制消息'"
+            class="conversation-message__action conversation-message__action--copy"
+            :class="{ 'is-copied': copied, 'is-failed': copyFailed }"
+            :title="copyLabel"
+            :aria-label="copyLabel"
             @click="copyMessage"
           >
-            <Copy :size="14" />
+            <Check v-if="copied" :size="13" />
+            <Copy v-else :size="13" />
+            <span>{{ copyLabel }}</span>
+          </button>
+          <button
+            v-if="rewindable"
+            type="button"
+            class="conversation-message__action"
+            title="回退本轮"
+            aria-label="回退本轮代码或会话"
+            :disabled="rewindDisabled"
+            @click="emit('rewind')"
+          >
+            <RotateCcw :size="14" />
           </button>
           <button
             v-if="editable"
@@ -204,9 +234,9 @@ const copyMessage = async () => {
   display: inline-flex;
   align-items: center;
   gap: 2px;
-  opacity: 0;
-  pointer-events: none;
-  transform: translateY(2px);
+  opacity: .62;
+  pointer-events: auto;
+  transform: none;
   transition: opacity .14s ease, transform .14s ease;
 }
 
@@ -226,10 +256,23 @@ const copyMessage = async () => {
   border: 0;
   border-radius: 50%;
   color: var(--text-muted, #94a3b8);
-  background: color-mix(in srgb, var(--panel-bg, #172033) 88%, transparent);
+  background: transparent;
   cursor: pointer;
   transition: color .14s ease, background .14s ease, transform .14s ease;
 }
+
+.conversation-message__action--copy {
+  width: auto;
+  min-width: 28px;
+  padding: 0 7px;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.conversation-message__action--copy span { white-space: nowrap; }
+.conversation-message__action--copy.is-copied { color: var(--accent-green, #16a34a); }
+.conversation-message__action--copy.is-failed { color: var(--accent-red, #dc2626); }
 
 .conversation-message__action:hover:not(:disabled) {
   color: var(--text-primary, #f8fafc);

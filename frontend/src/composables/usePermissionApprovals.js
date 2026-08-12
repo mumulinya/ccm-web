@@ -63,7 +63,10 @@ export function usePermissionApprovals({ scope, active, onApproved } = {}) {
         }),
       })
       requests.value = requests.value.filter(item => item.id !== request.id)
-      toast.success(decision === 'approve' ? '已批准一次，授权将在 15 分钟内失效' : '已拒绝这项权限申请')
+      const taskEditApproval = (request.approvalScope || request.approval_scope) === 'task' && request.operation === 'workspace_edit_session'
+      toast.success(decision === 'approve'
+        ? (taskEditApproval ? '已允许当前任务修改，返工和复验将复用这次授权' : '已批准本次精确操作，授权将在限定时间内失效')
+        : '已拒绝这项权限申请')
       if (decision === 'approve') await onApproved?.(request, result)
     } catch (error) {
       toast.error(error?.message || '权限处理失败')

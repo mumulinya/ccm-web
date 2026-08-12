@@ -6,7 +6,7 @@ const internal_mcp_runtime_1 = require("./internal-mcp-runtime");
 const workspace_readonly_tools_1 = require("../tools/workspace-readonly-tools");
 exports.WORKSPACE_READONLY_MCP_SERVER_NAME = "ccm__workspace_readonly";
 const MAIN_AGENT_ROLES = ["global-agent", "group-main-agent", "project-agent"];
-const tools = workspace_readonly_tools_1.WORKSPACE_READONLY_TOOL_DEFINITIONS_V2.map(tool => ({
+const tools = workspace_readonly_tools_1.WORKSPACE_READONLY_TOOL_DEFINITIONS_V3.map(tool => ({
     name: tool.name,
     description: tool.description,
     inputSchema: tool.inputSchema,
@@ -45,6 +45,6 @@ function workspaceReadonlyMcpTools() {
     name: exports.WORKSPACE_READONLY_MCP_SERVER_NAME,
     version: "2.0.0",
     tools,
-    callTool: (context, name, args) => (0, workspace_readonly_tools_1.executeWorkspaceReadonlyToolWithCapability)(name, args, capabilityFromContext(context)),
+    callTool: (context, name, args) => (0, workspace_readonly_tools_1.executeWorkspaceReadonlyToolWithCapability)(name, args, capabilityFromContext(context), 3),
 });
 //# sourceMappingURL=workspace-readonly-mcp.js.map

@@ -5,7 +5,7 @@ import { CCM_DIR } from "../../core/utils";
 import { ensureTraceId } from "../../system/reliability-ledger";
 import { normalizeAgentReasoningState } from "../reasoning-loop";
 import type { GlobalAgentDecisionState, GlobalAgentRun, GlobalAgentRunStatus, GlobalAgentToolRisk, GlobalAgentToolSpec, GlobalAgentUserSteer, GlobalAgentUserSteerStatus } from "./loop";
-import { WORKSPACE_READONLY_TOOL_DEFINITIONS_V2 } from "../../tools/workspace-readonly-tools";
+import { WORKSPACE_READONLY_TOOL_DEFINITIONS_V3 } from "../../tools/workspace-readonly-tools";
 import { projectContextSourceToolResultForPersistence } from "../../system/context-source-tool-result-projection";
 
 export const STORE_DIR = path.join(CCM_DIR, "global-agent-runs");
@@ -418,7 +418,7 @@ export function validateTool(name: string, args: any) {
 
 export const GLOBAL_AGENT_TOOL_SPECS: GlobalAgentToolSpec[] = [
   { name: "tool_search", description: "按需发现本轮尚未加载的低频只读工作区工具。", required: ["query"], risk: "read" },
-  ...WORKSPACE_READONLY_TOOL_DEFINITIONS_V2.map(tool => ({
+  ...WORKSPACE_READONLY_TOOL_DEFINITIONS_V3.map(tool => ({
     name: tool.name,
     description: tool.description,
     required: Array.isArray(tool.inputSchema?.required) ? tool.inputSchema.required : [],

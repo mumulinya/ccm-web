@@ -1705,7 +1705,7 @@ function handleToolsAndMetricsApi(pathname, req, res, parsed) {
                 main_agent_catalog: {
                     schema: "ccm-main-agent-tool-catalog-v2",
                     native: main_agent_tool_runtime_1.MAIN_AGENT_NATIVE_TOOLS_V2.map(tool => ({ ...tool, source: "native", applicable_agents: ["global", "group", "project"] })),
-                    workspace_readonly: workspace_readonly_tools_1.WORKSPACE_READONLY_TOOL_DEFINITIONS_V2.map(tool => ({
+                    workspace_readonly: workspace_readonly_tools_1.WORKSPACE_READONLY_TOOL_DEFINITIONS_V3.map(tool => ({
                         name: tool.name,
                         canonical_name: tool.canonicalName,
                         description: tool.description,

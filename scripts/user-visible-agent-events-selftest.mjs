@@ -116,8 +116,10 @@ const directory = events.appendToolProjection({
     outputTokens: 200, resultChecksum: 'INTERNAL_CHECKSUM_SENTINEL', ok: true,
   },
 })
-assert.equal(directory.display.title, 'List directory')
-assert.equal(directory.detail?.toolDisplay?.tool?.serverLabel, 'ccm_workspace_readonly')
+assert.equal(directory.display.title, '查找目录')
+assert.equal(directory.detail?.toolDisplay?.tool?.name, 'list_directory')
+assert.equal(directory.detail?.toolDisplay?.tool?.category, 'builtin')
+assert.equal(directory.detail?.toolDisplay?.tool?.serverLabel, undefined)
 assert.equal(directory.detail?.toolDisplay?.result?.rows?.length, 2)
 assert.match(directory.detail?.toolDisplay?.result?.summary || '', /1 个目录，1 个文件/)
 assert.match(directory.display?.summary || '', /1 个目录，1 个文件/, '工具行必须直接展示业务结果摘要')
@@ -298,6 +300,11 @@ assert.match(progressTranscriptSource, /freshness === 'drifted'/, '权威结果�
 assert.match(progressTranscriptSource, /cc-live-execution-status/, '运行态必须显示Codex风格的处理时间和当前阶段')
 assert.match(progressTranscriptSource, /liveRowLabel/, '运行态工具必须使用正在运行或已完成的紧凑文案')
 assert.match(progressTranscriptSource, /isLivePresentation/, '运行态与完成态必须使用同一账本的不同投影')
+assert.match(progressTranscriptSource, /link\?\.schema !== 'ccm-task-event-link-v1'/, '任务回放入口必须依赖显式安全关联契约')
+assert.match(progressTranscriptSource, /\^gar_/, '历史全局普通运行ID不得继续显示任务回放入口')
+const globalReplayLoopSource = fs.readFileSync(new URL('../backend/agents/global/global-agent-loop-engine.ts', import.meta.url), 'utf8')
+assert.doesNotMatch(globalReplayLoopSource, /taskId:\s*run\.mission_id\s*\|\|\s*run\.id/, '全局普通问答运行ID不得伪装为正式任务ID')
+assert.match(globalReplayLoopSource, /taskId:\s*run\.mission_id\s*\|\|\s*undefined/, '全局任务回放身份必须只来自真实mission')
 const pinnedScrollSource = fs.readFileSync(new URL('../frontend/src/composables/usePinnedScroll.js', import.meta.url), 'utf8')
 assert.match(pinnedScrollSource, /pendingUpdates/, '用户离开底部时必须累计新进度')
 assert.match(pinnedScrollSource, /threshold = options\.threshold \|\| 120/, '自动跟随底部阈值必须为120px')
@@ -315,6 +322,22 @@ const conversationEvents = [
 ]
 assert.equal(frontendExecution.shouldRenderExecutionTranscript(conversationEvents, conversationMessages, 1, false), false, '零动作普通对话默认不得显示执行记录')
 assert.equal(frontendExecution.shouldRenderExecutionTranscript(conversationEvents, conversationMessages, 1, true), true, 'Ctrl+O展开后普通对话仍可查看技术记录')
+const legacyOrdinaryMessages = [
+  conversationMessages[0],
+  {
+    ...conversationMessages[1],
+    streamEvents: [
+      { eventType: 'started', title: '理解需求', text: '正在判断是普通对话还是需要执行操作。', at: at(1) },
+      { eventType: 'decision', title: '组织回复', text: '正在整理回答。', at: at(2) },
+      { eventType: 'completed', title: '处理结果', text: '回答已完成。', at: at(3) },
+    ],
+  },
+]
+assert.equal(frontendExecution.shouldRenderExecutionTranscript([], legacyOrdinaryMessages, 1, false), false, '旧全局started/decision事件不得把普通回答伪装成执行进度')
+const globalMessagingSource = fs.readFileSync(new URL('../frontend/src/composables/useGlobalAgentMessaging.js', import.meta.url), 'utf8')
+assert.match(globalMessagingSource, /!globalResultReceived && !globalStreamFailed/, 'SSE done先到达时仍必须权威回读最终回答')
+const globalAgentViewSource = fs.readFileSync(new URL('../frontend/src/components/global/GlobalAgent.vue', import.meta.url), 'utf8')
+assert.doesNotMatch(globalAgentViewSource, /fallback = '这条消息已整理。'/, '空回答不得使用伪完成兜底文案')
 const toolEvents = [
   ...conversationEvents.slice(0, 2),
   { eventId: 'progress-before-tools', sequence: 3, eventType: 'assistant_progress', display: { status: 'running', summary: '我先检查项目结构。' }, detail: { progress: { kind: 'before_tools', text: '我先检查项目结构。', modelCallIndex: 1, relatedToolCallIds: ['tool-start'], milestoneChecksum: 'safe' } }, createdAt: at(2) },
@@ -400,8 +423,12 @@ assert.match(transcriptSource, /cc-execution-timing/, '展开记录必须提供�
 assert.doesNotMatch(transcriptSource, /<p v-if="event\.display\?\.summary">/, '工具行不得直接重复通用执行完成摘要')
 assert.match(transcriptSource, /const transcriptExpanded = ref\(false\)/, '每条消息必须拥有独立执行记录展开状态')
 assert.match(transcriptSource, /const stageMode = computed/, '真实会话必须支持阶段分组展示')
-assert.match(transcriptSource, /const expandedStages = reactive/, '四个阶段必须能够独立收起与展开')
-assert.match(transcriptSource, /const stageIsExpanded/, '四个阶段必须保留独立展开状态')
+assert.match(transcriptSource, /coordination_dispatch/, '真实全局分派必须拥有独立用户阶段')
+assert.match(transcriptSource, /了解情况/, '完成态执行记录必须使用固定用户阶段标题')
+assert.match(transcriptSource, /验证与交付/, '验收与总结必须归入统一交付阶段')
+assert.match(transcriptSource, /const stageSummaryFor/, '阶段标题下必须投影安全阶段摘要')
+assert.match(transcriptSource, /const expandedStages = reactive/, '固定阶段必须能够独立收起与展开')
+assert.match(transcriptSource, /const stageIsExpanded/, '固定阶段必须保留独立展开状态')
 assert.match(transcriptSource, /emit\('open-file-change'/, '执行记录文件路径必须能打开权威Diff抽屉')
 assert.match(transcriptSource, /查看 Diff/, '文件变化列表必须提供明确的Diff入口')
 const completionRows = frontendExecution.completionFileChangesForRows([

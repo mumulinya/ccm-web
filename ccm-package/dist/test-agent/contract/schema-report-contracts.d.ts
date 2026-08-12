@@ -2798,10 +2798,10 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             provider?: "mcp" | "playwright";
             scope?: string;
             releasedAt?: string;
+            resourceType?: "browser" | "browser_context" | "external_browser_session";
             acquiredAt?: string;
             ownership?: "owned" | "external";
             planId?: string;
-            resourceType?: "browser" | "browser_context" | "external_browser_session";
             releaseAttemptedAt?: string;
         }, {
             id?: string;
@@ -2810,10 +2810,10 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             provider?: "mcp" | "playwright";
             scope?: string;
             releasedAt?: string;
+            resourceType?: "browser" | "browser_context" | "external_browser_session";
             acquiredAt?: string;
             ownership?: "owned" | "external";
             planId?: string;
-            resourceType?: "browser" | "browser_context" | "external_browser_session";
             releaseAttemptedAt?: string;
         }>, "many">;
     }, "strict", z.ZodTypeAny, {
@@ -2825,10 +2825,10 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             provider?: "mcp" | "playwright";
             scope?: string;
             releasedAt?: string;
+            resourceType?: "browser" | "browser_context" | "external_browser_session";
             acquiredAt?: string;
             ownership?: "owned" | "external";
             planId?: string;
-            resourceType?: "browser" | "browser_context" | "external_browser_session";
             releaseAttemptedAt?: string;
         }[];
         eventCount?: number;
@@ -2857,10 +2857,10 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             provider?: "mcp" | "playwright";
             scope?: string;
             releasedAt?: string;
+            resourceType?: "browser" | "browser_context" | "external_browser_session";
             acquiredAt?: string;
             ownership?: "owned" | "external";
             planId?: string;
-            resourceType?: "browser" | "browser_context" | "external_browser_session";
             releaseAttemptedAt?: string;
         }[];
         eventCount?: number;
@@ -7499,10 +7499,10 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             provider?: "mcp" | "playwright";
             scope?: string;
             releasedAt?: string;
+            resourceType?: "browser" | "browser_context" | "external_browser_session";
             acquiredAt?: string;
             ownership?: "owned" | "external";
             planId?: string;
-            resourceType?: "browser" | "browser_context" | "external_browser_session";
             releaseAttemptedAt?: string;
         }, {
             id?: string;
@@ -7511,10 +7511,10 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             provider?: "mcp" | "playwright";
             scope?: string;
             releasedAt?: string;
+            resourceType?: "browser" | "browser_context" | "external_browser_session";
             acquiredAt?: string;
             ownership?: "owned" | "external";
             planId?: string;
-            resourceType?: "browser" | "browser_context" | "external_browser_session";
             releaseAttemptedAt?: string;
         }>, "many">;
     }, "strict", z.ZodTypeAny, {
@@ -7526,10 +7526,10 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             provider?: "mcp" | "playwright";
             scope?: string;
             releasedAt?: string;
+            resourceType?: "browser" | "browser_context" | "external_browser_session";
             acquiredAt?: string;
             ownership?: "owned" | "external";
             planId?: string;
-            resourceType?: "browser" | "browser_context" | "external_browser_session";
             releaseAttemptedAt?: string;
         }[];
         eventCount?: number;
@@ -7558,10 +7558,10 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             provider?: "mcp" | "playwright";
             scope?: string;
             releasedAt?: string;
+            resourceType?: "browser" | "browser_context" | "external_browser_session";
             acquiredAt?: string;
             ownership?: "owned" | "external";
             planId?: string;
-            resourceType?: "browser" | "browser_context" | "external_browser_session";
             releaseAttemptedAt?: string;
         }[];
         eventCount?: number;
@@ -12200,10 +12200,10 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             provider?: "mcp" | "playwright";
             scope?: string;
             releasedAt?: string;
+            resourceType?: "browser" | "browser_context" | "external_browser_session";
             acquiredAt?: string;
             ownership?: "owned" | "external";
             planId?: string;
-            resourceType?: "browser" | "browser_context" | "external_browser_session";
             releaseAttemptedAt?: string;
         }, {
             id?: string;
@@ -12212,10 +12212,10 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             provider?: "mcp" | "playwright";
             scope?: string;
             releasedAt?: string;
+            resourceType?: "browser" | "browser_context" | "external_browser_session";
             acquiredAt?: string;
             ownership?: "owned" | "external";
             planId?: string;
-            resourceType?: "browser" | "browser_context" | "external_browser_session";
             releaseAttemptedAt?: string;
         }>, "many">;
     }, "strict", z.ZodTypeAny, {
@@ -12227,10 +12227,10 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             provider?: "mcp" | "playwright";
             scope?: string;
             releasedAt?: string;
+            resourceType?: "browser" | "browser_context" | "external_browser_session";
             acquiredAt?: string;
             ownership?: "owned" | "external";
             planId?: string;
-            resourceType?: "browser" | "browser_context" | "external_browser_session";
             releaseAttemptedAt?: string;
         }[];
         eventCount?: number;
@@ -12259,10 +12259,10 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             provider?: "mcp" | "playwright";
             scope?: string;
             releasedAt?: string;
+            resourceType?: "browser" | "browser_context" | "external_browser_session";
             acquiredAt?: string;
             ownership?: "owned" | "external";
             planId?: string;
-            resourceType?: "browser" | "browser_context" | "external_browser_session";
             releaseAttemptedAt?: string;
         }[];
         eventCount?: number;
@@ -16901,10 +16901,10 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             provider?: "mcp" | "playwright";
             scope?: string;
             releasedAt?: string;
+            resourceType?: "browser" | "browser_context" | "external_browser_session";
             acquiredAt?: string;
             ownership?: "owned" | "external";
             planId?: string;
-            resourceType?: "browser" | "browser_context" | "external_browser_session";
             releaseAttemptedAt?: string;
         }, {
             id?: string;
@@ -16913,10 +16913,10 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             provider?: "mcp" | "playwright";
             scope?: string;
             releasedAt?: string;
+            resourceType?: "browser" | "browser_context" | "external_browser_session";
             acquiredAt?: string;
             ownership?: "owned" | "external";
             planId?: string;
-            resourceType?: "browser" | "browser_context" | "external_browser_session";
             releaseAttemptedAt?: string;
         }>, "many">;
     }, "strict", z.ZodTypeAny, {
@@ -16928,10 +16928,10 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             provider?: "mcp" | "playwright";
             scope?: string;
             releasedAt?: string;
+            resourceType?: "browser" | "browser_context" | "external_browser_session";
             acquiredAt?: string;
             ownership?: "owned" | "external";
             planId?: string;
-            resourceType?: "browser" | "browser_context" | "external_browser_session";
             releaseAttemptedAt?: string;
         }[];
         eventCount?: number;
@@ -16960,10 +16960,10 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             provider?: "mcp" | "playwright";
             scope?: string;
             releasedAt?: string;
+            resourceType?: "browser" | "browser_context" | "external_browser_session";
             acquiredAt?: string;
             ownership?: "owned" | "external";
             planId?: string;
-            resourceType?: "browser" | "browser_context" | "external_browser_session";
             releaseAttemptedAt?: string;
         }[];
         eventCount?: number;
@@ -21602,10 +21602,10 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             provider?: "mcp" | "playwright";
             scope?: string;
             releasedAt?: string;
+            resourceType?: "browser" | "browser_context" | "external_browser_session";
             acquiredAt?: string;
             ownership?: "owned" | "external";
             planId?: string;
-            resourceType?: "browser" | "browser_context" | "external_browser_session";
             releaseAttemptedAt?: string;
         }, {
             id?: string;
@@ -21614,10 +21614,10 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             provider?: "mcp" | "playwright";
             scope?: string;
             releasedAt?: string;
+            resourceType?: "browser" | "browser_context" | "external_browser_session";
             acquiredAt?: string;
             ownership?: "owned" | "external";
             planId?: string;
-            resourceType?: "browser" | "browser_context" | "external_browser_session";
             releaseAttemptedAt?: string;
         }>, "many">;
     }, "strict", z.ZodTypeAny, {
@@ -21629,10 +21629,10 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             provider?: "mcp" | "playwright";
             scope?: string;
             releasedAt?: string;
+            resourceType?: "browser" | "browser_context" | "external_browser_session";
             acquiredAt?: string;
             ownership?: "owned" | "external";
             planId?: string;
-            resourceType?: "browser" | "browser_context" | "external_browser_session";
             releaseAttemptedAt?: string;
         }[];
         eventCount?: number;
@@ -21661,10 +21661,10 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             provider?: "mcp" | "playwright";
             scope?: string;
             releasedAt?: string;
+            resourceType?: "browser" | "browser_context" | "external_browser_session";
             acquiredAt?: string;
             ownership?: "owned" | "external";
             planId?: string;
-            resourceType?: "browser" | "browser_context" | "external_browser_session";
             releaseAttemptedAt?: string;
         }[];
         eventCount?: number;
@@ -23538,15 +23538,15 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             project: z.ZodOptional<z.ZodString>;
         }, "strict", z.ZodTypeAny, {
             project?: string;
+            path?: string;
             code?: string;
             message?: string;
-            path?: string;
             severity?: "warning" | "error";
         }, {
             project?: string;
+            path?: string;
             code?: string;
             message?: string;
-            path?: string;
             severity?: "warning" | "error";
         }>, "many">;
         warnings: z.ZodArray<z.ZodObject<{
@@ -23557,47 +23557,47 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             project: z.ZodOptional<z.ZodString>;
         }, "strict", z.ZodTypeAny, {
             project?: string;
+            path?: string;
             code?: string;
             message?: string;
-            path?: string;
             severity?: "warning" | "error";
         }, {
             project?: string;
+            path?: string;
             code?: string;
             message?: string;
-            path?: string;
             severity?: "warning" | "error";
         }>, "many">;
     }, "strict", z.ZodTypeAny, {
         valid?: boolean;
         errors?: {
             project?: string;
+            path?: string;
             code?: string;
             message?: string;
-            path?: string;
             severity?: "warning" | "error";
         }[];
         warnings?: {
             project?: string;
+            path?: string;
             code?: string;
             message?: string;
-            path?: string;
             severity?: "warning" | "error";
         }[];
     }, {
         valid?: boolean;
         errors?: {
             project?: string;
+            path?: string;
             code?: string;
             message?: string;
-            path?: string;
             severity?: "warning" | "error";
         }[];
         warnings?: {
             project?: string;
+            path?: string;
             code?: string;
             message?: string;
-            path?: string;
             severity?: "warning" | "error";
         }[];
     }>;
@@ -23611,15 +23611,15 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             project: z.ZodOptional<z.ZodString>;
         }, "strict", z.ZodTypeAny, {
             project?: string;
+            path?: string;
             code?: string;
             message?: string;
-            path?: string;
             severity?: "warning" | "error";
         }, {
             project?: string;
+            path?: string;
             code?: string;
             message?: string;
-            path?: string;
             severity?: "warning" | "error";
         }>, "many">;
         warnings: z.ZodArray<z.ZodObject<{
@@ -23630,47 +23630,47 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             project: z.ZodOptional<z.ZodString>;
         }, "strict", z.ZodTypeAny, {
             project?: string;
+            path?: string;
             code?: string;
             message?: string;
-            path?: string;
             severity?: "warning" | "error";
         }, {
             project?: string;
+            path?: string;
             code?: string;
             message?: string;
-            path?: string;
             severity?: "warning" | "error";
         }>, "many">;
     }, "strict", z.ZodTypeAny, {
         valid?: boolean;
         errors?: {
             project?: string;
+            path?: string;
             code?: string;
             message?: string;
-            path?: string;
             severity?: "warning" | "error";
         }[];
         warnings?: {
             project?: string;
+            path?: string;
             code?: string;
             message?: string;
-            path?: string;
             severity?: "warning" | "error";
         }[];
     }, {
         valid?: boolean;
         errors?: {
             project?: string;
+            path?: string;
             code?: string;
             message?: string;
-            path?: string;
             severity?: "warning" | "error";
         }[];
         warnings?: {
             project?: string;
+            path?: string;
             code?: string;
             message?: string;
-            path?: string;
             severity?: "warning" | "error";
         }[];
     }>>;
@@ -26475,10 +26475,10 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 provider?: "mcp" | "playwright";
                 scope?: string;
                 releasedAt?: string;
+                resourceType?: "browser" | "browser_context" | "external_browser_session";
                 acquiredAt?: string;
                 ownership?: "owned" | "external";
                 planId?: string;
-                resourceType?: "browser" | "browser_context" | "external_browser_session";
                 releaseAttemptedAt?: string;
             }, {
                 id?: string;
@@ -26487,10 +26487,10 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 provider?: "mcp" | "playwright";
                 scope?: string;
                 releasedAt?: string;
+                resourceType?: "browser" | "browser_context" | "external_browser_session";
                 acquiredAt?: string;
                 ownership?: "owned" | "external";
                 planId?: string;
-                resourceType?: "browser" | "browser_context" | "external_browser_session";
                 releaseAttemptedAt?: string;
             }>, "many">;
         }, "strict", z.ZodTypeAny, {
@@ -26502,10 +26502,10 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 provider?: "mcp" | "playwright";
                 scope?: string;
                 releasedAt?: string;
+                resourceType?: "browser" | "browser_context" | "external_browser_session";
                 acquiredAt?: string;
                 ownership?: "owned" | "external";
                 planId?: string;
-                resourceType?: "browser" | "browser_context" | "external_browser_session";
                 releaseAttemptedAt?: string;
             }[];
             eventCount?: number;
@@ -26534,10 +26534,10 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 provider?: "mcp" | "playwright";
                 scope?: string;
                 releasedAt?: string;
+                resourceType?: "browser" | "browser_context" | "external_browser_session";
                 acquiredAt?: string;
                 ownership?: "owned" | "external";
                 planId?: string;
-                resourceType?: "browser" | "browser_context" | "external_browser_session";
                 releaseAttemptedAt?: string;
             }[];
             eventCount?: number;
@@ -31176,10 +31176,10 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 provider?: "mcp" | "playwright";
                 scope?: string;
                 releasedAt?: string;
+                resourceType?: "browser" | "browser_context" | "external_browser_session";
                 acquiredAt?: string;
                 ownership?: "owned" | "external";
                 planId?: string;
-                resourceType?: "browser" | "browser_context" | "external_browser_session";
                 releaseAttemptedAt?: string;
             }, {
                 id?: string;
@@ -31188,10 +31188,10 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 provider?: "mcp" | "playwright";
                 scope?: string;
                 releasedAt?: string;
+                resourceType?: "browser" | "browser_context" | "external_browser_session";
                 acquiredAt?: string;
                 ownership?: "owned" | "external";
                 planId?: string;
-                resourceType?: "browser" | "browser_context" | "external_browser_session";
                 releaseAttemptedAt?: string;
             }>, "many">;
         }, "strict", z.ZodTypeAny, {
@@ -31203,10 +31203,10 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 provider?: "mcp" | "playwright";
                 scope?: string;
                 releasedAt?: string;
+                resourceType?: "browser" | "browser_context" | "external_browser_session";
                 acquiredAt?: string;
                 ownership?: "owned" | "external";
                 planId?: string;
-                resourceType?: "browser" | "browser_context" | "external_browser_session";
                 releaseAttemptedAt?: string;
             }[];
             eventCount?: number;
@@ -31235,10 +31235,10 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 provider?: "mcp" | "playwright";
                 scope?: string;
                 releasedAt?: string;
+                resourceType?: "browser" | "browser_context" | "external_browser_session";
                 acquiredAt?: string;
                 ownership?: "owned" | "external";
                 planId?: string;
-                resourceType?: "browser" | "browser_context" | "external_browser_session";
                 releaseAttemptedAt?: string;
             }[];
             eventCount?: number;
@@ -35877,10 +35877,10 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 provider?: "mcp" | "playwright";
                 scope?: string;
                 releasedAt?: string;
+                resourceType?: "browser" | "browser_context" | "external_browser_session";
                 acquiredAt?: string;
                 ownership?: "owned" | "external";
                 planId?: string;
-                resourceType?: "browser" | "browser_context" | "external_browser_session";
                 releaseAttemptedAt?: string;
             }, {
                 id?: string;
@@ -35889,10 +35889,10 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 provider?: "mcp" | "playwright";
                 scope?: string;
                 releasedAt?: string;
+                resourceType?: "browser" | "browser_context" | "external_browser_session";
                 acquiredAt?: string;
                 ownership?: "owned" | "external";
                 planId?: string;
-                resourceType?: "browser" | "browser_context" | "external_browser_session";
                 releaseAttemptedAt?: string;
             }>, "many">;
         }, "strict", z.ZodTypeAny, {
@@ -35904,10 +35904,10 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 provider?: "mcp" | "playwright";
                 scope?: string;
                 releasedAt?: string;
+                resourceType?: "browser" | "browser_context" | "external_browser_session";
                 acquiredAt?: string;
                 ownership?: "owned" | "external";
                 planId?: string;
-                resourceType?: "browser" | "browser_context" | "external_browser_session";
                 releaseAttemptedAt?: string;
             }[];
             eventCount?: number;
@@ -35936,10 +35936,10 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 provider?: "mcp" | "playwright";
                 scope?: string;
                 releasedAt?: string;
+                resourceType?: "browser" | "browser_context" | "external_browser_session";
                 acquiredAt?: string;
                 ownership?: "owned" | "external";
                 planId?: string;
-                resourceType?: "browser" | "browser_context" | "external_browser_session";
                 releaseAttemptedAt?: string;
             }[];
             eventCount?: number;
@@ -40578,10 +40578,10 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 provider?: "mcp" | "playwright";
                 scope?: string;
                 releasedAt?: string;
+                resourceType?: "browser" | "browser_context" | "external_browser_session";
                 acquiredAt?: string;
                 ownership?: "owned" | "external";
                 planId?: string;
-                resourceType?: "browser" | "browser_context" | "external_browser_session";
                 releaseAttemptedAt?: string;
             }, {
                 id?: string;
@@ -40590,10 +40590,10 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 provider?: "mcp" | "playwright";
                 scope?: string;
                 releasedAt?: string;
+                resourceType?: "browser" | "browser_context" | "external_browser_session";
                 acquiredAt?: string;
                 ownership?: "owned" | "external";
                 planId?: string;
-                resourceType?: "browser" | "browser_context" | "external_browser_session";
                 releaseAttemptedAt?: string;
             }>, "many">;
         }, "strict", z.ZodTypeAny, {
@@ -40605,10 +40605,10 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 provider?: "mcp" | "playwright";
                 scope?: string;
                 releasedAt?: string;
+                resourceType?: "browser" | "browser_context" | "external_browser_session";
                 acquiredAt?: string;
                 ownership?: "owned" | "external";
                 planId?: string;
-                resourceType?: "browser" | "browser_context" | "external_browser_session";
                 releaseAttemptedAt?: string;
             }[];
             eventCount?: number;
@@ -40637,10 +40637,10 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 provider?: "mcp" | "playwright";
                 scope?: string;
                 releasedAt?: string;
+                resourceType?: "browser" | "browser_context" | "external_browser_session";
                 acquiredAt?: string;
                 ownership?: "owned" | "external";
                 planId?: string;
-                resourceType?: "browser" | "browser_context" | "external_browser_session";
                 releaseAttemptedAt?: string;
             }[];
             eventCount?: number;
@@ -45279,10 +45279,10 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 provider?: "mcp" | "playwright";
                 scope?: string;
                 releasedAt?: string;
+                resourceType?: "browser" | "browser_context" | "external_browser_session";
                 acquiredAt?: string;
                 ownership?: "owned" | "external";
                 planId?: string;
-                resourceType?: "browser" | "browser_context" | "external_browser_session";
                 releaseAttemptedAt?: string;
             }, {
                 id?: string;
@@ -45291,10 +45291,10 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 provider?: "mcp" | "playwright";
                 scope?: string;
                 releasedAt?: string;
+                resourceType?: "browser" | "browser_context" | "external_browser_session";
                 acquiredAt?: string;
                 ownership?: "owned" | "external";
                 planId?: string;
-                resourceType?: "browser" | "browser_context" | "external_browser_session";
                 releaseAttemptedAt?: string;
             }>, "many">;
         }, "strict", z.ZodTypeAny, {
@@ -45306,10 +45306,10 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 provider?: "mcp" | "playwright";
                 scope?: string;
                 releasedAt?: string;
+                resourceType?: "browser" | "browser_context" | "external_browser_session";
                 acquiredAt?: string;
                 ownership?: "owned" | "external";
                 planId?: string;
-                resourceType?: "browser" | "browser_context" | "external_browser_session";
                 releaseAttemptedAt?: string;
             }[];
             eventCount?: number;
@@ -45338,10 +45338,10 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 provider?: "mcp" | "playwright";
                 scope?: string;
                 releasedAt?: string;
+                resourceType?: "browser" | "browser_context" | "external_browser_session";
                 acquiredAt?: string;
                 ownership?: "owned" | "external";
                 planId?: string;
-                resourceType?: "browser" | "browser_context" | "external_browser_session";
                 releaseAttemptedAt?: string;
             }[];
             eventCount?: number;
@@ -47760,10 +47760,10 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 provider?: "mcp" | "playwright";
                 scope?: string;
                 releasedAt?: string;
+                resourceType?: "browser" | "browser_context" | "external_browser_session";
                 acquiredAt?: string;
                 ownership?: "owned" | "external";
                 planId?: string;
-                resourceType?: "browser" | "browser_context" | "external_browser_session";
                 releaseAttemptedAt?: string;
             }[];
             eventCount?: number;
@@ -48156,16 +48156,16 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
         valid?: boolean;
         errors?: {
             project?: string;
+            path?: string;
             code?: string;
             message?: string;
-            path?: string;
             severity?: "warning" | "error";
         }[];
         warnings?: {
             project?: string;
+            path?: string;
             code?: string;
             message?: string;
-            path?: string;
             severity?: "warning" | "error";
         }[];
     };
@@ -48173,16 +48173,16 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
         valid?: boolean;
         errors?: {
             project?: string;
+            path?: string;
             code?: string;
             message?: string;
-            path?: string;
             severity?: "warning" | "error";
         }[];
         warnings?: {
             project?: string;
+            path?: string;
             code?: string;
             message?: string;
-            path?: string;
             severity?: "warning" | "error";
         }[];
     };
@@ -48665,10 +48665,10 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 provider?: "mcp" | "playwright";
                 scope?: string;
                 releasedAt?: string;
+                resourceType?: "browser" | "browser_context" | "external_browser_session";
                 acquiredAt?: string;
                 ownership?: "owned" | "external";
                 planId?: string;
-                resourceType?: "browser" | "browser_context" | "external_browser_session";
                 releaseAttemptedAt?: string;
             }[];
             eventCount?: number;
@@ -49061,16 +49061,16 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
         valid?: boolean;
         errors?: {
             project?: string;
+            path?: string;
             code?: string;
             message?: string;
-            path?: string;
             severity?: "warning" | "error";
         }[];
         warnings?: {
             project?: string;
+            path?: string;
             code?: string;
             message?: string;
-            path?: string;
             severity?: "warning" | "error";
         }[];
     };
@@ -49078,16 +49078,16 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
         valid?: boolean;
         errors?: {
             project?: string;
+            path?: string;
             code?: string;
             message?: string;
-            path?: string;
             severity?: "warning" | "error";
         }[];
         warnings?: {
             project?: string;
+            path?: string;
             code?: string;
             message?: string;
-            path?: string;
             severity?: "warning" | "error";
         }[];
     };
@@ -49570,10 +49570,10 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 provider?: "mcp" | "playwright";
                 scope?: string;
                 releasedAt?: string;
+                resourceType?: "browser" | "browser_context" | "external_browser_session";
                 acquiredAt?: string;
                 ownership?: "owned" | "external";
                 planId?: string;
-                resourceType?: "browser" | "browser_context" | "external_browser_session";
                 releaseAttemptedAt?: string;
             }[];
             eventCount?: number;
@@ -49966,16 +49966,16 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
         valid?: boolean;
         errors?: {
             project?: string;
+            path?: string;
             code?: string;
             message?: string;
-            path?: string;
             severity?: "warning" | "error";
         }[];
         warnings?: {
             project?: string;
+            path?: string;
             code?: string;
             message?: string;
-            path?: string;
             severity?: "warning" | "error";
         }[];
     };
@@ -49983,16 +49983,16 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
         valid?: boolean;
         errors?: {
             project?: string;
+            path?: string;
             code?: string;
             message?: string;
-            path?: string;
             severity?: "warning" | "error";
         }[];
         warnings?: {
             project?: string;
+            path?: string;
             code?: string;
             message?: string;
-            path?: string;
             severity?: "warning" | "error";
         }[];
     };
@@ -50475,10 +50475,10 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 provider?: "mcp" | "playwright";
                 scope?: string;
                 releasedAt?: string;
+                resourceType?: "browser" | "browser_context" | "external_browser_session";
                 acquiredAt?: string;
                 ownership?: "owned" | "external";
                 planId?: string;
-                resourceType?: "browser" | "browser_context" | "external_browser_session";
                 releaseAttemptedAt?: string;
             }[];
             eventCount?: number;
@@ -50871,16 +50871,16 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
         valid?: boolean;
         errors?: {
             project?: string;
+            path?: string;
             code?: string;
             message?: string;
-            path?: string;
             severity?: "warning" | "error";
         }[];
         warnings?: {
             project?: string;
+            path?: string;
             code?: string;
             message?: string;
-            path?: string;
             severity?: "warning" | "error";
         }[];
     };
@@ -50888,16 +50888,16 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
         valid?: boolean;
         errors?: {
             project?: string;
+            path?: string;
             code?: string;
             message?: string;
-            path?: string;
             severity?: "warning" | "error";
         }[];
         warnings?: {
             project?: string;
+            path?: string;
             code?: string;
             message?: string;
-            path?: string;
             severity?: "warning" | "error";
         }[];
     };

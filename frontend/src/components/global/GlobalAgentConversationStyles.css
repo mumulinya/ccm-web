@@ -156,6 +156,16 @@
   border-top-left-radius: 2px;
 }
 
+.chat-bubble-wrapper.assistant .chat-bubble.chat-bubble--final-answer {
+  width: min(100%, 860px);
+  padding: 2px 0 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
 .bubble-content {
   white-space: pre-wrap;
 }

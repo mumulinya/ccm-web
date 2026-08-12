@@ -235,7 +235,7 @@ async function executeGlobalAgentAuthorizedTool(kind, input, auditContext = {}, 
             : {};
     const selected = runtime.catalog.tools.find(row => row.canonicalName === toolName);
     const output = selected?.server === "ccm__workspace_readonly"
-        ? JSON.stringify(await (0, workspace_readonly_tools_1.executeWorkspaceReadonlyTool)(selected.name, args, runtime.capability_token))
+        ? JSON.stringify(await (0, workspace_readonly_tools_1.executeWorkspaceReadonlyTool)(selected.name, args, runtime.capability_token, 3))
         : await tool_manager_1.toolManager.executeToolCall(toolName, args, runtime.scope);
     return { success: true, kind, name: toolName, result: parseToolResult(output), authorization_checksum: runtime.checksum };
 }

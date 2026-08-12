@@ -64,6 +64,7 @@ const unified_evidence_registry_1 = require("../../system/unified-evidence-regis
 const failure_record_1 = require("../../system/failure-record");
 const task_transition_ledger_1 = require("../../system/task-transition-ledger");
 const completion_gate_1 = require("../../test-agent/completion-gate");
+const conversation_permission_policy_1 = require("../tools/conversation-permission-policy");
 const group_orchestrator_1 = require("./group-orchestrator");
 const memory_1 = require("./memory");
 const logs_1 = require("./logs");
@@ -311,6 +312,9 @@ function createTaskWithScopedIdentity(task) {
         updated_at: new Date().toISOString(),
     };
     const acceptancePolicy = (0, task_acceptance_policy_1.buildTaskAcceptancePolicySnapshot)(newTask);
+    newTask.conversation_permission_snapshot = (0, conversation_permission_policy_1.permissionSnapshotForTask)(newTask);
+    newTask.conversation_permission_mode = newTask.conversation_permission_snapshot.mode;
+    newTask.permission_policy_revision = newTask.conversation_permission_snapshot.revision;
     if (acceptancePolicy) {
         newTask.acceptance_policy_snapshot = acceptancePolicy;
         newTask.acceptance_mode = acceptancePolicy.mode;
@@ -485,6 +489,9 @@ function buildRequirementEpicTaskRecord(input, id, traceId, now) {
     };
     record.work_items = (0, work_items_1.buildMainAgentWorkItems)(record);
     record.work_item_summary = (0, work_items_1.buildMainAgentWorkItemSummary)(record.work_items);
+    record.conversation_permission_snapshot = (0, conversation_permission_policy_1.permissionSnapshotForTask)(record);
+    record.conversation_permission_mode = record.conversation_permission_snapshot.mode;
+    record.permission_policy_revision = record.conversation_permission_snapshot.revision;
     return record;
 }
 function createRequirementEpicWithChildren(payload) {

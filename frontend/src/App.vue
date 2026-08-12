@@ -35,6 +35,7 @@ import UsabilityWorkbench from './components/common/UsabilityWorkbench.vue'
 import PageLoadingOverlay from './components/common/PageLoadingOverlay.vue'
 import PageLoadError from './components/common/PageLoadError.vue'
 import NotificationCenter from './components/system/NotificationCenter.vue'
+import BackgroundTaskPanel from './components/tasks/BackgroundTaskPanel.vue'
 import WebPetHost from './components/pets/WebPetHost.vue'
 import {
   MENU_CONFIG_EVENT,
@@ -1031,6 +1032,8 @@ const closeTab = (tabId, event) => {
           <Sun v-if="isDark" :size="17" />
           <Moon v-else :size="17" />
         </button>
+        <NotificationCenter @navigate="handleNotificationNavigate" />
+        <BackgroundTaskPanel @navigate="handleNotificationNavigate" />
       </div>
 
       <div class="content-area" :class="{ 'has-bottom-bar': isMobile, 'pets-content-area': currentTab === 'pets' }" @wheel.stop>
@@ -1117,7 +1120,6 @@ const closeTab = (tabId, event) => {
       </button>
     </nav>
 
-    <NotificationCenter @navigate="handleNotificationNavigate" />
     <WebPetHost @navigate="handleNotificationNavigate" />
 
   </div>

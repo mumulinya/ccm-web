@@ -6,6 +6,7 @@ import OnlineDocumentReferences from './OnlineDocumentReferences.vue'
 import EmptyState from './EmptyState.vue'
 import LoadingSkeleton from './LoadingSkeleton.vue'
 import ScopeTargetSelect from './ScopeTargetSelect.vue'
+import WorkspacePageShell from './WorkspacePageShell.vue'
 import { useUsabilityWorkbenchLive } from '../../composables/useUsabilityWorkbenchLive.js'
 import { useWorkbenchPreferences } from '../../composables/useWorkbenchPreferences.js'
 import {
@@ -74,6 +75,11 @@ const quickActions = [
 ]
 const quickActionIds = quickActions.map(item => item.tab)
 const { sections, quickActionOrder, setSection, moveQuickAction, reset: resetLayout } = useWorkbenchPreferences(quickActionIds)
+const workbenchPrimaryAction = { id: 'new-goal', label: '发起新目标', icon: Sparkles }
+const showNewGoal = () => {
+  setSection('command', true)
+  requestAnimationFrame(() => document.getElementById('new-goal-title')?.scrollIntoView({ behavior: 'smooth', block: 'center' }))
+}
 const orderedQuickActions = computed(() => quickActionOrder.value.map(id => quickActions.find(item => item.tab === id)).filter(Boolean))
 const sectionOptions = [
   { key: 'command', label: '发起新目标' },
@@ -265,7 +271,7 @@ const toggleCron = async job => {
 }
 
 const actionLabel = action => ({
-  confirm: '确认执行', edit: '调整计划', cancel: '永久取消', supplement: '补充说明', resume: '恢复', interrupt: '停止当前执行', resume_interrupted: '恢复任务', retry: '重试',
+  confirm: '确认执行', edit: '调整计划', cancel: '停止任务', supplement: '补充说明', resume: '恢复', interrupt: '停止当前执行', resume_interrupted: '恢复任务', retry: '重试',
   switch_executor: '切换执行器', pause: '暂停', start: '开始', view_report: '查看交付', archive: '归档', view: '查看',
 })[action] || action
 
@@ -374,30 +380,29 @@ onUnmounted(() => {
 </script>
 
 <template>
+  <WorkspacePageShell
+    title="我的工作台"
+    description="先处理需要决定的事，再跟进正在运行的任务"
+    :primary-action="workbenchPrimaryAction"
+    @primary-action="showNewGoal"
+  >
+    <template #status>
+      <button v-if="attention.length" class="attention-counter" @click="navigateResource('tasks')"><AlertTriangle :size="14" />{{ attention.length }} 项待处理</button>
+      <span class="sync-state" :class="{ stale }"><i></i>{{ realtimeConnected ? '实时连接' : stale ? `缓存于 ${cacheLabel}` : `更新于 ${updatedLabel}` }}</span>
+    </template>
+    <template #actions>
+      <details class="layout-menu">
+        <summary class="icon-command" title="自定义工作台"><Settings2 :size="16" /><span>布局</span></summary>
+        <div class="layout-popover">
+          <div class="layout-popover-head"><strong>显示区域</strong><button title="恢复默认布局" @click.prevent="resetLayout"><RotateCcw :size="14" /></button></div>
+          <label v-for="item in sectionOptions" :key="item.key"><input type="checkbox" :checked="sections[item.key]" @change="setSection(item.key, $event.target.checked)">{{ item.label }}</label>
+          <div class="layout-order-title">快捷入口顺序</div>
+          <div v-for="(item, index) in orderedQuickActions" :key="item.tab" class="layout-order-row"><span>{{ item.label }}</span><button :disabled="index === 0" :title="`上移${item.label}`" @click.prevent="moveQuickAction(item.tab, -1)"><ArrowUp :size="13" /></button><button :disabled="index === orderedQuickActions.length - 1" :title="`下移${item.label}`" @click.prevent="moveQuickAction(item.tab, 1)"><ArrowDown :size="13" /></button></div>
+        </div>
+      </details>
+      <button class="icon-command" :disabled="refreshing" title="刷新工作台" @click="refreshWorkbench"><RefreshCw :size="16" :class="{ spinning: refreshing }" /></button>
+    </template>
   <div class="workbench">
-    <header class="workbench-header">
-      <div class="header-copy">
-        <span class="eyebrow">我的工作台</span>
-        <h1>今天的工作，一处看清</h1>
-        <p>发起目标、处理阻塞、跟进执行和查看交付，都从这里开始。</p>
-      </div>
-      <div class="header-actions">
-        <button v-if="attention.length" class="attention-counter" @click="navigateResource('tasks')"><AlertTriangle :size="14" />{{ attention.length }} 项待处理</button>
-        <span class="sync-state" :class="{ stale }"><i></i>{{ realtimeConnected ? '实时连接' : stale ? `缓存于 ${cacheLabel}` : `更新于 ${updatedLabel}` }}</span>
-        <details class="layout-menu">
-          <summary class="icon-command" title="自定义工作台"><Settings2 :size="16" />布局</summary>
-          <div class="layout-popover">
-            <div class="layout-popover-head"><strong>显示区域</strong><button title="恢复默认布局" @click.prevent="resetLayout"><RotateCcw :size="14" /></button></div>
-            <label v-for="item in sectionOptions" :key="item.key"><input type="checkbox" :checked="sections[item.key]" @change="setSection(item.key, $event.target.checked)">{{ item.label }}</label>
-            <div class="layout-order-title">快捷入口顺序</div>
-            <div v-for="(item, index) in orderedQuickActions" :key="item.tab" class="layout-order-row"><span>{{ item.label }}</span><button :disabled="index === 0" :title="`上移${item.label}`" @click.prevent="moveQuickAction(item.tab, -1)"><ArrowUp :size="13" /></button><button :disabled="index === orderedQuickActions.length - 1" :title="`下移${item.label}`" @click.prevent="moveQuickAction(item.tab, 1)"><ArrowDown :size="13" /></button></div>
-          </div>
-        </details>
-        <button class="icon-command" :disabled="refreshing" title="刷新工作台" @click="refreshWorkbench">
-          <RefreshCw :size="16" :class="{ spinning: refreshing }" />{{ refreshing ? '刷新中' : '刷新' }}
-        </button>
-      </div>
-    </header>
 
     <div v-if="stale || lastError" class="stale-banner" role="status">
       <WifiOff :size="16" /><span><strong>正在显示最近一次可用数据</strong><small>{{ lastError || '实时连接正在恢复' }}，恢复后会自动更新。</small></span><button @click="refreshWorkbench">立即重试</button>
@@ -619,10 +624,11 @@ onUnmounted(() => {
       </div>
     </template>
   </div>
+  </WorkspacePageShell>
 </template>
 
 <style scoped>
-.workbench{box-sizing:border-box;width:100%;min-height:100%;margin:0;padding:26px clamp(20px,2.1vw,40px) 64px;color:var(--text-primary,#172033)}
+.workbench{box-sizing:border-box;width:100%;min-height:100%;margin:0;padding:18px clamp(20px,2.1vw,40px) 64px;color:var(--text-primary,#172033)}
 .workbench-header,.header-actions,.pulse-item span,.command-heading,.command-heading>div,.intake-footer,.intake-tools,.quick-actions button,.section-title,.confirm-head,.confirm-actions,.task-meta,.task-bottom,.text-btn,.rail-heading,.resource-list button,.cron-summary,.cron-list button,.inline-empty{display:flex;align-items:center}
 .workbench-header{justify-content:space-between;gap:24px;padding:4px 0 20px}.header-copy{min-width:0}.header-copy h1{margin:5px 0 7px;font-size:30px;line-height:1.2;letter-spacing:0}.header-copy p,.section-title p{margin:0;color:var(--text-secondary,#667085)}
 .eyebrow{display:block;color:var(--accent-blue,#2563eb);font-size:11px;font-weight:800;letter-spacing:0}.eyebrow.warn{color:#b54708}.success-text{color:#067647}.header-actions{flex:0 0 auto;gap:10px}.sync-state{display:inline-flex;align-items:center;gap:7px;color:#7a8496;font-size:12px}.sync-state i{width:7px;height:7px;border-radius:50%;background:#12b76a}.icon-command{display:inline-flex;align-items:center;gap:7px;min-height:36px;padding:7px 11px;border:1px solid var(--border-color,#dfe4ec);border-radius:7px;background:var(--surface,#fff);color:inherit;font-weight:700}.spinning{animation:spin .8s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}

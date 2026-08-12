@@ -1,6 +1,8 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
 import MainAgentDecisionCard from '../agents/MainAgentDecisionCard.vue'
+import TaskRecoveryRetryNotice from './TaskRecoveryRetryNotice.vue'
+import { useTaskRecoveryPresentation } from '../../composables/useTaskRecoveryPresentation.js'
 import { getDeliveryReport, getStreamlinedToolSummary, getStreamlinedUserText, getTechnicalDetailSections, normalizeTestAgentExecutionPlanSummary, sanitizeUserFacingAgentText, sanitizeUserFacingPlanStructure, sanitizeUserFacingPlanText } from '../../utils/agentDisplay.js'
 import {
   PRESENTATION_DELIVERY,
@@ -929,6 +931,10 @@ const reinjectionGateSummary = computed(() => displayValue(agentCoordination.val
 const postCompactDispatchSummary = computed(() => agentCoordination.value?.post_compact_dispatch_marker_summary || agentCoordination.value?.postCompactDispatchMarkerSummary || runtimeKernel.value?.post_compact_dispatch_marker || runtimeKernel.value?.postCompactDispatchMarker || null)
 const runtimeTooling = computed(() => runtimeKernel.value?.runtime_tooling || runtimeKernel.value?.runtimeTooling || null)
 const recoverySummary = computed(() => displayValue(props.card.recovery_summary || props.card.recoverySummary || props.card.technical?.recovery_summary || props.card.technical?.recoverySummary || null, '恢复接续已整理。'))
+const { recoveryPresentation } = useTaskRecoveryPresentation(() => props.card)
+const recoveryActions = computed(() => asList(props.card.actions).filter(action => ['resume_interrupted', 'cancel'].includes(action?.kind)))
+const visibleCardActions = computed(() => asList(card.value.actions)
+  .filter(action => !recoveryPresentation.value.visible || !['resume_interrupted', 'cancel'].includes(action?.kind)))
 const continuationStatus = computed(() => displayValue(props.card.continuation_status || props.card.continuationStatus || null, '接续状态已整理。'))
 const continuationNeedsReplan = computed(() => continuationStatus.value?.replan_required === true || continuationStatus.value?.replanRequired === true)
 const continuationSteps = computed(() => {

@@ -152,8 +152,12 @@ export function assertInternalMcpRole(context: InternalMcpTaskContext, roles: In
 function compactAuditArgs(value: any) {
   const result: Record<string, any> = {};
   for (const [key, item] of Object.entries(value && typeof value === "object" ? value : {})) {
-    if (/(secret|token|password|authorization|credential|content|diff|patch)/i.test(key)) {
-      result[key] = "[已隐藏]";
+    if (/(secret|token|password|authorization|credential|content|diff|patch|command|script|shell|stdout|stderr|old[_-]?text|new[_-]?text|replacement|file[_-]?data)/i.test(key)) {
+      const text = typeof item === "string" ? item : JSON.stringify(item ?? "");
+      result[key] = {
+        hidden: true,
+        checksum: crypto.createHash("sha256").update(text).digest("hex").slice(0, 16),
+      };
     } else if (Array.isArray(item)) {
       result[key] = { count: item.length };
     } else if (item && typeof item === "object") {

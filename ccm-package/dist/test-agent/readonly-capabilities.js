@@ -205,7 +205,7 @@ function buildTestAgentReadonlyCapabilityManifest(options = {}) {
     const mcp = [];
     const rejectedMcp = [];
     const seenMcp = new Set();
-    const definitions = [...workspace_readonly_tools_1.WORKSPACE_READONLY_TOOL_DEFINITIONS_V2, ...(Array.isArray(options.mcpTools) ? options.mcpTools : [])];
+    const definitions = [...workspace_readonly_tools_1.WORKSPACE_READONLY_TOOL_DEFINITIONS_V3, ...(Array.isArray(options.mcpTools) ? options.mcpTools : [])];
     for (const definition of definitions) {
         const name = String(definition?.canonicalName || definition?.name || "").trim();
         if (!name || seenMcp.has(name))

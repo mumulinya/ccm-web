@@ -102,6 +102,8 @@ const crypto = __importStar(require("crypto"));
 const utils_1 = require("../../core/utils");
 const db_1 = require("../../core/db");
 const group_orchestrator_1 = require("./group-orchestrator");
+const runtime_edit_capability_1 = require("../../agents/runtime-edit-capability");
+const collaboration_agent_probes_1 = require("./collaboration-agent-probes");
 const memory_1 = require("./memory");
 const agent_internal_mcp_1 = require("../../integrations/agent-internal-mcp");
 const global_mission_1 = require("./global-mission");
@@ -217,6 +219,10 @@ function prepareAgentRuntimeTools(groupId, projectName, workDir, agentType, allo
             };
         }).filter((project) => project.workDir)
         : [];
+    const runtimeEditCapability = (0, runtime_edit_capability_1.resolveRuntimeEditCapability)({
+        runtimeDeclared: (0, runtime_1.getAgentRuntime)(agentType).capabilities.nativeWorkspaceEditing,
+        probe: (0, collaboration_agent_probes_1.readAgentProbeStatus)({ groupId, project: projectName, agentType }),
+    });
     const taskBoundInternalMcpServers = !options.disableTaskBoundInternalMcp && sourceTask?.id && workDir
         ? (0, agent_internal_mcp_1.buildTaskBoundInternalMcpServers)({
             taskId: String(sourceTask.id),
@@ -244,6 +250,7 @@ function prepareAgentRuntimeTools(groupId, projectName, workDir, agentType, allo
             originMessageId: String(options.originMessageId || ""),
             requestText: options.requestText || "",
             memoryReadBudgetTokens: Number(options.memoryReadBudgetTokens || 0),
+            nativeWorkspaceEditing: runtimeEditCapability.nativeWorkspaceEditing,
         })
         : {};
     const audit = (0, runtime_tool_sync_1.syncRuntimeTools)(workDir, agentType, allowedTools, {
@@ -251,6 +258,7 @@ function prepareAgentRuntimeTools(groupId, projectName, workDir, agentType, allo
         internalMcpServers: { ...taskBoundInternalMcpServers, ...(options.internalMcpServers || {}) },
     });
     audit.authorization_readiness = authorizationReadiness;
+    audit.workspace_edit_capability = runtimeEditCapability;
     mergeRuntimeToolManagerAudit(audit, options.toolAudit);
     audit.dispatch_gate = (0, runtime_tool_sync_1.buildRuntimeToolDispatchGate)(audit);
     const dispatchBlocked = audit.dispatch_gate.dispatchReady === false;
@@ -1110,6 +1118,19 @@ function getDashboardWorkerRows(task) {
 }
 function getTaskDashboardActions(task, phase) {
     const actions = [];
+    const recovery = task?.recovery || task?.interruption_receipt?.recovery || {};
+    const interruptionReason = String(task?.interruption_receipt?.reason_code || "");
+    const transientModelRecovery = task?.acceptance_state === "recovery_required"
+        && ["temporary_network", "provider_overload", "provider_unavailable", "model_stream_interrupted"].includes(interruptionReason)
+        && task?.interruption_receipt?.recoverable === true;
+    if (transientModelRecovery) {
+        const safeAutoRecovery = recovery.mode === "safe_auto"
+            && ["waiting_provider", "validating", "queued"].includes(String(recovery.state || ""));
+        return [
+            { id: "resume_interrupted", label: safeAutoRecovery ? "立即重试" : "恢复任务", kind: "resume_interrupted", tone: "primary" },
+            { id: "cancel", label: "停止任务", kind: "cancel", tone: "danger" },
+        ];
+    }
     if ((0, collaboration_runtime_task_queue_1.isTaskPaused)(task)) {
         actions.push({ id: "resume", label: "继续执行", kind: "resume", tone: "primary" });
     }
@@ -1140,7 +1161,7 @@ function getTaskDashboardActions(task, phase) {
         actions.unshift({ id: "probe", label: "复检执行通道", kind: "probe", tone: "warning" });
     }
     if (!["done", "cancelled"].includes(String(task?.status || ""))) {
-        actions.push({ id: "cancel", label: "取消任务", kind: "cancel", tone: "danger" });
+        actions.push({ id: "cancel", label: "停止任务", kind: "cancel", tone: "danger" });
     }
     return actions;
 }

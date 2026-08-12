@@ -61,6 +61,7 @@ const assistant_progress_1 = require("../../system/assistant-progress");
 const slash_command_session_state_1 = require("../../system/slash-command-session-state");
 const user_visible_agent_projections_1 = require("../../system/user-visible-agent-projections");
 const session_compaction_core_1 = require("../../system/session-compaction-core");
+const transient_model_content_1 = require("../../system/transient-model-content");
 const role_skills_1 = require("../../skills/role-skills");
 const main_agent_tool_runtime_1 = require("../../tools/main-agent-tool-runtime");
 const cc_tool_result_limits_1 = require("../../tools/cc-tool-result-limits");
@@ -194,6 +195,7 @@ async function executeGroupMainAgentToolRequests(input) {
                     resultTokenLimit: cc_tool_result_limits_1.CC_ALIGNED_TOOL_RESULT_MAX_TOKENS,
                     toolBatchSize: 1,
                     readOnlyParallelism,
+                    abortSignal: input.signal,
                 });
                 row = rows[0];
             }
@@ -790,13 +792,13 @@ ${input.message}${toolResultsPart}
 ${JSON.stringify(input.workflowDecision || null)}
 
 请输出 JSON。`;
-    return [
+    return (0, transient_model_content_1.attachTransientModelBlocks)([
         { role: "system", content: system },
         ...(mainAgentTools.policyPrompt
             ? [{ role: "system", contextBlockType: "mcp", content: mainAgentTools.policyPrompt }]
             : []),
         { role: "user", content: user },
-    ];
+    ], (0, transient_model_content_1.collectTransientModelBlocks)(toolResults));
 }
 function buildLlmCoordinatorContextComponents(input) {
     const group = (0, group_orchestrator_routing_1.normalizeGroupOrchestrator)(input.group);
@@ -1382,6 +1384,7 @@ async function runLlmGroupOrchestrator(input) {
                 toolCallIds: preparedToolCallIds,
                 toolBatchSize: loopBudget.toolBatchSize,
                 readOnlyParallelism: loopBudget.readOnlyParallelism,
+                signal: input.signal,
             });
             toolWallDurationMs += Math.max(0, Date.now() - toolBatchStartedAt);
             toolCallCount += roundResults.length;

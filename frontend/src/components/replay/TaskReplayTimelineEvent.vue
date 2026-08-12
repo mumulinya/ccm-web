@@ -1,12 +1,12 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
-import { replayActorLabel, replayEventSummary, replayEventTitle, replayProjectLabel, replayTechnicalLabel } from '../../utils/taskReplayPresentation.js'
+import { replayActorLabel, replayEventSummary, replayEventTitle, replayProjectLabel, replayStageLabel, replayTechnicalLabel } from '../../utils/taskReplayPresentation.js'
 
 const props = defineProps({ item: { type: Object, required: true }, focused: Boolean, showRawGroups: Boolean })
 const emit = defineEmits(['open-evidence', 'return-execution'])
 const open = ref(false)
 watch(() => props.focused, value => { if (value) open.value = true }, { immediate: true })
-const stageLabel = stage => ({ intake: '需求', planning: '计划', dispatch: '派发', execution: '执行', change: '改动', test: '测试', rework: '返工', review: '验收', completion: '交付', system: '系统' }[stage] || stage || '记录')
+const stageLabel = replayStageLabel
 const statusLabel = status => ({ info: '记录', running: '进行中', passed: '通过', warning: '注意', failed: '失败', blocked: '受阻', cancelled: '已取消' }[status] || status || '记录')
 const timeLabel = value => { const date = new Date(value); return Number.isNaN(date.getTime()) ? '时间未知' : date.toLocaleString('zh-CN', { hour12: false }) }
 const summary = computed(() => replayEventSummary(props.item))

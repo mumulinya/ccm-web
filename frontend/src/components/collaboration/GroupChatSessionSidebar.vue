@@ -2,7 +2,6 @@
 import { computed, ref, watch } from 'vue'
 import {
   Archive,
-  ChevronRight,
   Link2,
   ListTodo,
   MessageSquare,
@@ -14,6 +13,7 @@ import {
   Trash2,
 } from '@lucide/vue'
 import AutomationSessionBindingDialog from '../common/AutomationSessionBindingDialog.vue'
+import ConversationSessionGroup from '../common/ConversationSessionGroup.vue'
 
 const props = defineProps({
   groupId: { type: String, default: '' },
@@ -39,13 +39,13 @@ const conversationSessions = computed(() => props.sessions.filter(session => !se
 const automationSessions = computed(() => props.sessions.filter(session => !session.archived && sessionKind(session) === 'automation'))
 const archivedSessions = computed(() => props.sessions.filter(session => session.archived))
 
-const groupStateKey = () => `ccm:group-session-sections:v2:${props.groupId || 'default'}`
+const groupStateKey = () => `ccm:group-session-sections:v3:${props.groupId || 'default'}`
 const readExpandedGroups = () => {
   try {
     const saved = JSON.parse(localStorage.getItem(groupStateKey()) || '{}')
-    return { conversation: saved.conversation === true, automation: saved.automation === true }
+    return { conversation: saved.conversation !== false, automation: saved.automation === true }
   } catch {
-    return { conversation: false, automation: false }
+    return { conversation: true, automation: false }
   }
 }
 const expandedGroups = ref(readExpandedGroups())
@@ -104,21 +104,14 @@ const sessionTitle = session => session?.title || session?.name || '新会话'
       </button>
     </header>
 
-    <div class="session-sidebar-group" :title="groupName">{{ groupName }}</div>
-
     <button type="button" class="new-session-button" @click="emit('create')">
       <Plus :size="16" />
       <span>新建会话</span>
     </button>
 
     <div class="group-session-list">
-      <div v-if="!conversationSessions.length && !automationSessions.length" class="session-list-empty">暂无进行中的会话</div>
-
-      <section class="live-session-section">
-        <button class="live-session-label" type="button" :aria-expanded="expandedGroups.conversation" @click="toggleGroup('conversation')">
-          <span><ChevronRight :class="{ expanded: expandedGroups.conversation }" :size="13" /><MessageSquare :size="13" />普通会话</span><strong>{{ conversationSessions.length }}</strong>
-        </button>
-        <div v-show="expandedGroups.conversation" class="live-session-content">
+      <ConversationSessionGroup label="普通会话" :count="conversationSessions.length" :expanded="expandedGroups.conversation" empty-label="暂无普通会话" @toggle="toggleGroup('conversation')">
+        <template #icon><MessageSquare :size="12" /></template>
           <div
             v-for="session in conversationSessions"
             :key="session.id"
@@ -140,14 +133,10 @@ const sessionTitle = session => session?.title || session?.name || '新会话'
               </div>
             </details>
           </div>
-        </div>
-      </section>
+      </ConversationSessionGroup>
 
-      <section class="live-session-section automation-section">
-        <button class="live-session-label" type="button" :aria-expanded="expandedGroups.automation" @click="toggleGroup('automation')">
-          <span><ChevronRight :class="{ expanded: expandedGroups.automation }" :size="13" /><ListTodo :size="13" />自动化任务会话</span><strong>{{ automationSessions.length }}</strong>
-        </button>
-        <div v-show="expandedGroups.automation" class="live-session-content">
+      <ConversationSessionGroup label="自动化任务会话" :count="automationSessions.length" :expanded="expandedGroups.automation" empty-label="暂无自动化任务会话" create-label="新建自动化任务会话" @toggle="toggleGroup('automation')" @create="openBindingDialog(null)">
+        <template #icon><ListTodo :size="12" /></template>
           <div
             v-for="session in automationSessions"
             :key="session.id"
@@ -170,9 +159,7 @@ const sessionTitle = session => session?.title || session?.name || '新会话'
               </div>
             </details>
           </div>
-          <button class="empty-automation" type="button" @click="openBindingDialog(null)"><Plus :size="14" />新建自动化任务会话</button>
-        </div>
-      </section>
+      </ConversationSessionGroup>
 
       <section v-if="archivedSessions.length" class="archived-session-section">
         <div class="archived-session-label">已归档 {{ archivedSessions.length }}</div>
@@ -225,8 +212,8 @@ const sessionTitle = session => session?.title || session?.name || '新会话'
   position: relative;
   z-index: 12;
   display: flex;
-  width: 232px;
-  min-width: 232px;
+  width: 252px;
+  min-width: 252px;
   min-height: 0;
   flex-direction: column;
   overflow: visible;
@@ -238,7 +225,7 @@ const sessionTitle = session => session?.title || session?.name || '新会话'
 .group-session-sidebar.collapsed {
   width: 0;
   min-width: 0;
-  transform: translateX(-232px);
+  transform: translateX(-252px);
   overflow: hidden;
   border-right: 0;
 }
@@ -261,8 +248,8 @@ const sessionTitle = session => session?.title || session?.name || '新会话'
   color: var(--text-primary);
 }
 
-.session-sidebar-title strong { font-size: 13px; }
-.session-sidebar-title span { color: var(--text-muted); font-size: 10px; font-weight: 700; }
+.session-sidebar-title strong { font-size: 12px; }
+.session-sidebar-title span { min-width:18px; padding:1px 5px; border-radius:999px; background:var(--control-bg); color:var(--text-muted); font-size:9px; font-weight:700; text-align:center; }
 
 .session-sidebar-group {
   overflow: hidden;
@@ -298,13 +285,13 @@ const sessionTitle = session => session?.title || session?.name || '新会话'
   align-items: center;
   justify-content: center;
   gap: 7px;
-  margin: 7px 10px 5px;
+  margin: 10px 10px 5px;
   padding: 0 10px;
-  border: 1px solid color-mix(in srgb, var(--accent-blue) 30%, var(--border-color));
-  border-radius: 7px;
-  background: var(--accent-soft);
+  border: 1px solid color-mix(in srgb, var(--accent-blue) 25%, var(--border-color));
+  border-radius: 8px;
+  background: color-mix(in srgb,var(--accent-blue) 7%,var(--surface));
   color: var(--accent-blue);
-  font-size: 12px;
+  font-size: 11.5px;
   font-weight: 750;
   cursor: pointer;
 }

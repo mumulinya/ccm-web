@@ -24,18 +24,31 @@ export const isUnsafeExecutionProgress = event => {
 }
 
 const legacyEvent = (event, index, prefix) => {
-  const kind = String(event?.kind || event?.type || 'status').toLowerCase()
+  const kind = String(event?.eventType || event?.kind || event?.type || 'status').toLowerCase()
   const failed = /error|fail/.test(kind)
   const done = /done|complete|result/.test(kind)
+  const eventType = kind === 'started' || kind === 'turn_started'
+    ? 'turn_started'
+    : kind === 'decision' || kind === 'thinking' || kind === 'thinking_status'
+      ? 'thinking_status'
+      : ['completed', 'done', 'result', 'failed', 'cancelled', 'canceled', 'blocked', 'paused', 'interrupted'].includes(kind)
+        ? 'result'
+        : ['tool_started', 'tool_progress', 'tool_completed', 'tool_failed'].includes(kind)
+          ? kind
+          : kind === 'assistant_progress'
+            ? 'assistant_progress'
+            : kind === 'tool'
+              ? 'tool_progress'
+              : 'agent_progress'
   return {
     schema: 'ccm-user-visible-agent-event-v1',
     eventId: String(event?.id || `${prefix}:${index}:${event?.time || event?.at || ''}`),
     sequence: index + 1,
-    eventType: failed ? 'agent_failed' : done ? 'agent_completed' : kind === 'tool' ? 'tool_progress' : 'agent_progress',
+    eventType,
     display: {
-      title: kind === 'tool' ? '工具' : '执行进度',
+      title: eventType.startsWith('tool_') ? '工具' : eventType === 'thinking_status' ? '正在思考' : eventType === 'turn_started' ? '开始处理' : '执行进度',
       summary: safeLegacyExecutionSummary(event?.text || event?.message || event?.title),
-      status: failed ? 'failed' : done ? 'success' : 'running',
+      status: failed ? 'failed' : done ? 'success' : ['cancelled', 'canceled', 'paused', 'interrupted'].includes(kind) ? 'waiting' : 'running',
     },
     visibility: 'default',
     contentStored: false,
@@ -329,8 +342,35 @@ export function shouldRenderExecutionTranscript(events, messages, index, expande
   return rows.length > 0 && (expanded || rows.some(isMeaningfulExecutionEvent))
 }
 
+export function executionTurnStateForMessage(events, messages, index) {
+  const message = messages?.[index] || {}
+  const rows = executionEventsForMessage(events, messages, index)
+  const generation = rows.reduce((max, event) => Math.max(max, Number(event?.generation || 0)), 0)
+  const current = rows.filter(event => Number(event?.generation || 0) === generation || !generation)
+  const result = [...current].reverse().find(event => event?.eventType === 'result')
+  if (result) {
+    const status = String(result?.display?.status || result?.detail?.result?.status || '').toLowerCase()
+    if (/cancel/.test(status)) return { state: 'cancelled', rows, terminal: true, showThinking: false }
+    if (/interrupt|pause|waiting/.test(status)) return { state: 'interrupted', rows, terminal: true, showThinking: false }
+    if (/fail|error|blocked/.test(status)) return { state: 'failed', rows, terminal: true, showThinking: false }
+    return { state: 'completed', rows, terminal: true, showThinking: false }
+  }
+  const waiting = [...current].reverse().find(event => {
+    const status = String(event?.display?.status || '').toLowerCase()
+    const phase = String(event?.detail?.executionStage?.kind || event?.detail?.agentDisplay?.phase || '').toLowerCase()
+    return /waiting|blocked|permission/.test(`${status} ${phase} ${event?.eventType || ''}`)
+  })
+  if (waiting) return { state: 'waiting_user', rows, terminal: false, showThinking: false }
+  const verifying = current.some(event => /verification|acceptance|summary/.test(String(event?.detail?.executionStage?.kind || '').toLowerCase()))
+  if (verifying) return { state: 'verifying', rows, terminal: false, showThinking: false }
+  if (current.some(isMeaningfulExecutionEvent)) return { state: 'executing', rows, terminal: false, showThinking: false }
+  if (message?.streaming && String(message?.content || '').trim()) return { state: 'streaming_final', rows, terminal: false, showThinking: false }
+  if (message?.streaming || message?.role === 'thinking') return { state: 'thinking', rows, terminal: false, showThinking: true }
+  return { state: 'idle', rows, terminal: false, showThinking: false }
+}
+
 export function shouldShowCompactProcessingState(events, messages, index) {
-  return !shouldRenderExecutionTranscript(events, messages, index)
+  return executionTurnStateForMessage(events, messages, index).showThinking
 }
 
 export function terminalExecutionEventForMessage(events, messages, index) {

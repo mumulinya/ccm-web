@@ -25,6 +25,7 @@ export type TaskBoundInternalMcpInput = {
     originMessageId?: string;
     requestText?: string;
     memoryReadBudgetTokens?: number;
+    nativeWorkspaceEditing?: boolean;
 };
 export declare function buildTaskBoundInternalMcpServers(input: TaskBoundInternalMcpInput): Record<string, any>;
 export type ProjectSessionBoundMemoryMcpInput = {

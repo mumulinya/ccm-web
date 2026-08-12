@@ -24,6 +24,7 @@ export declare function executeGroupMainAgentToolRequests(input: {
     executeToolCall?: (name: string, args: any, scope?: ToolScope) => Promise<string>;
     toolBatchSize?: number;
     readOnlyParallelism?: number;
+    signal?: AbortSignal;
 }): Promise<any[]>;
 export declare function attachLlmTokenUsage(error: any, usage: LlmTokenUsage | null): any;
 export declare function runLlmCoordinatorSummary(group: any, userMessage: string, outputs: string[], options?: any): Promise<{
@@ -202,6 +203,7 @@ export declare function runLlmGroupOrchestrator(input: {
     turn_id?: string;
     anchorMessageId?: string;
     anchor_message_id?: string;
+    signal?: AbortSignal;
 }): Promise<{
     usage: LlmTokenUsage;
     mainAgentTurnDecision: import("../../agents/main-agent-turn").MainAgentTurnDecisionV1;

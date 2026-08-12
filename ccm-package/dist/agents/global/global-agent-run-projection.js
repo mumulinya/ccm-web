@@ -21,6 +21,7 @@ const reasoning_loop_1 = require("../reasoning-loop");
 const workflow_decision_1 = require("../workflow-decision");
 const conversational_reply_style_1 = require("../conversational-reply-style");
 const workspace_readonly_tools_1 = require("../../tools/workspace-readonly-tools");
+const transient_model_content_1 = require("../../system/transient-model-content");
 function compactObservation(value) {
     let text = "";
     try {
@@ -31,7 +32,7 @@ function compactObservation(value) {
     }
     if (text.length <= global_agent_run_store_1.MAX_OBSERVATION_CHARS)
         return value;
-    return { truncated: true, preview: text.slice(0, global_agent_run_store_1.MAX_OBSERVATION_CHARS), original_chars: text.length };
+    return (0, transient_model_content_1.attachTransientModelBlocks)({ truncated: true, preview: text.slice(0, global_agent_run_store_1.MAX_OBSERVATION_CHARS), original_chars: text.length }, (0, transient_model_content_1.transientModelBlocks)(value));
 }
 exports.GLOBAL_MODEL_ROUTE_KEYS = new Set([
     "success", "accepted", "completed", "replayed", "operation", "id", "mission_id", "global_mission_id",
@@ -106,6 +107,9 @@ function projectGlobalAgentObservationForModel(toolName, observation) {
     const name = String(toolName || "");
     if (!observation || typeof observation !== "object")
         return observation === undefined ? undefined : { available: true };
+    if (workspace_readonly_tools_1.WORKSPACE_READONLY_TOOL_DEFINITIONS_V3.some(tool => tool.name === name.replace(/^mcp__ccm__ccm_workspace_readonly__/, ""))) {
+        return compactObservation(redactGroupSessionFields(observation));
+    }
     if (name === "list_projects")
         return { success: observation.success !== false, projects: projectProjectRows(observation.projects) };
     if (name === "inspect_project")
@@ -236,7 +240,7 @@ function normalizeDecision(value, fallbackWorkflowDecision = null) {
 }
 function buildToolPrompt(loadedToolNames = []) {
     const loaded = new Set((loadedToolNames || []).map(value => String(value || "")));
-    const deferredWorkspaceNames = new Set(workspace_readonly_tools_1.WORKSPACE_READONLY_TOOL_DEFINITIONS_V2
+    const deferredWorkspaceNames = new Set(workspace_readonly_tools_1.WORKSPACE_READONLY_TOOL_DEFINITIONS_V3
         .filter(tool => tool.loadPolicy === "search" && !loaded.has(tool.name) && !loaded.has(tool.canonicalName))
         .map(tool => tool.name));
     return (0, runtime_1.buildGlobalAgentToolDefinitions)(global_agent_run_store_1.GLOBAL_AGENT_TOOL_SPECS)
@@ -257,6 +261,11 @@ function buildBoundedGlobalModelContext(context) {
     };
     const rows = (value, limit) => Array.isArray(value) ? value.slice(0, limit) : [];
     const toolCatalog = context?.tools || {};
+    const workspace = rows(toolCatalog.workspace, 32).map((tool) => ({
+        name: String(tool?.name || ""),
+        description: text(tool?.description || "", 260),
+        schema_available_on_demand: true,
+    })).filter((tool) => tool.name);
     const mcp = rows(toolCatalog.mcp, 32).map((tool) => ({
         name: String(tool?.name || tool?.canonicalName || ""),
         server: String(tool?.server || ""),
@@ -299,6 +308,8 @@ function buildBoundedGlobalModelContext(context) {
             policy: toolCatalog.policy || "global_scope_authorized_only",
             available_counts: toolCatalog.available_counts || toolCatalog.configured_counts || {},
             loaded_tool_names: rows(toolCatalog.loaded_tool_names, 80).map(String),
+            workspace,
+            deferred_workspace: rows(toolCatalog.deferred_workspace, 48).map((tool) => ({ name: String(tool?.name || tool || "") })).filter((tool) => tool.name),
             mcp,
             deferred_mcp: rows(toolCatalog.deferred_mcp, 48).map((tool) => ({ name: String(tool?.name || tool || "") })).filter((tool) => tool.name),
             skills,
@@ -440,12 +451,12 @@ ${(0, role_skills_1.buildModelSelectableSkillCatalog)()}
         context: modelContext,
         prior_steps: priorSteps,
     });
-    return [
+    return (0, transient_model_content_1.attachTransientModelBlocks)([
         { role: "system", content: system },
         ...summaryMessages,
         ...continuationWithoutCurrent,
         ...runHistoryMessages,
         { role: "user", content: `【用户当前目标】\n${run.reasoning_loop.effective_goal || run.user_message}\n\n【当前运行状态】\n${state}\n\n请决定下一步。` },
-    ];
+    ], (0, transient_model_content_1.collectTransientModelBlocks)(run.steps.map(step => step.observation)));
 }
 //# sourceMappingURL=global-agent-run-projection.js.map

@@ -43,7 +43,9 @@ const listingDisplay = toolDisplay.buildToolDisplayDetail({ toolName: "mcp__ccm_
 assert.equal(listingDisplay.tool.label, "List directory");
 assert.equal(listingDisplay.tool.family, "read");
 assert.equal(listingDisplay.tool.userLabel, "查找目录");
-assert.equal(listingDisplay.tool.serverLabel, "ccm_workspace_readonly");
+assert.equal(listingDisplay.tool.name, "list_directory");
+assert.equal(listingDisplay.tool.category, "builtin");
+assert.equal(listingDisplay.tool.serverLabel, undefined);
 assert.equal(listingDisplay.result.rows.some(item => item.name === "src"), true);
 const glob = await workspace.executeWorkspaceReadonlyTool("glob_files", { pattern: "**/*.ts", limit: 20 }, token);
 assert.deepEqual(glob.items, ["root.ts", "src/service.ts"]);
@@ -102,14 +104,91 @@ const context = mainRuntime.buildMainAgentToolRuntimeContext({
   scopeIdentity: { scope: "project", scopeId: "alpha", exactSessionId: "pchat-alpha", allowedProjects: ["alpha"] },
 });
 assert.equal(context.schema, "ccm-main-agent-tool-runtime-context-v2");
-assert.deepEqual(context.catalog.loadedMcp.filter(tool => tool.server === "ccm__workspace_readonly").map(tool => tool.name).sort(), ["glob_files", "grep_text", "list_directory", "read_file"]);
-assert.equal(context.catalog.discoverableMcp.length, workspace.WORKSPACE_READONLY_TOOL_DEFINITIONS_V2.length - 4);
+assert.deepEqual(context.catalog.loadedMcp.filter(tool => tool.server === "ccm__workspace_readonly").map(tool => tool.name).sort(), ["glob_files", "grep_text", "list_directory", "read_file", "read_files"]);
+assert.match(context.policyPrompt, /可直接使用的工作区工具/);
+assert.match(context.policyPrompt, /- read_file:/);
+assert.equal(context.policyPrompt.includes("mcp__ccm__ccm_workspace_readonly__read_file"), false);
+assert.equal(context.catalog.discoverableMcp.length, workspace.WORKSPACE_READONLY_TOOL_DEFINITIONS_V3.length - 5);
+const emptyGroupContext = mainRuntime.buildMainAgentToolRuntimeContext({
+  configuredTools: {},
+  label: "群聊主 Agent",
+  mcpPolicy: "read_only",
+  scopeIdentity: { scope: "group", scopeId: "empty-group", exactSessionId: "gcs-empty", allowedProjects: [] },
+});
+assert.equal(emptyGroupContext.capabilityToken, "");
+assert.equal(emptyGroupContext.catalog.loadedMcp.some(tool => tool.server === "ccm__workspace_readonly"), false);
+assert.equal(emptyGroupContext.catalog.discoverableMcp.some(tool => tool.server === "ccm__workspace_readonly"), false);
+
+const contextualRead = await mainRuntime.executeMainAgentToolRequests({
+  requests: [{ name: "read_file", arguments: { path: "src/service.ts", offset: 1, limit: 1 }, reason: "inspect context ledger" }],
+  toolContext: context,
+});
+assert.equal(contextualRead[0].ok, true);
+const contextualReadPayload = JSON.parse(contextualRead[0].output);
+assert.equal(contextualReadPayload.modelPayload.status, "partial");
+assert.equal(contextualReadPayload.modelPayload.continuation.nextOffset, 2);
+assert.equal(typeof contextualReadPayload.modelPayload.continuation.checksum, "string");
+const unchangedRead = await mainRuntime.executeMainAgentToolRequests({
+  requests: [{ name: "read_file", arguments: { path: "src/service.ts", offset: 1, limit: 1 }, reason: "deduplicate context read" }],
+  toolContext: context,
+});
+assert.equal(JSON.parse(unchangedRead[0].output).modelPayload.status, "unchanged");
+const continuedRead = await mainRuntime.executeMainAgentToolRequests({
+  requests: [{ name: "read_file", arguments: { path: "src/service.ts", offset: contextualReadPayload.modelPayload.continuation.nextOffset, limit: 20, expected_checksum: contextualReadPayload.modelPayload.continuation.checksum }, reason: "continue safely" }],
+  toolContext: context,
+});
+assert.equal(JSON.parse(continuedRead[0].output).modelPayload.lines[0].line, 2);
+const suggestedRead = await mainRuntime.executeMainAgentToolRequests({
+  requests: [{ name: "read_file", arguments: { path: "src/servce.ts", offset: 1, limit: 1 }, reason: "suggest safe path" }],
+  toolContext: context,
+});
+assert.equal(suggestedRead[0].ok, false);
+const suggestedReadPayload = JSON.parse(suggestedRead[0].output);
+assert.equal(suggestedReadPayload.code, "PATH_NOT_FOUND");
+assert.equal(suggestedReadPayload.suggestions[0].path, "src/service.ts");
+const reliableSearch = await mainRuntime.executeMainAgentToolRequests({
+  requests: [{ name: "grep_text", arguments: { pattern: "alpha", path: "src", output_mode: "files_with_matches" }, reason: "inspect reliable search" }],
+  toolContext: context,
+});
+assert.equal(reliableSearch[0].ok, true);
+assert.equal(JSON.parse(reliableSearch[0].output).modelPayload.searchExecution.engine, "bundled_rg");
+const cancelledSearchController = new AbortController();
+cancelledSearchController.abort();
+const cancelledSearch = await mainRuntime.executeMainAgentToolRequests({
+  requests: [{ name: "grep_text", arguments: { pattern: "alpha", path: ".", output_mode: "content" }, reason: "cancel search safely" }],
+  toolContext: context,
+  abortSignal: cancelledSearchController.signal,
+});
+const cancelledSearchPayload = JSON.parse(cancelledSearch[0].output).modelPayload;
+assert.equal(cancelledSearchPayload.status, "partial", JSON.stringify(cancelledSearchPayload));
+assert.equal(cancelledSearchPayload.searchExecution.cancelled, true);
+const firstBatchRead = await mainRuntime.executeMainAgentToolRequests({
+  requests: [{ name: "read_files", arguments: { paths: ["src/service.ts", "root.ts"] }, reason: "batch read" }],
+  toolContext: context,
+});
+assert.equal(JSON.parse(firstBatchRead[0].output).modelPayload.item_count, 2);
+const unchangedBatchRead = await mainRuntime.executeMainAgentToolRequests({
+  requests: [{ name: "read_files", arguments: { paths: ["src/service.ts", "root.ts"] }, reason: "deduplicate batch read" }],
+  toolContext: context,
+});
+const unchangedBatchPayload = JSON.parse(unchangedBatchRead[0].output).modelPayload;
+assert.equal(unchangedBatchPayload.item_count, 2);
+assert.equal(unchangedBatchPayload.files.every(file => file.status === "unchanged"), true);
+fs.writeFileSync(path.join(project, "src", "service.ts"), "export function beta() {\n  return 'beta';\n}\n");
+const driftedContinuation = await mainRuntime.executeMainAgentToolRequests({
+  requests: [{ name: "read_file", arguments: { path: "src/service.ts", offset: 2, limit: 20, expected_checksum: contextualReadPayload.modelPayload.continuation.checksum }, reason: "reject stale continuation" }],
+  toolContext: context,
+});
+assert.equal(driftedContinuation[0].ok, false);
+assert.equal(JSON.parse(driftedContinuation[0].output).code, "FILE_CHANGED");
 const rejectedBeforeSearch = await mainRuntime.executeMainAgentToolRequests({ requests: [{ name: "read_git_status", arguments: {}, reason: "inspect" }], toolContext: context });
 assert.equal(rejectedBeforeSearch[0].error, "MAIN_AGENT_TOOL_SCHEMA_NOT_LOADED");
 const searchRows = await mainRuntime.executeMainAgentToolRequests({ requests: [{ name: "tool_search", arguments: { query: "Git" }, reason: "inspect" }], toolContext: context });
 assert.equal(searchRows[0].ok, true);
 assert.equal(context.catalog.loadedMcp.some(tool => tool.name === "read_git_status"), true);
 assert.match(searchRows[0].output, /inputSchema/);
+assert.match(searchRows[0].output, /"name":"read_git_status"/);
+assert.equal(searchRows[0].output.includes("mcp__ccm__ccm_workspace_readonly__read_git_status"), false);
 assert.match(context.policyPrompt, /CCM ToolSearch 本轮已加载 Schema/);
 
 const fakeTool = (name, readOnlyHint) => ({
@@ -184,15 +263,16 @@ assert.equal(groupSource.includes("for (let round = 0; round <= loopBudget.maxTo
 
 console.log(JSON.stringify({
   pass: true,
-  tools: workspace.WORKSPACE_READONLY_TOOL_DEFINITIONS_V2.length,
-  base_tools: 4,
-  lazy_tools: workspace.WORKSPACE_READONLY_TOOL_DEFINITIONS_V2.length - 4,
+  tools: workspace.WORKSPACE_READONLY_TOOL_DEFINITIONS_V3.length,
+  base_tools: 5,
+  lazy_tools: workspace.WORKSPACE_READONLY_TOOL_DEFINITIONS_V3.length - 5,
   semantic_code_intelligence: true,
   incremental_index_generation: true,
   complete_line_paging: true,
   root_glob_and_sensitive_grep: true,
   sensitive_file_blocked: true,
   cross_project_blocked: true,
+  empty_group_workspace_tools_hidden: true,
   expired_capability_blocked: true,
   duplicate_project_selector_removed: true,
   group_duplicate_source_schema_removed: true,

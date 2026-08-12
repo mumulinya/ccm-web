@@ -4,7 +4,7 @@ import * as os from "os";
 import * as path from "path";
 import { readJsonWithBackup, withFileLock, writeJsonAtomic } from "../core/atomic-json-file";
 import { estimateTextTokens } from "./context-budget";
-import { buildToolDisplayDetail, type ToolDisplayDetailV1 } from "./tool-display-projection";
+import { buildToolDisplayDetail, isWorkspaceReadonlyToolName, type ToolDisplayDetailV1 } from "./tool-display-projection";
 import {
   assistantProgressBatchId,
   assistantProgressMilestoneChecksum,
@@ -65,6 +65,7 @@ export type UserVisibleAgentEvent = {
     tokenAccuracy?: "reported" | "estimated";
   };
   detail?: {
+    toolContractVersion?: 2 | 3;
     safeArguments?: any;
     safeResult?: any;
     evidenceIds?: string[];
@@ -81,7 +82,7 @@ export type UserVisibleAgentEvent = {
       isParallel: boolean;
     };
     executionStage?: {
-      kind: "preparation" | "project_execution" | "independent_verification" | "main_agent_summary";
+      kind: "preparation" | "coordination_dispatch" | "project_execution" | "independent_verification" | "main_agent_summary";
       stageRunId: string;
       reviewCycleId?: string;
       attempt: number;
@@ -439,7 +440,7 @@ function readStore(scope: string, scopeId: string, exactSessionId: string): Even
 
 function toolPresentation(toolNameInput: any, args: any = {}) {
   const display = buildToolDisplayDetail({ toolName: toolNameInput, arguments: args });
-  return { title: display.tool.label, target: display.tool.target || "" };
+  return { title: display.tool.userLabel || display.tool.label, target: display.tool.target || "" };
 }
 
 function normalizeEventType(input: any): UserVisibleAgentEventType {
@@ -507,6 +508,8 @@ export function normalizeUserVisibleAgentEvent(input: any, sequence = 0): UserVi
   const criterionIds = uniqueStrings(detailSource?.causalRefs?.criterionIds || detailSource?.causal_refs?.criterion_ids || input?.criterionIds || input?.criterion_ids, 40);
   const eventAttempt = Math.max(1, Number(detailSource?.agentDisplay?.attempt || detailSource?.executionStage?.attempt || input?.attempt || 1));
   const detail: UserVisibleAgentEvent["detail"] = {
+    ...(Number(detailSource.toolContractVersion || detailSource.tool_contract_version || input?.toolContractVersion || input?.tool_contract_version) === 3
+      ? { toolContractVersion: 3 as const } : {}),
     ...(args && Object.keys(args).length ? { safeArguments: sanitizeUserVisibleAgentDetail(args) } : {}),
     ...(detailSource.safeResult != null || input?.observation != null || input?.result != null
       ? { safeResult: sanitizeUserVisibleAgentDetail(detailSource.safeResult ?? input?.observation ?? input?.result) } : {}),
@@ -530,7 +533,7 @@ export function normalizeUserVisibleAgentEvent(input: any, sequence = 0): UserVi
       }),
     } : {}),
     ...(detailSource.executionStage && typeof detailSource.executionStage === "object"
-      && ["preparation", "project_execution", "independent_verification", "main_agent_summary"].includes(String(detailSource.executionStage.kind)) ? {
+      && ["preparation", "coordination_dispatch", "project_execution", "independent_verification", "main_agent_summary"].includes(String(detailSource.executionStage.kind)) ? {
       executionStage: sanitizeUserVisibleAgentDetail({
         kind: String(detailSource.executionStage.kind),
         stageRunId: compactText(detailSource.executionStage.stageRunId || detailSource.executionStage.stage_run_id, 240),
@@ -748,7 +751,27 @@ export function appendUserVisibleRequirementPlan(input: any) {
 }
 
 function projectSafeStoredEvent(event: UserVisibleAgentEvent | null) {
-  if (!event || event.eventType !== "assistant_progress") return event;
+  if (!event) return event;
+  if (event.eventType === "tool_completed" && /(?:^|__)read_files$/i.test(String(event.toolName || ""))) {
+    const paths = event.detail?.safeArguments?.paths;
+    const requestedCount = Array.isArray(paths) ? paths.length : 0;
+    const currentTotal = Number(event.detail?.toolDisplay?.result?.total || 0);
+    if (requestedCount > 0 && currentTotal === 0 && /已读取\s*0\s*个文件/.test(String(event.display?.summary || ""))) {
+      const summary = `已读取 ${requestedCount} 个文件`;
+      return {
+        ...event,
+        display: { ...event.display, summary },
+        detail: {
+          ...(event.detail || {}),
+          toolDisplay: event.detail?.toolDisplay ? {
+            ...event.detail.toolDisplay,
+            result: { ...event.detail.toolDisplay.result, summary, total: requestedCount },
+          } : event.detail?.toolDisplay,
+        },
+      } as UserVisibleAgentEvent;
+    }
+  }
+  if (event.eventType !== "assistant_progress") return event;
   const progress = event.detail?.progress;
   const safeText = sanitizeAssistantProgressText(progress?.text || event.display?.summary || "", 600);
   if (!safeText) return null;
@@ -828,10 +851,18 @@ export function appendToolProjection(input: any) {
   const toolName = input?.toolName || input?.tool_name || input?.tool?.name || input?.tool || "";
   const args = input?.arguments || input?.args || input?.detail?.safeArguments || {};
   const rawResult = input?.observation ?? input?.result ?? input?.detail?.safeResult;
+  const safeEventArguments = Object.fromEntries(Object.entries(args && typeof args === "object" ? args : {}).map(([key, value]) => {
+    if (!/^(?:command|cmd|script|shellCommand|shell_command|content|text|body|old_text|new_text|replacement|file_data)$/i.test(key)) return [key, value];
+    return [key, {
+      hidden: true,
+      checksum: crypto.createHash("sha256").update(String(value ?? "")).digest("hex").slice(0, 16),
+    }];
+  }));
   const toolDisplay = buildToolDisplayDetail({ toolName, arguments: args, result: rawResult, error: input?.error, includeTechnicalCommand: true });
   const eventType = normalizeEventType(input?.error ? "tool_failed" : input?.eventType || input?.type);
   const terminal = eventType === "tool_completed" || eventType === "tool_failed";
-  const explicitTokens = Number(input?.display?.tokenCount ?? input?.tokenCount ?? input?.token_count ?? input?.outputTokens);
+  const explicitTokens = Number(input?.display?.tokenCount ?? input?.tokenCount ?? input?.token_count ?? input?.outputTokens
+    ?? rawResult?.outputTokens ?? rawResult?.output_tokens);
   const outputTokens = terminal
     ? (Number.isFinite(explicitTokens) && explicitTokens > 0 ? explicitTokens : estimateTextTokens(JSON.stringify(rawResult ?? "")))
     : 0;
@@ -842,7 +873,9 @@ export function appendToolProjection(input: any) {
   const durationMs = Math.max(0, Number(input?.display?.durationMs ?? input?.durationMs ?? input?.duration_ms ?? 0));
   const stageKind = /test.?agent/i.test(String(toolName))
     ? "independent_verification"
-    : /dispatch|skill.?fork/i.test(String(toolName))
+    : input?.scope === "global" && /dispatch|skill.?fork|orchestrat/i.test(String(toolName))
+      ? "coordination_dispatch"
+      : /dispatch|skill.?fork/i.test(String(toolName))
       ? "project_execution"
       : "preparation";
   const completedAt = terminal ? new Date().toISOString() : "";
@@ -867,6 +900,8 @@ export function appendToolProjection(input: any) {
     },
     detail: {
       ...(input?.detail || {}),
+      ...((input?.toolContractVersion === 3 || input?.detail?.toolContractVersion === 3 || rawResult?.toolContractVersion === 3 || isWorkspaceReadonlyToolName(toolName))
+        ? { toolContractVersion: 3 as const } : {}),
       ...((eventType === "tool_failed" || eventType === "agent_failed") ? {
         availableActions: sanitizeAvailableActions(input?.detail?.availableActions || input?.detail?.available_actions).length
           ? sanitizeAvailableActions(input?.detail?.availableActions || input?.detail?.available_actions)
@@ -880,7 +915,7 @@ export function appendToolProjection(input: any) {
         ...(completedAt ? { completedAt } : {}),
         ...(durationMs > 0 ? { activeDurationMs: durationMs } : {}),
       },
-      safeArguments: input?.arguments || input?.args || input?.detail?.safeArguments,
+      safeArguments: safeEventArguments,
       toolDisplay,
     },
   });
@@ -905,9 +940,65 @@ export function runUserVisibleAgentEventSelfTest() {
   }, 2);
   const longProgress = sanitizeAssistantProgressText(`我会先检查当前项目结构和配置，再定位实际启动入口。${"这是不应继续展示的冗长说明。".repeat(20)}`);
   const protocolProgress = sanitizeAssistantProgressText('{"workflowDecision":{"mode":"project_analysis"},"selectedSkills":[]}');
+  const globalDispatch = appendToolProjection({
+    scope: "global", scopeId: "global", exactSessionId: "session-global-dispatch", eventId: "global-dispatch-stage",
+    eventType: "tool_completed", toolName: "dispatch_project_task", toolCallId: "dispatch-1",
+    observation: { success: true, count: 1 },
+  });
+  const projectDispatch = appendToolProjection({
+    scope: "project", scopeId: "demo", exactSessionId: "session-project-dispatch", eventId: "project-dispatch-stage",
+    eventType: "tool_completed", toolName: "dispatch_project_task", toolCallId: "dispatch-2",
+    observation: { success: true, count: 1 },
+  });
+  const internalWorkspaceRead = buildToolDisplayDetail({
+    toolName: "mcp__ccm__ccm_workspace_readonly__read_file",
+    arguments: { path: "README.md" },
+  });
+  const nativeRuntimeGlob = buildToolDisplayDetail({ toolName: "Glob", arguments: { pattern: "**/*.ts" } });
+  const inlineCommand = buildToolDisplayDetail({
+    toolName: "run_command",
+    arguments: { command: 'powershell -Command "Write-Output SOURCE_COMMAND_SENTINEL"', description: "检查构建" },
+    includeTechnicalCommand: true,
+  });
+  const nestedBatchReceipt = {
+    output: JSON.stringify({
+      schema: "ccm-workspace-tool-envelope-v3",
+      toolContractVersion: 3,
+      modelPayload: {
+        schema: "ccm-workspace-read-files-result-v3",
+        files: [{ path: "README.md", truncated: true, next_cursor: "101", checksum: "readme-sum" }, { path: "package.json", truncated: false }],
+        item_count: 2,
+        truncated: true,
+      },
+      safeReceipt: { kind: "text", itemCount: 2, truncated: true, contentStored: false },
+      contentStored: false,
+    }),
+    outputTokens: 1234,
+  };
+  const nestedBatchDisplay = buildToolDisplayDetail({
+    toolName: "mcp__ccm__ccm_workspace_readonly__read_files",
+    arguments: { paths: ["README.md", "package.json"] },
+    result: nestedBatchReceipt,
+  });
+  const nestedBatchEvent = appendToolProjection({
+    scope: "project", scopeId: "demo", exactSessionId: "session-batch-read", eventId: "batch-read-result",
+    eventType: "tool_completed", toolName: "mcp__ccm__ccm_workspace_readonly__read_files", toolCallId: "batch-read-1",
+    arguments: { paths: ["README.md", "package.json"] }, observation: nestedBatchReceipt,
+  });
+  const legacyBatchEvent = projectSafeStoredEvent({
+    schema: USER_VISIBLE_AGENT_EVENT_SCHEMA, eventId: "legacy-batch", sequence: 1, eventType: "tool_completed",
+    scope: "project", scopeId: "demo", exactSessionId: "legacy-session", generation: 0,
+    toolName: "mcp__ccm__ccm_workspace_readonly__read_files",
+    display: { title: "批量读取文件", summary: "已读取 0 个文件", status: "success" },
+    detail: {
+      safeArguments: { paths: ["README.md", "package.json"] },
+      toolDisplay: buildToolDisplayDetail({ toolName: "read_files", arguments: { paths: ["README.md", "package.json"] }, result: {} }),
+    },
+    visibility: "default", contentStored: false, createdAt: new Date().toISOString(),
+  } as UserVisibleAgentEvent);
   const checks = {
     schema: event.schema === USER_VISIBLE_AGENT_EVENT_SCHEMA,
-    ccLabel: event.display.title === "Find definition",
+    ccLabel: event.display.title === "查找定义",
     secretRedacted: !serialized.includes("SENTINEL"),
     bodyProjected: !serialized.includes("SOURCE_SENTINEL") && serialized.includes("contentChecksum"),
     noContent: event.contentStored === false,
@@ -915,6 +1006,22 @@ export function runUserVisibleAgentEventSelfTest() {
     causalRefsSafe: linked.detail?.causalRefs?.planStepId === "step-1" && linked.detail.causalRefs.dependencyIds?.[0] === "dep-1",
     progressLengthBounded: longProgress.length <= 120 && longProgress.split(/[。！？!?]/).filter(Boolean).length <= 2,
     internalProgressRejected: protocolProgress === "",
+    globalDispatchStage: globalDispatch.detail?.executionStage?.kind === "coordination_dispatch",
+    projectDispatchStage: projectDispatch.detail?.executionStage?.kind === "project_execution",
+    workspaceMcpUsesNativeFacade: internalWorkspaceRead.tool.name === "read_file"
+      && internalWorkspaceRead.tool.userLabel === "读取文件"
+      && internalWorkspaceRead.tool.category === "builtin"
+      && !internalWorkspaceRead.tool.serverLabel,
+    nativeRuntimeToolLocalized: nativeRuntimeGlob.tool.userLabel === "查找文件"
+      && nativeRuntimeGlob.tool.family === "search",
+    inlineCommandBodyHidden: !JSON.stringify(inlineCommand).includes("SOURCE_COMMAND_SENTINEL")
+      && inlineCommand.sensitiveCommand?.includes("[脚本内容已隐藏]"),
+    nestedBatchCountProjected: nestedBatchDisplay.result.total === 2
+      && nestedBatchDisplay.result.summary.startsWith("已读取 2 个文件")
+      && nestedBatchDisplay.result.truncated === true,
+    nestedBatchUsesRuntimeTokenCount: nestedBatchEvent.display.tokenCount === 1234,
+    legacyBatchCountRecovered: legacyBatchEvent?.display?.summary === "已读取 2 个文件"
+      && legacyBatchEvent?.detail?.toolDisplay?.result?.total === 2,
   };
   return { pass: Object.values(checks).every(Boolean), checks, event };
 }

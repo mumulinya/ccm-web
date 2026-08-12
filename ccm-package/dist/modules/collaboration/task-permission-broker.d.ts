@@ -33,7 +33,7 @@ export type TaskPermissionRequest = {
     risk: PermissionRisk;
     riskReasons: string[];
     state: PermissionState;
-    decidedBy: "group-main-agent" | "group-main-policy" | "project-policy" | "local-user" | "system";
+    decidedBy: "group-main-agent" | "project-main-agent" | "group-main-policy" | "project-policy" | "local-user" | "system";
     decisionReason: string;
     createdAt: string;
     decidedAt: string;
@@ -41,6 +41,14 @@ export type TaskPermissionRequest = {
     maxUses: number;
     usedCount: number;
     checksum: string;
+    repeatCount?: number;
+    lastRequestedAt?: string;
+    autoRetryBlocked?: boolean;
+    approvalScope?: "operation" | "task";
+    permissionPolicyRevision?: number;
+    approvedProjectIds?: string[];
+    approvedPaths?: string[];
+    approvalTaskKey?: string;
 };
 export declare function classifyTaskPermissionRequest(context: Pick<InternalMcpTaskContext, "workDir">, input: any): {
     operation: string;
@@ -82,7 +90,7 @@ export declare function requestTaskPermission(context: InternalMcpTaskContext, i
     risk: PermissionRisk;
     riskReasons: string[];
     state: PermissionState;
-    decidedBy: "group-main-agent" | "group-main-policy" | "project-policy" | "local-user" | "system";
+    decidedBy: "group-main-agent" | "project-main-agent" | "group-main-policy" | "project-policy" | "local-user" | "system";
     decisionReason: string;
     createdAt: string;
     decidedAt: string;
@@ -90,6 +98,14 @@ export declare function requestTaskPermission(context: InternalMcpTaskContext, i
     maxUses: number;
     usedCount: number;
     checksum: string;
+    repeatCount?: number;
+    lastRequestedAt?: string;
+    autoRetryBlocked?: boolean;
+    approvalScope?: "operation" | "task";
+    permissionPolicyRevision?: number;
+    approvedProjectIds?: string[];
+    approvedPaths?: string[];
+    approvalTaskKey?: string;
 }>;
 export declare function listTaskPermissionRequests(filters?: any): {
     command: string;
@@ -123,7 +139,7 @@ export declare function listTaskPermissionRequests(filters?: any): {
     risk: PermissionRisk;
     riskReasons: string[];
     state: PermissionState;
-    decidedBy: "group-main-agent" | "group-main-policy" | "project-policy" | "local-user" | "system";
+    decidedBy: "group-main-agent" | "project-main-agent" | "group-main-policy" | "project-policy" | "local-user" | "system";
     decisionReason: string;
     createdAt: string;
     decidedAt: string;
@@ -131,6 +147,14 @@ export declare function listTaskPermissionRequests(filters?: any): {
     maxUses: number;
     usedCount: number;
     checksum: string;
+    repeatCount?: number;
+    lastRequestedAt?: string;
+    autoRetryBlocked?: boolean;
+    approvalScope?: "operation" | "task";
+    permissionPolicyRevision?: number;
+    approvedProjectIds?: string[];
+    approvedPaths?: string[];
+    approvalTaskKey?: string;
 }[];
 export declare function decideTaskPermission(requestId: string, input: any): {
     command: string;
@@ -164,7 +188,7 @@ export declare function decideTaskPermission(requestId: string, input: any): {
     risk: PermissionRisk;
     riskReasons: string[];
     state: PermissionState;
-    decidedBy: "group-main-agent" | "group-main-policy" | "project-policy" | "local-user" | "system";
+    decidedBy: "group-main-agent" | "project-main-agent" | "group-main-policy" | "project-policy" | "local-user" | "system";
     decisionReason: string;
     createdAt: string;
     decidedAt: string;
@@ -172,6 +196,14 @@ export declare function decideTaskPermission(requestId: string, input: any): {
     maxUses: number;
     usedCount: number;
     checksum: string;
+    repeatCount?: number;
+    lastRequestedAt?: string;
+    autoRetryBlocked?: boolean;
+    approvalScope?: "operation" | "task";
+    permissionPolicyRevision?: number;
+    approvedProjectIds?: string[];
+    approvedPaths?: string[];
+    approvalTaskKey?: string;
 };
 export declare function consumeTaskPermission(context: InternalMcpTaskContext, requestId: string): {
     success: boolean;
@@ -208,7 +240,7 @@ export declare function consumeTaskPermission(context: InternalMcpTaskContext, r
         risk: PermissionRisk;
         riskReasons: string[];
         state: PermissionState;
-        decidedBy: "group-main-agent" | "group-main-policy" | "project-policy" | "local-user" | "system";
+        decidedBy: "group-main-agent" | "project-main-agent" | "group-main-policy" | "project-policy" | "local-user" | "system";
         decisionReason: string;
         createdAt: string;
         decidedAt: string;
@@ -216,6 +248,14 @@ export declare function consumeTaskPermission(context: InternalMcpTaskContext, r
         maxUses: number;
         usedCount: number;
         checksum: string;
+        repeatCount?: number;
+        lastRequestedAt?: string;
+        autoRetryBlocked?: boolean;
+        approvalScope?: "operation" | "task";
+        permissionPolicyRevision?: number;
+        approvedProjectIds?: string[];
+        approvedPaths?: string[];
+        approvalTaskKey?: string;
     };
 };
 export declare function executeApprovedTaskCommand(context: InternalMcpTaskContext, requestId: string): Promise<{

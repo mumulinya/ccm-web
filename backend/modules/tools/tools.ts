@@ -90,7 +90,7 @@ import {
 } from "../../tools/internal-mcp-registry";
 import { loadGlobalAgentToolAuthorization } from "../global/global-agent-tool-authorization";
 import { MAIN_AGENT_NATIVE_TOOLS_V2 } from "../../tools/main-agent-tool-runtime";
-import { WORKSPACE_READONLY_TOOL_DEFINITIONS_V2 } from "../../tools/workspace-readonly-tools";
+import { WORKSPACE_READONLY_TOOL_DEFINITIONS_V3 } from "../../tools/workspace-readonly-tools";
 import {
   ensureLegacyMetricsMigrated,
   loadMetricsDashboardV3,
@@ -1763,7 +1763,7 @@ export function handleToolsAndMetricsApi(pathname: string, req: any, res: any, p
         main_agent_catalog: {
           schema: "ccm-main-agent-tool-catalog-v2",
           native: MAIN_AGENT_NATIVE_TOOLS_V2.map(tool => ({ ...tool, source: "native", applicable_agents: ["global", "group", "project"] })),
-          workspace_readonly: WORKSPACE_READONLY_TOOL_DEFINITIONS_V2.map(tool => ({
+          workspace_readonly: WORKSPACE_READONLY_TOOL_DEFINITIONS_V3.map(tool => ({
             name: tool.name,
             canonical_name: tool.canonicalName,
             description: tool.description,

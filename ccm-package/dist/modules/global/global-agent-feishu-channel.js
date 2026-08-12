@@ -44,6 +44,8 @@ const feishu_access_1 = require("../collaboration/feishu-access");
 const feishu_channel_1 = require("../collaboration/feishu-channel");
 const feishu_conversation_v2_1 = require("../collaboration/feishu-conversation-v2");
 const automation_session_bindings_1 = require("../../system/automation-session-bindings");
+const global_agent_capabilities_1 = require("./global-agent-capabilities");
+const slash_command_conversations_1 = require("../tools/slash-command-conversations");
 // Feishu event decoding, message lifecycle, turn control, and restart recovery.
 function createGlobalAgentFeishuChannel(deps) {
     const { GLOBAL_AGENT_VISIBLE_RESULT_FALLBACK, appendGlobalActionAudit, appendGlobalAgentConversationMessage, appendTraceEvent, bindFeishuIdentifiersFromValue, bindFeishuTaskContext, cancelGlobalAgentRun, conversationTurnControl, createAgenticRuntime, ensureTraceId, feishuRuntimeEventPresentation, findWaitingGlobalAgentRun, formatMissionStatus, getConfigs, getFeishuMessageId, getGlobalAgentConversationMessages, getGlobalAgentRun, getGlobalDevelopmentMission, globalRunVisibleReply, isGlobalProgressStatusRequest, listGlobalAgentRuns, listTaskPermissionRequests, loadGroups, notifyFeishuTaskStage, postLocalApi, recordFeishuInbound, resolveFeishuGlobalAgentSessionId, resumeGlobalAgentRun, runAgenticGlobalRequest, sendFeishuReportMessage, steerGlobalAgentRun } = deps;
@@ -403,8 +405,15 @@ function createGlobalAgentFeishuChannel(deps) {
         };
         appendTraceEvent(traceId, { id: `feishu:${getFeishuMessageId(payload) || crypto.randomBytes(4).toString("hex")}:received`, type: "feishu.message_received", status: "info", message: text.slice(0, 500), data: { conversation_id: conversationId, message_id: getFeishuMessageId(payload) } });
         try {
+            if ((0, global_agent_capabilities_1.isGlobalAgentCapabilityQuestion)(text)) {
+                const markdown = global_agent_capabilities_1.GLOBAL_AGENT_CAPABILITY_REPLY;
+                appendGlobalAgentConversationMessage(conversationId, "assistant", markdown, "feishu");
+                if (sendReport)
+                    await sendFeishuConversationReply({ conversationId, title: "全局 Agent 能力说明", markdown, traceId, dedupeSuffix: "capabilities" });
+                return markdown;
+            }
             if (/^(帮助|help|\/help)$/i.test(text)) {
-                const markdown = "可以直接发送业务需求，也可以说：\n- 查看任务状态\n- 检查系统状态\n- 给某个协作群或项目执行成员下发指令\n- 每天 9 点执行某项任务\n- 暂停、恢复或重试指定任务\n\n项目 Agent 请求额外权限时，可按通知回复“批准权限 申请ID”或“拒绝权限 申请ID”。";
+                const markdown = `${global_agent_capabilities_1.GLOBAL_AGENT_CAPABILITY_REPLY}\n\n项目 Agent 请求额外权限时，可按通知回复“批准权限 申请ID”或“拒绝权限 申请ID”。`;
                 if (sendReport)
                     await sendFeishuConversationReply({ conversationId, title: "全局 Agent 使用帮助", markdown, traceId, dedupeSuffix: "help" });
                 appendGlobalAgentConversationMessage(conversationId, "assistant", markdown, "feishu");
@@ -552,6 +561,9 @@ function createGlobalAgentFeishuChannel(deps) {
     }
     function parseFeishuConversationTurnCommand(value) {
         const text = String(value || "").trim();
+        const aside = text.match(/^\/btw(?:\s+([\s\S]+))?$/i);
+        if (aside)
+            return { kind: "aside", message: String(aside[1] || "").trim() };
         if (/^(?:停止|停止当前|取消当前|stop)$/i.test(text))
             return { kind: "stop", message: "" };
         const steer = text.match(/^(?:引导|补充|调整)(?:当前)?\s*[:：]\s*([\s\S]+)$/i);
@@ -631,10 +643,35 @@ function createGlobalAgentFeishuChannel(deps) {
         const inferredConversationId = resolveFeishuGlobalAgentSessionId(payload);
         const conversationId = resolveBoundFeishuGlobalSessionId(payload, inferredConversationId);
         const messageId = getFeishuMessageId(payload);
+        const command = parseFeishuConversationTurnCommand(text);
+        const earlyAccess = resolveUserAccess(payload);
+        if (command.kind === "aside") {
+            if (!earlyAccess.allowed) {
+                const reply = `${earlyAccess.reason}。无法读取这个飞书会话绑定的CCM上下文。`;
+                if (options.sendReport !== false)
+                    await sendFeishuConversationReply({ conversationId, title: "临时提问", markdown: reply, traceId: options.traceId, dedupeSuffix: `aside-denied:${messageId}` });
+                return { reply, denied: true, ephemeral: true };
+            }
+            const exactBinding = (0, feishu_channel_1.getFeishuBindingByMessageId)(messageId || payload?.event?.message?.root_id || payload?.root_message_id || "");
+            const bindingType = String(exactBinding?.target_type || "global_agent");
+            const asideScope = ["group_agent", "group_session"].includes(bindingType) ? "group" : bindingType === "project_agent" ? "project" : "global";
+            const asideScopeId = asideScope === "global" ? "global" : String(exactBinding?.project_id || "").trim();
+            const asideSessionId = asideScope === "global" ? conversationId : String(exactBinding?.active_session_id || "").trim();
+            if (!asideSessionId || !asideScopeId || !command.message) {
+                const reply = !command.message ? "请在 /btw 后输入临时问题。" : "当前飞书消息没有精确绑定CCM会话，无法安全读取上下文。";
+                if (options.sendReport !== false)
+                    await sendFeishuConversationReply({ conversationId, title: "临时提问", markdown: reply, traceId: options.traceId, dedupeSuffix: `aside-invalid:${messageId}` });
+                return { reply, ephemeral: true };
+            }
+            const result = await (0, slash_command_conversations_1.runConversationAside)({ scope: asideScope, scopeId: asideScopeId, exactSessionId: asideSessionId, question: command.message });
+            const reply = `**临时提问 · 基于提问时上下文**\n\n${result.answer}`;
+            if (options.sendReport !== false)
+                await sendFeishuConversationReply({ conversationId: asideSessionId, title: "临时提问", markdown: reply, traceId: options.traceId, dedupeSuffix: `aside:${messageId || crypto.randomUUID()}` });
+            return { reply, ephemeral: true, content_stored: false };
+        }
         const destination = recordFeishuInbound({ payload, sessionId: conversationId, messageId });
         const originReceipt = (0, feishu_conversation_v2_1.buildFeishuOriginReceiptV2)({ envelope, sessionId: conversationId });
         bindFeishuTaskContext({ sessionId: conversationId, destination, source: "feishu-control-bot", targetType: "global_agent" });
-        const command = parseFeishuConversationTurnCommand(text);
         const access = resolveUserAccess({ ...payload, open_id: destination?.open_id, user_id: destination?.user_id });
         if (!access.allowed) {
             const reply = `${access.reason}。请让 CCM 管理员在“设置 → 通知与渠道 → 任务会话”中添加你的飞书身份。`;
@@ -753,6 +790,8 @@ function createGlobalAgentFeishuChannel(deps) {
             stop: parseFeishuConversationTurnCommand("停止").kind === "stop",
             steer: parseFeishuConversationTurnCommand("引导：先补测试").message === "先补测试",
             queue: parseFeishuConversationTurnCommand("排队: 再写文档").kind === "queue",
+            aside: parseFeishuConversationTurnCommand("/btw 当前任务做到哪一步了").kind === "aside"
+                && parseFeishuConversationTurnCommand("/btw 当前任务做到哪一步了").message === "当前任务做到哪一步了",
             ordinaryDefaultsToNormal: parseFeishuConversationTurnCommand("进度怎么样").kind === "normal",
         };
         return { pass: Object.values(checks).every(Boolean), checks };

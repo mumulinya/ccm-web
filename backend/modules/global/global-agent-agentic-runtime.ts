@@ -18,8 +18,9 @@ import {
   executeGlobalAgentAuthorizedTool,
 } from "./global-agent-tool-authorization";
 import { executeMainAgentToolRequests } from "../../tools/main-agent-tool-runtime";
+import { createWorkspaceReadContextLedger, type WorkspaceReadContextLedger } from "../../tools/workspace-read-context";
 import { CC_ALIGNED_TOOL_RESULT_MAX_TOKENS } from "../../tools/cc-tool-result-limits";
-import { WORKSPACE_READONLY_TOOL_DEFINITIONS_V2 } from "../../tools/workspace-readonly-tools";
+import { WORKSPACE_READONLY_TOOL_DEFINITIONS_V3 } from "../../tools/workspace-readonly-tools";
 import { saveRun as saveGlobalAgentRun } from "../../agents/global/global-agent-run-store";
 import { appendTraceEvent } from "../../system/reliability-ledger";
 import { buildGlobalWriteAuthorizationReceipt } from "../../agents/global/global-agent-authorization";
@@ -38,12 +39,33 @@ import {
 } from "../../system/main-agent-context-source-continuity";
 import { isContextSourceToolResult, projectContextSourceToolResultForPersistence } from "../../system/context-source-tool-result-projection";
 import { readSlashCommandSessionState, renderSlashCommandSessionDirective } from "../../system/slash-command-session-state";
+import { attachTransientModelBlocks, transientModelBlocks } from "../../system/transient-model-content";
 
 type LocalIntentResult = any;
 
 // Global-only context, tool execution, mission supervision, and agentic loop lifecycle.
 export function createGlobalAgentAgenticRuntime(deps: any) {
   const { hasExplicitGlobalWriteAuthorization, GLOBAL_AGENT_TOOL_SPECS, GLOBAL_MANAGEMENT_ACTIONS, GLOBAL_PET_AGENT_NAME, acquireIdempotency, annotateGlobalAction, applyGlobalAgentSupervisionSteer, attachGlobalAgentRunSupervision, bindFeishuIdentifiersFromValue, bindFeishuTaskContext, buildGlobalAgentMemoryPacket, buildGlobalAgentSessionContinuation, buildGlobalSingleProjectMissionPayload, callGlobalModelWithRetry, compactGlobalAgentSessionWithModel, compactPetText, completeGlobalAgentSupervision, completeIdempotency, continueGlobalAgentRunWithClarification, controlGlobalDevelopmentMission, controlGlobalMissionSupervisor, createGlobalDevelopmentMission, createRequirementEpicWithChildren, executeFeishuAction, executePlayMusic, executeStopMusic, failIdempotency, findClarifyingGlobalAgentRun, formatGlobalMissionFinalReport, getAgentQualityPolicy, getConfigInfo, getConfigs, getGlobalAgentBackgroundOutput, getGlobalAgentMemoryPolicy, getGlobalAgentRun, getGlobalDevelopmentMission, getGlobalMissionSupervisor, getGlobalMissionSupervisorSchedulerStatus, globalRunVisibleReply, hasExplicitDevelopmentExecutionIntent, inferLocalGlobalAction, ingestGlobalAgentConversation, listGlobalAgentRuns, listGlobalMissionSupervisors, listTaskAgentSessions, loadCronJobs, loadGlobalAgentHistoryStore, loadGlobalAgentHooks, loadGlobalAgentMemory, loadGlobalAgentPermissionRules, loadGroups, loadMcpTools, loadOrchestratorConfig, loadSkills, loadTasks, normalizeText, notifyFeishuTaskStage, postLocalApi, queryKnowledgeBase, recallGlobalAgentMemory, rebuildGlobalAgentMemory, recordGlobalAgentRuntimeOutput, recordGlobalAgentSessionProviderUsage, recordGlobalMissionMemory, recoverInterruptedGlobalAgentRuns, refreshGlobalDevelopmentMissions, renderGlobalGroupMemoryContextBundle, resumeGlobalAgentRun, sanitizeGlobalDirectAgentOutput, setGlobalAgentMemoryPolicy, settleIdempotencyByTrace, startGlobalAgentRun, startGlobalMissionSupervisor, startGlobalMissionSupervisorScheduler, stopGlobalMissionSupervisorScheduler, superviseGlobalDevelopmentMissionCycle, updateGlobalAgentSupervisionState, waitForIdempotencyResult } = deps
+  const globalWorkspaceReadContexts = new Map<string, WorkspaceReadContextLedger>();
+
+  function workspaceReadContextForRun(run: GlobalAgentRun) {
+    const generation = Math.max(0, Number((run as any).generation ?? (run as any).resume_count ?? 0));
+    const boundaryGeneration = Math.max(0, Number(buildGlobalAgentSessionContinuation(String(run.session_id || ""))?.boundaryGeneration || 0));
+    const key = `${String(run.id || "")}\0${String(run.session_id || "")}\0${generation}\0${boundaryGeneration}`;
+    let ledger = globalWorkspaceReadContexts.get(key);
+    if (!ledger) {
+      ledger = createWorkspaceReadContextLedger({
+        scope: "global", scopeId: "global", exactSessionId: String(run.session_id || run.id || "global"), generation,
+      });
+      globalWorkspaceReadContexts.set(key, ledger);
+      while (globalWorkspaceReadContexts.size > 100) {
+        const oldest = globalWorkspaceReadContexts.keys().next().value;
+        if (oldest === undefined) break;
+        globalWorkspaceReadContexts.delete(oldest);
+      }
+    }
+    return ledger;
+  }
 
   function safeProjectRows() {
     return getConfigs().map((config: any) => {
@@ -263,16 +285,29 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
         connection_preflight: authorizedTools.connection_preflight,
         configured_counts: authorizedTools.configured_counts,
         available_counts: authorizedTools.counts,
-        mcp: authorizedTools.catalog.tools.map((tool: any) => ({
+        workspace: authorizedTools.catalog.tools
+          .filter((tool: any) => tool.server === "ccm__workspace_readonly")
+          .map((tool: any) => ({
+            name: tool.name,
+            description: tool.description,
+            input_schema: tool.inputSchema,
+            annotations: tool.annotations,
+          })),
+        mcp: authorizedTools.catalog.tools
+          .filter((tool: any) => tool.server !== "ccm__workspace_readonly")
+          .map((tool: any) => ({
           name: tool.canonicalName,
           server: tool.server,
           description: tool.description,
           input_schema: tool.inputSchema,
           annotations: tool.annotations,
         })),
-        deferred_mcp: authorizedTools.discoverable_tools.map((tool: any) => ({
-          name: tool.canonicalName || tool.name,
-        })),
+        deferred_workspace: authorizedTools.discoverable_tools
+          .filter((tool: any) => tool.server === "ccm__workspace_readonly")
+          .map((tool: any) => ({ name: tool.name })),
+        deferred_mcp: authorizedTools.discoverable_tools
+          .filter((tool: any) => tool.server !== "ccm__workspace_readonly")
+          .map((tool: any) => ({ name: tool.canonicalName || tool.name })),
         loaded_tool_names: authorizedTools.loaded_tool_names,
         skills: authorizedTools.catalog.skills.map((skill: any) => ({
           name: skill.name,
@@ -399,7 +434,7 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
           : tool?.alwaysLoad === true ? "always_load" as const : "same_run" as const,
       }));
     const loadedToolNames = new Set((run?.loaded_tool_names || run?.loadedToolNames || []).map(value => String(value || "")));
-    const deferredWorkspaceNames = new Set(WORKSPACE_READONLY_TOOL_DEFINITIONS_V2
+    const deferredWorkspaceNames = new Set(WORKSPACE_READONLY_TOOL_DEFINITIONS_V3
       .filter(tool => tool.loadPolicy === "search" && !loadedToolNames.has(tool.name) && !loadedToolNames.has(tool.canonicalName))
       .map(tool => tool.name));
     const modelVisibleToolSpecs = GLOBAL_AGENT_TOOL_SPECS.filter(spec => !deferredWorkspaceNames.has(spec.name));
@@ -766,11 +801,11 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
     };
   }
   
-  async function executeAgenticTool(baseUrl: string, ctx: CollabCtx, name: string, args: any, run: GlobalAgentRun, onEvent?: (event: any) => void) {
+  async function executeAgenticTool(baseUrl: string, ctx: CollabCtx, name: string, args: any, run: GlobalAgentRun, onEvent?: (event: any) => void, signal?: AbortSignal) {
     const sourceGate = sourceExecutionGate(run, name, args);
     if (sourceGate) return sourceGate;
     const loadedNames = new Set((run.loaded_tool_names || run.loadedToolNames || []).map(value => String(value || "")));
-    const deferredWorkspace = WORKSPACE_READONLY_TOOL_DEFINITIONS_V2.find(tool => tool.loadPolicy === "search" && (tool.name === name || tool.canonicalName === name));
+    const deferredWorkspace = WORKSPACE_READONLY_TOOL_DEFINITIONS_V3.find(tool => tool.loadPolicy === "search" && (tool.name === name || tool.canonicalName === name));
     if (deferredWorkspace && !loadedNames.has(deferredWorkspace.name) && !loadedNames.has(deferredWorkspace.canonicalName)) {
       throw new Error(`MAIN_AGENT_TOOL_SCHEMA_NOT_LOADED:${deferredWorkspace.canonicalName}`);
     }
@@ -842,7 +877,7 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
           sessionId: run.session_id,
           source: run.source || "global-agent",
         }, run.loaded_tool_names || run.loadedToolNames || []);
-      } else if (name === "tool_search" || WORKSPACE_READONLY_TOOL_DEFINITIONS_V2.some(tool => tool.name === name)) {
+      } else if (name === "tool_search" || WORKSPACE_READONLY_TOOL_DEFINITIONS_V3.some(tool => tool.name === name)) {
         const runtime = buildGlobalAgentToolRuntimeContext({
           taskId: run.id,
           executionId: operationKey,
@@ -873,11 +908,13 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
           scopeIdentity: runtime.scope_identity,
           restoredSkillAttachments: runtime.restored_skill_attachments || [],
           postCompactRestoreReceipt: runtime.post_compact_restore_receipt || undefined,
+          workspaceReadContext: workspaceReadContextForRun(run),
         };
         const rows = await executeMainAgentToolRequests({
           requests: [{ name, arguments: args || {}, reason: "全局主 Agent按需读取" }],
           toolContext,
           resultTokenLimit: CC_ALIGNED_TOOL_RESULT_MAX_TOKENS,
+          abortSignal: signal,
         });
         const row = rows[0];
         if (!row?.ok) throw new Error(row?.error || `${name}调用失败`);
@@ -886,7 +923,10 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
           run.loadedToolNames = run.loaded_tool_names.slice();
           saveGlobalAgentRun(run, true);
         }
-        observation = { success: true, tool: name, result: (() => { try { return JSON.parse(row.output); } catch { return row.output; } })(), authorization_checksum: runtime.checksum };
+        observation = attachTransientModelBlocks(
+          { success: true, tool: name, result: (() => { try { return JSON.parse(row.output); } catch { return row.output; } })(), authorization_checksum: runtime.checksum },
+          transientModelBlocks(row),
+        );
       } else if (name === "inspect_system") {
         observation = { success: true, ...buildAgenticContext(), missions: refreshGlobalDevelopmentMissions().slice(-8) };
       } else if (name === "list_projects") {
@@ -1390,9 +1430,9 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
         requestedTargetRefs: input.requestedTargetRefs || (run as any).requested_target_refs || [],
       }),
       verifyContextBoundary: context => verifyGlobalAgentContextBoundary(context),
-      executeTool: (name, args, run) => {
+      executeTool: (name, args, run, signal) => {
         attachGlobalRunRequirementSources(run, input.sourceIngestion);
-        return executeAgenticTool(baseUrl, ctx, name, args, run, input.onEvent);
+        return executeAgenticTool(baseUrl, ctx, name, args, run, input.onEvent, signal);
       },
       fallbackDecision: (run, error) => {
         const detail = compactPetText(error?.message || error || "统一大模型调用失败", 800);
@@ -1617,7 +1657,7 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
         fixedContext: { main_agent_loop: true },
         tools: (run as any).direct_reply_fast_path === true ? [] : GLOBAL_AGENT_TOOL_SPECS.filter(spec => {
           const loaded = new Set((run.loaded_tool_names || run.loadedToolNames || []).map(value => String(value || "")));
-          const deferred = WORKSPACE_READONLY_TOOL_DEFINITIONS_V2.find(tool => tool.loadPolicy === "search" && tool.name === spec.name);
+          const deferred = WORKSPACE_READONLY_TOOL_DEFINITIONS_V3.find(tool => tool.loadPolicy === "search" && tool.name === spec.name);
           return !deferred || loaded.has(deferred.name) || loaded.has(deferred.canonicalName);
         }),
         modelVisiblePayload: (run as any).latest_model_visible_payload || null,

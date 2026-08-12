@@ -8,6 +8,7 @@ import { buildTestAcceptanceMcpServerConfig, TEST_ACCEPTANCE_MCP_SERVER_NAME } f
 import { buildPermissionBrokerMcpServerConfig, PERMISSION_BROKER_MCP_SERVER_NAME } from "./permission-broker-mcp";
 import { buildAgentCommunicationMcpServerConfig, AGENT_COMMUNICATION_MCP_SERVER_NAME } from "./agent-communication-mcp";
 import { buildNotebookWorkspaceMcpServerConfig, NOTEBOOK_WORKSPACE_MCP_SERVER_NAME } from "./notebook-workspace-mcp";
+import { buildWorkspaceEditMcpServerConfig, WORKSPACE_EDIT_MCP_SERVER_NAME } from "./workspace-edit-mcp";
 
 export type TaskBoundInternalMcpInput = {
   taskId: string;
@@ -35,6 +36,7 @@ export type TaskBoundInternalMcpInput = {
   originMessageId?: string;
   requestText?: string;
   memoryReadBudgetTokens?: number;
+  nativeWorkspaceEditing?: boolean;
 };
 
 export function buildTaskBoundInternalMcpServers(input: TaskBoundInternalMcpInput) {
@@ -93,6 +95,12 @@ export function buildTaskBoundInternalMcpServers(input: TaskBoundInternalMcpInpu
   }
   if (input.role === "project-child-agent") {
     servers[NOTEBOOK_WORKSPACE_MCP_SERVER_NAME] = buildNotebookWorkspaceMcpServerConfig(context);
+  }
+  // This MCP is a capability fallback, not a sandbox. Native third-party
+  // runtimes keep their own Edit/Write tools and are governed by the outer
+  // worktree, allowed-path diff checks and Terminal Gate instead.
+  if (input.role === "project-child-agent" && input.nativeWorkspaceEditing === false) {
+    servers[WORKSPACE_EDIT_MCP_SERVER_NAME] = buildWorkspaceEditMcpServerConfig(context);
   }
   return servers;
 }

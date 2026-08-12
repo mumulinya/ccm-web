@@ -1,4 +1,5 @@
 export declare const GROUP_COORDINATOR_INTERNAL_MCP = "ccm__group_coordinator";
+export declare const WORKSPACE_EDIT_INTERNAL_MCP = "ccm__workspace_edit";
 export declare const FEISHU_INTERNAL_MCP = "mcp-feishu";
 export declare const FETCH_WEB_BUNDLED_MCP = "fetch-web-mcp";
 export declare const FILESYSTEM_BUNDLED_MCP = "filesystem-mcp";
@@ -93,6 +94,7 @@ export declare function runInternalMcpRegistrySelfTest(packageRoot?: string): {
         workflowMcpsProtectedAndReady: boolean;
         permissionBrokerProtectedAndReady: boolean;
         workspaceReadonlyProtectedAndReady: boolean;
+        workspaceEditProtectedAndReady: boolean;
         feishuNeedsSettingsWithoutCredentials: boolean;
         internalNamesReserved: boolean;
         secretsNeverExposed: boolean;

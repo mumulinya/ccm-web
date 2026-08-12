@@ -2,12 +2,12 @@ import { computed, ref } from 'vue'
 
 const STORAGE_KEY = 'ccm:usability-workbench:preferences:v1'
 const DEFAULT_SECTIONS = {
-  command: true,
+  command: false,
   quickActions: true,
   attention: true,
   active: true,
-  completed: true,
-  resources: true,
+  completed: false,
+  resources: false,
 }
 
 export function useWorkbenchPreferences(quickActionIds = []) {
@@ -23,7 +23,10 @@ export function useWorkbenchPreferences(quickActionIds = []) {
   const load = () => {
     try {
       const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null')
-      if (stored?.sections) sections.value = { ...DEFAULT_SECTIONS, ...stored.sections }
+      if (stored?.sections) {
+        const legacyDefault = ['command', 'quickActions', 'attention', 'active', 'completed', 'resources'].every(key => stored.sections[key] === true)
+        sections.value = legacyDefault ? { ...DEFAULT_SECTIONS } : { ...DEFAULT_SECTIONS, ...stored.sections }
+      }
       const storedOrder = Array.isArray(stored?.quickActionOrder) ? stored.quickActionOrder : []
       quickActionOrder.value = [...storedOrder.filter(id => quickActionIds.includes(id)), ...quickActionIds.filter(id => !storedOrder.includes(id))]
     } catch {}

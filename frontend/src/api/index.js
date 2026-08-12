@@ -109,6 +109,7 @@ export const tasksApi = {
   cancel: (data) => api('/api/tasks/cancel', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
   executions: (taskId) => api(`/api/tasks/executions?task_id=${encodeURIComponent(taskId)}`),
   rollbackExecution: (data) => api('/api/tasks/execution/rollback', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
+  rewindExecutionFiles: (data) => api('/api/tasks/execution/rewind', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
   mergeExecution: (data) => api('/api/tasks/execution/merge', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
   cleanupExecution: (data) => api('/api/tasks/execution/cleanup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
   delete: (id) => api('/api/tasks/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) }),

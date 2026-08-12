@@ -11,6 +11,9 @@ import SlashCommandPanel from '../common/SlashCommandPanel.vue'
 import SessionContextUsage from '../common/SessionContextUsage.vue'
 import PermissionApprovalCards from '../common/PermissionApprovalCards.vue'
 import ActiveTaskPlanDock from '../common/ActiveTaskPlanDock.vue'
+import ConversationAsideDock from '../common/ConversationAsideDock.vue'
+import ConversationHistoryBranches from '../common/ConversationHistoryBranches.vue'
+import ConversationPermissionMode from '../common/ConversationPermissionMode.vue'
 import GlobalAgentSessionSidebar from './GlobalAgentSessionSidebar.vue'
 import GlobalAgentFeishuBindingModal from './GlobalAgentFeishuBindingModal.vue'
 import GlobalAgentMessageList from './GlobalAgentMessageList.vue'
@@ -36,6 +39,7 @@ import { usePermissionApprovals } from '../../composables/usePermissionApprovals
 import { getDeliveryReport } from '../../utils/agentDisplay.js'
 import { subscribeRuntimeEvents } from '../../utils/runtimeEventBus.js'
 import { getEditableUserMessageText, hasMessageAttachments } from '../../utils/messageActions.js'
+import { consumeAsideCommand, rewindConversationTurn } from '../../utils/conversationRewind.js'
 import {
   classifyGlobalAgentRunPresentation,
   PRESENTATION_REPLY,
@@ -639,8 +643,29 @@ const handleGlobalInputKeydown = async (event) => {
   if (await slash.onKeydown(event)) return
   if (event.key === 'Enter' && !event.shiftKey) {
     event.preventDefault()
+    if (consumeAsideCommand(chatInput.value, { scope: 'global', scopeId: 'global', exactSessionId: currentSessionId.value })) {
+      chatInput.value = ''
+      return
+    }
     await sendMessage()
   }
+}
+
+const rewindGlobalMessage = async (message) => {
+  try {
+    const receipt = await rewindConversationTurn({ scope: 'global', scopeId: 'global', exactSessionId: currentSessionId.value, anchorMessageId: message?.id })
+    if (!receipt) return
+    await syncHistoryFromServer()
+    chatInput.value = receipt.originalPrompt || ''
+    toast.success(receipt.action ? `已总结 ${receipt.summarizedMessages || 0} 条消息` : '已回退到本轮开始前，原需求已放回输入框')
+  } catch (error) { toast.error(error?.message || '回退失败') }
+}
+const sendGlobalMessage = async () => {
+  if (consumeAsideCommand(chatInput.value, { scope: 'global', scopeId: 'global', exactSessionId: currentSessionId.value })) {
+    chatInput.value = ''
+    return
+  }
+  await sendMessage()
 }
 
 const globalRequestRetrySignature = ({ sessionId, message, files, clarificationRunId, targetRefs }) => JSON.stringify({
@@ -821,7 +846,7 @@ const formatGlobalRunVisibleReply = (run = {}, fallback = GLOBAL_RESULT_VISIBLE_
   return sanitizeGlobalVisibleStreamText(text || fallback, fallback, 8000)
 }
 
-function getVisibleGlobalMessageContent(msg, fallback = '这条消息已整理。') {
+function getVisibleGlobalMessageContent(msg, fallback = '') {
   if (!msg) return ''
   if (msg.role === 'user') return String(msg.content || '')
   const structured = msg.agenticRun ? formatGlobalRunVisibleReply(msg.agenticRun, '') : ''
@@ -1030,8 +1055,6 @@ const {
   postJson,
   saveCurrentGlobalSessionKnowledge,
   applyGlobalMissionPayload,
-  getGlobalTaskCard,
-  isGlobalMissionTaskMessage,
   runtimeDebugSections,
   openGlobalChangesTab,
   handleGlobalTaskAction,
@@ -1169,31 +1192,6 @@ onUnmounted(() => {
   unsubscribeFeishuSessionEvents?.()
   unsubscribeFeishuSessionEvents = null
 })
-
-const renderMarkdown = (text) => {
-  if (!text) return '';
-  let html = text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
-
-  html = html.replace(/```(diff|javascript|typescript|js|ts|json|html|css|bash)?([\s\S]*?)```/g, (match, lang, code) => {
-    return `<pre style="background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.08); padding: 12px; border-radius: 6px; font-family: monospace; overflow-x: auto; color: #e5c07b; margin: 12px 0;"><code>${code.trim()}</code></pre>`;
-  });
-
-  html = html.replace(/`([^`]+)`/g, '<code style="background: rgba(255,255,255,0.08); padding: 2px 6px; border-radius: 4px; font-family: monospace; color: #e06c75;">$1</code>');
-  html = html.replace(/\*\*([^\*]+)\*\*/g, '<strong style="color: #61afef;">$1</strong>');
-
-  html = html.replace(/^(#{1,6})\s+(.+)$/gm, (match, hashes, title) => {
-    const level = hashes.length;
-    const sizes = ['20px', '18px', '16px', '15px', '14px', '13px'];
-    const size = sizes[level - 1] || '14px';
-    return `<h${level} style="font-size: ${size}; font-weight: bold; margin-top: 16px; margin-bottom: 8px; color: #fff;">${title}</h${level}>`;
-  });
-
-  html = html.replace(/\n/g, '<br>');
-  return html;
-}
 
 const getGitStatusColor = (status) => {
   if (!status) return '#aaa';
@@ -1473,8 +1471,6 @@ const handleGitCommitCardSubmit = async (msg) => {
         :update-scroll-state="updateScrollState"
         :scroll-to-message="scrollToMessage"
         :scroll-to-bottom="scrollToBottom"
-        :get-global-task-card="getGlobalTaskCard"
-        :is-global-mission-task-message="isGlobalMissionTaskMessage"
         :handle-global-task-action="handleGlobalTaskAction"
         :runtime-debug-sections="runtimeDebugSections"
         :get-visible-global-message-content="getVisibleGlobalMessageContent"
@@ -1484,7 +1480,6 @@ const handleGitCommitCardSubmit = async (msg) => {
         :parse-project-report="parseProjectReport"
         :toggle-report="toggleReport"
         :is-report-open="isReportOpen"
-        :render-markdown="renderMarkdown"
         :toggle-select-all-files="toggleSelectAllFiles"
         :get-git-status-color="getGitStatusColor"
         :handle-git-commit-card-submit="handleGitCommitCardSubmit"
@@ -1493,6 +1488,7 @@ const handleGitCommitCardSubmit = async (msg) => {
         :pending-progress-count="pendingGlobalProgressCount"
         :jump-to-latest-progress="jumpToLatestGlobalProgress"
         @edit-message="editGlobalUserMessage"
+        @rewind-message="rewindGlobalMessage"
         @open-file-change="openSingleFileChange"
         @open-file-changes="openCodeChangeDrawer($event, { title: '全局任务文件改动' })"
       />
@@ -1560,6 +1556,24 @@ const handleGitCommitCardSubmit = async (msg) => {
           @guide="guideGlobalQueuedTurn"
           @retry="(turn) => globalTurnControl.retry(turn).then(() => drainGlobalTurnQueue())"
         />
+        <ConversationAsideDock
+          scope="global"
+          scope-id="global"
+          :exact-session-id="currentSessionId || ''"
+          :active="globalTurnBusy && !!currentSessionId && !isCurrentSessionDraft"
+        />
+        <ConversationPermissionMode
+          scope="global"
+          scope-id="global"
+          :exact-session-id="currentSessionId || ''"
+          :disabled="!currentSessionId || isCurrentSessionDraft"
+        />
+        <ConversationHistoryBranches
+          scope="global"
+          scope-id="global"
+          :exact-session-id="currentSessionId || ''"
+          @restored="syncHistoryFromServer"
+        />
         <div class="input-wrapper" :class="{ 'steering-mode': (isSending && !!activeGlobalRunId) || isSupervisionContinuationInput }">
           <input 
             type="file" 
@@ -1609,7 +1623,7 @@ const handleGitCommitCardSubmit = async (msg) => {
           <button
             class="send-btn"
             :class="{ 'pulse-glow': isSending && !isSteering, 'steering-submit': isSending }"
-            @click="sendMessage"
+            @click="sendGlobalMessage"
             :disabled="!canSendGlobalMessage"
           >
             <svg class="icon-send" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">

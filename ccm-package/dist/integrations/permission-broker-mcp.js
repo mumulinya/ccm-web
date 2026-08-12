@@ -75,7 +75,17 @@ const tools = [
 async function callTool(context, name, args) {
     if (name === "request_execution_permission") {
         const request = await (0, task_permission_broker_1.requestTaskPermission)(context, args);
-        return { success: true, request, allowed: request.state === "approved", next_action: request.state === "approved" ? (request.command ? "调用 execute_approved_command" : "调用 consume_execution_permission") : request.state === "awaiting_user" ? "停止相关操作并等待用户审批" : "停止相关操作并调整方案" };
+        return {
+            success: true,
+            request,
+            allowed: request.state === "approved",
+            retry_blocked: request.state === "rejected" && request.autoRetryBlocked === true,
+            next_action: request.state === "approved"
+                ? (request.command ? "调用 execute_approved_command" : "调用 consume_execution_permission")
+                : request.state === "awaiting_user"
+                    ? "停止相关操作并等待用户审批"
+                    : "该精确操作已被拒绝，不要再次申请；请选择不需要该权限的替代方案，或向用户说明阻塞原因",
+        };
     }
     if (name === "consume_execution_permission")
         return (0, task_permission_broker_1.consumeTaskPermission)(context, String(args?.request_id || ""));

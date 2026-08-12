@@ -1,15 +1,39 @@
+  <WorkspacePageShell
+    :active-view="activeTaskView"
+    title="任务管理"
+    description="派发、跟进、处理阻塞并核对最终交付"
+    :views="taskViews"
+    :primary-action="taskPrimaryAction"
+    :secondary-actions="taskSecondaryActions"
+    storage-key="ccm:tasks-layout:v1"
+    @update:active-view="changeTaskView"
+    @primary-action="handleCreateType('business')"
+    @secondary-action="handleTaskSecondaryAction"
+  >
   <div class="task-manager">
-    <TaskDispatchHeader
-      :stats="stats"
-      :archived-count="archivedTaskCount"
-      :active-view="activeTaskView"
-      @change-view="changeTaskView"
-      @create="handleCreateType"
-      @open-backlog="openBacklog"
-    />
+    <section v-if="taskStopNotice" :class="['task-stop-notice', taskStopNotice.stage]" role="status" aria-live="polite">
+      <div class="task-stop-notice-head">
+        <div>
+          <strong>{{ taskStopNotice.stage === 'cancelled' ? '任务已停止' : taskStopNotice.stage === 'needs_attention' ? '停止任务需要处理' : '正在安全停止任务' }}</strong>
+          <span>{{ taskStopNotice.title }}</span>
+        </div>
+        <div class="task-stop-notice-actions">
+          <button v-if="taskStopNotice.undoAvailable" class="btn btn-outline btn-sm" :disabled="!!taskCancelBusyId" @click="undoStoppedTask">撤销停止</button>
+          <button v-for="action in (taskStopNotice.availableActions || [])" :key="action.id" class="btn btn-outline btn-sm" :disabled="!!taskCancelBusyId" @click="handleTaskStopRecovery(action.kind)">{{ action.label }}</button>
+        </div>
+      </div>
+      <div v-if="taskStopNotice.steps?.length" class="task-stop-steps">
+        <span v-for="step in taskStopNotice.steps" :key="step.id" :class="step.status">
+          <i>{{ step.status === 'completed' ? '✓' : step.status === 'running' ? '●' : '○' }}</i>{{ step.label }}
+        </span>
+      </div>
+      <small v-if="taskStopNotice.undoAvailable">排队任务尚未执行，可在短暂安全窗口内恢复。</small>
+      <small v-else-if="taskStopNotice.stuck">Agent 进程未按时退出，可以重新检查或转为人工接管。</small>
+      <small v-else>代码检查点、任务回放和审计记录都会保留。</small>
+    </section>
 
     <PermissionApprovalCards
-      v-if="activeTaskView !== 'all'"
+      v-if="activeTaskView === 'overview'"
       :requests="pendingPermissionRequests"
       :busy-id="permissionDecisionBusyId"
       @approve="(request) => decideTaskPermission(request, 'approve')"
@@ -75,13 +99,22 @@
             </div>
           </div>
 
-          <div v-if="!isDashboardItemExpanded(item)" class="dashboard-compact-line" @click="toggleDashboardItem(item)">
+          <div v-if="dashboardRecoveryPresentation(item).visible" class="dashboard-recovery-retry" role="status" aria-live="polite">
+            <span class="dashboard-recovery-icon" aria-hidden="true">↻</span>
+            <div>
+              <strong>{{ dashboardRecoveryPresentation(item).title }}</strong>
+              <span>{{ dashboardRecoveryPresentation(item).statusText }}</span>
+              <small>{{ dashboardRecoveryPresentation(item).detail }}</small>
+            </div>
+          </div>
+
+          <div v-if="!isDashboardItemExpanded(item) && !dashboardRecoveryPresentation(item).visible" class="dashboard-compact-line" @click="toggleDashboardItem(item)">
             <span>{{ compactDashboardText(item.status_detail || item.headline || '暂无执行摘要', 150) }}</span>
             <strong>{{ item.workers?.length || item.assignments?.length || 0 }} 个执行成员 · 验证 {{ item.evidence?.verification_executed?.length || 0 }} · 实变 {{ item.evidence?.actual_file_change_count || 0 }}</strong>
           </div>
 
           <div v-else class="dashboard-detail-body">
-            <div v-if="item.status_detail || item.headline" class="dashboard-status-line">
+            <div v-if="!dashboardRecoveryPresentation(item).visible && (item.status_detail || item.headline)" class="dashboard-status-line">
               {{ compactDashboardText(item.status_detail || item.headline, 220) }}
             </div>
 
@@ -145,12 +178,37 @@
                 v-for="action in item.actions"
                 :key="action.id"
                 :class="actionClass(action)"
+                :disabled="executionActionBusy === item.id || (action.kind === 'cancel' && taskCancelBusyId === item.id)"
                 @click.stop="handleDashboardAction(item, action)"
-              >{{ action.label }}</button>
+              >{{ action.kind === 'resume_interrupted' && executionActionBusy === item.id ? '恢复中…' : action.kind === 'cancel' && taskCancelBusyId === item.id ? '正在停止…' : action.label }}</button>
             </div>
           </div>
         </article>
       </div>
+    </section>
+
+    <section v-else-if="activeTaskView === 'needs'" class="task-needs-attention">
+      <div class="needs-attention-head"><div><span>集中处理</span><h3>需要你处理的任务</h3><p>权限、阻塞、失败重试和人工接管统一展示在这里。</p></div><button class="btn btn-outline btn-sm" @click="refreshTaskWork"><RefreshCw :size="14" />刷新</button></div>
+      <PermissionApprovalCards
+        :requests="pendingPermissionRequests"
+        :busy-id="permissionDecisionBusyId"
+        @approve="(request) => decideTaskPermission(request, 'approve')"
+        @reject="(request) => decideTaskPermission(request, 'reject')"
+      />
+      <div v-if="needsAttentionItems.length" class="needs-attention-list">
+        <article v-for="item in needsAttentionItems" :key="item.id" class="needs-attention-item">
+          <div>
+            <span :class="['dashboard-phase', phaseTone(item.phase)]">{{ phaseLabel(item.phase) }}</span><strong>{{ item.title }}</strong>
+            <div v-if="dashboardRecoveryPresentation(item).visible" class="dashboard-recovery-retry compact" role="status">
+              <span class="dashboard-recovery-icon" aria-hidden="true">↻</span>
+              <div><strong>{{ dashboardRecoveryPresentation(item).title }}</strong><span>{{ dashboardRecoveryPresentation(item).statusText }}</span><small>{{ dashboardRecoveryPresentation(item).detail }}</small></div>
+            </div>
+            <p v-else>{{ compactDashboardText(item.status_detail || item.headline || item.blockers?.[0] || '等待处理', 180) }}</p>
+          </div>
+          <div class="dashboard-actions"><button v-for="action in (item.actions || []).filter(actionVisible)" :key="action.id" :class="actionClass(action)" :disabled="executionActionBusy === item.id || (action.kind === 'cancel' && taskCancelBusyId === item.id)" @click="handleDashboardAction(item, action)">{{ action.kind === 'resume_interrupted' && executionActionBusy === item.id ? '恢复中…' : action.kind === 'cancel' && taskCancelBusyId === item.id ? '正在停止…' : action.label }}</button></div>
+        </article>
+      </div>
+      <EmptyState v-else icon="✅" title="当前没有需要处理的任务" hint="权限、阻塞或失败任务出现后会集中显示在这里" />
     </section>
 
     <section v-else-if="activeTaskView === 'advanced'" class="task-runtime-management">
@@ -295,6 +353,7 @@
           :kernel-green-text="greenLevelLabel(taskKernelGreen(task))"
           :can-manual-complete="canManualCompleteDailyDev(task)"
           :can-cancel="canCancelTask(task)"
+          :cancel-busy="taskCancelBusyId === task.id"
           @toggle-selected="toggleTaskSelection"
           @status-change="updateStatus"
           @restore="restoreTask"
@@ -509,10 +568,7 @@
       </div>
     </div>
 
-    <div v-if="showReport" class="modal-overlay" @click.self="showReport = false">
-      <div class="modal report-modal">
-        <button class="modal-close" @click="showReport = false">&times;</button>
-        <h3>📄 任务执行报告</h3>
+    <ResponsiveDetailDrawer :open="showReport" title="任务执行报告" :subtitle="visibleTaskTitle()" width="wide" @close="showReport = false">
         <div class="modal-body" style="flex: 1; overflow-y: auto; padding-right: 4px; margin-top: 12px; display: flex; flex-direction: column; gap: 16px;">
         <div class="report-meta">
           <div><strong>{{ visibleTaskTitle() }}</strong></div>
@@ -741,6 +797,7 @@
                 </div>
               </div>
               <div class="kernel-actions">
+                <button v-if="execution.checkpointIds?.length && (execution.fileChanges?.files?.length || execution.file_changes?.files?.length)" class="btn btn-outline btn-sm" :disabled="!!executionActionBusy" @click="rewindExecutionFiles(execution)">撤销文件…</button>
                 <button v-if="execution.checkpointIds?.length && !['running', 'spawning', 'cancel_requested'].includes(execution.state)" class="btn btn-outline btn-sm" :disabled="!!executionActionBusy" @click="rollbackExecution(execution)">回滚检查点</button>
                 <button v-if="execution.workspace?.mode === 'worktree' && execution.workspace?.mergeOwner !== false && execution.green?.level === 'merge_ready' && !execution.workspace?.mergedAt" class="btn btn-primary btn-sm" :disabled="!!executionActionBusy" @click="mergeExecution(execution)">安全合并</button>
                 <button v-if="execution.workspace?.mergedAt && !execution.workspace?.cleanedAt" class="btn btn-outline btn-sm" :disabled="!!executionActionBusy" @click="cleanupExecution(execution)">清理 worktree</button>
@@ -763,15 +820,13 @@
         </div>
           </details>
         <div class="form-actions">
-          <button v-if="canCancelTask(currentTaskReport)" class="btn btn-danger" @click="cancelTask(currentTaskReport)">停止任务</button>
+          <button v-if="canCancelTask(currentTaskReport)" class="btn btn-danger" :disabled="taskCancelBusyId === currentTaskReport.id" @click="cancelTask(currentTaskReport)">{{ taskCancelBusyId === currentTaskReport.id ? '正在停止…' : '停止任务' }}</button>
           <button v-if="currentTaskReport?.status !== 'done'" class="btn btn-primary" @click="autoContinueFromReport">按缺口自动继续</button>
           <button v-if="currentTaskReport?.status !== 'done'" class="btn btn-outline" @click="continueFromReport">按阻塞项继续</button>
           <button class="btn btn-primary" @click="showReport = false">关闭</button>
         </div>
-      </div>
-    </div>
-  </div>
-
+        </div>
+    </ResponsiveDetailDrawer>
     <!-- 继续执行弹窗 -->
     <div v-if="showContinue" class="modal-overlay" @click.self="showContinue = false">
       <div class="modal continue-modal">
@@ -792,7 +847,6 @@
         </div>
       </div>
     </div>
-
     <!-- 任务日志弹窗 -->
     <div v-if="showLogs" class="modal-overlay" @click.self="showLogs = false">
       <div class="modal" style="min-width:600px;max-height:80vh;display:flex;flex-direction:column">
@@ -816,3 +870,4 @@
       </div>
     </div>
   </div>
+  </WorkspacePageShell>

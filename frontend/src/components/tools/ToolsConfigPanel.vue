@@ -16,6 +16,7 @@ import {
   Package,
   PackageOpen,
   Plug,
+  Plus,
   RefreshCw,
   ScrollText,
   Search,
@@ -34,6 +35,7 @@ import ToolControlOverview from './ToolControlOverview.vue'
 import McpServerEditor from './McpServerEditor.vue'
 import SkillMarkdownViewer from './SkillMarkdownViewer.vue'
 import InternalMcpCatalog from './InternalMcpCatalog.vue'
+import WorkspacePageShell from '../common/WorkspacePageShell.vue'
 
 const emit = defineEmits(['navigate'])
 
@@ -132,6 +134,35 @@ const sectionMeta = computed(() => ({
   'custom-prompt': ['Skill 管理', '管理内置和外部 Prompt Skill'],
   marketplace: ['技能商城', '发现并安装可用的 Skill 与 MCP'],
 }[currentFilter.value] || ['工具与技能', '管理 Agent 可使用的能力']))
+
+const toolViewForFilter = filter => filter === 'overview'
+  ? 'overview'
+  : ['authorization', 'chain-verification', 'invocation-audit'].includes(filter)
+    ? 'governance'
+    : filter === 'runtime'
+      ? 'advanced'
+      : 'capabilities'
+const toolTopView = computed({
+  get: () => toolViewForFilter(currentFilter.value),
+  set: view => {
+    currentFilter.value = ({ overview: 'overview', capabilities: 'core', governance: 'authorization', advanced: 'runtime' })[view] || 'overview'
+  },
+})
+const toolTopViews = computed(() => [
+  { id: 'overview', label: '运行概况' },
+  { id: 'capabilities', label: '能力库', count: coreToolsList.length + mcpTools.value.length + skills.value.length },
+  { id: 'governance', label: '授权与验收', count: authorizationInventory.value.summary?.needsAttention || 0 },
+  { id: 'advanced', label: '高级治理', count: runtimeNeedsAttention.value || 0 },
+])
+const toolPrimaryAction = computed(() => currentFilter.value === 'mcp'
+  ? { id: 'add-mcp', label: '新增 MCP', icon: Plus }
+  : ['custom-prompt', 'custom-skills'].includes(currentFilter.value)
+    ? { id: 'add-skill', label: '新增 Skill', icon: Plus }
+    : null)
+const handleToolPrimaryAction = action => {
+  if (action?.id === 'add-mcp') openMcpEditor()
+  if (action?.id === 'add-skill') showAddSkill.value = true
+}
 
 const runtimeNeedsAttention = computed(() => Math.max(
   0,

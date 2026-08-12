@@ -414,7 +414,14 @@ async function handleGroupLiveRoutesSendPreface(payload, uploadedFiles, ctx, dep
     }
     catch (error) {
         const status = /不存在/.test(String(error?.message || "")) ? 404 : 409;
-        (0, utils_1.sendJson)(res, { error: error.message }, status);
+        // The browser must not attempt to parse this JSON response as SSE.  A
+        // stable code lets it keep the user's draft and refresh its session list.
+        (0, utils_1.sendJson)(res, {
+            error: error.message,
+            code: "GROUP_SESSION_UNAVAILABLE",
+            group_id: String(group_id || ""),
+            requested_session_id: groupSessionId || null,
+        }, status);
         return { done: true };
     }
     (0, group_orchestrator_1.normalizeGroupOrchestrator)(group);
@@ -598,7 +605,15 @@ async function handleGroupLiveRoutesSendPreface(payload, uploadedFiles, ctx, dep
         });
     }
     const persistentTaskRequest = !!explicitContinuationTask || (!statusFollowupRequest && shouldCreatePersistentGroupTask({ isOrchestrated, messageMode, taskIntent, forceProjectTask }));
-    const projectAnalysisRequest = !statusFollowupRequest && shouldUseProjectAnalysisMode({ isOrchestrated, messageMode, taskIntent }) && !persistentTaskRequest;
+    // A newly created group has only its virtual coordinator.  It can
+    // converse, but it cannot inspect a project until a real project
+    // member is added.  Do not route the first message into source
+    // analysis where there is no valid project_id to use.
+    const hasRoutableProjects = (0, group_orchestrator_1.getRoutableMembers)(group).length > 0;
+    const projectAnalysisRequest = hasRoutableProjects
+        && !statusFollowupRequest
+        && shouldUseProjectAnalysisMode({ isOrchestrated, messageMode, taskIntent })
+        && !persistentTaskRequest;
     const continuationKind = explicitContinuationTask
         ? explicitContinuationKind
         : String(taskIntent?.workflowDecision?.continuationKind || "new_task");
@@ -1335,6 +1350,10 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                         }),
                     });
                     const context = (0, group_session_model_context_1.buildExactGroupSessionModelContextPacket)(group_id, { groupSessionId }).rendered;
+                    const groupHasRoutableProjects = (0, group_orchestrator_1.getRoutableMembers)(group).length > 0;
+                    const emptyGroupNotice = groupHasRoutableProjects
+                        ? ""
+                        : "【项目状态】当前群聊尚未添加任何项目成员，因此没有可读取、分析或介绍的项目。请直接说明这一点，并引导用户通过“成员”添加项目；不要调用项目、文件或代码工具。";
                     const sharedFilesContext = buildCoordinatorSharedFilesContext(ctx, group, { groupSessionId, message: messageForAgent });
                     const projectAnalysisContext = projectAnalysisRequest ? buildGroupProjectAnalysisContext(group, messageForAgent, ctx, configs) : "";
                     const responseMessageId = "m" + Date.now().toString(36) + "coord" + crypto.randomBytes(2).toString("hex");
@@ -1364,7 +1383,7 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                         message: projectAnalysisRequest
                             ? `${messageForAgent}\n\n[模式]\n只读项目分析：请基于项目上下文回答用户问题，不要派发子 Agent，不要创建任务，不要承诺修改。`
                             : messageForAgent,
-                        context: projectAnalysisRequest ? `${context}\n\n${projectAnalysisContext}` : context,
+                        context: [context, projectAnalysisRequest ? projectAnalysisContext : "", emptyGroupNotice].filter(Boolean).join("\n\n"),
                         source: "user",
                         groupSessionId,
                         turnId: visibleTurnId,

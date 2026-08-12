@@ -9,9 +9,11 @@ import TaskReplayEvidence from '../replay/TaskReplayEvidence.vue'
 import TaskReplayPlanBoard from '../replay/TaskReplayPlanBoard.vue'
 import TaskReplayTimeline from '../replay/TaskReplayTimeline.vue'
 import TaskReplayInsights from '../replay/TaskReplayInsights.vue'
+import WorkspacePageShell from '../common/WorkspacePageShell.vue'
+import WorkspaceSectionNav from '../common/WorkspaceSectionNav.vue'
 import { subscribeRuntimeEvents } from '../../utils/runtimeEventBus.js'
 import { compactTaskReplayEvents, replayCompactionStats } from '../../utils/taskReplayEventCompaction.js'
-import { isReplayDiagnosticEvent, replayEventSummary, replayEventTitle } from '../../utils/taskReplayPresentation.js'
+import { isReplayDiagnosticEvent, replayEventSummary, replayEventTitle, replayStageLabel } from '../../utils/taskReplayPresentation.js'
 
 const props = defineProps({ navigateTo: { type: Object, default: null } })
 const emit = defineEmits(['navigate'])
@@ -34,6 +36,21 @@ const focusedEvidenceId = ref('')
 const pendingReplayTarget = ref(null)
 const issuePosition = ref(-1)
 const includeSystemEvents = ref(false)
+const replayView = ref(sessionStorage.getItem('ccm:replay-layout:v1:view') || 'summary')
+const currentReplaySection = ref('result')
+const replayViews = [{ id: 'summary', label: '摘要' }, { id: 'advanced', label: '完整记录' }]
+const replaySections = [
+  { id: 'result', label: '结果与下一步' },
+  { id: 'integrity', label: '完整度与因果链' },
+  { id: 'acceptance', label: '验收标准' },
+  { id: 'attempts', label: '尝试对比' },
+  { id: 'timeline', label: '完整时间线' },
+]
+const selectReplaySection = id => {
+  currentReplaySection.value = id
+  requestAnimationFrame(() => document.getElementById(`replay-section-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
+}
+watch(replayView, value => sessionStorage.setItem('ccm:replay-layout:v1:view', value))
 const timelineMode = ref('key')
 const chapterFilter = ref('all')
 const codeChangeDrawer = ref({ visible: false, title: '', subtitle: '', project: '', files: [] })
@@ -120,7 +137,14 @@ const usageLabel = (value, suffix = '') => {
 const isReplayRunning = computed(() => !!replay.value && replay.value.completed !== true)
 const loadedEventLabel = computed(() => `${allEvents.value.length} / ${eventPage.value.total ?? replay.value?.summary?.event_count ?? allEvents.value.length}`)
 const statusLabel = (value) => ({ pending: '待执行', in_progress: '执行中', running: '执行中', done: '已完成', completed: '已完成', failed: '失败', blocked: '受阻', cancelled: '已取消', passed: '通过', warning: '注意', info: '记录' }[value] || value || '未知')
-const stageLabel = (value) => ({ intake: '需求', planning: '计划', dispatch: '派发', execution: '执行', change: '改动', test: '测试', rework: '返工', review: '验收', completion: '交付', system: '系统' }[value] || value)
+const stageLabel = replayStageLabel
+const recoveryPhaseLabel = value => {
+  const phase = String(value || '').toLowerCase()
+  if (/accept|verify|review|summary|deliver|test/.test(phase)) return '验证与交付'
+  if (/dispatch|queue|dependency|merge|wake/.test(phase)) return '协调与分派'
+  if (/execut|work|rework/.test(phase)) return '实施处理'
+  return '当前阶段'
+}
 const dateLabel = (value) => {
   const date = new Date(value)
   return Number.isNaN(date.getTime()) ? '时间未知' : date.toLocaleString('zh-CN', { hour12: false })
@@ -579,21 +603,20 @@ watch([search, stageFilter, statusFilter, actorFilter, taskFilter, preset, chapt
 </script>
 
 <template>
-  <section class="task-replay-page">
-    <header class="replay-toolbar">
-      <div class="toolbar-title">
-        <strong>任务回放</strong>
-        <span>查看从需求到交付的完整工作记录</span>
-      </div>
-      <details class="toolbar-diagnostic-lookup">
+  <WorkspacePageShell
+    v-model:active-view="replayView"
+    title="任务回放"
+    description="从最终结果向下查看验收、因果链和完整执行证据"
+    :views="replayViews"
+    storage-key="ccm:replay-layout:v1"
+  >
+    <template #actions>
+      <details v-if="replayView === 'advanced'" class="toolbar-diagnostic-lookup">
         <summary>按任务编号查找</summary>
-        <div class="toolbar-lookup">
-          <input v-model="taskId" aria-label="任务编号" placeholder="输入任务编号" @keyup.enter="loadReplay()" />
-          <button type="button" :disabled="loading" @click="loadReplay()">{{ loading ? '读取中' : '打开' }}</button>
-        </div>
+        <div class="toolbar-lookup"><input v-model="taskId" aria-label="任务编号" placeholder="输入任务编号" @keyup.enter="loadReplay()" /><button type="button" :disabled="loading" @click="loadReplay()">{{ loading ? '读取中' : '打开' }}</button></div>
       </details>
-    </header>
-
+    </template>
+  <section class="task-replay-page">
     <div v-if="error" class="replay-error">{{ error }}</div>
 
     <template v-if="!replay">
@@ -625,6 +648,7 @@ watch([search, stageFilter, statusFilter, actorFilter, taskFilter, preset, chapt
     </template>
 
     <template v-else>
+      <div class="replay-chapter-nav"><WorkspaceSectionNav :sections="replaySections" :active-section="currentReplaySection" collapsible-on-mobile @update:active-section="selectReplaySection" /></div>
       <div class="replay-overview">
         <div class="overview-heading">
           <button type="button" class="back-button" @click="showIndex">返回任务列表</button>
@@ -634,7 +658,7 @@ watch([search, stageFilter, statusFilter, actorFilter, taskFilter, preset, chapt
         <div v-if="replay.legacy" class="legacy-notice">这条旧记录没有完整任务关联，因此只能显示系统仍保留的诊断事件。</div>
       </div>
 
-      <TaskReplayExecutiveSummary v-if="presentation" :presentation="presentation" :navigation="replay.navigation || []" @navigate="openConversationLink" />
+      <div id="replay-section-result" class="replay-section-anchor"><TaskReplayExecutiveSummary v-if="presentation" :presentation="presentation" :navigation="replay.navigation || []" @navigate="openConversationLink" /></div>
       <section v-if="replay.schedule_origin" class="schedule-origin-card">
         <div><strong>由定时规则生成</strong><span>计划时间 {{ dateLabel(replay.schedule_origin.scheduledFor) }} · {{ replay.schedule_origin.trigger === 'manual' ? '立即运行' : replay.schedule_origin.trigger === 'recovery' ? '停机补跑' : '计划触发' }}</span></div>
         <button type="button" @click="emit('navigate', { tab: 'cron', cronJobId: replay.schedule_origin.cronJobId, cronRunId: replay.schedule_origin.cronRunId })">返回定时任务运行记录</button>
@@ -646,7 +670,7 @@ watch([search, stageFilter, statusFilter, actorFilter, taskFilter, preset, chapt
         <button v-if="canManageReplay" type="button" @click="downloadAuditJson">导出安全审计 JSON</button>
       </div>
 
-      <TaskReplayInsights v-if="presentation" :presentation="presentation" section="overview" @focus-event="focusReplayEvent" @handle-action="handleReplayAction" />
+      <div id="replay-section-integrity" class="replay-section-anchor"><TaskReplayInsights v-if="presentation" :presentation="presentation" section="overview" @focus-event="focusReplayEvent" @handle-action="handleReplayAction" /></div>
 
       <section v-if="freshness" class="replay-freshness">
         <header><div><strong>历史证据与当前代码</strong><small>保留执行时结论，同时重新读取当前权威仓库状态</small></div><em>{{ dateLabel(freshness.checkedAt) }}</em></header>
@@ -677,9 +701,9 @@ watch([search, stageFilter, statusFilter, actorFilter, taskFilter, preset, chapt
         </div>
       </details>
 
-      <TaskReplayAcceptanceMatrix v-if="presentation" :rows="presentation.acceptanceMatrix || []" @open-evidence="openEvidence" />
+      <div id="replay-section-acceptance" class="replay-section-anchor"><TaskReplayAcceptanceMatrix v-if="presentation" :rows="presentation.acceptanceMatrix || []" @open-evidence="openEvidence" /></div>
 
-      <TaskReplayInsights v-if="presentation" :presentation="presentation" section="attempts" />
+      <div id="replay-section-attempts" class="replay-section-anchor"><TaskReplayInsights v-if="presentation" :presentation="presentation" section="attempts" /></div>
 
       <TaskReplayDelivery :deliveries="replay.deliveries || []" :tasks="replay.tasks || []" />
 
@@ -691,7 +715,7 @@ watch([search, stageFilter, statusFilter, actorFilter, taskFilter, preset, chapt
           <span :class="['recovery-dot', row.result]"></span>
           <div>
             <strong>{{ row.reasonLabel }}</strong>
-            <p>现场已保留，从“{{ row.resumePhase || '当前阶段' }}”继续<span v-if="row.completedWorkItemCount">；跳过 {{ row.completedWorkItemCount }} 个已完成工作项</span></p>
+            <p>现场已保留，从“{{ recoveryPhaseLabel(row.resumePhase) }}”继续<span v-if="row.completedWorkItemCount">；跳过 {{ row.completedWorkItemCount }} 个已完成工作项</span></p>
             <small>{{ row.mode === 'safe_auto' ? `安全自动恢复 · 第 ${row.attempt + 1}/${row.maxAttempts} 轮` : '人工恢复门禁' }}<span v-if="row.recoveredAt"> · 已接上原任务</span><span v-else-if="row.nextRetryAt"> · 下次 {{ dateLabel(row.nextRetryAt) }}</span></small>
           </div>
           <b>{{ row.result === 'resumed' ? '已恢复' : row.result === 'needs_user' ? '需要处理' : '等待恢复' }}</b>
@@ -706,7 +730,7 @@ watch([search, stageFilter, statusFilter, actorFilter, taskFilter, preset, chapt
         @select="selectChapter"
       />
 
-      <details class="full-replay-timeline" :open="isReplayRunning">
+      <details id="replay-section-timeline" class="full-replay-timeline replay-section-anchor" :open="replayView === 'advanced' || isReplayRunning">
         <summary><span><strong>完整时间线</strong><small>{{ replay.summary?.event_count || 0 }} 条记录 · 总耗时 {{ durationLabel }}</small></span><em>{{ isReplayRunning ? '任务运行中，实时更新' : '展开查看完整过程' }}</em></summary>
 
       <nav v-if="replay.phases?.length" class="phase-strip" aria-label="任务阶段">
@@ -715,7 +739,7 @@ watch([search, stageFilter, statusFilter, actorFilter, taskFilter, preset, chapt
         </button>
       </nav>
 
-      <div class="replay-controls">
+      <div v-if="replayView === 'advanced'" class="replay-controls">
         <div class="preset-control" role="group" aria-label="快速筛选">
           <button v-for="item in [{id:'all',label:'全部'},{id:'failed',label:'只看失败'},{id:'issues',label:'问题'},{id:'test',label:'TestAgent 验收'},{id:'browser',label:'页面验证'},{id:'changes',label:'改动与返工'}]" :key="item.id" type="button" :class="{ active: preset === item.id }" @click="setPreset(item.id)">{{ item.label }}</button>
         </div>
@@ -734,7 +758,7 @@ watch([search, stageFilter, statusFilter, actorFilter, taskFilter, preset, chapt
         </div>
       </div>
 
-      <div v-if="replay.tasks?.length" class="task-family-strip">
+      <div v-if="replayView === 'advanced' && replay.tasks?.length" class="task-family-strip">
         <button v-for="item in replay.tasks" :key="item.id" type="button" :class="{ active: taskFilter === item.id }" @click="taskFilter = taskFilter === item.id ? 'all' : item.id">
           <span>{{ item.is_root ? '主任务' : item.project || '执行任务' }}</span><strong>{{ item.title }}</strong><em>{{ statusLabel(item.status) }}</em>
         </button>
@@ -763,6 +787,7 @@ watch([search, stageFilter, statusFilter, actorFilter, taskFilter, preset, chapt
       </details>
     </template>
   </section>
+  </WorkspacePageShell>
   <AgentCodeChangeDrawer
     :visible="codeChangeDrawer.visible"
     :title="codeChangeDrawer.title"
@@ -774,7 +799,8 @@ watch([search, stageFilter, statusFilter, actorFilter, taskFilter, preset, chapt
 </template>
 
 <style scoped>
-.task-replay-page { height:100%; overflow:auto; padding:16px; background:var(--bg-primary); color:var(--text-primary); letter-spacing:0; }
+.task-replay-page { min-height:100%; padding:16px; background:var(--bg-primary); color:var(--text-primary); letter-spacing:0; }
+.replay-chapter-nav{position:sticky;top:-16px;z-index:12;margin:-16px -16px 14px;padding:8px 16px;border-bottom:1px solid var(--border-color);background:color-mix(in srgb,var(--bg-primary) 94%,transparent);backdrop-filter:blur(10px)}.replay-chapter-nav :deep(.workspace-section-nav){width:100%;display:flex;gap:4px;overflow-x:auto;padding:0;border:0;background:transparent}.replay-chapter-nav :deep(.workspace-section-nav button){flex:0 0 auto}.replay-section-anchor{scroll-margin-top:62px}
 .replay-toolbar { display:flex; justify-content:space-between; align-items:end; gap:16px; padding-bottom:14px; border-bottom:1px solid var(--border-color); }.toolbar-title strong { display:block; font-size:18px; }.toolbar-title span { display:block; margin-top:3px; color:var(--text-muted); font-size:12px; }.toolbar-diagnostic-lookup { position:relative; }.toolbar-diagnostic-lookup>summary { min-height:34px; display:flex; align-items:center; padding:0 10px; border:1px solid var(--border-color); border-radius:6px; background:var(--surface); color:var(--text-muted); font-size:11px; font-weight:750; cursor:pointer; list-style:none; }.toolbar-diagnostic-lookup>summary::-webkit-details-marker { display:none; }.toolbar-diagnostic-lookup[open]>summary { border-color:var(--accent-blue); color:var(--accent-blue); }.toolbar-diagnostic-lookup .toolbar-lookup { position:absolute; z-index:20; top:calc(100% + 6px); right:0; min-width:270px; padding:8px; border:1px solid var(--border-color); border-radius:7px; background:var(--surface); box-shadow:0 12px 28px rgba(0,0,0,.16); }.toolbar-lookup { display:flex; align-items:center; gap:6px; }.toolbar-lookup>span { color:var(--text-muted); font-size:11px; }.toolbar-lookup input,.replay-index-head input,.event-search,.replay-controls select { height:34px; min-width:0; border:1px solid var(--border-color); border-radius:6px; padding:0 9px; background:var(--surface); color:var(--text-primary); font-size:12px; }.toolbar-lookup input { width:170px; }.toolbar-lookup button,.back-button { height:34px; padding:0 12px; border:1px solid var(--accent-blue); border-radius:6px; background:var(--accent-blue); color:#fff; font-size:12px; font-weight:750; cursor:pointer; }.toolbar-lookup button:disabled { opacity:.6; }
 .replay-error,.legacy-notice { margin-top:12px; padding:10px 12px; border:1px solid #fecaca; border-radius:8px; background:#fef2f2; color:#991b1b; font-size:12px; }.legacy-notice { margin:12px 0 0; border-color:#fde68a; background:#fffbeb; color:#92400e; }
 .replay-index-head { display:flex; justify-content:space-between; align-items:center; gap:14px; padding:18px 0 10px; }.replay-index-head>div strong { display:block; font-size:14px; }.replay-index-head>div span { display:block; margin-top:2px; color:var(--text-muted); font-size:11px; }.replay-index-head input { width:min(330px,45vw); }.replay-index-list { border-top:1px solid var(--border-color); }.replay-index-row { display:grid; width:100%; grid-template-columns:10px minmax(0,1fr) auto; gap:12px; align-items:center; padding:13px 4px; border:0; border-bottom:1px solid var(--border-color); background:transparent; color:inherit; text-align:left; cursor:pointer; }.replay-index-row:hover { background:var(--bg-secondary); }.task-state-dot { width:8px; height:8px; border-radius:50%; background:#94a3b8; }.task-state-dot.done,.task-state-dot.completed { background:#16a34a; }.task-state-dot.in_progress,.task-state-dot.running { background:#2563eb; }.task-state-dot.failed,.task-state-dot.blocked { background:#dc2626; }.task-index-copy { min-width:0; }.task-index-copy strong,.task-index-copy small { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }.task-index-copy strong { font-size:13px; }.task-index-copy small { margin-top:3px; color:var(--text-muted); font-size:11px; }.task-index-meta { text-align:right; }.task-index-meta em,.task-index-meta small { display:block; }.task-index-meta em { color:var(--text-secondary); font-size:11px; font-style:normal; font-weight:750; }.task-index-meta small { margin-top:3px; color:var(--text-muted); font-size:10px; }.replay-loading { padding:50px 12px; color:var(--text-muted); text-align:center; font-size:13px; }

@@ -1,8 +1,9 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
-import { ChevronRight, Link2, ListTodo, MessageSquare, Pencil, Plus, RefreshCw, Send, Trash2, X } from '@lucide/vue'
+import { Link2, ListTodo, MessageSquare, Pencil, Plus, RefreshCw, Send, Trash2, X } from '@lucide/vue'
 import EmptyState from '../common/EmptyState.vue'
 import AutomationSessionBindingDialog from '../common/AutomationSessionBindingDialog.vue'
+import ConversationSessionGroup from '../common/ConversationSessionGroup.vue'
 const props = defineProps({
   project: { type: String, default: '' },
   sessions: { type: Array, default: () => [] },
@@ -16,17 +17,18 @@ const kindOf = (session) => String(session?.session_kind || session?.sessionKind
 const conversationSessions = computed(() => props.sessions.filter(session => sourceOf(session) === 'web' && kindOf(session) === 'conversation'))
 const automationSessions = computed(() => props.sessions.filter(session => sourceOf(session) === 'web' && kindOf(session) === 'automation'))
 const feishuSessions = computed(() => props.sessions.filter(session => sourceOf(session) === 'feishu'))
-const groupStorageKey = 'ccm:project-session-groups:v1'
+const groupStorageKey = 'ccm:project-session-groups:v2'
 const readGroupState = () => {
   try {
     const saved = JSON.parse(localStorage.getItem(groupStorageKey) || '{}')
+    const hasConversationPreference = Object.prototype.hasOwnProperty.call(saved, 'conversation') || Object.prototype.hasOwnProperty.call(saved, 'web')
     return {
-      conversation: saved.conversation === true || saved.web === true,
+      conversation: hasConversationPreference ? (saved.conversation === true || saved.web === true) : true,
       automation: saved.automation === true,
       feishu: saved.feishu === true,
     }
   } catch {
-    return { conversation: false, automation: false, feishu: false }
+    return { conversation: true, automation: false, feishu: false }
   }
 }
 const expandedGroups = ref(readGroupState())
@@ -79,9 +81,8 @@ const bindingText = (session) => {
   <div v-if="open" class="sidebar-backdrop" @click="emit('close')"></div>
   <aside :class="['session-sidebar', { open }]">
     <header>
-      <strong>会话</strong>
+      <strong>会话 <small>{{ sessions.length }}</small></strong>
       <div>
-        <button class="feishu-create" :disabled="!project" title="新建飞书会话" @click="emit('create-feishu')"><Send :size="16" /></button>
         <button :disabled="!project" title="刷新会话" @click="emit('refresh')"><RefreshCw :size="17" /></button>
         <button class="mobile-close" title="关闭会话栏" @click="emit('close')"><X :size="18" /></button>
       </div>
@@ -92,13 +93,9 @@ const bindingText = (session) => {
     </button>
     <div class="session-list">
       <EmptyState v-if="!project" icon="📂" title="选择项目后查看会话" />
-      <EmptyState v-else-if="sessions.length === 0" icon="💬" title="暂无会话" hint="新建一个开始工作" />
       <template v-else>
-        <section class="session-section">
-          <button class="session-section-title" type="button" :aria-expanded="expandedGroups.conversation" @click="toggleGroup('conversation')">
-            <span><ChevronRight class="section-chevron" :class="{ expanded: expandedGroups.conversation }" :size="14" /><MessageSquare :size="12" />普通会话</span><strong>{{ conversationSessions.length }}</strong>
-          </button>
-          <div v-show="expandedGroups.conversation" class="session-section-content">
+        <ConversationSessionGroup label="普通会话" :count="conversationSessions.length" :expanded="expandedGroups.conversation" empty-label="暂无普通会话" @toggle="toggleGroup('conversation')">
+          <template #icon><MessageSquare :size="12" /></template>
             <div
               v-for="session in conversationSessions"
               :key="session.id"
@@ -115,13 +112,9 @@ const bindingText = (session) => {
                 <button title="删除会话" @click.stop="emit('delete', session.id)"><Trash2 :size="14" /></button>
               </span>
             </div>
-          </div>
-        </section>
-        <section class="session-section automation-section">
-          <button class="session-section-title" type="button" :aria-expanded="expandedGroups.automation" @click="toggleGroup('automation')">
-            <span><ChevronRight class="section-chevron" :class="{ expanded: expandedGroups.automation }" :size="14" /><ListTodo :size="12" />自动化任务会话</span><strong>{{ automationSessions.length }}</strong>
-          </button>
-          <div v-show="expandedGroups.automation" class="session-section-content">
+        </ConversationSessionGroup>
+        <ConversationSessionGroup label="自动化任务会话" :count="automationSessions.length" :expanded="expandedGroups.automation" empty-label="暂无自动化任务会话" create-label="新建自动化任务会话" @toggle="toggleGroup('automation')" @create="openBindingDialog(null)">
+          <template #icon><ListTodo :size="12" /></template>
             <div
               v-for="session in automationSessions"
               :key="session.id"
@@ -139,14 +132,9 @@ const bindingText = (session) => {
                 <button title="删除会话" @click.stop="emit('delete', session.id)"><Trash2 :size="14" /></button>
               </span>
             </div>
-            <button class="empty-automation" type="button" @click="openBindingDialog(null)"><Plus :size="14" />新建自动化任务会话</button>
-          </div>
-        </section>
-        <section class="session-section feishu-section">
-          <button class="session-section-title" type="button" :aria-expanded="expandedGroups.feishu" @click="toggleGroup('feishu')">
-            <span><ChevronRight class="section-chevron" :class="{ expanded: expandedGroups.feishu }" :size="14" /><Send :size="12" />飞书会话</span><strong>{{ feishuSessions.length }}</strong>
-          </button>
-          <div v-show="expandedGroups.feishu" class="session-section-content">
+        </ConversationSessionGroup>
+        <ConversationSessionGroup label="飞书会话" tone="feishu" :count="feishuSessions.length" :expanded="expandedGroups.feishu" empty-label="暂无飞书会话" create-label="新建并绑定飞书会话" @toggle="toggleGroup('feishu')" @create="emit('create-feishu')">
+          <template #icon><Send :size="12" /></template>
             <div
               v-for="session in feishuSessions"
               :key="session.id"
@@ -167,9 +155,7 @@ const bindingText = (session) => {
                 <button title="删除飞书会话" @click.stop="emit('delete', session.id)"><Trash2 :size="14" /></button>
               </span>
             </div>
-            <button v-if="!feishuSessions.length" class="empty-feishu" @click="emit('create-feishu')"><Send :size="14" />新建并绑定飞书会话</button>
-          </div>
-        </section>
+        </ConversationSessionGroup>
       </template>
     </div>
   </aside>
@@ -184,31 +170,36 @@ const bindingText = (session) => {
 </template>
 
 <style scoped>
-.session-sidebar { width:276px; min-width:276px; min-height:0; display:flex; flex-direction:column; border-right:1px solid var(--border-color); background:color-mix(in srgb,var(--surface) 98%,var(--bg-secondary) 2%); }
-header { height:54px; flex:0 0 54px; display:flex; align-items:center; justify-content:space-between; padding:0 12px 0 15px; border-bottom:1px solid var(--border-color); }
-header strong { color:var(--text-primary); font-size:12px; }
+.session-sidebar { width:252px; min-width:252px; min-height:0; display:flex; flex-direction:column; border-right:1px solid var(--border-color); background:color-mix(in srgb,var(--surface) 99%,var(--bg-secondary) 1%); }
+header { height:50px; flex:0 0 50px; display:flex; align-items:center; justify-content:space-between; padding:0 10px 0 14px; border-bottom:1px solid var(--border-color); }
+header strong { display:inline-flex; align-items:center; gap:7px; color:var(--text-primary); font-size:12px; }
+header strong small { min-width:18px; padding:1px 5px; border-radius:999px; background:var(--control-bg); color:var(--text-muted); font-size:9px; text-align:center; }
 header>div { display:flex; gap:5px; }
 header button,.session-actions button { width:30px; height:30px; display:inline-flex; align-items:center; justify-content:center; padding:0; border:1px solid transparent; border-radius:6px; background:transparent; color:var(--text-muted); cursor:pointer; }
-header .feishu-create { color:#00a870; border-color:color-mix(in srgb,#00a870 20%,var(--border-color)); }
 header button:hover,.session-actions button:hover { background:var(--control-hover); color:var(--accent-blue); }
-.new-session-button { min-height:36px; flex:0 0 36px; display:flex; align-items:center; justify-content:center; gap:7px; margin:8px 9px 3px; padding:0 10px; border:1px solid color-mix(in srgb,var(--accent-blue) 30%,var(--border-color)); border-radius:7px; background:var(--accent-soft); color:var(--accent-blue); font:inherit; font-size:12px; font-weight:750; cursor:pointer; }
+.new-session-button { min-height:36px; flex:0 0 36px; display:flex; align-items:center; justify-content:center; gap:7px; margin:10px 10px 5px; padding:0 10px; border:1px solid color-mix(in srgb,var(--accent-blue) 25%,var(--border-color)); border-radius:8px; background:color-mix(in srgb,var(--accent-blue) 7%,var(--surface)); color:var(--accent-blue); font:inherit; font-size:11.5px; font-weight:750; cursor:pointer; }
 .new-session-button:hover:not(:disabled) { border-color:var(--accent-blue); background:color-mix(in srgb,var(--accent-soft) 76%,var(--surface)); }
 .new-session-button:disabled { cursor:not-allowed; opacity:.48; }
 .mobile-close { display:none; }
-.session-list { min-height:0; flex:1; overflow:auto; padding:8px 7px; }
+.session-list { min-height:0; flex:1; overflow:auto; padding:5px 8px 12px; }
 .session-section { display:flex; flex-direction:column; }
-.session-section.automation-section { margin-top:5px; }
-.session-section.feishu-section { margin-top:8px; padding-top:6px; border-top:1px solid var(--border-color); }
-.session-section-title { width:100%; height:28px; display:flex; align-items:center; justify-content:space-between; padding:0 7px; border:0; border-radius:5px; background:transparent; color:var(--text-muted); font:inherit; font-size:10px; font-weight:700; text-align:left; cursor:pointer; transition:background .15s ease,color .15s ease; }
+.session-section.automation-section,.session-section.feishu-section { margin-top:4px; }
+.session-section-heading { display:flex; align-items:center; gap:2px; border-radius:6px; }
+.session-section-heading .session-section-title { flex:1; }
+.session-section-title { width:100%; height:32px; display:flex; align-items:center; justify-content:space-between; padding:0 7px; border:0; border-radius:6px; background:transparent; color:var(--text-muted); font:inherit; font-size:10px; font-weight:700; text-align:left; cursor:pointer; transition:background .15s ease,color .15s ease; }
 .session-section-title:hover { background:var(--control-hover); color:var(--text-primary); }
 .session-section-title span { display:inline-flex; align-items:center; gap:5px; }
 .session-section-title strong { font-size:9px; }
+.section-create { width:26px; height:26px; flex:0 0 26px; display:grid; place-items:center; padding:0; border:0; border-radius:6px; background:transparent; color:var(--text-muted); cursor:pointer; opacity:0; transition:opacity .15s ease,background .15s ease,color .15s ease; }
+.session-section-heading:hover .section-create,.section-create:focus-visible { opacity:1; }
+.section-create:hover { background:var(--control-hover); color:var(--accent-blue); }
+.section-create.feishu:hover { color:#00a870; }
 .section-chevron { flex:0 0 auto; transition:transform .16s ease; }
 .section-chevron.expanded { transform:rotate(90deg); }
 .session-section-content { display:flex; flex-direction:column; }
-.session-item { position:relative; width:100%; min-height:54px; display:flex; align-items:center; gap:8px; margin:2px 0; padding:8px 8px 8px 12px; border:1px solid transparent; border-radius:6px; background:transparent; color:var(--text-primary); text-align:left; cursor:pointer; }
+.session-item { position:relative; width:100%; min-height:50px; display:flex; align-items:center; gap:8px; margin:2px 0; padding:7px 8px 7px 11px; border:1px solid transparent; border-radius:8px; background:transparent; color:var(--text-primary); text-align:left; cursor:pointer; }
 .session-item:hover { border-color:var(--border-color); background:var(--control-hover); }
-.session-item.active { border-color:color-mix(in srgb,var(--accent-blue) 20%,var(--border-color)); background:color-mix(in srgb,var(--accent-blue) 7%,var(--surface)); }
+.session-item.active { border-color:color-mix(in srgb,var(--accent-blue) 22%,var(--border-color)); background:color-mix(in srgb,var(--accent-blue) 6%,var(--surface)); }
 .session-item.active::before { content:''; position:absolute; top:9px; bottom:9px; left:0; width:2px; border-radius:2px; background:var(--accent-blue); }
 .session-copy { min-width:0; flex:1; display:flex; flex-direction:column; gap:4px; }
 .session-copy strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:11.5px; }
@@ -218,12 +209,10 @@ header button:hover,.session-actions button:hover { background:var(--control-hov
 .feishu-session.bound:not(.active) { border-color:color-mix(in srgb,#00a870 18%,transparent); }
 .automation-session:not(.active) .session-source-icon { color:var(--accent-blue); }
 .session-actions { display:none; flex-shrink:0; }
-.session-item:hover .session-actions,.session-item.active .session-actions { display:flex; }
+.session-item:hover .session-actions,.session-item:focus-within .session-actions { display:flex; }
 .sidebar-backdrop { display:none; }
-.empty-feishu { width:100%; min-height:40px; display:flex; align-items:center; justify-content:center; gap:6px; border:1px dashed var(--border-color); border-radius:6px; background:transparent; color:var(--text-muted); font-size:10px; cursor:pointer; }
-.empty-automation { width:100%; min-height:34px; display:flex; align-items:center; justify-content:center; gap:6px; margin:3px 0; border:1px dashed color-mix(in srgb,var(--accent-blue) 32%,var(--border-color)); border-radius:6px; background:transparent; color:var(--accent-blue); font-size:10px; cursor:pointer; }
-.empty-automation:hover { background:color-mix(in srgb,var(--accent-blue) 6%,transparent); border-color:var(--accent-blue); }
-.empty-feishu:hover { color:#00a870; border-color:color-mix(in srgb,#00a870 45%,var(--border-color)); background:color-mix(in srgb,#00a870 6%,transparent); }
+.session-section-empty { margin:2px 8px 5px 27px; color:var(--text-muted); font-size:9.5px; line-height:24px; }
+@media (hover:none) { .section-create { opacity:1; } }
 @media (max-width:768px) {
   .sidebar-backdrop { display:block; position:fixed; inset:0; background:rgba(15,23,42,.35); z-index:49; }
   .session-sidebar { position:fixed; inset:0 auto 0 0; width:min(84vw,320px); min-width:0; transform:translateX(-102%); transition:transform .2s ease; z-index:50; box-shadow:12px 0 30px rgba(15,23,42,.15); }

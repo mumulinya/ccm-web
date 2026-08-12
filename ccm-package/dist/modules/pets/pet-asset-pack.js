@@ -90,6 +90,8 @@ function resolvePetAssetNpmInvocation(platform = process.platform) {
     const candidates = [
         process.env.npm_execpath,
         path.join(path.dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js"),
+        // setup-node installs npm beneath the Node distribution root, not bin/node_modules.
+        path.join(path.dirname(path.dirname(process.execPath)), "lib", "node_modules", "npm", "bin", "npm-cli.js"),
     ].filter(Boolean);
     const npmCli = candidates.find(candidate => {
         try {

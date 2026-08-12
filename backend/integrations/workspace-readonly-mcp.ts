@@ -5,7 +5,7 @@ import {
   runInternalMcpServer,
 } from "./internal-mcp-runtime";
 import {
-  WORKSPACE_READONLY_TOOL_DEFINITIONS_V2,
+  WORKSPACE_READONLY_TOOL_DEFINITIONS_V3,
   executeWorkspaceReadonlyToolWithCapability,
   type MainAgentScopeKind,
   type ScopedToolCapabilityV1,
@@ -14,7 +14,7 @@ import {
 export const WORKSPACE_READONLY_MCP_SERVER_NAME = "ccm__workspace_readonly";
 const MAIN_AGENT_ROLES: InternalMcpAgentRole[] = ["global-agent", "group-main-agent", "project-agent"];
 
-const tools: InternalMcpToolDefinition[] = WORKSPACE_READONLY_TOOL_DEFINITIONS_V2.map(tool => ({
+const tools: InternalMcpToolDefinition[] = WORKSPACE_READONLY_TOOL_DEFINITIONS_V3.map(tool => ({
   name: tool.name,
   description: tool.description,
   inputSchema: tool.inputSchema,
@@ -55,5 +55,5 @@ runInternalMcpServer({
   name: WORKSPACE_READONLY_MCP_SERVER_NAME,
   version: "2.0.0",
   tools,
-  callTool: (context, name, args) => executeWorkspaceReadonlyToolWithCapability(name, args, capabilityFromContext(context)),
+  callTool: (context, name, args) => executeWorkspaceReadonlyToolWithCapability(name, args, capabilityFromContext(context), 3),
 });

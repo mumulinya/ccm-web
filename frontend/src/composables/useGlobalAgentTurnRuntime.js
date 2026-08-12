@@ -138,7 +138,11 @@ export function useGlobalAgentTurnRuntime(options = {}) {
     if (agentMsg.streamEvents.length > GLOBAL_STREAM_EVENT_LIMIT) {
       agentMsg.streamEvents.splice(0, agentMsg.streamEvents.length - GLOBAL_STREAM_EVENT_LIMIT)
     }
-    agentMsg.content = agentMsg.streamEvents.map(item => `${item.icon} ${item.title}：${item.text}`).join('\n')
+    // streamEvents are execution-ledger compatibility data, not assistant
+    // message text.  The shared AgentExecutionTranscript already renders
+    // these events.  Copying them into content creates a second, legacy task
+    // card below the live transcript and can overwrite real streamed answer
+    // text when another lifecycle event arrives.
     return true
   }
 

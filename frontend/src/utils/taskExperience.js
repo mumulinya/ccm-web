@@ -118,6 +118,7 @@ const buildRecoverySummary = (source = {}) => {
   const reasoning = source.reasoning_loop || source.reasoningLoop || {}
   const checks = asArray(reasoning.recovery_checks || reasoning.recoveryChecks)
   const recovery = source.recovery || {}
+  const interruptionReceipt = source.interruption_receipt || source.interruptionReceipt || {}
   const checkpoint = source.resume_checkpoint || source.resumeCheckpoint || source.interruption_receipt?.resume_checkpoint || {}
   const safeAutoWaiting = recovery.mode === 'safe_auto' && ['waiting_provider', 'waiting_agent', 'validating', 'queued'].includes(String(recovery.state || ''))
   const resumeCount = Number(source.resume_count || source.resumeCount || recovery.lease_recovery_count || 0)
@@ -134,6 +135,11 @@ const buildRecoverySummary = (source = {}) => {
       : source.recovery_pending
       ? '检测到上次任务没有完整收尾，我已暂停并等待你确认是否继续。'
       : '我已接上上次任务上下文，重新核对目标、当前状态和验收条件后继续推进。',
+    reason_code: String(interruptionReceipt.reason_code || interruptionReceipt.reasonCode || ''),
+    auto_retry: safeAutoWaiting,
+    next_retry_at: safeAutoWaiting ? String(recovery.nextRetryAt || recovery.next_retry_at || '') : '',
+    attempt: Math.max(0, Number(recovery.attempt || 0)),
+    max_attempts: Math.max(1, Number(recovery.maxAttempts || recovery.max_attempts || 3)),
     revalidated: {
       goal: latest.goal_revalidated === true || latest.goalRevalidated === true || checks.length === 0,
       state: latest.state_revalidated === true || latest.stateRevalidated === true || checks.length === 0,
@@ -1095,6 +1101,14 @@ export const globalMissionTaskCard = (message = {}) => {
     rollback: !!mission.rollback_available,
     saveKnowledge: true,
   })
+  const transientModelRecovery = recoverySummary?.auto_retry === true
+    && ['temporary_network', 'provider_overload', 'provider_unavailable', 'model_stream_interrupted'].includes(String(recoverySummary?.reason_code || ''))
+  if (transientModelRecovery) {
+    actions.splice(0, actions.length,
+      { id: 'resume_interrupted', kind: 'resume_interrupted', label: '立即重试', tone: 'primary' },
+      { id: 'cancel', kind: 'cancel', label: '停止任务', tone: 'danger' },
+    )
+  }
   const allTargetLinks = asArray(missionNavigation.targets)
   const targetLinks = allTargetLinks.filter(link => link?.available !== false)
   const unavailableTargetReasons = uniq(allTargetLinks

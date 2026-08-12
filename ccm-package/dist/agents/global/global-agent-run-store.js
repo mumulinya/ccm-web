@@ -485,7 +485,7 @@ function validateTool(name, args) {
 }
 exports.GLOBAL_AGENT_TOOL_SPECS = [
     { name: "tool_search", description: "按需发现本轮尚未加载的低频只读工作区工具。", required: ["query"], risk: "read" },
-    ...workspace_readonly_tools_1.WORKSPACE_READONLY_TOOL_DEFINITIONS_V2.map(tool => ({
+    ...workspace_readonly_tools_1.WORKSPACE_READONLY_TOOL_DEFINITIONS_V3.map(tool => ({
         name: tool.name,
         description: tool.description,
         required: Array.isArray(tool.inputSchema?.required) ? tool.inputSchema.required : [],

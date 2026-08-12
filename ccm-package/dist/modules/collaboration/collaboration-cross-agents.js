@@ -54,6 +54,7 @@ const execution_kernel_1 = require("../../agents/execution-kernel");
 const collaboration_agent_parallel_dispatch_1 = require("./collaboration-agent-parallel-dispatch");
 const agent_communication_v2_1 = require("../../system/agent-communication-v2");
 const agent_communication_mcp_1 = require("../../integrations/agent-communication-mcp");
+const conversation_permission_policy_1 = require("../tools/conversation-permission-policy");
 async function processCrossAgents(groupId, group, sourceProject, output, atMentions, configs, ctx, streamRes = null, depth = 0, seenMentions = new Set(), executionOrder = "parallel", planMessageId = "", taskId = "", deps) {
     const { addGroupLog, addTaskLog, admitChildTypedMemoryDelivery, appendAgentQaTrace, appendGroupMessage, appendTaskTimelineEvent, attachExecutionWorkspace, attachInvokedSkillsToReceipt, attachMemoryContextConsumptionChallenge, attachTaskAgentFinalDispatchPayloadGate, bindTaskAgentInvocationContext, bindTaskAgentInvocationMemoryDelivery, bindTaskAgentInvocationRunnerRequest, bindTaskAgentMemoryContextSnapshot, buildAckPreflightReview, buildAgentMemoryContextBundleWithManifestSelection, buildAgentMemoryPacket, buildAgentQaProtocolInstructions, buildAgentToolContext, buildChildAgentDevelopmentContract, buildChildAgentTaskText, buildChildAgentWorkerHandoff, buildChildAgentWorktreeNotice, buildCollaborationConflictPlan, orderMentionsForConflictPlan, buildCoordinatorCollaborationInstructions, buildCoordinatorReworkContinuationFallback, buildCoordinatorSharedFilesContext, buildFinalWorkerDispatchPayloadGate, buildGroupContextPacket, buildMemberCollaborationInstructions, buildNativeTestAgentPlanBlockedReceipt, buildNativeTestAgentReceipt, buildNativeTestAgentReviewSummary, buildNativeTestAgentRuntimeToolContext, buildPostReviewSpotCheckSummary, buildProjectExecutionBrief, buildProjectVerificationHints, buildRuntimeRecoveryCandidates, buildRuntimeRecoveryPrompt, buildTaskPreflightReasoning, buildTaskProviderSwitchRequests, buildWorkerContinuationHandoff, buildWorkflowMeta, checkTaskFailure, claimTaskWorkItemForAgent, commitChildTypedMemoryDelivery, commitTaskAgentSessionCapacityRevalidation, compactMemoryText, compactRuntimeToolAudit, completeTaskAgentInvocationEdge, coordinatorReworkRouteNeedsFreshVerifier, coordinatorReworkRouteRequiresStop, coordinatorReworkRouteUsesVerifier, createChildTypedMemoryDispatchWal, createExecutionCheckpoint, createMemoryContextConsumptionChallenge, dispatchTaskAgentInvocationEdge, emitAssignmentStatus, ensureExecution, escapeRegExp, evaluateAdvisoryPermissionBoundary, evaluateGreenContract, extractActionableMentions, extractAgentReceipt, extractRunnerVerificationEvidence, formatCollectedAgentOutput, formatNativeTestAgentOutput, formatNativeTestAgentPlanBlockedOutput, getAgentDependencyStateFromOutputs, getChildAgentIsolationMode, getCoordinatorActionMentions, getCoordinatorMember, getInitialWorkflowMeta, getMentionReworkRoute, getProjectAgentCapabilityProfile, getProjectExtraConfig, getReceiptAssignmentStatus, getRoutableMembers, getTaskAgentSessionOptions, getTaskById, getTestAgentHandoffPayload, getTestAgentHandoffProjectWorkDir, getTestAgentHandoffReviewSubject, getTestAgentHandoffWarnings, getWorkDirState, handleAgentQaRequests, inspectTaskAgentFinalDispatchReactiveCompactCircuitBreaker, isCoordinatorTestAgentName, isProviderPromptTooLongFailure, loadExecution, markChildTypedMemoryDispatchCommitted, markChildTypedMemoryDispatchStarted, markChildTypedMemoryRunnerReturned, memoryContextConsumptionReceiptFile, normalizeAgentRuntimeId, normalizeMentionTask, normalizePlanAssignments, openTaskAgentSession, prepareAgentRuntimeTools, prepareChildAgentWorkDir, prepareTaskAgentInvocationEdge, prepareTaskAgentSessionCapacityRevalidation, recordAgentRuntimeLifecycle, recordReplayRepairTimelineBindingsForMention, recordTaskAgentFinalDispatchReactiveCompactCircuitOutcome, recordTaskAgentMemoryContextDelivery, recordTaskAgentSessionTurn, recordWorkerContextProviderSwitchExecutionReceiptForCoordinator, recordWorkerContextProviderSwitchSessionBindingForCoordinator, recoverFinalWorkerDispatchPayload, renderGroupPostCompactDynamicContextDelta, renderGroupPostCompactInvokedSkillAttachments, renderGroupPostCompactPlanAttachment, renderMemoryContextForWorker, resolveMemberRuntime, runGroupOrchestrator, runMainAgentPostReviewSpotCheck, runTestAgentCliJob, runtimeToolDispatchBlockedMessage, runtimeToolDispatchBlockedReceipt, runtimeToolSnapshotFromAudit, shouldSwitchRuntime, stopWrongDirectionWorkerForCoordinatorRoute, stripAgentQaProtocolBlocks, summarizeNativeTestAgentExecutionPlan, summarizeReplayRepairTimelineBindingsForEvent, summarizeTaskAgentMemoryContextSnapshot, summarizeWorkerHandoffForUser, taskAgentInvocationMemoryOptions, taskAgentSessionLifecycleRunnerOptions, taskRequiresCodeChanges, taskRequiresVerification, transitionExecution, uniqueStrings, updateGroupMemory, updateGroupTaskInlineStatus, updateTask, updateTaskWorkItemFromReceipt, validateTestAgentHandoffRegisteredWorkDirs, verifyFinalWorkerDispatchPayloadGate, writeSse } = deps;
     const collectedOutputs = [];
@@ -528,6 +529,30 @@ async function executeMentionJob(mention, env) {
         writeSse(streamRes, { type: "native_session", taskId, agent: targetName, session: { project: targetName, agentType: activeTaskSession.agentType, mode: activeTaskSession.resumeMode, turn: activeTaskSession.turnCount + 1, resumed: activeTaskSession.turnCount > 0 } });
         if (sourceTask)
             updateGroupTaskInlineStatus(sourceTask, "in_progress", `${targetName} ${activeTaskSession.turnCount > 0 ? "恢复原生会话" : "创建原生会话"}`);
+    }
+    if (!nativeTestAgentDispatch && sourceTask && taskRequiresCodeChanges(sourceTask)) {
+        const permission = await (0, conversation_permission_policy_1.authorizeProjectChildAgentStart)({ task: sourceTask, project: targetName, workDir: tWorkDir, agentType: tAgentType });
+        if (!permission.allowed) {
+            const detail = permission.message || "当前会话权限不允许启动代码修改 Agent";
+            updateTask(taskId, {
+                status: "blocked",
+                status_detail: detail,
+                conversation_permission_snapshot: permission.snapshot,
+                conversation_permission_mode: permission.mode,
+                permission_policy_revision: permission.snapshot?.revision || 0,
+                edit_approval_id: permission.editApprovalId || null,
+            });
+            appendTaskTimelineEvent(taskId, {
+                type: "conversation_permission.required",
+                title: permission.mode === "main_agent_only" ? "主 Agent 权限审核结果" : "等待代码修改授权",
+                detail,
+                status: "blocked",
+                phase: "dispatching",
+                agent: targetName,
+                data: { permission_request_id: permission.permissionRequest?.id || "", permission_mode: permission.mode },
+            });
+            return failChildDispatch(detail, [permission.mode === "main_agent_only" ? "处理主 Agent 的审核结果后继续" : "批准当前任务的代码修改权限后自动继续"]);
+        }
     }
     const preparedWorkDir = nativeTestAgentDispatch
         ? { mode: "shared", requestedMode: "shared", workDir: tWorkDir, originalWorkDir: tWorkDir }
@@ -2440,7 +2465,9 @@ async function executeMentionJobTryA(mention, env) {
                     trustedMemoryEnvelopeChecksum: activeMemoryContextSnapshot?.context?.memory_prompt_injection_proof?.trusted_envelope_checksum || "",
                     trustedMemoryEnvelopeSourceChecksum: activeMemoryContextSnapshot?.context?.memory_prompt_injection_proof?.trusted_envelope_source_checksum || "",
                     ...taskAgentSessionLifecycleRunnerOptions(activeMemoryContextSnapshot),
-                    agentSession: activeTaskSession ? getTaskAgentSessionOptions(activeTaskSession) : null,
+                    agentSession: activeTaskSession
+                        ? { ...getTaskAgentSessionOptions(activeTaskSession), conversationPermissionMode: sourceTask?.conversation_permission_mode || "full_access" }
+                        : { conversationPermissionMode: sourceTask?.conversation_permission_mode || "full_access" },
                     durableDispatch: typedMemoryDispatchAdmission.required === true
                         || capacityRevalidationPreparation?.required === true
                         || activeMemoryContextSnapshot?.context?.memory_prompt_injection_proof?.trusted_envelope_bound === true,
@@ -2837,7 +2864,9 @@ async function executeMentionJobTryA(mention, env) {
                         model: activeTaskSession?.modelId || "",
                         taskAgentSessionId: activeTaskSession?.id || "",
                         ...taskAgentSessionLifecycleRunnerOptions(activeMemoryContextSnapshot),
-                        agentSession: activeTaskSession ? getTaskAgentSessionOptions(activeTaskSession) : null,
+                        agentSession: activeTaskSession
+                            ? { ...getTaskAgentSessionOptions(activeTaskSession), conversationPermissionMode: sourceTask?.conversation_permission_mode || "full_access" }
+                            : { conversationPermissionMode: sourceTask?.conversation_permission_mode || "full_access" },
                         durableDispatch: lastTypedMemoryDispatchAdmission.required === true || capacityRevalidationPreparation?.required === true,
                         initialWorkEvents: [runtimeToolContext.workEvent],
                         onDone: (opts) => {

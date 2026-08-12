@@ -1,0 +1,9 @@
+{
+  "schema": "ccm-release-build-attestation-v1",
+  "package_name": "@mumulinya167/ccm-pet-assets",
+  "version": "2.0.4",
+  "package_json_sha256": "90328b63988a7df1c5f753fa6fa4fd997ce901b4657df77d9e32f30bdc5196f6",
+  "source_root": "C:\\Users\\admin\\.cc-connect\\ccm",
+  "created_at": "2026-08-11T17:34:50.188Z",
+  "expires_at": "2026-08-11T18:34:50.189Z"
+}

@@ -44,7 +44,7 @@ const VIEWER_CHAT = [
 const SELF_SERVICE_MUTATIONS = [
   /^\/api\/search\/favorites(?:\/|$)/,
   /^\/api\/slash-commands\/(?:resolve|confirm|records)$/,
-  /^\/api\/conversations\/(?:branch|rewind\/preview|rewind\/apply|plan-mode|preferences)$/,
+  /^\/api\/conversations\/(?:branch|rewind\/(?:preview|apply|execute)|summarize\/(?:preview|execute)|aside|history-branches(?:\/[^/]+\/restore)?|permission-mode|plan-mode|preferences)$/,
   /^\/api\/notifications\/(?:[^/]+\/(?:read|dismiss)|read-all)$/,
   /^\/api\/pets\/runtime\/deliveries\/[^/]+\/ack$/,
   /^\/api\/navigation\/config(?:\/|$)/,

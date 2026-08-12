@@ -4,6 +4,7 @@ import { buildGlobalConversationKnowledgePayload, buildGlobalTaskKnowledgePayloa
 import { getTechnicalDetailSections, sanitizeUserFacingAgentText } from '../utils/agentDisplay.js'
 import { globalExecutionIntentConfirmed, visibleGlobalText } from '../utils/globalAgentExecutionStream.js'
 import { classifyGlobalAgentRunPresentation, PRESENTATION_REPLY } from '../utils/resultPresentation.js'
+import { stopTaskWithPreview } from '../utils/taskStopFlow.js'
 
 export function useGlobalAgentActions(context) {
   const {
@@ -321,6 +322,22 @@ const handleGlobalTaskAction = async (msg, action) => {
     ) {
       return beginGlobalMissionInput(msg, card)
     }
+    const governedMissionId = msg?.globalMission?.id || (isGlobalMissionTaskMessage(msg) ? card?.task_id : '')
+    if (action.kind === 'cancel' && governedMissionId) {
+      const result = await stopTaskWithPreview({ ...(msg.globalMission || card), id: governedMissionId }, {
+        reason: '用户从全局任务卡停止任务', actor: 'global-task-card',
+        onConflict: () => toast.info('任务状态已更新，请重新确认停止范围'),
+      })
+      if (!result) return
+      if (result.task && msg?.globalMission?.id === result.task.id) msg.globalMission = { ...msg.globalMission, ...result.task }
+      if (Array.isArray(result.targets) && Array.isArray(msg.globalMissionChildren)) {
+        const updatedById = new Map(result.targets.map(item => [item.taskId, item.task]))
+        msg.globalMissionChildren = msg.globalMissionChildren.map(item => updatedById.has(item?.task?.id) ? { ...item, task: { ...item.task, ...updatedById.get(item.task.id) } } : item)
+      }
+      saveHistory()
+      toast.success(result.running ? '正在安全停止全局任务及其执行成员' : result.undoAvailable ? '任务已停止，可在 10 秒内撤销' : '全局任务已停止')
+      return
+    }
     if (msg?.agenticRun?.id) {
       if (action.kind === 'provide_clarification') {
         pendingGlobalClarificationInput.value = {
@@ -382,6 +399,9 @@ const handleGlobalTaskAction = async (msg, action) => {
       chatInput.value = missionId ? `继续全局任务 ${missionId}：${requirement}` : requirement
       await nextTick()
       return sendMessage()
+    }
+    if (action.kind === 'resume_interrupted') {
+      return controlMission('resume', { reason: '模型服务恢复后立即续接原任务' })
     }
     if (action.kind === 'cancel') {
       if (!await confirmDialog(`确定取消全局任务“${card?.title || missionId}”？`)) return

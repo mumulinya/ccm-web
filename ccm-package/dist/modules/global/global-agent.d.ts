@@ -55,7 +55,7 @@ export declare function bootstrapGlobalAgentMemoryForServer(): {
 };
 export declare function stopGlobalMissionSupervisionForServer(): void;
 type FeishuTurnCommand = {
-    kind: "normal" | "steer" | "queue" | "stop";
+    kind: "normal" | "steer" | "queue" | "stop" | "aside";
     message: string;
 };
 export declare function parseFeishuConversationTurnCommand(value: any): FeishuTurnCommand;
@@ -69,6 +69,7 @@ export declare function runFeishuConversationTurnCommandSelfTest(): {
         stop: boolean;
         steer: boolean;
         queue: boolean;
+        aside: boolean;
         ordinaryDefaultsToNormal: boolean;
     };
 };

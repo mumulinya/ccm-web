@@ -1,21 +1,13 @@
 import { toast, confirmDialog } from '../utils/toast.js'
 import { buildGroupTaskKnowledgePayload, postKnowledgeCapture } from '../utils/knowledgeCapture.js'
+import { resolveTaskMutationGuard, taskMutationGuardFromSource } from '../utils/taskMutationGuard.js'
+import { stopTaskWithPreview } from '../utils/taskStopFlow.js'
 
 const postTaskCardAction = async (path, body) => {
   const response = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) })
   const payload = await response.json()
   if (!response.ok || payload.success === false) throw new Error(payload.error || `操作失败 (${response.status})`)
   return payload
-}
-
-const taskMutationGuard = (card = {}) => {
-  const links = card.conversation_links || card.conversationLinks || []
-  const binding = links.find(item => item?.relation === 'target') || links.find(item => item?.relation === 'source') || {}
-  return {
-    expected_revision: Math.max(0, Number(card.revision || 0)),
-    generation: Math.max(1, Number(card.generation || card.workflow_generation || 1)),
-    ...(binding.bindingChecksum || binding.binding_checksum ? { binding_checksum: binding.bindingChecksum || binding.binding_checksum } : {}),
-  }
 }
 
 export const buildWaitingUserTaskContinuationFields = (target = {}) => ({
@@ -54,8 +46,8 @@ export function createGroupTaskCardActionHandler(options = {}) {
     const card = getTaskCard?.(msg)
     const id = card?.task_id || action?.task_id || msg?.task_id
     if (!id) return
-    const guard = taskMutationGuard(card)
     try {
+      const guard = await resolveTaskMutationGuard(id, card)
       if (action.kind === 'open_task_center') {
         navigateConversation?.({ tab: 'tasks', taskId: id })
         return
@@ -122,8 +114,14 @@ export function createGroupTaskCardActionHandler(options = {}) {
       } else if (action.kind === 'resume_interrupted') {
         await postTaskCardAction('/api/tasks/resume-interrupted', { id, ...guard })
       } else if (action.kind === 'cancel') {
-        if (!await confirmDialog(`确定永久取消任务“${card?.title || id}”？任务回放会保留，但不会自动恢复。`)) return
-        await postTaskCardAction('/api/tasks/cancel', { id, reason: '用户从群聊任务卡永久取消任务', ...guard })
+        const result = await stopTaskWithPreview({ ...card, id }, {
+          reason: '用户从群聊任务卡停止任务', actor: 'group-task-card',
+          onConflict: () => toast.info('任务状态已更新，请重新确认停止范围'),
+        })
+        if (!result) return
+        toast.success(result.running ? '正在安全停止任务' : result.undoAvailable ? '任务已停止，可在 10 秒内撤销' : '任务已停止')
+        await loadMessages?.()
+        return
       } else if (action.kind === 'confirm_plan') {
         const acceptFeedback = String(action.accept_feedback || action.acceptFeedback || action.feedback || '').trim()
         const confirmText = acceptFeedback
@@ -139,7 +137,7 @@ export function createGroupTaskCardActionHandler(options = {}) {
         await postTaskCardAction('/api/tasks/update', { id, status: 'paused', is_paused: true, status_detail: '用户从群聊任务卡暂停', ...guard })
       } else if (action.kind === 'resume') {
         const resumed = await postTaskCardAction('/api/tasks/update', { id, status: 'pending', is_paused: false, paused: false, status_detail: '用户从群聊任务卡恢复', ...guard })
-        await postTaskCardAction('/api/tasks/queue', { task_id: id, ...taskMutationGuard(resumed.task || card) })
+        await postTaskCardAction('/api/tasks/queue', { task_id: id, ...taskMutationGuardFromSource(resumed.task || card) })
       } else if (action.kind === 'retry') {
         await postTaskCardAction('/api/tasks/retry', { id, reason: '用户从群聊任务卡重新派发', auto_execute: true, ...guard })
       } else if (action.kind === 'reconcile_delivery' || action.kind === 'recheck') {

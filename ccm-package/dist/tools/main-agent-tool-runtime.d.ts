@@ -4,6 +4,7 @@ import type { LoadedContextItemsV1 } from "../system/session-compaction-core";
 import { type MainAgentScopeKind } from "./workspace-readonly-tools";
 import { type MainAgentContinuityIdentityV1, type PostCompactToolRestoreReceipt } from "../system/main-agent-post-compact-continuity";
 import { type MainAgentContextPolicy } from "./main-agent-context-policy";
+import { type WorkspaceReadContextLedger } from "./workspace-read-context";
 export type MainAgentToolRequest = {
     name: string;
     arguments: any;
@@ -37,6 +38,7 @@ export type MainAgentToolRuntimeContext = {
     postCompactRestoreReceipt?: PostCompactToolRestoreReceipt;
     contextPolicy?: MainAgentContextPolicy;
     contextBudget?: any;
+    workspaceReadContext?: WorkspaceReadContextLedger;
 };
 export type MainAgentNativeToolV2 = {
     name: string;
@@ -87,4 +89,5 @@ export declare function executeMainAgentToolRequests(input: {
     resultTokenLimit?: number;
     toolBatchSize?: number;
     readOnlyParallelism?: number;
+    abortSignal?: AbortSignal;
 }): Promise<any[]>;

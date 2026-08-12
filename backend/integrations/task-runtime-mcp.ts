@@ -10,6 +10,7 @@ import {
   internalMcpTaskPayload,
   publicInternalMcpTaskContext,
 } from "./internal-mcp-task-store";
+import { getTaskBoundCommandOutput, runTaskBoundCommand, stopTaskBoundCommand } from "./task-command-runtime";
 
 export const TASK_RUNTIME_MCP_SERVER_NAME = "ccm__task_runtime";
 
@@ -67,9 +68,55 @@ const tools: InternalMcpToolDefinition[] = [
       additionalProperties: false,
     },
   },
+  {
+    name: "run_command",
+    description: "在当前任务绑定的项目或隔离工作区运行构建、测试、启动等命令。必须提供用户可理解的用途说明；高风险操作仍需走授权流程。",
+    inputSchema: {
+      type: "object",
+      required: ["command", "description"],
+      properties: {
+        command: { type: "string", minLength: 1, maxLength: 8000 },
+        description: { type: "string", minLength: 1, maxLength: 160 },
+        working_directory: { type: "string" },
+        timeout_ms: { type: "integer", minimum: 10000, maximum: 600000, default: 120000 },
+        run_in_background: { type: "boolean", default: false },
+      },
+      additionalProperties: false,
+    },
+    roles: ["project-agent", "project-child-agent", "test-agent"],
+  },
+  {
+    name: "get_command_output",
+    description: "读取当前任务后台命令的增量状态和受限输出。不能读取其他任务的命令。",
+    inputSchema: {
+      type: "object",
+      required: ["command_run_id"],
+      properties: {
+        command_run_id: { type: "string" },
+        offset: { type: "integer", minimum: 0, default: 0 },
+        limit: { type: "integer", minimum: 1, maximum: 30000, default: 10000 },
+      },
+      additionalProperties: false,
+    },
+    roles: ["project-agent", "project-child-agent", "test-agent"],
+  },
+  {
+    name: "stop_command",
+    description: "安全停止当前任务的后台命令；必须携带最新 revision，状态漂移时拒绝操作。",
+    inputSchema: {
+      type: "object",
+      required: ["command_run_id", "revision"],
+      properties: { command_run_id: { type: "string" }, revision: { type: "integer", minimum: 1 } },
+      additionalProperties: false,
+    },
+    roles: ["project-agent", "project-child-agent", "test-agent"],
+  },
 ];
 
 async function callTool(context: InternalMcpTaskContext, name: string, args: any) {
+  if (name === "run_command") return runTaskBoundCommand(context, args);
+  if (name === "get_command_output") return getTaskBoundCommandOutput(context, args);
+  if (name === "stop_command") return stopTaskBoundCommand(context, args);
   if (name === "get_task_context") return { success: true, ...publicInternalMcpTaskContext(context) };
   if (name === "update_todo") {
     const items = (Array.isArray(args?.items) ? args.items : []).slice(0, 30).map((item: any, index: number) => ({

@@ -11,6 +11,7 @@ const test_acceptance_mcp_1 = require("./test-acceptance-mcp");
 const permission_broker_mcp_1 = require("./permission-broker-mcp");
 const agent_communication_mcp_1 = require("./agent-communication-mcp");
 const notebook_workspace_mcp_1 = require("./notebook-workspace-mcp");
+const workspace_edit_mcp_1 = require("./workspace-edit-mcp");
 function buildTaskBoundInternalMcpServers(input) {
     if (!input.taskId || !input.project || !input.workDir)
         return {};
@@ -68,6 +69,12 @@ function buildTaskBoundInternalMcpServers(input) {
     }
     if (input.role === "project-child-agent") {
         servers[notebook_workspace_mcp_1.NOTEBOOK_WORKSPACE_MCP_SERVER_NAME] = (0, notebook_workspace_mcp_1.buildNotebookWorkspaceMcpServerConfig)(context);
+    }
+    // This MCP is a capability fallback, not a sandbox. Native third-party
+    // runtimes keep their own Edit/Write tools and are governed by the outer
+    // worktree, allowed-path diff checks and Terminal Gate instead.
+    if (input.role === "project-child-agent" && input.nativeWorkspaceEditing === false) {
+        servers[workspace_edit_mcp_1.WORKSPACE_EDIT_MCP_SERVER_NAME] = (0, workspace_edit_mcp_1.buildWorkspaceEditMcpServerConfig)(context);
     }
     return servers;
 }

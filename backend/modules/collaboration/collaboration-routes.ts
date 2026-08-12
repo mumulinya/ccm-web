@@ -23,6 +23,7 @@ import {
   resolveAutomationSessionBinding,
 } from "../../system/automation-session-bindings";
 import { buildTaskConversationLinks, validateTaskMutationGuard } from "../../system/task-conversation-links";
+import { appendUserVisibleAgentEvent } from "../../system/user-visible-agent-events";
 import { hasResourceAccess, hasTaskResourceAccess } from "../system/access-policy";
 import { buildTaskPreflight } from "./task-intake-preflight";
 import {
@@ -329,9 +330,11 @@ import {
   evaluateGreenContract,
   inspectBranchFreshness,
   isTaskCancellationRequested,
+  listActiveAgentRuns,
   listExecutions,
   loadExecution,
   mergeExecutionWorktree,
+  previewExecutionCheckpointRecovery,
   purgeTaskExecutionArtifacts,
   requestTaskCancellation,
   rollbackExecutionCheckpoint,
@@ -745,6 +748,112 @@ export function handleCollaborationApiReplayAndExecutionRoutes(
     if (!access.allowed) { sendJson(res, { success: false, error: "当前账户没有该任务的访问权限", code: "RESOURCE_ACCESS_DENIED" }, 403); return null; }
     return access.task;
   };
+  const appendSafeRecoveryMilestone = (task: any, decision: any) => {
+    if (!task || decision?.resumed === false) return;
+    const links = buildTaskConversationLinks(task, [task])?.links || [];
+    const link = links.find((item: any) => item.relation === "target" && item.available) || links.find((item: any) => item.available);
+    if (!link) return;
+    const checkpoint = task?.resume_checkpoint || task?.interruption_receipt?.resume_checkpoint || {};
+    const phase = String(checkpoint?.phase || "");
+    const phaseLabel = /accept|verify|review|summary|deliver/i.test(phase) ? "验证与交付" : /dispatch|queue|dependency/i.test(phase) ? "协调与分派" : phase ? "实施处理" : "";
+    const skippedWorkItemCount = Array.isArray(checkpoint?.completedWorkItemIds) ? checkpoint.completedWorkItemIds.length : Number(checkpoint?.completedWorkItemCount || 0);
+    appendUserVisibleAgentEvent({
+      eventId: `task:${task.id}:recovery:${Math.max(1, Number(task.generation || task.workflow_generation || 1))}`,
+      scope: link.scope,
+      scopeId: link.scopeId,
+      exactSessionId: link.exactSessionId,
+      ...(link.messageId ? { anchorMessageId: link.messageId } : {}),
+      generation: Math.max(1, Number(task.generation || task.workflow_generation || 1)),
+      taskId: String(task.id || ""),
+      eventType: "agent_progress",
+      display: { title: "恢复接续", summary: "已重新核验后继续", status: "success" },
+      detail: {
+        executionStage: { kind: phaseLabel === "验证与交付" ? "verification_delivery" : phaseLabel === "协调与分派" ? "coordination_dispatch" : "project_execution" },
+        recoveryMilestone: { safe: true, phaseLabel, skippedWorkItemCount: Math.max(0, skippedWorkItemCount), revalidated: true },
+      },
+    });
+  };
+  const taskStopTerminal = (task: any) => ["done", "failed", "cancelled", "canceled", "reverted", "archived"]
+    .includes(String(task?.status || "").toLowerCase());
+  const taskStopQueued = (taskId: string) => Array.from(taskQueues.values()).some((queue: any) => Array.isArray(queue) && queue.includes(taskId));
+  const taskStopDescendants = (root: any, tasks = loadTasks()) => {
+    const byParent = new Map<string, any[]>();
+    for (const candidate of tasks) {
+      const parents = new Set([
+        String(candidate?.parent_task_id || candidate?.parentTaskId || ""),
+        String(candidate?.global_mission_id || candidate?.globalMissionId || ""),
+      ].filter(Boolean));
+      for (const parentId of parents) byParent.set(parentId, [...(byParent.get(parentId) || []), candidate]);
+    }
+    const explicit = new Map(tasks.map((item: any) => [String(item?.id || ""), item]));
+    const result: any[] = [];
+    const seen = new Set<string>([String(root?.id || "")]);
+    const queue = [
+      ...(byParent.get(String(root?.id || "")) || []),
+      ...(Array.isArray(root?.child_task_ids) ? root.child_task_ids.map((id: any) => explicit.get(String(id))).filter(Boolean) : []),
+    ];
+    while (queue.length) {
+      const current = queue.shift();
+      const id = String(current?.id || "");
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      result.push(current);
+      queue.push(...(byParent.get(id) || []));
+      if (Array.isArray(current?.child_task_ids)) queue.push(...current.child_task_ids.map((childId: any) => explicit.get(String(childId))).filter(Boolean));
+    }
+    return result;
+  };
+  const taskStopTargets = (task: any, cascade: string) => {
+    const descendants = taskStopDescendants(task).filter(item => !taskStopTerminal(item));
+    return cascade === "task_only" ? [task] : [task, ...descendants];
+  };
+  const taskStopPreviewToken = (task: any, cascade: string, targets: any[]) => crypto.createHash("sha256").update(JSON.stringify({
+    schema: "ccm-task-stop-preview-v1",
+    task_id: task?.id || "",
+    revision: Math.max(0, Number(task?.revision || 0)),
+    generation: Math.max(1, Number(task?.generation || task?.workflow_generation || 1)),
+    cascade,
+    targets: targets.map(item => [item?.id || "", Math.max(0, Number(item?.revision || 0)), String(item?.status || "")]),
+  })).digest("hex");
+  const buildTaskStopPreview = (task: any, requestedCascade = "") => {
+    const descendants = taskStopDescendants(task).filter(item => !taskStopTerminal(item));
+    const cascade = requestedCascade === "task_only" ? "task_only" : descendants.length ? "descendants" : "task_only";
+    const targets = taskStopTargets(task, cascade);
+    const executions = targets.flatMap(target => listExecutions({ taskId: String(target.id || "") }));
+    const liveExecutions = executions.filter((execution: any) => !["succeeded", "failed", "cancelled"].includes(String(execution?.state || "")));
+    const agentRuns = targets.flatMap(target => listActiveAgentRuns({ taskId: String(target.id || "") }));
+    const queuedTargets = targets.filter(target => taskStopQueued(String(target.id || "")));
+    const activeSessions = targets.flatMap(target => listTaskAgentSessions({ taskId: String(target.id || "") }))
+      .filter((session: any) => !["closed", "cancelled", "failed", "completed"].includes(String(session?.status || session?.state || "").toLowerCase()));
+    const worktrees = executions.filter((execution: any) => execution?.workspace?.mode === "worktree" && !execution?.workspace?.cleanedAt);
+    const canUndo = targets.every(target => ["pending", "paused", "blocked", "needs_user"].includes(String(target?.status || "").toLowerCase()))
+      && agentRuns.length === 0 && liveExecutions.length === 0 && !targets.some(target => runningTaskIds.has(String(target?.id || "")));
+    return {
+      schema: "ccm-task-stop-preview-v1",
+      taskId: String(task?.id || ""),
+      title: compactFormText(task?.title, "任务"),
+      cascade,
+      recommendedCascade: descendants.length ? "descendants" : "task_only",
+      descendants: descendants.map(item => ({ taskId: String(item.id || ""), title: compactFormText(item.title, "子任务"), status: String(item.status || "") })),
+      impact: {
+        targetTaskCount: targets.length,
+        childTaskCount: Math.max(0, targets.length - 1),
+        activeAgentCount: agentRuns.length,
+        activeExecutionCount: liveExecutions.length,
+        activeSessionCount: activeSessions.length,
+        queuedTaskCount: queuedTargets.length,
+        worktreeCount: worktrees.length,
+        checkpointsPreserved: true,
+        replayPreserved: true,
+      },
+      canUndo,
+      undoWindowSeconds: canUndo ? 10 : 0,
+      previewToken: taskStopPreviewToken(task, cascade, targets),
+      revision: Math.max(0, Number(task?.revision || 0)),
+      generation: Math.max(1, Number(task?.generation || task?.workflow_generation || 1)),
+      contentStored: false,
+    };
+  };
   const conversationLinksMatch = pathname.match(/^\/api\/tasks\/([^/]+)\/conversation-links$/);
   if (conversationLinksMatch && req.method === "GET") {
     const taskId = decodeURIComponent(conversationLinksMatch[1] || "").trim();
@@ -880,6 +989,131 @@ export function handleCollaborationApiReplayAndExecutionRoutes(
   if (pathname === "/api/tasks/execution-dashboard" && req.method === "GET") {
     const limit = Math.max(1, Math.min(50, Number(parsed.query.limit || 12)));
     sendJson(res, buildExecutionDashboard(limit));
+    return true;
+  }
+
+  if (pathname === "/api/tasks/active-runs" && req.method === "GET") {
+    const principal = (req as any).ccmAuth;
+    const now = Date.now();
+    const safeText = (value: any, max = 180) => {
+      const text = String(value || "").replace(/[\r\n\t]+/g, " ").replace(/\s+/g, " ").trim();
+      if (!text || /```|-----begin|(?:api[_ -]?key|password|secret|authorization|bearer)\s*[:=]/i.test(text)) return "";
+      return text.slice(0, max);
+    };
+    const isTerminal = (task: any) => ["done", "failed", "cancelled", "canceled", "reverted"].includes(String(task?.status || "").toLowerCase());
+    const modelRecoveryFor = (task: any) => {
+      const receipt = task?.interruption_receipt || {};
+      const recovery = receipt?.recovery || {};
+      const reasonCode = String(receipt?.reason_code || receipt?.reasonCode || "");
+      const transient = ["temporary_network", "provider_overload", "provider_unavailable", "model_stream_interrupted"].includes(reasonCode);
+      const recoverable = receipt?.recoverable === true;
+      const autoRetry = recovery?.mode === "safe_auto" && ["waiting_provider", "validating", "queued"].includes(String(recovery?.state || ""));
+      return {
+        visible: transient && recoverable,
+        reasonCode,
+        autoRetry,
+        state: String(recovery?.state || ""),
+        nextRetryAt: String(recovery?.nextRetryAt || recovery?.next_retry_at || ""),
+        attempt: Math.max(0, Number(recovery?.attempt || 0)),
+        maxAttempts: Math.max(0, Number(recovery?.maxAttempts || recovery?.max_attempts || 0)),
+      };
+    };
+    const needsUser = (task: any) => task?.recovery_pending === true
+      || task?.acceptance_state === "recovery_required"
+      || ["blocked", "needs_user", "awaiting_confirmation"].includes(String(task?.status || "").toLowerCase())
+      || task?.collaboration_state?.needs_user === true;
+    const stageFor = (task: any) => {
+      const state = String(task?.acceptance_state || task?.collaboration_state?.phase || "").toLowerCase();
+      if (/dispatch|queue|dependency|merge|wake/.test(state) || task?.workflow_type === "global_mission") return "协调与分派";
+      if (/verify|review|accept|test|summary|deliver|complete/.test(state) || task?.status === "done") return "验证与交付";
+      if (/execut|rework|work_item|running|progress/.test(state) || task?.status === "in_progress") return "实施处理";
+      return "了解情况";
+    };
+    const stateFor = (task: any) => {
+      if (isTerminal(task)) return String(task?.status || "").toLowerCase() === "done" ? "completed" : String(task?.status || "").toLowerCase();
+      if (task?.cancellation_requested_at) return "stopping";
+      const modelRecovery = modelRecoveryFor(task);
+      if (modelRecovery.visible && modelRecovery.autoRetry) return "waiting";
+      if (needsUser(task)) return "needs_user";
+      if (["pending", "queued"].includes(String(task?.status || "").toLowerCase())) return "waiting";
+      return "running";
+    };
+    const sourceFor = (task: any) => {
+      if (task?.group_id) return { type: "group", label: safeText(task?.group_name || task?.mission_target?.name || "群聊协作", 80) || "群聊协作" };
+      if (task?.target_project) return { type: "project", label: safeText(task?.target_project, 80) || "项目会话" };
+      return { type: "global", label: "全局 Agent" };
+    };
+    const project = (task: any) => {
+      const source = sourceFor(task);
+      const checkpoint = task?.resume_checkpoint || task?.interruption_receipt?.resume_checkpoint || {};
+      const skipped = Array.isArray(checkpoint?.completedWorkItemIds) ? checkpoint.completedWorkItemIds.length : Number(checkpoint?.completedWorkItemCount || 0);
+      const updatedAt = String(task?.updated_at || task?.resumed_at || task?.created_at || "");
+      const updatedMs = Date.parse(updatedAt);
+      const progress = safeText(task?.delivery_summary?.headline || task?.status_detail || task?.final_report || task?.result, 180)
+        || (needsUser(task) ? "需要继续处理后才能完成" : stateFor(task) === "waiting" ? "等待执行" : "正在处理任务");
+      const canStop = !isTerminal(task) && hasTaskResourceAccess(task, principal, "manage");
+      const undoExpiresAt = String(task?.cancellation_undo?.expires_at || "");
+      const undoAvailable = String(task?.status || "").toLowerCase() === "cancelled" && !!undoExpiresAt && Date.parse(undoExpiresAt) > now;
+      const stoppingElapsedMs = task?.cancellation_requested_at ? Math.max(0, now - Date.parse(String(task.cancellation_requested_at))) : 0;
+      const stopStuck = stateFor(task) === "stopping" && stoppingElapsedMs >= 30_000;
+      const modelRecovery = modelRecoveryFor(task);
+      const availableActions: any[] = [];
+      if (modelRecovery.visible && canStop) {
+        availableActions.push({ id: "resume_interrupted", kind: "resume_interrupted", label: modelRecovery.autoRetry ? "立即重试" : "恢复任务", enabled: true });
+        if (stateFor(task) !== "stopping") availableActions.push({ id: "cancel", kind: "cancel", label: "停止任务", enabled: true });
+      } else if (canStop && stateFor(task) !== "stopping") availableActions.push({ id: "cancel", kind: "cancel", label: "停止任务", enabled: true });
+      if (!modelRecovery.visible && stopStuck && canStop) availableActions.push(
+        { id: "recheck", kind: "recheck", label: "重新检查", enabled: true },
+        { id: "takeover", kind: "takeover", label: "人工接管", enabled: true },
+      );
+      if (undoAvailable && hasTaskResourceAccess(task, principal, "manage")) availableActions.push({ id: "undo_stop", kind: "undo_stop", label: "撤销停止", enabled: true });
+      return {
+        taskId: String(task?.id || ""),
+        title: safeText(task?.title, 140) || "未命名任务",
+        source,
+        state: stateFor(task),
+        stage: stageFor(task),
+        progress,
+        updatedAt,
+        createdAt: String(task?.created_at || ""),
+        elapsedMs: Number.isFinite(updatedMs) ? Math.max(0, now - updatedMs) : 0,
+        recovery: modelRecovery.visible ? {
+          reasonCode: modelRecovery.reasonCode,
+          autoRetry: modelRecovery.autoRetry,
+          state: modelRecovery.state,
+          nextRetryAt: modelRecovery.nextRetryAt,
+          attempt: modelRecovery.attempt,
+          maxAttempts: modelRecovery.maxAttempts,
+        } : task?.resumed_at ? {
+          mode: task?.recovery_decision?.user_requested === true ? "manual" : "automatic",
+          stage: safeText(checkpoint?.phase, 80),
+          skippedWorkItemCount: Math.max(0, skipped),
+          revalidated: task?.recovery_decision?.revalidated === true || task?.recovery_decision?.state_revalidated === true,
+        } : null,
+        availableActions,
+        stopProgress: task?.cancellation_progress ? {
+          stage: safeText(task.cancellation_progress.stage, 40),
+          requestedAt: String(task.cancellation_progress.requested_at || task.cancellation_requested_at || ""),
+          stuck: stopStuck,
+        } : null,
+        undoExpiresAt: undoAvailable ? undoExpiresAt : "",
+        revision: Math.max(0, Number(task?.revision || 0)),
+        generation: Math.max(1, Number(task?.generation || task?.workflow_generation || 1)),
+        bindingChecksum: safeText(task?.automation_session_binding_snapshot?.bindingChecksum || task?.automation_session_binding_snapshot?.binding_checksum, 128),
+        contentStored: false,
+      };
+    };
+    const visible = loadTasks()
+      .filter((task: any) => !task?.archived && !task?.deleted_at)
+      .filter((task: any) => hasTaskResourceAccess(task, principal, "use"))
+      .sort((a: any, b: any) => String(b?.updated_at || b?.created_at || "").localeCompare(String(a?.updated_at || a?.created_at || "")));
+    const active = visible.filter((task: any) => !isTerminal(task)).map(project);
+    const recent = visible
+      .filter((task: any) => isTerminal(task) && (now - Date.parse(String(task?.updated_at || task?.completed_at || task?.created_at || 0))) <= 24 * 60 * 60 * 1000)
+      .slice(0, 10)
+      .map(project);
+    res.setHeader("Cache-Control", "private, no-store");
+    sendJson(res, { success: true, active, recent, generatedAt: new Date().toISOString(), contentStored: false });
     return true;
   }
 
@@ -1101,8 +1335,8 @@ export function handleCollaborationApiReplayAndExecutionRoutes(
         const payload = body ? JSON.parse(body) : {};
         const taskId = String(payload.task_id || payload.taskId || payload.id || "");
         if (!taskId) return sendJson(res, { error: "缺少任务 ID" }, 400);
-        const task = loadTasks().find((item: any) => item.id === taskId);
-        if (!task) return sendJson(res, { error: "任务不存在" }, 404);
+        const task = rejectTaskRead(taskId, "manage");
+        if (!task) return;
         if (runningTaskIds.has(taskId)) return sendJson(res, { error: "任务仍在执行，请先停止后再撤销" }, 409);
         const checkpointIds = uniqueStrings(listExecutions({ taskId }).flatMap((item: any) => item.checkpointIds || [])).reverse();
         if (!checkpointIds.length) return sendJson(res, { error: "该任务没有可用的安全检查点" }, 409);
@@ -1150,10 +1384,159 @@ export function handleCollaborationApiReplayAndExecutionRoutes(
         const recovery = resumeInterruptedTaskExecution(task, { userRequested: true, authorizationValid: true, runtimeValid: true });
         if (!recovery.resumed) return sendJson(res, { error: recovery.decision.reason, recovery_decision: recovery.decision }, 409);
         const updated = updateTask(taskId, { status: "pending", acceptance_state: task.interruption_receipt?.checkpoint || "planned", auto_execute: true, is_paused: false, paused: false, recovery_pending: false, recovery_decision: recovery.decision, execution_attempt: Math.max(0, Number(task.execution_attempt || 0)) + 1, resumed_at: new Date().toISOString(), status_detail: "已恢复原任务和子 Agent 会话，等待继续执行" });
+        appendSafeRecoveryMilestone(updated || task, recovery);
         appendTaskTimelineEvent(taskId, { type: "task_recovered", title: "已恢复原任务和子 Agent 会话", detail: recovery.decision.reason, status: "ok", phase: "queued", data: { reopened_session_ids: recovery.reopenedSessions.map((item: any) => item.id), recovery_checksum: recovery.decision.checksum } });
         const queued = enqueueTask(taskId, ctx);
         return sendJson(res, { success: true, task: updated, recovery_decision: recovery.decision, queue_result: queued });
       } catch (e: any) { return sendJson(res, { error: e.message }, 400); }
+    });
+    return true;
+  }
+
+  if (pathname === "/api/tasks/cancel/preview" && req.method === "POST") {
+    let body = "";
+    req.on("data", (chunk: any) => body += chunk);
+    req.on("end", () => {
+      try {
+        const payload = body ? JSON.parse(body) : {};
+        const taskId = String(payload.task_id || payload.taskId || payload.id || "");
+        if (!taskId) return sendJson(res, { error: "缺少任务 ID" }, 400);
+        const task = rejectTaskRead(taskId, "manage");
+        if (!task) return;
+        if (rejectTaskMutationConflict(res, task, payload, false)) return;
+        if (taskStopTerminal(task)) return sendJson(res, { error: "任务已经结束，无法停止" }, 409);
+        res.setHeader("Cache-Control", "private, no-store");
+        sendJson(res, { success: true, preview: buildTaskStopPreview(task, String(payload.cascade || "")) });
+      } catch (error: any) { sendJson(res, { error: error.message || "无法生成停止预览" }, 400); }
+    });
+    return true;
+  }
+
+  if (pathname === "/api/tasks/cancel/status" && req.method === "GET") {
+    const taskId = String(parsed.query.task_id || parsed.query.taskId || "");
+    if (!taskId) { sendJson(res, { error: "缺少任务 ID" }, 400); return true; }
+    const task = rejectTaskRead(taskId, "manage");
+    if (!task) return true;
+    const scopeIds = Array.isArray(task?.cancellation_scope?.target_ids) && task.cancellation_scope.target_ids.length
+      ? task.cancellation_scope.target_ids.map(String)
+      : [taskId];
+    const rows = loadTasks().filter((item: any) => scopeIds.includes(String(item?.id || "")));
+    const activeRuns = rows.flatMap((item: any) => listActiveAgentRuns({ taskId: String(item.id || "") }));
+    const liveExecutions = rows.flatMap((item: any) => listExecutions({ taskId: String(item.id || "") }))
+      .filter((execution: any) => !["succeeded", "failed", "cancelled"].includes(String(execution?.state || "")));
+    const stillRunning = rows.some((item: any) => runningTaskIds.has(String(item.id || ""))) || activeRuns.length > 0 || liveExecutions.length > 0;
+    const requestedAt = String(task?.cancellation_requested_at || task?.cancellation_progress?.requested_at || "");
+    const elapsedMs = requestedAt ? Math.max(0, Date.now() - Date.parse(requestedAt)) : 0;
+    const stuck = stillRunning && elapsedMs >= 30_000;
+    let current = task;
+    if (!stillRunning && task?.cancellation_requested_at && String(task?.status || "") !== "cancelled") {
+      for (const row of rows) {
+        if (taskStopTerminal(row) && String(row?.status || "") !== "in_progress") continue;
+        updateTask(row.id, {
+          status: "cancelled", status_detail: "任务已安全停止", cancelled_at: new Date().toISOString(),
+          cancellation_progress: { ...(row.cancellation_progress || {}), stage: "cancelled", completed_at: new Date().toISOString() },
+        });
+        clearTaskCancellation(row.id);
+      }
+      current = loadTasks().find((item: any) => String(item?.id || "") === taskId) || task;
+    }
+    const stage = !stillRunning ? "cancelled" : stuck ? "needs_attention" : "stopping";
+    res.setHeader("Cache-Control", "private, no-store");
+    sendJson(res, {
+      success: true,
+      status: {
+        taskId, stage, stillRunning, stuck, elapsedMs,
+        activeAgentCount: activeRuns.length,
+        activeExecutionCount: liveExecutions.length,
+        steps: [
+          { id: "request", label: "停止请求已接收", status: "completed" },
+          { id: "agents", label: "停止 Agent 与验证进程", status: stillRunning ? "running" : "completed" },
+          { id: "workspace", label: "保留检查点并收口工作区", status: stillRunning ? "pending" : "completed" },
+          { id: "done", label: "任务已停止", status: stillRunning ? "pending" : "completed" },
+        ],
+        availableActions: stuck ? [
+          { id: "recheck", kind: "recheck", label: "重新检查" },
+          { id: "takeover", kind: "takeover", label: "人工接管" },
+        ] : [],
+        revision: Math.max(0, Number(current?.revision || 0)),
+        generation: Math.max(1, Number(current?.generation || current?.workflow_generation || 1)),
+        contentStored: false,
+      },
+    });
+    return true;
+  }
+
+  if (pathname === "/api/tasks/cancel/recheck" && req.method === "POST") {
+    let body = "";
+    req.on("data", (chunk: any) => body += chunk);
+    req.on("end", async () => {
+      try {
+        const payload = body ? JSON.parse(body) : {};
+        const taskId = String(payload.task_id || payload.taskId || payload.id || "");
+        const task = rejectTaskRead(taskId, "manage");
+        if (!task) return;
+        if (rejectTaskMutationConflict(res, task, payload, false)) return;
+        const action = String(payload.action || "recheck");
+        const ids = Array.isArray(task?.cancellation_scope?.target_ids) ? task.cancellation_scope.target_ids.map(String) : [taskId];
+        for (const id of ids) requestTaskCancellation(id, action === "takeover" ? "用户人工接管未退出的任务进程" : "用户重新检查任务停止状态", "task-stop-governance");
+        if (action === "takeover") {
+          const updated = updateTask(taskId, {
+            status: "manual_takeover", recovery_pending: true, acceptance_state: "recovery_required",
+            status_detail: "自动停止未能确认，已转为人工接管并保留现场",
+            cancellation_progress: { ...(task.cancellation_progress || {}), stage: "needs_attention", takeover_at: new Date().toISOString() },
+          });
+          addTaskLog(taskId, "warning", "自动停止超时，用户已人工接管");
+          await ctx.onTaskStatusChange?.(updated || task, "needs_user", "自动停止超时，已人工接管");
+          return sendJson(res, { success: true, task: updated, takeover: true });
+        }
+        addTaskLog(taskId, "info", "用户重新检查并再次发送停止请求");
+        sendJson(res, { success: true, rechecked: true });
+      } catch (error: any) { sendJson(res, { error: error.message || "重新检查失败" }, 400); }
+    });
+    return true;
+  }
+
+  if (pathname === "/api/tasks/cancel/undo" && req.method === "POST") {
+    let body = "";
+    req.on("data", (chunk: any) => body += chunk);
+    req.on("end", async () => {
+      try {
+        const payload = body ? JSON.parse(body) : {};
+        const taskId = String(payload.task_id || payload.taskId || payload.id || "");
+        const task = rejectTaskRead(taskId, "manage");
+        if (!task) return;
+        if (rejectTaskMutationConflict(res, task, payload, false)) return;
+        const undo = task?.cancellation_undo;
+        if (!undo?.expires_at || Date.parse(String(undo.expires_at)) <= Date.now()) return sendJson(res, { error: "撤销停止已过期" }, 409);
+        const targets = Array.isArray(undo.targets) ? undo.targets : [];
+        const currentTasks = loadTasks();
+        for (const snapshot of targets) {
+          const current = currentTasks.find((item: any) => String(item?.id || "") === String(snapshot?.task_id || ""));
+          if (!current || String(current.status || "") !== "cancelled" || listActiveAgentRuns({ taskId: current.id }).length) {
+            return sendJson(res, { error: "任务状态已变化，不能撤销停止" }, 409);
+          }
+        }
+        const restored: any[] = [];
+        for (const snapshot of targets) {
+          clearTaskCancellation(String(snapshot.task_id || ""));
+          const updated = updateTask(String(snapshot.task_id || ""), {
+            status: snapshot.status || "pending", auto_execute: snapshot.auto_execute !== false,
+            is_paused: snapshot.is_paused === true, paused: snapshot.paused === true,
+            status_detail: "已撤销停止，恢复原任务状态", acceptance_state: snapshot.acceptance_state || "planned",
+            terminal_state_receipt: null, terminal_decision: null, terminal_gate: null,
+            cancellation_requested_at: null,
+            cancellation_reason: null, cancelled_at: null, cancellation_scope: null,
+            cancellation_progress: null, cancellation_undo: null,
+          });
+          if (snapshot.was_queued || (snapshot.status === "pending" && snapshot.auto_execute !== false)) enqueueTask(String(snapshot.task_id || ""), ctx);
+          if (updated) restored.push(updated);
+        }
+        addTaskLog(taskId, "info", "用户在安全窗口内撤销停止，任务已恢复原状态");
+        appendTaskTimelineEvent(taskId, { type: "task_stop_undone", title: "已撤销停止", detail: "任务已恢复到停止前状态", status: "ok", phase: "queued" });
+        const current = loadTasks().find((item: any) => String(item?.id || "") === taskId) || restored[0] || task;
+        await ctx.onTaskStatusChange?.(current, "restored", "用户撤销停止");
+        sendJson(res, { success: true, task: current, restored });
+      } catch (error: any) { sendJson(res, { error: error.message || "撤销停止失败" }, 400); }
     });
     return true;
   }
@@ -1166,56 +1549,101 @@ export function handleCollaborationApiReplayAndExecutionRoutes(
         const payload = body ? JSON.parse(body) : {};
         const taskId = String(payload.task_id || payload.taskId || payload.id || "");
         if (!taskId) return sendJson(res, { error: "缺少任务 ID" }, 400);
-        const task = loadTasks().find((item: any) => item.id === taskId);
-        if (!task) return sendJson(res, { error: "任务不存在" }, 404);
+        const task = rejectTaskRead(taskId, "manage");
+        if (!task) return;
         if (rejectTaskMutationConflict(res, task, payload, false)) return;
-        if (task.status === "done") return sendJson(res, { error: "已完成任务不能取消" }, 409);
-        for (const queue of taskQueues.values()) {
-          let index = queue.indexOf(taskId);
-          while (index >= 0) { queue.splice(index, 1); index = queue.indexOf(taskId); }
+        if (taskStopTerminal(task)) return sendJson(res, { error: "已经结束的任务不能停止" }, 409);
+        const cascade = String(payload.cascade || "") === "task_only" ? "task_only" : taskStopDescendants(task).some(item => !taskStopTerminal(item)) ? "descendants" : "task_only";
+        const preview = buildTaskStopPreview(task, cascade);
+        const suppliedPreviewToken = String(payload.preview_token || payload.previewToken || "");
+        if (suppliedPreviewToken && suppliedPreviewToken !== preview.previewToken) {
+          return sendJson(res, { success: false, error: "任务影响范围已变化，请重新确认", code: "TASK_STOP_PREVIEW_CONFLICT" }, 409);
         }
+        const targets = taskStopTargets(task, cascade).filter(item => !taskStopTerminal(item));
         const reason = compactFormText(payload.reason, "用户主动停止任务");
-        const cancellation = requestTaskCancellation(taskId, reason, String(payload.actor || "local-user"));
-        const testAgentRunsCancelled = cancelTestAgentRunsForTask(taskId, reason);
-        const isRunning = runningTaskIds.has(taskId);
-        const sessions = closeTaskAgentSessions({ taskId }, "用户取消任务，关闭任务级原生会话");
-        const idempotencySettled = task.trace_id ? settleIdempotencyByTrace(task.trace_id, "failed", { cancelled: true, task_id: taskId, reason }) : [];
-        const worktrees: any[] = [];
-        for (const execution of listExecutions({ taskId })) {
-          if (execution.workspace?.mode !== "worktree" || execution.workspace?.cleanedAt) continue;
-          try { worktrees.push({ execution_id: execution.id, ...cleanupExecutionWorktree(execution.id, true) }); }
-          catch (error: any) { worktrees.push({ execution_id: execution.id, success: false, error: error.message }); }
+        const requestedAt = new Date().toISOString();
+        const batchId = `stop_${crypto.randomBytes(8).toString("hex")}`;
+        const undoTargets = preview.canUndo ? targets.map(item => ({
+          task_id: String(item.id || ""), status: String(item.status || "pending"), auto_execute: item.auto_execute !== false,
+          is_paused: item.is_paused === true, paused: item.paused === true, was_queued: taskStopQueued(String(item.id || "")),
+          acceptance_state: item.acceptance_state || "planned",
+        })) : [];
+        const results: any[] = [];
+        let anyRunning = false;
+        for (const target of targets) {
+          const targetId = String(target.id || "");
+          removeTaskFromQueues(targetId);
+          const cancellation = requestTaskCancellation(targetId, reason, String(payload.actor || "local-user"));
+          const testAgentRunsCancelled = cancelTestAgentRunsForTask(targetId, reason);
+          const isRunning = runningTaskIds.has(targetId) || listActiveAgentRuns({ taskId: targetId }).length > 0;
+          anyRunning = anyRunning || isRunning;
+          const sessions = closeTaskAgentSessions({ taskId: targetId }, "用户停止任务，关闭任务级原生会话");
+          const idempotencySettled = target.trace_id ? settleIdempotencyByTrace(target.trace_id, "failed", { cancelled: true, task_id: targetId, reason }) : [];
+          const worktrees: any[] = [];
+          for (const execution of listExecutions({ taskId: targetId })) {
+            if (execution.workspace?.mode !== "worktree" || execution.workspace?.cleanedAt) continue;
+            try { worktrees.push({ execution_id: execution.id, ...cleanupExecutionWorktree(execution.id, true) }); }
+            catch (error: any) { worktrees.push({ execution_id: execution.id, success: false, error: error.message }); }
+          }
+          const updatedTarget = updateTask(targetId, {
+            status: isRunning ? "in_progress" : "cancelled", auto_execute: false, is_paused: true, paused: true,
+            status_detail: isRunning ? "正在安全停止 Agent 并收口工作区" : "任务已停止",
+            cancellation_requested_at: requestedAt, cancellation_reason: reason, cancellation_actor: String(payload.actor || "local-user"),
+            cancellation_audit: { schema: "ccm-task-stop-audit-v1", batch_id: batchId, actor: String(payload.actor || "local-user"), reason, requested_at: requestedAt, cascade, root_task_id: taskId, contentStored: false },
+            cancellation_scope: { batch_id: batchId, root_task_id: taskId, cascade, target_ids: targets.map(item => String(item.id || "")) },
+            cancellation_progress: { schema: "ccm-task-stop-progress-v1", batch_id: batchId, stage: isRunning ? "stopping" : "cancelled", requested_at: requestedAt, ...(isRunning ? {} : { completed_at: requestedAt }) },
+            cancellation_cleanup: { sessions_closed: sessions.length, test_agent_runs_cancelled: testAgentRunsCancelled.length, idempotency_settled: Array.isArray(idempotencySettled) ? idempotencySettled.length : Number(idempotencySettled || 0), worktrees },
+            ...(isRunning ? {} : { cancelled_at: requestedAt }),
+          });
+          if (!isRunning) { releaseTaskLease(targetId, "cancelled"); clearTaskCancellation(targetId); }
+          updateGroupTaskInlineStatus(updatedTarget || target, isRunning ? "in_progress" : "cancelled", isRunning ? "正在安全停止" : "任务已停止");
+          addTaskLog(targetId, "warning", isRunning ? "已发送停止请求，正在终止 Agent 进程并收口工作区" : "已从队列移除并停止任务");
+          appendTaskTimelineEvent(targetId, { type: "task_stop_requested", title: isRunning ? "正在停止任务" : "任务已停止", detail: reason, status: isRunning ? "active" : "warning", phase: "cancelled", data: { batch_id: batchId, root_task_id: taskId, cascade } });
+          await ctx.onTaskStatusChange?.(updatedTarget || target, isRunning ? "cancelling" : "cancelled", reason);
+          results.push({ taskId: targetId, task: updatedTarget, running: isRunning, cancellation });
         }
-        const updated = updateTask(taskId, { status: isRunning ? "in_progress" : "cancelled", auto_execute: false, is_paused: true, paused: true, status_detail: isRunning ? "取消请求已发送，正在终止 Agent 进程" : "任务已取消", cancellation_requested_at: new Date().toISOString(), cancellation_reason: reason, cancellation_cleanup: { sessions_closed: sessions.length, test_agent_runs_cancelled: testAgentRunsCancelled.length, idempotency_settled: Array.isArray(idempotencySettled) ? idempotencySettled.length : Number(idempotencySettled || 0), worktrees }, ...(isRunning ? {} : { cancelled_at: new Date().toISOString() }) });
-        if (!isRunning) {
-          releaseTaskLease(taskId, "cancelled");
-          clearTaskCancellation(taskId);
+        let updated = loadTasks().find((item: any) => String(item?.id || "") === taskId) || task;
+        if (preview.canUndo && !anyRunning) {
+          const expiresAt = new Date(Date.now() + 10_000).toISOString();
+          updated = updateTask(taskId, { cancellation_undo: { schema: "ccm-task-stop-undo-v1", batch_id: batchId, expires_at: expiresAt, targets: undoTargets } }) || updated;
         }
-        updateGroupTaskInlineStatus(updated || task, isRunning ? "in_progress" : "cancelled", isRunning ? "正在终止 Agent 进程" : "任务已取消");
-        addTaskLog(taskId, "warning", isRunning ? "已发送取消请求，正在终止 Agent 进程树" : "已从队列移除并取消任务");
-        await ctx.onTaskStatusChange?.(updated || task, isRunning ? "cancelling" : "cancelled", reason);
-        sendJson(res, { success: true, task: updated, running: isRunning, cancellation, cleanup: updated?.cancellation_cleanup, queue_status: getQueueStatus() });
+        sendJson(res, {
+          success: true, task: updated, running: anyRunning, targets: results,
+          progress: { taskId, stage: anyRunning ? "stopping" : "cancelled", batchId, targetTaskCount: targets.length },
+          undoAvailable: preview.canUndo && !anyRunning,
+          undoExpiresAt: updated?.cancellation_undo?.expires_at || "",
+          queue_status: getQueueStatus(),
+        });
       } catch (e: any) { sendJson(res, { error: e.message }, 400); }
     });
     return true;
   }
 
-  if (["/api/tasks/execution/rollback", "/api/tasks/execution/merge", "/api/tasks/execution/cleanup"].includes(pathname) && req.method === "POST") {
+  if (["/api/tasks/execution/rollback", "/api/tasks/execution/rewind", "/api/tasks/execution/merge", "/api/tasks/execution/cleanup"].includes(pathname) && req.method === "POST") {
     let body = "";
     req.on("data", (chunk: any) => body += chunk);
     req.on("end", () => {
       try {
         const payload = body ? JSON.parse(body) : {};
+        if ((pathname.endsWith("/rollback") || pathname.endsWith("/rewind")) && payload.preview_only === true) {
+          return sendJson(res, previewExecutionCheckpointRecovery(String(payload.checkpoint_id || payload.checkpointId || ""), { paths: payload.paths }));
+        }
         if (payload.confirmed !== true) return sendJson(res, { error: "该操作需要服务端确认回执" }, 409);
         let result: any;
-        if (pathname.endsWith("/rollback")) result = rollbackExecutionCheckpoint(String(payload.checkpoint_id || payload.checkpointId || ""), String(payload.reason || ""), { allowShared: payload.allow_shared === true || payload.allowShared === true });
+        if (pathname.endsWith("/rollback") || pathname.endsWith("/rewind")) result = rollbackExecutionCheckpoint(String(payload.checkpoint_id || payload.checkpointId || ""), String(payload.reason || ""), {
+          allowShared: payload.allow_shared === true || payload.allowShared === true,
+          paths: pathname.endsWith("/rewind") ? payload.paths : undefined,
+          cancelExecution: pathname.endsWith("/rollback"),
+          previewToken: payload.preview_token || payload.previewToken || "",
+          authoritative: payload.authoritative === true,
+        });
         else if (pathname.endsWith("/merge")) result = mergeExecutionWorktree(String(payload.execution_id || payload.executionId || ""), { force: !!payload.force, commit: payload.commit !== false, message: payload.message || "" });
         else result = cleanupExecutionWorktree(String(payload.execution_id || payload.executionId || ""), !!payload.force);
         const executionId = String(payload.execution_id || payload.executionId || result?.executionId || "");
         const executionRecord = executionId ? loadExecution(executionId) : null;
         const task = executionRecord?.taskId ? loadTasks().find((item: any) => item.id === executionRecord.taskId) : null;
         if (task?.trace_id) {
-          const action = pathname.endsWith("/merge") ? "merge" : pathname.endsWith("/rollback") ? "rollback" : "cleanup";
+          const action = pathname.endsWith("/merge") ? "merge" : pathname.endsWith("/rewind") ? "rewind" : pathname.endsWith("/rollback") ? "rollback" : "cleanup";
           appendTraceEvent(task.trace_id, { id: `execution:${executionId}:${action}:${result?.mergeCommit || result?.rolledBackAt || result?.cleanedAt || "done"}`, type: `execution.${action}`, status: "ok", task_id: task.id, group_id: task.group_id || "", agent: executionRecord?.project || "", message: result?.duplicate ? `${action} 重复请求已复用原结果` : `${action} 操作完成`, data: result });
         }
         sendJson(res, result);

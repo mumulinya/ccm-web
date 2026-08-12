@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { Box, FileText, Pause, Play, RefreshCw, RotateCcw, Settings2 } from '@lucide/vue'
+import { Box, Ellipsis, FileText, Pause, Play, RefreshCw, RotateCcw, Settings2 } from '@lucide/vue'
 
 const props = defineProps({
   project: { type: String, default: '' },
@@ -11,6 +11,7 @@ const props = defineProps({
 })
 const emit = defineEmits(['update:selectedProfileId', 'action', 'rescan', 'configure', 'logs'])
 const now = ref(Date.now())
+const menuOpen = ref(false)
 let timer = null
 onMounted(() => { timer = window.setInterval(() => { now.value = Date.now() }, 1000) })
 onBeforeUnmount(() => window.clearInterval(timer))
@@ -50,13 +51,13 @@ const statusText = computed(() => {
   <section v-if="project" class="runtime-bar" aria-label="项目运行工作台">
     <div class="runtime-heading">
       <span class="runtime-icon"><Play :size="16" /></span>
-      <div><strong>源码运行</strong><small>运行与构建</small></div>
+      <div><strong>项目运行</strong><small>启动、构建与日志</small></div>
     </div>
 
     <div v-if="loading" class="runtime-loading"><RefreshCw :size="15" class="spin" />正在读取运行配置</div>
     <template v-else-if="profiles.length">
       <label class="profile-select">
-        <span>运行配置</span>
+        <span>运行入口</span>
         <select :value="selected?.id || ''" @change="emit('update:selectedProfileId', $event.target.value)">
           <option v-for="profile in profiles" :key="profile.id" :value="profile.id">
             {{ profile.label }} · {{ profile.projectType }}{{ profile.environment !== 'default' ? ` · ${profile.environment}` : '' }} · {{ profile.runCommand ? (profile.run_readiness?.ready === false ? `缺少 ${profile.run_readiness.executable || '运行环境'}` : '可启动') : '仅构建' }}
@@ -66,16 +67,23 @@ const statusText = computed(() => {
 
       <div class="runtime-state" :class="processState.status">
         <span class="state-dot"></span>
-        <div><strong>{{ statusText }}</strong><small>{{ selected?.modulePath === '.' ? '项目根目录' : selected?.modulePath }}</small></div>
+        <div><strong>{{ running ? '正在运行' : statusText }}</strong><small>{{ selected?.modulePath === '.' ? '项目根目录' : selected?.modulePath }}</small></div>
       </div>
 
       <div class="runtime-actions">
         <button v-if="!active" class="primary" :disabled="!!busyAction || unknown || !selected?.runCommand || !runReady" :title="runReady ? '启动所选源码项目' : selected?.run_readiness?.reason" @click="emit('action', 'start')"><Play :size="15" />{{ busyAction === 'start' ? '启动中' : '启动' }}</button>
         <button v-else class="pause" :disabled="!!busyAction || stopping" :title="starting ? '停止依赖准备' : '暂停所选源码项目'" @click="emit('action', 'stop')"><Pause :size="15" />{{ stopping || busyAction === 'stop' ? '停止中' : starting ? '停止准备' : '暂停' }}</button>
-        <button :disabled="!!busyAction || starting || unknown || !selected?.runCommand || !runReady" :title="runReady ? '重新运行所选源码项目' : selected?.run_readiness?.reason" @click="emit('action', 'restart')"><RotateCcw :size="15" /></button>
         <button :disabled="!!busyAction || building || !selected?.buildCommand || !buildReady" :title="buildReady ? buildLabel : selected?.build_readiness?.reason" @click="emit('action', 'build')"><Box :size="15" />{{ building ? '构建中' : buildLabel }}</button>
-        <button title="查看运行日志" @click="emit('logs', 'run')"><FileText :size="15" /></button>
-        <button title="运行配置" @click="emit('configure')"><Settings2 :size="15" /></button>
+        <div class="runtime-more">
+          <button class="more-trigger" title="更多运行操作" aria-label="更多运行操作" :aria-expanded="menuOpen" @click="menuOpen = !menuOpen"><Ellipsis :size="17" /></button>
+          <div v-if="menuOpen" class="runtime-menu">
+            <button :disabled="!!busyAction || starting || unknown || !selected?.runCommand || !runReady" @click="menuOpen = false; emit('action', 'restart')"><RotateCcw :size="15" />重新运行</button>
+            <button @click="menuOpen = false; emit('logs', 'run')"><FileText :size="15" />运行日志</button>
+            <button v-if="buildState" @click="menuOpen = false; emit('logs', 'build')"><FileText :size="15" />构建日志</button>
+            <button @click="menuOpen = false; emit('configure')"><Settings2 :size="15" />运行配置</button>
+            <button @click="menuOpen = false; emit('rescan')"><RefreshCw :size="15" />重新扫描入口</button>
+          </div>
+        </div>
       </div>
 
       <div v-if="buildState && buildState.status !== 'building'" class="build-result" :class="buildState.status">
@@ -94,26 +102,31 @@ const statusText = computed(() => {
 </template>
 
 <style scoped>
-.runtime-bar { min-height:58px; display:flex; align-items:center; gap:14px; padding:8px 16px; border-bottom:1px solid var(--border-color); background:color-mix(in srgb,var(--surface) 97%,var(--accent-blue) 3%); }
-.runtime-heading { min-width:112px; display:flex; align-items:center; gap:8px; }
+.runtime-bar { position:relative; min-height:54px; display:flex; align-items:center; gap:12px; padding:7px 18px; border-bottom:1px solid var(--border-color); background:color-mix(in srgb,var(--surface) 98%,var(--accent-blue) 2%); }
+.runtime-heading { min-width:150px; display:flex; align-items:center; gap:8px; }
 .runtime-heading > div,.runtime-state > div { display:flex; flex-direction:column; min-width:0; }
 .runtime-heading strong,.runtime-state strong { font-size:11.5px; }
 .runtime-heading small,.runtime-state small { margin-top:2px; color:var(--text-muted); font-size:9.5px; }
-.runtime-icon { width:32px; height:32px; display:grid; place-items:center; border:1px solid color-mix(in srgb,var(--accent-blue) 22%,var(--border-color)); border-radius:7px; background:var(--surface); color:var(--accent-blue); }
+.runtime-icon { width:30px; height:30px; display:grid; place-items:center; border:1px solid color-mix(in srgb,var(--accent-blue) 18%,var(--border-color)); border-radius:8px; background:var(--surface); color:var(--accent-blue); }
 .profile-select { min-width:240px; max-width:460px; flex:1; display:grid; grid-template-columns:auto minmax(0,1fr); align-items:center; gap:8px; }
 .profile-select span { color:var(--text-muted); font-size:9.5px; white-space:nowrap; }
 select { width:100%; height:34px; padding:0 30px 0 10px; border:1px solid var(--border-color); border-radius:6px; background:var(--surface); color:var(--text-primary); font-size:11px; }
-.runtime-state { min-width:145px; display:flex; align-items:center; gap:8px; padding:0 10px; border-left:1px solid var(--border-color); }
+.runtime-state { min-width:126px; display:flex; align-items:center; gap:8px; padding:0 10px; border-left:1px solid var(--border-color); }
 .state-dot { width:8px; height:8px; border-radius:50%; background:#94a3b8; }
 .runtime-state.running .state-dot { background:#16a34a; box-shadow:0 0 0 3px color-mix(in srgb,#16a34a 14%,transparent); }
 .runtime-state.starting .state-dot { background:#d97706; box-shadow:0 0 0 3px color-mix(in srgb,#d97706 14%,transparent); }
 .runtime-state.stopping .state-dot { background:#d97706; box-shadow:0 0 0 3px color-mix(in srgb,#d97706 14%,transparent); animation:pulse-stop 1s ease-in-out infinite; }
 .runtime-state.failed .state-dot,.runtime-state.unknown .state-dot { background:#dc2626; }
 .runtime-actions { display:flex; align-items:center; gap:5px; }
+.runtime-more { position:relative; }
 button { min-width:34px; height:34px; display:inline-flex; align-items:center; justify-content:center; gap:6px; padding:0 9px; border:1px solid var(--border-color); border-radius:6px; background:var(--surface); color:var(--text-primary); cursor:pointer; font-size:10.5px; white-space:nowrap; }
 button:disabled { opacity:.45; cursor:not-allowed; }
 button.primary { border-color:var(--accent-blue); background:var(--accent-blue); color:white; }
 button.pause { border-color:#dc2626; color:#dc2626; }
+.more-trigger { width:34px; padding:0; }
+.runtime-menu { position:absolute; top:40px; right:0; z-index:45; width:178px; display:grid; gap:2px; padding:6px; border:1px solid var(--border-color); border-radius:9px; background:var(--surface); box-shadow:var(--shadow-lg); }
+.runtime-menu button { width:100%; justify-content:flex-start; border-color:transparent; background:transparent; font-weight:550; }
+.runtime-menu button:hover:not(:disabled) { background:var(--control-hover); }
 .runtime-loading,.runtime-empty { flex:1; display:flex; align-items:center; gap:8px; color:var(--text-muted); font-size:12px; }
 .runtime-empty button:first-of-type { margin-left:auto; }
 .build-result { max-width:180px; display:flex; align-items:center; gap:4px; color:var(--text-muted); font-size:9.5px; }
@@ -125,7 +138,7 @@ button.pause { border-color:#dc2626; color:#dc2626; }
 .spin { animation:spin 1s linear infinite; }
 @keyframes spin { to { transform:rotate(360deg); } }
 @keyframes pulse-stop { 50% { opacity:.35; } }
-@media(max-width:1180px) { .build-result { display:none; } .runtime-state { min-width:125px; } }
+@media(max-width:1180px) { .build-result { display:none; } .runtime-state { min-width:118px; } .runtime-heading { min-width:132px; } }
 @media(max-width:900px) { .runtime-bar { flex-wrap:wrap; } .runtime-heading { min-width:104px; } .profile-select { min-width:min(340px,calc(100vw - 165px)); } .runtime-actions { margin-left:auto; } }
 @media(max-width:620px) { .runtime-bar { padding:9px 12px; gap:9px; } .runtime-heading { display:none; } .profile-select { width:100%; max-width:none; min-width:0; grid-template-columns:1fr; } .profile-select span { display:none; } .runtime-state { width:100%; min-width:0; padding:0; border-left:0; } .runtime-actions { width:100%; margin-left:0; overflow-x:auto; padding-bottom:2px; } .runtime-actions button { flex:0 0 auto; } }
 </style>

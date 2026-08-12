@@ -11,6 +11,9 @@ import { useTaskBacklog } from '../../composables/useTaskBacklog.js'
 import { useTaskExecutionDashboard } from '../../composables/useTaskExecutionDashboard.js'
 import { sanitizeUserFacingAgentText, sanitizeUserFacingStructure } from '../../utils/agentDisplay.js'
 import { subscribeRuntimeEvents } from '../../utils/runtimeEventBus.js'
+import { getTaskStopStatus, recheckTaskStop, stopTaskWithPreview, undoTaskStop } from '../../utils/taskStopFlow.js'
+import { resolveTaskMutationGuard } from '../../utils/taskMutationGuard.js'
+import { taskRecoveryPresentation } from '../../composables/useTaskRecoveryPresentation.js'
 
 export function useTaskManager(props, emit) {
   const tasks = ref([])
@@ -22,6 +25,9 @@ export function useTaskManager(props, emit) {
   const orchestratorDiagnostics = ref(null)
   const taskExecutions = ref({})
   const executionActionBusy = ref('')
+  const taskCancelBusyId = ref('')
+  const taskStopNotice = ref(null)
+  const taskStopTimers = new Map()
   const showArchivedTasks = ref(false)
   const archivedTaskCount = ref(0)
   const selectedTaskIds = ref([])
@@ -32,6 +38,8 @@ export function useTaskManager(props, emit) {
   let unsubscribeRuntimeEvents = null
   let runtimeRefreshTimer = null
   let fallbackRefreshTimer = null
+  let taskRecoveryClockTimer = null
+  const taskRecoveryClock = ref(Date.now())
 
   // 弹窗状态
   const showCreate = ref(false)
@@ -471,7 +479,12 @@ export function useTaskManager(props, emit) {
 
   const taskKernelState = (task) => task?.execution_kernel?.state || (task?.status === 'in_progress' ? 'running' : '')
   const taskKernelGreen = (task) => task?.execution_kernel?.green?.level || 'none'
-  const canCancelTask = (task) => ['pending', 'in_progress'].includes(task?.status) && taskKernelState(task) !== 'cancel_requested'
+  const canCancelTask = (task) => {
+    const status = String(task?.status || '').toLowerCase()
+    return ['pending', 'in_progress', 'paused', 'blocked', 'needs_user', 'reviewing', 'reworking', 'manual_takeover'].includes(status)
+      && taskKernelState(task) !== 'cancel_requested'
+      && !task?.cancellation_requested_at
+  }
 
   const canManualCompleteDailyDev = (task) => {
     if (task?.workflow_type !== 'daily_dev') return true
@@ -979,6 +992,29 @@ export function useTaskManager(props, emit) {
     }
   }
 
+  const dashboardRecoveryPresentation = item => taskRecoveryPresentation(item?.raw_task || item, taskRecoveryClock.value)
+
+  const resumeInterruptedTask = async task => {
+    if (!task?.id) return
+    executionActionBusy.value = task.id
+    try {
+      const guard = await resolveTaskMutationGuard(task.id, task)
+      const response = await fetch('/api/tasks/resume-interrupted', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: task.id, ...guard }),
+      })
+      const payload = await response.json()
+      if (!response.ok || payload?.success === false) throw new Error(payload?.error || '恢复任务失败')
+      toast.success('已接上原任务，正在从最近检查点继续')
+      await refreshTaskWork()
+    } catch (error) {
+      toast.error(error?.message || '恢复任务失败')
+    } finally {
+      executionActionBusy.value = ''
+    }
+  }
+
   const handleDashboardAction = async (item, action) => {
     const task = findTaskByDashboardItem(item)
     if (!task) return
@@ -987,6 +1023,7 @@ export function useTaskManager(props, emit) {
       openContinueTask(task)
       return
     }
+    if (action.kind === 'resume_interrupted') return resumeInterruptedTask(task)
     if (action.kind === 'retry') return resendTask(task)
     if (action.kind === 'gap_continue') return autoContinueDashboardItem(item)
     if (action.kind === 'queue') return addToQueue(task.id)
@@ -994,6 +1031,7 @@ export function useTaskManager(props, emit) {
     if (action.kind === 'view_report') return viewReport(task)
     if (action.kind === 'confirm_done') return confirmDashboardDone(item)
     if (action.kind === 'probe') return runDashboardProbe()
+    if (action.kind === 'cancel') return cancelTask(task)
   }
 
   // 查看任务日志
@@ -1067,14 +1105,119 @@ export function useTaskManager(props, emit) {
   }
 
   const cancelTask = async (task) => {
-    const confirmed = await confirmDialog(`确定停止任务“${task.title}”？系统会终止正在运行的 Agent 子进程，并保留检查点供回滚。`)
-    if (!confirmed) return
+    if (!task?.id || taskCancelBusyId.value === task.id) return
+    taskCancelBusyId.value = task.id
     try {
-      await tasksApi.cancel({ task_id: task.id, reason: '用户从任务管理页主动停止' })
-      toast.warning('停止请求已发送，正在终止 Agent 进程')
+      const result = await stopTaskWithPreview(task, {
+        reason: '用户从任务管理页主动停止',
+        actor: 'task-manager',
+        onConflict: () => toast.info('任务状态刚刚发生变化，已刷新影响范围，请重新确认'),
+      })
+      if (!result) return
+      if (result?.task) {
+        tasks.value = tasks.value.map(item => item.id === result.task.id ? { ...item, ...result.task } : item)
+        if (currentTaskReport.value?.id === result.task.id) currentTaskReport.value = { ...currentTaskReport.value, ...result.task }
+      }
+      taskStopNotice.value = {
+        taskId: task.id,
+        title: task.title || '任务',
+        task: result.task || task,
+        stage: result?.running ? 'stopping' : 'cancelled',
+        steps: result?.running ? [
+          { id: 'request', label: '停止请求已接收', status: 'completed' },
+          { id: 'agents', label: '停止 Agent 与验证进程', status: 'running' },
+          { id: 'workspace', label: '保留检查点并收口工作区', status: 'pending' },
+          { id: 'done', label: '任务已停止', status: 'pending' },
+        ] : [],
+        undoAvailable: result?.undoAvailable === true,
+        undoExpiresAt: result?.undoExpiresAt || '',
+      }
+      if (result?.running) {
+        toast.warning('正在安全停止 Agent，任务现场会保留')
+        trackTaskStop(task.id)
+      } else {
+        toast.success(result?.undoAvailable ? '任务已停止，可在 10 秒内撤销' : '任务已停止')
+        scheduleTaskStopNoticeClose(task.id, result?.undoAvailable ? 10_000 : 4_000)
+      }
       await refreshTaskWork()
     } catch (e) {
       toast.error(e.message || '停止任务失败')
+      await loadTasks().catch(() => {})
+    } finally {
+      taskCancelBusyId.value = ''
+    }
+  }
+
+  const scheduleTaskStopNoticeClose = (taskId, delay) => {
+    const previous = taskStopTimers.get(taskId)
+    if (previous) window.clearTimeout(previous)
+    const timer = window.setTimeout(() => {
+      taskStopTimers.delete(taskId)
+      if (taskStopNotice.value?.taskId === taskId) taskStopNotice.value = null
+    }, delay)
+    taskStopTimers.set(taskId, timer)
+  }
+
+  const trackTaskStop = taskId => {
+    const previous = taskStopTimers.get(taskId)
+    if (previous) window.clearTimeout(previous)
+    const poll = async () => {
+      try {
+        const result = await getTaskStopStatus(taskId)
+        const status = result?.status || {}
+        if (taskStopNotice.value?.taskId === taskId) taskStopNotice.value = { ...taskStopNotice.value, ...status, stage: status.stage, steps: status.steps || [] }
+        if (status.stage === 'cancelled') {
+          toast.success('任务已安全停止，检查点和回放已保留')
+          await refreshTaskWork()
+          scheduleTaskStopNoticeClose(taskId, 4_000)
+          return
+        }
+      } catch {}
+      const timer = window.setTimeout(poll, 1_500)
+      taskStopTimers.set(taskId, timer)
+    }
+    const timer = window.setTimeout(poll, 900)
+    taskStopTimers.set(taskId, timer)
+  }
+
+  const undoStoppedTask = async () => {
+    const notice = taskStopNotice.value
+    if (!notice?.taskId || !notice.undoAvailable) return
+    taskCancelBusyId.value = notice.taskId
+    try {
+      const current = tasks.value.find(item => item.id === notice.taskId) || notice.task || { id: notice.taskId }
+      const result = await undoTaskStop(current)
+      toast.success('已撤销停止，任务恢复到原状态')
+      taskStopNotice.value = null
+      await refreshTaskWork()
+      return result
+    } catch (error) {
+      toast.error(error?.message || '撤销停止失败')
+      await refreshTaskWork()
+    } finally {
+      taskCancelBusyId.value = ''
+    }
+  }
+
+  const handleTaskStopRecovery = async action => {
+    const notice = taskStopNotice.value
+    if (!notice?.taskId) return
+    taskCancelBusyId.value = notice.taskId
+    try {
+      const current = tasks.value.find(item => item.id === notice.taskId) || notice.task || { id: notice.taskId }
+      await recheckTaskStop(current, action)
+      if (action === 'takeover') {
+        toast.warning('已转为人工接管，当前现场已保留')
+        taskStopNotice.value = null
+      } else {
+        toast.info('已重新检查并再次发送停止请求')
+        trackTaskStop(notice.taskId)
+      }
+      await refreshTaskWork()
+    } catch (error) {
+      toast.error(error?.message || '停止状态处理失败')
+    } finally {
+      taskCancelBusyId.value = ''
     }
   }
 
@@ -1090,10 +1233,51 @@ export function useTaskManager(props, emit) {
     if (!confirmed) return
     executionActionBusy.value = `rollback:${execution.id}`
     try {
-      await tasksApi.rollbackExecution({ checkpoint_id: checkpointId, reason: reason.trim(), allow_shared: shared, confirmed: true })
+      const preview = await tasksApi.rollbackExecution({ checkpoint_id: checkpointId, preview_only: true })
+      if (preview?.available && preview?.conflicts?.length) throw new Error(`检测到 ${preview.conflicts.length} 个冲突文件，请先处理后续修改`)
+      await tasksApi.rollbackExecution({
+        checkpoint_id: checkpointId,
+        reason: reason.trim(),
+        allow_shared: shared,
+        confirmed: true,
+        authoritative: preview?.available === true,
+        preview_token: preview?.previewToken || '',
+      })
       toast.success('已回滚到任务检查点')
       await loadTaskExecutions(currentTaskReport.value?.id)
     } catch (e) { toast.error(e.message || '回滚失败') }
+    executionActionBusy.value = ''
+  }
+
+  const rewindExecutionFiles = async (execution) => {
+    const checkpointId = execution?.checkpointIds?.[execution.checkpointIds.length - 1]
+    if (!checkpointId) return toast.warning('这个执行没有可用检查点')
+    const candidates = (execution?.fileChanges?.files || execution?.file_changes?.files || [])
+      .map(file => typeof file === 'string' ? file : file?.path)
+      .filter(Boolean)
+    if (!candidates.length) return toast.warning('这个执行没有可选择的文件变更')
+    const value = window.prompt('输入要撤销的文件路径，多个路径用英文逗号分隔。只会恢复这些文件。', candidates.join(', '))
+    if (!value?.trim()) return
+    const paths = [...new Set(value.split(',').map(item => item.trim().replace(/\\/g, '/')).filter(Boolean))]
+    if (!paths.length) return
+    const confirmed = await confirmDialog(`确定只撤销选中的 ${paths.length} 个文件吗？其他文件和当前任务状态会保留。`)
+    if (!confirmed) return
+    executionActionBusy.value = `rewind:${execution.id}`
+    try {
+      const preview = await tasksApi.rewindExecutionFiles({ checkpoint_id: checkpointId, paths, preview_only: true })
+      if (preview?.available && preview?.conflicts?.length) throw new Error(`检测到 ${preview.conflicts.length} 个冲突文件，请排除或处理后再恢复`)
+      await tasksApi.rewindExecutionFiles({
+        checkpoint_id: checkpointId,
+        paths,
+        reason: '用户从任务管理页选择性撤销文件',
+        allow_shared: execution.workspace?.mode !== 'worktree',
+        confirmed: true,
+        authoritative: preview?.available === true,
+        preview_token: preview?.previewToken || '',
+      })
+      toast.success(`已撤销 ${paths.length} 个文件，其他工作保持不变`)
+      await loadTaskExecutions(currentTaskReport.value?.id)
+    } catch (e) { toast.error(e.message || '撤销文件失败') }
     executionActionBusy.value = ''
   }
 
@@ -1255,7 +1439,7 @@ export function useTaskManager(props, emit) {
 
   const changeTaskView = async (view) => {
     activeTaskView.value = view
-    if (view === 'overview') await loadExecutionDashboard()
+    if (view === 'overview' || view === 'needs') await loadExecutionDashboard()
     if (view === 'advanced') await Promise.all([loadActiveAgentRuns(), loadQueueStatus()])
   }
 
@@ -1299,6 +1483,7 @@ export function useTaskManager(props, emit) {
       }, 180)
     })
     fallbackRefreshTimer = window.setInterval(() => void loadTasks(), 60_000)
+    taskRecoveryClockTimer = window.setInterval(() => { taskRecoveryClock.value = Date.now() }, 1_000)
   })
 
   onUnmounted(() => {
@@ -1306,12 +1491,15 @@ export function useTaskManager(props, emit) {
     unsubscribeRuntimeEvents = null
     if (runtimeRefreshTimer) window.clearTimeout(runtimeRefreshTimer)
     if (fallbackRefreshTimer) window.clearInterval(fallbackRefreshTimer)
+    if (taskRecoveryClockTimer) window.clearInterval(taskRecoveryClockTimer)
+    for (const timer of taskStopTimers.values()) window.clearTimeout(timer)
+    taskStopTimers.clear()
   })
 
   return {
     AgentPipeline, TaskListItem, TaskBacklogModal, DailyDevTaskModal, TaskDispatchHeader, AutomatedTaskIntakeModal, tasks,
     permissionRequests, pendingPermissionRequests, standalonePermissionRequests, permissionDecisionBusyId,
-    groups, projects, stats, orchestratorDiagnostics, taskExecutions, executionActionBusy,
+    groups, projects, stats, orchestratorDiagnostics, taskExecutions, executionActionBusy, taskCancelBusyId, taskStopNotice,
     showArchivedTasks, archivedTaskCount, selectedTaskIds, editingTaskId, activeTaskView, taskSearch,
     taskStatusFilter, showCreate, showDailyDevCreate, showAutomatedIntake, showQueue, showLogs, showReport,
     showContinue, currentTaskLogs, currentTaskId, currentTaskReport, currentTaskTrace, taskTraceLoading,
@@ -1338,10 +1526,10 @@ export function useTaskManager(props, emit) {
     submitDailyDevTask, updateStatus, deleteTask, openCreateTask, editTask, restoreTask,
     purgeTask, runBulkTaskAction, addToQueue, addAllToQueue, queueStatus, watchdogStatus,
     loadQueueStatus, showQueueStatus, resumeQueue, resumeWatchdog, retryRuntimeFailures, replanDashboardTask,
-    autoContinueDashboardItem, confirmDashboardDone, handleDashboardAction, viewTaskLogs, showPipeline, currentPipelineTask,
+    autoContinueDashboardItem, confirmDashboardDone, dashboardRecoveryPresentation, handleDashboardAction, viewTaskLogs, showPipeline, currentPipelineTask,
     viewPipeline, loadTaskExecutions, currentExecutions, currentDeliverySummary, currentReviewSummary, currentWorkerNotifications,
     visibleTaskTitle, visibleTaskStatusDetail, visibleRequiredVerification, visibleDeliveryBlockers, visibleUserDeliveryReport, loadTaskTrace,
-    viewReport, cancelTask, rollbackExecution, mergeExecution, cleanupExecution, openContinueTask,
+    viewReport, cancelTask, undoStoppedTask, handleTaskStopRecovery, rollbackExecution, rewindExecutionFiles, mergeExecution, cleanupExecution, openContinueTask,
     continueFromReport, submitContinuationPayload, submitTaskContinuation, autoContinueFromReport, resendTask, priorityLabel,
     visibleTasks, handleCreateType, changeTaskView, toggleArchivedTasks, decideTaskPermission, openTaskReplay,
     openRequirementIntake, openRequirementCollection, changeTaskPriority

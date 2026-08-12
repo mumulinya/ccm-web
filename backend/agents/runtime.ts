@@ -16,6 +16,7 @@ export interface AgentCommandOptions {
   persistSession?: boolean;
   appendSystemPromptFile?: string;
   developerInstructionsFile?: string;
+  conversationPermissionMode?: "full_access" | "main_agent_only" | "ask_before_edit";
 }
 
 export interface AgentRuntimeDescriptor {
@@ -30,6 +31,7 @@ export interface AgentRuntimeDescriptor {
     worktreeIsolation: boolean;
     sessionResume: boolean;
     scratchpadContinuation: boolean;
+    nativeWorkspaceEditing: boolean;
   };
   buildCommand: (msgFile: string, options?: AgentCommandOptions) => string;
 }
@@ -206,7 +208,8 @@ function formatPluginDirArg(metadata: RuntimeLaunchMetadata) {
   return pluginDir ? ` --plugin-dir ${quoteCmdArg(pluginDir)}` : "";
 }
 
-function getClaudePermissionMode() {
+function getClaudePermissionMode(options: AgentCommandOptions = {}) {
+  if (["full_access", "main_agent_only", "ask_before_edit"].includes(String(options.conversationPermissionMode || ""))) return "acceptEdits";
   const requested = String(process.env.CCM_CLAUDE_PERMISSION_MODE || "auto").trim();
   return ["acceptEdits", "auto", "bypassPermissions", "dontAsk", "manual", "plan"].includes(requested)
     ? requested
@@ -290,7 +293,7 @@ function buildCursorAgentCommand(msgFile: string, options: AgentCommandOptions =
   const command = explicit || resolveCursorAgentCommand();
   const isolatedHome = String(metadata.isolatedHomePath || "").trim();
   const homePrefix = isolatedHome ? formatWindowsEnvPrefix(buildIsolatedHomeEnv(isolatedHome, "cursor")) : "";
-  const args = ["-p", "--force", "--trust"];
+  const args = ["-p", "--force", "--trust", "--sandbox", "enabled"];
   const selectedModel = getConfiguredDevelopmentAgentModel("cursor");
   if (selectedModel) args.push("--model", selectedModel);
   if (metadata.pluginDirPath) {
@@ -303,7 +306,7 @@ function buildCursorAgentCommand(msgFile: string, options: AgentCommandOptions =
 }
 
 function buildAntigravityAgentCommand(msgFile: string, options: AgentCommandOptions = {}) {
-  const args = ["--mode", "accept-edits", "--dangerously-skip-permissions", "--output-format", "json", "--print-timeout", "30m"];
+  const args = ["--mode", "accept-edits", "--sandbox", "--output-format", "json", "--print-timeout", "30m"];
   const selectedModel = getConfiguredDevelopmentAgentModel("gemini");
   if (selectedModel) args.push("--model", selectedModel);
   const sessionId = String(options.sessionId || "").trim();
@@ -340,6 +343,7 @@ export const AGENT_RUNTIMES: AgentRuntimeDescriptor[] = [
       worktreeIsolation: true,
       sessionResume: true,
       scratchpadContinuation: true,
+      nativeWorkspaceEditing: true,
     },
     buildCommand: (msgFile, options = {}) => {
       const sessionId = String(options.sessionId || "").trim();
@@ -349,7 +353,7 @@ export const AGENT_RUNTIMES: AgentRuntimeDescriptor[] = [
       const metadata = readRuntimeLaunchMetadata(options);
       const selectedModel = getConfiguredDevelopmentAgentModel("claudecode");
       const modelArg = selectedModel ? ` --model ${quoteCmdArg(selectedModel)}` : "";
-      return `${pipeFileToCommand(msgFile, `claude --permission-mode ${getClaudePermissionMode()}${modelArg}`, options)}${formatStrictMcpConfigArg(options)}${formatPluginDirArg(metadata)}${formatAppendSystemPromptFileArg(options)}${sessionArg} --output-format stream-json --verbose -p`;
+      return `${pipeFileToCommand(msgFile, `claude --permission-mode ${getClaudePermissionMode(options)}${modelArg}`, options)}${formatStrictMcpConfigArg(options)}${formatPluginDirArg(metadata)}${formatAppendSystemPromptFileArg(options)}${sessionArg} --output-format stream-json --verbose -p`;
     },
   },
   {
@@ -364,6 +368,7 @@ export const AGENT_RUNTIMES: AgentRuntimeDescriptor[] = [
       worktreeIsolation: true,
       sessionResume: true,
       scratchpadContinuation: true,
+      nativeWorkspaceEditing: true,
     },
     buildCommand: (msgFile, options) => buildCursorAgentCommand(msgFile, options),
   },
@@ -379,6 +384,7 @@ export const AGENT_RUNTIMES: AgentRuntimeDescriptor[] = [
       worktreeIsolation: true,
       sessionResume: true,
       scratchpadContinuation: true,
+      nativeWorkspaceEditing: true,
     },
     buildCommand: (msgFile, options) => buildAntigravityAgentCommand(msgFile, options),
   },
@@ -394,6 +400,7 @@ export const AGENT_RUNTIMES: AgentRuntimeDescriptor[] = [
       worktreeIsolation: true,
       sessionResume: true,
       scratchpadContinuation: true,
+      nativeWorkspaceEditing: true,
     },
     buildCommand: (msgFile, options) => buildCodexExecCommand(msgFile, options),
   },
@@ -409,6 +416,7 @@ export const AGENT_RUNTIMES: AgentRuntimeDescriptor[] = [
       worktreeIsolation: true,
       sessionResume: false,
       scratchpadContinuation: true,
+      nativeWorkspaceEditing: true,
     },
     buildCommand: (msgFile, options) => buildOpenCodeAgentCommand(msgFile, options),
   },
@@ -424,6 +432,7 @@ export const AGENT_RUNTIMES: AgentRuntimeDescriptor[] = [
       worktreeIsolation: true,
       sessionResume: false,
       scratchpadContinuation: true,
+      nativeWorkspaceEditing: true,
     },
     buildCommand: msgFile => pipeFileToCommand(msgFile, "qodercli -p"),
   },

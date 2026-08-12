@@ -20,6 +20,8 @@ import {
 } from '../../utils/agentDisplay.js'
 import { buildTaskJourneyPresentation } from '../../utils/taskJourneyPresentation.js'
 import { useTaskRuntimeStatus } from '../../composables/useTaskRuntimeStatus.js'
+import { useTaskRecoveryPresentation } from '../../composables/useTaskRecoveryPresentation.js'
+import TaskRecoveryRetryNotice from './TaskRecoveryRetryNotice.vue'
 
 const props = defineProps({
   card: { type: Object, required: true },
@@ -235,8 +237,12 @@ const executionPlan = computed(() => {
 })
 
 const actionKinds = new Set(['confirm', 'confirm_plan', 'revise_plan', 'approve_epic', 'targeted_rework', 'continue', 'continue_work_item', 'retry', 'resume', 'interrupt', 'resume_interrupted', 'gap_continue', 'cancel', 'rollback', 'save_knowledge'])
+const { recoveryPresentation } = useTaskRecoveryPresentation(() => props.card)
+const recoveryActions = computed(() => asList(props.card.actions)
+  .filter(action => ['resume_interrupted', 'cancel'].includes(action?.kind)))
 const primaryActions = computed(() => asList(props.card.actions)
   .filter(action => actionKinds.has(action?.kind))
+  .filter(action => !recoveryPresentation.value.visible || !['resume_interrupted', 'cancel'].includes(action?.kind))
   .slice(0, needsUser.value ? 2 : 1))
 
 const taskId = computed(() => props.card.task_id || props.card.taskId || props.card.id || '')
@@ -287,6 +293,13 @@ const openTaskCenter = () => emit('action', { kind: 'open_task_center', id: 'tar
       </button>
       <p v-if="unavailableLinkReason">{{ unavailableLinkReason }}</p>
     </section>
+
+    <TaskRecoveryRetryNotice
+      :presentation="recoveryPresentation"
+      :actions="recoveryActions"
+      :busy="busy"
+      @action="emit('action', $event)"
+    />
 
     <section v-if="showRequestContract" class="task-request-contract">
       <header>

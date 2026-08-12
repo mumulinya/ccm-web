@@ -395,6 +395,7 @@
               :sender-label="msg.role === 'agent' ? musicAgentLabel : msg.role === 'operator' ? '我' : '系统'"
               :structured="!!getMessageResults(msg)"
               :streaming="!!msg.streaming"
+              :copy-text="displayMessageContent(msg.content)"
               compact
               class="aura-chat-row"
               :class="msg.role"

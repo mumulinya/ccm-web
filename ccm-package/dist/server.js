@@ -1059,6 +1059,36 @@ function handleRequest(req, res) {
                     return (0, utils_1.sendJson)(res, { error: `项目飞书身份校验失败：${error?.message || error}` }, 403);
                 }
             }
+            const exactProjectSessionId = String(projectSessionId || "").trim();
+            const asideMatch = source === "feishu" ? String(message || "").trim().match(/^\/btw(?:\s+([\s\S]+))?$/i) : null;
+            if (asideMatch) {
+                if (!project || !exactProjectSessionId || !(0, sessions_1.getSessionDetail)(project, exactProjectSessionId)) {
+                    return (0, utils_1.sendJson)(res, { error: "当前飞书消息没有精确绑定可读取的项目会话，无法执行临时提问" }, 400);
+                }
+                const question = String(asideMatch[1] || "").trim();
+                if (!question)
+                    return (0, utils_1.sendJson)(res, { error: "请在 /btw 后输入临时问题" }, 400);
+                try {
+                    const result = await (0, slash_command_conversations_1.runConversationAside)({ scope: "project", scopeId: project, exactSessionId: exactProjectSessionId, question });
+                    const reply = `临时提问 · 基于提问时上下文\n\n${result.answer}`;
+                    await (0, feishu_channel_1.notifyFeishuTaskStage)({
+                        stage: "project_agent_aside",
+                        title: `${(0, project_runtime_1.projectDisplayName)(project)} · 临时提问`,
+                        markdown: reply,
+                        sessionId: exactProjectSessionId,
+                        forceNewMessage: true,
+                        dedupeKey: `project-feishu-aside:${projectFeishuEnvelope?.message_id || crypto.randomUUID()}`,
+                    });
+                    res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "private, no-store", Connection: "keep-alive", "X-Accel-Buffering": "no" });
+                    writeSse(res, { type: "chunk", text: reply, ephemeral: true });
+                    writeSse(res, { type: "done", ephemeral: true, content_stored: false });
+                    res.end();
+                    return;
+                }
+                catch (error) {
+                    return (0, utils_1.sendJson)(res, { error: error?.message || "临时提问失败" }, 400);
+                }
+            }
             let sourceIngestion = null;
             try {
                 sourceIngestion = await (0, source_ingestion_1.ingestRequirementSources)({
@@ -1082,7 +1112,6 @@ function handleRequest(req, res) {
             const config = configs.find(c => c.name === project);
             if (!config)
                 return (0, utils_1.sendJson)(res, { error: "项目不存在" }, 400);
-            const exactProjectSessionId = String(projectSessionId || "").trim();
             if (exactProjectSessionId && !(0, sessions_1.getSessionDetail)(project, exactProjectSessionId)) {
                 return (0, utils_1.sendJson)(res, { error: "项目会话不存在" }, 404);
             }

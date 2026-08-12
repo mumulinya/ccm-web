@@ -7,6 +7,7 @@ import {
   replayEventSummary,
   replayEventTitle,
   replayProjectLabel,
+  replayStageLabel,
   replayTechnicalLabel,
 } from '../../utils/taskReplayPresentation.js'
 
@@ -20,7 +21,7 @@ const openEvents = ref(new Set())
 const virtualHost = ref(null)
 const virtualizationEnabled = computed(() => props.events.length > 300)
 
-const stageLabel = (stage) => ({ intake: '需求', planning: '计划', dispatch: '派发', execution: '执行', change: '改动', test: '测试', rework: '返工', review: '验收', completion: '交付', system: '系统' }[stage] || stage || '记录')
+const stageLabel = replayStageLabel
 const statusLabel = (status) => ({ info: '记录', running: '进行中', passed: '通过', warning: '注意', failed: '失败', blocked: '受阻', cancelled: '已取消' }[status] || status || '记录')
 const timeLabel = (value) => {
   const date = new Date(value)

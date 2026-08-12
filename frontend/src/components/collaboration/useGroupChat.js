@@ -578,6 +578,7 @@ export function useGroupChat(props, emit) {
     currentGroup,
     currentGroupSessionId,
     ensureGroupSession: (...args) => materializeGroupSessionDraft(...args),
+    refreshWritableGroupSession: (...args) => refreshWritableGroupSession(...args),
     mainAgentStatus,
     groupAgentQa,
     lastGroupMsgCount,
@@ -774,6 +775,31 @@ export function useGroupChat(props, emit) {
     } finally {
       groupDraftCreation = null
     }
+  }
+
+  // A browser can retain a session id removed by retention or another client.
+  // Only ordinary conversation messages may rebind to the current authoritative
+  // session; task continuation and approval flows retain their exact binding.
+  const refreshWritableGroupSession = async () => {
+    const groupId = String(currentGroup.value?.id || '')
+    if (!groupId) return ''
+    const data = await groupsApi.sessions(groupId)
+    if (groupId !== String(currentGroup.value?.id || '')) return ''
+    const sessions = Array.isArray(data.sessions) ? data.sessions : []
+    let sessionId = String(data.activeSessionId || data.active_session_id || '').trim()
+    if (!sessionId) sessionId = String(sessions.find(item => !item?.archived)?.id || '').trim()
+    if (!sessionId) {
+      const created = await groupsApi.createSession(groupId)
+      if (groupId !== String(currentGroup.value?.id || '')) return ''
+      groupSessions.value = created.sessions || sessions
+      sessionId = String(created.session?.id || created.activeSessionId || '').trim()
+    } else {
+      groupSessions.value = sessions
+    }
+    if (!sessionId) throw new Error('服务端没有可用的群聊会话')
+    currentGroupSessionId.value = sessionId
+    isGroupSessionDraft.value = false
+    return sessionId
   }
 
   const createGroupSession = async () => {

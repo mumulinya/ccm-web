@@ -24,6 +24,7 @@ import {
 import { AGENT_COMMUNICATION_ACK_MCP_TOOL_ALIASES } from "../../integrations/agent-communication-mcp";
 import { buildTaskAgentContinuityBinding } from "../../tasks/agent-sessions";
 import { appendUserVisibleRequirementPlan } from "../../system/user-visible-agent-events";
+import { authorizeProjectChildAgentStart } from "../tools/conversation-permission-policy";
 
 type CollabCtx = any;
 
@@ -769,6 +770,40 @@ export async function executeTask(task: any, ctx: CollabCtx, deps: any) {
     let workDir = info[0]?.workDir;
     const agentType = info[0]?.agent || "claudecode";
 
+    if (taskRequiresCodeChanges(task)) {
+      const permission = await authorizeProjectChildAgentStart({ task, project: task.target_project, workDir, agentType });
+      if (!permission.allowed) {
+        const detail = permission.message || "当前会话权限不允许启动代码修改 Agent";
+        updateTask(task.id, {
+          status: "blocked",
+          status_detail: detail,
+          conversation_permission_snapshot: permission.snapshot,
+          conversation_permission_mode: permission.mode,
+          permission_policy_revision: permission.snapshot?.revision || 0,
+          edit_approval_id: permission.editApprovalId || null,
+        });
+        appendTaskTimelineEvent(task.id, {
+          type: "conversation_permission.required",
+          title: permission.mode === "main_agent_only" ? "主 Agent 权限审核结果" : "等待代码修改授权",
+          detail,
+          status: "blocked",
+          phase: "dispatching",
+          agent: task.target_project,
+          data: { permission_request_id: permission.permissionRequest?.id || "", permission_mode: permission.mode },
+        });
+        return {
+          status: "blocked",
+          detail,
+          permissionRequest: permission.permissionRequest || null,
+          conversationPermissionMode: permission.mode,
+        };
+      }
+      task.conversation_permission_snapshot = permission.snapshot;
+      task.conversation_permission_mode = permission.mode;
+      task.permission_policy_revision = permission.snapshot?.revision || 0;
+      task.edit_approval_id = permission.editApprovalId || null;
+    }
+
     const toolContext = buildAgentToolContext(ctx, null, task.target_project, `${task.title || ""}\n${task.description || ""}\n${task.acceptance_criteria || ""}`, task.selected_skill_names || []);
     const preparedWorkDir = prepareChildAgentWorkDir(workDir, {
       mode: getChildAgentIsolationMode(null, task),
@@ -1331,7 +1366,9 @@ ${requirementEpicExecutionBoundary(task)}
         trustedMemoryEnvelopeChecksum: directMemoryContextSnapshot?.context?.memory_prompt_injection_proof?.trusted_envelope_checksum || "",
         trustedMemoryEnvelopeSourceChecksum: directMemoryContextSnapshot?.context?.memory_prompt_injection_proof?.trusted_envelope_source_checksum || "",
         ...taskAgentSessionLifecycleRunnerOptions(directMemoryContextSnapshot),
-        agentSession: directTaskSession ? getTaskAgentSessionOptions(directTaskSession) : null,
+        agentSession: directTaskSession
+          ? { ...getTaskAgentSessionOptions(directTaskSession), conversationPermissionMode: task.conversation_permission_mode || "full_access" }
+          : { conversationPermissionMode: task.conversation_permission_mode || "full_access" },
         durableDispatch: directTypedMemoryDispatchAdmission.required === true
           || directCapacityRevalidationPreparation?.required === true
           || directMemoryContextSnapshot?.context?.memory_prompt_injection_proof?.trusted_envelope_bound === true,

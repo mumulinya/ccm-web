@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.FILESYSTEM_BUNDLED_MCP = exports.FETCH_WEB_BUNDLED_MCP = exports.FEISHU_INTERNAL_MCP = exports.GROUP_COORDINATOR_INTERNAL_MCP = void 0;
+exports.FILESYSTEM_BUNDLED_MCP = exports.FETCH_WEB_BUNDLED_MCP = exports.FEISHU_INTERNAL_MCP = exports.WORKSPACE_EDIT_INTERNAL_MCP = exports.GROUP_COORDINATOR_INTERNAL_MCP = void 0;
 exports.findCcmPackageRoot = findCcmPackageRoot;
 exports.discoverBundledInternalMcpManifests = discoverBundledInternalMcpManifests;
 exports.isInternalMcpName = isInternalMcpName;
@@ -49,6 +49,7 @@ const fs = __importStar(require("fs"));
 const os = __importStar(require("os"));
 const path = __importStar(require("path"));
 exports.GROUP_COORDINATOR_INTERNAL_MCP = "ccm__group_coordinator";
+exports.WORKSPACE_EDIT_INTERNAL_MCP = "ccm__workspace_edit";
 exports.FEISHU_INTERNAL_MCP = "mcp-feishu";
 exports.FETCH_WEB_BUNDLED_MCP = "fetch-web-mcp";
 exports.FILESYSTEM_BUNDLED_MCP = "filesystem-mcp";
@@ -124,7 +125,7 @@ function isInternalMcpName(value) {
     const name = String(value || "").trim().toLowerCase();
     if (!name)
         return false;
-    if (name === exports.GROUP_COORDINATOR_INTERNAL_MCP || name === exports.FEISHU_INTERNAL_MCP)
+    if (name === exports.GROUP_COORDINATOR_INTERNAL_MCP || name === exports.WORKSPACE_EDIT_INTERNAL_MCP || name === exports.FEISHU_INTERNAL_MCP)
         return true;
     return discoverBundledInternalMcpManifests().some(item => String(item.name || "").toLowerCase() === name);
 }
@@ -269,6 +270,32 @@ function buildInternalMcpCatalog(options = {}) {
         configuration_route: "",
         technical: { entry_path: coordinatorEntry, discovery: "backend_embedded", server_name: exports.GROUP_COORDINATOR_INTERNAL_MCP },
     };
+    const workspaceEditEntry = path.join(packageRoot, "dist", "integrations", "workspace-edit-mcp.js");
+    const workspaceEditAvailable = fs.existsSync(workspaceEditEntry);
+    const workspaceEdit = {
+        name: exports.WORKSPACE_EDIT_INTERNAL_MCP,
+        display_name: "项目工作区编辑",
+        description: "仅为缺少原生文件编辑能力的项目执行子 Agent补充受控修改、创建、移动和删除能力；原生第三方 Agent不注入此 MCP。",
+        version: String(packageJson.version || "1.0.0"),
+        origin: "internal",
+        protected: true,
+        immutable: true,
+        bundled: true,
+        lifecycle: "task_scoped",
+        lifecycle_label: "按项目任务注入",
+        scopes: ["项目子 Agent"],
+        tools: [
+            { name: "apply_patch", label: "修改文件", description: "按旧内容和文件校验和精确修改文本。" },
+            { name: "write_file", label: "写入文件", description: "创建文件或在校验旧版本后覆盖文本。" },
+            { name: "move_path", label: "移动文件", description: "在当前项目边界内移动或重命名文件。" },
+            { name: "delete_path", label: "删除文件", description: "校验版本后删除单个普通文件。" },
+        ],
+        state: workspaceEditAvailable ? "ready" : "unavailable",
+        state_label: workspaceEditAvailable ? "可用" : "组件缺失",
+        state_detail: workspaceEditAvailable ? "仅在项目执行运行时明确缺少原生编辑能力时自动注入" : "安装包缺少工作区编辑 MCP 入口文件",
+        configuration_route: "",
+        technical: { entry_path: workspaceEditEntry, discovery: "backend_embedded", server_name: exports.WORKSPACE_EDIT_INTERNAL_MCP },
+    };
     const discovered = discoverBundledInternalMcpManifests(packageRoot).map(manifest => {
         const entryPath = manifest.entry ? path.resolve(manifest.package_dir, manifest.entry) : "";
         const available = !!entryPath && fs.existsSync(entryPath);
@@ -296,7 +323,7 @@ function buildInternalMcpCatalog(options = {}) {
             technical: { entry_path: entryPath, manifest_path: manifest.manifest_path, discovery: "bundled_manifest", server_name: manifest.name },
         };
     });
-    const items = [coordinator, ...discovered].sort((a, b) => a.display_name.localeCompare(b.display_name, "zh-CN"));
+    const items = [coordinator, workspaceEdit, ...discovered].sort((a, b) => a.display_name.localeCompare(b.display_name, "zh-CN"));
     return {
         schema: "ccm-internal-mcp-catalog-v1",
         success: true,
@@ -327,16 +354,18 @@ function runInternalMcpRegistrySelfTest(packageRoot = findCcmPackageRoot()) {
     const workflowItems = [...workflowMcps].map(([name, tools]) => ({ item: configured.items.find((row) => row.name === name), name, tools }));
     const permissionBroker = configured.items.find((item) => item.name === "ccm__permission_broker");
     const workspaceReadonly = configured.items.find((item) => item.name === "ccm__workspace_readonly");
+    const workspaceEdit = configured.items.find((item) => item.name === exports.WORKSPACE_EDIT_INTERNAL_MCP);
     const hiddenSecrets = !JSON.stringify(configured).includes("secret") && !JSON.stringify(configured).includes("cli_test");
     const checks = {
-        bundledCatalogDiscovered: configured.items.length === 9 && configured.summary.tools === 56,
+        bundledCatalogDiscovered: configured.items.length === 10 && configured.summary.tools === 60,
         coordinatorProtectedAndReady: coordinator?.protected === true && coordinator?.state === "ready" && coordinator?.tools?.length === 4,
         feishuBundledAndReady: feishu?.bundled === true && feishu?.state === "ready" && feishu?.tools?.length === 4,
         workflowMcpsProtectedAndReady: workflowItems.every(({ item, tools }) => item?.bundled === true && item?.protected === true && item?.immutable === true && item?.state === "ready" && item?.lifecycle === "task_scoped" && item?.tools?.length === tools),
         permissionBrokerProtectedAndReady: permissionBroker?.bundled === true && permissionBroker?.protected === true && permissionBroker?.immutable === true && permissionBroker?.state === "ready" && permissionBroker?.lifecycle === "session_scoped" && permissionBroker?.tools?.length === 3,
         workspaceReadonlyProtectedAndReady: workspaceReadonly?.bundled === true && workspaceReadonly?.protected === true && workspaceReadonly?.immutable === true && workspaceReadonly?.state === "ready" && workspaceReadonly?.tools?.length === 12,
+        workspaceEditProtectedAndReady: workspaceEdit?.bundled === true && workspaceEdit?.protected === true && workspaceEdit?.immutable === true && workspaceEdit?.state === "ready" && workspaceEdit?.lifecycle === "task_scoped" && workspaceEdit?.tools?.length === 4,
         feishuNeedsSettingsWithoutCredentials: unconfigured.items.find((item) => item.name === exports.FEISHU_INTERNAL_MCP)?.state === "needs_configuration",
-        internalNamesReserved: [exports.GROUP_COORDINATOR_INTERNAL_MCP, exports.FEISHU_INTERNAL_MCP, ...workflowMcps.keys(), "ccm__permission_broker", "ccm__workspace_readonly"].every(isInternalMcpName),
+        internalNamesReserved: [exports.GROUP_COORDINATOR_INTERNAL_MCP, exports.WORKSPACE_EDIT_INTERNAL_MCP, exports.FEISHU_INTERNAL_MCP, ...workflowMcps.keys(), "ccm__permission_broker", "ccm__workspace_readonly"].every(isInternalMcpName),
         secretsNeverExposed: hiddenSecrets,
     };
     return { pass: Object.values(checks).every(Boolean), checks, catalog: configured };

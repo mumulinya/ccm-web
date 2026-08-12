@@ -20,6 +20,10 @@ import GroupMainAgentStatusCard from './GroupMainAgentStatusCard.vue'
 import MainAgentDecisionCard from '../agents/MainAgentDecisionCard.vue'
 import AgentExecutionTranscript from '../common/AgentExecutionTranscript.vue'
 import ActiveTaskPlanDock from '../common/ActiveTaskPlanDock.vue'
+import ConversationAsideDock from '../common/ConversationAsideDock.vue'
+import ConversationHistoryBranches from '../common/ConversationHistoryBranches.vue'
+import ConversationPermissionMode from '../common/ConversationPermissionMode.vue'
+import ConversationSummaryBoundary from '../common/ConversationSummaryBoundary.vue'
 import NewProgressIndicator from '../common/NewProgressIndicator.vue'
 import GroupChatHeader from './GroupChatHeader.vue'
 import GroupChatSessionSidebar from './GroupChatSessionSidebar.vue'
@@ -38,6 +42,8 @@ import { usePermissionApprovals } from '../../composables/usePermissionApprovals
 import { useAgentExecutionEvents } from '../../composables/useAgentExecutionEvents.js'
 import { getCopyableMessageText } from '../../utils/messageActions.js'
 import { hasTerminalExecutionForMessage, shouldShowCompactProcessingState } from '../../utils/agentExecutionEvents.js'
+import { consumeAsideCommand, rewindConversationTurn } from '../../utils/conversationRewind.js'
+import { toast } from '../../utils/toast.js'
 
 const props = defineProps({
   navigateTo: { type: Object, default: null },
@@ -129,6 +135,30 @@ const groupTaskExecutionActive = computed(() => {
     return !['completed', 'done', 'succeeded', 'failed', 'cancelled', 'canceled', 'reverted'].includes(status)
   })
 })
+const rewindGroupMessage = async (message) => {
+  try {
+    const receipt = await rewindConversationTurn({ scope: 'group', scopeId: currentGroup.value?.id || '', exactSessionId: currentGroupSessionId.value, anchorMessageId: message?.id })
+    if (!receipt) return
+    await loadMessages()
+    newMessage.value = receipt.originalPrompt || ''
+    toast.success(receipt.action ? `已总结 ${receipt.summarizedMessages || 0} 条消息` : '已回退到本轮开始前，原需求已放回输入框')
+  } catch (error) { toast.error(error?.message || '回退失败') }
+}
+const sendGroupMessage = async () => {
+  if (consumeAsideCommand(newMessage.value, { scope: 'group', scopeId: currentGroup.value?.id || '', exactSessionId: currentGroupSessionId.value })) {
+    newMessage.value = ''
+    return
+  }
+  await sendMessage()
+}
+const handleGroupKeydown = async (event) => {
+  if (event.key === 'Enter' && !event.shiftKey && /^\/btw(?:\s|$)/i.test(newMessage.value)) {
+    event.preventDefault()
+    await sendGroupMessage()
+    return
+  }
+  await handleKeydown(event)
+}
 watch(groupMeaningfulRevision, () => notifyGroupProgress({ key: groupLatestMeaningfulKey.value }))
 watch(currentGroupSessionId, () => resetGroupPinnedScroll())
 const locateGroupPlanStep = ({ messageIndex }) => {

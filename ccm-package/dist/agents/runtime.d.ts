@@ -8,6 +8,7 @@ export interface AgentCommandOptions {
     persistSession?: boolean;
     appendSystemPromptFile?: string;
     developerInstructionsFile?: string;
+    conversationPermissionMode?: "full_access" | "main_agent_only" | "ask_before_edit";
 }
 export interface AgentRuntimeDescriptor {
     id: AgentRuntimeId;
@@ -21,6 +22,7 @@ export interface AgentRuntimeDescriptor {
         worktreeIsolation: boolean;
         sessionResume: boolean;
         scratchpadContinuation: boolean;
+        nativeWorkspaceEditing: boolean;
     };
     buildCommand: (msgFile: string, options?: AgentCommandOptions) => string;
 }

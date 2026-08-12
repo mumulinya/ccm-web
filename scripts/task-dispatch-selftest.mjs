@@ -17,15 +17,16 @@ const renderRegression = read('scripts/task-dispatch-render-regression.mjs')
 const legacyAliases = JSON.parse(read('scripts/legacy-test-aliases.json')).aliases || {}
 
 const checks = {
-  dedicatedHeaderComponent: manager.includes("TaskDispatchHeader")
-    && manager.includes('<TaskDispatchHeader'),
-  threeBusinessViews: ['overview', 'all', 'advanced'].every(view => header.includes(`id: '${view}'`))
+  workspacePageShell: manager.includes("WorkspacePageShell")
+    && manager.includes('<WorkspacePageShell'),
+  fourBusinessViews: ['overview', 'all', 'needs', 'advanced'].every(view => manager.includes(`id: '${view}'`))
     && manager.includes("activeTaskView === 'overview'")
     && manager.includes("activeTaskView === 'all'")
+    && manager.includes("activeTaskView === 'needs'")
     && manager.includes("activeTaskView === 'advanced'"),
-  unifiedCreateEntry: header.includes('<Plus :size="16" />新建任务')
-    && header.includes("chooseCreateType('business')")
-    && header.includes("chooseCreateType('standard')")
+  unifiedCreateEntry: manager.includes("label: '新建任务'")
+    && manager.includes("handleCreateType('business')")
+    && manager.includes("handleCreateType('standard')")
     && !manager.includes('>业务开发任务</button>')
     && !manager.includes('>+ 新建任务</button>'),
   runtimeGovernanceIsAdvanced: manager.indexOf("activeTaskView === 'advanced'") < manager.indexOf('class="runtime-governance-card"'),
@@ -41,7 +42,7 @@ const checks = {
     && dailyDevModal.includes('@paste.capture="handlePaste(task, $event)"')
     && manager.includes("form.append('payload', JSON.stringify(buildDailyDevCreatePayload(forceQualityGate)))"),
   responsiveWidthGuard: manager.includes('overflow-x: clip')
-    && header.includes('@media (max-width: 768px)')
+    && manager.includes('@media')
     && renderRegression.includes('assertNoHorizontalOverflow'),
   realRenderRegressionRegistered: legacyAliases['test:task-dispatch-render'] === 'node scripts/task-dispatch-render-regression.mjs'
     && renderRegression.includes('05-task-overview-mobile.png')

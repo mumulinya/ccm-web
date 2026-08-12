@@ -644,9 +644,9 @@ const sendMessage = async (options = {}) => {
     // persisted the terminal run but before the final result packet reaches the
     // page. Re-read that authoritative run so the thinking envelope cannot be
     // left behind until a manual refresh.
-    if (!globalResultReceived && agentMsg.streaming) {
+    if (!globalResultReceived && !globalStreamFailed && agentMsg.type !== 'global_agent_queued') {
       const reconciled = await reconcileAuthoritativeGlobalRun()
-      if (!reconciled) agentMsg.streaming = false
+      if (!reconciled && agentMsg.streaming) agentMsg.streaming = false
     }
 
     if (globalResultReceived && pendingGlobalRequestRetry.value?.requestId === requestId) {

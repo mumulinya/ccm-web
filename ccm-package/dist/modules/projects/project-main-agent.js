@@ -86,6 +86,7 @@ const agent_loop_budget_1 = require("../../system/agent-loop-budget");
 const user_visible_agent_events_1 = require("../../system/user-visible-agent-events");
 const assistant_progress_1 = require("../../system/assistant-progress");
 const slash_command_session_state_1 = require("../../system/slash-command-session-state");
+const transient_model_content_1 = require("../../system/transient-model-content");
 const test_agent_runner_1 = require("../collaboration/test-agent-runner");
 const execution_kernel_1 = require("../../agents/execution-kernel");
 const unified_evidence_registry_1 = require("../../system/unified-evidence-registry");
@@ -131,7 +132,10 @@ function recordProjectMainToolResult(project, projectSessionId, toolName, toolCa
     });
     const started = projectMainToolStartedAt.get(toolCallId);
     const startedAt = started?.startedAt || Date.now();
-    const outputTokens = error ? 0 : (0, context_budget_1.estimateTextTokens)(JSON.stringify(observation ?? ""));
+    const runtimeOutputTokens = Number(observation?.outputTokens ?? observation?.output_tokens);
+    const outputTokens = error ? 0 : Number.isFinite(runtimeOutputTokens) && runtimeOutputTokens > 0
+        ? runtimeOutputTokens
+        : (0, context_budget_1.estimateTextTokens)(JSON.stringify(observation ?? ""));
     projectMainToolStartedAt.delete(toolCallId);
     (0, user_visible_agent_events_1.appendToolProjection)({
         scope: "project",
@@ -786,7 +790,7 @@ async function runProjectMainAgentFirstTurn(input) {
         };
     };
     const sessionDirective = (0, slash_command_session_state_1.renderSlashCommandSessionDirective)("project", project, projectSessionId);
-    const buildMessages = () => [{
+    const buildMessages = () => (0, transient_model_content_1.attachTransientModelBlocks)([{
             role: "system",
             content: `你是 CCM 项目“${project}”的项目主 Agent。你必须在这次主 Agent 首轮调用中直接理解用户消息并决定：直接回答、调用只读工具、澄清、制定计划或分派当前项目开发任务。不要先做独立意图分类。
 
@@ -798,8 +802,8 @@ ${sessionDirective}
 
 规则：
 1. 普通问候、致谢和自包含问答直接 responseType=reply，不调用工具、不创建任务。
-2. 只有缺少项目事实时才请求只读工具。基础工作区工具为 list_directory、glob_files、grep_text、read_file；低频Git、运行日志和配置工具先用 tool_search 加载。知识检索使用 query_knowledge。
-3. 工具结果会回到同一 Agent Loop；只要仍需要事实或证据就可以继续调用，不要重复相同请求。互不依赖的只读请求可同轮提出；有副作用或依赖关系的请求必须串行。
+2. 只有缺少项目事实时才请求只读工具。基础工作区工具为 list_directory、glob_files、grep_text、read_file、read_files；低频Git、运行日志和配置工具先用 tool_search 加载。知识检索使用 query_knowledge。
+3. 工具结果会回到同一 Agent Loop；只要仍需要事实或证据就可以继续调用，不要重复相同请求。读取结果提供 continuation 时，仅在当前问题所需信息尚未出现时使用 nextOffset 与 checksum 续读，不要机械读到文件末尾；内容未变化时直接使用当前上下文，文件漂移时重新读取权威版本。互不依赖的只读请求可同轮提出；有副作用或依赖关系的请求必须串行。
 4. 需要实际修改时只做形成 WorkItem、验收标准、依赖与权限边界所必需的最小只读核实，然后 responseType=plan 或 dispatch；项目主 Agent本身不修改代码，后续立即交给当前项目子 Agent。
 5. 信息不足时 responseType=clarify。写入权限、RBAC和高风险确认由服务端最终裁决。
 6. 只输出JSON，不输出Markdown或内部推理。
@@ -823,7 +827,7 @@ JSON：{"responseType":"reply|tool_calls|clarify|plan|dispatch","reply":"给用�
                 source_count: Math.max(0, Number(input.sourceCount || 0)),
                 tool_results: toolResults,
             }),
-        }];
+        }], (0, transient_model_content_1.collectTransientModelBlocks)(toolResults));
     const executeSelectedRequest = async (request, parallelGroupId = "", preparedToolCallId = "") => {
         const callId = recordProjectMainToolUse(project, projectSessionId, request.name, request.arguments || {}, "", parallelGroupId, preparedToolCallId);
         try {
@@ -857,7 +861,7 @@ JSON：{"responseType":"reply|tool_calls|clarify|plan|dispatch","reply":"给用�
                 };
             }
             else {
-                const rows = await (0, main_agent_tool_runtime_1.executeMainAgentToolRequests)({ requests: [request], toolContext, resultTokenLimit: cc_tool_result_limits_1.CC_ALIGNED_TOOL_RESULT_MAX_TOKENS, toolBatchSize: 1, readOnlyParallelism: loopBudget.readOnlyParallelism });
+                const rows = await (0, main_agent_tool_runtime_1.executeMainAgentToolRequests)({ requests: [request], toolContext, resultTokenLimit: cc_tool_result_limits_1.CC_ALIGNED_TOOL_RESULT_MAX_TOKENS, toolBatchSize: 1, readOnlyParallelism: loopBudget.readOnlyParallelism, abortSignal: input.signal });
                 const row = rows[0];
                 if (!row?.ok)
                     throw new Error(row?.error || `项目主 Agent工具调用失败：${request.name}`);
@@ -865,7 +869,7 @@ JSON：{"responseType":"reply|tool_calls|clarify|plan|dispatch","reply":"给用�
             }
             recordProjectMainToolResult(project, projectSessionId, request.name, callId, (0, session_execution_ledger_1.sanitizeSessionExecutionValue)(output));
             const receipt = output && typeof output === "object" && "toolKind" in output ? output : {};
-            return {
+            return (0, transient_model_content_1.attachTransientModelBlocks)({
                 name: request.name,
                 ok: true,
                 output,
@@ -876,7 +880,7 @@ JSON：{"responseType":"reply|tool_calls|clarify|plan|dispatch","reply":"给用�
                 outputTokens: receipt.outputTokens || (0, context_budget_1.estimateTextTokens)(JSON.stringify(output)),
                 durationMs: receipt.durationMs || 0,
                 resultChecksum: receipt.resultChecksum || crypto.createHash("sha256").update(JSON.stringify(output)).digest("hex"),
-            };
+            }, (0, transient_model_content_1.transientModelBlocks)(output));
         }
         catch (error) {
             const detail = cleanText(error?.message || error, 1000);
@@ -2132,6 +2136,27 @@ async function executeProjectMainTask(input) {
                 agent: "project-main-agent",
                 data: { completed_work_item_ids: Array.from(completedWorkItemIds) },
             });
+        if (checkpointMatchesPlan)
+            (0, user_visible_agent_events_1.appendUserVisibleAgentEvent)({
+                eventId: `project-task:${taskId}:recovery:${executionGeneration}`,
+                scope: "project",
+                scopeId: project,
+                exactSessionId: input.plan.projectSessionId,
+                anchorMessageId: String(persistedAtResume?.anchor_message_id || `project-main-task:${taskId}`),
+                generation: executionGeneration,
+                taskId,
+                eventType: "agent_progress",
+                display: { title: "恢复接续", summary: "已重新核验后继续", status: "success" },
+                detail: {
+                    executionStage: { kind: persistedCheckpoint.phase === "main_agent_accepting" ? "verification_delivery" : "project_execution" },
+                    recoveryMilestone: {
+                        safe: true,
+                        phaseLabel: persistedCheckpoint.phase === "main_agent_accepting" ? "验证与交付" : "实施处理",
+                        skippedWorkItemCount: completedWorkItemIds.size,
+                        revalidated: true,
+                    },
+                },
+            });
         emit("planning", { status: "completed", plan: input.plan });
         for (const item of input.plan.workItems) {
             assertNotCancelled();
@@ -2804,13 +2829,18 @@ function projectMainTaskPublic(task) {
                 ? [{ id: "interrupt", kind: "interrupt", label: "停止当前执行", tone: "danger" }, { id: "cancel", kind: "cancel", label: "永久取消", tone: "outline" }]
                 : ["failed", "blocked", "environment_blocked", "recovery_required"].includes(runtimeStatus.phase)
                     ? task.acceptance_state === "recovery_required"
-                        ? [
-                            { id: "resume_interrupted", kind: "resume_interrupted", label: task.recovery?.mode === "safe_auto" ? "立即重试" : "恢复任务", tone: "primary" },
-                            { id: "open_project_settings", kind: "open_project_settings", label: "处理配置", tone: "outline" },
-                            { id: "recheck", kind: "recheck", label: "重新核验", tone: "outline" },
-                            { id: "takeover", kind: "takeover", label: "人工接管", tone: "outline" },
-                            { id: "cancel", kind: "cancel", label: "永久取消", tone: "outline" },
-                        ]
+                        ? ["temporary_network", "provider_overload", "provider_unavailable", "model_stream_interrupted"].includes(String(task.interruption_receipt?.reason_code || ""))
+                            ? [
+                                { id: "resume_interrupted", kind: "resume_interrupted", label: task.recovery?.mode === "safe_auto" ? "立即重试" : "恢复任务", tone: "primary" },
+                                { id: "cancel", kind: "cancel", label: "停止任务", tone: "danger" },
+                            ]
+                            : [
+                                { id: "resume_interrupted", kind: "resume_interrupted", label: "恢复任务", tone: "primary" },
+                                { id: "open_project_settings", kind: "open_project_settings", label: "处理配置", tone: "outline" },
+                                { id: "recheck", kind: "recheck", label: "重新核验", tone: "outline" },
+                                { id: "takeover", kind: "takeover", label: "人工接管", tone: "outline" },
+                                { id: "cancel", kind: "cancel", label: "停止任务", tone: "outline" },
+                            ]
                         : [{ id: "retry", kind: "retry", label: "重新执行", tone: "primary" }]
                     : [],
     };

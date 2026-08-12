@@ -203,7 +203,7 @@ export async function executeGlobalAgentAuthorizedTool(kind: "mcp" | "skill", in
       : {};
   const selected = runtime.catalog.tools.find(row => row.canonicalName === toolName);
   const output = selected?.server === "ccm__workspace_readonly"
-    ? JSON.stringify(await executeWorkspaceReadonlyTool(selected.name, args, runtime.capability_token))
+    ? JSON.stringify(await executeWorkspaceReadonlyTool(selected.name, args, runtime.capability_token, 3))
     : await toolManager.executeToolCall(toolName, args, runtime.scope);
   return { success: true, kind, name: toolName, result: parseToolResult(output), authorization_checksum: runtime.checksum };
 }

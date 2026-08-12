@@ -9,6 +9,7 @@ import {
   UNIFIED_MODEL_TOTAL_TIMEOUT_MS,
 } from "../../system/model-call-retry";
 import { recordProviderNativeCompactExecutionReceipt } from "./provider-native-compact-execution-receipt";
+import { transientModelBlocks, type TransientModelBlock } from "../../system/transient-model-content";
 import {
   buildGroupApiMicroCompactEditPlan,
   buildGroupApiMicrocompactNativeApplyPlan,
@@ -188,6 +189,7 @@ function providerContextCacheOptions(config: any, options: LlmCallOptions, provi
 }
 
 async function prepareContextCache(config: any, options: LlmCallOptions, provider: "openai" | "anthropic" | "gemini") {
+  const transientBlocks = transientModelBlocks(options.messages || []);
   const sourceMessages = options.system != null
     && !(options.messages || []).some(message => String(message?.role || "") === "system")
     ? [{ role: "system", content: options.system }, ...(options.messages || [])]
@@ -238,11 +240,12 @@ async function prepareContextCache(config: any, options: LlmCallOptions, provide
       }
     }
   }
-  if (!cacheOptions) return { messages: sourceMessages, plan: null, adapterPatch: null };
+  if (!cacheOptions) return { messages: sourceMessages, plan: null, adapterPatch: null, transientBlocks };
   const prepared = await prepareProviderNeutralContextCacheRequestSingleflight(sourceMessages, cacheOptions);
   const result = {
     ...prepared,
     adapterPatch: buildProviderContextCacheAdapterRequestPatch(config, prepared.plan, cacheOptions.adapterCapability),
+    transientBlocks,
   };
   if (result.plan) Object.defineProperty(result.plan, "_runtimeProviderStartedAtMs", { value: Date.now(), enumerable: false, configurable: true });
   return result;
@@ -783,6 +786,44 @@ function providerRequestId(response: any) {
     || responseHeader(response, "x-anthropic-request-id");
 }
 
+function withTransientModelBlocks(messagesInput: any[], blocks: TransientModelBlock[], family: "openai" | "anthropic") {
+  if (!blocks.length) return messagesInput;
+  const messages = messagesInput.map(message => ({ ...message }));
+  let index = messages.length - 1;
+  while (index >= 0 && String(messages[index]?.role || "") === "system") index -= 1;
+  if (index < 0) messages.push({ role: "user", content: "" }), index = messages.length - 1;
+  const current = messages[index];
+  const content = Array.isArray(current.content)
+    ? [...current.content]
+    : family === "anthropic"
+      ? [{ type: "text", text: String(current.content || "") }]
+      : [{ type: "text", text: String(current.content || "") }];
+  for (const block of blocks) {
+    if (block.type === "text") content.push({ type: "text", text: block.text });
+    else if (family === "anthropic") {
+      content.push({ type: "text", text: block.label ? `临时视觉内容：${block.label}` : "临时视觉内容" });
+      content.push({ type: "image", source: { type: "base64", media_type: block.mimeType, data: block.data.toString("base64") } });
+    } else {
+      content.push({ type: "text", text: block.label ? `临时视觉内容：${block.label}` : "临时视觉内容" });
+      content.push({ type: "image_url", image_url: { url: `data:${block.mimeType};base64,${block.data.toString("base64")}` } });
+    }
+  }
+  messages[index] = { ...current, content };
+  return messages;
+}
+
+function geminiPartsWithTransient(content: any, blocks: TransientModelBlock[]) {
+  const parts: any[] = [{ text: geminiContentText(content) }];
+  for (const block of blocks) {
+    if (block.type === "text") parts.push({ text: block.text });
+    else {
+      if (block.label) parts.push({ text: `临时视觉内容：${block.label}` });
+      parts.push({ inlineData: { mimeType: block.mimeType, data: block.data.toString("base64") } });
+    }
+  }
+  return parts;
+}
+
 function recordAnthropicPromptCacheState(config: any, options: LlmCallOptions, body: any, headers: Record<string, string>) {
   const tracking = options.promptCacheTracking || options.prompt_cache_tracking || null;
   const groupId = String(tracking?.groupId || tracking?.group_id || "").trim();
@@ -896,7 +937,7 @@ async function callOpenAiCompatibleChatOnce(config: any, options: LlmCallOptions
         ...buildOpenAiReasoningFields(callReasoningConfig(config, options)),
         ...(cache.adapterPatch?.body || {}),
         ...nativePatch.body,
-        messages: cache.messages,
+        messages: withTransientModelBlocks(cache.messages, cache.transientBlocks || [], "openai"),
       }),
       signal: abort.controller.signal,
     });
@@ -975,13 +1016,16 @@ async function callGeminiCompatibleChatOnce(config: any, options: LlmCallOptions
   const cache = await prepareContextCache(config, options, "gemini");
   const system = cache.messages.filter((message: any) => String(message?.role || "") === "system")
     .map((message: any) => geminiContentText(message?.content)).filter(Boolean).join("\n\n");
-  const contents = cache.messages
-    .filter((message: any) => String(message?.role || "") !== "system")
-    .map((message: any) => ({
+  const nonSystemMessages = cache.messages.filter((message: any) => String(message?.role || "") !== "system");
+  const lastTransientMessageIndex = nonSystemMessages.length - 1;
+  const contents = nonSystemMessages
+    .map((message: any, index: number) => ({
       role: String(message?.role || "") === "assistant" ? "model" : "user",
-      parts: [{ text: geminiContentText(message?.content) }],
+      parts: index === lastTransientMessageIndex
+        ? geminiPartsWithTransient(message?.content, cache.transientBlocks || [])
+        : [{ text: geminiContentText(message?.content) }],
     }))
-    .filter((message: any) => message.parts[0].text.trim());
+    .filter((message: any) => message.parts.some((part: any) => part.inlineData || String(part.text || "").trim()));
   const body = {
     ...(system ? { systemInstruction: { parts: [{ text: system }] } } : {}),
     contents,
@@ -1055,7 +1099,7 @@ async function callAnthropicCompatibleChatOnce(config: any, options: LlmCallOpti
   let emitted = false;
 
   const cache = await prepareContextCache(config, options, "anthropic");
-  const messages = cache.messages;
+  const messages = withTransientModelBlocks(cache.messages, cache.transientBlocks || [], "anthropic");
   // Anthropic 的 system 是独立字段，必须把所有 system 消息按序拼接。
   // 此前用 find() 只取首条，一旦上游把稳定段与易变段拆成多条 system
   // （为了让 prompt cache 前缀不被工具目录变更击穿），后续几条会被静默丢弃。

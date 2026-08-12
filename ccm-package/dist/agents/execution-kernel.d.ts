@@ -97,6 +97,7 @@ export declare function purgeTaskExecutionArtifacts(taskId: string): {
     executions: number;
     checkpoints: number;
     outputs: number;
+    recoveryManifests: number;
 };
 export declare function transitionExecution(executionId: string, state: ExecutionState, message?: string, extra?: any): ExecutionRecord;
 export declare function beginExecutionAttempt(executionId: string, message?: string): ExecutionRecord;
@@ -257,30 +258,8 @@ export declare function createExecutionCheckpoint(input: {
     workDir: string;
     mode?: string;
     label?: string;
-}): {
-    version: number;
-    id: string;
-    executionId: string;
-    taskId: string;
-    label: string;
-    workDir: string;
-    repoRoot: string;
-    mode: string;
-    originalHead: string;
-    originalBranch: string;
-    indexTree: string;
-    checkpointCommit: string;
-    createdAt: string;
-    rolledBackAt: string;
-    rollbackReason: string;
-};
-export declare function rollbackExecutionCheckpoint(checkpointId: string, reason: string, options?: any): {
-    success: boolean;
-    checkpointId: string;
-    executionId: any;
-    restoredHead: any;
-    rolledBackAt: any;
-};
+}): any;
+export declare function rollbackExecutionCheckpoint(checkpointId: string, reason: string, options?: any): any;
 export declare function inspectBranchFreshness(workDir: string, baseRef?: string): {
     repoRoot: string;
     branch: string;
@@ -306,6 +285,62 @@ export declare function mergeExecutionWorktree(executionId: string, options?: an
     duplicate?: undefined;
     mergedAt?: undefined;
 };
+export declare function previewExecutionCheckpointRecovery(checkpointId: string, options?: any): {
+    checkpointId: string;
+    available: boolean;
+    reason: string;
+    conflicts: any[];
+    files: any[];
+    schema?: undefined;
+    executionId?: undefined;
+    taskId?: undefined;
+    project?: undefined;
+    canExecute?: undefined;
+    protectedFileCount?: undefined;
+    currentHead?: undefined;
+    previewToken?: undefined;
+    contentStored?: undefined;
+} | {
+    schema: string;
+    checkpointId: string;
+    executionId: any;
+    taskId: any;
+    project: any;
+    available: boolean;
+    canExecute: boolean;
+    conflicts: any[];
+    files: {
+        path: string;
+        action: string;
+        conflict: boolean;
+    }[];
+    protectedFileCount: any;
+    currentHead: string;
+    previewToken: string;
+    contentStored: boolean;
+    reason?: undefined;
+};
+export declare function applyExecutionCheckpointRecovery(checkpointId: string, options?: any): {
+    success: boolean;
+    duplicate: boolean;
+    checkpointId: string;
+    restoredFiles: number;
+    contentStored: boolean;
+    executionId?: undefined;
+    taskId?: undefined;
+    recoveryCommit?: undefined;
+    restoredAt?: undefined;
+} | {
+    success: boolean;
+    checkpointId: string;
+    executionId: any;
+    taskId: any;
+    recoveryCommit: string;
+    restoredFiles: number;
+    restoredAt: string;
+    contentStored: boolean;
+    duplicate?: undefined;
+};
 export declare function cleanupExecutionWorktree(executionId: string, force?: boolean): {
     success: boolean;
     executionId: string;
@@ -318,6 +353,7 @@ export declare function runExecutionKernelSelfTest(): {
         rejectsDangerousVerificationCommand: boolean;
         createsPersistentExecution: boolean;
         checkpointRollbackRestoresFiles: boolean;
+        selectiveCheckpointRewindPreservesOtherFiles: boolean;
         classifiesTypedFailure: boolean;
         evaluatesMergeReadyGreenContract: boolean;
         persistsDeliveryEvidence: boolean;

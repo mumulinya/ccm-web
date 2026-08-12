@@ -1187,6 +1187,19 @@ function ensureTaskKernelExecution(task: any) {
 
 export function finalizeTaskKernel(task: any, execution: any, deliverySummary: any, state: "succeeded" | "failed" | "reviewing" | "cancelled", message: string) {
   ensureTaskKernelExecution(task);
+  const boundaryViolations = Array.isArray(deliverySummary?.project_policy_violations)
+    ? deliverySummary.project_policy_violations
+    : [];
+  if (boundaryViolations.length) {
+    const { enforceNativeWorkspaceBoundary } = require("../../agents/native-workspace-boundary");
+    const boundary = enforceNativeWorkspaceBoundary(task.id, boundaryViolations);
+    deliverySummary.native_workspace_boundary = boundary;
+    deliverySummary.native_workspace_boundary_passed = false;
+    state = "failed";
+    message = boundary.quarantined?.length
+      ? `检测到 ${boundaryViolations.length} 项越界写入，违规文件已在隔离工作区恢复，任务未交付`
+      : `检测到 ${boundaryViolations.length} 项越界写入，任务已阻止交付并等待用户处理`;
+  }
   const records = listExecutions({ taskId: task.id });
   let rootGreen: any = null;
   for (const record of records) {

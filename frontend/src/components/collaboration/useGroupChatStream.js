@@ -19,6 +19,7 @@ export function useGroupChatStream({
   currentGroup,
   currentGroupSessionId,
   ensureGroupSession,
+  refreshWritableGroupSession,
   mainAgentStatus,
   groupAgentQa,
   lastGroupMsgCount,
@@ -362,9 +363,53 @@ export function useGroupChatStream({
     let res
     const controller = new AbortController()
     groupStreamController.value = controller
+    const sendRequest = async () => {
+      const res = await groupsApi.send(payload, { signal: controller.signal })
+      // `groupsApi.send` returns raw SSE responses, so an HTTP error must be
+      // decoded before it reaches the reader.
+      if (!res.ok) {
+      const responseType = String(res.headers.get('content-type') || '').toLowerCase()
+      let body = null
+      if (responseType.includes('application/json')) body = await res.json().catch(() => null)
+      else {
+        const text = await res.text().catch(() => '')
+        try { body = JSON.parse(text) } catch { body = text ? { error: text } : null }
+      }
+      const error = new Error(String(body?.error || body?.message || `发送失败（HTTP ${res.status}）`).trim())
+      error.code = body?.code || ''
+      error.status = res.status
+      error.groupSessionUnavailable = error.code === 'GROUP_SESSION_UNAVAILABLE'
+      throw error
+      }
+      return res
+    }
+    // An exact continuation must never move to another session. Ordinary web
+    // conversation may refresh a stale session id and retry exactly once.
+    const canRefreshUnavailableSession = !resumeInterruption?.id
+      && !directedInputFields
+      && queuedTurn?.metadata?.requested_mode !== 'steer'
+      && !queuedTurn?.metadata?.continuation_task_id
+    let requestError = null
     try {
-      res = await groupsApi.send(payload, { signal: controller.signal })
+      res = await sendRequest()
     } catch (error) {
+      if (error?.groupSessionUnavailable && canRefreshUnavailableSession) {
+        try {
+          const previousSessionId = String(currentGroupSessionId.value || '')
+          const refreshedSessionId = String(await refreshWritableGroupSession?.() || '')
+          if (!refreshedSessionId || refreshedSessionId === previousSessionId) throw error
+          if (payload instanceof FormData) payload.set('group_session_id', refreshedSessionId)
+          else payload.group_session_id = refreshedSessionId
+          res = await sendRequest()
+          toast.info('原群聊会话已不可用，已切换到当前会话继续发送')
+        } catch (retryError) {
+          requestError = retryError
+        }
+      } else {
+        requestError = error
+      }
+      if (requestError) {
+        const error = requestError
       const stopped = error?.name === 'AbortError'
       if (!stopped) {
         newMessage.value = msg
@@ -379,6 +424,7 @@ export function useGroupChatStream({
       nextTick(focusGroupInput)
       if (groupStreamController.value === controller) groupStreamController.value = null
       return { success: false, error: stopped ? '当前工作已停止' : (error?.message || '消息提交失败') }
+      }
     }
 
     const reader = res.body.getReader()

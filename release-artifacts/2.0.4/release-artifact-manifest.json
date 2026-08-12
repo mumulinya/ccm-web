@@ -1,0 +1,37 @@
+{
+  "schema": "ccm-release-artifact-manifest-v1",
+  "package_name": "@mumulinya167/cc-web",
+  "version": "2.0.4",
+  "tarball": "mumulinya167-cc-web-2.0.4.tgz",
+  "tarball_sha256": "501cbe660d2dd57f706ba06cec63781cc85b6c92ffed6bf08ee5c42c4fa6bb5d",
+  "sbom": "sbom.cdx.json",
+  "sbom_sha256": "4d1347fe2238c1342bc0bea63662a7209c7f49025f93e783b8ac49e3ae9d019f",
+  "pet_assets": {
+    "package_name": "@mumulinya167/ccm-pet-assets",
+    "version": "2.0.4",
+    "tarball": "mumulinya167-ccm-pet-assets-2.0.4.tgz",
+    "tarball_sha256": "300dc62acbfc3a1fb1908dc41014c01c2a1c08d36fdf68eb3dcc980f9aeb492d",
+    "compressed_bytes": 17496826,
+    "unpacked_bytes": 20881865,
+    "entries": 178
+  },
+  "budgets": {
+    "compressed_bytes": 20971520,
+    "unpacked_bytes": 36700160,
+    "entries": 800
+  },
+  "actual": {
+    "compressed_bytes": 11136538,
+    "unpacked_bytes": 32203897,
+    "entries": 775
+  },
+  "executable_entries": [
+    "package/bin/ccm.js",
+    "package/bin/legacy-project-cli.js",
+    "package/bin/postinstall.js",
+    "package/bin/prepublish-guard.js",
+    "package/bin/setup.js"
+  ],
+  "tested": false,
+  "created_at": "2026-08-11T17:34:57.298Z"
+}

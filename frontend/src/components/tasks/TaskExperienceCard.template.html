@@ -54,7 +54,14 @@
         </li>
       </ol>
     </div>
-    <div v-if="recoverySummary" class="task-card-section recovery-summary" :class="recoverySummary.status">
+    <TaskRecoveryRetryNotice
+      v-if="recoveryPresentation.visible"
+      :presentation="recoveryPresentation"
+      :actions="recoveryActions"
+      :busy="busy"
+      @action="emit('action', $event)"
+    />
+    <div v-else-if="recoverySummary" class="task-card-section recovery-summary" :class="recoverySummary.status">
       <div class="section-head">
         <label>{{ recoverySummary.title || '恢复接续' }}</label>
         <span>{{ recoverySummary.status_label || recoveryStatusLabel(recoverySummary.status) }}</span>
@@ -923,8 +930,8 @@
       <ul><li v-for="item in card.delivery.risks" :key="item">{{ item }}</li></ul>
     </div>
 
-    <div v-if="card.actions?.length" class="task-card-actions">
-      <button v-for="action in card.actions" :key="action.id" type="button" :disabled="busy" :class="['task-card-button', action.tone]" @click="emit('action', taskActionPayload(action))">{{ action.label }}</button>
+    <div v-if="visibleCardActions.length" class="task-card-actions">
+      <button v-for="action in visibleCardActions" :key="action.id" type="button" :disabled="busy" :class="['task-card-button', action.tone]" @click="emit('action', taskActionPayload(action))">{{ action.label }}</button>
     </div>
 
     <details v-if="card.technical" class="task-card-technical">

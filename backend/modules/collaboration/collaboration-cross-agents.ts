@@ -57,6 +57,7 @@ import {
   transitionAgentCommunication,
 } from "../../system/agent-communication-v2";
 import { AGENT_COMMUNICATION_ACK_MCP_TOOL_ALIASES } from "../../integrations/agent-communication-mcp";
+import { authorizeProjectChildAgentStart } from "../tools/conversation-permission-policy";
 
 // ===== merged from collaboration-cross-agents.ts =====
 
@@ -651,6 +652,30 @@ export async function executeMentionJob(mention: any, env: CrossAgentEnv): Promi
       });
       writeSse(streamRes, { type: "native_session", taskId, agent: targetName, session: { project: targetName, agentType: activeTaskSession.agentType, mode: activeTaskSession.resumeMode, turn: activeTaskSession.turnCount + 1, resumed: activeTaskSession.turnCount > 0 } });
       if (sourceTask) updateGroupTaskInlineStatus(sourceTask, "in_progress", `${targetName} ${activeTaskSession.turnCount > 0 ? "恢复原生会话" : "创建原生会话"}`);
+    }
+    if (!nativeTestAgentDispatch && sourceTask && taskRequiresCodeChanges(sourceTask)) {
+      const permission = await authorizeProjectChildAgentStart({ task: sourceTask, project: targetName, workDir: tWorkDir, agentType: tAgentType });
+      if (!permission.allowed) {
+        const detail = permission.message || "当前会话权限不允许启动代码修改 Agent";
+        updateTask(taskId, {
+          status: "blocked",
+          status_detail: detail,
+          conversation_permission_snapshot: permission.snapshot,
+          conversation_permission_mode: permission.mode,
+          permission_policy_revision: permission.snapshot?.revision || 0,
+          edit_approval_id: permission.editApprovalId || null,
+        });
+        appendTaskTimelineEvent(taskId, {
+          type: "conversation_permission.required",
+          title: permission.mode === "main_agent_only" ? "主 Agent 权限审核结果" : "等待代码修改授权",
+          detail,
+          status: "blocked",
+          phase: "dispatching",
+          agent: targetName,
+          data: { permission_request_id: permission.permissionRequest?.id || "", permission_mode: permission.mode },
+        });
+        return failChildDispatch(detail, [permission.mode === "main_agent_only" ? "处理主 Agent 的审核结果后继续" : "批准当前任务的代码修改权限后自动继续"]);
+      }
     }
     const preparedWorkDir = nativeTestAgentDispatch
       ? { mode: "shared" as const, requestedMode: "shared" as const, workDir: tWorkDir, originalWorkDir: tWorkDir }
@@ -2610,7 +2635,9 @@ export async function executeMentionJobTryA(mention: any, env: CrossAgentEnv): P
           trustedMemoryEnvelopeChecksum: activeMemoryContextSnapshot?.context?.memory_prompt_injection_proof?.trusted_envelope_checksum || "",
           trustedMemoryEnvelopeSourceChecksum: activeMemoryContextSnapshot?.context?.memory_prompt_injection_proof?.trusted_envelope_source_checksum || "",
           ...taskAgentSessionLifecycleRunnerOptions(activeMemoryContextSnapshot),
-          agentSession: activeTaskSession ? getTaskAgentSessionOptions(activeTaskSession) : null,
+          agentSession: activeTaskSession
+            ? { ...getTaskAgentSessionOptions(activeTaskSession), conversationPermissionMode: sourceTask?.conversation_permission_mode || "full_access" }
+            : { conversationPermissionMode: sourceTask?.conversation_permission_mode || "full_access" },
           durableDispatch: typedMemoryDispatchAdmission.required === true
             || capacityRevalidationPreparation?.required === true
             || activeMemoryContextSnapshot?.context?.memory_prompt_injection_proof?.trusted_envelope_bound === true,
@@ -2985,7 +3012,9 @@ export async function executeMentionJobTryA(mention: any, env: CrossAgentEnv): P
               model: activeTaskSession?.modelId || "",
               taskAgentSessionId: activeTaskSession?.id || "",
               ...taskAgentSessionLifecycleRunnerOptions(activeMemoryContextSnapshot),
-              agentSession: activeTaskSession ? getTaskAgentSessionOptions(activeTaskSession) : null,
+              agentSession: activeTaskSession
+                ? { ...getTaskAgentSessionOptions(activeTaskSession), conversationPermissionMode: sourceTask?.conversation_permission_mode || "full_access" }
+                : { conversationPermissionMode: sourceTask?.conversation_permission_mode || "full_access" },
               durableDispatch: lastTypedMemoryDispatchAdmission.required === true || capacityRevalidationPreparation?.required === true,
             initialWorkEvents: [runtimeToolContext.workEvent],
             onDone: (opts: any) => {

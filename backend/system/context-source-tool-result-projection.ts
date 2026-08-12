@@ -63,6 +63,7 @@ function nestedCandidates(value: any) {
     parseValue(root.output),
     parseValue(root.rawOutput || root.raw_output),
     parseValue(root.result?.result),
+    parseValue(root.modelPayload || root.model_payload),
   ].filter(candidate => candidate != null);
 }
 
@@ -248,6 +249,31 @@ export function buildContextSourceToolResultReference(toolNameInput: any, value:
 }
 
 export function projectContextSourceToolResultForPersistence(toolName: any, value: any, query: any = "") {
+  const normalizedTool = clean(toolName, 240).replace(/^mcp__ccm__ccm_workspace_readonly__/, "");
+  if (["read_file", "grep_text", "glob_files", "list_directory", "inspect_notebook"].includes(normalizedTool)) {
+    const candidates = nestedCandidates(value);
+    const source = candidates.find(candidate => candidate && typeof candidate === "object" && (
+      candidate.safeReceipt || candidate.safe_receipt || candidate.toolContractVersion || /^ccm-workspace-/.test(String(candidate.schema || ""))
+    )) || candidates.find(candidate => candidate && typeof candidate === "object") || {};
+    const receipt = source?.safeReceipt || source?.safe_receipt || {};
+    const kind = clean(receipt.kind || ({ read_file: "text", grep_text: "grep", glob_files: "glob", list_directory: "glob", inspect_notebook: "notebook" } as any)[normalizedTool], 40);
+    const itemCount = Number(receipt.itemCount ?? source?.numFiles ?? source?.numLines ?? source?.items?.length ?? source?.lines?.length ?? 0);
+    const truncated = receipt.truncated === true || source?.truncated === true;
+    return {
+      schema: "ccm-workspace-tool-result-reference-v1",
+      toolName: normalizedTool,
+      toolContractVersion: Number(source?.toolContractVersion || 2),
+      kind,
+      path: clean(receipt.path || source?.path, 1200),
+      checksum: clean(receipt.checksum || source?.checksum || source?.result_checksum || checksum(value), 300),
+      itemCount: Math.max(0, itemCount),
+      lineCount: Math.max(0, Number(receipt.lineCount || source?.numLines || source?.lines?.length || 0)),
+      pageCount: Math.max(0, Number(receipt.pageCount || source?.selected_pages?.length || 0)),
+      truncated,
+      rehydratable: true,
+      contentStored: false,
+    };
+  }
   return buildContextSourceToolResultReference(toolName, value, query) || value;
 }
 
@@ -268,7 +294,7 @@ export function contextSourceToolResultProjectionSelfTest() {
   return {
     pass: JSON.stringify(knowledge).includes(sentinel) === false
       && JSON.stringify(shared).includes(sentinel) === false
-      && projectContextSourceToolResultForPersistence("read_file", ordinary) === ordinary
+      && projectContextSourceToolResultForPersistence("read_file", ordinary)?.contentStored === false
       && knowledge?.contentStored === false
       && shared?.contentStored === false,
     knowledge,

@@ -33,11 +33,11 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.WORKSPACE_READONLY_TOOL_DEFINITIONS_V2 = void 0;
+exports.WORKSPACE_READONLY_TOOL_DEFINITIONS_V3 = exports.WORKSPACE_READONLY_TOOL_DEFINITIONS_V2 = void 0;
 exports.sealScopedToolCapability = sealScopedToolCapability;
 exports.openScopedToolCapability = openScopedToolCapability;
-exports.executeWorkspaceReadonlyToolWithCapability = executeWorkspaceReadonlyToolWithCapability;
 exports.executeWorkspaceReadonlyTool = executeWorkspaceReadonlyTool;
+exports.executeWorkspaceReadonlyToolWithCapability = executeWorkspaceReadonlyToolWithCapability;
 exports.runWorkspaceReadonlyToolsSelfTest = runWorkspaceReadonlyToolsSelfTest;
 const crypto = __importStar(require("crypto"));
 const fs = __importStar(require("fs"));
@@ -45,6 +45,8 @@ const os = __importStar(require("os"));
 const path = __importStar(require("path"));
 const child_process_1 = require("child_process");
 const util_1 = require("util");
+const readline = __importStar(require("readline"));
+const minimatch_1 = require("minimatch");
 const db_1 = require("../core/db");
 const project_runtime_1 = require("../modules/projects/project-runtime");
 const context_budget_1 = require("../system/context-budget");
@@ -53,6 +55,9 @@ const web_notebook_tools_1 = require("./web-notebook-tools");
 const unified_evidence_registry_1 = require("../system/unified-evidence-registry");
 const group_orchestrator_config_1 = require("../modules/collaboration/group-orchestrator-config");
 const cc_tool_result_limits_1 = require("./cc-tool-result-limits");
+const workspace_read_media_1 = require("./workspace-read-media");
+const transient_model_content_1 = require("../system/transient-model-content");
+const workspace_search_runtime_1 = require("./workspace-search-runtime");
 const execFileAsync = (0, util_1.promisify)(child_process_1.execFile);
 const SECRET_FILE = path.join(os.homedir(), ".cc-connect", "private", "main-agent-tool-capability-secret");
 const EXCLUDED_DIRECTORIES = new Set([".git", "node_modules", "target", "dist", "build", "coverage", ".next", ".nuxt", ".output"]);
@@ -64,6 +69,7 @@ const RG_SENSITIVE_GLOBS = [
     "!**/*service-account*", "!**/*firebase-admin*",
 ];
 const TEXT_FILE_LIMIT = 4 * 1024 * 1024;
+const V3_TEXT_SCAN_LIMIT = 64 * 1024 * 1024;
 const TOOL_RESULT_TOKEN_LIMIT = cc_tool_result_limits_1.CC_ALIGNED_TOOL_RESULT_MAX_TOKENS;
 const DIRECTORY_SCAN_LIMIT = 20_000;
 function canonical(value) {
@@ -129,7 +135,7 @@ const rawDefinitions = [
     { name: "list_directory", loadPolicy: "base", description: "列出授权项目目录中的文件和子目录，结果分页返回。", inputSchema: { type: "object", properties: { project_id: { type: "string" }, path: { type: "string" }, cursor: { type: "string" }, limit: { type: "integer", minimum: 1, maximum: 500 } } } },
     { name: "glob_files", loadPolicy: "base", description: "在授权项目中按Glob模式查找文件，返回稳定分页结果。", inputSchema: { type: "object", required: ["pattern"], properties: { project_id: { type: "string" }, pattern: { type: "string" }, cursor: { type: "string" }, limit: { type: "integer", minimum: 1, maximum: 500 } } } },
     { name: "grep_text", loadPolicy: "base", description: "使用ripgrep在授权项目源码中检索文本或正则表达式。", inputSchema: { type: "object", required: ["pattern"], properties: { project_id: { type: "string" }, pattern: { type: "string" }, glob: { type: "string" }, mode: { enum: ["content", "files_with_matches", "count"] }, multiline: { type: "boolean" }, cursor: { type: "string" }, limit: { type: "integer", minimum: 1, maximum: 500 } } } },
-    { name: "read_file", loadPolicy: "base", description: "按完整行读取授权项目内的普通文本文件，支持offset、limit和继续游标。单次读取最高25000 Token，最终仍受Provider安全容量门限制。", inputSchema: { type: "object", required: ["path"], properties: { project_id: { type: "string" }, path: { type: "string" }, offset: { type: "integer", minimum: 1 }, limit: { type: "integer", minimum: 1, maximum: 2000 }, token_budget: { type: "integer", minimum: 256, maximum: 25000, default: 25000 } } } },
+    { name: "read_file", loadPolicy: "base", description: "按完整行读取授权项目内文件，支持offset、limit、版本校验和继续游标。仅在当前模型上下文仍持有相同内容时返回未变化。单次读取最高25000 Token。", inputSchema: { type: "object", required: ["path"], properties: { project_id: { type: "string" }, path: { type: "string" }, offset: { type: "integer", minimum: 1 }, limit: { type: "integer", minimum: 1, maximum: 2000 }, expected_checksum: { type: "string" }, token_budget: { type: "integer", minimum: 256, maximum: 25000, default: 25000 } } } },
     { name: "inspect_notebook", loadPolicy: "search", description: "结构化检查Notebook元数据、单元格身份、源码校验值和输出类型；不返回单元格正文。", inputSchema: { type: "object", required: ["path"], properties: { project_id: { type: "string" }, path: { type: "string" }, cursor: { type: "string" }, limit: { type: "integer", minimum: 1, maximum: 200 } } } },
     { name: "web_fetch", loadPolicy: "search", description: "安全读取公开HTTPS网页、文本、JSON或PDF；逐次校验DNS和重定向并阻止私网、凭据URL和超限响应。", inputSchema: { type: "object", required: ["url"], properties: { project_id: { type: "string" }, url: { type: "string" }, max_chars: { type: "integer", minimum: 1000, maximum: 300000 } } } },
     ...((0, web_notebook_tools_1.isWebSearchAvailable)() ? [{ name: "web_search", loadPolicy: "search", description: "通过已配置的真实搜索Provider检索公开Web；未配置真实后端时本工具不会注册。", inputSchema: { type: "object", required: ["query"], properties: { project_id: { type: "string" }, query: { type: "string" }, count: { type: "integer", minimum: 1, maximum: 20 } } } }] : []),
@@ -149,12 +155,84 @@ const rawDefinitions = [
     { name: "read_runtime_status", loadPolicy: "search", description: "读取授权项目的运行配置、进程和构建状态。", inputSchema: { type: "object", properties: { project_id: { type: "string" } } } },
     { name: "read_runtime_logs", loadPolicy: "search", description: "读取授权项目精确运行配置的运行或构建日志。", inputSchema: { type: "object", required: ["profile_id"], properties: { project_id: { type: "string" }, profile_id: { type: "string" }, kind: { enum: ["run", "build"] }, lines: { type: "integer", minimum: 1, maximum: 2000 } } } },
 ];
+const v3Schemas = {
+    glob_files: {
+        type: "object", required: ["pattern"], additionalProperties: false,
+        properties: {
+            project_id: { type: "string" }, pattern: { type: "string" }, path: { type: "string" },
+            offset: { type: "integer", minimum: 0 }, limit: { type: "integer", minimum: 1, maximum: 500 },
+            respect_gitignore: { type: "boolean" },
+        },
+    },
+    grep_text: {
+        type: "object", required: ["pattern"], additionalProperties: false,
+        properties: {
+            project_id: { type: "string" }, pattern: { type: "string" }, path: { type: "string" }, glob: { type: "string" },
+            output_mode: { enum: ["content", "files_with_matches", "count"] }, mode: { enum: ["content", "files_with_matches", "count"] },
+            "-B": { type: "integer", minimum: 0, maximum: 100 }, "-A": { type: "integer", minimum: 0, maximum: 100 },
+            "-C": { type: "integer", minimum: 0, maximum: 100 }, context: { type: "integer", minimum: 0, maximum: 100 },
+            "-n": { type: "boolean" }, "-i": { type: "boolean" }, type: { type: "string" },
+            head_limit: { type: "integer", minimum: 0, maximum: 10000 }, offset: { type: "integer", minimum: 0 }, multiline: { type: "boolean" },
+        },
+    },
+    read_file: {
+        type: "object", required: ["path"], additionalProperties: false,
+        properties: {
+            project_id: { type: "string" }, path: { type: "string" }, offset: { type: "integer", minimum: 0 },
+            limit: { type: "integer", minimum: 1, maximum: 2000 }, pages: { type: "string" },
+            cell_offset: { type: "integer", minimum: 0 }, cell_limit: { type: "integer", minimum: 1, maximum: 200 },
+            expected_checksum: { type: "string" },
+            token_budget: { type: "integer", minimum: 256, maximum: 25000, default: 25000 },
+        },
+    },
+};
+const v3OnlyDefinitions = [
+    {
+        name: "read_files",
+        loadPolicy: "base",
+        description: "一次读取最多20个授权项目内的普通文本文件。每个文件独立返回路径、行号、校验和和续读位置；图片、PDF和Notebook请使用read_file。",
+        inputSchema: {
+            type: "object", required: ["paths"], additionalProperties: false,
+            properties: {
+                project_id: { type: "string" },
+                paths: {
+                    type: "array", minItems: 1, maxItems: 20,
+                    items: {
+                        oneOf: [
+                            { type: "string" },
+                            {
+                                type: "object", required: ["path"], additionalProperties: false,
+                                properties: {
+                                    path: { type: "string" }, offset: { type: "integer", minimum: 0 },
+                                    limit: { type: "integer", minimum: 1, maximum: 2000 },
+                                    expected_checksum: { type: "string" },
+                                },
+                            },
+                        ],
+                    },
+                },
+                token_budget: { type: "integer", minimum: 1024, maximum: 25000, default: 25000 },
+            },
+        },
+    },
+];
 exports.WORKSPACE_READONLY_TOOL_DEFINITIONS_V2 = rawDefinitions.map(definition => {
     const body = {
         ...definition,
         canonicalName: `mcp__ccm__ccm_workspace_readonly__${definition.name}`,
         server: "ccm__workspace_readonly",
         annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, ccmTrustedReadonly: true },
+    };
+    return { ...body, checksum: checksum(body) };
+});
+exports.WORKSPACE_READONLY_TOOL_DEFINITIONS_V3 = [...rawDefinitions, ...v3OnlyDefinitions].map(definition => {
+    const body = {
+        ...definition,
+        ...(v3Schemas[definition.name] ? { inputSchema: v3Schemas[definition.name] } : {}),
+        canonicalName: `mcp__ccm__ccm_workspace_readonly__${definition.name}`,
+        server: "ccm__workspace_readonly",
+        annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, ccmTrustedReadonly: true },
+        toolContractVersion: 3,
     };
     return { ...body, checksum: checksum(body) };
 });
@@ -188,6 +266,82 @@ function assertNotSensitive(relative) {
     if (relative.split("/").some(part => SENSITIVE_NAMES.test(part)))
         throw new Error("敏感文件禁止读取");
 }
+function editDistance(leftValue, rightValue) {
+    const left = leftValue.toLowerCase();
+    const right = rightValue.toLowerCase();
+    const previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+    for (let row = 1; row <= left.length; row += 1) {
+        let diagonal = previous[0];
+        previous[0] = row;
+        for (let column = 1; column <= right.length; column += 1) {
+            const above = previous[column];
+            previous[column] = left[row - 1] === right[column - 1]
+                ? diagonal
+                : Math.min(previous[column - 1], above, diagonal) + 1;
+            diagonal = above;
+        }
+    }
+    return previous[right.length];
+}
+function suggestionCandidates(root, requestedValue) {
+    const requested = normalizeRelative(requestedValue);
+    if (!requested || path.isAbsolute(requested) || requested.split("/").includes("..") || requested.split("/").some(part => SENSITIVE_NAMES.test(part)))
+        return [];
+    const requestedBase = path.posix.basename(requested);
+    const requestedParent = path.posix.dirname(requested) === "." ? "" : path.posix.dirname(requested);
+    const requestedExtension = path.posix.extname(requestedBase).toLowerCase();
+    const rows = [];
+    const stack = [root];
+    const realRoot = fs.realpathSync(root);
+    while (stack.length && rows.length < 5_000) {
+        const directory = stack.pop();
+        let entries = [];
+        try {
+            entries = fs.readdirSync(directory, { withFileTypes: true });
+        }
+        catch {
+            continue;
+        }
+        for (const entry of entries) {
+            if (entry.isSymbolicLink() || SENSITIVE_NAMES.test(entry.name))
+                continue;
+            if (entry.isDirectory() && EXCLUDED_DIRECTORIES.has(entry.name.toLowerCase()))
+                continue;
+            const absolute = path.join(directory, entry.name);
+            const relative = normalizeRelative(path.relative(realRoot, absolute));
+            if (!relative || relative.split("/").some(part => SENSITIVE_NAMES.test(part)))
+                continue;
+            rows.push(relative);
+            if (entry.isDirectory())
+                stack.push(absolute);
+            if (rows.length >= 5_000)
+                break;
+        }
+    }
+    return rows.map(candidate => {
+        const candidateBase = path.posix.basename(candidate);
+        const candidateParent = path.posix.dirname(candidate) === "." ? "" : path.posix.dirname(candidate);
+        const caseMismatch = candidate.toLowerCase() === requested.toLowerCase() && candidate !== requested;
+        const cwdRelative = candidateBase.toLowerCase() === requestedBase.toLowerCase() && candidateParent !== requestedParent;
+        const reason = caseMismatch ? "case_mismatch" : cwdRelative ? "cwd_relative" : "similar_name";
+        const extensionPenalty = requestedExtension && path.posix.extname(candidateBase).toLowerCase() !== requestedExtension ? 5 : 0;
+        const parentPenalty = candidateParent === requestedParent ? 0 : Math.min(8, editDistance(candidateParent, requestedParent));
+        const score = caseMismatch ? -100 : cwdRelative ? -20 + parentPenalty : editDistance(candidateBase, requestedBase) * 3 + parentPenalty + extensionPenalty;
+        return { path: candidate, reason, score };
+    }).filter(row => row.score <= Math.max(12, requestedBase.length))
+        .sort((left, right) => left.score - right.score || left.path.localeCompare(right.path))
+        .slice(0, 5)
+        .map(({ path: suggestedPath, reason }) => ({ path: suggestedPath, reason }));
+}
+function workspacePathNotFound(root, requested) {
+    const suggestions = suggestionCandidates(root, requested);
+    const detail = suggestions.length ? `；可能是：${suggestions.map(item => item.path).join("、")}` : "";
+    const error = new Error(`文件或目录不存在：${normalizeRelative(requested) || "."}${detail}`);
+    error.code = "PATH_NOT_FOUND";
+    error.suggestions = suggestions;
+    error.workspaceResult = { status: "error", code: "PATH_NOT_FOUND", path: normalizeRelative(requested), suggestions, contentStored: false };
+    throw error;
+}
 function safePath(root, relativeValue, allowMissing = false) {
     const relative = normalizeRelative(relativeValue);
     if (path.isAbsolute(relative) || relative.split("/").includes(".."))
@@ -200,13 +354,21 @@ function safePath(root, relativeValue, allowMissing = false) {
     for (const segment of checkedSegments) {
         cursor = path.join(cursor, segment);
         if (!fs.existsSync(cursor))
-            throw new Error("文件或目录不存在");
+            workspacePathNotFound(root, relative);
         if (fs.lstatSync(cursor).isSymbolicLink())
             throw new Error("不允许读取符号链接或Junction目标");
     }
     const parent = allowMissing ? path.dirname(resolved) : resolved;
     const realRoot = fs.realpathSync(root);
-    const realTarget = fs.realpathSync(parent);
+    let realTarget = "";
+    try {
+        realTarget = fs.realpathSync(parent);
+    }
+    catch (error) {
+        if (error?.code === "ENOENT")
+            workspacePathNotFound(root, relative);
+        throw error;
+    }
     const contained = path.relative(realRoot, realTarget);
     if (contained.startsWith("..") || path.isAbsolute(contained))
         throw new Error("路径越过项目边界");
@@ -275,6 +437,309 @@ async function walk(root) {
     }
     return files.sort((left, right) => left.localeCompare(right));
 }
+async function walkDetailed(root, relativeBase = "", options = {}) {
+    const base = safePath(root, relativeBase || "");
+    if (!(await fs.promises.lstat(base)).isDirectory())
+        throw new Error("Glob的path必须是目录");
+    const rows = [];
+    const stack = [base];
+    const realRoot = await fs.promises.realpath(root);
+    let scanned = 0;
+    let interrupted = false;
+    while (stack.length && scanned < DIRECTORY_SCAN_LIMIT) {
+        if (options.signal?.aborted || (options.deadline && Date.now() >= options.deadline)) {
+            interrupted = true;
+            break;
+        }
+        const directory = stack.pop();
+        const entries = await fs.promises.readdir(directory, { withFileTypes: true });
+        for (const entry of entries) {
+            if (options.signal?.aborted || (options.deadline && Date.now() >= options.deadline)) {
+                interrupted = true;
+                break;
+            }
+            if (entry.isSymbolicLink())
+                continue;
+            if (entry.isDirectory() && EXCLUDED_DIRECTORIES.has(entry.name.toLowerCase()))
+                continue;
+            const absolute = path.join(directory, entry.name);
+            const projectRelative = normalizeRelative(path.relative(realRoot, absolute));
+            if (!projectRelative || projectRelative.split("/").some(part => SENSITIVE_NAMES.test(part)))
+                continue;
+            if (entry.isDirectory())
+                stack.push(absolute);
+            else if (entry.isFile()) {
+                scanned += 1;
+                const stat = await fs.promises.stat(absolute);
+                rows.push({ path: projectRelative, relativeToBase: normalizeRelative(path.relative(base, absolute)), mtimeMs: stat.mtimeMs });
+            }
+            if (scanned >= DIRECTORY_SCAN_LIMIT)
+                break;
+        }
+    }
+    return { rows, scanLimitReached: scanned >= DIRECTORY_SCAN_LIMIT || stack.length > 0, interrupted };
+}
+function pageOffset(rows, offsetValue, limitValue, defaultLimit) {
+    const offset = Math.max(0, Number(offsetValue || 0) || 0);
+    const limit = Math.max(1, Math.min(500, Number(limitValue || defaultLimit) || defaultLimit));
+    const items = rows.slice(offset, offset + limit);
+    return { items, offset, limit, total: rows.length, next_cursor: offset + items.length < rows.length ? String(offset + items.length) : "", truncated: offset + items.length < rows.length };
+}
+async function globFilesV3(root, args, options = {}) {
+    const pattern = normalizeRelative(args?.pattern || "**/*");
+    if (!pattern || pattern.length > 500)
+        throw new Error("Glob模式无效或过长");
+    const relativeBase = normalizeRelative(args?.path || "");
+    const base = safePath(root, relativeBase || "");
+    if (!(await fs.promises.lstat(base)).isDirectory())
+        throw new Error("Glob的path必须是目录");
+    const target = normalizeRelative(path.relative(root, base)) || ".";
+    const rgArgs = ["--files", "--hidden"];
+    if (args?.respect_gitignore !== true)
+        rgArgs.push("--no-ignore");
+    for (const excluded of ["!.git/**", "!node_modules/**", "!target/**", "!dist/**", "!build/**", "!coverage/**", "!.next/**", "!.nuxt/**", "!.output/**", ...RG_SENSITIVE_GLOBS])
+        rgArgs.push("--glob", excluded);
+    rgArgs.push(target);
+    let fallbackWalked = null;
+    const search = await (0, workspace_search_runtime_1.runWorkspaceRipgrep)(rgArgs, root, {
+        signal: options.signal,
+        nodeFallback: async () => {
+            const deadline = Date.now() + (process.env.WSL_DISTRO_NAME ? 60_000 : 20_000);
+            fallbackWalked = await walkDetailed(root, relativeBase, { signal: options.signal, deadline });
+            return {
+                stdout: fallbackWalked.rows.map(row => row.path).join("\n"),
+                engine: "node_fallback",
+                timedOut: !options.signal?.aborted && fallbackWalked.interrupted,
+                cancelled: options.signal?.aborted === true,
+                partial: fallbackWalked.interrupted || fallbackWalked.scanLimitReached,
+            };
+        },
+    });
+    const paths = search.stdout.split(/\r?\n/).map(normalizeRelative).filter(Boolean).slice(0, DIRECTORY_SCAN_LIMIT);
+    const rows = [];
+    for (const projectRelative of paths) {
+        try {
+            const absolute = safePath(root, projectRelative);
+            const stat = await fs.promises.stat(absolute);
+            if (stat.isFile())
+                rows.push({ path: projectRelative, relativeToBase: normalizeRelative(path.relative(base, absolute)), mtimeMs: stat.mtimeMs });
+        }
+        catch { }
+    }
+    const walked = { rows, scanLimitReached: paths.length >= DIRECTORY_SCAN_LIMIT || search.partial || fallbackWalked?.scanLimitReached === true };
+    const ignorePatterns = args?.respect_gitignore === true ? rootIgnorePatterns(root) : [];
+    const matches = walked.rows
+        .filter(row => !ignorePatterns.length || !ignoredByRootGitignore(row.path, ignorePatterns))
+        .filter(row => (0, minimatch_1.minimatch)(row.relativeToBase, pattern, { dot: true, nocase: process.platform === "win32", matchBase: !pattern.includes("/") }))
+        .sort((left, right) => right.mtimeMs - left.mtimeMs || left.path.localeCompare(right.path));
+    const selected = pageOffset(matches, args?.offset, args?.limit, 100);
+    const items = selected.items.map(row => row.path);
+    const value = {
+        schema: "ccm-workspace-glob-result-v3", toolContractVersion: 3, pattern, path: relativeBase,
+        items, filenames: items, numFiles: items.length, durationMs: 0,
+        total: selected.total, offset: selected.offset, next_cursor: selected.next_cursor,
+        truncated: selected.truncated || walked.scanLimitReached, scan_limit_reached: walked.scanLimitReached,
+        status: search.partial ? "partial" : "read",
+        searchExecution: { engine: search.engine, timedOut: search.timedOut, cancelled: search.cancelled, partial: search.partial },
+    };
+    return enforceResultBudget({ ...value, safeReceipt: { kind: "glob", checksum: checksum(value), itemCount: items.length, truncated: value.truncated, contentStored: false } });
+}
+function grepResultFiles(lines) {
+    const files = new Set();
+    for (const line of lines) {
+        const match = line.match(/^(.+?):(?:\d+:|-|\d+$)/);
+        if (match?.[1])
+            files.add(normalizeRelative(match[1]));
+    }
+    return [...files];
+}
+const FALLBACK_TYPE_EXTENSIONS = {
+    js: [".js", ".jsx", ".mjs", ".cjs"], ts: [".ts", ".tsx", ".mts", ".cts"], py: [".py"],
+    rust: [".rs"], go: [".go"], java: [".java"], kotlin: [".kt", ".kts"], c: [".c", ".h"],
+    cpp: [".cc", ".cpp", ".cxx", ".hpp", ".hh"], json: [".json", ".jsonc"], yaml: [".yaml", ".yml"],
+    html: [".html", ".htm"], css: [".css", ".scss", ".sass", ".less"], md: [".md", ".mdx"], xml: [".xml"],
+};
+function rootIgnorePatterns(root) {
+    try {
+        return fs.readFileSync(path.join(root, ".gitignore"), "utf-8").split(/\r?\n/)
+            .map(line => line.trim()).filter(line => line && !line.startsWith("#") && !line.startsWith("!"))
+            .map(line => line.replace(/^\/+/, ""));
+    }
+    catch {
+        return [];
+    }
+}
+function ignoredByRootGitignore(relative, patterns) {
+    return patterns.some(pattern => (0, minimatch_1.minimatch)(relative, pattern, { dot: true, matchBase: !pattern.includes("/") })
+        || (0, minimatch_1.minimatch)(relative, `${pattern.replace(/\/$/, "")}/**`, { dot: true }));
+}
+async function grepTextNodeFallback(root, args, target, targetStat, options) {
+    const startedAt = Date.now();
+    const timeoutMs = process.env.WSL_DISTRO_NAME ? 60_000 : 20_000;
+    const deadline = startedAt + timeoutMs;
+    const mode = ["content", "files_with_matches", "count"].includes(String(args?.output_mode || args?.mode || ""))
+        ? String(args.output_mode || args.mode) : "files_with_matches";
+    const flags = `${args?.["-i"] === true ? "i" : ""}${args?.multiline === true ? "ms" : ""}g`;
+    let expression;
+    try {
+        expression = new RegExp(String(args?.pattern || ""), flags);
+    }
+    catch (error) {
+        throw new Error(`无效正则表达式：${String(error?.message || error)}`);
+    }
+    const typeExtensions = args?.type ? FALLBACK_TYPE_EXTENSIONS[String(args.type).toLowerCase()] : undefined;
+    if (args?.type && !typeExtensions)
+        throw new Error(`未知文件类型：${String(args.type)}`);
+    const ignorePatterns = rootIgnorePatterns(root);
+    let candidates = [];
+    let scanLimited = false;
+    if (targetStat.isFile())
+        candidates = [normalizeRelative(path.relative(root, target))];
+    else {
+        const relativeBase = normalizeRelative(path.relative(root, target));
+        const walked = await walkDetailed(root, relativeBase === "." ? "" : relativeBase, { signal: options.signal, deadline });
+        candidates = walked.rows.map(row => row.path);
+        scanLimited = walked.scanLimitReached || walked.interrupted;
+    }
+    candidates = candidates.filter(file => {
+        if (typeExtensions && !typeExtensions.includes(path.extname(file).toLowerCase()))
+            return false;
+        if (args?.glob && !(0, minimatch_1.minimatch)(file, String(args.glob), { dot: true, matchBase: !String(args.glob).includes("/") }))
+            return false;
+        return targetStat.isFile() || !ignoredByRootGitignore(file, ignorePatterns);
+    });
+    const output = [];
+    let interrupted = false;
+    for (const relative of candidates) {
+        if (options.signal?.aborted || Date.now() >= deadline) {
+            interrupted = true;
+            break;
+        }
+        const absolute = path.join(root, ...relative.split("/"));
+        let source;
+        try {
+            source = await fs.promises.readFile(absolute);
+        }
+        catch {
+            continue;
+        }
+        if (source.length > V3_TEXT_SCAN_LIMIT || source.subarray(0, Math.min(8192, source.length)).includes(0))
+            continue;
+        const text = source.toString("utf-8");
+        expression.lastIndex = 0;
+        if (args?.multiline === true) {
+            const matches = [...text.matchAll(expression)];
+            if (!matches.length)
+                continue;
+            if (mode === "files_with_matches")
+                output.push(relative);
+            else if (mode === "count")
+                output.push(`${relative}:${matches.length}`);
+            else
+                for (const match of matches) {
+                    const line = text.slice(0, Number(match.index || 0)).split(/\r?\n/).length;
+                    output.push(`${relative}:${line}:${String(match[0] || "").replace(/\s+/g, " ").slice(0, 500)}`);
+                }
+            continue;
+        }
+        const lines = text.split(/\r?\n/);
+        const matching = [];
+        for (let index = 0; index < lines.length; index += 1) {
+            expression.lastIndex = 0;
+            if (expression.test(lines[index]))
+                matching.push(index);
+        }
+        if (!matching.length)
+            continue;
+        if (mode === "files_with_matches")
+            output.push(relative);
+        else if (mode === "count")
+            output.push(`${relative}:${matching.length}`);
+        else {
+            const before = Math.max(0, Number(args?.context ?? args?.["-C"] ?? args?.["-B"] ?? 0) || 0);
+            const after = Math.max(0, Number(args?.context ?? args?.["-C"] ?? args?.["-A"] ?? 0) || 0);
+            const selectedLines = new Set();
+            for (const index of matching)
+                for (let row = Math.max(0, index - before); row <= Math.min(lines.length - 1, index + after); row += 1)
+                    selectedLines.add(row);
+            for (const index of [...selectedLines].sort((left, right) => left - right))
+                output.push(`${relative}:${index + 1}:${lines[index].slice(0, 500)}`);
+        }
+        if (Buffer.byteLength(output.join("\n"), "utf-8") >= 20 * 1024 * 1024) {
+            interrupted = true;
+            break;
+        }
+    }
+    const cancelled = options.signal?.aborted === true;
+    const timedOut = !cancelled && Date.now() >= deadline;
+    return { stdout: output.join("\n"), engine: "node_fallback", timedOut, cancelled, partial: interrupted || scanLimited };
+}
+async function grepTextV3(root, args, options = {}) {
+    const pattern = String(args?.pattern || "");
+    if (!pattern || pattern.length > 1000)
+        throw new Error("检索表达式为空或过长");
+    const modeValue = String(args?.output_mode || args?.mode || "files_with_matches");
+    const mode = ["content", "files_with_matches", "count"].includes(modeValue) ? modeValue : "files_with_matches";
+    const targetPath = args?.path === undefined || args?.path === "" ? "." : normalizeRelative(args.path);
+    const target = targetPath === "." ? root : safePath(root, targetPath);
+    const targetStat = await fs.promises.lstat(target);
+    if (!targetStat.isDirectory() && !targetStat.isFile())
+        throw new Error("Grep的path必须是文件或目录");
+    const relativeTarget = normalizeRelative(path.relative(root, target)) || ".";
+    const rgArgs = ["--no-heading", "--color", "never", "--hidden", "--max-columns", "500", "--max-columns-preview"];
+    if (mode === "files_with_matches")
+        rgArgs.push("--files-with-matches");
+    else if (mode === "count")
+        rgArgs.push("--count");
+    else if (args?.["-n"] !== false)
+        rgArgs.push("--line-number");
+    if (args?.["-i"] === true)
+        rgArgs.push("--ignore-case");
+    if (args?.multiline === true)
+        rgArgs.push("-U", "--multiline-dotall");
+    if (args?.type)
+        rgArgs.push("--type", String(args.type));
+    if (args?.glob)
+        rgArgs.push("--glob", String(args.glob));
+    if (mode === "content") {
+        const context = args?.context ?? args?.["-C"];
+        if (context !== undefined)
+            rgArgs.push("-C", String(Math.max(0, Number(context) || 0)));
+        else {
+            if (args?.["-B"] !== undefined)
+                rgArgs.push("-B", String(Math.max(0, Number(args["-B"]) || 0)));
+            if (args?.["-A"] !== undefined)
+                rgArgs.push("-A", String(Math.max(0, Number(args["-A"]) || 0)));
+        }
+    }
+    if (targetStat.isFile())
+        rgArgs.push("--no-ignore");
+    for (const excluded of ["!.git/**", "!.svn/**", "!.hg/**", "!.bzr/**", "!.jj/**", "!.sl/**", "!node_modules/**", "!target/**", "!dist/**", "!build/**", ...RG_SENSITIVE_GLOBS])
+        rgArgs.push("--glob", excluded);
+    rgArgs.push("-e", pattern, relativeTarget);
+    const search = await (0, workspace_search_runtime_1.runWorkspaceRipgrep)(rgArgs, root, {
+        signal: options.signal,
+        nodeFallback: () => grepTextNodeFallback(root, args, target, targetStat, options),
+    });
+    const output = search.stdout;
+    const allLines = output ? output.replace(/\r?\n$/, "").split(/\r?\n/) : [];
+    const offset = Math.max(0, Number(args?.offset || 0) || 0);
+    const requestedLimit = args?.head_limit === 0 ? Math.max(1, allLines.length || 1) : Math.max(1, Math.min(10_000, Number(args?.head_limit ?? 250) || 250));
+    const selected = allLines.slice(offset, offset + requestedLimit);
+    const truncated = offset + selected.length < allLines.length || search.partial;
+    const filenames = mode === "files_with_matches" ? selected.map(normalizeRelative).filter(Boolean) : grepResultFiles(allLines);
+    const numMatches = mode === "count" ? allLines.reduce((sum, line) => sum + Number(line.match(/:(\d+)$/)?.[1] || 0), 0) : undefined;
+    const value = {
+        schema: "ccm-workspace-grep-result-v3", toolContractVersion: 3, pattern, path: targetPath, mode,
+        filenames, numFiles: filenames.length, content: mode === "files_with_matches" ? undefined : selected.join("\n"),
+        lines: selected, numLines: mode === "content" ? selected.length : undefined, numMatches,
+        appliedLimit: truncated ? requestedLimit : undefined, appliedOffset: offset || undefined,
+        next_cursor: truncated ? String(offset + selected.length) : "", truncated,
+        status: search.partial ? "partial" : "read",
+        searchExecution: { engine: search.engine, timedOut: search.timedOut, cancelled: search.cancelled, partial: search.partial },
+    };
+    return enforceResultBudget({ ...value, safeReceipt: { kind: "grep", checksum: checksum(value), itemCount: selected.length, truncated, contentStored: false } });
+}
 async function runCommand(command, args, cwd, timeout = 10_000) {
     try {
         const result = await execFileAsync(command, args, { cwd, timeout, windowsHide: true, encoding: "utf-8", maxBuffer: 2 * 1024 * 1024 });
@@ -337,10 +802,197 @@ async function readFileTool(root, args) {
     const nextLine = selected.length ? selected[selected.length - 1].line + 1 : offset;
     return enforceResultBudget({ path: normalizeRelative(path.relative(root, file)), checksum: checksum(text), total_lines: lines.length, offset, lines: selected, next_cursor: nextLine <= lines.length ? String(nextLine) : "", truncated: nextLine <= lines.length }, tokenBudget);
 }
-async function executeWorkspaceReadonlyToolWithCapability(toolName, args, capability) {
+async function readFileToolV3(root, args) {
+    const file = safePath(root, args?.path);
+    const stat = await fs.promises.lstat(file);
+    if (!stat.isFile())
+        throw new Error("目标不是文件");
+    const relativePath = normalizeRelative(path.relative(root, file));
+    const extension = path.extname(file).toLowerCase();
+    if ([".png", ".jpg", ".jpeg", ".gif", ".webp"].includes(extension))
+        return (0, workspace_read_media_1.readWorkspaceImage)(file, relativePath);
+    if (extension === ".pdf")
+        return (0, workspace_read_media_1.readWorkspacePdf)(file, relativePath, args?.pages);
+    if (extension === ".ipynb")
+        return (0, workspace_read_media_1.readWorkspaceNotebook)(file, relativePath, args);
+    if (stat.size > V3_TEXT_SCAN_LIMIT)
+        throw new Error("普通文本文件超过64MB安全扫描上限，请先缩小目标文件");
+    const sampleHandle = await fs.promises.open(file, "r");
+    const sample = Buffer.alloc(Math.min(8192, stat.size));
+    try {
+        await sampleHandle.read(sample, 0, sample.length, 0);
+    }
+    finally {
+        await sampleHandle.close();
+    }
+    if (sample.includes(0))
+        throw new Error("二进制文件不能作为普通文本读取");
+    const requestedOffset = Number(args?.offset ?? 1);
+    const offset = requestedOffset <= 1 ? 1 : Math.floor(requestedOffset);
+    const explicitRange = args?.offset !== undefined || args?.limit !== undefined;
+    const limit = Math.max(1, Math.min(2000, Number(args?.limit || 2000) || 2000));
+    const tokenBudget = Math.max(256, Math.min(cc_tool_result_limits_1.CC_ALIGNED_FILE_READ_MAX_TOKENS, Number(args?.token_budget || cc_tool_result_limits_1.CC_ALIGNED_FILE_READ_MAX_TOKENS) || cc_tool_result_limits_1.CC_ALIGNED_FILE_READ_MAX_TOKENS));
+    const selected = [];
+    let used = 0;
+    let rangeTruncatedByTokens = false;
+    let totalLines = 0;
+    const contentHash = crypto.createHash("sha256");
+    const stream = fs.createReadStream(file);
+    stream.on("data", chunk => contentHash.update(chunk));
+    const reader = readline.createInterface({ input: stream, crlfDelay: Infinity });
+    for await (const line of reader) {
+        totalLines += 1;
+        if (totalLines < offset || selected.length >= limit || rangeTruncatedByTokens)
+            continue;
+        const row = { line: totalLines, text: line };
+        const rowTokens = (0, context_budget_1.estimateTextTokens)(JSON.stringify(row));
+        if (rowTokens > tokenBudget - 256)
+            throw new Error(`第${totalLines}行超过单次Token预算，未进行字符截断`);
+        if (used + rowTokens > tokenBudget - 256) {
+            if (explicitRange)
+                throw new Error("显式读取范围超过25000 Token，请缩小offset或limit");
+            rangeTruncatedByTokens = true;
+            continue;
+        }
+        selected.push(row);
+        used += rowTokens;
+    }
+    const fileChecksum = contentHash.digest("hex");
+    const pastEof = offset > totalLines;
+    const nextLine = selected.length ? selected[selected.length - 1].line + 1 : offset;
+    const truncated = nextLine <= totalLines;
+    const result = {
+        schema: "ccm-workspace-read-result-v3", toolContractVersion: 3, type: "text", path: relativePath,
+        checksum: fileChecksum, total_lines: totalLines, offset, lines: selected,
+        empty: stat.size === 0, past_eof: pastEof, next_cursor: truncated ? String(nextLine) : "", truncated,
+        partial_notice: truncated && !explicitRange ? "文件内容较长，已返回首段；请使用offset和limit继续读取。" : "",
+    };
+    return enforceResultBudget({ ...result, safeReceipt: { kind: "text", path: relativePath, checksum: result.checksum, lineCount: selected.length, truncated, contentStored: false } }, tokenBudget);
+}
+function workspaceReadRange(args) {
+    const requestedOffset = Number(args?.offset ?? 1);
+    return {
+        // V3 intentionally treats offset 0 and 1 as the same first-line range.
+        // Normalizing here lets the context ledger deduplicate both spellings.
+        offset: requestedOffset <= 1 ? 1 : Math.floor(requestedOffset),
+        limit: Math.max(1, Math.min(2000, Number(args?.limit || 2000) || 2000)),
+        pages: String(args?.pages || ""),
+        cellOffset: Math.max(0, Number(args?.cell_offset || 0) || 0),
+        cellLimit: Math.max(1, Math.min(200, Number(args?.cell_limit || 200) || 200)),
+        tokenBudget: Math.max(256, Math.min(cc_tool_result_limits_1.CC_ALIGNED_FILE_READ_MAX_TOKENS, Number(args?.token_budget || cc_tool_result_limits_1.CC_ALIGNED_FILE_READ_MAX_TOKENS) || cc_tool_result_limits_1.CC_ALIGNED_FILE_READ_MAX_TOKENS)),
+    };
+}
+function fileChangedError(relativePath, expected, actual) {
+    const error = new Error(`文件内容已变化，请从权威版本重新读取：${relativePath}`);
+    error.code = "FILE_CHANGED";
+    error.workspaceResult = {
+        status: "error", code: "FILE_CHANGED", path: relativePath,
+        expectedChecksum: expected, currentChecksum: actual, contentStored: false,
+    };
+    throw error;
+}
+function decorateWorkspaceReadResult(result, args) {
+    const nextOffset = Math.max(0, Number(result?.next_cursor || result?.nextCursor || 0));
+    const total = Math.max(0, Number(result?.total_lines || result?.total_cells || result?.total_pages || 0));
+    const currentEnd = Array.isArray(result?.lines) ? Number(result.lines.at(-1)?.line || result?.offset || 0)
+        : Array.isArray(result?.cells) ? Number(result?.offset || 0) + result.cells.length
+            : Array.isArray(result?.selected_pages) ? Number(result.selected_pages.at(-1) || 0) : 0;
+    const expected = String(args?.expected_checksum || args?.expectedChecksum || "").trim();
+    const actual = String(result?.checksum || result?.safeReceipt?.checksum || "").trim();
+    if (expected && actual && expected !== actual)
+        fileChangedError(String(result?.path || args?.path || "文件"), expected, actual);
+    return {
+        ...result,
+        status: result?.truncated === true ? "partial" : "read",
+        ...(nextOffset > 0 ? {
+            continuation: {
+                path: String(result?.path || args?.path || ""), nextOffset, checksum: actual,
+                ...(total > 0 ? { remainingLines: Math.max(0, total - currentEnd) } : {}),
+            },
+        } : {}),
+    };
+}
+async function readFileToolV3WithContext(root, project, args, context) {
+    const file = safePath(root, args?.path);
+    const relativePath = normalizeRelative(path.relative(root, file));
+    const range = workspaceReadRange(args);
+    const stat = await fs.promises.lstat(file);
+    const cached = context?.lookup(project, relativePath, range, stat);
+    if (cached) {
+        const expected = String(args?.expected_checksum || args?.expectedChecksum || "").trim();
+        if (expected && expected !== cached.checksum)
+            fileChangedError(relativePath, expected, cached.checksum);
+        const value = {
+            schema: "ccm-workspace-read-result-v3", toolContractVersion: 3, type: "file_unchanged",
+            status: "unchanged", path: relativePath, checksum: cached.checksum,
+            offset: cached.from || range.offset || 1, total_lines: cached.totalLines || 0,
+            next_cursor: cached.nextOffset ? String(cached.nextOffset) : "", truncated: Boolean(cached.nextOffset),
+            ...(cached.nextOffset ? { continuation: { path: relativePath, nextOffset: cached.nextOffset, checksum: cached.checksum, ...(cached.totalLines ? { remainingLines: Math.max(0, cached.totalLines - Number(cached.to || 0)) } : {}) } } : {}),
+            safeReceipt: { kind: "unchanged", path: relativePath, checksum: cached.checksum, lineCount: 0, truncated: Boolean(cached.nextOffset), contentStored: false },
+        };
+        return enforceResultBudget(value, range.tokenBudget);
+    }
+    const inFlight = context?.inFlightFor(project, relativePath, range);
+    if (inFlight) {
+        await inFlight;
+        return readFileToolV3WithContext(root, project, args, context);
+    }
+    const reading = readFileToolV3(root, args).then(result => decorateWorkspaceReadResult(result, args));
+    context?.setInFlight(project, relativePath, range, reading);
+    const result = await reading;
+    const finalStat = await fs.promises.lstat(file);
+    context?.record({
+        project, path: relativePath, range, checksum: String(result?.checksum || result?.safeReceipt?.checksum || ""),
+        mtimeMs: finalStat.mtimeMs, size: finalStat.size,
+        totalLines: Number(result?.total_lines || result?.total_cells || result?.total_pages || 0),
+        from: Array.isArray(result?.lines) ? Number(result.lines[0]?.line || result?.offset || 1) : Number(result?.offset || 0),
+        to: Array.isArray(result?.lines) ? Number(result.lines.at(-1)?.line || result?.offset || 1)
+            : Array.isArray(result?.cells) ? Number(result?.offset || 0) + result.cells.length : 0,
+        nextOffset: Math.max(0, Number(result?.next_cursor || result?.nextCursor || 0)) || undefined,
+    });
+    return result;
+}
+async function readFilesToolV3(root, project, args, context) {
+    const requested = Array.isArray(args?.paths) ? args.paths : [];
+    if (!requested.length || requested.length > 20)
+        throw new Error("paths必须包含1到20个文件");
+    const normalized = requested.map((item) => typeof item === "string" ? { path: item } : { ...(item || {}) });
+    const seen = new Set();
+    for (const item of normalized) {
+        const key = normalizeRelative(String(item?.path || ""));
+        if (!key)
+            throw new Error("批量读取包含空文件路径");
+        if (seen.has(key))
+            throw new Error(`批量读取包含重复文件：${key}`);
+        seen.add(key);
+        if ([".png", ".jpg", ".jpeg", ".gif", ".webp", ".pdf", ".ipynb"].includes(path.extname(key).toLowerCase())) {
+            throw new Error(`批量读取仅支持普通文本文件；${key}请使用read_file`);
+        }
+    }
+    const totalBudget = Math.max(1024, Math.min(cc_tool_result_limits_1.CC_ALIGNED_FILE_READ_MAX_TOKENS, Number(args?.token_budget || cc_tool_result_limits_1.CC_ALIGNED_FILE_READ_MAX_TOKENS) || cc_tool_result_limits_1.CC_ALIGNED_FILE_READ_MAX_TOKENS));
+    const perFileBudget = Math.max(512, Math.floor((totalBudget - 512) / normalized.length));
+    const files = [];
+    for (const item of normalized) {
+        const result = await readFileToolV3WithContext(root, project, { ...item, token_budget: Math.min(cc_tool_result_limits_1.CC_ALIGNED_FILE_READ_MAX_TOKENS, perFileBudget) }, context);
+        files.push(result);
+    }
+    const aggregate = {
+        schema: "ccm-workspace-read-files-result-v3", toolContractVersion: 3, type: "text_batch",
+        files, item_count: files.length, line_count: files.reduce((sum, file) => sum + Number(file?.lines?.length || 0), 0),
+        truncated: files.some(file => file?.truncated === true),
+        status: files.some(file => file?.status === "partial") ? "partial" : files.every(file => file?.status === "unchanged") ? "unchanged" : "read",
+    };
+    const resultChecksum = checksum(files.map(file => ({ path: file.path, checksum: file.checksum, offset: file.offset, next_cursor: file.next_cursor })));
+    return enforceResultBudget({
+        ...aggregate,
+        safeReceipt: { kind: "text", checksum: resultChecksum, itemCount: files.length, lineCount: aggregate.line_count, truncated: aggregate.truncated, contentStored: false },
+    }, totalBudget);
+}
+async function executeWorkspaceReadonlyToolWithCapabilityRaw(toolName, args, capability, contractVersion = 2, options = {}) {
     const alias = { read_project_source: "read_project_config", read_runtime_diagnostics: "read_runtime_status" };
     const name = alias[String(toolName || "")] || String(toolName || "").replace(/^mcp__ccm__ccm_workspace_readonly__/, "");
-    if (!exports.WORKSPACE_READONLY_TOOL_DEFINITIONS_V2.some(tool => tool.name === name))
+    const definitions = contractVersion === 3 ? exports.WORKSPACE_READONLY_TOOL_DEFINITIONS_V3 : exports.WORKSPACE_READONLY_TOOL_DEFINITIONS_V2;
+    if (!definitions.some(tool => tool.name === name))
         throw new Error(`未知只读工作区工具：${name}`);
     const { project, root } = selectProject(capability, args || {});
     if (name === "list_directory") {
@@ -355,11 +1007,15 @@ async function executeWorkspaceReadonlyToolWithCapability(toolName, args, capabi
         return enforceResultBudget({ project, path: normalizeRelative(args?.path || ""), ...page(entries, args?.cursor, args?.limit) });
     }
     if (name === "glob_files") {
+        if (contractVersion === 3)
+            return { project, ...(await globFilesV3(root, args, options)) };
         const matcher = globRegex(args?.pattern);
         const matches = (await walk(root)).filter(file => matcher.test(file));
         return enforceResultBudget({ project, pattern: String(args?.pattern || ""), ...page(matches, args?.cursor, args?.limit), scan_limit_reached: matches.length >= DIRECTORY_SCAN_LIMIT });
     }
     if (name === "grep_text") {
+        if (contractVersion === 3)
+            return { project, ...(await grepTextV3(root, args, options)) };
         const pattern = String(args?.pattern || "");
         if (!pattern || pattern.length > 1000)
             throw new Error("检索表达式为空或过长");
@@ -379,8 +1035,14 @@ async function executeWorkspaceReadonlyToolWithCapability(toolName, args, capabi
         const output = await runCommand("rg", rgArgs, root, 15_000);
         return enforceResultBudget({ project, pattern, mode, ...pageLines(output, args?.cursor, args?.limit, 500) });
     }
-    if (name === "read_file")
-        return { project, ...(await readFileTool(root, args)) };
+    if (name === "read_file") {
+        const result = await (contractVersion === 3 ? readFileToolV3WithContext(root, project, args, options.readContext) : readFileTool(root, args));
+        return (0, transient_model_content_1.attachTransientModelBlocks)({ project, ...result }, (0, workspace_read_media_1.transientWorkspaceBlocks)(result));
+    }
+    if (name === "read_files") {
+        const result = await readFilesToolV3(root, project, args, options.readContext);
+        return { project, ...result };
+    }
     if (["inspect_notebook", "web_fetch", "web_search"].includes(name)) {
         const featureConfig = (0, group_orchestrator_config_1.loadOrchestratorConfig)();
         if (name === "inspect_notebook") {
@@ -463,14 +1125,46 @@ async function executeWorkspaceReadonlyToolWithCapability(toolName, args, capabi
         return enforceResultBudget(await (0, project_runtime_1.getProjectRuntimeLogsAsync)(project, args?.profile_id || args?.profileId, args?.kind || "run", args?.lines || 300));
     throw new Error(`未实现工具：${name}`);
 }
-async function executeWorkspaceReadonlyTool(toolName, args, capabilityToken) {
-    return executeWorkspaceReadonlyToolWithCapability(toolName, args, openScopedToolCapability(capabilityToken));
+async function executeWorkspaceReadonlyTool(toolName, args, capabilityToken, contractVersion = 2, options = {}) {
+    return executeWorkspaceReadonlyToolWithCapability(toolName, args, openScopedToolCapability(capabilityToken), contractVersion, options);
+}
+async function executeWorkspaceReadonlyToolWithCapability(toolName, args, capability, contractVersion = 2, options = {}) {
+    const result = await executeWorkspaceReadonlyToolWithCapabilityRaw(toolName, args, capability, contractVersion, options);
+    const normalizedName = String(toolName || "").replace(/^mcp__ccm__ccm_workspace_readonly__/, "");
+    if (contractVersion !== 3 || !["read_file", "read_files", "glob_files", "grep_text"].includes(normalizedName))
+        return result;
+    const sourceReceipt = result?.safeReceipt || result?.safe_receipt || {};
+    const fallbackKind = normalizedName === "read_file" || normalizedName === "read_files" ? "text" : normalizedName === "glob_files" ? "glob" : "grep";
+    const receipt = {
+        kind: sourceReceipt.kind || fallbackKind,
+        ...(sourceReceipt.path || result?.path ? { path: String(sourceReceipt.path || result.path) } : {}),
+        checksum: String(sourceReceipt.checksum || result?.checksum || result?.result_checksum || checksum(result)),
+        ...(sourceReceipt.itemCount !== undefined ? { itemCount: Number(sourceReceipt.itemCount || 0) } : {}),
+        ...(sourceReceipt.lineCount !== undefined ? { lineCount: Number(sourceReceipt.lineCount || 0) } : {}),
+        ...(sourceReceipt.pageCount !== undefined ? { pageCount: Number(sourceReceipt.pageCount || 0) } : {}),
+        truncated: sourceReceipt.truncated === true || result?.truncated === true,
+        contentStored: false,
+    };
+    return (0, transient_model_content_1.attachTransientModelBlocks)({
+        schema: "ccm-workspace-tool-envelope-v3",
+        toolContractVersion: 3,
+        modelPayload: result,
+        safeReceipt: receipt,
+        contentStored: false,
+    }, (0, workspace_read_media_1.transientWorkspaceBlocks)(result));
 }
 function runWorkspaceReadonlyToolsSelfTest() {
-    const checksums = exports.WORKSPACE_READONLY_TOOL_DEFINITIONS_V2.map(tool => tool.checksum);
+    const checksums = [...exports.WORKSPACE_READONLY_TOOL_DEFINITIONS_V2, ...exports.WORKSPACE_READONLY_TOOL_DEFINITIONS_V3].map(tool => tool.checksum);
+    const v3ByName = new Map(exports.WORKSPACE_READONLY_TOOL_DEFINITIONS_V3.map(tool => [tool.name, tool]));
     return {
-        success: exports.WORKSPACE_READONLY_TOOL_DEFINITIONS_V2.length >= 21 && new Set(checksums).size === checksums.length,
-        tools: exports.WORKSPACE_READONLY_TOOL_DEFINITIONS_V2.map(tool => ({ name: tool.name, checksum: tool.checksum, loadPolicy: tool.loadPolicy })),
+        success: Boolean(exports.WORKSPACE_READONLY_TOOL_DEFINITIONS_V2.length >= 21
+            && exports.WORKSPACE_READONLY_TOOL_DEFINITIONS_V3.length === exports.WORKSPACE_READONLY_TOOL_DEFINITIONS_V2.length + 1
+            && new Set(checksums).size === checksums.length
+            && v3ByName.get("read_file")?.inputSchema?.properties?.pages
+            && v3ByName.get("read_files")?.inputSchema?.properties?.paths?.maxItems === 20
+            && v3ByName.get("glob_files")?.inputSchema?.properties?.respect_gitignore
+            && v3ByName.get("grep_text")?.inputSchema?.properties?.output_mode),
+        tools: exports.WORKSPACE_READONLY_TOOL_DEFINITIONS_V3.map(tool => ({ name: tool.name, checksum: tool.checksum, loadPolicy: tool.loadPolicy, toolContractVersion: tool.toolContractVersion })),
     };
 }
 //# sourceMappingURL=workspace-readonly-tools.js.map

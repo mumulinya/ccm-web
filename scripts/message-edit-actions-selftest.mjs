@@ -19,14 +19,19 @@ assert.equal(
 )
 assert.equal(getEditableUserMessageText({ role: 'assistant', content: '不能编辑' }), '')
 assert.equal(hasMessageAttachments({ role: 'user', content: '请求\n[附件]\n- a.txt' }), true)
+assert.equal(getCopyableMessageText({ role: 'user', content: '请求\n[附件]\n- a.txt' }), '请求', '复制用户消息不应附带历史附件投影')
 assert.equal(getCopyableMessageText({ role: 'assistant', content: '回答' }, '安全可见回答'), '安全可见回答')
-assert.equal(getCopyableMessageText({ role: 'assistant', type: 'task', content: '内部内容' }, '摘要'), '')
-assert.equal(getCopyableMessageText({ role: 'assistant', streaming: true, content: '半截输出' }, '半截输出'), '')
+assert.equal(getCopyableMessageText({ role: 'assistant', type: 'global_stream', content: '内部内容' }, '安全可见摘要'), '安全可见摘要')
+assert.equal(getCopyableMessageText({ role: 'assistant', type: 'agent_qa', content: '回答' }, '安全问答'), '安全问答')
+assert.equal(getCopyableMessageText({ role: 'assistant', streaming: true, content: '半截输出' }, '半截输出'), '半截输出')
+assert.equal(getCopyableMessageText({ role: 'assistant', type: 'command_result', content: '技术数据' }, '技术数据'), '')
 
 const shell = read('frontend/src/components/common/ConversationMessageShell.vue')
-assert.ok(shell.includes("defineEmits(['edit'])"), '公共消息壳必须暴露编辑事件')
+assert.ok(shell.includes("defineEmits(['edit', 'rewind'])"), '公共消息壳必须暴露编辑和回退事件')
 assert.ok(shell.includes('title="编辑并重新发送"'), '编辑按钮必须有明确用途')
 assert.ok(shell.includes('navigator.clipboard?.writeText'), '消息复制必须使用真实剪贴板能力')
+assert.ok(shell.includes('fallbackCopy(text)'), '剪贴板权限失败时必须降级到兼容复制')
+assert.ok(shell.includes("? '已复制'"), '复制按钮必须提供成功反馈')
 assert.ok(shell.includes('.conversation-message:hover .conversation-message__actions'), '桌面端操作必须在消息悬停时显示')
 assert.ok(shell.includes('@media (hover: none)'), '触屏设备必须始终可访问消息操作')
 
@@ -49,6 +54,9 @@ for (const file of [
   assert.ok(source.includes(':editable='), `${file} 未声明可编辑用户消息`)
   assert.ok(source.includes(':edit-disabled='), `${file} 未在执行中保护历史消息编辑`)
 }
+
+const projectMessages = read('frontend/src/components/projects/ProjectManager.template.html')
+assert.ok(projectMessages.includes("getProjectTaskCard(msg) ? '' : msg.content"), '项目 Agent 带工具或文件结果的最终回答仍必须可复制')
 
 console.log(JSON.stringify({
   success: true,

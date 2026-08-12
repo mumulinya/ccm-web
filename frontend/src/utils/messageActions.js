@@ -16,8 +16,13 @@ export function hasMessageAttachments(message) {
 }
 
 export function getCopyableMessageText(message, visibleAssistantText = null) {
-  if (!message || message.role === 'thinking' || message.streaming) return ''
-  if (String(message.role || '').toLowerCase() === 'user') return String(message.content || '').trim()
-  if (message.type && message.type !== 'text') return ''
+  if (!message || String(message.role || '').toLowerCase() === 'thinking') return ''
+  if (String(message.role || '').toLowerCase() === 'user') return getEditableUserMessageText(message)
+
+  // Structured controls have their own actions and must never leak their
+  // internal payload through the generic message copy button. Agent replies
+  // such as global_stream, agent_qa and project_task_intake are still normal
+  // user-visible answers, so their sanitized display text remains copyable.
+  if (['command_result', 'conversation_summary_boundary'].includes(String(message.type || '').toLowerCase())) return ''
   return String(visibleAssistantText === null ? (message.content || '') : visibleAssistantText).trim()
 }

@@ -85,7 +85,12 @@
             <p>输入需求、粘贴图片或添加附件。发送第一条消息后，这个会话才会创建并进入列表。</p>
           </div>
           <template v-else>
-            <div class="project-messages-flow">
+            <div v-if="!messages.length" class="conversation-empty conversation-ready">
+              <span class="conversation-empty-icon"><MessageSquareText :size="25" /></span>
+              <strong>从这里开始处理项目工作</strong>
+              <p>可以询问项目情况、提交开发需求，或让项目主 Agent 检查、修改并验证代码。</p>
+            </div>
+            <div v-else class="project-messages-flow">
             <ConversationMessageShell
               v-for="(msg, i) in messages"
               :key="getMessageKey(msg)"
@@ -95,10 +100,13 @@
               :timestamp="msg.timestamp || msg.created_at || msg.createdAt"
               :structured="msg.type === 'command_result' || !!getProjectTaskCard(msg) || (Array.isArray(msg.workEvents) && msg.workEvents.length > 0) || Number(msg.fileChanges?.count || 0) > 0"
               :streaming="!!msg.streaming || (isStreaming && i === messages.length - 1)"
-              :copy-text="getCopyableMessageText(msg, (!getProjectTaskCard(msg) && !(Array.isArray(msg.workEvents) && msg.workEvents.length) && !Number(msg.fileChanges?.count || 0)) ? msg.content : '')"
+              :copy-text="getCopyableMessageText(msg, getProjectTaskCard(msg) ? '' : msg.content)"
               :editable="msg.role === 'user' && !!String(msg.content || '').trim()"
               :edit-disabled="isStreaming"
+              :rewindable="msg.role === 'assistant' && !msg.streaming && !!String(msg.id || '').trim()"
+              :rewind-disabled="false"
               @edit="editProjectUserMessage(msg)"
+              @rewind="rewindProjectMessage(msg)"
               class="message"
               :class="[
                 msg.role,
@@ -123,7 +131,7 @@
               <!-- 思考过程消息 -->
                 <template v-else-if="msg.role === 'thinking'">
                   <ConversationProcessingState
-                  v-if="!projectTaskExecutionActive && shouldShowCompactProcessingState(projectAgentExecutionEvents, messages, i)"
+                  v-if="!hasLiveProjectExecutionForMessage(i) && shouldShowCompactProcessingState(projectAgentExecutionEvents, messages, i)"
                   compact
                   title="正在思考…"
                   detail=""
@@ -134,17 +142,19 @@
                 <div>{{ msg.content }}</div>
               </div>
               <!-- Agent 回复 -->
-               <div v-else-if="!(msg.role === 'assistant' && msg.streaming && !String(msg.content || '').trim() && projectTaskExecutionActive)" class="bubble">
+               <ConversationSummaryBoundary v-else-if="msg.type === 'conversation_summary_boundary'" :message="msg" />
+               <template v-else-if="!(msg.role === 'assistant' && msg.streaming && !String(msg.content || '').trim() && hasLiveProjectExecutionForMessage(i))">
                  <ProjectAgentMessage
                    :message="msg"
                    :task-card="getProjectTaskCard(msg)"
-                   :suppress-thinking="projectTaskExecutionActive"
+                   :suppress-thinking="hasLiveProjectExecutionForMessage(i)"
                   :is-last-streaming="isStreaming && i === messages.length - 1"
                   :hide-file-changes="hasTerminalExecutionForMessage(projectAgentExecutionEvents, messages, i)"
+                  :message-key="`${currentSession || 'session'}:${getMessageKey(msg)}`"
                   @task-action="handleProjectTaskAction(msg, $event)"
                   @open-file-diff="openFileDiff"
                 />
-              </div>
+              </template>
               <AgentExecutionTranscript
                 :events="projectAgentExecutionEvents"
                 :enabled="projectAgentExecutionEnabled"
@@ -190,6 +200,24 @@
           @guide="guideProjectQueuedTurn"
           @retry="(turn) => projectTurnControl.retry(turn).then(() => drainProjectTurnQueue())"
         />
+        <ConversationAsideDock
+          scope="project"
+          :scope-id="currentProject || ''"
+          :exact-session-id="currentSession || ''"
+          :active="projectTurnBusy && !!currentProject && !!currentSession"
+        />
+        <ConversationPermissionMode
+          scope="project"
+          :scope-id="currentProject || ''"
+          :exact-session-id="currentSession || ''"
+          :disabled="!currentProject || !currentSession"
+        />
+        <ConversationHistoryBranches
+          scope="project"
+          :scope-id="currentProject || ''"
+          :exact-session-id="currentSession || ''"
+          @restored="selectSession(currentSession)"
+        />
         <ChatComposer
           v-model="chatInput"
           input-id="projectChatInput"
@@ -202,9 +230,9 @@
           :allow-input-while-busy="true"
           @files-selected="onChatFilesSelected"
           @remove-file="removeChatFile"
-          @keydown="handleKeydown"
+          @keydown="handleProjectKeydown"
           @input="handleInput"
-          @send="sendMessage"
+          @send="sendProjectMessage"
           @stop="stopStreaming"
         >
           <template #context>

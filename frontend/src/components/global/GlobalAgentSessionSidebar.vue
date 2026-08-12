@@ -1,6 +1,7 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
-import { ChevronRight, Link2, MessageSquare, Monitor, PanelLeftClose, PanelLeftOpen, Plus, Send, Trash2, X } from '@lucide/vue'
+import { Link2, MessageSquare, Monitor, PanelLeftClose, PanelLeftOpen, Plus, Send, Trash2, X } from '@lucide/vue'
+import ConversationSessionGroup from '../common/ConversationSessionGroup.vue'
 
 const props = defineProps({
   sessions: {
@@ -31,13 +32,13 @@ const emit = defineEmits([
 const sourceOf = (session) => String(session?.source || (String(session?.id || '').startsWith('feishu:') ? 'feishu' : 'web')) === 'feishu' ? 'feishu' : 'web'
 const webSessions = computed(() => props.sessions.filter(session => sourceOf(session) === 'web' && session?.draft !== true))
 const feishuSessions = computed(() => props.sessions.filter(session => sourceOf(session) === 'feishu'))
-const groupStorageKey = 'ccm:global-session-groups:v1'
+const groupStorageKey = 'ccm:global-session-groups:v2'
 const readGroupState = () => {
   try {
     const saved = JSON.parse(localStorage.getItem(groupStorageKey) || '{}')
-    return { web: saved.web === true, feishu: saved.feishu === true }
+    return { web: saved.web !== false, feishu: saved.feishu === true }
   } catch {
-    return { web: false, feishu: false }
+    return { web: true, feishu: false }
   }
 }
 const expandedGroups = ref(readGroupState())
@@ -60,25 +61,19 @@ const bindingText = (session) => {
 <template>
   <aside class="assistant-sidebar" :class="{ collapsed: !open }">
     <div class="sidebar-header">
-      <button class="new-chat-btn" @click="emit('new-session')">
-        <Plus :size="16" />
-        <span>新建网页会话</span>
-      </button>
-      <button class="header-icon-btn feishu-create-btn" aria-label="新建飞书会话" title="新建飞书会话" @click="emit('new-feishu-session')">
-        <Send :size="16" />
-      </button>
+      <strong>会话 <small>{{ sessions.length }}</small></strong>
       <button class="header-icon-btn" aria-label="折叠会话栏" @click="emit('toggle')" title="折叠会话栏">
         <PanelLeftClose :size="16" />
       </button>
     </div>
+    <button class="new-chat-btn" @click="emit('new-session')">
+      <Plus :size="16" />
+      <span>新建会话</span>
+    </button>
 
     <div class="session-list">
-      <section class="session-group">
-        <button class="session-group-heading" type="button" :aria-expanded="expandedGroups.web" @click="toggleGroup('web')">
-          <span><ChevronRight class="group-chevron" :class="{ expanded: expandedGroups.web }" :size="14" /><Monitor :size="13" />网页会话</span>
-          <strong>{{ webSessions.length }}</strong>
-        </button>
-        <div v-show="expandedGroups.web" class="session-group-content">
+      <ConversationSessionGroup label="普通会话" :count="webSessions.length" :expanded="expandedGroups.web" empty-label="暂无普通会话" @toggle="toggleGroup('web')">
+        <template #icon><MessageSquare :size="12" /></template>
           <button
             v-for="session in webSessions"
             :key="session.id"
@@ -96,15 +91,10 @@ const bindingText = (session) => {
               <span class="delete-session-btn" title="删除网页会话" @click.stop="emit('delete-session', session.id)"><X :size="14" /></span>
             </span>
           </button>
-        </div>
-      </section>
+      </ConversationSessionGroup>
 
-      <section class="session-group feishu-group">
-        <button class="session-group-heading" type="button" :aria-expanded="expandedGroups.feishu" @click="toggleGroup('feishu')">
-          <span><ChevronRight class="group-chevron" :class="{ expanded: expandedGroups.feishu }" :size="14" /><Send :size="13" />飞书会话</span>
-          <strong>{{ feishuSessions.length }}</strong>
-        </button>
-        <div v-show="expandedGroups.feishu" class="session-group-content">
+      <ConversationSessionGroup label="飞书会话" tone="feishu" :count="feishuSessions.length" :expanded="expandedGroups.feishu" empty-label="暂无飞书会话" create-label="新建并绑定飞书会话" @toggle="toggleGroup('feishu')" @create="emit('new-feishu-session')">
+        <template #icon><Send :size="12" /></template>
           <button
             v-for="session in feishuSessions"
             :key="session.id"
@@ -126,12 +116,7 @@ const bindingText = (session) => {
               <span class="delete-session-btn" title="删除飞书会话" @click.stop="emit('delete-session', session.id)"><X :size="14" /></span>
             </span>
           </button>
-          <button v-if="!feishuSessions.length" class="empty-feishu" @click="emit('new-feishu-session')">
-            <Send :size="15" />
-            <span>新建并绑定飞书会话</span>
-          </button>
-        </div>
-      </section>
+      </ConversationSessionGroup>
     </div>
 
     <div class="sidebar-footer">
@@ -154,7 +139,8 @@ const bindingText = (session) => {
 
 <style scoped>
 .assistant-sidebar {
-  width: 258px;
+  width: 252px;
+  min-width: 252px;
   border-right: 1px solid var(--border-color);
   background: var(--panel-muted);
   display: flex;
@@ -171,29 +157,34 @@ const bindingText = (session) => {
 
 .assistant-sidebar.collapsed {
   width: 0;
-  transform: translateX(-258px);
+  min-width: 0;
+  transform: translateX(-252px);
   overflow: hidden;
   border-right: none;
 }
 
 .sidebar-header {
-  min-height: 52px;
-  padding: 8px 10px;
+  min-height: 50px;
+  padding: 7px 10px 7px 14px;
   display: flex;
-  gap: 10px;
+  justify-content: space-between;
+  gap: 8px;
   align-items: center;
   border-bottom: 1px solid var(--border-color);
 }
+.sidebar-header strong { display:inline-flex; align-items:center; gap:7px; color:var(--text-primary); font-size:12px; }
+.sidebar-header strong small { min-width:18px; padding:1px 5px; border-radius:999px; background:var(--control-bg); color:var(--text-muted); font-size:9px; text-align:center; }
 
 .new-chat-btn {
-  flex: 1;
-  min-height: 34px;
-  background: var(--accent-blue);
-  color: white;
-  border: none;
+  min-height: 36px;
+  flex: 0 0 36px;
+  margin: 10px 10px 5px;
+  background: color-mix(in srgb,var(--accent-blue) 7%,var(--surface));
+  color: var(--accent-blue);
+  border: 1px solid color-mix(in srgb,var(--accent-blue) 25%,var(--border-color));
   border-radius: 8px;
   padding: 0 12px;
-  font-size: 13px;
+  font-size: 11.5px;
   font-weight: 700;
   cursor: pointer;
   display: flex;
@@ -204,7 +195,8 @@ const bindingText = (session) => {
 }
 
 .new-chat-btn:hover {
-  background: color-mix(in srgb, var(--accent-blue) 86%, #000);
+  border-color:var(--accent-blue);
+  background:color-mix(in srgb,var(--accent-blue) 10%,var(--surface));
 }
 
 .header-icon-btn {
@@ -263,10 +255,10 @@ const bindingText = (session) => {
 .session-list {
   flex: 1;
   overflow-y: auto;
-  padding: 10px 8px;
+  padding: 5px 8px 12px;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 0;
   scrollbar-width: thin;
 }
 

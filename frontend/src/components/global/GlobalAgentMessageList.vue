@@ -2,29 +2,15 @@
 import { computed } from 'vue'
 import EmptyState from '../common/EmptyState.vue'
 import LoadingSkeleton from '../common/LoadingSkeleton.vue'
-import TaskExperienceCard from '../tasks/TaskExperienceCard.vue'
 import MessageNavigator from '../common/MessageNavigator.vue'
 import CommandResultCard from '../common/CommandResultCard.vue'
 import ConversationMessageShell from '../common/ConversationMessageShell.vue'
 import ConversationProcessingState from '../common/ConversationProcessingState.vue'
 import AgentExecutionTranscript from '../common/AgentExecutionTranscript.vue'
 import NewProgressIndicator from '../common/NewProgressIndicator.vue'
-import {
-  buildGlobalStreamCurrentTodoSummary,
-  globalDispatchLaunchRows,
-  globalDispatchLaunchSummary,
-  globalDispatchRowClass,
-  globalExecutionIntentConfirmed,
-  globalStreamCurrentTodoTone,
-  globalStreamHeaderSubtitle,
-  globalStreamHeaderTitle,
-  globalStreamProgressRefreshItems,
-  globalStreamProgressRefreshSummary,
-  globalStreamProgressRefreshTone,
-  globalStreamToolUseSummary,
-  visibleGlobalStreamEventText,
-  visibleGlobalStreamEventTitle,
-} from '../../utils/globalAgentExecutionStream.js'
+import ConversationSummaryBoundary from '../common/ConversationSummaryBoundary.vue'
+import AgentFinalAnswer from '../common/AgentFinalAnswer.vue'
+import { shouldRenderExecutionTranscript, shouldShowCompactProcessingState } from '../../utils/agentExecutionEvents.js'
 import {
   globalAttachmentUrl,
   isGlobalImageAttachment,
@@ -47,8 +33,6 @@ const props = defineProps({
   updateScrollState: { type: Function, required: true },
   scrollToMessage: { type: Function, required: true },
   scrollToBottom: { type: Function, required: true },
-  getGlobalTaskCard: { type: Function, required: true },
-  isGlobalMissionTaskMessage: { type: Function, required: true },
   handleGlobalTaskAction: { type: Function, required: true },
   runtimeDebugSections: { type: Function, required: true },
   getVisibleGlobalMessageContent: { type: Function, required: true },
@@ -58,7 +42,6 @@ const props = defineProps({
   parseProjectReport: { type: Function, required: true },
   toggleReport: { type: Function, required: true },
   isReportOpen: { type: Function, required: true },
-  renderMarkdown: { type: Function, required: true },
   toggleSelectAllFiles: { type: Function, required: true },
   getGitStatusColor: { type: Function, required: true },
   handleGitCommitCardSubmit: { type: Function, required: true },
@@ -68,10 +51,9 @@ const props = defineProps({
   jumpToLatestProgress: { type: Function, required: true },
 })
 
-const emit = defineEmits(['edit-message', 'open-file-change', 'open-file-changes'])
+const emit = defineEmits(['edit-message', 'rewind-message', 'open-file-change', 'open-file-changes'])
 const isTaskExecutionMessage = (msg) => !!(
-  (typeof getGlobalTaskCard === 'function' && getGlobalTaskCard(msg))
-  || msg?.globalMission
+  msg?.globalMission
   || msg?.globalMissionSupervisor
   || msg?.agenticRun?.mission_id
   || msg?.agenticRun?.supervisor_id
@@ -92,6 +74,72 @@ const globalTaskExecutionActive = computed(() => (
     return !['completed', 'done', 'succeeded', 'failed', 'cancelled', 'canceled', 'reverted'].includes(status)
   })
 ))
+
+// A global stream envelope exists before the first model text chunk. Once it
+// has real execution rows, the shared transcript is its only live UI.
+const hasLiveGlobalExecutionForMessage = messageIndex => shouldRenderExecutionTranscript(
+  props.executionEvents,
+  props.messages,
+  messageIndex,
+)
+
+const LEGACY_GLOBAL_STREAM_LINE = /^\s*(?:\p{Extended_Pictographic}\uFE0F?|•)?\s*(?:理解需求|执行前计划(?:已整理)?|形成行动计划|规划下一步|组织回复|执行动作|动作已返回|执行遇到问题|需要补充信息|等待授权确认|已暂停|持续跟进中|已派发的工作|处理结果|失败|已取消|状态更新)\s*[：:]/u
+
+// Older global SSE handling mirrored lifecycle checkpoints into message.content
+// (for example “🧠 理解需求：…”).  When the shared transcript is available,
+// that content is a duplicate execution UI rather than an assistant answer.
+// Keep real streamed/final text visible and suppress only the legacy scaffold.
+const isLegacyGlobalStreamText = (value = '') => {
+  const lines = String(value).split(/\r?\n/).map(line => line.trim()).filter(Boolean)
+  return lines.length > 0 && lines.every(line => LEGACY_GLOBAL_STREAM_LINE.test(line))
+}
+
+const shouldHideDuplicateGlobalBubble = (msg, messageIndex) => {
+  if (msg?.role !== 'assistant') return false
+  const hasLiveExecution = hasLiveGlobalExecutionForMessage(messageIndex)
+  if (hasLiveExecution && isLegacyGlobalStreamText(msg?.content)) {
+    const finalReply = String(msg?.agenticRun?.final_reply || msg?.agenticRun?.finalReply || '').trim()
+    // Preserve an authoritative user-facing final answer from historical
+    // records even if their old compatibility content still contains the
+    // lifecycle scaffold.
+    if (finalReply && !isLegacyGlobalStreamText(finalReply)) return false
+    return true
+  }
+  const hasVisibleAnswer = !!String(
+    msg?.agenticRun?.final_reply
+      || msg?.agenticRun?.finalReply
+      || msg?.content
+      || '',
+  ).trim()
+  // While a real execution transcript is present it owns the empty live row.
+  // Without a transcript, keep the empty streaming envelope so the normal
+  // “正在思考” state can render. A terminal empty envelope is hidden instead
+  // of inventing a generic answer.
+  if (!hasVisibleAnswer) return hasLiveExecution || msg?.streaming !== true
+  return false
+}
+
+const STRUCTURED_GLOBAL_MESSAGE_TYPES = new Set([
+  'command_result',
+  'conversation_summary_boundary',
+  'management_action',
+  'git_review',
+  'git_commit',
+])
+
+const isPlainGlobalAssistantAnswer = msg => !!(
+  msg?.role === 'assistant'
+  && !STRUCTURED_GLOBAL_MESSAGE_TYPES.has(String(msg?.type || ''))
+  && !props.isSystemReceipt(msg?.content)
+  && !props.isProjectReport(msg?.content)
+)
+
+const isStructuredGlobalMessage = msg => !!(
+  STRUCTURED_GLOBAL_MESSAGE_TYPES.has(String(msg?.type || ''))
+  || isTaskExecutionMessage(msg)
+  || props.isSystemReceipt(msg?.content)
+  || props.isProjectReport(msg?.content)
+)
 </script>
 
 <template>
@@ -111,17 +159,20 @@ const globalTaskExecutionActive = computed(() => (
               :id="'msg-' + index"
               :role="msg.role"
               :timestamp="msg.timestamp || msg.created_at || msg.createdAt"
-              :structured="!!msg.type && msg.type !== 'text'"
+              :structured="isStructuredGlobalMessage(msg)"
               :streaming="!!msg.streaming"
               class="chat-bubble-wrapper"
-              :class="[msg.role, { 'search-hit': searchHighlightMsgIndex === index, 'structured-message': !!msg.type && msg.type !== 'text' }]"
+              :class="[msg.role, { 'search-hit': searchHighlightMsgIndex === index, 'structured-message': isStructuredGlobalMessage(msg) }]"
               :data-local-command="msg.type === 'command_result' || undefined"
               :data-message-type="msg.type || undefined"
               :data-message-id="msg.id || undefined"
               :copy-text="getCopyableMessageText(msg, getVisibleGlobalMessageContent(msg))"
               :editable="msg.role === 'user' && !!String(msg.content || '').trim()"
               :edit-disabled="isSending"
+              :rewindable="msg.role === 'assistant' && !msg.streaming && !!String(msg.id || '').trim()"
+              :rewind-disabled="false"
               @edit="emit('edit-message', msg)"
+              @rewind="emit('rewind-message', msg)"
             >
             <AgentExecutionTranscript
               :events="executionEvents"
@@ -133,152 +184,46 @@ const globalTaskExecutionActive = computed(() => (
               @open-file-change="emit('open-file-change', $event)"
               @execution-action="handleGlobalTaskAction(msg, $event)"
             />
-             <div v-if="!(msg.role === 'assistant' && msg.streaming && !String(msg.content || '').trim() && isTaskExecutionMessage(msg))" class="chat-bubble">
+             <div
+               v-if="!shouldHideDuplicateGlobalBubble(msg, index)"
+               class="chat-bubble"
+               :class="{ 'chat-bubble--final-answer': isPlainGlobalAssistantAnswer(msg) }"
+             >
               <!-- 助手消息判定 -->
               <template v-if="msg.role === 'assistant'">
+                <ConversationSummaryBoundary v-if="msg.type === 'conversation_summary_boundary'" :message="msg" />
                 <div
-                  v-if="msg.type === 'command_result'"
+                  v-else-if="msg.type === 'command_result'"
                   class="global-command-result"
                 >
                   <CommandResultCard :result="msg.commandResult" />
                 </div>
-                <div
-                  v-else-if="msg.type === 'global_stream' && !globalExecutionIntentConfirmed(msg)"
-                  class="global-stream-replying"
-                  :data-run-id="msg.agenticRun?.id || undefined"
-                  aria-live="polite"
+                <template
+                  v-else-if="msg.type === 'global_stream' && !hasLiveGlobalExecutionForMessage(index)"
                 >
-                   <ConversationProcessingState
-                     v-if="msg.streaming && !String(msg.content || '').trim() && !isTaskExecutionMessage(msg)"
+                  <ConversationProcessingState
+                    v-if="msg.streaming && !String(getVisibleGlobalMessageContent(msg) || '').trim() && !isTaskExecutionMessage(msg) && shouldShowCompactProcessingState(executionEvents, messages, index)"
                     compact
                     title="正在思考…"
                     detail="正在理解你的问题并整理当前上下文"
                   />
-                  <template v-else>
+                  <AgentFinalAnswer
+                    v-else-if="String(getVisibleGlobalMessageContent(msg) || '').trim()"
+                    :content="getVisibleGlobalMessageContent(msg)"
+                    :streaming="!!msg.streaming"
+                    :mentions="msg.mentions || []"
+                    :storage-key="`${currentSessionId || 'session'}:${msg.id || index}`"
+                  />
+                  <div
+                    v-else
+                    class="global-stream-replying"
+                    :data-run-id="msg.agenticRun?.id || undefined"
+                    aria-live="polite"
+                  >
                     <span class="stream-dot" :class="{ active: msg.streaming }"></span>
                     <span>{{ msg.streaming ? '正在回复...' : '回复已完成' }}</span>
-                  </template>
-                </div>
-                <div
-                  v-else-if="msg.type === 'global_stream'"
-                  class="global-stream-card"
-                  :data-run-id="msg.agenticRun?.id || undefined"
-                >
-                  <div class="global-stream-head">
-                    <span class="stream-dot" :class="{ active: msg.streaming }"></span>
-                    <div>
-                      <strong>{{ globalStreamHeaderTitle(msg) }}</strong>
-                      <p>{{ globalStreamHeaderSubtitle(msg) }}</p>
-                    </div>
                   </div>
-                  <div
-                    v-for="currentTodo in (getGlobalTaskCard(msg) ? [] : [buildGlobalStreamCurrentTodoSummary(msg)].filter(Boolean))"
-                    :key="currentTodo.step_id || currentTodo.label"
-                    class="global-stream-current-todo"
-                    :class="globalStreamCurrentTodoTone(currentTodo)"
-                  >
-                    <span class="stream-todo-label">当前步骤</span>
-                    <strong>{{ currentTodo.active_form || currentTodo.label }}</strong>
-                    <p v-if="currentTodo.detail">{{ currentTodo.detail }}</p>
-                    <div v-if="currentTodo.recent_action || currentTodo.recentAction || currentTodo.needs_action || currentTodo.needsAction" class="stream-todo-post-turn">
-                      <span v-if="currentTodo.recent_action || currentTodo.recentAction">最近：{{ currentTodo.recent_action || currentTodo.recentAction }}</span>
-                      <span v-if="currentTodo.needs_action || currentTodo.needsAction">需要：{{ currentTodo.needs_action || currentTodo.needsAction }}</span>
-                    </div>
-                    <small v-if="currentTodo.verification_reminder" class="stream-todo-verification">
-                      {{ currentTodo.verification_reminder.title || '还缺验收步骤' }}：{{ currentTodo.verification_reminder.headline || '完成前需要补一项真实验证，或者说明为什么当前不能验证。' }}
-                    </small>
-                    <small v-if="currentTodo.next_action" class="stream-todo-next">下一步：{{ currentTodo.next_action }}</small>
-                    <em class="stream-todo-progress">
-                      <span>{{ currentTodo.status_label || '进行中' }}</span>
-                      <b>{{ currentTodo.progress_label || `${currentTodo.completed_count || 0}/${currentTodo.total_count || 0}` }}</b>
-                    </em>
-                  </div>
-                  <div
-                    v-for="refreshSummary in (getGlobalTaskCard(msg) ? [] : [globalStreamProgressRefreshSummary(msg)].filter(Boolean))"
-                    :key="refreshSummary.schema || refreshSummary.title || 'global-progress-refresh'"
-                    class="global-stream-progress-refresh"
-                    :class="globalStreamProgressRefreshTone(refreshSummary)"
-                  >
-                    <span class="stream-refresh-label">{{ refreshSummary.title || '进度刷新提醒' }}</span>
-                    <strong>{{ refreshSummary.current_state || refreshSummary.currentState || refreshSummary.headline || '我已整理当前进度刷新状态。' }}</strong>
-                    <div v-if="globalStreamProgressRefreshItems(refreshSummary).length" class="stream-refresh-items">
-                      <span v-for="item in globalStreamProgressRefreshItems(refreshSummary)" :key="item">{{ item }}</span>
-                    </div>
-                    <small v-if="refreshSummary.next_action || refreshSummary.nextAction" class="stream-refresh-next">下一步：{{ refreshSummary.next_action || refreshSummary.nextAction }}</small>
-                    <em>{{ refreshSummary.status_label || refreshSummary.statusLabel || '已整理' }}</em>
-                  </div>
-                  <div
-                    v-for="toolSummary in (getGlobalTaskCard(msg) ? [] : [globalStreamToolUseSummary(msg)].filter(Boolean))"
-                    :key="toolSummary.schema || toolSummary.title"
-                    class="global-stream-tool-summary"
-                  >
-                    <span class="stream-tool-label">动作摘要</span>
-                    <strong>{{ toolSummary.headline || toolSummary.title }}</strong>
-                    <small v-if="toolSummary.latest_label">最近：{{ toolSummary.latest_label }}</small>
-                    <div class="stream-tool-counts">
-                      <span v-if="toolSummary.running_count">进行中 {{ toolSummary.running_count }}</span>
-                      <span v-if="toolSummary.completed_count">已返回 {{ toolSummary.completed_count }}</span>
-                      <span v-if="toolSummary.failed_count" class="failed">待排查 {{ toolSummary.failed_count }}</span>
-                    </div>
-                  </div>
-                  <details v-if="!getGlobalTaskCard(msg) && globalDispatchLaunchRows(msg).length" class="global-stream-dispatch" open>
-                    <summary>
-                      <div>
-                        <strong>{{ globalDispatchLaunchSummary(msg)?.title || '已派发的工作' }}</strong>
-                        <span>{{ globalDispatchLaunchSummary(msg)?.count_label || `${globalDispatchLaunchRows(msg).length} 个执行目标` }}</span>
-                      </div>
-                      <small>展开查看每个目标</small>
-                    </summary>
-                    <p v-if="globalDispatchLaunchSummary(msg)?.headline">{{ globalDispatchLaunchSummary(msg).headline }}</p>
-                    <div class="global-stream-dispatch-list">
-                      <article
-                        v-for="row in globalDispatchLaunchRows(msg)"
-                        :key="row.id || row.agent || row.task"
-                        :class="globalDispatchRowClass(row)"
-                      >
-                        <header>
-                          <strong>{{ row.role || '执行成员' }} · {{ row.agent || '待确认目标' }}</strong>
-                          <em>{{ row.status_label || '已派发' }}</em>
-                        </header>
-                        <span>{{ row.task || '已进入执行链路。' }}</span>
-                        <small v-if="row.reason">{{ row.reason }}</small>
-                        <small v-if="row.depends_on?.length">依赖：{{ row.depends_on.join('、') }}</small>
-                      </article>
-                    </div>
-                    <small v-if="globalDispatchLaunchSummary(msg)?.next_action" class="global-stream-dispatch-next">下一步：{{ globalDispatchLaunchSummary(msg).next_action }}</small>
-                  </details>
-                  <div v-if="!getGlobalTaskCard(msg)" class="global-stream-events">
-                    <div
-                      v-for="(event, eventIndex) in msg.streamEvents || []"
-                      :key="eventIndex"
-                      class="global-stream-event"
-                      :class="event.tone"
-                    >
-                      <span class="event-icon">{{ event.icon }}</span>
-                      <div>
-                        <strong>{{ visibleGlobalStreamEventTitle(event.title) }}</strong>
-                        <p>{{ visibleGlobalStreamEventText(event.text) }}</p>
-                      </div>
-                    </div>
-                    <div v-if="!(msg.streamEvents || []).length" class="global-stream-event running">
-                      <span class="event-icon">🧠</span>
-                      <div>
-                        <strong>准备中</strong>
-                        <p>正在连接全局 Agent...</p>
-                      </div>
-                    </div>
-                  </div>
-                  <TaskExperienceCard
-                    v-if="getGlobalTaskCard(msg)"
-                    class="global-stream-plan-card"
-                    :card="getGlobalTaskCard(msg)"
-                    context="global"
-                    compact
-                    :busy="!!msg.agenticRunLoading"
-                    @action="handleGlobalTaskAction(msg, $event)"
-                  />
-                </div>
-
+                </template>
                 <!-- CCM 系统管理处理结果 -->
                 <div v-else-if="msg.type === 'management_action'" class="management-action-card" :class="{ failed: !msg.managementReceipt?.success, cancelled: msg.managementReceipt?.cancelled }">
                   <div class="management-action-head">
@@ -296,16 +241,6 @@ const globalTaskExecutionActive = computed(() => (
                   </div>
                 </div>
 
-                <!-- 全局总控任务 -->
-                <TaskExperienceCard
-                  v-else-if="getGlobalTaskCard(msg) && isGlobalMissionTaskMessage(msg)"
-                  :card="getGlobalTaskCard(msg)"
-                  context="global"
-                  compact
-                  :busy="!!msg.agenticRunLoading"
-                  @action="handleGlobalTaskAction(msg, $event)"
-                />
-
                 <!-- RAG/Git 新增 1: 智能代码审查卡片 -->
                 <div v-else-if="msg.type === 'git_review'" class="git-review-card" style="width: 100%;">
                   <div class="card-header" style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
@@ -318,7 +253,11 @@ const globalTaskExecutionActive = computed(() => (
                   <div v-else-if="msg.error" style="color: #f44336; font-size: 14px; background: rgba(244,67,54,0.1); padding: 10px; border-radius: 6px;">
                     ❌ 审查失败: {{ msg.error }}
                   </div>
-                  <div v-else class="review-body" v-html="renderMarkdown(getVisibleGlobalMessageContent(msg, '代码审查报告已整理，技术细节已放入技术详情。'))" style="font-size: 14px; line-height: 1.6; color: #ddd; max-height: 450px; overflow-y: auto; background: rgba(0,0,0,0.15); border: 1px solid rgba(255,255,255,0.05); padding: 16px; border-radius: 8px;"></div>
+                  <AgentFinalAnswer
+                    v-else
+                    :content="getVisibleGlobalMessageContent(msg, '代码审查报告已整理，技术细节已放入技术详情。')"
+                    :storage-key="`${currentSessionId || 'session'}:${msg.id || index}:review`"
+                  />
                 </div>
 
                 <!-- RAG/Git 新增 2: Git 一键提交确认卡片 -->
@@ -372,15 +311,12 @@ const globalTaskExecutionActive = computed(() => (
                 </div>
 
                 <template v-else-if="msg.agenticRun">
-                  <TaskExperienceCard
-                    v-if="getGlobalTaskCard(msg)"
-                    :card="getGlobalTaskCard(msg)"
-                    context="global"
-                    compact
-                    :busy="!!msg.agenticRunLoading"
-                    @action="handleGlobalTaskAction(msg, $event)"
+                  <AgentFinalAnswer
+                    :content="getVisibleGlobalMessageContent(msg)"
+                    :streaming="!!msg.streaming"
+                    :mentions="msg.mentions || []"
+                    :storage-key="`${currentSessionId || 'session'}:${msg.id || index}`"
                   />
-                  <div v-else class="bubble-content">{{ getVisibleGlobalMessageContent(msg) }}</div>
                   <details v-if="runtimeDebugSections(msg).length" class="global-runtime-debug">
                     <summary class="runtime-debug-head">
                       <strong>技术详情</strong>
@@ -428,7 +364,13 @@ const globalTaskExecutionActive = computed(() => (
                 </div>
   
                 <!-- 3. 普通文本 -->
-                <div v-else class="bubble-content">{{ getVisibleGlobalMessageContent(msg) }}</div>
+                <AgentFinalAnswer
+                  v-else
+                  :content="getVisibleGlobalMessageContent(msg)"
+                  :streaming="!!msg.streaming"
+                  :mentions="msg.mentions || []"
+                  :storage-key="`${currentSessionId || 'session'}:${msg.id || index}`"
+                />
               </template>
   
               <!-- 用户消息普通渲染 -->

@@ -59,6 +59,7 @@ import {
 import { recordFailure } from "../../system/failure-record";
 import { appendTaskTransitionEvent } from "../../system/task-transition-ledger";
 import { validateTestAgentCompletionGate } from "../../test-agent/completion-gate";
+import { permissionSnapshotForTask } from "../tools/conversation-permission-policy";
 
 import {
   buildCodedCoordinatorSummary,
@@ -734,6 +735,9 @@ function createTaskWithScopedIdentity(task: any) {
     updated_at: new Date().toISOString(),
   };
   const acceptancePolicy = buildTaskAcceptancePolicySnapshot(newTask);
+  newTask.conversation_permission_snapshot = permissionSnapshotForTask(newTask);
+  newTask.conversation_permission_mode = newTask.conversation_permission_snapshot.mode;
+  newTask.permission_policy_revision = newTask.conversation_permission_snapshot.revision;
   if (acceptancePolicy) {
     newTask.acceptance_policy_snapshot = acceptancePolicy;
     newTask.acceptance_mode = acceptancePolicy.mode;
@@ -909,6 +913,9 @@ function buildRequirementEpicTaskRecord(input: any, id: string, traceId: string,
   };
   record.work_items = buildMainAgentWorkItems(record);
   record.work_item_summary = buildMainAgentWorkItemSummary(record.work_items);
+  record.conversation_permission_snapshot = permissionSnapshotForTask(record);
+  record.conversation_permission_mode = record.conversation_permission_snapshot.mode;
+  record.permission_policy_revision = record.conversation_permission_snapshot.revision;
   return record;
 }
 

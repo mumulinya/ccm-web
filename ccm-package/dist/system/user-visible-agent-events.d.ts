@@ -33,6 +33,7 @@ export type UserVisibleAgentEvent = {
         tokenAccuracy?: "reported" | "estimated";
     };
     detail?: {
+        toolContractVersion?: 2 | 3;
         safeArguments?: any;
         safeResult?: any;
         evidenceIds?: string[];
@@ -49,7 +50,7 @@ export type UserVisibleAgentEvent = {
             isParallel: boolean;
         };
         executionStage?: {
-            kind: "preparation" | "project_execution" | "independent_verification" | "main_agent_summary";
+            kind: "preparation" | "coordination_dispatch" | "project_execution" | "independent_verification" | "main_agent_summary";
             stageRunId: string;
             reviewCycleId?: string;
             attempt: number;
@@ -214,6 +215,14 @@ export declare function runUserVisibleAgentEventSelfTest(): {
         causalRefsSafe: boolean;
         progressLengthBounded: boolean;
         internalProgressRejected: boolean;
+        globalDispatchStage: boolean;
+        projectDispatchStage: boolean;
+        workspaceMcpUsesNativeFacade: boolean;
+        nativeRuntimeToolLocalized: boolean;
+        inlineCommandBodyHidden: boolean;
+        nestedBatchCountProjected: boolean;
+        nestedBatchUsesRuntimeTokenCount: boolean;
+        legacyBatchCountRecovered: boolean;
     };
     event: UserVisibleAgentEvent;
 };

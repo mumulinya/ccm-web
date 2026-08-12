@@ -8,6 +8,7 @@ const workspace_readonly_tools_1 = require("../tools/workspace-readonly-tools");
 const storage_1 = require("../modules/collaboration/storage");
 const utils_1 = require("../core/utils");
 const group_orchestrator_config_1 = require("../modules/collaboration/group-orchestrator-config");
+const unified_agent_turn_state_1 = require("./unified-agent-turn-state");
 function identity(query) {
     return {
         scope: query?.scope,
@@ -26,7 +27,7 @@ function writeEvent(res, event) {
     res.write(`event: agent_execution\n`);
     res.write(`data: ${JSON.stringify(event)}\n\n`);
 }
-async function rehydrateReadonlyToolDetail(event) {
+async function rehydrateReadonlyToolDetail(event, options = {}) {
     if (!event.toolName || !(0, tool_display_projection_1.isWorkspaceReadonlyToolName)(event.toolName))
         throw Object.assign(new Error("该工具不支持安全详情重取"), { statusCode: 409 });
     if (!event.toolCallId || !event.detail?.safeArguments)
@@ -43,7 +44,44 @@ async function rehydrateReadonlyToolDetail(event) {
         generation: event.generation,
         allowedProjects,
     });
-    const result = await (0, workspace_readonly_tools_1.executeWorkspaceReadonlyTool)(event.toolName, event.detail.safeArguments, capabilityToken);
+    let executionArguments = event.detail.safeArguments;
+    const continuationFiles = Array.isArray(options?.continuation?.files) ? options.continuation.files : [];
+    const continueBatchRead = options?.continue === true && /(?:^|__)read_files$/i.test(String(event.toolName || ""));
+    if (continueBatchRead) {
+        const originalPaths = new Set((Array.isArray(event.detail.safeArguments?.paths) ? event.detail.safeArguments.paths : [])
+            .map((item) => String(typeof item === "string" ? item : item?.path || "").replace(/\\/g, "/").trim())
+            .filter(Boolean));
+        const paths = continuationFiles.slice(0, 20).map((item) => ({
+            path: String(item?.path || "").replace(/\\/g, "/").trim(),
+            offset: Math.max(1, Number(item?.nextOffset || item?.next_offset || 1)),
+            expectedChecksum: String(item?.checksum || ""),
+        })).filter((item) => item.path && originalPaths.has(item.path));
+        if (!paths.length)
+            throw Object.assign(new Error("没有可继续读取的文件"), { statusCode: 409 });
+        executionArguments = {
+            ...event.detail.safeArguments,
+            // Continue in bounded chunks. An explicit offset without a limit means
+            // "read to EOF" in the V3 contract and can exceed the per-file budget.
+            paths: paths.map((item) => ({ path: item.path, offset: item.offset, limit: 100 })),
+        };
+        const result = await (0, workspace_readonly_tools_1.executeWorkspaceReadonlyTool)(event.toolName, executionArguments, capabilityToken, 3);
+        const rawFiles = Array.isArray(result?.modelPayload?.files) ? result.modelPayload.files : [];
+        const changed = paths.find((item) => item.expectedChecksum
+            && rawFiles.find((file) => String(file?.path || "") === item.path)?.checksum !== item.expectedChecksum);
+        if (changed)
+            throw Object.assign(new Error(`文件内容已变化，请重新读取当前详情：${changed.path}`), { statusCode: 409 });
+        const current = (0, tool_display_projection_1.buildToolDisplayDetail)({
+            toolName: event.toolName,
+            arguments: event.detail.safeArguments,
+            result,
+            transientBody: true,
+            freshness: "current",
+        });
+        const pendingCount = Number(current.result.continuation?.pendingCount || 0);
+        current.result.summary = `已继续读取 ${paths.length} 个文件${pendingCount ? `，仍有 ${pendingCount} 个文件未读完` : "，剩余内容已读完"}`;
+        return current;
+    }
+    const result = await (0, workspace_readonly_tools_1.executeWorkspaceReadonlyTool)(event.toolName, executionArguments, capabilityToken, event.detail?.toolContractVersion === 3 ? 3 : 2);
     const current = (0, tool_display_projection_1.buildToolDisplayDetail)({
         toolName: event.toolName,
         arguments: event.detail.safeArguments,
@@ -63,36 +101,47 @@ function rehydrateFailureFreshness(error) {
         return "permission_revoked";
     if (/not.?found|不存在|已删除|ENOENT/i.test(message))
         return "deleted";
+    if (/已变化|checksum|版本漂移/i.test(message))
+        return "drifted";
     return "";
 }
 function handleUserVisibleAgentEventsApi(pathname, req, res, parsed) {
     const detailMatch = pathname.match(/^\/api\/agent-execution\/events\/([^/]+)\/detail$/);
     if (detailMatch && req.method === "POST") {
         res.setHeader("Cache-Control", "no-store");
-        try {
-            const filter = identity(parsed?.query);
-            const event = (0, user_visible_agent_events_1.getUserVisibleAgentEvent)(filter, decodeURIComponent(detailMatch[1]));
-            if (!event)
-                return (0, utils_1.sendJson)(res, { success: false, error: "工具事件不存在或不属于当前精确会话" }, 404);
-            rehydrateReadonlyToolDetail(event)
-                .then(toolDisplay => (0, utils_1.sendJson)(res, { success: true, schema: "ccm-tool-detail-response-v1", toolDisplay, contentStored: false }))
-                .catch((error) => (0, utils_1.sendJson)(res, {
-                success: false,
-                error: String(error?.message || error),
-                ...(rehydrateFailureFreshness(error) ? { freshness: rehydrateFailureFreshness(error) } : {}),
-                contentStored: false,
-            }, Number(error?.statusCode || 400)));
-        }
-        catch (error) {
-            (0, utils_1.sendJson)(res, { success: false, error: String(error?.message || error) }, 400);
-        }
+        let body = "";
+        req.on("data", chunk => {
+            body += chunk;
+            if (body.length > 128_000)
+                req.destroy();
+        });
+        req.on("end", async () => {
+            try {
+                const filter = identity(parsed?.query);
+                const event = (0, user_visible_agent_events_1.getUserVisibleAgentEvent)(filter, decodeURIComponent(detailMatch[1]));
+                if (!event)
+                    return (0, utils_1.sendJson)(res, { success: false, error: "工具事件不存在或不属于当前精确会话" }, 404);
+                const options = body ? JSON.parse(body) : {};
+                const toolDisplay = await rehydrateReadonlyToolDetail(event, options);
+                (0, utils_1.sendJson)(res, { success: true, schema: "ccm-tool-detail-response-v1", toolDisplay, contentStored: false });
+            }
+            catch (error) {
+                (0, utils_1.sendJson)(res, {
+                    success: false,
+                    error: String(error?.message || error),
+                    ...(rehydrateFailureFreshness(error) ? { freshness: rehydrateFailureFreshness(error) } : {}),
+                    contentStored: false,
+                }, Number(error?.statusCode || 400));
+            }
+        });
         return true;
     }
     if (pathname === "/api/agent-execution/events" && req.method === "GET") {
         try {
             const enabled = (0, group_orchestrator_config_1.loadOrchestratorConfig)().ccStyleExecutionDisplayEnabled !== false;
+            const page = enabled ? (0, user_visible_agent_events_1.listUserVisibleAgentEvents)({ ...identity(parsed?.query), ...parsed?.query }) : null;
             (0, utils_1.sendJson)(res, enabled
-                ? { success: true, enabled, ...(0, user_visible_agent_events_1.listUserVisibleAgentEvents)({ ...identity(parsed?.query), ...parsed?.query }) }
+                ? { success: true, enabled, ...page, turnStates: (0, unified_agent_turn_state_1.projectUnifiedAgentTurnStates)(page?.events || []) }
                 : { success: true, enabled, schema: "ccm-user-visible-agent-event-list-v1", events: [], nextCursor: 0, hasMore: false, contentStored: false });
         }
         catch (error) {

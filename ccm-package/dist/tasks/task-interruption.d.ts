@@ -76,8 +76,8 @@ export declare function buildTaskInterruptionReceipt(input: {
     version: 1;
     task_id: string;
     reason: string;
-    recoverable: boolean;
     recovery?: TaskRecoveryScheduleV1;
+    recoverable: boolean;
     schema: "ccm-task-interruption-receipt-v1";
     actor: string;
     receipt_id: string;
@@ -104,8 +104,8 @@ export declare function interruptTaskExecution(input: Parameters<typeof buildTas
         version: 1;
         task_id: string;
         reason: string;
-        recoverable: boolean;
         recovery?: TaskRecoveryScheduleV1;
+        recoverable: boolean;
         schema: "ccm-task-interruption-receipt-v1";
         actor: string;
         receipt_id: string;

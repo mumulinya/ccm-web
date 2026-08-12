@@ -12,8 +12,14 @@ const code = await load('system', 'code-intelligence.js')
 const webNotebook = await load('tools', 'web-notebook-tools.js')
 const search = await load('tools', 'tool-search-index.js')
 const projection = await load('system', 'context-source-tool-result-projection.js')
+const workspace = await load('tools', 'workspace-readonly-tools.js')
+const media = await load('tools', 'workspace-read-media.js')
+const transient = await load('system', 'transient-model-content.js')
 const marketplace = await load('modules', 'tools', 'marketplace.js')
 const lsp = await load('system', 'lsp-client.js')
+const toolDisplay = await load('system', 'tool-display-projection.js')
+const internalAgentMcp = await load('integrations', 'agent-internal-mcp.js')
+const workspaceEdit = await load('integrations', 'workspace-edit-mcp.js')
 
 const usage = { inputTokens: 10, outputTokens: 2, totalTokens: 12, reported: true }
 const openai = provider.parseOpenAiAgentTurn({ choices: [{ finish_reason: 'tool_calls', message: { tool_calls: [{ id: 'c1', function: { name: 'read_file', arguments: '{"path":"a.ts"}' } }] } }] }, usage)
@@ -43,6 +49,43 @@ assert.equal(parsedSkill.effort, 'high')
 
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'ccm-tools-selftest-'))
 try {
+  process.env.CCM_TASK_COMMAND_RUN_DIR = path.join(temp, 'command-runs')
+  const taskCommands = await load('integrations', 'task-command-runtime.js')
+  const workspaceContract = workspace.runWorkspaceReadonlyToolsSelfTest()
+  assert.equal(workspaceContract.success, true, JSON.stringify(workspaceContract, null, 2))
+  assert.ok(workspaceContract.tools.every(tool => tool.toolContractVersion === 3))
+  assert.equal(workspace.WORKSPACE_READONLY_TOOL_DEFINITIONS_V3.some(tool => tool.name === 'read_files'), true)
+  assert.equal(workspace.WORKSPACE_READONLY_TOOL_DEFINITIONS_V2.some(tool => tool.name === 'read_files'), false)
+
+  const editTools = workspaceEdit.workspaceEditMcpTools()
+  assert.deepEqual(editTools.map(tool => tool.name), ['apply_patch', 'write_file', 'move_path', 'delete_path'])
+  assert.equal(editTools.every(tool => !tool.roles.includes('project-agent') && tool.roles.includes('project-child-agent')), true)
+  const mcpContext = { taskId: 'tools-selftest', groupId: '', project: 'fixture', workDir: temp }
+  const projectMainServers = internalAgentMcp.buildTaskBoundInternalMcpServers({ ...mcpContext, role: 'project-agent' })
+  const nativeProjectChildServers = internalAgentMcp.buildTaskBoundInternalMcpServers({ ...mcpContext, role: 'project-child-agent', agentType: 'claudecode', nativeWorkspaceEditing: true })
+  const fallbackProjectChildServers = internalAgentMcp.buildTaskBoundInternalMcpServers({ ...mcpContext, role: 'project-child-agent', agentType: 'provider-without-native-edit', nativeWorkspaceEditing: false })
+  const groupServers = internalAgentMcp.buildTaskBoundInternalMcpServers({ ...mcpContext, role: 'group-main-agent' })
+  assert.equal(Boolean(projectMainServers.ccm__workspace_edit), false)
+  assert.equal(Boolean(nativeProjectChildServers.ccm__workspace_edit), false)
+  assert.ok(fallbackProjectChildServers.ccm__workspace_edit)
+  assert.equal(Boolean(groupServers.ccm__workspace_edit), false)
+
+  const editDisplay = toolDisplay.buildToolDisplayDetail({
+    toolName: 'mcp__ccm__ccm_workspace_edit__apply_patch',
+    arguments: { path: 'src/a.ts', old_text: 'BODY_SENTINEL_OLD', new_text: 'BODY_SENTINEL_NEW', expected_checksum: 'abc' },
+    result: { schema: 'ccm-workspace-edit-result-v1', action: 'apply_patch', path: 'src/a.ts', afterChecksum: 'def', contentStored: false },
+  })
+  assert.equal(editDisplay.tool.userLabel, '修改文件')
+  assert.equal(JSON.stringify(editDisplay).includes('BODY_SENTINEL'), false)
+
+  const tinyPng = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64')
+  const imageFile = path.join(temp, 'pixel.png')
+  fs.writeFileSync(imageFile, tinyPng)
+  const imageResult = await media.readWorkspaceImage(imageFile, 'pixel.png')
+  assert.equal(imageResult.safeReceipt.contentStored, false)
+  assert.equal(transient.transientModelBlocks(imageResult).length, 1)
+  assert.equal(JSON.stringify(imageResult).includes(tinyPng.toString('base64')), false)
+
   fs.writeFileSync(path.join(temp, 'sample.ipynb'), JSON.stringify({ nbformat: 4, nbformat_minor: 5, metadata: { kernelspec: { name: 'python3' } }, cells: [{ id: 'c1', cell_type: 'code', metadata: {}, source: ['print(1)\n'], outputs: [{ output_type: 'stream', text: ['1\n'] }], execution_count: 1 }] }))
   const notebook = webNotebook.inspectNotebook(temp, { path: 'sample.ipynb' })
   assert.equal(notebook.cells[0].id, 'c1')
@@ -56,6 +99,16 @@ try {
   const symbols = await client.request('workspace/symbol', { query: 'External' })
   assert.equal(symbols[0].name, 'ExternalSymbol')
   await client.stop()
+
+  const commandContext = {
+    taskId: 'tools-selftest', project: 'fixture', role: 'project-agent', workDir: temp, baseWorkDir: temp,
+    communicationGeneration: 2, communicationAttempt: 1, communicationLeaseId: 'lease-selftest',
+  }
+  const foreground = await taskCommands.runTaskBoundCommand(commandContext, {
+    command: `${JSON.stringify(process.execPath)} -p "6*7"`, description: '验证托管命令', timeout_ms: 10000,
+  })
+  assert.equal(foreground.status, 'completed')
+  assert.match(foreground.output, /42/)
 } finally { fs.rmSync(temp, { recursive: true, force: true }) }
 
 const webProjection = projection.projectContextSourceToolResultForPersistence('web_fetch', { finalUrl: 'https://example.com/doc', title: 'Doc', text: 'WEB_BODY_SENTINEL', contentChecksum: 'abc' })
@@ -75,4 +128,4 @@ assert.match(notebookMcpSource, /work_item_id/)
 assert.match(notebookMcpSource, /lease_id/)
 assert.match(notebookMcpSource, /recordEvidence/)
 
-console.log(JSON.stringify({ success: true, providers: ['anthropic', 'openai', 'gemini'], languageServers: servers.length, semanticFixture, externalLspJsonRpc: true, toolSearch: ranked[0].reasons, contentStored: false }, null, 2))
+console.log(JSON.stringify({ success: true, providers: ['anthropic', 'openai', 'gemini'], languageServers: servers.length, semanticFixture, externalLspJsonRpc: true, workspaceContractV3: true, workspaceEditTaskBound: true, taskBoundCommand: true, toolSearch: ranked[0].reasons, contentStored: false }, null, 2))

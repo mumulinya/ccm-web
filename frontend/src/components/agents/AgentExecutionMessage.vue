@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import MainAgentDecisionCard from './MainAgentDecisionCard.vue'
 import TaskCollaborationCard from '../collaboration/TaskCollaborationCard.vue'
 import AgentWorkEventDetails from './AgentWorkEventDetails.vue'
+import AgentFinalAnswer from '../common/AgentFinalAnswer.vue'
 import { isQuietMainAgentDecision } from '../../composables/useMainAgentDisplay.js'
 
 const props = defineProps({
@@ -22,7 +23,6 @@ const props = defineProps({
   fileChangesTitle: { type: String, default: '' },
   hideFileChanges: { type: Boolean, default: false },
   workflowSteps: { type: Array, default: () => [] },
-  highlightMentions: { type: Function, default: (value) => value || '' },
   getPlanTitle: { type: Function, default: () => '协作计划' },
   getExecutionOrderLabel: { type: Function, default: (value) => value || '并行' },
   getDispatchActionLabel: { type: Function, default: (value) => value || '派发' },
@@ -33,6 +33,7 @@ const props = defineProps({
   getAssignmentStatusClass: { type: Function, default: (value) => value || 'pending' },
   getAssignmentStatusLabel: { type: Function, default: (value) => value || '待执行' },
   getAgentDisplayName: { type: Function, default: (value) => value || 'Agent' },
+  messageKey: { type: String, default: '' },
 })
 
 const emit = defineEmits(['step-action', 'task-action', 'open-pipeline', 'open-file-diff', 'failure-action'])
@@ -53,6 +54,7 @@ const failureTechnical = computed(() => props.msg?.providerFailureTechnical || p
 const isRecoverableModelFailure = computed(() => (
   ['llm-error', 'llm-not-configured'].includes(String(props.msg?.runtime || '').toLowerCase())
 ))
+const plainAnswer = computed(() => textOnly.value && !isRecoverableModelFailure.value)
 const formatDuration = value => {
   const ms = Number(value || 0)
   if (!Number.isFinite(ms) || ms <= 0) return ''
@@ -61,7 +63,15 @@ const formatDuration = value => {
 </script>
 
 <template>
+  <AgentFinalAnswer
+    v-if="plainAnswer && (displayContent || msg.content)"
+    :content="displayContent || msg.content"
+    :streaming="!!msg.streaming"
+    :mentions="msg.mentions || []"
+    :storage-key="messageKey"
+  />
   <div
+    v-else
     class="bubble agent-exec-bubble"
     :class="['agent-state-' + status.tone, { 'text-only': textOnly }]"
     :style="accentStyle"
@@ -75,7 +85,13 @@ const formatDuration = value => {
         {{ status.label }}
       </span>
     </div>
-    <div v-if="(displayContent || msg.content) && !primaryTaskCard" class="agent-message-content" v-html="highlightMentions(displayContent || msg.content)"></div>
+    <AgentFinalAnswer
+      v-if="(displayContent || msg.content) && !primaryTaskCard"
+      :content="displayContent || msg.content"
+      :streaming="!!msg.streaming"
+      :mentions="msg.mentions || []"
+      :storage-key="messageKey"
+    />
     <div v-if="isRecoverableModelFailure" class="model-failure-actions">
       <button type="button" class="model-failure-primary" @click="emit('failure-action', 'retry')">立即重试</button>
       <button type="button" @click="emit('failure-action', 'settings')">检查模型配置</button>
@@ -290,12 +306,6 @@ const formatDuration = value => {
 .agent-status-pill.fail {
   background: rgba(239, 68, 68, 0.12);
   color: var(--accent-red);
-}
-.agent-message-content {
-  position: relative;
-  z-index: 1;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
 }
 .model-failure-actions {
   position: relative;

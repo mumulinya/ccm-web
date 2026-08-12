@@ -1,13 +1,14 @@
 <script setup>
 import { computed } from 'vue'
 import { sanitizeUserFacingAgentText } from '../../utils/agentDisplay.js'
+import AgentFinalAnswer from '../common/AgentFinalAnswer.vue'
 
 const props = defineProps({
   msg: { type: Object, required: true },
   accentStyle: { type: Object, default: () => ({}) },
   actionLoading: { type: Object, default: () => ({}) },
-  highlightMentions: { type: Function, default: (value) => value || '' },
   getAgentDisplayName: { type: Function, default: (agent) => agent || '执行成员' },
+  messageKey: { type: String, default: '' },
 })
 
 const emit = defineEmits(['action'])
@@ -84,7 +85,6 @@ const visibleSummary = computed(() => userPreview.value.summary || sanitizeUserF
 const visibleQuestion = computed(() => userPreview.value.question || (qa.value.question ? sanitizeUserFacingAgentText(qa.value.question, '问题原文已放入技术详情。', 180) : ''))
 const visibleAnswer = computed(() => userPreview.value.answer || (qa.value.answer ? sanitizeUserFacingAgentText(qa.value.answer, '回答详情已放入技术详情。', 220) : ''))
 const visibleNextAction = computed(() => userPreview.value.next_action || '')
-const contentHtml = computed(() => props.highlightMentions(visibleSummary.value || ''))
 const evidenceText = computed(() => Array.isArray(qa.value.answer_evidence) ? qa.value.answer_evidence.slice(0, 4).join(' · ') : '')
 const technicalRows = computed(() => [
   { label: '协调请求', value: qa.value.coordination_request_id },
@@ -113,9 +113,28 @@ const isLoading = (action) => !!props.actionLoading[`${qa.value.id}:${action}`]
       <span :class="['agent-qa-status', statusTone]">{{ statusLabel }}</span>
     </div>
     <div v-if="meta" class="agent-qa-meta">{{ meta }}</div>
-    <div class="agent-qa-content" v-html="contentHtml"></div>
-    <div v-if="visibleQuestion" class="agent-qa-question">问：{{ visibleQuestion }}</div>
-    <div v-if="visibleAnswer" class="agent-qa-answer">答：{{ visibleAnswer }}</div>
+    <AgentFinalAnswer
+      class="agent-qa-content"
+      :content="visibleSummary"
+      :mentions="msg.mentions || []"
+      :storage-key="`${messageKey}:summary`"
+    />
+    <div v-if="visibleQuestion" class="agent-qa-question">
+      <strong>问</strong>
+      <AgentFinalAnswer
+        :content="visibleQuestion"
+        :mentions="msg.mentions || []"
+        :storage-key="`${messageKey}:question`"
+      />
+    </div>
+    <div v-if="visibleAnswer" class="agent-qa-answer">
+      <strong>答</strong>
+      <AgentFinalAnswer
+        :content="visibleAnswer"
+        :mentions="msg.mentions || []"
+        :storage-key="`${messageKey}:answer`"
+      />
+    </div>
     <div v-if="qa.acceptance?.reason" class="agent-qa-meta">仲裁结论：{{ sanitizeUserFacingAgentText(qa.acceptance.reason, '问答仲裁已完成。', 180) }}</div>
     <div v-if="visibleNextAction" class="agent-qa-meta">下一步：{{ visibleNextAction }}</div>
     <div v-if="qa.permission_boundary?.pass === false" class="agent-qa-question">权限门禁：检测到问答外副作用，回答未采纳。</div>
@@ -210,12 +229,21 @@ const isLoading = (action) => !!props.actionLoading[`${qa.value.id}:${action}`]
 }
 .agent-qa-question,
 .agent-qa-answer {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  gap: 7px;
   margin: 8px 0;
   padding: 8px 10px;
   border-radius: 8px;
   background: rgba(15, 23, 42, 0.04);
   color: var(--text-secondary);
   overflow-wrap: anywhere;
+}
+.agent-qa-question > strong,
+.agent-qa-answer > strong {
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.72;
 }
 .agent-qa-answer {
   background: rgba(34, 197, 94, 0.08);

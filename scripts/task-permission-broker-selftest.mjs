@@ -113,12 +113,29 @@ try {
     assert.equal(mockModelCalls, 1)
   })
 
+  const mainReviewedEdit = await broker.requestTaskPermission(context, {
+    operation: 'workspace_edit_session',
+    paths: [workDir],
+    reason: '由群聊主 Agent 审核项目子 Agent 的当前任务修改范围',
+    forceMainAgentReview: true,
+    approvalScope: 'task',
+    permissionPolicyRevision: 7,
+    approvedProjectIds: ['project-a'],
+    approvedPaths: [workDir],
+  })
+  check('main-agent review mode lets the main Agent adjudicate child edit access', () => {
+    assert.equal(mainReviewedEdit.state, 'approved')
+    assert.equal(mainReviewedEdit.decidedBy, 'group-main-agent')
+    assert.equal(mainReviewedEdit.approvalScope, 'task')
+    assert.equal(mockModelCalls, 2)
+  })
+
   const commandGrant = await broker.requestTaskPermission(context, { operation: 'build', command: `node -e "process.stdout.write('approved-command-ok')"`, paths: ['.'], reason: '验证受控审批命令执行链' })
   const commandResult = await broker.executeApprovedTaskCommand(context, commandGrant.id)
   check('approved command runs through the CCM managed runner and consumes its lease', () => {
     assert.equal(commandResult.success, true)
     assert.match(commandResult.stdout, /approved-command-ok/)
-    assert.equal(mockModelCalls, 2)
+    assert.equal(mockModelCalls, 3)
     assert.throws(() => broker.consumeTaskPermission(context, commandGrant.id), /不可用|耗尽/)
   })
 
@@ -181,6 +198,21 @@ try {
     assert.equal(broker.consumeTaskPermission(projectContext, projectRequest.id).allowed, true)
   })
 
+  const projectMainReviewedEdit = await broker.requestTaskPermission(projectContext, {
+    operation: 'workspace_edit_session',
+    paths: [workDir],
+    reason: '由项目主 Agent 审核项目子 Agent 的修改范围',
+    forceMainAgentReview: true,
+    approvalScope: 'task',
+    permissionPolicyRevision: 9,
+    approvedProjectIds: ['project-a'],
+    approvedPaths: [workDir],
+  })
+  check('project main Agent can review child edit access without a group binding', () => {
+    assert.equal(projectMainReviewedEdit.state, 'approved')
+    assert.equal(projectMainReviewedEdit.decidedBy, 'project-main-agent')
+  })
+
   const petNotifications = []
   const feishuNotifications = []
   const notificationResult = await broker.deliverPendingTaskPermissionNotifications({
@@ -215,7 +247,7 @@ try {
   })
 
   const listed = broker.listTaskPermissionRequests({ taskId: task.id })
-  check('requests are independently auditable by exact task', () => assert.equal(listed.length, 5))
+  check('requests are independently auditable by exact task', () => assert.equal(listed.length, 6))
   console.log(JSON.stringify({ pass: true, checks, paid_provider_calls: 0 }, null, 2))
 } catch (error) {
   console.error(error?.stack || String(error))

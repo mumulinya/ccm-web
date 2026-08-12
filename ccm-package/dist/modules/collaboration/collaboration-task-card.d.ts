@@ -26,6 +26,11 @@ export declare function buildMainAgentRecoverySummary(task: any, phase: string, 
     mode: any;
     status_label: string;
     headline: any;
+    reason_code: string;
+    auto_retry: boolean;
+    next_retry_at: string;
+    attempt: number;
+    max_attempts: number;
     revalidated: {
         goal: boolean;
         state: boolean;
@@ -6178,6 +6183,11 @@ export declare function buildTaskCardView(task: any, executions: any[], sessions
         mode: any;
         status_label: string;
         headline: any;
+        reason_code: string;
+        auto_retry: boolean;
+        next_retry_at: string;
+        attempt: number;
+        max_attempts: number;
         revalidated: {
             goal: boolean;
             state: boolean;
@@ -6209,6 +6219,11 @@ export declare function buildTaskCardView(task: any, executions: any[], sessions
         mode: any;
         status_label: string;
         headline: any;
+        reason_code: string;
+        auto_retry: boolean;
+        next_retry_at: string;
+        attempt: number;
+        max_attempts: number;
         revalidated: {
             goal: boolean;
             state: boolean;
@@ -6480,6 +6495,11 @@ export declare function buildTaskCardView(task: any, executions: any[], sessions
             mode: any;
             status_label: string;
             headline: any;
+            reason_code: string;
+            auto_retry: boolean;
+            next_retry_at: string;
+            attempt: number;
+            max_attempts: number;
             revalidated: {
                 goal: boolean;
                 state: boolean;

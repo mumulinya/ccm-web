@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import TaskExperienceCard from '../tasks/TaskExperienceCard.vue'
 import ConversationProcessingState from '../common/ConversationProcessingState.vue'
+import AgentFinalAnswer from '../common/AgentFinalAnswer.vue'
 
 const props = defineProps({
   message: {
@@ -18,6 +19,7 @@ const props = defineProps({
   },
   suppressThinking: { type: Boolean, default: false },
   hideFileChanges: { type: Boolean, default: false },
+  messageKey: { type: String, default: '' },
 })
 
 const emit = defineEmits(['task-action', 'open-file-diff'])
@@ -77,8 +79,13 @@ const showThinking = computed(() => (
     title="正在思考…"
     detail="正在理解你的问题并检查项目上下文"
   />
-  <div v-else class="streamed-answer">{{ message.content }}</div>
-  <span v-if="isLastStreaming" class="stream-cursor">▌</span>
+  <AgentFinalAnswer
+    v-else
+    :content="message.content || ''"
+    :streaming="isLastStreaming"
+    :mentions="message.mentions || []"
+    :storage-key="messageKey"
+  />
 
   <details v-if="workEvents.length && !taskCard && isTaskMessage" class="agent-work-events">
     <summary class="work-events-head">
@@ -116,24 +123,6 @@ const showThinking = computed(() => (
 </template>
 
 <style scoped>
-.stream-cursor {
-  animation: pulse-glow 1s infinite ease-in-out;
-  color: var(--accent-blue);
-  font-weight: bold;
-  display: inline;
-  margin-left: 2px;
-}
-
-@keyframes pulse-glow {
-  0%, 100% {
-    opacity: 0.15;
-  }
-  50% {
-    opacity: 1;
-    text-shadow: 0 0 8px var(--accent-blue);
-  }
-}
-
 .file-changes {
   margin-top: 10px;
   padding: 12px;

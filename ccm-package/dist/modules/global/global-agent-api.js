@@ -55,6 +55,7 @@ const task_conversation_links_1 = require("../../system/task-conversation-links"
 const secure_multipart_1 = require("../../system/secure-multipart");
 const automation_session_bindings_1 = require("../../system/automation-session-bindings");
 const access_policy_1 = require("../system/access-policy");
+const global_agent_capabilities_1 = require("./global-agent-capabilities");
 function normalizeGlobalRequestedTargets(value, message = "") {
     let rows = value;
     if (typeof rows === "string") {
@@ -1402,6 +1403,16 @@ function createGlobalAgentApi(deps) {
                     const displayMessage = originalMessage || (files.length
                         ? `请处理已上传的 ${files.length} 份资料：${files.map((file) => file.filename || "附件").join("、")}`
                         : message);
+                    if (!files.length && (0, global_agent_capabilities_1.isGlobalAgentCapabilityQuestion)(originalMessage)) {
+                        if (isStream) {
+                            await streamBufferedGlobalReply(global_agent_capabilities_1.GLOBAL_AGENT_CAPABILITY_REPLY);
+                            emit({ type: "done", capability_reply: true });
+                            res.end();
+                        }
+                        else
+                            sendJson(res, { success: true, reply: global_agent_capabilities_1.GLOBAL_AGENT_CAPABILITY_REPLY, capability_reply: true, contentStored: false });
+                        return;
+                    }
                     const requestedTargetRefs = normalizeGlobalRequestedTargets(payload.target_refs || payload.targetRefs, originalMessage || message);
                     const requestPrincipal = (0, api_access_control_1.requestAccessPrincipal)(req);
                     if (requestPrincipal?.kind === "browser" && requestPrincipal.role !== "admin") {

@@ -69,18 +69,31 @@ const stageFallbackTitle = (stage, status) => {
   if (status === 'blocked') return '本阶段需要处理'
   if (status === 'warning') return '本阶段存在注意事项'
   return {
-    intake: '已确认任务要求',
-    planning: '执行计划已更新',
-    dispatch: '任务安排已更新',
-    execution: '执行进度已更新',
-    change: '代码改动已更新',
-    test: '独立验收已更新',
-    rework: '返工进度已更新',
-    review: '主 Agent 验收已更新',
-    completion: '任务交付已更新',
+    intake: '了解情况已更新',
+    planning: '了解情况已更新',
+    dispatch: '协调与分派已更新',
+    execution: '实施处理已更新',
+    change: '实施处理已更新',
+    test: '验证与交付已更新',
+    rework: '实施处理已更新',
+    review: '验证与交付已更新',
+    completion: '验证与交付已更新',
     system: '系统状态已更新',
   }[stage] || '任务进度已更新'
 }
+
+export const replayStageLabel = stage => ({
+  intake: '了解情况',
+  planning: '了解情况',
+  dispatch: '协调与分派',
+  execution: '实施处理',
+  change: '实施处理',
+  rework: '实施处理',
+  test: '验证与交付',
+  review: '验证与交付',
+  completion: '验证与交付',
+  system: '系统',
+}[stage] || stage || '记录')
 
 export const replayEventTitle = item => {
   const raw = sanitizeReplayText(item?.title)

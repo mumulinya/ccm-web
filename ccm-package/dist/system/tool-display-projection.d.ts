@@ -20,13 +20,41 @@ export type ToolDisplayDetailV1 = {
         kind: "summary" | "list" | "table" | "text" | "locations" | "diagnostics" | "diff" | "empty" | "error";
         summary: string;
         rows?: unknown[];
+        fileRows?: Array<{
+            path: string;
+            status: "completed" | "partial" | "unchanged";
+            from: number;
+            to: number;
+            totalLines: number;
+            nextOffset?: number;
+            checksum?: string;
+            lines: Array<{
+                line: number;
+                text: string;
+            }>;
+        }>;
         preview?: string;
         total?: number;
         truncated: boolean;
         nextCursor?: string;
+        continuation?: {
+            kind: "read_files";
+            pendingCount: number;
+            files: Array<{
+                path: string;
+                nextOffset: number;
+                checksum: string;
+            }>;
+        };
         rehydratable?: boolean;
         freshness?: "current" | "drifted" | "deleted" | "permission_revoked";
         authoritativeRevision?: string;
+        searchExecution?: {
+            engine: "bundled_rg" | "system_rg" | "node_fallback";
+            timedOut: boolean;
+            cancelled: boolean;
+            partial: boolean;
+        };
     };
     contentStored: false;
 };

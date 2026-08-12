@@ -34,6 +34,9 @@ export declare function buildTaskConversationLinks(taskOrId: any, tasksInput?: a
     schema: string;
     taskId: string;
     missionId: string;
+    revision: number;
+    generation: number;
+    bindingChecksum: string;
     projectionRevision: string;
     links: TaskConversationLinkV1[];
     contentStored: boolean;

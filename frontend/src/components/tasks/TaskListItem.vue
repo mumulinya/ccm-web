@@ -67,6 +67,10 @@ defineProps({
   canCancel: {
     type: Boolean,
     default: false
+  },
+  cancelBusy: {
+    type: Boolean,
+    default: false
   }
 })
 
@@ -174,7 +178,7 @@ const emit = defineEmits([
       <button v-if="showArchived" class="btn btn-primary btn-sm" @click="emit('restore', task.id)">恢复</button>
       <button v-if="showArchived" class="btn btn-danger btn-sm" @click="emit('purge', task.id)">永久清除</button>
       <template v-if="!showArchived">
-        <button v-if="canCancel" class="btn btn-danger btn-sm" @click="emit('cancel', task)">停止任务</button>
+        <button v-if="canCancel" class="btn btn-danger btn-sm" :disabled="cancelBusy" @click="emit('cancel', task)">{{ cancelBusy ? '正在停止…' : '停止任务' }}</button>
         <button v-if="task.status === 'pending' || task.status === 'failed'" class="btn btn-primary btn-sm" @click="emit('queue', task.id)">📥 加入队列</button>
         <button v-if="task.status === 'pending'" class="btn btn-outline btn-sm" @click="emit('priority', task, task.priority === 'high' ? 'normal' : 'high')">{{ task.priority === 'high' ? '取消插队' : '插队' }}</button>
         <button v-if="task.final_report || task.result || task.receipt || task.review" class="btn btn-outline btn-sm" @click="emit('report', task)">📄 报告</button>

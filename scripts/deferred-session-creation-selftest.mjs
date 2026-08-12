@@ -55,6 +55,9 @@ assert.doesNotMatch(groupCreate, /groupsApi\.createSession/)
 const groupStream = read('frontend/src/components/collaboration/useGroupChatStream.js')
 assert.match(groupStream, /await ensureGroupSession\?\.\(\)/)
 assert.match(groupStream, /if \(!currentGroupSessionId\.value\)/)
+assert.match(groupStream, /if \(!res\.ok\)/, '群聊 SSE 非成功响应必须先作为 JSON 错误处理')
+assert.match(groupStream, /GROUP_SESSION_UNAVAILABLE/, '群聊会话冲突必须保留稳定错误码')
+assert.match(groupStream, /messages\.value\.splice\(assistantIdx, 1\)/, '群聊 SSE 提交失败必须撤回空白助手占位')
 
 console.log(JSON.stringify({
   pass: true,

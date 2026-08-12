@@ -12,7 +12,7 @@ import * as os from "os";
 import * as path from "path";
 import { SKILLS_DIR } from "../core/db";
 import { selectRoleSkills, type SelectedRoleSkill } from "../skills/role-skills";
-import { WORKSPACE_READONLY_TOOL_DEFINITIONS_V2, type WorkspaceReadonlyToolDefinitionV2 } from "../tools/workspace-readonly-tools";
+import { WORKSPACE_READONLY_TOOL_DEFINITIONS_V3, type WorkspaceReadonlyToolDefinitionV2 } from "../tools/workspace-readonly-tools";
 
 export interface TestAgentReadonlyMcpCapability {
   name: string;
@@ -225,7 +225,7 @@ export function buildTestAgentReadonlyCapabilityManifest(options: TestAgentReado
   const mcp: TestAgentReadonlyMcpCapability[] = [];
   const rejectedMcp: Array<{ name: string; reason: string }> = [];
   const seenMcp = new Set<string>();
-  const definitions: any[] = [...WORKSPACE_READONLY_TOOL_DEFINITIONS_V2, ...(Array.isArray(options.mcpTools) ? options.mcpTools : [])];
+  const definitions: any[] = [...WORKSPACE_READONLY_TOOL_DEFINITIONS_V3, ...(Array.isArray(options.mcpTools) ? options.mcpTools : [])];
   for (const definition of definitions) {
     const name = String(definition?.canonicalName || definition?.name || "").trim();
     if (!name || seenMcp.has(name)) continue;

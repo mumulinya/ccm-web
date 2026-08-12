@@ -1,76 +1,68 @@
+  <WorkspacePageShell
+    v-model:active-view="toolTopView"
+    title="工具与技能"
+    description="管理 Agent 的连接、能力、授权与运行状态"
+    :views="toolTopViews"
+    :primary-action="toolPrimaryAction"
+    :secondary-actions="[{ id: 'reload', label: '重新加载工具', icon: RefreshCw }]"
+    storage-key="ccm:tools-layout:v1"
+    @primary-action="handleToolPrimaryAction"
+    @secondary-action="reloadTools"
+  >
   <div class="tools-config">
-    <div class="toolbar">
-      <div class="toolbar-identity">
-        <span class="toolbar-icon"><Wrench :size="18" /></span>
-        <div>
-          <strong>工具与技能</strong>
-          <span>管理 Agent 的连接、能力与运行状态</span>
-        </div>
-      </div>
-      <div class="toolbar-actions">
-        <div class="resource-counts" aria-label="资源统计">
-          <span>工具 {{ coreToolsList.length }}</span>
-          <span>MCP {{ (internalMcpCatalog.summary?.total || 0) + mcpTools.length }}</span>
-          <span>Skill {{ internalSkills.length + customSkills.length }}</span>
-        </div>
-        <button v-if="currentFilter === 'mcp'" class="btn btn-primary btn-sm" @click="openMcpEditor()">新增 MCP</button>
-        <button v-if="currentFilter === 'custom-prompt'" class="btn btn-primary btn-sm" @click="showAddSkill = true">新增 Skill</button>
-        <button class="btn btn-outline btn-sm toolbar-reload" title="重新加载工具" @click="reloadTools"><RefreshCw :size="14" />重载</button>
-      </div>
-    </div>
 
     <div class="main-content">
       <!-- 左侧分类侧边栏 -->
       <div class="sidebar">
         <div class="sidebar-header">管理范围</div>
         <div class="category-list">
-          <div class="category-group-label">总览</div>
-          <div class="category-item" :class="{ active: currentFilter === 'overview' }" @click="currentFilter = 'overview'">
+          <div v-if="toolTopView === 'overview'" class="category-group-label">总览</div>
+          <div v-show="toolTopView === 'overview'" class="category-item" :class="{ active: currentFilter === 'overview' }" @click="currentFilter = 'overview'">
             <LayoutDashboard :size="15" /><span>运行概况</span>
             <span class="badge">{{ chainVerificationSummary.verified || 0 }}/{{ chainVerificationSummary.configuredScopes || 0 }}</span>
           </div>
 
-          <div class="category-group-label">工具与连接</div>
-          <div class="category-item" :class="{ active: currentFilter === 'core' }" @click="currentFilter = 'core'">
+          <div v-if="toolTopView === 'capabilities'" class="category-group-label">工具与连接</div>
+          <div v-show="toolTopView === 'capabilities'" class="category-item" :class="{ active: currentFilter === 'core' }" @click="currentFilter = 'core'">
             <Wrench :size="15" /><span>内置工具</span>
             <span class="badge">{{ coreToolsList.length }}</span>
           </div>
-          <div class="category-item" :class="{ active: currentFilter === 'internal-mcp' }" @click="currentFilter = 'internal-mcp'">
+          <div v-show="toolTopView === 'capabilities'" class="category-item" :class="{ active: currentFilter === 'internal-mcp' }" @click="currentFilter = 'internal-mcp'">
             <Blocks :size="15" /><span>内部 MCP</span>
             <span class="badge">{{ internalMcpCatalog.summary?.ready || 0 }}/{{ internalMcpCatalog.summary?.total || 0 }}</span>
           </div>
-          <div class="category-item" :class="{ active: currentFilter === 'mcp' }" @click="currentFilter = 'mcp'">
+          <div v-show="toolTopView === 'capabilities'" class="category-item" :class="{ active: currentFilter === 'mcp' }" @click="currentFilter = 'mcp'">
             <Plug :size="15" /><span>外部 MCP</span>
             <span class="badge">{{ mcpTools.length }}</span>
           </div>
 
-          <div class="category-group-label">Skill</div>
-          <div class="category-item" :class="{ active: currentFilter === 'custom-prompt' }" @click="currentFilter = 'custom-prompt'">
+          <div v-if="toolTopView === 'capabilities'" class="category-group-label">Skill</div>
+          <div v-show="toolTopView === 'capabilities'" class="category-item" :class="{ active: currentFilter === 'custom-prompt' }" @click="currentFilter = 'custom-prompt'">
             <Sparkles :size="15" /><span>Skill 管理</span>
             <span class="badge">{{ skills.length }}</span>
           </div>
-          <div class="category-item" :class="{ active: currentFilter === 'custom-skills' }" @click="currentFilter = 'custom-skills'">
+          <div v-show="toolTopView === 'capabilities'" class="category-item" :class="{ active: currentFilter === 'custom-skills' }" @click="currentFilter = 'custom-skills'">
             <PackageOpen :size="15" /><span>外部 Skill 包</span>
             <span class="badge">{{ customSkills.length }}</span>
           </div>
-          <div class="category-item" :class="{ active: currentFilter === 'marketplace' }" @click="currentFilter = 'marketplace'">
+          <div v-show="toolTopView === 'capabilities'" class="category-item" :class="{ active: currentFilter === 'marketplace' }" @click="currentFilter = 'marketplace'">
             <ShoppingBag :size="15" /><span>技能商城</span>
           </div>
 
-          <div class="category-group-label">治理与验收</div>
-          <div class="category-item" :class="{ active: currentFilter === 'authorization' }" @click="currentFilter = 'authorization'">
+          <div v-if="toolTopView === 'governance'" class="category-group-label">治理与验收</div>
+          <div v-show="toolTopView === 'governance'" class="category-item" :class="{ active: currentFilter === 'authorization' }" @click="currentFilter = 'authorization'">
             <ShieldCheck :size="15" /><span>授权总览</span>
             <span class="badge">{{ authorizationConfiguredReady }}/{{ authorizationSummary.configuredScopes || 0 }}</span>
           </div>
-          <div class="category-item" :class="{ active: currentFilter === 'chain-verification' }" @click="currentFilter = 'chain-verification'">
+          <div v-show="toolTopView === 'governance'" class="category-item" :class="{ active: currentFilter === 'chain-verification' }" @click="currentFilter = 'chain-verification'">
             <ListChecks :size="15" /><span>链路验收</span>
             <span class="badge">{{ chainVerificationSummary.verified || 0 }}/{{ chainVerificationSummary.configuredScopes || 0 }}</span>
           </div>
-          <div class="category-item" :class="{ active: currentFilter === 'invocation-audit' }" @click="openToolInvocationAudit()">
+          <div v-show="toolTopView === 'governance'" class="category-item" :class="{ active: currentFilter === 'invocation-audit' }" @click="openToolInvocationAudit()">
             <ScrollText :size="15" /><span>调用审计</span>
             <span class="badge">{{ invocationAuditSummary.unauthorized || 0 }}/{{ invocationAuditSummary.totalReturned || 0 }}</span>
           </div>
-          <div class="category-item" :class="{ active: currentFilter === 'runtime' }" @click="currentFilter = 'runtime'">
+          <div v-show="toolTopView === 'advanced'" class="category-item" :class="{ active: currentFilter === 'runtime' }" @click="currentFilter = 'runtime'">
             <Cpu :size="15" /><span>Agent 运行时</span>
             <span class="badge">{{ runtimeReadiness.summary.ready || 0 }}/{{ runtimeReadiness.summary.total || 0 }}</span>
           </div>
@@ -979,3 +971,4 @@
       </div>
     </div>
   </div>
+  </WorkspacePageShell>

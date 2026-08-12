@@ -163,7 +163,9 @@ function emit(runtime, event, run) {
             exactSessionId: run.session_id,
             anchorMessageId: `gam_${String(run.id || "result")}_assistant`,
             generation: Math.max(0, Number(run.resume_count || 0)),
-            taskId: run.mission_id || run.id,
+            // A global run is a conversation turn, not automatically a formal task.
+            // Only a real mission has a task-ledger entry and therefore a replay.
+            taskId: run.mission_id || undefined,
             eventType,
             toolName: toolName === "invoke_mcp" ? (tool?.arguments?.tool_name || tool?.arguments?.toolName || toolName) : toolName,
             toolCallId: tool?.signature || undefined,
@@ -279,7 +281,7 @@ function appendGlobalRequirementPlan(run, decision, terminalStatus) {
         exactSessionId: run.session_id,
         anchorMessageId: `gam_${String(run.id || "result")}_assistant`,
         generation: Math.max(0, Number(run.resume_count || 0)),
-        taskId: run.mission_id || run.id,
+        taskId: run.mission_id || undefined,
         plan,
     });
 }
@@ -978,7 +980,7 @@ function completeRun(run, runtime, status, reply, error = "") {
     }
     (0, user_visible_agent_projections_1.publishUserVisibleAssistantText)({
         scope: "global", scopeId: "global", exactSessionId: run.session_id,
-        generation: Math.max(0, Number(run.resume_count || 0)), taskId: run.mission_id || run.id,
+        generation: Math.max(0, Number(run.resume_count || 0)), taskId: run.mission_id || undefined,
         turnId: run.id, text: run.final_reply, title: "全局 Agent 回复",
     });
     emit(runtime, { type: status === "completed" ? "completed" : status, reply: run.final_reply, error: run.error }, run);
@@ -1371,7 +1373,8 @@ async function continueLoop(run, runtime) {
                     (0, user_visible_agent_events_1.appendAssistantProgress)({
                         scope: "global", scopeId: "global", exactSessionId: run.session_id,
                         generation: Math.max(0, Number(run.resume_count || 0)),
-                        taskId: run.mission_id || run.id,
+                        anchorMessageId: `gam_${String(run.id || "result")}_assistant`,
+                        taskId: run.mission_id || undefined,
                         turnId: run.id,
                         text: progressText,
                         kind: run.tool_calls === 0 ? "before_tools" : "key_finding",
@@ -1512,7 +1515,9 @@ async function continueLoop(run, runtime) {
                 if (!toolSucceeded && (0, assistant_progress_1.assistantProgressNarrationEnabled)(progressConfig))
                     (0, user_visible_agent_events_1.appendAssistantProgress)({
                         scope: "global", scopeId: "global", exactSessionId: run.session_id,
-                        generation: Math.max(0, Number(run.resume_count || 0)), taskId: run.mission_id || run.id, turnId: run.id,
+                        generation: Math.max(0, Number(run.resume_count || 0)),
+                        anchorMessageId: `gam_${String(run.id || "result")}_assistant`,
+                        taskId: run.mission_id || undefined, turnId: run.id,
                         text: "当前工具返回了失败结果，我会根据这项观察调整计划，不会机械重复同一调用。",
                         kind: "blocker", modelCallIndex: run.model_calls, relatedToolCallIds: [signature], title: "全局 Agent",
                     });
@@ -1555,7 +1560,9 @@ async function continueLoop(run, runtime) {
                 if ((0, assistant_progress_1.assistantProgressNarrationEnabled)(progressConfig))
                     (0, user_visible_agent_events_1.appendAssistantProgress)({
                         scope: "global", scopeId: "global", exactSessionId: run.session_id,
-                        generation: Math.max(0, Number(run.resume_count || 0)), taskId: run.mission_id || run.id, turnId: run.id,
+                        generation: Math.max(0, Number(run.resume_count || 0)),
+                        anchorMessageId: `gam_${String(run.id || "result")}_assistant`,
+                        taskId: run.mission_id || undefined, turnId: run.id,
                         text: "当前工具执行失败，我会先核对错误和可用能力，再决定是否重试或请求你介入。",
                         kind: "blocker", modelCallIndex: run.model_calls, relatedToolCallIds: [signature], title: "全局 Agent",
                     });

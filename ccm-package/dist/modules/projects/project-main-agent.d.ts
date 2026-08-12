@@ -102,6 +102,7 @@ export declare function runProjectMainAgentFirstTurn(input: {
     userMessage: string;
     turnId?: string;
     sourceCount?: number;
+    signal?: AbortSignal;
 }): Promise<{
     workflowDecision: WorkflowDecision;
     responseType: import("../../agents/main-agent-turn").MainAgentTurnResponseKind;

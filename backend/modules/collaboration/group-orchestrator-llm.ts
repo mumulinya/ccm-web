@@ -55,6 +55,7 @@ import { assistantProgressNarrationEnabled, buildAssistantProgressFallback, sani
 import { readSlashCommandSessionState, renderSlashCommandSessionDirective } from "../../system/slash-command-session-state";
 import { publishUserVisibleAssistantText } from "../../system/user-visible-agent-projections";
 import { buildModelVisiblePayloadSnapshot, modelVisibleFixedTokens } from "../../system/session-compaction-core";
+import { attachTransientModelBlocks, collectTransientModelBlocks } from "../../system/transient-model-content";
 import { buildRoleSkillPrompt } from "../../skills/role-skills";
 import type { ToolScope } from "../../tools/tool-manager";
 import {
@@ -229,6 +230,7 @@ export async function executeGroupMainAgentToolRequests(input: {
   executeToolCall?: (name: string, args: any, scope?: ToolScope) => Promise<string>;
   toolBatchSize?: number;
   readOnlyParallelism?: number;
+  signal?: AbortSignal;
 }) {
   const batchSize = Math.max(1, Math.min(8, Math.floor(Number(input.toolBatchSize || 2))));
   const readOnlyParallelism = Math.max(1, Math.min(8, Math.floor(Number(input.readOnlyParallelism || 2))));
@@ -261,6 +263,7 @@ export async function executeGroupMainAgentToolRequests(input: {
           resultTokenLimit: CC_ALIGNED_TOOL_RESULT_MAX_TOKENS,
           toolBatchSize: 1,
           readOnlyParallelism,
+          abortSignal: input.signal,
         });
         row = rows[0];
       } catch (error: any) {
@@ -892,13 +895,13 @@ ${JSON.stringify(input.workflowDecision || null)}
 
 请输出 JSON。`;
 
-  return [
+  return attachTransientModelBlocks([
     { role: "system", content: system },
     ...(mainAgentTools.policyPrompt
       ? [{ role: "system", contextBlockType: "mcp", content: mainAgentTools.policyPrompt }]
       : []),
     { role: "user", content: user },
-  ];
+  ], collectTransientModelBlocks(toolResults));
 }
 
 export function buildLlmCoordinatorContextComponents(input: {
@@ -1326,6 +1329,7 @@ export async function runLlmGroupOrchestrator(input: {
   turn_id?: string;
   anchorMessageId?: string;
   anchor_message_id?: string;
+  signal?: AbortSignal;
 }) {
   const group = normalizeGroupOrchestrator(input.group);
   const baseConfig = loadOrchestratorConfig();
@@ -1560,6 +1564,7 @@ export async function runLlmGroupOrchestrator(input: {
         toolCallIds: preparedToolCallIds,
         toolBatchSize: loopBudget.toolBatchSize,
         readOnlyParallelism: loopBudget.readOnlyParallelism,
+        signal: input.signal,
       });
       toolWallDurationMs += Math.max(0, Date.now() - toolBatchStartedAt);
       toolCallCount += roundResults.length;

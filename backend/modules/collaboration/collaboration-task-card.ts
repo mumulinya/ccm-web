@@ -817,6 +817,11 @@ export function buildMainAgentRecoverySummary(task: any, phase: string, sessions
         ? recovery.user_headline
         : "检测到上次任务没有完整收尾，我已暂停并等待你确认是否继续。"
       : recovery.user_headline || "我已接上上次任务上下文，重新核对目标、当前状态和验收条件后继续推进。",
+    reason_code: String(task?.interruption_receipt?.reason_code || ""),
+    auto_retry: safeAutoWaiting,
+    next_retry_at: safeAutoWaiting ? String(recovery.nextRetryAt || "") : "",
+    attempt: Math.max(0, Number(recovery.attempt || 0)),
+    max_attempts: Math.max(1, Number(recovery.maxAttempts || 3)),
     revalidated: {
       goal: latestCheck.goal_revalidated === true,
       state: latestCheck.state_revalidated === true,
@@ -1270,6 +1275,14 @@ export function buildUserTaskActions(task: any, phase: string, executions: any[]
   const completed = String(task?.status || "") === "done" && hasStrongTaskAcceptanceEvidence(task, executions, task?.delivery_summary || {});
   const stopped = ["cancelled", "reverted"].includes(String(task?.status || "")) || ["cancelled", "reverted"].includes(phase);
   const recoveryRequired = phase === "recovery_required" || task?.acceptance_state === "recovery_required";
+  const recovery = task?.recovery || task?.interruption_receipt?.recovery || {};
+  const interruptionReason = String(task?.interruption_receipt?.reason_code || "");
+  const transientModelRecovery = recoveryRequired
+    && ["temporary_network", "provider_overload", "provider_unavailable", "model_stream_interrupted"].includes(interruptionReason)
+    && task?.interruption_receipt?.recoverable === true;
+  const safeAutoRecovery = transientModelRecovery
+    && recovery.mode === "safe_auto"
+    && ["waiting_provider", "validating", "queued"].includes(String(recovery.state || ""));
   const retryable = !recoveryRequired && (
     ["failed", "blocked", "environment_blocked"].includes(phase)
     || ["failed", "blocked"].includes(String(task?.status || ""))
@@ -1278,13 +1291,20 @@ export function buildUserTaskActions(task: any, phase: string, executions: any[]
   if (task?.intake_state === "awaiting_confirmation") {
     actions.push({ id: "confirm_plan", label: "确认执行", kind: "confirm_plan", tone: "primary" });
     actions.push({ id: "revise_plan", label: "调整计划", kind: "revise_plan", tone: "warning" });
-    actions.push({ id: "cancel", label: "取消任务", kind: "cancel", tone: "danger" });
+    actions.push({ id: "cancel", label: "停止任务", kind: "cancel", tone: "danger" });
     return actions;
   }
   if (task?.workflow_type === "requirement_epic" && task?.status === "awaiting_change_review") {
     actions.push({ id: "changes", label: "查看整批改动", kind: "view_changes", tone: "outline" });
     actions.push({ id: "approve_epic", label: "批准 Epic 交付", kind: "approve_epic", tone: "primary" });
     actions.push({ id: "targeted_rework", label: "退回子任务返工", kind: "targeted_rework", tone: "warning", requirement_epic: true });
+    return actions;
+  }
+  // A temporary model outage continues the same task. Do not offer actions
+  // that would append a new requirement or create a fresh dispatch attempt.
+  if (transientModelRecovery) {
+    actions.push({ id: "resume_interrupted", label: safeAutoRecovery ? "立即重试" : "恢复任务", kind: "resume_interrupted", tone: "primary" });
+    actions.push({ id: "cancel", label: "停止任务", kind: "cancel", tone: "danger" });
     return actions;
   }
   if (task?.delivery_summary || task?.file_changes) actions.push({ id: "changes", label: "查看改动", kind: "view_changes", tone: "outline" });
@@ -1298,7 +1318,7 @@ export function buildUserTaskActions(task: any, phase: string, executions: any[]
   const checkpointIds = executions.flatMap((item: any) => Array.isArray(item.checkpointIds) ? item.checkpointIds : []).filter(Boolean);
   if (completed && checkpointIds.length) actions.push({ id: "rollback", label: "安全撤销", kind: "rollback", tone: "danger", checkpoint_ids: checkpointIds });
   if (!terminal) actions.push({ id: "interrupt", label: "停止当前执行", kind: "interrupt", tone: "danger" });
-  if (!completed && !stopped) actions.push({ id: "cancel", label: "永久取消", kind: "cancel", tone: "outline" });
+  if (!completed && !stopped) actions.push({ id: "cancel", label: "停止任务", kind: "cancel", tone: "outline" });
   return actions;
 }
 
@@ -3337,7 +3357,7 @@ export function buildTodoStepActions(input: { task: any; stepId: string; status:
     if (stepId === "dispatch_child_agent") add("retry", "重新派发", "retry", "primary");
     if (["child_agent_execution", "read_child_agent_receipts", "coordinator_review"].includes(stepId)) add("gap_continue", "按缺口返工", "gap_continue", "warning");
     if (["child_agent_execution", "coordinator_review"].includes(stepId)) add("switch_executor", "切换执行器", "switch_executor", "outline");
-    add("cancel", "取消任务", "cancel", "danger");
+    add("cancel", "停止任务", "cancel", "danger");
   }
   if (status === "reworking") add("view_pipeline", "查看协作看板", "view_pipeline", "outline");
   if (status === "reviewing" && stepId === "coordinator_review") {
@@ -3345,7 +3365,7 @@ export function buildTodoStepActions(input: { task: any; stepId: string; status:
     if (hasStrongTaskAcceptanceEvidence(task, [], summary)) add("confirm_done", "标记已处理", "confirm_done", "success");
   }
   if (status === "completed" && stepId === "final_delivery_report") add("view_pipeline", "查看交付证据", "view_pipeline", "outline");
-  if (["in_progress", "reviewing", "reworking"].includes(status) && !["completed", "cancelled"].includes(phase)) add("cancel", "取消任务", "cancel", "danger");
+  if (["in_progress", "reviewing", "reworking"].includes(status) && !["completed", "cancelled"].includes(phase)) add("cancel", "停止任务", "cancel", "danger");
   return actions.slice(0, 4);
 }
 

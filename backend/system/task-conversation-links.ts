@@ -155,6 +155,15 @@ export function buildTaskConversationLinks(taskOrId: any, tasksInput?: any[]) {
     schema: "ccm-task-conversation-links-v1",
     taskId: String(task.id || ""),
     missionId,
+    revision: Math.max(0, Number(task?.revision || 0)),
+    generation: Math.max(1, Number(task?.generation || task?.workflow_generation || 1)),
+    bindingChecksum: clean(
+      task?.automation_session_binding_snapshot?.bindingChecksum
+        || task?.automation_session_binding_snapshot?.binding_checksum
+        || links.find((link) => link.relation === "target")?.bindingChecksum
+        || links.find((link) => link.relation === "source")?.bindingChecksum,
+      128,
+    ),
     projectionRevision: stableChecksum({ task: task.id, revision: task.revision, updatedAt: task.updated_at, links: links.map(link => link.linkId) }),
     links,
     contentStored: false,

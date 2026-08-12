@@ -12,10 +12,16 @@ import { MessageSquareText, Plus } from '@lucide/vue'
 import GlobalAgentFeishuBindingModal from '../global/GlobalAgentFeishuBindingModal.vue'
 import AgentExecutionTranscript from '../common/AgentExecutionTranscript.vue'
 import ActiveTaskPlanDock from '../common/ActiveTaskPlanDock.vue'
+import ConversationAsideDock from '../common/ConversationAsideDock.vue'
+import ConversationHistoryBranches from '../common/ConversationHistoryBranches.vue'
+import ConversationPermissionMode from '../common/ConversationPermissionMode.vue'
+import ConversationSummaryBoundary from '../common/ConversationSummaryBoundary.vue'
 import NewProgressIndicator from '../common/NewProgressIndicator.vue'
 import { useAgentExecutionEvents } from '../../composables/useAgentExecutionEvents.js'
 import { getCopyableMessageText } from '../../utils/messageActions.js'
-import { hasTerminalExecutionForMessage, shouldShowCompactProcessingState } from '../../utils/agentExecutionEvents.js'
+import { hasTerminalExecutionForMessage, shouldRenderExecutionTranscript, shouldShowCompactProcessingState } from '../../utils/agentExecutionEvents.js'
+import { consumeAsideCommand, rewindConversationTurn } from '../../utils/conversationRewind.js'
+import { toast } from '../../utils/toast.js'
 
 const props = defineProps({
   navigateTo: { type: Object, default: null },
@@ -81,6 +87,13 @@ const projectTaskExecutionActive = computed(() => {
     return !['completed', 'done', 'succeeded', 'failed', 'cancelled', 'canceled', 'reverted'].includes(status)
   })
 })
+// The streaming envelope is created before the first text chunk. Once the
+// turn has real execution events, it must not also show the legacy thinking UI.
+const hasLiveProjectExecutionForMessage = messageIndex => shouldRenderExecutionTranscript(
+  projectAgentExecutionEvents.value,
+  messages.value,
+  messageIndex,
+)
 watch(projectMeaningfulRevision, () => notifyProjectProgress({ key: projectLatestMeaningfulKey.value }))
 watch(currentSession, () => resetProjectPinnedScroll())
 const locateProjectPlanStep = ({ messageIndex }) => {
@@ -89,6 +102,30 @@ const locateProjectPlanStep = ({ messageIndex }) => {
 const handleProjectPlanAction = ({ messageIndex, action }) => {
   const message = Number.isInteger(messageIndex) && messageIndex >= 0 ? messages.value[messageIndex] : {}
   return handleProjectTaskAction(message || {}, action)
+}
+const rewindProjectMessage = async (message) => {
+  try {
+    const receipt = await rewindConversationTurn({ scope: 'project', scopeId: currentProject.value, exactSessionId: currentSession.value, anchorMessageId: message?.id })
+    if (!receipt) return
+    await selectSession(currentSession.value)
+    chatInput.value = receipt.originalPrompt || ''
+    toast.success(receipt.action ? `已总结 ${receipt.summarizedMessages || 0} 条消息` : '已回退到本轮开始前，原需求已放回输入框')
+  } catch (error) { toast.error(error?.message || '回退失败') }
+}
+const sendProjectMessage = async () => {
+  if (consumeAsideCommand(chatInput.value, { scope: 'project', scopeId: currentProject.value, exactSessionId: currentSession.value })) {
+    chatInput.value = ''
+    return
+  }
+  await sendMessage()
+}
+const handleProjectKeydown = async (event) => {
+  if (event.key === 'Enter' && !event.shiftKey && /^\/btw(?:\s|$)/i.test(chatInput.value)) {
+    event.preventDefault()
+    await sendProjectMessage()
+    return
+  }
+  await handleKeydown(event)
 }
 const {
   usage: projectContextUsage,

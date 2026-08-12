@@ -62,6 +62,7 @@ const http = __importStar(require("http"));
 const https = __importStar(require("https"));
 const model_call_retry_1 = require("../../system/model-call-retry");
 const provider_native_compact_execution_receipt_1 = require("./provider-native-compact-execution-receipt");
+const transient_model_content_1 = require("../../system/transient-model-content");
 const group_memory_compaction_1 = require("./group-memory-compaction");
 const group_prompt_cache_break_detection_1 = require("./group-prompt-cache-break-detection");
 const provider_neutral_context_cache_1 = require("../../system/provider-neutral-context-cache");
@@ -166,6 +167,7 @@ function providerContextCacheOptions(config, options, provider) {
     };
 }
 async function prepareContextCache(config, options, provider) {
+    const transientBlocks = (0, transient_model_content_1.transientModelBlocks)(options.messages || []);
     const sourceMessages = options.system != null
         && !(options.messages || []).some(message => String(message?.role || "") === "system")
         ? [{ role: "system", content: options.system }, ...(options.messages || [])]
@@ -222,11 +224,12 @@ async function prepareContextCache(config, options, provider) {
         }
     }
     if (!cacheOptions)
-        return { messages: sourceMessages, plan: null, adapterPatch: null };
+        return { messages: sourceMessages, plan: null, adapterPatch: null, transientBlocks };
     const prepared = await (0, provider_neutral_context_cache_1.prepareProviderNeutralContextCacheRequestSingleflight)(sourceMessages, cacheOptions);
     const result = {
         ...prepared,
         adapterPatch: (0, provider_context_cache_adapters_1.buildProviderContextCacheAdapterRequestPatch)(config, prepared.plan, cacheOptions.adapterCapability),
+        transientBlocks,
     };
     if (result.plan)
         Object.defineProperty(result.plan, "_runtimeProviderStartedAtMs", { value: Date.now(), enumerable: false, configurable: true });
@@ -783,6 +786,49 @@ function providerRequestId(response) {
         || responseHeader(response, "anthropic-request-id")
         || responseHeader(response, "x-anthropic-request-id");
 }
+function withTransientModelBlocks(messagesInput, blocks, family) {
+    if (!blocks.length)
+        return messagesInput;
+    const messages = messagesInput.map(message => ({ ...message }));
+    let index = messages.length - 1;
+    while (index >= 0 && String(messages[index]?.role || "") === "system")
+        index -= 1;
+    if (index < 0)
+        messages.push({ role: "user", content: "" }), index = messages.length - 1;
+    const current = messages[index];
+    const content = Array.isArray(current.content)
+        ? [...current.content]
+        : family === "anthropic"
+            ? [{ type: "text", text: String(current.content || "") }]
+            : [{ type: "text", text: String(current.content || "") }];
+    for (const block of blocks) {
+        if (block.type === "text")
+            content.push({ type: "text", text: block.text });
+        else if (family === "anthropic") {
+            content.push({ type: "text", text: block.label ? `临时视觉内容：${block.label}` : "临时视觉内容" });
+            content.push({ type: "image", source: { type: "base64", media_type: block.mimeType, data: block.data.toString("base64") } });
+        }
+        else {
+            content.push({ type: "text", text: block.label ? `临时视觉内容：${block.label}` : "临时视觉内容" });
+            content.push({ type: "image_url", image_url: { url: `data:${block.mimeType};base64,${block.data.toString("base64")}` } });
+        }
+    }
+    messages[index] = { ...current, content };
+    return messages;
+}
+function geminiPartsWithTransient(content, blocks) {
+    const parts = [{ text: geminiContentText(content) }];
+    for (const block of blocks) {
+        if (block.type === "text")
+            parts.push({ text: block.text });
+        else {
+            if (block.label)
+                parts.push({ text: `临时视觉内容：${block.label}` });
+            parts.push({ inlineData: { mimeType: block.mimeType, data: block.data.toString("base64") } });
+        }
+    }
+    return parts;
+}
 function recordAnthropicPromptCacheState(config, options, body, headers) {
     const tracking = options.promptCacheTracking || options.prompt_cache_tracking || null;
     const groupId = String(tracking?.groupId || tracking?.group_id || "").trim();
@@ -904,7 +950,7 @@ async function callOpenAiCompatibleChatOnce(config, options) {
                 ...buildOpenAiReasoningFields(callReasoningConfig(config, options)),
                 ...(cache.adapterPatch?.body || {}),
                 ...nativePatch.body,
-                messages: cache.messages,
+                messages: withTransientModelBlocks(cache.messages, cache.transientBlocks || [], "openai"),
             }),
             signal: abort.controller.signal,
         });
@@ -992,13 +1038,16 @@ async function callGeminiCompatibleChatOnce(config, options) {
     const cache = await prepareContextCache(config, options, "gemini");
     const system = cache.messages.filter((message) => String(message?.role || "") === "system")
         .map((message) => geminiContentText(message?.content)).filter(Boolean).join("\n\n");
-    const contents = cache.messages
-        .filter((message) => String(message?.role || "") !== "system")
-        .map((message) => ({
+    const nonSystemMessages = cache.messages.filter((message) => String(message?.role || "") !== "system");
+    const lastTransientMessageIndex = nonSystemMessages.length - 1;
+    const contents = nonSystemMessages
+        .map((message, index) => ({
         role: String(message?.role || "") === "assistant" ? "model" : "user",
-        parts: [{ text: geminiContentText(message?.content) }],
+        parts: index === lastTransientMessageIndex
+            ? geminiPartsWithTransient(message?.content, cache.transientBlocks || [])
+            : [{ text: geminiContentText(message?.content) }],
     }))
-        .filter((message) => message.parts[0].text.trim());
+        .filter((message) => message.parts.some((part) => part.inlineData || String(part.text || "").trim()));
     const body = {
         ...(system ? { systemInstruction: { parts: [{ text: system }] } } : {}),
         contents,
@@ -1083,7 +1132,7 @@ async function callAnthropicCompatibleChatOnce(config, options) {
     const streaming = options.stream === true || typeof options.onDelta === "function";
     let emitted = false;
     const cache = await prepareContextCache(config, options, "anthropic");
-    const messages = cache.messages;
+    const messages = withTransientModelBlocks(cache.messages, cache.transientBlocks || [], "anthropic");
     // Anthropic 的 system 是独立字段，必须把所有 system 消息按序拼接。
     // 此前用 find() 只取首条，一旦上游把稳定段与易变段拆成多条 system
     // （为了让 prompt cache 前缀不被工具目录变更击穿），后续几条会被静默丢弃。

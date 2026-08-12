@@ -5,13 +5,17 @@ import { captureReasoningFacts, type AgentReasoningState } from "../reasoning-lo
 import { WORKFLOW_DECISION_GUIDANCE, normalizeWorkflowDecision } from "../workflow-decision";
 import { CONVERSATIONAL_REPLY_STYLE_GUIDANCE } from "../conversational-reply-style";
 import type { GlobalAgentDecision, GlobalAgentDecisionState, GlobalAgentLoopRuntime, GlobalAgentRun } from "./loop";
-import { WORKSPACE_READONLY_TOOL_DEFINITIONS_V2 } from "../../tools/workspace-readonly-tools";
+import { WORKSPACE_READONLY_TOOL_DEFINITIONS_V3 } from "../../tools/workspace-readonly-tools";
+import { attachTransientModelBlocks, collectTransientModelBlocks, transientModelBlocks } from "../../system/transient-model-content";
 
 export function compactObservation(value: any) {
   let text = "";
   try { text = JSON.stringify(value); } catch { text = String(value); }
   if (text.length <= MAX_OBSERVATION_CHARS) return value;
-  return { truncated: true, preview: text.slice(0, MAX_OBSERVATION_CHARS), original_chars: text.length };
+  return attachTransientModelBlocks(
+    { truncated: true, preview: text.slice(0, MAX_OBSERVATION_CHARS), original_chars: text.length },
+    transientModelBlocks(value),
+  );
 }
 
 export const GLOBAL_MODEL_ROUTE_KEYS = new Set([
@@ -87,6 +91,9 @@ export function projectGlobalTaskRows(observation: any) {
 export function projectGlobalAgentObservationForModel(toolName: string, observation: any) {
   const name = String(toolName || "");
   if (!observation || typeof observation !== "object") return observation === undefined ? undefined : { available: true };
+  if (WORKSPACE_READONLY_TOOL_DEFINITIONS_V3.some(tool => tool.name === name.replace(/^mcp__ccm__ccm_workspace_readonly__/, ""))) {
+    return compactObservation(redactGroupSessionFields(observation));
+  }
   if (name === "list_projects") return { success: observation.success !== false, projects: projectProjectRows(observation.projects) };
   if (name === "inspect_project") return {
     success: observation.success !== false,
@@ -208,7 +215,7 @@ export function normalizeDecision(value: any, fallbackWorkflowDecision: any = nu
 
 export function buildToolPrompt(loadedToolNames: string[] = []) {
   const loaded = new Set((loadedToolNames || []).map(value => String(value || "")));
-  const deferredWorkspaceNames = new Set(WORKSPACE_READONLY_TOOL_DEFINITIONS_V2
+  const deferredWorkspaceNames = new Set(WORKSPACE_READONLY_TOOL_DEFINITIONS_V3
     .filter(tool => tool.loadPolicy === "search" && !loaded.has(tool.name) && !loaded.has(tool.canonicalName))
     .map(tool => tool.name));
   return buildGlobalAgentToolDefinitions(GLOBAL_AGENT_TOOL_SPECS)
@@ -230,6 +237,11 @@ function buildBoundedGlobalModelContext(context: any) {
   };
   const rows = (value: any, limit: number) => Array.isArray(value) ? value.slice(0, limit) : [];
   const toolCatalog = context?.tools || {};
+  const workspace = rows(toolCatalog.workspace, 32).map((tool: any) => ({
+    name: String(tool?.name || ""),
+    description: text(tool?.description || "", 260),
+    schema_available_on_demand: true,
+  })).filter((tool: any) => tool.name);
   const mcp = rows(toolCatalog.mcp, 32).map((tool: any) => ({
     name: String(tool?.name || tool?.canonicalName || ""),
     server: String(tool?.server || ""),
@@ -272,6 +284,8 @@ function buildBoundedGlobalModelContext(context: any) {
       policy: toolCatalog.policy || "global_scope_authorized_only",
       available_counts: toolCatalog.available_counts || toolCatalog.configured_counts || {},
       loaded_tool_names: rows(toolCatalog.loaded_tool_names, 80).map(String),
+      workspace,
+      deferred_workspace: rows(toolCatalog.deferred_workspace, 48).map((tool: any) => ({ name: String(tool?.name || tool || "") })).filter((tool: any) => tool.name),
       mcp,
       deferred_mcp: rows(toolCatalog.deferred_mcp, 48).map((tool: any) => ({ name: String(tool?.name || tool || "") })).filter((tool: any) => tool.name),
       skills,
@@ -417,11 +431,11 @@ ${buildModelSelectableSkillCatalog()}
     context: modelContext,
     prior_steps: priorSteps,
   });
-  return [
+  return attachTransientModelBlocks([
     { role: "system", content: system },
     ...summaryMessages,
     ...continuationWithoutCurrent,
     ...runHistoryMessages,
     { role: "user", content: `【用户当前目标】\n${run.reasoning_loop.effective_goal || run.user_message}\n\n【当前运行状态】\n${state}\n\n请决定下一步。` },
-  ];
+  ], collectTransientModelBlocks(run.steps.map(step => step.observation)));
 }

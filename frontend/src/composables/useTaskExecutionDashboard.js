@@ -53,7 +53,7 @@ export const compactDashboardText = (value, max = 120) => {
   return sanitizeUserFacingAgentText(text.length > max ? `${text.slice(0, max)}...` : text, '任务状态已整理。', max)
 }
 
-export const actionVisible = (item, kind) => (item?.actions || []).some(action => action.kind === kind)
+export const actionVisible = action => !!action && action.hidden !== true && action.enabled !== false
 
 export function useTaskExecutionDashboard(options = {}) {
   const tasks = options.tasks || ref([])

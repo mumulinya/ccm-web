@@ -20,6 +20,8 @@ import {
 import { toast } from '../../utils/toast.js'
 import MicroCompactStatusPanel from './MicroCompactStatusPanel.vue'
 import PostCompactRecoveryPanel from './PostCompactRecoveryPanel.vue'
+import WorkspacePageShell from '../common/WorkspacePageShell.vue'
+import WorkspaceSectionNav from '../common/WorkspaceSectionNav.vue'
 
 const presets = [
   { id: 'default', label: '自动', window: 0, threshold: 0 },
@@ -38,6 +40,7 @@ const detail = ref(null)
 const query = ref('')
 const audit = ref([])
 const showAudit = ref(false)
+const advancedSection = ref(sessionStorage.getItem('ccm:memory-layout:v1:section') || 'context')
 const editState = ref(null)
 
 const config = ref({
@@ -112,6 +115,44 @@ const customizationTarget = ref('')
 const customContent = ref('')
 const customProfile = ref(null)
 const customizationLoading = ref(false)
+
+const memoryView = computed({
+  get: () => activePage.value === 'settings' ? 'advanced' : (showAudit.value ? 'audit' : 'memory'),
+  set: value => {
+    if (value === 'advanced') {
+      activePage.value = 'settings'
+      showAudit.value = false
+      return
+    }
+    activePage.value = 'memory'
+    if (value === 'audit' && !showAudit.value) toggleAudit()
+    else showAudit.value = false
+  },
+})
+const memoryViews = computed(() => [
+  { id: 'memory', label: '记忆' },
+  { id: 'audit', label: '审计', count: audit.value.length },
+  { id: 'advanced', label: '高级设置' },
+])
+const advancedSections = [
+  { id: 'context', label: '上下文与压缩', description: '窗口、预算与整理策略' },
+  { id: 'tools', label: '代码与网络工具', description: '索引、搜索与原生工具' },
+  { id: 'main-agent', label: '主 Agent 执行', description: '续环与工具批量' },
+  { id: 'third-party', label: '第三方 Agent 通信', description: 'ACK、心跳、租约与并发' },
+  { id: 'provider', label: 'Provider 容量', description: '模型窗口与输出能力' },
+  { id: 'templates', label: '记忆模板', description: '抽取提示词与模板' },
+]
+const setAdvancedSection = value => {
+  advancedSection.value = value
+  try { sessionStorage.setItem('ccm:memory-layout:v1:section', value) } catch {}
+}
+const memoryPrimaryAction = computed(() => memoryView.value !== 'advanced' ? null : ({ id: 'save', label: saving.value ? '保存中' : '保存当前设置', icon: Save, disabled: saving.value || customizationLoading.value }))
+const saveCurrentMemorySection = () => {
+  if (advancedSection.value === 'provider') return saveCapability()
+  if (advancedSection.value === 'templates') return saveCustomization(false)
+  return saveSettings()
+}
+const refreshCurrentMemoryView = () => memoryView.value === 'advanced' ? loadSettings() : (memoryView.value === 'audit' ? loadAudit() : loadOverview(true))
 
 const scopes = computed(() => [
   ...(overview.value.globals || []).map(item => ({ ...item, scope: item.scope || 'global' })),
@@ -622,21 +663,18 @@ onMounted(() => loadOverview(false))
 </script>
 
 <template>
+  <WorkspacePageShell
+    v-model:active-view="memoryView"
+    title="记忆中心"
+    description="查看会话记忆、审计记录与上下文策略"
+    :views="memoryViews"
+    :primary-action="memoryPrimaryAction"
+    :secondary-actions="[{ id: 'refresh', label: '刷新当前数据', icon: RefreshCw }]"
+    storage-key="ccm:memory-layout:v1"
+    @primary-action="saveCurrentMemorySection"
+    @secondary-action="refreshCurrentMemoryView"
+  >
   <div class="memory-center">
-    <header class="mc-header">
-      <div>
-        <span class="eyebrow">MEMORY CENTER</span>
-        <h2>记忆中心</h2>
-      </div>
-      <div class="header-actions">
-        <nav class="page-tabs" aria-label="记忆中心视图">
-          <button :class="{ active: activePage === 'memory' }" @click="activePage = 'memory'"><MessagesSquare :size="16" />会话记忆</button>
-          <button :class="{ active: activePage === 'settings' }" @click="activePage = 'settings'"><Settings2 :size="16" />上下文设置</button>
-        </nav>
-        <button class="icon-btn" :disabled="loading" title="刷新" @click="activePage === 'memory' ? loadOverview(true) : loadSettings()"><RefreshCw :size="18" /></button>
-      </div>
-    </header>
-
     <div v-if="activePage === 'memory'" class="memory-workspace">
       <aside class="scope-list">
         <div v-if="globalTree.longTerm.length || globalTree.sessions.length" class="scope-group">
@@ -824,9 +862,11 @@ onMounted(() => loadOverview(false))
       </main>
     </div>
 
-    <main v-else class="settings-page">
-      <section class="settings-section">
-        <div class="section-head"><div><span class="eyebrow">CONTEXT POLICY</span><h3>上下文与压缩</h3></div><button class="primary-btn" :disabled="saving" @click="saveSettings"><Save :size="16" />{{ saving ? '保存中' : '保存' }}</button></div>
+    <div v-else class="advanced-settings-layout">
+      <WorkspaceSectionNav :sections="advancedSections" :active-section="advancedSection" label="高级设置章节" @update:active-section="setAdvancedSection" />
+    <main class="settings-page">
+      <section v-show="advancedSection === 'context'" class="settings-section">
+        <div class="section-head"><div><span class="eyebrow">CONTEXT POLICY</span><h3>上下文与压缩</h3></div></div>
         <div class="preset-control"><button v-for="preset in presets" :key="preset.id" :class="{ active: config.memoryContextPreset === preset.id }" @click="selectPreset(preset)">{{ preset.label }}</button></div>
         <div class="field-grid">
           <label><span>上下文窗口</span><input v-model.number="config.modelContextWindow" type="number" min="0" step="1000" :disabled="config.memoryContextPreset !== 'custom'" /></label>
@@ -855,7 +895,7 @@ onMounted(() => loadOverview(false))
         <div v-if="capacity" class="runtime-strip"><span>摘要方式 <strong>模型</strong></span><span>上下文缓存 <strong>{{ config.providerContextCacheMode === 'native' ? '优先原生' : config.providerContextCacheMode === 'controlled' ? 'CCM 受控' : config.providerContextCacheMode === 'off' ? '关闭' : '自动' }}</strong></span><span>模型窗口 <strong>{{ formatNumber(capacity.capacity?.contextWindow) }}</strong></span><span>有效窗口 <strong>{{ formatNumber(capacity.capacity?.effectiveContextWindow) }}</strong></span><span>当前触发线 <strong>{{ formatNumber(capacity.effectiveAutoCompactThreshold) }}</strong></span></div>
       </section>
 
-      <section class="settings-section">
+      <section v-show="advancedSection === 'tools'" class="settings-section">
         <div class="section-head"><div><span class="eyebrow">CC-LEVEL TOOLS</span><h3>代码智能与原生工具</h3></div></div>
         <div class="field-grid">
           <label><span>索引启动策略</span><select v-model="config.codeIndexStartPolicy"><option value="on_demand">按需启动</option><option value="manual">仅手动</option><option value="startup">启动时建立</option></select></label>
@@ -880,7 +920,7 @@ onMounted(() => loadOverview(false))
         <p class="compact-history">其他语言服务不会静默下载；搜索没有真实Provider时不注册；Notebook写入与执行必须绑定正式WorkItem、attempt和lease。</p>
       </section>
 
-      <section class="settings-section">
+      <section v-show="advancedSection === 'main-agent'" class="settings-section">
         <div class="section-head"><div><span class="eyebrow">MAIN AGENT LOOP</span><h3>主 Agent 自适应续环</h3></div></div>
         <div class="field-grid">
           <label><span>分段工具调用数</span><input v-model.number="config.agentToolCallBudget" type="number" min="1" max="64" step="1" /><small>自适应模式下只生成续环统计，不终止任务</small></label>
@@ -893,7 +933,7 @@ onMounted(() => loadOverview(false))
         <p class="compact-history">关闭后进入旧版 bounded 兼容模式，分段工具调用数和模型轮次会重新成为硬上限。无论哪种模式，上下文、权限、取消、重复失败和副作用安全门始终有效。</p>
       </section>
 
-      <section class="settings-section">
+      <section v-show="advancedSection === 'third-party'" class="settings-section">
         <div class="section-head"><div><span class="eyebrow">AGENT COMMUNICATION V2</span><h3>第三方 Agent 通信与租约</h3></div></div>
         <div class="field-grid">
           <label><span>Runner 启动超时（ms）</span><input v-model.number="config.agentRunnerStartTimeoutMs" type="number" min="5000" max="300000" step="1000" /></label>
@@ -912,8 +952,8 @@ onMounted(() => loadOverview(false))
         <p class="compact-history">第三方 Agent 只能提交 ACK、进度和 Result；Terminal 仅由 CCM 在正式验收后生成。项目/群聊只能降低并发上限，不能突破全局值。</p>
       </section>
 
-      <section class="settings-section">
-        <div class="section-head"><div><span class="eyebrow">PROVIDER CAPACITY</span><h3>子 Agent 模型容量</h3></div><button class="primary-btn" :disabled="saving" @click="saveCapability"><Save :size="16" />保存容量</button></div>
+      <section v-show="advancedSection === 'provider'" class="settings-section">
+        <div class="section-head"><div><span class="eyebrow">PROVIDER CAPACITY</span><h3>子 Agent 模型容量</h3></div></div>
         <div class="field-grid capability-grid">
           <label><span>Provider</span><input v-model.trim="capabilityForm.provider" placeholder="codex" /></label>
           <label><span>模型</span><input v-model.trim="capabilityForm.model" placeholder="可选" /></label>
@@ -923,8 +963,8 @@ onMounted(() => loadOverview(false))
         <div class="capability-list"><div v-for="entry in capabilities.filter(item => !item.revoked).slice(0, 12)" :key="entry.evidenceId || `${entry.provider}:${entry.model}`"><strong>{{ entry.provider }}{{ entry.model ? ` / ${entry.model}` : '' }}</strong><span>{{ formatNumber(entry.contextWindow) }} / 输出 {{ formatNumber(entry.maxOutputTokens) }}</span><small>{{ entry.source }}</small></div></div>
       </section>
 
-      <section class="settings-section">
-        <div class="section-head"><div><span class="eyebrow">SESSION MEMORY</span><h3>抽取提示词与模板</h3></div><div class="section-actions"><button class="text-btn" :disabled="customizationLoading" @click="saveCustomization(true)">恢复继承</button><button class="primary-btn" :disabled="saving || customizationLoading" @click="saveCustomization(false)"><Save :size="16" />保存</button></div></div>
+      <section v-show="advancedSection === 'templates'" class="settings-section">
+        <div class="section-head"><div><span class="eyebrow">SESSION MEMORY</span><h3>抽取提示词与模板</h3></div><div class="section-actions"><button class="text-btn" :disabled="customizationLoading" @click="saveCustomization(true)">恢复继承</button></div></div>
         <div class="customization-toolbar">
           <div class="preset-control"><button :class="{ active: customizationMode === 'prompt' }" @click="customizationMode = 'prompt'">提示词</button><button :class="{ active: customizationMode === 'template' }" @click="customizationMode = 'template'">模板</button></div>
           <select v-model="customizationTarget"><option value="">所有群聊默认</option><option v-for="item in groupScopes" :key="item.id" :value="item.id">{{ item.label }}</option></select>
@@ -933,6 +973,7 @@ onMounted(() => loadOverview(false))
         <small class="profile-note">{{ customProfile?.source || 'default' }} · {{ customContent.length }} 字符</small>
       </section>
     </main>
+    </div>
 
     <div v-if="editState" class="modal-backdrop" @click.self="editState = null">
       <div class="edit-modal">
@@ -943,10 +984,13 @@ onMounted(() => loadOverview(false))
       </div>
     </div>
   </div>
+  </WorkspacePageShell>
 </template>
 
 <style scoped>
 .memory-center { height: 100%; min-height: 0; display: flex; flex-direction: column; overflow: hidden; color: var(--text-primary, #17201d); background: var(--bg-primary); }
+.advanced-settings-layout { min-height:0; flex:1; display:flex; overflow:hidden; }
+.advanced-settings-layout .settings-page { min-width:0; flex:1; }
 .mc-header { min-height: 76px; padding: 14px 24px; display: flex; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: 20px; border-bottom: 1px solid var(--border-color); background: var(--surface); }
 .mc-header h2, .detail-head h3, .section-head h3 { margin: 2px 0 0; font-size: 20px; letter-spacing: 0; }
 .eyebrow { color: var(--text-muted); font-size: 10px; font-weight: 700; letter-spacing: 0; }

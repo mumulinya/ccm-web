@@ -37,6 +37,7 @@ import { buildGlobalMissionSafeProjection, buildTaskConversationLinks } from "..
 import { parseSecureMultipartRequest } from "../../system/secure-multipart";
 import { listGlobalDispatchTargets } from "../../system/automation-session-bindings";
 import { hasResourceAccess } from "../system/access-policy";
+import { GLOBAL_AGENT_CAPABILITY_REPLY, isGlobalAgentCapabilityQuestion } from "./global-agent-capabilities";
 
 function normalizeGlobalRequestedTargets(value: any, message = "") {
   let rows = value;
@@ -1352,6 +1353,14 @@ export function createGlobalAgentApi(deps: any) {
           const displayMessage = originalMessage || (files.length
             ? `请处理已上传的 ${files.length} 份资料：${files.map((file: any) => file.filename || "附件").join("、")}`
             : message);
+          if (!files.length && isGlobalAgentCapabilityQuestion(originalMessage)) {
+            if (isStream) {
+              await streamBufferedGlobalReply(GLOBAL_AGENT_CAPABILITY_REPLY);
+              emit({ type: "done", capability_reply: true });
+              res.end();
+            } else sendJson(res, { success: true, reply: GLOBAL_AGENT_CAPABILITY_REPLY, capability_reply: true, contentStored: false });
+            return;
+          }
           const requestedTargetRefs = normalizeGlobalRequestedTargets(payload.target_refs || payload.targetRefs, originalMessage || message);
           const requestPrincipal = requestAccessPrincipal(req);
           if (requestPrincipal?.kind === "browser" && requestPrincipal.role !== "admin") {

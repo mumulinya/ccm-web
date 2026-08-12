@@ -64,6 +64,8 @@ exports.createExecutionCheckpoint = createExecutionCheckpoint;
 exports.rollbackExecutionCheckpoint = rollbackExecutionCheckpoint;
 exports.inspectBranchFreshness = inspectBranchFreshness;
 exports.mergeExecutionWorktree = mergeExecutionWorktree;
+exports.previewExecutionCheckpointRecovery = previewExecutionCheckpointRecovery;
+exports.applyExecutionCheckpointRecovery = applyExecutionCheckpointRecovery;
 exports.cleanupExecutionWorktree = cleanupExecutionWorktree;
 exports.runExecutionKernelSelfTest = runExecutionKernelSelfTest;
 exports.runExecutionKernelCancellationSelfTest = runExecutionKernelCancellationSelfTest;
@@ -73,6 +75,7 @@ const path = __importStar(require("path"));
 const os = __importStar(require("os"));
 const child_process_1 = require("child_process");
 const runtime_events_1 = require("../system/runtime-events");
+const execution_recovery_1 = require("./execution-recovery");
 // Keep the execution kernel independent from core/utils. That module imports
 // the database, which imports this kernel for metrics; importing CCM_DIR from
 // it here would leave CCM_DIR undefined during ACP child-process startup.
@@ -313,7 +316,8 @@ function purgeTaskExecutionArtifacts(taskId) {
     catch { }
     clearTaskCancellation(id);
     activeProcesses.delete(id);
-    return { executions: records.length, checkpoints, outputs };
+    const recoveryManifests = (0, execution_recovery_1.purgeExecutionRecoveryManifests)(id);
+    return { executions: records.length, checkpoints, outputs, recoveryManifests };
 }
 function transitionExecution(executionId, state, message = "", extra = {}) {
     const record = loadExecution(executionId);
@@ -340,6 +344,13 @@ function transitionExecution(executionId, state, message = "", extra = {}) {
         record.outputPreview = String(extra.outputPreview || "").slice(0, 12_000);
     if (extra.cancellation)
         record.cancellation = extra.cancellation;
+    if (state === "succeeded" && (record.checkpointIds || []).length) {
+        try {
+            const workDir = record.workspace?.worktreePath || record.packet?.workDir || record.workspace?.originalWorkDir;
+            (0, execution_recovery_1.finalizeExecutionRecoveryManifests)(record, { workDir });
+        }
+        catch { }
+    }
     record.events = [...(record.events || []), createEvent(record, extra.name || `execution.${state}`, message || state, {
             state, status: extra.status || (state === "failed" ? "error" : state === "succeeded" ? "ok" : state === "cancelled" ? "warning" : "info"),
             failureClass: extra.failureClass, data: extra.data,
@@ -1032,6 +1043,13 @@ function createExecutionCheckpoint(input) {
     };
     writeJsonAtomic(checkpointFile(checkpointId), checkpoint);
     const record = loadExecution(input.executionId);
+    try {
+        (0, execution_recovery_1.createExecutionRecoveryManifest)(checkpoint, record);
+    }
+    catch (error) {
+        checkpoint.recoveryUnavailableReason = String(error?.message || error || "无法持久化恢复检查点").slice(0, 500);
+        writeJsonAtomic(checkpointFile(checkpointId), checkpoint);
+    }
     if (record) {
         record.checkpointIds = Array.from(new Set([...(record.checkpointIds || []), checkpointId]));
         record.events = [...record.events, createEvent(record, "checkpoint.created", "已创建任务前文件检查点", { status: "ok", data: { checkpointId, checkpointCommit } })].slice(-MAX_EVENTS);
@@ -1046,9 +1064,71 @@ function rollbackExecutionCheckpoint(checkpointId, reason, options = {}) {
     const checkpoint = readJson(checkpointFile(checkpointId), null);
     if (!checkpoint)
         throw new Error("检查点不存在");
+    const durable = (0, execution_recovery_1.readExecutionRecoveryManifest)(checkpointId);
+    if (durable?.deliveryCommit && (durable?.mergeCommit || !fs.existsSync(String(checkpoint.repoRoot || "")) || options.authoritative === true)) {
+        if (options.previewOnly === true)
+            return (0, execution_recovery_1.previewExecutionRecovery)(checkpointId, { paths: options.paths });
+        return (0, execution_recovery_1.applyExecutionRecovery)(checkpointId, {
+            paths: options.paths,
+            previewToken: String(options.previewToken || options.preview_token || ""),
+            reason,
+        });
+    }
     if (checkpoint.mode !== "worktree" && options.allowShared !== true)
         throw new Error("共享工作目录默认禁止自动回滚；请显式确认 allowShared=true");
     const repoRoot = checkpoint.repoRoot;
+    const selectedPaths = Array.from(new Set((Array.isArray(options.paths) ? options.paths : [])
+        .map((value) => String(value || "").trim().replace(/\\/g, "/").replace(/^\.\//, ""))
+        .filter(Boolean)));
+    if (selectedPaths.length) {
+        if (selectedPaths.length > 100)
+            throw new Error("单次最多选择 100 个文件撤销");
+        for (const relative of selectedPaths) {
+            if (path.isAbsolute(relative) || relative === ".." || relative.startsWith("../") || relative.includes("/../")) {
+                throw new Error(`撤销路径不在项目内：${relative}`);
+            }
+            const target = path.resolve(repoRoot, relative);
+            if (!(target === path.resolve(repoRoot) || target.startsWith(`${path.resolve(repoRoot)}${path.sep}`))) {
+                throw new Error(`撤销路径不在项目内：${relative}`);
+            }
+            const existsInCheckpoint = (0, child_process_1.spawnSync)("git", ["cat-file", "-e", `${checkpoint.checkpointCommit}:${relative}`], {
+                cwd: repoRoot, windowsHide: true, stdio: "ignore",
+            }).status === 0;
+            if (existsInCheckpoint) {
+                runGit(repoRoot, ["restore", `--source=${checkpoint.checkpointCommit}`, "--worktree", "--", relative]);
+            }
+            else if (fs.existsSync(target)) {
+                const stat = fs.statSync(target);
+                if (!stat.isFile() && !stat.isSymbolicLink())
+                    throw new Error(`为避免误删目录，只能选择具体文件撤销：${relative}`);
+                fs.unlinkSync(target);
+            }
+        }
+        const rolledBackAt = now();
+        checkpoint.selectiveRollbacks = [
+            ...(Array.isArray(checkpoint.selectiveRollbacks) ? checkpoint.selectiveRollbacks : []),
+            { paths: selectedPaths, reason, rolledBackAt },
+        ].slice(-50);
+        writeJsonAtomic(checkpointFile(checkpointId), checkpoint);
+        const record = loadExecution(checkpoint.executionId);
+        if (record) {
+            record.events = [...record.events, createEvent(record, "checkpoint.paths_rewound", `已撤销 ${selectedPaths.length} 个文件到任务开始前`, {
+                    status: "warning",
+                    data: { checkpointId, paths: selectedPaths, contentStored: false },
+                })].slice(-MAX_EVENTS);
+            record.updatedAt = rolledBackAt;
+            writeJsonAtomic(executionFile(record.id), record);
+        }
+        return {
+            success: true,
+            selective: true,
+            checkpointId,
+            executionId: checkpoint.executionId,
+            paths: selectedPaths,
+            rolledBackAt,
+            executionContinues: options.cancelExecution !== true,
+        };
+    }
     const currentHead = runGit(repoRoot, ["rev-parse", "HEAD"]);
     if (currentHead !== checkpoint.originalHead)
         runGit(repoRoot, ["reset", "--soft", checkpoint.originalHead]);
@@ -1109,6 +1189,7 @@ function mergeExecutionWorktree(executionId, options = {}) {
         runGit(record.workspace.worktreePath, ["add", "-A"]);
         runGit(record.workspace.worktreePath, ["commit", "-m", options.message || `feat: complete ${record.taskId}`]);
     }
+    const deliveryCommit = runGit(record.workspace.worktreePath, ["rev-parse", "HEAD"]);
     const currentBranch = runGit(original, ["branch", "--show-current"]);
     if (record.workspace.baseBranch && currentBranch !== record.workspace.baseBranch && options.force !== true)
         throw new Error(`主工作目录当前分支 ${currentBranch} 与任务基线 ${record.workspace.baseBranch} 不一致`);
@@ -1124,6 +1205,17 @@ function mergeExecutionWorktree(executionId, options = {}) {
     }
     record.workspace.mergedAt = now();
     record.workspace.mergeCommit = runGit(original, ["rev-parse", "HEAD"]);
+    const recoveryManifests = (0, execution_recovery_1.finalizeExecutionRecoveryManifests)(record, {
+        workDir: record.workspace.worktreePath,
+        deliveryCommit,
+        mergeCommit: record.workspace.mergeCommit,
+    });
+    record.workspace.recoveryManifests = recoveryManifests.map((item) => ({
+        checkpointId: item.checkpointId || "",
+        finalizedAt: item.finalizedAt || "",
+        changedFiles: Array.isArray(item.changedFiles) ? item.changedFiles.length : 0,
+        error: item.error || "",
+    }));
     record.events = [...record.events, createEvent(record, "lane.merged", "worktree 已安全合并到主工作目录", { status: "ok", data: { mergeCommit: record.workspace.mergeCommit } })].slice(-MAX_EVENTS);
     record.updatedAt = now();
     writeJsonAtomic(executionFile(record.id), record);
@@ -1138,6 +1230,12 @@ function mergeExecutionWorktree(executionId, options = {}) {
         }
     }
     return { success: true, executionId, branch: record.workspace.worktreeBranch, mergeCommit: record.workspace.mergeCommit };
+}
+function previewExecutionCheckpointRecovery(checkpointId, options = {}) {
+    return (0, execution_recovery_1.previewExecutionRecovery)(checkpointId, { paths: options.paths });
+}
+function applyExecutionCheckpointRecovery(checkpointId, options = {}) {
+    return (0, execution_recovery_1.applyExecutionRecovery)(checkpointId, options);
 }
 function cleanupExecutionWorktree(executionId, force = false) {
     const record = loadExecution(executionId);
@@ -1194,6 +1292,9 @@ function runExecutionKernelSelfTest() {
         selfTestCheckpointId = checkpoint.id;
         fs.writeFileSync(path.join(tempRoot, "tracked.txt"), "after\n", "utf-8");
         fs.writeFileSync(path.join(tempRoot, "created.txt"), "new\n", "utf-8");
+        const selective = rollbackExecutionCheckpoint(checkpoint.id, "selective self test", { paths: ["tracked.txt"] });
+        const selectiveRestored = fs.readFileSync(path.join(tempRoot, "tracked.txt"), "utf-8").replace(/\r\n/g, "\n") === "before\n"
+            && fs.existsSync(path.join(tempRoot, "created.txt"));
         const rollback = rollbackExecutionCheckpoint(checkpoint.id, "self test");
         const green = evaluateGreenContract({ receipt: { status: "done", verification: ["npm test passed"] }, fileChanges: [{ path: "tracked.txt" }], requiresChanges: true, requiresVerification: true, runnerVerification: { status: "passed", results: [{ command: "npm test", status: "passed" }] }, workspacePassed: true, branchFresh: true, reviewPassed: true, requiredLevel: "merge_ready" });
         const persistedReceipt = { agent: "self-test", status: "done", verification: ["npm test passed by external runner (exit 0)"] };
@@ -1214,6 +1315,7 @@ function runExecutionKernelSelfTest() {
             rejectsDangerousVerificationCommand: packet.verification.commands.length === 1 && packet.verification.commands[0] === "npm test",
             createsPersistentExecution: !!loadExecution(execution.id),
             checkpointRollbackRestoresFiles: rollback.success && restored,
+            selectiveCheckpointRewindPreservesOtherFiles: selective.success && selective.selective === true && selectiveRestored,
             classifiesTypedFailure: failure.failureClass === "mcp_handshake" && failure.recoverable,
             evaluatesMergeReadyGreenContract: green.pass && green.level === "merge_ready",
             persistsDeliveryEvidence: reloadedExecution?.receipt?.status === "done"

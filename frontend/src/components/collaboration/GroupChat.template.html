@@ -87,7 +87,10 @@
                   :copy-text="getCopyableMessageText(msg, getVisibleGroupMessageContent(msg, ''))"
                   :editable="msg.role === 'user' && !!String(msg.content || '').trim()"
                   :edit-disabled="isStreaming"
+                  :rewindable="msg.role === 'assistant' && !msg.streaming && !!String(msg.id || '').trim()"
+                  :rewind-disabled="false"
                   @edit="editGroupUserMessage(msg)"
+                  @rewind="rewindGroupMessage(msg)"
                   class="message"
                   :class="[
                     msg.role,
@@ -129,6 +132,7 @@
                   <MainAgentDecisionCard v-if="getMainAgentDecision(msg) && !isPrimaryTaskCard(msg, i)" :decision="getMainAgentDecision(msg)" compact @step-action="handleTaskCardAction(msg, $event)" />
                 </ProjectTaskIntakeMessage>
                 <ConflictPlanMessage v-else-if="msg.type === 'conflict_plan'" :msg="msg" />
+                <ConversationSummaryBoundary v-else-if="msg.type === 'conversation_summary_boundary'" :message="msg" />
                 <!-- Agent 问答 -->
                 <AgentQaMessage
                   v-else-if="isAgentQaMessage(msg)"
@@ -136,12 +140,12 @@
                   :display-content="getVisibleGroupMessageContent(msg, '回复已整理，技术细节已放入技术详情。')"
                   :accent-style="getAgentAccentStyle(msg.agent)"
                   :action-loading="agentQaActionLoading"
-                  :highlight-mentions="highlightMentions"
                   :get-agent-display-name="getAgentDisplayName"
+                  :message-key="`${currentGroupSessionId || 'session'}:${getGroupMessageKey(msg)}`"
                   @action="runAgentQaAction(msg, $event)"
                 />
                 <ConversationProcessingState
-                  v-else-if="msg.role === 'assistant' && msg.streaming && !String(msg.content || '').trim() && !groupTaskExecutionActive"
+                  v-else-if="msg.role === 'assistant' && msg.streaming && !groupTaskExecutionActive && shouldShowCompactProcessingState(groupAgentExecutionEvents, messages, i)"
                   compact
                   title="正在思考…"
                   :detail="msg.processingDetail || '正在理解你的问题并检查群聊上下文'"
@@ -165,7 +169,6 @@
                   :file-changes-title="getFileChangesTitle(msg.fileChanges)"
                   :hide-file-changes="hasTerminalExecutionForMessage(groupAgentExecutionEvents, messages, i)"
                   :workflow-steps="workflowSteps"
-                  :highlight-mentions="highlightMentions"
                   :get-plan-title="getPlanTitle"
                   :get-execution-order-label="getExecutionOrderLabel"
                   :get-dispatch-action-label="getDispatchActionLabel"
@@ -176,6 +179,7 @@
                   :get-assignment-status-class="getAssignmentStatusClass"
                   :get-assignment-status-label="getAssignmentStatusLabel"
                   :get-agent-display-name="getAgentDisplayName"
+                  :message-key="`${currentGroupSessionId || 'session'}:${getGroupMessageKey(msg)}`"
                   @step-action="handleTaskCardAction(msg, $event)"
                   @task-action="handleTaskCardAction(msg, $event)"
                   @open-pipeline="openPipelineViewer(msg)"
@@ -245,6 +249,24 @@
               @guide="guideGroupQueuedTurn"
               @retry="(turn) => groupTurnControl.retry(turn).then(() => drainGroupTurnQueue())"
             />
+            <ConversationAsideDock
+              scope="group"
+              :scope-id="currentGroup?.id || ''"
+              :exact-session-id="currentGroupSessionId || ''"
+              :active="groupTurnBusy && !!currentGroupSessionId"
+            />
+            <ConversationPermissionMode
+              scope="group"
+              :scope-id="currentGroup?.id || ''"
+              :exact-session-id="currentGroupSessionId || ''"
+              :disabled="!currentGroup || !currentGroupSessionId"
+            />
+            <ConversationHistoryBranches
+              scope="group"
+              :scope-id="currentGroup?.id || ''"
+              :exact-session-id="currentGroupSessionId || ''"
+              @restored="loadMessages"
+            />
             <ChatComposer
               v-model="newMessage"
               input-id="groupChatInput"
@@ -257,9 +279,9 @@
               :slash="slash"
               @files-selected="onMessageFilesSelected"
               @remove-file="removeMessageFile"
-              @keydown="handleKeydown"
+              @keydown="handleGroupKeydown"
               @input="handleInput"
-              @send="sendMessage"
+              @send="sendGroupMessage"
             >
               <template #prefix>
                 <div v-if="isTaskSupplementMode" class="task-supplement-context" aria-live="polite">
