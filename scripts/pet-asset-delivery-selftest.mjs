@@ -37,6 +37,7 @@ try {
   const windowsInvocation = resolvePetAssetNpmInvocation('win32')
   assert.equal(windowsInvocation.command, process.execPath)
   assert.ok(windowsInvocation.prefixArgs[0].endsWith('npm-cli.js'))
+  assert.ok(fs.existsSync(windowsInvocation.prefixArgs[0]))
   const unixInvocation = resolvePetAssetNpmInvocation('linux')
   assert.deepEqual(unixInvocation, { command: 'npm', prefixArgs: [] })
 
