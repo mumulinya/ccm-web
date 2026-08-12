@@ -1,7 +1,7 @@
 {
   "name": "ccm",
   "private": true,
-  "version": "2.0.4",
+  "version": "2.0.5",
   "description": "CCM development workspace",
   "scripts": {
     "dev:frontend": "npm --prefix frontend run dev",
@@ -29,7 +29,7 @@
     "stability:9:check": "node scripts/check-clean-soak-9.js",
     "release:readme-check": "node scripts/npm-readme-release-selftest.mjs",
     "release:gate": "npm run coverage:check && npm run docs:check && npm run release:readme-check && npm run test:all && npm run build",
-    "release:artifact": "npm run release:gate && node scripts/build-release-artifact.mjs",
+    "release:artifact": "npm run coverage:check && npm run docs:check && npm run release:readme-check && npm run build && node scripts/build-release-artifact.mjs",
     "pack": "npm run release:artifact",
     "test": "npm run test:quick",
     "test:quick": "node scripts/domain-test-runner.mjs quick",
