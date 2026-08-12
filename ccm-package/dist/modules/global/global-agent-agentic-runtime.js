@@ -471,7 +471,41 @@ function createGlobalAgentAgenticRuntime(deps) {
         });
     }
     function isGlobalPromptTooLongError(error) {
-        return /HTTP\s*413|prompt(?:\s+is)?\s+too\s+long|context(?:_length)?(?:\s+window)?\s*(?:exceeded|limit)|maximum context|request too large/i.test(String(error?.message || error || ""));
+        return /HTTP\s*413|prompt(?:\s+is)?\s+too\s+long|context(?:_length)?(?:\s+window)?\s*(?:exceeded|limit)|maximum context|request too large|token\s*(?:检查|门禁).*拒绝|Token.*(?:rejected|refused)|POST_COMPACT_THRESHOLD/i.test(String(error?.message || error || ""));
+    }
+    function compactGlobalProviderMessageContent(value, maxChars) {
+        const source = String(value || "").trim();
+        if (source.length <= maxChars)
+            return source;
+        return `${source.slice(0, Math.max(0, maxChars - 44)).trimEnd()}\n[该部分已按恢复上下文预算截断]`;
+    }
+    /**
+     * A provider can reject the formal compaction request itself when fixed
+     * global context grew beyond its advertised window.  Keep the authoritative
+     * transcript and memory untouched, but retry the *next* model turn with a
+     * minimal, deterministic recovery projection.  It contains the current
+     * request plus the newest safe conversation context and does not invent a
+     * summary or silently discard stored history.
+     */
+    function buildEmergencyGlobalProviderMessages(messages, run) {
+        const system = messages.find(message => message.role === "system");
+        const currentGoal = String(run.reasoning_loop?.effective_goal || run.user_message || "").trim();
+        const nonSystem = messages.filter(message => message.role !== "system");
+        const recent = nonSystem
+            .filter(message => String(message.content || "").trim() && String(message.content || "").trim() !== currentGoal)
+            .slice(-4)
+            .map(message => ({ role: message.role === "assistant" ? "assistant" : "user", content: compactGlobalProviderMessageContent(message.content, 3_000) }));
+        const recoverySystem = [
+            "你是 CCM 全局 Agent 的恢复决策内核。会话历史和长期记忆已经安全保留在服务端。",
+            "当前只提供必要上下文以恢复本轮，不得声称看到未提供的历史；需要事实时调用只读工具。",
+            "每轮最多一个工具。只输出既有 CCM 决策 JSON 协议，不要 Markdown、内部错误、Token 或上下文容量信息。",
+            "若无法安全继续，使用 needs_confirmation 提出一个具体问题。",
+        ].join("\n");
+        return [
+            { role: "system", content: `${compactGlobalProviderMessageContent(system?.content || "", 14_000)}\n\n[上下文恢复模式]\n${recoverySystem}` },
+            ...recent,
+            { role: "user", content: `【当前用户目标】\n${compactGlobalProviderMessageContent(currentGoal, 8_000)}\n\n【恢复状态】\n会话内容较多，已保留现场并切换到安全恢复上下文。请决定下一步。` },
+        ];
     }
     async function prepareGlobalProviderMessages(messages, run, runtime, options = {}) {
         const sessionId = String(run.session_id || "").trim();
@@ -485,48 +519,55 @@ function createGlobalAgentAgenticRuntime(deps) {
         const triggerPayload = buildGlobalProviderPayloadSnapshot(messages, sessionId, run);
         if (!options.promptTooLong && triggerPayload.totalTokens < threshold)
             return messages;
-        const compaction = await compactGlobalAgentSessionWithModel(sessionId, {
-            reason: options.promptTooLong ? "provider_prompt_too_long" : "provider_payload_preflight",
-            promptTooLong: options.promptTooLong === true,
-            currentRequest: { role: "user", content: run.reasoning_loop?.effective_goal || run.user_message },
-            fixedContext: messages.filter(message => message.role === "system"),
-            modelVisiblePayload: triggerPayload,
-            postCompactPayloadBuilder: async ({ summary, preservedMessages, boundaryMarker, recoveryContext, hookResults }) => {
-                const continuation = {
-                    schema: "ccm-global-session-continuation-v2",
-                    sessionId,
-                    summary,
-                    messages: preservedMessages.map((message) => ({
-                        id: String(message.id || ""),
-                        role: message.role === "assistant" ? "assistant" : "user",
-                        content: String(message.content || ""),
-                        timestamp: String(message.timestamp || ""),
-                    })),
-                    boundary: boundaryMarker,
-                    recoveryContext,
-                    hookResults,
-                };
-                const rebuiltMessages = await (0, global_agent_run_projection_1.buildGlobalAgentModelMessages)(run, runtime, { sessionContinuationOverride: continuation });
-                return {
-                    messages: rebuiltMessages,
-                    modelVisiblePayload: buildGlobalProviderPayloadSnapshot(rebuiltMessages, sessionId, run),
-                };
-            },
-        });
-        if (compaction?.reason === "circuit_breaker") {
-            throw new Error("当前全局会话记忆压缩已熔断，本轮未调用模型；请在记忆中心检查该精确会话");
+        let compaction = null;
+        try {
+            compaction = await compactGlobalAgentSessionWithModel(sessionId, {
+                reason: options.promptTooLong ? "provider_prompt_too_long" : "provider_payload_preflight",
+                promptTooLong: options.promptTooLong === true,
+                currentRequest: { role: "user", content: run.reasoning_loop?.effective_goal || run.user_message },
+                fixedContext: messages.filter(message => message.role === "system"),
+                modelVisiblePayload: triggerPayload,
+                postCompactPayloadBuilder: async ({ summary, preservedMessages, boundaryMarker, recoveryContext, hookResults }) => {
+                    const continuation = {
+                        schema: "ccm-global-session-continuation-v2",
+                        sessionId,
+                        summary,
+                        messages: preservedMessages.map((message) => ({
+                            id: String(message.id || ""),
+                            role: message.role === "assistant" ? "assistant" : "user",
+                            content: String(message.content || ""),
+                            timestamp: String(message.timestamp || ""),
+                        })),
+                        boundary: boundaryMarker,
+                        recoveryContext,
+                        hookResults,
+                    };
+                    const rebuiltMessages = await (0, global_agent_run_projection_1.buildGlobalAgentModelMessages)(run, runtime, { sessionContinuationOverride: continuation });
+                    return {
+                        messages: rebuiltMessages,
+                        modelVisiblePayload: buildGlobalProviderPayloadSnapshot(rebuiltMessages, sessionId, run),
+                    };
+                },
+            });
         }
-        if (compaction?.compacted !== true) {
-            throw new Error(`全局 Agent 上下文已达到模型门禁，但无法形成可提交的正式压缩：${compaction?.reason || "unknown"}`);
+        catch (error) {
+            if (isGlobalPromptTooLongError(error) || /GLOBAL_COMPACTION_|GLOBAL_SESSION_/i.test(String(error?.code || ""))) {
+                recordGlobalAgentRuntimeOutput(run, { type: "context_recovery", status: "warning", message: "会话上下文已切换为安全恢复投影", detail: "provider_or_compaction_capacity" });
+                return buildEmergencyGlobalProviderMessages(messages, run);
+            }
+            throw error;
         }
+        if (compaction?.reason === "circuit_breaker")
+            return buildEmergencyGlobalProviderMessages(messages, run);
+        if (compaction?.compacted !== true)
+            return buildEmergencyGlobalProviderMessages(messages, run);
         const rebuiltMessages = Array.isArray(compaction.preparedModelMessages)
             ? compaction.preparedModelMessages
             : await (0, global_agent_run_projection_1.buildGlobalAgentModelMessages)(run, runtime);
         const rebuiltPayload = buildGlobalProviderPayloadSnapshot(rebuiltMessages, sessionId, run);
         const postCompactGate = (0, session_compaction_core_1.buildSessionPostCompactGate)({ modelVisiblePayload: rebuiltPayload, threshold });
-        if (postCompactGate.providerCallAllowed !== true || rebuiltPayload.totalTokens >= modelCapacity.contextWindow) {
-            throw new Error(`全局 Agent 正式压缩后的真实 Provider Payload 仍超限：${rebuiltPayload.totalTokens}/${threshold}`);
-        }
+        if (postCompactGate.providerCallAllowed !== true || rebuiltPayload.totalTokens >= modelCapacity.contextWindow)
+            return buildEmergencyGlobalProviderMessages(rebuiltMessages, run);
         return rebuiltMessages;
     }
     function localActionToAgenticDecision(localIntent, run) {

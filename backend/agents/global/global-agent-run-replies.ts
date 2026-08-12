@@ -62,12 +62,21 @@ export function globalVisibleReplyFallback(status?: GlobalAgentRunStatus) {
   return "我已整理处理结果，技术细节已放入技术详情。";
 }
 
+const GLOBAL_CONTEXT_RECOVERY_ERROR_PATTERN = /Context Engine V2|Token\s*(?:检查|门禁)|(?:prompt|context).*(?:too long|limit|exceed)|GLOBAL_(?:SESSION|COMPACTION).*?(?:THRESHOLD|CAPACITY)|模型压缩.*(?:失败|不可用)|上下文.*(?:超限|超过|容量)/i;
+
+function globalContextRecoveryReply(status?: GlobalAgentRunStatus) {
+  if (status === "failed") return "当前会话内容较多，现场已保留。请稍后继续，系统会先整理历史信息后再恢复处理。";
+  return "当前会话内容较多，正在整理历史信息后继续处理。";
+}
+
 export function buildGlobalVisibleReplyContent(input: { value?: any; rawSource?: any; fallback?: string; status?: GlobalAgentRunStatus; max?: number } = {}) {
   const max = Math.max(80, Number(input.max || 8000));
   const fallback = input.fallback || globalVisibleReplyFallback(input.status);
   const rawVisible = String(input.value || "").replace(/\r/g, "").replace(/\n{3,}/g, "\n\n").trim();
   const rawSource = String(input.rawSource === undefined ? input.value || "" : input.rawSource || "").replace(/\r/g, "").trim();
-  let text = rawVisible || fallback;
+  let text = GLOBAL_CONTEXT_RECOVERY_ERROR_PATTERN.test(rawVisible || rawSource)
+    ? globalContextRecoveryReply(input.status)
+    : rawVisible || fallback;
   const hiddenForProtocol = hasGlobalUserSummaryTechnicalDetails(text);
   if (hiddenForProtocol) text = fallback;
   text = sanitizeGlobalVisibleReplyTerminology(text).trim() || fallback;

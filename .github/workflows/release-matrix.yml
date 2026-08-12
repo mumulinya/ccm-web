@@ -2,6 +2,12 @@ name: CCM release matrix
 
 on:
   workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publish the tested release candidate to npm after matrix attestation"
+        required: false
+        default: false
+        type: boolean
   pull_request:
     paths:
       - "backend/**"
@@ -122,3 +128,34 @@ jobs:
           name: ccm-release-tested
           path: release-artifacts/**
           if-no-files-found: error
+
+  publish-npm:
+    needs: attest-candidate
+    if: github.event_name == 'workflow_dispatch' && inputs.publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - uses: actions/download-artifact@v4
+        with:
+          name: ccm-release-tested
+          path: release-artifacts
+      - name: Publish the exact tested tarballs
+        shell: pwsh
+        run: |
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $artifactRoot = Join-Path $PWD "release-artifacts/$version"
+          $manifestPath = Join-Path $artifactRoot "release-artifact-manifest.json"
+          $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+          if ($manifest.tested -ne $true) { throw "Release matrix attestation is missing" }
+          $env:CCM_RELEASE_MANIFEST = $manifestPath
+          $env:CCM_RELEASE_ATTESTATION = Join-Path $artifactRoot "build-attestation.json"
+          npm publish (Join-Path $artifactRoot $manifest.tarball) --access public --provenance
+          $env:CCM_PET_ASSET_RELEASE_ATTESTATION = Join-Path $artifactRoot "pet-assets-build-attestation.json"
+          npm publish (Join-Path $artifactRoot $manifest.pet_assets.tarball) --access public --provenance

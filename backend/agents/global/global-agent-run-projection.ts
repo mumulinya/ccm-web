@@ -217,6 +217,85 @@ export function buildToolPrompt(loadedToolNames: string[] = []) {
     .join("\n");
 }
 
+/**
+ * The global directory is intentionally broad, but it must never become a
+ * model-sized dump of every MCP schema, resource and historical task.  The
+ * detailed records remain available through the read tools.  This projection
+ * is the only global context embedded in a provider request.
+ */
+function buildBoundedGlobalModelContext(context: any) {
+  const text = (value: any, limit: number) => {
+    const source = typeof value === "string" ? value : JSON.stringify(value ?? "");
+    return source.length > limit ? `${source.slice(0, Math.max(0, limit - 32)).trimEnd()}\n[已按上下文预算截断]` : source;
+  };
+  const rows = (value: any, limit: number) => Array.isArray(value) ? value.slice(0, limit) : [];
+  const toolCatalog = context?.tools || {};
+  const mcp = rows(toolCatalog.mcp, 32).map((tool: any) => ({
+    name: String(tool?.name || tool?.canonicalName || ""),
+    server: String(tool?.server || ""),
+    description: text(tool?.description || "", 260),
+    // The runtime validates arguments against the authoritative schema.  Full
+    // schemas can be loaded on demand and are too large for every turn.
+    schema_available_on_demand: true,
+  })).filter((tool: any) => tool.name);
+  const skills = rows(toolCatalog.skills, 20).map((skill: any) => ({
+    name: String(skill?.name || ""),
+    description: text(skill?.description || "", 240),
+  })).filter((skill: any) => skill.name);
+  const projects = rows(context?.projects, 48).map((project: any) => ({
+    name: String(project?.name || ""),
+    display_name: String(project?.display_name || ""),
+    agent: String(project?.agent || ""),
+    platform: String(project?.platform || ""),
+  })).filter((project: any) => project.name);
+  const groups = rows(context?.groups, 48).map((group: any) => ({
+    id: String(group?.id || ""),
+    name: String(group?.name || ""),
+    members: rows(group?.members, 16).map((member: any) => ({ project: String(member?.project || ""), agent: String(member?.agent || "") })),
+  })).filter((group: any) => group.id || group.name);
+  const sharedFiles = context?.global_shared_files || {};
+  return {
+    projects,
+    groups,
+    requested_dispatch_targets: context?.requested_dispatch_targets || { targets: [], policy: "only_these_targets_may_receive_tasks" },
+    task_summary: {
+      policy: context?.task_summary?.policy || "global_agent_owned_tasks_only",
+      total: Number(context?.task_summary?.total || 0),
+      active: Number(context?.task_summary?.active || 0),
+      recent: rows(context?.task_summary?.recent, 12).map((task: any) => ({
+        id: String(task?.id || ""), title: text(task?.title || "", 240), status: String(task?.status || ""),
+        status_detail: text(task?.status_detail || "", 260), target_project: String(task?.target_project || ""), updated_at: String(task?.updated_at || ""),
+      })),
+    },
+    cron_jobs: rows(context?.cron_jobs, 24).map((job: any) => ({ id: String(job?.id || ""), name: text(job?.name || "", 160), schedule: String(job?.schedule || ""), enabled: job?.enabled !== false, target_type: String(job?.target_type || "") })),
+    tools: {
+      policy: toolCatalog.policy || "global_scope_authorized_only",
+      available_counts: toolCatalog.available_counts || toolCatalog.configured_counts || {},
+      loaded_tool_names: rows(toolCatalog.loaded_tool_names, 80).map(String),
+      mcp,
+      deferred_mcp: rows(toolCatalog.deferred_mcp, 48).map((tool: any) => ({ name: String(tool?.name || tool || "") })).filter((tool: any) => tool.name),
+      skills,
+    },
+    global_memory: text(context?.global_memory || "", 18_000),
+    global_knowledge: text(context?.global_knowledge || "", 10_000),
+    context_source_catalog: text(context?.context_source_catalog || "", 12_000),
+    global_shared_files: {
+      context: text(sharedFiles.context || "", 12_000),
+      manifest_checksum: String(sharedFiles.manifest_checksum || ""),
+      complete: sharedFiles.complete === true,
+      files: rows(sharedFiles.files, 30).map((file: any) => ({ id: String(file?.id || ""), name: String(file?.name || ""), checksum: String(file?.checksum || ""), chunks: Number(file?.chunks || 0) })),
+    },
+    // Message bodies are emitted separately as continuation messages.
+    session_continuity: context?.session_continuity ? {
+      schema: String(context.session_continuity?.schema || ""),
+      boundary_generation: Number(context.session_continuity?.boundary?.generation || context.session_continuity?.boundary_generation || 0),
+      summary_available: !!context.session_continuity?.summary,
+    } : null,
+    memory_context_boundary: context?.memory_context_boundary || null,
+    context_source_manifest: context?.context_source_manifest || null,
+  };
+}
+
 export async function buildGlobalAgentModelMessages(run: GlobalAgentRun, runtime: GlobalAgentLoopRuntime, options: { sessionContinuationOverride?: any } = {}) {
   const context = runtime.getContext ? await runtime.getContext(run) : {};
   const boundaryValidation = runtime.verifyContextBoundary?.(context, run);
@@ -300,9 +379,9 @@ ${buildModelSelectableSkillCatalog()}
       return true;
     });
   const { messages: _continuationMessages, ...continuationMetadata } = continuation || {};
-  const modelContext = continuation
+  const modelContext = buildBoundedGlobalModelContext(continuation
     ? { ...context, session_continuity: continuationMetadata }
-    : context;
+    : context);
   const summaryMessages = continuation?.summary
     ? [{ role: "user", content: `【当前全局会话压缩摘要】\n${JSON.stringify(continuation.summary)}` }]
     : [];
