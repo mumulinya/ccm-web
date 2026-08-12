@@ -11,6 +11,7 @@ import { loadGroups } from "../modules/collaboration/storage";
 import { sendJson } from "../core/utils";
 import { loadOrchestratorConfig } from "../modules/collaboration/group-orchestrator-config";
 import { projectUnifiedAgentTurnStates } from "./unified-agent-turn-state";
+import { getConfigs } from "../core/db";
 
 function identity(query: any) {
   return {
@@ -39,7 +40,12 @@ export async function rehydrateReadonlyToolDetail(event: UserVisibleAgentEvent, 
     : event.scope === "group"
       ? (loadGroups().find((group: any) => String(group?.id || "") === event.scopeId)?.members || [])
         .map((member: any) => String(member?.project || "").trim()).filter(Boolean)
-      : [];
+      : (() => {
+        const requestedProject = String(event.detail?.safeArguments?.project_id || event.detail?.safeArguments?.projectId || "").trim();
+        return requestedProject && getConfigs().some((project: any) => String(project?.name || "") === requestedProject)
+          ? [requestedProject]
+          : [];
+      })();
   const capabilityToken = sealScopedToolCapability({
     scope: event.scope,
     scopeId: event.scopeId,
@@ -64,7 +70,7 @@ export async function rehydrateReadonlyToolDetail(event: UserVisibleAgentEvent, 
       ...event.detail.safeArguments,
       // Continue in bounded chunks. An explicit offset without a limit means
       // "read to EOF" in the V3 contract and can exceed the per-file budget.
-      paths: paths.map((item: any) => ({ path: item.path, offset: item.offset, limit: 100 })),
+      paths: paths.map((item: any) => ({ path: item.path, offset: item.offset, limit: 100, expected_checksum: item.expectedChecksum })),
     };
     const result = await executeWorkspaceReadonlyTool(event.toolName, executionArguments, capabilityToken, 3) as any;
     const rawFiles = Array.isArray(result?.modelPayload?.files) ? result.modelPayload.files : [];

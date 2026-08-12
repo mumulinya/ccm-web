@@ -9,6 +9,7 @@ const storage_1 = require("../modules/collaboration/storage");
 const utils_1 = require("../core/utils");
 const group_orchestrator_config_1 = require("../modules/collaboration/group-orchestrator-config");
 const unified_agent_turn_state_1 = require("./unified-agent-turn-state");
+const db_1 = require("../core/db");
 function identity(query) {
     return {
         scope: query?.scope,
@@ -36,7 +37,12 @@ async function rehydrateReadonlyToolDetail(event, options = {}) {
         : event.scope === "group"
             ? ((0, storage_1.loadGroups)().find((group) => String(group?.id || "") === event.scopeId)?.members || [])
                 .map((member) => String(member?.project || "").trim()).filter(Boolean)
-            : [];
+            : (() => {
+                const requestedProject = String(event.detail?.safeArguments?.project_id || event.detail?.safeArguments?.projectId || "").trim();
+                return requestedProject && (0, db_1.getConfigs)().some((project) => String(project?.name || "") === requestedProject)
+                    ? [requestedProject]
+                    : [];
+            })();
     const capabilityToken = (0, workspace_readonly_tools_1.sealScopedToolCapability)({
         scope: event.scope,
         scopeId: event.scopeId,
@@ -62,7 +68,7 @@ async function rehydrateReadonlyToolDetail(event, options = {}) {
             ...event.detail.safeArguments,
             // Continue in bounded chunks. An explicit offset without a limit means
             // "read to EOF" in the V3 contract and can exceed the per-file budget.
-            paths: paths.map((item) => ({ path: item.path, offset: item.offset, limit: 100 })),
+            paths: paths.map((item) => ({ path: item.path, offset: item.offset, limit: 100, expected_checksum: item.expectedChecksum })),
         };
         const result = await (0, workspace_readonly_tools_1.executeWorkspaceReadonlyTool)(event.toolName, executionArguments, capabilityToken, 3);
         const rawFiles = Array.isArray(result?.modelPayload?.files) ? result.modelPayload.files : [];

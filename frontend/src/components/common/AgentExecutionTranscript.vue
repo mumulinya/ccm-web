@@ -330,6 +330,7 @@ const executionStageRows = computed(() => {
 const hydratedDetails = reactive({})
 const detailLoading = reactive({})
 const detailErrors = reactive({})
+const detailNotices = reactive({})
 const expandedRows = reactive({})
 const expandedBatchFiles = reactive({})
 
@@ -800,33 +801,62 @@ const rehydrateDetail = async (event, continueRead = false) => {
   if (detailLoading[event.eventId]) return
   detailLoading[event.eventId] = true
   detailErrors[event.eventId] = ''
+  detailNotices[event.eventId] = continueRead ? '正在继续读取未读内容…' : '正在读取当前详情…'
   try {
     const query = new URLSearchParams({
       scope: String(event.scope || ''),
       scope_id: String(event.scopeId || ''),
       exact_session_id: String(event.exactSessionId || ''),
     })
-    const previousDetail = toolDisplayFor(event)
-    const continuation = previousDetail?.result?.continuation
-    const response = await fetch(`/api/agent-execution/events/${encodeURIComponent(event.eventId)}/detail?${query}`, {
-      method: 'POST', cache: 'no-store', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(continueRead && continuation ? { continue: true, continuation } : {}),
-    })
-    const payload = await response.json()
-    if (!response.ok || payload.success === false) {
-      if (payload.freshness && event?.detail?.toolDisplay) {
-        hydratedDetails[event.eventId] = {
-          ...event.detail.toolDisplay,
-          result: { ...(event.detail.toolDisplay.result || {}), freshness: payload.freshness },
+    const requestDetail = async (continuation) => {
+      const response = await fetch(`/api/agent-execution/events/${encodeURIComponent(event.eventId)}/detail?${query}`, {
+        method: 'POST', cache: 'no-store', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(continueRead && continuation ? { continue: true, continuation } : {}),
+      })
+      const payload = await response.json().catch(() => ({}))
+      if (!response.ok || payload.success === false) {
+        if (payload.freshness && event?.detail?.toolDisplay) {
+          hydratedDetails[event.eventId] = {
+            ...event.detail.toolDisplay,
+            result: { ...(event.detail.toolDisplay.result || {}), freshness: payload.freshness },
+          }
         }
+        throw new Error(payload.error || '读取当前详情失败')
       }
-      throw new Error(payload.error || '读取当前详情失败')
+      return payload.toolDisplay
     }
-    hydratedDetails[event.eventId] = continueRead
-      ? mergeBatchReadDetail(previousDetail, payload.toolDisplay)
-      : payload.toolDisplay
+
+    let mergedDetail = toolDisplayFor(event)
+    let continuation = mergedDetail?.result?.continuation
+    if (!continueRead || !continuation?.pendingCount) {
+      mergedDetail = await requestDetail(null)
+      hydratedDetails[event.eventId] = mergedDetail
+    } else {
+      // A single user action drains several bounded 100-line chunks. The API
+      // still validates every cursor/checksum independently, while the UI no
+      // longer appears inert when the same files remain partial after one chunk.
+      const maxContinuationRounds = 10
+      let rounds = 0
+      let previousCursorSignature = ''
+      while (continuation?.pendingCount && rounds < maxContinuationRounds) {
+        const cursorSignature = JSON.stringify((continuation.files || []).map(file => [file.path, file.nextOffset, file.checksum]))
+        if (!cursorSignature || cursorSignature === previousCursorSignature) break
+        previousCursorSignature = cursorSignature
+        rounds += 1
+        detailNotices[event.eventId] = `正在续读第 ${rounds} 段 · ${continuation.pendingCount} 个文件待处理`
+        const currentDetail = await requestDetail(continuation)
+        mergedDetail = mergeBatchReadDetail(mergedDetail, currentDetail)
+        hydratedDetails[event.eventId] = mergedDetail
+        continuation = mergedDetail?.result?.continuation
+      }
+      const pendingCount = Math.max(0, Number(continuation?.pendingCount || 0))
+      detailNotices[event.eventId] = pendingCount
+        ? `已补充读取 ${rounds} 段，仍有 ${pendingCount} 个文件未读完，可再次继续`
+        : `剩余内容已读取完成 · 共补充 ${rounds} 段`
+    }
   } catch (error) {
     detailErrors[event.eventId] = error?.message || '读取当前详情失败'
+    detailNotices[event.eventId] = ''
   } finally {
     detailLoading[event.eventId] = false
   }
@@ -1212,10 +1242,11 @@ const liveStageLabel = computed(() => executionStageRows.value.find(item => item
                 <pre v-if="toolDisplayFor(event).result?.preview">{{ toolDisplayFor(event).result.preview }}</pre>
                 <small v-if="toolDisplayFor(event).result?.continuation?.pendingCount">{{ toolDisplayFor(event).result.continuation.pendingCount }} 个文件仍有内容未读完</small>
                 <small v-else-if="toolDisplayFor(event).result?.truncated">结果已截断<span v-if="toolDisplayFor(event).result?.total"> · 共 {{ toolDisplayFor(event).result.total }} 项</span></small>
-                <button v-if="toolDisplayFor(event).result?.rehydratable" type="button" class="cc-tool-rehydrate" :disabled="detailLoading[event.eventId]" @click.stop="rehydrateDetail(event, !!toolDisplayFor(event).result?.continuation?.pendingCount)">
+                <button v-if="toolDisplayFor(event).result?.rehydratable" type="button" class="cc-tool-rehydrate" :disabled="detailLoading[event.eventId]" @click.prevent.stop="rehydrateDetail(event, !!toolDisplayFor(event).result?.continuation?.pendingCount)">
                   {{ detailLoading[event.eventId] ? '正在读取…' : toolDisplayFor(event).result?.continuation?.pendingCount ? '继续读取未读完内容' : '读取当前详情' }}
                 </button>
-                <small v-if="detailErrors[event.eventId]" class="cc-tool-detail-error">{{ detailErrors[event.eventId] }}</small>
+                <small v-if="detailNotices[event.eventId]" class="cc-tool-detail-notice" role="status" aria-live="polite">{{ detailNotices[event.eventId] }}</small>
+                <small v-if="detailErrors[event.eventId]" class="cc-tool-detail-error" role="alert">{{ detailErrors[event.eventId] }}</small>
               </div>
             </template>
             <template v-else>
@@ -1503,7 +1534,10 @@ const liveStageLabel = computed(() => executionStageRows.value.find(item => item
 .cc-tool-rehydrate { margin-top: 6px; padding: 3px 8px; border: 1px solid rgba(100, 116, 139, 0.25); border-radius: 5px; color: var(--text-secondary); background: transparent; font-size: 10px; cursor: pointer; }
 .cc-tool-rehydrate:hover:not(:disabled) { background: rgba(100, 116, 139, 0.08); }
 .cc-tool-rehydrate:disabled { opacity: 0.55; cursor: wait; }
-.cc-tool-detail-error { color: #dc2626 !important; }
+.cc-tool-detail-notice,
+.cc-tool-detail-error { display: block; margin-top: 6px; font-size: 10px; line-height: 1.45; }
+.cc-tool-detail-notice { color: #2563eb; }
+.cc-tool-detail-error { color: #dc2626; }
 .cc-tool-freshness { padding: 6px 8px; border-radius: 6px; font-size: 10px !important; }
 .cc-tool-freshness.current { color: #15803d; background: rgba(34, 197, 94, 0.1); }
 .cc-tool-freshness.warning { color: #b45309; background: rgba(245, 158, 11, 0.11); }
