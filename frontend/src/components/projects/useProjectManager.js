@@ -35,6 +35,7 @@ import { shouldShowProjectTaskCard } from '../../utils/projectChatPresentation.j
 import { buildProjectSessionKnowledgePayload, buildProjectTaskKnowledgePayload, postKnowledgeCapture } from '../../utils/knowledgeCapture.js'
 import { resolveTaskMutationGuard, taskMutationGuardFromSource } from '../../utils/taskMutationGuard.js'
 import { stopTaskWithPreview } from '../../utils/taskStopFlow.js'
+import { forceInterruptPausedTask, requestTaskPause, resumePausedTask } from '../../utils/taskPauseFlow.js'
 import { subscribeRuntimeEvents } from '../../utils/runtimeEventBus.js'
 import { getEditableUserMessageText, hasMessageAttachments } from '../../utils/messageActions.js'
 
@@ -1070,6 +1071,21 @@ export function useProjectManager(props, emit) {
         chatInput.value = requirement
         await nextTick()
         await sendMessage()
+      } else if (action.kind === 'pause') {
+        if (!id) return toast.info('当前任务没有可暂停身份')
+        await requestTaskPause({ ...card, ...action, id })
+        toast.info('正在暂停，将在当前操作安全收口后保留现场')
+        await refreshCurrentProjectSession(currentSession.value)
+      } else if (action.kind === 'resume_paused') {
+        if (!id) return toast.info('当前任务没有可继续身份')
+        await resumePausedTask({ ...card, ...action, id })
+        toast.success('已重新核验现场，正在从原任务继续')
+        await refreshCurrentProjectSession(currentSession.value)
+      } else if (action.kind === 'force_interrupt') {
+        if (!id || !await confirmDialog(`安全暂停仍未完成，确定强制中断“${card.title}”吗？`)) return
+        await forceInterruptPausedTask({ ...card, ...action, id })
+        toast.info('已进入强制中断恢复流程')
+        await refreshCurrentProjectSession(currentSession.value)
       } else if (action.kind === 'interrupt' || action.kind === 'resume_interrupted') {
         if (!id || !isProjectMainTask) return toast.info('当前任务不支持此恢复操作')
         if (action.kind === 'interrupt' && !await confirmDialog(`确定停止“${card.title}”当前这一轮执行吗？任务和子 Agent 会话会保留。`)) return
@@ -1112,7 +1128,14 @@ export function useProjectManager(props, emit) {
         }
       } else if (action.kind === 'recheck') {
         if (!id) return toast.info('当前任务没有可核验身份')
-        await postTaskAction('/api/tasks/reconcile-delivery', { id, ...mutationGuard })
+        const pauseState = card?.pause_status?.state || card?.pauseStatus?.state || card?.pause_control?.state
+        if (pauseState === 'blocked') {
+          await resumePausedTask({ ...card, ...action, id })
+          toast.success('重新核验已通过，正在从原任务继续')
+          await refreshCurrentProjectSession(currentSession.value)
+        } else {
+          await postTaskAction('/api/tasks/reconcile-delivery', { id, ...mutationGuard })
+        }
       } else if (action.kind === 'takeover') {
         if (!id) return toast.info('当前任务没有可接管身份')
         if (!await confirmDialog(`确定人工接管“${card.title}”？系统会保留当前执行现场。`)) return
@@ -1232,6 +1255,9 @@ export function useProjectManager(props, emit) {
     const message = chatInput.value.trim()
     if (!message && !chatFiles.value.length) return
     const requestedMode = projectTurnControl.mode.value
+    const continuationTaskId = requestedMode === 'steer'
+      ? (activeProjectMainTaskId.value || activeProjectRunId.value)
+      : ''
     const turn = await projectTurnControl.enqueue({
       message,
       attachments: [...chatFiles.value],
@@ -1240,8 +1266,11 @@ export function useProjectManager(props, emit) {
       metadata: {
         project: currentProject.value,
         session_id: currentSession.value,
-        parent_run_id: activeProjectMainTaskId.value || activeProjectRunId.value,
-        continuation_task_id: activeProjectMainTaskId.value,
+        // A normal queued message is a future independent turn. Only the
+        // explicit “adjust direction” path is allowed to inherit the current
+        // task/run identity.
+        parent_run_id: continuationTaskId,
+        continuation_task_id: requestedMode === 'steer' ? activeProjectMainTaskId.value : '',
         requested_mode: requestedMode,
       },
     })
@@ -1271,11 +1300,17 @@ export function useProjectManager(props, emit) {
       pendingProjectParentRunId.value = currentTaskId
     }
     await projectTurnControl.apply(guidedTurn, async claimed => {
-      const result = await sendMessage({ queueTurn: claimed })
+      const result = await sendMessage({ queueTurn: claimed, continuationParentRunId: currentTaskId })
       if (result?.success === false) throw new Error(result.error || '调整方向没有接入当前任务')
       return { run_id: result?.runId || '', continuation_task_id: currentTaskId }
     })
     return guidedTurn
+  }
+
+  const resolveProjectQueuedRoute = async (turn, choice) => {
+    await projectTurnControl.resolveRoute(turn, choice)
+    toast.success(choice === 'continue_original' ? '将继续原任务' : choice === 'answer_only' ? '将只回答这条消息' : '将作为新任务处理')
+    window.setTimeout(() => drainProjectTurnQueue().catch(() => {}), 0)
   }
 
   // Leaving the page or switching project/session only detaches the browser
@@ -1305,18 +1340,6 @@ export function useProjectManager(props, emit) {
       : '原消息已载入输入框，修改后发送即可重新请求')
   }
 
-  const isProjectContinuationPrompt = value => /^(继续|继续处理|接着做|接着处理|从中断处继续|从上次继续)[。.!！\s]*$/u.test(String(value || '').trim())
-  const isRecoverableProjectAssistantMessage = message => {
-    if (!message || message.role !== 'assistant') return false
-    if (message.interruption?.recoverable === true) return true
-    return /(?:连接暂时中断|执行暂时中断|现场已保留|本次处理已停止，你可以调整需求后重新发送)/.test(String(message.content || ''))
-  }
-  const latestRecoverableProjectAssistantMessage = value => {
-    if (!isProjectContinuationPrompt(value)) return null
-    const latestAssistant = [...messages.value].reverse().find(message => message?.role === 'assistant') || null
-    return isRecoverableProjectAssistantMessage(latestAssistant) ? latestAssistant : null
-  }
-
   const sendMessage = async (options = {}) => {
     const queuedTurn = options?.queueTurn || null
     if (projectTurnBusy.value && !queuedTurn) return submitProjectMessageWhileBusy()
@@ -1336,9 +1359,20 @@ export function useProjectManager(props, emit) {
     const projectAtSend = queuedTurn?.metadata?.project || currentProject.value
     const sessionAtSend = queuedTurn?.metadata?.session_id || currentSession.value
     const msg = queuedTurn ? String(queuedTurn.message || '').trim() : chatInput.value.trim()
+    const clarificationPayload = options?.prePlanClarification
+      ? {
+          id: options.prePlanClarification.clarification?.id,
+          message_id: options.prePlanClarification.messageId,
+          revision: options.prePlanClarification.clarification?.revision,
+          generation: options.prePlanClarification.clarification?.generation,
+        }
+      : null
     const filesToSend = queuedTurn ? [...(queuedTurn.files || [])] : [...chatFiles.value]
-    const resumableMessage = queuedTurn ? null : latestRecoverableProjectAssistantMessage(msg)
-    const parentRunId = queuedTurn?.metadata?.parent_run_id
+    // Typed text (including “继续”) is routed by the main Agent. Only an
+    // explicit resume/steer action may bind this request to an old task.
+    const resumableMessage = null
+    const parentRunId = options?.continuationParentRunId
+      || (queuedTurn?.metadata?.requested_mode === 'steer' ? queuedTurn?.metadata?.parent_run_id : '')
       || pendingProjectParentRunId.value
       || resumableMessage?.projectRun?.id
       || resumableMessage?.task_id
@@ -1351,8 +1385,8 @@ export function useProjectManager(props, emit) {
     const attachmentText = filesToSend.length
       ? `\n\n[附件]\n${filesToSend.map(f => `- ${f.name}（${formatFileSize(f.size)}）`).join('\n')}`
       : ''
-    const userMsg = { id: makeProjectMessageId(), role: 'user', content: `${msg || '请处理附件'}${attachmentText}`, timestamp: new Date().toISOString() }
-    messages.value.push(userMsg)
+    const userMsg = { id: queuedTurn?.metadata?.original_message_id || makeProjectMessageId(), role: 'user', content: `${msg || '请处理附件'}${attachmentText}`, timestamp: new Date().toISOString() }
+    if (!messages.value.some(item => item.id === userMsg.id)) messages.value.push(userMsg)
 
     scrollToBottom({ force: true })
 
@@ -1376,6 +1410,7 @@ export function useProjectManager(props, emit) {
     let userPersisted = false
     let backendError = ''
     let requestError = ''
+    let routeRequired = false
 
     const addAgentMessage = () => {
       if (agentMsgAdded) return
@@ -1395,9 +1430,14 @@ export function useProjectManager(props, emit) {
       if (!dataText) return
       try {
         const data = JSON.parse(dataText)
-        if (data.type === 'presentation') {
+        if (data.type === 'route_required') {
+          routeRequired = true
+          agentMsg.streaming = false
+          projectTurnControl.refresh().catch(() => {})
+        } else if (data.type === 'presentation') {
           const mode = String(data.message_mode || data.messageMode || 'conversation')
           agentMsg.messageMode = mode
+          if (data.prePlanClarification || data.pre_plan_clarification) agentMsg.prePlanClarification = data.prePlanClarification || data.pre_plan_clarification
         } else if (data.type === 'task_runtime' || data.type === 'task_heartbeat') {
           if (data.message_id) agentMsg.id = data.message_id
           agentMsg.projectRun = data.run || agentMsg.projectRun
@@ -1428,7 +1468,7 @@ export function useProjectManager(props, emit) {
             addAgentMessage()
             scrollToBottom()
           }
-        } else if (data.type === 'chunk') {
+        } else if (data.type === 'chunk' || data.type === 'response_delta') {
           addAgentMessage()
           agentMsg.content += data.text
           scrollToBottom()
@@ -1438,6 +1478,7 @@ export function useProjectManager(props, emit) {
           if (data.provider_usage) agentMsg.provider_usage = data.provider_usage
           notifySessionContextUsage('project_session', `${projectAtSend}::${sessionAtSend}`, { reason: 'provider_usage_updated' })
           agentMsg.messageMode = data.message_mode || data.messageMode || agentMsg.messageMode
+          if (typeof data.final_text === 'string' && data.final_text.trim()) agentMsg.content = data.final_text
           if (data.fileChanges && data.fileChanges.count > 0) {
             agentMsg.fileChanges = data.fileChanges
           }
@@ -1447,6 +1488,8 @@ export function useProjectManager(props, emit) {
           agentMsg.workEvents = data.workEvents || agentMsg.workEvents
           agentMsg.interruption = null
           agentMsg.streaming = false
+          agentMsg.completedAt = data.completed_at || data.completedAt || new Date().toISOString()
+          if (data.prePlanClarification || data.pre_plan_clarification) agentMsg.prePlanClarification = data.prePlanClarification || data.pre_plan_clarification
         } else if (data.type === 'error') {
           if (data.message_id) agentMsg.id = data.message_id
           addAgentMessage()
@@ -1454,6 +1497,7 @@ export function useProjectManager(props, emit) {
           agentMsg.projectRun = data.run || agentMsg.projectRun
           agentMsg.task_id = data.taskExperience?.task_id || data.run?.id || agentMsg.task_id
           agentMsg.taskExperience = data.taskExperience || agentMsg.taskExperience
+          agentMsg.completedAt = data.completed_at || data.completedAt || new Date().toISOString()
           backendError = String(data.text || '项目 Agent 执行失败')
         }
       } catch {}
@@ -1472,13 +1516,17 @@ export function useProjectManager(props, emit) {
         if (parentRunId) formData.append('parent_run_id', parentRunId)
         formData.append('client_message_id', userMsg.id)
         formData.append('assistant_message_id', agentMsg.id)
+        if (queuedTurn?.id) formData.append('conversation_turn_id', queuedTurn.id)
+        if (queuedTurn?.metadata?.resolved_route) formData.append('resolved_route', queuedTurn.metadata.resolved_route)
+        if (queuedTurn?.metadata?.resolved_candidate_task_id) formData.append('resolved_candidate_task_id', queuedTurn.metadata.resolved_candidate_task_id)
+        if (clarificationPayload) formData.append('clarification_payload', JSON.stringify(clarificationPayload))
         filesToSend.forEach(file => formData.append('files', file))
         res = await fetch('/api/send-stream', { method: 'POST', body: formData, signal: controller.signal })
       } else {
         res = await fetch('/api/send-stream', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'X-Client-Message-ID': userMsg.id },
-          body: JSON.stringify({ project: projectAtSend, session_id: sessionAtSend, message: msg, parent_run_id: parentRunId, client_message_id: userMsg.id, assistant_message_id: agentMsg.id }),
+          body: JSON.stringify({ project: projectAtSend, session_id: sessionAtSend, message: msg, parent_run_id: parentRunId, client_message_id: userMsg.id, assistant_message_id: agentMsg.id, clarification_payload: clarificationPayload, conversation_turn_id: queuedTurn?.id || '', resolved_route: queuedTurn?.metadata?.resolved_route || '', resolved_candidate_task_id: queuedTurn?.metadata?.resolved_candidate_task_id || '' }),
           signal: controller.signal,
         })
       }
@@ -1537,12 +1585,20 @@ export function useProjectManager(props, emit) {
       }
     } finally {
       agentMsg.streaming = false
+      if (!agentMsg.completedAt && !['background_running', 'resuming'].includes(String(agentMsg.interruption?.state || '').toLowerCase())) {
+        agentMsg.completedAt = new Date().toISOString()
+      }
       isStreaming.value = false
       if (streamController.value === controller) streamController.value = null
       const completedRunId = agentMsg.projectRun?.id || activeProjectRunId.value
       if (!agentMsg.projectRun || agentMsg.projectRun?.id === activeProjectRunId.value) activeProjectRunId.value = ''
       if (agentMsg.task_id === activeProjectMainTaskId.value) activeProjectMainTaskId.value = ''
-      const hasAgentResult = agentMsg.content || agentMsg.taskExperience || agentMsg.workEvents.length
+      if (routeRequired && agentMsgAdded) {
+        const agentIndex = messages.value.indexOf(agentMsg)
+        if (agentIndex >= 0) messages.value.splice(agentIndex, 1)
+        agentMsgAdded = false
+      }
+      const hasAgentResult = !routeRequired && (agentMsg.content || agentMsg.taskExperience || agentMsg.workEvents.length)
       if (hasAgentResult) {
         addAgentMessage()
         const serverOwnedTaskMessage = (agentMsg.messageMode === 'task' && !!agentMsg.task_id) || !!resumableMessage
@@ -1551,7 +1607,7 @@ export function useProjectManager(props, emit) {
             await sessionsApi.saveMessage({
               project: projectAtSend,
               sessionId: sessionAtSend,
-              message: { id: agentMsg.id, role: 'assistant', content: agentMsg.content, requestText: agentMsg.requestText, messageMode: agentMsg.messageMode, task_id: agentMsg.task_id || '', taskExperience: agentMsg.taskExperience || null, timestamp: agentMsg.timestamp, fileChanges: agentMsg.fileChanges || null, workEvents: agentMsg.workEvents || [], provider_usage: agentMsg.provider_usage || null, interruption: agentMsg.interruption || null }
+              message: { id: agentMsg.id, role: 'assistant', content: agentMsg.content, requestText: agentMsg.requestText, messageMode: agentMsg.messageMode, task_id: agentMsg.task_id || '', taskExperience: agentMsg.taskExperience || null, timestamp: agentMsg.timestamp, completedAt: agentMsg.completedAt || null, fileChanges: agentMsg.fileChanges || null, workEvents: agentMsg.workEvents || [], provider_usage: agentMsg.provider_usage || null, interruption: agentMsg.interruption || null }
             })
           } catch (error) { toast.warning('回复已显示，但会话保存失败，请刷新后确认') }
         }
@@ -1563,7 +1619,7 @@ export function useProjectManager(props, emit) {
       scrollToBottom()
       if (!queuedTurn) window.setTimeout(() => drainProjectTurnQueue().catch(() => {}), 0)
     }
-    return { success: !requestError && !backendError, error: requestError || backendError, runId: agentMsg.projectRun?.id || '' }
+    return { success: !requestError && !backendError, error: requestError || backendError, runId: agentMsg.projectRun?.id || '', routeRequired }
   }
 
   const scheduledAutoRecoveries = new Map()
@@ -2219,7 +2275,7 @@ export function useProjectManager(props, emit) {
     openSwitchAgent, switchAgent, startProjectWithAgent, createSession, openProjectFeishuBinding, updateProjectFeishuBinding, renameSession, deleteSession,
     saveCurrentProjectSessionKnowledge, getProjectTaskCard, postTaskAction, removeMessageFromCurrentSession, handleProjectTaskAction, isStreaming,
     pendingProjectParentRunId, streamController, activeProjectRunId, activeProjectMainTaskId, stoppingProjectTurn, makeProjectMessageId,
-    projectTurnConversationId, projectTurnControl, projectTurnBusy, projectComposerSendLabel, stopStreaming, drainProjectTurnQueue, guideProjectQueuedTurn, submitProjectMessageWhileBusy,
+    projectTurnConversationId, projectTurnControl, projectTurnBusy, projectComposerSendLabel, stopStreaming, drainProjectTurnQueue, guideProjectQueuedTurn, resolveProjectQueuedRoute, submitProjectMessageWhileBusy,
     sendMessage, editProjectUserMessage, formatFileSize, onChatFilesSelected, removeChatFile, openFileDiff, openProjectChangesTab,
     closeFileDiff, currentSessionNew, autoNameSession, chatTarget, showLogsPanel, logsTitle, logsProfileId, logsKind, logsRuntimeProcess,
     openProjectRuntimeLogs, openFeishuQr, startFeishuQrSetup, openFolderBrowser, loadDrives,

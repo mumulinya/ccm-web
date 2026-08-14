@@ -96,6 +96,7 @@
       "tests": [
         "agent-communication-v2-selftest.mjs",
         "user-visible-agent-events-selftest.mjs",
+        "command-live-progress-selftest.mjs",
         "global-agent-runtime-production-closure-selftest.mjs",
         "unified-model-retry-selftest.mjs",
         "model-semantic-routing-audit.mjs",
@@ -122,6 +123,7 @@
       "label": "飞书与终端集成",
       "build": "backend",
       "tests": [
+        "feishu-inbound-attachments-selftest.mjs",
         "feishu-channel-production-selftest.mjs",
         "feishu-control-bot-reliability-selftest.mjs",
         "feishu-global-agent-roundtrip-selftest.mjs",

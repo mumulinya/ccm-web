@@ -1,4 +1,37 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.GLOBAL_DISPATCH_VISIBLE_TEXT_PATTERN = exports.GLOBAL_USER_SUMMARY_TECHNICAL_EVIDENCE_PATTERN = exports.GLOBAL_USER_SUMMARY_INTERNAL_PATTERN = void 0;
 exports.nowIso = nowIso;
@@ -24,8 +57,10 @@ exports.buildGlobalDispatchRow = buildGlobalDispatchRow;
 exports.isGlobalDispatchTool = isGlobalDispatchTool;
 exports.normalizeGlobalDispatchLaunchRowStatus = normalizeGlobalDispatchLaunchRowStatus;
 exports.buildGlobalDispatchLaunchSummary = buildGlobalDispatchLaunchSummary;
+const crypto = __importStar(require("crypto"));
 const global_agent_run_store_1 = require("./global-agent-run-store");
 const user_facing_text_1 = require("../user-facing-text");
+const pre_plan_clarification_1 = require("../pre-plan-clarification");
 function nowIso(runtime) {
     return new Date(runtime?.now ? runtime.now() : Date.now()).toISOString();
 }
@@ -178,6 +213,26 @@ function buildGlobalClarificationSummary(input) {
         input.decision?.reason,
     ].filter(Boolean);
     const reason = compactGlobalUserSummaryText(rawReasons.join("；"), "目标、范围或授权信息还不够明确。", 320);
+    const structuredQuestions = input.decision?.structuredClarificationQuestions
+        || input.decision?.structured_clarification_questions
+        || input.decision?.workflowDecision?.structuredClarificationQuestions
+        || input.run.workflow_decision?.structuredClarificationQuestions
+        || input.run.workflowDecision?.structuredClarificationQuestions
+        || [];
+    const prePlanClarification = (0, pre_plan_clarification_1.buildPrePlanClarification)({
+        scope: "global",
+        scopeId: "global",
+        exactSessionId: input.run.session_id,
+        anchorMessageId: input.run.id,
+        id: `preplan:global:${input.run.id}`,
+        generation: Number(input.run.generation || 0),
+        revision: Number(input.run.revision || 1),
+        round: Math.max(1, Math.min(2, Number(input.run.resume_count || 0) + 1)),
+        questions: structuredQuestions,
+        fallbackQuestions: structuredQuestions.length ? [] : [question],
+        headline: reason,
+        originalRequestChecksum: crypto.createHash("sha256").update(String(input.run.user_message || "")).digest("hex"),
+    });
     return {
         schema: "ccm-global-main-agent-clarification-summary-v1",
         surface: "global",
@@ -193,6 +248,8 @@ function buildGlobalClarificationSummary(input) {
             "说明你希望看到的验收结果：例如改动文件、验证命令或最终效果。",
         ],
         next_action: "你回复后，我会沿用同一个运行继续规划、执行和总结。",
+        pre_plan_clarification: prePlanClarification,
+        prePlanClarification,
         display_policy: {
             user_text_first: true,
             technical_default_collapsed: true,

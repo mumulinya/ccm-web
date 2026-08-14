@@ -1,5 +1,6 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
+import PlanConfirmationPanel from '../common/PlanConfirmationPanel.vue'
 import MainAgentDecisionCard from '../agents/MainAgentDecisionCard.vue'
 import TaskRecoveryRetryNotice from './TaskRecoveryRetryNotice.vue'
 import { useTaskRecoveryPresentation } from '../../composables/useTaskRecoveryPresentation.js'
@@ -686,8 +687,10 @@ const planRiskSummary = computed(() => planMode.value?.risk?.summary ? planCopy(
 const planAcceptanceItems = computed(() => asList(planMode.value?.acceptance).map(item => planCopy(item, '验收标准已整理。', 260)).slice(0, 8))
 const planPermissionBoundaries = computed(() => asList(planMode.value?.permission_boundaries).map(item => planCopy(item, '执行边界已整理。', 260)).slice(0, 8))
 const planAcceptFeedback = ref('')
-const planAcceptFeedbackId = computed(() => `plan-accept-feedback-${props.card.task_id || props.card.id || 'task'}`)
 const isPlanConfirmAction = (action) => action?.kind === 'confirm_plan' || (props.context === 'global' && action?.kind === 'confirm')
+const isPlanReviseAction = (action) => ['revise_plan', 'replan'].includes(action?.kind)
+const planConfirmAction = computed(() => asList(props.card.actions).find(isPlanConfirmAction) || null)
+const planReviseAction = computed(() => asList(props.card.actions).find(isPlanReviseAction) || null)
 const hasPlanConfirmAction = computed(() => !!planMode.value && props.card.phase === 'needs_user' && asList(props.card.actions).some(isPlanConfirmAction))
 const planApprovalRequest = computed(() => {
   const plan = planMode.value
@@ -934,7 +937,8 @@ const recoverySummary = computed(() => displayValue(props.card.recovery_summary 
 const { recoveryPresentation } = useTaskRecoveryPresentation(() => props.card)
 const recoveryActions = computed(() => asList(props.card.actions).filter(action => ['resume_interrupted', 'cancel'].includes(action?.kind)))
 const visibleCardActions = computed(() => asList(card.value.actions)
-  .filter(action => !recoveryPresentation.value.visible || !['resume_interrupted', 'cancel'].includes(action?.kind)))
+  .filter(action => !recoveryPresentation.value.visible || !['resume_interrupted', 'cancel'].includes(action?.kind))
+  .filter(action => !(planMode.value && (isPlanConfirmAction(action) || isPlanReviseAction(action)))))
 const continuationStatus = computed(() => displayValue(props.card.continuation_status || props.card.continuationStatus || null, '接续状态已整理。'))
 const continuationNeedsReplan = computed(() => continuationStatus.value?.replan_required === true || continuationStatus.value?.replanRequired === true)
 const continuationSteps = computed(() => {
@@ -1158,7 +1162,7 @@ const taskActionPayload = (action) => {
 watch(() => props.card.task_id || props.card.id || '', () => {
   planAcceptFeedback.value = ''
 })
-const handoffActionCanEmit = (action) => ['view_changes', 'continue', 'retry', 'resume', 'interrupt', 'resume_interrupted', 'cancel', 'gap_continue', 'confirm_plan', 'revise_plan', 'approve_epic', 'targeted_rework', 'continue_work_item', 'rollback', 'save_knowledge'].includes(action?.kind)
+const handoffActionCanEmit = (action) => ['view_changes', 'continue', 'retry', 'resume', 'pause', 'resume_paused', 'force_interrupt', 'interrupt', 'resume_interrupted', 'cancel', 'gap_continue', 'confirm_plan', 'revise_plan', 'approve_epic', 'targeted_rework', 'continue_work_item', 'rollback', 'save_knowledge'].includes(action?.kind)
 const handoffActionPayload = (action) => {
   if (!action) return action
   if (action.kind === 'view_changes') {

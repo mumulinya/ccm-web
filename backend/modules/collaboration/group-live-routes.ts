@@ -1,6 +1,7 @@
 // group-live-routes.ts — merged from 3 part files (behavior-freeze merge).
 
 import * as crypto from "crypto";
+import { buildPrePlanClarification } from "../../agents/pre-plan-clarification";
 import type {
   IncomingMessage,
   ServerResponse,
@@ -72,6 +73,12 @@ import {
   buildExactGroupSessionModelContextPacket,
 } from "./group-session-model-context";
 import { appendUserVisibleRequirementPlan } from "../../system/user-visible-agent-events";
+import { conversationTurnControl } from "../../agents/conversation-turn-control";
+import {
+  buildRecoverableTaskSummary,
+  decideConversationMessageRoute,
+  findRecoverableConversationTasks,
+} from "../../agents/conversation-message-routing";
 
 // ===== merged from group-live-routes-part-01.ts =====
 
@@ -120,12 +127,11 @@ export type GroupLiveRoutesDeps = {
   extractAgentReceipt: (text: string, project: string) => any;
 };
 
-const GROUP_MODEL_RESUME_TEXT = /^(?:继续|重试|再试(?:一次)?|重新尝试|接着来|恢复执行|resume|retry)[。！!,.，\s]*$/i;
-
 export function resolveGroupModelRecovery(messages: any[] = [], input: any = {}) {
   const requestedId = String(input?.resumeMessageId || input?.resume_message_id || "").trim();
-  const text = String(input?.message || "").trim();
-  if (!requestedId && !GROUP_MODEL_RESUME_TEXT.test(text)) return null;
+  // Free-form text, including “继续”, must pass through the main Agent's
+  // semantic routing. Only the explicit recovery control supplies an id.
+  if (!requestedId) return null;
   let failureIndex = requestedId
     ? messages.findIndex((item: any) => String(item?.id || item?.message_id || "") === requestedId)
     : -1;
@@ -252,6 +258,7 @@ export function buildGroupClarificationSummary(input: {
   dispatchPolicy?: any;
   analysis?: any;
   coordinator?: string;
+  round?: number;
 }) {
   const members = Array.isArray(input.group?.members)
     ? input.group.members.map((member: any) => String(member?.project || "").trim()).filter((name: string) => name && !/^coordinator$/i.test(name)).slice(0, 8)
@@ -273,6 +280,26 @@ export function buildGroupClarificationSummary(input: {
     "补充你希望完成的验收标准",
     "说明是否允许修改代码、配置或执行验证",
   ].filter(Boolean).slice(0, 3);
+  const structuredQuestions = input.dispatchPolicy?.structuredClarificationQuestions
+    || input.dispatchPolicy?.structured_clarification_questions
+    || input.analysis?.structuredClarificationQuestions
+    || input.analysis?.structured_clarification_questions
+    || [];
+  const scopeId = String(input.group?.id || input.group?.group_id || input.group?.name || "").trim();
+  const exactSessionId = String(input.group?.exactSessionId || input.group?.session_id || input.group?.sessionId || "").trim();
+  const anchorMessageId = String(input.dispatchPolicy?.responseMessageId || input.dispatchPolicy?.response_message_id || crypto.randomUUID());
+  const prePlanClarification = buildPrePlanClarification({
+    scope: "group",
+    scopeId,
+    exactSessionId,
+    anchorMessageId,
+    id: `preplan:group:${scopeId}:${anchorMessageId}`,
+    questions: structuredQuestions,
+    round: Math.max(1, Math.min(2, Number(input.round || 1))),
+    fallbackQuestions: structuredQuestions.length ? [] : [question],
+    headline: reason,
+    originalRequestChecksum: crypto.createHash("sha256").update(String(input.userMessage || "")).digest("hex"),
+  });
   return {
     schema: "ccm-group-main-agent-clarification-summary-v1",
     title: "需要你补充信息",
@@ -283,6 +310,8 @@ export function buildGroupClarificationSummary(input: {
     reason,
     answer_suggestions: suggestions,
     next_action: "你回复后，我会带着补充信息继续判断：直接回答、进入计划确认，或安排执行成员。",
+    pre_plan_clarification: prePlanClarification,
+    prePlanClarification,
     coordinator: sanitizeMainAgentRoleLanguage(input.coordinator || "我"),
     display_policy: {
       user_visible: true,
@@ -350,7 +379,7 @@ export function buildGroupClarificationContinuationMessage(context: any, answerF
     "[用户补充]",
     answer,
     "[接续要求]",
-    "这是对同一请求的补充回答。请合并原始请求与补充信息继续判断、规划或执行，不要把这条简短回答当成独立新任务。",
+    "这是对同一请求的计划前业务澄清。请合并原始请求与补充信息生成详细计划和执行清单；计划必须等待用户确认后才能派发执行成员。不要把这条简短回答当成独立新任务。",
   ].filter(Boolean).join("\n\n");
 }
 
@@ -365,8 +394,8 @@ export function resolveStoredGroupClarification(groupId: string, pending: any, a
   const context = groupClarificationContext(current) || pending.context;
   messages[index] = {
     ...current,
-    clarification_summary: summary ? { ...summary, status: "resolved", status_label: "已补充", resolved_at: resolvedAt, answer_message_id: answerMessageId } : summary,
-    clarificationSummary: summary ? { ...summary, status: "resolved", status_label: "已补充", resolved_at: resolvedAt, answer_message_id: answerMessageId } : summary,
+    clarification_summary: summary ? { ...summary, status: "resolved", status_label: "已确认", resolved_at: resolvedAt, answer_message_id: answerMessageId, pre_plan_clarification: summary.pre_plan_clarification ? { ...summary.pre_plan_clarification, status: "resolved", revision: Number(summary.pre_plan_clarification.revision || 1) + 1 } : undefined } : summary,
+    clarificationSummary: summary ? { ...summary, status: "resolved", status_label: "已确认", resolved_at: resolvedAt, answer_message_id: answerMessageId, prePlanClarification: summary.prePlanClarification ? { ...summary.prePlanClarification, status: "resolved", revision: Number(summary.prePlanClarification.revision || 1) + 1 } : undefined } : summary,
     clarification_context: { ...context, status: "resolved", resolved_at: resolvedAt, answer_message_id: answerMessageId },
     clarificationContext: { ...context, status: "resolved", resolved_at: resolvedAt, answer_message_id: answerMessageId },
   };
@@ -580,14 +609,14 @@ export async function handleGroupLiveRoutesSendPreface(
 
         const explicitContinuationTaskId = String(payload.continuation_task_id || payload.continuationTaskId || "").trim();
         const explicitContinuationResolution = resolveExplicitGroupContinuationTask(loadTasks(), group_id, explicitContinuationTaskId);
-        const explicitContinuationTask = explicitContinuationResolution.task;
+        let explicitContinuationTask = explicitContinuationResolution.task;
         if (explicitContinuationTaskId && !explicitContinuationTask) {
           sendJson(res, { error: explicitContinuationResolution.error }, explicitContinuationResolution.status || 404); return { done: true as const };
         }
         if (explicitContinuationTask && String(explicitContinuationTask.group_session_id || explicitContinuationTask.groupSessionId || "default") !== groupSessionId) {
           sendJson(res, { error: "这个任务属于另一个群聊会话，请切换到任务所属会话后继续" }, 409); return { done: true as const };
         }
-        const explicitContinuationKind = String(payload.continuation_kind || payload.continuationKind || "supplement").trim().toLowerCase();
+        let explicitContinuationKind = String(payload.continuation_kind || payload.continuationKind || "supplement").trim().toLowerCase();
         if (explicitContinuationTaskId && !["supplement", "revise_goal"].includes(explicitContinuationKind)) {
           sendJson(res, { error: "不支持的任务接续类型" }, 400); return { done: true as const };
         }
@@ -638,7 +667,17 @@ export async function handleGroupLiveRoutesSendPreface(
         const requestRecoveryAttempt = Math.max(1, Number(modelRecovery?.attempt || 1));
         const requestTurnId = `${requestExecutionAnchorMessageId}:attempt:${requestRecoveryAttempt}:${incomingUserMessageId}`;
         const exactSessionContext = buildExactGroupSessionModelContextPacket(group_id, { groupSessionId }).rendered;
-        let taskIntent = await classifyGroupProjectTaskIntentWithAgent({
+        const recoverableCandidates = findRecoverableConversationTasks({
+          scope: "group",
+          scopeId: String(group_id),
+          exactSessionId: groupSessionId,
+        });
+        const semanticRoutingContext = recoverableCandidates.length
+          ? `${exactSessionContext}\n\n[当前精确会话的可恢复任务摘要]\n${JSON.stringify(recoverableCandidates.slice(0, 3).map(buildRecoverableTaskSummary))}\n请结合当前消息判断 continuationKind；不要仅因为存在旧任务就续接。`
+          : exactSessionContext;
+        let taskIntent: any;
+        try {
+          taskIntent = await classifyGroupProjectTaskIntentWithAgent({
             group,
             message: effectiveUserMessage,
             uploadedFiles,
@@ -649,8 +688,42 @@ export async function handleGroupLiveRoutesSendPreface(
             groupSessionId,
             turnId: requestTurnId,
             anchorMessageId: requestExecutionAnchorMessageId,
-            context: exactSessionContext,
+            context: semanticRoutingContext,
           });
+        } catch (error: any) {
+          if (String(payload.resolved_route || payload.resolvedRoute || "")) throw error;
+          const conversationId = `${group_id}:${groupSessionId}`;
+          const conversationTurnId = String(payload.conversation_turn_id || payload.conversationTurnId || "");
+          let routeTurn = conversationTurnId
+            ? conversationTurnControl.listInternal({ scope: "group", conversation_id: conversationId, limit: 500 }).turns.find(item => item.id === conversationTurnId)
+            : null;
+          if (!routeTurn) {
+            const created = conversationTurnControl.enqueue({
+              scope: "group",
+              conversation_id: conversationId,
+              mode: "queue",
+              message: userMessage,
+              request_id: `route:${client_message_id || crypto.randomUUID()}`,
+              metadata: { group_id, group_session_id: groupSessionId, original_message_id: client_message_id },
+            });
+            routeTurn = conversationTurnControl.claim({ scope: "group", conversation_id: conversationId, id: created.turn.id, revision: created.turn.revision });
+          }
+          if (!routeTurn || routeTurn.status !== "sending") throw error;
+          const routed = conversationTurnControl.requireRoute({
+            id: routeTurn.id,
+            revision: routeTurn.revision,
+            routing: {
+              candidateTaskId: String(recoverableCandidates[0]?.id || ""),
+              confidence: 0,
+              reason: "主 Agent 暂时无法可靠判断这条消息是否续接原任务，请选择处理方式",
+            },
+          });
+          res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "private, no-store", "Connection": "keep-alive", "Access-Control-Allow-Origin": "*" });
+          writeSse(res, { type: "route_required", turn: { id: routed.id, revision: routed.revision, status: routed.status, routing: routed.routing }, messageId: client_message_id });
+          writeSse(res, { type: "done", route_required: true, messageId: client_message_id });
+          res.end();
+          return { done: true as const };
+        }
         if (readOnly && taskIntent?.workflowDecision?.actionRequired === true) {
           sendJson(res, { success: false, error: "当前 Viewer 账户仅允许群聊只读问答；这条需求需要创建或执行任务，请联系 Operator 或 Admin", code: "VIEWER_EXECUTION_FORBIDDEN" }, 403);
           return { done: true as const };
@@ -665,6 +738,69 @@ export async function handleGroupLiveRoutesSendPreface(
               continuationKind: explicitContinuationKind,
             }),
           };
+        }
+        const explicitRouteChoice = String(payload.resolved_route || payload.resolvedRoute || "").trim();
+        const resolvedCandidateTaskId = String(payload.resolved_candidate_task_id || payload.resolvedCandidateTaskId || "").trim();
+        const explicitRouteCandidate = explicitRouteChoice === "continue_original"
+          ? recoverableCandidates.find((item: any) => String(item.id || "") === resolvedCandidateTaskId)
+          : null;
+        if (explicitRouteChoice === "continue_original") {
+          if (!explicitRouteCandidate) {
+            sendJson(res, { error: "原任务已不可恢复，请重新选择处理方式", code: "CONVERSATION_ROUTE_CANDIDATE_STALE" }, 409);
+            return { done: true as const };
+          }
+          explicitContinuationTask = explicitRouteCandidate;
+          explicitContinuationKind = String(taskIntent?.workflowDecision?.continuationKind || "supplement") === "revise_goal" ? "revise_goal" : "supplement";
+        } else if (explicitRouteChoice === "start_new_task" && taskIntent?.workflowDecision) {
+          taskIntent = { ...taskIntent, workflowDecision: { ...taskIntent.workflowDecision, continuationKind: "new_task" } };
+        } else if (explicitRouteChoice === "answer_only" && taskIntent?.workflowDecision) {
+          taskIntent = {
+            ...taskIntent,
+            kind: "conversation",
+            workflowDecision: explicitWorkflowDecision("answer", "用户明确选择仅回答当前问题", {
+              ...taskIntent.workflowDecision,
+              actionRequired: false,
+              requiresCodeChanges: false,
+              continuationKind: "new_task",
+            }),
+          };
+        } else if (!explicitContinuationTask && !clarificationContext && !modelRecovery) {
+          const routeDecision = decideConversationMessageRoute({ workflowDecision: taskIntent?.workflowDecision, candidates: recoverableCandidates });
+          if (["resume_task", "revise_task"].includes(routeDecision.decision) && routeDecision.candidate) {
+            explicitContinuationTask = routeDecision.candidate;
+            explicitContinuationKind = routeDecision.decision === "revise_task" ? "revise_goal" : "supplement";
+          } else if (routeDecision.decision === "needs_user") {
+            const conversationId = `${group_id}:${groupSessionId}`;
+            const conversationTurnId = String(payload.conversation_turn_id || payload.conversationTurnId || "");
+            let routeTurn = conversationTurnId
+              ? conversationTurnControl.listInternal({ scope: "group", conversation_id: conversationId, limit: 500 }).turns.find(item => item.id === conversationTurnId)
+              : null;
+            if (!routeTurn) {
+              const created = conversationTurnControl.enqueue({
+                scope: "group",
+                conversation_id: conversationId,
+                mode: "queue",
+                message: userMessage,
+                request_id: `route:${client_message_id || crypto.randomUUID()}`,
+                metadata: { group_id, group_session_id: groupSessionId, original_message_id: client_message_id },
+              });
+              routeTurn = conversationTurnControl.claim({ scope: "group", conversation_id: conversationId, id: created.turn.id, revision: created.turn.revision });
+            }
+            if (!routeTurn || routeTurn.status !== "sending") {
+              sendJson(res, { error: "消息处理方式已经变化，请刷新后重试", code: "QUEUE_REVISION_CONFLICT" }, 409);
+              return { done: true as const };
+            }
+            const routed = conversationTurnControl.requireRoute({
+              id: routeTurn.id,
+              revision: routeTurn.revision,
+              routing: { candidateTaskId: String(routeDecision.candidate?.id || ""), confidence: routeDecision.confidence, reason: routeDecision.reason },
+            });
+            res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "private, no-store", "Connection": "keep-alive", "Access-Control-Allow-Origin": "*" });
+            writeSse(res, { type: "route_required", turn: { id: routed.id, revision: routed.revision, status: routed.status, routing: routed.routing }, messageId: client_message_id });
+            writeSse(res, { type: "done", route_required: true, messageId: client_message_id });
+            res.end();
+            return { done: true as const };
+          }
         }
         const statusFollowupRequest = isOrchestrated
           && !clarificationContext
@@ -1074,6 +1210,11 @@ export function handleGroupLiveRoutes(
             attachmentCount: attachmentRecords.length,
             coordinatorProject: coordinator.project,
           });
+          if (clarificationContext) {
+            planModePreflight.requires_confirmation = true;
+            planModePreflight.auto_continue = false;
+            planModePreflight.clarification_resolved = true;
+          }
           const requirementEpicPlan = sourceIngestion.decomposition && sourceIngestion.decomposition.items.length > 1
             ? sourceIngestion.decomposition
             : null;
@@ -1491,22 +1632,7 @@ export function handleGroupLiveRoutes(
           const recoveryAttempt = Math.max(1, Number(requestRecoveryAttempt || modelRecovery?.attempt || 1));
           const visibleTurnId = String(requestTurnId || `${executionAnchorMessageId}:attempt:${recoveryAttempt}:${responseMessageId}`);
           let coordinatorDeltaEmitted = false;
-          const streamBufferedCoordinatorReply = async (content: string) => {
-            const characters = Array.from(String(content || ""));
-            const chunkSize = characters.length > 2400 ? 36 : characters.length > 800 ? 24 : 16;
-            for (let offset = 0; offset < characters.length; offset += chunkSize) {
-              if (res.destroyed || res.writableEnded) break;
-              writeSse(res, {
-                type: "chunk",
-                agent: coordinator.project,
-                text: characters.slice(offset, offset + chunkSize).join(""),
-              });
-              (res as any).flush?.();
-              if (offset + chunkSize < characters.length) {
-                await new Promise(resolve => setTimeout(resolve, 14));
-              }
-            }
-          };
+          writeSse(res, { type: "response_started", agent: coordinator.project });
           const coordinatorResult = await runGroupOrchestrator({
             group,
             message: projectAnalysisRequest
@@ -1525,11 +1651,12 @@ export function handleGroupLiveRoutes(
               if (!delta) return;
               coordinatorDeltaEmitted = true;
               writeSse(res, {
-                type: "chunk",
+                type: "response_delta",
                 agent: coordinator.project,
                 text: delta,
               });
             },
+            onModelActivity: (activity: any) => writeSse(res, { type: "model_activity", activity, agent: coordinator.project }),
           });
           writeSse(res, {
             type: "turn_decision",
@@ -1543,7 +1670,7 @@ export function handleGroupLiveRoutes(
           try {
             const outputText = coordinatorResult.content;
             if (!coordinatorDeltaEmitted && String(outputText || "").trim()) {
-              await streamBufferedCoordinatorReply(outputText);
+              writeSse(res, { type: "response_delta", agent: coordinator.project, text: String(outputText) });
             }
             const coordinatorRuntime = String((coordinatorResult as any).runtime || "");
             const providerFailure = (coordinatorResult as any).providerFailure || null;
@@ -1597,12 +1724,13 @@ export function handleGroupLiveRoutes(
             });
             const clarificationSummary = dispatchPolicy?.action === "ask_user"
               ? buildGroupClarificationSummary({
-                group,
+                group: { ...group, exactSessionId: groupSessionId },
                 userMessage: effectiveUserMessage,
                 responseText: outputText,
-                dispatchPolicy,
+                dispatchPolicy: { ...dispatchPolicy, responseMessageId },
                 analysis: (coordinatorResult as any).analysis || null,
                 coordinator: coordinator.project,
+                round: clarificationContext ? Math.min(2, Number(clarificationContext?.pre_plan_clarification?.round || 1) + 1) : 1,
               })
               : null;
             const clarificationContextRecord = clarificationSummary ? {
@@ -1621,8 +1749,13 @@ export function handleGroupLiveRoutes(
               trace_id: clarificationContext?.trace_id || clarificationContext?.traceId || messageTraceId,
               parent_request_id: clarificationRequestId || "",
               created_at: new Date().toISOString(),
+              revision: clarificationSummary.pre_plan_clarification?.revision || 1,
+              generation: clarificationSummary.pre_plan_clarification?.generation || 0,
+              original_request_checksum: clarificationSummary.pre_plan_clarification?.originalRequestChecksum || "",
+              pre_plan_clarification: clarificationSummary.pre_plan_clarification,
             } : null;
             applyMainAgentDecisionPetState(ctx, mainAgentDecision);
+            writeSse(res, { type: "response_completed", agent: coordinator.project, final: true });
             writeSse(res, {
               type: "agent_done",
               agent: coordinator.project,

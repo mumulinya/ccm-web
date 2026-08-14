@@ -15,6 +15,7 @@ const agent_communication_mcp_1 = require("../../integrations/agent-communicatio
 const agent_sessions_1 = require("../../tasks/agent-sessions");
 const user_visible_agent_events_1 = require("../../system/user-visible-agent-events");
 const conversation_permission_policy_1 = require("../tools/conversation-permission-policy");
+const task_pause_control_1 = require("../../tasks/task-pause-control");
 function groupPlanningProjectRefs(task) {
     return Array.from(new Set([
         ...(Array.isArray(task?.workflow_decision?.targetRefs) ? task.workflow_decision.targetRefs : []),
@@ -122,6 +123,10 @@ function sourceGroundedPlanModeUpdates(task, architecturePlan, sourceEvidence, e
 }
 async function executeTask(task, ctx, deps) {
     const { addTaskLog, admitChildTypedMemoryDelivery, alignRequirementEpicAssignments, appendGroupMessage, appendTaskTimelineEvent, assertRuntimeToolDispatchReady, attachExecutionWorkspace, attachInvokedSkillsToReceipt, attachMemoryContextConsumptionChallenge, bindTaskAgentInvocationContext, bindTaskAgentInvocationMemoryDelivery, bindTaskAgentInvocationRunnerRequest, bindTaskAgentMemoryContextSnapshot, buildAgentMemoryContextBundleWithManifestSelection, buildAgentToolContext, buildChildAgentDevelopmentContract, buildChildAgentTaskText, buildChildAgentWorkerHandoff, buildChildAgentWorktreeNotice, buildCoordinatorSharedFilesContext, buildGroupMainPlanningSourceContext, buildProjectVerificationHints, buildQueuedGroupTaskMessage, buildTaskProviderSwitchRequests, buildTaskSandboxRehearsal, buildTaskSourceDocumentsContext, buildUserCoordinationAcknowledgement, buildWorkerContinuationHandoff, buildWorkflowMeta, captureReasoningFacts, checkTaskFailure, claimTaskWorkItemForAgent, commitChildTypedMemoryDelivery, commitTaskAgentSessionCapacityRevalidation, compactMemoryText, compactRuntimeToolAudit, completeTaskAgentInvocationEdge, createChildTypedMemoryDispatchWal, createExecutionCheckpoint, createMemoryContextConsumptionChallenge, dispatchTaskAgentInvocationEdge, ensureExecution, evaluateGreenContract, explainReasoningDecision, extractAgentReceipt, extractRunnerVerificationEvidence, getChildAgentIsolationMode, getConfigInfo, getConfigs, getCoordinatorActionMentions, getCoordinatorMember, getGroupTaskExecutionStatus, getInitialWorkflowMeta, getRoutableMembers, getTaskAgentSessionOptions, getTaskExecutionFromReceipt, groupSessionIdForTask, loadExecution, loadGroups, loadTasks, markChildTypedMemoryDispatchCommitted, markChildTypedMemoryDispatchStarted, markChildTypedMemoryRunnerReturned, markGroupCoordinationDependencyStarted, memoryContextConsumptionReceiptFile, mergeCoordinatorDocumentContexts, normalizeAgentReasoningState, normalizePlanAssignments, openTaskAgentSession, prepareAgentRuntimeTools, prepareChildAgentWorkDir, prepareTaskAgentInvocationEdge, prepareTaskAgentSessionCapacityRevalidation, processCrossAgents, recordAgentRuntimeLifecycle, recordReasoningDeviation, recordReplayRepairTimelineBindingsForMention, recordTaskAgentMemoryContextDelivery, recordTaskAgentSessionTurn, requirementEpicExecutionBoundary, runCoordinatorReviewLoop, runGroupOrchestrator, runtimeToolDispatchBlockedReceipt, runtimeToolSnapshotFromAudit, safeAddGroupLog, saveTasks, setReasoningAssertion, summarizeReplayRepairTimelineBindingsForEvent, summarizeWorkerHandoffForUser, taskAgentInvocationMemoryOptions, taskAgentSessionLifecycleRunnerOptions, taskRequiresCodeChanges, transitionExecution, updateGroupMemory, updateReasoningPlan, updateTask, updateTaskWorkItemFromReceipt } = deps;
+    const pauseBoundary = (phase, workItemId = "") => {
+        const latest = loadTasks().find((item) => String(item?.id || "") === String(task.id || "")) || task;
+        (0, task_pause_control_1.assertTaskPauseBoundary)(latest, phase, workItemId);
+    };
     const configs = getConfigs();
     let acceptancePolicyResult = (0, task_acceptance_policy_1.resolveTaskAcceptancePolicy)(task, { allowLegacyCapture: true });
     if (acceptancePolicyResult.legacyCaptured && acceptancePolicyResult.snapshot) {
@@ -142,23 +147,42 @@ async function executeTask(task, ctx, deps) {
         const appendGroupTaskPlanState = (phase) => {
             const latestTask = loadTasks().find((item) => item.id === task.id) || task;
             const planMode = latestTask?.workflow_meta?.plan_mode || latestTask?.workflow_meta?.intake?.plan_mode || latestTask?.intake_draft || {};
-            const sourceSteps = Array.isArray(planMode?.steps) ? planMode.steps : [];
+            const explicitWorkItems = Array.isArray(latestTask?.work_items) ? latestTask.work_items : [];
+            const sourceSteps = explicitWorkItems.length ? explicitWorkItems : (Array.isArray(planMode?.steps) ? planMode.steps : []);
             if (!sourceSteps.length)
                 return null;
             const normalized = sourceSteps.map((step, index) => ({
                 id: String(step?.id || `step_${index + 1}`),
+                workItemId: String(step?.workItemId || step?.work_item_id || step?.id || `step_${index + 1}`),
                 title: String(step?.label || step?.title || `实施步骤 ${index + 1}`),
-                description: String(step?.detail || "按当前计划完成该步骤。"),
-                outcome: String(step?.outcome || "完成后进入下一阶段。"),
-                project: String(step?.project || ""),
+                description: String(step?.objective || step?.detail || "按当前计划完成该步骤。"),
+                outcome: String(step?.outcome || step?.acceptanceCriteria?.[0] || step?.acceptance_criteria?.[0] || "完成后进入下一阶段。"),
+                project: String(step?.project || step?.target_project || ""),
                 dependsOn: Array.isArray(step?.dependsOn || step?.depends_on) ? (step.dependsOn || step.depends_on) : [],
                 status: String(step?.status || "pending"),
+                waitingReason: String(step?.waitingReason || step?.waiting_reason || ""),
             }));
             const completedStatus = (value) => ["completed", "done", "success", "succeeded"].includes(value.toLowerCase());
             let activeAssigned = false;
             const steps = normalized.map((step) => {
                 if (phase === "completed")
                     return { ...step, status: "completed" };
+                if (explicitWorkItems.length) {
+                    const dependencyWaiting = step.dependsOn.length > 0 && step.dependsOn.some((id) => {
+                        const dependency = normalized.find((item) => item.id === id || item.workItemId === id);
+                        return dependency && !completedStatus(dependency.status);
+                    });
+                    if (dependencyWaiting && ["pending", "queued", "waiting"].includes(step.status.toLowerCase())) {
+                        return { ...step, status: "waiting_dependency", waitingReason: step.waitingReason || "等待前置工作项验收" };
+                    }
+                    if (phase === "reviewing" && !completedStatus(step.status))
+                        return { ...step, status: "reviewing" };
+                    if (phase === "blocked" && !activeAssigned && !completedStatus(step.status)) {
+                        activeAssigned = true;
+                        return { ...step, status: "blocked" };
+                    }
+                    return step;
+                }
                 if (phase === "reviewing")
                     return { ...step, status: step.id === "verify_and_summarize" || step.id === "verify_and_reply" ? "running" : "completed" };
                 if (phase === "dispatching") {
@@ -225,6 +249,7 @@ async function executeTask(task, ctx, deps) {
             targetProjects: groupPlanningProjectRefs(task),
             maxRounds: 3,
         });
+        pauseBoundary("planning");
         const planningSourceSummary = summarizeGroupPlanningSource(planningSource);
         const previousSourceChecksum = String(task?.intake_draft?.read_only_exploration?.source_snapshot_checksum
             || task?.workflow_meta?.plan_mode?.read_only_exploration?.source_snapshot_checksum
@@ -293,6 +318,7 @@ async function executeTask(task, ctx, deps) {
                 "本轮是源码驱动规划。必须引用注入的当前源码证据，生成明确的目标、边界、跨项目数据关系、依赖顺序和可验收工作项；不得把需求分析或跨项目架构设计转交给开发 Agent。开发 Agent只负责本项目内的当前源码复查、实现、验证和结果说明。",
             ].filter(Boolean).join("\n\n"),
         });
+        pauseBoundary("planning");
         let coordinatorOutput = coordinatorResult.content;
         const coordinatorTranscript = [coordinatorOutput].filter(Boolean);
         const initialCoordinatorRuntime = String(coordinatorResult.runtime || "");
@@ -455,6 +481,7 @@ async function executeTask(task, ctx, deps) {
                     "上一轮模型没有生成可执行 assignments。请重新核对用户目标与群成员职责；若信息足够，必须由模型返回结构化 assignments；若不足，明确返回 clarificationQuestions，禁止规则补派。",
                 ].filter(Boolean).join("\n\n"),
             });
+            pauseBoundary("planning");
             const repairMentions = getCoordinatorActionMentions(repairResult, group, coordinatorProject);
             const repairAssignments = normalizePlanAssignments(repairResult.assignments || []);
             if (repairMentions.length > 0 || repairAssignments.length > 0) {
@@ -534,6 +561,7 @@ async function executeTask(task, ctx, deps) {
         let crossOutputs = [];
         let reviewResult = null;
         if (validMentions.length > 0) {
+            pauseBoundary("dispatching");
             addTaskLog(task.id, "info", `检测到群聊派发目标: ${validMentions.map(m => m.mention).join(", ")}`);
             const dispatchReplayRepairBindings = validMentions.flatMap((mention) => summarizeReplayRepairTimelineBindingsForEvent(mention, {
                 taskId: task.id,
@@ -581,6 +609,7 @@ async function executeTask(task, ctx, deps) {
             }
             appendGroupTaskPlanState("dispatching");
             crossOutputs = await processCrossAgents(task.group_id, group, coordinatorProject, coordinatorOutput, validMentions, configs, ctx, null, 0, new Set(), coordinatorResult.executionOrder || "parallel", coordinatorMessageId, task.id);
+            pauseBoundary("reviewing");
             appendGroupTaskPlanState("reviewing");
             reviewResult = await runCoordinatorReviewLoop({
                 groupId: task.group_id,
@@ -595,6 +624,7 @@ async function executeTask(task, ctx, deps) {
                 groupSessionId: task.group_session_id || task.groupSessionId || "",
                 acceptancePolicy,
             });
+            pauseBoundary("reviewing");
             appendTaskTimelineEvent(task.id, { type: "coordinator_review", title: "主 Agent 验收", detail: compactMemoryText(reviewResult?.content || reviewResult?.detail || "", 500), status: reviewResult?.status === "done" ? "ok" : "warn", phase: "reviewing", agent: coordinatorProject, data: { review: reviewResult?.review || reviewResult } });
         }
         const outputText = [...coordinatorTranscript, ...crossOutputs, reviewResult?.content || ""].filter(Boolean).join("\n\n---\n\n");
@@ -626,7 +656,9 @@ async function executeTask(task, ctx, deps) {
         let workDir = info[0]?.workDir;
         const agentType = info[0]?.agent || "claudecode";
         if (taskRequiresCodeChanges(task)) {
+            pauseBoundary("dispatching");
             const permission = await (0, conversation_permission_policy_1.authorizeProjectChildAgentStart)({ task, project: task.target_project, workDir, agentType });
+            pauseBoundary("dispatching");
             if (!permission.allowed) {
                 const detail = permission.message || "当前会话权限不允许启动代码修改 Agent";
                 updateTask(task.id, {
@@ -1176,6 +1208,7 @@ ${requirementEpicExecutionBoundary(task)}
                     background: true,
                     durableDispatch: false,
                 });
+                pauseBoundary("executing");
                 const preflightChanges = workDir ? ctx.getFileChanges(task.target_project, preflightSnapshot) : null;
                 if (Number(preflightChanges?.count || 0) > 0) {
                     (0, agent_communication_v2_1.transitionAgentCommunication)(communicationEnvelope.messageId, "recovery_required", {
@@ -1288,6 +1321,7 @@ ${requirementEpicExecutionBoundary(task)}
             if (communicationHeartbeat)
                 clearInterval(communicationHeartbeat);
         }
+        pauseBoundary("reviewing");
         if (!directCapacityRevalidationCommitted && directTaskSession && directCapacityRevalidationPreparation?.proof) {
             const capacityCommit = commitTaskAgentSessionCapacityRevalidation(directTaskSession.id, directCapacityRevalidationPreparation.proof, {
                 runnerRequestId: directRunnerRequestId,
@@ -1529,6 +1563,7 @@ ${requirementEpicExecutionBoundary(task)}
                     }],
                 workerOutputs: [output],
             });
+            pauseBoundary("reviewing");
             updateTask(task.id, { test_agent_review: null, main_agent_self_verification: projectReview, acceptance_state: projectReview.canAccept ? "main_agent_self_verified" : "main_agent_self_verification_failed" });
             appendTaskTimelineEvent(task.id, {
                 type: coordinationDependency ? "group_main_dependency_verification_finished" : "project_main_self_verification_finished",
@@ -1579,6 +1614,7 @@ ${requirementEpicExecutionBoundary(task)}
                     issuedBy: "project-main-agent",
                     previousReview,
                 });
+                pauseBoundary("reviewing");
                 const decision = projectReview?.decision || (0, test_agent_review_policy_1.classifyTestAgentReview)(projectReview);
                 const problems = (0, project_test_agent_gate_1.projectTestAgentProblems)(projectReview);
                 appendTaskTimelineEvent(task.id, {

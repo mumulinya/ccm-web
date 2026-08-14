@@ -35,10 +35,10 @@ async function classifyProjectChatIntentWithModel(message, uploadedFiles = [], o
         ? "conversation"
         : workflowDecision.mode === "project_analysis"
             ? "project_analysis"
-            : "task";
+            : (0, workflow_decision_1.isDevelopmentTaskWorkflowDecision)(workflowDecision) ? "task" : "project_analysis";
     return {
         mode,
-        executable: workflowDecision.actionRequired,
+        executable: (0, workflow_decision_1.isDevelopmentTaskWorkflowDecision)(workflowDecision),
         reason: workflowDecision.reason,
         workflowDecision,
     };
@@ -52,12 +52,16 @@ function runProjectChatIntentSelfTest() {
         ["先规划认证重构再实施", "plan_task", "task"],
     ];
     const checks = cases.map(([message, modelMode, expected]) => {
-        const workflowDecision = (0, workflow_decision_1.normalizeWorkflowDecision)({ mode: modelMode, reason: "脚本化模型决策" });
+        const workflowDecision = (0, workflow_decision_1.normalizeWorkflowDecision)({
+            mode: modelMode,
+            reason: "脚本化模型决策",
+            requiresCodeChanges: expected === "task",
+        });
         const actual = workflowDecision.mode === "answer"
             ? "conversation"
             : workflowDecision.mode === "project_analysis"
                 ? "project_analysis"
-                : "task";
+                : (0, workflow_decision_1.isDevelopmentTaskWorkflowDecision)(workflowDecision) ? "task" : "project_analysis";
         return { message, expected, actual, workflowDecision };
     });
     return { success: checks.every(item => item.actual === item.expected), checks };

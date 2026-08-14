@@ -128,18 +128,31 @@
                 @execution-action="handleProjectTaskAction(msg, $event)"
               />
               <CommandResultCard v-if="msg.type === 'command_result'" :result="msg.commandResult" />
-              <!-- 思考过程消息 -->
-                <template v-else-if="msg.role === 'thinking'">
-                  <ConversationProcessingState
-                  v-if="!hasLiveProjectExecutionForMessage(i) && shouldShowCompactProcessingState(projectAgentExecutionEvents, messages, i)"
-                  compact
-                  title="正在思考…"
-                  detail=""
-                />
-              </template>
+              <!-- 旧 thinking 信封保持静默；10 秒后的事实状态由统一执行投影原位展示。 -->
+              <template v-else-if="msg.role === 'thinking'"></template>
               <!-- 用户消息 -->
               <div v-else-if="msg.role === 'user'" class="bubble">
                 <div>{{ msg.content }}</div>
+                <div v-if="Array.isArray(msg.files) && msg.files.length" class="message-attachment-list">
+                  <a
+                    v-for="file in msg.files"
+                    :key="file.id || `${file.name}-${file.checksum}`"
+                    :href="file.upload_url || undefined"
+                    :target="file.upload_url ? '_blank' : undefined"
+                    :rel="file.upload_url ? 'noopener noreferrer' : undefined"
+                    class="message-attachment-row"
+                    @click="!file.upload_url && $event.preventDefault()"
+                  >
+                    <Paperclip :size="14" />
+                    <span class="message-attachment-name">{{ file.name || '附件' }}</span>
+                    <small>{{ attachmentSizeLabel(file.size) }}</small>
+                    <span :class="['message-attachment-status', { ok: attachmentReadOk(file) }]">
+                      <CheckCircle2 v-if="attachmentReadOk(file)" :size="13" />
+                      <AlertCircle v-else :size="13" />
+                      {{ attachmentStatusLabel(file) }}
+                    </span>
+                  </a>
+                </div>
               </div>
               <!-- Agent 回复 -->
                <ConversationSummaryBoundary v-else-if="msg.type === 'conversation_summary_boundary'" :message="msg" />
@@ -149,7 +162,7 @@
                    :task-card="getProjectTaskCard(msg)"
                    :suppress-thinking="hasLiveProjectExecutionForMessage(i)"
                   :is-last-streaming="isStreaming && i === messages.length - 1"
-                  :hide-file-changes="hasTerminalExecutionForMessage(projectAgentExecutionEvents, messages, i)"
+                  :hide-file-changes="hasAcceptedExecutionForMessage(projectAgentExecutionEvents, messages, i)"
                   :message-key="`${currentSession || 'session'}:${getMessageKey(msg)}`"
                   @task-action="handleProjectTaskAction(msg, $event)"
                   @open-file-diff="openFileDiff"
@@ -183,11 +196,24 @@
           @approve="approveProjectPermission"
           @reject="rejectProjectPermission"
         />
+        <ConversationAwayRecap
+          :events="projectAgentExecutionEvents"
+          scope="project"
+          :scope-id="currentProject || ''"
+          :exact-session-id="currentSession || ''"
+        />
+        <PrePlanClarificationDock
+          :clarification="activeProjectPrePlanClarification"
+          :busy="prePlanClarificationBusy"
+          @submit="submitProjectPrePlanClarification"
+          @defaults="submitProjectPrePlanClarification"
+          @cancel="cancelProjectPrePlanClarification"
+        />
         <ActiveTaskPlanDock
           :events="projectAgentExecutionEvents"
           :messages="messages"
           :exact-session-id="currentSession || ''"
-          :active="projectAgentExecutionEnabled && !!currentProject && !!currentSession"
+          :active="projectAgentExecutionEnabled && !!currentProject && !!currentSession && !activeProjectPrePlanClarification"
           @locate="locateProjectPlanStep"
           @execution-action="handleProjectPlanAction"
         />
@@ -198,6 +224,7 @@
           @stop="stopStreaming"
           @cancel="projectTurnControl.cancel"
           @guide="guideProjectQueuedTurn"
+          @resolve-route="resolveProjectQueuedRoute"
           @retry="(turn) => projectTurnControl.retry(turn).then(() => drainProjectTurnQueue())"
         />
         <ConversationAsideDock
@@ -205,12 +232,6 @@
           :scope-id="currentProject || ''"
           :exact-session-id="currentSession || ''"
           :active="projectTurnBusy && !!currentProject && !!currentSession"
-        />
-        <ConversationPermissionMode
-          scope="project"
-          :scope-id="currentProject || ''"
-          :exact-session-id="currentSession || ''"
-          :disabled="!currentProject || !currentSession"
         />
         <ConversationHistoryBranches
           scope="project"
@@ -235,8 +256,20 @@
           @send="sendProjectMessage"
           @stop="stopStreaming"
         >
+          <template #toolbar>
+            <ConversationModeToolbar
+              scope="project"
+              :scope-id="currentProject || ''"
+              :exact-session-id="currentSession || ''"
+              :mode-disabled="!currentProject || !currentSession || projectTurnBusy"
+              :permission-disabled="!currentProject || !currentSession"
+            />
+          </template>
           <template #context>
             <SessionContextUsage
+              scope="project"
+              :scope-id="currentProject || ''"
+              :exact-session-id="currentSession || ''"
               :usage="projectContextUsage"
               :loading="projectContextLoading"
               :error="projectContextError"

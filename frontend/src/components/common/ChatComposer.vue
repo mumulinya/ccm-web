@@ -1,5 +1,6 @@
 <script setup>
 import { computed, ref, useSlots } from 'vue'
+import { Paperclip, Send, Square } from '@lucide/vue'
 import AttachmentChips from './AttachmentChips.vue'
 import SlashCommandMenu from './SlashCommandMenu.vue'
 import SlashCommandPanel from './SlashCommandPanel.vue'
@@ -73,20 +74,29 @@ const onInput = (event) => {
   <div class="chat-composer">
     <slot name="prefix" />
     <input ref="fileInput" type="file" multiple class="hidden-file-input" :accept="props.accept" @change="onFilesSelected">
-    <button class="composer-button" type="button" :disabled="props.disabled || (props.busy && !props.allowInputWhileBusy)" :title="props.attachTitle" @click="chooseFiles">📎</button>
-    <div class="chat-input-wrap" :class="{ 'has-context-usage': !!slots.context }">
+    <div class="chat-input-wrap has-inline-footer">
       <AttachmentChips :files="props.files" @remove="emit('remove-file', $event)" />
       <OnlineDocumentReferences :text="props.modelValue" compact />
-      <textarea
-        :id="props.inputId"
-        :value="props.modelValue"
-        :placeholder="props.placeholder"
-        :rows="props.rows"
-        :disabled="props.disabled || (props.busy && !props.allowInputWhileBusy)"
-        @input="onInput"
-        @keydown="emit('keydown', $event)"
-        @paste="onPaste"
-      ></textarea>
+      <div class="composer-input-row">
+        <button
+          class="composer-button"
+          type="button"
+          :disabled="props.disabled || (props.busy && !props.allowInputWhileBusy)"
+          :title="props.attachTitle"
+          :aria-label="props.attachTitle"
+          @click="chooseFiles"
+        ><Paperclip :size="19" aria-hidden="true" /></button>
+        <textarea
+          :id="props.inputId"
+          :value="props.modelValue"
+          :placeholder="props.placeholder"
+          :rows="props.rows"
+          :disabled="props.disabled || (props.busy && !props.allowInputWhileBusy)"
+          @input="onInput"
+          @keydown="emit('keydown', $event)"
+          @paste="onPaste"
+        ></textarea>
+      </div>
       <SlashCommandMenu
         v-if="props.slash"
         :open="!!slashState.open"
@@ -103,25 +113,30 @@ const onInput = (event) => {
         @action="slashState.runPanelAction?.($event)"
       />
       <slot name="overlays" />
-      <div v-if="slots.context" class="composer-context-slot">
-        <slot name="context" />
+      <div class="composer-inline-footer">
+        <div v-if="slots.toolbar" class="composer-toolbar-slot"><slot name="toolbar" /></div>
+        <span class="composer-footer-spacer" />
+        <div v-if="slots.context" class="composer-context-slot"><slot name="context" /></div>
+        <button :class="['send-button', { stopping: props.busy && !props.allowInputWhileBusy }]" type="button" :disabled="props.disabled || (props.busy && props.allowInputWhileBusy && !props.modelValue.trim() && !props.files.length)" @click="emit(props.busy && !props.allowInputWhileBusy ? 'stop' : 'send')">
+          <Square v-if="props.busy && !props.allowInputWhileBusy" :size="13" aria-hidden="true" />
+          <Send v-else :size="14" aria-hidden="true" />
+          <span>{{ props.busy && !props.allowInputWhileBusy ? '停止' : props.sendLabel }}</span>
+        </button>
       </div>
     </div>
-    <button :class="['send-button', { stopping: props.busy && !props.allowInputWhileBusy }]" type="button" :disabled="props.disabled || (props.busy && props.allowInputWhileBusy && !props.modelValue.trim() && !props.files.length)" @click="emit(props.busy && !props.allowInputWhileBusy ? 'stop' : 'send')">
-      {{ props.busy && !props.allowInputWhileBusy ? '停止' : props.sendLabel }}
-    </button>
   </div>
 </template>
 
 <style scoped>
 .chat-composer {
   display: flex;
-  align-items: flex-end;
-  gap: 8px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
   width: 100%;
-  padding: 12px 14px;
+  padding: 10px 16px 12px;
   border-top: 1px solid var(--border-color);
-  background: var(--surface-translucent);
+  background: var(--surface);
 }
 
 .hidden-file-input {
@@ -133,20 +148,19 @@ const onInput = (event) => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  height: 44px;
+  height: 32px;
   border: 1px solid var(--border-color);
-  border-radius: 10px;
+  border-radius: 7px;
   cursor: pointer;
   transition: all 0.2s ease;
 }
 
 .composer-button {
-  width: 44px;
-  min-width: 44px;
+  width: 32px;
+  min-width: 32px;
   padding: 0;
-  background: var(--control-bg);
+  background: transparent;
   color: var(--text-secondary);
-  font-size: 16px;
 }
 
 .composer-button:hover {
@@ -156,13 +170,14 @@ const onInput = (event) => {
 }
 
 .send-button {
-  min-width: 74px;
-  padding: 0 16px;
+  min-width: 68px;
+  padding: 0 12px;
   border-color: transparent;
   background: var(--accent-blue, #2563eb);
   color: #fff;
   font-size: 13px;
-  font-weight: 800;
+  font-weight: 700;
+  gap: 5px;
 }
 
 .send-button:disabled {
@@ -175,62 +190,124 @@ const onInput = (event) => {
 .chat-input-wrap {
   position: relative;
   display: flex;
-  flex: 1;
+  width: 100%;
   min-width: 0;
   flex-direction: column;
-  gap: 8px;
+  gap: 0;
+}
+
+.composer-input-row {
+  display: flex;
+  align-items: flex-start;
+  min-width: 0;
+  padding: 4px 7px 0;
 }
 
 textarea {
-  width: 100%;
-  min-height: 44px;
-  max-height: 160px;
-  padding: 11px 14px;
+  flex: 1;
+  width: auto;
+  min-width: 0;
+  min-height: 36px;
+  max-height: 120px;
+  box-sizing: border-box;
+  field-sizing: content;
+  padding: 8px 6px;
   resize: none;
-  border: 1px solid var(--border-color);
-  border-radius: 12px;
+  overflow-y: auto;
+  border: 0;
+  border-radius: 0;
   outline: none;
-  background: var(--control-bg);
+  background: transparent;
   color: var(--text-primary);
   font-size: 13.5px;
   line-height: 1.5;
 }
 
-.chat-input-wrap.has-context-usage textarea {
-  padding-right: 76px;
+.chat-input-wrap.has-inline-footer {
+  overflow: visible;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: var(--surface);
+  transition: border-color .15s ease, box-shadow .15s ease;
 }
 
-.composer-context-slot {
-  position: absolute;
-  right: 7px;
-  bottom: 7px;
-  z-index: 7;
-}
-
-textarea:focus {
+.chat-input-wrap.has-inline-footer:focus-within {
   border-color: color-mix(in srgb, var(--accent-blue) 52%, var(--border-color));
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-blue) 12%, transparent);
 }
 
-:global([data-theme="dark"] .chat-composer){
-  border-top-color: var(--border-color);
-  background: var(--surface-translucent);
+.chat-input-wrap.has-inline-footer textarea {
+  min-height: 36px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
-:global([data-theme="dark"] .composer-button),
-:global([data-theme="dark"] textarea){
+.composer-inline-footer {
+  display: flex;
+  align-items: center;
+  min-height: 32px;
+  gap: 6px;
+  padding: 3px 7px 6px 9px;
+}
+
+.composer-toolbar-slot {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.composer-context-slot {
+  display: flex;
+  align-items: center;
+  z-index: 7;
+}
+
+.composer-footer-spacer {
+  flex: 1;
+  min-width: 8px;
+}
+
+textarea:focus {
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.chat-input-wrap.has-inline-footer textarea:focus {
+  border-color: transparent;
+  box-shadow: none;
+}
+
+:global([data-theme="dark"] .chat-composer){
+  border-top-color: var(--border-color);
+  background: var(--surface);
+}
+
+:global([data-theme="dark"] .chat-input-wrap){
   border-color: var(--border-color);
-  background: var(--control-bg);
+  background: var(--surface);
 }
 
 @media (max-width: 720px) {
   .chat-composer {
+    padding: 8px 10px 10px;
+  }
+
+  .composer-inline-footer {
     flex-wrap: wrap;
   }
 
-  .chat-input-wrap {
-    order: -1;
-    flex-basis: 100%;
+  .composer-footer-spacer {
+    display: none;
+  }
+
+  .composer-context-slot {
+    margin-left: auto;
+  }
+
+  .send-button {
+    margin-left: 0;
   }
 }
 </style>

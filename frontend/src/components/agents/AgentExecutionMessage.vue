@@ -5,6 +5,7 @@ import TaskCollaborationCard from '../collaboration/TaskCollaborationCard.vue'
 import AgentWorkEventDetails from './AgentWorkEventDetails.vue'
 import AgentFinalAnswer from '../common/AgentFinalAnswer.vue'
 import { isQuietMainAgentDecision } from '../../composables/useMainAgentDisplay.js'
+import { taskCardNeedsConversationControl } from '../../utils/taskCardPresentation.js'
 
 const props = defineProps({
   msg: { type: Object, required: true },
@@ -40,10 +41,13 @@ const emit = defineEmits(['step-action', 'task-action', 'open-pipeline', 'open-f
 
 const deliverySummary = () => props.msg.delivery_summary || props.msg.deliverySummary || null
 const clarificationSummary = () => props.msg.clarification_summary || props.msg.clarificationSummary || null
+const structuredClarification = () => clarificationSummary()?.pre_plan_clarification || clarificationSummary()?.prePlanClarification || null
+const showClarificationSummary = () => !structuredClarification() || structuredClarification()?.status !== 'pending'
+const showTaskControlCard = computed(() => props.primaryTaskCard && taskCardNeedsConversationControl(props.taskCard))
 const textOnly = computed(() => !(
-  clarificationSummary()
+  (clarificationSummary() && showClarificationSummary())
   || (props.mainAgentDecision && !isQuietMainAgentDecision(props.mainAgentDecision))
-  || props.primaryTaskCard
+  || showTaskControlCard.value
   || deliverySummary()
   || props.showOrchestrationPlan
   || props.workEvents.length
@@ -86,7 +90,7 @@ const formatDuration = value => {
       </span>
     </div>
     <AgentFinalAnswer
-      v-if="(displayContent || msg.content) && !primaryTaskCard"
+      v-if="displayContent || msg.content"
       :content="displayContent || msg.content"
       :streaming="!!msg.streaming"
       :mentions="msg.mentions || []"
@@ -107,7 +111,7 @@ const formatDuration = value => {
       <p v-if="failureTechnical?.safeSummary || msg.providerFailure?.safeSummary">{{ failureTechnical?.safeSummary || msg.providerFailure?.safeSummary }}</p>
       <small>这里只显示已脱敏诊断，不包含 API Key、Prompt 或原始响应。</small>
     </div>
-    <div v-if="clarificationSummary()" class="clarification-summary" :class="clarificationSummary().status">
+    <div v-if="clarificationSummary() && showClarificationSummary()" class="clarification-summary" :class="clarificationSummary().status">
       <div class="clarification-head">
         <strong>{{ clarificationSummary().title || '需要你补充信息' }}</strong>
         <span>{{ clarificationSummary().status_label || '等待你回复' }}</span>
@@ -124,13 +128,13 @@ const formatDuration = value => {
       <small v-if="clarificationSummary().next_action" class="clarification-next">下一步：{{ clarificationSummary().next_action }}</small>
     </div>
     <MainAgentDecisionCard
-      v-if="mainAgentDecision && !primaryTaskCard"
+      v-if="mainAgentDecision && !showTaskControlCard"
       :decision="mainAgentDecision"
       compact
       @step-action="emit('step-action', $event)"
     />
     <TaskCollaborationCard
-      v-if="primaryTaskCard"
+      v-if="showTaskControlCard"
       :card="taskCard"
       :runtime="taskRuntime"
       @action="emit('task-action', $event)"

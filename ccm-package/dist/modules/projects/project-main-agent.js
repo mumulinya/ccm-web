@@ -61,6 +61,7 @@ const group_orchestrator_config_1 = require("../collaboration/group-orchestrator
 const group_compaction_strategy_1 = require("../collaboration/group-compaction-strategy");
 const main_agent_context_policy_1 = require("../../tools/main-agent-context-policy");
 const workflow_decision_1 = require("../../agents/workflow-decision");
+const pre_plan_clarification_1 = require("../../agents/pre-plan-clarification");
 const conversational_reply_style_1 = require("../../agents/conversational-reply-style");
 const main_agent_turn_1 = require("../../agents/main-agent-turn");
 const project_validation_1 = require("./project-validation");
@@ -85,12 +86,14 @@ const plan_inheritance_1 = require("../../system/plan-inheritance");
 const agent_loop_budget_1 = require("../../system/agent-loop-budget");
 const user_visible_agent_events_1 = require("../../system/user-visible-agent-events");
 const assistant_progress_1 = require("../../system/assistant-progress");
+const model_activity_1 = require("../../system/model-activity");
 const slash_command_session_state_1 = require("../../system/slash-command-session-state");
 const transient_model_content_1 = require("../../system/transient-model-content");
 const test_agent_runner_1 = require("../collaboration/test-agent-runner");
 const execution_kernel_1 = require("../../agents/execution-kernel");
 const unified_evidence_registry_1 = require("../../system/unified-evidence-registry");
 const agent_sessions_purge_1 = require("../../tasks/agent-sessions-purge");
+const task_pause_control_1 = require("../../tasks/task-pause-control");
 const task_interruption_1 = require("../../tasks/task-interruption");
 function projectMainToolCallId(projectSessionId, toolName) {
     return `pmtool_${crypto.createHash("sha256").update(`${projectSessionId}:${toolName}:${Date.now()}:${crypto.randomBytes(4).toString("hex")}`).digest("hex").slice(0, 20)}`;
@@ -321,16 +324,21 @@ function projectMainModelCallOptions(config, messages, telemetry) {
         signal: telemetry.signal,
         nativeTools: telemetry.nativeTools,
         nativeToolReference: telemetry.nativeToolReference,
-        onRetry: (notice) => (0, runtime_events_1.publishRuntimeEvent)("project", "project.main_agent.retrying", {
-            project: telemetry.project,
-            sessionId: telemetry.projectSessionId,
-            status: "retrying",
-            attempt: notice.attempt + 1,
-            max_attempts: notice.maxAttempts,
-            retry_profile: notice.profile,
-            remaining_budget_ms: Math.max(0, (notice.profile === "interactive_first_turn" ? 60_000 : notice.profile === "agent_orchestration" ? 120_000 : 360_000) - Number(notice.elapsedMs || 0)),
-            reason: cleanText(notice.error?.message || notice.error, 240),
-        }),
+        stream: typeof telemetry.onDelta === "function",
+        onDelta: telemetry.onDelta,
+        onRetry: (notice) => {
+            telemetry.onRetry?.(notice);
+            (0, runtime_events_1.publishRuntimeEvent)("project", "project.main_agent.retrying", {
+                project: telemetry.project,
+                sessionId: telemetry.projectSessionId,
+                status: "retrying",
+                attempt: notice.attempt + 1,
+                max_attempts: notice.maxAttempts,
+                retry_profile: notice.profile,
+                remaining_budget_ms: Math.max(0, (notice.profile === "interactive_first_turn" ? 60_000 : notice.profile === "agent_orchestration" ? 120_000 : 360_000) - Number(notice.elapsedMs || 0)),
+                reason: cleanText(notice.error?.message || notice.error, 240),
+            });
+        },
         providerContextCache: {
             scope: "project",
             scopeId: telemetry.project,
@@ -373,9 +381,10 @@ async function modelText(messages, errorPrefix, maxTokens = 1600, telemetry, onD
     if (!config.enabled || !config.apiUrl || !config.apiKey || !config.model)
         throw new Error("统一大模型尚未配置");
     const telemetryOptions = projectMainModelCallOptions(config, messages, telemetry);
+    const effectiveDelta = onDelta || telemetry?.onDelta;
     return (0, group_orchestrator_llm_client_1.shouldUseAnthropic)(config)
-        ? (0, group_orchestrator_llm_client_1.callAnthropicCompatibleChat)(config, { messages, maxTokens, temperature: 0.2, defaultTimeoutMs: 60_000, httpErrorPrefix: errorPrefix, stream: !!onDelta, onDelta, ...telemetryOptions })
-        : (0, group_orchestrator_llm_client_1.callOpenAiCompatibleChat)(config, { messages, temperature: 0.2, defaultTimeoutMs: 60_000, httpErrorPrefix: errorPrefix, stream: !!onDelta, onDelta, ...telemetryOptions });
+        ? (0, group_orchestrator_llm_client_1.callAnthropicCompatibleChat)(config, { messages, maxTokens, temperature: 0.2, defaultTimeoutMs: 60_000, httpErrorPrefix: errorPrefix, ...telemetryOptions, stream: !!effectiveDelta, onDelta: effectiveDelta })
+        : (0, group_orchestrator_llm_client_1.callOpenAiCompatibleChat)(config, { messages, temperature: 0.2, defaultTimeoutMs: 60_000, httpErrorPrefix: errorPrefix, ...telemetryOptions, stream: !!effectiveDelta, onDelta: effectiveDelta });
 }
 function projectMainLoadedContextItems(toolContext, results, roleSkills, runtimeResults = []) {
     const selectedSkills = (Array.isArray(roleSkills?.selected) ? roleSkills.selected : []).map((skill) => ({
@@ -712,14 +721,6 @@ async function runProjectMainAgentFirstTurn(input) {
         eventType: "turn_started",
         display: { title: "项目主 Agent", summary: "已开始处理当前请求", status: "running" },
     });
-    (0, user_visible_agent_events_1.appendUserVisibleAgentEvent)({
-        eventId: `project-turn:${visibleTurnId}:thinking`,
-        scope: "project",
-        scopeId: project,
-        exactSessionId: projectSessionId,
-        eventType: "thinking_status",
-        display: { title: "正在思考", summary: "正在核对项目上下文并决定下一步", status: "running" },
-    });
     const exactContext = projectMainExactSessionContext(project, projectSessionId, input.userMessage);
     const configuredToolContext = buildProjectMainConfiguredToolContext({
         project,
@@ -769,6 +770,21 @@ async function runProjectMainAgentFirstTurn(input) {
     let modelDurationMs = 0;
     let toolWallDurationMs = 0;
     let tokenUsage = null;
+    let firstVisibleFeedbackAt = 0;
+    let firstProviderDeltaAt = 0;
+    let modelRetryCount = 0;
+    let initialReadFileCount = 0;
+    let initialReadTokens = 0;
+    let visibleReplyDeltaEmitted = false;
+    let fallbackStreamCount = 0;
+    let lastVisibleFeedbackAt = visibleTurnStartedAt;
+    let maxSilentGapMs = 0;
+    const markVisibleFeedback = (at = Date.now()) => {
+        if (!firstVisibleFeedbackAt)
+            firstVisibleFeedbackAt = at;
+        maxSilentGapMs = Math.max(maxSilentGapMs, Math.max(0, at - lastVisibleFeedbackAt));
+        lastVisibleFeedbackAt = at;
+    };
     const captureUsage = (usage) => {
         if (!usage || typeof usage !== "object")
             return;
@@ -798,18 +814,21 @@ ${workflow_decision_1.WORKFLOW_DECISION_GUIDANCE}
 
 ${conversational_reply_style_1.CONVERSATIONAL_REPLY_STYLE_GUIDANCE}
 
+${input.continuationCandidate ? `当前精确会话有一个最近可恢复任务摘要：${JSON.stringify(input.continuationCandidate)}。请结合当前消息判断 continuationKind；不要仅因存在旧任务就续接。` : "当前精确会话没有唯一可安全恢复的任务。"}
+${input.forcedConversationRoute ? `用户已经明确选择消息处理方式=${input.forcedConversationRoute}。answer_only 必须直接回答且不得创建任务；start_new_task 必须使用 continuationKind=new_task；continue_original 必须按原任务目标判断 supplement 或 revise_goal。` : ""}
+
 ${sessionDirective}
 
 规则：
 1. 普通问候、致谢和自包含问答直接 responseType=reply，不调用工具、不创建任务。
-2. 只有缺少项目事实时才请求只读工具。基础工作区工具为 list_directory、glob_files、grep_text、read_file、read_files；低频Git、运行日志和配置工具先用 tool_search 加载。知识检索使用 query_knowledge。
+2. 项目简介、用途、技术栈、架构、模块和当前实现必须先读取当前项目的 README、构建清单、入口或目录结构，以当前代码和配置为权威事实；不得先用知识库替代代码检查。业务历史与既有约定可使用 query_knowledge 补充，但优先当前项目知识，未明确绑定当前项目的全局共享资料不得用于推断项目事实。代码与资料冲突时明确说明并以当前代码为准。基础工作区工具为 list_directory、glob_files、grep_text、read_file、read_files；低频Git、运行日志和配置工具先用 tool_search 加载。
 3. 工具结果会回到同一 Agent Loop；只要仍需要事实或证据就可以继续调用，不要重复相同请求。读取结果提供 continuation 时，仅在当前问题所需信息尚未出现时使用 nextOffset 与 checksum 续读，不要机械读到文件末尾；内容未变化时直接使用当前上下文，文件漂移时重新读取权威版本。互不依赖的只读请求可同轮提出；有副作用或依赖关系的请求必须串行。
 4. 需要实际修改时只做形成 WorkItem、验收标准、依赖与权限边界所必需的最小只读核实，然后 responseType=plan 或 dispatch；项目主 Agent本身不修改代码，后续立即交给当前项目子 Agent。
-5. 信息不足时 responseType=clarify。写入权限、RBAC和高风险确认由服务端最终裁决。
+5. 只有会改变业务流程、实施范围、角色权限、数据保留策略或验收结果的歧义才使用 responseType=clarify，并在 structuredClarificationQuestions 集中提出1～3项。代码、配置和现有资料可查明的技术问题必须先用只读工具核实，不得询问用户。目标项目选择、代码修改授权和正式计划确认不放进业务澄清。写入权限、RBAC和高风险确认由服务端最终裁决。
 6. 只输出JSON，不输出Markdown或内部推理。
 7. 第一个工具批次前在 progressUpdate 写一句面向用户的简短说明；后续只有关键发现、方向变化、阻塞、返工、验收或总结节点才填写。不要逐个工具机械播报，不能写隐藏思维链。
 
-JSON：{"responseType":"reply|tool_calls|clarify|plan|dispatch","reply":"给用户的完整回复或澄清问题","progressUpdate":"工具前或关键节点的安全进度说明；不需要时为空","progressKind":"before_tools|key_finding|direction_change|blocker|rework|verification|before_summary","workflowDecision":{"mode":"answer|project_analysis|execute_direct|plan_task|decompose_epic","reason":"语义依据","confidence":0.95,"needsPlanning":false,"needsEpicDecomposition":false,"actionRequired":false,"continuationKind":"new_task|supplement|revise_goal","readAction":"none|inspect_status","targetRefs":[],"impactScope":[],"planSteps":[],"clarificationQuestions":[],"selectedSkills":[],"intentKind":"conversation|question|status|analysis|execution|management|continuation","requiresCodeChanges":false,"requiresAgentQa":false,"requiresIndependentReview":false,"verificationModes":[],"memoryPolicy":"use|ignore","authorizationDirective":"preserve|grant|revoke","riskLevel":"low|write|high","requiresUserConfirmation":false},"toolRequests":[{"name":"工具名","arguments":{},"reason":"原因"}],"plan":{"title":"标题","summary":"摘要","requiresConfirmation":false,"acceptanceEvidencePlan":[{"criterion":"标准","observableOutcome":"可观察结果","evidenceTypes":["command"],"target":"对象"}],"verificationProfile":{"tier":"lightweight|standard|interactive|critical","changeClass":"documentation|configuration|code|interactive|critical","reason":"依据"},"permissionBoundaries":[],"workItems":[{"id":"work_1","title":"步骤","objective":"自包含目标","acceptanceCriteria":[],"dependsOn":[]}]}}`,
+JSON：{"responseType":"reply|tool_calls|clarify|plan|dispatch","reply":"给用户的完整回复或澄清问题","progressUpdate":"工具前或关键节点的安全进度说明；不需要时为空","progressKind":"before_tools|key_finding|direction_change|blocker|rework|verification|before_summary","workflowDecision":{"mode":"answer|project_analysis|execute_direct|plan_task|decompose_epic","reason":"语义依据","confidence":0.95,"needsPlanning":false,"needsEpicDecomposition":false,"actionRequired":false,"continuationKind":"new_task|supplement|revise_goal","readAction":"none|inspect_status","targetRefs":[],"impactScope":[],"planSteps":[],"clarificationQuestions":[],"structuredClarificationQuestions":[{"id":"scope","label":"业务问题","reason":"影响方案的原因","type":"single|multiple|text","required":true,"options":[{"id":"a","label":"选项","recommended":true,"safeDefault":true}]}],"selectedSkills":[],"intentKind":"conversation|question|status|analysis|execution|management|continuation","requiresCodeChanges":false,"requiresAgentQa":false,"requiresIndependentReview":false,"verificationModes":[],"memoryPolicy":"use|ignore","authorizationDirective":"preserve|grant|revoke","riskLevel":"low|write|high","requiresUserConfirmation":false},"toolRequests":[{"name":"工具名","arguments":{},"reason":"原因"}],"plan":{"title":"标题","summary":"摘要","requiresConfirmation":false,"acceptanceEvidencePlan":[{"criterion":"标准","observableOutcome":"可观察结果","evidenceTypes":["command"],"target":"对象"}],"verificationProfile":{"tier":"lightweight|standard|interactive|critical","changeClass":"documentation|configuration|code|interactive|critical","reason":"依据"},"permissionBoundaries":[],"workItems":[{"id":"work_1","title":"步骤","objective":"自包含目标","acceptanceCriteria":[],"dependsOn":[]}]}}`,
         }, {
             // 工具目录单独成块：policyPrompt 会被 tool_search 在 Run 中途改写，
             // 与上面这段固定规则合并成一条 system 时，整块 contentChecksum 每次都变，
@@ -825,6 +844,8 @@ JSON：{"responseType":"reply|tool_calls|clarify|plan|dispatch","reply":"给用�
                 exact_session_context: exactContext,
                 current_message: input.userMessage,
                 source_count: Math.max(0, Number(input.sourceCount || 0)),
+                recoverable_task: input.continuationCandidate || null,
+                explicit_route_choice: input.forcedConversationRoute || "",
                 tool_results: toolResults,
             }),
         }], (0, transient_model_content_1.collectTransientModelBlocks)(toolResults));
@@ -912,6 +933,38 @@ JSON：{"responseType":"reply|tool_calls|clarify|plan|dispatch","reply":"给用�
         modelCallCount += 1;
         segmentModelTurns += 1;
         const modelStartedAt = Date.now();
+        const activityPhase = toolResults.length ? "tool_result_review" : toolRoundCount ? "tool_decision" : "understanding";
+        const activity = (0, model_activity_1.createModelActivityController)({
+            scope: "project",
+            scopeId: project,
+            exactSessionId: projectSessionId,
+            turnId: visibleTurnId,
+            modelCallIndex: modelCallCount,
+            phase: activityPhase,
+            generation: Number(toolContext.scopeIdentity?.generation || 0),
+            onActivity: activityValue => {
+                if (["waiting", "retrying"].includes(String(activityValue?.state || "")))
+                    markVisibleFeedback();
+                input.onModelActivity?.(activityValue);
+            },
+        });
+        let visibleDeltaSequence = 0;
+        const replyExtractor = (0, model_activity_1.createSafeJsonReplyDeltaExtractor)(delta => {
+            visibleReplyDeltaEmitted = true;
+            activity.onDelta(delta);
+            if (!firstProviderDeltaAt)
+                firstProviderDeltaAt = Date.now();
+            markVisibleFeedback(firstProviderDeltaAt || Date.now());
+            visibleDeltaSequence += 1;
+            (0, user_visible_agent_events_1.publishEphemeralUserVisibleAgentEvent)({
+                eventId: `project-delta:${visibleTurnId}:${modelCallCount}:${visibleDeltaSequence}`,
+                scope: "project", scopeId: project, exactSessionId: projectSessionId,
+                eventType: "assistant_text_delta",
+                display: { title: "项目主 Agent", summary: String(delta || "").slice(0, 500), status: "running" },
+                detail: { stream: { sequence: visibleDeltaSequence, final: false } },
+            });
+            input.onDelta?.(delta);
+        });
         try {
             parsed = await modelJson(gate.messages, "项目主 Agent首轮决策失败", {
                 project,
@@ -930,7 +983,15 @@ JSON：{"responseType":"reply|tool_calls|clarify|plan|dispatch","reply":"给用�
                     deferred: tool.deferred === true,
                 })).filter((tool) => tool.name),
                 nativeToolReference: true,
+                onDelta: delta => { if (!firstProviderDeltaAt)
+                    firstProviderDeltaAt = Date.now(); replyExtractor.push(delta); },
+                onRetry: notice => { modelRetryCount += 1; activity.onRetry(Number(notice?.attempt || 0) + 1); },
             });
+            activity.complete();
+        }
+        catch (error) {
+            activity.fail();
+            throw error;
         }
         finally {
             modelDurationMs += Math.max(0, Date.now() - modelStartedAt);
@@ -984,6 +1045,7 @@ JSON：{"responseType":"reply|tool_calls|clarify|plan|dispatch","reply":"给用�
                 (0, user_visible_agent_events_1.appendAssistantProgress)({
                     scope: "project", scopeId: project, exactSessionId: projectSessionId,
                     generation: Number(toolContext.scopeIdentity?.generation || 0),
+                    round: Math.max(1, Math.min(2, Number(input.clarificationRound || 1))),
                     turnId: visibleTurnId,
                     text: progressText,
                     kind: progressKind || "before_tools",
@@ -991,6 +1053,8 @@ JSON：{"responseType":"reply|tool_calls|clarify|plan|dispatch","reply":"给用�
                     relatedToolCallIds: preparedToolCallIds,
                     title: "项目主 Agent",
                 });
+            if (progressText)
+                markVisibleFeedback();
         }
         for (const request of selectedRequests) {
             executed.add((0, main_agent_tool_runtime_1.mainAgentToolRequestFingerprint)(request));
@@ -1019,6 +1083,27 @@ JSON：{"responseType":"reply|tool_calls|clarify|plan|dispatch","reply":"给用�
             toolWallDurationMs += Math.max(0, Date.now() - toolBatchStartedAt);
         }
         toolResults.push(...roundResults);
+        if (round === 0) {
+            const initialReads = roundResults.filter(row => /^(?:read_file|read_files|glob_files|grep_text)$/i.test(String(row?.name || "")));
+            initialReadFileCount += initialReads.reduce((count, row) => count + Math.max(1, Number(row?.rawOutput?.safeReceipt?.itemCount || row?.rawOutput?.itemCount || 0)), 0);
+            initialReadTokens += initialReads.reduce((count, row) => count + Math.max(0, Number(row?.outputTokens || 0)), 0);
+        }
+        if ((0, assistant_progress_1.assistantProgressNarrationEnabled)(budgetConfig)) {
+            const outcomeProgress = (0, assistant_progress_1.buildToolBatchOutcomeProgress)(roundResults, { target: project });
+            if (outcomeProgress)
+                (0, user_visible_agent_events_1.appendAssistantProgress)({
+                    scope: "project", scopeId: project, exactSessionId: projectSessionId,
+                    generation: Number(toolContext.scopeIdentity?.generation || 0),
+                    turnId: visibleTurnId,
+                    text: outcomeProgress,
+                    kind: "key_finding",
+                    modelCallIndex: modelCallCount,
+                    relatedToolCallIds: preparedToolCallIds,
+                    title: "项目主 Agent",
+                });
+            if (outcomeProgress)
+                markVisibleFeedback();
+        }
         if ((0, assistant_progress_1.assistantProgressNarrationEnabled)(budgetConfig) && roundResults.length && roundResults.every(row => row?.ok !== true)) {
             (0, user_visible_agent_events_1.appendAssistantProgress)({
                 scope: "project", scopeId: project, exactSessionId: projectSessionId,
@@ -1057,6 +1142,57 @@ JSON：{"responseType":"reply|tool_calls|clarify|plan|dispatch","reply":"给用�
             segmentStartedAt = Date.now();
         }
     }
+    const terminalResponseType = String(parsed?.responseType || parsed?.response_type || "").toLowerCase();
+    if (["reply", "clarify"].includes(terminalResponseType) && !visibleReplyDeltaEmitted && input.onDelta) {
+        fallbackStreamCount += 1;
+        modelCallCount += 1;
+        const synthesisStartedAt = Date.now();
+        const synthesisActivity = (0, model_activity_1.createModelActivityController)({
+            scope: "project", scopeId: project, exactSessionId: projectSessionId,
+            turnId: visibleTurnId, modelCallIndex: modelCallCount, phase: "final_synthesis",
+            generation: Number(toolContext.scopeIdentity?.generation || 0),
+            onActivity: activityValue => {
+                if (["waiting", "retrying"].includes(String(activityValue?.state || "")))
+                    markVisibleFeedback();
+                input.onModelActivity?.(activityValue);
+            },
+        });
+        let synthesisSequence = 0;
+        try {
+            const synthesized = await modelText([
+                { role: "system", content: "请将已经形成的结论整理为面向用户的最终回答。只输出回答正文，不输出JSON、内部协议、推理过程或工具原始结果。" },
+                { role: "user", content: JSON.stringify({ request: String(input.userMessage || "").slice(0, 4000), draft: String(parsed?.reply || parsed?.content || "").slice(0, 8000), toolSummary: (0, assistant_progress_1.buildToolBatchOutcomeProgress)(toolResults, { target: project }) || "未使用工具" }) },
+            ], "项目主 Agent最终回答整理失败", 1600, {
+                project, projectSessionId, currentRequest: input.userMessage,
+                onUsage: captureUsage, retryProfile: "interactive_first_turn",
+                onRetry: notice => { modelRetryCount += 1; synthesisActivity.onRetry(Number(notice?.attempt || 0) + 1); },
+            }, delta => {
+                visibleReplyDeltaEmitted = true;
+                synthesisActivity.onDelta(delta);
+                if (!firstProviderDeltaAt)
+                    firstProviderDeltaAt = Date.now();
+                markVisibleFeedback();
+                synthesisSequence += 1;
+                (0, user_visible_agent_events_1.publishEphemeralUserVisibleAgentEvent)({
+                    eventId: `project-delta:${visibleTurnId}:${modelCallCount}:${synthesisSequence}`,
+                    scope: "project", scopeId: project, exactSessionId: projectSessionId,
+                    eventType: "assistant_text_delta",
+                    display: { title: "项目主 Agent", summary: String(delta || "").slice(0, 500), status: "running" },
+                    detail: { stream: { sequence: synthesisSequence, final: false } },
+                });
+                input.onDelta?.(delta);
+            });
+            parsed = { ...parsed, reply: String(synthesized || parsed?.reply || parsed?.content || "") };
+            synthesisActivity.complete();
+        }
+        catch (error) {
+            synthesisActivity.fail();
+            throw error;
+        }
+        finally {
+            modelDurationMs += Math.max(0, Date.now() - synthesisStartedAt);
+        }
+    }
     const planModeActive = (0, slash_command_session_state_1.readSlashCommandSessionState)("project", project, projectSessionId).planMode?.enabled === true;
     if (planModeActive && ["dispatch", "execute"].includes(String(parsed?.responseType || parsed?.response_type || "").toLowerCase())) {
         parsed = {
@@ -1083,6 +1219,21 @@ JSON：{"responseType":"reply|tool_calls|clarify|plan|dispatch","reply":"给用�
         reply: parsed?.reply,
         planDraft: parsed?.plan,
     });
+    const prePlanClarification = turnDecision.responseKind === "clarify" || workflowDecision.structuredClarificationQuestions.length || workflowDecision.clarificationQuestions.length
+        ? (0, pre_plan_clarification_1.buildPrePlanClarification)({
+            scope: "project",
+            scopeId: project,
+            exactSessionId: projectSessionId,
+            anchorMessageId: visibleTurnId,
+            id: `preplan:project:${project}:${visibleTurnId}`,
+            generation: Number(toolContext.scopeIdentity?.generation || 0),
+            questions: workflowDecision.structuredClarificationQuestions,
+            fallbackQuestions: workflowDecision.structuredClarificationQuestions.length ? [] : workflowDecision.clarificationQuestions.length ? workflowDecision.clarificationQuestions : [turnDecision.reply],
+            headline: workflowDecision.reason,
+            originalRequestChecksum: cleanText(input.originalRequestChecksum, 128)
+                || crypto.createHash("sha256").update(String(input.userMessage || "")).digest("hex"),
+        })
+        : null;
     const turnReceipt = (0, main_agent_turn_1.createMainAgentTurnReceipt)({
         decision: turnDecision,
         modelCallIndex: Math.max(1, modelCallCount),
@@ -1157,6 +1308,7 @@ JSON：{"responseType":"reply|tool_calls|clarify|plan|dispatch","reply":"给用�
     }
     return {
         workflowDecision,
+        prePlanClarification,
         responseType: turnDecision.responseKind,
         reply: turnDecision.reply,
         plan,
@@ -1170,6 +1322,14 @@ JSON：{"responseType":"reply|tool_calls|clarify|plan|dispatch","reply":"给用�
             usage: tokenUsage || { source: "unreported", missingReason: "runtime_unreported" },
             modelCalls: modelCallCount,
             toolCalls: toolCallCount,
+            firstVisibleFeedbackMs: firstVisibleFeedbackAt ? Math.max(0, firstVisibleFeedbackAt - visibleTurnStartedAt) : 0,
+            firstTokenMs: firstProviderDeltaAt ? Math.max(0, firstProviderDeltaAt - visibleTurnStartedAt) : 0,
+            maxSilentGapMs: Math.max(maxSilentGapMs, Math.max(0, Date.now() - lastVisibleFeedbackAt)),
+            retryCount: modelRetryCount,
+            initialReadTokenBudget: 8_000,
+            initialReadFileCount,
+            initialReadTokens,
+            fallbackStreamCount,
             usageAnchorId: `project-main:${projectSessionId}:${visibleTurnId}`,
         },
         mainAgentToolUsage: {
@@ -2123,6 +2283,8 @@ async function executeProjectMainTask(input) {
         const latest = getProjectMainTask(taskId);
         if (latest?.status === "cancelled" || latest?.cancellation_requested_at)
             throw new Error("项目主 Agent 任务已取消");
+        if ((0, task_pause_control_1.isTaskPauseRequested)(latest))
+            throw (0, task_pause_control_1.taskPauseBoundaryError)(latest, executionPhase);
     };
     try {
         (0, collaboration_task_service_1.updateTask)(taskId, { status: "in_progress", intake_state: "confirmed", acceptance_state: "executing", status_detail: checkpointMatchesPlan ? "已接上原任务，正在从最近检查点继续" : "项目主 Agent 正在安排开发 Agent" });
@@ -2584,11 +2746,59 @@ async function executeProjectMainTask(input) {
             evidenceIds: verification,
             detail: {
                 timing: { totalMs: Math.max(0, Date.now() - Date.parse(executionStartedAt)) },
+                terminalGate: {
+                    passed: accepted,
+                    accepted,
+                    source: "task_ledger",
+                },
             },
         });
         return { task: finalTask, status: accepted ? "completed" : "blocked", summary, fileChanges, verification, risks, testAgent: independentTestAgentEnabled ? latestReview : null };
     }
     catch (error) {
+        if (String(error?.code || "") === "CCM_TASK_PAUSE_SAFE_BOUNDARY") {
+            const currentTask = getProjectMainTask(taskId) || input.task;
+            const suspended = (0, agent_sessions_purge_1.suspendTaskAgentSessions)({ taskId }, "项目主 Agent 已在安全检查点暂停");
+            const pauseControl = (0, task_pause_control_1.updateTaskPauseProgress)(currentTask, {
+                state: "paused",
+                pendingWriterCount: 0,
+                suspendedSessionCount: suspended.length,
+                workspaceChecksum: (0, task_pause_control_1.taskPauseWorkspaceChecksum)(currentTask) || projectMainWorkspaceChecksum(workDir, results),
+            });
+            const pausedTask = (0, collaboration_task_service_1.updateTask)(taskId, {
+                status: "paused",
+                auto_execute: false,
+                is_paused: true,
+                paused: true,
+                pause_control: pauseControl,
+                status_detail: "已在最近安全检查点暂停，代码现场和子 Agent 会话已保留",
+                collaboration_state: { ...(currentTask.collaboration_state || {}), phase: "paused", needs_user: false, updated_at: new Date().toISOString() },
+            }) || currentTask;
+            (0, logs_1.appendTaskTimelineEvent)(taskId, {
+                type: "task_pause_checkpoint_reached",
+                title: "已到达安全暂停点",
+                detail: `从“${String(error?.phase || executionPhase)}”阶段暂停；已保留 ${completedWorkItemIds.size} 个完成工作项和 ${suspended.length} 个子 Agent 会话`,
+                status: "ok",
+                phase: String(error?.phase || executionPhase),
+                agent: "project-main-agent",
+                data: { pause_sequence: pauseControl.pauseSequence, checkpoint: pauseControl.checkpoint, content_stored: false },
+            });
+            (0, user_visible_agent_events_1.appendAssistantProgress)({
+                eventId: `project-task:${taskId}:paused:${pauseControl.pauseSequence}`,
+                scope: "project",
+                scopeId: project,
+                exactSessionId: input.plan.projectSessionId,
+                generation: executionGeneration,
+                taskId,
+                turnId: `project-task:${taskId}`,
+                text: "已在最近安全检查点暂停，代码现场和子 Agent 会话已保留。",
+                kind: "blocker",
+                modelCallIndex: 0,
+                relatedToolCallIds: [],
+                title: "项目主 Agent",
+            });
+            return { task: pausedTask, status: "paused", summary: pausedTask.status_detail, fileChanges: aggregateFileChanges(results), verification: [], risks: [], testAgent: independentTestAgentEnabled ? latestReview : null };
+        }
         const summary = `项目主 Agent 未能完成本轮任务：${error?.message || error}`;
         let currentTask = getProjectMainTask(taskId) || input.task;
         const cancelled = currentTask?.status === "cancelled" || /已取消/.test(String(error?.message || ""));
@@ -2726,6 +2936,11 @@ async function executeProjectMainTask(input) {
                 fileChanges: unacceptedFileChanges.files,
                 detail: {
                     timing: { totalMs: Math.max(0, Date.now() - Date.parse(executionStartedAt)) },
+                    terminalGate: {
+                        passed: false,
+                        accepted: false,
+                        source: "task_ledger",
+                    },
                 },
             });
         return { task, status: interrupted || lostLease ? "blocked" : "failed", summary, fileChanges: unacceptedFileChanges, verification: [], risks: [summary], testAgent: independentTestAgentEnabled ? latestReview : null };

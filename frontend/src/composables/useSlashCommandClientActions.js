@@ -167,11 +167,22 @@ export function createSlashCommandClientActions(options = {}) {
         ? current
         : await jsonRequest('/api/conversations/plan-mode', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...identity, revision: current.revision, generation: current.generation, action: isExit ? 'exit' : 'open', description: isExit ? '' : args.replace(/^open\s*/i, '') }) })
       const plan = data.result || data.planMode || data
+      if (!isRead && typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('ccm-conversation-plan-mode-changed', {
+          detail: {
+            ...identity,
+            mode: plan.enabled ? 'plan' : 'agent',
+            enabled: plan.enabled === true,
+            revision: plan.revision ?? data.revision ?? 0,
+            generation: plan.generation ?? data.generation ?? 0,
+          },
+        }))
+      }
       return {
         success: true,
         stateChanged: !isRead,
-        summary: plan.enabled ? '当前会话已进入 Plan Mode；计划状态会随会话和压缩边界恢复。' : '当前会话未启用 Plan Mode。',
-        metrics: { 状态: plan.enabled ? 'Plan Mode' : '普通模式', 世代: plan.generation ?? data.generation ?? 0, 修订: plan.revision ?? data.revision ?? 0 },
+        summary: plan.enabled ? '当前会话已进入 Plan 模式；计划状态会随会话和压缩边界恢复。' : '当前会话已切换为 Agent 模式。',
+        metrics: { 状态: plan.enabled ? 'Plan 模式' : 'Agent 模式', 世代: plan.generation ?? data.generation ?? 0, 修订: plan.revision ?? data.revision ?? 0 },
         items: plan.description ? [{ title: '当前目标', detail: plan.description, status: plan.enabled ? '进行中' : '已退出' }] : [],
       }
     }

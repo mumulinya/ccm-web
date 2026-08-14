@@ -100,7 +100,7 @@ assert.match(frontendSource, /\/api\/metrics\/events/);
 assert.match(frontendSource, /全部历史/);
 assert.match(frontendSource, /executionStatusOptions/);
 assert.match(frontendSource, /executionResult\.totalPages/);
-assert.match(frontendSource, /自定义日期/);
+assert.match(frontendSource, /<option :value="CUSTOM_RANGE_DAYS">自定义<\/option>/);
 assert.match(frontendSource, /params\.set\('from'/);
 assert.match(frontendSource, /params\.set\('to'/);
 assert.match(frontendSource, /class="event-time"[^>]*:title="formatTime\(event\.at\)"/);

@@ -377,17 +377,17 @@
         <span :class="['plan-risk', planMode.risk?.level || 'low']">{{ riskLabel(planMode.risk?.level) }}</span>
       </div>
       <p v-if="planRiskSummary">{{ planRiskSummary }}</p>
-      <div v-if="planApprovalRequest" class="plan-approval-request">
-        <div class="section-head">
-          <label>{{ planApprovalRequest.title || '等待你确认计划' }}</label>
-          <span>{{ planApprovalRequest.status_label || '待确认' }}</span>
-        </div>
-        <p>{{ planApprovalRequest.headline || '确认后我才会按这份计划开始执行。' }}</p>
-        <ul v-if="planApprovalRows.length">
-          <li v-for="item in planApprovalRows" :key="item">{{ item }}</li>
-        </ul>
-        <small v-if="planApprovalRequest.feedback_hint || planApprovalRequest.feedbackHint">{{ planApprovalRequest.feedback_hint || planApprovalRequest.feedbackHint }}</small>
-      </div>
+      <PlanConfirmationPanel
+        v-if="planApprovalRequest"
+        v-model="planAcceptFeedback"
+        :request="planApprovalRequest"
+        :rows="planApprovalRows"
+        :busy="busy"
+        :can-confirm="!!planConfirmAction"
+        :can-revise="!!planReviseAction"
+        @confirm="emit('action', taskActionPayload(planConfirmAction))"
+        @revise="emit('action', taskActionPayload(planReviseAction))"
+      />
       <div v-if="planMode.revision" class="plan-mode-revision">
         <strong>计划调整</strong>
         <small>第 {{ planMode.revision.count || 1 }} 次：{{ planMode.revision.feedback || '用户要求调整执行前计划。' }}</small>
@@ -462,17 +462,6 @@
       <div v-if="planPermissionBoundaries.length && card.phase === 'needs_user'" class="plan-mode-list permission">
         <strong>执行边界</strong>
         <ul><li v-for="item in planPermissionBoundaries" :key="item">{{ item }}</li></ul>
-      </div>
-      <div v-if="hasPlanConfirmAction" class="plan-mode-accept-feedback">
-        <label :for="planAcceptFeedbackId">确认执行时补充要求</label>
-        <textarea
-          :id="planAcceptFeedbackId"
-          v-model="planAcceptFeedback"
-          :disabled="busy"
-          maxlength="600"
-          rows="2"
-          placeholder="可选：例如同时更新 README、保留旧接口兼容"
-        ></textarea>
       </div>
     </div>
 

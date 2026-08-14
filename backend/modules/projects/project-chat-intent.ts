@@ -1,6 +1,7 @@
 import {
   decideWorkflowWithModel,
   explicitWorkflowDecision,
+  isDevelopmentTaskWorkflowDecision,
   normalizeWorkflowDecision,
   type WorkflowDecision,
 } from "../../agents/workflow-decision";
@@ -50,10 +51,10 @@ export async function classifyProjectChatIntentWithModel(
     ? "conversation"
     : workflowDecision.mode === "project_analysis"
       ? "project_analysis"
-      : "task";
+      : isDevelopmentTaskWorkflowDecision(workflowDecision) ? "task" : "project_analysis";
   return {
     mode,
-    executable: workflowDecision.actionRequired,
+    executable: isDevelopmentTaskWorkflowDecision(workflowDecision),
     reason: workflowDecision.reason,
     workflowDecision,
   };
@@ -68,12 +69,16 @@ export function runProjectChatIntentSelfTest() {
     ["先规划认证重构再实施", "plan_task", "task"],
   ] as const;
   const checks = cases.map(([message, modelMode, expected]) => {
-    const workflowDecision = normalizeWorkflowDecision({ mode: modelMode, reason: "脚本化模型决策" });
+    const workflowDecision = normalizeWorkflowDecision({
+      mode: modelMode,
+      reason: "脚本化模型决策",
+      requiresCodeChanges: expected === "task",
+    });
     const actual: ProjectChatMode = workflowDecision.mode === "answer"
       ? "conversation"
       : workflowDecision.mode === "project_analysis"
         ? "project_analysis"
-        : "task";
+        : isDevelopmentTaskWorkflowDecision(workflowDecision) ? "task" : "project_analysis";
     return { message, expected, actual, workflowDecision };
   });
   return { success: checks.every(item => item.actual === item.expected), checks };

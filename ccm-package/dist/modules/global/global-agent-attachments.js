@@ -74,6 +74,9 @@ function serializeGlobalRequestAttachments(files = []) {
                 type: String(file?.type || file?.contentType || inferAttachmentType(name)).trim().slice(0, 128),
                 upload_url: `/api/uploads/${storedFilename}`,
                 attachment_owner: "user",
+                status: String(file?.status || "received").slice(0, 40),
+                readable: file?.readable === true,
+                checksum: String(file?.checksum || "").slice(0, 128),
             }];
     });
 }
@@ -100,6 +103,9 @@ function sanitizeGlobalHistoryAttachments(value, role) {
                 type,
                 ...(uploadUrl ? { upload_url: uploadUrl } : {}),
                 attachment_owner: owner,
+                status: String(file.status || "received").slice(0, 40),
+                readable: file.readable === true,
+                checksum: String(file.checksum || "").slice(0, 128),
             }];
     });
 }

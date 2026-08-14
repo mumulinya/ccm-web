@@ -55,6 +55,21 @@ export type ToolDisplayDetailV1 = {
             cancelled: boolean;
             partial: boolean;
         };
+        presentation?: {
+            layout: "directory" | "files" | "matches" | "symbols" | "file_content" | "git" | "verification" | "generic";
+            groups?: Array<{
+                id: string;
+                label: string;
+                count: number;
+                items: Array<{
+                    label: string;
+                    secondary?: string;
+                    path?: string;
+                    line?: number;
+                    status?: string;
+                }>;
+            }>;
+        };
     };
     contentStored: false;
 };

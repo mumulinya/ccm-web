@@ -83,6 +83,34 @@ export function buildAssistantProgressFallback(requests: any[], context: { targe
   return sanitizeAssistantProgressText(`我先核对完成${subject}所需的信息。`);
 }
 
+export function buildToolBatchOutcomeProgress(results: any[], context: { target?: any } = {}) {
+  const rows = Array.isArray(results) ? results : [];
+  const succeeded = rows.filter(row => row?.ok === true);
+  const failed = rows.length - succeeded.length;
+  if (!succeeded.length) return "";
+  const families = new Set(succeeded.map(row => assistantProgressToolFamily(row?.name || row?.toolName || row?.tool)));
+  const target = safeSubject(context.target, 32);
+  const scope = target ? `“${target}”` : "项目";
+  const partial = succeeded.some(row => {
+    const value = row?.output || row?.rawOutput || row?.result || {};
+    return value?.truncated === true || value?.status === "partial" || value?.safeReceipt?.truncated === true
+      || Number(value?.continuation?.pendingCount || value?.continuation?.remainingLines || 0) > 0;
+  });
+  let result = "已取得检查结果";
+  if (families.has("search") && families.has("read")) result = `已定位并读取${scope}的相关入口与配置`;
+  else if (families.has("search")) result = `已找到${scope}的相关代码和配置位置`;
+  else if (families.has("read")) result = `已读取${scope}的项目入口和配置`;
+  else if (families.has("knowledge")) result = `已取得${scope}相关的知识来源`;
+  else if (families.has("git")) result = `已检查${scope}的代码状态和变更记录`;
+  else if (families.has("verify")) result = `已取得${scope}的验证结果`;
+  const tail = partial
+    ? "，部分内容仍需续读；我会先缩小范围再继续检查。"
+    : failed
+      ? `；${failed} 项未返回有效结果，我会调整检查方向。`
+      : "，正在根据结果确定下一步。";
+  return sanitizeAssistantProgressText(`${result}${tail}`);
+}
+
 export type AssistantProgressValidationContext = {
   firstBatch?: boolean;
   hasSuccessfulObservation?: boolean;

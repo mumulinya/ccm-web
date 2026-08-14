@@ -15,6 +15,8 @@ export declare function createGlobalAgentFeishuChannel(deps: any): {
         principal?: any;
         turnId?: string;
         turn_id?: string;
+        resolvedRoute?: string;
+        resolvedCandidateTaskId?: string;
     }) => Promise<any>;
     parseFeishuConversationTurnCommand: (value: any) => {
         kind: "normal" | "steer" | "queue" | "stop" | "aside";
@@ -31,6 +33,8 @@ export declare function createGlobalAgentFeishuChannel(deps: any): {
         ephemeral: boolean;
         content_stored?: undefined;
         report_sent?: undefined;
+        route_required?: undefined;
+        turn?: undefined;
         turn_id?: undefined;
     } | {
         reply: string;
@@ -38,6 +42,8 @@ export declare function createGlobalAgentFeishuChannel(deps: any): {
         denied?: undefined;
         content_stored?: undefined;
         report_sent?: undefined;
+        route_required?: undefined;
+        turn?: undefined;
         turn_id?: undefined;
     } | {
         reply: string;
@@ -45,11 +51,24 @@ export declare function createGlobalAgentFeishuChannel(deps: any): {
         content_stored: boolean;
         denied?: undefined;
         report_sent?: undefined;
+        route_required?: undefined;
+        turn?: undefined;
         turn_id?: undefined;
     } | {
         reply: string;
         denied: boolean;
         report_sent: boolean;
+        ephemeral?: undefined;
+        content_stored?: undefined;
+        route_required?: undefined;
+        turn?: undefined;
+        turn_id?: undefined;
+    } | {
+        reply: string;
+        route_required: boolean;
+        turn: any;
+        report_sent: boolean;
+        denied?: undefined;
         ephemeral?: undefined;
         content_stored?: undefined;
         turn_id?: undefined;
@@ -60,6 +79,8 @@ export declare function createGlobalAgentFeishuChannel(deps: any): {
         denied?: undefined;
         ephemeral?: undefined;
         content_stored?: undefined;
+        route_required?: undefined;
+        turn?: undefined;
         turn_id?: undefined;
     } | {
         report_sent: boolean;
@@ -69,6 +90,7 @@ export declare function createGlobalAgentFeishuChannel(deps: any): {
         denied?: undefined;
         ephemeral?: undefined;
         content_stored?: undefined;
+        route_required?: undefined;
         turn_id?: undefined;
     } | {
         report_sent: boolean;
@@ -80,6 +102,7 @@ export declare function createGlobalAgentFeishuChannel(deps: any): {
         denied?: undefined;
         ephemeral?: undefined;
         content_stored?: undefined;
+        route_required?: undefined;
         turn_id?: undefined;
     } | {
         reply: any;
@@ -88,6 +111,8 @@ export declare function createGlobalAgentFeishuChannel(deps: any): {
         ephemeral?: undefined;
         content_stored?: undefined;
         report_sent?: undefined;
+        route_required?: undefined;
+        turn?: undefined;
     }>;
     processFeishuCardAction: (baseUrl: string, payload: any, ctx?: CollabCtx) => Promise<{
         success: boolean;

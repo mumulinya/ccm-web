@@ -40,7 +40,7 @@ const prepare = async (page, { authDelay = 0, projectDelay = 0, groupDelay = 0 }
     if (acceptsEvents) return route.fulfill({ status: 200, contentType: 'text/event-stream', body: 'event: ready\ndata: {"type":"ready"}\n\n' })
     if (url.pathname === '/api/auth/session') {
       if (authDelay) await delay(authDelay)
-      return route.fulfill(json({ success: true, authenticated: true, user: { username: 'loading-selftest' } }))
+      return route.fulfill(json({ success: true, authenticated: true, user: { username: 'loading-selftest', role: 'admin' }, capabilities: ['read', 'task.execute', 'project.runtime', 'project.git', 'security.manage'] }))
     }
     if (url.pathname === '/api/projects') {
       if (projectDelay) await delay(projectDelay)
@@ -80,6 +80,7 @@ try {
   report.checks.push({ name: 'authentication reuses the global viewport overlay', pass: true })
   await capture(desktop, 'desktop-auth-loading')
   await navigation
+  await authOverlay.waitFor({ state: 'detached', timeout: 5_000 })
 
   const projectOverlay = desktop.locator('[data-page-loading="projects"]')
   await projectOverlay.waitFor({ state: 'visible', timeout: 8_000 })
@@ -110,6 +111,7 @@ try {
   const mobileNavigation = mobile.goto(`${baseUrl}/?tab=projects`, { waitUntil: 'domcontentloaded', timeout: 30_000 })
   await mobile.locator('[data-page-loading="authentication"]').waitFor({ state: 'visible', timeout: 5_000 })
   await mobileNavigation
+  await mobile.locator('[data-page-loading="authentication"]').waitFor({ state: 'detached', timeout: 5_000 })
   const mobileProjectOverlay = mobile.locator('[data-page-loading="projects"]')
   await mobileProjectOverlay.waitFor({ state: 'visible', timeout: 8_000 })
   const mobileMetrics = await mobileProjectOverlay.evaluate(element => {

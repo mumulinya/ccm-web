@@ -81,7 +81,14 @@ import {
   startWebConversationTurnRecoveryForServer,
   stopWebConversationTurnRecoveryForServer,
 } from "./agents/conversation-turn-control";
+import {
+  buildRecoverableTaskSummary,
+  decideConversationMessageRoute,
+  findRecoverableConversationTasks,
+} from "./agents/conversation-message-routing";
 import { parseSecureMultipartRequest } from "./system/secure-multipart";
+import { appendUserVisibleAgentEvent, buildUserVisibleAgentResult } from "./system/user-visible-agent-events";
+import { isDevelopmentTaskWorkflowDecision } from "./agents/workflow-decision";
 
 // 导入底座与持久层
 import {
@@ -172,6 +179,7 @@ import {
   upsertProjectSessionTaskMessage,
 } from "./modules/projects/sessions";
 import { handleConversationSearchApi } from "./modules/search/conversation-search";
+import { formatPrePlanClarificationText } from "./agents/pre-plan-clarification";
 import { startConversationSearchIndexScheduler, stopConversationSearchIndexScheduler } from "./modules/search/conversation-search-index";
 import { handleGitApi } from "./modules/tools/git";
 import { handleMarketplaceApi, recoverMarketplaceProductionState } from "./modules/tools/marketplace";
@@ -256,6 +264,11 @@ import { handleSlashCommandsApi } from "./modules/tools/slash-commands";
 import { handleSlashCommandConversationApi, runConversationAside } from "./modules/tools/slash-command-conversations";
 import { migrateConfigDirectory, migrateTomlCredentials } from "./core/credential-store";
 import { handleFeishuReactionFeedbackApi } from "./integrations/feishu-reaction-feedback";
+import {
+  materializeFeishuInboundAttachments,
+  publicFeishuInboundAttachments,
+  resolveFeishuInboundAttachments,
+} from "./integrations/feishu-inbound-attachments";
 import { handleUsabilityApi, startUsabilityArchiveScheduler, stopUsabilityArchiveScheduler } from "./modules/system/usability";
 import { handleNavigationConfigApi } from "./modules/system/navigation-config";
 import { handleSystemSettingsApi } from "./modules/system/settings";
@@ -1188,7 +1201,7 @@ function handleRequest(req: any, res: any) {
   // === 流式发送消息给 Agent（SSE）===
   if (pathname === "/api/send-stream" && req.method === "POST") {
     const contentType = req.headers["content-type"] || "";
-    const handleStreamSend = async (project: string, message: string, files: any[] = [], parentRunId = "", projectSessionId = "", source = "web", platformContext: any = {}, clientMessageId = "", assistantMessageId = "") => {
+    const handleStreamSend = async (project: string, message: string, files: any[] = [], parentRunId = "", projectSessionId = "", source = "web", platformContext: any = {}, clientMessageId = "", assistantMessageId = "", clarificationPayload: any = null, ccConnectAttachmentRefs: any[] = [], feishuAttachments: any[] = [], conversationTurnId = "", resolvedRoute = "", resolvedCandidateTaskId = "") => {
       let projectFeishuEnvelope: any = null;
       if (source === "feishu") {
         if (String(platformContext?.target_type || "project_agent") !== "project_agent") {
@@ -1209,7 +1222,99 @@ function handleRequest(req: any, res: any) {
           return sendJson(res, { error: `项目飞书身份校验失败：${error?.message || error}` }, 403);
         }
       }
+      let controlledFeishuAttachments = Array.isArray(feishuAttachments)
+        ? feishuAttachments.filter((item: any) => item?.schema === "ccm-feishu-inbound-attachment-v1")
+        : [];
+      if (controlledFeishuAttachments.length && (req.ccmAuth?.kind !== "internal" || !["feishu-acp", "project-feishu-queue"].includes(String(req.ccmAuth?.caller || "")))) {
+        return sendJson(res, { error: "飞书附件回执只允许由受信任的内部通道提交" }, 403);
+      }
+      if (source === "feishu" && Array.isArray(ccConnectAttachmentRefs) && ccConnectAttachmentRefs.length) {
+        if (req.ccmAuth?.kind !== "internal" || req.ccmAuth?.caller !== "feishu-acp") {
+          return sendJson(res, { error: "只有飞书 ACP 适配器可以提交本地附件引用" }, 403);
+        }
+        try {
+          const attachmentConfig = getConfigs().find(item => item.name === project);
+          const attachmentWorkDir = attachmentConfig ? String(getConfigInfo(attachmentConfig.path)[0]?.workDir || "") : "";
+          if (!attachmentWorkDir) throw new Error("无法确认当前项目工作目录");
+          const resolved = await resolveFeishuInboundAttachments({
+            messageId: String(platformContext?.platform_message_id || platformContext?.message_id || ""),
+            localRefs: ccConnectAttachmentRefs,
+            expectedWorkDir: attachmentWorkDir,
+            source: "cc_connect_acp",
+          });
+          if (!resolved.attachments.length) throw new Error(resolved.failures[0]?.reason || "飞书附件未能安全接管");
+          controlledFeishuAttachments = resolved.attachments;
+          platformContext = {
+            ...platformContext,
+            feishu_attachments: controlledFeishuAttachments,
+            feishu_attachment_warnings: resolved.warnings,
+            feishu_attachment_failures: resolved.failures,
+          };
+        } catch (error: any) {
+          return sendJson(res, { error: `飞书附件接管失败：${error?.message || error}` }, 400);
+        }
+      }
+      if (source === "feishu" && controlledFeishuAttachments.length) {
+        try {
+          files = materializeFeishuInboundAttachments(controlledFeishuAttachments);
+        } catch (error: any) {
+          return sendJson(res, { error: `飞书附件受控副本不可用：${error?.message || error}` }, 400);
+        }
+      }
       const exactProjectSessionId = String(projectSessionId || "").trim();
+      if (source === "feishu" && exactProjectSessionId && /^[123]$/.test(String(message || "").trim())) {
+        const pendingRoute = conversationTurnControl.listInternal({
+          scope: "project",
+          conversation_id: `${project}:${exactProjectSessionId}`,
+          statuses: "needs_route",
+          limit: 20,
+        }).turns.at(-1);
+        if (pendingRoute?.routing) {
+          const choice = String(message).trim() === "1" ? "continue_original" : String(message).trim() === "2" ? "start_new_task" : "answer_only";
+          if (choice !== "continue_original" || pendingRoute.routing.candidateTaskId) {
+            const resolved = conversationTurnControl.resolveRoute({
+              id: pendingRoute.id,
+              revision: pendingRoute.revision,
+              choice,
+              bindingChecksum: pendingRoute.routing.bindingChecksum,
+            });
+            message = resolved.message;
+            conversationTurnId = resolved.id;
+            resolvedRoute = choice;
+            resolvedCandidateTaskId = resolved.routing?.candidateTaskId || "";
+          }
+        }
+      }
+      let effectiveMessage = String(message || "");
+      let resolvedProjectClarification: any = null;
+      if (clarificationPayload && exactProjectSessionId) {
+        const detail: any = getSessionDetail(project, exactProjectSessionId);
+        const clarificationId = String(clarificationPayload.id || clarificationPayload.clarification_id || "").trim();
+        const clarificationMessageId = String(clarificationPayload.message_id || clarificationPayload.messageId || "").trim();
+        const pending = [...(Array.isArray(detail?.history) ? detail.history : [])].reverse().find((item: any) => {
+          const projection = item?.prePlanClarification || item?.pre_plan_clarification;
+          return item?.role === "assistant" && projection?.status === "pending"
+            && ((!clarificationId || String(projection.id || "") === clarificationId)
+              && (!clarificationMessageId || String(item.id || "") === clarificationMessageId));
+        });
+        const projection = pending?.prePlanClarification || pending?.pre_plan_clarification;
+        if (!pending || !projection) return sendJson(res, { error: "当前项目会话中没有等待回答的这个业务澄清" }, 404);
+        if (Number(clarificationPayload.revision || 0) !== Number(projection.revision || 0)
+          || Number(clarificationPayload.generation || 0) !== Number(projection.generation || 0)) {
+          return sendJson(res, { error: "澄清内容已更新，请刷新后重新提交", code: "CLARIFICATION_REVISION_CONFLICT" }, 409);
+        }
+        const original = String(pending?.clarificationContext?.originalRequest || pending?.clarification_context?.original_request || pending?.requestText || "").trim();
+        const checksum = crypto.createHash("sha256").update(original).digest("hex");
+        if (projection.originalRequestChecksum && checksum !== projection.originalRequestChecksum) {
+          return sendJson(res, { error: "原始请求绑定已变化，请重新开始规划", code: "CLARIFICATION_BINDING_CONFLICT" }, 409);
+        }
+        effectiveMessage = [
+          "[原始业务需求]", original,
+          "[用户确认的业务决策]", String(message || "").trim(),
+          "[续接要求]", "请基于上述业务决策生成详细计划和执行清单。计划必须 requiresConfirmation=true，在用户确认前不得启动项目子 Agent或修改代码。",
+        ].filter(Boolean).join("\n\n");
+        resolvedProjectClarification = { pending, projection };
+      }
       const asideMatch = source === "feishu" ? String(message || "").trim().match(/^\/btw(?:\s+([\s\S]+))?$/i) : null;
       if (asideMatch) {
         if (!project || !exactProjectSessionId || !getSessionDetail(project, exactProjectSessionId)) {
@@ -1241,18 +1346,31 @@ function handleRequest(req: any, res: any) {
       try {
         sourceIngestion = await ingestRequirementSources({
           files: Array.isArray(files) ? files : [],
-          userText: message || "",
+          userText: effectiveMessage,
           extractRequirement: false,
           decomposeRequirement: false,
         });
       } catch (error: any) {
         console.warn(`[项目资料读取] ${project || "unknown"} 统一解析失败：${error?.message || error}`);
       }
+      const attachmentSources = Array.isArray(sourceIngestion?.sources) ? sourceIngestion.sources : [];
+      const readableAttachmentCount = attachmentSources.filter((item: any) => item?.readable === true || ["parsed", "partial"].includes(String(item?.status || "").toLowerCase())).length;
+      const publicProjectFeishuAttachments = publicFeishuInboundAttachments(controlledFeishuAttachments).map((item: any) => {
+        const parsed = attachmentSources.find((sourceItem: any) => String(sourceItem?.name || "") === item.name);
+        return parsed ? { ...item, status: String(parsed.status || (parsed.readable ? "parsed" : "failed")), readable: parsed.readable === true } : item;
+      });
+      if (controlledFeishuAttachments.length && readableAttachmentCount === 0
+        && /^(?:请读取并处理我刚发送的附件。?|请读取并处理这条飞书附件。?)$/.test(String(message || "").trim())) {
+        return sendJson(res, {
+          error: "附件已经收到，但没有可读取的内容。请转换为 PDF、图片或文本后重新发送。",
+          attachment_failures: Array.isArray(platformContext?.feishu_attachment_failures) ? platformContext.feishu_attachment_failures : [],
+        }, 400);
+      }
       const sourceContext = String(sourceIngestion?.agent_context || "");
       const fallbackFileContext = !sourceContext && files && files.length > 0
         ? buildUploadedFilesContext(files, "本次消息附件")
         : "";
-      const finalMessage = `${message || ""}${sourceContext || fallbackFileContext}`;
+      const finalMessage = `${effectiveMessage}${sourceContext || fallbackFileContext}`;
       if (!project || !finalMessage.trim()) return sendJson(res, { error: "参数不足" }, 400);
       const configs = getConfigs();
       const config = configs.find(c => c.name === project);
@@ -1274,7 +1392,7 @@ function handleRequest(req: any, res: any) {
           project,
           projectSessionId: exactProjectSessionId,
           message,
-          files,
+          files: controlledFeishuAttachments.length ? controlledFeishuAttachments : files,
           platformContext: {
             ...platformContext,
             target_type: "project_agent",
@@ -1312,11 +1430,44 @@ function handleRequest(req: any, res: any) {
           projectId: project,
           originReceipt: projectFeishuOriginReceipt,
         });
+        if (controlledFeishuAttachments.length) {
+          const transferFailureCount = Array.isArray(platformContext?.feishu_attachment_failures) ? platformContext.feishu_attachment_failures.length : 0;
+          const unreadable = Math.max(0, controlledFeishuAttachments.length - readableAttachmentCount) + transferFailureCount;
+          const reportedAttachmentCount = controlledFeishuAttachments.length + transferFailureCount;
+          const unreadableNames = [
+            ...attachmentSources.filter((item: any) => item?.readable !== true).map((item: any) => String(item?.name || "附件")),
+            ...(Array.isArray(platformContext?.feishu_attachment_failures) ? platformContext.feishu_attachment_failures.map((item: any) => String(item?.name || "附件")) : []),
+          ].filter(Boolean).slice(0, 5);
+          void notifyFeishuTaskStage({
+            stage: "project_agent_attachment_ingestion",
+            title: `${projectDisplayName(project)} · 附件读取`,
+            markdown: unreadable
+              ? `已收到 ${reportedAttachmentCount} 个附件，已读取 ${readableAttachmentCount} 个；${unreadable} 个无法解析${unreadableNames.length ? `（${unreadableNames.join("、")}）` : ""}，将继续处理可读内容。`
+              : `已收到并读取 ${reportedAttachmentCount} 个附件，正在整理任务目标。`,
+            sessionId: exactProjectSessionId,
+            forceNewMessage: true,
+            dedupeKey: `project-feishu-attachments:${projectFeishuEnvelope?.message_id || controlledFeishuAttachments.map((item: any) => item.id).join(":")}`,
+          }).catch(() => {});
+        }
+        try {
+          const persistedUserMessageId = safeClientMessageId
+            || `feishu-user:${String(platformContext?.platform_message_id || projectFeishuEnvelope?.message_id || crypto.randomUUID()).replace(/[^A-Za-z0-9:_-]/g, "").slice(0, 150)}`;
+          upsertProjectSessionTaskMessage(project, exactProjectSessionId, {
+            id: persistedUserMessageId,
+            role: "user",
+            content: String(message || "").trim() || "请读取并处理我刚发送的附件。",
+            timestamp: new Date().toISOString(),
+            source: "feishu-project-user",
+            files: publicProjectFeishuAttachments,
+          });
+        } catch (error: any) {
+          console.warn(`[项目飞书会话] 用户消息附件投影失败 (${project}/${exactProjectSessionId})：${error?.message || error}`);
+        }
         try {
           applyProjectSessionProvisionalTitle(project, exactProjectSessionId, {
             role: "user",
             content: finalMessage,
-            files,
+            files: controlledFeishuAttachments.length ? publicProjectFeishuAttachments : files,
           });
         } catch (error: any) {
           console.warn(`[项目飞书会话] 临时命名失败 (${project}/${exactProjectSessionId})：${error?.message || error}`);
@@ -1337,7 +1488,7 @@ function handleRequest(req: any, res: any) {
           console.warn(`[项目飞书会话] 自动命名失败 (${project}/${exactProjectSessionId})：${error?.message || error}`);
         });
       };
-      const parentProjectMainTask = parentRunId ? getProjectMainTask(String(parentRunId)) : null;
+      let parentProjectMainTask = parentRunId ? getProjectMainTask(String(parentRunId)) : null;
       if (exactProjectSessionId && parentRunId) {
         const parentRun = projectChatRuns.get(String(parentRunId));
         if (!parentRun && !parentProjectMainTask) return sendJson(res, { error: "续跑来源不存在" }, 404);
@@ -1363,7 +1514,7 @@ function handleRequest(req: any, res: any) {
           setImmediate(() => void drainProjectFeishuTurns(`http://127.0.0.1:${PORT}`, project, exactProjectSessionId));
         }
       };
-      const persistConversationReply = (content: string, mode = "conversation") => {
+      const persistConversationReply = (content: string, mode = "conversation", extras: any = {}) => {
         if (!exactProjectSessionId || !String(content || "").trim()) return;
         try {
           upsertProjectSessionTaskMessage(project, exactProjectSessionId, {
@@ -1377,30 +1528,50 @@ function handleRequest(req: any, res: any) {
             task_id: "",
             run_id: "",
             interruption: null,
+            ...extras,
             source: source === "feishu" ? "feishu-project-main-agent-reply" : "web-project-main-agent-reply",
           });
         } catch (error: any) {
           console.warn(`[项目会话] 权威回复持久化失败 (${project}/${exactProjectSessionId})：${error?.message || error}`);
         }
       };
-      const streamBufferedConversationReply = async (content: string) => {
-        const characters = Array.from(String(content || ""));
-        const chunkSize = characters.length > 2400 ? 36 : characters.length > 800 ? 24 : 16;
-        for (let offset = 0; offset < characters.length; offset += chunkSize) {
-          if (res.destroyed || res.writableEnded) break;
-          writeSse(res, {
-            type: "chunk",
-            text: characters.slice(offset, offset + chunkSize).join(""),
-            agent: "project-main-agent",
-          });
-          (res as any).flush?.();
-          if (offset + chunkSize < characters.length) {
-            await new Promise(resolve => setTimeout(resolve, 14));
-          }
-        }
+      let projectReplyStreamStarted = false;
+      let projectReplyDeltaEmitted = false;
+      let projectReplySequence = 0;
+      const ensureProjectReplyStream = () => {
+        if (projectReplyStreamStarted || res.destroyed || res.writableEnded) return;
+        projectReplyStreamStarted = true;
+        res.writeHead(200, {
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-cache, no-transform",
+          "Connection": "keep-alive",
+          "Access-Control-Allow-Origin": "*",
+          "X-Accel-Buffering": "no",
+        });
+        if (typeof res.flushHeaders === "function") res.flushHeaders();
+        writeSse(res, { type: "response_started", agent: "project-main-agent" });
+      };
+      const emitProjectReplyDelta = (delta: string) => {
+        if (!delta || res.destroyed || res.writableEnded) return;
+        ensureProjectReplyStream();
+        projectReplyDeltaEmitted = true;
+        projectReplySequence += 1;
+        writeSse(res, { type: "response_delta", text: delta, agent: "project-main-agent", sequence: projectReplySequence });
+        (res as any).flush?.();
       };
       let projectFirstTurn: any;
       const projectMainMetricStartedAt = Date.now();
+      const recoverableProjectCandidates = findRecoverableConversationTasks({
+        scope: "project",
+        scopeId: project,
+        exactSessionId: exactProjectSessionId,
+      });
+      const explicitRouteChoice = ["continue_original", "start_new_task", "answer_only"].includes(String(resolvedRoute || ""))
+        ? String(resolvedRoute)
+        : "";
+      const explicitCandidate = explicitRouteChoice === "continue_original"
+        ? recoverableProjectCandidates.find((item: any) => String(item.id || "") === String(resolvedCandidateTaskId || ""))
+        : null;
       try {
         projectFirstTurn = await runProjectMainAgentFirstTurn({
           project,
@@ -1408,11 +1579,91 @@ function handleRequest(req: any, res: any) {
           userMessage: finalMessage,
           turnId: String((sourceIngestion as any)?.client_message_id || safeClientMessageId || ""),
           sourceCount: Number(sourceIngestion?.source_count || sourceIngestion?.sources?.length || files?.length || 0),
+          originalRequestChecksum: crypto.createHash("sha256").update(String(message || "")).digest("hex"),
+          clarificationRound: resolvedProjectClarification ? Math.min(2, Number(resolvedProjectClarification.projection.round || 1) + 1) : 1,
+          continuationCandidate: buildRecoverableTaskSummary(explicitCandidate || (recoverableProjectCandidates.length === 1 ? recoverableProjectCandidates[0] : null)),
+          forcedConversationRoute: explicitRouteChoice as any,
+          onDelta: source === "feishu" ? undefined : emitProjectReplyDelta,
+          onModelActivity: (activity: any) => {
+            if (!projectReplyStreamStarted || res.destroyed || res.writableEnded) return;
+            writeSse(res, { type: "model_activity", activity });
+          },
         });
       } catch (error: any) {
+        if (!explicitRouteChoice && source === "web" && exactProjectSessionId) {
+          try {
+            let routeTurn = conversationTurnId
+              ? conversationTurnControl.listInternal({ scope: "project", conversation_id: `${project}:${exactProjectSessionId}`, limit: 500 }).turns.find(item => item.id === conversationTurnId)
+              : null;
+            if (!routeTurn) {
+              const created = conversationTurnControl.enqueue({
+                scope: "project",
+                conversation_id: `${project}:${exactProjectSessionId}`,
+                mode: "queue",
+                message: String(message || ""),
+                request_id: `route:${safeClientMessageId || crypto.randomUUID()}`,
+                owner_id: req.ccmAuth?.kind === "browser" ? req.ccmAuth.userId : "",
+                metadata: { project, session_id: exactProjectSessionId, original_message_id: safeClientMessageId },
+              });
+              routeTurn = conversationTurnControl.claim({ scope: "project", conversation_id: `${project}:${exactProjectSessionId}`, id: created.turn.id, revision: created.turn.revision });
+            }
+            if (routeTurn?.status === "sending") {
+              const routed = conversationTurnControl.requireRoute({
+                id: routeTurn.id,
+                revision: routeTurn.revision,
+                routing: {
+                  candidateTaskId: String(recoverableProjectCandidates[0]?.id || ""),
+                  confidence: 0,
+                  reason: "主 Agent 暂时无法可靠判断这条消息是否续接原任务，请选择处理方式",
+                },
+              });
+              ensureProjectReplyStream();
+              writeSse(res, { type: "route_required", turn: { id: routed.id, revision: routed.revision, status: routed.status, routing: routed.routing }, message_id: safeAssistantMessageId });
+              writeSse(res, { type: "done", route_required: true, message_id: safeAssistantMessageId, message_mode: "conversation", final_text: "" });
+              releaseDispatch();
+              if (!res.writableEnded && !res.destroyed) res.end();
+              return;
+            }
+          } catch {}
+        }
+        const failedAt = new Date().toISOString();
+        const failedDurationMs = Math.max(0, Date.now() - projectMainMetricStartedAt);
+        const rawFailure = String(error?.message || error || "");
+        const providerUnavailable = /(?:HTTP\s*50[0234]|service temporarily unavailable|timeout|timed out|ECONNRESET|ECONNREFUSED|模型服务.*不可用|provider.*unavailable)/i.test(rawFailure);
+        const safeFailureText = providerUnavailable
+          ? "模型服务暂时不可用，自动重试后仍未恢复；本轮没有启动项目 Agent，也没有修改代码。请稍后直接重试。"
+          : "项目主 Agent 暂时无法形成可靠的后续方案；本轮没有启动项目 Agent，也没有修改代码。请重试或检查模型配置。";
+        appendUserVisibleAgentEvent({
+          eventId: `project-turn:${String((sourceIngestion as any)?.client_message_id || safeClientMessageId || Date.now())}:result:failed`,
+          scope: "project",
+          scopeId: project,
+          exactSessionId: exactProjectSessionId,
+          eventType: "result",
+          error: safeFailureText,
+          display: {
+            title: "本轮未完成",
+            summary: "项目主 Agent 未能形成可靠的后续方案",
+            status: "failed",
+            durationMs: failedDurationMs,
+          },
+          result: buildUserVisibleAgentResult({
+            status: "failed",
+            text: safeFailureText,
+            durationMs: failedDurationMs,
+            stopReason: String(error?.code || "project_main_first_turn_failed"),
+            unfinished: ["本轮未启动项目 Agent"],
+          }),
+          detail: {
+            timing: { totalMs: failedDurationMs },
+            retryable: true,
+            safeRetry: true,
+            sideEffectState: "read_only",
+            failedAt,
+          },
+        });
         recordMetric("project-main-agent", {
           success: false,
-          durationMs: Date.now() - projectMainMetricStartedAt,
+          durationMs: failedDurationMs,
           fileChangeCount: 0,
           scopeType: "project", projectId: project, role: "main_agent",
           source: "project-main-turn", runtime: "main-agent-model",
@@ -1423,9 +1674,15 @@ function handleRequest(req: any, res: any) {
           error: error?.message || String(error),
         });
         releaseDispatch();
+        if (projectReplyStreamStarted && !res.destroyed && !res.writableEnded) {
+          writeSse(res, { type: "error", text: safeFailureText, interrupted: projectReplyDeltaEmitted, completed_at: failedAt });
+          res.end();
+          return;
+        }
         return sendJson(res, {
           success: false,
-          error: `统一大模型无法形成可靠工作流决策，本轮未启动项目 Agent：${error?.message || error}`,
+          error: safeFailureText,
+          completed_at: failedAt,
         }, 503);
       }
       recordMetric("project-main-agent", {
@@ -1442,40 +1699,137 @@ function handleRequest(req: any, res: any) {
           totalMs: Number(projectFirstTurn.metric?.durationMs || 0),
           modelMs: Number(projectFirstTurn.metric?.modelMs || 0),
           toolWallMs: Number(projectFirstTurn.metric?.toolWallMs || 0),
+          firstVisibleFeedbackMs: Number(projectFirstTurn.metric?.firstVisibleFeedbackMs || 0),
+          firstTokenMs: Number(projectFirstTurn.metric?.firstTokenMs || 0),
+          maxSilentGapMs: Number(projectFirstTurn.metric?.maxSilentGapMs || 0),
+        },
+        streaming: {
+          firstVisibleFeedbackMs: Number(projectFirstTurn.metric?.firstVisibleFeedbackMs || 0),
+          firstTokenMs: Number(projectFirstTurn.metric?.firstTokenMs || 0),
+          maxSilentGapMs: Number(projectFirstTurn.metric?.maxSilentGapMs || 0),
+          providerRetryCount: Number(projectFirstTurn.metric?.retryCount || 0),
+          fallbackStreamCount: Number(projectFirstTurn.metric?.fallbackStreamCount || 0),
+          initialReadFileCount: Number(projectFirstTurn.metric?.initialReadFileCount || 0),
+          initialReadTokens: Number(projectFirstTurn.metric?.initialReadTokens || 0),
         },
       });
       const chatIntent = {
         mode: projectFirstTurn.responseType === "reply" || projectFirstTurn.responseType === "clarify"
           ? "conversation"
-          : projectFirstTurn.workflowDecision?.mode === "project_analysis" ? "project_analysis" : "task",
+          : isDevelopmentTaskWorkflowDecision(projectFirstTurn.workflowDecision) ? "task" : "project_analysis",
         workflowDecision: projectFirstTurn.workflowDecision,
       };
+      const routeDecision = decideConversationMessageRoute({
+        workflowDecision: projectFirstTurn.workflowDecision,
+        candidates: recoverableProjectCandidates,
+      });
+      if (explicitRouteChoice === "continue_original") {
+        if (!explicitCandidate) {
+          releaseDispatch();
+          return sendJson(res, { success: false, error: "原任务已不可恢复，请重新选择处理方式", code: "CONVERSATION_ROUTE_CANDIDATE_STALE" }, 409);
+        }
+        parentRunId = String(explicitCandidate.id || "");
+        parentProjectMainTask = getProjectMainTask(parentRunId) || explicitCandidate;
+      } else if (explicitRouteChoice === "start_new_task" || explicitRouteChoice === "answer_only") {
+        parentRunId = "";
+        parentProjectMainTask = null;
+      } else if (["resume_task", "revise_task"].includes(routeDecision.decision) && routeDecision.candidate) {
+        parentRunId = String(routeDecision.candidate.id || "");
+        parentProjectMainTask = getProjectMainTask(parentRunId) || routeDecision.candidate;
+      } else if (routeDecision.decision === "needs_user") {
+        let routeTurn = conversationTurnId
+          ? conversationTurnControl.listInternal({ scope: "project", conversation_id: `${project}:${exactProjectSessionId}`, limit: 500 }).turns.find(item => item.id === conversationTurnId)
+          : null;
+        if (!routeTurn) {
+          const created = conversationTurnControl.enqueue({
+            scope: "project",
+            conversation_id: `${project}:${exactProjectSessionId}`,
+            mode: "queue",
+            message: String(message || ""),
+            request_id: `route:${safeClientMessageId || crypto.randomUUID()}`,
+            owner_id: req.ccmAuth?.kind === "browser" ? req.ccmAuth.userId : "",
+            metadata: { project, session_id: exactProjectSessionId, original_message_id: safeClientMessageId },
+          });
+          routeTurn = conversationTurnControl.claim({ scope: "project", conversation_id: `${project}:${exactProjectSessionId}`, id: created.turn.id, revision: created.turn.revision });
+        }
+        if (!routeTurn || routeTurn.status !== "sending") {
+          releaseDispatch();
+          return sendJson(res, { success: false, error: "消息处理方式已经变化，请刷新后重试", code: "QUEUE_REVISION_CONFLICT" }, 409);
+        }
+        const routed = conversationTurnControl.requireRoute({
+          id: routeTurn.id,
+          revision: routeTurn.revision,
+          routing: {
+            candidateTaskId: String(routeDecision.candidate?.id || ""),
+            confidence: routeDecision.confidence,
+            reason: routeDecision.reason,
+          },
+        });
+        if (source === "feishu") {
+          await notifyFeishuTaskStage({
+            stage: "conversation_route_required",
+            title: `${projectDisplayName(project)} · 请选择处理方式`,
+            markdown: [
+              "这条消息可能与刚才的任务有关。",
+              routed.routing?.reason || "请确认如何处理这条消息。",
+              routed.routing?.candidateTaskId ? "1. 继续原任务" : "1. 继续原任务（当前不可用）",
+              "2. 作为新任务",
+              "3. 仅回答问题",
+              "请直接回复 1、2 或 3。",
+            ].join("\n"),
+            sessionId: exactProjectSessionId,
+            forceNewMessage: true,
+            dedupeKey: `project-route:${routed.id}:${routed.revision}`,
+          });
+        }
+        ensureProjectReplyStream();
+        writeSse(res, { type: "route_required", turn: { id: routed.id, revision: routed.revision, status: routed.status, routing: routed.routing }, message_id: safeAssistantMessageId });
+        writeSse(res, { type: "done", route_required: true, message_id: safeAssistantMessageId, message_mode: "conversation", final_text: "" });
+        releaseDispatch();
+        if (!res.writableEnded && !res.destroyed) res.end();
+        return;
+      }
+      if (parentProjectMainTask && explicitRouteChoice !== "answer_only") chatIntent.mode = "task";
       const directProjectReply = ["reply", "clarify"].includes(String(projectFirstTurn.responseType || ""))
         ? String(projectFirstTurn.reply || "").trim()
         : "";
       if (directProjectReply) {
-        persistConversationReply(directProjectReply, "conversation");
+        const clarificationProjection = projectFirstTurn.prePlanClarification;
+        const visibleProjectReply = source === "feishu" && clarificationProjection
+          ? formatPrePlanClarificationText(clarificationProjection)
+          : directProjectReply;
+        persistConversationReply(visibleProjectReply, "conversation", clarificationProjection ? {
+          prePlanClarification: { ...clarificationProjection, anchorMessageId: safeAssistantMessageId },
+          pre_plan_clarification: { ...clarificationProjection, anchorMessageId: safeAssistantMessageId },
+          clarificationContext: { schema: "ccm-project-clarification-context-v1", originalRequest: message, status: "pending" },
+          clarification_context: { schema: "ccm-project-clarification-context-v1", original_request: message, status: "pending" },
+        } : {});
         if (!res.destroyed && !res.writableEnded) {
-          res.writeHead(200, {
-            "Content-Type": "text/event-stream",
-            "Cache-Control": "no-cache, no-transform",
-            "Connection": "keep-alive",
-            "Access-Control-Allow-Origin": "*",
-            "X-Accel-Buffering": "no",
-          });
-          if (typeof res.flushHeaders === "function") res.flushHeaders();
+          ensureProjectReplyStream();
           writeSse(res, { type: "turn_decision", decision: projectFirstTurn.turnDecision, receipt: projectFirstTurn.turnReceipt });
           for (const item of projectFirstTurn.toolResults || []) writeSse(res, { type: "tool_activity", phase: item.ok === false ? "failed" : "completed", tool: item.name, scope: item.scope || "project", source: item.source || item.toolKind || "", loaded: item.loaded !== false, output_tokens: item.outputTokens || 0, duration_ms: item.durationMs || 0, result_checksum: item.resultChecksum || "", error: item.error || "" });
-          writeSse(res, { type: "presentation", message_mode: "conversation", show_task_card: false, main_agent: "project", direct_reply_fast_path: true });
-          await streamBufferedConversationReply(directProjectReply);
+          writeSse(res, { type: "presentation", message_mode: "conversation", show_task_card: false, main_agent: "project", direct_reply_fast_path: true, prePlanClarification: clarificationProjection, pre_plan_clarification: clarificationProjection });
+          if (!projectReplyDeltaEmitted && visibleProjectReply) emitProjectReplyDelta(visibleProjectReply);
           if (!res.destroyed && !res.writableEnded) {
-            writeSse(res, { type: "done", message_id: safeAssistantMessageId, message_mode: "conversation", main_agent: "project", taskExperience: null, direct_reply_fast_path: true });
+            writeSse(res, { type: "response_completed", sequence: projectReplySequence, final: true });
+            writeSse(res, { type: "done", message_id: safeAssistantMessageId, message_mode: "conversation", main_agent: "project", taskExperience: null, direct_reply_fast_path: true, final_text: visibleProjectReply, prePlanClarification: clarificationProjection, pre_plan_clarification: clarificationProjection });
           }
         }
-        scheduleFeishuSessionTitle(directProjectReply);
+        scheduleFeishuSessionTitle(visibleProjectReply);
         releaseDispatch();
         if (!res.writableEnded && !res.destroyed) res.end();
         return;
+      }
+      if (resolvedProjectClarification && projectFirstTurn.plan) {
+        projectFirstTurn.plan.requiresConfirmation = true;
+        const resolvedAt = new Date().toISOString();
+        upsertProjectSessionTaskMessage(project, exactProjectSessionId, {
+          ...resolvedProjectClarification.pending,
+          prePlanClarification: { ...resolvedProjectClarification.projection, status: "resolved", revision: Number(resolvedProjectClarification.projection.revision || 1) + 1, resolvedAt },
+          pre_plan_clarification: { ...resolvedProjectClarification.projection, status: "resolved", revision: Number(resolvedProjectClarification.projection.revision || 1) + 1, resolved_at: resolvedAt },
+          clarificationContext: { ...(resolvedProjectClarification.pending.clarificationContext || {}), status: "resolved", resolvedAt },
+          clarification_context: { ...(resolvedProjectClarification.pending.clarification_context || {}), status: "resolved", resolved_at: resolvedAt },
+        });
       }
       const info = getConfigInfo(config.path);
       const workDir = info[0]?.workDir;
@@ -1786,7 +2140,7 @@ function handleRequest(req: any, res: any) {
           return;
         }
 
-        const projectRun = createProjectChatRun(project, finalMessage, workDir, parentRunId, exactProjectSessionId);
+        const projectRun = createProjectChatRun(project, effectiveMessage, workDir, parentRunId, exactProjectSessionId);
         projectRun.message_mode = "task";
         projectRun.workflow_decision = chatIntent.workflowDecision;
         const bound = bindProjectRunAgentSession(projectRun, project, agentType);
@@ -1804,7 +2158,7 @@ function handleRequest(req: any, res: any) {
           project,
           projectSessionId: exactProjectSessionId,
           projectMainRunId: projectRun.id,
-          userMessage: finalMessage,
+          userMessage: effectiveMessage,
           plan,
           workflowDecision: chatIntent.workflowDecision,
           sourceAttachments: files,
@@ -2125,6 +2479,12 @@ function handleRequest(req: any, res: any) {
             {},
             String((fields as any).client_message_id || (fields as any).clientMessageId || ""),
             String((fields as any).assistant_message_id || (fields as any).assistantMessageId || ""),
+            (fields as any).clarification_payload ? JSON.parse(String((fields as any).clarification_payload)) : null,
+            [],
+            [],
+            String((fields as any).conversation_turn_id || ""),
+            String((fields as any).resolved_route || ""),
+            String((fields as any).resolved_candidate_task_id || ""),
           );
         } catch (e: any) {
           sendJson(res, { error: e.message }, 400);
@@ -2137,8 +2497,24 @@ function handleRequest(req: any, res: any) {
     req.on("data", (chunk) => body += chunk);
     req.on("end", () => {
       try {
-        const { project, message, files, parent_run_id, parentRunId, session_id, sessionId, source, platform_context, platformContext, client_message_id, clientMessageId, assistant_message_id, assistantMessageId } = JSON.parse(body);
-        void handleStreamSend(project, message, Array.isArray(files) ? files : [], String(parent_run_id || parentRunId || ""), String(session_id || sessionId || ""), String(source || "web"), platform_context || platformContext || {}, String(client_message_id || clientMessageId || ""), String(assistant_message_id || assistantMessageId || ""));
+        const { project, message, files, attachments, cc_connect_attachment_refs, parent_run_id, parentRunId, session_id, sessionId, source, platform_context, platformContext, client_message_id, clientMessageId, assistant_message_id, assistantMessageId, clarification_payload, clarificationPayload, conversation_turn_id, resolved_route, resolved_candidate_task_id } = JSON.parse(body);
+        void handleStreamSend(
+          project,
+          message,
+          Array.isArray(files) ? files : [],
+          String(parent_run_id || parentRunId || ""),
+          String(session_id || sessionId || ""),
+          String(source || "web"),
+          platform_context || platformContext || {},
+          String(client_message_id || clientMessageId || ""),
+          String(assistant_message_id || assistantMessageId || ""),
+          clarification_payload || clarificationPayload || null,
+          Array.isArray(cc_connect_attachment_refs) ? cc_connect_attachment_refs : [],
+          Array.isArray(attachments) ? attachments : [],
+          String(conversation_turn_id || ""),
+          String(resolved_route || ""),
+          String(resolved_candidate_task_id || ""),
+        );
       } catch (e: any) {
         sendJson(res, { error: e.message }, 400);
       }

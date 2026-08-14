@@ -134,14 +134,24 @@ export function createGroupTaskCardActionHandler(options = {}) {
         if (!feedback?.trim()) return
         await postTaskCardAction('/api/usability/intake/revise', { id, feedback: feedback.trim(), ...guard })
       } else if (action.kind === 'pause') {
-        await postTaskCardAction('/api/tasks/update', { id, status: 'paused', is_paused: true, status_detail: '用户从群聊任务卡暂停', ...guard })
-      } else if (action.kind === 'resume') {
-        const resumed = await postTaskCardAction('/api/tasks/update', { id, status: 'pending', is_paused: false, paused: false, status_detail: '用户从群聊任务卡恢复', ...guard })
-        await postTaskCardAction('/api/tasks/queue', { task_id: id, ...taskMutationGuardFromSource(resumed.task || card) })
+        await postTaskCardAction('/api/tasks/pause', { id, ...guard, pauseSequence: action?.pauseSequence || card?.pause_status?.pauseSequence || card?.pauseStatus?.pauseSequence || card?.pause_control?.pauseSequence || card?.pause_sequence || 0 })
+        toast.info('正在暂停，将在当前操作安全收口后保留现场')
+      } else if (action.kind === 'resume' || action.kind === 'resume_paused') {
+        await postTaskCardAction('/api/tasks/resume-paused', { id, ...guard, pauseSequence: action?.pauseSequence || card?.pause_status?.pauseSequence || card?.pauseStatus?.pauseSequence || card?.pause_control?.pauseSequence || card?.pause_sequence || 0 })
+        toast.success('已通过现场核验，正在从原任务继续')
+      } else if (action.kind === 'force_interrupt') {
+        if (!await confirmDialog(`安全暂停仍未完成，确定强制中断“${card?.title || id}”吗？这会进入中断恢复流程。`)) return
+        await postTaskCardAction('/api/tasks/interrupt', { id, reason: '安全暂停超时后由用户强制中断', ...guard })
       } else if (action.kind === 'retry') {
         await postTaskCardAction('/api/tasks/retry', { id, reason: '用户从群聊任务卡重新派发', auto_execute: true, ...guard })
       } else if (action.kind === 'reconcile_delivery' || action.kind === 'recheck') {
-        await postTaskCardAction('/api/tasks/reconcile-delivery', { id, ...guard })
+        const pauseState = card?.pause_status?.state || card?.pauseStatus?.state || card?.pause_control?.state
+        if (action.kind === 'recheck' && pauseState === 'blocked') {
+          await postTaskCardAction('/api/tasks/resume-paused', { id, ...guard, pauseSequence: card?.pause_status?.pauseSequence || card?.pauseStatus?.pauseSequence || card?.pause_control?.pauseSequence || 0 })
+          toast.success('重新核验已通过，正在从原任务继续')
+        } else {
+          await postTaskCardAction('/api/tasks/reconcile-delivery', { id, ...guard })
+        }
       } else if (action.kind === 'resolve_permission') {
         navigateConversation?.({ tab: 'tools-config', taskId: id })
         return

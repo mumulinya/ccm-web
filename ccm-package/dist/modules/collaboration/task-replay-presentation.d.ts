@@ -62,21 +62,7 @@ export declare function buildTaskReplayPresentation(input: TaskReplayPresentatio
         resolution: string;
         evidenceIds: string[];
     }[];
-    recoveryJourney: {
-        taskId: string;
-        reasonCode: string;
-        reasonLabel: string;
-        interruptedAt: string;
-        resumePhase: string;
-        completedWorkItemCount: number;
-        mode: any;
-        state: any;
-        attempt: number;
-        maxAttempts: number;
-        nextRetryAt: string;
-        recoveredAt: string;
-        result: string;
-    }[];
+    recoveryJourney: any[];
     integrity: {
         level: string;
         expectedSources: string[];

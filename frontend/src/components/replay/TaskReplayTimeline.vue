@@ -2,6 +2,7 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import TaskReplayTimelineEvent from './TaskReplayTimelineEvent.vue'
+import ToolResultDetail from '../common/ToolResultDetail.vue'
 import {
   replayActorLabel,
   replayEventSummary,
@@ -32,6 +33,7 @@ const summaryText = item => replayEventSummary(item)
 const hasDetails = (item) => !!(
   summaryText(item).length > 220
   || item.evidence_ids?.length
+  || item.tool_display
   || item.group_count > 1
   || item.task_id
   || item.category
@@ -165,6 +167,7 @@ watch(() => props.focusedEventId, async (id) => {
               {{ isOpen(item.id) ? '收起' : item.group_count > 1 ? `展开 ${item.group_count} 条合并记录` : summaryText(item).length > 220 ? '展开完整内容' : '查看相关信息' }}
             </button>
             <div v-if="isOpen(item.id)" class="event-details">
+              <ToolResultDetail v-if="item.tool_display" :display="item.tool_display" />
               <div v-if="item.evidence_ids?.length" class="event-evidence-links">
                 <button v-for="evidenceId in item.evidence_ids" :key="evidenceId" type="button" @click="emit('open-evidence', evidenceId)">查看验证证据</button>
                 <button v-if="item.replay_link?.anchorMessageId" type="button" @click="emit('return-execution', item.replay_link)">返回执行现场</button>

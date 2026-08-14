@@ -24,6 +24,7 @@ export type ExecutionState =
   | "ready"
   | "prompt_accepted"
   | "running"
+  | "paused"
   | "waiting_input"
   | "reviewing"
   | "succeeded"
@@ -636,6 +637,37 @@ export function cancelActiveAgentRun(input: any = {}) {
     source: run.source,
   });
   return { success: true, matched: matched.length, killed, cancellation, targeted: !cancelTask, runs: matched.map(publicActiveAgentRun) };
+}
+
+export function requestActiveAgentRunPause(input: any = {}) {
+  const taskId = String(input.taskId || input.task_id || "").trim();
+  const reason = String(input.reason || "任务请求在最近安全检查点暂停").trim();
+  if (!taskId) throw new Error("缺少 taskId");
+  const matched = Array.from(activeAgentRuns.values()).filter(run => run.taskId === taskId);
+  let signalled = 0;
+  for (const run of matched) {
+    run.status = "pause_requested";
+    run.updatedAt = now();
+    try {
+      if (run.child?.connected && typeof run.child.send === "function") {
+        run.child.send({ type: "ccm.pause_requested", taskId, reason, contentStored: false });
+        signalled++;
+      }
+    } catch {}
+    if (run.executionId) transitionExecution(run.executionId, "running", "已请求在当前原子操作结束后暂停", {
+      status: "warning",
+      data: { pause_requested: true, cooperative: true, content_stored: false },
+    });
+    publishRuntimeEvent("agent", "agent.pause_requested", {
+      runId: run.id,
+      taskId: run.taskId,
+      project: run.project,
+      reason,
+      cooperative: true,
+      signalled: run.child?.connected === true,
+    });
+  }
+  return { success: true, matched: matched.length, signalled };
 }
 
 export function trackManagedChildProcess(taskId: string, executionId: string, child: ChildProcess, meta: any = {}) {

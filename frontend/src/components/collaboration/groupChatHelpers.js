@@ -1,4 +1,5 @@
 import { sanitizeUserFacingAgentText, sanitizeUserFacingLegacyTerminology, sanitizeUserFacingPlanText, sanitizeUserFacingStructure } from '../../utils/agentDisplay.js'
+import { taskCardNeedsConversationControl } from '../../utils/taskCardPresentation.js'
 import {
   classifyGroupTaskCardPresentation,
   PRESENTATION_REPLY,
@@ -237,7 +238,8 @@ export const buildGroupContextCompactionEvent = (memory, messages = []) => {
 }
 
 export const isPrimaryTaskCard = (messages, msg, index) => {
-  return !!getTaskCard(msg) && isPrimaryTaskMessage(messages, msg, index)
+  const card = getTaskCard(msg)
+  return taskCardNeedsConversationControl(card) && isPrimaryTaskMessage(messages, msg, index)
 }
 
 export const taskRuntimeStatusLabel = (status) => ({ pending: '待执行', in_progress: '执行中', blocked: '受阻', done: '已完成', failed: '失败', cancelled: '已取消' }[status] || status || '执行中')

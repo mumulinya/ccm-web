@@ -128,6 +128,7 @@ export declare function runWorkerContextPreDispatchGateSelfTest(): {
         requiresConfirmation: boolean;
         risk: string;
         nextStep: string;
+        structuredClarificationQuestions: any[];
         confidence: any;
     };
 };
@@ -159,6 +160,7 @@ export declare function runWorkerContextCompactionRetrySelfTest(): {
         requiresConfirmation: boolean;
         risk: string;
         nextStep: string;
+        structuredClarificationQuestions: any[];
         confidence: any;
     };
 };

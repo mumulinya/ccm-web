@@ -1,6 +1,7 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
 import { replayActorLabel, replayEventSummary, replayEventTitle, replayProjectLabel, replayStageLabel, replayTechnicalLabel } from '../../utils/taskReplayPresentation.js'
+import ToolResultDetail from '../common/ToolResultDetail.vue'
 
 const props = defineProps({ item: { type: Object, required: true }, focused: Boolean, showRawGroups: Boolean })
 const emit = defineEmits(['open-evidence', 'return-execution'])
@@ -10,7 +11,7 @@ const stageLabel = replayStageLabel
 const statusLabel = status => ({ info: '记录', running: '进行中', passed: '通过', warning: '注意', failed: '失败', blocked: '受阻', cancelled: '已取消' }[status] || status || '记录')
 const timeLabel = value => { const date = new Date(value); return Number.isNaN(date.getTime()) ? '时间未知' : date.toLocaleString('zh-CN', { hour12: false }) }
 const summary = computed(() => replayEventSummary(props.item))
-const hasDetails = computed(() => summary.value.length > 220 || props.item.evidence_ids?.length || props.item.group_count > 1 || props.item.replay_link?.anchorMessageId || (props.item.technical && Object.keys(props.item.technical).length))
+const hasDetails = computed(() => summary.value.length > 220 || props.item.tool_display || props.item.evidence_ids?.length || props.item.group_count > 1 || props.item.replay_link?.anchorMessageId || (props.item.technical && Object.keys(props.item.technical).length))
 const technicalRows = computed(() => Object.entries(props.item.technical || {}).filter(([, value]) => value !== '' && value != null).map(([key, value]) => ({ key, label: replayTechnicalLabel(key), value: typeof value === 'string' ? value : JSON.stringify(value, null, 2) })))
 </script>
 
@@ -21,6 +22,7 @@ const technicalRows = computed(() => Object.entries(props.item.technical || {}).
     <p v-if="summary" :class="{ clamped: !open }">{{ summary }}</p>
     <button v-if="hasDetails" type="button" class="virtual-toggle" @click="open = !open">{{ open ? '收起' : '查看相关信息' }}</button>
     <div v-if="open" class="virtual-details">
+      <ToolResultDetail v-if="item.tool_display" :display="item.tool_display" />
       <div class="virtual-actions"><button v-for="id in item.evidence_ids || []" :key="id" type="button" @click="emit('open-evidence', id)">查看验证证据</button><button v-if="item.replay_link?.anchorMessageId" type="button" @click="emit('return-execution', item.replay_link)">返回执行现场</button></div>
       <ol v-if="showRawGroups && item.group_count > 1"><li v-for="raw in item.raw_events" :key="raw.id"><time>{{ timeLabel(raw.at) }}</time><strong>{{ replayEventTitle(raw) }}</strong><p>{{ replayEventSummary(raw) }}</p></li></ol>
       <details v-if="technicalRows.length"><summary>排障信息</summary><dl><template v-for="row in technicalRows" :key="row.key"><dt>{{ row.label }}</dt><dd><pre>{{ row.value }}</pre></dd></template></dl></details>

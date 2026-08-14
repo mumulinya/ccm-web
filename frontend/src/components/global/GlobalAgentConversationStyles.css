@@ -1237,6 +1237,15 @@
 .project-report-card.failed .report-body code {
   color: #f87171;
 }
+.file-read-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-top: 2px;
+  color: var(--accent-red);
+  font-size: 10px;
+}
+.file-read-status.ok { color: var(--accent-green); }
 
 /* Ordinary text bubbles follow content; rich Agent cards keep their work area. */
 .chat-bubble-wrapper {

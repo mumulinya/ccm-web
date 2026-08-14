@@ -1,4 +1,4 @@
-export function disableBlockingFeishuReaction(content: string) {
+export function configureNativeFeishuReactionFeedback(content: string) {
   if (!/^\s*\[\[projects\.platforms\]\]\s*$/mi.test(content)) return content;
 
   const newline = content.includes("\r\n") ? "\r\n" : "\n";
@@ -30,7 +30,7 @@ export function disableBlockingFeishuReaction(content: string) {
     if (optionsStart < 0) {
       let insertAt = end;
       while (insertAt > boundary.index + 1 && !lines[insertAt - 1].trim()) insertAt -= 1;
-      lines.splice(insertAt, 0, "", "[projects.platforms.options]", 'reaction_emoji = "none"');
+      lines.splice(insertAt, 0, "", "[projects.platforms.options]", 'reaction_emoji = "OnIt"', 'done_emoji = "Done"');
       continue;
     }
 
@@ -41,23 +41,30 @@ export function disableBlockingFeishuReaction(content: string) {
         break;
       }
     }
-    const reactionIndex = lines.findIndex((line, index) => (
-      index > optionsStart
-      && index < optionsEnd
-      && /^\s*reaction_emoji\s*=/i.test(line)
-    ));
-    if (reactionIndex >= 0) {
-      const indent = lines[reactionIndex].match(/^\s*/)?.[0] || "";
-      lines[reactionIndex] = `${indent}reaction_emoji = "none"`;
-    } else {
-      let insertAt = optionsEnd;
-      while (insertAt > optionsStart + 1 && !lines[insertAt - 1].trim()) insertAt -= 1;
-      lines.splice(insertAt, 0, 'reaction_emoji = "none"');
+    for (const [key, value] of [["done_emoji", "Done"], ["reaction_emoji", "OnIt"]] as const) {
+      const settingIndex = lines.findIndex((line, index) => (
+        index > optionsStart
+        && index < optionsEnd
+        && new RegExp(`^\\s*${key}\\s*=`, "i").test(line)
+      ));
+      if (settingIndex >= 0) {
+        const indent = lines[settingIndex].match(/^\s*/)?.[0] || "";
+        lines[settingIndex] = `${indent}${key} = "${value}"`;
+      } else {
+        let insertAt = optionsEnd;
+        while (insertAt > optionsStart + 1 && !lines[insertAt - 1].trim()) insertAt -= 1;
+        lines.splice(insertAt, 0, `${key} = "${value}"`);
+        optionsEnd += 1;
+      }
     }
   }
 
   return lines.join(newline);
 }
+
+// Preserve the old export for installed extensions while changing the private
+// runtime projection to cc-connect's native reaction lifecycle.
+export const disableBlockingFeishuReaction = configureNativeFeishuReactionFeedback;
 
 export function disableVisibleCcConnectIdleRotation(content: string) {
   const marker = content.search(/\r?\n\[projects\.agent\]/i);

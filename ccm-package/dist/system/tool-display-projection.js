@@ -10,6 +10,83 @@ const AUDIT_KEYS = new Set([
 ]);
 const BODY_KEYS = /^(?:content|text|body|output|rawOutput|raw_output|context|html|sourceCode|source_code|notebookOutput|notebook_output|old_text|new_text|replacement|file_data)$/i;
 const SECRET_KEYS = /(?:api[_-]?key|access[_-]?token|refresh[_-]?token|authorization|cookie|password|passwd|secret|credential|private[_-]?key)/i;
+function resultPresentation(operation, rows, raw) {
+    const safeRows = Array.isArray(rows) ? rows : [];
+    const item = (label, options = {}) => ({
+        label: cleanText(label, 500),
+        ...(options.secondary ? { secondary: cleanText(options.secondary, 500) } : {}),
+        ...(options.path ? { path: cleanText(options.path, 800) } : {}),
+        ...(Number.isFinite(Number(options.line)) && Number(options.line) > 0 ? { line: Number(options.line) } : {}),
+        ...(options.status ? { status: cleanText(options.status, 80) } : {}),
+    });
+    if (operation === "list_directory") {
+        const directories = safeRows.filter(row => row?.type === "directory").map(row => item(row.name || row.path, { path: row.path, status: "directory" }));
+        const files = safeRows.filter(row => row?.type !== "directory").map(row => item(row.name || row.path, { path: row.path, status: "file" }));
+        return { layout: "directory", groups: [
+                { id: "directories", label: "目录", count: directories.length, items: directories },
+                { id: "files", label: "文件", count: files.length, items: files },
+            ].filter(group => group.count) };
+    }
+    if (operation === "glob_files")
+        return { layout: "files", groups: [{ id: "files", label: "匹配文件", count: safeRows.length, items: safeRows.map(row => item(row.path || row.name, { path: row.path || row.name, status: "file" })) }] };
+    if (operation === "grep_text") {
+        const items = safeRows.map(row => {
+            const location = cleanText(row?.location || row?.path, 800);
+            const match = location.match(/^(.*?):(\d+)$/);
+            return item("匹配内容", { path: match?.[1] || location, line: match?.[2], secondary: row?.preview });
+        });
+        const byPath = new Map();
+        for (const row of items) {
+            const key = row.path || "其他匹配";
+            byPath.set(key, [...(byPath.get(key) || []), row]);
+        }
+        return { layout: "matches", groups: [...byPath.entries()].map(([path, matches]) => ({ id: `match:${path}`, label: path, count: matches.length, items: matches })) };
+    }
+    if (/find_|workspace_symbols|document_symbols/.test(operation)) {
+        return { layout: "symbols", groups: [{ id: "symbols", label: "符号位置", count: safeRows.length, items: safeRows.map(row => item(row.symbol || row.path || "符号", {
+                        path: row.path,
+                        line: Number(row?.range?.start?.line ?? row?.line ?? -1) + 1,
+                        secondary: row.kind,
+                    })) }] };
+    }
+    if (/^read_(?:file|files)$/.test(operation)) {
+        const sourceRows = safeRows.length ? safeRows : raw?.path ? [{
+                path: raw.path,
+                status: raw.status === "unchanged" || raw.type === "file_unchanged" ? "内容未变化" : raw.truncated ? "部分读取" : "已读完",
+                lines: Number(raw?.safeReceipt?.lineCount || raw?.lines?.length || 0),
+                from: Number(raw?.offset || raw?.lines?.[0]?.line || 0),
+                to: Number(raw?.lines?.at?.(-1)?.line || 0),
+                totalLines: Number(raw?.total_lines || raw?.totalLines || 0),
+            }] : [];
+        return {
+            layout: "file_content",
+            groups: sourceRows.length ? [{
+                    id: "files",
+                    label: operation === "read_files" ? "读取文件" : "读取范围",
+                    count: sourceRows.length,
+                    items: sourceRows.map(row => {
+                        const from = Number(row?.from || 0);
+                        const to = Number(row?.to || 0);
+                        const totalLines = Number(row?.totalLines || row?.total_lines || 0);
+                        const range = from ? `第 ${from}${to > from ? `–${to}` : ""} 行${totalLines ? ` · 共 ${totalLines} 行` : ""}` : "";
+                        const status = cleanText(row?.status, 80);
+                        return item(row?.path || "文件", {
+                            path: row?.path,
+                            status: status.includes("失败") ? "failed" : status.includes("部分") ? "partial" : "file",
+                            secondary: [range, status, row?.reason].filter(Boolean).join(" · "),
+                        });
+                    }),
+                }] : [],
+        };
+    }
+    if (/git/.test(operation))
+        return { layout: "git", groups: safeRows.length ? [{ id: "git", label: "Git 结果", count: safeRows.length, items: safeRows.map(row => item(row.subject || row.path || row.label || row.name || "记录", { secondary: row.hash || row.status, path: row.path })) }] : [] };
+    if (/test|build|lint|typecheck|verify|verification|maven|gradle/.test(operation))
+        return { layout: "verification" };
+    if (safeRows.length)
+        return { layout: "generic", groups: [{ id: "results", label: "结果", count: safeRows.length, items: safeRows.map(row => item(row.label || row.name || row.path || row.location || "记录", { secondary: row.value || row.status, path: row.path })) }] };
+    return undefined;
+}
 const cleanText = (value, max = 1500) => String(value ?? "")
     .replace(/((?:api[_-]?key|access[_-]?token|authorization|cookie|password|secret|credential)\s*[:=]\s*["']?)[^\s,"'}]{6,}/gi, "$1[redacted]")
     .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [redacted]")
@@ -209,7 +286,7 @@ function resultProjection(operation, rawInput, error, transientBody) {
         }));
         const directories = rows.filter((row) => row.type === "directory").length;
         const files = rows.filter((row) => row.type === "file").length;
-        return { kind: "list", summary: `发现 ${total || rows.length} 项（${directories} 个目录，${files} 个文件）`, rows, ...paging };
+        return { kind: "list", summary: `发现 ${total || rows.length} 项（${directories} 个目录，${files} 个文件）`, rows, presentation: resultPresentation(operation, rows, raw), ...paging };
     }
     if (operation === "glob_files") {
         const rows = (Array.isArray(raw?.items) ? raw.items : []).slice(0, 40).map((item) => ({ path: cleanText(item?.path || item, 800) }));
@@ -217,7 +294,7 @@ function resultProjection(operation, rawInput, error, transientBody) {
         const summary = count > 0 ? `找到 ${count} 个文件${partialSuffix}`
             : searchExecution?.partial ? `暂未返回匹配文件${partialSuffix}，可缩小目录或模式后重试`
                 : "未找到匹配文件";
-        return { kind: "list", summary, rows, ...(searchExecution ? { searchExecution } : {}), ...paging };
+        return { kind: "list", summary, rows, presentation: resultPresentation(operation, rows, raw), ...(searchExecution ? { searchExecution } : {}), ...paging };
     }
     if (operation === "grep_text") {
         const rows = (Array.isArray(raw?.lines) ? raw.lines : []).slice(0, 40).map((item) => {
@@ -230,7 +307,26 @@ function resultProjection(operation, rawInput, error, transientBody) {
         const summary = count > 0 ? `找到 ${count} 条匹配${partialSuffix}`
             : searchExecution?.partial ? `暂未返回匹配内容${partialSuffix}，可缩小目录或检索范围后重试`
                 : "未找到匹配内容";
-        return { kind: "locations", summary, rows, rehydratable: !transientBody, ...(searchExecution ? { searchExecution } : {}), ...paging };
+        return { kind: "locations", summary, rows, presentation: resultPresentation(operation, rows, raw), rehydratable: !transientBody, ...(searchExecution ? { searchExecution } : {}), ...paging };
+    }
+    if (operation === "query_knowledge") {
+        const sources = [
+            ...(Array.isArray(raw?.sources) ? raw.sources : []),
+            ...(Array.isArray(raw?.sourceReferences) ? raw.sourceReferences : []),
+            ...(Array.isArray(raw?.source_references) ? raw.source_references : []),
+            ...(Array.isArray(raw?.results) ? raw.results : []),
+        ];
+        const names = [...new Set(sources.map((source) => cleanText(source?.documentName || source?.document_name || source?.filename || source?.sourceId || source?.source_id, 500)).filter(Boolean))].slice(0, 20);
+        const citationNames = names.length ? names : [...new Set((Array.isArray(raw?.citations) ? raw.citations : [])
+                .map((citation) => cleanText(citation, 500).replace(/#\d+$/, ""))
+                .filter(Boolean))].slice(0, 20);
+        return {
+            kind: citationNames.length ? "list" : "empty",
+            summary: citationNames.length ? `参考了 ${citationNames.length} 份知识资料` : "未找到与当前范围可靠匹配的知识资料",
+            ...(citationNames.length ? { rows: citationNames.map(name => ({ name })) } : {}),
+            total: citationNames.length,
+            truncated: false,
+        };
     }
     if (operation === "read_files") {
         const files = Array.isArray(raw?.files) ? raw.files : [];
@@ -238,14 +334,25 @@ function resultProjection(operation, rawInput, error, transientBody) {
         const normalizedCount = Number.isFinite(count) ? Math.max(0, count) : 0;
         const pending = files.filter((file) => file?.truncated === true && Number(file?.next_cursor || file?.nextCursor || 0) > 0);
         const unchanged = files.filter((file) => file?.status === "unchanged" || file?.type === "file_unchanged").length;
-        const rows = transientBody ? files.slice(0, 40).map((file) => ({
-            path: cleanText(file?.path || "文件", 800),
-            status: file?.status === "unchanged" || file?.type === "file_unchanged" ? "内容未变化" : file?.truncated === true ? "部分读取" : "已读完",
-            lines: Math.max(0, Number(file?.lines?.length || file?.safeReceipt?.lineCount || 0)),
-            ...(file?.truncated === true && Number(file?.next_cursor || file?.nextCursor || 0) > 0
-                ? { nextLine: Number(file?.next_cursor || file?.nextCursor) } : {}),
-        })) : undefined;
-        const fileRows = transientBody ? files.slice(0, 40).map((file) => {
+        const failed = files.filter((file) => file?.status === "failed" || file?.type === "text_error").length;
+        const rows = files.slice(0, 40).map((file) => {
+            const sourceLines = Array.isArray(file?.lines) ? file.lines : [];
+            const from = Number(sourceLines[0]?.line || file?.offset || 0);
+            const to = Number(sourceLines.at(-1)?.line || from);
+            return ({
+                path: cleanText(file?.path || "文件", 800),
+                status: file?.status === "failed" || file?.type === "text_error" ? "读取失败"
+                    : file?.status === "unchanged" || file?.type === "file_unchanged" ? "内容未变化"
+                        : file?.truncated === true ? "部分读取" : "已读完",
+                lines: Math.max(0, Number(file?.lines?.length || file?.safeReceipt?.lineCount || 0)),
+                ...(from > 0 ? { from, to: Math.max(from, to) } : {}),
+                ...(Number(file?.total_lines || file?.totalLines || 0) > 0 ? { totalLines: Number(file?.total_lines || file?.totalLines) } : {}),
+                ...(file?.status === "failed" || file?.type === "text_error" ? { reason: cleanText(file?.error || "文件读取失败", 500) } : {}),
+                ...(file?.truncated === true && Number(file?.next_cursor || file?.nextCursor || 0) > 0
+                    ? { nextLine: Number(file?.next_cursor || file?.nextCursor) } : {}),
+            });
+        });
+        const fileRows = transientBody ? files.filter((file) => file?.status !== "failed" && file?.type !== "text_error").slice(0, 40).map((file) => {
             const sourceLines = Array.isArray(file?.lines) ? file.lines : [];
             const normalizedLines = sourceLines.slice(0, 2000).map((line, index) => ({
                 line: Math.max(1, Number(line?.line || Number(file?.offset || 1) + index)),
@@ -276,37 +383,40 @@ function resultProjection(operation, rawInput, error, transientBody) {
         } : undefined;
         return {
             kind: "summary",
-            summary: `已读取 ${normalizedCount} 个文件${unchanged ? `，${unchanged} 个内容未变化` : ""}${pending.length ? `，其中 ${pending.length} 个文件仍有内容未读完` : ""}`,
+            summary: failed
+                ? `已处理 ${normalizedCount} 个文件，成功读取 ${Math.max(0, normalizedCount - failed)} 个，${failed} 个读取失败${pending.length ? `，${pending.length} 个仍有内容未读完` : ""}`
+                : `已读取 ${normalizedCount} 个文件${unchanged ? `，${unchanged} 个内容未变化` : ""}${pending.length ? `，其中 ${pending.length} 个文件仍有内容未读完` : ""}`,
             total: normalizedCount,
             truncated: pending.length > 0,
             rehydratable: true,
-            ...(rows ? { rows } : {}),
+            presentation: resultPresentation(operation, rows, raw),
+            rows,
             ...(fileRows ? { fileRows } : {}),
             ...(continuation?.files.length ? { continuation } : {}),
         };
     }
     if (operation === "read_file") {
         if (raw?.status === "unchanged" || raw?.type === "file_unchanged") {
-            return { kind: "summary", summary: `${cleanText(raw?.path || "文件", 500)} 内容未变化，继续使用当前上下文`, rehydratable: false, ...paging };
+            return { kind: "summary", summary: `${cleanText(raw?.path || "文件", 500)} 内容未变化，继续使用当前上下文`, presentation: resultPresentation(operation, [], raw), rehydratable: false, ...paging };
         }
         if (raw?.kind === "image" || raw?.type === "image") {
             const width = Number(raw?.width || raw?.dimensions?.displayWidth || 0);
             const height = Number(raw?.height || raw?.dimensions?.displayHeight || 0);
-            return { kind: "summary", summary: `已读取图片${width && height ? ` · ${width}×${height}` : ""}`, rehydratable: true, ...paging };
+            return { kind: "summary", summary: `已读取图片${width && height ? ` · ${width}×${height}` : ""}`, presentation: resultPresentation(operation, [], raw), rehydratable: true, ...paging };
         }
         if (raw?.kind === "pdf" || raw?.type === "pdf") {
             const pages = Number(raw?.page_count || raw?.pageCount || raw?.pages?.length || 0);
-            return { kind: "summary", summary: `已读取 PDF${pages ? ` · ${pages} 页` : ""}`, rehydratable: true, ...paging };
+            return { kind: "summary", summary: `已读取 PDF${pages ? ` · ${pages} 页` : ""}`, presentation: resultPresentation(operation, [], raw), rehydratable: true, ...paging };
         }
         if (raw?.kind === "notebook" || raw?.type === "notebook") {
             const cells = Number(raw?.item_count || raw?.itemCount || raw?.cells?.length || raw?.total_cells || 0);
-            return { kind: "summary", summary: `已读取 Notebook${cells ? ` · ${cells} 个单元格` : ""}`, rehydratable: true, ...paging };
+            return { kind: "summary", summary: `已读取 Notebook${cells ? ` · ${cells} 个单元格` : ""}`, presentation: resultPresentation(operation, [], raw), rehydratable: true, ...paging };
         }
         const sourceRows = Array.isArray(raw?.lines) ? raw.lines : [];
         const rows = transientBody ? sourceRows.slice(0, 40).map((item) => ({ line: Number(item?.line || 0), text: cleanText(item?.text || "", 12_000) })) : undefined;
         const from = Number(raw?.offset || sourceRows[0]?.line || 0);
         const to = Number(sourceRows.at(-1)?.line || from);
-        return { kind: transientBody ? "text" : "summary", summary: `读取 ${cleanText(raw?.path || "文件", 500)}${from ? ` 第 ${from}${to > from ? `–${to}` : ""} 行` : ""}`, ...(rows ? { rows } : {}), rehydratable: !transientBody, ...paging };
+        return { kind: transientBody ? "text" : "summary", summary: `读取 ${cleanText(raw?.path || "文件", 500)}${from ? ` 第 ${from}${to > from ? `–${to}` : ""} 行` : ""}`, ...(rows ? { rows } : {}), presentation: resultPresentation(operation, [], raw), rehydratable: !transientBody, ...paging };
     }
     if (["run_command", "get_command_output", "stop_command"].includes(operation)) {
         const status = cleanText(raw?.status || "", 40);
@@ -315,7 +425,7 @@ function resultProjection(operation, rawInput, error, transientBody) {
             running: `${description}仍在运行`, completed: `${description}已完成`, failed: `${description}未通过`,
             cancelled: `${description}已停止`, timed_out: `${description}运行超时`, needs_recheck: `${description}需要重新核验`,
         };
-        return { kind: status === "failed" || status === "timed_out" ? "error" : "summary", summary: summaries[status] || `${description}状态已更新`, truncated: Boolean(raw?.truncated), authoritativeRevision: cleanText(raw?.revision || "", 40) };
+        return { kind: status === "failed" || status === "timed_out" ? "error" : "summary", summary: summaries[status] || `${description}状态已更新`, presentation: { layout: "verification" }, truncated: Boolean(raw?.truncated), authoritativeRevision: cleanText(raw?.revision || "", 40) };
     }
     if (["apply_patch", "write_file", "move_path", "delete_path"].includes(operation) && raw?.schema === "ccm-workspace-edit-result-v1") {
         const labels = { apply_patch: "文件修改已保存", write_file: raw?.created ? "文件已创建" : "文件已写入", move_path: "文件已移动", delete_path: "文件已删除" };
@@ -323,18 +433,65 @@ function resultProjection(operation, rawInput, error, transientBody) {
     }
     if (/find_|workspace_symbols|document_symbols/.test(operation) && Array.isArray(raw?.locations)) {
         const rows = raw.locations.slice(0, 40).map((item) => ({ path: cleanText(item?.path, 800), range: safeValue(item?.range), symbol: cleanText(item?.symbol, 300), kind: cleanText(item?.kind, 100) }));
-        return { kind: "locations", summary: `找到 ${total || rows.length} 个位置`, rows, ...paging };
+        return { kind: "locations", summary: `找到 ${total || rows.length} 个位置`, rows, presentation: resultPresentation(operation, rows, raw), ...paging };
     }
     if (operation === "read_code_diagnostics") {
         const sourceRows = Array.isArray(raw?.diagnostics) ? raw.diagnostics : Array.isArray(raw?.locations) ? raw.locations : [];
-        return { kind: "diagnostics", summary: `${sourceRows.length} 条诊断`, rows: safeValue(sourceRows), ...paging };
+        const rows = safeValue(sourceRows);
+        return {
+            kind: "diagnostics",
+            summary: `${sourceRows.length} 条诊断`,
+            rows,
+            presentation: {
+                layout: "verification",
+                groups: rows.length ? [{
+                        id: "diagnostics",
+                        label: "诊断结果",
+                        count: rows.length,
+                        items: rows.map(row => ({
+                            label: cleanText(row?.message || row?.label || "诊断信息", 500),
+                            ...(row?.path ? { path: cleanText(row.path, 800) } : {}),
+                            ...(Number.isFinite(Number(row?.line)) && Number(row.line) > 0 ? { line: Number(row.line) } : {}),
+                            ...(row?.severity ? { status: cleanText(row.severity, 80) } : {}),
+                        })),
+                    }] : [],
+            },
+            ...paging,
+        };
+    }
+    if (operation === "read_git_status") {
+        const lines = (Array.isArray(raw?.lines) ? raw.lines : []).map((line) => cleanText(line, 900)).filter(Boolean);
+        const branch = lines.find((line) => line.startsWith("## "))?.slice(3) || "";
+        const changes = lines.filter((line) => !line.startsWith("## ")).map((line) => {
+            const code = line.slice(0, 2);
+            const label = code.includes("?") ? "未跟踪" : code.includes("A") ? "已新增" : code.includes("D") ? "已删除"
+                : code.includes("R") ? "已重命名" : code.includes("U") ? "存在冲突" : "已修改";
+            return {
+                label: cleanText(line.slice(3) || line, 800),
+                secondary: label,
+                path: cleanText(line.slice(3) || line, 800),
+                status: code.includes("U") ? "conflict" : "changed",
+            };
+        });
+        return {
+            kind: "list",
+            summary: changes.length ? `当前分支有 ${changes.length} 个文件变化${branch ? ` · ${branch}` : ""}` : `工作区干净${branch ? ` · ${branch}` : ""}`,
+            rows: changes,
+            presentation: {
+                layout: "git",
+                groups: changes.length ? [{ id: "changes", label: "文件变化", count: changes.length, items: changes }] : [],
+            },
+            ...paging,
+        };
     }
     if (operation === "read_git_diff") {
         const sourceRows = Array.isArray(raw?.lines) ? raw.lines : [];
-        return { kind: "diff", summary: sourceRows.length ? `${sourceRows.length} 行差异` : "没有未提交差异", ...(transientBody ? { rows: safeValue(sourceRows, 0, true) } : {}), rehydratable: sourceRows.length > 0 && !transientBody, ...paging };
+        return { kind: "diff", summary: sourceRows.length ? `${sourceRows.length} 行差异` : "没有未提交差异", presentation: { layout: "git" }, ...(transientBody ? { rows: safeValue(sourceRows, 0, true) } : {}), rehydratable: sourceRows.length > 0 && !transientBody, ...paging };
     }
-    if (operation === "read_git_history" && Array.isArray(raw?.commits))
-        return { kind: "table", summary: `${raw.commits.length} 条提交`, rows: safeValue(raw.commits), ...paging };
+    if (operation === "read_git_history" && Array.isArray(raw?.commits)) {
+        const rows = safeValue(raw.commits);
+        return { kind: "table", summary: `${raw.commits.length} 条提交`, rows, presentation: resultPresentation(operation, rows, raw), ...paging };
+    }
     if (Array.isArray(raw?.items))
         return { kind: "list", summary: `${total || raw.items.length} 项结果`, rows: safeValue(raw.items), ...paging };
     if (typeof raw === "string")

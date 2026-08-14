@@ -474,7 +474,15 @@ function createGlobalAgentHistoryRuntime(deps) {
             };
             sessions.unshift(session);
         }
-        const message = { role, content, timestamp: new Date().toISOString(), source };
+        const message = {
+            role,
+            content,
+            timestamp: new Date().toISOString(),
+            source,
+            ...(role === "user" && Array.isArray(options.files) && options.files.length
+                ? { files: (0, global_agent_attachments_1.sanitizeGlobalHistoryAttachments)(options.files, "user") }
+                : {}),
+        };
         try {
             ingestGlobalAgentConversation({ sessionId, source, messages: [message], extractMemory: options.extractMemory });
         }

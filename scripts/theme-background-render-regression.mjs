@@ -41,7 +41,7 @@ const prepare = async page => {
     if (!pathname.startsWith('/api/')) return route.continue()
     const acceptsEvents = String(route.request().headers().accept || '').includes('text/event-stream')
     if (acceptsEvents) return route.fulfill({ status: 200, contentType: 'text/event-stream', body: 'event: ready\ndata: {"type":"ready"}\n\n' })
-    if (pathname === '/api/auth/session') return route.fulfill(json({ success: true, authenticated: true, user: { username: 'theme-selftest' } }))
+    if (pathname === '/api/auth/session') return route.fulfill(json({ success: true, authenticated: true, user: { username: 'theme-selftest', role: 'admin' }, capabilities: ['read', 'task.execute', 'project.runtime', 'project.git', 'security.manage'] }))
     if (pathname === '/api/groups') return route.fulfill(json({ success: true, groups: [group, siblingGroup] }))
     if (pathname === '/api/groups/messages') return route.fulfill(json({
       success: true,
@@ -117,15 +117,18 @@ try {
   report.checks.push({ name: 'desktop group selector and native options use the deep-ocean palette', pass: true, details: groupTheme })
   const groupComposerTheme = await desktop.evaluate(() => {
     const root = getComputedStyle(document.documentElement)
+    const wrapper = document.querySelector('.group-chat .chat-input-wrap')
     const textarea = document.querySelector('.group-chat .chat-composer textarea')
     return {
       control: root.getPropertyValue('--control-bg').trim(),
       surface: root.getPropertyValue('--surface').trim(),
+      wrapper: wrapper ? getComputedStyle(wrapper).backgroundColor : '',
       textarea: textarea ? getComputedStyle(textarea).backgroundColor : '',
     }
   })
   assert.equal(groupComposerTheme.control, groupComposerTheme.surface)
-  assert.equal(groupComposerTheme.textarea, 'rgb(12, 26, 58)')
+  assert.equal(groupComposerTheme.wrapper, 'rgb(12, 26, 58)')
+  assert.equal(groupComposerTheme.textarea, 'rgba(0, 0, 0, 0)')
   report.checks.push({ name: 'shared group composer follows the selected control surface', pass: true, details: groupComposerTheme })
   await capture(desktop, 'desktop-deep-ocean-group-chat')
 
@@ -143,14 +146,14 @@ try {
   })
   assert.equal(globalComposerTheme.control, globalComposerTheme.surface)
   assert.equal(globalComposerTheme.wrapper, 'rgb(12, 26, 58)')
-  assert.equal(globalComposerTheme.input, globalComposerTheme.wrapper)
+  assert.equal(globalComposerTheme.input, 'rgba(0, 0, 0, 0)')
   report.checks.push({ name: 'global Agent input surface does not retain the legacy green control color', pass: true, details: globalComposerTheme })
   await capture(desktop, 'desktop-deep-ocean-global-agent')
 
   await openTab(desktop, 'memory-center', '.memory-center')
   const memoryTheme = await desktop.evaluate(() => {
     const page = document.querySelector('.memory-center')
-    const header = document.querySelector('.mc-header')
+    const header = document.querySelector('.workspace-page-shell:has(.memory-center) > .workspace-page-header')
     return {
       page: page ? getComputedStyle(page).backgroundColor : '',
       header: header ? getComputedStyle(header).backgroundColor : '',

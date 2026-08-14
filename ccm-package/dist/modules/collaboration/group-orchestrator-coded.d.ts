@@ -73,12 +73,14 @@ export declare function buildDispatchPolicy(action: string, reason: string, anal
     requiresConfirmation?: boolean;
     risk?: string;
     nextStep?: string;
+    structuredClarificationQuestions?: any[];
 }): {
     action: string;
     reason: string;
     requiresConfirmation: boolean;
     risk: string;
     nextStep: string;
+    structuredClarificationQuestions: any[];
     confidence: any;
 };
 export declare function isBroadDevelopmentRequest(message: string, analysis?: any): boolean;
@@ -88,6 +90,7 @@ export declare function inferCodedDispatchPolicy(group: any, message: string, an
     requiresConfirmation: boolean;
     risk: string;
     nextStep: string;
+    structuredClarificationQuestions: any[];
     confidence: any;
 };
 export declare function normalizeDispatchPolicy(parsed: any, analysis: any, targets: any[]): {
@@ -96,6 +99,7 @@ export declare function normalizeDispatchPolicy(parsed: any, analysis: any, targ
     requiresConfirmation: boolean;
     risk: string;
     nextStep: string;
+    structuredClarificationQuestions: any[];
     confidence: any;
 };
 export declare function runCodedGroupOrchestrator(input: {
@@ -144,6 +148,7 @@ export declare function runCodedGroupOrchestrator(input: {
         requiresConfirmation: boolean;
         risk: string;
         nextStep: string;
+        structuredClarificationQuestions: any[];
         confidence: any;
     };
     content: string;
@@ -190,6 +195,7 @@ export declare function runCodedGroupOrchestrator(input: {
         requiresConfirmation: boolean;
         risk: string;
         nextStep: string;
+        structuredClarificationQuestions: any[];
         confidence: any;
     };
     content: string;

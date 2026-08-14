@@ -399,6 +399,25 @@ function getSessionDetail(projectName, sessionId) {
     }
     return null;
 }
+function sanitizeProjectSessionAttachments(value) {
+    return (Array.isArray(value) ? value : []).slice(0, 10).flatMap((item) => {
+        if (!item || typeof item !== "object")
+            return [];
+        const name = path.basename(String(item.name || item.filename || "附件")).slice(0, 180) || "附件";
+        const rawUrl = String(item.upload_url || item.uploadUrl || "").trim();
+        const uploadUrl = rawUrl.startsWith("/api/uploads/") ? rawUrl.slice(0, 2048) : "";
+        return [{
+                id: String(item.id || item.feishuAttachmentId || "").slice(0, 160),
+                name,
+                size: Math.max(0, Number(item.size || 0)),
+                type: String(item.type || item.mimeType || item.contentType || "application/octet-stream").slice(0, 128),
+                checksum: String(item.checksum || "").slice(0, 128),
+                status: String(item.status || "received").slice(0, 40),
+                contentStored: false,
+                ...(uploadUrl ? { upload_url: uploadUrl } : {}),
+            }];
+    });
+}
 function normalizeWebSessionMessage(message) {
     const input = message && typeof message === "object" ? message : {};
     const safe = {
@@ -412,6 +431,12 @@ function normalizeWebSessionMessage(message) {
         "requestText",
         "messageMode",
         "message_mode",
+        "prePlanClarification",
+        "pre_plan_clarification",
+        "clarificationContext",
+        "clarification_context",
+        "businessDecision",
+        "business_decision",
         "task_id",
         "run_id",
         "taskExperience",
@@ -431,6 +456,9 @@ function normalizeWebSessionMessage(message) {
         if (Object.prototype.hasOwnProperty.call(input, key))
             safe[key] = input[key];
     }
+    const attachments = sanitizeProjectSessionAttachments(input.files || input.attachments);
+    if (attachments.length)
+        safe.files = attachments;
     return safe;
 }
 function replaceProjectSessionConversation(projectInput, sessionIdInput, messages, reason = "会话历史被受控替换") {

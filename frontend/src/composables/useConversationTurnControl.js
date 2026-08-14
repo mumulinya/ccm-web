@@ -15,7 +15,7 @@ export function useConversationTurnControl(options = {}) {
   const scope = () => String(readValue(options.scope) || '').trim()
   const conversationId = () => String(readValue(options.conversationId) || '').trim()
   const busy = () => Boolean(readValue(options.busy))
-  const activeTurns = computed(() => turns.value.filter(turn => ['queued', 'sending', 'failed'].includes(turn.status)))
+  const activeTurns = computed(() => turns.value.filter(turn => ['queued', 'sending', 'needs_route', 'failed'].includes(turn.status)))
 
   const refresh = async () => {
     const currentScope = scope()
@@ -29,7 +29,7 @@ export function useConversationTurnControl(options = {}) {
       const data = await conversationTurnsApi.list({
         scope: currentScope,
         conversationId: currentConversation,
-        statuses: 'queued,sending,failed',
+        statuses: 'queued,sending,needs_route,failed',
       })
       turns.value = data.turns || []
       return turns.value
@@ -99,6 +99,14 @@ export function useConversationTurnControl(options = {}) {
     finally { await refresh().catch(() => {}) }
   }
 
+  const resolveRoute = async (turn, choice) => {
+    if (!turn?.id || !turn?.routing?.bindingChecksum) return null
+    try {
+      const data = await conversationTurnsApi.resolveRoute(turn.id, turn.revision, choice, turn.routing.bindingChecksum)
+      return data.turn
+    } finally { await refresh().catch(() => {}) }
+  }
+
   const drain = async (handler) => {
     if (draining.value || busy() || !scope() || !conversationId()) return false
     draining.value = true
@@ -118,6 +126,10 @@ export function useConversationTurnControl(options = {}) {
         await refresh()
         try {
           const result = await handler(turn)
+          if (result?.routeRequired) {
+            await refresh()
+            break
+          }
           await settle(turn, 'completed', { result: result || null })
         } catch (error) {
           await settle(turn, 'failed', { error: error?.message || String(error) })
@@ -147,6 +159,10 @@ export function useConversationTurnControl(options = {}) {
       await refresh()
       try {
         const result = await handler(claimed)
+        if (result?.routeRequired) {
+          await refresh()
+          return true
+        }
         await settle(claimed, 'completed', { result: result || null })
       } catch (error) {
         await settle(claimed, 'failed', { error: error?.message || String(error) })
@@ -190,5 +206,5 @@ export function useConversationTurnControl(options = {}) {
   })
   watch(() => conversationId(), () => refresh().catch(() => {}))
 
-  return { mode, turns, activeTurns, loading, draining, refresh, enqueue, settle, cancel, guide, retry, drain, apply }
+  return { mode, turns, activeTurns, loading, draining, refresh, enqueue, settle, cancel, guide, retry, resolveRoute, drain, apply }
 }

@@ -21,6 +21,7 @@ export type UserVisibleAgentEventType =
   | "thinking_status"
   | "assistant_text_delta"
   | "assistant_progress"
+  | "model_activity"
   | "requirement_plan"
   | "tool_started"
   | "tool_progress"
@@ -118,6 +119,29 @@ export type UserVisibleAgentEvent = {
       source?: "agent_reported" | "runtime_structured" | "system_observed";
       confidence?: "declared" | "observed";
       sourceEventChecksum?: string;
+    };
+    modelActivity?: {
+      state: "started" | "waiting" | "retrying" | "streaming" | "completed" | "failed";
+      phase: "understanding" | "tool_decision" | "tool_result_review" | "verification" | "final_synthesis";
+      modelCallIndex: number;
+      retryAttempt?: number;
+      startedAt: string;
+      firstDeltaAt?: string;
+      safeLabel: string;
+      contentStored: false;
+    };
+    liveProgress?: {
+      phase: "starting" | "running" | "testing" | "building" | "finishing" | "retrying";
+      safeSummary: string;
+      completed?: number;
+      total?: number;
+      updatedAt: string;
+      contentStored: false;
+    };
+    stream?: {
+      sequence: number;
+      final: boolean;
+      checksum?: string;
     };
     availableActions?: UserVisibleAgentAction[];
     replayLink?: {
@@ -446,7 +470,7 @@ function toolPresentation(toolNameInput: any, args: any = {}) {
 function normalizeEventType(input: any): UserVisibleAgentEventType {
   const source = String(input || "").toLowerCase();
   if ([
-    "turn_started", "thinking_status", "assistant_text_delta", "assistant_progress", "requirement_plan",
+    "turn_started", "thinking_status", "assistant_text_delta", "assistant_progress", "model_activity", "requirement_plan",
     "tool_started", "tool_progress", "tool_completed", "tool_failed",
     "agent_started", "agent_progress", "agent_completed", "agent_failed",
     "permission_required", "clarification_required", "context_compacted", "result",
@@ -582,6 +606,39 @@ export function normalizeUserVisibleAgentEvent(input: any, sequence = 0): UserVi
           ? { confidence: String(detailSource.progress.confidence) as "declared" | "observed" } : {}),
         ...(compactText(detailSource.progress.sourceEventChecksum || detailSource.progress.source_event_checksum, 80)
           ? { sourceEventChecksum: compactText(detailSource.progress.sourceEventChecksum || detailSource.progress.source_event_checksum, 80) } : {}),
+      },
+    } : {}),
+    ...(detailSource.modelActivity && typeof detailSource.modelActivity === "object"
+      && ["started", "waiting", "retrying", "streaming", "completed", "failed"].includes(String(detailSource.modelActivity.state))
+      && ["understanding", "tool_decision", "tool_result_review", "verification", "final_synthesis"].includes(String(detailSource.modelActivity.phase)) ? {
+      modelActivity: {
+        state: String(detailSource.modelActivity.state) as "started" | "waiting" | "retrying" | "streaming" | "completed" | "failed",
+        phase: String(detailSource.modelActivity.phase) as "understanding" | "tool_decision" | "tool_result_review" | "verification" | "final_synthesis",
+        modelCallIndex: Math.max(1, Number(detailSource.modelActivity.modelCallIndex || 1)),
+        ...(Number(detailSource.modelActivity.retryAttempt) > 0 ? { retryAttempt: Math.max(1, Number(detailSource.modelActivity.retryAttempt)) } : {}),
+        startedAt: compactText(detailSource.modelActivity.startedAt, 40),
+        ...(compactText(detailSource.modelActivity.firstDeltaAt, 40) ? { firstDeltaAt: compactText(detailSource.modelActivity.firstDeltaAt, 40) } : {}),
+        safeLabel: compactText(detailSource.modelActivity.safeLabel, 120),
+        contentStored: false as const,
+      },
+    } : {}),
+    ...(detailSource.liveProgress && typeof detailSource.liveProgress === "object"
+      && ["starting", "running", "testing", "building", "finishing", "retrying"].includes(String(detailSource.liveProgress.phase))
+      && compactText(detailSource.liveProgress.safeSummary, 160) ? {
+      liveProgress: {
+        phase: String(detailSource.liveProgress.phase) as "starting" | "running" | "testing" | "building" | "finishing" | "retrying",
+        safeSummary: compactText(detailSource.liveProgress.safeSummary, 160),
+        ...(Number.isFinite(Number(detailSource.liveProgress.completed)) ? { completed: Math.max(0, Number(detailSource.liveProgress.completed)) } : {}),
+        ...(Number.isFinite(Number(detailSource.liveProgress.total)) ? { total: Math.max(0, Number(detailSource.liveProgress.total)) } : {}),
+        updatedAt: compactText(detailSource.liveProgress.updatedAt, 40) || now(),
+        contentStored: false as const,
+      },
+    } : {}),
+    ...(detailSource.stream && typeof detailSource.stream === "object" ? {
+      stream: {
+        sequence: Math.max(0, Number(detailSource.stream.sequence || 0)),
+        final: detailSource.stream.final === true,
+        ...(compactText(detailSource.stream.checksum, 80) ? { checksum: compactText(detailSource.stream.checksum, 80) } : {}),
       },
     } : {}),
     ...(sanitizeAvailableActions(detailSource.availableActions || detailSource.available_actions).length

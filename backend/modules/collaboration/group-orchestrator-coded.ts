@@ -521,7 +521,7 @@ export function buildDispatchPolicy(
   action: string,
   reason: string,
   analysis: any,
-  options: { requiresConfirmation?: boolean; risk?: string; nextStep?: string } = {}
+  options: { requiresConfirmation?: boolean; risk?: string; nextStep?: string; structuredClarificationQuestions?: any[] } = {}
 ) {
   return {
     action,
@@ -529,6 +529,7 @@ export function buildDispatchPolicy(
     requiresConfirmation: !!options.requiresConfirmation,
     risk: options.risk || "",
     nextStep: options.nextStep || "",
+    structuredClarificationQuestions: Array.isArray(options.structuredClarificationQuestions) ? options.structuredClarificationQuestions.slice(0, 3) : [],
     confidence: typeof analysis?.confidence === "number" ? analysis.confidence : 0,
   };
 }
@@ -590,6 +591,11 @@ export function normalizeDispatchPolicy(parsed: any, analysis: any, targets: any
     requiresConfirmation: parsedRequiresConfirmation,
     risk: String(parsed?.dispatchPolicy?.risk || parsed?.risk || "").trim(),
     nextStep: String(parsed?.dispatchPolicy?.nextStep || parsed?.nextStep || (action === "delegate" ? "立即派发给对应子 Agent" : "")).trim(),
+    structuredClarificationQuestions: parsed?.dispatchPolicy?.structuredClarificationQuestions
+      || parsed?.dispatchPolicy?.structured_clarification_questions
+      || parsed?.workflowDecision?.structuredClarificationQuestions
+      || parsed?.workflow_decision?.structured_clarification_questions
+      || [],
   });
 }
 

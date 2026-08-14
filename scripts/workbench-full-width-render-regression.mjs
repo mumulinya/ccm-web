@@ -45,7 +45,7 @@ const prepare = async page => {
     if (!pathname.startsWith('/api/')) return route.continue()
     const acceptsEvents = String(route.request().headers().accept || '').includes('text/event-stream')
     if (acceptsEvents) return route.fulfill({ status: 200, contentType: 'text/event-stream', body: 'event: ready\ndata: {"type":"ready"}\n\n' })
-    if (pathname === '/api/auth/session') return route.fulfill(json({ success: true, authenticated: true, user: { username: 'workbench-selftest' } }))
+    if (pathname === '/api/auth/session') return route.fulfill(json({ success: true, authenticated: true, user: { username: 'workbench-selftest', role: 'admin' }, capabilities: ['read', 'task.execute', 'project.runtime', 'project.git', 'security.manage'] }))
     if (pathname === '/api/usability/workbench') return route.fulfill(json(snapshot))
     if (pathname === '/api/projects') return route.fulfill(json({ success: true, projects: snapshot.resources.projects }))
     if (pathname === '/api/pets/agents') return route.fulfill(json({ success: true, agents: [] }))
@@ -57,7 +57,7 @@ const prepare = async page => {
   })
   await page.goto(`${baseUrl}/?tab=dashboard`, { waitUntil: 'domcontentloaded', timeout: 30_000 })
   await page.locator('.workbench').waitFor({ state: 'visible', timeout: 20_000 })
-  await page.getByRole('button', { name: /^workspace-5/ }).waitFor({ state: 'attached', timeout: 10_000 })
+  await page.locator('.workspace-grid').waitFor({ state: 'visible', timeout: 10_000 })
   await page.locator('[data-page-loading="dashboard"]').waitFor({ state: 'detached', timeout: 10_000 })
 }
 
@@ -91,7 +91,7 @@ try {
   assert.ok(Math.abs(desktopMetrics.workbenchWidth - desktopMetrics.paneWidth) <= 1, JSON.stringify(desktopMetrics))
   assert.ok(desktopMetrics.pulseWidth >= desktopMetrics.workbenchWidth - 82, JSON.stringify(desktopMetrics))
   assert.ok(Math.abs(desktopMetrics.gridWidth - desktopMetrics.pulseWidth) <= 1, JSON.stringify(desktopMetrics))
-  assert.ok(desktopMetrics.railWidth >= 320, JSON.stringify(desktopMetrics))
+  assert.equal(desktopMetrics.railWidth, 0, JSON.stringify(desktopMetrics))
   assert.ok(desktopMetrics.documentScrollWidth <= desktopMetrics.viewport + 1, JSON.stringify(desktopMetrics))
   report.checks.push({ name: 'desktop workbench fills the entire tab content width', pass: true, details: desktopMetrics })
   await capture(desktop, 'desktop-full-width-workbench')

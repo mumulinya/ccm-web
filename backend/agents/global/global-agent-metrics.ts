@@ -100,6 +100,14 @@ export function recordGlobalAgentRunMetric(
 
   const usage = collectUsage(run);
   const success = normalizedStatus === "completed";
+  const streamingMetric = run?.streaming_metric && typeof run.streaming_metric === "object" ? { ...run.streaming_metric } : {};
+  const completedAt = Date.parse(String(run?.completed_at || new Date().toISOString()));
+  if (Number.isFinite(completedAt) && Number(streamingMetric.lastVisibleFeedbackAt || 0) > 0) {
+    streamingMetric.maxSilentGapMs = Math.max(Number(streamingMetric.maxSilentGapMs || 0), Math.max(0, completedAt - Number(streamingMetric.lastVisibleFeedbackAt || completedAt)));
+  }
+  const firstRoundReads = (Array.isArray(run?.steps) ? run.steps : []).filter((step: any) => /^(?:read_file|read_files|glob_files|grep_text)$/i.test(String(step?.tool?.name || "")) && Number(step?.index || 0) <= 1);
+  streamingMetric.initialReadFileCount = firstRoundReads.reduce((count: number, step: any) => count + Math.max(1, Number(step?.observation?.safeReceipt?.itemCount || step?.observation?.itemCount || 0)), 0);
+  streamingMetric.initialReadTokens = firstRoundReads.reduce((count: number, step: any) => count + Math.max(0, Number(step?.observation?.outputTokens || step?.output_tokens || 0)), 0);
   const recorded = recordMetric(GLOBAL_AGENT_NAME, {
     scopeType: "global",
     scopeId: "global",
@@ -113,6 +121,8 @@ export function recordGlobalAgentRunMetric(
     taskId: String(run?.mission_id || run?.missionId || run?.id || ""),
     executionId,
     error: success ? "" : String(run?.error || normalizedStatus || "").slice(0, 300),
+    timing: { modelMs: Number(run?.model_duration_ms || 0), firstVisibleFeedbackMs: Number(streamingMetric.firstVisibleFeedbackMs || 0), firstTokenMs: Number(streamingMetric.firstTokenMs || 0), maxSilentGapMs: Number(streamingMetric.maxSilentGapMs || 0) },
+    streaming: streamingMetric,
     ...(usage ? { usage, inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, totalCostUsd: usage.totalCostUsd } : {}),
   });
 

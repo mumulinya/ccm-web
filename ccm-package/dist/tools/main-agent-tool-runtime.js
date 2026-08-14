@@ -257,6 +257,7 @@ function buildMainAgentToolRuntimeContext(input) {
         unavailable.length ? "部分已配置工具当前不可用；不得声称已经调用。" : "",
         discoverableMcp.length ? `延迟工具不会预先占用完整 Schema Token；需要时先调用 tool_search，按名称或能力描述加载。` : "",
         inlineSafetyDowngraded ? `MCP完整定义超过本轮安全容量，已从${contextPolicy.mcpToolLoadingMode}安全降级为deferred。` : "",
+        `代码说明、技术栈和项目用途类问题必须先做自适应小范围检索：优先README、构建清单、入口文件和一级模块目录，首轮读取预算不超过8000 Token；Glob和Grep必须限定目录与数量。只有现有结果不足以回答时才沿next_cursor继续，禁止先枚举整个仓库。`,
         `需要工具数据时在 toolRequests 中请求。工作区文件工具只使用短名称；扩展 MCP 使用上面列出的 canonicalName。Skill只能使用 invoke_skill，并在 arguments.name 中填写已列出的 Skill。工具结果由CCM执行后重新交给模型，不得把请求本身视为完成。`,
     ].filter(Boolean).join("\n\n");
     const contextBudget = {
@@ -463,7 +464,26 @@ async function executeMainAgentToolRequests(input) {
     // logical calls returned by one model turn. Keep the complete bounded turn
     // and drain it in safe batches so later independent calls are never lost.
     const requests = input.requests.slice(0, 32);
-    const executeOne = async (request) => {
+    const applyAdaptiveWorkspaceReadBudget = (request) => {
+        const workspaceTool = workspaceByName.get(request.name);
+        const name = String(workspaceTool?.name || request.name || "");
+        if (!workspaceTool)
+            return request;
+        const args = { ...(request.arguments || {}) };
+        if (name === "read_files")
+            args.token_budget = Math.max(1024, Math.min(8_000, Number(args.token_budget || 8_000)));
+        if (name === "read_file")
+            args.token_budget = Math.max(256, Math.min(8_000, Number(args.token_budget || 4_000)));
+        if (name === "glob_files")
+            args.limit = Math.max(1, Math.min(100, Number(args.limit || 100)));
+        if (name === "grep_text") {
+            const requested = Number(args.head_limit ?? 100);
+            args.head_limit = requested === 0 ? 250 : Math.max(1, Math.min(250, requested || 100));
+        }
+        return { ...request, arguments: args };
+    };
+    const executeOne = async (requestInput) => {
+        const request = applyAdaptiveWorkspaceReadBudget(requestInput);
         if (request.name === "tool_search") {
             const callId = input.onUse?.(request) || "";
             const rawQuery = String(request.arguments?.query || request.arguments?.name || "").trim();

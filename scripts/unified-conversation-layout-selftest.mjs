@@ -22,7 +22,11 @@ for (const [name, source] of Object.entries({ globalMessages, projectPanel, proj
   assert.match(source, /ConversationMessageShell/, `${name} must use the shared conversation message shell`)
 }
 
-for (const [name, source] of Object.entries({ globalMessages, projectPanel, projectTemplate, groupPanel, groupTemplate, musicPanel, musicTemplate })) {
+for (const [name, source] of Object.entries({ globalMessages, projectPanel, projectTemplate, groupPanel, groupTemplate })) {
+  assert.match(source, /AgentExecutionTranscript/, `${name} must use the shared factual execution transcript`)
+  assert.doesNotMatch(source, /ConversationProcessingState/, `${name} must not render a duplicate generic thinking state`)
+}
+for (const [name, source] of Object.entries({ musicPanel, musicTemplate })) {
   assert.match(source, /ConversationProcessingState/, `${name} must use the shared processing state`)
 }
 

@@ -58,10 +58,10 @@ function normalizeMainAgentTurnDecision(input) {
     const explicitResponseKind = String(parsed.responseType || parsed.response_type || "").trim();
     const responseKind = toolRequests.length
         ? "tool_calls"
-        : ["reply", "clarify", "plan", "dispatch"].includes(explicitResponseKind)
-            ? explicitResponseKind
-            : workflowDecision.clarificationQuestions.length || String(parsed.questionForUser || parsed.question_for_user || "").trim()
-                ? "clarify"
+        : workflowDecision.structuredClarificationQuestions.length || workflowDecision.clarificationQuestions.length || String(parsed.questionForUser || parsed.question_for_user || "").trim()
+            ? "clarify"
+            : ["reply", "clarify", "plan", "dispatch"].includes(explicitResponseKind)
+                ? explicitResponseKind
                 : workflowDecision.mode === "decompose_epic" || (Array.isArray(dispatchDraft) && dispatchDraft.length)
                     ? "dispatch"
                     : workflowDecision.mode === "plan_task" || workflowDecision.mode === "execute_direct" || workflowDecision.actionRequired

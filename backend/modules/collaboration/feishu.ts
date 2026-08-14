@@ -68,6 +68,72 @@ export async function downloadFeishuMessageResource(input: {
   };
 }
 
+export type FeishuMessageResourceDescriptor = {
+  kind: "image" | "file";
+  key: string;
+  name: string;
+};
+
+/**
+ * Reads only the attachment metadata for one exact Feishu message.  The
+ * resource body is still fetched through downloadFeishuMessageResource so the
+ * same tenant identity, byte limit and timeout are applied in both paths.
+ */
+export async function getFeishuMessageResources(messageIdValue: string): Promise<FeishuMessageResourceDescriptor[]> {
+  const messageId = String(messageIdValue || "").trim();
+  if (!messageId) throw new Error("飞书附件缺少 message_id");
+  const token = await getControlBotTenantToken();
+  if (!token) throw new Error("无法获取飞书控制机器人 Token");
+  const response = await fetch(
+    `https://open.feishu.cn/open-apis/im/v1/messages/${encodeURIComponent(messageId)}`,
+    {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(15_000),
+    },
+  );
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(`飞书消息附件元数据读取失败 HTTP ${response.status}: ${detail.slice(0, 240)}`);
+  }
+  const payload = await response.json() as any;
+  if (Number(payload?.code || 0) !== 0) throw new Error(`飞书消息附件元数据读取失败：${String(payload?.msg || "未知错误").slice(0, 240)}`);
+  const rows: FeishuMessageResourceDescriptor[] = [];
+  const seen = new Set<string>();
+  const push = (kind: "image" | "file", keyValue: any, nameValue: any = "") => {
+    const key = String(keyValue || "").trim();
+    if (!key || seen.has(`${kind}:${key}`)) return;
+    seen.add(`${kind}:${key}`);
+    const fallback = kind === "image" ? `feishu-image-${key.slice(-8)}.png` : `feishu-file-${key.slice(-8)}`;
+    rows.push({ kind, key, name: String(nameValue || fallback).trim() || fallback });
+  };
+  const walk = (value: any, inheritedName = "") => {
+    if (!value) return;
+    if (typeof value === "string") {
+      const text = value.trim();
+      if (/^[\[{]/.test(text)) {
+        try { walk(JSON.parse(text), inheritedName); } catch {}
+      }
+      return;
+    }
+    if (Array.isArray(value)) {
+      for (const item of value) walk(item, inheritedName);
+      return;
+    }
+    if (typeof value !== "object") return;
+    const name = String(value.file_name || value.name || value.title || inheritedName || "");
+    if (value.image_key) push("image", value.image_key, name);
+    if (value.file_key) push("file", value.file_key, name);
+    for (const [key, child] of Object.entries(value)) {
+      if (["image_key", "file_key"].includes(key)) continue;
+      walk(child, name);
+    }
+  };
+  for (const item of Array.isArray(payload?.data?.items) ? payload.data.items : []) {
+    walk(item?.body?.content || item?.body || item, item?.name || "");
+  }
+  return rows;
+}
+
 export async function getFeishuUserToken(appId: string, appSecret: string, code: string): Promise<any> {
   try {
     const response = await fetch("https://open.feishu.cn/open-apis/authen/v1/oidc/access_token", {

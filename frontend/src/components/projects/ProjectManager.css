@@ -322,6 +322,58 @@
   box-shadow: 0 4px 12px rgba(59, 130, 246, 0.03);
 }
 
+.message-attachment-list {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.message-attachment-row {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 7px 9px;
+  border: 1px solid color-mix(in srgb, var(--border-color) 78%, transparent);
+  border-radius: 8px;
+  background: var(--surface-translucent);
+  color: var(--text-secondary);
+  text-decoration: none;
+}
+
+.message-attachment-row[href]:hover {
+  border-color: color-mix(in srgb, var(--accent-blue) 35%, var(--border-color));
+}
+
+.message-attachment-name {
+  overflow: hidden;
+  color: var(--text-primary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.message-attachment-row small {
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.message-attachment-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--accent-red);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.message-attachment-status.ok { color: var(--accent-green); }
+
+@media (max-width: 720px) {
+  .message-attachment-row { grid-template-columns: 16px minmax(0, 1fr) auto; }
+  .message-attachment-row small { display: none; }
+}
+
 .message.assistant .bubble {
   background: var(--surface);
   backdrop-filter: blur(20px);

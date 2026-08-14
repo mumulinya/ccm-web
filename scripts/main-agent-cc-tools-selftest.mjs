@@ -167,6 +167,47 @@ const firstBatchRead = await mainRuntime.executeMainAgentToolRequests({
   toolContext: context,
 });
 assert.equal(JSON.parse(firstBatchRead[0].output).modelPayload.item_count, 2);
+fs.writeFileSync(path.join(project, "large.ts"), Array.from({ length: 500 }, (_, index) => `export const fixture_${index} = '${"x".repeat(32)}';`).join("\n"));
+const resilientBatchRead = await mainRuntime.executeMainAgentToolRequests({
+  requests: [{
+    name: "read_files",
+    arguments: {
+      paths: [
+        { path: "large.ts", offset: 1, limit: 500 },
+        { path: "root.ts", offset: 1, limit: 20 },
+        { path: "src", offset: 1, limit: 20 },
+      ],
+      token_budget: 5_000,
+    },
+    reason: "preserve successful files when one batch item fails",
+  }],
+  toolContext: context,
+});
+assert.equal(resilientBatchRead[0].ok, true, resilientBatchRead[0].error);
+const resilientBatchPayload = JSON.parse(resilientBatchRead[0].output).modelPayload;
+assert.equal(resilientBatchPayload.item_count, 3);
+assert.equal(resilientBatchPayload.read_count, 2);
+assert.equal(resilientBatchPayload.failed_count, 1);
+assert.equal(resilientBatchPayload.status, "partial");
+assert.equal(resilientBatchPayload.files[0].status, "partial");
+assert.equal(resilientBatchPayload.files[1].status, "read");
+assert.equal(resilientBatchPayload.files[2].status, "failed");
+assert.match(resilientBatchPayload.files[2].error, /目标不是文件/);
+const resilientBatchDisplay = toolDisplay.buildToolDisplayDetail({
+  toolName: "mcp__ccm__ccm_workspace_readonly__read_files",
+  arguments: { paths: ["large.ts", "root.ts", "src"] },
+  result: resilientBatchPayload,
+  transientBody: true,
+});
+assert.match(resilientBatchDisplay.result.summary, /成功读取 2 个，1 个读取失败/);
+assert.equal(resilientBatchDisplay.result.total, 3);
+assert.equal(resilientBatchDisplay.result.rows.find(row => row.path === "src")?.status, "读取失败");
+const failedBatchRead = await mainRuntime.executeMainAgentToolRequests({
+  requests: [{ name: "read_files", arguments: { paths: ["src"], token_budget: 2_000 }, reason: "surface an all-failed batch as failure" }],
+  toolContext: context,
+});
+assert.equal(failedBatchRead[0].ok, false);
+assert.equal(JSON.parse(failedBatchRead[0].output).code, "BATCH_READ_FAILED");
 const unchangedBatchRead = await mainRuntime.executeMainAgentToolRequests({
   requests: [{ name: "read_files", arguments: { paths: ["src/service.ts", "root.ts"] }, reason: "deduplicate batch read" }],
   toolContext: context,

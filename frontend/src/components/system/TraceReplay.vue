@@ -709,16 +709,16 @@ watch([search, stageFilter, statusFilter, actorFilter, taskFilter, preset, chapt
 
       <TaskReplayPlanBoard :plans="replay.plans || []" :work-items="replay.work_items || []" :tasks="replay.tasks || []" @open-evidence="openEvidence" />
 
-      <section v-if="presentation?.recoveryJourney?.length" class="recovery-journey" aria-label="中断与恢复记录">
-        <header><div><strong>中断与恢复</strong><span>区分模型重试、任务中断和检查点续接</span></div><em>{{ presentation.recoveryJourney.length }} 次</em></header>
+      <section v-if="presentation?.recoveryJourney?.length" class="recovery-journey" aria-label="暂停、中断与恢复记录">
+        <header><div><strong>暂停与恢复</strong><span>区分安全暂停、强制中断和检查点续接</span></div><em>{{ presentation.recoveryJourney.length }} 次</em></header>
         <article v-for="(row, index) in presentation.recoveryJourney" :key="`${row.taskId}:${row.interruptedAt}:${index}`">
           <span :class="['recovery-dot', row.result]"></span>
           <div>
             <strong>{{ row.reasonLabel }}</strong>
-            <p>现场已保留，从“{{ recoveryPhaseLabel(row.resumePhase) }}”继续<span v-if="row.completedWorkItemCount">；跳过 {{ row.completedWorkItemCount }} 个已完成工作项</span></p>
-            <small>{{ row.mode === 'safe_auto' ? `安全自动恢复 · 第 ${row.attempt + 1}/${row.maxAttempts} 轮` : '人工恢复门禁' }}<span v-if="row.recoveredAt"> · 已接上原任务</span><span v-else-if="row.nextRetryAt"> · 下次 {{ dateLabel(row.nextRetryAt) }}</span></small>
+            <p>现场已保留，从“{{ recoveryPhaseLabel(row.resumePhase) }}”继续<span v-if="row.completedWorkItemCount">；跳过 {{ row.completedWorkItemCount }} 个已完成工作项</span><span v-if="row.suspendedSessionCount">；保留 {{ row.suspendedSessionCount }} 个子 Agent 会话</span></p>
+            <small>{{ row.kind === 'pause' ? '协作式安全暂停' : row.mode === 'safe_auto' ? `安全自动恢复 · 第 ${row.attempt + 1}/${row.maxAttempts} 轮` : '人工恢复门禁' }}<span v-if="row.recoveredAt"> · 已接上原任务</span><span v-else-if="row.nextRetryAt"> · 下次 {{ dateLabel(row.nextRetryAt) }}</span></small>
           </div>
-          <b>{{ row.result === 'resumed' ? '已恢复' : row.result === 'needs_user' ? '需要处理' : '等待恢复' }}</b>
+          <b>{{ row.result === 'resumed' ? '已继续' : row.result === 'paused' ? '已暂停' : row.result === 'needs_user' ? '需要处理' : '等待恢复' }}</b>
         </article>
       </section>
 

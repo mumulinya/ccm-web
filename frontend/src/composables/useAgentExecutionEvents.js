@@ -21,7 +21,7 @@ export function useAgentExecutionEvents(options) {
 
   const logicalMeaningfulKey = item => {
     const type = String(item?.eventType || '')
-    if (type === 'assistant_progress' || type === 'requirement_plan' || type === 'permission_required' || type === 'context_compacted') return `${type}:${item.eventId}`
+    if (type === 'assistant_progress' || type === 'model_activity' || type === 'requirement_plan' || type === 'permission_required' || type === 'context_compacted') return `${type}:${item.eventId}`
     if (type.startsWith('tool_')) return item?.toolCallId ? `tool:${item.toolCallId}` : `tool:${item.eventId}`
     if (type.startsWith('agent_')) return `agent:${item?.agentRunId || [item?.taskId, item?.workItemId, item?.detail?.agentDisplay?.projectId, item?.generation].join(':')}`
     if (item?.display?.status === 'failed') return `failed:${item.eventId}`
@@ -43,7 +43,11 @@ export function useAgentExecutionEvents(options) {
       }
     }
     events.value = [...map.values()]
-      .sort((left, right) => Number(left.sequence || 0) - Number(right.sequence || 0) || String(left.createdAt || '').localeCompare(String(right.createdAt || '')))
+      .sort((left, right) => {
+        const leftSequence = Number(left.sequence || 0) || Number.MAX_SAFE_INTEGER
+        const rightSequence = Number(right.sequence || 0) || Number.MAX_SAFE_INTEGER
+        return leftSequence - rightSequence || String(left.createdAt || '').localeCompare(String(right.createdAt || ''))
+      })
       .slice(-3000)
   }
 

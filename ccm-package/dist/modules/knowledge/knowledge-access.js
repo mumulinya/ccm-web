@@ -20,6 +20,53 @@ function exactProjectNames(context) {
         ...(context.role === "group-main-agent" ? (context.projects || []).map(item => String(item.name || item.project || "").trim()) : []),
     ].filter(Boolean));
 }
+function normalizedIdentity(value) {
+    return String(value || "").trim().toLowerCase().replace(/[\s_.-]+/g, "");
+}
+function metadataExplicitlyBindsProject(metadata, projectValue) {
+    const project = String(projectValue || "").trim();
+    const normalizedProject = normalizedIdentity(project);
+    if (!metadata || !normalizedProject)
+        return false;
+    if (metadata.scope?.type === "project" && normalizedIdentity(metadata.scope.id) === normalizedProject)
+        return true;
+    const source = metadata.source || {};
+    const candidates = [
+        metadata.domain,
+        ...(Array.isArray(metadata.tags) ? metadata.tags : []),
+        source.project,
+        source.projectId,
+        source.project_id,
+        source.scopeId,
+        source.scope_id,
+    ];
+    return candidates.some(value => {
+        const normalized = normalizedIdentity(String(value || "").replace(/^#(?:project|scope:project)[:/]/i, ""));
+        return normalized === normalizedProject;
+    });
+}
+function asksForProjectIdentity(queryValue, context) {
+    if (context.role !== "project-agent")
+        return false;
+    const query = String(queryValue || "").trim().toLowerCase();
+    const project = String(context.project || "").trim().toLowerCase();
+    if (project && query.includes(project))
+        return true;
+    return /(?:是什么项目|项目(?:简介|用途|定位|概况|技术栈|架构|主要模块|功能模块)|技术栈|代码架构|project\s+(?:overview|purpose)|tech(?:nology)?\s+stack|architecture|main\s+modules)/i.test(query);
+}
+function knowledgeSourcePriority(metadata, context) {
+    const scope = metadata?.scope || { type: "global", id: "" };
+    const project = String(context.project || "").trim();
+    if (scope.type === "project" && scope.id === project)
+        return 0;
+    if (scope.type === "group" && scope.id === String(context.groupId || "").trim())
+        return 0;
+    if (scope.type === "agent" && [project, String(context.taskAgentSessionId || "").trim()].includes(scope.id))
+        return 0;
+    if (scope.type === "global" && metadataExplicitlyBindsProject(metadata, project))
+        return 1;
+    return 2;
+}
 function isKnowledgeDocumentAllowed(metadata, context) {
     const scope = metadata?.scope || { type: "global", id: "" };
     const visibility = metadata?.visibility || "shared";
@@ -64,7 +111,19 @@ async function searchAgentKnowledge(query, context, options = {}) {
         return { results: [], citations: [], context: "", embeddingMode: "lexical", embeddingError: "", fallback: true };
     await ensureKnowledgeIndex();
     const metadata = (0, knowledge_files_1.loadKnowledgeMetadata)();
-    const filenames = Object.keys(metadata).filter(filename => isKnowledgeDocumentAllowed(metadata[filename], context));
+    const projectIdentityQuery = asksForProjectIdentity(normalizedQuery, context);
+    const filenames = Object.keys(metadata).filter(filename => {
+        const document = metadata[filename];
+        if (!isKnowledgeDocumentAllowed(document, context))
+            return false;
+        // Project identity and architecture answers must not be inferred from a
+        // generic globally-shared document. Such documents are eligible only when
+        // metadata explicitly binds them to the current project.
+        if (projectIdentityQuery && document?.scope?.type === "global") {
+            return metadataExplicitlyBindsProject(document, context.project);
+        }
+        return true;
+    });
     if (!filenames.length)
         return { results: [], citations: [], context: "", embeddingMode: "lexical", embeddingError: "", fallback: true };
     const limit = Math.max(1, Math.min(12, Number(options.limit || 6)));
@@ -76,7 +135,14 @@ async function searchAgentKnowledge(query, context, options = {}) {
     const maxChunkChars = Math.max(500, Math.min(8000, Number(options.maxChunkChars || 4000)));
     const maxContextTokens = Math.max(500, Math.min(20000, Number(options.maxContextTokens || Math.ceil(Number(options.maxContextChars || 16000) / 4))));
     let usedTokens = 0;
-    const results = search.results.flatMap(item => {
+    const prioritizedSearchResults = [...search.results]
+        .sort((left, right) => {
+        const priority = knowledgeSourcePriority(metadata[left.chunk.filename], context)
+            - knowledgeSourcePriority(metadata[right.chunk.filename], context);
+        return priority || Number(right.score || 0) - Number(left.score || 0);
+    })
+        .slice(0, limit);
+    const results = prioritizedSearchResults.flatMap(item => {
         const source = metadata[item.chunk.filename];
         if (!isKnowledgeDocumentAllowed(source, context))
             return [];

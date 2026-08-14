@@ -26,6 +26,8 @@ import {
   getUnifiedTaskSchedulerStatus,
   withUnifiedWorkspaceMutationLane,
 } from "../../system/unified-task-scheduler";
+import { buildTaskConversationLinks } from "../../system/task-conversation-links";
+import { appendUserVisibleAgentEvent } from "../../system/user-visible-agent-events";
 import {
   finalizeAgentCommunication,
   getAgentCommunication,
@@ -318,6 +320,7 @@ import {
   evaluateGreenContract,
   inspectBranchFreshness,
   isTaskCancellationRequested,
+  listActiveAgentRuns,
   listExecutions,
   loadExecution,
   mergeExecutionWorktree,
@@ -344,7 +347,10 @@ import {
   recordTaskAgentFinalDispatchReactiveCompactCircuitOutcome,
   recordTaskAgentSessionTurn,
   reopenTaskAgentSessions,
+  suspendTaskAgentSessions,
 } from "../../tasks/agent-sessions";
+import { isTaskPauseRequested, isTaskSafelyPaused } from "../../tasks/task-pause-control";
+import { finalizeTaskPauseAtSafeBoundary, reconcileTaskPauseTree } from "./task-pause-routes";
 import {
   interruptTaskExecution,
 } from "../../tasks/task-interruption";
@@ -1237,6 +1243,37 @@ export function finalizeTaskKernel(task: any, execution: any, deliverySummary: a
 }
 
 // 队列处理
+function scheduleTaskPauseFinalization(taskId: string) {
+  setTimeout(() => {
+    try {
+      const tasks = loadTasks();
+      const task = tasks.find((item: any) => String(item?.id || "") === String(taskId || ""));
+      if (!task || !isTaskPauseRequested(task)) return;
+      const deps = {
+        loadTasks,
+        listActiveAgentRuns,
+        listExecutions,
+        transitionExecution,
+        listTaskAgentSessions,
+        suspendTaskAgentSessions,
+        runningTaskIds,
+        updateTask,
+        appendTaskTimelineEvent,
+        appendUserVisibleAgentEvent,
+        buildTaskConversationLinks,
+        updateGroupTaskInlineStatus,
+      };
+      finalizeTaskPauseAtSafeBoundary(task, deps);
+      const byId = new Map(loadTasks().map((item: any) => [String(item?.id || ""), item]));
+      let root: any = byId.get(String(taskId || "")) || task;
+      while (root?.parent_task_id && byId.has(String(root.parent_task_id))) root = byId.get(String(root.parent_task_id));
+      if (root && String(root.id || "") !== String(taskId || "") && isTaskPauseRequested(root)) reconcileTaskPauseTree(root, deps);
+    } catch (error: any) {
+      addTaskLog(taskId, "warning", `暂停现场收口失败，等待重新检查：${String(error?.message || error).slice(0, 300)}`);
+    }
+  }, 0);
+}
+
 function settleTaskAgentCommunication(taskId: string, outcome: "accepted" | "rejected" | "cancelled" | "failed", evidence: any = {}) {
   const latest: any = loadTasks().find((item: any) => item.id === taskId);
   const ids = Array.from(new Set([
@@ -1351,9 +1388,25 @@ export async function processTargetQueue(targetKey: string, ctx: CollabCtx, test
       runningTaskIds.add(taskId);
       leaseHeartbeat = setInterval(() => renewTaskLease(taskId, 45_000), 10_000);
       ensureTaskKernelExecution(task);
-      beginExecutionAttempt(taskId, "任务队列正在启动新的开发执行轮次");
+      const resumingFromPause = task?.pause_control?.state === "resuming";
+      if (!resumingFromPause) beginExecutionAttempt(taskId, "任务队列正在启动新的开发执行轮次");
       const reasoningLoop = buildTaskPreflightReasoning(task, "主 Agent 执行前重新核对目标、当前状态和验收条件", Number(leaseResult.lease.recovery_count || 0) > 0 || !!task.recovery);
-      const startedTask = updateTask(taskId, { status: "in_progress", trace_id: traceId, started_at: new Date().toISOString(), queue_position: 0, queue_state: "running", reasoning_loop: reasoningLoop, execution_lease: { owner_id: leaseResult.lease.owner_id, acquired_at: leaseResult.lease.acquired_at, recovery_count: leaseResult.lease.recovery_count } }) || task;
+      const startedTask = updateTask(taskId, {
+        status: "in_progress",
+        trace_id: traceId,
+        started_at: new Date().toISOString(),
+        queue_position: 0,
+        queue_state: "running",
+        reasoning_loop: reasoningLoop,
+        execution_lease: { owner_id: leaseResult.lease.owner_id, acquired_at: leaseResult.lease.acquired_at, recovery_count: leaseResult.lease.recovery_count },
+        ...(task?.pause_control?.state === "resuming" ? {
+          last_pause_control: task.pause_control,
+          pause_control: null,
+          pause_previous_status: null,
+          pause_previous_auto_execute: null,
+          collaboration_state: { ...(task.collaboration_state || {}), phase: "executing", needs_user: false, updated_at: new Date().toISOString() },
+        } : {}),
+      }) || task;
       appendTaskTimelineEvent(taskId, { type: "reasoning_preflight", title: "我已复核目标与验收", detail: `计划版本 v${reasoningLoop.plan_version} · 待证明 ${reasoningLoop.assertions.filter(item => item.status !== "passed").length} 项`, status: "ok", phase: "planning", data: { plan_version: reasoningLoop.plan_version, fact_hash: reasoningLoop.fact_snapshots[reasoningLoop.fact_snapshots.length - 1]?.hash || "", recovery: Number(leaseResult.lease.recovery_count || 0) > 0 || !!task.recovery } });
       updateGroupTaskInlineStatus(startedTask, "in_progress", "我已开始协调执行");
       addTaskLog(taskId, "info", `任务状态更新为: 进行中`);
@@ -1797,6 +1850,17 @@ export async function processTargetQueue(targetKey: string, ctx: CollabCtx, test
       }
     } catch (error: any) {
       console.error(`[任务队列] [${targetKey}] 任务执行失败: ${task.title}`, error.message);
+      if (String(error?.code || "") === "CCM_TASK_PAUSE_SAFE_BOUNDARY") {
+        const pausedTask = loadTasks().find((item: any) => item.id === taskId) || task;
+        updateTask(taskId, {
+          status_detail: "已到达安全暂停点，正在确认所有写入均已停止",
+          acceptance_state: pausedTask.acceptance_state || "executing",
+        });
+        updateGroupTaskInlineStatus(pausedTask, "paused", "正在收口并保留代码现场");
+        addTaskLog(taskId, "info", `已在“${String(error?.phase || pausedTask.acceptance_state || "当前") }”阶段到达安全暂停点`);
+        scheduleTaskPauseFinalization(taskId);
+        continue;
+      }
       if (String(error?.code || "") === "CCM_AGENT_COMMUNICATION_CAPACITY_WAIT") {
         const capacity = error?.capacity || {};
         const waitingTask = updateTask(taskId, {
@@ -1942,7 +2006,7 @@ export async function processTargetQueue(targetKey: string, ctx: CollabCtx, test
       if (leaseHeartbeat) clearInterval(leaseHeartbeat);
       runningTaskIds.delete(taskId);
       const finalTask = loadTasks().find((item: any) => item.id === taskId);
-      if (finalTask?.workflow_type === "agent_coordination_dependency") {
+      if (finalTask?.workflow_type === "agent_coordination_dependency" && !isTaskPauseRequested(finalTask) && !isTaskSafelyPaused(finalTask)) {
         try { await settleGroupCoordinationDependency(finalTask, ctx); }
         catch (error: any) { addTaskLog(taskId, "error", `协作工作项收口失败：${error?.message || error}`); }
       }

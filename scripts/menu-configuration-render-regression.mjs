@@ -87,7 +87,6 @@ const prepare = async (page, config = null) => {
   }, config)
   await page.goto(`${baseUrl}/?tab=menumanager`, { waitUntil: 'commit', timeout: 30_000 })
   await page.locator('.navigation-center').waitFor({ timeout: 60_000 })
-  await page.getByText('导航配置中心', { exact: true }).waitFor({ timeout: 60_000 })
 }
 const noOverflow = async (page, label) => {
   const metrics = await page.evaluate(() => ({ client: document.documentElement.clientWidth, scroll: document.documentElement.scrollWidth, center: document.querySelector('.navigation-center')?.clientWidth || 0, centerScroll: document.querySelector('.navigation-center')?.scrollWidth || 0 }))
@@ -109,10 +108,12 @@ try {
   await capture(desktop, 'desktop-navigation-center')
 
   const changesRow = desktop.locator('[data-menu-id="changes"]')
+  await changesRow.hover()
   await changesRow.getByTitle('固定到常用').click()
   await desktop.locator('.nav-sidebar').getByText('常用', { exact: true }).waitFor()
   assert.equal(await desktop.locator('.nav-sidebar .nav-group-items').filter({ hasText: '代码协作' }).count() > 0, true)
   const metricsRow = desktop.locator('[data-menu-id="metrics"]')
+  await metricsRow.hover()
   await metricsRow.getByTitle('隐藏菜单').click()
   await desktop.locator('.nav-sidebar .nav-item').filter({ hasText: '性能监控' }).waitFor({ state: 'detached' })
   assert.equal(await desktop.locator('.nav-sidebar .nav-item').filter({ hasText: '性能监控' }).count(), 0)

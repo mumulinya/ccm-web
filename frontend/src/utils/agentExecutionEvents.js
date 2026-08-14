@@ -315,6 +315,100 @@ export function executionEventsForMessage(events, messages, index) {
   return coalesceExecutionEvents(merged).filter(event => !isUnsafeExecutionProgress(event))
 }
 
+const terminalStatusFromValue = value => {
+  const status = String(value || '').trim().toLowerCase()
+  if (!status) return ''
+  if (/cancel/.test(status)) return 'cancelled'
+  if (/interrupt/.test(status)) return 'interrupted'
+  if (/fail|error|blocked|rejected/.test(status)) return 'failed'
+  if (/complete|done|success|succeed|accepted|delivered|reverted/.test(status)) return 'success'
+  return ''
+}
+
+const messageExecutionStatus = message => {
+  const values = [
+    message?.taskExperience?.status,
+    message?.taskExperience?.phase,
+    message?.task?.status,
+    message?.task?.phase,
+    message?.projectRun?.status,
+    message?.projectRun?.phase,
+    message?.interruption?.state,
+    message?.status,
+    message?.phase,
+  ]
+  for (const value of values) {
+    const terminal = terminalStatusFromValue(value)
+    if (terminal) return terminal
+  }
+  return ''
+}
+
+const messageExecutionIsActive = message => {
+  const values = [
+    message?.taskExperience?.status,
+    message?.taskExperience?.phase,
+    message?.task?.status,
+    message?.task?.phase,
+    message?.projectRun?.status,
+    message?.projectRun?.phase,
+    message?.interruption?.state,
+    message?.status,
+    message?.phase,
+  ].map(value => String(value || '').trim().toLowerCase()).filter(Boolean)
+  return values.some(value => /^(?:running|in_progress|executing|starting|queued|sending|resuming|background_running|waiting_provider|waiting_agent)$/.test(value))
+}
+
+// A provider or transport failure can finish the visible assistant turn before
+// the backend manages to append its authoritative `result` event.  Treat the
+// finalized assistant envelope as a terminal boundary as well, so live timers
+// freeze immediately instead of counting forever.  A later generation with an
+// active task status still wins and starts a new live projection.
+export function executionTerminalBoundaryForMessage(events, messages, index) {
+  const rows = executionEventsForMessage(events, messages, index)
+  const currentGeneration = rows.reduce((max, event) => Math.max(max, Number(event?.generation || 0)), 0)
+  const result = [...rows].reverse().find(event => event?.eventType === 'result' && Number(event?.generation || 0) === currentGeneration)
+  if (result) {
+    return {
+      terminal: true,
+      source: 'result',
+      event: result,
+      status: terminalStatusFromValue(result?.display?.status || result?.result?.status) || 'success',
+      at: time(result?.createdAt),
+    }
+  }
+  const message = messages?.[index] || {}
+  const currentRows = rows.filter(event => Number(event?.generation || 0) === currentGeneration || !currentGeneration)
+  const currentGenerationIsActive = currentRows.some(event => {
+    const status = String(event?.display?.status || '').trim().toLowerCase()
+    const modelState = String(event?.detail?.modelActivity?.state || '').trim().toLowerCase()
+    return ['running', 'waiting', 'queued', 'starting', 'executing'].includes(status)
+      || ['started', 'waiting', 'retrying', 'streaming'].includes(modelState)
+  })
+  const structuredStatus = messageExecutionStatus(message)
+  const explicitFailureAnswer = /没有完成|未完成|失败|出错|中断|取消/.test(String(message?.content || ''))
+  const finalizedEnvelope = message?.streaming === false || !!structuredStatus || explicitFailureAnswer
+  if (!isExecutionAnchor(messages, index) || message?.streaming === true || messageExecutionIsActive(message) || (currentGenerationIsActive && !finalizedEnvelope)) return null
+  const hasFinalContent = !!String(message?.content || message?.text || '').trim()
+  if (!hasFinalContent && !structuredStatus && message?.streaming !== false) return null
+  const latestEventAt = rows.reduce((latest, event) => Math.max(latest, time(event?.createdAt)), 0)
+  const completedAt = time(
+    message?.completedAt
+      || message?.completed_at
+      || message?.finishedAt
+      || message?.finished_at
+      || message?.updatedAt
+      || message?.updated_at,
+  ) || latestEventAt || time(message?.timestamp || message?.createdAt || message?.created_at)
+  return {
+    terminal: true,
+    source: 'message',
+    event: null,
+    status: structuredStatus || (explicitFailureAnswer ? 'failed' : 'success'),
+    at: completedAt,
+  }
+}
+
 const meaningfulExecutionTypes = new Set([
   'assistant_progress',
   'requirement_plan',
@@ -324,6 +418,7 @@ const meaningfulExecutionTypes = new Set([
 
 export function isMeaningfulExecutionEvent(event) {
   const eventType = String(event?.eventType || '')
+  if (eventType === 'model_activity') return ['waiting', 'retrying'].includes(String(event?.detail?.modelActivity?.state || ''))
   if (event?.display?.status === 'failed') return true
   if (eventType.startsWith('tool_') || eventType.startsWith('agent_')) return true
   if (meaningfulExecutionTypes.has(eventType)) return true
@@ -347,9 +442,9 @@ export function executionTurnStateForMessage(events, messages, index) {
   const rows = executionEventsForMessage(events, messages, index)
   const generation = rows.reduce((max, event) => Math.max(max, Number(event?.generation || 0)), 0)
   const current = rows.filter(event => Number(event?.generation || 0) === generation || !generation)
-  const result = [...current].reverse().find(event => event?.eventType === 'result')
-  if (result) {
-    const status = String(result?.display?.status || result?.detail?.result?.status || '').toLowerCase()
+  const boundary = executionTerminalBoundaryForMessage(events, messages, index)
+  if (boundary) {
+    const status = String(boundary.status || '').toLowerCase()
     if (/cancel/.test(status)) return { state: 'cancelled', rows, terminal: true, showThinking: false }
     if (/interrupt|pause|waiting/.test(status)) return { state: 'interrupted', rows, terminal: true, showThinking: false }
     if (/fail|error|blocked/.test(status)) return { state: 'failed', rows, terminal: true, showThinking: false }
@@ -363,6 +458,7 @@ export function executionTurnStateForMessage(events, messages, index) {
   if (waiting) return { state: 'waiting_user', rows, terminal: false, showThinking: false }
   const verifying = current.some(event => /verification|acceptance|summary/.test(String(event?.detail?.executionStage?.kind || '').toLowerCase()))
   if (verifying) return { state: 'verifying', rows, terminal: false, showThinking: false }
+  if (current.some(event => event?.eventType === 'model_activity')) return { state: 'executing', rows, terminal: false, showThinking: false }
   if (current.some(isMeaningfulExecutionEvent)) return { state: 'executing', rows, terminal: false, showThinking: false }
   if (message?.streaming && String(message?.content || '').trim()) return { state: 'streaming_final', rows, terminal: false, showThinking: false }
   if (message?.streaming || message?.role === 'thinking') return { state: 'thinking', rows, terminal: false, showThinking: true }
@@ -379,8 +475,37 @@ export function terminalExecutionEventForMessage(events, messages, index) {
   return [...rows].reverse().find(event => event?.eventType === 'result' && Number(event?.generation || 0) === currentGeneration) || null
 }
 
+export function terminalGateForExecutionEvent(event) {
+  return event?.detail?.terminalGate
+    || event?.detail?.terminal_gate
+    || event?.result?.terminalGate
+    || event?.result?.terminal_gate
+    || null
+}
+
+export function executionMessageIsFormalTask(events, messages, index) {
+  const message = messages?.[index] || {}
+  const rows = executionEventsForMessage(events, messages, index)
+  const mode = String(message?.messageMode || message?.message_mode || '').trim().toLowerCase()
+  if (mode === 'task') return true
+  if (message?.taskExperience || message?.taskCard || message?.task?.id) return true
+  if (message?.globalMission || message?.globalMissionSupervisor || message?.missionId || message?.mission_id) return true
+  if (rows.some(event => String(event?.eventType || '').startsWith('agent_'))) return true
+  if (rows.some(event => event?.eventType === 'requirement_plan' && event?.taskId && event?.detail?.requirementPlan)) return true
+  return rows.some(event => event?.eventType === 'result' && !!terminalGateForExecutionEvent(event))
+}
+
 export function hasTerminalExecutionForMessage(events, messages, index) {
-  return !!terminalExecutionEventForMessage(events, messages, index)
+  return !!executionTerminalBoundaryForMessage(events, messages, index)
+}
+
+export function hasAcceptedExecutionForMessage(events, messages, index) {
+  if (!executionMessageIsFormalTask(events, messages, index)) return false
+  const boundary = executionTerminalBoundaryForMessage(events, messages, index)
+  if (String(boundary?.status || '').toLowerCase() !== 'success') return false
+  const event = terminalExecutionEventForMessage(events, messages, index)
+  const gate = terminalGateForExecutionEvent(event)
+  return !!event && gate?.passed === true && gate?.accepted !== false
 }
 
 const normalizeCompletionFileChange = value => {

@@ -5,6 +5,7 @@ import { getTechnicalDetailSections, sanitizeUserFacingAgentText } from '../util
 import { globalExecutionIntentConfirmed, visibleGlobalText } from '../utils/globalAgentExecutionStream.js'
 import { classifyGlobalAgentRunPresentation, PRESENTATION_REPLY } from '../utils/resultPresentation.js'
 import { stopTaskWithPreview } from '../utils/taskStopFlow.js'
+import { forceInterruptPausedTask, requestTaskPause, resumePausedTask } from '../utils/taskPauseFlow.js'
 
 export function useGlobalAgentActions(context) {
   const {
@@ -400,6 +401,20 @@ const handleGlobalTaskAction = async (msg, action) => {
       await nextTick()
       return sendMessage()
     }
+    if (action.kind === 'pause') {
+      const data = await requestTaskPause({ ...card, ...action, id: missionId })
+      toast.info('正在暂停，将在当前操作安全收口后保留现场')
+      return data
+    }
+    if (action.kind === 'resume_paused') {
+      const data = await resumePausedTask({ ...card, ...action, id: missionId })
+      toast.success('已重新核验现场，正在从原任务继续')
+      return data
+    }
+    if (action.kind === 'force_interrupt') {
+      if (!await confirmDialog(`安全暂停仍未完成，确定强制中断“${card?.title || missionId}”吗？`)) return
+      return forceInterruptPausedTask({ ...card, ...action, id: missionId })
+    }
     if (action.kind === 'resume_interrupted') {
       return controlMission('resume', { reason: '模型服务恢复后立即续接原任务' })
     }
@@ -414,6 +429,12 @@ const handleGlobalTaskAction = async (msg, action) => {
       return sendMessage()
     }
     if (action.kind === 'recheck') {
+      const pauseState = card?.pause_status?.state || card?.pauseStatus?.state || card?.pause_control?.state
+      if (missionId && pauseState === 'blocked') {
+        const data = await resumePausedTask({ ...card, ...action, id: missionId })
+        toast.success('重新核验已通过，正在从原任务继续')
+        return data
+      }
       if (missionId) return controlMission('resume', { reason: '用户从执行记录请求重新核验' })
       toast.info('当前任务没有可重新核验的任务身份')
       return
@@ -547,11 +568,9 @@ const executeManagementAction = async (action) => {
     } else if (action.type === 'manage_task') {
       const id = params.id || params.task_id
       if (operation === 'list') result = await requestJson('/api/tasks')
-      else if (operation === 'pause') result = await postJson('/api/tasks/update', { id, status: 'paused', status_detail: '由全局 Agent暂停' })
-      else if (operation === 'resume') {
-        await postJson('/api/tasks/update', { id, status: 'pending', status_detail: '由全局 Agent恢复' })
-        result = await postJson('/api/tasks/queue', { task_id: id })
-      } else if (operation === 'continue') result = await postJson('/api/tasks/continue', { id, message: params.message || '由全局 Agent继续推进', auto_execute: true })
+      else if (operation === 'pause') result = await postJson('/api/tasks/pause', { id, expected_revision: params.expected_revision ?? params.revision, generation: params.generation, binding_checksum: params.binding_checksum })
+      else if (operation === 'resume') result = await postJson('/api/tasks/resume-paused', { id, expected_revision: params.expected_revision ?? params.revision, generation: params.generation, binding_checksum: params.binding_checksum, pauseSequence: params.pause_sequence ?? params.pauseSequence })
+      else if (operation === 'continue') result = await postJson('/api/tasks/continue', { id, message: params.message || '由全局 Agent继续推进', auto_execute: true })
       else if (operation === 'retry') result = await postJson('/api/tasks/retry', { id, reason: params.message || '由全局 Agent发起重试', auto_execute: true, expected_revision: params.expected_revision ?? params.revision, generation: params.generation })
       else if (operation === 'queue') result = await postJson('/api/tasks/queue', { task_id: id })
       else if (operation === 'delete') result = await postJson('/api/tasks/delete', { id })

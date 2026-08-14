@@ -91,6 +91,7 @@ function normalizedEvent(agentInput, data, now = new Date()) {
     const status = normalizedStatus(data);
     const usage = data.usage && typeof data.usage === "object" ? data.usage : {};
     const timing = data.timing && typeof data.timing === "object" ? data.timing : {};
+    const streaming = data.streaming && typeof data.streaming === "object" ? data.streaming : {};
     const resources = data.resources && typeof data.resources === "object" ? data.resources : {};
     const inputTokens = finite(data.inputTokens ?? data.input_tokens ?? usage.inputTokens ?? usage.input_tokens);
     const outputTokens = finite(data.outputTokens ?? data.output_tokens ?? usage.outputTokens ?? usage.output_tokens);
@@ -136,6 +137,14 @@ function normalizedEvent(agentInput, data, now = new Date()) {
         peakCpuPercent: finite(data.peakCpuPercent ?? data.peak_cpu_percent ?? resources.peakCpuPercent ?? resources.peak_cpu_percent),
         peakRssBytes: finite(data.peakRssBytes ?? data.peak_rss_bytes ?? resources.peakRssBytes ?? resources.peak_rss_bytes),
         peakChildProcessCount: finite(data.peakChildProcessCount ?? data.peak_child_process_count ?? resources.peakChildProcessCount ?? resources.peak_child_process_count),
+        firstVisibleFeedbackMs: finite(data.firstVisibleFeedbackMs ?? data.first_visible_feedback_ms ?? timing.firstVisibleFeedbackMs ?? timing.first_visible_feedback_ms ?? streaming.firstVisibleFeedbackMs ?? streaming.first_visible_feedback_ms),
+        firstTokenMs: finite(data.firstTokenMs ?? data.first_token_ms ?? timing.firstTokenMs ?? timing.first_token_ms ?? streaming.firstTokenMs ?? streaming.first_token_ms),
+        maxSilentGapMs: finite(data.maxSilentGapMs ?? data.max_silent_gap_ms ?? timing.maxSilentGapMs ?? timing.max_silent_gap_ms ?? streaming.maxSilentGapMs ?? streaming.max_silent_gap_ms),
+        providerRetryCount: finite(data.providerRetryCount ?? data.provider_retry_count ?? data.modelRetryCount ?? data.model_retry_count ?? streaming.providerRetryCount ?? streaming.provider_retry_count),
+        fallbackStreamCount: finite(data.fallbackStreamCount ?? data.fallback_stream_count ?? streaming.fallbackStreamCount ?? streaming.fallback_stream_count),
+        initialReadFileCount: finite(data.initialReadFileCount ?? data.initial_read_file_count ?? streaming.initialReadFileCount ?? streaming.initial_read_file_count),
+        initialReadTokens: finite(data.initialReadTokens ?? data.initial_read_tokens ?? streaming.initialReadTokens ?? streaming.initial_read_tokens),
+        partialOutputBeforeCancel: data.partialOutputBeforeCancel === true || data.partial_output_before_cancel === true || streaming.partialOutputBeforeCancel === true || streaming.partial_output_before_cancel === true,
         traceId: String(data.traceId || data.trace_id || ""), taskId: String(data.taskId || data.task_id || ""),
         executionId: String(data.executionId || data.execution_id || ""),
         error: status === "completed" ? "" : String((0, trace_sanitizer_1.sanitizeTraceValue)(String(data.error || data.message || ""))).slice(0, 300),
@@ -191,8 +200,10 @@ function insertEvent(db, event) {
     usage_source, usage_missing_reason, usage_breakdown_available,
     model_ms, tool_wall_ms, queue_wait_ms, dependency_wait_ms, verification_ms, summary_ms,
     peak_cpu_percent, peak_rss_bytes, peak_child_process_count,
+    first_visible_feedback_ms, first_token_ms, max_silent_gap_ms, provider_retry_count,
+    fallback_stream_count, initial_read_file_count, initial_read_tokens, partial_output_before_cancel,
     trace_id, task_id, execution_id, error, usage_reported, created_at
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(event.eventId, event.at, event.dateKey, event.timezone, event.scopeType, event.scopeId, event.groupId, event.projectId, event.agent, event.role, event.source, event.runtime, event.status, event.durationMs, event.fileChangeCount, event.inputTokens, event.outputTokens, event.directInputTokens, event.cacheCreationInputTokens, event.cacheReadInputTokens, event.providerTotalTokens, event.totalCostUsd, event.usageSource, event.usageMissingReason, event.usageBreakdownAvailable ? 1 : 0, event.modelMs, event.toolWallMs, event.queueWaitMs, event.dependencyWaitMs, event.verificationMs, event.summaryMs, event.peakCpuPercent, event.peakRssBytes, event.peakChildProcessCount, event.traceId, event.taskId, event.executionId, event.error, event.usageReported ? 1 : 0, new Date().toISOString());
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(event.eventId, event.at, event.dateKey, event.timezone, event.scopeType, event.scopeId, event.groupId, event.projectId, event.agent, event.role, event.source, event.runtime, event.status, event.durationMs, event.fileChangeCount, event.inputTokens, event.outputTokens, event.directInputTokens, event.cacheCreationInputTokens, event.cacheReadInputTokens, event.providerTotalTokens, event.totalCostUsd, event.usageSource, event.usageMissingReason, event.usageBreakdownAvailable ? 1 : 0, event.modelMs, event.toolWallMs, event.queueWaitMs, event.dependencyWaitMs, event.verificationMs, event.summaryMs, event.peakCpuPercent, event.peakRssBytes, event.peakChildProcessCount, event.firstVisibleFeedbackMs, event.firstTokenMs, event.maxSilentGapMs, event.providerRetryCount, event.fallbackStreamCount, event.initialReadFileCount, event.initialReadTokens, event.partialOutputBeforeCancel ? 1 : 0, event.traceId, event.taskId, event.executionId, event.error, event.usageReported ? 1 : 0, new Date().toISOString());
     if (result.changes !== 1)
         return false;
     updateAggregate(db, event, "");
@@ -350,6 +361,7 @@ function queryMetricEventsV3(filters = {}) {
         totalCostUsd: Number(row.total_cost_usd || 0), usageSource: row.usage_source || "unreported",
         usageMissingReason: row.usage_missing_reason || "", usageBreakdownAvailable: row.usage_breakdown_available === 1,
         timing: { modelMs: Number(row.model_ms || 0), toolWallMs: Number(row.tool_wall_ms || 0), queueWaitMs: Number(row.queue_wait_ms || 0), dependencyWaitMs: Number(row.dependency_wait_ms || 0), verificationMs: Number(row.verification_ms || 0), summaryMs: Number(row.summary_ms || 0) },
+        streaming: { firstVisibleFeedbackMs: Number(row.first_visible_feedback_ms || 0), firstTokenMs: Number(row.first_token_ms || 0), maxSilentGapMs: Number(row.max_silent_gap_ms || 0), providerRetryCount: Number(row.provider_retry_count || 0), fallbackStreamCount: Number(row.fallback_stream_count || 0), initialReadFileCount: Number(row.initial_read_file_count || 0), initialReadTokens: Number(row.initial_read_tokens || 0), partialOutputBeforeCancel: row.partial_output_before_cancel === 1 },
         resources: { peakCpuPercent: Number(row.peak_cpu_percent || 0), peakRssBytes: Number(row.peak_rss_bytes || 0), peakChildProcessCount: Number(row.peak_child_process_count || 0) },
         traceId: row.trace_id, taskId: row.task_id, executionId: row.execution_id, error: row.error,
         usageReported: row.usage_reported === 1,

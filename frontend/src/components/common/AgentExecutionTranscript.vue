@@ -1,15 +1,38 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import {
+  AlertTriangle,
+  Check,
+  ChevronDown,
+  ChevronRight,
+  Circle,
+  CircleX,
+  FileCode2,
+  FileDiff,
+  History,
+  ListChecks,
+  LoaderCircle,
+  Minus,
+  RefreshCcw,
+  Search,
+  Wrench,
+  X,
+} from '@lucide/vue'
+import {
   agentStatusCategory,
   completionFileChangesForRows,
   eventStatusLabel,
+  executionMessageIsFormalTask,
   executionEventsForMessage,
+  executionTerminalBoundaryForMessage,
   formatExecutionDuration,
   formatExecutionDurationLong,
   shouldRenderExecutionTranscript,
+  terminalGateForExecutionEvent,
 } from '../../utils/agentExecutionEvents.js'
-import { agentProgressBatchPresentation, longRunningToolDuration } from '../../utils/agentProgressPresentation.js'
+import { agentProgressBatchPresentation, agentProgressToolFamily, longRunningToolDuration } from '../../utils/agentProgressPresentation.js'
+import ToolResultDetail from './ToolResultDetail.vue'
+import { buildLegacyToolDisplay, toolResultHasUserDetails } from '../../utils/toolResultPresentation.js'
 
 const props = defineProps({
   events: { type: Array, default: () => [] },
@@ -21,9 +44,20 @@ const props = defineProps({
   presentation: { type: String, default: 'auto' },
 })
 const emit = defineEmits(['open-file-change', 'open-file-changes', 'execution-action'])
-const stageMode = computed(() => props.stagePreview || props.stageGrouped)
+const requestedStageMode = computed(() => props.stagePreview || props.stageGrouped)
 
 const now = ref(Date.now())
+const EXECUTION_DENSITY_KEY = 'ccm:execution-display-density:v1'
+const executionDensity = ref('standard')
+const executionDensityOptions = [
+  { value: 'summary', label: '摘要' },
+  { value: 'standard', label: '标准' },
+  { value: 'detailed', label: '详细' },
+]
+const onExecutionDensityChanged = event => {
+  const value = String(event?.detail || '')
+  if (value !== executionDensity.value && executionDensityOptions.some(option => option.value === value)) executionDensity.value = value
+}
 const executionAnchor = ref(null)
 const transcriptExpanded = ref(false)
 const searchQuery = ref('')
@@ -31,12 +65,18 @@ const searchCursor = ref(-1)
 let durationTimer = null
 const toggleTranscript = () => { transcriptExpanded.value = !transcriptExpanded.value }
 onMounted(() => {
+  try {
+    const savedDensity = localStorage.getItem(EXECUTION_DENSITY_KEY)
+    if (executionDensityOptions.some(option => option.value === savedDensity)) executionDensity.value = savedDensity
+  } catch {}
   durationTimer = window.setInterval(() => { now.value = Date.now() }, 1000)
   window.addEventListener('ccm:locate-execution-event', locateExecutionEvent)
+  window.addEventListener('ccm:execution-density-changed', onExecutionDensityChanged)
   restoreExpansionState()
 })
 onBeforeUnmount(() => {
   window.removeEventListener('ccm:locate-execution-event', locateExecutionEvent)
+  window.removeEventListener('ccm:execution-density-changed', onExecutionDensityChanged)
   if (durationTimer) window.clearInterval(durationTimer)
 })
 
@@ -45,20 +85,44 @@ const anchorMessage = computed(() => props.messages?.[props.messageIndex] || {})
 const expansionStorageKey = computed(() => {
   const sessionId = rows.value[0]?.exactSessionId || anchorMessage.value?.exactSessionId || anchorMessage.value?.sessionId || 'session'
   const messageId = anchorMessage.value?.id || anchorMessage.value?.messageId || anchorMessage.value?.timestamp || props.messageIndex
-  return `ccm:execution-expansion:${sessionId}:${messageId}`
+  return `ccm:execution-expansion:${effectiveExecutionDensity.value}:${sessionId}:${messageId}`
+})
+watch(executionDensity, value => {
+  try { localStorage.setItem(EXECUTION_DENSITY_KEY, value) } catch {}
+  window.dispatchEvent(new CustomEvent('ccm:execution-density-changed', { detail: value }))
 })
 const shouldRender = computed(() => shouldRenderExecutionTranscript(props.events, props.messages, props.messageIndex, transcriptExpanded.value))
 const currentGeneration = computed(() => rows.value.reduce((max, event) => Math.max(max, Number(event?.generation || 0)), 0))
 const resultEvent = computed(() => [...rows.value].reverse().find(event => event.eventType === 'result' && Number(event?.generation || 0) === currentGeneration.value))
-const isTerminal = computed(() => !!resultEvent.value)
-const isLivePresentation = computed(() => props.presentation === 'live' && !isTerminal.value)
-const terminalAt = computed(() => eventTime(resultEvent.value?.createdAt))
+const terminalBoundary = computed(() => executionTerminalBoundaryForMessage(props.events, props.messages, props.messageIndex))
+const isTerminal = computed(() => !!terminalBoundary.value)
+const isFormalTaskExecution = computed(() => executionMessageIsFormalTask(props.events, props.messages, props.messageIndex))
+const hasToolExecution = computed(() => rows.value.some(event => String(event?.eventType || '').startsWith('tool_')))
+const isQueryExecution = computed(() => !isFormalTaskExecution.value && hasToolExecution.value)
+const isQueryCompletion = computed(() => isQueryExecution.value
+  && isTerminal.value
+  && String(terminalBoundary.value?.status || '').toLowerCase() === 'success')
+const stageMode = computed(() => requestedStageMode.value && isFormalTaskExecution.value)
+const isOfficialCompletion = computed(() => {
+  if (!isFormalTaskExecution.value || String(terminalBoundary.value?.status || '').toLowerCase() !== 'success' || !resultEvent.value) return false
+  const gate = terminalGateForExecutionEvent(resultEvent.value)
+  return gate?.passed === true && gate?.accepted !== false
+})
+const isIncompleteTerminal = computed(() => isTerminal.value && !isOfficialCompletion.value && !isQueryCompletion.value)
+const isLivePresentation = computed(() => props.presentation === 'live' && !isOfficialCompletion.value && !isQueryCompletion.value)
+// Running work always exposes the full construction trail. Density is a
+// completed-record reading preference and must not hide live progress.
+const effectiveExecutionDensity = computed(() => isLivePresentation.value ? 'detailed' : executionDensity.value)
+const latestPauseMilestone = computed(() => [...rows.value].reverse().find(event => event?.detail?.pauseMilestone?.kind))
+const pausedAt = computed(() => latestPauseMilestone.value?.detail?.pauseMilestone?.kind === 'paused' ? eventTime(latestPauseMilestone.value?.createdAt) : 0)
+const terminalAt = computed(() => Number(terminalBoundary.value?.at || 0) || pausedAt.value)
 const presentationVisible = computed(() => {
-  if (props.presentation === 'live') return !isTerminal.value
-  if (props.presentation === 'completed') return isTerminal.value
+  if (props.presentation === 'live') return !isOfficialCompletion.value && !isQueryCompletion.value
+  if (props.presentation === 'completed') return isOfficialCompletion.value || isQueryCompletion.value
   return true
 })
-const compacted = computed(() => !transcriptExpanded.value && isTerminal.value)
+const completedProjectionVisible = computed(() => isOfficialCompletion.value || isQueryCompletion.value)
+const compacted = computed(() => !transcriptExpanded.value && completedProjectionVisible.value)
 const assistantProgressRows = computed(() => rows.value.filter(event => event.eventType === 'assistant_progress'))
 const currentProgressEventId = computed(() => isTerminal.value ? '' : assistantProgressRows.value.at(-1)?.eventId || '')
 const requirementPlanEvents = computed(() => rows.value.filter(event => event.eventType === 'requirement_plan' && event?.detail?.requirementPlan))
@@ -72,8 +136,9 @@ const livePlanDockEligible = computed(() => !!(
   && latestRequirementPlanEvent.value?.anchorMessageId
 ))
 const requirementPlanHistory = computed(() => requirementPlanEvents.value.filter(event => event.eventId !== latestRequirementPlanEvent.value?.eventId))
-const visibleRows = computed(() => rows.value.filter(event => !['turn_started', 'assistant_text_delta', 'assistant_progress', 'requirement_plan', 'result'].includes(event.eventType)))
-const stageSourceRows = computed(() => rows.value.filter(event => !['turn_started', 'assistant_text_delta', 'thinking_status', 'requirement_plan', 'result'].includes(event.eventType)))
+const visibleModelActivity = event => event?.eventType === 'model_activity' && ['waiting', 'retrying'].includes(String(event?.detail?.modelActivity?.state || ''))
+const visibleRows = computed(() => rows.value.filter(event => !['turn_started', 'assistant_text_delta', 'assistant_progress', 'requirement_plan', 'result'].includes(event.eventType) && (event.eventType !== 'model_activity' || visibleModelActivity(event))))
+const stageSourceRows = computed(() => rows.value.filter(event => !['turn_started', 'assistant_text_delta', 'thinking_status', 'model_activity', 'requirement_plan', 'result'].includes(event.eventType)))
 const hasProgressFlow = computed(() => assistantProgressRows.value.length > 0)
 const hasExecutionRows = computed(() => requirementPlan.value || visibleRows.value.some(event => event.eventType?.startsWith('tool_') || event.eventType?.startsWith('agent_') || ['permission_required', 'context_compacted'].includes(event.eventType)))
 const toolRows = computed(() => rows.value.filter(event => event.eventType.startsWith('tool_')))
@@ -129,11 +194,15 @@ const stageTimingSource = computed(() => {
 const expandedStages = reactive({})
 const expandedBatches = reactive({})
 const requirementPlanExpanded = ref(false)
+const completionFilesExpanded = ref(false)
+const attemptHistoryExpanded = ref(false)
 const planIsExpanded = computed(() => isTerminal.value ? requirementPlanExpanded.value && transcriptExpanded.value : requirementPlanExpanded.value)
 const toggleRequirementPlan = () => { requirementPlanExpanded.value = !requirementPlanExpanded.value }
 const stageIsExpanded = stage => {
   if (expandedStages[stage.kind] !== undefined) return expandedStages[stage.kind]
-  if (!isLivePresentation.value) return false
+  if (effectiveExecutionDensity.value === 'detailed') return true
+  if (effectiveExecutionDensity.value === 'summary') return stage.status === '失败' || stage.active === true
+  if (!isLivePresentation.value) return stage.status === '失败'
   return stage.active === true || stageLifecycleStatus(stage.kind) === 'running'
 }
 const toggleStage = stage => {
@@ -192,13 +261,13 @@ const unionDuration = intervals => {
 const derivedStageDuration = stageRows => unionDuration(stageRows.flatMap(event => {
   const stage = event?.detail?.executionStage || {}
   const started = eventTime(stage.startedAt || event?.createdAt)
-  const terminalBoundary = isTerminal.value ? eventTime(resultEvent.value?.createdAt) : 0
-  if (!started || (terminalBoundary && started > terminalBoundary)) return []
+  const terminalBoundaryAt = isTerminal.value ? terminalAt.value : 0
+  if (!started || (terminalBoundaryAt && started > terminalBoundaryAt)) return []
   const duration = Math.max(0, Number(stage.activeDurationMs || event?.display?.durationMs || 0))
   const completed = eventTime(stage.completedAt)
   const live = ['running', 'waiting'].includes(String(event?.display?.status || ''))
-  const inferredEnd = completed || (duration ? started + duration : live ? (terminalBoundary || now.value) : started)
-  const ended = terminalBoundary ? Math.min(inferredEnd, terminalBoundary) : inferredEnd
+  const inferredEnd = completed || (duration ? started + duration : live ? (terminalBoundaryAt || now.value) : started)
+  const ended = terminalBoundaryAt ? Math.min(inferredEnd, terminalBoundaryAt) : inferredEnd
   const current = [[started, Math.max(started, ended)]]
   const history = (event?.detail?.agentAttemptHistory || []).map(attempt => {
     const attemptStarted = eventTime(attempt?.startedAt || attempt?.createdAt)
@@ -214,8 +283,79 @@ const configuredStageDuration = (stage, timing) => {
   return values.reduce((total, value) => total + value, 0)
 }
 const batchKeyFor = progress => String(progress?.detail?.progress?.batchId || progress?.eventId || '')
-const batchIsExpanded = batch => expandedBatches[batch.key] === undefined ? isLivePresentation.value : expandedBatches[batch.key]
+const eventHasPartialResult = event => {
+  const result = event?.detail?.toolDisplay?.result || {}
+  const continuation = result?.continuation || event?.detail?.continuation || {}
+  return String(event?.display?.status || '') === 'partial'
+    || result?.partial === true
+    || result?.searchExecution?.partial === true
+    || (result?.truncated === true && (Number(continuation?.pendingCount || 0) > 0 || Number(continuation?.remainingLines || 0) > 0))
+}
+const eventNeedsAttention = event => ['running', 'waiting', 'failed'].includes(String(event?.display?.status || '')) || eventHasPartialResult(event)
+const batchNeedsAttention = batch => (batch?.children || []).some(eventNeedsAttention)
+const batchHasFailure = batch => (batch?.children || []).some(event => event?.display?.status === 'failed')
+const batchPartialCount = batch => (batch?.children || []).filter(eventHasPartialResult).length
+const batchStatusIcon = batch => batchHasFailure(batch) ? CircleX : batchNeedsAttention(batch) ? LoaderCircle : Check
+const batchIsExpanded = batch => {
+  if (expandedBatches[batch.key] !== undefined) return expandedBatches[batch.key]
+  if (effectiveExecutionDensity.value === 'detailed') return true
+  if (effectiveExecutionDensity.value === 'summary') return batchNeedsAttention(batch)
+  return batchNeedsAttention(batch)
+}
 const toggleBatch = batch => { expandedBatches[batch.key] = !batchIsExpanded(batch) }
+const parallelSemanticRank = event => {
+  const name = String(event?.toolName || event?.detail?.toolDisplay?.tool?.name || '').toLowerCase()
+  if (/list_directory|glob|grep|search|find_(?:definition|references)|workspace_symbols/.test(name)) return 0
+  const family = agentProgressToolFamily(event)
+  if (family === 'search' || family === 'symbol') return 0
+  if (/read_file|read_files/.test(name) || family === 'read') return 1
+  if (family === 'git') return 2
+  if (family === 'verify' || family === 'terminal') return 3
+  return 4
+}
+const parallelFriendlyOrder = events => [...events].sort((left, right) => {
+  const leftGroup = String(left?.parallelGroupId || '')
+  const rightGroup = String(right?.parallelGroupId || '')
+  if (leftGroup && leftGroup === rightGroup) {
+    const semantic = parallelSemanticRank(left) - parallelSemanticRank(right)
+    if (semantic) return semantic
+  }
+  return Number(left?.sequence || 0) - Number(right?.sequence || 0)
+})
+const isParallelBatch = children => children.some((event, childIndex) => (
+  event?.parallelGroupId
+  && children.some((candidate, candidateIndex) => candidateIndex !== childIndex && candidate?.parallelGroupId === event.parallelGroupId && candidate?.toolCallId !== event?.toolCallId)
+))
+const syntheticParallelBatches = lifecycleRows => {
+  const groups = new Map()
+  for (const event of lifecycleRows) {
+    if (!String(event?.eventType || '').startsWith('tool_') || !event?.parallelGroupId) continue
+    const key = String(event.parallelGroupId)
+    if (!groups.has(key)) groups.set(key, [])
+    groups.get(key).push(event)
+  }
+  const eligible = new Map([...groups].filter(([, events]) => new Set(events.map(event => event?.toolCallId).filter(Boolean)).size > 1))
+  const handled = new Set()
+  return lifecycleRows.flatMap(event => {
+    const groupId = String(event?.parallelGroupId || '')
+    const group = eligible.get(groupId)
+    if (!group) return [event]
+    if (handled.has(groupId)) return []
+    handled.add(groupId)
+    const children = parallelFriendlyOrder(group)
+    return [{
+      __progressBatch: true,
+      __syntheticBatch: true,
+      key: `parallel:${groupId}`,
+      sequence: Math.min(...children.map(child => Number(child?.sequence || 0))),
+      progress: null,
+      children,
+      presentation: agentProgressBatchPresentation(children, { now: now.value, terminalAt: terminalAt.value }),
+      parallel: true,
+      durationMs: derivedStageDuration(children),
+    }]
+  })
+}
 const groupedStageItems = stageRows => {
   const progressRows = stageRows.filter(event => event?.eventType === 'assistant_progress')
   const lifecycleRows = stageRows.filter(event => event?.eventType !== 'assistant_progress')
@@ -223,13 +363,13 @@ const groupedStageItems = stageRows => {
   const batches = progressRows.map((progress, index) => {
     const related = new Set(progress?.detail?.progress?.relatedToolCallIds || [])
     const nextSequence = Number(progressRows[index + 1]?.sequence || Number.POSITIVE_INFINITY)
-    const children = lifecycleRows.filter(event => {
+    const children = parallelFriendlyOrder(lifecycleRows.filter(event => {
       const matched = related.size
         ? related.has(event?.toolCallId)
         : Number(event?.sequence || 0) > Number(progress?.sequence || 0) && Number(event?.sequence || 0) < nextSequence
       if (matched) claimed.add(event.eventId)
       return matched
-    })
+    }))
     const key = batchKeyFor(progress)
     return {
       __progressBatch: true,
@@ -237,11 +377,12 @@ const groupedStageItems = stageRows => {
       progress,
       children,
       presentation: agentProgressBatchPresentation(children, { now: now.value, terminalAt: terminalAt.value }),
+      parallel: isParallelBatch(children),
       durationMs: derivedStageDuration(children),
     }
   })
   const unclaimed = lifecycleRows.filter(event => !claimed.has(event.eventId))
-  return [...batches, ...unclaimed]
+  return [...batches, ...syntheticParallelBatches(unclaimed)]
     .sort((left, right) => Number((left.progress || left)?.sequence || 0) - Number((right.progress || right)?.sequence || 0))
 }
 const liveOrderedStageItems = items => {
@@ -263,6 +404,14 @@ const liveOrderedStageItems = items => {
       if (!runId) return sequence
       const start = groupStarts.get(runId) ?? sequence
       return String(event?.eventType || '').startsWith('agent_') ? start - 0.01 : sequence
+    }
+    const leftEvent = eventFor(left)
+    const rightEvent = eventFor(right)
+    const leftGroup = String(leftEvent?.parallelGroupId || '')
+    const rightGroup = String(rightEvent?.parallelGroupId || '')
+    if (leftGroup && leftGroup === rightGroup) {
+      const semantic = parallelSemanticRank(leftEvent) - parallelSemanticRank(rightEvent)
+      if (semantic) return semantic
     }
     return orderFor(left) - orderFor(right)
   })
@@ -313,6 +462,10 @@ const executionStageRows = computed(() => {
   })
   const projected = []
   let planInserted = false
+  if (includeRequirementPlan && isTerminal.value) {
+    projected.push({ __requirementPlan: true, key: `requirement-plan:${requirementPlan.value.planId}:${requirementPlan.value.revision}`, event: latestRequirementPlanEvent.value })
+    planInserted = true
+  }
   for (const block of stageBlocks) {
     if (!planInserted && block.stage.kind === 'project_execution' && includeRequirementPlan) {
       projected.push({ __requirementPlan: true, key: `requirement-plan:${requirementPlan.value.planId}:${requirementPlan.value.revision}`, event: latestRequirementPlanEvent.value })
@@ -331,6 +484,7 @@ const hydratedDetails = reactive({})
 const detailLoading = reactive({})
 const detailErrors = reactive({})
 const detailNotices = reactive({})
+const liveTails = reactive({})
 const expandedRows = reactive({})
 const expandedBatchFiles = reactive({})
 
@@ -361,6 +515,8 @@ const restoreExpansionState = () => {
     const saved = JSON.parse(sessionStorage.getItem(expansionStorageKey.value) || '{}')
     transcriptExpanded.value = saved.transcriptExpanded === true
     requirementPlanExpanded.value = saved.requirementPlanExpanded === true
+    attemptHistoryExpanded.value = saved.attemptHistoryExpanded === true
+    completionFilesExpanded.value = saved.completionFilesExpanded === true
     replaceReactiveFlags(expandedStages, saved.stages)
     replaceReactiveFlags(expandedBatches, saved.batches)
     replaceReactiveFlags(expandedRows, saved.rows)
@@ -373,6 +529,8 @@ const persistExpansionState = () => {
     sessionStorage.setItem(expansionStorageKey.value, JSON.stringify({
       transcriptExpanded: transcriptExpanded.value,
       requirementPlanExpanded: requirementPlanExpanded.value,
+      attemptHistoryExpanded: attemptHistoryExpanded.value,
+      completionFilesExpanded: completionFilesExpanded.value,
       stages: { ...expandedStages },
       batches: { ...expandedBatches },
       rows: { ...expandedRows },
@@ -381,14 +539,14 @@ const persistExpansionState = () => {
   } catch {}
 }
 watch(expansionStorageKey, restoreExpansionState)
-watch([transcriptExpanded, requirementPlanExpanded, expandedStages, expandedBatches, expandedRows, expandedBatchFiles], persistExpansionState, { deep: true })
+watch([transcriptExpanded, requirementPlanExpanded, attemptHistoryExpanded, completionFilesExpanded, expandedStages, expandedBatches, expandedRows, expandedBatchFiles], persistExpansionState, { deep: true })
 
 const eventTime = value => {
   const parsed = Date.parse(String(value || ''))
   return Number.isFinite(parsed) ? parsed : 0
 }
 const turnStartedAt = computed(() => eventTime(rows.value.find(event => event.eventType === 'turn_started')?.createdAt || rows.value[0]?.createdAt))
-const turnEndedAt = computed(() => eventTime(resultEvent.value?.createdAt))
+const turnEndedAt = computed(() => terminalAt.value)
 const turnDurationMs = computed(() => {
   const reported = Number(resultEvent.value?.display?.durationMs || 0)
   if (reported > 0) return reported
@@ -405,8 +563,7 @@ const processedDurationLabel = computed(() => {
   return seconds ? `${minutes}分${seconds}秒` : `${minutes}分钟`
 })
 
-const completionFiles = computed(() => completionFileChangesForRows(rows.value))
-const completionFilesExpanded = ref(false)
+const completionFiles = computed(() => isOfficialCompletion.value ? completionFileChangesForRows(rows.value) : [])
 const completionFilesVisible = computed(() => completionFilesExpanded.value ? completionFiles.value.slice(0, 40) : completionFiles.value.slice(0, 3))
 const completionFileRemainder = computed(() => Math.max(0, completionFiles.value.length - completionFilesVisible.value.length))
 const completionFileTotals = computed(() => completionFiles.value.reduce((summary, file) => {
@@ -420,7 +577,13 @@ const completionFileTotals = computed(() => completionFiles.value.reduce((summar
   }
   return summary
 }, { additions: 0, deletions: 0, hasStats: false }))
-const completionSucceeded = computed(() => resultEvent.value?.display?.status === 'success')
+const completionSucceeded = computed(() => isOfficialCompletion.value)
+const completionSafeSummary = value => {
+  const summary = String(value || '').replace(/\s+/g, ' ').trim()
+  if (!summary || summary.length > 120) return ''
+  if (/```|(?:api[_ -]?key|password|secret|authorization|bearer)\s*[:=]|-----begin|^(?:\[|\{)/i.test(summary)) return ''
+  return summary
+}
 const completionVerificationCount = computed(() => {
   const result = resultEvent.value?.result || {}
   const candidates = [result.verification, resultEvent.value?.evidenceIds, resultEvent.value?.detail?.verification]
@@ -428,22 +591,50 @@ const completionVerificationCount = computed(() => {
 })
 const completionResultSummary = computed(() => {
   if (!isTerminal.value) return ''
-  const status = String(resultEvent.value?.display?.status || '').toLowerCase()
+  if (isQueryCompletion.value) return toolCount.value ? `已检查 ${toolCount.value} 项` : '查询已完成'
+  const status = String(terminalBoundary.value?.status || resultEvent.value?.display?.status || '').toLowerCase()
   const files = completionFiles.value.length
   const failedVerification = Array.isArray(resultEvent.value?.result?.unfinished)
     ? resultEvent.value.result.unfinished.length
     : 0
   if (status === 'success') {
     const parts = []
+    const resultSummary = completionSafeSummary(resultEvent.value?.display?.summary)
+    if (resultSummary && !/^(?:任务|执行|回复)?已完成$|^(?:代码修改和)?独立验收(?:均)?已通过$/.test(resultSummary)) parts.push(resultSummary)
     if (completionVerificationCount.value) parts.push('验证通过')
     if (files) parts.push(`修改 ${files} 个文件`)
-    return parts.join(' · ')
+    return [...new Set(parts)].join(' · ') || '本轮任务已完成'
   }
   if (files && failedVerification) return `已完成主要修改，${failedVerification} 项验证未通过`
   if (status === 'cancelled' || status === 'canceled') return '本轮已停止，未正式交付'
   if (status === 'interrupted') return '本轮已中断，未正式交付'
   return '本轮未通过验收，未正式交付'
 })
+const completedProjectionTitle = computed(() => isQueryCompletion.value ? '查询过程' : '执行记录')
+const completedProjectionSucceeded = computed(() => isOfficialCompletion.value || isQueryCompletion.value)
+const attemptHistoryGroups = computed(() => {
+  const groups = new Map()
+  for (const event of agentRows.value) {
+    const history = Array.isArray(event?.detail?.agentAttemptHistory) ? event.detail.agentAttemptHistory : []
+    if (!history.length) continue
+    const display = event?.detail?.agentDisplay || {}
+    const project = String(display.projectName || display.projectId || event?.display?.title || 'Agent').trim()
+    const workItem = String(display.workItemTitle || event?.workItemId || event?.display?.target || '执行任务').trim()
+    const key = `${project}|${workItem}`
+    const existing = groups.get(key) || { key, project, workItem, attempts: [] }
+    for (const attempt of history) {
+      const attemptNumber = Number(attempt?.attempt || 0)
+      const attemptKey = `${attemptNumber}|${String(attempt?.status || '')}|${String(attempt?.summary || '')}`
+      if (!existing.attempts.some(item => item.key === attemptKey)) existing.attempts.push({ ...attempt, key: attemptKey, attempt: attemptNumber })
+    }
+    groups.set(key, existing)
+  }
+  return [...groups.values()].filter(group => group.attempts.length).map(group => ({
+    ...group,
+    attempts: group.attempts.sort((left, right) => Number(left.attempt || 0) - Number(right.attempt || 0)),
+  }))
+})
+const attemptHistoryCount = computed(() => attemptHistoryGroups.value.reduce((count, group) => count + group.attempts.length, 0))
 const recoveryMilestone = computed(() => {
   const event = [...rows.value].reverse().find(item => item?.detail?.recoveryMilestone && Number(item?.generation || 0) === currentGeneration.value)
   const recovery = event?.detail?.recoveryMilestone
@@ -468,16 +659,16 @@ const effectivePlanSteps = computed(() => (requirementPlan.value?.steps || []).m
 }))
 const planStatusLabel = computed(() => {
   if (requirementPlan.value?.status === 'completed' || completionSucceeded.value) return '计划已完成'
-  if (requirementPlan.value?.status === 'blocked' || resultEvent.value?.display?.status === 'failed') return '计划受阻'
+  if (requirementPlan.value?.status === 'blocked' || terminalBoundary.value?.status === 'failed') return '计划受阻'
   if (effectivePlanSteps.value.some(step => step.status === 'running')) return '正在执行'
   return '计划已就绪'
 })
-const planStepMark = step => step.status === 'completed' ? '✓' : step.status === 'blocked' ? '×' : step.status === 'running' ? '●' : step.status === 'skipped' ? '–' : '○'
+const planStepIcon = step => step.status === 'completed' ? Check : step.status === 'blocked' ? CircleX : step.status === 'running' ? LoaderCircle : step.status === 'skipped' ? Minus : Circle
 const planScopeLabel = computed(() => (requirementPlan.value?.scope || []).slice(0, 4).join(' · '))
 const stageLifecycleStatus = kind => {
   const stageRows = stageSourceRows.value.filter(event => inferredStageKind(event) === kind && event?.eventType !== 'assistant_progress')
   if (!stageRows.length) return 'pending'
-  if (isTerminal.value && resultEvent.value?.display?.status === 'success') return 'completed'
+  if (isTerminal.value && completionSucceeded.value) return 'completed'
   if (stageRows.some(event => event?.display?.status === 'failed')) return 'blocked'
   if (stageRows.some(event => ['running', 'waiting'].includes(String(event?.display?.status || '')))) return 'running'
   return 'completed'
@@ -528,6 +719,9 @@ const progressSegments = computed(() => {
     }
   })
 })
+const displayedProgressSegments = computed(() => effectiveExecutionDensity.value === 'summary'
+  ? progressSegments.value.slice(-1)
+  : progressSegments.value)
 
 const derivedToolWallMs = computed(() => {
   const intervals = toolRows.value
@@ -566,12 +760,25 @@ const timingItems = computed(() => {
   return items.filter(([, value]) => Number.isFinite(value) && value > 0)
 })
 
-const statusMark = event => {
-  if (event?.display?.status === 'success') return '✓'
-  if (event?.display?.status === 'failed') return '×'
-  if (event?.display?.status === 'waiting') return '…'
-  return '●'
+const statusIcon = event => {
+  if (event?.display?.status === 'success') return Check
+  if (event?.display?.status === 'failed') return CircleX
+  if (event?.display?.status === 'waiting') return LoaderCircle
+  return Circle
 }
+const semanticToolIcon = event => {
+  const family = agentProgressToolFamily(event)
+  if (family === 'read') return FileCode2
+  if (family === 'search' || family === 'symbol') return Search
+  if (family === 'git') return History
+  if (family === 'verify' || family === 'terminal') return Wrench
+  if (family === 'agent') return ListChecks
+  return Wrench
+}
+const rowLeadingIcon = event => event?.__batchChild && event?.display?.status === 'success' && !eventHasPartialResult(event)
+  ? semanticToolIcon(event)
+  : statusIcon(event)
+const rowShowsTerminalStatus = event => !event?.__batchChild || event?.display?.status !== 'success' || eventHasPartialResult(event)
 
 const safeJson = value => {
   if (value == null) return ''
@@ -590,11 +797,34 @@ const legacyResult = value => {
   return Object.keys(result).length ? result : null
 }
 
-const toolDisplayFor = event => hydratedDetails[event.eventId] || event?.detail?.toolDisplay || null
+const legacyToolDisplays = new WeakMap()
+const toolDisplayFor = event => {
+  const current = hydratedDetails[event?.eventId] || event?.detail?.toolDisplay
+  if (current) return current
+  if (!event || typeof event !== 'object' || !event.detail || (!event.detail.safeArguments && !event.detail.safeResult)) return null
+  if (!legacyToolDisplays.has(event)) legacyToolDisplays.set(event, buildLegacyToolDisplay(event))
+  return legacyToolDisplays.get(event) || null
+}
+const toolDisplayExpandable = event => {
+  const display = toolDisplayFor(event)
+  if (!display) return false
+  const result = display.result || {}
+  return toolResultHasUserDetails(display)
+    || !!display.sensitiveCommand
+    || !!display.arguments?.length
+    || !!result.searchExecution
+    || !!result.freshness
+    || !!result.authoritativeRevision
+    || !!result.preview
+    || !!result.fileRows?.length
+    || !!result.continuation
+    || !!result.rehydratable
+    || !!result.truncated
+    || Number(event?.display?.tokenCount || 0) > 0
+}
 const isRowExpandable = event => !!(event?.detail && (
-  toolDisplayFor(event)
+  toolDisplayExpandable(event)
   || event.detail.agentDisplay
-  || event.detail.agentAttemptHistory?.length
   || event.detail.safeArguments
   || legacyResult(event.detail.safeResult)
   || event.detail.fileChanges?.length
@@ -613,13 +843,15 @@ const legacyToolIdentity = event => {
   const parts = raw.split('__').filter(Boolean)
   const operation = parts[0] === 'mcp' ? parts.at(-1) : raw
   const labels = {
-    Read: '读取文件', read: '读取文件', read_file: '读取文件', FileRead: '读取文件',
-    Glob: '查找文件', glob: '查找文件', glob_files: '查找文件',
-    Grep: '搜索代码', grep: '搜索代码', grep_text: '搜索代码',
-    list_directory: '查看目录', LS: '查看目录',
+    Read: '读取文件', read: '读取文件', read_file: '读取文件', FileRead: '读取文件', 'Read file': '读取文件', 'Read files': '批量读取文件',
+    Glob: '查找文件', glob: '查找文件', glob_files: '查找文件', 'Glob files': '查找文件',
+    Grep: '搜索代码', grep: '搜索代码', grep_text: '搜索代码', 'Grep text': '搜索代码',
+    list_directory: '查看目录', LS: '查看目录', 'List directory': '查看目录',
     find_definition: '查找定义', find_references: '查找引用', find_implementations: '查找实现',
+    'Find definition': '查找定义', 'Find references': '查找引用', 'Find implementations': '查找实现',
     find_type_definition: '查找类型定义', find_incoming_calls: '查找调用方', find_outgoing_calls: '查找被调用项',
     read_code_diagnostics: '读取代码诊断', read_git_status: '检查 Git 状态', read_git_diff: '查看 Git 差异', read_git_history: '查看 Git 历史',
+    inspect_system: '检查系统状态', 'Inspect system': '检查系统状态',
     shell_read_runtime_log: '读取项目日志', shell_read_runtime_logs: '读取项目日志',
     maven_build: '运行 Maven 构建', gradle_build: '运行 Gradle 构建', run_terminal: '运行项目命令',
   }
@@ -627,13 +859,21 @@ const legacyToolIdentity = event => {
   return { label: labels[operation] || raw, serverLabel: parts[0] === 'mcp' && !internalWorkspace ? parts.at(-2) : '' }
 }
 
+const toolReadableLabel = event => {
+  const projected = String(toolDisplayFor(event)?.tool?.userLabel || toolDisplayFor(event)?.tool?.label || '').trim()
+  const legacy = legacyToolIdentity(event).label
+  if (projected && /[\u3400-\u9fff]/.test(projected)) return projected
+  return legacy !== String(event?.toolName || event?.display?.title || 'Agent') ? legacy : projected || legacy
+}
+
 const eventTitle = event => {
+  if (event?.eventType === 'model_activity') return event?.detail?.modelActivity?.safeLabel || event?.display?.summary || '正在处理'
   if (String(event?.eventType || '').startsWith('agent_')) {
     const display = event?.detail?.agentDisplay
     if (display?.projectName) return [display.projectName, display.runtimeLabel].filter(Boolean).join(' · ')
     return event?.display?.title || 'Agent'
   }
-  return toolDisplayFor(event)?.tool?.userLabel || toolDisplayFor(event)?.tool?.label || legacyToolIdentity(event).label
+  return toolReadableLabel(event)
 }
 const eventBusinessSummary = event => {
   const projected = String(toolDisplayFor(event)?.result?.summary || '').trim()
@@ -641,6 +881,23 @@ const eventBusinessSummary = event => {
   const generic = /^(?:执行完成|工具执行完成|正在执行)$/
   if (projected && !generic.test(projected)) return projected
   return generic.test(fallback) ? '' : fallback
+}
+const safeInlineTarget = value => {
+  const text = typeof value === 'string' || typeof value === 'number' ? String(value).trim() : ''
+  return text && text.length <= 500 ? text : ''
+}
+const eventTarget = event => {
+  const toolDisplay = toolDisplayFor(event)
+  const candidates = [
+    event?.display?.target,
+    toolDisplay?.tool?.target,
+    toolDisplay?.arguments?.path,
+    toolDisplay?.arguments?.project,
+    toolDisplay?.arguments?.projectId,
+    event?.detail?.safeArguments?.path,
+    event?.detail?.safeArguments?.project,
+  ]
+  return candidates.map(safeInlineTarget).find(Boolean) || ''
 }
 const safeStageSummaryText = value => {
   const summary = String(value || '').replace(/\s+/g, ' ').trim()
@@ -681,11 +938,6 @@ const stageSummaryFor = (kind, stageRows, lifecycleRows, status) => {
   return narration ? safeStageSummaryText(progressText(narration)) : stageFallbackSummary(kind, status)
 }
 
-const displayValue = value => {
-  if (value == null || value === '') return '—'
-  if (typeof value === 'object') return safeJson(value)
-  return String(value)
-}
 const normalizedFileChange = (file, event) => {
   const source = typeof file === 'string' ? { path: file } : { ...(file || {}) }
   const path = String(source.path || source.file || source.name || '').trim()
@@ -708,12 +960,6 @@ const fileChangeStat = (file) => {
   const deletions = Number(file?.deletions ?? file?.diff?.deletions ?? 0)
   if (!additions && !deletions) return ''
   return `+${additions} -${deletions}`
-}
-
-const rowEntries = row => {
-  if (row == null) return []
-  if (typeof row !== 'object') return [['', row]]
-  return Object.entries(row).filter(([, value]) => value !== '' && value != null)
 }
 
 const batchFileRowsFor = event => {
@@ -782,9 +1028,10 @@ const mergeBatchReadDetail = (previous, current) => {
     const path = String(row?.path || '').trim()
     if (path) rowsByPath.set(path, row)
   }
-  const total = Math.max(Number(previousResult.total || 0), rowsByPath.size)
-  const pendingCount = Math.max(0, Number(currentResult?.continuation?.pendingCount || 0))
-  return {
+    const total = Math.max(Number(previousResult.total || 0), rowsByPath.size)
+    const pendingCount = Math.max(0, Number(currentResult?.continuation?.pendingCount || 0))
+    const failedCount = [...rowsByPath.values()].filter(row => row?.status === '读取失败').length
+    return {
     ...current,
     result: {
       ...currentResult,
@@ -792,7 +1039,9 @@ const mergeBatchReadDetail = (previous, current) => {
       rows: [...rowsByPath.values()],
       fileRows: mergeBatchFileRows(previousResult.fileRows, currentResult.fileRows),
       truncated: pendingCount > 0,
-      summary: `已读取 ${total} 个文件${pendingCount ? `，其中 ${pendingCount} 个文件仍有内容未读完` : '，所有文件均已读完'}`,
+      summary: failedCount
+        ? `已处理 ${total} 个文件，成功读取 ${Math.max(0, total - failedCount)} 个，${failedCount} 个读取失败${pendingCount ? `，${pendingCount} 个仍有内容未读完` : ''}`
+        : `已读取 ${total} 个文件${pendingCount ? `，其中 ${pendingCount} 个文件仍有内容未读完` : '，所有文件均已读完'}`,
     },
   }
 }
@@ -861,11 +1110,34 @@ const rehydrateDetail = async (event, continueRead = false) => {
     detailLoading[event.eventId] = false
   }
 }
+const loadLiveTail = async event => {
+  if (detailLoading[event.eventId]) return
+  detailLoading[event.eventId] = true
+  detailErrors[event.eventId] = ''
+  try {
+    const query = new URLSearchParams({ scope: String(event.scope || ''), scope_id: String(event.scopeId || ''), exact_session_id: String(event.exactSessionId || '') })
+    const response = await fetch(`/api/agent-execution/events/${encodeURIComponent(event.eventId)}/detail?${query}`, {
+      method: 'POST', cache: 'no-store', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ includeLiveTail: true }),
+    })
+    const payload = await response.json().catch(() => ({}))
+    if (!response.ok || payload.success === false) throw new Error(payload.error || '最近输出读取失败')
+    liveTails[event.eventId] = payload.liveTail || { text: '', lines: [] }
+    detailNotices[event.eventId] = payload.liveTail ? '已读取脱敏最近输出' : '当前没有可用的实时输出'
+  } catch (error) {
+    detailErrors[event.eventId] = error?.message || '最近输出读取失败'
+  } finally {
+    detailLoading[event.eventId] = false
+  }
+}
+const supportsLiveTail = event => ['terminal', 'verify'].includes(String(toolDisplayFor(event)?.tool?.family || '')) && /run_command|command|terminal|shell|bash|powershell/i.test(String(event?.toolName || toolDisplayFor(event)?.tool?.canonicalName || ''))
 
 const rowMeta = event => {
   const liveDuration = longRunningToolDuration(event, { now: now.value, terminalAt: terminalAt.value })
+  const fileCount = Array.isArray(event?.detail?.fileChanges) ? event.detail.fileChanges.length : 0
   return [
-  event?.display?.toolUseCount ? `${event.display.toolUseCount} tool uses` : '',
+  event?.parallelGroupId && !event?.__batchChild ? '并行执行' : '',
+  event?.display?.toolUseCount ? `${event.display.toolUseCount} 项工具` : '',
+  fileCount ? `${fileCount} 个文件` : '',
   event?.display?.tokenCount
     ? `${event.display.tokenType === 'provider_total' ? '本轮' : event.eventType?.startsWith('tool_') ? '结果' : ''}${event.display.tokenAccuracy === 'reported' ? '' : '约'} ${event.display.tokenCount} tokens`.trim()
     : '',
@@ -874,6 +1146,11 @@ const rowMeta = event => {
 }
 
 const liveRowLabel = event => {
+  if (event?.eventType === 'model_activity') {
+    const startedAt = eventTime(event?.detail?.modelActivity?.startedAt || event?.createdAt)
+    const elapsed = startedAt ? formatExecutionDuration(Math.max(0, now.value - startedAt)) : ''
+    return [eventTitle(event), elapsed].filter(Boolean).join(' · ')
+  }
   const title = eventTitle(event)
   if (String(event?.eventType || '').startsWith('agent_')) return title
   const status = String(event?.display?.status || 'running')
@@ -883,8 +1160,12 @@ const liveRowLabel = event => {
   if (status === 'waiting') return `${title}正在等待`
   return `正在运行 ${title}`
 }
+const rowPrimaryLabel = event => event?.__batchChild && event?.display?.status === 'success' && !eventHasPartialResult(event)
+  ? eventTitle(event)
+  : isLivePresentation.value ? liveRowLabel(event) : eventTitle(event)
 
 const liveRowMeta = event => {
+  if (event?.eventType === 'model_activity') return ''
   const liveDuration = longRunningToolDuration(event, { now: now.value, terminalAt: terminalAt.value })
   if (liveDuration) return `已运行 ${formatExecutionDuration(liveDuration)}`
   if (String(event?.eventType || '').startsWith('agent_')) return rowMeta(event)
@@ -970,6 +1251,18 @@ const openReplay = () => {
   if (replayTarget.value) emit('execution-action', replayTarget.value)
 }
 const liveStageLabel = computed(() => executionStageRows.value.find(item => item?.__stageHeader && item.active)?.label || '')
+const displayedExecutionStageRows = computed(() => {
+  if (effectiveExecutionDensity.value !== 'summary') return executionStageRows.value
+  const filtered = executionStageRows.value.filter(event => {
+    if (event?.__stageHeader) return event.active || event.status === '失败'
+    if (event?.__progressBatch) return batchNeedsAttention(event)
+    return isCurrentEvent(event)
+      || ['failed', 'waiting', 'blocked', 'cancelled'].includes(String(event?.display?.status || ''))
+      || eventHasPartialResult(event)
+      || event?.eventType === 'permission_required'
+  })
+  return filtered.length ? filtered : executionStageRows.value.slice(-1)
+})
 </script>
 
 <template>
@@ -982,30 +1275,34 @@ const liveStageLabel = computed(() => executionStageRows.value.find(item => item
     </template>
   </header>
   <div v-if="hasProgressFlow && !stageMode && (!isTerminal || transcriptExpanded)" class="cc-progress-flow" aria-label="Agent 进度说明">
-    <div v-for="segment in progressSegments" :key="segment.key" class="cc-progress-segment" :class="{ current: segment.progress?.eventId === currentProgressEventId, completed: segment.progress?.eventId !== currentProgressEventId }">
+    <div v-for="segment in displayedProgressSegments" :key="segment.key" class="cc-progress-segment" :class="{ current: segment.progress?.eventId === currentProgressEventId, completed: segment.progress?.eventId !== currentProgressEventId }">
       <p v-if="progressText(segment.progress)" class="cc-progress-text">{{ progressText(segment.progress) }}</p>
       <button v-if="segment.label" type="button" class="cc-progress-batch" :aria-expanded="transcriptExpanded" @click="toggleTranscript">
-        <span class="cc-progress-batch-icon">⌘</span>
+        <span class="cc-progress-batch-icon"><Wrench :size="11" /></span>
         <span>{{ segment.label }}</span>
         <small v-if="segment.durationMs">{{ formatExecutionDuration(segment.durationMs) }}</small>
-        <span class="cc-progress-batch-chevron">{{ transcriptExpanded ? '⌃' : '⌄' }}</span>
+        <span class="cc-progress-batch-chevron"><ChevronDown v-if="transcriptExpanded" :size="13" /><ChevronRight v-else :size="13" /></span>
       </button>
     </div>
   </div>
 
-  <section v-if="presentation === 'completed' && completionFiles.length" class="cc-completion-files" :class="{ warning: !completionSucceeded }" aria-label="本轮文件变化">
+  <section v-if="presentation === 'completed' && isOfficialCompletion && completionFiles.length" class="cc-completion-files" :class="{ warning: !completionSucceeded }" aria-label="本轮文件变化">
     <header class="cc-completion-files-head">
-      <span class="cc-completion-files-icon">⊞</span>
-      <div>
-        <strong>{{ completionFileTitle }}</strong>
-        <small v-if="completionFileTotals.hasStats">
-          <span class="additions">+{{ completionFileTotals.additions }}</span>
-          <span class="deletions">-{{ completionFileTotals.deletions }}</span>
-        </small>
-      </div>
+      <button type="button" class="cc-completion-files-toggle" :aria-expanded="completionFilesExpanded" @click="toggleCompletionFiles">
+        <span class="cc-completion-files-icon"><FileCode2 :size="16" /></span>
+        <span class="cc-completion-files-copy">
+          <strong>{{ completionFileTitle }}</strong>
+          <small v-if="completionFileTotals.hasStats">
+            <span class="additions">+{{ completionFileTotals.additions }}</span>
+            <span class="deletions">-{{ completionFileTotals.deletions }}</span>
+          </small>
+        </span>
+        <ChevronDown v-if="completionFilesExpanded" :size="15" aria-hidden="true" />
+        <ChevronRight v-else :size="15" aria-hidden="true" />
+      </button>
       <button type="button" class="cc-completion-review" @click="openAllFileChanges">审核</button>
     </header>
-    <div class="cc-completion-file-list">
+    <div v-if="completionFilesExpanded" class="cc-completion-file-list">
       <button v-for="file in completionFilesVisible" :key="`${file.project}|${file.path}`" type="button" class="cc-completion-file-row" @click="openFileChange(file, resultEvent)">
         <span class="cc-completion-file-path"><small v-if="file.project">{{ file.project }} / </small>{{ file.path }}</span>
         <span v-if="Number.isFinite(Number(file.additions)) || Number.isFinite(Number(file.deletions))" class="cc-completion-file-delta">
@@ -1015,23 +1312,25 @@ const liveStageLabel = computed(() => executionStageRows.value.find(item => item
         <span v-else class="cc-completion-file-status">{{ file.deleted ? '已删除' : file.binary ? '二进制' : file.status || '已修改' }}</span>
       </button>
     </div>
-    <button v-if="completionFiles.length > 3" type="button" class="cc-completion-files-more" @click="toggleCompletionFiles">
-      {{ completionFilesExpanded ? '收起文件列表' : `显示其余 ${completionFileRemainder} 个文件` }} {{ completionFilesExpanded ? '⌃' : '⌄' }}
-    </button>
-    <button v-if="completionFiles.length > 40 && completionFilesExpanded" type="button" class="cc-completion-files-all" @click="openAllFileChanges">查看全部 {{ completionFiles.length }} 个文件</button>
+    <button v-if="completionFilesExpanded && completionFiles.length > 40" type="button" class="cc-completion-files-all" @click="openAllFileChanges">查看全部 {{ completionFiles.length }} 个文件</button>
   </section>
 
-  <section v-if="shouldRender && (hasExecutionRows || assistantProgressRows.length || transcriptExpanded) && (!hasProgressFlow || stageMode || transcriptExpanded)" class="cc-execution" :class="{ complete: isTerminal, expanded: transcriptExpanded, live: isLivePresentation }" :aria-label="isLivePresentation ? 'Agent 实时执行进度' : '执行记录'">
-    <button v-if="isTerminal" class="cc-execution-head" type="button" @click="toggleTranscript">
-      <span class="cc-execution-chevron">{{ transcriptExpanded ? '⌄' : '›' }}</span>
-      <strong>执行记录</strong>
-      <span :class="['cc-execution-result-mark', completionSucceeded ? 'success' : 'warning']" aria-hidden="true">{{ completionSucceeded ? '✓' : '!' }}</span>
+  <section v-if="!isIncompleteTerminal && shouldRender && (hasExecutionRows || (!isTerminal && assistantProgressRows.length) || transcriptExpanded || isQueryCompletion) && (!hasProgressFlow || stageMode || transcriptExpanded || isQueryCompletion)" class="cc-execution" :class="{ complete: completedProjectionVisible, expanded: transcriptExpanded, live: isLivePresentation, query: isQueryCompletion }" :aria-label="isLivePresentation ? 'Agent 实时执行进度' : completedProjectionTitle">
+    <button v-if="completedProjectionVisible" class="cc-execution-head" type="button" @click="toggleTranscript">
+      <span class="cc-execution-chevron"><ChevronDown v-if="transcriptExpanded" :size="15" /><ChevronRight v-else :size="15" /></span>
+      <strong>{{ completedProjectionTitle }}</strong>
+      <span :class="['cc-execution-result-mark', completedProjectionSucceeded ? 'success' : 'warning']" aria-hidden="true"><Check v-if="completedProjectionSucceeded" :size="11" /><AlertTriangle v-else :size="11" /></span>
       <span class="cc-execution-summary">{{ completionResultSummary }}</span>
       <span v-if="totalDurationLabel" class="cc-execution-duration">{{ totalDurationLabel }}</span>
     </button>
-    <div v-if="isTerminal && transcriptExpanded && (recoveryMilestone || replayTarget)" class="cc-execution-meta">
+    <label v-if="isOfficialCompletion" class="cc-execution-density completed" @click.stop>
+      <span class="sr-only">执行展示密度</span>
+      <select v-model="executionDensity" aria-label="执行展示密度">
+        <option v-for="option in executionDensityOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+      </select>
+    </label>
+    <div v-if="isOfficialCompletion && transcriptExpanded && recoveryMilestone" class="cc-execution-meta">
       <p v-if="recoveryMilestone" class="cc-recovery-milestone">{{ recoveryMilestone }}</p>
-      <button v-if="replayTarget" type="button" class="cc-execution-replay-link" @click="openReplay">在任务回放中查看</button>
     </div>
 
     <div v-if="!compacted" class="cc-execution-rows">
@@ -1039,14 +1338,14 @@ const liveStageLabel = computed(() => executionStageRows.value.find(item => item
         <span v-for="([label, value]) in timingItems" :key="label"><small>{{ label }}</small>{{ formatExecutionDuration(value) }}</span>
       </div>
       <div v-if="transcriptExpanded" class="cc-execution-search" role="search">
-        <span>⌕</span>
+        <Search :size="14" aria-hidden="true" />
         <input v-model="searchQuery" type="search" placeholder="搜索工具、项目、文件或失败原因" @keydown="onSearchKeydown" />
         <small v-if="normalizedSearchQuery">{{ searchMatches.length }} 个匹配</small>
         <button v-if="searchMatches.length" type="button" title="上一个匹配" @click="focusSearchMatch(-1)">↑</button>
         <button v-if="searchMatches.length" type="button" title="下一个匹配" @click="focusSearchMatch(1)">↓</button>
-        <button v-if="normalizedSearchQuery" type="button" title="清除搜索" @click="searchQuery = ''">×</button>
+        <button v-if="normalizedSearchQuery" type="button" title="清除搜索" @click="searchQuery = ''"><X :size="13" /></button>
       </div>
-      <template v-for="event in executionStageRows" :key="event.key || event.eventId">
+      <template v-for="event in displayedExecutionStageRows" :key="event.key || event.eventId">
       <button
         v-if="event.__stageHeader"
         v-show="stageMatchesSearch(event.kind)"
@@ -1056,38 +1355,39 @@ const liveStageLabel = computed(() => executionStageRows.value.find(item => item
         :aria-expanded="stageIsExpanded(event)"
         @click="toggleStage(event)"
       >
-        <span class="cc-execution-stage-marker" aria-hidden="true">{{ event.status === '完成' ? '✓' : event.status === '失败' ? '!' : '●' }}</span>
+        <span class="cc-execution-stage-marker" aria-hidden="true"><Check v-if="event.status === '完成'" :size="11" /><AlertTriangle v-else-if="event.status === '失败'" :size="11" /><span v-else class="cc-stage-running-dot" /></span>
         <span class="cc-execution-stage-copy">
           <strong>{{ event.label }}</strong>
           <small>{{ event.summary }}</small>
         </span>
         <em>{{ event.status }}</em>
         <span v-if="event.durationMs">{{ formatExecutionDuration(event.durationMs) }}</span>
-        <span class="cc-execution-stage-chevron">{{ stageIsExpanded(event) ? '⌃' : '⌄' }}</span>
+        <span class="cc-execution-stage-chevron"><ChevronDown v-if="stageIsExpanded(event)" :size="14" /><ChevronRight v-else :size="14" /></span>
       </button>
       <section
         v-else-if="event.__progressBatch"
         v-show="batchMatchesSearch(event)"
         class="cc-progress-batch-group stage-child"
-        :class="{ current: event.progress?.eventId === currentProgressEventId, completed: event.progress?.eventId !== currentProgressEventId }"
-        :aria-current="event.progress?.eventId === currentProgressEventId ? 'step' : undefined"
+        :class="{ current: batchNeedsAttention(event), completed: !batchNeedsAttention(event), attention: batchNeedsAttention(event) }"
+        :aria-current="batchNeedsAttention(event) ? 'step' : undefined"
       >
-        <p class="cc-execution-stage-progress">{{ progressText(event.progress) }}</p>
+        <p v-if="event.progress && progressText(event.progress)" class="cc-execution-stage-progress">{{ progressText(event.progress) }}</p>
         <button v-if="event.children.length" type="button" class="cc-progress-batch-head" :aria-expanded="batchIsExpanded(event)" @click="toggleBatch(event)">
-          <span>{{ batchIsExpanded(event) ? '⌄' : '›' }}</span>
+          <span class="cc-progress-batch-status" :class="{ failed: batchHasFailure(event), attention: batchNeedsAttention(event) }"><component :is="batchStatusIcon(event)" :size="12" /></span>
           <strong>{{ event.presentation?.label || '工具批次' }}</strong>
-          <small>{{ event.presentation?.count || event.children.length }} 项<span v-if="event.presentation?.failed"> · {{ event.presentation.failed }} 项失败</span><span v-if="event.presentation?.durationMs || event.durationMs"> · {{ formatExecutionDuration(event.presentation?.durationMs || event.durationMs) }}</span></small>
+          <small>{{ event.presentation?.count || event.children.length }}项<span v-if="event.parallel"> · 并行</span><span v-if="event.presentation?.failed"> · {{ event.presentation.failed }}项失败</span><span v-if="batchPartialCount(event)"> · {{ batchPartialCount(event) }}项部分结果</span><span v-if="event.presentation?.durationMs || event.durationMs"> · {{ formatExecutionDuration(event.presentation?.durationMs || event.durationMs) }}</span></small>
+          <span class="cc-progress-batch-chevron"><ChevronDown v-if="batchIsExpanded(event)" :size="13" /><ChevronRight v-else :size="13" /></span>
         </button>
       </section>
       <article v-else-if="event.__requirementPlan" class="cc-requirement-plan" :class="requirementPlan?.status || 'ready'">
         <button type="button" class="cc-requirement-plan-head" :aria-expanded="planIsExpanded" @click="toggleRequirementPlan">
-          <span class="cc-requirement-plan-icon">▤</span>
+          <span class="cc-requirement-plan-icon"><ListChecks :size="14" /></span>
           <span class="cc-requirement-plan-title">
             <strong>{{ isLivePresentation ? `${requirementPlan?.title || '实施计划'} · ${effectivePlanSteps.length}步` : requirementPlan?.title || '需求实施计划' }}</strong>
             <small>根据你的需求和现有项目整理 · 版本 {{ requirementPlan?.revision || 1 }}</small>
           </span>
           <span class="cc-requirement-plan-status">{{ planStatusLabel }}</span>
-          <span class="cc-requirement-plan-chevron">{{ planIsExpanded ? '⌃' : '⌄' }}</span>
+          <span class="cc-requirement-plan-chevron"><ChevronDown v-if="planIsExpanded" :size="14" /><ChevronRight v-else :size="14" /></span>
         </button>
         <div v-if="planIsExpanded" class="cc-requirement-plan-body">
           <div class="cc-requirement-plan-main">
@@ -1099,7 +1399,7 @@ const liveStageLabel = computed(() => executionStageRows.value.find(item => item
               <h4>接下来会这样处理</h4>
               <ol class="cc-requirement-plan-steps">
                 <li v-for="(step, stepIndex) in effectivePlanSteps" :key="step.id || stepIndex" :class="step.status">
-                  <span class="cc-requirement-step-mark">{{ planStepMark(step) }}</span>
+                  <span class="cc-requirement-step-mark"><component :is="planStepIcon(step)" :size="11" /></span>
                   <div>
                     <strong>{{ step.title }}</strong>
                     <p v-if="step.description && step.description !== step.title">{{ step.description }}</p>
@@ -1119,7 +1419,7 @@ const liveStageLabel = computed(() => executionStageRows.value.find(item => item
         </div>
         <footer v-if="planIsExpanded" class="cc-requirement-plan-foot">
           <span>{{ effectivePlanSteps.length }} 个实施步骤 · {{ requirementPlan?.expectedResults?.length || 0 }} 项预期结果</span>
-          <button type="button" @click="toggleRequirementPlan">收起计划⌃</button>
+          <button type="button" @click="toggleRequirementPlan">收起计划 <ChevronDown :size="12" /></button>
         </footer>
       </article>
       <p v-else-if="event.eventType === 'assistant_progress'" v-show="!normalizedSearchQuery || searchableText(event).includes(normalizedSearchQuery)" class="cc-execution-stage-progress" :class="{ current: event.eventId === currentProgressEventId }" :aria-current="event.eventId === currentProgressEventId ? 'step' : undefined">{{ progressText(event) }}</p>
@@ -1127,7 +1427,7 @@ const liveStageLabel = computed(() => executionStageRows.value.find(item => item
         v-else
         v-show="eventMatchesSearch(event)"
         class="cc-execution-row"
-        :class="[event.display?.status || 'running', { 'stage-child': event.__stageChild, 'batch-child': event.__batchChild, 'agent-child': event.__agentChild, current: isCurrentEvent(event), completed: event.display?.status === 'success' }]"
+        :class="[event.display?.status || 'running', { 'stage-child': event.__stageChild, 'batch-child': event.__batchChild, 'agent-child': event.__agentChild, 'model-activity': event.eventType === 'model_activity', current: isCurrentEvent(event), completed: event.display?.status === 'success' }]"
         :data-execution-event-id="event.eventId"
         :aria-current="isCurrentEvent(event) ? 'step' : undefined"
       >
@@ -1138,17 +1438,17 @@ const liveStageLabel = computed(() => executionStageRows.value.find(item => item
           :aria-expanded="isRowExpandable(event) ? isRowExpanded(event) : undefined"
           @click="toggleRow(event)"
         >
-          <span class="cc-execution-mark">{{ statusMark(event) }}</span>
+          <span class="cc-execution-mark" :class="{ semantic: event.__batchChild && event.display?.status === 'success' && !eventHasPartialResult(event), partial: eventHasPartialResult(event) }"><component :is="rowLeadingIcon(event)" :size="11" /></span>
           <div class="cc-execution-main">
             <div class="cc-execution-title">
-              <strong>{{ isLivePresentation ? liveRowLabel(event) : eventTitle(event) }}</strong>
-              <code v-if="event.display?.target" :title="event.display.target">{{ event.display.target }}</code>
-              <span v-if="!isLivePresentation">{{ eventStatusLabel(event) }}</span>
+              <strong>{{ rowPrimaryLabel(event) }}</strong>
+              <code v-if="eventTarget(event)" :title="eventTarget(event)">{{ eventTarget(event) }}</code>
+              <span v-if="!isLivePresentation && rowShowsTerminalStatus(event)">{{ eventHasPartialResult(event) ? '部分结果' : eventStatusLabel(event) }}</span>
             </div>
-            <p v-if="eventBusinessSummary(event) && (!isLivePresentation || String(event?.eventType || '').startsWith('agent_'))">{{ eventBusinessSummary(event) }}</p>
+            <p v-if="eventBusinessSummary(event) && (!isLivePresentation || event.__batchChild || String(event?.eventType || '').startsWith('agent_'))">{{ eventBusinessSummary(event) }}</p>
             <small v-if="isLivePresentation ? liveRowMeta(event) : rowMeta(event)">{{ isLivePresentation ? liveRowMeta(event) : rowMeta(event) }}</small>
           </div>
-          <span v-if="isRowExpandable(event)" class="cc-execution-row-chevron">{{ isRowExpanded(event) ? '⌃' : '⌄' }}</span>
+          <span v-if="isRowExpandable(event)" class="cc-execution-row-chevron"><ChevronDown v-if="isRowExpanded(event)" :size="13" /><ChevronRight v-else :size="13" /></span>
         </button>
         <div v-if="isRowExpanded(event) && event.detail" class="cc-execution-detail">
             <template v-if="event.detail.agentDisplay">
@@ -1164,10 +1464,6 @@ const liveStageLabel = computed(() => executionStageRows.value.find(item => item
                   <dt>队列</dt><dd>第 {{ event.detail.agentDisplay.queuePosition }} 位</dd>
                 </template>
               </dl>
-              <div v-if="event.detail.agentAttemptHistory?.length">
-                <b>历史尝试</b>
-                <ul><li v-for="attempt in event.detail.agentAttemptHistory" :key="attempt.attempt">第 {{ attempt.attempt }} 次 · {{ attempt.summary || attempt.status }}</li></ul>
-              </div>
               <div v-if="legacyResult(event.detail.safeResult)">
                 <b>当前回执</b>
                 <pre>{{ safeJson(legacyResult(event.detail.safeResult)) }}</pre>
@@ -1175,33 +1471,17 @@ const liveStageLabel = computed(() => executionStageRows.value.find(item => item
             </template>
             <template v-else-if="toolDisplayFor(event)">
               <div class="cc-tool-identity">
-                <b>{{ toolDisplayFor(event).tool?.userLabel || toolDisplayFor(event).tool?.label || event.display?.title }}</b>
+                <b>{{ toolReadableLabel(event) }}</b>
                 <span v-if="toolDisplayFor(event).tool?.serverLabel">扩展服务 · {{ toolDisplayFor(event).tool.serverLabel }}</span>
               </div>
-              <div v-if="toolDisplayFor(event).sensitiveCommand" class="cc-tool-command-detail">
-                <b>脱敏命令</b>
-                <pre>{{ toolDisplayFor(event).sensitiveCommand }}</pre>
-              </div>
-              <div v-if="toolDisplayFor(event).arguments?.length">
-                <b>参数</b>
-                <dl class="cc-tool-arguments">
-                  <template v-for="argument in toolDisplayFor(event).arguments" :key="argument.label">
-                    <dt>{{ argument.label }}</dt><dd>{{ displayValue(argument.value) }}</dd>
-                  </template>
-                </dl>
-              </div>
-              <div class="cc-tool-result">
-                <b>结果</b>
-                <p>{{ toolDisplayFor(event).result?.summary || '工具执行完成' }}</p>
-                <p v-if="toolDisplayFor(event).result?.freshness === 'drifted'" class="cc-tool-freshness warning">当前内容已变化，下面展示的是重新读取的新版本；原执行结论摘要仍保留在上方。</p>
-                <p v-else-if="toolDisplayFor(event).result?.freshness === 'deleted'" class="cc-tool-freshness danger">权威来源已删除，当前详情不可读取。</p>
-                <p v-else-if="toolDisplayFor(event).result?.freshness === 'permission_revoked'" class="cc-tool-freshness danger">当前权限已撤销，无法重新读取详情。</p>
-                <p v-else-if="toolDisplayFor(event).result?.freshness === 'current'" class="cc-tool-freshness current">当前结果与权威来源一致。</p>
-                <dl v-if="toolDisplayFor(event).result?.searchExecution" class="cc-tool-arguments cc-search-execution-detail">
-                  <dt>搜索引擎</dt><dd>{{ toolDisplayFor(event).result.searchExecution.engine === 'bundled_rg' ? 'CCM 内置搜索' : toolDisplayFor(event).result.searchExecution.engine === 'system_rg' ? '系统搜索' : '兼容搜索' }}</dd>
-                  <dt>结果状态</dt><dd>{{ toolDisplayFor(event).result.searchExecution.cancelled ? '已取消，保留部分结果' : toolDisplayFor(event).result.searchExecution.timedOut ? '已超时，保留部分结果' : toolDisplayFor(event).result.searchExecution.partial ? '部分结果' : '完整结果' }}</dd>
-                </dl>
-                <div v-if="batchFileRowsFor(event).length" class="cc-batch-file-list">
+              <ToolResultDetail
+                :display="toolDisplayFor(event)"
+                :token-count="Number(event.display?.tokenCount || 0)"
+                :detailed="effectiveExecutionDensity === 'detailed' && !isLivePresentation"
+                :custom-content="!!(batchFileRowsFor(event).length || toolDisplayFor(event).result?.preview)"
+              >
+                <template #content>
+                  <div v-if="batchFileRowsFor(event).length" class="cc-batch-file-list">
                   <article v-for="file in batchFileRowsFor(event)" :key="file.path" class="cc-batch-file-item" :class="{ expanded: isBatchFileExpanded(event, file), partial: file.status === 'partial' }">
                     <button
                       type="button"
@@ -1209,13 +1489,13 @@ const liveStageLabel = computed(() => executionStageRows.value.find(item => item
                       :aria-expanded="isBatchFileExpanded(event, file)"
                       @click.stop="toggleBatchFile(event, file)"
                     >
-                      <span class="cc-batch-file-status" aria-hidden="true">{{ file.status === 'partial' ? '•' : file.status === 'unchanged' ? '↺' : '✓' }}</span>
+                      <span class="cc-batch-file-status" aria-hidden="true"><Circle v-if="file.status === 'partial'" :size="10" /><RefreshCcw v-else-if="file.status === 'unchanged'" :size="10" /><Check v-else :size="10" /></span>
                       <span class="cc-batch-file-title">
                         <span><strong>读取文件</strong> <code>{{ file.path }}</code></span>
                         <small>读取 {{ file.path }} {{ batchFileRange(file) }}<span v-if="file.totalLines"> · 共 {{ file.totalLines }} 行</span></small>
                       </span>
                       <span class="cc-batch-file-state">{{ file.status === 'partial' ? '部分读取' : file.status === 'unchanged' ? '内容未变化' : '完成' }}</span>
-                      <span class="cc-batch-file-chevron" aria-hidden="true">{{ isBatchFileExpanded(event, file) ? '⌃' : '⌄' }}</span>
+                      <span class="cc-batch-file-chevron" aria-hidden="true"><ChevronDown v-if="isBatchFileExpanded(event, file)" :size="12" /><ChevronRight v-else :size="12" /></span>
                     </button>
                     <div v-if="isBatchFileExpanded(event, file)" class="cc-batch-file-detail">
                       <div class="cc-batch-file-detail-head">
@@ -1224,30 +1504,30 @@ const liveStageLabel = computed(() => executionStageRows.value.find(item => item
                       </div>
                       <div v-if="file.lines?.length" class="cc-batch-file-lines" role="region" :aria-label="`${file.path} 已读取内容`">
                         <div v-for="line in file.lines" :key="line.line" class="cc-batch-file-line">
-                          <span>line {{ line.line }}</span><code>{{ line.text || ' ' }}</code>
+                          <span>第 {{ line.line }} 行</span><code>{{ line.text || ' ' }}</code>
                         </div>
                       </div>
                       <p v-else class="cc-batch-file-empty">{{ file.status === 'unchanged' ? '文件内容未变化，主 Agent继续使用当前上下文中的已读内容。' : '该文件本次没有可显示的文本内容。' }}</p>
                       <small v-if="file.status === 'partial'" class="cc-batch-file-pending">该文件尚未读完，可在批次底部继续读取剩余内容。</small>
                     </div>
                   </article>
-                </div>
-                <div v-else-if="toolDisplayFor(event).result?.rows?.length" class="cc-tool-result-rows">
-                  <div v-for="(row, rowIndex) in toolDisplayFor(event).result.rows" :key="rowIndex" class="cc-tool-result-row">
-                    <span v-for="([label, value], valueIndex) in rowEntries(row)" :key="`${label}-${valueIndex}`">
-                      <small v-if="label">{{ label }}</small>{{ displayValue(value) }}
-                    </span>
                   </div>
-                </div>
-                <pre v-if="toolDisplayFor(event).result?.preview">{{ toolDisplayFor(event).result.preview }}</pre>
-                <small v-if="toolDisplayFor(event).result?.continuation?.pendingCount">{{ toolDisplayFor(event).result.continuation.pendingCount }} 个文件仍有内容未读完</small>
-                <small v-else-if="toolDisplayFor(event).result?.truncated">结果已截断<span v-if="toolDisplayFor(event).result?.total"> · 共 {{ toolDisplayFor(event).result.total }} 项</span></small>
-                <button v-if="toolDisplayFor(event).result?.rehydratable" type="button" class="cc-tool-rehydrate" :disabled="detailLoading[event.eventId]" @click.prevent.stop="rehydrateDetail(event, !!toolDisplayFor(event).result?.continuation?.pendingCount)">
-                  {{ detailLoading[event.eventId] ? '正在读取…' : toolDisplayFor(event).result?.continuation?.pendingCount ? '继续读取未读完内容' : '读取当前详情' }}
-                </button>
-                <small v-if="detailNotices[event.eventId]" class="cc-tool-detail-notice" role="status" aria-live="polite">{{ detailNotices[event.eventId] }}</small>
-                <small v-if="detailErrors[event.eventId]" class="cc-tool-detail-error" role="alert">{{ detailErrors[event.eventId] }}</small>
-              </div>
+                  <pre v-if="toolDisplayFor(event).result?.preview" class="cc-tool-readable-preview">{{ toolDisplayFor(event).result.preview }}</pre>
+                </template>
+                <template #actions>
+                  <small v-if="toolDisplayFor(event).result?.continuation?.pendingCount">{{ toolDisplayFor(event).result.continuation.pendingCount }} 个文件仍有内容未读完</small>
+                  <small v-else-if="toolDisplayFor(event).result?.truncated">结果已截断<span v-if="toolDisplayFor(event).result?.total"> · 共 {{ toolDisplayFor(event).result.total }} 项</span></small>
+                  <button v-if="toolDisplayFor(event).result?.rehydratable" type="button" class="cc-tool-rehydrate" :disabled="detailLoading[event.eventId]" @click.prevent.stop="rehydrateDetail(event, !!toolDisplayFor(event).result?.continuation?.pendingCount)">
+                    {{ detailLoading[event.eventId] ? '正在读取…' : toolDisplayFor(event).result?.continuation?.pendingCount ? '继续读取未读完内容' : '读取当前详情' }}
+                  </button>
+                  <button v-if="supportsLiveTail(event)" type="button" class="cc-tool-rehydrate" :disabled="detailLoading[event.eventId]" @click.prevent.stop="loadLiveTail(event)">
+                    {{ detailLoading[event.eventId] ? '正在读取…' : '查看脱敏最近输出' }}
+                  </button>
+                  <pre v-if="liveTails[event.eventId]?.text" class="cc-tool-live-tail" aria-label="脱敏最近输出">{{ liveTails[event.eventId].text }}</pre>
+                  <small v-if="detailNotices[event.eventId]" class="cc-tool-detail-notice" role="status" aria-live="polite">{{ detailNotices[event.eventId] }}</small>
+                  <small v-if="detailErrors[event.eventId]" class="cc-tool-detail-error" role="alert">{{ detailErrors[event.eventId] }}</small>
+                </template>
+              </ToolResultDetail>
             </template>
             <template v-else>
               <div v-if="legacyToolIdentity(event).serverLabel" class="cc-tool-identity"><span>扩展服务 · {{ legacyToolIdentity(event).serverLabel }}</span></div>
@@ -1267,7 +1547,7 @@ const liveStageLabel = computed(() => executionStageRows.value.find(item => item
                   <button type="button" @click.stop="openFileChange(file, event)">
                     <span>{{ normalizedFileChange(file, event).path }}</span>
                     <small v-if="fileChangeStat(file)" :class="{ 'has-deletions': Number(file?.deletions ?? file?.diff?.deletions ?? 0) > 0 }">{{ fileChangeStat(file) }}</small>
-                    <span class="cc-file-change-open">查看 Diff ›</span>
+                    <span class="cc-file-change-open"><FileDiff :size="12" />查看 Diff <ChevronRight :size="12" /></span>
                   </button>
                 </li>
               </ul>
@@ -1302,6 +1582,24 @@ const liveStageLabel = computed(() => executionStageRows.value.find(item => item
         </div>
       </article>
       </template>
+      <section v-if="isOfficialCompletion && transcriptExpanded && attemptHistoryGroups.length" class="cc-attempt-history">
+        <button type="button" class="cc-attempt-history-head" :aria-expanded="attemptHistoryExpanded" @click="attemptHistoryExpanded = !attemptHistoryExpanded">
+          <History :size="15" aria-hidden="true" />
+          <strong>历史尝试</strong>
+          <span>{{ attemptHistoryCount }} 次</span>
+          <ChevronDown v-if="attemptHistoryExpanded" :size="14" aria-hidden="true" />
+          <ChevronRight v-else :size="14" aria-hidden="true" />
+        </button>
+        <div v-if="attemptHistoryExpanded" class="cc-attempt-history-list">
+          <article v-for="group in attemptHistoryGroups" :key="group.key">
+            <header><strong>{{ group.project }}</strong><span>{{ group.workItem }}</span></header>
+            <p v-for="attempt in group.attempts" :key="attempt.key">第 {{ attempt.attempt || '—' }} 次 · {{ attempt.summary || attempt.status || '历史结果已保留' }}</p>
+          </article>
+        </div>
+      </section>
+      <div v-if="isOfficialCompletion && transcriptExpanded && replayTarget" class="cc-execution-footer">
+        <button type="button" class="cc-execution-replay-link" @click="openReplay">在任务回放中查看 <ChevronRight :size="13" /></button>
+      </div>
     </div>
   </section>
   </div>
@@ -1309,13 +1607,12 @@ const liveStageLabel = computed(() => executionStageRows.value.find(item => item
 
 <style scoped>
 .cc-execution {
+  position: relative;
   width: 100%;
   margin: 0 0 10px;
-  border: 0;
-  border-top: 1px solid color-mix(in srgb, var(--border-color, #94a3b8) 38%, transparent);
-  border-bottom: 1px solid color-mix(in srgb, var(--border-color, #94a3b8) 24%, transparent);
-  border-radius: 0;
-  background: transparent;
+  border: 1px solid color-mix(in srgb, var(--border-color, #94a3b8) 38%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--surface, #fff) 97%, transparent);
   overflow: hidden;
 }
 .cc-execution.live { border-color: transparent; border-radius: 0; background: transparent; }
@@ -1324,6 +1621,12 @@ const liveStageLabel = computed(() => executionStageRows.value.find(item => item
 .cc-execution-anchor:empty { height: 0; }
 .cc-live-execution-status { display: flex; align-items: center; gap: 7px; margin: 0 0 9px; padding: 0 1px 8px; border-bottom: 1px solid color-mix(in srgb, var(--border-color, #94a3b8) 24%, transparent); color: var(--text-muted); font-size: 11px; line-height: 1.4; }
 .cc-live-execution-status strong { min-width: 0; overflow: hidden; color: var(--text-secondary); font-size: 11px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.cc-execution-density { margin-left: auto; flex: 0 0 auto; }
+.cc-execution-density select { height: 25px; padding: 0 21px 0 8px; border: 1px solid color-mix(in srgb, var(--border-color, #94a3b8) 40%, transparent); border-radius: 7px; color: var(--text-secondary); background: color-mix(in srgb, var(--surface, #fff) 96%, transparent); font: inherit; font-size: 10px; cursor: pointer; }
+.cc-execution-density select:focus-visible { outline: 2px solid color-mix(in srgb, var(--primary-color, #2563eb) 65%, transparent); outline-offset: 2px; }
+.cc-execution-density.completed { position: absolute; z-index: 2; top: 8px; right: 9px; }
+.cc-execution.complete .cc-execution-head { padding-right: 82px; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 .cc-progress-flow { display: grid; gap: 9px; margin: 0 0 8px; }
 .cc-progress-overview { width: 100%; display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto; align-items: center; gap: 7px; padding: 4px 1px; border: 0; color: var(--text-secondary); background: transparent; text-align: left; cursor: pointer; }
 .cc-progress-overview:hover { color: var(--text-primary); }
@@ -1355,7 +1658,7 @@ const liveStageLabel = computed(() => executionStageRows.value.find(item => item
   text-align: left;
   cursor: pointer;
 }
-.cc-execution-head:hover { background: rgba(100, 116, 139, 0.035); }
+.cc-execution-head:hover { background: rgba(100, 116, 139, 0.045); }
 .cc-execution-head:focus-visible,
 .cc-execution-row-summary:focus-visible { outline: 2px solid color-mix(in srgb, var(--primary-color, #ec4899) 72%, transparent); outline-offset: -2px; }
 .cc-execution-head strong { color: var(--text-primary); font-size: 12px; }
@@ -1365,8 +1668,9 @@ const liveStageLabel = computed(() => executionStageRows.value.find(item => item
 .cc-execution-result-mark.warning { color:#b45309; background:rgba(245,158,11,.13); }
 .cc-execution-summary { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
 .cc-execution-meta { display:flex; align-items:center; flex-wrap:wrap; gap:7px 14px; padding:0 2px 8px 50px; }
-.cc-execution-replay-link { display:block; margin:0; padding:0; border:0; background:transparent; color:var(--accent-blue); font-size:10px; font-weight:750; cursor:pointer; }
+.cc-execution-replay-link { display:inline-flex; align-items:center; gap:3px; margin:0; padding:0; border:0; background:transparent; color:var(--accent-blue); font-size:10px; font-weight:750; cursor:pointer; }
 .cc-execution-replay-link:hover { text-decoration:underline; }
+.cc-execution.query .cc-execution-head { padding-right:88px; }
 .cc-recovery-milestone { margin:0; color:var(--text-muted); font-size:10px; line-height:1.45; }
 .cc-execution-duration { color: var(--text-secondary); font-size: 10px; white-space: nowrap; }
 .cc-execution-rows { border-top: 1px solid rgba(100, 116, 139, 0.1); padding: 7px 0 4px; }
@@ -1422,13 +1726,14 @@ const liveStageLabel = computed(() => executionStageRows.value.find(item => item
 .cc-requirement-plan-side ul { display: grid; gap: 4px; margin: 0; padding-left: 14px; color: var(--text-secondary); font-size: 9px; line-height: 1.5; }
 .cc-requirement-plan-side li::marker { color: var(--primary-color, #ec4899); }
 .cc-requirement-plan-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 11px; border-top: 1px solid rgba(148, 163, 184, 0.12); color: var(--text-muted); font-size: 8px; }
-.cc-requirement-plan-foot button { padding: 2px 0; border: 0; color: var(--primary-color, #ec4899); background: transparent; font-size: 8px; cursor: pointer; }
+.cc-requirement-plan-foot button { display:inline-flex; align-items:center; gap:3px; padding: 2px 0; border: 0; color: var(--primary-color, #ec4899); background: transparent; font-size: 8px; cursor: pointer; }
 .cc-execution-stage-head { position:relative; width: calc(100% - 4px); display: grid; grid-template-columns: 20px minmax(0, 1fr) auto auto 20px; align-items: center; gap: 8px; margin:0 2px; padding: 9px 0; border: 0; color: var(--text-secondary); background: transparent; text-align: left; cursor: pointer; }
 .cc-execution-stage-head:not(:first-child) { margin-top: 0; border-top: 1px solid rgba(100, 116, 139, 0.075); }
 .cc-execution-stage-head:hover { background: rgba(100, 116, 139, 0.025); }
 .cc-execution-stage-head.active { color: var(--text-primary); background: transparent; box-shadow: none; }
 .cc-execution-stage-head:focus-visible { outline: 2px solid color-mix(in srgb, var(--primary-color, #ec4899) 72%, transparent); outline-offset: -2px; }
 .cc-execution-stage-marker { width:18px; height:18px; display:inline-flex; align-items:center; justify-content:center; border-radius:50%; color:var(--text-muted); background:rgba(100,116,139,.09); font-size:9px; font-weight:800; }
+.cc-stage-running-dot { width:6px; height:6px; border-radius:50%; background:currentColor; }
 .cc-execution-stage-head.completed .cc-execution-stage-marker { color:#15803d; background:rgba(34,197,94,.11); }
 .cc-execution-stage-head.failed .cc-execution-stage-marker { color:#dc2626; background:rgba(239,68,68,.11); }
 .cc-execution-stage-copy { min-width:0; display:grid; grid-template-columns:auto minmax(0,1fr); align-items:baseline; gap:8px; }
@@ -1441,14 +1746,18 @@ const liveStageLabel = computed(() => executionStageRows.value.find(item => item
 .cc-execution-stage-head > span:nth-last-child(2) { color: var(--text-muted); font-size: 10px; white-space: nowrap; }
 .cc-execution-stage-progress { display: -webkit-box; margin: 3px 8px 7px 31px; padding-left:12px; overflow: hidden; border-left:1px solid color-mix(in srgb,var(--border-color,#94a3b8) 28%,transparent); color: var(--text-primary); font-size: 11px; line-height: 1.6; white-space: normal; overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .cc-execution-stage-progress.current { padding-left: 7px; border-left: 2px solid color-mix(in srgb, var(--primary-color, #ec4899) 75%, transparent); background: color-mix(in srgb, var(--primary-color, #ec4899) 4%, transparent); }
-.cc-progress-batch-group { margin-left: 31px; border-left: 1px solid color-mix(in srgb, var(--border-color, #94a3b8) 28%, transparent); }
-.cc-progress-batch-group.completed { opacity: 0.72; }
+.cc-progress-batch-group { margin-left: 24px; border-left: 1px solid color-mix(in srgb, var(--border-color, #94a3b8) 22%, transparent); }
+.cc-progress-batch-group.completed { opacity: 0.84; }
 .cc-progress-batch-group.current { opacity: 1; border-left-color: color-mix(in srgb, var(--primary-color, #ec4899) 70%, transparent); background: color-mix(in srgb, var(--primary-color, #ec4899) 3%, transparent); }
 .cc-progress-batch-group .cc-execution-stage-progress { margin-left: 13px; }
-.cc-progress-batch-head { display: flex; align-items: center; gap: 7px; margin: 0 8px 5px 12px; padding: 4px 1px; border: 0; border-radius: 4px; color: var(--text-secondary); background: transparent; cursor: pointer; }
+.cc-progress-batch-head { width:calc(100% - 12px); display:grid; grid-template-columns:18px minmax(0,1fr) auto 18px; align-items:center; gap:7px; margin: 0 0 4px 12px; padding: 5px 4px; border: 0; border-radius: 5px; color: var(--text-secondary); background: transparent; text-align:left; cursor: pointer; }
 .cc-progress-batch-head:hover { background:rgba(100,116,139,.035); }
-.cc-progress-batch-head strong { font-size: 10px; }
-.cc-progress-batch-head small { color: var(--text-muted); font-size: 9px; }
+.cc-progress-batch-head strong { min-width:0; overflow:hidden; color:var(--text-primary); font-size:11px; font-weight:600; text-overflow:ellipsis; white-space:nowrap; }
+.cc-progress-batch-head small { color: var(--text-muted); font-size: 9px; white-space:nowrap; }
+.cc-progress-batch-status,.cc-progress-batch-chevron { display:inline-flex; align-items:center; justify-content:center; color:#15803d; }
+.cc-progress-batch-status.attention { color:#b45309; }
+.cc-progress-batch-status.failed { color:#dc2626; }
+.cc-progress-batch-chevron { color:var(--text-muted); }
 .cc-execution-row { padding: 0; }
 .cc-execution-row,
 .cc-progress-batch-group,
@@ -1459,8 +1768,8 @@ const liveStageLabel = computed(() => executionStageRows.value.find(item => item
   contain-intrinsic-size: auto 52px;
 }
 .cc-execution-row.stage-child { margin-left: 31px; border-left: 1px solid color-mix(in srgb, var(--border-color, #94a3b8) 28%, transparent); }
-.cc-execution-row.batch-child { margin-left: 48px; }
-.cc-execution-row.completed { opacity: 0.7; }
+.cc-execution-row.batch-child { margin-left: 36px; }
+.cc-execution-row.completed { opacity: 0.82; }
 .cc-execution-row.completed:hover,
 .cc-execution-row.current { opacity: 1; }
 .cc-execution-row.current { background: color-mix(in srgb, var(--primary-color, #ec4899) 7%, transparent); box-shadow: inset 2px 0 color-mix(in srgb, var(--primary-color, #ec4899) 80%, transparent); }
@@ -1474,6 +1783,10 @@ const liveStageLabel = computed(() => executionStageRows.value.find(item => item
 .cc-execution-row.success .cc-execution-mark { color: #15803d; background: rgba(34, 197, 94, 0.12); }
 .cc-execution-row.failed .cc-execution-mark { color: #dc2626; background: rgba(239, 68, 68, 0.12); }
 .cc-execution-row.waiting .cc-execution-mark { color: #b45309; background: rgba(245, 158, 11, 0.13); }
+.cc-execution-row.success .cc-execution-mark.semantic { color:var(--text-muted); background:transparent; }
+.cc-execution-row .cc-execution-mark.partial { color:#b45309; background:rgba(245,158,11,.12); }
+.cc-execution-row.batch-child .cc-execution-row-summary { min-height:32px; padding-top:5px; padding-bottom:5px; }
+.cc-execution-row.batch-child .cc-execution-title strong { font-weight:550; }
 .cc-execution-title { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; min-width: 0; }
 .cc-execution-title strong { color: var(--text-primary); font-size: 12px; }
 .cc-execution-title code { max-width: min(520px, 65vw); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); font-size: 11px; }
@@ -1492,7 +1805,7 @@ const liveStageLabel = computed(() => executionStageRows.value.find(item => item
 .cc-file-changes button > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 10px/1.4 Consolas, monospace; }
 .cc-file-changes small { color: #059669; font: 10px/1.4 Consolas, monospace; white-space: nowrap; }
 .cc-file-changes small.has-deletions { color: #b45309; }
-.cc-file-change-open { color: var(--primary-color, #ec4899); font-size: 10px; white-space: nowrap; }
+.cc-file-change-open { display:inline-flex; align-items:center; gap:3px; color: var(--primary-color, #ec4899); font-size: 10px; white-space: nowrap; }
 .cc-tool-identity { display: flex; align-items: center; gap: 8px; }
 .cc-tool-identity b { margin: 0; color: var(--text-primary); font-size: 12px; }
 .cc-tool-identity span { color: var(--text-muted); font-size: 10px; }
@@ -1534,6 +1847,7 @@ const liveStageLabel = computed(() => executionStageRows.value.find(item => item
 .cc-tool-rehydrate { margin-top: 6px; padding: 3px 8px; border: 1px solid rgba(100, 116, 139, 0.25); border-radius: 5px; color: var(--text-secondary); background: transparent; font-size: 10px; cursor: pointer; }
 .cc-tool-rehydrate:hover:not(:disabled) { background: rgba(100, 116, 139, 0.08); }
 .cc-tool-rehydrate:disabled { opacity: 0.55; cursor: wait; }
+.cc-tool-live-tail { max-height: 180px; margin: 7px 0 0; padding: 8px 9px; overflow: auto; border: 1px solid color-mix(in srgb, var(--border-color, #94a3b8) 45%, transparent); border-radius: 6px; color: var(--text-secondary); background: color-mix(in srgb, var(--surface, #fff) 92%, #0f172a 8%); font: 10px/1.55 var(--font-mono, monospace); white-space: pre-wrap; word-break: break-word; }
 .cc-tool-detail-notice,
 .cc-tool-detail-error { display: block; margin-top: 6px; font-size: 10px; line-height: 1.45; }
 .cc-tool-detail-notice { color: #2563eb; }
@@ -1546,13 +1860,15 @@ const liveStageLabel = computed(() => executionStageRows.value.find(item => item
 .cc-execution-actions button { padding: 4px 8px; border: 1px solid rgba(148, 163, 184, 0.24); border-radius: 6px; color: var(--text-secondary); background: transparent; font-size: 10px; cursor: pointer; }
 .cc-execution-actions button:hover:not(:disabled) { border-color: color-mix(in srgb, var(--primary-color, #ec4899) 55%, transparent); color: var(--text-primary); background: color-mix(in srgb, var(--primary-color, #ec4899) 7%, transparent); }
 .cc-execution-actions button:disabled { opacity: 0.45; cursor: not-allowed; }
-.cc-completion-files { width: 100%; margin: 5px 0 9px; overflow: hidden; border: 1px solid color-mix(in srgb, var(--border-color, #94a3b8) 42%, transparent); border-radius: 9px; background: color-mix(in srgb, var(--surface-subtle, #f8fafc) 88%, transparent); }
+.cc-completion-files { width: 100%; margin: 5px 0 9px; overflow: hidden; border: 1px solid color-mix(in srgb, var(--border-color, #94a3b8) 38%, transparent); border-radius: 9px; background: color-mix(in srgb, var(--surface, #fff) 97%, transparent); }
 .cc-completion-files.warning { border-color: color-mix(in srgb, #d97706 42%, transparent); }
-.cc-completion-files-head { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 10px 12px; border-bottom: 1px solid rgba(100, 116, 139, 0.12); }
-.cc-completion-files-icon { width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center; border-radius: 7px; color: var(--text-secondary); background: rgba(100, 116, 139, 0.09); font-size: 16px; }
-.cc-completion-files-head > div { min-width: 0; display: grid; gap: 2px; }
-.cc-completion-files-head strong { color: var(--text-primary); font-size: 12px; }
-.cc-completion-files-head small { display: flex; gap: 6px; font-size: 10px; }
+.cc-completion-files-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; min-height: 42px; padding: 0 10px; }
+.cc-completion-files-toggle { min-width:0; display:grid; grid-template-columns:24px minmax(0,1fr) auto; align-items:center; gap:8px; padding:7px 0; border:0; color:inherit; background:transparent; text-align:left; cursor:pointer; }
+.cc-completion-files-toggle:hover .cc-completion-files-copy strong { color:var(--primary-color,#2563eb); }
+.cc-completion-files-icon { width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; border-radius: 6px; color: var(--text-secondary); background: rgba(100, 116, 139, 0.08); }
+.cc-completion-files-copy { min-width: 0; display: flex; align-items:baseline; gap:8px; }
+.cc-completion-files-copy strong { color: var(--text-primary); font-size: 12px; }
+.cc-completion-files-copy small { display: flex; gap: 6px; font-size: 10px; }
 .additions { color: #16a34a; }
 .deletions { color: #dc2626; }
 .cc-completion-review { padding: 5px 9px; border: 1px solid color-mix(in srgb, var(--border-color, #94a3b8) 55%, transparent); border-radius: 6px; color: var(--text-primary); background: transparent; font-size: 10px; cursor: pointer; }
@@ -1562,6 +1878,7 @@ const liveStageLabel = computed(() => executionStageRows.value.find(item => item
 .cc-completion-files-more:focus-visible,
 .cc-completion-files-all:focus-visible { outline: 2px solid color-mix(in srgb, var(--primary-color, #ec4899) 72%, transparent); outline-offset: -2px; }
 .cc-completion-file-list { display: grid; }
+.cc-completion-file-list { border-top:1px solid rgba(100,116,139,.1); }
 .cc-completion-file-row { width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 7px 12px; border: 0; border-bottom: 1px solid rgba(100, 116, 139, 0.08); color: var(--text-secondary); background: transparent; text-align: left; cursor: pointer; }
 .cc-completion-file-row:hover { background: rgba(100, 116, 139, 0.055); }
 .cc-completion-file-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
@@ -1571,6 +1888,18 @@ const liveStageLabel = computed(() => executionStageRows.value.find(item => item
 .cc-completion-files-more,
 .cc-completion-files-all { padding: 8px 12px; border: 0; color: var(--text-muted); background: transparent; font-size: 10px; cursor: pointer; text-align: left; }
 .cc-completion-files-all { float: right; }
+.cc-attempt-history { margin:4px 2px 0; border-top:1px solid rgba(100,116,139,.09); }
+.cc-attempt-history-head { width:100%; display:grid; grid-template-columns:20px auto minmax(0,1fr) 20px; align-items:center; gap:7px; min-height:38px; padding:6px 0; border:0; color:var(--text-secondary); background:transparent; text-align:left; cursor:pointer; }
+.cc-attempt-history-head:hover { background:rgba(100,116,139,.035); }
+.cc-attempt-history-head strong { color:var(--text-primary); font-size:11px; }
+.cc-attempt-history-head span { color:var(--text-muted); font-size:10px; }
+.cc-attempt-history-list { display:grid; gap:7px; padding:2px 8px 9px 27px; }
+.cc-attempt-history-list article { padding-left:9px; border-left:1px solid color-mix(in srgb,var(--border-color,#94a3b8) 32%,transparent); }
+.cc-attempt-history-list header { display:flex; align-items:baseline; gap:7px; }
+.cc-attempt-history-list header strong { color:var(--text-primary); font-size:10px; }
+.cc-attempt-history-list header span,.cc-attempt-history-list p { color:var(--text-muted); font-size:9px; }
+.cc-attempt-history-list p { margin:3px 0 0; line-height:1.45; }
+.cc-execution-footer { display:flex; padding:9px 3px 4px 30px; border-top:1px solid rgba(100,116,139,.09); }
 
 /* Live projection: a compact construction view backed by the same durable ledger. */
 .cc-execution.live { margin-bottom: 8px; overflow: visible; }
@@ -1587,15 +1916,15 @@ const liveStageLabel = computed(() => executionStageRows.value.find(item => item
 .cc-execution.live .cc-execution-stage-progress { margin: 7px 2px 8px 21px; padding: 0; border-left: 0; background: transparent; font-size: 12px; line-height: 1.55; }
 .cc-execution.live .cc-execution-stage-progress.current { padding-left: 0; border-left: 0; background: transparent; }
 .cc-execution.live .cc-progress-batch-group { margin: 0 0 3px 20px; border-left: 0; background: transparent; }
-.cc-execution.live .cc-progress-batch-group.completed { opacity: 0.72; }
+.cc-execution.live .cc-progress-batch-group.completed { opacity: 0.84; }
 .cc-execution.live .cc-progress-batch-group.current { border-left: 0; background: transparent; }
 .cc-execution.live .cc-progress-batch-group .cc-execution-stage-progress { margin-left: 0; }
-.cc-execution.live .cc-progress-batch-head { width: calc(100% - 2px); display: grid; grid-template-columns: 13px minmax(0, 1fr) auto; gap: 7px; margin: 0; padding: 4px 1px; border-radius: 4px; background: transparent; text-align: left; }
+.cc-execution.live .cc-progress-batch-head { width: calc(100% - 2px); display: grid; grid-template-columns: 15px minmax(0, 1fr) auto 15px; gap: 7px; margin: 0; padding: 4px 1px; border-radius: 4px; background: transparent; text-align: left; }
 .cc-execution.live .cc-progress-batch-head:hover { background: rgba(100, 116, 139, 0.055); }
 .cc-execution.live .cc-progress-batch-head strong { overflow: hidden; color: var(--text-secondary); font-size: 10px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
 .cc-execution.live .cc-progress-batch-head small { font-size: 9px; white-space: nowrap; }
 .cc-execution.live .cc-execution-row.stage-child { margin-left: 20px; border-left: 0; }
-.cc-execution.live .cc-execution-row.batch-child { margin-left: 20px; }
+.cc-execution.live .cc-execution-row.batch-child { margin-left: 26px; }
 .cc-execution.live .cc-execution-row.agent-child { margin-left: 38px; }
 .cc-execution.live .cc-execution-row + .cc-execution-row { border-top: 0; }
 .cc-execution.live .cc-execution-row-summary { grid-template-columns: 18px minmax(0, 1fr) auto; align-items: center; min-height: 30px; gap: 6px; padding: 4px 1px; border-radius: 4px; }
@@ -1603,7 +1932,7 @@ const liveStageLabel = computed(() => executionStageRows.value.find(item => item
 .cc-execution.live .cc-execution-mark { width: 16px; height: 16px; border: 1px solid color-mix(in srgb, var(--border-color, #94a3b8) 45%, transparent); border-radius: 4px; color: var(--text-muted); background: transparent; font-size: 9px; }
 .cc-execution.live .cc-execution-row.current .cc-execution-mark { color: var(--primary-color, #2563eb); border-color: color-mix(in srgb, var(--primary-color, #2563eb) 45%, transparent); animation: cc-live-pulse 1.35s ease-in-out infinite; }
 .cc-execution.live .cc-execution-row.current { background: transparent; box-shadow: none; }
-.cc-execution.live .cc-execution-row.completed { opacity: 0.64; }
+.cc-execution.live .cc-execution-row.completed { opacity: 0.78; }
 .cc-execution.live .cc-execution-row.completed:hover { opacity: 1; }
 .cc-execution.live .cc-execution-title { gap: 6px; flex-wrap: nowrap; }
 .cc-execution.live .cc-execution-title strong { min-width: 0; overflow: hidden; color: var(--text-secondary); font-size: 11px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
@@ -1668,9 +1997,9 @@ const liveStageLabel = computed(() => executionStageRows.value.find(item => item
   .cc-execution.live .cc-execution-stage-head { grid-template-columns: 13px auto minmax(0, 1fr); }
   .cc-execution.live .cc-execution-stage-head > span:last-child { grid-column: 2 / -1; margin-left: 0; }
   .cc-execution.live .cc-execution-row.stage-child,
-  .cc-execution.live .cc-execution-row.batch-child,
   .cc-execution.live .cc-progress-batch-group,
   .cc-execution.live .cc-requirement-plan { margin-left: 14px; }
+  .cc-execution.live .cc-execution-row.batch-child { margin-left: 22px; }
   .cc-execution.live .cc-execution-row.agent-child { margin-left: 28px; }
   .cc-execution.live .cc-execution-title code { max-width: 34%; }
   .cc-execution.live .cc-execution-detail { margin-left: 0; }

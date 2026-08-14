@@ -5,6 +5,7 @@ import * as path from "path";
 import { spawn, spawnSync, type ChildProcess } from "child_process";
 import type { InternalMcpTaskContext } from "./internal-mcp-runtime";
 import { appendInternalMcpTaskJournal } from "./internal-mcp-task-store";
+import { createCommandLiveProgress } from "../system/command-live-progress";
 
 type CommandStatus = "running" | "completed" | "failed" | "cancelled" | "timed_out" | "needs_recheck";
 
@@ -30,6 +31,7 @@ type CommandRun = {
   child?: ChildProcess;
   timeout?: NodeJS.Timeout;
   context?: InternalMcpTaskContext;
+  liveProgress?: ReturnType<typeof createCommandLiveProgress>;
 };
 
 const ROOT = path.resolve(process.env.CCM_TASK_COMMAND_RUN_DIR || path.join(os.homedir(), ".cc-connect", "private", "task-command-runs"));
@@ -165,6 +167,7 @@ function finish(run: CommandRun, status: CommandStatus, code: number | null) {
     run.outputChecksum = checksum(bytes);
   } catch {}
   persist(run);
+  run.liveProgress?.finish(status);
   if (run.context) {
     try {
       appendInternalMcpTaskJournal(run.context, "progress", {
@@ -214,6 +217,20 @@ export async function runTaskBoundCommand(context: InternalMcpTaskContext, args:
     project: String(context.project || ""), cwd, description, commandChecksum: checksum(command), pid: Number(child.pid || 0),
     status: "running", startedAt: new Date().toISOString(), outputFile, totalOutputBytes: 0, child, context,
   };
+  const exactSessionId = String(context.groupSessionId || context.projectSessionId || "");
+  if (exactSessionId) {
+    run.liveProgress = createCommandLiveProgress({
+      commandRunId: id,
+      taskId: taskIdentity(context),
+      scope: context.groupId ? "group" : "project",
+      scopeId: String(context.groupId || context.project || ""),
+      exactSessionId,
+      generation: run.generation,
+      attempt: run.attempt,
+      anchorMessageId: context.anchorMessageId,
+      description,
+    });
+  }
   runs.set(id, run);
   persist(run);
   try {
@@ -230,8 +247,8 @@ export async function runTaskBoundCommand(context: InternalMcpTaskContext, args:
     output.write(value);
     written += value.length;
   };
-  child.stdout?.on("data", (chunk: Buffer) => write("", chunk));
-  child.stderr?.on("data", (chunk: Buffer) => write("[stderr] ", chunk));
+  child.stdout?.on("data", (chunk: Buffer) => { write("", chunk); run.liveProgress?.observe(chunk); });
+  child.stderr?.on("data", (chunk: Buffer) => { write("[stderr] ", chunk); run.liveProgress?.observe(chunk); });
   child.on("error", error => { write("[error] ", Buffer.from(error.message)); output.end(); finish(run, "failed", null); });
   child.on("close", code => { output.end(); finish(run, code === 0 ? "completed" : "failed", code); });
   run.timeout = setTimeout(() => { stopTree(run); finish(run, "timed_out", null); }, timeoutMs);

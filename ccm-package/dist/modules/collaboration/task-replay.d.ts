@@ -1,5 +1,6 @@
 import { type ResolvedTestAgentArtifact } from "../../test-agent/artifact-retention";
 import { type TaskReplayStatus } from "./task-replay-shared";
+import type { ToolDisplayDetailV1 } from "../../system/tool-display-projection";
 export type TaskReplayStage = "intake" | "planning" | "dispatch" | "execution" | "change" | "test" | "rework" | "review" | "completion" | "system";
 export type { TaskReplayStatus } from "./task-replay-shared";
 export interface TaskReplayEvent {
@@ -21,6 +22,7 @@ export interface TaskReplayEvent {
     project: string;
     source: string;
     evidence_ids: string[];
+    tool_display?: ToolDisplayDetailV1;
     replay_link?: {
         schema: "ccm-task-event-link-v1";
         taskId: string;

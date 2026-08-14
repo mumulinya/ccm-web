@@ -12,6 +12,9 @@ import { sendJson } from "../core/utils";
 import { loadOrchestratorConfig } from "../modules/collaboration/group-orchestrator-config";
 import { projectUnifiedAgentTurnStates } from "./unified-agent-turn-state";
 import { getConfigs } from "../core/db";
+import { hasResourceAccess, hasTaskResourceAccess } from "../modules/system/access-policy";
+import { loadTasks } from "../core/db";
+import { getCommandLiveTail } from "./command-live-progress";
 
 function identity(query: any) {
   return {
@@ -113,7 +116,7 @@ function rehydrateFailureFreshness(error: any) {
 export function handleUserVisibleAgentEventsApi(pathname: string, req: IncomingMessage, res: ServerResponse, parsed: any) {
   const detailMatch = pathname.match(/^\/api\/agent-execution\/events\/([^/]+)\/detail$/);
   if (detailMatch && req.method === "POST") {
-    res.setHeader("Cache-Control", "no-store");
+    res.setHeader("Cache-Control", "private, no-store");
     let body = "";
     req.on("data", chunk => {
       body += chunk;
@@ -125,6 +128,27 @@ export function handleUserVisibleAgentEventsApi(pathname: string, req: IncomingM
         const event = getUserVisibleAgentEvent(filter, decodeURIComponent(detailMatch[1]));
         if (!event) return sendJson(res, { success: false, error: "工具事件不存在或不属于当前精确会话" }, 404);
         const options = body ? JSON.parse(body) : {};
+        if (options?.includeLiveTail === true) {
+          const principal = (req as any).ccmAuth;
+          const task = event.taskId ? loadTasks().find((item: any) => String(item?.id || "") === String(event.taskId)) : null;
+          const canManage = principal?.role === "admin"
+            || (task && hasTaskResourceAccess(task, principal, "manage"))
+            || (event.scope !== "global" && hasResourceAccess(String(principal?.userId || ""), principal?.role, event.scope, event.scopeId, "manage"));
+          if (!canManage) return sendJson(res, { success: false, error: "只有资源管理者可以查看脱敏最近输出" }, 403);
+          const findRunId = (value: any, depth = 0): string => {
+            if (!value || depth > 5) return "";
+            if (typeof value !== "object") return "";
+            if (value.command_run_id || value.commandRunId) return String(value.command_run_id || value.commandRunId);
+            for (const child of Object.values(value)) {
+              const found = findRunId(child, depth + 1);
+              if (found) return found;
+            }
+            return "";
+          };
+          const commandRunId = findRunId(event.detail?.safeResult) || findRunId(event.detail?.toolDisplay?.result);
+          const liveTail = commandRunId ? getCommandLiveTail(commandRunId) : null;
+          return sendJson(res, { success: true, schema: "ccm-tool-detail-response-v1", toolDisplay: event.detail?.toolDisplay || null, liveTail, contentStored: false });
+        }
         const toolDisplay = await rehydrateReadonlyToolDetail(event, options);
         sendJson(res, { success: true, schema: "ccm-tool-detail-response-v1", toolDisplay, contentStored: false });
       } catch (error: any) {
@@ -172,8 +196,10 @@ export function handleUserVisibleAgentEventsApi(pathname: string, req: IncomingM
     const unsubscribe = subscribeUserVisibleAgentEvents(event => {
       if (!matches(event, filter)) return;
       if (!replayReady) { queued.push(event); return; }
-      if (written.has(event.eventId)) return;
-      written.add(event.eventId);
+      // Persisted events are immutable. Live-only tool progress deliberately
+      // reuses a stable event id so the client can update one row in place.
+      if (event.sequence > 0 && written.has(event.eventId)) return;
+      if (event.sequence > 0) written.add(event.eventId);
       try { writeEvent(res, event); } catch { unsubscribe(); }
     });
     let replayCursor = cursor;
@@ -189,8 +215,8 @@ export function handleUserVisibleAgentEventsApi(pathname: string, req: IncomingM
     }
     replayReady = true;
     for (const event of queued) {
-      if (written.has(event.eventId)) continue;
-      written.add(event.eventId);
+      if (event.sequence > 0 && written.has(event.eventId)) continue;
+      if (event.sequence > 0) written.add(event.eventId);
       writeEvent(res, event);
     }
     const heartbeat = setInterval(() => {

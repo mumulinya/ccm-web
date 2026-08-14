@@ -517,6 +517,7 @@ function publicGlobalAgentRunSummary(run) {
         pending_tool: run.pending_tool
             ? { name: run.pending_tool.name, risk: run.pending_tool.risk, signature: run.pending_tool.signature }
             : null,
+        pause_control: run.pause_control || null,
     };
 }
 function publicGlobalAgentRun(run, includeObservations = false) {
@@ -541,6 +542,7 @@ function publicGlobalAgentRun(run, includeObservations = false) {
         source: run.source,
         status: run.status,
         phase: run.phase,
+        pause_control: run.pause_control || null,
         presentation: run.presentation || null,
         explicit_write_authorization: run.explicit_write_authorization,
         turn_id: run.turn_id || "",

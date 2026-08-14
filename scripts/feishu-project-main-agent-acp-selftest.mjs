@@ -35,6 +35,7 @@ const waitFor = (messages, predicate, timeoutMs = 5000) => new Promise((resolve,
 
 const port = await freePort()
 const calls = []
+let sendStreamCount = 0
 const server = http.createServer(async (req, res) => {
   let body = ''
   for await (const chunk of req) body += chunk
@@ -51,8 +52,11 @@ const server = http.createServer(async (req, res) => {
     return
   }
   if (req.url === '/api/send-stream') {
+    sendStreamCount += 1
     res.writeHead(200, { 'Content-Type': 'text/event-stream' })
-    res.end('data: {"type":"status","text":"项目主 Agent 正在回复"}\n\ndata: {"type":"chunk","text":"项目会话回复正常"}\n\ndata: {"type":"done","main_agent":"project"}\n\n')
+    res.end(sendStreamCount === 1
+      ? 'data: {"type":"status","text":"项目主 Agent 正在回复"}\n\ndata: {"type":"response_delta","delta":"项目会话回复正常"}\n\ndata: {"type":"response_completed","final":true}\n\ndata: {"type":"done","main_agent":"project","final_text":"项目会话回复正常"}\n\n'
+      : 'data: {"type":"status","text":"项目主 Agent 正在回复"}\n\ndata: {"type":"done","main_agent":"project","final_text":"项目会话回复正常"}\n\n')
     return
   }
   if (req.url === '/api/projects/session-runtime-event') {
@@ -124,6 +128,20 @@ try {
   assert.equal(secondTurnMessages[0]?.params?.update?.content?.text, '项目会话回复正常')
   assert.equal(secondTurnMessages[1]?.id, 4)
   assert.ok(!secondTurnMessages.some(item => /空响应/.test(item.params?.update?.content?.text || '')))
+  send({
+    jsonrpc: '2.0', id: 5, method: 'session/prompt',
+    params: {
+      sessionId: created.result.sessionId,
+      prompt: [{ type: 'text', text: '请总结附件\n(Files saved locally, please read them: C:\\demo\\.cc-connect\\attachments\\需求.pdf)\n(Image files saved locally: C:\\demo\\.cc-connect\\attachments\\页面.png)' }],
+    },
+  })
+  await waitFor(messages, item => item.id === 5 && item.result?.stopReason === 'end_turn')
+  const attachmentCall = calls.filter(call => call.url === '/api/send-stream').at(-1)
+  assert.equal(attachmentCall?.data?.message, '请总结附件')
+  assert.deepEqual(attachmentCall?.data?.cc_connect_attachment_refs, [
+    { kind: 'image', path: 'C:\\demo\\.cc-connect\\attachments\\页面.png' },
+    { kind: 'file', path: 'C:\\demo\\.cc-connect\\attachments\\需求.pdf' },
+  ])
   const projectSource = fs.readFileSync(path.join(root, 'backend', 'modules', 'projects', 'projects.ts'), 'utf8')
   assert.match(projectSource, /buildProjectFeishuAcpRuntimeConfig/)
   assert.match(projectSource, /--project=\$\{projectName\}/)
@@ -146,6 +164,9 @@ try {
       project_channel_log_is_append_only: true,
       project_session_runtime_events_cover_inbound_and_reply: true,
       consecutive_turns_have_visible_terminal_replies: true,
+      native_response_delta_supported: true,
+      done_final_text_fallback_supported: true,
+      cc_connect_attachment_paths_are_stripped_and_forwarded: true,
     },
     paid_provider_calls: 0,
   }, null, 2))

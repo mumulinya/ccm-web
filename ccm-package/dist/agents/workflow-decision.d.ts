@@ -13,6 +13,7 @@ export interface WorkflowDecision {
     impactScope: string[];
     planSteps: string[];
     clarificationQuestions: string[];
+    structuredClarificationQuestions: any[];
     selectedSkills: string[];
     intentKind: "conversation" | "question" | "status" | "analysis" | "execution" | "management" | "continuation";
     requiresCodeChanges: boolean;
@@ -31,6 +32,7 @@ export interface WorkflowDecision {
 }
 export declare const WORKFLOW_DECISION_GUIDANCE: string;
 export declare function normalizeWorkflowDecision(value: any, source?: WorkflowDecision["source"]): WorkflowDecision;
+export declare function isDevelopmentTaskWorkflowDecision(value: any): boolean;
 export declare function explicitWorkflowDecision(mode: WorkflowDecisionMode, reason: string, overrides?: Partial<WorkflowDecision>): WorkflowDecision;
 export declare function decideWorkflowWithModel(input: {
     message: string;

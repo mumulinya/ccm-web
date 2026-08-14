@@ -20,6 +20,8 @@ const normalizeStepStatus = value => {
   if (['completed', 'done', 'success', 'succeeded', 'accepted'].includes(status)) return 'completed'
   if (['rework', 'reworking', 'revision'].includes(status)) return 'rework'
   if (['running', 'in_progress', 'executing', 'awaiting_review', 'reviewing'].includes(status)) return 'running'
+  if (['waiting_dependency', 'dependency_wait', 'waiting_for_dependency'].includes(status)) return 'waiting_dependency'
+  if (['waiting_permission', 'permission_required'].includes(status)) return 'waiting_permission'
   if (['blocked', 'failed', 'rejected', 'needs_confirmation'].includes(status)) return 'blocked'
   if (['skipped', 'cancelled', 'canceled'].includes(status)) return 'skipped'
   return 'pending'
@@ -42,7 +44,11 @@ const projectLinkedStepStatus = (step, rows, maxAttempt) => {
   const displayStatus = String(latest?.display?.status || '').toLowerCase()
   const attempt = Math.max(maxAttempt, eventAttempt(latest))
   if (displayStatus === 'failed' || type.endsWith('_failed')) return 'blocked'
-  if (displayStatus === 'waiting' || displayStatus === 'blocked') return 'blocked'
+  if (displayStatus === 'blocked') return 'blocked'
+  if (displayStatus === 'waiting') {
+    const reason = String(latest?.display?.summary || latest?.detail?.waitingReason || latest?.detail?.waiting_reason || '').toLowerCase()
+    return /permission|授权|权限/.test(reason) ? 'waiting_permission' : 'waiting_dependency'
+  }
   if (displayStatus === 'success' && (type === 'agent_completed' || type === 'verification_completed')) return 'completed'
   if (['agent_started', 'agent_progress', 'tool_started', 'tool_progress', 'verification_started'].includes(type)
     || displayStatus === 'running') return attempt > 1 ? 'rework' : 'running'
@@ -125,6 +131,7 @@ export function projectActiveTaskPlans(events, options = {}) {
     const terminalResult = latestBySequence(runRows.filter(event => event?.eventType === 'result'))
     const latestRunEvent = latestBySequence(runRows)
     const latestInterruption = latestBySequence(runRows.filter(isInterruption))
+    const latestPause = latestBySequence(runRows.filter(event => event?.detail?.pauseMilestone?.kind))
     const latestResumedActivity = latestBySequence(runRows.filter(event => (
       ['assistant_progress', 'tool_started', 'tool_progress', 'agent_started', 'agent_progress'].includes(String(event?.eventType || ''))
       && ['running', 'waiting'].includes(String(event?.display?.status || ''))
@@ -139,8 +146,11 @@ export function projectActiveTaskPlans(events, options = {}) {
     const steps = rawSteps.map(step => {
       const projected = {
         id: String(step?.id || ''),
+        workItemId: String(step?.workItemId || step?.work_item_id || step?.id || ''),
         title: String(step?.title || '').trim(),
         project: String(step?.project || '').trim(),
+        dependsOn: Array.isArray(step?.dependsOn || step?.depends_on) ? (step.dependsOn || step.depends_on).map(value => String(value || '')).filter(Boolean) : [],
+        outcome: String(step?.outcome || '').trim(),
         status: normalizeStepStatus(step?.status),
       }
       projected.status = successful
@@ -149,11 +159,17 @@ export function projectActiveTaskPlans(events, options = {}) {
       if (projected.status === 'running' && maxAttempt > 1) projected.status = 'rework'
       return projected
     }).filter(step => step.id && step.title)
-    const current = steps.find(step => ['running', 'rework', 'blocked'].includes(step.status))
+    const current = steps.find(step => ['running', 'rework', 'blocked', 'waiting_dependency', 'waiting_permission'].includes(step.status))
       || steps.find(step => step.status === 'pending')
       || steps.at(-1)
+    const pauseKind = String(latestPause?.detail?.pauseMilestone?.kind || '')
+    const pauseIsCurrent = !!latestPause && eventSequence(latestPause) >= eventSequence(latestResumedActivity)
     const status = successful
       ? 'completed'
+      : pauseIsCurrent && pauseKind === 'paused'
+        ? 'paused'
+        : pauseIsCurrent && pauseKind === 'requested'
+          ? 'pausing'
       : interrupted
         ? 'interrupted'
         : plan.status === 'blocked' || failed || steps.some(step => step.status === 'blocked')
@@ -196,7 +212,7 @@ export function projectActiveTaskPlans(events, options = {}) {
 
   const executing = projectedPlans.filter(plan => plan.status === 'executing')
   const holding = projectedPlans
-    .filter(plan => ['blocked', 'interrupted', 'ready'].includes(plan.status))
+    .filter(plan => ['blocked', 'interrupted', 'paused', 'pausing', 'ready'].includes(plan.status))
     .sort((left, right) => left.createdAt - right.createdAt || left.updatedAt - right.updatedAt)[0]
   const executingByPriority = [...executing].sort((left, right) => (
       Number(right.executionActivityAt > 0) - Number(left.executionActivityAt > 0)

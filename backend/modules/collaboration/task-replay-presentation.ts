@@ -404,8 +404,35 @@ function buildIssues(input: TaskReplayPresentationInput) {
 
 function buildRecoveryJourney(input: TaskReplayPresentationInput) {
   return input.tasks.flatMap(task => {
+    const rows: any[] = [];
+    const pause = task?.pause_control?.schema === "ccm-task-pause-control-v1"
+      ? task.pause_control
+      : task?.last_pause_control?.schema === "ccm-task-pause-control-v1" ? task.last_pause_control : null;
+    if (pause) {
+      const pausedAt = iso(pause.pausedAt);
+      const recoveredAt = iso(pause.resumedAt || task.resumed_at);
+      rows.push({
+        kind: "pause",
+        taskId: String(task.id || pause.taskId || ""),
+        reasonCode: "user_pause",
+        reasonLabel: "任务已安全暂停",
+        interruptedAt: iso(pause.requestedAt),
+        pausedAt,
+        resumePhase: safeText(pause.checkpoint?.phase, 120),
+        completedWorkItemCount: Math.max(0, Number(pause.checkpoint?.completedWorkItemIds?.length || 0)),
+        suspendedSessionCount: Math.max(0, Number(pause.checkpoint?.suspendedSessionCount || 0)),
+        pauseDurationMs: pausedAt && recoveredAt ? Math.max(0, timeMs(recoveredAt) - timeMs(pausedAt)) : 0,
+        mode: "safe_pause",
+        state: String(pause.state || "paused"),
+        attempt: Math.max(0, Number(pause.attempt || 0)),
+        maxAttempts: Math.max(1, Number(pause.attempt || 0) + 1),
+        nextRetryAt: "",
+        recoveredAt,
+        result: recoveredAt ? "resumed" : pause.state === "blocked" ? "needs_user" : "paused",
+      });
+    }
     const receipt = task?.interruption_receipt;
-    if (receipt?.schema !== "ccm-task-interruption-receipt-v1") return [];
+    if (receipt?.schema !== "ccm-task-interruption-receipt-v1") return rows;
     const checkpoint = receipt.resume_checkpoint || task.resume_checkpoint || {};
     const recovery = task.recovery || receipt.recovery || {};
     const reasonLabels: Record<string, string> = {
@@ -416,7 +443,8 @@ function buildRecoveryJourney(input: TaskReplayPresentationInput) {
       service_restart: "CCM 服务重启",
       lease_lost: "执行租约中断",
     };
-    return [{
+    rows.push({
+      kind: "interruption",
       taskId: String(task.id || receipt.task_id || ""),
       reasonCode: String(receipt.reason_code || "unknown"),
       reasonLabel: reasonLabels[String(receipt.reason_code || "")] || "任务执行中断",
@@ -430,7 +458,8 @@ function buildRecoveryJourney(input: TaskReplayPresentationInput) {
       nextRetryAt: iso(recovery.nextRetryAt),
       recoveredAt: iso(task.resumed_at || recovery.recovered_at || recovery.revalidated_at),
       result: task.resumed_at ? "resumed" : recovery.state === "needs_user" ? "needs_user" : "waiting",
-    }];
+    });
+    return rows;
   }).sort((a, b) => a.interruptedAt.localeCompare(b.interruptedAt));
 }
 

@@ -48,6 +48,7 @@ exports.registerExternalRunnerRequest = registerExternalRunnerRequest;
 exports.metricAgentResourceSummary = metricAgentResourceSummary;
 exports.listActiveAgentRuns = listActiveAgentRuns;
 exports.cancelActiveAgentRun = cancelActiveAgentRun;
+exports.requestActiveAgentRunPause = requestActiveAgentRunPause;
 exports.trackManagedChildProcess = trackManagedChildProcess;
 exports.terminateManagedChildProcess = terminateManagedChildProcess;
 exports.clearTaskCancellation = clearTaskCancellation;
@@ -622,6 +623,39 @@ function cancelActiveAgentRun(input = {}) {
             source: run.source,
         });
     return { success: true, matched: matched.length, killed, cancellation, targeted: !cancelTask, runs: matched.map(publicActiveAgentRun) };
+}
+function requestActiveAgentRunPause(input = {}) {
+    const taskId = String(input.taskId || input.task_id || "").trim();
+    const reason = String(input.reason || "任务请求在最近安全检查点暂停").trim();
+    if (!taskId)
+        throw new Error("缺少 taskId");
+    const matched = Array.from(activeAgentRuns.values()).filter(run => run.taskId === taskId);
+    let signalled = 0;
+    for (const run of matched) {
+        run.status = "pause_requested";
+        run.updatedAt = now();
+        try {
+            if (run.child?.connected && typeof run.child.send === "function") {
+                run.child.send({ type: "ccm.pause_requested", taskId, reason, contentStored: false });
+                signalled++;
+            }
+        }
+        catch { }
+        if (run.executionId)
+            transitionExecution(run.executionId, "running", "已请求在当前原子操作结束后暂停", {
+                status: "warning",
+                data: { pause_requested: true, cooperative: true, content_stored: false },
+            });
+        (0, runtime_events_1.publishRuntimeEvent)("agent", "agent.pause_requested", {
+            runId: run.id,
+            taskId: run.taskId,
+            project: run.project,
+            reason,
+            cooperative: true,
+            signalled: run.child?.connected === true,
+        });
+    }
+    return { success: true, matched: matched.length, signalled };
 }
 function trackManagedChildProcess(taskId, executionId, child, meta = {}) {
     const safeTaskId = String(taskId || executionId || "standalone");

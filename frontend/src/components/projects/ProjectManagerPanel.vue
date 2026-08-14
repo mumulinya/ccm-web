@@ -1,33 +1,50 @@
 <script setup>
-import { computed, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import ConversationMessageShell from '../common/ConversationMessageShell.vue'
-import ConversationProcessingState from '../common/ConversationProcessingState.vue'
 import SessionContextUsage from '../common/SessionContextUsage.vue'
+import ConversationAwayRecap from '../common/ConversationAwayRecap.vue'
 import ConversationFindBar from '../common/ConversationFindBar.vue'
 import PermissionApprovalCards from '../common/PermissionApprovalCards.vue'
 import { useProjectManager } from './useProjectManager.js'
 import { useSessionContextUsage } from '../../composables/useSessionContextUsage.js'
 import { usePermissionApprovals } from '../../composables/usePermissionApprovals.js'
-import { MessageSquareText, Plus } from '@lucide/vue'
+import { AlertCircle, CheckCircle2, MessageSquareText, Paperclip, Plus } from '@lucide/vue'
 import GlobalAgentFeishuBindingModal from '../global/GlobalAgentFeishuBindingModal.vue'
 import AgentExecutionTranscript from '../common/AgentExecutionTranscript.vue'
 import ActiveTaskPlanDock from '../common/ActiveTaskPlanDock.vue'
+import PrePlanClarificationDock from '../common/PrePlanClarificationDock.vue'
 import ConversationAsideDock from '../common/ConversationAsideDock.vue'
 import ConversationHistoryBranches from '../common/ConversationHistoryBranches.vue'
-import ConversationPermissionMode from '../common/ConversationPermissionMode.vue'
+import ConversationModeToolbar from '../common/ConversationModeToolbar.vue'
 import ConversationSummaryBoundary from '../common/ConversationSummaryBoundary.vue'
 import NewProgressIndicator from '../common/NewProgressIndicator.vue'
 import { useAgentExecutionEvents } from '../../composables/useAgentExecutionEvents.js'
 import { getCopyableMessageText } from '../../utils/messageActions.js'
-import { hasTerminalExecutionForMessage, shouldRenderExecutionTranscript, shouldShowCompactProcessingState } from '../../utils/agentExecutionEvents.js'
+import { hasAcceptedExecutionForMessage, shouldRenderExecutionTranscript } from '../../utils/agentExecutionEvents.js'
 import { consumeAsideCommand, rewindConversationTurn } from '../../utils/conversationRewind.js'
 import { toast } from '../../utils/toast.js'
+import { findActivePrePlanClarification, validatePrePlanClarificationAction } from '../../utils/prePlanClarification.js'
 
 const props = defineProps({
   navigateTo: { type: Object, default: null },
   active: { type: Boolean, default: true },
 })
 const emit = defineEmits(['navigated', 'switch-tab', 'set-navigation'])
+const prePlanClarificationBusy = ref(false)
+const attachmentSizeLabel = (size) => {
+  const value = Math.max(0, Number(size || 0))
+  if (value < 1024) return `${value} B`
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`
+  return `${(value / 1024 / 1024).toFixed(1)} MB`
+}
+const attachmentReadOk = (file) => file?.readable === true || ['parsed', 'partial', 'received'].includes(String(file?.status || '').toLowerCase())
+const attachmentStatusLabel = (file) => {
+  const status = String(file?.status || '').toLowerCase()
+  if (status === 'partial') return '部分读取'
+  if (file?.readable === true || status === 'parsed') return '已读取'
+  if (['failed', 'blocked', 'unreadable'].includes(status)) return '未读取'
+  return '已接收'
+}
 
 const {
   ChatComposer, ConversationTurnControls, CommandResultCard, MessageNavigator, AgentCodeChangeDrawer, ProjectAgentMessage,
@@ -63,6 +80,28 @@ const {
   addProjectFile, submitAddProjectFile, editProjectFile, submitEditProjectFile, deleteProjectFile, handleInput,
   handleKeydown
 } = useProjectManager(props, emit)
+
+const activeProjectPrePlanRow = computed(() => findActivePrePlanClarification(messages.value))
+const activeProjectPrePlanClarification = computed(() => activeProjectPrePlanRow.value?.clarification || null)
+const submitProjectPrePlanClarification = async payload => {
+  const row = activeProjectPrePlanRow.value
+  if (!row?.message || !payload?.answerText || prePlanClarificationBusy.value) return
+  prePlanClarificationBusy.value = true
+  try {
+    await validatePrePlanClarificationAction({ clarification: payload.clarification, action: payload.useDefaults ? 'defaults' : 'answer', scope: 'project', scopeId: currentProject.value, exactSessionId: currentSession.value, answers: payload.answers, additionalNote: payload.additionalNote })
+    chatInput.value = payload.answerText
+    await nextTick()
+    await sendMessage({ prePlanClarification: { ...payload, messageId: row.message.id } })
+  } finally { prePlanClarificationBusy.value = false }
+}
+const cancelProjectPrePlanClarification = async () => {
+  try {
+    await validatePrePlanClarificationAction({ clarification: activeProjectPrePlanClarification.value, action: 'cancel', scope: 'project', scopeId: currentProject.value, exactSessionId: currentSession.value })
+  } catch (error) { return toast.error(error?.message || '取消失败') }
+  const clarification = activeProjectPrePlanClarification.value
+  if (clarification) clarification.status = 'cancelled'
+  toast.info('已取消本次计划前澄清')
+}
 
 const projectContextScopeId = computed(() => currentProject.value && currentSession.value
   ? `${currentProject.value}::${currentSession.value}`

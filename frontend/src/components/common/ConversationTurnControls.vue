@@ -1,6 +1,6 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
-import { ChevronDown, CornerDownRight, ListEnd, MoreHorizontal, Paperclip, RotateCcw, Square, Trash2 } from '@lucide/vue'
+import { ChevronDown, CornerDownRight, HelpCircle, ListEnd, MoreHorizontal, Paperclip, RotateCcw, Square, Trash2 } from '@lucide/vue'
 
 const props = defineProps({
   busy: { type: Boolean, default: false },
@@ -9,11 +9,11 @@ const props = defineProps({
   compact: { type: Boolean, default: false },
 })
 
-const emit = defineEmits(['stop', 'cancel', 'guide', 'retry'])
+const emit = defineEmits(['stop', 'cancel', 'guide', 'retry', 'resolve-route'])
 const expanded = ref(false)
 const menuTurnId = ref('')
 const visibleTurns = computed(() => (props.turns || [])
-  .filter(turn => ['queued', 'failed'].includes(String(turn.status || '')))
+  .filter(turn => ['queued', 'needs_route', 'failed'].includes(String(turn.status || '')))
   .sort((left, right) => Number(left.position || 0) - Number(right.position || 0)
     || Date.parse(left.created_at || left.createdAt || '') - Date.parse(right.created_at || right.createdAt || '')))
 const displayedTurns = computed(() => expanded.value ? visibleTurns.value : visibleTurns.value.slice(0, 1))
@@ -25,6 +25,7 @@ const sourceLabel = turn => ({
 const statusLabel = turn => ({
   queued: turn.mode === 'steer' ? '等待调整' : (turn.position ? `排队第 ${turn.position} 条` : '等待处理'),
   sending: '正在接入',
+  needs_route: '等待你选择',
   failed: '处理失败',
 }[turn.status] || turn.status)
 const turnText = turn => turn.messagePreview || turn.message || (turn.attachmentRefs?.length || turn.attachments?.length ? '附件消息' : '待处理消息')
@@ -51,20 +52,28 @@ watch(() => visibleTurns.value.length, count => {
 <template>
   <section v-if="visibleTurns.length" class="turn-control" :class="{ compact: props.compact }" data-testid="conversation-turn-controls" aria-label="会话待处理消息">
     <div v-if="visibleTurns.length" class="turn-queue" aria-live="polite">
-      <article v-for="turn in displayedTurns" :key="turn.id" class="turn-row" :class="[`status-${turn.status}`, { dispatch: isDispatch(turn) }]">
+      <article v-for="turn in displayedTurns" :key="turn.id" class="turn-row" :class="[`status-${turn.status}`, { dispatch: isDispatch(turn), 'route-row': turn.status === 'needs_route' }]">
         <div class="turn-main">
-          <ListEnd class="turn-handle" :size="16" aria-hidden="true" />
+          <HelpCircle v-if="turn.status === 'needs_route'" class="turn-handle" :size="16" aria-hidden="true" />
+          <ListEnd v-else class="turn-handle" :size="16" aria-hidden="true" />
           <div class="turn-copy">
+            <strong v-if="turn.status === 'needs_route'" class="route-title">这条消息可能与刚才的任务有关</strong>
             <div class="turn-message" :title="turn.message || turn.messagePreview">{{ turnText(turn) }}</div>
             <div class="turn-meta">
               <span v-if="sourceLabel(turn)" class="turn-source">{{ sourceLabel(turn) }}</span>
               <span>{{ statusLabel(turn) }}</span>
               <span v-if="(turn.attachmentRefs?.length || turn.attachments?.length)" class="turn-attachments"><Paperclip :size="11" />{{ turn.attachmentRefs?.length || turn.attachments?.length }}</span>
             </div>
+            <p v-if="turn.status === 'needs_route' && turn.routing?.reason" class="route-reason">{{ turn.routing.reason }}</p>
+            <div v-if="turn.status === 'needs_route'" class="route-actions" aria-label="选择消息处理方式">
+              <button type="button" :disabled="turn.canMutate === false || !turn.routing?.candidateTaskId" :title="!turn.routing?.candidateTaskId ? '当前没有可安全恢复的原任务' : ''" @click="emit('resolve-route', turn, 'continue_original')">继续原任务</button>
+              <button type="button" class="primary" :disabled="turn.canMutate === false" @click="emit('resolve-route', turn, 'start_new_task')">作为新任务</button>
+              <button type="button" :disabled="turn.canMutate === false" @click="emit('resolve-route', turn, 'answer_only')">仅回答问题</button>
+            </div>
           </div>
         </div>
 
-        <div class="turn-actions">
+        <div v-if="turn.status !== 'needs_route'" class="turn-actions">
           <button
             v-if="busy && turn.status === 'queued' && turn.mode !== 'steer' && !isDispatch(turn) && turn.canMutate !== false"
             class="guide-turn"
@@ -119,6 +128,15 @@ watch(() => visibleTurns.value.length, count => {
 .turn-main { min-width:0; flex:1; display:flex; align-items:flex-start; gap:10px; }
 .turn-handle { flex:0 0 auto; margin-top:2px; color:var(--text-muted,#94a3b8); }
 .turn-copy { min-width:0; display:grid; gap:4px; }
+.route-title { color:var(--text-primary,#0f172a); font-size:13px; line-height:1.35; }
+.route-reason { margin:1px 0 0; color:var(--text-secondary,#475569); font-size:11px; line-height:1.45; }
+.route-actions { display:flex; flex-wrap:wrap; gap:6px; margin-top:6px; }
+.route-actions button { min-height:30px; padding:0 11px; border:1px solid color-mix(in srgb,var(--border-color,#cbd5e1) 80%,transparent); border-radius:8px; background:var(--surface,#fff); color:var(--text-secondary,#475569); font-size:11px; font-weight:650; cursor:pointer; }
+.route-actions button:hover { border-color:color-mix(in srgb,var(--primary-color,#2563eb) 55%,var(--border-color,#cbd5e1)); color:var(--primary-color,#2563eb); }
+.route-actions button.primary { border-color:var(--primary-color,#2563eb); background:var(--primary-color,#2563eb); color:#fff; }
+.route-actions button:disabled { cursor:not-allowed; opacity:.55; }
+.route-row { align-items:flex-start; padding-block:12px; background:color-mix(in srgb,var(--primary-color,#2563eb) 3%,var(--surface,#fff)); }
+.route-row .turn-handle { color:var(--primary-color,#2563eb); }
 .turn-message { overflow:hidden; display:-webkit-box; color:var(--text-primary,#0f172a); font-size:13px; line-height:1.45; -webkit-box-orient:vertical; -webkit-line-clamp:2; }
 .turn-meta { display:flex; align-items:center; flex-wrap:wrap; gap:6px; color:var(--text-muted,#64748b); font-size:10px; }
 .turn-source { color:var(--primary-color,#2563eb); }

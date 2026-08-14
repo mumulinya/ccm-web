@@ -16,6 +16,7 @@ import {
   UPLOAD_DIR,
   SHARED_DIR,
   CCM_DIR,
+  getWorkDirForProject,
 } from "../../core/utils";
 import { parseSecureMultipartRequest } from "../../system/secure-multipart";
 import {
@@ -23,8 +24,13 @@ import {
   resolveAutomationSessionBinding,
 } from "../../system/automation-session-bindings";
 import { buildTaskConversationLinks, validateTaskMutationGuard } from "../../system/task-conversation-links";
-import { appendUserVisibleAgentEvent } from "../../system/user-visible-agent-events";
+import { appendUserVisibleAgentEvent, appendUserVisibleRequirementPlan, listUserVisibleAgentEvents } from "../../system/user-visible-agent-events";
+import { inspectProjectGit } from "../projects/project-git";
 import { hasResourceAccess, hasTaskResourceAccess } from "../system/access-policy";
+import { confirmProjectMainTask } from "../projects/project-main-agent";
+import { buildTaskPlanDetail, buildTaskPlanPatch } from "./task-plan-detail";
+import { handleTaskPauseRoutes } from "./task-pause-routes";
+import { taskPauseStatusProjection } from "../../tasks/task-pause-control";
 import { buildTaskPreflight } from "./task-intake-preflight";
 import {
   decomposeRequirementToTaskPlan,
@@ -336,6 +342,7 @@ import {
   mergeExecutionWorktree,
   previewExecutionCheckpointRecovery,
   purgeTaskExecutionArtifacts,
+  requestActiveAgentRunPause,
   requestTaskCancellation,
   rollbackExecutionCheckpoint,
   runExecutionKernelSelfTest,
@@ -358,6 +365,7 @@ import {
   recordTaskAgentFinalDispatchReactiveCompactCircuitOutcome,
   recordTaskAgentSessionTurn,
   reopenTaskAgentSessions,
+  suspendTaskAgentSessions,
 } from "../../tasks/agent-sessions";
 import { interruptTaskExecution, resumeInterruptedTaskExecution } from "../../tasks/task-interruption";
 import {
@@ -737,6 +745,24 @@ export function handleCollaborationApiReplayAndExecutionRoutes(
   parsed: any,
   ctx: CollabCtx,
 ): boolean {
+  if (handleTaskPauseRoutes(req, res, parsed, ctx, {
+    sendJson,
+    loadTasks,
+    updateTask,
+    enqueueTask,
+    listActiveAgentRuns,
+    requestActiveAgentRunPause,
+    listExecutions,
+    transitionExecution,
+    listTaskAgentSessions,
+    suspendTaskAgentSessions,
+    reopenTaskAgentSessions,
+    runningTaskIds,
+    appendTaskTimelineEvent,
+    appendUserVisibleAgentEvent,
+    buildTaskConversationLinks,
+    updateGroupTaskInlineStatus,
+  })) return true;
   const taskForRead = (taskId: string, required: "use" | "manage" = "use") => {
     const task = loadTasks().find((item: any) => String(item?.id || "") === String(taskId || ""));
     if (!task) return { task: null, allowed: false };
@@ -748,6 +774,137 @@ export function handleCollaborationApiReplayAndExecutionRoutes(
     if (!access.allowed) { sendJson(res, { success: false, error: "当前账户没有该任务的访问权限", code: "RESOURCE_ACCESS_DENIED" }, 403); return null; }
     return access.task;
   };
+  const planDetailMatch = pathname.match(/^\/api\/tasks\/([^/]+)\/plan-detail(?:\/confirm)?$/);
+  if (planDetailMatch && ["GET", "PATCH", "POST"].includes(req.method)) {
+    const taskId = decodeURIComponent(planDetailMatch[1]);
+    const task = rejectTaskRead(taskId, "use");
+    if (!task) return true;
+    res.setHeader("Cache-Control", "private, no-store");
+    if (req.method === "GET") {
+      sendJson(res, { success: true, plan: buildTaskPlanDetail(task) });
+      return true;
+    }
+    let body = "";
+    req.on("data", (chunk: any) => body += chunk);
+    req.on("end", () => {
+      try {
+        const payload = body ? JSON.parse(body) : {};
+        const current = buildTaskPlanDetail(task);
+        if (Number(payload?.revision) !== current.revision
+          || Number(payload?.generation) !== current.generation
+          || String(payload?.bindingChecksum || "") !== current.bindingChecksum) {
+          return sendJson(res, {
+            success: false,
+            error: "计划已经更新，请刷新后重试",
+            code: "TASK_PLAN_REVISION_CONFLICT",
+            current: current,
+          }, 409);
+        }
+        if (pathname.endsWith("/confirm")) {
+          if (task.workflow_type === "requirement_epic") {
+            return sendJson(res, { success: false, error: "需求 Epic 请使用原确认入口，以保留拆单和任务图校验", code: "SPECIALIZED_PLAN_CONFIRM_REQUIRED" }, 409);
+          }
+          if (task.orchestration_scope === "project_session") {
+            const confirmed = confirmProjectMainTask(task.id, task.target_project, task.project_session_id);
+            return sendJson(res, {
+              success: true,
+              task: confirmed,
+              plan: buildTaskPlanDetail(confirmed),
+              resume_required: true,
+              resume_parent_run_id: confirmed.id,
+            });
+          }
+          const planMode = task.workflow_meta?.plan_mode || task.workflow_meta?.intake?.plan_mode || task.intake_draft || {};
+          const acceptedAt = new Date().toISOString();
+          const acceptedPlan = {
+            ...planMode,
+            requires_confirmation: false,
+            auto_continue: true,
+            confirmation_status: "confirmed",
+            accepted_at: acceptedAt,
+          };
+          const confirmed = updateTask(task.id, {
+            intake_state: "confirmed",
+            status: "pending",
+            auto_execute: true,
+            status_detail: "详细计划已确认，正在进入会话执行队列",
+            intake_draft: acceptedPlan,
+            workflow_meta: {
+              ...(task.workflow_meta || {}),
+              plan_mode: acceptedPlan,
+              intake: { ...(task.workflow_meta?.intake || {}), plan_mode: acceptedPlan },
+            },
+          }) || task;
+          const queue = enqueueTask(task.id, ctx);
+          return sendJson(res, { success: true, task: confirmed, plan: buildTaskPlanDetail(confirmed), queue });
+        }
+
+        const principal = (req as any).ccmAuth;
+        const projects = Array.from(new Set<string>((Array.isArray(payload?.workItems) ? payload.workItems : [])
+          .map((item: any) => String(item?.project || "").trim()).filter(Boolean)));
+        if (principal?.kind === "browser" && principal?.role !== "admin") {
+          for (const project of projects) {
+            if (!hasResourceAccess(String(principal.userId || ""), principal.role, "project", project, "use")) {
+              return sendJson(res, { success: false, error: `当前账户没有项目 ${project} 的访问权限`, code: "RESOURCE_ACCESS_DENIED" }, 403);
+            }
+          }
+        }
+        const patch = buildTaskPlanPatch(task, payload);
+        const updated = updateTask(task.id, patch.updates) || task;
+        const detail = buildTaskPlanDetail(updated);
+        appendTaskTimelineEvent(task.id, {
+          type: "structured_plan_revision",
+          title: "用户调整了详细计划",
+          detail: String(payload?.summary || payload?.feedback || `执行清单更新为 ${detail.workItems.length} 项`),
+          status: "ok",
+          phase: "planning",
+          agent: "user",
+          data: { revision: detail.revision, work_item_ids: detail.workItems.map((item: any) => item.id) },
+        });
+        const links = buildTaskConversationLinks(updated, [updated])?.links || [];
+        const link = links.find((item: any) => item.relation === "target" && item.available)
+          || links.find((item: any) => item.available);
+        if (link?.scope && link?.scopeId && link?.exactSessionId && link?.messageId) {
+          appendUserVisibleRequirementPlan({
+            eventId: `task:${task.id}:requirement-plan:${detail.revision}:structured-edit`,
+            scope: link.scope,
+            scopeId: link.scopeId,
+            exactSessionId: link.exactSessionId,
+            anchorMessageId: link.messageId,
+            generation: detail.generation,
+            taskId: task.id,
+            plan: {
+              planId: task.id,
+              revision: detail.revision,
+              title: detail.title,
+              goal: detail.goal,
+              steps: detail.workItems.map((item: any) => ({
+                id: item.planStepId || item.id,
+                workItemId: item.id,
+                title: item.title,
+                description: item.objective,
+                project: item.project,
+                dependsOn: item.dependsOn,
+                outcome: item.acceptanceCriteria[0] || "完成后进入下一步",
+                status: item.status,
+              })),
+              scope: detail.assignments.map((item: any) => item.project).filter(Boolean),
+              expectedResults: detail.acceptanceCriteria,
+              exclusions: detail.permissionBoundaries,
+              status: detail.status === "blocked" ? "blocked" : detail.status === "completed" ? "completed" : detail.status === "ready" || detail.status === "awaiting_confirmation" ? "ready" : "executing",
+              createdAt: task.created_at || new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+            },
+          });
+        }
+        return sendJson(res, { success: true, task: updated, plan: detail, revision: patch.revision });
+      } catch (error: any) {
+        const status = Number(error?.status || (/版本|更新|冲突/.test(String(error?.message || "")) ? 409 : 400));
+        sendJson(res, { success: false, error: error?.message || String(error), code: error?.code || "TASK_PLAN_UPDATE_FAILED", current: error?.current }, status);
+      }
+    });
+    return true;
+  }
   const appendSafeRecoveryMilestone = (task: any, decision: any) => {
     if (!task || decision?.resumed === false) return;
     const links = buildTaskConversationLinks(task, [task])?.links || [];
@@ -992,6 +1149,94 @@ export function handleCollaborationApiReplayAndExecutionRoutes(
     return true;
   }
 
+  if (pathname === "/api/conversations/runtime-status" && req.method === "GET") {
+    const scope = String(parsed.query.scope || "").trim();
+    const scopeId = String(parsed.query.scope_id || parsed.query.scopeId || (scope === "global" ? "global" : "")).trim();
+    const exactSessionId = String(parsed.query.exact_session_id || parsed.query.exactSessionId || "").trim();
+    if (!["global", "project", "group"].includes(scope) || !scopeId || !exactSessionId) {
+      sendJson(res, { success: false, error: "缺少有效的会话范围" }, 400);
+      return true;
+    }
+    const principal = (req as any).ccmAuth;
+    if (scope !== "global" && !hasResourceAccess(String(principal?.userId || ""), principal?.role, scope as "project" | "group", scopeId, "use")) {
+      sendJson(res, { success: false, error: "无权读取该会话状态" }, 403);
+      return true;
+    }
+    const allTasks = loadTasks().filter((task: any) => hasTaskResourceAccess(task, principal, "use"));
+    const taskMatchesSession = (task: any) => {
+      const candidates = [
+        task?.exact_session_id, task?.exactSessionId, task?.session_id, task?.sessionId,
+        task?.automation_session_binding_snapshot?.exactSessionId,
+        task?.automation_session_binding_snapshot?.exact_session_id,
+        task?.conversation_link?.exactSessionId,
+      ].filter(Boolean).map(String);
+      if (!candidates.includes(exactSessionId)) return false;
+      if (scope === "project") return String(task?.target_project || task?.project || "") === scopeId || candidates.includes(exactSessionId);
+      if (scope === "group") return String(task?.group_id || task?.groupId || "") === scopeId;
+      return true;
+    };
+    const matchingTasks = allTasks.filter(taskMatchesSession).sort((left: any, right: any) => String(right?.updated_at || right?.created_at || "").localeCompare(String(left?.updated_at || left?.created_at || "")));
+    const activeTask = matchingTasks.find((task: any) => !["done", "failed", "cancelled", "canceled", "reverted"].includes(String(task?.status || "").toLowerCase())) || matchingTasks[0] || null;
+    const stageFor = (task: any) => {
+      const state = String(task?.acceptance_state || task?.collaboration_state?.phase || task?.status || "").toLowerCase();
+      if (/dispatch|queue|dependency|merge|wake/.test(state)) return "协调与分派";
+      if (/verify|review|accept|test|summary|deliver|complete|done/.test(state)) return "验证与交付";
+      if (/execut|rework|work_item|running|progress/.test(state)) return "实施处理";
+      return "了解情况";
+    };
+    let events: any[] = [];
+    try {
+      events = listUserVisibleAgentEvents({ scope, scopeId, exactSessionId, limit: 500 }).events || [];
+    } catch {}
+    const eventTaskId = String([...events].reverse().find((event: any) => event?.taskId)?.taskId || "");
+    const runtimeTask = activeTask || (eventTaskId ? allTasks.find((task: any) => String(task?.id || "") === eventTaskId) : null);
+    const latestUsageEvent = [...events].reverse().find((event: any) => event?.detail?.usage && typeof event.detail.usage === "object");
+    const rawUsage = latestUsageEvent?.detail?.usage || runtimeTask?.metrics?.usage || runtimeTask?.usage || null;
+    const numeric = (value: any) => Number.isFinite(Number(value)) ? Number(value) : undefined;
+    const usage = rawUsage ? {
+      inputTokens: numeric(rawUsage.inputTokens ?? rawUsage.input_tokens),
+      outputTokens: numeric(rawUsage.outputTokens ?? rawUsage.output_tokens),
+      cacheReadInputTokens: numeric(rawUsage.cacheReadInputTokens ?? rawUsage.cache_read_input_tokens),
+      totalCostUsd: numeric(rawUsage.totalCostUsd ?? rawUsage.total_cost_usd ?? rawUsage.costUsd ?? rawUsage.cost_usd),
+      source: String(rawUsage.source || "").includes("provider") || numeric(rawUsage.inputTokens ?? rawUsage.input_tokens) !== undefined ? "provider_reported" : "unreported",
+      missingReason: rawUsage.missingReason || rawUsage.missing_reason,
+    } : { source: "unreported", missingReason: "runtime_unreported" };
+    const projectNames = new Set<string>();
+    if (scope === "project") projectNames.add(scopeId);
+    if (scope === "group") {
+      const group = loadGroups().find((item: any) => String(item?.id || "") === scopeId);
+      for (const member of group?.members || []) if (member?.project && member?.project !== "coordinator") projectNames.add(String(member.project));
+    }
+    if (scope === "global") {
+      for (const task of matchingTasks.slice(0, 20)) {
+        for (const value of [task?.target_project, task?.project, task?.mission_target?.project]) if (value && value !== "coordinator") projectNames.add(String(value));
+        for (const value of task?.target_projects || task?.projects || []) {
+          const name = typeof value === "string" ? value : value?.id || value?.project || value?.name;
+          if (name && name !== "coordinator") projectNames.add(String(name));
+        }
+      }
+      for (const value of [runtimeTask?.target_project, runtimeTask?.project, runtimeTask?.mission_target?.project]) if (value && value !== "coordinator") projectNames.add(String(value));
+    }
+    const projects = [...projectNames].filter(project => hasResourceAccess(String(principal?.userId || ""), principal?.role, "project", project, "use")).slice(0, 20).map(project => {
+      const workDir = getWorkDirForProject(project);
+      if (!workDir) return { id: project, name: project, dirty: false, changedFiles: 0, risk: "unavailable" };
+      try {
+        const git = inspectProjectGit(workDir);
+        const risk = !git.git_available || !git.is_repository ? "unavailable" : Number(git.behind || 0) > 0 && Number(git.ahead || 0) > 0 ? "conflict" : git.dirty ? "changed" : "normal";
+        return { id: project, name: project, branch: git.branch || undefined, dirty: git.dirty === true, changedFiles: Math.max(0, Number(git.changed_files || 0)), ahead: Math.max(0, Number(git.ahead || 0)), behind: Math.max(0, Number(git.behind || 0)), risk };
+      } catch {
+        return { id: project, name: project, dirty: false, changedFiles: 0, risk: "unavailable" };
+      }
+    });
+    const configuredModel = runtimeTask?.model_display_name || runtimeTask?.model || runtimeTask?.provider_model || runtimeTask?.runtime_model;
+    const runtimeTaskTerminal = runtimeTask && ["done", "failed", "cancelled", "canceled", "reverted"].includes(String(runtimeTask?.status || "").toLowerCase());
+    const model = configuredModel ? { displayName: String(configuredModel).slice(0, 120), effort: runtimeTask?.reasoning_effort ? String(runtimeTask.reasoning_effort).slice(0, 40) : undefined, source: runtimeTaskTerminal ? "latest_run" : runtimeTask ? "active_run" : "configured" } : undefined;
+    const task = runtimeTask ? { title: String(runtimeTask?.title || "当前任务").replace(/[\r\n]+/g, " ").slice(0, 160), state: String(runtimeTask?.status || "running"), stage: stageFor(runtimeTask) } : undefined;
+    res.setHeader("Cache-Control", "private, no-store");
+    sendJson(res, { success: true, status: { schema: "ccm-conversation-runtime-status-v1", model, usage, task, projects, contentStored: false } });
+    return true;
+  }
+
   if (pathname === "/api/tasks/active-runs" && req.method === "GET") {
     const principal = (req as any).ccmAuth;
     const now = Date.now();
@@ -1021,7 +1266,8 @@ export function handleCollaborationApiReplayAndExecutionRoutes(
     const needsUser = (task: any) => task?.recovery_pending === true
       || task?.acceptance_state === "recovery_required"
       || ["blocked", "needs_user", "awaiting_confirmation"].includes(String(task?.status || "").toLowerCase())
-      || task?.collaboration_state?.needs_user === true;
+      || task?.collaboration_state?.needs_user === true
+      || String(task?.pause_control?.state || "") === "blocked";
     const stageFor = (task: any) => {
       const state = String(task?.acceptance_state || task?.collaboration_state?.phase || "").toLowerCase();
       if (/dispatch|queue|dependency|merge|wake/.test(state) || task?.workflow_type === "global_mission") return "协调与分派";
@@ -1031,6 +1277,9 @@ export function handleCollaborationApiReplayAndExecutionRoutes(
     };
     const stateFor = (task: any) => {
       if (isTerminal(task)) return String(task?.status || "").toLowerCase() === "done" ? "completed" : String(task?.status || "").toLowerCase();
+      const pauseState = String(task?.pause_control?.state || "");
+      if (["requested", "quiescing"].includes(pauseState)) return "pausing";
+      if (pauseState === "paused") return "paused";
       if (task?.cancellation_requested_at) return "stopping";
       const modelRecovery = modelRecoveryFor(task);
       if (modelRecovery.visible && modelRecovery.autoRetry) return "waiting";
@@ -1057,11 +1306,24 @@ export function handleCollaborationApiReplayAndExecutionRoutes(
       const stoppingElapsedMs = task?.cancellation_requested_at ? Math.max(0, now - Date.parse(String(task.cancellation_requested_at))) : 0;
       const stopStuck = stateFor(task) === "stopping" && stoppingElapsedMs >= 30_000;
       const modelRecovery = modelRecoveryFor(task);
+      const pauseStatus = taskPauseStatusProjection(task, { activeWriterCount: listActiveAgentRuns({ taskId: String(task?.id || "") }).length });
       const availableActions: any[] = [];
-      if (modelRecovery.visible && canStop) {
+      if (pauseStatus.state === "paused" && canStop) {
+        availableActions.push({ id: "resume_paused", kind: "resume_paused", label: "继续", enabled: true });
+      } else if (["requested", "quiescing"].includes(pauseStatus.state) && canStop) {
+        if (pauseStatus.stuck) availableActions.push({ id: "force_interrupt", kind: "force_interrupt", label: "强制中断", enabled: true });
+      } else if (pauseStatus.state === "blocked" && canStop) {
+        availableActions.push(
+          { id: "recheck", kind: "recheck", label: "重新核验", enabled: true },
+          { id: "takeover", kind: "takeover", label: "人工接管", enabled: true },
+        );
+      } else if (modelRecovery.visible && canStop) {
         availableActions.push({ id: "resume_interrupted", kind: "resume_interrupted", label: modelRecovery.autoRetry ? "立即重试" : "恢复任务", enabled: true });
         if (stateFor(task) !== "stopping") availableActions.push({ id: "cancel", kind: "cancel", label: "停止任务", enabled: true });
-      } else if (canStop && stateFor(task) !== "stopping") availableActions.push({ id: "cancel", kind: "cancel", label: "停止任务", enabled: true });
+      } else if (canStop && stateFor(task) !== "stopping") {
+        availableActions.push({ id: "pause", kind: "pause", label: "暂停", enabled: true });
+        availableActions.push({ id: "cancel", kind: "cancel", label: "停止任务", enabled: true });
+      }
       if (!modelRecovery.visible && stopStuck && canStop) availableActions.push(
         { id: "recheck", kind: "recheck", label: "重新检查", enabled: true },
         { id: "takeover", kind: "takeover", label: "人工接管", enabled: true },
@@ -1090,6 +1352,7 @@ export function handleCollaborationApiReplayAndExecutionRoutes(
           skippedWorkItemCount: Math.max(0, skipped),
           revalidated: task?.recovery_decision?.revalidated === true || task?.recovery_decision?.state_revalidated === true,
         } : null,
+        pauseStatus,
         availableActions,
         stopProgress: task?.cancellation_progress ? {
           stage: safeText(task.cancellation_progress.stage, 40),
@@ -3190,6 +3453,17 @@ export function handleCollaborationApiTaskLifecycleRoutes(
         let updates = incomingUpdates;
         const current = loadTasks().find(t => t.id === id);
         if (!current) return sendJson(res, { error: "任务不存在" }, 404);
+        const requestsDirectPause = incomingUpdates.status === "paused" || incomingUpdates.is_paused === true || incomingUpdates.paused === true;
+        const requestsDirectResume = current?.pause_control && (incomingUpdates.status === "pending" || incomingUpdates.is_paused === false || incomingUpdates.paused === false);
+        if (requestsDirectPause || requestsDirectResume) {
+          return sendJson(res, {
+            success: false,
+            code: "SAFE_PAUSE_API_REQUIRED",
+            error: requestsDirectPause
+              ? "运行中任务必须通过安全暂停接口，在最近安全检查点停止写入"
+              : "已安全暂停的任务必须通过原位继续接口重新核验现场",
+          }, 409);
+        }
         if (rejectTaskMutationConflict(res, current, payload, incomingUpdates.status === "pending" || incomingUpdates.is_paused === false)) return;
         if (multipart) {
           const attachments = await buildTaskAttachmentMutation({

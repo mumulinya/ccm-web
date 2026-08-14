@@ -8,6 +8,7 @@ const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ccm-visible-agent-events-'))
 process.env.CCM_USER_VISIBLE_AGENT_EVENT_DIR = root
 
 const require = createRequire(import.meta.url)
+const commandLiveProgress = require('../ccm-package/dist/system/command-live-progress.js')
 const events = require('../ccm-package/dist/system/user-visible-agent-events.js')
 const projections = require('../ccm-package/dist/system/user-visible-agent-projections.js')
 const taskStages = require('../ccm-package/dist/system/task-execution-stage-projection.js')
@@ -19,6 +20,11 @@ const builtIn = events.runUserVisibleAgentEventSelfTest()
 assert.equal(builtIn.pass, true, JSON.stringify(builtIn, null, 2))
 const runtimeBuiltIn = runtimeEvents.runAgentRuntimeStructuredEventSelfTest()
 assert.equal(runtimeBuiltIn.pass, true, JSON.stringify(runtimeBuiltIn, null, 2))
+const sanitizedCommandProgress = commandLiveProgress.sanitizeCommandLiveOutputForSelfTest('\u001b[32mAPI_TOKEN=secret-value\u001b[0m\nC:\\Users\\admin\\private\\build.log\nCompiled 328 modules\nconst privateSource = true')
+assert.equal(JSON.stringify(sanitizedCommandProgress).includes('secret-value'), false, '长命令进度不得泄漏密钥')
+assert.equal(JSON.stringify(sanitizedCommandProgress).includes('C:\\Users\\admin'), false, '长命令进度不得泄漏绝对路径')
+assert.equal(JSON.stringify(sanitizedCommandProgress).includes('privateSource'), false, '长命令进度不得泄漏源码行')
+assert.equal(sanitizedCommandProgress.progress.completed, 328, '长命令进度必须提取可验证的构建计数')
 
 const identity = { scope: 'project', scopeId: 'demo', exactSessionId: 'session-visible-1', generation: 2 }
 const progress = events.appendAssistantProgress({
@@ -251,6 +257,26 @@ unsubscribe()
 assert.equal(ephemeral?.sequence, 0, '文本增量必须是非持久实时事件')
 assert.equal(events.listUserVisibleAgentEvents({ ...identity }).events.length, 5, '文本增量不得写入持久投影')
 
+const liveCommandUpdates = []
+const stopLiveCommandCapture = events.subscribeUserVisibleAgentEvents(event => {
+  if (event.eventId === 'live-command-selftest') liveCommandUpdates.push(event)
+})
+for (const [summary, completed] of [['已编译 20 个模块，正在生成构建结果', 20], ['已编译 40 个模块，正在生成构建结果', 40]]) {
+  events.publishEphemeralUserVisibleAgentEvent({
+    ...identity,
+    eventId: 'live-command-selftest',
+    eventType: 'tool_progress',
+    toolCallId: 'command-selftest',
+    toolName: 'run_command',
+    display: { title: '运行项目构建', summary, status: 'running' },
+    detail: { liveProgress: { phase: 'building', safeSummary: summary, completed, updatedAt: new Date().toISOString(), contentStored: false } },
+  })
+}
+stopLiveCommandCapture()
+assert.equal(liveCommandUpdates.length, 2, '相同工具调用的实时进度必须原位更新而不是被去重')
+assert.equal(liveCommandUpdates[1]?.detail?.liveProgress?.completed, 40, '实时进度必须保留最新结构化计数')
+assert.equal(events.listUserVisibleAgentEvents({ ...identity }).events.length, 5, '长命令实时进度不得进入持久事件账本')
+
 const liveScopes = []
 const stopLiveScopeCapture = events.subscribeUserVisibleAgentEvents(event => {
   if (event.eventType === 'assistant_text_delta') liveScopes.push(event.scope)
@@ -283,6 +309,14 @@ for (const file of frontendFiles) {
   assert.match(source, /presentation="live"/, `${file}必须在运行中使用实时投影`)
   assert.match(source, /presentation="completed"/, `${file}必须在最终回答后使用完成投影`)
 }
+const awayRecapSource = fs.readFileSync(new URL('../frontend/src/components/common/ConversationAwayRecap.vue', import.meta.url), 'utf8')
+assert.match(awayRecapSource, /180000/, '离开摘要必须使用3分钟阈值')
+assert.match(awayRecapSource, /12000/, '普通离开摘要必须在12秒后收口')
+assert.equal(awayRecapSource.includes('messages'), false, '离开摘要组件不得把消息正文写入浏览器存储')
+for (const file of ['frontend/src/components/global/GlobalAgent.vue', 'frontend/src/components/collaboration/GroupChat.template.html', 'frontend/src/components/projects/ProjectManager.template.html']) {
+  const source = fs.readFileSync(new URL(`../${file}`, import.meta.url), 'utf8')
+  assert.match(source, /ConversationAwayRecap/, `${file}必须接入共享离开摘要`)
+}
 const progressTranscriptSource = fs.readFileSync(new URL('../frontend/src/components/common/AgentExecutionTranscript.vue', import.meta.url), 'utf8')
 assert.match(progressTranscriptSource, /assistantProgressRows/, '统一执行流组件必须识别主Agent进度说明')
 assert.match(progressTranscriptSource, /progressSegments/, '主Agent说明与后续工具批次必须按时序分段')
@@ -293,10 +327,15 @@ assert.match(progressTranscriptSource, /产生了.*未验收改动/, '失败或�
 assert.match(progressTranscriptSource, /requirementPlan/, '统一执行流组件必须展示用户需求实施计划')
 assert.match(progressTranscriptSource, /cc-requirement-plan/, '需求实施计划必须使用独立的可折叠用户界面')
 assert.match(progressTranscriptSource, /batchId|__progressBatch/, '说明文字必须与对应工具批次精确绑定')
+assert.match(progressTranscriptSource, /syntheticParallelBatches/, '缺少主动说明的真实并行工具仍必须合并为一个结果批次')
+assert.match(progressTranscriptSource, /parallelSemanticRank/, '并行批次内部必须按查找、读取、Git和验证的用户语义排序')
+assert.match(progressTranscriptSource, /batchNeedsAttention/, '失败、部分结果、等待和运行中批次必须自动展开')
+assert.match(progressTranscriptSource, /rowShowsTerminalStatus/, '成功子工具不得重复显示完成状态')
 assert.match(progressTranscriptSource, /sessionStorage/, '展开状态必须按会话消息保存在浏览器会话存储')
 assert.match(progressTranscriptSource, /搜索工具、项目、文件或失败原因/, '长执行记录必须支持当前消息内搜索')
 assert.match(progressTranscriptSource, /availableActions/, '失败操作必须来自后端授权动作')
-assert.match(progressTranscriptSource, /freshness === 'drifted'/, '权威结果变化必须给出漂移提示')
+const toolResultDetailSource = fs.readFileSync(new URL('../frontend/src/components/common/ToolResultDetail.vue', import.meta.url), 'utf8')
+assert.match(toolResultDetailSource, /drifted: '当前内容已经变化'/, '共享工具详情必须给出权威结果漂移提示')
 assert.match(progressTranscriptSource, /cc-live-execution-status/, '运行态必须显示Codex风格的处理时间和当前阶段')
 assert.match(progressTranscriptSource, /liveRowLabel/, '运行态工具必须使用正在运行或已完成的紧凑文案')
 assert.match(progressTranscriptSource, /isLivePresentation/, '运行态与完成态必须使用同一账本的不同投影')
@@ -413,10 +452,10 @@ assert.equal(frontendExecution.formatExecutionDurationLong(272_000), '耗时 4 �
 const transcriptSource = fs.readFileSync(new URL('../frontend/src/components/common/AgentExecutionTranscript.vue', import.meta.url), 'utf8')
 assert.match(transcriptSource, /expandedRows/, '工具详情必须逐条独立展开')
 assert.match(transcriptSource, /turnDurationLabel/, '执行流必须展示整轮耗时')
-assert.match(transcriptSource, /executionSummaryItems/, '执行流标题必须按精确Agent阶段汇总')
-assert.match(transcriptSource, /parallelAgentCount\.value >= 2 \? '并行执行'/, '只有两个以上真实执行中的同批Agent才可显示并行执行')
-assert.match(transcriptSource, /等待 CCM 验收/, '等待验收必须与排队、启动和执行状态分开展示')
-assert.match(transcriptSource, /运行了.*个工具/, '执行流标题必须使用明确的工具数量')
+assert.match(transcriptSource, /completionResultSummary/, '执行流标题必须提供安全的本轮结果摘要')
+assert.match(transcriptSource, /const parallelAgentCount = computed/, '并行状态必须根据真实执行中的同批Agent计算')
+assert.match(transcriptSource, /agentStatusCategory/, '等待验收必须与排队、启动和执行状态分开展示')
+assert.match(transcriptSource, /项工具/, '执行记录必须使用明确的工具数量')
 assert.match(transcriptSource, /tokenAccuracy/, '工具Token必须区分真实值和估算值')
 assert.match(transcriptSource, /parallelToolCount/, '真实并发工具必须展示并行标识')
 assert.match(transcriptSource, /cc-execution-timing/, '展开记录必须提供本轮耗时统计')

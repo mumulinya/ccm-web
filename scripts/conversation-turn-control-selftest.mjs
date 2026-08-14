@@ -12,10 +12,13 @@ process.env.HOME = home
 process.env.USERPROFILE = home
 const require = createRequire(import.meta.url)
 const turnModule = require(path.join(root, 'ccm-package', 'dist', 'agents', 'conversation-turn-control.js'))
+const routingModule = require(path.join(root, 'ccm-package', 'dist', 'agents', 'conversation-message-routing.js'))
 const globalModule = require(path.join(root, 'ccm-package', 'dist', 'modules', 'global', 'global-agent.js'))
 
 const direct = turnModule.runConversationTurnControlSelfTest()
 assert.equal(direct.pass, true, `持久化内核自测失败：${JSON.stringify(direct.checks)}`)
+const routing = routingModule.runConversationMessageRoutingSelfTest()
+assert.equal(routing.pass, true, `消息语义路由自测失败：${JSON.stringify(routing.checks)}`)
 const feishu = globalModule.runFeishuConversationTurnCommandSelfTest()
 assert.equal(feishu.pass, true, `飞书控制命令自测失败：${JSON.stringify(feishu.checks)}`)
 
@@ -84,6 +87,7 @@ try {
   console.log(JSON.stringify({
     pass: true,
     direct: direct.checks,
+    routing: routing.checks,
     feishu: feishu.checks,
     api: { idempotent: true, fifo: true, positions: true, completed: true, cancelled: true, retry: true },
     source: { global: true, group: true, project: true, editable_while_busy: true, acp_no_implicit_abort: true },

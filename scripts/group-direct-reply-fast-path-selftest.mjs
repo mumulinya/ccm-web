@@ -124,29 +124,27 @@ const originalFetch = globalThis.fetch;
 try {
   globalThis.fetch = async () => {
     uncachedGroupProviderCalls += 1;
+    const streamedContent = JSON.stringify({
+      responseType: "reply",
+      friendlyResponse: "这是一个多 Agent 协作开发控制台，还可以继续扩展功能。",
+      summary: "介绍当前项目并给出扩展方向",
+      shouldDelegate: false,
+      workflowDecision: helloWorkflow,
+      dispatchPolicy: { action: "direct_answer", reason: "普通项目咨询不需要派发", requiresConfirmation: false },
+      targets: [],
+      toolRequests: [],
+    });
     return {
       ok: true,
       status: 200,
-      headers: { get: () => "" },
+      headers: { get: name => String(name || "").toLowerCase() === "content-type" ? "text/event-stream" : "" },
       async text() {
-        return JSON.stringify({
-          choices: [{
-            finish_reason: "stop",
-            message: {
-              content: JSON.stringify({
-                responseType: "reply",
-                friendlyResponse: "这是一个多 Agent 协作开发控制台，还可以继续扩展功能。",
-                summary: "介绍当前项目并给出扩展方向",
-                shouldDelegate: false,
-                workflowDecision: helloWorkflow,
-                dispatchPolicy: { action: "direct_answer", reason: "普通项目咨询不需要派发", requiresConfirmation: false },
-                targets: [],
-                toolRequests: [],
-              }),
-            },
-          }],
-          usage: { prompt_tokens: 120, completion_tokens: 60, total_tokens: 180 },
-        });
+        return [
+          `data: ${JSON.stringify({ choices: [{ delta: { content: streamedContent } }] })}`,
+          `data: ${JSON.stringify({ choices: [{ finish_reason: "stop", delta: {} }], usage: { prompt_tokens: 120, completion_tokens: 60, total_tokens: 180 } })}`,
+          "data: [DONE]",
+          "",
+        ].join("\n\n");
       },
     };
   };
@@ -187,7 +185,7 @@ assert.doesNotMatch(groupLoop, /canonicalName:\s*"read_project_source"/);
 assert.match(groupLoop, /mainAgentToolResults:\s*toolResults/);
 const sharedToolRuntime = source("backend/tools/main-agent-tool-runtime.ts");
 const workspaceTools = source("backend/tools/workspace-readonly-tools.ts");
-assert.match(sharedToolRuntime, /WORKSPACE_READONLY_TOOL_DEFINITIONS_V2\.filter\(tool => tool\.loadPolicy === "base"\)/);
+assert.match(sharedToolRuntime, /WORKSPACE_READONLY_TOOL_DEFINITIONS_V3\.filter\(tool => tool\.loadPolicy === "base"\)/);
 assert.match(workspaceTools, /name:\s*"glob_files"/);
 assert.match(workspaceTools, /name:\s*"grep_text"/);
 assert.match(workspaceTools, /name:\s*"read_file"/);

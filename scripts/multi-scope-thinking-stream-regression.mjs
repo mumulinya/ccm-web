@@ -14,28 +14,29 @@ const projectMessage = read('frontend/src/components/projects/ProjectAgentMessag
 const executionTranscript = read('frontend/src/components/common/AgentExecutionTranscript.vue')
 
 assert.match(projectMessaging, /addAgentMessage\(\)\s*\r?\n\s*scrollToBottom\(\{ force: true \}\)/)
-assert.match(projectMessage, /title="正在思考…"/)
+assert.doesNotMatch(projectMessage, /title="正在思考…"/)
 assert.match(executionTranscript, /if \(isLivePresentation\.value\) \{\s*return \{ stage, rows: groupedRows \}/)
 assert.match(executionTranscript, /return \{ stage, rows: groupedRows \}/)
+assert.match(executionTranscript, /visibleModelActivity/)
 
 assert.match(globalMessaging, /ensureGlobalStreamMessage\(agentMsg, agentMsgAdded\)\s*\r?\n\s*saveHistory\(\)/)
-assert.match(globalMessages, /msg\.streaming && !String\(msg\.content \|\| ''\)\.trim\(\)/)
-assert.match(globalMessages, /title="正在思考…"/)
-assert.match(globalApi, /streamBufferedGlobalReply\(run\.final_reply\)/)
+assert.doesNotMatch(globalMessages, /title="正在思考…"/)
+assert.match(globalApi, /type: "response_delta"/)
+assert.doesNotMatch(globalApi, /streamBufferedGlobalReply/)
 
 assert.match(groupStream, /messages\.value\.push\(agentMsg\)/)
 assert.match(groupStream, /streaming: true/)
 assert.doesNotMatch(groupStream, /thinkingMsg/)
-assert.match(groupTemplate, /msg\.role === 'assistant' && msg\.streaming && !String\(msg\.content \|\| ''\)\.trim\(\)/)
-assert.match(groupTemplate, /title="正在思考…"/)
-assert.match(groupApi, /streamBufferedCoordinatorReply\(outputText\)/)
+assert.doesNotMatch(groupTemplate, /title="正在思考…"/)
+assert.match(groupApi, /type: "response_delta"/)
+assert.doesNotMatch(groupApi, /streamBufferedCoordinatorReply/)
 
 console.log(JSON.stringify({
   pass: true,
   schema: 'ccm-multi-scope-thinking-stream-regression-v1',
   scopes: {
-    project: { immediateThinking: true, streamedReply: true },
-    global: { immediateThinking: true, streamedReply: true },
-    group: { immediateThinking: true, streamedReply: true, singleEnvelope: true },
+    project: { factualWaitingAfterThreshold: true, nativeReplyDelta: true },
+    global: { factualWaitingAfterThreshold: true, nativeReplyDelta: true },
+    group: { factualWaitingAfterThreshold: true, nativeReplyDelta: true, singleEnvelope: true },
   },
 }, null, 2))

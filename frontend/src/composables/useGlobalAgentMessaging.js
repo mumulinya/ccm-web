@@ -246,6 +246,12 @@ const guideGlobalQueuedTurn = async (turn) => {
   return guidedTurn
 }
 
+const resolveGlobalQueuedRoute = async (turn, choice) => {
+  await globalTurnControl.resolveRoute(turn, choice)
+  toast.success(choice === 'continue_original' ? '将继续原任务' : choice === 'answer_only' ? '将只回答这条消息' : '将作为新任务处理')
+  window.setTimeout(() => drainGlobalTurnQueue().catch(() => {}), 0)
+}
+
 const beginGlobalMissionInput = async (msg, card = {}) => {
   const missionId = msg?.globalMission?.id || card?.task_id || ''
   const supervisorId = msg?.globalMissionSupervisor?.id || msg?.globalMission?.supervisor_id || missionId
@@ -442,6 +448,9 @@ const sendMessage = async (options = {}) => {
       formData.append('session_id', currentSessionId.value)
       formData.append('request_id', requestId)
       formData.append('target_refs', JSON.stringify(requestedTargetRefs))
+      if (queuedTurn?.id) formData.append('conversation_turn_id', queuedTurn.id)
+      if (queuedTurn?.metadata?.resolved_route) formData.append('resolved_route', queuedTurn.metadata.resolved_route)
+      if (queuedTurn?.metadata?.resolved_candidate_task_id) formData.append('resolved_candidate_task_id', queuedTurn.metadata.resolved_candidate_task_id)
       if (clarificationTarget?.runId) formData.append('clarification_run_id', clarificationTarget.runId)
       formData.append('stream', 'true')
       attachedFiles.forEach((f, idx) => {
@@ -468,6 +477,9 @@ const sendMessage = async (options = {}) => {
           request_id: requestId,
           target_refs: requestedTargetRefs,
           clarification_run_id: clarificationTarget?.runId || '',
+          conversation_turn_id: queuedTurn?.id || '',
+          resolved_route: queuedTurn?.metadata?.resolved_route || '',
+          resolved_candidate_task_id: queuedTurn?.metadata?.resolved_candidate_task_id || '',
           stream: true
         })
       })
@@ -486,6 +498,7 @@ const sendMessage = async (options = {}) => {
     const seenGlobalStreamEventIds = new Set()
     let globalResultReceived = false
     let globalStreamFailed = false
+    let routeRequired = false
 
     const reconcileAuthoritativeGlobalRun = async () => {
       const reconciled = await reconcileAuthoritativeGlobalRunMessage(agentMsg)
@@ -507,7 +520,12 @@ const sendMessage = async (options = {}) => {
         const eventId = String(data.event_id || data.eventId || '')
         if (eventId && seenGlobalStreamEventIds.has(eventId)) return
         if (eventId) seenGlobalStreamEventIds.add(eventId)
-        if (data.type === 'text') {
+        if (data.type === 'route_required') {
+          routeRequired = true
+          globalResultReceived = true
+          agentMsg.streaming = false
+          globalTurnControl.refresh().catch(() => {})
+        } else if (data.type === 'text' || data.type === 'response_delta') {
           ensureGlobalStreamMessage(agentMsg, agentMsgAdded)
           const chunkText = String(data.text || '')
           globalStreamRawBuffer += chunkText
@@ -649,6 +667,12 @@ const sendMessage = async (options = {}) => {
       if (!reconciled && agentMsg.streaming) agentMsg.streaming = false
     }
 
+    if (routeRequired && agentMsgAdded.value) {
+      const assistantIndex = currentSession.value?.messages?.indexOf(agentMsg) ?? -1
+      if (assistantIndex >= 0) currentSession.value.messages.splice(assistantIndex, 1)
+      agentMsgAdded.value = false
+    }
+
     if (globalResultReceived && pendingGlobalRequestRetry.value?.requestId === requestId) {
       pendingGlobalRequestRetry.value = null
     } else if (globalStreamFailed && !chatInput.value.trim()) {
@@ -657,7 +681,7 @@ const sendMessage = async (options = {}) => {
     }
 
     saveHistory()
-    return { success: !globalStreamFailed, error: globalStreamFailed ? '全局消息没有完成' : '', runId: agentMsg.agenticRun?.id || '' }
+    return { success: !globalStreamFailed, error: globalStreamFailed ? '全局消息没有完成' : '', runId: agentMsg.agenticRun?.id || '', routeRequired }
 
   } catch (err) {
     const stopped = err?.name === 'AbortError'
@@ -705,6 +729,7 @@ const sendMessage = async (options = {}) => {
     stopGlobalCurrentWork,
     drainGlobalTurnQueue,
     guideGlobalQueuedTurn,
+    resolveGlobalQueuedRoute,
     submitGlobalMessageWhileBusy,
     beginGlobalMissionInput,
     sendGlobalMissionInput,

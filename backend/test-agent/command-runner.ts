@@ -3,8 +3,10 @@ import { CommandRunResult, NormalizedTestAgentProjectTarget, NormalizedTestAgent
 import { appendLimited, buildTestAgentSubprocessEnv, compactText, nowIso, redactTestAgentSensitiveText, verificationCommandInvocation } from "./utils";
 import { testAgentPolicyContextFromWorkOrder } from "./isolation";
 import { evaluateTestAgentCommandSideEffect, type TestAgentSideEffectPolicyContext } from "./side-effect-policy";
+import { createCommandLiveProgress } from "../system/command-live-progress";
+import * as crypto from "crypto";
 
-function runSingleCommand(project: NormalizedTestAgentProjectTarget, command: string, timeoutMs: number, maxOutputChars: number, policyContext: TestAgentSideEffectPolicyContext | null = null): Promise<CommandRunResult> {
+function runSingleCommand(project: NormalizedTestAgentProjectTarget, command: string, timeoutMs: number, maxOutputChars: number, policyContext: TestAgentSideEffectPolicyContext | null = null, liveIdentity: any = null): Promise<CommandRunResult> {
   const startedAt = nowIso();
   const started = Date.now();
   const policy = policyContext ? evaluateTestAgentCommandSideEffect(command, { ...policyContext, project }) : null;
@@ -55,11 +57,23 @@ function runSingleCommand(project: NormalizedTestAgentProjectTarget, command: st
       windowsHide: true,
       env: buildTestAgentSubprocessEnv(project.env),
     });
+    const liveProgress = liveIdentity?.exactSessionId ? createCommandLiveProgress({
+      commandRunId: `test-${crypto.randomUUID()}`,
+      taskId: liveIdentity.taskId,
+      scope: liveIdentity.scope,
+      scopeId: liveIdentity.scopeId,
+      exactSessionId: liveIdentity.exactSessionId,
+      generation: liveIdentity.generation,
+      attempt: liveIdentity.attempt,
+      anchorMessageId: liveIdentity.anchorMessageId,
+      description: `验证 ${project.name}`,
+    }) : null;
 
     const finish = (status: CommandRunResult["status"], exitCode: number | null, signal?: NodeJS.Signals | null, error?: string) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      liveProgress?.finish(status === "passed" ? "completed" : status);
       const finishedAt = nowIso();
       resolve({
         project: project.name,
@@ -91,8 +105,8 @@ function runSingleCommand(project: NormalizedTestAgentProjectTarget, command: st
     }, timeoutMs);
     timer.unref?.();
 
-    child.stdout?.on("data", chunk => { stdout = appendLimited(stdout, chunk, maxOutputChars); });
-    child.stderr?.on("data", chunk => { stderr = appendLimited(stderr, chunk, maxOutputChars); });
+    child.stdout?.on("data", chunk => { stdout = appendLimited(stdout, chunk, maxOutputChars); liveProgress?.observe(chunk); });
+    child.stderr?.on("data", chunk => { stderr = appendLimited(stderr, chunk, maxOutputChars); liveProgress?.observe(chunk); });
     child.on("error", error => finish("failed", null, null, error.message));
     child.on("close", (code, signal) => finish(code === 0 ? "passed" : "failed", code, signal));
   });
@@ -101,9 +115,21 @@ function runSingleCommand(project: NormalizedTestAgentProjectTarget, command: st
 export async function runVerificationCommands(workOrder: NormalizedTestAgentWorkOrder): Promise<CommandRunResult[]> {
   const results: CommandRunResult[] = [];
   const policyContext = testAgentPolicyContextFromWorkOrder(workOrder);
+  const exactSessionId = String(workOrder.metadata?.groupSessionId || workOrder.metadata?.group_session_id || workOrder.metadata?.projectSessionId || workOrder.metadata?.project_session_id || workOrder.metadata?.exactSessionId || workOrder.metadata?.exact_session_id || "");
+  const scope = workOrder.groupId ? "group" : "project";
+  const scopeId = String(workOrder.groupId || workOrder.projects[0]?.name || "");
+  const liveIdentity = exactSessionId && scopeId ? {
+    taskId: workOrder.taskId,
+    scope,
+    scopeId,
+    exactSessionId,
+    generation: Math.max(0, Number(workOrder.metadata?.generation || workOrder.metadata?.workflowGeneration || 0)),
+    attempt: Math.max(1, Number(workOrder.metadata?.attempt || 1)),
+    anchorMessageId: String(workOrder.metadata?.anchorMessageId || workOrder.metadata?.anchor_message_id || "") || undefined,
+  } : null;
   for (const project of workOrder.projects) {
     for (const command of project.verificationCommands) {
-      results.push(await runSingleCommand(project, command, workOrder.options.commandTimeoutMs, workOrder.options.maxOutputChars, policyContext));
+      results.push(await runSingleCommand(project, command, workOrder.options.commandTimeoutMs, workOrder.options.maxOutputChars, policyContext, liveIdentity));
     }
   }
   return results;

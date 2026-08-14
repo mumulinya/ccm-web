@@ -452,7 +452,7 @@ export function createGlobalAgentHistoryRuntime(deps: any) {
     role: "user" | "assistant",
     content: string,
     source = "feishu",
-    options: { extractMemory?: boolean } = {},
+    options: { extractMemory?: boolean; files?: any[] } = {},
   ) {
     const store = loadGlobalAgentHistoryStore();
     const sessions = Array.isArray(store.sessions) ? store.sessions : [];
@@ -468,7 +468,15 @@ export function createGlobalAgentHistoryRuntime(deps: any) {
       };
       sessions.unshift(session);
     }
-    const message = { role, content, timestamp: new Date().toISOString(), source };
+    const message = {
+      role,
+      content,
+      timestamp: new Date().toISOString(),
+      source,
+      ...(role === "user" && Array.isArray(options.files) && options.files.length
+        ? { files: sanitizeGlobalHistoryAttachments(options.files, "user") }
+        : {}),
+    };
     try {
       ingestGlobalAgentConversation({ sessionId, source, messages: [message], extractMemory: options.extractMemory });
     } catch (error: any) {

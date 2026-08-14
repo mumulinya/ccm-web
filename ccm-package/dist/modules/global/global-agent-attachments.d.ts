@@ -6,9 +6,15 @@ export declare function serializeGlobalRequestAttachments(files?: any[]): {
     type: string;
     upload_url: string;
     attachment_owner: string;
+    status: string;
+    readable: boolean;
+    checksum: string;
 }[];
 export declare function sanitizeGlobalHistoryAttachments(value: any, role: string): {
     attachment_owner: string;
+    status: string;
+    readable: boolean;
+    checksum: string;
     upload_url?: string;
     name: string;
     size: number;

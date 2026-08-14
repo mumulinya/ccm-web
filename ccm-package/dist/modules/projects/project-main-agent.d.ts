@@ -83,7 +83,7 @@ export type ProjectMainWorkerResult = {
 };
 export type ProjectMainExecutionResult = {
     task: any;
-    status: "awaiting_confirmation" | "completed" | "blocked" | "failed";
+    status: "awaiting_confirmation" | "completed" | "blocked" | "failed" | "paused";
     summary: string;
     fileChanges: any;
     verification: string[];
@@ -102,9 +102,34 @@ export declare function runProjectMainAgentFirstTurn(input: {
     userMessage: string;
     turnId?: string;
     sourceCount?: number;
+    originalRequestChecksum?: string;
+    clarificationRound?: number;
+    continuationCandidate?: any;
+    forcedConversationRoute?: "continue_original" | "start_new_task" | "answer_only" | "";
     signal?: AbortSignal;
+    onDelta?: (delta: string) => void;
+    onModelActivity?: (activity: any) => void;
 }): Promise<{
     workflowDecision: WorkflowDecision;
+    prePlanClarification: {
+        schema: string;
+        id: string;
+        scope: any;
+        scopeId: string;
+        exactSessionId: string;
+        anchorMessageId: string;
+        status: any;
+        revision: number;
+        generation: number;
+        round: number;
+        title: string;
+        headline: string;
+        questions: any[];
+        allowAdditionalNote: boolean;
+        safeDefaultsAvailable: boolean;
+        originalRequestChecksum: string;
+        contentStored: boolean;
+    };
     responseType: import("../../agents/main-agent-turn").MainAgentTurnResponseKind;
     reply: string;
     plan: ProjectMainPlan;
@@ -118,6 +143,14 @@ export declare function runProjectMainAgentFirstTurn(input: {
         usage: any;
         modelCalls: number;
         toolCalls: number;
+        firstVisibleFeedbackMs: number;
+        firstTokenMs: number;
+        maxSilentGapMs: number;
+        retryCount: number;
+        initialReadTokenBudget: number;
+        initialReadFileCount: number;
+        initialReadTokens: number;
+        fallbackStreamCount: number;
         usageAnchorId: string;
     };
     mainAgentToolUsage: {

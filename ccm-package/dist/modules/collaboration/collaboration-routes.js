@@ -49,7 +49,12 @@ const secure_multipart_1 = require("../../system/secure-multipart");
 const automation_session_bindings_1 = require("../../system/automation-session-bindings");
 const task_conversation_links_1 = require("../../system/task-conversation-links");
 const user_visible_agent_events_1 = require("../../system/user-visible-agent-events");
+const project_git_1 = require("../projects/project-git");
 const access_policy_1 = require("../system/access-policy");
+const project_main_agent_1 = require("../projects/project-main-agent");
+const task_plan_detail_1 = require("./task-plan-detail");
+const task_pause_routes_1 = require("./task-pause-routes");
+const task_pause_control_1 = require("../../tasks/task-pause-control");
 const task_intake_preflight_1 = require("./task-intake-preflight");
 const source_ingestion_1 = require("../requirements/source-ingestion");
 const source_evidence_v2_1 = require("../requirements/source-evidence-v2");
@@ -217,6 +222,25 @@ function configureCollaborationRouteExecutors(ctx) {
     });
 }
 function handleCollaborationApiReplayAndExecutionRoutes(pathname, req, res, parsed, ctx) {
+    if ((0, task_pause_routes_1.handleTaskPauseRoutes)(req, res, parsed, ctx, {
+        sendJson: utils_1.sendJson,
+        loadTasks: db_1.loadTasks,
+        updateTask: collaboration_1.updateTask,
+        enqueueTask: collaboration_1.enqueueTask,
+        listActiveAgentRuns: execution_kernel_1.listActiveAgentRuns,
+        requestActiveAgentRunPause: execution_kernel_1.requestActiveAgentRunPause,
+        listExecutions: execution_kernel_1.listExecutions,
+        transitionExecution: execution_kernel_1.transitionExecution,
+        listTaskAgentSessions: agent_sessions_1.listTaskAgentSessions,
+        suspendTaskAgentSessions: agent_sessions_1.suspendTaskAgentSessions,
+        reopenTaskAgentSessions: agent_sessions_1.reopenTaskAgentSessions,
+        runningTaskIds: collaboration_1.runningTaskIds,
+        appendTaskTimelineEvent: logs_1.appendTaskTimelineEvent,
+        appendUserVisibleAgentEvent: user_visible_agent_events_1.appendUserVisibleAgentEvent,
+        buildTaskConversationLinks: task_conversation_links_1.buildTaskConversationLinks,
+        updateGroupTaskInlineStatus: collaboration_1.updateGroupTaskInlineStatus,
+    }))
+        return true;
     const taskForRead = (taskId, required = "use") => {
         const task = (0, db_1.loadTasks)().find((item) => String(item?.id || "") === String(taskId || ""));
         if (!task)
@@ -235,6 +259,138 @@ function handleCollaborationApiReplayAndExecutionRoutes(pathname, req, res, pars
         }
         return access.task;
     };
+    const planDetailMatch = pathname.match(/^\/api\/tasks\/([^/]+)\/plan-detail(?:\/confirm)?$/);
+    if (planDetailMatch && ["GET", "PATCH", "POST"].includes(req.method)) {
+        const taskId = decodeURIComponent(planDetailMatch[1]);
+        const task = rejectTaskRead(taskId, "use");
+        if (!task)
+            return true;
+        res.setHeader("Cache-Control", "private, no-store");
+        if (req.method === "GET") {
+            (0, utils_1.sendJson)(res, { success: true, plan: (0, task_plan_detail_1.buildTaskPlanDetail)(task) });
+            return true;
+        }
+        let body = "";
+        req.on("data", (chunk) => body += chunk);
+        req.on("end", () => {
+            try {
+                const payload = body ? JSON.parse(body) : {};
+                const current = (0, task_plan_detail_1.buildTaskPlanDetail)(task);
+                if (Number(payload?.revision) !== current.revision
+                    || Number(payload?.generation) !== current.generation
+                    || String(payload?.bindingChecksum || "") !== current.bindingChecksum) {
+                    return (0, utils_1.sendJson)(res, {
+                        success: false,
+                        error: "计划已经更新，请刷新后重试",
+                        code: "TASK_PLAN_REVISION_CONFLICT",
+                        current: current,
+                    }, 409);
+                }
+                if (pathname.endsWith("/confirm")) {
+                    if (task.workflow_type === "requirement_epic") {
+                        return (0, utils_1.sendJson)(res, { success: false, error: "需求 Epic 请使用原确认入口，以保留拆单和任务图校验", code: "SPECIALIZED_PLAN_CONFIRM_REQUIRED" }, 409);
+                    }
+                    if (task.orchestration_scope === "project_session") {
+                        const confirmed = (0, project_main_agent_1.confirmProjectMainTask)(task.id, task.target_project, task.project_session_id);
+                        return (0, utils_1.sendJson)(res, {
+                            success: true,
+                            task: confirmed,
+                            plan: (0, task_plan_detail_1.buildTaskPlanDetail)(confirmed),
+                            resume_required: true,
+                            resume_parent_run_id: confirmed.id,
+                        });
+                    }
+                    const planMode = task.workflow_meta?.plan_mode || task.workflow_meta?.intake?.plan_mode || task.intake_draft || {};
+                    const acceptedAt = new Date().toISOString();
+                    const acceptedPlan = {
+                        ...planMode,
+                        requires_confirmation: false,
+                        auto_continue: true,
+                        confirmation_status: "confirmed",
+                        accepted_at: acceptedAt,
+                    };
+                    const confirmed = (0, collaboration_1.updateTask)(task.id, {
+                        intake_state: "confirmed",
+                        status: "pending",
+                        auto_execute: true,
+                        status_detail: "详细计划已确认，正在进入会话执行队列",
+                        intake_draft: acceptedPlan,
+                        workflow_meta: {
+                            ...(task.workflow_meta || {}),
+                            plan_mode: acceptedPlan,
+                            intake: { ...(task.workflow_meta?.intake || {}), plan_mode: acceptedPlan },
+                        },
+                    }) || task;
+                    const queue = (0, collaboration_1.enqueueTask)(task.id, ctx);
+                    return (0, utils_1.sendJson)(res, { success: true, task: confirmed, plan: (0, task_plan_detail_1.buildTaskPlanDetail)(confirmed), queue });
+                }
+                const principal = req.ccmAuth;
+                const projects = Array.from(new Set((Array.isArray(payload?.workItems) ? payload.workItems : [])
+                    .map((item) => String(item?.project || "").trim()).filter(Boolean)));
+                if (principal?.kind === "browser" && principal?.role !== "admin") {
+                    for (const project of projects) {
+                        if (!(0, access_policy_1.hasResourceAccess)(String(principal.userId || ""), principal.role, "project", project, "use")) {
+                            return (0, utils_1.sendJson)(res, { success: false, error: `当前账户没有项目 ${project} 的访问权限`, code: "RESOURCE_ACCESS_DENIED" }, 403);
+                        }
+                    }
+                }
+                const patch = (0, task_plan_detail_1.buildTaskPlanPatch)(task, payload);
+                const updated = (0, collaboration_1.updateTask)(task.id, patch.updates) || task;
+                const detail = (0, task_plan_detail_1.buildTaskPlanDetail)(updated);
+                (0, logs_1.appendTaskTimelineEvent)(task.id, {
+                    type: "structured_plan_revision",
+                    title: "用户调整了详细计划",
+                    detail: String(payload?.summary || payload?.feedback || `执行清单更新为 ${detail.workItems.length} 项`),
+                    status: "ok",
+                    phase: "planning",
+                    agent: "user",
+                    data: { revision: detail.revision, work_item_ids: detail.workItems.map((item) => item.id) },
+                });
+                const links = (0, task_conversation_links_1.buildTaskConversationLinks)(updated, [updated])?.links || [];
+                const link = links.find((item) => item.relation === "target" && item.available)
+                    || links.find((item) => item.available);
+                if (link?.scope && link?.scopeId && link?.exactSessionId && link?.messageId) {
+                    (0, user_visible_agent_events_1.appendUserVisibleRequirementPlan)({
+                        eventId: `task:${task.id}:requirement-plan:${detail.revision}:structured-edit`,
+                        scope: link.scope,
+                        scopeId: link.scopeId,
+                        exactSessionId: link.exactSessionId,
+                        anchorMessageId: link.messageId,
+                        generation: detail.generation,
+                        taskId: task.id,
+                        plan: {
+                            planId: task.id,
+                            revision: detail.revision,
+                            title: detail.title,
+                            goal: detail.goal,
+                            steps: detail.workItems.map((item) => ({
+                                id: item.planStepId || item.id,
+                                workItemId: item.id,
+                                title: item.title,
+                                description: item.objective,
+                                project: item.project,
+                                dependsOn: item.dependsOn,
+                                outcome: item.acceptanceCriteria[0] || "完成后进入下一步",
+                                status: item.status,
+                            })),
+                            scope: detail.assignments.map((item) => item.project).filter(Boolean),
+                            expectedResults: detail.acceptanceCriteria,
+                            exclusions: detail.permissionBoundaries,
+                            status: detail.status === "blocked" ? "blocked" : detail.status === "completed" ? "completed" : detail.status === "ready" || detail.status === "awaiting_confirmation" ? "ready" : "executing",
+                            createdAt: task.created_at || new Date().toISOString(),
+                            updatedAt: new Date().toISOString(),
+                        },
+                    });
+                }
+                return (0, utils_1.sendJson)(res, { success: true, task: updated, plan: detail, revision: patch.revision });
+            }
+            catch (error) {
+                const status = Number(error?.status || (/版本|更新|冲突/.test(String(error?.message || "")) ? 409 : 400));
+                (0, utils_1.sendJson)(res, { success: false, error: error?.message || String(error), code: error?.code || "TASK_PLAN_UPDATE_FAILED", current: error?.current }, status);
+            }
+        });
+        return true;
+    }
     const appendSafeRecoveryMilestone = (task, decision) => {
         if (!task || decision?.resumed === false)
             return;
@@ -520,6 +676,110 @@ function handleCollaborationApiReplayAndExecutionRoutes(pathname, req, res, pars
         (0, utils_1.sendJson)(res, (0, collaboration_1.buildExecutionDashboard)(limit));
         return true;
     }
+    if (pathname === "/api/conversations/runtime-status" && req.method === "GET") {
+        const scope = String(parsed.query.scope || "").trim();
+        const scopeId = String(parsed.query.scope_id || parsed.query.scopeId || (scope === "global" ? "global" : "")).trim();
+        const exactSessionId = String(parsed.query.exact_session_id || parsed.query.exactSessionId || "").trim();
+        if (!["global", "project", "group"].includes(scope) || !scopeId || !exactSessionId) {
+            (0, utils_1.sendJson)(res, { success: false, error: "缺少有效的会话范围" }, 400);
+            return true;
+        }
+        const principal = req.ccmAuth;
+        if (scope !== "global" && !(0, access_policy_1.hasResourceAccess)(String(principal?.userId || ""), principal?.role, scope, scopeId, "use")) {
+            (0, utils_1.sendJson)(res, { success: false, error: "无权读取该会话状态" }, 403);
+            return true;
+        }
+        const allTasks = (0, db_1.loadTasks)().filter((task) => (0, access_policy_1.hasTaskResourceAccess)(task, principal, "use"));
+        const taskMatchesSession = (task) => {
+            const candidates = [
+                task?.exact_session_id, task?.exactSessionId, task?.session_id, task?.sessionId,
+                task?.automation_session_binding_snapshot?.exactSessionId,
+                task?.automation_session_binding_snapshot?.exact_session_id,
+                task?.conversation_link?.exactSessionId,
+            ].filter(Boolean).map(String);
+            if (!candidates.includes(exactSessionId))
+                return false;
+            if (scope === "project")
+                return String(task?.target_project || task?.project || "") === scopeId || candidates.includes(exactSessionId);
+            if (scope === "group")
+                return String(task?.group_id || task?.groupId || "") === scopeId;
+            return true;
+        };
+        const matchingTasks = allTasks.filter(taskMatchesSession).sort((left, right) => String(right?.updated_at || right?.created_at || "").localeCompare(String(left?.updated_at || left?.created_at || "")));
+        const activeTask = matchingTasks.find((task) => !["done", "failed", "cancelled", "canceled", "reverted"].includes(String(task?.status || "").toLowerCase())) || matchingTasks[0] || null;
+        const stageFor = (task) => {
+            const state = String(task?.acceptance_state || task?.collaboration_state?.phase || task?.status || "").toLowerCase();
+            if (/dispatch|queue|dependency|merge|wake/.test(state))
+                return "协调与分派";
+            if (/verify|review|accept|test|summary|deliver|complete|done/.test(state))
+                return "验证与交付";
+            if (/execut|rework|work_item|running|progress/.test(state))
+                return "实施处理";
+            return "了解情况";
+        };
+        let events = [];
+        try {
+            events = (0, user_visible_agent_events_1.listUserVisibleAgentEvents)({ scope, scopeId, exactSessionId, limit: 500 }).events || [];
+        }
+        catch { }
+        const eventTaskId = String([...events].reverse().find((event) => event?.taskId)?.taskId || "");
+        const runtimeTask = activeTask || (eventTaskId ? allTasks.find((task) => String(task?.id || "") === eventTaskId) : null);
+        const latestUsageEvent = [...events].reverse().find((event) => event?.detail?.usage && typeof event.detail.usage === "object");
+        const rawUsage = latestUsageEvent?.detail?.usage || runtimeTask?.metrics?.usage || runtimeTask?.usage || null;
+        const numeric = (value) => Number.isFinite(Number(value)) ? Number(value) : undefined;
+        const usage = rawUsage ? {
+            inputTokens: numeric(rawUsage.inputTokens ?? rawUsage.input_tokens),
+            outputTokens: numeric(rawUsage.outputTokens ?? rawUsage.output_tokens),
+            cacheReadInputTokens: numeric(rawUsage.cacheReadInputTokens ?? rawUsage.cache_read_input_tokens),
+            totalCostUsd: numeric(rawUsage.totalCostUsd ?? rawUsage.total_cost_usd ?? rawUsage.costUsd ?? rawUsage.cost_usd),
+            source: String(rawUsage.source || "").includes("provider") || numeric(rawUsage.inputTokens ?? rawUsage.input_tokens) !== undefined ? "provider_reported" : "unreported",
+            missingReason: rawUsage.missingReason || rawUsage.missing_reason,
+        } : { source: "unreported", missingReason: "runtime_unreported" };
+        const projectNames = new Set();
+        if (scope === "project")
+            projectNames.add(scopeId);
+        if (scope === "group") {
+            const group = (0, storage_1.loadGroups)().find((item) => String(item?.id || "") === scopeId);
+            for (const member of group?.members || [])
+                if (member?.project && member?.project !== "coordinator")
+                    projectNames.add(String(member.project));
+        }
+        if (scope === "global") {
+            for (const task of matchingTasks.slice(0, 20)) {
+                for (const value of [task?.target_project, task?.project, task?.mission_target?.project])
+                    if (value && value !== "coordinator")
+                        projectNames.add(String(value));
+                for (const value of task?.target_projects || task?.projects || []) {
+                    const name = typeof value === "string" ? value : value?.id || value?.project || value?.name;
+                    if (name && name !== "coordinator")
+                        projectNames.add(String(name));
+                }
+            }
+            for (const value of [runtimeTask?.target_project, runtimeTask?.project, runtimeTask?.mission_target?.project])
+                if (value && value !== "coordinator")
+                    projectNames.add(String(value));
+        }
+        const projects = [...projectNames].filter(project => (0, access_policy_1.hasResourceAccess)(String(principal?.userId || ""), principal?.role, "project", project, "use")).slice(0, 20).map(project => {
+            const workDir = (0, utils_1.getWorkDirForProject)(project);
+            if (!workDir)
+                return { id: project, name: project, dirty: false, changedFiles: 0, risk: "unavailable" };
+            try {
+                const git = (0, project_git_1.inspectProjectGit)(workDir);
+                const risk = !git.git_available || !git.is_repository ? "unavailable" : Number(git.behind || 0) > 0 && Number(git.ahead || 0) > 0 ? "conflict" : git.dirty ? "changed" : "normal";
+                return { id: project, name: project, branch: git.branch || undefined, dirty: git.dirty === true, changedFiles: Math.max(0, Number(git.changed_files || 0)), ahead: Math.max(0, Number(git.ahead || 0)), behind: Math.max(0, Number(git.behind || 0)), risk };
+            }
+            catch {
+                return { id: project, name: project, dirty: false, changedFiles: 0, risk: "unavailable" };
+            }
+        });
+        const configuredModel = runtimeTask?.model_display_name || runtimeTask?.model || runtimeTask?.provider_model || runtimeTask?.runtime_model;
+        const runtimeTaskTerminal = runtimeTask && ["done", "failed", "cancelled", "canceled", "reverted"].includes(String(runtimeTask?.status || "").toLowerCase());
+        const model = configuredModel ? { displayName: String(configuredModel).slice(0, 120), effort: runtimeTask?.reasoning_effort ? String(runtimeTask.reasoning_effort).slice(0, 40) : undefined, source: runtimeTaskTerminal ? "latest_run" : runtimeTask ? "active_run" : "configured" } : undefined;
+        const task = runtimeTask ? { title: String(runtimeTask?.title || "当前任务").replace(/[\r\n]+/g, " ").slice(0, 160), state: String(runtimeTask?.status || "running"), stage: stageFor(runtimeTask) } : undefined;
+        res.setHeader("Cache-Control", "private, no-store");
+        (0, utils_1.sendJson)(res, { success: true, status: { schema: "ccm-conversation-runtime-status-v1", model, usage, task, projects, contentStored: false } });
+        return true;
+    }
     if (pathname === "/api/tasks/active-runs" && req.method === "GET") {
         const principal = req.ccmAuth;
         const now = Date.now();
@@ -550,7 +810,8 @@ function handleCollaborationApiReplayAndExecutionRoutes(pathname, req, res, pars
         const needsUser = (task) => task?.recovery_pending === true
             || task?.acceptance_state === "recovery_required"
             || ["blocked", "needs_user", "awaiting_confirmation"].includes(String(task?.status || "").toLowerCase())
-            || task?.collaboration_state?.needs_user === true;
+            || task?.collaboration_state?.needs_user === true
+            || String(task?.pause_control?.state || "") === "blocked";
         const stageFor = (task) => {
             const state = String(task?.acceptance_state || task?.collaboration_state?.phase || "").toLowerCase();
             if (/dispatch|queue|dependency|merge|wake/.test(state) || task?.workflow_type === "global_mission")
@@ -564,6 +825,11 @@ function handleCollaborationApiReplayAndExecutionRoutes(pathname, req, res, pars
         const stateFor = (task) => {
             if (isTerminal(task))
                 return String(task?.status || "").toLowerCase() === "done" ? "completed" : String(task?.status || "").toLowerCase();
+            const pauseState = String(task?.pause_control?.state || "");
+            if (["requested", "quiescing"].includes(pauseState))
+                return "pausing";
+            if (pauseState === "paused")
+                return "paused";
             if (task?.cancellation_requested_at)
                 return "stopping";
             const modelRecovery = modelRecoveryFor(task);
@@ -596,14 +862,27 @@ function handleCollaborationApiReplayAndExecutionRoutes(pathname, req, res, pars
             const stoppingElapsedMs = task?.cancellation_requested_at ? Math.max(0, now - Date.parse(String(task.cancellation_requested_at))) : 0;
             const stopStuck = stateFor(task) === "stopping" && stoppingElapsedMs >= 30_000;
             const modelRecovery = modelRecoveryFor(task);
+            const pauseStatus = (0, task_pause_control_1.taskPauseStatusProjection)(task, { activeWriterCount: (0, execution_kernel_1.listActiveAgentRuns)({ taskId: String(task?.id || "") }).length });
             const availableActions = [];
-            if (modelRecovery.visible && canStop) {
+            if (pauseStatus.state === "paused" && canStop) {
+                availableActions.push({ id: "resume_paused", kind: "resume_paused", label: "继续", enabled: true });
+            }
+            else if (["requested", "quiescing"].includes(pauseStatus.state) && canStop) {
+                if (pauseStatus.stuck)
+                    availableActions.push({ id: "force_interrupt", kind: "force_interrupt", label: "强制中断", enabled: true });
+            }
+            else if (pauseStatus.state === "blocked" && canStop) {
+                availableActions.push({ id: "recheck", kind: "recheck", label: "重新核验", enabled: true }, { id: "takeover", kind: "takeover", label: "人工接管", enabled: true });
+            }
+            else if (modelRecovery.visible && canStop) {
                 availableActions.push({ id: "resume_interrupted", kind: "resume_interrupted", label: modelRecovery.autoRetry ? "立即重试" : "恢复任务", enabled: true });
                 if (stateFor(task) !== "stopping")
                     availableActions.push({ id: "cancel", kind: "cancel", label: "停止任务", enabled: true });
             }
-            else if (canStop && stateFor(task) !== "stopping")
+            else if (canStop && stateFor(task) !== "stopping") {
+                availableActions.push({ id: "pause", kind: "pause", label: "暂停", enabled: true });
                 availableActions.push({ id: "cancel", kind: "cancel", label: "停止任务", enabled: true });
+            }
             if (!modelRecovery.visible && stopStuck && canStop)
                 availableActions.push({ id: "recheck", kind: "recheck", label: "重新检查", enabled: true }, { id: "takeover", kind: "takeover", label: "人工接管", enabled: true });
             if (undoAvailable && (0, access_policy_1.hasTaskResourceAccess)(task, principal, "manage"))
@@ -631,6 +910,7 @@ function handleCollaborationApiReplayAndExecutionRoutes(pathname, req, res, pars
                     skippedWorkItemCount: Math.max(0, skipped),
                     revalidated: task?.recovery_decision?.revalidated === true || task?.recovery_decision?.state_revalidated === true,
                 } : null,
+                pauseStatus,
                 availableActions,
                 stopProgress: task?.cancellation_progress ? {
                     stage: safeText(task.cancellation_progress.stage, 40),
@@ -2809,6 +3089,17 @@ function handleCollaborationApiTaskLifecycleRoutes(pathname, req, res, parsed, c
                 const current = (0, db_1.loadTasks)().find(t => t.id === id);
                 if (!current)
                     return (0, utils_1.sendJson)(res, { error: "任务不存在" }, 404);
+                const requestsDirectPause = incomingUpdates.status === "paused" || incomingUpdates.is_paused === true || incomingUpdates.paused === true;
+                const requestsDirectResume = current?.pause_control && (incomingUpdates.status === "pending" || incomingUpdates.is_paused === false || incomingUpdates.paused === false);
+                if (requestsDirectPause || requestsDirectResume) {
+                    return (0, utils_1.sendJson)(res, {
+                        success: false,
+                        code: "SAFE_PAUSE_API_REQUIRED",
+                        error: requestsDirectPause
+                            ? "运行中任务必须通过安全暂停接口，在最近安全检查点停止写入"
+                            : "已安全暂停的任务必须通过原位继续接口重新核验现场",
+                    }, 409);
+                }
                 if (rejectTaskMutationConflict(res, current, payload, incomingUpdates.status === "pending" || incomingUpdates.is_paused === false))
                     return;
                 if (multipart) {

@@ -190,7 +190,7 @@ const trustedPacket = orchestrator.buildWorkerContextPacketForAssignment({
     source: "explicit_provider_capability",
     contextWindow: 516_000,
     maxOutputTokens: 64_000,
-    checkedAt: "2026-07-12T00:00:00.000Z",
+    checkedAt: new Date().toISOString(),
   },
 });
 

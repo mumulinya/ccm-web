@@ -42,6 +42,7 @@ const os = __importStar(require("os"));
 const path = __importStar(require("path"));
 const child_process_1 = require("child_process");
 const internal_mcp_task_store_1 = require("./internal-mcp-task-store");
+const command_live_progress_1 = require("../system/command-live-progress");
 const ROOT = path.resolve(process.env.CCM_TASK_COMMAND_RUN_DIR || path.join(os.homedir(), ".cc-connect", "private", "task-command-runs"));
 const runs = new Map();
 const MAX_FOREGROUND_OUTPUT = 30_000;
@@ -182,6 +183,7 @@ function finish(run, status, code) {
     }
     catch { }
     persist(run);
+    run.liveProgress?.finish(status);
     if (run.context) {
         try {
             (0, internal_mcp_task_store_1.appendInternalMcpTaskJournal)(run.context, "progress", {
@@ -235,6 +237,20 @@ async function runTaskBoundCommand(context, args) {
         project: String(context.project || ""), cwd, description, commandChecksum: checksum(command), pid: Number(child.pid || 0),
         status: "running", startedAt: new Date().toISOString(), outputFile, totalOutputBytes: 0, child, context,
     };
+    const exactSessionId = String(context.groupSessionId || context.projectSessionId || "");
+    if (exactSessionId) {
+        run.liveProgress = (0, command_live_progress_1.createCommandLiveProgress)({
+            commandRunId: id,
+            taskId: taskIdentity(context),
+            scope: context.groupId ? "group" : "project",
+            scopeId: String(context.groupId || context.project || ""),
+            exactSessionId,
+            generation: run.generation,
+            attempt: run.attempt,
+            anchorMessageId: context.anchorMessageId,
+            description,
+        });
+    }
     runs.set(id, run);
     persist(run);
     try {
@@ -253,8 +269,8 @@ async function runTaskBoundCommand(context, args) {
         output.write(value);
         written += value.length;
     };
-    child.stdout?.on("data", (chunk) => write("", chunk));
-    child.stderr?.on("data", (chunk) => write("[stderr] ", chunk));
+    child.stdout?.on("data", (chunk) => { write("", chunk); run.liveProgress?.observe(chunk); });
+    child.stderr?.on("data", (chunk) => { write("[stderr] ", chunk); run.liveProgress?.observe(chunk); });
     child.on("error", error => { write("[error] ", Buffer.from(error.message)); output.end(); finish(run, "failed", null); });
     child.on("close", code => { output.end(); finish(run, code === 0 ? "completed" : "failed", code); });
     run.timeout = setTimeout(() => { stopTree(run); finish(run, "timed_out", null); }, timeoutMs);

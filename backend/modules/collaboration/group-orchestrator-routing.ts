@@ -794,6 +794,8 @@ export type GroupOrchestratorInput = {
   mainAgentFirstTurnResult?: any;
   main_agent_first_turn_result?: any;
   onDelta?: (delta: string) => void;
+  onModelActivity?: (activity: any) => void;
+  onRetry?: (notice: any) => void;
 };
 
 
@@ -1211,10 +1213,11 @@ export async function runGroupOrchestrator(input: GroupOrchestratorInput) {
     const reusedFirstTurn = !!(input.mainAgentFirstTurnResult || input.main_agent_first_turn_result);
     const result: any = input.mainAgentFirstTurnResult || input.main_agent_first_turn_result || await runGroupOrchestratorCore(input);
     const runtime = String((result as any)?.runtime || "");
-    if (input.onDelta && !["llm-error", "llm-not-configured"].includes(runtime)) {
+    if (input.onDelta && result?.replyDeltaEmitted !== true && result?.reply_delta_emitted !== true && !["llm-error", "llm-not-configured"].includes(runtime)) {
       const canonicalReply = String((result as any)?.content || "").trim();
       if (canonicalReply) {
         streamCanonicalGroupReply(canonicalReply, input.onDelta);
+        result.streamingMetric = { ...(result.streamingMetric || {}), fallbackStreamCount: Number(result.streamingMetric?.fallbackStreamCount || 0) + 1 };
       }
     }
     const workflowDecision = (result as any)?.workflowDecision || (result as any)?.analysis?.workflowDecision || null;
@@ -1243,6 +1246,14 @@ export async function runGroupOrchestrator(input: GroupOrchestratorInput) {
       taskId: input.taskId || input.task_id || "",
       executionId: input.executionId || input.execution_id || "",
       usage: (result as any)?.usage || null,
+      timing: {
+        modelMs: Number((result as any)?.streamingMetric?.modelMs || 0),
+        toolWallMs: Number((result as any)?.streamingMetric?.toolWallMs || 0),
+        firstVisibleFeedbackMs: Number((result as any)?.streamingMetric?.firstVisibleFeedbackMs || 0),
+        firstTokenMs: Number((result as any)?.streamingMetric?.firstTokenMs || 0),
+        maxSilentGapMs: Number((result as any)?.streamingMetric?.maxSilentGapMs || 0),
+      },
+      streaming: (result as any)?.streamingMetric || null,
       error: finalRuntime === "llm-error" ? "群聊主 Agent 大模型调用失败" : finalRuntime === "llm-not-configured" ? "群聊主 Agent 模型未配置" : "",
     });
     return { ...result, selectedRoleSkills };

@@ -50,8 +50,9 @@ import {
 import { resolveTrustedModelContextCapacity } from "./model-capability-cache";
 import { estimateTextTokens } from "../../system/context-budget";
 import { resolveAgentLoopBudget, shouldContinueAgentLoop } from "../../system/agent-loop-budget";
-import { appendAssistantProgress, appendToolProjection, appendUserVisibleAgentEvent, appendUserVisibleRequirementPlan, buildUserVisibleAgentResult } from "../../system/user-visible-agent-events";
-import { assistantProgressNarrationEnabled, buildAssistantProgressFallback, sanitizeAssistantProgressText, validateAssistantProgressKind } from "../../system/assistant-progress";
+import { appendAssistantProgress, appendToolProjection, appendUserVisibleAgentEvent, appendUserVisibleRequirementPlan, buildUserVisibleAgentResult, publishEphemeralUserVisibleAgentEvent } from "../../system/user-visible-agent-events";
+import { assistantProgressNarrationEnabled, buildAssistantProgressFallback, buildToolBatchOutcomeProgress, sanitizeAssistantProgressText, validateAssistantProgressKind } from "../../system/assistant-progress";
+import { createModelActivityController, createSafeJsonReplyDeltaExtractor, type ModelActivityPhase } from "../../system/model-activity";
 import { readSlashCommandSessionState, renderSlashCommandSessionDirective } from "../../system/slash-command-session-state";
 import { publishUserVisibleAssistantText } from "../../system/user-visible-agent-projections";
 import { buildModelVisiblePayloadSnapshot, modelVisibleFixedTokens } from "../../system/session-compaction-core";
@@ -760,7 +761,8 @@ ${CONVERSATIONAL_REPLY_STYLE_GUIDANCE}
 - 项目分析模式下必须 shouldDelegate=false、dispatchPolicy.action=direct_answer；只总结只读上下文、指出不确定点和下一步建议。
 - 只有用户当前消息明确要求“修改、实现、创建、运行、执行、派发、修复、删除、更新、部署”等实际动作时，才允许 shouldDelegate=true。历史消息中的开发要求不能替代当前消息授权。
 - 对业务开发、PRD、需求文档、接口文档、功能实现类任务，只要群聊里存在可分派项目 Agent，默认 shouldDelegate=true；即使未明确前端/后端/具体项目，也要先派给相关或全部项目 Agent 让其按职责判断影响范围。
-- 缺少范围、字段或验收细节时，把缺口写入 missingInfo、dispatchPolicy.risk 和子 Agent task 的“待确认/风险”，不要因此直接 ask_user，除非完全没有业务目标、没有可分派项目 Agent，或涉及高风险操作必须用户确认。
+- 当缺口会改变业务流程、实施范围、角色权限、数据保留策略或验收结果时，必须在正式计划和派发前设置 dispatchPolicy.action=ask_user，并输出1～3个 structuredClarificationQuestions。代码、配置和现有资料可查明的技术问题不得询问用户，应先只读核实。
+- 同一轮最多3个业务问题，每题最多4个选项；有低风险默认方案时标记 safeDefault。不要把目标项目选择、代码修改授权或计划确认混入业务澄清。
 
 CCM 主 Agent 动作边界（必须按动作风险做决定）：
 - read_group_context：读取群聊上下文，只读，可自动。
@@ -812,6 +814,7 @@ JSON 格式：
     "impactScope": ["模型识别的影响范围"],
     "planSteps": ["若选择 plan_task/decompose_epic，给出执行前步骤"],
     "clarificationQuestions": [],
+    "structuredClarificationQuestions": [{"id":"business_scope","label":"需要确认的业务选择","reason":"它如何影响方案或验收","type":"single | multiple | text","required":true,"options":[{"id":"option_1","label":"选项","description":"影响说明","recommended":true,"safeDefault":true}]}],
     "selectedSkills": ["只能从统一语义预检目录选择"],
     "intentKind": "conversation | question | status | analysis | execution | management | continuation",
     "requiresCodeChanges": false,
@@ -835,7 +838,8 @@ JSON 格式：
     "reason": "为什么选择这个动作",
     "requiresConfirmation": false,
     "risk": "如果有风险写清楚；没有则空字符串",
-    "nextStep": "接下来应该做什么"
+    "nextStep": "接下来应该做什么",
+    "structuredClarificationQuestions": []
   },
   "coordinationStrategy": "direct_worker_execution | research_synthesis_implementation_verification",
   "coordinationPlan": {
@@ -1325,6 +1329,8 @@ export async function runLlmGroupOrchestrator(input: {
   projectSourceEvidence?: any;
   project_source_evidence?: any;
   onRetry?: (notice: any) => void;
+  onDelta?: (delta: string) => void;
+  onModelActivity?: (activity: any) => void;
   turnId?: string;
   turn_id?: string;
   anchorMessageId?: string;
@@ -1365,13 +1371,6 @@ export async function runLlmGroupOrchestrator(input: {
       eventType: "turn_started",
       display: { title: "群聊主 Agent", summary: "已开始处理当前请求", status: "running" },
     });
-    appendUserVisibleAgentEvent({
-      eventId: `group-turn:${visibleTurnId}:thinking`,
-      scope: "group", scopeId: String(group.id), exactSessionId: groupSessionId,
-      ...(visibleAnchorMessageId ? { anchorMessageId: visibleAnchorMessageId } : {}),
-      eventType: "thinking_status",
-      display: { title: "正在思考", summary: "正在核对成员、上下文和协作计划", status: "running" },
-    });
   }
   const anthropic = shouldUseAnthropic(config);
   let tokenUsage: LlmTokenUsage | null = null;
@@ -1398,6 +1397,20 @@ export async function runLlmGroupOrchestrator(input: {
   let continuationSegments = 0;
   let noProgressCount = 0;
   let loopStopReason = "model_completed";
+  let visibleReplyDeltaEmitted = false;
+  let visibleReplyDeltaSequence = 0;
+  let firstVisibleFeedbackAt = 0;
+  let firstProviderDeltaAt = 0;
+  let lastVisibleFeedbackAt = visibleTurnStartedAt;
+  let maxSilentGapMs = 0;
+  let modelRetryCount = 0;
+  let initialReadFileCount = 0;
+  let initialReadTokens = 0;
+  const markVisibleFeedback = (at = Date.now()) => {
+    if (!firstVisibleFeedbackAt) firstVisibleFeedbackAt = at;
+    maxSilentGapMs = Math.max(maxSilentGapMs, Math.max(0, at - lastVisibleFeedbackAt));
+    lastVisibleFeedbackAt = at;
+  };
   const callPlanningModel = async (roundInput: any, round: number) => {
     modelCallCount += 1;
     segmentModelTurns += 1;
@@ -1434,38 +1447,79 @@ export async function runLlmGroupOrchestrator(input: {
         } catch {}
       }
     };
-    const parsed = anthropic
+    const activityPhase: ModelActivityPhase = toolResults.length ? "tool_result_review" : round > 0 ? "tool_decision" : "understanding";
+    const activity = createModelActivityController({
+      scope: "group", scopeId: String(group.id), exactSessionId: groupSessionId,
+      turnId: visibleTurnId, modelCallIndex: modelCallCount, phase: activityPhase,
+      anchorMessageId: visibleAnchorMessageId || undefined,
+      onActivity: activityValue => {
+        if (["waiting", "retrying"].includes(String(activityValue?.state || ""))) markVisibleFeedback();
+        input.onModelActivity?.(activityValue);
+      },
+    });
+    const replyExtractor = createSafeJsonReplyDeltaExtractor(delta => {
+      visibleReplyDeltaEmitted = true;
+      if (!firstProviderDeltaAt) firstProviderDeltaAt = Date.now();
+      markVisibleFeedback(firstProviderDeltaAt || Date.now());
+      visibleReplyDeltaSequence += 1;
+      activity.onDelta(delta);
+      publishEphemeralUserVisibleAgentEvent({
+        eventId: `group-delta:${visibleTurnId}:${modelCallCount}:${visibleReplyDeltaSequence}`,
+        scope: "group", scopeId: String(group.id), exactSessionId: groupSessionId,
+        ...(visibleAnchorMessageId ? { anchorMessageId: visibleAnchorMessageId } : {}),
+        eventType: "assistant_text_delta",
+        display: { title: "群聊主 Agent", summary: String(delta || "").slice(0, 500), status: "running" },
+        detail: { stream: { sequence: visibleReplyDeltaSequence, final: false } },
+      });
+      input.onDelta?.(delta);
+    });
+    let parsed: any;
+    try {
+      parsed = anthropic
       ? await callAnthropicCompatibleJson(config, {
           messages,
           maxTokens: 1500,
           defaultTimeoutMs: 45000,
           retryProfile: round > 0 ? "agent_orchestration" : "interactive_first_turn",
           onRetry: notice => {
+            modelRetryCount += 1;
             const publicNotice = { attempt: notice.attempt, max_attempts: notice.maxAttempts, remaining_budget_ms: Math.max(0, (notice.profile === "interactive_first_turn" ? 60_000 : 120_000) - notice.elapsedMs), profile: notice.profile, reason: String(notice.error?.message || notice.error || "模型暂时不可用").slice(0, 240) };
             retryNotices.push(publicNotice);
             input.onRetry?.(publicNotice);
+            activity.onRetry(notice.attempt + 1);
           },
           httpErrorPrefix: "主 Agent API 调用失败",
           promptCacheTracking: { groupId: group.id, groupSessionId, source: round > 0 ? `group_main_tool_followup_${round}` : "group_main_planning" },
           onUsage: captureTokenUsage,
           nativeTools: [...(roundToolContext.catalog.loadedMcp || roundToolContext.catalog.mcp || []).map((tool: any) => ({ ...tool, deferred: false })), ...(roundToolContext.catalog.discoverableMcp || []).map((tool: any) => ({ ...tool, deferred: true }))].map((tool: any) => ({ name: String(tool.canonicalName || tool.name || ""), description: String(tool.description || ""), inputSchema: tool.inputSchema || { type: "object", properties: {} }, deferred: tool.deferred === true })).filter((tool: any) => tool.name),
           nativeToolReference: true,
+          stream: true,
+          onDelta: delta => { if (!firstProviderDeltaAt) firstProviderDeltaAt = Date.now(); replyExtractor.push(delta); },
         })
       : await callOpenAiCompatibleJson(config, {
           messages,
           defaultTimeoutMs: 45000,
           retryProfile: round > 0 ? "agent_orchestration" : "interactive_first_turn",
           onRetry: notice => {
+            modelRetryCount += 1;
             const publicNotice = { attempt: notice.attempt, max_attempts: notice.maxAttempts, remaining_budget_ms: Math.max(0, (notice.profile === "interactive_first_turn" ? 60_000 : 120_000) - notice.elapsedMs), profile: notice.profile, reason: String(notice.error?.message || notice.error || "模型暂时不可用").slice(0, 240) };
             retryNotices.push(publicNotice);
             input.onRetry?.(publicNotice);
+            activity.onRetry(notice.attempt + 1);
           },
           httpErrorPrefix: "主 Agent API 调用失败",
           promptCacheTracking: { groupId: group.id, groupSessionId, source: round > 0 ? `group_main_tool_followup_${round}` : "group_main_planning" },
           onUsage: captureTokenUsage,
           nativeTools: [...(roundToolContext.catalog.loadedMcp || roundToolContext.catalog.mcp || []).map((tool: any) => ({ ...tool, deferred: false })), ...(roundToolContext.catalog.discoverableMcp || []).map((tool: any) => ({ ...tool, deferred: true }))].map((tool: any) => ({ name: String(tool.canonicalName || tool.name || ""), description: String(tool.description || ""), inputSchema: tool.inputSchema || { type: "object", properties: {} }, deferred: tool.deferred === true })).filter((tool: any) => tool.name),
           nativeToolReference: true,
+          stream: true,
+          onDelta: delta => { if (!firstProviderDeltaAt) firstProviderDeltaAt = Date.now(); replyExtractor.push(delta); },
         });
+      activity.complete();
+    } catch (error) {
+      activity.fail();
+      throw error;
+    }
     return { parsed, messages, providerPayload };
   };
   let parsed: any;
@@ -1553,6 +1607,7 @@ export async function runLlmGroupOrchestrator(input: {
           relatedToolCallIds: preparedToolCallIds,
           title: "群聊主 Agent",
         });
+        if (progressText) markVisibleFeedback();
       }
       for (const request of selectedRequests) {
         executed.add(crypto.createHash("sha256").update(JSON.stringify({ name: request.name, arguments: request.arguments })).digest("hex"));
@@ -1570,6 +1625,26 @@ export async function runLlmGroupOrchestrator(input: {
       toolCallCount += roundResults.length;
       segmentToolCalls += roundResults.length;
       toolResults.push(...roundResults);
+      if (round === 0) {
+        const initialReads = roundResults.filter((row: any) => /^(?:read_file|read_files|glob_files|grep_text)$/i.test(String(row?.name || "")));
+        initialReadFileCount += initialReads.reduce((count: number, row: any) => count + Math.max(1, Number(row?.rawOutput?.safeReceipt?.itemCount || row?.rawOutput?.itemCount || 0)), 0);
+        initialReadTokens += initialReads.reduce((count: number, row: any) => count + Math.max(0, Number(row?.outputTokens || 0)), 0);
+      }
+      if (assistantProgressNarrationEnabled(config)) {
+        const outcomeProgress = buildToolBatchOutcomeProgress(roundResults, { target: group.name || group.id });
+        if (outcomeProgress) appendAssistantProgress({
+          scope: "group", scopeId: String(group.id), exactSessionId: groupSessionId,
+          ...(visibleAnchorMessageId ? { anchorMessageId: visibleAnchorMessageId } : {}),
+          generation: Number(toolContext.scopeIdentity?.generation || 0),
+          turnId: visibleTurnId,
+          text: outcomeProgress,
+          kind: "key_finding",
+          modelCallIndex: modelCallCount,
+          relatedToolCallIds: preparedToolCallIds,
+          title: "群聊主 Agent",
+        });
+        if (outcomeProgress) markVisibleFeedback();
+      }
       if (assistantProgressNarrationEnabled(config) && roundResults.length && roundResults.every((row: any) => row?.ok !== true)) {
         appendAssistantProgress({
           scope: "group", scopeId: String(group.id), exactSessionId: groupSessionId,
@@ -1630,6 +1705,57 @@ export async function runLlmGroupOrchestrator(input: {
     }
   } catch (error: any) {
     throw attachLlmTokenUsage(error, tokenUsage);
+  }
+  const terminalResponseType = String(parsed?.responseType || parsed?.response_type || "").toLowerCase();
+  let fallbackStreamCount = 0;
+  if (["reply", "clarify"].includes(terminalResponseType) && !visibleReplyDeltaEmitted && input.onDelta) {
+    fallbackStreamCount += 1;
+    modelCallCount += 1;
+    const synthesisStartedAt = Date.now();
+    const synthesisActivity = createModelActivityController({
+      scope: "group", scopeId: String(group.id), exactSessionId: groupSessionId,
+      turnId: visibleTurnId, modelCallIndex: modelCallCount, phase: "final_synthesis",
+      anchorMessageId: visibleAnchorMessageId || undefined,
+      onActivity: activityValue => {
+        if (["waiting", "retrying"].includes(String(activityValue?.state || ""))) markVisibleFeedback();
+        input.onModelActivity?.(activityValue);
+      },
+    });
+    let synthesisSequence = 0;
+    const onSynthesisDelta = (delta: string) => {
+      if (!delta) return;
+      visibleReplyDeltaEmitted = true;
+      if (!firstProviderDeltaAt) firstProviderDeltaAt = Date.now();
+      markVisibleFeedback();
+      synthesisActivity.onDelta(delta);
+      synthesisSequence += 1;
+      publishEphemeralUserVisibleAgentEvent({
+        eventId: `group-delta:${visibleTurnId}:${modelCallCount}:${synthesisSequence}`,
+        scope: "group", scopeId: String(group.id), exactSessionId: groupSessionId,
+        ...(visibleAnchorMessageId ? { anchorMessageId: visibleAnchorMessageId } : {}),
+        eventType: "assistant_text_delta",
+        display: { title: "群聊主 Agent", summary: String(delta).slice(0, 500), status: "running" },
+        detail: { stream: { sequence: synthesisSequence, final: false } },
+      });
+      input.onDelta?.(delta);
+    };
+    try {
+      const synthesisMessages = [
+        { role: "system", content: "请把既有结论整理成面向用户的最终回答。只输出回答正文，不输出JSON、内部协议、推理过程或工具原始结果。" },
+        { role: "user", content: JSON.stringify({ request: String(input.message || "").slice(0, 4000), draft: String(parsed?.reply || parsed?.content || parsed?.summary || "").slice(0, 8000), toolSummary: buildToolBatchOutcomeProgress(toolResults, { target: group.name || group.id }) || "未使用工具" }) },
+      ];
+      const captureSynthesisUsage = (usage: LlmTokenUsage) => { tokenUsage = mergeLlmTokenUsage(tokenUsage, usage); };
+      const synthesized = anthropic
+        ? await callAnthropicCompatibleChat(config, { messages: synthesisMessages, maxTokens: 1600, temperature: 0.2, defaultTimeoutMs: 60_000, retryProfile: "interactive_first_turn", stream: true, onDelta: onSynthesisDelta, onUsage: captureSynthesisUsage, onRetry: notice => { modelRetryCount += 1; synthesisActivity.onRetry(notice.attempt + 1); } })
+        : await callOpenAiCompatibleChat(config, { messages: synthesisMessages, temperature: 0.2, defaultTimeoutMs: 60_000, retryProfile: "interactive_first_turn", stream: true, onDelta: onSynthesisDelta, onUsage: captureSynthesisUsage, onRetry: notice => { modelRetryCount += 1; synthesisActivity.onRetry(notice.attempt + 1); } });
+      parsed = { ...parsed, reply: String(synthesized || parsed?.reply || parsed?.content || ""), content: String(synthesized || parsed?.content || parsed?.reply || "") };
+      synthesisActivity.complete();
+    } catch (error) {
+      synthesisActivity.fail();
+      throw attachLlmTokenUsage(error, tokenUsage);
+    } finally {
+      modelDurationMs += Math.max(0, Date.now() - synthesisStartedAt);
+    }
   }
   if (readSlashCommandSessionState("group", String(group.id), groupSessionId).planMode?.enabled === true
     && (["dispatch", "execute"].includes(String(parsed?.responseType || parsed?.response_type || "").toLowerCase())
@@ -1719,6 +1845,19 @@ export async function runLlmGroupOrchestrator(input: {
       noProgressCount,
       stopReason: loopStopReason,
       results: toolResults.map(row => ({ name: row.name, ok: row.ok, outputTokens: row.outputTokens || 0, error: row.error || "" })),
+    },
+    replyDeltaEmitted: visibleReplyDeltaEmitted,
+    reply_delta_emitted: visibleReplyDeltaEmitted,
+    streamingMetric: {
+      modelMs: modelDurationMs,
+      toolWallMs: toolWallDurationMs,
+      firstVisibleFeedbackMs: firstVisibleFeedbackAt ? Math.max(0, firstVisibleFeedbackAt - visibleTurnStartedAt) : 0,
+      firstTokenMs: firstProviderDeltaAt ? Math.max(0, firstProviderDeltaAt - visibleTurnStartedAt) : 0,
+      maxSilentGapMs: Math.max(maxSilentGapMs, Math.max(0, Date.now() - lastVisibleFeedbackAt)),
+      providerRetryCount: modelRetryCount,
+      fallbackStreamCount,
+      initialReadFileCount,
+      initialReadTokens,
     },
   };
 }

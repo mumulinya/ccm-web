@@ -20,13 +20,15 @@ assert.match(frontend, /const stopped = explicitlyStoppedStreams\.has\(controlle
 assert.match(frontend, /const detachProjectStream = \(\) =>/)
 assert.match(frontend, /onUnmounted\(\(\) => \{[\s\S]*?detachProjectStream\(\)/)
 assert.doesNotMatch(frontend, /onUnmounted\(\(\) => \{[\s\S]*?stopStreaming\(\)/)
-assert.match(frontend, /latestRecoverableProjectAssistantMessage\(msg\)/)
+assert.match(frontend, /const resumableMessage = null/)
+assert.match(frontend, /options\?\.continuationParentRunId/)
+assert.match(frontend, /queuedTurn\?\.metadata\?\.requested_mode === 'steer'/)
 assert.match(frontend, /assistant_message_id: agentMsg\.id/)
 assert.match(frontend, /PROJECT_SESSION_TURN_ACTIVE/)
 assert.match(frontend, /addAgentMessage\(\)\s*\n\s*scrollToBottom\(\{ force: true \}\)/)
 assert.match(frontend, /reconcileProjectConversationReply\(eventProject, eventSessionId, eventMessageId\)/)
 assert.match(frontend, /agentMsg\.streaming = false/)
-assert.match(projectMessage, /title="正在思考…"/)
+assert.doesNotMatch(projectMessage, /title="正在思考…"/)
 
 assert.ok(
   streamRoute.indexOf('acquireProjectSessionAgentDispatch(project, exactProjectSessionId)')
@@ -34,9 +36,10 @@ assert.ok(
   'project session dispatch must be locked before the first model turn',
 )
 assert.doesNotMatch(streamRoute, /res\.once\?\.\("close", releaseDispatch\)/)
-assert.match(streamRoute, /persistConversationReply\(directProjectReply, "conversation"\)/)
+assert.match(streamRoute, /persistConversationReply\(visibleProjectReply, "conversation"/)
 assert.match(streamRoute, /persistConversationReply\(answer, chatIntent\.mode\)/)
-assert.match(streamRoute, /streamBufferedConversationReply\(directProjectReply\)/)
+assert.match(streamRoute, /type: "response_delta"/)
+assert.doesNotMatch(streamRoute, /streamBufferedConversationReply/)
 assert.match(streamRoute, /message_id: safeAssistantMessageId/)
 assert.match(streamRoute, /assistant_message_id, assistantMessageId/)
 assert.match(sessions, /"interruption"/)
@@ -50,9 +53,10 @@ process.stdout.write(`${JSON.stringify({
     sessionLockedBeforeFirstTurn: true,
     clientDisconnectDoesNotReleaseExecution: true,
     authoritativeReplyPersisted: true,
-    resumeReusesAssistantAnchor: true,
-    thinkingPlaceholderRenderedImmediately: true,
+    typedTurnsStayUnboundUntilRouted: true,
+    explicitResumeKeepsTaskBinding: true,
+    factualWaitingProjectedAfterThreshold: true,
     authoritativeConversationReplyReconciled: true,
-    bufferedFastReplyStreamedInChunks: true,
+    providerReplyDeltaStreamedDirectly: true,
   },
 }, null, 2)}\n`)

@@ -14,6 +14,7 @@ import { subscribeRuntimeEvents } from '../../utils/runtimeEventBus.js'
 import { getTaskStopStatus, recheckTaskStop, stopTaskWithPreview, undoTaskStop } from '../../utils/taskStopFlow.js'
 import { resolveTaskMutationGuard } from '../../utils/taskMutationGuard.js'
 import { taskRecoveryPresentation } from '../../composables/useTaskRecoveryPresentation.js'
+import { forceInterruptPausedTask, requestTaskPause, resumePausedTask } from '../../utils/taskPauseFlow.js'
 
 export function useTaskManager(props, emit) {
   const tasks = ref([])
@@ -1024,6 +1025,26 @@ export function useTaskManager(props, emit) {
       return
     }
     if (action.kind === 'resume_interrupted') return resumeInterruptedTask(task)
+    if (action.kind === 'pause') {
+      executionActionBusy.value = task.id
+      try { await requestTaskPause(task); toast.info('正在等待当前操作安全收口'); await refreshTaskWork() }
+      catch (error) { toast.error(error?.message || '暂停任务失败') }
+      finally { executionActionBusy.value = '' }
+      return
+    }
+    if (action.kind === 'resume_paused') {
+      executionActionBusy.value = task.id
+      try { await resumePausedTask(task); toast.success('已从安全暂停点继续'); await refreshTaskWork() }
+      catch (error) { toast.error(error?.message || '继续任务失败') }
+      finally { executionActionBusy.value = '' }
+      return
+    }
+    if (action.kind === 'force_interrupt') {
+      if (!await confirmDialog(`确定强制中断“${task.title || task.id}”吗？`)) return
+      await forceInterruptPausedTask(task)
+      await refreshTaskWork()
+      return
+    }
     if (action.kind === 'retry') return resendTask(task)
     if (action.kind === 'gap_continue') return autoContinueDashboardItem(item)
     if (action.kind === 'queue') return addToQueue(task.id)

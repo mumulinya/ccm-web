@@ -41,6 +41,44 @@ export declare function buildGlobalClarificationSummary(input: {
     reason: string;
     answer_suggestions: string[];
     next_action: string;
+    pre_plan_clarification: {
+        schema: string;
+        id: string;
+        scope: any;
+        scopeId: string;
+        exactSessionId: string;
+        anchorMessageId: string;
+        status: any;
+        revision: number;
+        generation: number;
+        round: number;
+        title: string;
+        headline: string;
+        questions: any[];
+        allowAdditionalNote: boolean;
+        safeDefaultsAvailable: boolean;
+        originalRequestChecksum: string;
+        contentStored: boolean;
+    };
+    prePlanClarification: {
+        schema: string;
+        id: string;
+        scope: any;
+        scopeId: string;
+        exactSessionId: string;
+        anchorMessageId: string;
+        status: any;
+        revision: number;
+        generation: number;
+        round: number;
+        title: string;
+        headline: string;
+        questions: any[];
+        allowAdditionalNote: boolean;
+        safeDefaultsAvailable: boolean;
+        originalRequestChecksum: string;
+        contentStored: boolean;
+    };
     display_policy: {
         user_text_first: boolean;
         technical_default_collapsed: boolean;

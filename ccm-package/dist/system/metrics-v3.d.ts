@@ -37,6 +37,14 @@ export declare function recordMetricV3(agent: string, data: any, now?: Date | st
         peakCpuPercent: number;
         peakRssBytes: number;
         peakChildProcessCount: number;
+        firstVisibleFeedbackMs: number;
+        firstTokenMs: number;
+        maxSilentGapMs: number;
+        providerRetryCount: number;
+        fallbackStreamCount: number;
+        initialReadFileCount: number;
+        initialReadTokens: number;
+        partialOutputBeforeCancel: boolean;
         traceId: string;
         taskId: string;
         executionId: string;
@@ -85,6 +93,16 @@ export declare function queryMetricEventsV3(filters?: any): {
             dependencyWaitMs: number;
             verificationMs: number;
             summaryMs: number;
+        };
+        streaming: {
+            firstVisibleFeedbackMs: number;
+            firstTokenMs: number;
+            maxSilentGapMs: number;
+            providerRetryCount: number;
+            fallbackStreamCount: number;
+            initialReadFileCount: number;
+            initialReadTokens: number;
+            partialOutputBeforeCancel: boolean;
         };
         resources: {
             peakCpuPercent: number;

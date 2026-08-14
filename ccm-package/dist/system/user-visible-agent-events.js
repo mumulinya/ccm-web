@@ -306,7 +306,7 @@ function toolPresentation(toolNameInput, args = {}) {
 function normalizeEventType(input) {
     const source = String(input || "").toLowerCase();
     if ([
-        "turn_started", "thinking_status", "assistant_text_delta", "assistant_progress", "requirement_plan",
+        "turn_started", "thinking_status", "assistant_text_delta", "assistant_progress", "model_activity", "requirement_plan",
         "tool_started", "tool_progress", "tool_completed", "tool_failed",
         "agent_started", "agent_progress", "agent_completed", "agent_failed",
         "permission_required", "clarification_required", "context_compacted", "result",
@@ -458,6 +458,39 @@ function normalizeUserVisibleAgentEvent(input, sequence = 0) {
                     ? { confidence: String(detailSource.progress.confidence) } : {}),
                 ...(compactText(detailSource.progress.sourceEventChecksum || detailSource.progress.source_event_checksum, 80)
                     ? { sourceEventChecksum: compactText(detailSource.progress.sourceEventChecksum || detailSource.progress.source_event_checksum, 80) } : {}),
+            },
+        } : {}),
+        ...(detailSource.modelActivity && typeof detailSource.modelActivity === "object"
+            && ["started", "waiting", "retrying", "streaming", "completed", "failed"].includes(String(detailSource.modelActivity.state))
+            && ["understanding", "tool_decision", "tool_result_review", "verification", "final_synthesis"].includes(String(detailSource.modelActivity.phase)) ? {
+            modelActivity: {
+                state: String(detailSource.modelActivity.state),
+                phase: String(detailSource.modelActivity.phase),
+                modelCallIndex: Math.max(1, Number(detailSource.modelActivity.modelCallIndex || 1)),
+                ...(Number(detailSource.modelActivity.retryAttempt) > 0 ? { retryAttempt: Math.max(1, Number(detailSource.modelActivity.retryAttempt)) } : {}),
+                startedAt: compactText(detailSource.modelActivity.startedAt, 40),
+                ...(compactText(detailSource.modelActivity.firstDeltaAt, 40) ? { firstDeltaAt: compactText(detailSource.modelActivity.firstDeltaAt, 40) } : {}),
+                safeLabel: compactText(detailSource.modelActivity.safeLabel, 120),
+                contentStored: false,
+            },
+        } : {}),
+        ...(detailSource.liveProgress && typeof detailSource.liveProgress === "object"
+            && ["starting", "running", "testing", "building", "finishing", "retrying"].includes(String(detailSource.liveProgress.phase))
+            && compactText(detailSource.liveProgress.safeSummary, 160) ? {
+            liveProgress: {
+                phase: String(detailSource.liveProgress.phase),
+                safeSummary: compactText(detailSource.liveProgress.safeSummary, 160),
+                ...(Number.isFinite(Number(detailSource.liveProgress.completed)) ? { completed: Math.max(0, Number(detailSource.liveProgress.completed)) } : {}),
+                ...(Number.isFinite(Number(detailSource.liveProgress.total)) ? { total: Math.max(0, Number(detailSource.liveProgress.total)) } : {}),
+                updatedAt: compactText(detailSource.liveProgress.updatedAt, 40) || now(),
+                contentStored: false,
+            },
+        } : {}),
+        ...(detailSource.stream && typeof detailSource.stream === "object" ? {
+            stream: {
+                sequence: Math.max(0, Number(detailSource.stream.sequence || 0)),
+                final: detailSource.stream.final === true,
+                ...(compactText(detailSource.stream.checksum, 80) ? { checksum: compactText(detailSource.stream.checksum, 80) } : {}),
             },
         } : {}),
         ...(sanitizeAvailableActions(detailSource.availableActions || detailSource.available_actions).length

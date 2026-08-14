@@ -17,6 +17,7 @@ exports.buildProjectCodeReadOnlySnapshot = buildProjectCodeReadOnlySnapshot;
 exports.buildChildAgentWorkerHandoff = buildChildAgentWorkerHandoff;
 exports.buildQueuedGroupTaskMessage = buildQueuedGroupTaskMessage;
 const db_1 = require("../../core/db");
+const workflow_decision_1 = require("../../agents/workflow-decision");
 const group_orchestrator_1 = require("./group-orchestrator");
 const project_analysis_1 = require("./project-analysis");
 const memory_1 = require("./memory");
@@ -189,8 +190,7 @@ function normalizeGroupAgentGatewayTaskIntent(fallback, coordinatorResult, messa
             agent_gateway: { runtime, dispatchPolicy, llm_backed: true, safe_stop: true, contract_invalid: true },
         };
     }
-    const delegates = workflowDecision.actionRequired
-        && ["execute_direct", "plan_task", "decompose_epic"].includes(workflowDecision.mode)
+    const delegates = (0, workflow_decision_1.isDevelopmentTaskWorkflowDecision)(workflowDecision)
         && action === "delegate"
         && assignments.length > 0;
     const analysisEligible = !delegates && workflowDecision.mode === "project_analysis";

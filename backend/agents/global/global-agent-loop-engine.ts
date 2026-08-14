@@ -15,7 +15,7 @@ import {
 } from "../runtime-kernel";
 import { projectContextSourceToolResultForPersistence } from "../../system/context-source-tool-result-projection";
 import { appendAssistantProgress, appendToolProjection, appendUserVisibleAgentEvent, appendUserVisibleRequirementPlan, buildUserVisibleAgentResult } from "../../system/user-visible-agent-events";
-import { assistantProgressNarrationEnabled, buildAssistantProgressFallback, sanitizeAssistantProgressText } from "../../system/assistant-progress";
+import { assistantProgressNarrationEnabled, buildAssistantProgressFallback, buildToolBatchOutcomeProgress, sanitizeAssistantProgressText } from "../../system/assistant-progress";
 import { loadOrchestratorConfig } from "../../modules/collaboration/group-orchestrator-config";
 import { publishUserVisibleAssistantText } from "../../system/user-visible-agent-projections";
 import {
@@ -139,14 +139,13 @@ export function emit(runtime: GlobalAgentLoopRuntime, event: any, run: GlobalAge
   try {
     const sourceType = String(event?.type || "");
     const accepted = new Set([
-      "started", "decision", "tool_started", "tool_completed", "tool_failed",
+      "started", "tool_started", "tool_completed", "tool_failed",
       "clarification_required", "confirmation_required", "completed", "failed", "cancelled", "blocked", "paused", "interrupted",
     ]);
     if (!accepted.has(sourceType) || !run.session_id) return;
     const tool = event?.tool || event?.pending_tool || {};
     const toolName = typeof tool === "string" ? tool : tool?.name;
-    const eventType = sourceType === "decision" ? "thinking_status"
-      : sourceType === "confirmation_required" ? "permission_required"
+    const eventType = sourceType === "confirmation_required" ? "permission_required"
         : ["paused", "interrupted"].includes(sourceType) ? "result"
         : sourceType;
     const finalFileChanges = (() => {
@@ -179,6 +178,12 @@ export function emit(runtime: GlobalAgentLoopRuntime, event: any, run: GlobalAge
       ? run.steps.reduce((sum, step) => sum + (step.tool ? Math.max(0, Number(step.duration_ms || 0)) : 0), 0)
       : 0;
     const otherDurationMs = result ? Math.max(0, totalDurationMs - modelDurationMs - toolWallDurationMs) : 0;
+    const globalAcceptancePassed = !!run.mission_id && (
+      run.final_report?.acceptance_gate_passed === true
+      || run.final_delivery_report?.acceptance_gate_passed === true
+      || run.workchain?.completion_summary?.acceptance_gate_passed === true
+      || run.workchain?.delivery_report?.acceptance_gate_passed === true
+    );
     const eventInput = {
       eventId: `global:${run.id}:${sourceType}:${tool?.signature || event?.step?.index || run.steps.length}`,
       scope: "global",
@@ -199,11 +204,13 @@ export function emit(runtime: GlobalAgentLoopRuntime, event: any, run: GlobalAge
       result,
       fileChanges: result ? finalFileChanges : undefined,
       usage: result ? run.usage : undefined,
-      detail: result ? { timing: { totalMs: totalDurationMs, modelMs: modelDurationMs, toolWallMs: toolWallDurationMs, otherMs: otherDurationMs } } : undefined,
+      detail: result ? {
+        timing: { totalMs: totalDurationMs, modelMs: modelDurationMs, toolWallMs: toolWallDurationMs, otherMs: otherDurationMs },
+        ...(run.mission_id ? { terminalGate: { passed: globalAcceptancePassed, accepted: globalAcceptancePassed, source: "task_ledger" } } : {}),
+      } : undefined,
       display: {
         title: sourceType === "started" ? "全局 Agent"
-          : sourceType === "decision" ? "正在思考"
-            : sourceType === "confirmation_required" ? "需要操作确认"
+          : sourceType === "confirmation_required" ? "需要操作确认"
               : sourceType === "clarification_required" ? "需要补充信息"
                 : sourceType === "completed" ? "回复完成"
                   : undefined,
@@ -1027,6 +1034,24 @@ async function continueLoop(run: GlobalAgentRun, runtime: GlobalAgentLoopRuntime
   activeRunObjects.set(run.id, run);
   const runAbortController = new AbortController();
   activeRunAbortControllers.set(run.id, runAbortController);
+  const pauseAtSafeBoundary = (reply = "已在最近安全检查点暂停，运行上下文已经保留。") => {
+    if (!pauseRequests.delete(run.id)) return null;
+    run.status = "paused";
+    (run as any).pause_control = {
+      schema: "ccm-global-run-pause-control-v1",
+      state: "paused",
+      sequence: Math.max(0, Number((run as any).pause_control?.sequence || 0)),
+      requested_at: String((run as any).pause_control?.requested_at || nowIso(runtime)),
+      paused_at: nowIso(runtime),
+      phase: run.phase,
+      contentStored: false,
+    };
+    run.updated_at = nowIso(runtime);
+    saveRun(run, runtime.persist !== false);
+    appendTraceEvent(run.trace_id, { id: `${run.id}:paused:${run.updated_at}`, type: "global_agent.paused", status: "warning", message: reply, data: { phase: run.phase, pause_sequence: (run as any).pause_control.sequence } });
+    emit(runtime, { type: "paused", reply }, run);
+    return run;
+  };
   try {
     run.status = "running";
     run.updated_at = nowIso(runtime);
@@ -1037,14 +1062,8 @@ async function continueLoop(run: GlobalAgentRun, runtime: GlobalAgentLoopRuntime
 
     while (run.status === "running") {
       if (cancelRequests.delete(run.id)) return completeRun(run, runtime, "cancelled", "用户已取消本次运行。", "user_cancelled");
-      if (pauseRequests.delete(run.id)) {
-        run.status = "paused";
-        run.updated_at = nowIso(runtime);
-        saveRun(run, runtime.persist !== false);
-        appendTraceEvent(run.trace_id, { id: `${run.id}:paused:${run.updated_at}`, type: "global_agent.paused", status: "warning", message: "我已暂停这次运行" });
-        emit(runtime, { type: "paused", reply: "我已暂停这次运行。" }, run);
-        return run;
-      }
+      const pausedAtLoopBoundary = pauseAtSafeBoundary();
+      if (pausedAtLoopBoundary) return pausedAtLoopBoundary;
       applyPendingGlobalAgentUserSteers(run, runtime);
       const now = runtime.now ? runtime.now() : Date.now();
       if (now > Date.parse(run.deadline_at)) return completeRun(run, runtime, "failed", "本次运行已达到执行时间上限，我已安全停止。", "deadline_exceeded");
@@ -1064,17 +1083,14 @@ async function continueLoop(run: GlobalAgentRun, runtime: GlobalAgentLoopRuntime
           run.model_duration_ms = Math.max(0, Number(run.model_duration_ms || 0))
             + Math.max(0, (runtime.now ? runtime.now() : Date.now()) - modelStartedAt);
         }
+        const pausedAfterModel = pauseAtSafeBoundary();
+        if (pausedAfterModel) return pausedAfterModel;
         if (applyPendingGlobalAgentUserSteers(run, runtime).length) continue;
         decision = parseGlobalAgentDecision(rawDecision, run.workflow_decision || run.workflowDecision || null);
       } catch (error: any) {
         if (cancelRequests.delete(run.id)) return completeRun(run, runtime, "cancelled", "用户已取消本次运行。", "user_cancelled");
-        if (pauseRequests.delete(run.id)) {
-          run.status = "paused";
-          run.updated_at = nowIso(runtime);
-          saveRun(run, runtime.persist !== false);
-          emit(runtime, { type: "interrupted", reply: "当前执行已停止，运行上下文已经保留。" }, run);
-          return run;
-        }
+        const pausedAfterModelFailure = pauseAtSafeBoundary();
+        if (pausedAfterModelFailure) return pausedAfterModelFailure;
         if (applyPendingGlobalAgentUserSteers(run, runtime).length) continue;
         const fallback = runtime.fallbackDecision ? await runtime.fallbackDecision(run, error) : null;
         if (!fallback) return completeRun(run, runtime, "failed", `我暂时无法形成可靠决策：${error?.message || error}`, error?.message || String(error));
@@ -1286,7 +1302,9 @@ async function continueLoop(run: GlobalAgentRun, runtime: GlobalAgentLoopRuntime
       }
       const receiptAuthorization = globalWriteAuthorizationAllowsTool({ run, tool: decision.tool.name, args, risk });
       const approved = run.approved_tool_signatures.includes(signature) || permission.allowed;
-      const requiresUserConfirmation = (risk === "write" && !receiptAuthorization.allowed && !approved) || (risk === "high" && !approved);
+      const requiresUserConfirmation = ((run as any).pre_plan_clarification_resolved === true && risk !== "read")
+        || (risk === "write" && !receiptAuthorization.allowed && !approved)
+        || (risk === "high" && !approved);
       // 点歌/导航等 UI 副作用：即使模型把 intent 标成 execution，也不挂「执行前计划」脚手架
       const lightUiTool = LIGHT_UI_TOOL_NAMES.includes(String(decision.tool.name || ""));
       const shouldExposePlanMode = !lightUiTool && (
@@ -1407,6 +1425,8 @@ async function continueLoop(run: GlobalAgentRun, runtime: GlobalAgentLoopRuntime
         });
       }
       markGlobalAgentToolTodo(run, decision.tool.name, "in_progress", step.message || `执行 ${decision.tool.name}`);
+      const pausedBeforeTool = pauseAtSafeBoundary();
+      if (pausedBeforeTool) return pausedBeforeTool;
       recordGlobalAgentRuntimeOutput(run, { type: "tool_started", tool: decision.tool.name, risk, arguments: args });
       emit(runtime, { type: "tool_started", tool: step.tool, message: step.message }, run);
       emit(runtime, { type: "tool_activity", phase: "started", tool: decision.tool.name, risk, step: step.index }, run);
@@ -1534,6 +1554,19 @@ async function continueLoop(run: GlobalAgentRun, runtime: GlobalAgentLoopRuntime
         recordGlobalAgentRuntimeOutput(run, { type: "tool_completed", tool: decision.tool.name, sourceToolName: decision.tool.name === "invoke_mcp" ? (args?.tool_name || args?.toolName || "") : "", risk, duration_ms: step.duration_ms, observation: step.observation });
         markGlobalAgentToolTodo(run, decision.tool.name, toolSucceeded ? "done" : "blocked", toolSucceeded ? `${decision.tool.name} 完成` : String(result?.error || `${decision.tool.name} 返回失败`));
         emit(runtime, { type: "tool_completed", tool: step.tool, observation: step.observation }, run);
+        if (toolSucceeded && assistantProgressNarrationEnabled(progressConfig)) {
+          const outcomeProgress = buildToolBatchOutcomeProgress([{ name: decision.tool.name, ok: true, output: result }], {
+            target: decision.intent?.target_refs?.[0] || summarizeGlobalToolTarget(args),
+          });
+          if (outcomeProgress) appendAssistantProgress({
+            scope: "global", scopeId: "global", exactSessionId: run.session_id,
+            generation: Math.max(0, Number(run.resume_count || 0)),
+            anchorMessageId: `gam_${String(run.id || "result")}_assistant`,
+            taskId: run.mission_id || undefined, turnId: run.id,
+            text: outcomeProgress, kind: "key_finding", modelCallIndex: run.model_calls,
+            relatedToolCallIds: [signature], title: "全局 Agent",
+          });
+        }
         if (!toolSucceeded && assistantProgressNarrationEnabled(progressConfig)) appendAssistantProgress({
           scope: "global", scopeId: "global", exactSessionId: run.session_id,
           generation: Math.max(0, Number(run.resume_count || 0)),
@@ -1590,6 +1623,8 @@ async function continueLoop(run: GlobalAgentRun, runtime: GlobalAgentLoopRuntime
       run.pending_tool = null;
       run.updated_at = nowIso(runtime);
       saveRun(run, runtime.persist !== false);
+      const pausedAfterTool = pauseAtSafeBoundary();
+      if (pausedAfterTool) return pausedAfterTool;
       if (acceptedSupervision) {
         return completeRun(run, runtime, "completed", decision.message || "全局任务已派发并进入持续跟进。");
       }
@@ -1820,9 +1855,21 @@ export async function resumeGlobalAgentRun(id: string, runtime: GlobalAgentLoopR
     saveRun(run, runtime.persist !== false);
   } else {
     const resumedAt = nowIso(runtime);
+    const resumedFromPause = run.status === "paused";
     applyGlobalResumeFeedback(run, runtime, options.feedback || options.acceptFeedback || "", { source: options.source || options.resumeSource || "user" });
     run.status = "running";
-    run.resume_count += 1;
+    if (!resumedFromPause) run.resume_count += 1;
+    if (resumedFromPause) {
+      pauseRequests.delete(run.id);
+      (run as any).last_pause_control = (run as any).pause_control || null;
+      (run as any).pause_control = {
+        ...((run as any).pause_control || {}),
+        state: "resuming",
+        resumed_at: resumedAt,
+        contentStored: false,
+      };
+      appendTraceEvent(run.trace_id, { id: `${run.id}:resumed:${resumedAt}`, type: "global_agent.resumed_from_pause", status: "ok", message: "已从暂停处原位继续", data: { phase: run.phase, pause_sequence: (run as any).pause_control?.sequence || 0 } });
+    }
     run.updated_at = resumedAt;
     saveRun(run, runtime.persist !== false);
   }
@@ -1865,6 +1912,8 @@ export async function continueGlobalAgentRunWithClarification(id: string, answer
     (run as any).sourceExecutionWaiver = (run as any).source_execution_waiver;
   }
   run.explicit_write_authorization = currentAuthorization || inheritedAuthorization;
+  (run as any).pre_plan_clarification_resolved = true;
+  (run as any).prePlanClarificationResolved = true;
   if (options.writeAuthorizationReceipt) {
     (run as any).write_authorization_receipt = options.writeAuthorizationReceipt;
     (run as any).writeAuthorizationReceipt = options.writeAuthorizationReceipt;
@@ -1891,14 +1940,18 @@ export function pauseGlobalAgentRun(id: string) {
   if (!stored) throw new Error("全局 Agent 运行不存在");
   if (stored.status !== "running") return stored;
   pauseRequests.add(id);
-  activeRunAbortControllers.get(id)?.abort(new Error("用户停止当前全局 Agent 执行"));
-  const run = normalizeRun(stored);
-  run.status = "paused";
-  run.clarification_summary = null;
-  run.confirmation_summary = null;
+  const run = activeRunObjects.get(id) || normalizeRun(stored);
+  (run as any).pause_control = {
+    schema: "ccm-global-run-pause-control-v1",
+    state: "requested",
+    sequence: Math.max(0, Number((run as any).pause_control?.sequence || 0)) + 1,
+    requested_at: new Date().toISOString(),
+    phase: run.phase,
+    contentStored: false,
+  };
   run.updated_at = new Date().toISOString();
   saveRun(run, !volatileRuns.has(id));
-  appendTraceEvent(run.trace_id, { id: `${run.id}:paused:${run.updated_at}`, type: "global_agent.paused", status: "warning", message: "我已暂停这次运行" });
+  appendTraceEvent(run.trace_id, { id: `${run.id}:pause-requested:${run.updated_at}`, type: "global_agent.pause_requested", status: "warning", message: "正在暂停，等待当前操作安全收口", data: { phase: run.phase, pause_sequence: (run as any).pause_control.sequence } });
   return run;
 }
 
@@ -1928,6 +1981,20 @@ export async function recoverInterruptedGlobalAgentRuns(runtime: GlobalAgentLoop
   const results: any[] = [];
   for (const stored of candidates) {
     const run = normalizeRun(stored);
+    if (["requested", "quiescing", "paused"].includes(String((run as any).pause_control?.state || ""))) {
+      run.status = "paused";
+      (run as any).pause_control = {
+        ...(run as any).pause_control,
+        state: "paused",
+        paused_at: (run as any).pause_control?.paused_at || nowIso(runtime),
+        pending_writer_count: 0,
+      };
+      run.updated_at = nowIso(runtime);
+      saveRun(run, runtime.persist !== false);
+      appendTraceEvent(run.trace_id, { id: `${run.id}:pause-recovered:${run.updated_at}`, type: "global_agent.pause_recovered", status: "warning", message: "服务重启后保持安全暂停，不自动续跑" });
+      results.push(run);
+      continue;
+    }
     if (Date.now() > Date.parse(run.deadline_at)) {
       recordReasoningRecoveryCheck(run.reasoning_loop, { reason: "服务重启恢复时已超过截止时间", goalRevalidated: true, stateRevalidated: false, acceptanceRevalidated: false, remainingGaps: ["执行时间预算已耗尽"] });
       results.push(completeRun(run, runtime, "failed", "服务重启后发现运行已超过时间预算，已安全终止。", "recovery_deadline_exceeded"));

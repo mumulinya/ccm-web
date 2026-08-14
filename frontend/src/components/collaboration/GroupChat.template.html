@@ -112,15 +112,8 @@
                   @execution-action="handleTaskCardAction(msg, $event)"
                 />
                 <CommandResultCard v-if="msg.type === 'command_result'" :result="msg.commandResult" />
-                <!-- 思考过程消息 -->
-                <template v-else-if="msg.role === 'thinking'">
-                  <ConversationProcessingState
-                    v-if="!groupTaskExecutionActive && shouldShowCompactProcessingState(groupAgentExecutionEvents, messages, i)"
-                    compact
-                    title="正在思考…"
-                    detail=""
-                  />
-                </template>
+                <!-- 旧 thinking 信封保持静默；10 秒后的事实状态由统一执行投影原位展示。 -->
+                <template v-else-if="msg.role === 'thinking'"></template>
                 <!-- 用户消息 -->
                 <div v-else-if="msg.role === 'user'" class="bubble">
                   <div v-html="highlightMentions(msg.content)"></div>
@@ -144,12 +137,6 @@
                   :message-key="`${currentGroupSessionId || 'session'}:${getGroupMessageKey(msg)}`"
                   @action="runAgentQaAction(msg, $event)"
                 />
-                <ConversationProcessingState
-                  v-else-if="msg.role === 'assistant' && msg.streaming && !groupTaskExecutionActive && shouldShowCompactProcessingState(groupAgentExecutionEvents, messages, i)"
-                  compact
-                  title="正在思考…"
-                  :detail="msg.processingDetail || '正在理解你的问题并检查群聊上下文'"
-                />
                 <!-- Agent 回复 -->
                 <AgentExecutionMessage
                   v-else
@@ -167,7 +154,7 @@
                   :work-events="getWorkEvents(msg)"
                   :main-agent="isGroupMainAgentMessage(msg)"
                   :file-changes-title="getFileChangesTitle(msg.fileChanges)"
-                  :hide-file-changes="hasTerminalExecutionForMessage(groupAgentExecutionEvents, messages, i)"
+                  :hide-file-changes="hasAcceptedExecutionForMessage(groupAgentExecutionEvents, messages, i)"
                   :workflow-steps="workflowSteps"
                   :get-plan-title="getPlanTitle"
                   :get-execution-order-label="getExecutionOrderLabel"
@@ -232,11 +219,24 @@
         <!-- 输入栏 -->
         <div v-if="currentGroup" class="composer-region">
           <div class="composer-inner">
+            <ConversationAwayRecap
+              :events="groupAgentExecutionEvents"
+              scope="group"
+              :scope-id="currentGroup?.id || ''"
+              :exact-session-id="currentGroupSessionId || ''"
+            />
+            <PrePlanClarificationDock
+              :clarification="activeGroupPrePlanClarification"
+              :busy="prePlanClarificationBusy"
+              @submit="submitGroupPrePlanClarification"
+              @defaults="submitGroupPrePlanClarification"
+              @cancel="cancelGroupPrePlanClarification"
+            />
             <ActiveTaskPlanDock
               :events="groupAgentExecutionEvents"
               :messages="messages"
               :exact-session-id="currentGroupSessionId || ''"
-              :active="groupAgentExecutionEnabled && !!currentGroupSessionId"
+              :active="groupAgentExecutionEnabled && !!currentGroupSessionId && !activeGroupPrePlanClarification"
               @locate="locateGroupPlanStep"
               @execution-action="handleGroupPlanAction"
             />
@@ -247,6 +247,7 @@
               @stop="stopGroupCurrentWork()"
               @cancel="groupTurnControl.cancel"
               @guide="guideGroupQueuedTurn"
+              @resolve-route="resolveGroupQueuedRoute"
               @retry="(turn) => groupTurnControl.retry(turn).then(() => drainGroupTurnQueue())"
             />
             <ConversationAsideDock
@@ -254,12 +255,6 @@
               :scope-id="currentGroup?.id || ''"
               :exact-session-id="currentGroupSessionId || ''"
               :active="groupTurnBusy && !!currentGroupSessionId"
-            />
-            <ConversationPermissionMode
-              scope="group"
-              :scope-id="currentGroup?.id || ''"
-              :exact-session-id="currentGroupSessionId || ''"
-              :disabled="!currentGroup || !currentGroupSessionId"
             />
             <ConversationHistoryBranches
               scope="group"
@@ -294,14 +289,21 @@
                   <strong :title="pendingGroupClarificationInput?.title">{{ pendingGroupClarificationInput?.title }}</strong>
                   <button type="button" title="取消回答并发送新消息" aria-label="取消回答并发送新消息" @click="cancelGroupClarificationInput">×</button>
                 </div>
-                <div v-else class="message-mode" aria-label="消息模式">
-                  <button type="button" :class="{ active: messageMode === 'conversation' }" @click="messageMode = 'conversation'">对话</button>
-                  <button type="button" :class="{ active: messageMode === 'project_analysis' }" @click="messageMode = 'project_analysis'">项目分析</button>
-                  <button type="button" :class="{ active: messageMode === 'project_task' }" @click="messageMode = 'project_task'">项目任务</button>
-                </div>
+              </template>
+              <template #toolbar>
+                <ConversationModeToolbar
+                  scope="group"
+                  :scope-id="currentGroup?.id || ''"
+                  :exact-session-id="currentGroupSessionId || ''"
+                  :mode-disabled="!currentGroup || !currentGroupSessionId || groupTurnBusy"
+                  :permission-disabled="!currentGroup || !currentGroupSessionId"
+                />
               </template>
               <template #context>
                 <SessionContextUsage
+                  scope="group"
+                  :scope-id="currentGroup?.id || ''"
+                  :exact-session-id="currentGroupSessionId || ''"
                   :usage="groupContextUsage"
                   :loading="groupContextLoading"
                   :error="groupContextError"

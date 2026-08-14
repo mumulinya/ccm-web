@@ -1,18 +1,75 @@
 <script setup>
-import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { ChevronDown, Gauge, RefreshCw, X } from '@lucide/vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { Bot, ChevronDown, CircleDollarSign, FolderGit2, Gauge, RefreshCw, X } from '@lucide/vue'
+import { subscribeRuntimeEvents } from '../../utils/runtimeEventBus.js'
 
 const props = defineProps({
   usage: { type: Object, default: null },
   loading: { type: Boolean, default: false },
   error: { type: String, default: '' },
   compacting: { type: Boolean, default: false },
+  scope: { type: String, default: '' },
+  scopeId: { type: String, default: '' },
+  exactSessionId: { type: String, default: '' },
 })
 
 const emit = defineEmits(['refresh'])
 const rootEl = ref(null)
 const detailsOpen = ref(false)
+const activeTab = ref('overview')
+const runtimeStatus = ref(null)
+const runtimeLoading = ref(false)
+const runtimeError = ref('')
+const expandedProjects = ref(new Set())
+let runtimeTimer = null
+let unsubscribeRuntimeEvents = null
 const expandedCatalogKeys = ref(new Set())
+const formatUsd = value => Number.isFinite(Number(value)) ? `$${Number(value).toFixed(Number(value) < 0.01 ? 4 : 2)}` : '未提供'
+const runtimeUsage = computed(() => runtimeStatus.value?.usage || {})
+const runtimeTokenLabel = computed(() => {
+  if (runtimeUsage.value?.source !== 'provider_reported') return '未提供'
+  const input = Number(runtimeUsage.value?.inputTokens)
+  const output = Number(runtimeUsage.value?.outputTokens)
+  if (!Number.isFinite(input) && !Number.isFinite(output)) return '未提供'
+  return `${formatTokens(Number.isFinite(input) ? input : 0)} 输入 · ${formatTokens(Number.isFinite(output) ? output : 0)} 输出`
+})
+const workspaceSummary = computed(() => {
+  const projects = runtimeStatus.value?.projects || []
+  if (!projects.length) return '当前会话没有可读取的项目状态'
+  const changed = projects.filter(project => project.dirty).length
+  const conflict = projects.filter(project => project.risk === 'conflict').length
+  if (conflict) return `${projects.length} 个项目 · ${conflict} 个分支存在冲突风险`
+  if (changed) return `${projects.length} 个项目 · ${changed} 个工作区有改动`
+  return `${projects.length} 个项目 · 工作区正常`
+})
+const projectExpanded = id => expandedProjects.value.has(id)
+const toggleProject = id => {
+  const next = new Set(expandedProjects.value)
+  if (next.has(id)) next.delete(id); else next.add(id)
+  expandedProjects.value = next
+}
+const loadRuntimeStatus = async () => {
+  if (!props.scope || !props.scopeId || !props.exactSessionId || runtimeLoading.value) return
+  runtimeLoading.value = true
+  runtimeError.value = ''
+  try {
+    const params = new URLSearchParams({ scope: props.scope, scope_id: props.scopeId, exact_session_id: props.exactSessionId })
+    const response = await fetch(`/api/conversations/runtime-status?${params.toString()}`, { cache: 'no-store' })
+    const payload = await response.json().catch(() => ({}))
+    if (!response.ok || !payload?.success) throw new Error(payload?.error || '会话状态读取失败')
+    runtimeStatus.value = payload.status || null
+  } catch (error) {
+    runtimeError.value = error?.message || '会话状态读取失败'
+  } finally {
+    runtimeLoading.value = false
+  }
+}
+const scheduleRuntimeRefresh = () => {
+  if (runtimeTimer) window.clearInterval(runtimeTimer)
+  runtimeTimer = null
+  if (!detailsOpen.value || !runtimeStatus.value?.task || ['done', 'failed', 'cancelled', 'canceled'].includes(String(runtimeStatus.value.task.state || '').toLowerCase())) return
+  runtimeTimer = window.setInterval(loadRuntimeStatus, 10000)
+}
 
 const currentTokens = computed(() => Math.max(0, Number(props.usage?.currentTokens || 0)))
 const contextWindow = computed(() => Math.max(0, Number(props.usage?.effectiveContextWindow || 0)))
@@ -202,6 +259,8 @@ const thresholdPercent = computed(() => autoCompactThreshold.value > 0 && contex
 const toggleDetails = () => {
   detailsOpen.value = !detailsOpen.value
   emit('refresh')
+  if (detailsOpen.value) loadRuntimeStatus()
+  scheduleRuntimeRefresh()
 }
 const onRootKeydown = event => {
   if (event.key === 'Escape') {
@@ -216,8 +275,16 @@ const onRootKeydown = event => {
 const closeDetails = event => {
   if (rootEl.value && !rootEl.value.contains(event.target)) detailsOpen.value = false
 }
-onMounted(() => document.addEventListener('pointerdown', closeDetails))
-onUnmounted(() => document.removeEventListener('pointerdown', closeDetails))
+onMounted(() => {
+  document.addEventListener('pointerdown', closeDetails)
+  unsubscribeRuntimeEvents = subscribeRuntimeEvents(['task'], event => {
+    if (event?.type === 'task.changed' && detailsOpen.value) loadRuntimeStatus()
+  })
+})
+onUnmounted(() => { document.removeEventListener('pointerdown', closeDetails); unsubscribeRuntimeEvents?.(); if (runtimeTimer) window.clearInterval(runtimeTimer) })
+watch(() => [props.scope, props.scopeId, props.exactSessionId], () => { runtimeStatus.value = null; if (detailsOpen.value) loadRuntimeStatus() })
+watch(() => runtimeStatus.value?.task?.state, scheduleRuntimeRefresh)
+watch(detailsOpen, scheduleRuntimeRefresh)
 </script>
 
 <template>
@@ -237,9 +304,33 @@ onUnmounted(() => document.removeEventListener('pointerdown', closeDetails))
     <span>{{ usage ? contextPercentLabel : '--' }}</span>
     <div v-if="detailsOpen" class="context-usage-popover" role="dialog" aria-label="当前会话上下文详情" @click.stop>
       <header class="context-popover-header">
-        <div><span>CONTEXT</span><strong>{{ usage ? `${contextPercentLabel} 本轮载荷` : stateLabel }}</strong></div>
+        <div><span>SESSION STATUS</span><strong>{{ runtimeStatus?.task?.title || sessionLabel }}</strong></div>
         <button type="button" class="context-popover-close" aria-label="关闭上下文详情" @click="detailsOpen = false"><X :size="14" /></button>
       </header>
+      <nav class="context-popover-tabs" aria-label="会话状态页签">
+        <button type="button" :class="{ active: activeTab === 'overview' }" :aria-current="activeTab === 'overview' ? 'page' : undefined" @click="activeTab = 'overview'">概览</button>
+        <button type="button" :class="{ active: activeTab === 'context' }" :aria-current="activeTab === 'context' ? 'page' : undefined" @click="activeTab = 'context'">上下文</button>
+        <button type="button" class="context-runtime-refresh" title="刷新会话状态" @click="loadRuntimeStatus"><RefreshCw :size="12" :class="{ spinning: runtimeLoading }" /></button>
+      </nav>
+      <section v-if="activeTab === 'overview'" class="context-runtime-overview">
+        <div v-if="runtimeStatus" class="context-runtime-grid">
+          <article><Bot :size="15" /><span><small>当前模型</small><strong>{{ runtimeStatus.model?.displayName || '未提供' }}</strong><em v-if="runtimeStatus.model?.effort">{{ runtimeStatus.model.effort }}</em></span></article>
+          <article><Gauge :size="15" /><span><small>任务阶段</small><strong>{{ runtimeStatus.task?.stage || '当前无正式任务' }}</strong><em v-if="runtimeStatus.task?.state">{{ runtimeStatus.task.state }}</em></span></article>
+          <article><CircleDollarSign :size="15" /><span><small>本轮真实用量</small><strong>{{ runtimeTokenLabel }}</strong><em>{{ formatUsd(runtimeUsage.totalCostUsd) }}</em></span></article>
+          <article><FolderGit2 :size="15" /><span><small>工作区</small><strong>{{ workspaceSummary }}</strong><em>{{ contextPercentLabel }} 上下文</em></span></article>
+        </div>
+        <div v-if="runtimeStatus?.projects?.length" class="context-runtime-projects">
+          <button v-for="project in runtimeStatus.projects" :key="project.id" type="button" :class="['context-runtime-project', `risk-${project.risk}`]" :aria-expanded="projectExpanded(project.id)" @click="toggleProject(project.id)">
+            <span class="context-runtime-project-main"><FolderGit2 :size="13" /><b>{{ project.name }}</b><small>{{ project.branch || 'Git 不可用' }}</small></span>
+            <span>{{ project.dirty ? `${project.changedFiles} 个改动` : project.risk === 'unavailable' ? '状态不可用' : '干净' }}</span>
+            <ChevronDown :size="13" :class="{ expanded: projectExpanded(project.id) }" />
+            <small v-if="projectExpanded(project.id)" class="context-runtime-project-detail">领先 {{ project.ahead || 0 }} · 落后 {{ project.behind || 0 }} · {{ project.risk === 'conflict' ? '分支存在冲突风险' : project.dirty ? '存在未提交改动' : project.risk === 'unavailable' ? '无法读取仓库状态' : '工作区正常' }}</small>
+          </button>
+        </div>
+        <small v-if="runtimeLoading && !runtimeStatus" class="context-popover-empty">正在读取会话状态...</small>
+        <small v-else-if="runtimeError && !runtimeStatus" class="context-popover-empty">{{ runtimeError }}</small>
+      </section>
+      <template v-if="activeTab === 'context'">
       <div v-if="usage" class="context-popover-session">{{ sessionLabel }}<span>{{ compactStateLabel }}</span></div>
       <div v-if="usage" class="context-popover-total"><span>最近完整模型载荷</span><b>~{{ formatTokens(currentTokens) }} / {{ formatTokens(contextWindow) }} Tokens</b></div>
       <div v-if="usage" class="context-continuity-note">
@@ -286,6 +377,7 @@ onUnmounted(() => document.removeEventListener('pointerdown', closeDetails))
         <span><strong>更新于</strong>{{ tokenUpdatedAt }}</span>
       </div>
       <small v-else class="context-popover-empty">{{ error || '正在读取当前会话...' }}</small>
+      </template>
     </div>
   </div>
 </template>
@@ -346,6 +438,27 @@ onUnmounted(() => document.removeEventListener('pointerdown', closeDetails))
 }
 .context-popover-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; min-width: 0; padding-bottom: 11px; border-bottom: 1px solid var(--border-color); }
 .context-popover-header div { display: grid; min-width: 0; gap: 5px; }.context-popover-header span { color: var(--text-muted); font-family: var(--font-mono, monospace); font-size: 10px; letter-spacing: 0; }.context-popover-header strong { color: var(--text-primary); font-size: 14px; font-weight: 750; overflow-wrap: anywhere; }
+.context-popover-tabs { display: flex; align-items: center; gap: 4px; padding: 9px 0; border-bottom: 1px solid var(--border-color); }
+.context-popover-tabs button { height: 27px; padding: 0 10px; border: 0; border-radius: 6px; color: var(--text-muted); background: transparent; font-size: 10px; font-weight: 650; cursor: pointer; }
+.context-popover-tabs button.active { color: var(--text-primary); background: var(--panel-muted); }
+.context-popover-tabs .context-runtime-refresh { width: 27px; margin-left: auto; padding: 0; display: inline-grid; place-items: center; }
+.context-runtime-refresh .spinning { animation: context-spin .9s linear infinite; }
+.context-runtime-overview { display: grid; gap: 11px; padding-top: 11px; }
+.context-runtime-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+.context-runtime-grid article { min-width: 0; display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 5px; padding: 9px; border: 1px solid color-mix(in srgb, var(--border-color) 75%, transparent); border-radius: 7px; background: color-mix(in srgb, var(--surface) 97%, transparent); }
+.context-runtime-grid article > svg { margin-top: 2px; color: var(--text-muted); }
+.context-runtime-grid article span { min-width: 0; display: grid; gap: 2px; }
+.context-runtime-grid small { color: var(--text-muted); font-size: 8px; }
+.context-runtime-grid strong { min-width: 0; overflow: hidden; color: var(--text-primary); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.context-runtime-grid em { color: var(--text-muted); font-size: 8px; font-style: normal; }
+.context-runtime-projects { display: grid; border-top: 1px solid var(--border-color); }
+.context-runtime-project { width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) auto 16px; align-items: center; gap: 7px; padding: 8px 2px; border: 0; border-bottom: 1px solid color-mix(in srgb, var(--border-color) 70%, transparent); color: var(--text-secondary); background: transparent; font: inherit; font-size: 9px; text-align: left; cursor: pointer; }
+.context-runtime-project-main { min-width: 0; display: grid; grid-template-columns: 18px minmax(0, auto) minmax(0, 1fr); align-items: center; gap: 4px; }
+.context-runtime-project-main b { overflow: hidden; color: var(--text-primary); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.context-runtime-project-main small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.context-runtime-project > svg { transition: transform .16s ease; }.context-runtime-project > svg.expanded { transform: rotate(180deg); }
+.context-runtime-project-detail { grid-column: 1 / -1; padding-left: 22px; color: var(--text-muted); line-height: 1.45; }
+.context-runtime-project.risk-conflict > span:nth-child(2) { color: #dc2626; }.context-runtime-project.risk-changed > span:nth-child(2) { color: #b45309; }
 .context-popover-close { width: 24px; height: 24px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 50%; background: var(--panel-muted); color: var(--text-muted); cursor: pointer; }.context-popover-close:hover { background: var(--control-hover); color: var(--accent-green); }
 .context-popover-session { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 0 4px; color: var(--text-muted); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.context-popover-session span { flex: 0 0 auto; color: var(--accent-green); font-size: 10px; font-weight: 700; }
 .context-popover-total { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 10px; min-width: 0; padding: 7px 0 8px; color: var(--text-muted); font-size: 10px; }.context-popover-total b { color: var(--text-primary); font-family: var(--font-mono, monospace); font-size: 11px; font-weight: 600; white-space: nowrap; }
@@ -364,5 +477,6 @@ onUnmounted(() => document.removeEventListener('pointerdown', closeDetails))
 @media (max-width: 520px) {
   .session-context-usage { min-width: 46px; padding: 0 6px; }
   .context-usage-popover { position: fixed; right: 12px; bottom: 82px; left: 12px; width: auto; max-height: calc(100vh - 106px); overflow: auto; }
+  .context-runtime-grid { grid-template-columns: 1fr; }
 }
 </style>

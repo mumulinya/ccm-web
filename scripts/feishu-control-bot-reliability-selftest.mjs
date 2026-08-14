@@ -34,8 +34,7 @@ assert.ok(adapterSource.includes("acpSessionId: sessionId"), "global ACP calls m
 assert.ok(globalApiSource.includes("resolveControlBotAcpPlatformContext"), "global ACP sessions must resolve the Feishu user identity from cc-connect state");
 assert.ok(globalApiSource.includes("platform_message_id: threadId"), "global ACP identity must expose the exact Feishu root message id");
 assert.ok(projectSessionsSource.includes("latest_message_id: threadId"), "project ACP targets must expose the exact Feishu root message id");
-assert.ok(globalApiSource.includes("beginFeishuReactionFeedback") && globalApiSource.includes('finishReaction("completed")'), "global Agent feedback must start after ACP resolution and finish after processing");
-assert.ok(adapterSource.includes('postFeishuReactionFeedback("start"') && adapterSource.includes('postFeishuReactionFeedback("finish"'), "project ACP must use non-blocking CCM reaction feedback");
+assert.ok(globalApiSource.includes("!isAcp") && globalApiSource.includes("cc-connect owns the ACP reaction lifecycle"), "global ACP reactions must be owned by cc-connect at the exact inbound boundary");
 assert.ok(reactionFeedbackSource.includes("AbortSignal.timeout(timeoutMs)"), "Feishu reaction API calls must have a hard timeout");
 assert.ok(reactionFeedbackSource.includes("仅允许签名飞书 ACP 调用"), "reaction feedback API must require signed ACP identity");
 assert.ok(adapterSource.includes("buildInternalApiHeaders"), "ACP calls must use the signed internal API identity");
@@ -45,10 +44,11 @@ assert.ok(adapterSource.includes("writeBatchAsync"), "ACP text and end_turn must
 assert.ok(adapterSource.includes("agent_thinking_chunk"), "ACP must keep a long-running turn alive without emitting a visible answer chunk");
 assert.ok(adapterSource.includes("enqueueOutput"), "all ACP stdout frames must share one serialized writer");
 assert.ok(projectSource.includes("const command = process.execPath"), "cc-connect must launch the Node ACP directly without a second Windows line proxy");
-assert.ok(projectSource.includes("disableBlockingFeishuReaction(runtimeContent)"), "existing project configs must disable blocking reactions in private runtime copies");
-assert.ok((projectSource.match(/reaction_emoji = "none"/g) || []).length >= 3, "global, project create, and project update configs must disable Feishu reactions");
+assert.ok(projectSource.includes("configureNativeFeishuReactionFeedback(runtimeContent)"), "existing project configs must enable native Feishu reactions in private runtime copies");
+assert.ok((projectSource.match(/reaction_emoji = "OnIt"/g) || []).length >= 3, "global, project create, and project update configs must acknowledge incoming Feishu messages");
+assert.ok((projectSource.match(/done_emoji = "Done"/g) || []).length >= 3, "global, project create, and project update configs must mark successful completion");
 
-const { disableBlockingFeishuReaction, disableVisibleCcConnectIdleRotation } = await import(pathToFileURL(runtimeConfigFile).href);
+const { configureNativeFeishuReactionFeedback, disableVisibleCcConnectIdleRotation } = await import(pathToFileURL(runtimeConfigFile).href);
 const { applyCcConnectTurnGuards } = await import(pathToFileURL(path.join(root, "ccm-package", "dist", "modules", "projects", "projects.js")).href);
 const guardedConfig = applyCcConnectTurnGuards(`language = "zh"\n\n[[projects]]\nname = "demo"\nidle_timeout_mins = 12\nmax_turn_time_mins = 12\nreset_on_idle_mins = 30\n\n[projects.agent]\ntype = "acp"\n`, { idleTimeoutMins: 4, maxTurnTimeMins: 4, resetOnIdleMins: 0 });
 assert.match(guardedConfig, /^language = "zh"\n\nidle_timeout_mins = 4\nmax_turn_time_mins = 4\n\n\[\[projects\]\]/);
@@ -56,13 +56,15 @@ assert.match(guardedConfig, /\[\[projects\]\]\nreset_on_idle_mins = 0\nname = "d
 assert.equal((guardedConfig.match(/idle_timeout_mins/g) || []).length, 1);
 assert.equal((guardedConfig.match(/max_turn_time_mins/g) || []).length, 1);
 const savedProjectConfig = `[[projects]]\nname = "demo"\n\n[[projects.platforms]]\ntype = "feishu"\n\n[projects.platforms.options]\nreaction_emoji = "OnIt"\nprogress_style = "card"\n\n[[projects.platforms]]\ntype = "slack"\n\n[projects.platforms.options]\nreaction_emoji = "eyes"\n`;
-const privateRuntimeConfig = disableBlockingFeishuReaction(savedProjectConfig);
-assert.match(privateRuntimeConfig, /type = "feishu"[\s\S]*?reaction_emoji = "none"/);
+const privateRuntimeConfig = configureNativeFeishuReactionFeedback(savedProjectConfig);
+assert.match(privateRuntimeConfig, /type = "feishu"[\s\S]*?reaction_emoji = "OnIt"/);
+assert.match(privateRuntimeConfig, /type = "feishu"[\s\S]*?done_emoji = "Done"/);
 assert.match(privateRuntimeConfig, /type = "slack"[\s\S]*?reaction_emoji = "eyes"/);
 assert.equal(savedProjectConfig.includes('reaction_emoji = "OnIt"'), true, "saved user config must remain unchanged");
-assert.equal(disableBlockingFeishuReaction(privateRuntimeConfig), privateRuntimeConfig, "reaction guard must be idempotent");
-const insertedReaction = disableBlockingFeishuReaction(`[[projects]]\nname = "demo"\n\n[[projects.platforms]]\ntype = "lark"\n\n[projects.platforms.options]\nprogress_style = "compact"\n`);
-assert.match(insertedReaction, /progress_style = "compact"\nreaction_emoji = "none"/);
+assert.equal(configureNativeFeishuReactionFeedback(privateRuntimeConfig), privateRuntimeConfig, "reaction projection must be idempotent");
+const insertedReaction = configureNativeFeishuReactionFeedback(`[[projects]]\nname = "demo"\n\n[[projects.platforms]]\ntype = "lark"\n\n[projects.platforms.options]\nprogress_style = "compact"\n`);
+assert.match(insertedReaction, /reaction_emoji = "OnIt"/);
+assert.match(insertedReaction, /done_emoji = "Done"/);
 const visibleIdleRotation = `[[projects]]\nname = "demo"\nreset_on_idle_mins = 30\n\n[projects.agent]\ntype = "acp"\n`;
 const silentIdleRuntime = disableVisibleCcConnectIdleRotation(visibleIdleRotation);
 assert.match(silentIdleRuntime, /reset_on_idle_mins = 0/);
@@ -183,7 +185,7 @@ try {
       heartbeat_stops_before_terminal: true,
       pending_response_body_is_bounded: true,
       global_acp_identity_is_hydrated: true,
-      pre_acp_reaction_is_disabled: true,
+      native_pre_acp_reaction_is_enabled: true,
       existing_project_config_is_normalized_privately: true,
       acp_prompt_boundary_is_diagnosable: true,
       idle_rotation_notice_is_suppressed: true,

@@ -1,6 +1,10 @@
 # CCM Workspace
 
 <p align="center">
+  <a href="#中文">中文</a> · <a href="#english">English</a>
+</p>
+
+<p align="center">
   <img src="https://raw.githubusercontent.com/mumulinya/ccm-web/main/ccm-package/public/ccm-app-icon.png" alt="CCM Workspace" width="88" height="88" />
 </p>
 
@@ -14,6 +18,10 @@
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT License" />
   <img src="https://img.shields.io/badge/storage-local--first-0f766e" alt="Local first" />
 </p>
+
+<a id="中文"></a>
+
+## 中文
 
 CCM 将全局助手、群聊主 Agent、项目主 Agent、项目开发 Agent、TestAgent、会话记忆、MCP/Skill、知识库、Git、终端、飞书和任务回放放进同一个本地工作区。它不是单一聊天界面，而是一套从需求进入、源码规划、开发执行、独立验收到最终交付的可恢复工作流。
 
@@ -58,7 +66,13 @@ ccm logs --follow
 
 普通问答由主 Agent首轮直接回答。只有模型确实需要信息时才加载知识、源码、Skill或MCP；复杂开发任务进入持久队列和验收链，后台执行不会长期占用聊天回合。
 
-## 2.0.7 最新能力
+## 2.0.8 最新能力
+
+- 全局、项目和群聊统一采用真实流式回答与可解释进度：工具完成后立即展示安全结果和下一步，长等待只显示真实阶段，不展示隐藏推理。
+- 开发需求、只读分析和普通问答使用统一边界；只有明确需要修改代码或配置时才创建正式开发任务，修改仍由受控项目开发 Agent执行。
+- 执行记录升级为“摘要 → 用户可读详情 → 技术详情”三层展示，目录、文件、搜索位置、读取范围、Git与验证结果不再暴露原始JSON字段。
+- 支持安全暂停与原位续接、任务意图路由、计划前业务澄清、飞书附件接入、运行时状态中心和离开期间摘要。
+- 完成态严格由当前generation的Terminal Gate确认；失败、暂停、中断和等待处理不会伪装为正式交付。
 
 - 主 Agent文件读取升级为安全续读闭环：批量读取会稳定保留原文件集合，一键继续读取未完成内容，并通过checksum阻止文件漂移后误拼接旧结果。
 - 同一模型上下文内的重复读取会返回未变化状态，避免重复注入正文与重复计算Token；新任务、压缩、恢复或generation变化后会重新读取权威内容。
@@ -363,5 +377,144 @@ node scripts/build-release-artifact.mjs
 提交问题时请提供CCM版本、操作系统、Node版本、复现步骤和脱敏后的错误信息。不要提交API Key、Cookie、OAuth验证码、完整Prompt或私有源码。
 
 ## License
+
+MIT
+
+---
+
+<a id="english"></a>
+
+## English
+
+CCM Workspace is a local-first multi-agent development and workspace management platform. It brings global, group, and project main agents together with project development agents, TestAgent, persistent task execution, memory, MCP/Skills, knowledge retrieval, Git, terminals, Feishu/Lark, and task replay in one web workspace.
+
+CCM is not just another chat page. It provides a recoverable delivery workflow from a user request, through source-grounded planning and delegated implementation, to independent verification and an accepted final result.
+
+### Quick start
+
+CCM requires Node.js 20 or newer.
+
+```bash
+npm install -g @mumulinya167/cc-web@latest
+ccm start --background --open
+```
+
+The default URL is <http://localhost:3080>. CCM listens on `127.0.0.1` by default and does not expose the service to your LAN or the public internet automatically.
+
+Useful diagnostics:
+
+```bash
+ccm status
+ccm doctor
+ccm logs --follow
+```
+
+### What CCM provides
+
+- **Three main-agent scopes:** a global agent for cross-workspace coordination, group main agents for multi-project collaboration, and project main agents for source-grounded project work.
+- **Controlled development agents:** Claude Code, Codex, Cursor, Gemini/Antigravity, OpenCode, and Qoder can execute project work inside permission and workspace boundaries.
+- **Persistent development tasks:** development requests can continue while the browser is closed, survive service restarts, pause at safe checkpoints, and resume in place.
+- **Planning and clarification:** ambiguous business requirements can be clarified before a detailed plan is confirmed and dispatched.
+- **Readable live progress:** provider-native streaming, safe tool summaries, long-running build/test progress, project-agent status, and verification milestones are displayed without exposing hidden reasoning.
+- **Independent acceptance:** TestAgent or main-agent self-verification produces evidence before Terminal Gate accepts a delivery.
+- **Task replay:** plans, attempts, project assignments, evidence, verification, interruptions, recoveries, and final delivery can be reviewed later.
+- **Context and memory:** conversation context, project memory, knowledge sources, MCP tools, and Skills are budgeted and loaded only when relevant.
+- **Workspace tooling:** bounded Read, Glob, Grep, symbols, Git, build, test, terminal, PDF, image, Office, and notebook ingestion are available through controlled capabilities.
+- **Feishu/Lark integration:** global and project sessions support inbound messages, images, files, persistent queues, progress feedback, and final replies.
+
+### Core workflow
+
+```text
+User message / requirement document / image / attachment
+→ exact conversation queue
+→ main-agent read-only analysis and optional business clarification
+→ detailed plan and user confirmation
+→ persistent development task
+→ project development agents in controlled worktrees
+→ build, test, TestAgent or main-agent verification
+→ Terminal Gate
+→ final answer, file changes, execution record, and task replay
+```
+
+Ordinary questions and read-only analysis remain lightweight. A formal development task is created only when the request explicitly requires code, configuration, dependency, test, or build-script changes. The main agent reads, analyzes, plans, coordinates, and reviews; actual source modifications are delegated to controlled project development agents.
+
+### Version 2.0.8 highlights
+
+- Real streaming and explainable progress are shared by global, group, and project conversations.
+- Tool results use three levels: concise summary, user-readable results, and permission-aware technical details.
+- Development-task classification no longer turns ordinary questions or read-only code analysis into heavy task records.
+- Safe pause/resume, message intent routing, pre-plan clarification, Feishu attachment ingestion, conversation status, and away summaries are integrated with the existing task ledger.
+- Only the current generation accepted by Terminal Gate is presented as a completed delivery.
+- Workspace reads support continuation cursors, checksums, in-context deduplication, path suggestions, bundled ripgrep, cancellation, timeout, and partial-result recovery.
+
+### Models and providers
+
+CCM supports OpenAI-compatible, Claude-compatible, and Gemini-compatible provider configurations. Availability, model access, usage reporting, cache accounting, and cost reporting depend on the selected provider. CCM reports provider-returned Token and cost data; it does not fabricate missing usage or estimate an unreported cost as zero.
+
+Third-party development runtimes require their own official installation, account, and authentication. CCM does not bypass provider, CLI, organization, or repository permissions.
+
+### Common CLI commands
+
+```bash
+ccm start --background --open
+ccm stop
+ccm restart
+ccm status
+ccm doctor
+ccm logs --follow
+ccm update --check
+ccm update
+```
+
+To make CCM reachable on a trusted LAN, explicitly choose a host and port:
+
+```bash
+ccm start --background --host 0.0.0.0 --port 3080
+```
+
+For public deployment, keep CCM bound to `127.0.0.1` and place an HTTPS reverse proxy or a secure tunnel in front of it. Do not expose an unencrypted login endpoint directly to the internet.
+
+### Local data and security
+
+Runtime data is stored under `~/.cc-connect` rather than the npm installation directory:
+
+```text
+~/.cc-connect/
+  configs/       projects, agents, providers, and workspace settings
+  logs/          service, project, and runtime logs
+  sessions/      conversation and continuity data
+  uploads/       controlled attachments and source snapshots
+  models/        local embedding model cache
+  run/           process identity, locks, and lifecycle state
+```
+
+CCM applies conversation and resource permissions, CSRF/Host protections, signed internal calls, project path boundaries, sensitive-file filtering, worktree isolation, and explicit approval for high-risk operations. Prompts, secrets, raw stdout, hidden reasoning, source bodies, and native third-party session identifiers are not included in normal execution records or task replay projections.
+
+Uninstalling the npm package does not delete `~/.cc-connect`. Back up your data and stop the service before removing that directory manually.
+
+### Development and release
+
+```bash
+npm install
+npm --prefix frontend install
+npm run check
+npm run test:all
+npm run build
+```
+
+The production npm payload is generated under `ccm-package/`. Release gates validate documentation, project coverage, tests, production builds, package manifests, installability, file modes, artifact size, and integrity metadata.
+
+### Documentation and support
+
+- [Documentation center](docs/README.md)
+- [Confirmed architecture](docs/confirmed-project-architecture/README.md)
+- [Confirmed business processes](docs/confirmed-business-processes/README.md)
+- [Project coverage matrix](docs/confirmed-project-architecture/PROJECT-COVERAGE-MATRIX.md)
+- [npm package](https://www.npmjs.com/package/@mumulinya167/cc-web)
+- [Issue tracker](https://github.com/mumulinya/ccm-web/issues)
+
+When reporting a problem, include the CCM version, operating system, Node.js version, reproduction steps, and sanitized error details. Never publish API keys, cookies, OAuth codes, full prompts, private source code, or raw internal logs.
+
+### License
 
 MIT

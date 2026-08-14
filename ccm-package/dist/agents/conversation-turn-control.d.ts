@@ -1,9 +1,19 @@
 import type { IncomingMessage, ServerResponse } from "http";
 export type ConversationTurnScope = "global" | "group" | "project" | "feishu";
 export type ConversationTurnMode = "steer" | "queue";
-export type ConversationTurnStatus = "queued" | "applied" | "sending" | "completed" | "failed" | "cancelled";
+export type ConversationTurnStatus = "queued" | "sending" | "needs_route" | "applied" | "completed" | "failed" | "cancelled";
 export type ConversationTurnKind = "user_message" | "task_dispatch";
 export type ConversationTurnSource = "web" | "workbench" | "global_agent" | "schedule";
+export type ConversationTurnRouting = {
+    decision: "answer" | "new_task" | "resume_task" | "revise_task" | "needs_user";
+    candidateTaskId: string;
+    confidence: number;
+    reason: string;
+    bindingChecksum: string;
+    selectedChoice?: "continue_original" | "start_new_task" | "answer_only";
+    source?: "model" | "explicit_user_choice";
+    contentStored: false;
+};
 export type ConversationTurnRecord = {
     id: string;
     revision: number;
@@ -35,6 +45,7 @@ export type ConversationTurnRecord = {
     run_id: string;
     checkpoint: string;
     semantic_decision_receipt: any;
+    routing: ConversationTurnRouting | null;
 };
 export declare class ConversationTurnControlStore {
     readonly file: string;
@@ -53,6 +64,16 @@ export declare class ConversationTurnControlStore {
         generation: number;
         updated_at: string;
         turns: {
+            routing?: {
+                contentStored: boolean;
+                decision: "answer" | "new_task" | "resume_task" | "revise_task" | "needs_user";
+                candidateTaskId: string;
+                confidence: number;
+                reason: string;
+                bindingChecksum: string;
+                selectedChoice?: "continue_original" | "start_new_task" | "answer_only";
+                source?: "model" | "explicit_user_choice";
+            };
             id: string;
             revision: number;
             scope: ConversationTurnScope;
@@ -92,6 +113,8 @@ export declare class ConversationTurnControlStore {
     claim(input: any): ConversationTurnRecord;
     settle(input: any): ConversationTurnRecord;
     defer(id: string, reason?: string, expectedRevision?: number): ConversationTurnRecord;
+    requireRoute(input: any): ConversationTurnRecord;
+    resolveRoute(input: any): ConversationTurnRecord;
     cancel(id: string, reason?: string, expectedRevision?: number): ConversationTurnRecord;
     guide(id: string, expectedRevision?: number): ConversationTurnRecord;
     retry(id: string, expectedRevision?: number): ConversationTurnRecord;
@@ -100,6 +123,16 @@ export declare class ConversationTurnControlStore {
 }
 export declare const conversationTurnControl: ConversationTurnControlStore;
 export declare function admitTaskDispatchTurn(task: any): ConversationTurnRecord | {
+    routing?: {
+        contentStored: boolean;
+        decision: "answer" | "new_task" | "resume_task" | "revise_task" | "needs_user";
+        candidateTaskId: string;
+        confidence: number;
+        reason: string;
+        bindingChecksum: string;
+        selectedChoice?: "continue_original" | "start_new_task" | "answer_only";
+        source?: "model" | "explicit_user_choice";
+    };
     id: string;
     revision: number;
     scope: ConversationTurnScope;
@@ -148,5 +181,8 @@ export declare function runConversationTurnControlSelfTest(): {
         persistedSchema: boolean;
         safeAttachmentProjection: boolean;
         completedAttachmentCleanup: boolean;
+        ambiguousRouteBlocksQueue: boolean;
+        explicitRouteResolution: boolean;
+        routeBindingProtected: boolean;
     };
 };

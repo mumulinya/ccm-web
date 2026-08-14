@@ -269,6 +269,64 @@ export declare function buildTaskCardView(task: any, executions: any[], sessions
     };
     status_detail: any;
     status: any;
+    pause_status: {
+        schema: string;
+        taskId: string;
+        state: string;
+        requestedAt: string;
+        pausedAt: string;
+        resumedAt: string;
+        elapsedMs: number;
+        stuck: boolean;
+        activeWriterCount: number;
+        descendantCount: number;
+        childPausedCount: number;
+        checkpoint: {
+            phase: string;
+            completedWorkItemCount: any;
+            suspendedSessionCount: number;
+        };
+        pauseSequence: number;
+        revision: number;
+        generation: number;
+        availableActions: {
+            id: string;
+            kind: string;
+            label: string;
+            enabled: boolean;
+        }[];
+        checksum: string;
+        contentStored: boolean;
+    };
+    pauseStatus: {
+        schema: string;
+        taskId: string;
+        state: string;
+        requestedAt: string;
+        pausedAt: string;
+        resumedAt: string;
+        elapsedMs: number;
+        stuck: boolean;
+        activeWriterCount: number;
+        descendantCount: number;
+        childPausedCount: number;
+        checkpoint: {
+            phase: string;
+            completedWorkItemCount: any;
+            suspendedSessionCount: number;
+        };
+        pauseSequence: number;
+        revision: number;
+        generation: number;
+        availableActions: {
+            id: string;
+            kind: string;
+            label: string;
+            enabled: boolean;
+        }[];
+        checksum: string;
+        contentStored: boolean;
+    };
     usage_summary: any;
     progress: any;
     active_agents: string[];

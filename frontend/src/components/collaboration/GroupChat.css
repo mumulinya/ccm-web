@@ -81,35 +81,6 @@
 .label.agent { color: var(--accent-blue); opacity: 1; letter-spacing: 0.5px; }
 .label.system { color: var(--accent-red); opacity: 1; letter-spacing: 0.5px; }
 .msg-meta { font-size: 10px; color: var(--text-muted); margin-top: 6px; font-family: 'Share Tech Mono', monospace; }
-.message-mode {
-  display: inline-flex;
-  flex: 0 0 auto;
-  align-items: center;
-  gap: 2px;
-  padding: 3px;
-  border: 1px solid rgba(15, 23, 42, 0.08);
-  border-radius: 999px;
-  background: var(--surface);
-  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.04);
-}
-.message-mode button {
-  min-height: 30px;
-  padding: 0 11px;
-  border: 0;
-  border-radius: 999px;
-  background: transparent;
-  color: var(--text-muted);
-  font-size: 11.5px;
-  font-weight: 700;
-  white-space: nowrap;
-  cursor: pointer;
-  transition: background .16s ease, color .16s ease, box-shadow .16s ease;
-}
-.message-mode button.active {
-  background: var(--accent-blue);
-  color: #fff;
-  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.18);
-}
 .task-supplement-context {
   display: flex;
   flex: 0 1 260px;
@@ -511,21 +482,6 @@
   box-shadow: none !important;
 }
 
-[data-theme="dark"] .message-mode {
-  background: var(--bg-primary) !important;
-  border-color: var(--border-color) !important;
-  box-shadow: none !important;
-}
-
-[data-theme="dark"] .message-mode button {
-  color: var(--text-muted) !important;
-}
-
-[data-theme="dark"] .message-mode button.active {
-  background: var(--accent-blue) !important;
-  color: #fff !important;
-}
-
 [data-theme="dark"] .task-supplement-context {
   border-color: rgba(96, 165, 250, 0.24);
   background: rgba(59, 130, 246, 0.12);
@@ -799,37 +755,6 @@
   background: transparent;
 }
 
-.group-chat .composer-inner :deep(.composer-button),
-.group-chat .composer-inner :deep(.send-button),
-.group-chat .composer-inner :deep(textarea) {
-  height: 46px;
-  border-radius: 8px;
-}
-
-.group-chat .composer-inner :deep(.composer-button) {
-  width: 42px;
-  min-width: 42px;
-  background: var(--surface);
-}
-
-.group-chat .composer-inner :deep(textarea) {
-  min-height: 46px;
-  padding: 12px 14px;
-  background: var(--surface);
-}
-
-.group-chat .message-mode {
-  padding: 3px;
-  border-color: var(--border-color);
-  border-radius: 8px;
-  box-shadow: none;
-}
-
-.group-chat .message-mode button {
-  min-height: 34px;
-  border-radius: 6px;
-}
-
 .group-chat .messages-flow > .conversation-message.message {
   width: fit-content;
   max-width: min(72%, 780px);
@@ -871,6 +796,4 @@
   .group-chat .messages-flow { --conversation-locator-safe-area: 34px; }
   .group-chat .messages-flow > .conversation-message.message,
   .group-chat .messages-flow > .conversation-message.message.conversation-message--user { padding: 0; }
-  .group-chat .message-mode { width: 100%; }
-  .group-chat .message-mode button { flex: 1; }
 }

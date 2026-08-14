@@ -139,6 +139,8 @@ export type GroupOrchestratorInput = {
     mainAgentFirstTurnResult?: any;
     main_agent_first_turn_result?: any;
     onDelta?: (delta: string) => void;
+    onModelActivity?: (activity: any) => void;
+    onRetry?: (notice: any) => void;
 };
 export declare function measureGroupMainAgentPayload(input: any): {
     messages: ({
@@ -300,6 +302,19 @@ export declare function runGroupOrchestratorCore(input: GroupOrchestratorInput):
             error: any;
         }[];
     };
+    replyDeltaEmitted: boolean;
+    reply_delta_emitted: boolean;
+    streamingMetric: {
+        modelMs: number;
+        toolWallMs: number;
+        firstVisibleFeedbackMs: number;
+        firstTokenMs: number;
+        maxSilentGapMs: number;
+        providerRetryCount: number;
+        fallbackStreamCount: number;
+        initialReadFileCount: number;
+        initialReadTokens: number;
+    };
     agent: any;
     delegated: any[];
     assignments: any[];
@@ -311,6 +326,7 @@ export declare function runGroupOrchestratorCore(input: GroupOrchestratorInput):
         requiresConfirmation: boolean;
         risk: string;
         nextStep: string;
+        structuredClarificationQuestions: any[];
         confidence: any;
     } | {
         action: string;
@@ -358,6 +374,19 @@ export declare function runGroupOrchestratorCore(input: GroupOrchestratorInput):
             error: any;
         }[];
     };
+    replyDeltaEmitted: boolean;
+    reply_delta_emitted: boolean;
+    streamingMetric: {
+        modelMs: number;
+        toolWallMs: number;
+        firstVisibleFeedbackMs: number;
+        firstTokenMs: number;
+        maxSilentGapMs: number;
+        providerRetryCount: number;
+        fallbackStreamCount: number;
+        initialReadFileCount: number;
+        initialReadTokens: number;
+    };
     agent: any;
     delegated: any[];
     assignments: any[];
@@ -371,6 +400,7 @@ export declare function runGroupOrchestratorCore(input: GroupOrchestratorInput):
         requiresConfirmation: boolean;
         risk: string;
         nextStep: string;
+        structuredClarificationQuestions: any[];
         confidence: any;
     } | {
         action: string;
@@ -453,6 +483,19 @@ export declare function runGroupOrchestratorCore(input: GroupOrchestratorInput):
             error: any;
         }[];
     };
+    replyDeltaEmitted: boolean;
+    reply_delta_emitted: boolean;
+    streamingMetric: {
+        modelMs: number;
+        toolWallMs: number;
+        firstVisibleFeedbackMs: number;
+        firstTokenMs: number;
+        maxSilentGapMs: number;
+        providerRetryCount: number;
+        fallbackStreamCount: number;
+        initialReadFileCount: number;
+        initialReadTokens: number;
+    };
     agent: any;
     delegated: any[];
     assignments: any[];
@@ -464,6 +507,7 @@ export declare function runGroupOrchestratorCore(input: GroupOrchestratorInput):
         requiresConfirmation: boolean;
         risk: string;
         nextStep: string;
+        structuredClarificationQuestions: any[];
         confidence: any;
     } | {
         action: string;
@@ -519,6 +563,19 @@ export declare function runGroupOrchestratorCore(input: GroupOrchestratorInput):
             error: any;
         }[];
     };
+    replyDeltaEmitted: boolean;
+    reply_delta_emitted: boolean;
+    streamingMetric: {
+        modelMs: number;
+        toolWallMs: number;
+        firstVisibleFeedbackMs: number;
+        firstTokenMs: number;
+        maxSilentGapMs: number;
+        providerRetryCount: number;
+        fallbackStreamCount: number;
+        initialReadFileCount: number;
+        initialReadTokens: number;
+    };
     agent: any;
     delegated: any[];
     assignments: any[];
@@ -532,6 +589,7 @@ export declare function runGroupOrchestratorCore(input: GroupOrchestratorInput):
         requiresConfirmation: boolean;
         risk: string;
         nextStep: string;
+        structuredClarificationQuestions: any[];
         confidence: any;
     } | {
         action: string;

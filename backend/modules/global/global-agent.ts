@@ -634,6 +634,7 @@ function publicGlobalAgentRunSummary(run: GlobalAgentRun | null) {
     pending_tool: run.pending_tool
       ? { name: run.pending_tool.name, risk: run.pending_tool.risk, signature: run.pending_tool.signature }
       : null,
+    pause_control: (run as any).pause_control || null,
   };
 }
 
@@ -652,6 +653,7 @@ function publicGlobalAgentRun(run: GlobalAgentRun | null, includeObservations = 
     source: run.source,
     status: run.status,
     phase: run.phase,
+    pause_control: (run as any).pause_control || null,
     presentation: (run as any).presentation || null,
     explicit_write_authorization: run.explicit_write_authorization,
     turn_id: (run as any).turn_id || "",

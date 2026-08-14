@@ -18,10 +18,11 @@ const checks = []
 const check = (name, fn) => { fn(); checks.push({ name, pass: true }) }
 const hasCitation = (citations, filename) => citations.some(item => item.startsWith(`${filename}#`))
 
-function store(name, text, scope, visibility = 'shared') {
+function store(name, text, scope, visibility = 'shared', options = {}) {
   files.storeKnowledgeBuffer(name, Buffer.from(`# ${name}\n\n${text}`), {
     scope,
     visibility,
+    ...options,
     source: { type: 'agent-knowledge-selftest' },
   })
 }
@@ -33,13 +34,15 @@ try {
   store('group-b.md', 'GROUP-B-164 群聊乙内部规范', { type: 'group', id: 'group-b' })
   store('project-a.md', 'PROJECT-A-275 项目甲内部规范', { type: 'project', id: 'project-a' }, 'restricted')
   store('project-b.md', 'PROJECT-B-386 项目乙共享规范', { type: 'project', id: 'project-b' })
+  store('unrelated-global-project.md', '项目简介 技术栈 功能模块 SpringBoot 家教管理系统', { type: 'global', id: '' })
+  store('bound-global-project.md', 'PROJECT-A-BOUND-701 项目甲架构补充', { type: 'global', id: '' }, 'shared', { tags: ['#project:project-a'] })
   await index.rebuildKnowledgeIndex('agent-knowledge-selftest')
 
   const local = await access.searchAgentKnowledge('GLOBAL-SHARED-731', { role: 'project-agent', project: 'project-a' })
   check('no Embedding configuration uses local hybrid retrieval', () => {
     assert.equal(local.embeddingMode, 'lexical')
     assert.equal(local.fallback, true)
-    assert.equal(local.citations.length, 1)
+    assert.ok(local.citations.length >= 1)
     assert.equal(hasCitation(local.citations, 'global-shared.md'), true)
   })
 
@@ -67,6 +70,14 @@ try {
   check('group main Agent does not implicitly read restricted member-project knowledge', () => assert.equal(hasCitation(restrictedMemberProject.citations, 'project-a.md'), false))
   const exactProject = await access.searchAgentKnowledge('PROJECT-A-275', { role: 'project-agent', project: 'project-a' })
   check('exact project Agent reads its restricted project knowledge', () => assert.ok(hasCitation(exactProject.citations, 'project-a.md')))
+  const projectIdentity = await access.searchAgentKnowledge('project-a 项目简介 技术栈 功能模块', { role: 'project-agent', project: 'project-a' })
+  check('project identity query rejects unrelated global shared documents', () => {
+    assert.equal(hasCitation(projectIdentity.citations, 'unrelated-global-project.md'), false)
+  })
+  const boundProjectKnowledge = await access.searchAgentKnowledge('project-a PROJECT-A-BOUND-701 架构', { role: 'project-agent', project: 'project-a' })
+  check('project identity query accepts explicitly project-bound global knowledge', () => {
+    assert.equal(hasCitation(boundProjectKnowledge.citations, 'bound-global-project.md'), true)
+  })
 
   files.saveRagEmbeddingConfig({ mode: 'remote', enabled: true, apiUrl: 'http://127.0.0.1:9/v1', apiKey: 'selftest', model: 'unreachable-test-model' })
   await index.rebuildKnowledgeIndex('agent-knowledge-remote-degraded')

@@ -15,9 +15,20 @@ import { getGroupMessages } from "../modules/collaboration/storage";
 
 export type ConversationTurnScope = "global" | "group" | "project" | "feishu";
 export type ConversationTurnMode = "steer" | "queue";
-export type ConversationTurnStatus = "queued" | "applied" | "sending" | "completed" | "failed" | "cancelled";
+export type ConversationTurnStatus = "queued" | "sending" | "needs_route" | "applied" | "completed" | "failed" | "cancelled";
 export type ConversationTurnKind = "user_message" | "task_dispatch";
 export type ConversationTurnSource = "web" | "workbench" | "global_agent" | "schedule";
+
+export type ConversationTurnRouting = {
+  decision: "answer" | "new_task" | "resume_task" | "revise_task" | "needs_user";
+  candidateTaskId: string;
+  confidence: number;
+  reason: string;
+  bindingChecksum: string;
+  selectedChoice?: "continue_original" | "start_new_task" | "answer_only";
+  source?: "model" | "explicit_user_choice";
+  contentStored: false;
+};
 
 export type ConversationTurnRecord = {
   id: string;
@@ -50,6 +61,7 @@ export type ConversationTurnRecord = {
   run_id: string;
   checkpoint: string;
   semantic_decision_receipt: any;
+  routing: ConversationTurnRouting | null;
 };
 
 type ConversationTurnStoreFile = {
@@ -62,7 +74,7 @@ type ConversationTurnStoreFile = {
 const STORE_FILE = process.env.CCM_CONVERSATION_TURN_FILE || path.join(CCM_DIR, "conversation-turn-control.json");
 const MAX_RECORDS = 800;
 const TERMINAL_RETENTION_MS = 14 * 24 * 60 * 60 * 1000;
-const ACTIVE_STATUSES = new Set<ConversationTurnStatus>(["queued", "sending"]);
+const ACTIVE_STATUSES = new Set<ConversationTurnStatus>(["queued", "sending", "needs_route"]);
 const TERMINAL_STATUSES = new Set<ConversationTurnStatus>(["applied", "completed", "failed", "cancelled"]);
 
 function nowIso() {
@@ -114,6 +126,34 @@ function emitTurnChanged(turn: ConversationTurnRecord, operation: string) {
   });
 }
 
+function normalizeRouting(input: any): ConversationTurnRouting | null {
+  if (!input || typeof input !== "object") return null;
+  const decision = String(input.decision || "needs_user");
+  if (!["answer", "new_task", "resume_task", "revise_task", "needs_user"].includes(decision)) return null;
+  const selectedChoice = String(input.selectedChoice || input.selected_choice || "");
+  return {
+    decision: decision as ConversationTurnRouting["decision"],
+    candidateTaskId: String(input.candidateTaskId || input.candidate_task_id || ""),
+    confidence: Math.max(0, Math.min(1, Number(input.confidence || 0))),
+    reason: String(input.reason || "").replace(/[\r\n\t]+/g, " ").trim().slice(0, 240),
+    bindingChecksum: String(input.bindingChecksum || input.binding_checksum || ""),
+    ...(selectedChoice ? { selectedChoice: selectedChoice as ConversationTurnRouting["selectedChoice"] } : {}),
+    ...(input.source ? { source: String(input.source) as ConversationTurnRouting["source"] } : {}),
+    contentStored: false,
+  };
+}
+
+function routeBindingChecksum(turn: ConversationTurnRecord, candidateTaskId: string) {
+  return crypto.createHash("sha256").update(JSON.stringify({
+    turnId: turn.id,
+    requestId: turn.request_id,
+    scope: turn.scope,
+    conversationId: turn.conversation_id,
+    candidateTaskId,
+    messageChecksum: crypto.createHash("sha256").update(turn.message).digest("hex"),
+  })).digest("hex");
+}
+
 function publicTurnProjection(turn: ConversationTurnRecord, position = 0, viewerUserId = "", viewerRole = "") {
   const messagePreview = String(turn.message || "").replace(/[\r\n\t]+/g, " ").trim().slice(0, 240);
   const attachmentRefs = turn.attachments.map((item: any) => ({
@@ -121,7 +161,7 @@ function publicTurnProjection(turn: ConversationTurnRecord, position = 0, viewer
     name: String(item?.name || item?.filename || "").slice(0, 160),
     size: Math.max(0, Number(item?.size || 0)),
     checksum: String(item?.checksum || "").slice(0, 128),
-    contentType: String(item?.contentType || item?.content_type || "application/octet-stream").slice(0, 120),
+    contentType: String(item?.contentType || item?.content_type || item?.mimeType || "application/octet-stream").slice(0, 120),
     url: item?.id ? `/api/conversation-turns/attachment?turn_id=${encodeURIComponent(turn.id)}&attachment_id=${encodeURIComponent(String(item.id))}` : "",
   })).filter((item: any) => item.id || item.name);
   return {
@@ -146,6 +186,7 @@ function publicTurnProjection(turn: ConversationTurnRecord, position = 0, viewer
     updated_at: turn.updated_at,
     contentStored: false,
     canMutate: viewerRole === "admin" || !turn.owner_id || (!!viewerUserId && turn.owner_id === viewerUserId),
+    ...(turn.routing ? { routing: { ...turn.routing, contentStored: false } } : {}),
   };
 }
 
@@ -174,6 +215,7 @@ function publicClaimProjection(turn: ConversationTurnRecord | null) {
   const safeMetadataKeys = [
     "project", "session_id", "parent_run_id", "continuation_task_id", "requested_mode",
     "group_id", "group_session_id", "message_mode", "target_refs",
+    "resolved_route", "resolved_candidate_task_id", "route_source",
   ];
   const metadata = Object.fromEntries(safeMetadataKeys
     .filter((key) => turn.metadata?.[key] != null)
@@ -253,7 +295,7 @@ function normalizeRecord(input: any): ConversationTurnRecord | null {
       owner_id: String(input?.owner_id || input?.ownerId || ""),
       message: String(input?.message || ""),
       attachments: Array.isArray(input?.attachments) ? input.attachments : [],
-      status: (["queued", "applied", "sending", "completed", "failed", "cancelled"].includes(status) ? status : "queued") as ConversationTurnStatus,
+      status: (["queued", "sending", "needs_route", "applied", "completed", "failed", "cancelled"].includes(status) ? status : "queued") as ConversationTurnStatus,
       active_run_id: String(input?.active_run_id || input?.activeRunId || ""),
       metadata: input?.metadata && typeof input.metadata === "object" ? input.metadata : {},
       retry_count: Math.max(0, Number(input?.retry_count || input?.retryCount || 0)),
@@ -269,6 +311,7 @@ function normalizeRecord(input: any): ConversationTurnRecord | null {
       run_id: String(input?.run_id || input?.runId || input?.active_run_id || input?.activeRunId || ""),
       checkpoint: String(input?.checkpoint || "queued"),
       semantic_decision_receipt: input?.semantic_decision_receipt || input?.semanticDecisionReceipt || null,
+      routing: normalizeRouting(input?.routing),
     };
   } catch {
     return null;
@@ -392,6 +435,7 @@ export class ConversationTurnControlStore {
         run_id: "",
         checkpoint: "queued",
         semantic_decision_receipt: input?.semantic_decision_receipt || input?.semanticDecisionReceipt || null,
+        routing: null,
       };
       store.turns.push(turn);
       emitTurnChanged(turn, "enqueue");
@@ -459,7 +503,7 @@ export class ConversationTurnControlStore {
       }
       const active = store.turns.find((item) => item.scope === scope
         && item.conversation_id === conversationId
-        && item.status === "sending"
+        && ["sending", "needs_route"].includes(item.status)
         && item.kind === "user_message");
       if (active) return null;
       const requestedId = String(input?.id || "").trim();
@@ -532,6 +576,68 @@ export class ConversationTurnControlStore {
     });
   }
 
+  requireRoute(input: any) {
+    const id = String(input?.id || "").trim();
+    if (!id) throw new Error("缺少队列消息 ID");
+    return this.mutate((store) => {
+      const turn = store.turns.find((item) => item.id === id);
+      if (!turn) throw new Error("队列消息不存在");
+      requireExpectedRevision(turn, input?.revision ?? input?.expected_revision ?? input?.expectedRevision);
+      if (!["sending", "needs_route"].includes(turn.status)) throw queueConflict("这条消息当前不能进入路由确认");
+      if (turn.kind !== "user_message") throw new Error("正式派发任务不参加消息意图确认");
+      const candidateTaskId = String(input?.routing?.candidateTaskId || input?.routing?.candidate_task_id || "");
+      const checksum = routeBindingChecksum(turn, candidateTaskId);
+      turn.status = "needs_route";
+      turn.revision += 1;
+      turn.routing = normalizeRouting({
+        ...(input?.routing || {}),
+        decision: "needs_user",
+        candidateTaskId,
+        bindingChecksum: checksum,
+        source: "model",
+      });
+      turn.error = "";
+      turn.updated_at = nowIso();
+      turn.lease_id = "";
+      turn.lease_expires_at = "";
+      turn.checkpoint = "needs_route";
+      emitTurnChanged(turn, "require_route");
+      return turn;
+    });
+  }
+
+  resolveRoute(input: any) {
+    const id = String(input?.id || "").trim();
+    const choice = String(input?.choice || "") as ConversationTurnRouting["selectedChoice"];
+    if (!id) throw new Error("缺少队列消息 ID");
+    if (!["continue_original", "start_new_task", "answer_only"].includes(String(choice))) throw new Error("无效的消息处理方式");
+    return this.mutate((store) => {
+      const turn = store.turns.find((item) => item.id === id);
+      if (!turn) throw new Error("队列消息不存在");
+      requireExpectedRevision(turn, input?.revision ?? input?.expected_revision ?? input?.expectedRevision);
+      if (turn.status !== "needs_route" || !turn.routing) throw queueConflict("这条消息已不再等待处理方式确认");
+      const checksum = String(input?.bindingChecksum || input?.binding_checksum || "");
+      if (!checksum || checksum !== turn.routing.bindingChecksum) throw queueConflict("消息与候选任务已经变化，请重新确认");
+      const expected = routeBindingChecksum(turn, turn.routing.candidateTaskId);
+      if (expected !== checksum) throw queueConflict("消息绑定校验失败，请重新确认");
+      turn.status = "queued";
+      turn.revision += 1;
+      turn.routing = { ...turn.routing, selectedChoice: choice, source: "explicit_user_choice", contentStored: false };
+      turn.metadata = {
+        ...turn.metadata,
+        resolved_route: choice,
+        resolved_candidate_task_id: turn.routing.candidateTaskId,
+        route_source: "explicit_user_choice",
+      };
+      turn.updated_at = nowIso();
+      turn.claimed_at = "";
+      turn.settled_at = "";
+      turn.checkpoint = "route_resolved";
+      emitTurnChanged(turn, "resolve_route");
+      return turn;
+    });
+  }
+
   cancel(id: string, reason = "用户取消了这条排队消息", expectedRevision?: number) {
     return this.settle({ id, status: "cancelled", error: reason, revision: expectedRevision });
   }
@@ -570,6 +676,7 @@ export class ConversationTurnControlStore {
       turn.retry_count += 1;
       turn.error = "";
       turn.result = null;
+      turn.routing = null;
       turn.updated_at = nowIso();
       turn.claimed_at = "";
       turn.settled_at = "";
@@ -780,6 +887,9 @@ async function postQueuedConversationTurn(baseUrl: string, turn: ConversationTur
         message: turn.message,
         files,
         parent_run_id: turn.metadata?.parent_run_id || turn.metadata?.continuation_task_id || "",
+        conversation_turn_id: turn.id,
+        resolved_route: turn.metadata?.resolved_route || "",
+        resolved_candidate_task_id: turn.metadata?.resolved_candidate_task_id || "",
         source: "web",
       }),
     });
@@ -792,6 +902,9 @@ async function postQueuedConversationTurn(baseUrl: string, turn: ConversationTur
     form.append("message", turn.message);
     form.append("client_message_id", turn.request_id);
     form.append("message_mode", String(turn.metadata?.message_mode || "conversation"));
+    form.append("conversation_turn_id", turn.id);
+    form.append("resolved_route", String(turn.metadata?.resolved_route || ""));
+    form.append("resolved_candidate_task_id", String(turn.metadata?.resolved_candidate_task_id || ""));
     for (const file of files) {
       const blob = new Blob([fs.readFileSync(String(file.savedPath))], { type: String(file.contentType || "application/octet-stream") });
       form.append("files", blob, String(file.name || file.filename || "附件"));
@@ -807,6 +920,9 @@ async function postQueuedConversationTurn(baseUrl: string, turn: ConversationTur
       message: turn.message,
       client_message_id: turn.request_id,
       message_mode: String(turn.metadata?.message_mode || "conversation"),
+      conversation_turn_id: turn.id,
+      resolved_route: turn.metadata?.resolved_route || "",
+      resolved_candidate_task_id: turn.metadata?.resolved_candidate_task_id || "",
     }),
   });
 }
@@ -827,6 +943,7 @@ async function drainWebConversationTurns(baseUrl: string, seed: ConversationTurn
           break;
         }
         if (!response.ok || /\"type\"\s*:\s*\"error\"/.test(body)) throw new Error(`会话消息处理失败（HTTP ${response.status}）`);
+        if (/\"type\"\s*:\s*\"route_required\"/.test(body)) break;
         conversationTurnControl.settle({ id: turn.id, status: "completed", result: { delivered: true } });
       } catch (error: any) {
         conversationTurnControl.settle({ id: turn.id, status: "failed", error: error?.message || String(error) });
@@ -948,6 +1065,7 @@ export function handleConversationTurnControlApi(pathname: string, req: Incoming
     },
     "/api/conversation-turns/guide": (payload) => ({ turn: publicTurnProjection(conversationTurnControl.guide(String(payload?.id || ""), payload?.revision)) }),
     "/api/conversation-turns/retry": (payload) => ({ turn: publicTurnProjection(conversationTurnControl.retry(String(payload?.id || ""), payload?.revision)) }),
+    "/api/conversation-turns/resolve-route": (payload) => ({ turn: publicTurnProjection(conversationTurnControl.resolveRoute(payload)) }),
   };
   const operation = operations[pathname];
   if (!operation || req.method !== "POST") return false;
@@ -994,6 +1112,26 @@ export function runConversationTurnControlSelfTest() {
     const publicAttached = store.list({ scope: "project", conversation_id: "p1:s1" }).turns[0];
     const claimedAttached = store.claim({ scope: "project", conversation_id: "p1:s1" });
     store.settle({ id: claimedAttached?.id, status: "completed" });
+    const routed = store.enqueue({ scope: "project", conversation_id: "p2:s1", mode: "queue", message: "继续完善这个功能", request_id: "route-r1" });
+    const routedClaim = store.claim({ scope: "project", conversation_id: "p2:s1" });
+    const needsRoute = store.requireRoute({
+      id: routedClaim?.id,
+      revision: routedClaim?.revision,
+      routing: { candidateTaskId: "task_candidate", confidence: 0.62, reason: "既可能续接，也可能是独立需求" },
+    });
+    const blockedClaim = store.claim({ scope: "project", conversation_id: "p2:s1" });
+    let staleRouteConflict = false;
+    try {
+      store.resolveRoute({ id: needsRoute.id, revision: needsRoute.revision, choice: "start_new_task", bindingChecksum: "stale" });
+    } catch (error: any) { staleRouteConflict = error?.code === "QUEUE_REVISION_CONFLICT"; }
+    const resolvedRoute = store.resolveRoute({
+      id: needsRoute.id,
+      revision: needsRoute.revision,
+      choice: "start_new_task",
+      bindingChecksum: needsRoute.routing?.bindingChecksum,
+    });
+    const routedReclaim = store.claim({ scope: "project", conversation_id: "p2:s1", id: resolvedRoute.id, revision: resolvedRoute.revision });
+    store.settle({ id: routedReclaim?.id, status: "completed" });
     const checks = {
       idempotentEnqueue: duplicate.duplicate && duplicate.turn.id === first.turn.id && rows.length === 3,
       fifoClaim: claimed?.id === first.turn.id && reclaimed?.id === first.turn.id,
@@ -1009,6 +1147,11 @@ export function runConversationTurnControlSelfTest() {
         && publicAttached?.attachmentRefs?.[0]?.name === "说明.txt"
         && !JSON.stringify(publicAttached).includes("PRIVATE_QUEUE_ATTACHMENT"),
       completedAttachmentCleanup: !fs.existsSync(attachmentPath),
+      ambiguousRouteBlocksQueue: routed.turn.id === needsRoute.id && needsRoute.status === "needs_route" && !blockedClaim,
+      explicitRouteResolution: resolvedRoute.status === "queued"
+        && resolvedRoute.routing?.selectedChoice === "start_new_task"
+        && routedReclaim?.metadata?.resolved_route === "start_new_task",
+      routeBindingProtected: staleRouteConflict,
     };
     return { pass: Object.values(checks).every(Boolean), checks };
   } finally {

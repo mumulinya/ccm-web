@@ -121,11 +121,9 @@ function createGlobalAgentFeishuActions(deps) {
             if (operation === "list")
                 result = await callLocalApi(baseUrl, "/api/tasks");
             else if (operation === "pause")
-                result = await postLocalApi(baseUrl, "/api/tasks/update", { id, status: "paused", status_detail: "由飞书全局 Agent 暂停" });
-            else if (operation === "resume") {
-                await postLocalApi(baseUrl, "/api/tasks/update", { id, status: "pending", status_detail: "由飞书全局 Agent 恢复" });
-                result = await postLocalApi(baseUrl, "/api/tasks/queue", { task_id: id });
-            }
+                result = await postLocalApi(baseUrl, "/api/tasks/pause", { id });
+            else if (operation === "resume")
+                result = await postLocalApi(baseUrl, "/api/tasks/resume-paused", { id, pauseSequence: params.pause_sequence ?? params.pauseSequence });
             else if (operation === "continue")
                 result = await postLocalApi(baseUrl, "/api/tasks/continue", { id, message: params.message || "由飞书全局 Agent 继续推进", auto_execute: true, idempotency_key: params.idempotency_key });
             else if (operation === "retry")

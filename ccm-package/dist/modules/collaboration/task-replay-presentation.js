@@ -446,9 +446,36 @@ function buildIssues(input) {
 }
 function buildRecoveryJourney(input) {
     return input.tasks.flatMap(task => {
+        const rows = [];
+        const pause = task?.pause_control?.schema === "ccm-task-pause-control-v1"
+            ? task.pause_control
+            : task?.last_pause_control?.schema === "ccm-task-pause-control-v1" ? task.last_pause_control : null;
+        if (pause) {
+            const pausedAt = (0, task_replay_shared_1.iso)(pause.pausedAt);
+            const recoveredAt = (0, task_replay_shared_1.iso)(pause.resumedAt || task.resumed_at);
+            rows.push({
+                kind: "pause",
+                taskId: String(task.id || pause.taskId || ""),
+                reasonCode: "user_pause",
+                reasonLabel: "任务已安全暂停",
+                interruptedAt: (0, task_replay_shared_1.iso)(pause.requestedAt),
+                pausedAt,
+                resumePhase: (0, task_replay_shared_1.safeText)(pause.checkpoint?.phase, 120),
+                completedWorkItemCount: Math.max(0, Number(pause.checkpoint?.completedWorkItemIds?.length || 0)),
+                suspendedSessionCount: Math.max(0, Number(pause.checkpoint?.suspendedSessionCount || 0)),
+                pauseDurationMs: pausedAt && recoveredAt ? Math.max(0, timeMs(recoveredAt) - timeMs(pausedAt)) : 0,
+                mode: "safe_pause",
+                state: String(pause.state || "paused"),
+                attempt: Math.max(0, Number(pause.attempt || 0)),
+                maxAttempts: Math.max(1, Number(pause.attempt || 0) + 1),
+                nextRetryAt: "",
+                recoveredAt,
+                result: recoveredAt ? "resumed" : pause.state === "blocked" ? "needs_user" : "paused",
+            });
+        }
         const receipt = task?.interruption_receipt;
         if (receipt?.schema !== "ccm-task-interruption-receipt-v1")
-            return [];
+            return rows;
         const checkpoint = receipt.resume_checkpoint || task.resume_checkpoint || {};
         const recovery = task.recovery || receipt.recovery || {};
         const reasonLabels = {
@@ -459,21 +486,23 @@ function buildRecoveryJourney(input) {
             service_restart: "CCM 服务重启",
             lease_lost: "执行租约中断",
         };
-        return [{
-                taskId: String(task.id || receipt.task_id || ""),
-                reasonCode: String(receipt.reason_code || "unknown"),
-                reasonLabel: reasonLabels[String(receipt.reason_code || "")] || "任务执行中断",
-                interruptedAt: (0, task_replay_shared_1.iso)(receipt.interrupted_at),
-                resumePhase: (0, task_replay_shared_1.safeText)(checkpoint.phase || receipt.checkpoint, 120),
-                completedWorkItemCount: Math.max(0, Number(checkpoint.completedWorkItemIds?.length || 0)),
-                mode: recovery.mode || (receipt.auto_resume_allowed ? "safe_auto" : "manual"),
-                state: recovery.state || (receipt.auto_resume_allowed ? "waiting_provider" : "needs_user"),
-                attempt: Math.max(0, Number(recovery.attempt || 0)),
-                maxAttempts: Math.max(1, Number(recovery.maxAttempts || 3)),
-                nextRetryAt: (0, task_replay_shared_1.iso)(recovery.nextRetryAt),
-                recoveredAt: (0, task_replay_shared_1.iso)(task.resumed_at || recovery.recovered_at || recovery.revalidated_at),
-                result: task.resumed_at ? "resumed" : recovery.state === "needs_user" ? "needs_user" : "waiting",
-            }];
+        rows.push({
+            kind: "interruption",
+            taskId: String(task.id || receipt.task_id || ""),
+            reasonCode: String(receipt.reason_code || "unknown"),
+            reasonLabel: reasonLabels[String(receipt.reason_code || "")] || "任务执行中断",
+            interruptedAt: (0, task_replay_shared_1.iso)(receipt.interrupted_at),
+            resumePhase: (0, task_replay_shared_1.safeText)(checkpoint.phase || receipt.checkpoint, 120),
+            completedWorkItemCount: Math.max(0, Number(checkpoint.completedWorkItemIds?.length || 0)),
+            mode: recovery.mode || (receipt.auto_resume_allowed ? "safe_auto" : "manual"),
+            state: recovery.state || (receipt.auto_resume_allowed ? "waiting_provider" : "needs_user"),
+            attempt: Math.max(0, Number(recovery.attempt || 0)),
+            maxAttempts: Math.max(1, Number(recovery.maxAttempts || 3)),
+            nextRetryAt: (0, task_replay_shared_1.iso)(recovery.nextRetryAt),
+            recoveredAt: (0, task_replay_shared_1.iso)(task.resumed_at || recovery.recovered_at || recovery.revalidated_at),
+            result: task.resumed_at ? "resumed" : recovery.state === "needs_user" ? "needs_user" : "waiting",
+        });
+        return rows;
     }).sort((a, b) => a.interruptedAt.localeCompare(b.interruptedAt));
 }
 function buildTaskReplayPresentation(input) {

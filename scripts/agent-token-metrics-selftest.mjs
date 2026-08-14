@@ -31,6 +31,7 @@ try {
       source: "provider_reported",
     },
     timing: { totalMs: 1200, modelMs: 900, toolWallMs: 200, summaryMs: 100 },
+    streaming: { firstVisibleFeedbackMs: 240, firstTokenMs: 610, maxSilentGapMs: 10_200, providerRetryCount: 1, fallbackStreamCount: 0, initialReadFileCount: 4, initialReadTokens: 6200 },
     resources: { peakCpuPercent: 34.5, peakRssBytes: 134217728, peakChildProcessCount: 3 },
   }, "2026-08-11T02:00:00.000Z");
   assert.equal(first.inserted, true);
@@ -71,6 +72,13 @@ try {
   assert.equal(page.total, 3);
   assert.equal(page.events.find(row => row.role === "test_agent").usageSource, "local_no_model");
   assert.equal(page.events.find(row => row.role === "project_agent").usageMissingReason, "runtime_unreported");
+  const mainEvent = page.events.find(row => row.role === "main_agent");
+  assert.equal(mainEvent.streaming.firstVisibleFeedbackMs, 240);
+  assert.equal(mainEvent.streaming.firstTokenMs, 610);
+  assert.equal(mainEvent.streaming.maxSilentGapMs, 10_200);
+  assert.equal(mainEvent.streaming.providerRetryCount, 1);
+  assert.equal(mainEvent.streaming.initialReadFileCount, 4);
+  assert.equal(mainEvent.streaming.initialReadTokens, 6200);
   assert.equal(dashboard.coverage.reduce((sum, row) => sum + row.calls, 0), 3);
 
   console.log(JSON.stringify({
@@ -82,6 +90,7 @@ try {
       local_test_agent_is_not_reported_as_zero_token: true,
       missing_usage_reason_is_preserved: true,
       timing_and_resource_peaks_are_preserved: true,
+      streaming_feedback_metrics_are_preserved: true,
       external_calls: 0,
     },
   }, null, 2));

@@ -5,17 +5,17 @@ import LoadingSkeleton from '../common/LoadingSkeleton.vue'
 import MessageNavigator from '../common/MessageNavigator.vue'
 import CommandResultCard from '../common/CommandResultCard.vue'
 import ConversationMessageShell from '../common/ConversationMessageShell.vue'
-import ConversationProcessingState from '../common/ConversationProcessingState.vue'
 import AgentExecutionTranscript from '../common/AgentExecutionTranscript.vue'
 import NewProgressIndicator from '../common/NewProgressIndicator.vue'
 import ConversationSummaryBoundary from '../common/ConversationSummaryBoundary.vue'
 import AgentFinalAnswer from '../common/AgentFinalAnswer.vue'
-import { shouldRenderExecutionTranscript, shouldShowCompactProcessingState } from '../../utils/agentExecutionEvents.js'
+import { shouldRenderExecutionTranscript } from '../../utils/agentExecutionEvents.js'
 import {
   globalAttachmentUrl,
   isGlobalImageAttachment,
 } from '../../utils/globalAgentAttachments.js'
 import { getCopyableMessageText } from '../../utils/messageActions.js'
+import { AlertCircle, CheckCircle2 } from '@lucide/vue'
 
 const props = defineProps({
   messages: { type: Array, default: () => [] },
@@ -52,6 +52,14 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['edit-message', 'rewind-message', 'open-file-change', 'open-file-changes'])
+const attachmentReadOk = file => file?.readable === true || ['parsed', 'partial', 'received'].includes(String(file?.status || '').toLowerCase())
+const attachmentStatusLabel = file => {
+  const status = String(file?.status || '').toLowerCase()
+  if (status === 'partial') return '部分读取'
+  if (file?.readable === true || status === 'parsed') return '已读取'
+  if (['failed', 'blocked', 'unreadable'].includes(status)) return '未读取'
+  return '已接收'
+}
 const isTaskExecutionMessage = (msg) => !!(
   msg?.globalMission
   || msg?.globalMissionSupervisor
@@ -111,11 +119,9 @@ const shouldHideDuplicateGlobalBubble = (msg, messageIndex) => {
       || msg?.content
       || '',
   ).trim()
-  // While a real execution transcript is present it owns the empty live row.
-  // Without a transcript, keep the empty streaming envelope so the normal
-  // “正在思考” state can render. A terminal empty envelope is hidden instead
-  // of inventing a generic answer.
-  if (!hasVisibleAnswer) return hasLiveExecution || msg?.streaming !== true
+  // Empty streaming envelopes stay invisible. A factual model-activity row is
+  // projected after the 10 second threshold and owns the waiting experience.
+  if (!hasVisibleAnswer) return true
   return false
 }
 
@@ -201,14 +207,8 @@ const isStructuredGlobalMessage = msg => !!(
                 <template
                   v-else-if="msg.type === 'global_stream' && !hasLiveGlobalExecutionForMessage(index)"
                 >
-                  <ConversationProcessingState
-                    v-if="msg.streaming && !String(getVisibleGlobalMessageContent(msg) || '').trim() && !isTaskExecutionMessage(msg) && shouldShowCompactProcessingState(executionEvents, messages, index)"
-                    compact
-                    title="正在思考…"
-                    detail="正在理解你的问题并整理当前上下文"
-                  />
                   <AgentFinalAnswer
-                    v-else-if="String(getVisibleGlobalMessageContent(msg) || '').trim()"
+                    v-if="String(getVisibleGlobalMessageContent(msg) || '').trim()"
                     :content="getVisibleGlobalMessageContent(msg)"
                     :streaming="!!msg.streaming"
                     :mentions="msg.mentions || []"
@@ -400,6 +400,11 @@ const isStructuredGlobalMessage = msg => !!(
                     <div class="file-info">
                       <span class="file-name">{{ file.name }}</span>
                       <span class="file-size" v-if="file.size">{{ formatSize(file.size) }}</span>
+                      <span :class="['file-read-status', { ok: attachmentReadOk(file) }]">
+                        <CheckCircle2 v-if="attachmentReadOk(file)" :size="12" />
+                        <AlertCircle v-else :size="12" />
+                        {{ attachmentStatusLabel(file) }}
+                      </span>
                     </div>
                   </a>
                   <div v-else class="attachment-preview-file">
@@ -407,6 +412,11 @@ const isStructuredGlobalMessage = msg => !!(
                     <div class="file-info">
                       <span class="file-name">{{ file.name }}</span>
                       <span class="file-size" v-if="file.size">{{ formatSize(file.size) }}</span>
+                      <span :class="['file-read-status', { ok: attachmentReadOk(file) }]">
+                        <CheckCircle2 v-if="attachmentReadOk(file)" :size="12" />
+                        <AlertCircle v-else :size="12" />
+                        {{ attachmentStatusLabel(file) }}
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -438,16 +448,6 @@ const isStructuredGlobalMessage = msg => !!(
             </span>
           </div>
           
-          <!-- 正在分析状态 -->
-          <ConversationMessageShell
-            v-if="isSending && !globalTaskExecutionActive && (!currentSession?.messages?.length || currentSession.messages[currentSession.messages.length - 1].role !== 'assistant')"
-            role="assistant"
-            compact
-            streaming
-            class="chat-bubble-wrapper assistant typing"
-          >
-            <ConversationProcessingState compact title="正在思考…" detail="" />
-          </ConversationMessageShell>
         </div>
       </div>
       <NewProgressIndicator :count="pendingProgressCount" @activate="jumpToLatestProgress" />

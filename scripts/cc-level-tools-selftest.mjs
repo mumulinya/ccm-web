@@ -78,6 +78,20 @@ try {
   assert.equal(editDisplay.tool.userLabel, '修改文件')
   assert.equal(JSON.stringify(editDisplay).includes('BODY_SENTINEL'), false)
 
+  const knowledgeDisplay = toolDisplay.buildToolDisplayDetail({
+    toolName: 'query_knowledge',
+    arguments: { query: 'project-a 项目简介' },
+    result: {
+      retrievalMode: 'hybrid:local',
+      sourceReferences: [{ documentName: 'project-a-guide.md', chunkIds: ['project-a-guide.md#3'], revision: '7', checksum: 'SECRET_CHECKSUM', tokenCount: 1200 }],
+    },
+    transientBody: true,
+  })
+  assert.equal(knowledgeDisplay.result.summary, '参考了 1 份知识资料')
+  assert.equal(knowledgeDisplay.result.rows[0].name, 'project-a-guide.md')
+  assert.equal(JSON.stringify(knowledgeDisplay).includes('chunkIds'), false)
+  assert.equal(JSON.stringify(knowledgeDisplay).includes('SECRET_CHECKSUM'), false)
+
   const tinyPng = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64')
   const imageFile = path.join(temp, 'pixel.png')
   fs.writeFileSync(imageFile, tinyPng)

@@ -292,10 +292,12 @@ import {
   evaluateGreenContract,
   inspectBranchFreshness,
   isTaskCancellationRequested,
+  listActiveAgentRuns,
   listExecutions,
   loadExecution,
   mergeExecutionWorktree,
   purgeTaskExecutionArtifacts,
+  requestActiveAgentRunPause,
   requestTaskCancellation,
   rollbackExecutionCheckpoint,
   runExecutionKernelSelfTest,
@@ -319,7 +321,11 @@ import {
   recordTaskAgentFinalDispatchReactiveCompactCircuitOutcome,
   recordTaskAgentSessionTurn,
   reopenTaskAgentSessions,
+  suspendTaskAgentSessions,
 } from "../../tasks/agent-sessions";
+import { appendUserVisibleAgentEvent } from "../../system/user-visible-agent-events";
+import { updateGroupTaskInlineStatus } from "./collaboration-runtime-task-queue";
+import { requestTaskPauseTree, resumeTaskPauseTree } from "./task-pause-routes";
 
 import {
   bindTaskAgentInvocationContext,
@@ -486,6 +492,26 @@ export function getGlobalDirectDispatchContinuationKey(task: any) {
     interruption.requested_at || "",
     reason,
   ].filter(Boolean).join("|");
+}
+
+function globalMissionPauseDeps() {
+  return {
+    loadTasks,
+    updateTask,
+    listActiveAgentRuns,
+    requestActiveAgentRunPause,
+    listTaskAgentSessions,
+    suspendTaskAgentSessions,
+    reopenTaskAgentSessions,
+    listExecutions,
+    transitionExecution,
+    runningTaskIds,
+    appendTaskTimelineEvent,
+    appendUserVisibleAgentEvent,
+    buildTaskConversationLinks,
+    updateGroupTaskInlineStatus,
+    enqueueTask,
+  };
 }
 
 export function shouldNotifyGlobalDirectDispatchContinuation(task: any, previousStatus = "") {
@@ -985,6 +1011,24 @@ export async function controlGlobalDevelopmentMission(id: string, operation: str
       await ctx.onTaskStatusChange?.(child, running ? "cancelling" : "cancelled", reason);
     }
     updateTask(id, { status: "cancelled", status_detail: compactFormText(payload.reason, "全局任务已取消"), cancelled_at: now });
+  } else if (op === "pause") {
+    const pausedTree = requestTaskPauseTree(current.mission, globalMissionPauseDeps());
+    updateTask(id, {
+      supervisor_control: { mode: "paused", updated_at: now, actor: payload.actor || "user" },
+      status_detail: pausedTree.childrenSafe
+        ? "全局任务树已在安全检查点暂停"
+        : "正在暂停全局任务树，等待子任务安全收口",
+    });
+  } else if (op === "resume") {
+    try {
+      await resumeTaskPauseTree(current.mission, ctx, globalMissionPauseDeps());
+      updateTask(id, {
+        supervisor_control: { mode: "automatic", updated_at: now, actor: payload.actor || "user" },
+        status_detail: "全局任务已从安全暂停点继续",
+      });
+    } catch (error: any) {
+      return { success: false, status: Number(error?.status || 409), error: error?.message || "全局任务暂时无法继续", checks: error?.checks || [] };
+    }
   } else {
     const paused = op === "pause" || op === "takeover";
     for (const child of current.children) {

@@ -7,6 +7,9 @@ export declare function buildAssistantProgressFallback(requests: any[], context?
     target?: any;
     goal?: any;
 }): string;
+export declare function buildToolBatchOutcomeProgress(results: any[], context?: {
+    target?: any;
+}): string;
 export type AssistantProgressValidationContext = {
     firstBatch?: boolean;
     hasSuccessfulObservation?: boolean;

@@ -38,6 +38,7 @@ import { buildSelectedSkillUsageDirective, selectRoleSkills } from "../../skills
 import {
   decideWorkflowWithModel,
   explicitWorkflowDecision,
+  isDevelopmentTaskWorkflowDecision,
   type WorkflowDecision,
 } from "../../agents/workflow-decision";
 
@@ -639,8 +640,7 @@ export function normalizeGroupAgentGatewayTaskIntent(fallback: any, coordinatorR
       agent_gateway: { runtime, dispatchPolicy, llm_backed: true, safe_stop: true, contract_invalid: true },
     };
   }
-  const delegates = workflowDecision.actionRequired
-    && ["execute_direct", "plan_task", "decompose_epic"].includes(workflowDecision.mode)
+  const delegates = isDevelopmentTaskWorkflowDecision(workflowDecision)
     && action === "delegate"
     && assignments.length > 0;
   const analysisEligible = !delegates && workflowDecision.mode === "project_analysis";

@@ -1,5 +1,5 @@
 import { ChildProcess } from "child_process";
-export type ExecutionState = "queued" | "spawning" | "ready" | "prompt_accepted" | "running" | "waiting_input" | "reviewing" | "succeeded" | "failed" | "cancel_requested" | "cancelled";
+export type ExecutionState = "queued" | "spawning" | "ready" | "prompt_accepted" | "running" | "paused" | "waiting_input" | "reviewing" | "succeeded" | "failed" | "cancel_requested" | "cancelled";
 export type FailureClass = "prompt_delivery" | "trust_gate" | "workspace" | "permission" | "branch_divergence" | "compile" | "test" | "test_timeout" | "plugin_startup" | "mcp_startup" | "mcp_handshake" | "gateway_routing" | "tool_runtime" | "provider" | "cancelled" | "timeout" | "infra" | "unknown";
 export type GreenLevel = "none" | "targeted" | "project" | "workspace" | "merge_ready";
 export interface DevelopmentTaskPacket {
@@ -170,6 +170,11 @@ export declare function cancelActiveAgentRun(input?: any): {
             peakChildProcessCount: number;
         };
     }[];
+};
+export declare function requestActiveAgentRunPause(input?: any): {
+    success: boolean;
+    matched: number;
+    signalled: number;
 };
 export declare function trackManagedChildProcess(taskId: string, executionId: string, child: ChildProcess, meta?: any): () => void;
 export declare function terminateManagedChildProcess(child: ChildProcess): boolean;

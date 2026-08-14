@@ -1,8 +1,8 @@
 <script setup>
 import { computed } from 'vue'
 import TaskExperienceCard from '../tasks/TaskExperienceCard.vue'
-import ConversationProcessingState from '../common/ConversationProcessingState.vue'
 import AgentFinalAnswer from '../common/AgentFinalAnswer.vue'
+import { taskCardNeedsConversationControl } from '../../utils/taskCardPresentation.js'
 
 const props = defineProps({
   message: {
@@ -29,6 +29,7 @@ const workEvents = computed(() => (
 ))
 
 const isTaskMessage = computed(() => String(props.message?.messageMode || props.message?.message_mode || '').toLowerCase() === 'task' || !!props.taskCard)
+const showTaskControlCard = computed(() => taskCardNeedsConversationControl(props.taskCard))
 
 const visibleWorkEvents = computed(() => workEvents.value.slice(-10))
 
@@ -59,35 +60,25 @@ const workEventTone = (kind) => {
 const hasFileChanges = computed(() => (
   props.message?.fileChanges?.count > 0 && Array.isArray(props.message?.fileChanges?.files)
 ))
-const showThinking = computed(() => (
-  !props.suppressThinking && !props.taskCard && props.message?.streaming && !String(props.message?.content || '').trim()
-))
 </script>
 
 <template>
+  <AgentFinalAnswer
+    v-if="message.content || isLastStreaming"
+    :content="message.content || ''"
+    :streaming="isLastStreaming"
+    :mentions="message.mentions || []"
+    :storage-key="messageKey"
+  />
   <TaskExperienceCard
-    v-if="taskCard"
+    v-if="showTaskControlCard"
     :card="taskCard"
     context="project"
     compact
     :busy="!!message.streaming || !!message.taskActionBusy"
     @action="emit('task-action', $event)"
   />
-  <ConversationProcessingState
-    v-else-if="showThinking"
-    compact
-    title="正在思考…"
-    detail="正在理解你的问题并检查项目上下文"
-  />
-  <AgentFinalAnswer
-    v-else
-    :content="message.content || ''"
-    :streaming="isLastStreaming"
-    :mentions="message.mentions || []"
-    :storage-key="messageKey"
-  />
-
-  <details v-if="workEvents.length && !taskCard && isTaskMessage" class="agent-work-events">
+  <details v-if="workEvents.length && !showTaskControlCard && isTaskMessage" class="agent-work-events">
     <summary class="work-events-head">
       <span>技术详情</span>
       <span>{{ workEvents.length }} 条</span>
@@ -104,7 +95,7 @@ const showThinking = computed(() => (
     </div>
   </details>
 
-  <div v-if="hasFileChanges && !taskCard && isTaskMessage && !hideFileChanges" class="file-changes">
+  <div v-if="hasFileChanges && !showTaskControlCard && isTaskMessage && !hideFileChanges" class="file-changes">
     <div class="file-changes-header">📁 修改了 {{ message.fileChanges.count }} 个文件</div>
     <button
       v-for="file in message.fileChanges.files"

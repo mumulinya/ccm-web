@@ -33,11 +33,16 @@ import {
 import { requestAccessPrincipal, requestIsReadOnly } from "../system/api-access-control";
 import { runGitCommand, tryGitCommand } from "../tools/git-workspace-runtime";
 import { listGlobalTerminalDeliveries, retryGlobalTerminalDelivery } from "../../agents/global/global-terminal-delivery";
+import {
+  buildRecoverableTaskSummary,
+  decideConversationMessageRoute,
+  findRecoverableConversationTasks,
+} from "../../agents/conversation-message-routing";
 import { buildGlobalMissionSafeProjection, buildTaskConversationLinks } from "../../system/task-conversation-links";
 import { parseSecureMultipartRequest } from "../../system/secure-multipart";
 import { listGlobalDispatchTargets } from "../../system/automation-session-bindings";
 import { hasResourceAccess } from "../system/access-policy";
-import { GLOBAL_AGENT_CAPABILITY_REPLY, isGlobalAgentCapabilityQuestion } from "./global-agent-capabilities";
+import { resolveFeishuInboundAttachments } from "../../integrations/feishu-inbound-attachments";
 
 function normalizeGlobalRequestedTargets(value: any, message = "") {
   let rows = value;
@@ -105,6 +110,7 @@ function resolveControlBotAcpPlatformContext(acpSessionIdValue: string) {
       return {
         chat_id: chatId,
         open_id: openId,
+        user_id: "",
         root_id: threadId,
         thread_id: threadId,
         platform_message_id: threadId,
@@ -168,11 +174,19 @@ export function createGlobalAgentApi(deps: any) {
         const turn = conversationTurnControl.claim({ scope: "global", conversation_id: sessionId });
         if (!turn) break;
         const metadata = turn.metadata?.global_context_v2 || {};
+        const resolvedRoute = String(turn.metadata?.resolved_route || metadata.resolved_route || "");
+        const resolvedCandidateTaskId = String(turn.metadata?.resolved_candidate_task_id || metadata.resolved_candidate_task_id || "");
+        const recoverableCandidates = findRecoverableConversationTasks({ scope: "global", scopeId: "global", exactSessionId: sessionId });
+        const routeHistory = Array.isArray(metadata.history) ? [...metadata.history] : [];
+        const resolvedCandidate = resolvedRoute === "continue_original"
+          ? recoverableCandidates.find((item: any) => String(item.id || "") === resolvedCandidateTaskId)
+          : null;
+        if (resolvedCandidate) routeHistory.push({ role: "system", content: `用户明确选择继续原任务。可恢复任务摘要：${JSON.stringify(buildRecoverableTaskSummary(resolvedCandidate))}。` });
         try {
           const run = await runAgenticGlobalRequest(baseUrl, ctx, {
             message: String(metadata.message || turn.message || ""),
             originalMessage: String(metadata.original_message || turn.message || ""),
-            history: Array.isArray(metadata.history) ? metadata.history : [],
+            history: routeHistory,
             sessionId,
             source: String(metadata.source || "web-queue-recovery"),
             traceId: String(metadata.trace_id || ""),
@@ -183,6 +197,22 @@ export function createGlobalAgentApi(deps: any) {
             requestedTargetRefs: Array.isArray(metadata.requested_target_refs) ? metadata.requested_target_refs : [],
             turnId: turn.id,
             queueScope: `global:${sessionId}`,
+            routeGuard: (workflowDecision: any) => {
+              if (resolvedRoute === "answer_only") {
+                workflowDecision.mode = "answer";
+                workflowDecision.actionRequired = false;
+                workflowDecision.requiresCodeChanges = false;
+                workflowDecision.continuationKind = "new_task";
+                return;
+              }
+              if (resolvedRoute === "start_new_task") {
+                workflowDecision.continuationKind = "new_task";
+                return;
+              }
+              if (resolvedRoute === "continue_original" && resolvedCandidate) return;
+              const route = decideConversationMessageRoute({ workflowDecision, candidates: recoverableCandidates });
+              if (route.decision === "needs_user") throw Object.assign(new Error(route.reason), { code: "CONVERSATION_ROUTE_REQUIRED", route });
+            },
           });
           conversationTurnControl.settle({
             id: turn.id,
@@ -194,6 +224,14 @@ export function createGlobalAgentApi(deps: any) {
             error: run.status === "failed" ? run.error || run.final_reply : "",
           });
         } catch (error: any) {
+          if (error?.code === "CONVERSATION_ROUTE_REQUIRED") {
+            conversationTurnControl.requireRoute({
+              id: turn.id,
+              revision: turn.revision,
+              routing: { candidateTaskId: String(error?.route?.candidate?.id || ""), confidence: Number(error?.route?.confidence || 0), reason: error?.route?.reason || error?.message },
+            });
+            break;
+          }
           conversationTurnControl.settle({ id: turn.id, status: "failed", checkpoint: "failed", error: error?.message || String(error) });
         }
       }
@@ -412,7 +450,18 @@ export function createGlobalAgentApi(deps: any) {
           }
           streamResponse = isAcp && payload.stream === true;
           if (isAcp) {
-            payload = { ...payload, ...resolveControlBotAcpPlatformContext(payload.acpSessionId || payload.sessionId) };
+            const resolvedAcpContext = resolveControlBotAcpPlatformContext(payload.acpSessionId || payload.sessionId);
+            payload = {
+              ...payload,
+              chat_id: payload.chat_id || resolvedAcpContext.chat_id,
+              open_id: payload.open_id || resolvedAcpContext.open_id,
+              user_id: payload.user_id || resolvedAcpContext.user_id,
+              root_id: payload.root_id || resolvedAcpContext.root_id,
+              thread_id: payload.thread_id || resolvedAcpContext.thread_id,
+              platform_message_id: payload.platform_message_id || resolvedAcpContext.platform_message_id,
+              platform_session_key: payload.platform_session_key || resolvedAcpContext.platform_session_key,
+              acp_session_id: payload.acp_session_id || resolvedAcpContext.acp_session_id,
+            };
           }
           const inboundEnvelope = buildFeishuInboundEnvelopeV2({
             payload: { ...payload, target_type: "global_agent" },
@@ -428,6 +477,23 @@ export function createGlobalAgentApi(deps: any) {
             feishu_app_fingerprint: inboundEnvelope.identity.application_fingerprint,
             feishu_inbound_envelope: inboundEnvelope,
           };
+          if (isAcp && Array.isArray(payload.cc_connect_attachment_refs) && payload.cc_connect_attachment_refs.length) {
+            const resolvedAttachments = await resolveFeishuInboundAttachments({
+              messageId: getFeishuMessageId(payload),
+              localRefs: payload.cc_connect_attachment_refs,
+              expectedWorkDir: process.cwd(),
+              source: "cc_connect_acp",
+            });
+            payload = {
+              ...payload,
+              feishu_attachments: resolvedAttachments.attachments,
+              feishu_attachment_warnings: resolvedAttachments.warnings,
+              feishu_attachment_failures: resolvedAttachments.failures,
+            };
+            if (!resolvedAttachments.attachments.length) {
+              throw new Error(resolvedAttachments.failures[0]?.reason || "飞书附件未能安全接管，请重新上传后再试");
+            }
+          }
           const text = extractCcConnectHookText(payload);
           if (!text) {
             sendJson(res, { success: false, error: "未从控制机器人载荷中识别到文本消息" }, 400);
@@ -468,7 +534,9 @@ export function createGlobalAgentApi(deps: any) {
             replyWithDuplicate(settled);
             return;
           }
-          if (isAcp && /^om_[a-z0-9_-]{8,200}$/i.test(messageId)) {
+          // cc-connect owns the ACP reaction lifecycle because it still has the
+          // exact inbound Feishu message ID before crossing the ACP boundary.
+          if (!isAcp && /^om_[a-z0-9_-]{8,200}$/i.test(messageId)) {
             reactionInput = { scope: "global", messageId };
             try {
               beginFeishuReactionFeedback(reactionInput);
@@ -1318,7 +1386,7 @@ export function createGlobalAgentApi(deps: any) {
         }
         const emit = (event: any) => {
           if (!isStream || res.writableEnded) return;
-          if (event?.type === "text" && String(event?.text || "").trim()) visibleTextEmitted = true;
+          if (["text", "response_delta"].includes(String(event?.type || "")) && String(event?.text || "").trim()) visibleTextEmitted = true;
           const ui = event?.ui === undefined ? buildGlobalAgentEventUi(event) : event.ui;
           const sequence = ++streamSequence;
           const eventId = String(event?.event_id || event?.eventId || `${streamRequestId || "global-stream"}:${sequence}`);
@@ -1326,16 +1394,9 @@ export function createGlobalAgentApi(deps: any) {
           res.write(`data: ${JSON.stringify(payloadWithOrder)}\n\n`);
           (res as any).flush?.();
         };
-        const streamBufferedGlobalReply = async (content: string) => {
-          const characters = Array.from(String(content || ""));
-          const chunkSize = characters.length > 2400 ? 36 : characters.length > 800 ? 24 : 16;
-          for (let offset = 0; offset < characters.length; offset += chunkSize) {
-            if (res.destroyed || res.writableEnded) break;
-            emit({ type: "text", text: characters.slice(offset, offset + chunkSize).join("") });
-            if (offset + chunkSize < characters.length) {
-              await new Promise(resolve => setTimeout(resolve, 14));
-            }
-          }
+        const emitCompleteGlobalReply = (content: string) => {
+          const text = String(content || "");
+          if (text && !res.destroyed && !res.writableEnded) emit({ type: "response_delta", text, final: true });
         };
         try {
           let message = String(payload.message || "").trim();
@@ -1353,14 +1414,6 @@ export function createGlobalAgentApi(deps: any) {
           const displayMessage = originalMessage || (files.length
             ? `请处理已上传的 ${files.length} 份资料：${files.map((file: any) => file.filename || "附件").join("、")}`
             : message);
-          if (!files.length && isGlobalAgentCapabilityQuestion(originalMessage)) {
-            if (isStream) {
-              await streamBufferedGlobalReply(GLOBAL_AGENT_CAPABILITY_REPLY);
-              emit({ type: "done", capability_reply: true });
-              res.end();
-            } else sendJson(res, { success: true, reply: GLOBAL_AGENT_CAPABILITY_REPLY, capability_reply: true, contentStored: false });
-            return;
-          }
           const requestedTargetRefs = normalizeGlobalRequestedTargets(payload.target_refs || payload.targetRefs, originalMessage || message);
           const requestPrincipal = requestAccessPrincipal(req);
           if (requestPrincipal?.kind === "browser" && requestPrincipal.role !== "admin") {
@@ -1378,6 +1431,20 @@ export function createGlobalAgentApi(deps: any) {
           let history: any[] = [];
           try { history = Array.isArray(payload.history) ? payload.history : JSON.parse(String(payload.history || "[]")); } catch {}
           const sessionId = String(payload.session_id || payload.sessionId || "web:default");
+          const explicitRouteChoice = String(payload.resolved_route || payload.resolvedRoute || "").trim();
+          const explicitCandidateTaskId = String(payload.resolved_candidate_task_id || payload.resolvedCandidateTaskId || "").trim();
+          const recoverableCandidates = findRecoverableConversationTasks({ scope: "global", scopeId: "global", exactSessionId: sessionId });
+          const explicitCandidate = explicitRouteChoice === "continue_original"
+            ? recoverableCandidates.find((item: any) => String(item.id || "") === explicitCandidateTaskId)
+            : null;
+          if (explicitRouteChoice === "continue_original" && !explicitCandidate) {
+            throw Object.assign(new Error("原任务已不可恢复，请重新选择处理方式"), { code: "CONVERSATION_ROUTE_CANDIDATE_STALE" });
+          }
+          if (explicitCandidate) {
+            history.push({ role: "system", content: `用户明确选择继续原任务。可恢复任务摘要：${JSON.stringify(buildRecoverableTaskSummary(explicitCandidate))}。必须沿用该任务目标，不得创建重复任务。` });
+          } else if (recoverableCandidates.length) {
+            history.push({ role: "system", content: `当前精确会话的可恢复任务摘要：${JSON.stringify(recoverableCandidates.slice(0, 3).map(buildRecoverableTaskSummary))}。请结合当前消息判断 continuationKind；不要仅因为存在旧任务就续接。` });
+          }
           ctx.setAgentActivity(GLOBAL_PET_AGENT_NAME, "thinking", "全局 Agent 正在思考...", { tab: "global-agent" }, 12 * 60 * 1000);
           ctx.broadcastPetSpeech(GLOBAL_PET_AGENT_NAME, { role: "user", text: displayMessage, final: true, source: "global" });
           const requestId = String(payload.request_id || payload.requestId || req.headers["x-client-message-id"] || `server-${Date.now()}-${crypto.randomBytes(4).toString("hex")}`).trim();
@@ -1399,30 +1466,40 @@ export function createGlobalAgentApi(deps: any) {
             return;
           }
           const principal = requestAccessPrincipal(req);
-          const queued = conversationTurnControl.enqueue({
-            scope: "global",
-            conversation_id: sessionId,
-            mode: "queue",
-            message: displayMessage,
-            attachments: sourceFiles,
-            request_id: requestId,
-            metadata: {
-              global_context_v2: {
-                message,
-                original_message: displayMessage,
-                history,
-                source: "web",
-                trace_id: operation?.traceId || "",
-                clarification_run_id: payload.clarification_run_id || payload.clarificationRunId || "",
-                source_ingestion: sourceIngestion,
-                read_only: requestIsReadOnly(req),
-                principal,
-                requested_target_refs: requestedTargetRefs,
+          const suppliedTurnId = String(payload.conversation_turn_id || payload.conversationTurnId || "").trim();
+          const suppliedTurn = suppliedTurnId
+            ? conversationTurnControl.listInternal({ scope: "global", conversation_id: sessionId, limit: 500 }).turns.find((item: any) => item.id === suppliedTurnId)
+            : null;
+          const queued = suppliedTurn
+            ? { turn: suppliedTurn, duplicate: true }
+            : conversationTurnControl.enqueue({
+              scope: "global",
+              conversation_id: sessionId,
+              mode: "queue",
+              message: displayMessage,
+              attachments: sourceFiles,
+              request_id: requestId,
+              metadata: {
+                global_context_v2: {
+                  message,
+                  original_message: displayMessage,
+                  history,
+                  source: "web",
+                  trace_id: operation?.traceId || "",
+                  clarification_run_id: payload.clarification_run_id || payload.clarificationRunId || "",
+                  source_ingestion: sourceIngestion,
+                  read_only: requestIsReadOnly(req),
+                  principal,
+                  requested_target_refs: requestedTargetRefs,
+                  resolved_route: explicitRouteChoice,
+                  resolved_candidate_task_id: explicitCandidateTaskId,
+                },
               },
-            },
-          });
+            });
           activeSessionId = sessionId;
-          activeTurn = conversationTurnControl.claim({ scope: "global", conversation_id: sessionId, id: queued.turn.id, lease_ms: 13 * 60 * 1000 });
+          activeTurn = suppliedTurn?.status === "sending"
+            ? suppliedTurn
+            : conversationTurnControl.claim({ scope: "global", conversation_id: sessionId, id: queued.turn.id, revision: queued.turn.revision, lease_ms: 13 * 60 * 1000 });
           if (!activeTurn) {
             const position = conversationTurnControl.list({ scope: "global", conversation_id: sessionId, statuses: "queued,sending" })
               .turns.find((turn: any) => turn.id === queued.turn.id)?.position || 1;
@@ -1437,6 +1514,7 @@ export function createGlobalAgentApi(deps: any) {
           }
           emit({ type: "claimed", turn_id: activeTurn.id, queue_scope: `global:${sessionId}`, queue_position: 1 });
           let finalPetEventRelayed = false;
+          emit({ type: "response_started", agent: "global-agent" });
           const run = await runAgenticGlobalRequest(getRequestBaseUrl(req), ctx, {
             message,
             originalMessage: displayMessage,
@@ -1449,6 +1527,27 @@ export function createGlobalAgentApi(deps: any) {
             readOnly: requestIsReadOnly(req),
             principal,
             requestedTargetRefs,
+            routeGuard: (workflowDecision: any) => {
+              if (explicitRouteChoice === "answer_only") {
+                workflowDecision.mode = "answer";
+                workflowDecision.actionRequired = false;
+                workflowDecision.requiresCodeChanges = false;
+                workflowDecision.continuationKind = "new_task";
+                return;
+              }
+              if (explicitRouteChoice === "start_new_task") {
+                workflowDecision.continuationKind = "new_task";
+                return;
+              }
+              if (explicitRouteChoice === "continue_original") {
+                workflowDecision.continuationKind = String(workflowDecision.continuationKind || "supplement") === "revise_goal" ? "revise_goal" : "supplement";
+                return;
+              }
+              const route = decideConversationMessageRoute({ workflowDecision, candidates: recoverableCandidates });
+              if (route.decision === "needs_user") {
+                throw Object.assign(new Error(route.reason), { code: "CONVERSATION_ROUTE_REQUIRED", route });
+              }
+            },
             turnId: activeTurn.id,
             queueScope: `global:${sessionId}`,
             onEvent: (event: any) => {
@@ -1460,8 +1559,9 @@ export function createGlobalAgentApi(deps: any) {
             },
           });
           if (isStream && !visibleTextEmitted && String(run.final_reply || "").trim()) {
-            await streamBufferedGlobalReply(run.final_reply);
+            emitCompleteGlobalReply(run.final_reply);
           }
+          if (isStream) emit({ type: "response_completed", final: true });
           conversationTurnControl.settle({
             id: activeTurn.id,
             status: run.status === "failed" ? "failed" : "completed",
@@ -1482,6 +1582,49 @@ export function createGlobalAgentApi(deps: any) {
             res.end();
           } else sendJson(res, { success: true, run: result, source_files: sourceFiles, files: sourceFiles, turn_id: activeTurn.id, queue_scope: `global:${sessionId}`, queue_position: 0, authorization_receipt: run.write_authorization_receipt || null, retryable: run.retryable === true, terminal_receipt: run.terminal_receipt || null });
         } catch (error: any) {
+          if (activeTurn?.id && error?.code === "CONVERSATION_ROUTE_REQUIRED") {
+            try {
+              const routed = conversationTurnControl.requireRoute({
+                id: activeTurn.id,
+                revision: activeTurn.revision,
+                routing: {
+                  candidateTaskId: String(error?.route?.candidate?.id || ""),
+                  confidence: Number(error?.route?.confidence || 0),
+                  reason: String(error?.route?.reason || error?.message || "需要确认消息处理方式"),
+                },
+              });
+              if (isStream) {
+                emit({ type: "route_required", turn: { id: routed.id, revision: routed.revision, status: routed.status, routing: routed.routing } });
+                emit({ type: "done", route_required: true });
+                res.end();
+              } else sendJson(res, { success: true, route_required: true, turn: { id: routed.id, revision: routed.revision, status: routed.status, routing: routed.routing } }, 202);
+              return;
+            } catch (routeError: any) {
+              error = routeError;
+            }
+          }
+          if (activeTurn?.id
+            && !String(payload.resolved_route || payload.resolvedRoute || "")
+            && ["统一大模型尚未配置", "MODEL", "PROVIDER", "TIMEOUT", "NETWORK"].some(token => String(error?.code || error?.message || "").toUpperCase().includes(token))) {
+            try {
+              const candidates = findRecoverableConversationTasks({ scope: "global", scopeId: "global", exactSessionId: activeSessionId });
+              const routed = conversationTurnControl.requireRoute({
+                id: activeTurn.id,
+                revision: activeTurn.revision,
+                routing: {
+                  candidateTaskId: String(candidates[0]?.id || ""),
+                  confidence: 0,
+                  reason: "主 Agent 暂时无法可靠判断这条消息是否续接原任务，请选择处理方式",
+                },
+              });
+              if (isStream) {
+                emit({ type: "route_required", turn: { id: routed.id, revision: routed.revision, status: routed.status, routing: routed.routing } });
+                emit({ type: "done", route_required: true });
+                res.end();
+              } else sendJson(res, { success: true, route_required: true, turn: { id: routed.id, revision: routed.revision, status: routed.status, routing: routed.routing } }, 202);
+              return;
+            } catch {}
+          }
           if (activeTurn?.id) {
             try { conversationTurnControl.settle({ id: activeTurn.id, status: "failed", checkpoint: "failed", error: error?.message || String(error) }); } catch {}
           }

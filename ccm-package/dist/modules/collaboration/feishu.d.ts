@@ -10,6 +10,17 @@ export declare function downloadFeishuMessageResource(input: {
     content_disposition: string;
     size: number;
 }>;
+export type FeishuMessageResourceDescriptor = {
+    kind: "image" | "file";
+    key: string;
+    name: string;
+};
+/**
+ * Reads only the attachment metadata for one exact Feishu message.  The
+ * resource body is still fetched through downloadFeishuMessageResource so the
+ * same tenant identity, byte limit and timeout are applied in both paths.
+ */
+export declare function getFeishuMessageResources(messageIdValue: string): Promise<FeishuMessageResourceDescriptor[]>;
 export declare function getFeishuUserToken(appId: string, appSecret: string, code: string): Promise<any>;
 export declare function getFeishuUserInfo(accessToken: string): Promise<any>;
 export declare function getFeishuChatList(accessToken: string): Promise<any[]>;

@@ -78,6 +78,7 @@ export declare function buildGroupClarificationSummary(input: {
     dispatchPolicy?: any;
     analysis?: any;
     coordinator?: string;
+    round?: number;
 }): {
     schema: string;
     title: string;
@@ -88,6 +89,44 @@ export declare function buildGroupClarificationSummary(input: {
     reason: string;
     answer_suggestions: string[];
     next_action: string;
+    pre_plan_clarification: {
+        schema: string;
+        id: string;
+        scope: any;
+        scopeId: string;
+        exactSessionId: string;
+        anchorMessageId: string;
+        status: any;
+        revision: number;
+        generation: number;
+        round: number;
+        title: string;
+        headline: string;
+        questions: any[];
+        allowAdditionalNote: boolean;
+        safeDefaultsAvailable: boolean;
+        originalRequestChecksum: string;
+        contentStored: boolean;
+    };
+    prePlanClarification: {
+        schema: string;
+        id: string;
+        scope: any;
+        scopeId: string;
+        exactSessionId: string;
+        anchorMessageId: string;
+        status: any;
+        revision: number;
+        generation: number;
+        round: number;
+        title: string;
+        headline: string;
+        questions: any[];
+        allowAdditionalNote: boolean;
+        safeDefaultsAvailable: boolean;
+        originalRequestChecksum: string;
+        contentStored: boolean;
+    };
     coordinator: string;
     display_policy: {
         user_visible: boolean;
@@ -116,6 +155,44 @@ export declare function runGroupClarificationSummarySelfTest(): {
         reason: string;
         answer_suggestions: string[];
         next_action: string;
+        pre_plan_clarification: {
+            schema: string;
+            id: string;
+            scope: any;
+            scopeId: string;
+            exactSessionId: string;
+            anchorMessageId: string;
+            status: any;
+            revision: number;
+            generation: number;
+            round: number;
+            title: string;
+            headline: string;
+            questions: any[];
+            allowAdditionalNote: boolean;
+            safeDefaultsAvailable: boolean;
+            originalRequestChecksum: string;
+            contentStored: boolean;
+        };
+        prePlanClarification: {
+            schema: string;
+            id: string;
+            scope: any;
+            scopeId: string;
+            exactSessionId: string;
+            anchorMessageId: string;
+            status: any;
+            revision: number;
+            generation: number;
+            round: number;
+            title: string;
+            headline: string;
+            questions: any[];
+            allowAdditionalNote: boolean;
+            safeDefaultsAvailable: boolean;
+            originalRequestChecksum: string;
+            contentStored: boolean;
+        };
         coordinator: string;
         display_policy: {
             user_visible: boolean;

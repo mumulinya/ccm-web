@@ -77,7 +77,7 @@ try {
   const testTerminal = rows.find(row => row.eventType === 'agent_completed' && row.workItemId === 'test-item')
   const finalResult = rows.find(row => row.eventId === 'project-terminal-result')
 
-  assert.equal(codeSearch?.display?.title, 'Find definition')
+  assert.equal(codeSearch?.display?.title, '查找定义')
   assert.ok(resultSubmitted, 'Worker Result必须展示为等待CCM验收')
   assert.ok(workerTerminal && testTerminal, 'Worker和TestAgent必须分别具备CCM Terminal事件')
   assert.ok(resultSubmitted.sequence < workerTerminal.sequence, 'Result不得晚于或替代Terminal')

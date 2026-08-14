@@ -1,8 +1,9 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.disableBlockingFeishuReaction = disableBlockingFeishuReaction;
+exports.disableBlockingFeishuReaction = void 0;
+exports.configureNativeFeishuReactionFeedback = configureNativeFeishuReactionFeedback;
 exports.disableVisibleCcConnectIdleRotation = disableVisibleCcConnectIdleRotation;
-function disableBlockingFeishuReaction(content) {
+function configureNativeFeishuReactionFeedback(content) {
     if (!/^\s*\[\[projects\.platforms\]\]\s*$/mi.test(content))
         return content;
     const newline = content.includes("\r\n") ? "\r\n" : "\n";
@@ -32,7 +33,7 @@ function disableBlockingFeishuReaction(content) {
             let insertAt = end;
             while (insertAt > boundary.index + 1 && !lines[insertAt - 1].trim())
                 insertAt -= 1;
-            lines.splice(insertAt, 0, "", "[projects.platforms.options]", 'reaction_emoji = "none"');
+            lines.splice(insertAt, 0, "", "[projects.platforms.options]", 'reaction_emoji = "OnIt"', 'done_emoji = "Done"');
             continue;
         }
         let optionsEnd = end;
@@ -42,22 +43,28 @@ function disableBlockingFeishuReaction(content) {
                 break;
             }
         }
-        const reactionIndex = lines.findIndex((line, index) => (index > optionsStart
-            && index < optionsEnd
-            && /^\s*reaction_emoji\s*=/i.test(line)));
-        if (reactionIndex >= 0) {
-            const indent = lines[reactionIndex].match(/^\s*/)?.[0] || "";
-            lines[reactionIndex] = `${indent}reaction_emoji = "none"`;
-        }
-        else {
-            let insertAt = optionsEnd;
-            while (insertAt > optionsStart + 1 && !lines[insertAt - 1].trim())
-                insertAt -= 1;
-            lines.splice(insertAt, 0, 'reaction_emoji = "none"');
+        for (const [key, value] of [["done_emoji", "Done"], ["reaction_emoji", "OnIt"]]) {
+            const settingIndex = lines.findIndex((line, index) => (index > optionsStart
+                && index < optionsEnd
+                && new RegExp(`^\\s*${key}\\s*=`, "i").test(line)));
+            if (settingIndex >= 0) {
+                const indent = lines[settingIndex].match(/^\s*/)?.[0] || "";
+                lines[settingIndex] = `${indent}${key} = "${value}"`;
+            }
+            else {
+                let insertAt = optionsEnd;
+                while (insertAt > optionsStart + 1 && !lines[insertAt - 1].trim())
+                    insertAt -= 1;
+                lines.splice(insertAt, 0, `${key} = "${value}"`);
+                optionsEnd += 1;
+            }
         }
     }
     return lines.join(newline);
 }
+// Preserve the old export for installed extensions while changing the private
+// runtime projection to cc-connect's native reaction lifecycle.
+exports.disableBlockingFeishuReaction = configureNativeFeishuReactionFeedback;
 function disableVisibleCcConnectIdleRotation(content) {
     const marker = content.search(/\r?\n\[projects\.agent\]/i);
     if (marker < 0)

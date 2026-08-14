@@ -28,6 +28,7 @@ export interface WorkflowDecision {
   impactScope: string[];
   planSteps: string[];
   clarificationQuestions: string[];
+  structuredClarificationQuestions: any[];
   selectedSkills: string[];
   intentKind: "conversation" | "question" | "status" | "analysis" | "execution" | "management" | "continuation";
   requiresCodeChanges: boolean;
@@ -57,7 +58,7 @@ export const WORKFLOW_DECISION_GUIDANCE = `
 
 判断原则：
 1. 用户询问“怎么做/能否做/为什么”不等于授权执行。
-2. 用户明确要求实际实现、修改、修复、运行、创建或派发时，actionRequired 才为 true。
+2. 用户明确要求新增、修改、删除代码或项目配置时，requiresCodeChanges=true；仅运行、查询、构建、解释或诊断不等于开发任务。
 3. 简单明确的修复不要过度拆 Epic；复杂、多目标、跨项目需求优先 plan_task 或 decompose_epic。
 4. 附件或 URL 只是上下文，不自动意味着必须拆解；先理解用户对资料的真实要求。
 5. 若本轮是在补充现有目标，continuationKind=supplement；若改变目标、范围、方案或验收，continuationKind=revise_goal；否则 new_task。
@@ -85,6 +86,12 @@ const MODES = new Set<WorkflowDecisionMode>([
 function list(value: any, max = 12) {
   return Array.isArray(value)
     ? value.map(item => String(item || "").trim()).filter(Boolean).slice(0, max)
+    : [];
+}
+
+function structuredClarifications(value: any) {
+  return Array.isArray(value)
+    ? value.filter(item => item && typeof item === "object").slice(0, 3)
     : [];
 }
 
@@ -127,6 +134,7 @@ export function normalizeWorkflowDecision(value: any, source: WorkflowDecision["
     impactScope: list(value?.impactScope || value?.impact_scope),
     planSteps: list(value?.planSteps || value?.plan_steps, 16),
     clarificationQuestions: list(value?.clarificationQuestions || value?.clarification_questions, 6),
+    structuredClarificationQuestions: structuredClarifications(value?.structuredClarificationQuestions || value?.structured_clarification_questions),
     selectedSkills: list(value?.selectedSkills || value?.selected_skills, 6).filter(name => INTERNAL_SKILL_NAMES.has(name)),
     intentKind: INTENT_KINDS.has(String(value?.intentKind || value?.intent_kind || ""))
       ? String(value?.intentKind || value?.intent_kind) as WorkflowDecision["intentKind"]
@@ -152,6 +160,13 @@ export function normalizeWorkflowDecision(value: any, source: WorkflowDecision["
     source,
     ...(semanticDecisionReceipt ? { semanticDecisionReceipt } : {}),
   };
+}
+
+export function isDevelopmentTaskWorkflowDecision(value: any): boolean {
+  const mode = String(value?.mode || value?.workflowMode || "").trim();
+  return value?.actionRequired === true
+    && (value?.requiresCodeChanges === true || value?.requires_code_changes === true)
+    && ["execute_direct", "plan_task", "decompose_epic"].includes(mode);
 }
 
 export function explicitWorkflowDecision(
@@ -195,7 +210,7 @@ export async function decideWorkflowWithModel(input: {
 - sourcePolicy 只有用户在已知资料未读取的情况下明确允许忽略这些资料并继续时才为 ignore_unread，否则必须为 require_read。
 - authorizationDirective 表示本轮是否明确授予或撤销已有执行授权；没有明确改变时必须为 preserve。
 - riskLevel 根据用户要求的实际操作选择 low/write/high；requiresUserConfirmation 只表示语义上需要确认，最终权限仍由服务端工具门禁决定。
-- 模型无法可靠判断时通过 clarificationQuestions 提问，不得用本地规则补选。
+- 模型无法可靠判断时通过 structuredClarificationQuestions 提问，不得用本地规则补选。只询问会改变业务流程、实施范围、权限或验收的问题；代码和配置中可查明的问题不得询问。最多3项，每项最多4个选项；兼容旧 clarificationQuestions 字符串数组。
 - 当且仅当当前消息本身已经足够回答、不需要会话历史、记忆、知识库、Skill、MCP、项目状态或任何工具时，可以设置 directReplyReady=true，并在 directReply 中直接给出面向用户的完整自然语言回复。
 - 问候、致谢等自包含普通交流通常可以直接回复；存在指代不明、需要历史上下文、需要查证事实、状态查询、项目分析或任何执行动作时，directReplyReady 必须为 false。
 - directReplyReady 只是减少重复模型调用，不能绕过语义判断、权限、上下文或工具门禁。
@@ -204,7 +219,7 @@ export async function decideWorkflowWithModel(input: {
 ${CCM_INTERNAL_SKILL_CATALOG.map(item => `- ${item.name}: ${item.description}`).join("\n")}
 
 只输出合法 JSON：
-{"mode":"answer|project_analysis|execute_direct|plan_task|decompose_epic","reason":"判断依据","confidence":0.95,"needsPlanning":false,"needsEpicDecomposition":false,"actionRequired":false,"continuationKind":"new_task|supplement|revise_goal","readAction":"none|inspect_status","targetRefs":[],"impactScope":[],"planSteps":[],"clarificationQuestions":[],"selectedSkills":[],"intentKind":"conversation|question|status|analysis|execution|management|continuation","requiresCodeChanges":false,"requiresAgentQa":false,"requiresIndependentReview":false,"verificationModes":[],"memoryPolicy":"use|ignore","sourcePolicy":"require_read|ignore_unread","authorizationDirective":"preserve|grant|revoke","riskLevel":"low|write|high","requiresUserConfirmation":false,"directReplyReady":false,"directReply":""}`,
+{"mode":"answer|project_analysis|execute_direct|plan_task|decompose_epic","reason":"判断依据","confidence":0.95,"needsPlanning":false,"needsEpicDecomposition":false,"actionRequired":false,"continuationKind":"new_task|supplement|revise_goal","readAction":"none|inspect_status","targetRefs":[],"impactScope":[],"planSteps":[],"clarificationQuestions":[],"structuredClarificationQuestions":[{"id":"business_rule","label":"需要确认的问题","reason":"为什么影响方案","type":"single|multiple|text","required":true,"options":[{"id":"option_1","label":"选项","description":"影响","recommended":true,"safeDefault":true}]}],"selectedSkills":[],"intentKind":"conversation|question|status|analysis|execution|management|continuation","requiresCodeChanges":false,"requiresAgentQa":false,"requiresIndependentReview":false,"verificationModes":[],"memoryPolicy":"use|ignore","sourcePolicy":"require_read|ignore_unread","authorizationDirective":"preserve|grant|revoke","riskLevel":"low|write|high","requiresUserConfirmation":false,"directReplyReady":false,"directReply":""}`,
     },
     {
       role: "user",

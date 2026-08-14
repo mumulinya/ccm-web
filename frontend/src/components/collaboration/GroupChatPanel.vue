@@ -2,13 +2,13 @@
 import { computed, ref, watch } from 'vue'
 import ChatComposer from '../common/ChatComposer.vue'
 import SessionContextUsage from '../common/SessionContextUsage.vue'
+import ConversationAwayRecap from '../common/ConversationAwayRecap.vue'
 import PermissionApprovalCards from '../common/PermissionApprovalCards.vue'
 import ConversationTurnControls from '../common/ConversationTurnControls.vue'
 import CommandResultCard from '../common/CommandResultCard.vue'
 import EmptyState from '../common/EmptyState.vue'
 import MessageNavigator from '../common/MessageNavigator.vue'
 import ConversationMessageShell from '../common/ConversationMessageShell.vue'
-import ConversationProcessingState from '../common/ConversationProcessingState.vue'
 import ConflictPlanMessage from './ConflictPlanMessage.vue'
 import ContextCompactionEvent from './ContextCompactionEvent.vue'
 import ProjectTaskIntakeMessage from './ProjectTaskIntakeMessage.vue'
@@ -20,9 +20,10 @@ import GroupMainAgentStatusCard from './GroupMainAgentStatusCard.vue'
 import MainAgentDecisionCard from '../agents/MainAgentDecisionCard.vue'
 import AgentExecutionTranscript from '../common/AgentExecutionTranscript.vue'
 import ActiveTaskPlanDock from '../common/ActiveTaskPlanDock.vue'
+import PrePlanClarificationDock from '../common/PrePlanClarificationDock.vue'
 import ConversationAsideDock from '../common/ConversationAsideDock.vue'
 import ConversationHistoryBranches from '../common/ConversationHistoryBranches.vue'
-import ConversationPermissionMode from '../common/ConversationPermissionMode.vue'
+import ConversationModeToolbar from '../common/ConversationModeToolbar.vue'
 import ConversationSummaryBoundary from '../common/ConversationSummaryBoundary.vue'
 import NewProgressIndicator from '../common/NewProgressIndicator.vue'
 import GroupChatHeader from './GroupChatHeader.vue'
@@ -41,15 +42,17 @@ import { useSessionContextUsage } from '../../composables/useSessionContextUsage
 import { usePermissionApprovals } from '../../composables/usePermissionApprovals.js'
 import { useAgentExecutionEvents } from '../../composables/useAgentExecutionEvents.js'
 import { getCopyableMessageText } from '../../utils/messageActions.js'
-import { hasTerminalExecutionForMessage, shouldShowCompactProcessingState } from '../../utils/agentExecutionEvents.js'
+import { hasAcceptedExecutionForMessage } from '../../utils/agentExecutionEvents.js'
 import { consumeAsideCommand, rewindConversationTurn } from '../../utils/conversationRewind.js'
 import { toast } from '../../utils/toast.js'
+import { findActivePrePlanClarification, validatePrePlanClarificationAction } from '../../utils/prePlanClarification.js'
 
 const props = defineProps({
   navigateTo: { type: Object, default: null },
   active: { type: Boolean, default: true },
 })
 const emit = defineEmits(['navigated', 'switch-tab', 'set-navigation'])
+const prePlanClarificationBusy = ref(false)
 
 const {
   GROUP_VISIBLE_INTERNAL_TEXT_PATTERN, GROUP_INTERNAL_PROTOCOL_FALLBACK, GROUP_STREAM_ERROR_FALLBACK,
@@ -95,7 +98,7 @@ const {
   handleKeydown, highlightMentions, updateCreateGroupProjectSelection,
   submitCreateGroup, submitRename, deleteGroup, clearGroupMessages, saveCurrentGroupConversationKnowledge,
   isStreaming, thinkingMessages, pendingGroupSendRetry, groupStreamController, activeGroupTaskId,
-  stoppingGroupTurn, groupTurnConversationId, groupTurnControl, stopGroupCurrentWork, drainGroupTurnQueue, guideGroupQueuedTurn,
+  stoppingGroupTurn, groupTurnConversationId, groupTurnControl, stopGroupCurrentWork, drainGroupTurnQueue, guideGroupQueuedTurn, resolveGroupQueuedRoute,
   submitGroupMessageWhileBusy, groupSendRetrySignature, sendMessage, editGroupUserMessage, handleGroupModelFailureAction, waitingCrossReply, pullNewMessages,
   logs, logFilter, logEventSource, logsResizeObserver, scrollLogsToBottom, loadLogs, startLogStream,
   stopLogStream, clearLogs, normalizeGroupTools, loadAvailableGroupTools, loadGroupTools, toggleGroupTool, updateGroupContextPolicy,
@@ -104,6 +107,29 @@ const {
   getAvailableProjects, addGroupMember, removeGroupMember, groupPollTimer, lastGroupMsgCount,
   startGroupPolling, stopGroupPolling, origSelectGroup,
 } = useGroupChat(props, emit)
+
+const activeGroupPrePlanRow = computed(() => findActivePrePlanClarification(messages.value))
+const activeGroupPrePlanClarification = computed(() => activeGroupPrePlanRow.value?.clarification || null)
+const submitGroupPrePlanClarification = async payload => {
+  const row = activeGroupPrePlanRow.value
+  if (!row?.message || !payload?.answerText || prePlanClarificationBusy.value) return
+  prePlanClarificationBusy.value = true
+  try {
+    await validatePrePlanClarificationAction({ clarification: payload.clarification, action: payload.useDefaults ? 'defaults' : 'answer', scope: 'group', scopeId: currentGroup.value?.id, exactSessionId: currentGroupSessionId.value, answers: payload.answers, additionalNote: payload.additionalNote })
+    beginGroupClarificationInput(row.message, { focus: false, clear: true })
+    newMessage.value = payload.answerText
+    await sendGroupMessage()
+  } finally { prePlanClarificationBusy.value = false }
+}
+const cancelGroupPrePlanClarification = async () => {
+  try {
+    await validatePrePlanClarificationAction({ clarification: activeGroupPrePlanClarification.value, action: 'cancel', scope: 'group', scopeId: currentGroup.value?.id, exactSessionId: currentGroupSessionId.value })
+  } catch (error) { return toast.error(error?.message || '取消失败') }
+  cancelGroupClarificationInput()
+  const clarification = activeGroupPrePlanClarification.value
+  if (clarification) clarification.status = 'cancelled'
+  toast.info('已取消本次计划前澄清')
+}
 
 const groupSessionSidebarOpen = ref(typeof window === 'undefined' || window.innerWidth > 768)
 const selectSessionFromSidebar = async (sessionId) => {

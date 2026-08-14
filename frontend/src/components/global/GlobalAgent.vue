@@ -1,6 +1,6 @@
 <script setup>
 import { computed, ref, onMounted, onUnmounted, nextTick, watch } from 'vue'
-import { BookOpen, Bot, Gauge, MoreHorizontal, RefreshCw, Wrench } from '@lucide/vue'
+import { BookOpen, Bot, Gauge, MoreHorizontal, RefreshCw, Target, Wrench } from '@lucide/vue'
 import { toast, confirmDialog } from '../../utils/toast.js'
 import AgentCodeChangeDrawer from '../agents/AgentCodeChangeDrawer.vue'
 import ConversationTurnControls from '../common/ConversationTurnControls.vue'
@@ -9,16 +9,19 @@ import LoadingSkeleton from '../common/LoadingSkeleton.vue'
 import SlashCommandMenu from '../common/SlashCommandMenu.vue'
 import SlashCommandPanel from '../common/SlashCommandPanel.vue'
 import SessionContextUsage from '../common/SessionContextUsage.vue'
+import ConversationAwayRecap from '../common/ConversationAwayRecap.vue'
 import PermissionApprovalCards from '../common/PermissionApprovalCards.vue'
 import ActiveTaskPlanDock from '../common/ActiveTaskPlanDock.vue'
+import PrePlanClarificationDock from '../common/PrePlanClarificationDock.vue'
 import ConversationAsideDock from '../common/ConversationAsideDock.vue'
 import ConversationHistoryBranches from '../common/ConversationHistoryBranches.vue'
-import ConversationPermissionMode from '../common/ConversationPermissionMode.vue'
+import ConversationModeToolbar from '../common/ConversationModeToolbar.vue'
 import GlobalAgentSessionSidebar from './GlobalAgentSessionSidebar.vue'
 import GlobalAgentFeishuBindingModal from './GlobalAgentFeishuBindingModal.vue'
 import GlobalAgentMessageList from './GlobalAgentMessageList.vue'
 import AgentToolsModal from '../common/AgentToolsModal.vue'
 import OnlineDocumentReferences from '../common/OnlineDocumentReferences.vue'
+import { findActivePrePlanClarification, validatePrePlanClarificationAction } from '../../utils/prePlanClarification.js'
 import ScopeTargetSelect from '../common/ScopeTargetSelect.vue'
 import { useAgentExecutionEvents } from '../../composables/useAgentExecutionEvents.js'
 import { useCodeChangeDrawer } from '../../composables/useCodeChangeDrawer.js'
@@ -337,6 +340,7 @@ const globalStreamController = ref(null)
 const stoppingGlobalTurn = ref(false)
 const pendingGlobalMissionInput = ref(null)
 const pendingGlobalClarificationInput = ref(null)
+const prePlanClarificationBusy = ref(false)
 const pendingGlobalRequestRetry = ref(null)
 const executingAction = ref(null)
 const chatBody = ref(null)
@@ -457,6 +461,38 @@ const syncPendingGlobalClarificationInput = () => {
           || '补充当前请求',
       }
     : null
+}
+const activeGlobalPrePlanClarification = computed(() => {
+  const active = findActivePrePlanClarification(messages.value)
+  if (active?.clarification) return active.clarification
+  const pending = pendingGlobalClarificationInput.value
+  const run = pending?.message?.agenticRun || pending?.message?.agentic_run || null
+  return run?.clarification_summary?.pre_plan_clarification
+    || run?.clarificationSummary?.prePlanClarification
+    || null
+})
+const submitGlobalPrePlanClarification = async payload => {
+  if (!payload?.answerText || prePlanClarificationBusy.value) return
+  prePlanClarificationBusy.value = true
+  try {
+    await validatePrePlanClarificationAction({ clarification: payload.clarification, action: payload.useDefaults ? 'defaults' : 'answer', scope: 'global', scopeId: 'global', exactSessionId: currentSessionId.value, answers: payload.answers, additionalNote: payload.additionalNote })
+    chatInput.value = payload.answerText
+    await nextTick()
+    await sendGlobalMessage()
+  } finally { prePlanClarificationBusy.value = false }
+}
+const cancelGlobalPrePlanClarification = async () => {
+  const runId = pendingGlobalClarificationInput.value?.runId
+  if (!runId || prePlanClarificationBusy.value) return
+  prePlanClarificationBusy.value = true
+  try {
+    await validatePrePlanClarificationAction({ clarification: activeGlobalPrePlanClarification.value, action: 'cancel', scope: 'global', scopeId: 'global', exactSessionId: currentSessionId.value })
+    await postJson('/api/global-agent/runs/cancel', { id: runId })
+    pendingGlobalClarificationInput.value = null
+    await syncHistoryFromServer()
+    toast.info('已取消本次计划前澄清')
+  } catch (error) { toast.error(error?.message || '取消失败') }
+  finally { prePlanClarificationBusy.value = false }
 }
 
 const searchHighlightMsgIndex = ref(-1)
@@ -921,6 +957,7 @@ const {
   stopGlobalCurrentWork,
   drainGlobalTurnQueue,
   guideGlobalQueuedTurn,
+  resolveGlobalQueuedRoute,
   beginGlobalMissionInput,
   sendMessage,
 } = useGlobalAgentMessaging({
@@ -1518,31 +1555,26 @@ const handleGitCommitCardSubmit = async (msg) => {
           </div>
         </div>
 
-        <div v-if="!pendingGlobalMissionInput" class="global-dispatch-target-picker">
-          <span class="global-dispatch-target-label">任务投放目标</span>
-          <div class="global-dispatch-target-options">
-            <p v-if="globalDispatchTargetsLoading" class="dispatch-target-state">正在读取可投放项目和群聊…</p>
-            <div v-else-if="globalDispatchTargetsError" class="dispatch-target-load-error" role="alert">
-              <span>目标列表加载失败：{{ globalDispatchTargetsError }}</span>
-              <button type="button" :disabled="isSending" @click="loadGlobalDispatchTargets">重新读取</button>
-            </div>
-            <ScopeTargetSelect
-              v-else-if="globalDispatchTargets.length"
-              v-model="selectedGlobalTargetKey"
-              :options="globalDispatchTargetOptions"
-              :disabled="isSending"
-              placeholder="选择群聊或项目"
-              aria-label="选择本次全局 Agent 任务的投放目标"
-            />
-            <p v-if="!globalDispatchTargetsLoading && !globalDispatchTargetsError && !globalDispatchTargets.length">当前确实没有已配置的项目或群聊。普通问答仍可直接发送。</p>
-          </div>
-        </div>
         <OnlineDocumentReferences :text="chatInput" compact pending-label="发送后读取" />
+        <ConversationAwayRecap
+          :events="globalAgentExecutionEvents"
+          scope="global"
+          scope-id="global"
+          :exact-session-id="currentSessionId || ''"
+        />
+        <PrePlanClarificationDock
+          :clarification="activeGlobalPrePlanClarification"
+          :busy="prePlanClarificationBusy"
+          @submit="submitGlobalPrePlanClarification"
+          @defaults="submitGlobalPrePlanClarification"
+          @cancel="cancelGlobalPrePlanClarification"
+        />
         <ActiveTaskPlanDock
           :events="globalAgentExecutionEvents"
           :messages="messages"
           :exact-session-id="currentSessionId || ''"
-          :active="globalAgentExecutionEnabled && !!currentSessionId && !isCurrentSessionDraft"
+          :active="globalAgentExecutionEnabled && !!currentSessionId && !isCurrentSessionDraft && !activeGlobalPrePlanClarification"
+          :detail-enabled="false"
           @locate="locateGlobalPlanStep"
           @execution-action="handleGlobalPlanAction"
         />
@@ -1554,6 +1586,7 @@ const handleGitCommitCardSubmit = async (msg) => {
           @stop="stopGlobalCurrentWork"
           @cancel="globalTurnControl.cancel"
           @guide="guideGlobalQueuedTurn"
+          @resolve-route="resolveGlobalQueuedRoute"
           @retry="(turn) => globalTurnControl.retry(turn).then(() => drainGlobalTurnQueue())"
         />
         <ConversationAsideDock
@@ -1561,12 +1594,6 @@ const handleGitCommitCardSubmit = async (msg) => {
           scope-id="global"
           :exact-session-id="currentSessionId || ''"
           :active="globalTurnBusy && !!currentSessionId && !isCurrentSessionDraft"
-        />
-        <ConversationPermissionMode
-          scope="global"
-          scope-id="global"
-          :exact-session-id="currentSessionId || ''"
-          :disabled="!currentSessionId || isCurrentSessionDraft"
         />
         <ConversationHistoryBranches
           scope="global"
@@ -1584,26 +1611,51 @@ const handleGitCommitCardSubmit = async (msg) => {
             accept="image/*,.txt,.md,.json,.csv,.pdf,.docx,.pptx,.xlsx"
             :disabled="!!pendingGlobalMissionInput"
           />
-          <button
-            class="attach-btn"
-            @click="triggerFileUpload"
-            :title="pendingGlobalMissionInput ? '当前正在补充任务条件，请先提交文字信息' : globalTurnBusy ? '为下一条待处理消息添加附件' : '上传图片或文件附件'"
-            :disabled="!!pendingGlobalMissionInput"
-          >
-            <svg class="icon-attach" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
-            </svg>
-          </button>
-          <input 
-            type="text" 
-            id="globalChatInput"
-            ref="chatInputElement"
-            v-model="chatInput" 
-            :placeholder="globalInputPlaceholder"
-            @input="handleGlobalInput"
-            @keydown="handleGlobalInputKeydown"
-            @paste="handleAttachmentPaste"
-          />
+          <div v-if="!pendingGlobalMissionInput" class="global-dispatch-target-picker">
+            <div class="global-dispatch-target-label">
+              <Target :size="14" aria-hidden="true" />
+              <span>投放到</span>
+              <small>普通问答可不选</small>
+            </div>
+            <div class="global-dispatch-target-options">
+              <p v-if="globalDispatchTargetsLoading" class="dispatch-target-state">正在读取可投放目标…</p>
+              <div v-else-if="globalDispatchTargetsError" class="dispatch-target-load-error" role="alert">
+                <span>目标列表加载失败</span>
+                <button type="button" :disabled="isSending" @click="loadGlobalDispatchTargets">重试</button>
+              </div>
+              <ScopeTargetSelect
+                v-else-if="globalDispatchTargets.length"
+                v-model="selectedGlobalTargetKey"
+                :options="globalDispatchTargetOptions"
+                :disabled="isSending"
+                placeholder="选择群聊或项目"
+                aria-label="选择本次全局 Agent 任务的投放目标"
+              />
+              <p v-else>暂无可投放目标</p>
+            </div>
+          </div>
+          <div class="global-input-main">
+            <button
+              class="attach-btn"
+              @click="triggerFileUpload"
+              :title="pendingGlobalMissionInput ? '当前正在补充任务条件，请先提交文字信息' : globalTurnBusy ? '为下一条待处理消息添加附件' : '上传图片或文件附件'"
+              :disabled="!!pendingGlobalMissionInput"
+            >
+              <svg class="icon-attach" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
+              </svg>
+            </button>
+            <textarea
+              id="globalChatInput"
+              ref="chatInputElement"
+              v-model="chatInput"
+              rows="1"
+              :placeholder="globalInputPlaceholder"
+              @input="handleGlobalInput"
+              @keydown="handleGlobalInputKeydown"
+              @paste="handleAttachmentPaste"
+            ></textarea>
+          </div>
           <SlashCommandMenu
             :open="slash.open"
             :commands="slash.filtered"
@@ -1613,25 +1665,38 @@ const handleGitCommitCardSubmit = async (msg) => {
             @select="slash.select"
           />
           <SlashCommandPanel :panel="slash.panel" @close="slash.closePanel" @action="slash.runPanelAction" />
-          <SessionContextUsage
-            :usage="globalContextUsage"
-            :loading="globalContextLoading"
-            :error="globalContextError"
-            :compacting="globalContextCompacting"
-            @refresh="refreshGlobalContextUsage"
-          />
-          <button
-            class="send-btn"
-            :class="{ 'pulse-glow': isSending && !isSteering, 'steering-submit': isSending }"
-            @click="sendGlobalMessage"
-            :disabled="!canSendGlobalMessage"
-          >
-            <svg class="icon-send" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-              <line x1="22" y1="2" x2="11" y2="13"></line>
-              <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
-            </svg>
-            <span>{{ globalSendButtonLabel }}</span>
-          </button>
+          <div class="global-input-footer">
+            <ConversationModeToolbar
+              scope="global"
+              scope-id="global"
+              :exact-session-id="currentSessionId || ''"
+              :mode-disabled="!currentSessionId || isCurrentSessionDraft || globalTurnBusy"
+              :permission-disabled="!currentSessionId || isCurrentSessionDraft"
+            />
+            <span class="global-input-footer__spacer" />
+            <SessionContextUsage
+              scope="global"
+              scope-id="global"
+              :exact-session-id="currentSessionId || ''"
+              :usage="globalContextUsage"
+              :loading="globalContextLoading"
+              :error="globalContextError"
+              :compacting="globalContextCompacting"
+              @refresh="refreshGlobalContextUsage"
+            />
+            <button
+              class="send-btn"
+              :class="{ 'pulse-glow': isSending && !isSteering, 'steering-submit': isSending }"
+              @click="sendGlobalMessage"
+              :disabled="!canSendGlobalMessage"
+            >
+              <svg class="icon-send" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="22" y1="2" x2="11" y2="13"></line>
+                <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+              </svg>
+              <span>{{ globalSendButtonLabel }}</span>
+            </button>
+          </div>
         </div>
       </div>
     </div>

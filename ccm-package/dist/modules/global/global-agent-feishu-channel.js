@@ -35,17 +35,15 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.createGlobalAgentFeishuChannel = createGlobalAgentFeishuChannel;
 const crypto = __importStar(require("crypto"));
-const fs = __importStar(require("fs"));
-const path = __importStar(require("path"));
-const utils_1 = require("../../core/utils");
-const feishu_1 = require("../collaboration/feishu");
 const source_ingestion_1 = require("../requirements/source-ingestion");
 const feishu_access_1 = require("../collaboration/feishu-access");
 const feishu_channel_1 = require("../collaboration/feishu-channel");
 const feishu_conversation_v2_1 = require("../collaboration/feishu-conversation-v2");
 const automation_session_bindings_1 = require("../../system/automation-session-bindings");
-const global_agent_capabilities_1 = require("./global-agent-capabilities");
 const slash_command_conversations_1 = require("../tools/slash-command-conversations");
+const feishu_inbound_attachments_1 = require("../../integrations/feishu-inbound-attachments");
+const global_agent_attachments_1 = require("./global-agent-attachments");
+const conversation_message_routing_1 = require("../../agents/conversation-message-routing");
 // Feishu event decoding, message lifecycle, turn control, and restart recovery.
 function createGlobalAgentFeishuChannel(deps) {
     const { GLOBAL_AGENT_VISIBLE_RESULT_FALLBACK, appendGlobalActionAudit, appendGlobalAgentConversationMessage, appendTraceEvent, bindFeishuIdentifiersFromValue, bindFeishuTaskContext, cancelGlobalAgentRun, conversationTurnControl, createAgenticRuntime, ensureTraceId, feishuRuntimeEventPresentation, findWaitingGlobalAgentRun, formatMissionStatus, getConfigs, getFeishuMessageId, getGlobalAgentConversationMessages, getGlobalAgentRun, getGlobalDevelopmentMission, globalRunVisibleReply, isGlobalProgressStatusRequest, listGlobalAgentRuns, listTaskPermissionRequests, loadGroups, notifyFeishuTaskStage, postLocalApi, recordFeishuInbound, resolveFeishuGlobalAgentSessionId, resumeGlobalAgentRun, runAgenticGlobalRequest, sendFeishuReportMessage, steerGlobalAgentRun } = deps;
@@ -96,6 +94,17 @@ function createGlobalAgentFeishuChannel(deps) {
         else if (status === "waiting_clarification") {
             lines.push("当前状态：需要你补充信息，任务进度已保留。");
             lines.push(base);
+            const clarification = run.clarification_summary?.pre_plan_clarification
+                || run.clarificationSummary?.prePlanClarification;
+            if (Array.isArray(clarification?.questions) && clarification.questions.length) {
+                lines.push(clarification.questions.map((question, index) => {
+                    const options = Array.isArray(question.options) && question.options.length
+                        ? `\n${question.options.map((option, optionIndex) => `   ${optionIndex + 1}. ${option.label}${option.recommended ? "（推荐）" : ""}`).join("\n")}`
+                        : "";
+                    return `${index + 1}. ${question.label}${options}`;
+                }).join("\n"));
+                lines.push("请按“问题序号：选项序号/补充文字”回复，我会沿用原请求生成详细计划并等待你确认。");
+            }
         }
         else if (["supervising", "running"].includes(status) || mission && !["completed", "failed", "cancelled"].includes(String(mission.status || ""))) {
             const childCount = Array.isArray(mission?.children) ? mission.children.length : 0;
@@ -250,10 +259,6 @@ function createGlobalAgentFeishuChannel(deps) {
             .replace(/<at[^>]*>.*?<\/at>/gi, "")
             .trim();
     }
-    function safeFeishuFileName(value, fallback) {
-        const name = path.basename(String(value || fallback)).replace(/[<>:"/\\|?*\x00-\x1f]/g, "_").slice(0, 180);
-        return name || fallback;
-    }
     function feishuRequirementTargets() {
         return (0, automation_session_bindings_1.listGlobalDispatchTargets)().filter((target) => target.ready !== false).map((target) => ({
             type: target.scope,
@@ -310,35 +315,55 @@ function createGlobalAgentFeishuChannel(deps) {
         const message = payload?.event?.message || {};
         const messageType = String(message.message_type || "").toLowerCase();
         const targets = feishuRequirementTargets();
-        if (["file", "media", "image"].includes(messageType)) {
-            let content = {};
-            try {
-                content = JSON.parse(String(message.content || "{}"));
-            }
-            catch { }
-            const fileKey = String(content.file_key || content.image_key || "").trim();
-            const messageId = String(message.message_id || getFeishuMessageId(payload) || "").trim();
-            if (!fileKey || !messageId)
-                throw new Error("飞书附件事件缺少资源标识");
-            const image = messageType === "image" && !content.file_key;
-            const fallbackName = image ? `feishu-image-${fileKey.slice(-8)}.png` : `feishu-file-${fileKey.slice(-8)}`;
-            const fileName = safeFeishuFileName(content.file_name || content.name, fallbackName);
-            const downloaded = await (0, feishu_1.downloadFeishuMessageResource)({
-                messageId,
-                fileKey,
-                type: image ? "image" : "file",
-                maxBytes: 25 * 1024 * 1024,
-            });
-            fs.mkdirSync(utils_1.UPLOAD_DIR, { recursive: true });
-            const savedPath = path.join(utils_1.UPLOAD_DIR, `feishu-${Date.now()}-${crypto.randomBytes(4).toString("hex")}-${fileName}`);
-            fs.writeFileSync(savedPath, downloaded.buffer);
-            return (0, source_ingestion_1.ingestRequirementSources)({
-                files: [{ filename: fileName, savedPath, size: downloaded.size }],
+        const controlledAttachments = Array.isArray(payload?.feishu_attachments) ? payload.feishu_attachments : [];
+        if (controlledAttachments.length) {
+            const files = (0, feishu_inbound_attachments_1.materializeFeishuInboundAttachments)(controlledAttachments);
+            const result = await (0, source_ingestion_1.ingestRequirementSources)({
+                files,
                 userText,
                 extractRequirement: true,
                 decomposeRequirement: false,
                 availableTargets: targets,
             });
+            result.warnings = [...new Set([
+                    ...(Array.isArray(result.warnings) ? result.warnings : []),
+                    ...(Array.isArray(payload?.feishu_attachment_warnings) ? payload.feishu_attachment_warnings : []),
+                ])];
+            result.feishu_attachments = controlledAttachments;
+            result.public_attachments = (0, global_agent_attachments_1.serializeGlobalRequestAttachments)(files).map((item) => {
+                const parsed = (result.sources || []).find((sourceItem) => String(sourceItem?.name || "") === item.name);
+                return parsed ? { ...item, status: String(parsed.status || (parsed.readable ? "parsed" : "failed")), readable: parsed.readable === true, checksum: String(parsed.checksum || parsed.manifest?.source_checksum || "") } : item;
+            });
+            return result;
+        }
+        if (["file", "media", "image"].includes(messageType)) {
+            const messageId = String(message.message_id || getFeishuMessageId(payload) || "").trim();
+            if (!messageId)
+                throw new Error("飞书附件事件缺少消息标识");
+            const resolved = await (0, feishu_inbound_attachments_1.resolveFeishuInboundAttachments)({
+                messageId,
+                resourceHints: (0, feishu_inbound_attachments_1.extractFeishuEventResourceHints)(payload),
+                source: "event_callback",
+            });
+            if (!resolved.attachments.length)
+                throw new Error(resolved.failures[0]?.reason || "飞书附件下载失败");
+            payload.feishu_attachments = resolved.attachments;
+            payload.feishu_attachment_warnings = resolved.warnings;
+            const files = (0, feishu_inbound_attachments_1.materializeFeishuInboundAttachments)(resolved.attachments);
+            const result = await (0, source_ingestion_1.ingestRequirementSources)({
+                files,
+                userText,
+                extractRequirement: true,
+                decomposeRequirement: false,
+                availableTargets: targets,
+            });
+            result.warnings = [...new Set([...(result.warnings || []), ...resolved.warnings])];
+            result.feishu_attachments = resolved.attachments;
+            result.public_attachments = (0, global_agent_attachments_1.serializeGlobalRequestAttachments)(files).map((item) => {
+                const parsed = (result.sources || []).find((sourceItem) => String(sourceItem?.name || "") === item.name);
+                return parsed ? { ...item, status: String(parsed.status || (parsed.readable ? "parsed" : "failed")), readable: parsed.readable === true, checksum: String(parsed.checksum || parsed.manifest?.source_checksum || "") } : item;
+            });
+            return result;
         }
         if (/https?:\/\//i.test(userText)) {
             return (0, source_ingestion_1.ingestRequirementSources)({
@@ -392,11 +417,56 @@ function createGlobalAgentFeishuChannel(deps) {
         const destination = options.destination || (options.inboundRecorded ? null : recordFeishuInbound({ payload, sessionId: conversationId, messageId: getFeishuMessageId(payload) }));
         bindFeishuTaskContext({ sessionId: conversationId, destination, source: "feishu-control-bot", targetType: "global_agent", originReceipt: options.originReceipt });
         const historyBeforeUser = getGlobalAgentConversationMessages(conversationId);
+        const explicitRouteChoice = String(options.resolvedRoute || "").trim();
+        const explicitCandidateTaskId = String(options.resolvedCandidateTaskId || "").trim();
+        const recoverableCandidates = (0, conversation_message_routing_1.findRecoverableConversationTasks)({ scope: "global", scopeId: "global", exactSessionId: conversationId });
+        const explicitCandidate = explicitRouteChoice === "continue_original"
+            ? recoverableCandidates.find((item) => String(item?.id || "") === explicitCandidateTaskId)
+            : null;
+        if (explicitRouteChoice === "continue_original" && !explicitCandidate) {
+            throw Object.assign(new Error("原任务已不可恢复，请选择作为新任务或仅回答问题"), { code: "CONVERSATION_ROUTE_CANDIDATE_STALE" });
+        }
+        if (explicitCandidate) {
+            historyBeforeUser.push({ role: "system", content: `用户明确选择继续原任务。可恢复任务摘要：${JSON.stringify((0, conversation_message_routing_1.buildRecoverableTaskSummary)(explicitCandidate))}。必须沿用该任务目标，不得创建重复任务。` });
+        }
+        else if (recoverableCandidates.length) {
+            historyBeforeUser.push({ role: "system", content: `当前精确会话的可恢复任务摘要：${JSON.stringify(recoverableCandidates.slice(0, 3).map(conversation_message_routing_1.buildRecoverableTaskSummary))}。请结合当前消息判断 continuationKind；不要仅因为存在旧任务就续接。` });
+        }
         const sourceIngestion = await ingestFeishuRequirementAttachment(payload, text);
+        const controlledAttachments = Array.isArray(payload?.feishu_attachments) ? payload.feishu_attachments : [];
+        const attachmentSources = Array.isArray(sourceIngestion?.sources) ? sourceIngestion.sources : [];
+        const readableAttachmentCount = attachmentSources.filter((item) => item?.readable === true || ["parsed", "partial"].includes(String(item?.status || "").toLowerCase())).length;
+        if (controlledAttachments.length && readableAttachmentCount === 0
+            && /^(?:请读取并处理我刚发送的附件。?|请读取并处理这条飞书附件。?)$/.test(String(text || "").trim())) {
+            throw new Error("附件已经收到，但没有可读取的内容。请转换为 PDF、图片或文本后重新发送。");
+        }
+        if (controlledAttachments.length) {
+            const transferFailureCount = Array.isArray(payload?.feishu_attachment_failures) ? payload.feishu_attachment_failures.length : 0;
+            const unreadable = Math.max(0, controlledAttachments.length - readableAttachmentCount) + transferFailureCount;
+            const reportedAttachmentCount = controlledAttachments.length + transferFailureCount;
+            const unreadableNames = [
+                ...attachmentSources.filter((item) => item?.readable !== true).map((item) => String(item?.name || "附件")),
+                ...(Array.isArray(payload?.feishu_attachment_failures) ? payload.feishu_attachment_failures.map((item) => String(item?.name || "附件")) : []),
+            ].filter(Boolean).slice(0, 5);
+            await sendFeishuConversationReply({
+                conversationId,
+                title: "全局 Agent · 附件读取",
+                markdown: unreadable
+                    ? `已收到 ${reportedAttachmentCount} 个附件，已读取 ${readableAttachmentCount} 个；${unreadable} 个无法解析${unreadableNames.length ? `（${unreadableNames.join("、")}）` : ""}，将继续处理可读内容。`
+                    : `已收到并读取 ${reportedAttachmentCount} 个附件，正在整理任务目标。`,
+                traceId,
+                stage: "global_agent_attachment_ingestion",
+                dedupeSuffix: `attachments:${getFeishuMessageId(payload) || controlledAttachments.map((item) => item.id).join(":")}`,
+            });
+        }
         const agentMessage = sourceIngestion?.agent_context
             ? `${text}${sourceIngestion.agent_context}`
             : text;
-        appendGlobalAgentConversationMessage(conversationId, "user", text, "feishu");
+        appendGlobalAgentConversationMessage(conversationId, "user", text, "feishu", {
+            files: Array.isArray(sourceIngestion?.public_attachments)
+                ? sourceIngestion.public_attachments
+                : (0, feishu_inbound_attachments_1.publicFeishuInboundAttachments)(payload?.feishu_attachments),
+        });
         const auditBase = {
             source: "feishu-control-bot",
             sender_id: payload?.event?.sender?.sender_id?.open_id || payload?.event?.sender?.sender_id?.user_id || payload?.sender?.id || "unknown",
@@ -405,20 +475,6 @@ function createGlobalAgentFeishuChannel(deps) {
         };
         appendTraceEvent(traceId, { id: `feishu:${getFeishuMessageId(payload) || crypto.randomBytes(4).toString("hex")}:received`, type: "feishu.message_received", status: "info", message: text.slice(0, 500), data: { conversation_id: conversationId, message_id: getFeishuMessageId(payload) } });
         try {
-            if ((0, global_agent_capabilities_1.isGlobalAgentCapabilityQuestion)(text)) {
-                const markdown = global_agent_capabilities_1.GLOBAL_AGENT_CAPABILITY_REPLY;
-                appendGlobalAgentConversationMessage(conversationId, "assistant", markdown, "feishu");
-                if (sendReport)
-                    await sendFeishuConversationReply({ conversationId, title: "全局 Agent 能力说明", markdown, traceId, dedupeSuffix: "capabilities" });
-                return markdown;
-            }
-            if (/^(帮助|help|\/help)$/i.test(text)) {
-                const markdown = `${global_agent_capabilities_1.GLOBAL_AGENT_CAPABILITY_REPLY}\n\n项目 Agent 请求额外权限时，可按通知回复“批准权限 申请ID”或“拒绝权限 申请ID”。`;
-                if (sendReport)
-                    await sendFeishuConversationReply({ conversationId, title: "全局 Agent 使用帮助", markdown, traceId, dedupeSuffix: "help" });
-                appendGlobalAgentConversationMessage(conversationId, "assistant", markdown, "feishu");
-                return markdown;
-            }
             const permissionMatch = text.match(/^(批准权限|同意权限|拒绝权限|取消权限)\s+(perm_[a-f0-9]{24})[。！!\s]*$/i);
             if (permissionMatch) {
                 const access = resolveUserAccess({ ...payload, open_id: destination?.open_id, user_id: destination?.user_id });
@@ -507,6 +563,27 @@ function createGlobalAgentFeishuChannel(deps) {
                     queueScope: `feishu:${conversationId}`,
                     clarificationRunId: clarificationRun?.id || "",
                     requestedTargetRefs,
+                    routeGuard: (workflowDecision) => {
+                        if (explicitRouteChoice === "answer_only") {
+                            workflowDecision.mode = "answer";
+                            workflowDecision.actionRequired = false;
+                            workflowDecision.requiresCodeChanges = false;
+                            workflowDecision.continuationKind = "new_task";
+                            return;
+                        }
+                        if (explicitRouteChoice === "start_new_task") {
+                            workflowDecision.continuationKind = "new_task";
+                            return;
+                        }
+                        if (explicitRouteChoice === "continue_original") {
+                            workflowDecision.continuationKind = String(workflowDecision.continuationKind || "supplement") === "revise_goal" ? "revise_goal" : "supplement";
+                            return;
+                        }
+                        const route = (0, conversation_message_routing_1.decideConversationMessageRoute)({ workflowDecision, candidates: recoverableCandidates });
+                        if (route.decision === "needs_user") {
+                            throw Object.assign(new Error(route.reason), { code: "CONVERSATION_ROUTE_REQUIRED", route });
+                        }
+                    },
                     onEvent: onFeishuRuntimeEvent,
                 });
             }
@@ -551,6 +628,36 @@ function createGlobalAgentFeishuChannel(deps) {
             return markdown;
         }
         catch (error) {
+            const modelCouldNotRoute = !explicitRouteChoice && [
+                String(error?.code || ""),
+                String(error?.message || ""),
+            ].some(value => /MODEL|PROVIDER|TIMEOUT|NETWORK|大模型|模型不可用|模型未配置/i.test(value));
+            if ((error?.code === "CONVERSATION_ROUTE_REQUIRED" || modelCouldNotRoute) && String(options.turnId || options.turn_id || "").trim()) {
+                const turnId = String(options.turnId || options.turn_id || "").trim();
+                const currentTurn = conversationTurnControl.listInternal({ scope: "feishu", conversation_id: conversationId, limit: 500 }).turns.find((item) => item.id === turnId);
+                if (currentTurn?.status === "sending") {
+                    const routed = conversationTurnControl.requireRoute({
+                        id: currentTurn.id,
+                        revision: currentTurn.revision,
+                        routing: {
+                            candidateTaskId: String(error?.route?.candidate?.id || recoverableCandidates[0]?.id || ""),
+                            confidence: Number(error?.route?.confidence || 0),
+                            reason: String(error?.route?.reason || (modelCouldNotRoute ? "主 Agent 暂时无法可靠判断这条消息是否续接原任务，请选择处理方式" : error?.message) || "需要确认消息处理方式"),
+                        },
+                    });
+                    const markdown = [
+                        "这条消息可能与刚才的任务有关。",
+                        routed.routing?.reason || "请确认如何处理这条消息。",
+                        routed.routing?.candidateTaskId ? "1. 继续原任务" : "1. 继续原任务（当前不可用）",
+                        "2. 作为新任务",
+                        "3. 仅回答问题",
+                        "请直接回复 1、2 或 3。",
+                    ].join("\n");
+                    if (sendReport)
+                        await sendFeishuConversationReply({ conversationId, title: "全局 Agent · 请选择处理方式", markdown, traceId, stage: "conversation_route_required", dedupeSuffix: `route:${routed.id}:${routed.revision}` });
+                    throw Object.assign(new Error(markdown), { code: "CONVERSATION_ROUTE_REQUIRED", routeHandled: true, routed, safeReply: markdown });
+                }
+            }
             const markdown = `指令：${text}\n\n错误：${error?.message || String(error)}`;
             appendGlobalActionAudit({ ...auditBase, action: { type: "feishu_command", params: { message: text } }, status: "failed", result: { error: error?.message || String(error) } });
             appendGlobalAgentConversationMessage(conversationId, "assistant", markdown, "feishu");
@@ -597,10 +704,14 @@ function createGlobalAgentFeishuChannel(deps) {
                         originReceipt: turn.metadata?.origin_receipt || undefined,
                         principal: turn.metadata?.principal || undefined,
                         turnId: turn.id,
+                        resolvedRoute: String(turn.metadata?.resolved_route || ""),
+                        resolvedCandidateTaskId: String(turn.metadata?.resolved_candidate_task_id || ""),
                     });
                     conversationTurnControl.settle({ id: turn.id, status: "completed", result: { reply } });
                 }
                 catch (error) {
+                    if (error?.routeHandled === true)
+                        break;
                     conversationTurnControl.settle({ id: turn.id, status: "failed", error: error?.message || String(error) });
                     break;
                 }
@@ -643,7 +754,7 @@ function createGlobalAgentFeishuChannel(deps) {
         const inferredConversationId = resolveFeishuGlobalAgentSessionId(payload);
         const conversationId = resolveBoundFeishuGlobalSessionId(payload, inferredConversationId);
         const messageId = getFeishuMessageId(payload);
-        const command = parseFeishuConversationTurnCommand(text);
+        let command = parseFeishuConversationTurnCommand(text);
         const earlyAccess = resolveUserAccess(payload);
         if (command.kind === "aside") {
             if (!earlyAccess.allowed) {
@@ -671,6 +782,16 @@ function createGlobalAgentFeishuChannel(deps) {
         }
         const destination = recordFeishuInbound({ payload, sessionId: conversationId, messageId });
         const originReceipt = (0, feishu_conversation_v2_1.buildFeishuOriginReceiptV2)({ envelope, sessionId: conversationId });
+        const buildQueuedContext = () => {
+            const context = (0, feishu_conversation_v2_1.buildFeishuQueuedTurnContextV2)(envelope, payload, destination);
+            if (Array.isArray(payload?.feishu_attachments) && payload.feishu_attachments.length) {
+                context.payload.feishu_attachments = payload.feishu_attachments;
+                context.payload.feishu_attachment_warnings = Array.isArray(payload?.feishu_attachment_warnings)
+                    ? payload.feishu_attachment_warnings
+                    : [];
+            }
+            return context;
+        };
         bindFeishuTaskContext({ sessionId: conversationId, destination, source: "feishu-control-bot", targetType: "global_agent" });
         const access = resolveUserAccess({ ...payload, open_id: destination?.open_id, user_id: destination?.user_id });
         if (!access.allowed) {
@@ -678,6 +799,31 @@ function createGlobalAgentFeishuChannel(deps) {
             if (options.sendReport !== false)
                 await sendFeishuConversationReply({ conversationId, title: "全局 Agent 访问受限", markdown: reply, traceId: options.traceId, dedupeSuffix: `access-denied:${messageId || access.open_id || access.user_id}` });
             return { reply, denied: true, report_sent: options.sendReport !== false };
+        }
+        let resolvedRoute = "";
+        let resolvedCandidateTaskId = "";
+        let resolvedConversationTurn = null;
+        if (command.kind === "normal" && /^[123]$/.test(command.message)) {
+            const pendingRoute = conversationTurnControl.listInternal({ scope: "feishu", conversation_id: conversationId, statuses: "needs_route", limit: 20 }).turns.at(-1);
+            if (pendingRoute?.routing) {
+                const choice = command.message === "1" ? "continue_original" : command.message === "2" ? "start_new_task" : "answer_only";
+                if (choice === "continue_original" && !pendingRoute.routing.candidateTaskId) {
+                    const reply = "当前没有可安全恢复的原任务，请回复 2 作为新任务，或回复 3 仅回答问题。";
+                    if (options.sendReport !== false)
+                        await sendFeishuConversationReply({ conversationId, title: "全局 Agent · 请选择处理方式", markdown: reply, traceId: options.traceId, dedupeSuffix: `route-unavailable:${pendingRoute.id}:${pendingRoute.revision}` });
+                    return { reply, route_required: true, turn: pendingRoute, report_sent: options.sendReport !== false };
+                }
+                const resolved = conversationTurnControl.resolveRoute({
+                    id: pendingRoute.id,
+                    revision: pendingRoute.revision,
+                    choice,
+                    bindingChecksum: pendingRoute.routing.bindingChecksum,
+                });
+                command = { kind: "normal", message: resolved.message };
+                resolvedRoute = choice;
+                resolvedCandidateTaskId = String(resolved.routing?.candidateTaskId || "");
+                resolvedConversationTurn = resolved;
+            }
         }
         if (["stop", "steer", "queue"].includes(command.kind) && !access.canOperate) {
             const reply = "当前飞书用户只有查看权限，不能控制或排队开发任务。";
@@ -734,8 +880,8 @@ function createGlobalAgentFeishuChannel(deps) {
                 throw error;
             }
         }
-        if (activeRun && (command.kind === "queue" || command.kind === "normal")) {
-            const queuedContext = (0, feishu_conversation_v2_1.buildFeishuQueuedTurnContextV2)(envelope, payload, destination);
+        if (activeRun && !resolvedConversationTurn && (command.kind === "queue" || command.kind === "normal")) {
+            const queuedContext = buildQueuedContext();
             const queued = conversationTurnControl.enqueue({
                 scope: "feishu",
                 conversation_id: conversationId,
@@ -757,15 +903,17 @@ function createGlobalAgentFeishuChannel(deps) {
                 await sendFeishuConversationReply({ conversationId, title: "全局 Agent", markdown: result.reply, traceId: options.traceId, dedupeSuffix: `queue:${queued.turn.id}` });
             return { ...result, report_sent: options.sendReport !== false, origin_receipt: originReceipt };
         }
-        const queuedContext = (0, feishu_conversation_v2_1.buildFeishuQueuedTurnContextV2)(envelope, payload, destination);
-        const queued = conversationTurnControl.enqueue({
-            scope: "feishu",
-            conversation_id: conversationId,
-            mode: "queue",
-            message: command.message,
-            request_id: messageId || options.traceId || undefined,
-            metadata: { source: "feishu-control-bot", trace_id: options.traceId || "", feishu_context_v2: queuedContext, origin_receipt: originReceipt, principal: { kind: "feishu", id: destination?.open_id || destination?.user_id || "unknown", role: access.role || (access.canOperate ? "operator" : "viewer"), capabilities: access.canOperate ? ["task.execute"] : [] } },
-        });
+        const queuedContext = buildQueuedContext();
+        const queued = resolvedConversationTurn
+            ? { turn: resolvedConversationTurn, duplicate: true }
+            : conversationTurnControl.enqueue({
+                scope: "feishu",
+                conversation_id: conversationId,
+                mode: "queue",
+                message: command.message,
+                request_id: messageId || options.traceId || undefined,
+                metadata: { source: "feishu-control-bot", trace_id: options.traceId || "", feishu_context_v2: queuedContext, origin_receipt: originReceipt, principal: { kind: "feishu", id: destination?.open_id || destination?.user_id || "unknown", role: access.role || (access.canOperate ? "operator" : "viewer"), capabilities: access.canOperate ? ["task.execute"] : [] } },
+            });
         const turn = conversationTurnControl.claim({ scope: "feishu", conversation_id: conversationId, id: queued.turn.id });
         if (!turn) {
             const position = conversationTurnControl.list({ scope: "feishu", conversation_id: conversationId, statuses: "queued,sending" }).turns.find((item) => item.id === queued.turn.id)?.position || 1;
@@ -775,12 +923,15 @@ function createGlobalAgentFeishuChannel(deps) {
             return { reply, queued: true, position, turn: queued.turn, report_sent: options.sendReport !== false, origin_receipt: originReceipt };
         }
         try {
-            const reply = await processFeishuGlobalAgentMessage(baseUrl, ctx, command.message, payload, { ...options, inboundRecorded: true, destination, conversationId, originReceipt, turnId: turn.id, principal: { kind: "feishu", id: destination?.open_id || destination?.user_id || "unknown", role: access.role || (access.canOperate ? "operator" : "viewer"), capabilities: access.canOperate ? ["task.execute"] : [] } });
+            const reply = await processFeishuGlobalAgentMessage(baseUrl, ctx, command.message, payload, { ...options, inboundRecorded: true, destination, conversationId, originReceipt, turnId: turn.id, resolvedRoute, resolvedCandidateTaskId, principal: { kind: "feishu", id: destination?.open_id || destination?.user_id || "unknown", role: access.role || (access.canOperate ? "operator" : "viewer"), capabilities: access.canOperate ? ["task.execute"] : [] } });
             conversationTurnControl.settle({ id: turn.id, status: "completed", checkpoint: "completed", result: { reply } });
             void drainFeishuConversationTurns(baseUrl, ctx, conversationId, payload).catch((error) => console.warn(`[飞书全局 Agent] 队列续跑失败：${error?.message || error}`));
             return { reply, turn_id: turn.id };
         }
         catch (error) {
+            if (error?.routeHandled === true) {
+                return { reply: String(error.safeReply || error.message || "请选择处理方式"), route_required: true, turn: error.routed, report_sent: options.sendReport !== false };
+            }
             conversationTurnControl.settle({ id: turn.id, status: "failed", checkpoint: "failed", error: error?.message || String(error) });
             throw error;
         }

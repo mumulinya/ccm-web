@@ -53,24 +53,31 @@ function appendGroupTaskResult(task: any, input: any) {
   ) || at;
   const durationMs = durationBetween(startedAt, at);
   const successful = text(task?.status) === "done";
+  const gatePassed = successful && (
+    task?.delivery_summary?.acceptance_gate_passed === true
+    || task?.deliverySummary?.acceptanceGatePassed === true
+    || task?.delivery_summary?.acceptance_gate?.pass === true
+    || task?.deliverySummary?.acceptanceGate?.pass === true
+  );
   return appendUserVisibleAgentEvent({
     eventId: `task-stage:${taskId}:result:${text(task?.status) || "terminal"}`,
     ...identity,
     taskId,
     eventType: "result",
     display: {
-      title: successful ? "任务已完成" : "任务未完成",
+      title: gatePassed ? "任务已完成" : "任务未完成",
       target: text(task?.title),
       summary: text(task?.final_summary || task?.result || task?.status_detail)
-        || (successful ? "主 Agent 已完成最终验收与总结" : "任务已停止，详情见执行记录"),
-      status: successful ? "success" : "failed",
+        || (gatePassed ? "主 Agent 已完成最终验收与总结" : "任务尚未通过正式验收"),
+      status: gatePassed ? "success" : "failed",
       durationMs,
     },
     detail: {
       timing: { totalMs: durationMs },
+      terminalGate: { passed: gatePassed, accepted: gatePassed, source: "task_ledger" },
       evidenceIds: task?.delivery_summary?.verification || task?.verification || [],
       fileChanges: task?.delivery_summary?.actual_file_changes || task?.file_changes?.files || [],
-      ...(!successful ? { availableActions: [
+      ...(!gatePassed ? { availableActions: [
         { id: "view_error", kind: "view_error", label: "查看错误", enabled: true, revision: number(task?.revision), generation: identity.generation },
         { id: "recheck", kind: "recheck", label: "重新核验", enabled: true, revision: number(task?.revision), generation: identity.generation },
       ] } : {}),

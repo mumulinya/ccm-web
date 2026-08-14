@@ -236,7 +236,7 @@ const executionPlan = computed(() => {
   return candidates.map(normalizePlanItem).filter(Boolean).slice(0, 5)
 })
 
-const actionKinds = new Set(['confirm', 'confirm_plan', 'revise_plan', 'approve_epic', 'targeted_rework', 'continue', 'continue_work_item', 'retry', 'resume', 'interrupt', 'resume_interrupted', 'gap_continue', 'cancel', 'rollback', 'save_knowledge'])
+const actionKinds = new Set(['confirm', 'confirm_plan', 'revise_plan', 'approve_epic', 'targeted_rework', 'continue', 'continue_work_item', 'retry', 'resume', 'pause', 'resume_paused', 'force_interrupt', 'interrupt', 'resume_interrupted', 'gap_continue', 'cancel', 'rollback', 'save_knowledge'])
 const { recoveryPresentation } = useTaskRecoveryPresentation(() => props.card)
 const recoveryActions = computed(() => asList(props.card.actions)
   .filter(action => ['resume_interrupted', 'cancel'].includes(action?.kind)))

@@ -24,6 +24,7 @@ import { listTestAgentRunnerRecords } from "./test-agent-runner";
 import { getObservabilityDatabase, withImmediateObservabilityTransaction } from "../../system/observability-database";
 import { captureRepoStateIdentity, compareRepoStateIdentity, listEvidence, repoStateFingerprint } from "../../system/unified-evidence-registry";
 import { listUserVisibleAgentEvents } from "../../system/user-visible-agent-events";
+import type { ToolDisplayDetailV1 } from "../../system/tool-display-projection";
 
 export type TaskReplayStage = "intake" | "planning" | "dispatch" | "execution" | "change" | "test" | "rework" | "review" | "completion" | "system";
 export type { TaskReplayStatus } from "./task-replay-shared";
@@ -44,6 +45,7 @@ export interface TaskReplayEvent {
   project: string;
   source: string;
   evidence_ids: string[];
+  tool_display?: ToolDisplayDetailV1;
   replay_link?: {
     schema: "ccm-task-event-link-v1";
     taskId: string;
@@ -273,6 +275,7 @@ function event(input: Partial<TaskReplayEvent> & Pick<TaskReplayEvent, "title">)
     project: safeText(input.project, 100),
     source,
     evidence_ids: [...new Set(input.evidence_ids || [])],
+    ...(input.tool_display ? { tool_display: input.tool_display } : {}),
     ...(input.replay_link ? { replay_link: input.replay_link } : {}),
     ...(input.causal_refs ? { causal_refs: input.causal_refs } : {}),
     ...(input.technical ? { technical: safeTechnical(input.technical) } : {}),
@@ -787,6 +790,7 @@ function buildUserVisibleExecutionEvents(tasks: any[]) {
         status: row.display?.status === "success" ? "passed" : row.display?.status === "failed" ? "failed" : row.display?.status === "waiting" ? "blocked" : "running",
         title: row.display?.title || "Agent 执行进展", summary: row.display?.summary || progress.text || "", actor: actor(actorType as any, row?.detail?.agentDisplay?.runtimeLabel || project || undefined),
         task_id: String(task.id || ""), parent_task_id: String(task.parent_task_id || ""), trace_id: String(task.trace_id || ""), project, source: "user_visible_agent_event", evidence_ids: row?.detail?.evidenceIds || [],
+        tool_display: row?.detail?.toolDisplay,
         technical: {
           generation: row.generation, attempt: row?.detail?.agentDisplay?.attempt || row?.detail?.executionStage?.attempt || 1,
           work_item_id: row.workItemId || row?.detail?.causalRefs?.workItemId || "", plan_step_id: row?.detail?.causalRefs?.planStepId || "", batch_id: progress.batchId || "",

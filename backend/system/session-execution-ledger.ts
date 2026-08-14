@@ -145,7 +145,10 @@ export function mergeConversationWithExecution(messages: any[], events: SessionE
 export function runSessionExecutionLedgerSelfTest() {
   const use = createSessionExecutionEvent({
     type: "tool_use",
-    toolName: "read_file",
+    // Use an ordinary tool here so this self-test exercises the ledger sanitizer.
+    // Workspace read tools intentionally persist only a rehydratable receipt and
+    // therefore must not retain the raw payload tested below.
+    toolName: "custom_tool",
     toolCallId: "tool-selftest",
     runId: "run-selftest",
     anchorMessageId: "user-1",
@@ -154,7 +157,7 @@ export function runSessionExecutionLedgerSelfTest() {
   });
   const result = createSessionExecutionEvent({
     type: "tool_result",
-    toolName: "read_file",
+    toolName: "custom_tool",
     toolCallId: "tool-selftest",
     runId: "run-selftest",
     anchorMessageId: "user-1",

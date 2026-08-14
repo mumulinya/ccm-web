@@ -127,6 +127,7 @@ const collaboration_coordination_ux_1 = require("./collaboration-coordination-ux
 const collaboration_memory_gates_1 = require("./collaboration-memory-gates");
 const crypto = __importStar(require("crypto"));
 const task_conversation_links_1 = require("../../system/task-conversation-links");
+const task_pause_control_1 = require("../../tasks/task-pause-control");
 const db_1 = require("../../core/db");
 const display_1 = require("./display");
 const memory_1 = require("./memory");
@@ -486,8 +487,17 @@ function buildMainAgentRecoverySummary(task, phase, sessions = [], workItems = [
 }
 function taskCardPhase(task, executions) {
     const explicit = String(task?.collaboration_state?.phase || "");
+    const pauseState = String(task?.pause_control?.state || "");
     if (task?.rolled_back_at)
         return "reverted";
+    if (["requested", "quiescing"].includes(pauseState))
+        return "pausing";
+    if (pauseState === "paused")
+        return "paused";
+    if (pauseState === "resuming")
+        return "resuming";
+    if (pauseState === "blocked")
+        return "needs_user";
     if (task?.intake_state === "awaiting_confirmation")
         return "needs_user";
     if (task?.status === "awaiting_change_review")
@@ -957,6 +967,21 @@ function buildUserTaskActions(task, phase, executions) {
         actions.push({ id: "cancel", label: "停止任务", kind: "cancel", tone: "danger" });
         return actions;
     }
+    const pauseStatus = (0, task_pause_control_1.taskPauseStatusProjection)(task);
+    if (["requested", "quiescing"].includes(pauseStatus.state)) {
+        if (pauseStatus.stuck)
+            actions.push({ id: "force_interrupt", label: "强制中断", kind: "force_interrupt", tone: "danger" });
+        return actions;
+    }
+    if (pauseStatus.state === "paused") {
+        actions.push({ id: "resume_paused", label: "继续", kind: "resume_paused", tone: "primary" });
+        return actions;
+    }
+    if (pauseStatus.state === "blocked") {
+        actions.push({ id: "recheck", label: "重新核验", kind: "recheck", tone: "primary" });
+        actions.push({ id: "takeover", label: "人工接管", kind: "takeover", tone: "warning" });
+        return actions;
+    }
     if (task?.delivery_summary || task?.file_changes)
         actions.push({ id: "changes", label: "查看改动", kind: "view_changes", tone: "outline" });
     if (completed)
@@ -973,7 +998,7 @@ function buildUserTaskActions(task, phase, executions) {
     if (completed && checkpointIds.length)
         actions.push({ id: "rollback", label: "安全撤销", kind: "rollback", tone: "danger", checkpoint_ids: checkpointIds });
     if (!terminal)
-        actions.push({ id: "interrupt", label: "停止当前执行", kind: "interrupt", tone: "danger" });
+        actions.push({ id: "pause", label: "暂停", kind: "pause", tone: "outline" });
     if (!completed && !stopped)
         actions.push({ id: "cancel", label: "停止任务", kind: "cancel", tone: "outline" });
     return actions;
@@ -1153,11 +1178,14 @@ function buildTaskCardView(task, executions, sessions) {
         needs_user: "需要你确认",
         change_review: "等待你审阅",
         blocked: "正在恢复",
+        pausing: "正在暂停",
+        paused: "已暂停",
+        resuming: "正在继续",
         completed: "已完成",
         cancelled: "已取消",
         reverted: "已安全撤销",
     };
-    const progressByPhase = { planning: 10, queued: 20, dispatching: 30, executing: 55, reworking: 65, reviewing: 85, needs_user: 70, change_review: 95, blocked: 60, completed: 100, cancelled: 0, reverted: 100 };
+    const progressByPhase = { planning: 10, queued: 20, dispatching: 30, executing: 55, reworking: 65, reviewing: 85, needs_user: 70, change_review: 95, blocked: 60, pausing: 55, paused: 55, resuming: 55, completed: 100, cancelled: 0, reverted: 100 };
     const terminalPhase = phase === "completed" || phase === "cancelled" || phase === "reverted";
     const gapItems = terminalPhase ? [] : (0, collaboration_1.getTaskGapItems)(task);
     const dashboardWorkers = getDashboardWorkerRows(task);
@@ -1262,6 +1290,12 @@ function buildTaskCardView(task, executions, sessions) {
         nextAction = task?.intake_state === "awaiting_confirmation" ? "请确认执行前计划，确认后才会派发子 Agent" : "请补充卡片中列出的信息";
     else if (phase === "blocked")
         nextAction = "系统正在重试或切换执行器";
+    else if (phase === "pausing")
+        nextAction = "等待当前操作安全收口后保留现场";
+    else if (phase === "paused")
+        nextAction = "现场已保留，点击继续会先重新核验";
+    else if (phase === "resuming")
+        nextAction = "正在从原任务和原检查点继续";
     else if (phase === "completed")
         nextAction = "可以查看改动、继续修改或安全撤销";
     else if (phase === "cancelled")
@@ -1308,6 +1342,8 @@ function buildTaskCardView(task, executions, sessions) {
         runtime_status: runtimeStatus,
         status_detail: task?.status_detail || runtimeStatus.status_detail,
         status: task?.status || "pending",
+        pause_status: (0, task_pause_control_1.taskPauseStatusProjection)(task),
+        pauseStatus: (0, task_pause_control_1.taskPauseStatusProjection)(task),
         usage_summary: task?.usage_summary || task?.usageSummary || task?.provider_usage || task?.providerUsage || {
             model_calls: Number.isFinite(Number(task?.model_calls)) ? Number(task.model_calls) : undefined,
             input_tokens: Number.isFinite(Number(task?.input_tokens)) ? Number(task.input_tokens) : undefined,

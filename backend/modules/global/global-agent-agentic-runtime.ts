@@ -40,6 +40,9 @@ import {
 import { isContextSourceToolResult, projectContextSourceToolResultForPersistence } from "../../system/context-source-tool-result-projection";
 import { readSlashCommandSessionState, renderSlashCommandSessionDirective } from "../../system/slash-command-session-state";
 import { attachTransientModelBlocks, transientModelBlocks } from "../../system/transient-model-content";
+import { globalPlanModeWouldCauseSideEffect } from "../../agents/global/global-agent-plan-mode";
+import { createModelActivityController, createSafeJsonReplyDeltaExtractor } from "../../system/model-activity";
+import { isDevelopmentTaskWorkflowDecision } from "../../agents/workflow-decision";
 
 type LocalIntentResult = any;
 
@@ -1167,6 +1170,12 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
         if (!supervisor) throw new Error("全局任务监工不存在");
         observation = { success: true, supervisor, mission: getGlobalDevelopmentMission(supervisor.mission_id) };
       } else if (name === "orchestrate_development" || name === "send_project_cmd" || name === "create_task") {
+        const workflowDecision = (run.workflow_decision || run.workflowDecision) as any;
+        if (!isDevelopmentTaskWorkflowDecision(workflowDecision)) {
+          throw Object.assign(new Error("当前请求没有明确要求修改代码或项目配置，因此不会创建开发任务；我会先以只读分析方式回答。"), {
+            code: "CCM_DEVELOPMENT_TASK_WRITE_INTENT_REQUIRED",
+          });
+        }
         const missionArgs = name === "send_project_cmd"
           ? buildGlobalSingleProjectMissionPayload({
               project: String(args.project || args.projectName || ""),
@@ -1367,6 +1376,7 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
     source?: string;
     authorizationMessage?: string;
     requestedTargetRefs?: any[];
+    routeGuard?: (workflowDecision: any) => void;
   } = {}): GlobalAgentLoopRuntime {
     const baseConfig = loadOrchestratorConfig();
     const runtime: GlobalAgentLoopRuntime = {
@@ -1381,20 +1391,64 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
           : messages;
         const { accumulateGlobalAgentRunUsage } = require("../../agents/global/global-agent-metrics");
         const invoke = (providerMessages: Array<{ role: string; content: string }>) => {
+          const runStartedAt = Date.parse(String(run.started_at || run.created_at || new Date().toISOString()));
+          const streamMetric: any = (run as any).streaming_metric || ((run as any).streaming_metric = {
+            firstVisibleFeedbackMs: 0,
+            firstTokenMs: 0,
+            maxSilentGapMs: 0,
+            providerRetryCount: 0,
+            fallbackStreamCount: 0,
+            lastVisibleFeedbackAt: Number.isFinite(runStartedAt) ? runStartedAt : Date.now(),
+          });
+          const markVisibleFeedback = (at = Date.now()) => {
+            if (!streamMetric.firstVisibleFeedbackMs && Number.isFinite(runStartedAt)) streamMetric.firstVisibleFeedbackMs = Math.max(0, at - runStartedAt);
+            streamMetric.maxSilentGapMs = Math.max(Number(streamMetric.maxSilentGapMs || 0), Math.max(0, at - Number(streamMetric.lastVisibleFeedbackAt || runStartedAt || at)));
+            streamMetric.lastVisibleFeedbackAt = at;
+          };
+          const markProviderToken = (at = Date.now()) => {
+            if (!streamMetric.firstTokenMs && Number.isFinite(runStartedAt)) streamMetric.firstTokenMs = Math.max(0, at - runStartedAt);
+          };
           const modelCallIndex = Math.max(0, Number((run as any).main_model_call_count || 0));
           (run as any).main_model_call_count = modelCallIndex + 1;
           (run as any).latest_model_visible_payload = buildGlobalProviderPayloadSnapshot(providerMessages, String(run.session_id || ""), run);
           const providerCacheBoundary = buildGlobalAgentSessionContinuation(String(run.session_id || ""));
+          const activity = createModelActivityController({
+            scope: "global", scopeId: "global", exactSessionId: String(run.session_id || input.sessionId || "global"),
+            turnId: String(run.id || input.turnId || "global-run"), modelCallIndex: modelCallIndex + 1,
+            phase: Number(run.tool_calls || 0) > 0 ? "tool_result_review" : "understanding",
+            taskId: String(run.mission_id || "") || undefined,
+            anchorMessageId: `gam_${String(run.id || "result")}_assistant`,
+            generation: Number((run as any).generation || run.resume_count || 0),
+            onActivity: activityValue => {
+              if (["waiting", "retrying"].includes(String(activityValue?.state || ""))) markVisibleFeedback();
+              input.onEvent?.({ type: "model_activity", activity: activityValue });
+            },
+          });
+          let deltaSequence = 0;
+          const replyExtractor = createSafeJsonReplyDeltaExtractor(delta => {
+            activity.onDelta(delta);
+            markVisibleFeedback();
+            deltaSequence += 1;
+            input.onEvent?.({
+              type: "response_delta", text: delta, model_call_index: modelCallIndex + 1,
+              sequence: deltaSequence, final: false,
+            });
+          });
           return callGlobalModelWithRetry(config, providerMessages, {
           signal,
           retryProfile: modelCallIndex === 0 ? "interactive_first_turn" : "agent_orchestration",
-          onRetry: (notice: any) => input.onEvent?.({
-            type: "retrying",
-            attempt: notice.attempt + 1,
-            max_attempts: notice.maxAttempts,
-            remaining_budget_ms: Math.max(0, (modelCallIndex === 0 ? 60_000 : 120_000) - Number(notice.elapsedMs || 0)),
-            reason: String(notice.error?.message || notice.error || "模型暂时不可用").slice(0, 240),
-          }),
+          onDelta: delta => { markProviderToken(); replyExtractor.push(delta); },
+          onRetry: (notice: any) => {
+            streamMetric.providerRetryCount = Number(streamMetric.providerRetryCount || 0) + 1;
+            activity.onRetry(notice.attempt + 1);
+            input.onEvent?.({
+              type: "retrying",
+              attempt: notice.attempt + 1,
+              max_attempts: notice.maxAttempts,
+              remaining_budget_ms: Math.max(0, (modelCallIndex === 0 ? 60_000 : 120_000) - Number(notice.elapsedMs || 0)),
+              reason: String(notice.error?.message || notice.error || "模型暂时不可用").slice(0, 240),
+            });
+          },
           providerContextCache: {
             scope: "global",
             scopeId: String(run.session_id || ""),
@@ -1410,7 +1464,57 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
             (run as any).latest_context_usage = usage;
             accumulateGlobalAgentRunUsage(run, usage);
           },
-          });
+          }).then(async result => {
+            activity.complete();
+            const resultState = String((result as any)?.state || "").toLowerCase();
+            if (replyExtractor.emitted || !["answer", "clarify", "needs_clarification"].includes(resultState)) return result;
+            streamMetric.fallbackStreamCount = Number(streamMetric.fallbackStreamCount || 0) + 1;
+            const synthesisCallIndex = Math.max(0, Number((run as any).main_model_call_count || 0)) + 1;
+            (run as any).main_model_call_count = synthesisCallIndex;
+            run.model_calls = Math.max(0, Number(run.model_calls || 0)) + 1;
+            const synthesisActivity = createModelActivityController({
+              scope: "global", scopeId: "global", exactSessionId: String(run.session_id || input.sessionId || "global"),
+              turnId: String(run.id || input.turnId || "global-run"), modelCallIndex: synthesisCallIndex,
+              phase: "final_synthesis", taskId: String(run.mission_id || "") || undefined,
+              anchorMessageId: `gam_${String(run.id || "result")}_assistant`,
+              generation: Number((run as any).generation || run.resume_count || 0),
+              onActivity: activityValue => {
+                if (["waiting", "retrying"].includes(String(activityValue?.state || ""))) markVisibleFeedback();
+                input.onEvent?.({ type: "model_activity", activity: activityValue });
+              },
+            });
+            let synthesisSequence = 0;
+            try {
+              const synthesized = await callGlobalModelWithRetry(config, [
+                { role: "system", content: "请把既有结论整理成面向用户的最终回答。只输出回答正文，不输出JSON、内部协议、推理过程或工具原始结果。" },
+                { role: "user", content: JSON.stringify({ request: String(run.original_user_message || run.user_message || "").slice(0, 4000), draft: String((result as any)?.message || "").slice(0, 8000) }) },
+              ], {
+                signal,
+                retryProfile: "interactive_first_turn",
+                onDelta: delta => {
+                  if (!delta) return;
+                  markProviderToken();
+                  markVisibleFeedback();
+                  synthesisActivity.onDelta(delta);
+                  synthesisSequence += 1;
+                  input.onEvent?.({ type: "response_delta", text: delta, model_call_index: synthesisCallIndex, sequence: synthesisSequence, final: false });
+                },
+                onRetry: (notice: any) => {
+                  streamMetric.providerRetryCount = Number(streamMetric.providerRetryCount || 0) + 1;
+                  synthesisActivity.onRetry(notice.attempt + 1);
+                },
+                onUsage: (usage: any) => {
+                  (run as any).latest_context_usage = usage;
+                  accumulateGlobalAgentRunUsage(run, usage);
+                },
+              });
+              synthesisActivity.complete();
+              return { ...(result as any), message: String(synthesized || (result as any)?.message || "") };
+            } catch (error) {
+              synthesisActivity.fail();
+              throw error;
+            }
+          }, error => { activity.fail(); throw error; });
         };
         try {
           return await invoke(providerMessages);
@@ -1444,11 +1548,8 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
       onWorkflowDecision: (workflowDecision, run, modelCallIndex, modelDecision) => {
         const groundedTargets = Array.isArray(input.requestedTargetRefs) ? input.requestedTargetRefs : [];
         const requestedToolName = String(modelDecision?.tool?.name || "").toLowerCase();
-        const targetRequired = workflowDecision.actionRequired === true && (
-          workflowDecision.requiresCodeChanges === true
-          || ["plan_task", "decompose_epic"].includes(String(workflowDecision.mode || ""))
-          || ["orchestrate_development", "send_project_cmd", "send_group_cmd"].includes(requestedToolName)
-        );
+        const targetRequired = isDevelopmentTaskWorkflowDecision(workflowDecision)
+          && ["orchestrate_development", "send_project_cmd", "send_group_cmd", "create_task"].includes(requestedToolName);
         if (groundedTargets.length) {
           const targetRefs = groundedTargets.map((target: any) => ({
             type: target.scope,
@@ -1469,13 +1570,19 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
             modelDecision.message = "这项请求需要投放任务，但还没有明确目标。请从可投放的项目或群聊中选择后继续；我不会猜测目标。";
           }
         }
+        if (modelCallIndex === 1) input.routeGuard?.(workflowDecision);
         const planModeActive = readSlashCommandSessionState("global", "global", String(run.session_id || input.sessionId || "")).planMode?.enabled === true;
-        if (planModeActive && (workflowDecision.actionRequired === true || modelDecision?.tool)) {
+        const planModeBlockedAction = globalPlanModeWouldCauseSideEffect({
+          tool: modelDecision?.tool,
+          workflowActionRequired: workflowDecision.actionRequired === true,
+          toolSpecs: GLOBAL_AGENT_TOOL_SPECS,
+        });
+        if (planModeActive && planModeBlockedAction) {
           workflowDecision.actionRequired = false;
           workflowDecision.requiresCodeChanges = false;
           workflowDecision.requiresUserConfirmation = false;
           workflowDecision.mode = "plan_task";
-          workflowDecision.reason = "当前精确会话处于 Plan Mode，已由服务端阻止工具执行和任务派发";
+          workflowDecision.reason = "当前精确会话处于 Plan Mode，已由服务端阻止有副作用的工具执行和任务派发";
           if (modelDecision) {
             modelDecision.state = "plan";
             modelDecision.tool = undefined;
@@ -1545,6 +1652,7 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
     queueScope?: string;
     principal?: any;
     requestedTargetRefs?: any[];
+    routeGuard?: (workflowDecision: any) => void;
   }) {
     const sessionId = input.sessionId || "default";
     const visibleUserMessage = input.originalMessage || input.message;
@@ -1583,6 +1691,7 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
       source: input.source || "web",
       authorizationMessage: visibleUserMessage,
       requestedTargetRefs: input.requestedTargetRefs || [],
+      routeGuard: input.routeGuard,
     });
     const waitingClarification = requestedClarificationRunId ? clarificationCandidate : null;
     if (waitingClarification && Array.isArray(input.requestedTargetRefs) && input.requestedTargetRefs.length) {

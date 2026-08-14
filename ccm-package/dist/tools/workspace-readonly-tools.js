@@ -832,8 +832,12 @@ async function readFileToolV3(root, args) {
     const explicitRange = args?.offset !== undefined || args?.limit !== undefined;
     const limit = Math.max(1, Math.min(2000, Number(args?.limit || 2000) || 2000));
     const tokenBudget = Math.max(256, Math.min(cc_tool_result_limits_1.CC_ALIGNED_FILE_READ_MAX_TOKENS, Number(args?.token_budget || cc_tool_result_limits_1.CC_ALIGNED_FILE_READ_MAX_TOKENS) || cc_tool_result_limits_1.CC_ALIGNED_FILE_READ_MAX_TOKENS));
+    const contentTokenBudget = Math.max(1, tokenBudget - 256);
+    const hardContentTokenBudget = cc_tool_result_limits_1.CC_ALIGNED_FILE_READ_MAX_TOKENS - 256;
     const selected = [];
     let used = 0;
+    let requestedRangeTokens = 0;
+    let requestedRangeLines = 0;
     let rangeTruncatedByTokens = false;
     let totalLines = 0;
     const contentHash = crypto.createHash("sha256");
@@ -842,15 +846,20 @@ async function readFileToolV3(root, args) {
     const reader = readline.createInterface({ input: stream, crlfDelay: Infinity });
     for await (const line of reader) {
         totalLines += 1;
-        if (totalLines < offset || selected.length >= limit || rangeTruncatedByTokens)
+        if (totalLines < offset || requestedRangeLines >= limit)
             continue;
+        requestedRangeLines += 1;
         const row = { line: totalLines, text: line };
         const rowTokens = (0, context_budget_1.estimateTextTokens)(JSON.stringify(row));
-        if (rowTokens > tokenBudget - 256)
-            throw new Error(`第${totalLines}行超过单次Token预算，未进行字符截断`);
-        if (used + rowTokens > tokenBudget - 256) {
-            if (explicitRange)
-                throw new Error("显式读取范围超过25000 Token，请缩小offset或limit");
+        if (rowTokens > hardContentTokenBudget)
+            throw new Error(`第${totalLines}行超过单次最大25000 Token，未进行字符截断`);
+        requestedRangeTokens += rowTokens;
+        if (explicitRange && requestedRangeTokens > hardContentTokenBudget) {
+            throw new Error("显式读取范围超过25000 Token，请缩小offset或limit");
+        }
+        if (rangeTruncatedByTokens)
+            continue;
+        if (rowTokens > contentTokenBudget || used + rowTokens > contentTokenBudget) {
             rangeTruncatedByTokens = true;
             continue;
         }
@@ -865,7 +874,11 @@ async function readFileToolV3(root, args) {
         schema: "ccm-workspace-read-result-v3", toolContractVersion: 3, type: "text", path: relativePath,
         checksum: fileChecksum, total_lines: totalLines, offset, lines: selected,
         empty: stat.size === 0, past_eof: pastEof, next_cursor: truncated ? String(nextLine) : "", truncated,
-        partial_notice: truncated && !explicitRange ? "文件内容较长，已返回首段；请使用offset和limit继续读取。" : "",
+        partial_notice: truncated
+            ? rangeTruncatedByTokens
+                ? "本次读取已达到Token预算；请使用next_cursor和checksum继续读取。"
+                : "文件内容较长，已返回当前范围；请使用next_cursor和checksum继续读取。"
+            : "",
     };
     return enforceResultBudget({ ...result, safeReceipt: { kind: "text", path: relativePath, checksum: result.checksum, lineCount: selected.length, truncated, contentStored: false } }, tokenBudget);
 }
@@ -970,23 +983,65 @@ async function readFilesToolV3(root, project, args, context) {
         }
     }
     const totalBudget = Math.max(1024, Math.min(cc_tool_result_limits_1.CC_ALIGNED_FILE_READ_MAX_TOKENS, Number(args?.token_budget || cc_tool_result_limits_1.CC_ALIGNED_FILE_READ_MAX_TOKENS) || cc_tool_result_limits_1.CC_ALIGNED_FILE_READ_MAX_TOKENS));
-    const perFileBudget = Math.max(512, Math.floor((totalBudget - 512) / normalized.length));
-    const files = [];
-    for (const item of normalized) {
-        const result = await readFileToolV3WithContext(root, project, { ...item, token_budget: Math.min(cc_tool_result_limits_1.CC_ALIGNED_FILE_READ_MAX_TOKENS, perFileBudget) }, context);
-        files.push(result);
+    const perFileMinimum = 512;
+    const envelopeReserve = 512 + normalized.length * 128;
+    if (totalBudget < envelopeReserve + normalized.length * perFileMinimum) {
+        throw new Error(`批量读取Token预算不足以安全返回${normalized.length}个文件，请减少文件数量或提高token_budget`);
     }
+    let remainingBudget = totalBudget - envelopeReserve;
+    const files = [];
+    for (let index = 0; index < normalized.length; index += 1) {
+        const item = normalized[index];
+        const remainingFiles = normalized.length - index - 1;
+        const itemBudget = Math.max(perFileMinimum, Math.min(cc_tool_result_limits_1.CC_ALIGNED_FILE_READ_MAX_TOKENS, remainingBudget - remainingFiles * perFileMinimum));
+        try {
+            const result = await readFileToolV3WithContext(root, project, { ...item, token_budget: itemBudget }, context);
+            files.push(result);
+            const consumed = Math.max(perFileMinimum, Math.min(itemBudget, Number(result?.output_tokens || 0) || (0, context_budget_1.estimateTextTokens)(JSON.stringify(result))));
+            remainingBudget = Math.max(remainingFiles * perFileMinimum, remainingBudget - consumed);
+        }
+        catch (error) {
+            const relativePath = normalizeRelative(item?.path || "");
+            const structured = error?.workspaceResult && typeof error.workspaceResult === "object" ? error.workspaceResult : null;
+            const safeMessage = String(error?.message || "文件读取失败")
+                .replaceAll(root, "[项目目录]")
+                .replaceAll(root.replace(/\\/g, "/"), "[项目目录]")
+                .slice(0, 500);
+            const errorChecksum = checksum({ path: relativePath, code: structured?.code || error?.code || "READ_FAILED", message: safeMessage });
+            files.push({
+                schema: "ccm-workspace-read-result-v3", toolContractVersion: 3, type: "text_error",
+                status: "failed", path: relativePath, code: String(structured?.code || error?.code || "READ_FAILED"),
+                error: safeMessage, ...(Array.isArray(structured?.suggestions) ? { suggestions: structured.suggestions } : {}),
+                lines: [], total_lines: 0, next_cursor: "", truncated: false, checksum: errorChecksum,
+                safeReceipt: { kind: "text", path: relativePath, checksum: errorChecksum, lineCount: 0, truncated: false, contentStored: false },
+            });
+            remainingBudget = Math.max(remainingFiles * perFileMinimum, remainingBudget - perFileMinimum);
+        }
+    }
+    const failedCount = files.filter(file => file?.status === "failed").length;
+    const readCount = files.length - failedCount;
     const aggregate = {
         schema: "ccm-workspace-read-files-result-v3", toolContractVersion: 3, type: "text_batch",
-        files, item_count: files.length, line_count: files.reduce((sum, file) => sum + Number(file?.lines?.length || 0), 0),
+        files, item_count: normalized.length, read_count: readCount, failed_count: failedCount,
+        line_count: files.reduce((sum, file) => sum + Number(file?.lines?.length || 0), 0),
         truncated: files.some(file => file?.truncated === true),
-        status: files.some(file => file?.status === "partial") ? "partial" : files.every(file => file?.status === "unchanged") ? "unchanged" : "read",
+        status: failedCount === files.length ? "failed"
+            : failedCount > 0 || files.some(file => file?.status === "partial") ? "partial"
+                : files.every(file => file?.status === "unchanged") ? "unchanged" : "read",
     };
     const resultChecksum = checksum(files.map(file => ({ path: file.path, checksum: file.checksum, offset: file.offset, next_cursor: file.next_cursor })));
-    return enforceResultBudget({
+    const payload = {
         ...aggregate,
-        safeReceipt: { kind: "text", checksum: resultChecksum, itemCount: files.length, lineCount: aggregate.line_count, truncated: aggregate.truncated, contentStored: false },
-    }, totalBudget);
+        safeReceipt: { kind: "text", checksum: resultChecksum, itemCount: normalized.length, lineCount: aggregate.line_count, truncated: aggregate.truncated, contentStored: false },
+        contentStored: false,
+    };
+    if (failedCount === files.length) {
+        const error = new Error(`批量读取失败：${failedCount}个文件均无法读取`);
+        error.code = "BATCH_READ_FAILED";
+        error.workspaceResult = { ...payload, code: error.code };
+        throw error;
+    }
+    return enforceResultBudget(payload, totalBudget);
 }
 async function executeWorkspaceReadonlyToolWithCapabilityRaw(toolName, args, capability, contractVersion = 2, options = {}) {
     const alias = { read_project_source: "read_project_config", read_runtime_diagnostics: "read_runtime_status" };

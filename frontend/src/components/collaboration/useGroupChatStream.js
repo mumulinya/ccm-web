@@ -186,6 +186,7 @@ export function useGroupChatStream({
     const message = newMessage.value.trim()
     if (!message && !messageFiles.value.length) return
     const requestedMode = groupTurnControl.mode.value
+    const continuationTaskId = requestedMode === 'steer' ? activeGroupTaskId.value : ''
     await groupTurnControl.enqueue({
       message,
       attachments: [...messageFiles.value],
@@ -195,7 +196,10 @@ export function useGroupChatStream({
         group_id: currentGroup.value.id,
         group_session_id: currentGroupSessionId.value,
         message_mode: messageMode.value,
-        continuation_task_id: activeGroupTaskId.value,
+        // Ordinary queued requirements become independent turns after the
+        // current task releases the conversation slot. Only an explicit steer
+        // may bind to the running task.
+        continuation_task_id: continuationTaskId,
         requested_mode: requestedMode,
       },
     })
@@ -218,6 +222,12 @@ export function useGroupChatStream({
       return { task_id: result?.taskId || currentTaskId, continuation_task_id: currentTaskId }
     })
     return guidedTurn
+  }
+
+  const resolveGroupQueuedRoute = async (turn, choice) => {
+    await groupTurnControl.resolveRoute(turn, choice)
+    toast.success(choice === 'continue_original' ? '将继续原任务' : choice === 'answer_only' ? '将只回答这条消息' : '将作为新任务处理')
+    window.setTimeout(() => drainGroupTurnQueue().catch(() => {}), 0)
   }
 
   const sendMessage = async (options = {}) => {
@@ -271,9 +281,10 @@ export function useGroupChatStream({
       files: filesToSend,
       directed: directedInputFields,
     })
-    const clientMessageId = pendingGroupSendRetry.value?.signature === retrySignature
-      ? pendingGroupSendRetry.value.clientMessageId
-      : createLocalMessageId()
+    const clientMessageId = queuedTurn?.metadata?.original_message_id
+      || (pendingGroupSendRetry.value?.signature === retrySignature
+        ? pendingGroupSendRetry.value.clientMessageId
+        : createLocalMessageId())
     pendingGroupSendRetry.value = { signature: retrySignature, clientMessageId }
     newMessage.value = ''
     messageFiles.value = []
@@ -341,6 +352,9 @@ export function useGroupChatStream({
       payload.append('message', msg)
       payload.append('client_message_id', clientMessageId)
       payload.append('message_mode', directedInputFields?.message_mode || queuedTurn?.metadata?.message_mode || messageMode.value)
+      if (queuedTurn?.id) payload.append('conversation_turn_id', queuedTurn.id)
+      if (queuedTurn?.metadata?.resolved_route) payload.append('resolved_route', queuedTurn.metadata.resolved_route)
+      if (queuedTurn?.metadata?.resolved_candidate_task_id) payload.append('resolved_candidate_task_id', queuedTurn.metadata.resolved_candidate_task_id)
       if (resumeInterruption?.id) payload.append('resume_interruption_message_id', String(resumeInterruption.id))
       if (directedInputFields) {
         Object.entries(directedInputFields)
@@ -355,6 +369,9 @@ export function useGroupChatStream({
         message: msg,
         client_message_id: clientMessageId,
         message_mode: queuedTurn?.metadata?.message_mode || messageMode.value,
+        conversation_turn_id: queuedTurn?.id || '',
+        resolved_route: queuedTurn?.metadata?.resolved_route || '',
+        resolved_candidate_task_id: queuedTurn?.metadata?.resolved_candidate_task_id || '',
         ...(resumeInterruption?.id ? { resume_interruption_message_id: String(resumeInterruption.id) } : {}),
         ...(directedInputFields || {})
       }
@@ -432,6 +449,7 @@ export function useGroupChatStream({
     let sseBuffer = ''
     let streamFailed = false
     let streamStopped = false
+    let routeRequired = false
     const seenStreamEventIds = new Set()
 
     const handleStreamLine = (line) => {
@@ -441,7 +459,11 @@ export function useGroupChatStream({
         const eventId = String(data.event_id || data.eventId || '')
         if (eventId && seenStreamEventIds.has(eventId)) return
         if (eventId) seenStreamEventIds.add(eventId)
-        if (data.type === 'status') {
+        if (data.type === 'route_required') {
+          routeRequired = true
+          agentMsg.streaming = false
+          groupTurnControl.refresh().catch(() => {})
+        } else if (data.type === 'status') {
           applyMainAgentProgressCheckpoint(data)
           agentMsg.processingDetail = sanitizeGroupVisibleText(data.text, '我正在整理当前进展。', 120)
           if (String(data.text || '').includes('分派') || String(data.text || '').includes('等待')) {
@@ -567,7 +589,7 @@ export function useGroupChatStream({
           appendAgentQaMessage(data)
           waitingCrossReply.value = true
           scrollToBottom()
-        } else if (data.type === 'chunk' && data.agent) {
+        } else if ((data.type === 'chunk' || data.type === 'response_delta') && data.agent) {
           // 流式 chunk：为每个 Agent 创建独立的流式消息
           const agentKey = data.agent
           if (!agentStreamMsgs[agentKey]) {
@@ -679,7 +701,7 @@ export function useGroupChatStream({
             waitingCrossReply.value = true
           }
           scrollToBottom()
-        } else if (data.type === 'chunk') {
+        } else if (data.type === 'chunk' || data.type === 'response_delta') {
           // 单 Agent 模式的 chunk
           if (!agentMsgAdded) {
             messages.value.push(agentMsg)
@@ -748,6 +770,10 @@ export function useGroupChatStream({
 
     isStreaming.value = false
     agentMsg.streaming = false
+    if (routeRequired) {
+      const assistantIndex = messages.value.indexOf(agentMsg)
+      if (assistantIndex >= 0) messages.value.splice(assistantIndex, 1)
+    }
     if (groupStreamController.value === controller) groupStreamController.value = null
 
     // 既然所有协作已经在同一个 SSE 请求中同步完成，重置等待标志，并主动拉取一次做最终同步
@@ -786,7 +812,7 @@ export function useGroupChatStream({
       messageFiles.value = filesToSend
     }
     if (!queuedTurn) window.setTimeout(() => drainGroupTurnQueue().catch(() => {}), 0)
-    return { success: !streamFailed, error: streamFailed ? '群聊消息没有完成' : '', taskId: activeGroupTaskId.value }
+    return { success: !streamFailed, error: streamFailed ? '群聊消息没有完成' : '', taskId: activeGroupTaskId.value, routeRequired }
   }
 
   return {
@@ -804,6 +830,7 @@ export function useGroupChatStream({
     groupTurnConversationId,
     groupTurnControl,
     guideGroupQueuedTurn,
+    resolveGroupQueuedRoute,
     stopGroupCurrentWork,
     drainGroupTurnQueue,
     submitGroupMessageWhileBusy,

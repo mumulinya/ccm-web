@@ -125,6 +125,7 @@ export declare function buildCoordinatorResultFromAnalysis(group: any, message: 
         requiresConfirmation: boolean;
         risk: string;
         nextStep: string;
+        structuredClarificationQuestions: any[];
         confidence: any;
     } | {
         action: string;
@@ -159,6 +160,7 @@ export declare function buildCoordinatorResultFromAnalysis(group: any, message: 
         requiresConfirmation: boolean;
         risk: string;
         nextStep: string;
+        structuredClarificationQuestions: any[];
         confidence: any;
     } | {
         action: string;
@@ -199,6 +201,8 @@ export declare function runLlmGroupOrchestrator(input: {
     projectSourceEvidence?: any;
     project_source_evidence?: any;
     onRetry?: (notice: any) => void;
+    onDelta?: (delta: string) => void;
+    onModelActivity?: (activity: any) => void;
     turnId?: string;
     turn_id?: string;
     anchorMessageId?: string;
@@ -231,6 +235,19 @@ export declare function runLlmGroupOrchestrator(input: {
             error: any;
         }[];
     };
+    replyDeltaEmitted: boolean;
+    reply_delta_emitted: boolean;
+    streamingMetric: {
+        modelMs: number;
+        toolWallMs: number;
+        firstVisibleFeedbackMs: number;
+        firstTokenMs: number;
+        maxSilentGapMs: number;
+        providerRetryCount: number;
+        fallbackStreamCount: number;
+        initialReadFileCount: number;
+        initialReadTokens: number;
+    };
     agent: any;
     delegated: any[];
     assignments: any[];
@@ -242,6 +259,7 @@ export declare function runLlmGroupOrchestrator(input: {
         requiresConfirmation: boolean;
         risk: string;
         nextStep: string;
+        structuredClarificationQuestions: any[];
         confidence: any;
     } | {
         action: string;
@@ -289,6 +307,19 @@ export declare function runLlmGroupOrchestrator(input: {
             error: any;
         }[];
     };
+    replyDeltaEmitted: boolean;
+    reply_delta_emitted: boolean;
+    streamingMetric: {
+        modelMs: number;
+        toolWallMs: number;
+        firstVisibleFeedbackMs: number;
+        firstTokenMs: number;
+        maxSilentGapMs: number;
+        providerRetryCount: number;
+        fallbackStreamCount: number;
+        initialReadFileCount: number;
+        initialReadTokens: number;
+    };
     agent: any;
     delegated: any[];
     assignments: any[];
@@ -302,6 +333,7 @@ export declare function runLlmGroupOrchestrator(input: {
         requiresConfirmation: boolean;
         risk: string;
         nextStep: string;
+        structuredClarificationQuestions: any[];
         confidence: any;
     } | {
         action: string;

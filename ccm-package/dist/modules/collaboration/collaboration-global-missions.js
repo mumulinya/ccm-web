@@ -26,6 +26,10 @@ const test_agent_runner_1 = require("./test-agent-runner");
 const storage_1 = require("./storage");
 const daily_dev_backlog_1 = require("./daily-dev-backlog");
 const execution_kernel_1 = require("../../agents/execution-kernel");
+const agent_sessions_1 = require("../../tasks/agent-sessions");
+const user_visible_agent_events_1 = require("../../system/user-visible-agent-events");
+const collaboration_runtime_task_queue_1 = require("./collaboration-runtime-task-queue");
+const task_pause_routes_1 = require("./task-pause-routes");
 const reliability_ledger_1 = require("../../system/reliability-ledger");
 const runtime_kernel_1 = require("../../agents/runtime-kernel");
 const worker_handoff_1 = require("../../agents/worker-handoff");
@@ -50,6 +54,25 @@ function getGlobalDirectDispatchContinuationKey(task) {
         interruption.requested_at || "",
         reason,
     ].filter(Boolean).join("|");
+}
+function globalMissionPauseDeps() {
+    return {
+        loadTasks: db_1.loadTasks,
+        updateTask: collaboration_1.updateTask,
+        listActiveAgentRuns: execution_kernel_1.listActiveAgentRuns,
+        requestActiveAgentRunPause: execution_kernel_1.requestActiveAgentRunPause,
+        listTaskAgentSessions: agent_sessions_1.listTaskAgentSessions,
+        suspendTaskAgentSessions: agent_sessions_1.suspendTaskAgentSessions,
+        reopenTaskAgentSessions: agent_sessions_1.reopenTaskAgentSessions,
+        listExecutions: execution_kernel_1.listExecutions,
+        transitionExecution: execution_kernel_1.transitionExecution,
+        runningTaskIds: collaboration_1.runningTaskIds,
+        appendTaskTimelineEvent: logs_1.appendTaskTimelineEvent,
+        appendUserVisibleAgentEvent: user_visible_agent_events_1.appendUserVisibleAgentEvent,
+        buildTaskConversationLinks: task_conversation_links_1.buildTaskConversationLinks,
+        updateGroupTaskInlineStatus: collaboration_runtime_task_queue_1.updateGroupTaskInlineStatus,
+        enqueueTask: collaboration_1.enqueueTask,
+    };
 }
 function shouldNotifyGlobalDirectDispatchContinuation(task, previousStatus = "") {
     const meta = (0, collaboration_1.getGlobalDirectDispatchMeta)(task);
@@ -558,6 +581,27 @@ async function controlGlobalDevelopmentMission(id, operation, ctx, payload = {})
             await ctx.onTaskStatusChange?.(child, running ? "cancelling" : "cancelled", reason);
         }
         (0, collaboration_1.updateTask)(id, { status: "cancelled", status_detail: (0, collaboration_1.compactFormText)(payload.reason, "全局任务已取消"), cancelled_at: now });
+    }
+    else if (op === "pause") {
+        const pausedTree = (0, task_pause_routes_1.requestTaskPauseTree)(current.mission, globalMissionPauseDeps());
+        (0, collaboration_1.updateTask)(id, {
+            supervisor_control: { mode: "paused", updated_at: now, actor: payload.actor || "user" },
+            status_detail: pausedTree.childrenSafe
+                ? "全局任务树已在安全检查点暂停"
+                : "正在暂停全局任务树，等待子任务安全收口",
+        });
+    }
+    else if (op === "resume") {
+        try {
+            await (0, task_pause_routes_1.resumeTaskPauseTree)(current.mission, ctx, globalMissionPauseDeps());
+            (0, collaboration_1.updateTask)(id, {
+                supervisor_control: { mode: "automatic", updated_at: now, actor: payload.actor || "user" },
+                status_detail: "全局任务已从安全暂停点继续",
+            });
+        }
+        catch (error) {
+            return { success: false, status: Number(error?.status || 409), error: error?.message || "全局任务暂时无法继续", checks: error?.checks || [] };
+        }
     }
     else {
         const paused = op === "pause" || op === "takeover";

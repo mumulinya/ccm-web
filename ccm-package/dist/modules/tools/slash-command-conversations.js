@@ -199,6 +199,108 @@ function assertExpected(boundary, input) {
     if (expectedGeneration !== undefined && Number(expectedGeneration) !== boundary.generation)
         throw new Error("会话 generation 已漂移，请重新预览");
 }
+function prePlanProjection(message) {
+    const summary = message?.clarification_summary || message?.clarificationSummary || null;
+    const run = message?.agenticRun || message?.agentic_run || null;
+    return message?.prePlanClarification || message?.pre_plan_clarification
+        || summary?.prePlanClarification || summary?.pre_plan_clarification
+        || run?.clarification_summary?.pre_plan_clarification
+        || run?.clarificationSummary?.prePlanClarification
+        || null;
+}
+function activePrePlanClarification(input) {
+    const boundary = currentBoundary(input);
+    const row = [...boundary.messages].reverse().map((message) => ({ message, projection: prePlanProjection(message) }))
+        .find((item) => item.projection?.schema === "ccm-pre-plan-clarification-v1" && item.projection.status === "pending");
+    return {
+        clarification: row?.projection || null,
+        anchorMessageId: String(row?.message?.id || row?.projection?.anchorMessageId || ""),
+        revision: boundary.revision,
+        generation: boundary.generation,
+        conversationChecksum: boundary.conversationChecksum,
+        contentStored: false,
+    };
+}
+function validatePrePlanClarificationAction(input, expectedStatus = "pending") {
+    const boundary = currentBoundary(input);
+    const active = activePrePlanClarification(input);
+    const projection = active.clarification;
+    if (!projection || projection.status !== expectedStatus) {
+        const error = new Error("当前会话没有等待处理的计划前业务澄清");
+        error.statusCode = 404;
+        throw error;
+    }
+    if (String(input.clarificationId || input.clarification_id || input.id || "") !== String(projection.id || "")) {
+        const error = new Error("澄清请求已经变化，请刷新后重试");
+        error.statusCode = 409;
+        error.code = "CLARIFICATION_REVISION_CONFLICT";
+        throw error;
+    }
+    if (Number(input.revision) !== Number(projection.revision) || Number(input.generation) !== Number(projection.generation)) {
+        const error = new Error("澄清版本已经变化，请刷新后重试");
+        error.statusCode = 409;
+        error.code = "CLARIFICATION_REVISION_CONFLICT";
+        throw error;
+    }
+    const expectedChecksum = String(input.conversationChecksum || input.conversation_checksum || "");
+    if (expectedChecksum && expectedChecksum !== boundary.conversationChecksum) {
+        const error = new Error("会话内容已漂移，请刷新后重试");
+        error.statusCode = 409;
+        error.code = "CLARIFICATION_REVISION_CONFLICT";
+        throw error;
+    }
+    return { boundary, projection, anchorMessageId: active.anchorMessageId };
+}
+function updatePrePlanClarificationStatus(boundary, clarificationId, status) {
+    const updatedAt = now();
+    const messages = (boundary.messages || []).map((message) => {
+        const projection = prePlanProjection(message);
+        if (String(projection?.id || "") !== clarificationId)
+            return message;
+        const nextProjection = { ...projection, status, revision: Number(projection.revision || 1) + 1, updatedAt };
+        const summary = message.clarification_summary || message.clarificationSummary || null;
+        const agenticRun = message.agenticRun || message.agentic_run || null;
+        return {
+            ...message,
+            ...(message.prePlanClarification ? { prePlanClarification: nextProjection } : {}),
+            ...(message.pre_plan_clarification ? { pre_plan_clarification: nextProjection } : {}),
+            ...(summary ? {
+                clarification_summary: { ...summary, status, pre_plan_clarification: nextProjection },
+                clarificationSummary: { ...summary, status, prePlanClarification: nextProjection },
+            } : {}),
+            ...(agenticRun ? {
+                agenticRun: {
+                    ...agenticRun,
+                    clarification_summary: { ...(agenticRun.clarification_summary || {}), status, pre_plan_clarification: nextProjection },
+                    clarificationSummary: { ...(agenticRun.clarificationSummary || {}), status, prePlanClarification: nextProjection },
+                },
+            } : {}),
+        };
+    });
+    if (boundary.id.scope === "global") {
+        (0, atomic_json_file_1.withFileLock)(GLOBAL_HISTORY_FILE, () => {
+            const store = loadGlobalStore();
+            const session = (store.sessions || []).find((item) => String(item.id) === boundary.id.sessionId);
+            if (!session)
+                throw new Error("全局会话不存在");
+            session.messages = messages;
+            session.updatedAt = updatedAt;
+            writeGlobalStore(store);
+        });
+    }
+    else if (boundary.id.scope === "project") {
+        const changed = messages.find((message) => String(prePlanProjection(message)?.id || "") === clarificationId);
+        if (changed)
+            (0, sessions_1.upsertProjectSessionTaskMessage)(boundary.id.scopeId, boundary.id.sessionId, changed);
+    }
+    else {
+        (0, storage_1.saveGroupMessages)(boundary.id.scopeId, messages, boundary.id.sessionId);
+    }
+    return nextProjectionReceipt(status, clarificationId, updatedAt);
+}
+function nextProjectionReceipt(status, clarificationId, updatedAt) {
+    return { status, clarificationId, updatedAt, contentStored: false };
+}
 function persistSessionState(id, patch, expected = {}) {
     return mutateState(state => {
         const previous = state.sessions[id.key] || { revision: 0, generation: 0 };
@@ -877,6 +979,38 @@ function sseWrite(res, event, data) {
 }
 async function body(req) { return JSON.parse((await (0, utils_1.collectRequestBuffer)(req)).toString("utf8") || "{}"); }
 function handleSlashCommandConversationApi(pathname, req, res, parsed) {
+    if (pathname === "/api/conversations/clarifications/active" && req.method === "GET") {
+        try {
+            assertApiResourceAccess(req, parsed.query || {}, "use");
+            (0, utils_1.sendJson)(res, { success: true, result: activePrePlanClarification(parsed.query || {}) });
+        }
+        catch (error) {
+            (0, utils_1.sendJson)(res, { success: false, error: error.message || String(error) }, error.statusCode || 400);
+        }
+        return true;
+    }
+    const clarificationAction = pathname.match(/^\/api\/conversations\/clarifications\/([^/]+)\/(answer|defaults|cancel)$/);
+    if (clarificationAction && req.method === "POST") {
+        void body(req).then(value => {
+            assertApiResourceAccess(req, value, "use");
+            const checked = validatePrePlanClarificationAction({ ...value, clarificationId: decodeURIComponent(clarificationAction[1]) });
+            const action = clarificationAction[2];
+            if (action === "cancel")
+                updatePrePlanClarificationStatus(checked.boundary, checked.projection.id, "cancelled");
+            return {
+                schema: "ccm-pre-plan-clarification-action-receipt-v1",
+                accepted: true,
+                action,
+                clarificationId: checked.projection.id,
+                anchorMessageId: checked.anchorMessageId,
+                nextStatus: action === "cancel" ? "cancelled" : "resolved",
+                revision: Number(checked.projection.revision || 1),
+                generation: Number(checked.projection.generation || 0),
+                contentStored: false,
+            };
+        }).then(result => (0, utils_1.sendJson)(res, { success: true, result })).catch((error) => (0, utils_1.sendJson)(res, { success: false, error: error.message || String(error), code: error.code }, error.statusCode || 409));
+        return true;
+    }
     if (pathname === "/api/conversations/permission-mode" && req.method === "GET") {
         try {
             assertApiResourceAccess(req, parsed.query || {}, "use");
@@ -969,6 +1103,7 @@ function handleSlashCommandConversationApi(pathname, req, res, parsed) {
     }
     if (pathname === "/api/conversations/plan-mode" && req.method === "GET") {
         try {
+            assertApiResourceAccess(req, parsed.query || {}, "use");
             const { id, state } = readSessionState(parsed.query || {});
             (0, utils_1.sendJson)(res, { success: true, scope: id.scope, scopeId: id.scopeId, exactSessionId: id.sessionId, generation: Number(state.generation || 0), revision: Number(state.revision || 0), planMode: state.planMode || { enabled: false } });
         }

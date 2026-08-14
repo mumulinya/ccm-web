@@ -83,7 +83,7 @@ async function drainProjectFeishuTurns(baseUrl, project, projectSessionId) {
                         project,
                         sessionId: projectSessionId,
                         message: turn.message,
-                        files: turn.attachments,
+                        attachments: turn.attachments,
                         source: "feishu",
                         target_type: "project_agent",
                         platform_context: metadata.platform_context || {},

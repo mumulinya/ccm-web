@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { Activity, ChevronRight, CircleStop, Clock3, LoaderCircle, ShieldAlert, X } from '@lucide/vue'
+import { Activity, ChevronRight, CircleStop, Clock3, LoaderCircle, Pause, Play, ShieldAlert, X } from '@lucide/vue'
 import { subscribeRuntimeEvents } from '../../utils/runtimeEventBus.js'
 import { toast } from '../../utils/toast.js'
 import { recheckTaskStop, stopTaskWithPreview, undoTaskStop } from '../../utils/taskStopFlow.js'
@@ -21,9 +21,9 @@ let recoveryClockTimer = null
 const recoveryClock = ref(Date.now())
 
 const activeCount = computed(() => active.value.length)
-const running = computed(() => active.value.filter(item => ['running', 'stopping'].includes(item.state)))
+const running = computed(() => active.value.filter(item => ['running', 'pausing', 'stopping'].includes(item.state)))
 const attention = computed(() => active.value.filter(item => item.state === 'needs_user'))
-const waiting = computed(() => active.value.filter(item => item.state === 'waiting'))
+const waiting = computed(() => active.value.filter(item => ['waiting', 'paused'].includes(item.state)))
 
 const duration = value => {
   const seconds = Math.max(0, Math.floor(Number(value || 0) / 1000))
@@ -31,7 +31,7 @@ const duration = value => {
   const minutes = Math.floor(seconds / 60)
   return minutes < 60 ? `${minutes}分${seconds % 60}秒` : `${Math.floor(minutes / 60)}时${minutes % 60}分`
 }
-const stateLabel = item => ({ running: '运行中', stopping: '正在停止', waiting: '等待中', needs_user: '需要处理', completed: '已完成', failed: '未完成', cancelled: '已停止' }[item?.state] || '处理中')
+const stateLabel = item => ({ running: '运行中', pausing: '正在暂停', paused: '已暂停', stopping: '正在停止', waiting: '等待中', needs_user: '需要处理', completed: '已完成', failed: '未完成', cancelled: '已停止' }[item?.state] || '处理中')
 const sourceIcon = type => type === 'project' ? '▣' : type === 'group' ? '◉' : '✦'
 const recoveryPresentation = item => taskRecoveryPresentation(item, recoveryClock.value)
 
@@ -118,12 +118,51 @@ const resume = async item => {
     actionBusyId.value = ''
   }
 }
+const pauseControl = async (item, kind) => {
+  const action = item?.availableActions?.find(value => value.kind === kind && value.enabled)
+  if (!action) return
+  actionBusyId.value = item.taskId
+  try {
+    const guard = await resolveTaskMutationGuard(item.taskId, item)
+    const endpoint = kind === 'pause' ? '/api/tasks/pause'
+      : kind === 'resume_paused' ? '/api/tasks/resume-paused'
+        : '/api/tasks/interrupt'
+    const response = await fetch(endpoint, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: item.taskId,
+        ...guard,
+        pauseSequence: item?.pauseStatus?.pauseSequence || 0,
+        ...(kind === 'force_interrupt' ? { reason: '安全暂停超过30秒后由用户强制中断' } : {}),
+      }),
+    })
+    const payload = await response.json()
+    if (!response.ok || payload?.success === false) throw new Error(payload?.error || '暂停操作失败')
+    toast[kind === 'resume_paused' ? 'success' : 'info'](kind === 'pause'
+      ? '正在等待当前操作安全收口'
+      : kind === 'resume_paused' ? '已通过核验，正在原位继续' : '已进入强制中断恢复流程')
+    await refresh()
+  } catch (error) {
+    toast.error(error?.message || '暂停操作失败')
+  } finally {
+    actionBusyId.value = ''
+  }
+}
 const handleStopAction = async (item, kind) => {
   actionBusyId.value = item.taskId
   try {
     if (kind === 'undo_stop') {
       await undoTaskStop({ ...item, id: item.taskId })
       toast.success('已撤销停止，任务恢复到原状态')
+    } else if (kind === 'recheck' && item?.pauseStatus?.state === 'blocked') {
+      const guard = await resolveTaskMutationGuard(item.taskId, item)
+      const response = await fetch('/api/tasks/resume-paused', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: item.taskId, ...guard, pauseSequence: item.pauseStatus.pauseSequence || 0 }),
+      })
+      const payload = await response.json()
+      if (!response.ok || payload?.success === false) throw new Error(payload?.error || '重新核验失败')
+      toast.success('重新核验已通过，正在从原任务继续')
     } else {
       await recheckTaskStop({ ...item, id: item.taskId }, kind)
       toast.info(kind === 'takeover' ? '已转为人工接管' : '已重新检查停止状态')
@@ -175,7 +214,7 @@ onBeforeUnmount(() => {
                 <strong>{{ item.title }}</strong>
                 <div v-if="recoveryPresentation(item).visible" class="background-recovery"><strong>{{ recoveryPresentation(item).title }}</strong><span>{{ recoveryPresentation(item).statusText }}</span><small>{{ recoveryPresentation(item).detail }}</small></div>
                 <p v-else>{{ item.stage }} · {{ item.progress }}</p>
-                <footer><span><Clock3 :size="12" /> {{ duration(item.elapsedMs) }}</span><button type="button" @click="view(item)">查看 <ChevronRight :size="13" /></button><button v-if="item.availableActions?.some(action => action.kind === 'resume_interrupted' && action.enabled)" type="button" :disabled="actionBusyId === item.taskId" @click="resume(item)">{{ actionBusyId === item.taskId ? '恢复中…' : '立即重试' }}</button><button v-if="item.availableActions?.some(action => action.kind === 'cancel' && action.enabled)" type="button" class="danger" :disabled="actionBusyId === item.taskId" @click="cancel(item)"><CircleStop :size="13" />{{ actionBusyId === item.taskId ? '处理中…' : '停止任务' }}</button><button v-for="action in (item.availableActions || []).filter(value => ['recheck','takeover'].includes(value.kind))" :key="action.id" type="button" :class="{ danger: action.kind === 'takeover' }" :disabled="actionBusyId === item.taskId" @click="handleStopAction(item, action.kind)">{{ action.label }}</button></footer>
+                <footer><span><Clock3 :size="12" /> {{ duration(item.elapsedMs) }}</span><button type="button" @click="view(item)">查看 <ChevronRight :size="13" /></button><button v-if="item.availableActions?.some(action => action.kind === 'pause' && action.enabled)" type="button" :disabled="actionBusyId === item.taskId" @click="pauseControl(item, 'pause')"><Pause :size="12" />暂停</button><button v-if="item.availableActions?.some(action => action.kind === 'force_interrupt' && action.enabled)" type="button" class="danger" :disabled="actionBusyId === item.taskId" @click="pauseControl(item, 'force_interrupt')">强制中断</button><button v-if="item.availableActions?.some(action => action.kind === 'resume_interrupted' && action.enabled)" type="button" :disabled="actionBusyId === item.taskId" @click="resume(item)">{{ actionBusyId === item.taskId ? '恢复中…' : '立即重试' }}</button><button v-if="item.availableActions?.some(action => action.kind === 'cancel' && action.enabled)" type="button" class="danger" :disabled="actionBusyId === item.taskId" @click="cancel(item)"><CircleStop :size="13" />{{ actionBusyId === item.taskId ? '处理中…' : '停止任务' }}</button><button v-for="action in (item.availableActions || []).filter(value => ['recheck','takeover'].includes(value.kind))" :key="action.id" type="button" :class="{ danger: action.kind === 'takeover' }" :disabled="actionBusyId === item.taskId" @click="handleStopAction(item, action.kind)">{{ action.label }}</button></footer>
               </article>
             </section>
             <section v-if="attention.length">
@@ -184,7 +223,7 @@ onBeforeUnmount(() => {
                 <div class="background-task-source"><span>{{ sourceIcon(item.source?.type) }}</span><small>{{ item.source?.label }}</small></div>
                 <strong>{{ item.title }}</strong>
                 <div v-if="recoveryPresentation(item).visible" class="background-recovery"><strong>{{ recoveryPresentation(item).title }}</strong><span>{{ recoveryPresentation(item).statusText }}</span><small>{{ recoveryPresentation(item).detail }}</small></div><p v-else>{{ item.progress }}</p>
-                <footer><span>{{ item.stage }}</span><button type="button" @click="view(item)">查看需要处理 <ChevronRight :size="13" /></button><button v-if="item.availableActions?.some(action => action.kind === 'resume_interrupted' && action.enabled)" type="button" :disabled="actionBusyId === item.taskId" @click="resume(item)">{{ actionBusyId === item.taskId ? '恢复中…' : recoveryPresentation(item).safeAuto ? '立即重试' : '恢复任务' }}</button><button v-if="item.availableActions?.some(action => action.kind === 'cancel' && action.enabled)" type="button" class="danger" :disabled="actionBusyId === item.taskId" @click="cancel(item)">停止任务</button></footer>
+                <footer><span>{{ item.stage }}</span><button type="button" @click="view(item)">查看需要处理 <ChevronRight :size="13" /></button><button v-if="item.availableActions?.some(action => action.kind === 'resume_interrupted' && action.enabled)" type="button" :disabled="actionBusyId === item.taskId" @click="resume(item)">{{ actionBusyId === item.taskId ? '恢复中…' : recoveryPresentation(item).safeAuto ? '立即重试' : '恢复任务' }}</button><button v-if="item.availableActions?.some(action => action.kind === 'force_interrupt' && action.enabled)" type="button" class="danger" :disabled="actionBusyId === item.taskId" @click="pauseControl(item, 'force_interrupt')">强制中断</button><button v-if="item.availableActions?.some(action => action.kind === 'cancel' && action.enabled)" type="button" class="danger" :disabled="actionBusyId === item.taskId" @click="cancel(item)">停止任务</button><button v-for="action in (item.availableActions || []).filter(value => ['recheck','takeover'].includes(value.kind))" :key="action.id" type="button" :class="{ danger: action.kind === 'takeover' }" :disabled="actionBusyId === item.taskId" @click="handleStopAction(item, action.kind)">{{ action.label }}</button></footer>
               </article>
             </section>
             <section v-if="waiting.length">
@@ -193,7 +232,7 @@ onBeforeUnmount(() => {
                 <div class="background-task-source"><span>{{ sourceIcon(item.source?.type) }}</span><small>{{ item.source?.label }}</small></div>
                 <strong>{{ item.title }}</strong>
                 <div v-if="recoveryPresentation(item).visible" class="background-recovery"><strong>{{ recoveryPresentation(item).title }}</strong><span>{{ recoveryPresentation(item).statusText }}</span><small>{{ recoveryPresentation(item).detail }}</small></div><p v-else>{{ item.stage }} · {{ item.progress }}</p>
-                <footer><span>{{ stateLabel(item) }}</span><button type="button" @click="view(item)">查看 <ChevronRight :size="13" /></button><button v-if="item.availableActions?.some(action => action.kind === 'resume_interrupted' && action.enabled)" type="button" :disabled="actionBusyId === item.taskId" @click="resume(item)">{{ actionBusyId === item.taskId ? '恢复中…' : recoveryPresentation(item).safeAuto ? '立即重试' : '恢复任务' }}</button><button v-if="item.availableActions?.some(action => action.kind === 'cancel' && action.enabled)" type="button" class="danger" :disabled="actionBusyId === item.taskId" @click="cancel(item)">停止任务</button></footer>
+                <footer><span>{{ stateLabel(item) }}</span><button type="button" @click="view(item)">查看 <ChevronRight :size="13" /></button><button v-if="item.availableActions?.some(action => action.kind === 'resume_paused' && action.enabled)" type="button" :disabled="actionBusyId === item.taskId" @click="pauseControl(item, 'resume_paused')"><Play :size="12" />{{ actionBusyId === item.taskId ? '核验中…' : '继续' }}</button><button v-if="item.availableActions?.some(action => action.kind === 'resume_interrupted' && action.enabled)" type="button" :disabled="actionBusyId === item.taskId" @click="resume(item)">{{ actionBusyId === item.taskId ? '恢复中…' : recoveryPresentation(item).safeAuto ? '立即重试' : '恢复任务' }}</button><button v-if="item.availableActions?.some(action => action.kind === 'cancel' && action.enabled)" type="button" class="danger" :disabled="actionBusyId === item.taskId" @click="cancel(item)">停止任务</button></footer>
               </article>
             </section>
             <section v-if="recent.length">

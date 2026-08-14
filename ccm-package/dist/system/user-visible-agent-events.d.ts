@@ -2,7 +2,7 @@ import { type ToolDisplayDetailV1 } from "./tool-display-projection";
 import { type AssistantProgressKind } from "./assistant-progress";
 export declare const USER_VISIBLE_AGENT_EVENT_SCHEMA: "ccm-user-visible-agent-event-v1";
 export declare const USER_VISIBLE_AGENT_RESULT_SCHEMA: "ccm-user-visible-agent-result-v1";
-export type UserVisibleAgentEventType = "turn_started" | "thinking_status" | "assistant_text_delta" | "assistant_progress" | "requirement_plan" | "tool_started" | "tool_progress" | "tool_completed" | "tool_failed" | "agent_started" | "agent_progress" | "agent_completed" | "agent_failed" | "permission_required" | "clarification_required" | "context_compacted" | "result";
+export type UserVisibleAgentEventType = "turn_started" | "thinking_status" | "assistant_text_delta" | "assistant_progress" | "model_activity" | "requirement_plan" | "tool_started" | "tool_progress" | "tool_completed" | "tool_failed" | "agent_started" | "agent_progress" | "agent_completed" | "agent_failed" | "permission_required" | "clarification_required" | "context_compacted" | "result";
 export type UserVisibleAgentEvent = {
     schema: typeof USER_VISIBLE_AGENT_EVENT_SCHEMA;
     eventId: string;
@@ -86,6 +86,29 @@ export type UserVisibleAgentEvent = {
             source?: "agent_reported" | "runtime_structured" | "system_observed";
             confidence?: "declared" | "observed";
             sourceEventChecksum?: string;
+        };
+        modelActivity?: {
+            state: "started" | "waiting" | "retrying" | "streaming" | "completed" | "failed";
+            phase: "understanding" | "tool_decision" | "tool_result_review" | "verification" | "final_synthesis";
+            modelCallIndex: number;
+            retryAttempt?: number;
+            startedAt: string;
+            firstDeltaAt?: string;
+            safeLabel: string;
+            contentStored: false;
+        };
+        liveProgress?: {
+            phase: "starting" | "running" | "testing" | "building" | "finishing" | "retrying";
+            safeSummary: string;
+            completed?: number;
+            total?: number;
+            updatedAt: string;
+            contentStored: false;
+        };
+        stream?: {
+            sequence: number;
+            final: boolean;
+            checksum?: string;
         };
         availableActions?: UserVisibleAgentAction[];
         replayLink?: {

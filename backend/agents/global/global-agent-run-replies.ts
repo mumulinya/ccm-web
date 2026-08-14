@@ -1,6 +1,8 @@
+import * as crypto from "crypto";
 import { GLOBAL_DISPATCH_TOOL_NAMES } from "./global-agent-run-store";
 import { sanitizeMainAgentRoleLanguage, sanitizeMainAgentUserFacingText } from "../user-facing-text";
 import type { GlobalAgentDecision, GlobalAgentLoopRuntime, GlobalAgentRun, GlobalAgentRunStatus, GlobalAgentToolRisk } from "./loop";
+import { buildPrePlanClarification } from "../pre-plan-clarification";
 
 export function nowIso(runtime?: GlobalAgentLoopRuntime) {
   return new Date(runtime?.now ? runtime.now() : Date.now()).toISOString();
@@ -158,6 +160,26 @@ export function buildGlobalClarificationSummary(input: { run: GlobalAgentRun; qu
     input.decision?.reason,
   ].filter(Boolean);
   const reason = compactGlobalUserSummaryText(rawReasons.join("；"), "目标、范围或授权信息还不够明确。", 320);
+  const structuredQuestions = input.decision?.structuredClarificationQuestions
+    || input.decision?.structured_clarification_questions
+    || input.decision?.workflowDecision?.structuredClarificationQuestions
+    || (input.run as any).workflow_decision?.structuredClarificationQuestions
+    || (input.run as any).workflowDecision?.structuredClarificationQuestions
+    || [];
+  const prePlanClarification = buildPrePlanClarification({
+    scope: "global",
+    scopeId: "global",
+    exactSessionId: input.run.session_id,
+    anchorMessageId: input.run.id,
+    id: `preplan:global:${input.run.id}`,
+    generation: Number((input.run as any).generation || 0),
+    revision: Number((input.run as any).revision || 1),
+    round: Math.max(1, Math.min(2, Number((input.run as any).resume_count || 0) + 1)),
+    questions: structuredQuestions,
+    fallbackQuestions: structuredQuestions.length ? [] : [question],
+    headline: reason,
+    originalRequestChecksum: crypto.createHash("sha256").update(String(input.run.user_message || "")).digest("hex"),
+  });
   return {
     schema: "ccm-global-main-agent-clarification-summary-v1",
     surface: "global",
@@ -173,6 +195,8 @@ export function buildGlobalClarificationSummary(input: { run: GlobalAgentRun; qu
       "说明你希望看到的验收结果：例如改动文件、验证命令或最终效果。",
     ],
     next_action: "你回复后，我会沿用同一个运行继续规划、执行和总结。",
+    pre_plan_clarification: prePlanClarification,
+    prePlanClarification,
     display_policy: {
       user_text_first: true,
       technical_default_collapsed: true,

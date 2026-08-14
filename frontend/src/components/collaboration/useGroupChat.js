@@ -256,13 +256,19 @@ export function useGroupChat(props, emit) {
     el.style.height = `${el.scrollHeight}px`
   }
   const messageFiles = ref([])
-  const messageMode = ref('conversation')
   const pendingGroupTaskInput = ref(null)
   const pendingGroupClarificationInput = ref(null)
   const isTaskSupplementMode = computed(() => !!pendingGroupTaskInput.value
     && pendingGroupTaskInput.value.groupId === currentGroup.value?.id)
   const isClarificationResponseMode = computed(() => !!pendingGroupClarificationInput.value
     && pendingGroupClarificationInput.value.groupId === currentGroup.value?.id)
+  // 普通消息统一交给主 Agent 做语义判断；只有精确的任务续接或澄清回复
+  // 才沿用原请求模式，避免已移除的旧模式选择残留到下一条消息。
+  const messageMode = computed(() => isTaskSupplementMode.value
+    ? 'project_task'
+    : isClarificationResponseMode.value
+      ? String(pendingGroupClarificationInput.value?.messageMode || 'conversation')
+      : 'conversation')
   const isDirectedGroupInputMode = computed(() => isTaskSupplementMode.value || isClarificationResponseMode.value)
   const groupComposerPlaceholder = computed(() => isTaskSupplementMode.value
     ? '补充当前任务需要的信息，发送后会沿用原任务继续执行和验收...'
@@ -271,7 +277,7 @@ export function useGroupChat(props, emit) {
       : '输入消息...（输入 / 打开命令中心）')
   const groupComposerSendLabel = computed(() => isStreaming.value
     ? '正在提交...'
-    : isTaskSupplementMode.value ? '提交并继续' : isClarificationResponseMode.value ? '提交补充' : '发送 ➤')
+    : isTaskSupplementMode.value ? '提交并继续' : isClarificationResponseMode.value ? '提交补充' : '发送')
   const cancelTaskSupplementInput = () => {
     pendingGroupTaskInput.value = null
     newMessage.value = ''
@@ -290,7 +296,6 @@ export function useGroupChat(props, emit) {
     }
     newMessage.value = ''
     messageFiles.value = []
-    messageMode.value = 'project_task'
     nextTick(focusGroupInput)
   }
   const beginGroupClarificationInput = (msg, { focus = true, clear = true } = {}) => {
@@ -309,7 +314,6 @@ export function useGroupChat(props, emit) {
       newMessage.value = ''
       messageFiles.value = []
     }
-    messageMode.value = pendingGroupClarificationInput.value.messageMode
     if (focus) nextTick(focusGroupInput)
     return true
   }
@@ -571,6 +575,7 @@ export function useGroupChat(props, emit) {
     stopGroupCurrentWork,
     drainGroupTurnQueue,
     guideGroupQueuedTurn,
+    resolveGroupQueuedRoute,
     submitGroupMessageWhileBusy,
     sendMessage,
   } = useGroupChatStream({
@@ -618,8 +623,6 @@ export function useGroupChat(props, emit) {
     pendingGroupTaskInput.value = null
     pendingGroupClarificationInput.value = null
     pendingDirectMemoryCommand.value = null
-    const originalMode = String(message.messageMode || message.message_mode || 'conversation')
-    messageMode.value = ['conversation', 'project_analysis', 'project_task'].includes(originalMode) ? originalMode : 'conversation'
     await nextTick()
     focusGroupInput()
     toast.info(hasMessageAttachments(message)
@@ -1007,7 +1010,7 @@ export function useGroupChat(props, emit) {
     handleKeydown, highlightMentions, updateCreateGroupProjectSelection,
     submitCreateGroup, submitRename, deleteGroup, clearGroupMessages, saveCurrentGroupConversationKnowledge,
     isStreaming, thinkingMessages, pendingGroupSendRetry, groupStreamController, activeGroupTaskId,
-    stoppingGroupTurn, groupTurnConversationId, groupTurnControl, stopGroupCurrentWork, drainGroupTurnQueue, guideGroupQueuedTurn,
+    stoppingGroupTurn, groupTurnConversationId, groupTurnControl, stopGroupCurrentWork, drainGroupTurnQueue, guideGroupQueuedTurn, resolveGroupQueuedRoute,
     submitGroupMessageWhileBusy, groupSendRetrySignature, sendMessage, editGroupUserMessage, handleGroupModelFailureAction, waitingCrossReply, pullNewMessages,
     logs, logFilter, logEventSource, logsResizeObserver, scrollLogsToBottom, loadLogs, startLogStream,
     stopLogStream, clearLogs, normalizeGroupTools, loadAvailableGroupTools, loadGroupTools, toggleGroupTool, updateGroupContextPolicy,

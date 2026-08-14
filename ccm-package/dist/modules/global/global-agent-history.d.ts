@@ -40,6 +40,7 @@ export declare function createGlobalAgentHistoryRuntime(deps: any): {
     getGlobalAgentConversationMessages: (sessionId: string) => any[];
     appendGlobalAgentConversationMessage: (sessionId: string, role: "user" | "assistant", content: string, source?: string, options?: {
         extractMemory?: boolean;
+        files?: any[];
     }) => void;
     scheduleGlobalSessionAutoTitle: (sessionId: string) => Promise<any>;
     resolveFeishuGlobalAgentSessionId: (payload: any, store?: any) => string;

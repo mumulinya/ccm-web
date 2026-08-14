@@ -39,6 +39,7 @@ const fs = __importStar(require("fs"));
 const readline = __importStar(require("readline"));
 const feishu_conversation_v2_1 = require("../modules/collaboration/feishu-conversation-v2");
 const internal_api_auth_1 = require("../modules/system/internal-api-auth");
+const feishu_inbound_attachments_1 = require("./feishu-inbound-attachments");
 const port = Number(process.env.CCM_PORT || process.argv.find((arg) => arg.startsWith("--port="))?.split("=")[1] || 3080);
 const baseUrl = `http://127.0.0.1:${port}`;
 const project = String(process.argv.find((arg) => arg.startsWith("--project="))?.slice("--project=".length) || "").trim();
@@ -96,9 +97,9 @@ function writeBatchAsync(messages) {
 function extractPrompt(params) {
     const prompt = params?.prompt || params?.content || params?.messages || [];
     if (typeof prompt === "string")
-        return { text: prompt.trim(), unsupported: [] };
+        return { ...(0, feishu_inbound_attachments_1.extractCcConnectInboundAttachmentPaths)(prompt), unsupported: [] };
     if (!Array.isArray(prompt))
-        return { text: "", unsupported: [] };
+        return { text: "", refs: [], unsupported: [] };
     const parts = [];
     const unsupported = [];
     const collect = (block) => {
@@ -128,7 +129,7 @@ function extractPrompt(params) {
     for (const item of prompt) {
         collect(item);
     }
-    return { text: parts.join("\n").trim(), unsupported: [...new Set(unsupported)] };
+    return { ...(0, feishu_inbound_attachments_1.extractCcConnectInboundAttachmentPaths)(parts.join("\n")), unsupported: [...new Set(unsupported)] };
 }
 function extractPlatformContext(params = {}) {
     const sources = [params, params?._meta, params?.metadata, params?.context, params?.channelContext, params?.channel_context].filter(Boolean);
@@ -194,7 +195,7 @@ function beginFeishuReactionFeedback(platformContext) {
         void started.then(() => postFeishuReactionFeedback("finish", platformContext, status));
     };
 }
-async function callGlobalAgent(text, sessionId = "default", messageId = "", platformContext = {}, onDelta) {
+async function callGlobalAgent(text, sessionId = "default", messageId = "", platformContext = {}, attachmentRefs = [], onDelta) {
     const controller = new AbortController();
     // 消息是否引导、排队或停止由 CCM 后端统一决定，适配层不能静默打断上一回合。
     inFlightRequests.set(sessionId, controller);
@@ -218,6 +219,7 @@ async function callGlobalAgent(text, sessionId = "default", messageId = "", plat
                     ...platformContext,
                     target_type: "global_agent",
                     source: "cc-connect-acp",
+                    cc_connect_attachment_refs: attachmentRefs,
                     stream: true,
                 }),
                 signal: controller.signal,
@@ -284,12 +286,27 @@ function projectReplyFromSse(payload) {
             continue;
         try {
             const event = JSON.parse(line.slice(5).trim());
-            if (event?.type === "chunk" && event.text)
-                chunks.push(String(event.text));
+            if (["chunk", "response_delta", "assistant_text_delta"].includes(String(event?.type || ""))) {
+                const delta = String(event.text || event.delta || event.content || "");
+                if (delta)
+                    chunks.push(delta);
+            }
             if (event?.type === "error")
-                error = String(event.text || event.error || "项目主 Agent 处理失败");
+                error = String(event.text || event.error || event.message || "项目主 Agent 处理失败");
+            if (event?.type === "route_required") {
+                fallback = [
+                    "这条消息可能与刚才的任务有关。",
+                    String(event?.turn?.routing?.reason || "请确认如何处理这条消息。"),
+                    event?.turn?.routing?.candidateTaskId ? "1. 继续原任务" : "1. 继续原任务（当前不可用）",
+                    "2. 作为新任务",
+                    "3. 仅回答问题",
+                    "请直接回复 1、2 或 3。",
+                ].join("\n");
+            }
+            if (event?.type === "result")
+                fallback = String(event.reply || event.run?.final_reply || event.run?.finalReply || event.message || fallback || "");
             if (event?.type === "done")
-                fallback = String(event.taskExperience?.final_summary || event.taskExperience?.finalSummary || event.message || fallback || "");
+                fallback = String(event.final_text || event.finalText || event.taskExperience?.final_summary || event.taskExperience?.finalSummary || event.message || fallback || "");
         }
         catch { }
     }
@@ -342,16 +359,26 @@ async function readProjectSseResponse(response, onDelta) {
         catch {
             return;
         }
-        if (event?.type === "chunk" && event.text) {
-            const delta = String(event.text);
+        if (["chunk", "response_delta", "assistant_text_delta"].includes(String(event?.type || "")) && (event.text || event.delta || event.content)) {
+            const delta = String(event.text || event.delta || event.content);
             chunks.push(delta);
             await onDelta?.(delta);
         }
         else if (event?.type === "error") {
-            failure = String(event.text || event.error || "项目主 Agent 处理失败");
+            failure = String(event.text || event.error || event.message || "项目主 Agent 处理失败");
+        }
+        else if (event?.type === "route_required") {
+            fallback = [
+                "这条消息可能与刚才的任务有关。",
+                String(event?.turn?.routing?.reason || "请确认如何处理这条消息。"),
+                event?.turn?.routing?.candidateTaskId ? "1. 继续原任务" : "1. 继续原任务（当前不可用）",
+                "2. 作为新任务",
+                "3. 仅回答问题",
+                "请直接回复 1、2 或 3。",
+            ].join("\n");
         }
         else if (event?.type === "done") {
-            fallback = String(event.taskExperience?.final_summary || event.taskExperience?.finalSummary || event.message || fallback || "");
+            fallback = String(event.final_text || event.finalText || event.taskExperience?.final_summary || event.taskExperience?.finalSummary || event.message || fallback || "");
         }
         else if (event?.type === "result") {
             fallback = String(event.reply || event.run?.final_reply || event.run?.finalReply || event.message || fallback || "");
@@ -379,7 +406,7 @@ async function readProjectSseResponse(response, onDelta) {
         throw new Error("项目主 Agent 未返回可展示内容");
     return reply;
 }
-async function callProjectAgent(text, sessionId = "default", messageId = "", platformContext = {}, onResolvedPlatformContext, onDelta) {
+async function callProjectAgent(text, sessionId = "default", messageId = "", platformContext = {}, attachmentRefs = [], onResolvedPlatformContext, onDelta) {
     const controller = new AbortController();
     inFlightRequests.set(sessionId, controller);
     let timeout = null;
@@ -416,7 +443,7 @@ async function callProjectAgent(text, sessionId = "default", messageId = "", pla
                 conversation_key_v2: String(resolvedTarget.conversation_key_v2 || ""),
             };
             onResolvedPlatformContext?.(resolvedPlatformContext);
-            const stableMessageId = String(platformContext.platform_message_id || platformContext.message_id || `acp:${sessionId}:${messageId}:${crypto.createHash("sha256").update(text).digest("hex").slice(0, 16)}`);
+            const stableMessageId = String(resolvedPlatformContext.platform_message_id || resolvedPlatformContext.message_id || `acp:${sessionId}:${messageId}:${crypto.createHash("sha256").update(text).digest("hex").slice(0, 16)}`);
             const inboundEnvelope = (0, feishu_conversation_v2_1.buildFeishuInboundEnvelopeV2)({
                 payload: { ...resolvedPlatformContext, message_id: stableMessageId },
                 targetType: "project_agent",
@@ -442,6 +469,7 @@ async function callProjectAgent(text, sessionId = "default", messageId = "", pla
                         project,
                         sessionId: projectSessionId,
                         message: text,
+                        cc_connect_attachment_refs: attachmentRefs,
                         source: "feishu",
                         target_type: "project_agent",
                         platform_context: { ...resolvedPlatformContext, platform_message_id: stableMessageId, feishu_inbound_envelope: inboundEnvelope, feishu_origin_receipt: originReceipt },
@@ -584,12 +612,12 @@ async function handleRequest(message) {
             const prompt = extractPrompt(params);
             const text = prompt.text;
             const platformContext = extractPlatformContext(params);
-            process.stderr.write(`[CCM control bot ACP] prompt received mode=${projectMode ? "project" : "global"} session=${sessionId} request=${String(id ?? "")} chars=${text.length} unsupported=${prompt.unsupported.length}\n`);
+            process.stderr.write(`[CCM control bot ACP] prompt received mode=${projectMode ? "project" : "global"} session=${sessionId} request=${String(id ?? "")} chars=${text.length} attachments=${prompt.refs.length} unsupported=${prompt.unsupported.length}\n`);
             if (prompt.unsupported.length > 0) {
                 await completeTurnWithText(id, sessionId, "我看到了附件，但当前飞书控制通道还不能可靠读取附件内容。请把任务目标和附件中的关键信息用文字发给我，我会继续处理。附件不会被当作已读取或已验收。");
                 return;
             }
-            if (!text) {
+            if (!text && prompt.refs.length === 0) {
                 await completeTurnWithText(id, sessionId, "请发送文字指令。");
                 return;
             }
@@ -602,9 +630,7 @@ async function handleRequest(message) {
                 let streamedReply = false;
                 try {
                     projectResult = projectMode
-                        ? await callProjectAgent(text, sessionId, String(id ?? ""), platformContext, resolvedContext => {
-                            finishReaction = beginFeishuReactionFeedback(resolvedContext);
-                        }, async (delta) => {
+                        ? await callProjectAgent(text, sessionId, String(id ?? ""), platformContext, prompt.refs, undefined, async (delta) => {
                             if (!delta)
                                 return;
                             streamedReply = true;
@@ -612,7 +638,7 @@ async function handleRequest(message) {
                         })
                         : null;
                     reply = projectResult?.reply
-                        || await callGlobalAgent(text, sessionId, String(id ?? ""), platformContext, async (delta) => {
+                        || await callGlobalAgent(text, sessionId, String(id ?? ""), platformContext, prompt.refs, async (delta) => {
                             if (!delta)
                                 return;
                             streamedReply = true;

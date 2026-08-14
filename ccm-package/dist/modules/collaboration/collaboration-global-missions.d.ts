@@ -32,6 +32,7 @@ export declare function controlGlobalDevelopmentMission(id: string, operation: s
     success: boolean;
     status: number;
     error: string;
+    checks?: undefined;
 } | {
     mission: any;
     children: any[];
@@ -56,6 +57,12 @@ export declare function controlGlobalDevelopmentMission(id: string, operation: s
     };
     status?: undefined;
     error?: undefined;
+    checks?: undefined;
+} | {
+    success: boolean;
+    status: number;
+    error: any;
+    checks: any;
 } | {
     mission: any;
     children: any[];
@@ -63,6 +70,7 @@ export declare function controlGlobalDevelopmentMission(id: string, operation: s
     operation: string;
     status?: undefined;
     error?: undefined;
+    checks?: undefined;
 }>;
 export declare function buildGlobalMissionTargetHandoff(input: {
     parent: any;

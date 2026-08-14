@@ -19,6 +19,7 @@ const globalAgentRuntime = read('backend/modules/global/global-agent-agentic-run
 const projectCompaction = read('backend/modules/projects/project-session-compaction.ts')
 const projectMainAgent = read('backend/modules/projects/project-main-agent.ts')
 const memoryCenterApi = read('backend/modules/knowledge/memory-control-center-api.ts')
+const collaborationRoutes = read('backend/modules/collaboration/collaboration-routes.ts')
 const contextSnapshot = read('backend/system/session-compaction-core.ts')
 const mainAgentToolRuntime = read('backend/tools/main-agent-tool-runtime.ts')
 const groupOrchestrator = read('backend/modules/collaboration/group-orchestrator-llm.ts')
@@ -38,13 +39,28 @@ const checks = {
   apiUsesExactScopeAndId: /memory-center\/scope\?scope=.*scopeId/.test(composable),
   lowFrequencyPolling: /15_000/.test(composable) && /Math\.max\(10_000/.test(composable),
   conversationRefreshIsDebounced: /refreshKey/.test(composable) && /scheduleRefresh/.test(composable),
-  composerReservesTextSpace: /has-context-usage/.test(composer) && /padding-right:\s*76px/.test(composer),
+  composerReservesTextSpace: /composer-footer-spacer/.test(composer)
+    && /composer-context-slot/.test(composer)
+    && /composer-inline-footer/.test(composer),
   globalExactSessionScope: /scope:\s*'global_session'/.test(globalAgent) && /`session:\$\{currentSessionId\.value\}`/.test(globalAgent),
   groupExactSessionScope: /scope:\s*'group'/.test(groupPanel) && /\$\{currentGroup\.value\.id\}::\$\{currentGroupSessionId\.value\}/.test(groupPanel),
   projectExactSessionScope: /scope:\s*'project_session'/.test(projectPanel) && /\$\{currentProject\.value\}::\$\{currentSession\.value\}/.test(projectPanel),
   allComposersRenderIndicator: globalAgent.includes('<SessionContextUsage')
     && groupTemplate.includes('<SessionContextUsage')
     && projectTemplate.includes('<SessionContextUsage'),
+  runtimeStatusCenterHasTwoViews: /activeTab === 'overview'/.test(component)
+    && /activeTab === 'context'/.test(component)
+    && /会话状态页签/.test(component),
+  runtimeStatusUsesExactConversation: /conversations\/runtime-status/.test(component)
+    && /exact_session_id/.test(component)
+    && /Cache-Control", "private, no-store"/.test(collaborationRoutes),
+  runtimeStatusCoversTrueUsageAndGit: /provider_reported/.test(component)
+    && /未提供/.test(component)
+    && /workspaceSummary/.test(component)
+    && /inspectProjectGit/.test(collaborationRoutes),
+  allComposersBindRuntimeIdentity: /scope="global"[\s\S]{0,180}:exact-session-id="currentSessionId/.test(globalAgent)
+    && /scope="group"[\s\S]{0,220}:exact-session-id="currentGroupSessionId/.test(groupTemplate)
+    && /scope="project"[\s\S]{0,220}:exact-session-id="currentSession/.test(projectTemplate),
   mobileDetailsAreClickable: /detailsOpen/.test(component) && /aria-expanded/.test(component) && /@click\.stop="toggleDetails"/.test(component),
   sourceAndFreshnessVisible: /tokenSourceLabel/.test(component) && /tokenUpdatedAt/.test(component) && /更新于/.test(component),
   actualBackendActivityExposed: /getGlobalAgentSessionCompactionActivity/.test(globalMemory)
@@ -75,8 +91,8 @@ const checks = {
   providerRemainderIsTransparent: /Provider 其余上下文/.test(component) && /历史 Provider 总量（无分项快照）/.test(component),
   latestPayloadAndConversationAreDistinguished: /最近完整模型载荷/.test(component)
     && /会话正文/.test(component)
-    && /System、Rules 与已启用工具定义属于稳定上下文/.test(component)
-    && /Skill 正文、知识、源码和工具结果按需加载/.test(component),
+    && /系统规则和已启用工具保持可用/.test(component)
+    && /Skill、知识、源码及工具结果按需加载/.test(component),
   deferredToolsRemainVisibleWithoutInflatingUsage: (/授权可用目录/.test(component)
     || /工具上下文/.test(component))
     && /逐项按真实载荷与调用回执统计/.test(component)

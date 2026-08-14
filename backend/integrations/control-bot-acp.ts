@@ -11,6 +11,10 @@ import {
   updateFeishuInboundReceipt,
 } from "../modules/collaboration/feishu-conversation-v2";
 import { buildInternalApiHeaders } from "../modules/system/internal-api-auth";
+import {
+  extractCcConnectInboundAttachmentPaths,
+  type CcConnectAttachmentPathRef,
+} from "./feishu-inbound-attachments";
 
 const port = Number(process.env.CCM_PORT || process.argv.find((arg) => arg.startsWith("--port="))?.split("=")[1] || 3080);
 const baseUrl = `http://127.0.0.1:${port}`;
@@ -72,8 +76,8 @@ function writeBatchAsync(messages: any[]) {
 
 function extractPrompt(params: any) {
   const prompt = params?.prompt || params?.content || params?.messages || [];
-  if (typeof prompt === "string") return { text: prompt.trim(), unsupported: [] as string[] };
-  if (!Array.isArray(prompt)) return { text: "", unsupported: [] as string[] };
+  if (typeof prompt === "string") return { ...extractCcConnectInboundAttachmentPaths(prompt), unsupported: [] as string[] };
+  if (!Array.isArray(prompt)) return { text: "", refs: [] as CcConnectAttachmentPathRef[], unsupported: [] as string[] };
   const parts: string[] = [];
   const unsupported: string[] = [];
   const collect = (block: any) => {
@@ -100,7 +104,7 @@ function extractPrompt(params: any) {
   for (const item of prompt) {
     collect(item);
   }
-  return { text: parts.join("\n").trim(), unsupported: [...new Set(unsupported)] };
+  return { ...extractCcConnectInboundAttachmentPaths(parts.join("\n")), unsupported: [...new Set(unsupported)] };
 }
 
 function extractPlatformContext(params: any = {}) {
@@ -175,6 +179,7 @@ async function callGlobalAgent(
   sessionId = "default",
   messageId = "",
   platformContext: any = {},
+  attachmentRefs: CcConnectAttachmentPathRef[] = [],
   onDelta?: (delta: string) => Promise<void> | void,
 ) {
   const controller = new AbortController();
@@ -200,6 +205,7 @@ async function callGlobalAgent(
           ...platformContext,
           target_type: "global_agent",
           source: "cc-connect-acp",
+          cc_connect_attachment_refs: attachmentRefs,
           stream: true,
         }),
         signal: controller.signal,
@@ -258,9 +264,23 @@ function projectReplyFromSse(payload: string) {
     if (!line.startsWith("data:")) continue;
     try {
       const event = JSON.parse(line.slice(5).trim());
-      if (event?.type === "chunk" && event.text) chunks.push(String(event.text));
-      if (event?.type === "error") error = String(event.text || event.error || "项目主 Agent 处理失败");
-      if (event?.type === "done") fallback = String(event.taskExperience?.final_summary || event.taskExperience?.finalSummary || event.message || fallback || "");
+      if (["chunk", "response_delta", "assistant_text_delta"].includes(String(event?.type || ""))) {
+        const delta = String(event.text || event.delta || event.content || "");
+        if (delta) chunks.push(delta);
+      }
+      if (event?.type === "error") error = String(event.text || event.error || event.message || "项目主 Agent 处理失败");
+      if (event?.type === "route_required") {
+        fallback = [
+          "这条消息可能与刚才的任务有关。",
+          String(event?.turn?.routing?.reason || "请确认如何处理这条消息。"),
+          event?.turn?.routing?.candidateTaskId ? "1. 继续原任务" : "1. 继续原任务（当前不可用）",
+          "2. 作为新任务",
+          "3. 仅回答问题",
+          "请直接回复 1、2 或 3。",
+        ].join("\n");
+      }
+      if (event?.type === "result") fallback = String(event.reply || event.run?.final_reply || event.run?.finalReply || event.message || fallback || "");
+      if (event?.type === "done") fallback = String(event.final_text || event.finalText || event.taskExperience?.final_summary || event.taskExperience?.finalSummary || event.message || fallback || "");
     } catch {}
   }
   const reply = chunks.join("").trim() || fallback.trim();
@@ -299,14 +319,23 @@ async function readProjectSseResponse(response: any, onDelta?: (delta: string) =
     if (!dataText) return;
     let event: any = null;
     try { event = JSON.parse(dataText); } catch { return; }
-    if (event?.type === "chunk" && event.text) {
-      const delta = String(event.text);
+    if (["chunk", "response_delta", "assistant_text_delta"].includes(String(event?.type || "")) && (event.text || event.delta || event.content)) {
+      const delta = String(event.text || event.delta || event.content);
       chunks.push(delta);
       await onDelta?.(delta);
     } else if (event?.type === "error") {
-      failure = String(event.text || event.error || "项目主 Agent 处理失败");
+      failure = String(event.text || event.error || event.message || "项目主 Agent 处理失败");
+    } else if (event?.type === "route_required") {
+      fallback = [
+        "这条消息可能与刚才的任务有关。",
+        String(event?.turn?.routing?.reason || "请确认如何处理这条消息。"),
+        event?.turn?.routing?.candidateTaskId ? "1. 继续原任务" : "1. 继续原任务（当前不可用）",
+        "2. 作为新任务",
+        "3. 仅回答问题",
+        "请直接回复 1、2 或 3。",
+      ].join("\n");
     } else if (event?.type === "done") {
-      fallback = String(event.taskExperience?.final_summary || event.taskExperience?.finalSummary || event.message || fallback || "");
+      fallback = String(event.final_text || event.finalText || event.taskExperience?.final_summary || event.taskExperience?.finalSummary || event.message || fallback || "");
     } else if (event?.type === "result") {
       fallback = String(event.reply || event.run?.final_reply || event.run?.finalReply || event.message || fallback || "");
     }
@@ -335,6 +364,7 @@ async function callProjectAgent(
   sessionId = "default",
   messageId = "",
   platformContext: any = {},
+  attachmentRefs: CcConnectAttachmentPathRef[] = [],
   onResolvedPlatformContext?: (context: any) => void,
   onDelta?: (delta: string) => Promise<void> | void,
 ) {
@@ -372,7 +402,7 @@ async function callProjectAgent(
         conversation_key_v2: String(resolvedTarget.conversation_key_v2 || ""),
       };
       onResolvedPlatformContext?.(resolvedPlatformContext);
-      const stableMessageId = String(platformContext.platform_message_id || platformContext.message_id || `acp:${sessionId}:${messageId}:${crypto.createHash("sha256").update(text).digest("hex").slice(0, 16)}`);
+      const stableMessageId = String(resolvedPlatformContext.platform_message_id || resolvedPlatformContext.message_id || `acp:${sessionId}:${messageId}:${crypto.createHash("sha256").update(text).digest("hex").slice(0, 16)}`);
       const inboundEnvelope = buildFeishuInboundEnvelopeV2({
         payload: { ...resolvedPlatformContext, message_id: stableMessageId },
         targetType: "project_agent",
@@ -398,6 +428,7 @@ async function callProjectAgent(
             project,
             sessionId: projectSessionId,
             message: text,
+            cc_connect_attachment_refs: attachmentRefs,
             source: "feishu",
             target_type: "project_agent",
             platform_context: { ...resolvedPlatformContext, platform_message_id: stableMessageId, feishu_inbound_envelope: inboundEnvelope, feishu_origin_receipt: originReceipt },
@@ -541,12 +572,12 @@ async function handleRequest(message: any) {
       const prompt = extractPrompt(params);
       const text = prompt.text;
       const platformContext = extractPlatformContext(params);
-      process.stderr.write(`[CCM control bot ACP] prompt received mode=${projectMode ? "project" : "global"} session=${sessionId} request=${String(id ?? "")} chars=${text.length} unsupported=${prompt.unsupported.length}\n`);
+      process.stderr.write(`[CCM control bot ACP] prompt received mode=${projectMode ? "project" : "global"} session=${sessionId} request=${String(id ?? "")} chars=${text.length} attachments=${prompt.refs.length} unsupported=${prompt.unsupported.length}\n`);
       if (prompt.unsupported.length > 0) {
         await completeTurnWithText(id, sessionId, "我看到了附件，但当前飞书控制通道还不能可靠读取附件内容。请把任务目标和附件中的关键信息用文字发给我，我会继续处理。附件不会被当作已读取或已验收。");
         return;
       }
-      if (!text) {
+      if (!text && prompt.refs.length === 0) {
         await completeTurnWithText(id, sessionId, "请发送文字指令。");
         return;
       }
@@ -559,16 +590,14 @@ async function handleRequest(message: any) {
         let streamedReply = false;
         try {
           projectResult = projectMode
-            ? await callProjectAgent(text, sessionId, String(id ?? ""), platformContext, resolvedContext => {
-                finishReaction = beginFeishuReactionFeedback(resolvedContext);
-              }, async delta => {
+            ? await callProjectAgent(text, sessionId, String(id ?? ""), platformContext, prompt.refs, undefined, async delta => {
                 if (!delta) return;
                 streamedReply = true;
                 await sendTextUpdate(sessionId, delta);
               })
             : null;
           reply = projectResult?.reply
-            || await callGlobalAgent(text, sessionId, String(id ?? ""), platformContext, async delta => {
+            || await callGlobalAgent(text, sessionId, String(id ?? ""), platformContext, prompt.refs, async delta => {
               if (!delta) return;
               streamedReply = true;
               await sendTextUpdate(sessionId, delta);
