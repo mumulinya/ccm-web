@@ -34,7 +34,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.resolveGroupModelRecovery = resolveGroupModelRecovery;
+exports.runGroupModelRecoverySelfTest = exports.resolveGroupModelRecovery = exports.isGroupModelRecoveryContinuePhrase = void 0;
 exports.compactGroupLiveText = compactGroupLiveText;
 exports.groupLiveFlag = groupLiveFlag;
 exports.resolveExplicitGroupContinuationTask = resolveExplicitGroupContinuationTask;
@@ -67,71 +67,31 @@ const group_memory_index_1 = require("./group-memory-index");
 const workflow_decision_1 = require("../../agents/workflow-decision");
 const group_session_model_context_1 = require("./group-session-model-context");
 const user_visible_agent_events_1 = require("../../system/user-visible-agent-events");
+const group_presented_plan_1 = require("./group-presented-plan");
+const group_clarification_attach_1 = require("./group-clarification-attach");
 const conversation_turn_control_1 = require("../../agents/conversation-turn-control");
 const conversation_message_routing_1 = require("../../agents/conversation-message-routing");
-function resolveGroupModelRecovery(messages = [], input = {}) {
-    const requestedId = String(input?.resumeMessageId || input?.resume_message_id || "").trim();
-    // Free-form text, including “继续”, must pass through the main Agent's
-    // semantic routing. Only the explicit recovery control supplies an id.
-    if (!requestedId)
-        return null;
-    let failureIndex = requestedId
-        ? messages.findIndex((item) => String(item?.id || item?.message_id || "") === requestedId)
-        : -1;
-    if (failureIndex < 0) {
-        for (let index = messages.length - 1; index >= 0; index -= 1) {
-            const item = messages[index];
-            const runtime = String(item?.runtime || "").toLowerCase();
-            const recoveryState = String(item?.recovery?.state || "").toLowerCase();
-            if (item?.role === "assistant" && ["llm-error", "llm-not-configured"].includes(runtime)
-                && !["recovered", "cancelled"].includes(recoveryState)) {
-                failureIndex = index;
-                break;
-            }
-            if (item?.role === "assistant" && String(item?.content || "").trim())
-                break;
-        }
-    }
-    if (failureIndex < 0)
-        return null;
-    const failure = messages[failureIndex];
-    if (failure?.role !== "assistant" || !["llm-error", "llm-not-configured"].includes(String(failure?.runtime || "").toLowerCase()))
-        return null;
-    let originalUser = null;
-    const originalUserId = String(failure?.recovery?.originalUserMessageId || failure?.recovery?.original_user_message_id || "");
-    if (originalUserId)
-        originalUser = messages.find((item) => String(item?.id || "") === originalUserId);
-    if (!originalUser) {
-        for (let index = failureIndex - 1; index >= 0; index -= 1) {
-            if (messages[index]?.role === "user") {
-                originalUser = messages[index];
-                break;
-            }
-        }
-    }
-    if (!originalUser || !String(originalUser.content || "").trim())
-        return null;
-    const anchorMessageId = String(failure?.execution_anchor_message_id
-        || failure?.executionAnchorMessageId
-        || failure?.recovery?.anchorMessageId
-        || failure?.recovery?.anchor_message_id
-        || failure?.id).trim();
-    return {
-        failureMessageId: String(failure?.id || ""),
-        anchorMessageId,
-        originalUserMessageId: String(originalUser?.id || ""),
-        originalMessage: String(originalUser.content || "").trim(),
-        attempt: Math.max(2, Number(failure?.recovery?.attempt || 1) + 1),
-    };
-}
-function updateGroupModelRecoveryMessages(groupId, sessionId, anchorMessageId, state, patch = {}) {
+const group_model_recovery_1 = require("./group-model-recovery");
+var group_model_recovery_2 = require("./group-model-recovery");
+Object.defineProperty(exports, "isGroupModelRecoveryContinuePhrase", { enumerable: true, get: function () { return group_model_recovery_2.isGroupModelRecoveryContinuePhrase; } });
+Object.defineProperty(exports, "resolveGroupModelRecovery", { enumerable: true, get: function () { return group_model_recovery_2.resolveGroupModelRecovery; } });
+Object.defineProperty(exports, "runGroupModelRecoverySelfTest", { enumerable: true, get: function () { return group_model_recovery_2.runGroupModelRecoverySelfTest; } });
+function updateGroupModelRecoveryMessages(groupId, sessionId, anchorMessageId, state, patch = {}, failureMessageId = "") {
     if (!groupId || !sessionId || !anchorMessageId)
         return;
     const stored = (0, storage_1.getGroupMessages)(groupId, sessionId);
     let changed = false;
     const next = stored.map((item) => {
         const itemAnchor = String(item?.execution_anchor_message_id || item?.executionAnchorMessageId || item?.recovery?.anchorMessageId || item?.recovery?.anchor_message_id || item?.id || "");
-        if (item?.role !== "assistant" || !["llm-error", "llm-not-configured"].includes(String(item?.runtime || "").toLowerCase()) || itemAnchor !== anchorMessageId)
+        const itemId = String(item?.id || item?.message_id || "");
+        // A single anchor represents the logical request, not one retry.  When a
+        // recovery is in flight, update only the failure that the user selected;
+        // touching every historical failure with the same anchor makes stale
+        // bubbles look like the current attempt.
+        if (item?.role !== "assistant"
+            || !["llm-error", "llm-not-configured"].includes(String(item?.runtime || "").toLowerCase())
+            || itemAnchor !== anchorMessageId
+            || (failureMessageId && itemId !== failureMessageId))
             return item;
         changed = true;
         return { ...item, recovery: { ...(item.recovery || {}), state, ...patch } };
@@ -217,6 +177,8 @@ function buildGroupClarificationSummary(input) {
         || input.dispatchPolicy?.structured_clarification_questions
         || input.analysis?.structuredClarificationQuestions
         || input.analysis?.structured_clarification_questions
+        || input.analysis?.workflowDecision?.structuredClarificationQuestions
+        || input.analysis?.workflowDecision?.structured_clarification_questions
         || [];
     const scopeId = String(input.group?.id || input.group?.group_id || input.group?.name || "").trim();
     const exactSessionId = String(input.group?.exactSessionId || input.group?.session_id || input.group?.sessionId || "").trim();
@@ -229,8 +191,14 @@ function buildGroupClarificationSummary(input) {
         id: `preplan:group:${scopeId}:${anchorMessageId}`,
         questions: structuredQuestions,
         round: Math.max(1, Math.min(2, Number(input.round || 1))),
-        fallbackQuestions: structuredQuestions.length ? [] : [question],
+        fallbackQuestions: structuredQuestions.length ? [] : [{
+                label: question,
+                type: "single",
+                reason,
+                options: suggestions.map((item) => ({ label: item })),
+            }],
         headline: reason,
+        purpose: "mid_turn",
         originalRequestChecksum: crypto.createHash("sha256").update(String(input.userMessage || "")).digest("hex"),
     });
     return {
@@ -271,6 +239,13 @@ function runGroupClarificationSummarySelfTest() {
         answer_suggestions: summary.answer_suggestions,
         next_action: summary.next_action,
     });
+    const structured = buildGroupClarificationSummary({
+        group: { members: [{ project: "web-app" }] },
+        responseText: "我先确认 3 个关键范围。",
+        dispatchPolicy: { action: "ask_user", structuredClarificationQuestions: [{ label: "核销方式", type: "single", options: [{ label: "到店核销" }, { label: "线上核销" }] }] },
+        analysis: { workflowDecision: { structuredClarificationQuestions: [{ label: "核销方式" }] } },
+        coordinator: "coordinator",
+    });
     const checks = {
         schema: summary.schema === "ccm-group-main-agent-clarification-summary-v1",
         waitsForUser: summary.status === "waiting_user" && summary.status_label === "等待你回复",
@@ -278,6 +253,8 @@ function runGroupClarificationSummarySelfTest() {
         suggestionsVisible: summary.answer_suggestions.some((item) => item.includes("web-app")),
         todoHidden: summary.display_policy.show_todo === false,
         hidesProtocol: !GROUP_CLARIFICATION_INTERNAL_PATTERN.test(visibleText),
+        structuredCards: structured.prePlanClarification?.questions?.[0]?.label === "核销方式"
+            && structured.prePlanClarification?.questions?.[0]?.options?.some((item) => item.label === "到店核销"),
     };
     return { pass: Object.values(checks).every(Boolean), checks, summary };
 }
@@ -554,7 +531,7 @@ async function handleGroupLiveRoutesSendPreface(payload, uploadedFiles, ctx, dep
     }
     const clarificationContext = pendingClarification.context;
     const modelRecovery = !clarificationContext && !explicitContinuationTask
-        ? resolveGroupModelRecovery((0, storage_1.getGroupMessages)(group_id, groupSessionId), {
+        ? (0, group_model_recovery_1.resolveGroupModelRecovery)((0, storage_1.getGroupMessages)(group_id, groupSessionId), {
             message: userMessage,
             resumeMessageId: payload.resume_interruption_message_id || payload.resumeInterruptionMessageId,
         })
@@ -613,6 +590,8 @@ async function handleGroupLiveRoutesSendPreface(payload, uploadedFiles, ctx, dep
     }
     catch (error) {
         if (String(payload.resolved_route || payload.resolvedRoute || ""))
+            throw error;
+        if (recoverableCandidates.length === 0)
             throw error;
         const conversationId = `${group_id}:${groupSessionId}`;
         const conversationTurnId = String(payload.conversation_turn_id || payload.conversationTurnId || "");
@@ -796,7 +775,7 @@ async function handleGroupLiveRoutesSendPreface(payload, uploadedFiles, ctx, dep
     };
     (0, storage_1.appendGroupMessage)(group_id, userMsg);
     if (modelRecovery)
-        updateGroupModelRecoveryMessages(group_id, groupSessionId, modelRecovery.anchorMessageId, "retrying", { retryingAt: new Date().toISOString(), attempt: modelRecovery.attempt });
+        updateGroupModelRecoveryMessages(group_id, groupSessionId, modelRecovery.anchorMessageId, "retrying", { retryingAt: new Date().toISOString(), attempt: modelRecovery.attempt }, modelRecovery.failureMessageId);
     for (const member of targetMembers) {
         ctx.broadcastPetSpeech(member.project, { role: "user", text: userMessageForHistory, final: true, source: "group" });
     }
@@ -1505,7 +1484,16 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                     const recoveryAttempt = Math.max(1, Number(requestRecoveryAttempt || modelRecovery?.attempt || 1));
                     const visibleTurnId = String(requestTurnId || `${executionAnchorMessageId}:attempt:${recoveryAttempt}:${responseMessageId}`);
                     let coordinatorDeltaEmitted = false;
-                    writeSse(res, { type: "response_started", agent: coordinator.project });
+                    writeSse(res, {
+                        type: "response_started",
+                        agent: coordinator.project,
+                        executionAnchorMessageId,
+                        execution_anchor_message_id: executionAnchorMessageId,
+                        executionTurnId: visibleTurnId,
+                        execution_turn_id: visibleTurnId,
+                        executionAttempt: recoveryAttempt,
+                        execution_attempt: recoveryAttempt,
+                    });
                     const coordinatorResult = await (0, group_orchestrator_1.runGroupOrchestrator)({
                         group,
                         message: projectAnalysisRequest
@@ -1521,7 +1509,7 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                         mainAgentFirstTurnResult: taskIntent?.mainAgentFirstTurnResult || taskIntent?.coordinatorResult || null,
                         sharedFilesContext: [sharedFilesContext, projectAnalysisContext].filter(Boolean).join("\n\n"),
                         onDelta: delta => {
-                            if (!delta)
+                            if (!String(delta || "").trim())
                                 return;
                             coordinatorDeltaEmitted = true;
                             writeSse(res, {
@@ -1568,11 +1556,18 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                         } : null;
                         const rawPlanAssignments = normalizePlanAssignments(coordinatorResult.assignments || []);
                         const planAssignments = conversationalOnly || projectAnalysisRequest ? [] : rawPlanAssignments;
-                        const dispatchPolicy = projectAnalysisRequest
-                            ? { action: "project_analysis", reason: taskIntent.reason, nextStep: "已基于只读项目上下文回答用户" }
-                            : conversationalOnly
-                                ? { action: "answer", reason: taskIntent.reason, nextStep: "已按普通对话回复用户" }
-                                : (coordinatorResult.dispatchPolicy || null);
+                        const visiblePlan = (0, group_presented_plan_1.visibleGroupPresentedPlanFields)({
+                            projectAnalysis: !!projectAnalysisRequest,
+                            conversationalOnly,
+                            coordinationPlan: coordinatorResult.coordinationPlan || null,
+                            presentedPlan: coordinatorResult.presentedPlan || null,
+                        });
+                        const dispatchPolicy = (0, group_clarification_attach_1.resolveGroupLiveDispatchPolicy)({
+                            projectAnalysisRequest,
+                            conversationalOnly,
+                            taskIntent,
+                            coordinatorResult,
+                        });
                         const workflowMeta = getInitialWorkflowMeta(planAssignments, dispatchPolicy, "初始计划");
                         const mainAgentDecision = appendMainAgentDecisionTrace({
                             groupId: group_id,
@@ -1596,6 +1591,7 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                             reply: { kind: "assistant_message", messageId: responseMessageId, text: outputText },
                         });
                         const clarificationSummary = dispatchPolicy?.action === "ask_user"
+                            || coordinatorResult.mainAgentTurnDecision?.responseKind === "clarify"
                             ? buildGroupClarificationSummary({
                                 group: { ...group, exactSessionId: groupSessionId },
                                 userMessage: effectiveUserMessage,
@@ -1628,12 +1624,36 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                             pre_plan_clarification: clarificationSummary.pre_plan_clarification,
                         } : null;
                         applyMainAgentDecisionPetState(ctx, mainAgentDecision);
-                        writeSse(res, { type: "response_completed", agent: coordinator.project, final: true });
+                        writeSse(res, {
+                            type: "response_completed",
+                            agent: coordinator.project,
+                            final: true,
+                            messageId: responseMessageId,
+                            responseMessageId,
+                            response_message_id: responseMessageId,
+                            executionAnchorMessageId,
+                            execution_anchor_message_id: executionAnchorMessageId,
+                            executionTurnId: visibleTurnId,
+                            execution_turn_id: visibleTurnId,
+                            executionAttempt: recoveryAttempt,
+                            execution_attempt: recoveryAttempt,
+                        });
                         writeSse(res, {
                             type: "agent_done",
                             agent: coordinator.project,
                             text: outputText,
                             messageId: responseMessageId,
+                            responseMessageId,
+                            response_message_id: responseMessageId,
+                            executionTurnId: visibleTurnId,
+                            execution_turn_id: visibleTurnId,
+                            executionAttempt: recoveryAttempt,
+                            execution_attempt: recoveryAttempt,
+                            // Keep the short aliases for older projections while exposing
+                            // an unambiguous per-attempt identity to reconnecting clients.
+                            turnId: visibleTurnId,
+                            turn_id: visibleTurnId,
+                            attempt: recoveryAttempt,
                             assignments: planAssignments,
                             executionOrder: conversationalOnly ? "none" : (coordinatorResult.executionOrder || "parallel"),
                             runtime: coordinatorResult.runtime || "",
@@ -1642,7 +1662,9 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                             recovery,
                             executionAnchorMessageId,
                             dispatchPolicy,
-                            coordinationPlan: conversationalOnly ? null : (coordinatorResult.coordinationPlan || null),
+                            coordinationPlan: visiblePlan.coordinationPlan,
+                            presentedPlan: visiblePlan.presentedPlan,
+                            presented_plan: visiblePlan.presentedPlan,
                             workflow: workflowMeta,
                             mainAgentDecision,
                             clarificationSummary,
@@ -1665,8 +1687,19 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                             providerFailureTechnical,
                             recovery,
                             execution_anchor_message_id: executionAnchorMessageId,
+                            response_message_id: responseMessageId,
+                            responseMessageId,
+                            execution_turn_id: visibleTurnId,
+                            executionTurnId: visibleTurnId,
+                            turn_id: visibleTurnId,
+                            turnId: visibleTurnId,
+                            execution_attempt: recoveryAttempt,
+                            executionAttempt: recoveryAttempt,
+                            attempt: recoveryAttempt,
                             dispatchPolicy,
-                            coordinationPlan: conversationalOnly ? null : (coordinatorResult.coordinationPlan || null),
+                            coordinationPlan: visiblePlan.coordinationPlan,
+                            presentedPlan: visiblePlan.presentedPlan,
+                            presented_plan: visiblePlan.presentedPlan,
                             workflow: workflowMeta,
                             mainAgentDecision,
                             clarificationSummary,
@@ -1675,7 +1708,7 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                             clarification_context: clarificationContextRecord,
                         });
                         if (modelRecovery && !interrupted)
-                            updateGroupModelRecoveryMessages(group_id, groupSessionId, executionAnchorMessageId, "recovered", { recoveredAt: new Date().toISOString(), recoveredByMessageId: responseMessageId });
+                            updateGroupModelRecoveryMessages(group_id, groupSessionId, executionAnchorMessageId, "recovered", { recoveredAt: new Date().toISOString(), recoveredByMessageId: responseMessageId }, modelRecovery.failureMessageId);
                         if (clarificationContext)
                             resolveStoredGroupClarification(group_id, pendingClarification, userMsg.id, groupSessionId);
                         updateGroupMemory(group_id, {
@@ -1710,11 +1743,34 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                                 executionOrder: execOrder,
                             });
                         }
-                        writeSse(res, { type: "done", messageId: responseMessageId });
+                        writeSse(res, {
+                            type: "done",
+                            messageId: responseMessageId,
+                            responseMessageId,
+                            response_message_id: responseMessageId,
+                            executionAnchorMessageId,
+                            execution_anchor_message_id: executionAnchorMessageId,
+                            executionTurnId: visibleTurnId,
+                            execution_turn_id: visibleTurnId,
+                            executionAttempt: recoveryAttempt,
+                            execution_attempt: recoveryAttempt,
+                        });
                         res.end();
                     }
                     catch (err) {
-                        writeSse(res, { type: "error", text: err.message });
+                        writeSse(res, {
+                            type: "error",
+                            text: err.message,
+                            messageId: responseMessageId,
+                            responseMessageId,
+                            response_message_id: responseMessageId,
+                            executionAnchorMessageId,
+                            execution_anchor_message_id: executionAnchorMessageId,
+                            executionTurnId: visibleTurnId,
+                            execution_turn_id: visibleTurnId,
+                            executionAttempt: recoveryAttempt,
+                            execution_attempt: recoveryAttempt,
+                        });
                         try {
                             res.end();
                         }

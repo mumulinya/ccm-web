@@ -109,9 +109,10 @@ function projectCommunicationEvent(envelope: any, eventType: "agent_started" | "
         isParallel: !!parallelGroupId,
       },
       executionStage: {
-        kind: envelope.scope === "global"
-          ? "coordination_dispatch"
-          : testAgent ? "independent_verification" : "project_execution",
+        // The envelope may belong to a global conversation, but the worker is
+        // still the project child Agent that performs the implementation.
+        // Actual dispatch/coordination events keep their own coordination stage.
+        kind: testAgent ? "independent_verification" : "project_execution",
         stageRunId: envelope.messageId,
         ...(String(payload.reviewCycleId || payload.review_cycle_id || "").trim()
           ? { reviewCycleId: String(payload.reviewCycleId || payload.review_cycle_id) } : {}),

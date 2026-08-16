@@ -7,6 +7,8 @@ const props = defineProps({
   turns: { type: Array, default: () => [] },
   stopping: { type: Boolean, default: false },
   compact: { type: Boolean, default: false },
+  resolvingRouteId: { type: String, default: '' },
+  resolvingRouteChoice: { type: String, default: '' },
 })
 
 const emit = defineEmits(['stop', 'cancel', 'guide', 'retry', 'resolve-route'])
@@ -30,6 +32,7 @@ const statusLabel = turn => ({
 }[turn.status] || turn.status)
 const turnText = turn => turn.messagePreview || turn.message || (turn.attachmentRefs?.length || turn.attachments?.length ? '附件消息' : '待处理消息')
 const isDispatch = turn => turn?.kind === 'task_dispatch'
+const isResolvingRoute = turn => props.resolvingRouteId === turn?.id
 const toggleMenu = turn => { menuTurnId.value = menuTurnId.value === turn.id ? '' : turn.id }
 const runAndClose = (event, turn) => {
   menuTurnId.value = ''
@@ -66,9 +69,9 @@ watch(() => visibleTurns.value.length, count => {
             </div>
             <p v-if="turn.status === 'needs_route' && turn.routing?.reason" class="route-reason">{{ turn.routing.reason }}</p>
             <div v-if="turn.status === 'needs_route'" class="route-actions" aria-label="选择消息处理方式">
-              <button type="button" :disabled="turn.canMutate === false || !turn.routing?.candidateTaskId" :title="!turn.routing?.candidateTaskId ? '当前没有可安全恢复的原任务' : ''" @click="emit('resolve-route', turn, 'continue_original')">继续原任务</button>
-              <button type="button" class="primary" :disabled="turn.canMutate === false" @click="emit('resolve-route', turn, 'start_new_task')">作为新任务</button>
-              <button type="button" :disabled="turn.canMutate === false" @click="emit('resolve-route', turn, 'answer_only')">仅回答问题</button>
+              <button type="button" :disabled="isResolvingRoute(turn) || turn.canMutate === false || !turn.routing?.candidateTaskId" :title="!turn.routing?.candidateTaskId ? '当前没有可安全恢复的原任务' : ''" @click="emit('resolve-route', turn, 'continue_original')">{{ isResolvingRoute(turn) && resolvingRouteChoice === 'continue_original' ? '处理中…' : '继续原任务' }}</button>
+              <button type="button" class="primary" :disabled="isResolvingRoute(turn) || turn.canMutate === false" @click="emit('resolve-route', turn, 'start_new_task')">{{ isResolvingRoute(turn) && resolvingRouteChoice === 'start_new_task' ? '处理中…' : '作为新任务' }}</button>
+              <button type="button" :disabled="isResolvingRoute(turn) || turn.canMutate === false" @click="emit('resolve-route', turn, 'answer_only')">{{ isResolvingRoute(turn) && resolvingRouteChoice === 'answer_only' ? '处理中…' : '仅回答问题' }}</button>
             </div>
           </div>
         </div>

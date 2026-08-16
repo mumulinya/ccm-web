@@ -9,8 +9,12 @@ exports.UNIFIED_MODEL_MAX_ATTEMPTS = 5;
 exports.UNIFIED_MODEL_ATTEMPT_TIMEOUT_MS = 30_000;
 exports.UNIFIED_MODEL_TOTAL_TIMEOUT_MS = 180_000;
 const RETRY_PROFILES = {
-    interactive_first_turn: { schema: "ccm-model-retry-profile-v1", id: "interactive_first_turn", maxAttempts: 2, attemptTimeoutCapMs: 60_000, totalTimeoutMs: 60_000 },
-    agent_orchestration: { schema: "ccm-model-retry-profile-v1", id: "agent_orchestration", maxAttempts: 3, attemptTimeoutCapMs: 120_000, totalTimeoutMs: 120_000 },
+    // Fast HTTP failures still retry immediately. The attempt cap must also cover a
+    // healthy streaming completion: gpt-class replies of ~4k tokens commonly take
+    // 70–90s. The previous 60s cap aborted those in-flight streams and surfaced
+    // “模型这次没有完成回复”, while the provider continued and billed the full turn.
+    interactive_first_turn: { schema: "ccm-model-retry-profile-v1", id: "interactive_first_turn", maxAttempts: 2, attemptTimeoutCapMs: 180_000, totalTimeoutMs: 180_000 },
+    agent_orchestration: { schema: "ccm-model-retry-profile-v1", id: "agent_orchestration", maxAttempts: 3, attemptTimeoutCapMs: 180_000, totalTimeoutMs: 180_000 },
     long_running_task: { schema: "ccm-model-retry-profile-v1", id: "long_running_task", maxAttempts: 5, attemptTimeoutCapMs: 360_000, totalTimeoutMs: 360_000 },
     background_auxiliary: { schema: "ccm-model-retry-profile-v1", id: "background_auxiliary", maxAttempts: 1, attemptTimeoutCapMs: 30_000, totalTimeoutMs: 30_000 },
 };
@@ -202,6 +206,8 @@ async function runModelCallRetrySelfTest() {
         invalidJsonIsRetryable: shouldRetryModelCallError(new Error("模型未返回有效 JSON")),
         missingKeyIsPermanent: !shouldRetryModelCallError(new Error("主 Agent API Key 未配置")),
         emittedStreamDoesNotRetry: !shouldRetryModelCallError(Object.assign(new Error("socket closed"), { code: "CCM_MODEL_STREAM_INTERRUPTED_AFTER_DELTA" })),
+        interactiveFirstTurnHonorsConfiguredTimeout: resolveModelRetryProfile("interactive_first_turn", 120_000).attemptTimeoutMs === 120_000,
+        orchestrationHonorsConfiguredTimeout: resolveModelRetryProfile("agent_orchestration", 120_000).attemptTimeoutMs === 120_000,
     };
     return { pass: Object.values(checks).every(Boolean), checks };
 }

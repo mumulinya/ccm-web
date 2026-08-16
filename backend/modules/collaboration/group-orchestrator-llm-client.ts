@@ -92,7 +92,9 @@ export type LlmCallOptions = {
   signal?: AbortSignal;
   nativeTools?: import("../../system/provider-native-tools").ProviderToolDefinition[];
   nativeToolReference?: boolean;
+  nativeToolsRequired?: boolean;
   onProviderAgentTurn?: (turn: import("../../system/provider-native-tools").ProviderAgentTurn) => void;
+  onNativeToolCallReady?: (call: import("../../system/provider-native-tools").ProviderToolCall) => void;
 };
 
 function createLlmAbortContext(options: LlmCallOptions, timeoutMs: number) {
@@ -813,7 +815,7 @@ function withTransientModelBlocks(messagesInput: any[], blocks: TransientModelBl
 }
 
 function geminiPartsWithTransient(content: any, blocks: TransientModelBlock[]) {
-  const parts: any[] = [{ text: geminiContentText(content) }];
+  const parts: any[] = encodeGeminiContentParts(content);
   for (const block of blocks) {
     if (block.type === "text") parts.push({ text: block.text });
     else {
@@ -822,6 +824,41 @@ function geminiPartsWithTransient(content: any, blocks: TransientModelBlock[]) {
     }
   }
   return parts;
+}
+
+function encodeGeminiContentParts(content: any): any[] {
+  if (Array.isArray(content)) {
+    const parts = content.flatMap((item: any) => {
+      if (!item || typeof item !== "object") return String(item || "").trim() ? [{ text: String(item) }] : [];
+      if (item.functionCall || item.functionResponse || item.inlineData || item.text != null) return [item];
+      if (item.type === "functionCall" || item.type === "function_call") return [{ functionCall: item.functionCall || { name: item.name, args: item.args || item.arguments || {} } }];
+      if (item.type === "functionResponse" || item.type === "function_response") return [{ functionResponse: item.functionResponse || { name: item.name, response: item.response } }];
+      if (item.type === "text") return String(item.text || "").trim() ? [{ text: String(item.text) }] : [];
+      return [{ text: geminiContentText(item) }];
+    }).filter(Boolean);
+    return parts.length ? parts : [{ text: "" }];
+  }
+  if (content && typeof content === "object" && Array.isArray(content.parts)) return encodeGeminiContentParts(content.parts);
+  return [{ text: geminiContentText(content) }];
+}
+
+function encodeGeminiChatContent(message: any, transientBlocks: TransientModelBlock[] = []) {
+  const role = String(message?.role || "");
+  if (role === "assistant" || role === "model") {
+    return { role: "model", parts: transientBlocks.length ? geminiPartsWithTransient(message?.content, transientBlocks) : encodeGeminiContentParts(message?.content) };
+  }
+  if (role === "tool") {
+    return {
+      role: "user",
+      parts: [{
+        functionResponse: {
+          name: String(message?.name || message?.toolName || ""),
+          response: typeof message?.content === "string" ? { result: message.content } : (message?.content || { result: "" }),
+        },
+      }],
+    };
+  }
+  return { role: "user", parts: transientBlocks.length ? geminiPartsWithTransient(message?.content, transientBlocks) : encodeGeminiContentParts(message?.content) };
 }
 
 function recordAnthropicPromptCacheState(config: any, options: LlmCallOptions, body: any, headers: Record<string, string>) {
@@ -949,7 +986,7 @@ async function callOpenAiCompatibleChatOnce(config: any, options: LlmCallOptions
     if (streaming) {
       let content = "";
       let usage: any = null;
-      const turnAccumulator = createOpenAiStreamTurnAccumulator();
+      const turnAccumulator = createOpenAiStreamTurnAccumulator(options.onNativeToolCallReady);
       await consumeSseJson(response, event => {
         turnAccumulator.push(event);
         const choice = event?.choices?.[0];
@@ -964,7 +1001,7 @@ async function callOpenAiCompatibleChatOnce(config: any, options: LlmCallOptions
       const providerTurn = turnAccumulator.finish(normalizedUsage);
       options.onProviderAgentTurn?.(providerTurn);
       content = turnForLegacyJsonLoop(providerTurn);
-      if (!content.trim()) throw new Error("模型返回空响应");
+      if (!content.trim() && !providerTurn.toolCalls.length) throw new Error("模型返回空响应");
       reportTokenUsage(options, normalizedUsage);
       finishContextCache(options, cache.plan, { ok: true, usage: normalizedUsage, providerRequestId: providerRequestId(response), adapterEvidence: providerAdapterEvidence(cache) });
       return content;
@@ -975,7 +1012,7 @@ async function callOpenAiCompatibleChatOnce(config: any, options: LlmCallOptions
     const providerTurn = parseOpenAiAgentTurn(data, normalizedUsage);
     options.onProviderAgentTurn?.(providerTurn);
     const content = turnForLegacyJsonLoop(providerTurn);
-    if (!content.trim()) throw new Error("模型返回空响应");
+    if (!content.trim() && !providerTurn.toolCalls.length) throw new Error("模型返回空响应");
     reportTokenUsage(options, normalizedUsage);
     finishContextCache(options, cache.plan, { ok: true, usage: normalizedUsage, providerRequestId: providerRequestId(response), adapterEvidence: providerAdapterEvidence(cache) });
     return content;
@@ -1019,13 +1056,8 @@ async function callGeminiCompatibleChatOnce(config: any, options: LlmCallOptions
   const nonSystemMessages = cache.messages.filter((message: any) => String(message?.role || "") !== "system");
   const lastTransientMessageIndex = nonSystemMessages.length - 1;
   const contents = nonSystemMessages
-    .map((message: any, index: number) => ({
-      role: String(message?.role || "") === "assistant" ? "model" : "user",
-      parts: index === lastTransientMessageIndex
-        ? geminiPartsWithTransient(message?.content, cache.transientBlocks || [])
-        : [{ text: geminiContentText(message?.content) }],
-    }))
-    .filter((message: any) => message.parts.some((part: any) => part.inlineData || String(part.text || "").trim()));
+    .map((message: any, index: number) => encodeGeminiChatContent(message, index === lastTransientMessageIndex ? cache.transientBlocks || [] : []))
+    .filter((message: any) => message.parts.some((part: any) => part.inlineData || part.functionCall || part.functionResponse || String(part.text || "").trim()));
   const body = {
     ...(system ? { systemInstruction: { parts: [{ text: system }] } } : {}),
     contents,
@@ -1065,7 +1097,7 @@ async function callGeminiCompatibleChatOnce(config: any, options: LlmCallOptions
       const providerTurn = parseGeminiAgentTurn({ candidates: nativeEvents.flatMap(event => event?.candidates || []) }, normalizedUsage);
       options.onProviderAgentTurn?.(providerTurn);
       content = turnForLegacyJsonLoop(providerTurn);
-      if (!content.trim()) throw new Error("模型返回空响应");
+      if (!content.trim() && !providerTurn.toolCalls.length) throw new Error("模型返回空响应");
       reportTokenUsage(options, normalizedUsage);
       finishContextCache(options, cache.plan, { ok: true, usage: normalizedUsage, providerRequestId: providerRequestId(response), adapterEvidence: providerAdapterEvidence(cache) });
       return content;
@@ -1075,7 +1107,7 @@ async function callGeminiCompatibleChatOnce(config: any, options: LlmCallOptions
     const providerTurn = parseGeminiAgentTurn(data, normalizedUsage);
     options.onProviderAgentTurn?.(providerTurn);
     const content = turnForLegacyJsonLoop(providerTurn).trim();
-    if (!content) throw new Error("模型返回空响应");
+    if (!content && !providerTurn.toolCalls.length) throw new Error("模型返回空响应");
     reportTokenUsage(options, normalizedUsage);
     finishContextCache(options, cache.plan, { ok: true, usage: normalizedUsage, providerRequestId: providerRequestId(response), adapterEvidence: providerAdapterEvidence(cache) });
     return content;
@@ -1183,7 +1215,7 @@ async function callAnthropicCompatibleChatOnce(config: any, options: LlmCallOpti
     if (streaming) {
       let content = "";
       let usage: any = {};
-      const turnAccumulator = createAnthropicStreamTurnAccumulator();
+      const turnAccumulator = createAnthropicStreamTurnAccumulator(options.onNativeToolCallReady);
       await consumeSseJson(response, event => {
         turnAccumulator.push(event);
         if (event?.usage) {
@@ -1226,7 +1258,7 @@ async function callAnthropicCompatibleChatOnce(config: any, options: LlmCallOpti
       const providerTurn = turnAccumulator.finish(normalizedUsage);
       options.onProviderAgentTurn?.(providerTurn);
       content = turnForLegacyJsonLoop(providerTurn);
-      if (!content.trim()) throw new Error("模型返回空响应");
+      if (!content.trim() && !providerTurn.toolCalls.length) throw new Error("模型返回空响应");
       reportTokenUsage(options, normalizedUsage);
       finishContextCache(options, cache.plan, { ok: true, usage: normalizedUsage, providerRequestId: providerRequestId(response), adapterEvidence: cacheReferenceEditing });
       return content;
@@ -1270,7 +1302,7 @@ async function callAnthropicCompatibleChatOnce(config: any, options: LlmCallOpti
     const providerTurn = parseAnthropicAgentTurn(data, normalizedUsage);
     options.onProviderAgentTurn?.(providerTurn);
     const content = turnForLegacyJsonLoop(providerTurn).trim();
-    if (!content) throw new Error("模型返回空响应");
+    if (!content && !providerTurn.toolCalls.length) throw new Error("模型返回空响应");
     reportTokenUsage(options, normalizedUsage);
     finishContextCache(options, cache.plan, { ok: true, usage: normalizedUsage, providerRequestId: providerRequestId(response), adapterEvidence: cacheReferenceEditing });
     return content;
@@ -1323,6 +1355,11 @@ export async function callOpenAiCompatibleChat(config: any, options: LlmCallOpti
     catch (error: any) {
       if (!attemptOptions.nativeTools?.length || error?.code === "CCM_MODEL_STREAM_INTERRUPTED_AFTER_DELTA" || !/(unknown|unsupported|unrecognized|invalid).{0,80}(tools?|tool_choice|function)|(?:tools?|tool_choice|function).{0,80}(unknown|unsupported|unrecognized|invalid)/i.test(String(error?.message || error))) throw error;
       try { recordProviderNativeToolCapability(config, "openai", "unsupported", error); } catch {}
+      if (attemptOptions.nativeToolsRequired) {
+        const rejected: any = new Error("当前供应商不支持原生 tools，已退回 JSON 循环");
+        rejected.code = "CCM_NATIVE_TOOLS_UNSUPPORTED";
+        throw rejected;
+      }
       return callOpenAiCompatibleChatOnce(config, { ...attemptOptions, nativeTools: undefined, nativeToolReference: false, retry: false });
     }
   };
@@ -1339,6 +1376,11 @@ export async function callGeminiCompatibleChat(config: any, options: LlmCallOpti
     catch (error: any) {
       if (!attemptOptions.nativeTools?.length || error?.code === "CCM_MODEL_STREAM_INTERRUPTED_AFTER_DELTA" || !/(unknown|unsupported|unrecognized|invalid).{0,80}(tools?|function)|(?:tools?|function).{0,80}(unknown|unsupported|unrecognized|invalid)/i.test(String(error?.message || error))) throw error;
       try { recordProviderNativeToolCapability(config, "gemini", "unsupported", error); } catch {}
+      if (attemptOptions.nativeToolsRequired) {
+        const rejected: any = new Error("当前供应商不支持原生 tools，已退回 JSON 循环");
+        rejected.code = "CCM_NATIVE_TOOLS_UNSUPPORTED";
+        throw rejected;
+      }
       return callGeminiCompatibleChatOnce(config, { ...attemptOptions, nativeTools: undefined, nativeToolReference: false, retry: false });
     }
   };
@@ -1356,6 +1398,11 @@ export async function callAnthropicCompatibleChat(config: any, options: LlmCallO
     } catch (error: any) {
       if (attemptOptions.nativeTools?.length && error?.code !== "CCM_MODEL_STREAM_INTERRUPTED_AFTER_DELTA" && /(unknown|unsupported|unrecognized|invalid).{0,80}(tools?|defer_loading|tool_reference)|(?:tools?|defer_loading|tool_reference).{0,80}(unknown|unsupported|unrecognized|invalid)/i.test(String(error?.message || error))) {
         try { recordProviderNativeToolCapability(config, "anthropic", "unsupported", error); } catch {}
+        if (attemptOptions.nativeToolsRequired) {
+          const rejected: any = new Error("当前供应商不支持原生 tools，已退回 JSON 循环");
+          rejected.code = "CCM_NATIVE_TOOLS_UNSUPPORTED";
+          throw rejected;
+        }
         return callAnthropicCompatibleChatOnce(config, { ...attemptOptions, nativeTools: undefined, nativeToolReference: false, retry: false });
       }
       const nativePlan = getApiMicrocompactNativeApplyPlan(attemptOptions);
@@ -1449,6 +1496,37 @@ export async function callAnthropicCompatibleJson(config: any, options: LlmCallO
     if (usage) reportTokenUsage(options, usage);
     return parsed;
   }, resolveLlmRetryOptions(config, options, "Anthropic-compatible JSON model call"));
+}
+
+export const NATIVE_AGENT_TURN_MAX_TOKENS = 4096;
+
+function emptyNativeTurn(text = ""): import("../../system/provider-native-tools").ProviderAgentTurn {
+  return {
+    text: String(text || ""),
+    toolCalls: [],
+    toolReferences: [],
+    stopReason: "end_turn",
+    usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0, reported: false },
+  };
+}
+
+export async function callNativeAgentTurn(config: any, options: LlmCallOptions): Promise<import("../../system/provider-native-tools").ProviderAgentTurn> {
+  let captured: import("../../system/provider-native-tools").ProviderAgentTurn | null = null;
+  const merged: LlmCallOptions = {
+    ...options,
+    maxTokens: options.maxTokens || NATIVE_AGENT_TURN_MAX_TOKENS,
+    stream: options.stream !== false,
+    nativeToolsRequired: options.nativeToolsRequired !== false && !!options.nativeTools?.length,
+    onProviderAgentTurn: (turn) => {
+      captured = turn;
+      options.onProviderAgentTurn?.(turn);
+    },
+  };
+  const content = shouldUseAnthropic(config)
+    ? await callAnthropicCompatibleChat(config, merged)
+    : await callOpenAiCompatibleChat(config, merged);
+  if (captured) return captured;
+  return emptyNativeTurn(content);
 }
 
 export async function runLlmTokenUsageSelfTest() {

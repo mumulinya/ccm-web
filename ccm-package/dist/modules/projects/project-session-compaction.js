@@ -34,6 +34,8 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getProjectSessionCompactionActivity = getProjectSessionCompactionActivity;
+exports.listProjectSessionExecutionEvents = listProjectSessionExecutionEvents;
+exports.listProjectSessionHistoryMessages = listProjectSessionHistoryMessages;
 exports.appendProjectSessionExecutionEvent = appendProjectSessionExecutionEvent;
 exports.recordProjectSessionProviderUsage = recordProjectSessionProviderUsage;
 exports.scheduleProjectSessionMemoryExtraction = scheduleProjectSessionMemoryExtraction;
@@ -115,6 +117,33 @@ function persistSession(project, projectSessionId, value) {
 }
 function projectExecutionEvents(data) {
     return (0, session_execution_ledger_1.normalizeSessionExecutionEvents)(data?.execution_history || data?.executionHistory);
+}
+function listProjectSessionExecutionEvents(projectInput, projectSessionIdInput) {
+    try {
+        const project = (0, project_validation_1.validateProjectName)(projectInput);
+        const projectSessionId = (0, project_validation_1.validateSessionId)(projectSessionIdInput);
+        const file = sessionFile(project, projectSessionId);
+        if (!fs.existsSync(file))
+            return [];
+        return projectExecutionEvents(JSON.parse(fs.readFileSync(file, "utf8")));
+    }
+    catch {
+        return [];
+    }
+}
+function listProjectSessionHistoryMessages(projectInput, projectSessionIdInput) {
+    try {
+        const project = (0, project_validation_1.validateProjectName)(projectInput);
+        const projectSessionId = (0, project_validation_1.validateSessionId)(projectSessionIdInput);
+        const file = sessionFile(project, projectSessionId);
+        if (!fs.existsSync(file))
+            return [];
+        const data = JSON.parse(fs.readFileSync(file, "utf8"));
+        return (Array.isArray(data.history) ? data.history : []).filter((message) => ["user", "assistant"].includes(String(message?.role || "")));
+    }
+    catch {
+        return [];
+    }
 }
 function projectExecutionForMessages(data, messages) {
     return (0, session_execution_ledger_1.eventsAnchoredToMessages)(projectExecutionEvents(data), messages);

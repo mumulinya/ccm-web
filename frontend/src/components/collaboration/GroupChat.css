@@ -83,12 +83,14 @@
 .msg-meta { font-size: 10px; color: var(--text-muted); margin-top: 6px; font-family: 'Share Tech Mono', monospace; }
 .task-supplement-context {
   display: flex;
-  flex: 0 1 260px;
+  flex: 0 0 auto;
+  align-self: flex-start;
   min-width: 0;
-  height: 38px;
+  max-width: min(100%, 420px);
+  height: 32px;
   align-items: center;
   gap: 7px;
-  padding: 0 7px 0 10px;
+  padding: 0 6px 0 10px;
   border: 1px solid rgba(37, 99, 235, 0.18);
   border-radius: 8px;
   background: rgba(37, 99, 235, 0.06);

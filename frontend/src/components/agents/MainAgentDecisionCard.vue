@@ -1,6 +1,6 @@
 <script setup>
 import { computed } from 'vue'
-import { getDisplayStream, getStreamlinedToolSummary, getStreamlinedUserText, getTechnicalDetailSections, sanitizeUserFacingPlanStructure, sanitizeUserFacingPlanText, sanitizeUserFacingStructure } from '../../utils/agentDisplay.js'
+import { getDisplayStream, getStreamlinedToolSummary, getStreamlinedUserText, sanitizeUserFacingPlanStructure, sanitizeUserFacingPlanText, sanitizeUserFacingStructure } from '../../utils/agentDisplay.js'
 import { isQuietMainAgentDecision } from '../../composables/useMainAgentDisplay.js'
 
 const props = defineProps({
@@ -115,8 +115,12 @@ const shouldHideSimpleConversationPlan = computed(() => {
   const display = todoPlan.value?.display || {}
   const policy = todoPlan.value?.display_policy || todoPlan.value?.displayPolicy || {}
   if (policy.user_visible === false || policy.hide_for_ordinary_conversation === true || policy.hideForOrdinaryConversation === true) return true
-  if (props.decision?.mode !== 'conversation') return false
-  if (display.user_visible === true && display.hide_for_simple_conversation !== true) return false
+  const mode = String(props.decision?.mode || 'conversation').toLowerCase()
+  if (mode !== 'conversation' && mode !== 'project_analysis') return false
+  if (display.user_visible === true && display.hide_for_simple_conversation !== true && display.hide_for_ordinary_conversation !== true) {
+    const hasBlockingOrAction = blockedPermissions.value.length > 0 || planSteps.value.some(step => ['failed', 'needs_confirmation', 'reworking', 'reviewing', 'in_progress'].includes(step.status))
+    return !hasBlockingOrAction
+  }
   const hasBlockingOrAction = blockedPermissions.value.length > 0 || planSteps.value.some(step => ['failed', 'needs_confirmation', 'reworking', 'reviewing', 'in_progress'].includes(step.status))
   return display.user_visible === false || display.hide_for_simple_conversation === true || !hasBlockingOrAction
 })
@@ -259,10 +263,16 @@ const contextLabels = computed(() => {
 const nextStep = computed(() => displayPlanText(dispatchPolicy.value?.nextStep || (verify.value?.passed ? '已完成本轮回复' : '等待用户确认或补充信息'), '等待下一步。', 180))
 const reason = computed(() => dispatchPolicy.value?.reason || props.decision?.decision?.reason || modeInfo.value.summary)
 const publicHeaderNote = computed(() => modeInfo.value.summary)
-const rawJson = computed(() => JSON.stringify(props.decision || {}, null, 2))
 const displayStream = computed(() => getDisplayStream(props.decision))
 const workchain = computed(() => displayPlanStructure(displayStream.value?.workchain || props.decision?.workchain || null, '处理链路已整理。', 260))
 const workchainStages = computed(() => Array.isArray(workchain.value?.stages) ? workchain.value.stages : [])
+const showWorkchain = computed(() => {
+  if (!workchainStages.value.length) return false
+  const mode = String(props.decision?.mode || 'conversation').toLowerCase()
+  if (['conversation', 'project_analysis'].includes(mode)) return false
+  if (dispatchLaunchRows.value.length) return true
+  return ['project_task', 'delegation', 'followup', 'governance'].includes(mode)
+})
 const streamlinedText = computed(() => getStreamlinedUserText(props.decision, modeInfo.value.summary))
 const streamlinedToolSummary = computed(() => getStreamlinedToolSummary(props.decision, visibleActions.value.join('、')))
 const dispatchLaunchSummary = computed(() => sanitizeUserFacingPlanStructure(
@@ -271,7 +281,7 @@ const dispatchLaunchSummary = computed(() => sanitizeUserFacingPlanStructure(
     || displayStream.value?.dispatch_launch_summary
     || displayStream.value?.dispatchLaunchSummary
     || null,
-  { fallback: '派发信息已整理，技术细节已放入技术详情。', max: 260 }
+  { fallback: '派发信息已整理。', max: 260 }
 ))
 const dispatchLaunchRows = computed(() => Array.isArray(dispatchLaunchSummary.value?.rows)
   ? dispatchLaunchSummary.value.rows.map(row => ({
@@ -281,10 +291,6 @@ const dispatchLaunchRows = computed(() => Array.isArray(dispatchLaunchSummary.va
     reason: row.reason ? sanitizeUserFacingPlanText(row.reason, '安排原因已整理。', 180) : row.reason,
   }))
   : [])
-const technicalSections = computed(() => getTechnicalDetailSections(props.decision, {
-  trace_id: props.decision?.trace_id,
-  blockers: blockedPermissions.value.map(item => item.reason || item.action_id),
-}))
 const decisionExplanation = computed(() => {
   if (blockedPermissions.value.length) return `需要确认：${blockedPermissions.value.map(p => displayPlanText(p.reason || actionLabels[p.action_id] || p.action_id, '确认项已整理。', 120)).join('；')}`
   if (!selectedActions.value.includes('dispatch_child_agent') && props.decision?.mode === 'conversation') return '没有安排：这轮是普通对话，我只回复用户，不创建任务。'
@@ -300,16 +306,6 @@ const userSummary = computed(() => {
   if (props.decision?.mode === 'project_analysis') return '已判断为只读项目分析，只读取必要上下文并回答，不派发开发任务。'
   return decisionExplanation.value || modeInfo.value.summary
 })
-const actionRows = computed(() => selectedActions.value.map(id => {
-  const permission = permissions.value.find(item => item.action_id === id) || {}
-  return {
-    id,
-    label: actionLabels[id] || id,
-    allowed: permission.allowed !== false,
-    risk: permission.risk || 'safe',
-    reason: permission.reason || '',
-  }
-}))
 </script>
 
 <template>
@@ -352,7 +348,7 @@ const actionRows = computed(() => selectedActions.value.map(id => {
       </div>
       <small v-if="dispatchLaunchSummary.next_action" class="dispatch-launch-next">下一步：{{ dispatchLaunchSummary.next_action }}</small>
     </div>
-    <div v-if="workchainStages.length" class="decision-workchain" aria-label="处理链路">
+    <div v-if="showWorkchain" class="decision-workchain" aria-label="处理链路">
       <div v-for="stage in workchainStages" :key="stage.id" :class="['workchain-stage', stage.status]">
         <span>{{ stage.label }}</span>
         <small>{{ loopStatusText(stage.status) }}</small>
@@ -415,81 +411,6 @@ const actionRows = computed(() => selectedActions.value.map(id => {
       </ol>
       <small v-if="hiddenPlanCount" class="plan-hidden-summary">还有 {{ hiddenPlanCount }} 个步骤，可在任务详情中继续查看。</small>
     </div>
-
-    <details class="decision-technical">
-      <summary>技术详情</summary>
-
-      <div class="tech-row">
-        <span>处理方式</span>
-        <code>{{ modeInfo.label }}{{ decision.mode ? ` · ${decision.mode}` : '' }}</code>
-      </div>
-
-      <div v-if="loopStages.length" class="decision-loop">
-        <div class="loop-head">
-          <strong>内部工作循环</strong>
-          <span>{{ internalLoop.current_label || internalLoop.current_stage }}</span>
-        </div>
-        <div class="loop-rail">
-          <div v-for="stage in loopStages" :key="stage.id" :class="['loop-stage', stage.status]">
-            <i>{{ stage.label }}</i>
-            <small>{{ loopStatusText(stage.status) }}</small>
-          </div>
-        </div>
-        <div v-if="!compact" class="loop-details">
-          <div v-for="stage in loopStages" :key="`detail-${stage.id}`" class="loop-detail-row">
-            <strong>{{ stage.title }}</strong>
-            <span>{{ stage.tool_choice }}</span>
-            <small v-if="stage.evidence?.length">{{ stage.evidence.join('；') }}</small>
-          </div>
-        </div>
-      </div>
-
-      <div class="decision-grid">
-        <div>
-          <span>读取内容</span>
-          <strong>{{ contextLabels.length ? contextLabels.join('、') : '无额外读取' }}</strong>
-        </div>
-        <div>
-          <span>本轮动作</span>
-          <strong>{{ visibleActions.join(' → ') }}</strong>
-        </div>
-        <div>
-          <span>权限判断</span>
-          <strong v-if="blockedPermissions.length" class="warn-text">{{ blockedPermissions.map(p => actionLabels[p.action_id] || p.action_id).join('、') }} 需要确认</strong>
-          <strong v-else>{{ allowedWrites.length ? '执行动作已获得当前消息授权' : '只读/安全动作' }}</strong>
-        </div>
-        <div>
-          <span>决策说明</span>
-          <strong>{{ decisionExplanation }}</strong>
-        </div>
-        <div>
-          <span>下一步</span>
-          <strong>{{ nextStep }}</strong>
-        </div>
-      </div>
-
-      <div v-if="technicalSections.length" class="technical-sections">
-        <section v-for="section in technicalSections" :key="section.id">
-          <strong>{{ section.title }}</strong>
-          <div v-for="item in section.items" :key="`${section.id}-${item.label}-${item.value}`" class="tech-row">
-            <span>{{ item.label }}</span>
-            <code>{{ item.value }}</code>
-          </div>
-        </section>
-      </div>
-
-      <div class="tech-row"><span>执行记录</span><code>{{ decision.trace_id ? '已关联' : '无' }}</code></div>
-      <div class="tech-row"><span>动作</span><code>{{ selectedActions.join(', ') }}</code></div>
-      <div class="tech-row"><span>观察</span><code>{{ observation.dispatch_action || observation.intent_kind || decision.mode }}</code></div>
-      <div class="action-trace-list">
-        <div v-for="row in actionRows" :key="row.id" class="action-trace-row" :class="{ blocked: !row.allowed }">
-          <strong>{{ row.label }}</strong>
-          <span>{{ row.risk }} · {{ row.allowed ? '允许' : '需确认' }}</span>
-          <small v-if="row.reason">{{ row.reason }}</small>
-        </div>
-      </div>
-      <pre>{{ rawJson }}</pre>
-    </details>
   </section>
 </template>
 

@@ -108,15 +108,31 @@ const runAction = action => {
   })
 }
 
-const openDetail = () => { if (props.detailEnabled && selectedPlan.value?.taskId) detailOpen.value = true }
+const overrideTaskId = ref('')
+const openDetail = () => {
+  const taskId = overrideTaskId.value || selectedPlan.value?.taskId
+  if (props.detailEnabled && taskId) detailOpen.value = true
+}
 const confirmDetailedPlan = () => {
   detailOpen.value = false
-  runAction({ id: 'confirm_plan', kind: 'confirm_plan', label: '确认并分派', enabled: true, taskId: selectedPlan.value?.taskId })
+  runAction({ id: 'confirm_plan', kind: 'confirm_plan', label: '确认并分派', enabled: true, taskId: overrideTaskId.value || selectedPlan.value?.taskId })
 }
 const locateDetailedItem = ({ planStepId, workItemId }) => locateStep({ id: planStepId || workItemId })
+const onOpenPlanDetail = event => {
+  const taskId = String(event?.detail?.taskId || event?.detail?.task_id || '').trim()
+  if (!taskId || !props.detailEnabled) return
+  overrideTaskId.value = taskId
+  detailOpen.value = true
+}
 
-onMounted(() => { timer = window.setInterval(() => { now.value = Date.now() }, 500) })
-onBeforeUnmount(() => { if (timer) window.clearInterval(timer) })
+onMounted(() => {
+  timer = window.setInterval(() => { now.value = Date.now() }, 500)
+  window.addEventListener('ccm:open-task-plan-detail', onOpenPlanDetail)
+})
+onBeforeUnmount(() => {
+  if (timer) window.clearInterval(timer)
+  window.removeEventListener('ccm:open-task-plan-detail', onOpenPlanDetail)
+})
 </script>
 
 <template>
@@ -181,7 +197,7 @@ onBeforeUnmount(() => { if (timer) window.clearInterval(timer) })
   <ActiveTaskPlanDetailDrawer
     v-if="detailEnabled"
     :open="detailOpen"
-    :task-id="selectedPlan?.taskId || ''"
+    :task-id="overrideTaskId || selectedPlan?.taskId || ''"
     :fallback-plan="selectedPlan"
     @close="detailOpen = false"
     @confirm="confirmDetailedPlan"

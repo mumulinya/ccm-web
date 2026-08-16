@@ -84,7 +84,7 @@
                   :timestamp="msg.timestamp || msg.created_at || msg.createdAt"
                   :structured="msg.type === 'command_result' || isPrimaryTaskCard(msg, i) || msg.type === 'project_task_intake' || msg.type === 'conflict_plan' || getWorkEvents(msg).length > 0 || Number(msg.fileChanges?.count || 0) > 0"
                   :streaming="!!msg.streaming"
-                  :copy-text="getCopyableMessageText(msg, getVisibleGroupMessageContent(msg, ''))"
+                  :copy-text="getCopyableMessageText(msg, visibleGroupAssistantContent(msg, i, ''))"
                   :editable="msg.role === 'user' && !!String(msg.content || '').trim()"
                   :edit-disabled="isStreaming"
                   :rewindable="msg.role === 'assistant' && !msg.streaming && !!String(msg.id || '').trim()"
@@ -101,16 +101,6 @@
                     },
                   ]"
                 >
-                <AgentExecutionTranscript
-                  :events="groupAgentExecutionEvents"
-                  :enabled="groupAgentExecutionEnabled"
-                  :messages="messages"
-                  :message-index="i"
-                  stage-grouped
-                  presentation="live"
-                  @open-file-change="openSingleFileChange"
-                  @execution-action="handleTaskCardAction(msg, $event)"
-                />
                 <CommandResultCard v-if="msg.type === 'command_result'" :result="msg.commandResult" />
                 <!-- 旧 thinking 信封保持静默；10 秒后的事实状态由统一执行投影原位展示。 -->
                 <template v-else-if="msg.role === 'thinking'"></template>
@@ -137,11 +127,10 @@
                   :message-key="`${currentGroupSessionId || 'session'}:${getGroupMessageKey(msg)}`"
                   @action="runAgentQaAction(msg, $event)"
                 />
-                <!-- Agent 回复 -->
+                <template v-else>
                 <AgentExecutionMessage
-                  v-else
                   :msg="msg"
-                  :display-content="getVisibleGroupMessageContent(msg, '回复已整理，技术细节已放入技术详情。')"
+                  :display-content="visibleGroupAssistantContent(msg, i, '回复已整理，技术细节已放入技术详情。')"
                   :accent-style="getAgentAccentStyle(msg.agent)"
                   :status="getAgentMessageStatus(msg)"
                   :agent-initials="getAgentInitials(msg.agent)"
@@ -167,11 +156,15 @@
                   :get-assignment-status-label="getAssignmentStatusLabel"
                   :get-agent-display-name="getAgentDisplayName"
                   :message-key="`${currentGroupSessionId || 'session'}:${getGroupMessageKey(msg)}`"
+                  :can-confirm-execute="canConfirmOnMessageCard(msg)"
+                  :confirm-execute-busy="presentedPlanConfirmBusy"
                   @step-action="handleTaskCardAction(msg, $event)"
                   @task-action="handleTaskCardAction(msg, $event)"
                   @open-pipeline="openPipelineViewer(msg)"
                   @open-file-diff="openFileDiff"
                   @failure-action="handleGroupModelFailureAction(msg, i, $event)"
+                  @clarify-reply="submitInlineGroupClarification"
+                  @confirm-execute="confirmPresentedPlanExecute(msg)"
                 />
                 <AgentExecutionTranscript
                   :events="groupAgentExecutionEvents"
@@ -179,11 +172,29 @@
                   :messages="messages"
                   :message-index="i"
                   stage-grouped
+                  presentation="live"
+                  :can-confirm-execute="canConfirmOnTranscript(msg)"
+                  :confirm-execute-busy="presentedPlanConfirmBusy"
+                  @open-file-change="openSingleFileChange"
+                  @execution-action="handleTaskCardAction(msg, $event)"
+                  @confirm-execute="confirmPresentedPlanExecute(msg, $event)"
+                />
+                <AgentExecutionTranscript
+                  v-if="!isGroupModelFailureMessage(msg)"
+                  :events="groupAgentExecutionEvents"
+                  :enabled="groupAgentExecutionEnabled"
+                  :messages="messages"
+                  :message-index="i"
+                  stage-grouped
                   presentation="completed"
+                  :can-confirm-execute="canConfirmOnTranscript(msg)"
+                  :confirm-execute-busy="presentedPlanConfirmBusy"
                   @open-file-change="openSingleFileChange"
                   @open-file-changes="openCodeChangeDrawer($event, { title: '群聊任务文件改动' })"
                   @execution-action="handleTaskCardAction(msg, $event)"
+                  @confirm-execute="confirmPresentedPlanExecute(msg, $event)"
                 />
+                </template>
                 </ConversationMessageShell>
               </template>
               <ContextCompactionEvent
@@ -244,6 +255,8 @@
               :busy="groupTurnBusy"
               :turns="groupTurnControl.turns.value"
               :stopping="stoppingGroupTurn"
+              :resolving-route-id="groupTurnControl.resolvingRouteId.value"
+              :resolving-route-choice="groupTurnControl.resolvingRouteChoice.value"
               @stop="stopGroupCurrentWork()"
               @cancel="groupTurnControl.cancel"
               @guide="guideGroupQueuedTurn"

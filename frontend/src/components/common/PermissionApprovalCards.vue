@@ -55,10 +55,7 @@ const purposeLabel = request => request?.reason || operationLabel(request)
           <ShieldAlert :size="14" />
           <span>{{ request.riskReasons.join('；') }}</span>
         </div>
-        <details v-if="request.command" class="permission-technical-detail">
-          <summary>查看脱敏技术详情</summary>
-          <code>{{ request.command }}</code>
-        </details>
+        <pre v-if="request.command" class="permission-command">{{ request.command }}</pre>
       </div>
       <div class="permission-approval-actions">
         <button type="button" class="permission-icon-button reject" title="拒绝" :disabled="!!busyId" @click="emit('reject', request)">
@@ -92,9 +89,7 @@ const purposeLabel = request => request?.reason || operationLabel(request)
 .permission-safety-note { display:flex; align-items:flex-start; gap:7px; padding:8px 9px; border:1px solid color-mix(in srgb,#f59e0b 24%,var(--border-color)); border-radius:7px; color:#92400e; background:color-mix(in srgb,#f59e0b 6%,var(--bg-card)); font-size:10.5px; line-height:1.45; }
 .permission-safety-note svg { flex:0 0 auto; margin-top:1px; }
 .permission-safety-note.danger { color:var(--accent-red); border-color:color-mix(in srgb,var(--accent-red) 28%,var(--border-color)); background:var(--danger-soft); }
-.permission-technical-detail { color:var(--text-muted); font-size:10px; }
-.permission-technical-detail summary { width:fit-content; cursor:pointer; }
-.permission-technical-detail code { display:block; max-width:100%; margin-top:5px; padding:6px 7px; overflow-x:auto; color:var(--text-secondary); background:color-mix(in srgb,var(--text-primary) 5%,transparent); border-radius:5px; font-size:10px; white-space:pre; }
+.permission-command { display:block; max-width:100%; margin:0; padding:6px 7px; overflow-x:auto; color:var(--text-secondary); background:color-mix(in srgb,var(--text-primary) 5%,transparent); border-radius:5px; font-size:10px; white-space:pre; }
 .permission-approval-actions { grid-column:2; display:flex; justify-content:flex-end; gap:7px; padding-top:1px; }
 .permission-icon-button { min-height: 34px; display: inline-flex; align-items: center; justify-content: center; gap: 5px; padding: 0 12px; border: 1px solid var(--border-color); border-radius: 7px; background: var(--bg-card); color: var(--text-primary); font-size: 11.5px; font-weight: 700; cursor: pointer; white-space: nowrap; }
 .permission-icon-button:hover:not(:disabled) { border-color: #d97706; }

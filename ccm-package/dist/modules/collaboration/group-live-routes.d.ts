@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "http";
 import type { UrlWithParsedQuery } from "url";
+export { isGroupModelRecoveryContinuePhrase, resolveGroupModelRecovery, runGroupModelRecoverySelfTest, } from "./group-model-recovery";
 export type GroupLiveRoutesDeps = {
     writeSse: (res: ServerResponse, data: any) => void;
     ensureTraceId: (value: any, prefix: string) => string;
@@ -48,13 +49,6 @@ export type GroupLiveRoutesDeps = {
     extractActionableMentions: (text: string, group: any, sourceProject: string) => any[];
     extractAgentReceipt: (text: string, project: string) => any;
 };
-export declare function resolveGroupModelRecovery(messages?: any[], input?: any): {
-    failureMessageId: string;
-    anchorMessageId: string;
-    originalUserMessageId: string;
-    originalMessage: string;
-    attempt: number;
-};
 export declare function compactGroupLiveText(value: any, max?: number): string;
 export declare function groupLiveFlag(value: any, fallback?: boolean): boolean;
 export declare function resolveExplicitGroupContinuationTask(tasks: any[], groupId: string, taskId: string): {
@@ -102,6 +96,7 @@ export declare function buildGroupClarificationSummary(input: {
         round: number;
         title: string;
         headline: string;
+        purpose: string;
         questions: any[];
         allowAdditionalNote: boolean;
         safeDefaultsAvailable: boolean;
@@ -121,6 +116,7 @@ export declare function buildGroupClarificationSummary(input: {
         round: number;
         title: string;
         headline: string;
+        purpose: string;
         questions: any[];
         allowAdditionalNote: boolean;
         safeDefaultsAvailable: boolean;
@@ -144,6 +140,7 @@ export declare function runGroupClarificationSummarySelfTest(): {
         suggestionsVisible: boolean;
         todoHidden: boolean;
         hidesProtocol: boolean;
+        structuredCards: any;
     };
     summary: {
         schema: string;
@@ -168,6 +165,7 @@ export declare function runGroupClarificationSummarySelfTest(): {
             round: number;
             title: string;
             headline: string;
+            purpose: string;
             questions: any[];
             allowAdditionalNote: boolean;
             safeDefaultsAvailable: boolean;
@@ -187,6 +185,7 @@ export declare function runGroupClarificationSummarySelfTest(): {
             round: number;
             title: string;
             headline: string;
+            purpose: string;
             questions: any[];
             allowAdditionalNote: boolean;
             safeDefaultsAvailable: boolean;

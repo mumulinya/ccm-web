@@ -1,10 +1,9 @@
 import { nextTick } from 'vue'
 import { globalAgentRunTaskCard, globalMissionTaskCard } from '../utils/taskExperience.js'
 import { buildGlobalConversationKnowledgePayload, buildGlobalTaskKnowledgePayload, postKnowledgeCapture } from '../utils/knowledgeCapture.js'
-import { getTechnicalDetailSections, sanitizeUserFacingAgentText } from '../utils/agentDisplay.js'
-import { globalExecutionIntentConfirmed, visibleGlobalText } from '../utils/globalAgentExecutionStream.js'
-import { classifyGlobalAgentRunPresentation, PRESENTATION_REPLY } from '../utils/resultPresentation.js'
+import { visibleGlobalText } from '../utils/globalAgentExecutionStream.js'
 import { stopTaskWithPreview } from '../utils/taskStopFlow.js'
+import { notifyConversationPlanModeChanged, openTaskPlanDetail } from '../utils/conversationPlanMode.js'
 import { forceInterruptPausedTask, requestTaskPause, resumePausedTask } from '../utils/taskPauseFlow.js'
 
 export function useGlobalAgentActions(context) {
@@ -122,44 +121,6 @@ const GLOBAL_MISSION_TASK_MESSAGE_TYPES = new Set([
 
 const isGlobalMissionTaskMessage = (msg) => GLOBAL_MISSION_TASK_MESSAGE_TYPES.has(String(msg?.type || ''))
 
-const runtimeDebugRows = (msg) => {
-  const debug = msg?.agenticRun?.runtime_debug || null
-  if (!debug) return []
-  const rows = []
-  if (msg?.agenticRun?.id) rows.push({ label: '运行 ID', value: msg.agenticRun.id })
-  rows.push({ label: '状态', value: `${debug.status || '-'} / ${debug.phase || '-'}` })
-  if (debug.pending_tool?.name) rows.push({ label: '待确认工具', value: `${debug.pending_tool.name} · ${debug.pending_tool.risk || ''}` })
-  rows.push({ label: '调用', value: `模型 ${debug.model_calls || 0} · 工具 ${debug.tool_calls || 0} · 恢复 ${debug.resume_count || 0}` })
-  if (debug.todos?.length) rows.push({ label: 'Todo', value: debug.todos.slice(-4).map(item => `${item.status}:${item.text}`).join(' / ') })
-  if (debug.permissions?.length) rows.push({ label: '权限', value: debug.permissions.slice(-2).map(item => item.result?.rule?.decision || (item.result?.allowed ? 'allow' : item.result?.denied ? 'deny' : 'ask')).join(' / ') })
-  if (debug.hooks?.length) rows.push({ label: 'Hook', value: debug.hooks.slice(-2).map(item => `${item.phase}:${item.blocked ? 'blocked' : 'ok'}`).join(' / ') })
-  if (debug.output_tail?.length) rows.push({ label: '输出', value: debug.output_tail.slice(-2).map(item => item.type || 'event').join(' / ') })
-  return rows
-}
-
-const runtimeDebugSections = (msg) => {
-  // 简单业务短气泡：不挂「技术详情」折叠块
-  if (!globalExecutionIntentConfirmed(msg)) return []
-  if (classifyGlobalAgentRunPresentation(msg?.agenticRun || {}, msg) === PRESENTATION_REPLY) return []
-  const debug = msg?.agenticRun?.runtime_debug || null
-  if (!debug) return []
-  const fallback = {
-    run_id: msg?.agenticRun?.id || '',
-    blockers: debug.failed_gates || [],
-    trace_id: debug.trace_id || msg?.agenticRun?.trace_id || '',
-  }
-  const sections = getTechnicalDetailSections({ technical: fallback }, fallback)
-  const records = sections.find(section => section.id === 'records') || { id: 'records', title: '完整记录', items: [] }
-  for (const row of runtimeDebugRows(msg)) {
-    if (!records.items.some(item => item.label === row.label && item.value === row.value)) records.items.push(row)
-  }
-  if (!sections.includes(records)) sections.push(records)
-  return sections.map(section => ({
-    ...section,
-    items: section.items.map(item => ({ ...item, value: sanitizeUserFacingAgentText(item.value, String(item.value || ''), 420) }))
-  }))
-}
-
 const inferGlobalChangeProject = (msg) => {
   const direct = msg?.agenticRun?.project || msg?.agenticRun?.target_project || msg?.globalMission?.target_project
   if (direct) return direct
@@ -274,6 +235,10 @@ const handleGlobalTaskAction = async (msg, action) => {
       toast.success('已退回指定子任务返工')
       return
     }
+    if (action.kind === 'open_plan_detail') {
+      openTaskPlanDetail(card?.task_id || msg?.task_id || card?.id)
+      return
+    }
     if (action.kind === 'confirm_plan') {
       const taskId = card?.task_id || msg?.task_id
       const feedback = String(action.accept_feedback || action.acceptFeedback || action.feedback || '').trim()
@@ -282,6 +247,13 @@ const handleGlobalTaskAction = async (msg, action) => {
       if (data.epic || data.task) msg.globalMission = data.epic || data.task
       if (data.children) msg.globalMissionChildren = data.children.map(task => ({ task, target: task.mission_target || null }))
       saveHistory()
+      notifyConversationPlanModeChanged({
+        scope: 'global',
+        scopeId: 'global',
+        exactSessionId: currentSessionId.value || '',
+        enabled: false,
+        mode: 'agent',
+      })
       toast.success('需求任务图已确认并开始派发')
       return
     }
@@ -984,7 +956,7 @@ const executeAction = async (action, actionFiles = []) => {
 
   return {
     requestJson, postJson, controlAgenticRun, saveCurrentGlobalSessionKnowledge, applyGlobalMissionPayload, getGlobalTaskCard,
-    isGlobalMissionTaskMessage, runtimeDebugSections, openGlobalCodeChangeDrawer, openGlobalChangesTab,
+    isGlobalMissionTaskMessage, openGlobalCodeChangeDrawer, openGlobalChangesTab,
     handleGlobalTaskAction, executeManagementAction, dispatchTrackedGlobalMission, executeAction,
   }
 }

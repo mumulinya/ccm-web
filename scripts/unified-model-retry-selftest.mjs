@@ -46,13 +46,15 @@ try {
   assert.deepEqual(
     ["interactive_first_turn", "agent_orchestration", "long_running_task", "background_auxiliary"].map(id => retry.resolveModelRetryProfile(id, 120_000)).map(item => [item.id, item.maxAttempts, item.totalTimeoutMs]),
     [
-      ["interactive_first_turn", 2, 60_000],
-      ["agent_orchestration", 3, 120_000],
+      ["interactive_first_turn", 2, 180_000],
+      ["agent_orchestration", 3, 180_000],
       ["long_running_task", 5, 360_000],
       ["background_auxiliary", 1, 30_000],
     ],
     "retry profiles must keep interactive turns fast and long tasks bounded",
   );
+  assert.equal(retry.resolveModelRetryProfile("interactive_first_turn", 120_000).attemptTimeoutMs, 120_000, "first-turn streaming must be allowed to finish a ~80s provider generation");
+  assert.equal(retry.resolveModelRetryProfile("agent_orchestration", 120_000).attemptTimeoutMs, 120_000, "orchestration streaming must honor the configured 120s provider timeout");
 
   let abortedCalls = 0;
   const abortController = new AbortController();

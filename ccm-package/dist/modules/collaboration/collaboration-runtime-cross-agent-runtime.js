@@ -80,6 +80,7 @@ const agent_notifications_1 = require("./agent-notifications");
 const logs_1 = require("./logs");
 const test_agent_runner_1 = require("./test-agent-runner");
 const storage_1 = require("./storage");
+const group_presented_plan_1 = require("./group-presented-plan");
 const runtime_1 = require("../../agents/runtime");
 const worktree_1 = require("../../agents/worktree");
 const execution_kernel_1 = require("../../agents/execution-kernel");
@@ -1704,7 +1705,9 @@ function buildCoordinatorTestAgentAcceptanceCriteria(task, verificationCommands)
     const projectCriteria = (0, collaboration_runtime_task_queue_1.splitUserAcceptanceText)(task.acceptance_criteria || task.acceptanceCriteria)
         .filter((criterion) => !isCoordinatorOnlyAcceptanceCriterion(criterion));
     const commandCriteria = verificationCommands.map(command => `命令 ${command} 必须成功执行。`);
-    return (0, collaboration_runtime_status_helpers_1.uniqueStrings)([...projectCriteria, ...commandCriteria]).slice(0, 10);
+    const plan = (0, group_presented_plan_1.presentedPlanFromTask)(task)
+        || (0, group_presented_plan_1.latestPresentedPlanFromGroupSession)(task?.group_id || task?.groupId, task?.group_session_id || task?.groupSessionId);
+    return (0, group_presented_plan_1.mergePresentedPlanAcceptanceCriteria)([...projectCriteria, ...commandCriteria], plan, 10);
 }
 function buildTestAgentHandoffId(taskId = "", originalTarget = "") {
     const base = [taskId || "test-agent-handoff", originalTarget || "project"].join("-");

@@ -1,0 +1,12 @@
+{
+  "schema": "ccm-release-platform-evidence-v1",
+  "success": true,
+  "version": "2.0.7",
+  "tarball": "mumulinya167-cc-web-2.0.7.tgz",
+  "tarball_sha256": "2c5b2f60d98480e2d7d346f8e1a13b279317994623179703fddb3629bcc30940",
+  "platform": "win32",
+  "node": "22.22.0",
+  "installDurationMs": 43374,
+  "paidProviderCalls": 0,
+  "verified_at": "2026-08-12T17:39:17.582Z"
+}

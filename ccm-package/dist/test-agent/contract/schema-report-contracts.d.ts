@@ -2970,6 +2970,7 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             foreignToolCallIds?: string[];
             duplicateToolCallIds?: string[];
         }[];
+        toolCallCount?: number;
         statusCounts?: {
             complete?: number;
             invalid?: number;
@@ -2980,7 +2981,6 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
         mcpResultCount?: number;
         evidenceRequiredResultCount?: number;
         linkedResultCount?: number;
-        toolCallCount?: number;
         scopedToolCallCount?: number;
         unlinkedRequiredResultCount?: number;
         missingToolCallReferenceCount?: number;
@@ -3006,6 +3006,7 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             foreignToolCallIds?: string[];
             duplicateToolCallIds?: string[];
         }[];
+        toolCallCount?: number;
         statusCounts?: {
             complete?: number;
             invalid?: number;
@@ -3016,7 +3017,6 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
         mcpResultCount?: number;
         evidenceRequiredResultCount?: number;
         linkedResultCount?: number;
-        toolCallCount?: number;
         scopedToolCallCount?: number;
         unlinkedRequiredResultCount?: number;
         missingToolCallReferenceCount?: number;
@@ -7671,6 +7671,7 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             foreignToolCallIds?: string[];
             duplicateToolCallIds?: string[];
         }[];
+        toolCallCount?: number;
         statusCounts?: {
             complete?: number;
             invalid?: number;
@@ -7681,7 +7682,6 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
         mcpResultCount?: number;
         evidenceRequiredResultCount?: number;
         linkedResultCount?: number;
-        toolCallCount?: number;
         scopedToolCallCount?: number;
         unlinkedRequiredResultCount?: number;
         missingToolCallReferenceCount?: number;
@@ -7707,6 +7707,7 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             foreignToolCallIds?: string[];
             duplicateToolCallIds?: string[];
         }[];
+        toolCallCount?: number;
         statusCounts?: {
             complete?: number;
             invalid?: number;
@@ -7717,7 +7718,6 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
         mcpResultCount?: number;
         evidenceRequiredResultCount?: number;
         linkedResultCount?: number;
-        toolCallCount?: number;
         scopedToolCallCount?: number;
         unlinkedRequiredResultCount?: number;
         missingToolCallReferenceCount?: number;
@@ -12372,6 +12372,7 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             foreignToolCallIds?: string[];
             duplicateToolCallIds?: string[];
         }[];
+        toolCallCount?: number;
         statusCounts?: {
             complete?: number;
             invalid?: number;
@@ -12382,7 +12383,6 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
         mcpResultCount?: number;
         evidenceRequiredResultCount?: number;
         linkedResultCount?: number;
-        toolCallCount?: number;
         scopedToolCallCount?: number;
         unlinkedRequiredResultCount?: number;
         missingToolCallReferenceCount?: number;
@@ -12408,6 +12408,7 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             foreignToolCallIds?: string[];
             duplicateToolCallIds?: string[];
         }[];
+        toolCallCount?: number;
         statusCounts?: {
             complete?: number;
             invalid?: number;
@@ -12418,7 +12419,6 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
         mcpResultCount?: number;
         evidenceRequiredResultCount?: number;
         linkedResultCount?: number;
-        toolCallCount?: number;
         scopedToolCallCount?: number;
         unlinkedRequiredResultCount?: number;
         missingToolCallReferenceCount?: number;
@@ -17073,6 +17073,7 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             foreignToolCallIds?: string[];
             duplicateToolCallIds?: string[];
         }[];
+        toolCallCount?: number;
         statusCounts?: {
             complete?: number;
             invalid?: number;
@@ -17083,7 +17084,6 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
         mcpResultCount?: number;
         evidenceRequiredResultCount?: number;
         linkedResultCount?: number;
-        toolCallCount?: number;
         scopedToolCallCount?: number;
         unlinkedRequiredResultCount?: number;
         missingToolCallReferenceCount?: number;
@@ -17109,6 +17109,7 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             foreignToolCallIds?: string[];
             duplicateToolCallIds?: string[];
         }[];
+        toolCallCount?: number;
         statusCounts?: {
             complete?: number;
             invalid?: number;
@@ -17119,7 +17120,6 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
         mcpResultCount?: number;
         evidenceRequiredResultCount?: number;
         linkedResultCount?: number;
-        toolCallCount?: number;
         scopedToolCallCount?: number;
         unlinkedRequiredResultCount?: number;
         missingToolCallReferenceCount?: number;
@@ -21774,6 +21774,7 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             foreignToolCallIds?: string[];
             duplicateToolCallIds?: string[];
         }[];
+        toolCallCount?: number;
         statusCounts?: {
             complete?: number;
             invalid?: number;
@@ -21784,7 +21785,6 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
         mcpResultCount?: number;
         evidenceRequiredResultCount?: number;
         linkedResultCount?: number;
-        toolCallCount?: number;
         scopedToolCallCount?: number;
         unlinkedRequiredResultCount?: number;
         missingToolCallReferenceCount?: number;
@@ -21810,6 +21810,7 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             foreignToolCallIds?: string[];
             duplicateToolCallIds?: string[];
         }[];
+        toolCallCount?: number;
         statusCounts?: {
             complete?: number;
             invalid?: number;
@@ -21820,7 +21821,6 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
         mcpResultCount?: number;
         evidenceRequiredResultCount?: number;
         linkedResultCount?: number;
-        toolCallCount?: number;
         scopedToolCallCount?: number;
         unlinkedRequiredResultCount?: number;
         missingToolCallReferenceCount?: number;
@@ -26647,6 +26647,7 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 foreignToolCallIds?: string[];
                 duplicateToolCallIds?: string[];
             }[];
+            toolCallCount?: number;
             statusCounts?: {
                 complete?: number;
                 invalid?: number;
@@ -26657,7 +26658,6 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             mcpResultCount?: number;
             evidenceRequiredResultCount?: number;
             linkedResultCount?: number;
-            toolCallCount?: number;
             scopedToolCallCount?: number;
             unlinkedRequiredResultCount?: number;
             missingToolCallReferenceCount?: number;
@@ -26683,6 +26683,7 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 foreignToolCallIds?: string[];
                 duplicateToolCallIds?: string[];
             }[];
+            toolCallCount?: number;
             statusCounts?: {
                 complete?: number;
                 invalid?: number;
@@ -26693,7 +26694,6 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             mcpResultCount?: number;
             evidenceRequiredResultCount?: number;
             linkedResultCount?: number;
-            toolCallCount?: number;
             scopedToolCallCount?: number;
             unlinkedRequiredResultCount?: number;
             missingToolCallReferenceCount?: number;
@@ -31348,6 +31348,7 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 foreignToolCallIds?: string[];
                 duplicateToolCallIds?: string[];
             }[];
+            toolCallCount?: number;
             statusCounts?: {
                 complete?: number;
                 invalid?: number;
@@ -31358,7 +31359,6 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             mcpResultCount?: number;
             evidenceRequiredResultCount?: number;
             linkedResultCount?: number;
-            toolCallCount?: number;
             scopedToolCallCount?: number;
             unlinkedRequiredResultCount?: number;
             missingToolCallReferenceCount?: number;
@@ -31384,6 +31384,7 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 foreignToolCallIds?: string[];
                 duplicateToolCallIds?: string[];
             }[];
+            toolCallCount?: number;
             statusCounts?: {
                 complete?: number;
                 invalid?: number;
@@ -31394,7 +31395,6 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             mcpResultCount?: number;
             evidenceRequiredResultCount?: number;
             linkedResultCount?: number;
-            toolCallCount?: number;
             scopedToolCallCount?: number;
             unlinkedRequiredResultCount?: number;
             missingToolCallReferenceCount?: number;
@@ -36049,6 +36049,7 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 foreignToolCallIds?: string[];
                 duplicateToolCallIds?: string[];
             }[];
+            toolCallCount?: number;
             statusCounts?: {
                 complete?: number;
                 invalid?: number;
@@ -36059,7 +36060,6 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             mcpResultCount?: number;
             evidenceRequiredResultCount?: number;
             linkedResultCount?: number;
-            toolCallCount?: number;
             scopedToolCallCount?: number;
             unlinkedRequiredResultCount?: number;
             missingToolCallReferenceCount?: number;
@@ -36085,6 +36085,7 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 foreignToolCallIds?: string[];
                 duplicateToolCallIds?: string[];
             }[];
+            toolCallCount?: number;
             statusCounts?: {
                 complete?: number;
                 invalid?: number;
@@ -36095,7 +36096,6 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             mcpResultCount?: number;
             evidenceRequiredResultCount?: number;
             linkedResultCount?: number;
-            toolCallCount?: number;
             scopedToolCallCount?: number;
             unlinkedRequiredResultCount?: number;
             missingToolCallReferenceCount?: number;
@@ -40750,6 +40750,7 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 foreignToolCallIds?: string[];
                 duplicateToolCallIds?: string[];
             }[];
+            toolCallCount?: number;
             statusCounts?: {
                 complete?: number;
                 invalid?: number;
@@ -40760,7 +40761,6 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             mcpResultCount?: number;
             evidenceRequiredResultCount?: number;
             linkedResultCount?: number;
-            toolCallCount?: number;
             scopedToolCallCount?: number;
             unlinkedRequiredResultCount?: number;
             missingToolCallReferenceCount?: number;
@@ -40786,6 +40786,7 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 foreignToolCallIds?: string[];
                 duplicateToolCallIds?: string[];
             }[];
+            toolCallCount?: number;
             statusCounts?: {
                 complete?: number;
                 invalid?: number;
@@ -40796,7 +40797,6 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             mcpResultCount?: number;
             evidenceRequiredResultCount?: number;
             linkedResultCount?: number;
-            toolCallCount?: number;
             scopedToolCallCount?: number;
             unlinkedRequiredResultCount?: number;
             missingToolCallReferenceCount?: number;
@@ -45451,6 +45451,7 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 foreignToolCallIds?: string[];
                 duplicateToolCallIds?: string[];
             }[];
+            toolCallCount?: number;
             statusCounts?: {
                 complete?: number;
                 invalid?: number;
@@ -45461,7 +45462,6 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             mcpResultCount?: number;
             evidenceRequiredResultCount?: number;
             linkedResultCount?: number;
-            toolCallCount?: number;
             scopedToolCallCount?: number;
             unlinkedRequiredResultCount?: number;
             missingToolCallReferenceCount?: number;
@@ -45487,6 +45487,7 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 foreignToolCallIds?: string[];
                 duplicateToolCallIds?: string[];
             }[];
+            toolCallCount?: number;
             statusCounts?: {
                 complete?: number;
                 invalid?: number;
@@ -45497,7 +45498,6 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             mcpResultCount?: number;
             evidenceRequiredResultCount?: number;
             linkedResultCount?: number;
-            toolCallCount?: number;
             scopedToolCallCount?: number;
             unlinkedRequiredResultCount?: number;
             missingToolCallReferenceCount?: number;
@@ -47801,6 +47801,7 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 foreignToolCallIds?: string[];
                 duplicateToolCallIds?: string[];
             }[];
+            toolCallCount?: number;
             statusCounts?: {
                 complete?: number;
                 invalid?: number;
@@ -47811,7 +47812,6 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             mcpResultCount?: number;
             evidenceRequiredResultCount?: number;
             linkedResultCount?: number;
-            toolCallCount?: number;
             scopedToolCallCount?: number;
             unlinkedRequiredResultCount?: number;
             missingToolCallReferenceCount?: number;
@@ -48706,6 +48706,7 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 foreignToolCallIds?: string[];
                 duplicateToolCallIds?: string[];
             }[];
+            toolCallCount?: number;
             statusCounts?: {
                 complete?: number;
                 invalid?: number;
@@ -48716,7 +48717,6 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             mcpResultCount?: number;
             evidenceRequiredResultCount?: number;
             linkedResultCount?: number;
-            toolCallCount?: number;
             scopedToolCallCount?: number;
             unlinkedRequiredResultCount?: number;
             missingToolCallReferenceCount?: number;
@@ -49611,6 +49611,7 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 foreignToolCallIds?: string[];
                 duplicateToolCallIds?: string[];
             }[];
+            toolCallCount?: number;
             statusCounts?: {
                 complete?: number;
                 invalid?: number;
@@ -49621,7 +49622,6 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             mcpResultCount?: number;
             evidenceRequiredResultCount?: number;
             linkedResultCount?: number;
-            toolCallCount?: number;
             scopedToolCallCount?: number;
             unlinkedRequiredResultCount?: number;
             missingToolCallReferenceCount?: number;
@@ -50516,6 +50516,7 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 foreignToolCallIds?: string[];
                 duplicateToolCallIds?: string[];
             }[];
+            toolCallCount?: number;
             statusCounts?: {
                 complete?: number;
                 invalid?: number;
@@ -50526,7 +50527,6 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             mcpResultCount?: number;
             evidenceRequiredResultCount?: number;
             linkedResultCount?: number;
-            toolCallCount?: number;
             scopedToolCallCount?: number;
             unlinkedRequiredResultCount?: number;
             missingToolCallReferenceCount?: number;

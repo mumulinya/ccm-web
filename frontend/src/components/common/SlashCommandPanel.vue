@@ -1,9 +1,8 @@
 <script setup>
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted } from 'vue'
 
 const props = defineProps({ panel: { type: Object, default: null } })
 const emit = defineEmits(['close', 'action'])
-const technicalOpen = ref(false)
 const result = computed(() => props.panel?.result || {})
 const command = computed(() => props.panel?.command || {})
 const stats = computed(() => result.value.stats || result.value.metrics || [])
@@ -49,10 +48,6 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
           <div v-if="result.actions?.length" class="panel-actions">
             <button v-for="action in result.actions" :key="`${action.kind}-${action.label}`" type="button" @click="emit('action', action)">{{ action.label }}</button>
           </div>
-          <button v-if="result.technicalDetails && Object.keys(result.technicalDetails).length" class="technical-toggle" type="button" @click="technicalOpen = !technicalOpen">
-            {{ technicalOpen ? '收起技术详情' : '技术详情' }}
-          </button>
-          <pre v-if="technicalOpen">{{ JSON.stringify(result.technicalDetails, null, 2) }}</pre>
         </div>
         <footer><span>{{ result.durationMs || 0 }} ms</span><span>Esc 关闭</span></footer>
       </section>

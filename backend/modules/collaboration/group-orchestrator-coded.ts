@@ -69,6 +69,7 @@ import {
   normalizeWorkflowDecision,
   type WorkflowDecision,
 } from "../../agents/workflow-decision";
+import { parsedRequestsUserClarification } from "../../agents/clarification-turn";
 import {
   claimGroupReactiveCompactRetry,
   completeGroupReactiveCompactRetry,
@@ -583,9 +584,11 @@ export function normalizeDispatchPolicy(parsed: any, analysis: any, targets: any
   const rawAction = String(parsed?.dispatchPolicy?.action || parsed?.dispatchAction || "").trim();
   const allowed = new Set(["direct_answer", "ask_user", "delegate", "hold"]);
   const parsedRequiresConfirmation = !!(parsed?.dispatchPolicy?.requiresConfirmation || parsed?.requiresConfirmation);
-  const action = allowed.has(rawAction)
-    ? rawAction
-    : targets.length > 0 ? "delegate" : analysis.missingInfo?.length ? "ask_user" : "direct_answer";
+  const action = parsedRequestsUserClarification(parsed)
+    ? "ask_user"
+    : allowed.has(rawAction)
+      ? rawAction
+      : targets.length > 0 ? "delegate" : analysis.missingInfo?.length ? "ask_user" : "direct_answer";
   const reason = String(parsed?.dispatchPolicy?.reason || parsed?.dispatchReason || "").trim();
   return buildDispatchPolicy(action, reason, analysis, {
     requiresConfirmation: parsedRequiresConfirmation,

@@ -1,4 +1,4 @@
-export declare const CONVERSATION_AUTO_RESUME_CONFIDENCE = 0.85;
+export declare const CONVERSATION_AUTO_RESUME_CONFIDENCE = 0.72;
 export type ConversationRouteScope = "global" | "project" | "group";
 export declare function findRecoverableConversationTasks(input: {
     scope: ConversationRouteScope;
@@ -48,5 +48,7 @@ export declare function runConversationMessageRoutingSelfTest(): {
         expandedTargetNeedsUser: boolean;
         explicitNewTaskStaysNew: boolean;
         answerDoesNotCreateTask: boolean;
+        noCandidateActionStartsNewTask: boolean;
+        noCandidateReadOnlyAnswers: boolean;
     };
 };

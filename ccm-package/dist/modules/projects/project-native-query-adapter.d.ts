@@ -1,0 +1,32 @@
+export declare function runProjectMainNativeQueryLoop(input: {
+    config: any;
+    project: string;
+    projectSessionId: string;
+    userMessage: string;
+    visibleTurnId: string;
+    loopBudget: any;
+    signal?: AbortSignal;
+    onDelta?: (delta: string) => void;
+    onModelActivity?: (activity: any) => void;
+    markVisibleFeedback: (at?: number) => void;
+    buildMessages: () => any[];
+    getToolContext: () => any;
+    executeSelectedRequest: (request: any, parallelGroupId?: string, preparedToolCallId?: string) => Promise<any>;
+    isReadOnly: (request: any) => boolean;
+    captureUsage?: (usage: any) => void;
+}): Promise<{
+    parsed: any;
+    toolResults: any[];
+    modelCallCount: number;
+    toolRoundCount: number;
+    toolCallCount: number;
+    noProgressCount: number;
+    continuationSegments: number;
+    loopStopReason: string;
+    modelDurationMs: number;
+    toolWallDurationMs: number;
+    modelRetryCount: number;
+    visibleReplyDeltaEmitted: boolean;
+    initialReadFileCount: number;
+    initialReadTokens: number;
+}>;

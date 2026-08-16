@@ -194,6 +194,7 @@ function assistantProgressBatchId(input) {
         turnId: String(input.turnId || "turn").trim(),
         generation: Math.max(0, Number(input.generation || 0)),
         modelCallIndex: Math.max(0, Number(input.modelCallIndex || 0)),
+        kind: String(input.kind || "").trim(),
         toolIds,
     })).digest("hex").slice(0, 24)}`;
 }

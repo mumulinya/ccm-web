@@ -7,6 +7,23 @@ export function usePinnedScroll(scrollRef, options = {}) {
   const pendingUpdates = ref(0)
   const lastMeaningfulKey = ref('')
   let resizeObserver = null
+  let manualResizeTimer = null
+  let scrollFrame = 0
+
+  const handleManualContentToggle = event => {
+    const scrollEl = scrollRef.value
+    const toggleEl = event?.detail?.element
+    if (!scrollEl || !toggleEl || typeof Node === 'undefined' || !(toggleEl instanceof Node) || !scrollEl.contains(toggleEl)) return
+    // A manual detail expansion means the user is reading that location. Do
+    // not let ResizeObserver force the viewport to the bottom while the DOM
+    // grows underneath the clicked row.
+    isPinnedToBottom.value = false
+    if (manualResizeTimer) window.clearTimeout(manualResizeTimer)
+    manualResizeTimer = window.setTimeout(() => {
+      manualResizeTimer = null
+      updateScrollState()
+    }, 650)
+  }
 
   const isNearBottom = () => {
     const el = scrollRef.value
@@ -65,17 +82,26 @@ export function usePinnedScroll(scrollRef, options = {}) {
     const target = observeRef.value
     if (!target) return
     resizeObserver = new ResizeObserver(() => {
-      if (isPinnedToBottom.value && scrollRef.value?.clientHeight > 0) {
-        scrollRef.value.scrollTop = scrollRef.value.scrollHeight
-      }
+      if (!isPinnedToBottom.value || !(scrollRef.value?.clientHeight > 0)) return
+      if (scrollFrame) return
+      scrollFrame = requestAnimationFrame(() => {
+        scrollFrame = 0
+        if (isPinnedToBottom.value && scrollRef.value) scrollRef.value.scrollTop = scrollRef.value.scrollHeight
+      })
     })
     resizeObserver.observe(target)
+    if (typeof window !== 'undefined') window.addEventListener('ccm:manual-content-toggle', handleManualContentToggle)
   }
 
   const detachResizeObserver = () => {
     if (!resizeObserver) return
     resizeObserver.disconnect()
     resizeObserver = null
+    if (scrollFrame && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(scrollFrame)
+    scrollFrame = 0
+    if (typeof window !== 'undefined') window.removeEventListener('ccm:manual-content-toggle', handleManualContentToggle)
+    if (manualResizeTimer) window.clearTimeout(manualResizeTimer)
+    manualResizeTimer = null
   }
 
   return {

@@ -32,6 +32,7 @@ export declare function assistantProgressBatchId(input: {
     turnId?: any;
     generation?: any;
     modelCallIndex?: any;
+    kind?: any;
     relatedToolCallIds?: string[];
 }): string;
 export declare function assistantProgressNarrationEnabled(config: any): boolean;

@@ -433,6 +433,8 @@ function normalizeWebSessionMessage(message) {
         "message_mode",
         "prePlanClarification",
         "pre_plan_clarification",
+        "clarificationSummary",
+        "clarification_summary",
         "clarificationContext",
         "clarification_context",
         "businessDecision",

@@ -52,6 +52,7 @@ const user_visible_agent_events_1 = require("../../system/user-visible-agent-eve
 const project_git_1 = require("../projects/project-git");
 const access_policy_1 = require("../system/access-policy");
 const project_main_agent_1 = require("../projects/project-main-agent");
+const conversation_plan_mode_gate_1 = require("../../system/conversation-plan-mode-gate");
 const task_plan_detail_1 = require("./task-plan-detail");
 const task_pause_routes_1 = require("./task-pause-routes");
 const task_pause_control_1 = require("../../tasks/task-pause-control");
@@ -292,6 +293,7 @@ function handleCollaborationApiReplayAndExecutionRoutes(pathname, req, res, pars
                     }
                     if (task.orchestration_scope === "project_session") {
                         const confirmed = (0, project_main_agent_1.confirmProjectMainTask)(task.id, task.target_project, task.project_session_id);
+                        (0, conversation_plan_mode_gate_1.exitConversationPlanModeForTask)(confirmed);
                         return (0, utils_1.sendJson)(res, {
                             success: true,
                             task: confirmed,
@@ -321,6 +323,7 @@ function handleCollaborationApiReplayAndExecutionRoutes(pathname, req, res, pars
                             intake: { ...(task.workflow_meta?.intake || {}), plan_mode: acceptedPlan },
                         },
                     }) || task;
+                    (0, conversation_plan_mode_gate_1.exitConversationPlanModeForTask)(confirmed);
                     const queue = (0, collaboration_1.enqueueTask)(task.id, ctx);
                     return (0, utils_1.sendJson)(res, { success: true, task: confirmed, plan: (0, task_plan_detail_1.buildTaskPlanDetail)(confirmed), queue });
                 }
@@ -1572,14 +1575,15 @@ function handleCollaborationApiReplayAndExecutionRoutes(pathname, req, res, pars
         const includeArchived = String(parsed.query.include_archived || parsed.query.includeArchived || "") === "true";
         const onlyArchived = String(parsed.query.archived || "") === "true";
         const allTasks = (0, db_1.loadTasks)();
-        const tasks = onlyArchived
-            ? allTasks.filter((task) => task.archived || task.deleted_at)
-            : includeArchived ? allTasks : allTasks.filter((task) => !task.archived && !task.deleted_at);
         const principal = req.ccmAuth;
-        const visibleTasks = principal?.kind === "browser" && principal.role !== "admin"
-            ? tasks.filter((task) => (0, access_policy_1.hasTaskResourceAccess)(task, principal, "use"))
-            : tasks;
-        (0, utils_1.sendJson)(res, { tasks: visibleTasks, archived_count: visibleTasks.filter((task) => task.archived || task.deleted_at).length });
+        const accessibleTasks = principal?.kind === "browser" && principal.role !== "admin"
+            ? allTasks.filter((task) => (0, access_policy_1.hasTaskResourceAccess)(task, principal, "use"))
+            : allTasks;
+        const isArchivedTask = (task) => !!(task.archived || task.deleted_at || task.status === "archived");
+        const tasks = onlyArchived
+            ? accessibleTasks.filter(isArchivedTask)
+            : includeArchived ? accessibleTasks : accessibleTasks.filter((task) => !isArchivedTask(task));
+        (0, utils_1.sendJson)(res, { tasks, archived_count: accessibleTasks.filter(isArchivedTask).length });
         return true;
     }
     if (pathname === "/api/tasks/requirement-epic/self-test" && req.method === "GET") {
@@ -2202,6 +2206,7 @@ function handleCollaborationApiIntakeRoutesPartA(pathname, req, res, parsed, ctx
                             },
                         },
                     }) || epicResult.epic;
+                    (0, conversation_plan_mode_gate_1.exitConversationPlanModeForTask)(updatedEpic);
                     (0, collaboration_1.updateGroupTaskInlineStatus)(updatedEpic, updatedEpic.status, updatedEpic.status_detail);
                     return (0, utils_1.sendJson)(res, {
                         success: true,
@@ -2254,6 +2259,7 @@ function handleCollaborationApiIntakeRoutesPartA(pathname, req, res, parsed, ctx
                         },
                     },
                 }) || current;
+                (0, conversation_plan_mode_gate_1.exitConversationPlanModeForTask)(task);
                 (0, reliability_ledger_1.appendTraceEvent)(task.trace_id, {
                     type: "intake.confirmed",
                     status: "ok",

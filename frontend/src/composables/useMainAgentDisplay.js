@@ -23,15 +23,15 @@ export const mainDecisionTone = (decision) => {
   return 'idle'
 }
 
-/** Quiet when read-only conversation/analysis needs no user-facing decision chrome. */
+/** Quiet when read-only conversation/analysis is only the generic coordinator loop, not a user-task plan. */
 export const isQuietMainAgentDecision = (decision) => {
-  const mode = String(decision?.mode || '').toLowerCase()
-  if (!decision || !['conversation', 'project_analysis'].includes(mode)) return false
+  if (!decision) return false
+  const mode = String(decision?.mode || 'conversation').toLowerCase()
+  if (!['conversation', 'project_analysis'].includes(mode)) return false
   const actions = decision?.decision?.selected_actions || decision?.decision?.selectedActions || []
   const workflowActions = new Set([
     'create_project_task',
     'dispatch_child_agent',
-    'ask_user_clarification',
     'govern_task_lifecycle',
     'replan_from_observation',
   ])
@@ -40,18 +40,7 @@ export const isQuietMainAgentDecision = (decision) => {
   if (permissions.some(item => item?.allowed === false)) return false
   const blockedActions = decision?.verify?.blocked_actions || decision?.verify?.blockedActions || []
   if (Array.isArray(blockedActions) && blockedActions.length > 0) return false
-  const steps = decision?.todo_plan?.steps || decision?.todoPlan?.steps || decision?.user_plan_steps || decision?.userPlanSteps || []
-  const hasActiveStep = steps.some(step => [
-    'in_progress',
-    'running',
-    'reviewing',
-    'reworking',
-    'needs_confirmation',
-    'needs_user',
-    'blocked',
-    'failed',
-  ].includes(String(step?.status || '').toLowerCase()))
-  return !hasActiveStep
+  return true
 }
 
 /** @deprecated use isQuietMainAgentDecision */

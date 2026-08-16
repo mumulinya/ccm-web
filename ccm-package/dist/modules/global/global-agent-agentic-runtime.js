@@ -42,6 +42,7 @@ const source_ingestion_1 = require("../requirements/source-ingestion");
 const knowledge_access_1 = require("../knowledge/knowledge-access");
 const project_runtime_1 = require("../projects/project-runtime");
 const main_agent_turn_1 = require("../../agents/main-agent-turn");
+const global_native_query_adapter_1 = require("./global-native-query-adapter");
 const global_agent_tool_authorization_1 = require("./global-agent-tool-authorization");
 const main_agent_tool_runtime_1 = require("../../tools/main-agent-tool-runtime");
 const workspace_read_context_1 = require("../../tools/workspace-read-context");
@@ -1493,42 +1494,19 @@ function createGlobalAgentAgenticRuntime(deps) {
                             input.onEvent?.({ type: "model_activity", activity: activityValue });
                         },
                     });
-                    let deltaSequence = 0;
-                    const replyExtractor = (0, model_activity_1.createSafeJsonReplyDeltaExtractor)(delta => {
-                        activity.onDelta(delta);
-                        markVisibleFeedback();
-                        deltaSequence += 1;
-                        input.onEvent?.({
-                            type: "response_delta", text: delta, model_call_index: modelCallIndex + 1,
-                            sequence: deltaSequence, final: false,
-                        });
-                    });
-                    return callGlobalModelWithRetry(config, providerMessages, {
+                    return (0, global_native_query_adapter_1.runGlobalNativeQueryCall)({
+                        config,
+                        messages: providerMessages,
+                        run,
                         signal,
-                        retryProfile: modelCallIndex === 0 ? "interactive_first_turn" : "agent_orchestration",
-                        onDelta: delta => { markProviderToken(); replyExtractor.push(delta); },
-                        onRetry: (notice) => {
-                            streamMetric.providerRetryCount = Number(streamMetric.providerRetryCount || 0) + 1;
-                            activity.onRetry(notice.attempt + 1);
-                            input.onEvent?.({
-                                type: "retrying",
-                                attempt: notice.attempt + 1,
-                                max_attempts: notice.maxAttempts,
-                                remaining_budget_ms: Math.max(0, (modelCallIndex === 0 ? 60_000 : 120_000) - Number(notice.elapsedMs || 0)),
-                                reason: String(notice.error?.message || notice.error || "模型暂时不可用").slice(0, 240),
-                            });
+                        executeTool: (name, args, currentRun, toolSignal) => executeAgenticTool(baseUrl, ctx, name, args, currentRun, input.onEvent, toolSignal),
+                        onEvent: event => {
+                            if (event?.type === "response_delta")
+                                activity.onDelta(event.text);
+                            input.onEvent?.(event);
                         },
-                        providerContextCache: {
-                            scope: "global",
-                            scopeId: String(run.session_id || ""),
-                            sessionId: String(run.session_id || ""),
-                            generation: Number(run.generation || 0),
-                            boundaryGeneration: Number(providerCacheBoundary?.boundaryGeneration || 0),
-                            source: "global_main_agent",
-                        },
-                        onProviderContextCache: (receipt) => {
-                            run.latest_provider_context_cache = receipt;
-                        },
+                        markVisibleFeedback,
+                        markProviderToken,
                         onUsage: (usage) => {
                             run.latest_context_usage = usage;
                             accumulateGlobalAgentRunUsage(run, usage);
@@ -1536,7 +1514,7 @@ function createGlobalAgentAgenticRuntime(deps) {
                     }).then(async (result) => {
                         activity.complete();
                         const resultState = String(result?.state || "").toLowerCase();
-                        if (replyExtractor.emitted || !["answer", "clarify", "needs_clarification"].includes(resultState))
+                        if (String(result?.message || "").trim() || !["answer", "clarify", "needs_clarification", "needs_confirmation"].includes(resultState))
                             return result;
                         streamMetric.fallbackStreamCount = Number(streamMetric.fallbackStreamCount || 0) + 1;
                         const synthesisCallIndex = Math.max(0, Number(run.main_model_call_count || 0)) + 1;
@@ -1663,7 +1641,7 @@ function createGlobalAgentAgenticRuntime(deps) {
                     if (modelDecision) {
                         modelDecision.state = "plan";
                         modelDecision.tool = undefined;
-                        modelDecision.message = modelDecision.message || "已在 Plan Mode 中完成分析；退出 Plan Mode 后才能执行写操作。";
+                        modelDecision.message = modelDecision.message || "已在 Plan Mode 中完成分析；确认并执行后会切回 Agent，并按这份计划开工。";
                     }
                 }
                 const responseType = modelDecision?.tool

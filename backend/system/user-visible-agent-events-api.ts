@@ -5,7 +5,7 @@ import {
   subscribeUserVisibleAgentEvents,
   type UserVisibleAgentEvent,
 } from "./user-visible-agent-events";
-import { buildToolDisplayDetail, isWorkspaceReadonlyToolName } from "./tool-display-projection";
+import { buildToolDisplayDetail, isWorkspaceReadonlyToolName, workspaceReadonlyContractVersion } from "./tool-display-projection";
 import { executeWorkspaceReadonlyTool, sealScopedToolCapability } from "../tools/workspace-readonly-tools";
 import { loadGroups } from "../modules/collaboration/storage";
 import { sendJson } from "../core/utils";
@@ -15,6 +15,7 @@ import { getConfigs } from "../core/db";
 import { hasResourceAccess, hasTaskResourceAccess } from "../modules/system/access-policy";
 import { loadTasks } from "../core/db";
 import { getCommandLiveTail } from "./command-live-progress";
+import { projectEventFileDiff } from "./event-file-diff";
 
 function identity(query: any) {
   return {
@@ -34,6 +35,64 @@ function writeEvent(res: ServerResponse, event: UserVisibleAgentEvent) {
   if (event.sequence > 0) res.write(`id: ${event.sequence}\n`);
   res.write(`event: agent_execution\n`);
   res.write(`data: ${JSON.stringify(event)}\n\n`);
+}
+
+function normalizedToolPath(value: any) {
+  return String(value || "").replace(/\\/g, "/").replace(/^\.\//, "").trim();
+}
+
+function observedFileChecksums(event: UserVisibleAgentEvent) {
+  const rows: any[] = Array.isArray(event.detail?.toolDisplay?.result?.rows) ? event.detail.toolDisplay.result.rows as any[] : [];
+  const checksums = new Map<string, string>();
+  for (const row of rows) {
+    const filePath = normalizedToolPath(row?.path);
+    const value = String(row?.checksum || "").trim();
+    if (filePath && value) checksums.set(filePath, value);
+  }
+  const singlePath = normalizedToolPath(event.detail?.safeArguments?.path);
+  const singleRevision = String(event.detail?.toolDisplay?.result?.authoritativeRevision || "").trim();
+  if (singlePath && singleRevision && !checksums.has(singlePath)) checksums.set(singlePath, singleRevision);
+  return checksums;
+}
+
+function attachSourceFreshness(event: UserVisibleAgentEvent, current: any) {
+  const observed = observedFileChecksums(event);
+  const fileRows = Array.isArray(current?.result?.fileRows) ? current.result.fileRows : [];
+  for (const row of fileRows) {
+    const filePath = normalizedToolPath(row?.path);
+    const observedChecksum = String(observed.get(filePath) || "").trim();
+    const currentChecksum = String(row?.checksum || row?.currentChecksum || "").trim();
+    row.observedChecksum = observedChecksum || undefined;
+    row.currentChecksum = currentChecksum || undefined;
+    row.freshness = observedChecksum && currentChecksum && observedChecksum !== currentChecksum ? "drifted" : "current";
+  }
+  if (fileRows.some((row: any) => row.freshness === "drifted")) current.result.freshness = "drifted";
+  else if (fileRows.length) current.result.freshness = "current";
+  return current;
+}
+
+function canReadCurrentSource(req: IncomingMessage, event: UserVisibleAgentEvent) {
+  const principal = (req as any).ccmAuth;
+  if (!principal || principal.kind !== "browser" || principal.role === "admin") return true;
+  const userId = String(principal.userId || "");
+  if (event.scope === "project" && !hasResourceAccess(userId, principal.role, "project", event.scopeId, "use")) return false;
+  if (event.scope === "group" && !hasResourceAccess(userId, principal.role, "group", event.scopeId, "use")) return false;
+  const requestedProject = String(event.detail?.safeArguments?.project_id || event.detail?.safeArguments?.projectId || event.detail?.safeArguments?.project || (event.scope === "project" ? event.scopeId : "")).trim();
+  return !!requestedProject && hasResourceAccess(userId, principal.role, "project", requestedProject, "use");
+}
+
+function eventDiffProject(event: UserVisibleAgentEvent, requestedPath: string) {
+  const normalized = normalizedToolPath(requestedPath);
+  const row: any = (Array.isArray(event.detail?.fileChanges) ? event.detail.fileChanges : [])
+    .find((item: any) => normalizedToolPath(item?.path || item?.file || item?.name) === normalized);
+  const task: any = event.taskId ? loadTasks().find((item: any) => String(item?.id || "") === String(event.taskId)) : null;
+  return String(row?.project || event.detail?.agentDisplay?.projectId || task?.target_project || task?.targetProject || (event.scope === "project" ? event.scopeId : "")).trim();
+}
+
+function canReadProjectCode(req: IncomingMessage, project: string) {
+  const principal = (req as any).ccmAuth;
+  if (!principal || principal.kind !== "browser" || principal.role === "admin") return true;
+  return !!project && hasResourceAccess(String(principal.userId || ""), principal.role, "project", project, "use");
 }
 
 export async function rehydrateReadonlyToolDetail(event: UserVisibleAgentEvent, options: any = {}) {
@@ -58,9 +117,13 @@ export async function rehydrateReadonlyToolDetail(event: UserVisibleAgentEvent, 
   });
   let executionArguments: any = event.detail.safeArguments;
   const continuationFiles = Array.isArray(options?.continuation?.files) ? options.continuation.files : [];
-  const continueBatchRead = options?.continue === true && /(?:^|__)read_files$/i.test(String(event.toolName || ""));
-  if (continueBatchRead) {
-    const originalPaths = new Set((Array.isArray(event.detail.safeArguments?.paths) ? event.detail.safeArguments.paths : [])
+  const continueSourceRead = options?.continue === true && /(?:^|__)read_files?$/i.test(String(event.toolName || ""));
+  if (continueSourceRead) {
+    const isBatch = /(?:^|__)read_files$/i.test(String(event.toolName || ""));
+    const originalValues = isBatch
+      ? (Array.isArray(event.detail.safeArguments?.paths) ? event.detail.safeArguments.paths : [])
+      : [event.detail.safeArguments?.path];
+    const originalPaths = new Set(originalValues
       .map((item: any) => String(typeof item === "string" ? item : item?.path || "").replace(/\\/g, "/").trim())
       .filter(Boolean));
     const paths = continuationFiles.slice(0, 20).map((item: any) => ({
@@ -69,14 +132,21 @@ export async function rehydrateReadonlyToolDetail(event: UserVisibleAgentEvent, 
       expectedChecksum: String(item?.checksum || ""),
     })).filter((item: any) => item.path && originalPaths.has(item.path));
     if (!paths.length) throw Object.assign(new Error("没有可继续读取的文件"), { statusCode: 409 });
-    executionArguments = {
+    executionArguments = isBatch ? {
       ...event.detail.safeArguments,
       // Continue in bounded chunks. An explicit offset without a limit means
       // "read to EOF" in the V3 contract and can exceed the per-file budget.
       paths: paths.map((item: any) => ({ path: item.path, offset: item.offset, limit: 100, expected_checksum: item.expectedChecksum })),
+    } : {
+      ...event.detail.safeArguments,
+      path: paths[0].path,
+      offset: paths[0].offset,
+      limit: 100,
+      expected_checksum: paths[0].expectedChecksum,
     };
     const result = await executeWorkspaceReadonlyTool(event.toolName, executionArguments, capabilityToken, 3) as any;
-    const rawFiles = Array.isArray(result?.modelPayload?.files) ? result.modelPayload.files : [];
+    const rawPayload = result?.modelPayload || result;
+    const rawFiles = isBatch && Array.isArray(rawPayload?.files) ? rawPayload.files : [rawPayload];
     const changed = paths.find((item: any) => item.expectedChecksum
       && rawFiles.find((file: any) => String(file?.path || "") === item.path)?.checksum !== item.expectedChecksum);
     if (changed) throw Object.assign(new Error(`文件内容已变化，请重新读取当前详情：${changed.path}`), { statusCode: 409 });
@@ -89,9 +159,14 @@ export async function rehydrateReadonlyToolDetail(event: UserVisibleAgentEvent, 
     });
     const pendingCount = Number(current.result.continuation?.pendingCount || 0);
     current.result.summary = `已继续读取 ${paths.length} 个文件${pendingCount ? `，仍有 ${pendingCount} 个文件未读完` : "，剩余内容已读完"}`;
-    return current;
+    return attachSourceFreshness(event, current);
   }
-  const result = await executeWorkspaceReadonlyTool(event.toolName, executionArguments, capabilityToken, event.detail?.toolContractVersion === 3 ? 3 : 2);
+  const result = await executeWorkspaceReadonlyTool(
+    event.toolName,
+    executionArguments,
+    capabilityToken,
+    workspaceReadonlyContractVersion(event.toolName, event.detail?.toolContractVersion),
+  );
   const current = buildToolDisplayDetail({
     toolName: event.toolName,
     arguments: event.detail.safeArguments,
@@ -102,7 +177,7 @@ export async function rehydrateReadonlyToolDetail(event: UserVisibleAgentEvent, 
   const previousRevision = String(event.detail?.toolDisplay?.result?.authoritativeRevision || "");
   const currentRevision = String(current.result.authoritativeRevision || "");
   if (previousRevision && currentRevision && previousRevision !== currentRevision) current.result.freshness = "drifted";
-  return current;
+  return attachSourceFreshness(event, current);
 }
 
 function rehydrateFailureFreshness(error: any) {
@@ -128,6 +203,14 @@ export function handleUserVisibleAgentEventsApi(pathname: string, req: IncomingM
         const event = getUserVisibleAgentEvent(filter, decodeURIComponent(detailMatch[1]));
         if (!event) return sendJson(res, { success: false, error: "工具事件不存在或不属于当前精确会话" }, 404);
         const options = body ? JSON.parse(body) : {};
+        if (options?.includeDiff === true) {
+          const requestedPath = normalizedToolPath(options?.path);
+          if (!requestedPath) return sendJson(res, { success: false, error: "Diff详情请求缺少文件路径", contentStored: false }, 400);
+          const project = eventDiffProject(event, requestedPath);
+          if (!canReadProjectCode(req, project)) return sendJson(res, { success: false, error: "当前账户没有目标项目的源码读取权限", freshness: "permission_revoked", contentStored: false }, 403);
+          const detail = projectEventFileDiff(event, requestedPath, project);
+          return sendJson(res, { success: true, ...detail });
+        }
         if (options?.includeLiveTail === true) {
           const principal = (req as any).ccmAuth;
           const task = event.taskId ? loadTasks().find((item: any) => String(item?.id || "") === String(event.taskId)) : null;
@@ -149,6 +232,8 @@ export function handleUserVisibleAgentEventsApi(pathname: string, req: IncomingM
           const liveTail = commandRunId ? getCommandLiveTail(commandRunId) : null;
           return sendJson(res, { success: true, schema: "ccm-tool-detail-response-v1", toolDisplay: event.detail?.toolDisplay || null, liveTail, contentStored: false });
         }
+        if (options?.includeSource !== true) return sendJson(res, { success: false, error: "源码详情请求缺少明确读取标记", contentStored: false }, 400);
+        if (!canReadCurrentSource(req, event)) return sendJson(res, { success: false, error: "当前账户没有目标项目的源码读取权限", freshness: "permission_revoked", contentStored: false }, 403);
         const toolDisplay = await rehydrateReadonlyToolDetail(event, options);
         sendJson(res, { success: true, schema: "ccm-tool-detail-response-v1", toolDisplay, contentStored: false });
       } catch (error: any) {

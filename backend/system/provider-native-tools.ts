@@ -21,6 +21,15 @@ function checksum(value: any) {
   return crypto.createHash("sha256").update(JSON.stringify(value ?? null)).digest("hex");
 }
 
+function providerContentText(value: any) {
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) {
+    return value.map(item => typeof item === "string" ? item : String(item?.text || item?.content || "")).join("");
+  }
+  if (value && typeof value === "object") return String(value.text || value.content || "");
+  return "";
+}
+
 function parseArguments(value: any) {
   if (value && typeof value === "object") return value;
   try { const parsed = JSON.parse(String(value || "{}")); return parsed && typeof parsed === "object" ? parsed : {}; }
@@ -45,7 +54,7 @@ export function providerToolsRequestPatch(family: "openai" | "anthropic" | "gemi
 export function parseOpenAiAgentTurn(data: any, usage: LlmTokenUsage): ProviderAgentTurn {
   const message = data?.choices?.[0]?.message || {};
   return {
-    text: String(message.content || ""),
+    text: providerContentText(message.content),
     toolCalls: (message.tool_calls || []).map((item: any) => call(item.id, item.function?.name, item.function?.arguments)),
     toolReferences: [],
     stopReason: String(data?.choices?.[0]?.finish_reason || ""),
@@ -86,28 +95,42 @@ export function turnForLegacyJsonLoop(turn: ProviderAgentTurn) {
   return turn.text.trim();
 }
 
-export function createOpenAiStreamTurnAccumulator() {
+function tryCompleteToolCall(row: { id: string; name: string; arguments: string }, emitted: Set<string>, onToolCallReady?: (item: ProviderToolCall) => void) {
+  if (!row.name || !String(row.arguments || "").trim() || emitted.has(`${row.id}:${row.name}`)) return;
+  try {
+    const parsed = JSON.parse(String(row.arguments));
+    if (!parsed || typeof parsed !== "object") return;
+    const item = call(row.id, row.name, parsed);
+    emitted.add(`${row.id}:${row.name}`);
+    onToolCallReady?.(item);
+  } catch {}
+}
+
+export function createOpenAiStreamTurnAccumulator(onToolCallReady?: (item: ProviderToolCall) => void) {
   const calls = new Map<number, { id: string; name: string; arguments: string }>();
+  const emitted = new Set<string>();
   let text = "";
   let stopReason = "";
   return {
     push(event: any) {
       const choice = event?.choices?.[0];
-      text += String(choice?.delta?.content || "");
+      text += providerContentText(choice?.delta?.content);
       stopReason = String(choice?.finish_reason || stopReason || "");
       for (const item of choice?.delta?.tool_calls || []) {
         const index = Number(item.index || 0);
         const row = calls.get(index) || { id: "", name: "", arguments: "" };
         row.id += String(item.id || ""); row.name += String(item.function?.name || ""); row.arguments += String(item.function?.arguments || "");
         calls.set(index, row);
+        tryCompleteToolCall(row, emitted, onToolCallReady);
       }
     },
     finish(usage: LlmTokenUsage): ProviderAgentTurn { return { text, toolCalls: [...calls.values()].map(row => call(row.id, row.name, row.arguments)), toolReferences: [], stopReason, usage }; },
   };
 }
 
-export function createAnthropicStreamTurnAccumulator() {
+export function createAnthropicStreamTurnAccumulator(onToolCallReady?: (item: ProviderToolCall) => void) {
   const blocks = new Map<number, any>();
+  const emitted = new Set<string>();
   let text = "";
   let stopReason = "";
   return {
@@ -118,6 +141,17 @@ export function createAnthropicStreamTurnAccumulator() {
         if (event?.delta?.type === "text_delta") { block.text = String(block.text || "") + String(event.delta.text || ""); text += String(event.delta.text || ""); }
         if (event?.delta?.type === "input_json_delta") block.partial += String(event.delta.partial_json || "");
         blocks.set(Number(event.index || 0), block);
+        if (block.type === "tool_use") tryCompleteToolCall({ id: String(block.id || ""), name: String(block.name || ""), arguments: String(block.partial || "") }, emitted, onToolCallReady);
+      }
+      if (event?.type === "content_block_stop") {
+        const block = blocks.get(Number(event.index || 0));
+        if (block?.type === "tool_use") {
+          const item = call(block.id, block.name, block.input || block.partial);
+          if (!emitted.has(`${item.id}:${item.name}`)) {
+            emitted.add(`${item.id}:${item.name}`);
+            onToolCallReady?.(item);
+          }
+        }
       }
       stopReason = String(event?.delta?.stop_reason || event?.stop_reason || stopReason || "");
     },

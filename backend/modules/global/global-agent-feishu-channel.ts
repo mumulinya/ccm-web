@@ -602,7 +602,9 @@ export function createGlobalAgentFeishuChannel(deps: any) {
         String(error?.code || ""),
         String(error?.message || ""),
       ].some(value => /MODEL|PROVIDER|TIMEOUT|NETWORK|大模型|模型不可用|模型未配置/i.test(value));
-      if ((error?.code === "CONVERSATION_ROUTE_REQUIRED" || modelCouldNotRoute) && String(options.turnId || options.turn_id || "").trim()) {
+      if ((error?.code === "CONVERSATION_ROUTE_REQUIRED" || modelCouldNotRoute)
+        && recoverableCandidates.length > 0
+        && String(options.turnId || options.turn_id || "").trim()) {
         const turnId = String(options.turnId || options.turn_id || "").trim();
         const currentTurn = conversationTurnControl.listInternal({ scope: "feishu", conversation_id: conversationId, limit: 500 }).turns.find((item: any) => item.id === turnId);
         if (currentTurn?.status === "sending") {

@@ -1442,6 +1442,7 @@ function handleRequest(req, res) {
                     projectSessionId: exactProjectSessionId,
                     userMessage: finalMessage,
                     turnId: String(sourceIngestion?.client_message_id || safeClientMessageId || ""),
+                    anchorMessageId: String(safeAssistantMessageId || ""),
                     sourceCount: Number(sourceIngestion?.source_count || sourceIngestion?.sources?.length || files?.length || 0),
                     originalRequestChecksum: crypto.createHash("sha256").update(String(message || "")).digest("hex"),
                     clarificationRound: resolvedProjectClarification ? Math.min(2, Number(resolvedProjectClarification.projection.round || 1) + 1) : 1,
@@ -1456,7 +1457,11 @@ function handleRequest(req, res) {
                 });
             }
             catch (error) {
-                if (!explicitRouteChoice && source === "web" && exactProjectSessionId) {
+                // A route choice only makes sense when there is an actual old task to
+                // choose. Without a recoverable candidate, surface the model/provider
+                // failure and let the user retry instead of showing a misleading
+                // "continue or start new" card.
+                if (!explicitRouteChoice && source === "web" && exactProjectSessionId && recoverableProjectCandidates.length > 0) {
                     try {
                         let routeTurn = conversationTurnId
                             ? conversation_turn_control_1.conversationTurnControl.listInternal({ scope: "project", conversation_id: `${project}:${exactProjectSessionId}`, limit: 500 }).turns.find(item => item.id === conversationTurnId)
@@ -1497,7 +1502,7 @@ function handleRequest(req, res) {
                 const failedAt = new Date().toISOString();
                 const failedDurationMs = Math.max(0, Date.now() - projectMainMetricStartedAt);
                 const rawFailure = String(error?.message || error || "");
-                const providerUnavailable = /(?:HTTP\s*50[0234]|service temporarily unavailable|timeout|timed out|ECONNRESET|ECONNREFUSED|模型服务.*不可用|provider.*unavailable)/i.test(rawFailure);
+                const providerUnavailable = /(?:HTTP\s*50[0234]|service temporarily unavailable|timeout|timed out|ECONNRESET|ECONNREFUSED|模型服务.*不可用|provider.*unavailable|模型返回空响应|empty (?:model )?response)/i.test(rawFailure);
                 const safeFailureText = providerUnavailable
                     ? "模型服务暂时不可用，自动重试后仍未恢复；本轮没有启动项目 Agent，也没有修改代码。请稍后直接重试。"
                     : "项目主 Agent 暂时无法形成可靠的后续方案；本轮没有启动项目 Agent，也没有修改代码。请重试或检查模型配置。";
@@ -1671,9 +1676,17 @@ function handleRequest(req, res) {
                 const visibleProjectReply = source === "feishu" && clarificationProjection
                     ? (0, pre_plan_clarification_1.formatPrePlanClarificationText)(clarificationProjection)
                     : directProjectReply;
+                const clarificationSummary = projectFirstTurn.clarificationSummary
+                    || (clarificationProjection ? (0, pre_plan_clarification_1.buildConversationClarificationSummary)({
+                        schema: "ccm-project-main-agent-clarification-summary-v1",
+                        question: visibleProjectReply,
+                        prePlanClarification: clarificationProjection,
+                    }) : null);
                 persistConversationReply(visibleProjectReply, "conversation", clarificationProjection ? {
                     prePlanClarification: { ...clarificationProjection, anchorMessageId: safeAssistantMessageId },
                     pre_plan_clarification: { ...clarificationProjection, anchorMessageId: safeAssistantMessageId },
+                    clarificationSummary,
+                    clarification_summary: clarificationSummary,
                     clarificationContext: { schema: "ccm-project-clarification-context-v1", originalRequest: message, status: "pending" },
                     clarification_context: { schema: "ccm-project-clarification-context-v1", original_request: message, status: "pending" },
                 } : {});
@@ -1682,12 +1695,12 @@ function handleRequest(req, res) {
                     writeSse(res, { type: "turn_decision", decision: projectFirstTurn.turnDecision, receipt: projectFirstTurn.turnReceipt });
                     for (const item of projectFirstTurn.toolResults || [])
                         writeSse(res, { type: "tool_activity", phase: item.ok === false ? "failed" : "completed", tool: item.name, scope: item.scope || "project", source: item.source || item.toolKind || "", loaded: item.loaded !== false, output_tokens: item.outputTokens || 0, duration_ms: item.durationMs || 0, result_checksum: item.resultChecksum || "", error: item.error || "" });
-                    writeSse(res, { type: "presentation", message_mode: "conversation", show_task_card: false, main_agent: "project", direct_reply_fast_path: true, prePlanClarification: clarificationProjection, pre_plan_clarification: clarificationProjection });
+                    writeSse(res, { type: "presentation", message_mode: "conversation", show_task_card: false, main_agent: "project", direct_reply_fast_path: true, prePlanClarification: clarificationProjection, pre_plan_clarification: clarificationProjection, clarificationSummary, clarification_summary: clarificationSummary });
                     if (!projectReplyDeltaEmitted && visibleProjectReply)
                         emitProjectReplyDelta(visibleProjectReply);
                     if (!res.destroyed && !res.writableEnded) {
                         writeSse(res, { type: "response_completed", sequence: projectReplySequence, final: true });
-                        writeSse(res, { type: "done", message_id: safeAssistantMessageId, message_mode: "conversation", main_agent: "project", taskExperience: null, direct_reply_fast_path: true, final_text: visibleProjectReply, prePlanClarification: clarificationProjection, pre_plan_clarification: clarificationProjection });
+                        writeSse(res, { type: "done", message_id: safeAssistantMessageId, message_mode: "conversation", main_agent: "project", taskExperience: null, direct_reply_fast_path: true, final_text: visibleProjectReply, prePlanClarification: clarificationProjection, pre_plan_clarification: clarificationProjection, clarificationSummary, clarification_summary: clarificationSummary });
                     }
                 }
                 scheduleFeishuSessionTitle(visibleProjectReply);

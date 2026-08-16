@@ -19,12 +19,15 @@ export type ToolDisplayDetailV1 = {
     rows?: unknown[];
     fileRows?: Array<{
       path: string;
-      status: "completed" | "partial" | "unchanged";
+      status: "completed" | "partial" | "unchanged" | "failed";
       from: number;
       to: number;
       totalLines: number;
       nextOffset?: number;
       checksum?: string;
+      observedChecksum?: string;
+      currentChecksum?: string;
+      freshness?: "current" | "drifted" | "deleted" | "permission_revoked";
       lines: Array<{ line: number; text: string }>;
     }>;
     preview?: string;
@@ -32,7 +35,7 @@ export type ToolDisplayDetailV1 = {
     truncated: boolean;
     nextCursor?: string;
     continuation?: {
-      kind: "read_files";
+      kind: "read_file" | "read_files";
       pendingCount: number;
       files: Array<{ path: string; nextOffset: number; checksum: string }>;
     };
@@ -65,14 +68,15 @@ function resultPresentation(operation: string, rows: any[], raw: any): ToolResul
     ...(options.status ? { status: cleanText(options.status, 80) } : {}),
   });
   if (operation === "list_directory") {
-    const directories = safeRows.filter(row => row?.type === "directory").map(row => item(row.name || row.path, { path: row.path, status: "directory" }));
-    const files = safeRows.filter(row => row?.type !== "directory").map(row => item(row.name || row.path, { path: row.path, status: "file" }));
-    return { layout: "directory", groups: [
-      { id: "directories", label: "目录", count: directories.length, items: directories },
-      { id: "files", label: "文件", count: files.length, items: files },
-    ].filter(group => group.count) };
+    const items = safeRows.map(row => {
+      const isDir = row?.type === "directory";
+      const name = cleanText(row.name || row.path, 500).replace(/\\/g, "/");
+      const base = name.split("/").filter(Boolean).at(-1) || name;
+      return item(isDir ? `${base.replace(/\/$/, "")}/` : base, { path: row.path || name, status: isDir ? "directory" : "file" });
+    });
+    return { layout: "directory", groups: items.length ? [{ id: "listing", label: "", count: items.length, items }] : [] };
   }
-  if (operation === "glob_files") return { layout: "files", groups: [{ id: "files", label: "匹配文件", count: safeRows.length, items: safeRows.map(row => item(row.path || row.name, { path: row.path || row.name, status: "file" })) }] };
+  if (operation === "glob_files") return { layout: "files", groups: [{ id: "listing", label: "", count: safeRows.length, items: safeRows.map(row => item(row.path || row.name, { path: row.path || row.name, status: "file" })) }] };
   if (operation === "grep_text") {
     const items = safeRows.map(row => {
       const location = cleanText(row?.location || row?.path, 800);
@@ -105,19 +109,20 @@ function resultPresentation(operation: string, rows: any[], raw: any): ToolResul
     return {
       layout: "file_content",
       groups: sourceRows.length ? [{
-        id: "files",
-        label: operation === "read_files" ? "读取文件" : "读取范围",
+        id: "listing",
+        label: "",
         count: sourceRows.length,
         items: sourceRows.map(row => {
           const from = Number(row?.from || 0);
           const to = Number(row?.to || 0);
           const totalLines = Number(row?.totalLines || row?.total_lines || 0);
-          const range = from ? `第 ${from}${to > from ? `–${to}` : ""} 行${totalLines ? ` · 共 ${totalLines} 行` : ""}` : "";
+          const range = from ? `${from}${to > from ? `–${to}` : ""}${totalLines ? `/${totalLines}` : ""}` : "";
           const status = cleanText(row?.status, 80);
+          const usefulStatus = status && !/已读完|读取范围/.test(status) ? status : "";
           return item(row?.path || "文件", {
             path: row?.path,
             status: status.includes("失败") ? "failed" : status.includes("部分") ? "partial" : "file",
-            secondary: [range, status, row?.reason].filter(Boolean).join(" · "),
+            secondary: [range, usefulStatus, row?.reason].filter(Boolean).join(" · "),
           });
         }),
       }] : [],
@@ -134,6 +139,14 @@ const cleanText = (value: any, max = 1500) => String(value ?? "")
   .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [redacted]")
   .replace(/[\0\r\t]+/g, " ")
   .trim()
+  .slice(0, max);
+
+// Source rows are transient and need to preserve indentation. Keep tabs and
+// spaces intact while applying the same credential redaction boundary.
+const cleanSourceLine = (value: any, max = 12_000) => String(value ?? "")
+  .replace(/((?:api[_-]?key|access[_-]?token|authorization|cookie|password|secret|credential)\s*[:=]\s*["']?)[^\s,"'}]{6,}/gi, "$1[redacted]")
+  .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [redacted]")
+  .replace(/[\0\r]/g, "")
   .slice(0, max);
 
 function parseToolName(input: any) {
@@ -221,7 +234,7 @@ function redactedCommand(args: Record<string, any>) {
 
 const argumentLabels: Record<string, string> = {
   project_id: "项目", projectId: "项目", path: "路径", pattern: "检索内容", query: "查询",
-  symbol: "符号", glob: "文件范围", offset: "起始行", limit: "数量上限", token_budget: "Token预算",
+  symbol: "符号", glob: "文件范围", offset: "起始行", limit: "数量上限",
   staged: "暂存区", profile_id: "运行配置", kind: "类型", name: "名称", url: "网址",
   paths: "文件列表", source: "来源路径", destination: "目标路径", expected_checksum: "文件版本",
   work_item_id: "工作项", attempt: "尝试次数", lease_id: "任务租约", replace_all: "替换全部",
@@ -288,6 +301,16 @@ function resultProjection(operation: string, rawInput: any, error: any, transien
   if (error) return { kind: "error", summary: cleanText(error, 500) || "工具执行失败", truncated: false };
   const raw = unwrapResult(rawInput);
   if (raw == null || raw === "") return { kind: "empty", summary: "没有返回内容", truncated: false };
+  if (raw?.status === "needs_project_id" || raw?.schema === "ccm-workspace-project-required-v1") {
+    const names = (Array.isArray(raw.available_projects) ? raw.available_projects : [])
+      .map((item: any) => String(item || "").trim())
+      .filter(Boolean);
+    return {
+      kind: "summary",
+      summary: names.length ? `请选择要查看的项目：${names.join("、")}` : "请指定要查看的项目",
+      truncated: false,
+    };
+  }
   const total = Number(raw?.total ?? raw?.total_count ?? raw?.locations?.length ?? raw?.diagnostics?.length ?? raw?.items?.length ?? 0);
   const truncated = raw?.truncated === true;
   const nextCursor = cleanText(raw?.next_cursor || raw?.nextCursor || "", 300);
@@ -312,8 +335,13 @@ function resultProjection(operation: string, rawInput: any, error: any, transien
   }
   if (operation === "glob_files") {
     const rows = (Array.isArray(raw?.items) ? raw.items : []).slice(0, 40).map((item: any) => ({ path: cleanText(item?.path || item, 800) }));
-    const count = total || rows.length;
-    const summary = count > 0 ? `找到 ${count} 个文件${partialSuffix}`
+    const count = Number(raw?.numFiles ?? raw?.itemCount ?? raw?.safeReceipt?.itemCount ?? rows.length);
+    const pageCount = Number.isFinite(count) ? Math.max(0, count) : rows.length;
+    const found = total || pageCount;
+    const summary = found > 0
+      ? (total > pageCount && pageCount > 0
+        ? `找到 ${total} 个文件，本页 ${pageCount} 个${partialSuffix}`
+        : `找到 ${found} 个文件${partialSuffix}`)
       : searchExecution?.partial ? `暂未返回匹配文件${partialSuffix}，可缩小目录或模式后重试`
         : "未找到匹配文件";
     return { kind: "list", summary, rows, presentation: resultPresentation(operation, rows, raw), ...(searchExecution ? { searchExecution } : {}), ...paging };
@@ -373,22 +401,25 @@ function resultProjection(operation: string, rawInput: any, error: any, transien
       ...(from > 0 ? { from, to: Math.max(from, to) } : {}),
       ...(Number(file?.total_lines || file?.totalLines || 0) > 0 ? { totalLines: Number(file?.total_lines || file?.totalLines) } : {}),
       ...(file?.status === "failed" || file?.type === "text_error" ? { reason: cleanText(file?.error || "文件读取失败", 500) } : {}),
+      ...(file?.checksum ? { checksum: cleanText(file.checksum, 160) } : {}),
       ...(file?.truncated === true && Number(file?.next_cursor || file?.nextCursor || 0) > 0
         ? { nextLine: Number(file?.next_cursor || file?.nextCursor) } : {}),
       });
     });
-    const fileRows = transientBody ? files.filter((file: any) => file?.status !== "failed" && file?.type !== "text_error").slice(0, 40).map((file: any) => {
+    const fileRows = transientBody ? files.slice(0, 40).map((file: any) => {
       const sourceLines = Array.isArray(file?.lines) ? file.lines : [];
       const normalizedLines = sourceLines.slice(0, 2000).map((line: any, index: number) => ({
         line: Math.max(1, Number(line?.line || Number(file?.offset || 1) + index)),
-        text: cleanText(line?.text ?? line ?? "", 12_000),
+        text: cleanSourceLine(line?.text ?? line ?? "", 12_000),
       }));
       const from = Number(normalizedLines[0]?.line || file?.offset || 1);
       const to = Number(normalizedLines.at(-1)?.line || from);
       const nextOffset = Number(file?.next_cursor || file?.nextCursor || 0);
       return {
         path: cleanText(file?.path || "文件", 800),
-        status: file?.status === "unchanged" || file?.type === "file_unchanged" ? "unchanged" as const : file?.truncated === true ? "partial" as const : "completed" as const,
+        status: file?.status === "failed" || file?.type === "text_error" ? "failed" as const
+          : file?.status === "unchanged" || file?.type === "file_unchanged" ? "unchanged" as const
+            : file?.truncated === true ? "partial" as const : "completed" as const,
         from: Math.max(1, from),
         to: Math.max(Math.max(1, from), to),
         totalLines: Math.max(to, Number(file?.total_lines || file?.totalLines || to)),
@@ -438,10 +469,45 @@ function resultProjection(operation: string, rawInput: any, error: any, transien
       return { kind: "summary", summary: `已读取 Notebook${cells ? ` · ${cells} 个单元格` : ""}`, presentation: resultPresentation(operation, [], raw), rehydratable: true, ...paging };
     }
     const sourceRows = Array.isArray(raw?.lines) ? raw.lines : [];
-    const rows = transientBody ? sourceRows.slice(0, 40).map((item: any) => ({ line: Number(item?.line || 0), text: cleanText(item?.text || "", 12_000) })) : undefined;
+    const sourceLines = transientBody ? sourceRows.slice(0, 2000).map((item: any) => ({ line: Math.max(1, Number(item?.line || 1)), text: cleanSourceLine(item?.text ?? "", 12_000) })) : [];
     const from = Number(raw?.offset || sourceRows[0]?.line || 0);
     const to = Number(sourceRows.at(-1)?.line || from);
-    return { kind: transientBody ? "text" : "summary", summary: `读取 ${cleanText(raw?.path || "文件", 500)}${from ? ` 第 ${from}${to > from ? `–${to}` : ""} 行` : ""}`, ...(rows ? { rows } : {}), presentation: resultPresentation(operation, [], raw), rehydratable: !transientBody, ...paging };
+    const totalLines = Math.max(to, Number(raw?.total_lines || raw?.totalLines || to));
+    const checksum = cleanText(raw?.checksum || raw?.safeReceipt?.checksum || "", 160);
+    const metadataRows = [{
+      path: cleanText(raw?.path || "文件", 800),
+      status: raw?.truncated === true ? "部分读取" : "已读完",
+      ...(from > 0 ? { from, to: Math.max(from, to) } : {}),
+      ...(totalLines > 0 ? { totalLines } : {}),
+      ...(checksum ? { checksum } : {}),
+    }];
+    const nextOffset = Number(raw?.next_cursor || raw?.nextCursor || 0);
+    const fileRows = transientBody ? [{
+      path: cleanText(raw?.path || "文件", 800),
+      status: raw?.truncated === true ? "partial" as const : "completed" as const,
+      from: Math.max(1, from || 1),
+      to: Math.max(1, to || from || 1),
+      totalLines,
+      ...(raw?.truncated === true && nextOffset > 0 ? { nextOffset } : {}),
+      ...(checksum ? { checksum } : {}),
+      lines: sourceLines,
+    }] : undefined;
+    const continuation = transientBody && raw?.truncated === true && nextOffset > 0 && checksum ? {
+      kind: "read_file" as const,
+      pendingCount: 1,
+      files: [{ path: cleanText(raw?.path || "文件", 800), nextOffset, checksum }],
+    } : undefined;
+    return {
+      kind: transientBody ? "text" : "summary",
+      summary: `读取 ${cleanText(raw?.path || "文件", 500)}${from ? ` 第 ${from}${to > from ? `–${to}` : ""} 行` : ""}`,
+      rows: metadataRows,
+      ...(fileRows ? { fileRows } : {}),
+      ...(continuation ? { continuation } : {}),
+      presentation: resultPresentation(operation, metadataRows, raw),
+      rehydratable: !transientBody,
+      ...(checksum ? { authoritativeRevision: checksum } : {}),
+      ...paging,
+    };
   }
   if (["run_command", "get_command_output", "stop_command"].includes(operation)) {
     const status = cleanText(raw?.status || "", 40);
@@ -577,6 +643,33 @@ export function buildToolDisplayDetail(input: {
   };
 }
 
+const WORKSPACE_READONLY_SHORT_NAMES = new Set([
+  "list_directory", "glob_files", "grep_text", "read_file", "read_files",
+  "inspect_notebook", "web_fetch", "web_search",
+  "find_definition", "find_references", "workspace_symbols", "document_symbols",
+  "find_implementations", "find_type_definition", "find_incoming_calls", "find_outgoing_calls",
+  "read_code_diagnostics", "read_project_config", "read_project_source",
+  "read_git_status", "read_git_diff", "read_git_history",
+  "read_runtime_status", "read_runtime_logs", "read_runtime_diagnostics",
+]);
+
+export function workspaceReadonlyToolShortName(value: any) {
+  return String(value || "").replace(/^mcp__ccm__ccm_workspace_readonly__/, "");
+}
+
 export function isWorkspaceReadonlyToolName(value: any) {
-  return String(value || "").startsWith("mcp__ccm__ccm_workspace_readonly__");
+  const raw = String(value || "");
+  if (!raw) return false;
+  if (raw.startsWith("mcp__ccm__ccm_workspace_readonly__")) return true;
+  return WORKSPACE_READONLY_SHORT_NAMES.has(raw);
+}
+
+export function workspaceReadonlyContractVersion(value: any, storedVersion?: any): 2 | 3 {
+  const raw = String(value || "");
+  const shortName = workspaceReadonlyToolShortName(raw);
+  if (shortName === "read_files") return 3;
+  if (Number(storedVersion) === 3) return 3;
+  if (Number(storedVersion) === 2) return 2;
+  // Main-agent events persist short names and always execute V3.
+  return WORKSPACE_READONLY_SHORT_NAMES.has(raw) ? 3 : 2;
 }

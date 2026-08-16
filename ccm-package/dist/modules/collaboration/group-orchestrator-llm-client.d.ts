@@ -48,7 +48,9 @@ export type LlmCallOptions = {
     signal?: AbortSignal;
     nativeTools?: import("../../system/provider-native-tools").ProviderToolDefinition[];
     nativeToolReference?: boolean;
+    nativeToolsRequired?: boolean;
     onProviderAgentTurn?: (turn: import("../../system/provider-native-tools").ProviderAgentTurn) => void;
+    onNativeToolCallReady?: (call: import("../../system/provider-native-tools").ProviderToolCall) => void;
 };
 export declare function normalizeLlmTokenUsage(value: any, provider?: "openai" | "anthropic" | "gemini"): LlmTokenUsage;
 export declare function normalizeChatCompletionsUrl(apiUrl: string): string;
@@ -105,6 +107,8 @@ export declare function callAnthropicCompatibleChat(config: any, options: LlmCal
 export declare function callOpenAiCompatibleJson(config: any, options: LlmCallOptions): Promise<any>;
 export declare function callGeminiCompatibleJson(config: any, options: LlmCallOptions): Promise<any>;
 export declare function callAnthropicCompatibleJson(config: any, options: LlmCallOptions): Promise<any>;
+export declare const NATIVE_AGENT_TURN_MAX_TOKENS = 4096;
+export declare function callNativeAgentTurn(config: any, options: LlmCallOptions): Promise<import("../../system/provider-native-tools").ProviderAgentTurn>;
 export declare function runLlmTokenUsageSelfTest(): Promise<{
     pass: boolean;
     checks: {

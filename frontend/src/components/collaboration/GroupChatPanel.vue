@@ -42,10 +42,11 @@ import { useSessionContextUsage } from '../../composables/useSessionContextUsage
 import { usePermissionApprovals } from '../../composables/usePermissionApprovals.js'
 import { useAgentExecutionEvents } from '../../composables/useAgentExecutionEvents.js'
 import { getCopyableMessageText } from '../../utils/messageActions.js'
-import { hasAcceptedExecutionForMessage } from '../../utils/agentExecutionEvents.js'
+import { countExecutionToolItems, executionEventsForMessage, hasAcceptedExecutionForMessage, liveAssistantInProgressText, liveAssistantProvisionalText } from '../../utils/agentExecutionEvents.js'
 import { consumeAsideCommand, rewindConversationTurn } from '../../utils/conversationRewind.js'
 import { toast } from '../../utils/toast.js'
 import { findActivePrePlanClarification, validatePrePlanClarificationAction } from '../../utils/prePlanClarification.js'
+import { usePresentedPlanConfirmExecute } from '../../composables/usePresentedPlanConfirmExecute.js'
 
 const props = defineProps({
   navigateTo: { type: Object, default: null },
@@ -77,7 +78,7 @@ const {
   contextCompactionEvent,
   getWorkEvents, agentAccentPalette, hashAgent, getAgentAccent, getAgentAccentStyle, getAgentInitials,
   getWorkPanelState, getAgentMessageStatus, isGroupMainAgentMessage, getTaskRuntime, isLegacyNonTaskCard,
-  getTaskCard, shouldShowOrchestrationPlan, isInternalProtocolMessage, getMessageTaskId,
+  getTaskCard, shouldShowOrchestrationPlan, isGroupModelFailureMessage, isInternalProtocolMessage, getMessageTaskId,
   isPrimaryTaskMessage, shouldShowGroupMessage, isPrimaryTaskCard, handleTaskCardAction,
   taskRuntimeStatusLabel, taskRuntimeAgentState, taskRuntimeGreenLabel, applyTransientTaskRuntime,
   latestTestAgentFallbackTaskId, resolveTestAgentFallbackTaskId, createTestAgentExecutionPlanFallbackMessage,
@@ -98,7 +99,7 @@ const {
   handleKeydown, highlightMentions, updateCreateGroupProjectSelection,
   submitCreateGroup, submitRename, deleteGroup, clearGroupMessages, saveCurrentGroupConversationKnowledge,
   isStreaming, thinkingMessages, pendingGroupSendRetry, groupStreamController, activeGroupTaskId,
-  stoppingGroupTurn, groupTurnConversationId, groupTurnControl, stopGroupCurrentWork, drainGroupTurnQueue, guideGroupQueuedTurn, resolveGroupQueuedRoute,
+  stoppingGroupTurn, groupTurnConversationId, groupTurnControl, groupTurnBusy, stopGroupCurrentWork, drainGroupTurnQueue, guideGroupQueuedTurn, resolveGroupQueuedRoute,
   submitGroupMessageWhileBusy, groupSendRetrySignature, sendMessage, editGroupUserMessage, handleGroupModelFailureAction, waitingCrossReply, pullNewMessages,
   logs, logFilter, logEventSource, logsResizeObserver, scrollLogsToBottom, loadLogs, startLogStream,
   stopLogStream, clearLogs, normalizeGroupTools, loadAvailableGroupTools, loadGroupTools, toggleGroupTool, updateGroupContextPolicy,
@@ -108,7 +109,7 @@ const {
   startGroupPolling, stopGroupPolling, origSelectGroup,
 } = useGroupChat(props, emit)
 
-const activeGroupPrePlanRow = computed(() => findActivePrePlanClarification(messages.value))
+const activeGroupPrePlanRow = computed(() => findActivePrePlanClarification(messages.value, { purpose: 'pre_plan' }))
 const activeGroupPrePlanClarification = computed(() => activeGroupPrePlanRow.value?.clarification || null)
 const submitGroupPrePlanClarification = async payload => {
   const row = activeGroupPrePlanRow.value
@@ -130,6 +131,36 @@ const cancelGroupPrePlanClarification = async () => {
   if (clarification) clarification.status = 'cancelled'
   toast.info('已取消本次计划前澄清')
 }
+const submitInlineGroupClarification = async payload => {
+  if (!payload?.answerText || prePlanClarificationBusy.value) return
+  prePlanClarificationBusy.value = true
+  try {
+    if (payload.clarification?.id) {
+      await validatePrePlanClarificationAction({ clarification: payload.clarification, action: 'answer', scope: 'group', scopeId: currentGroup.value?.id, exactSessionId: currentGroupSessionId.value, answers: payload.answers, additionalNote: payload.additionalNote })
+    }
+    newMessage.value = payload.answerText
+    await sendGroupMessage()
+  } finally { prePlanClarificationBusy.value = false }
+}
+
+const liveGroupAssistantProgress = messageIndex => liveAssistantProvisionalText(
+  groupAgentExecutionEvents.value,
+  messages.value,
+  messageIndex,
+) || liveAssistantInProgressText(
+  groupAgentExecutionEvents.value,
+  messages.value,
+  messageIndex,
+)
+const visibleGroupAssistantContent = (msg, messageIndex, fallback) => {
+  const live = liveGroupAssistantProgress(messageIndex)
+  if (live) return live
+  if (String(msg?.runtime || '').toLowerCase() === 'llm-error') {
+    const tools = countExecutionToolItems(executionEventsForMessage(groupAgentExecutionEvents.value, messages.value, messageIndex))
+    return getVisibleGroupMessageContent(msg, fallback, { toolCount: tools.completed + tools.failed })
+  }
+  return getVisibleGroupMessageContent(msg, fallback)
+}
 
 const groupSessionSidebarOpen = ref(typeof window === 'undefined' || window.innerWidth > 768)
 const selectSessionFromSidebar = async (sessionId) => {
@@ -145,12 +176,18 @@ const {
   enabled: groupAgentExecutionEnabled,
   meaningfulRevision: groupMeaningfulRevision,
   latestMeaningfulKey: groupLatestMeaningfulKey,
+  refresh: refreshGroupAgentExecutionEvents,
 } = useAgentExecutionEvents({
   scope: computed(() => 'group'),
   scopeId: computed(() => currentGroup.value?.id || ''),
   exactSessionId: currentGroupSessionId,
   active: computed(() => props.active !== false && !!currentGroup.value?.id && !!currentGroupSessionId.value),
 })
+watch(
+  () => `${currentGroup.value?.id || ''}:${currentGroupSessionId.value || ''}:${messages.value.length}:${messages.value.at(-1)?.id || ''}`,
+  () => { if (currentGroup.value?.id && currentGroupSessionId.value && messages.value.length) void refreshGroupAgentExecutionEvents({ notify: false }) },
+  { flush: 'post' },
+)
 const groupTaskExecutionActive = computed(() => {
   if (activeGroupTaskId.value) return true
   return messages.value.some(message => {
@@ -220,6 +257,22 @@ const {
     originGroupId: currentGroup.value?.id || '',
   })),
   active: computed(() => props.active !== false && !!currentGroup.value?.id && !!currentGroupSessionId.value),
+})
+
+const {
+  confirmBusy: presentedPlanConfirmBusy,
+  canConfirmOnMessageCard,
+  canConfirmOnTranscript,
+  confirmExecute: confirmPresentedPlanExecute,
+} = usePresentedPlanConfirmExecute({
+  scope: 'group',
+  scopeId: computed(() => currentGroup.value?.id || ''),
+  exactSessionId: currentGroupSessionId,
+  messages,
+  executionEvents: groupAgentExecutionEvents,
+  turnBusy: groupTurnBusy,
+  send: (options) => sendMessage(options),
+  messageCardOwnsPlan: true,
 })
 </script>
 

@@ -22,12 +22,15 @@ export type ToolDisplayDetailV1 = {
         rows?: unknown[];
         fileRows?: Array<{
             path: string;
-            status: "completed" | "partial" | "unchanged";
+            status: "completed" | "partial" | "unchanged" | "failed";
             from: number;
             to: number;
             totalLines: number;
             nextOffset?: number;
             checksum?: string;
+            observedChecksum?: string;
+            currentChecksum?: string;
+            freshness?: "current" | "drifted" | "deleted" | "permission_revoked";
             lines: Array<{
                 line: number;
                 text: string;
@@ -38,7 +41,7 @@ export type ToolDisplayDetailV1 = {
         truncated: boolean;
         nextCursor?: string;
         continuation?: {
-            kind: "read_files";
+            kind: "read_file" | "read_files";
             pendingCount: number;
             files: Array<{
                 path: string;
@@ -83,5 +86,7 @@ export declare function buildToolDisplayDetail(input: {
     authoritativeRevision?: string;
     includeTechnicalCommand?: boolean;
 }): ToolDisplayDetailV1;
+export declare function workspaceReadonlyToolShortName(value: any): string;
 export declare function isWorkspaceReadonlyToolName(value: any): boolean;
+export declare function workspaceReadonlyContractVersion(value: any, storedVersion?: any): 2 | 3;
 export {};

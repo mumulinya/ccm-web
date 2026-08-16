@@ -20,10 +20,11 @@ import ConversationSummaryBoundary from '../common/ConversationSummaryBoundary.v
 import NewProgressIndicator from '../common/NewProgressIndicator.vue'
 import { useAgentExecutionEvents } from '../../composables/useAgentExecutionEvents.js'
 import { getCopyableMessageText } from '../../utils/messageActions.js'
-import { hasAcceptedExecutionForMessage, shouldRenderExecutionTranscript } from '../../utils/agentExecutionEvents.js'
+import { hasAcceptedExecutionForMessage, liveAssistantInProgressText, liveAssistantProvisionalText, shouldRenderExecutionTranscript } from '../../utils/agentExecutionEvents.js'
 import { consumeAsideCommand, rewindConversationTurn } from '../../utils/conversationRewind.js'
 import { toast } from '../../utils/toast.js'
 import { findActivePrePlanClarification, validatePrePlanClarificationAction } from '../../utils/prePlanClarification.js'
+import { usePresentedPlanConfirmExecute } from '../../composables/usePresentedPlanConfirmExecute.js'
 
 const props = defineProps({
   navigateTo: { type: Object, default: null },
@@ -52,7 +53,7 @@ const {
   ProjectSharedFilesModal, ProjectAgentSwitchModal, ProjectWorkspaceHeader, ProjectSessionSidebar, ProjectArchiveManager, ProjectRuntimeBar, ProjectRuntimeConfigModal, ProjectRunConsole, GroupTestTargetsModal, PanelLeft,
   highlightMsgIndex, handleNavigation, scrollToMessage, projects, currentProject, currentSession, currentSessionDraft, hasProjectConversation,
   sessions, projectFeishuTargets, projectFeishuBindingSession, projectFeishuBindingOpen, projectFeishuBindingBusy,
-  messages, messagesEl, chatInput, isMessagesPinnedToBottom, updateMessageScrollState,
+  messages, projectSessionExecutionEvents, messagesEl, chatInput, isMessagesPinnedToBottom, updateMessageScrollState,
   pendingProjectProgressCount, notifyProjectProgress, jumpToLatestProjectProgress, resetProjectPinnedScroll,
   scrollToBottom, attachMessagesResizeObserver, detachMessagesResizeObserver, navMessages, codeChangeDrawer, openCodeChangeDrawer,
   openSingleFileChange, closeCodeChangeDrawer, slashNavigate, runProjectClientCommand, slash,
@@ -67,7 +68,7 @@ const {
   openSwitchAgent, switchAgent, startProjectWithAgent, createSession, openProjectFeishuBinding, updateProjectFeishuBinding, renameSession, deleteSession,
   saveCurrentProjectSessionKnowledge, getProjectTaskCard, postTaskAction, removeMessageFromCurrentSession, handleProjectTaskAction, isStreaming,
   pendingProjectParentRunId, streamController, activeProjectRunId, activeProjectMainTaskId, stoppingProjectTurn, makeProjectMessageId,
-  projectTurnConversationId, projectTurnControl, projectComposerSendLabel, stopStreaming, drainProjectTurnQueue, guideProjectQueuedTurn, submitProjectMessageWhileBusy,
+  projectTurnConversationId, projectTurnControl, projectTurnBusy, projectComposerSendLabel, stopStreaming, drainProjectTurnQueue, guideProjectQueuedTurn, submitProjectMessageWhileBusy,
   sendMessage, editProjectUserMessage, formatFileSize, onChatFilesSelected, removeChatFile, openFileDiff, openProjectChangesTab,
   closeFileDiff, currentSessionNew, autoNameSession, chatTarget, showLogsPanel, logsTitle, logsProfileId, logsKind, logsRuntimeProcess,
   openProjectRuntimeLogs, openFeishuQr, startFeishuQrSetup, openFolderBrowser, loadDrives,
@@ -81,7 +82,7 @@ const {
   handleKeydown
 } = useProjectManager(props, emit)
 
-const activeProjectPrePlanRow = computed(() => findActivePrePlanClarification(messages.value))
+const activeProjectPrePlanRow = computed(() => findActivePrePlanClarification(messages.value, { purpose: 'pre_plan' }))
 const activeProjectPrePlanClarification = computed(() => activeProjectPrePlanRow.value?.clarification || null)
 const submitProjectPrePlanClarification = async payload => {
   const row = activeProjectPrePlanRow.value
@@ -102,6 +103,18 @@ const cancelProjectPrePlanClarification = async () => {
   if (clarification) clarification.status = 'cancelled'
   toast.info('已取消本次计划前澄清')
 }
+const submitInlineProjectClarification = async payload => {
+  if (!payload?.answerText || prePlanClarificationBusy.value) return
+  prePlanClarificationBusy.value = true
+  try {
+    if (payload.clarification?.id) {
+      await validatePrePlanClarificationAction({ clarification: payload.clarification, action: 'answer', scope: 'project', scopeId: currentProject.value, exactSessionId: currentSession.value, answers: payload.answers, additionalNote: payload.additionalNote })
+    }
+    chatInput.value = payload.answerText
+    await nextTick()
+    await sendMessage()
+  } finally { prePlanClarificationBusy.value = false }
+}
 
 const projectContextScopeId = computed(() => currentProject.value && currentSession.value
   ? `${currentProject.value}::${currentSession.value}`
@@ -111,12 +124,23 @@ const {
   enabled: projectAgentExecutionEnabled,
   meaningfulRevision: projectMeaningfulRevision,
   latestMeaningfulKey: projectLatestMeaningfulKey,
+  refresh: refreshProjectAgentExecutionEvents,
 } = useAgentExecutionEvents({
   scope: computed(() => 'project'),
   scopeId: currentProject,
   exactSessionId: currentSession,
+  seedEvents: projectSessionExecutionEvents,
   active: computed(() => props.active !== false && !!currentProject.value && !!currentSession.value),
 })
+// Session history and the execution ledger are loaded independently. Re-read
+// the ledger once the authoritative message envelope arrives so a completed
+// read-only turn cannot miss its "查询过程" because the first event request
+// raced ahead of session hydration.
+watch(
+  () => `${currentProject.value || ''}:${currentSession.value || ''}:${messages.value.length}:${messages.value.at(-1)?.id || ''}`,
+  () => { if (currentProject.value && currentSession.value && messages.value.length) void refreshProjectAgentExecutionEvents({ notify: false }) },
+  { flush: 'post' },
+)
 const projectTaskExecutionActive = computed(() => {
   if (activeProjectRunId.value || activeProjectMainTaskId.value) return true
   return messages.value.some(message => {
@@ -129,6 +153,15 @@ const projectTaskExecutionActive = computed(() => {
 // The streaming envelope is created before the first text chunk. Once the
 // turn has real execution events, it must not also show the legacy thinking UI.
 const hasLiveProjectExecutionForMessage = messageIndex => shouldRenderExecutionTranscript(
+  projectAgentExecutionEvents.value,
+  messages.value,
+  messageIndex,
+)
+const liveProjectAssistantProgress = messageIndex => liveAssistantProvisionalText(
+  projectAgentExecutionEvents.value,
+  messages.value,
+  messageIndex,
+) || liveAssistantInProgressText(
   projectAgentExecutionEvents.value,
   messages.value,
   messageIndex,
@@ -200,6 +233,20 @@ const {
   })),
   active: computed(() => props.active !== false && !!currentProject.value && !!currentSession.value),
   onApproved: continueProjectAfterPermission,
+})
+
+const {
+  confirmBusy: presentedPlanConfirmBusy,
+  canConfirmOnTranscript,
+  confirmExecute: confirmPresentedPlanExecute,
+} = usePresentedPlanConfirmExecute({
+  scope: 'project',
+  scopeId: currentProject,
+  exactSessionId: currentSession,
+  messages,
+  executionEvents: projectAgentExecutionEvents,
+  turnBusy: projectTurnBusy,
+  send: (options) => sendMessage(options),
 })
 </script>
 

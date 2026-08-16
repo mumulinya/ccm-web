@@ -7,6 +7,8 @@ export function useConversationTurnControl(options = {}) {
   const turns = ref([])
   const loading = ref(false)
   const draining = ref(false)
+  const resolvingRouteId = ref('')
+  const resolvingRouteChoice = ref('')
   let pollTimer = null
   let refreshTimer = null
   let unsubscribeRuntime = null
@@ -100,11 +102,19 @@ export function useConversationTurnControl(options = {}) {
   }
 
   const resolveRoute = async (turn, choice) => {
-    if (!turn?.id || !turn?.routing?.bindingChecksum) return null
+    if (!turn?.id) throw new Error('待处理消息已经失效，请刷新后重试')
+    if (!turn?.routing?.bindingChecksum) throw new Error('消息处理方式尚未准备好，请刷新后重试')
+    if (resolvingRouteId.value) return null
+    resolvingRouteId.value = turn.id
+    resolvingRouteChoice.value = choice
     try {
       const data = await conversationTurnsApi.resolveRoute(turn.id, turn.revision, choice, turn.routing.bindingChecksum)
       return data.turn
-    } finally { await refresh().catch(() => {}) }
+    } finally {
+      await refresh().catch(() => {})
+      resolvingRouteId.value = ''
+      resolvingRouteChoice.value = ''
+    }
   }
 
   const drain = async (handler) => {
@@ -206,5 +216,8 @@ export function useConversationTurnControl(options = {}) {
   })
   watch(() => conversationId(), () => refresh().catch(() => {}))
 
-  return { mode, turns, activeTurns, loading, draining, refresh, enqueue, settle, cancel, guide, retry, resolveRoute, drain, apply }
+  return {
+    mode, turns, activeTurns, loading, draining, resolvingRouteId, resolvingRouteChoice,
+    refresh, enqueue, settle, cancel, guide, retry, resolveRoute, drain, apply,
+  }
 }

@@ -2,7 +2,6 @@
 import { computed, ref } from 'vue'
 
 const props = defineProps({ result: { type: Object, required: true } })
-const technicalOpen = ref(false)
 const showAllRows = ref(false)
 
 const implementationLabel = (value) => ({
@@ -35,20 +34,6 @@ const normalized = computed(() => {
 })
 
 const scopeLabel = computed(() => normalized.value.technicalDetails?.scopeId || normalized.value.technicalDetails?.scope || '')
-const technicalText = computed(() => {
-  const result = normalized.value
-  const details = result.schema === 'ccm-command-result-v2'
-    ? result.technicalDetails || {}
-    : {
-        schema: 'ccm-command-legacy-safe-projection-v1',
-        command: result.command,
-        success: result.success !== false,
-        metrics: result.stats.length,
-        sections: result.sections.length,
-        note: '历史原始响应已按安全策略隐藏。',
-      }
-  return JSON.stringify(details, null, 2)
-})
 
 const visibleRows = rows => showAllRows.value ? rows : rows.slice(0, 8)
 const statusGlyph = tone => ({ success: '●', warning: '▲', danger: '×', neutral: '•' }[tone] || '•')
@@ -112,11 +97,7 @@ function runAction(action) {
 
     <footer>
       <span>{{ normalized.durationMs || 0 }} ms · {{ new Date(normalized.at || Date.now()).toLocaleTimeString('zh-CN') }}</span>
-      <button type="button" :aria-expanded="technicalOpen" @click="technicalOpen = !technicalOpen">
-        {{ technicalOpen ? '收起技术详情' : '技术详情' }}
-      </button>
     </footer>
-    <pre v-if="technicalOpen">{{ technicalText }}</pre>
   </section>
 </template>
 

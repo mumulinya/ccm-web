@@ -22,6 +22,7 @@ import GlobalAgentMessageList from './GlobalAgentMessageList.vue'
 import AgentToolsModal from '../common/AgentToolsModal.vue'
 import OnlineDocumentReferences from '../common/OnlineDocumentReferences.vue'
 import { findActivePrePlanClarification, validatePrePlanClarificationAction } from '../../utils/prePlanClarification.js'
+import { usePresentedPlanConfirmExecute } from '../../composables/usePresentedPlanConfirmExecute.js'
 import ScopeTargetSelect from '../common/ScopeTargetSelect.vue'
 import { useAgentExecutionEvents } from '../../composables/useAgentExecutionEvents.js'
 import { useCodeChangeDrawer } from '../../composables/useCodeChangeDrawer.js'
@@ -130,12 +131,18 @@ const {
   enabled: globalAgentExecutionEnabled,
   meaningfulRevision: globalMeaningfulRevision,
   latestMeaningfulKey: globalLatestMeaningfulKey,
+  refresh: refreshGlobalAgentExecutionEvents,
 } = useAgentExecutionEvents({
   scope: computed(() => 'global'),
   scopeId: computed(() => 'global'),
   exactSessionId: currentSessionId,
   active: computed(() => props.active !== false && !!currentSessionId.value && !isCurrentSessionDraft.value),
 })
+watch(
+  () => `${currentSessionId.value || ''}:${messages.value.length}:${messages.value.at(-1)?.id || ''}`,
+  () => { if (currentSessionId.value && messages.value.length && !isCurrentSessionDraft.value) void refreshGlobalAgentExecutionEvents({ notify: false }) },
+  { flush: 'post' },
+)
 
 const feishuBindings = ref([])
 const bindingSession = ref(null)
@@ -321,7 +328,7 @@ async function deleteFeishuSessionOnServer(sessionId) {
   }
 }
 
-const { navMessages } = useMessageNavigation(messages, { getAssistantContent: (message) => getVisibleGlobalMessageContent(message, '回复已整理，技术细节已放入技术详情。') })
+const { navMessages } = useMessageNavigation(messages, { getAssistantContent: (message) => getVisibleGlobalMessageContent(message, '回复已整理。') })
 
 const scrollToMessage = (originalIndex) => {
   const el = document.getElementById(`msg-${originalIndex}`)
@@ -463,13 +470,14 @@ const syncPendingGlobalClarificationInput = () => {
     : null
 }
 const activeGlobalPrePlanClarification = computed(() => {
-  const active = findActivePrePlanClarification(messages.value)
+  const active = findActivePrePlanClarification(messages.value, { purpose: 'pre_plan' })
   if (active?.clarification) return active.clarification
   const pending = pendingGlobalClarificationInput.value
   const run = pending?.message?.agenticRun || pending?.message?.agentic_run || null
-  return run?.clarification_summary?.pre_plan_clarification
+  const nested = run?.clarification_summary?.pre_plan_clarification
     || run?.clarificationSummary?.prePlanClarification
     || null
+  return nested && String(nested.purpose || 'pre_plan').toLowerCase() !== 'mid_turn' ? nested : null
 })
 const submitGlobalPrePlanClarification = async payload => {
   if (!payload?.answerText || prePlanClarificationBusy.value) return
@@ -493,6 +501,18 @@ const cancelGlobalPrePlanClarification = async () => {
     toast.info('已取消本次计划前澄清')
   } catch (error) { toast.error(error?.message || '取消失败') }
   finally { prePlanClarificationBusy.value = false }
+}
+const submitInlineGlobalClarification = async payload => {
+  if (!payload?.answerText || prePlanClarificationBusy.value) return
+  prePlanClarificationBusy.value = true
+  try {
+    if (payload.clarification?.id) {
+      await validatePrePlanClarificationAction({ clarification: payload.clarification, action: 'answer', scope: 'global', scopeId: 'global', exactSessionId: currentSessionId.value, answers: payload.answers, additionalNote: payload.additionalNote })
+    }
+    chatInput.value = payload.answerText
+    await nextTick()
+    await sendGlobalMessage()
+  } finally { prePlanClarificationBusy.value = false }
 }
 
 const searchHighlightMsgIndex = ref(-1)
@@ -850,7 +870,7 @@ const parseProjectReport = (content) => {
     const bodyMatch = content.match(/📂 \[(?:项目 Agent|项目执行成员) - [^\s\]]+ 的运行报告\]:\s*([\s\S]*)/)
     result.body = bodyMatch ? bodyMatch[1].trim() : content
   }
-  result.body = visibleGlobalText(result.body, result.success ? '项目执行成员已提交运行报告，技术细节已放入详情。' : '项目执行成员执行遇到问题，排障信息已放入技术详情。', 1200)
+  result.body = visibleGlobalText(result.body, result.success ? '项目执行成员已提交运行报告。' : '项目执行成员执行遇到问题。', 1200)
   return result
 }
 
@@ -975,6 +995,20 @@ const {
   GLOBAL_RESULT_VISIBLE_FALLBACK, trackGlobalMission, emit,
 })
 
+const {
+  confirmBusy: presentedPlanConfirmBusy,
+  canConfirmOnTranscript,
+  confirmExecute: confirmPresentedPlanExecute,
+} = usePresentedPlanConfirmExecute({
+  scope: 'global',
+  scopeId: 'global',
+  exactSessionId: currentSessionId,
+  messages,
+  executionEvents: globalAgentExecutionEvents,
+  turnBusy: globalTurnBusy,
+  send: (options) => sendMessage(options),
+})
+
 const globalContextScopeId = computed(() => currentSessionId.value && !isCurrentSessionDraft.value ? `session:${currentSessionId.value}` : '')
 const {
   usage: globalContextUsage,
@@ -1092,7 +1126,6 @@ const {
   postJson,
   saveCurrentGlobalSessionKnowledge,
   applyGlobalMissionPayload,
-  runtimeDebugSections,
   openGlobalChangesTab,
   handleGlobalTaskAction,
   executeAction,
@@ -1509,7 +1542,6 @@ const handleGitCommitCardSubmit = async (msg) => {
         :scroll-to-message="scrollToMessage"
         :scroll-to-bottom="scrollToBottom"
         :handle-global-task-action="handleGlobalTaskAction"
-        :runtime-debug-sections="runtimeDebugSections"
         :get-visible-global-message-content="getVisibleGlobalMessageContent"
         :is-system-receipt="isSystemReceipt"
         :parse-receipt="parseReceipt"
@@ -1524,10 +1556,14 @@ const handleGitCommitCardSubmit = async (msg) => {
         :format-size="formatSize"
         :pending-progress-count="pendingGlobalProgressCount"
         :jump-to-latest-progress="jumpToLatestGlobalProgress"
+        :can-confirm-presented-plan="canConfirmOnTranscript"
+        :presented-plan-confirm-busy="presentedPlanConfirmBusy"
         @edit-message="editGlobalUserMessage"
         @rewind-message="rewindGlobalMessage"
         @open-file-change="openSingleFileChange"
         @open-file-changes="openCodeChangeDrawer($event, { title: '全局任务文件改动' })"
+        @clarify-reply="submitInlineGlobalClarification"
+        @confirm-presented-plan="(msg, plan) => confirmPresentedPlanExecute(msg, plan)"
       />
 
       <div class="chat-footer">
@@ -1582,6 +1618,8 @@ const handleGitCommitCardSubmit = async (msg) => {
           :busy="globalTurnBusy"
           :turns="globalTurnControl.turns.value"
           :stopping="stoppingGlobalTurn"
+          :resolving-route-id="globalTurnControl.resolvingRouteId.value"
+          :resolving-route-choice="globalTurnControl.resolvingRouteChoice.value"
           compact
           @stop="stopGlobalCurrentWork"
           @cancel="globalTurnControl.cancel"

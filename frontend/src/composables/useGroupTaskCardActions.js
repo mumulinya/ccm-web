@@ -2,6 +2,7 @@ import { toast, confirmDialog } from '../utils/toast.js'
 import { buildGroupTaskKnowledgePayload, postKnowledgeCapture } from '../utils/knowledgeCapture.js'
 import { resolveTaskMutationGuard, taskMutationGuardFromSource } from '../utils/taskMutationGuard.js'
 import { stopTaskWithPreview } from '../utils/taskStopFlow.js'
+import { notifyConversationPlanModeChanged, openTaskPlanDetail } from '../utils/conversationPlanMode.js'
 
 const postTaskCardAction = async (path, body) => {
   const response = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) })
@@ -33,6 +34,7 @@ export function createGroupTaskCardActionHandler(options = {}) {
   const {
     getTaskCard,
     getCurrentGroup,
+    getExactSessionId,
     openCodeChangeDrawer,
     openPipelineViewer,
     openTraceReplay,
@@ -59,6 +61,10 @@ export function createGroupTaskCardActionHandler(options = {}) {
         const link = (data.links || []).find(item => item.relation === 'source')
         if (!link?.available) throw new Error(link?.unavailableReason || '原全局会话不存在或无权访问')
         navigateConversation?.({ tab: 'global-agent', sessionId: link.exactSessionId, messageId: link.messageId || '', missionId: link.missionId || '' })
+        return
+      }
+      if (action.kind === 'open_plan_detail') {
+        openTaskPlanDetail(id)
         return
       }
       if (action.kind === 'view_changes') {
@@ -129,8 +135,15 @@ export function createGroupTaskCardActionHandler(options = {}) {
           : `确认执行“${card?.title || id}”？确认后我才会安排执行成员开始修改。`
         if (!await confirmDialog(confirmText)) return
         await postTaskCardAction('/api/usability/intake/confirm', { id, ...guard, ...(acceptFeedback ? { accept_feedback: acceptFeedback } : {}) })
+        notifyConversationPlanModeChanged({
+          scope: 'group',
+          scopeId: getCurrentGroup?.()?.id || card?.group_id || '',
+          exactSessionId: getExactSessionId?.() || '',
+          enabled: false,
+          mode: 'agent',
+        })
       } else if (action.kind === 'revise_plan') {
-        const feedback = window.prompt('希望我怎么调整这份执行前计划？', action.feedback || '')
+        const feedback = String(action.feedback || '').trim() || window.prompt('希望我怎么调整这份执行方案？', '')
         if (!feedback?.trim()) return
         await postTaskCardAction('/api/usability/intake/revise', { id, feedback: feedback.trim(), ...guard })
       } else if (action.kind === 'pause') {

@@ -163,6 +163,14 @@ try {
 const contractFailure = orchestrator.classifyGroupOrchestratorFailure(Object.assign(new Error("大模型返回了无效工作流：空"), { code: "CCM_WORKFLOW_DECISION_INVALID" }));
 assert.equal(contractFailure.kind, "workflow_contract");
 assert.doesNotMatch(contractFailure.guidance, /Key 是否有效/);
+const recovery = dist("modules", "collaboration", "group-model-recovery.js");
+const compactMod = dist("modules", "collaboration", "group-main-tool-result-compact.js");
+const recoverySelfTest = recovery.runGroupModelRecoverySelfTest();
+assert.equal(recoverySelfTest.pass, true, JSON.stringify(recoverySelfTest, null, 2));
+const failureSelfTest = orchestrator.runGroupOrchestratorFailureSelfTest();
+assert.equal(failureSelfTest.pass, true, JSON.stringify(failureSelfTest, null, 2));
+const compactSelfTest = compactMod.runGroupMainToolResultCompactSelfTest();
+assert.equal(compactSelfTest.pass, true, JSON.stringify(compactSelfTest, null, 2));
 
 const source = relative => fs.readFileSync(path.join(root, relative), "utf8");
 const globalSource = source("backend/modules/global/global-agent-agentic-runtime.ts");
@@ -183,6 +191,7 @@ const groupLoop = source("backend/modules/collaboration/group-orchestrator-llm.t
 assert.match(groupLoop, /canonicalName:\s*"query_knowledge"/);
 assert.doesNotMatch(groupLoop, /canonicalName:\s*"read_project_source"/);
 assert.match(groupLoop, /mainAgentToolResults:\s*toolResults/);
+assert.match(groupLoop, /compactGroupMainToolResultsForPayload/);
 const sharedToolRuntime = source("backend/tools/main-agent-tool-runtime.ts");
 const workspaceTools = source("backend/tools/workspace-readonly-tools.ts");
 assert.match(sharedToolRuntime, /WORKSPACE_READONLY_TOOL_DEFINITIONS_V3\.filter\(tool => tool\.loadPolicy === "base"\)/);
@@ -200,7 +209,10 @@ const projectFirstTurn = source("backend/modules/projects/project-main-agent.ts"
   source("backend/modules/projects/project-main-agent.ts").indexOf("export async function runProjectMainAgentFirstTurn"),
   source("backend/modules/projects/project-main-agent.ts").indexOf("export async function planProjectMainTask"),
 );
-assert.match(projectFirstTurn, /responseType.*reply\|tool_calls\|clarify\|plan\|dispatch/);
+assert.match(projectFirstTurn, /ccm_ask_user/);
+assert.match(projectFirstTurn, /ccm_present_plan/);
+assert.match(projectFirstTurn, /ccm_dispatch/);
+assert.match(projectFirstTurn, /runProjectMainNativeQueryLoop/);
 assert.match(projectFirstTurn, /query_knowledge/);
 assert.doesNotMatch(projectFirstTurn, /canonicalName:\s*"read_project_source"/);
 assert.doesNotMatch(projectFirstTurn, /canonicalName:\s*"read_runtime_diagnostics"/);

@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.SIMPLE_MESSAGE_PATTERNS = exports.GREETING_PATTERNS = exports.PLANNING_HINTS = exports.IMPLEMENT_HINTS = exports.BUG_HINTS = exports.TEST_HINTS = exports.REVIEW_HINTS = exports.QUESTION_HINTS = exports.BROAD_HINTS = exports.BACKEND_HINTS = exports.FRONTEND_HINTS = exports.GROUP_MEMORY_WORKER_CONTEXT_PTL_EMERGENCIES_DIR = exports.GROUP_MEMORY_WORKER_CONTEXT_COMPACT_STRATEGIES_DIR = exports.GROUP_MEMORY_WORKER_CONTEXT_COMPACT_OUTCOMES_DIR = exports.GROUP_MEMORY_WORKER_CONTEXT_COMPACT_HOOKS_DIR = exports.GROUP_MEMORY_REPLAY_REPAIR_TIMELINE_BINDINGS_DIR = exports.GROUP_MEMORY_REPLAY_REPAIR_DISPATCH_BINDINGS_DIR = exports.GROUP_MEMORY_REPLAY_REPAIR_DISPATCH_PLANS_DIR = exports.GROUP_MEMORY_REPLAY_REPAIR_WORK_ITEMS_DIR = void 0;
+exports.SIMPLE_MESSAGE_PATTERNS = exports.GREETING_PATTERNS = exports.PLANNING_HINTS = exports.IMPLEMENT_HINTS = exports.BUG_HINTS = exports.TEST_HINTS = exports.REVIEW_HINTS = exports.QUESTION_HINTS = exports.BROAD_HINTS = exports.BACKEND_HINTS = exports.FRONTEND_HINTS = exports.GROUP_MEMORY_WORKER_CONTEXT_PTL_EMERGENCIES_DIR = exports.GROUP_MEMORY_WORKER_CONTEXT_COMPACT_STRATEGIES_DIR = exports.GROUP_MEMORY_WORKER_CONTEXT_COMPACT_OUTCOMES_DIR = exports.GROUP_MEMORY_WORKER_CONTEXT_COMPACT_HOOKS_DIR = exports.GROUP_MEMORY_REPLAY_REPAIR_TIMELINE_BINDINGS_DIR = exports.GROUP_MEMORY_REPLAY_REPAIR_DISPATCH_BINDINGS_DIR = exports.GROUP_MEMORY_REPLAY_REPAIR_DISPATCH_PLANS_DIR = exports.GROUP_MEMORY_REPLAY_REPAIR_WORK_ITEMS_DIR = exports.runGroupOrchestratorFailureSelfTest = exports.summarizeGroupOrchestratorProviderError = exports.classifyGroupOrchestratorFailure = void 0;
 exports.getLlmConfigIssue = getLlmConfigIssue;
 exports.createCoordinatorMember = createCoordinatorMember;
 exports.isCoordinatorMember = isCoordinatorMember;
@@ -65,8 +65,6 @@ exports.isStructuredCoordinatorFallbackAllowed = isStructuredCoordinatorFallback
 exports.measureGroupMainAgentPayload = measureGroupMainAgentPayload;
 exports.prepareExactGroupMainAgentInput = prepareExactGroupMainAgentInput;
 exports.runGroupOrchestratorCore = runGroupOrchestratorCore;
-exports.classifyGroupOrchestratorFailure = classifyGroupOrchestratorFailure;
-exports.summarizeGroupOrchestratorProviderError = summarizeGroupOrchestratorProviderError;
 exports.streamCanonicalGroupReply = streamCanonicalGroupReply;
 exports.runGroupOrchestrator = runGroupOrchestrator;
 exports.isContextLimitError = isContextLimitError;
@@ -85,6 +83,11 @@ const group_orchestrator_coded_1 = require("./group-orchestrator-coded");
 const main_agent_context_source_continuity_1 = require("../../system/main-agent-context-source-continuity");
 const group_orchestrator_llm_1 = require("./group-orchestrator-llm");
 const user_visible_agent_events_1 = require("../../system/user-visible-agent-events");
+const group_orchestrator_failure_1 = require("./group-orchestrator-failure");
+var group_orchestrator_failure_2 = require("./group-orchestrator-failure");
+Object.defineProperty(exports, "classifyGroupOrchestratorFailure", { enumerable: true, get: function () { return group_orchestrator_failure_2.classifyGroupOrchestratorFailure; } });
+Object.defineProperty(exports, "summarizeGroupOrchestratorProviderError", { enumerable: true, get: function () { return group_orchestrator_failure_2.summarizeGroupOrchestratorProviderError; } });
+Object.defineProperty(exports, "runGroupOrchestratorFailureSelfTest", { enumerable: true, get: function () { return group_orchestrator_failure_2.runGroupOrchestratorFailureSelfTest; } });
 exports.GROUP_MEMORY_REPLAY_REPAIR_WORK_ITEMS_DIR = path.join(group_orchestrator_config_1.CCM_DIR, "group-memory-replay-repair-work-items");
 exports.GROUP_MEMORY_REPLAY_REPAIR_DISPATCH_PLANS_DIR = path.join(group_orchestrator_config_1.CCM_DIR, "group-memory-replay-repair-dispatch-plans");
 exports.GROUP_MEMORY_REPLAY_REPAIR_DISPATCH_BINDINGS_DIR = path.join(group_orchestrator_config_1.CCM_DIR, "group-memory-replay-repair-dispatch-bindings");
@@ -821,11 +824,12 @@ async function runGroupOrchestratorCore(input) {
                     error = (0, group_orchestrator_llm_1.attachLlmTokenUsage)(recoveryError, firstAttemptUsage);
                 }
         }
-        const failure = classifyGroupOrchestratorFailure(error);
-        const providerErrorSummary = summarizeGroupOrchestratorProviderError(error);
+        const failure = (0, group_orchestrator_failure_1.classifyGroupOrchestratorFailure)(error);
+        const providerErrorSummary = (0, group_orchestrator_failure_1.summarizeGroupOrchestratorProviderError)(error);
         const visibleTurnId = String(input.turnId || input.turn_id || `${group.id}:${groupSessionId}:${Date.now()}`);
         const anchorMessageId = String(input.anchorMessageId || input.anchor_message_id || "").trim();
         const elapsedMs = Math.max(0, Number(error?.elapsedMs) || 0);
+        const observedTools = Math.max(0, Number(error?.observationCount || error?.toolResultCount || 0));
         const providerFailure = {
             kind: failure.kind,
             code: String(error?.code || "CCM_MODEL_CALL_FAILED"),
@@ -835,6 +839,9 @@ async function runGroupOrchestratorCore(input) {
             elapsedMs,
             attemptTimeoutMs: Math.max(0, Number(error?.attemptTimeoutMs) || 0),
             totalTimeoutMs: Math.max(0, Number(error?.totalTimeoutMs) || 0),
+            observationCount: observedTools,
+            userSummary: failure.userSummary,
+            userGuidance: failure.userGuidance,
             safeSummary: providerErrorSummary,
             contentStored: false,
         };
@@ -884,56 +891,6 @@ async function runGroupOrchestratorCore(input) {
             content: [failure.userSummary, failure.userGuidance].filter(Boolean).join("\n"),
         };
     }
-}
-function classifyGroupOrchestratorFailure(error) {
-    const withLegacyGuidance = (failure) => ({
-        ...failure,
-        // Existing integrations still read this alias while the public projection
-        // uses userGuidance. Keep both fields synchronized during the migration.
-        guidance: failure.userGuidance,
-    });
-    const code = String(error?.code || "").trim();
-    const raw = String(error?.message || error || "").trim();
-    if (code === "CCM_WORKFLOW_DECISION_INVALID"
-        || /无效工作流|workflowDecision|workflow_decision|结构化工作流|有效 JSON|合法 JSON/i.test(raw)) {
-        return withLegacyGuidance({
-            kind: "workflow_contract",
-            userSummary: "主 Agent 没有生成可执行计划，本次请求未完成。",
-            userGuidance: "请重试；如果仍然失败，请检查当前模型配置。",
-        });
-    }
-    if (/CONTEXT|COMPACT|上下文|容量|prompt.{0,20}(?:long|large)|too.{0,10}long/i.test(`${code} ${raw}`)) {
-        return withLegacyGuidance({
-            kind: "context",
-            userSummary: "当前会话上下文整理失败，本次请求未完成。",
-            userGuidance: "请重试，或先压缩当前会话上下文。",
-        });
-    }
-    if (/^CCM_MODEL_|HTTP\s+\d{3}|fetch|network|socket|timeout|timed out|ECONN|ENOTFOUND|模型返回空响应|Provider/i.test(`${code} ${raw}`)) {
-        return withLegacyGuidance({
-            kind: "provider",
-            userSummary: "大模型暂时不可用，本次请求未完成。",
-            userGuidance: "请检查模型配置或网络后重试。",
-        });
-    }
-    return withLegacyGuidance({
-        kind: "internal",
-        userSummary: "主 Agent 暂时无法处理，本次请求未完成。",
-        userGuidance: "请重试；如果仍然失败，请查看技术详情。",
-    });
-}
-function summarizeGroupOrchestratorProviderError(error) {
-    const raw = String(error?.message || error || "主 Agent Provider 调用失败").trim();
-    const status = raw.match(/\bHTTP\s+\d{3}\b/i);
-    if (status?.index !== undefined) {
-        return raw.slice(0, status.index + status[0].length).replace(/\s+/g, " ").replace(/[:：\s]+$/, "").slice(0, 220);
-    }
-    const firstLine = raw.split(/\r?\n/, 1)[0]
-        .replace(/<!doctype[\s\S]*$/i, "")
-        .replace(/<[^>]*>/g, "")
-        .replace(/\s+/g, " ")
-        .trim();
-    return (firstLine || "主 Agent Provider 调用失败").slice(0, 220);
 }
 function streamCanonicalGroupReply(text, onDelta, maxChunkChars = 240) {
     if (!onDelta)

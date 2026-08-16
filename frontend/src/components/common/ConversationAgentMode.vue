@@ -15,13 +15,13 @@ const modes = [
   {
     value: 'agent',
     label: 'Agent 模式',
-    detail: '简单任务直接处理，复杂任务由主 Agent 自动规划',
+    detail: '简单任务直接处理。高风险操作仍会先等你确认，那是安全闸，不是 Plan 模式。',
     icon: Bot,
   },
   {
     value: 'plan',
     label: 'Plan 模式',
-    detail: '只分析和制定计划，确认前不修改代码或分派子 Agent',
+    detail: '只读探索并出可改方案。确认并执行后会切回 Agent，按这份计划开工。',
     icon: ListChecks,
   },
 ]
@@ -116,9 +116,9 @@ const onDocumentClick = event => {
 
 const onExternalChange = event => {
   const detail = event?.detail || {}
-  if (detail.scope !== props.scope) return
-  if (String(detail.scopeId || '') !== String(identity().scopeId || '')) return
-  if (String(detail.exactSessionId || '') !== String(props.exactSessionId || '')) return
+  if (detail.scope && detail.scope !== props.scope) return
+  if (detail.scopeId && String(detail.scopeId || '') !== String(identity().scopeId || '')) return
+  if (detail.exactSessionId && String(detail.exactSessionId || '') !== String(props.exactSessionId || '')) return
   void load()
 }
 
@@ -166,8 +166,8 @@ onBeforeUnmount(() => {
         </span>
         <Check v-if="selectedMode === item.value" :size="15" />
       </button>
-      <p v-if="selectedMode === 'plan'">Plan 模式会保留只读分析能力；确认计划并切回 Agent 模式后，才会启动项目子 Agent。</p>
-      <p v-else>Agent 模式仍会为复杂或高风险需求自动生成计划并等待确认。</p>
+      <p v-if="selectedMode === 'plan'">Plan 模式只做只读分析和出方案。确认并执行后会自动切回 Agent，并按这份计划开工。</p>
+      <p v-else>简单任务会直接处理。高风险或破坏性操作仍会先等你确认，这是安全闸，不是 Plan 模式。</p>
     </div>
 
     <span v-if="error" class="agent-mode__error" role="alert">{{ error }}</span>

@@ -1,0 +1,45 @@
+import { type LlmTokenUsage } from "./group-orchestrator-llm-client";
+export declare function runGroupMainNativeQueryLoop(input: {
+    config: any;
+    group: any;
+    groupSessionId: string;
+    planningInput: any;
+    loopBudget: any;
+    visibleTurnId: string;
+    visibleAnchorMessageId: string;
+    signal?: AbortSignal;
+    onDelta?: (delta: string) => void;
+    onRetry?: (notice: any) => void;
+    onModelActivity?: (activity: any) => void;
+    markVisibleFeedback: (at?: number) => void;
+    buildMessages: (planningInput: any) => any[];
+    buildToolContext: (planningInput: any) => any;
+    buildContextComponents: (planningInput: any) => any;
+    executeRequests: (args: {
+        requests: any[];
+        toolContext: any;
+        toolCallIds: string[];
+        toolBatchSize: number;
+        readOnlyParallelism: number;
+        signal?: AbortSignal;
+    }) => Promise<any[]>;
+    isBuiltinReadOnly: (name: string) => boolean;
+}): Promise<{
+    parsed: any;
+    planningInput: any;
+    toolResults: any[];
+    modelCallCount: number;
+    toolRoundCount: number;
+    toolCallCount: number;
+    noProgressCount: number;
+    continuationSegments: number;
+    loopStopReason: string;
+    tokenUsage: LlmTokenUsage | null;
+    modelDurationMs: number;
+    toolWallDurationMs: number;
+    modelRetryCount: number;
+    retryNotices: any[];
+    visibleReplyDeltaEmitted: boolean;
+    initialReadFileCount: number;
+    initialReadTokens: number;
+}>;

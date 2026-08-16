@@ -4,6 +4,7 @@ import { getGroupAutoCompactThreshold } from "./group-compaction-strategy";
 import { getCompactBoundaryIndex } from "./group-memory-shared";
 import { loadGroupMemory } from "./group-memory-storage";
 import { getActiveGroupChatSessionId, getGroupMessages } from "./storage";
+import { listGroupSessionExecutionEvents } from "./group-session-execution-ledger";
 
 function modelContextMessageContent(message: any) {
   const value = message?.content ?? message?.message?.content ?? message?.text ?? "";
@@ -38,6 +39,7 @@ export function buildExactGroupSessionModelContextProjection(messagesInput: any[
       || memory?.compaction?.sessionMemoryState?.lastExtractedMessageId
       || "",
     ),
+    executionEvents: options.executionEvents || options.execution_events || listGroupSessionExecutionEvents(groupId, groupSessionId),
     microCompact: resolveSessionModelMicroCompactPolicy(config, {
       contextTokens: Number(memory?.compaction?.tokenMeasurement?.activeTokens || memory?.compaction?.beforeTokens || 0),
       pressureThresholdTokens: getGroupAutoCompactThreshold(config),
@@ -51,7 +53,7 @@ export function buildExactGroupSessionModelContextProjection(messagesInput: any[
     groupSessionId,
     totalMessageCount: messages.length,
     visibleMessageCount: unified.visibleMessages.length,
-    visibleMessageIds: unified.visibleMessages.map((message: any) => message.id),
+    visibleMessageIds: unified.visibleMessages.filter((message: any) => message?.hidden_execution !== true).map((message: any) => message.id),
   };
 }
 

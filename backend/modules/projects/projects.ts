@@ -18,6 +18,7 @@ import { getPublicAgentRuntimes, isAgentRuntimeAvailable } from "../../agents/ru
 import { isDevelopmentAgentEnabled } from "../system/agent-provider-settings";
 import { getSessions, getSessionDetail, syncSessions } from "./sessions";
 import { publishRuntimeEvent } from "../../system/runtime-events";
+import { listUserVisibleAgentEvents } from "../../system/user-visible-agent-events";
 import { createPrivateRuntimeConfig, credentialStoreStatus, migrateConfigDirectory, migrateTomlCredentials, protectCredential, redactSensitiveText, resolveCredential, schedulePrivateRuntimeConfigCleanup } from "../../core/credential-store";
 import { buildFreshToolAuthorizationPayload, buildToolAuthorizationPayload, normalizeToolAuthorization, recordToolAuthorizationChange } from "../../tools/tool-authorization";
 import {
@@ -1851,7 +1852,17 @@ type = "${finalPlatform}"${platformOptionsToml}
       if (!allowProject(projectName, "use")) return true;
       const sessionId = validateSessionId(decodeURIComponent(sessionDetailMatch[2]));
       const detail = getSessionDetail(projectName, sessionId);
-      if (detail) sendJson(res, detail);
+      if (detail) {
+        const executionPage = loadOrchestratorConfig().ccStyleExecutionDisplayEnabled === false
+          ? { events: [] }
+          : listUserVisibleAgentEvents({ scope: "project", scopeId: projectName, exactSessionId: sessionId, limit: 500 });
+        sendJson(res, {
+          ...detail,
+          // Safe event projections only. Source text and raw tool output are
+          // deliberately absent, matching the dedicated execution endpoint.
+          execution_events: executionPage.events || [],
+        });
+      }
       else sendJson(res, { error: "会话不存在" }, 404);
     } catch (e: any) { sendJson(res, { error: e.message }, 400); }
     return true;

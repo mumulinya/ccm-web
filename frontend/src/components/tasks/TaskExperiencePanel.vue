@@ -687,10 +687,23 @@ const planRiskSummary = computed(() => planMode.value?.risk?.summary ? planCopy(
 const planAcceptanceItems = computed(() => asList(planMode.value?.acceptance).map(item => planCopy(item, '验收标准已整理。', 260)).slice(0, 8))
 const planPermissionBoundaries = computed(() => asList(planMode.value?.permission_boundaries).map(item => planCopy(item, '执行边界已整理。', 260)).slice(0, 8))
 const planAcceptFeedback = ref('')
+const planStepEdits = ref({})
+const planRevisionFeedbackFromSteps = () => {
+  const edits = planStepEdits.value || {}
+  const lines = planModeSteps.value.map((step, index) => {
+    const key = step.id || String(index)
+    const next = String(edits[key] ?? '').trim()
+    const original = String(step.detail || '').trim()
+    if (next && next !== original) return `${index + 1}. ${step.label || step.content || '步骤'}：${next}`
+    return ''
+  }).filter(Boolean)
+  return lines.length ? `请按以下修订后的步骤说明执行：\n${lines.join('\n')}` : ''
+}
 const isPlanConfirmAction = (action) => action?.kind === 'confirm_plan' || (props.context === 'global' && action?.kind === 'confirm')
 const isPlanReviseAction = (action) => ['revise_plan', 'replan'].includes(action?.kind)
 const planConfirmAction = computed(() => asList(props.card.actions).find(isPlanConfirmAction) || null)
 const planReviseAction = computed(() => asList(props.card.actions).find(isPlanReviseAction) || null)
+const canEditPlanSteps = computed(() => !!planReviseAction.value && props.card.phase === 'needs_user')
 const hasPlanConfirmAction = computed(() => !!planMode.value && props.card.phase === 'needs_user' && asList(props.card.actions).some(isPlanConfirmAction))
 const planApprovalRequest = computed(() => {
   const plan = planMode.value
@@ -713,10 +726,12 @@ const planApprovalRequest = computed(() => {
   const permissionBoundaries = asList(plan.permission_boundaries).map(item => planCopy(item, '执行边界已整理。', 180)).slice(0, 2)
   return displayValue({
     schema: 'ccm-main-agent-plan-approval-request-v1',
-    title: '等待你确认计划',
+    title: plan.session_plan_mode === true || plan.confirmation_kind === 'session_plan' ? '等待你确认计划' : '需要你确认后才执行',
     status: 'waiting_confirmation',
     status_label: '待确认',
-    headline: '确认后我才会按这份计划开始执行；确认前不会写入文件、安排执行成员或做高风险操作。',
+    headline: plan.session_plan_mode === true || plan.confirmation_kind === 'session_plan'
+      ? '确认后会切回 Agent，并按这份计划开始执行；确认前不会写入文件或派发子 Agent。'
+      : '确认后我才会按这份方案开始执行。这是安全确认，不是 Plan 模式。',
     rows: [
       pendingSteps.length ? `确认后继续：${pendingSteps.join('；')}` : '确认后我会进入执行链路。',
       permissionBoundaries.length ? `执行边界：${permissionBoundaries.join('；')}` : '执行边界会按计划和当前授权范围控制。',
@@ -1150,6 +1165,13 @@ const taskActionPayload = (action) => {
       feedback: acceptFeedback,
     }
   }
+  if (isPlanReviseAction(action)) {
+    const stepFeedback = planRevisionFeedbackFromSteps()
+    return {
+      ...action,
+      feedback: stepFeedback || action.feedback || '',
+    }
+  }
   if (action?.kind !== 'view_changes') return action
   return {
     ...action,
@@ -1161,6 +1183,7 @@ const taskActionPayload = (action) => {
 }
 watch(() => props.card.task_id || props.card.id || '', () => {
   planAcceptFeedback.value = ''
+  planStepEdits.value = {}
 })
 const handoffActionCanEmit = (action) => ['view_changes', 'continue', 'retry', 'resume', 'pause', 'resume_paused', 'force_interrupt', 'interrupt', 'resume_interrupted', 'cancel', 'gap_continue', 'confirm_plan', 'revise_plan', 'approve_epic', 'targeted_rework', 'continue_work_item', 'rollback', 'save_knowledge'].includes(action?.kind)
 const handoffActionPayload = (action) => {

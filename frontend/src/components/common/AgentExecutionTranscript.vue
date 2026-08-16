@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import {
   AlertTriangle,
   Check,
@@ -9,30 +9,45 @@ import {
   CircleX,
   FileCode2,
   FileDiff,
+  FileMinus2,
+  FilePlus2,
   History,
   ListChecks,
   LoaderCircle,
   Minus,
-  RefreshCcw,
+  Pencil,
   Search,
   Wrench,
   X,
 } from '@lucide/vue'
 import {
   agentStatusCategory,
+  appendLiveModelActivityToTail,
   completionFileChangesForRows,
   eventStatusLabel,
   executionMessageIsFormalTask,
+  executionQueryRecordForMessage,
   executionEventsForMessage,
   executionTerminalBoundaryForMessage,
   formatExecutionDuration,
   formatExecutionDurationLong,
+  isLiveModelActivityEvent,
   shouldRenderExecutionTranscript,
   terminalGateForExecutionEvent,
 } from '../../utils/agentExecutionEvents.js'
 import { agentProgressBatchPresentation, agentProgressToolFamily, longRunningToolDuration } from '../../utils/agentProgressPresentation.js'
+import { collapseReadSearchRows } from '../../utils/collapseReadSearchRows.js'
+import {
+  childAgentCardTitle,
+  isChildAgentDialogueProgress,
+  nestChildAgentConversation,
+} from '../../utils/nestChildAgentConversation.js'
 import ToolResultDetail from './ToolResultDetail.vue'
+import InlineAgentDiff from './InlineAgentDiff.vue'
+import ReadSearchCollapseHeader from './ReadSearchCollapseHeader.vue'
+import ChildAgentConversation from './ChildAgentConversation.vue'
 import { buildLegacyToolDisplay, toolResultHasUserDetails } from '../../utils/toolResultPresentation.js'
+import { findSourceReadEventForPath, sourceReadPathsFromEvent } from '../../utils/executionSourceReads.js'
 
 const props = defineProps({
   events: { type: Array, default: () => [] },
@@ -42,8 +57,10 @@ const props = defineProps({
   stagePreview: { type: Boolean, default: false },
   stageGrouped: { type: Boolean, default: false },
   presentation: { type: String, default: 'auto' },
+  canConfirmExecute: Boolean,
+  confirmExecuteBusy: Boolean,
 })
-const emit = defineEmits(['open-file-change', 'open-file-changes', 'execution-action'])
+const emit = defineEmits(['open-file-change', 'open-file-changes', 'execution-action', 'confirm-execute'])
 const requestedStageMode = computed(() => props.stagePreview || props.stageGrouped)
 
 const now = ref(Date.now())
@@ -63,7 +80,23 @@ const transcriptExpanded = ref(false)
 const searchQuery = ref('')
 const searchCursor = ref(-1)
 let durationTimer = null
-const toggleTranscript = () => { transcriptExpanded.value = !transcriptExpanded.value }
+const toggleTranscript = event => {
+  // Expanding a completed record can add hundreds of pixels. Tell the shared
+  // conversation scroller that this resize was initiated by the user so its
+  // bottom-follow observer does not immediately scroll the clicked header out
+  // of view (which looks like the execution record disappeared).
+  const header = event?.currentTarget || executionAnchor.value || null
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('ccm:manual-content-toggle', {
+      detail: { element: header },
+    }))
+  }
+  transcriptExpanded.value = !transcriptExpanded.value
+  nextTick(() => {
+    if (!transcriptExpanded.value || !header || typeof header.scrollIntoView !== 'function') return
+    header.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+  })
+}
 onMounted(() => {
   try {
     const savedDensity = localStorage.getItem(EXECUTION_DENSITY_KEY)
@@ -99,9 +132,8 @@ const isTerminal = computed(() => !!terminalBoundary.value)
 const isFormalTaskExecution = computed(() => executionMessageIsFormalTask(props.events, props.messages, props.messageIndex))
 const hasToolExecution = computed(() => rows.value.some(event => String(event?.eventType || '').startsWith('tool_')))
 const isQueryExecution = computed(() => !isFormalTaskExecution.value && hasToolExecution.value)
-const isQueryCompletion = computed(() => isQueryExecution.value
-  && isTerminal.value
-  && String(terminalBoundary.value?.status || '').toLowerCase() === 'success')
+const queryRecord = computed(() => executionQueryRecordForMessage(props.events, props.messages, props.messageIndex))
+const isQueryCompletion = computed(() => !!queryRecord.value)
 const stageMode = computed(() => requestedStageMode.value && isFormalTaskExecution.value)
 const isOfficialCompletion = computed(() => {
   if (!isFormalTaskExecution.value || String(terminalBoundary.value?.status || '').toLowerCase() !== 'success' || !resultEvent.value) return false
@@ -109,38 +141,59 @@ const isOfficialCompletion = computed(() => {
   return gate?.passed === true && gate?.accepted !== false
 })
 const isIncompleteTerminal = computed(() => isTerminal.value && !isOfficialCompletion.value && !isQueryCompletion.value)
-const isLivePresentation = computed(() => props.presentation === 'live' && !isOfficialCompletion.value && !isQueryCompletion.value)
+const isLivePresentation = computed(() => props.presentation === 'live' && !isOfficialCompletion.value && !isQueryCompletion.value && !isTerminal.value)
 // Running work always exposes the full construction trail. Density is a
 // completed-record reading preference and must not hide live progress.
-const effectiveExecutionDensity = computed(() => isLivePresentation.value ? 'detailed' : executionDensity.value)
+const effectiveExecutionDensity = computed(() => {
+  if (isLivePresentation.value) return 'detailed'
+  if (isQueryCompletion.value && executionDensity.value === 'summary') return 'standard'
+  return executionDensity.value
+})
 const latestPauseMilestone = computed(() => [...rows.value].reverse().find(event => event?.detail?.pauseMilestone?.kind))
 const pausedAt = computed(() => latestPauseMilestone.value?.detail?.pauseMilestone?.kind === 'paused' ? eventTime(latestPauseMilestone.value?.createdAt) : 0)
 const terminalAt = computed(() => Number(terminalBoundary.value?.at || 0) || pausedAt.value)
 const presentationVisible = computed(() => {
-  if (props.presentation === 'live') return !isOfficialCompletion.value && !isQueryCompletion.value
+  if (props.presentation === 'live') return isLivePresentation.value
   if (props.presentation === 'completed') return isOfficialCompletion.value || isQueryCompletion.value
   return true
 })
 const completedProjectionVisible = computed(() => isOfficialCompletion.value || isQueryCompletion.value)
 const compacted = computed(() => !transcriptExpanded.value && completedProjectionVisible.value)
-const assistantProgressRows = computed(() => rows.value.filter(event => event.eventType === 'assistant_progress'))
+const assistantProgressRows = computed(() => rows.value.filter(event => event.eventType === 'assistant_progress' && !isChildAgentDialogueProgress(event)))
 const currentProgressEventId = computed(() => isTerminal.value ? '' : assistantProgressRows.value.at(-1)?.eventId || '')
 const requirementPlanEvents = computed(() => rows.value.filter(event => event.eventType === 'requirement_plan' && event?.detail?.requirementPlan))
 const latestRequirementPlanEvent = computed(() => [...requirementPlanEvents.value].sort((left, right) => (
   Number(left?.detail?.requirementPlan?.revision || 1) - Number(right?.detail?.requirementPlan?.revision || 1)
   || Number(left?.sequence || 0) - Number(right?.sequence || 0)
 )).at(-1) || null)
-const requirementPlan = computed(() => latestRequirementPlanEvent.value?.detail?.requirementPlan || null)
+const messagePresentedPlan = computed(() => {
+  const plan = anchorMessage.value?.presentedPlan || anchorMessage.value?.presented_plan
+  if (plan && Array.isArray(plan.steps) && plan.steps.length && String(plan.goal || plan.title || '').trim()) return plan
+  return null
+})
+const requirementPlan = computed(() => latestRequirementPlanEvent.value?.detail?.requirementPlan || messagePresentedPlan.value || null)
 const livePlanDockEligible = computed(() => !!(
   latestRequirementPlanEvent.value?.taskId
   && latestRequirementPlanEvent.value?.anchorMessageId
 ))
 const requirementPlanHistory = computed(() => requirementPlanEvents.value.filter(event => event.eventId !== latestRequirementPlanEvent.value?.eventId))
-const visibleModelActivity = event => event?.eventType === 'model_activity' && ['waiting', 'retrying'].includes(String(event?.detail?.modelActivity?.state || ''))
-const visibleRows = computed(() => rows.value.filter(event => !['turn_started', 'assistant_text_delta', 'assistant_progress', 'requirement_plan', 'result'].includes(event.eventType) && (event.eventType !== 'model_activity' || visibleModelActivity(event))))
-const stageSourceRows = computed(() => rows.value.filter(event => !['turn_started', 'assistant_text_delta', 'thinking_status', 'model_activity', 'requirement_plan', 'result'].includes(event.eventType)))
+const visibleModelActivity = event => isLiveModelActivityEvent(event)
+const nestedLedgerRows = computed(() => nestChildAgentConversation(rows.value.filter(event => (
+  !['turn_started', 'assistant_text_delta', 'requirement_plan', 'result'].includes(String(event?.eventType || ''))
+  && (event.eventType !== 'model_activity' || visibleModelActivity(event))
+))))
+const visibleRows = computed(() => nestedLedgerRows.value)
+const stageSourceRows = computed(() => nestedLedgerRows.value.filter(event => (
+  event?.__childAgentConversation
+  || !['thinking_status', 'model_activity'].includes(String(event?.eventType || ''))
+)))
 const hasProgressFlow = computed(() => assistantProgressRows.value.length > 0)
-const hasExecutionRows = computed(() => requirementPlan.value || visibleRows.value.some(event => event.eventType?.startsWith('tool_') || event.eventType?.startsWith('agent_') || ['permission_required', 'context_compacted'].includes(event.eventType)))
+const hasExecutionRows = computed(() => requirementPlan.value || visibleRows.value.some(event => (
+  event?.__childAgentConversation
+  || event.eventType?.startsWith('tool_')
+  || event.eventType?.startsWith('agent_')
+  || ['permission_required', 'context_compacted'].includes(event.eventType)
+)))
 const toolRows = computed(() => rows.value.filter(event => event.eventType.startsWith('tool_')))
 const toolCount = computed(() => toolRows.value.length)
 const agentRows = computed(() => rows.value.filter(event => event.eventType.startsWith('agent_')))
@@ -193,6 +246,9 @@ const stageTimingSource = computed(() => {
 })
 const expandedStages = reactive({})
 const expandedBatches = reactive({})
+const expandedReadSearchGroups = reactive({})
+const expandedChildAgentCards = reactive({})
+const expandedChildAgentTools = reactive({})
 const requirementPlanExpanded = ref(false)
 const completionFilesExpanded = ref(false)
 const attemptHistoryExpanded = ref(false)
@@ -214,6 +270,7 @@ const owningAgentFor = event => {
   return agentRows.value.find(agent => String(agent?.agentRunId || agent?.detail?.agentRunId || '') === runId) || null
 }
 const inferredStageKind = event => {
+  if (event?.__childAgentConversation) return inferredStageKind(event.agent)
   const explicit = String(event?.detail?.executionStage?.kind || '')
   if (['independent_verification', 'main_agent_summary'].includes(explicit)) return 'verification_delivery'
   if (stageDefinitions.some(stage => stage.kind === explicit)) return explicit
@@ -282,7 +339,7 @@ const configuredStageDuration = (stage, timing) => {
     .filter(value => Number.isFinite(value) && value > 0)
   return values.reduce((total, value) => total + value, 0)
 }
-const batchKeyFor = progress => String(progress?.detail?.progress?.batchId || progress?.eventId || '')
+const batchKeyFor = progress => String(progress?.eventId || progress?.detail?.progress?.batchId || '')
 const eventHasPartialResult = event => {
   const result = event?.detail?.toolDisplay?.result || {}
   const continuation = result?.continuation || event?.detail?.continuation || {}
@@ -298,11 +355,51 @@ const batchPartialCount = batch => (batch?.children || []).filter(eventHasPartia
 const batchStatusIcon = batch => batchHasFailure(batch) ? CircleX : batchNeedsAttention(batch) ? LoaderCircle : Check
 const batchIsExpanded = batch => {
   if (expandedBatches[batch.key] !== undefined) return expandedBatches[batch.key]
-  if (effectiveExecutionDensity.value === 'detailed') return true
+  if (isQueryCompletion.value || effectiveExecutionDensity.value === 'detailed') return true
   if (effectiveExecutionDensity.value === 'summary') return batchNeedsAttention(batch)
   return batchNeedsAttention(batch)
 }
 const toggleBatch = batch => { expandedBatches[batch.key] = !batchIsExpanded(batch) }
+const readSearchGroupIsExpanded = group => group?.expanded === true
+const revealSourceReadEvent = event => {
+  if (!event?.eventId || !isSourceReadEvent(event)) return
+  expandedRows[event.eventId] = true
+}
+const toggleReadSearchGroup = group => {
+  if (!group?.key) return
+  const opening = !readSearchGroupIsExpanded(group)
+  expandedReadSearchGroups[group.key] = opening
+  if (opening) {
+    for (const child of group.children || []) revealSourceReadEvent(child)
+  }
+}
+const childAgentCardExpanded = event => {
+  if (!event?.__childAgentConversation) return false
+  if (effectiveExecutionDensity.value === 'summary' && !isLivePresentation.value) return false
+  if (expandedChildAgentCards[event.key] !== undefined) return expandedChildAgentCards[event.key]
+  return isLivePresentation.value || String(event?.display?.status || '') === 'failed'
+}
+const toggleChildAgentCard = event => {
+  if (!event?.key) return
+  expandedChildAgentCards[event.key] = !childAgentCardExpanded(event)
+}
+const childAgentToolsVisible = event => {
+  if (!event?.__childAgentConversation || !childAgentCardExpanded(event)) return false
+  if (expandedChildAgentTools[event.key] === true) return true
+  if (expandedChildAgentTools[event.key] === false) return false
+  if ((event.tools || []).some(item => item?.display?.status === 'failed' || item?.eventType === 'tool_failed')) return true
+  if (normalizedSearchQuery.value && (event.tools || []).some(tool => searchableText(tool).includes(normalizedSearchQuery.value))) return true
+  return false
+}
+const toggleChildAgentTools = event => {
+  if (!event?.key) return
+  expandedChildAgentTools[event.key] = !childAgentToolsVisible(event)
+}
+const childAgentMatchesSearch = event => {
+  if (!normalizedSearchQuery.value) return true
+  return searchableText(event).includes(normalizedSearchQuery.value)
+    || (event.tools || []).some(tool => searchableText(tool).includes(normalizedSearchQuery.value))
+}
 const parallelSemanticRank = event => {
   const name = String(event?.toolName || event?.detail?.toolDisplay?.tool?.name || '').toLowerCase()
   if (/list_directory|glob|grep|search|find_(?:definition|references)|workspace_symbols/.test(name)) return 0
@@ -357,17 +454,25 @@ const syntheticParallelBatches = lifecycleRows => {
   })
 }
 const groupedStageItems = stageRows => {
-  const progressRows = stageRows.filter(event => event?.eventType === 'assistant_progress')
-  const lifecycleRows = stageRows.filter(event => event?.eventType !== 'assistant_progress')
+  const cards = stageRows.filter(event => event?.__childAgentConversation)
+  const rest = stageRows.filter(event => !event?.__childAgentConversation)
+  const progressRows = rest.filter(event => event?.eventType === 'assistant_progress')
+  const lifecycleRows = rest.filter(event => event?.eventType !== 'assistant_progress')
   const claimed = new Set()
+  const claimedToolCallIds = new Set()
   const batches = progressRows.map((progress, index) => {
     const related = new Set(progress?.detail?.progress?.relatedToolCallIds || [])
     const nextSequence = Number(progressRows[index + 1]?.sequence || Number.POSITIVE_INFINITY)
     const children = parallelFriendlyOrder(lifecycleRows.filter(event => {
-      const matched = related.size
-        ? related.has(event?.toolCallId)
-        : Number(event?.sequence || 0) > Number(progress?.sequence || 0) && Number(event?.sequence || 0) < nextSequence
-      if (matched) claimed.add(event.eventId)
+      if (isLiveModelActivityEvent(event)) return false
+      if (claimed.has(event.eventId)) return false
+      if (event?.toolCallId && claimedToolCallIds.has(event.toolCallId)) return false
+      const inWindow = Number(event?.sequence || 0) > Number(progress?.sequence || 0) && Number(event?.sequence || 0) < nextSequence
+      const matched = related.size ? related.has(event?.toolCallId) || inWindow : inWindow
+      if (matched) {
+        claimed.add(event.eventId)
+        if (event?.toolCallId) claimedToolCallIds.add(event.toolCallId)
+      }
       return matched
     }))
     const key = batchKeyFor(progress)
@@ -381,8 +486,8 @@ const groupedStageItems = stageRows => {
       durationMs: derivedStageDuration(children),
     }
   })
-  const unclaimed = lifecycleRows.filter(event => !claimed.has(event.eventId))
-  return [...batches, ...syntheticParallelBatches(unclaimed)]
+  const unclaimed = lifecycleRows.filter(event => !claimed.has(event.eventId) && !(event?.toolCallId && claimedToolCallIds.has(event.toolCallId)))
+  return [...batches, ...syntheticParallelBatches(unclaimed), ...cards]
     .sort((left, right) => Number((left.progress || left)?.sequence || 0) - Number((right.progress || right)?.sequence || 0))
 }
 const liveOrderedStageItems = items => {
@@ -416,18 +521,36 @@ const liveOrderedStageItems = items => {
     return orderFor(left) - orderFor(right)
   })
 }
+const flattenGroupedLiveRows = items => appendLiveModelActivityToTail(
+  liveOrderedStageItems(groupedStageItems(items)).flatMap(item => {
+    if (!item.__progressBatch) return isLiveModelActivityEvent(item) ? [] : [item]
+    return [
+      item,
+      ...(batchIsExpanded(item) ? item.children.filter(event => !isLiveModelActivityEvent(event)).map(event => ({
+        ...event,
+        __batchChild: true,
+        __agentChild: !!owningAgentFor(event),
+        __batchKey: item.key,
+      })) : []),
+    ]
+  }),
+  items.filter(isLiveModelActivityEvent),
+)
 const executionStageRows = computed(() => {
   const includeRequirementPlan = !!requirementPlan.value && !(isLivePresentation.value && livePlanDockEligible.value)
   if (!stageMode.value) {
-    if (!includeRequirementPlan) return visibleRows.value
-    const projected = [...visibleRows.value]
-    const firstAgentIndex = projected.findIndex(event => event?.eventType?.startsWith('agent_'))
+    const sourceRows = (isLivePresentation.value || isQueryCompletion.value)
+      ? flattenGroupedLiveRows(nestedLedgerRows.value.filter(event => event?.__childAgentConversation || event?.eventType !== 'thinking_status'))
+      : visibleRows.value
+    if (!includeRequirementPlan) return sourceRows
+    const projected = [...sourceRows]
+    const firstAgentIndex = projected.findIndex(event => event?.__childAgentConversation || event?.eventType?.startsWith('agent_'))
     projected.splice(firstAgentIndex >= 0 ? firstAgentIndex : projected.length, 0, {
       __requirementPlan: true,
       key: `requirement-plan:${requirementPlan.value.planId}:${requirementPlan.value.revision}`,
       event: latestRequirementPlanEvent.value,
     })
-    return projected
+    return appendLiveModelActivityToTail(projected)
   }
   const stageTiming = stageTimingSource.value?.stages || {}
   const stageBlocks = stageDefinitions.map(stage => {
@@ -478,7 +601,7 @@ const executionStageRows = computed(() => {
     }
   }
   if (!planInserted && includeRequirementPlan) projected.unshift({ __requirementPlan: true, key: `requirement-plan:${requirementPlan.value.planId}:${requirementPlan.value.revision}`, event: latestRequirementPlanEvent.value })
-  return projected
+  return appendLiveModelActivityToTail(projected, nestedLedgerRows.value)
 })
 const hydratedDetails = reactive({})
 const detailLoading = reactive({})
@@ -487,6 +610,7 @@ const detailNotices = reactive({})
 const liveTails = reactive({})
 const expandedRows = reactive({})
 const expandedBatchFiles = reactive({})
+const expandedInlineDiffs = reactive({})
 
 const locateExecutionEvent = browserEvent => {
   const detail = browserEvent?.detail || {}
@@ -503,6 +627,9 @@ const locateExecutionEvent = browserEvent => {
   ))
   if (progressOwner) expandedBatches[batchKeyFor(progressOwner)] = true
   if (target.eventId) expandedRows[target.eventId] = true
+  const groupKey = target.__readSearchGroupKey || `read-search:${target.eventId || target.toolCallId || ''}`
+  if (target.__readSearchGroupKey) expandedReadSearchGroups[target.__readSearchGroupKey] = true
+  else if (groupKey) expandedReadSearchGroups[groupKey] = true
 }
 
 const replaceReactiveFlags = (target, source) => {
@@ -519,8 +646,10 @@ const restoreExpansionState = () => {
     completionFilesExpanded.value = saved.completionFilesExpanded === true
     replaceReactiveFlags(expandedStages, saved.stages)
     replaceReactiveFlags(expandedBatches, saved.batches)
+    replaceReactiveFlags(expandedReadSearchGroups, saved.readSearchGroups)
     replaceReactiveFlags(expandedRows, saved.rows)
     replaceReactiveFlags(expandedBatchFiles, saved.batchFiles)
+    replaceReactiveFlags(expandedInlineDiffs, saved.inlineDiffs)
   } catch {}
 }
 const persistExpansionState = () => {
@@ -533,13 +662,15 @@ const persistExpansionState = () => {
       completionFilesExpanded: completionFilesExpanded.value,
       stages: { ...expandedStages },
       batches: { ...expandedBatches },
+      readSearchGroups: { ...expandedReadSearchGroups },
       rows: { ...expandedRows },
       batchFiles: { ...expandedBatchFiles },
+      inlineDiffs: { ...expandedInlineDiffs },
     }))
   } catch {}
 }
 watch(expansionStorageKey, restoreExpansionState)
-watch([transcriptExpanded, requirementPlanExpanded, attemptHistoryExpanded, completionFilesExpanded, expandedStages, expandedBatches, expandedRows, expandedBatchFiles], persistExpansionState, { deep: true })
+watch([transcriptExpanded, requirementPlanExpanded, attemptHistoryExpanded, completionFilesExpanded, expandedStages, expandedBatches, expandedReadSearchGroups, expandedRows, expandedBatchFiles, expandedInlineDiffs], persistExpansionState, { deep: true })
 
 const eventTime = value => {
   const parsed = Date.parse(String(value || ''))
@@ -591,7 +722,12 @@ const completionVerificationCount = computed(() => {
 })
 const completionResultSummary = computed(() => {
   if (!isTerminal.value) return ''
-  if (isQueryCompletion.value) return toolCount.value ? `已检查 ${toolCount.value} 项` : '查询已完成'
+  if (isQueryCompletion.value) {
+    const count = Number(queryRecord.value?.toolCount || toolCount.value || 0)
+    return queryRecord.value?.succeeded === false
+      ? `已检查 ${count || 1} 项，部分操作未完成`
+      : count ? `已检查 ${count} 项` : '查询已完成'
+  }
   const status = String(terminalBoundary.value?.status || resultEvent.value?.display?.status || '').toLowerCase()
   const files = completionFiles.value.length
   const failedVerification = Array.isArray(resultEvent.value?.result?.unfinished)
@@ -611,7 +747,7 @@ const completionResultSummary = computed(() => {
   return '本轮未通过验收，未正式交付'
 })
 const completedProjectionTitle = computed(() => isQueryCompletion.value ? '查询过程' : '执行记录')
-const completedProjectionSucceeded = computed(() => isOfficialCompletion.value || isQueryCompletion.value)
+const completedProjectionSucceeded = computed(() => isOfficialCompletion.value || queryRecord.value?.succeeded === true)
 const attemptHistoryGroups = computed(() => {
   const groups = new Map()
   for (const event of agentRows.value) {
@@ -664,7 +800,6 @@ const planStatusLabel = computed(() => {
   return '计划已就绪'
 })
 const planStepIcon = step => step.status === 'completed' ? Check : step.status === 'blocked' ? CircleX : step.status === 'running' ? LoaderCircle : step.status === 'skipped' ? Minus : Circle
-const planScopeLabel = computed(() => (requirementPlan.value?.scope || []).slice(0, 4).join(' · '))
 const stageLifecycleStatus = kind => {
   const stageRows = stageSourceRows.value.filter(event => inferredStageKind(event) === kind && event?.eventType !== 'assistant_progress')
   if (!stageRows.length) return 'pending'
@@ -712,7 +847,7 @@ const progressSegments = computed(() => {
     if (presentation.failed) parts.push(`${presentation.failed}项失败`)
     return {
       ...segment,
-      key: segment.progress?.detail?.progress?.batchId || segment.progress?.eventId || `progress-${index}`,
+      key: segment.progress?.eventId || segment.progress?.detail?.progress?.batchId || `progress-${index}`,
       label: parts.join(' · '),
       durationMs: presentation.durationMs || batchDuration(segment.rows),
       running: presentation.running,
@@ -828,14 +963,20 @@ const isRowExpandable = event => !!(event?.detail && (
   || event.detail.safeArguments
   || legacyResult(event.detail.safeResult)
   || event.detail.fileChanges?.length
-  || event.detail.evidenceIds?.length
-  || event.detail.runtimeObservation
-  || (event.detail.usage && Object.keys(event.detail.usage).length)
 ))
 const isRowExpanded = event => isRowExpandable(event) && expandedRows[event.eventId] === true
 const toggleRow = event => {
   if (!isRowExpandable(event)) return
-  expandedRows[event.eventId] = !expandedRows[event.eventId]
+  const opening = expandedRows[event.eventId] !== true
+  expandedRows[event.eventId] = opening
+  if (opening && isSourceReadEvent(event) && !batchFileRowsFor(event).length && !detailLoading[event.eventId]) {
+    void rehydrateDetail(event, false)
+  }
+}
+
+const isSourceReadEvent = event => {
+  const name = String(toolDisplayFor(event)?.tool?.name || event?.toolName || '').split('__').at(-1).toLowerCase()
+  return name === 'read_file' || name === 'read_files'
 }
 
 const legacyToolIdentity = event => {
@@ -870,12 +1011,17 @@ const eventTitle = event => {
   if (event?.eventType === 'model_activity') return event?.detail?.modelActivity?.safeLabel || event?.display?.summary || '正在处理'
   if (String(event?.eventType || '').startsWith('agent_')) {
     const display = event?.detail?.agentDisplay
-    if (display?.projectName) return [display.projectName, display.runtimeLabel].filter(Boolean).join(' · ')
+    if (display?.projectName || display?.projectId) {
+      const project = display.projectName || display.projectId
+      const isTestAgent = /test.?agent/i.test(String(display.runtimeLabel || event?.display?.title || ''))
+      return `${isTestAgent ? 'TestAgent' : '项目子 Agent'} · ${project}`
+    }
     return event?.display?.title || 'Agent'
   }
   return toolReadableLabel(event)
 }
 const eventBusinessSummary = event => {
+  if (event?.eventType === 'model_activity') return ''
   const projected = String(toolDisplayFor(event)?.result?.summary || '').trim()
   const fallback = String(event?.display?.summary || '').trim()
   const generic = /^(?:执行完成|工具执行完成|正在执行)$/
@@ -889,6 +1035,7 @@ const safeInlineTarget = value => {
 const eventTarget = event => {
   const toolDisplay = toolDisplayFor(event)
   const candidates = [
+    String(event?.eventType || '').startsWith('agent_') ? event?.detail?.agentDisplay?.runtimeLabel : '',
     event?.display?.target,
     toolDisplay?.tool?.target,
     toolDisplay?.arguments?.path,
@@ -950,6 +1097,68 @@ const normalizedFileChange = (file, event) => {
     eventId: event?.eventId || '',
   }
 }
+const projectAgentOwnerFor = event => {
+  const candidate = event?.detail?.agentDisplay ? event : owningAgentFor(event)
+  const display = candidate?.detail?.agentDisplay || {}
+  if (!candidate || !String(candidate?.agentRunId || candidate?.detail?.agentRunId || event?.agentRunId || '')) return null
+  if (!String(display.projectId || display.projectName || '').trim()) return null
+  if (/test.?agent/i.test(String(display.runtimeLabel || candidate?.display?.title || ''))) return null
+  return candidate
+}
+const latestAttemptForOwner = event => {
+  const owner = projectAgentOwnerFor(event)
+  if (!owner) return 0
+  const display = owner.detail?.agentDisplay || {}
+  const project = String(display.projectId || display.projectName || '')
+  const workItemId = String(owner.workItemId || event?.workItemId || '')
+  return agentRows.value.reduce((max, candidate) => {
+    const candidateDisplay = candidate?.detail?.agentDisplay || {}
+    if (String(candidateDisplay.projectId || candidateDisplay.projectName || '') !== project) return max
+    if (workItemId && String(candidate.workItemId || '') !== workItemId) return max
+    return Math.max(max, Number(candidate.attempt || candidateDisplay.attempt || 1))
+  }, 0)
+}
+const inlineFileChangesFor = event => {
+  const owner = projectAgentOwnerFor(event)
+  if (!owner || Number(event?.generation || 0) !== currentGeneration.value) return []
+  const attempt = Number(event?.attempt || event?.detail?.agentDisplay?.attempt || owner?.attempt || owner?.detail?.agentDisplay?.attempt || 1)
+  if (attempt < latestAttemptForOwner(event)) return []
+  const ownerDisplay = owner.detail?.agentDisplay || {}
+  const raw = Array.isArray(event?.detail?.fileChanges) && event.detail.fileChanges.length
+    ? event.detail.fileChanges
+    : String(event?.detail?.runtimeObservation?.eventType || '') === 'file_changed' && event?.display?.target
+      ? [{ path: event.display.target, status: '修改' }]
+      : []
+  const unique = new Map()
+  for (const item of raw) {
+    const normalized = normalizedFileChange(item, event)
+    if (!normalized.path) continue
+    normalized.project = normalized.project || ownerDisplay.projectId || ownerDisplay.projectName || ''
+    const previous = unique.get(normalized.path)
+    unique.set(normalized.path, previous ? {
+      ...previous,
+      ...normalized,
+      additions: Math.max(Number(previous.additions || 0), Number(normalized.additions || 0)),
+      deletions: Math.max(Number(previous.deletions || 0), Number(normalized.deletions || 0)),
+    } : normalized)
+  }
+  return [...unique.values()]
+}
+const fileChangeKind = file => {
+  const status = String(file?.statusKind || file?.status || '').toLowerCase()
+  if (file?.deleted || /删除|deleted|^d$/.test(status)) return 'deleted'
+  if (/新增|added|^a$/.test(status)) return 'added'
+  if (/重命名|renamed|^r/.test(status)) return 'renamed'
+  return 'modified'
+}
+const fileChangeLabel = file => ({ added: '已创建', deleted: '已删除', renamed: '已重命名', modified: '已修改' })[fileChangeKind(file)]
+const fileChangeIcon = file => fileChangeKind(file) === 'added' ? FilePlus2 : fileChangeKind(file) === 'deleted' ? FileMinus2 : Pencil
+const inlineDiffKey = (event, file) => `${event?.eventId || 'event'}:${String(file?.path || '')}`
+const inlineDiffExpanded = (event, file) => expandedInlineDiffs[inlineDiffKey(event, file)] === true
+const toggleInlineDiff = (event, file) => {
+  const key = inlineDiffKey(event, file)
+  expandedInlineDiffs[key] = !expandedInlineDiffs[key]
+}
 const openFileChange = (file, event) => {
   const normalized = normalizedFileChange(file, event)
   if (!normalized.path) return
@@ -966,16 +1175,32 @@ const batchFileRowsFor = event => {
   const rows = toolDisplayFor(event)?.result?.fileRows
   return Array.isArray(rows) ? rows : []
 }
-const batchFileKey = (event, file) => `${event?.eventId || 'tool'}:${String(file?.path || '')}`
-const isBatchFileExpanded = (event, file) => expandedBatchFiles[batchFileKey(event, file)] === true
-const toggleBatchFile = (event, file) => {
-  const key = batchFileKey(event, file)
-  expandedBatchFiles[key] = !expandedBatchFiles[key]
+const openableSourcePaths = computed(() => {
+  const paths = []
+  for (const event of rows.value) {
+    if (!isSourceReadEvent(event)) continue
+    paths.push(...sourceReadPathsFromEvent(event))
+  }
+  return paths
+})
+const openSourceFile = event => {
+  if (isSourceReadEvent(event) && !batchFileRowsFor(event).length && !detailLoading[event.eventId]) {
+    void rehydrateDetail(event, false)
+  }
 }
-const batchFileRange = file => {
-  const from = Math.max(1, Number(file?.from || file?.lines?.[0]?.line || 1))
-  const to = Math.max(from, Number(file?.to || file?.lines?.at?.(-1)?.line || from))
-  return from === to ? `第 ${from} 行` : `第 ${from}–${to} 行`
+const openListingSource = payload => {
+  const match = findSourceReadEventForPath(rows.value.filter(isSourceReadEvent), payload?.path)
+  if (!match) return
+  transcriptExpanded.value = true
+  revealSourceReadEvent(match)
+  const group = collapsedExecutionStageRows.value.find(item => (
+    item?.__readSearchGroup && (item.children || []).some(child => child.eventId === match.eventId)
+  ))
+  if (group?.key) expandedReadSearchGroups[group.key] = true
+  nextTick(() => {
+    const node = executionAnchor.value?.querySelector(`[data-execution-event-id="${match.eventId}"]`)
+    node?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+  })
 }
 
 const mergeBatchFileRows = (previousRows, currentRows) => {
@@ -1018,7 +1243,7 @@ const mergeBatchFileRows = (previousRows, currentRows) => {
 const mergeBatchReadDetail = (previous, current) => {
   const previousResult = previous?.result || {}
   const currentResult = current?.result || {}
-  if (previousResult?.continuation?.kind !== 'read_files') return current
+  if (!['read_file', 'read_files'].includes(previousResult?.continuation?.kind)) return current
   const rowsByPath = new Map()
   for (const row of previousResult.rows || []) {
     const path = String(row?.path || '').trim()
@@ -1060,7 +1285,7 @@ const rehydrateDetail = async (event, continueRead = false) => {
     const requestDetail = async (continuation) => {
       const response = await fetch(`/api/agent-execution/events/${encodeURIComponent(event.eventId)}/detail?${query}`, {
         method: 'POST', cache: 'no-store', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(continueRead && continuation ? { continue: true, continuation } : {}),
+        body: JSON.stringify(continueRead && continuation ? { includeSource: true, continue: true, continuation } : { includeSource: true }),
       })
       const payload = await response.json().catch(() => ({}))
       if (!response.ok || payload.success === false) {
@@ -1080,6 +1305,7 @@ const rehydrateDetail = async (event, continueRead = false) => {
     if (!continueRead || !continuation?.pendingCount) {
       mergedDetail = await requestDetail(null)
       hydratedDetails[event.eventId] = mergedDetail
+      detailNotices[event.eventId] = ''
     } else {
       // A single user action drains several bounded 100-line chunks. The API
       // still validates every cursor/checksum independently, while the UI no
@@ -1110,6 +1336,25 @@ const rehydrateDetail = async (event, continueRead = false) => {
     detailLoading[event.eventId] = false
   }
 }
+const hydrateRestoredSourceRows = () => {
+  for (const event of rows.value) {
+    if (expandedRows[event?.eventId] === true && isSourceReadEvent(event) && !batchFileRowsFor(event).length && !detailLoading[event.eventId]) {
+      void rehydrateDetail(event, false)
+    }
+  }
+}
+watch([rows, () => Object.entries(expandedRows).filter(([, value]) => value === true).map(([key]) => key).join('|')], hydrateRestoredSourceRows, { immediate: true })
+watch(transcriptExpanded, expanded => {
+  if (!expanded || !isQueryCompletion.value) return
+  for (const event of collapsedExecutionStageRows.value) {
+    if (event?.__readSearchGroup) {
+      expandedReadSearchGroups[event.key] = true
+      for (const child of event.children || []) revealSourceReadEvent(child)
+    } else {
+      revealSourceReadEvent(event)
+    }
+  }
+})
 const loadLiveTail = async event => {
   if (detailLoading[event.eventId]) return
   detailLoading[event.eventId] = true
@@ -1154,11 +1399,9 @@ const liveRowLabel = event => {
   const title = eventTitle(event)
   if (String(event?.eventType || '').startsWith('agent_')) return title
   const status = String(event?.display?.status || 'running')
-  const duration = formatExecutionDuration(event?.display?.durationMs)
-  if (status === 'success') return duration ? `已在 ${duration} 内完成 ${title}` : `已完成 ${title}`
   if (status === 'failed') return `${title}运行失败`
   if (status === 'waiting') return `${title}正在等待`
-  return `正在运行 ${title}`
+  return title
 }
 const rowPrimaryLabel = event => event?.__batchChild && event?.display?.status === 'success' && !eventHasPartialResult(event)
   ? eventTitle(event)
@@ -1172,12 +1415,24 @@ const liveRowMeta = event => {
   return ''
 }
 
-const searchableText = event => [
-  eventTitle(event), event?.display?.target, eventBusinessSummary(event), eventStatusLabel(event),
-  event?.detail?.agentDisplay?.projectName, event?.detail?.agentDisplay?.workItemTitle,
-  ...(event?.detail?.fileChanges || []).map(file => typeof file === 'string' ? file : file?.path),
-  event?.display?.summary,
-].filter(Boolean).join(' ').toLowerCase()
+const searchableText = event => {
+  if (event?.__childAgentConversation) {
+    return [
+      childAgentCardTitle(event),
+      event.runtimeLabel,
+      event?.display?.summary,
+      ...(event.dialogue || []).map(line => line.text),
+      ...(event.files || []).map(file => file.path),
+      ...(event.tools || []).map(item => eventTitle(item)),
+    ].filter(Boolean).join(' ').toLowerCase()
+  }
+  return [
+    eventTitle(event), event?.display?.target, eventBusinessSummary(event), eventStatusLabel(event),
+    event?.detail?.agentDisplay?.projectName, event?.detail?.agentDisplay?.workItemTitle,
+    ...(event?.detail?.fileChanges || []).map(file => typeof file === 'string' ? file : file?.path),
+    event?.display?.summary,
+  ].filter(Boolean).join(' ').toLowerCase()
+}
 const normalizedSearchQuery = computed(() => searchQuery.value.trim().toLowerCase())
 const searchMatches = computed(() => {
   if (!normalizedSearchQuery.value) return []
@@ -1251,17 +1506,37 @@ const openReplay = () => {
   if (replayTarget.value) emit('execution-action', replayTarget.value)
 }
 const liveStageLabel = computed(() => executionStageRows.value.find(item => item?.__stageHeader && item.active)?.label || '')
+const collapsedExecutionStageRows = computed(() => {
+  const nested = collapseReadSearchRows(executionStageRows.value, {
+    expandedGroups: expandedReadSearchGroups,
+  })
+  return nested.flatMap(event => {
+    if (!event?.__childAgentConversation || !childAgentToolsVisible(event)) return [event]
+    const children = collapseReadSearchRows((event.tools || []).map(tool => ({
+      ...tool,
+      __childAgentChild: true,
+      __childAgentKey: event.key,
+      __stageChild: event.__stageChild,
+      __stageKind: event.__stageKind,
+      __agentChild: true,
+    })), { expandedGroups: expandedReadSearchGroups })
+    return [event, ...children]
+  })
+})
 const displayedExecutionStageRows = computed(() => {
-  if (effectiveExecutionDensity.value !== 'summary') return executionStageRows.value
-  const filtered = executionStageRows.value.filter(event => {
+  if (isQueryCompletion.value || effectiveExecutionDensity.value !== 'summary') return collapsedExecutionStageRows.value
+  const filtered = collapsedExecutionStageRows.value.filter(event => {
     if (event?.__stageHeader) return event.active || event.status === '失败'
     if (event?.__progressBatch) return batchNeedsAttention(event)
+    if (event?.__readSearchGroup) return event.failed || event.running
+    if (event?.__childAgentConversation) return true
+    if (event?.__childAgentChild) return false
     return isCurrentEvent(event)
       || ['failed', 'waiting', 'blocked', 'cancelled'].includes(String(event?.display?.status || ''))
       || eventHasPartialResult(event)
       || event?.eventType === 'permission_required'
   })
-  return filtered.length ? filtered : executionStageRows.value.slice(-1)
+  return filtered.length ? filtered : collapsedExecutionStageRows.value.slice(-1)
 })
 </script>
 
@@ -1274,10 +1549,10 @@ const displayedExecutionStageRows = computed(() => {
       <strong>{{ liveStageLabel }}</strong>
     </template>
   </header>
-  <div v-if="hasProgressFlow && !stageMode && (!isTerminal || transcriptExpanded)" class="cc-progress-flow" aria-label="Agent 进度说明">
+  <div v-if="hasProgressFlow && !stageMode && !isLivePresentation && !isQueryCompletion && (!isTerminal || transcriptExpanded)" class="cc-progress-flow" aria-label="Agent 进度说明">
     <div v-for="segment in displayedProgressSegments" :key="segment.key" class="cc-progress-segment" :class="{ current: segment.progress?.eventId === currentProgressEventId, completed: segment.progress?.eventId !== currentProgressEventId }">
       <p v-if="progressText(segment.progress)" class="cc-progress-text">{{ progressText(segment.progress) }}</p>
-      <button v-if="segment.label" type="button" class="cc-progress-batch" :aria-expanded="transcriptExpanded" @click="toggleTranscript">
+      <button v-if="segment.label" type="button" class="cc-progress-batch" :aria-expanded="transcriptExpanded" @click.stop="toggleTranscript">
         <span class="cc-progress-batch-icon"><Wrench :size="11" /></span>
         <span>{{ segment.label }}</span>
         <small v-if="segment.durationMs">{{ formatExecutionDuration(segment.durationMs) }}</small>
@@ -1315,8 +1590,8 @@ const displayedExecutionStageRows = computed(() => {
     <button v-if="completionFilesExpanded && completionFiles.length > 40" type="button" class="cc-completion-files-all" @click="openAllFileChanges">查看全部 {{ completionFiles.length }} 个文件</button>
   </section>
 
-  <section v-if="!isIncompleteTerminal && shouldRender && (hasExecutionRows || (!isTerminal && assistantProgressRows.length) || transcriptExpanded || isQueryCompletion) && (!hasProgressFlow || stageMode || transcriptExpanded || isQueryCompletion)" class="cc-execution" :class="{ complete: completedProjectionVisible, expanded: transcriptExpanded, live: isLivePresentation, query: isQueryCompletion }" :aria-label="isLivePresentation ? 'Agent 实时执行进度' : completedProjectionTitle">
-    <button v-if="completedProjectionVisible" class="cc-execution-head" type="button" @click="toggleTranscript">
+  <section v-if="!isIncompleteTerminal && shouldRender && (hasExecutionRows || (!isTerminal && assistantProgressRows.length) || transcriptExpanded || isQueryCompletion) && (!hasProgressFlow || stageMode || transcriptExpanded || isQueryCompletion || isLivePresentation)" class="cc-execution" :class="{ complete: completedProjectionVisible, expanded: transcriptExpanded, live: isLivePresentation, query: isQueryCompletion }" :aria-label="isLivePresentation ? 'Agent 实时执行进度' : completedProjectionTitle">
+    <button v-if="completedProjectionVisible" class="cc-execution-head" type="button" @click.stop="toggleTranscript">
       <span class="cc-execution-chevron"><ChevronDown v-if="transcriptExpanded" :size="15" /><ChevronRight v-else :size="15" /></span>
       <strong>{{ completedProjectionTitle }}</strong>
       <span :class="['cc-execution-result-mark', completedProjectionSucceeded ? 'success' : 'warning']" aria-hidden="true"><Check v-if="completedProjectionSucceeded" :size="11" /><AlertTriangle v-else :size="11" /></span>
@@ -1334,10 +1609,10 @@ const displayedExecutionStageRows = computed(() => {
     </div>
 
     <div v-if="!compacted" class="cc-execution-rows">
-      <div v-if="resultEvent && timingItems.length" class="cc-execution-timing" aria-label="本轮耗时统计">
+      <div v-if="resultEvent && timingItems.length && !isQueryCompletion" class="cc-execution-timing" aria-label="本轮耗时统计">
         <span v-for="([label, value]) in timingItems" :key="label"><small>{{ label }}</small>{{ formatExecutionDuration(value) }}</span>
       </div>
-      <div v-if="transcriptExpanded" class="cc-execution-search" role="search">
+      <div v-if="transcriptExpanded && (!isQueryCompletion || visibleRows.length > 20)" class="cc-execution-search" role="search">
         <Search :size="14" aria-hidden="true" />
         <input v-model="searchQuery" type="search" placeholder="搜索工具、项目、文件或失败原因" @keydown="onSearchKeydown" />
         <small v-if="normalizedSearchQuery">{{ searchMatches.length }} 个匹配</small>
@@ -1372,7 +1647,7 @@ const displayedExecutionStageRows = computed(() => {
         :aria-current="batchNeedsAttention(event) ? 'step' : undefined"
       >
         <p v-if="event.progress && progressText(event.progress)" class="cc-execution-stage-progress">{{ progressText(event.progress) }}</p>
-        <button v-if="event.children.length" type="button" class="cc-progress-batch-head" :aria-expanded="batchIsExpanded(event)" @click="toggleBatch(event)">
+        <button v-if="event.children.length && !((isLivePresentation || isQueryCompletion) && batchIsExpanded(event))" type="button" class="cc-progress-batch-head" :aria-expanded="batchIsExpanded(event)" @click="toggleBatch(event)">
           <span class="cc-progress-batch-status" :class="{ failed: batchHasFailure(event), attention: batchNeedsAttention(event) }"><component :is="batchStatusIcon(event)" :size="12" /></span>
           <strong>{{ event.presentation?.label || '工具批次' }}</strong>
           <small>{{ event.presentation?.count || event.children.length }}项<span v-if="event.parallel"> · 并行</span><span v-if="event.presentation?.failed"> · {{ event.presentation.failed }}项失败</span><span v-if="batchPartialCount(event)"> · {{ batchPartialCount(event) }}项部分结果</span><span v-if="event.presentation?.durationMs || event.durationMs"> · {{ formatExecutionDuration(event.presentation?.durationMs || event.durationMs) }}</span></small>
@@ -1383,51 +1658,69 @@ const displayedExecutionStageRows = computed(() => {
         <button type="button" class="cc-requirement-plan-head" :aria-expanded="planIsExpanded" @click="toggleRequirementPlan">
           <span class="cc-requirement-plan-icon"><ListChecks :size="14" /></span>
           <span class="cc-requirement-plan-title">
-            <strong>{{ isLivePresentation ? `${requirementPlan?.title || '实施计划'} · ${effectivePlanSteps.length}步` : requirementPlan?.title || '需求实施计划' }}</strong>
+            <strong>{{ isLivePresentation ? `${requirementPlan?.title || '实施计划'} · ${effectivePlanSteps.length} 项待办` : requirementPlan?.title || '需求实施计划' }}</strong>
             <small>根据你的需求和现有项目整理 · 版本 {{ requirementPlan?.revision || 1 }}</small>
           </span>
           <span class="cc-requirement-plan-status">{{ planStatusLabel }}</span>
           <span class="cc-requirement-plan-chevron"><ChevronDown v-if="planIsExpanded" :size="14" /><ChevronRight v-else :size="14" /></span>
         </button>
-        <div v-if="planIsExpanded" class="cc-requirement-plan-body">
+        <div v-if="planIsExpanded" class="cc-requirement-plan-body" :class="{ 'has-side': requirementPlan?.exclusions?.length }">
           <div class="cc-requirement-plan-main">
             <section>
               <h4>目标</h4>
-              <p>{{ requirementPlan?.goal }}</p>
+              <p>{{ requirementPlan?.overview || requirementPlan?.goal }}</p>
             </section>
             <section>
-              <h4>接下来会这样处理</h4>
+              <h4>待办</h4>
               <ol class="cc-requirement-plan-steps">
                 <li v-for="(step, stepIndex) in effectivePlanSteps" :key="step.id || stepIndex" :class="step.status">
                   <span class="cc-requirement-step-mark"><component :is="planStepIcon(step)" :size="11" /></span>
                   <div>
                     <strong>{{ step.title }}</strong>
-                    <p v-if="step.description && step.description !== step.title">{{ step.description }}</p>
-                    <small v-if="step.outcome">完成后：{{ step.outcome }}</small>
                   </div>
                   <span v-if="step.project" class="cc-requirement-step-project">{{ step.project }}</span>
                 </li>
               </ol>
             </section>
           </div>
-          <aside class="cc-requirement-plan-side">
-            <section v-if="planScopeLabel"><h4>涉及范围</h4><p>{{ planScopeLabel }}</p></section>
-            <section v-if="requirementPlan?.expectedResults?.length"><h4>预期结果</h4><ul><li v-for="item in requirementPlan.expectedResults" :key="item">{{ item }}</li></ul></section>
-            <section v-if="requirementPlan?.exclusions?.length"><h4>本次不包含</h4><ul><li v-for="item in requirementPlan.exclusions" :key="item">{{ item }}</li></ul></section>
-            <section v-if="requirementPlanHistory.length"><h4>计划历史</h4><p>此前还有 {{ requirementPlanHistory.length }} 个版本，可在技术详情中回看。</p></section>
+          <aside v-if="requirementPlan?.exclusions?.length" class="cc-requirement-plan-side">
+            <section><h4>本次不包含</h4><ul><li v-for="item in requirementPlan.exclusions" :key="item">{{ item }}</li></ul></section>
           </aside>
         </div>
         <footer v-if="planIsExpanded" class="cc-requirement-plan-foot">
-          <span>{{ effectivePlanSteps.length }} 个实施步骤 · {{ requirementPlan?.expectedResults?.length || 0 }} 项预期结果</span>
+          <span>{{ effectivePlanSteps.length }} 项待办</span>
           <button type="button" @click="toggleRequirementPlan">收起计划 <ChevronDown :size="12" /></button>
         </footer>
+        <div v-if="canConfirmExecute" class="cc-requirement-plan-confirm">
+          <button type="button" :disabled="confirmExecuteBusy" @click="emit('confirm-execute', requirementPlan)">
+            <Check :size="14" />确认并执行
+          </button>
+        </div>
       </article>
+      <ReadSearchCollapseHeader
+        v-else-if="event.__readSearchGroup"
+        v-show="!normalizedSearchQuery || event.children?.some(eventMatchesSearch)"
+        :group="event"
+        @toggle="toggleReadSearchGroup"
+      />
+      <ChildAgentConversation
+        v-else-if="event.__childAgentConversation"
+        v-show="childAgentMatchesSearch(event)"
+        :card="event"
+        :live="isLivePresentation"
+        :expanded="childAgentCardExpanded(event)"
+        :tools-expanded="childAgentToolsVisible(event)"
+        :density="effectiveExecutionDensity"
+        @toggle="toggleChildAgentCard"
+        @toggle-tools="toggleChildAgentTools"
+        @open-file-change="openFileChange"
+      />
       <p v-else-if="event.eventType === 'assistant_progress'" v-show="!normalizedSearchQuery || searchableText(event).includes(normalizedSearchQuery)" class="cc-execution-stage-progress" :class="{ current: event.eventId === currentProgressEventId }" :aria-current="event.eventId === currentProgressEventId ? 'step' : undefined">{{ progressText(event) }}</p>
       <article
         v-else
         v-show="eventMatchesSearch(event)"
         class="cc-execution-row"
-        :class="[event.display?.status || 'running', { 'stage-child': event.__stageChild, 'batch-child': event.__batchChild, 'agent-child': event.__agentChild, 'model-activity': event.eventType === 'model_activity', current: isCurrentEvent(event), completed: event.display?.status === 'success' }]"
+        :class="[event.display?.status || 'running', { 'stage-child': event.__stageChild, 'batch-child': event.__batchChild, 'read-search-child': event.__readSearchChild, 'agent-child': event.__agentChild, 'child-agent-child': event.__childAgentChild, 'model-activity': event.eventType === 'model_activity', current: isCurrentEvent(event), completed: event.display?.status === 'success' }]"
         :data-execution-event-id="event.eventId"
         :aria-current="isCurrentEvent(event) ? 'step' : undefined"
       >
@@ -1445,11 +1738,35 @@ const displayedExecutionStageRows = computed(() => {
               <code v-if="eventTarget(event)" :title="eventTarget(event)">{{ eventTarget(event) }}</code>
               <span v-if="!isLivePresentation && rowShowsTerminalStatus(event)">{{ eventHasPartialResult(event) ? '部分结果' : eventStatusLabel(event) }}</span>
             </div>
-            <p v-if="eventBusinessSummary(event) && (!isLivePresentation || event.__batchChild || String(event?.eventType || '').startsWith('agent_'))">{{ eventBusinessSummary(event) }}</p>
+            <p v-if="eventBusinessSummary(event)">{{ eventBusinessSummary(event) }}</p>
             <small v-if="isLivePresentation ? liveRowMeta(event) : rowMeta(event)">{{ isLivePresentation ? liveRowMeta(event) : rowMeta(event) }}</small>
           </div>
           <span v-if="isRowExpandable(event)" class="cc-execution-row-chevron"><ChevronDown v-if="isRowExpanded(event)" :size="13" /><ChevronRight v-else :size="13" /></span>
         </button>
+        <div v-if="inlineFileChangesFor(event).length && !event.__childAgentChild" class="cc-agent-file-stream" aria-label="项目子 Agent文件变化">
+          <div v-for="file in inlineFileChangesFor(event)" :key="inlineDiffKey(event, file)" class="cc-agent-file-change" :class="fileChangeKind(file)">
+            <button
+              type="button"
+              class="cc-agent-file-change-row"
+              :aria-expanded="inlineDiffExpanded(event, file)"
+              @click.stop="toggleInlineDiff(event, file)"
+            >
+              <component :is="fileChangeIcon(file)" :size="13" aria-hidden="true" />
+              <strong>{{ fileChangeLabel(file) }}</strong>
+              <code :title="file.path">{{ file.path }}</code>
+              <small v-if="fileChangeStat(file)" :class="{ 'has-deletions': Number(file?.deletions || 0) > 0 }">{{ fileChangeStat(file) }}</small>
+              <small v-else>点击查看差异</small>
+              <ChevronDown v-if="inlineDiffExpanded(event, file)" :size="13" aria-hidden="true" />
+              <ChevronRight v-else :size="13" aria-hidden="true" />
+            </button>
+            <InlineAgentDiff
+              v-if="inlineDiffExpanded(event, file)"
+              :event="event"
+              :file="file"
+              @open-full="openFileChange($event, event)"
+            />
+          </div>
+        </div>
         <div v-if="isRowExpanded(event) && event.detail" class="cc-execution-detail">
             <template v-if="event.detail.agentDisplay">
               <div class="cc-tool-identity">
@@ -1478,47 +1795,24 @@ const displayedExecutionStageRows = computed(() => {
                 :display="toolDisplayFor(event)"
                 :token-count="Number(event.display?.tokenCount || 0)"
                 :detailed="effectiveExecutionDensity === 'detailed' && !isLivePresentation"
-                :custom-content="!!(batchFileRowsFor(event).length || toolDisplayFor(event).result?.preview)"
+                :custom-content="!!toolDisplayFor(event).result?.preview && !isSourceReadEvent(event)"
+                :source-loading="!!detailLoading[event.eventId]"
+                :source-error="detailErrors[event.eventId] || ''"
+                :openable-paths="openableSourcePaths"
+                @open-source="openSourceFile(event)"
+                @open-listing-path="openListingSource"
               >
                 <template #content>
-                  <div v-if="batchFileRowsFor(event).length" class="cc-batch-file-list">
-                  <article v-for="file in batchFileRowsFor(event)" :key="file.path" class="cc-batch-file-item" :class="{ expanded: isBatchFileExpanded(event, file), partial: file.status === 'partial' }">
-                    <button
-                      type="button"
-                      class="cc-batch-file-toggle"
-                      :aria-expanded="isBatchFileExpanded(event, file)"
-                      @click.stop="toggleBatchFile(event, file)"
-                    >
-                      <span class="cc-batch-file-status" aria-hidden="true"><Circle v-if="file.status === 'partial'" :size="10" /><RefreshCcw v-else-if="file.status === 'unchanged'" :size="10" /><Check v-else :size="10" /></span>
-                      <span class="cc-batch-file-title">
-                        <span><strong>读取文件</strong> <code>{{ file.path }}</code></span>
-                        <small>读取 {{ file.path }} {{ batchFileRange(file) }}<span v-if="file.totalLines"> · 共 {{ file.totalLines }} 行</span></small>
-                      </span>
-                      <span class="cc-batch-file-state">{{ file.status === 'partial' ? '部分读取' : file.status === 'unchanged' ? '内容未变化' : '完成' }}</span>
-                      <span class="cc-batch-file-chevron" aria-hidden="true"><ChevronDown v-if="isBatchFileExpanded(event, file)" :size="12" /><ChevronRight v-else :size="12" /></span>
-                    </button>
-                    <div v-if="isBatchFileExpanded(event, file)" class="cc-batch-file-detail">
-                      <div class="cc-batch-file-detail-head">
-                        <span>{{ file.path }}</span>
-                        <span>{{ batchFileRange(file) }}</span>
-                      </div>
-                      <div v-if="file.lines?.length" class="cc-batch-file-lines" role="region" :aria-label="`${file.path} 已读取内容`">
-                        <div v-for="line in file.lines" :key="line.line" class="cc-batch-file-line">
-                          <span>第 {{ line.line }} 行</span><code>{{ line.text || ' ' }}</code>
-                        </div>
-                      </div>
-                      <p v-else class="cc-batch-file-empty">{{ file.status === 'unchanged' ? '文件内容未变化，主 Agent继续使用当前上下文中的已读内容。' : '该文件本次没有可显示的文本内容。' }}</p>
-                      <small v-if="file.status === 'partial'" class="cc-batch-file-pending">该文件尚未读完，可在批次底部继续读取剩余内容。</small>
-                    </div>
-                  </article>
-                  </div>
                   <pre v-if="toolDisplayFor(event).result?.preview" class="cc-tool-readable-preview">{{ toolDisplayFor(event).result.preview }}</pre>
                 </template>
                 <template #actions>
                   <small v-if="toolDisplayFor(event).result?.continuation?.pendingCount">{{ toolDisplayFor(event).result.continuation.pendingCount }} 个文件仍有内容未读完</small>
                   <small v-else-if="toolDisplayFor(event).result?.truncated">结果已截断<span v-if="toolDisplayFor(event).result?.total"> · 共 {{ toolDisplayFor(event).result.total }} 项</span></small>
-                  <button v-if="toolDisplayFor(event).result?.rehydratable" type="button" class="cc-tool-rehydrate" :disabled="detailLoading[event.eventId]" @click.prevent.stop="rehydrateDetail(event, !!toolDisplayFor(event).result?.continuation?.pendingCount)">
-                    {{ detailLoading[event.eventId] ? '正在读取…' : toolDisplayFor(event).result?.continuation?.pendingCount ? '继续读取未读完内容' : '读取当前详情' }}
+                  <button v-if="toolDisplayFor(event).result?.continuation?.pendingCount" type="button" class="cc-tool-rehydrate" :disabled="detailLoading[event.eventId]" @click.prevent.stop="rehydrateDetail(event, true)">
+                    {{ detailLoading[event.eventId] ? '正在继续读取…' : '继续读取未读内容' }}
+                  </button>
+                  <button v-else-if="detailErrors[event.eventId] && isSourceReadEvent(event)" type="button" class="cc-tool-rehydrate" :disabled="detailLoading[event.eventId]" @click.prevent.stop="rehydrateDetail(event, false)">
+                    {{ detailLoading[event.eventId] ? '正在重试…' : '重试读取当前源码' }}
                   </button>
                   <button v-if="supportsLiveTail(event)" type="button" class="cc-tool-rehydrate" :disabled="detailLoading[event.eventId]" @click.prevent.stop="loadLiveTail(event)">
                     {{ detailLoading[event.eventId] ? '正在读取…' : '查看脱敏最近输出' }}
@@ -1540,8 +1834,8 @@ const displayedExecutionStageRows = computed(() => {
                 <pre>{{ safeJson(legacyResult(event.detail.safeResult)) }}</pre>
               </div>
             </template>
-            <div v-if="event.detail.fileChanges?.length">
-              <b>文件变化</b>
+            <div v-if="event.detail.fileChanges?.length && !inlineFileChangesFor(event).length">
+              <b>未归属的历史改动</b>
               <ul class="cc-file-changes">
                 <li v-for="file in event.detail.fileChanges" :key="normalizedFileChange(file, event).path">
                   <button type="button" @click.stop="openFileChange(file, event)">
@@ -1551,23 +1845,6 @@ const displayedExecutionStageRows = computed(() => {
                   </button>
                 </li>
               </ul>
-            </div>
-            <details v-if="event.detail.runtimeObservation" class="cc-runtime-observation">
-              <summary>运行时技术详情</summary>
-              <dl class="cc-tool-arguments">
-                <dt>来源</dt><dd>{{ event.detail.runtimeObservation.source }}</dd>
-                <dt>可信度</dt><dd>{{ event.detail.runtimeObservation.confidence }}</dd>
-                <template v-if="event.detail.runtimeObservation.runtime"><dt>运行时</dt><dd>{{ event.detail.runtimeObservation.runtime }} {{ event.detail.runtimeObservation.runtimeVersion || '' }}</dd></template>
-                <dt>事件校验</dt><dd>{{ event.detail.runtimeObservation.sourceEventChecksum }}</dd>
-              </dl>
-            </details>
-            <div v-if="event.detail.evidenceIds?.length">
-              <b>Evidence</b>
-              <code>{{ event.detail.evidenceIds.join(' · ') }}</code>
-            </div>
-            <div v-if="event.detail.usage && Object.keys(event.detail.usage).length">
-              <b>Usage</b>
-              <pre>{{ safeJson(event.detail.usage) }}</pre>
             </div>
         </div>
         <div v-if="availableActions(event).length" class="cc-execution-actions" aria-label="可执行操作">
@@ -1671,6 +1948,33 @@ const displayedExecutionStageRows = computed(() => {
 .cc-execution-replay-link { display:inline-flex; align-items:center; gap:3px; margin:0; padding:0; border:0; background:transparent; color:var(--accent-blue); font-size:10px; font-weight:750; cursor:pointer; }
 .cc-execution-replay-link:hover { text-decoration:underline; }
 .cc-execution.query .cc-execution-head { padding-right:88px; }
+.cc-execution.query {
+  margin: 2px 0 10px;
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+.cc-execution.query .cc-execution-head {
+  min-height: 36px;
+  padding: 5px 1px 8px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border-color, #94a3b8) 22%, transparent);
+}
+.cc-execution.query .cc-execution-rows {
+  padding: 5px 0 0;
+  border-top: 0;
+}
+.cc-execution.query .cc-execution-row.stage-child,
+.cc-execution.query .cc-execution-row.batch-child {
+  margin-left: 18px;
+}
+.cc-execution.query .cc-execution-detail {
+  margin: 0 4px 7px 38px;
+  padding: 7px 0 7px 12px;
+  border-left: 1px solid color-mix(in srgb, var(--border-color, #94a3b8) 30%, transparent);
+  border-radius: 0;
+  background: transparent;
+}
 .cc-recovery-milestone { margin:0; color:var(--text-muted); font-size:10px; line-height:1.45; }
 .cc-execution-duration { color: var(--text-secondary); font-size: 10px; white-space: nowrap; }
 .cc-execution-rows { border-top: 1px solid rgba(100, 116, 139, 0.1); padding: 7px 0 4px; }
@@ -1706,9 +2010,10 @@ const displayedExecutionStageRows = computed(() => {
 .cc-requirement-plan-status { padding: 2px 7px; border-radius: 999px; color: #15803d; background: rgba(34, 197, 94, 0.1); font-size: 9px; white-space: nowrap; }
 .cc-requirement-plan.blocked .cc-requirement-plan-status { color: #b91c1c; background: rgba(239, 68, 68, 0.1); }
 .cc-requirement-plan-chevron { color: var(--text-muted); font-size: 10px; text-align: center; }
-.cc-requirement-plan-body { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(220px, 0.72fr); border-top: 1px solid rgba(148, 163, 184, 0.09); }
+.cc-requirement-plan-body { display: grid; grid-template-columns: minmax(0, 1fr); border-top: 1px solid rgba(148, 163, 184, 0.09); }
+.cc-requirement-plan-body.has-side { grid-template-columns: minmax(0, 1.5fr) minmax(220px, 0.72fr); }
 .cc-requirement-plan-main, .cc-requirement-plan-side { min-width: 0; padding: 11px; }
-.cc-requirement-plan-main { border-right: 1px solid rgba(148, 163, 184, 0.12); }
+.cc-requirement-plan-body.has-side .cc-requirement-plan-main { border-right: 1px solid rgba(148, 163, 184, 0.12); }
 .cc-requirement-plan-body section + section { margin-top: 12px; }
 .cc-requirement-plan-body h4 { margin: 0 0 6px; color: var(--text-muted); font-size: 9px; font-weight: 650; letter-spacing: 0.04em; }
 .cc-requirement-plan-body section > p { margin: 0; color: var(--text-secondary); font-size: 10px; line-height: 1.55; }
@@ -1727,6 +2032,9 @@ const displayedExecutionStageRows = computed(() => {
 .cc-requirement-plan-side li::marker { color: var(--primary-color, #ec4899); }
 .cc-requirement-plan-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 11px; border-top: 1px solid rgba(148, 163, 184, 0.12); color: var(--text-muted); font-size: 8px; }
 .cc-requirement-plan-foot button { display:inline-flex; align-items:center; gap:3px; padding: 2px 0; border: 0; color: var(--primary-color, #ec4899); background: transparent; font-size: 8px; cursor: pointer; }
+.cc-requirement-plan-confirm { display: flex; justify-content: flex-end; gap: 8px; padding: 7px 11px; border-top: 1px solid rgba(148, 163, 184, 0.12); }
+.cc-requirement-plan-confirm button { display: inline-flex; align-items: center; gap: 5px; min-height: 28px; padding: 0 11px; border: 1px solid var(--primary-color, #2563eb); border-radius: 7px; background: var(--primary-color, #2563eb); color: #fff; font-size: 11px; cursor: pointer; }
+.cc-requirement-plan-confirm button:disabled { opacity: 0.5; cursor: not-allowed; }
 .cc-execution-stage-head { position:relative; width: calc(100% - 4px); display: grid; grid-template-columns: 20px minmax(0, 1fr) auto auto 20px; align-items: center; gap: 8px; margin:0 2px; padding: 9px 0; border: 0; color: var(--text-secondary); background: transparent; text-align: left; cursor: pointer; }
 .cc-execution-stage-head:not(:first-child) { margin-top: 0; border-top: 1px solid rgba(100, 116, 139, 0.075); }
 .cc-execution-stage-head:hover { background: rgba(100, 116, 139, 0.025); }
@@ -1769,6 +2077,8 @@ const displayedExecutionStageRows = computed(() => {
 }
 .cc-execution-row.stage-child { margin-left: 31px; border-left: 1px solid color-mix(in srgb, var(--border-color, #94a3b8) 28%, transparent); }
 .cc-execution-row.batch-child { margin-left: 36px; }
+.cc-execution-row.child-agent-child { margin-left: 42px; }
+.cc-execution-row.read-search-child { margin-left: 36px; }
 .cc-execution-row.completed { opacity: 0.82; }
 .cc-execution-row.completed:hover,
 .cc-execution-row.current { opacity: 1; }
@@ -1800,6 +2110,18 @@ const displayedExecutionStageRows = computed(() => {
 .cc-execution-detail ul { margin: 0; padding-left: 18px; color: var(--text-secondary); font-size: 10px; }
 .cc-execution-detail .cc-file-changes { display: grid; gap: 4px; padding: 0; list-style: none; }
 .cc-file-changes button { width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 10px; padding: 6px 8px; border: 1px solid color-mix(in srgb, var(--border-color, #94a3b8) 30%, transparent); border-radius: 6px; color: var(--text-secondary); background: color-mix(in srgb, var(--surface, #fff) 78%, transparent); text-align: left; cursor: pointer; }
+.cc-agent-file-stream { display: grid; gap: 2px; margin: 0 0 4px 28px; }
+.cc-agent-file-change { min-width: 0; }
+.cc-agent-file-change-row { width: 100%; min-height: 30px; display: grid; grid-template-columns: 16px auto minmax(0, 1fr) auto 16px; align-items: center; gap: 6px; padding: 4px 2px; border: 0; border-radius: 5px; color: var(--text-secondary); background: transparent; text-align: left; cursor: pointer; }
+.cc-agent-file-change-row:hover { background: color-mix(in srgb, var(--border-color, #94a3b8) 9%, transparent); }
+.cc-agent-file-change-row:focus-visible { outline: 2px solid color-mix(in srgb, var(--primary-color, #2563eb) 60%, transparent); outline-offset: 1px; }
+.cc-agent-file-change-row > svg { color: var(--text-muted); }
+.cc-agent-file-change.added .cc-agent-file-change-row > svg { color: #15803d; }
+.cc-agent-file-change.deleted .cc-agent-file-change-row > svg { color: #b91c1c; }
+.cc-agent-file-change-row strong { color: var(--text-secondary); font-size: 10px; font-weight: 650; }
+.cc-agent-file-change-row code { min-width: 0; overflow: hidden; color: var(--text-secondary); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.cc-agent-file-change-row small { color: var(--text-muted); font-size: 9px; }
+.cc-agent-file-change-row small.has-deletions { color: #b45309; }
 .cc-file-changes button:hover { border-color: color-mix(in srgb, var(--primary-color, #ec4899) 55%, transparent); background: color-mix(in srgb, var(--primary-color, #ec4899) 7%, transparent); }
 .cc-file-changes button:focus-visible { outline: 2px solid color-mix(in srgb, var(--primary-color, #ec4899) 70%, transparent); outline-offset: 1px; }
 .cc-file-changes button > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 10px/1.4 Consolas, monospace; }
@@ -1820,30 +2142,6 @@ const displayedExecutionStageRows = computed(() => {
 .cc-tool-result-row { display: flex; flex-wrap: wrap; gap: 5px 12px; padding: 4px 6px; border-radius: 5px; background: rgba(100, 116, 139, 0.055); color: var(--text-secondary); font: 10px/1.4 Consolas, monospace; }
 .cc-tool-result-row span { min-width: 0; overflow-wrap: anywhere; }
 .cc-tool-result-row small { margin: 0 4px 0 0; color: var(--text-muted); font-family: inherit; }
-.cc-batch-file-list { display: grid; gap: 2px; margin-top: 6px; border-top: 1px solid color-mix(in srgb, var(--border-color, #94a3b8) 28%, transparent); }
-.cc-batch-file-item { overflow: hidden; border-bottom: 1px solid color-mix(in srgb, var(--border-color, #94a3b8) 22%, transparent); }
-.cc-batch-file-toggle { width: 100%; display: grid; grid-template-columns: 18px minmax(0, 1fr) auto 18px; align-items: center; gap: 8px; padding: 8px 4px; border: 0; color: var(--text-primary); background: transparent; text-align: left; cursor: pointer; }
-.cc-batch-file-toggle:hover { background: color-mix(in srgb, var(--primary-color, #2563eb) 5%, transparent); }
-.cc-batch-file-toggle:focus-visible { outline: 2px solid color-mix(in srgb, var(--primary-color, #2563eb) 65%, transparent); outline-offset: -2px; }
-.cc-batch-file-status { width: 16px; height: 16px; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; color: #15803d; background: rgba(34, 197, 94, 0.11); font-size: 10px; font-weight: 700; }
-.cc-batch-file-item.partial .cc-batch-file-status { color: #2563eb; background: rgba(37, 99, 235, 0.1); font-size: 16px; }
-.cc-batch-file-title { min-width: 0; display: grid; gap: 2px; }
-.cc-batch-file-title > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
-.cc-batch-file-title strong { margin-right: 5px; font-size: 11px; }
-.cc-batch-file-title code { color: var(--text-muted); font: 10px/1.4 Consolas, monospace; }
-.cc-batch-file-title small { overflow: hidden; color: var(--text-muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
-.cc-batch-file-state { color: var(--text-muted); font-size: 10px; white-space: nowrap; }
-.cc-batch-file-item.partial .cc-batch-file-state { color: #2563eb; }
-.cc-batch-file-chevron { color: var(--text-muted); font-size: 10px; text-align: center; }
-.cc-batch-file-detail { margin: 0 4px 8px 26px; padding: 8px; border-radius: 7px; background: color-mix(in srgb, var(--surface-subtle, #f8fafc) 82%, transparent); }
-.cc-batch-file-detail-head { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 6px; color: var(--text-muted); font: 10px/1.4 Consolas, monospace; }
-.cc-batch-file-lines { max-height: 300px; overflow: auto; border-radius: 5px; background: color-mix(in srgb, var(--surface, #fff) 84%, transparent); }
-.cc-batch-file-line { display: grid; grid-template-columns: 64px minmax(0, 1fr); min-height: 22px; border-bottom: 1px solid color-mix(in srgb, var(--border-color, #94a3b8) 14%, transparent); }
-.cc-batch-file-line:last-child { border-bottom: 0; }
-.cc-batch-file-line > span { padding: 4px 7px; color: var(--text-muted); background: rgba(100, 116, 139, 0.045); font: 9px/1.5 Consolas, monospace; user-select: none; }
-.cc-batch-file-line code { padding: 4px 8px; white-space: pre; overflow-wrap: normal; color: var(--text-secondary); font: 10px/1.5 Consolas, monospace; }
-.cc-batch-file-empty { margin: 0 !important; color: var(--text-muted) !important; font-size: 10px !important; }
-.cc-batch-file-pending { display: block; margin-top: 7px; color: #2563eb; font-size: 10px; }
 .cc-tool-rehydrate { margin-top: 6px; padding: 3px 8px; border: 1px solid rgba(100, 116, 139, 0.25); border-radius: 5px; color: var(--text-secondary); background: transparent; font-size: 10px; cursor: pointer; }
 .cc-tool-rehydrate:hover:not(:disabled) { background: rgba(100, 116, 139, 0.08); }
 .cc-tool-rehydrate:disabled { opacity: 0.55; cursor: wait; }
@@ -1926,6 +2224,7 @@ const displayedExecutionStageRows = computed(() => {
 .cc-execution.live .cc-execution-row.stage-child { margin-left: 20px; border-left: 0; }
 .cc-execution.live .cc-execution-row.batch-child { margin-left: 26px; }
 .cc-execution.live .cc-execution-row.agent-child { margin-left: 38px; }
+.cc-execution.live .cc-execution-row.child-agent-child { margin-left: 44px; }
 .cc-execution.live .cc-execution-row + .cc-execution-row { border-top: 0; }
 .cc-execution.live .cc-execution-row-summary { grid-template-columns: 18px minmax(0, 1fr) auto; align-items: center; min-height: 30px; gap: 6px; padding: 4px 1px; border-radius: 4px; }
 .cc-execution.live .cc-execution-row-summary.expandable:hover { background: rgba(100, 116, 139, 0.055); }
@@ -1940,6 +2239,10 @@ const displayedExecutionStageRows = computed(() => {
 .cc-execution.live .cc-execution-main p { margin-top: 2px; font-size: 10px; }
 .cc-execution.live .cc-execution-main small { margin-top: 2px; font-size: 9px; }
 .cc-execution.live .cc-execution-row-chevron { min-width: 20px; min-height: 20px; }
+.cc-execution.live .cc-execution-row.model-activity { opacity: 1; }
+.cc-execution.live .cc-execution-row.model-activity .cc-execution-row-summary { min-height: 26px; padding-top: 3px; padding-bottom: 3px; }
+.cc-execution.live .cc-execution-row.model-activity .cc-execution-mark { border: 0; background: transparent; color: var(--text-muted); }
+.cc-execution.live .cc-execution-row.model-activity .cc-execution-title strong { font-weight: 400; color: var(--text-secondary); white-space: normal; }
 .cc-execution.live .cc-execution-detail { margin: 3px 1px 8px 23px; padding: 9px 10px; border: 1px solid color-mix(in srgb, var(--border-color, #94a3b8) 24%, transparent); border-radius: 7px; background: color-mix(in srgb, var(--surface-subtle, #f8fafc) 72%, transparent); }
 .cc-execution.live .cc-execution-actions { margin-left: 23px; }
 
@@ -1956,6 +2259,7 @@ const displayedExecutionStageRows = computed(() => {
 .cc-execution.live .cc-requirement-plan-side,
 .cc-execution.live .cc-requirement-plan-foot,
 .cc-execution.live .cc-requirement-plan-main h4 { display: none; }
+.cc-execution.live .cc-requirement-plan-confirm { display: flex; padding: 6px 0 4px; border-top: 1px solid rgba(148, 163, 184, 0.1); }
 .cc-execution.live .cc-requirement-plan-body section + section { margin-top: 0; }
 .cc-execution.live .cc-requirement-plan-steps { gap: 1px; }
 .cc-execution.live .cc-requirement-plan-steps li { grid-template-columns: 18px minmax(0, 1fr) auto; gap: 6px; padding: 3px 0; border: 0; border-radius: 0; background: transparent; }
@@ -2001,12 +2305,12 @@ const displayedExecutionStageRows = computed(() => {
   .cc-execution.live .cc-requirement-plan { margin-left: 14px; }
   .cc-execution.live .cc-execution-row.batch-child { margin-left: 22px; }
   .cc-execution.live .cc-execution-row.agent-child { margin-left: 28px; }
+  .cc-execution.live .cc-execution-row.child-agent-child { margin-left: 34px; }
   .cc-execution.live .cc-execution-title code { max-width: 34%; }
   .cc-execution.live .cc-execution-detail { margin-left: 0; }
-  .cc-batch-file-toggle { grid-template-columns: 18px minmax(0, 1fr) 16px; gap: 6px; }
-  .cc-batch-file-state { display: none; }
-  .cc-batch-file-detail { margin-left: 0; }
-  .cc-batch-file-line { grid-template-columns: 52px minmax(0, 1fr); }
+  .cc-agent-file-stream { margin-left: 16px; }
+  .cc-agent-file-change-row { grid-template-columns: 16px auto minmax(0, 1fr) 16px; }
+  .cc-agent-file-change-row > small { grid-column: 3; }
   .cc-execution.live .cc-requirement-plan-steps li { grid-template-columns: 18px minmax(0, 1fr); }
   .cc-execution.live .cc-requirement-step-project { grid-column: 2; }
 }

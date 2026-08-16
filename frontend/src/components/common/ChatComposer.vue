@@ -72,9 +72,9 @@ const onInput = (event) => {
 
 <template>
   <div class="chat-composer">
-    <slot name="prefix" />
     <input ref="fileInput" type="file" multiple class="hidden-file-input" :accept="props.accept" @change="onFilesSelected">
     <div class="chat-input-wrap has-inline-footer">
+      <div v-if="slots.prefix" class="composer-prefix-slot"><slot name="prefix" /></div>
       <AttachmentChips :files="props.files" @remove="emit('remove-file', $event)" />
       <OnlineDocumentReferences :text="props.modelValue" compact />
       <div class="composer-input-row">
@@ -221,6 +221,14 @@ textarea {
   color: var(--text-primary);
   font-size: 13.5px;
   line-height: 1.5;
+}
+
+.composer-prefix-slot {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  min-width: 0;
+  padding: 7px 9px 0;
 }
 
 .chat-input-wrap.has-inline-footer {

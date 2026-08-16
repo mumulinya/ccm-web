@@ -12,6 +12,9 @@ import {
   getMessageTaskId,
   getTaskCard,
   groupSendRetrySignature,
+  isGroupModelRecoveryContinuePhrase,
+  findUnrecoveredGroupModelFailure,
+  groupModelRecoveryAnchorId,
 } from './groupChatHelpers.js'
 
 export function useGroupChatStream({
@@ -47,6 +50,36 @@ export function useGroupChatStream({
 }) {
   let activeAgentStreamMsgs = {}
 
+  const applyExecutionIdentity = (message, data = {}) => {
+    if (!message || !data) return message
+    const responseId = data.responseMessageId || data.response_message_id || data.messageId || data.message_id || ''
+    const turnId = data.executionTurnId || data.execution_turn_id || data.turnId || data.turn_id || ''
+    const attempt = data.executionAttempt ?? data.execution_attempt ?? data.attempt
+    const generation = data.generation
+    const anchor = data.executionAnchorMessageId || data.execution_anchor_message_id || data.anchorMessageId || data.anchor_message_id || ''
+    if (responseId) {
+      message.responseMessageId = responseId
+      message.response_message_id = responseId
+    }
+    if (turnId) {
+      message.executionTurnId = turnId
+      message.execution_turn_id = turnId
+      message.turnId = turnId
+      message.turn_id = turnId
+    }
+    if (attempt !== undefined && attempt !== null && Number.isFinite(Number(attempt))) {
+      message.executionAttempt = Number(attempt)
+      message.execution_attempt = Number(attempt)
+      message.attempt = Number(attempt)
+    }
+    if (generation !== undefined && generation !== null && Number.isFinite(Number(generation))) message.generation = Number(generation)
+    if (anchor) {
+      message.executionAnchorMessageId = anchor
+      message.execution_anchor_message_id = anchor
+    }
+    return message
+  }
+
   const appendAgentWorkEvent = (agent, event) => {
     if (!agent || !event) return
     let streamMsg = activeAgentStreamMsgs[agent]
@@ -56,11 +89,12 @@ export function useGroupChatStream({
         agent,
         content: '',
         streaming: true,
+        __groupTransient: true,
         workEvents: [],
         timestamp: new Date().toISOString()
       }
       activeAgentStreamMsgs[agent] = streamMsg
-      messages.value.push(streamMsg)
+      rememberLiveGroupStreamMessage(streamMsg)
     }
     if (!Array.isArray(streamMsg.workEvents)) streamMsg.workEvents = []
     const key = event.id || `${event.kind}:${event.time}:${event.text}`
@@ -68,7 +102,6 @@ export function useGroupChatStream({
       streamMsg.workEvents.push(event)
       if (streamMsg.workEvents.length > 80) streamMsg.workEvents.splice(0, streamMsg.workEvents.length - 80)
     }
-    streamMsg.timestamp = event.time || streamMsg.timestamp
   }
 
   const appendAgentQaMessage = (payload) => {
@@ -85,6 +118,10 @@ export function useGroupChatStream({
       timestamp: new Date().toISOString(),
       qa: { ...qa, kind }
     }
+    if (groupStreamSessionId.value && !isViewingGroupStreamSession()) {
+      rememberLiveGroupStreamMessage(msg)
+      return
+    }
     mergeIncomingMessage(msg)
   }
 
@@ -98,7 +135,7 @@ export function useGroupChatStream({
       : []
     const key = checkpoint.id || `${checkpoint.label}:${checkpoint.detail || ''}:${checkpoint.phase || ''}`
     const nextItems = [...existing.filter(item => (item.id || `${item.label}:${item.detail || ''}:${item.phase || ''}`) !== key), checkpoint].slice(-6)
-    mainAgentStatus.value = {
+    const nextStatus = {
       ...current,
       schema: current.schema || 'ccm-group-main-agent-status-v1',
       phase: checkpoint.phase || current.phase || 'running',
@@ -112,10 +149,64 @@ export function useGroupChatStream({
       progressCheckpoints: nextItems,
       updated_at: checkpoint.at || new Date().toISOString(),
     }
+    liveGroupStreamStatus = nextStatus
+    if (!groupStreamActive.value || isViewingGroupStreamSession()) mainAgentStatus.value = nextStatus
     return true
   }
 
-  const isStreaming = ref(false)
+  const groupStreamActive = ref(false)
+  const groupStreamGroupId = ref('')
+  const groupStreamSessionId = ref('')
+  const liveGroupStreamMessages = []
+  let liveGroupStreamStatus = null
+  const isViewingGroupStreamSession = (groupId = currentGroup.value?.id, sessionId = currentGroupSessionId.value) => (
+    !!groupStreamGroupId.value
+    && !!groupStreamSessionId.value
+    && String(groupId || '') === String(groupStreamGroupId.value)
+    && String(sessionId || '') === String(groupStreamSessionId.value)
+  )
+  const isStreaming = computed(() => groupStreamActive.value && isViewingGroupStreamSession())
+  const rememberLiveGroupStreamMessage = (msg) => {
+    if (!msg) return
+    if (groupStreamSessionId.value && !liveGroupStreamMessages.includes(msg)) liveGroupStreamMessages.push(msg)
+    if (groupStreamSessionId.value && !isViewingGroupStreamSession()) return
+    if (messages.value.includes(msg)) return
+    const id = String(msg.id || '')
+    const idx = id ? messages.value.findIndex(item => String(item.id || '') === id) : -1
+    if (idx >= 0) messages.value.splice(idx, 1, msg)
+    else messages.value.push(msg)
+  }
+  const restoreLiveGroupStreamIfCurrent = () => {
+    if (!isViewingGroupStreamSession() || !liveGroupStreamMessages.length) return false
+    if (liveGroupStreamStatus) mainAgentStatus.value = liveGroupStreamStatus
+    for (const msg of liveGroupStreamMessages) {
+      if (messages.value.includes(msg)) continue
+      const id = String(msg.id || '')
+      const idx = id ? messages.value.findIndex(item => String(item.id || '') === id) : -1
+      if (idx >= 0) messages.value.splice(idx, 1, msg)
+      else messages.value.push(msg)
+    }
+    return true
+  }
+  const beginLiveGroupStream = (groupId, sessionId, seedMessages = []) => {
+    liveGroupStreamMessages.length = 0
+    liveGroupStreamStatus = null
+    groupStreamGroupId.value = String(groupId || '')
+    groupStreamSessionId.value = String(sessionId || '')
+    groupStreamActive.value = true
+    for (const msg of seedMessages) rememberLiveGroupStreamMessage(msg)
+  }
+  const finishLiveGroupStream = ({ keepTranscript = false } = {}) => {
+    groupStreamActive.value = false
+    if (keepTranscript) return
+    liveGroupStreamMessages.length = 0
+    liveGroupStreamStatus = null
+    groupStreamGroupId.value = ''
+    groupStreamSessionId.value = ''
+  }
+  const scrollIfViewingStream = () => {
+    if (isViewingGroupStreamSession()) scrollToBottom()
+  }
   const thinkingMessages = ref([])
   const pendingGroupSendRetry = ref(null)
   const groupStreamController = ref(null)
@@ -137,7 +228,7 @@ export function useGroupChatStream({
   })
 
   const stopGroupCurrentWork = async ({ preserveTask = false } = {}) => {
-    if ((!isStreaming.value && !(preserveTask && groupCurrentTaskId.value)) || stoppingGroupTurn.value) return
+    if ((!groupStreamActive.value && !isStreaming.value && !(preserveTask && groupCurrentTaskId.value)) || stoppingGroupTurn.value) return
     stoppingGroupTurn.value = true
     try {
       const groupId = currentGroup.value?.id
@@ -225,14 +316,25 @@ export function useGroupChatStream({
   }
 
   const resolveGroupQueuedRoute = async (turn, choice) => {
-    await groupTurnControl.resolveRoute(turn, choice)
-    toast.success(choice === 'continue_original' ? '将继续原任务' : choice === 'answer_only' ? '将只回答这条消息' : '将作为新任务处理')
-    window.setTimeout(() => drainGroupTurnQueue().catch(() => {}), 0)
+    try {
+      const resolved = await groupTurnControl.resolveRoute(turn, choice)
+      if (!resolved) return
+      toast.success(choice === 'continue_original' ? '正在继续原任务' : choice === 'answer_only' ? '正在回答这条消息' : '正在作为新任务处理')
+      await drainGroupTurnQueue()
+    } catch (error) {
+      toast.error(error?.message || '消息处理方式提交失败，请重试')
+      await groupTurnControl.refresh().catch(() => {})
+    }
   }
 
   const sendMessage = async (options = {}) => {
     const queuedTurn = options?.queueTurn || null
     const resumeInterruption = options?.resumeInterruption || null
+    if (groupStreamActive.value && !queuedTurn) {
+      if (isViewingGroupStreamSession()) return submitGroupMessageWhileBusy()
+      toast.info('另一个会话还在回复，先回到那个会话查看，或等它结束后再发')
+      return
+    }
     if (groupTurnBusy.value && !queuedTurn) return submitGroupMessageWhileBusy()
     if ((!queuedTurn && !newMessage.value.trim() && messageFiles.value.length === 0) || !currentGroup.value) return
     if (!currentGroupSessionId.value) {
@@ -247,6 +349,8 @@ export function useGroupChatStream({
       toast.error('当前群聊会话尚未创建')
       return { success: false, error: '当前群聊会话尚未创建' }
     }
+    const groupAtSend = String(queuedTurn?.metadata?.group_id || currentGroup.value.id || '')
+    const sessionAtSend = String(queuedTurn?.metadata?.group_session_id || currentGroupSessionId.value || '')
     const msg = queuedTurn ? String(queuedTurn.message || '').trim() : newMessage.value.trim()
     const filesToSend = queuedTurn ? [...(queuedTurn.files || [])] : [...messageFiles.value]
     const taskSupplementTarget = isTaskSupplementMode.value ? { ...pendingGroupTaskInput.value } : null
@@ -273,8 +377,24 @@ export function useGroupChatStream({
       memory_content: directMemoryCommand.content,
       message_mode: 'conversation',
     } : null)
+    const typedResume = !resumeInterruption
+      && !queuedTurn
+      && !directedInputFields
+      && isGroupModelRecoveryContinuePhrase(msg)
+      ? findUnrecoveredGroupModelFailure(messages.value)
+      : null
+    const recoveredFailure = resumeInterruption || typedResume
+    if (recoveredFailure && recoveredFailure.recovery?.state !== 'retrying') {
+      recoveredFailure.recovery = {
+        ...(recoveredFailure.recovery || {}),
+        state: 'retrying',
+        retryingAt: new Date().toISOString(),
+      }
+    }
+    if (recoveredFailure) recoveredFailure.workEvents = []
+    const recoveryAnchorId = recoveredFailure ? groupModelRecoveryAnchorId(recoveredFailure) : ''
     const retrySignature = groupSendRetrySignature({
-      groupId: currentGroup.value.id,
+      groupId: groupAtSend,
       target: 'coordinator',
       mode: directedInputFields?.message_mode || queuedTurn?.metadata?.message_mode || messageMode.value,
       message: msg,
@@ -295,22 +415,19 @@ export function useGroupChatStream({
   [附件]
   ${filesToSend.map(f => `- ${f.name}（${formatFileSize(f.size)}）`).join('\n')}`
       : ''
-    if (!messages.value.some(item => item.id === clientMessageId)) {
-      messages.value.push({
-        id: clientMessageId,
-        role: 'user',
-        target: 'coordinator',
-        message_mode: directedInputFields?.message_mode || queuedTurn?.metadata?.message_mode || messageMode.value,
-        content: `${msg || '请处理附件'}${attachmentText}`,
-        timestamp: new Date().toISOString(),
-        ...(taskSupplementTarget ? { task_id: taskSupplementTarget.taskId } : {}),
-        ...(clarificationResponseTarget ? {
-          clarification_request_id: clarificationResponseTarget.requestId,
-          clarification_response_to: clarificationResponseTarget.messageId,
-        } : {})
-      })
+    const userMsg = {
+      id: clientMessageId,
+      role: 'user',
+      target: 'coordinator',
+      message_mode: directedInputFields?.message_mode || queuedTurn?.metadata?.message_mode || messageMode.value,
+      content: `${msg || '请处理附件'}${attachmentText}`,
+      timestamp: new Date().toISOString(),
+      ...(taskSupplementTarget ? { task_id: taskSupplementTarget.taskId } : {}),
+      ...(clarificationResponseTarget ? {
+        clarification_request_id: clarificationResponseTarget.requestId,
+        clarification_response_to: clarificationResponseTarget.messageId,
+      } : {})
     }
-    scrollToBottom()
 
     // Create the authoritative assistant envelope immediately. It renders as
     // “正在思考…” until the first safe chunk arrives, then the same row streams
@@ -320,18 +437,27 @@ export function useGroupChatStream({
       role: 'assistant',
       agent: 'coordinator',
       content: '',
-      processingDetail: '正在理解你的问题并检查群聊上下文',
-      // The server persists the final assistant reply with this anchor. Keeping
-      // it on the optimistic envelope lets runtime-event/poll recovery replace
-      // the same row even when the terminal SSE packet is lost.
-      execution_anchor_message_id: clientMessageId,
+      processingDetail: recoveredFailure ? '正在接着刚才的检查继续' : '正在理解你的问题并检查群聊上下文',
+      // Resume reuses the interrupted turn's execution anchor so the query
+      // process and plan move down onto this new envelope, matching Cursor.
+      execution_anchor_message_id: recoveryAnchorId || clientMessageId,
       streaming: true,
-      timestamp: new Date().toISOString()
+      __groupTransient: true,
+      timestamp: new Date().toISOString(),
+      ...(recoveredFailure ? {
+        assignments: recoveredFailure.assignments || null,
+        dispatchPolicy: recoveredFailure.dispatchPolicy || null,
+        coordinationPlan: recoveredFailure.coordinationPlan || null,
+        presentedPlan: recoveredFailure.presentedPlan || recoveredFailure.presented_plan || null,
+        presented_plan: recoveredFailure.presented_plan || recoveredFailure.presentedPlan || null,
+        mainAgentDecision: recoveredFailure.mainAgentDecision || recoveredFailure.main_agent_decision || null,
+        main_agent_decision: recoveredFailure.main_agent_decision || recoveredFailure.mainAgentDecision || null,
+        workEvents: Array.isArray(recoveredFailure.workEvents) ? [...recoveredFailure.workEvents] : [],
+      } : {}),
     }
-    messages.value.push(agentMsg)
-
-    isStreaming.value = true
+    beginLiveGroupStream(groupAtSend, sessionAtSend, [userMsg, agentMsg])
     thinkingMessages.value = []
+    scrollIfViewingStream()
 
     // 跟踪每个 Agent 的流式消息
     activeAgentStreamMsgs = {}
@@ -347,8 +473,8 @@ export function useGroupChatStream({
     let payload
     if (filesToSend.length > 0) {
       payload = new FormData()
-      payload.append('group_id', currentGroup.value.id)
-      payload.append('group_session_id', currentGroupSessionId.value)
+      payload.append('group_id', groupAtSend)
+      payload.append('group_session_id', sessionAtSend)
       payload.append('message', msg)
       payload.append('client_message_id', clientMessageId)
       payload.append('message_mode', directedInputFields?.message_mode || queuedTurn?.metadata?.message_mode || messageMode.value)
@@ -356,6 +482,7 @@ export function useGroupChatStream({
       if (queuedTurn?.metadata?.resolved_route) payload.append('resolved_route', queuedTurn.metadata.resolved_route)
       if (queuedTurn?.metadata?.resolved_candidate_task_id) payload.append('resolved_candidate_task_id', queuedTurn.metadata.resolved_candidate_task_id)
       if (resumeInterruption?.id) payload.append('resume_interruption_message_id', String(resumeInterruption.id))
+      else if (recoveredFailure?.id) payload.append('resume_interruption_message_id', String(recoveredFailure.id))
       if (directedInputFields) {
         Object.entries(directedInputFields)
           .filter(([key]) => key !== 'message_mode')
@@ -364,8 +491,8 @@ export function useGroupChatStream({
       filesToSend.forEach(file => payload.append('files', file))
     } else {
       payload = {
-        group_id: currentGroup.value.id,
-        group_session_id: currentGroupSessionId.value,
+        group_id: groupAtSend,
+        group_session_id: sessionAtSend,
         message: msg,
         client_message_id: clientMessageId,
         message_mode: queuedTurn?.metadata?.message_mode || messageMode.value,
@@ -373,6 +500,7 @@ export function useGroupChatStream({
         resolved_route: queuedTurn?.metadata?.resolved_route || '',
         resolved_candidate_task_id: queuedTurn?.metadata?.resolved_candidate_task_id || '',
         ...(resumeInterruption?.id ? { resume_interruption_message_id: String(resumeInterruption.id) } : {}),
+        ...(recoveredFailure?.id && !resumeInterruption?.id ? { resume_interruption_message_id: String(recoveredFailure.id) } : {}),
         ...(directedInputFields || {})
       }
     }
@@ -403,6 +531,7 @@ export function useGroupChatStream({
     // An exact continuation must never move to another session. Ordinary web
     // conversation may refresh a stale session id and retry exactly once.
     const canRefreshUnavailableSession = !resumeInterruption?.id
+      && !recoveredFailure?.id
       && !directedInputFields
       && queuedTurn?.metadata?.requested_mode !== 'steer'
       && !queuedTurn?.metadata?.continuation_task_id
@@ -410,13 +539,14 @@ export function useGroupChatStream({
     try {
       res = await sendRequest()
     } catch (error) {
-      if (error?.groupSessionUnavailable && canRefreshUnavailableSession) {
+      if (error?.groupSessionUnavailable && canRefreshUnavailableSession && isViewingGroupStreamSession(groupAtSend, sessionAtSend)) {
         try {
-          const previousSessionId = String(currentGroupSessionId.value || '')
+          const previousSessionId = sessionAtSend
           const refreshedSessionId = String(await refreshWritableGroupSession?.() || '')
           if (!refreshedSessionId || refreshedSessionId === previousSessionId) throw error
           if (payload instanceof FormData) payload.set('group_session_id', refreshedSessionId)
           else payload.group_session_id = refreshedSessionId
+          groupStreamSessionId.value = refreshedSessionId
           res = await sendRequest()
           toast.info('原群聊会话已不可用，已切换到当前会话继续发送')
         } catch (retryError) {
@@ -428,7 +558,8 @@ export function useGroupChatStream({
       if (requestError) {
         const error = requestError
       const stopped = error?.name === 'AbortError'
-      if (!stopped) {
+      const viewingSendSession = isViewingGroupStreamSession(groupAtSend, sessionAtSend)
+      if (!stopped && viewingSendSession) {
         newMessage.value = msg
         messageFiles.value = filesToSend
       }
@@ -436,7 +567,7 @@ export function useGroupChatStream({
       if (optimisticIdx !== -1) messages.value.splice(optimisticIdx, 1)
       const assistantIdx = messages.value.indexOf(agentMsg)
       if (assistantIdx !== -1) messages.value.splice(assistantIdx, 1)
-      isStreaming.value = false
+      finishLiveGroupStream()
       if (!stopped) toast.error(error?.message || '消息提交失败，请检查后重试')
       nextTick(focusGroupInput)
       if (groupStreamController.value === controller) groupStreamController.value = null
@@ -459,6 +590,7 @@ export function useGroupChatStream({
         const eventId = String(data.event_id || data.eventId || '')
         if (eventId && seenStreamEventIds.has(eventId)) return
         if (eventId) seenStreamEventIds.add(eventId)
+        restoreLiveGroupStreamIfCurrent()
         if (data.type === 'route_required') {
           routeRequired = true
           agentMsg.streaming = false
@@ -469,12 +601,12 @@ export function useGroupChatStream({
           if (String(data.text || '').includes('分派') || String(data.text || '').includes('等待')) {
             waitingCrossReply.value = true
           }
-          scrollToBottom()
+          scrollIfViewingStream()
         } else if (data.type === 'test_agent_execution_plan_ready') {
           applyTestAgentExecutionPlanReady(data)
           agentMsg.processingDetail = sanitizeGroupVisibleText(data.detail || 'TestAgent 复核计划已生成。', 'TestAgent 复核计划已整理。', 120)
           waitingCrossReply.value = true
-          scrollToBottom()
+          scrollIfViewingStream()
         } else if (data.type === 'test_agent_review_ready') {
           const result = applyTestAgentReviewReady(data)
           const attached = result === true || result?.mode === 'attached'
@@ -489,7 +621,7 @@ export function useGroupChatStream({
             120,
           )
           if (attached) waitingCrossReply.value = true
-          scrollToBottom()
+          scrollIfViewingStream()
         } else if (data.type === 'task_created') {
           activeGroupTaskId.value = data.task?.id || activeGroupTaskId.value
           applyMainAgentProgressCheckpoint(data)
@@ -515,10 +647,10 @@ export function useGroupChatStream({
             mainAgentDecision: data.mainAgentDecision || data.main_agent_decision || null,
             main_agent_decision: data.main_agent_decision || data.mainAgentDecision || null
           }
-          mergeIncomingMessage(taskMessage)
+          rememberLiveGroupStreamMessage(taskMessage)
           waitingCrossReply.value = true
           toast.success('项目任务已创建：' + (data.task?.id || ''))
-          scrollToBottom()
+          scrollIfViewingStream()
         } else if (data.type === 'task_updated') {
           const taskId = data.taskId || data.task_id || data.task?.id || ''
           activeGroupTaskId.value = taskId || activeGroupTaskId.value
@@ -537,14 +669,14 @@ export function useGroupChatStream({
           }
           agentMsg.processingDetail = sanitizeGroupVisibleText(data.text || '补充信息已收到，正在沿用原任务继续处理。', '补充信息已收到，正在沿用原任务继续处理。', 120)
           waitingCrossReply.value = true
-          scrollToBottom()
+          scrollIfViewingStream()
         } else if (data.type === 'main_agent_decision') {
           if (attachMainAgentDecision(data.decision)) {
-            scrollToBottom()
+            scrollIfViewingStream()
           }
         } else if (data.type === 'assignment_status') {
           if (applyAssignmentStatus(data)) {
-            scrollToBottom()
+            scrollIfViewingStream()
           }
         } else if (data.type === 'native_session') {
           applyTransientTaskRuntime(data.taskId, (runtime) => {
@@ -555,9 +687,9 @@ export function useGroupChatStream({
             else sessions.push(session)
             return { ...runtime, status: 'in_progress', sessions, statusText: `${data.agent} ${data.session?.resumed ? '恢复原生会话' : '创建原生会话'}` }
           })
-          scrollToBottom()
+          scrollIfViewingStream()
         } else if (data.type === 'runtime_fallback') {
-          const fallbackText = sanitizeGroupVisibleText(data.text || '执行通道正在切换，我会保留当前任务进度；排障信息已放入技术详情。', '执行通道正在切换，我会保留当前任务进度；排障信息已放入技术详情。', 600)
+          const fallbackText = sanitizeGroupVisibleText(data.text || '执行通道正在切换，我会保留当前任务进度。', '执行通道正在切换，我会保留当前任务进度。', 600)
           applyTransientTaskRuntime(data.taskId, (runtime) => {
             const agents = runtime.agents || []
             const index = agents.findIndex(item => item.project === data.agent)
@@ -567,9 +699,9 @@ export function useGroupChatStream({
             return { ...runtime, status: 'in_progress', agents, statusText: fallbackText }
           })
           appendAgentWorkEvent(data.agent, { id: `fallback-${Date.now()}`, time: new Date().toISOString(), kind: 'warning', text: fallbackText })
-          scrollToBottom()
+          scrollIfViewingStream()
         } else if (data.type === 'conflict_plan') {
-          messages.value.push({
+          rememberLiveGroupStreamMessage({
             id: `conflict-${Date.now()}`,
             role: 'assistant',
             agent: 'system',
@@ -580,15 +712,15 @@ export function useGroupChatStream({
             timestamp: new Date().toISOString()
           })
           waitingCrossReply.value = true
-          scrollToBottom()
+          scrollIfViewingStream()
         } else if (data.type === 'agent_work_event') {
           appendAgentWorkEvent(data.agent, data.event)
           waitingCrossReply.value = true
-          scrollToBottom()
+          scrollIfViewingStream()
         } else if (data.type === 'agent_qa') {
           appendAgentQaMessage(data)
           waitingCrossReply.value = true
-          scrollToBottom()
+          scrollIfViewingStream()
         } else if ((data.type === 'chunk' || data.type === 'response_delta') && data.agent) {
           // 流式 chunk：为每个 Agent 创建独立的流式消息
           const agentKey = data.agent
@@ -599,6 +731,7 @@ export function useGroupChatStream({
                 agent: agentKey,
                 content: '',
                 streaming: true,
+                __groupTransient: true,
                 workEvents: [],
                 timestamp: new Date().toISOString()
               }
@@ -608,7 +741,7 @@ export function useGroupChatStream({
               streamMsg.processingDetail = ''
             }
             agentStreamMsgs[agentKey] = streamMsg
-            if (!reusePrimaryEnvelope) messages.value.push(streamMsg)
+            if (!reusePrimaryEnvelope) rememberLiveGroupStreamMessage(streamMsg)
           }
           const chunkText = String(data.text || '')
           const nextRaw = `${agentStreamRawBuffers[agentKey] || ''}${chunkText}`
@@ -623,7 +756,7 @@ export function useGroupChatStream({
             hasMention = true
             waitingCrossReply.value = true
           }
-          scrollToBottom()
+          scrollIfViewingStream()
         } else if (data.type === 'agent_done') {
           // 某个 Agent 完成：用最终完整内容替换流式消息
           const agentKey = data.agent
@@ -637,8 +770,13 @@ export function useGroupChatStream({
           const finalText = sanitizeGroupVisibleText(data.text || agentStreamRawBuffers[agentKey], '执行成员已提交结果说明，我正在汇总验收。', 3000)
           if (streamMsg) {
             if (data.messageId) streamMsg.id = data.messageId
+            applyExecutionIdentity(streamMsg, data)
             streamMsg.content = finalText
             streamMsg.streaming = false
+            streamMsg.__groupTransient = false
+            streamMsg.transient = false
+            streamMsg.optimistic = false
+            streamMsg.timestamp = new Date().toISOString()
             if (Array.isArray(data.assignments)) streamMsg.assignments = data.assignments
             streamMsg.executionOrder = data.executionOrder || streamMsg.executionOrder || ''
             streamMsg.runtime = data.runtime || streamMsg.runtime || ''
@@ -648,6 +786,8 @@ export function useGroupChatStream({
             streamMsg.execution_anchor_message_id = data.executionAnchorMessageId || data.execution_anchor_message_id || streamMsg.execution_anchor_message_id || ''
             streamMsg.dispatchPolicy = data.dispatchPolicy || streamMsg.dispatchPolicy || null
             streamMsg.coordinationPlan = data.coordinationPlan || streamMsg.coordinationPlan || null
+            streamMsg.presentedPlan = data.presentedPlan || data.presented_plan || streamMsg.presentedPlan || streamMsg.presented_plan || null
+            streamMsg.presented_plan = streamMsg.presentedPlan
             streamMsg.workflow = data.workflow || streamMsg.workflow
             streamMsg.mainAgentDecision = data.mainAgentDecision || data.main_agent_decision || streamMsg.mainAgentDecision || streamMsg.main_agent_decision
             streamMsg.main_agent_decision = data.main_agent_decision || data.mainAgentDecision || streamMsg.main_agent_decision || streamMsg.mainAgentDecision
@@ -661,12 +801,13 @@ export function useGroupChatStream({
             }
           } else {
             if ((finalText && finalText.trim()) || (data.fileChanges && data.fileChanges.count > 0)) {
-              messages.value.push({
+              const completedMsg = {
                 id: data.messageId,
                 role: 'assistant',
                 agent: data.agent,
                 content: finalText,
                 timestamp: new Date().toISOString(),
+                __groupTransient: false,
                 assignments: data.assignments || null,
                 executionOrder: data.executionOrder || '',
                 runtime: data.runtime || '',
@@ -676,6 +817,8 @@ export function useGroupChatStream({
                 execution_anchor_message_id: data.executionAnchorMessageId || data.execution_anchor_message_id || '',
                 dispatchPolicy: data.dispatchPolicy || null,
                 coordinationPlan: data.coordinationPlan || null,
+                presentedPlan: data.presentedPlan || data.presented_plan || null,
+                presented_plan: data.presentedPlan || data.presented_plan || null,
                 workflow: data.workflow || null,
                 mainAgentDecision: data.mainAgentDecision || data.main_agent_decision || null,
                 main_agent_decision: data.main_agent_decision || data.mainAgentDecision || null,
@@ -685,26 +828,31 @@ export function useGroupChatStream({
                 clarification_context: data.clarification_context || data.clarificationContext || null,
                 fileChanges: data.fileChanges || null,
                 workEvents: data.workEvents || []
-              })
+              }
+              applyExecutionIdentity(completedMsg, data)
+              rememberLiveGroupStreamMessage(completedMsg)
             }
           }
           delete agentStreamRawBuffers[agentKey]
           delete agentStreamHiddenBuffers[agentKey]
           if (data.clarificationContext || data.clarification_context) {
-            const clarificationMessage = (data.messageId ? messages.value.find(item => item.id === data.messageId) : null)
+            const clarificationMessage = (data.messageId
+              ? (messages.value.find(item => item.id === data.messageId) || liveGroupStreamMessages.find(item => item.id === data.messageId))
+              : null)
               || streamMsg
+              || liveGroupStreamMessages[liveGroupStreamMessages.length - 1]
               || messages.value[messages.value.length - 1]
-            beginGroupClarificationInput(clarificationMessage)
+            if (isViewingGroupStreamSession()) beginGroupClarificationInput(clarificationMessage)
           }
           if (String(data.text || '').includes('@')) {
             hasMention = true
             waitingCrossReply.value = true
           }
-          scrollToBottom()
+          scrollIfViewingStream()
         } else if (data.type === 'chunk' || data.type === 'response_delta') {
           // 单 Agent 模式的 chunk
           if (!agentMsgAdded) {
-            messages.value.push(agentMsg)
+            rememberLiveGroupStreamMessage(agentMsg)
             agentMsgAdded = true
           }
           const chunkText = String(data.text || '')
@@ -716,17 +864,19 @@ export function useGroupChatStream({
             agentMsg.content += sanitizeGroupVisibleText(chunkText)
           }
           if (chunkText.includes('@')) hasMention = true
-          scrollToBottom()
+          scrollIfViewingStream()
         } else if (data.type === 'done') {
-          isStreaming.value = false
+          groupStreamActive.value = false
           agentMsg.streaming = false
-          if (currentGroup.value?.id && currentGroupSessionId.value) {
-            notifySessionContextUsage('group', `${currentGroup.value.id}::${currentGroupSessionId.value}`, { reason: 'provider_usage_updated' })
-          }
+          notifySessionContextUsage('group', `${groupAtSend}::${sessionAtSend}`, { reason: 'provider_usage_updated' })
           // 附加文件变更到当前 Agent 消息
           if (data.messageId) {
             agentMsg.id = data.messageId
           }
+          applyExecutionIdentity(agentMsg, data)
+          agentMsg.__groupTransient = false
+          agentMsg.transient = false
+          agentMsg.optimistic = false
           if (data.fileChanges && data.fileChanges.count > 0) {
             agentMsg.fileChanges = data.fileChanges
           }
@@ -735,7 +885,7 @@ export function useGroupChatStream({
           agentMsg.content = buildGroupStreamErrorText(data.text)
           agentMsg.streaming = false
           streamFailed = true
-          isStreaming.value = false
+          groupStreamActive.value = false
         }
       } catch {}
     }
@@ -761,14 +911,15 @@ export function useGroupChatStream({
       streamFailed = true
       const stopped = error?.name === 'AbortError'
       streamStopped = stopped
-      if (!stopped) {
+      if (!stopped && isViewingGroupStreamSession(groupAtSend, sessionAtSend)) {
         newMessage.value = msg
         messageFiles.value = filesToSend
         toast.error('连接中断，重新发送会继续同一次请求')
       }
     }
 
-    isStreaming.value = false
+    const viewingSendSession = isViewingGroupStreamSession(groupAtSend, sessionAtSend)
+    finishLiveGroupStream({ keepTranscript: !viewingSendSession })
     agentMsg.streaming = false
     if (routeRequired) {
       const assistantIndex = messages.value.indexOf(agentMsg)
@@ -778,18 +929,18 @@ export function useGroupChatStream({
 
     // 既然所有协作已经在同一个 SSE 请求中同步完成，重置等待标志，并主动拉取一次做最终同步
     waitingCrossReply.value = false
-    if (currentGroup.value) {
+    if (viewingSendSession && currentGroup.value) {
       await pullNewMessages()
-    }
-    // 更新轮询基准计数
-    if (currentGroup.value) {
       try {
-        const res = await fetch(`/api/groups/messages?id=${currentGroup.value.id}&limit=100&session_id=${encodeURIComponent(currentGroupSessionId.value)}`)
+        const res = await fetch(`/api/groups/messages?id=${encodeURIComponent(groupAtSend)}&limit=100&session_id=${encodeURIComponent(sessionAtSend)}`)
         const data = await res.json()
-        mainAgentStatus.value = data.mainAgentStatus || mainAgentStatus.value
-        groupAgentQa.value = data.agentQa || groupAgentQa.value
-        lastGroupMsgCount.value = (data.messages || []).length
+        if (String(currentGroup.value?.id || '') === groupAtSend && String(currentGroupSessionId.value || '') === sessionAtSend) {
+          mainAgentStatus.value = data.mainAgentStatus || mainAgentStatus.value
+          groupAgentQa.value = data.agentQa || groupAgentQa.value
+          lastGroupMsgCount.value = (data.messages || []).length
+        }
       } catch {}
+      finishLiveGroupStream()
     }
     if (!streamFailed && taskSupplementTarget
       && pendingGroupTaskInput.value?.taskId === taskSupplementTarget.taskId
@@ -807,11 +958,11 @@ export function useGroupChatStream({
         && pendingDirectMemoryCommand.value?.content === directMemoryCommand.content) {
         pendingDirectMemoryCommand.value = null
       }
-    } else if (streamFailed && !streamStopped && !newMessage.value.trim()) {
+    } else if (streamFailed && !streamStopped && !newMessage.value.trim() && viewingSendSession) {
       newMessage.value = msg
       messageFiles.value = filesToSend
     }
-    if (!queuedTurn) window.setTimeout(() => drainGroupTurnQueue().catch(() => {}), 0)
+    if (!queuedTurn && viewingSendSession) window.setTimeout(() => drainGroupTurnQueue().catch(() => {}), 0)
     return { success: !streamFailed, error: streamFailed ? '群聊消息没有完成' : '', taskId: activeGroupTaskId.value, routeRequired }
   }
 
@@ -820,6 +971,7 @@ export function useGroupChatStream({
     appendAgentWorkEvent,
     appendAgentQaMessage,
     applyMainAgentProgressCheckpoint,
+    restoreLiveGroupStreamIfCurrent,
     isStreaming,
     thinkingMessages,
     pendingGroupSendRetry,

@@ -1,16 +1,58 @@
-import { callAnthropicCompatibleChat, callOpenAiCompatibleChat, normalizeAnthropicMessagesUrl, normalizeChatCompletionsUrl, shouldUseAnthropic } from "../collaboration/group-orchestrator-llm-client";
+import { callAnthropicCompatibleChat, callNativeAgentTurn, callOpenAiCompatibleChat, normalizeAnthropicMessagesUrl, normalizeChatCompletionsUrl, shouldUseAnthropic } from "../collaboration/group-orchestrator-llm-client";
 import { ModelRetryProfileId, runModelCallWithRetry, shouldRetryModelCallError } from "../../system/model-call-retry";
 import { compactPetText } from "./global-agent-test-agent-display";
 
 export async function callLlm(
   config: any,
   messages: any[],
-  options: { onUsage?: (usage: any) => void; onDelta?: (delta: string) => void; providerContextCache?: any; onProviderContextCache?: (receipt: any) => void; retryProfile?: ModelRetryProfileId; signal?: AbortSignal; onRetry?: (notice: any) => void } = {},
+  options: {
+    onUsage?: (usage: any) => void;
+    onDelta?: (delta: string) => void;
+    providerContextCache?: any;
+    onProviderContextCache?: (receipt: any) => void;
+    retryProfile?: ModelRetryProfileId;
+    signal?: AbortSignal;
+    onRetry?: (notice: any) => void;
+    maxTokens?: number;
+    nativeTools?: any[];
+    nativeToolReference?: boolean;
+    onProviderAgentTurn?: (turn: any) => void;
+  } = {},
 ): Promise<string> {
   const requestBytes = Buffer.byteLength(JSON.stringify(messages));
   const maxRequestBytes = 512 * 1024;
   if (requestBytes > maxRequestBytes) {
     throw new Error(`统一大模型请求上下文过大：${requestBytes} bytes，安全上限 ${maxRequestBytes} bytes`);
+  }
+
+  if (options.nativeTools?.length) {
+    const turn = await callNativeAgentTurn(config, {
+      messages,
+      nativeTools: options.nativeTools,
+      nativeToolReference: options.nativeToolReference,
+      maxTokens: options.maxTokens || 4096,
+      temperature: 0.3,
+      defaultTimeoutMs: 60_000,
+      httpErrorPrefix: "统一大模型 API 调用失败:",
+      onUsage: options.onUsage,
+      stream: typeof options.onDelta === "function",
+      onDelta: options.onDelta,
+      providerContextCache: options.providerContextCache,
+      onProviderContextCache: options.onProviderContextCache,
+      retryProfile: options.retryProfile,
+      signal: options.signal,
+      onRetry: options.onRetry,
+      onProviderAgentTurn: options.onProviderAgentTurn,
+    });
+    if (turn.toolCalls.length) {
+      return JSON.stringify({
+        state: "investigate",
+        message: turn.text,
+        tool: { name: turn.toolCalls[0].name, arguments: turn.toolCalls[0].arguments },
+        tools: turn.toolCalls,
+      });
+    }
+    return JSON.stringify({ state: "answer", message: turn.text, tool: null });
   }
 
   if (shouldUseAnthropic(config)) {
@@ -24,7 +66,7 @@ export async function callLlm(
     return callAnthropicCompatibleChat(config, {
       system,
       messages: userMessages,
-      maxTokens: 2000,
+      maxTokens: options.maxTokens || 2000,
       temperature: 0.3,
       defaultTimeoutMs: 60_000,
       httpErrorPrefix: "统一大模型 API 调用失败:",
@@ -42,6 +84,7 @@ export async function callLlm(
   return callOpenAiCompatibleChat(config, {
     messages,
     temperature: 0.3,
+    maxTokens: options.maxTokens || 2000,
     defaultTimeoutMs: 60_000,
     httpErrorPrefix: "统一大模型 API 调用失败:",
     onUsage: options.onUsage,

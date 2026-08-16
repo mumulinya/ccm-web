@@ -112,21 +112,42 @@ if (process.argv[2] === "--child") {
     }), "utf8");
     const llmClient = require(llmClientFile);
     let calls = 0;
-    llmClient.callOpenAiCompatibleJson = async () => {
+    const dispatchJson = {
+      intent: "implementation",
+      summary: "实现 Phase 303 reactive compact ownership integration",
+      domains: ["backend"],
+      deliverables: ["verified retry ownership"],
+      constraints: [],
+      missingInfo: [],
+      shouldDelegate: true,
+      executionOrder: "parallel",
+      dispatchPolicy: { action: "delegate", requiresConfirmation: false, reason: "integration test" },
+      targets: [{ project: "api", task: "实现 PHASE303_REACTIVE_INTEGRATION_SENTINEL 并验证。", reason: "backend" }],
+    };
+    llmClient.callNativeAgentTurn = async () => {
       calls += 1;
       if (calls === 1) throw new Error("HTTP 413: prompt too long");
       return {
-        intent: "implementation",
-        summary: "实现 Phase 303 reactive compact ownership integration",
-        domains: ["backend"],
-        deliverables: ["verified retry ownership"],
-        constraints: [],
-        missingInfo: [],
-        shouldDelegate: true,
-        executionOrder: "parallel",
-        dispatchPolicy: { action: "delegate", requiresConfirmation: false, reason: "integration test" },
-        targets: [{ project: "api", task: "实现 PHASE303_REACTIVE_INTEGRATION_SENTINEL 并验证。", reason: "backend" }],
+        text: "",
+        toolCalls: [{
+          id: "call_dispatch",
+          name: "ccm_dispatch",
+          arguments: {
+            friendlyResponse: dispatchJson.summary,
+            targets: dispatchJson.targets,
+            workflowDecision: { mode: "execute_direct", actionRequired: true, intentKind: "implementation" },
+          },
+          argumentsChecksum: "x",
+        }],
+        toolReferences: [],
+        stopReason: "tool_calls",
+        usage: { inputTokens: 10, outputTokens: 10, totalTokens: 20, reported: true },
       };
+    };
+    llmClient.callOpenAiCompatibleJson = async () => {
+      calls += 1;
+      if (calls === 1) throw new Error("HTTP 413: prompt too long");
+      return dispatchJson;
     };
     const orchestrator = require(orchestratorFile);
     const result = await orchestrator.runGroupOrchestrator({

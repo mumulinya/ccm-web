@@ -67,11 +67,11 @@ export declare function parseOpenAiAgentTurn(data: any, usage: LlmTokenUsage): P
 export declare function parseGeminiAgentTurn(data: any, usage: LlmTokenUsage): ProviderAgentTurn;
 export declare function parseAnthropicAgentTurn(data: any, usage: LlmTokenUsage): ProviderAgentTurn;
 export declare function turnForLegacyJsonLoop(turn: ProviderAgentTurn): string;
-export declare function createOpenAiStreamTurnAccumulator(): {
+export declare function createOpenAiStreamTurnAccumulator(onToolCallReady?: (item: ProviderToolCall) => void): {
     push(event: any): void;
     finish(usage: LlmTokenUsage): ProviderAgentTurn;
 };
-export declare function createAnthropicStreamTurnAccumulator(): {
+export declare function createAnthropicStreamTurnAccumulator(onToolCallReady?: (item: ProviderToolCall) => void): {
     push(event: any): void;
     finish(usage: LlmTokenUsage): ProviderAgentTurn;
 };

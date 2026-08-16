@@ -1,3 +1,5 @@
+import { isChildAgentDialogueProgress } from './nestChildAgentConversation.js'
+
 const time = value => {
   const parsed = Date.parse(String(value || ''))
   return Number.isFinite(parsed) ? parsed : 0
@@ -121,6 +123,48 @@ const agentRowKey = event => {
 }
 
 const uniqueValues = values => [...new Map((Array.isArray(values) ? values : []).map(value => [JSON.stringify(value), value])).values()]
+
+// Recovery attempts historically shared one anchor and some persisted events
+// did not expose turnId/attempt as top-level fields.  The event id still
+// carries the immutable identity (for example `...:attempt:2:<turn-id>:...`).
+// Keep this extraction local to the projection layer so old ledgers remain
+// readable without rewriting them.
+const executionTurnIdOf = value => {
+  const explicit = value?.executionTurnId
+    || value?.execution_turn_id
+    || value?.turnId
+    || value?.turn_id
+    || value?.detail?.executionStage?.turnId
+    || value?.detail?.executionStage?.turn_id
+    || value?.detail?.turnId
+    || value?.detail?.turn_id
+  if (explicit) return String(explicit)
+  const eventId = String(value?.eventId || value?.id || '')
+  const match = eventId.match(/(?:^|:)attempt:(\d+):([^:]+)(?::|$)/i)
+  return match?.[2] ? String(match[2]) : ''
+}
+
+const executionAttemptOf = value => {
+  const explicit = value?.executionAttempt
+    ?? value?.execution_attempt
+    ?? value?.recovery?.attempt
+    ?? value?.attempt
+  if (explicit !== undefined && explicit !== null && explicit !== '') {
+    const parsed = Number(explicit)
+    if (Number.isFinite(parsed) && parsed > 0) return parsed
+  }
+  const eventId = String(value?.eventId || value?.id || '')
+  const match = eventId.match(/(?:^|:)attempt:(\d+):/i)
+  if (match?.[1]) return Number(match[1])
+  // executionStage.attempt describes a project/TestAgent work attempt, not
+  // necessarily the parent group recovery attempt. Only use it when that
+  // stage also carries an explicit turn identity.
+  if (value?.detail?.executionStage?.turnId || value?.detail?.executionStage?.turn_id) {
+    const stageAttempt = Number(value?.detail?.executionStage?.attempt || 0)
+    if (Number.isFinite(stageAttempt) && stageAttempt > 0) return stageAttempt
+  }
+  return 0
+}
 
 const mergeAgentEvent = (first, next, previousAttempt) => {
   const nextAttempt = agentAttempt(next)
@@ -261,9 +305,11 @@ export function executionEventsForMessage(events, messages, index) {
       || message?.messageId
       || '',
   )
-  const anchoredEvents = messageId
-    ? orderedEvents.filter(event => String(event?.anchorMessageId || event?.anchor_message_id || '') === messageId)
-    : []
+  const belongsToOtherAnchor = event => {
+    if (!messageId) return false
+    const eventAnchor = String(event?.anchorMessageId || event?.anchor_message_id || '')
+    return !!eventAnchor && eventAnchor !== messageId
+  }
   // Persisted group user messages can receive their timestamp when the turn is
   // committed, after the tools have already run.  Bind completed turns by the
   // result event nearest to the assistant message instead of relying only on
@@ -272,9 +318,30 @@ export function executionEventsForMessage(events, messages, index) {
   const resultCandidates = orderedEvents
     .map((event, eventIndex) => ({ event, eventIndex, distance: Math.abs(time(event?.createdAt) - messageTime) }))
     .filter(candidate => candidate.event?.eventType === 'result' && time(candidate.event?.createdAt) && messageTime)
+    .filter(candidate => !belongsToOtherAnchor(candidate.event))
     .sort((left, right) => left.distance - right.distance || right.eventIndex - left.eventIndex)
   const matchedResult = resultCandidates[0]
   let lifecycleEvents = null
+  const matchedTurnId = executionTurnIdOf(matchedResult?.event)
+  const matchedAttempt = executionAttemptOf(matchedResult?.event)
+
+  // Once an authoritative result is available, use its immutable recovery
+  // identity to isolate the current turn.  A shared anchor is only a legacy
+  // correlation hint; it must never pull a previous retry back into this row.
+  const belongsToMatchedTurn = event => {
+    if (!event || belongsToOtherAnchor(event)) return false
+    if (!matchedResult) return true
+    const eventTurnId = executionTurnIdOf(event)
+    const eventAttempt = executionAttemptOf(event)
+    if (matchedTurnId && eventTurnId && eventTurnId !== matchedTurnId) return false
+    if (matchedAttempt && eventAttempt && eventAttempt !== matchedAttempt) return false
+    return true
+  }
+
+  const anchoredEvents = !matchedResult && messageId
+    ? orderedEvents.filter(event => String(event?.anchorMessageId || event?.anchor_message_id || '') === messageId)
+      .filter(belongsToMatchedTurn)
+    : []
   // Result persistence and the visible assistant message normally differ by
   // milliseconds.  A bounded tolerance avoids attaching an unrelated old run
   // to a message that never had a projected execution lifecycle.
@@ -288,6 +355,7 @@ export function executionEventsForMessage(events, messages, index) {
       if (cursor < matchedResult.eventIndex && orderedEvents[cursor]?.eventType === 'result') break
     }
     lifecycleEvents = orderedEvents.slice(startIndex, matchedResult.eventIndex + 1)
+      .filter(belongsToMatchedTurn)
   }
   let previousUser = null
   let nextUser = null
@@ -300,17 +368,32 @@ export function executionEventsForMessage(events, messages, index) {
   const start = time(previousUser?.timestamp || previousUser?.createdAt || previousUser?.created_at)
   const end = time(nextUser?.timestamp || nextUser?.createdAt || nextUser?.created_at) || Number.POSITIVE_INFINITY
   const taskId = String(message?.task_id || message?.taskId || message?.taskExperience?.task_id || '')
-  const taskEvents = taskId ? orderedEvents.filter(event => String(event?.taskId || '') === taskId) : []
+  // Group user timestamps are often the commit time of the reply, not the send
+  // time. The window from this user to the next user can therefore swallow the
+  // following question's tools. Never attach another assistant bubble's events.
   const timeBoundEvents = orderedEvents.filter(event => {
+    if (!belongsToMatchedTurn(event)) return false
+    // With a matched result, lifecycleEvents is the authoritative bounded
+    // slice.  Do not re-add every same-anchor event through the broad time
+    // window below; that was the source of stale recovery contamination.
+    if (matchedResult) return false
     if (taskId && String(event?.taskId || '') === taskId) return true
     const created = time(event?.createdAt)
     return created && (!start || created >= start) && created < end
   })
-  const current = anchoredEvents.length
-    ? anchoredEvents
-    : taskEvents.length
-    ? [...new Map([...(lifecycleEvents || []), ...timeBoundEvents, ...taskEvents].map(event => [event.eventId, event])).values()]
-    : lifecycleEvents || timeBoundEvents
+  // Formal tasks may already have a newer generation running while an older
+  // result is still the closest event to the assistant envelope. Keep the
+  // task-wide generation fence intact; recovery-only group turns have no
+  // taskId and remain bounded exclusively by lifecycleEvents above.
+  const taskEvents = taskId
+    ? orderedEvents.filter(event => String(event?.taskId || '') === taskId && !belongsToOtherAnchor(event))
+    : []
+  const current = [...new Map([
+    ...anchoredEvents,
+    ...(lifecycleEvents || []),
+    ...timeBoundEvents,
+    ...taskEvents,
+  ].filter(Boolean).map(event => [event.eventId, event])).values()]
   const merged = [...current, ...legacyExecutionEvents(message)]
   return coalesceExecutionEvents(merged).filter(event => !isUnsafeExecutionProgress(event))
 }
@@ -326,6 +409,8 @@ const terminalStatusFromValue = value => {
 }
 
 const messageExecutionStatus = message => {
+  const runtime = String(message?.runtime || '').toLowerCase()
+  if (runtime === 'llm-error' || runtime === 'llm-not-configured') return 'failed'
   const values = [
     message?.taskExperience?.status,
     message?.taskExperience?.phase,
@@ -418,7 +503,7 @@ const meaningfulExecutionTypes = new Set([
 
 export function isMeaningfulExecutionEvent(event) {
   const eventType = String(event?.eventType || '')
-  if (eventType === 'model_activity') return ['waiting', 'retrying'].includes(String(event?.detail?.modelActivity?.state || ''))
+  if (eventType === 'model_activity') return isLiveModelActivityEvent(event)
   if (event?.display?.status === 'failed') return true
   if (eventType.startsWith('tool_') || eventType.startsWith('agent_')) return true
   if (meaningfulExecutionTypes.has(eventType)) return true
@@ -428,6 +513,41 @@ export function isMeaningfulExecutionEvent(event) {
   return false
 }
 
+export function isLiveModelActivityEvent(event) {
+  return event?.eventType === 'model_activity'
+    && ['waiting', 'retrying'].includes(String(event?.detail?.modelActivity?.state || ''))
+}
+
+export function appendLiveModelActivityToTail(items, extraLive = []) {
+  const live = []
+  const rest = []
+  const seen = new Set()
+  const pushLive = event => {
+    if (!isLiveModelActivityEvent(event)) return
+    const id = String(event?.eventId || '')
+    if (id) {
+      if (seen.has(id)) return
+      seen.add(id)
+    }
+    live.push(event)
+  }
+  for (const item of Array.isArray(items) ? items : []) {
+    if (item?.__progressBatch && Array.isArray(item.children)) {
+      const children = []
+      for (const child of item.children) {
+        if (isLiveModelActivityEvent(child)) pushLive(child)
+        else children.push(child)
+      }
+      rest.push(children.length === item.children.length ? item : { ...item, children })
+      continue
+    }
+    if (isLiveModelActivityEvent(item)) pushLive(item)
+    else rest.push(item)
+  }
+  for (const event of Array.isArray(extraLive) ? extraLive : []) pushLive(event)
+  return [...rest, ...live]
+}
+
 export function hasMeaningfulExecutionForMessage(events, messages, index) {
   return executionEventsForMessage(events, messages, index).some(isMeaningfulExecutionEvent)
 }
@@ -435,6 +555,40 @@ export function hasMeaningfulExecutionForMessage(events, messages, index) {
 export function shouldRenderExecutionTranscript(events, messages, index, expanded = false) {
   const rows = executionEventsForMessage(events, messages, index)
   return rows.length > 0 && (expanded || rows.some(isMeaningfulExecutionEvent))
+}
+
+const INCOMPLETE_QUERY_STATUS = /^(?:failed|error|cancelled|canceled|interrupted|blocked)$/i
+
+// Ordinary answers do not need a task ledger or Terminal Gate, but once a
+// turn actually used a tool and finished, the user can inspect what was
+// queried. Incomplete turns stay like Cursor: no collapsed query record.
+// Provider/transport paths are not equally reliable at persisting a final
+// `result` event, so a finalized assistant envelope is also a valid
+// query-record boundary. This never upgrades the turn into a development
+// task; it only controls the lightweight completed query projection.
+export function executionQueryRecordForMessage(events, messages, index) {
+  const rows = executionEventsForMessage(events, messages, index)
+  if (executionMessageIsFormalTask(events, messages, index)) return null
+  const toolRows = rows.filter(event => String(event?.eventType || '').startsWith('tool_'))
+  if (!toolRows.length) return null
+  const message = messages?.[index] || {}
+  const runtime = String(message?.runtime || '').toLowerCase()
+  if (runtime === 'llm-error' || runtime === 'llm-not-configured') return null
+  const boundary = executionTerminalBoundaryForMessage(events, messages, index)
+  const finalizedAnswer = message?.role === 'assistant'
+    && message?.streaming !== true
+    && !!String(message?.content || message?.text || '').trim()
+  if (!boundary && !finalizedAnswer) return null
+  const status = String(boundary?.status || '').toLowerCase()
+  if (INCOMPLETE_QUERY_STATUS.test(status)) return null
+  const toolFailed = toolRows.some(event => ['failed', 'error', 'cancelled', 'canceled'].includes(String(event?.display?.status || '').toLowerCase()))
+  const succeeded = status ? true : !toolFailed
+  return {
+    status: succeeded ? 'success' : 'partial',
+    succeeded,
+    toolCount: new Set(toolRows.map(event => String(event?.toolCallId || event?.eventId || '')).filter(Boolean)).size,
+    boundarySource: boundary?.source || 'assistant_message',
+  }
 }
 
 export function executionTurnStateForMessage(events, messages, index) {
@@ -469,6 +623,87 @@ export function shouldShowCompactProcessingState(events, messages, index) {
   return executionTurnStateForMessage(events, messages, index).showThinking
 }
 
+const LIVE_ASSISTANT_PROGRESS_FALLBACK = '我正在处理当前请求。'
+const SKIP_PROVISIONAL_MESSAGE_TYPES = new Set([
+  'command_result',
+  'conversation_summary_boundary',
+  'management_action',
+  'git_review',
+  'git_commit',
+  'project_task_intake',
+  'conflict_plan',
+])
+
+const messageFinalAnswerText = message => String(
+  message?.agenticRun?.final_reply
+  || message?.agenticRun?.finalReply
+  || message?.content
+  || message?.text
+  || '',
+).replace(/\s+/g, ' ').trim()
+
+export function latestAssistantProgressText(events, messages, index) {
+  const rows = executionEventsForMessage(events, messages, index)
+  const latest = [...rows].reverse().find(event => (
+    event?.eventType === 'assistant_progress'
+    && !isUnsafeExecutionProgress(event)
+    && !isChildAgentDialogueProgress(event)
+  ))
+  return String(latest?.detail?.progress?.text || latest?.display?.summary || '').replace(/\s+/g, ' ').trim()
+}
+
+export function accumulatedAssistantTextDelta(events, messages, index) {
+  return executionEventsForMessage(events, messages, index)
+    .filter(event => event?.eventType === 'assistant_text_delta')
+    .map(event => String(event?.display?.summary || event?.detail?.delta || event?.detail?.stream?.text || ''))
+    .join('')
+    .trim()
+}
+
+export function liveAssistantInProgressText(events, messages, index) {
+  const message = messages?.[index]
+  if (!message || message.role === 'user' || message.role === 'thinking') return ''
+  if (SKIP_PROVISIONAL_MESSAGE_TYPES.has(String(message.type || ''))) return ''
+  if (messageFinalAnswerText(message)) return ''
+  const turn = executionTurnStateForMessage(events, messages, index)
+  const live = message.streaming === true
+    || ['thinking', 'executing', 'waiting_user', 'verifying'].includes(String(turn.state || ''))
+  if (!live) return ''
+  return accumulatedAssistantTextDelta(events, messages, index) || latestAssistantProgressText(events, messages, index)
+}
+
+export function liveAssistantProvisionalText(events, messages, index, fallback = LIVE_ASSISTANT_PROGRESS_FALLBACK, options = {}) {
+  const message = messages?.[index]
+  if (!message || message.role === 'user' || message.role === 'thinking') return ''
+  if (SKIP_PROVISIONAL_MESSAGE_TYPES.has(String(message.type || ''))) return ''
+  const boundary = executionTerminalBoundaryForMessage(events, messages, index)
+  const turn = executionTurnStateForMessage(events, messages, index)
+  if (!options.treatContentAsEmpty && messageFinalAnswerText(message)) return ''
+  if (message.streaming !== true && (boundary?.terminal || turn.terminal)) return ''
+  const live = message.streaming === true
+    || ['thinking', 'executing', 'waiting_user', 'verifying'].includes(String(turn.state || ''))
+  if (!live) return ''
+  if (latestAssistantProgressText(events, messages, index)) return ''
+  if ((turn.rows || []).some(isMeaningfulExecutionEvent)) return ''
+  return String(fallback || '').trim()
+}
+
+export function countExecutionToolItems(events = []) {
+  const succeeded = new Set()
+  const failed = new Set()
+  for (const event of Array.isArray(events) ? events : []) {
+    const type = String(event?.eventType || '')
+    if (type !== 'tool_completed' && type !== 'tool_failed') continue
+    const id = String(event?.toolCallId || event?.eventId || '').trim()
+    if (!id) continue
+    const status = String(event?.display?.status || '').toLowerCase()
+    if (type === 'tool_failed' || ['failed', 'error', 'cancelled', 'canceled'].includes(status)) failed.add(id)
+    else succeeded.add(id)
+  }
+  for (const id of failed) succeeded.delete(id)
+  return { completed: succeeded.size, failed: failed.size }
+}
+
 export function terminalExecutionEventForMessage(events, messages, index) {
   const rows = executionEventsForMessage(events, messages, index)
   const currentGeneration = rows.reduce((max, event) => Math.max(max, Number(event?.generation || 0)), 0)
@@ -488,7 +723,19 @@ export function executionMessageIsFormalTask(events, messages, index) {
   const rows = executionEventsForMessage(events, messages, index)
   const mode = String(message?.messageMode || message?.message_mode || '').trim().toLowerCase()
   if (mode === 'task') return true
-  if (message?.taskExperience || message?.taskCard || message?.task?.id) return true
+  const writeIntentValues = [
+    message?.requiresCodeChanges,
+    message?.requires_code_changes,
+    message?.workflowDecision?.requiresCodeChanges,
+    message?.workflowDecision?.requires_code_changes,
+    message?.taskExperience?.requiresCodeChanges,
+    message?.taskExperience?.requires_code_changes,
+    message?.taskCard?.requiresCodeChanges,
+    message?.taskCard?.requires_code_changes,
+    message?.task?.requiresCodeChanges,
+    message?.task?.requires_code_changes,
+  ]
+  if (writeIntentValues.some(value => value === true)) return true
   if (message?.globalMission || message?.globalMissionSupervisor || message?.missionId || message?.mission_id) return true
   if (rows.some(event => String(event?.eventType || '').startsWith('agent_'))) return true
   if (rows.some(event => event?.eventType === 'requirement_plan' && event?.taskId && event?.detail?.requirementPlan)) return true

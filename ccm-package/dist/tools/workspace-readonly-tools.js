@@ -72,6 +72,19 @@ const TEXT_FILE_LIMIT = 4 * 1024 * 1024;
 const V3_TEXT_SCAN_LIMIT = 64 * 1024 * 1024;
 const TOOL_RESULT_TOKEN_LIMIT = cc_tool_result_limits_1.CC_ALIGNED_TOOL_RESULT_MAX_TOKENS;
 const DIRECTORY_SCAN_LIMIT = 20_000;
+function throwIfFileReadTokensExceeded(tokenCount, line) {
+    if (tokenCount <= cc_tool_result_limits_1.CC_ALIGNED_FILE_READ_MAX_TOKENS)
+        return;
+    if (line)
+        throw new Error(`第${line}行超过单次最大${cc_tool_result_limits_1.CC_ALIGNED_FILE_READ_MAX_TOKENS} Token，未进行字符截断`);
+    throw new Error(`文件内容（${tokenCount} Token）超过单次允许的 ${cc_tool_result_limits_1.CC_ALIGNED_FILE_READ_MAX_TOKENS} Token。请使用 offset 和 limit 读取特定部分，或改用搜索。`);
+}
+function catNFileReadLine(lineNumber, text) {
+    return `${String(lineNumber).padStart(6)}\t${text}`;
+}
+function fileReadContentTokens(rows) {
+    return (0, context_budget_1.estimateTextTokens)(rows.map(row => catNFileReadLine(row.line, row.text)).join("\n"));
+}
 function canonical(value) {
     if (Array.isArray(value))
         return value.map(canonical);
@@ -132,12 +145,12 @@ function openScopedToolCapability(token) {
     return body;
 }
 const rawDefinitions = [
-    { name: "list_directory", loadPolicy: "base", description: "列出授权项目目录中的文件和子目录，结果分页返回。", inputSchema: { type: "object", properties: { project_id: { type: "string" }, path: { type: "string" }, cursor: { type: "string" }, limit: { type: "integer", minimum: 1, maximum: 500 } } } },
-    { name: "glob_files", loadPolicy: "base", description: "在授权项目中按Glob模式查找文件，返回稳定分页结果。", inputSchema: { type: "object", required: ["pattern"], properties: { project_id: { type: "string" }, pattern: { type: "string" }, cursor: { type: "string" }, limit: { type: "integer", minimum: 1, maximum: 500 } } } },
-    { name: "grep_text", loadPolicy: "base", description: "使用ripgrep在授权项目源码中检索文本或正则表达式。", inputSchema: { type: "object", required: ["pattern"], properties: { project_id: { type: "string" }, pattern: { type: "string" }, glob: { type: "string" }, mode: { enum: ["content", "files_with_matches", "count"] }, multiline: { type: "boolean" }, cursor: { type: "string" }, limit: { type: "integer", minimum: 1, maximum: 500 } } } },
-    { name: "read_file", loadPolicy: "base", description: "按完整行读取授权项目内文件，支持offset、limit、版本校验和继续游标。仅在当前模型上下文仍持有相同内容时返回未变化。单次读取最高25000 Token。", inputSchema: { type: "object", required: ["path"], properties: { project_id: { type: "string" }, path: { type: "string" }, offset: { type: "integer", minimum: 1 }, limit: { type: "integer", minimum: 1, maximum: 2000 }, expected_checksum: { type: "string" }, token_budget: { type: "integer", minimum: 256, maximum: 25000, default: 25000 } } } },
+    { name: "list_directory", loadPolicy: "base", description: "列出授权项目目录中的文件和子目录，结果分页返回。默认最多返回100项；未列完时再分页。当前作用域只有一个授权项目时可省略 project_id。", inputSchema: { type: "object", properties: { project_id: { type: "string", description: "当前作用域只有一个授权项目时可省略；多个项目时必须传入精确项目名。" }, path: { type: "string" }, cursor: { type: "string" }, limit: { type: "integer", minimum: 1, maximum: 100 } } } },
+    { name: "glob_files", loadPolicy: "base", description: "按Glob模式查找授权项目内文件，结果按修改时间排序。默认最多返回100个匹配；未读完时再分页。", inputSchema: { type: "object", required: ["pattern"], properties: { project_id: { type: "string" }, pattern: { type: "string" }, cursor: { type: "string" }, limit: { type: "integer", minimum: 1, maximum: 100 } } } },
+    { name: "grep_text", loadPolicy: "base", description: "使用ripgrep在授权项目源码中检索文本或正则表达式。未指定数量时默认返回250条；显式传0表示不限制。", inputSchema: { type: "object", required: ["pattern"], properties: { project_id: { type: "string" }, pattern: { type: "string" }, glob: { type: "string" }, mode: { enum: ["content", "files_with_matches", "count"] }, multiline: { type: "boolean" }, cursor: { type: "string" }, limit: { type: "integer", minimum: 1, maximum: 500 } } } },
+    { name: "read_file", loadPolicy: "base", description: "读取授权项目内文件。默认从文件开头最多读取2000行；仅当文件过大无法一次读完时才提供offset和limit。当前上下文已持有相同内容时返回未变化。", inputSchema: { type: "object", required: ["path"], properties: { project_id: { type: "string" }, path: { type: "string" }, offset: { type: "integer", minimum: 1 }, limit: { type: "integer", minimum: 1, maximum: 2000 }, expected_checksum: { type: "string" } } } },
     { name: "inspect_notebook", loadPolicy: "search", description: "结构化检查Notebook元数据、单元格身份、源码校验值和输出类型；不返回单元格正文。", inputSchema: { type: "object", required: ["path"], properties: { project_id: { type: "string" }, path: { type: "string" }, cursor: { type: "string" }, limit: { type: "integer", minimum: 1, maximum: 200 } } } },
-    { name: "web_fetch", loadPolicy: "search", description: "安全读取公开HTTPS网页、文本、JSON或PDF；逐次校验DNS和重定向并阻止私网、凭据URL和超限响应。", inputSchema: { type: "object", required: ["url"], properties: { project_id: { type: "string" }, url: { type: "string" }, max_chars: { type: "integer", minimum: 1000, maximum: 300000 } } } },
+    { name: "web_fetch", loadPolicy: "search", description: "安全读取公开HTTPS网页、文本、JSON或PDF，并按 prompt 用模型摘要；逐次校验DNS和重定向并阻止私网、凭据URL和超限响应。prompt 必填，说明想从页面得到什么。未配置统一大模型时明确失败，不会静默返回整页原文。", inputSchema: { type: "object", required: ["url", "prompt"], properties: { project_id: { type: "string" }, url: { type: "string" }, prompt: { type: "string", description: "想从该页面得到什么" } } } },
     ...((0, web_notebook_tools_1.isWebSearchAvailable)() ? [{ name: "web_search", loadPolicy: "search", description: "通过已配置的真实搜索Provider检索公开Web；未配置真实后端时本工具不会注册。", inputSchema: { type: "object", required: ["query"], properties: { project_id: { type: "string" }, query: { type: "string" }, count: { type: "integer", minimum: 1, maximum: 20 } } } }] : []),
     { name: "find_definition", loadPolicy: "search", description: "通过已配置语言服务查找符号定义；没有可靠语言服务时明确返回不可用。", inputSchema: { type: "object", required: ["symbol"], properties: { project_id: { type: "string" }, symbol: { type: "string" }, path: { type: "string" } } } },
     { name: "find_references", loadPolicy: "search", description: "通过已配置语言服务查找符号引用；没有可靠语言服务时明确返回不可用。", inputSchema: { type: "object", required: ["symbol"], properties: { project_id: { type: "string" }, symbol: { type: "string" }, path: { type: "string" } } } },
@@ -160,7 +173,7 @@ const v3Schemas = {
         type: "object", required: ["pattern"], additionalProperties: false,
         properties: {
             project_id: { type: "string" }, pattern: { type: "string" }, path: { type: "string" },
-            offset: { type: "integer", minimum: 0 }, limit: { type: "integer", minimum: 1, maximum: 500 },
+            offset: { type: "integer", minimum: 0 }, limit: { type: "integer", minimum: 1, maximum: 100 },
             respect_gitignore: { type: "boolean" },
         },
     },
@@ -182,7 +195,6 @@ const v3Schemas = {
             limit: { type: "integer", minimum: 1, maximum: 2000 }, pages: { type: "string" },
             cell_offset: { type: "integer", minimum: 0 }, cell_limit: { type: "integer", minimum: 1, maximum: 200 },
             expected_checksum: { type: "string" },
-            token_budget: { type: "integer", minimum: 256, maximum: 25000, default: 25000 },
         },
     },
 };
@@ -211,7 +223,6 @@ const v3OnlyDefinitions = [
                         ],
                     },
                 },
-                token_budget: { type: "integer", minimum: 1024, maximum: 25000, default: 25000 },
             },
         },
     },
@@ -249,12 +260,23 @@ function projectWorkDir(project) {
         throw new Error(`项目源码目录不可用：${project}`);
     return fs.realpathSync(workDir);
 }
+function allowedProjectsFor(capability) {
+    if (capability.scope === "global" && !(capability.allowedProjects || []).length)
+        return activeProjects();
+    return (capability.allowedProjects || []).map(item => String(item || "").trim()).filter(Boolean);
+}
 function selectProject(capability, args) {
     const requested = String(args?.project_id || args?.projectId || "").trim();
-    const allowed = capability.scope === "global" && capability.allowedProjects.length === 0 ? activeProjects() : capability.allowedProjects;
-    const project = capability.scope === "project" ? capability.scopeId : requested;
-    if (!project)
-        throw new Error("当前工具需要指定精确project_id");
+    const allowed = allowedProjectsFor(capability);
+    const project = capability.scope === "project"
+        ? capability.scopeId
+        : requested || (allowed.length === 1 ? allowed[0] : "");
+    if (!project) {
+        const error = new Error(allowed.length ? "当前工具需要指定精确project_id" : "当前作用域没有可读取的项目");
+        error.code = allowed.length ? "PROJECT_ID_REQUIRED" : "NO_PROJECT_IN_SCOPE";
+        error.availableProjects = allowed;
+        throw error;
+    }
     if (!allowed.includes(project))
         throw new Error(`当前Agent作用域无权读取项目：${project}`);
     return { project, root: projectWorkDir(project) };
@@ -379,9 +401,10 @@ function safePath(root, relativeValue, allowMissing = false) {
     }
     return allowMissing ? resolved : realTarget;
 }
-function page(rows, cursorValue, limitValue) {
+function page(rows, cursorValue, limitValue, maxLimit = 500) {
     const offset = Math.max(0, Number.parseInt(String(cursorValue || "0"), 10) || 0);
-    const limit = Math.max(1, Math.min(500, Number(limitValue || 100) || 100));
+    const fallback = Math.min(100, maxLimit);
+    const limit = Math.max(1, Math.min(maxLimit, Number(limitValue || fallback) || fallback));
     const items = rows.slice(offset, offset + limit);
     return { items, total: rows.length, next_cursor: offset + items.length < rows.length ? String(offset + items.length) : "", truncated: offset + items.length < rows.length };
 }
@@ -481,7 +504,7 @@ async function walkDetailed(root, relativeBase = "", options = {}) {
 }
 function pageOffset(rows, offsetValue, limitValue, defaultLimit) {
     const offset = Math.max(0, Number(offsetValue || 0) || 0);
-    const limit = Math.max(1, Math.min(500, Number(limitValue || defaultLimit) || defaultLimit));
+    const limit = Math.max(1, Math.min(cc_tool_result_limits_1.CC_ALIGNED_GLOB_MAX_RESULTS, Number(limitValue || defaultLimit) || defaultLimit));
     const items = rows.slice(offset, offset + limit);
     return { items, offset, limit, total: rows.length, next_cursor: offset + items.length < rows.length ? String(offset + items.length) : "", truncated: offset + items.length < rows.length };
 }
@@ -532,7 +555,7 @@ async function globFilesV3(root, args, options = {}) {
         .filter(row => !ignorePatterns.length || !ignoredByRootGitignore(row.path, ignorePatterns))
         .filter(row => (0, minimatch_1.minimatch)(row.relativeToBase, pattern, { dot: true, nocase: process.platform === "win32", matchBase: !pattern.includes("/") }))
         .sort((left, right) => right.mtimeMs - left.mtimeMs || left.path.localeCompare(right.path));
-    const selected = pageOffset(matches, args?.offset, args?.limit, 100);
+    const selected = pageOffset(matches, args?.offset, args?.limit, cc_tool_result_limits_1.CC_ALIGNED_GLOB_MAX_RESULTS);
     const items = selected.items.map(row => row.path);
     const value = {
         schema: "ccm-workspace-glob-result-v3", toolContractVersion: 3, pattern, path: relativeBase,
@@ -724,7 +747,7 @@ async function grepTextV3(root, args, options = {}) {
     const output = search.stdout;
     const allLines = output ? output.replace(/\r?\n$/, "").split(/\r?\n/) : [];
     const offset = Math.max(0, Number(args?.offset || 0) || 0);
-    const requestedLimit = args?.head_limit === 0 ? Math.max(1, allLines.length || 1) : Math.max(1, Math.min(10_000, Number(args?.head_limit ?? 250) || 250));
+    const requestedLimit = args?.head_limit === 0 ? Math.max(1, allLines.length || 1) : Math.max(1, Math.min(10_000, Number(args?.head_limit ?? cc_tool_result_limits_1.CC_ALIGNED_GREP_DEFAULT_HEAD_LIMIT) || cc_tool_result_limits_1.CC_ALIGNED_GREP_DEFAULT_HEAD_LIMIT));
     const selected = allLines.slice(offset, offset + requestedLimit);
     const truncated = offset + selected.length < allLines.length || search.partial;
     const filenames = mode === "files_with_matches" ? selected.map(normalizeRelative).filter(Boolean) : grepResultFiles(allLines);
@@ -785,22 +808,19 @@ async function readFileTool(root, args) {
     const lines = text.split(/\r?\n/);
     const offset = Math.max(1, Number(args?.offset || 1) || 1);
     const limit = Math.max(1, Math.min(2000, Number(args?.limit || 2000) || 2000));
-    const tokenBudget = Math.max(256, Math.min(cc_tool_result_limits_1.CC_ALIGNED_FILE_READ_MAX_TOKENS, Number(args?.token_budget || cc_tool_result_limits_1.CC_ALIGNED_FILE_READ_MAX_TOKENS) || cc_tool_result_limits_1.CC_ALIGNED_FILE_READ_MAX_TOKENS));
-    const contentTokenBudget = Math.max(128, tokenBudget - 256);
     const selected = [];
     let used = 0;
     for (let index = offset - 1; index < lines.length && selected.length < limit; index += 1) {
         const row = { line: index + 1, text: lines[index] };
-        const rowTokens = (0, context_budget_1.estimateTextTokens)(JSON.stringify(row));
-        if (rowTokens > contentTokenBudget)
-            throw new Error(`第${index + 1}行超过单次Token预算，未进行字符截断`);
-        if (used + rowTokens > contentTokenBudget)
-            break;
-        selected.push(row);
+        const rowTokens = (0, context_budget_1.estimateTextTokens)(catNFileReadLine(row.line, row.text));
+        throwIfFileReadTokensExceeded(rowTokens, index + 1);
         used += rowTokens;
+        throwIfFileReadTokensExceeded(used);
+        selected.push(row);
     }
     const nextLine = selected.length ? selected[selected.length - 1].line + 1 : offset;
-    return enforceResultBudget({ path: normalizeRelative(path.relative(root, file)), checksum: checksum(text), total_lines: lines.length, offset, lines: selected, next_cursor: nextLine <= lines.length ? String(nextLine) : "", truncated: nextLine <= lines.length }, tokenBudget);
+    throwIfFileReadTokensExceeded(fileReadContentTokens(selected));
+    return enforceResultBudget({ path: normalizeRelative(path.relative(root, file)), checksum: checksum(text), total_lines: lines.length, offset, lines: selected, next_cursor: nextLine <= lines.length ? String(nextLine) : "", truncated: nextLine <= lines.length });
 }
 async function readFileToolV3(root, args) {
     const file = safePath(root, args?.path);
@@ -829,42 +849,32 @@ async function readFileToolV3(root, args) {
         throw new Error("二进制文件不能作为普通文本读取");
     const requestedOffset = Number(args?.offset ?? 1);
     const offset = requestedOffset <= 1 ? 1 : Math.floor(requestedOffset);
-    const explicitRange = args?.offset !== undefined || args?.limit !== undefined;
     const limit = Math.max(1, Math.min(2000, Number(args?.limit || 2000) || 2000));
-    const tokenBudget = Math.max(256, Math.min(cc_tool_result_limits_1.CC_ALIGNED_FILE_READ_MAX_TOKENS, Number(args?.token_budget || cc_tool_result_limits_1.CC_ALIGNED_FILE_READ_MAX_TOKENS) || cc_tool_result_limits_1.CC_ALIGNED_FILE_READ_MAX_TOKENS));
-    const contentTokenBudget = Math.max(1, tokenBudget - 256);
-    const hardContentTokenBudget = cc_tool_result_limits_1.CC_ALIGNED_FILE_READ_MAX_TOKENS - 256;
     const selected = [];
     let used = 0;
-    let requestedRangeTokens = 0;
     let requestedRangeLines = 0;
-    let rangeTruncatedByTokens = false;
     let totalLines = 0;
     const contentHash = crypto.createHash("sha256");
     const stream = fs.createReadStream(file);
     stream.on("data", chunk => contentHash.update(chunk));
     const reader = readline.createInterface({ input: stream, crlfDelay: Infinity });
-    for await (const line of reader) {
-        totalLines += 1;
-        if (totalLines < offset || requestedRangeLines >= limit)
-            continue;
-        requestedRangeLines += 1;
-        const row = { line: totalLines, text: line };
-        const rowTokens = (0, context_budget_1.estimateTextTokens)(JSON.stringify(row));
-        if (rowTokens > hardContentTokenBudget)
-            throw new Error(`第${totalLines}行超过单次最大25000 Token，未进行字符截断`);
-        requestedRangeTokens += rowTokens;
-        if (explicitRange && requestedRangeTokens > hardContentTokenBudget) {
-            throw new Error("显式读取范围超过25000 Token，请缩小offset或limit");
+    try {
+        for await (const line of reader) {
+            totalLines += 1;
+            if (totalLines < offset || requestedRangeLines >= limit)
+                continue;
+            requestedRangeLines += 1;
+            const row = { line: totalLines, text: line };
+            const rowTokens = (0, context_budget_1.estimateTextTokens)(catNFileReadLine(row.line, row.text));
+            throwIfFileReadTokensExceeded(rowTokens, totalLines);
+            used += rowTokens;
+            throwIfFileReadTokensExceeded(used);
+            selected.push(row);
         }
-        if (rangeTruncatedByTokens)
-            continue;
-        if (rowTokens > contentTokenBudget || used + rowTokens > contentTokenBudget) {
-            rangeTruncatedByTokens = true;
-            continue;
-        }
-        selected.push(row);
-        used += rowTokens;
+    }
+    finally {
+        reader.close();
+        stream.destroy();
     }
     const fileChecksum = contentHash.digest("hex");
     const pastEof = offset > totalLines;
@@ -874,13 +884,10 @@ async function readFileToolV3(root, args) {
         schema: "ccm-workspace-read-result-v3", toolContractVersion: 3, type: "text", path: relativePath,
         checksum: fileChecksum, total_lines: totalLines, offset, lines: selected,
         empty: stat.size === 0, past_eof: pastEof, next_cursor: truncated ? String(nextLine) : "", truncated,
-        partial_notice: truncated
-            ? rangeTruncatedByTokens
-                ? "本次读取已达到Token预算；请使用next_cursor和checksum继续读取。"
-                : "文件内容较长，已返回当前范围；请使用next_cursor和checksum继续读取。"
-            : "",
+        partial_notice: truncated ? "文件内容较长，已返回当前范围；请使用next_cursor和checksum继续读取。" : "",
     };
-    return enforceResultBudget({ ...result, safeReceipt: { kind: "text", path: relativePath, checksum: result.checksum, lineCount: selected.length, truncated, contentStored: false } }, tokenBudget);
+    throwIfFileReadTokensExceeded(fileReadContentTokens(selected));
+    return enforceResultBudget({ ...result, safeReceipt: { kind: "text", path: relativePath, checksum: result.checksum, lineCount: selected.length, truncated, contentStored: false } });
 }
 function workspaceReadRange(args) {
     const requestedOffset = Number(args?.offset ?? 1);
@@ -892,7 +899,7 @@ function workspaceReadRange(args) {
         pages: String(args?.pages || ""),
         cellOffset: Math.max(0, Number(args?.cell_offset || 0) || 0),
         cellLimit: Math.max(1, Math.min(200, Number(args?.cell_limit || 200) || 200)),
-        tokenBudget: Math.max(256, Math.min(cc_tool_result_limits_1.CC_ALIGNED_FILE_READ_MAX_TOKENS, Number(args?.token_budget || cc_tool_result_limits_1.CC_ALIGNED_FILE_READ_MAX_TOKENS) || cc_tool_result_limits_1.CC_ALIGNED_FILE_READ_MAX_TOKENS)),
+        tokenBudget: cc_tool_result_limits_1.CC_ALIGNED_FILE_READ_MAX_TOKENS,
     };
 }
 function fileChangedError(relativePath, expected, actual) {
@@ -970,6 +977,8 @@ async function readFilesToolV3(root, project, args, context) {
     if (!requested.length || requested.length > 20)
         throw new Error("paths必须包含1到20个文件");
     const normalized = requested.map((item) => typeof item === "string" ? { path: item } : { ...(item || {}) });
+    for (const item of normalized)
+        delete item.token_budget;
     const seen = new Set();
     for (const item of normalized) {
         const key = normalizeRelative(String(item?.path || ""));
@@ -982,23 +991,12 @@ async function readFilesToolV3(root, project, args, context) {
             throw new Error(`批量读取仅支持普通文本文件；${key}请使用read_file`);
         }
     }
-    const totalBudget = Math.max(1024, Math.min(cc_tool_result_limits_1.CC_ALIGNED_FILE_READ_MAX_TOKENS, Number(args?.token_budget || cc_tool_result_limits_1.CC_ALIGNED_FILE_READ_MAX_TOKENS) || cc_tool_result_limits_1.CC_ALIGNED_FILE_READ_MAX_TOKENS));
-    const perFileMinimum = 512;
-    const envelopeReserve = 512 + normalized.length * 128;
-    if (totalBudget < envelopeReserve + normalized.length * perFileMinimum) {
-        throw new Error(`批量读取Token预算不足以安全返回${normalized.length}个文件，请减少文件数量或提高token_budget`);
-    }
-    let remainingBudget = totalBudget - envelopeReserve;
     const files = [];
     for (let index = 0; index < normalized.length; index += 1) {
         const item = normalized[index];
-        const remainingFiles = normalized.length - index - 1;
-        const itemBudget = Math.max(perFileMinimum, Math.min(cc_tool_result_limits_1.CC_ALIGNED_FILE_READ_MAX_TOKENS, remainingBudget - remainingFiles * perFileMinimum));
         try {
-            const result = await readFileToolV3WithContext(root, project, { ...item, token_budget: itemBudget }, context);
+            const result = await readFileToolV3WithContext(root, project, item, context);
             files.push(result);
-            const consumed = Math.max(perFileMinimum, Math.min(itemBudget, Number(result?.output_tokens || 0) || (0, context_budget_1.estimateTextTokens)(JSON.stringify(result))));
-            remainingBudget = Math.max(remainingFiles * perFileMinimum, remainingBudget - consumed);
         }
         catch (error) {
             const relativePath = normalizeRelative(item?.path || "");
@@ -1015,7 +1013,6 @@ async function readFilesToolV3(root, project, args, context) {
                 lines: [], total_lines: 0, next_cursor: "", truncated: false, checksum: errorChecksum,
                 safeReceipt: { kind: "text", path: relativePath, checksum: errorChecksum, lineCount: 0, truncated: false, contentStored: false },
             });
-            remainingBudget = Math.max(remainingFiles * perFileMinimum, remainingBudget - perFileMinimum);
         }
     }
     const failedCount = files.filter(file => file?.status === "failed").length;
@@ -1041,7 +1038,7 @@ async function readFilesToolV3(root, project, args, context) {
         error.workspaceResult = { ...payload, code: error.code };
         throw error;
     }
-    return enforceResultBudget(payload, totalBudget);
+    return enforceResultBudget(payload, cc_tool_result_limits_1.CC_ALIGNED_TOOL_RESULT_MAX_TOKENS);
 }
 async function executeWorkspaceReadonlyToolWithCapabilityRaw(toolName, args, capability, contractVersion = 2, options = {}) {
     const alias = { read_project_source: "read_project_config", read_runtime_diagnostics: "read_runtime_status" };
@@ -1049,7 +1046,22 @@ async function executeWorkspaceReadonlyToolWithCapabilityRaw(toolName, args, cap
     const definitions = contractVersion === 3 ? exports.WORKSPACE_READONLY_TOOL_DEFINITIONS_V3 : exports.WORKSPACE_READONLY_TOOL_DEFINITIONS_V2;
     if (!definitions.some(tool => tool.name === name))
         throw new Error(`未知只读工作区工具：${name}`);
-    const { project, root } = selectProject(capability, args || {});
+    let project = "";
+    let root = "";
+    try {
+        ({ project, root } = selectProject(capability, args || {}));
+    }
+    catch (error) {
+        if (error?.code === "PROJECT_ID_REQUIRED") {
+            return {
+                schema: "ccm-workspace-project-required-v1",
+                status: "needs_project_id",
+                available_projects: Array.isArray(error.availableProjects) ? error.availableProjects : [],
+                message: "当前作用域有多个授权项目。请在本次调用传入精确 project_id；若用户尚未指定，使用 ccm_ask_user 提供选项让用户选择。",
+            };
+        }
+        throw error;
+    }
     if (name === "list_directory") {
         const directory = safePath(root, args?.path || "");
         const stat = await fs.promises.lstat(directory);
@@ -1059,14 +1071,14 @@ async function executeWorkspaceReadonlyToolWithCapabilityRaw(toolName, args, cap
             .filter(entry => !entry.isSymbolicLink() && !EXCLUDED_DIRECTORIES.has(entry.name.toLowerCase()) && !SENSITIVE_NAMES.test(entry.name))
             .map(entry => ({ name: entry.name, path: normalizeRelative(path.relative(root, path.join(directory, entry.name))), type: entry.isDirectory() ? "directory" : entry.isFile() ? "file" : "other" }))
             .sort((left, right) => left.type.localeCompare(right.type) || left.name.localeCompare(right.name));
-        return enforceResultBudget({ project, path: normalizeRelative(args?.path || ""), ...page(entries, args?.cursor, args?.limit) });
+        return enforceResultBudget({ project, path: normalizeRelative(args?.path || ""), ...page(entries, args?.cursor, args?.limit, cc_tool_result_limits_1.CC_ALIGNED_GLOB_MAX_RESULTS) });
     }
     if (name === "glob_files") {
         if (contractVersion === 3)
             return { project, ...(await globFilesV3(root, args, options)) };
         const matcher = globRegex(args?.pattern);
         const matches = (await walk(root)).filter(file => matcher.test(file));
-        return enforceResultBudget({ project, pattern: String(args?.pattern || ""), ...page(matches, args?.cursor, args?.limit), scan_limit_reached: matches.length >= DIRECTORY_SCAN_LIMIT });
+        return enforceResultBudget({ project, pattern: String(args?.pattern || ""), ...page(matches, args?.cursor, args?.limit, cc_tool_result_limits_1.CC_ALIGNED_GLOB_MAX_RESULTS), scan_limit_reached: matches.length >= DIRECTORY_SCAN_LIMIT });
     }
     if (name === "grep_text") {
         if (contractVersion === 3)
@@ -1151,7 +1163,7 @@ async function executeWorkspaceReadonlyToolWithCapabilityRaw(toolName, args, cap
         const selected = page(files, args?.cursor, Math.min(20, Number(args?.limit || 20)));
         const configs = [];
         for (const file of selected.items)
-            configs.push(await readFileTool(root, { path: file, offset: 1, limit: 400, token_budget: 1500 }));
+            configs.push(await readFileTool(root, { path: file, offset: 1, limit: 400 }));
         return enforceResultBudget({ project, configs, total: selected.total, next_cursor: selected.next_cursor, truncated: selected.truncated });
     }
     if (name === "read_git_status") {
@@ -1185,6 +1197,8 @@ async function executeWorkspaceReadonlyTool(toolName, args, capabilityToken, con
 }
 async function executeWorkspaceReadonlyToolWithCapability(toolName, args, capability, contractVersion = 2, options = {}) {
     const result = await executeWorkspaceReadonlyToolWithCapabilityRaw(toolName, args, capability, contractVersion, options);
+    if (result?.status === "needs_project_id")
+        return result;
     const normalizedName = String(toolName || "").replace(/^mcp__ccm__ccm_workspace_readonly__/, "");
     if (contractVersion !== 3 || !["read_file", "read_files", "glob_files", "grep_text"].includes(normalizedName))
         return result;
@@ -1216,7 +1230,13 @@ function runWorkspaceReadonlyToolsSelfTest() {
             && exports.WORKSPACE_READONLY_TOOL_DEFINITIONS_V3.length === exports.WORKSPACE_READONLY_TOOL_DEFINITIONS_V2.length + 1
             && new Set(checksums).size === checksums.length
             && v3ByName.get("read_file")?.inputSchema?.properties?.pages
+            && !v3ByName.get("read_file")?.inputSchema?.properties?.token_budget
+            && !v3ByName.get("read_files")?.inputSchema?.properties?.token_budget
             && v3ByName.get("read_files")?.inputSchema?.properties?.paths?.maxItems === 20
+            && v3ByName.get("glob_files")?.inputSchema?.properties?.limit?.maximum === 100
+            && v3ByName.get("list_directory")?.inputSchema?.properties?.limit?.maximum === 100
+            && v3ByName.get("web_fetch")?.inputSchema?.required?.includes("prompt")
+            && !v3ByName.get("web_fetch")?.inputSchema?.properties?.max_chars
             && v3ByName.get("glob_files")?.inputSchema?.properties?.respect_gitignore
             && v3ByName.get("grep_text")?.inputSchema?.properties?.output_mode),
         tools: exports.WORKSPACE_READONLY_TOOL_DEFINITIONS_V3.map(tool => ({ name: tool.name, checksum: tool.checksum, loadPolicy: tool.loadPolicy, toolContractVersion: tool.toolContractVersion })),

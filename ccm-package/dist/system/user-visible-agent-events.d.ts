@@ -14,6 +14,12 @@ export type UserVisibleAgentEvent = {
     generation: number;
     anchorMessageId?: string;
     originMessageId?: string;
+    /** Stable identity for one visible request/recovery attempt. */
+    turnId?: string;
+    /** Recovery/work attempt number; omitted for legacy events without one. */
+    attempt?: number;
+    /** Authoritative assistant response row, when known. */
+    responseMessageId?: string;
     taskId?: string;
     workItemId?: string;
     agentRunId?: string;
@@ -174,6 +180,7 @@ export type UserVisibleRequirementPlanV1 = {
     revision: number;
     title: string;
     goal: string;
+    overview?: string;
     steps: UserVisibleRequirementPlanStepV1[];
     scope: string[];
     expectedResults: string[];
@@ -246,6 +253,7 @@ export declare function runUserVisibleAgentEventSelfTest(): {
         nestedBatchCountProjected: boolean;
         nestedBatchUsesRuntimeTokenCount: boolean;
         legacyBatchCountRecovered: boolean;
+        nextTurnProgressAfterPreviousResult: boolean;
     };
     event: UserVisibleAgentEvent;
 };

@@ -9,7 +9,9 @@ import AgentExecutionTranscript from '../common/AgentExecutionTranscript.vue'
 import NewProgressIndicator from '../common/NewProgressIndicator.vue'
 import ConversationSummaryBoundary from '../common/ConversationSummaryBoundary.vue'
 import AgentFinalAnswer from '../common/AgentFinalAnswer.vue'
-import { shouldRenderExecutionTranscript } from '../../utils/agentExecutionEvents.js'
+import ConversationTodo from '../common/ConversationTodo.vue'
+import ConversationClarificationCards from '../common/ConversationClarificationCards.vue'
+import { liveAssistantInProgressText, liveAssistantProvisionalText, shouldRenderExecutionTranscript } from '../../utils/agentExecutionEvents.js'
 import {
   globalAttachmentUrl,
   isGlobalImageAttachment,
@@ -34,7 +36,6 @@ const props = defineProps({
   scrollToMessage: { type: Function, required: true },
   scrollToBottom: { type: Function, required: true },
   handleGlobalTaskAction: { type: Function, required: true },
-  runtimeDebugSections: { type: Function, required: true },
   getVisibleGlobalMessageContent: { type: Function, required: true },
   isSystemReceipt: { type: Function, required: true },
   parseReceipt: { type: Function, required: true },
@@ -49,9 +50,11 @@ const props = defineProps({
   formatSize: { type: Function, required: true },
   pendingProgressCount: { type: Number, default: 0 },
   jumpToLatestProgress: { type: Function, required: true },
+  canConfirmPresentedPlan: { type: Function, default: () => () => false },
+  presentedPlanConfirmBusy: Boolean,
 })
 
-const emit = defineEmits(['edit-message', 'rewind-message', 'open-file-change', 'open-file-changes'])
+const emit = defineEmits(['edit-message', 'rewind-message', 'open-file-change', 'open-file-changes', 'clarify-reply', 'confirm-presented-plan'])
 const attachmentReadOk = file => file?.readable === true || ['parsed', 'partial', 'received'].includes(String(file?.status || '').toLowerCase())
 const attachmentStatusLabel = file => {
   const status = String(file?.status || '').toLowerCase()
@@ -102,8 +105,29 @@ const isLegacyGlobalStreamText = (value = '') => {
   return lines.length > 0 && lines.every(line => LEGACY_GLOBAL_STREAM_LINE.test(line))
 }
 
+const liveGlobalAssistantProgress = messageIndex => {
+  const msg = props.messages?.[messageIndex]
+  const finalReply = String(msg?.agenticRun?.final_reply || msg?.agenticRun?.finalReply || '').trim()
+  const treatContentAsEmpty = isLegacyGlobalStreamText(msg?.content)
+    && (!finalReply || isLegacyGlobalStreamText(finalReply))
+  return liveAssistantProvisionalText(
+    props.executionEvents,
+    props.messages,
+    messageIndex,
+    '我正在处理当前请求。',
+    { treatContentAsEmpty },
+  )
+}
+
+const visibleGlobalAssistantContent = (msg, messageIndex, fallback = '') => (
+  liveGlobalAssistantProgress(messageIndex)
+  || liveAssistantInProgressText(props.executionEvents, props.messages, messageIndex)
+  || props.getVisibleGlobalMessageContent(msg, fallback)
+)
+
 const shouldHideDuplicateGlobalBubble = (msg, messageIndex) => {
   if (msg?.role !== 'assistant') return false
+  if (liveGlobalAssistantProgress(messageIndex)) return false
   const hasLiveExecution = hasLiveGlobalExecutionForMessage(messageIndex)
   if (hasLiveExecution && isLegacyGlobalStreamText(msg?.content)) {
     const finalReply = String(msg?.agenticRun?.final_reply || msg?.agenticRun?.finalReply || '').trim()
@@ -172,7 +196,7 @@ const isStructuredGlobalMessage = msg => !!(
               :data-local-command="msg.type === 'command_result' || undefined"
               :data-message-type="msg.type || undefined"
               :data-message-id="msg.id || undefined"
-              :copy-text="getCopyableMessageText(msg, getVisibleGlobalMessageContent(msg))"
+              :copy-text="getCopyableMessageText(msg, visibleGlobalAssistantContent(msg, index))"
               :editable="msg.role === 'user' && !!String(msg.content || '').trim()"
               :edit-disabled="isSending"
               :rewindable="msg.role === 'assistant' && !msg.streaming && !!String(msg.id || '').trim()"
@@ -180,16 +204,6 @@ const isStructuredGlobalMessage = msg => !!(
               @edit="emit('edit-message', msg)"
               @rewind="emit('rewind-message', msg)"
             >
-            <AgentExecutionTranscript
-              :events="executionEvents"
-              :enabled="executionEventsEnabled"
-              :messages="messages"
-              :message-index="index"
-              stage-grouped
-              presentation="live"
-              @open-file-change="emit('open-file-change', $event)"
-              @execution-action="handleGlobalTaskAction(msg, $event)"
-            />
              <div
                v-if="!shouldHideDuplicateGlobalBubble(msg, index)"
                class="chat-bubble"
@@ -223,6 +237,8 @@ const isStructuredGlobalMessage = msg => !!(
                     <span class="stream-dot" :class="{ active: msg.streaming }"></span>
                     <span>{{ msg.streaming ? '正在回复...' : '回复已完成' }}</span>
                   </div>
+                  <ConversationTodo :source="msg" :decision="msg.mainAgentDecision || msg.main_agent_decision || msg.agenticRun?.mainAgentDecision" />
+                  <ConversationClarificationCards :source="msg" @submit="emit('clarify-reply', $event)" />
                 </template>
                 <!-- CCM 系统管理处理结果 -->
                 <div v-else-if="msg.type === 'management_action'" class="management-action-card" :class="{ failed: !msg.managementReceipt?.success, cancelled: msg.managementReceipt?.cancelled }">
@@ -255,7 +271,7 @@ const isStructuredGlobalMessage = msg => !!(
                   </div>
                   <AgentFinalAnswer
                     v-else
-                    :content="getVisibleGlobalMessageContent(msg, '代码审查报告已整理，技术细节已放入技术详情。')"
+                    :content="getVisibleGlobalMessageContent(msg, '代码审查报告已整理。')"
                     :storage-key="`${currentSessionId || 'session'}:${msg.id || index}:review`"
                   />
                 </div>
@@ -312,26 +328,13 @@ const isStructuredGlobalMessage = msg => !!(
 
                 <template v-else-if="msg.agenticRun">
                   <AgentFinalAnswer
-                    :content="getVisibleGlobalMessageContent(msg)"
-                    :streaming="!!msg.streaming"
+                    :content="visibleGlobalAssistantContent(msg, index)"
+                    :streaming="!!msg.streaming || !!liveGlobalAssistantProgress(index)"
                     :mentions="msg.mentions || []"
                     :storage-key="`${currentSessionId || 'session'}:${msg.id || index}`"
                   />
-                  <details v-if="runtimeDebugSections(msg).length" class="global-runtime-debug">
-                    <summary class="runtime-debug-head">
-                      <strong>技术详情</strong>
-                      <small>可展开排查</small>
-                    </summary>
-                    <div class="runtime-debug-grid">
-                      <section v-for="section in runtimeDebugSections(msg)" :key="section.id" class="runtime-debug-section">
-                        <strong>{{ section.title }}</strong>
-                        <div v-for="row in section.items" :key="`${section.id}-${row.label}`">
-                          <span>{{ row.label }}</span>
-                          <code>{{ row.value }}</code>
-                        </div>
-                      </section>
-                    </div>
-                  </details>
+                  <ConversationTodo :source="msg" :decision="msg.mainAgentDecision || msg.main_agent_decision || msg.agenticRun?.mainAgentDecision" />
+                  <ConversationClarificationCards :source="msg" @submit="emit('clarify-reply', $event)" />
                 </template>
 
                 <!-- 1. 处理结果高阶卡片 -->
@@ -364,13 +367,16 @@ const isStructuredGlobalMessage = msg => !!(
                 </div>
   
                 <!-- 3. 普通文本 -->
-                <AgentFinalAnswer
-                  v-else
-                  :content="getVisibleGlobalMessageContent(msg)"
-                  :streaming="!!msg.streaming"
-                  :mentions="msg.mentions || []"
-                  :storage-key="`${currentSessionId || 'session'}:${msg.id || index}`"
-                />
+                <template v-else>
+                  <AgentFinalAnswer
+                    :content="visibleGlobalAssistantContent(msg, index)"
+                    :streaming="!!msg.streaming || !!liveGlobalAssistantProgress(index)"
+                    :mentions="msg.mentions || []"
+                    :storage-key="`${currentSessionId || 'session'}:${msg.id || index}`"
+                  />
+                  <ConversationTodo :source="msg" :decision="msg.mainAgentDecision || msg.main_agent_decision" />
+                  <ConversationClarificationCards :source="msg" @submit="emit('clarify-reply', $event)" />
+                </template>
               </template>
   
               <!-- 用户消息普通渲染 -->
@@ -429,10 +435,26 @@ const isStructuredGlobalMessage = msg => !!(
               :messages="messages"
               :message-index="index"
               stage-grouped
+              presentation="live"
+              :can-confirm-execute="canConfirmPresentedPlan(msg)"
+              :confirm-execute-busy="presentedPlanConfirmBusy"
+              @open-file-change="emit('open-file-change', $event)"
+              @execution-action="handleGlobalTaskAction(msg, $event)"
+              @confirm-execute="emit('confirm-presented-plan', msg, $event)"
+            />
+            <AgentExecutionTranscript
+              :events="executionEvents"
+              :enabled="executionEventsEnabled"
+              :messages="messages"
+              :message-index="index"
+              stage-grouped
               presentation="completed"
+              :can-confirm-execute="canConfirmPresentedPlan(msg)"
+              :confirm-execute-busy="presentedPlanConfirmBusy"
               @open-file-change="emit('open-file-change', $event)"
               @open-file-changes="emit('open-file-changes', $event)"
               @execution-action="handleGlobalTaskAction(msg, $event)"
+              @confirm-execute="emit('confirm-presented-plan', msg, $event)"
             />
           </ConversationMessageShell>
           

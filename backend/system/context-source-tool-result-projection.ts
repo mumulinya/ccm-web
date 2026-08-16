@@ -248,27 +248,58 @@ export function buildContextSourceToolResultReference(toolNameInput: any, value:
   };
 }
 
+const WORKSPACE_PERSISTENCE_TOOLS = new Set([
+  "read_file", "read_files", "grep_text", "glob_files", "list_directory", "inspect_notebook",
+  "read_project_config", "read_git_status", "read_git_diff", "read_git_history",
+  "read_runtime_status", "read_runtime_logs",
+  "workspace_symbols", "document_symbols",
+  "find_definition", "find_references", "find_implementations", "find_type_definition",
+  "find_incoming_calls", "find_outgoing_calls", "read_code_diagnostics",
+]);
+
+const WORKSPACE_RECEIPT_KIND: Record<string, string> = {
+  read_file: "text", read_files: "text", grep_text: "grep", glob_files: "glob",
+  list_directory: "glob", inspect_notebook: "notebook",
+};
+
+export function normalizedWorkspacePersistenceToolName(toolName: any) {
+  return clean(toolName, 240)
+    .replace(/^mcp__ccm__ccm_workspace_readonly__/, "")
+    .replace(/^mcp__ccm__ccm_workspace_edit__/, "");
+}
+
+export function isWorkspaceToolResultReference(value: any) {
+  return !!value && typeof value === "object"
+    && value.schema === "ccm-workspace-tool-result-reference-v1"
+    && value.contentStored === false;
+}
+
 export function projectContextSourceToolResultForPersistence(toolName: any, value: any, query: any = "") {
-  const normalizedTool = clean(toolName, 240).replace(/^mcp__ccm__ccm_workspace_readonly__/, "");
-  if (["read_file", "grep_text", "glob_files", "list_directory", "inspect_notebook"].includes(normalizedTool)) {
+  if (isWorkspaceToolResultReference(value)) return value;
+  const normalizedTool = normalizedWorkspacePersistenceToolName(toolName);
+  if (WORKSPACE_PERSISTENCE_TOOLS.has(normalizedTool)) {
     const candidates = nestedCandidates(value);
+    const nestedReference = candidates.find(candidate => isWorkspaceToolResultReference(candidate));
+    if (nestedReference) return nestedReference;
     const source = candidates.find(candidate => candidate && typeof candidate === "object" && (
       candidate.safeReceipt || candidate.safe_receipt || candidate.toolContractVersion || /^ccm-workspace-/.test(String(candidate.schema || ""))
     )) || candidates.find(candidate => candidate && typeof candidate === "object") || {};
     const receipt = source?.safeReceipt || source?.safe_receipt || {};
-    const kind = clean(receipt.kind || ({ read_file: "text", grep_text: "grep", glob_files: "glob", list_directory: "glob", inspect_notebook: "notebook" } as any)[normalizedTool], 40);
-    const itemCount = Number(receipt.itemCount ?? source?.numFiles ?? source?.numLines ?? source?.items?.length ?? source?.lines?.length ?? 0);
-    const truncated = receipt.truncated === true || source?.truncated === true;
+    const body = source?.modelPayload && typeof source.modelPayload === "object" ? source.modelPayload : source;
+    const files = Array.isArray(body?.files) ? body.files : Array.isArray(source?.files) ? source.files : [];
+    const kind = clean(receipt.kind || WORKSPACE_RECEIPT_KIND[normalizedTool] || "text", 40);
+    const itemCount = Number(receipt.itemCount ?? body?.item_count ?? body?.read_count ?? source?.numFiles ?? source?.numLines ?? files.length ?? body?.items?.length ?? body?.lines?.length ?? 0);
+    const truncated = receipt.truncated === true || body?.truncated === true || source?.truncated === true;
     return {
       schema: "ccm-workspace-tool-result-reference-v1",
       toolName: normalizedTool,
       toolContractVersion: Number(source?.toolContractVersion || 2),
       kind,
-      path: clean(receipt.path || source?.path, 1200),
-      checksum: clean(receipt.checksum || source?.checksum || source?.result_checksum || checksum(value), 300),
+      path: clean(receipt.path || body?.path || files[0]?.path, 1200),
+      checksum: clean(receipt.checksum || source?.checksum || source?.result_checksum || body?.checksum || checksum(value), 300),
       itemCount: Math.max(0, itemCount),
-      lineCount: Math.max(0, Number(receipt.lineCount || source?.numLines || source?.lines?.length || 0)),
-      pageCount: Math.max(0, Number(receipt.pageCount || source?.selected_pages?.length || 0)),
+      lineCount: Math.max(0, Number(receipt.lineCount || body?.line_count || source?.numLines || body?.lines?.length || 0)),
+      pageCount: Math.max(0, Number(receipt.pageCount || body?.selected_pages?.length || source?.selected_pages?.length || 0)),
       truncated,
       rehydratable: true,
       contentStored: false,
@@ -291,13 +322,35 @@ export function contextSourceToolResultProjectionSelfTest() {
     complete: true,
   });
   const ordinary = { content: sentinel };
+  const batch = projectContextSourceToolResultForPersistence("read_files", {
+    schema: "ccm-workspace-tool-envelope-v3",
+    toolContractVersion: 3,
+    modelPayload: {
+      type: "text_batch",
+      files: [{ path: "src/app.ts", lines: [{ line: 1, text: sentinel }] }],
+    },
+    safeReceipt: { kind: "text", checksum: "batch-checksum", itemCount: 1, lineCount: 1, truncated: false, contentStored: false },
+  });
+  const nestedBatch = projectContextSourceToolResultForPersistence("mcp__ccm__ccm_workspace_readonly__read_files", {
+    observation: {
+      schema: "ccm-workspace-tool-envelope-v3",
+      modelPayload: { type: "text_batch", files: [{ path: "src/app.ts", lines: [{ line: 1, text: sentinel }] }] },
+    },
+  });
   return {
     pass: JSON.stringify(knowledge).includes(sentinel) === false
       && JSON.stringify(shared).includes(sentinel) === false
       && projectContextSourceToolResultForPersistence("read_file", ordinary)?.contentStored === false
       && knowledge?.contentStored === false
-      && shared?.contentStored === false,
+      && shared?.contentStored === false
+      && batch?.schema === "ccm-workspace-tool-result-reference-v1"
+      && batch?.contentStored === false
+      && JSON.stringify(batch).includes(sentinel) === false
+      && nestedBatch?.contentStored === false
+      && nestedBatch?.path === "src/app.ts"
+      && JSON.stringify(nestedBatch).includes(sentinel) === false,
     knowledge,
     shared,
+    read_files: batch,
   };
 }

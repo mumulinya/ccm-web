@@ -44,6 +44,16 @@ const crypto = __importStar(require("crypto"));
 function checksum(value) {
     return crypto.createHash("sha256").update(JSON.stringify(value ?? null)).digest("hex");
 }
+function providerContentText(value) {
+    if (typeof value === "string")
+        return value;
+    if (Array.isArray(value)) {
+        return value.map(item => typeof item === "string" ? item : String(item?.text || item?.content || "")).join("");
+    }
+    if (value && typeof value === "object")
+        return String(value.text || value.content || "");
+    return "";
+}
 function parseArguments(value) {
     if (value && typeof value === "object")
         return value;
@@ -73,7 +83,7 @@ function providerToolsRequestPatch(family, tools, nativeToolReference = false) {
 function parseOpenAiAgentTurn(data, usage) {
     const message = data?.choices?.[0]?.message || {};
     return {
-        text: String(message.content || ""),
+        text: providerContentText(message.content),
         toolCalls: (message.tool_calls || []).map((item) => call(item.id, item.function?.name, item.function?.arguments)),
         toolReferences: [],
         stopReason: String(data?.choices?.[0]?.finish_reason || ""),
@@ -111,14 +121,28 @@ function turnForLegacyJsonLoop(turn) {
         });
     return turn.text.trim();
 }
-function createOpenAiStreamTurnAccumulator() {
+function tryCompleteToolCall(row, emitted, onToolCallReady) {
+    if (!row.name || !String(row.arguments || "").trim() || emitted.has(`${row.id}:${row.name}`))
+        return;
+    try {
+        const parsed = JSON.parse(String(row.arguments));
+        if (!parsed || typeof parsed !== "object")
+            return;
+        const item = call(row.id, row.name, parsed);
+        emitted.add(`${row.id}:${row.name}`);
+        onToolCallReady?.(item);
+    }
+    catch { }
+}
+function createOpenAiStreamTurnAccumulator(onToolCallReady) {
     const calls = new Map();
+    const emitted = new Set();
     let text = "";
     let stopReason = "";
     return {
         push(event) {
             const choice = event?.choices?.[0];
-            text += String(choice?.delta?.content || "");
+            text += providerContentText(choice?.delta?.content);
             stopReason = String(choice?.finish_reason || stopReason || "");
             for (const item of choice?.delta?.tool_calls || []) {
                 const index = Number(item.index || 0);
@@ -127,13 +151,15 @@ function createOpenAiStreamTurnAccumulator() {
                 row.name += String(item.function?.name || "");
                 row.arguments += String(item.function?.arguments || "");
                 calls.set(index, row);
+                tryCompleteToolCall(row, emitted, onToolCallReady);
             }
         },
         finish(usage) { return { text, toolCalls: [...calls.values()].map(row => call(row.id, row.name, row.arguments)), toolReferences: [], stopReason, usage }; },
     };
 }
-function createAnthropicStreamTurnAccumulator() {
+function createAnthropicStreamTurnAccumulator(onToolCallReady) {
     const blocks = new Map();
+    const emitted = new Set();
     let text = "";
     let stopReason = "";
     return {
@@ -149,6 +175,18 @@ function createAnthropicStreamTurnAccumulator() {
                 if (event?.delta?.type === "input_json_delta")
                     block.partial += String(event.delta.partial_json || "");
                 blocks.set(Number(event.index || 0), block);
+                if (block.type === "tool_use")
+                    tryCompleteToolCall({ id: String(block.id || ""), name: String(block.name || ""), arguments: String(block.partial || "") }, emitted, onToolCallReady);
+            }
+            if (event?.type === "content_block_stop") {
+                const block = blocks.get(Number(event.index || 0));
+                if (block?.type === "tool_use") {
+                    const item = call(block.id, block.name, block.input || block.partial);
+                    if (!emitted.has(`${item.id}:${item.name}`)) {
+                        emitted.add(`${item.id}:${item.name}`);
+                        onToolCallReady?.(item);
+                    }
+                }
             }
             stopReason = String(event?.delta?.stop_reason || event?.stop_reason || stopReason || "");
         },

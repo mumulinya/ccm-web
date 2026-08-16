@@ -1,6 +1,26 @@
 import * as crypto from "crypto";
 
 export type PrePlanQuestionType = "single" | "multiple" | "text";
+export const PRE_PLAN_OTHER_OPTION_ID = "other";
+export const PRE_PLAN_OTHER_OPTION_LABEL = "其他";
+
+function isOtherOption(option: any) {
+  const id = clean(option?.id, 80).toLowerCase();
+  const label = clean(option?.label, 80);
+  return id === PRE_PLAN_OTHER_OPTION_ID || /^(其他|other)$/i.test(label);
+}
+
+export function ensureOtherOption(options: any[] = []) {
+  const rest = (Array.isArray(options) ? options : []).filter(option => option && !isOtherOption(option));
+  return [
+    ...rest,
+    {
+      id: PRE_PLAN_OTHER_OPTION_ID,
+      label: PRE_PLAN_OTHER_OPTION_LABEL,
+      description: "以上都不合适时，用自己的话说明",
+    },
+  ];
+}
 
 function clean(value: any, max = 240) {
   return String(value || "")
@@ -27,7 +47,7 @@ export function normalizePrePlanQuestions(value: any, fallback: any[] = []) {
     seen.add(signature);
     const rawType = clean(object.type || object.kind, 24).toLowerCase();
     let type: PrePlanQuestionType = rawType === "single" || rawType === "multiple" ? rawType : "text";
-    const options = (Array.isArray(object.options) ? object.options : []).slice(0, 4).map((item: any, optionIndex: number) => {
+    let options = (Array.isArray(object.options) ? object.options : []).slice(0, 4).map((item: any, optionIndex: number) => {
       const option = item && typeof item === "object" ? item : { label: item };
       const optionLabel = clean(option.label || option.title || option.value, 100);
       if (!optionLabel) return null;
@@ -39,7 +59,11 @@ export function normalizePrePlanQuestions(value: any, fallback: any[] = []) {
         safeDefault: option.safeDefault === true || option.safe_default === true,
       };
     }).filter(Boolean);
-    if ((type === "single" || type === "multiple") && options.length < 2) type = "text";
+    if (type === "single" || type === "multiple") {
+      const withOther = ensureOtherOption(options);
+      if (withOther.length < 2) type = "text";
+      else options = withOther;
+    }
     questions.push({
       id: clean(object.id, 80) || stableId("question", label, index),
       label,
@@ -71,8 +95,9 @@ export function buildPrePlanClarification(input: any) {
     id, scope, scopeId, exactSessionId, anchorMessageId,
     status: ["resolved", "cancelled"].includes(String(input.status)) ? input.status : "pending",
     revision, generation, round,
-    title: clean(input.title, 120) || `制定计划前，需要确认 ${questions.length} 项`,
-    headline: clean(input.headline, 220) || "这些选择会影响业务流程和验收范围。",
+    title: clean(input.title, 120) || (String(input.purpose || "").toLowerCase() === "mid_turn" ? `需要确认 ${questions.length} 项` : `制定计划前，需要确认 ${questions.length} 项`),
+    headline: clean(input.headline, 220) || (String(input.purpose || "").toLowerCase() === "mid_turn" ? "请先选择一项，我会按你的答案继续。" : "这些选择会影响业务流程和验收范围。"),
+    purpose: String(input.purpose || "").toLowerCase() === "mid_turn" ? "mid_turn" : "pre_plan",
     questions,
     allowAdditionalNote: input.allowAdditionalNote !== false,
     safeDefaultsAvailable,
@@ -88,6 +113,10 @@ export function formatPrePlanAnswers(clarification: any, answers: any = {}, addi
     const selected = Array.isArray(raw) ? raw : raw === undefined || raw === null ? [] : [raw];
     const labels = selected.map((value: any) => {
       const option = question.options?.find((item: any) => item.id === value);
+      if (option && isOtherOption(option)) {
+        const note = clean(answers?.[`${question.id}__note`] || answers?.[`${question.id}__other`] || additionalNote, 400);
+        return note && note !== clean(additionalNote, 400) ? `${PRE_PLAN_OTHER_OPTION_LABEL}：${note}` : PRE_PLAN_OTHER_OPTION_LABEL;
+      }
       return clean(option?.label || value, 160);
     }).filter(Boolean);
     if (labels.length) lines.push(`${question.label}：${labels.join("、")}`);
@@ -95,6 +124,34 @@ export function formatPrePlanAnswers(clarification: any, answers: any = {}, addi
   const note = clean(additionalNote, 600);
   if (note) lines.push(`补充说明：${note}`);
   return lines.join("\n");
+}
+
+export function buildConversationClarificationSummary(input: {
+  schema?: string;
+  question?: string;
+  reason?: string;
+  headline?: string;
+  suggestions?: string[];
+  nextAction?: string;
+  prePlanClarification: any;
+}) {
+  const projection = input.prePlanClarification;
+  const firstQuestion = Array.isArray(projection?.questions) ? projection.questions[0] : null;
+  const question = clean(input.question || firstQuestion?.label || projection?.headline, 260)
+    || "请补充会影响实施方案或验收结果的业务信息。";
+  return {
+    schema: input.schema || "ccm-conversation-clarification-summary-v1",
+    title: projection?.title || "需要你补充信息",
+    status: "waiting_user",
+    status_label: "等待你回复",
+    headline: clean(input.headline || projection?.headline, 220) || "请先选择一项，我会按你的答案继续。",
+    question,
+    reason: clean(input.reason, 220),
+    answer_suggestions: Array.isArray(input.suggestions) ? input.suggestions.filter(Boolean).slice(0, 3) : [],
+    next_action: clean(input.nextAction, 220) || "你回复后我会继续。",
+    pre_plan_clarification: projection,
+    prePlanClarification: projection,
+  };
 }
 
 export function formatPrePlanClarificationText(clarification: any) {
@@ -123,7 +180,7 @@ export function runPrePlanClarificationSelfTest() {
     ],
   });
   return {
-    pass: projection.questions.length === 3 && projection.safeDefaultsAvailable === false && projection.contentStored === false,
-    checks: { cappedAndDeduped: projection.questions.length === 3, structuredOptions: projection.questions[0]?.options?.length === 2, safeProjection: projection.contentStored === false },
+    pass: projection.questions.length === 3 && projection.safeDefaultsAvailable === false && projection.contentStored === false && projection.questions[0]?.options?.some((option: any) => option.id === PRE_PLAN_OTHER_OPTION_ID),
+    checks: { cappedAndDeduped: projection.questions.length === 3, structuredOptions: projection.questions[0]?.options?.length === 3, otherOption: projection.questions[0]?.options?.at(-1)?.id === PRE_PLAN_OTHER_OPTION_ID, safeProjection: projection.contentStored === false },
   };
 }

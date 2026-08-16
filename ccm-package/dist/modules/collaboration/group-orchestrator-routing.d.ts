@@ -1,5 +1,6 @@
 import { type LlmTokenUsage } from "./group-orchestrator-llm-client";
 import { type WorkflowDecision } from "../../agents/workflow-decision";
+export { classifyGroupOrchestratorFailure, summarizeGroupOrchestratorProviderError, runGroupOrchestratorFailureSelfTest, } from "./group-orchestrator-failure";
 export declare const GROUP_MEMORY_REPLAY_REPAIR_WORK_ITEMS_DIR: string;
 export declare const GROUP_MEMORY_REPLAY_REPAIR_DISPATCH_PLANS_DIR: string;
 export declare const GROUP_MEMORY_REPLAY_REPAIR_DISPATCH_BINDINGS_DIR: string;
@@ -143,15 +144,7 @@ export type GroupOrchestratorInput = {
     onRetry?: (notice: any) => void;
 };
 export declare function measureGroupMainAgentPayload(input: any): {
-    messages: ({
-        role: string;
-        content: string;
-        contextBlockType?: undefined;
-    } | {
-        role: string;
-        contextBlockType: string;
-        content: any;
-    })[];
+    messages: import("./group-orchestrator-llm-client").LlmChatMessage[];
     snapshot: import("../../system/session-compaction-core").ModelVisiblePayloadSnapshot;
     tokens: number;
 };
@@ -159,15 +152,7 @@ export declare function prepareExactGroupMainAgentInput(input: any, group: any, 
     input: any;
     compacted: boolean;
     measurement: {
-        messages: ({
-            role: string;
-            content: string;
-            contextBlockType?: undefined;
-        } | {
-            role: string;
-            contextBlockType: string;
-            content: any;
-        })[];
+        messages: import("./group-orchestrator-llm-client").LlmChatMessage[];
         snapshot: import("../../system/session-compaction-core").ModelVisiblePayloadSnapshot;
         tokens: number;
     };
@@ -180,15 +165,7 @@ export declare function prepareExactGroupMainAgentInput(input: any, group: any, 
     compacted: boolean;
     projection: any;
     measurement: {
-        messages: ({
-            role: string;
-            content: string;
-            contextBlockType?: undefined;
-        } | {
-            role: string;
-            contextBlockType: string;
-            content: any;
-        })[];
+        messages: import("./group-orchestrator-llm-client").LlmChatMessage[];
         snapshot: import("../../system/session-compaction-core").ModelVisiblePayloadSnapshot;
         tokens: number;
     };
@@ -315,6 +292,20 @@ export declare function runGroupOrchestratorCore(input: GroupOrchestratorInput):
         initialReadFileCount: number;
         initialReadTokens: number;
     };
+    presentedPlan?: {
+        steps: any;
+        scope: string[];
+        expectedResults: string[];
+        exclusions: string[];
+        status: "ready" | "completed" | "blocked" | "superseded" | "executing";
+        createdAt: string;
+        updatedAt: string;
+        overview?: string;
+        planId: string;
+        revision: number;
+        title: string;
+        goal: string;
+    };
     agent: any;
     delegated: any[];
     assignments: any[];
@@ -386,6 +377,20 @@ export declare function runGroupOrchestratorCore(input: GroupOrchestratorInput):
         fallbackStreamCount: number;
         initialReadFileCount: number;
         initialReadTokens: number;
+    };
+    presentedPlan?: {
+        steps: any;
+        scope: string[];
+        expectedResults: string[];
+        exclusions: string[];
+        status: "ready" | "completed" | "blocked" | "superseded" | "executing";
+        createdAt: string;
+        updatedAt: string;
+        overview?: string;
+        planId: string;
+        revision: number;
+        title: string;
+        goal: string;
     };
     agent: any;
     delegated: any[];
@@ -496,6 +501,20 @@ export declare function runGroupOrchestratorCore(input: GroupOrchestratorInput):
         initialReadFileCount: number;
         initialReadTokens: number;
     };
+    presentedPlan?: {
+        steps: any;
+        scope: string[];
+        expectedResults: string[];
+        exclusions: string[];
+        status: "ready" | "completed" | "blocked" | "superseded" | "executing";
+        createdAt: string;
+        updatedAt: string;
+        overview?: string;
+        planId: string;
+        revision: number;
+        title: string;
+        goal: string;
+    };
     agent: any;
     delegated: any[];
     assignments: any[];
@@ -576,6 +595,20 @@ export declare function runGroupOrchestratorCore(input: GroupOrchestratorInput):
         initialReadFileCount: number;
         initialReadTokens: number;
     };
+    presentedPlan?: {
+        steps: any;
+        scope: string[];
+        expectedResults: string[];
+        exclusions: string[];
+        status: "ready" | "completed" | "blocked" | "superseded" | "executing";
+        createdAt: string;
+        updatedAt: string;
+        overview?: string;
+        planId: string;
+        revision: number;
+        title: string;
+        goal: string;
+    };
     agent: any;
     delegated: any[];
     assignments: any[];
@@ -624,6 +657,9 @@ export declare function runGroupOrchestratorCore(input: GroupOrchestratorInput):
         elapsedMs: number;
         attemptTimeoutMs: number;
         totalTimeoutMs: number;
+        observationCount: number;
+        userSummary: string;
+        userGuidance: string;
         safeSummary: string;
         contentStored: boolean;
     };
@@ -653,14 +689,6 @@ export declare function runGroupOrchestratorCore(input: GroupOrchestratorInput):
     };
     content: string;
 }>;
-export declare function classifyGroupOrchestratorFailure(error: any): {
-    kind: string;
-    userSummary: string;
-    userGuidance: string;
-} & {
-    guidance: string;
-};
-export declare function summarizeGroupOrchestratorProviderError(error: any): string;
 export declare function streamCanonicalGroupReply(text: string, onDelta?: (delta: string) => void, maxChunkChars?: number): number;
 export declare function runGroupOrchestrator(input: GroupOrchestratorInput): Promise<any>;
 export declare function isContextLimitError(error: any): boolean;

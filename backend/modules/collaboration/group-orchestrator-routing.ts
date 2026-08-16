@@ -86,6 +86,16 @@ import {
   runLlmGroupOrchestrator,
 } from "./group-orchestrator-llm";
 import { appendUserVisibleAgentEvent } from "../../system/user-visible-agent-events";
+import {
+  classifyGroupOrchestratorFailure,
+  summarizeGroupOrchestratorProviderError,
+} from "./group-orchestrator-failure";
+
+export {
+  classifyGroupOrchestratorFailure,
+  summarizeGroupOrchestratorProviderError,
+  runGroupOrchestratorFailureSelfTest,
+} from "./group-orchestrator-failure";
 
 
 
@@ -1067,6 +1077,7 @@ export async function runGroupOrchestratorCore(input: GroupOrchestratorInput) {
     const visibleTurnId = String((input as any).turnId || (input as any).turn_id || `${group.id}:${groupSessionId}:${Date.now()}`);
     const anchorMessageId = String((input as any).anchorMessageId || (input as any).anchor_message_id || "").trim();
     const elapsedMs = Math.max(0, Number(error?.elapsedMs) || 0);
+    const observedTools = Math.max(0, Number(error?.observationCount || error?.toolResultCount || 0));
     const providerFailure = {
       kind: failure.kind,
       code: String(error?.code || "CCM_MODEL_CALL_FAILED"),
@@ -1076,6 +1087,9 @@ export async function runGroupOrchestratorCore(input: GroupOrchestratorInput) {
       elapsedMs,
       attemptTimeoutMs: Math.max(0, Number(error?.attemptTimeoutMs) || 0),
       totalTimeoutMs: Math.max(0, Number(error?.totalTimeoutMs) || 0),
+      observationCount: observedTools,
+      userSummary: failure.userSummary,
+      userGuidance: failure.userGuidance,
       safeSummary: providerErrorSummary,
       contentStored: false,
     };
@@ -1127,58 +1141,6 @@ export async function runGroupOrchestratorCore(input: GroupOrchestratorInput) {
 }
 
 
-export function classifyGroupOrchestratorFailure(error: any) {
-  const withLegacyGuidance = <T extends { userGuidance: string }>(failure: T) => ({
-    ...failure,
-    // Existing integrations still read this alias while the public projection
-    // uses userGuidance. Keep both fields synchronized during the migration.
-    guidance: failure.userGuidance,
-  });
-  const code = String(error?.code || "").trim();
-  const raw = String(error?.message || error || "").trim();
-  if (code === "CCM_WORKFLOW_DECISION_INVALID"
-    || /无效工作流|workflowDecision|workflow_decision|结构化工作流|有效 JSON|合法 JSON/i.test(raw)) {
-    return withLegacyGuidance({
-      kind: "workflow_contract",
-      userSummary: "主 Agent 没有生成可执行计划，本次请求未完成。",
-      userGuidance: "请重试；如果仍然失败，请检查当前模型配置。",
-    });
-  }
-  if (/CONTEXT|COMPACT|上下文|容量|prompt.{0,20}(?:long|large)|too.{0,10}long/i.test(`${code} ${raw}`)) {
-    return withLegacyGuidance({
-      kind: "context",
-      userSummary: "当前会话上下文整理失败，本次请求未完成。",
-      userGuidance: "请重试，或先压缩当前会话上下文。",
-    });
-  }
-  if (/^CCM_MODEL_|HTTP\s+\d{3}|fetch|network|socket|timeout|timed out|ECONN|ENOTFOUND|模型返回空响应|Provider/i.test(`${code} ${raw}`)) {
-    return withLegacyGuidance({
-      kind: "provider",
-      userSummary: "大模型暂时不可用，本次请求未完成。",
-      userGuidance: "请检查模型配置或网络后重试。",
-    });
-  }
-  return withLegacyGuidance({
-    kind: "internal",
-    userSummary: "主 Agent 暂时无法处理，本次请求未完成。",
-    userGuidance: "请重试；如果仍然失败，请查看技术详情。",
-  });
-}
-
-
-export function summarizeGroupOrchestratorProviderError(error: any) {
-  const raw = String(error?.message || error || "主 Agent Provider 调用失败").trim();
-  const status = raw.match(/\bHTTP\s+\d{3}\b/i);
-  if (status?.index !== undefined) {
-    return raw.slice(0, status.index + status[0].length).replace(/\s+/g, " ").replace(/[:：\s]+$/, "").slice(0, 220);
-  }
-  const firstLine = raw.split(/\r?\n/, 1)[0]
-    .replace(/<!doctype[\s\S]*$/i, "")
-    .replace(/<[^>]*>/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-  return (firstLine || "主 Agent Provider 调用失败").slice(0, 220);
-}
 
 
 

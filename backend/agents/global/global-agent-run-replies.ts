@@ -160,6 +160,11 @@ export function buildGlobalClarificationSummary(input: { run: GlobalAgentRun; qu
     input.decision?.reason,
   ].filter(Boolean);
   const reason = compactGlobalUserSummaryText(rawReasons.join("；"), "目标、范围或授权信息还不够明确。", 320);
+  const suggestions = [
+    "说明要处理的对象：项目、群聊、任务或具体页面。",
+    "说明允许的范围：只分析、创建任务、修改代码或执行管理操作。",
+    "说明你希望看到的验收结果：例如改动文件、验证命令或最终效果。",
+  ];
   const structuredQuestions = input.decision?.structuredClarificationQuestions
     || input.decision?.structured_clarification_questions
     || input.decision?.workflowDecision?.structuredClarificationQuestions
@@ -176,8 +181,14 @@ export function buildGlobalClarificationSummary(input: { run: GlobalAgentRun; qu
     revision: Number((input.run as any).revision || 1),
     round: Math.max(1, Math.min(2, Number((input.run as any).resume_count || 0) + 1)),
     questions: structuredQuestions,
-    fallbackQuestions: structuredQuestions.length ? [] : [question],
+    fallbackQuestions: structuredQuestions.length ? [] : [{
+      label: question,
+      type: "single",
+      reason,
+      options: suggestions.map((item: string) => ({ label: item })),
+    }],
     headline: reason,
+    purpose: "mid_turn",
     originalRequestChecksum: crypto.createHash("sha256").update(String(input.run.user_message || "")).digest("hex"),
   });
   return {
@@ -189,11 +200,7 @@ export function buildGlobalClarificationSummary(input: { run: GlobalAgentRun; qu
     headline: "我已停在需要你补充信息的位置，不会猜测目标或擅自执行。",
     question,
     reason,
-    answer_suggestions: [
-      "说明要处理的对象：项目、群聊、任务或具体页面。",
-      "说明允许的范围：只分析、创建任务、修改代码或执行管理操作。",
-      "说明你希望看到的验收结果：例如改动文件、验证命令或最终效果。",
-    ],
+    answer_suggestions: suggestions,
     next_action: "你回复后，我会沿用同一个运行继续规划、执行和总结。",
     pre_plan_clarification: prePlanClarification,
     prePlanClarification,
@@ -335,8 +342,9 @@ export function buildGlobalPlanModeSummary(input: { run: GlobalAgentRun; decisio
   const generatedAt = nowIso();
   const planMode = {
     schema: "ccm-global-main-agent-plan-mode-v1",
-    title: "执行前计划",
+    title: requiresConfirmation ? "需要你确认后才执行" : "执行前计划",
     mode: "cc-style-plan-mode",
+    confirmation_kind: requiresConfirmation ? "write_authorization" : "auto",
     source: "global-main-agent-plan-mode-v1",
     requirement: compactGlobalUserSummaryText(input.run.original_user_message || input.run.user_message, "本轮全局任务", 520),
     action: toolLabel,

@@ -41,7 +41,12 @@ exports.conversationRouteAuditChecksum = conversationRouteAuditChecksum;
 exports.runConversationMessageRoutingSelfTest = runConversationMessageRoutingSelfTest;
 const crypto = __importStar(require("crypto"));
 const db_1 = require("../core/db");
-exports.CONVERSATION_AUTO_RESUME_CONFIDENCE = 0.85;
+// A recoverable task is already constrained to the same exact conversation,
+// resource scope and a verifiable workspace. Requiring 0.85 here caused
+// otherwise clear follow-ups to be sent back to the user too often. Keep a
+// meaningful confidence gate, but reserve the choice card for genuinely
+// ambiguous cases.
+exports.CONVERSATION_AUTO_RESUME_CONFIDENCE = 0.72;
 function text(value) {
     return String(value ?? "").trim();
 }
@@ -135,6 +140,18 @@ function decideConversationMessageRoute(input) {
     if (continuationKind === "new_task") {
         return { decision: "new_task", confidence, candidate: null, reason: text(workflowDecision.reason || "这是独立的新需求") };
     }
+    // There is nothing to resume. Do not ask the user to distinguish between
+    // an old task and a new task when no safe old-task candidate exists. The
+    // current message remains authoritative: action requests start a new task,
+    // while read-only/conversational requests stay as answers.
+    if (candidates.length === 0) {
+        const actionRequired = workflowDecision.actionRequired === true
+            || workflowDecision.requiresCodeChanges === true
+            || ["execute", "execute_direct", "plan_task", "decompose_epic"].includes(mode);
+        return actionRequired
+            ? { decision: "new_task", confidence, candidate: null, reason: text(workflowDecision.reason || "当前没有需要续接的旧任务，将按新需求处理") }
+            : { decision: "answer", confidence, candidate: null, reason: text(workflowDecision.reason || "当前消息只需要直接回答") };
+    }
     if (candidate && confidence >= exports.CONVERSATION_AUTO_RESUME_CONFIDENCE && !targetExpanded(workflowDecision, candidate)) {
         return {
             decision: continuationKind === "revise_goal" ? "revise_task" : "resume_task",
@@ -153,7 +170,7 @@ function decideConversationMessageRoute(input) {
                 ? "这条消息像是续接要求，但当前没有唯一可安全恢复的任务"
                 : targetExpanded(workflowDecision, candidate)
                     ? "这条消息扩大了原任务的项目范围，需要你确认是否作为新任务"
-                    : `消息可能与刚才的任务有关，但当前判断置信度为 ${Math.round(confidence * 100)}%`,
+                    : "这条消息与可恢复任务有关，但继续原目标还是开始新需求仍不够明确",
     };
 }
 function conversationRouteAuditChecksum(value) {
@@ -175,12 +192,14 @@ function runConversationMessageRoutingSelfTest() {
         ...extra,
     });
     const checks = {
-        belowThresholdNeedsUser: decideConversationMessageRoute({ workflowDecision: decision(0.849), candidates: [candidate] }).decision === "needs_user",
-        thresholdResumes: decideConversationMessageRoute({ workflowDecision: decision(0.85), candidates: [candidate] }).decision === "resume_task",
+        belowThresholdNeedsUser: decideConversationMessageRoute({ workflowDecision: decision(0.719), candidates: [candidate] }).decision === "needs_user",
+        thresholdResumes: decideConversationMessageRoute({ workflowDecision: decision(0.72), candidates: [candidate] }).decision === "resume_task",
         multipleCandidatesNeedUser: decideConversationMessageRoute({ workflowDecision: decision(0.99), candidates: [candidate, { ...candidate, id: "task-other" }] }).decision === "needs_user",
         expandedTargetNeedsUser: decideConversationMessageRoute({ workflowDecision: decision(0.99, { targetRefs: [{ scope: "project", scopeId: "project-b" }] }), candidates: [candidate] }).decision === "needs_user",
         explicitNewTaskStaysNew: decideConversationMessageRoute({ workflowDecision: decision(0.99, { continuationKind: "new_task" }), candidates: [candidate] }).decision === "new_task",
         answerDoesNotCreateTask: decideConversationMessageRoute({ workflowDecision: decision(0.99, { mode: "answer", actionRequired: false }), candidates: [candidate] }).decision === "answer",
+        noCandidateActionStartsNewTask: decideConversationMessageRoute({ workflowDecision: decision(0.2), candidates: [] }).decision === "new_task",
+        noCandidateReadOnlyAnswers: decideConversationMessageRoute({ workflowDecision: decision(0.2, { mode: "project_analysis", actionRequired: false }), candidates: [] }).decision === "answer",
     };
     return { pass: Object.values(checks).every(Boolean), checks };
 }

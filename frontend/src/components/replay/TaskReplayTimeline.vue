@@ -2,15 +2,6 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import TaskReplayTimelineEvent from './TaskReplayTimelineEvent.vue'
-import ToolResultDetail from '../common/ToolResultDetail.vue'
-import {
-  replayActorLabel,
-  replayEventSummary,
-  replayEventTitle,
-  replayProjectLabel,
-  replayStageLabel,
-  replayTechnicalLabel,
-} from '../../utils/taskReplayPresentation.js'
 
 const props = defineProps({
   events: { type: Array, default: () => [] },
@@ -18,65 +9,9 @@ const props = defineProps({
   showRawGroups: { type: Boolean, default: false },
 })
 const emit = defineEmits(['open-evidence', 'return-execution'])
-const openEvents = ref(new Set())
 const virtualHost = ref(null)
 const virtualizationEnabled = computed(() => props.events.length > 300)
-
-const stageLabel = replayStageLabel
-const statusLabel = (status) => ({ info: '记录', running: '进行中', passed: '通过', warning: '注意', failed: '失败', blocked: '受阻', cancelled: '已取消' }[status] || status || '记录')
-const timeLabel = (value) => {
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return '时间未知'
-  return date.toLocaleString('zh-CN', { hour12: false })
-}
-const summaryText = item => replayEventSummary(item)
-const hasDetails = (item) => !!(
-  summaryText(item).length > 220
-  || item.evidence_ids?.length
-  || item.tool_display
-  || item.group_count > 1
-  || item.task_id
-  || item.category
-  || (item.technical && Object.keys(item.technical).length)
-)
-const isOpen = (id) => openEvents.value.has(id)
-const toggle = (id) => {
-  const next = new Set(openEvents.value)
-  next.has(id) ? next.delete(id) : next.add(id)
-  openEvents.value = next
-}
-const technicalRows = (item = {}) => {
-  const technical = item.technical || {}
-  const rows = [
-    ['category', item.category],
-    ['task_id', item.task_id],
-    ['actor', item.actor?.label],
-    ['project', item.project],
-    ...Object.entries(technical),
-  ]
-  const seen = new Set()
-  return rows
-    .filter(([key, value]) => {
-      if (value === '' || value == null || seen.has(key)) return false
-      seen.add(key)
-      return true
-    })
-    .map(([key, value]) => ({
-      key,
-      label: replayTechnicalLabel(key),
-      value: typeof value === 'string' ? value : JSON.stringify(value, null, 2),
-    }))
-}
 const containsEvent = (item, eventId) => item.id === eventId || (item.raw_event_ids || []).includes(eventId)
-const groupLabel = (item) => ({ duplicate: '重复更新', progress: '状态更新', retry: '重试记录' }[item.group_kind] || '关联记录')
-const timeRangeLabel = (item) => {
-  if (!item.first_at || !item.last_at || item.first_at === item.last_at) return timeLabel(item.at)
-  const start = new Date(item.first_at)
-  const end = new Date(item.last_at)
-  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return timeLabel(item.at)
-  const options = { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }
-  return `${start.toLocaleTimeString('zh-CN', options)} - ${end.toLocaleTimeString('zh-CN', options)}`
-}
 const dateGroups = computed(() => {
   const groups = []
   for (const item of props.events) {
@@ -107,9 +42,6 @@ watch(() => props.focusedEventId, async (id) => {
   if (!id) return
   const target = props.events.find(item => containsEvent(item, id))
   const targetId = target?.id || id
-  const next = new Set(openEvents.value)
-  next.add(targetId)
-  openEvents.value = next
   await nextTick()
   if (virtualizationEnabled.value) {
     const index = virtualRows.value.findIndex(row => row.type === 'event' && containsEvent(row.item, id))
@@ -146,51 +78,14 @@ watch(() => props.focusedEventId, async (id) => {
           :class="['timeline-event', item.status, { focused: containsEvent(item, focusedEventId) }]"
         >
           <div class="event-rail"><span></span></div>
-          <article>
-            <header>
-              <div class="event-heading">
-                <span class="event-stage">{{ stageLabel(item.stage) }}</span>
-                <strong>{{ replayEventTitle(item) }}</strong>
-              </div>
-              <div class="event-meta">
-                <span v-if="item.group_count > 1" class="event-group-count">{{ groupLabel(item) }} · {{ item.group_count }} 条</span>
-                <span :class="['event-status', item.status]">{{ statusLabel(item.status) }}</span>
-                <time>{{ timeRangeLabel(item) }}</time>
-              </div>
-            </header>
-            <div class="event-context">
-              <span class="event-actor">{{ replayActorLabel(item.actor) }}</span>
-              <span v-if="replayProjectLabel(item)" class="event-project">项目 · {{ replayProjectLabel(item) }}</span>
-            </div>
-            <p v-if="summaryText(item)" :class="['event-summary', { clamped: !isOpen(item.id) }]">{{ summaryText(item) }}</p>
-            <button v-if="hasDetails(item)" type="button" class="detail-toggle" :aria-expanded="isOpen(item.id)" @click="toggle(item.id)">
-              {{ isOpen(item.id) ? '收起' : item.group_count > 1 ? `展开 ${item.group_count} 条合并记录` : summaryText(item).length > 220 ? '展开完整内容' : '查看相关信息' }}
-            </button>
-            <div v-if="isOpen(item.id)" class="event-details">
-              <ToolResultDetail v-if="item.tool_display" :display="item.tool_display" />
-              <div v-if="item.evidence_ids?.length" class="event-evidence-links">
-                <button v-for="evidenceId in item.evidence_ids" :key="evidenceId" type="button" @click="emit('open-evidence', evidenceId)">查看验证证据</button>
-                <button v-if="item.replay_link?.anchorMessageId" type="button" @click="emit('return-execution', item.replay_link)">返回执行现场</button>
-              </div>
-              <button v-else-if="item.replay_link?.anchorMessageId" type="button" class="return-execution" @click="emit('return-execution', item.replay_link)">返回执行现场</button>
-              <ol v-if="showRawGroups && item.group_count > 1" class="raw-event-list">
-                <li v-for="raw in item.raw_events" :key="raw.id || `${raw.at}-${raw.title}`">
-                  <time>{{ timeLabel(raw.at) }}</time>
-                  <span :class="['event-status', raw.status]">{{ statusLabel(raw.status) }}</span>
-                  <div><strong>{{ replayEventTitle(raw) }}</strong><p v-if="replayEventSummary(raw)">{{ replayEventSummary(raw) }}</p></div>
-                </li>
-              </ol>
-              <details v-if="technicalRows(item).length" class="event-technical">
-                <summary>排障信息</summary>
-                <dl>
-                  <template v-for="row in technicalRows(item)" :key="row.key">
-                    <dt>{{ row.label }}</dt>
-                    <dd><pre>{{ row.value }}</pre></dd>
-                  </template>
-                </dl>
-              </details>
-            </div>
-          </article>
+          <TaskReplayTimelineEvent
+            :item="item"
+            :focused="containsEvent(item, focusedEventId)"
+            :show-raw-groups="showRawGroups"
+            variant="static"
+            @open-evidence="emit('open-evidence', $event)"
+            @return-execution="emit('return-execution', $event)"
+          />
         </li>
       </ol>
     </section>

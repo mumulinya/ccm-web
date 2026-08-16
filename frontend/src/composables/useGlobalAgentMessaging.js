@@ -247,9 +247,15 @@ const guideGlobalQueuedTurn = async (turn) => {
 }
 
 const resolveGlobalQueuedRoute = async (turn, choice) => {
-  await globalTurnControl.resolveRoute(turn, choice)
-  toast.success(choice === 'continue_original' ? '将继续原任务' : choice === 'answer_only' ? '将只回答这条消息' : '将作为新任务处理')
-  window.setTimeout(() => drainGlobalTurnQueue().catch(() => {}), 0)
+  try {
+    const resolved = await globalTurnControl.resolveRoute(turn, choice)
+    if (!resolved) return
+    toast.success(choice === 'continue_original' ? '正在继续原任务' : choice === 'answer_only' ? '正在回答这条消息' : '正在作为新任务处理')
+    await drainGlobalTurnQueue()
+  } catch (error) {
+    toast.error(error?.message || '消息处理方式提交失败，请重试')
+    await globalTurnControl.refresh().catch(() => {})
+  }
 }
 
 const beginGlobalMissionInput = async (msg, card = {}) => {
@@ -564,6 +570,16 @@ const sendMessage = async (options = {}) => {
             'assistant'
           )
           agentMsg.agenticRun = run
+          const clarificationSummary = run.clarification_summary || run.clarificationSummary || agentMsg.clarification_summary || agentMsg.clarificationSummary || null
+          if (clarificationSummary) {
+            agentMsg.clarification_summary = clarificationSummary
+            agentMsg.clarificationSummary = clarificationSummary
+            const projection = clarificationSummary.pre_plan_clarification || clarificationSummary.prePlanClarification
+            if (projection) {
+              agentMsg.prePlanClarification = projection
+              agentMsg.pre_plan_clarification = projection
+            }
+          }
           activeGlobalRunId.value = run.id || activeGlobalRunId.value
           activeGlobalRunMessage.value = agentMsg
           agentMsg.streaming = false
@@ -618,7 +634,7 @@ const sendMessage = async (options = {}) => {
         } else if (data.type === 'error') {
           globalStreamFailed = true
           ensureGlobalStreamMessage(agentMsg, agentMsgAdded)
-          agentMsg.content = `出错啦：${sanitizeGlobalVisibleStreamText(data.text, '这次处理没有完成，排障信息已放入技术详情。', 1200)}`
+          agentMsg.content = `出错啦：${sanitizeGlobalVisibleStreamText(data.text, '这次处理没有完成。', 1200)}`
           agentMsg.streaming = false
           agentMsg.type = 'global_agent_error'
         } else if (data.type !== 'done') {

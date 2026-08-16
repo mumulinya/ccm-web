@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { AlertTriangle, CheckCircle2, Clock3, X } from '@lucide/vue'
+import { countExecutionToolItems } from '../../utils/agentExecutionEvents.js'
 
 const props = defineProps({
   events: { type: Array, default: () => [] },
@@ -44,17 +45,15 @@ const buildRecap = events => {
   const currentAttempt = relevantEvents.value.filter(event => Number(event?.generation || 0) === currentGeneration)
     .reduce((max, event) => Math.max(max, Number(event?.attempt || event?.detail?.agentDisplay?.attempt || 0)), 0)
   const active = events.filter(event => Number(event?.generation || 0) === currentGeneration && (!currentAttempt || Number(event?.attempt || event?.detail?.agentDisplay?.attempt || currentAttempt) === currentAttempt))
-  const completedIds = new Set(active.filter(event => (
-    ['agent_completed', 'tool_completed'].includes(event?.eventType) && event?.display?.status !== 'failed'
-  )).map(event => event?.workItemId || event?.agentRunId || event?.toolCallId || event?.eventId).filter(Boolean))
-  const failed = active.filter(event => event?.display?.status === 'failed' || ['agent_failed', 'tool_failed'].includes(event?.eventType)).length
+  const toolItems = countExecutionToolItems(active)
+  const failed = toolItems.failed
   const paused = active.some(event => event?.detail?.pauseMilestone?.kind === 'paused')
   const needsAction = active.some(event => event?.eventType === 'permission_required' || ['blocked', 'waiting_permission'].includes(String(event?.display?.status || '')))
   const terminal = [...active].reverse().find(event => event?.eventType === 'result')
   const stage = [...active].reverse().find(event => event?.detail?.executionStage?.label || event?.detail?.executionStage?.kind)?.detail?.executionStage
   const files = safeFileCount(active)
   const facts = []
-  if (completedIds.size) facts.push(`完成${completedIds.size}个执行项`)
+  if (toolItems.completed) facts.push(`完成${toolItems.completed}个执行项`)
   if (files) facts.push(`修改${files}个文件`)
   if (failed) facts.push(`${failed}项执行失败`)
   if (paused) facts.push('任务已暂停')

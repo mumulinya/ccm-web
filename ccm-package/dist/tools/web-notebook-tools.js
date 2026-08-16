@@ -42,12 +42,11 @@ const crypto = __importStar(require("crypto"));
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const secure_public_network_1 = require("./secure-public-network");
+const html_to_light_markdown_1 = require("./html-to-light-markdown");
+const web_fetch_summarize_1 = require("./web-fetch-summarize");
 const MAX_WEB_BYTES = 5 * 1024 * 1024;
 const MAX_TEXT_CHARS = 300_000;
 function hash(value) { return crypto.createHash("sha256").update(Buffer.isBuffer(value) ? value : Buffer.from(typeof value === "string" ? value : JSON.stringify(value ?? null))).digest("hex"); }
-function cleanHtml(html) {
-    return html.replace(/<script\b[\s\S]*?<\/script>/gi, " ").replace(/<style\b[\s\S]*?<\/style>/gi, " ").replace(/<noscript\b[\s\S]*?<\/noscript>/gi, " ").replace(/<[^>]+>/g, " ").replace(/&nbsp;/gi, " ").replace(/&amp;/gi, "&").replace(/&lt;/gi, "<").replace(/&gt;/gi, ">").replace(/&#39;/g, "'").replace(/&quot;/gi, '"').replace(/\s+/g, " ").trim();
-}
 function webSearchConfig() {
     let stored = {};
     try {
@@ -139,36 +138,40 @@ async function browserRender(url) {
 }
 async function webFetch(args, allowBrowserFallback = true) {
     const requestedUrl = String(args?.url || "").trim();
+    const prompt = String(args?.prompt || "").trim();
+    if (!prompt)
+        throw new Error("web_fetch 需要 prompt：说明你想从该页面得到什么");
     const response = await (0, secure_public_network_1.securePublicFetch)(requestedUrl, { method: "GET", headers: { "User-Agent": "CCM-WebFetch/1.0", Accept: "text/html,application/json,text/plain,application/pdf;q=0.9" } }, { maxBytes: MAX_WEB_BYTES, timeoutMs: 20_000 });
     if (!response.ok)
         throw new Error(`Web Fetch失败 (HTTP ${response.status})`);
     const finalUrl = response.headers.get("x-ccm-final-url") || requestedUrl;
     const contentType = String(response.headers.get("content-type") || "").toLowerCase();
     const buffer = Buffer.from(await response.arrayBuffer());
-    let text = "";
+    let markdown = "";
     let title = "";
     if (contentType.includes("application/pdf") || /\.pdf(?:$|[?#])/i.test(finalUrl)) {
         const pdfParse = require("pdf-parse");
         const parsed = await pdfParse(buffer);
-        text = String(parsed?.text || "");
+        markdown = String(parsed?.text || "");
         title = String(parsed?.info?.Title || "");
     }
     else {
         const raw = buffer.toString("utf8");
         if (contentType.includes("html") || /^\s*</.test(raw)) {
-            title = cleanHtml(raw.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || "");
-            text = cleanHtml(raw);
-            if (allowBrowserFallback && text.length < 200 && /<script|id=["'](?:root|app)["']/i.test(raw)) {
+            title = (0, html_to_light_markdown_1.htmlToLightMarkdown)(raw.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || "").replace(/^#+\s*/, "");
+            markdown = (0, html_to_light_markdown_1.htmlToLightMarkdown)(raw);
+            if (allowBrowserFallback && markdown.length < 200 && /<script|id=["'](?:root|app)["']/i.test(raw)) {
                 const rendered = await browserRender(finalUrl);
                 title = rendered.title || title;
-                text = rendered.text;
+                markdown = rendered.text;
             }
         }
         else
-            text = raw;
+            markdown = raw;
     }
-    text = text.slice(0, Math.max(1000, Math.min(MAX_TEXT_CHARS, Number(args?.max_chars || args?.maxChars || 100_000) || 100_000)));
-    return { schema: "ccm-web-fetch-result-v1", title, requestedUrl, finalUrl, contentType, text, citation: finalUrl, contentChecksum: hash(buffer), truncated: text.length >= MAX_TEXT_CHARS || buffer.length >= MAX_WEB_BYTES, contentStored: false };
+    markdown = markdown.slice(0, MAX_TEXT_CHARS);
+    const summary = await (0, web_fetch_summarize_1.summarizeWebFetchPage)({ title, url: finalUrl, markdown, prompt });
+    return { schema: "ccm-web-fetch-result-v1", title, requestedUrl, finalUrl, contentType, prompt, summary, text: summary, citation: finalUrl, contentChecksum: hash(buffer), truncated: markdown.length >= MAX_TEXT_CHARS || buffer.length >= MAX_WEB_BYTES, contentStored: false };
 }
 function searchOrder(args) {
     const config = webSearchConfig();

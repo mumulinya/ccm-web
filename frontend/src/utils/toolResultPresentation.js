@@ -10,13 +10,47 @@ const item = (label, options = {}) => ({
   status: text(options.status, 80),
 })
 
+const listingItems = (rows, { glob = false } = {}) => (Array.isArray(rows) ? rows : []).map(row => {
+  const source = typeof row === 'string' ? { path: row, name: row } : (row || {})
+  const isDir = source.type === 'directory' || source.status === 'directory'
+  const name = String(source.name || source.path || '').replace(/\\/g, '/')
+  const base = name.split('/').filter(Boolean).at(-1) || name
+  const label = glob ? (name || '文件') : (isDir ? `${base.replace(/\/$/, '')}/` : base)
+  return item(label, { path: source.path || name, status: isDir ? 'directory' : 'file' })
+})
+
 const directoryPresentation = rows => {
-  const directories = rows.filter(row => row?.type === 'directory').map(row => item(row.name || row.path, { path: row.path, status: 'directory' }))
-  const files = rows.filter(row => row?.type !== 'directory').map(row => item(row.name || row.path, { path: row.path, status: 'file' }))
-  return { layout: 'directory', groups: [
-    { id: 'directories', label: '目录', count: directories.length, items: directories },
-    { id: 'files', label: '文件', count: files.length, items: files },
-  ].filter(group => group.count) }
+  const items = listingItems(rows)
+  return { layout: 'directory', groups: items.length ? [{ id: 'listing', label: '', count: items.length, items }] : [] }
+}
+
+const globPresentation = rows => {
+  const items = listingItems(rows, { glob: true })
+  return { layout: 'files', groups: items.length ? [{ id: 'listing', label: '', count: items.length, items }] : [] }
+}
+
+const fileRangeSecondary = row => {
+  const from = Number(row?.from || 0)
+  const to = Number(row?.to || 0)
+  const total = Number(row?.totalLines || row?.total_lines || 0)
+  const range = from ? `${from}${to > from ? `–${to}` : ''}${total ? `/${total}` : ''}` : ''
+  const status = primitiveText(row?.status || row?.secondary, 80)
+  const usefulStatus = status && !/已读完|读取范围|第\s*\d/.test(status) ? status : ''
+  return [range, usefulStatus, primitiveText(row?.reason, 80)].filter(Boolean).join(' · ')
+}
+
+const fileContentPresentation = rows => {
+  const items = (Array.isArray(rows) ? rows : []).map(row => {
+    const source = typeof row === 'string' ? { path: row } : (row || {})
+    const filePath = String(source.path || source.name || source.label || '').replace(/\\/g, '/')
+    return item(filePath || '文件', { path: filePath, status: 'file', secondary: fileRangeSecondary(source) })
+  })
+  return { layout: 'file_content', groups: items.length ? [{ id: 'listing', label: '', count: items.length, items }] : [] }
+}
+
+const flattenListingGroups = (layout, groups = []) => {
+  const items = groups.flatMap(group => Array.isArray(group?.items) ? group.items.map(row => item(row?.label, row)) : [])
+  return { layout, groups: items.length ? [{ id: 'listing', label: '', count: items.length, items }] : [] }
 }
 
 const LEGACY_ARGUMENT_LABELS = {
@@ -87,6 +121,17 @@ const genericPresentation = rows => {
 
 export function normalizeToolResultPresentation(display = {}) {
   const explicit = display?.result?.presentation
+  const name = toolName(display)
+  const rows = rowsOf(display)
+  if (explicit?.layout === 'directory' || /list_directory|(?:^|__)ls$/.test(name)) {
+    return rows.length ? directoryPresentation(rows) : flattenListingGroups('directory', explicit?.groups)
+  }
+  if (explicit?.layout === 'files' || /glob_files|findfiles|(?:^|__)glob$/.test(name)) {
+    return rows.length ? globPresentation(rows) : flattenListingGroups('files', explicit?.groups)
+  }
+  if (explicit?.layout === 'file_content' || /read_file|read_files|fileread/.test(name)) {
+    return rows.length ? fileContentPresentation(rows) : flattenListingGroups('file_content', explicit?.groups)
+  }
   if (explicit?.layout) return {
     layout: explicit.layout,
     groups: (explicit.groups || []).map(group => ({
@@ -95,13 +140,8 @@ export function normalizeToolResultPresentation(display = {}) {
       items: Array.isArray(group?.items) ? group.items.map(row => item(row?.label, row)) : [],
     })).filter(group => group.count || group.items.length),
   }
-  const name = toolName(display)
-  const rows = rowsOf(display)
-  if (/list_directory|(?:^|__)ls$/.test(name)) return directoryPresentation(rows)
-  if (/glob_files|glob|findfiles/.test(name)) return { layout: 'files', groups: [{ id: 'files', label: '匹配文件', count: rows.length, items: rows.map(row => item(row?.path || row?.name || row, { path: row?.path || row?.name || row, status: 'file' })) }] }
   if (/grep_text|grep|codesearch|searchtext/.test(name)) return matchPresentation(rows)
   if (/find_definition|find_references|find_implementations|find_type_definition|workspace_symbols|document_symbols/.test(name)) return { layout: 'symbols', groups: [{ id: 'symbols', label: '符号位置', count: rows.length, items: rows.map(row => item(row?.symbol || row?.path || '符号', { path: row?.path, line: Number(row?.range?.start?.line ?? row?.line ?? -1) + 1, secondary: row?.kind })) }] }
-  if (/read_file|read_files|fileread/.test(name)) return { layout: 'file_content', groups: [] }
   if (/git/.test(name)) return { layout: 'git', groups: rows.length ? [{ id: 'git', label: 'Git 结果', count: rows.length, items: rows.map(row => item(row?.subject || row?.path || row?.label || row?.name || '记录', { path: row?.path, secondary: row?.hash || row?.status })) }] : [] }
   if (/test|build|lint|typecheck|verify|maven|gradle/.test(name)) return { layout: 'verification', groups: [] }
   return genericPresentation(rows)

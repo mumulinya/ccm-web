@@ -33,12 +33,33 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.PRE_PLAN_OTHER_OPTION_LABEL = exports.PRE_PLAN_OTHER_OPTION_ID = void 0;
+exports.ensureOtherOption = ensureOtherOption;
 exports.normalizePrePlanQuestions = normalizePrePlanQuestions;
 exports.buildPrePlanClarification = buildPrePlanClarification;
 exports.formatPrePlanAnswers = formatPrePlanAnswers;
+exports.buildConversationClarificationSummary = buildConversationClarificationSummary;
 exports.formatPrePlanClarificationText = formatPrePlanClarificationText;
 exports.runPrePlanClarificationSelfTest = runPrePlanClarificationSelfTest;
 const crypto = __importStar(require("crypto"));
+exports.PRE_PLAN_OTHER_OPTION_ID = "other";
+exports.PRE_PLAN_OTHER_OPTION_LABEL = "其他";
+function isOtherOption(option) {
+    const id = clean(option?.id, 80).toLowerCase();
+    const label = clean(option?.label, 80);
+    return id === exports.PRE_PLAN_OTHER_OPTION_ID || /^(其他|other)$/i.test(label);
+}
+function ensureOtherOption(options = []) {
+    const rest = (Array.isArray(options) ? options : []).filter(option => option && !isOtherOption(option));
+    return [
+        ...rest,
+        {
+            id: exports.PRE_PLAN_OTHER_OPTION_ID,
+            label: exports.PRE_PLAN_OTHER_OPTION_LABEL,
+            description: "以上都不合适时，用自己的话说明",
+        },
+    ];
+}
 function clean(value, max = 240) {
     return String(value || "")
         .replace(/```[\s\S]*?```/g, "")
@@ -64,7 +85,7 @@ function normalizePrePlanQuestions(value, fallback = []) {
         seen.add(signature);
         const rawType = clean(object.type || object.kind, 24).toLowerCase();
         let type = rawType === "single" || rawType === "multiple" ? rawType : "text";
-        const options = (Array.isArray(object.options) ? object.options : []).slice(0, 4).map((item, optionIndex) => {
+        let options = (Array.isArray(object.options) ? object.options : []).slice(0, 4).map((item, optionIndex) => {
             const option = item && typeof item === "object" ? item : { label: item };
             const optionLabel = clean(option.label || option.title || option.value, 100);
             if (!optionLabel)
@@ -77,8 +98,13 @@ function normalizePrePlanQuestions(value, fallback = []) {
                 safeDefault: option.safeDefault === true || option.safe_default === true,
             };
         }).filter(Boolean);
-        if ((type === "single" || type === "multiple") && options.length < 2)
-            type = "text";
+        if (type === "single" || type === "multiple") {
+            const withOther = ensureOtherOption(options);
+            if (withOther.length < 2)
+                type = "text";
+            else
+                options = withOther;
+        }
         questions.push({
             id: clean(object.id, 80) || stableId("question", label, index),
             label,
@@ -108,8 +134,9 @@ function buildPrePlanClarification(input) {
         id, scope, scopeId, exactSessionId, anchorMessageId,
         status: ["resolved", "cancelled"].includes(String(input.status)) ? input.status : "pending",
         revision, generation, round,
-        title: clean(input.title, 120) || `制定计划前，需要确认 ${questions.length} 项`,
-        headline: clean(input.headline, 220) || "这些选择会影响业务流程和验收范围。",
+        title: clean(input.title, 120) || (String(input.purpose || "").toLowerCase() === "mid_turn" ? `需要确认 ${questions.length} 项` : `制定计划前，需要确认 ${questions.length} 项`),
+        headline: clean(input.headline, 220) || (String(input.purpose || "").toLowerCase() === "mid_turn" ? "请先选择一项，我会按你的答案继续。" : "这些选择会影响业务流程和验收范围。"),
+        purpose: String(input.purpose || "").toLowerCase() === "mid_turn" ? "mid_turn" : "pre_plan",
         questions,
         allowAdditionalNote: input.allowAdditionalNote !== false,
         safeDefaultsAvailable,
@@ -124,6 +151,10 @@ function formatPrePlanAnswers(clarification, answers = {}, additionalNote = "") 
         const selected = Array.isArray(raw) ? raw : raw === undefined || raw === null ? [] : [raw];
         const labels = selected.map((value) => {
             const option = question.options?.find((item) => item.id === value);
+            if (option && isOtherOption(option)) {
+                const note = clean(answers?.[`${question.id}__note`] || answers?.[`${question.id}__other`] || additionalNote, 400);
+                return note && note !== clean(additionalNote, 400) ? `${exports.PRE_PLAN_OTHER_OPTION_LABEL}：${note}` : exports.PRE_PLAN_OTHER_OPTION_LABEL;
+            }
             return clean(option?.label || value, 160);
         }).filter(Boolean);
         if (labels.length)
@@ -133,6 +164,25 @@ function formatPrePlanAnswers(clarification, answers = {}, additionalNote = "") 
     if (note)
         lines.push(`补充说明：${note}`);
     return lines.join("\n");
+}
+function buildConversationClarificationSummary(input) {
+    const projection = input.prePlanClarification;
+    const firstQuestion = Array.isArray(projection?.questions) ? projection.questions[0] : null;
+    const question = clean(input.question || firstQuestion?.label || projection?.headline, 260)
+        || "请补充会影响实施方案或验收结果的业务信息。";
+    return {
+        schema: input.schema || "ccm-conversation-clarification-summary-v1",
+        title: projection?.title || "需要你补充信息",
+        status: "waiting_user",
+        status_label: "等待你回复",
+        headline: clean(input.headline || projection?.headline, 220) || "请先选择一项，我会按你的答案继续。",
+        question,
+        reason: clean(input.reason, 220),
+        answer_suggestions: Array.isArray(input.suggestions) ? input.suggestions.filter(Boolean).slice(0, 3) : [],
+        next_action: clean(input.nextAction, 220) || "你回复后我会继续。",
+        pre_plan_clarification: projection,
+        prePlanClarification: projection,
+    };
 }
 function formatPrePlanClarificationText(clarification) {
     const questions = Array.isArray(clarification?.questions) ? clarification.questions : [];
@@ -160,8 +210,8 @@ function runPrePlanClarificationSelfTest() {
         ],
     });
     return {
-        pass: projection.questions.length === 3 && projection.safeDefaultsAvailable === false && projection.contentStored === false,
-        checks: { cappedAndDeduped: projection.questions.length === 3, structuredOptions: projection.questions[0]?.options?.length === 2, safeProjection: projection.contentStored === false },
+        pass: projection.questions.length === 3 && projection.safeDefaultsAvailable === false && projection.contentStored === false && projection.questions[0]?.options?.some((option) => option.id === exports.PRE_PLAN_OTHER_OPTION_ID),
+        checks: { cappedAndDeduped: projection.questions.length === 3, structuredOptions: projection.questions[0]?.options?.length === 3, otherOption: projection.questions[0]?.options?.at(-1)?.id === exports.PRE_PLAN_OTHER_OPTION_ID, safeProjection: projection.contentStored === false },
     };
 }
 //# sourceMappingURL=pre-plan-clarification.js.map

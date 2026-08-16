@@ -10,7 +10,9 @@ import {
 
 export const GROUP_VISIBLE_INTERNAL_TEXT_PATTERN = /CCM_AGENT_RECEIPT|CCM_AGENT_REQUESTS|<\s*\/?\s*task-notification|task-notification|receipt[-_\s]*status|trace_id|session_id|WorkerContextPacket|raw\s+receipt|raw\s+payload|raw_report|scratchpad|Runtime Kernel|workflow_timeline/i
 export const GROUP_INTERNAL_PROTOCOL_FALLBACK = '执行成员已提交技术执行信息，我正在整理用户可读结论。'
-export const GROUP_STREAM_ERROR_FALLBACK = '请求没有完成，我会保留当前进度；排障信息已放入技术详情。'
+export const GROUP_STREAM_ERROR_FALLBACK = '请求没有完成，我会保留当前进度。'
+export const GROUP_FAILURE_AFTER_TOOLS = '只读检查已完成，但没能生成计划。\n发送继续或点立即重试，会接着刚才的检查继续。'
+export const GROUP_FAILURE_EMPTY_REPLY = '模型这次没有给出可用回复，本次请求未完成。\n请重试；这不是工具失败，也不需要先改模型配置。'
 
 export const stripProviderHtmlErrorPayload = (value) => {
   const raw = String(value || '')
@@ -43,11 +45,23 @@ export const sanitizeGroupVisibleText = (value, fallback = '我正在处理当�
 
 export const buildGroupStreamErrorText = (value) => `这次没有完成：${sanitizeGroupVisibleText(value || GROUP_STREAM_ERROR_FALLBACK, GROUP_STREAM_ERROR_FALLBACK, 800) || GROUP_STREAM_ERROR_FALLBACK}`
 
-export function getVisibleGroupMessageContent(msg, fallback = '我已整理这条消息。') {
+export function getVisibleGroupMessageContent(msg, fallback = '我已整理这条消息。', options = {}) {
   if (!msg) return ''
   if (msg.role === 'user') return String(msg.content || '')
   const runtime = String(msg.runtime || '').toLowerCase()
-  if (runtime === 'llm-error') return '大模型暂时不可用，本次请求未完成。\n请检查模型配置或网络后重试。'
+  if (runtime === 'llm-error') {
+    const summary = [msg.providerFailure?.userSummary, msg.providerFailure?.userGuidance].filter(Boolean).join('\n')
+      || String(msg.content || '')
+    const technical = `${msg.providerFailure?.safeSummary || ''} ${msg.providerFailureTechnical?.safeSummary || ''} ${msg.providerFailure?.code || ''} ${summary}`
+    const toolCount = Math.max(0, Number(options.toolCount ?? msg.providerFailure?.observationCount ?? 0))
+    const looksUnavailable = /大模型暂时不可用|本次请求未开始/.test(summary)
+    const copy = toolCount > 0 && looksUnavailable
+      ? GROUP_FAILURE_AFTER_TOOLS
+      : /模型返回空响应|empty (?:model )?response/i.test(technical) && looksUnavailable
+        ? GROUP_FAILURE_EMPTY_REPLY
+        : summary
+    return sanitizeGroupVisibleText(copy, '本次请求未完成，请重试。', 800)
+  }
   if (runtime === 'llm-not-configured') return '大模型尚未配置，本次请求未开始。\n请完成模型配置后重试。'
   const card = msg?.taskCard || msg?.task_card || msg?.taskRuntime?.taskCard || msg?.taskRuntime?.task_card || null
   const presentation = classifyGroupTaskCardPresentation(card, msg)
@@ -139,13 +153,49 @@ export const getTaskCard = (msg) => {
   return { ...enriched, presentation, delivery_scaffold: showDeliveryScaffold(presentation) }
 }
 
+export const isGroupModelFailureMessage = (msg) => (
+  ['llm-error', 'llm-not-configured'].includes(String(msg?.runtime || '').toLowerCase())
+  && !['retrying', 'recovered', 'superseded'].includes(String(msg?.recovery?.state || '').toLowerCase())
+)
+
 export const shouldShowOrchestrationPlan = (msg) => {
   if (!msg || getTaskCard(msg)) return false
+  if (['retrying', 'recovered', 'superseded'].includes(String(msg?.recovery?.state || '').toLowerCase())) return false
   const assignments = Array.isArray(msg.assignments) ? msg.assignments : []
   if (assignments.length > 0) return true
   if (msg.coordinationPlan?.phases?.length) return true
   const action = String(msg.dispatchPolicy?.action || '')
   return action === 'delegate'
+}
+
+const GROUP_MODEL_RECOVERY_CONTINUE = /^(?:继续|接着(?:做|来|干)?|再试(?:一次)?|重试|continue|retry)\s*[。.!！]*$/i
+const GROUP_MODEL_RECOVERY_RUNTIMES = new Set(['llm-error', 'llm-not-configured'])
+const GROUP_MODEL_RECOVERY_CLOSED = new Set(['recovered', 'cancelled'])
+
+export const isGroupModelRecoveryContinuePhrase = (value) => GROUP_MODEL_RECOVERY_CONTINUE.test(String(value || '').replace(/\s+/g, ' ').trim())
+
+export function findUnrecoveredGroupModelFailure(messages = []) {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const item = messages[index]
+    const runtime = String(item?.runtime || '').toLowerCase()
+    const recoveryState = String(item?.recovery?.state || '').toLowerCase()
+    if (item?.role === 'assistant' && GROUP_MODEL_RECOVERY_RUNTIMES.has(runtime) && !GROUP_MODEL_RECOVERY_CLOSED.has(recoveryState)) {
+      return item
+    }
+    if (item?.role === 'assistant' && String(item?.content || '').trim() && !GROUP_MODEL_RECOVERY_RUNTIMES.has(runtime)) break
+  }
+  return null
+}
+
+export function groupModelRecoveryAnchorId(failure) {
+  return String(
+    failure?.execution_anchor_message_id
+      || failure?.executionAnchorMessageId
+      || failure?.recovery?.anchorMessageId
+      || failure?.recovery?.anchor_message_id
+      || failure?.id
+      || '',
+  ).trim()
 }
 
 export const isInternalProtocolMessage = (msg) => {
@@ -361,7 +411,7 @@ export const getPlanTitle = (msg) => {
 }
 
 export const compactPlanText = (text, max = 180) => {
-  const value = sanitizeGroupVisibleText(text, '计划详情已整理，可在技术详情查看。', max).replace(/\s+/g, ' ').trim()
+  const value = sanitizeGroupVisibleText(text, '计划详情已整理。', max).replace(/\s+/g, ' ').trim()
   return value.length > max ? value.slice(0, max) + '...' : value
 }
 

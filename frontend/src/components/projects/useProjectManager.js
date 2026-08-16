@@ -38,6 +38,7 @@ import { stopTaskWithPreview } from '../../utils/taskStopFlow.js'
 import { forceInterruptPausedTask, requestTaskPause, resumePausedTask } from '../../utils/taskPauseFlow.js'
 import { subscribeRuntimeEvents } from '../../utils/runtimeEventBus.js'
 import { getEditableUserMessageText, hasMessageAttachments } from '../../utils/messageActions.js'
+import { notifyConversationPlanModeChanged, openTaskPlanDetail } from '../../utils/conversationPlanMode.js'
 
 export function useProjectManager(props, emit) {
   // 搜索跳转高亮
@@ -114,6 +115,7 @@ export function useProjectManager(props, emit) {
   const projectFeishuBindingOpen = ref(false)
   const projectFeishuBindingBusy = ref(false)
   const messages = ref([])
+  const projectSessionExecutionEvents = ref([])
   const messagesEl = ref(null)
   const chatInput = ref('')
   const {
@@ -471,8 +473,10 @@ export function useProjectManager(props, emit) {
   const selectProject = async (name) => {
     if (isStreaming.value) detachProjectStream()
     showLogsPanel.value = false
-    currentProject.value = name
+    messages.value = []
+    projectSessionExecutionEvents.value = []
     currentSession.value = null
+    currentProject.value = name
     currentSessionDraft.value = false
     selectedRuntimeProfileId.value = ''
     projectTools.value = { mcp: [], skill: [] }
@@ -553,6 +557,7 @@ export function useProjectManager(props, emit) {
     ])
     if (sequence !== projectSessionRefreshSequence || project !== currentProject.value || sessionId !== currentSession.value) return false
     messages.value = await hydrateProjectTaskMessages(detail.history || [], project, sessionId)
+    projectSessionExecutionEvents.value = Array.isArray(detail.execution_events) ? detail.execution_events : []
     if (wasPinned) nextTick(() => scrollToBottom({ force: true }))
     return true
   }
@@ -577,13 +582,15 @@ export function useProjectManager(props, emit) {
   const selectSession = async (sessionId, newSession = false) => {
     if (isStreaming.value) detachProjectStream()
     const project = currentProject.value
-    currentSession.value = sessionId
     currentSessionDraft.value = false
     currentSessionNew.value = newSession
     if (project) localStorage.setItem(`ccm:project-session:${project}`, sessionId)
     const data = await sessionsApi.detail(project, sessionId)
-    if (project !== currentProject.value || sessionId !== currentSession.value) return
+    if (project !== currentProject.value) return
     messages.value = await hydrateProjectTaskMessages(data.history || [], project, sessionId)
+    if (project !== currentProject.value) return
+    projectSessionExecutionEvents.value = Array.isArray(data.execution_events) ? data.execution_events : []
+    currentSession.value = sessionId
     scrollToBottom({ force: true })
   }
 
@@ -981,6 +988,10 @@ export function useProjectManager(props, emit) {
         emit('switch-tab', 'global-agent')
         return
       }
+      if (action.kind === 'open_plan_detail') {
+        openTaskPlanDetail(id)
+        return
+      }
       if (action.kind === 'confirm_plan') {
         const data = await postTaskAction('/api/projects/main-agent/plan-confirm', {
           task_id: id,
@@ -989,13 +1000,20 @@ export function useProjectManager(props, emit) {
           project_session_id: currentSession.value,
         })
         pendingProjectParentRunId.value = data.resume_parent_run_id || id
+        notifyConversationPlanModeChanged({
+          scope: 'project',
+          scopeId: currentProject.value,
+          exactSessionId: currentSession.value,
+          enabled: false,
+          mode: 'agent',
+        })
         chatInput.value = '我确认按当前计划执行。'
         await nextTick()
         await sendMessage()
         return
       }
       if (action.kind === 'revise_plan') {
-        const requirement = window.prompt('需要怎样调整这份计划？', '')
+        const requirement = String(action.feedback || '').trim() || window.prompt('需要怎样调整这份计划？', '')
         if (!requirement) return
         msg.taskActionBusy = true
         try {
@@ -1308,9 +1326,15 @@ export function useProjectManager(props, emit) {
   }
 
   const resolveProjectQueuedRoute = async (turn, choice) => {
-    await projectTurnControl.resolveRoute(turn, choice)
-    toast.success(choice === 'continue_original' ? '将继续原任务' : choice === 'answer_only' ? '将只回答这条消息' : '将作为新任务处理')
-    window.setTimeout(() => drainProjectTurnQueue().catch(() => {}), 0)
+    try {
+      const resolved = await projectTurnControl.resolveRoute(turn, choice)
+      if (!resolved) return
+      toast.success(choice === 'continue_original' ? '正在继续原任务' : choice === 'answer_only' ? '正在回答这条消息' : '正在作为新任务处理')
+      await drainProjectTurnQueue()
+    } catch (error) {
+      toast.error(error?.message || '消息处理方式提交失败，请重试')
+      await projectTurnControl.refresh().catch(() => {})
+    }
   }
 
   // Leaving the page or switching project/session only detaches the browser
@@ -1437,7 +1461,14 @@ export function useProjectManager(props, emit) {
         } else if (data.type === 'presentation') {
           const mode = String(data.message_mode || data.messageMode || 'conversation')
           agentMsg.messageMode = mode
-          if (data.prePlanClarification || data.pre_plan_clarification) agentMsg.prePlanClarification = data.prePlanClarification || data.pre_plan_clarification
+          if (data.prePlanClarification || data.pre_plan_clarification) {
+            agentMsg.prePlanClarification = data.prePlanClarification || data.pre_plan_clarification
+            agentMsg.pre_plan_clarification = agentMsg.prePlanClarification
+          }
+          if (data.clarificationSummary || data.clarification_summary) {
+            agentMsg.clarificationSummary = data.clarificationSummary || data.clarification_summary
+            agentMsg.clarification_summary = agentMsg.clarificationSummary
+          }
         } else if (data.type === 'task_runtime' || data.type === 'task_heartbeat') {
           if (data.message_id) agentMsg.id = data.message_id
           agentMsg.projectRun = data.run || agentMsg.projectRun
@@ -1489,7 +1520,14 @@ export function useProjectManager(props, emit) {
           agentMsg.interruption = null
           agentMsg.streaming = false
           agentMsg.completedAt = data.completed_at || data.completedAt || new Date().toISOString()
-          if (data.prePlanClarification || data.pre_plan_clarification) agentMsg.prePlanClarification = data.prePlanClarification || data.pre_plan_clarification
+          if (data.prePlanClarification || data.pre_plan_clarification) {
+            agentMsg.prePlanClarification = data.prePlanClarification || data.pre_plan_clarification
+            agentMsg.pre_plan_clarification = agentMsg.prePlanClarification
+          }
+          if (data.clarificationSummary || data.clarification_summary) {
+            agentMsg.clarificationSummary = data.clarificationSummary || data.clarification_summary
+            agentMsg.clarification_summary = agentMsg.clarificationSummary
+          }
         } else if (data.type === 'error') {
           if (data.message_id) agentMsg.id = data.message_id
           addAgentMessage()
@@ -1577,7 +1615,9 @@ export function useProjectManager(props, emit) {
         const detail = error?.message || '连接中断'
         agentMsg.content = agentMsg.content
           ? `${agentMsg.content}\n\n连接中断，已保留收到的内容。你可以继续追问或重新发送。`
-          : `这次没有完成：${detail}。请检查项目 Agent 状态后重试。`
+          : /请重试|请稍后/.test(detail)
+            ? `这次没有完成：${detail}`
+            : `这次没有完成：${detail}。请检查项目 Agent 状态后重试。`
         if (!responseAccepted && !resumableMessage) {
           chatInput.value = msg
           chatFiles.value = filesToSend
@@ -1615,6 +1655,9 @@ export function useProjectManager(props, emit) {
       if (currentSessionNew.value && userPersisted && agentMsg.content) {
         currentSessionNew.value = false
         autoNameSession(projectAtSend, sessionAtSend, msg)
+      }
+      if (!routeRequired && userPersisted && agentMsg.id) {
+        void reconcileProjectConversationReply(projectAtSend, sessionAtSend, agentMsg.id)
       }
       scrollToBottom()
       if (!queuedTurn) window.setTimeout(() => drainProjectTurnQueue().catch(() => {}), 0)
@@ -2259,7 +2302,7 @@ export function useProjectManager(props, emit) {
     ProjectSharedFilesModal, ProjectAgentSwitchModal, ProjectWorkspaceHeader, ProjectSessionSidebar, ProjectArchiveManager, ProjectRuntimeBar, ProjectRuntimeConfigModal, ProjectRunConsole, GroupTestTargetsModal, PanelLeft,
     highlightMsgIndex, handleNavigation, scrollToMessage, projects, currentProject, currentSession, currentSessionDraft, hasProjectConversation,
     sessions, projectFeishuTargets, projectFeishuBindingSession, projectFeishuBindingOpen, projectFeishuBindingBusy,
-    messages, messagesEl, chatInput, isMessagesPinnedToBottom, updateMessageScrollState,
+    messages, projectSessionExecutionEvents, messagesEl, chatInput, isMessagesPinnedToBottom, updateMessageScrollState,
     scrollToBottom, attachMessagesResizeObserver, detachMessagesResizeObserver, navMessages, codeChangeDrawer, openCodeChangeDrawer,
     pendingProjectProgressCount, notifyProjectProgress, jumpToLatestProjectProgress, resetProjectPinnedScroll,
     openSingleFileChange, closeCodeChangeDrawer, slashNavigate, runProjectClientCommand, slash,

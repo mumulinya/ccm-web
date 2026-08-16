@@ -29,10 +29,28 @@ const eventApi = require(path.join(root, "ccm-package", "dist", "system", "user-
 assert.equal(workspace.runWorkspaceReadonlyToolsSelfTest().success, true);
 assert.equal(ccLimits.CC_ALIGNED_FILE_READ_MAX_TOKENS, 25_000);
 assert.equal(ccLimits.CC_ALIGNED_TOOL_RESULT_MAX_TOKENS, 100_000);
+assert.equal(ccLimits.CC_ALIGNED_GLOB_MAX_RESULTS, 100);
+assert.equal(ccLimits.CC_ALIGNED_GREP_DEFAULT_HEAD_LIMIT, 250);
 assert.ok(workspace.WORKSPACE_READONLY_TOOL_DEFINITIONS_V2.length >= 21);
 const readSchema = workspace.WORKSPACE_READONLY_TOOL_DEFINITIONS_V2.find(tool => tool.name === "read_file")?.inputSchema;
 assert.equal(readSchema?.properties?.limit?.maximum, 2_000);
-assert.equal(readSchema?.properties?.token_budget?.maximum, 25_000);
+assert.equal(readSchema?.properties?.token_budget, undefined);
+assert.equal(workspace.WORKSPACE_READONLY_TOOL_DEFINITIONS_V3.find(tool => tool.name === "read_file")?.inputSchema?.properties?.token_budget, undefined);
+assert.equal(workspace.WORKSPACE_READONLY_TOOL_DEFINITIONS_V3.find(tool => tool.name === "read_files")?.inputSchema?.properties?.token_budget, undefined);
+assert.equal(workspace.WORKSPACE_READONLY_TOOL_DEFINITIONS_V2.find(tool => tool.name === "glob_files")?.inputSchema?.properties?.limit?.maximum, 100);
+assert.equal(workspace.WORKSPACE_READONLY_TOOL_DEFINITIONS_V3.find(tool => tool.name === "glob_files")?.inputSchema?.properties?.limit?.maximum, 100);
+assert.equal(workspace.WORKSPACE_READONLY_TOOL_DEFINITIONS_V2.find(tool => tool.name === "list_directory")?.inputSchema?.properties?.limit?.maximum, 100);
+assert.equal(workspace.WORKSPACE_READONLY_TOOL_DEFINITIONS_V3.find(tool => tool.name === "list_directory")?.inputSchema?.properties?.limit?.maximum, 100);
+const webFetchSchema = workspace.WORKSPACE_READONLY_TOOL_DEFINITIONS_V2.find(tool => tool.name === "web_fetch")?.inputSchema;
+assert.ok(webFetchSchema?.required?.includes("prompt"));
+assert.equal(webFetchSchema?.properties?.max_chars, undefined);
+assert.ok(workspace.WORKSPACE_READONLY_TOOL_DEFINITIONS_V3.find(tool => tool.name === "web_fetch")?.inputSchema?.required?.includes("prompt"));
+assert.equal(workspace.WORKSPACE_READONLY_TOOL_DEFINITIONS_V3.find(tool => tool.name === "web_fetch")?.inputSchema?.properties?.max_chars, undefined);
+assert.match(workspace.WORKSPACE_READONLY_TOOL_DEFINITIONS_V3.find(tool => tool.name === "read_file")?.description || "", /最多读取2000行/);
+const htmlMd = require(path.join(root, "ccm-package", "dist", "tools", "html-to-light-markdown.js"));
+assert.match(htmlMd.htmlToLightMarkdown("<h1>Hello</h1><p>See <a href=\"https://example.com\">docs</a></p><pre>code()</pre>"), /# Hello/);
+assert.match(htmlMd.htmlToLightMarkdown("<h1>Hello</h1><p>See <a href=\"https://example.com\">docs</a></p><pre>code()</pre>"), /\[docs\]\(https:\/\/example.com\)/);
+assert.match(htmlMd.htmlToLightMarkdown("<h1>Hello</h1><p>See <a href=\"https://example.com\">docs</a></p><pre>code()</pre>"), /```[\s\S]*code\(\)/);
 const token = workspace.sealScopedToolCapability({ scope: "project", scopeId: "alpha", exactSessionId: "pchat-alpha", generation: 3, allowedProjects: ["alpha"] });
 assert.equal(workspace.openScopedToolCapability(token).exactSessionId, "pchat-alpha");
 
@@ -62,9 +80,12 @@ assert.equal(persistedReadDisplay.result.rehydratable, true);
 const rehydratedReadDisplay = await eventApi.rehydrateReadonlyToolDetail({
   scope: "project", scopeId: "alpha", exactSessionId: "pchat-alpha", generation: 3,
   toolName: "mcp__ccm__ccm_workspace_readonly__read_file", toolCallId: "read-call",
-  detail: { safeArguments: { path: "src/service.ts", offset: 1, limit: 1 } },
+  detail: { safeArguments: { path: "src/service.ts", offset: 1, limit: 1 }, toolDisplay: persistedReadDisplay },
 });
 assert.equal(JSON.stringify(rehydratedReadDisplay).includes("export function alpha"), true);
+assert.equal(rehydratedReadDisplay.result.fileRows.length, 1);
+assert.equal(rehydratedReadDisplay.result.fileRows[0].freshness, "current");
+assert.equal(rehydratedReadDisplay.result.fileRows[0].observedChecksum, rehydratedReadDisplay.result.fileRows[0].currentChecksum);
 const searchDisplay = toolDisplay.buildToolDisplayDetail({ toolName: "mcp__ccm__ccm_workspace_readonly__grep_text", arguments: { pattern: "alpha" }, result: { lines: [], total: 0 } });
 assert.equal(searchDisplay.tool.family, "search");
 assert.equal(searchDisplay.tool.userLabel, "搜索代码");
@@ -76,6 +97,20 @@ await assert.rejects(() => eventApi.rehydrateReadonlyToolDetail({
   scope: "project", scopeId: "alpha", exactSessionId: "pchat-alpha", generation: 3,
   toolName: "mcp__external__write_file", toolCallId: "write-call", detail: { safeArguments: { path: "src/service.ts" } },
 }), /不支持安全详情重取/);
+assert.equal(toolDisplay.isWorkspaceReadonlyToolName("read_files"), true);
+assert.equal(toolDisplay.isWorkspaceReadonlyToolName("mcp__ccm__ccm_workspace_readonly__read_files"), true);
+assert.equal(toolDisplay.workspaceReadonlyContractVersion("read_files"), 3);
+const shortNameBatch = await eventApi.rehydrateReadonlyToolDetail({
+  scope: "project", scopeId: "alpha", exactSessionId: "pchat-alpha", generation: 3,
+  toolName: "read_files", toolCallId: "batch-read-short",
+  detail: {
+    safeArguments: { paths: ["package.json", "src/service.ts"] },
+    toolDisplay: toolDisplay.buildToolDisplayDetail({ toolName: "read_files", arguments: { paths: ["package.json", "src/service.ts"] }, result: {} }),
+  },
+});
+assert.equal(shortNameBatch.result.fileRows.length, 2);
+assert.ok(shortNameBatch.result.fileRows.some(file => file.path === "package.json" && Array.isArray(file.lines) && file.lines.length > 0));
+assert.ok(JSON.stringify(shortNameBatch.result.fileRows).includes("alpha"));
 const secondRead = await workspace.executeWorkspaceReadonlyTool("read_file", { path: "src/service.ts", offset: Number(firstRead.next_cursor), limit: 20 }, token);
 assert.equal(secondRead.lines[0].line, 2);
 await assert.rejects(() => workspace.executeWorkspaceReadonlyTool("read_file", { path: ".env" }, token), /敏感文件/);
@@ -88,12 +123,34 @@ const definitionResult = await workspace.executeWorkspaceReadonlyTool("find_defi
 assert.equal(definitionResult.locations.some(location => location.path === "src/service.ts"), true);
 const firstIndexGeneration = definitionResult.indexGeneration;
 fs.appendFileSync(path.join(project, "src", "service.ts"), "\nexport function beta() { return alpha(); }\n");
+const driftedReadDisplay = await eventApi.rehydrateReadonlyToolDetail({
+  scope: "project", scopeId: "alpha", exactSessionId: "pchat-alpha", generation: 3,
+  toolName: "mcp__ccm__ccm_workspace_readonly__read_file", toolCallId: "read-call",
+  detail: { safeArguments: { path: "src/service.ts", offset: 1, limit: 1 }, toolDisplay: persistedReadDisplay },
+});
+assert.equal(driftedReadDisplay.result.fileRows[0].freshness, "drifted");
+assert.notEqual(driftedReadDisplay.result.fileRows[0].observedChecksum, driftedReadDisplay.result.fileRows[0].currentChecksum);
 const incrementalResult = await workspace.executeWorkspaceReadonlyTool("workspace_symbols", { query: "beta", limit: 20 }, token);
 assert.equal(incrementalResult.locations.some(location => location.symbol === "beta"), true);
 assert.ok(incrementalResult.indexGeneration > firstIndexGeneration);
 
+const groupToken = workspace.sealScopedToolCapability({ scope: "group", scopeId: "g1", exactSessionId: "gs1", generation: 1, allowedProjects: ["alpha"] });
+const groupListing = await workspace.executeWorkspaceReadonlyTool("list_directory", { path: "", limit: 20 }, groupToken);
+assert.equal(groupListing.project, "alpha");
+assert.equal(groupListing.items.some(item => item.name === "src"), true);
+const multiToken = workspace.sealScopedToolCapability({ scope: "group", scopeId: "g1", exactSessionId: "gs1", generation: 1, allowedProjects: ["alpha", "beta"] });
+const needProject = await workspace.executeWorkspaceReadonlyTool("list_directory", { path: "", limit: 20 }, multiToken);
+assert.equal(needProject.status, "needs_project_id");
+assert.deepEqual(needProject.available_projects, ["alpha", "beta"]);
+const needDisplay = toolDisplay.buildToolDisplayDetail({ toolName: "mcp__ccm__ccm_workspace_readonly__list_directory", arguments: { path: "" }, result: needProject });
+assert.equal(needDisplay.result.kind, "summary");
+assert.match(needDisplay.result.summary, /请选择要查看的项目/);
+assert.equal(needDisplay.result.kind !== "error", true);
+
 const globalToken = workspace.sealScopedToolCapability({ scope: "global", scopeId: "global-agent", exactSessionId: "gas-alpha", generation: 1, allowedProjects: ["alpha"] });
 await assert.rejects(() => workspace.executeWorkspaceReadonlyTool("read_file", { project_id: "beta", path: "package.json" }, globalToken), /无权读取项目/);
+const globalUnique = await workspace.executeWorkspaceReadonlyTool("list_directory", { path: "", limit: 20 }, globalToken);
+assert.equal(globalUnique.project, "alpha");
 const expired = workspace.sealScopedToolCapability({ scope: "project", scopeId: "alpha", exactSessionId: "pchat-alpha", generation: 1, allowedProjects: ["alpha"], issuedAt: "2020-01-01T00:00:00.000Z", expiresAt: "2020-01-01T00:01:00.000Z" });
 assert.throws(() => workspace.openScopedToolCapability(expired), /已过期/);
 
@@ -107,6 +164,9 @@ assert.equal(context.schema, "ccm-main-agent-tool-runtime-context-v2");
 assert.deepEqual(context.catalog.loadedMcp.filter(tool => tool.server === "ccm__workspace_readonly").map(tool => tool.name).sort(), ["glob_files", "grep_text", "list_directory", "read_file", "read_files"]);
 assert.match(context.policyPrompt, /可直接使用的工作区工具/);
 assert.match(context.policyPrompt, /- read_file:/);
+assert.match(context.policyPrompt, /默认一次读完/);
+assert.equal(context.policyPrompt.includes("首轮读取预算"), false);
+assert.equal(context.policyPrompt.includes("不超过8000"), false);
 assert.equal(context.policyPrompt.includes("mcp__ccm__ccm_workspace_readonly__read_file"), false);
 assert.equal(context.catalog.discoverableMcp.length, workspace.WORKSPACE_READONLY_TOOL_DEFINITIONS_V3.length - 5);
 const emptyGroupContext = mainRuntime.buildMainAgentToolRuntimeContext({
@@ -177,7 +237,6 @@ const resilientBatchRead = await mainRuntime.executeMainAgentToolRequests({
         { path: "root.ts", offset: 1, limit: 20 },
         { path: "src", offset: 1, limit: 20 },
       ],
-      token_budget: 5_000,
     },
     reason: "preserve successful files when one batch item fails",
   }],
@@ -189,7 +248,7 @@ assert.equal(resilientBatchPayload.item_count, 3);
 assert.equal(resilientBatchPayload.read_count, 2);
 assert.equal(resilientBatchPayload.failed_count, 1);
 assert.equal(resilientBatchPayload.status, "partial");
-assert.equal(resilientBatchPayload.files[0].status, "partial");
+assert.equal(resilientBatchPayload.files[0].status, "read");
 assert.equal(resilientBatchPayload.files[1].status, "read");
 assert.equal(resilientBatchPayload.files[2].status, "failed");
 assert.match(resilientBatchPayload.files[2].error, /目标不是文件/);
@@ -203,7 +262,7 @@ assert.match(resilientBatchDisplay.result.summary, /成功读取 2 个，1 个�
 assert.equal(resilientBatchDisplay.result.total, 3);
 assert.equal(resilientBatchDisplay.result.rows.find(row => row.path === "src")?.status, "读取失败");
 const failedBatchRead = await mainRuntime.executeMainAgentToolRequests({
-  requests: [{ name: "read_files", arguments: { paths: ["src"], token_budget: 2_000 }, reason: "surface an all-failed batch as failure" }],
+  requests: [{ name: "read_files", arguments: { paths: ["src"] }, reason: "surface an all-failed batch as failure" }],
   toolContext: context,
 });
 assert.equal(failedBatchRead[0].ok, false);
@@ -295,10 +354,12 @@ assert.deepEqual(executionOrder, ["start:read_a", "end:read_a", "start:write_c",
 
 const projectSource = fs.readFileSync(path.join(root, "backend", "modules", "projects", "project-main-agent.ts"), "utf8");
 const groupSource = fs.readFileSync(path.join(root, "backend", "modules", "collaboration", "group-orchestrator-llm.ts"), "utf8");
+const nativeLoop = fs.readFileSync(path.join(root, "backend", "agents", "native-query-loop.ts"), "utf8");
 assert.equal((projectSource.match(/hydrateProjectConfiguredTools\(\{/g) || []).length, 0);
 assert.equal(groupSource.includes('canonicalName: "read_project_source"'), false);
-assert.equal(projectSource.includes("while (true)"), true);
-assert.equal(groupSource.includes("while (true)"), true);
+assert.equal(nativeLoop.includes("while (true)"), true);
+assert.equal(projectSource.includes("runProjectMainNativeQueryLoop"), true);
+assert.equal(groupSource.includes("runGroupMainNativeQueryLoop"), true);
 assert.equal(projectSource.includes("for (let round = 0; round <= loopBudget.maxToolRounds"), false);
 assert.equal(groupSource.includes("for (let round = 0; round <= loopBudget.maxToolRounds"), false);
 

@@ -113,6 +113,31 @@ function projectExecutionEvents(data: any) {
   return normalizeSessionExecutionEvents(data?.execution_history || data?.executionHistory);
 }
 
+export function listProjectSessionExecutionEvents(projectInput: string, projectSessionIdInput: string) {
+  try {
+    const project = validateProjectName(projectInput);
+    const projectSessionId = validateSessionId(projectSessionIdInput);
+    const file = sessionFile(project, projectSessionId);
+    if (!fs.existsSync(file)) return [];
+    return projectExecutionEvents(JSON.parse(fs.readFileSync(file, "utf8")));
+  } catch {
+    return [];
+  }
+}
+
+export function listProjectSessionHistoryMessages(projectInput: string, projectSessionIdInput: string) {
+  try {
+    const project = validateProjectName(projectInput);
+    const projectSessionId = validateSessionId(projectSessionIdInput);
+    const file = sessionFile(project, projectSessionId);
+    if (!fs.existsSync(file)) return [];
+    const data = JSON.parse(fs.readFileSync(file, "utf8"));
+    return (Array.isArray(data.history) ? data.history : []).filter((message: any) => ["user", "assistant"].includes(String(message?.role || "")));
+  } catch {
+    return [];
+  }
+}
+
 function projectExecutionForMessages(data: any, messages: any[]) {
   return eventsAnchoredToMessages(projectExecutionEvents(data), messages);
 }

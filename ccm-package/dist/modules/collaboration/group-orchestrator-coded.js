@@ -244,6 +244,7 @@ const crypto = __importStar(require("crypto"));
 const atomic_json_file_1 = require("../../core/atomic-json-file");
 const runtime_kernel_1 = require("../../agents/runtime-kernel");
 const group_memory_index_1 = require("./group-memory-index");
+const clarification_turn_1 = require("../../agents/clarification-turn");
 const group_orchestrator_routing_1 = require("./group-orchestrator-routing");
 const group_orchestrator_prompts_1 = require("./group-orchestrator-prompts");
 // ===== merged from group-orchestrator-coded-part-01.ts =====
@@ -704,9 +705,11 @@ function normalizeDispatchPolicy(parsed, analysis, targets) {
     const rawAction = String(parsed?.dispatchPolicy?.action || parsed?.dispatchAction || "").trim();
     const allowed = new Set(["direct_answer", "ask_user", "delegate", "hold"]);
     const parsedRequiresConfirmation = !!(parsed?.dispatchPolicy?.requiresConfirmation || parsed?.requiresConfirmation);
-    const action = allowed.has(rawAction)
-        ? rawAction
-        : targets.length > 0 ? "delegate" : analysis.missingInfo?.length ? "ask_user" : "direct_answer";
+    const action = (0, clarification_turn_1.parsedRequestsUserClarification)(parsed)
+        ? "ask_user"
+        : allowed.has(rawAction)
+            ? rawAction
+            : targets.length > 0 ? "delegate" : analysis.missingInfo?.length ? "ask_user" : "direct_answer";
     const reason = String(parsed?.dispatchPolicy?.reason || parsed?.dispatchReason || "").trim();
     return buildDispatchPolicy(action, reason, analysis, {
         requiresConfirmation: parsedRequiresConfirmation,

@@ -41,6 +41,7 @@ import {
   isLegacyNonTaskCard,
   getTaskCard,
   shouldShowOrchestrationPlan,
+  isGroupModelFailureMessage,
   isInternalProtocolMessage,
   getMessageTaskId,
   isPrimaryTaskMessage as isPrimaryTaskMessagePure,
@@ -161,7 +162,7 @@ export function useGroupChat(props, emit) {
     jumpToLatest: jumpToLatestGroupProgress,
     resetPinnedScroll: resetGroupPinnedScroll,
   } = usePinnedScroll(groupMessagesEl, { observeRef: groupMessagesContentEl })
-  const { navMessages } = useMessageNavigation(messages, { getAssistantContent: (message) => getVisibleGroupMessageContent(message, '这条回复已整理，技术细节已放入技术详情。') })
+  const { navMessages } = useMessageNavigation(messages, { getAssistantContent: (message) => getVisibleGroupMessageContent(message, '这条回复已整理。') })
 
   const scrollToMessage = (originalIndex) => {
     const el = document.getElementById(`gc-msg-${originalIndex}`)
@@ -564,6 +565,7 @@ export function useGroupChat(props, emit) {
     appendAgentWorkEvent,
     appendAgentQaMessage,
     applyMainAgentProgressCheckpoint,
+    restoreLiveGroupStreamIfCurrent,
     isStreaming,
     thinkingMessages,
     pendingGroupSendRetry,
@@ -572,6 +574,7 @@ export function useGroupChat(props, emit) {
     stoppingGroupTurn,
     groupTurnConversationId,
     groupTurnControl,
+    groupTurnBusy,
     stopGroupCurrentWork,
     drainGroupTurnQueue,
     guideGroupQueuedTurn,
@@ -691,9 +694,15 @@ export function useGroupChat(props, emit) {
   const loadMessages = async (limit = 100) => {
     if (!currentGroup.value) return
     if (isGroupSessionDraft.value) return false
-    const data = await groupsApi.messages(currentGroup.value.id, limit, currentGroupSessionId.value)
+    const groupId = currentGroup.value.id
+    const requestedSessionId = String(currentGroupSessionId.value || '')
+    const data = await groupsApi.messages(groupId, limit, requestedSessionId)
+    if (currentGroup.value?.id !== groupId) return
+    if (requestedSessionId && String(currentGroupSessionId.value || '') !== requestedSessionId) return
     groupSessions.value = data.sessions || groupSessions.value
-    currentGroupSessionId.value = data.sessionId || currentGroupSessionId.value || groupSessions.value[0]?.id || ''
+    if (!requestedSessionId) {
+      currentGroupSessionId.value = data.sessionId || currentGroupSessionId.value || groupSessions.value[0]?.id || ''
+    }
     try {
       const protocolRes = await fetch(`/api/agent-collaboration/protocol?group_id=${encodeURIComponent(currentGroup.value.id)}&limit=100`)
       collaborationProtocol.value = protocolRes.ok ? await protocolRes.json() : null
@@ -704,6 +713,7 @@ export function useGroupChat(props, emit) {
     mainAgentStatus.value = data.mainAgentStatus || null
     groupAgentQa.value = data.agentQa || []
     messages.value = (data.messages || []).filter(m => !m.content?.startsWith('📤'))
+    restoreLiveGroupStreamIfCurrent()
     syncPendingGroupClarificationInput()
     scrollToBottom({ force: true })
     // 延迟多次滚动，防范 Markdown/Diff 渲染等重排引起的高度时差
@@ -734,6 +744,7 @@ export function useGroupChat(props, emit) {
   const handleTaskCardAction = createGroupTaskCardActionHandler({
     getTaskCard,
     getCurrentGroup: () => currentGroup.value,
+    getExactSessionId: () => currentGroupSessionId.value,
     openCodeChangeDrawer,
     openPipelineViewer,
     openTraceReplay,
@@ -752,6 +763,7 @@ export function useGroupChat(props, emit) {
     isGroupSessionDraft.value = false
     currentGroupSessionId.value = sessionId
     messages.value = []
+    restoreLiveGroupStreamIfCurrent()
     await loadMessages()
     startGroupPolling()
   }
@@ -807,7 +819,6 @@ export function useGroupChat(props, emit) {
 
   const createGroupSession = async () => {
     if (!currentGroup.value) return
-    if (isStreaming.value) await stopGroupCurrentWork({ preserveTask: true })
     stopGroupPolling()
     currentGroupSessionId.value = ''
     isGroupSessionDraft.value = true
@@ -989,7 +1000,7 @@ export function useGroupChat(props, emit) {
     contextCompactionEvent,
     getWorkEvents, agentAccentPalette, hashAgent, getAgentAccent, getAgentAccentStyle, getAgentInitials,
     getWorkPanelState, getAgentMessageStatus, isGroupMainAgentMessage, getTaskRuntime, isLegacyNonTaskCard,
-    getTaskCard, shouldShowOrchestrationPlan, isInternalProtocolMessage, getMessageTaskId,
+    getTaskCard, shouldShowOrchestrationPlan, isGroupModelFailureMessage, isInternalProtocolMessage, getMessageTaskId,
     isPrimaryTaskMessage, shouldShowGroupMessage, isPrimaryTaskCard, handleTaskCardAction,
     taskRuntimeStatusLabel, taskRuntimeAgentState, taskRuntimeGreenLabel, applyTransientTaskRuntime,
     latestTestAgentFallbackTaskId, resolveTestAgentFallbackTaskId,
@@ -1010,7 +1021,7 @@ export function useGroupChat(props, emit) {
     handleKeydown, highlightMentions, updateCreateGroupProjectSelection,
     submitCreateGroup, submitRename, deleteGroup, clearGroupMessages, saveCurrentGroupConversationKnowledge,
     isStreaming, thinkingMessages, pendingGroupSendRetry, groupStreamController, activeGroupTaskId,
-    stoppingGroupTurn, groupTurnConversationId, groupTurnControl, stopGroupCurrentWork, drainGroupTurnQueue, guideGroupQueuedTurn, resolveGroupQueuedRoute,
+    stoppingGroupTurn, groupTurnConversationId, groupTurnControl, groupTurnBusy, stopGroupCurrentWork, drainGroupTurnQueue, guideGroupQueuedTurn, resolveGroupQueuedRoute,
     submitGroupMessageWhileBusy, groupSendRetrySignature, sendMessage, editGroupUserMessage, handleGroupModelFailureAction, waitingCrossReply, pullNewMessages,
     logs, logFilter, logEventSource, logsResizeObserver, scrollLogsToBottom, loadLogs, startLogStream,
     stopLogStream, clearLogs, normalizeGroupTools, loadAvailableGroupTools, loadGroupTools, toggleGroupTool, updateGroupContextPolicy,

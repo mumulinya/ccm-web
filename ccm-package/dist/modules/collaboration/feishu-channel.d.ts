@@ -294,6 +294,7 @@ export declare function runFeishuChannelSelfTest(): {
         progress_status_supported: boolean;
         test_agent_event_supported: boolean;
         plan_event_supported: boolean;
+        presented_plan_markdown: boolean;
         cross_process_delivery_lease: boolean;
         secrets_redacted: boolean;
     };

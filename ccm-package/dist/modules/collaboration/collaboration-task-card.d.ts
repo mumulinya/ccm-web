@@ -6372,6 +6372,8 @@ export declare function buildTaskCardView(task: any, executions: any[], sessions
     plan_mode: {
         title: any;
         mode: any;
+        confirmation_kind: any;
+        session_plan_mode: boolean;
         requires_confirmation: boolean;
         auto_continue: boolean;
         confirmation_status: any;

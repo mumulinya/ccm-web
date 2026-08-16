@@ -19,6 +19,15 @@ export declare function runGlobalAgentPlanModeSelfTest(): {
         writeToolBlocked: boolean;
         unknownToolClosed: boolean;
         directActionBlocked: boolean;
+        holdClearsDispatch: boolean;
+        holdClearsProjectDelegate: boolean;
+        readToolsPass: boolean;
+        writeToolsHeld: boolean;
+        unknownToolsHeld: boolean;
+        disabledDoesNotHold: boolean;
+        readToolOpen: boolean;
+        groupSessionWins: boolean;
+        projectIdentityResolved: boolean;
     };
 };
 export {};

@@ -1,4 +1,5 @@
 import * as crypto from "crypto";
+import { parsedRequestsUserClarification } from "./clarification-turn";
 import { normalizeWorkflowDecision, type WorkflowDecision } from "./workflow-decision";
 
 export type MainAgentTurnResponseKind = "reply" | "tool_calls" | "clarify" | "plan" | "dispatch";
@@ -62,15 +63,17 @@ export function normalizeMainAgentTurnDecision(input: {
       reason: String(item?.reason || "").trim(),
     }))
     .filter((item: any) => item.name);
-  const reply = String(input.reply ?? parsed.directResponse ?? parsed.direct_response ?? parsed.friendlyResponse ?? parsed.friendly_response ?? parsed.message ?? "").trim();
+  const reply = String(input.reply ?? parsed.reply ?? parsed.questionForUser ?? parsed.question_for_user ?? parsed.directResponse ?? parsed.direct_response ?? parsed.friendlyResponse ?? parsed.friendly_response ?? parsed.message ?? "").trim();
   const planDraft = input.planDraft ?? parsed.plan ?? parsed.coordinationPlan ?? parsed.coordination_plan ?? null;
   const dispatchDraft = input.dispatchDraft ?? parsed.targets ?? parsed.assignments ?? null;
   const explicitResponseKind = String(parsed.responseType || parsed.response_type || "").trim() as MainAgentTurnResponseKind;
-  const responseKind: MainAgentTurnResponseKind = toolRequests.length
-    ? "tool_calls"
-    : workflowDecision.structuredClarificationQuestions.length || workflowDecision.clarificationQuestions.length || String(parsed.questionForUser || parsed.question_for_user || "").trim()
+  const responseKind: MainAgentTurnResponseKind = ["dispatch", "plan"].includes(explicitResponseKind)
+    ? explicitResponseKind
+    : parsedRequestsUserClarification(parsed) || workflowDecision.structuredClarificationQuestions.length || workflowDecision.clarificationQuestions.length
       ? "clarify"
-    : ["reply", "clarify", "plan", "dispatch"].includes(explicitResponseKind)
+    : toolRequests.length
+      ? "tool_calls"
+    : ["reply", "clarify"].includes(explicitResponseKind)
       ? explicitResponseKind
       : workflowDecision.mode === "decompose_epic" || (Array.isArray(dispatchDraft) && dispatchDraft.length)
         ? "dispatch"

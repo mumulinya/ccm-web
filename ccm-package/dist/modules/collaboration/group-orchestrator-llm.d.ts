@@ -82,15 +82,7 @@ export declare function buildLlmCoordinatorMessages(input: {
     mainAgentToolResults?: any[];
     main_agent_tool_results?: any[];
     workflowDecision?: WorkflowDecision | null;
-}): ({
-    role: string;
-    content: string;
-    contextBlockType?: undefined;
-} | {
-    role: string;
-    contextBlockType: string;
-    content: any;
-})[];
+}): import("./group-orchestrator-llm-client").LlmChatMessage[];
 export declare function buildLlmCoordinatorContextComponents(input: {
     group: any;
     message: string;
@@ -111,7 +103,7 @@ export declare function buildLlmCoordinatorContextComponents(input: {
 };
 export declare function normalizeDocumentFindings(parsed: any): any;
 export declare function enrichTaskWithDocumentFindings(task: string, findings: string[]): string;
-export declare function sanitizeLlmTargets(group: any, parsed: any, message: string, fallbackAnalysis: any, allowRuleRepair?: boolean): any[];
+export declare function sanitizeLlmTargets(group: any, parsed: any, message: string, fallbackAnalysis: any, allowRuleRepair?: boolean, dispatchContext?: any): any[];
 export declare function normalizeLlmAnalysis(parsed: any, fallback: any): any;
 export declare function buildCoordinatorResultFromAnalysis(group: any, message: string, analysis: any, targets: any[], runtime: string, parsed?: any, options?: any): {
     agent: any;
@@ -248,6 +240,20 @@ export declare function runLlmGroupOrchestrator(input: {
         initialReadFileCount: number;
         initialReadTokens: number;
     };
+    presentedPlan?: {
+        steps: any;
+        scope: string[];
+        expectedResults: string[];
+        exclusions: string[];
+        status: "ready" | "completed" | "blocked" | "superseded" | "executing";
+        createdAt: string;
+        updatedAt: string;
+        overview?: string;
+        planId: string;
+        revision: number;
+        title: string;
+        goal: string;
+    };
     agent: any;
     delegated: any[];
     assignments: any[];
@@ -319,6 +325,20 @@ export declare function runLlmGroupOrchestrator(input: {
         fallbackStreamCount: number;
         initialReadFileCount: number;
         initialReadTokens: number;
+    };
+    presentedPlan?: {
+        steps: any;
+        scope: string[];
+        expectedResults: string[];
+        exclusions: string[];
+        status: "ready" | "completed" | "blocked" | "superseded" | "executing";
+        createdAt: string;
+        updatedAt: string;
+        overview?: string;
+        planId: string;
+        revision: number;
+        title: string;
+        goal: string;
     };
     agent: any;
     delegated: any[];

@@ -82,21 +82,9 @@ const meta = computed(() => {
   return parts.join(' · ')
 })
 const visibleSummary = computed(() => userPreview.value.summary || sanitizeUserFacingAgentText(props.msg.display_content || props.msg.content || qa.value.content || '', '协作问答进展已更新。', 260))
-const visibleQuestion = computed(() => userPreview.value.question || (qa.value.question ? sanitizeUserFacingAgentText(qa.value.question, '问题原文已放入技术详情。', 180) : ''))
-const visibleAnswer = computed(() => userPreview.value.answer || (qa.value.answer ? sanitizeUserFacingAgentText(qa.value.answer, '回答详情已放入技术详情。', 220) : ''))
+const visibleQuestion = computed(() => userPreview.value.question || (qa.value.question ? sanitizeUserFacingAgentText(qa.value.question, '问题已整理。', 180) : ''))
+const visibleAnswer = computed(() => userPreview.value.answer || (qa.value.answer ? sanitizeUserFacingAgentText(qa.value.answer, '回答已整理。', 220) : ''))
 const visibleNextAction = computed(() => userPreview.value.next_action || '')
-const evidenceText = computed(() => Array.isArray(qa.value.answer_evidence) ? qa.value.answer_evidence.slice(0, 4).join(' · ') : '')
-const technicalRows = computed(() => [
-  { label: '协调请求', value: qa.value.coordination_request_id },
-  { label: '工作项', value: qa.value.work_item_task_id },
-  { label: '问题 ID', value: qa.value.id },
-  { label: '执行', value: qa.value.execution_id },
-  { label: '路由', value: qa.value.routing?.strategy },
-  { label: '证据评分', value: qa.value.acceptance?.score != null ? qa.value.acceptance.score : '' },
-  { label: '权限模式', value: qa.value.permission_contract?.mode },
-  { label: '证据', value: evidenceText.value },
-  { label: '仲裁状态', value: qa.value.arbitration?.decision || qa.value.acceptance?.status },
-].filter(item => item.value !== undefined && item.value !== null && String(item.value).trim()))
 const canRetry = computed(() => ['failed', 'timeout', 'manual'].includes(qa.value.status))
 const canTakeover = computed(() => ['waiting', 'asking', 'timeout', 'needs_user'].includes(qa.value.status))
 const canArbitrate = computed(() => qa.value.status === 'rejected' || ['conflict', 'needs_evidence'].includes(qa.value.acceptance?.status))
@@ -138,15 +126,6 @@ const isLoading = (action) => !!props.actionLoading[`${qa.value.id}:${action}`]
     <div v-if="qa.acceptance?.reason" class="agent-qa-meta">仲裁结论：{{ sanitizeUserFacingAgentText(qa.acceptance.reason, '问答仲裁已完成。', 180) }}</div>
     <div v-if="visibleNextAction" class="agent-qa-meta">下一步：{{ visibleNextAction }}</div>
     <div v-if="qa.permission_boundary?.pass === false" class="agent-qa-question">权限门禁：检测到问答外副作用，回答未采纳。</div>
-    <details v-if="technicalRows.length" class="agent-qa-details">
-      <summary>技术详情</summary>
-      <dl>
-        <template v-for="row in technicalRows" :key="row.label">
-          <dt>{{ row.label }}</dt>
-          <dd>{{ row.value }}</dd>
-        </template>
-      </dl>
-    </details>
     <div v-if="canRetry || canTakeover || canArbitrate" class="agent-qa-actions">
       <button
         v-if="canRetry"
@@ -252,32 +231,6 @@ const isLoading = (action) => !!props.actionLoading[`${qa.value.id}:${action}`]
   color: var(--text-secondary);
   overflow-wrap: anywhere;
 }
-.agent-qa-details {
-  margin-top: 8px;
-  color: var(--text-muted);
-  font-size: 11px;
-}
-.agent-qa-details summary {
-  cursor: pointer;
-  font-weight: 800;
-}
-.agent-qa-details dl {
-  display: grid;
-  grid-template-columns: 72px minmax(0, 1fr);
-  gap: 5px 8px;
-  margin: 8px 0 0;
-  padding: 8px;
-  border: 1px solid rgba(15, 23, 42, 0.08);
-  border-radius: 8px;
-  background: var(--surface-subtle);
-}
-.agent-qa-details dt {
-  font-weight: 800;
-}
-.agent-qa-details dd {
-  margin: 0;
-  overflow-wrap: anywhere;
-}
 .agent-qa-actions {
   display: flex;
   justify-content: flex-end;
@@ -292,10 +245,6 @@ const isLoading = (action) => !!props.actionLoading[`${qa.value.id}:${action}`]
 :global([data-theme="dark"] .agent-qa-question),
 :global([data-theme="dark"] .agent-qa-answer){
   background: rgba(255, 255, 255, 0.06);
-}
-:global([data-theme="dark"] .agent-qa-details dl){
-  background: rgba(15, 23, 42, 0.45);
-  border-color: rgba(255, 255, 255, 0.08);
 }
 :global([data-theme="dark"] .agent-qa-actions){
   border-top-color: rgba(255, 255, 255, 0.08);

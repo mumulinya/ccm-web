@@ -54,6 +54,7 @@ const runtime_1 = require("../../agents/runtime");
 const agent_provider_settings_1 = require("../system/agent-provider-settings");
 const sessions_1 = require("./sessions");
 const runtime_events_1 = require("../../system/runtime-events");
+const user_visible_agent_events_1 = require("../../system/user-visible-agent-events");
 const credential_store_1 = require("../../core/credential-store");
 const tool_authorization_1 = require("../../tools/tool-authorization");
 const main_agent_context_policy_1 = require("../../tools/main-agent-context-policy");
@@ -1915,8 +1916,17 @@ type = "${finalPlatform}"${platformOptionsToml}
                 return true;
             const sessionId = (0, project_validation_1.validateSessionId)(decodeURIComponent(sessionDetailMatch[2]));
             const detail = (0, sessions_1.getSessionDetail)(projectName, sessionId);
-            if (detail)
-                (0, utils_1.sendJson)(res, detail);
+            if (detail) {
+                const executionPage = (0, group_orchestrator_config_1.loadOrchestratorConfig)().ccStyleExecutionDisplayEnabled === false
+                    ? { events: [] }
+                    : (0, user_visible_agent_events_1.listUserVisibleAgentEvents)({ scope: "project", scopeId: projectName, exactSessionId: sessionId, limit: 500 });
+                (0, utils_1.sendJson)(res, {
+                    ...detail,
+                    // Safe event projections only. Source text and raw tool output are
+                    // deliberately absent, matching the dedicated execution endpoint.
+                    execution_events: executionPage.events || [],
+                });
+            }
             else
                 (0, utils_1.sendJson)(res, { error: "会话不存在" }, 404);
         }

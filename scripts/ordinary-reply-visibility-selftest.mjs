@@ -21,16 +21,21 @@ const ordinary = {
 const checks = {
   ordinaryReplyIsQuiet: isQuietMainAgentConversationDecision(ordinary),
   greetingIsQuiet: isQuietMainAgentConversationDecision({ ...ordinary, reply: { preview: '你好！' } }),
-  clarificationStaysVisible: !isQuietMainAgentConversationDecision({
+  clarificationUsesDedicatedCard: isQuietMainAgentConversationDecision({
     ...ordinary,
     decision: { selected_actions: ['read_group_context', 'ask_user_clarification', 'generate_final_reply'] },
+  }),
+  emptyModeIsQuiet: isQuietMainAgentConversationDecision({
+    decision: { selected_actions: ['read_group_context', 'generate_final_reply'] },
+    permissions: ordinary.permissions,
+    verify: ordinary.verify,
   }),
   blockedPermissionStaysVisible: !isQuietMainAgentConversationDecision({
     ...ordinary,
     permissions: [{ action_id: 'govern_task_lifecycle', allowed: false }],
     verify: { passed: false, blocked_actions: ['govern_task_lifecycle'] },
   }),
-  activeStepStaysVisible: !isQuietMainAgentConversationDecision({
+  todoConfirmationStaysOnTodoCard: isQuietMainAgentConversationDecision({
     ...ordinary,
     todo_plan: { steps: [{ id: 'reply', status: 'needs_confirmation' }] },
   }),

@@ -6,6 +6,8 @@ export declare function getProjectSessionCompactionActivity(project: string, pro
     startedAt: string;
     updatedAt: string;
 };
+export declare function listProjectSessionExecutionEvents(projectInput: string, projectSessionIdInput: string): import("../../system/session-execution-ledger").SessionExecutionEvent[];
+export declare function listProjectSessionHistoryMessages(projectInput: string, projectSessionIdInput: string): any;
 export declare function appendProjectSessionExecutionEvent(projectInput: string, projectSessionIdInput: string, event: any): {
     id: string;
     toolCallId: string;

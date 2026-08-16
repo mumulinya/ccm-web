@@ -1,9 +1,10 @@
 <script setup>
-import { computed, ref } from 'vue'
+import { computed } from 'vue'
 import MainAgentDecisionCard from './MainAgentDecisionCard.vue'
 import TaskCollaborationCard from '../collaboration/TaskCollaborationCard.vue'
-import AgentWorkEventDetails from './AgentWorkEventDetails.vue'
 import AgentFinalAnswer from '../common/AgentFinalAnswer.vue'
+import ConversationTodo from '../common/ConversationTodo.vue'
+import ConversationClarificationCards from '../common/ConversationClarificationCards.vue'
 import { isQuietMainAgentDecision } from '../../composables/useMainAgentDisplay.js'
 import { taskCardNeedsConversationControl } from '../../utils/taskCardPresentation.js'
 
@@ -37,43 +38,58 @@ const props = defineProps({
   messageKey: { type: String, default: '' },
 })
 
-const emit = defineEmits(['step-action', 'task-action', 'open-pipeline', 'open-file-diff', 'failure-action'])
+const emit = defineEmits(['step-action', 'task-action', 'open-pipeline', 'open-file-diff', 'failure-action', 'clarify-reply'])
 
 const deliverySummary = () => props.msg.delivery_summary || props.msg.deliverySummary || null
 const clarificationSummary = () => props.msg.clarification_summary || props.msg.clarificationSummary || null
-const structuredClarification = () => clarificationSummary()?.pre_plan_clarification || clarificationSummary()?.prePlanClarification || null
+const structuredClarification = () => clarificationSummary()?.pre_plan_clarification || clarificationSummary()?.prePlanClarification || props.msg.prePlanClarification || props.msg.pre_plan_clarification || null
+const showInlineClarify = computed(() => {
+  const structured = structuredClarification()
+  const summary = clarificationSummary()
+  if (structured?.status === 'resolved' || structured?.status === 'cancelled' || structured?.status === 'canceled') return false
+  if (structured?.status === 'pending') return true
+  return !!summary && ['waiting_user', 'waiting_clarification', 'needs_user', 'pending'].includes(String(summary.status || '').toLowerCase())
+})
 const showClarificationSummary = () => !structuredClarification() || structuredClarification()?.status !== 'pending'
 const showTaskControlCard = computed(() => props.primaryTaskCard && taskCardNeedsConversationControl(props.taskCard))
 const textOnly = computed(() => !(
-  (clarificationSummary() && showClarificationSummary())
+  showInlineClarify.value
+  || (clarificationSummary() && showClarificationSummary())
   || (props.mainAgentDecision && !isQuietMainAgentDecision(props.mainAgentDecision))
   || showTaskControlCard.value
   || deliverySummary()
   || props.showOrchestrationPlan
-  || props.workEvents.length
   || Number(props.msg?.fileChanges?.count || 0) > 0
 ))
-const technicalOpen = ref(false)
-const failureTechnical = computed(() => props.msg?.providerFailureTechnical || props.msg?.provider_failure_technical || null)
 const isRecoverableModelFailure = computed(() => (
   ['llm-error', 'llm-not-configured'].includes(String(props.msg?.runtime || '').toLowerCase())
+  && !['retrying', 'recovered', 'superseded'].includes(String(props.msg?.recovery?.state || '').toLowerCase())
 ))
+const showModelSettingsAction = computed(() => {
+  if (String(props.msg?.runtime || '').toLowerCase() === 'llm-not-configured') return true
+  const failure = props.msg?.providerFailure || props.msg?.provider_failure || {}
+  const diagnostic = [
+    failure.code,
+    failure.kind,
+    failure.userSummary,
+    failure.userGuidance,
+    failure.safeSummary,
+  ].filter(Boolean).join(' ')
+  return /(?:not[_ -]?configured|configuration|authentication|unauthorized|forbidden|invalid[_ -]?(?:api[_ -]?)?key|api[_ -]?key|HTTP\s*(?:401|403)|未配置|鉴权|认证|密钥无效)/i.test(diagnostic)
+})
 const plainAnswer = computed(() => textOnly.value && !isRecoverableModelFailure.value)
-const formatDuration = value => {
-  const ms = Number(value || 0)
-  if (!Number.isFinite(ms) || ms <= 0) return ''
-  return ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)}s`
-}
 </script>
 
 <template>
-  <AgentFinalAnswer
-    v-if="plainAnswer && (displayContent || msg.content)"
-    :content="displayContent || msg.content"
-    :streaming="!!msg.streaming"
-    :mentions="msg.mentions || []"
-    :storage-key="messageKey"
-  />
+  <div v-if="plainAnswer && (displayContent || msg.content)" class="plain-answer-stack">
+    <AgentFinalAnswer
+      :content="displayContent || msg.content"
+      :streaming="!!msg.streaming || (!!displayContent && !String(msg.content || '').trim())"
+      :mentions="msg.mentions || []"
+      :storage-key="messageKey"
+    />
+    <ConversationTodo :source="msg" :decision="mainAgentDecision" />
+  </div>
   <div
     v-else
     class="bubble agent-exec-bubble"
@@ -92,26 +108,21 @@ const formatDuration = value => {
     <AgentFinalAnswer
       v-if="displayContent || msg.content"
       :content="displayContent || msg.content"
-      :streaming="!!msg.streaming"
+      :streaming="!!msg.streaming || (!!displayContent && !String(msg.content || '').trim())"
       :mentions="msg.mentions || []"
       :storage-key="messageKey"
     />
     <div v-if="isRecoverableModelFailure" class="model-failure-actions">
       <button type="button" class="model-failure-primary" @click="emit('failure-action', 'retry')">立即重试</button>
-      <button type="button" @click="emit('failure-action', 'settings')">检查模型配置</button>
-      <button type="button" :aria-expanded="technicalOpen" @click="technicalOpen = !technicalOpen">
-        {{ technicalOpen ? '收起技术详情' : '查看技术详情' }}
-      </button>
+      <button v-if="showModelSettingsAction" type="button" @click="emit('failure-action', 'settings')">检查模型配置</button>
     </div>
-    <div v-if="isRecoverableModelFailure && technicalOpen" class="model-failure-technical">
-      <div><span>错误类型</span><strong>{{ failureTechnical?.category || msg.providerFailure?.kind || 'provider' }}</strong></div>
-      <div><span>错误代码</span><code>{{ failureTechnical?.code || msg.providerFailure?.code || 'CCM_MODEL_CALL_FAILED' }}</code></div>
-      <div v-if="Number(failureTechnical?.attempts || msg.providerFailure?.attempts || 0) > 0"><span>调用尝试</span><strong>{{ failureTechnical?.attempts || msg.providerFailure?.attempts }} 次</strong></div>
-      <div v-if="formatDuration(failureTechnical?.elapsedMs || msg.providerFailure?.elapsedMs)"><span>耗时</span><strong>{{ formatDuration(failureTechnical?.elapsedMs || msg.providerFailure?.elapsedMs) }}</strong></div>
-      <p v-if="failureTechnical?.safeSummary || msg.providerFailure?.safeSummary">{{ failureTechnical?.safeSummary || msg.providerFailure?.safeSummary }}</p>
-      <small>这里只显示已脱敏诊断，不包含 API Key、Prompt 或原始响应。</small>
-    </div>
-    <div v-if="clarificationSummary() && showClarificationSummary()" class="clarification-summary" :class="clarificationSummary().status">
+    <ConversationTodo :source="msg" :decision="mainAgentDecision" />
+    <ConversationClarificationCards
+      v-if="showInlineClarify"
+      :source="msg"
+      @submit="emit('clarify-reply', $event)"
+    />
+    <div v-else-if="clarificationSummary() && showClarificationSummary()" class="clarification-summary" :class="clarificationSummary().status">
       <div class="clarification-head">
         <strong>{{ clarificationSummary().title || '需要你补充信息' }}</strong>
         <span>{{ clarificationSummary().status_label || '等待你回复' }}</span>
@@ -122,9 +133,6 @@ const formatDuration = value => {
         <strong>{{ clarificationSummary().question }}</strong>
       </div>
       <p v-if="clarificationSummary().reason" class="clarification-reason">{{ clarificationSummary().reason }}</p>
-      <ul v-if="clarificationSummary().answer_suggestions?.length" class="clarification-suggestions">
-        <li v-for="item in clarificationSummary().answer_suggestions" :key="item">{{ item }}</li>
-      </ul>
       <small v-if="clarificationSummary().next_action" class="clarification-next">下一步：{{ clarificationSummary().next_action }}</small>
     </div>
     <MainAgentDecisionCard
@@ -194,12 +202,6 @@ const formatDuration = value => {
       </div>
     </div>
     <span v-if="msg.streaming" class="stream-cursor">▌</span>
-    <AgentWorkEventDetails
-      v-if="workEvents.length && !taskCard"
-      :msg="msg"
-      :main-agent="mainAgent"
-      :accent-style="accentStyle"
-    />
     <div v-if="msg.fileChanges && msg.fileChanges.count > 0 && !hideFileChanges" class="file-changes">
       <div class="file-changes-header">{{ fileChangesTitle }}</div>
       <button v-for="f in msg.fileChanges.files" :key="f.path" class="file-change-item" @click="emit('open-file-diff', f)">
@@ -215,6 +217,10 @@ const formatDuration = value => {
 </template>
 
 <style scoped>
+.plain-answer-stack {
+  display: grid;
+  gap: 4px;
+}
 .agent-exec-bubble {
   position: relative;
   width: auto;
@@ -240,8 +246,9 @@ const formatDuration = value => {
   opacity: 0.7;
 }
 .agent-exec-bubble.agent-state-fail {
-  border-color: rgba(239, 68, 68, 0.36) !important;
-  box-shadow: 0 6px 18px rgba(239, 68, 68, 0.08) !important;
+  border-color: color-mix(in srgb, var(--accent-red, #dc2626) 28%, var(--border-color, #e2e8f0)) !important;
+  box-shadow: none !important;
+  background: color-mix(in srgb, var(--accent-red, #dc2626) 4%, var(--bg-primary, #fff));
 }
 .agent-exec-bubble.agent-state-running {
   box-shadow: 0 6px 18px color-mix(in srgb, var(--agent-accent) 12%, transparent) !important;
@@ -335,24 +342,6 @@ const formatDuration = value => {
   background: var(--accent-blue, #2563eb);
   color: #fff;
 }
-.model-failure-technical {
-  position: relative;
-  z-index: 1;
-  display: grid;
-  gap: 7px;
-  margin-top: 9px;
-  padding: 10px 11px;
-  border: 1px solid rgba(148, 163, 184, .28);
-  border-radius: 8px;
-  background: rgba(148, 163, 184, .07);
-  color: var(--text-secondary, #475569);
-  font-size: 11px;
-}
-.model-failure-technical > div { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
-.model-failure-technical span { color: var(--text-muted, #94a3b8); }
-.model-failure-technical code { overflow-wrap: anywhere; color: var(--text-primary, #0f172a); }
-.model-failure-technical p { margin: 2px 0 0; line-height: 1.5; overflow-wrap: anywhere; }
-.model-failure-technical small { color: var(--text-muted, #94a3b8); line-height: 1.4; }
 .clarification-summary {
   position: relative;
   z-index: 1;

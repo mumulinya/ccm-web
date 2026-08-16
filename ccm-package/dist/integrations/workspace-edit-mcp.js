@@ -60,16 +60,16 @@ const tools = [
     {
         name: "apply_patch",
         roles: [...EDIT_ROLES],
-        description: "在当前任务绑定的项目工作区精确替换文件内容。必须匹配expected_checksum；默认要求old_text唯一，避免修改错误位置。",
+        description: "在当前任务绑定的项目工作区精确替换文件内容。改已有文件必须先读取该文件，并传入当时的 expected_checksum；校验和不匹配会失败，请重新读取后再改。优先用本工具修改已有文件，不要用完整写文件覆盖。replace_all 用于把同一字符串在全文件中全部替换。必须匹配 expected_checksum；默认要求 old_text 唯一，避免改错位置。",
         inputSchema: {
             type: "object", required: ["path", "old_text", "new_text", "expected_checksum", "work_item_id", "attempt"], additionalProperties: false,
-            properties: { path: { type: "string" }, old_text: { type: "string" }, new_text: { type: "string" }, replace_all: { type: "boolean", default: false }, expected_checksum: { type: "string" }, ...fenceProperties },
+            properties: { path: { type: "string" }, old_text: { type: "string" }, new_text: { type: "string" }, replace_all: { type: "boolean", default: false, description: "将 old_text 在全文件中的每一处都替换为 new_text" }, expected_checksum: { type: "string" }, ...fenceProperties },
         },
     },
     {
         name: "write_file",
         roles: [...EDIT_ROLES],
-        description: "在当前任务工作区创建UTF-8文本文件，或在携带旧校验和时完整覆盖已有文本文件。不会写入敏感文件或项目外路径。",
+        description: "在当前任务工作区创建 UTF-8 文本文件，或在携带旧校验和时完整覆盖已有文本文件。改已有文件应优先 apply_patch；完整 write_file 只用于新建或必须整文件重写。用户没有要求时不要新建 README 或其他文档。覆盖已有文件必须先读取并传入 expected_checksum，校验和不匹配会失败。不会写入敏感文件或项目外路径。",
         inputSchema: {
             type: "object", required: ["path", "content", "work_item_id", "attempt"], additionalProperties: false,
             properties: { path: { type: "string" }, content: { type: "string", maxLength: FILE_LIMIT }, expected_checksum: { type: "string" }, create_parent_directories: { type: "boolean", default: false }, ...fenceProperties },
@@ -197,7 +197,7 @@ function readTextFile(file) {
 }
 function assertChecksum(actual, expected) {
     if (!String(expected || "") || actual !== String(expected))
-        throw Object.assign(new Error("文件已变化，请重新读取后再修改"), { code: "WORKSPACE_EDIT_CHECKSUM_CONFLICT" });
+        throw Object.assign(new Error("文件校验和不匹配：必须先读取该文件并传入当时的 expected_checksum；若文件已变化，请重新读取后再修改"), { code: "WORKSPACE_EDIT_CHECKSUM_CONFLICT" });
 }
 function atomicWrite(file, content) {
     const bytes = Buffer.from(content, "utf-8");

@@ -1,6 +1,123 @@
 import { ref } from 'vue'
 import { getAssignmentIdentity, getAssignmentStatusLabel } from './groupChatHelpers.js'
 
+const asPositiveInteger = (value) => {
+  const number = Number(value)
+  return Number.isFinite(number) && number > 0 ? Math.floor(number) : 0
+}
+
+// An execution anchor identifies the logical request. It is intentionally not
+// used as the assistant message identity because every recovery attempt keeps
+// the same anchor.
+export const groupMessageAnchor = (message) => String(
+  message?.execution_anchor_message_id
+    || message?.executionAnchorMessageId
+    || message?.recovery?.anchorMessageId
+    || message?.recovery?.anchor_message_id
+    || '',
+).trim()
+
+export const groupMessageStableId = (message) => String(
+  message?.responseMessageId
+    || message?.response_message_id
+    || message?.id
+    || message?.message_id
+    || '',
+).trim()
+
+export const groupMessageTurnId = (message) => String(
+  message?.executionTurnId
+    || message?.execution_turn_id
+    || message?.turnId
+    || message?.turn_id
+    || '',
+).trim()
+
+export const groupMessageAttempt = (message) => asPositiveInteger(
+  message?.executionAttempt
+    ?? message?.execution_attempt
+    ?? message?.attempt
+    ?? message?.recovery?.attempt,
+)
+
+export const groupMessageGeneration = (message) => asPositiveInteger(
+  message?.generation
+    ?? message?.taskRuntime?.generation
+    ?? message?.task_runtime?.generation
+    ?? message?.taskCard?.generation
+    ?? message?.task_card?.generation,
+)
+
+export const groupMessageSequence = (message) => asPositiveInteger(
+  message?.sequence
+    ?? message?.eventSequence
+    ?? message?.event_sequence
+    ?? message?.executionSequence
+    ?? message?.execution_sequence,
+)
+
+export const isTransientGroupMessage = (message) => {
+  if (!message || message.role !== 'assistant') return false
+  if (message.__groupTransient === true || message.transient === true || message.optimistic === true) return true
+  const id = String(message.id || '').trim()
+  if (id.startsWith('group-reply:')) return true
+  // A stream envelope created before the server assigns a response id is
+  // replaceable; persisted assistant rows always have a stable id.
+  return message.streaming === true && !groupMessageStableId(message)
+}
+
+export function compareGroupMessageVersion(incoming, current) {
+  const incomingGeneration = groupMessageGeneration(incoming)
+  const currentGeneration = groupMessageGeneration(current)
+  if (incomingGeneration !== currentGeneration && (incomingGeneration || currentGeneration)) {
+    return incomingGeneration > currentGeneration ? 1 : -1
+  }
+  const incomingAttempt = groupMessageAttempt(incoming)
+  const currentAttempt = groupMessageAttempt(current)
+  if (incomingAttempt !== currentAttempt && (incomingAttempt || currentAttempt)) {
+    return incomingAttempt > currentAttempt ? 1 : -1
+  }
+  const incomingSequence = groupMessageSequence(incoming)
+  const currentSequence = groupMessageSequence(current)
+  if (incomingSequence !== currentSequence && (incomingSequence || currentSequence)) {
+    return incomingSequence > currentSequence ? 1 : -1
+  }
+  return 0
+}
+
+export function shouldIgnoreStaleGroupMessage(incoming, current) {
+  const version = compareGroupMessageVersion(incoming, current)
+  if (version < 0) return true
+  // Old records created before per-attempt fields were added have no version.
+  // Their timestamp still lets us reject a late replay once a newer attempt is
+  // already visible for the same logical request.
+  if (version === 0
+    && groupMessageAttempt(current) > 0
+    && groupMessageAttempt(incoming) === 0
+    && groupMessageAnchor(incoming)
+    && groupMessageAnchor(incoming) === groupMessageAnchor(current)) {
+    const incomingTime = Date.parse(String(incoming?.timestamp || incoming?.created_at || incoming?.createdAt || ''))
+    const currentTime = Date.parse(String(current?.timestamp || current?.created_at || current?.createdAt || ''))
+    if (Number.isFinite(incomingTime) && Number.isFinite(currentTime) && incomingTime <= currentTime) return true
+  }
+  return false
+}
+
+export function canMergeGroupMessage(current, incoming) {
+  if (!current || !incoming) return false
+  const currentId = groupMessageStableId(current)
+  const incomingId = groupMessageStableId(incoming)
+  if (currentId && incomingId && currentId === incomingId) return true
+  const currentAnchor = groupMessageAnchor(current)
+  const incomingAnchor = groupMessageAnchor(incoming)
+  if (!currentAnchor || currentAnchor !== incomingAnchor) return false
+  // Same-anchor authoritative messages are separate recovery attempts. Only
+  // replace a local stream envelope with the authoritative server response.
+  if (isTransientGroupMessage(current) && !isTransientGroupMessage(incoming)) return true
+  if (isTransientGroupMessage(incoming) && !isTransientGroupMessage(current)) return false
+  return false
+}
+
 export function useGroupChatMessaging({ messages, currentGroup, currentGroupSessionId, isGroupSessionDraft, groupSessions, mainAgentStatus, groupAgentQa, scrollToBottom }) {
   const groupMessageKeyMap = new WeakMap()
   let groupMessageKeySeq = 0
@@ -31,28 +148,60 @@ export function useGroupChatMessaging({ messages, currentGroup, currentGroupSess
     return !at || !bt || Math.abs(at - bt) < 120000
   }
 
-  const messageGeneration = (msg) => Math.max(0, Number(
-    msg?.generation
-      ?? msg?.taskRuntime?.generation
-      ?? msg?.task_runtime?.generation
-      ?? msg?.taskCard?.generation
-      ?? msg?.task_card?.generation
-      ?? 0,
-  ))
-
   const mergeIncomingMessage = (msg) => {
     if (!msg || msg.content?.startsWith('📤')) return false
-    const incomingExecutionAnchor = String(msg.execution_anchor_message_id || msg.executionAnchorMessageId || '')
-    const existingIndex = messages.value.findIndex(m => {
-      if (msg.id && m.id === msg.id) return true
-      const currentExecutionAnchor = String(m.execution_anchor_message_id || m.executionAnchorMessageId || '')
-      if (incomingExecutionAnchor && currentExecutionAnchor === incomingExecutionAnchor) return true
-      return isEquivalentMessage(m, msg)
-    })
+    const incomingId = groupMessageStableId(msg)
+    const incomingAnchor = groupMessageAnchor(msg)
+
+    // Reject a late replay before it can be appended as a second visible
+    // answer. This is especially important for legacy rows that share an
+    // anchor but predate executionAttempt/turn fields.
+    if (incomingAnchor) {
+      const latestSameAnchor = [...messages.value].reverse().find(current => (
+        current !== msg
+        && groupMessageAnchor(current) === incomingAnchor
+        && !isTransientGroupMessage(current)
+      ))
+      if (latestSameAnchor && shouldIgnoreStaleGroupMessage(msg, latestSameAnchor)) return false
+    }
+
+    let existingIndex = -1
+    // Stable server ids are the strongest identity and must be checked first.
+    if (incomingId) {
+      for (let index = messages.value.length - 1; index >= 0; index -= 1) {
+        if (groupMessageStableId(messages.value[index]) === incomingId) {
+          existingIndex = index
+          break
+        }
+      }
+    }
+    // Then, and only then, allow an authoritative response to close its local
+    // optimistic stream envelope. Never merge two persisted rows by anchor.
+    if (existingIndex < 0) {
+      for (let index = messages.value.length - 1; index >= 0; index -= 1) {
+        if (canMergeGroupMessage(messages.value[index], msg)) {
+          existingIndex = index
+          break
+        }
+      }
+    }
+    // Content equivalence is safe only when one side is transient. Two
+    // historical assistant replies can legitimately contain the same text.
+    if (existingIndex < 0) {
+      for (let index = messages.value.length - 1; index >= 0; index -= 1) {
+        const current = messages.value[index]
+        if ((isTransientGroupMessage(current) || isTransientGroupMessage(msg)) && isEquivalentMessage(current, msg)) {
+          existingIndex = index
+          break
+        }
+      }
+    }
     if (existingIndex >= 0) {
       const current = messages.value[existingIndex]
-      // 重连或轮询可能带回旧代次的投影；旧 generation 只能留在后端审计，不能覆盖当前卡片。
-      if (messageGeneration(msg) > 0 && messageGeneration(current) > messageGeneration(msg)) return false
+      // 重连或轮询可能带回旧代次/旧 attempt 的投影；旧版本只能留在
+      // 后端审计，不能覆盖当前卡片或把当前回复降级成错误。
+      if (shouldIgnoreStaleGroupMessage(msg, current)) return false
+      if (current.streaming === true || current.__groupTransient === true) return false
       const currentKey = getGroupMessageKey(current)
       const next = {
         ...current,
@@ -64,6 +213,8 @@ export function useGroupChatMessaging({ messages, currentGroup, currentGroupSess
         runtime: msg.runtime || current.runtime,
         dispatchPolicy: msg.dispatchPolicy || current.dispatchPolicy,
         coordinationPlan: msg.coordinationPlan || current.coordinationPlan,
+        presentedPlan: msg.presentedPlan || msg.presented_plan || current.presentedPlan || current.presented_plan,
+        presented_plan: msg.presented_plan || msg.presentedPlan || current.presented_plan || current.presentedPlan,
         workflow: msg.workflow || current.workflow,
         mainAgentDecision: msg.mainAgentDecision || msg.main_agent_decision || current.mainAgentDecision || current.main_agent_decision,
         main_agent_decision: msg.main_agent_decision || msg.mainAgentDecision || current.main_agent_decision || current.mainAgentDecision,
@@ -80,7 +231,10 @@ export function useGroupChatMessaging({ messages, currentGroup, currentGroupSess
         delivery_summary: msg.delivery_summary || current.delivery_summary,
         deliverySummary: msg.deliverySummary || current.deliverySummary,
         receipts: msg.receipts || current.receipts,
-        streaming: current.streaming && !msg.content ? current.streaming : false
+        streaming: current.streaming && !msg.content ? current.streaming : false,
+        // Once the server response has arrived the envelope is no longer
+        // eligible for same-anchor replacement by another persisted row.
+        ...(isTransientGroupMessage(current) && !isTransientGroupMessage(msg) ? { __groupTransient: false, transient: false, optimistic: false } : {}),
       }
       groupMessageKeyMap.set(next, currentKey)
       messages.value[existingIndex] = next
@@ -168,10 +322,13 @@ export function useGroupChatMessaging({ messages, currentGroup, currentGroupSess
   let pullInFlight = false
   const pullNewMessages = async () => {
     if (!currentGroup.value || isGroupSessionDraft?.value || pullInFlight) return
+    const groupId = currentGroup.value.id
+    const sessionId = String(currentGroupSessionId.value || '')
     pullInFlight = true
     try {
-      const res = await fetch(`/api/groups/messages?id=${currentGroup.value.id}&limit=100&session_id=${encodeURIComponent(currentGroupSessionId.value)}`)
+      const res = await fetch(`/api/groups/messages?id=${encodeURIComponent(groupId)}&limit=100&session_id=${encodeURIComponent(sessionId)}`)
       const data = await res.json()
+      if (currentGroup.value?.id !== groupId || String(currentGroupSessionId.value || '') !== sessionId) return
       if (Array.isArray(data.sessions)) groupSessions.value = data.sessions
       mainAgentStatus.value = data.mainAgentStatus || mainAgentStatus.value
       groupAgentQa.value = data.agentQa || groupAgentQa.value

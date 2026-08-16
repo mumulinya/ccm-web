@@ -7,6 +7,7 @@ import { sendFeishuMessageToTarget, sendFeishuReportMessage } from "./feishu";
 import { publishRuntimeEvent } from "../../system/runtime-events";
 import { extractFeishuInboundIdentity, publicFeishuUserMapping, signFeishuCardAction } from "./feishu-access";
 import { buildFeishuConversationIdentityV2, type FeishuAgentTargetType } from "./feishu-conversation-v2";
+import { formatPresentedPlanMarkdown } from "./group-presented-plan";
 
 const STATE_FILE = path.join(CCM_DIR, "feishu-channel-state.json");
 const SESSION_DIR = path.join(CCM_DIR, "sessions");
@@ -986,11 +987,13 @@ export function feishuRuntimeEventPresentation(event: any) {
   const type = String(event?.type || "");
   const tool = String(event?.tool || event?.name || "");
   if (type === "plan_mode_ready") {
-    const plan = event.plan_mode || event.planMode || {};
+    const plan = event.plan_mode || event.planMode || event.presentedPlan || event.presented_plan || {};
+    const markdown = formatPresentedPlanMarkdown(plan.steps ? plan : { ...plan, steps: plan.steps || plan.plan_steps || [] })
+      || safeText(plan.next_step || plan.risk?.summary || event.message || "我已整理执行步骤，接下来会按计划派发、跟踪和验收。");
     return {
       stage: "plan",
       title: safeText(plan.title || "执行计划已经整理", 80),
-      markdown: safeText(plan.next_step || plan.risk?.summary || event.message || "我已整理执行步骤，接下来会按计划派发、跟踪和验收。"),
+      markdown,
     };
   }
   if (type === "dispatch_launch_summary") {
@@ -1104,6 +1107,18 @@ export function runFeishuChannelSelfTest() {
   const status = taskStatusPresentation("in_progress");
   const testEvent = feishuRuntimeEventPresentation({ type: "test_agent_review_ready", detail: "复验通过" });
   const planEvent = feishuRuntimeEventPresentation({ type: "plan_mode_ready", plan_mode: { title: "登录修复计划", next_step: "先派发实现，再运行独立复核。" } });
+  const presentedPlanEvent = feishuRuntimeEventPresentation({
+    type: "plan_mode_ready",
+    presentedPlan: {
+      title: "原生短轮循环",
+      overview: "规划用贪心，地图失败降级直线距离。",
+      steps: [
+        { title: "接共享 loop", description: "不要出现在飞书卡片" },
+        { title: "改卡片为 To-dos" },
+      ],
+      exclusions: ["子 Agent CLI"],
+    },
+  });
   const leaseId = `selftest_${process.pid}_${Date.now()}`;
   const firstLease = acquireDeliveryLease(leaseId);
   const competingLease = acquireDeliveryLease(leaseId);
@@ -1116,6 +1131,11 @@ export function runFeishuChannelSelfTest() {
     progress_status_supported: status?.stage === "execution",
     test_agent_event_supported: testEvent?.stage === "test" && /复验通过/.test(testEvent.markdown),
     plan_event_supported: planEvent?.stage === "plan" && /先派发实现/.test(planEvent.markdown),
+    presented_plan_markdown: presentedPlanEvent?.stage === "plan"
+      && /规划用贪心/.test(presentedPlanEvent.markdown)
+      && /- 接共享 loop/.test(presentedPlanEvent.markdown)
+      && /本次不包含：子 Agent CLI/.test(presentedPlanEvent.markdown)
+      && presentedPlanEvent.markdown.includes("不要出现在飞书卡片") === false,
     cross_process_delivery_lease: !!firstLease && competingLease === null && !!reacquiredLease,
     secrets_redacted: safeText("api_key=secret-value").includes("[已隐藏]"),
   };

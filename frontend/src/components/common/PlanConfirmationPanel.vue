@@ -8,18 +8,19 @@ defineProps({
   busy: Boolean,
   canConfirm: Boolean,
   canRevise: Boolean,
+  canOpenDetail: Boolean,
 })
 
-const emit = defineEmits(['update:modelValue', 'confirm', 'revise'])
+const emit = defineEmits(['update:modelValue', 'confirm', 'revise', 'open-detail'])
 </script>
 
 <template>
-  <section v-if="request" class="plan-confirmation-panel" aria-label="计划确认">
+  <section v-if="request" class="plan-confirmation-panel" aria-label="待确认方案">
     <header>
       <span class="plan-confirmation-icon"><ShieldCheck :size="16" /></span>
       <div>
-        <strong>{{ request.title || '等待你确认计划' }}</strong>
-        <p>{{ request.headline || '确认后才会按这份计划开始执行。' }}</p>
+        <strong>{{ request.title || '需要你确认后才执行' }}</strong>
+        <p>{{ request.headline || '确认后才会按这份方案开始执行。' }}</p>
       </div>
       <span class="plan-confirmation-status">{{ request.status_label || '待确认' }}</span>
     </header>
@@ -42,7 +43,8 @@ const emit = defineEmits(['update:modelValue', 'confirm', 'revise'])
 
     <small v-if="request.feedback_hint || request.feedbackHint" class="plan-confirmation-hint">{{ request.feedback_hint || request.feedbackHint }}</small>
 
-    <footer v-if="canConfirm || canRevise">
+    <footer v-if="canConfirm || canRevise || canOpenDetail">
+      <button v-if="canOpenDetail" type="button" class="secondary" :disabled="busy" @click="emit('open-detail')"><Pencil :size="14" />查看并修改计划</button>
       <button v-if="canRevise" type="button" class="secondary" :disabled="busy" @click="emit('revise')"><Pencil :size="14" />修改计划</button>
       <button v-if="canConfirm" type="button" class="primary" :disabled="busy" @click="emit('confirm')"><Check :size="14" />确认并执行</button>
     </footer>

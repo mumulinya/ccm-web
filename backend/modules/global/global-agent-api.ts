@@ -1608,6 +1608,7 @@ export function createGlobalAgentApi(deps: any) {
             && ["统一大模型尚未配置", "MODEL", "PROVIDER", "TIMEOUT", "NETWORK"].some(token => String(error?.code || error?.message || "").toUpperCase().includes(token))) {
             try {
               const candidates = findRecoverableConversationTasks({ scope: "global", scopeId: "global", exactSessionId: activeSessionId });
+              if (candidates.length === 0) throw error;
               const routed = conversationTurnControl.requireRoute({
                 id: activeTurn.id,
                 revision: activeTurn.revision,

@@ -23,6 +23,15 @@ export interface TaskReplayEvent {
     source: string;
     evidence_ids: string[];
     tool_display?: ToolDisplayDetailV1;
+    file_changes?: Array<{
+        path: string;
+        project?: string;
+        status?: string;
+        additions?: number;
+        deletions?: number;
+        binary?: boolean;
+        deleted?: boolean;
+    }>;
     replay_link?: {
         schema: "ccm-task-event-link-v1";
         taskId: string;

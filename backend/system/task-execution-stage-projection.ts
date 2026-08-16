@@ -183,7 +183,6 @@ function appendMainSummaryEvent(task: any, eventType: "agent_started" | "agent_c
         ...(durationMs > 0 ? { activeDurationMs: durationMs } : {}),
       },
       evidenceIds: Array.isArray(input?.evidenceIds) ? input.evidenceIds : [],
-      fileChanges: Array.isArray(input?.fileChanges) ? input.fileChanges : [],
       ...(eventType === "agent_failed" ? { availableActions: [
         { id: "view_error", kind: "view_error", label: "查看错误", enabled: true, revision: number(task?.revision), generation: identity.generation },
         { id: "takeover", kind: "takeover", label: "人工接管", enabled: true, revision: number(task?.revision), generation: identity.generation },

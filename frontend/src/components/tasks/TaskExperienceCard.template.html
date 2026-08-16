@@ -373,7 +373,7 @@
 
     <div v-if="planMode" class="task-card-section plan-mode">
       <div class="plan-mode-head">
-        <label>{{ planMode.title || '执行前计划' }}</label>
+        <label>{{ planMode.session_plan_mode ? (planMode.title || '执行方案') : (planApprovalRequest ? '需要你确认后才执行' : (planMode.title || '执行方案')) }}</label>
         <span :class="['plan-risk', planMode.risk?.level || 'low']">{{ riskLabel(planMode.risk?.level) }}</span>
       </div>
       <p v-if="planRiskSummary">{{ planRiskSummary }}</p>
@@ -385,8 +385,10 @@
         :busy="busy"
         :can-confirm="!!planConfirmAction"
         :can-revise="!!planReviseAction"
+        :can-open-detail="!!(card.task_id || card.id)"
         @confirm="emit('action', taskActionPayload(planConfirmAction))"
         @revise="emit('action', taskActionPayload(planReviseAction))"
+        @open-detail="emit('action', { kind: 'open_plan_detail', task_id: card.task_id || card.id, label: '查看并修改计划' })"
       />
       <div v-if="planMode.revision" class="plan-mode-revision">
         <strong>计划调整</strong>
@@ -435,7 +437,16 @@
             <span>{{ stepIndex + 1 }}</span>
             <div>
               <b>{{ step.label || step.content || step }}<em v-if="step.source === 'user_followup'" class="plan-step-followup-tag">追加</em></b>
-              <small v-if="step.detail || step.activeForm">{{ step.detail || step.activeForm }}</small>
+              <small v-if="!canEditPlanSteps && (step.detail || step.activeForm)">{{ step.detail || step.activeForm }}</small>
+              <textarea
+                v-if="canEditPlanSteps"
+                :value="planStepEdits[step.id || stepIndex] ?? (step.detail || '')"
+                :disabled="busy"
+                rows="2"
+                maxlength="220"
+                placeholder="改步骤说明后点「修改计划」"
+                @input="planStepEdits = { ...planStepEdits, [step.id || stepIndex]: $event.target.value }"
+              />
             </div>
           </li>
         </ol>

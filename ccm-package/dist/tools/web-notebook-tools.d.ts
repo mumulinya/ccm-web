@@ -22,6 +22,8 @@ export declare function webFetch(args: any, allowBrowserFallback?: boolean): Pro
     requestedUrl: string;
     finalUrl: string;
     contentType: string;
+    prompt: string;
+    summary: string;
     text: string;
     citation: string;
     contentChecksum: string;

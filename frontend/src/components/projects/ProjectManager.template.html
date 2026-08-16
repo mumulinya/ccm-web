@@ -100,7 +100,7 @@
               :timestamp="msg.timestamp || msg.created_at || msg.createdAt"
               :structured="msg.type === 'command_result' || !!getProjectTaskCard(msg) || (Array.isArray(msg.workEvents) && msg.workEvents.length > 0) || Number(msg.fileChanges?.count || 0) > 0"
               :streaming="!!msg.streaming || (isStreaming && i === messages.length - 1)"
-              :copy-text="getCopyableMessageText(msg, getProjectTaskCard(msg) ? '' : msg.content)"
+                  :copy-text="getCopyableMessageText(msg, getProjectTaskCard(msg) ? '' : (liveProjectAssistantProgress(i) || msg.content))"
               :editable="msg.role === 'user' && !!String(msg.content || '').trim()"
               :edit-disabled="isStreaming"
               :rewindable="msg.role === 'assistant' && !msg.streaming && !!String(msg.id || '').trim()"
@@ -117,16 +117,6 @@
                 },
               ]"
             >
-              <AgentExecutionTranscript
-                :events="projectAgentExecutionEvents"
-                :enabled="projectAgentExecutionEnabled"
-                :messages="messages"
-                :message-index="i"
-                stage-grouped
-                presentation="live"
-                @open-file-change="openSingleFileChange"
-                @execution-action="handleProjectTaskAction(msg, $event)"
-              />
               <CommandResultCard v-if="msg.type === 'command_result'" :result="msg.commandResult" />
               <!-- 旧 thinking 信封保持静默；10 秒后的事实状态由统一执行投影原位展示。 -->
               <template v-else-if="msg.role === 'thinking'"></template>
@@ -154,20 +144,34 @@
                   </a>
                 </div>
               </div>
-              <!-- Agent 回复 -->
+              <!-- Agent 回复：进行中进度在执行过程里展示，完成后才显示总结正文。 -->
                <ConversationSummaryBoundary v-else-if="msg.type === 'conversation_summary_boundary'" :message="msg" />
-               <template v-else-if="!(msg.role === 'assistant' && msg.streaming && !String(msg.content || '').trim() && hasLiveProjectExecutionForMessage(i))">
-                 <ProjectAgentMessage
-                   :message="msg"
-                   :task-card="getProjectTaskCard(msg)"
-                   :suppress-thinking="hasLiveProjectExecutionForMessage(i)"
-                  :is-last-streaming="isStreaming && i === messages.length - 1"
-                  :hide-file-changes="hasAcceptedExecutionForMessage(projectAgentExecutionEvents, messages, i)"
-                  :message-key="`${currentSession || 'session'}:${getMessageKey(msg)}`"
-                  @task-action="handleProjectTaskAction(msg, $event)"
-                  @open-file-diff="openFileDiff"
-                />
-              </template>
+               <ProjectAgentMessage
+                 v-else
+                 :message="msg"
+                 :task-card="getProjectTaskCard(msg)"
+                 :suppress-thinking="hasLiveProjectExecutionForMessage(i)"
+                 :is-last-streaming="isStreaming && i === messages.length - 1"
+                 :hide-file-changes="hasAcceptedExecutionForMessage(projectAgentExecutionEvents, messages, i)"
+                 :message-key="`${currentSession || 'session'}:${getMessageKey(msg)}`"
+                 :live-progress="liveProjectAssistantProgress(i)"
+                 @task-action="handleProjectTaskAction(msg, $event)"
+                 @open-file-diff="openFileDiff"
+                 @clarify-reply="submitInlineProjectClarification"
+               />
+              <AgentExecutionTranscript
+                :events="projectAgentExecutionEvents"
+                :enabled="projectAgentExecutionEnabled"
+                :messages="messages"
+                :message-index="i"
+                stage-grouped
+                presentation="live"
+                :can-confirm-execute="canConfirmOnTranscript(msg)"
+                :confirm-execute-busy="presentedPlanConfirmBusy"
+                @open-file-change="openSingleFileChange"
+                @execution-action="handleProjectTaskAction(msg, $event)"
+                @confirm-execute="confirmPresentedPlanExecute(msg, $event)"
+              />
               <AgentExecutionTranscript
                 :events="projectAgentExecutionEvents"
                 :enabled="projectAgentExecutionEnabled"
@@ -175,9 +179,12 @@
                 :message-index="i"
                 stage-grouped
                 presentation="completed"
+                :can-confirm-execute="canConfirmOnTranscript(msg)"
+                :confirm-execute-busy="presentedPlanConfirmBusy"
                 @open-file-change="openSingleFileChange"
                 @open-file-changes="openCodeChangeDrawer($event, { title: '本轮文件改动', project: currentProject })"
                 @execution-action="handleProjectTaskAction(msg, $event)"
+                @confirm-execute="confirmPresentedPlanExecute(msg, $event)"
               />
             </ConversationMessageShell>
             </div>
@@ -221,6 +228,8 @@
           :busy="projectTurnBusy"
           :turns="projectTurnControl.turns.value"
           :stopping="stoppingProjectTurn"
+          :resolving-route-id="projectTurnControl.resolvingRouteId.value"
+          :resolving-route-choice="projectTurnControl.resolvingRouteChoice.value"
           @stop="stopStreaming"
           @cancel="projectTurnControl.cancel"
           @guide="guideProjectQueuedTurn"

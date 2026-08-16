@@ -22,9 +22,12 @@ export type ContextSourceToolResultReferenceV1 = {
 };
 export declare function isContextSourceToolResult(toolName: any, value?: any): boolean;
 export declare function buildContextSourceToolResultReference(toolNameInput: any, value: any, query?: any): ContextSourceToolResultReferenceV1 | null;
+export declare function normalizedWorkspacePersistenceToolName(toolName: any): string;
+export declare function isWorkspaceToolResultReference(value: any): boolean;
 export declare function projectContextSourceToolResultForPersistence(toolName: any, value: any, query?: any): any;
 export declare function contextSourceToolResultProjectionSelfTest(): {
     pass: boolean;
     knowledge: any;
     shared: any;
+    read_files: any;
 };

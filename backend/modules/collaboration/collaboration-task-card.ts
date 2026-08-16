@@ -1619,7 +1619,7 @@ export function buildTaskCardView(task: any, executions: any[], sessions: any[])
   else if (phase === "reworking") nextAction = waitingUserResolved ? "正在沿用原任务继续复核和验收" : "修复后会重新运行检查";
   else if (phase === "reviewing") nextAction = "检查通过后自动交付";
   else if (phase === "change_review") nextAction = "请审阅整批变更后批准交付，或退回指定子任务返工";
-  else if (phase === "needs_user") nextAction = task?.intake_state === "awaiting_confirmation" ? "请确认执行前计划，确认后才会派发子 Agent" : "请补充卡片中列出的信息";
+  else if (phase === "needs_user") nextAction = task?.intake_state === "awaiting_confirmation" ? "需要你确认后才执行；确认后才会派发子 Agent" : "请补充卡片中列出的信息";
   else if (phase === "blocked") nextAction = "系统正在重试或切换执行器";
   else if (phase === "pausing") nextAction = "等待当前操作安全收口后保留现场";
   else if (phase === "paused") nextAction = "现场已保留，点击继续会先重新核验";
@@ -1743,8 +1743,10 @@ export function buildTaskCardView(task: any, executions: any[], sessions: any[])
       summary: task?.mission_summary || null,
     } : null,
     plan_mode: planMode ? {
-      title: planMode.title || "执行前计划",
+      title: planMode.title || "执行方案",
       mode: planMode.mode || "",
+      confirmation_kind: planMode.confirmation_kind || (planMode.session_plan_mode === true ? "session_plan" : planMode.requires_confirmation === true ? "write_authorization" : ""),
+      session_plan_mode: planMode.session_plan_mode === true,
       requires_confirmation: planMode.requires_confirmation === true,
       auto_continue: planMode.auto_continue === true,
       confirmation_status: planMode.confirmation_status || "",

@@ -144,7 +144,8 @@ function sanitizeUserVisibleRequirementPlan(value) {
         return null;
     const planId = compactText(value.planId || value.plan_id || value.id, 240);
     const title = compactText(value.title || "需求实施计划", 160) || "需求实施计划";
-    const goal = compactText(value.goal || value.summary || value.objective, 1200);
+    const overview = compactText(value.overview || value.body, 4000);
+    const goal = compactText(value.goal || value.summary || value.objective || overview, 1200);
     const steps = (Array.isArray(value.steps) ? value.steps : [])
         .slice(0, 30)
         .map((step, index) => {
@@ -154,8 +155,8 @@ function sanitizeUserVisibleRequirementPlan(value) {
         return {
             id: compactText(step?.id || `step_${index + 1}`, 100),
             title: stepTitle,
-            description: compactText(step?.description || step?.objective || step?.detail, 800),
-            outcome: compactText(step?.outcome || step?.expectedResult || step?.expected_result || step?.acceptance?.[0], 600),
+            description: compactText(step?.description || step?.detail, 200),
+            outcome: compactText(step?.outcome || step?.expectedResult || step?.expected_result || step?.acceptance?.[0], 160),
             ...(compactText(step?.project || step?.projectName || step?.project_name, 160)
                 ? { project: compactText(step?.project || step?.projectName || step?.project_name, 160) } : {}),
             dependsOn: uniqueStrings(step?.dependsOn || step?.depends_on, 20).map(item => compactText(item, 100)),
@@ -177,6 +178,7 @@ function sanitizeUserVisibleRequirementPlan(value) {
         revision: Math.max(1, Number(value.revision || 1)),
         title,
         goal,
+        ...(overview ? { overview } : {}),
         steps,
         scope: uniqueStrings(value.scope || value.scopes, 20).map(item => compactText(item, 300)),
         expectedResults: uniqueStrings(value.expectedResults || value.expected_results, 24).map(item => compactText(item, 600)),
@@ -376,6 +378,8 @@ function normalizeUserVisibleAgentEvent(input, sequence = 0) {
     const detailSource = input?.detail || {};
     const taskIdentity = compactText(input?.taskId || input?.task_id, 240);
     const anchorIdentity = compactText(input?.anchorMessageId || input?.anchor_message_id, 240);
+    const turnIdentity = compactText(input?.turnId || input?.turn_id || input?.executionTurnId || input?.execution_turn_id, 240);
+    const responseIdentity = compactText(input?.responseMessageId || input?.response_message_id, 240);
     const workItemIdentity = compactText(input?.workItemId || input?.work_item_id || detailSource?.causalRefs?.workItemId || detailSource?.causal_refs?.work_item_id, 240);
     const planStepIdentity = compactText(detailSource?.causalRefs?.planStepId || detailSource?.causal_refs?.plan_step_id || input?.planStepId || input?.plan_step_id, 160);
     const batchIdentity = compactText(detailSource?.progress?.batchId || detailSource?.progress?.batch_id || detailSource?.replayLink?.batchId || detailSource?.replay_link?.batch_id, 160);
@@ -383,6 +387,7 @@ function normalizeUserVisibleAgentEvent(input, sequence = 0) {
     const dependencyIds = uniqueStrings(detailSource?.causalRefs?.dependencyIds || detailSource?.causal_refs?.dependency_ids || input?.dependencyIds || input?.dependency_ids, 40);
     const criterionIds = uniqueStrings(detailSource?.causalRefs?.criterionIds || detailSource?.causal_refs?.criterion_ids || input?.criterionIds || input?.criterion_ids, 40);
     const eventAttempt = Math.max(1, Number(detailSource?.agentDisplay?.attempt || detailSource?.executionStage?.attempt || input?.attempt || 1));
+    const suppliedAttempt = Number(input?.attempt ?? input?.executionAttempt ?? input?.execution_attempt);
     const detail = {
         ...(Number(detailSource.toolContractVersion || detailSource.tool_contract_version || input?.toolContractVersion || input?.tool_contract_version) === 3
             ? { toolContractVersion: 3 } : {}),
@@ -555,6 +560,9 @@ function normalizeUserVisibleAgentEvent(input, sequence = 0) {
             ? { anchorMessageId: compactText(input?.anchorMessageId || input?.anchor_message_id, 240) } : {}),
         ...(compactText(input?.originMessageId || input?.origin_message_id, 240)
             ? { originMessageId: compactText(input?.originMessageId || input?.origin_message_id, 240) } : {}),
+        ...(turnIdentity ? { turnId: turnIdentity } : {}),
+        ...(Number.isFinite(suppliedAttempt) && suppliedAttempt > 0 ? { attempt: Math.max(1, Math.floor(suppliedAttempt)) } : {}),
+        ...(responseIdentity ? { responseMessageId: responseIdentity } : {}),
         ...(compactText(input?.taskId || input?.task_id, 240) ? { taskId: compactText(input?.taskId || input?.task_id, 240) } : {}),
         ...(compactText(input?.workItemId || input?.work_item_id, 240) ? { workItemId: compactText(input?.workItemId || input?.work_item_id, 240) } : {}),
         ...(compactText(input?.agentRunId || input?.agent_run_id, 240) ? { agentRunId: compactText(input?.agentRunId || input?.agent_run_id, 240) } : {}),
@@ -569,6 +577,20 @@ function normalizeUserVisibleAgentEvent(input, sequence = 0) {
         createdAt,
     };
 }
+function sameVisibleEventLane(item, next) {
+    if (Number(item.generation || 0) !== Number(next.generation || 0))
+        return false;
+    const nextTask = compactText(next.taskId, 240);
+    const itemTask = compactText(item.taskId, 240);
+    return nextTask ? itemTask === nextTask : !itemTask;
+}
+function shouldDropLateAssistantProgress(store, next) {
+    if (next.eventType !== "assistant_progress")
+        return false;
+    const lastTurnStart = [...store.events].reverse().find(item => item.eventType === "turn_started" && sameVisibleEventLane(item, next));
+    const lastResult = [...store.events].reverse().find(item => item.eventType === "result" && sameVisibleEventLane(item, next));
+    return !!(lastResult && (!lastTurnStart || Number(lastResult.sequence || 0) >= Number(lastTurnStart.sequence || 0)));
+}
 function appendUserVisibleAgentEvent(input) {
     const initial = normalizeUserVisibleAgentEvent(input);
     const file = eventStoreFile(initial.scope, initial.scopeId, initial.exactSessionId);
@@ -576,9 +598,7 @@ function appendUserVisibleAgentEvent(input) {
     let appended = false;
     (0, atomic_json_file_1.withFileLock)(file, () => {
         const store = readStore(initial.scope, initial.scopeId, initial.exactSessionId);
-        if (initial.eventType === "assistant_progress" && store.events.some(item => item.eventType === "result"
-            && Number(item.generation || 0) === Number(initial.generation || 0)
-            && (!initial.taskId || !item.taskId || item.taskId === initial.taskId)))
+        if (shouldDropLateAssistantProgress(store, initial))
             return;
         const existing = store.events.find(item => item.eventId === initial.eventId);
         if (existing) {
@@ -615,6 +635,7 @@ function appendAssistantProgress(input) {
         turnId: turnIdentity,
         generation: input?.generation,
         modelCallIndex,
+        kind,
         relatedToolCallIds,
     });
     const milestoneChecksum = (0, assistant_progress_1.assistantProgressMilestoneChecksum)({ kind, text, modelCallIndex, relatedToolCallIds, batchId });
@@ -941,6 +962,28 @@ function runUserVisibleAgentEventSelfTest() {
         nestedBatchUsesRuntimeTokenCount: nestedBatchEvent.display.tokenCount === 1234,
         legacyBatchCountRecovered: legacyBatchEvent?.display?.summary === "已读取 2 个文件"
             && legacyBatchEvent?.detail?.toolDisplay?.result?.total === 2,
+        nextTurnProgressAfterPreviousResult: (() => {
+            const identity = { scope: "project", scopeId: "demo", exactSessionId: "session-next-turn-progress" };
+            appendUserVisibleAgentEvent({
+                ...identity, eventId: "prev-turn-started", eventType: "turn_started",
+                display: { title: "项目主 Agent", summary: "上一轮开始", status: "running" },
+            });
+            appendUserVisibleAgentEvent({
+                ...identity, eventId: "prev-turn-result", eventType: "result",
+                display: { title: "回复完成", summary: "上一轮已完成", status: "success" },
+            });
+            appendUserVisibleAgentEvent({
+                ...identity, eventId: "next-turn-started", eventType: "turn_started",
+                display: { title: "项目主 Agent", summary: "本轮开始", status: "running" },
+            });
+            const nextProgress = appendAssistantProgress({
+                ...identity, turnId: "next-turn", text: "我先定位相关代码和配置，再根据结果继续判断。",
+                kind: "before_tools", modelCallIndex: 1, relatedToolCallIds: ["tool-next"],
+            });
+            const listed = listUserVisibleAgentEvents({ ...identity, cursor: 0, limit: 20 });
+            return nextProgress?.eventType === "assistant_progress"
+                && listed.events.some(item => item.eventId === nextProgress.eventId);
+        })(),
     };
     return { pass: Object.values(checks).every(Boolean), checks, event };
 }

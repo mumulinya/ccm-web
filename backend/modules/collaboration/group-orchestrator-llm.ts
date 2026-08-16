@@ -13,9 +13,7 @@ import {
 } from "../../agents/runtime-kernel";
 import {
   callAnthropicCompatibleChat,
-  callAnthropicCompatibleJson,
   callOpenAiCompatibleChat,
-  callOpenAiCompatibleJson,
   extractJsonObject,
   shouldUseAnthropic,
   shouldUseGemini,
@@ -54,6 +52,7 @@ import { appendAssistantProgress, appendToolProjection, appendUserVisibleAgentEv
 import { assistantProgressNarrationEnabled, buildAssistantProgressFallback, buildToolBatchOutcomeProgress, sanitizeAssistantProgressText, validateAssistantProgressKind } from "../../system/assistant-progress";
 import { createModelActivityController, createSafeJsonReplyDeltaExtractor, type ModelActivityPhase } from "../../system/model-activity";
 import { readSlashCommandSessionState, renderSlashCommandSessionDirective } from "../../system/slash-command-session-state";
+import { applyConversationPlanModeHold, applyConversationPlanModeToRound, isConversationPlanModeEnabled } from "../../system/conversation-plan-mode-gate";
 import { publishUserVisibleAssistantText } from "../../system/user-visible-agent-projections";
 import { buildModelVisiblePayloadSnapshot, modelVisibleFixedTokens } from "../../system/session-compaction-core";
 import { attachTransientModelBlocks, collectTransientModelBlocks } from "../../system/transient-model-content";
@@ -68,6 +67,7 @@ import {
   type MainAgentToolRequest,
 } from "../../tools/main-agent-tool-runtime";
 import { CC_ALIGNED_TOOL_RESULT_MAX_TOKENS, GROUP_MAIN_TOOL_RESULT_LIMIT_ERROR, MAIN_AGENT_TOOL_RESULT_LIMIT_ERROR } from "../../tools/cc-tool-result-limits";
+import { compactGroupMainToolResultsForPayload } from "./group-main-tool-result-compact";
 import { getGroupAutoCompactThreshold, resolveGroupModelContextCapacity } from "./group-compaction-strategy";
 import { resolveMainAgentContextPolicy } from "../../tools/main-agent-context-policy";
 import {
@@ -76,6 +76,7 @@ import {
   type WorkflowDecision,
 } from "../../agents/workflow-decision";
 import { createMainAgentTurnReceipt, normalizeMainAgentTurnDecision } from "../../agents/main-agent-turn";
+import { runGroupMainNativeQueryLoop } from "./group-native-query-adapter";
 import { CONVERSATIONAL_REPLY_STYLE_GUIDANCE } from "../../agents/conversational-reply-style";
 import { searchAgentKnowledge } from "../knowledge/knowledge-access";
 import {
@@ -108,10 +109,32 @@ import {
 import {
   buildCoordinatorFollowUpSummary,
   compactText,
+  GROUP_MAIN_SESSION_CONTEXT_GUIDANCE,
   normalizeCoordinatorFollowUpTask,
   sanitizeCoordinatorUserList,
   sanitizeCoordinatorUserText,
 } from "./group-orchestrator-prompts";
+import {
+  applySynthesizedCoordinatorReply,
+  coordinatorShouldFailEmptyVisibleReply,
+  coordinatorUsableReply,
+  coordinatorVisibleFallbackContent,
+  shouldSynthesizeCoordinatorVisibleReply,
+} from "./group-coordinator-visible-reply";
+import {
+  COORDINATOR_PRESENTED_PLAN_HEADLINE,
+  attachConfirmedPlanSlicesToDispatchTargets,
+  hasPresentedGroupPlan,
+  latestPresentedPlanFromGroupSession,
+  PRESENTED_PLAN_DISPATCH_HANDOFF_GUIDANCE,
+  PRESENTED_PLAN_SHAPE_GUIDANCE,
+  publishGroupPresentedRequirementPlan,
+} from "./group-presented-plan";
+import {
+  extractPriorGroupPlanDraft,
+  formatPriorGroupPlanBlock,
+} from "./group-prior-plan-context";
+import { tryBuildGroupNativeCoordinatorMessages } from "./group-coordinator-native-messages";
 import {
   buildAllowedProjectBrief,
   buildAssignmentsFromTargets,
@@ -724,18 +747,11 @@ export function buildLlmCoordinatorMessages(input: {
   });
   const roleSkillsPart = roleSkills.prompt ? `\n\n${roleSkills.prompt}` : "";
   const mainAgentTools = buildGroupMainAgentToolContext(input);
-  // 工具目录不再拼进 system 主体：policyPrompt 会被 tool_search 在 Run 中途
-  // 改写，混在固定规则里会让整条 system 的 contentChecksum 每轮都变，
-  // provider-neutral-context-cache 的稳定前缀被整体击穿。改为单独一条
-  // system 消息，位置仍紧跟在原来的插入点之后。
   const mainAgentToolsPart = "";
   const toolResults = Array.isArray(input.mainAgentToolResults)
     ? input.mainAgentToolResults
     : Array.isArray(input.main_agent_tool_results) ? input.main_agent_tool_results : [];
-  const toolResultsPart = toolResults.length
-    ? `\n\nCCM 已执行的群聊主 Agent 工具结果（只能据此得出结果中可验证的事实；不要重复相同请求）：\n${JSON.stringify(toolResults)}`
-    : "";
-  const system = `你是 CCM 群聊的主 Agent（工作协调者）。
+  const identityRules = `你是 CCM 群聊的主 Agent（工作协调者）。
 
 ${WORKFLOW_DECISION_GUIDANCE}
 
@@ -750,18 +766,19 @@ ${CONVERSATIONAL_REPLY_STYLE_GUIDANCE}
 - 只做需求理解、任务拆分、路由分派、等待和汇总。
 - 你的输出会被系统直接执行，targets 不是建议，而是真实派单。
 - 不要为了显得忙而分派；只有需要项目上下文、代码确认、修改、验证或跨项目联调时才分派。
-- Coordinator 不写代码、不直接操作项目文件系统、不运行命令；对于开发任务，必须先使用系统注入的只读源码证据完成影响分析、架构边界和工作项规划。Worker 负责重新读取当前源码、实现、验证和回执。
+- Coordinator 不写代码、不直接操作项目文件系统、不运行命令。Worker 负责重新读取当前源码、实现、验证和回执。
+- 会话里已有需求、上一轮计划或步骤时，把它们当作成熟上下文；展开或重述已有计划稿不要再读项目文件。第一次为当前需求出实现计划时，允许最小只读核实。
 - 工具结果会回到同一 Agent Loop；形成自包含工作单所需事实未齐时可以继续调用。互不依赖的只读请求可同轮并行；有副作用、权限变化或依赖关系的请求必须串行。
 - 对代码任务只做形成项目目标、WorkItem、验收标准、依赖和权限边界所必需的最小核实；材料足够后立即结束规划并派发项目 Agent，不在主 Agent 内继续做 Worker 的实现探索。
 - 如果系统注入了“只读项目分析上下文”，你可以基于这些已提供的项目配置、项目记忆、目录摘要和知识库召回回答用户；这不代表用户授权修改、运行命令或派发子 Agent。
 - 按本轮注入的 Skill 完成需求提炼、任务拆解和文档条款追踪；Skill 是执行方法，不是可忽略的参考材料。
 - 子 Agent 看不到完整对话，targets[].task 必须是自包含工作单；依赖关系和重规划条件必须有业务或技术依据。
-- 如果用户需求太模糊，shouldDelegate=false，并用 questionForUser 问一个最关键的问题。
-- 普通聊天、知识问答、项目介绍、架构说明、原因分析和方案咨询必须 shouldDelegate=false、dispatchPolicy.action=direct_answer；不能为了满足代码变更门禁而把问答改造成修改 README 或开发任务。
-- 项目分析模式下必须 shouldDelegate=false、dispatchPolicy.action=direct_answer；只总结只读上下文、指出不确定点和下一步建议。
-- 只有用户当前消息明确要求“修改、实现、创建、运行、执行、派发、修复、删除、更新、部署”等实际动作时，才允许 shouldDelegate=true。历史消息中的开发要求不能替代当前消息授权。
-- 对业务开发、PRD、需求文档、接口文档、功能实现类任务，只要群聊里存在可分派项目 Agent，默认 shouldDelegate=true；即使未明确前端/后端/具体项目，也要先派给相关或全部项目 Agent 让其按职责判断影响范围。
-- 当缺口会改变业务流程、实施范围、角色权限、数据保留策略或验收结果时，必须在正式计划和派发前设置 dispatchPolicy.action=ask_user，并输出1～3个 structuredClarificationQuestions。代码、配置和现有资料可查明的技术问题不得询问用户，应先只读核实。
+- 如果用户需求太模糊，调用 ccm_ask_user 问一个最关键的问题。
+- 普通聊天、知识问答、项目介绍、架构说明、原因分析和方案咨询必须直接用自然语言回复，不能为了满足代码变更门禁而把问答改造成修改 README 或开发任务。
+- 项目分析模式下必须直接回答；只总结只读上下文、指出不确定点和下一步建议。
+- 只有用户当前消息明确要求“修改、实现、创建、运行、执行、派发、修复、删除、更新、部署”等实际动作时，才允许调用 ccm_dispatch。历史消息中的开发要求不能替代当前消息授权。
+- 对业务开发、PRD、需求文档、接口文档、功能实现类任务，只要群聊里存在可分派项目 Agent，默认调用 ccm_dispatch；即使未点名具体项目，也要先派给相关或全部项目 Agent 让其按职责判断影响范围。
+- 当缺口会改变业务流程、实施范围、角色权限、数据保留策略或验收结果时，必须在正式计划和派发前调用 ccm_ask_user，并给出1～3个 structuredClarificationQuestions。代码、配置和现有资料可查明的技术问题不得询问用户，应先只读核实。
 - 同一轮最多3个业务问题，每题最多4个选项；有低风险默认方案时标记 safeDefault。不要把目标项目选择、代码修改授权或计划确认混入业务澄清。
 
 CCM 主 Agent 动作边界（必须按动作风险做决定）：
@@ -783,10 +800,11 @@ CCM 主 Agent 动作边界（必须按动作风险做决定）：
 - 子 Agent 默认不直接读取群聊知识库，执行所需摘要和来源必须由主 Agent 写入自包含工作单。
 
 源码驱动规划要求：
-- workflowDecision.requiresCodeChanges=true 时，必须先使用注入的“群聊主 Agent 任务前只读源码证据”完成 architecturePlan。
-- architecturePlan 必须说明目标、明确边界、页面/接口/服务/数据表或消息之间的数据关系、带依赖的执行步骤和真实 sourceCitations。
+- 仅当用户当前消息要求派发或改代码，且会话里还缺少具体文件、接口或配置事实时，才读取源码或使用注入的“群聊主 Agent 任务前只读源码证据”。
+- workflowDecision.requiresCodeChanges=true 且准备 ccm_dispatch 时，architecturePlan 必须说明目标、明确边界、页面/接口/服务/数据表或消息之间的数据关系、带依赖的执行步骤和真实 sourceCitations。
 - sourceCitations 只能引用注入证据中的项目与相对路径。没有源码证据或证据状态不可用时不得派发，应返回 hold 并说明缺口。
-- targets[].task 必须落实 architecturePlan 中属于该项目的步骤；开发 Agent只负责重新读取当前源码、实现、验证和报告冲突，不负责重新定义用户目标或跨项目架构。
+- 展开、重述或整理已有计划不是派发，不要为了重述计划卡片去全量扫仓库。第一次为当前需求出实现计划时，允许最小只读核实以点名缝在哪。
+- targets[].task 必须落实 architecturePlan 中属于该项目的步骤，并写明落实了哪些已确认计划卡切片；开发 Agent只负责重新读取当前源码、实现、验证和报告冲突，不负责重新定义用户目标或跨项目架构。
 - 代码任务统一按 sequential 串行推进；后续项目必须等待 dependsOn 的真实结果和契约证据。
 
 权限审批边界：
@@ -794,110 +812,43 @@ CCM 主 Agent 动作边界（必须按动作风险做决定）：
 - 群聊主 Agent只能审批目标项目内、可恢复、完成当前任务确有必要的权限。
 - 发布、生产部署、强推、密钥、系统提权、项目外路径、破坏性数据库操作和无法判断的事项必须列入 userApprovalRequired，不能提前授权。
 
-你必须只返回 JSON 对象，不要 Markdown，不要解释。第一个工具批次前在 progressUpdate 写一句面向用户的简短说明；后续只有关键发现、方向变化、阻塞、返工、验收或总结节点才填写，不要逐个工具机械播报，也不能写隐藏思维链。
+你通过原生工具行动，不要输出大段 JSON 协议：
+- 需要读取事实时调用已授权的只读工具、invoke_skill 或 tool_search。
+- 需要澄清时调用 ccm_ask_user。
+- 需要展示计划稿时必须调用 ccm_present_plan。${PRESENTED_PLAN_SHAPE_GUIDANCE}
+- 需要派工时调用 ccm_dispatch，targets[].task 必须是自包含工作单。${PRESENTED_PLAN_DISPATCH_HANDOFF_GUIDANCE}
+- 无需工具时直接用自然语言回复用户。
+- 只有真正要调用工具时，才在第一个工具批次前用一句面向用户的短说明；不调工具就直接 ccm_present_plan 或回复。不要写隐藏思维链。计划待办写在 ccm_present_plan.steps[].title 里，不要只输出摘要。
 
 允许分派的项目 Agent 只有：
-${buildAllowedProjectBrief(group) || "- 无"}${sharedFilesPart}${ragPart}${extraInstructionsPart}${roleSkillsPart}${mainAgentToolsPart}
+${buildAllowedProjectBrief(group) || "- 无"}${extraInstructionsPart}${roleSkillsPart}${mainAgentToolsPart}`;
+  const nativeMessages = tryBuildGroupNativeCoordinatorMessages({
+    group,
+    message: input.message,
+    groupSessionId: String(input.groupSessionId || input.group_session_id || ""),
+    sharedFilesContext: input.sharedFilesContext,
+    ragContext: input.ragContext,
+    identityRules,
+    sessionGuidance: GROUP_MAIN_SESSION_CONTEXT_GUIDANCE,
+    mcpPolicy: mainAgentTools.policyPrompt,
+    mainAgentToolResults: toolResults,
+  });
+  if (nativeMessages) return nativeMessages;
+  const priorPlanBlock = formatPriorGroupPlanBlock(extractPriorGroupPlanDraft(input.context));
+  const system = `${identityRules}
 
-JSON 格式：
-{
-  "workflowDecision": {
-    "mode": "answer | project_analysis | execute_direct | plan_task | decompose_epic",
-    "reason": "为什么选择该工作流",
-    "confidence": 0.95,
-    "needsPlanning": false,
-    "needsEpicDecomposition": false,
-    "actionRequired": false,
-    "continuationKind": "new_task | supplement | revise_goal",
-    "readAction": "none | inspect_status",
-    "targetRefs": [],
-    "impactScope": ["模型识别的影响范围"],
-    "planSteps": ["若选择 plan_task/decompose_epic，给出执行前步骤"],
-    "clarificationQuestions": [],
-    "structuredClarificationQuestions": [{"id":"business_scope","label":"需要确认的业务选择","reason":"它如何影响方案或验收","type":"single | multiple | text","required":true,"options":[{"id":"option_1","label":"选项","description":"影响说明","recommended":true,"safeDefault":true}]}],
-    "selectedSkills": ["只能从统一语义预检目录选择"],
-    "intentKind": "conversation | question | status | analysis | execution | management | continuation",
-    "requiresCodeChanges": false,
-    "requiresAgentQa": false,
-    "requiresIndependentReview": false,
-    "verificationModes": ["commands | http | browser | visual | integration | release"],
-    "memoryPolicy": "use | ignore",
-    "authorizationDirective": "preserve | grant | revoke",
-    "riskLevel": "low | write | high",
-    "requiresUserConfirmation": false
-  },
-  "intent": "greeting | question | planning | implementation | bugfix | review | verification | discussion",
-  "summary": "你对用户需求的一句话理解",
-  "domains": ["frontend", "backend", "general"],
-  "deliverables": ["子 Agent 应该交付什么"],
-  "constraints": ["用户明确约束或优先级"],
-  "documentFindings": ["如果有共享文档或知识库参考，提炼其中的接口、字段、业务规则、历史决策、验收标准、引用文件或不明确点；没有则空数组"],
-  "missingInfo": ["缺失但重要的信息"],
-  "dispatchPolicy": {
-    "action": "direct_answer | ask_user | delegate | hold",
-    "reason": "为什么选择这个动作",
-    "requiresConfirmation": false,
-    "risk": "如果有风险写清楚；没有则空字符串",
-    "nextStep": "接下来应该做什么",
-    "structuredClarificationQuestions": []
-  },
-  "coordinationStrategy": "direct_worker_execution | research_synthesis_implementation_verification",
-  "coordinationPlan": {
-    "phases": ["主 Agent 计划阶段，例如理解需求、研究与综合、分配任务、协同执行、复盘验收"],
-    "synthesisStrategy": "你会如何综合子 Agent 回执并判断是否需要返工"
-  },
-  "architecturePlan": {
-    "goal": "用户最终要得到的可观察结果",
-    "boundaries": ["本次负责与明确不负责的边界"],
-    "dataRelationships": ["跨页面、接口、服务、表或消息之间的数据关系"],
-    "dependencySteps": [{"id":"step_1","title":"可执行步骤","project":"项目名","dependsOn":[],"acceptance":["可观察验收结果"]}],
-    "sourceCitations": [{"project":"项目名","paths":["本轮源码证据中的真实相对路径"],"reason":"这些文件如何支撑当前判断"}]
-  },
-  "reasoning": {
-    "knownFacts": ["来自用户当前消息、共享文档或当前群聊上下文的事实"],
-    "assumptionsToVerify": ["必须由 Worker 读取当前项目后核验的假设"],
-    "verificationAssertions": ["最终交付必须用证据证明的目标断言"],
-    "acceptanceEvidencePlan": [{"criterion":"可观察的验收标准","observableOutcome":"用户或系统能看到的结果","evidenceTypes":["command","browser"],"target":"验收对象；证据类型只能使用 code_diff、command、http、browser、artifact"}],
-    "verificationProfile": {"tier":"lightweight | standard | interactive | critical","changeClass":"documentation | configuration | code | interactive | critical","reason":"根据完整需求语义给出的分级依据"},
-    "dependencyRationale": ["每条跨项目依赖为什么存在"],
-    "replanTriggers": ["出现什么事实变化或失败时必须重规划"]
-  },
-  "progressUpdate": "工具前或关键节点的安全进度说明；不需要时为空字符串",
-  "progressKind": "before_tools | key_finding | direction_change | blocker | rework | verification | before_summary",
-  "toolRequests": [
-    {
-      "name": "只读 MCP 的 canonicalName，或 invoke_skill",
-      "arguments": { "工具参数": "值；Skill 使用 name 和 input" },
-      "reason": "为什么当前规划必须读取这项信息"
-    }
-  ],
-  "shouldDelegate": true,
-  "executionOrder": "parallel | sequential | backend_first",
-  "targets": [
-    {
-      "project": "必须是允许分派的项目 Agent 名称",
-      "task": "给这个项目 Agent 的可执行工作单，包含背景、引用的文档/附件、负责的接口/字段/业务规则、边界、交付物、需要检查/修改的范围、风险和验证要求",
-      "reason": "为什么分给它",
-      "dependsOn": "如果依赖其他 Agent 先完成，填其项目名；否则空字符串",
-      "permissionPlan": { "requestedOperations": ["预计需要主 Agent 审批的额外操作"], "userApprovalRequired": ["必须由用户审批的操作"] }
-    }
-  ],
-  "friendlyResponse": "给用户看的友好自然语言回复，说明你的判断和安排，不要包含内部分析结构",
-  "questionForUser": "如果信息不足且不应分派，写一个必须追问的问题；否则空字符串",
-  "directResponse": "如果不需要分派，可以给用户的协调型回复；否则空字符串",
-  "confidence": 0.0
-}`;
+${GROUP_MAIN_SESSION_CONTEXT_GUIDANCE}${sharedFilesPart}${ragPart}`;
 
   const user = `群聊最近上下文：
 ${input.context || "无"}
-
+${priorPlanBlock ? `\n${priorPlanBlock}\n` : ""}
 用户最新消息：
-${input.message}${toolResultsPart}
+${input.message}
 
 当前 Run 已有工作流决定（主 Agent首轮为空，工具续轮沿用上一轮）：
 ${JSON.stringify(input.workflowDecision || null)}
 
-请输出 JSON。`;
+请根据完整语义决定：直接回复、调用只读工具、ccm_ask_user、ccm_present_plan 或 ccm_dispatch。用户要看计划、方案或步骤时必须调用 ccm_present_plan，不要只用自然语言概述。第一次为当前需求出实现计划时允许最小只读核实；若已有计划稿只是展开或重述，不要再读取项目文件。若最近上下文已能回答当前消息且不是要计划，优先直接回复。`;
 
   return attachTransientModelBlocks([
     { role: "system", content: system },
@@ -1093,7 +1044,7 @@ export function enrichTaskWithDocumentFindings(task: string, findings: string[])
 
 
 
-export function sanitizeLlmTargets(group: any, parsed: any, message: string, fallbackAnalysis: any, allowRuleRepair = false) {
+export function sanitizeLlmTargets(group: any, parsed: any, message: string, fallbackAnalysis: any, allowRuleRepair = false, dispatchContext: any = null) {
   void allowRuleRepair;
   const allowed = new Map(getRoutableMembers(group).map((m: any) => [m.project, m]));
   const rawTargets = Array.isArray(parsed?.targets) ? parsed.targets : [];
@@ -1143,7 +1094,11 @@ export function sanitizeLlmTargets(group: any, parsed: any, message: string, fal
     seen.add(project);
   }
 
-  return targets;
+  const presentedPlan = dispatchContext?.presentedPlan
+    || latestPresentedPlanFromGroupSession(group?.id, dispatchContext?.groupSessionId)
+    || parsed?.presentedPlan
+    || parsed?.presented_plan;
+  return attachConfirmedPlanSlicesToDispatchTargets(targets, presentedPlan);
 }
 
 
@@ -1202,7 +1157,7 @@ export function normalizeLlmAnalysis(parsed: any, fallback: any) {
 export function buildCoordinatorResultFromAnalysis(group: any, message: string, analysis: any, targets: any[], runtime: string, parsed: any = null, options: any = {}) {
   const coordinator = getCoordinatorMember(group);
   // 优化6：优先使用 LLM 生成的 friendlyResponse
-  const friendlyText = String(parsed?.friendlyResponse || "").trim();
+  const friendlyText = coordinatorUsableReply(parsed);
   const dispatchPolicy = parsed
     ? normalizeDispatchPolicy(parsed, analysis, targets)
     : { action: "hold", reason: "缺少模型结构化派发决定", requiresConfirmation: false, risk: "", nextStep: "重新调用模型" };
@@ -1215,8 +1170,6 @@ export function buildCoordinatorResultFromAnalysis(group: any, message: string, 
     });
 
   if (effectiveTargets.length === 0) {
-    const response = friendlyText || String(parsed?.questionForUser || parsed?.directResponse || "").trim();
-    const fallbackQuestion = analysis.missingInfo?.[0] || "请描述更具体的需求";
     const policyLine = dispatchPolicy.action === "delegate" && dispatchPolicy.requiresConfirmation
       ? `我先不直接派发：${dispatchPolicy.reason || "该操作需要你确认"}${dispatchPolicy.risk ? `\n风险：${dispatchPolicy.risk}` : ""}`
       : "";
@@ -1229,7 +1182,13 @@ export function buildCoordinatorResultFromAnalysis(group: any, message: string, 
       dispatchPolicy,
       runtime,
       agentBoundary: buildGroupMainAgentBoundary(runtime === "llm-api" ? "llm" : runtime),
-      content: response || policyLine || `我理解了你的需求，不过还需要你补充一下：**${fallbackQuestion}**`,
+      content: coordinatorVisibleFallbackContent({
+        parsed,
+        analysis,
+        policyLine,
+        priorPlanDraft: options.priorPlanDraft || options.prior_plan_draft,
+        observationCount: options.observationCount || options.observation_count,
+      }),
     };
   }
 
@@ -1411,117 +1370,6 @@ export async function runLlmGroupOrchestrator(input: {
     maxSilentGapMs = Math.max(maxSilentGapMs, Math.max(0, at - lastVisibleFeedbackAt));
     lastVisibleFeedbackAt = at;
   };
-  const callPlanningModel = async (roundInput: any, round: number) => {
-    modelCallCount += 1;
-    segmentModelTurns += 1;
-    const messages = buildLlmCoordinatorMessages(roundInput);
-    const roundToolContext = buildGroupMainAgentToolContext(roundInput);
-    const estimatedContextTokens = messages.reduce((sum: number, message: any) => {
-      return sum + estimateTextTokens(String(message?.content || ""));
-    }, 0);
-    const providerPayload = buildModelVisiblePayloadSnapshot({
-      scope: "group",
-      sessionId: `${group.id}:${groupSessionId}`,
-      system: messages.filter((message: any) => message.role === "system"),
-      contextComponents: buildLlmCoordinatorContextComponents(roundInput),
-      recentMessages: messages.filter((message: any) => message.role !== "system"),
-    });
-    const captureTokenUsage = (usage: LlmTokenUsage) => {
-      tokenUsage = mergeLlmTokenUsage(tokenUsage, usage);
-      if (groupSessionId.startsWith("gcs_")) {
-        try {
-          recordGroupPromptCacheUsage({
-            groupId: group.id,
-            groupSessionId,
-            source: round > 0 ? `group_main_tool_followup_${round}` : "group_main_planning",
-            provider: anthropic ? "anthropic" : shouldUseGemini(config) ? "gemini" : "openai",
-            model: config.model,
-            usage,
-            estimatedContextTokens,
-            estimatedPayloadTokens: providerPayload.totalTokens,
-            estimatedFixedTokens: modelVisibleFixedTokens(providerPayload),
-            payloadChecksum: providerPayload.payloadChecksum,
-            fixedContextChecksum: providerPayload.fixedContextChecksum,
-            modelVisiblePayload: providerPayload,
-          });
-        } catch {}
-      }
-    };
-    const activityPhase: ModelActivityPhase = toolResults.length ? "tool_result_review" : round > 0 ? "tool_decision" : "understanding";
-    const activity = createModelActivityController({
-      scope: "group", scopeId: String(group.id), exactSessionId: groupSessionId,
-      turnId: visibleTurnId, modelCallIndex: modelCallCount, phase: activityPhase,
-      anchorMessageId: visibleAnchorMessageId || undefined,
-      onActivity: activityValue => {
-        if (["waiting", "retrying"].includes(String(activityValue?.state || ""))) markVisibleFeedback();
-        input.onModelActivity?.(activityValue);
-      },
-    });
-    const replyExtractor = createSafeJsonReplyDeltaExtractor(delta => {
-      visibleReplyDeltaEmitted = true;
-      if (!firstProviderDeltaAt) firstProviderDeltaAt = Date.now();
-      markVisibleFeedback(firstProviderDeltaAt || Date.now());
-      visibleReplyDeltaSequence += 1;
-      activity.onDelta(delta);
-      publishEphemeralUserVisibleAgentEvent({
-        eventId: `group-delta:${visibleTurnId}:${modelCallCount}:${visibleReplyDeltaSequence}`,
-        scope: "group", scopeId: String(group.id), exactSessionId: groupSessionId,
-        ...(visibleAnchorMessageId ? { anchorMessageId: visibleAnchorMessageId } : {}),
-        eventType: "assistant_text_delta",
-        display: { title: "群聊主 Agent", summary: String(delta || "").slice(0, 500), status: "running" },
-        detail: { stream: { sequence: visibleReplyDeltaSequence, final: false } },
-      });
-      input.onDelta?.(delta);
-    });
-    let parsed: any;
-    try {
-      parsed = anthropic
-      ? await callAnthropicCompatibleJson(config, {
-          messages,
-          maxTokens: 1500,
-          defaultTimeoutMs: 45000,
-          retryProfile: round > 0 ? "agent_orchestration" : "interactive_first_turn",
-          onRetry: notice => {
-            modelRetryCount += 1;
-            const publicNotice = { attempt: notice.attempt, max_attempts: notice.maxAttempts, remaining_budget_ms: Math.max(0, (notice.profile === "interactive_first_turn" ? 60_000 : 120_000) - notice.elapsedMs), profile: notice.profile, reason: String(notice.error?.message || notice.error || "模型暂时不可用").slice(0, 240) };
-            retryNotices.push(publicNotice);
-            input.onRetry?.(publicNotice);
-            activity.onRetry(notice.attempt + 1);
-          },
-          httpErrorPrefix: "主 Agent API 调用失败",
-          promptCacheTracking: { groupId: group.id, groupSessionId, source: round > 0 ? `group_main_tool_followup_${round}` : "group_main_planning" },
-          onUsage: captureTokenUsage,
-          nativeTools: [...(roundToolContext.catalog.loadedMcp || roundToolContext.catalog.mcp || []).map((tool: any) => ({ ...tool, deferred: false })), ...(roundToolContext.catalog.discoverableMcp || []).map((tool: any) => ({ ...tool, deferred: true }))].map((tool: any) => ({ name: String(tool.canonicalName || tool.name || ""), description: String(tool.description || ""), inputSchema: tool.inputSchema || { type: "object", properties: {} }, deferred: tool.deferred === true })).filter((tool: any) => tool.name),
-          nativeToolReference: true,
-          stream: true,
-          onDelta: delta => { if (!firstProviderDeltaAt) firstProviderDeltaAt = Date.now(); replyExtractor.push(delta); },
-        })
-      : await callOpenAiCompatibleJson(config, {
-          messages,
-          defaultTimeoutMs: 45000,
-          retryProfile: round > 0 ? "agent_orchestration" : "interactive_first_turn",
-          onRetry: notice => {
-            modelRetryCount += 1;
-            const publicNotice = { attempt: notice.attempt, max_attempts: notice.maxAttempts, remaining_budget_ms: Math.max(0, (notice.profile === "interactive_first_turn" ? 60_000 : 120_000) - notice.elapsedMs), profile: notice.profile, reason: String(notice.error?.message || notice.error || "模型暂时不可用").slice(0, 240) };
-            retryNotices.push(publicNotice);
-            input.onRetry?.(publicNotice);
-            activity.onRetry(notice.attempt + 1);
-          },
-          httpErrorPrefix: "主 Agent API 调用失败",
-          promptCacheTracking: { groupId: group.id, groupSessionId, source: round > 0 ? `group_main_tool_followup_${round}` : "group_main_planning" },
-          onUsage: captureTokenUsage,
-          nativeTools: [...(roundToolContext.catalog.loadedMcp || roundToolContext.catalog.mcp || []).map((tool: any) => ({ ...tool, deferred: false })), ...(roundToolContext.catalog.discoverableMcp || []).map((tool: any) => ({ ...tool, deferred: true }))].map((tool: any) => ({ name: String(tool.canonicalName || tool.name || ""), description: String(tool.description || ""), inputSchema: tool.inputSchema || { type: "object", properties: {} }, deferred: tool.deferred === true })).filter((tool: any) => tool.name),
-          nativeToolReference: true,
-          stream: true,
-          onDelta: delta => { if (!firstProviderDeltaAt) firstProviderDeltaAt = Date.now(); replyExtractor.push(delta); },
-        });
-      activity.complete();
-    } catch (error) {
-      activity.fail();
-      throw error;
-    }
-    return { parsed, messages, providerPayload };
-  };
   let parsed: any;
   let planningInput: any = {
     ...input,
@@ -1529,186 +1377,57 @@ export async function runLlmGroupOrchestrator(input: {
     workflowDecision: providedWorkflowDecision || null,
     extraInstructions: [String(input.extraInstructions || "").trim(), sessionDirective].filter(Boolean).join("\n\n"),
   };
-  const toolResults: any[] = [];
-  const executed = new Set<string>();
+  let toolResults: any[] = [];
   try {
-    while (true) {
-      const round = toolRoundCount;
-      const modelStartedAt = Date.now();
-      const response = await callPlanningModel(planningInput, round);
-      modelDurationMs += Math.max(0, Date.now() - modelStartedAt);
-      parsed = response.parsed;
-      const requests = normalizeGroupMainToolRequests(parsed?.toolRequests || parsed?.tool_requests);
-      if (requests.length === 0) {
-        loopStopReason = "model_completed";
-        break;
-      }
-      const freshRequests = requests.filter(request => {
-        const fingerprint = crypto.createHash("sha256").update(JSON.stringify({ name: request.name, arguments: request.arguments })).digest("hex");
-        return !executed.has(fingerprint);
-      });
-      if (freshRequests.length === 0) {
-        noProgressCount += 1;
-        toolResults.push({
-          name: "loop_control",
-          ok: false,
-          error: "GROUP_MAIN_TOOL_LOOP_DUPLICATE_REQUEST",
-          reason: "相同工具和参数已经执行，请基于已有结果完成协调、调整计划或选择不同的工具。",
-        });
-        planningInput = { ...planningInput, mainAgentToolResults: toolResults };
-        if (noProgressCount >= loopBudget.noProgressThreshold) {
-          loopStopReason = "no_progress";
-          throw new Error("GROUP_MAIN_TOOL_LOOP_NO_PROGRESS");
-        }
-        toolRoundCount += 1;
-        continue;
-      }
-      if (loopBudget.mode === "bounded" && round >= loopBudget.maxToolRounds) throw new Error("GROUP_MAIN_TOOL_LOOP_MAX_ROUNDS");
-      const remainingToolCalls = loopBudget.mode === "bounded"
-        ? Math.max(0, loopBudget.toolCallBudget - toolCallCount)
-        : freshRequests.length;
-      if (!remainingToolCalls) throw new Error("GROUP_MAIN_TOOL_LOOP_TOOL_BUDGET");
-      const toolContext = buildGroupMainAgentToolContext(planningInput);
-      const selectedRequests = freshRequests.slice(0, remainingToolCalls);
-      const preparedToolCallIds = selectedRequests.map(request => `gmtool_${crypto.createHash("sha256").update(JSON.stringify({
-        groupId: group.id,
-        exactSessionId: groupSessionId,
-        name: request.name,
-        arguments: request.arguments,
-        turn: visibleTurnId,
-        round,
-        nonce: crypto.randomBytes(4).toString("hex"),
-      })).digest("hex").slice(0, 24)}`);
-      if (assistantProgressNarrationEnabled(config)) {
-        const explicitProgress = sanitizeAssistantProgressText(parsed?.progressUpdate || parsed?.progress_update || "", 600);
-        const progressKind = validateAssistantProgressKind(
-          parsed?.progressKind || parsed?.progress_kind || (round === 0 ? "before_tools" : "key_finding"),
-          {
-            firstBatch: round === 0,
-            hasSuccessfulObservation: toolResults.some((row: any) => row?.ok === true),
-            hasFailure: toolResults.some((row: any) => row?.ok === false),
-            directionChanged: round > 0 && toolResults.some((row: any) => row?.ok === false),
-            attempt: Number(toolContext.scopeIdentity?.attempt || 1),
-            verificationActive: selectedRequests.some(request => /test|build|lint|typecheck|verify|verification/i.test(String(request?.name || ""))),
-          },
-        );
-        const fallbackProgress = round === 0
-          ? buildAssistantProgressFallback(selectedRequests, { target: group.name || group.id, goal: input.message })
-          : "";
-        const progressText = progressKind ? (explicitProgress || fallbackProgress) : fallbackProgress;
-        if (progressText) appendAssistantProgress({
-          scope: "group", scopeId: String(group.id), exactSessionId: groupSessionId,
-          ...(visibleAnchorMessageId ? { anchorMessageId: visibleAnchorMessageId } : {}),
-          generation: Number(toolContext.scopeIdentity?.generation || 0),
-          turnId: visibleTurnId,
-          text: progressText,
-          kind: progressKind || "before_tools",
-          modelCallIndex: modelCallCount,
-          relatedToolCallIds: preparedToolCallIds,
-          title: "群聊主 Agent",
-        });
-        if (progressText) markVisibleFeedback();
-      }
-      for (const request of selectedRequests) {
-        executed.add(crypto.createHash("sha256").update(JSON.stringify({ name: request.name, arguments: request.arguments })).digest("hex"));
-      }
-      const toolBatchStartedAt = Date.now();
-      const roundResults = await executeGroupMainAgentToolRequests({
-        requests: selectedRequests,
-        toolContext,
-        toolCallIds: preparedToolCallIds,
-        toolBatchSize: loopBudget.toolBatchSize,
-        readOnlyParallelism: loopBudget.readOnlyParallelism,
-        signal: input.signal,
-      });
-      toolWallDurationMs += Math.max(0, Date.now() - toolBatchStartedAt);
-      toolCallCount += roundResults.length;
-      segmentToolCalls += roundResults.length;
-      toolResults.push(...roundResults);
-      if (round === 0) {
-        const initialReads = roundResults.filter((row: any) => /^(?:read_file|read_files|glob_files|grep_text)$/i.test(String(row?.name || "")));
-        initialReadFileCount += initialReads.reduce((count: number, row: any) => count + Math.max(1, Number(row?.rawOutput?.safeReceipt?.itemCount || row?.rawOutput?.itemCount || 0)), 0);
-        initialReadTokens += initialReads.reduce((count: number, row: any) => count + Math.max(0, Number(row?.outputTokens || 0)), 0);
-      }
-      if (assistantProgressNarrationEnabled(config)) {
-        const outcomeProgress = buildToolBatchOutcomeProgress(roundResults, { target: group.name || group.id });
-        if (outcomeProgress) appendAssistantProgress({
-          scope: "group", scopeId: String(group.id), exactSessionId: groupSessionId,
-          ...(visibleAnchorMessageId ? { anchorMessageId: visibleAnchorMessageId } : {}),
-          generation: Number(toolContext.scopeIdentity?.generation || 0),
-          turnId: visibleTurnId,
-          text: outcomeProgress,
-          kind: "key_finding",
-          modelCallIndex: modelCallCount,
-          relatedToolCallIds: preparedToolCallIds,
-          title: "群聊主 Agent",
-        });
-        if (outcomeProgress) markVisibleFeedback();
-      }
-      if (assistantProgressNarrationEnabled(config) && roundResults.length && roundResults.every((row: any) => row?.ok !== true)) {
-        appendAssistantProgress({
-          scope: "group", scopeId: String(group.id), exactSessionId: groupSessionId,
-          ...(visibleAnchorMessageId ? { anchorMessageId: visibleAnchorMessageId } : {}),
-          generation: Number(toolContext.scopeIdentity?.generation || 0),
-          turnId: visibleTurnId,
-          text: "当前工具批次没有取得有效结果，我会根据错误调整检查方向，不会机械重复同一请求。",
-          kind: "blocker",
-          modelCallIndex: modelCallCount,
-          relatedToolCallIds: preparedToolCallIds,
-          title: "群聊主 Agent",
-        });
-      }
-      noProgressCount = roundResults.some((row: any) => row?.ok === true) ? 0 : noProgressCount + 1;
-      if (noProgressCount >= loopBudget.noProgressThreshold) {
-        loopStopReason = "no_progress";
-        throw new Error("GROUP_MAIN_TOOL_LOOP_NO_PROGRESS");
-      }
-      const knowledgeResult = [...roundResults].reverse().find((row: any) => row.name === "query_knowledge" && row.ok && row.rawOutput);
-      planningInput = {
-        ...planningInput,
-        mainAgentToolResults: toolResults,
-        loadedMainAgentTools: toolContext.loadedToolNames || [],
-        ...(knowledgeResult ? { ragContext: knowledgeResult.rawOutput.context || "" } : {}),
-      };
-      const hydratedMessages = buildLlmCoordinatorMessages(planningInput);
-      const hydratedPayload = buildModelVisiblePayloadSnapshot({
-        scope: "group",
-        sessionId: `${group.id}:${groupSessionId}`,
-        system: hydratedMessages.filter((message: any) => message.role === "system"),
-        contextComponents: buildLlmCoordinatorContextComponents(planningInput),
-        recentMessages: hydratedMessages.filter((message: any) => message.role !== "system"),
-      });
-      const threshold = getGroupAutoCompactThreshold(config);
-      if (hydratedPayload.totalTokens >= threshold) {
-        throw new Error(`GROUP_MAIN_TOOL_RESULT_PAYLOAD_BLOCKED:${hydratedPayload.totalTokens}/${threshold}`);
-      }
-      toolRoundCount += 1;
-      const continuation = shouldContinueAgentLoop({
-        budget: loopBudget,
-        round: toolRoundCount,
-        modelTurns: segmentModelTurns,
-        toolCalls: segmentToolCalls,
-        elapsedMs: Date.now() - segmentStartedAt,
-        unresolvedCriteria: 1,
-        noProgressCount,
-      });
-      if (!continuation.continue) {
-        loopStopReason = continuation.reason;
-        throw new Error(`GROUP_MAIN_TOOL_LOOP_${continuation.reason.toUpperCase()}`);
-      }
-      if (continuation.resetSegment) {
-        continuationSegments += 1;
-        segmentToolCalls = 0;
-        segmentModelTurns = 0;
-        segmentStartedAt = Date.now();
-      }
-    }
+    const nativeLoop = await runGroupMainNativeQueryLoop({
+      config,
+      group,
+      groupSessionId,
+      planningInput,
+      loopBudget,
+      visibleTurnId,
+      visibleAnchorMessageId,
+      signal: input.signal,
+      onDelta: input.onDelta,
+      onRetry: input.onRetry,
+      onModelActivity: input.onModelActivity,
+      markVisibleFeedback,
+      buildMessages: (roundInput: any) => buildLlmCoordinatorMessages(roundInput),
+      buildToolContext: (roundInput: any) => buildGroupMainAgentToolContext(roundInput),
+      buildContextComponents: (roundInput: any) => buildLlmCoordinatorContextComponents(roundInput),
+      executeRequests: executeGroupMainAgentToolRequests,
+      isBuiltinReadOnly: (name: string) => GROUP_MAIN_BUILTIN_TOOLS.some(tool => tool.canonicalName === name),
+    });
+    parsed = nativeLoop.parsed;
+    toolResults = nativeLoop.toolResults;
+    planningInput = {
+      ...nativeLoop.planningInput,
+      mainAgentToolResults: toolResults,
+      priorPlanDraft: extractPriorGroupPlanDraft(input.context),
+      observationCount: toolResults.filter((row: any) => row?.name && row.name !== "loop_control").length,
+    };
+    modelCallCount = nativeLoop.modelCallCount;
+    toolRoundCount = nativeLoop.toolRoundCount;
+    toolCallCount = nativeLoop.toolCallCount;
+    noProgressCount = nativeLoop.noProgressCount;
+    continuationSegments = nativeLoop.continuationSegments;
+    loopStopReason = nativeLoop.loopStopReason;
+    tokenUsage = nativeLoop.tokenUsage || tokenUsage;
+    modelDurationMs += nativeLoop.modelDurationMs;
+    toolWallDurationMs += nativeLoop.toolWallDurationMs;
+    modelRetryCount += nativeLoop.modelRetryCount;
+    retryNotices.push(...nativeLoop.retryNotices);
+    visibleReplyDeltaEmitted = nativeLoop.visibleReplyDeltaEmitted || visibleReplyDeltaEmitted;
+    initialReadFileCount += nativeLoop.initialReadFileCount;
+    initialReadTokens += nativeLoop.initialReadTokens;
   } catch (error: any) {
+    if (error && !Number(error.observationCount)) {
+      error.observationCount = toolResults.filter((row: any) => row?.name && row.name !== "loop_control").length;
+    }
     throw attachLlmTokenUsage(error, tokenUsage);
   }
-  const terminalResponseType = String(parsed?.responseType || parsed?.response_type || "").toLowerCase();
   let fallbackStreamCount = 0;
-  if (["reply", "clarify"].includes(terminalResponseType) && !visibleReplyDeltaEmitted && input.onDelta) {
+  if (shouldSynthesizeCoordinatorVisibleReply(parsed) && input.onDelta) {
     fallbackStreamCount += 1;
     modelCallCount += 1;
     const synthesisStartedAt = Date.now();
@@ -1723,7 +1442,7 @@ export async function runLlmGroupOrchestrator(input: {
     });
     let synthesisSequence = 0;
     const onSynthesisDelta = (delta: string) => {
-      if (!delta) return;
+      if (!String(delta || "").trim()) return;
       visibleReplyDeltaEmitted = true;
       if (!firstProviderDeltaAt) firstProviderDeltaAt = Date.now();
       markVisibleFeedback();
@@ -1740,43 +1459,50 @@ export async function runLlmGroupOrchestrator(input: {
       input.onDelta?.(delta);
     };
     try {
+      const priorPlanDraft = String(planningInput.priorPlanDraft || "");
       const synthesisMessages = [
-        { role: "system", content: "请把既有结论整理成面向用户的最终回答。只输出回答正文，不输出JSON、内部协议、推理过程或工具原始结果。" },
-        { role: "user", content: JSON.stringify({ request: String(input.message || "").slice(0, 4000), draft: String(parsed?.reply || parsed?.content || parsed?.summary || "").slice(0, 8000), toolSummary: buildToolBatchOutcomeProgress(toolResults, { target: group.name || group.id }) || "未使用工具" }) },
+        { role: "system", content: "请把既有结论整理成面向用户的最终回答。若已有计划稿，用一两句说明关键决策，不要把待办再写成 P0–P4 小作文，也不要输出空回复。若最近上下文已包含用户需求，直接据此回答或给出实现计划，不要再问用户描述更具体的需求。只输出回答正文，不输出JSON、内部协议、推理过程或工具原始结果。" },
+        { role: "user", content: JSON.stringify({
+          request: String(input.message || "").slice(0, 4000),
+          recentContext: String(input.context || "").slice(0, 6000),
+          priorPlanDraft: priorPlanDraft.slice(0, 4000),
+          draft: String(parsed?.reply || parsed?.content || parsed?.summary || "").slice(0, 8000),
+          toolSummary: buildToolBatchOutcomeProgress(toolResults, { target: group.name || group.id }) || "未使用工具",
+        }) },
       ];
       const captureSynthesisUsage = (usage: LlmTokenUsage) => { tokenUsage = mergeLlmTokenUsage(tokenUsage, usage); };
       const synthesized = anthropic
         ? await callAnthropicCompatibleChat(config, { messages: synthesisMessages, maxTokens: 1600, temperature: 0.2, defaultTimeoutMs: 60_000, retryProfile: "interactive_first_turn", stream: true, onDelta: onSynthesisDelta, onUsage: captureSynthesisUsage, onRetry: notice => { modelRetryCount += 1; synthesisActivity.onRetry(notice.attempt + 1); } })
         : await callOpenAiCompatibleChat(config, { messages: synthesisMessages, temperature: 0.2, defaultTimeoutMs: 60_000, retryProfile: "interactive_first_turn", stream: true, onDelta: onSynthesisDelta, onUsage: captureSynthesisUsage, onRetry: notice => { modelRetryCount += 1; synthesisActivity.onRetry(notice.attempt + 1); } });
-      parsed = { ...parsed, reply: String(synthesized || parsed?.reply || parsed?.content || ""), content: String(synthesized || parsed?.content || parsed?.reply || "") };
+      parsed = applySynthesizedCoordinatorReply(parsed, String(synthesized || parsed?.reply || parsed?.content || ""));
       synthesisActivity.complete();
-    } catch (error) {
+    } catch (error: any) {
       synthesisActivity.fail();
+      if (error && !Number(error.observationCount)) {
+        error.observationCount = toolResults.filter((row: any) => row?.name && row.name !== "loop_control").length;
+      }
       throw attachLlmTokenUsage(error, tokenUsage);
     } finally {
       modelDurationMs += Math.max(0, Date.now() - synthesisStartedAt);
     }
   }
-  if (readSlashCommandSessionState("group", String(group.id), groupSessionId).planMode?.enabled === true
-    && (["dispatch", "execute"].includes(String(parsed?.responseType || parsed?.response_type || "").toLowerCase())
-      || parsed?.shouldDelegate === true || parsed?.should_delegate === true)) {
-    parsed = {
-      ...parsed,
-      responseType: "plan",
-      shouldDelegate: false,
-      targets: [],
-      workflowDecision: {
-        ...(parsed?.workflowDecision || parsed?.workflow_decision || {}),
-        mode: "plan_task",
-        actionRequired: false,
-        requiresCodeChanges: false,
-        requiresUserConfirmation: false,
-        reason: "当前精确会话处于 Plan Mode，已由服务端阻止任务派发和写操作",
-      },
-    };
+  parsed = applyConversationPlanModeHold("group", String(group.id), groupSessionId, parsed);
+  if (hasPresentedGroupPlan(parsed) && !coordinatorUsableReply(parsed)) {
+    parsed = applySynthesizedCoordinatorReply(parsed, COORDINATOR_PRESENTED_PLAN_HEADLINE);
+  }
+  if (coordinatorShouldFailEmptyVisibleReply({
+    parsed,
+    priorPlanDraft: planningInput.priorPlanDraft,
+    observationCount: planningInput.observationCount,
+    workflowMode: parsed?.workflowDecision?.mode,
+  })) {
+    const error: any = new Error("模型返回空响应");
+    error.code = "CCM_EMPTY_REPLY";
+    error.observationCount = Number(planningInput.observationCount || 0);
+    throw attachLlmTokenUsage(error, tokenUsage);
   }
   const analysis = normalizeLlmAnalysis(parsed, fallbackAnalysis);
-  const targets = sanitizeLlmTargets(group, parsed, input.message, analysis, false);
+  const targets = sanitizeLlmTargets(group, parsed, input.message, analysis, false, { groupSessionId });
   const turnDecision = normalizeMainAgentTurnDecision({
     scope: "group",
     scopeId: String(group.id || ""),
@@ -1794,7 +1520,7 @@ export async function runLlmGroupOrchestrator(input: {
     usage: tokenUsage,
     inputIdentity: { groupId: group.id, groupSessionId, message: input.message },
   });
-  if (group.id && groupSessionId && ["reply", "clarify"].includes(turnDecision.responseKind)) {
+  if (group.id && groupSessionId && ["reply", "clarify", "plan"].includes(turnDecision.responseKind)) {
     const reply = String(parsed?.reply || parsed?.content || parsed?.summary || "");
     const totalDurationMs = Math.max(0, Date.now() - visibleTurnStartedAt);
     const otherDurationMs = Math.max(0, totalDurationMs - modelDurationMs - toolWallDurationMs);
@@ -1809,8 +1535,8 @@ export async function runLlmGroupOrchestrator(input: {
       ...(visibleAnchorMessageId ? { anchorMessageId: visibleAnchorMessageId } : {}),
       eventType: turnDecision.responseKind === "clarify" ? "clarification_required" : "result",
       display: {
-        title: turnDecision.responseKind === "clarify" ? "需要补充信息" : "回复完成",
-        summary: turnDecision.responseKind === "clarify" ? reply : "群聊主 Agent 已完成本轮回复",
+        title: turnDecision.responseKind === "clarify" ? "需要补充信息" : turnDecision.responseKind === "plan" ? "计划已整理" : "回复完成",
+        summary: turnDecision.responseKind === "clarify" ? reply : turnDecision.responseKind === "plan" ? "群聊主 Agent 已整理本轮计划" : "群聊主 Agent 已完成本轮回复",
         status: turnDecision.responseKind === "clarify" ? "waiting" : "success",
         toolUseCount: toolCallCount,
         tokenCount: Number(tokenUsage?.totalTokens || 0),
@@ -1823,8 +1549,19 @@ export async function runLlmGroupOrchestrator(input: {
       usage: tokenUsage,
     });
   }
+  const coordinatorResult = buildCoordinatorResultFromAnalysis(group, input.message, analysis, targets, "llm-api", parsed, planningInput);
+  const presentedPlan = publishGroupPresentedRequirementPlan({
+    groupId: group.id,
+    groupSessionId,
+    turnId: visibleTurnId,
+    anchorMessageId: visibleAnchorMessageId,
+    parsed,
+    goalFallback: coordinatorUsableReply(parsed) || String(input.message || ""),
+    skip: Array.isArray(coordinatorResult?.assignments) && coordinatorResult.assignments.length > 0,
+  });
   return {
-    ...buildCoordinatorResultFromAnalysis(group, input.message, analysis, targets, "llm-api", parsed, planningInput),
+    ...coordinatorResult,
+    ...(presentedPlan ? { presentedPlan } : {}),
     usage: tokenUsage,
     mainAgentTurnDecision: turnDecision,
     mainAgentTurnReceipt: turnReceipt,

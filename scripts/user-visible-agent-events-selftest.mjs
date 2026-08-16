@@ -338,7 +338,10 @@ const toolResultDetailSource = fs.readFileSync(new URL('../frontend/src/componen
 assert.match(toolResultDetailSource, /drifted: '当前内容已经变化'/, '共享工具详情必须给出权威结果漂移提示')
 assert.match(progressTranscriptSource, /cc-live-execution-status/, '运行态必须显示Codex风格的处理时间和当前阶段')
 assert.match(progressTranscriptSource, /liveRowLabel/, '运行态工具必须使用正在运行或已完成的紧凑文案')
+assert.match(progressTranscriptSource, /appendLiveModelActivityToTail/, '等待模型归纳时必须接到已读取等进度后面')
+assert.match(progressTranscriptSource, /if \(event\?\.eventType === 'model_activity'\) return ''/, '归纳结论不得把同一句再重复成摘要')
 assert.match(progressTranscriptSource, /isLivePresentation/, '运行态与完成态必须使用同一账本的不同投影')
+assert.match(progressTranscriptSource, /!isQueryCompletion.value && !isTerminal.value/, '回合结束后不得继续展示实时执行过程')
 assert.match(progressTranscriptSource, /link\?\.schema !== 'ccm-task-event-link-v1'/, '任务回放入口必须依赖显式安全关联契约')
 assert.match(progressTranscriptSource, /\^gar_/, '历史全局普通运行ID不得继续显示任务回放入口')
 const globalReplayLoopSource = fs.readFileSync(new URL('../backend/agents/global/global-agent-loop-engine.ts', import.meta.url), 'utf8')
@@ -448,6 +451,49 @@ const delayedCommitEvents = [
 ]
 const delayedProjection = frontendExecution.executionEventsForMessage(delayedCommitEvents, delayedCommitMessages, 1)
 assert.equal(delayedProjection.some(event => event.toolCallId === 'delayed-tool' && event.eventType === 'tool_completed'), true, '消息延迟落库时仍必须按 turn lifecycle 关联工具记录')
+const nextQuestionMessages = [
+  { role: 'user', id: 'client-q1', content: '我这个是一个什么项目', timestamp: at(20) },
+  { role: 'assistant', id: 'reply-q1', execution_anchor_message_id: 'client-q1', content: '这是本地生活平台。', timestamp: at(21) },
+  { role: 'user', id: 'client-q2', content: '我这个项目使用了一些什么语言栈', timestamp: at(40) },
+  { role: 'assistant', id: 'reply-q2', execution_anchor_message_id: 'client-q2', content: '后端是 Java。', timestamp: at(41) },
+]
+const nextQuestionEvents = [
+  { eventId: 'q1-turn', sequence: 1, eventType: 'turn_started', anchorMessageId: 'client-q1', display: { status: 'running' }, createdAt: at(10) },
+  { eventId: 'q1-progress', sequence: 2, eventType: 'assistant_progress', anchorMessageId: 'client-q1', display: { summary: '我先检查项目结构和当前配置。' }, detail: { progress: { kind: 'before_tools', relatedToolCallIds: ['q1-ls'] } }, createdAt: at(11) },
+  { eventId: 'q1-ls', toolCallId: 'q1-ls', sequence: 3, eventType: 'tool_completed', toolName: 'list_directory', anchorMessageId: 'client-q1', display: { title: '查找目录', status: 'success', summary: '发现 44 项' }, createdAt: at(12) },
+  { eventId: 'q1-result', sequence: 4, eventType: 'result', anchorMessageId: 'client-q1', display: { status: 'success', durationMs: 83000 }, createdAt: at(19) },
+  { eventId: 'q2-turn', sequence: 5, eventType: 'turn_started', anchorMessageId: 'client-q2', display: { status: 'running' }, createdAt: at(30) },
+  { eventId: 'q2-progress', sequence: 6, eventType: 'assistant_progress', anchorMessageId: 'client-q2', display: { summary: '我先检查项目结构和当前配置。' }, detail: { progress: { kind: 'before_tools', relatedToolCallIds: ['q2-ls'] } }, createdAt: at(31) },
+  { eventId: 'q2-ls', toolCallId: 'q2-ls', sequence: 7, eventType: 'tool_completed', toolName: 'list_directory', anchorMessageId: 'client-q2', display: { title: '查找目录', status: 'success', summary: '发现 44 项' }, createdAt: at(32) },
+  { eventId: 'q2-result', sequence: 8, eventType: 'result', anchorMessageId: 'client-q2', display: { status: 'success', durationMs: 92000 }, createdAt: at(39) },
+]
+const firstAnswerProjection = frontendExecution.executionEventsForMessage(nextQuestionEvents, nextQuestionMessages, 1)
+const secondAnswerProjection = frontendExecution.executionEventsForMessage(nextQuestionEvents, nextQuestionMessages, 3)
+assert.equal(firstAnswerProjection.some(event => event.toolCallId === 'q1-ls'), true, '上一问必须保留自己的查询工具')
+assert.equal(firstAnswerProjection.some(event => event.toolCallId === 'q2-ls'), false, '上一问不得吞掉下一问的查询过程')
+assert.equal(secondAnswerProjection.some(event => event.toolCallId === 'q2-ls'), true, '下一问必须保留自己的查询工具')
+assert.equal(secondAnswerProjection.some(event => event.toolCallId === 'q1-ls'), false, '下一问不得回带上一问的查询过程')
+assert.equal(frontendExecution.executionQueryRecordForMessage(nextQuestionEvents, nextQuestionMessages, 1)?.toolCount, 1, '上一问查询项数不得把下一问算进去')
+assert.equal(frontendExecution.executionQueryRecordForMessage(nextQuestionEvents, nextQuestionMessages, 3)?.toolCount, 1, '下一问查询项数只统计本轮工具')
+const continueMessages = [
+  { role: 'user', id: 'u-plan', content: '加智能推荐和预约排队', timestamp: at(50) },
+  { role: 'assistant', id: 'a-fail', execution_anchor_message_id: 'u-plan', runtime: 'llm-error', recovery: { state: 'retrying', originalUserMessageId: 'u-plan' }, content: '只读检查已完成，但没能生成计划。', timestamp: at(51) },
+  { role: 'user', id: 'u-continue', content: '继续', timestamp: at(52) },
+  { role: 'assistant', id: 'a-resume', execution_anchor_message_id: 'u-plan', streaming: true, content: '', timestamp: at(52) },
+]
+const continueEvents = [
+  { eventId: 'plan-turn', sequence: 1, eventType: 'turn_started', anchorMessageId: 'u-plan', display: { status: 'running' }, createdAt: at(50) },
+  { eventId: 'plan-ls', toolCallId: 'plan-ls', sequence: 2, eventType: 'tool_completed', toolName: 'list_directory', anchorMessageId: 'u-plan', display: { title: '查找目录', status: 'success' }, createdAt: at(50) },
+  { eventId: 'plan-grep', toolCallId: 'plan-grep', sequence: 3, eventType: 'tool_completed', toolName: 'grep_text', anchorMessageId: 'u-plan', display: { title: '搜索代码', status: 'success' }, createdAt: at(51) },
+  { eventId: 'plan-fail', sequence: 4, eventType: 'result', anchorMessageId: 'u-plan', display: { status: 'failed' }, createdAt: at(51) },
+]
+const failedBubbleEvents = frontendExecution.executionEventsForMessage(continueEvents, continueMessages, 1)
+const resumeBubbleEvents = frontendExecution.executionEventsForMessage(continueEvents, continueMessages, 3)
+assert.equal(failedBubbleEvents.length, 0, '续跑后旧错误气泡不得再挂查询过程')
+assert.equal(resumeBubbleEvents.some(event => event.toolCallId === 'plan-ls'), true, '续跑新回复必须接下上一轮查询过程')
+assert.equal(resumeBubbleEvents.some(event => event.toolCallId === 'plan-grep'), true, '续跑新回复必须保留上一轮搜索')
+assert.equal(frontendExecution.liveAssistantProvisionalText(continueEvents, continueMessages, 3), '', '已有查询过程时不得盖住「我正在处理当前请求」')
+assert.deepEqual(frontendExecution.countExecutionToolItems(continueEvents), { completed: 2, failed: 0 }, '欢迎回来计数必须按唯一 toolCallId')
 assert.equal(frontendExecution.formatExecutionDurationLong(272_000), '耗时 4 分 32 秒', '整轮任务必须展示中文可读耗时')
 const transcriptSource = fs.readFileSync(new URL('../frontend/src/components/common/AgentExecutionTranscript.vue', import.meta.url), 'utf8')
 assert.match(transcriptSource, /expandedRows/, '工具详情必须逐条独立展开')
@@ -496,6 +542,7 @@ const failedEvents = [
   { eventId: 'turn-failed', sequence: 3, eventType: 'result', display: { status: 'failed' }, createdAt: at(3) },
 ]
 assert.equal(frontendExecution.shouldRenderExecutionTranscript(failedEvents, conversationMessages, 1, false), true, '失败事件必须保留排障入口')
+assert.equal(frontendExecution.executionQueryRecordForMessage(failedEvents, conversationMessages, 1), null, '零工具失败不得投影查询过程')
 assert.match(replyStyle.CONVERSATIONAL_REPLY_STYLE_GUIDANCE, /两至三段短文或少量要点/)
 for (const file of [
   'backend/agents/global/global-agent-run-projection.ts',
@@ -510,6 +557,81 @@ assert.match(projectMainSource, /project-task:\$\{taskId\}:main-summary:complete
 assert.match(projectMainSource, /unacceptedFileChanges/, '项目失败或阻塞时必须投影已产生的未验收改动')
 const globalLoopSource = fs.readFileSync(new URL('../backend/agents/global/global-agent-loop-engine.ts', import.meta.url), 'utf8')
 assert.match(globalLoopSource, /finalFileChanges/, '全局终态必须从Delivery Report投影最终文件集合')
+const executionUi = await import(new URL('../frontend/src/utils/agentExecutionEvents.js', import.meta.url))
+const liveActivityTail = executionUi.appendLiveModelActivityToTail([
+  {
+    eventId: 'activity-review',
+    sequence: 0,
+    eventType: 'model_activity',
+    display: { status: 'running', summary: '已取得检查结果，正在归纳关键结论' },
+    detail: { modelActivity: { state: 'waiting', safeLabel: '已取得检查结果，正在归纳关键结论' } },
+  },
+  { eventId: 'progress-plan', sequence: 1, eventType: 'assistant_progress' },
+  { __progressBatch: true, key: 'batch-read', progress: { eventId: 'progress-read', sequence: 4 }, children: [
+    {
+      eventId: 'activity-review',
+      sequence: 0,
+      eventType: 'model_activity',
+      display: { status: 'running', summary: '已取得检查结果，正在归纳关键结论' },
+      detail: { modelActivity: { state: 'waiting', safeLabel: '已取得检查结果，正在归纳关键结论' } },
+    },
+    { eventId: 'tool-glob', sequence: 3, eventType: 'tool_completed', toolCallId: 'glob-1' },
+  ] },
+  { eventId: 'progress-read', sequence: 4, eventType: 'assistant_progress' },
+])
+assert.equal(liveActivityTail.at(-1)?.eventId, 'activity-review', '等待归纳必须排在已读取之后')
+assert.equal(liveActivityTail.filter(event => event?.eventType === 'model_activity').length, 1, '同一条归纳进度不得在批次内外各出现一次')
+assert.equal(liveActivityTail.find(event => event?.__progressBatch)?.children?.some(event => event?.eventType === 'model_activity'), false, '归纳进度不得嵌进工具批次里')
+assert.equal(executionUi.executionMessageIsFormalTask([], [
+  { role: 'user', id: 'query-user' },
+  { role: 'assistant', id: 'query-answer', taskExperience: { task_id: 'read-only-envelope' }, streaming: false },
+], 1), false, '只读查询不得仅凭任务关联对象被误判为正式开发任务')
+assert.equal(executionUi.executionMessageIsFormalTask([], [
+  { role: 'user', id: 'task-user' },
+  { role: 'assistant', id: 'task-answer', messageMode: 'task', taskExperience: { task_id: 'write-task' }, streaming: false },
+], 1), true, '明确任务模式必须继续投影为正式开发任务')
+const finalizedReadonlyQueryMessages = [
+  { role: 'user', id: 'query-tool-user', content: '这个项目是做什么的', timestamp: at(0) },
+  { role: 'assistant', id: 'query-tool-answer', content: '这是一个本地开发平台。', timestamp: at(4), streaming: false, messageMode: 'conversation' },
+]
+const finalizedReadonlyQueryEvents = [
+  { eventId: 'query-tool-turn', sequence: 1, eventType: 'turn_started', createdAt: at(1), display: { status: 'running' } },
+  { eventId: 'query-tool-completed', toolCallId: 'query-tool-1', sequence: 2, eventType: 'tool_completed', createdAt: at(2), display: { status: 'success', title: '读取文件' } },
+]
+assert.deepEqual(executionUi.executionQueryRecordForMessage(finalizedReadonlyQueryEvents, finalizedReadonlyQueryMessages, 1), {
+  status: 'success',
+  succeeded: true,
+  toolCount: 1,
+  boundarySource: 'message',
+}, '普通问答只要真实使用过工具且回答已收口，就必须显示查询过程，即使Provider没有落库Result事件')
+const incompleteQueryMessages = [
+  { role: 'user', id: 'u-incomplete', content: '加智能推荐', timestamp: at(70) },
+  {
+    role: 'assistant',
+    id: 'a-incomplete',
+    execution_anchor_message_id: 'u-incomplete',
+    runtime: 'llm-error',
+    streaming: false,
+    content: '模型这次没有给出可用回复，本次请求未完成。',
+    timestamp: at(74),
+  },
+]
+const incompleteQueryEvents = [
+  { eventId: 'inc-turn', sequence: 1, eventType: 'turn_started', anchorMessageId: 'u-incomplete', display: { status: 'running' }, createdAt: at(71) },
+  { eventId: 'inc-ls', toolCallId: 'inc-ls', sequence: 2, eventType: 'tool_completed', toolName: 'list_directory', anchorMessageId: 'u-incomplete', display: { status: 'success' }, createdAt: at(72) },
+  { eventId: 'inc-fail', sequence: 3, eventType: 'result', anchorMessageId: 'u-incomplete', display: { status: 'failed' }, createdAt: at(73) },
+]
+assert.equal(executionUi.executionQueryRecordForMessage(incompleteQueryEvents, incompleteQueryMessages, 1), null, '未完成回合即使已跑过工具也不得投影查询过程')
+assert.equal(executionUi.executionTerminalBoundaryForMessage(incompleteQueryEvents, incompleteQueryMessages, 1)?.status, 'failed', '模型失败必须落成终态，不能再显示实时执行过程')
+const emptyReplyMessages = [
+  { role: 'user', id: 'u-empty', content: '继续', timestamp: at(80) },
+  { role: 'assistant', id: 'a-empty', execution_anchor_message_id: 'u-empty', runtime: 'llm-error', streaming: false, content: '模型这次没有给出可用回复，本次请求未完成。', timestamp: at(82) },
+]
+const emptyReplyEvents = [
+  { eventId: 'empty-turn', sequence: 1, eventType: 'turn_started', anchorMessageId: 'u-empty', display: { status: 'running' }, createdAt: at(81) },
+  { eventId: 'empty-fail', sequence: 2, eventType: 'result', anchorMessageId: 'u-empty', display: { status: 'interrupted' }, createdAt: at(82) },
+]
+assert.equal(executionUi.executionQueryRecordForMessage(emptyReplyEvents, emptyReplyMessages, 1), null, '空响应失败不得投影查询过程')
 
 fs.rmSync(root, { recursive: true, force: true })
 console.log(JSON.stringify({
@@ -545,5 +667,6 @@ console.log(JSON.stringify({
     turnDurationVisible: true,
     failedExecutionShown: true,
     adaptiveConciseReplySharedAcrossScopes: true,
+    readOnlyTaskEnvelopeRemainsQuery: true,
   },
 }, null, 2))

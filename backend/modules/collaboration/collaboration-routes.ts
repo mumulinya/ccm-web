@@ -28,6 +28,7 @@ import { appendUserVisibleAgentEvent, appendUserVisibleRequirementPlan, listUser
 import { inspectProjectGit } from "../projects/project-git";
 import { hasResourceAccess, hasTaskResourceAccess } from "../system/access-policy";
 import { confirmProjectMainTask } from "../projects/project-main-agent";
+import { exitConversationPlanModeForTask } from "../../system/conversation-plan-mode-gate";
 import { buildTaskPlanDetail, buildTaskPlanPatch } from "./task-plan-detail";
 import { handleTaskPauseRoutes } from "./task-pause-routes";
 import { taskPauseStatusProjection } from "../../tasks/task-pause-control";
@@ -806,6 +807,7 @@ export function handleCollaborationApiReplayAndExecutionRoutes(
           }
           if (task.orchestration_scope === "project_session") {
             const confirmed = confirmProjectMainTask(task.id, task.target_project, task.project_session_id);
+            exitConversationPlanModeForTask(confirmed);
             return sendJson(res, {
               success: true,
               task: confirmed,
@@ -835,6 +837,7 @@ export function handleCollaborationApiReplayAndExecutionRoutes(
               intake: { ...(task.workflow_meta?.intake || {}), plan_mode: acceptedPlan },
             },
           }) || task;
+          exitConversationPlanModeForTask(confirmed);
           const queue = enqueueTask(task.id, ctx);
           return sendJson(res, { success: true, task: confirmed, plan: buildTaskPlanDetail(confirmed), queue });
         }
@@ -1942,14 +1945,15 @@ export function handleCollaborationApiReplayAndExecutionRoutes(
     const includeArchived = String(parsed.query.include_archived || parsed.query.includeArchived || "") === "true";
     const onlyArchived = String(parsed.query.archived || "") === "true";
     const allTasks = loadTasks();
-    const tasks = onlyArchived
-      ? allTasks.filter((task: any) => task.archived || task.deleted_at)
-      : includeArchived ? allTasks : allTasks.filter((task: any) => !task.archived && !task.deleted_at);
     const principal = (req as any).ccmAuth;
-    const visibleTasks = principal?.kind === "browser" && principal.role !== "admin"
-      ? tasks.filter((task: any) => hasTaskResourceAccess(task, principal, "use"))
-      : tasks;
-    sendJson(res, { tasks: visibleTasks, archived_count: visibleTasks.filter((task: any) => task.archived || task.deleted_at).length });
+    const accessibleTasks = principal?.kind === "browser" && principal.role !== "admin"
+      ? allTasks.filter((task: any) => hasTaskResourceAccess(task, principal, "use"))
+      : allTasks;
+    const isArchivedTask = (task: any) => !!(task.archived || task.deleted_at || task.status === "archived");
+    const tasks = onlyArchived
+      ? accessibleTasks.filter(isArchivedTask)
+      : includeArchived ? accessibleTasks : accessibleTasks.filter((task: any) => !isArchivedTask(task));
+    sendJson(res, { tasks, archived_count: accessibleTasks.filter(isArchivedTask).length });
     return true;
   }
 
@@ -2581,6 +2585,7 @@ export function handleCollaborationApiIntakeRoutesPartA(
               },
             },
           }) || epicResult.epic;
+          exitConversationPlanModeForTask(updatedEpic);
           updateGroupTaskInlineStatus(updatedEpic, updatedEpic.status, updatedEpic.status_detail);
           return sendJson(res, {
             success: true,
@@ -2633,6 +2638,7 @@ export function handleCollaborationApiIntakeRoutesPartA(
             },
           },
         }) || current;
+        exitConversationPlanModeForTask(task);
         appendTraceEvent(task.trace_id, {
           type: "intake.confirmed",
           status: "ok",

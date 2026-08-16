@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.MODEL_LONG_REQUEST_TOTAL_TIMEOUT_MS = void 0;
+exports.NATIVE_AGENT_TURN_MAX_TOKENS = exports.MODEL_LONG_REQUEST_TOTAL_TIMEOUT_MS = void 0;
 exports.normalizeLlmTokenUsage = normalizeLlmTokenUsage;
 exports.normalizeChatCompletionsUrl = normalizeChatCompletionsUrl;
 exports.normalizeAnthropicMessagesUrl = normalizeAnthropicMessagesUrl;
@@ -55,6 +55,7 @@ exports.callAnthropicCompatibleChat = callAnthropicCompatibleChat;
 exports.callOpenAiCompatibleJson = callOpenAiCompatibleJson;
 exports.callGeminiCompatibleJson = callGeminiCompatibleJson;
 exports.callAnthropicCompatibleJson = callAnthropicCompatibleJson;
+exports.callNativeAgentTurn = callNativeAgentTurn;
 exports.runLlmTokenUsageSelfTest = runLlmTokenUsageSelfTest;
 exports.runLlmStreamingSelfTest = runLlmStreamingSelfTest;
 exports.runGroupOrchestratorApiMicrocompactNativeAdapterTelemetrySelfTest = runGroupOrchestratorApiMicrocompactNativeAdapterTelemetrySelfTest;
@@ -817,7 +818,7 @@ function withTransientModelBlocks(messagesInput, blocks, family) {
     return messages;
 }
 function geminiPartsWithTransient(content, blocks) {
-    const parts = [{ text: geminiContentText(content) }];
+    const parts = encodeGeminiContentParts(content);
     for (const block of blocks) {
         if (block.type === "text")
             parts.push({ text: block.text });
@@ -828,6 +829,45 @@ function geminiPartsWithTransient(content, blocks) {
         }
     }
     return parts;
+}
+function encodeGeminiContentParts(content) {
+    if (Array.isArray(content)) {
+        const parts = content.flatMap((item) => {
+            if (!item || typeof item !== "object")
+                return String(item || "").trim() ? [{ text: String(item) }] : [];
+            if (item.functionCall || item.functionResponse || item.inlineData || item.text != null)
+                return [item];
+            if (item.type === "functionCall" || item.type === "function_call")
+                return [{ functionCall: item.functionCall || { name: item.name, args: item.args || item.arguments || {} } }];
+            if (item.type === "functionResponse" || item.type === "function_response")
+                return [{ functionResponse: item.functionResponse || { name: item.name, response: item.response } }];
+            if (item.type === "text")
+                return String(item.text || "").trim() ? [{ text: String(item.text) }] : [];
+            return [{ text: geminiContentText(item) }];
+        }).filter(Boolean);
+        return parts.length ? parts : [{ text: "" }];
+    }
+    if (content && typeof content === "object" && Array.isArray(content.parts))
+        return encodeGeminiContentParts(content.parts);
+    return [{ text: geminiContentText(content) }];
+}
+function encodeGeminiChatContent(message, transientBlocks = []) {
+    const role = String(message?.role || "");
+    if (role === "assistant" || role === "model") {
+        return { role: "model", parts: transientBlocks.length ? geminiPartsWithTransient(message?.content, transientBlocks) : encodeGeminiContentParts(message?.content) };
+    }
+    if (role === "tool") {
+        return {
+            role: "user",
+            parts: [{
+                    functionResponse: {
+                        name: String(message?.name || message?.toolName || ""),
+                        response: typeof message?.content === "string" ? { result: message.content } : (message?.content || { result: "" }),
+                    },
+                }],
+        };
+    }
+    return { role: "user", parts: transientBlocks.length ? geminiPartsWithTransient(message?.content, transientBlocks) : encodeGeminiContentParts(message?.content) };
 }
 function recordAnthropicPromptCacheState(config, options, body, headers) {
     const tracking = options.promptCacheTracking || options.prompt_cache_tracking || null;
@@ -967,7 +1007,7 @@ async function callOpenAiCompatibleChatOnce(config, options) {
         if (streaming) {
             let content = "";
             let usage = null;
-            const turnAccumulator = (0, provider_native_tools_1.createOpenAiStreamTurnAccumulator)();
+            const turnAccumulator = (0, provider_native_tools_1.createOpenAiStreamTurnAccumulator)(options.onNativeToolCallReady);
             await consumeSseJson(response, event => {
                 turnAccumulator.push(event);
                 const choice = event?.choices?.[0];
@@ -983,7 +1023,7 @@ async function callOpenAiCompatibleChatOnce(config, options) {
             const providerTurn = turnAccumulator.finish(normalizedUsage);
             options.onProviderAgentTurn?.(providerTurn);
             content = (0, provider_native_tools_1.turnForLegacyJsonLoop)(providerTurn);
-            if (!content.trim())
+            if (!content.trim() && !providerTurn.toolCalls.length)
                 throw new Error("模型返回空响应");
             reportTokenUsage(options, normalizedUsage);
             finishContextCache(options, cache.plan, { ok: true, usage: normalizedUsage, providerRequestId: providerRequestId(response), adapterEvidence: providerAdapterEvidence(cache) });
@@ -995,7 +1035,7 @@ async function callOpenAiCompatibleChatOnce(config, options) {
         const providerTurn = (0, provider_native_tools_1.parseOpenAiAgentTurn)(data, normalizedUsage);
         options.onProviderAgentTurn?.(providerTurn);
         const content = (0, provider_native_tools_1.turnForLegacyJsonLoop)(providerTurn);
-        if (!content.trim())
+        if (!content.trim() && !providerTurn.toolCalls.length)
             throw new Error("模型返回空响应");
         reportTokenUsage(options, normalizedUsage);
         finishContextCache(options, cache.plan, { ok: true, usage: normalizedUsage, providerRequestId: providerRequestId(response), adapterEvidence: providerAdapterEvidence(cache) });
@@ -1041,13 +1081,8 @@ async function callGeminiCompatibleChatOnce(config, options) {
     const nonSystemMessages = cache.messages.filter((message) => String(message?.role || "") !== "system");
     const lastTransientMessageIndex = nonSystemMessages.length - 1;
     const contents = nonSystemMessages
-        .map((message, index) => ({
-        role: String(message?.role || "") === "assistant" ? "model" : "user",
-        parts: index === lastTransientMessageIndex
-            ? geminiPartsWithTransient(message?.content, cache.transientBlocks || [])
-            : [{ text: geminiContentText(message?.content) }],
-    }))
-        .filter((message) => message.parts.some((part) => part.inlineData || String(part.text || "").trim()));
+        .map((message, index) => encodeGeminiChatContent(message, index === lastTransientMessageIndex ? cache.transientBlocks || [] : []))
+        .filter((message) => message.parts.some((part) => part.inlineData || part.functionCall || part.functionResponse || String(part.text || "").trim()));
     const body = {
         ...(system ? { systemInstruction: { parts: [{ text: system }] } } : {}),
         contents,
@@ -1096,7 +1131,7 @@ async function callGeminiCompatibleChatOnce(config, options) {
             const providerTurn = (0, provider_native_tools_1.parseGeminiAgentTurn)({ candidates: nativeEvents.flatMap(event => event?.candidates || []) }, normalizedUsage);
             options.onProviderAgentTurn?.(providerTurn);
             content = (0, provider_native_tools_1.turnForLegacyJsonLoop)(providerTurn);
-            if (!content.trim())
+            if (!content.trim() && !providerTurn.toolCalls.length)
                 throw new Error("模型返回空响应");
             reportTokenUsage(options, normalizedUsage);
             finishContextCache(options, cache.plan, { ok: true, usage: normalizedUsage, providerRequestId: providerRequestId(response), adapterEvidence: providerAdapterEvidence(cache) });
@@ -1107,7 +1142,7 @@ async function callGeminiCompatibleChatOnce(config, options) {
         const providerTurn = (0, provider_native_tools_1.parseGeminiAgentTurn)(data, normalizedUsage);
         options.onProviderAgentTurn?.(providerTurn);
         const content = (0, provider_native_tools_1.turnForLegacyJsonLoop)(providerTurn).trim();
-        if (!content)
+        if (!content && !providerTurn.toolCalls.length)
             throw new Error("模型返回空响应");
         reportTokenUsage(options, normalizedUsage);
         finishContextCache(options, cache.plan, { ok: true, usage: normalizedUsage, providerRequestId: providerRequestId(response), adapterEvidence: providerAdapterEvidence(cache) });
@@ -1219,7 +1254,7 @@ async function callAnthropicCompatibleChatOnce(config, options) {
         if (streaming) {
             let content = "";
             let usage = {};
-            const turnAccumulator = (0, provider_native_tools_1.createAnthropicStreamTurnAccumulator)();
+            const turnAccumulator = (0, provider_native_tools_1.createAnthropicStreamTurnAccumulator)(options.onNativeToolCallReady);
             await consumeSseJson(response, event => {
                 turnAccumulator.push(event);
                 if (event?.usage) {
@@ -1262,7 +1297,7 @@ async function callAnthropicCompatibleChatOnce(config, options) {
             const providerTurn = turnAccumulator.finish(normalizedUsage);
             options.onProviderAgentTurn?.(providerTurn);
             content = (0, provider_native_tools_1.turnForLegacyJsonLoop)(providerTurn);
-            if (!content.trim())
+            if (!content.trim() && !providerTurn.toolCalls.length)
                 throw new Error("模型返回空响应");
             reportTokenUsage(options, normalizedUsage);
             finishContextCache(options, cache.plan, { ok: true, usage: normalizedUsage, providerRequestId: providerRequestId(response), adapterEvidence: cacheReferenceEditing });
@@ -1308,7 +1343,7 @@ async function callAnthropicCompatibleChatOnce(config, options) {
         const providerTurn = (0, provider_native_tools_1.parseAnthropicAgentTurn)(data, normalizedUsage);
         options.onProviderAgentTurn?.(providerTurn);
         const content = (0, provider_native_tools_1.turnForLegacyJsonLoop)(providerTurn).trim();
-        if (!content)
+        if (!content && !providerTurn.toolCalls.length)
             throw new Error("模型返回空响应");
         reportTokenUsage(options, normalizedUsage);
         finishContextCache(options, cache.plan, { ok: true, usage: normalizedUsage, providerRequestId: providerRequestId(response), adapterEvidence: cacheReferenceEditing });
@@ -1362,6 +1397,11 @@ async function callOpenAiCompatibleChat(config, options) {
                 (0, provider_native_tool_capability_1.recordProviderNativeToolCapability)(config, "openai", "unsupported", error);
             }
             catch { }
+            if (attemptOptions.nativeToolsRequired) {
+                const rejected = new Error("当前供应商不支持原生 tools，已退回 JSON 循环");
+                rejected.code = "CCM_NATIVE_TOOLS_UNSUPPORTED";
+                throw rejected;
+            }
             return callOpenAiCompatibleChatOnce(config, { ...attemptOptions, nativeTools: undefined, nativeToolReference: false, retry: false });
         }
     };
@@ -1381,6 +1421,11 @@ async function callGeminiCompatibleChat(config, options) {
                 (0, provider_native_tool_capability_1.recordProviderNativeToolCapability)(config, "gemini", "unsupported", error);
             }
             catch { }
+            if (attemptOptions.nativeToolsRequired) {
+                const rejected = new Error("当前供应商不支持原生 tools，已退回 JSON 循环");
+                rejected.code = "CCM_NATIVE_TOOLS_UNSUPPORTED";
+                throw rejected;
+            }
             return callGeminiCompatibleChatOnce(config, { ...attemptOptions, nativeTools: undefined, nativeToolReference: false, retry: false });
         }
     };
@@ -1399,6 +1444,11 @@ async function callAnthropicCompatibleChat(config, options) {
                     (0, provider_native_tool_capability_1.recordProviderNativeToolCapability)(config, "anthropic", "unsupported", error);
                 }
                 catch { }
+                if (attemptOptions.nativeToolsRequired) {
+                    const rejected = new Error("当前供应商不支持原生 tools，已退回 JSON 循环");
+                    rejected.code = "CCM_NATIVE_TOOLS_UNSUPPORTED";
+                    throw rejected;
+                }
                 return callAnthropicCompatibleChatOnce(config, { ...attemptOptions, nativeTools: undefined, nativeToolReference: false, retry: false });
             }
             const nativePlan = getApiMicrocompactNativeApplyPlan(attemptOptions);
@@ -1499,6 +1549,35 @@ async function callAnthropicCompatibleJson(config, options) {
             reportTokenUsage(options, usage);
         return parsed;
     }, resolveLlmRetryOptions(config, options, "Anthropic-compatible JSON model call"));
+}
+exports.NATIVE_AGENT_TURN_MAX_TOKENS = 4096;
+function emptyNativeTurn(text = "") {
+    return {
+        text: String(text || ""),
+        toolCalls: [],
+        toolReferences: [],
+        stopReason: "end_turn",
+        usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0, reported: false },
+    };
+}
+async function callNativeAgentTurn(config, options) {
+    let captured = null;
+    const merged = {
+        ...options,
+        maxTokens: options.maxTokens || exports.NATIVE_AGENT_TURN_MAX_TOKENS,
+        stream: options.stream !== false,
+        nativeToolsRequired: options.nativeToolsRequired !== false && !!options.nativeTools?.length,
+        onProviderAgentTurn: (turn) => {
+            captured = turn;
+            options.onProviderAgentTurn?.(turn);
+        },
+    };
+    const content = shouldUseAnthropic(config)
+        ? await callAnthropicCompatibleChat(config, merged)
+        : await callOpenAiCompatibleChat(config, merged);
+    if (captured)
+        return captured;
+    return emptyNativeTurn(content);
 }
 async function runLlmTokenUsageSelfTest() {
     const originalFetch = globalThis.fetch;

@@ -5127,6 +5127,7 @@ export declare const browserToolEvidenceLineageSchema: z.ZodObject<{
         foreignToolCallIds?: string[];
         duplicateToolCallIds?: string[];
     }[];
+    toolCallCount?: number;
     statusCounts?: {
         complete?: number;
         invalid?: number;
@@ -5137,7 +5138,6 @@ export declare const browserToolEvidenceLineageSchema: z.ZodObject<{
     mcpResultCount?: number;
     evidenceRequiredResultCount?: number;
     linkedResultCount?: number;
-    toolCallCount?: number;
     scopedToolCallCount?: number;
     unlinkedRequiredResultCount?: number;
     missingToolCallReferenceCount?: number;
@@ -5163,6 +5163,7 @@ export declare const browserToolEvidenceLineageSchema: z.ZodObject<{
         foreignToolCallIds?: string[];
         duplicateToolCallIds?: string[];
     }[];
+    toolCallCount?: number;
     statusCounts?: {
         complete?: number;
         invalid?: number;
@@ -5173,7 +5174,6 @@ export declare const browserToolEvidenceLineageSchema: z.ZodObject<{
     mcpResultCount?: number;
     evidenceRequiredResultCount?: number;
     linkedResultCount?: number;
-    toolCallCount?: number;
     scopedToolCallCount?: number;
     unlinkedRequiredResultCount?: number;
     missingToolCallReferenceCount?: number;

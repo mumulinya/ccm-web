@@ -44,5 +44,7 @@ export declare function runModelCallRetrySelfTest(): Promise<{
         invalidJsonIsRetryable: boolean;
         missingKeyIsPermanent: boolean;
         emittedStreamDoesNotRetry: boolean;
+        interactiveFirstTurnHonorsConfiguredTimeout: boolean;
+        orchestrationHonorsConfiguredTimeout: boolean;
     };
 }>;

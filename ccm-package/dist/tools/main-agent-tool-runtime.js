@@ -90,7 +90,7 @@ function renderWorkspaceToolPrompt(label, tools, deferred = false) {
             : `- ${mainAgentCallableToolName(tool)}: ${tool.description || tool.name}; 参数 Schema=${JSON.stringify(tool.inputSchema || {})}`),
         deferred
             ? "这些是 CCM 提供的安全文件能力；调用前先使用 tool_search 加载 Schema，加载后仍使用上面的短名称。"
-            : "这些工具由 CCM 在授权项目边界内执行；直接使用短名称，不要使用内部 MCP canonicalName，也不要改用终端命令读取普通文件。读取结果出现continuation时，仅当当前问题需要的证据尚未覆盖才使用nextOffset和checksum继续读取，不要盲目读到文件末尾；PATH_NOT_FOUND只有唯一高可信建议时才可重试。",
+            : "这些工具由 CCM 在授权项目边界内执行；直接使用短名称，不要使用内部 MCP canonicalName，也不要改用终端命令读取普通文件。read_file默认一次读完（最多2000行），不要先传offset/limit；只有结果truncated或文件过大时，再用offset/limit继续读取尚未覆盖的部分。PATH_NOT_FOUND只有唯一高可信建议时才可重试。",
     ].join("\n");
 }
 function isMainAgentReadOnlyMcpTool(tool) {
@@ -257,7 +257,7 @@ function buildMainAgentToolRuntimeContext(input) {
         unavailable.length ? "部分已配置工具当前不可用；不得声称已经调用。" : "",
         discoverableMcp.length ? `延迟工具不会预先占用完整 Schema Token；需要时先调用 tool_search，按名称或能力描述加载。` : "",
         inlineSafetyDowngraded ? `MCP完整定义超过本轮安全容量，已从${contextPolicy.mcpToolLoadingMode}安全降级为deferred。` : "",
-        `代码说明、技术栈和项目用途类问题必须先做自适应小范围检索：优先README、构建清单、入口文件和一级模块目录，首轮读取预算不超过8000 Token；Glob和Grep必须限定目录与数量。只有现有结果不足以回答时才沿next_cursor继续，禁止先枚举整个仓库。`,
+        `读取工作区文件时默认一次读完（最多2000行）；只有文件过大才用offset和limit分段。Glob默认最多100个匹配，Grep未指定数量时默认250条、显式0表示不限制。不要为了穷尽仓库而枚举全部文件。`,
         `需要工具数据时在 toolRequests 中请求。工作区文件工具只使用短名称；扩展 MCP 使用上面列出的 canonicalName。Skill只能使用 invoke_skill，并在 arguments.name 中填写已列出的 Skill。工具结果由CCM执行后重新交给模型，不得把请求本身视为完成。`,
     ].filter(Boolean).join("\n\n");
     const contextBudget = {
@@ -470,16 +470,8 @@ async function executeMainAgentToolRequests(input) {
         if (!workspaceTool)
             return request;
         const args = { ...(request.arguments || {}) };
-        if (name === "read_files")
-            args.token_budget = Math.max(1024, Math.min(8_000, Number(args.token_budget || 8_000)));
-        if (name === "read_file")
-            args.token_budget = Math.max(256, Math.min(8_000, Number(args.token_budget || 4_000)));
-        if (name === "glob_files")
-            args.limit = Math.max(1, Math.min(100, Number(args.limit || 100)));
-        if (name === "grep_text") {
-            const requested = Number(args.head_limit ?? 100);
-            args.head_limit = requested === 0 ? 250 : Math.max(1, Math.min(250, requested || 100));
-        }
+        if (name === "read_file" || name === "read_files")
+            delete args.token_budget;
         return { ...request, arguments: args };
     };
     const executeOne = async (requestInput) => {

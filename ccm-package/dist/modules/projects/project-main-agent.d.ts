@@ -101,6 +101,7 @@ export declare function runProjectMainAgentFirstTurn(input: {
     projectSessionId: string;
     userMessage: string;
     turnId?: string;
+    anchorMessageId?: string;
     sourceCount?: number;
     originalRequestChecksum?: string;
     clarificationRound?: number;
@@ -124,11 +125,25 @@ export declare function runProjectMainAgentFirstTurn(input: {
         round: number;
         title: string;
         headline: string;
+        purpose: string;
         questions: any[];
         allowAdditionalNote: boolean;
         safeDefaultsAvailable: boolean;
         originalRequestChecksum: string;
         contentStored: boolean;
+    };
+    clarificationSummary: {
+        schema: string;
+        title: any;
+        status: string;
+        status_label: string;
+        headline: string;
+        question: string;
+        reason: string;
+        answer_suggestions: string[];
+        next_action: string;
+        pre_plan_clarification: any;
+        prePlanClarification: any;
     };
     responseType: import("../../agents/main-agent-turn").MainAgentTurnResponseKind;
     reply: string;

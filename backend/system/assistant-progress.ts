@@ -155,6 +155,7 @@ export function assistantProgressBatchId(input: {
   turnId?: any;
   generation?: any;
   modelCallIndex?: any;
+  kind?: any;
   relatedToolCallIds?: string[];
 }) {
   const toolIds = [...new Set(input.relatedToolCallIds || [])].filter(Boolean).sort();
@@ -162,6 +163,7 @@ export function assistantProgressBatchId(input: {
     turnId: String(input.turnId || "turn").trim(),
     generation: Math.max(0, Number(input.generation || 0)),
     modelCallIndex: Math.max(0, Number(input.modelCallIndex || 0)),
+    kind: String(input.kind || "").trim(),
     toolIds,
   })).digest("hex").slice(0, 24)}`;
 }

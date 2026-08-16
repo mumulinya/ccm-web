@@ -9,6 +9,7 @@ const group_compaction_strategy_1 = require("./group-compaction-strategy");
 const group_memory_shared_1 = require("./group-memory-shared");
 const group_memory_storage_1 = require("./group-memory-storage");
 const storage_1 = require("./storage");
+const group_session_execution_ledger_1 = require("./group-session-execution-ledger");
 function modelContextMessageContent(message) {
     const value = message?.content ?? message?.message?.content ?? message?.text ?? "";
     if (typeof value === "string")
@@ -46,6 +47,7 @@ function buildExactGroupSessionModelContextProjection(messagesInput, memory, opt
             || memory?.sessionMemory?.last_summarized_message_id
             || memory?.compaction?.sessionMemoryState?.lastExtractedMessageId
             || ""),
+        executionEvents: options.executionEvents || options.execution_events || (0, group_session_execution_ledger_1.listGroupSessionExecutionEvents)(groupId, groupSessionId),
         microCompact: (0, session_model_context_1.resolveSessionModelMicroCompactPolicy)(config, {
             contextTokens: Number(memory?.compaction?.tokenMeasurement?.activeTokens || memory?.compaction?.beforeTokens || 0),
             pressureThresholdTokens: (0, group_compaction_strategy_1.getGroupAutoCompactThreshold)(config),
@@ -59,7 +61,7 @@ function buildExactGroupSessionModelContextProjection(messagesInput, memory, opt
         groupSessionId,
         totalMessageCount: messages.length,
         visibleMessageCount: unified.visibleMessages.length,
-        visibleMessageIds: unified.visibleMessages.map((message) => message.id),
+        visibleMessageIds: unified.visibleMessages.filter((message) => message?.hidden_execution !== true).map((message) => message.id),
     };
 }
 function buildExactGroupSessionModelContextPacket(groupId, options = {}) {

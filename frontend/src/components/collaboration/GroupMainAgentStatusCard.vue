@@ -94,7 +94,7 @@ const progressRefreshSummary = computed(() => {
   const policy = summary?.display_policy || summary?.displayPolicy || {}
   if (!summary || policy.user_visible === false) return null
   return sanitizeUserFacingPlanStructure(summary, {
-    fallback: '进度刷新提醒已整理，技术细节已放入技术详情。',
+    fallback: '进度刷新提醒已整理。',
     max: 260,
   })
 })
@@ -154,7 +154,7 @@ const pickupSummary = computed(() => {
   const policy = summary?.display_policy || summary?.displayPolicy || {}
   if (!summary || policy.user_visible === false) return null
   return sanitizeUserFacingPlanStructure(summary, {
-    fallback: '回来继续看的摘要已整理，技术细节已放入技术详情。',
+    fallback: '回来继续看的摘要已整理。',
     max: 260,
   })
 })
@@ -292,7 +292,6 @@ const failedGateText = computed(() => {
           <span v-for="item in pickupReviewItems" :key="item">{{ item }}</span>
         </div>
         <small v-if="pickupSummary.resume_action || pickupSummary.resumeAction" class="pickup-next">下一步：{{ pickupSummary.resume_action || pickupSummary.resumeAction }}</small>
-        <small v-if="pickupSummary.technical_hint || pickupSummary.technicalHint" class="pickup-tech-hint">{{ pickupSummary.technical_hint || pickupSummary.technicalHint }}</small>
         <em>{{ pickupSummary.status_label || pickupSummary.statusLabel || '已整理' }}</em>
       </div>
       <div class="main-agent-status-item">
@@ -307,29 +306,10 @@ const failedGateText = computed(() => {
         <span class="item-label">交付进度</span>
         <span class="item-value">{{ status.latest_delivery_summary.actual_file_change_count || 0 }} 个文件 · {{ status.latest_delivery_summary.external_runner_verification_count || 0 }} 项验证</span>
       </div>
-      <details class="main-agent-technical-detail">
-        <summary>技术详情</summary>
-        <div class="main-agent-status-item" v-if="status?.latest_delivery_summary?.lifecycle">
-          <span class="item-label">任务阶段</span>
-          <span class="item-value">{{ status.latest_delivery_summary.lifecycle.state }} · {{ status.latest_delivery_summary.lifecycle.terminal ? '终态' : '会话保留' }}</span>
-        </div>
-        <div class="main-agent-status-item" v-if="sessionContinuityText">
-          <span class="item-label">执行器 / 会话</span>
-          <span class="item-value">{{ sessionContinuityText }}</span>
-        </div>
-        <div class="main-agent-status-item" v-if="status?.latest_delivery_summary">
-          <span class="item-label">文件 / 验证</span>
-          <span class="item-value">{{ status.latest_delivery_summary.actual_file_change_count || 0 }} 个文件 · {{ status.latest_delivery_summary.external_runner_verification_count || 0 }} 条外部验证</span>
-        </div>
-        <div class="main-agent-status-item" v-if="status?.latest_delivery_summary?.reasoning_loop">
-          <span class="item-label">推理闭环</span>
-          <span class="item-value">计划 v{{ status.latest_delivery_summary.reasoning_loop.plan_version || 0 }} · 待证明 {{ status.latest_delivery_summary.reasoning_open_assertions || 0 }} · 偏差 {{ status.latest_delivery_summary.reasoning_deviation_count || 0 }} · 复盘 {{ status.latest_delivery_summary.reasoning_loop.postmortems?.length || 0 }}</span>
-        </div>
-        <div class="main-agent-status-item warning" v-if="status?.failed_gates?.length || status?.failedGates?.length">
-          <span class="item-label">待补验收</span>
-          <span class="item-value">{{ failedGateText }}</span>
-        </div>
-      </details>
+      <div class="main-agent-status-item warning" v-if="status?.failed_gates?.length || status?.failedGates?.length">
+        <span class="item-label">待补验收</span>
+        <span class="item-value">{{ failedGateText }}</span>
+      </div>
       <div class="main-agent-status-item warning" v-if="status?.blockers?.length || status?.needs?.length">
         <span class="item-label">阻塞/待补</span>
         <span class="item-value">{{ blockerText }}</span>

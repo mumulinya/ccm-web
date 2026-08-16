@@ -7,6 +7,8 @@ import { CONVERSATIONAL_REPLY_STYLE_GUIDANCE } from "../conversational-reply-sty
 import type { GlobalAgentDecision, GlobalAgentDecisionState, GlobalAgentLoopRuntime, GlobalAgentRun } from "./loop";
 import { WORKSPACE_READONLY_TOOL_DEFINITIONS_V3 } from "../../tools/workspace-readonly-tools";
 import { attachTransientModelBlocks, collectTransientModelBlocks, transientModelBlocks } from "../../system/transient-model-content";
+import { GLOBAL_MAIN_SESSION_CONTEXT_GUIDANCE, tryBuildGlobalNativeModelMessages } from "./global-native-messages";
+import { PRESENTED_PLAN_SHAPE_GUIDANCE } from "../../modules/collaboration/group-presented-plan";
 
 export function compactObservation(value: any) {
   let text = "";
@@ -335,43 +337,32 @@ export async function buildGlobalAgentModelMessages(run: GlobalAgentRun, runtime
       modelDecision: run.workflow_decision || run.workflowDecision || null,
     },
   );
-  const system = `你是 CCM 全局 Agent 的决策内核。你不是关键词触发器，而是根据用户完整语义、真实系统上下文和工具观察结果决定下一步。
+  const identityRules = `你是 CCM 全局 Agent 的决策内核。你不是关键词触发器，而是根据用户完整语义、真实系统上下文和工具观察结果决定下一步。
 
 ${WORKFLOW_DECISION_GUIDANCE}
 
 ${CONVERSATIONAL_REPLY_STYLE_GUIDANCE}
 
-每轮必须输出 workflowDecision。它决定本轮是直接回答、只读项目分析、直接执行、先计划还是拆 Epic。附件和 URL 只提供上下文，绝不能自动触发拆解。
-
-状态只能是 answer、investigate、plan、execute、needs_confirmation、complete。
-- 普通聊天、知识问答、原理说明、可行性咨询：answer 或 complete，不调用写工具。
-- 事实不足时先调用读取工具调查；不得猜测项目、群聊、任务 ID。
+每轮根据完整语义决定下一步。你通过原生工具行动，不要输出大段 JSON 协议。
+- 普通聊天、知识问答、原理说明、可行性咨询：直接用自然语言回答，不调用写工具。
+- 事实不足时先调用读取工具调查；不得猜测项目、群聊、任务 ID。互不依赖的只读工具可以同轮并行。
 - 用户明确要求实际修改、实现、修复、运行、创建或派发时，才可选择写工具。
 - 写工具是否获得授权由服务端最终判定；不要试图绕过确认。
-- 每轮最多选择一个工具。观察结果返回后再决定下一步。
-- 已经获得足够证据时必须 complete，禁止重复调用相同工具和空转。
+- 需要澄清时调用 ccm_ask_user；需要展示计划时调用 ccm_present_plan。${PRESENTED_PLAN_SHAPE_GUIDANCE}
+- 已经获得足够证据时必须直接给出最终回答，禁止重复调用相同工具和空转。
 - 最终回复区分：实际完成、已派发/仍在执行、验证证据、风险、需要用户确认的事项。
 - 普通聊天、知识问答和原理说明如果没有调用工具，只给自然、直接的答案；不要附加“验证/证据”“风险”“下一步”等执行报告栏目，也不要向用户展示意图分类、置信度、授权依据、计划版本、断言、偏差或复盘。
 - 只有实际执行、派发或调用工具后，最终回复才需要交付证据、风险和后续动作。
-- state 为 answer 或 complete 时，message 必须直接写成给用户看的完整答案或完整执行回执，真正回答原问题；禁止只写“基于上下文回答”“准备总结”“已处理”等过程描述。
-- state 为 investigate、plan、execute 或 needs_confirmation 时，message 才是简短进度说明。
-- 首次调用工具前，message 必须用一句话说明接下来要检查或执行什么；后续只在关键发现、方向变化、阻塞、返工、验收或总结节点更新，不要逐工具机械播报，也不能输出隐藏思维链。
-- 每次都必须输出 intent：category、goal、action_required、target_refs、impact_scope、confidence、authorization_basis、reason。
+- 首次调用工具前，用一句话说明接下来要检查或执行什么；后续只在关键发现、方向变化、阻塞、返工、验收或总结节点更新，不要逐工具机械播报，也不能输出隐藏思维链。
 - 必须核对“推理闭环”：原始目标、澄清链、当前事实快照、计划版本、验证断言和已知偏差。事实变化、工具失败或验收缺口出现后必须重规划，不能机械继续旧计划。
-- 完成前必须逐项说明哪些目标断言已被证据证明；执行过写工具却没有可核验观察时不得声称完成。
+- 完成前必须能说明哪些目标断言已被证据证明；执行过写工具却没有可核验观察时不得声称完成。
 - 运行期间可能收到“执行中补充要求”或“执行中目标调整”。最新补充必须进入下一轮判断；目标调整与旧计划冲突时，以最新目标边界为准并重新规划。
 - 执行中的目标调整不会自动继承旧目标范围的写入授权；需要写入时必须重新满足服务端授权或确认规则。
-- category 只能是 conversation、question、analysis、execution、high_risk、ambiguous；confidence 为 0~1。
-- 目标没有在用户当前消息或读取工具结果中出现时，不得猜测；confidence 不足时使用 needs_confirmation 并提出一个具体澄清问题。
+- 目标没有在用户当前消息或读取工具结果中出现时，不得猜测；不确定时调用 ccm_ask_user 并提出一个具体澄清问题。
 
-可用工具：
-${buildToolPrompt(run.loaded_tool_names || run.loadedToolNames || [])}
-
-${buildModelSelectableSkillCatalog()}
-
-只输出一个合法 JSON 对象，不要输出 Markdown：
-{"state":"investigate|plan|execute|needs_confirmation|answer|complete","message":"非终态写进度；终态写直接回答用户的完整内容","workflowDecision":{"mode":"answer|project_analysis|execute_direct|plan_task|decompose_epic","reason":"完整语义判断依据","confidence":0.95,"needsPlanning":false,"needsEpicDecomposition":false,"actionRequired":false,"continuationKind":"new_task|supplement|revise_goal","readAction":"none|inspect_status","targetRefs":[],"impactScope":[],"planSteps":[],"clarificationQuestions":[],"selectedSkills":[],"intentKind":"conversation|question|status|analysis|execution|management|continuation","requiresCodeChanges":false,"requiresAgentQa":false,"requiresIndependentReview":false,"verificationModes":[],"memoryPolicy":"use|ignore","authorizationDirective":"preserve|grant|revoke","riskLevel":"low|write|high","requiresUserConfirmation":false},"intent":{"category":"conversation|question|analysis|execution|high_risk|ambiguous","goal":"用户真实目标","action_required":false,"target_refs":[],"impact_scope":[],"confidence":0.95,"authorization_basis":"current_message|confirmation|none","reason":"判断依据"},"plan":["步骤"],"tool":{"name":"工具名","arguments":{}},"completion":{"summary":"结论","evidence":[],"risks":[],"next_action":""}}
-不调用工具时 tool 必须为 null。${roleSkills.prompt ? `\n\n${roleSkills.prompt}` : ""}`;
+可用工具已作为原生 tools 注入。需要事实时直接调用只读工具；需要澄清时调用 ccm_ask_user；无需工具时直接回答用户。`;
+  const mcpPolicy = [buildToolPrompt(run.loaded_tool_names || run.loadedToolNames || []), buildModelSelectableSkillCatalog(), roleSkills.prompt].filter(Boolean).join("\n\n");
+  const system = `${identityRules}\n\n${mcpPolicy}`;
   const continuation = options.sessionContinuationOverride !== undefined
     ? options.sessionContinuationOverride
     : context?.session_continuity && typeof context.session_continuity === "object"
@@ -431,11 +422,39 @@ ${buildModelSelectableSkillCatalog()}
     context: modelContext,
     prior_steps: priorSteps,
   });
+  const currentUserText = `【用户当前目标】\n${currentGoal}`;
+  const nativeMessages = tryBuildGlobalNativeModelMessages({
+    sessionId: String(run.session_id || ""),
+    currentUserText,
+    identityRules,
+    sessionGuidance: GLOBAL_MAIN_SESSION_CONTEXT_GUIDANCE,
+    mcpPolicy,
+    continuation,
+    runHistory: run.history,
+    metaBlocks: [{
+      title: "当前运行状态",
+      body: JSON.stringify({
+        run: {
+          id: run.id,
+          status: run.status,
+          phase: run.phase,
+          explicit_write_authorization: run.explicit_write_authorization,
+          max_steps: run.max_steps,
+          remaining_steps: Math.max(0, run.max_steps - run.steps.length),
+          latest_user_steer: run.last_user_steer || run.lastUserSteer || null,
+          replan_required: run.reasoning_loop.replan_required === true,
+          workflow_decision: run.workflow_decision || run.workflowDecision || null,
+        },
+      }),
+    }],
+    observations: run.steps.map(step => step.observation),
+  });
+  if (nativeMessages) return nativeMessages;
   return attachTransientModelBlocks([
     { role: "system", content: system },
     ...summaryMessages,
     ...continuationWithoutCurrent,
     ...runHistoryMessages,
-    { role: "user", content: `【用户当前目标】\n${run.reasoning_loop.effective_goal || run.user_message}\n\n【当前运行状态】\n${state}\n\n请决定下一步。` },
+    { role: "user", content: `【用户当前目标】\n${run.reasoning_loop.effective_goal || run.user_message}\n\n【当前运行状态】\n${state}\n\n请决定下一步：直接回答、调用工具，或 ccm_ask_user。` },
   ], collectTransientModelBlocks(run.steps.map(step => step.observation)));
 }

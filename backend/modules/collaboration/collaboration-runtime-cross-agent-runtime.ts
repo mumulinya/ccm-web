@@ -254,6 +254,11 @@ import {
   saveGroups,
 } from "./storage";
 import {
+  latestPresentedPlanFromGroupSession,
+  mergePresentedPlanAcceptanceCriteria,
+  presentedPlanFromTask,
+} from "./group-presented-plan";
+import {
   buildDailyDevTaskDescription,
   claimReadyDailyDevBacklog,
   configureDailyDevBacklogRuntime,
@@ -2185,7 +2190,9 @@ export function buildCoordinatorTestAgentAcceptanceCriteria(task: any, verificat
   const projectCriteria = splitUserAcceptanceText(task.acceptance_criteria || task.acceptanceCriteria)
     .filter((criterion: string) => !isCoordinatorOnlyAcceptanceCriterion(criterion));
   const commandCriteria = verificationCommands.map(command => `命令 ${command} 必须成功执行。`);
-  return uniqueStrings([...projectCriteria, ...commandCriteria]).slice(0, 10);
+  const plan = presentedPlanFromTask(task)
+    || latestPresentedPlanFromGroupSession(task?.group_id || task?.groupId, task?.group_session_id || task?.groupSessionId);
+  return mergePresentedPlanAcceptanceCriteria([...projectCriteria, ...commandCriteria], plan, 10);
 }
 
 export function buildTestAgentHandoffId(taskId = "", originalTarget = "") {

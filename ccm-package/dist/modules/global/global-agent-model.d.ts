@@ -7,6 +7,10 @@ export declare function callLlm(config: any, messages: any[], options?: {
     retryProfile?: ModelRetryProfileId;
     signal?: AbortSignal;
     onRetry?: (notice: any) => void;
+    maxTokens?: number;
+    nativeTools?: any[];
+    nativeToolReference?: boolean;
+    onProviderAgentTurn?: (turn: any) => void;
 }): Promise<string>;
 export declare function shouldRetryGlobalModelError(error: any): boolean;
 export declare function callGlobalModelWithRetry(config: any, messages: any[], options?: {

@@ -13,6 +13,7 @@ const db_1 = require("../core/db");
 const access_policy_1 = require("../modules/system/access-policy");
 const db_2 = require("../core/db");
 const command_live_progress_1 = require("./command-live-progress");
+const event_file_diff_1 = require("./event-file-diff");
 function identity(query) {
     return {
         scope: query?.scope,
@@ -30,6 +31,66 @@ function writeEvent(res, event) {
         res.write(`id: ${event.sequence}\n`);
     res.write(`event: agent_execution\n`);
     res.write(`data: ${JSON.stringify(event)}\n\n`);
+}
+function normalizedToolPath(value) {
+    return String(value || "").replace(/\\/g, "/").replace(/^\.\//, "").trim();
+}
+function observedFileChecksums(event) {
+    const rows = Array.isArray(event.detail?.toolDisplay?.result?.rows) ? event.detail.toolDisplay.result.rows : [];
+    const checksums = new Map();
+    for (const row of rows) {
+        const filePath = normalizedToolPath(row?.path);
+        const value = String(row?.checksum || "").trim();
+        if (filePath && value)
+            checksums.set(filePath, value);
+    }
+    const singlePath = normalizedToolPath(event.detail?.safeArguments?.path);
+    const singleRevision = String(event.detail?.toolDisplay?.result?.authoritativeRevision || "").trim();
+    if (singlePath && singleRevision && !checksums.has(singlePath))
+        checksums.set(singlePath, singleRevision);
+    return checksums;
+}
+function attachSourceFreshness(event, current) {
+    const observed = observedFileChecksums(event);
+    const fileRows = Array.isArray(current?.result?.fileRows) ? current.result.fileRows : [];
+    for (const row of fileRows) {
+        const filePath = normalizedToolPath(row?.path);
+        const observedChecksum = String(observed.get(filePath) || "").trim();
+        const currentChecksum = String(row?.checksum || row?.currentChecksum || "").trim();
+        row.observedChecksum = observedChecksum || undefined;
+        row.currentChecksum = currentChecksum || undefined;
+        row.freshness = observedChecksum && currentChecksum && observedChecksum !== currentChecksum ? "drifted" : "current";
+    }
+    if (fileRows.some((row) => row.freshness === "drifted"))
+        current.result.freshness = "drifted";
+    else if (fileRows.length)
+        current.result.freshness = "current";
+    return current;
+}
+function canReadCurrentSource(req, event) {
+    const principal = req.ccmAuth;
+    if (!principal || principal.kind !== "browser" || principal.role === "admin")
+        return true;
+    const userId = String(principal.userId || "");
+    if (event.scope === "project" && !(0, access_policy_1.hasResourceAccess)(userId, principal.role, "project", event.scopeId, "use"))
+        return false;
+    if (event.scope === "group" && !(0, access_policy_1.hasResourceAccess)(userId, principal.role, "group", event.scopeId, "use"))
+        return false;
+    const requestedProject = String(event.detail?.safeArguments?.project_id || event.detail?.safeArguments?.projectId || event.detail?.safeArguments?.project || (event.scope === "project" ? event.scopeId : "")).trim();
+    return !!requestedProject && (0, access_policy_1.hasResourceAccess)(userId, principal.role, "project", requestedProject, "use");
+}
+function eventDiffProject(event, requestedPath) {
+    const normalized = normalizedToolPath(requestedPath);
+    const row = (Array.isArray(event.detail?.fileChanges) ? event.detail.fileChanges : [])
+        .find((item) => normalizedToolPath(item?.path || item?.file || item?.name) === normalized);
+    const task = event.taskId ? (0, db_2.loadTasks)().find((item) => String(item?.id || "") === String(event.taskId)) : null;
+    return String(row?.project || event.detail?.agentDisplay?.projectId || task?.target_project || task?.targetProject || (event.scope === "project" ? event.scopeId : "")).trim();
+}
+function canReadProjectCode(req, project) {
+    const principal = req.ccmAuth;
+    if (!principal || principal.kind !== "browser" || principal.role === "admin")
+        return true;
+    return !!project && (0, access_policy_1.hasResourceAccess)(String(principal.userId || ""), principal.role, "project", project, "use");
 }
 async function rehydrateReadonlyToolDetail(event, options = {}) {
     if (!event.toolName || !(0, tool_display_projection_1.isWorkspaceReadonlyToolName)(event.toolName))
@@ -55,9 +116,13 @@ async function rehydrateReadonlyToolDetail(event, options = {}) {
     });
     let executionArguments = event.detail.safeArguments;
     const continuationFiles = Array.isArray(options?.continuation?.files) ? options.continuation.files : [];
-    const continueBatchRead = options?.continue === true && /(?:^|__)read_files$/i.test(String(event.toolName || ""));
-    if (continueBatchRead) {
-        const originalPaths = new Set((Array.isArray(event.detail.safeArguments?.paths) ? event.detail.safeArguments.paths : [])
+    const continueSourceRead = options?.continue === true && /(?:^|__)read_files?$/i.test(String(event.toolName || ""));
+    if (continueSourceRead) {
+        const isBatch = /(?:^|__)read_files$/i.test(String(event.toolName || ""));
+        const originalValues = isBatch
+            ? (Array.isArray(event.detail.safeArguments?.paths) ? event.detail.safeArguments.paths : [])
+            : [event.detail.safeArguments?.path];
+        const originalPaths = new Set(originalValues
             .map((item) => String(typeof item === "string" ? item : item?.path || "").replace(/\\/g, "/").trim())
             .filter(Boolean));
         const paths = continuationFiles.slice(0, 20).map((item) => ({
@@ -67,14 +132,21 @@ async function rehydrateReadonlyToolDetail(event, options = {}) {
         })).filter((item) => item.path && originalPaths.has(item.path));
         if (!paths.length)
             throw Object.assign(new Error("没有可继续读取的文件"), { statusCode: 409 });
-        executionArguments = {
+        executionArguments = isBatch ? {
             ...event.detail.safeArguments,
             // Continue in bounded chunks. An explicit offset without a limit means
             // "read to EOF" in the V3 contract and can exceed the per-file budget.
             paths: paths.map((item) => ({ path: item.path, offset: item.offset, limit: 100, expected_checksum: item.expectedChecksum })),
+        } : {
+            ...event.detail.safeArguments,
+            path: paths[0].path,
+            offset: paths[0].offset,
+            limit: 100,
+            expected_checksum: paths[0].expectedChecksum,
         };
         const result = await (0, workspace_readonly_tools_1.executeWorkspaceReadonlyTool)(event.toolName, executionArguments, capabilityToken, 3);
-        const rawFiles = Array.isArray(result?.modelPayload?.files) ? result.modelPayload.files : [];
+        const rawPayload = result?.modelPayload || result;
+        const rawFiles = isBatch && Array.isArray(rawPayload?.files) ? rawPayload.files : [rawPayload];
         const changed = paths.find((item) => item.expectedChecksum
             && rawFiles.find((file) => String(file?.path || "") === item.path)?.checksum !== item.expectedChecksum);
         if (changed)
@@ -88,9 +160,9 @@ async function rehydrateReadonlyToolDetail(event, options = {}) {
         });
         const pendingCount = Number(current.result.continuation?.pendingCount || 0);
         current.result.summary = `已继续读取 ${paths.length} 个文件${pendingCount ? `，仍有 ${pendingCount} 个文件未读完` : "，剩余内容已读完"}`;
-        return current;
+        return attachSourceFreshness(event, current);
     }
-    const result = await (0, workspace_readonly_tools_1.executeWorkspaceReadonlyTool)(event.toolName, executionArguments, capabilityToken, event.detail?.toolContractVersion === 3 ? 3 : 2);
+    const result = await (0, workspace_readonly_tools_1.executeWorkspaceReadonlyTool)(event.toolName, executionArguments, capabilityToken, (0, tool_display_projection_1.workspaceReadonlyContractVersion)(event.toolName, event.detail?.toolContractVersion));
     const current = (0, tool_display_projection_1.buildToolDisplayDetail)({
         toolName: event.toolName,
         arguments: event.detail.safeArguments,
@@ -102,7 +174,7 @@ async function rehydrateReadonlyToolDetail(event, options = {}) {
     const currentRevision = String(current.result.authoritativeRevision || "");
     if (previousRevision && currentRevision && previousRevision !== currentRevision)
         current.result.freshness = "drifted";
-    return current;
+    return attachSourceFreshness(event, current);
 }
 function rehydrateFailureFreshness(error) {
     const message = String(error?.message || error || "");
@@ -131,6 +203,16 @@ function handleUserVisibleAgentEventsApi(pathname, req, res, parsed) {
                 if (!event)
                     return (0, utils_1.sendJson)(res, { success: false, error: "工具事件不存在或不属于当前精确会话" }, 404);
                 const options = body ? JSON.parse(body) : {};
+                if (options?.includeDiff === true) {
+                    const requestedPath = normalizedToolPath(options?.path);
+                    if (!requestedPath)
+                        return (0, utils_1.sendJson)(res, { success: false, error: "Diff详情请求缺少文件路径", contentStored: false }, 400);
+                    const project = eventDiffProject(event, requestedPath);
+                    if (!canReadProjectCode(req, project))
+                        return (0, utils_1.sendJson)(res, { success: false, error: "当前账户没有目标项目的源码读取权限", freshness: "permission_revoked", contentStored: false }, 403);
+                    const detail = (0, event_file_diff_1.projectEventFileDiff)(event, requestedPath, project);
+                    return (0, utils_1.sendJson)(res, { success: true, ...detail });
+                }
                 if (options?.includeLiveTail === true) {
                     const principal = req.ccmAuth;
                     const task = event.taskId ? (0, db_2.loadTasks)().find((item) => String(item?.id || "") === String(event.taskId)) : null;
@@ -157,6 +239,10 @@ function handleUserVisibleAgentEventsApi(pathname, req, res, parsed) {
                     const liveTail = commandRunId ? (0, command_live_progress_1.getCommandLiveTail)(commandRunId) : null;
                     return (0, utils_1.sendJson)(res, { success: true, schema: "ccm-tool-detail-response-v1", toolDisplay: event.detail?.toolDisplay || null, liveTail, contentStored: false });
                 }
+                if (options?.includeSource !== true)
+                    return (0, utils_1.sendJson)(res, { success: false, error: "源码详情请求缺少明确读取标记", contentStored: false }, 400);
+                if (!canReadCurrentSource(req, event))
+                    return (0, utils_1.sendJson)(res, { success: false, error: "当前账户没有目标项目的源码读取权限", freshness: "permission_revoked", contentStored: false }, 403);
                 const toolDisplay = await rehydrateReadonlyToolDetail(event, options);
                 (0, utils_1.sendJson)(res, { success: true, schema: "ccm-tool-detail-response-v1", toolDisplay, contentStored: false });
             }

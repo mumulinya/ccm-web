@@ -15,10 +15,17 @@ export function getPrePlanClarification(value) {
   return result?.schema === 'ccm-pre-plan-clarification-v1' ? result : null
 }
 
-export function findActivePrePlanClarification(messages = []) {
+export function findActivePrePlanClarification(messages = [], options = {}) {
+  const purpose = String(options.purpose || '').toLowerCase()
   return [...(Array.isArray(messages) ? messages : [])].reverse()
     .map(message => ({ message, clarification: getPrePlanClarification(message) }))
-    .find(row => row.clarification?.status === 'pending') || null
+    .find(row => {
+      if (row.clarification?.status !== 'pending') return false
+      const rowPurpose = String(row.clarification?.purpose || 'pre_plan').toLowerCase()
+      if (purpose === 'mid_turn') return rowPurpose === 'mid_turn'
+      if (purpose === 'pre_plan') return rowPurpose !== 'mid_turn'
+      return true
+    }) || null
 }
 
 export function formatPrePlanClarificationAnswer(clarification, answers = {}, additionalNote = '') {

@@ -54,6 +54,7 @@ export declare function buildGlobalClarificationSummary(input: {
         round: number;
         title: string;
         headline: string;
+        purpose: string;
         questions: any[];
         allowAdditionalNote: boolean;
         safeDefaultsAvailable: boolean;
@@ -73,6 +74,7 @@ export declare function buildGlobalClarificationSummary(input: {
         round: number;
         title: string;
         headline: string;
+        purpose: string;
         questions: any[];
         allowAdditionalNote: boolean;
         safeDefaultsAvailable: boolean;
@@ -173,6 +175,7 @@ export declare function buildGlobalPlanModeSummary(input: {
     schema: string;
     title: string;
     mode: string;
+    confirmation_kind: string;
     source: string;
     requirement: string;
     action: string;
@@ -230,6 +233,7 @@ export declare function buildGlobalPlanModeSummary(input: {
     schema: string;
     title: string;
     mode: string;
+    confirmation_kind: string;
     source: string;
     requirement: string;
     action: string;
