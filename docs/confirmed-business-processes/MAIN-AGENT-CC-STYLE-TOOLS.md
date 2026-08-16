@@ -54,6 +54,10 @@ Skill首轮只提供名称、说明和内容hash。完整`SKILL.md`只在模型�
 
 页面和API区分“已授权但未加载”“已加载Schema”和“已实际调用”。延迟目录只按名称投影计算Token，完整Schema只在`alwaysLoad`或ToolSearch加载后计算，工具结果只在真实调用后计算。Context Engine只统计本轮真实载荷；调用与结果保持成对写入精确会话隐藏执行账本，旧结果仅在满足MicroCompact条件时压缩。聊天正文不展示源码原文或内部协议。
 
+原生路径的 `policy_prompt` 只写工具短名称和一句说明，不再把 JSON Schema 再写进政策提示；完整 Schema 只出现在本轮 `tools` 数组。JSON 退化路径仍在政策文本中携带参数 Schema。群聊/项目原生 `tools` 数组包含 `tool_search` 与 `invoke_skill`，工作区工具使用短名称。全局低频管理工具默认延迟，需先 `tool_search` 再调用。
+
+超过 50_000 字符的工具结果写入 `~/.cc-connect/tool-results/{scope}/{sessionId}/`，模型上下文只保留约 2KB 冻结预览和 `<persisted-output>`；同一 `tool_call_id` 的预览字节级稳定。`read_file`、已有工作区引用和图片块不落盘。单轮并行结果合计超过 200_000 字符时从最大新鲜结果开始落盘。原生 transcript 应用投影算出的 MicroCompact 清理/替换，不把完整执行账本重新灌进模型；time-based MicroCompact 默认关闭，与 Claude Code GrowthBook 默认一致。
+
 正式压缩成功后，三类主Agent使用同一份`MainAgentPostCompactRestoreManifestV1`恢复动态工具状态：
 
 1. 只有存在真实`invoke_skill`回执的Skill才记录内容checksum，并在新Run中重新读取、校验后恢复正文。
@@ -73,6 +77,9 @@ Skill首轮只提供名称、说明和内容hash。完整`SKILL.md`只在模型�
 ## 7. 实现与验证入口
 
 - `backend/tools/main-agent-tool-runtime.ts`
+- `backend/tools/tool-result-storage.ts`
+- `backend/agents/global/global-tool-load-policy.ts`
+- `backend/agents/native-session-transcript.ts`
 - `backend/system/main-agent-post-compact-continuity.ts`
 - `backend/tools/workspace-readonly-tools.ts`
 - `backend/integrations/workspace-readonly-mcp.ts`
@@ -80,6 +87,7 @@ Skill首轮只提供名称、说明和内容hash。完整`SKILL.md`只在模型�
 - `backend/modules/collaboration/group-orchestrator-llm.ts`
 - `backend/modules/projects/project-main-agent.ts`
 - `scripts/main-agent-cc-tools-selftest.mjs`
+- `scripts/cc-tool-context-parity-selftest.mjs`
 - `scripts/main-agent-post-compact-continuity-selftest.mjs`
 - `scripts/agent-tool-inheritance-selftest.mjs`
 - `scripts/internal-mcp-catalog-selftest.mjs`

@@ -12,29 +12,18 @@ exports.projectGlobalAgentObservationForModel = projectGlobalAgentObservationFor
 exports.projectGlobalAgentReasoningForModel = projectGlobalAgentReasoningForModel;
 exports.parseGlobalAgentDecision = parseGlobalAgentDecision;
 exports.normalizeDecision = normalizeDecision;
-exports.buildToolPrompt = buildToolPrompt;
 exports.buildGlobalAgentModelMessages = buildGlobalAgentModelMessages;
-const global_agent_run_store_1 = require("./global-agent-run-store");
-const runtime_1 = require("./runtime");
 const role_skills_1 = require("../../skills/role-skills");
 const reasoning_loop_1 = require("../reasoning-loop");
 const workflow_decision_1 = require("../workflow-decision");
-const conversational_reply_style_1 = require("../conversational-reply-style");
 const workspace_readonly_tools_1 = require("../../tools/workspace-readonly-tools");
 const transient_model_content_1 = require("../../system/transient-model-content");
 const global_native_messages_1 = require("./global-native-messages");
-const group_presented_plan_1 = require("../../modules/collaboration/group-presented-plan");
+const main_agent_identity_1 = require("../main-agent-identity");
+const slash_command_session_state_1 = require("../../system/slash-command-session-state");
+const global_agent_tool_authorization_1 = require("../../modules/global/global-agent-tool-authorization");
 function compactObservation(value) {
-    let text = "";
-    try {
-        text = JSON.stringify(value);
-    }
-    catch {
-        text = String(value);
-    }
-    if (text.length <= global_agent_run_store_1.MAX_OBSERVATION_CHARS)
-        return value;
-    return (0, transient_model_content_1.attachTransientModelBlocks)({ truncated: true, preview: text.slice(0, global_agent_run_store_1.MAX_OBSERVATION_CHARS), original_chars: text.length }, (0, transient_model_content_1.transientModelBlocks)(value));
+    return value;
 }
 exports.GLOBAL_MODEL_ROUTE_KEYS = new Set([
     "success", "accepted", "completed", "replayed", "operation", "id", "mission_id", "global_mission_id",
@@ -240,16 +229,6 @@ function normalizeDecision(value, fallbackWorkflowDecision = null) {
         } : undefined,
     };
 }
-function buildToolPrompt(loadedToolNames = []) {
-    const loaded = new Set((loadedToolNames || []).map(value => String(value || "")));
-    const deferredWorkspaceNames = new Set(workspace_readonly_tools_1.WORKSPACE_READONLY_TOOL_DEFINITIONS_V3
-        .filter(tool => tool.loadPolicy === "search" && !loaded.has(tool.name) && !loaded.has(tool.canonicalName))
-        .map(tool => tool.name));
-    return (0, runtime_1.buildGlobalAgentToolDefinitions)(global_agent_run_store_1.GLOBAL_AGENT_TOOL_SPECS)
-        .filter(spec => !deferredWorkspaceNames.has(spec.name))
-        .map(spec => `- ${spec.name}${spec.required?.length ? `（必填：${spec.required.join("、")}）` : ""}：${spec.description}；schema=${JSON.stringify(spec.inputSchema)}；risk=${spec.risk}`)
-        .join("\n");
-}
 /**
  * The global directory is intentionally broad, but it must never become a
  * model-sized dump of every MCP schema, resource and historical task.  The
@@ -356,32 +335,16 @@ async function buildGlobalAgentModelMessages(run, runtime, options = {}) {
         selectedSkillNames: (run.workflow_decision || run.workflowDecision)?.selectedSkills || [],
         modelDecision: run.workflow_decision || run.workflowDecision || null,
     });
-    const identityRules = `你是 CCM 全局 Agent 的决策内核。你不是关键词触发器，而是根据用户完整语义、真实系统上下文和工具观察结果决定下一步。
-
-${workflow_decision_1.WORKFLOW_DECISION_GUIDANCE}
-
-${conversational_reply_style_1.CONVERSATIONAL_REPLY_STYLE_GUIDANCE}
-
-每轮根据完整语义决定下一步。你通过原生工具行动，不要输出大段 JSON 协议。
-- 普通聊天、知识问答、原理说明、可行性咨询：直接用自然语言回答，不调用写工具。
-- 事实不足时先调用读取工具调查；不得猜测项目、群聊、任务 ID。互不依赖的只读工具可以同轮并行。
-- 用户明确要求实际修改、实现、修复、运行、创建或派发时，才可选择写工具。
-- 写工具是否获得授权由服务端最终判定；不要试图绕过确认。
-- 需要澄清时调用 ccm_ask_user；需要展示计划时调用 ccm_present_plan。${group_presented_plan_1.PRESENTED_PLAN_SHAPE_GUIDANCE}
-- 已经获得足够证据时必须直接给出最终回答，禁止重复调用相同工具和空转。
-- 最终回复区分：实际完成、已派发/仍在执行、验证证据、风险、需要用户确认的事项。
-- 普通聊天、知识问答和原理说明如果没有调用工具，只给自然、直接的答案；不要附加“验证/证据”“风险”“下一步”等执行报告栏目，也不要向用户展示意图分类、置信度、授权依据、计划版本、断言、偏差或复盘。
-- 只有实际执行、派发或调用工具后，最终回复才需要交付证据、风险和后续动作。
-- 首次调用工具前，用一句话说明接下来要检查或执行什么；后续只在关键发现、方向变化、阻塞、返工、验收或总结节点更新，不要逐工具机械播报，也不能输出隐藏思维链。
-- 必须核对“推理闭环”：原始目标、澄清链、当前事实快照、计划版本、验证断言和已知偏差。事实变化、工具失败或验收缺口出现后必须重规划，不能机械继续旧计划。
-- 完成前必须能说明哪些目标断言已被证据证明；执行过写工具却没有可核验观察时不得声称完成。
-- 运行期间可能收到“执行中补充要求”或“执行中目标调整”。最新补充必须进入下一轮判断；目标调整与旧计划冲突时，以最新目标边界为准并重新规划。
-- 执行中的目标调整不会自动继承旧目标范围的写入授权；需要写入时必须重新满足服务端授权或确认规则。
-- 目标没有在用户当前消息或读取工具结果中出现时，不得猜测；不确定时调用 ccm_ask_user 并提出一个具体澄清问题。
-
-可用工具已作为原生 tools 注入。需要事实时直接调用只读工具；需要澄清时调用 ccm_ask_user；无需工具时直接回答用户。`;
-    const mcpPolicy = [buildToolPrompt(run.loaded_tool_names || run.loadedToolNames || []), (0, role_skills_1.buildModelSelectableSkillCatalog)(), roleSkills.prompt].filter(Boolean).join("\n\n");
-    const system = `${identityRules}\n\n${mcpPolicy}`;
+    const sessionId = String(run.session_id || "");
+    const loadedToolNames = run.loaded_tool_names || run.loadedToolNames || [];
+    const authorizedTools = (0, global_agent_tool_authorization_1.buildGlobalAgentToolRuntimeContext)({ taskId: run.id, sessionId, source: run.source || "global-agent-model-messages" }, loadedToolNames, { executionSkills: roleSkills.names });
+    const sessionGuidance = (0, main_agent_identity_1.buildGlobalMainSessionGuidance)();
+    const identityRules = (0, main_agent_identity_1.buildGlobalMainIdentityRules)({
+        sessionDirective: (0, slash_command_session_state_1.renderSlashCommandSessionDirective)("global", "global", sessionId),
+        roleSkillsPrompt: roleSkills.prompt,
+    });
+    const mcpPolicy = String(authorizedTools.policy_prompt || "").trim();
+    const identitySystem = [identityRules, sessionGuidance].filter(Boolean).join("\n\n");
     const continuation = options.sessionContinuationOverride !== undefined
         ? options.sessionContinuationOverride
         : context?.session_continuity && typeof context.session_continuity === "object"
@@ -444,35 +407,24 @@ ${conversational_reply_style_1.CONVERSATIONAL_REPLY_STYLE_GUIDANCE}
     });
     const currentUserText = `【用户当前目标】\n${currentGoal}`;
     const nativeMessages = (0, global_native_messages_1.tryBuildGlobalNativeModelMessages)({
-        sessionId: String(run.session_id || ""),
+        sessionId,
         currentUserText,
         identityRules,
-        sessionGuidance: global_native_messages_1.GLOBAL_MAIN_SESSION_CONTEXT_GUIDANCE,
+        sessionGuidance,
         mcpPolicy,
         continuation,
         runHistory: run.history,
         metaBlocks: [{
                 title: "当前运行状态",
-                body: JSON.stringify({
-                    run: {
-                        id: run.id,
-                        status: run.status,
-                        phase: run.phase,
-                        explicit_write_authorization: run.explicit_write_authorization,
-                        max_steps: run.max_steps,
-                        remaining_steps: Math.max(0, run.max_steps - run.steps.length),
-                        latest_user_steer: run.last_user_steer || run.lastUserSteer || null,
-                        replan_required: run.reasoning_loop.replan_required === true,
-                        workflow_decision: run.workflow_decision || run.workflowDecision || null,
-                    },
-                }),
+                body: state,
             }],
         observations: run.steps.map(step => step.observation),
     });
     if (nativeMessages)
         return nativeMessages;
     return (0, transient_model_content_1.attachTransientModelBlocks)([
-        { role: "system", content: system },
+        { role: "system", content: identitySystem },
+        ...(mcpPolicy ? [{ role: "system", contextBlockType: "mcp", content: mcpPolicy }] : []),
         ...summaryMessages,
         ...continuationWithoutCurrent,
         ...runHistoryMessages,

@@ -66,20 +66,27 @@ ccm logs --follow
 
 普通问答由主 Agent首轮直接回答。只有模型确实需要信息时才加载知识、源码、Skill或MCP；复杂开发任务进入持久队列和验收链，后台执行不会长期占用聊天回合。
 
-## 2.0.8 最新能力
+## 2.0.9 最新能力
 
+- **全局与群聊长期记忆管理升级**：全局 Agent 记忆中心深度升级，引入全局主题索引（Topic Index）、记忆账本（Ledger）、事务隔离与蒸馏记忆（Distilled Memory）；支持长短期记忆投影、动态窗口、分层 Token 预算管理及权威源文件证明；引入会话边界日志（Memory Boundary Journal）与反应式压缩恢复，保障跨会话长程记忆与断点续跑零丢失。
+- **Agent 执行流可视化与交互体验增强**：
+  - **行内 Agent Diff（Inline Agent Diff）**：主 Agent 及子 Agent 产生的文件变更在执行流步骤中直接原位呈现代码差异高亮，直观掌握文件修改。
+  - **子 Agent 嵌套会话（Nested Child Agent Conversation）**：子 Agent 的执行步骤与内部对话以嵌套层级折叠呈现，清晰追溯多 Agent 协作细节。
+  - **需求方案确认与一键执行（Presented Requirement Plan）**：提供直观的方案确认卡片与一键执行流，支持实施前业务澄清问答与交互式决策。
+  - **会话待办事项追踪（Conversation Todo）**：在会话中实时同步并追踪待办事项完成度与步骤进度。
+  - **文件阅读与检索折叠收起（Read & Search Collapsible Header）**：大批量文件读取与代码搜索步骤自动收拢折叠，显著降低聊天视窗干扰。
+  - **工具结果多维结构化呈现（Rich Tool Result Detail & Replay）**：工具输出深度适配各类结构化数据，提供更详尽可读的视图与回放支持。
+- **上下文引擎与多 Provider 缓存优化**：提供中立 Provider 提示词缓存与微压缩生命周期管理，降低长会话 Token 消耗；原生会话与执行日志深度对齐。
 - 全局、项目和群聊统一采用真实流式回答与可解释进度：工具完成后立即展示安全结果和下一步，长等待只显示真实阶段，不展示隐藏推理。
 - 开发需求、只读分析和普通问答使用统一边界；只有明确需要修改代码或配置时才创建正式开发任务，修改仍由受控项目开发 Agent执行。
 - 执行记录升级为“摘要 → 用户可读详情 → 技术详情”三层展示，目录、文件、搜索位置、读取范围、Git与验证结果不再暴露原始JSON字段。
 - 支持安全暂停与原位续接、任务意图路由、计划前业务澄清、飞书附件接入、运行时状态中心和离开期间摘要。
 - 完成态严格由当前generation的Terminal Gate确认；失败、暂停、中断和等待处理不会伪装为正式交付。
-
 - 主 Agent文件读取升级为安全续读闭环：批量读取会稳定保留原文件集合，一键继续读取未完成内容，并通过checksum阻止文件漂移后误拼接旧结果。
 - 同一模型上下文内的重复读取会返回未变化状态，避免重复注入正文与重复计算Token；新任务、压缩、恢复或generation变化后会重新读取权威内容。
 - Glob和Grep优先使用npm随包安装的ripgrep，系统ripgrep和Node安全实现作为降级；搜索支持超时、取消和已完成部分结果保留。
 - 文件路径不存在时返回受项目权限、敏感文件和真实路径边界约束的候选建议，不会猜测或暴露越界文件。
 - 全局、项目和群聊使用同一套只读工作区工具与展示；主 Agent负责读取、分析和规划，代码修改仍由受控项目开发 Agent执行。
-
 - 修复全局 Agent 上下文边界白名单遗漏，恢复全局飞书会话和“继续”操作的正常执行。
 - 全局、项目和群聊统一接入可恢复任务队列、阶段计划、执行记录与任务回放；服务重启后保留任务现场和会话连续性。
 - Agent 指标覆盖主 Agent、项目子 Agent 和 TestAgent，支持真实 Token、费用、阶段耗时与进程资源观测；未提供 usage 时明确显示原因。
@@ -438,8 +445,11 @@ User message / requirement document / image / attachment
 
 Ordinary questions and read-only analysis remain lightweight. A formal development task is created only when the request explicitly requires code, configuration, dependency, test, or build-script changes. The main agent reads, analyzes, plans, coordinates, and reviews; actual source modifications are delegated to controlled project development agents.
 
-### Version 2.0.8 highlights
+### Version 2.0.9 highlights
 
+- Enhanced Global & Group Memory Management: Topic indexing, memory ledger, transaction isolation, distilled memory, dynamic memory window, and boundary journal with reactive compaction recovery.
+- Advanced Agent Execution UX: Inline agent code diff rendering, nested child agent conversations, presented requirement plan cards with one-click confirmation, pre-plan clarification cards, conversation todo tracking, and collapsible read/search step headers.
+- Context Engine & Multi-Provider Prompt Cache: Provider-neutral prompt caching and microcompaction lifecycle management to optimize token usage in long conversations.
 - Real streaming and explainable progress are shared by global, group, and project conversations.
 - Tool results use three levels: concise summary, user-readable results, and permission-aware technical details.
 - Development-task classification no longer turns ordinary questions or read-only code analysis into heavy task records.

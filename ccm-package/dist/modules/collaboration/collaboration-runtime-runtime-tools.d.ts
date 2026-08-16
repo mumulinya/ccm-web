@@ -47,7 +47,7 @@ export declare function classifyTaskContinuation(message: string): any;
 export declare function looksLikeTaskContinuation(message: string): any;
 export declare function getGlobalMissionChildDeliveryEvidence(task: any): {
     strong_acceptance_passed: any;
-    acceptance_evidence_status: "missing" | "strong" | "weak";
+    acceptance_evidence_status: "missing" | "weak" | "strong";
     acceptance_evidence_source: string;
     acceptance_evidence_detail: string;
     execution_count: number;

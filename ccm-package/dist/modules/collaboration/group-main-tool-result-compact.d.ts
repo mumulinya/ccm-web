@@ -1,10 +1,11 @@
 import type { LlmChatMessage } from "./group-orchestrator-llm-client";
-export declare function compactGroupMainToolResultsForPayload(rows?: any[], budgetTokens?: number): {
+import { type ToolResultPersistContext } from "../../tools/tool-result-storage";
+export declare function compactGroupMainToolResultsForPayload(rows?: any[], budgetTokens?: number, persistContext?: ToolResultPersistContext | null): {
     rows: any[];
     changed: boolean;
     tokens: any;
 };
-export declare function compactGroupNativeTranscript(messages: LlmChatMessage[], rows?: any[], budgetTokens?: number): {
+export declare function compactGroupNativeTranscript(messages: LlmChatMessage[], rows?: any[], budgetTokens?: number, persistContext?: ToolResultPersistContext | null): {
     messages: LlmChatMessage[];
     rows: any[];
     changed: boolean;
@@ -18,5 +19,6 @@ export declare function runGroupMainToolResultCompactSelfTest(): {
         keptSmallRow: boolean;
         fileReadKeepsContent: boolean;
         transcriptRewritesToolResult: boolean;
+        persistOversizePreview: boolean;
     };
 };

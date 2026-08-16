@@ -14,9 +14,19 @@ const segments = computed(() => {
 </script>
 
 <template>
-  <span><template v-for="(segment, index) in segments" :key="index"><mark v-if="segment.marked">{{ segment.text }}</mark><template v-else>{{ segment.text }}</template></template></span>
+  <span class="highlighted-text"><template v-for="(segment, index) in segments" :key="index"><mark v-if="segment.marked" class="search-highlight">{{ segment.text }}</mark><template v-else>{{ segment.text }}</template></template></span>
 </template>
 
 <style scoped>
-mark { padding: 0 2px; border-radius: 2px; background: color-mix(in srgb, #facc15 24%, transparent); color: inherit; font-weight: 700; }
+.search-highlight {
+  padding: 1px 4px;
+  margin: 0 1px;
+  border-radius: 4px;
+  background: rgba(234, 179, 8, 0.22);
+  color: var(--text-primary);
+  border: 1px solid rgba(234, 179, 8, 0.35);
+  font-weight: 700;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
 </style>

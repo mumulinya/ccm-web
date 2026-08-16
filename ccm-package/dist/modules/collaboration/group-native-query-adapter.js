@@ -74,6 +74,7 @@ async function runGroupMainNativeQueryLoop(input) {
         exactSessionId: groupSessionId,
         signal: input.signal,
         nativeToolReference: true,
+        persistContext: { scope: "group", sessionId: groupSessionId },
         loopBudget,
         planModeEnabled: (0, conversation_plan_mode_gate_1.isConversationPlanModeEnabled)("group", String(group.id), groupSessionId),
         promptCacheTracking: { groupId: group.id, groupSessionId, source: "group_main_planning" },
@@ -258,7 +259,7 @@ async function runGroupMainNativeQueryLoop(input) {
         compactTranscript: (messages) => {
             const threshold = (0, group_compaction_strategy_1.getGroupAutoCompactThreshold)(config);
             const budget = Math.max(4_000, Math.min(40_000, Number(threshold) || 40_000));
-            const compacted = (0, group_main_tool_result_compact_1.compactGroupNativeTranscript)(messages, toolResults, budget);
+            const compacted = (0, group_main_tool_result_compact_1.compactGroupNativeTranscript)(messages, toolResults, budget, { scope: "group", sessionId: groupSessionId });
             if (compacted.changed) {
                 toolResults.length = 0;
                 toolResults.push(...compacted.rows);

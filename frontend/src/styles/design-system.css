@@ -267,6 +267,92 @@ html.low-perf .ccm-skeleton {
   background: var(--panel-muted);
 }
 
+/* Semantic Badges & Tags */
+.ds-badge,
+.badge-blue,
+.badge-purple,
+.badge-green,
+.badge-amber,
+.badge-red {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 20px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  padding: 2px 8px;
+  font-size: var(--font-size-xs);
+  font-weight: 650;
+  line-height: 1;
+  letter-spacing: 0.15px;
+  white-space: nowrap;
+}
+
+.badge-blue {
+  background: var(--accent-soft, rgba(59, 130, 246, 0.12));
+  color: var(--accent-blue, #2563eb);
+  border-color: color-mix(in srgb, var(--accent-blue) 22%, transparent);
+}
+
+.badge-purple {
+  background: var(--purple-soft, rgba(168, 85, 247, 0.12));
+  color: var(--accent-purple, #7c3aed);
+  border-color: color-mix(in srgb, var(--accent-purple) 22%, transparent);
+}
+
+.badge-green {
+  background: var(--success-soft, rgba(16, 185, 129, 0.12));
+  color: var(--accent-green, #10b981);
+  border-color: color-mix(in srgb, var(--accent-green) 22%, transparent);
+}
+
+.badge-amber {
+  background: var(--warning-soft, rgba(245, 158, 11, 0.12));
+  color: var(--accent-yellow, #d97706);
+  border-color: color-mix(in srgb, var(--accent-yellow) 22%, transparent);
+}
+
+.badge-red {
+  background: var(--danger-soft, rgba(239, 68, 68, 0.12));
+  color: var(--accent-red, #dc2626);
+  border-color: color-mix(in srgb, var(--accent-red) 22%, transparent);
+}
+
+/* Modal Layout with Sticky Header & Footer */
+.ds-modal-layout {
+  display: flex;
+  flex-direction: column;
+  max-height: min(85vh, 760px);
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.ds-modal-header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.ds-modal-body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: var(--space-5);
+}
+
+.ds-modal-footer {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  border-top: 1px solid var(--border-color);
+  background: var(--panel-muted);
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -277,3 +363,4 @@ html.low-perf .ccm-skeleton {
     transition-duration: 0.01ms !important;
   }
 }
+

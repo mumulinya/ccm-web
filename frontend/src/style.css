@@ -144,15 +144,15 @@ html[data-theme-preset]:not([data-theme-preset="default"]) .hud-corner::after {
   height: 100%;
 }
 
-/* 婊氬姩鏉?*/
+/* 滚动条 */
 ::-webkit-scrollbar { width: 5px; height: 5px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: rgba(59, 130, 246, 0.12); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: rgba(59, 130, 246, 0.28); }
 
-/* === 鏋佸閲嶇疆涓庡熀纭€鎺т欢鍗囩骇 === */
+/* === 极客重置与基础控件升级 === */
 
-/* 鍗囩骇鎸夐挳 - 娴呰壊鐗?*/
+/* 升级按钮 - 浅色版 */
 .btn {
   font-family: inherit;
   font-weight: 600;
@@ -225,7 +225,7 @@ html[data-theme-preset]:not([data-theme-preset="default"]) .hud-corner::after {
   font-weight: 500;
 }
 
-/* 鍗囩骇琛ㄥ崟鎺т欢 - 娴呰壊鐗?*/
+/* 升级表单控件 - 浅色版 */
 input, select, textarea {
   font-family: inherit;
   background: var(--surface);
@@ -246,7 +246,7 @@ input::placeholder, textarea::placeholder {
   color: var(--text-muted);
 }
 
-/* 鍗囩骇寮圭獥 - 娴呰壊鐗?*/
+/* 升级弹窗 - 浅色版 */
 .modal-overlay {
   position: fixed;
   inset: 0;
@@ -320,9 +320,9 @@ input::placeholder, textarea::placeholder {
   to { opacity: 1; transform: scale(1) translateY(0); }
 }
 
-/* === 鍏ㄥ眬鍝嶅簲寮忎笌琛ㄦ牸閫傞厤 === */
+/* === 全局响应式与表格适配 === */
 
-/* 寮圭獥鍏ㄥ睆锛堢Щ鍔ㄧ锛?*/
+/* 弹窗全屏（移动端） */
 @media (max-width: 768px) {
   .modal-overlay {
     padding: 0;
@@ -361,7 +361,7 @@ input::placeholder, textarea::placeholder {
   }
 }
 
-/* === 娣辫壊涓婚 === */
+/* === 深色主题 === */
 [data-theme="dark"] {
   --bg-primary: #0a0e1a;
   --bg-secondary: #111827;
@@ -434,8 +434,8 @@ html[data-theme-preset]:not([data-theme-preset="default"])[data-theme="dark"] .h
   border-color: rgba(56, 189, 248, 0.25);
 }
 
-/* ==================== 鍏ㄥ眬娣辫壊涓婚娣卞害瀹氬埗浼樺寲 ==================== */
-/* 1. 宸︿晶鑿滃崟鏍?Sidebar 娣卞害缇庡寲 */
+/* ==================== 全局深色主题深度定制优化 ==================== */
+/* 1. 左侧菜单栏 Sidebar 深度美化 */
 [data-theme="dark"] .nav-sidebar {
   background: var(--surface-nav);
   border-right: 1px solid var(--border-color);
@@ -477,13 +477,14 @@ html[data-theme-preset]:not([data-theme-preset="default"])[data-theme="dark"] .h
 
 [data-theme="dark"] .nav-logo {
   border-bottom-color: rgba(255, 255, 255, 0.05);
-}/* 2. 鍙充晶涓诲唴瀹瑰ご閮ㄩ《鏍?Header 娣卞害缇庡寲 */
+}
+/* 2. 右侧主内容头部顶栏 Header 深度美化 */
 [data-theme="dark"] .main-wrapper > .header {
   background: rgba(10, 15, 30, 0.6);
   border-bottom: 1px solid rgba(56, 189, 248, 0.15);
 }
 
-/* 3. 鍏ㄥ眬姣涚幓鐠冨崱鐗囬潰鏉?(.glass-panel) 鏋佽嚧浼樺寲 */
+/* 3. 全局毛玻璃卡片面板 (.glass-panel) 极致优化 */
 [data-theme="dark"] .glass-panel {
   background: var(--surface);
   border: 1px solid rgba(56, 189, 248, 0.15);
@@ -491,7 +492,7 @@ html[data-theme-preset]:not([data-theme-preset="default"])[data-theme="dark"] .h
   backdrop-filter: blur(35px) saturate(180%);
 }
 
-/* 4. 娴忚鍣ㄦ爣绛炬爮 tab-bar 涓?tab-item 娣辫壊缇庡寲 */
+/* 4. 浏览器标签栏 tab-bar 与 tab-item 深色美化 */
 [data-theme="dark"] .tab-bar {
   background: rgba(8, 12, 24, 0.85);
   border-bottom-color: rgba(255, 255, 255, 0.05);
@@ -510,7 +511,7 @@ html[data-theme-preset]:not([data-theme-preset="default"])[data-theme="dark"] .h
   background: rgba(239, 68, 68, 0.15);
 }
 
-/* 5. 鑿滃崟绠＄悊寮圭獥娣辫壊缇庡寲 */
+/* 5. 菜单管理弹窗深色美化 */
 [data-theme="dark"] .menu-mgr-overlay {
   background: rgba(0, 0, 0, 0.6);
 }
@@ -524,13 +525,13 @@ html[data-theme-preset]:not([data-theme-preset="default"])[data-theme="dark"] .h
   border-color: rgba(255, 255, 255, 0.05);
 }
 
-/* ==================== 鍓╀綑瀛愰〉闈㈡繁鑹叉ā寮忔繁搴︿紭鍖?==================== */
+/* ==================== 剩余子页面深色模式深度优化 ==================== */
 
 [data-theme="dark"] {
-  /* 鍗犱綅绌洪€夋嫨鍣紝淇濊瘉鍚戜笅鍏煎鍜屼唬鐮佽鑼?*/
+  /* 占位空选择器，保证向下兼容和代码规范 */
 }
 
-/* 0. 鏋侀珮浼樺厛绾у叏灞€妯℃€佸脊绐楀強琛ㄥ崟閫傞厤锛屽交搴曞帇鍒跺瓙缁勪欢 scoped CSS */
+/* 0. 全局模态弹窗及表单深色适配 */
 html[data-theme="dark"] body .modal-overlay .modal,
 html[data-theme="dark"] body .modal,
 html[data-theme="dark"] .modal,
@@ -611,7 +612,7 @@ html[data-theme="dark"] .modal .modal-close:hover,
   border-color: rgba(239, 68, 68, 0.3);
 }
 
-/* 缇よ亰鍗忎綔鏂板缓缇よ亰寮圭獥 checkbox-list 涓?tag 琛ラ仐 */
+/* 群聊协作新建群聊弹窗 checkbox-list 与 tag 补遗 */
 [data-theme="dark"] .checkbox-item:hover {
   background: rgba(56, 189, 248, 0.08);
 }
@@ -624,7 +625,7 @@ html[data-theme="dark"] .modal .modal-close:hover,
   border: 1px solid rgba(255, 255, 255, 0.05);
 }
 
-/* 1. 浠诲姟娲惧彂 (TaskManager.vue) 瑕嗙洊 */
+/* 1. 任务派发 (TaskManager.vue) 覆盖 */
 [data-theme="dark"] .task-manager .toolbar {
   background: rgba(10, 15, 30, 0.4);
   border-bottom-color: rgba(255, 255, 255, 0.05);
@@ -644,13 +645,8 @@ html[data-theme="dark"] .modal .modal-close:hover,
   border-color: var(--border-color);
   color: var(--text-primary);
 }
-[data-theme="dark"] .task-manager div[style*="background:rgba(255,255,255,0.85)"],
-[data-theme="dark"] .task-manager div[style*="background: rgba(255, 255, 255, 0.85)"] {
-  background: rgba(17, 24, 39, 0.85);
-  border-color: rgba(56, 189, 248, 0.15);
-}
 
-/* 2. 瀵硅瘽妯℃澘 (Templates.vue) 瑕嗙洊 */
+/* 2. 对话模板 (Templates.vue) 覆盖 */
 [data-theme="dark"] .templates-container .toolbar,
 [data-theme="dark"] .templates-manager .toolbar,
 [data-theme="dark"] .toolbar {
@@ -668,13 +664,13 @@ html[data-theme="dark"] .modal .modal-close:hover,
   border-color: rgba(56, 189, 248, 0.12);
 }
 
-/* 3. 鍐呯疆缁堢 (Terminal.vue) 瑕嗙洊 */
+/* 3. 内置终端 (Terminal.vue) 覆盖 */
 [data-theme="dark"] .terminal-body {
   background: rgba(8, 10, 18, 0.95);
   border-color: rgba(56, 189, 248, 0.15);
 }
 
-/* 4. 宸ュ叿閰嶇疆 (ToolsConfig.vue) 瑕嗙洊 */
+/* 4. 工具配置 (ToolsConfig.vue) 覆盖 */
 [data-theme="dark"] .tools-config .sidebar,
 [data-theme="dark"] .tools-config-container .sidebar,
 [data-theme="dark"] .sidebar {
@@ -689,9 +685,7 @@ html[data-theme="dark"] .modal .modal-close:hover,
   background: rgba(10, 15, 30, 0.6);
   border-color: rgba(56, 189, 248, 0.12);
 }
-[data-theme="dark"] .marketplace-source-selector,
-[data-theme="dark"] div[style*="background:rgba(255,255,255,0.45)"],
-[data-theme="dark"] div[style*="background: rgba(255, 255, 255, 0.45)"] {
+[data-theme="dark"] .marketplace-source-selector {
   background: rgba(10, 15, 30, 0.6);
   border-color: rgba(56, 189, 248, 0.12);
 }
@@ -700,9 +694,8 @@ html[data-theme="dark"] .modal .modal-close:hover,
   border-color: rgba(56, 189, 248, 0.2);
 }
 
-/* 5. 椤圭洰绠＄悊 (ProjectManager.vue) 瑕嗙洊 */
-[data-theme="dark"] .project-manager .toolbar,
-[data-theme="dark"] div[style*="background: rgba(255, 255, 255, 0.45)"] {
+/* 5. 项目管理 (ProjectManager.vue) 覆盖 */
+[data-theme="dark"] .project-manager .toolbar {
   background: rgba(10, 15, 30, 0.45);
 }
 [data-theme="dark"] .project-actions-inline .btn {
@@ -768,14 +761,8 @@ html[data-theme="dark"] .modal .modal-close:hover,
   background: rgba(10, 15, 30, 0.75);
   border-top-color: rgba(255, 255, 255, 0.05);
 }
-[data-theme="dark"] textarea[style*="background:rgba(255,255,255,0.85)"],
-[data-theme="dark"] textarea[style*="background: rgba(255, 255, 255, 0.85)"] {
-  background: var(--control-bg);
-  border-color: var(--border-color);
-  color: var(--text-primary);
-}
 
-/* 6. 绯荤粺璁剧疆 (Settings.vue) 瑕嗙洊 */
+/* 6. 系统设置 (Settings.vue) 覆盖 */
 [data-theme="dark"] .card {
   background: rgba(10, 15, 30, 0.6);
   border-color: rgba(56, 189, 248, 0.12);
@@ -793,7 +780,7 @@ html[data-theme="dark"] .modal .modal-close:hover,
   border-color: rgba(255, 255, 255, 0.05);
 }
 
-/* 7. 瀹犵墿绌洪棿 (pets/PetMenu.vue) 瑕嗙洊 */
+/* 7. 宠物空间 (pets/PetMenu.vue) 覆盖 */
 [data-theme="dark"] .desktop-engine-card,
 [data-theme="dark"] .pet-list-item,
 [data-theme="dark"] .skin-card,
@@ -859,8 +846,8 @@ html[data-theme="dark"] .modal .modal-close:hover,
   color: var(--accent-blue);
 }
 
-/* 琛ラ仐锛氳В鍐宠仛鐒︺€佸唴鑱旀垨鐗规畩鎮诞鍙戠櫧闂 */
-/* 椤圭洰绠＄悊 (ProjectManager.vue) 鑱氱劍鍙樼櫧 */
+/* 补遗：解决聚焦、内联或特殊悬浮发白问题 */
+/* 项目管理 (ProjectManager.vue) 聚焦变白 */
 [data-theme="dark"] .project-manager .select:focus {
   background: var(--control-bg);
 }
@@ -868,7 +855,7 @@ html[data-theme="dark"] .modal .modal-close:hover,
   background: var(--control-bg);
 }
 
-/* 宸ュ叿閰嶇疆 (ToolsConfig.vue) 鐨勫唴鑱旂櫧鑹茶緭鍏ユ銆佷笅鎷夋涓庨€変腑鎸夐挳瑕嗙洊 */
+/* 工具配置 (ToolsConfig.vue) 的内联白色输入框、下拉框与选中按钮覆盖 */
 [data-theme="dark"] .marketplace-source-selector select {
   background: var(--control-bg);
   border-color: var(--border-color);
@@ -880,15 +867,9 @@ html[data-theme="dark"] .modal .modal-close:hover,
   border-color: var(--border-color);
   color: var(--text-primary);
 }
-[data-theme="dark"] .marketplace-source-selector button[style*="background: rgb(255, 255, 255)"],
-[data-theme="dark"] .marketplace-source-selector button[style*="background:#ffffff"],
-[data-theme="dark"] .marketplace-source-selector button[style*="background: #ffffff"] {
-  background: rgba(56, 189, 248, 0.15);
-  color: var(--accent-blue);
-  box-shadow: none;
-}
 
-/* 瀹犵墿绌洪棿鍙充笅瑙掑皬鐖瓙鎮诞绠＄悊鎸夐挳 (PetManager.vue) */
+
+/* 宠物空间右下角小爪子悬浮管理按钮 (PetManager.vue) */
 [data-theme="dark"] .pet-menu-btn {
   background: rgba(10, 15, 30, 0.72);
   border-color: rgba(56, 189, 248, 0.15);
@@ -896,9 +877,9 @@ html[data-theme="dark"] .modal .modal-close:hover,
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
 }
 
-/* ==================== 琛ュ叏鎺掓煡婕忔帀鐨勫瓙椤甸潰娣辫壊鏍峰紡瑕嗙洊 ==================== */
+/* ==================== 补全排查漏掉的子页面深色样式覆盖 ==================== */
 
-/* 8. Agent 鎸囨爣鐩戞帶 (AgentMetrics.vue) */
+/* 8. Agent 指标监控 (AgentMetrics.vue) */
 [data-theme="dark"] .stat-card,
 [data-theme="dark"] .section-card {
   background: rgba(10, 15, 30, 0.6);
@@ -910,7 +891,7 @@ html[data-theme="dark"] .modal .modal-close:hover,
   border-color: rgba(255, 255, 255, 0.05);
 }
 
-/* 9. 浠ｇ爜鍙樻洿 (CodeChanges.vue) */
+/* 9. 代码变更 (CodeChanges.vue) */
 [data-theme="dark"] .code-changes .toolbar,
 [data-theme="dark"] .code-changes-container .toolbar,
 [data-theme="dark"] .commit-bar {
@@ -930,7 +911,7 @@ html[data-theme="dark"] .modal .modal-close:hover,
   border-right-color: rgba(255, 255, 255, 0.05);
 }
 
-/* 10. 瀹氭椂浠诲姟 (CronJobs.vue) */
+/* 10. 定时任务 (CronJobs.vue) */
 [data-theme="dark"] .cron-jobs .toolbar,
 [data-theme="dark"] .cron-container .toolbar {
   background: rgba(10, 15, 30, 0.4);
@@ -942,7 +923,7 @@ html[data-theme="dark"] .modal .modal-close:hover,
   color: var(--text-secondary);
 }
 
-/* 12. 缇よ亰鍗忎綔 (GroupChat.vue) */
+/* 12. 群聊协作 (GroupChat.vue) */
 [data-theme="dark"] .group-chat .toolbar,
 [data-theme="dark"] .group-chat-container .toolbar {
   background: rgba(10, 15, 30, 0.4);
@@ -993,31 +974,24 @@ html[data-theme="dark"] .modal .modal-close:hover,
   background: rgba(56, 189, 248, 0.08);
   color: var(--accent-blue);
 }
-[data-theme="dark"] div[style*="background: rgba(255, 255, 255, 0.85)"],
-[data-theme="dark"] div[style*="background:rgba(255,255,255,0.85)"] {
-  background: rgba(10, 15, 30, 0.72);
-  border-color: rgba(56, 189, 248, 0.15);
-}
 
-/* 13. 鑿滃崟绠＄悊 (MenuManager.vue) */
+
+/* 13. 菜单管理 (MenuManager.vue) */
 [data-theme="dark"] .menu-manager .group-header,
 [data-theme="dark"] .group-header {
   background: rgba(17, 24, 39, 0.5);
   border-bottom-color: rgba(255, 255, 255, 0.05);
 }
 
-/* 14. 瀹犵墿绠＄悊 (pets/PetManager.vue) */
+/* 14. 宠物管理 (pets/PetManager.vue) */
 [data-theme="dark"] .pet-manager,
 [data-theme="dark"] .pets-manager-container {
   background: rgba(10, 15, 30, 0.6);
   border-color: rgba(56, 189, 248, 0.12);
 }
-[data-theme="dark"] div[style*="background: rgba(255, 255, 255, 0.85)"],
-[data-theme="dark"] div[style*="background:rgba(255,255,255,0.85)"] {
-  background: rgba(10, 15, 30, 0.72);
-}
 
-/* 15. Toast 鎻愮ず閫傞厤 */
+
+/* 15. Toast 提示适配 */
 [data-theme="dark"] .toast.info {
   background: rgba(10, 15, 30, 0.85);
   border-color: rgba(56, 189, 248, 0.2);
@@ -2054,9 +2028,9 @@ label,
   }
 }
 
-/* === 绉戞妧闇撹櫣鑹烘湳涓婚棰勮 (Theme Presets) === */
+/* === 科技霓虹艺术主题预设 (Theme Presets) === */
 
-/* 1. 娣遍們鏋佸 (deep-void) */
+/* 1. 深邃极空 (deep-void) */
 [data-theme-preset="deep-void"] {
   color-scheme: dark;
   --bg-primary: #0a0f1d;
@@ -2085,7 +2059,7 @@ label,
   --code-text: #b6cde2;
 }
 
-/* 2. 璧涘崥涔嬮湏 (cyberpunk) */
+/* 2. 赛博之霓 (cyberpunk) */
 [data-theme-preset="cyberpunk"] {
   color-scheme: dark;
   --bg-primary: #07040f;
@@ -2114,7 +2088,7 @@ label,
   --code-text: #f0c3e6;
 }
 
-/* 3. 娣辨捣鎺㈢储 (deep-ocean) */
+/* 3. 深海探索 (deep-ocean) */
 [data-theme-preset="deep-ocean"] {
   color-scheme: dark;
   --bg-primary: #050c1e;
@@ -2143,7 +2117,7 @@ label,
   --code-text: #a5c2f0;
 }
 
-/* 4. 鏋佸湴娴佸厜 (aurora) */
+/* 4. 极地流光 (aurora) */
 [data-theme-preset="aurora"] {
   color-scheme: light;
   --bg-primary: #f0f7f4;
@@ -2364,5 +2338,42 @@ html[data-theme-preset]:not([data-theme-preset="default"]) .pulse-glow {
 
   :where(.modal .form-actions > button) {
     min-width: 0;
+  }
+}
+
+/* === 中等屏幕响应式增强 (分屏/窄桌面) === */
+@media (min-width: 769px) and (max-width: 1200px) {
+  .project-manager .sidebar,
+  .group-chat .sidebar,
+  .code-changes .sidebar,
+  .tools-config .sidebar {
+    min-width: 160px;
+    max-width: 200px;
+    flex: 0 0 auto;
+  }
+
+  .project-manager .toolbar,
+  .group-chat .toolbar,
+  .code-changes .toolbar,
+  .tools-config .toolbar {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .project-actions-inline {
+    overflow-x: auto;
+    flex-wrap: nowrap;
+  }
+
+  .project-actions-inline .btn {
+    flex: 0 0 auto;
+  }
+
+  .tab-label {
+    max-width: 72px;
+  }
+
+  .message {
+    max-width: 88%;
   }
 }

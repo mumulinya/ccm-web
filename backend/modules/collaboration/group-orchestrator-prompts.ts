@@ -77,7 +77,6 @@ import {
   readReplayRepairDispatchCandidatesForCoordinator,
   syncReplayRepairDispatchPlansForCoordinator,
 } from "./group-orchestrator-coded";
-import { PRESENTED_PLAN_DISPATCH_HANDOFF_GUIDANCE, PRESENTED_PLAN_SHAPE_GUIDANCE } from "./group-presented-plan";
 
 
 
@@ -100,14 +99,7 @@ export function buildGroupCollaborationRules(memberList = "") {
 
 
 
-export const GROUP_MAIN_SESSION_CONTEXT_GUIDANCE = `会话上下文使用：
-- 群聊最近上下文里已经出现的用户需求、约束、上一轮计划和步骤视为已知，不要再问“请描述更具体的需求”，也不要再全量读取项目文件。
-- 用户要求基于前文做实现计划、方案、步骤，或展开/重述刚才的计划时，必须调用 ccm_present_plan。${PRESENTED_PLAN_SHAPE_GUIDANCE}计划卡片只来自 ccm_present_plan。
-- 第一次为当前需求出实现计划时，允许最小只读核实以点名缝在哪；展开或重述已有计划稿时不要再读项目文件。
-- 只有当前消息要派发或改代码，且会话里还缺少具体文件、接口或配置事实时，才做派发前的源码证据读取。
-- “做一个实现的计划”不是派发授权，也不是需求不清；用户未要求马上改代码时不要调用 ccm_dispatch。
-- 用户已确认计划卡后调用 ccm_dispatch 时：${PRESENTED_PLAN_DISPATCH_HANDOFF_GUIDANCE}
-- 用户追问“你不知道我要做啥吗”一类时，先用会话上下文回答已知目标，不要重新全量扫仓库。`;
+export { GROUP_MAIN_SESSION_CONTEXT_GUIDANCE, buildGroupMainSessionGuidance } from "../../agents/main-agent-identity";
 
 export function buildCoordinatorCollaborationInstructions(memberList = "") {
   return `\n\n你是群聊的主 Agent（协调者），这是一个独立编排层。你的目标是让多个项目 Agent 像团队群聊一样协作，而不是让所有底层模型同时抢答。${buildGroupCollaborationRules(memberList)}

@@ -9,8 +9,9 @@ import { attachTransientModelBlocks, collectTransientModelBlocks } from "../../s
 import { loadOrchestratorConfig } from "../../modules/collaboration/group-orchestrator-config";
 import { loadGlobalAgentTranscript } from "./memory";
 import type { LlmChatMessage } from "../../modules/collaboration/group-orchestrator-llm-client";
+import { sessionModelReplacementTextMap } from "../../system/session-model-context";
 
-export const GLOBAL_MAIN_SESSION_CONTEXT_GUIDANCE = "精确会话里已有目标、计划和工具观察视为已知；未变化的事实不要重复读取。prior_steps 里已经出现过的观察不要再当新证据。";
+export { GLOBAL_MAIN_SESSION_CONTEXT_GUIDANCE } from "../main-agent-identity";
 
 export function tryBuildGlobalNativeModelMessages(input: {
   sessionId: string;
@@ -45,6 +46,9 @@ export function tryBuildGlobalNativeModelMessages(input: {
     canonicalSummary: input.continuation?.summary || null,
     metaBlocks: input.metaBlocks || [],
     currentUserText: String(input.currentUserText || "").trim(),
+    clearedToolCallIds: input.continuation?.microCompact?.clearedToolCallIds,
+    replacedToolResults: sessionModelReplacementTextMap(input.continuation?.contentReplacement),
+    persistContext: { scope: "global", sessionId },
   });
   if (lastNativeUserText(history) !== String(input.currentUserText || "").trim()) return null;
   const system = splitNativeSystemSegments({

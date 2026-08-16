@@ -119,17 +119,17 @@ export declare function loadGlobalAgentTranscript(sessionId: string): {
     };
 };
 export declare function appendGlobalAgentExecutionEvent(sessionIdInput: string, event: any): {
-    id: string;
-    toolCallId: string;
-    hidden: true;
     type: import("../../system/session-execution-ledger").SessionExecutionEventType;
     toolName: string;
+    toolCallId: string;
     timestamp: string;
     runId: string;
     traceId: string;
     anchorMessageId: string;
     status: "error" | "ok" | "running";
     payload: any;
+    id: string;
+    hidden: true;
 };
 export declare function previewGlobalTranscriptContextSourceMaintenance(sessionIdInput: string): {
     file: string;

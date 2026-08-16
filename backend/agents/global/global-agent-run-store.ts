@@ -7,6 +7,7 @@ import { normalizeAgentReasoningState } from "../reasoning-loop";
 import type { GlobalAgentDecisionState, GlobalAgentRun, GlobalAgentRunStatus, GlobalAgentToolRisk, GlobalAgentToolSpec, GlobalAgentUserSteer, GlobalAgentUserSteerStatus } from "./loop";
 import { WORKSPACE_READONLY_TOOL_DEFINITIONS_V3 } from "../../tools/workspace-readonly-tools";
 import { projectContextSourceToolResultForPersistence } from "../../system/context-source-tool-result-projection";
+import { persistToolResultIfNeeded } from "../../tools/tool-result-storage";
 
 export const STORE_DIR = path.join(CCM_DIR, "global-agent-runs");
 export const STORE_FILE = path.join(STORE_DIR, "runs.json");
@@ -33,27 +34,22 @@ export function invalidateGlobalAgentRunStoreCache() {
   runStoreCache = null;
 }
 
-function truncateStepObservation(step: any) {
+function truncateStepObservation(step: any, run?: any) {
   if (!step || typeof step !== "object" || step.observation === undefined) return step;
   const persistedToolName = step?.tool?.name === "invoke_mcp"
     ? (step?.tool?.arguments?.tool_name || step?.tool?.arguments?.toolName || step?.tool?.name)
     : (step?.tool?.name || step?.tool);
   const persistedObservation = projectContextSourceToolResultForPersistence(persistedToolName, step.observation);
-  let serialized = "";
-  try {
-    serialized = typeof persistedObservation === "string" ? persistedObservation : JSON.stringify(persistedObservation);
-  } catch {
-    serialized = String(step.observation);
-  }
-  if (serialized.length <= MAX_OBSERVATION_CHARS) return persistedObservation === step.observation ? step : { ...step, observation: persistedObservation };
-  return {
-    ...step,
-    observation: {
-      truncated: true,
-      preview: serialized.slice(0, MAX_OBSERVATION_CHARS),
-      original_chars: serialized.length,
-    },
-  };
+  const sessionId = String(run?.session_id || run?.sessionId || "");
+  const toolCallId = String(step?.toolCallId || step?.tool_call_id || step?.tool?.signature || `step_${step?.index || "0"}`);
+  const persisted = persistToolResultIfNeeded({
+    toolName: String(persistedToolName || "tool"),
+    toolCallId,
+    payload: persistedObservation,
+    context: sessionId ? { scope: "global", sessionId } : null,
+  });
+  if (persisted === step.observation) return step;
+  return { ...step, observation: persisted };
 }
 
 const ARCHIVED_RUN_BOUNDED_FIELDS = ["display_stream", "workchain", "final_report", "final_delivery_report", "reasoning_loop", "history"] as const;
@@ -172,7 +168,7 @@ export function normalizeRun(run: any): GlobalAgentRun {
     total_cost_usd: Math.max(0, Number(run?.total_cost_usd ?? run?.totalCostUsd ?? run?.usage?.totalCostUsd ?? 0) || 0),
     deadline_at: run?.deadline_at || new Date(Date.now() + 10 * 60_000).toISOString(),
     max_steps: Math.max(1, Math.min(16, Number(run?.max_steps || 8))),
-    steps: Array.isArray(run?.steps) ? run.steps.slice(-32).map(truncateStepObservation) : [],
+    steps: Array.isArray(run?.steps) ? run.steps.slice(-32).map(step => truncateStepObservation(step, run)) : [],
     pending_tool: run?.pending_tool || null,
     approved_tool_signatures: Array.isArray(run?.approved_tool_signatures) ? run.approved_tool_signatures.slice(-20) : [],
     final_reply: String(run?.final_reply || ""),

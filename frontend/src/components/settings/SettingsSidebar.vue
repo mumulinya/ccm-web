@@ -14,7 +14,7 @@ const emit = defineEmits(['update:activeSection'])
 const allSections = [
   { key: 'channels', icon: Bell, label: '通知与渠道', description: '飞书通知和任务会话' },
   { key: 'models', icon: Bot, label: '统一大模型', description: '全局、群聊与音乐 Agent' },
-  { key: 'agent-providers', icon: Terminal, label: '开发 Agent', description: 'Claude、Codex、Cursor、Gemini 与 OpenCode' },
+  { key: 'agent-providers', icon: Terminal, label: '开发 Agent', description: 'Claude、Codex、Cursor、Gemini 等' },
   { key: 'test-agent', icon: FlaskConical, label: 'TestAgent', description: '独立验收与主 Agent 自验' },
   { key: 'experience', icon: Palette, label: '外观与刷新', description: '主题、轮询和性能' },
   { key: 'security', icon: ShieldCheck, label: '账户与安全', description: '登录、注册和密码' },
@@ -38,13 +38,76 @@ const sections = computed(() => props.role === 'admin'
         :aria-current="activeSection === section.key ? 'page' : undefined"
         @click="emit('update:activeSection', section.key)"
       >
-        <component :is="section.icon" :size="18" />
-        <span>
+        <span class="nav-item-icon">
+          <component :is="section.icon" :size="16" />
+        </span>
+        <span class="nav-item-text">
           <strong>{{ section.label }}</strong>
           <small>{{ section.description }}</small>
         </span>
       </button>
     </nav>
-    <span v-if="version" class="settings-version">CCM v{{ version }}</span>
+    <div v-if="version" class="settings-version-pill">
+      <span class="version-dot"></span>
+      <span class="font-mono">CCM v{{ version }}</span>
+    </div>
   </aside>
 </template>
+
+<style scoped>
+.font-mono {
+  font-family: var(--font-mono, monospace);
+  font-variant-numeric: tabular-nums;
+}
+
+.nav-item-icon {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 32px;
+  border-radius: 6px;
+  background: var(--surface, var(--bg-card));
+  color: var(--text-muted);
+  border: 1px solid var(--border-color);
+  transition: all 0.15s ease;
+}
+
+.settings-nav-item:hover .nav-item-icon {
+  color: var(--accent-blue);
+  border-color: color-mix(in srgb, var(--accent-blue) 35%, var(--border-color));
+}
+
+.settings-nav-item.active .nav-item-icon {
+  background: var(--accent-soft, rgba(37, 99, 235, 0.08));
+  color: var(--accent-blue);
+  border-color: transparent;
+}
+
+.nav-item-text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.settings-version-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 16px 8px 0;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border-color);
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.version-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent-green, #10b981);
+}
+</style>

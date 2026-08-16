@@ -209,6 +209,7 @@ assert.equal(visualTestAgentReport.metadata?.roleSkills?.applied, true);
 const nativePromptChecks = {
   global: roleSkills.buildRoleSkillPrompt("global-agent", "fixture", { forceWork: true, phase: "planning", selectedSkillNames: [roleSkills.CCM_ROLE_SKILL_NAMES.incidentDiagnosis] }),
   groupPlanning: roleSkills.buildRoleSkillPrompt("group-main-agent", "fixture", { forceWork: true, phase: "planning", selectedSkillNames: [roleSkills.CCM_ROLE_SKILL_NAMES.taskDecomposition] }),
+  groupPlanMode: roleSkills.buildRoleSkillPrompt("group-main-agent", "fixture", { forceWork: true, phase: "planning", planAuthoring: true, selectedSkillNames: [roleSkills.CCM_ROLE_SKILL_NAMES.taskDecomposition] }),
   groupReview: roleSkills.buildRoleSkillPrompt("group-main-agent", "复核实现和测试证据并安排返工", { forceWork: true, phase: "review" }),
   testVisual: roleSkills.buildRoleSkillPrompt("test-agent", "fixture", { forceWork: true, phase: "verification", selectedSkillNames: [roleSkills.CCM_ROLE_SKILL_NAMES.frontendVisualQa] }),
   groupBusinessPlanning: roleSkills.buildRoleSkillPrompt("group-main-agent", "fixture", { forceWork: true, phase: "planning", selectedSkillNames: [roleSkills.CCM_ROLE_SKILL_NAMES.businessRuleModeling, roleSkills.CCM_ROLE_SKILL_NAMES.interfaceDataContract] }),
@@ -217,7 +218,8 @@ const nativePromptChecks = {
 assert.match(nativePromptChecks.global.prompt, /Skill:ccm-global-mission-lead/);
 assert.match(nativePromptChecks.global.prompt, /Skill:ccm-incident-diagnosis/);
 assert.match(nativePromptChecks.groupPlanning.prompt, /Skill:ccm-task-decomposition/);
-assert.match(nativePromptChecks.groupPlanning.prompt, /Skill:ccm-implementation-plan-authoring/);
+assert.doesNotMatch(nativePromptChecks.groupPlanning.prompt, /Skill:ccm-implementation-plan-authoring/);
+assert.match(nativePromptChecks.groupPlanMode.prompt, /Skill:ccm-implementation-plan-authoring/);
 assert.match(nativePromptChecks.groupReview.prompt, /Skill:ccm-delivery-review-rework/);
 assert.match(nativePromptChecks.testVisual.prompt, /Skill:ccm-frontend-visual-qa/);
 assert.match(nativePromptChecks.groupBusinessPlanning.prompt, /Skill:ccm-business-rule-modeling/);

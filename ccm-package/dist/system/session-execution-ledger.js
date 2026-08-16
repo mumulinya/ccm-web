@@ -44,6 +44,7 @@ exports.mergeConversationWithExecution = mergeConversationWithExecution;
 exports.runSessionExecutionLedgerSelfTest = runSessionExecutionLedgerSelfTest;
 const crypto = __importStar(require("crypto"));
 const context_source_tool_result_projection_1 = require("./context-source-tool-result-projection");
+const tool_result_storage_1 = require("../tools/tool-result-storage");
 const SECRET_KEY = /(?:^|_)(?:api[_-]?key|access[_-]?token|refresh[_-]?token|authorization|cookie|password|passwd|secret|credential)(?:$|_)/i;
 const BINARY_KEY = /(?:^|_)(?:data|base64|bytes|image[_-]?data|file[_-]?data)(?:$|_)/i;
 const DATA_URL = /data:(?:image|application\/pdf)\/[a-z0-9.+-]+;base64,[a-z0-9+/=]{64,}/gi;
@@ -79,24 +80,29 @@ function sanitizeSessionExecutionValue(value, depth = 0, seen = new WeakSet()) {
 function createSessionExecutionEvent(input) {
     const timestamp = String(input.timestamp || new Date().toISOString());
     const status = input.status === "error" ? "error" : input.type === "tool_use" ? "running" : "ok";
-    const normalized = {
+    const rawPayload = sanitizeSessionExecutionValue(input.type === "tool_result"
+        ? (0, context_source_tool_result_projection_1.projectContextSourceToolResultForPersistence)(input.toolName, input.payload ?? null)
+        : input.payload ?? null);
+    const toolCallId = String(input.toolCallId || "") || `tc_${hash([String(input.runId || ""), String(input.toolName || "tool"), timestamp, input.type])}`;
+    const payload = input.type === "tool_result"
+        ? (0, tool_result_storage_1.persistPayloadObservation)({
+            toolName: String(input.toolName || "tool"),
+            toolCallId,
+            payload: rawPayload,
+            context: input.persistContext || null,
+        })
+        : rawPayload;
+    return {
         type: input.type,
         toolName: String(input.toolName || "tool"),
-        toolCallId: String(input.toolCallId || ""),
+        toolCallId,
         timestamp,
         runId: String(input.runId || ""),
         traceId: String(input.traceId || ""),
         anchorMessageId: String(input.anchorMessageId || ""),
         status,
-        payload: sanitizeSessionExecutionValue(input.type === "tool_result"
-            ? (0, context_source_tool_result_projection_1.projectContextSourceToolResultForPersistence)(input.toolName, input.payload ?? null)
-            : input.payload ?? null),
-    };
-    const toolCallId = normalized.toolCallId || `tc_${hash([normalized.runId, normalized.toolName, timestamp, normalized.type])}`;
-    return {
-        ...normalized,
-        id: String(input.id || `exec_${hash([toolCallId, normalized.type, timestamp])}`),
-        toolCallId,
+        payload,
+        id: String(input.id || `exec_${hash([toolCallId, input.type, timestamp])}`),
         hidden: true,
     };
 }
@@ -104,9 +110,16 @@ function executionEventModelContent(event, options = {}) {
     const serialized = JSON.stringify(event.payload ?? null);
     if (event.type === "tool_use")
         return `[tool_use ${event.toolName} #${event.toolCallId}]\n${serialized}`;
+    const persisted = (0, tool_result_storage_1.isPersistedToolResult)(event.payload)
+        ? event.payload
+        : (0, tool_result_storage_1.isPersistedToolResult)(event.payload?.observation)
+            ? event.payload.observation
+            : null;
     const projected = options.clearToolResult === true
-        ? "[Old tool result content cleared]"
-        : String(options.replacementText || serialized);
+        ? tool_result_storage_1.TOOL_RESULT_CLEARED_MESSAGE
+        : persisted
+            ? (0, tool_result_storage_1.modelVisiblePersistedToolResult)(persisted)
+            : String(options.replacementText || serialized);
     return `[tool_result ${event.toolName} #${event.toolCallId} status=${event.status}]\n${projected}`;
 }
 function executionEventToModelMessage(event, options = {}) {

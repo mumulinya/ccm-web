@@ -7,7 +7,9 @@ const native_query_messages_1 = require("../native-query-messages");
 const transient_model_content_1 = require("../../system/transient-model-content");
 const group_orchestrator_config_1 = require("../../modules/collaboration/group-orchestrator-config");
 const memory_1 = require("./memory");
-exports.GLOBAL_MAIN_SESSION_CONTEXT_GUIDANCE = "精确会话里已有目标、计划和工具观察视为已知；未变化的事实不要重复读取。prior_steps 里已经出现过的观察不要再当新证据。";
+const session_model_context_1 = require("../../system/session-model-context");
+var main_agent_identity_1 = require("../main-agent-identity");
+Object.defineProperty(exports, "GLOBAL_MAIN_SESSION_CONTEXT_GUIDANCE", { enumerable: true, get: function () { return main_agent_identity_1.GLOBAL_MAIN_SESSION_CONTEXT_GUIDANCE; } });
 function tryBuildGlobalNativeModelMessages(input) {
     const sessionId = String(input.sessionId || "").trim();
     const config = input.config || (0, group_orchestrator_config_1.loadOrchestratorConfig)();
@@ -31,6 +33,9 @@ function tryBuildGlobalNativeModelMessages(input) {
         canonicalSummary: input.continuation?.summary || null,
         metaBlocks: input.metaBlocks || [],
         currentUserText: String(input.currentUserText || "").trim(),
+        clearedToolCallIds: input.continuation?.microCompact?.clearedToolCallIds,
+        replacedToolResults: (0, session_model_context_1.sessionModelReplacementTextMap)(input.continuation?.contentReplacement),
+        persistContext: { scope: "global", sessionId },
     });
     if ((0, native_session_transcript_1.lastNativeUserText)(history) !== String(input.currentUserText || "").trim())
         return null;

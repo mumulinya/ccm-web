@@ -168,6 +168,22 @@ assert.match(context.policyPrompt, /默认一次读完/);
 assert.equal(context.policyPrompt.includes("首轮读取预算"), false);
 assert.equal(context.policyPrompt.includes("不超过8000"), false);
 assert.equal(context.policyPrompt.includes("mcp__ccm__ccm_workspace_readonly__read_file"), false);
+assert.equal(context.policyPrompt.includes("参数 Schema="), true);
+const nativeContext = mainRuntime.buildMainAgentToolRuntimeContext({
+  configuredTools: {},
+  label: "项目主 Agent",
+  mcpPolicy: "read_only",
+  schemaSurface: "native",
+  scopeIdentity: { scope: "project", scopeId: "alpha", exactSessionId: "pchat-alpha", allowedProjects: ["alpha"] },
+});
+assert.equal(nativeContext.policyPrompt.includes("参数 Schema="), false);
+assert.match(nativeContext.policyPrompt, /- read_file:/);
+const nativeLoop = require(path.join(root, "ccm-package", "dist", "agents", "native-query-loop.js"));
+const nativeTools = nativeLoop.catalogToNativeTools(nativeContext);
+assert.equal(nativeTools.some(tool => tool.name === "tool_search"), true);
+assert.equal(nativeTools.some(tool => tool.name === "invoke_skill"), true);
+assert.equal(nativeTools.some(tool => tool.name === "read_file" && tool.deferred !== true), true);
+assert.equal(nativeTools.every(tool => !String(tool.name).includes("ccm_workspace_readonly")), true);
 assert.equal(context.catalog.discoverableMcp.length, workspace.WORKSPACE_READONLY_TOOL_DEFINITIONS_V3.length - 5);
 const emptyGroupContext = mainRuntime.buildMainAgentToolRuntimeContext({
   configuredTools: {},
@@ -354,10 +370,10 @@ assert.deepEqual(executionOrder, ["start:read_a", "end:read_a", "start:write_c",
 
 const projectSource = fs.readFileSync(path.join(root, "backend", "modules", "projects", "project-main-agent.ts"), "utf8");
 const groupSource = fs.readFileSync(path.join(root, "backend", "modules", "collaboration", "group-orchestrator-llm.ts"), "utf8");
-const nativeLoop = fs.readFileSync(path.join(root, "backend", "agents", "native-query-loop.ts"), "utf8");
+const nativeLoopSrc = fs.readFileSync(path.join(root, "backend", "agents", "native-query-loop.ts"), "utf8");
 assert.equal((projectSource.match(/hydrateProjectConfiguredTools\(\{/g) || []).length, 0);
 assert.equal(groupSource.includes('canonicalName: "read_project_source"'), false);
-assert.equal(nativeLoop.includes("while (true)"), true);
+assert.equal(nativeLoopSrc.includes("while (true)"), true);
 assert.equal(projectSource.includes("runProjectMainNativeQueryLoop"), true);
 assert.equal(groupSource.includes("runGroupMainNativeQueryLoop"), true);
 assert.equal(projectSource.includes("for (let round = 0; round <= loopBudget.maxToolRounds"), false);

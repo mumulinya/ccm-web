@@ -44,6 +44,7 @@ export declare function verifySessionModelMicroCompactReceipt(receipt: any, expe
     valid: boolean;
     issues: string[];
 };
+export declare function sessionModelReplacementTextMap(contentReplacement: any): Map<string, string>;
 export declare function verifySessionModelContentReplacementReceipt(receipt: any, expected?: {
     scope?: string;
     sessionId?: string;

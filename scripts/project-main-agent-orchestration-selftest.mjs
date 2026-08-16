@@ -64,7 +64,8 @@ const checks = {
   projectMainUsesRuntimeDiagnostics: runner.includes('hydrateProjectRuntimeDiagnostics({')
     && runner.includes('current_project_runtime: runtimeHydration.prompt')
     && runner.includes('type: "project_main_runtime_diagnostics"'),
-  sendStreamUsesProjectMainAgent: server.includes('operation: () => executeProjectMainTask({') && server.includes('answerAsProjectMainAgent({'),
+  sendStreamUsesProjectMainAgent: server.includes('operation: () => executeProjectMainTask({')
+    && !server.includes('answerAsProjectMainAgent({'),
   projectMainUsesUnifiedSerialScheduler: server.includes('scheduleUnifiedTaskOperation({')
     && server.includes('queueKey: `conversation:project:${project}:${exactProjectSessionId}`')
     && unifiedScheduler.includes('withUnifiedWorkspaceMutationLane'),

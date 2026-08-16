@@ -39,6 +39,7 @@ export type MainAgentToolRuntimeContext = {
     contextPolicy?: MainAgentContextPolicy;
     contextBudget?: any;
     workspaceReadContext?: WorkspaceReadContextLedger;
+    schemaSurface?: "native" | "prompt";
 };
 export type MainAgentNativeToolV2 = {
     name: string;
@@ -47,6 +48,8 @@ export type MainAgentNativeToolV2 = {
     sideEffect: "none" | "orchestrator_control";
 };
 export declare const MAIN_AGENT_NATIVE_TOOLS_V2: MainAgentNativeToolV2[];
+export declare function mainAgentCallableToolName(tool: any): string;
+export declare function renderMainAgentToolCatalogLine(tool: any, schemaSurface?: "native" | "prompt"): string;
 export declare function isMainAgentReadOnlyMcpTool(tool: any): boolean;
 export declare function buildMainAgentToolRuntimeContext(input: {
     configuredTools?: any;
@@ -71,7 +74,9 @@ export declare function buildMainAgentToolRuntimeContext(input: {
         output?: number;
         safety?: number;
     };
+    schemaSurface?: "native" | "prompt";
 }): MainAgentToolRuntimeContext;
+export declare function registerMainAgentDiscoverableTools(toolContext: MainAgentToolRuntimeContext, tools?: any[]): MainAgentToolRuntimeContext;
 export declare function normalizeMainAgentToolRequests(value: any, limit?: number): MainAgentToolRequest[];
 export declare function mainAgentToolRequestFingerprint(request: MainAgentToolRequest): string;
 export declare function buildMainAgentLoadedContextItems(toolContext: MainAgentToolRuntimeContext, results?: any[], additionalSkills?: Array<{

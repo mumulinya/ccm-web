@@ -52,7 +52,15 @@ export declare function saveGlobalAgentToolAuthorization(input?: any): Promise<{
     updated_at: string;
     updated_by: string;
 }>;
-export declare function buildGlobalAgentToolRuntimeContext(auditContext?: ToolScope["auditContext"], loadedToolNames?: string[]): {
+export declare function resolveGlobalAgentExecutionSkills(input?: {
+    message?: string;
+    source?: string;
+    workflowDecision?: any;
+}): string[];
+export declare function resolveGlobalAgentExecutionSkillsFromRun(run: any): string[];
+export declare function buildGlobalAgentToolRuntimeContext(auditContext?: ToolScope["auditContext"], loadedToolNames?: string[], options?: {
+    executionSkills?: string[];
+}): {
     schema: string;
     tools: Required<Pick<ToolScope, "mcp" | "skill">>;
     tool_audit: any;
@@ -99,10 +107,13 @@ export declare function buildGlobalAgentToolRuntimeContext(auditContext?: ToolSc
     context_budget: any;
     policy_prompt: string;
     mcp_prompt: string;
+    execution_skills: string[];
     updated_at: string;
     updated_by: string;
 };
-export declare function executeGlobalAgentAuthorizedTool(kind: "mcp" | "skill", input: any, auditContext?: ToolScope["auditContext"], loadedToolNames?: string[]): Promise<{
+export declare function executeGlobalAgentAuthorizedTool(kind: "mcp" | "skill", input: any, auditContext?: ToolScope["auditContext"], loadedToolNames?: string[], options?: {
+    executionSkills?: string[];
+}): Promise<{
     success: boolean;
     kind: "skill";
     name: string;
@@ -118,6 +129,8 @@ export declare function executeGlobalAgentAuthorizedTool(kind: "mcp" | "skill", 
 export declare function runGlobalAgentToolAuthorizationSelfTest(): {
     pass: boolean;
     normalized: Required<Pick<ToolScope, "mcp" | "skill">>;
+    idleSkills: string[];
+    workSkills: string[];
     storage_file: string;
 };
 export {};

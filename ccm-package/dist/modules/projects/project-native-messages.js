@@ -1,14 +1,16 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.PROJECT_MAIN_SESSION_CONTEXT_GUIDANCE = void 0;
+exports.buildProjectMainSessionGuidance = exports.PROJECT_MAIN_SESSION_CONTEXT_GUIDANCE = void 0;
 exports.tryBuildProjectNativeMainMessages = tryBuildProjectNativeMainMessages;
 const native_session_transcript_1 = require("../../agents/native-session-transcript");
 const native_query_messages_1 = require("../../agents/native-query-messages");
 const transient_model_content_1 = require("../../system/transient-model-content");
 const group_orchestrator_config_1 = require("../collaboration/group-orchestrator-config");
 const project_session_compaction_1 = require("./project-session-compaction");
-const group_presented_plan_1 = require("../collaboration/group-presented-plan");
-exports.PROJECT_MAIN_SESSION_CONTEXT_GUIDANCE = `会话里已有需求、上一轮计划和工具结果视为已知；未变化的文件不要再全量读取。展开或重述计划不是派发授权。第一次为当前需求出实现计划时，允许最小只读核实以点名缝在哪。${group_presented_plan_1.PRESENTED_PLAN_SHAPE_GUIDANCE}用户已确认计划卡后调用 ccm_dispatch 时：${group_presented_plan_1.PRESENTED_PLAN_DISPATCH_HANDOFF_GUIDANCE}`;
+const main_agent_identity_1 = require("../../agents/main-agent-identity");
+Object.defineProperty(exports, "PROJECT_MAIN_SESSION_CONTEXT_GUIDANCE", { enumerable: true, get: function () { return main_agent_identity_1.PROJECT_MAIN_SESSION_CONTEXT_GUIDANCE; } });
+Object.defineProperty(exports, "buildProjectMainSessionGuidance", { enumerable: true, get: function () { return main_agent_identity_1.buildProjectMainSessionGuidance; } });
+const session_model_context_1 = require("../../system/session-model-context");
 function tryBuildProjectNativeMainMessages(input) {
     const project = String(input.project || "").trim();
     const projectSessionId = String(input.projectSessionId || "").trim();
@@ -36,6 +38,9 @@ function tryBuildProjectNativeMainMessages(input) {
         canonicalSummary: projection?.canonicalSummary ? projection.summary : null,
         metaBlocks: input.metaBlocks || [],
         currentUserText: String(input.userMessage || "").trim(),
+        clearedToolCallIds: projection?.microCompact?.clearedToolCallIds,
+        replacedToolResults: (0, session_model_context_1.sessionModelReplacementTextMap)(projection?.contentReplacement),
+        persistContext: { scope: "project", sessionId: projectSessionId },
     });
     if ((0, native_session_transcript_1.lastNativeUserText)(history) !== String(input.userMessage || "").trim())
         return null;

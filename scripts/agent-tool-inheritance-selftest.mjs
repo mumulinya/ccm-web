@@ -166,6 +166,17 @@ try {
   assert.match(projectMainSource, /configuredToolContext\.skillPrompt/);
   assert.match(projectMainSource, /executionSkills: roleSkills\.names/);
 
+  const globalAuthSource = fs.readFileSync(path.join(repoRoot, "backend", "modules", "global", "global-agent-tool-authorization.ts"), "utf-8");
+  const globalProjectionSource = fs.readFileSync(path.join(repoRoot, "backend", "agents", "global", "global-agent-run-projection.ts"), "utf-8");
+  const globalRuntimeSource = fs.readFileSync(path.join(repoRoot, "backend", "modules", "global", "global-agent-agentic-runtime.ts"), "utf-8");
+  const groupLoopSource = fs.readFileSync(path.join(repoRoot, "backend", "modules", "collaboration", "group-orchestrator-llm.ts"), "utf-8");
+  assert.match(groupLoopSource, /executionSkills: selectedRoleSkills\.names/);
+  assert.match(globalAuthSource, /executionSkills,/);
+  assert.match(globalAuthSource, /resolveGlobalAgentExecutionSkills/);
+  assert.match(globalProjectionSource, /executionSkills: roleSkills\.names/);
+  assert.match(globalRuntimeSource, /resolveGlobalAgentExecutionSkillsFromRun/);
+  assert.match(globalRuntimeSource, /executionSkills \}/);
+
   console.log(JSON.stringify({
     pass: true,
     checks: {
@@ -179,6 +190,7 @@ try {
       forgedRoleSkillRejected: true,
       configuredScopeDriftRejected: true,
       exactSessionMismatchRejected: true,
+      globalExecutionSkillsAligned: true,
     },
   }, null, 2));
 } finally {

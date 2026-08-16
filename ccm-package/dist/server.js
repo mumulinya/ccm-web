@@ -77,6 +77,7 @@ const projects_1 = require("./modules/projects/projects");
 const project_git_1 = require("./modules/projects/project-git");
 const git_workspace_runtime_1 = require("./modules/tools/git-workspace-runtime");
 const project_main_agent_1 = require("./modules/projects/project-main-agent");
+const project_main_turn_complete_1 = require("./modules/projects/project-main-turn-complete");
 const sessions_1 = require("./modules/projects/sessions");
 const conversation_search_1 = require("./modules/search/conversation-search");
 const pre_plan_clarification_1 = require("./agents/pre-plan-clarification");
@@ -1587,9 +1588,9 @@ function handleRequest(req, res) {
                 },
             });
             const chatIntent = {
-                mode: projectFirstTurn.responseType === "reply" || projectFirstTurn.responseType === "clarify"
-                    ? "conversation"
-                    : (0, workflow_decision_1.isDevelopmentTaskWorkflowDecision)(projectFirstTurn.workflowDecision) ? "task" : "project_analysis",
+                mode: (0, workflow_decision_1.isDevelopmentTaskWorkflowDecision)(projectFirstTurn.workflowDecision)
+                    ? "task"
+                    : String(projectFirstTurn.workflowDecision?.mode || "") === "project_analysis" ? "project_analysis" : "conversation",
                 workflowDecision: projectFirstTurn.workflowDecision,
             };
             const routeDecision = (0, conversation_message_routing_1.decideConversationMessageRoute)({
@@ -1668,39 +1669,42 @@ function handleRequest(req, res) {
             }
             if (parentProjectMainTask && explicitRouteChoice !== "answer_only")
                 chatIntent.mode = "task";
-            const directProjectReply = ["reply", "clarify"].includes(String(projectFirstTurn.responseType || ""))
-                ? String(projectFirstTurn.reply || "").trim()
-                : "";
-            if (directProjectReply) {
+            const visibleProjectTurn = (0, project_main_turn_complete_1.projectFirstTurnVisiblePresentation)(projectFirstTurn, {
+                treatAsTask: chatIntent.mode === "task",
+            });
+            if (visibleProjectTurn.present) {
                 const clarificationProjection = projectFirstTurn.prePlanClarification;
                 const visibleProjectReply = source === "feishu" && clarificationProjection
                     ? (0, pre_plan_clarification_1.formatPrePlanClarificationText)(clarificationProjection)
-                    : directProjectReply;
+                    : visibleProjectTurn.reply;
                 const clarificationSummary = projectFirstTurn.clarificationSummary
                     || (clarificationProjection ? (0, pre_plan_clarification_1.buildConversationClarificationSummary)({
                         schema: "ccm-project-main-agent-clarification-summary-v1",
                         question: visibleProjectReply,
                         prePlanClarification: clarificationProjection,
                     }) : null);
-                persistConversationReply(visibleProjectReply, "conversation", clarificationProjection ? {
-                    prePlanClarification: { ...clarificationProjection, anchorMessageId: safeAssistantMessageId },
-                    pre_plan_clarification: { ...clarificationProjection, anchorMessageId: safeAssistantMessageId },
-                    clarificationSummary,
-                    clarification_summary: clarificationSummary,
-                    clarificationContext: { schema: "ccm-project-clarification-context-v1", originalRequest: message, status: "pending" },
-                    clarification_context: { schema: "ccm-project-clarification-context-v1", original_request: message, status: "pending" },
-                } : {});
+                persistConversationReply(visibleProjectReply, visibleProjectTurn.messageMode, {
+                    ...(clarificationProjection ? {
+                        prePlanClarification: { ...clarificationProjection, anchorMessageId: safeAssistantMessageId },
+                        pre_plan_clarification: { ...clarificationProjection, anchorMessageId: safeAssistantMessageId },
+                        clarificationSummary,
+                        clarification_summary: clarificationSummary,
+                        clarificationContext: { schema: "ccm-project-clarification-context-v1", originalRequest: message, status: "pending" },
+                        clarification_context: { schema: "ccm-project-clarification-context-v1", original_request: message, status: "pending" },
+                    } : {}),
+                    ...(visibleProjectTurn.presentedPlan ? { presentedPlan: visibleProjectTurn.presentedPlan } : {}),
+                });
                 if (!res.destroyed && !res.writableEnded) {
                     ensureProjectReplyStream();
                     writeSse(res, { type: "turn_decision", decision: projectFirstTurn.turnDecision, receipt: projectFirstTurn.turnReceipt });
                     for (const item of projectFirstTurn.toolResults || [])
                         writeSse(res, { type: "tool_activity", phase: item.ok === false ? "failed" : "completed", tool: item.name, scope: item.scope || "project", source: item.source || item.toolKind || "", loaded: item.loaded !== false, output_tokens: item.outputTokens || 0, duration_ms: item.durationMs || 0, result_checksum: item.resultChecksum || "", error: item.error || "" });
-                    writeSse(res, { type: "presentation", message_mode: "conversation", show_task_card: false, main_agent: "project", direct_reply_fast_path: true, prePlanClarification: clarificationProjection, pre_plan_clarification: clarificationProjection, clarificationSummary, clarification_summary: clarificationSummary });
+                    writeSse(res, { type: "presentation", message_mode: visibleProjectTurn.messageMode, show_task_card: false, main_agent: "project", direct_reply_fast_path: true, prePlanClarification: clarificationProjection, pre_plan_clarification: clarificationProjection, clarificationSummary, clarification_summary: clarificationSummary, ...(visibleProjectTurn.presentedPlan ? { presentedPlan: visibleProjectTurn.presentedPlan } : {}) });
                     if (!projectReplyDeltaEmitted && visibleProjectReply)
                         emitProjectReplyDelta(visibleProjectReply);
                     if (!res.destroyed && !res.writableEnded) {
                         writeSse(res, { type: "response_completed", sequence: projectReplySequence, final: true });
-                        writeSse(res, { type: "done", message_id: safeAssistantMessageId, message_mode: "conversation", main_agent: "project", taskExperience: null, direct_reply_fast_path: true, final_text: visibleProjectReply, prePlanClarification: clarificationProjection, pre_plan_clarification: clarificationProjection, clarificationSummary, clarification_summary: clarificationSummary });
+                        writeSse(res, { type: "done", message_id: safeAssistantMessageId, message_mode: visibleProjectTurn.messageMode, main_agent: "project", taskExperience: null, direct_reply_fast_path: true, final_text: visibleProjectReply, prePlanClarification: clarificationProjection, pre_plan_clarification: clarificationProjection, clarificationSummary, clarification_summary: clarificationSummary, ...(visibleProjectTurn.presentedPlan ? { presentedPlan: visibleProjectTurn.presentedPlan } : {}) });
                     }
                 }
                 scheduleFeishuSessionTitle(visibleProjectReply);
@@ -2006,35 +2010,6 @@ function handleRequest(req, res) {
                 send({ type: "turn_decision", decision: projectFirstTurn.turnDecision, receipt: projectFirstTurn.turnReceipt });
                 for (const item of projectFirstTurn.toolResults || []) {
                     send({ type: "tool_activity", phase: item.ok === false ? "failed" : "completed", tool: item.name, scope: item.scope || "project", source: item.source || item.toolKind || "", loaded: item.loaded !== false, output_tokens: item.outputTokens || 0, duration_ms: item.durationMs || 0, result_checksum: item.resultChecksum || "", error: item.error || "" });
-                }
-                if (chatIntent.mode !== "task") {
-                    send({ type: "presentation", message_mode: chatIntent.mode, show_task_card: false, main_agent: "project" });
-                    send({ type: "status", text: chatIntent.mode === "project_analysis" ? "项目主 Agent 正在分析当前项目..." : "项目主 Agent 正在回复...", agent: "project-main-agent" });
-                    const projectMainContext = [projectKnowledge.context, projectSharedFiles.context].filter(Boolean).join("\n\n");
-                    let streamedAnswer = false;
-                    const answer = await (0, project_main_agent_1.answerAsProjectMainAgent)({
-                        project,
-                        projectSessionId: exactProjectSessionId,
-                        userMessage: finalMessage,
-                        mode: chatIntent.mode === "project_analysis" ? "project_analysis" : "conversation",
-                        context: projectMainContext,
-                        workflowDecision: chatIntent.workflowDecision,
-                        onDelta: delta => {
-                            if (!delta)
-                                return;
-                            streamedAnswer = true;
-                            send({ type: "chunk", text: delta, agent: "project-main-agent" });
-                        },
-                    });
-                    if (answer && !streamedAnswer)
-                        send({ type: "chunk", text: answer, agent: "project-main-agent" });
-                    persistConversationReply(answer, chatIntent.mode);
-                    scheduleFeishuSessionTitle(answer);
-                    send({ type: "done", message_id: safeAssistantMessageId, message_mode: chatIntent.mode, main_agent: "project", taskExperience: null });
-                    clearInterval(heartbeat);
-                    releaseDispatch();
-                    res.end();
-                    return;
                 }
                 const projectRun = (0, chat_runs_1.createProjectChatRun)(project, effectiveMessage, workDir, parentRunId, exactProjectSessionId);
                 projectRun.message_mode = "task";

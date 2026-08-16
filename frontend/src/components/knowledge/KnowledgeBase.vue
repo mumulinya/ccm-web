@@ -417,8 +417,36 @@ onBeforeUnmount(() => { if (pollTimer) window.clearInterval(pollTimer) })
   background: var(--bg-primary);
   color: var(--text-primary);
 }
-.workspace-layout { display: grid; gap: 16px; width: min(1560px, 100%); margin: 0 auto; padding: 18px 24px 28px; box-sizing: border-box; }
-.top-grid { display: grid; grid-template-columns: minmax(360px, .82fr) minmax(480px, 1.18fr); gap: 16px; align-items: start; }
-@media (max-width: 1080px) { .top-grid { grid-template-columns: 1fr; } }
-@media (max-width: 600px) { .workspace-layout { padding: 12px; gap: 12px; }.top-grid { gap: 12px; } }
+
+.workspace-layout {
+  display: grid;
+  gap: 16px;
+  width: min(1560px, 100%);
+  margin: 0 auto;
+  padding: 18px 24px 32px;
+  box-sizing: border-box;
+}
+
+.top-grid {
+  display: grid;
+  grid-template-columns: minmax(360px, 0.85fr) minmax(480px, 1.15fr);
+  gap: 16px;
+  align-items: start;
+}
+
+@media (max-width: 1120px) {
+  .top-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .workspace-layout {
+    padding: 12px 14px 24px;
+    gap: 12px;
+  }
+  .top-grid {
+    gap: 12px;
+  }
+}
 </style>

@@ -15,14 +15,15 @@ exports.presentedPlanAcceptanceLines = presentedPlanAcceptanceLines;
 exports.appendConfirmedPlanSliceContract = appendConfirmedPlanSliceContract;
 exports.attachConfirmedPlanSlicesToDispatchTargets = attachConfirmedPlanSlicesToDispatchTargets;
 exports.mergePresentedPlanAcceptanceCriteria = mergePresentedPlanAcceptanceCriteria;
+exports.presentedPlanFromParsed = presentedPlanFromParsed;
 exports.publishGroupPresentedRequirementPlan = publishGroupPresentedRequirementPlan;
 exports.runGroupPresentedPlanSelfTest = runGroupPresentedPlanSelfTest;
 const user_visible_agent_events_1 = require("../../system/user-visible-agent-events");
 const presented_plan_quality_1 = require("../../agents/presented-plan-quality");
 exports.COORDINATOR_PRESENTED_PLAN_HEADLINE = "计划已经整理完成，请查看下面的待办。";
 exports.PRESENTED_PLAN_AUTHORING_SKILL = "ccm-implementation-plan-authoring";
-exports.PRESENTED_PLAN_SHAPE_GUIDANCE = "计划稿形状见 Skill:ccm-implementation-plan-authoring：title 短名；goal 或 overview 钉死运转规则；steps 用一行待办（可演示交付切片），条数按需求来；禁止按设计/接口/前端/后端分层，不要默认 P0–P4。不要把 TestAgent 写成待办。Plan Mode 必须以 ccm_present_plan 出卡，不得派发。";
-exports.PRESENTED_PLAN_DISPATCH_HANDOFF_GUIDANCE = "已确认计划卡交接见 Skill:ccm-implementation-plan-authoring：ccm_dispatch 必须覆盖卡片每条切片的验收口径；不要把卡片重写成前端/后端/测试分工；targets[].task 要写明落实了哪些已确认切片；不要把 TestAgent 写成卡片待办或 targets[]。";
+exports.PRESENTED_PLAN_SHAPE_GUIDANCE = "计划稿形状见 Skill:ccm-implementation-plan-authoring。";
+exports.PRESENTED_PLAN_DISPATCH_HANDOFF_GUIDANCE = "已确认计划卡交接见 Skill:ccm-implementation-plan-authoring。";
 function compactText(value, max = 400) {
     return String(value || "").replace(/\s+/g, " ").trim().slice(0, max);
 }
@@ -237,26 +238,40 @@ function mergePresentedPlanAcceptanceCriteria(existing, plan, limit = 10) {
     }
     return merged;
 }
-function publishGroupPresentedRequirementPlan(input) {
+function presentedPlanFromParsed(input) {
     const plan = normalizePresentedGroupPlan({
         parsed: input.parsed,
-        planId: input.turnId || `group-plan-${Date.now()}`,
+        planId: input.planId,
         goalFallback: input.goalFallback,
-        status: "ready",
+        status: input.status || "ready",
     });
     if (!plan)
         return null;
     const repaired = input.parsed?.planQuality?.repaired === true || input.parsed?.plan?.quality?.repaired === true;
-    const published = (0, presented_plan_quality_1.attachPresentedPlanQuality)(plan, { repaired }).plan;
+    return (0, presented_plan_quality_1.attachPresentedPlanQuality)(plan, { repaired }).plan;
+}
+function publishGroupPresentedRequirementPlan(input) {
+    const published = input.plan && typeof input.plan === "object" && Array.isArray(input.plan.steps) && input.plan.steps.length
+        ? input.plan
+        : presentedPlanFromParsed({
+            parsed: input.parsed,
+            planId: input.turnId || `${input.scope || "group"}-plan-${Date.now()}`,
+            goalFallback: input.goalFallback,
+        });
+    if (!published)
+        return null;
     if (input.skip)
         return null;
-    if (!input.groupId || !input.groupSessionId)
+    const scope = input.scope || (input.groupId ? "group" : "");
+    const scopeId = String(input.scopeId || input.groupId || "").trim();
+    const exactSessionId = String(input.exactSessionId || input.groupSessionId || "").trim();
+    if (!scope || !scopeId || !exactSessionId)
         return published;
     (0, user_visible_agent_events_1.appendUserVisibleRequirementPlan)({
-        eventId: `group-turn:${published.planId}:requirement-plan:${published.revision}:presented`,
-        scope: "group",
-        scopeId: String(input.groupId),
-        exactSessionId: String(input.groupSessionId),
+        eventId: `${scope}-turn:${published.planId}:requirement-plan:${published.revision}:presented`,
+        scope,
+        scopeId,
+        exactSessionId,
         ...(String(input.anchorMessageId || "").trim() ? { anchorMessageId: String(input.anchorMessageId).trim() } : {}),
         ...(String(input.turnId || "").trim() ? { turnId: String(input.turnId).trim() } : {}),
         generation: Math.max(0, Number(input.generation || 0)),
@@ -339,23 +354,24 @@ function runGroupPresentedPlanSelfTest() {
         dropsStepProject: layered?.steps?.[0]?.title === "占住资源"
             && layered?.steps?.[0]?.project == null
             && layered?.steps?.[0]?.dependsOn == null,
-        shapePointsToSkill: /Skill:ccm-implementation-plan-authoring/.test(exports.PRESENTED_PLAN_SHAPE_GUIDANCE)
-            && /ccm_present_plan 出卡/.test(exports.PRESENTED_PLAN_SHAPE_GUIDANCE)
-            && /不得派发/.test(exports.PRESENTED_PLAN_SHAPE_GUIDANCE)
-            && /一行待办/.test(exports.PRESENTED_PLAN_SHAPE_GUIDANCE)
-            && /不要默认 P0–P4/.test(exports.PRESENTED_PLAN_SHAPE_GUIDANCE)
-            && /不要把 TestAgent 写成待办/.test(exports.PRESENTED_PLAN_SHAPE_GUIDANCE),
-        handoffPointsToSkill: /Skill:ccm-implementation-plan-authoring/.test(exports.PRESENTED_PLAN_DISPATCH_HANDOFF_GUIDANCE)
-            && /必须覆盖卡片每条切片的验收口径/.test(exports.PRESENTED_PLAN_DISPATCH_HANDOFF_GUIDANCE)
-            && /不要把卡片重写成前端\/后端\/测试分工/.test(exports.PRESENTED_PLAN_DISPATCH_HANDOFF_GUIDANCE)
-            && /targets\[\]\.task 要写明落实了哪些已确认切片/.test(exports.PRESENTED_PLAN_DISPATCH_HANDOFF_GUIDANCE)
-            && /不要把 TestAgent 写成卡片待办或 targets\[\]/.test(exports.PRESENTED_PLAN_DISPATCH_HANDOFF_GUIDANCE),
+        shapePointsToSkill: exports.PRESENTED_PLAN_SHAPE_GUIDANCE === "计划稿形状见 Skill:ccm-implementation-plan-authoring。"
+            && /Skill:ccm-implementation-plan-authoring/.test(exports.PRESENTED_PLAN_SHAPE_GUIDANCE)
+            && /一行待办/.test(exports.PRESENTED_PLAN_SHAPE_GUIDANCE) === false,
+        handoffPointsToSkill: exports.PRESENTED_PLAN_DISPATCH_HANDOFF_GUIDANCE === "已确认计划卡交接见 Skill:ccm-implementation-plan-authoring。"
+            && /Skill:ccm-implementation-plan-authoring/.test(exports.PRESENTED_PLAN_DISPATCH_HANDOFF_GUIDANCE)
+            && /必须覆盖卡片每条切片的验收口径/.test(exports.PRESENTED_PLAN_DISPATCH_HANDOFF_GUIDANCE) === false,
         appendsSliceContract: contract.includes("已确认切片") && contract.includes("占住资源")
             && appendConfirmedPlanSliceContract(contract, layered) === contract,
         mergesAcceptance: merged[0] === "占住后超时从下单时钟释放。" && merged.includes("占住资源") && merged.includes("命令 npm test 必须成功执行。"),
         readsLatestMessagePlan: fromMessages?.steps?.[0]?.title === "占住资源",
         attachLeavesEmptyTargets: attachConfirmedPlanSlicesToDispatchTargets([], layered).length === 0,
         publishedHasQuality: typeof publishGroupPresentedRequirementPlan({ parsed, turnId: "turn-1", goalFallback: "原生循环" })?.quality?.ok === "boolean",
+        publishedProjectScopeKeepsPlan: typeof publishGroupPresentedRequirementPlan({
+            scope: "project",
+            parsed,
+            turnId: "project-turn-1",
+            goalFallback: "项目计划",
+        })?.quality?.ok === "boolean",
         shapeDroppedLongEssay: /没有现成域就写明 greenfield/.test(exports.PRESENTED_PLAN_SHAPE_GUIDANCE) === false,
     };
     return { pass: Object.values(checks).every(Boolean), checks };

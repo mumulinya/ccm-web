@@ -219,103 +219,145 @@ onUnmounted(() => { if (transactionPoller) clearInterval(transactionPoller) })
         <span class="cleanup-title-icon"><ShieldCheck :size="20" /></span>
         <div>
           <h1>清理中心</h1>
-          <p>先预览，再精确处理；任务回放和测试证据会按同一条链路管理。</p>
+          <p>先预览，再精确处理；任务回放和测试证据会按同一条链路统一治理。</p>
         </div>
       </div>
       <div class="cleanup-header-actions">
-        <span v-if="summary?.updated_at" class="cleanup-last-update">扫描于 {{ new Date(summary.updated_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) }}</span>
+        <span v-if="summary?.updated_at" class="cleanup-last-update font-mono">
+          扫描于 {{ new Date(summary.updated_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) }}
+        </span>
         <span class="cleanup-service-state">
-          <CircleCheck :size="15" /> {{ summary?.storage?.index?.status === 'index_building' ? '存储索引构建中' : '已启用安全预览' }}
+          <CircleCheck :size="14" />
+          <span>{{ summary?.storage?.index?.status === 'index_building' ? '存储索引构建中' : '已启用安全预览' }}</span>
         </span>
         <button class="cleanup-icon-button" title="刷新清理摘要" :disabled="loading" @click="loadSummary">
-          <RefreshCw :size="17" :class="{ spinning: loading }" />
+          <RefreshCw :size="16" :class="{ spinning: loading }" />
         </button>
-        <button class="cleanup-button" title="在后台重新扫描存储" :disabled="loading" @click="scanStorage">重新扫描</button>
+        <button class="cleanup-button primary" title="在后台重新扫描存储" :disabled="loading" @click="scanStorage">
+          <span>重新扫描</span>
+        </button>
       </div>
     </header>
 
     <div v-if="error" class="cleanup-alert cleanup-page-alert" role="alert">{{ error }}</div>
 
     <section v-if="activeTransaction" class="cleanup-alert cleanup-transaction-banner">
-      <div>
+      <div class="transaction-info">
         <strong>{{ activeTransaction.label }} · {{ activeTransaction.status }}</strong>
-        <span>已完成 {{ activeTransaction.processed_count || 0 }} / {{ activeTransaction.requested_count || 0 }}，失败 {{ activeTransaction.failed_count || 0 }}</span>
+        <span class="font-mono">已完成 {{ activeTransaction.processed_count || 0 }} / {{ activeTransaction.requested_count || 0 }}，失败 {{ activeTransaction.failed_count || 0 }}</span>
       </div>
-      <button v-if="!terminalTransaction(activeTransaction.status)" class="cleanup-button" @click="cancelTransaction">停止后续步骤</button>
+      <button v-if="!terminalTransaction(activeTransaction.status)" class="cleanup-button danger" @click="cancelTransaction">停止后续步骤</button>
     </section>
 
+    <!-- 4 个 KPI 微卡片 -->
     <section v-if="summary" class="cleanup-summary-strip" aria-label="清理中心摘要">
-      <div><Database :size="16" /><span><strong>{{ totalRecords.toLocaleString() }}</strong><small>条运行数据</small></span></div>
-      <div><HardDrive :size="16" /><span><strong>{{ formatBytes(summary.storage?.total_bytes) }}</strong><small>已统计空间</small></span></div>
-      <div><Archive :size="16" /><span><strong>{{ safeActions.length }}</strong><small>项可恢复整理</small></span></div>
-      <div class="danger"><ShieldAlert :size="16" /><span><strong>{{ dangerActions.length }}</strong><small>项永久操作</small></span></div>
+      <div class="summary-kpi-card">
+        <Database :size="18" class="kpi-icon blue" />
+        <div class="kpi-copy">
+          <small>运行数据条数</small>
+          <strong class="font-mono">{{ totalRecords.toLocaleString() }}</strong>
+        </div>
+      </div>
+      <div class="summary-kpi-card">
+        <HardDrive :size="18" class="kpi-icon purple" />
+        <div class="kpi-copy">
+          <small>已统计占用容量</small>
+          <strong class="font-mono">{{ formatBytes(summary.storage?.total_bytes) }}</strong>
+        </div>
+      </div>
+      <div class="summary-kpi-card">
+        <Archive :size="18" class="kpi-icon green" />
+        <div class="kpi-copy">
+          <small>可安全恢复整理</small>
+          <strong class="font-mono">{{ safeActions.length }} 项</strong>
+        </div>
+      </div>
+      <div class="summary-kpi-card danger">
+        <ShieldAlert :size="18" class="kpi-icon red" />
+        <div class="kpi-copy">
+          <small>高风险永久删除</small>
+          <strong class="font-mono">{{ dangerActions.length }} 项</strong>
+        </div>
+      </div>
     </section>
 
     <div v-if="summary" class="cleanup-workspace">
+      <!-- 左侧治理视图导航 -->
       <nav class="cleanup-segmented" aria-label="清理中心视图">
-        <div class="cleanup-nav-heading"><strong>数据治理</strong><small>选择要处理的范围</small></div>
+        <div class="cleanup-nav-heading">
+          <strong>数据治理范围</strong>
+          <small>选择要查看与处理的模块</small>
+        </div>
         <button
           v-for="view in views"
           :key="view.id"
+          type="button"
           :class="[{ active: activeView === view.id }, view.tone]"
           @click="activeView = view.id; closePreview()"
         >
-          <span><component :is="view.icon" :size="16" /></span>
-          <span><strong>{{ view.label }}</strong><small>{{ view.description }}</small></span>
+          <span class="nav-icon-wrap"><component :is="view.icon" :size="15" /></span>
+          <span class="nav-copy">
+            <strong>{{ view.label }}</strong>
+            <small>{{ view.description }}</small>
+          </span>
         </button>
-        <div class="cleanup-boundary-note"><Info :size="14" /><span>不会清理项目源码、知识库和用户上传资料。</span></div>
+        <div class="cleanup-boundary-note">
+          <Info :size="13" />
+          <span>不会清理项目源码、知识库与用户上传资料。</span>
+        </div>
       </nav>
 
+      <!-- 右侧舞台 -->
       <section class="cleanup-stage">
-    <main v-if="summary" class="cleanup-content">
-      <CleanupStorageOverview
-        v-if="activeView === 'overview'"
-        :cards="summary.cards"
-        :total-bytes="summary.storage?.total_bytes || 0"
-        :selected-id="selectedCardId"
-        :selected-card="currentCard"
-        :rows="currentRows"
-        :navigation-label="navigationMap[selectedCardId]?.label || ''"
-        @select="selectedCardId = $event"
-        @navigate="navigateSelected"
-      />
-
-      <template v-else-if="activeView === 'safe' || activeView === 'danger'">
-        <div class="cleanup-action-workspace" :class="{ 'has-preview': preview }">
-          <div class="cleanup-action-column">
-            <CleanupActionPanel
-              :mode="activeView"
-              :actions="activeView === 'safe' ? safeActions : dangerActions"
-              :retention-days="retentionDays"
-              :retention-options="summary.policy?.retention_options || [7, 30, 90, 0]"
-              :loading="loading || running"
-              @update:retention-days="retentionDays = $event; closePreview()"
-              @preview="previewAction"
-            />
-          </div>
-          <CleanupPreviewPanel
-            v-if="preview"
-            :preview="preview"
-            :selected-ids="selectedIds"
-            :confirmation-text="confirmationText"
-            :running="running"
-            @toggle="toggleSelected"
-            @toggle-all="toggleAll"
-            @update:confirmation-text="confirmationText = $event"
-            @close="closePreview"
-            @execute="runAction"
+        <main class="cleanup-content">
+          <CleanupStorageOverview
+            v-if="activeView === 'overview'"
+            :cards="summary.cards"
+            :total-bytes="summary.storage?.total_bytes || 0"
+            :selected-id="selectedCardId"
+            :selected-card="currentCard"
+            :rows="currentRows"
+            :navigation-label="navigationMap[selectedCardId]?.label || ''"
+            @select="selectedCardId = $event"
+            @navigate="navigateSelected"
           />
-        </div>
-      </template>
 
-      <CleanupHistory v-else :records="summary.history || []" />
-    </main>
+          <template v-else-if="activeView === 'safe' || activeView === 'danger'">
+            <div class="cleanup-action-workspace" :class="{ 'has-preview': preview }">
+              <div class="cleanup-action-column">
+                <CleanupActionPanel
+                  :mode="activeView"
+                  :actions="activeView === 'safe' ? safeActions : dangerActions"
+                  :retention-days="retentionDays"
+                  :retention-options="summary.policy?.retention_options || [7, 30, 90, 0]"
+                  :loading="loading || running"
+                  @update:retention-days="retentionDays = $event; closePreview()"
+                  @preview="previewAction"
+                />
+              </div>
+              <CleanupPreviewPanel
+                v-if="preview"
+                :preview="preview"
+                :selected-ids="selectedIds"
+                :confirmation-text="confirmationText"
+                :running="running"
+                @toggle="toggleSelected"
+                @toggle-all="toggleAll"
+                @update:confirmation-text="confirmationText = $event"
+                @close="closePreview"
+                @execute="runAction"
+              />
+            </div>
+          </template>
 
+          <CleanupHistory v-else :records="summary.history || []" />
+        </main>
       </section>
     </div>
 
     <div v-else-if="loading" class="cleanup-loading">
-      <RefreshCw :size="18" class="spinning" /> 正在扫描可整理数据
+      <RefreshCw :size="20" class="spinning" />
+      <span>正在扫描可整理运行数据...</span>
     </div>
   </div>
 </template>

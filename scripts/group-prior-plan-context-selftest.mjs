@@ -34,6 +34,7 @@ assert.equal(visible.coordinatorShouldFailEmptyVisibleReply({
 const read = relative => fs.readFileSync(path.join(root, relative), "utf8");
 const llm = read("backend/modules/collaboration/group-orchestrator-llm.ts");
 const prompts = read("backend/modules/collaboration/group-orchestrator-prompts.ts");
+const identity = read("backend/agents/main-agent-identity.ts");
 const loop = read("backend/agents/native-query-loop.ts");
 const priorSrc = read("backend/modules/collaboration/group-prior-plan-context.ts");
 assert.match(llm, /extractPriorGroupPlanDraft/);
@@ -42,8 +43,9 @@ assert.match(priorSrc, /不要重新扫仓库/);
 assert.match(llm, /priorPlanDraft/);
 assert.match(llm, /coordinatorShouldFailEmptyVisibleReply/);
 assert.match(llm, /模型返回空响应/);
-assert.match(prompts, /不要再全量读取项目文件/);
-assert.match(prompts, /展开\/重述刚才的计划/);
+assert.match(identity, /不要再全量读取项目文件/);
+assert.match(identity, /展开或重述已有计划稿不要再读项目文件/);
+assert.match(prompts, /buildGroupMainSessionGuidance/);
 assert.match(loop, /mergeNativeTurnParsed/);
 assert.match(loop, /emptyFollowupKeepsFirstTurnText/);
 

@@ -22,6 +22,7 @@ export interface RoleSkillSelectionOptions {
         actionRequired?: boolean;
         selectedSkills?: string[];
     } | null;
+    /** 仅当用户开启 Plan Mode 时注入 ccm-implementation-plan-authoring */
     planAuthoring?: boolean;
 }
 export declare function ensureRoleSkillsInstalled(options?: {
@@ -47,6 +48,8 @@ export declare function runRoleSkillSelectionSelfTest(): {
         ordinaryGroupLoadsNoWorkSkills: boolean;
         globalGetsOnlyRelevantSkills: boolean;
         groupGetsCoordinatorAndDecomposition: boolean;
+        groupPlanModeGetsPlanSkill: boolean;
+        agentModeIgnoresModelPickedPlanSkill: boolean;
         groupReviewGetsReviewAndReceipt: boolean;
         contextualExecutionRequiresModelDecision: boolean;
         planAuthoringOnlyLoadsPlanSkill: boolean;
@@ -68,6 +71,8 @@ export declare function runRoleSkillSelectionSelfTest(): {
         ordinaryGroup: CcmInternalSkillName[];
         globalWork: CcmInternalSkillName[];
         groupWork: CcmInternalSkillName[];
+        groupWorkPlanMode: CcmInternalSkillName[];
+        sneakyPlanSkill: CcmInternalSkillName[];
         groupReview: CcmInternalSkillName[];
         contextualGroupWork: CcmInternalSkillName[];
         planAuthoringOnly: CcmInternalSkillName[];

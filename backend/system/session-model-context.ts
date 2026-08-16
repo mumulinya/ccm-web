@@ -5,6 +5,7 @@ import {
   mergeConversationWithExecution,
   type SessionExecutionEvent,
 } from "./session-execution-ledger";
+import { isPersistedToolResult } from "../tools/tool-result-storage";
 
 export type SessionModelContextScope = "global" | "group" | "project";
 
@@ -62,7 +63,7 @@ export function resolveSessionModelMicroCompactPolicy(config: any = {}, override
 }
 
 const CC_TIME_BASED_CLEARED_MESSAGE = "[Old tool result content cleared]";
-const CC_COMPACTABLE_TOOL = /(?:^|[_-])(?:read|shell|bash|command|grep|glob|search|fetch|edit|write)(?:$|[_-])/i;
+const CC_COMPACTABLE_TOOL = /(?:^|[_-])(?:read|shell|bash|command|grep|glob|search|fetch|edit|write|inspect|list|query)(?:$|[_-])|^invoke_mcp$/i;
 
 export function sessionModelMessageContent(value: any) {
   const content = value && typeof value === "object"
@@ -186,6 +187,16 @@ function contentReplacementReceiptChecksum(receipt: any) {
   return crypto.createHash("sha256").update(JSON.stringify(payload)).digest("hex");
 }
 
+export function sessionModelReplacementTextMap(contentReplacement: any): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const row of Array.isArray(contentReplacement?.replacements) ? contentReplacement.replacements : []) {
+    const id = String(row?.toolCallId || "").trim();
+    const text = String(row?.projectedText || "").trim();
+    if (id && text) map.set(id, text);
+  }
+  return map;
+}
+
 export function verifySessionModelContentReplacementReceipt(receipt: any, expected: { scope?: string; sessionId?: string; scopeId?: string } = {}) {
   const issues = [
     receipt?.schema !== "ccm-session-tool-result-content-replacement-v1" ? "schema_invalid" : "",
@@ -216,6 +227,7 @@ function selectRecoverableToolResultReplacements(events: SessionExecutionEvent[]
   const replacementMap = new Map<string, string>();
   for (const event of completed) {
     if (protectedIds.has(event.toolCallId)) continue;
+    if (isPersistedToolResult(event.payload) || isPersistedToolResult(event.payload?.observation)) continue;
     const raw = JSON.stringify(event.payload ?? null);
     const rawTokens = estimateTextTokens(raw);
     if (rawTokens <= maxResultTokens) continue;
@@ -237,6 +249,7 @@ function selectRecoverableToolResultReplacements(events: SessionExecutionEvent[]
       toolName: event.toolName,
       rawTokens,
       projectedTokens: estimateTextTokens(text),
+      projectedText: text,
       checksum,
       locator,
     });

@@ -8,6 +8,7 @@ const group_orchestrator_config_1 = require("./group-orchestrator-config");
 const group_session_model_context_1 = require("./group-session-model-context");
 const group_session_execution_ledger_1 = require("./group-session-execution-ledger");
 const storage_1 = require("./storage");
+const session_model_context_1 = require("../../system/session-model-context");
 function tryBuildGroupNativeCoordinatorMessages(input) {
     const groupId = String(input.group?.id || "").trim();
     const groupSessionId = String(input.groupSessionId || "").trim();
@@ -41,6 +42,9 @@ function tryBuildGroupNativeCoordinatorMessages(input) {
         metaBlocks,
         presentedPlan,
         currentUserText: String(input.message || "").trim(),
+        clearedToolCallIds: projection.microCompact?.clearedToolCallIds,
+        replacedToolResults: (0, session_model_context_1.sessionModelReplacementTextMap)(projection.contentReplacement),
+        persistContext: { scope: "group", sessionId: groupSessionId },
     });
     if ((0, native_session_transcript_1.lastNativeUserText)(history) !== String(input.message || "").trim())
         return null;

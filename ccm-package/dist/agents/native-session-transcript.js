@@ -11,6 +11,7 @@ exports.runNativeSessionTranscriptSelfTest = runNativeSessionTranscriptSelfTest;
 const native_query_messages_1 = require("./native-query-messages");
 const native_query_loop_1 = require("./native-query-loop");
 const context_source_tool_result_projection_1 = require("../system/context-source-tool-result-projection");
+const tool_result_storage_1 = require("../tools/tool-result-storage");
 exports.NATIVE_SESSION_RESUME_HINT = "精确会话原生续写已启用。上一轮正文、计划卡片和工具结果已在 messages 中；未变化的文件不要重读。以下参考材料不一定与当前句相关。";
 const SKIP_REPLAY_TOOLS = new Set(["ccm_dispatch"]);
 const PLAN_TOOLS = new Set(["ccm_present_plan"]);
@@ -57,28 +58,70 @@ function presentedPlanFrom(value) {
         return plan;
     return null;
 }
+function replacementMapFrom(value) {
+    const map = new Map();
+    if (!value)
+        return map;
+    if (value instanceof Map) {
+        for (const [id, text] of value) {
+            if (id && text)
+                map.set(String(id), String(text));
+        }
+        return map;
+    }
+    if (Array.isArray(value)) {
+        for (const row of value) {
+            const id = String(row?.toolCallId || "").trim();
+            const text = String(row?.projectedText || "").trim();
+            if (id && text)
+                map.set(id, text);
+        }
+        return map;
+    }
+    for (const [id, text] of Object.entries(value)) {
+        if (id && text)
+            map.set(id, String(text));
+    }
+    return map;
+}
 function toolUseArguments(event) {
     const payload = event?.payload && typeof event.payload === "object" ? event.payload : {};
     if (payload.arguments && typeof payload.arguments === "object")
         return payload.arguments;
     return payload;
 }
-function toolResultOutput(event) {
+function toolResultOutput(event, options) {
+    if (options.cleared.has(event.toolCallId))
+        return tool_result_storage_1.TOOL_RESULT_CLEARED_MESSAGE;
     const payload = event?.payload;
+    const persisted = (0, tool_result_storage_1.isPersistedToolResult)(payload)
+        ? payload
+        : (0, tool_result_storage_1.isPersistedToolResult)(payload?.observation)
+            ? payload.observation
+            : null;
+    if (persisted)
+        return (0, tool_result_storage_1.modelVisiblePersistedToolResult)(persisted);
+    if (options.replaced.has(event.toolCallId))
+        return options.replaced.get(event.toolCallId);
     const projected = (0, context_source_tool_result_projection_1.projectContextSourceToolResultForPersistence)(event?.toolName, payload);
     if ((0, context_source_tool_result_projection_1.isWorkspaceToolResultReference)(projected))
         return projected;
+    let output = payload ?? null;
     if (payload && typeof payload === "object") {
         if (payload.observation !== undefined) {
             const inner = (0, context_source_tool_result_projection_1.projectContextSourceToolResultForPersistence)(event?.toolName, payload.observation);
             if ((0, context_source_tool_result_projection_1.isWorkspaceToolResultReference)(inner))
                 return inner;
-            return payload.observation;
+            output = payload.observation;
         }
-        if (payload.error)
-            return { ok: false, error: payload.error };
+        else if (payload.error) {
+            output = { ok: false, error: payload.error };
+        }
     }
-    return payload ?? null;
+    if (options.persistContext?.scope && options.persistContext?.sessionId) {
+        (0, tool_result_storage_1.markToolResultSeenUnreplaced)(options.persistContext, event.toolCallId);
+    }
+    return output;
 }
 function pairExecutionEvents(events) {
     const uses = new Map();
@@ -100,7 +143,7 @@ function pairExecutionEvents(events) {
     }
     return pairs.sort((left, right) => String(left.use.timestamp || "").localeCompare(String(right.use.timestamp || "")));
 }
-function turnFromPair(pair) {
+function turnFromPair(pair, options) {
     const args = toolUseArguments(pair.use);
     const call = {
         id: pair.use.toolCallId,
@@ -120,7 +163,7 @@ function turnFromPair(pair) {
                 callId: pair.result.toolCallId,
                 name: pair.result.toolName,
                 ok: pair.result.status !== "error",
-                output: toolResultOutput(pair.result),
+                output: toolResultOutput(pair.result, options),
                 error: pair.result.status === "error" ? asText(pair.result.payload?.error || pair.result.payload) : undefined,
             }],
     };
@@ -160,6 +203,11 @@ function materializeNativeSessionTranscript(input) {
         .filter(item => ["user", "assistant"].includes(messageRole(item)))
         .filter(item => item?.hidden_execution !== true && item?.modelVisible !== false && item?.model_visible !== false);
     const pairs = pairExecutionEvents(input.executionEvents);
+    const projectionOptions = {
+        cleared: new Set(Array.from(input.clearedToolCallIds || []).map(id => String(id || "").trim()).filter(Boolean)),
+        replaced: replacementMapFrom(input.replacedToolResults),
+        persistContext: input.persistContext || null,
+    };
     const planMetas = [];
     const seenPlan = new Set();
     const collectPlan = (plan, summary = "") => {
@@ -208,7 +256,7 @@ function materializeNativeSessionTranscript(input) {
                 }
                 if (CONTROL_SKIP_TOOLS.has(pair.use.toolName))
                     continue;
-                const mapped = turnFromPair(pair);
+                const mapped = turnFromPair(pair, projectionOptions);
                 messages = (0, native_query_messages_1.appendNativeTurnTranscript)(messages, mapped.turn, mapped.results, family);
             }
             continue;
@@ -224,7 +272,7 @@ function materializeNativeSessionTranscript(input) {
         }
         if (CONTROL_SKIP_TOOLS.has(pair.use.toolName))
             continue;
-        const mapped = turnFromPair(pair);
+        const mapped = turnFromPair(pair, projectionOptions);
         messages = (0, native_query_messages_1.appendNativeTurnTranscript)(messages, mapped.turn, mapped.results, family);
     }
     const current = String(input.currentUserText || "").trim();
@@ -498,7 +546,47 @@ function runNativeSessionTranscriptSelfTest() {
             && bulkySerialized.includes("ccm-workspace-tool-result-reference-v1")
             && bulkySerialized.includes(bulkyBody) === false
             && bulkySerialized.includes("text_batch") === false,
+        nativeAppliesMicroCompact: true,
     };
+    const microEvents = [
+        {
+            id: "use-grep",
+            type: "tool_use",
+            toolCallId: "call_grep_old",
+            toolName: "grep_text",
+            timestamp: "2026-01-01T00:00:01.000Z",
+            runId: "run-1",
+            traceId: "t1",
+            anchorMessageId: "u1",
+            status: "running",
+            hidden: true,
+            payload: { arguments: { pattern: "TODO" } },
+        },
+        {
+            id: "res-grep",
+            type: "tool_result",
+            toolCallId: "call_grep_old",
+            toolName: "grep_text",
+            timestamp: "2026-01-01T00:00:02.000Z",
+            runId: "run-1",
+            traceId: "t1",
+            anchorMessageId: "u1",
+            status: "ok",
+            hidden: true,
+            payload: { observation: { lines: ["keep-raw-in-ledger"] } },
+        },
+    ];
+    const microMessages = materializeNativeSessionTranscript({
+        family: "openai",
+        conversation: [{ id: "u1", role: "user", content: "继续" }],
+        executionEvents: microEvents,
+        currentUserText: "继续",
+        clearedToolCallIds: ["call_grep_old"],
+    });
+    const microSerialized = JSON.stringify(microMessages);
+    checks.nativeAppliesMicroCompact = microSerialized.includes("[Old tool result content cleared]")
+        && microSerialized.includes("keep-raw-in-ledger") === false
+        && JSON.stringify(microEvents[1].payload).includes("keep-raw-in-ledger");
     return { pass: Object.values(checks).every(Boolean), checks, messages, system };
 }
 //# sourceMappingURL=native-session-transcript.js.map

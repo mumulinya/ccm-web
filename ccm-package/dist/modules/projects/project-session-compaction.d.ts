@@ -9,17 +9,17 @@ export declare function getProjectSessionCompactionActivity(project: string, pro
 export declare function listProjectSessionExecutionEvents(projectInput: string, projectSessionIdInput: string): import("../../system/session-execution-ledger").SessionExecutionEvent[];
 export declare function listProjectSessionHistoryMessages(projectInput: string, projectSessionIdInput: string): any;
 export declare function appendProjectSessionExecutionEvent(projectInput: string, projectSessionIdInput: string, event: any): {
-    id: string;
-    toolCallId: string;
-    hidden: true;
     type: import("../../system/session-execution-ledger").SessionExecutionEventType;
     toolName: string;
+    toolCallId: string;
     timestamp: string;
     runId: string;
     traceId: string;
     anchorMessageId: string;
     status: "error" | "ok" | "running";
     payload: any;
+    id: string;
+    hidden: true;
 };
 export declare function recordProjectSessionProviderUsage(project: string, projectSessionId: string, input?: any): import("../../system/session-compaction-core").SessionProviderUsageBaseline;
 export declare function scheduleProjectSessionMemoryExtraction(project: string, projectSessionId: string, options?: {

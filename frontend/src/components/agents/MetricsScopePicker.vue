@@ -95,7 +95,200 @@ onUnmounted(() => document.removeEventListener('pointerdown', onDocumentPointer)
 </template>
 
 <style scoped>
-.metrics-scope-picker{position:relative;min-width:240px}.scope-picker-trigger{height:42px;width:100%;display:grid;grid-template-columns:30px minmax(0,1fr) auto;align-items:center;gap:9px;padding:0 11px;border:1px solid var(--border-color);border-radius:10px;background:var(--control-bg,var(--bg-card));color:var(--text-primary);cursor:pointer;text-align:left}.scope-picker-trigger:hover,.scope-picker-trigger:focus-visible{border-color:var(--accent-blue);box-shadow:var(--focus-ring)}.scope-picker-icon,.option-icon{display:grid;place-items:center;width:30px;height:30px;border-radius:8px;background:var(--accent-soft);color:var(--accent-blue)}.scope-picker-copy,.option-copy{min-width:0;display:flex;flex-direction:column;gap:2px}.scope-picker-copy strong,.option-copy strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px}.scope-picker-copy small,.option-copy small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-muted);font-size:9px}.scope-picker-trigger>svg{color:var(--text-muted);transition:transform .18s}.scope-picker-trigger>svg.rotated{transform:rotate(180deg)}
-.scope-picker-popover{position:absolute;z-index:80;top:calc(100% + 7px);right:0;width:min(400px,calc(100vw - 32px));overflow:hidden;border:1px solid var(--border-color);border-radius:13px;background:var(--bg-card);box-shadow:0 18px 48px rgba(15,23,42,.18)}.scope-picker-mobile-head{display:none}.scope-picker-search{position:sticky;top:0;z-index:1;display:flex;align-items:center;gap:8px;padding:11px 12px;border-bottom:1px solid var(--border-color);background:var(--bg-card);color:var(--text-muted)}.scope-picker-search input{height:34px;min-width:0;flex:1;border:0;background:transparent;color:var(--text-primary);font-size:11px;outline:0}.scope-picker-list{max-height:390px;overflow:auto;padding:7px}.scope-picker-group header{position:sticky;top:0;z-index:1;display:flex;justify-content:space-between;align-items:center;padding:9px 9px 6px;background:var(--bg-card);color:var(--text-muted);font-size:9px;font-weight:850;letter-spacing:.04em}.scope-picker-group header b{font:9px ui-monospace,monospace}.scope-picker-option{width:100%;display:grid;grid-template-columns:32px minmax(0,1fr) 20px;align-items:center;gap:9px;margin:1px 0;padding:8px;border:0;border-radius:9px;background:transparent;color:var(--text-primary);text-align:left;cursor:pointer}.scope-picker-option:hover,.scope-picker-option.active{background:var(--accent-soft)}.scope-picker-option.active .option-icon{background:var(--accent-blue);color:#fff}.option-check{color:var(--accent-blue)}.scope-picker-empty{padding:32px 12px;text-align:center;color:var(--text-muted);font-size:11px}.scope-picker-scrim{display:none}
-@media(max-width:700px){.metrics-scope-picker{position:static;min-width:0}.scope-picker-popover{position:fixed;inset:auto 0 0;width:auto;max-height:min(76vh,620px);border-radius:18px 18px 0 0;z-index:101}.scope-picker-mobile-head{display:flex;align-items:center;justify-content:space-between;padding:15px 16px 8px}.scope-picker-mobile-head strong{font-size:14px}.scope-picker-mobile-head button{display:grid;place-items:center;width:32px;height:32px;border:0;border-radius:8px;background:var(--panel-muted);color:var(--text-primary)}.scope-picker-list{max-height:calc(76vh - 118px)}.scope-picker-scrim{display:block;position:fixed;inset:0;z-index:100;background:rgba(15,23,42,.38);backdrop-filter:blur(2px)}}
+.metrics-scope-picker {
+  position: relative;
+  min-width: 220px;
+}
+.scope-picker-trigger {
+  height: var(--control-height, 34px);
+  width: 100%;
+  box-sizing: border-box;
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md, 6px);
+  background: var(--control-bg, var(--bg-card));
+  color: var(--text-primary);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.scope-picker-trigger:hover,
+.scope-picker-trigger:focus-visible {
+  border-color: var(--accent-blue);
+  box-shadow: var(--focus-ring);
+}
+.scope-picker-icon,
+.option-icon {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 5px;
+  background: var(--accent-soft);
+  color: var(--accent-blue);
+}
+.scope-picker-copy,
+.option-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.scope-picker-copy strong,
+.option-copy strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11.5px;
+  line-height: 1.2;
+}
+.scope-picker-copy small,
+.option-copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted);
+  font-size: 9.5px;
+  line-height: 1.1;
+}
+.scope-picker-trigger > svg {
+  color: var(--text-muted);
+  transition: transform 0.18s;
+}
+.scope-picker-trigger > svg.rotated {
+  transform: rotate(180deg);
+}
+.scope-picker-popover {
+  position: absolute;
+  z-index: 80;
+  top: calc(100% + 6px);
+  right: 0;
+  width: min(380px, calc(100vw - 32px));
+  overflow: hidden;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: var(--surface, var(--bg-card));
+  box-shadow: var(--shadow-lg, 0 16px 40px rgba(0, 0, 0, 0.15));
+}
+.scope-picker-mobile-head { display: none; }
+.scope-picker-search {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--surface, var(--bg-card));
+  color: var(--text-muted);
+}
+.scope-picker-search input {
+  height: 30px;
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 12px;
+  outline: 0;
+}
+.scope-picker-list {
+  max-height: 360px;
+  overflow: auto;
+  padding: 6px;
+}
+.scope-picker-group header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 8px 4px;
+  background: var(--surface, var(--bg-card));
+  color: var(--text-muted);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+.scope-picker-group header b {
+  font: 10px var(--font-mono, monospace);
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: var(--panel-muted);
+}
+.scope-picker-option {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr) 18px;
+  align-items: center;
+  gap: 8px;
+  margin: 1px 0;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+.scope-picker-option:hover,
+.scope-picker-option.active {
+  background: var(--accent-soft);
+}
+.scope-picker-option.active .option-icon {
+  background: var(--accent-blue);
+  color: #fff;
+}
+.option-check { color: var(--accent-blue); }
+.scope-picker-empty {
+  padding: 28px 12px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.scope-picker-scrim { display: none; }
+@media (max-width: 700px) {
+  .metrics-scope-picker { position: static; min-width: 0; }
+  .scope-picker-popover {
+    position: fixed;
+    inset: auto 0 0;
+    width: auto;
+    max-height: min(76vh, 620px);
+    border-radius: 16px 16px 0 0;
+    z-index: 101;
+  }
+  .scope-picker-mobile-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 16px 8px;
+  }
+  .scope-picker-mobile-head strong { font-size: 14px; }
+  .scope-picker-mobile-head button {
+    display: grid;
+    place-items: center;
+    width: 32px;
+    height: 32px;
+    border: 0;
+    border-radius: 8px;
+    background: var(--panel-muted);
+    color: var(--text-primary);
+  }
+  .scope-picker-list { max-height: calc(76vh - 118px); }
+  .scope-picker-scrim {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    background: rgba(15, 23, 42, 0.42);
+    backdrop-filter: blur(2px);
+  }
+}
 </style>

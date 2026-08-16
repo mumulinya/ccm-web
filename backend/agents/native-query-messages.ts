@@ -1,5 +1,6 @@
 import type { ProviderAgentTurn, ProviderToolCall } from "../system/provider-native-tools";
 import { shouldUseAnthropic, shouldUseGemini, type LlmChatMessage } from "../modules/collaboration/group-orchestrator-llm-client";
+import { isPersistedToolResult, modelVisiblePersistedToolResult } from "../tools/tool-result-storage";
 
 export type NativeQueryFamily = "openai" | "anthropic" | "gemini";
 
@@ -20,6 +21,8 @@ export function nativeQueryFamily(config: any): NativeQueryFamily {
 
 function stringifyToolOutput(result: NativeToolResult) {
   if (result.error) return JSON.stringify({ ok: false, error: result.error, reason: result.reason || "" });
+  if (isPersistedToolResult(result.output)) return modelVisiblePersistedToolResult(result.output);
+  if (isPersistedToolResult(result.output?.observation)) return modelVisiblePersistedToolResult(result.output.observation);
   if (typeof result.output === "string") return result.output;
   try { return JSON.stringify(result.output ?? { ok: result.ok !== false }); }
   catch { return String(result.output ?? ""); }
@@ -88,7 +91,7 @@ function geminiToolResultMessage(results: NativeToolResult[]) {
         id: result.callId,
         response: result.ok === false
           ? { ok: false, error: result.error || result.reason || "tool_failed" }
-          : (result.output && typeof result.output === "object" ? result.output : { result: stringifyToolOutput(result) }),
+          : (result.output && typeof result.output === "object" && !isPersistedToolResult(result.output) ? result.output : { result: stringifyToolOutput(result) }),
       },
     })),
   };
@@ -161,7 +164,7 @@ function replaceToolResultPart(part: any, byId: Map<string, NativeToolResult>) {
         ...part.functionResponse,
         response: result.ok === false
           ? { ok: false, error: result.error || result.reason || "tool_failed" }
-          : (result.output && typeof result.output === "object" ? result.output : { result: stringifyToolOutput(result) }),
+          : (result.output && typeof result.output === "object" && !isPersistedToolResult(result.output) ? result.output : { result: stringifyToolOutput(result) }),
       },
     };
   }

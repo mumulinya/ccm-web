@@ -4,10 +4,12 @@ import { type AgentLoopBudget } from "../system/agent-loop-budget";
 import { type ConversationPlanScope } from "../system/conversation-plan-mode-gate";
 import { type MainAgentTurnDecisionV1 } from "./main-agent-turn";
 import { type NativeQueryFamily, type NativeToolResult } from "./native-query-messages";
+import { type ToolResultPersistContext } from "../tools/tool-result-storage";
 export declare const NATIVE_CONTROL_TOOL_NAMES: readonly ["ccm_ask_user", "ccm_present_plan", "ccm_dispatch"];
 export type NativeControlToolName = typeof NATIVE_CONTROL_TOOL_NAMES[number];
 export declare function isNativeControlTool(name: string): boolean;
 export declare function nativeControlToolDefinitions(): ProviderToolDefinition[];
+export declare function nativeDiscoveryToolDefinitions(): ProviderToolDefinition[];
 export declare function catalogToNativeTools(toolContext: any): ProviderToolDefinition[];
 export declare function shouldUseNativeQueryLoop(config: any): boolean;
 export declare function mapNativeTurnToParsed(turn: ProviderAgentTurn, controlCalls?: ProviderToolCall[]): {
@@ -105,6 +107,7 @@ export type NativeQueryLoopInput = {
     callTurn?: (config: any, options: LlmCallOptions) => Promise<ProviderAgentTurn>;
     getTools?: () => ProviderToolDefinition[];
     compactTranscript?: (messages: LlmChatMessage[]) => LlmChatMessage[];
+    persistContext?: ToolResultPersistContext | null;
     shouldStopAfterTools?: (calls: ProviderToolCall[], results: NativeToolResult[]) => boolean;
 };
 export type NativeQueryLoopResult = {
@@ -144,6 +147,9 @@ export declare function runNativeQueryLoopSelfTest(): Promise<{
         planQualityRepairsOnce: boolean;
         planQualityAcceptsDegradedAfterRepair: boolean;
         planQualityPassesFirstShot: boolean;
+        catalogEmitsDiscoveryTools: boolean;
+        catalogUsesWorkspaceShortNames: boolean;
+        catalogIncludesGroupBuiltin: boolean;
     };
     result: NativeQueryLoopResult;
 }>;

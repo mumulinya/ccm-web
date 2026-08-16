@@ -563,6 +563,7 @@ export function appendGlobalAgentExecutionEvent(sessionIdInput: string, event: a
     payload: type === "tool_use"
       ? { arguments: event?.arguments || {}, risk: event?.risk || "", confirmed: event?.confirmed === true }
       : { observation: event?.observation ?? null, error: event?.error || event?.question || "", duration_ms: event?.duration_ms || 0, confirmed: event?.confirmed === true },
+    persistContext: { scope: "global", sessionId },
   });
   if (!events.some(item => item.id === created.id)) events.push(created);
   transcript.executionMessages = events.sort((a, b) => a.timestamp.localeCompare(b.timestamp));

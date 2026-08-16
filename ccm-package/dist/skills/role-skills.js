@@ -186,16 +186,16 @@ function isRoleSkillWorkRequest(message = "", options = {}) {
 function selectRoleSkills(role, taskText = "", options = {}) {
     ensureRoleSkillsInstalled();
     const work = role === "project-child-agent" || role === "test-agent" || isRoleSkillWorkRequest(taskText, options);
-    const planAuthoringOnly = !work
-        && options.planAuthoring === true
+    const planAuthoring = options.planAuthoring === true
         && (role === "group-main-agent" || role === "project-main-agent");
-    if (!work && !planAuthoringOnly)
+    const planAuthoringOnly = planAuthoring && !work;
+    if (!work && !planAuthoring)
         return [];
     const rows = [];
     const phase = options.phase || (role === "test-agent" ? "verification" : role === "project-child-agent" ? "execution" : "planning");
     const add = (name, kind, reason) => rows.push({ name, kind, reason });
-    if (planAuthoringOnly) {
-        add(internal_skill_catalog_1.CCM_ROLE_SKILL_NAMES.implementationPlanAuthoring, "workflow", "本轮需要产出用户可确认的计划卡");
+    if (planAuthoring) {
+        add(internal_skill_catalog_1.CCM_ROLE_SKILL_NAMES.implementationPlanAuthoring, "workflow", "用户已选择 Plan 模式，本轮需要产出用户可确认的计划卡");
     }
     if (!planAuthoringOnly && role === "global-agent") {
         add(internal_skill_catalog_1.CCM_ROLE_SKILL_NAMES.global, "role", "跨群聊任务路由与监督");
@@ -209,9 +209,6 @@ function selectRoleSkills(role, taskText = "", options = {}) {
         }
         else {
             add(internal_skill_catalog_1.CCM_ROLE_SKILL_NAMES.taskDecomposition, "workflow", "当前阶段需要拆解和路由任务");
-            if (phase === "planning") {
-                add(internal_skill_catalog_1.CCM_ROLE_SKILL_NAMES.implementationPlanAuthoring, "workflow", "本轮需要产出用户可确认的计划卡");
-            }
         }
     }
     if (role === "project-child-agent") {
@@ -235,6 +232,8 @@ function selectRoleSkills(role, taskText = "", options = {}) {
         for (const rawName of modelSelected) {
             const name = String(rawName || "").trim();
             if (!definitions.has(name) || roleRoots.has(name))
+                continue;
+            if (name === internal_skill_catalog_1.CCM_ROLE_SKILL_NAMES.implementationPlanAuthoring && !planAuthoring)
                 continue;
             add(name, name === internal_skill_catalog_1.CCM_ROLE_SKILL_NAMES.receipt || name === internal_skill_catalog_1.CCM_ROLE_SKILL_NAMES.evidence ? "shared" : "workflow", "统一大模型根据完整任务语义选择");
         }
@@ -287,6 +286,8 @@ function runRoleSkillSelectionSelfTest() {
     const ordinaryGroup = selectRoleSkills("group-main-agent", "这个项目是做什么的？");
     const globalWork = selectRoleSkills("global-agent", "model-selected", { modelDecision: { actionRequired: true, selectedSkills: [internal_skill_catalog_1.CCM_ROLE_SKILL_NAMES.requirementIntake, internal_skill_catalog_1.CCM_ROLE_SKILL_NAMES.incidentDiagnosis] } });
     const groupWork = selectRoleSkills("group-main-agent", "model-selected", { source: "task", phase: "planning", selectedSkillNames: [internal_skill_catalog_1.CCM_ROLE_SKILL_NAMES.businessRuleModeling] });
+    const groupWorkPlanMode = selectRoleSkills("group-main-agent", "model-selected", { source: "task", phase: "planning", planAuthoring: true, selectedSkillNames: [internal_skill_catalog_1.CCM_ROLE_SKILL_NAMES.businessRuleModeling] });
+    const sneakyPlanSkill = selectRoleSkills("group-main-agent", "model-selected", { source: "task", phase: "planning", selectedSkillNames: [internal_skill_catalog_1.CCM_ROLE_SKILL_NAMES.implementationPlanAuthoring] });
     const groupReview = selectRoleSkills("group-main-agent", "model-selected", { forceWork: true, phase: "review", selectedSkillNames: [internal_skill_catalog_1.CCM_ROLE_SKILL_NAMES.businessScenarioAcceptance] });
     const contextualGroupWork = selectRoleSkills("group-main-agent", "那就以这个为目标");
     const planAuthoringOnly = selectRoleSkills("group-main-agent", "这个项目是做什么的？", { planAuthoring: true, phase: "planning" });
@@ -314,8 +315,13 @@ function runRoleSkillSelectionSelfTest() {
             && !globalWork.some(item => item.name === internal_skill_catalog_1.CCM_ROLE_SKILL_NAMES.group),
         groupGetsCoordinatorAndDecomposition: groupWork[0]?.name === internal_skill_catalog_1.CCM_ROLE_SKILL_NAMES.group
             && groupWork.some(item => item.name === internal_skill_catalog_1.CCM_ROLE_SKILL_NAMES.taskDecomposition)
-            && groupWork.some(item => item.name === internal_skill_catalog_1.CCM_ROLE_SKILL_NAMES.implementationPlanAuthoring)
+            && !groupWork.some(item => item.name === internal_skill_catalog_1.CCM_ROLE_SKILL_NAMES.implementationPlanAuthoring)
             && !groupWork.some(item => item.name === internal_skill_catalog_1.CCM_ROLE_SKILL_NAMES.project),
+        groupPlanModeGetsPlanSkill: groupWorkPlanMode.some(item => item.name === internal_skill_catalog_1.CCM_ROLE_SKILL_NAMES.implementationPlanAuthoring)
+            && groupWorkPlanMode.some(item => item.name === internal_skill_catalog_1.CCM_ROLE_SKILL_NAMES.group)
+            && groupWorkPlanMode.some(item => item.name === internal_skill_catalog_1.CCM_ROLE_SKILL_NAMES.taskDecomposition),
+        agentModeIgnoresModelPickedPlanSkill: !sneakyPlanSkill.some(item => item.name === internal_skill_catalog_1.CCM_ROLE_SKILL_NAMES.implementationPlanAuthoring)
+            && sneakyPlanSkill.some(item => item.name === internal_skill_catalog_1.CCM_ROLE_SKILL_NAMES.group),
         groupReviewGetsReviewAndReceipt: groupReview.some(item => item.name === internal_skill_catalog_1.CCM_ROLE_SKILL_NAMES.deliveryReviewRework)
             && groupReview.some(item => item.name === internal_skill_catalog_1.CCM_ROLE_SKILL_NAMES.receipt)
             && !groupReview.some(item => item.name === internal_skill_catalog_1.CCM_ROLE_SKILL_NAMES.implementationPlanAuthoring),
@@ -336,7 +342,7 @@ function runRoleSkillSelectionSelfTest() {
             && testWork.some(item => item.name === internal_skill_catalog_1.CCM_ROLE_SKILL_NAMES.frontendVisualQa),
         businessPlanningGetsRuleModeling: businessPlanning.some(item => item.name === internal_skill_catalog_1.CCM_ROLE_SKILL_NAMES.businessRuleModeling)
             && businessPlanning.some(item => item.name === internal_skill_catalog_1.CCM_ROLE_SKILL_NAMES.taskDecomposition)
-            && businessPlanning.some(item => item.name === internal_skill_catalog_1.CCM_ROLE_SKILL_NAMES.implementationPlanAuthoring),
+            && !businessPlanning.some(item => item.name === internal_skill_catalog_1.CCM_ROLE_SKILL_NAMES.implementationPlanAuthoring),
         interfaceWorkGetsContractAndScenarioAcceptance: contractWork.some(item => item.name === internal_skill_catalog_1.CCM_ROLE_SKILL_NAMES.interfaceDataContract)
             && contractWork.some(item => item.name === internal_skill_catalog_1.CCM_ROLE_SKILL_NAMES.businessScenarioAcceptance),
         businessReviewGetsScenarioAcceptance: businessReview.some(item => item.name === internal_skill_catalog_1.CCM_ROLE_SKILL_NAMES.businessScenarioAcceptance),
@@ -348,7 +354,7 @@ function runRoleSkillSelectionSelfTest() {
         directProjectGetsAllBusinessWorkflowSkills: directProjectBusinessWork.some(item => item.name === internal_skill_catalog_1.CCM_ROLE_SKILL_NAMES.businessRuleModeling)
             && directProjectBusinessWork.some(item => item.name === internal_skill_catalog_1.CCM_ROLE_SKILL_NAMES.interfaceDataContract)
             && directProjectBusinessWork.some(item => item.name === internal_skill_catalog_1.CCM_ROLE_SKILL_NAMES.businessScenarioAcceptance),
-        selectionBudgetBounded: [globalWork, groupWork, groupReview, projectWork, incidentWork, releaseWork, testWork, businessPlanning, contractWork, businessReview, businessTest, visualOnly, directProjectBusinessWork, planAuthoringOnly, planAuthoringProjectOnly].every(items => items.length <= 6),
+        selectionBudgetBounded: [globalWork, groupWork, groupWorkPlanMode, sneakyPlanSkill, groupReview, projectWork, incidentWork, releaseWork, testWork, businessPlanning, contractWork, businessReview, businessTest, visualOnly, directProjectBusinessWork, planAuthoringOnly, planAuthoringProjectOnly].every(items => items.length <= 6),
         usageDirectiveRequiresApplicationAndReceipt: buildSelectedSkillUsageDirective(projectWork).includes("不是可选目录项")
             && buildSelectedSkillUsageDirective(projectWork).includes("CCM_AGENT_RECEIPT"),
     };
@@ -360,6 +366,8 @@ function runRoleSkillSelectionSelfTest() {
             ordinaryGroup: ordinaryGroup.map(item => item.name),
             globalWork: globalWork.map(item => item.name),
             groupWork: groupWork.map(item => item.name),
+            groupWorkPlanMode: groupWorkPlanMode.map(item => item.name),
+            sneakyPlanSkill: sneakyPlanSkill.map(item => item.name),
             groupReview: groupReview.map(item => item.name),
             contextualGroupWork: contextualGroupWork.map(item => item.name),
             planAuthoringOnly: planAuthoringOnly.map(item => item.name),

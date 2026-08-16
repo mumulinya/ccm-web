@@ -1,5 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.globalNativeTools = globalNativeTools;
 exports.nativeTurnToGlobalDecision = nativeTurnToGlobalDecision;
 exports.runGlobalNativeQueryCall = runGlobalNativeQueryCall;
 exports.runGlobalNativeQuerySelfTest = runGlobalNativeQuerySelfTest;
@@ -7,17 +8,16 @@ const native_query_loop_1 = require("../../agents/native-query-loop");
 const group_orchestrator_llm_client_1 = require("../collaboration/group-orchestrator-llm-client");
 const runtime_1 = require("../../agents/global/runtime");
 const global_agent_run_store_1 = require("../../agents/global/global-agent-run-store");
-const workspace_readonly_tools_1 = require("../../tools/workspace-readonly-tools");
+const global_tool_load_policy_1 = require("../../agents/global/global-tool-load-policy");
+const provider_native_tools_1 = require("../../system/provider-native-tools");
 function globalNativeTools(run) {
     const loaded = new Set((run?.loaded_tool_names || run?.loadedToolNames || []).map((value) => String(value || "")));
-    const deferredWorkspaceNames = new Set(workspace_readonly_tools_1.WORKSPACE_READONLY_TOOL_DEFINITIONS_V3
-        .filter(tool => tool.loadPolicy === "search" && !loaded.has(tool.name) && !loaded.has(tool.canonicalName))
-        .map(tool => tool.name));
-    const specs = (0, runtime_1.buildGlobalAgentToolDefinitions)(global_agent_run_store_1.GLOBAL_AGENT_TOOL_SPECS.filter(spec => !deferredWorkspaceNames.has(spec.name)));
+    const specs = (0, runtime_1.buildGlobalAgentToolDefinitions)(global_agent_run_store_1.GLOBAL_AGENT_TOOL_SPECS);
     const fromSpecs = specs.map(spec => ({
         name: spec.name,
         description: spec.description,
         inputSchema: spec.inputSchema || { type: "object", properties: {} },
+        deferred: (0, global_tool_load_policy_1.isGlobalDeferredTool)(spec.name, Array.from(loaded)),
     }));
     return [
         ...(0, native_query_loop_1.nativeControlToolDefinitions)().filter(tool => tool.name !== "ccm_dispatch"),
@@ -91,6 +91,7 @@ async function runGlobalNativeQueryCall(input) {
         exactSessionId: String(run.session_id || ""),
         signal: input.signal,
         nativeToolReference: true,
+        persistContext: { scope: "global", sessionId: String(run.session_id || "") },
         getTools: () => globalNativeTools(run),
         isReadOnly: isReadOnlyCall,
         shouldStopAfterTools: (calls) => calls.some(call => !isReadOnlyCall(call)),
@@ -123,6 +124,7 @@ async function runGlobalNativeQueryCall(input) {
                         state: "investigate",
                         message: "",
                         tool: { name: call.name, arguments: call.arguments || {}, risk: "read" },
+                        toolCallId: call.id,
                         observation,
                     });
                     (0, runtime_1.recordGlobalAgentRuntimeOutput)(run, {
@@ -157,9 +159,19 @@ async function runGlobalNativeQueryCall(input) {
 function runGlobalNativeQuerySelfTest() {
     const decision = nativeTurnToGlobalDecision({ responseType: "reply", reply: "hello" }, null);
     const writeDecision = nativeTurnToGlobalDecision({ responseType: "reply", reply: "执行中" }, { id: "1", name: "create_task", arguments: { title: "x" }, argumentsChecksum: "" });
+    const firstTurn = (0, provider_native_tools_1.providerToolsRequestPatch)("openai", globalNativeTools({ loaded_tool_names: [] }));
+    const firstNames = (firstTurn.body.tools || []).map((tool) => tool.function?.name || tool.name);
+    const afterSearch = (0, provider_native_tools_1.providerToolsRequestPatch)("openai", globalNativeTools({ loaded_tool_names: ["manage_project"] }));
+    const afterNames = (afterSearch.body.tools || []).map((tool) => tool.function?.name || tool.name);
     const checks = {
         replyMapsAnswer: decision.state === "answer" && decision.message === "hello",
         writeMapsExecute: writeDecision.state === "execute" && writeDecision.tool?.name === "create_task",
+        firstTurnOmitsManagement: firstNames.includes("tool_search") === true
+            && firstNames.includes("inspect_system") === true
+            && firstNames.includes("read_file") === true
+            && firstNames.includes("manage_project") === false
+            && firstNames.includes("orchestrate_development") === false,
+        searchLoadsManagementSchema: afterNames.includes("manage_project") === true,
     };
     return { pass: Object.values(checks).every(Boolean), checks };
 }

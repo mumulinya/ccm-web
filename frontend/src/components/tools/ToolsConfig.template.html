@@ -110,7 +110,7 @@
                   <div style="flex:1">
                     <div class="tool-name">
                       {{ tool.name }}
-                      <span class="badge" style="background:rgba(59,130,246,0.1);color:var(--accent-blue)">{{ tool.category }}</span>
+                      <span class="badge badge-blue">{{ tool.category }}</span>
                       <span class="security-badge" :class="tool.securityClass">{{ tool.security }}</span>
                     </div>
                     <div class="tool-desc" style="margin-top:6px;font-size:12.5px;line-height:1.5;color:var(--text-secondary)">
@@ -509,7 +509,7 @@
                     <div class="skill-name">{{ skill.name }}</div>
                     <div class="skill-id font-mono">skills/{{ skill.id }}</div>
                   </div>
-                  <span class="badge" style="background:rgba(168,85,247,0.1);color:var(--accent-purple)">外部 Skill</span>
+                  <span class="badge badge-purple">外部 Skill</span>
                 </div>
                 <div class="skill-card-body">
                   {{ skill.description || '暂无描述' }}

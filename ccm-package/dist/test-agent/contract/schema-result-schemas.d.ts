@@ -4605,8 +4605,8 @@ export declare const browserCheckExecutionPlanSchema: z.ZodObject<{
         project?: string;
         name?: string;
         url?: string;
-        adversarial?: boolean;
         probeType?: string;
+        adversarial?: boolean;
         projectIndex?: number;
         checkIndex?: number;
         checkId?: string;
@@ -4617,8 +4617,8 @@ export declare const browserCheckExecutionPlanSchema: z.ZodObject<{
         project?: string;
         name?: string;
         url?: string;
-        adversarial?: boolean;
         probeType?: string;
+        adversarial?: boolean;
         projectIndex?: number;
         checkIndex?: number;
         checkId?: string;
@@ -4633,8 +4633,8 @@ export declare const browserCheckExecutionPlanSchema: z.ZodObject<{
         project?: string;
         name?: string;
         url?: string;
-        adversarial?: boolean;
         probeType?: string;
+        adversarial?: boolean;
         projectIndex?: number;
         checkIndex?: number;
         checkId?: string;
@@ -4653,8 +4653,8 @@ export declare const browserCheckExecutionPlanSchema: z.ZodObject<{
         project?: string;
         name?: string;
         url?: string;
-        adversarial?: boolean;
         probeType?: string;
+        adversarial?: boolean;
         projectIndex?: number;
         checkIndex?: number;
         checkId?: string;
@@ -4811,8 +4811,8 @@ export declare const browserEvidenceTemporalIntegritySchema: z.ZodObject<{
         kind?: "report" | "execution_plan" | "browser_result" | "browser_tool_call";
         run?: number;
         startedAt?: string;
-        errors?: string[];
         finishedAt?: string;
+        errors?: string[];
         checkId?: string;
     }, {
         id?: string;
@@ -4821,8 +4821,8 @@ export declare const browserEvidenceTemporalIntegritySchema: z.ZodObject<{
         kind?: "report" | "execution_plan" | "browser_result" | "browser_tool_call";
         run?: number;
         startedAt?: string;
-        errors?: string[];
         finishedAt?: string;
+        errors?: string[];
         checkId?: string;
     }>, "many">;
 }, "strict", z.ZodTypeAny, {
@@ -4834,8 +4834,8 @@ export declare const browserEvidenceTemporalIntegritySchema: z.ZodObject<{
         kind?: "report" | "execution_plan" | "browser_result" | "browser_tool_call";
         run?: number;
         startedAt?: string;
-        errors?: string[];
         finishedAt?: string;
+        errors?: string[];
         checkId?: string;
     }[];
     toleranceMs?: number;
@@ -4857,8 +4857,8 @@ export declare const browserEvidenceTemporalIntegritySchema: z.ZodObject<{
         kind?: "report" | "execution_plan" | "browser_result" | "browser_tool_call";
         run?: number;
         startedAt?: string;
-        errors?: string[];
         finishedAt?: string;
+        errors?: string[];
         checkId?: string;
     }[];
     toleranceMs?: number;
@@ -4891,10 +4891,10 @@ export declare const browserResourceLifecycleEventSchema: z.ZodObject<{
     provider?: "mcp" | "playwright";
     scope?: string;
     releasedAt?: string;
-    resourceType?: "browser" | "browser_context" | "external_browser_session";
     acquiredAt?: string;
     ownership?: "owned" | "external";
     planId?: string;
+    resourceType?: "browser" | "browser_context" | "external_browser_session";
     releaseAttemptedAt?: string;
 }, {
     id?: string;
@@ -4903,10 +4903,10 @@ export declare const browserResourceLifecycleEventSchema: z.ZodObject<{
     provider?: "mcp" | "playwright";
     scope?: string;
     releasedAt?: string;
-    resourceType?: "browser" | "browser_context" | "external_browser_session";
     acquiredAt?: string;
     ownership?: "owned" | "external";
     planId?: string;
+    resourceType?: "browser" | "browser_context" | "external_browser_session";
     releaseAttemptedAt?: string;
 }>;
 export declare const browserResourceLifecycleSummarySchema: z.ZodObject<{
@@ -4955,10 +4955,10 @@ export declare const browserResourceLifecycleSummarySchema: z.ZodObject<{
         provider?: "mcp" | "playwright";
         scope?: string;
         releasedAt?: string;
-        resourceType?: "browser" | "browser_context" | "external_browser_session";
         acquiredAt?: string;
         ownership?: "owned" | "external";
         planId?: string;
+        resourceType?: "browser" | "browser_context" | "external_browser_session";
         releaseAttemptedAt?: string;
     }, {
         id?: string;
@@ -4967,10 +4967,10 @@ export declare const browserResourceLifecycleSummarySchema: z.ZodObject<{
         provider?: "mcp" | "playwright";
         scope?: string;
         releasedAt?: string;
-        resourceType?: "browser" | "browser_context" | "external_browser_session";
         acquiredAt?: string;
         ownership?: "owned" | "external";
         planId?: string;
+        resourceType?: "browser" | "browser_context" | "external_browser_session";
         releaseAttemptedAt?: string;
     }>, "many">;
 }, "strict", z.ZodTypeAny, {
@@ -4982,10 +4982,10 @@ export declare const browserResourceLifecycleSummarySchema: z.ZodObject<{
         provider?: "mcp" | "playwright";
         scope?: string;
         releasedAt?: string;
-        resourceType?: "browser" | "browser_context" | "external_browser_session";
         acquiredAt?: string;
         ownership?: "owned" | "external";
         planId?: string;
+        resourceType?: "browser" | "browser_context" | "external_browser_session";
         releaseAttemptedAt?: string;
     }[];
     eventCount?: number;
@@ -5014,10 +5014,10 @@ export declare const browserResourceLifecycleSummarySchema: z.ZodObject<{
         provider?: "mcp" | "playwright";
         scope?: string;
         releasedAt?: string;
-        resourceType?: "browser" | "browser_context" | "external_browser_session";
         acquiredAt?: string;
         ownership?: "owned" | "external";
         planId?: string;
+        resourceType?: "browser" | "browser_context" | "external_browser_session";
         releaseAttemptedAt?: string;
     }[];
     eventCount?: number;

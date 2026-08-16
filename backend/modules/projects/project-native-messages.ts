@@ -13,9 +13,13 @@ import {
   listProjectSessionHistoryMessages,
 } from "./project-session-compaction";
 import type { LlmChatMessage } from "../collaboration/group-orchestrator-llm-client";
-import { PRESENTED_PLAN_DISPATCH_HANDOFF_GUIDANCE, PRESENTED_PLAN_SHAPE_GUIDANCE } from "../collaboration/group-presented-plan";
+import {
+  PROJECT_MAIN_SESSION_CONTEXT_GUIDANCE,
+  buildProjectMainSessionGuidance,
+} from "../../agents/main-agent-identity";
+import { sessionModelReplacementTextMap } from "../../system/session-model-context";
 
-export const PROJECT_MAIN_SESSION_CONTEXT_GUIDANCE = `会话里已有需求、上一轮计划和工具结果视为已知；未变化的文件不要再全量读取。展开或重述计划不是派发授权。第一次为当前需求出实现计划时，允许最小只读核实以点名缝在哪。${PRESENTED_PLAN_SHAPE_GUIDANCE}用户已确认计划卡后调用 ccm_dispatch 时：${PRESENTED_PLAN_DISPATCH_HANDOFF_GUIDANCE}`;
+export { PROJECT_MAIN_SESSION_CONTEXT_GUIDANCE, buildProjectMainSessionGuidance };
 
 export function tryBuildProjectNativeMainMessages(input: {
   project: string;
@@ -52,6 +56,9 @@ export function tryBuildProjectNativeMainMessages(input: {
     canonicalSummary: projection?.canonicalSummary ? projection.summary : null,
     metaBlocks: input.metaBlocks || [],
     currentUserText: String(input.userMessage || "").trim(),
+    clearedToolCallIds: projection?.microCompact?.clearedToolCallIds,
+    replacedToolResults: sessionModelReplacementTextMap(projection?.contentReplacement),
+    persistContext: { scope: "project", sessionId: projectSessionId },
   });
   if (lastNativeUserText(history) !== String(input.userMessage || "").trim()) return null;
   const system = splitNativeSystemSegments({

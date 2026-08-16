@@ -1,4 +1,5 @@
-import type { ProviderToolCall } from "../../system/provider-native-tools";
+import { type ProviderToolCall, type ProviderToolDefinition } from "../../system/provider-native-tools";
+export declare function globalNativeTools(run: any): ProviderToolDefinition[];
 export declare function nativeTurnToGlobalDecision(parsed: any, pendingWrite?: ProviderToolCall | null): {
     state: string;
     message: string;
@@ -43,5 +44,7 @@ export declare function runGlobalNativeQuerySelfTest(): {
     checks: {
         replyMapsAnswer: boolean;
         writeMapsExecute: boolean;
+        firstTurnOmitsManagement: boolean;
+        searchLoadsManagementSchema: boolean;
     };
 };

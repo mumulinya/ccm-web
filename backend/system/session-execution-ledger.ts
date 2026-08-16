@@ -1,5 +1,12 @@
 import * as crypto from "crypto";
 import { projectContextSourceToolResultForPersistence } from "./context-source-tool-result-projection";
+import {
+  isPersistedToolResult,
+  modelVisiblePersistedToolResult,
+  persistPayloadObservation,
+  TOOL_RESULT_CLEARED_MESSAGE,
+  type ToolResultPersistContext,
+} from "../tools/tool-result-storage";
 
 export type SessionExecutionEventType = "tool_use" | "tool_result";
 
@@ -47,27 +54,33 @@ export function createSessionExecutionEvent(input: Partial<SessionExecutionEvent
   type: SessionExecutionEventType;
   toolName: string;
   payload?: any;
+  persistContext?: ToolResultPersistContext | null;
 }) {
   const timestamp = String(input.timestamp || new Date().toISOString());
   const status: SessionExecutionEvent["status"] = input.status === "error" ? "error" : input.type === "tool_use" ? "running" : "ok";
-  const normalized = {
+  const rawPayload = sanitizeSessionExecutionValue(input.type === "tool_result"
+    ? projectContextSourceToolResultForPersistence(input.toolName, input.payload ?? null)
+    : input.payload ?? null);
+  const toolCallId = String(input.toolCallId || "") || `tc_${hash([String(input.runId || ""), String(input.toolName || "tool"), timestamp, input.type])}`;
+  const payload = input.type === "tool_result"
+    ? persistPayloadObservation({
+      toolName: String(input.toolName || "tool"),
+      toolCallId,
+      payload: rawPayload,
+      context: input.persistContext || null,
+    })
+    : rawPayload;
+  return {
     type: input.type,
     toolName: String(input.toolName || "tool"),
-    toolCallId: String(input.toolCallId || ""),
+    toolCallId,
     timestamp,
     runId: String(input.runId || ""),
     traceId: String(input.traceId || ""),
     anchorMessageId: String(input.anchorMessageId || ""),
     status,
-    payload: sanitizeSessionExecutionValue(input.type === "tool_result"
-      ? projectContextSourceToolResultForPersistence(input.toolName, input.payload ?? null)
-      : input.payload ?? null),
-  };
-  const toolCallId = normalized.toolCallId || `tc_${hash([normalized.runId, normalized.toolName, timestamp, normalized.type])}`;
-  return {
-    ...normalized,
-    id: String(input.id || `exec_${hash([toolCallId, normalized.type, timestamp])}`),
-    toolCallId,
+    payload,
+    id: String(input.id || `exec_${hash([toolCallId, input.type, timestamp])}`),
     hidden: true as const,
   } satisfies SessionExecutionEvent;
 }
@@ -75,9 +88,16 @@ export function createSessionExecutionEvent(input: Partial<SessionExecutionEvent
 export function executionEventModelContent(event: SessionExecutionEvent, options: { clearToolResult?: boolean; replacementText?: string } = {}) {
   const serialized = JSON.stringify(event.payload ?? null);
   if (event.type === "tool_use") return `[tool_use ${event.toolName} #${event.toolCallId}]\n${serialized}`;
+  const persisted = isPersistedToolResult(event.payload)
+    ? event.payload
+    : isPersistedToolResult(event.payload?.observation)
+      ? event.payload.observation
+      : null;
   const projected = options.clearToolResult === true
-    ? "[Old tool result content cleared]"
-    : String(options.replacementText || serialized);
+    ? TOOL_RESULT_CLEARED_MESSAGE
+    : persisted
+      ? modelVisiblePersistedToolResult(persisted)
+      : String(options.replacementText || serialized);
   return `[tool_result ${event.toolName} #${event.toolCallId} status=${event.status}]\n${projected}`;
 }
 

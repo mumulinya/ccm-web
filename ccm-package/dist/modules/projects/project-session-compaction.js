@@ -177,6 +177,7 @@ function appendProjectSessionExecutionEvent(projectInput, projectSessionIdInput,
         timestamp: event?.timestamp || event?.at || new Date().toISOString(),
         status: event?.status === "error" || event?.error ? "error" : type === "tool_use" ? "running" : "ok",
         payload: event?.payload ?? (type === "tool_use" ? { arguments: event?.arguments || {} } : { observation: event?.observation ?? null, error: event?.error || "" }),
+        persistContext: { scope: "project", sessionId: projectSessionId },
     });
     if (!events.some(item => item.id === created.id))
         events.push(created);

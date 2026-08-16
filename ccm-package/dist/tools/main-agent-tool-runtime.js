@@ -34,8 +34,11 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.MAIN_AGENT_NATIVE_TOOLS_V2 = void 0;
+exports.mainAgentCallableToolName = mainAgentCallableToolName;
+exports.renderMainAgentToolCatalogLine = renderMainAgentToolCatalogLine;
 exports.isMainAgentReadOnlyMcpTool = isMainAgentReadOnlyMcpTool;
 exports.buildMainAgentToolRuntimeContext = buildMainAgentToolRuntimeContext;
+exports.registerMainAgentDiscoverableTools = registerMainAgentDiscoverableTools;
 exports.normalizeMainAgentToolRequests = normalizeMainAgentToolRequests;
 exports.mainAgentToolRequestFingerprint = mainAgentToolRequestFingerprint;
 exports.buildMainAgentLoadedContextItems = buildMainAgentLoadedContextItems;
@@ -80,14 +83,21 @@ function mainAgentCallableToolName(tool) {
         ? String(tool?.name || "")
         : String(tool?.canonicalName || tool?.name || "");
 }
-function renderWorkspaceToolPrompt(label, tools, deferred = false) {
+function renderMainAgentToolCatalogLine(tool, schemaSurface = "prompt") {
+    const name = mainAgentCallableToolName(tool);
+    const description = String(tool?.description || tool?.name || "");
+    if (schemaSurface === "native")
+        return `- ${name}: ${description}`;
+    return `- ${name}: ${description}; 参数 Schema=${JSON.stringify(tool?.inputSchema || {})}`;
+}
+function renderWorkspaceToolPrompt(label, tools, deferred = false, schemaSurface = "prompt") {
     if (!tools.length)
         return "";
     return [
         `${label}${deferred ? "可按需加载的" : "可直接使用的"}工作区工具：`,
         ...tools.map(tool => deferred
             ? `- ${mainAgentCallableToolName(tool)}`
-            : `- ${mainAgentCallableToolName(tool)}: ${tool.description || tool.name}; 参数 Schema=${JSON.stringify(tool.inputSchema || {})}`),
+            : renderMainAgentToolCatalogLine(tool, schemaSurface)),
         deferred
             ? "这些是 CCM 提供的安全文件能力；调用前先使用 tool_search 加载 Schema，加载后仍使用上面的短名称。"
             : "这些工具由 CCM 在授权项目边界内执行；直接使用短名称，不要使用内部 MCP canonicalName，也不要改用终端命令读取普通文件。read_file默认一次读完（最多2000行），不要先传offset/limit；只有结果truncated或文件过大时，再用offset/limit继续读取尚未覆盖的部分。PATH_NOT_FOUND只有唯一高可信建议时才可重试。",
@@ -106,6 +116,7 @@ function isMainAgentReadOnlyMcpTool(tool) {
 }
 function buildMainAgentToolRuntimeContext(input) {
     const contextPolicy = (0, main_agent_context_policy_1.readMainAgentContextPolicy)(input.contextPolicy || {});
+    const schemaSurface = input.schemaSurface === "native" ? "native" : "prompt";
     const contextWindow = Math.max(32_000, Math.floor(Number(input.contextWindow || 200_000)));
     const configured = (0, tool_authorization_1.normalizeToolAuthorization)(input.configuredTools || {});
     const executionSkills = uniqueNames(input.executionSkills || []);
@@ -221,12 +232,12 @@ function buildMainAgentToolRuntimeContext(input) {
     const loadedExtensions = mcp.filter(tool => !isWorkspaceReadonlyDefinition(tool));
     const deferredWorkspace = discoverableMcp.filter(isWorkspaceReadonlyDefinition);
     const deferredExtensions = discoverableMcp.filter(tool => !isWorkspaceReadonlyDefinition(tool));
-    const workspacePrompt = renderWorkspaceToolPrompt(label, loadedWorkspace);
+    const workspacePrompt = renderWorkspaceToolPrompt(label, loadedWorkspace, false, schemaSurface);
     const mcpPrompt = loadedExtensions.length ? [
         `${label}已授权的${readOnly ? "只读" : ""} MCP 工具（必须使用 canonicalName）：`,
-        ...loadedExtensions.map(tool => `- ${tool.canonicalName}: ${tool.description || tool.name}; 参数 Schema=${JSON.stringify(tool.inputSchema || {})}`),
+        ...loadedExtensions.map(tool => renderMainAgentToolCatalogLine(tool, schemaSurface)),
     ].join("\n") : "";
-    const deferredWorkspacePrompt = renderWorkspaceToolPrompt(label, deferredWorkspace, true);
+    const deferredWorkspacePrompt = renderWorkspaceToolPrompt(label, deferredWorkspace, true, schemaSurface);
     const deferredMcpPrompt = deferredExtensions.length ? [
         `${label}已授权但尚未加载 Schema 的 MCP/低频工具：`,
         ...deferredExtensions.map(tool => `- ${tool.canonicalName || tool.name}`),
@@ -314,6 +325,7 @@ function buildMainAgentToolRuntimeContext(input) {
         postCompactRestoreReceipt: restored?.receipt,
         contextPolicy,
         contextBudget,
+        schemaSurface,
         workspaceReadContext: continuityIdentity ? (0, workspace_read_context_1.createWorkspaceReadContextLedger)({
             scope: continuityIdentity.scope,
             scopeId: continuityIdentity.scopeId,
@@ -324,15 +336,16 @@ function buildMainAgentToolRuntimeContext(input) {
 }
 function refreshMainAgentToolPromptState(toolContext) {
     const label = String(toolContext.scope.auditContext?.runtime || "主 Agent");
+    const schemaSurface = toolContext.schemaSurface === "native" ? "native" : "prompt";
     const loadedMcp = toolContext.catalog.loadedMcp || toolContext.catalog.mcp;
-    const workspacePrompt = renderWorkspaceToolPrompt(label, loadedMcp.filter(isWorkspaceReadonlyDefinition));
+    const workspacePrompt = renderWorkspaceToolPrompt(label, loadedMcp.filter(isWorkspaceReadonlyDefinition), false, schemaSurface);
     const extensionTools = loadedMcp.filter(tool => !isWorkspaceReadonlyDefinition(tool));
     const loadedPrompt = extensionTools.length ? [
         `${label}当前已加载 Schema 的 MCP 工具（必须使用 canonicalName）：`,
-        ...extensionTools.map((tool) => `- ${tool.canonicalName}: ${tool.description || tool.name}; 参数 Schema=${JSON.stringify(tool.inputSchema || {})}`),
+        ...extensionTools.map((tool) => renderMainAgentToolCatalogLine(tool, schemaSurface)),
     ].join("\n") : "";
     const discoverable = toolContext.catalog.discoverableMcp || [];
-    const deferredWorkspacePrompt = renderWorkspaceToolPrompt(label, discoverable.filter(isWorkspaceReadonlyDefinition), true);
+    const deferredWorkspacePrompt = renderWorkspaceToolPrompt(label, discoverable.filter(isWorkspaceReadonlyDefinition), true, schemaSurface);
     const deferredExtensions = discoverable.filter(tool => !isWorkspaceReadonlyDefinition(tool));
     const deferredPrompt = deferredExtensions.length ? [
         `${label}已授权但尚未加载 Schema 的 MCP/低频工具：`,
@@ -344,6 +357,25 @@ function refreshMainAgentToolPromptState(toolContext) {
     toolContext.deferredToolNames = uniqueNames((toolContext.catalog.discoverableMcp || []).map((tool) => tool.canonicalName || tool.name));
     const marker = "[CCM ToolSearch 本轮已加载 Schema]";
     toolContext.policyPrompt = `${String(toolContext.policyPrompt || "").split(marker)[0].trim()}\n\n${marker}\n${toolContext.mcpPrompt}`.trim();
+}
+function registerMainAgentDiscoverableTools(toolContext, tools = []) {
+    if (!toolContext?.catalog)
+        return toolContext;
+    const loaded = uniqueNames([
+        ...(toolContext.catalog.loadedMcp || []).map((tool) => tool.canonicalName || tool.name),
+        ...(toolContext.catalog.mcp || []).map((tool) => tool.canonicalName || tool.name),
+        ...(toolContext.loadedToolNames || []),
+    ]);
+    const existing = uniqueNames((toolContext.catalog.discoverableMcp || []).map((tool) => tool.canonicalName || tool.name));
+    const extra = (Array.isArray(tools) ? tools : []).filter(tool => {
+        const name = String(tool?.canonicalName || tool?.name || "").trim();
+        return !!name && !loaded.includes(name) && !existing.includes(name);
+    });
+    if (!extra.length)
+        return toolContext;
+    toolContext.catalog.discoverableMcp = [...(toolContext.catalog.discoverableMcp || []), ...extra];
+    refreshMainAgentToolPromptState(toolContext);
+    return toolContext;
 }
 function normalizeMainAgentToolRequests(value, limit = 32) {
     const rows = Array.isArray(value) ? value : [];

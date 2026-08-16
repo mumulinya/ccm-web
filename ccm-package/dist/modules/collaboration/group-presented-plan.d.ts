@@ -1,7 +1,7 @@
 export declare const COORDINATOR_PRESENTED_PLAN_HEADLINE = "\u8BA1\u5212\u5DF2\u7ECF\u6574\u7406\u5B8C\u6210\uFF0C\u8BF7\u67E5\u770B\u4E0B\u9762\u7684\u5F85\u529E\u3002";
 export declare const PRESENTED_PLAN_AUTHORING_SKILL = "ccm-implementation-plan-authoring";
-export declare const PRESENTED_PLAN_SHAPE_GUIDANCE = "\u8BA1\u5212\u7A3F\u5F62\u72B6\u89C1 Skill:ccm-implementation-plan-authoring\uFF1Atitle \u77ED\u540D\uFF1Bgoal \u6216 overview \u9489\u6B7B\u8FD0\u8F6C\u89C4\u5219\uFF1Bsteps \u7528\u4E00\u884C\u5F85\u529E\uFF08\u53EF\u6F14\u793A\u4EA4\u4ED8\u5207\u7247\uFF09\uFF0C\u6761\u6570\u6309\u9700\u6C42\u6765\uFF1B\u7981\u6B62\u6309\u8BBE\u8BA1/\u63A5\u53E3/\u524D\u7AEF/\u540E\u7AEF\u5206\u5C42\uFF0C\u4E0D\u8981\u9ED8\u8BA4 P0\u2013P4\u3002\u4E0D\u8981\u628A TestAgent \u5199\u6210\u5F85\u529E\u3002Plan Mode \u5FC5\u987B\u4EE5 ccm_present_plan \u51FA\u5361\uFF0C\u4E0D\u5F97\u6D3E\u53D1\u3002";
-export declare const PRESENTED_PLAN_DISPATCH_HANDOFF_GUIDANCE = "\u5DF2\u786E\u8BA4\u8BA1\u5212\u5361\u4EA4\u63A5\u89C1 Skill:ccm-implementation-plan-authoring\uFF1Accm_dispatch \u5FC5\u987B\u8986\u76D6\u5361\u7247\u6BCF\u6761\u5207\u7247\u7684\u9A8C\u6536\u53E3\u5F84\uFF1B\u4E0D\u8981\u628A\u5361\u7247\u91CD\u5199\u6210\u524D\u7AEF/\u540E\u7AEF/\u6D4B\u8BD5\u5206\u5DE5\uFF1Btargets[].task \u8981\u5199\u660E\u843D\u5B9E\u4E86\u54EA\u4E9B\u5DF2\u786E\u8BA4\u5207\u7247\uFF1B\u4E0D\u8981\u628A TestAgent \u5199\u6210\u5361\u7247\u5F85\u529E\u6216 targets[]\u3002";
+export declare const PRESENTED_PLAN_SHAPE_GUIDANCE = "\u8BA1\u5212\u7A3F\u5F62\u72B6\u89C1 Skill:ccm-implementation-plan-authoring\u3002";
+export declare const PRESENTED_PLAN_DISPATCH_HANDOFF_GUIDANCE = "\u5DF2\u786E\u8BA4\u8BA1\u5212\u5361\u4EA4\u63A5\u89C1 Skill:ccm-implementation-plan-authoring\u3002";
 export declare function presentedPlanSource(parsed: any): any;
 export declare function presentedPlanSteps(source: any): any;
 export declare function hasPresentedGroupPlan(parsed: any): boolean;
@@ -42,13 +42,23 @@ export declare function presentedPlanAcceptanceLines(plan: any): any[];
 export declare function appendConfirmedPlanSliceContract(taskText: any, plan: any): string;
 export declare function attachConfirmedPlanSlicesToDispatchTargets(targets: any[], plan: any): any[];
 export declare function mergePresentedPlanAcceptanceCriteria(existing: any, plan: any, limit?: number): string[];
+export declare function presentedPlanFromParsed(input: {
+    parsed?: any;
+    planId?: string;
+    goalFallback?: string;
+    status?: "ready" | "executing" | "completed" | "blocked" | "superseded";
+}): any;
 export declare function publishGroupPresentedRequirementPlan(input: {
     groupId?: string;
     groupSessionId?: string;
+    scope?: "group" | "project";
+    scopeId?: string;
+    exactSessionId?: string;
     turnId?: string;
     anchorMessageId?: string;
     generation?: number;
     parsed?: any;
+    plan?: any;
     goalFallback?: string;
     skip?: boolean;
 }): any;
@@ -75,6 +85,7 @@ export declare function runGroupPresentedPlanSelfTest(): {
         readsLatestMessagePlan: boolean;
         attachLeavesEmptyTargets: boolean;
         publishedHasQuality: boolean;
+        publishedProjectScopeKeepsPlan: boolean;
         shapeDroppedLongEssay: boolean;
     };
 };

@@ -1,5 +1,32 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import {
+  Activity,
+  AlertCircle,
+  AlertTriangle,
+  ArrowUpRight,
+  Check,
+  CheckCircle2,
+  Clock,
+  Coins,
+  Copy,
+  Cpu,
+  CreditCard,
+  Database,
+  ExternalLink,
+  HelpCircle,
+  History,
+  LayoutDashboard,
+  Layers,
+  ListFilter,
+  Radio,
+  RotateCw,
+  Sparkles,
+  Target,
+  Workflow,
+  XCircle,
+  Zap,
+} from '@lucide/vue'
 import MetricsScopePicker from './MetricsScopePicker.vue'
 import WorkspacePageShell from '../common/WorkspacePageShell.vue'
 
@@ -10,12 +37,13 @@ const props = defineProps({
 })
 const metricsView = ref(sessionStorage.getItem('ccm:metrics-layout:v1:view') || 'overview')
 const metricsViews = [
-  { id: 'overview', label: '概览' },
-  { id: 'token', label: 'Token' },
-  { id: 'performance', label: '性能' },
-  { id: 'executions', label: '执行记录' },
+  { id: 'overview', label: '概览', icon: LayoutDashboard },
+  { id: 'token', label: 'Token 分析', icon: Coins },
+  { id: 'performance', label: '性能诊断', icon: Zap },
+  { id: 'executions', label: '执行记录', icon: ListFilter },
 ]
 watch(metricsView, value => sessionStorage.setItem('ccm:metrics-layout:v1:view', value))
+
 
 const GLOBAL_SCOPE_ID = '__global__'
 const CUSTOM_RANGE_DAYS = -1
@@ -862,6 +890,38 @@ watch(() => props.active, (isActive) => {
   restartPoller()
 })
 
+const copiedKey = ref('')
+const copyText = async (text, key) => {
+  if (!text) return
+  try {
+    await navigator.clipboard.writeText(text)
+    copiedKey.value = key || text
+    setTimeout(() => { if (copiedKey.value === (key || text)) copiedKey.value = '' }, 1800)
+  } catch {}
+}
+
+const inputTokenRatio = computed(() => {
+  const total = safeNumber(rangeStats.value.inputTokens) + safeNumber(rangeStats.value.outputTokens)
+  return total > 0 ? (safeNumber(rangeStats.value.inputTokens) / total) * 100 : 50
+})
+
+const expandedErrorIds = ref(new Set())
+const toggleErrorExpand = (id) => {
+  if (!id) return
+  if (expandedErrorIds.value.has(id)) expandedErrorIds.value.delete(id)
+  else expandedErrorIds.value.add(id)
+}
+
+const totalStatusBucketCalls = computed(() => {
+  const b = statusBuckets.value
+  return b.completed + b.failed + b.cancelled + b.blocked + b.unknown
+})
+
+const statusPercent = (count) => {
+  const total = totalStatusBucketCalls.value
+  return total > 0 ? ((count / total) * 100).toFixed(1) : '0.0'
+}
+
 onMounted(async () => {
   await loadMetrics()
   restartPoller()
@@ -885,403 +945,1939 @@ onUnmounted(() => {
       <div class="toolbar metrics-shared-toolbar">
         <label class="scope-control"><span>范围</span><MetricsScopePicker v-model="selectedGroupId" :options="scopeOptions" /></label>
         <label><span>时间</span><select v-model.number="rangeDays"><option :value="1">今天</option><option :value="7">近 7 天</option><option :value="14">近 14 天</option><option :value="30">近 30 天</option><option :value="90">近 90 天</option><option :value="0">全部历史</option><option :value="CUSTOM_RANGE_DAYS">自定义</option></select></label>
-        <button class="refresh-btn" :disabled="refreshing" @click="loadMetrics({ silent: true })"><span :class="{ spinning: refreshing }">↻</span>{{ refreshing ? '刷新中' : '刷新' }}</button>
+        <button class="refresh-btn" :disabled="refreshing" @click="loadMetrics({ silent: true })"><RotateCw :size="13" :class="{ spinning: refreshing }" /><span>{{ refreshing ? '刷新中' : '刷新' }}</span></button>
       </div>
     </template>
-  <div class="metrics-page">
-    <div v-if="rangeDays === CUSTOM_RANGE_DAYS" class="custom-range-inline">
-      <div class="toolbar">
-        <div class="custom-date-range">
-          <label>
-            <span>开始日期</span>
-            <input v-model="customDateFrom" type="date" :max="customDateTo || defaultCustomEnd">
-          </label>
-          <i>至</i>
-          <label>
-            <span>结束日期</span>
-            <input v-model="customDateTo" type="date" :min="customDateFrom" :max="defaultCustomEnd">
-          </label>
-          <button class="apply-range-btn" type="button" :disabled="!!customRangeError" :title="customRangeError || '按选择日期统计'" @click="applyCustomRange">应用</button>
-          <small v-if="customRangeError" class="custom-range-error">{{ customRangeError }}</small>
+
+    <div class="metrics-page">
+      <div v-if="rangeDays === CUSTOM_RANGE_DAYS" class="custom-range-inline">
+        <div class="toolbar">
+          <div class="custom-date-range">
+            <label>
+              <span>开始日期</span>
+              <input v-model="customDateFrom" type="date" :max="customDateTo || defaultCustomEnd">
+            </label>
+            <i>至</i>
+            <label>
+              <span>结束日期</span>
+              <input v-model="customDateTo" type="date" :min="customDateFrom" :max="defaultCustomEnd">
+            </label>
+            <button class="apply-range-btn" type="button" :disabled="!!customRangeError" :title="customRangeError || '按选择日期统计'" @click="applyCustomRange">应用</button>
+            <small v-if="customRangeError" class="custom-range-error">{{ customRangeError }}</small>
+          </div>
         </div>
       </div>
-    </div>
 
-    <div v-if="error" class="state-banner error-state">
-      <div><strong>性能指标加载失败</strong><span>{{ error }}</span></div>
-      <button @click="loadMetrics()">重试</button>
-    </div>
-
-    <div v-if="loading" class="loading-grid">
-      <div v-for="item in 8" :key="item" class="skeleton"></div>
-    </div>
-
-    <template v-else-if="hasScopeSelection">
-      <section class="scope-strip">
-        <div class="scope-main">
-          <span class="scope-avatar">{{ scopeDisplayName.slice(0, 1) }}</span>
-          <div>
-            <strong>{{ scopeDisplayName }}</strong>
-            <span>{{ mainAgentLabel }} · {{ coordinatorName }}</span>
-          </div>
+      <div v-if="error" class="state-banner error-state">
+        <div class="banner-content">
+          <AlertCircle :size="18" />
+          <div><strong>性能指标加载失败</strong><span>{{ error }}</span></div>
         </div>
-        <div class="scope-status" :class="freshness.level"><i></i><strong>{{ freshness.label }}</strong><span>{{ freshness.detail }}</span></div>
-        <div class="scope-meta">
-          <span>{{ isGlobalScope ? '按全局 scope 聚合' : (isProjectScope ? '严格按 Project ID 聚合' : '严格按 Group ID 聚合') }}</span>
-          <code>{{ isGlobalScope ? 'global:global' : (isProjectScope ? `project:${selectedProjectId}` : `group:${selectedGroup.id}`) }}</code>
-        </div>
-      </section>
-
-      <div v-if="legacyNotice && !isGlobalScope" class="legacy-notice">
-        <span>历史兼容数据未包含群聊归属，已与当前群聊指标隔离，不参与本页计算。</span>
-        <small>{{ legacyNotice }} 个旧 Agent 记录</small>
+        <button @click="loadMetrics()">重试</button>
       </div>
 
-      <section v-if="metricsView === 'overview'" class="kpi-grid">
-        <article class="kpi-card primary">
-          <div class="kpi-head"><span>{{ mainAgentLabel }}调用</span><i>01</i></div>
-          <strong>{{ formatNumber(rangeStats.calls) }}</strong>
-          <p>{{ rangeLabel }} · 失败 {{ formatNumber(rangeStats.failures) }} 次</p>
-        </article>
-        <article class="kpi-card" :class="health.level">
-          <div class="kpi-head"><span>调用成功率</span><i>02</i></div>
-          <strong>{{ rangeStats.calls ? formatPercent(rangeStats.successRate) : '—' }}</strong>
-          <p>{{ health.label }} · {{ health.detail }}</p>
-        </article>
-        <article class="kpi-card">
-          <div class="kpi-head"><span>P95 响应时间</span><i>03</i></div>
-          <strong>{{ formatDuration(rangeStats.p95Ms) }}</strong>
-          <p>平均 {{ formatDuration(rangeStats.avgMs) }}</p>
-        </article>
-        <article class="kpi-card">
-          <div class="kpi-head"><span>最近{{ mainAgentLabel }}活动</span><i>04</i></div>
-          <strong class="time-value">{{ formatRelativeTime(latestMainEvent?.at || mainAggregate.lastCall) }}</strong>
-          <p>{{ formatTime(latestMainEvent?.at || mainAggregate.lastCall) }}</p>
-        </article>
-        <article class="kpi-card">
-          <div class="kpi-head"><span>Token 用量</span><i>05</i></div>
-          <strong>{{ formatTokens(rangeStats.totalTokens) }}</strong>
-          <p v-if="rangeStats.usageReportedCalls">用量覆盖 {{ formatPercent(rangeStats.usageCoverage) }}</p>
-          <p v-else>{{ isGlobalScope ? '等待全局模型返回真实 Token 用量' : '当前运行时未返回用量，不以 0 冒充' }}</p>
-        </article>
-        <article class="kpi-card">
-          <div class="kpi-head"><span>输入 / 输出 Token</span><i>06</i></div>
-          <strong>{{ rangeStats.usageReportedCalls ? `${formatTokens(rangeStats.inputTokens)} / ${formatTokens(rangeStats.outputTokens)}` : '—' }}</strong>
-          <p>{{ rangeStats.usageReportedCalls ? '输入 Token / 输出 Token' : '等待提供商返回真实 Token 用量' }}</p>
-        </article>
-        <article class="kpi-card">
-          <div class="kpi-head"><span>缓存 Token</span><i>07</i></div>
-          <strong>{{ rangeStats.usageReportedCalls ? formatTokens(rangeStats.cacheCreationInputTokens + rangeStats.cacheReadInputTokens) : '—' }}</strong>
-          <p v-if="rangeStats.usageReportedCalls">写入 {{ formatTokens(rangeStats.cacheCreationInputTokens) }} · 命中 {{ formatTokens(rangeStats.cacheReadInputTokens) }}</p>
-          <p v-else>Provider 未提供缓存用量</p>
-        </article>
-        <article class="kpi-card">
-          <div class="kpi-head"><span>Provider 真实费用</span><i>08</i></div>
-          <strong>{{ formatCost(rangeStats.totalCostUsd) }}</strong>
-          <p>{{ rangeStats.totalCostUsd ? '仅统计 Provider 明确返回的费用' : '不根据模型价格估算' }}</p>
-        </article>
-        <article class="kpi-card">
-          <div class="kpi-head"><span>Agent 资源峰值</span><i>09</i></div>
-          <strong>{{ rangeStats.peakRssBytes ? formatBytes(rangeStats.peakRssBytes) : '—' }}</strong>
-          <p>{{ rangeStats.peakCpuPercent ? `CPU ${rangeStats.peakCpuPercent.toFixed(1)}% · ${rangeStats.peakChildProcessCount} 个进程` : '等待托管 Agent 进程采样' }}</p>
-        </article>
-      </section>
+      <div v-if="loading" class="loading-grid">
+        <div v-for="item in 6" :key="item" class="skeleton"></div>
+      </div>
 
-      <section v-if="metricsView === 'overview'" class="bucket-strip">
-        <div class="bucket-block">
-          <span class="bucket-kicker">终态分桶 · {{ rangeLabel }}</span>
-          <div class="bucket-chips">
-            <span class="chip ok">成功 {{ formatNumber(statusBuckets.completed) }}</span>
-            <span class="chip bad">失败 {{ formatNumber(statusBuckets.failed) }}</span>
-            <span class="chip mute">取消 {{ formatNumber(statusBuckets.cancelled) }}</span>
-            <span class="chip warn">阻塞 {{ formatNumber(statusBuckets.blocked) }}</span>
-            <span class="chip info">历史未知 {{ formatNumber(statusBuckets.unknown) }}</span>
-          </div>
-        </div>
-        <div v-if="isGlobalScope" class="bucket-block live">
-          <span class="bucket-kicker">进行中 · 实时 runs</span>
-          <div class="bucket-chips">
-            <span class="chip warn">待确认 {{ formatNumber(liveRunBuckets.waiting_confirmation) }}</span>
-            <span class="chip info">监督中 {{ formatNumber(liveRunBuckets.supervising) }}</span>
-            <span class="chip mute">运行中 {{ formatNumber(liveRunBuckets.running) }}</span>
-            <small v-if="!hasLiveRuns">当前无进行中的全局 run</small>
-          </div>
-        </div>
-      </section>
-
-      <section v-if="metricsView === 'overview' || metricsView === 'performance'" class="overview-grid">
-        <article class="panel trend-panel">
-          <div class="panel-head">
-            <div><span class="panel-kicker">{{ isGlobalScope ? 'GLOBAL AGENT TREND' : (isProjectScope ? 'PROJECT AGENT TREND' : 'MAIN AGENT TREND') }}</span><h3>{{ mainAgentLabel }}调用趋势</h3></div>
-            <div class="legend"><span><i class="ok"></i>成功</span><span><i class="fail"></i>失败</span></div>
-          </div>
-          <div class="chart">
-            <div v-for="day in trendPoints" :key="day.key" class="chart-column" :title="`${day.key} · ${day.calls} 次 · 成功 ${day.successes} · 失败 ${day.failures}`">
-              <span class="chart-value">{{ day.calls || '' }}</span>
-              <div class="bar-track">
-                <div class="bar-total" :style="{ height: `${day.height}%` }">
-                  <div class="bar-success" :style="{ height: `${day.successHeight}%` }"></div>
-                </div>
+      <template v-else-if="hasScopeSelection">
+        <!-- 顶部 Agent 资产与范围信息横幅 -->
+        <section class="scope-strip">
+          <div class="scope-main">
+            <span class="scope-avatar">{{ scopeDisplayName.slice(0, 1) }}</span>
+            <div class="scope-info">
+              <div class="scope-title-row">
+                <strong>{{ scopeDisplayName }}</strong>
+                <span class="scope-tag">{{ mainAgentLabel }}</span>
               </div>
-              <span class="chart-label">{{ day.label }}</span>
+              <span class="scope-coordinator">协调者：{{ coordinatorName }}</span>
             </div>
           </div>
-          <div v-if="!rangeStats.calls" class="chart-empty">所选时间范围内暂无{{ isGlobalScope ? '全局 Agent' : (isProjectScope ? '该项目 Agent' : '该群主 Agent') }}调用</div>
-        </article>
-
-        <article class="panel runtime-panel">
-          <div class="panel-head"><div><span class="panel-kicker">CCM PROCESS</span><h3>服务进程实时资源</h3></div><span class="live-dot">LIVE</span></div>
-          <div v-if="hasSystem" class="runtime-grid">
-            <div><span>CPU</span><strong>{{ safeNumber(system.process?.cpuPercent).toFixed(1) }}%</strong><div class="meter"><i :style="{ width: `${Math.min(100, safeNumber(system.process?.cpuPercent))}%` }"></i></div></div>
-            <div><span>Heap</span><strong>{{ formatBytes(system.process?.heapUsedBytes) }}</strong><div class="meter"><i :style="{ width: `${heapPercent}%` }"></i></div></div>
-            <div><span>RSS 内存</span><strong>{{ formatBytes(system.process?.rssBytes) }}</strong><small>进程总驻留内存</small></div>
-            <div><span>事件循环利用率</span><strong>{{ safeNumber(system.eventLoop?.utilization).toFixed(1) }}%</strong><small>最近两次采样窗口</small></div>
-            <div><span>运行时长</span><strong>{{ formatDuration(safeNumber(system.process?.uptimeSeconds) * 1000) }}</strong><small>PID {{ system.process?.pid || '—' }}</small></div>
-            <div><span>采样时间</span><strong class="sample-time">{{ formatTime(system.collectedAt, '—') }}</strong><small>随页面轮询更新</small></div>
-          </div>
-          <div v-else class="runtime-empty">服务重启后启用实时 CPU、内存和事件循环采样。</div>
-        </article>
-      </section>
-
-      <section v-if="metricsView === 'token' || metricsView === 'performance'" class="observability-detail-grid">
-        <article v-if="metricsView === 'token'" class="panel coverage-panel">
-          <div class="panel-head">
-            <div><span class="panel-kicker">USAGE COMPLETENESS</span><h3>Token 用量完整度</h3></div>
-            <span class="panel-note">真实回执 {{ formatNumber(rangeStats.usageReportedCalls) }} / {{ formatNumber(rangeStats.calls) }} 次</span>
-          </div>
-          <div v-if="usageCoverageRows.length" class="coverage-list">
-            <div v-for="row in usageCoverageRows" :key="`${row.roleLabel}:${row.project}`" class="coverage-row">
-              <div class="coverage-agent">
-                <strong>{{ row.project }}</strong>
-                <span>{{ row.roleLabel }}<template v-if="row.usage.runtimes.length"> · {{ row.usage.runtimes.join(' / ') }}</template></span>
-              </div>
-              <div class="coverage-meter" :title="`真实 usage ${row.usage.reported}/${row.calls}`"><i :style="{ width: `${Math.min(100, row.coverage)}%` }"></i></div>
-              <strong>{{ row.calls ? formatPercent(row.coverage) : '—' }}</strong>
-              <div class="coverage-detail">
-                <span v-if="row.usage.reported" class="coverage-ok">已报告 {{ row.usage.reported }}</span>
-                <span v-if="row.usage.local" class="coverage-local">本地验证 {{ row.usage.local }}</span>
-                <span v-if="row.usage.missing" class="coverage-missing">未提供 {{ row.usage.missing }}</span>
-                <small v-if="row.usage.missingReasons.length">{{ row.usage.missingReasons.map(missingReasonLabel).join('；') }}</small>
-              </div>
+          <div class="scope-status" :class="freshness.level">
+            <span class="status-indicator"></span>
+            <div>
+              <strong>{{ freshness.label }}</strong>
+              <span :title="freshness.detail">{{ freshness.detail }}</span>
             </div>
           </div>
-          <div v-else class="runtime-empty">当前范围尚无 Agent 调用记录。</div>
-        </article>
-
-        <article v-if="metricsView === 'performance'" class="panel phase-panel">
-          <div class="panel-head">
-            <div><span class="panel-kicker">WALL CLOCK BREAKDOWN</span><h3>阶段耗时分解</h3></div>
-            <span class="panel-note">缺少可靠数据的阶段不显示</span>
-          </div>
-          <div v-if="phaseTimingRows.length" class="phase-list">
-            <div v-for="item in phaseTimingRows" :key="item.label">
-              <span>{{ item.label }}</span>
-              <strong>{{ formatDuration(item.value) }}</strong>
-              <i :style="{ width: `${Math.min(100, rangeStats.totalMs ? (item.value / rangeStats.totalMs) * 100 : 0)}%` }"></i>
-            </div>
-          </div>
-          <div v-else class="runtime-empty">当前调用尚未返回可分解的阶段耗时。</div>
-        </article>
-      </section>
-
-      <section v-if="metricsView === 'performance' && agentResources.length" class="panel agent-resource-panel">
-        <div class="panel-head">
-          <div><span class="panel-kicker">ACTIVE AGENT PROCESSES</span><h3>当前 Agent 进程资源</h3></div>
-          <span class="live-dot">{{ agentResources.length }} RUNNING</span>
-        </div>
-        <div class="agent-resource-list">
-          <div v-for="run in agentResources" :key="run.id" class="agent-resource-row">
-            <div><strong>{{ run.project || run.agentType || 'Agent' }}</strong><span>{{ run.commandLabel || run.source || '托管运行时' }}</span></div>
-            <span>CPU <strong>{{ safeNumber(run.resources?.cpuPercent).toFixed(1) }}%</strong></span>
-            <span>RSS <strong>{{ formatBytes(run.resources?.rssBytes) }}</strong></span>
-            <span>子进程 <strong>{{ formatNumber(run.resources?.childProcessCount) }}</strong></span>
-            <span>已运行 <strong>{{ formatDuration(run.ageMs) }}</strong></span>
-          </div>
-        </div>
-      </section>
-
-      <section v-if="metricsView === 'performance' && (reliability || reliabilityError)" class="panel reliability-panel">
-        <div class="panel-head">
-          <div><span class="panel-kicker">RELIABILITY DRILLS</span><h3>可靠性演练与恢复</h3></div>
-          <div class="reliability-actions">
-            <button v-if="reliability?.active_run" type="button" :disabled="reliabilityLoading" @click="cancelReliabilityDrill">取消演练</button>
-            <button v-else type="button" :disabled="reliabilityLoading" @click="startReliabilityDrill">{{ reliabilityLoading ? '启动中' : '运行演练' }}</button>
-          </div>
-        </div>
-        <div v-if="reliabilityError" class="event-load-error"><span>{{ reliabilityError }}</span><button @click="loadReliability">重试</button></div>
-        <div v-else class="reliability-grid">
-          <div><span>当前状态</span><strong>{{ reliability?.active_run?.status || '空闲' }}</strong><small>{{ reliability?.active_run?.checkpoint || '没有同类演练占用租约' }}</small></div>
-          <div><span>最近结果</span><strong>{{ reliability?.latest_run?.status || '暂无记录' }}</strong><small>{{ formatTime(reliability?.latest_run?.completed_at, '尚未完成演练') }}</small></div>
-          <div><span>调度器</span><strong>{{ reliability?.scheduler_running ? '已启用' : '已停止' }}</strong><small>下次 {{ formatTime(reliability?.next_run_at, '等待首次运行') }}</small></div>
-        </div>
-      </section>
-
-      <section v-if="metricsView === 'token'" class="panel agent-panel">
-        <div class="panel-head">
-          <div>
-            <span class="panel-kicker">{{ isGlobalScope ? 'GLOBAL AGENT' : (isProjectScope ? 'PROJECT AGENTS' : 'GROUP AGENTS') }}</span>
-            <h3>{{ isGlobalScope ? '全局 Agent 性能' : (isProjectScope ? '该项目 Agent 性能' : '该群 Agent 性能') }}</h3>
-          </div>
-          <span class="panel-note">{{ isGlobalScope ? '全局助手终态调用统计，含模型返回的 Token 用量' : (isProjectScope ? '项目主 Agent、开发 Agent 与 TestAgent 分角色统计' : '主 Agent 与成员 Agent 分角色统计') }}</span>
-        </div>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Agent</th>
-                <th>角色</th>
-                <th>调用</th>
-                <th>成功率</th>
-                <th>平均耗时</th>
-                <th>P95</th>
-                <th>Token</th>
-                <th>用量覆盖</th>
-                <th>缓存 Token</th>
-                <th>真实费用</th>
-                <th>最后调用</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="agent in agentRows" :key="agent.project">
-                <td><strong>{{ agent.project }}</strong></td>
-                <td><span class="role-badge" :class="{ main: agent.isMain }">{{ agent.roleLabel }}</span></td>
-                <td>{{ formatNumber(agent.calls) }}</td>
-                <td><span :class="['rate', agent.calls && agent.successRate < 80 ? 'bad' : '']">{{ agent.calls ? formatPercent(agent.successRate) : '—' }}</span></td>
-                <td>{{ formatDuration(agent.avgMs) }}</td>
-                <td>{{ formatDuration(agent.p95Ms) }}</td>
-                <td>{{ agent.usageReportedCalls ? formatTokens(agent.tokens) : (agent.usage.local ? '本地验证，无模型 Token' : '未提供') }}</td>
-                <td>{{ agent.calls ? `${agent.usage.reported}/${agent.calls}` : '—' }}</td>
-                <td>{{ agent.usageReportedCalls ? formatTokens(agent.cacheTokens) : '—' }}</td>
-                <td>{{ formatCost(agent.costUsd) }}</td>
-                <td><span :title="formatTime(agent.lastCall)">{{ formatRelativeTime(agent.lastCall) }}</span></td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      <section v-if="metricsView === 'executions'" class="panel event-panel">
-        <div class="panel-head">
-          <div>
-            <span class="panel-kicker">RECENT EXECUTIONS</span>
-            <h3>{{ isGlobalScope ? '全局执行记录' : (isProjectScope ? '该项目执行记录' : '该群执行记录') }}</h3>
-          </div>
-          <span class="panel-note">{{ rangeLabel }}共 {{ formatNumber(executionResult.total) }} 条 · 可点击跳转</span>
-        </div>
-        <div class="event-controls">
-          <div class="event-status-tabs" role="tablist" aria-label="执行状态筛选">
+          <div class="scope-meta">
+            <span class="meta-label">{{ isGlobalScope ? '全局 Scope' : (isProjectScope ? 'Project ID' : 'Group ID') }}</span>
             <button
-              v-for="option in executionStatusOptions"
-              :key="option.value"
               type="button"
-              :class="{ active: executionStatus === option.value }"
-              @click="executionStatus = option.value"
+              class="scope-code-btn"
+              :title="copiedKey === 'scope' ? '已复制' : '点击复制 Scope'"
+              @click="copyText(isGlobalScope ? 'global:global' : (isProjectScope ? `project:${selectedProjectId}` : `group:${selectedGroup.id}`), 'scope')"
             >
-              {{ option.label }} <span>{{ formatNumber(option.count) }}</span>
+              <code>{{ isGlobalScope ? 'global:global' : (isProjectScope ? `project:${selectedProjectId}` : `group:${selectedGroup.id}`) }}</code>
+              <Check v-if="copiedKey === 'scope'" :size="12" class="copied-icon" />
+              <Copy v-else :size="12" />
             </button>
           </div>
-          <label class="page-size-control">
-            <span>每页</span>
-            <select v-model.number="executionPageSize">
-              <option :value="10">10 条</option>
-              <option :value="20">20 条</option>
-              <option :value="50">50 条</option>
-            </select>
-          </label>
-        </div>
-        <div v-if="executionError" class="event-load-error">
-          <span>{{ executionError }}</span>
-          <button type="button" @click="loadExecutionEvents">重新加载</button>
-        </div>
-        <div v-if="recentEvents.length" class="event-list" :class="{ loading: executionLoading }">
-          <article
-            v-for="event in recentEvents"
-            :key="event.id"
-            class="event-row"
-            :class="{
-              'is-failed': event.resolvedStatus === 'failed',
-              'is-cancelled': event.resolvedStatus === 'cancelled',
-              'is-blocked': event.resolvedStatus === 'blocked',
-              'is-unknown': event.resolvedStatus === 'unknown',
-              'is-clickable': eventNavigable(event),
-              'is-navigating': navigatingEventId === event.id,
-            }"
-            @click="openEvent(event)"
-          >
-            <span class="event-state" :class="eventStatusClass(event.resolvedStatus)">
-              {{ event.resolvedStatus === 'completed' ? '✓' : (event.resolvedStatus === 'cancelled' ? '–' : (event.resolvedStatus === 'unknown' ? '?' : '!')) }}
-            </span>
-            <div class="event-main">
-              <div>
-                <strong>{{ event.agent }}</strong>
-                <span class="role-badge" :class="{ main: event.role === 'main_agent' || event.role === 'global_agent' }">{{ eventRoleLabel(event.role) }}</span>
-                <span class="status-badge" :class="eventStatusClass(event.resolvedStatus)">{{ eventStatusLabel(event.resolvedStatus) }}</span>
-                <span>{{ sourceLabel(event.source) }}</span>
-              </div>
-              <p v-if="event.resolvedStatus !== 'completed' && event.error" class="event-error" :title="event.error">{{ event.error }}</p>
-              <p class="event-time" :title="formatTime(event.at)">
-                {{ event.runtime || '默认运行时' }} · {{ formatTime(event.at) }}
-              </p>
-            </div>
-            <div class="event-metrics">
-              <span>{{ formatDuration(event.durationMs) }}</span>
-              <span v-if="event.usageReported">{{ formatTokens(safeNumber(event.inputTokens) + safeNumber(event.outputTokens)) }} Token</span>
-              <span v-else-if="event.usageSource === 'local_no_model'">本地验证，无模型 Token</span>
-              <span v-else :title="missingReasonLabel(event.usageMissingReason)">Token 未提供</span>
-              <span v-if="safeNumber(event.totalCostUsd)">{{ formatCost(event.totalCostUsd) }}</span>
-              <span v-if="event.fileChangeCount">{{ event.fileChangeCount }} 个文件</span>
-            </div>
-            <code v-if="event.traceId || event.executionId || event.taskId" :title="event.traceId || event.executionId || event.taskId">
-              {{ (event.traceId || event.executionId || event.taskId).slice(0, 18) }}
-            </code>
-          </article>
-        </div>
-        <div v-else-if="!executionLoading && !executionError" class="event-empty">
-          {{ executionStatus === 'all'
-            ? (isGlobalScope
-              ? '所选时间范围内暂无全局执行记录。'
-              : (isProjectScope ? '所选时间范围内暂无该项目执行记录。' : '所选时间范围内暂无该群执行记录。'))
-            : `所选时间范围内暂无“${eventStatusLabel(executionStatus)}”记录。` }}
-        </div>
-        <div v-if="executionLoading && !recentEvents.length" class="event-loading">正在加载执行记录…</div>
-        <div v-if="executionResult.totalPages > 1" class="event-pagination">
-          <span>第 {{ executionPageStart }}–{{ executionPageEnd }} 条，共 {{ formatNumber(executionResult.total) }} 条</span>
-          <div>
-            <button type="button" :disabled="executionResult.page <= 1 || executionLoading" @click="executionPage = 1">首页</button>
-            <button type="button" :disabled="executionResult.page <= 1 || executionLoading" @click="executionPage -= 1">上一页</button>
-            <strong>{{ executionResult.page }} / {{ executionResult.totalPages }}</strong>
-            <button type="button" :disabled="executionResult.page >= executionResult.totalPages || executionLoading" @click="executionPage += 1">下一页</button>
-            <button type="button" :disabled="executionResult.page >= executionResult.totalPages || executionLoading" @click="executionPage = executionResult.totalPages">末页</button>
-          </div>
-        </div>
-      </section>
+        </section>
 
-      <footer class="page-foot">
-        <span>页面刷新：{{ loadedAt ? loadedAt.toLocaleTimeString('zh-CN', { hour12: false }) : '—' }}</span>
-        <span>指标版本 v{{ payload.metrics?.version || 1 }}</span>
-      </footer>
-    </template>
-  </div>
+        <div v-if="legacyNotice && !isGlobalScope" class="legacy-notice">
+          <AlertTriangle :size="15" />
+          <span>历史兼容数据未包含群聊归属，已与当前群聊指标隔离，不参与本页计算。</span>
+          <small>{{ legacyNotice }} 个旧 Agent 记录</small>
+        </div>
+
+        <!-- 视图 1：概览视图 -->
+        <template v-if="metricsView === 'overview'">
+          <!-- KPI 9格指标矩阵 -->
+          <section class="kpi-grid">
+            <article class="kpi-card">
+              <div class="kpi-head">
+                <div class="kpi-title">
+                  <span class="icon-wrap blue"><Zap :size="15" /></span>
+                  <span>{{ mainAgentLabel }}调用</span>
+                </div>
+                <span v-if="rangeStats.failures > 0" class="kpi-badge warn">失败 {{ formatNumber(rangeStats.failures) }}</span>
+                <span v-else class="kpi-badge ok">全成功</span>
+              </div>
+              <strong class="kpi-value">{{ formatNumber(rangeStats.calls) }}</strong>
+              <p class="kpi-footer">{{ rangeLabel }} · 成功 {{ formatNumber(rangeStats.successes) }} 次</p>
+            </article>
+
+            <article class="kpi-card" :class="health.level">
+              <div class="kpi-head">
+                <div class="kpi-title">
+                  <span class="icon-wrap green"><Target :size="15" /></span>
+                  <span>调用成功率</span>
+                </div>
+                <span class="kpi-badge" :class="health.level">{{ health.label }}</span>
+              </div>
+              <strong class="kpi-value" :class="{ 'text-danger': rangeStats.calls && rangeStats.successRate < 80 }">
+                {{ rangeStats.calls ? formatPercent(rangeStats.successRate) : '—' }}
+              </strong>
+              <p class="kpi-footer" :title="health.detail">{{ health.detail }}</p>
+            </article>
+
+            <article class="kpi-card">
+              <div class="kpi-head">
+                <div class="kpi-title">
+                  <span class="icon-wrap purple"><Clock :size="15" /></span>
+                  <span>P95 响应时间</span>
+                </div>
+                <span class="kpi-badge muted">尾部延迟</span>
+              </div>
+              <strong class="kpi-value">{{ formatDuration(rangeStats.p95Ms) }}</strong>
+              <p class="kpi-footer">平均耗时 {{ formatDuration(rangeStats.avgMs) }}</p>
+            </article>
+
+            <article class="kpi-card">
+              <div class="kpi-head">
+                <div class="kpi-title">
+                  <span class="icon-wrap cyan"><History :size="15" /></span>
+                  <span>最近活动</span>
+                </div>
+                <span class="kpi-badge muted">时效</span>
+              </div>
+              <strong class="kpi-value time-value">{{ formatRelativeTime(latestMainEvent?.at || mainAggregate.lastCall) }}</strong>
+              <p class="kpi-footer" :title="formatTime(latestMainEvent?.at || mainAggregate.lastCall)">{{ formatTime(latestMainEvent?.at || mainAggregate.lastCall) }}</p>
+            </article>
+
+            <article class="kpi-card">
+              <div class="kpi-head">
+                <div class="kpi-title">
+                  <span class="icon-wrap amber"><Coins :size="15" /></span>
+                  <span>Token 总用量</span>
+                </div>
+                <span v-if="rangeStats.usageReportedCalls" class="kpi-badge ok">覆盖 {{ formatPercent(rangeStats.usageCoverage) }}</span>
+                <span v-else class="kpi-badge muted">未回执</span>
+              </div>
+              <strong class="kpi-value">{{ formatTokens(rangeStats.totalTokens) }}</strong>
+              <p class="kpi-footer" v-if="rangeStats.usageReportedCalls">真实回执 {{ rangeStats.usageReportedCalls }}/{{ rangeStats.calls }} 次</p>
+              <p class="kpi-footer text-muted" v-else>{{ isGlobalScope ? '等待全局模型返回真实用量' : '当前运行时未返回用量' }}</p>
+            </article>
+
+            <article class="kpi-card">
+              <div class="kpi-head">
+                <div class="kpi-title">
+                  <span class="icon-wrap indigo"><RotateCw :size="15" /></span>
+                  <span>输入 / 输出 Token</span>
+                </div>
+                <span class="kpi-badge muted">分布</span>
+              </div>
+              <strong class="kpi-value token-pair" v-if="rangeStats.usageReportedCalls">
+                <span class="inp">{{ formatTokens(rangeStats.inputTokens) }}</span>
+                <span class="sep">/</span>
+                <span class="out">{{ formatTokens(rangeStats.outputTokens) }}</span>
+              </strong>
+              <strong class="kpi-value" v-else>—</strong>
+              <div v-if="rangeStats.usageReportedCalls" class="token-mini-bar" title="输入 vs 输出比例">
+                <span class="bar-in" :style="{ width: `${inputTokenRatio}%` }"></span>
+                <span class="bar-out" :style="{ width: `${100 - inputTokenRatio}%` }"></span>
+              </div>
+              <p class="kpi-footer" v-else>等待提供商返回真实 Token 用量</p>
+            </article>
+
+            <article class="kpi-card">
+              <div class="kpi-head">
+                <div class="kpi-title">
+                  <span class="icon-wrap teal"><Database :size="15" /></span>
+                  <span>缓存 Token</span>
+                </div>
+                <span class="kpi-badge muted">Prompt 缓存</span>
+              </div>
+              <strong class="kpi-value">{{ rangeStats.usageReportedCalls ? formatTokens(rangeStats.cacheCreationInputTokens + rangeStats.cacheReadInputTokens) : '—' }}</strong>
+              <p class="kpi-footer" v-if="rangeStats.usageReportedCalls">写入 {{ formatTokens(rangeStats.cacheCreationInputTokens) }} · 命中 {{ formatTokens(rangeStats.cacheReadInputTokens) }}</p>
+              <p class="kpi-footer text-muted" v-else>Provider 未提供缓存用量</p>
+            </article>
+
+            <article class="kpi-card">
+              <div class="kpi-head">
+                <div class="kpi-title">
+                  <span class="icon-wrap emerald"><CreditCard :size="15" /></span>
+                  <span>Provider 费用</span>
+                </div>
+                <span class="kpi-badge muted">真实回执</span>
+              </div>
+              <strong class="kpi-value">{{ formatCost(rangeStats.totalCostUsd) }}</strong>
+              <p class="kpi-footer">{{ rangeStats.totalCostUsd ? '仅统计 Provider 明确返回的费用' : '未提供价格结算' }}</p>
+            </article>
+
+            <article class="kpi-card">
+              <div class="kpi-head">
+                <div class="kpi-title">
+                  <span class="icon-wrap orange"><Cpu :size="15" /></span>
+                  <span>Agent 资源峰值</span>
+                </div>
+                <span class="kpi-badge muted">进程监控</span>
+              </div>
+              <strong class="kpi-value">{{ rangeStats.peakRssBytes ? formatBytes(rangeStats.peakRssBytes) : '—' }}</strong>
+              <p class="kpi-footer">{{ rangeStats.peakCpuPercent ? `CPU ${rangeStats.peakCpuPercent.toFixed(1)}% · ${rangeStats.peakChildProcessCount} 个进程` : '等待托管进程采样' }}</p>
+            </article>
+          </section>
+
+          <!-- 终态分桶：横向比例分解条 -->
+          <section class="bucket-strip">
+            <div class="bucket-header">
+              <div class="bucket-title">
+                <Layers :size="14" />
+                <strong>终态调用分布 · {{ rangeLabel }}</strong>
+              </div>
+              <span class="bucket-total">总计 {{ formatNumber(totalStatusBucketCalls) }} 次</span>
+            </div>
+
+            <!-- 横向彩色比例段 -->
+            <div v-if="totalStatusBucketCalls > 0" class="breakdown-bar">
+              <div
+                v-if="statusBuckets.completed > 0"
+                class="seg ok"
+                :style="{ width: `${statusPercent(statusBuckets.completed)}%` }"
+                :title="`成功: ${statusBuckets.completed} (${statusPercent(statusBuckets.completed)}%)`"
+              ></div>
+              <div
+                v-if="statusBuckets.failed > 0"
+                class="seg bad"
+                :style="{ width: `${statusPercent(statusBuckets.failed)}%` }"
+                :title="`失败: ${statusBuckets.failed} (${statusPercent(statusBuckets.failed)}%)`"
+              ></div>
+              <div
+                v-if="statusBuckets.cancelled > 0"
+                class="seg mute"
+                :style="{ width: `${statusPercent(statusBuckets.cancelled)}%` }"
+                :title="`取消: ${statusBuckets.cancelled} (${statusPercent(statusBuckets.cancelled)}%)`"
+              ></div>
+              <div
+                v-if="statusBuckets.blocked > 0"
+                class="seg warn"
+                :style="{ width: `${statusPercent(statusBuckets.blocked)}%` }"
+                :title="`阻塞: ${statusBuckets.blocked} (${statusPercent(statusBuckets.blocked)}%)`"
+              ></div>
+              <div
+                v-if="statusBuckets.unknown > 0"
+                class="seg info"
+                :style="{ width: `${statusPercent(statusBuckets.unknown)}%` }"
+                :title="`历史未知: ${statusBuckets.unknown} (${statusPercent(statusBuckets.unknown)}%)`"
+              ></div>
+            </div>
+
+            <div class="bucket-chips">
+              <span class="chip ok"><i class="dot"></i>成功 <strong>{{ formatNumber(statusBuckets.completed) }}</strong> <small>({{ statusPercent(statusBuckets.completed) }}%)</small></span>
+              <span class="chip bad"><i class="dot"></i>失败 <strong>{{ formatNumber(statusBuckets.failed) }}</strong> <small>({{ statusPercent(statusBuckets.failed) }}%)</small></span>
+              <span class="chip mute"><i class="dot"></i>取消 <strong>{{ formatNumber(statusBuckets.cancelled) }}</strong></span>
+              <span class="chip warn"><i class="dot"></i>阻塞 <strong>{{ formatNumber(statusBuckets.blocked) }}</strong></span>
+              <span class="chip info"><i class="dot"></i>未知 <strong>{{ formatNumber(statusBuckets.unknown) }}</strong></span>
+            </div>
+
+            <div v-if="isGlobalScope" class="live-runs-bar">
+              <span class="live-title"><Radio :size="12" class="live-pulse" /> 进行中 Runs</span>
+              <div class="live-chips">
+                <span class="chip warn">待确认 {{ formatNumber(liveRunBuckets.waiting_confirmation) }}</span>
+                <span class="chip info">监督中 {{ formatNumber(liveRunBuckets.supervising) }}</span>
+                <span class="chip mute">运行中 {{ formatNumber(liveRunBuckets.running) }}</span>
+                <small v-if="!hasLiveRuns">当前无进行中的全局 run</small>
+              </div>
+            </div>
+          </section>
+
+          <!-- 趋势图与实时进程资源 -->
+          <section class="overview-grid">
+            <!-- 调用趋势 -->
+            <article class="panel trend-panel">
+              <div class="panel-head">
+                <div>
+                  <span class="panel-kicker">{{ isGlobalScope ? 'GLOBAL AGENT TREND' : (isProjectScope ? 'PROJECT AGENT TREND' : 'MAIN AGENT TREND') }}</span>
+                  <h3>{{ mainAgentLabel }}调用趋势</h3>
+                </div>
+                <div class="legend">
+                  <span><i class="ok"></i>成功</span>
+                  <span><i class="fail"></i>失败</span>
+                </div>
+              </div>
+              <div class="chart">
+                <div v-for="day in trendPoints" :key="day.key" class="chart-column" :title="`${day.key} · 共 ${day.calls} 次 · 成功 ${day.successes} · 失败 ${day.failures}`">
+                  <span class="chart-value">{{ day.calls > 0 ? day.calls : '' }}</span>
+                  <div class="bar-track">
+                    <div class="bar-total" :style="{ height: `${day.height}%` }">
+                      <div class="bar-success" :style="{ height: `${day.successHeight}%` }"></div>
+                    </div>
+                  </div>
+                  <span class="chart-label">{{ day.label }}</span>
+                </div>
+              </div>
+              <div v-if="!rangeStats.calls" class="chart-empty">所选时间范围内暂无调用数据</div>
+            </article>
+
+            <!-- 服务进程实时资源 -->
+            <article class="panel runtime-panel">
+              <div class="panel-head">
+                <div>
+                  <span class="panel-kicker">CCM PROCESS</span>
+                  <h3>服务进程实时资源</h3>
+                </div>
+                <span class="live-pill"><i class="live-dot-pulse"></i> LIVE</span>
+              </div>
+              <div v-if="hasSystem" class="runtime-dashboard">
+                <div class="gauge-card">
+                  <div class="gauge-header">
+                    <span>CPU 使用率</span>
+                    <strong>{{ safeNumber(system.process?.cpuPercent).toFixed(1) }}%</strong>
+                  </div>
+                  <div class="meter-bar">
+                    <i :style="{ width: `${Math.min(100, safeNumber(system.process?.cpuPercent))}%` }"></i>
+                  </div>
+                </div>
+
+                <div class="gauge-card">
+                  <div class="gauge-header">
+                    <span>Node.js Heap 堆内存</span>
+                    <strong>{{ formatBytes(system.process?.heapUsedBytes) }}</strong>
+                  </div>
+                  <div class="meter-bar heap">
+                    <i :style="{ width: `${heapPercent}%` }"></i>
+                  </div>
+                </div>
+
+                <div class="runtime-stat-row">
+                  <div class="stat-mini">
+                    <span>RSS 驻留内存</span>
+                    <strong>{{ formatBytes(system.process?.rssBytes) }}</strong>
+                  </div>
+                  <div class="stat-mini">
+                    <span>事件循环利用率</span>
+                    <strong>{{ safeNumber(system.eventLoop?.utilization).toFixed(1) }}%</strong>
+                  </div>
+                  <div class="stat-mini">
+                    <span>运行时长</span>
+                    <strong>{{ formatDuration(safeNumber(system.process?.uptimeSeconds) * 1000) }}</strong>
+                  </div>
+                  <div class="stat-mini">
+                    <span>PID 进程号</span>
+                    <strong class="font-mono">{{ system.process?.pid || '—' }}</strong>
+                  </div>
+                </div>
+
+                <div class="runtime-footer">
+                  <span>采样时间：{{ formatTime(system.collectedAt, '—') }}</span>
+                  <small>随页面心跳轮询更新</small>
+                </div>
+              </div>
+              <div v-else class="runtime-empty">服务启动后将自动激活实时 CPU、内存与事件循环采样。</div>
+            </article>
+          </section>
+        </template>
+
+        <!-- 视图 2：Token 分析 -->
+        <template v-if="metricsView === 'token'">
+          <!-- Token 完整度分析 -->
+          <article class="panel coverage-panel">
+            <div class="panel-head">
+              <div>
+                <span class="panel-kicker">USAGE COMPLETENESS</span>
+                <h3>Token 用量完整度分析</h3>
+              </div>
+              <span class="panel-note">真实回执覆盖 {{ formatNumber(rangeStats.usageReportedCalls) }} / {{ formatNumber(rangeStats.calls) }} 次</span>
+            </div>
+            <div v-if="usageCoverageRows.length" class="coverage-list">
+              <div v-for="row in usageCoverageRows" :key="`${row.roleLabel}:${row.project}`" class="coverage-card">
+                <div class="coverage-agent">
+                  <div class="coverage-agent-header">
+                    <strong>{{ row.project }}</strong>
+                    <span class="role-badge" :class="{ main: row.isMain }">{{ row.roleLabel }}</span>
+                  </div>
+                  <small v-if="row.usage.runtimes.length" class="coverage-runtime">{{ row.usage.runtimes.join(' / ') }}</small>
+                </div>
+                <div class="coverage-progress-wrap">
+                  <div class="coverage-meter">
+                    <i :style="{ width: `${Math.min(100, row.coverage)}%` }"></i>
+                  </div>
+                  <strong class="coverage-pct">{{ row.calls ? formatPercent(row.coverage) : '—' }}</strong>
+                </div>
+                <div class="coverage-tags">
+                  <span v-if="row.usage.reported" class="coverage-tag ok">已报告 {{ row.usage.reported }}</span>
+                  <span v-if="row.usage.local" class="coverage-tag local">本地验证 {{ row.usage.local }}</span>
+                  <span v-if="row.usage.missing" class="coverage-tag missing">未提供 {{ row.usage.missing }}</span>
+                  <small v-if="row.usage.missingReasons.length" class="coverage-reason">{{ row.usage.missingReasons.map(missingReasonLabel).join('；') }}</small>
+                </div>
+              </div>
+            </div>
+            <div v-else class="runtime-empty">当前范围尚无 Agent 调用记录。</div>
+          </article>
+
+          <!-- Agent Token 性能详细大表 -->
+          <article class="panel agent-panel">
+            <div class="panel-head">
+              <div>
+                <span class="panel-kicker">{{ isGlobalScope ? 'GLOBAL AGENT' : (isProjectScope ? 'PROJECT AGENTS' : 'GROUP AGENTS') }}</span>
+                <h3>{{ isGlobalScope ? '全局 Agent Token 消耗表' : (isProjectScope ? '该项目 Agent 性能明细' : '该群 Agent 性能明细') }}</h3>
+              </div>
+              <span class="panel-note">支持首列固定与横向滑动查看</span>
+            </div>
+            <div class="table-wrap">
+              <table class="metrics-table">
+                <thead>
+                  <tr>
+                    <th class="sticky-col">Agent 名称</th>
+                    <th>角色</th>
+                    <th class="text-right">总调用</th>
+                    <th class="text-right">成功率</th>
+                    <th class="text-right">平均耗时</th>
+                    <th class="text-right">P95 耗时</th>
+                    <th class="text-right">Token 总量</th>
+                    <th class="text-right">回执覆盖</th>
+                    <th class="text-right">缓存 Token</th>
+                    <th class="text-right">Provider 费用</th>
+                    <th>最后调用时间</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="agent in agentRows" :key="agent.project">
+                    <td class="sticky-col">
+                      <div class="agent-col-cell">
+                        <strong>{{ agent.project }}</strong>
+                      </div>
+                    </td>
+                    <td><span class="role-badge" :class="{ main: agent.isMain }">{{ agent.roleLabel }}</span></td>
+                    <td class="text-right font-mono">{{ formatNumber(agent.calls) }}</td>
+                    <td class="text-right">
+                      <span :class="['rate font-mono', agent.calls && agent.successRate < 80 ? 'bad' : '']">
+                        {{ agent.calls ? formatPercent(agent.successRate) : '—' }}
+                      </span>
+                    </td>
+                    <td class="text-right font-mono">{{ formatDuration(agent.avgMs) }}</td>
+                    <td class="text-right font-mono">{{ formatDuration(agent.p95Ms) }}</td>
+                    <td class="text-right font-mono">
+                      <strong>{{ agent.usageReportedCalls ? formatTokens(agent.tokens) : (agent.usage.local ? '本地验证' : '未提供') }}</strong>
+                    </td>
+                    <td class="text-right font-mono">{{ agent.calls ? `${agent.usage.reported}/${agent.calls}` : '—' }}</td>
+                    <td class="text-right font-mono">{{ agent.usageReportedCalls ? formatTokens(agent.cacheTokens) : '—' }}</td>
+                    <td class="text-right font-mono">{{ formatCost(agent.costUsd) }}</td>
+                    <td><span :title="formatTime(agent.lastCall)">{{ formatRelativeTime(agent.lastCall) }}</span></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </article>
+        </template>
+
+        <!-- 视图 3：性能与可靠性 -->
+        <template v-if="metricsView === 'performance'">
+          <!-- 阶段耗时瀑布流分解 -->
+          <article class="panel phase-panel">
+            <div class="panel-head">
+              <div>
+                <span class="panel-kicker">WALL CLOCK BREAKDOWN</span>
+                <h3>阶段耗时瀑布分解 (Waterfall Breakdown)</h3>
+              </div>
+              <span class="panel-note">总耗时 {{ formatDuration(rangeStats.totalMs) }}</span>
+            </div>
+            <div v-if="phaseTimingRows.length" class="phase-waterfall">
+              <div v-for="item in phaseTimingRows" :key="item.label" class="waterfall-row">
+                <div class="waterfall-label">
+                  <strong>{{ item.label }}</strong>
+                  <span class="font-mono">{{ formatDuration(item.value) }}</span>
+                </div>
+                <div class="waterfall-track">
+                  <div
+                    class="waterfall-bar"
+                    :style="{ width: `${Math.min(100, rangeStats.totalMs ? (item.value / rangeStats.totalMs) * 100 : 0)}%` }"
+                  >
+                    <span class="waterfall-pct">{{ rangeStats.totalMs ? Math.round((item.value / rangeStats.totalMs) * 100) : 0 }}%</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div v-else class="runtime-empty">当前调用尚未返回可分解的阶段耗时。</div>
+          </article>
+
+          <!-- 活跃 Agent 进程资源 -->
+          <article v-if="agentResources.length" class="panel agent-resource-panel">
+            <div class="panel-head">
+              <div>
+                <span class="panel-kicker">ACTIVE AGENT PROCESSES</span>
+                <h3>运行中的 Agent 进程</h3>
+              </div>
+              <span class="live-pill"><i class="live-dot-pulse"></i> {{ agentResources.length }} RUNNING</span>
+            </div>
+            <div class="agent-resource-list">
+              <div v-for="run in agentResources" :key="run.id" class="agent-resource-card">
+                <div class="resource-card-header">
+                  <strong>{{ run.project || run.agentType || 'Agent' }}</strong>
+                  <span class="resource-source">{{ run.commandLabel || run.source || '托管运行时' }}</span>
+                </div>
+                <div class="resource-card-metrics">
+                  <div class="res-item">
+                    <span>CPU 占用</span>
+                    <strong :class="{ 'text-warn': safeNumber(run.resources?.cpuPercent) > 60 }">{{ safeNumber(run.resources?.cpuPercent).toFixed(1) }}%</strong>
+                  </div>
+                  <div class="res-item">
+                    <span>RSS 内存</span>
+                    <strong>{{ formatBytes(run.resources?.rssBytes) }}</strong>
+                  </div>
+                  <div class="res-item">
+                    <span>子进程数</span>
+                    <strong>{{ formatNumber(run.resources?.childProcessCount) }}</strong>
+                  </div>
+                  <div class="res-item">
+                    <span>已运行时长</span>
+                    <strong>{{ formatDuration(run.ageMs) }}</strong>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </article>
+
+          <!-- 可靠性演练与恢复 -->
+          <article v-if="reliability || reliabilityError" class="panel reliability-panel">
+            <div class="panel-head">
+              <div>
+                <span class="panel-kicker">RELIABILITY DRILLS</span>
+                <h3>系统可靠性演练与自愈验证</h3>
+              </div>
+              <div class="reliability-actions">
+                <button v-if="reliability?.active_run" type="button" class="btn-warn" :disabled="reliabilityLoading" @click="cancelReliabilityDrill">取消演练</button>
+                <button v-else type="button" class="btn-primary" :disabled="reliabilityLoading" @click="startReliabilityDrill">
+                  <Sparkles :size="13" />
+                  <span>{{ reliabilityLoading ? '启动中…' : '发起可靠性演练' }}</span>
+                </button>
+              </div>
+            </div>
+            <div v-if="reliabilityError" class="event-load-error">
+              <AlertCircle :size="16" />
+              <span>{{ reliabilityError }}</span>
+              <button @click="loadReliability">重试</button>
+            </div>
+            <div v-else class="reliability-grid">
+              <div class="reliability-card">
+                <span>当前运行状态</span>
+                <strong :class="{ 'text-ok': !reliability?.active_run }">{{ reliability?.active_run?.status || '空闲就绪' }}</strong>
+                <small>{{ reliability?.active_run?.checkpoint || '没有演练占用租约' }}</small>
+              </div>
+              <div class="reliability-card">
+                <span>最近演练结论</span>
+                <strong>{{ reliability?.latest_run?.status || '暂无演练记录' }}</strong>
+                <small>{{ formatTime(reliability?.latest_run?.completed_at, '尚未完成演练') }}</small>
+              </div>
+              <div class="reliability-card">
+                <span>自动化调度器</span>
+                <strong>{{ reliability?.scheduler_running ? '已激活' : '已暂停' }}</strong>
+                <small>下次演练：{{ formatTime(reliability?.next_run_at, '等待触发') }}</small>
+              </div>
+            </div>
+          </article>
+        </template>
+
+        <!-- 视图 4：执行记录列表 -->
+        <template v-if="metricsView === 'executions'">
+          <article class="panel event-panel">
+            <div class="panel-head">
+              <div>
+                <span class="panel-kicker">RECENT EXECUTIONS</span>
+                <h3>{{ isGlobalScope ? '全局执行链路记录' : (isProjectScope ? '该项目执行记录' : '该群执行记录') }}</h3>
+              </div>
+              <span class="panel-note">{{ rangeLabel }}共 {{ formatNumber(executionResult.total) }} 条记录 · 支持交互追溯</span>
+            </div>
+
+            <!-- 状态筛选器 -->
+            <div class="event-controls">
+              <div class="event-status-tabs" role="tablist" aria-label="执行状态筛选">
+                <button
+                  v-for="option in executionStatusOptions"
+                  :key="option.value"
+                  type="button"
+                  :class="{ active: executionStatus === option.value }"
+                  @click="executionStatus = option.value"
+                >
+                  <span>{{ option.label }}</span>
+                  <small>{{ formatNumber(option.count) }}</small>
+                </button>
+              </div>
+              <label class="page-size-control">
+                <span>单页显示</span>
+                <select v-model.number="executionPageSize">
+                  <option :value="10">10 条</option>
+                  <option :value="20">20 条</option>
+                  <option :value="50">50 条</option>
+                </select>
+              </label>
+            </div>
+
+            <div v-if="executionError" class="event-load-error">
+              <AlertCircle :size="16" />
+              <span>{{ executionError }}</span>
+              <button type="button" @click="loadExecutionEvents">重新加载</button>
+            </div>
+
+            <!-- 执行记录流 -->
+            <div v-if="recentEvents.length" class="event-list" :class="{ loading: executionLoading }">
+              <article
+                v-for="event in recentEvents"
+                :key="event.id"
+                class="event-row"
+                :class="{
+                  'is-failed': event.resolvedStatus === 'failed',
+                  'is-cancelled': event.resolvedStatus === 'cancelled',
+                  'is-blocked': event.resolvedStatus === 'blocked',
+                  'is-unknown': event.resolvedStatus === 'unknown',
+                  'is-clickable': eventNavigable(event),
+                  'is-navigating': navigatingEventId === event.id,
+                }"
+                @click="openEvent(event)"
+              >
+                <!-- 状态微图标 -->
+                <div class="event-state-icon" :class="eventStatusClass(event.resolvedStatus)">
+                  <CheckCircle2 v-if="event.resolvedStatus === 'completed'" :size="16" />
+                  <XCircle v-else-if="event.resolvedStatus === 'failed'" :size="16" />
+                  <AlertTriangle v-else-if="event.resolvedStatus === 'blocked'" :size="16" />
+                  <Clock v-else-if="event.resolvedStatus === 'cancelled'" :size="16" />
+                  <HelpCircle v-else :size="16" />
+                </div>
+
+                <div class="event-main">
+                  <div class="event-main-head">
+                    <strong class="event-agent-name">{{ event.agent }}</strong>
+                    <span class="role-badge" :class="{ main: event.role === 'main_agent' || event.role === 'global_agent' }">{{ eventRoleLabel(event.role) }}</span>
+                    <span class="status-badge" :class="eventStatusClass(event.resolvedStatus)">{{ eventStatusLabel(event.resolvedStatus) }}</span>
+                    <span class="event-source-tag">{{ sourceLabel(event.source) }}</span>
+                  </div>
+
+                  <!-- 错误信息可折叠展开 -->
+                  <div v-if="event.resolvedStatus !== 'completed' && event.error" class="event-error-box" @click.stop="toggleErrorExpand(event.id)">
+                    <span class="error-text" :class="{ expanded: expandedErrorIds.has(event.id) }">{{ event.error }}</span>
+                    <small class="error-hint">{{ expandedErrorIds.has(event.id) ? '收起' : '展开详情' }}</small>
+                  </div>
+
+                  <p class="event-time">
+                    <span>{{ event.runtime || '默认运行时' }}</span>
+                    <span class="dot-sep">·</span>
+                    <span class="font-mono">{{ formatTime(event.at) }}</span>
+                  </p>
+                </div>
+
+                <div class="event-metrics">
+                  <span class="font-mono duration">{{ formatDuration(event.durationMs) }}</span>
+                  <span v-if="event.usageReported" class="font-mono text-muted">{{ formatTokens(safeNumber(event.inputTokens) + safeNumber(event.outputTokens)) }} Token</span>
+                  <span v-else-if="event.usageSource === 'local_no_model'" class="text-muted">本地验证</span>
+                  <span v-else class="text-muted" :title="missingReasonLabel(event.usageMissingReason)">Token 未提供</span>
+                  <span v-if="safeNumber(event.totalCostUsd)" class="font-mono text-ok">{{ formatCost(event.totalCostUsd) }}</span>
+                  <span v-if="event.fileChangeCount" class="text-muted">{{ event.fileChangeCount }} 个文件变更</span>
+                </div>
+
+                <!-- Trace ID 胶囊带复制 -->
+                <div v-if="event.traceId || event.executionId || event.taskId" class="event-trace-wrap" @click.stop>
+                  <button
+                    type="button"
+                    class="trace-pill"
+                    :title="`点击复制：${event.traceId || event.executionId || event.taskId}`"
+                    @click="copyText(event.traceId || event.executionId || event.taskId, event.id)"
+                  >
+                    <code>{{ (event.traceId || event.executionId || event.taskId).slice(0, 14) }}…</code>
+                    <Check v-if="copiedKey === event.id" :size="11" class="copied-icon" />
+                    <Copy v-else :size="11" />
+                  </button>
+                  <ArrowUpRight v-if="eventNavigable(event)" :size="13" class="nav-arrow" />
+                </div>
+              </article>
+            </div>
+
+            <div v-else-if="!executionLoading && !executionError" class="event-empty">
+              {{ executionStatus === 'all'
+                ? (isGlobalScope
+                  ? '所选时间范围内暂无全局执行记录。'
+                  : (isProjectScope ? '所选时间范围内暂无该项目执行记录。' : '所选时间范围内暂无该群执行记录。'))
+                : `所选时间范围内暂无“${eventStatusLabel(executionStatus)}”记录。` }}
+            </div>
+
+            <div v-if="executionLoading && !recentEvents.length" class="event-loading">正在加载执行记录…</div>
+
+            <!-- 分页栏 -->
+            <div v-if="executionResult.totalPages > 1" class="event-pagination">
+              <span>第 {{ executionPageStart }}–{{ executionPageEnd }} 条，共 {{ formatNumber(executionResult.total) }} 条</span>
+              <div class="pagination-buttons">
+                <button type="button" :disabled="executionResult.page <= 1 || executionLoading" @click="executionPage = 1">首页</button>
+                <button type="button" :disabled="executionResult.page <= 1 || executionLoading" @click="executionPage -= 1">上一页</button>
+                <span class="page-current">{{ executionResult.page }} / {{ executionResult.totalPages }}</span>
+                <button type="button" :disabled="executionResult.page >= executionResult.totalPages || executionLoading" @click="executionPage += 1">下一页</button>
+                <button type="button" :disabled="executionResult.page >= executionResult.totalPages || executionLoading" @click="executionPage = executionResult.totalPages">末页</button>
+              </div>
+            </div>
+          </article>
+        </template>
+
+        <footer class="page-foot">
+          <span>页面更新：{{ loadedAt ? loadedAt.toLocaleTimeString('zh-CN', { hour12: false }) : '—' }}</span>
+          <span>CCM 指标引擎 v{{ payload.metrics?.version || 2 }}</span>
+        </footer>
+      </template>
+    </div>
   </WorkspacePageShell>
 </template>
 
 <style scoped>
-.metrics-page{min-height:100%;padding:18px 28px 40px;background:linear-gradient(180deg,var(--bg-secondary),var(--bg-primary));color:var(--text-primary)}
-.metrics-shared-toolbar{align-items:center}.metrics-shared-toolbar label{flex-direction:row;align-items:center}.metrics-shared-toolbar label span{white-space:nowrap}.custom-range-inline{display:flex;justify-content:flex-end;margin-bottom:12px}
-.page-header{display:flex;align-items:flex-end;justify-content:space-between;gap:24px;margin-bottom:20px}.eyebrow,.panel-kicker{display:block;color:var(--accent-blue);font-size:9px;font-weight:900;letter-spacing:.16em}.page-header h2{margin:5px 0 4px;font-size:23px;letter-spacing:-.03em}.page-header p{margin:0;color:var(--text-muted);font-size:12px}.toolbar{display:flex;align-items:flex-end;gap:9px;flex-wrap:wrap;justify-content:flex-end}.toolbar label{display:flex;flex-direction:column;gap:5px}.toolbar label span{color:var(--text-muted);font-size:9px;font-weight:800}.toolbar select,.toolbar input[type=date],.refresh-btn,.scope-trigger,.apply-range-btn{height:35px;border:1px solid var(--border-color);border-radius:9px;background:var(--bg-card);color:var(--text-primary);font-size:11px;font-weight:700;outline:none}.toolbar select{min-width:100px;padding:0 30px 0 10px}.toolbar input[type=date]{box-sizing:border-box;width:132px;padding:0 9px;color-scheme:light dark}.custom-date-range{position:relative;display:flex;align-items:flex-end;gap:7px;padding-left:9px;border-left:1px solid var(--border-color)}.custom-date-range>i{height:35px;display:flex;align-items:center;color:var(--text-muted);font-size:10px;font-style:normal}.apply-range-btn{padding:0 12px;cursor:pointer}.apply-range-btn:hover:not(:disabled){border-color:var(--accent-blue);color:var(--accent-blue)}.apply-range-btn:disabled{opacity:.5;cursor:not-allowed}.custom-range-error{position:absolute;top:100%;right:0;margin-top:3px;color:var(--danger,#ef4444);font-size:9px;white-space:nowrap}.refresh-btn{display:flex;align-items:center;gap:5px;padding:0 13px;cursor:pointer}.refresh-btn:hover{border-color:var(--border-strong);color:var(--accent-blue)}.refresh-btn:disabled{opacity:.6;cursor:wait}.spinning{display:inline-block;animation:spin .8s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
-.scope-control{min-width:240px}.toolbar select,.toolbar input[type=date],.refresh-btn,.apply-range-btn{height:var(--control-height,34px);border-radius:var(--radius-md,6px);background:var(--control-bg)}.toolbar select:focus,.toolbar input[type=date]:focus,.apply-range-btn:focus{border-color:var(--accent-blue);box-shadow:var(--focus-ring)}
-.state-banner,.scope-strip,.legacy-notice,.panel,.kpi-card,.empty-state,.bucket-strip{border:1px solid var(--border-color);background:var(--bg-card);box-shadow:var(--shadow-sm)}.state-banner{display:flex;justify-content:space-between;align-items:center;padding:14px 16px;border-radius:12px;margin-bottom:16px}.state-banner div{display:flex;flex-direction:column;gap:3px}.state-banner strong{font-size:12px}.state-banner span{font-size:11px;color:var(--text-muted)}.state-banner button{border:0;border-radius:8px;background:var(--accent-blue);color:white;padding:7px 12px}.error-state{border-color:color-mix(in srgb,var(--accent-red) 32%,transparent);background:var(--danger-soft)}
-.loading-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.skeleton{height:128px;border-radius:14px;background:linear-gradient(90deg,var(--bg-tertiary),var(--bg-card),var(--bg-tertiary));background-size:220% 100%;animation:shimmer 1.4s infinite}@keyframes shimmer{to{background-position:-220% 0}}.empty-state{border-radius:16px;padding:70px 20px;text-align:center}.empty-icon{font-size:38px;color:var(--accent-blue)}.empty-state h3{font-size:16px;margin:12px 0 7px}.empty-state p{font-size:12px;color:var(--text-muted)}
-.scope-strip{display:grid;grid-template-columns:minmax(210px,1fr) minmax(270px,1.4fr) auto;align-items:center;gap:18px;border-radius:14px;padding:13px 15px;margin-bottom:10px}.scope-main,.scope-status{display:flex;align-items:center;gap:10px}.scope-avatar{display:grid;place-items:center;width:34px;height:34px;border-radius:10px;background:linear-gradient(145deg,#2563eb,#7c3aed);color:#fff;font-weight:900}.scope-main div,.scope-status{min-width:0}.scope-main div{display:flex;flex-direction:column;gap:2px}.scope-main strong{font-size:12.5px}.scope-main div span,.scope-status span{color:var(--text-muted);font-size:10px}.scope-status{display:grid;grid-template-columns:auto auto 1fr}.scope-status i{width:8px;height:8px;border-radius:50%;background:#94a3b8}.scope-status.live i{background:#10b981;box-shadow:0 0 0 4px rgba(16,185,129,.12)}.scope-status.idle i{background:#3b82f6}.scope-status.stale i{background:#f59e0b}.scope-status strong{font-size:11px}.scope-status span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.scope-meta{display:flex;flex-direction:column;align-items:flex-end;gap:3px}.scope-meta span{font-size:9px;color:var(--text-muted)}.scope-meta code{font-size:9px;color:var(--accent-blue);background:var(--accent-soft);padding:3px 6px;border-radius:5px}.legacy-notice{display:flex;justify-content:space-between;gap:15px;margin-bottom:14px;padding:9px 13px;border-radius:10px;border-color:color-mix(in srgb,var(--accent-yellow) 28%,transparent);background:var(--warning-soft);color:var(--accent-yellow);font-size:10px}.legacy-notice small{white-space:nowrap;font-weight:800}
-.kpi-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:11px;margin-bottom:10px}.kpi-card{position:relative;min-height:112px;border-radius:13px;padding:14px 15px;overflow:hidden}.kpi-card:after{content:"";position:absolute;right:-18px;bottom:-22px;width:68px;height:68px;border-radius:50%;background:rgba(59,130,246,.08);filter:blur(4px)}.kpi-card.primary{background:linear-gradient(135deg,rgba(37,99,235,.95),rgba(79,70,229,.9));color:#fff}.kpi-card.primary p,.kpi-card.primary .kpi-head{color:rgba(255,255,255,.72)}.kpi-card.critical{border-color:rgba(239,68,68,.28)}.kpi-card.warning{border-color:rgba(245,158,11,.28)}.kpi-head{display:flex;justify-content:space-between;color:var(--text-muted);font-size:10px;font-weight:800}.kpi-head i{font-style:normal;font-family:monospace;opacity:.45}.kpi-card>strong{display:block;margin-top:12px;font-size:25px;line-height:1;font-variant-numeric:tabular-nums;letter-spacing:-.035em}.kpi-card>strong.time-value{font-size:20px}.kpi-card p{position:relative;z-index:1;margin:9px 0 0;color:var(--text-muted);font-size:9.5px;line-height:1.45}
-.bucket-strip{display:flex;flex-wrap:wrap;gap:14px 22px;border-radius:12px;padding:11px 14px;margin-bottom:13px}.bucket-block{display:flex;flex-direction:column;gap:7px;min-width:180px}.bucket-kicker{color:var(--text-muted);font-size:9px;font-weight:800;letter-spacing:.04em}.bucket-chips{display:flex;flex-wrap:wrap;align-items:center;gap:7px}.bucket-chips small{color:var(--text-muted);font-size:9px}.chip{display:inline-flex;align-items:center;border-radius:999px;padding:4px 9px;font-size:10px;font-weight:800}.chip.ok{background:rgba(16,185,129,.12);color:#059669}.chip.bad{background:rgba(239,68,68,.12);color:#dc2626}.chip.warn{background:rgba(245,158,11,.14);color:#d97706}.chip.info{background:rgba(59,130,246,.12);color:#2563eb}.chip.mute{background:var(--panel-muted);color:var(--text-muted)}
-.overview-grid{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(330px,1fr);gap:13px;margin-bottom:13px}.panel{border-radius:14px;overflow:hidden}.panel-head{display:flex;align-items:center;justify-content:space-between;gap:15px;padding:14px 16px;border-bottom:1px solid rgba(148,163,184,.13)}.panel-head h3{font-size:12.5px;margin:3px 0 0}.panel-note{font-size:9.5px;color:var(--text-muted)}.legend{display:flex;gap:12px;color:var(--text-muted);font-size:9px}.legend span{display:flex;align-items:center;gap:5px}.legend i{width:7px;height:7px;border-radius:2px}.legend .ok{background:#2563eb}.legend .fail{background:#ef4444}.chart{position:relative;display:flex;align-items:flex-end;gap:6px;height:190px;padding:25px 16px 13px}.chart-column{display:flex;flex:1;min-width:0;height:100%;flex-direction:column;align-items:center}.chart-value{height:15px;font:8px ui-monospace,monospace;color:var(--text-muted)}.bar-track{display:flex;align-items:flex-end;width:min(70%,28px);height:125px;border-radius:5px;background:rgba(148,163,184,.08);overflow:hidden}.bar-total{position:relative;width:100%;min-height:2px;background:#ef4444;border-radius:4px 4px 0 0;overflow:hidden;transition:height .3s}.bar-success{position:absolute;left:0;right:0;bottom:0;background:linear-gradient(180deg,#60a5fa,#2563eb)}.chart-label{margin-top:7px;color:var(--text-muted);font-size:8px;white-space:nowrap}.chart-empty{margin:-112px 0 83px;text-align:center;color:var(--text-muted);font-size:10px;pointer-events:none}.live-dot{font-size:8px;font-weight:900;letter-spacing:.12em;color:#059669;background:rgba(16,185,129,.1);border-radius:99px;padding:5px 8px}.runtime-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:0;padding:7px 16px 13px}.runtime-grid>div{min-height:69px;padding:11px 8px;border-bottom:1px solid rgba(148,163,184,.1)}.runtime-grid>div:nth-last-child(-n+2){border-bottom:0}.runtime-grid span{display:block;color:var(--text-muted);font-size:9px}.runtime-grid strong{display:block;margin-top:5px;font-size:15px}.runtime-grid strong.sample-time{font-size:10px;margin-top:8px}.runtime-grid small{display:block;margin-top:5px;color:var(--text-muted);font-size:8px}.meter{height:3px;margin-top:7px;border-radius:3px;background:rgba(148,163,184,.14);overflow:hidden}.meter i{display:block;height:100%;background:linear-gradient(90deg,#2563eb,#8b5cf6);border-radius:inherit}
-.agent-panel,.event-panel,.reliability-panel{margin-bottom:13px}.reliability-actions{display:flex;gap:7px}.reliability-actions button{height:30px;padding:0 10px;border:1px solid var(--border-color);border-radius:7px;background:var(--bg-card);color:var(--text-secondary);font-size:9px;font-weight:800;cursor:pointer}.reliability-actions button:hover:not(:disabled){border-color:var(--accent-blue);color:var(--accent-blue)}.reliability-actions button:disabled{opacity:.5}.reliability-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:1px;background:var(--border-color)}.reliability-grid>div{min-width:0;padding:13px 15px;background:var(--bg-card);display:flex;flex-direction:column;gap:3px}.reliability-grid span,.reliability-grid small{color:var(--text-muted);font-size:9px}.reliability-grid strong{font-size:13px}.table-wrap{overflow-x:auto}table{width:100%;border-collapse:collapse;min-width:790px}th,td{padding:10px 14px;text-align:left;border-bottom:1px solid var(--border-color);font-size:10px;white-space:nowrap}th{color:var(--text-muted);font-size:8.5px;text-transform:uppercase;letter-spacing:.05em;background:var(--panel-muted)}td strong{font-size:10.5px}tbody tr:last-child td{border-bottom:0}tbody tr:hover{background:var(--accent-soft)}.role-badge,.status-badge{display:inline-flex;border-radius:99px;padding:3px 7px;background:var(--panel-muted);color:var(--text-muted);font-size:8px;font-weight:800}.role-badge.main{background:var(--accent-soft);color:var(--accent-blue)}.status-badge.success{background:rgba(16,185,129,.12);color:#059669}.status-badge.failed{background:rgba(239,68,68,.12);color:#dc2626}.status-badge.cancelled{background:rgba(148,163,184,.16);color:#64748b}.status-badge.blocked{background:rgba(245,158,11,.14);color:#b45309}.status-badge.unknown{background:rgba(59,130,246,.1);color:#2563eb}.rate{color:var(--accent-green);font-weight:800}.rate.bad{color:var(--accent-red)}
-.runtime-empty{display:grid;place-items:center;min-height:220px;padding:30px;text-align:center;color:var(--text-muted);font-size:10px}
-.observability-detail-grid{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(300px,.85fr);gap:13px;margin-bottom:13px}.coverage-list{padding:7px 14px 12px}.coverage-row{display:grid;grid-template-columns:minmax(150px,1.1fr) minmax(90px,.8fr) 44px minmax(190px,1.3fr);align-items:center;gap:12px;padding:10px 2px;border-bottom:1px solid rgba(148,163,184,.12)}.coverage-row:last-child{border-bottom:0}.coverage-agent{min-width:0;display:flex;flex-direction:column;gap:2px}.coverage-agent strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10.5px}.coverage-agent span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-muted);font-size:8.5px}.coverage-meter{height:5px;border-radius:99px;background:var(--panel-muted);overflow:hidden}.coverage-meter i{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,#2563eb,#22c55e)}.coverage-row>strong{text-align:right;font-size:10px}.coverage-detail{display:flex;align-items:center;flex-wrap:wrap;gap:5px}.coverage-detail span{padding:3px 6px;border-radius:99px;font-size:8px;font-weight:800}.coverage-ok{background:rgba(16,185,129,.12);color:#059669}.coverage-local{background:rgba(59,130,246,.12);color:#2563eb}.coverage-missing{background:rgba(245,158,11,.14);color:#b45309}.coverage-detail small{width:100%;color:var(--text-muted);font-size:8px}.phase-list{padding:11px 16px 15px}.phase-list>div{position:relative;display:grid;grid-template-columns:1fr auto;gap:10px;padding:9px 0 12px}.phase-list span{color:var(--text-muted);font-size:9px}.phase-list strong{font-size:10px}.phase-list i{position:absolute;left:0;bottom:4px;height:3px;border-radius:99px;background:linear-gradient(90deg,#2563eb,#8b5cf6)}.agent-resource-panel{margin-bottom:13px}.agent-resource-list{padding:5px 16px 11px}.agent-resource-row{display:grid;grid-template-columns:minmax(180px,1fr) repeat(4,auto);align-items:center;gap:20px;padding:11px 1px;border-bottom:1px solid rgba(148,163,184,.12)}.agent-resource-row:last-child{border-bottom:0}.agent-resource-row>div{display:flex;flex-direction:column;gap:2px}.agent-resource-row>div strong{font-size:10.5px}.agent-resource-row>div span,.agent-resource-row>span{color:var(--text-muted);font-size:8.5px}.agent-resource-row>span strong{margin-left:3px;color:var(--text-primary);font-size:9.5px}
-.event-controls{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 16px;border-bottom:1px solid rgba(148,163,184,.12);background:var(--panel-muted)}.event-status-tabs{display:flex;align-items:center;gap:4px}.event-status-tabs button{height:29px;border:1px solid transparent;border-radius:7px;background:transparent;color:var(--text-muted);padding:0 9px;font-size:9.5px;font-weight:800;cursor:pointer}.event-status-tabs button span{margin-left:3px;font:8.5px ui-monospace,monospace;opacity:.72}.event-status-tabs button:hover{color:var(--text-primary);background:var(--bg-card)}.event-status-tabs button.active{border-color:var(--border-strong);background:var(--bg-card);color:var(--accent-blue);box-shadow:var(--shadow-sm)}.page-size-control{display:flex;align-items:center;gap:6px;color:var(--text-muted);font-size:9px}.page-size-control select{height:29px;border:1px solid var(--border-color);border-radius:7px;background:var(--bg-card);color:var(--text-primary);padding:0 24px 0 8px;font-size:9.5px;outline:none}
-.page-size-control select{height:var(--control-height-sm,28px);border-radius:var(--radius-md,6px);background:var(--control-bg);font-size:10.5px}.page-size-control select:focus{border-color:var(--accent-blue);box-shadow:var(--focus-ring)}
-.event-list{padding:2px 14px 8px;transition:opacity .18s}.event-list.loading{opacity:.55;pointer-events:none}.event-row{display:grid;grid-template-columns:27px minmax(0,1fr) auto minmax(80px,140px);align-items:center;gap:10px;padding:10px 8px;margin:0 -6px;border-radius:8px;border-bottom:1px solid rgba(148,163,184,.1)}.event-row:last-child{border-bottom:0}.event-row.is-clickable{cursor:pointer}.event-row.is-clickable:hover{background:var(--accent-soft)}.event-row.is-failed{background:rgba(239,68,68,.05);box-shadow:inset 3px 0 0 #ef4444}.event-row.is-cancelled{background:rgba(148,163,184,.06);box-shadow:inset 3px 0 0 #94a3b8}.event-row.is-blocked{background:rgba(245,158,11,.06);box-shadow:inset 3px 0 0 #f59e0b}.event-row.is-unknown{background:rgba(59,130,246,.04);box-shadow:inset 3px 0 0 #60a5fa}.event-row.is-navigating{opacity:.65}.event-state{display:grid;place-items:center;width:22px;height:22px;border-radius:7px;font-size:10px;font-weight:900}.event-state.success{background:rgba(16,185,129,.1);color:#059669}.event-state.failed{background:rgba(239,68,68,.1);color:#dc2626}.event-state.cancelled{background:rgba(148,163,184,.16);color:#64748b}.event-state.blocked{background:rgba(245,158,11,.14);color:#b45309}.event-state.unknown{background:rgba(59,130,246,.1);color:#2563eb}.event-main{min-width:0}.event-main>div{display:flex;align-items:center;gap:7px;flex-wrap:wrap}.event-main strong{font-size:10.5px}.event-main>div>span:last-child{color:var(--text-muted);font-size:9px}.event-main p{margin:3px 0 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-muted);font-size:9px}.event-main p.event-error{color:#dc2626;font-weight:700}.event-main p.event-time{font-variant-numeric:tabular-nums}.event-metrics{display:flex;flex-direction:column;align-items:flex-end;gap:3px;font-size:9px;color:var(--text-secondary)}.event-row code{overflow:hidden;text-overflow:ellipsis;color:var(--text-muted);font-size:8px;background:rgba(100,116,139,.06);padding:4px 6px;border-radius:5px}.event-empty,.event-loading{padding:38px;text-align:center;color:var(--text-muted);font-size:10px}.event-load-error{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:10px 14px 0;padding:10px 12px;border:1px solid color-mix(in srgb,var(--accent-red) 30%,transparent);border-radius:8px;background:var(--danger-soft);color:var(--accent-red);font-size:9.5px}.event-load-error button{border:1px solid currentColor;border-radius:6px;background:transparent;color:inherit;padding:4px 8px;cursor:pointer}.event-pagination{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:10px 16px;border-top:1px solid rgba(148,163,184,.12);color:var(--text-muted);font-size:9px}.event-pagination>div{display:flex;align-items:center;gap:5px}.event-pagination button{height:27px;border:1px solid var(--border-color);border-radius:6px;background:var(--bg-card);color:var(--text-secondary);padding:0 8px;font-size:9px;cursor:pointer}.event-pagination button:hover:not(:disabled){border-color:var(--border-strong);color:var(--accent-blue)}.event-pagination button:disabled{opacity:.4;cursor:not-allowed}.event-pagination strong{min-width:52px;text-align:center;color:var(--text-primary);font:9px ui-monospace,monospace}.page-foot{display:flex;justify-content:space-between;padding:2px 3px;color:var(--text-muted);font-size:8.5px}
-@media(max-width:1050px){.page-header{align-items:flex-start;flex-direction:column}.toolbar{width:100%;flex-wrap:wrap}.scope-control{flex:1}.scope-strip{grid-template-columns:1fr 1fr}.scope-meta{display:none}.overview-grid,.observability-detail-grid{grid-template-columns:1fr}.kpi-grid{grid-template-columns:repeat(2,1fr)}}
-@media(max-width:700px){.metrics-page{padding:16px 14px 32px}.toolbar{align-items:stretch}.toolbar label{flex:1}.scope-control{flex-basis:100%}.toolbar select{width:100%;min-width:0}.custom-date-range{width:100%;box-sizing:border-box;padding:9px 0 0;border-left:0;border-top:1px solid var(--border-color);display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr) auto}.custom-date-range label{min-width:0}.toolbar .custom-date-range input[type=date]{width:100%}.custom-range-error{position:static;grid-column:1/-1;margin:0}.refresh-btn{align-self:flex-end}.scope-strip{grid-template-columns:1fr}.scope-status{grid-template-columns:auto auto;}.scope-status span{grid-column:2;white-space:normal}.kpi-grid{grid-template-columns:1fr}.chart{gap:2px;padding-left:8px;padding-right:8px}.chart-label{font-size:7px;transform:rotate(-45deg);transform-origin:center}.runtime-grid,.reliability-grid{grid-template-columns:1fr}.runtime-grid>div{border-bottom:1px solid rgba(148,163,184,.1)!important}.coverage-row{grid-template-columns:minmax(0,1fr) 70px 36px}.coverage-detail{grid-column:1/-1}.agent-resource-row{grid-template-columns:1fr 1fr;gap:8px 16px}.agent-resource-row>div{grid-column:1/-1}.event-controls,.event-pagination{align-items:stretch;flex-direction:column}.event-status-tabs{display:grid;grid-template-columns:repeat(3,1fr)}.event-status-tabs button{padding:0 5px}.page-size-control{justify-content:flex-end}.event-pagination>div{justify-content:space-between}.event-row{grid-template-columns:27px minmax(0,1fr) auto}.event-row code{display:none}}
+/* ==================== 页面基础容器 ==================== */
+.metrics-page {
+  min-height: 100%;
+  padding: 16px 24px 36px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  box-sizing: border-box;
+}
+
+.font-mono {
+  font-family: var(--font-mono, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace);
+  font-variant-numeric: tabular-nums;
+}
+
+.text-right { text-align: right; }
+.text-ok { color: var(--accent-green, #10b981) !important; }
+.text-warn { color: var(--accent-yellow, #f59e0b) !important; }
+.text-danger { color: var(--accent-red, #ef4444) !important; }
+.text-muted { color: var(--text-muted) !important; }
+
+/* 顶栏共享筛选栏 */
+.metrics-shared-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.metrics-shared-toolbar label {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+}
+.metrics-shared-toolbar label span {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.scope-control {
+  min-width: 220px;
+}
+.toolbar select,
+.refresh-btn,
+.apply-range-btn {
+  height: var(--control-height, 34px);
+  padding: 0 10px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md, 6px);
+  background: var(--control-bg, var(--bg-card));
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 600;
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.toolbar select:focus,
+.refresh-btn:focus-visible,
+.apply-range-btn:focus {
+  border-color: var(--accent-blue);
+  box-shadow: var(--focus-ring);
+}
+.refresh-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+.refresh-btn:hover:not(:disabled) {
+  border-color: var(--accent-blue);
+  color: var(--accent-blue);
+}
+.refresh-btn:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+.spinning {
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* 自定义日期选择面板 */
+.custom-range-inline {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 12px;
+}
+.custom-date-range {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: var(--radius-md, 6px);
+  border: 1px solid var(--border-color);
+  background: var(--surface, var(--bg-card));
+}
+.custom-date-range label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+.custom-date-range label span {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+.custom-date-range input[type="date"] {
+  height: 28px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background: var(--control-bg);
+  color: var(--text-primary);
+  font-size: 11.5px;
+  padding: 0 6px;
+  outline: none;
+}
+.custom-date-range > i {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-style: normal;
+}
+.custom-range-error {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 3px;
+  color: var(--accent-red, #ef4444);
+  font-size: 10.5px;
+}
+
+/* 错误与骨架屏 */
+.state-banner {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  border-radius: 8px;
+  margin-bottom: 14px;
+  border: 1px solid var(--border-color);
+  background: var(--surface);
+}
+.error-state {
+  border-color: color-mix(in srgb, var(--accent-red) 35%, transparent);
+  background: var(--danger-soft, rgba(239, 68, 68, 0.08));
+}
+.banner-content {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--accent-red);
+}
+.banner-content div { display: flex; flex-direction: column; gap: 2px; }
+.banner-content strong { font-size: 13px; }
+.banner-content span { font-size: 12px; color: var(--text-secondary); }
+.state-banner button {
+  padding: 5px 12px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--accent-blue);
+  color: #fff;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.loading-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+.skeleton {
+  height: 120px;
+  border-radius: 10px;
+  background: linear-gradient(90deg, var(--panel-muted), var(--surface), var(--panel-muted));
+  background-size: 200% 100%;
+  animation: shimmer 1.4s infinite;
+}
+@keyframes shimmer { to { background-position: -200% 0; } }
+
+/* ==================== 顶部 Scope 横幅 ==================== */
+.scope-strip {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(260px, 1.2fr) auto;
+  align-items: center;
+  gap: 16px;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  padding: 10px 16px;
+  margin-bottom: 14px;
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+.scope-main {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.scope-avatar {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, var(--accent-blue, #2563eb), #7c3aed);
+  color: #fff;
+  font-size: 15px;
+  font-weight: 800;
+  flex-shrink: 0;
+}
+.scope-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.scope-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.scope-title-row strong {
+  font-size: 14px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.scope-tag {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent-blue);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+.scope-coordinator {
+  color: var(--text-muted);
+  font-size: 11.5px;
+}
+.scope-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.status-indicator {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #94a3b8;
+  flex-shrink: 0;
+}
+.scope-status.live .status-indicator {
+  background: #10b981;
+  box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.16);
+}
+.scope-status.idle .status-indicator { background: #3b82f6; }
+.scope-status.stale .status-indicator { background: #f59e0b; }
+.scope-status div {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.scope-status strong {
+  font-size: 12px;
+  font-weight: 700;
+}
+.scope-status span {
+  font-size: 11px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.scope-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+}
+.meta-label {
+  font-size: 10.5px;
+  color: var(--text-muted);
+}
+.scope-code-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--panel-muted);
+  color: var(--text-primary);
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.scope-code-btn:hover {
+  border-color: var(--accent-blue);
+  color: var(--accent-blue);
+}
+.scope-code-btn code {
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+}
+.copied-icon {
+  color: var(--accent-green, #10b981);
+}
+.legacy-notice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--accent-yellow) 30%, transparent);
+  background: var(--warning-soft, rgba(245, 158, 11, 0.08));
+  color: var(--accent-yellow, #d97706);
+  font-size: 11.5px;
+  margin-bottom: 12px;
+}
+.legacy-notice small { margin-left: auto; font-weight: 700; }
+
+/* ==================== 1. KPI 9格指标网格 ==================== */
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.kpi-card {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  min-height: 118px;
+  padding: 14px 16px;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+}
+.kpi-card:hover {
+  border-color: color-mix(in srgb, var(--accent-blue) 30%, var(--border-color));
+  box-shadow: var(--shadow-md, 0 4px 12px rgba(0, 0, 0, 0.06));
+}
+.kpi-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.kpi-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.icon-wrap {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  flex-shrink: 0;
+}
+.icon-wrap.blue { background: rgba(37, 99, 235, 0.1); color: var(--accent-blue, #2563eb); }
+.icon-wrap.green { background: rgba(16, 185, 129, 0.1); color: var(--accent-green, #10b981); }
+.icon-wrap.purple { background: rgba(139, 92, 246, 0.1); color: #8b5cf6; }
+.icon-wrap.cyan { background: rgba(6, 182, 212, 0.1); color: #06b6d4; }
+.icon-wrap.amber { background: rgba(245, 158, 11, 0.1); color: #f59e0b; }
+.icon-wrap.indigo { background: rgba(99, 102, 241, 0.1); color: #6366f1; }
+.icon-wrap.teal { background: rgba(20, 184, 166, 0.1); color: #14b8a6; }
+.icon-wrap.emerald { background: rgba(16, 185, 129, 0.1); color: #10b981; }
+.icon-wrap.orange { background: rgba(249, 115, 22, 0.1); color: #f97316; }
+
+.kpi-badge {
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+.kpi-badge.ok { background: rgba(16, 185, 129, 0.12); color: #10b981; }
+.kpi-badge.warn { background: rgba(245, 158, 11, 0.12); color: #f59e0b; }
+.kpi-badge.muted { background: var(--panel-muted); color: var(--text-muted); }
+.kpi-badge.healthy { background: rgba(16, 185, 129, 0.12); color: #10b981; }
+.kpi-badge.warning { background: rgba(245, 158, 11, 0.12); color: #f59e0b; }
+.kpi-badge.critical { background: rgba(239, 68, 68, 0.12); color: #ef4444; }
+
+.kpi-value {
+  display: block;
+  margin: 10px 0 6px;
+  font-size: 26px;
+  font-weight: 800;
+  font-family: var(--font-mono, monospace);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+  letter-spacing: -0.03em;
+  color: var(--text-primary);
+}
+.kpi-value.time-value { font-size: 20px; }
+.kpi-value.token-pair {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  font-size: 20px;
+}
+.kpi-value.token-pair .inp { color: var(--accent-blue, #2563eb); }
+.kpi-value.token-pair .sep { color: var(--text-muted); font-size: 16px; font-weight: 400; }
+.kpi-value.token-pair .out { color: #8b5cf6; }
+
+.token-mini-bar {
+  display: flex;
+  height: 5px;
+  width: 100%;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--panel-muted);
+  margin-top: 4px;
+}
+.token-mini-bar .bar-in { background: var(--accent-blue, #2563eb); height: 100%; }
+.token-mini-bar .bar-out { background: #8b5cf6; height: 100%; }
+
+.kpi-footer {
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--text-muted);
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ==================== 终态分桶条 (Breakdown Strip) ==================== */
+.bucket-strip {
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  padding: 12px 16px;
+  margin-bottom: 14px;
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.bucket-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.bucket-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+  color: var(--text-primary);
+}
+.bucket-total {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+.breakdown-bar {
+  display: flex;
+  height: 8px;
+  width: 100%;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--panel-muted);
+}
+.breakdown-bar .seg { height: 100%; transition: width 0.3s ease; }
+.breakdown-bar .seg.ok { background: #10b981; }
+.breakdown-bar .seg.bad { background: #ef4444; }
+.breakdown-bar .seg.warn { background: #f59e0b; }
+.breakdown-bar .seg.info { background: #3b82f6; }
+.breakdown-bar .seg.mute { background: #94a3b8; }
+
+.bucket-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 11.5px;
+  font-weight: 600;
+  background: var(--panel-muted);
+  color: var(--text-secondary);
+}
+.chip .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+.chip.ok .dot { background: #10b981; }
+.chip.bad .dot { background: #ef4444; }
+.chip.warn .dot { background: #f59e0b; }
+.chip.info .dot { background: #3b82f6; }
+.chip.mute .dot { background: #94a3b8; }
+
+.chip.ok { background: rgba(16, 185, 129, 0.08); color: #059669; }
+.chip.bad { background: rgba(239, 68, 68, 0.08); color: #dc2626; }
+.chip.warn { background: rgba(245, 158, 11, 0.08); color: #d97706; }
+.chip.info { background: rgba(59, 130, 246, 0.08); color: #2563eb; }
+
+.live-runs-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-color);
+}
+.live-title {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.live-chips {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* ==================== 面板与图表容器 ==================== */
+.overview-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(320px, 1fr);
+  gap: 14px;
+  margin-bottom: 14px;
+}
+.panel {
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+  margin-bottom: 14px;
+}
+.panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--surface);
+}
+.panel-kicker {
+  display: block;
+  color: var(--accent-blue);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+.panel-head h3 {
+  margin: 3px 0 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.panel-note {
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+.legend {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+.legend span { display: flex; align-items: center; gap: 5px; }
+.legend i { width: 8px; height: 8px; border-radius: 2px; }
+.legend .ok { background: var(--accent-blue, #2563eb); }
+.legend .fail { background: #ef4444; }
+
+/* 趋势柱状图 */
+.chart {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  height: 210px;
+  padding: 24px 16px 14px;
+}
+.chart-column {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  flex-direction: column;
+  align-items: center;
+}
+.chart-value {
+  height: 16px;
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-muted);
+}
+.bar-track {
+  display: flex;
+  align-items: flex-end;
+  width: min(80%, 34px);
+  height: 140px;
+  border-radius: 6px;
+  background: var(--panel-muted);
+  overflow: hidden;
+}
+.bar-total {
+  position: relative;
+  width: 100%;
+  min-height: 3px;
+  background: #ef4444;
+  border-radius: 5px 5px 0 0;
+  overflow: hidden;
+  transition: height 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+}
+.bar-success {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(180deg, #60a5fa, var(--accent-blue, #2563eb));
+  border-radius: 5px 5px 0 0;
+}
+.chart-label {
+  margin-top: 8px;
+  color: var(--text-muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.chart-empty {
+  margin: -110px 0 90px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+/* 实时资源仪表盘 */
+.live-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(16, 185, 129, 0.1);
+  color: #10b981;
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+}
+.live-dot-pulse {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #10b981;
+  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.3);
+}
+.runtime-dashboard {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.gauge-card {
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-card);
+}
+.gauge-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 6px;
+}
+.gauge-header span { font-size: 12px; color: var(--text-muted); font-weight: 600; }
+.gauge-header strong { font-size: 15px; font-weight: 800; }
+.meter-bar {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--panel-muted);
+  overflow: hidden;
+}
+.meter-bar i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent-blue, #2563eb), #8b5cf6);
+  transition: width 0.3s ease;
+}
+.meter-bar.heap i {
+  background: linear-gradient(90deg, #06b6d4, #10b981);
+}
+.runtime-stat-row {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+.stat-mini {
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.stat-mini span { font-size: 11px; color: var(--text-muted); }
+.stat-mini strong { font-size: 13.5px; font-weight: 700; }
+.runtime-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* ==================== 2. Token 分析视图 ==================== */
+.coverage-list {
+  padding: 12px 16px;
+  display: grid;
+  gap: 10px;
+}
+.coverage-card {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.2fr) minmax(140px, 1fr) minmax(200px, 1.4fr);
+  align-items: center;
+  gap: 16px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-card);
+}
+.coverage-agent {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.coverage-agent-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.coverage-agent strong { font-size: 13px; font-weight: 700; }
+.coverage-runtime { color: var(--text-muted); font-size: 11px; }
+.coverage-progress-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.coverage-meter {
+  flex: 1;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--panel-muted);
+  overflow: hidden;
+}
+.coverage-meter i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent-blue, #2563eb), #10b981);
+}
+.coverage-pct { font-size: 12.5px; font-weight: 800; min-width: 44px; text-align: right; }
+.coverage-tags { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.coverage-tag {
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 700;
+}
+.coverage-tag.ok { background: rgba(16, 185, 129, 0.12); color: #10b981; }
+.coverage-tag.local { background: rgba(59, 130, 246, 0.12); color: #2563eb; }
+.coverage-tag.missing { background: rgba(245, 158, 11, 0.12); color: #d97706; }
+.coverage-reason { color: var(--text-muted); font-size: 10.5px; width: 100%; margin-top: 2px; }
+
+/* 大表格样式（首列固定） */
+.table-wrap {
+  overflow-x: auto;
+  max-width: 100%;
+}
+.metrics-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  min-width: 860px;
+}
+.metrics-table th,
+.metrics-table td {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border-color);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.metrics-table th {
+  background: var(--panel-muted);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
+.metrics-table tbody tr:hover td {
+  background: var(--accent-soft, rgba(37, 99, 235, 0.04));
+}
+.metrics-table .sticky-col {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  background: var(--surface);
+  box-shadow: 2px 0 6px rgba(0, 0, 0, 0.04);
+}
+.metrics-table th.sticky-col {
+  background: var(--panel-muted);
+  z-index: 3;
+}
+.agent-col-cell strong {
+  font-size: 13px;
+  font-weight: 700;
+}
+.role-badge,
+.status-badge {
+  display: inline-flex;
+  border-radius: 999px;
+  padding: 2px 8px;
+  background: var(--panel-muted);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 700;
+}
+.role-badge.main {
+  background: var(--accent-soft);
+  color: var(--accent-blue);
+}
+.rate {
+  color: var(--accent-green, #10b981);
+  font-weight: 700;
+}
+.rate.bad {
+  color: var(--accent-red, #ef4444);
+}
+
+/* ==================== 3. 性能诊断视图 (Waterfall) ==================== */
+.phase-waterfall {
+  padding: 14px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.waterfall-row {
+  display: grid;
+  grid-template-columns: 180px 1fr;
+  align-items: center;
+  gap: 16px;
+}
+.waterfall-label {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 12.5px;
+}
+.waterfall-label strong { font-weight: 700; }
+.waterfall-label span { color: var(--text-muted); font-size: 11.5px; }
+.waterfall-track {
+  height: 20px;
+  border-radius: 6px;
+  background: var(--panel-muted);
+  overflow: hidden;
+}
+.waterfall-bar {
+  height: 100%;
+  border-radius: 6px;
+  background: linear-gradient(90deg, var(--accent-blue, #2563eb), #8b5cf6);
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding-right: 8px;
+  min-width: 32px;
+  transition: width 0.3s ease;
+}
+.waterfall-pct {
+  color: #fff;
+  font-size: 10.5px;
+  font-weight: 800;
+  font-family: var(--font-mono, monospace);
+}
+
+.agent-resource-list {
+  padding: 12px 16px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 10px;
+}
+.agent-resource-card {
+  padding: 12px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-card);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.resource-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.resource-card-header strong { font-size: 13px; font-weight: 700; }
+.resource-source { font-size: 11px; color: var(--text-muted); }
+.resource-card-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6px;
+}
+.res-item {
+  display: flex;
+  flex-direction: column;
+  font-size: 11px;
+}
+.res-item span { color: var(--text-muted); }
+.res-item strong { font-size: 12.5px; font-weight: 700; margin-top: 1px; }
+
+/* 可靠性演练 */
+.reliability-actions { display: flex; gap: 8px; }
+.btn-primary, .btn-warn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  border: 0;
+}
+.btn-primary { background: var(--accent-blue); color: #fff; }
+.btn-warn { background: rgba(245, 158, 11, 0.15); color: #d97706; }
+.reliability-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  padding: 14px 16px;
+}
+.reliability-card {
+  padding: 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-card);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.reliability-card span { font-size: 11.5px; color: var(--text-muted); }
+.reliability-card strong { font-size: 14px; font-weight: 700; }
+.reliability-card small { font-size: 10.5px; color: var(--text-muted); margin-top: 2px; }
+
+/* ==================== 4. 执行记录视图 ==================== */
+.event-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--surface);
+}
+.event-status-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.event-status-tabs button {
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.event-status-tabs button:hover {
+  background: var(--control-hover);
+  color: var(--text-primary);
+}
+.event-status-tabs button.active {
+  background: var(--accent-soft);
+  color: var(--accent-blue);
+  font-weight: 700;
+  border-color: color-mix(in srgb, var(--accent-blue) 25%, transparent);
+}
+.event-status-tabs button small {
+  font-family: var(--font-mono, monospace);
+  font-size: 10.5px;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text-muted) 16%, transparent);
+}
+.event-status-tabs button.active small {
+  background: color-mix(in srgb, var(--accent-blue) 20%, transparent);
+}
+.page-size-control {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+.page-size-control select {
+  height: 28px;
+  border-radius: 6px;
+  padding: 0 8px;
+  font-size: 11.5px;
+}
+
+.event-list {
+  padding: 6px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.event-row {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1.4fr) minmax(130px, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: var(--surface);
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.event-row:hover {
+  background: var(--control-hover);
+  border-color: var(--border-color);
+}
+.event-row.is-clickable { cursor: pointer; }
+.event-row.is-failed {
+  border-left: 3px solid #ef4444;
+  background: rgba(239, 68, 68, 0.02);
+}
+.event-row.is-blocked {
+  border-left: 3px solid #f59e0b;
+}
+
+.event-state-icon {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+}
+.event-state-icon.success { color: #10b981; }
+.event-state-icon.failed { color: #ef4444; }
+.event-state-icon.blocked { color: #f59e0b; }
+.event-state-icon.cancelled { color: #94a3b8; }
+.event-state-icon.unknown { color: #3b82f6; }
+
+.event-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.event-main-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.event-agent-name {
+  font-size: 13px;
+  font-weight: 700;
+}
+.event-source-tag {
+  color: var(--text-muted);
+  font-size: 11.5px;
+}
+.event-error-box {
+  padding: 4px 8px;
+  border-radius: 5px;
+  background: rgba(239, 68, 68, 0.08);
+  color: #dc2626;
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  cursor: pointer;
+}
+.error-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.error-text.expanded { white-space: normal; }
+.error-hint { color: var(--accent-red); font-weight: 700; }
+.event-time {
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.dot-sep { opacity: 0.5; }
+
+.event-metrics {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  font-size: 11.5px;
+}
+.event-metrics .duration { font-weight: 700; }
+
+.event-trace-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.trace-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border-color);
+  background: var(--panel-muted);
+  color: var(--text-secondary);
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.trace-pill:hover {
+  border-color: var(--accent-blue);
+  color: var(--accent-blue);
+}
+.trace-pill code {
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+}
+.nav-arrow { color: var(--text-muted); }
+
+.event-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-top: 1px solid var(--border-color);
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.pagination-buttons {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.pagination-buttons button {
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text-primary);
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.pagination-buttons button:hover:not(:disabled) {
+  border-color: var(--accent-blue);
+  color: var(--accent-blue);
+}
+.pagination-buttons button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.page-current {
+  font-family: var(--font-mono, monospace);
+  font-size: 11.5px;
+  font-weight: 700;
+  padding: 0 8px;
+}
+
+.page-foot {
+  display: flex;
+  justify-content: space-between;
+  padding: 10px 4px 0;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+/* ==================== 响应式适配 ==================== */
+@media (max-width: 1050px) {
+  .kpi-grid { grid-template-columns: repeat(2, 1fr); }
+  .overview-grid { grid-template-columns: 1fr; }
+  .scope-strip { grid-template-columns: 1fr 1fr; }
+  .scope-meta { display: none; }
+  .reliability-grid { grid-template-columns: 1fr; }
+  .coverage-card { grid-template-columns: 1fr; gap: 8px; }
+}
+
+@media (max-width: 700px) {
+  .metrics-page { padding: 12px 14px 28px; }
+  .kpi-grid { grid-template-columns: 1fr; }
+  .scope-strip { grid-template-columns: 1fr; }
+  .event-row { grid-template-columns: 24px 1fr; }
+  .event-metrics, .event-trace-wrap { grid-column: 2; align-items: flex-start; }
+  .event-controls { flex-direction: column; align-items: stretch; }
+  .event-status-tabs { overflow-x: auto; scrollbar-width: none; }
+  .waterfall-row { grid-template-columns: 1fr; gap: 4px; }
+}
 </style>
+

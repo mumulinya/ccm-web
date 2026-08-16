@@ -7,6 +7,7 @@ exports.appendNativeTurnTranscript = appendNativeTurnTranscript;
 exports.nativeTranscriptHasToolResult = nativeTranscriptHasToolResult;
 exports.applyCompactedToolResultsToMessages = applyCompactedToolResultsToMessages;
 const group_orchestrator_llm_client_1 = require("../modules/collaboration/group-orchestrator-llm-client");
+const tool_result_storage_1 = require("../tools/tool-result-storage");
 function nativeQueryFamily(config) {
     if ((0, group_orchestrator_llm_client_1.shouldUseAnthropic)(config))
         return "anthropic";
@@ -17,6 +18,10 @@ function nativeQueryFamily(config) {
 function stringifyToolOutput(result) {
     if (result.error)
         return JSON.stringify({ ok: false, error: result.error, reason: result.reason || "" });
+    if ((0, tool_result_storage_1.isPersistedToolResult)(result.output))
+        return (0, tool_result_storage_1.modelVisiblePersistedToolResult)(result.output);
+    if ((0, tool_result_storage_1.isPersistedToolResult)(result.output?.observation))
+        return (0, tool_result_storage_1.modelVisiblePersistedToolResult)(result.output.observation);
     if (typeof result.output === "string")
         return result.output;
     try {
@@ -88,7 +93,7 @@ function geminiToolResultMessage(results) {
                 id: result.callId,
                 response: result.ok === false
                     ? { ok: false, error: result.error || result.reason || "tool_failed" }
-                    : (result.output && typeof result.output === "object" ? result.output : { result: stringifyToolOutput(result) }),
+                    : (result.output && typeof result.output === "object" && !(0, tool_result_storage_1.isPersistedToolResult)(result.output) ? result.output : { result: stringifyToolOutput(result) }),
             },
         })),
     };
@@ -158,7 +163,7 @@ function replaceToolResultPart(part, byId) {
                 ...part.functionResponse,
                 response: result.ok === false
                     ? { ok: false, error: result.error || result.reason || "tool_failed" }
-                    : (result.output && typeof result.output === "object" ? result.output : { result: stringifyToolOutput(result) }),
+                    : (result.output && typeof result.output === "object" && !(0, tool_result_storage_1.isPersistedToolResult)(result.output) ? result.output : { result: stringifyToolOutput(result) }),
             },
         };
     }

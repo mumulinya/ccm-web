@@ -15,13 +15,16 @@ import { resolveAgentLoopBudget, shouldContinueAgentLoop, type AgentLoopBudget }
 import { applyConversationPlanModeToRound, holdConversationPlanModeParsed, type ConversationPlanScope } from "../system/conversation-plan-mode-gate";
 import { normalizeMainAgentTurnDecision, type MainAgentTurnDecisionV1 } from "./main-agent-turn";
 import { appendNativeTurnTranscript, nativeQueryFamily, type NativeQueryFamily, type NativeToolResult } from "./native-query-messages";
-import { PRESENTED_PLAN_DISPATCH_HANDOFF_GUIDANCE, PRESENTED_PLAN_SHAPE_GUIDANCE } from "../modules/collaboration/group-presented-plan";
 import {
   attachPresentedPlanQuality,
   buildPresentedPlanQualityToolResult,
   evaluatePresentedPlanQuality,
   shouldRepairPresentedPlan,
 } from "./presented-plan-quality";
+import {
+  persistNativeToolResultRows,
+  type ToolResultPersistContext,
+} from "../tools/tool-result-storage";
 
 export const NATIVE_CONTROL_TOOL_NAMES = ["ccm_ask_user", "ccm_present_plan", "ccm_dispatch"] as const;
 export type NativeControlToolName = typeof NATIVE_CONTROL_TOOL_NAMES[number];
@@ -81,7 +84,7 @@ export function nativeControlToolDefinitions(): ProviderToolDefinition[] {
     },
     {
       name: "ccm_present_plan",
-      description: `提交只读计划稿供用户确认。用户要求看计划、方案或步骤时必须调用本工具。${PRESENTED_PLAN_SHAPE_GUIDANCE}`,
+      description: "提交只读计划稿供用户确认。用户要求看计划、方案或步骤时必须调用本工具。",
       inputSchema: {
         type: "object",
         additionalProperties: false,
@@ -122,7 +125,7 @@ export function nativeControlToolDefinitions(): ProviderToolDefinition[] {
     },
     {
       name: "ccm_dispatch",
-      description: `派发项目 Agent 或创建开发任务。必须给出自包含工作单；未获用户执行授权时不要调用。${PRESENTED_PLAN_DISPATCH_HANDOFF_GUIDANCE}`,
+      description: "派发项目 Agent 或创建开发任务。必须给出自包含工作单；未获用户执行授权时不要调用。",
       inputSchema: {
         type: "object",
         additionalProperties: false,
@@ -146,15 +149,70 @@ export function nativeControlToolDefinitions(): ProviderToolDefinition[] {
   ];
 }
 
+export function nativeDiscoveryToolDefinitions(): ProviderToolDefinition[] {
+  return [
+    {
+      name: "tool_search",
+      description: "按需发现并加载低频只读工具Schema。",
+      inputSchema: {
+        type: "object",
+        additionalProperties: false,
+        required: ["query"],
+        properties: {
+          query: { type: "string", description: "工具名称、能力描述或 select:canonicalName" },
+          max_results: { type: "integer", minimum: 1, maximum: 24 },
+        },
+      },
+    },
+    {
+      name: "invoke_skill",
+      description: "加载并调用当前作用域已授权的Skill。",
+      inputSchema: {
+        type: "object",
+        additionalProperties: false,
+        required: ["name"],
+        properties: {
+          name: { type: "string" },
+          input: { description: "本轮完整目标或必要上下文" },
+        },
+      },
+    },
+  ];
+}
+
+function catalogLoadedTools(toolContext: any) {
+  const loaded = [...(toolContext?.catalog?.loadedMcp || [])];
+  const names = new Set(loaded.map((tool: any) => String(tool?.canonicalName || tool?.name || "")));
+  for (const tool of toolContext?.catalog?.mcp || []) {
+    const server = String(tool?.server || "");
+    const name = String(tool?.canonicalName || tool?.name || "");
+    if (!name || names.has(name)) continue;
+    if (server === "ccm-group-readonly" || server === "ccm-project-readonly") {
+      loaded.push({ ...tool, deferred: false });
+      names.add(name);
+    }
+  }
+  return loaded;
+}
+
+function catalogNativeToolName(tool: any) {
+  return String(tool?.server || "") === "ccm__workspace_readonly"
+    ? String(tool?.name || "")
+    : String(tool?.canonicalName || tool?.name || "");
+}
+
 export function catalogToNativeTools(toolContext: any): ProviderToolDefinition[] {
-  const loaded = [...(toolContext?.catalog?.loadedMcp || toolContext?.catalog?.mcp || [])].map((tool: any) => ({ ...tool, deferred: false }));
+  const discovery = nativeDiscoveryToolDefinitions();
+  const reserved = new Set(discovery.map(tool => tool.name));
+  const loaded = catalogLoadedTools(toolContext).map((tool: any) => ({ ...tool, deferred: false }));
   const discoverable = [...(toolContext?.catalog?.discoverableMcp || [])].map((tool: any) => ({ ...tool, deferred: true }));
-  return [...loaded, ...discoverable].map((tool: any) => ({
-    name: String(tool.canonicalName || tool.name || ""),
+  const catalog = [...loaded, ...discoverable].map((tool: any) => ({
+    name: catalogNativeToolName(tool),
     description: String(tool.description || ""),
     inputSchema: tool.inputSchema || { type: "object", properties: {} },
     deferred: tool.deferred === true,
-  })).filter((tool: any) => tool.name);
+  })).filter((tool: any) => tool.name && !reserved.has(tool.name));
+  return [...discovery, ...catalog];
 }
 
 export function shouldUseNativeQueryLoop(config: any) {
@@ -258,6 +316,7 @@ export type NativeQueryLoopInput = {
   callTurn?: (config: any, options: LlmCallOptions) => Promise<ProviderAgentTurn>;
   getTools?: () => ProviderToolDefinition[];
   compactTranscript?: (messages: LlmChatMessage[]) => LlmChatMessage[];
+  persistContext?: ToolResultPersistContext | null;
   shouldStopAfterTools?: (calls: ProviderToolCall[], results: NativeToolResult[]) => boolean;
 };
 
@@ -370,8 +429,16 @@ function presentPlanControlCall(controlCalls: ProviderToolCall[]) {
   return (controlCalls || []).find(item => item.name === "ccm_present_plan") || null;
 }
 
+function persistExecutedToolRows(rows: NativeToolResult[], persistContext?: ToolResultPersistContext | null) {
+  if (!persistContext?.scope || !persistContext?.sessionId) return rows;
+  return persistNativeToolResultRows(rows, persistContext).rows;
+}
+
 async function runJsonQueryLoop(input: NativeQueryLoopInput): Promise<NativeQueryLoopResult> {
   const budget = input.loopBudget || resolveAgentLoopBudget(input.config);
+  const executeTools = async (calls: ProviderToolCall[], ctx: NativeQueryExecuteContext) => (
+    persistExecutedToolRows(await input.executeTools(calls, ctx), input.persistContext)
+  );
   let messages = input.messages.slice();
   const jsonHint = { role: "system", content: "退化路径：只输出一个 JSON 对象，不要 Markdown。格式：{\"responseType\":\"reply|tool_calls|clarify|plan|dispatch\",\"reply\":\"\",\"toolRequests\":[{\"name\":\"\",\"arguments\":{}}],\"workflowDecision\":{}}" };
   if (!messages.some(item => String(item.content || "").includes("退化路径：只输出一个 JSON"))) messages = [jsonHint, ...messages];
@@ -420,7 +487,7 @@ async function runJsonQueryLoop(input: NativeQueryLoopInput): Promise<NativeQuer
       continue;
     }
     for (const item of fresh) executed.add(fingerprintCall(item));
-    const rows = await input.executeTools(fresh, {
+    const rows = await executeTools(fresh, {
       round: toolRoundCount,
       turn: { text: String(parsed?.reply || ""), toolCalls: fresh, toolReferences: [], stopReason: "tool_calls", usage: usage || { inputTokens: 0, outputTokens: 0, totalTokens: 0, reported: false } },
       signal: input.signal,
@@ -470,6 +537,9 @@ export async function runNativeQueryLoop(input: NativeQueryLoopInput): Promise<N
   if (!shouldUseNativeQueryLoop(input.config)) return fallBackToJsonQueryLoop(input);
   const family = nativeQueryFamily(input.config);
   const budget = input.loopBudget || resolveAgentLoopBudget(input.config);
+  const executeTools = async (calls: ProviderToolCall[], ctx: NativeQueryExecuteContext) => (
+    persistExecutedToolRows(await input.executeTools(calls, ctx), input.persistContext)
+  );
   const callTurn = input.callTurn || callNativeAgentTurn;
   let messages = input.messages.slice();
   let parsed: any = { responseType: "reply", reply: "" };
@@ -500,7 +570,7 @@ export async function runNativeQueryLoop(input: NativeQueryLoopInput): Promise<N
       const onNativeToolCallReady = (call: ProviderToolCall) => {
         if (isNativeControlTool(call.name) || !isReadOnly(call) || started.has(call.id) || executed.has(fingerprintCall(call))) return;
         startedCallIds.add(call.id);
-        started.set(call.id, Promise.resolve().then(() => input.executeTools([call], {
+        started.set(call.id, Promise.resolve().then(() => executeTools([call], {
           round,
           turn: lastTurn,
           signal: input.signal,
@@ -641,7 +711,7 @@ export async function runNativeQueryLoop(input: NativeQueryLoopInput): Promise<N
       }
       const executedRows = [
         ...(await Promise.all(remaining.map(row => row[1]))),
-        ...(pending.length ? await input.executeTools(pending, { round, turn, signal: input.signal, startedCallIds }) : []),
+        ...(pending.length ? await executeTools(pending, { round, turn, signal: input.signal, startedCallIds }) : []),
         ...blockedResults,
       ];
       toolResults.push(...executedRows);
@@ -843,6 +913,9 @@ export async function runNativeQueryLoopSelfTest() {
     planQualityRepairsOnce: true,
     planQualityAcceptsDegradedAfterRepair: true,
     planQualityPassesFirstShot: true,
+    catalogEmitsDiscoveryTools: true,
+    catalogUsesWorkspaceShortNames: true,
+    catalogIncludesGroupBuiltin: true,
   };
   const keptTurns: ProviderAgentTurn[] = [
     {
@@ -931,6 +1004,25 @@ export async function runNativeQueryLoopSelfTest() {
     && passed.parsed?.planQuality?.ok === true
     && passed.parsed?.planQuality?.repaired !== true
     && !passed.toolResults.some(row => row.error === "PRESENTED_PLAN_QUALITY");
+  const nativeCatalog = catalogToNativeTools({
+    catalog: {
+      loadedMcp: [
+        { name: "read_file", canonicalName: "mcp__ccm__ccm_workspace_readonly__read_file", server: "ccm__workspace_readonly", description: "read", inputSchema: { type: "object" } },
+      ],
+      mcp: [
+        { name: "query_knowledge", canonicalName: "query_knowledge", server: "ccm-group-readonly", description: "kb", inputSchema: { type: "object" } },
+      ],
+      discoverableMcp: [
+        { name: "read_git_status", canonicalName: "mcp__ccm__ccm_workspace_readonly__read_git_status", server: "ccm__workspace_readonly", description: "git", inputSchema: { type: "object" } },
+      ],
+    },
+  });
+  checks.catalogEmitsDiscoveryTools = nativeCatalog.some(tool => tool.name === "tool_search")
+    && nativeCatalog.some(tool => tool.name === "invoke_skill");
+  checks.catalogUsesWorkspaceShortNames = nativeCatalog.some(tool => tool.name === "read_file" && tool.deferred !== true)
+    && nativeCatalog.some(tool => tool.name === "read_git_status" && tool.deferred === true)
+    && nativeCatalog.every(tool => !String(tool.name).includes("ccm_workspace_readonly"));
+  checks.catalogIncludesGroupBuiltin = nativeCatalog.some(tool => tool.name === "query_knowledge" && tool.deferred !== true);
   return { pass: Object.values(checks).every(Boolean), checks, result };
 }
 

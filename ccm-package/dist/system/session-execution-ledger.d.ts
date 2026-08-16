@@ -1,3 +1,4 @@
+import { type ToolResultPersistContext } from "../tools/tool-result-storage";
 export type SessionExecutionEventType = "tool_use" | "tool_result";
 export type SessionExecutionEvent = {
     id: string;
@@ -17,18 +18,19 @@ export declare function createSessionExecutionEvent(input: Partial<SessionExecut
     type: SessionExecutionEventType;
     toolName: string;
     payload?: any;
+    persistContext?: ToolResultPersistContext | null;
 }): {
-    id: string;
-    toolCallId: string;
-    hidden: true;
     type: SessionExecutionEventType;
     toolName: string;
+    toolCallId: string;
     timestamp: string;
     runId: string;
     traceId: string;
     anchorMessageId: string;
     status: "error" | "ok" | "running";
     payload: any;
+    id: string;
+    hidden: true;
 };
 export declare function executionEventModelContent(event: SessionExecutionEvent, options?: {
     clearToolResult?: boolean;

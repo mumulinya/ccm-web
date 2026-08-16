@@ -1,13 +1,47 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.compactGroupMainToolResultsForPayload = compactGroupMainToolResultsForPayload;
 exports.compactGroupNativeTranscript = compactGroupNativeTranscript;
 exports.runGroupMainToolResultCompactSelfTest = runGroupMainToolResultCompactSelfTest;
+const fs = __importStar(require("fs"));
+const path = __importStar(require("path"));
+const utils_1 = require("../../core/utils");
 const context_budget_1 = require("../../system/context-budget");
 const native_query_messages_1 = require("../../agents/native-query-messages");
-const GREP_KEEP = 20;
-const GLOB_KEEP = 40;
-const OUTPUT_CHAR_CAP = 4_000;
+const tool_result_storage_1 = require("../../tools/tool-result-storage");
 function cloneRow(row) {
     if (!row || typeof row !== "object")
         return row;
@@ -57,28 +91,12 @@ function compactOne(row) {
         }
         return { row: next, changed };
     }
-    if (raw) {
-        if (Array.isArray(raw.lines) && raw.lines.length > GREP_KEEP) {
-            raw.lines = raw.lines.slice(0, GREP_KEEP);
-            raw.truncated = true;
-            changed = true;
-        }
-        if (Array.isArray(raw.items) && raw.items.length > GLOB_KEEP) {
-            raw.items = raw.items.slice(0, GLOB_KEEP);
-            raw.filenames = Array.isArray(raw.filenames) ? raw.filenames.slice(0, GLOB_KEEP) : raw.filenames;
-            raw.truncated = true;
-            changed = true;
-        }
-        if (typeof raw.context === "string" && raw.context.length > OUTPUT_CHAR_CAP) {
-            raw.context = `${raw.context.slice(0, OUTPUT_CHAR_CAP)}\n…[truncated]`;
-            changed = true;
-        }
-        next.rawOutput = raw;
-        next.output = JSON.stringify(raw);
+    if ((0, tool_result_storage_1.isPersistedToolResult)(next.output) || (0, tool_result_storage_1.isPersistedToolResult)(raw)) {
+        return { row: next, changed: false };
     }
-    if (typeof next.output === "string" && next.output.length > OUTPUT_CHAR_CAP) {
-        next.output = `${next.output.slice(0, OUTPUT_CHAR_CAP)}\n…[truncated]`;
-        changed = true;
+    if (raw) {
+        next.rawOutput = raw;
+        next.output = typeof next.output === "string" ? next.output : JSON.stringify(raw);
     }
     if (changed) {
         next.outputTokens = (0, context_budget_1.estimateTextTokens)(String(next.output || ""));
@@ -87,6 +105,8 @@ function compactOne(row) {
     return { row: next, changed };
 }
 function stripBody(row) {
+    if ((0, tool_result_storage_1.isPersistedToolResult)(row?.output) || (0, tool_result_storage_1.isPersistedToolResult)(row?.rawOutput))
+        return row;
     const next = cloneRow(row);
     const summary = String(next.error || next.reason || next.name || "tool").slice(0, 240);
     next.rawOutput = undefined;
@@ -98,13 +118,14 @@ function stripBody(row) {
 function tokenSum(rows) {
     return rows.reduce((sum, row) => sum + Math.max(0, Number(row?.outputTokens) || (0, context_budget_1.estimateTextTokens)(String(row?.output || ""))), 0);
 }
-function compactGroupMainToolResultsForPayload(rows = [], budgetTokens = 40_000) {
+function compactGroupMainToolResultsForPayload(rows = [], budgetTokens = 40_000, persistContext) {
     const budget = Math.max(1_000, Number(budgetTokens) || 40_000);
-    const next = (Array.isArray(rows) ? rows : []).map(cloneRow);
+    const persisted = (0, tool_result_storage_1.persistNativeToolResultRows)(Array.isArray(rows) ? rows : [], persistContext);
+    const next = persisted.rows.map(cloneRow);
     const before = tokenSum(next);
     if (before <= budget)
-        return { rows: next, changed: false, tokens: before };
-    let changed = false;
+        return { rows: next, changed: persisted.changed, tokens: before };
+    let changed = persisted.changed;
     const ranked = [...next.keys()].sort((left, right) => ((Number(next[right]?.outputTokens) || 0) - (Number(next[left]?.outputTokens) || 0)));
     for (const index of ranked) {
         if (tokenSum(next) <= budget)
@@ -112,6 +133,12 @@ function compactGroupMainToolResultsForPayload(rows = [], budgetTokens = 40_000)
         const compacted = compactOne(next[index]);
         next[index] = compacted.row;
         changed = changed || compacted.changed;
+    }
+    if (persistContext?.sessionId) {
+        const extra = (0, tool_result_storage_1.persistNativeToolResultRows)(next, persistContext);
+        for (let index = 0; index < next.length; index += 1)
+            next[index] = extra.rows[index];
+        changed = changed || extra.changed;
     }
     for (const index of ranked) {
         if (tokenSum(next) <= budget)
@@ -129,8 +156,8 @@ function compactGroupMainToolResultsForPayload(rows = [], budgetTokens = 40_000)
     }
     return { rows: next, changed, tokens: tokenSum(next) };
 }
-function compactGroupNativeTranscript(messages, rows = [], budgetTokens = 40_000) {
-    const compacted = compactGroupMainToolResultsForPayload(rows, Math.max(1_000, Math.min(40_000, Number(budgetTokens) || 40_000)));
+function compactGroupNativeTranscript(messages, rows = [], budgetTokens = 40_000, persistContext) {
+    const compacted = compactGroupMainToolResultsForPayload(rows, Math.max(1_000, Math.min(40_000, Number(budgetTokens) || 40_000)), persistContext);
     if (!compacted.changed)
         return { messages, rows: compacted.rows, changed: false, tokens: compacted.tokens };
     return {
@@ -171,21 +198,38 @@ function runGroupMainToolResultCompactSelfTest() {
         { name: "list_directory", ok: true, outputTokens: 20, output: "{}", toolCallId: "call_ls" },
     ], 2_000);
     const rewritten = String(transcript.messages.find((item) => item?.tool_call_id === "call_grep")?.content || "");
-    const checks = {
-        reducedTokens: result.tokens < 12_000 && result.changed === true,
-        keptGrepPreview: Array.isArray(result.rows[0]?.rawOutput?.lines)
-            ? result.rows[0].rawOutput.lines.length <= GREP_KEEP
-            : String(result.rows[0]?.output || "").includes("truncated"),
-        keptSmallRow: result.rows[1]?.name === "list_directory",
-        fileReadKeepsContent: /export const v0/.test(String(fileResult.rows[0]?.output || ""))
-            && /export const v79/.test(String(fileResult.rows[0]?.output || ""))
-            && Array.isArray(fileResult.rows[0]?.rawOutput?.modelPayload?.lines)
-            && fileResult.rows[0].rawOutput.modelPayload.lines.length === 80,
-        transcriptRewritesToolResult: transcript.changed === true
-            && rewritten.length > 0
-            && rewritten.length < bulky.output.length
-            && rewritten !== bulky.output,
-    };
-    return { pass: Object.values(checks).every(Boolean), checks };
+    const persistContext = { scope: "group", sessionId: `gcs_compact_${Date.now()}_${process.pid}` };
+    try {
+        const huge = {
+            name: "grep_text",
+            ok: true,
+            toolCallId: "call_huge",
+            output: { lines: Array.from({ length: 3_000 }, (_, index) => `row-${index}-${"y".repeat(20)}`) },
+        };
+        const persisted = compactGroupMainToolResultsForPayload([huge], 40_000, persistContext);
+        const checks = {
+            reducedTokens: result.tokens < 12_000 && result.changed === true,
+            keptGrepPreview: String(result.rows[0]?.output || "").includes("truncated"),
+            keptSmallRow: result.rows[1]?.name === "list_directory",
+            fileReadKeepsContent: /export const v0/.test(String(fileResult.rows[0]?.output || ""))
+                && /export const v79/.test(String(fileResult.rows[0]?.output || ""))
+                && Array.isArray(fileResult.rows[0]?.rawOutput?.modelPayload?.lines)
+                && fileResult.rows[0].rawOutput.modelPayload.lines.length === 80,
+            transcriptRewritesToolResult: transcript.changed === true
+                && rewritten.length > 0
+                && rewritten.length < bulky.output.length
+                && rewritten !== bulky.output,
+            persistOversizePreview: (0, tool_result_storage_1.isPersistedToolResult)(persisted.rows[0]?.output) === true
+                && String(persisted.rows[0]?.output?.preview || "").includes("<persisted-output>")
+                && JSON.stringify(huge.output).length > tool_result_storage_1.DEFAULT_MAX_RESULT_SIZE_CHARS,
+        };
+        return { pass: Object.values(checks).every(Boolean), checks };
+    }
+    finally {
+        try {
+            fs.rmSync(path.join(utils_1.CCM_DIR, "tool-results", "group", persistContext.sessionId), { recursive: true, force: true });
+        }
+        catch { }
+    }
 }
 //# sourceMappingURL=group-main-tool-result-compact.js.map

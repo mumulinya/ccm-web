@@ -12,6 +12,13 @@ import {
   isWorkspaceToolResultReference,
   projectContextSourceToolResultForPersistence,
 } from "../system/context-source-tool-result-projection";
+import {
+  isPersistedToolResult,
+  markToolResultSeenUnreplaced,
+  modelVisiblePersistedToolResult,
+  TOOL_RESULT_CLEARED_MESSAGE,
+  type ToolResultPersistContext,
+} from "../tools/tool-result-storage";
 
 export const NATIVE_SESSION_RESUME_HINT = "精确会话原生续写已启用。上一轮正文、计划卡片和工具结果已在 messages 中；未变化的文件不要重读。以下参考材料不一定与当前句相关。";
 
@@ -32,6 +39,9 @@ export type NativeSessionTranscriptInput = {
   metaBlocks?: NativeSessionMetaBlock[];
   currentUserText?: string;
   presentedPlan?: any;
+  clearedToolCallIds?: Iterable<string>;
+  replacedToolResults?: Map<string, string> | Record<string, string> | Array<{ toolCallId?: string; projectedText?: string }>;
+  persistContext?: ToolResultPersistContext | null;
 };
 
 function stripCurrentUserLabel(text: string) {
@@ -72,25 +82,65 @@ function presentedPlanFrom(value: any) {
   return null;
 }
 
+function replacementMapFrom(value: NativeSessionTranscriptInput["replacedToolResults"]) {
+  const map = new Map<string, string>();
+  if (!value) return map;
+  if (value instanceof Map) {
+    for (const [id, text] of value) {
+      if (id && text) map.set(String(id), String(text));
+    }
+    return map;
+  }
+  if (Array.isArray(value)) {
+    for (const row of value) {
+      const id = String(row?.toolCallId || "").trim();
+      const text = String(row?.projectedText || "").trim();
+      if (id && text) map.set(id, text);
+    }
+    return map;
+  }
+  for (const [id, text] of Object.entries(value)) {
+    if (id && text) map.set(id, String(text));
+  }
+  return map;
+}
+
 function toolUseArguments(event: SessionExecutionEvent) {
   const payload = event?.payload && typeof event.payload === "object" ? event.payload : {};
   if (payload.arguments && typeof payload.arguments === "object") return payload.arguments;
   return payload;
 }
 
-function toolResultOutput(event: SessionExecutionEvent) {
+function toolResultOutput(event: SessionExecutionEvent, options: {
+  cleared: Set<string>;
+  replaced: Map<string, string>;
+  persistContext?: ToolResultPersistContext | null;
+}) {
+  if (options.cleared.has(event.toolCallId)) return TOOL_RESULT_CLEARED_MESSAGE;
   const payload = event?.payload;
+  const persisted = isPersistedToolResult(payload)
+    ? payload
+    : isPersistedToolResult(payload?.observation)
+      ? payload.observation
+      : null;
+  if (persisted) return modelVisiblePersistedToolResult(persisted);
+  if (options.replaced.has(event.toolCallId)) return options.replaced.get(event.toolCallId);
   const projected = projectContextSourceToolResultForPersistence(event?.toolName, payload);
   if (isWorkspaceToolResultReference(projected)) return projected;
+  let output: any = payload ?? null;
   if (payload && typeof payload === "object") {
     if (payload.observation !== undefined) {
       const inner = projectContextSourceToolResultForPersistence(event?.toolName, payload.observation);
       if (isWorkspaceToolResultReference(inner)) return inner;
-      return payload.observation;
+      output = payload.observation;
+    } else if (payload.error) {
+      output = { ok: false, error: payload.error };
     }
-    if (payload.error) return { ok: false, error: payload.error };
   }
-  return payload ?? null;
+  if (options.persistContext?.scope && options.persistContext?.sessionId) {
+    markToolResultSeenUnreplaced(options.persistContext, event.toolCallId);
+  }
+  return output;
 }
 
 function pairExecutionEvents(events: SessionExecutionEvent[]) {
@@ -110,7 +160,10 @@ function pairExecutionEvents(events: SessionExecutionEvent[]) {
   return pairs.sort((left, right) => String(left.use.timestamp || "").localeCompare(String(right.use.timestamp || "")));
 }
 
-function turnFromPair(pair: { use: SessionExecutionEvent; result: SessionExecutionEvent }): { turn: ProviderAgentTurn; results: NativeToolResult[] } {
+function turnFromPair(
+  pair: { use: SessionExecutionEvent; result: SessionExecutionEvent },
+  options: { cleared: Set<string>; replaced: Map<string, string>; persistContext?: ToolResultPersistContext | null },
+): { turn: ProviderAgentTurn; results: NativeToolResult[] } {
   const args = toolUseArguments(pair.use);
   const call: ProviderToolCall = {
     id: pair.use.toolCallId,
@@ -130,7 +183,7 @@ function turnFromPair(pair: { use: SessionExecutionEvent; result: SessionExecuti
       callId: pair.result.toolCallId,
       name: pair.result.toolName,
       ok: pair.result.status !== "error",
-      output: toolResultOutput(pair.result),
+      output: toolResultOutput(pair.result, options),
       error: pair.result.status === "error" ? asText(pair.result.payload?.error || pair.result.payload) : undefined,
     }],
   };
@@ -173,6 +226,11 @@ export function materializeNativeSessionTranscript(input: NativeSessionTranscrip
     .filter(item => ["user", "assistant"].includes(messageRole(item)))
     .filter(item => item?.hidden_execution !== true && item?.modelVisible !== false && item?.model_visible !== false);
   const pairs = pairExecutionEvents(input.executionEvents);
+  const projectionOptions = {
+    cleared: new Set(Array.from(input.clearedToolCallIds || []).map(id => String(id || "").trim()).filter(Boolean)),
+    replaced: replacementMapFrom(input.replacedToolResults),
+    persistContext: input.persistContext || null,
+  };
   const planMetas: NativeSessionMetaBlock[] = [];
   const seenPlan = new Set<string>();
   const collectPlan = (plan: any, summary = "") => {
@@ -215,7 +273,7 @@ export function materializeNativeSessionTranscript(input: NativeSessionTranscrip
           continue;
         }
         if (CONTROL_SKIP_TOOLS.has(pair.use.toolName)) continue;
-        const mapped = turnFromPair(pair);
+        const mapped = turnFromPair(pair, projectionOptions);
         messages = appendNativeTurnTranscript(messages, mapped.turn, mapped.results, family);
       }
       continue;
@@ -229,7 +287,7 @@ export function materializeNativeSessionTranscript(input: NativeSessionTranscrip
       continue;
     }
     if (CONTROL_SKIP_TOOLS.has(pair.use.toolName)) continue;
-    const mapped = turnFromPair(pair);
+    const mapped = turnFromPair(pair, projectionOptions);
     messages = appendNativeTurnTranscript(messages, mapped.turn, mapped.results, family);
   }
 
@@ -508,6 +566,46 @@ export function runNativeSessionTranscriptSelfTest() {
       && bulkySerialized.includes("ccm-workspace-tool-result-reference-v1")
       && bulkySerialized.includes(bulkyBody) === false
       && bulkySerialized.includes("text_batch") === false,
+    nativeAppliesMicroCompact: true,
   };
+  const microEvents: SessionExecutionEvent[] = [
+    {
+      id: "use-grep",
+      type: "tool_use",
+      toolCallId: "call_grep_old",
+      toolName: "grep_text",
+      timestamp: "2026-01-01T00:00:01.000Z",
+      runId: "run-1",
+      traceId: "t1",
+      anchorMessageId: "u1",
+      status: "running",
+      hidden: true,
+      payload: { arguments: { pattern: "TODO" } },
+    },
+    {
+      id: "res-grep",
+      type: "tool_result",
+      toolCallId: "call_grep_old",
+      toolName: "grep_text",
+      timestamp: "2026-01-01T00:00:02.000Z",
+      runId: "run-1",
+      traceId: "t1",
+      anchorMessageId: "u1",
+      status: "ok",
+      hidden: true,
+      payload: { observation: { lines: ["keep-raw-in-ledger"] } },
+    },
+  ];
+  const microMessages = materializeNativeSessionTranscript({
+    family: "openai",
+    conversation: [{ id: "u1", role: "user", content: "继续" }],
+    executionEvents: microEvents,
+    currentUserText: "继续",
+    clearedToolCallIds: ["call_grep_old"],
+  });
+  const microSerialized = JSON.stringify(microMessages);
+  checks.nativeAppliesMicroCompact = microSerialized.includes("[Old tool result content cleared]")
+    && microSerialized.includes("keep-raw-in-ledger") === false
+    && JSON.stringify(microEvents[1].payload).includes("keep-raw-in-ledger");
   return { pass: Object.values(checks).every(Boolean), checks, messages, system };
 }

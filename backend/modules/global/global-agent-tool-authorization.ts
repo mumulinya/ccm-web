@@ -3,12 +3,15 @@ import * as fs from "fs";
 import * as path from "path";
 import { CCM_DIR } from "../../core/utils";
 import { toolManager, type ToolScope } from "../../tools/tool-manager";
-import { buildMainAgentToolRuntimeContext } from "../../tools/main-agent-tool-runtime";
+import { buildMainAgentToolRuntimeContext, registerMainAgentDiscoverableTools } from "../../tools/main-agent-tool-runtime";
 import { executeWorkspaceReadonlyTool } from "../../tools/workspace-readonly-tools";
 import { recordMainAgentToolContinuityFromResult } from "../../system/main-agent-post-compact-continuity";
+import { shouldUseNativeQueryLoop } from "../../agents/native-query-loop";
 import { loadOrchestratorConfig } from "../collaboration/group-orchestrator-config";
 import { resolveGroupModelContextCapacity } from "../collaboration/group-compaction-strategy";
 import { resolveMainAgentContextPolicy } from "../../tools/main-agent-context-policy";
+import { buildRoleSkillPrompt } from "../../skills/role-skills";
+import { globalDiscoverableManagementTools } from "../../agents/global/global-tool-load-policy";
 import {
   buildFreshToolAuthorizationPayload,
   buildToolAuthorizationPayload,
@@ -99,12 +102,39 @@ export async function saveGlobalAgentToolAuthorization(input: any = {}) {
   return { ...store, ...payload, authorization_change: authorizationChange };
 }
 
-export function buildGlobalAgentToolRuntimeContext(auditContext: ToolScope["auditContext"] = {}, loadedToolNames: string[] = []) {
+export function resolveGlobalAgentExecutionSkills(input: {
+  message?: string;
+  source?: string;
+  workflowDecision?: any;
+} = {}) {
+  return buildRoleSkillPrompt("global-agent", String(input.message || ""), {
+    source: String(input.source || ""),
+    phase: "planning",
+    selectedSkillNames: Array.isArray(input.workflowDecision?.selectedSkills) ? input.workflowDecision.selectedSkills : [],
+    modelDecision: input.workflowDecision || null,
+  }).names;
+}
+
+export function resolveGlobalAgentExecutionSkillsFromRun(run: any) {
+  return resolveGlobalAgentExecutionSkills({
+    message: run?.reasoning_loop?.effective_goal || run?.user_message || "",
+    source: run?.source || "",
+    workflowDecision: run?.workflow_decision || run?.workflowDecision || null,
+  });
+}
+
+export function buildGlobalAgentToolRuntimeContext(
+  auditContext: ToolScope["auditContext"] = {},
+  loadedToolNames: string[] = [],
+  options: { executionSkills?: string[] } = {},
+) {
   const authorization = getGlobalAgentToolAuthorizationPayload();
   const orchestratorConfig = loadOrchestratorConfig();
   const contextPolicy = resolveMainAgentContextPolicy(orchestratorConfig);
+  const executionSkills = Array.from(new Set((options.executionSkills || []).map(value => String(value || "").trim()).filter(Boolean)));
   const shared = buildMainAgentToolRuntimeContext({
     configuredTools: authorization.tools,
+    executionSkills,
     mcpPolicy: "all",
     label: "全局 Agent",
     auditContext: {
@@ -125,7 +155,9 @@ export function buildGlobalAgentToolRuntimeContext(auditContext: ToolScope["audi
     loadedToolNames,
     contextPolicy: contextPolicy.effective,
     contextWindow: resolveGroupModelContextCapacity(orchestratorConfig).contextWindow,
+    schemaSurface: shouldUseNativeQueryLoop(orchestratorConfig) ? "native" : "prompt",
   });
+  registerMainAgentDiscoverableTools(shared, globalDiscoverableManagementTools(loadedToolNames));
   const catalog = { tools: shared.catalog.mcp, skills: shared.catalog.skills };
   return {
     schema: "ccm-global-agent-tool-runtime-context-v1",
@@ -149,6 +181,7 @@ export function buildGlobalAgentToolRuntimeContext(auditContext: ToolScope["audi
     context_budget: shared.contextBudget || null,
     policy_prompt: shared.policyPrompt,
     mcp_prompt: shared.mcpPrompt,
+    execution_skills: executionSkills,
     updated_at: authorization.updated_at,
     updated_by: authorization.updated_by,
   };
@@ -172,13 +205,21 @@ function parseToolResult(value: string) {
   catch { return { content: text }; }
 }
 
-export async function executeGlobalAgentAuthorizedTool(kind: "mcp" | "skill", input: any, auditContext: ToolScope["auditContext"] = {}, loadedToolNames: string[] = []) {
-  const runtime = buildGlobalAgentToolRuntimeContext(auditContext, loadedToolNames);
-  if (runtime.authorization_readiness?.dispatchReady !== true) {
-    throw new Error("全局 Agent 工具授权存在缺失、断连或无效项，请先在工具配置中处理");
-  }
+export async function executeGlobalAgentAuthorizedTool(
+  kind: "mcp" | "skill",
+  input: any,
+  auditContext: ToolScope["auditContext"] = {},
+  loadedToolNames: string[] = [],
+  options: { executionSkills?: string[] } = {},
+) {
+  const executionSkills = Array.from(new Set((options.executionSkills || []).map(value => String(value || "").trim()).filter(Boolean)));
+  const runtime = buildGlobalAgentToolRuntimeContext(auditContext, loadedToolNames, { executionSkills });
   if (kind === "skill") {
     const name = String(input?.name || input?.skill || "").trim();
+    const isExecutionSkill = executionSkills.includes(name);
+    if (!isExecutionSkill && runtime.authorization_readiness?.dispatchReady !== true) {
+      throw new Error("全局 Agent 工具授权存在缺失、断连或无效项，请先在工具配置中处理");
+    }
     if (!runtime.catalog.skills.some(row => row.name === name)) throw new Error(`Skill 未授权给全局 Agent：${name || "未指定"}`);
     const output = await toolManager.executeToolCall("invoke_skill", { name, input: input?.input ?? input?.context ?? "" }, runtime.scope);
     const result = parseToolResult(output);
@@ -191,6 +232,9 @@ export async function executeGlobalAgentAuthorizedTool(kind: "mcp" | "skill", in
       sourceMessageId: String((auditContext as any)?.userMessageId || ""),
     });
     return { success: true, kind, name, result, authorization_checksum: runtime.checksum };
+  }
+  if (runtime.authorization_readiness?.dispatchReady !== true) {
+    throw new Error("全局 Agent 工具授权存在缺失、断连或无效项，请先在工具配置中处理");
   }
   const requestedName = input?.tool_name || input?.toolName || input?.name;
   const deferredMatch = runtime.discoverable_tools.find((row: any) => requestedName === row.canonicalName || requestedName === row.name || requestedName === `${row.server}/${row.name}`);
@@ -213,9 +257,15 @@ export function runGlobalAgentToolAuthorizationSelfTest() {
     mcp: ["demo/read", "demo/read", "demo"],
     skill: ["release-notes", "release-notes"],
   });
+  const idleSkills = resolveGlobalAgentExecutionSkills({ message: "你好，介绍一下你自己" });
+  const workSkills = resolveGlobalAgentExecutionSkills({ message: "继续全局路由任务", source: "task" });
   return {
-    pass: normalized.mcp.length === 1 && normalized.mcp[0] === "demo" && normalized.skill.length === 1,
+    pass: normalized.mcp.length === 1 && normalized.mcp[0] === "demo" && normalized.skill.length === 1
+      && idleSkills.length === 0
+      && workSkills.includes("ccm-global-mission-lead"),
     normalized,
+    idleSkills,
+    workSkills,
     storage_file: GLOBAL_AGENT_TOOL_AUTHORIZATION_FILE,
   };
 }

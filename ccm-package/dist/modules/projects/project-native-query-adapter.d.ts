@@ -14,6 +14,7 @@ export declare function runProjectMainNativeQueryLoop(input: {
     executeSelectedRequest: (request: any, parallelGroupId?: string, preparedToolCallId?: string) => Promise<any>;
     isReadOnly: (request: any) => boolean;
     captureUsage?: (usage: any) => void;
+    planModeEnabled?: boolean;
 }): Promise<{
     parsed: any;
     toolResults: any[];

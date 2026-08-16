@@ -51,6 +51,10 @@ assert.equal(globalProjection.includes("currentUserText: currentGoal"), false);
 assert.match(globalNative, /materializeNativeSessionTranscript/);
 assert.match(globalAdapter, /recordGlobalAgentRuntimeOutput/);
 assert.match(shared, /splitNativeSystemSegments/);
+assert.match(shared, /clearedToolCallIds/);
+assert.match(groupNative, /clearedToolCallIds/);
+assert.match(projectNative, /clearedToolCallIds/);
+assert.match(globalNative, /clearedToolCallIds/);
 assert.match(shared, /缺对|droppedUnpairedToolUse|call_orphan/);
 assert.equal(groupLlm.includes("identityRules") && groupNative.includes("ragContext"), true);
 

@@ -102,7 +102,7 @@ function runGroupCoordinatorVisibleReplySelfTest() {
         }) === false,
         presentedPlanHeadline: coordinatorVisibleFallbackContent({
             parsed: { responseType: "plan", reply: "", plan: { goal: "预约排队", steps: [{ title: "P0 后端" }] } },
-        }).includes("实施步骤"),
+        }).includes(group_presented_plan_1.COORDINATOR_PRESENTED_PLAN_HEADLINE),
         emptyChatKeepsFallback: coordinatorShouldFailEmptyVisibleReply({ parsed: emptyParsed }) === false,
         priorPlanEmptyIsFailure: coordinatorShouldFailEmptyVisibleReply({
             parsed: emptyParsed,

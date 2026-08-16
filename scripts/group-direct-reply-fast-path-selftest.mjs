@@ -202,6 +202,9 @@ assert.match(workspaceTools, /name:\s*"read_file"/);
 const projectServer = source("backend/server.ts");
 const projectChat = projectServer.slice(projectServer.indexOf('pathname === "/api/send-stream"'), projectServer.indexOf('// === 发送消息给 Agent（非流式）==='));
 assert.match(projectChat, /runProjectMainAgentFirstTurn\s*\(/);
+assert.match(projectChat, /projectFirstTurnVisiblePresentation\s*\(/);
+assert.doesNotMatch(projectChat, /answerAsProjectMainAgent\s*\(/);
+assert.doesNotMatch(projectChat, /priorToolResults:\s*projectFirstTurn\.toolResults/);
 assert.doesNotMatch(projectChat, /classifyProjectChatIntentWithModel\s*\(/);
 assert.doesNotMatch(projectChat, /await\s+searchAgentKnowledge\s*\(/);
 
@@ -209,14 +212,24 @@ const projectFirstTurn = source("backend/modules/projects/project-main-agent.ts"
   source("backend/modules/projects/project-main-agent.ts").indexOf("export async function runProjectMainAgentFirstTurn"),
   source("backend/modules/projects/project-main-agent.ts").indexOf("export async function planProjectMainTask"),
 );
-assert.match(projectFirstTurn, /ccm_ask_user/);
-assert.match(projectFirstTurn, /ccm_present_plan/);
-assert.match(projectFirstTurn, /ccm_dispatch/);
+const projectIdentity = source("backend/agents/main-agent-identity.ts");
+assert.match(projectIdentity, /ccm_ask_user/);
+assert.match(projectIdentity, /ccm_present_plan/);
+assert.match(projectIdentity, /ccm_dispatch/);
+assert.match(projectFirstTurn, /buildProjectMainIdentityRules/);
 assert.match(projectFirstTurn, /runProjectMainNativeQueryLoop/);
 assert.match(projectFirstTurn, /query_knowledge/);
+assert.match(projectFirstTurn, /publishGroupPresentedRequirementPlan/);
+assert.match(projectFirstTurn, /计划已整理/);
+assert.match(projectFirstTurn, /coordinatorVisibleFallbackContent/);
 assert.doesNotMatch(projectFirstTurn, /canonicalName:\s*"read_project_source"/);
 assert.doesNotMatch(projectFirstTurn, /canonicalName:\s*"read_runtime_diagnostics"/);
 assert.match(projectFirstTurn, /let modelCallCount = 0/);
+assert.equal(fs.existsSync(path.join(root, "backend/modules/projects/project-main-answer.ts")), false);
+
+const turnComplete = dist("modules", "projects", "project-main-turn-complete.js");
+const turnCompleteSelfTest = turnComplete.runProjectMainTurnCompleteSelfTest();
+assert.equal(turnCompleteSelfTest.pass, true, JSON.stringify(turnCompleteSelfTest.checks, null, 2));
 
 const globalTools = source("backend/agents/global/global-agent-run-store.ts");
 assert.match(globalTools, /name:\s*"read_global_shared_files"/);
@@ -238,6 +251,8 @@ process.stdout.write(`${JSON.stringify({
     projectPreclassifierRemoved: true,
     projectAutomaticKnowledgeSearchRemoved: true,
     projectReadToolsAreModelSelected: true,
+    projectPlanFastPath: true,
+    projectHasNoAnalysisSecondLoop: true,
     globalSharedFilesAreModelSelected: true,
   },
 }, null, 2)}\n`);

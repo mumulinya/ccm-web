@@ -32,6 +32,7 @@ export interface RoleSkillSelectionOptions {
   phase?: CcmAgentSkillPhase;
   selectedSkillNames?: string[];
   modelDecision?: { actionRequired?: boolean; selectedSkills?: string[] } | null;
+  /** 仅当用户开启 Plan Mode 时注入 ccm-implementation-plan-authoring */
   planAuthoring?: boolean;
 }
 
@@ -173,15 +174,15 @@ export function isRoleSkillWorkRequest(message = "", options: RoleSkillSelection
 export function selectRoleSkills(role: CcmAgentRole, taskText = "", options: RoleSkillSelectionOptions = {}): SelectedRoleSkill[] {
   ensureRoleSkillsInstalled();
   const work = role === "project-child-agent" || role === "test-agent" || isRoleSkillWorkRequest(taskText, options);
-  const planAuthoringOnly = !work
-    && options.planAuthoring === true
+  const planAuthoring = options.planAuthoring === true
     && (role === "group-main-agent" || role === "project-main-agent");
-  if (!work && !planAuthoringOnly) return [];
+  const planAuthoringOnly = planAuthoring && !work;
+  if (!work && !planAuthoring) return [];
   const rows: Array<{ name: RoleSkillName; kind: "role" | "shared" | "workflow"; reason: string }> = [];
   const phase = options.phase || (role === "test-agent" ? "verification" : role === "project-child-agent" ? "execution" : "planning");
   const add = (name: RoleSkillName, kind: "role" | "shared" | "workflow", reason: string) => rows.push({ name, kind, reason });
-  if (planAuthoringOnly) {
-    add(CCM_ROLE_SKILL_NAMES.implementationPlanAuthoring, "workflow", "本轮需要产出用户可确认的计划卡");
+  if (planAuthoring) {
+    add(CCM_ROLE_SKILL_NAMES.implementationPlanAuthoring, "workflow", "用户已选择 Plan 模式，本轮需要产出用户可确认的计划卡");
   }
   if (!planAuthoringOnly && role === "global-agent") {
     add(CCM_ROLE_SKILL_NAMES.global, "role", "跨群聊任务路由与监督");
@@ -194,9 +195,6 @@ export function selectRoleSkills(role: CcmAgentRole, taskText = "", options: Rol
       add(CCM_ROLE_SKILL_NAMES.evidence, "shared", "复核验收项与实际证据");
     } else {
       add(CCM_ROLE_SKILL_NAMES.taskDecomposition, "workflow", "当前阶段需要拆解和路由任务");
-      if (phase === "planning") {
-        add(CCM_ROLE_SKILL_NAMES.implementationPlanAuthoring, "workflow", "本轮需要产出用户可确认的计划卡");
-      }
     }
   }
   if (role === "project-child-agent") {
@@ -221,6 +219,7 @@ export function selectRoleSkills(role: CcmAgentRole, taskText = "", options: Rol
     for (const rawName of modelSelected) {
       const name = String(rawName || "").trim() as RoleSkillName;
       if (!definitions.has(name) || roleRoots.has(name)) continue;
+      if (name === CCM_ROLE_SKILL_NAMES.implementationPlanAuthoring && !planAuthoring) continue;
       add(name, name === CCM_ROLE_SKILL_NAMES.receipt || name === CCM_ROLE_SKILL_NAMES.evidence ? "shared" : "workflow", "统一大模型根据完整任务语义选择");
     }
   }
@@ -275,6 +274,8 @@ export function runRoleSkillSelectionSelfTest() {
   const ordinaryGroup = selectRoleSkills("group-main-agent", "这个项目是做什么的？");
   const globalWork = selectRoleSkills("global-agent", "model-selected", { modelDecision: { actionRequired: true, selectedSkills: [CCM_ROLE_SKILL_NAMES.requirementIntake, CCM_ROLE_SKILL_NAMES.incidentDiagnosis] } });
   const groupWork = selectRoleSkills("group-main-agent", "model-selected", { source: "task", phase: "planning", selectedSkillNames: [CCM_ROLE_SKILL_NAMES.businessRuleModeling] });
+  const groupWorkPlanMode = selectRoleSkills("group-main-agent", "model-selected", { source: "task", phase: "planning", planAuthoring: true, selectedSkillNames: [CCM_ROLE_SKILL_NAMES.businessRuleModeling] });
+  const sneakyPlanSkill = selectRoleSkills("group-main-agent", "model-selected", { source: "task", phase: "planning", selectedSkillNames: [CCM_ROLE_SKILL_NAMES.implementationPlanAuthoring] });
   const groupReview = selectRoleSkills("group-main-agent", "model-selected", { forceWork: true, phase: "review", selectedSkillNames: [CCM_ROLE_SKILL_NAMES.businessScenarioAcceptance] });
   const contextualGroupWork = selectRoleSkills("group-main-agent", "那就以这个为目标");
   const planAuthoringOnly = selectRoleSkills("group-main-agent", "这个项目是做什么的？", { planAuthoring: true, phase: "planning" });
@@ -302,8 +303,13 @@ export function runRoleSkillSelectionSelfTest() {
       && !globalWork.some(item => item.name === CCM_ROLE_SKILL_NAMES.group),
     groupGetsCoordinatorAndDecomposition: groupWork[0]?.name === CCM_ROLE_SKILL_NAMES.group
       && groupWork.some(item => item.name === CCM_ROLE_SKILL_NAMES.taskDecomposition)
-      && groupWork.some(item => item.name === CCM_ROLE_SKILL_NAMES.implementationPlanAuthoring)
+      && !groupWork.some(item => item.name === CCM_ROLE_SKILL_NAMES.implementationPlanAuthoring)
       && !groupWork.some(item => item.name === CCM_ROLE_SKILL_NAMES.project),
+    groupPlanModeGetsPlanSkill: groupWorkPlanMode.some(item => item.name === CCM_ROLE_SKILL_NAMES.implementationPlanAuthoring)
+      && groupWorkPlanMode.some(item => item.name === CCM_ROLE_SKILL_NAMES.group)
+      && groupWorkPlanMode.some(item => item.name === CCM_ROLE_SKILL_NAMES.taskDecomposition),
+    agentModeIgnoresModelPickedPlanSkill: !sneakyPlanSkill.some(item => item.name === CCM_ROLE_SKILL_NAMES.implementationPlanAuthoring)
+      && sneakyPlanSkill.some(item => item.name === CCM_ROLE_SKILL_NAMES.group),
     groupReviewGetsReviewAndReceipt: groupReview.some(item => item.name === CCM_ROLE_SKILL_NAMES.deliveryReviewRework)
       && groupReview.some(item => item.name === CCM_ROLE_SKILL_NAMES.receipt)
       && !groupReview.some(item => item.name === CCM_ROLE_SKILL_NAMES.implementationPlanAuthoring),
@@ -324,7 +330,7 @@ export function runRoleSkillSelectionSelfTest() {
       && testWork.some(item => item.name === CCM_ROLE_SKILL_NAMES.frontendVisualQa),
     businessPlanningGetsRuleModeling: businessPlanning.some(item => item.name === CCM_ROLE_SKILL_NAMES.businessRuleModeling)
       && businessPlanning.some(item => item.name === CCM_ROLE_SKILL_NAMES.taskDecomposition)
-      && businessPlanning.some(item => item.name === CCM_ROLE_SKILL_NAMES.implementationPlanAuthoring),
+      && !businessPlanning.some(item => item.name === CCM_ROLE_SKILL_NAMES.implementationPlanAuthoring),
     interfaceWorkGetsContractAndScenarioAcceptance: contractWork.some(item => item.name === CCM_ROLE_SKILL_NAMES.interfaceDataContract)
       && contractWork.some(item => item.name === CCM_ROLE_SKILL_NAMES.businessScenarioAcceptance),
     businessReviewGetsScenarioAcceptance: businessReview.some(item => item.name === CCM_ROLE_SKILL_NAMES.businessScenarioAcceptance),
@@ -336,7 +342,7 @@ export function runRoleSkillSelectionSelfTest() {
     directProjectGetsAllBusinessWorkflowSkills: directProjectBusinessWork.some(item => item.name === CCM_ROLE_SKILL_NAMES.businessRuleModeling)
       && directProjectBusinessWork.some(item => item.name === CCM_ROLE_SKILL_NAMES.interfaceDataContract)
       && directProjectBusinessWork.some(item => item.name === CCM_ROLE_SKILL_NAMES.businessScenarioAcceptance),
-    selectionBudgetBounded: [globalWork, groupWork, groupReview, projectWork, incidentWork, releaseWork, testWork, businessPlanning, contractWork, businessReview, businessTest, visualOnly, directProjectBusinessWork, planAuthoringOnly, planAuthoringProjectOnly].every(items => items.length <= 6),
+    selectionBudgetBounded: [globalWork, groupWork, groupWorkPlanMode, sneakyPlanSkill, groupReview, projectWork, incidentWork, releaseWork, testWork, businessPlanning, contractWork, businessReview, businessTest, visualOnly, directProjectBusinessWork, planAuthoringOnly, planAuthoringProjectOnly].every(items => items.length <= 6),
     usageDirectiveRequiresApplicationAndReceipt: buildSelectedSkillUsageDirective(projectWork).includes("不是可选目录项")
       && buildSelectedSkillUsageDirective(projectWork).includes("CCM_AGENT_RECEIPT"),
   };
@@ -348,6 +354,8 @@ export function runRoleSkillSelectionSelfTest() {
       ordinaryGroup: ordinaryGroup.map(item => item.name),
       globalWork: globalWork.map(item => item.name),
       groupWork: groupWork.map(item => item.name),
+      groupWorkPlanMode: groupWorkPlanMode.map(item => item.name),
+      sneakyPlanSkill: sneakyPlanSkill.map(item => item.name),
       groupReview: groupReview.map(item => item.name),
       contextualGroupWork: contextualGroupWork.map(item => item.name),
       planAuthoringOnly: planAuthoringOnly.map(item => item.name),

@@ -11,6 +11,7 @@ import { buildExactGroupSessionModelContextPacket } from "./group-session-model-
 import { listGroupSessionExecutionEvents } from "./group-session-execution-ledger";
 import { getGroupMessages } from "./storage";
 import type { LlmChatMessage } from "./group-orchestrator-llm-client";
+import { sessionModelReplacementTextMap } from "../../system/session-model-context";
 
 export function tryBuildGroupNativeCoordinatorMessages(input: {
   group: any;
@@ -54,6 +55,9 @@ export function tryBuildGroupNativeCoordinatorMessages(input: {
     metaBlocks,
     presentedPlan,
     currentUserText: String(input.message || "").trim(),
+    clearedToolCallIds: projection.microCompact?.clearedToolCallIds,
+    replacedToolResults: sessionModelReplacementTextMap(projection.contentReplacement),
+    persistContext: { scope: "group", sessionId: groupSessionId },
   });
   if (lastNativeUserText(history) !== String(input.message || "").trim()) return null;
   const system = splitNativeSystemSegments({

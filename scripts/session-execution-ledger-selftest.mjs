@@ -5,7 +5,9 @@ import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const ledger = await import("../ccm-package/dist/system/session-execution-ledger.js");
+const storage = await import("../ccm-package/dist/tools/tool-result-storage.js");
 const result = ledger.runSessionExecutionLedgerSelfTest();
+const persist = storage.runToolResultStorageSelfTest();
 
 const globalMemory = fs.readFileSync(path.join(root, "backend/agents/global/memory.ts"), "utf8");
 const globalRuntime = fs.readFileSync(path.join(root, "backend/agents/global/runtime.ts"), "utf8");
@@ -32,7 +34,11 @@ const wiring = {
   ].every(token => projectMain.includes(token)),
   userVisibleProjectSessionHidesLedger: projectSessions.includes("...publicData")
     && projectSessions.includes("execution_history = []"),
+  persistContextOnAppend: globalMemory.includes("persistContext")
+    && projectCompaction.includes("persistContext")
+    && fs.readFileSync(path.join(root, "backend/modules/collaboration/group-session-execution-ledger.ts"), "utf8").includes("persistContext"),
 };
 
+assert.equal(persist.pass, true, JSON.stringify(persist.checks, null, 2));
 for (const [name, value] of Object.entries({ ...result.checks, ...wiring })) assert.equal(value, true, name);
-console.log(JSON.stringify({ pass: true, checks: Object.keys({ ...result.checks, ...wiring }).length, ...wiring }, null, 2));
+console.log(JSON.stringify({ pass: true, checks: Object.keys({ ...result.checks, ...wiring, persist: persist.pass }).length, ...wiring }, null, 2));

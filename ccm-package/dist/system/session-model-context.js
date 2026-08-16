@@ -37,6 +37,7 @@ exports.resolveSessionModelMicroCompactPolicy = resolveSessionModelMicroCompactP
 exports.sessionModelMessageContent = sessionModelMessageContent;
 exports.sessionModelMicroCompactReceiptChecksum = sessionModelMicroCompactReceiptChecksum;
 exports.verifySessionModelMicroCompactReceipt = verifySessionModelMicroCompactReceipt;
+exports.sessionModelReplacementTextMap = sessionModelReplacementTextMap;
 exports.verifySessionModelContentReplacementReceipt = verifySessionModelContentReplacementReceipt;
 exports.buildUnifiedSessionModelContextProjection = buildUnifiedSessionModelContextProjection;
 exports.runUnifiedSessionModelContextSelfTest = runUnifiedSessionModelContextSelfTest;
@@ -44,6 +45,7 @@ const crypto = __importStar(require("crypto"));
 const context_budget_1 = require("./context-budget");
 const session_memory_window_1 = require("./session-memory-window");
 const session_execution_ledger_1 = require("./session-execution-ledger");
+const tool_result_storage_1 = require("../tools/tool-result-storage");
 function resolveSessionModelMicroCompactPolicy(config = {}, overrides = {}) {
     const configuredEnabled = config?.timeBasedMicrocompactEnabled ?? config?.time_based_microcompact_enabled;
     const configuredGap = config?.timeBasedMicrocompactGapMinutes ?? config?.time_based_microcompact_gap_minutes;
@@ -61,7 +63,7 @@ function resolveSessionModelMicroCompactPolicy(config = {}, overrides = {}) {
     };
 }
 const CC_TIME_BASED_CLEARED_MESSAGE = "[Old tool result content cleared]";
-const CC_COMPACTABLE_TOOL = /(?:^|[_-])(?:read|shell|bash|command|grep|glob|search|fetch|edit|write)(?:$|[_-])/i;
+const CC_COMPACTABLE_TOOL = /(?:^|[_-])(?:read|shell|bash|command|grep|glob|search|fetch|edit|write|inspect|list|query)(?:$|[_-])|^invoke_mcp$/i;
 function sessionModelMessageContent(value) {
     const content = value && typeof value === "object"
         ? value.content ?? value.message?.content ?? value.text ?? ""
@@ -188,6 +190,16 @@ function contentReplacementReceiptChecksum(receipt) {
     delete payload.receiptChecksum;
     return crypto.createHash("sha256").update(JSON.stringify(payload)).digest("hex");
 }
+function sessionModelReplacementTextMap(contentReplacement) {
+    const map = new Map();
+    for (const row of Array.isArray(contentReplacement?.replacements) ? contentReplacement.replacements : []) {
+        const id = String(row?.toolCallId || "").trim();
+        const text = String(row?.projectedText || "").trim();
+        if (id && text)
+            map.set(id, text);
+    }
+    return map;
+}
 function verifySessionModelContentReplacementReceipt(receipt, expected = {}) {
     const issues = [
         receipt?.schema !== "ccm-session-tool-result-content-replacement-v1" ? "schema_invalid" : "",
@@ -219,6 +231,8 @@ function selectRecoverableToolResultReplacements(events, policy = {}) {
     for (const event of completed) {
         if (protectedIds.has(event.toolCallId))
             continue;
+        if ((0, tool_result_storage_1.isPersistedToolResult)(event.payload) || (0, tool_result_storage_1.isPersistedToolResult)(event.payload?.observation))
+            continue;
         const raw = JSON.stringify(event.payload ?? null);
         const rawTokens = (0, context_budget_1.estimateTextTokens)(raw);
         if (rawTokens <= maxResultTokens)
@@ -241,6 +255,7 @@ function selectRecoverableToolResultReplacements(events, policy = {}) {
             toolName: event.toolName,
             rawTokens,
             projectedTokens: (0, context_budget_1.estimateTextTokens)(text),
+            projectedText: text,
             checksum,
             locator,
         });

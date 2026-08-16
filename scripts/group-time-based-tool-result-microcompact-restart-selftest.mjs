@@ -160,7 +160,7 @@ function childCreate(fixtureFile) {
       && centerMicro.groupSessionId === groupSessionId,
     memoryCenterSettingsAndPanelPresent: uiSource.includes("timeBasedMicrocompactEnabled")
       && uiSource.includes("Time-based Tool Result Microcompact")
-      && uiSource.includes("空闲触发间隔（分钟）"),
+      && uiSource.includes("启用旧工具结果空闲整理"),
   };
   fs.writeFileSync(fixtureFile, JSON.stringify({ groupId, groupSessionId, siblingSessionId }, null, 2));
   process.stdout.write(`${resultPrefix}${JSON.stringify(checks)}\n`);

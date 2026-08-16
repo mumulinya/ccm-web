@@ -23,6 +23,7 @@ export async function runProjectMainNativeQueryLoop(input: {
   executeSelectedRequest: (request: any, parallelGroupId?: string, preparedToolCallId?: string) => Promise<any>;
   isReadOnly: (request: any) => boolean;
   captureUsage?: (usage: any) => void;
+  planModeEnabled?: boolean;
 }): Promise<{
   parsed: any;
   toolResults: any[];
@@ -59,8 +60,9 @@ export async function runProjectMainNativeQueryLoop(input: {
     exactSessionId: projectSessionId,
     signal: input.signal,
     nativeToolReference: true,
+    persistContext: { scope: "project", sessionId: projectSessionId },
     loopBudget,
-    planModeEnabled: isConversationPlanModeEnabled("project", project, projectSessionId),
+    planModeEnabled: input.planModeEnabled ?? isConversationPlanModeEnabled("project", project, projectSessionId),
     getTools: () => [...nativeControlToolDefinitions(), ...catalogToNativeTools(input.getToolContext())],
     isReadOnly: (call: ProviderToolCall) => {
       if (call.name === "ccm_ask_user" || call.name === "ccm_present_plan") return true;

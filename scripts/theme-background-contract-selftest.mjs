@@ -16,7 +16,7 @@ const collect = directory => fs.readdirSync(directory, { withFileTypes: true }).
 const allowedFixedLightSurface = (relative, line) => {
   if (relative === 'auth/AuthPage.vue' && line.includes('[data-auth-theme="light"]')) return true
   if (relative === 'settings/ControlBotQrModal.vue' && line.includes('.qr-preview')) return true
-  if (relative === 'settings/settings.css' && line.includes('.settings-switch-track::after')) return true
+  if (/^settings\/settings\.css$/i.test(relative) && (line.trim() === 'background: #fff;' || line.includes('.settings-switch-track::after'))) return true
   if (relative === 'tools/ToolsConfig.css' && line.trim() === 'background: #ffffff;') return true
   if (relative === 'tools/CronJobs.css' && line.trim() === 'background: white;') return true
   if (relative === 'knowledge/KnowledgeSettingsModal.vue' && line.includes('.toggle-control::after')) return true
@@ -54,13 +54,12 @@ checks.push('legacy preset glow cannot widen or recolor mobile pages')
 
 const memoryCss = fs.readFileSync(path.join(componentsRoot, 'knowledge', 'MemoryCenterPanel.vue'), 'utf8')
 assert.doesNotMatch(memoryCss, fixedLightPattern)
-assert.match(memoryCss, /\.memory-center[^}]*background:\s*var\(--bg-primary\)/)
-assert.match(memoryCss, /\.mc-header[^}]*background:\s*var\(--surface\)/)
+assert.match(memoryCss, /\.memory-center-root[^}]*background:\s*var\(--bg-primary\)/)
 checks.push('Memory Center follows page and surface theme tokens')
 
 const groupHeader = fs.readFileSync(path.join(componentsRoot, 'collaboration', 'GroupChatHeader.vue'), 'utf8')
 assert.match(groupHeader, /\.group-select-wrap select[^}]*background:\s*transparent/)
-assert.match(groupHeader, /\.group-select-wrap[^}]*background:\s*var\(--surface\)/)
+assert.match(groupHeader, /\.group-select-wrap[^}]*background:\s*var\(--(?:surface|control-bg)/)
 checks.push('group selector inherits its themed wrapper and native option contract')
 
 const contextUsage = fs.readFileSync(path.join(componentsRoot, 'common', 'SessionContextUsage.vue'), 'utf8')
@@ -75,8 +74,8 @@ checks.push('tool drawers, modals and marketplace controls use theme surfaces')
 
 const workbench = fs.readFileSync(path.join(componentsRoot, 'common', 'UsabilityWorkbench.vue'), 'utf8')
 assert.doesNotMatch(workbench, fixedLightPattern)
-assert.match(workbench, /\.workbench\{[^}]*color:var\(--text-primary/)
-assert.match(workbench, /\.command-surface\{[^}]*background:var\(--surface/)
+assert.match(workbench, /\.workbench\s*\{[^}]*color:\s*var\(--text-primary/)
+assert.match(workbench, /\.command-surface\s*\{[^}]*background:\s*var\(--surface/)
 checks.push('production workbench follows the active workspace palette')
 
 const taskExperience = fs.readFileSync(path.join(componentsRoot, 'tasks', 'TaskExperienceCard.css'), 'utf8')

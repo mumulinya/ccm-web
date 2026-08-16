@@ -111,6 +111,37 @@ export declare function runProjectMainAgentFirstTurn(input: {
     onDelta?: (delta: string) => void;
     onModelActivity?: (activity: any) => void;
 }): Promise<{
+    toolResults: any[];
+    turnDecision: import("../../agents/main-agent-turn").MainAgentTurnDecisionV1;
+    turnReceipt: import("../../agents/main-agent-turn").MainAgentTurnReceiptV1;
+    metric: {
+        durationMs: number;
+        modelMs: number;
+        toolWallMs: number;
+        usage: any;
+        modelCalls: number;
+        toolCalls: number;
+        firstVisibleFeedbackMs: number;
+        firstTokenMs: number;
+        maxSilentGapMs: number;
+        retryCount: number;
+        initialReadTokenBudget: number;
+        initialReadFileCount: number;
+        initialReadTokens: number;
+        fallbackStreamCount: number;
+        usageAnchorId: string;
+    };
+    mainAgentToolUsage: {
+        schema: string;
+        mode: import("../../system/agent-loop-budget").AgentLoopMode;
+        modelCalls: number;
+        toolRounds: number;
+        calls: number;
+        continuationSegments: number;
+        noProgressCount: number;
+        stopReason: string;
+    };
+    presentedPlan?: any;
     workflowDecision: WorkflowDecision;
     prePlanClarification: {
         schema: string;
@@ -147,37 +178,8 @@ export declare function runProjectMainAgentFirstTurn(input: {
     };
     responseType: import("../../agents/main-agent-turn").MainAgentTurnResponseKind;
     reply: string;
+    parsed: any;
     plan: ProjectMainPlan;
-    toolResults: any[];
-    turnDecision: import("../../agents/main-agent-turn").MainAgentTurnDecisionV1;
-    turnReceipt: import("../../agents/main-agent-turn").MainAgentTurnReceiptV1;
-    metric: {
-        durationMs: number;
-        modelMs: number;
-        toolWallMs: number;
-        usage: any;
-        modelCalls: number;
-        toolCalls: number;
-        firstVisibleFeedbackMs: number;
-        firstTokenMs: number;
-        maxSilentGapMs: number;
-        retryCount: number;
-        initialReadTokenBudget: number;
-        initialReadFileCount: number;
-        initialReadTokens: number;
-        fallbackStreamCount: number;
-        usageAnchorId: string;
-    };
-    mainAgentToolUsage: {
-        schema: string;
-        mode: import("../../system/agent-loop-budget").AgentLoopMode;
-        modelCalls: number;
-        toolRounds: number;
-        calls: number;
-        continuationSegments: number;
-        noProgressCount: number;
-        stopReason: string;
-    };
 }>;
 export declare function planProjectMainTask(input: {
     project: string;
@@ -225,15 +227,6 @@ export declare function planProjectMainTask(input: {
     workItems: ProjectMainWorkItem[];
     createdAt: string;
 }>;
-export declare function answerAsProjectMainAgent(input: {
-    project: string;
-    projectSessionId: string;
-    userMessage: string;
-    mode: "conversation" | "project_analysis";
-    context?: string;
-    workflowDecision?: WorkflowDecision;
-    onDelta?: (delta: string) => void;
-}): Promise<string>;
 export declare function createProjectMainTask(input: {
     project: string;
     projectSessionId: string;

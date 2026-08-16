@@ -147,6 +147,15 @@ const messages = await loop.buildGlobalAgentModelMessages(run, {
 });
 const rendered = JSON.stringify(messages);
 
+const identityText = messages
+  .filter(message => message.role === "system" && message.contextBlockType !== "mcp")
+  .map(message => String(message.content || ""))
+  .join("\n");
+const systemDump = messages
+  .filter(message => message.role === "system")
+  .map(message => String(message.content || ""))
+  .join("\n");
+
 const checks = {
   globalMemoryIncluded: rendered.includes(globalMemorySentinel),
   provenGlobalTaskIncluded: rendered.includes(globalTaskSentinel),
@@ -158,6 +167,8 @@ const checks = {
   groupSessionIdentityExcluded: !rendered.includes(groupSessionId) && !/\bgcs_[a-z0-9_-]+\b/i.test(rendered),
   recoveredRawEvidenceWasActuallyTainted: JSON.stringify(run).includes(groupMemorySentinel) && JSON.stringify(run).includes(projectMemorySentinel),
   reasoningFactsProjectedWithoutSummary: !rendered.includes("legacy-hash") || !rendered.includes(groupMemorySentinel),
+  identityHasFourSections: /# 角色/.test(identityText) && /# 工具/.test(identityText) && /# 工作流/.test(identityText) && /# 写工作单/.test(identityText),
+  identityDropsToolSchemaDump: !identityText.includes("schema=") && !systemDump.includes("；schema="),
 };
 assert.equal(Object.values(checks).every(Boolean), true, JSON.stringify(checks, null, 2));
 

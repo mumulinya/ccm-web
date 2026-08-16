@@ -27,8 +27,9 @@ async function runProjectMainNativeQueryLoop(input) {
         exactSessionId: projectSessionId,
         signal: input.signal,
         nativeToolReference: true,
+        persistContext: { scope: "project", sessionId: projectSessionId },
         loopBudget,
-        planModeEnabled: (0, conversation_plan_mode_gate_1.isConversationPlanModeEnabled)("project", project, projectSessionId),
+        planModeEnabled: input.planModeEnabled ?? (0, conversation_plan_mode_gate_1.isConversationPlanModeEnabled)("project", project, projectSessionId),
         getTools: () => [...(0, native_query_loop_1.nativeControlToolDefinitions)(), ...(0, native_query_loop_1.catalogToNativeTools)(input.getToolContext())],
         isReadOnly: (call) => {
             if (call.name === "ccm_ask_user" || call.name === "ccm_present_plan")

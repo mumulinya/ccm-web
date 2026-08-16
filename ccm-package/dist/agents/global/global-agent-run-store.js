@@ -63,6 +63,7 @@ const reliability_ledger_1 = require("../../system/reliability-ledger");
 const reasoning_loop_1 = require("../reasoning-loop");
 const workspace_readonly_tools_1 = require("../../tools/workspace-readonly-tools");
 const context_source_tool_result_projection_1 = require("../../system/context-source-tool-result-projection");
+const tool_result_storage_1 = require("../../tools/tool-result-storage");
 exports.STORE_DIR = path.join(utils_1.CCM_DIR, "global-agent-runs");
 exports.STORE_FILE = path.join(exports.STORE_DIR, "runs.json");
 exports.STORE_BACKUP = `${exports.STORE_FILE}.bak`;
@@ -84,30 +85,24 @@ let runStoreCache = null;
 function invalidateGlobalAgentRunStoreCache() {
     runStoreCache = null;
 }
-function truncateStepObservation(step) {
+function truncateStepObservation(step, run) {
     if (!step || typeof step !== "object" || step.observation === undefined)
         return step;
     const persistedToolName = step?.tool?.name === "invoke_mcp"
         ? (step?.tool?.arguments?.tool_name || step?.tool?.arguments?.toolName || step?.tool?.name)
         : (step?.tool?.name || step?.tool);
     const persistedObservation = (0, context_source_tool_result_projection_1.projectContextSourceToolResultForPersistence)(persistedToolName, step.observation);
-    let serialized = "";
-    try {
-        serialized = typeof persistedObservation === "string" ? persistedObservation : JSON.stringify(persistedObservation);
-    }
-    catch {
-        serialized = String(step.observation);
-    }
-    if (serialized.length <= exports.MAX_OBSERVATION_CHARS)
-        return persistedObservation === step.observation ? step : { ...step, observation: persistedObservation };
-    return {
-        ...step,
-        observation: {
-            truncated: true,
-            preview: serialized.slice(0, exports.MAX_OBSERVATION_CHARS),
-            original_chars: serialized.length,
-        },
-    };
+    const sessionId = String(run?.session_id || run?.sessionId || "");
+    const toolCallId = String(step?.toolCallId || step?.tool_call_id || step?.tool?.signature || `step_${step?.index || "0"}`);
+    const persisted = (0, tool_result_storage_1.persistToolResultIfNeeded)({
+        toolName: String(persistedToolName || "tool"),
+        toolCallId,
+        payload: persistedObservation,
+        context: sessionId ? { scope: "global", sessionId } : null,
+    });
+    if (persisted === step.observation)
+        return step;
+    return { ...step, observation: persisted };
 }
 const ARCHIVED_RUN_BOUNDED_FIELDS = ["display_stream", "workchain", "final_report", "final_delivery_report", "reasoning_loop", "history"];
 const RUN_TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled", "canceled", "error", "timeout"]);
@@ -232,7 +227,7 @@ function normalizeRun(run) {
         total_cost_usd: Math.max(0, Number(run?.total_cost_usd ?? run?.totalCostUsd ?? run?.usage?.totalCostUsd ?? 0) || 0),
         deadline_at: run?.deadline_at || new Date(Date.now() + 10 * 60_000).toISOString(),
         max_steps: Math.max(1, Math.min(16, Number(run?.max_steps || 8))),
-        steps: Array.isArray(run?.steps) ? run.steps.slice(-32).map(truncateStepObservation) : [],
+        steps: Array.isArray(run?.steps) ? run.steps.slice(-32).map(step => truncateStepObservation(step, run)) : [],
         pending_tool: run?.pending_tool || null,
         approved_tool_signatures: Array.isArray(run?.approved_tool_signatures) ? run.approved_tool_signatures.slice(-20) : [],
         final_reply: String(run?.final_reply || ""),
