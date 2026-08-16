@@ -17,6 +17,7 @@ const conversation_plan_mode_gate_1 = require("../system/conversation-plan-mode-
 const main_agent_turn_1 = require("./main-agent-turn");
 const native_query_messages_1 = require("./native-query-messages");
 const group_presented_plan_1 = require("../modules/collaboration/group-presented-plan");
+const presented_plan_quality_1 = require("./presented-plan-quality");
 exports.NATIVE_CONTROL_TOOL_NAMES = ["ccm_ask_user", "ccm_present_plan", "ccm_dispatch"];
 const CONTROL_TOOL_SET = new Set(exports.NATIVE_CONTROL_TOOL_NAMES);
 function isNativeControlTool(name) {
@@ -296,6 +297,15 @@ function mergeNativeTurnParsed(previous, next) {
     }
     return merged;
 }
+function stampPresentedPlanQuality(parsed, repaired) {
+    if (!parsed?.plan || typeof parsed.plan !== "object")
+        return parsed;
+    const attached = (0, presented_plan_quality_1.attachPresentedPlanQuality)(parsed.plan, { repaired });
+    return { ...parsed, plan: attached.plan, planQuality: attached.quality };
+}
+function presentPlanControlCall(controlCalls) {
+    return (controlCalls || []).find(item => item.name === "ccm_present_plan") || null;
+}
 async function runJsonQueryLoop(input) {
     const budget = input.loopBudget || (0, agent_loop_budget_1.resolveAgentLoopBudget)(input.config);
     let messages = input.messages.slice();
@@ -366,6 +376,7 @@ async function runJsonQueryLoop(input) {
         if (noProgressCount >= budget.noProgressThreshold)
             throw new Error("JSON_QUERY_LOOP_NO_PROGRESS");
     }
+    parsed = stampPresentedPlanQuality(parsed, false);
     const decision = (0, main_agent_turn_1.normalizeMainAgentTurnDecision)({
         scope: input.scope,
         scopeId: input.scopeId,
@@ -416,6 +427,7 @@ async function runNativeQueryLoop(input) {
     let segmentStartedAt = Date.now();
     let stopReason = "model_completed";
     let usage = null;
+    let planRepairCount = 0;
     const isReadOnly = input.isReadOnly || ((call) => !isNativeControlTool(call.name) && call.name !== "invoke_skill" && call.name !== "tool_search");
     const applyTranscript = (next) => input.compactTranscript ? input.compactTranscript(next) : next;
     try {
@@ -490,6 +502,20 @@ async function runNativeQueryLoop(input) {
                         isReadOnly: (request) => request.name === "ccm_ask_user" || request.name === "ccm_present_plan",
                     }).parsed);
                 }
+                const planCall = presentPlanControlCall(controlCalls);
+                if (planCall && (0, presented_plan_quality_1.shouldRepairPresentedPlan)(parsed, planRepairCount > 0)) {
+                    planRepairCount += 1;
+                    const quality = (0, presented_plan_quality_1.evaluatePresentedPlanQuality)(parsed.plan);
+                    const repairResult = (0, presented_plan_quality_1.buildPresentedPlanQualityToolResult)(planCall.id, quality);
+                    const controlResults = controlCalls.map(item => item.name === "ccm_present_plan"
+                        ? repairResult
+                        : { callId: item.id, name: item.name, ok: true, output: { recorded: true, responseType: parsed.responseType } });
+                    toolResults.push(repairResult);
+                    messages = applyTranscript((0, native_query_messages_1.appendNativeTurnTranscript)(messages, turn, controlResults, family));
+                    toolRoundCount += 1;
+                    continue;
+                }
+                parsed = stampPresentedPlanQuality(parsed, planRepairCount > 0);
                 messages = applyTranscript((0, native_query_messages_1.appendNativeTurnTranscript)(messages, turn, controlCalls.map(item => ({
                     callId: item.id,
                     name: item.name,
@@ -566,10 +592,27 @@ async function runNativeQueryLoop(input) {
             toolResults.push(...executedRows);
             toolCallCount += executedRows.filter(row => row.name !== "loop_control").length;
             segmentToolCalls += executedRows.filter(row => row.name !== "loop_control").length;
-            messages = applyTranscript((0, native_query_messages_1.appendNativeTurnTranscript)(messages, turn, [
-                ...executedRows,
-                ...controlCalls.map(item => ({ callId: item.id, name: item.name, ok: true, output: { deferred: "control_after_tools" } })),
-            ], family));
+            const planCall = presentPlanControlCall(controlCalls);
+            const repairing = !!(planCall && (0, presented_plan_quality_1.shouldRepairPresentedPlan)({
+                responseType: "plan",
+                plan: planCall.arguments?.plan,
+            }, planRepairCount > 0));
+            let controlResults = controlCalls.map(item => ({
+                callId: item.id,
+                name: item.name,
+                ok: true,
+                output: { deferred: "control_after_tools" },
+            }));
+            if (repairing && planCall) {
+                planRepairCount += 1;
+                const quality = (0, presented_plan_quality_1.evaluatePresentedPlanQuality)(planCall.arguments?.plan);
+                const repairResult = (0, presented_plan_quality_1.buildPresentedPlanQualityToolResult)(planCall.id, quality);
+                toolResults.push(repairResult);
+                controlResults = controlCalls.map(item => item.name === "ccm_present_plan"
+                    ? repairResult
+                    : { callId: item.id, name: item.name, ok: true, output: { deferred: "control_after_tools" } });
+            }
+            messages = applyTranscript((0, native_query_messages_1.appendNativeTurnTranscript)(messages, turn, [...executedRows, ...controlResults], family));
             if (executedRows.some(row => row.ok === true))
                 noProgressCount = 0;
             else
@@ -578,10 +621,15 @@ async function runNativeQueryLoop(input) {
                 stopReason = "no_progress";
                 throw new Error(`${String(input.scope || "agent").toUpperCase()}_MAIN_TOOL_LOOP_NO_PROGRESS`);
             }
+            if (repairing) {
+                toolRoundCount += 1;
+                continue;
+            }
             if (controlCalls.length || input.shouldStopAfterTools?.(runnable, executedRows)) {
                 parsed = mergeNativeTurnParsed(parsed, mapNativeTurnToParsed(turn, controlCalls));
                 if (input.planModeEnabled)
                     parsed = (0, conversation_plan_mode_gate_1.holdConversationPlanModeParsed)(parsed);
+                parsed = stampPresentedPlanQuality(parsed, planRepairCount > 0);
                 stopReason = "model_completed";
                 break;
             }
@@ -614,6 +662,7 @@ async function runNativeQueryLoop(input) {
         }
         throw error;
     }
+    parsed = stampPresentedPlanQuality(parsed, planRepairCount > 0);
     const decision = (0, main_agent_turn_1.normalizeMainAgentTurnDecision)({
         scope: input.scope,
         scopeId: input.scopeId,
@@ -738,6 +787,9 @@ async function runNativeQueryLoopSelfTest() {
         flushedUnstreamedTurnText: flushed.join("") === "我先看 README。",
         emptyFollowupKeepsFirstTurnText: true,
         keepClarifyAcrossTextFollowup: true,
+        planQualityRepairsOnce: true,
+        planQualityAcceptsDegradedAfterRepair: true,
+        planQualityPassesFirstShot: true,
     };
     const keptTurns = [
         {
@@ -770,6 +822,59 @@ async function runNativeQueryLoopSelfTest() {
         && mergeNativeTurnParsed({ reply: "引言", responseType: "reply" }, { reply: "", responseType: "reply" }).reply === "引言";
     const keptClarify = mergeNativeTurnParsed({ responseType: "clarify", questionForUser: "核销方式？", dispatchPolicy: { action: "ask_user" }, workflowDecision: { structuredClarificationQuestions: [{ label: "核销方式" }] }, reply: "核销方式？" }, { responseType: "reply", reply: "我先确认 3 个关键范围" });
     checks.keepClarifyAcrossTextFollowup = keptClarify.responseType === "clarify" && keptClarify.dispatchPolicy?.action === "ask_user";
+    const badPlan = { title: "短", goal: "太短", steps: [{ title: "占住资源" }] };
+    const goodPlan = {
+        title: "预约履约",
+        goal: "到店履约时先占住资源，核销后改状态，超时从下单时钟释放并挂到现有预约单；没有现成域就按 greenfield 新建履约对象，验收以可演示切片为准。",
+        steps: [{ title: "占住资源" }, { title: "核销改状态" }, { title: "超时释放" }],
+        exclusions: ["线下手工改库存"],
+    };
+    const presentTurn = (id, plan) => ({
+        text: "计划已经整理完成。",
+        toolCalls: [{ id, name: "ccm_present_plan", arguments: { reply: "请看计划", plan }, argumentsChecksum: id }],
+        toolReferences: [],
+        stopReason: "tool_calls",
+        usage: { inputTokens: 1, outputTokens: 2, totalTokens: 3, reported: true },
+    });
+    const loopInput = {
+        config: { providerNativeToolsMode: "auto", forceNativeQueryLoop: true },
+        messages: [{ role: "user", content: "做计划" }],
+        tools: [],
+        scope: "group",
+        scopeId: "g1",
+        exactSessionId: "gcs_plan_quality",
+        executeTools: async () => [],
+    };
+    let repairIndex = 0;
+    const repaired = await runNativeQueryLoop({
+        ...loopInput,
+        callTurn: async () => [presentTurn("p1", badPlan), presentTurn("p2", goodPlan)][Math.min(repairIndex++, 1)],
+    });
+    checks.planQualityRepairsOnce = repaired.modelCallCount === 2
+        && repaired.toolResults.some(row => row.error === "PRESENTED_PLAN_QUALITY")
+        && repaired.parsed?.plan?.steps?.length === 3
+        && repaired.parsed?.planQuality?.ok === true
+        && repaired.parsed?.planQuality?.repaired === true;
+    let degradeIndex = 0;
+    const degraded = await runNativeQueryLoop({
+        ...loopInput,
+        exactSessionId: "gcs_plan_degraded",
+        callTurn: async () => presentTurn(degradeIndex++ === 0 ? "d1" : "d2", badPlan),
+    });
+    checks.planQualityAcceptsDegradedAfterRepair = degraded.modelCallCount === 2
+        && degraded.toolResults.some(row => row.error === "PRESENTED_PLAN_QUALITY")
+        && degraded.parsed?.planQuality?.ok === false
+        && degraded.parsed?.planQuality?.repaired === true
+        && Array.isArray(degraded.parsed?.plan?.steps);
+    const passed = await runNativeQueryLoop({
+        ...loopInput,
+        exactSessionId: "gcs_plan_ok",
+        callTurn: async () => presentTurn("ok1", goodPlan),
+    });
+    checks.planQualityPassesFirstShot = passed.modelCallCount === 1
+        && passed.parsed?.planQuality?.ok === true
+        && passed.parsed?.planQuality?.repaired !== true
+        && !passed.toolResults.some(row => row.error === "PRESENTED_PLAN_QUALITY");
     return { pass: Object.values(checks).every(Boolean), checks, result };
 }
 //# sourceMappingURL=native-query-loop.js.map

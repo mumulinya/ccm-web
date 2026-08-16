@@ -7,6 +7,7 @@ export declare const CCM_ROLE_SKILL_NAMES: {
     readonly evidence: "ccm-acceptance-evidence";
     readonly requirementIntake: "ccm-requirement-intake";
     readonly taskDecomposition: "ccm-task-decomposition";
+    readonly implementationPlanAuthoring: "ccm-implementation-plan-authoring";
     readonly deliveryReviewRework: "ccm-delivery-review-rework";
     readonly projectSourceResearch: "ccm-project-source-research";
     readonly documentDrivenDelivery: "ccm-document-driven-delivery";

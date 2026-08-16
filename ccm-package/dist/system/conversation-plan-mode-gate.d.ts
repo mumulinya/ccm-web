@@ -1,3 +1,4 @@
+export { conversationPlanModeSupported } from "./slash-command-session-state";
 export type ConversationPlanScope = "global" | "project" | "group";
 export declare function isConversationPlanModeEnabled(scope: ConversationPlanScope, scopeId: string, exactSessionId: string): boolean;
 export declare function conversationPlanModeWouldCauseSideEffect(input: {
@@ -73,5 +74,8 @@ export declare function runConversationPlanModeGateSelfTest(): {
         readToolOpen: boolean;
         groupSessionWins: boolean;
         projectIdentityResolved: boolean;
+        globalHasNoConversationPlanMode: boolean;
+        groupKeepsConversationPlanMode: boolean;
+        projectKeepsConversationPlanMode: boolean;
     };
 };

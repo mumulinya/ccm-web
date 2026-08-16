@@ -1,6 +1,11 @@
 import { notifyConversationPlanModeChanged } from './conversationPlanMode.js'
 
 export const PRESENTED_PLAN_CONFIRM_EXECUTE_LABEL = '确认并执行'
+export const GLOBAL_CONVERSATION_PLAN_MODE_UNSUPPORTED = '全局会话不支持 Plan 模式。全局 Agent 不读取项目代码；实现计划请到群聊或项目主 Agent 会话。'
+
+export function conversationPlanModeSupported(scope) {
+  return scope === 'project' || scope === 'group'
+}
 
 export function presentedPlanFromMessage(msg) {
   const plan = msg?.presentedPlan || msg?.presented_plan
@@ -9,7 +14,7 @@ export function presentedPlanFromMessage(msg) {
   return plan
 }
 
-export function isLatestUnansweredPresentedPlan(messages, msg, hasPlan) {
+export function isLatestUnansweredPresentedPlan(messages, msg, hasPlan, messageIndex) {
   const list = Array.isArray(messages) ? messages : []
   const check = typeof hasPlan === 'function'
     ? (item, index) => !!hasPlan(item, index)
@@ -18,7 +23,11 @@ export function isLatestUnansweredPresentedPlan(messages, msg, hasPlan) {
   for (let i = 0; i < list.length; i += 1) {
     if (check(list[i], i)) lastIndex = i
   }
-  if (lastIndex < 0 || list[lastIndex] !== msg) return false
+  if (lastIndex < 0) return false
+  const resolvedIndex = Number.isInteger(messageIndex) && messageIndex >= 0
+    ? messageIndex
+    : list.findIndex((item) => item === msg || (!!msg?.id && String(item?.id || '') === String(msg.id)))
+  if (lastIndex !== resolvedIndex) return false
   for (let i = lastIndex + 1; i < list.length; i += 1) {
     if (String(list[i]?.role || '').toLowerCase() === 'user') return false
   }

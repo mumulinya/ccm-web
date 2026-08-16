@@ -1,0 +1,4 @@
+interface:
+  display_name: "CCM Implementation Plan Authoring"
+  short_description: "Author a confirmable plan card with operational rules and demoable slices"
+  default_prompt: "Use $ccm-implementation-plan-authoring to present a complete implementation plan card before dispatch."

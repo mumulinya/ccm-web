@@ -1,5 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.conversationPlanModeSupported = void 0;
 exports.isConversationPlanModeEnabled = isConversationPlanModeEnabled;
 exports.conversationPlanModeWouldCauseSideEffect = conversationPlanModeWouldCauseSideEffect;
 exports.conversationPlanModeHoldsParsed = conversationPlanModeHoldsParsed;
@@ -10,10 +11,14 @@ exports.conversationPlanModeIdentityFromTask = conversationPlanModeIdentityFromT
 exports.exitConversationPlanModeForTask = exitConversationPlanModeForTask;
 exports.runConversationPlanModeGateSelfTest = runConversationPlanModeGateSelfTest;
 const slash_command_session_state_1 = require("./slash-command-session-state");
+var slash_command_session_state_2 = require("./slash-command-session-state");
+Object.defineProperty(exports, "conversationPlanModeSupported", { enumerable: true, get: function () { return slash_command_session_state_2.conversationPlanModeSupported; } });
 const WRITE_RESPONSE_TYPES = new Set(["dispatch", "execute"]);
 const PLAN_MODE_BLOCKED_ERROR = "CONVERSATION_PLAN_MODE_BLOCKED";
 const PLAN_MODE_HOLD_REASON = "当前精确会话处于 Plan Mode，已由服务端阻止任务派发和写操作";
 function isConversationPlanModeEnabled(scope, scopeId, exactSessionId) {
+    if (!(0, slash_command_session_state_1.conversationPlanModeSupported)(scope))
+        return false;
     return (0, slash_command_session_state_1.readSlashCommandSessionState)(scope, scopeId, exactSessionId).planMode?.enabled === true;
 }
 function conversationPlanModeWouldCauseSideEffect(input) {
@@ -176,6 +181,9 @@ function runConversationPlanModeGateSelfTest() {
         readToolOpen: readAllowed === false,
         groupSessionWins: groupIdentity?.scope === "group" && groupIdentity.exactSessionId === "gcs_1",
         projectIdentityResolved: projectIdentity?.scope === "project" && projectIdentity.scopeId === "api",
+        globalHasNoConversationPlanMode: (0, slash_command_session_state_1.conversationPlanModeSupported)("global") === false,
+        groupKeepsConversationPlanMode: (0, slash_command_session_state_1.conversationPlanModeSupported)("group") === true,
+        projectKeepsConversationPlanMode: (0, slash_command_session_state_1.conversationPlanModeSupported)("project") === true,
     };
     return { pass: Object.values(checks).every(Boolean), checks };
 }

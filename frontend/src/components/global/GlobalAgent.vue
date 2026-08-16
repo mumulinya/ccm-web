@@ -997,7 +997,8 @@ const {
 
 const {
   confirmBusy: presentedPlanConfirmBusy,
-  canConfirmOnTranscript,
+  planForMessage,
+  canConfirmOnPlanCard,
   confirmExecute: confirmPresentedPlanExecute,
 } = usePresentedPlanConfirmExecute({
   scope: 'global',
@@ -1005,7 +1006,7 @@ const {
   exactSessionId: currentSessionId,
   messages,
   executionEvents: globalAgentExecutionEvents,
-  turnBusy: globalTurnBusy,
+  turnBusy: isSending,
   send: (options) => sendMessage(options),
 })
 
@@ -1556,14 +1557,15 @@ const handleGitCommitCardSubmit = async (msg) => {
         :format-size="formatSize"
         :pending-progress-count="pendingGlobalProgressCount"
         :jump-to-latest-progress="jumpToLatestGlobalProgress"
-        :can-confirm-presented-plan="canConfirmOnTranscript"
+        :can-confirm-presented-plan="canConfirmOnPlanCard"
+        :presented-plan-for-message="planForMessage"
         :presented-plan-confirm-busy="presentedPlanConfirmBusy"
         @edit-message="editGlobalUserMessage"
         @rewind-message="rewindGlobalMessage"
         @open-file-change="openSingleFileChange"
         @open-file-changes="openCodeChangeDrawer($event, { title: '全局任务文件改动' })"
         @clarify-reply="submitInlineGlobalClarification"
-        @confirm-presented-plan="(msg, plan) => confirmPresentedPlanExecute(msg, plan)"
+        @confirm-presented-plan="(msg, plan, index) => confirmPresentedPlanExecute(msg, plan, index)"
       />
 
       <div class="chat-footer">

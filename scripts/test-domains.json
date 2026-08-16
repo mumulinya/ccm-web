@@ -106,6 +106,8 @@
         "group-coordinator-visible-reply-selftest.mjs",
         "group-prior-plan-context-selftest.mjs",
         "group-presented-plan-selftest.mjs",
+        "presented-plan-quality-selftest.mjs",
+        "conversation-plan-mode-gate-selftest.mjs",
         "presented-plan-confirm-execute-selftest.mjs",
         "group-direct-reply-fast-path-selftest.mjs",
         "agent-tool-inheritance-selftest.mjs",

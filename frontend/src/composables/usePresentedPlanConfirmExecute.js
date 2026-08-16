@@ -3,7 +3,9 @@ import { toast } from '../utils/toast.js'
 import { executionEventsForMessage } from '../utils/agentExecutionEvents.js'
 import {
   PRESENTED_PLAN_CONFIRM_EXECUTE_LABEL,
+  GLOBAL_CONVERSATION_PLAN_MODE_UNSUPPORTED,
   buildPresentedPlanConfirmExecuteMessage,
+  conversationPlanModeSupported,
   exitConversationPlanMode,
   isLatestUnansweredPresentedPlan,
   presentedPlanFromMessage,
@@ -32,7 +34,7 @@ export function usePresentedPlanConfirmExecute(options = {}) {
 
   const load = async () => {
     const id = identity()
-    if (!id.exactSessionId) {
+    if (!id.exactSessionId || !conversationPlanModeSupported(id.scope)) {
       planModeEnabled.value = false
       return null
     }
@@ -58,6 +60,10 @@ export function usePresentedPlanConfirmExecute(options = {}) {
     if (detail.scope && detail.scope !== id.scope) return
     if (detail.scopeId && String(detail.scopeId || '') !== String(id.scopeId || '')) return
     if (detail.exactSessionId && String(detail.exactSessionId || '') !== String(id.exactSessionId || '')) return
+    if (!conversationPlanModeSupported(id.scope)) {
+      planModeEnabled.value = false
+      return
+    }
     if (detail.enabled === false || detail.mode === 'agent') {
       planModeEnabled.value = false
       return
@@ -92,11 +98,13 @@ export function usePresentedPlanConfirmExecute(options = {}) {
     ))
   }
 
-  const canConfirmExecute = (msg) => {
-    if (!planModeEnabled.value || confirmBusy.value) return false
+  const canConfirmExecute = (msg, index) => {
+    if (!conversationPlanModeSupported(identity().scope)) return false
+    if (confirmBusy.value) return false
     if (resolve(options.turnBusy)) return false
     if (msg?.streaming) return false
-    return isLatestUnansweredPresentedPlan(resolve(options.messages) || [], msg, messageHasPlan)
+    const messages = resolve(options.messages) || []
+    return isLatestUnansweredPresentedPlan(messages, msg, messageHasPlan, index)
   }
 
   const planForMessage = (msg, index) => {
@@ -115,7 +123,7 @@ export function usePresentedPlanConfirmExecute(options = {}) {
     return steps.length ? plan : null
   }
 
-  const canConfirmOnPlanCard = (msg, index) => canConfirmExecute(msg) && !!planForMessage(msg, index)
+  const canConfirmOnPlanCard = (msg, index) => canConfirmExecute(msg, index) && !!planForMessage(msg, index)
 
   const confirmExecute = async (msg, planOverride, index) => {
     const plan = usablePlan(planOverride) || planForMessage(msg, index)
@@ -123,6 +131,10 @@ export function usePresentedPlanConfirmExecute(options = {}) {
     const id = identity()
     if (!id.exactSessionId) {
       toast.error('当前会话尚未创建')
+      return
+    }
+    if (!conversationPlanModeSupported(id.scope)) {
+      toast.error(GLOBAL_CONVERSATION_PLAN_MODE_UNSUPPORTED)
       return
     }
     confirmBusy.value = true

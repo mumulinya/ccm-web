@@ -187,6 +187,13 @@ function sanitizeUserVisibleRequirementPlan(value) {
         createdAt,
         updatedAt,
         contentStored: false,
+        ...(value.quality && typeof value.quality === "object" ? {
+            quality: {
+                ok: value.quality.ok === true,
+                repaired: value.quality.repaired === true,
+                issues: uniqueStrings(value.quality.issues, 12).map(item => compactText(item, 240)),
+            },
+        } : {}),
     };
     return { ...projected, planChecksum: hash(projected) };
 }

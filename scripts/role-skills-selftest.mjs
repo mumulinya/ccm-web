@@ -217,6 +217,7 @@ const nativePromptChecks = {
 assert.match(nativePromptChecks.global.prompt, /Skill:ccm-global-mission-lead/);
 assert.match(nativePromptChecks.global.prompt, /Skill:ccm-incident-diagnosis/);
 assert.match(nativePromptChecks.groupPlanning.prompt, /Skill:ccm-task-decomposition/);
+assert.match(nativePromptChecks.groupPlanning.prompt, /Skill:ccm-implementation-plan-authoring/);
 assert.match(nativePromptChecks.groupReview.prompt, /Skill:ccm-delivery-review-rework/);
 assert.match(nativePromptChecks.testVisual.prompt, /Skill:ccm-frontend-visual-qa/);
 assert.match(nativePromptChecks.groupBusinessPlanning.prompt, /Skill:ccm-business-rule-modeling/);

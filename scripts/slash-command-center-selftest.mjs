@@ -66,6 +66,7 @@ for (const name of ['doctor', 'agent-health', 'cron', 'soak', 'quality', 'shadow
 for (const name of ['diff', 'git-status', 'history', 'commit']) assert.deepEqual(snapshot.commands.find(command => command.name === name)?.scopes, ['project'], `/${name} 必须只在项目会话可用`)
 for (const name of ['agents', 'permissions', 'model', 'hooks', 'config', 'branch']) assert.deepEqual(snapshot.commands.find(command => command.name === name)?.scopes, ['global', 'project', 'group'], `/${name} 必须在三类会话可用`)
 assert.deepEqual(snapshot.commands.find(command => command.name === 'forget')?.scopes, ['group'], '/forget 必须只在群聊会话可用')
+assert.deepEqual(snapshot.commands.find(command => command.name === 'plan')?.scopes, ['project', 'group'], '/plan 只在群聊和项目会话可用')
 assert.equal(builtin.checks.scopePolicyEnforced, true, '后端命令作用域矩阵必须通过')
 assert.equal(mcpCommand.action.clientAction, 'mcp_manager', '/mcp 必须进入当前作用域管理面板')
 assert.match(skillsCommand.action.endpointByScope.project, /scope=project&project=\$PROJECT/, '/skills 必须读取当前项目授权')

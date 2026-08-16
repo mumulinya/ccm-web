@@ -22,6 +22,7 @@ export interface RoleSkillSelectionOptions {
         actionRequired?: boolean;
         selectedSkills?: string[];
     } | null;
+    planAuthoring?: boolean;
 }
 export declare function ensureRoleSkillsInstalled(options?: {
     force?: boolean;
@@ -48,6 +49,7 @@ export declare function runRoleSkillSelectionSelfTest(): {
         groupGetsCoordinatorAndDecomposition: boolean;
         groupReviewGetsReviewAndReceipt: boolean;
         contextualExecutionRequiresModelDecision: boolean;
+        planAuthoringOnlyLoadsPlanSkill: boolean;
         projectGetsSourceReceiptAndMatchedWorkflows: boolean;
         incidentTaskGetsDiagnosis: boolean;
         releaseTaskGetsReadiness: boolean;
@@ -68,6 +70,8 @@ export declare function runRoleSkillSelectionSelfTest(): {
         groupWork: CcmInternalSkillName[];
         groupReview: CcmInternalSkillName[];
         contextualGroupWork: CcmInternalSkillName[];
+        planAuthoringOnly: CcmInternalSkillName[];
+        planAuthoringProjectOnly: CcmInternalSkillName[];
         projectWork: CcmInternalSkillName[];
         incidentWork: CcmInternalSkillName[];
         releaseWork: CcmInternalSkillName[];

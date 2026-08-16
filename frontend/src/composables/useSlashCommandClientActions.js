@@ -159,6 +159,7 @@ export function createSlashCommandClientActions(options = {}) {
     }
 
     if (action === 'plan_mode') {
+      if (identity.scope === 'global') throw new Error('全局会话不支持 Plan 模式。全局 Agent 不读取项目代码；实现计划请到群聊或项目主 Agent 会话。')
       const normalized = args.toLowerCase()
       const isExit = ['exit', 'off', 'disable', '退出'].includes(normalized)
       const isRead = !args || ['status', 'show', '查看'].includes(normalized)

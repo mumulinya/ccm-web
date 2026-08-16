@@ -11,6 +11,7 @@ import { usePermissionApprovals } from '../../composables/usePermissionApprovals
 import { AlertCircle, CheckCircle2, MessageSquareText, Paperclip, Plus } from '@lucide/vue'
 import GlobalAgentFeishuBindingModal from '../global/GlobalAgentFeishuBindingModal.vue'
 import AgentExecutionTranscript from '../common/AgentExecutionTranscript.vue'
+import PresentedPlanCard from '../common/PresentedPlanCard.vue'
 import ActiveTaskPlanDock from '../common/ActiveTaskPlanDock.vue'
 import PrePlanClarificationDock from '../common/PrePlanClarificationDock.vue'
 import ConversationAsideDock from '../common/ConversationAsideDock.vue'
@@ -237,7 +238,8 @@ const {
 
 const {
   confirmBusy: presentedPlanConfirmBusy,
-  canConfirmOnTranscript,
+  planForMessage,
+  canConfirmOnPlanCard,
   confirmExecute: confirmPresentedPlanExecute,
 } = usePresentedPlanConfirmExecute({
   scope: 'project',
@@ -245,7 +247,7 @@ const {
   exactSessionId: currentSession,
   messages,
   executionEvents: projectAgentExecutionEvents,
-  turnBusy: projectTurnBusy,
+  turnBusy: isStreaming,
   send: (options) => sendMessage(options),
 })
 </script>

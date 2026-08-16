@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.PRESENTED_PLAN_DISPATCH_HANDOFF_GUIDANCE = exports.PRESENTED_PLAN_SHAPE_GUIDANCE = exports.COORDINATOR_PRESENTED_PLAN_HEADLINE = void 0;
+exports.PRESENTED_PLAN_DISPATCH_HANDOFF_GUIDANCE = exports.PRESENTED_PLAN_SHAPE_GUIDANCE = exports.PRESENTED_PLAN_AUTHORING_SKILL = exports.COORDINATOR_PRESENTED_PLAN_HEADLINE = void 0;
 exports.presentedPlanSource = presentedPlanSource;
 exports.presentedPlanSteps = presentedPlanSteps;
 exports.hasPresentedGroupPlan = hasPresentedGroupPlan;
@@ -18,9 +18,11 @@ exports.mergePresentedPlanAcceptanceCriteria = mergePresentedPlanAcceptanceCrite
 exports.publishGroupPresentedRequirementPlan = publishGroupPresentedRequirementPlan;
 exports.runGroupPresentedPlanSelfTest = runGroupPresentedPlanSelfTest;
 const user_visible_agent_events_1 = require("../../system/user-visible-agent-events");
+const presented_plan_quality_1 = require("../../agents/presented-plan-quality");
 exports.COORDINATOR_PRESENTED_PLAN_HEADLINE = "计划已经整理完成，请查看下面的待办。";
-exports.PRESENTED_PLAN_SHAPE_GUIDANCE = "计划稿形状：title 用短名；goal 或 overview 写关键决策和边界，必须钉死运转规则（状态怎么走、资源何时占用/释放、超时从哪个时钟算、如何挂到现有对象；没有现成域就写明 greenfield）。steps 只保留 3–8 条一行待办（id+title），按能单独演示/验收的交付切片（例如占住资源、核销改状态、超时释放），禁止按设计/接口/前端/后端/联调分层，不要默认 P0–P4，不要每步再写要做/结果。不要把 TestAgent 写成待办。会改整张计划的分叉才调用 ccm_ask_user。只读核实：第一次为当前需求出实现计划时，允许最小只读核实以点名缝在哪（现有模块/表或明确无现成域）。展开、重述或整理已有计划稿时不要再读项目文件。Plan Mode 下鼓励只读探索，本轮必须以 ccm_present_plan 出卡，不得派发。";
-exports.PRESENTED_PLAN_DISPATCH_HANDOFF_GUIDANCE = "已确认计划卡交接：用户已确认计划卡后，ccm_dispatch 必须覆盖卡片每条切片的验收口径；一项目可覆盖多条切片，不要把卡片重写成前端/后端/测试分工。architecturePlan.dependencySteps 可以按项目/依赖排期，但每条 targets[].task 要写明落实了哪些已确认切片。不要把 TestAgent 写成卡片待办或 targets[]；独立验收沿用卡片 overview 与 steps 作为口径。";
+exports.PRESENTED_PLAN_AUTHORING_SKILL = "ccm-implementation-plan-authoring";
+exports.PRESENTED_PLAN_SHAPE_GUIDANCE = "计划稿形状见 Skill:ccm-implementation-plan-authoring：title 短名；goal 或 overview 钉死运转规则；steps 用一行待办（可演示交付切片），条数按需求来；禁止按设计/接口/前端/后端分层，不要默认 P0–P4。不要把 TestAgent 写成待办。Plan Mode 必须以 ccm_present_plan 出卡，不得派发。";
+exports.PRESENTED_PLAN_DISPATCH_HANDOFF_GUIDANCE = "已确认计划卡交接见 Skill:ccm-implementation-plan-authoring：ccm_dispatch 必须覆盖卡片每条切片的验收口径；不要把卡片重写成前端/后端/测试分工；targets[].task 要写明落实了哪些已确认切片；不要把 TestAgent 写成卡片待办或 targets[]。";
 function compactText(value, max = 400) {
     return String(value || "").replace(/\s+/g, " ").trim().slice(0, max);
 }
@@ -244,21 +246,23 @@ function publishGroupPresentedRequirementPlan(input) {
     });
     if (!plan)
         return null;
+    const repaired = input.parsed?.planQuality?.repaired === true || input.parsed?.plan?.quality?.repaired === true;
+    const published = (0, presented_plan_quality_1.attachPresentedPlanQuality)(plan, { repaired }).plan;
     if (input.skip)
         return null;
     if (!input.groupId || !input.groupSessionId)
-        return plan;
+        return published;
     (0, user_visible_agent_events_1.appendUserVisibleRequirementPlan)({
-        eventId: `group-turn:${plan.planId}:requirement-plan:${plan.revision}:presented`,
+        eventId: `group-turn:${published.planId}:requirement-plan:${published.revision}:presented`,
         scope: "group",
         scopeId: String(input.groupId),
         exactSessionId: String(input.groupSessionId),
         ...(String(input.anchorMessageId || "").trim() ? { anchorMessageId: String(input.anchorMessageId).trim() } : {}),
         ...(String(input.turnId || "").trim() ? { turnId: String(input.turnId).trim() } : {}),
         generation: Math.max(0, Number(input.generation || 0)),
-        plan,
+        plan: published,
     });
-    return plan;
+    return published;
 }
 function runGroupPresentedPlanSelfTest() {
     const parsed = {
@@ -335,25 +339,24 @@ function runGroupPresentedPlanSelfTest() {
         dropsStepProject: layered?.steps?.[0]?.title === "占住资源"
             && layered?.steps?.[0]?.project == null
             && layered?.steps?.[0]?.dependsOn == null,
-        shapeHasDemoSlice: /交付切片/.test(exports.PRESENTED_PLAN_SHAPE_GUIDANCE) && /运转规则/.test(exports.PRESENTED_PLAN_SHAPE_GUIDANCE),
-        shapeHasPositiveExample: /占住资源/.test(exports.PRESENTED_PLAN_SHAPE_GUIDANCE)
-            && /核销改状态/.test(exports.PRESENTED_PLAN_SHAPE_GUIDANCE)
-            && /超时释放/.test(exports.PRESENTED_PLAN_SHAPE_GUIDANCE),
-        shapeTestAgentNotTodo: /不要把 TestAgent 写成待办/.test(exports.PRESENTED_PLAN_SHAPE_GUIDANCE),
-        shapeHasFirstRead: /第一次为当前需求出实现计划/.test(exports.PRESENTED_PLAN_SHAPE_GUIDANCE) && /展开、重述或整理已有计划稿/.test(exports.PRESENTED_PLAN_SHAPE_GUIDANCE),
-        shapePlanModeMustPresent: /必须以 ccm_present_plan 出卡/.test(exports.PRESENTED_PLAN_SHAPE_GUIDANCE) && /不得派发/.test(exports.PRESENTED_PLAN_SHAPE_GUIDANCE),
-        shapeKeepsOneLineTodo: /一行待办/.test(exports.PRESENTED_PLAN_SHAPE_GUIDANCE) && /不要默认 P0–P4/.test(exports.PRESENTED_PLAN_SHAPE_GUIDANCE) && /不要每步再写要做\/结果/.test(exports.PRESENTED_PLAN_SHAPE_GUIDANCE),
-        handoffCoversSlices: /必须覆盖卡片每条切片的验收口径/.test(exports.PRESENTED_PLAN_DISPATCH_HANDOFF_GUIDANCE)
-            && /不要把卡片重写成前端\/后端\/测试分工/.test(exports.PRESENTED_PLAN_DISPATCH_HANDOFF_GUIDANCE),
-        handoffTaskMapsSlices: /dependencySteps 可以按项目\/依赖排期/.test(exports.PRESENTED_PLAN_DISPATCH_HANDOFF_GUIDANCE)
-            && /targets\[\]\.task 要写明落实了哪些已确认切片/.test(exports.PRESENTED_PLAN_DISPATCH_HANDOFF_GUIDANCE),
-        handoffTestAgentNotTarget: /不要把 TestAgent 写成卡片待办或 targets\[\]/.test(exports.PRESENTED_PLAN_DISPATCH_HANDOFF_GUIDANCE)
-            && /独立验收沿用卡片 overview 与 steps/.test(exports.PRESENTED_PLAN_DISPATCH_HANDOFF_GUIDANCE),
+        shapePointsToSkill: /Skill:ccm-implementation-plan-authoring/.test(exports.PRESENTED_PLAN_SHAPE_GUIDANCE)
+            && /ccm_present_plan 出卡/.test(exports.PRESENTED_PLAN_SHAPE_GUIDANCE)
+            && /不得派发/.test(exports.PRESENTED_PLAN_SHAPE_GUIDANCE)
+            && /一行待办/.test(exports.PRESENTED_PLAN_SHAPE_GUIDANCE)
+            && /不要默认 P0–P4/.test(exports.PRESENTED_PLAN_SHAPE_GUIDANCE)
+            && /不要把 TestAgent 写成待办/.test(exports.PRESENTED_PLAN_SHAPE_GUIDANCE),
+        handoffPointsToSkill: /Skill:ccm-implementation-plan-authoring/.test(exports.PRESENTED_PLAN_DISPATCH_HANDOFF_GUIDANCE)
+            && /必须覆盖卡片每条切片的验收口径/.test(exports.PRESENTED_PLAN_DISPATCH_HANDOFF_GUIDANCE)
+            && /不要把卡片重写成前端\/后端\/测试分工/.test(exports.PRESENTED_PLAN_DISPATCH_HANDOFF_GUIDANCE)
+            && /targets\[\]\.task 要写明落实了哪些已确认切片/.test(exports.PRESENTED_PLAN_DISPATCH_HANDOFF_GUIDANCE)
+            && /不要把 TestAgent 写成卡片待办或 targets\[\]/.test(exports.PRESENTED_PLAN_DISPATCH_HANDOFF_GUIDANCE),
         appendsSliceContract: contract.includes("已确认切片") && contract.includes("占住资源")
             && appendConfirmedPlanSliceContract(contract, layered) === contract,
         mergesAcceptance: merged[0] === "占住后超时从下单时钟释放。" && merged.includes("占住资源") && merged.includes("命令 npm test 必须成功执行。"),
         readsLatestMessagePlan: fromMessages?.steps?.[0]?.title === "占住资源",
         attachLeavesEmptyTargets: attachConfirmedPlanSlicesToDispatchTargets([], layered).length === 0,
+        publishedHasQuality: typeof publishGroupPresentedRequirementPlan({ parsed, turnId: "turn-1", goalFallback: "原生循环" })?.quality?.ok === "boolean",
+        shapeDroppedLongEssay: /没有现成域就写明 greenfield/.test(exports.PRESENTED_PLAN_SHAPE_GUIDANCE) === false,
     };
     return { pass: Object.values(checks).every(Boolean), checks };
 }

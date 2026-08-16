@@ -1190,6 +1190,7 @@ async function planProjectMainTask(input) {
         phase: "planning",
         selectedSkillNames: decision.selectedSkills,
         modelDecision: decision,
+        planAuthoring: (0, conversation_plan_mode_gate_1.isConversationPlanModeEnabled)("project", project, projectSessionId),
     });
     const hydrationContext = [
         projectMainExactSessionContext(project, projectSessionId, input.userMessage),
@@ -1358,6 +1359,7 @@ async function answerAsProjectMainAgent(input) {
         phase: "planning",
         selectedSkillNames: input.workflowDecision?.selectedSkills || [],
         modelDecision: input.workflowDecision || null,
+        planAuthoring: (0, conversation_plan_mode_gate_1.isConversationPlanModeEnabled)("project", input.project, input.projectSessionId),
     });
     let toolEvidence = "";
     let sourceEvidence = "";

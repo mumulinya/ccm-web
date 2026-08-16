@@ -133,7 +133,7 @@ function consumeConfirmationReceipt(req: any, token: unknown, scope: SlashComman
 const COMMANDS: SlashCommand[] = [
   { name: "help", aliases: ["commands", "?", "帮助"], description: "显示当前入口可用命令", category: "基础", icon: "⌘", scopes: ["global", "project", "group"], risk: "safe", source: "builtin", executionType: "local-jsx", displayMode: "overlay", compatibility: "cc_exact", action: { type: "client", clientAction: "command_inventory" } },
   { name: "status", aliases: ["状态"], description: "显示版本、模型、Provider、工具和当前作用域状态", category: "基础", icon: "◉", scopes: ["global", "project", "group"], risk: "safe", source: "builtin", executionType: "local-jsx", displayMode: "overlay", compatibility: "cc_equivalent", action: { type: "client", clientAction: "status" } },
-  { name: "plan", aliases: ["规划"], description: "进入、查看或退出当前会话 Plan Mode", category: "开发", icon: "◇", scopes: ["global", "project", "group"], argumentHint: "[open|exit|目标]", risk: "safe", source: "builtin", executionType: "local-jsx", displayMode: "overlay", compatibility: "cc_exact", action: { type: "client", clientAction: "plan_mode" } },
+  { name: "plan", aliases: ["规划"], description: "进入、查看或退出当前会话 Plan Mode", category: "开发", icon: "◇", scopes: ["project", "group"], argumentHint: "[open|exit|目标]", risk: "safe", source: "builtin", executionType: "local-jsx", displayMode: "overlay", compatibility: "cc_exact", action: { type: "client", clientAction: "plan_mode" } },
   { name: "review", aliases: ["审查"], description: "审查代码或当前交付，给出证据和风险", category: "开发", icon: "⌕", scopes: ["project", "group"], argumentHint: "[文件或范围]", risk: "safe", source: "builtin", action: { type: "prompt", prompt: "请对当前项目交付做严格审查，范围：$ARGS。请给出证据、风险等级和可操作建议，不要直接修改。" } },
   { name: "verify", aliases: ["test", "验证"], description: "运行适合当前项目的真实验证并汇报证据", category: "开发", icon: "✓", scopes: ["project", "group"], argumentHint: "[验证范围]", risk: "guarded", source: "ccm", action: { type: "prompt", prompt: "请针对当前项目执行真实验证，范围：$ARGS。记录实际运行的命令、输出摘要、失败原因和仍需人工确认的风险。" } },
   { name: "projects", aliases: ["项目"], description: "打开项目管理", category: "导航", icon: "▦", scopes: ["global", "project", "group"], risk: "safe", source: "ccm", action: { type: "navigate", tab: "projects" } },
@@ -456,12 +456,15 @@ export function runSlashCommandSelfTest() {
         && groupCommands.some(command => command.name === name))
       && groupCommands.some(command => command.name === "forget")
       && !globalCommands.some(command => command.name === "forget")
-      && !projectCommands.some(command => command.name === "forget"),
+      && !projectCommands.some(command => command.name === "forget")
+      && projectCommands.some(command => command.name === "plan")
+      && groupCommands.some(command => command.name === "plan")
+      && !globalCommands.some(command => command.name === "plan"),
     highRiskIsNotDirectAction: globalCommands.find(command => command.name === "project-stop")?.action.type === "prompt",
     memoryUsesScopedManager: globalCommands.find(command => command.name === "memory")?.action.clientAction === "memory_manager",
     argumentsAndContextExpand: expanded.includes("实现支付功能") && expanded.includes("项目A"),
     aliasesAvailable: globalCommands.find(command => command.name === "status")?.aliases?.includes("状态") === true,
-    parameterSchemaPublished: publicCommand(globalCommands.find(command => command.name === "plan")!).parameterSchema[0]?.required === false,
+    parameterSchemaPublished: publicCommand(projectCommands.find(command => command.name === "plan")!).parameterSchema[0]?.required === false,
     permissionDerivedFromRisk: publicCommand(globalCommands.find(command => command.name === "project-stop")!).permission === "manage",
     skillsRequireScopeAuthorization: !globalCommands.some(command => command.source === "skill") || authorizedSkillNames("global").size > 0,
     localQueriesDoNotInvokeModel: projectCommands.find(command => command.name === "diff")?.action.type === "query" && globalCommands.find(command => command.name === "agent-health")?.action.type === "query",

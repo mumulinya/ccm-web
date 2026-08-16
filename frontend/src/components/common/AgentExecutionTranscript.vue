@@ -57,10 +57,9 @@ const props = defineProps({
   stagePreview: { type: Boolean, default: false },
   stageGrouped: { type: Boolean, default: false },
   presentation: { type: String, default: 'auto' },
-  canConfirmExecute: Boolean,
-  confirmExecuteBusy: Boolean,
+  omitRequirementPlan: Boolean,
 })
-const emit = defineEmits(['open-file-change', 'open-file-changes', 'execution-action', 'confirm-execute'])
+const emit = defineEmits(['open-file-change', 'open-file-changes', 'execution-action'])
 const requestedStageMode = computed(() => props.stagePreview || props.stageGrouped)
 
 const now = ref(Date.now())
@@ -537,7 +536,7 @@ const flattenGroupedLiveRows = items => appendLiveModelActivityToTail(
   items.filter(isLiveModelActivityEvent),
 )
 const executionStageRows = computed(() => {
-  const includeRequirementPlan = !!requirementPlan.value && !(isLivePresentation.value && livePlanDockEligible.value)
+  const includeRequirementPlan = !!requirementPlan.value && !props.omitRequirementPlan && !(isLivePresentation.value && livePlanDockEligible.value)
   if (!stageMode.value) {
     const sourceRows = (isLivePresentation.value || isQueryCompletion.value)
       ? flattenGroupedLiveRows(nestedLedgerRows.value.filter(event => event?.__childAgentConversation || event?.eventType !== 'thinking_status'))
@@ -1691,11 +1690,6 @@ const displayedExecutionStageRows = computed(() => {
           <span>{{ effectivePlanSteps.length }} 项待办</span>
           <button type="button" @click="toggleRequirementPlan">收起计划 <ChevronDown :size="12" /></button>
         </footer>
-        <div v-if="canConfirmExecute" class="cc-requirement-plan-confirm">
-          <button type="button" :disabled="confirmExecuteBusy" @click="emit('confirm-execute', requirementPlan)">
-            <Check :size="14" />确认并执行
-          </button>
-        </div>
       </article>
       <ReadSearchCollapseHeader
         v-else-if="event.__readSearchGroup"
@@ -2032,9 +2026,6 @@ const displayedExecutionStageRows = computed(() => {
 .cc-requirement-plan-side li::marker { color: var(--primary-color, #ec4899); }
 .cc-requirement-plan-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 11px; border-top: 1px solid rgba(148, 163, 184, 0.12); color: var(--text-muted); font-size: 8px; }
 .cc-requirement-plan-foot button { display:inline-flex; align-items:center; gap:3px; padding: 2px 0; border: 0; color: var(--primary-color, #ec4899); background: transparent; font-size: 8px; cursor: pointer; }
-.cc-requirement-plan-confirm { display: flex; justify-content: flex-end; gap: 8px; padding: 7px 11px; border-top: 1px solid rgba(148, 163, 184, 0.12); }
-.cc-requirement-plan-confirm button { display: inline-flex; align-items: center; gap: 5px; min-height: 28px; padding: 0 11px; border: 1px solid var(--primary-color, #2563eb); border-radius: 7px; background: var(--primary-color, #2563eb); color: #fff; font-size: 11px; cursor: pointer; }
-.cc-requirement-plan-confirm button:disabled { opacity: 0.5; cursor: not-allowed; }
 .cc-execution-stage-head { position:relative; width: calc(100% - 4px); display: grid; grid-template-columns: 20px minmax(0, 1fr) auto auto 20px; align-items: center; gap: 8px; margin:0 2px; padding: 9px 0; border: 0; color: var(--text-secondary); background: transparent; text-align: left; cursor: pointer; }
 .cc-execution-stage-head:not(:first-child) { margin-top: 0; border-top: 1px solid rgba(100, 116, 139, 0.075); }
 .cc-execution-stage-head:hover { background: rgba(100, 116, 139, 0.025); }
@@ -2259,7 +2250,6 @@ const displayedExecutionStageRows = computed(() => {
 .cc-execution.live .cc-requirement-plan-side,
 .cc-execution.live .cc-requirement-plan-foot,
 .cc-execution.live .cc-requirement-plan-main h4 { display: none; }
-.cc-execution.live .cc-requirement-plan-confirm { display: flex; padding: 6px 0 4px; border-top: 1px solid rgba(148, 163, 184, 0.1); }
 .cc-execution.live .cc-requirement-plan-body section + section { margin-top: 0; }
 .cc-execution.live .cc-requirement-plan-steps { gap: 1px; }
 .cc-execution.live .cc-requirement-plan-steps li { grid-template-columns: 18px minmax(0, 1fr) auto; gap: 6px; padding: 3px 0; border: 0; border-radius: 0; background: transparent; }

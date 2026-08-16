@@ -20,6 +20,7 @@ watch(() => [props.scope, props.scopeId, props.exactSessionId], () => { agentMod
 <template>
   <div class="conversation-mode-inline" aria-label="会话工作模式和子 Agent 权限">
     <ConversationAgentMode
+      v-if="scope !== 'global'"
       :scope="scope"
       :scope-id="scopeId"
       :exact-session-id="exactSessionId"
@@ -27,7 +28,7 @@ watch(() => [props.scope, props.scopeId, props.exactSessionId], () => { agentMod
       @resolved="syncMode"
       @changed="syncMode"
     />
-    <span v-if="agentMode !== 'plan'" class="conversation-mode-inline__divider" aria-hidden="true">·</span>
+    <span v-if="scope !== 'global' && agentMode !== 'plan'" class="conversation-mode-inline__divider" aria-hidden="true">·</span>
     <ConversationPermissionMode
       v-if="agentMode !== 'plan'"
       :scope="scope"

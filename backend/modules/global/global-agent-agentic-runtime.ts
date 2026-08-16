@@ -41,7 +41,6 @@ import {
 import { isContextSourceToolResult, projectContextSourceToolResultForPersistence } from "../../system/context-source-tool-result-projection";
 import { readSlashCommandSessionState, renderSlashCommandSessionDirective } from "../../system/slash-command-session-state";
 import { attachTransientModelBlocks, transientModelBlocks } from "../../system/transient-model-content";
-import { globalPlanModeWouldCauseSideEffect } from "../../agents/global/global-agent-plan-mode";
 import { createModelActivityController } from "../../system/model-activity";
 import { isDevelopmentTaskWorkflowDecision } from "../../agents/workflow-decision";
 
@@ -1548,24 +1547,6 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
           }
         }
         if (modelCallIndex === 1) input.routeGuard?.(workflowDecision);
-        const planModeActive = readSlashCommandSessionState("global", "global", String(run.session_id || input.sessionId || "")).planMode?.enabled === true;
-        const planModeBlockedAction = globalPlanModeWouldCauseSideEffect({
-          tool: modelDecision?.tool,
-          workflowActionRequired: workflowDecision.actionRequired === true,
-          toolSpecs: GLOBAL_AGENT_TOOL_SPECS,
-        });
-        if (planModeActive && planModeBlockedAction) {
-          workflowDecision.actionRequired = false;
-          workflowDecision.requiresCodeChanges = false;
-          workflowDecision.requiresUserConfirmation = false;
-          workflowDecision.mode = "plan_task";
-          workflowDecision.reason = "当前精确会话处于 Plan Mode，已由服务端阻止有副作用的工具执行和任务派发";
-          if (modelDecision) {
-            modelDecision.state = "plan";
-            modelDecision.tool = undefined;
-            modelDecision.message = modelDecision.message || "已在 Plan Mode 中完成分析；确认并执行后会切回 Agent，并按这份计划开工。";
-          }
-        }
         const responseType = modelDecision?.tool
           ? "tool_calls"
           : modelDecision?.state === "needs_confirmation" ? "clarify"

@@ -159,6 +159,12 @@
                  @open-file-diff="openFileDiff"
                  @clarify-reply="submitInlineProjectClarification"
                />
+              <PresentedPlanCard
+                :plan="planForMessage(msg, i)"
+                :can-confirm-execute="canConfirmOnPlanCard(msg, i)"
+                :confirm-execute-busy="presentedPlanConfirmBusy"
+                @confirm-execute="confirmPresentedPlanExecute(msg, planForMessage(msg, i), i)"
+              />
               <AgentExecutionTranscript
                 :events="projectAgentExecutionEvents"
                 :enabled="projectAgentExecutionEnabled"
@@ -166,11 +172,9 @@
                 :message-index="i"
                 stage-grouped
                 presentation="live"
-                :can-confirm-execute="canConfirmOnTranscript(msg)"
-                :confirm-execute-busy="presentedPlanConfirmBusy"
+                :omit-requirement-plan="!!planForMessage(msg, i)"
                 @open-file-change="openSingleFileChange"
                 @execution-action="handleProjectTaskAction(msg, $event)"
-                @confirm-execute="confirmPresentedPlanExecute(msg, $event)"
               />
               <AgentExecutionTranscript
                 :events="projectAgentExecutionEvents"
@@ -179,12 +183,10 @@
                 :message-index="i"
                 stage-grouped
                 presentation="completed"
-                :can-confirm-execute="canConfirmOnTranscript(msg)"
-                :confirm-execute-busy="presentedPlanConfirmBusy"
+                :omit-requirement-plan="!!planForMessage(msg, i)"
                 @open-file-change="openSingleFileChange"
                 @open-file-changes="openCodeChangeDrawer($event, { title: '本轮文件改动', project: currentProject })"
                 @execution-action="handleProjectTaskAction(msg, $event)"
-                @confirm-execute="confirmPresentedPlanExecute(msg, $event)"
               />
             </ConversationMessageShell>
             </div>

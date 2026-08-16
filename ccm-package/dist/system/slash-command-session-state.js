@@ -33,6 +33,8 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.GLOBAL_CONVERSATION_PLAN_MODE_UNSUPPORTED = void 0;
+exports.conversationPlanModeSupported = conversationPlanModeSupported;
 exports.readSlashCommandSessionState = readSlashCommandSessionState;
 exports.exitSlashCommandSessionPlanMode = exitSlashCommandSessionPlanMode;
 exports.renderSlashCommandSessionDirective = renderSlashCommandSessionDirective;
@@ -40,6 +42,10 @@ const path = __importStar(require("path"));
 const utils_1 = require("../core/utils");
 const atomic_json_file_1 = require("../core/atomic-json-file");
 const STATE_FILE = path.join(utils_1.CCM_DIR, "slash-command-conversation-state.json");
+exports.GLOBAL_CONVERSATION_PLAN_MODE_UNSUPPORTED = "全局会话不支持 Plan 模式。全局 Agent 不读取项目代码；实现计划请到群聊或项目主 Agent 会话。";
+function conversationPlanModeSupported(scope) {
+    return scope === "project" || scope === "group";
+}
 function sessionKey(scope, scopeId, exactSessionId) {
     const normalizedScopeId = scope === "global" ? "global" : String(scopeId || "").trim();
     return `${scope}:${normalizedScopeId}:${String(exactSessionId || "").trim()}`;
@@ -91,7 +97,7 @@ function exitSlashCommandSessionPlanMode(scope, scopeId, exactSessionId) {
 function renderSlashCommandSessionDirective(scope, scopeId, exactSessionId) {
     const state = readSlashCommandSessionState(scope, scopeId, exactSessionId);
     const lines = [];
-    if (state.planMode?.enabled === true) {
+    if (conversationPlanModeSupported(scope) && state.planMode?.enabled === true) {
         lines.push("当前精确会话处于 Plan Mode：只允许分析、读取和制定计划，鼓励只读探索后必须调用 ccm_present_plan 出卡，不得派发写任务、修改代码或执行有副作用操作。", state.planMode.description ? `Plan Mode 目标：${String(state.planMode.description).slice(0, 4000)}` : "");
     }
     const style = String(state.preferences?.outputStyle || "").trim();

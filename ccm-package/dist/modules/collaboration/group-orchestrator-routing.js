@@ -76,6 +76,7 @@ const session_compaction_core_1 = require("../../system/session-compaction-core"
 const group_compaction_strategy_1 = require("./group-compaction-strategy");
 const group_session_model_context_1 = require("./group-session-model-context");
 const role_skills_1 = require("../../skills/role-skills");
+const conversation_plan_mode_gate_1 = require("../../system/conversation-plan-mode-gate");
 const group_reactive_compact_retry_ownership_1 = require("./group-reactive-compact-retry-ownership");
 const group_orchestrator_config_1 = require("./group-orchestrator-config");
 const group_orchestrator_prompts_1 = require("./group-orchestrator-prompts");
@@ -936,6 +937,7 @@ async function runGroupOrchestrator(input) {
             phase: "planning",
             selectedSkillNames: workflowDecision?.selectedSkills || [],
             modelDecision: workflowDecision,
+            planAuthoring: (0, conversation_plan_mode_gate_1.isConversationPlanModeEnabled)("group", String(group.id || ""), groupSessionId),
         }).names;
         const finalRuntime = String(result?.runtime || "");
         if (groupSessionId) {

@@ -1,4 +1,6 @@
-import { exitSlashCommandSessionPlanMode, readSlashCommandSessionState } from "./slash-command-session-state";
+import { conversationPlanModeSupported, exitSlashCommandSessionPlanMode, readSlashCommandSessionState } from "./slash-command-session-state";
+
+export { conversationPlanModeSupported } from "./slash-command-session-state";
 
 export type ConversationPlanScope = "global" | "project" | "group";
 
@@ -7,6 +9,7 @@ const PLAN_MODE_BLOCKED_ERROR = "CONVERSATION_PLAN_MODE_BLOCKED";
 const PLAN_MODE_HOLD_REASON = "当前精确会话处于 Plan Mode，已由服务端阻止任务派发和写操作";
 
 export function isConversationPlanModeEnabled(scope: ConversationPlanScope, scopeId: string, exactSessionId: string) {
+  if (!conversationPlanModeSupported(scope)) return false;
   return readSlashCommandSessionState(scope, scopeId, exactSessionId).planMode?.enabled === true;
 }
 
@@ -182,6 +185,9 @@ export function runConversationPlanModeGateSelfTest() {
     readToolOpen: readAllowed === false,
     groupSessionWins: groupIdentity?.scope === "group" && groupIdentity.exactSessionId === "gcs_1",
     projectIdentityResolved: projectIdentity?.scope === "project" && projectIdentity.scopeId === "api",
+    globalHasNoConversationPlanMode: conversationPlanModeSupported("global") === false,
+    groupKeepsConversationPlanMode: conversationPlanModeSupported("group") === true,
+    projectKeepsConversationPlanMode: conversationPlanModeSupported("project") === true,
   };
   return { pass: Object.values(checks).every(Boolean), checks };
 }

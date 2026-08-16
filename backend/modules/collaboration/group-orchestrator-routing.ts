@@ -48,6 +48,7 @@ import { buildModelVisiblePayloadSnapshot } from "../../system/session-compactio
 import { getGroupAutoCompactThreshold, resolveGroupModelContextCapacity } from "./group-compaction-strategy";
 import { buildExactGroupSessionModelContextPacket } from "./group-session-model-context";
 import { buildRoleSkillPrompt } from "../../skills/role-skills";
+import { isConversationPlanModeEnabled } from "../../system/conversation-plan-mode-gate";
 import {
   WORKFLOW_DECISION_GUIDANCE,
   normalizeWorkflowDecision,
@@ -1188,6 +1189,7 @@ export async function runGroupOrchestrator(input: GroupOrchestratorInput) {
       phase: "planning",
       selectedSkillNames: workflowDecision?.selectedSkills || [],
       modelDecision: workflowDecision,
+      planAuthoring: isConversationPlanModeEnabled("group", String(group.id || ""), groupSessionId),
     }).names;
     const finalRuntime = String((result as any)?.runtime || "");
     if (groupSessionId) {

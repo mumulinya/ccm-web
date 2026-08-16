@@ -19,6 +19,7 @@ import AgentQaMessage from '../agents/AgentQaMessage.vue'
 import GroupMainAgentStatusCard from './GroupMainAgentStatusCard.vue'
 import MainAgentDecisionCard from '../agents/MainAgentDecisionCard.vue'
 import AgentExecutionTranscript from '../common/AgentExecutionTranscript.vue'
+import PresentedPlanCard from '../common/PresentedPlanCard.vue'
 import ActiveTaskPlanDock from '../common/ActiveTaskPlanDock.vue'
 import PrePlanClarificationDock from '../common/PrePlanClarificationDock.vue'
 import ConversationAsideDock from '../common/ConversationAsideDock.vue'
@@ -261,8 +262,8 @@ const {
 
 const {
   confirmBusy: presentedPlanConfirmBusy,
-  canConfirmOnMessageCard,
-  canConfirmOnTranscript,
+  planForMessage,
+  canConfirmOnPlanCard,
   confirmExecute: confirmPresentedPlanExecute,
 } = usePresentedPlanConfirmExecute({
   scope: 'group',
@@ -270,9 +271,8 @@ const {
   exactSessionId: currentGroupSessionId,
   messages,
   executionEvents: groupAgentExecutionEvents,
-  turnBusy: groupTurnBusy,
+  turnBusy: isStreaming,
   send: (options) => sendMessage(options),
-  messageCardOwnsPlan: true,
 })
 </script>
 

@@ -57,6 +57,7 @@ const global_agent_loop_engine_1 = require("../../agents/global/global-agent-loo
 const global_agent_run_store_1 = require("../../agents/global/global-agent-run-store");
 const provider_neutral_context_cache_1 = require("../../system/provider-neutral-context-cache");
 const conversation_permission_policy_1 = require("./conversation-permission-policy");
+const slash_command_session_state_1 = require("../../system/slash-command-session-state");
 const STATE_FILE = path.join(utils_1.CCM_DIR, "slash-command-conversation-state.json");
 const GLOBAL_HISTORY_FILE = path.join(utils_1.CCM_DIR, "global-agent-history.json");
 const REWIND_DIR = path.join(utils_1.CCM_DIR, "conversation-rewind-snapshots");
@@ -841,6 +842,11 @@ function readSessionState(input) {
             : Number(stored.generation || 0);
     return { id, state: { ...stored, generation } };
 }
+function publicPlanMode(id, state) {
+    if (!(0, slash_command_session_state_1.conversationPlanModeSupported)(id.scope))
+        return { enabled: false };
+    return state.planMode && typeof state.planMode === "object" ? state.planMode : { enabled: false };
+}
 function updatePlanMode(input) {
     const { id, state } = readSessionState(input);
     if (input.revision === undefined || input.generation === undefined)
@@ -849,6 +855,13 @@ function updatePlanMode(input) {
         throw new Error("会话 generation 已漂移，请重新读取");
     const action = String(input.action || (input.enabled === false ? "exit" : "open")).toLowerCase();
     const enabled = !["exit", "off", "disable"].includes(action);
+    if (!(0, slash_command_session_state_1.conversationPlanModeSupported)(id.scope)) {
+        if (enabled)
+            throw new Error(slash_command_session_state_1.GLOBAL_CONVERSATION_PLAN_MODE_UNSUPPORTED);
+        const planMode = { enabled: false, planId: String(state.planMode?.planId || ""), description: String(state.planMode?.description || ""), exitedAt: now(), updatedAt: now() };
+        const next = persistSessionState(id, { planMode, generation: Number(state.generation || 0) }, { revision: Number(input.revision) });
+        return { schema: "ccm-conversation-plan-mode-v1", scope: id.scope, scopeId: id.scopeId, exactSessionId: id.sessionId, generation: Number(next.generation || 0), revision: Number(next.revision || 0), ...planMode };
+    }
     const planMode = enabled ? {
         enabled: true,
         planId: String(state.planMode?.planId || `plan_${crypto.randomUUID()}`),
@@ -1105,7 +1118,7 @@ function handleSlashCommandConversationApi(pathname, req, res, parsed) {
         try {
             assertApiResourceAccess(req, parsed.query || {}, "use");
             const { id, state } = readSessionState(parsed.query || {});
-            (0, utils_1.sendJson)(res, { success: true, scope: id.scope, scopeId: id.scopeId, exactSessionId: id.sessionId, generation: Number(state.generation || 0), revision: Number(state.revision || 0), planMode: state.planMode || { enabled: false } });
+            (0, utils_1.sendJson)(res, { success: true, scope: id.scope, scopeId: id.scopeId, exactSessionId: id.sessionId, generation: Number(state.generation || 0), revision: Number(state.revision || 0), planMode: publicPlanMode(id, state) });
         }
         catch (error) {
             (0, utils_1.sendJson)(res, { success: false, error: error.message }, 400);

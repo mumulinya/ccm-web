@@ -226,6 +226,11 @@ export type UserVisibleRequirementPlanV1 = {
   updatedAt: string;
   planChecksum: string;
   contentStored: false;
+  quality?: {
+    ok: boolean;
+    repaired: boolean;
+    issues: string[];
+  };
 };
 
 type EventStore = {
@@ -356,6 +361,13 @@ function sanitizeUserVisibleRequirementPlan(value: any): UserVisibleRequirementP
     createdAt,
     updatedAt,
     contentStored: false as const,
+    ...(value.quality && typeof value.quality === "object" ? {
+      quality: {
+        ok: value.quality.ok === true,
+        repaired: value.quality.repaired === true,
+        issues: uniqueStrings(value.quality.issues, 12).map(item => compactText(item, 240)),
+      },
+    } : {}),
   };
   return { ...projected, planChecksum: hash(projected) };
 }

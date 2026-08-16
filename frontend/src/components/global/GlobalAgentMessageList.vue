@@ -6,6 +6,7 @@ import MessageNavigator from '../common/MessageNavigator.vue'
 import CommandResultCard from '../common/CommandResultCard.vue'
 import ConversationMessageShell from '../common/ConversationMessageShell.vue'
 import AgentExecutionTranscript from '../common/AgentExecutionTranscript.vue'
+import PresentedPlanCard from '../common/PresentedPlanCard.vue'
 import NewProgressIndicator from '../common/NewProgressIndicator.vue'
 import ConversationSummaryBoundary from '../common/ConversationSummaryBoundary.vue'
 import AgentFinalAnswer from '../common/AgentFinalAnswer.vue'
@@ -51,6 +52,7 @@ const props = defineProps({
   pendingProgressCount: { type: Number, default: 0 },
   jumpToLatestProgress: { type: Function, required: true },
   canConfirmPresentedPlan: { type: Function, default: () => () => false },
+  presentedPlanForMessage: { type: Function, default: () => () => null },
   presentedPlanConfirmBusy: Boolean,
 })
 
@@ -429,6 +431,12 @@ const isStructuredGlobalMessage = msg => !!(
               </div>
   
             </div>
+            <PresentedPlanCard
+              :plan="presentedPlanForMessage(msg, index)"
+              :can-confirm-execute="canConfirmPresentedPlan(msg, index)"
+              :confirm-execute-busy="presentedPlanConfirmBusy"
+              @confirm-execute="emit('confirm-presented-plan', msg, presentedPlanForMessage(msg, index), index)"
+            />
             <AgentExecutionTranscript
               :events="executionEvents"
               :enabled="executionEventsEnabled"
@@ -436,11 +444,9 @@ const isStructuredGlobalMessage = msg => !!(
               :message-index="index"
               stage-grouped
               presentation="live"
-              :can-confirm-execute="canConfirmPresentedPlan(msg)"
-              :confirm-execute-busy="presentedPlanConfirmBusy"
+              :omit-requirement-plan="!!presentedPlanForMessage(msg, index)"
               @open-file-change="emit('open-file-change', $event)"
               @execution-action="handleGlobalTaskAction(msg, $event)"
-              @confirm-execute="emit('confirm-presented-plan', msg, $event)"
             />
             <AgentExecutionTranscript
               :events="executionEvents"
@@ -449,12 +455,10 @@ const isStructuredGlobalMessage = msg => !!(
               :message-index="index"
               stage-grouped
               presentation="completed"
-              :can-confirm-execute="canConfirmPresentedPlan(msg)"
-              :confirm-execute-busy="presentedPlanConfirmBusy"
+              :omit-requirement-plan="!!presentedPlanForMessage(msg, index)"
               @open-file-change="emit('open-file-change', $event)"
               @open-file-changes="emit('open-file-changes', $event)"
               @execution-action="handleGlobalTaskAction(msg, $event)"
-              @confirm-execute="emit('confirm-presented-plan', msg, $event)"
             />
           </ConversationMessageShell>
           

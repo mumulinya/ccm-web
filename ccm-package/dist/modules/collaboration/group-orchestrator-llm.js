@@ -119,6 +119,7 @@ function buildGroupMainAgentToolContext(input) {
         phase: "planning",
         selectedSkillNames: input.workflowDecision?.selectedSkills || [],
         modelDecision: input.workflowDecision || null,
+        planAuthoring: (0, conversation_plan_mode_gate_1.isConversationPlanModeEnabled)("group", String(group?.id || ""), String(input.groupSessionId || input.group_session_id || "")),
     });
     const shared = (0, main_agent_tool_runtime_1.buildMainAgentToolRuntimeContext)({
         configuredTools: group?.tools || {},
@@ -625,6 +626,7 @@ function buildLlmCoordinatorMessages(input) {
         phase: "planning",
         selectedSkillNames: input.workflowDecision?.selectedSkills || [],
         modelDecision: input.workflowDecision || null,
+        planAuthoring: (0, conversation_plan_mode_gate_1.isConversationPlanModeEnabled)("group", String(group?.id || ""), String(input.groupSessionId || input.group_session_id || "")),
     });
     const roleSkillsPart = roleSkills.prompt ? `\n\n${roleSkills.prompt}` : "";
     const mainAgentTools = buildGroupMainAgentToolContext(input);
@@ -745,6 +747,7 @@ function buildLlmCoordinatorContextComponents(input) {
         phase: "planning",
         selectedSkillNames: input.workflowDecision?.selectedSkills || [],
         modelDecision: input.workflowDecision || null,
+        planAuthoring: (0, conversation_plan_mode_gate_1.isConversationPlanModeEnabled)("group", String(group?.id || ""), String(input.groupSessionId || input.group_session_id || "")),
     });
     const mainAgentTools = buildGroupMainAgentToolContext(input);
     const toolResults = Array.isArray(input.mainAgentToolResults)

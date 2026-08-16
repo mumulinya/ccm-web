@@ -190,6 +190,11 @@ export type UserVisibleRequirementPlanV1 = {
     updatedAt: string;
     planChecksum: string;
     contentStored: false;
+    quality?: {
+        ok: boolean;
+        repaired: boolean;
+        issues: string[];
+    };
 };
 export declare function sanitizeUserVisibleAgentDetail(value: any, depth?: number, seen?: WeakSet<object>): any;
 export declare function normalizeUserVisibleAgentEvent(input: any, sequence?: number): UserVisibleAgentEvent;

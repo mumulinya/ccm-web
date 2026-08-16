@@ -141,6 +141,9 @@ export declare function runNativeQueryLoopSelfTest(): Promise<{
         flushedUnstreamedTurnText: boolean;
         emptyFollowupKeepsFirstTurnText: boolean;
         keepClarifyAcrossTextFollowup: boolean;
+        planQualityRepairsOnce: boolean;
+        planQualityAcceptsDegradedAfterRepair: boolean;
+        planQualityPassesFirstShot: boolean;
     };
     result: NativeQueryLoopResult;
 }>;

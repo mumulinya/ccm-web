@@ -292,20 +292,7 @@ export declare function runGroupOrchestratorCore(input: GroupOrchestratorInput):
         initialReadFileCount: number;
         initialReadTokens: number;
     };
-    presentedPlan?: {
-        steps: any;
-        scope: string[];
-        expectedResults: string[];
-        exclusions: string[];
-        status: "ready" | "completed" | "blocked" | "superseded" | "executing";
-        createdAt: string;
-        updatedAt: string;
-        overview?: string;
-        planId: string;
-        revision: number;
-        title: string;
-        goal: string;
-    };
+    presentedPlan?: any;
     agent: any;
     delegated: any[];
     assignments: any[];
@@ -378,20 +365,7 @@ export declare function runGroupOrchestratorCore(input: GroupOrchestratorInput):
         initialReadFileCount: number;
         initialReadTokens: number;
     };
-    presentedPlan?: {
-        steps: any;
-        scope: string[];
-        expectedResults: string[];
-        exclusions: string[];
-        status: "ready" | "completed" | "blocked" | "superseded" | "executing";
-        createdAt: string;
-        updatedAt: string;
-        overview?: string;
-        planId: string;
-        revision: number;
-        title: string;
-        goal: string;
-    };
+    presentedPlan?: any;
     agent: any;
     delegated: any[];
     assignments: any[];
@@ -501,20 +475,7 @@ export declare function runGroupOrchestratorCore(input: GroupOrchestratorInput):
         initialReadFileCount: number;
         initialReadTokens: number;
     };
-    presentedPlan?: {
-        steps: any;
-        scope: string[];
-        expectedResults: string[];
-        exclusions: string[];
-        status: "ready" | "completed" | "blocked" | "superseded" | "executing";
-        createdAt: string;
-        updatedAt: string;
-        overview?: string;
-        planId: string;
-        revision: number;
-        title: string;
-        goal: string;
-    };
+    presentedPlan?: any;
     agent: any;
     delegated: any[];
     assignments: any[];
@@ -595,20 +556,7 @@ export declare function runGroupOrchestratorCore(input: GroupOrchestratorInput):
         initialReadFileCount: number;
         initialReadTokens: number;
     };
-    presentedPlan?: {
-        steps: any;
-        scope: string[];
-        expectedResults: string[];
-        exclusions: string[];
-        status: "ready" | "completed" | "blocked" | "superseded" | "executing";
-        createdAt: string;
-        updatedAt: string;
-        overview?: string;
-        planId: string;
-        revision: number;
-        title: string;
-        goal: string;
-    };
+    presentedPlan?: any;
     agent: any;
     delegated: any[];
     assignments: any[];

@@ -29,6 +29,13 @@ fs.writeFileSync(path.join(tmp, 'slash-command-conversation-state.json'), JSON.s
   },
 }, null, 2))
 
+assert.equal(session.conversationPlanModeSupported('global'), false)
+assert.equal(session.conversationPlanModeSupported('group'), true)
+assert.equal(session.conversationPlanModeSupported('project'), true)
+assert.equal(gate.isConversationPlanModeEnabled('global', 'global', 'sess_1'), false, '全局即使残留 Plan 开关也不能进入会话 Plan Mode')
+assert.equal(gate.isConversationPlanModeEnabled('group', 'g1', 'gcs_1'), true)
+assert.equal(gate.isConversationPlanModeEnabled('project', 'api', 'ps_1'), true)
+
 const groupExit = gate.exitConversationPlanModeForTask({ group_id: 'g1', group_session_id: 'gcs_1', target_project: 'api', project_session_id: 'ps_ignored' })
 assert.equal(groupExit.exited, true, '群聊确认应退出该会话 Plan')
 assert.equal(session.readSlashCommandSessionState('group', 'g1', 'gcs_1').planMode.enabled, false)
@@ -39,8 +46,9 @@ assert.equal(projectExit.exited, true)
 assert.equal(session.readSlashCommandSessionState('project', 'api', 'ps_1').planMode.enabled, false)
 
 const globalExit = gate.exitConversationPlanModeForTask({ orchestration_scope: 'global', session_id: 'sess_1' })
-assert.equal(globalExit.exited, true)
+assert.equal(globalExit.exited, true, '残留全局 Plan 开关仍可被清掉，但不能再打开')
 assert.equal(session.readSlashCommandSessionState('global', 'global', 'sess_1').planMode.enabled, false)
+assert.equal(gate.isConversationPlanModeEnabled('global', 'global', 'sess_1'), false)
 
 const accepted = intake.buildAcceptedPlanModeDraft({
   title: '登录修复方案',
@@ -97,6 +105,8 @@ assert.match(projectLoop, /PRESENTED_PLAN_DISPATCH_HANDOFF_GUIDANCE/)
 assert.match(globalProjection, /PRESENTED_PLAN_SHAPE_GUIDANCE/)
 assert.match(slashState, /必须调用 ccm_present_plan 出卡/)
 assert.match(slashState, /不得派发写任务/)
+assert.match(slashState, /conversationPlanModeSupported\(scope\) && state\.planMode\?\.enabled === true/)
+assert.match(slashState, /全局会话不支持 Plan 模式/)
 assert.match(projectLoop, /applyConversationPlanModeToRound/)
 assert.match(projectLoop, /runProjectMainNativeQueryLoop/)
 assert.match(projectLoop, /applyConversationPlanModeHold\("project"/)
@@ -113,7 +123,7 @@ assert.match(taskCard, /open_plan_detail/)
 
 const confirmUtil = read('frontend/src/utils/presentedPlanConfirmExecute.js')
 const confirmComposable = read('frontend/src/composables/usePresentedPlanConfirmExecute.js')
-const presentedCard = read('frontend/src/components/agents/AgentExecutionMessage.vue')
+const presentedCard = read('frontend/src/components/common/PresentedPlanCard.vue')
 assert.match(confirmUtil, /action: 'exit'/)
 assert.match(confirmComposable, /exitConversationPlanMode/)
 assert.match(confirmComposable, /queueTurn/)
@@ -125,5 +135,17 @@ assert.ok(
 assert.match(presentedCard, /确认并执行/)
 assert.equal(presentedCard.includes('Build'), false)
 assert.equal(confirmUtil.includes('Build'), false)
+assert.match(confirmUtil, /conversationPlanModeSupported/)
+assert.match(confirmComposable, /conversationPlanModeSupported\(identity\(\)\.scope\)/)
+
+const toolbar = read('frontend/src/components/common/ConversationModeToolbar.vue')
+const slashCommands = read('backend/modules/tools/slash-commands.ts')
+const conversations = read('backend/modules/tools/slash-command-conversations.ts')
+const agenticRuntime = read('backend/modules/global/global-agent-agentic-runtime.ts')
+assert.match(toolbar, /v-if="scope !== 'global'"/)
+assert.match(slashCommands, /name: "plan"[\s\S]*scopes: \["project", "group"\]/)
+assert.match(conversations, /GLOBAL_CONVERSATION_PLAN_MODE_UNSUPPORTED/)
+assert.doesNotMatch(agenticRuntime, /globalPlanModeWouldCauseSideEffect/)
+assert.doesNotMatch(agenticRuntime, /planModeActive/)
 
 console.log('conversation-plan-mode-gate selftest passed')

@@ -56,7 +56,6 @@ const main_agent_context_source_continuity_1 = require("../../system/main-agent-
 const context_source_tool_result_projection_1 = require("../../system/context-source-tool-result-projection");
 const slash_command_session_state_1 = require("../../system/slash-command-session-state");
 const transient_model_content_1 = require("../../system/transient-model-content");
-const global_agent_plan_mode_1 = require("../../agents/global/global-agent-plan-mode");
 const model_activity_1 = require("../../system/model-activity");
 const workflow_decision_1 = require("../../agents/workflow-decision");
 // Global-only context, tool execution, mission supervision, and agentic loop lifecycle.
@@ -1626,24 +1625,6 @@ function createGlobalAgentAgenticRuntime(deps) {
                 }
                 if (modelCallIndex === 1)
                     input.routeGuard?.(workflowDecision);
-                const planModeActive = (0, slash_command_session_state_1.readSlashCommandSessionState)("global", "global", String(run.session_id || input.sessionId || "")).planMode?.enabled === true;
-                const planModeBlockedAction = (0, global_agent_plan_mode_1.globalPlanModeWouldCauseSideEffect)({
-                    tool: modelDecision?.tool,
-                    workflowActionRequired: workflowDecision.actionRequired === true,
-                    toolSpecs: GLOBAL_AGENT_TOOL_SPECS,
-                });
-                if (planModeActive && planModeBlockedAction) {
-                    workflowDecision.actionRequired = false;
-                    workflowDecision.requiresCodeChanges = false;
-                    workflowDecision.requiresUserConfirmation = false;
-                    workflowDecision.mode = "plan_task";
-                    workflowDecision.reason = "当前精确会话处于 Plan Mode，已由服务端阻止有副作用的工具执行和任务派发";
-                    if (modelDecision) {
-                        modelDecision.state = "plan";
-                        modelDecision.tool = undefined;
-                        modelDecision.message = modelDecision.message || "已在 Plan Mode 中完成分析；确认并执行后会切回 Agent，并按这份计划开工。";
-                    }
-                }
                 const responseType = modelDecision?.tool
                     ? "tool_calls"
                     : modelDecision?.state === "needs_confirmation" ? "clarify"

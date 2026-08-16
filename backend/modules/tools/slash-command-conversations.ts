@@ -36,6 +36,7 @@ import { cancelGlobalAgentRun } from "../../agents/global/global-agent-loop-engi
 import { getGlobalAgentRun, listGlobalAgentRuns } from "../../agents/global/global-agent-run-store";
 import { invalidateProviderNeutralContextCacheState } from "../../system/provider-neutral-context-cache";
 import { readConversationPermissionPolicy, updateConversationPermissionPolicy } from "./conversation-permission-policy";
+import { conversationPlanModeSupported, GLOBAL_CONVERSATION_PLAN_MODE_UNSUPPORTED } from "../../system/slash-command-session-state";
 
 type Scope = "global" | "project" | "group";
 
@@ -763,12 +764,23 @@ function readSessionState(input: any) {
   return { id, state: { ...stored, generation } };
 }
 
+function publicPlanMode(id: ReturnType<typeof identity>, state: any) {
+  if (!conversationPlanModeSupported(id.scope)) return { enabled: false };
+  return state.planMode && typeof state.planMode === "object" ? state.planMode : { enabled: false };
+}
+
 function updatePlanMode(input: any) {
   const { id, state } = readSessionState(input);
   if (input.revision === undefined || input.generation === undefined) throw new Error("Plan Mode 更新必须绑定 revision 与 generation");
   if (Number(input.generation) !== Number(state.generation || 0)) throw new Error("会话 generation 已漂移，请重新读取");
   const action = String(input.action || (input.enabled === false ? "exit" : "open")).toLowerCase();
   const enabled = !["exit", "off", "disable"].includes(action);
+  if (!conversationPlanModeSupported(id.scope)) {
+    if (enabled) throw new Error(GLOBAL_CONVERSATION_PLAN_MODE_UNSUPPORTED);
+    const planMode = { enabled: false, planId: String(state.planMode?.planId || ""), description: String(state.planMode?.description || ""), exitedAt: now(), updatedAt: now() };
+    const next = persistSessionState(id, { planMode, generation: Number(state.generation || 0) }, { revision: Number(input.revision) });
+    return { schema: "ccm-conversation-plan-mode-v1", scope: id.scope, scopeId: id.scopeId, exactSessionId: id.sessionId, generation: Number(next.generation || 0), revision: Number(next.revision || 0), ...planMode };
+  }
   const planMode = enabled ? {
     enabled: true,
     planId: String(state.planMode?.planId || `plan_${crypto.randomUUID()}`),
@@ -1001,7 +1013,7 @@ export function handleSlashCommandConversationApi(pathname: string, req: any, re
     return true;
   }
   if (pathname === "/api/conversations/plan-mode" && req.method === "GET") {
-    try { assertApiResourceAccess(req, parsed.query || {}, "use"); const { id, state } = readSessionState(parsed.query || {}); sendJson(res, { success: true, scope: id.scope, scopeId: id.scopeId, exactSessionId: id.sessionId, generation: Number(state.generation || 0), revision: Number(state.revision || 0), planMode: state.planMode || { enabled: false } }); }
+    try { assertApiResourceAccess(req, parsed.query || {}, "use"); const { id, state } = readSessionState(parsed.query || {}); sendJson(res, { success: true, scope: id.scope, scopeId: id.scopeId, exactSessionId: id.sessionId, generation: Number(state.generation || 0), revision: Number(state.revision || 0), planMode: publicPlanMode(id, state) }); }
     catch (error: any) { sendJson(res, { success: false, error: error.message }, 400); }
     return true;
   }
