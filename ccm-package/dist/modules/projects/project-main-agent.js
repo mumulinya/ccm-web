@@ -67,6 +67,7 @@ const main_agent_identity_1 = require("../../agents/main-agent-identity");
 const main_agent_turn_1 = require("../../agents/main-agent-turn");
 const project_validation_1 = require("./project-validation");
 const role_skills_1 = require("../../skills/role-skills");
+const session_context_tool_buckets_1 = require("../../system/session-context-tool-buckets");
 const main_agent_tool_runtime_1 = require("../../tools/main-agent-tool-runtime");
 const native_query_loop_1 = require("../../agents/native-query-loop");
 const cc_tool_result_limits_1 = require("../../tools/cc-tool-result-limits");
@@ -647,8 +648,6 @@ async function hydrateProjectRuntimeDiagnostics(input) {
             projectSessionId: input.projectSessionId,
             currentRequest: input.userMessage,
             contextComponents: {
-                messageMcpTools: project_main_agent_runtime_diagnostics_1.PROJECT_RUNTIME_DIAGNOSTIC_TOOL_SPECS,
-                mcpResults: manifest,
                 loadedContextItems: {
                     schema: "ccm-loaded-context-items-v1",
                     skills: [],
@@ -1265,8 +1264,7 @@ async function planProjectMainTask(input) {
     const contextComponents = {
         skills: [roleSkills.prompt, configuredToolContext.skillPrompt].filter(Boolean).join("\n\n"),
         projectSource: sourceHydration.prompt,
-        messageMcpTools: configuredToolContext.catalog.mcp,
-        mcpResults: [runtimeHydration.prompt, configuredToolHydration.prompt].filter(Boolean).join("\n\n"),
+        messageMcpTools: (0, session_context_tool_buckets_1.selectUserMcpToolDefinitions)(configuredToolContext.catalog.mcp),
         loadedContextItems: projectMainLoadedContextItems(configuredToolContext, configuredToolHydration.results, roleSkills, runtimeHydration.results),
     };
     const planningIdentity = `你是 CCM 的项目主 Agent。你只负责一个项目，不能选择其他项目，也不能亲自修改代码。请把用户目标整理为可由该项目唯一开发 Agent 顺序执行的工作项，并给出可验证验收标准。

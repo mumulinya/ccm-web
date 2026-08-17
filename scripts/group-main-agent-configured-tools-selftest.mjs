@@ -76,7 +76,7 @@ try {
   assert.doesNotMatch(prompt, /canonicalName.*mcp__ccm__docs__update_record/);
 
   const components = llm.buildLlmCoordinatorContextComponents({ group, message: "请检查接口", source: "group-chat" });
-  assert.match(components.mcpTools, /search_records/);
+  assert.match(JSON.stringify(components.mcpTools), /search_records/);
   assert.match(components.skills, /requirements-review/);
 
   const hydratedInput = {
@@ -96,7 +96,7 @@ try {
     contextComponents: hydratedComponents,
   });
   assert.ok(hydratedSnapshot.tokenBreakdown.mcpTools > 0);
-  assert.ok(hydratedSnapshot.tokenBreakdown.mcpResults > 0);
+  assert.equal(Number(hydratedSnapshot.tokenBreakdown.mcpResults || 0), 0);
   assert.ok(hydratedSnapshot.tokenBreakdown.recentMessages > 0);
 
   const discoveryResults = await llm.executeGroupMainAgentToolRequests({
@@ -175,7 +175,7 @@ try {
       resultBudgetFailClosed: true,
       siblingGroupIsolated: true,
       contextComponentsClassified: true,
-      dynamicMcpResultsClassified: true,
+      toolResultsStayInConversation: true,
       dynamicTokenAllocationVisible: true,
     },
   }, null, 2));

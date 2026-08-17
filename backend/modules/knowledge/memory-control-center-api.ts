@@ -69,6 +69,7 @@ import { readLatestProviderNeutralContextCacheState } from "../../system/provide
 import { readProviderCacheCapabilityState } from "../../system/provider-cache-capability-registry";
 import { readContextEngineTrends } from "../../system/context-engine-observability";
 import { listContextEngineRecoveryPoints } from "../../system/context-engine-recovery";
+import { isUserMcpToolDefinition, selectUserMcpToolDefinitions } from "../../system/session-context-tool-buckets";
 
 const MODEL_VISIBLE_FIXED_BUCKETS = [
   "system",
@@ -134,7 +135,7 @@ function buildAvailableContextCatalog(scope: MemoryScope, scopeId: string, memor
   const mcpByName = new Map(mcpCatalog.map((item: any) => [String(item?.name || ""), item]));
   const skillByName = new Map(skillCatalog.map((item: any) => [String(item?.name || ""), item]));
   const breakdown = modelVisiblePayload?.tokenBreakdown || modelVisiblePayload?.token_breakdown || {};
-  const mcpLoadedTokens = Math.max(0, Number(breakdown.mcpTools ?? breakdown.mcp ?? 0) + Number(breakdown.mcpResults || 0));
+  const mcpLoadedTokens = Math.max(0, Number(breakdown.mcpTools ?? breakdown.mcp ?? 0));
   const skillLoadedTokens = Math.max(0, Number(breakdown.skills || 0));
   const loadedEvidence = modelVisiblePayload?.loadedContextItems || modelVisiblePayload?.loaded_context_items || {};
   const loadedMcp = Array.isArray(loadedEvidence?.mcp) ? loadedEvidence.mcp : [];
@@ -204,6 +205,7 @@ function buildAvailableContextCatalog(scope: MemoryScope, scopeId: string, memor
   for (const row of loadedMcp) {
     const name = String(row?.name || "").trim();
     if (!name || mcp.some((item: any) => evidenceMatches(row, item.name, "mcp"))) continue;
+    if (!isUserMcpToolDefinition({ name, canonicalName: name, server: row?.server, aliases: row?.aliases })) continue;
     mcp.push({
       name,
       ...decorateEvidence(name, "mcp", true, false),
@@ -385,7 +387,7 @@ function rebuildCurrentSessionContextAccounting(scope: MemoryScope, scopeId: str
             authorization_readiness: context.tools?.authorization_readiness,
           },
           skills: context.tools?.skills || [],
-          mcpTools: context.tools?.mcp || [],
+          mcpTools: selectUserMcpToolDefinitions(context.tools?.mcp || []),
           subagentDefinitions: { projects: context.projects || [], groups: context.groups || [] },
         },
       });
@@ -433,7 +435,7 @@ function rebuildCurrentSessionContextAccounting(scope: MemoryScope, scopeId: str
         contextComponents: {
           rules,
           skills: catalog.skills,
-          mcpTools: catalog.tools,
+          mcpTools: selectUserMcpToolDefinitions(catalog.tools),
           subagentDefinitions: projectConfig ? [{ project, agent: projectConfig.agent || projectConfig.agent_type || "" }] : [],
         },
       });

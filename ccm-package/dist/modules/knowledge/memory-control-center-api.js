@@ -76,6 +76,7 @@ const provider_neutral_context_cache_1 = require("../../system/provider-neutral-
 const provider_cache_capability_registry_1 = require("../../system/provider-cache-capability-registry");
 const context_engine_observability_1 = require("../../system/context-engine-observability");
 const context_engine_recovery_1 = require("../../system/context-engine-recovery");
+const session_context_tool_buckets_1 = require("../../system/session-context-tool-buckets");
 const MODEL_VISIBLE_FIXED_BUCKETS = [
     "system",
     "tools",
@@ -136,7 +137,7 @@ function buildAvailableContextCatalog(scope, scopeId, memory, modelVisiblePayloa
     const mcpByName = new Map(mcpCatalog.map((item) => [String(item?.name || ""), item]));
     const skillByName = new Map(skillCatalog.map((item) => [String(item?.name || ""), item]));
     const breakdown = modelVisiblePayload?.tokenBreakdown || modelVisiblePayload?.token_breakdown || {};
-    const mcpLoadedTokens = Math.max(0, Number(breakdown.mcpTools ?? breakdown.mcp ?? 0) + Number(breakdown.mcpResults || 0));
+    const mcpLoadedTokens = Math.max(0, Number(breakdown.mcpTools ?? breakdown.mcp ?? 0));
     const skillLoadedTokens = Math.max(0, Number(breakdown.skills || 0));
     const loadedEvidence = modelVisiblePayload?.loadedContextItems || modelVisiblePayload?.loaded_context_items || {};
     const loadedMcp = Array.isArray(loadedEvidence?.mcp) ? loadedEvidence.mcp : [];
@@ -208,6 +209,8 @@ function buildAvailableContextCatalog(scope, scopeId, memory, modelVisiblePayloa
     for (const row of loadedMcp) {
         const name = String(row?.name || "").trim();
         if (!name || mcp.some((item) => evidenceMatches(row, item.name, "mcp")))
+            continue;
+        if (!(0, session_context_tool_buckets_1.isUserMcpToolDefinition)({ name, canonicalName: name, server: row?.server, aliases: row?.aliases }))
             continue;
         mcp.push({
             name,
@@ -389,7 +392,7 @@ function rebuildCurrentSessionContextAccounting(scope, scopeId, memory) {
                         authorization_readiness: context.tools?.authorization_readiness,
                     },
                     skills: context.tools?.skills || [],
-                    mcpTools: context.tools?.mcp || [],
+                    mcpTools: (0, session_context_tool_buckets_1.selectUserMcpToolDefinitions)(context.tools?.mcp || []),
                     subagentDefinitions: { projects: context.projects || [], groups: context.groups || [] },
                 },
             });
@@ -441,7 +444,7 @@ function rebuildCurrentSessionContextAccounting(scope, scopeId, memory) {
                 contextComponents: {
                     rules,
                     skills: catalog.skills,
-                    mcpTools: catalog.tools,
+                    mcpTools: (0, session_context_tool_buckets_1.selectUserMcpToolDefinitions)(catalog.tools),
                     subagentDefinitions: projectConfig ? [{ project, agent: projectConfig.agent || projectConfig.agent_type || "" }] : [],
                 },
             });

@@ -56,9 +56,11 @@ exports.recordSessionCompactionFailure = recordSessionCompactionFailure;
 exports.resetSessionCompactionFailures = resetSessionCompactionFailures;
 exports.registerSessionCompactionHook = registerSessionCompactionHook;
 exports.runSessionCompactionHooks = runSessionCompactionHooks;
+exports.runSessionContextCcMessageBucketSelfTest = runSessionContextCcMessageBucketSelfTest;
 const context_budget_1 = require("./context-budget");
 const crypto = __importStar(require("crypto"));
 const context_engine_observability_1 = require("./context-engine-observability");
+const session_context_tool_buckets_1 = require("./session-context-tool-buckets");
 exports.SESSION_COMPACTION_STATE_SCHEMA = "ccm-session-compaction-state-v2";
 exports.SESSION_COMPACTION_MAX_CONSECUTIVE_FAILURES = 3;
 exports.SESSION_MEMORY_INITIAL_TOKENS = 10_000;
@@ -199,6 +201,16 @@ function structuredContextHints(value) {
     visit(value);
     return result;
 }
+function userMcpHintTokens(value) {
+    if (value == null || value === "")
+        return 0;
+    const selected = (0, session_context_tool_buckets_1.selectUserMcpToolDefinitions)(value);
+    if (selected.length)
+        return valueTokens(selected);
+    if (Array.isArray(value) || (value && typeof value === "object"))
+        return 0;
+    return 0;
+}
 function toolContextHints(value) {
     const items = Array.isArray(value) ? value : value && typeof value === "object" ? Object.values(value) : [];
     let mcpTools = 0;
@@ -206,10 +218,10 @@ function toolContextHints(value) {
     for (const item of items) {
         const identity = JSON.stringify({ name: item?.name || item?.function?.name || item?.id || "", type: item?.type || "", source: item?.source || "" });
         const tokens = valueTokens(item);
-        if (/mcp__|\bmcp\b|dynamic[_-]?tool/i.test(identity))
-            mcpTools += tokens;
-        else if (/subagent|task[_-]?agent|worker[_-]?agent/i.test(identity))
+        if (/subagent|task[_-]?agent|worker[_-]?agent/i.test(identity))
             subagentDefinitions += tokens;
+        else if ((0, session_context_tool_buckets_1.isUserMcpToolDefinition)(item))
+            mcpTools += tokens;
     }
     return { mcpTools, subagentDefinitions };
 }
@@ -241,21 +253,20 @@ function buildModelVisiblePayloadSnapshot(input) {
     const toolHints = toolContextHints(input.tools);
     const explicit = input.contextComponents || {};
     const loadedContextItems = normalizeLoadedContextItems(explicit.loadedContextItems);
-    const toolMcpTokens = explicit.mcpTools === undefined ? toolHints.mcpTools : valueTokens(explicit.mcpTools);
+    const toolMcpTokens = toolHints.mcpTools;
     const toolSubagentTokens = toolHints.subagentDefinitions;
     const toolPartition = partitionTokens(rawToolTokens, { mcpTools: toolMcpTokens, subagentDefinitions: toolSubagentTokens });
     const rawRecentMessageTokens = recentMessages.reduce((sum, message) => sum + valueTokens(messageContent(message)), 0);
     const recentPartition = partitionTokens(rawRecentMessageTokens, {
         rules: explicit.messageRules === undefined ? 0 : valueTokens(explicit.messageRules),
         skills: explicit.messageSkills === undefined ? 0 : valueTokens(explicit.messageSkills),
-        mcpTools: explicit.messageMcpTools === undefined ? 0 : valueTokens(explicit.messageMcpTools),
-        mcpResults: explicit.mcpResults === undefined ? 0 : valueTokens(explicit.mcpResults),
+        mcpTools: explicit.messageMcpTools === undefined ? 0 : userMcpHintTokens(explicit.messageMcpTools),
         subagentDefinitions: explicit.messageSubagentDefinitions === undefined ? 0 : valueTokens(explicit.messageSubagentDefinitions),
     });
     const systemPartition = partitionTokens(rawSystemTokens, {
         rules: explicit.rules === undefined ? structuredHints.rules || 0 : valueTokens(explicit.rules),
         skills: explicit.skills === undefined ? structuredHints.skills || 0 : valueTokens(explicit.skills),
-        mcpTools: rawToolTokens > 0 ? 0 : explicit.mcpTools === undefined ? structuredHints.mcpTools || 0 : valueTokens(explicit.mcpTools),
+        mcpTools: rawToolTokens > 0 ? 0 : explicit.mcpTools === undefined ? structuredHints.mcpTools || 0 : userMcpHintTokens(explicit.mcpTools),
         subagentDefinitions: explicit.subagentDefinitions === undefined ? structuredHints.subagentDefinitions || 0 : valueTokens(explicit.subagentDefinitions),
     });
     const tokenBreakdown = {
@@ -655,5 +666,58 @@ async function runSessionCompactionHooks(phase, input) {
         });
     }
     return results.filter(result => result !== undefined && result !== null);
+}
+function runSessionContextCcMessageBucketSelfTest() {
+    const identity = (0, session_context_tool_buckets_1.runSessionContextToolBucketSelfTest)();
+    const readFilesBody = `${"README.md\n".repeat(40)}${"x".repeat(24_000)}`;
+    const inspectBody = `${"inspect_system\n".repeat(20)}${"y".repeat(18_000)}`;
+    const workspace = { name: "read_file", canonicalName: "mcp__ccm__ccm_workspace_readonly__read_file", server: "ccm__workspace_readonly", description: "read a workspace file" };
+    const userMcp = { name: "search_records", canonicalName: "mcp__ccm__docs__search_records", server: "docs", description: "search approved records", inputSchema: { type: "object", properties: { query: { type: "string" } } } };
+    const project = buildModelVisiblePayloadSnapshot({
+        scope: "project",
+        sessionId: "cc-connect-test:s1",
+        tools: [workspace, userMcp],
+        recentMessages: [
+            { role: "user", content: "read the project readme" },
+            { role: "tool", name: "read_files", content: readFilesBody },
+        ],
+        contextComponents: {
+            mcpTools: [workspace, userMcp],
+            mcpResults: readFilesBody,
+        },
+    });
+    const global = buildModelVisiblePayloadSnapshot({
+        scope: "global",
+        sessionId: "session:global-inspect",
+        tools: [{ name: "inspect_system", description: "inspect CCM" }, { name: "read_file", description: "read a file" }],
+        recentMessages: [
+            { role: "user", content: "inspect the system" },
+            { role: "tool", name: "inspect_system", content: inspectBody },
+        ],
+        contextComponents: {
+            mcpTools: [
+                { name: "inspect_system" },
+                { name: "read_file", canonicalName: "mcp__ccm__ccm_workspace_readonly__read_file", server: "ccm__workspace_readonly" },
+                userMcp,
+            ],
+        },
+    });
+    const checks = {
+        ...identity.checks,
+        identityPass: identity.pass === true,
+        projectResultsStayInConversation: project.tokenBreakdown.recentMessages > project.tokenBreakdown.mcpTools
+            && project.tokenBreakdown.recentMessages > 1_000
+            && Number(project.tokenBreakdown.mcpResults || 0) === 0,
+        projectMcpIsUserSchemaOnly: project.tokenBreakdown.mcpTools > 0
+            && project.tokenBreakdown.tools > 0
+            && project.tokenBreakdown.mcpTools < 400
+            && project.tokenBreakdown.mcpTools < project.tokenBreakdown.recentMessages,
+        projectIgnoresMcpResultsHint: Number(project.tokenBreakdown.mcpResults || 0) === 0,
+        globalObservationsStayInConversation: global.tokenBreakdown.recentMessages > 1_000
+            && Number(global.tokenBreakdown.mcpResults || 0) === 0,
+        globalManagementToolsStayInDefinitions: global.tokenBreakdown.tools > 0
+            && global.tokenBreakdown.mcpTools === 0,
+    };
+    return { pass: Object.values(checks).every(Boolean), checks, project: project.tokenBreakdown, global: global.tokenBreakdown };
 }
 //# sourceMappingURL=session-compaction-core.js.map

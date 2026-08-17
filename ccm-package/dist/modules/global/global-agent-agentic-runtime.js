@@ -45,6 +45,7 @@ const main_agent_turn_1 = require("../../agents/main-agent-turn");
 const global_native_query_adapter_1 = require("./global-native-query-adapter");
 const global_agent_tool_authorization_1 = require("./global-agent-tool-authorization");
 const global_tool_load_policy_1 = require("../../agents/global/global-tool-load-policy");
+const session_context_tool_buckets_1 = require("../../system/session-context-tool-buckets");
 const main_agent_tool_runtime_1 = require("../../tools/main-agent-tool-runtime");
 const workspace_read_context_1 = require("../../tools/workspace-read-context");
 const cc_tool_result_limits_1 = require("../../tools/cc-tool-result-limits");
@@ -424,7 +425,7 @@ function createGlobalAgentAgenticRuntime(deps) {
             skillSections.push(systemText.slice(selectedSkillStart));
         const authorizedTools = (0, global_agent_tool_authorization_1.buildGlobalAgentToolRuntimeContext)({ sessionId, taskId: String(run?.id || ""), source: "global-agent-provider-payload" }, (run?.loaded_tool_names || run?.loadedToolNames || []), { executionSkills: (0, global_agent_tool_authorization_1.resolveGlobalAgentExecutionSkillsFromRun)(run) });
         const configuredSkills = authorizedTools.catalog.skills.map((skill) => ({ name: String(skill?.name || ""), contentHash: String(skill?.contentHash || "") })).filter((skill) => skill.name);
-        const configuredMcpTools = authorizedTools.catalog.tools.map((tool) => ({ name: String(tool?.canonicalName || tool?.name || ""), server: String(tool?.server || "") })).filter((tool) => tool.name);
+        const configuredMcpTools = (0, session_context_tool_buckets_1.selectUserMcpToolDefinitions)(authorizedTools.catalog.tools).map((tool) => ({ name: String(tool?.canonicalName || tool?.name || ""), server: String(tool?.server || "") })).filter((tool) => tool.name);
         const restoredSkillNames = new Set((authorizedTools.restored_skill_attachments || []).map((skill) => String(skill?.name || "")));
         const loadedSkills = authorizedTools.catalog.skills
             .map((skill) => ({
@@ -453,7 +454,7 @@ function createGlobalAgentAgenticRuntime(deps) {
                 tokens: 0,
             });
         }
-        const loadedMcp = authorizedTools.catalog.tools.map((tool) => ({
+        const loadedMcp = (0, session_context_tool_buckets_1.selectUserMcpToolDefinitions)(authorizedTools.catalog.tools).map((tool) => ({
             kind: "mcp",
             name: String(tool?.canonicalName || tool?.name || ""),
             aliases: [
@@ -1802,7 +1803,7 @@ function createGlobalAgentAgenticRuntime(deps) {
                     const authorizedTools = (0, global_agent_tool_authorization_1.buildGlobalAgentToolRuntimeContext)({ taskId: run.id, sessionId: run.session_id, source: run.source || "global-agent-usage" }, run.loaded_tool_names || run.loadedToolNames || [], { executionSkills: (0, global_agent_tool_authorization_1.resolveGlobalAgentExecutionSkillsFromRun)(run) });
                     return {
                         skills: authorizedTools.catalog.skills.map((skill) => ({ name: String(skill?.name || ""), contentHash: String(skill?.contentHash || "") })).filter((skill) => skill.name),
-                        mcpTools: authorizedTools.catalog.tools.map((tool) => ({ name: String(tool?.canonicalName || tool?.name || ""), server: String(tool?.server || "") })).filter((tool) => tool.name),
+                        mcpTools: (0, session_context_tool_buckets_1.selectUserMcpToolDefinitions)(authorizedTools.catalog.tools).map((tool) => ({ name: String(tool?.canonicalName || tool?.name || ""), server: String(tool?.server || "") })).filter((tool) => tool.name),
                     };
                 })(),
             });

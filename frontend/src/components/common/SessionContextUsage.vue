@@ -150,10 +150,11 @@ const breakdownRows = computed(() => {
     { key: 'tools', label: 'Tool definitions', tokens: Number(breakdown.tools || 0), tone: 'tools' },
     { key: 'rules', label: 'Rules', tokens: Number(breakdown.rules || 0), tone: 'rules' },
     { key: 'skills', label: 'Skills', tokens: Number(breakdown.skills || 0), tone: 'skills' },
-    { key: 'mcp', label: 'MCP & dynamic tools', tokens: Number(breakdown.mcpTools ?? breakdown.mcp ?? 0) + Number(breakdown.mcpResults || 0), tone: 'mcp' },
+    { key: 'mcp', label: 'MCP & dynamic tools', tokens: Number(breakdown.mcpTools ?? breakdown.mcp ?? 0), tone: 'mcp' },
     { key: 'subagents', label: 'Subagent definitions', tokens: Number(breakdown.subagents || breakdown.subagentDefinitions || 0), tone: 'subagents' },
     { key: 'summary', label: 'Summarized conversation', tokens: Number(hasPayloadBreakdown ? breakdown.summary || 0 : measurement.estimatedSummaryTokens || 0), tone: 'summary' },
     { key: 'recentMessages', label: 'Conversation', tokens: Number(hasPayloadBreakdown ? breakdown.recentMessages || 0 : measurement.estimatedMessageTokens || 0), tone: 'conversation' },
+    { key: 'toolResults', label: '工具结果', tokens: Number(breakdown.mcpResults || 0), tone: 'conversation' },
     { key: 'currentRequest', label: 'Current request', tokens: Number(breakdown.currentRequest || 0), tone: 'request' },
     { key: 'recoveryContext', label: 'Recovery context', tokens: Number(hasPayloadBreakdown ? breakdown.recoveryContext || 0 : props.usage?.recoveryContextTokens || 0), tone: 'recovery' },
     { key: 'hookResults', label: 'Hooks', tokens: Number(hasPayloadBreakdown ? breakdown.hookResults || 0 : props.usage?.hookResultTokens || 0), tone: 'hooks' },
@@ -177,7 +178,7 @@ const breakdownRows = computed(() => {
   }))
 })
 const conversationTokens = computed(() => breakdownRows.value
-  .filter(row => ['summary', 'recentMessages', 'currentRequest'].includes(row.key))
+  .filter(row => ['summary', 'recentMessages', 'currentRequest', 'toolResults'].includes(row.key))
   .reduce((sum, row) => sum + Number(row.tokens || 0), 0))
 const dynamicContextTokens = computed(() => breakdownRows.value
   .filter(row => ['tools', 'skills', 'mcp', 'subagents', 'recoveryContext', 'hookResults', 'hydratedContext'].includes(row.key))

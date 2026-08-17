@@ -21,6 +21,7 @@ import {
   resolveGlobalAgentExecutionSkillsFromRun,
 } from "./global-agent-tool-authorization";
 import { isGlobalDeferredTool } from "../../agents/global/global-tool-load-policy";
+import { selectUserMcpToolDefinitions } from "../../system/session-context-tool-buckets";
 import { executeMainAgentToolRequests } from "../../tools/main-agent-tool-runtime";
 import { createWorkspaceReadContextLedger, type WorkspaceReadContextLedger } from "../../tools/workspace-read-context";
 import { CC_ALIGNED_TOOL_RESULT_MAX_TOKENS } from "../../tools/cc-tool-result-limits";
@@ -399,7 +400,7 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
       { executionSkills: resolveGlobalAgentExecutionSkillsFromRun(run) },
     );
     const configuredSkills = authorizedTools.catalog.skills.map((skill: any) => ({ name: String(skill?.name || ""), contentHash: String(skill?.contentHash || "") })).filter((skill: any) => skill.name);
-    const configuredMcpTools = authorizedTools.catalog.tools.map((tool: any) => ({ name: String(tool?.canonicalName || tool?.name || ""), server: String(tool?.server || "") })).filter((tool: any) => tool.name);
+    const configuredMcpTools = selectUserMcpToolDefinitions(authorizedTools.catalog.tools).map((tool: any) => ({ name: String(tool?.canonicalName || tool?.name || ""), server: String(tool?.server || "") })).filter((tool: any) => tool.name);
     const restoredSkillNames = new Set((authorizedTools.restored_skill_attachments || []).map((skill: any) => String(skill?.name || "")));
     const loadedSkills: any[] = authorizedTools.catalog.skills
       .map((skill: any) => ({
@@ -427,7 +428,7 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
         tokens: 0,
       });
     }
-    const loadedMcp = authorizedTools.catalog.tools.map((tool: any) => ({
+    const loadedMcp = selectUserMcpToolDefinitions(authorizedTools.catalog.tools).map((tool: any) => ({
         kind: "mcp" as const,
         name: String(tool?.canonicalName || tool?.name || ""),
         aliases: [
@@ -1745,7 +1746,7 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
           );
           return {
             skills: authorizedTools.catalog.skills.map((skill: any) => ({ name: String(skill?.name || ""), contentHash: String(skill?.contentHash || "") })).filter((skill: any) => skill.name),
-            mcpTools: authorizedTools.catalog.tools.map((tool: any) => ({ name: String(tool?.canonicalName || tool?.name || ""), server: String(tool?.server || "") })).filter((tool: any) => tool.name),
+            mcpTools: selectUserMcpToolDefinitions(authorizedTools.catalog.tools).map((tool: any) => ({ name: String(tool?.canonicalName || tool?.name || ""), server: String(tool?.server || "") })).filter((tool: any) => tool.name),
           };
         })(),
       });

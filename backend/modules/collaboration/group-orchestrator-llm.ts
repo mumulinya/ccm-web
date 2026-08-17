@@ -55,6 +55,7 @@ import { readSlashCommandSessionState, renderSlashCommandSessionDirective } from
 import { applyConversationPlanModeHold, applyConversationPlanModeToRound, isConversationPlanModeEnabled } from "../../system/conversation-plan-mode-gate";
 import { publishUserVisibleAssistantText } from "../../system/user-visible-agent-projections";
 import { buildModelVisiblePayloadSnapshot, modelVisibleFixedTokens } from "../../system/session-compaction-core";
+import { selectUserMcpToolDefinitions } from "../../system/session-context-tool-buckets";
 import { attachTransientModelBlocks, collectTransientModelBlocks } from "../../system/transient-model-content";
 import { buildRoleSkillPrompt } from "../../skills/role-skills";
 import type { ToolScope } from "../../tools/tool-manager";
@@ -828,8 +829,7 @@ export function buildLlmCoordinatorContextComponents(input: {
   return {
     rules: [WORKFLOW_DECISION_GUIDANCE, input.extraInstructions || ""].filter(Boolean).join("\n\n"),
     skills: [roleSkills.prompt || "", mainAgentTools.skillPrompt].filter(Boolean).join("\n\n"),
-    mcpTools: mainAgentTools.mcpPrompt,
-    mcpResults: toolResults,
+    mcpTools: selectUserMcpToolDefinitions(mainAgentTools.catalog?.mcp || mainAgentTools.catalog?.loadedMcp || []),
     subagentDefinitions: buildAllowedProjectBrief(group),
     loadedContextItems: buildMainAgentLoadedContextItems(
       mainAgentTools,

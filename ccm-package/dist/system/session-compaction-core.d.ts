@@ -315,4 +315,22 @@ export declare function recordSessionCompactionFailure(state: any, error: any): 
 export declare function resetSessionCompactionFailures(state: any): any;
 export declare function registerSessionCompactionHook(phase: SessionCompactionHookPhase, hook: SessionCompactionHook): () => boolean;
 export declare function runSessionCompactionHooks(phase: SessionCompactionHookPhase, input: any): Promise<any[]>;
+export declare function runSessionContextCcMessageBucketSelfTest(): {
+    pass: boolean;
+    checks: {
+        identityPass: boolean;
+        projectResultsStayInConversation: boolean;
+        projectMcpIsUserSchemaOnly: boolean;
+        projectIgnoresMcpResultsHint: boolean;
+        globalObservationsStayInConversation: boolean;
+        globalManagementToolsStayInDefinitions: boolean;
+        workspaceIsBuiltin: boolean;
+        workspaceIsNotUserMcp: boolean;
+        inspectStaysInToolDefinitions: boolean;
+        userMcpDetected: boolean;
+        selectFiltersWorkspace: boolean;
+    };
+    project: Record<string, number>;
+    global: Record<string, number>;
+};
 export {};

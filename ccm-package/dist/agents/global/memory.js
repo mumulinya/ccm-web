@@ -76,6 +76,7 @@ const memory_control_center_1 = require("../../modules/knowledge/memory-control-
 const group_compaction_engine_1 = require("../../modules/collaboration/group-compaction-engine");
 const group_orchestrator_config_1 = require("../../modules/collaboration/group-orchestrator-config");
 const main_agent_context_policy_1 = require("../../tools/main-agent-context-policy");
+const session_context_tool_buckets_1 = require("../../system/session-context-tool-buckets");
 const group_compaction_strategy_1 = require("../../modules/collaboration/group-compaction-strategy");
 const session_compaction_core_1 = require("../../system/session-compaction-core");
 const session_execution_ledger_1 = require("../../system/session-execution-ledger");
@@ -1237,7 +1238,7 @@ function commitGlobalAgentSessionCompaction(sessionId, options = {}) {
             contextComponents: {
                 ...(options.contextComponents || {}),
                 messageSkills: dynamicContextRestore.skillAttachments,
-                messageMcpTools: restoredMcpCatalog,
+                messageMcpTools: (0, session_context_tool_buckets_1.selectUserMcpToolDefinitions)(restoredMcpCatalog),
             },
         });
         const postCompactTokenCount = postCompactPayload.totalTokens;

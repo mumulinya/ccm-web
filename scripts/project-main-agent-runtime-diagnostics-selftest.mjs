@@ -42,9 +42,10 @@ const checks = {
     && mainAgent.includes('PROJECT_RUNTIME_DIAGNOSTIC_TOOL_SPECS')
     && mainAgent.includes('toolRequests'),
   planningAndAnalysisReceiveEvidence: mainAgent.includes('current_project_runtime: runtimeHydration.prompt')
-    && mainAgent.includes('runtimeEvidence = runtimeHydration.prompt'),
-  contextAccountingClassifiesResults: mainAgent.includes('mcpResults: [runtimeHydration.prompt, configuredToolHydration.prompt]')
-    && mainAgent.includes('mcpResults: [runtimeEvidence, toolEvidence].filter(Boolean).join'),
+    && mainAgent.includes('runtimeEvidence: projectRuntimeEvidenceSummary(runtimeHydration)'),
+  contextAccountingKeepsResultsInConversation: !mainAgent.includes('mcpResults: [runtimeHydration.prompt, configuredToolHydration.prompt]')
+    && !mainAgent.includes('mcpResults: [runtimeEvidence, toolEvidence].filter(Boolean).join')
+    && mainAgent.includes('selectUserMcpToolDefinitions(configuredToolContext.catalog.mcp)'),
   replayPersistsMetadataOnly: runtimeReplayBlock.includes('data: { runtime_evidence: input.plan.runtimeEvidence }')
     && runtimeReplayBlock.includes('input.plan.runtimeEvidence.toolCalls')
     && !runtimeReplayBlock.includes('runtimeHydration.prompt'),

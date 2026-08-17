@@ -62,6 +62,7 @@ const model_activity_1 = require("../../system/model-activity");
 const slash_command_session_state_1 = require("../../system/slash-command-session-state");
 const conversation_plan_mode_gate_1 = require("../../system/conversation-plan-mode-gate");
 const user_visible_agent_projections_1 = require("../../system/user-visible-agent-projections");
+const session_context_tool_buckets_1 = require("../../system/session-context-tool-buckets");
 const transient_model_content_1 = require("../../system/transient-model-content");
 const role_skills_1 = require("../../skills/role-skills");
 const main_agent_tool_runtime_1 = require("../../tools/main-agent-tool-runtime");
@@ -699,8 +700,7 @@ function buildLlmCoordinatorContextComponents(input) {
     return {
         rules: [workflow_decision_1.WORKFLOW_DECISION_GUIDANCE, input.extraInstructions || ""].filter(Boolean).join("\n\n"),
         skills: [roleSkills.prompt || "", mainAgentTools.skillPrompt].filter(Boolean).join("\n\n"),
-        mcpTools: mainAgentTools.mcpPrompt,
-        mcpResults: toolResults,
+        mcpTools: (0, session_context_tool_buckets_1.selectUserMcpToolDefinitions)(mainAgentTools.catalog?.mcp || mainAgentTools.catalog?.loadedMcp || []),
         subagentDefinitions: (0, group_orchestrator_coded_1.buildAllowedProjectBrief)(group),
         loadedContextItems: (0, main_agent_tool_runtime_1.buildMainAgentLoadedContextItems)(mainAgentTools, toolResults, roleSkills.selected.map((skill) => ({
             name: skill.name,

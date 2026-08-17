@@ -16,6 +16,7 @@ const globalAdapter = await load("modules", "global", "global-native-query-adapt
 const compact = await load("modules", "collaboration", "group-main-tool-result-compact.ts");
 const runtime = await load("tools", "main-agent-tool-runtime.ts");
 const ledger = await load("system", "session-execution-ledger.ts");
+const compactionCore = await load("system", "session-compaction-core.ts");
 
 const identityResult = identity.runMainAgentIdentitySelfTest();
 assert.equal(identityResult.pass, true, JSON.stringify(identityResult.checks, null, 2));
@@ -32,6 +33,9 @@ assert.equal(ledgerResult.pass, true, JSON.stringify(ledgerResult.checks, null, 
 
 const compactResult = compact.runGroupMainToolResultCompactSelfTest();
 assert.equal(compactResult.pass, true, JSON.stringify(compactResult.checks, null, 2));
+
+const bucketResult = compactionCore.runSessionContextCcMessageBucketSelfTest();
+assert.equal(bucketResult.pass, true, JSON.stringify(bucketResult.checks, null, 2));
 
 const transcriptResult = transcript.runNativeSessionTranscriptSelfTest();
 assert.equal(transcriptResult.pass, true, JSON.stringify(transcriptResult.checks, null, 2));

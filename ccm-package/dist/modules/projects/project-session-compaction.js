@@ -49,6 +49,7 @@ const utils_1 = require("../../core/utils");
 const group_compaction_engine_1 = require("../collaboration/group-compaction-engine");
 const group_orchestrator_config_1 = require("../collaboration/group-orchestrator-config");
 const main_agent_context_policy_1 = require("../../tools/main-agent-context-policy");
+const session_context_tool_buckets_1 = require("../../system/session-context-tool-buckets");
 const group_compaction_strategy_1 = require("../collaboration/group-compaction-strategy");
 const model_capability_cache_1 = require("../collaboration/model-capability-cache");
 const context_budget_1 = require("../../system/context-budget");
@@ -825,7 +826,7 @@ async function compactProjectSessionWithModel(project, projectSessionId, options
             contextComponents: {
                 ...(options.contextComponents || options.context_components || {}),
                 messageSkills: dynamicContextRestore.skillAttachments,
-                messageMcpTools: restoredMcpCatalog,
+                messageMcpTools: (0, session_context_tool_buckets_1.selectUserMcpToolDefinitions)(restoredMcpCatalog),
             },
         });
         let postCompactPayload = buildPostCompactPayload(summary);

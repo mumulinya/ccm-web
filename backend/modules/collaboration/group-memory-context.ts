@@ -28,6 +28,7 @@ import {
   restoreMainAgentPostCompactContext,
 } from "../../system/main-agent-post-compact-continuity";
 import { resolveMainAgentContextPolicy } from "../../tools/main-agent-context-policy";
+import { selectUserMcpToolDefinitions } from "../../system/session-context-tool-buckets";
 import { projectCommittedGroupCompaction } from "../../system/user-visible-agent-projections";
 import {
   getPublicAgentRuntimes,
@@ -1145,7 +1146,7 @@ export async function runGroupMemoryAutoCompactionNow(groupId: string, options: 
         rules: loadedConfig?.contextComponents?.rules || loadedConfig?.context_components?.rules || loadedConfig?.modelVisibleRules || loadedConfig?.model_visible_rules || null,
         subagentDefinitions: loadedConfig?.contextComponents?.subagentDefinitions || loadedConfig?.context_components?.subagentDefinitions || loadedConfig?.modelVisibleSubagentDefinitions || loadedConfig?.model_visible_subagent_definitions || null,
         messageSkills: dynamicContextRestore.skillAttachments,
-        messageMcpTools: restoredMcpCatalog,
+        messageMcpTools: selectUserMcpToolDefinitions(restoredMcpCatalog),
       },
       compactionLifecycleFence,
       compactionActivityOperationId: autoCompactAttemptId,

@@ -13,6 +13,7 @@ import { applyMemoryControls, recordMemoryMetric, recordMemoryOperation } from "
 import { callCompactionModel } from "../../modules/collaboration/group-compaction-engine";
 import { loadOrchestratorConfig } from "../../modules/collaboration/group-orchestrator-config";
 import { resolveMainAgentContextPolicy } from "../../tools/main-agent-context-policy";
+import { selectUserMcpToolDefinitions } from "../../system/session-context-tool-buckets";
 import { getGroupAutoCompactThreshold, resolveGroupModelContextCapacity } from "../../modules/collaboration/group-compaction-strategy";
 import {
   buildSessionPostCompactGate,
@@ -1209,7 +1210,7 @@ function commitGlobalAgentSessionCompaction(sessionId: string, options: GlobalSe
       contextComponents: {
         ...(options.contextComponents || {}),
         messageSkills: dynamicContextRestore.skillAttachments,
-        messageMcpTools: restoredMcpCatalog,
+        messageMcpTools: selectUserMcpToolDefinitions(restoredMcpCatalog),
       },
     });
     const postCompactTokenCount = postCompactPayload.totalTokens;

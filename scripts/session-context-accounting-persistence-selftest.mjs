@@ -93,7 +93,7 @@ try {
   assert.match(runtimeSource, /latest_model_visible_payload/);
   assert.match(runtimeSource, /modelVisiblePayload:\s*\(run as any\)\.latest_model_visible_payload/);
   assert.match(runtimeSource, /contextComponents:[\s\S]{0,500}skills:[\s\S]{0,500}mcpTools:/);
-  assert.match(runtimeSource, /}\n\s*try \{\n\s*recordGlobalAgentSessionProviderUsage\(sessionId/);
+  assert.match(runtimeSource, /}\r?\n\s*try \{\r?\n\s*recordGlobalAgentSessionProviderUsage\(sessionId/);
   console.log(JSON.stringify({ pass: true, scopes: ["global", "global_feishu", "project"], providerUsageReturned: false, exactProviderPayloadPersisted: true }, null, 2));
 } finally {
   fs.rmSync(tempHome, { recursive: true, force: true });

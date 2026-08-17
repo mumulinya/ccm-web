@@ -5,6 +5,7 @@ import { CCM_DIR, SESSIONS_DIR } from "../../core/utils";
 import { callCompactionModel } from "../collaboration/group-compaction-engine";
 import { loadOrchestratorConfig } from "../collaboration/group-orchestrator-config";
 import { resolveMainAgentContextPolicy } from "../../tools/main-agent-context-policy";
+import { selectUserMcpToolDefinitions } from "../../system/session-context-tool-buckets";
 import { resolveGroupModelContextCapacity } from "../collaboration/group-compaction-strategy";
 import { resolveTrustedModelContextCapacity } from "../collaboration/model-capability-cache";
 import { estimateTextTokens } from "../../system/context-budget";
@@ -824,7 +825,7 @@ export async function compactProjectSessionWithModel(project: string, projectSes
       contextComponents: {
         ...(options.contextComponents || options.context_components || {}),
         messageSkills: dynamicContextRestore.skillAttachments,
-        messageMcpTools: restoredMcpCatalog,
+        messageMcpTools: selectUserMcpToolDefinitions(restoredMcpCatalog),
       },
     });
     let postCompactPayload = buildPostCompactPayload(summary);

@@ -35,6 +35,7 @@
         "session-model-context-selftest.mjs",
       "memory-center-microcompact-display-selftest.mjs",
       "session-context-usage-ui-selftest.mjs",
+      "session-context-cc-message-buckets-selftest.mjs",
       "group-context-pressure-accounting-selftest.mjs",
       "group-compaction-invariant-selftest.mjs",
       "group-boundary-cursor-fence-selftest.mjs",

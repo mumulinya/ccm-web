@@ -68,6 +68,7 @@ const context_budget_1 = require("../../system/context-budget");
 const tool_manager_1 = require("../../tools/tool-manager");
 const main_agent_post_compact_continuity_1 = require("../../system/main-agent-post-compact-continuity");
 const main_agent_context_policy_1 = require("../../tools/main-agent-context-policy");
+const session_context_tool_buckets_1 = require("../../system/session-context-tool-buckets");
 const user_visible_agent_projections_1 = require("../../system/user-visible-agent-projections");
 const runtime_1 = require("../../agents/runtime");
 const group_runtime_memory_admission_1 = require("./group-runtime-memory-admission");
@@ -896,7 +897,7 @@ async function runGroupMemoryAutoCompactionNow(groupId, options = {}) {
                 rules: loadedConfig?.contextComponents?.rules || loadedConfig?.context_components?.rules || loadedConfig?.modelVisibleRules || loadedConfig?.model_visible_rules || null,
                 subagentDefinitions: loadedConfig?.contextComponents?.subagentDefinitions || loadedConfig?.context_components?.subagentDefinitions || loadedConfig?.modelVisibleSubagentDefinitions || loadedConfig?.model_visible_subagent_definitions || null,
                 messageSkills: dynamicContextRestore.skillAttachments,
-                messageMcpTools: restoredMcpCatalog,
+                messageMcpTools: (0, session_context_tool_buckets_1.selectUserMcpToolDefinitions)(restoredMcpCatalog),
             },
             compactionLifecycleFence,
             compactionActivityOperationId: autoCompactAttemptId,

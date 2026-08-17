@@ -96,8 +96,7 @@ export declare function buildLlmCoordinatorContextComponents(input: {
 }): {
     rules: string;
     skills: string;
-    mcpTools: any;
-    mcpResults: any[];
+    mcpTools: any[];
     subagentDefinitions: any;
     loadedContextItems: import("../../system/session-compaction-core").LoadedContextItemsV1;
 };

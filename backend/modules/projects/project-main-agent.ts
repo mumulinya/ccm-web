@@ -32,6 +32,7 @@ import { buildProjectMainIdentityRules, buildProjectMainSessionGuidance } from "
 import { createMainAgentTurnReceipt, normalizeMainAgentTurnDecision } from "../../agents/main-agent-turn";
 import { validateProjectName, validateSessionId, validateWorkDirectory } from "./project-validation";
 import { buildRoleSkillPrompt } from "../../skills/role-skills";
+import { selectUserMcpToolDefinitions } from "../../system/session-context-tool-buckets";
 import {
   buildMainAgentToolRuntimeContext,
   buildMainAgentLoadedContextItems,
@@ -801,8 +802,6 @@ async function hydrateProjectRuntimeDiagnostics(input: {
       projectSessionId: input.projectSessionId,
       currentRequest: input.userMessage,
       contextComponents: {
-        messageMcpTools: PROJECT_RUNTIME_DIAGNOSTIC_TOOL_SPECS,
-        mcpResults: manifest,
         loadedContextItems: {
           schema: "ccm-loaded-context-items-v1",
           skills: [],
@@ -1432,8 +1431,7 @@ export async function planProjectMainTask(input: {
   const contextComponents = {
     skills: [roleSkills.prompt, configuredToolContext.skillPrompt].filter(Boolean).join("\n\n"),
     projectSource: sourceHydration.prompt,
-    messageMcpTools: configuredToolContext.catalog.mcp,
-    mcpResults: [runtimeHydration.prompt, configuredToolHydration.prompt].filter(Boolean).join("\n\n"),
+    messageMcpTools: selectUserMcpToolDefinitions(configuredToolContext.catalog.mcp),
     loadedContextItems: projectMainLoadedContextItems(configuredToolContext, configuredToolHydration.results, roleSkills, runtimeHydration.results),
   };
   const planningIdentity = `你是 CCM 的项目主 Agent。你只负责一个项目，不能选择其他项目，也不能亲自修改代码。请把用户目标整理为可由该项目唯一开发 Agent 顺序执行的工作项，并给出可验证验收标准。

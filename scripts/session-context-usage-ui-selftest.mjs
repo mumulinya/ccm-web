@@ -114,6 +114,11 @@ const checks = {
   toolStateDoesNotGuessFromCategoryTokens: !/loadedThisTurn:\s*mcpLoadedTokens\s*>\s*0/.test(memoryCenterApi)
     && !/loadedThisTurn:\s*skillLoadedTokens\s*>\s*0/.test(memoryCenterApi)
     && /evidenceStatus:\s*evidenceAvailable\s*\?\s*"exact"\s*:\s*"unproven"/.test(memoryCenterApi),
+  mcpRowCountsSchemasOnly: /mcpTools \?\? breakdown\.mcp \?\? 0\), tone: 'mcp'/.test(component)
+    && !/\+ Number\(breakdown\.mcpResults \|\| 0\), tone: 'mcp'/.test(component)
+    && /label: '工具结果'/.test(component)
+    && /'summary', 'recentMessages', 'currentRequest', 'toolResults'/.test(component),
+  catalogLoadedTokensExcludeResults: /const mcpLoadedTokens = Math.max\(0, Number\(breakdown\.mcpTools \?\? breakdown\.mcp \?\? 0\)\);/.test(memoryCenterApi),
   threeMainAgentSurfacesAttachExactEvidence: /buildMainAgentLoadedContextItems/.test(groupOrchestrator)
     && /projectMainLoadedContextItems/.test(projectMainAgent)
     && /loadedContextItems/.test(globalAgentRuntime),
