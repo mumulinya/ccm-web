@@ -12,6 +12,7 @@ const props = defineProps({
   context: { type: String, default: 'task' },
   busy: { type: Boolean, default: false },
   compact: { type: Boolean, default: false },
+  suppressPlan: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['action'])
@@ -39,10 +40,11 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
     :card="card"
     :context="context"
     :busy="busy"
+    :suppress-plan="suppressPlan"
     @action="emit('action', $event)"
     @open-details="detailsOpen = true"
   />
-  <TaskExperiencePanel v-else-if="card" :card="card" :context="context" :busy="busy" @action="emit('action', $event)" />
+  <TaskExperiencePanel v-else-if="card" :card="card" :context="context" :busy="busy" :suppress-plan="suppressPlan" @action="emit('action', $event)" />
 
   <Teleport to="body">
     <div v-if="card && compact && detailsOpen" class="task-detail-overlay" role="presentation" @mousedown.self="closeDetails">
@@ -55,7 +57,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
           <button type="button" title="关闭详情" aria-label="关闭详情" @click="closeDetails"><X :size="18" /></button>
         </header>
         <div class="task-detail-body">
-          <TaskExperienceDetail :card="card" :context="context" :busy="busy" @action="emit('action', $event)" />
+          <TaskExperienceDetail :card="card" :context="context" :busy="busy" :suppress-plan="suppressPlan" @action="emit('action', $event)" />
         </div>
       </aside>
     </div>

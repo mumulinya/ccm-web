@@ -33,14 +33,33 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.resolveMainAgentTurnResponseKind = resolveMainAgentTurnResponseKind;
 exports.normalizeMainAgentTurnDecision = normalizeMainAgentTurnDecision;
 exports.createMainAgentTurnReceipt = createMainAgentTurnReceipt;
 exports.publicMainAgentTurnDecision = publicMainAgentTurnDecision;
+exports.runMainAgentTurnDecisionSelfTest = runMainAgentTurnDecisionSelfTest;
 const crypto = __importStar(require("crypto"));
 const clarification_turn_1 = require("./clarification-turn");
 const workflow_decision_1 = require("./workflow-decision");
 function checksum(value) {
     return crypto.createHash("sha256").update(JSON.stringify(value ?? null)).digest("hex");
+}
+function resolveMainAgentTurnResponseKind(input) {
+    const parsed = input.parsed && typeof input.parsed === "object" ? input.parsed : {};
+    const explicit = String(parsed.responseType || parsed.response_type || "").trim();
+    if (explicit === "plan")
+        return "plan";
+    if ((0, clarification_turn_1.parsedRequestsUserClarification)(parsed)
+        || input.workflowDecision.structuredClarificationQuestions.length
+        || input.workflowDecision.clarificationQuestions.length)
+        return "clarify";
+    if ((input.toolRequests || []).length)
+        return "tool_calls";
+    if (explicit === "clarify")
+        return "clarify";
+    const hasDispatchDraft = Array.isArray(input.dispatchDraft) && input.dispatchDraft.length > 0;
+    const requestedDispatch = explicit === "dispatch" || hasDispatchDraft || input.workflowDecision.needsEpicDecomposition === true;
+    return requestedDispatch && (0, workflow_decision_1.isDevelopmentTaskWorkflowDecision)(input.workflowDecision) ? "dispatch" : "reply";
 }
 function normalizeMainAgentTurnDecision(input) {
     const parsed = input.parsed && typeof input.parsed === "object" ? input.parsed : {};
@@ -56,20 +75,7 @@ function normalizeMainAgentTurnDecision(input) {
     const reply = String(input.reply ?? parsed.reply ?? parsed.questionForUser ?? parsed.question_for_user ?? parsed.directResponse ?? parsed.direct_response ?? parsed.friendlyResponse ?? parsed.friendly_response ?? parsed.message ?? "").trim();
     const planDraft = input.planDraft ?? parsed.plan ?? parsed.coordinationPlan ?? parsed.coordination_plan ?? null;
     const dispatchDraft = input.dispatchDraft ?? parsed.targets ?? parsed.assignments ?? null;
-    const explicitResponseKind = String(parsed.responseType || parsed.response_type || "").trim();
-    const responseKind = ["dispatch", "plan"].includes(explicitResponseKind)
-        ? explicitResponseKind
-        : (0, clarification_turn_1.parsedRequestsUserClarification)(parsed) || workflowDecision.structuredClarificationQuestions.length || workflowDecision.clarificationQuestions.length
-            ? "clarify"
-            : toolRequests.length
-                ? "tool_calls"
-                : ["reply", "clarify"].includes(explicitResponseKind)
-                    ? explicitResponseKind
-                    : workflowDecision.mode === "decompose_epic" || (Array.isArray(dispatchDraft) && dispatchDraft.length)
-                        ? "dispatch"
-                        : workflowDecision.mode === "plan_task" || workflowDecision.mode === "execute_direct" || workflowDecision.actionRequired
-                            ? "plan"
-                            : "reply";
+    const responseKind = resolveMainAgentTurnResponseKind({ parsed, workflowDecision, toolRequests, dispatchDraft });
     const body = {
         schema: "ccm-main-agent-turn-decision-v1",
         scope: input.scope,
@@ -100,6 +106,7 @@ function createMainAgentTurnReceipt(input) {
         usage: input.usage || null,
         inputChecksum: checksum(input.inputIdentity || null),
         decisionChecksum: input.decision.checksum,
+        ...(input.promptBindings ? { promptBindings: input.promptBindings } : {}),
         createdAt: input.createdAt || new Date().toISOString(),
     };
     return { ...body, checksum: checksum(body) };
@@ -116,5 +123,30 @@ function publicMainAgentTurnDecision(decision) {
         tool_count: decision.toolRequests.length,
         checksum: decision.checksum,
     };
+}
+function runMainAgentTurnDecisionSelfTest() {
+    const build = (parsed, workflowDecision) => normalizeMainAgentTurnDecision({
+        scope: "project",
+        scopeId: "demo",
+        exactSessionId: "session",
+        turnId: crypto.randomUUID(),
+        parsed,
+        workflowDecision,
+    });
+    const reply = build({ responseType: "reply", reply: "你好" }, { reason: "直接回复", actionRequired: false, requiresCodeChanges: false });
+    const tools = build({ responseType: "tool_calls", toolRequests: [{ name: "read_file", arguments: { path: "README.md" } }] }, { reason: "读取项目", actionRequired: false, requiresCodeChanges: false });
+    const dispatch = build({ responseType: "dispatch", targets: [{ project: "demo" }] }, { reason: "修改项目", actionRequired: true, requiresCodeChanges: true });
+    const rejectedDispatch = build({ responseType: "dispatch", targets: [{ project: "demo" }] }, { reason: "只需回答", actionRequired: false, requiresCodeChanges: false });
+    const plan = build({ responseType: "plan", plan: { steps: [{ title: "核对范围" }] } }, { reason: "手动 Plan", actionRequired: false, requiresCodeChanges: false });
+    const epic = build({ targets: [{ project: "demo" }] }, { reason: "内部拆解", actionRequired: true, requiresCodeChanges: true, needsEpicDecomposition: true });
+    const checks = {
+        replyStaysReply: reply.responseKind === "reply",
+        readToolsStayToolCalls: tools.responseKind === "tool_calls",
+        acceptedDevelopmentDispatches: dispatch.responseKind === "dispatch",
+        ungroundedDispatchFailsClosed: rejectedDispatch.responseKind === "reply",
+        manualPlanPresents: plan.responseKind === "plan",
+        epicUsesDispatchWithoutPlan: epic.responseKind === "dispatch",
+    };
+    return { pass: Object.values(checks).every(Boolean), checks };
 }
 //# sourceMappingURL=main-agent-turn.js.map

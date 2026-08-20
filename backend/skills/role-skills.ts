@@ -182,29 +182,29 @@ export function selectRoleSkills(role: CcmAgentRole, taskText = "", options: Rol
   const phase = options.phase || (role === "test-agent" ? "verification" : role === "project-child-agent" ? "execution" : "planning");
   const add = (name: RoleSkillName, kind: "role" | "shared" | "workflow", reason: string) => rows.push({ name, kind, reason });
   if (planAuthoring) {
-    add(CCM_ROLE_SKILL_NAMES.implementationPlanAuthoring, "workflow", "用户已选择 Plan 模式，本轮需要产出用户可确认的计划卡");
+    add(CCM_ROLE_SKILL_NAMES.implementationPlanAuthoring, "workflow", "The user selected plan authoring; this turn must produce a user-confirmable plan card.");
   }
   if (!planAuthoringOnly && role === "global-agent") {
-    add(CCM_ROLE_SKILL_NAMES.global, "role", "跨群聊任务路由与监督");
+    add(CCM_ROLE_SKILL_NAMES.global, "role", "Route and supervise work across groups and projects.");
   }
   if (!planAuthoringOnly && (role === "group-main-agent" || role === "project-main-agent")) {
-    add(CCM_ROLE_SKILL_NAMES.group, "role", role === "project-main-agent" ? "单项目任务计划、派发与复核" : "群聊任务计划、派发与复核");
+    add(CCM_ROLE_SKILL_NAMES.group, "role", role === "project-main-agent" ? "Plan, dispatch, and review work for one project." : "Plan, dispatch, and review group work.");
     if (phase === "review" || phase === "summary") {
-      add(CCM_ROLE_SKILL_NAMES.deliveryReviewRework, "workflow", "当前阶段需要复核回执或生成返工");
-      add(CCM_ROLE_SKILL_NAMES.receipt, "shared", "读取统一子 Agent 交付回执");
-      add(CCM_ROLE_SKILL_NAMES.evidence, "shared", "复核验收项与实际证据");
+      add(CCM_ROLE_SKILL_NAMES.deliveryReviewRework, "workflow", "Review receipts and produce evidence-based rework when needed.");
+      add(CCM_ROLE_SKILL_NAMES.receipt, "shared", "Read the unified child-Agent delivery receipt.");
+      add(CCM_ROLE_SKILL_NAMES.evidence, "shared", "Map acceptance criteria to real evidence.");
     } else {
-      add(CCM_ROLE_SKILL_NAMES.taskDecomposition, "workflow", "当前阶段需要拆解和路由任务");
+      add(CCM_ROLE_SKILL_NAMES.taskDecomposition, "workflow", "Decompose and route the current delivery work.");
     }
   }
   if (role === "project-child-agent") {
-    add(CCM_ROLE_SKILL_NAMES.project, "role", "限定范围内实施与验证");
-    add(CCM_ROLE_SKILL_NAMES.projectSourceResearch, "workflow", "修改前确认当前源码和项目规范");
-    add(CCM_ROLE_SKILL_NAMES.receipt, "shared", "向主 Agent 返回可复核回执");
+    add(CCM_ROLE_SKILL_NAMES.project, "role", "Implement and verify changes within the assigned scope.");
+    add(CCM_ROLE_SKILL_NAMES.projectSourceResearch, "workflow", "Confirm current source and project conventions before editing.");
+    add(CCM_ROLE_SKILL_NAMES.receipt, "shared", "Return an auditable receipt to the main Agent.");
   }
   if (role === "test-agent") {
-    add(CCM_ROLE_SKILL_NAMES.test, "role", "独立验收与保守结论");
-    add(CCM_ROLE_SKILL_NAMES.evidence, "shared", "验收项与真实证据绑定");
+    add(CCM_ROLE_SKILL_NAMES.test, "role", "Independently verify acceptance and reach conservative conclusions.");
+    add(CCM_ROLE_SKILL_NAMES.evidence, "shared", "Bind acceptance criteria to reproducible evidence.");
   }
 
   const roleRoots = new Set<RoleSkillName>([
@@ -220,7 +220,7 @@ export function selectRoleSkills(role: CcmAgentRole, taskText = "", options: Rol
       const name = String(rawName || "").trim() as RoleSkillName;
       if (!definitions.has(name) || roleRoots.has(name)) continue;
       if (name === CCM_ROLE_SKILL_NAMES.implementationPlanAuthoring && !planAuthoring) continue;
-      add(name, name === CCM_ROLE_SKILL_NAMES.receipt || name === CCM_ROLE_SKILL_NAMES.evidence ? "shared" : "workflow", "统一大模型根据完整任务语义选择");
+      add(name, name === CCM_ROLE_SKILL_NAMES.receipt || name === CCM_ROLE_SKILL_NAMES.evidence ? "shared" : "workflow", "Selected by the orchestration model from the complete task semantics.");
     }
   }
 
@@ -242,17 +242,17 @@ export function selectRoleSkills(role: CcmAgentRole, taskText = "", options: Rol
 export function buildSelectedSkillUsageDirective(selected: Array<Pick<SelectedRoleSkill, "name" | "reason">>) {
   if (!selected.length) return "";
   return [
-    "[CCM 本工作单已选择 Skill]",
-    "以下 Skill 不是可选目录项，而是本工作单已匹配的执行方法。开始工作前读取并应用其 SKILL.md；只在需要细节时读取 references。",
-    ...selected.map(item => `- Skill:${item.name}：${item.reason}`),
-    "完成后在 CCM_AGENT_RECEIPT 的 memoryUsed/Skill 使用记录中逐项报告实际使用的 Skill:<name>；未使用时说明原因，禁止虚报。",
+    "[CCM selected Skills for this work order]",
+    "These Skills are assigned execution methods, not optional catalog entries. Read and apply each SKILL.md before work; read references only when needed.",
+    ...selected.map(item => `- Skill:${item.name}: ${item.reason}`),
+    "In CCM_AGENT_RECEIPT, report each Skill actually used under memoryUsed/Skill usage. If a selected Skill was not used, explain why; never fabricate usage.",
   ].join("\n");
 }
 
 export function buildModelSelectableSkillCatalog() {
   return [
-    "[CCM 可由模型选择的 Skill 目录]",
-    "根据完整任务语义在 workflowDecision.selectedSkills 中选择最多 6 项；不要使用关键词机械匹配。",
+    "[CCM model-selectable Skill catalog]",
+    "Select at most six entries in workflowDecision.selectedSkills from the complete task semantics; never match mechanically by keyword.",
     ...ROLE_SKILL_CATALOG.map(item => `- ${item.name}: ${item.description}`),
   ].join("\n");
 }
@@ -263,7 +263,7 @@ export function buildRoleSkillPrompt(role: CcmAgentRole, taskText = "", options:
   const sections = selected.map(item => `## Skill:${item.name}\n${item.body}`);
   return {
     names: selected.map(item => item.name),
-    prompt: `[CCM 本轮角色 Skill]\n${sections.join("\n\n")}`.slice(0, 12_000),
+    prompt: `[CCM role Skills for this turn]\n${sections.join("\n\n")}`.slice(0, 12_000),
     selected,
   };
 }
@@ -343,7 +343,7 @@ export function runRoleSkillSelectionSelfTest() {
       && directProjectBusinessWork.some(item => item.name === CCM_ROLE_SKILL_NAMES.interfaceDataContract)
       && directProjectBusinessWork.some(item => item.name === CCM_ROLE_SKILL_NAMES.businessScenarioAcceptance),
     selectionBudgetBounded: [globalWork, groupWork, groupWorkPlanMode, sneakyPlanSkill, groupReview, projectWork, incidentWork, releaseWork, testWork, businessPlanning, contractWork, businessReview, businessTest, visualOnly, directProjectBusinessWork, planAuthoringOnly, planAuthoringProjectOnly].every(items => items.length <= 6),
-    usageDirectiveRequiresApplicationAndReceipt: buildSelectedSkillUsageDirective(projectWork).includes("不是可选目录项")
+    usageDirectiveRequiresApplicationAndReceipt: buildSelectedSkillUsageDirective(projectWork).includes("not optional catalog entries")
       && buildSelectedSkillUsageDirective(projectWork).includes("CCM_AGENT_RECEIPT"),
   };
   return {

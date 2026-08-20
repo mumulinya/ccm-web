@@ -4519,8 +4519,10 @@ function buildDeterministicConversationSummary(messages, memory, previous = {}) 
         files.push(...extractFiles(message));
         runtimeFacts.push(...extractRuntimeSkillFacts(message));
         const structuredStatus = String(message?.receipt?.status || message?.delivery_summary?.status || message?.status || "").toLowerCase();
-        if (["failed", "blocked", "timed_out", "timeout", "rejected", "needs_user", "needs_info"].includes(structuredStatus))
+        if (["failed", "blocked", "timed_out", "timeout", "rejected", "needs_user", "needs_info"].includes(structuredStatus)
+            || /(执行失败|失败|超时|error|failed|timed\s*out|timeout)/i.test(content)) {
             errors.push(`${actor}: ${compactText(content || structuredStatus, 600)}`);
+        }
         if (message?.dispatchPolicy?.action || Array.isArray(message?.assignments) && message.assignments.length) {
             decisions.push(`${actor}: ${message?.dispatchPolicy?.action || "delegate"}；${compactText(message?.dispatchPolicy?.reason || content, 500)}`);
             for (const assignment of message.assignments || []) {

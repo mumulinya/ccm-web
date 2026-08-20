@@ -147,7 +147,7 @@ function defaultOrchestratorConfig() {
         anthropicCacheReferenceEnabled: false,
         inferenceBackendKind: "remote_api",
         metricsPath: "",
-        timeBasedMicrocompactEnabled: false,
+        timeBasedMicrocompactEnabled: true,
         timeBasedThinkingClearEnabled: false,
         timeBasedMicrocompactGapMinutes: 60,
         timeBasedMicrocompactKeepRecent: 5,
@@ -777,14 +777,14 @@ async function testUnifiedModelConnection() {
         const messages = [{ role: "user", content: "仅回复 OK" }];
         const content = provider === "anthropic-compatible"
             ? await (0, group_orchestrator_llm_client_1.callAnthropicCompatibleChat)(testConfig, {
-                system: "你正在执行 CCM 统一大模型连通性检查。",
+                system: "You are running a CCM unified-model connectivity check. Return only a short health response.",
                 messages,
                 maxTokens: 16,
                 temperature: 0,
                 defaultTimeoutMs: 15_000,
             })
             : await (0, group_orchestrator_llm_client_1.callOpenAiCompatibleChat)(testConfig, {
-                messages: [{ role: "system", content: "你正在执行 CCM 统一大模型连通性检查。" }, ...messages],
+                messages: [{ role: "system", content: "You are running a CCM unified-model connectivity check. Return only a short health response." }, ...messages],
                 maxTokens: 16,
                 temperature: 0,
                 defaultTimeoutMs: 15_000,

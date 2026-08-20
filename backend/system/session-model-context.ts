@@ -6,6 +6,7 @@ import {
   type SessionExecutionEvent,
 } from "./session-execution-ledger";
 import { isPersistedToolResult } from "../tools/tool-result-storage";
+import { buildUnifiedCompactionReceipt, resolveUnifiedCompactionPolicy } from "./unified-session-compaction";
 
 export type SessionModelContextScope = "global" | "group" | "project";
 
@@ -46,18 +47,22 @@ export type UnifiedSessionModelContextInput = {
 };
 
 export function resolveSessionModelMicroCompactPolicy(config: any = {}, overrides: SessionModelContextMicroCompactPolicy = {}): SessionModelContextMicroCompactPolicy {
-  const configuredEnabled = config?.timeBasedMicrocompactEnabled ?? config?.time_based_microcompact_enabled;
-  const configuredGap = config?.timeBasedMicrocompactGapMinutes ?? config?.time_based_microcompact_gap_minutes;
-  const configuredKeepRecent = config?.timeBasedMicrocompactKeepRecent ?? config?.time_based_microcompact_keep_recent;
+  const unified = resolveUnifiedCompactionPolicy(config, {
+    microCompactEnabled: overrides.enabled,
+    idleGapMinutes: overrides.gapThresholdMinutes,
+    keepRecentToolResults: overrides.keepRecent,
+    pressureFirst: true,
+    autoCompactThreshold: overrides.pressureThresholdTokens || undefined,
+  });
   return {
-    enabled: overrides.enabled ?? configuredEnabled === true,
+    enabled: overrides.enabled ?? unified.microCompactEnabled,
     trigger: overrides.trigger || "time_based",
     mainThread: overrides.mainThread ?? true,
-    gapThresholdMinutes: Math.max(1, Number(overrides.gapThresholdMinutes ?? configuredGap ?? 60)),
-    keepRecent: Math.max(1, Number(overrides.keepRecent ?? configuredKeepRecent ?? 5)),
+    gapThresholdMinutes: Math.max(1, Number(overrides.gapThresholdMinutes ?? unified.idleGapMinutes)),
+    keepRecent: Math.max(1, Number(overrides.keepRecent ?? unified.keepRecentToolResults)),
     contextTokens: Math.max(0, Number(overrides.contextTokens || 0)),
-    pressureThresholdTokens: Math.max(0, Number(overrides.pressureThresholdTokens || 0)),
-    contextPressureEnabled: false,
+    pressureThresholdTokens: Math.max(0, Number(overrides.pressureThresholdTokens || unified.autoCompactThreshold || 0)),
+    contextPressureEnabled: overrides.contextPressureEnabled ?? true,
     now: overrides.now,
   };
 }
@@ -157,7 +162,7 @@ function selectTimeBasedMicroCompact(events: SessionExecutionEvent[], messages: 
     && policy.contextPressureEnabled === true
     && pressureThresholdTokens > 0
     && contextTokens >= Math.floor(pressureThresholdTokens * 0.9);
-  const pressureTriggered = false;
+  const pressureTriggered = pressureRequested;
   if (!timeTriggered && !pressureTriggered) {
     return {
       ...receipt,
@@ -393,6 +398,26 @@ export function buildUnifiedSessionModelContextProjection(input: UnifiedSessionM
       ...events.map(event => [event.id, event.type, event.toolCallId, event.payload]),
     ])).digest("hex"),
   };
+  const unifiedPolicy = resolveUnifiedCompactionPolicy({}, {
+    microCompactEnabled: input.microCompact?.enabled,
+    idleGapMinutes: input.microCompact?.gapThresholdMinutes,
+    keepRecentToolResults: input.microCompact?.keepRecent,
+    autoCompactThreshold: input.microCompact?.pressureThresholdTokens || undefined,
+  });
+  projection.unifiedCompaction = buildUnifiedCompactionReceipt({
+    scope: input.scope,
+    exactSessionId: sessionId,
+    stage: microCompact.applied ? "microcompact" : canonicalSummary ? "post_gate" : "idle",
+    beforeTokens: projection.visibleMessageTokens + projection.archiveMessageTokens,
+    afterTokens: projection.visibleMessageTokens,
+    microCompactApplied: microCompact.applied,
+    microCompactTrigger: microCompact.trigger === "context_pressure" ? "pressure" : microCompact.applied ? "idle" : "none",
+    summarySource: canonicalSummary ? "reused" : "none",
+    gateStatus: "ready",
+    boundaryGeneration: projection.boundaryGeneration,
+    summaryChecksum: projection.summaryChecksum,
+  });
+  projection.unifiedCompaction.policy = unifiedPolicy;
   projection.rendered = renderProjection(input, projection);
   projection.renderedTokens = estimateTextTokens(projection.rendered);
   return projection;
@@ -463,8 +488,9 @@ export function runUnifiedSessionModelContextSelfTest() {
       && old.microCompact.clearedToolCallIds.length === 1
       && old.visibleMessages.some(message => message.content.includes(CC_TIME_BASED_CLEARED_MESSAGE))
       && old.visibleMessages.some(message => message.content.includes("result-6")),
-    pressureTriggerDefersToFormalCompaction: pressured.microCompact.applied === false
-      && pressured.microCompact.reason === "context_pressure_requires_formal_compaction",
+    pressureTriggerClearsOldToolResult: pressured.microCompact.applied === true
+      && pressured.microCompact.trigger === "context_pressure"
+      && pressured.microCompact.clearedToolCallIds.length === 1,
     oldLargeToolResultReplacedRecoverably: replaced.contentReplacement.applied === true
       && replaced.contentReplacement.replacements.length === 1
       && replaced.visibleMessages.some(message => message.content.includes("raw result retained and recoverable"))

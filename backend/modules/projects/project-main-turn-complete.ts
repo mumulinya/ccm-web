@@ -10,7 +10,7 @@ import {
 
 export type ProjectFirstTurnVisiblePresentation = {
   present: boolean;
-  messageMode: "conversation" | "project_analysis";
+  messageMode: "conversation";
   reply: string;
   presentedPlan: any | null;
   responseKind: string;
@@ -32,12 +32,6 @@ export function projectFirstTurnShouldEnterTask(firstTurn: any, options: { treat
   return options.treatAsTask === true || isDevelopmentTaskWorkflowDecision(firstTurn?.workflowDecision);
 }
 
-export function projectFirstTurnMessageMode(firstTurn: any): "conversation" | "project_analysis" {
-  return String(firstTurn?.workflowDecision?.mode || firstTurn?.parsed?.workflowDecision?.mode || "") === "project_analysis"
-    ? "project_analysis"
-    : "conversation";
-}
-
 export function projectFirstTurnVisiblePresentation(firstTurn: any, options: { treatAsTask?: boolean } = {}): ProjectFirstTurnVisiblePresentation {
   const responseKind = String(firstTurn?.responseType || firstTurn?.turnDecision?.responseKind || "");
   const presentedPlan = presentedPlanFromProjectFirstTurn(firstTurn);
@@ -57,7 +51,7 @@ export function projectFirstTurnVisiblePresentation(firstTurn: any, options: { t
   }
   return {
     present: true,
-    messageMode: projectFirstTurnMessageMode(firstTurn),
+    messageMode: "conversation",
     reply,
     presentedPlan,
     responseKind,
@@ -77,21 +71,21 @@ export function projectFirstTurnVisibleCompletion(firstTurn: any, options: { tre
 }
 
 export function runProjectMainTurnCompleteSelfTest() {
-  const replyTurn = { responseType: "reply", reply: "这是问候。", workflowDecision: { mode: "answer", actionRequired: false } };
-  const clarifyTurn = { responseType: "clarify", reply: "首版范围是什么？", workflowDecision: { mode: "answer", actionRequired: false } };
+  const replyTurn = { responseType: "reply", reply: "这是问候。", workflowDecision: { actionRequired: false, requiresCodeChanges: false } };
+  const clarifyTurn = { responseType: "clarify", reply: "首版范围是什么？", workflowDecision: { actionRequired: false, requiresCodeChanges: false } };
   const planTurn = {
     responseType: "plan",
     reply: "请看计划",
     turnDecision: { turnId: "turn-plan-1", responseKind: "plan", reply: "请看计划" },
     parsed: { responseType: "plan", plan: { title: "登录", goal: "修好登录过期", steps: [{ title: "改 auth.ts" }] } },
-    workflowDecision: { mode: "plan_task", actionRequired: false, requiresCodeChanges: false },
+    workflowDecision: { actionRequired: false, requiresCodeChanges: false },
   };
-  const emptyAnalysis = { responseType: "reply", reply: "", workflowDecision: { mode: "project_analysis", actionRequired: false } };
+  const emptyAnalysis = { responseType: "reply", reply: "", workflowDecision: { actionRequired: false, requiresCodeChanges: false } };
   const devTask = {
     responseType: "plan",
     reply: "请看计划",
     parsed: { plan: { title: "登录", goal: "修好登录", steps: [{ title: "改 auth.ts" }] } },
-    workflowDecision: { mode: "plan_task", actionRequired: true, requiresCodeChanges: true },
+    workflowDecision: { actionRequired: true, requiresCodeChanges: true },
   };
   const replyVisible = projectFirstTurnVisiblePresentation(replyTurn);
   const clarifyVisible = projectFirstTurnVisiblePresentation(clarifyTurn);
@@ -104,7 +98,7 @@ export function runProjectMainTurnCompleteSelfTest() {
     clarifyPresents: clarifyVisible.present === true && clarifyVisible.responseKind === "clarify",
     planCardPresents: planVisible.present === true && planVisible.presentedPlan?.steps?.[0]?.title === "改 auth.ts",
     emptyAnalysisPresentsFallback: empty.present === true
-      && empty.messageMode === "project_analysis"
+      && empty.messageMode === "conversation"
       && empty.reply === COORDINATOR_EMPTY_REPLY_FALLBACK,
     developmentTaskDoesNotPresent: task.present === false,
     parentTaskPlanDoesNotPresent: parentTaskPlan.present === false,

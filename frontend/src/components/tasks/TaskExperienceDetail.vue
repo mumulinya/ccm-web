@@ -35,6 +35,7 @@ const props = defineProps({
   card: { type: Object, required: true },
   context: { type: String, default: 'task' },
   busy: { type: Boolean, default: false },
+  suppressPlan: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['action'])
@@ -394,8 +395,11 @@ const loadCompletePlan = async () => {
     replayPlanLoading.value = false
   }
 }
-onMounted(loadCompletePlan)
-const actions = computed(() => asList(props.card.actions).filter(action => action?.kind !== 'view_changes').slice(0, 5))
+onMounted(() => { if (!props.suppressPlan) void loadCompletePlan() })
+const actions = computed(() => asList(props.card.actions)
+  .filter(action => action?.kind !== 'view_changes')
+  .filter(action => !props.suppressPlan || !['confirm', 'confirm_plan', 'revise_plan'].includes(action?.kind))
+  .slice(0, 5))
 const resolutionActions = computed(() => {
   const configuredKinds = new Set(actions.value.map(action => action?.kind))
   const rows = []
@@ -500,7 +504,7 @@ const onFullRecordToggle = (event) => { fullRecordOpen.value = event.currentTarg
         </div>
       </section>
 
-      <section v-if="activePlan || replayPlanLoading || replayPlanError" class="detail-section execution-plan-section">
+      <section v-if="!suppressPlan && (activePlan || replayPlanLoading || replayPlanError)" class="detail-section execution-plan-section">
         <header>
           <div><small>模型计划</small><h3>执行计划</h3></div>
           <span>{{ replayPlanLoading ? '正在读取' : `${planCompletedCount}/${planTotalCount} 已完成` }}</span>

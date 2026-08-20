@@ -7,16 +7,16 @@ import {
 } from "./feishu-client.js";
 
 export function registerTools(server: McpServer, client: FeishuClient) {
-  // Tool 1: 列出群聊
+  // Tool 1: list chats
   server.tool(
     "list_chats",
-    "列出机器人所在的飞书群聊。返回群聊名称、chat_id、成员数量等信息。",
+    "List Feishu chats where the bot is a member. Return chat names, chat IDs, member counts, and related metadata.",
     {
       page_size: z
         .number()
         .optional()
-        .describe("每页返回数量，默认20，最大100"),
-      page_token: z.string().optional().describe("分页标记，首次请求不填"),
+        .describe("Number of chats per page. Defaults to 20 and is capped at 100."),
+      page_token: z.string().optional().describe("Pagination token. Omit on the first request."),
     },
     async (params) => {
       const data = await client.listChats(
@@ -44,27 +44,27 @@ export function registerTools(server: McpServer, client: FeishuClient) {
     }
   );
 
-  // Tool 2: 获取群聊历史消息
+  // Tool 2: get chat history
   server.tool(
     "get_chat_history",
-    "获取指定飞书群聊的历史消息。需要提供chat_id（通过list_chats获取）。返回消息列表，包含发送者、时间、内容。注意：飞书的start_time和end_time是Unix时间戳（秒级字符串），日期转换示例：2025-05-28 00:00:00 UTC+8 → '1748361600'",
+    "Read historical messages from a specified Feishu chat. The chat_id comes from list_chats. Results include sender, time, and content. Feishu start_time and end_time use Unix timestamps in seconds as strings; for example, 2025-05-28 00:00:00 UTC+8 is '1748361600'.",
     {
-      chat_id: z.string().describe("群聊ID，通过 list_chats 获取"),
+      chat_id: z.string().describe("Feishu chat ID returned by list_chats."),
       start_time: z
         .string()
         .optional()
         .describe(
-          "起始时间，Unix时间戳（秒级字符串），如 '1748361600' 表示 2025-05-28"
+          "Start time as a Unix timestamp in seconds, represented as a string; for example '1748361600'."
         ),
       end_time: z
         .string()
         .optional()
-        .describe("结束时间，Unix时间戳（秒级字符串）"),
+        .describe("End time as a Unix timestamp in seconds, represented as a string."),
       page_size: z
         .number()
         .optional()
-        .describe("返回消息数量，默认20，最大50"),
-      page_token: z.string().optional().describe("分页标记"),
+        .describe("Number of messages to return. Defaults to 20 and is capped at 50."),
+      page_token: z.string().optional().describe("Pagination token."),
     },
     async (params) => {
       const [history, chatInfo] = await Promise.all([
@@ -102,18 +102,18 @@ export function registerTools(server: McpServer, client: FeishuClient) {
     }
   );
 
-  // Tool 3: 搜索消息（本地过滤）
+  // Tool 3: search messages (local filtering)
   server.tool(
     "search_messages",
-    "在飞书群聊中搜索包含关键词的消息。此工具通过拉取最近消息并在本地过滤实现，搜索范围限制在最近50条消息内。建议先用list_chats获取chat_id，再指定chat_id搜索以提高效率。",
+    "Search Feishu chat messages containing a query. The tool fetches recent messages and filters locally; the search is limited to the latest 50 messages. Prefer list_chats first and pass chat_id to keep the search bounded.",
     {
-      query: z.string().describe("搜索关键词"),
+      query: z.string().describe("Message search query."),
       chat_id: z
         .string()
         .optional()
-        .describe("限定在某个群聊中搜索，不填则搜索所有群聊"),
-      start_time: z.string().optional().describe("起始时间，Unix时间戳（秒级字符串）"),
-      end_time: z.string().optional().describe("结束时间，Unix时间戳（秒级字符串）"),
+        .describe("Limit the search to one chat. Omit to search all authorized chats."),
+      start_time: z.string().optional().describe("Start time as a Unix timestamp in seconds."),
+      end_time: z.string().optional().describe("End time as a Unix timestamp in seconds."),
     },
     async (params) => {
       const chatIds: string[] = [];
@@ -188,12 +188,12 @@ export function registerTools(server: McpServer, client: FeishuClient) {
     }
   );
 
-  // Tool 4: 获取消息详情
+  // Tool 4: get message details
   server.tool(
     "get_message_detail",
-    "获取飞书消息的完整详情，包括完整的富文本内容、附件信息等。message_id格式如 om_xxxxx。",
+    "Read complete Feishu message details, including rich text content and attachments. message_id has a format such as om_xxxxx.",
     {
-      message_id: z.string().describe("消息ID，格式如 om_xxxxx"),
+      message_id: z.string().describe("Feishu message ID, for example om_xxxxx."),
     },
     async (params) => {
       const data = await client.getMessageDetail(params.message_id);

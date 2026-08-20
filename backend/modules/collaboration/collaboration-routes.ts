@@ -28,6 +28,7 @@ import { appendUserVisibleAgentEvent, appendUserVisibleRequirementPlan, listUser
 import { inspectProjectGit } from "../projects/project-git";
 import { hasResourceAccess, hasTaskResourceAccess } from "../system/access-policy";
 import { confirmProjectMainTask } from "../projects/project-main-agent";
+import { confirmPlanningSession, latestPlanningSession } from "../../agents/planning-orchestrator";
 import { exitConversationPlanModeForTask } from "../../system/conversation-plan-mode-gate";
 import { buildTaskPlanDetail, buildTaskPlanPatch } from "./task-plan-detail";
 import { handleTaskPauseRoutes } from "./task-pause-routes";
@@ -93,6 +94,25 @@ function rejectTaskMutationConflict(res: any, task: any, payload: any, requireTa
   if (!("error" in guard)) return false;
   sendJson(res, { success: false, error: guard.error, code: guard.code, ...guard.details }, guard.status);
   return true;
+}
+
+function confirmBoundPlanningSessionForTask(task: any, plan: any) {
+  const groupId = String(task?.group_id || task?.workflow_meta?.group_id || "").trim();
+  const project = String(task?.target_project || "").trim();
+  const scope = groupId ? "group" as const : "project" as const;
+  const scopeId = groupId || project;
+  const exactSessionId = String(task?.group_session_id || task?.project_session_id || task?.origin_session_id || "").trim();
+  if (!scopeId || !exactSessionId) return;
+  const session = latestPlanningSession(scope, scopeId, exactSessionId);
+  if (!session || session.phase === "confirmed") return;
+  const planRevision = Math.max(1, Number(plan?.revision || session.revision || 1));
+  const planChecksum = String(plan?.checksum || session.planChecksum || "").trim();
+  const confirmed = confirmPlanningSession({ scope, scopeId, exactSessionId, planRevision, planChecksum });
+  if (!confirmed.ok) {
+    const error: any = new Error("规划会话版本或复核回执已经变化，请重新加载最新计划");
+    error.code = confirmed.code;
+    throw error;
+  }
 }
 import {
   buildProjectCodeReadOnlySnapshot as buildProjectCodeReadOnlySnapshotBase,
@@ -578,7 +598,7 @@ import {
   runtimeToolDispatchBlockedReceipt,
   runtimeToolSnapshotFromAudit,
   shouldCreatePersistentGroupTask,
-  shouldUseProjectAnalysisMode,
+  shouldLoadReadOnlyProjectContext,
   splitUserAcceptanceText,
   switchTaskExecutor,
   taskAgentInvocationMemoryOptions,
@@ -816,6 +836,7 @@ export function handleCollaborationApiReplayAndExecutionRoutes(
               resume_parent_run_id: confirmed.id,
             });
           }
+          confirmBoundPlanningSessionForTask(task, task.workflow_meta?.presentedPlan || task.workflow_meta?.presented_plan || task.intake_draft);
           const planMode = task.workflow_meta?.plan_mode || task.workflow_meta?.intake?.plan_mode || task.intake_draft || {};
           const acceptedAt = new Date().toISOString();
           const acceptedPlan = {
@@ -2523,7 +2544,7 @@ export function handleCollaborationApiIntakeRoutesPartA(
             return sendJson(res, {
               ...epicResult,
               error: epicResult.needs_clarification
-                ? "仍有阻断问题，请先在“调整计划”中补充答案后再确认"
+                ? "仍有阻断问题，请先在“修改计划”中补充答案后再确认"
                 : "请先确认完整的 Epic 任务图",
               trace_id: current.trace_id,
             }, 409);
@@ -2600,6 +2621,7 @@ export function handleCollaborationApiIntakeRoutesPartA(
           });
         }
         const basePlan = getTaskPlanMode(current) || current.intake_draft || {};
+        confirmBoundPlanningSessionForTask(current, current.workflow_meta?.presentedPlan || current.workflow_meta?.presented_plan || basePlan);
         const acceptedPlan = buildAcceptedPlanModeDraft(basePlan, acceptFeedback, confirmedAt);
         const meta = current.workflow_meta || {};
         const acceptanceText = current.acceptance_criteria || current.acceptanceCriteria || "";
@@ -2687,7 +2709,7 @@ export function handleCollaborationApiIntakeRoutesPartA(
         const current = loadTasks().find((item: any) => item.id === taskId);
         if (!current) return sendJson(res, { error: "确认卡对应的任务不存在" }, 404);
         if (rejectTaskMutationConflict(res, current, payload, true)) return;
-        if (current.intake_state !== "awaiting_confirmation") return sendJson(res, { error: "这张确认卡已经失效，不能调整计划" }, 409);
+        if (current.intake_state !== "awaiting_confirmation") return sendJson(res, { error: "这张确认卡已经失效，不能修改计划" }, 409);
         if (!feedback) return sendJson(res, { error: "请填写希望主 Agent 调整的地方" }, 400);
         const basePlan = getTaskPlanMode(current) || current.intake_draft || {};
         let revisedDecomposition = current.decomposition_plan || current.requirement_decomposition || null;
@@ -3760,7 +3782,7 @@ export function handleCollaborationApi(
     ensureTraceId,
     classifyGroupProjectTaskIntentWithAgent,
     shouldCreatePersistentGroupTask,
-    shouldUseProjectAnalysisMode,
+    shouldLoadReadOnlyProjectContext,
     classifyTaskContinuation,
     looksLikeTaskContinuation,
     continueTaskWithMessage,

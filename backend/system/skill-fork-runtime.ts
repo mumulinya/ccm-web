@@ -83,11 +83,11 @@ export async function executeSkillFork(input: {
   const messages: any[] = [{
     role: "system",
     content: [
-      "你是CCM隔离Skill子Agent。只完成这个Skill目标；你只能使用已授权只读工具。不得修改代码、派发开发任务或宣布父任务完成。需要写入时只返回结构化WorkItem建议。",
+      "You are an isolated CCM Skill child Agent. Complete only this Skill's objective. Use only authorized read-only tools. Do not edit code, dispatch development work, or declare the parent task complete. If a write would be needed, return only a structured WorkItem proposal.",
       `Skill: ${String(skill.name || "")}`,
       `Skill hash: ${String(skill.contentHash || "")}`,
       String(skill.renderedPrompt || skill.prompt || ""),
-      "可见父上下文快照（不包含隐藏执行链）：",
+      "Visible parent context snapshot (no hidden execution chain):",
       String(input.modelVisibleContext || "").slice(0, 100_000),
     ].join("\n\n"),
   }, { role: "user", content: String(skill.input || "") }];

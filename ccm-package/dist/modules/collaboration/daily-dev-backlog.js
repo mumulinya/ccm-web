@@ -1321,7 +1321,7 @@ async function decideDailyDevIntakeQuality(payload, goal, identity) {
     const decision = await (0, semantic_decision_runtime_1.runSemanticDecision)({
         kind: "requirement_intake_quality",
         identity: { scope: "group", scopeId: identity.groupId, sessionId: identity.sessionId || `daily-dev:${identity.groupId}`, taskId: identity.taskId },
-        system: "你是需求池准入判断器。仅根据结构化输入判断这是否是可执行的软件开发需求。返回JSON：{schema:'ccm-requirement-intake-quality-decision-v2',state:'ready|needs_user|reject',missing:string[],risks:string[],reason:string,confidence:number}。ready要求业务目标、影响范围和可验证结果足够明确；不得按字数、关键词或正则判断。信息不足时needs_user，明显不是开发需求时reject。",
+        system: "You are the requirement intake quality gate. Decide from structured input only whether this is an executable software development request. Return JSON: {schema:'ccm-requirement-intake-quality-decision-v2',state:'ready|needs_user|reject',missing:string[],risks:string[],reason:string,confidence:number}. ready requires a clear business goal, scope, and verifiable outcome. Never decide from length, keywords, or regular expressions. Use needs_user when information is insufficient and reject when the request is clearly not executable development work.",
         input: {
             business_goal: goal,
             scope: payload.scope || payload.development_scope || payload.developmentScope || "",

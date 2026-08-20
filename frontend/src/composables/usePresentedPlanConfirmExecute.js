@@ -3,7 +3,6 @@ import { toast } from '../utils/toast.js'
 import { executionEventsForMessage } from '../utils/agentExecutionEvents.js'
 import {
   PRESENTED_PLAN_CONFIRM_EXECUTE_LABEL,
-  GLOBAL_CONVERSATION_PLAN_MODE_UNSUPPORTED,
   buildPresentedPlanConfirmExecuteMessage,
   conversationPlanModeSupported,
   exitConversationPlanMode,
@@ -20,6 +19,8 @@ const usablePlan = value => {
   if (!steps.length && !String(value.title || value.overview || value.goal || '').trim()) return null
   return value
 }
+
+const canConfirmPlanScope = scope => scope === 'project' || scope === 'group' || scope === 'global'
 
 export function usePresentedPlanConfirmExecute(options = {}) {
   const planModeEnabled = ref(false)
@@ -99,7 +100,7 @@ export function usePresentedPlanConfirmExecute(options = {}) {
   }
 
   const canConfirmExecute = (msg, index) => {
-    if (!conversationPlanModeSupported(identity().scope)) return false
+    if (!canConfirmPlanScope(identity().scope)) return false
     if (confirmBusy.value) return false
     if (resolve(options.turnBusy)) return false
     if (msg?.streaming) return false
@@ -133,14 +134,16 @@ export function usePresentedPlanConfirmExecute(options = {}) {
       toast.error('当前会话尚未创建')
       return
     }
-    if (!conversationPlanModeSupported(id.scope)) {
-      toast.error(GLOBAL_CONVERSATION_PLAN_MODE_UNSUPPORTED)
+    if (!canConfirmPlanScope(id.scope)) {
+      toast.error('当前会话不支持计划确认')
       return
     }
     confirmBusy.value = true
     try {
-      await exitConversationPlanMode(id)
-      planModeEnabled.value = false
+      if (conversationPlanModeSupported(id.scope)) {
+        await exitConversationPlanMode(id)
+        planModeEnabled.value = false
+      }
       const result = await options.send?.({ queueTurn: { message: buildPresentedPlanConfirmExecuteMessage(plan) } })
       if (result?.success === false) throw new Error(result.error || '发送失败')
     } catch (error) {

@@ -23,8 +23,8 @@ const wiring = {
     && globalRuntime.includes('"tool_started", "tool_completed", "tool_failed"'),
   projectExactSessionStoresExecution: projectCompaction.includes("appendProjectSessionExecutionEvent")
     && projectCompaction.includes("execution_history"),
-  projectCompressionUsesExecution: projectCompaction.includes("segmentModelTimeline")
-    && projectCompaction.includes("projectModelTimeline(data, unsummarized)"),
+  projectCompressionUsesExecution: projectCompaction.includes("projectExecutionEvents(data)")
+    && projectCompaction.includes("mergeConversationWithExecution(snapshot.messages, snapshot.executionEvents)"),
   projectMainRecordsSourceRuntimeMcpAndReview: [
     "read_project_source",
     "dispatch_project_worker",

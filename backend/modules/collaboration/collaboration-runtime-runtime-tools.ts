@@ -1660,14 +1660,14 @@ export function continueTaskWithMessage(taskId: string, message: string, ctx: Co
   if (continuationKind === "new_task") {
     return { success: false, status: 409, new_task_suggested: true, error: "这条要求看起来是一个独立新任务，请直接在群聊发送，不会混入当前任务。" };
   }
-  // 需求 Epic 的执行前计划等待确认时，追加要求必须走「调整计划」重新拆解：
+  // 需求 Epic 的执行前计划等待确认时，追加要求必须走「修改计划」重新拆解：
   // 只把文字并入计划书的话，确认时子任务仍按旧的 decomposition_plan 生成，追加内容会被静默丢弃。
   if (current.workflow_type === "requirement_epic" && current.intake_state === "awaiting_confirmation") {
     return {
       success: false,
       status: 409,
       needs_plan_revision: true,
-      error: "这个需求 Epic 的执行前计划还在等待确认；请使用确认卡上的「调整计划」提交这条要求，我会带着它重新拆解子任务后再请你确认。",
+      error: "这个需求 Epic 的执行前计划还在等待确认；请使用确认卡上的「修改计划」提交这条要求，我会带着它重新拆解子任务后再请你确认。",
     };
   }
   const currentlyRunning = runningTaskIds.has(taskId);

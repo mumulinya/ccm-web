@@ -100,12 +100,11 @@ export function decideConversationMessageRoute(input: {
   candidates: any[];
 }) {
   const workflowDecision = input.workflowDecision || {};
-  const mode = lower(workflowDecision.mode);
   const continuationKind = lower(workflowDecision.continuationKind || workflowDecision.continuation_kind || "new_task");
   const confidence = Math.max(0, Math.min(1, Number(workflowDecision.confidence || 0)));
   const candidates = input.candidates || [];
   const candidate = candidates.length === 1 ? candidates[0] : null;
-  if (["answer", "project_analysis"].includes(mode) && workflowDecision.actionRequired !== true) {
+  if (workflowDecision.actionRequired !== true && workflowDecision.requiresCodeChanges !== true) {
     return { decision: "answer" as const, confidence, candidate: null, reason: text(workflowDecision.reason || "这条消息只需要回答") };
   }
   if (continuationKind === "new_task") {
@@ -116,9 +115,7 @@ export function decideConversationMessageRoute(input: {
   // current message remains authoritative: action requests start a new task,
   // while read-only/conversational requests stay as answers.
   if (candidates.length === 0) {
-    const actionRequired = workflowDecision.actionRequired === true
-      || workflowDecision.requiresCodeChanges === true
-      || ["execute", "execute_direct", "plan_task", "decompose_epic"].includes(mode);
+    const actionRequired = workflowDecision.actionRequired === true || workflowDecision.requiresCodeChanges === true;
     return actionRequired
       ? { decision: "new_task" as const, confidence, candidate: null, reason: text(workflowDecision.reason || "当前没有需要续接的旧任务，将按新需求处理") }
       : { decision: "answer" as const, confidence, candidate: null, reason: text(workflowDecision.reason || "当前消息只需要直接回答") };
@@ -170,9 +167,9 @@ export function runConversationMessageRoutingSelfTest() {
     multipleCandidatesNeedUser: decideConversationMessageRoute({ workflowDecision: decision(0.99), candidates: [candidate, { ...candidate, id: "task-other" }] }).decision === "needs_user",
     expandedTargetNeedsUser: decideConversationMessageRoute({ workflowDecision: decision(0.99, { targetRefs: [{ scope: "project", scopeId: "project-b" }] }), candidates: [candidate] }).decision === "needs_user",
     explicitNewTaskStaysNew: decideConversationMessageRoute({ workflowDecision: decision(0.99, { continuationKind: "new_task" }), candidates: [candidate] }).decision === "new_task",
-    answerDoesNotCreateTask: decideConversationMessageRoute({ workflowDecision: decision(0.99, { mode: "answer", actionRequired: false }), candidates: [candidate] }).decision === "answer",
+    answerDoesNotCreateTask: decideConversationMessageRoute({ workflowDecision: decision(0.99, { actionRequired: false, requiresCodeChanges: false }), candidates: [candidate] }).decision === "answer",
     noCandidateActionStartsNewTask: decideConversationMessageRoute({ workflowDecision: decision(0.2), candidates: [] }).decision === "new_task",
-    noCandidateReadOnlyAnswers: decideConversationMessageRoute({ workflowDecision: decision(0.2, { mode: "project_analysis", actionRequired: false }), candidates: [] }).decision === "answer",
+    noCandidateReadOnlyAnswers: decideConversationMessageRoute({ workflowDecision: decision(0.2, { actionRequired: false, requiresCodeChanges: false }), candidates: [] }).decision === "answer",
   };
   return { pass: Object.values(checks).every(Boolean), checks };
 }

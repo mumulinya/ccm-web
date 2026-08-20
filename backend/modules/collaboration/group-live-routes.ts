@@ -98,7 +98,7 @@ export type GroupLiveRoutesDeps = {
   ensureTraceId: (value: any, prefix: string) => string;
   classifyGroupProjectTaskIntentWithAgent: (input: any) => Promise<any>;
   shouldCreatePersistentGroupTask: (input: any) => boolean;
-  shouldUseProjectAnalysisMode: (input: any) => boolean;
+  shouldLoadReadOnlyProjectContext: (input: any) => boolean;
   classifyTaskContinuation: (message: string) => string;
   looksLikeTaskContinuation: (message: string) => boolean;
   continueTaskWithMessage: (taskId: string, message: string, ctx: any, options?: any) => any;
@@ -475,7 +475,7 @@ export async function handleGroupLiveRoutesSendPreface(
     ensureTraceId,
     classifyGroupProjectTaskIntentWithAgent,
     shouldCreatePersistentGroupTask,
-    shouldUseProjectAnalysisMode,
+    shouldLoadReadOnlyProjectContext,
     continueTaskWithMessage,
     appendMainAgentDecisionTrace,
     applyMainAgentDecisionPetState,
@@ -729,8 +729,10 @@ export async function handleGroupLiveRoutesSendPreface(
             ...taskIntent,
             reason: "用户正在补充当前任务所需条件",
             source: "explicit_task_continuation",
-            workflowDecision: explicitWorkflowDecision("execute_direct", "用户显式继续现有任务", {
+            workflowDecision: explicitWorkflowDecision("用户显式继续现有任务", {
               ...taskIntent.workflowDecision,
+              actionRequired: true,
+              requiresCodeChanges: true,
               continuationKind: explicitContinuationKind,
             }),
           };
@@ -753,7 +755,7 @@ export async function handleGroupLiveRoutesSendPreface(
           taskIntent = {
             ...taskIntent,
             kind: "conversation",
-            workflowDecision: explicitWorkflowDecision("answer", "用户明确选择仅回答当前问题", {
+            workflowDecision: explicitWorkflowDecision("用户明确选择仅回答当前问题", {
               ...taskIntent.workflowDecision,
               actionRequired: false,
               requiresCodeChanges: false,
@@ -818,9 +820,9 @@ export async function handleGroupLiveRoutesSendPreface(
         // member is added.  Do not route the first message into source
         // analysis where there is no valid project_id to use.
         const hasRoutableProjects = getRoutableMembers(group).length > 0;
-        const projectAnalysisRequest = hasRoutableProjects
+        const readOnlyContextRequest = hasRoutableProjects
           && !statusFollowupRequest
-          && shouldUseProjectAnalysisMode({ isOrchestrated, messageMode, taskIntent })
+          && shouldLoadReadOnlyProjectContext({ isOrchestrated, taskIntent })
           && !persistentTaskRequest;
         const continuationKind = explicitContinuationTask
           ? explicitContinuationKind
@@ -1026,7 +1028,7 @@ export async function handleGroupLiveRoutesSendPreface(
     reliabilityOperationKey, group_id, target_project, groupSessionId, userMessage, group, sourceIngestion,
     uploadedFilesContext, attachmentSummary, incomingMessageForAgent, userMessageForHistory, messageForAgent,
     effectiveUserMessage, routing, isBroadcast, isOrchestrated, targetMembers, messageMode, messageTraceId,
-    forceProjectTask, taskIntent, statusFollowupRequest, persistentTaskRequest, projectAnalysisRequest,
+    forceProjectTask, taskIntent, statusFollowupRequest, persistentTaskRequest, readOnlyContextRequest,
     continuationKind, continuationTask, groupOperationKey, userMsg, clarificationContext, clarificationRequestId,
     pendingClarification, clarificationMessageId, explicitContinuationTask, explicitContinuationKind, client_message_id, configs, modelRecovery,
     requestExecutionAnchorMessageId, requestRecoveryAttempt, requestTurnId,
@@ -1048,7 +1050,7 @@ export function handleGroupLiveRoutes(
     ensureTraceId,
     classifyGroupProjectTaskIntentWithAgent,
     shouldCreatePersistentGroupTask,
-    shouldUseProjectAnalysisMode,
+    shouldLoadReadOnlyProjectContext,
     classifyTaskContinuation,
     looksLikeTaskContinuation,
     continueTaskWithMessage,
@@ -1099,7 +1101,7 @@ export function handleGroupLiveRoutes(
       let taskIntent: any;
       let statusFollowupRequest = false;
       let persistentTaskRequest = false;
-      let projectAnalysisRequest = false;
+      let readOnlyContextRequest = false;
       let continuationKind = "";
       let continuationTask: any;
       let groupOperationKey = "";
@@ -1145,7 +1147,7 @@ export function handleGroupLiveRoutes(
           taskIntent,
           statusFollowupRequest,
           persistentTaskRequest,
-          projectAnalysisRequest,
+          readOnlyContextRequest,
           continuationKind,
           continuationTask,
           groupOperationKey,
@@ -1594,23 +1596,23 @@ export function handleGroupLiveRoutes(
           });
 
           const coordinator = getCoordinatorMember(group);
-          const conversationalOnly = taskIntent?.workflowDecision?.mode === "answer" || projectAnalysisRequest;
+          const conversationalOnly = taskIntent?.executable !== true || readOnlyContextRequest;
           writeSse(res, {
             type: "status",
-            text: projectAnalysisRequest
-              ? `🔎 正在只读分析项目...`
+            text: readOnlyContextRequest
+              ? `正在查看项目上下文...`
               : conversationalOnly
               ? `💬 正在回复...`
               : `🧠 正在协调群聊...`,
             agent: coordinator.project
           });
-          ctx.setAgentActivity(coordinator.project, "working", projectAnalysisRequest ? "正在只读分析项目" : conversationalOnly ? "正在回复" : "正在协调群聊", { tab: "groups", groupId: group_id });
-          ctx.broadcastPetSpeech(coordinator.project, { role: "status", text: projectAnalysisRequest ? "正在查看项目上下文..." : conversationalOnly ? "正在回复..." : "正在协调群聊...", source: "group" });
+          ctx.setAgentActivity(coordinator.project, "working", readOnlyContextRequest ? "正在查看项目上下文" : conversationalOnly ? "正在回复" : "正在协调群聊", { tab: "groups", groupId: group_id });
+          ctx.broadcastPetSpeech(coordinator.project, { role: "status", text: readOnlyContextRequest ? "正在查看项目上下文..." : conversationalOnly ? "正在回复..." : "正在协调群聊...", source: "group" });
 
           updateGroupMemory(group_id, {
             groupSessionId,
             ...(conversationalOnly ? {} : { goal: effectiveUserMessage || userMessageForHistory }),
-            currentPhase: projectAnalysisRequest ? "project_analysis" : conversationalOnly ? "conversation" : "understanding",
+            currentPhase: conversationalOnly ? "conversation" : "understanding",
             ...(conversationalOnly ? {} : {
               decision: "用户把消息交给我协调",
               reason: routing.targetLabel,
@@ -1623,7 +1625,7 @@ export function handleGroupLiveRoutes(
             ? ""
             : "【项目状态】当前群聊尚未添加任何项目成员，因此没有可读取、分析或介绍的项目。请直接说明这一点，并引导用户通过“成员”添加项目；不要调用项目、文件或代码工具。";
           const sharedFilesContext = buildCoordinatorSharedFilesContext(ctx, group, { groupSessionId, message: messageForAgent });
-          const projectAnalysisContext = projectAnalysisRequest ? buildGroupProjectAnalysisContext(group, messageForAgent, ctx, configs) : "";
+          const readOnlyProjectContext = readOnlyContextRequest ? buildGroupProjectAnalysisContext(group, messageForAgent, ctx, configs) : "";
           const responseMessageId = "m" + Date.now().toString(36) + "coord" + crypto.randomBytes(2).toString("hex");
           const executionAnchorMessageId = String(requestExecutionAnchorMessageId || modelRecovery?.anchorMessageId || responseMessageId);
           const recoveryAttempt = Math.max(1, Number(requestRecoveryAttempt || modelRecovery?.attempt || 1));
@@ -1641,10 +1643,10 @@ export function handleGroupLiveRoutes(
            });
           const coordinatorResult = await runGroupOrchestrator({
             group,
-            message: projectAnalysisRequest
-              ? `${messageForAgent}\n\n[模式]\n只读项目分析：请基于项目上下文回答用户问题，不要派发子 Agent，不要创建任务，不要承诺修改。`
+            message: readOnlyContextRequest
+              ? `${messageForAgent}\n\n请基于已经读取的项目上下文回答，不要派发子 Agent、创建任务或承诺修改。`
               : messageForAgent,
-            context: [context, projectAnalysisRequest ? projectAnalysisContext : "", emptyGroupNotice].filter(Boolean).join("\n\n"),
+            context: [context, readOnlyContextRequest ? readOnlyProjectContext : "", emptyGroupNotice].filter(Boolean).join("\n\n"),
             source: "user",
             groupSessionId,
             turnId: visibleTurnId,
@@ -1652,7 +1654,7 @@ export function handleGroupLiveRoutes(
             recoveryAttempt,
             workflowDecision: taskIntent?.workflowDecision || null,
             mainAgentFirstTurnResult: taskIntent?.mainAgentFirstTurnResult || taskIntent?.coordinatorResult || null,
-            sharedFilesContext: [sharedFilesContext, projectAnalysisContext].filter(Boolean).join("\n\n"),
+            sharedFilesContext: [sharedFilesContext, readOnlyProjectContext].filter(Boolean).join("\n\n"),
             onDelta: delta => {
               if (!String(delta || "").trim()) return;
               coordinatorDeltaEmitted = true;
@@ -1700,15 +1702,15 @@ export function handleGroupLiveRoutes(
               contentStored: false,
             } : null;
             const rawPlanAssignments = normalizePlanAssignments((coordinatorResult as any).assignments || []);
-            const planAssignments = conversationalOnly || projectAnalysisRequest ? [] : rawPlanAssignments;
+            const planAssignments = conversationalOnly ? [] : rawPlanAssignments;
             const visiblePlan = visibleGroupPresentedPlanFields({
-              projectAnalysis: !!projectAnalysisRequest,
+              projectAnalysis: false,
               conversationalOnly,
               coordinationPlan: (coordinatorResult as any).coordinationPlan || null,
               presentedPlan: (coordinatorResult as any).presentedPlan || null,
             });
             const dispatchPolicy = resolveGroupLiveDispatchPolicy({
-              projectAnalysisRequest,
+              projectAnalysisRequest: false,
               conversationalOnly,
               taskIntent,
               coordinatorResult,
@@ -1719,7 +1721,7 @@ export function handleGroupLiveRoutes(
               traceId: messageTraceId,
               messageId: responseMessageId,
               coordinator: coordinator.project,
-              mode: projectAnalysisRequest ? "project_analysis" : planAssignments.length || dispatchPolicy?.action === "delegate" ? "delegation" : "conversation",
+              mode: planAssignments.length || dispatchPolicy?.action === "delegate" ? "delegation" : "conversation",
               messageMode,
               taskIntent,
               dispatchPolicy,
@@ -1729,7 +1731,7 @@ export function handleGroupLiveRoutes(
                 clarification_resumed: !!clarificationContext,
                 clarification_request_id: clarificationRequestId || "",
                 shared_files_context: !!sharedFilesContext,
-                project_analysis_context: !!projectAnalysisContext,
+                read_only_project_context: !!readOnlyProjectContext,
                 runtime: (coordinatorResult as any).runtime || "",
                 execution_order: conversationalOnly ? "none" : ((coordinatorResult as any).executionOrder || "parallel"),
               },

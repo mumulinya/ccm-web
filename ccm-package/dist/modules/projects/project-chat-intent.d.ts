@@ -1,7 +1,5 @@
 import { type WorkflowDecision } from "../../agents/workflow-decision";
-export type ProjectChatMode = "conversation" | "project_analysis" | "task";
 export type ProjectChatIntent = {
-    mode: ProjectChatMode;
     executable: boolean;
     reason: string;
     workflowDecision?: WorkflowDecision;
@@ -22,8 +20,8 @@ export declare function runProjectChatIntentSelfTest(): {
     success: boolean;
     checks: {
         message: "你好" | "你是什么模型" | "这个项目是什么架构？" | "修改登录接口并运行测试" | "先规划认证重构再实施";
-        expected: "task" | "conversation" | "project_analysis";
-        actual: ProjectChatMode;
+        expected: boolean;
+        actual: boolean;
         workflowDecision: WorkflowDecision;
     }[];
 };

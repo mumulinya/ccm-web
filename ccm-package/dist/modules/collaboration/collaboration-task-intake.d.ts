@@ -54,9 +54,8 @@ export declare function classifyGroupProjectTaskIntentWithAgent(input: {
     anchorMessageId?: string;
     anchor_message_id?: string;
 }): Promise<any>;
-export declare function shouldUseProjectAnalysisMode(input: {
+export declare function shouldLoadReadOnlyProjectContext(input: {
     isOrchestrated?: boolean;
-    messageMode?: string;
     taskIntent?: any;
 }): boolean;
 export declare function shouldCreatePersistentGroupTask(input: {
@@ -126,7 +125,6 @@ export declare function buildGroupPlanModePreflight(input: {
     };
     risk: {
         model_reason: string;
-        workflow_mode: import("../../agents/workflow-decision").WorkflowDecisionMode;
         level: any;
         requiresConfirmation: boolean;
         reasons: string[];
@@ -167,6 +165,11 @@ export declare function buildChildAgentWorkerHandoff(targetProject: string, task
     work_dir: string;
     agent_type: string;
     communication_envelope: {
+        sourceManifestChecksum?: string;
+        contractChecksum?: string;
+        planChecksum?: string;
+        planRevision?: number;
+        planId?: string;
         schema: string;
         messageId: string;
         correlationId: string;
@@ -185,6 +188,45 @@ export declare function buildChildAgentWorkerHandoff(targetProject: string, task
         contentStored: boolean;
     };
     worker_context_packet: any;
+    plan_binding: {
+        contentStored: false;
+        workItemId?: string;
+        contractChecksum?: string;
+        sourceManifestChecksum?: string;
+        planChecksum?: string;
+        planRevision?: number;
+        planId?: string;
+    };
+    work_item_contract: {
+        project: string;
+        files: string[];
+        dependsOn: string[];
+        parallelGroup: string;
+        allowedTools: string[];
+        forbiddenPaths: string[];
+        acceptance: string[];
+        verification: {
+            command?: string;
+            expected: string;
+            evidenceRequired: boolean;
+        }[];
+        worktree: {
+            strategy: "isolated" | "shared";
+            branch?: string;
+        };
+        executor: {
+            provider: string;
+            agentType: string;
+            model?: string;
+            transport: "acp" | "cli" | "websocket";
+            capabilities: string[];
+            degraded: boolean;
+            degradedReason?: string;
+        };
+        timeoutMs: number;
+        maxAttempts: number;
+        contentStored: boolean;
+    };
     scope: {
         allowed: string[];
         forbidden: string[];

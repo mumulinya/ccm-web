@@ -397,7 +397,7 @@ async function callSourcePlanningModel(config, payload) {
     const messages = [
         {
             role: "system",
-            content: `你是群聊主 Agent 的只读源码规划器。必须根据用户目标、项目文件清单和已读取源码选择下一批证据，不能按关键词机械决定最终范围。\n只返回 JSON：{"sufficient":false,"reason":"判断依据","selected_files":[{"project":"项目ID","path":"相对路径","reason":"读取原因"}],"search_queries":[{"project":"项目ID","query":"应在源码中搜索的文字或标识符"}],"plan_steps":[],"impact_scope":[],"clarification_questions":[]}\n规则：只能选择清单中的项目和路径；search_queries 必须来自对业务语义的理解；已有证据不足时 sufficient=false；最多选择24个文件和8个查询；不得声称修改或执行过源码。`,
+            content: `You are the read-only source planner for the group main Agent. Based on the user goal, project manifests, and source already read, select the next evidence batch. Do not determine the final scope mechanically by keyword.\nReturn JSON only: {"sufficient":false,"reason":"decision basis","selected_files":[{"project":"project-id","path":"relative/path","reason":"read reason"}],"search_queries":[{"project":"project-id","query":"business-relevant text or symbol to search"}],"plan_steps":[],"impact_scope":[],"clarification_questions":[]}\nRules: select only projects and paths present in the manifest; search_queries must follow from business semantics; set sufficient=false when evidence is incomplete; select at most 24 files and 8 queries; never claim to have edited or executed source.`,
         },
         { role: "user", content: JSON.stringify(payload) },
     ];

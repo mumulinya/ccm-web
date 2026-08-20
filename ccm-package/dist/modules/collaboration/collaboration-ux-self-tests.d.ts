@@ -63,9 +63,8 @@ export declare function runCollaborationUxSelfTest(): {
         groupIntentGatewayAllowsLlmDelegate: boolean;
         groupIntentGatewayKeepsLlmDirectAnswerReadOnly: boolean;
         projectTaskModeQuestionDoesNotCreatePersistentTask: boolean;
-        projectTaskQuestionUsesReadOnlyAnalysis: boolean;
-        explicitAnalysisGreetingDoesNotReadProjects: boolean;
-        explicitAnalysisModeReadsProjectContext: boolean;
+        projectQuestionLoadsContextAfterToolUse: boolean;
+        greetingWithoutToolDoesNotLoadProjects: boolean;
         projectAnalysisReadsSafeCodeSnapshot: boolean;
         forceTaskCanBypassIntentGate: boolean;
         nonTaskCardIsHidden: boolean;

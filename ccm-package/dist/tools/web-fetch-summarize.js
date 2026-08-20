@@ -18,8 +18,8 @@ async function summarizeWebFetchPage(input) {
     const { callLlm } = require("../modules/global/global-agent-model");
     const page = String(input.markdown || "").slice(0, SUMMARIZE_INPUT_CHARS);
     const summary = await callLlm(config, [
-        { role: "system", content: "根据用户 prompt 从网页内容中提取相关信息。只用页面里有的事实；没有的内容明确说页面未提供。不要编造。" },
-        { role: "user", content: `URL: ${input.url}\n标题: ${input.title || ""}\n用户想了解: ${prompt}\n\n页面内容:\n${page}` },
+        { role: "system", content: "Extract the information requested by the user from the web page. Use only facts present in the page; explicitly say when the page does not provide something. Do not invent facts." },
+        { role: "user", content: `URL: ${input.url}\nTitle: ${input.title || ""}\nUser request: ${prompt}\n\nPage content:\n${page}` },
     ], { maxTokens: 700 });
     const text = String(summary || "").trim();
     if (!text)

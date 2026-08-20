@@ -61,7 +61,7 @@ export async function reviewSessionSummaryIfSelected(input: {
     throw error;
   }
   const request = {
-    system: "你是独立的会话摘要验收模型。只输出 JSON。检查摘要是否遗漏持久约束、是否编造完成状态、是否与边界和参考冲突。字段：passed,missingAnchors,hallucinations,reason。",
+    system: "You are an independent conversation-summary acceptance reviewer. Return JSON only. Check whether the summary omits persistent constraints, invents completion state, or conflicts with the boundary and reference. Fields: passed, missingAnchors, hallucinations, reason.",
     messages: [{ role: "user", content: JSON.stringify({
       scope: input.scope,
       sourceMessageIds: input.sourceMessageIds || [],

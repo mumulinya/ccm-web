@@ -2,7 +2,6 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.presentedPlanFromProjectFirstTurn = presentedPlanFromProjectFirstTurn;
 exports.projectFirstTurnShouldEnterTask = projectFirstTurnShouldEnterTask;
-exports.projectFirstTurnMessageMode = projectFirstTurnMessageMode;
 exports.projectFirstTurnVisiblePresentation = projectFirstTurnVisiblePresentation;
 exports.projectFirstTurnVisibleCompletion = projectFirstTurnVisibleCompletion;
 exports.runProjectMainTurnCompleteSelfTest = runProjectMainTurnCompleteSelfTest;
@@ -24,11 +23,6 @@ function presentedPlanFromProjectFirstTurn(firstTurn) {
 function projectFirstTurnShouldEnterTask(firstTurn, options = {}) {
     return options.treatAsTask === true || (0, workflow_decision_1.isDevelopmentTaskWorkflowDecision)(firstTurn?.workflowDecision);
 }
-function projectFirstTurnMessageMode(firstTurn) {
-    return String(firstTurn?.workflowDecision?.mode || firstTurn?.parsed?.workflowDecision?.mode || "") === "project_analysis"
-        ? "project_analysis"
-        : "conversation";
-}
 function projectFirstTurnVisiblePresentation(firstTurn, options = {}) {
     const responseKind = String(firstTurn?.responseType || firstTurn?.turnDecision?.responseKind || "");
     const presentedPlan = presentedPlanFromProjectFirstTurn(firstTurn);
@@ -48,7 +42,7 @@ function projectFirstTurnVisiblePresentation(firstTurn, options = {}) {
     }
     return {
         present: true,
-        messageMode: projectFirstTurnMessageMode(firstTurn),
+        messageMode: "conversation",
         reply,
         presentedPlan,
         responseKind,
@@ -66,21 +60,21 @@ function projectFirstTurnVisibleCompletion(firstTurn, options = {}) {
     };
 }
 function runProjectMainTurnCompleteSelfTest() {
-    const replyTurn = { responseType: "reply", reply: "这是问候。", workflowDecision: { mode: "answer", actionRequired: false } };
-    const clarifyTurn = { responseType: "clarify", reply: "首版范围是什么？", workflowDecision: { mode: "answer", actionRequired: false } };
+    const replyTurn = { responseType: "reply", reply: "这是问候。", workflowDecision: { actionRequired: false, requiresCodeChanges: false } };
+    const clarifyTurn = { responseType: "clarify", reply: "首版范围是什么？", workflowDecision: { actionRequired: false, requiresCodeChanges: false } };
     const planTurn = {
         responseType: "plan",
         reply: "请看计划",
         turnDecision: { turnId: "turn-plan-1", responseKind: "plan", reply: "请看计划" },
         parsed: { responseType: "plan", plan: { title: "登录", goal: "修好登录过期", steps: [{ title: "改 auth.ts" }] } },
-        workflowDecision: { mode: "plan_task", actionRequired: false, requiresCodeChanges: false },
+        workflowDecision: { actionRequired: false, requiresCodeChanges: false },
     };
-    const emptyAnalysis = { responseType: "reply", reply: "", workflowDecision: { mode: "project_analysis", actionRequired: false } };
+    const emptyAnalysis = { responseType: "reply", reply: "", workflowDecision: { actionRequired: false, requiresCodeChanges: false } };
     const devTask = {
         responseType: "plan",
         reply: "请看计划",
         parsed: { plan: { title: "登录", goal: "修好登录", steps: [{ title: "改 auth.ts" }] } },
-        workflowDecision: { mode: "plan_task", actionRequired: true, requiresCodeChanges: true },
+        workflowDecision: { actionRequired: true, requiresCodeChanges: true },
     };
     const replyVisible = projectFirstTurnVisiblePresentation(replyTurn);
     const clarifyVisible = projectFirstTurnVisiblePresentation(clarifyTurn);
@@ -93,7 +87,7 @@ function runProjectMainTurnCompleteSelfTest() {
         clarifyPresents: clarifyVisible.present === true && clarifyVisible.responseKind === "clarify",
         planCardPresents: planVisible.present === true && planVisible.presentedPlan?.steps?.[0]?.title === "改 auth.ts",
         emptyAnalysisPresentsFallback: empty.present === true
-            && empty.messageMode === "project_analysis"
+            && empty.messageMode === "conversation"
             && empty.reply === group_coordinator_visible_reply_1.COORDINATOR_EMPTY_REPLY_FALLBACK,
         developmentTaskDoesNotPresent: task.present === false,
         parentTaskPlanDoesNotPresent: parentTaskPlan.present === false,

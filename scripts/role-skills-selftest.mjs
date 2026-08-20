@@ -99,7 +99,7 @@ for (const runtime of ["claudecode", "cursor", "codex"]) {
     for (const selectedName of allowedTools.skill) {
       assert.match(usageDirective, new RegExp(`Skill:${selectedName}`), `${runtime}/${scenario.id} usage directive missed ${selectedName}`);
     }
-    assert.match(usageDirective, /读取并应用其 SKILL\.md/);
+    assert.match(usageDirective, /Read and apply each SKILL\.md/);
     assert.match(usageDirective, /CCM_AGENT_RECEIPT/);
     const simulatedUsageReceipt = allowedTools.skill.map(name => `已实际应用 Skill:${name}`).join("\n");
     const detectedUsage = runtimeTools.detectInvokedSkillsFromText(simulatedUsageReceipt, allowedTools, catalog.skills);

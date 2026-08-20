@@ -117,15 +117,8 @@ function buildMainAgentUserPlanSteps(input) {
         const text = (0, main_agent_plan_core_1.planStepText)(id, { content, activeForm });
         steps.push((0, collaboration_runtime_coordinator_review_1.buildUserVisiblePlanStep)({ id, content: text.content, activeForm: text.activeForm, status, detail }));
     };
-    add("understand_intent", "确认用户这句话是普通询问、项目分析还是开发任务", "completed", "正在判断用户意图", input.taskIntent?.reason || input.dispatchPolicy?.reason || "");
+    add("understand_intent", "理解用户目标并决定下一步", "completed", "正在判断用户意图", input.taskIntent?.reason || input.dispatchPolicy?.reason || "");
     add("read_group_context", "", (0, collaboration_runtime_coordinator_review_1.mainAgentPlanStepStatus)(actionIds, blockedActions, "read_group_context"));
-    if (mode === "project_analysis") {
-        add("read_project_code_snapshot", "", (0, collaboration_runtime_coordinator_review_1.mainAgentPlanStepStatus)(actionIds, blockedActions, "read_project_code_snapshot"));
-        add("query_knowledge_base", "", (0, collaboration_runtime_coordinator_review_1.mainAgentPlanStepStatus)(actionIds, blockedActions, "query_knowledge_base", "skipped"));
-        add("decide_dispatch", "判断是否需要派发子 Agent：本轮是只读分析，不创建任务", "skipped", "正在判断是否派发子 Agent");
-        add("generate_final_reply", "把分析结果整理成用户能看懂的回复", (0, collaboration_runtime_coordinator_review_1.mainAgentPlanStepStatus)(actionIds, blockedActions, "generate_final_reply"), "正在生成回复");
-        return steps;
-    }
     if (mode === "project_task" || mode === "delegation") {
         add("read_project_code_snapshot", "确认涉及的项目、范围和可能影响的代码位置", actionIds.includes("read_project_code_snapshot") ? (0, collaboration_runtime_coordinator_review_1.mainAgentPlanStepStatus)(actionIds, blockedActions, "read_project_code_snapshot") : "pending", "正在确认项目和代码范围");
         add("create_project_task", "", (0, collaboration_runtime_coordinator_review_1.mainAgentPlanStepStatus)(actionIds, blockedActions, "create_project_task", input.taskId ? "completed" : "pending"), "", input.taskId ? `任务 ${input.taskId}` : "");
@@ -173,7 +166,6 @@ function buildMainAgentDecisionChain(input) {
     const policyAction = String(input.dispatchPolicy?.action || "").trim();
     const actionIds = (0, collaboration_runtime_coordinator_review_1.normalizeMainAgentActionIds)([
         "read_group_context",
-        ...(mode === "project_analysis" ? ["read_project_code_snapshot", "query_knowledge_base"] : []),
         ...(mode === "project_task" ? ["create_project_task", "dispatch_child_agent", "inspect_task_status"] : []),
         ...(mode === "followup" ? ["inspect_task_status", "replan_from_observation"] : []),
         ...(mode === "governance" ? ["govern_task_lifecycle", "inspect_task_status"] : []),
@@ -201,7 +193,7 @@ function buildMainAgentDecisionChain(input) {
         message_mode: input.messageMode || "",
         intent_kind: input.taskIntent?.kind || "",
         executable: input.taskIntent?.executable === true,
-        analysis_eligible: input.taskIntent?.analysisEligible === true,
+        tool_activity: input.taskIntent?.hasToolActivity === true,
         dispatch_action: policyAction || (mode === "project_task" ? "create_task" : "direct_reply"),
         assignment_count: (input.assignments || []).length,
         ...(input.observations || {}),
@@ -215,7 +207,6 @@ function buildMainAgentDecisionChain(input) {
     });
     const verified = blocked.length === 0
         && (mode !== "project_task" || input.taskId)
-        && (mode !== "project_analysis" || actionIds.includes("read_project_code_snapshot"))
         && actionIds.includes("generate_final_reply");
     const internalLoop = (0, collaboration_runtime_coordinator_review_1.buildGroupMainAgentInternalLoop)({
         mode,
@@ -280,8 +271,8 @@ function buildMainAgentDecisionChain(input) {
                 max_visible_steps: 7,
                 quiet_completed: true,
                 show_current_focus: true,
-                user_visible: !["conversation", "project_analysis"].includes(mode) || blocked.length > 0 || policyAction === "ask_user",
-                hide_for_simple_conversation: ["conversation", "project_analysis"].includes(mode) && blocked.length === 0 && policyAction !== "ask_user",
+                user_visible: mode !== "conversation" || blocked.length > 0 || policyAction === "ask_user",
+                hide_for_simple_conversation: mode === "conversation" && blocked.length === 0 && policyAction !== "ask_user",
             },
             strategy: "完整列表替换；普通用户看计划步骤，内部 Action/Trace 折叠",
             verification_nudge: Boolean(verificationReminder),
@@ -324,8 +315,6 @@ function mainAgentPetStateFromDecision(decision) {
     if (!decision?.verify?.passed)
         return { state: "waiting", text: "这个操作需要确认一下。" };
     const mode = String(decision?.mode || "");
-    if (mode === "project_analysis")
-        return { state: "thinking", text: "我在只读查看项目上下文。" };
     if (mode === "project_task")
         return { state: "planning", text: "我已创建任务，正在安排执行。" };
     if (mode === "delegation")
@@ -357,7 +346,7 @@ function applyMainAgentDecisionPetState(ctx, decision) {
 function runGroupMainAgentToolLoopSelfTest() {
     // 自测使用固定意图桩：同步关键词分类 classifyGroupProjectTaskIntent 已停用（调用即抛错），
     // 自测只需要形状正确的 taskIntent（权限判定仅消费 executable 字段）。
-    const stubIntent = (kind, executable, analysisEligible, reason, goal = "") => ({ kind, executable, analysisEligible, reason, goal, source: "self-test-stub" });
+    const stubIntent = (kind, executable, hasToolActivity, reason, goal = "") => ({ kind, executable, hasToolActivity, reason, goal, source: "self-test-stub" });
     const conversation = buildMainAgentDecisionChain({
         groupId: "g-loop",
         traceId: "trace-loop-conversation",
@@ -374,10 +363,10 @@ function runGroupMainAgentToolLoopSelfTest() {
         traceId: "trace-loop-analysis",
         messageId: "m2",
         coordinator: "coordinator",
-        mode: "project_analysis",
-        messageMode: "project_analysis",
+        mode: "conversation",
+        messageMode: "conversation",
         taskIntent: stubIntent("question", false, true, "自测桩：只读项目询问"),
-        dispatchPolicy: { action: "project_analysis", reason: "只读项目分析" },
+        dispatchPolicy: { action: "answer", reason: "已读取项目上下文" },
         observations: { code_snapshot: true, knowledge_recall: true },
         reply: { text: "这是只读分析。" },
     });

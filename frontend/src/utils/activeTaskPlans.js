@@ -92,6 +92,42 @@ const planBaseKey = event => {
   return eventTaskId(event) || eventAnchor(event) || String(plan.planId || event?.eventId || '')
 }
 
+const planStringList = value => [...new Set((Array.isArray(value) ? value : [])
+  .map(item => String(item || '').trim())
+  .filter(Boolean))]
+
+const stepRevisionSignature = step => JSON.stringify({
+  title: String(step?.title || '').trim(),
+  outcome: String(step?.outcome || '').trim(),
+  project: String(step?.project || '').trim(),
+  dependsOn: Array.isArray(step?.dependsOn || step?.depends_on)
+    ? [...(step.dependsOn || step.depends_on)].map(String).sort()
+    : [],
+})
+
+const projectRevisionDelta = (previousEvent, currentEvent) => {
+  if (!previousEvent || !currentEvent) return null
+  const previous = previousEvent?.detail?.requirementPlan || {}
+  const current = currentEvent?.detail?.requirementPlan || {}
+  const previousSteps = new Map((Array.isArray(previous.steps) ? previous.steps : [])
+    .map(step => [String(step?.id || ''), step]).filter(([id]) => id))
+  const currentSteps = new Map((Array.isArray(current.steps) ? current.steps : [])
+    .map(step => [String(step?.id || ''), step]).filter(([id]) => id))
+  const added = [...currentSteps.keys()].filter(id => !previousSteps.has(id))
+  const removed = [...previousSteps.keys()].filter(id => !currentSteps.has(id))
+  const changed = [...currentSteps.keys()].filter(id => (
+    previousSteps.has(id) && stepRevisionSignature(previousSteps.get(id)) !== stepRevisionSignature(currentSteps.get(id))
+  ))
+  const supportingChanged = [
+    String(previous.goal || '') !== String(current.goal || ''),
+    JSON.stringify(planStringList(previous.expectedResults)) !== JSON.stringify(planStringList(current.expectedResults)),
+    JSON.stringify(planStringList(previous.scope)) !== JSON.stringify(planStringList(current.scope)),
+    JSON.stringify(planStringList(previous.exclusions)) !== JSON.stringify(planStringList(current.exclusions)),
+  ].filter(Boolean).length
+  const delta = { added: added.length, changed: changed.length + supportingChanged, removed: removed.length }
+  return Object.values(delta).some(Boolean) ? delta : null
+}
+
 export function projectActiveTaskPlans(events, options = {}) {
   const exactSessionId = String(options.exactSessionId || '')
   const rows = (Array.isArray(events) ? events : []).filter(event => (
@@ -128,6 +164,14 @@ export function projectActiveTaskPlans(events, options = {}) {
       generation: eventGeneration(planEvent),
     }
     const runRows = rows.filter(event => samePlanRun(event, identity))
+    const revisionEvents = planEvents.filter(event => samePlanRun(event, identity))
+      .sort((left, right) => (
+        Number(left?.detail?.requirementPlan?.revision || 1) - Number(right?.detail?.requirementPlan?.revision || 1)
+        || eventSequence(left) - eventSequence(right)
+      ))
+    const previousPlanEvent = [...revisionEvents].reverse().find(event => (
+      Number(event?.detail?.requirementPlan?.revision || 1) < Number(plan.revision || 1)
+    )) || null
     const terminalResult = latestBySequence(runRows.filter(event => event?.eventType === 'result'))
     const latestRunEvent = latestBySequence(runRows)
     const latestInterruption = latestBySequence(runRows.filter(isInterruption))
@@ -164,6 +208,7 @@ export function projectActiveTaskPlans(events, options = {}) {
       || steps.at(-1)
     const pauseKind = String(latestPause?.detail?.pauseMilestone?.kind || '')
     const pauseIsCurrent = !!latestPause && eventSequence(latestPause) >= eventSequence(latestResumedActivity)
+    const hasExecutionActivity = runRows.some(event => !['requirement_plan', 'result'].includes(String(event?.eventType || '')))
     const status = successful
       ? 'completed'
       : pauseIsCurrent && pauseKind === 'paused'
@@ -174,7 +219,7 @@ export function projectActiveTaskPlans(events, options = {}) {
         ? 'interrupted'
         : plan.status === 'blocked' || failed || steps.some(step => step.status === 'blocked')
           ? 'blocked'
-          : plan.status === 'ready' && !steps.some(step => ['running', 'rework'].includes(step.status))
+          : plan.status === 'ready' && !hasExecutionActivity && !steps.some(step => ['running', 'rework'].includes(step.status))
             ? 'ready'
             : 'executing'
     const updatedAt = Math.max(eventTime(planEvent), eventTime(latestRunEvent))
@@ -195,6 +240,11 @@ export function projectActiveTaskPlans(events, options = {}) {
       revision: Math.max(1, Number(plan.revision || 1)),
       title: (/^(?:需求实施计划|执行前计划|实施计划)$/.test(planTitle) && conciseGoal ? conciseGoal : planTitle).slice(0, 80),
       goal: planGoal,
+      overview: String(plan.overview || '').trim(),
+      scope: planStringList(plan.scope),
+      acceptanceCriteria: planStringList(plan.expectedResults),
+      exclusions: planStringList(plan.exclusions),
+      revisionDelta: projectRevisionDelta(previousPlanEvent, planEvent),
       status,
       currentStepId: current?.id || '',
       completedCount: steps.filter(step => step.status === 'completed').length,

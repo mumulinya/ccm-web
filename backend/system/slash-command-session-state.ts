@@ -63,9 +63,9 @@ export function renderSlashCommandSessionDirective(scope: "global" | "project" |
   const state = readSlashCommandSessionState(scope, scopeId, exactSessionId);
   const lines = [];
   if (conversationPlanModeSupported(scope) && state.planMode?.enabled === true) {
-    lines.push("当前精确会话处于 Plan Mode：只允许分析、读取和制定计划，鼓励只读探索后必须调用 ccm_present_plan 出卡，不得派发写任务、修改代码或执行有副作用操作。", state.planMode.description ? `Plan Mode 目标：${String(state.planMode.description).slice(0, 4000)}` : "");
+    lines.push("The exact session is in Plan Mode: allow analysis, reads, and plan authoring only. Explore read-only first, then call ccm_present_plan. Do not dispatch writes, edit code, or perform side effects.", state.planMode.description ? `Plan Mode goal: ${String(state.planMode.description).slice(0, 4000)}` : "");
   }
   const style = String(state.preferences?.outputStyle || "").trim();
-  if (style) lines.push(`当前会话输出风格=${style}：concise=简洁直接，balanced=平衡，detailed=充分展开；不覆盖安全与证据要求。`);
+  if (style) lines.push(`Session output style=${style}: concise=direct, balanced=moderate detail, detailed=expanded; this never overrides safety or evidence requirements.`);
   return lines.filter(Boolean).join("\n");
 }

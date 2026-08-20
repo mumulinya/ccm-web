@@ -132,8 +132,7 @@ export function buildMainAgentDisplayStream(input: {
   const actionIds = Array.isArray(input.actionIds) ? input.actionIds : [];
   const toolUseSummary = buildStreamlinedToolUseSummary(input);
   const modeLabels: Record<string, string> = {
-    conversation: "普通回复",
-    project_analysis: "项目分析",
+    conversation: "回复",
     project_task: "项目任务",
     delegation: "协作执行",
     followup: "追加处理",

@@ -30,13 +30,12 @@ const actionLabels = {
 
 const modeInfo = computed(() => {
   const mode = props.decision?.mode || ''
-  if (mode === 'project_analysis') return { label: '项目分析', tone: 'analysis', icon: '🔎', summary: '只读查看项目上下文并回答，不创建任务。' }
   if (mode === 'project_task') return { label: '项目任务', tone: 'task', icon: '🧩', summary: '已把明确需求转成项目任务，并进入执行队列。' }
   if (mode === 'delegation') return { label: '协调安排', tone: 'task', icon: '🧠', summary: '我正在拆分计划并安排执行成员。' }
   if (mode === 'goal_revision') return { label: '目标调整', tone: 'task', icon: '🧭', summary: '旧方向已停止，我正在按新目标重新规划。' }
   if (mode === 'followup') return { label: '追加要求', tone: 'task', icon: '🔁', summary: '已并入原任务，我会基于当前状态继续。' }
   if (mode === 'governance') return { label: '任务治理', tone: 'govern', icon: '🛡️', summary: '停止、取消、归档等动作需要显式授权。' }
-  return { label: '普通回复', tone: 'chat', icon: '💬', summary: '只处理当前对话，不创建任务。' }
+  return { label: '回复', tone: 'chat', icon: '💬', summary: '正在处理当前消息。' }
 })
 
 const selectedActions = computed(() => Array.isArray(props.decision?.decision?.selected_actions) ? props.decision.decision.selected_actions : [])
@@ -116,7 +115,7 @@ const shouldHideSimpleConversationPlan = computed(() => {
   const policy = todoPlan.value?.display_policy || todoPlan.value?.displayPolicy || {}
   if (policy.user_visible === false || policy.hide_for_ordinary_conversation === true || policy.hideForOrdinaryConversation === true) return true
   const mode = String(props.decision?.mode || 'conversation').toLowerCase()
-  if (mode !== 'conversation' && mode !== 'project_analysis') return false
+  if (mode !== 'conversation') return false
   if (display.user_visible === true && display.hide_for_simple_conversation !== true && display.hide_for_ordinary_conversation !== true) {
     const hasBlockingOrAction = blockedPermissions.value.length > 0 || planSteps.value.some(step => ['failed', 'needs_confirmation', 'reworking', 'reviewing', 'in_progress'].includes(step.status))
     return !hasBlockingOrAction
@@ -269,7 +268,7 @@ const workchainStages = computed(() => Array.isArray(workchain.value?.stages) ? 
 const showWorkchain = computed(() => {
   if (!workchainStages.value.length) return false
   const mode = String(props.decision?.mode || 'conversation').toLowerCase()
-  if (['conversation', 'project_analysis'].includes(mode)) return false
+  if (mode === 'conversation') return false
   if (dispatchLaunchRows.value.length) return true
   return ['project_task', 'delegation', 'followup', 'governance'].includes(mode)
 })
@@ -293,8 +292,7 @@ const dispatchLaunchRows = computed(() => Array.isArray(dispatchLaunchSummary.va
   : [])
 const decisionExplanation = computed(() => {
   if (blockedPermissions.value.length) return `需要确认：${blockedPermissions.value.map(p => displayPlanText(p.reason || actionLabels[p.action_id] || p.action_id, '确认项已整理。', 120)).join('；')}`
-  if (!selectedActions.value.includes('dispatch_child_agent') && props.decision?.mode === 'conversation') return '没有安排：这轮是普通对话，我只回复用户，不创建任务。'
-  if (!selectedActions.value.includes('dispatch_child_agent') && props.decision?.mode === 'project_analysis') return '没有派发：这轮是只读项目分析，只读取上下文和代码快照，不修改项目。'
+  if (!selectedActions.value.includes('dispatch_child_agent') && props.decision?.mode === 'conversation') return '这轮没有安排执行成员。'
   if (selectedActions.value.includes('create_project_task')) return '已创建任务：当前消息包含明确执行意图，允许进入项目任务流程。'
   if (selectedActions.value.includes('dispatch_child_agent')) return '已安排：我已生成执行任务，等待执行成员执行并提交结果说明。'
   return modeInfo.value.summary
@@ -302,8 +300,7 @@ const decisionExplanation = computed(() => {
 const userSummary = computed(() => {
   if (displayStream.value?.user_visible_text) return streamlinedText.value
   if (blockedPermissions.value.length) return decisionExplanation.value
-  if (props.decision?.mode === 'conversation') return '已判断为普通对话，我会直接回复用户，不创建任务。'
-  if (props.decision?.mode === 'project_analysis') return '已判断为只读项目分析，只读取必要上下文并回答，不派发开发任务。'
+  if (props.decision?.mode === 'conversation') return '正在处理当前消息。'
   return decisionExplanation.value || modeInfo.value.summary
 })
 </script>

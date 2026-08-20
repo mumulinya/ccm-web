@@ -113,7 +113,21 @@ export declare function memorySummary(scope: MemoryScope, scopeId: string, memor
     consecutiveFailures: number;
     postCompactGate: any;
     tokenMeasurement: any;
-    modelVisiblePayload: any;
+    modelVisiblePayload: {
+        schema: string;
+        scope: import("../../system/session-compaction-core").SessionCompactionScope;
+        sessionId: string;
+        tokenBreakdown: {
+            [x: string]: number;
+        };
+        totalTokens: number;
+        payloadChecksum: string;
+        fixedContextChecksum: string;
+        pendingRequestChecksum: string;
+        loadedContextItems: import("../../system/session-compaction-core").LoadedContextItemsV1;
+        loadedContextItemsChecksum: string;
+        contentStored: boolean;
+    };
     availableContextCatalog: {
         schema: string;
         accounting: string;
@@ -252,6 +266,8 @@ export declare function memorySummary(scope: MemoryScope, scopeId: string, memor
         rawTranscriptPreserved: boolean;
         receiptChecksum: string;
     };
+    unifiedCompaction: import("../../system/unified-session-compaction").UnifiedCompactionProjection;
+    unifiedCompactionState: any;
     providerContextCache: any;
     contextEngineTrends: {
         schema: string;
@@ -375,7 +391,21 @@ export declare function getMemoryCenterScope(scope: MemoryScope, scopeId: string
         consecutiveFailures: number;
         postCompactGate: any;
         tokenMeasurement: any;
-        modelVisiblePayload: any;
+        modelVisiblePayload: {
+            schema: string;
+            scope: import("../../system/session-compaction-core").SessionCompactionScope;
+            sessionId: string;
+            tokenBreakdown: {
+                [x: string]: number;
+            };
+            totalTokens: number;
+            payloadChecksum: string;
+            fixedContextChecksum: string;
+            pendingRequestChecksum: string;
+            loadedContextItems: import("../../system/session-compaction-core").LoadedContextItemsV1;
+            loadedContextItemsChecksum: string;
+            contentStored: boolean;
+        };
         availableContextCatalog: {
             schema: string;
             accounting: string;
@@ -514,6 +544,8 @@ export declare function getMemoryCenterScope(scope: MemoryScope, scopeId: string
             rawTranscriptPreserved: boolean;
             receiptChecksum: string;
         };
+        unifiedCompaction: import("../../system/unified-session-compaction").UnifiedCompactionProjection;
+        unifiedCompactionState: any;
         providerContextCache: any;
         contextEngineTrends: {
             schema: string;

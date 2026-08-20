@@ -3,6 +3,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { CCM_DIR, SESSIONS_DIR } from "../../core/utils";
 import { callCompactionModel } from "../collaboration/group-compaction-engine";
+import { callUnifiedCompactionModel } from "../../system/unified-session-compaction-model";
 import { loadOrchestratorConfig } from "../collaboration/group-orchestrator-config";
 import { resolveMainAgentContextPolicy } from "../../tools/main-agent-context-policy";
 import { selectUserMcpToolDefinitions } from "../../system/session-context-tool-buckets";
@@ -48,6 +49,10 @@ import {
   normalizeSessionExecutionEvents,
 } from "../../system/session-execution-ledger";
 import { buildUnifiedSessionModelContextProjection, resolveSessionModelMicroCompactPolicy } from "../../system/session-model-context";
+import { buildUnifiedCompactionReceipt, buildUnifiedSessionCompactionStateV1, buildUnifiedRecoveryContext, orchestrateUnifiedCompaction, createUnifiedSessionCompactionEngine } from "../../system/unified-session-compaction";
+import { createUnifiedScopeAdapter } from "../../system/unified-session-compaction-adapters";
+import type { UnifiedCompactionResult } from "../../system/unified-session-compaction-types";
+import { unifiedSummaryChecksum } from "../../system/unified-session-compaction-summary";
 import { evaluateSessionSummaryQuality } from "../../system/session-summary-quality-gate";
 import { reviewSessionSummaryIfSelected } from "../../system/session-summary-secondary-review";
 import { loadProjectConfigs } from "../../core/db";
@@ -60,6 +65,137 @@ import {
 
 const MODEL_MAX_OUTPUT_TOKENS = 20_000;
 const compactions = new Map<string, { promise: Promise<any>; reason: string; startedAt: string }>();
+
+function projectCompactionSourceChecksum(data: any) {
+  return crypto.createHash("sha256").update(JSON.stringify({
+    history: (Array.isArray(data?.history) ? data.history : []).map((item: any) => String(item?.id || item?.messageId || "")),
+    execution: projectExecutionEvents(data).map((item: any) => String(item?.id || "")),
+    generation: Number(data?.unifiedSessionCompaction?.boundaryGeneration || 0),
+  })).digest("hex");
+}
+
+async function runUnifiedProjectSessionCompaction(project: string, projectSessionId: string, options: any = {}) {
+  const safeProject = validateProjectName(project);
+  const safeSessionId = validateSessionId(projectSessionId);
+  if (isProjectSessionAgentDispatchActive(safeProject, safeSessionId)) throw new Error("当前项目会话仍有第三方 Agent 正在执行，暂不能压缩");
+  const file = sessionFile(safeProject, safeSessionId);
+  if (!fs.existsSync(file)) throw new Error("项目会话不存在");
+  const config = loadOrchestratorConfig();
+  const binding = getProjectSessionAgentBinding(safeProject, safeSessionId);
+  const modelCapacity = resolveProjectCompactionCapacity(JSON.parse(fs.readFileSync(file, "utf8")), config, binding, {}, options);
+  let acquiredChecksum = "";
+  const adapter = createProjectSessionCompactionAdapter({
+    project: safeProject,
+    sessionId: safeSessionId,
+    acquire: () => {
+      const data = JSON.parse(fs.readFileSync(file, "utf8"));
+      acquiredChecksum = projectCompactionSourceChecksum(data);
+      return { scope: "project", exactSessionId: `${safeProject}:${safeSessionId}`, generation: Number(data?.unifiedSessionCompaction?.boundaryGeneration || 0), checksum: acquiredChecksum, acquiredAt: new Date().toISOString() };
+    },
+    load: () => {
+      const data = JSON.parse(fs.readFileSync(file, "utf8"));
+      const history = Array.isArray(data.history) ? data.history.filter((message: any) => ["user", "assistant"].includes(String(message?.role || ""))) : [];
+      const state = data.unifiedSessionCompaction || {};
+      return {
+        scope: "project",
+        exactSessionId: `${safeProject}:${safeSessionId}`,
+        messages: history,
+        executionEvents: projectExecutionEvents(data),
+        activeSummary: data.unifiedSessionSummary || null,
+        previousState: state,
+        boundaryGeneration: Number(state.boundaryGeneration || 0),
+        compactionFloorIndex: Number(state.summarizedMessageCount || 0),
+        recoveryContext: data.unifiedRecoveryContext || { permissionBoundary: safeProject, planBindings: data.plan ? [data.plan] : [], taskBindings: data.taskBindings || [] },
+        contextComponents: options.contextComponents || options.context_components || {},
+        providerUsage: state.providerUsage || null,
+      };
+    },
+    validate: () => {
+      const current = JSON.parse(fs.readFileSync(file, "utf8"));
+      if (projectCompactionSourceChecksum(current) !== acquiredChecksum) throw new Error("project_compaction_fence_stale");
+      if (isProjectSessionAgentDispatchActive(safeProject, safeSessionId)) throw new Error("project_compaction_dispatch_started");
+    },
+    commit: (result, fence) => {
+      const data = JSON.parse(fs.readFileSync(file, "utf8"));
+      if (projectCompactionSourceChecksum(data) !== fence.checksum) throw new Error("project_compaction_commit_fence_stale");
+      const summary = result.fullCompaction.summary;
+      if (!summary || summary.schema !== "ccm-unified-session-summary-v1") throw new Error("project_compaction_summary_missing");
+      const preservedIds = result.preservedRecentWindow.messages.map((item: any) => String(item?.id || "")).filter(Boolean);
+      const summarizedCount = Number(result.preservedRecentWindow.startIndex || 0);
+      const previousBinding = getProjectSessionAgentBinding(safeProject, safeSessionId);
+      const rotation = rotateProjectSessionAgentBinding(safeProject, safeSessionId, `统一会话压缩 ${result.receipt.checksum.slice(0, 12)}`);
+      const state = buildUnifiedSessionCompactionStateV1({ receipt: result.receipt, summaryQuality: result.summaryQuality, microCompact: result.microCompact, recoveryContext: result.recoveryContext, triggerReason: options.reason || "automatic", summarizedThroughMessageId: data.history?.[summarizedCount - 1]?.id || "", summarizedMessageCount: summarizedCount, preservedRecentMessageIds: preservedIds });
+      try {
+        data.unifiedSessionSummary = summary;
+        data.unifiedSessionCompaction = state;
+        data.unifiedRecoveryContext = result.recoveryContext;
+        data.unifiedSessionBoundary = { summarizedMessageCount: summarizedCount, summarizedThroughMessageId: data.history?.[summarizedCount - 1]?.id || "", preservedRecentMessageIds: preservedIds, checksum: result.receipt.checksum };
+        data.projectAgentGeneration = rotation.nextGeneration;
+        data.updated_at = new Date().toISOString();
+        persistSession(safeProject, safeSessionId, data);
+      } catch (error) {
+        reopenProjectSessionAgentBinding(safeProject, safeSessionId, "统一压缩提交失败，恢复旧世代");
+        throw error;
+      }
+      void previousBinding;
+    },
+    failure: (error) => {
+      const data = JSON.parse(fs.readFileSync(file, "utf8"));
+      data.unifiedSessionCompactionFailure = { code: String((error as any)?.code || "CCM_UNIFIED_COMPACTION_FAILED"), message: String((error as any)?.message || error).slice(0, 300), at: new Date().toISOString(), contentStored: false };
+      persistSession(safeProject, safeSessionId, data);
+    },
+  });
+  const modelCall = options.modelCall || ((request: any) => callUnifiedCompactionModel(config, request.system, request.user, request.maxOutputTokens));
+  const engine = createUnifiedSessionCompactionEngine({
+    adapter,
+    config: { ...config, autoCompactThreshold: modelCapacity.autoCompactThreshold },
+    force: options.force,
+    promptTooLong: options.promptTooLong,
+    reason: options.reason,
+    customInstructions: options.customInstructions,
+    modelCall,
+    buildProjection: (snapshot: any) => options.modelVisiblePayload || buildModelVisiblePayloadSnapshot({ scope: "project", sessionId: `${safeProject}:${safeSessionId}`, system: options.fixedContext || { project: safeProject, provider: modelCapacity.provider, model: modelCapacity.model }, tools: options.tools || null, activeSummary: snapshot.activeSummary, recentMessages: mergeConversationWithExecution(snapshot.messages, snapshot.executionEvents), currentRequest: options.currentRequest || null, recoveryContext: snapshot.recoveryContext, hookResults: [], contextComponents: options.contextComponents || options.context_components || {} }),
+    buildPostCompactPayload: ({ summary, preservedTimeline, recoveryContext }: any) => buildModelVisiblePayloadSnapshot({ scope: "project", sessionId: `${safeProject}:${safeSessionId}`, system: options.fixedContext || { project: safeProject, provider: modelCapacity.provider, model: modelCapacity.model }, tools: options.tools || null, activeSummary: summary, recentMessages: preservedTimeline, currentRequest: options.currentRequest || null, recoveryContext, hookResults: [], contextComponents: options.contextComponents || options.context_components || {} }),
+    measure: (payload: any) => Number(payload?.totalTokens || estimateTextTokens(JSON.stringify(payload || {}))),
+    qualityReference: () => ({ authorizationBoundaries: [safeProject], fileReferences: [], verificationEvidence: [], pendingWork: [], sourceMessageIds: [] }),
+  });
+  const result: any = await engine.run();
+  const persisted = JSON.parse(fs.readFileSync(file, "utf8"));
+  return {
+    compacted: result.compacted,
+    reason: result.reason,
+    before_tokens: result.receipt.beforeTokens,
+    after_tokens: result.receipt.afterTokens,
+    summary_source: result.receipt.summarySource,
+    boundary_generation: result.boundaryGeneration,
+    boundaryGeneration: result.boundaryGeneration,
+    boundary: persisted.unifiedSessionBoundary || null,
+    receipt: result.receipt,
+    unifiedSessionSummary: result.fullCompaction.summary,
+    unifiedSessionCompaction: result.receipt,
+    model_context_capacity: modelCapacity,
+    auto_compact_threshold: modelCapacity.autoCompactThreshold,
+    contentStored: false,
+  };
+}
+
+export function createProjectSessionCompactionAdapter(input: {
+  project: string;
+  sessionId: string;
+  load: () => Promise<any> | any;
+  commit: (result: UnifiedCompactionResult, fence: any) => Promise<void> | void;
+  acquire?: () => Promise<any> | any;
+  failure?: (error: unknown, fence: any) => Promise<void> | void;
+  validate?: (fence: any, snapshot: any) => Promise<void> | void;
+}) {
+  return createUnifiedScopeAdapter({
+    load: async () => ({ scope: "project", exactSessionId: `${input.project}:${input.sessionId}`, ...(await input.load()) }),
+    acquire: input.acquire,
+    commit: input.commit,
+    failure: input.failure,
+    validate: input.validate,
+  });
+}
 
 export function getProjectSessionCompactionActivity(project: string, projectSessionId: string) {
   let scopeId = "";
@@ -183,27 +319,22 @@ export function appendProjectSessionExecutionEvent(projectInput: string, project
 }
 
 function projectCompactionState(data: any, project: string, projectSessionId: string) {
-  const state = normalizeSessionCompactionState(data?.compaction?.v2 || data?.compaction || {}, {
-    scope: "project",
-    sessionId: `${project}:${projectSessionId}`,
-  });
-  const source = String(data?.compaction?.summary_source || data?.compaction?.summarySource || "").toLowerCase();
-  if (state.activeSummary && !["model", "session_memory", "session-memory"].includes(source)) {
-    return {
-      ...state,
-      activeSummary: null,
-      activeSummaryChecksum: "",
-      previousSummaryChecksum: "",
-      lastCompactedIndex: -1,
-      lastCompactedMessageId: "",
-      preservedRecentMessageIds: [],
-      preservedRecentTokens: 0,
-      preservedRecentTextMessageCount: 0,
-      latestProviderUsage: null,
-      boundaryGeneration: 0,
-    };
+  const unified = data?.unifiedSessionCompaction || null;
+  if (!unified || unified.schema !== "ccm-unified-session-compaction-state-v1") {
+    return normalizeSessionCompactionState({}, {
+      scope: "project",
+      sessionId: `${project}:${projectSessionId}`,
+    });
   }
-  return state;
+  return {
+    ...unified,
+    activeSummary: data?.unifiedSessionSummary || null,
+    activeSummaryChecksum: String(unified.summaryChecksum || ""),
+    lastCompactedIndex: Math.max(-1, Number(unified.summarizedMessageCount || 0) - 1),
+    lastCompactedMessageId: String(unified.summarizedThroughMessageId || ""),
+    preservedRecentMessageIds: Array.isArray(unified.preservedRecentMessageIds) ? unified.preservedRecentMessageIds : [],
+    boundaryGeneration: Number(unified.boundaryGeneration || 0),
+  };
 }
 
 function resolveProjectCompactionCapacity(data: any, config: any, binding: any, state: any, requested: any = {}) {
@@ -545,520 +676,7 @@ export async function compactProjectSessionWithModel(project: string, projectSes
   model?: string;
   modelVisiblePayload?: any;
 } = {}) {
-  const safeProject = validateProjectName(project);
-  const safeSessionId = validateSessionId(projectSessionId);
-  const scopeId = buildProjectSessionAgentScopeId(safeProject, safeSessionId);
-  const current = compactions.get(scopeId);
-  if (current) {
-    if (options.force) throw new Error("当前项目会话已有压缩正在进行，请稍后重试");
-    return current.promise;
-  }
-  const operation = (async () => {
-    if (isProjectSessionAgentDispatchActive(safeProject, safeSessionId)) throw new Error("当前项目会话仍有第三方 Agent 正在执行，暂不能压缩");
-    const file = sessionFile(safeProject, safeSessionId);
-    if (!fs.existsSync(file)) throw new Error("项目会话不存在");
-    await waitForScheduledSessionMemoryExtraction("project", `${safeProject}:${safeSessionId}`);
-    const data = JSON.parse(fs.readFileSync(file, "utf8"));
-    const history = Array.isArray(data.history) ? data.history.filter((message: any) => ["user", "assistant"].includes(String(message?.role || ""))) : [];
-    let state = projectCompactionState(data, safeProject, safeSessionId);
-    const storedSummarySource = String(data?.compaction?.summary_source || data?.compaction?.summarySource || "").toLowerCase();
-    const legacySummaryNeedsValidation = !!data?.compaction?.active_summary && !["model", "session_memory", "session-memory"].includes(storedSummarySource);
-    const legacyBoundaryCircuit = legacySummaryNeedsValidation
-      && sessionCompactionCircuitOpen(state)
-      && /source_boundary_mismatch/i.test(String(state.lastError || ""));
-    if (legacyBoundaryCircuit) {
-      state = resetSessionCompactionFailures(state);
-      data.compaction = {
-        ...(data.compaction || {}),
-        consecutive_failures: 0,
-        last_failure_at: "",
-        last_error: "",
-        v2: state,
-      };
-      data.updated_at = new Date().toISOString();
-      persistSession(safeProject, safeSessionId, data);
-    }
-    const startIndex = Math.max(0, state.lastCompactedIndex + 1);
-    const unsummarized = history.slice(startIndex);
-    const unsummarizedModelTimeline = projectModelTimeline(data, unsummarized);
-    const config = loadOrchestratorConfig();
-    const compactionModelCapacity = resolveGroupModelContextCapacity(config);
-    const bindingAtMeasurement = getProjectSessionAgentBinding(safeProject, safeSessionId);
-    const modelCapacity = resolveProjectCompactionCapacity(data, config, bindingAtMeasurement, state, options);
-    const threshold = Math.max(1, Number(modelCapacity.autoCompactThreshold || 0));
-    const currentRequest = pendingProjectRequest(history, options.currentRequest);
-    const triggerPayload = options.modelVisiblePayload?.schema === "ccm-model-visible-payload-snapshot-v1" ? options.modelVisiblePayload : buildModelVisiblePayloadSnapshot({
-      scope: "project",
-      sessionId: `${safeProject}:${safeSessionId}`,
-      system: options.fixedContext || { project: safeProject, provider: modelCapacity.provider, model: modelCapacity.model },
-      tools: options.tools || null,
-      activeSummary: state.activeSummary,
-      recentMessages: unsummarizedModelTimeline,
-      currentRequest,
-      recoveryContext: options.recoveryContext || null,
-      hookResults: [],
-      contextComponents: options.contextComponents || options.context_components || undefined,
-    });
-    const tokenMeasurement = measureSessionContextTokens({
-      scope: "project",
-      sessionId: `${safeProject}:${safeSessionId}`,
-      messages: unsummarizedModelTimeline,
-      activeSummary: state.activeSummary,
-      latestProviderUsage: state.latestProviderUsage,
-      provider: String(state.latestProviderUsage?.provider || bindingAtMeasurement.provider || ""),
-      model: String(state.latestProviderUsage?.model || modelCapacity.model || ""),
-      generation: Number(state.latestProviderUsage?.generation || bindingAtMeasurement.generation || 0),
-      boundaryGeneration: state.boundaryGeneration,
-      modelVisiblePayload: triggerPayload,
-    });
-    const tokenCount = tokenMeasurement.activeTokens;
-    if (!options.force && tokenCount < threshold) return {
-      compacted: false,
-      reason: "below_threshold",
-      before_tokens: tokenCount,
-      auto_compact_threshold: threshold,
-      model_context_capacity: modelCapacity,
-      token_measurement: tokenMeasurement,
-      model_visible_payload: triggerPayload,
-      resolved_model_capacity: modelCapacity,
-      pending_request_tokens: triggerPayload.tokenBreakdown.currentRequest,
-      legacy_summary_ignored: legacySummaryNeedsValidation,
-    };
-    if (sessionCompactionCircuitOpen(state) && !options.force) return {
-      compacted: false,
-      reason: "circuit_breaker",
-      before_tokens: tokenCount,
-      consecutive_failures: state.consecutiveFailures,
-    };
-    const recentWindow = calculateSessionMemoryKeepWindow(history, {
-      floorIndex: startIndex,
-      lastSummarizedMessageId: String(state.sessionMemoryState?.lastExtractedMessageId || ""),
-    });
-    const keepStart = recentWindow.startIndex;
-    const segment = history.slice(startIndex, keepStart);
-    if (!segment.length) return { compacted: false, reason: "nothing_to_compact", before_tokens: tokenCount };
-    const segmentExecution = projectExecutionForMessages(data, segment);
-    const segmentModelTimeline = mergeConversationWithExecution(segment, segmentExecution);
-    const previousSummary = state.activeSummary || null;
-    if (previousSummary && String(data.compaction?.active_summary_checksum || "") !== summaryChecksum(previousSummary)) {
-      throw new Error("项目会话上一轮压缩摘要校验失败");
-    }
-    const currentReference = referenceSummary(segmentModelTimeline);
-    const reference = previousSummary ? {
-      ...currentReference,
-      primaryRequest: currentReference.primaryRequest || previousSummary.primaryRequest || "",
-      userRequests: [...(previousSummary.userRequests || []), ...currentReference.userRequests].slice(-24),
-      keyOutcomes: [...(previousSummary.keyOutcomes || []), ...currentReference.keyOutcomes].slice(-24),
-      authorization: [...(previousSummary.authorization || []), ...currentReference.authorization].slice(-20),
-      decisions: [...(previousSummary.decisions || []), ...currentReference.decisions].slice(-24),
-      unresolved: [...(previousSummary.unresolved || []), ...currentReference.unresolved].slice(-24),
-      filesAndResources: [...new Set([...(previousSummary.filesAndResources || []), ...currentReference.filesAndResources])].slice(-48),
-      latestOutcome: currentReference.latestOutcome || previousSummary.latestOutcome || "",
-    } : currentReference;
-    const sourceMessageIds = reference.sourceMessageIds;
-    const preHookResults = await runSessionCompactionHooks("pre_compact", {
-      scope: "project",
-      project: safeProject,
-      sessionId: safeSessionId,
-      trigger: options.force ? "manual" : "auto",
-      customInstructions: options.customInstructions || "",
-      previousSummary,
-      tokenMeasurement,
-    });
-    const hookInstructions = preHookResults.map((item: any) => String(item?.customInstructions || item?.custom_instructions || "")).filter(Boolean).join("\n\n");
-    const system = [
-      "你是 CCM 项目会话压缩器。把旧对话压缩成可直接注入新 Claude Code/Codex/Cursor 会话的结构化上下文。",
-      "只输出 JSON，不要 Markdown。不得编造。授权边界和文件路径必须逐字保留。",
-      "消息边界由服务端绑定，无需返回 sourceMessageIds。",
-      "字段固定为 primaryRequest,userRequests,keyOutcomes,authorization,decisions,unresolved,filesAndResources,latestOutcome。",
-    ].join("\n");
-    const promptPayload = {
-      project: safeProject,
-      projectSessionId: safeSessionId,
-      customInstructions: compactText([options.customInstructions, hookInstructions].filter(Boolean).join("\n\n"), 4000),
-      previousSummary,
-      previousSummaryChecksum: state.activeSummaryChecksum || (previousSummary ? summaryChecksum(previousSummary) : ""),
-      preservationReference: reference,
-      timeline: segmentModelTimeline.map((message: any) => ({ id: message.id, role: message.role, type: message.type || "message", timestamp: message.timestamp, content: message.content })),
-    };
-    const maxInputTokens = Math.max(18_000, Number(compactionModelCapacity.effectiveContextWindow || 180_000) - 3_000);
-    const promptFit = fitProjectCompactionPrompt(system, promptPayload, maxInputTokens);
-    const invoke = options.modelCall || (async (request: any) => callCompactionModel(config, request.system, request.user, request.maxOutputTokens));
-    let result: any = null;
-    let validation: any = { valid: false, issues: ["summary_missing"] };
-    let lastError: any = null;
-    let nextSessionMemoryState = state.sessionMemoryState || null;
-    const exactMemorySessionId = `${safeProject}:${safeSessionId}`;
-    const expectedMemoryCursor = String(segmentModelTimeline.at(-1)?.id || segment.at(-1)?.id || "");
-    if (!options.customInstructions) {
-      const reusable = validateSessionMemoryState(state.sessionMemoryState, {
-        scope: "project",
-        sessionId: exactMemorySessionId,
-        expectedLastMessageId: expectedMemoryCursor,
-      });
-      if (reusable.valid) {
-        validation = validateSummary(bindTrustedProjectSourceBoundary(reusable.summary, sourceMessageIds), reference, sourceMessageIds, {
-          sessionId: exactMemorySessionId,
-          sourceMessages: segmentModelTimeline,
-          previousSummary,
-        });
-        if (validation.valid) result = { summary: reusable.summary, provider: state.sessionMemoryState?.provider, model: state.sessionMemoryState?.model, source: "session_memory" };
-      }
-    }
-    let retryTimeline = promptFit.timeline;
-    let retryUser = promptFit.user;
-    let ptlRecoveryAttempts = Number(promptFit.projection.ptlRecoveryAttempts || 0);
-    for (let attempt = 1; !validation.valid && attempt <= 4; attempt += 1) {
-      try {
-        result = await invoke({ system, user: retryUser, maxOutputTokens: MODEL_MAX_OUTPUT_TOKENS, attempt });
-        const candidate = bindTrustedProjectSourceBoundary(result?.summary || result, sourceMessageIds);
-        validation = validateSummary(candidate, reference, sourceMessageIds, {
-          sessionId: exactMemorySessionId,
-          sourceMessages: segmentModelTimeline,
-          previousSummary,
-        });
-        if (validation.valid) break;
-        lastError = new Error(`项目会话模型摘要校验失败：${validation.issues.join(", ")}`);
-      } catch (error) {
-        lastError = error;
-        if (isPromptTooLong(error) && ptlRecoveryAttempts < 3) {
-          const peeled = peelOldestApiConversationRound(retryTimeline);
-          if (!peeled.peeled) break;
-          retryTimeline = peeled.messages;
-          ptlRecoveryAttempts += 1;
-          retryUser = JSON.stringify({
-            ...promptPayload,
-            timeline: retryTimeline,
-            timelineProjection: {
-              strategy: "drop_oldest_complete_rounds",
-              fullSourceMessageIds: sourceMessageIds,
-              includedMessageIds: retryTimeline.map((message: any) => String(message?.id || "")),
-              fullTranscriptRetained: true,
-              ptlRecoveryAttempts,
-            },
-          });
-        }
-      }
-    }
-    if (!validation.valid) throw lastError || new Error("项目会话模型摘要不可用");
-    let summary = normalizeSummary(result?.summary || result, sourceMessageIds);
-    const verifiedRecoveryAttachments = buildVerifiedSessionRecoveryContext({
-      rootDir: String(options.fixedContext?.workDir || options.fixedContext?.work_dir || ""),
-      fileReferences: summary.filesAndResources || [],
-      skills: Array.isArray(options.recoveryContext?.skills) ? options.recoveryContext.skills : [],
-    });
-    const sessionStartHookResults = await runSessionCompactionHooks("session_start", {
-      scope: "project",
-      project: safeProject,
-      sessionId: safeSessionId,
-      trigger: "compact",
-      summary,
-      previousSummary,
-      recoveryContext: options.recoveryContext || {
-        project: safeProject,
-        filesAndResources: summary.filesAndResources || [],
-        authorization: summary.authorization || [],
-        unresolved: summary.unresolved || [],
-        verifiedAttachments: verifiedRecoveryAttachments,
-      },
-    });
-    const preservedVisibleMessages = history.slice(keepStart);
-    const preservedExecutionMessages = projectExecutionForMessages(data, preservedVisibleMessages);
-    const preservedMessages = mergeConversationWithExecution(preservedVisibleMessages, preservedExecutionMessages);
-    const recoveryContext = options.recoveryContext || {
-      project: safeProject,
-      filesAndResources: summary.filesAndResources || [],
-      authorization: summary.authorization || [],
-      unresolved: summary.unresolved || [],
-      verifiedAttachments: verifiedRecoveryAttachments,
-    };
-    const nextBoundaryGeneration = state.boundaryGeneration + 1;
-    const projectConfig = loadProjectConfigs()?.[safeProject] || {};
-    const effectiveContextPolicy = resolveMainAgentContextPolicy(
-      config,
-      projectConfig?.context_policy || projectConfig?.contextPolicy || {},
-    ).effective;
-    const projectToolScope = {
-      ...(projectConfig?.tools || {}),
-      auditContext: { runtime: "project-main-agent", project: safeProject, sessionId: safeSessionId, source: "post-compact-restore" },
-    };
-    const dynamicToolIdentity = {
-      agentKind: "project" as const,
-      scope: "project" as const,
-      scopeId: safeProject,
-      exactSessionId: safeSessionId,
-      generation: nextBoundaryGeneration,
-    };
-    const dynamicContextRestoreManifest = buildMainAgentPostCompactRestoreManifest({
-      identity: dynamicToolIdentity,
-      boundaryGeneration: nextBoundaryGeneration,
-      scope: projectToolScope,
-    });
-    const dynamicContextRestore = restoreMainAgentPostCompactContext({
-      identity: dynamicToolIdentity,
-      scope: projectToolScope,
-      manifest: dynamicContextRestoreManifest,
-      maxPerSkillTokens: effectiveContextPolicy.postCompactSkillPerItemMaxTokens,
-      maxTotalSkillTokens: effectiveContextPolicy.postCompactSkillTotalMaxTokens,
-    });
-    const restoredMcpCatalog = toolManager.getScopedToolCatalog(projectToolScope).tools
-      .filter((tool: any) => dynamicContextRestore.loadedToolNames.includes(String(tool.canonicalName || tool.name || "")));
-    const boundaryMarker = buildSessionCompactionBoundaryMarker({
-      scope: "project",
-      sessionId: `${safeProject}:${safeSessionId}`,
-      generation: nextBoundaryGeneration,
-      summarizedThroughMessageId: segmentModelTimeline.at(-1)?.id || segment.at(-1)?.id || "",
-      previousSummaryChecksum: state.activeSummaryChecksum || (previousSummary ? summaryChecksum(previousSummary) : ""),
-      preservedMessageIds: preservedMessages.map((message: any) => String(message.id || "")),
-      dynamicContextRestoreManifest,
-    });
-    const buildPostCompactPayload = (activeSummary: any) => buildModelVisiblePayloadSnapshot({
-      scope: "project",
-      sessionId: `${safeProject}:${safeSessionId}`,
-      system: options.fixedContext || { project: safeProject, provider: modelCapacity.provider, model: modelCapacity.model },
-      tools: options.tools || null,
-      activeSummary,
-      recentMessages: preservedMessages,
-      currentRequest,
-      recoveryContext: { boundaryMarker, ...recoveryContext },
-      hookResults: sessionStartHookResults,
-      contextComponents: {
-        ...(options.contextComponents || options.context_components || {}),
-        messageSkills: dynamicContextRestore.skillAttachments,
-        messageMcpTools: selectUserMcpToolDefinitions(restoredMcpCatalog),
-      },
-    });
-    let postCompactPayload = buildPostCompactPayload(summary);
-    let afterTokens = postCompactPayload.totalTokens;
-    let postCompactGate: any = buildSessionPostCompactGate({ modelVisiblePayload: postCompactPayload, threshold });
-    let formalRecompaction: any = {
-      schema: "ccm-bounded-formal-recompaction-v1",
-      scope: "project",
-      sessionId: `${safeProject}:${safeSessionId}`,
-      attempted: false,
-      maxAttempts: 1,
-      initialTokens: afterTokens,
-      threshold,
-      status: "not_required",
-    };
-    if (postCompactGate.providerCallAllowed !== true) {
-      formalRecompaction = { ...formalRecompaction, attempted: true, status: "running" };
-      try {
-        const retryResult = await invoke({
-          system: `${system}\n这是压缩后容量门禁触发的唯一一次正式重压缩。只压缩已有摘要，不添加新事实；preservationReference 必须逐字保留。`,
-          user: JSON.stringify({
-            project: safeProject,
-            projectSessionId: safeSessionId,
-            currentSummary: summary,
-            preservationReference: reference,
-            sourceMessageIds,
-            target: "produce a materially shorter valid summary",
-          }),
-          maxOutputTokens: Math.min(8_000, MODEL_MAX_OUTPUT_TOKENS),
-          attempt: "post_compact_recompact_1",
-        });
-        const rebound = bindTrustedProjectSourceBoundary(retryResult?.summary || retryResult, sourceMessageIds);
-        const retryValidation = validateSummary(rebound, reference, sourceMessageIds, {
-          sessionId: exactMemorySessionId,
-          sourceMessages: segmentModelTimeline,
-          previousSummary,
-        });
-        if (!retryValidation.valid) throw new Error(`项目会话正式重压缩摘要校验失败：${retryValidation.issues.join(", ")}`);
-        summary = normalizeSummary(rebound, sourceMessageIds);
-        validation = retryValidation;
-        result = { ...result, ...retryResult, summary, source: "model" };
-        postCompactPayload = buildPostCompactPayload(summary);
-        afterTokens = postCompactPayload.totalTokens;
-        postCompactGate = buildSessionPostCompactGate({ modelVisiblePayload: postCompactPayload, threshold });
-        formalRecompaction = {
-          ...formalRecompaction,
-          status: postCompactGate.providerCallAllowed === true ? "passed" : "still_over_threshold",
-          finalTokens: afterTokens,
-          summaryValidated: true,
-        };
-      } catch (error: any) {
-        formalRecompaction = { ...formalRecompaction, status: "failed", error: compactText(error?.message || error, 500) };
-      }
-    }
-    postCompactGate = { ...postCompactGate, formalRecompaction };
-    if (postCompactGate.providerCallAllowed !== true) {
-      const error: any = new Error(`项目会话压缩后仍超过阈值：${afterTokens}/${threshold}`);
-      error.code = "PROJECT_SESSION_POST_COMPACT_THRESHOLD_EXCEEDED";
-      error.postCompactGate = postCompactGate;
-      throw error;
-    }
-    const secondaryReview = await reviewSessionSummaryIfSelected({
-      config,
-      scope: "project",
-      scopeId: safeProject,
-      sessionId: safeSessionId,
-      boundaryGeneration: nextBoundaryGeneration,
-      summary,
-      reference,
-      sourceMessageIds,
-      deterministicQuality: validation.quality,
-    });
-    const archive = {
-      id: `pca_${Date.now().toString(36)}_${crypto.randomBytes(3).toString("hex")}`,
-      from_index: startIndex,
-      to_index: keepStart - 1,
-      source_message_ids: sourceMessageIds,
-      visible_message_count: segment.length,
-      execution_message_count: segmentExecution.length,
-      summary,
-      summary_checksum: summaryChecksum(summary),
-      summary_source: "model",
-      provider: result?.provider || "",
-      model: result?.model || config.model || "",
-      created_at: new Date().toISOString(),
-      reason: options.reason || "auto_model",
-        input_projection: promptFit.projection,
-        ptl_recovery_attempts: ptlRecoveryAttempts,
-      previous_summary_checksum: state.activeSummaryChecksum || (previousSummary ? summaryChecksum(previousSummary) : ""),
-      formal_recompaction: formalRecompaction,
-      summary_quality: validation.quality || null,
-      secondary_review: secondaryReview,
-    };
-    const beforeBinding = getProjectSessionAgentBinding(safeProject, safeSessionId);
-    const rotation = rotateProjectSessionAgentBinding(safeProject, safeSessionId, `项目会话模型压缩 ${archive.id}`);
-    try {
-      const nextState = resetSessionCompactionFailures({
-        ...state,
-        activeSummary: summary,
-        activeSummaryChecksum: summaryChecksum(summary),
-        previousSummaryChecksum: state.activeSummaryChecksum || (previousSummary ? summaryChecksum(previousSummary) : ""),
-        lastCompactedIndex: keepStart - 1,
-        lastCompactedMessageId: segment.at(-1)?.id || "",
-        preservedRecentMessageIds: preservedMessages.map((message: any) => String(message.id || "")),
-        preservedRecentTokens: preservedMessages.reduce((sum: number, message: any) => sum + estimateTextTokens(String(message?.content || "")), 0),
-        preservedRecentTextMessageCount: preservedMessages.filter((message: any) => String(message?.content || "").trim()).length,
-        latestProviderUsage: null,
-        tokenMeasurement,
-        sessionMemoryState: nextSessionMemoryState,
-        postCompactGate,
-        lastCompactedAt: new Date().toISOString(),
-        boundaryGeneration: state.boundaryGeneration + 1,
-        modelVisiblePayloadChecksum: postCompactPayload.payloadChecksum,
-        fixedContextChecksum: postCompactPayload.fixedContextChecksum,
-        pendingRequestChecksum: postCompactPayload.pendingRequestChecksum,
-        boundaryMarker,
-        preservedSegmentChecksum: sessionCompactionChecksum(preservedMessages.map((message: any) => String(message.id || ""))),
-        recoveryContextTokens: postCompactPayload.tokenBreakdown.recoveryContext,
-        hookResultTokens: postCompactPayload.tokenBreakdown.hookResults,
-        ptlRecoveryAttempts,
-        formalRecompaction,
-        summaryQuality: validation.quality || null,
-        secondaryReview,
-        dynamicContextRestoreManifest,
-        dynamicContextRestoreReceipt: dynamicContextRestore.receipt,
-      });
-      data.compaction = {
-        schema: "ccm-project-session-model-compaction-v2",
-        mode: "model_required",
-        summary_source: result?.source === "session_memory" ? "session_memory" : "model",
-        active_summary: summary,
-        active_summary_checksum: summaryChecksum(summary),
-        archives: [...(Array.isArray(data.compaction?.archives) ? data.compaction.archives : []), archive].slice(-100),
-        last_compacted_index: keepStart - 1,
-        last_compacted_message_id: segment.at(-1)?.id || "",
-        preserved_recent_message_ids: preservedMessages.map((message: any) => message.id),
-        preserved_recent_token_count: nextState.preservedRecentTokens,
-        preserved_recent_text_message_count: nextState.preservedRecentTextMessageCount,
-        recent_window: recentWindow,
-        before_tokens: tokenCount,
-        after_tokens: afterTokens,
-        auto_compact_threshold: threshold,
-        model_context_capacity: modelCapacity,
-        compacted_at: new Date().toISOString(),
-        rotated_from_generation: beforeBinding.generation,
-        next_generation: rotation.nextGeneration,
-        previous_summary_checksum: nextState.previousSummaryChecksum,
-        latest_provider_usage: null,
-        token_measurement: tokenMeasurement,
-        session_memory_state: nextState.sessionMemoryState,
-        post_compact_gate: postCompactGate,
-        summary_quality: validation.quality || null,
-        secondary_review: secondaryReview,
-        consecutive_failures: 0,
-        boundary_generation: nextState.boundaryGeneration,
-        boundary_marker: boundaryMarker,
-        preserved_segment_checksum: nextState.preservedSegmentChecksum,
-        model_visible_payload: postCompactPayload,
-        resolved_model_capacity: modelCapacity,
-        pending_request_tokens: postCompactPayload.tokenBreakdown.currentRequest,
-        recovery_context_tokens: postCompactPayload.tokenBreakdown.recoveryContext,
-        hook_result_tokens: postCompactPayload.tokenBreakdown.hookResults,
-        ptl_recovery_attempts: ptlRecoveryAttempts,
-        formal_recompaction: formalRecompaction,
-        dynamic_context_restore_manifest: dynamicContextRestoreManifest,
-        dynamic_context_restore_receipt: dynamicContextRestore.receipt,
-        v2: nextState,
-        hook_results: { pre: preHookResults, session_start: sessionStartHookResults },
-      };
-      data.updated_at = new Date().toISOString();
-      persistSession(safeProject, safeSessionId, data);
-      persistMainAgentPostCompactRestoreManifest(dynamicContextRestoreManifest);
-    } catch (error) {
-      reopenProjectSessionAgentBinding(safeProject, safeSessionId, "项目会话压缩提交失败，恢复旧世代");
-      throw error;
-    }
-    const response = {
-      compacted: true,
-      archive_id: archive.id,
-      before_tokens: data.compaction.before_tokens,
-      after_tokens: data.compaction.after_tokens,
-      preserved_messages: data.compaction.preserved_recent_message_ids.length,
-      next_generation: data.compaction.next_generation,
-      summary_source: "model",
-      token_measurement: tokenMeasurement,
-      post_compact_gate: postCompactGate,
-      session_memory: data.compaction.session_memory_state,
-      consecutive_failures: 0,
-      model_context_capacity: modelCapacity,
-      model_visible_payload: postCompactPayload,
-      resolved_model_capacity: modelCapacity,
-      pending_request_tokens: postCompactPayload.tokenBreakdown.currentRequest,
-      recovery_context_tokens: postCompactPayload.tokenBreakdown.recoveryContext,
-      hook_result_tokens: postCompactPayload.tokenBreakdown.hookResults,
-      ptl_recovery_attempts: ptlRecoveryAttempts,
-      summary_quality: validation.quality || null,
-      secondary_review: secondaryReview,
-      dynamic_context_restore_manifest: dynamicContextRestoreManifest,
-      dynamic_context_restore_receipt: dynamicContextRestore.receipt,
-    };
-    await runSessionCompactionHooks("post_compact", {
-      scope: "project",
-      project: safeProject,
-      sessionId: safeSessionId,
-      trigger: options.force ? "manual" : "auto",
-      result: response,
-    });
-    return response;
-  })().catch(error => {
-    const file = sessionFile(safeProject, safeSessionId);
-    if (fs.existsSync(file)) {
-      const currentData = JSON.parse(fs.readFileSync(file, "utf8"));
-      const failedState = recordSessionCompactionFailure(projectCompactionState(currentData, safeProject, safeSessionId), error);
-      currentData.compaction = {
-        ...(currentData.compaction || {}),
-        consecutive_failures: failedState.consecutiveFailures,
-        last_failure_at: failedState.lastFailureAt,
-        last_error: failedState.lastError,
-        v2: failedState,
-      };
-      currentData.updated_at = new Date().toISOString();
-      persistSession(safeProject, safeSessionId, currentData);
-    }
-    throw error;
-  }).finally(() => {
-    if (compactions.get(scopeId)?.promise === operation) compactions.delete(scopeId);
-  });
-  compactions.set(scopeId, {
-    promise: operation,
-    reason: String(options.reason || "auto_model"),
-    startedAt: new Date().toISOString(),
-  });
-  return operation;
+  return runUnifiedProjectSessionCompaction(project, projectSessionId, options);
 }
 
 function projectSessionMessageContent(value: any) {
@@ -1109,12 +727,7 @@ export function buildProjectSessionModelContextProjection(
   if (!fs.existsSync(file)) return null;
   const data = JSON.parse(fs.readFileSync(file, "utf8"));
   const state = projectCompactionState(data, project, projectSessionId);
-  const summary = state.activeSummary || null;
-  const compatibilitySummary = data.compaction?.active_summary || null;
-  if (summary && compatibilitySummary && summaryChecksum(summary) !== summaryChecksum(compatibilitySummary)) {
-    throw new Error("项目会话压缩摘要校验失败，V2 与兼容字段不一致");
-  }
-  if (summary && String(data.compaction?.active_summary_checksum || "") !== summaryChecksum(summary)) throw new Error("项目会话压缩摘要校验失败，拒绝注入");
+  const summary = data.unifiedSessionSummary || state.activeSummary || null;
   const history = Array.isArray(data.history)
     ? data.history.filter((message: any) => ["user", "assistant"].includes(String(message?.role || "")))
     : [];
@@ -1127,7 +740,7 @@ export function buildProjectSessionModelContextProjection(
     messages: history,
     executionEvents: projectExecutionEvents(data),
     canonicalSummary: canonicalSummary ? summary : null,
-    summarySource: canonicalSummary ? String(data.compaction?.summary_source || data.compaction?.summarySource || "") : "",
+    summarySource: canonicalSummary ? "model" : "",
     summaryChecksum: canonicalSummary ? summaryChecksum(summary) : "",
     boundaryGeneration: Number(state.boundaryGeneration || 0),
     summarizedThroughIndex: Number(state.lastCompactedIndex || -1),
@@ -1135,7 +748,7 @@ export function buildProjectSessionModelContextProjection(
     currentRequest: options.currentRequest,
     microCompact: resolveSessionModelMicroCompactPolicy(config, {
       contextTokens: Number(state.tokenMeasurement?.activeTokens || 0),
-      pressureThresholdTokens: Number(data.compaction?.auto_compact_threshold || state.postCompactGate?.threshold || 0),
+    pressureThresholdTokens: Number(state.autoCompactThreshold || data.compaction?.auto_compact_threshold || 0),
     }),
   });
   if (options.persistMicroCompactReceipt === true) {

@@ -52,7 +52,12 @@ import { appendAssistantProgress, appendToolProjection, appendUserVisibleAgentEv
 import { assistantProgressNarrationEnabled, buildAssistantProgressFallback, buildToolBatchOutcomeProgress, sanitizeAssistantProgressText, validateAssistantProgressKind } from "../../system/assistant-progress";
 import { createModelActivityController, createSafeJsonReplyDeltaExtractor, type ModelActivityPhase } from "../../system/model-activity";
 import { readSlashCommandSessionState, renderSlashCommandSessionDirective } from "../../system/slash-command-session-state";
-import { applyConversationPlanModeHold, applyConversationPlanModeToRound, isConversationPlanModeEnabled } from "../../system/conversation-plan-mode-gate";
+import {
+  applyConversationPlanModeHold,
+  applyConversationPlanModeToRound,
+  applyInteractiveConversationModePolicy,
+  isConversationPlanModeEnabled,
+} from "../../system/conversation-plan-mode-gate";
 import { publishUserVisibleAssistantText } from "../../system/user-visible-agent-projections";
 import { buildModelVisiblePayloadSnapshot, modelVisibleFixedTokens } from "../../system/session-compaction-core";
 import { selectUserMcpToolDefinitions } from "../../system/session-context-tool-buckets";
@@ -79,6 +84,7 @@ import {
   type WorkflowDecision,
 } from "../../agents/workflow-decision";
 import { createMainAgentTurnReceipt, normalizeMainAgentTurnDecision } from "../../agents/main-agent-turn";
+import { buildInternalPromptBindings } from "../../agents/internal-prompt-contract";
 import { runGroupMainNativeQueryLoop } from "./group-native-query-adapter";
 import { buildGroupMainIdentityRules, buildGroupMainSessionGuidance } from "../../agents/main-agent-identity";
 import { searchAgentKnowledge } from "../knowledge/knowledge-access";
@@ -167,7 +173,7 @@ const GROUP_MAIN_BUILTIN_TOOLS = [
     canonicalName: "query_knowledge",
     name: "query_knowledge",
     server: "ccm-group-readonly",
-    description: "按当前群聊及成员项目授权范围查询知识库。",
+    description: "Query the knowledge base within the current group and member project authorization scope.",
     inputSchema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] },
     annotations: { readOnlyHint: true },
   },
@@ -232,7 +238,7 @@ export function buildGroupMainAgentToolContext(input: {
     ...(shared.catalog.loadedMcp || []).filter((tool: any) => !builtinNames.has(String(tool?.canonicalName || "") as any)),
   ];
   const builtinPrompt = [
-    "群聊主 Agent内置只读工具：",
+    "Built-in read-only tools for the group main Agent:",
     ...GROUP_MAIN_BUILTIN_TOOLS.map(tool => renderMainAgentToolCatalogLine(tool, schemaSurface)),
   ].join("\n");
   return {
@@ -401,22 +407,22 @@ export async function runLlmCoordinatorSummary(group: any, userMessage: string, 
     }
   };
 
-  const childReplies = validOutputs.map((text, i) => `--- 子 Agent task-notification ${i + 1} ---\n${String(text).slice(0, 2000)}`).join("\n\n");
+  const childReplies = validOutputs.map((text, i) => `--- child Agent task-notification ${i + 1} ---\n${String(text).slice(0, 2000)}`).join("\n\n");
 
   const roleSkills = buildRoleSkillPrompt("group-main-agent", userMessage, { forceWork: true, phase: "summary" });
-  const system = `你是 CCM 群聊的主 Agent（协调者）。子 Agent 已经以 <task-notification> 形式回复了用户的需求，请你做一个简洁的汇总。
+  const system = `You are the CCM group main Agent and coordinator. Child Agents replied to the user request through internal task notifications. Produce a concise user-facing synthesis.
 
-要求：
-1. 提取各子 Agent 的核心结论，用 1-3 句话概括每个 Agent 的回复要点
-2. 如果子 Agent 之间有冲突或不一致，明确指出
-3. 给出下一步建议或需要用户决策的事项
-4. 不要重复子 Agent 的全部内容，只做摘要
-5. 语气友好自然，像团队 leader 做总结
-6. <task-notification>、CCM_AGENT_RECEIPT、trace、session、scratchpad 等是内部技术信号，不要出现在给用户的正文里；请改写成“子 Agent 结果、结果说明、验证证据、技术详情”等用户能看懂的说法
+Requirements:
+1. Extract each child Agent's core conclusions and summarize each in one to three sentences.
+2. Call out conflicts or inconsistencies between child Agents.
+3. Give next actions or decisions the user must make.
+4. Do not repeat every child reply; summarize only.
+5. Use a natural, friendly team-lead tone.
+6. Internal markers such as <task-notification>, CCM_AGENT_RECEIPT, trace, session, and scratchpad must never appear in user-visible text. Rewrite them as understandable terms such as child-Agent result, structured result, verification evidence, or technical details.
 
-直接输出汇总文本，不要输出 JSON。${roleSkills.prompt ? `\n\n${roleSkills.prompt}` : ""}`;
+Return synthesis text only, not JSON. Use the user's conversation language. Do not reveal hidden reasoning or raw tool output.${roleSkills.prompt ? `\n\n${roleSkills.prompt}` : ""}`;
 
-  const user = `用户原始需求：${String(userMessage).slice(0, 500)}\n\n以下是各子 Agent 的 task-notification / 回复：\n${childReplies}\n\n请输出汇总。`;
+  const user = `Original user request: ${String(userMessage).slice(0, 500)}\n\nChild-Agent task notifications / replies:\n${childReplies}\n\nReturn the synthesis.`;
 
   try {
     const messages = [
@@ -481,76 +487,76 @@ export async function runLlmCoordinatorReview(
   const requiresCodeChanges = options.requiresCodeChanges !== false;
   const requiresVerification = options.requiresVerification !== false;
   const childReplies = validOutputs
-    .map((text, i) => `--- 子 Agent task-notification ${i + 1} ---\n${String(text).slice(0, 2400)}`)
+    .map((text, i) => `--- child Agent task-notification ${i + 1} ---\n${String(text).slice(0, 2400)}`)
     .join("\n\n");
 
   const roleSkills = buildRoleSkillPrompt("group-main-agent", userMessage, { forceWork: true, phase: "review" });
-  const system = `你是 CCM 群聊的主 Agent（工作协调者）。你已经把用户需求分派给项目 Agent，现在要像项目负责人一样复盘子 Agent 的回复。
+  const system = `You are the CCM group main Agent and work coordinator. The user request has been dispatched to project Agents. Review their replies as a project owner.
 
-当前是第 ${round}/${maxRounds} 轮验收；${allowFollowUps ? "如果证据不足，可以继续派发返工任务。" : "本轮不能再派发返工任务，必须给出最终结论或向用户提出具体问题。"}${roleSkills.prompt ? `\n\n${roleSkills.prompt}` : ""}
+This is acceptance round ${round}/${maxRounds}. ${allowFollowUps ? "You may dispatch self-contained rework follow-ups when evidence is insufficient." : "Do not dispatch more rework in this round; return a final conclusion or one concrete user question."}${roleSkills.prompt ? `\n\n${roleSkills.prompt}` : ""}
 
-本任务的最新门禁配置（优先级高于历史会话中的旧要求）：
-- 必须产生代码/文件变更：${requiresCodeChanges ? "是" : "否；不得因为 filesChanged 为空判定缺口"}
-- 必须执行项目验证命令：${requiresVerification ? "是" : "否；不得因为未运行、无法运行或缺少 npm test/build 等命令判定缺口"}
+Latest gates for this task (these override stale conversation requirements):
+- Code/file changes required: ${requiresCodeChanges ? "yes" : "no; an empty filesChanged value is not a gap by itself"}
+- Project verification command required: ${requiresVerification ? "yes" : "no; do not require npm test/build when this gate is disabled"}
 
-你不是代码执行 Agent，不写代码，不假装完成没有证据的工作。按本轮注入的复核与返工 Skill 判断完成度、冲突、缺口和后续动作。
-- 需要补充时只能在 followUps 中派发自包含返工工作单；已经满足时给出最终协调结论；需要用户决策时提出一个具体问题。
-- 给用户看的 summary、gaps、conflicts、checks.detail/evidence、userQuestion 不得出现 <task-notification>、CCM_AGENT_RECEIPT、trace、session、scratchpad 等内部协议词；这些只用于内部判断，输出时改写成“子 Agent 结果、结构化结果说明、验证证据、技术详情”。
+You are not the code execution Agent. Do not edit code and do not claim unsupported completion. Use the injected review and rework Skills to judge completion, conflicts, gaps, and next actions.
+- Put self-contained rework work orders only in followUps. When evidence is sufficient, return the final coordination verdict. When user input is needed, ask one concrete question.
+- User-visible summary, gaps, conflicts, checks.detail/evidence, and userQuestion must not contain internal markers such as <task-notification>, CCM_AGENT_RECEIPT, trace, session, or scratchpad. Rewrite them as child-Agent results, structured result details, verification evidence, or technical details.
 
-验收门禁：
-- 优先读取每个 Worker 的 <task-notification>：task-id 表示 Worker，status 表示 completed/failed/blocked/partial/missing_receipt，receipt-status 表示 CCM_AGENT_RECEIPT 状态，result 是 Worker 结果摘要。
-- 优先读取每个子 Agent 回复末尾的 CCM_AGENT_RECEIPT / “结构化回执”摘要。
-- 如果某个被派发的 Agent 缺少结构化回执，或回执 status 不是 done，或没有提供实际动作/验证证据，通常不能判定 complete。
-- ${requiresCodeChanges ? "对代码修改类任务，必须看到修改点/文件或明确说明未修改；否则在 gaps 里指出。" : "本任务允许无文件变更；只需核对任务约定的可验收产出。"}
-- ${requiresVerification ? "必须看到符合任务要求的实际验证证据。" : "本任务已关闭强制验证门禁，不得追问项目测试命令。"}
-- 对依赖任务，后续 Agent 的结论必须引用或吸收前置 Agent 的结论；否则指出依赖未闭环。
-- 对接口文档、业务文档、需求文档或 PRD 驱动的任务，必须检查子 Agent 是否覆盖了被分派的接口契约、字段、业务规则、页面/交互、验收标准；缺少文档条目对应的实现/确认/验证证据时不能判定 complete。
-- 不要把“已建议”“可以修改”“应该检查”当成已完成。
+Acceptance gates:
+- Inspect each Worker's task notification: task-id identifies the Worker; status may be completed, failed, blocked, partial, or missing_receipt; receipt-status identifies the structured receipt state; result is the Worker summary.
+- Inspect the structured receipt summary at the end of each child-Agent reply.
+- A dispatched Agent without a structured receipt, with a receipt status other than done, or without actual action and verification evidence is normally not complete.
+- ${requiresCodeChanges ? "For code-change work, require changed files or an explicit statement that no files changed; otherwise add a gap." : "This task permits no file changes; verify only the agreed deliverables."}
+- ${requiresVerification ? "Require actual verification evidence matching the task." : "The mandatory verification gate is disabled; do not demand project test commands."}
+- Dependent work must cite or absorb the preceding Agent's conclusion; otherwise report an unclosed dependency.
+- For API, business, requirement, or PRD-driven work, verify that assigned contracts, fields, business rules, UI behavior, and acceptance criteria are covered by implementation or evidence.
+- Do not treat suggestions, proposed changes, or recommendations as completed work.
 
-只能返回 JSON 对象，不要 Markdown，不要解释。
+Return one JSON object only. Do not output Markdown or explanations.
 
-允许追问的项目 Agent：
-${buildAllowedProjectBrief(normalized) || "- 无"}
+Allowed project Agents:
+${buildAllowedProjectBrief(normalized) || "- none"}
 
-JSON 格式：
+JSON shape:
 {
   "schema_version": 1,
   "status": "complete | needs_followup | needs_user",
   "verdict": "pass | blocked | needs_user",
-  "decision": { "can_complete": true, "reason": "为什么可以完成或不能完成" },
-  "summary": "给用户看的最终或阶段性协调结论，必须包含已确认结论、已完成/未完成事项、风险和验证建议",
+  "decision": { "can_complete": true, "reason": "why completion is or is not allowed" },
+  "summary": "User-facing final or interim coordination conclusion in the conversation language, including confirmed conclusions, completed/uncompleted work, risks, and verification advice",
   "checks": [
-    { "id": "worker_receipt | actual_changes | verification | dependency | user_scope", "label": "检查项", "status": "pass | fail | warn", "detail": "检查结论", "evidence": ["证据"] }
+    { "id": "worker_receipt | actual_changes | verification | dependency | user_scope", "label": "check label", "status": "pass | fail | warn", "detail": "check conclusion", "evidence": ["evidence"] }
   ],
   "worker_reviews": [
-    { "project": "项目 Agent 名称", "receipt_status": "done | partial | blocked | failed | missing", "trusted": true, "completed_scope": ["已完成范围"], "gaps": ["缺口"], "verification": ["验证证据"] }
+    { "project": "project Agent name", "receipt_status": "done | partial | blocked | failed | missing", "trusted": true, "completed_scope": ["completed scope"], "gaps": ["gap"], "verification": ["verification evidence"] }
   ],
-  "gaps": ["仍缺少的信息或证据"],
-  "conflicts": ["子 Agent 之间冲突或不一致的地方"],
+  "gaps": ["missing information or evidence"],
+  "conflicts": ["conflict or inconsistency between child Agents"],
   "followUps": [
     {
-      "project": "必须是允许追问的项目 Agent 名称",
-      "summary": "5-10 个字/词的追问预览，给用户和任务卡展示，例如：补齐前端验证证据",
-      "task": "继续追问这个项目 Agent 的明确任务，包含要补充的证据/修改/验证",
-      "reason": "为什么需要继续追问"
+      "project": "must be an allowed project Agent name",
+      "summary": "five to ten word follow-up preview for the user and task card",
+      "task": "specific self-contained follow-up work including missing evidence, changes, or verification",
+      "reason": "why the follow-up is needed"
     }
   ],
-  "userQuestion": "如果需要用户补充，写一个具体问题；否则空字符串",
+  "userQuestion": "One concrete question if user input is required; otherwise an empty string",
   "confidence": 0.0
 }`;
 
-  const user = `用户原始需求：
+  const user = `Original user request:
 ${String(userMessage || "").slice(0, 1200)}
 
-主 Agent 初始安排：
+Initial main-Agent assignment:
 ${String(coordinatorPlan || "").slice(0, 1600)}
 
-子 Agent task-notification / 回复：
+Child-Agent task notifications / replies:
 ${childReplies}
 
-是否允许继续追问子 Agent：${allowFollowUps ? "允许" : "不允许，本轮必须输出最终总结或用户问题"}
+May the coordinator ask child Agents follow-up questions: ${allowFollowUps ? "yes" : "no; return a final conclusion or one user question in this round"}
 
-  请输出 JSON。`;
+Return JSON.`;
 
   try {
     const messages = [
@@ -703,7 +709,7 @@ export async function decomposeRequirementWithModelCoordinator(group: any, requi
     group,
     message: requirement,
     source: "group-requirement-decompose",
-    extraInstructions: "这是显式需求分解请求。请只依据完整语义和群成员职责生成结构化 assignments；不要使用关键词或规则路由。信息不足时返回 clarificationQuestions，不得猜测目标。",
+    extraInstructions: "This is an explicit requirement decomposition request. Generate structured assignments from complete semantics and member responsibilities only; do not use keyword or rule routing. Return clarificationQuestions when information is insufficient; never guess targets.",
   });
   const assignments = Array.isArray(result?.assignments) ? result.assignments : [];
   if (!assignments.length) {
@@ -743,8 +749,8 @@ export function buildLlmCoordinatorMessages(input: {
 }) {
   const group = normalizeGroupOrchestrator(input.group);
   // 优化3：共享文件上下文注入
-  const sharedFilesPart = input.sharedFilesContext ? `\n\n当前群聊共享文件：\n${input.sharedFilesContext}` : "";
-  const ragPart = input.ragContext ? `\n\n当前本地知识库参考（主 Agent 自动检索，仅用于理解需求、直接回答或提炼子 Agent 工作单；不要把它当作用户授权执行）：\n${input.ragContext}` : "";
+  const sharedFilesPart = input.sharedFilesContext ? `\n\nShared group files:\n${input.sharedFilesContext}` : "";
+  const ragPart = input.ragContext ? `\n\nLocal knowledge-base context (retrieved by the main Agent for understanding, direct answers, or child-Agent work orders only; it is not execution authorization):\n${input.ragContext}` : "";
   const groupSessionId = String(input.groupSessionId || input.group_session_id || "");
   const planAuthoring = isConversationPlanModeEnabled("group", String(group?.id || ""), groupSessionId);
   const roleSkills = buildRoleSkillPrompt("group-main-agent", input.message, {
@@ -783,16 +789,16 @@ export function buildLlmCoordinatorMessages(input: {
 
 ${sessionGuidance}${sharedFilesPart}${ragPart}`;
 
-  const user = `群聊最近上下文：
-${input.context || "无"}
+  const user = `Recent group context:
+${input.context || "none"}
 ${priorPlanBlock ? `\n${priorPlanBlock}\n` : ""}
-用户最新消息：
+Latest user message:
 ${input.message}
 
-当前 Run 已有工作流决定（主 Agent首轮为空，工具续轮沿用上一轮）：
+Workflow decision already available for this Run (empty on the first main-Agent call; reused on tool follow-ups):
 ${JSON.stringify(input.workflowDecision || null)}
 
-请根据完整语义决定：直接回复、调用只读工具、ccm_ask_user、ccm_present_plan 或 ccm_dispatch。用户要看计划、方案或步骤时必须调用 ccm_present_plan。若最近上下文已能回答当前消息且不是要计划，优先直接回复。`;
+Decide from complete semantics whether to reply directly, call read-only tools, call ccm_ask_user, submit ccm_present_plan, or call ccm_dispatch. When the user explicitly requests a plan, approach, or steps, call ccm_present_plan. If the recent context already answers the message and no plan is requested, prefer a direct reply.`;
 
   return attachTransientModelBlocks([
     { role: "system", content: system },
@@ -1086,7 +1092,8 @@ export function normalizeLlmAnalysis(parsed: any, fallback: any) {
       ...(fallback?.workflowDecision || {}),
       ...(parsed?.workflowDecision || parsed?.workflow_decision || {}),
       ...(!(parsed?.workflowDecision || parsed?.workflow_decision) ? {
-        mode: parsed?.shouldDelegate === true ? "execute_direct" : fallback?.workflowDecision?.mode || "answer",
+        actionRequired: parsed?.shouldDelegate === true,
+        requiresCodeChanges: parsed?.shouldDelegate === true,
         reason: parsed?.dispatchPolicy?.reason || fallback?.workflowDecision?.reason || "大模型已选择协调方式",
         confidence: parsed?.confidence ?? fallback?.confidence ?? 0.8,
       } : {}),
@@ -1109,7 +1116,8 @@ export function buildCoordinatorResultFromAnalysis(group: any, message: string, 
   const effectiveTargets = shouldDispatch ? targets : [];
   const workflowDecision: WorkflowDecision = analysis.workflowDecision
     || normalizeWorkflowDecision({
-      mode: effectiveTargets.length ? "execute_direct" : "answer",
+      actionRequired: effectiveTargets.length > 0,
+      requiresCodeChanges: effectiveTargets.length > 0,
       reason: dispatchPolicy.reason || "主 Agent 已选择协调方式",
     });
 
@@ -1405,7 +1413,7 @@ export async function runLlmGroupOrchestrator(input: {
     try {
       const priorPlanDraft = String(planningInput.priorPlanDraft || "");
       const synthesisMessages = [
-        { role: "system", content: "请把既有结论整理成面向用户的最终回答。若已有计划稿，用一两句说明关键决策，不要把待办再写成 P0–P4 小作文，也不要输出空回复。若最近上下文已包含用户需求，直接据此回答或给出实现计划，不要再问用户描述更具体的需求。只输出回答正文，不输出JSON、内部协议、推理过程或工具原始结果。" },
+        { role: "system", content: "Turn the established conclusions into the final user-facing answer in the user's conversation language. If a plan draft exists, mention its key decisions briefly instead of expanding every todo into an essay. Do not return an empty answer. Use recent context when it already contains the request; do not ask the user to restate it. Output answer text only; do not output JSON, internal protocols, hidden reasoning, or raw tool results." },
         { role: "user", content: JSON.stringify({
           request: String(input.message || "").slice(0, 4000),
           recentContext: String(input.context || "").slice(0, 6000),
@@ -1430,7 +1438,9 @@ export async function runLlmGroupOrchestrator(input: {
       modelDurationMs += Math.max(0, Date.now() - synthesisStartedAt);
     }
   }
+  const conversationPlanModeEnabled = isConversationPlanModeEnabled("group", String(group.id), groupSessionId);
   parsed = applyConversationPlanModeHold("group", String(group.id), groupSessionId, parsed);
+  parsed = applyInteractiveConversationModePolicy("group", conversationPlanModeEnabled, parsed);
   if (hasPresentedGroupPlan(parsed) && !coordinatorUsableReply(parsed)) {
     parsed = applySynthesizedCoordinatorReply(parsed, COORDINATOR_PRESENTED_PLAN_HEADLINE);
   }
@@ -1438,7 +1448,6 @@ export async function runLlmGroupOrchestrator(input: {
     parsed,
     priorPlanDraft: planningInput.priorPlanDraft,
     observationCount: planningInput.observationCount,
-    workflowMode: parsed?.workflowDecision?.mode,
   })) {
     const error: any = new Error("模型返回空响应");
     error.code = "CCM_EMPTY_REPLY";
@@ -1463,6 +1472,21 @@ export async function runLlmGroupOrchestrator(input: {
     toolRound: Math.max(0, modelCallCount - 1),
     usage: tokenUsage,
     inputIdentity: { groupId: group.id, groupSessionId, message: input.message },
+    promptBindings: buildInternalPromptBindings({
+      scope: "group",
+      system: buildLlmCoordinatorMessages(planningInput)
+        .filter((message: any) => message?.role === "system")
+        .map((message: any) => String(message.content || ""))
+        .join("\n\n"),
+      skills: buildRoleSkillPrompt("group-main-agent", input.message, {
+        source: String((input as any).source || ""),
+        phase: "planning",
+        selectedSkillNames: analysis.workflowDecision?.selectedSkills || [],
+        modelDecision: analysis.workflowDecision || null,
+        planAuthoring: conversationPlanModeEnabled,
+      }).selected.map((skill: any) => ({ name: skill.name, version: skill.version, body: skill.body })),
+      mcp: buildLlmCoordinatorContextComponents(planningInput).mcpTools,
+    }),
   });
   if (group.id && groupSessionId && ["reply", "clarify", "plan"].includes(turnDecision.responseKind)) {
     const reply = String(parsed?.reply || parsed?.content || parsed?.summary || "");
@@ -1488,7 +1512,7 @@ export async function runLlmGroupOrchestrator(input: {
         tokenAccuracy: tokenUsage?.reported === false ? "estimated" : "reported",
         durationMs: totalDurationMs,
       },
-      detail: { timing: { totalMs: totalDurationMs, modelMs: modelDurationMs, toolWallMs: toolWallDurationMs, otherMs: otherDurationMs } },
+      detail: { timing: { totalMs: totalDurationMs, modelMs: modelDurationMs, toolWallMs: toolWallDurationMs, otherMs: otherDurationMs }, promptBindings: turnReceipt.promptBindings },
       result: buildUserVisibleAgentResult({ status: turnDecision.responseKind === "clarify" ? "waiting" : "success", text: reply, durationMs: totalDurationMs, modelDurationMs, turns: modelCallCount, toolCalls: toolCallCount, usage: tokenUsage }),
       usage: tokenUsage,
     });

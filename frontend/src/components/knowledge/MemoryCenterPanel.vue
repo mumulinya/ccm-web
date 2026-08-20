@@ -74,7 +74,7 @@ const config = ref({
   groupSessionRetentionDays: 30,
   groupSessionMaxArchived: 20,
   groupSessionAutoPruneEnabled: false,
-  timeBasedMicrocompactEnabled: false,
+  timeBasedMicrocompactEnabled: true,
   timeBasedMicrocompactGapMinutes: 60,
   timeBasedMicrocompactKeepRecent: 5,
   agentCommunicationV2Enabled: true,
@@ -1153,7 +1153,7 @@ onMounted(() => loadOverview(false))
                 <select v-model="config.providerContextCacheMode">
                   <option value="auto">智能自动选择</option>
                   <option value="native">优先 Provider 原生缓存</option>
-                  <option value="controlled">CCM 受控压缩投影</option>
+                  <option value="controlled">CCM 受控投影</option>
                   <option value="off">关闭 Provider 适配</option>
                 </select>
               </div>
@@ -1208,6 +1208,16 @@ onMounted(() => loadOverview(false))
                 <input v-model="config.timeBasedMicrocompactEnabled" type="checkbox">
                 <span>启用旧工具结果空闲整理 (Time-based Tool Result Microcompact)</span>
               </label>
+            </div>
+            <div class="field-grid microcompact-policy-fields">
+              <div class="field-item">
+                <label>空闲触发间隔（分钟）</label>
+                <input v-model.number="config.timeBasedMicrocompactGapMinutes" type="number" min="1" max="1440" step="1">
+              </div>
+              <div class="field-item">
+                <label>保留最近工具结果数</label>
+                <input v-model.number="config.timeBasedMicrocompactKeepRecent" type="number" min="1" max="20" step="1">
+              </div>
             </div>
           </section>
 

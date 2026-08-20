@@ -40,7 +40,9 @@ function anchorValues(reference: any) {
   const durableKeys = [
     "userAnchors", "feedback", "authorization", "decisions", "references", "unresolved",
     "filesAndResources", "preferences", "dislikes", "artistsAndGenres", "playbackDecisions",
-    "persistentRequirements", "blockedItems", "constraints",
+    "persistentRequirements", "blockedItems", "constraints", "userGoals", "corrections",
+    "authorizationBoundaries", "completedWork", "pendingWork", "risksAndBlockers",
+    "fileReferences", "verificationEvidence", "attachmentReferences", "nextActions",
   ];
   return [...new Set(durableKeys.flatMap(key => Array.isArray(reference[key]) ? reference[key].map(String) : []))].filter(Boolean);
 }

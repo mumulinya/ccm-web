@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { AlertTriangle, Check, ChevronDown, ChevronRight, Circle, Clock3, ListChecks, Minus, RotateCcw } from '@lucide/vue'
+import { AlertTriangle, Check, ChevronDown, ChevronRight, Circle, Clock3, ListChecks, Minus, Pencil, RotateCcw } from '@lucide/vue'
 import ActiveTaskPlanDetailDrawer from './ActiveTaskPlanDetailDrawer.vue'
 import {
   activePlanMessageIndex,
@@ -14,6 +14,7 @@ const props = defineProps({
   exactSessionId: { type: String, default: '' },
   active: { type: Boolean, default: true },
   detailEnabled: { type: Boolean, default: true },
+  allowPlanConfirmation: { type: Boolean, default: true },
 })
 const emit = defineEmits(['locate', 'execution-action'])
 
@@ -26,6 +27,7 @@ let timer = null
 const allPlans = computed(() => projectActiveTaskPlans(props.events, { exactSessionId: props.exactSessionId }))
 const visiblePlans = computed(() => allPlans.value.filter(plan => (
   plan.status !== 'queued'
+  && (props.allowPlanConfirmation || plan.status !== 'ready')
   && (plan.status !== 'completed' || (plan.completedAt > 0 && now.value - plan.completedAt <= 3_000))
 )))
 const selectedPlan = computed(() => visiblePlans.value.find(plan => plan.status === 'executing')
@@ -42,6 +44,7 @@ const visibleSteps = computed(() => {
 const hiddenStepCount = computed(() => Math.max(0, (selectedPlan.value?.steps?.length || 0) - visibleSteps.value.length))
 const currentOrdinal = computed(() => {
   if (!selectedPlan.value?.totalCount) return 0
+  if (selectedPlan.value.status === 'ready') return 0
   if (selectedPlan.value.status === 'completed') return selectedPlan.value.totalCount
   return Math.min(selectedPlan.value.totalCount, currentStepIndex.value + 1)
 })
@@ -54,7 +57,23 @@ const statusLabel = computed(() => ({
   paused: '已暂停，现场已保留',
   completed: '全部完成',
 }[selectedPlan.value?.status] || '正在执行'))
-const enabledActions = computed(() => (selectedPlan.value?.actions || []).filter(action => action?.label))
+const planKindLabel = computed(() => selectedPlan.value?.status === 'ready' ? '实施计划' : '执行清单')
+const enabledActions = computed(() => {
+  const actions = (selectedPlan.value?.actions || []).filter(action => action?.label)
+  if (selectedPlan.value?.status !== 'ready') return actions
+  const byKind = new Map(actions.map(action => [String(action?.kind || action?.id || ''), action]))
+  return [
+    byKind.get('revise_plan') || { id: 'revise_plan', kind: 'revise_plan', label: '修改计划', enabled: true },
+    byKind.get('confirm_plan') || { id: 'confirm_plan', kind: 'confirm_plan', label: '确认并执行', enabled: true, tone: 'primary' },
+  ]
+})
+const visibleAcceptance = computed(() => (selectedPlan.value?.acceptanceCriteria || []).slice(0, 4))
+const revisionSummary = computed(() => {
+  const delta = selectedPlan.value?.revisionDelta
+  if (!delta) return ''
+  return [delta.added ? `新增 ${delta.added}` : '', delta.changed ? `调整 ${delta.changed}` : '', delta.removed ? `删除 ${delta.removed}` : '']
+    .filter(Boolean).join(' · ')
+})
 
 const toggleExpanded = () => {
   expanded.value = !expanded.value
@@ -95,7 +114,7 @@ const locateStep = step => {
 }
 
 const runAction = action => {
-  if (!action?.enabled || !selectedPlan.value) return
+  if (action?.enabled === false || !selectedPlan.value) return
   emit('execution-action', {
     messageIndex: activePlanMessageIndex(props.messages, selectedPlan.value),
     action: {
@@ -108,6 +127,11 @@ const runAction = action => {
   })
 }
 
+const runPlanAction = action => {
+  if (String(action?.kind || action?.id || '') === 'revise_plan') return openDetail()
+  runAction(action)
+}
+
 const overrideTaskId = ref('')
 const openDetail = () => {
   const taskId = overrideTaskId.value || selectedPlan.value?.taskId
@@ -115,7 +139,7 @@ const openDetail = () => {
 }
 const confirmDetailedPlan = () => {
   detailOpen.value = false
-  runAction({ id: 'confirm_plan', kind: 'confirm_plan', label: '确认并分派', enabled: true, taskId: overrideTaskId.value || selectedPlan.value?.taskId })
+  runAction({ id: 'confirm_plan', kind: 'confirm_plan', label: '确认并执行', enabled: true, taskId: overrideTaskId.value || selectedPlan.value?.taskId })
 }
 const locateDetailedItem = ({ planStepId, workItemId }) => locateStep({ id: planStepId || workItemId })
 const onOpenPlanDetail = event => {
@@ -145,26 +169,33 @@ onBeforeUnmount(() => {
     >
       <header class="plan-dock-head">
         <button type="button" class="plan-dock-title" :aria-expanded="expanded" @click="toggleExpanded">
-          <span class="plan-dock-kind"><ListChecks :size="14" />执行清单</span>
+          <span class="plan-dock-kind"><ListChecks :size="14" />{{ planKindLabel }}</span>
           <span>
             <strong>{{ selectedPlan.title }}</strong>
             <small aria-live="polite">{{ statusLabel }}</small>
           </span>
           <i><ChevronDown v-if="expanded" :size="14" /><ChevronRight v-else :size="14" /></i>
         </button>
-        <span class="plan-dock-progress">{{ currentOrdinal }} / {{ selectedPlan.totalCount }}</span>
+        <span class="plan-dock-progress">{{ selectedPlan.status === 'ready' ? `${selectedPlan.totalCount} 步` : `${currentOrdinal} / ${selectedPlan.totalCount}` }}</span>
         <button v-if="detailEnabled" type="button" class="plan-detail-trigger" @click="openDetail">查看详细计划</button>
       </header>
+
+      <div v-if="selectedPlan.status === 'ready'" class="plan-ready-summary">
+        <p v-if="selectedPlan.goal">{{ selectedPlan.goal }}</p>
+        <div v-if="selectedPlan.revision > 1" class="plan-revision-summary">
+          <Pencil :size="12" /><strong>第 {{ selectedPlan.revision }} 版</strong><span>{{ revisionSummary || '计划内容已更新' }}</span>
+        </div>
+      </div>
 
       <ol class="plan-dock-steps">
         <li
           v-for="step in visibleSteps"
           :key="step.id"
-          :class="[step.status, { current: step.id === selectedPlan.currentStepId }]"
+          :class="[step.status, { current: selectedPlan.status !== 'ready' && step.id === selectedPlan.currentStepId }]"
         >
           <button
             type="button"
-            :aria-current="step.id === selectedPlan.currentStepId ? 'step' : undefined"
+            :aria-current="selectedPlan.status !== 'ready' && step.id === selectedPlan.currentStepId ? 'step' : undefined"
             :title="`定位到执行现场：${step.title}`"
             @click="locateStep(step)"
           >
@@ -175,21 +206,28 @@ onBeforeUnmount(() => {
         </li>
       </ol>
 
+      <section v-if="selectedPlan.status === 'ready' && visibleAcceptance.length" class="plan-acceptance-summary" aria-label="验收标准">
+        <strong>验收标准</strong>
+        <ul><li v-for="item in visibleAcceptance" :key="item"><Check :size="11" />{{ item }}</li></ul>
+      </section>
+
       <footer class="plan-dock-foot">
         <button v-if="hiddenStepCount" type="button" class="plan-show-all" @click="showAll = !showAll">
           {{ showAll ? '收起步骤' : `查看其余${hiddenStepCount}步` }}
         </button>
-        <span>第 {{ currentOrdinal }} / {{ selectedPlan.totalCount }} 步</span>
+        <span v-if="selectedPlan.status === 'ready'">共 {{ selectedPlan.totalCount }} 步 · 确认后开始执行</span>
+        <span v-else>第 {{ currentOrdinal }} / {{ selectedPlan.totalCount }} 步</span>
       </footer>
 
-      <div v-if="['blocked', 'interrupted', 'paused', 'pausing'].includes(selectedPlan.status) && enabledActions.length" class="plan-dock-actions" aria-label="任务处理操作">
+      <div v-if="['ready', 'blocked', 'interrupted', 'paused', 'pausing'].includes(selectedPlan.status) && enabledActions.length" class="plan-dock-actions" aria-label="任务处理操作">
         <button
           v-for="action in enabledActions"
           :key="action.id"
           type="button"
-          :disabled="!action.enabled"
+          :disabled="action.enabled === false"
+          :class="{ primary: action.kind === 'confirm_plan' || action.tone === 'primary' }"
           :title="action.disabledReason || action.label"
-          @click="runAction(action)"
+          @click="runPlanAction(action)"
         >{{ action.label }}</button>
       </div>
     </section>
@@ -238,6 +276,10 @@ onBeforeUnmount(() => {
 .plan-detail-trigger { flex:0 0 auto; padding:4px 2px; border:0; background:transparent; color:var(--primary-color,#2563eb); font-size:10.5px; font-weight:750; cursor:pointer; }
 .plan-detail-trigger:hover { text-decoration:underline; }
 .plan-dock-steps { display: grid; gap: 0; margin: 0; padding: 1px 11px 5px; list-style: none; }
+.plan-ready-summary { display:grid; gap:7px; padding:10px 13px 5px; }
+.plan-ready-summary>p { margin:0; color:var(--text-secondary,#475569); font-size:11.5px; line-height:1.55; overflow-wrap:anywhere; }
+.plan-revision-summary { display:flex; align-items:center; gap:5px; color:#b45309; font-size:10px; }
+.plan-revision-summary strong { color:inherit; }.plan-revision-summary span { color:var(--text-muted,#64748b); }
 .plan-dock-steps li button { width: 100%; min-height: 27px; display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; align-items: center; gap: 6px; padding: 3px 5px; border: 0; border-radius: 6px; background: transparent; color: var(--text-secondary, #475569); text-align: left; cursor: pointer; }
 .plan-dock-steps li button:hover { background: rgba(100, 116, 139, .07); }
 .plan-dock-steps li.current button { color: var(--text-primary, #0f172a); background: color-mix(in srgb, var(--primary-color, #2563eb) 7%, transparent); }
@@ -251,10 +293,16 @@ onBeforeUnmount(() => {
 .plan-step-title { min-width: 0; overflow: hidden; font-size: 10.5px; font-weight: 560; text-overflow: ellipsis; white-space: nowrap; }
 .plan-dock-steps small { max-width: 105px; overflow: hidden; color: var(--text-muted, #64748b); font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
 .plan-dock-foot { min-height: 29px; display: flex; align-items: center; justify-content: flex-end; gap: 10px; padding: 2px 13px 7px; color: var(--text-muted, #64748b); font-size: 9px; }
+.plan-acceptance-summary { display:grid; grid-template-columns:auto minmax(0,1fr); gap:8px; padding:7px 13px 9px; border-top:1px solid color-mix(in srgb,var(--border-color,#94a3b8) 36%,transparent); }
+.plan-acceptance-summary>strong { color:var(--text-primary,#0f172a); font-size:10px; }
+.plan-acceptance-summary ul { display:flex; flex-wrap:wrap; gap:4px 14px; margin:0; padding:0; list-style:none; }
+.plan-acceptance-summary li { display:flex; align-items:flex-start; gap:4px; color:var(--text-secondary,#475569); font-size:9.5px; line-height:1.4; }
+.plan-acceptance-summary li svg { flex:0 0 auto; margin-top:1px; color:#16a34a; }
 .plan-show-all { margin-right: auto; padding: 2px 0; border: 0; background: transparent; color: var(--primary-color, #2563eb); font-size: 9px; cursor: pointer; }
 .plan-dock-actions { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 11px 10px; border-top: 1px solid color-mix(in srgb, var(--border-color, #94a3b8) 42%, transparent); }
 .plan-dock-actions button { min-height: 28px; padding: 0 9px; border: 1px solid color-mix(in srgb, var(--border-color, #94a3b8) 62%, transparent); border-radius: 7px; background: transparent; color: var(--text-secondary, #475569); font-size: 9px; cursor: pointer; }
 .plan-dock-actions button:hover:not(:disabled) { border-color: var(--primary-color, #2563eb); color: var(--primary-color, #2563eb); }
+.plan-dock-actions button.primary { margin-left:auto; border-color:var(--primary-color,#2563eb); background:var(--primary-color,#2563eb); color:#fff; }
 .plan-dock-actions button:disabled { opacity: .45; cursor: not-allowed; }
 .plan-dock-enter-active, .plan-dock-leave-active { transition: opacity .18s ease, transform .18s ease; }
 .plan-dock-enter-from, .plan-dock-leave-to { opacity: 0; transform: translateY(8px) scale(.985); }
@@ -270,6 +318,10 @@ onBeforeUnmount(() => {
   .plan-dock-steps { padding-inline: 8px; }
   .plan-dock-steps small { display: none; }
   .plan-dock-foot { padding-inline: 10px; }
+  .plan-acceptance-summary { grid-template-columns:1fr; padding-inline:10px; }
+  .plan-acceptance-summary ul { display:grid; gap:5px; }
+  .plan-dock-actions button { flex:1 1 120px; }
+  .plan-dock-actions button.primary { margin-left:0; }
 }
 @media (prefers-reduced-motion: reduce) {
   .plan-dock-steps li.running .plan-step-mark { animation: none; }

@@ -14,8 +14,8 @@ try {
   const turns = await import('../ccm-package/dist/agents/conversation-turn-control.js')
 
   const decision = (overrides = {}) => ({
-    mode: 'plan_task',
     actionRequired: true,
+    requiresCodeChanges: true,
     authorizationDirective: 'grant',
     requiresUserConfirmation: false,
     riskLevel: 'write',

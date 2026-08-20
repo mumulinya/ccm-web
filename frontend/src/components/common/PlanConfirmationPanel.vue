@@ -30,7 +30,7 @@ const emit = defineEmits(['update:modelValue', 'confirm', 'revise', 'open-detail
     </ul>
 
     <label v-if="canConfirm" class="plan-confirmation-feedback">
-      <span>补充要求 <small>可选</small></span>
+      <span>修改要求 <small>可选</small></span>
       <textarea
         :value="modelValue"
         :disabled="busy"

@@ -182,9 +182,8 @@ export declare function classifyGroupProjectTaskIntentWithAgent(input: {
     groupSessionId?: string;
     group_session_id?: string;
 }): Promise<any>;
-export declare function shouldUseProjectAnalysisMode(input: {
+export declare function shouldLoadReadOnlyProjectContext(input: {
     isOrchestrated?: boolean;
-    messageMode?: string;
     taskIntent?: any;
 }): any;
 export declare function shouldCreatePersistentGroupTask(input: {

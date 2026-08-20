@@ -1,5 +1,14 @@
 import { type SessionExecutionEvent } from "../../system/session-execution-ledger";
+import type { UnifiedCompactionResult } from "../../system/unified-session-compaction-types";
 export type GlobalMemoryItemType = "user" | "feedback" | "authorization" | "decisions" | "missions" | "unresolved" | "references";
+export declare function createGlobalSessionCompactionAdapter(input: {
+    sessionId: string;
+    load: () => Promise<any> | any;
+    commit: (result: UnifiedCompactionResult, fence: any) => Promise<void> | void;
+    acquire?: () => Promise<any> | any;
+    failure?: (error: unknown, fence: any) => Promise<void> | void;
+    validate?: (fence: any, snapshot: any) => Promise<void> | void;
+}): import("../../system/unified-session-compaction-types").UnifiedSessionCompactionAdapter;
 export interface GlobalMemoryItem {
     id: string;
     type: GlobalMemoryItemType;
@@ -172,7 +181,101 @@ export declare function compactGlobalAgentSessionWithModel(sessionId: string, op
     modelVisiblePayload?: any;
     contextComponents?: any;
     postCompactPayloadBuilder?: (input: any) => Promise<any> | any;
-}): any;
+}): Promise<{
+    compacted: any;
+    reason: any;
+    before_tokens: any;
+    after_tokens: any;
+    summary_source: any;
+    boundary_generation: any;
+    unifiedSessionSummary: any;
+    unifiedSessionCompaction: any;
+    model_context_capacity: {
+        schema: string;
+        provider: any;
+        model: any;
+        contextWindow: number;
+        maxOutputTokens: number;
+        reservedOutputTokens: number;
+        effectiveContextWindow: number;
+        autoCompactBufferTokens: number;
+        autoCompactThreshold: number;
+        source: any;
+        confidence: number;
+        checkedAt: any;
+        expiresAt: any;
+        evidenceId: any;
+        evidenceChecksum: any;
+        cacheStatus: string;
+        conservativeFallback: boolean;
+    } | {
+        reservedOutputTokens: number;
+        effectiveContextWindow: number;
+        autoCompactBufferTokens: number;
+        autoCompactThreshold: number;
+        reserveSource: string;
+        schema: string;
+        provider: any;
+        model: any;
+        contextWindow: number;
+        maxOutputTokens: number;
+        source: any;
+        confidence: number;
+        checkedAt: any;
+        expiresAt: any;
+        evidenceId: any;
+        evidenceChecksum: any;
+        cacheStatus: string;
+        conservativeFallback: boolean;
+    } | {
+        reservedOutputTokens: number;
+        effectiveContextWindow: number;
+        autoCompactBufferTokens: number;
+        autoCompactThreshold: number;
+        reserveSource: string;
+        conservativeFallback: boolean;
+        fallbackReason: string;
+        staleEvidenceId: any;
+        staleEvidenceSource: any;
+        schema: string;
+        provider: any;
+        model: any;
+        contextWindow: number;
+        maxOutputTokens: number;
+        source: any;
+        confidence: number;
+        checkedAt: any;
+        expiresAt: any;
+        evidenceId: any;
+        evidenceChecksum: any;
+        cacheStatus: string;
+    } | {
+        reservedOutputTokens: number;
+        effectiveContextWindow: number;
+        autoCompactBufferTokens: number;
+        autoCompactThreshold: number;
+        reserveSource: string;
+        schema: string;
+        provider: string;
+        model: string;
+        contextWindow: number;
+        maxOutputTokens: number;
+        source: string;
+        confidence: number;
+        checkedAt: string;
+        expiresAt: string;
+        evidenceId: string;
+        evidenceChecksum: string;
+        cacheStatus: string;
+        conservativeFallback: boolean;
+        fallbackReason: string;
+    };
+    auto_compact_threshold: number;
+    contentStored: boolean;
+    archive: any;
+    session: any;
+    legacySummaryIgnored: boolean;
+}>;
 export declare function scheduleGlobalAgentSessionMemoryExtraction(sessionId: string, options?: {
     modelCall?: (request: any) => Promise<any>;
 }): {

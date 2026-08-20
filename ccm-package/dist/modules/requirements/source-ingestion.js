@@ -285,7 +285,7 @@ async function analyzeImageWithConfiguredModel(filePath, name, configOverride) {
     if (mediaType === "application/octet-stream")
         throw new Error("视觉模型暂不支持这个图片格式");
     const data = fs.readFileSync(filePath).toString("base64");
-    const prompt = "请读取这张业务需求相关图片。只返回 JSON：{summary:string, visible_text:string, requirements:string[], acceptance:string[], risks:string[], uncertain:string[]}。准确转写可见文字，描述界面、表格、流程或标注中的业务含义；看不清的内容放进 uncertain，禁止猜测。";
+    const prompt = "Read this business-requirement image. Return JSON only: {summary:string, visible_text:string, requirements:string[], acceptance:string[], risks:string[], uncertain:string[]}. Transcribe visible text accurately and describe the business meaning of interfaces, tables, flows, or annotations. Put anything unclear in uncertain; never guess.";
     const timeoutMs = Math.max(10_000, Number(config.timeoutMs) || 120_000);
     const options = {
         temperature: 0,
@@ -698,7 +698,7 @@ async function extractRequirementWithModel(userText, sources, configOverride) {
         batches.push([]);
     const callExtraction = async (rows, index) => {
         const readable = rows.map(row => `【source_id=${row.source_id}; source_checksum=${row.source_checksum}; chunk_id=${row.id}; name=${row.source_name}】\n${row.content}`).join("\n\n");
-        const prompt = `请从用户文字和已读取资料分片中提取可执行的业务需求。只返回 JSON，不要输出 Markdown。\n字段：title(string，48字内)、business_goal(string)、scope(string[])、acceptance_criteria(string[])、dependencies(string[])、risks(string[])、clarification_questions(string[])、source_evidence_v2([{source_id:string,source_checksum:string,chunk_ids:string[]}])。\n规则：不得根据未读取资料猜测；每条结论必须引用实际chunk_id；目标、范围和验收标准必须可执行；资料冲突或缺失时放入clarification_questions。\n\n用户文字：\n${userText || "（用户仅提交了资料）"}\n\n已读取资料分片：\n${readable || "（无）"}\n\n未读取资料：\n${failed || "（无）"}`;
+        const prompt = `Extract an executable business requirement from the user's text and the provided source chunks. Return JSON only; do not output Markdown.\nFields: title(string, at most 48 characters), business_goal(string), scope(string[]), acceptance_criteria(string[]), dependencies(string[]), risks(string[]), clarification_questions(string[]), source_evidence_v2([{source_id:string,source_checksum:string,chunk_ids:string[]}]).\nRules: never infer from unread sources; every conclusion must cite actual chunk_id values; goal, scope, and acceptance criteria must be executable; put conflicts or missing information in clarification_questions. Write user-visible requirement content in the user's language.\n\nUser text:\n${userText || "(user submitted sources only)"}\n\nReadable source chunks:\n${readable || "(none)"}\n\nUnread sources:\n${failed || "(none)"}`;
         const options = {
             messages: [{ role: "user", content: prompt }], temperature: 0, maxTokens: 2200,
             defaultTimeoutMs: Math.max(10_000, Number(config.timeoutMs) || 120_000), retryAttempts: 5,
@@ -712,7 +712,7 @@ async function extractRequirementWithModel(userText, sources, configOverride) {
         partials.push(await callExtraction(batches[index], index));
     let value = partials[0];
     if (partials.length > 1) {
-        const mergePrompt = `合并以下逐分片需求提取结果，只返回同一JSON结构。不得丢失任何分片中的约束、验收、风险、依赖、澄清问题和source_evidence_v2，不得新增没有证据的结论。\n${JSON.stringify(partials)}`;
+        const mergePrompt = `Merge the following per-chunk requirement extraction results into one JSON object with the same schema. Do not lose constraints, acceptance criteria, risks, dependencies, clarification questions, or source_evidence_v2 from any chunk. Do not add conclusions without evidence. Preserve user-visible content in the user's language.\n${JSON.stringify(partials)}`;
         const options = {
             messages: [{ role: "user", content: mergePrompt }], temperature: 0, maxTokens: 4000,
             defaultTimeoutMs: Math.max(10_000, Number(config.timeoutMs) || 120_000), retryAttempts: 5,

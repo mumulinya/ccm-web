@@ -135,7 +135,7 @@ if (process.argv[2] === "--child") {
           arguments: {
             friendlyResponse: dispatchJson.summary,
             targets: dispatchJson.targets,
-            workflowDecision: { mode: "execute_direct", actionRequired: true, intentKind: "implementation" },
+            workflowDecision: { actionRequired: true, requiresCodeChanges: true, intentKind: "execution" },
           },
           argumentsChecksum: "x",
         }],
@@ -321,12 +321,12 @@ const checks = {
   siblingSessionIsolated: siblingClaim.status === "acquired" && siblingClaim.entry?.fencing_token === 1,
   validBackupFailsClosed: corruptRead.state === "fail_closed" && corruptRead.blocked === true && corruptRead.recovered_from_backup === true,
   workerPacketBindsExactSession: worker.assignment_group_session_id === sessionA && worker.packet_group_session_id === sessionA && !!worker.packet_id,
-  mainAgentPtlRetryClaimsAndSettles: integrationRecovered.calls === 2
-    && integrationRecovered.context_recovery_type === "reactive-compact"
-    && integrationRecovered.ownership_status === "recovered"
+  mainAgentPtlRetryFailsClosedWithoutTranscript: integrationRecovered.calls === 1
+    && integrationRecovered.context_recovery_type === "reactive-compact-not-retried"
+    && integrationRecovered.ownership_status === "failed"
     && integrationRecovered.ownership_acquired === true
     && integrationRecovered.completion_accepted === true
-    && integrationRecovered.assignment_group_session_id === integrationSession,
+    && integrationRecovered.assignment_group_session_id === "",
   mainAgentPtlRetryDoesNotReplayAfterRestart: integrationDuplicate.calls === 1
     && integrationDuplicate.context_recovery_type === "reactive-compact-not-retried"
     && integrationDuplicate.ownership_status === "already_attempted"

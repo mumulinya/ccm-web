@@ -30,7 +30,7 @@ function nativeTurnToGlobalDecision(parsed, pendingWrite) {
             state: (0, global_agent_run_store_1.classifyGlobalAgentToolRisk)(pendingWrite.name, pendingWrite.arguments) === "high" ? "execute" : "execute",
             message: String(parsed?.reply || parsed?.friendlyResponse || ""),
             tool: { name: pendingWrite.name, arguments: pendingWrite.arguments || {} },
-            workflowDecision: parsed?.workflowDecision || { mode: "execute_direct", actionRequired: true },
+            workflowDecision: parsed?.workflowDecision || { reason: "全局工具执行", actionRequired: true, requiresCodeChanges: false },
         };
     }
     const responseType = String(parsed?.responseType || "reply");
@@ -40,7 +40,7 @@ function nativeTurnToGlobalDecision(parsed, pendingWrite) {
             message: String(parsed?.friendlyResponse || parsed?.reply || ""),
             tool: null,
             targets: parsed?.targets || [],
-            workflowDecision: parsed?.workflowDecision || { mode: "execute_direct", actionRequired: true },
+            workflowDecision: parsed?.workflowDecision || { reason: "全局派发", actionRequired: true, requiresCodeChanges: true },
         };
     }
     if (responseType === "clarify") {
@@ -48,7 +48,7 @@ function nativeTurnToGlobalDecision(parsed, pendingWrite) {
             state: "needs_confirmation",
             message: String(parsed?.reply || parsed?.questionForUser || ""),
             tool: null,
-            workflowDecision: parsed?.workflowDecision || { mode: "answer", actionRequired: false },
+            workflowDecision: parsed?.workflowDecision || { reason: "需要用户澄清", actionRequired: false, requiresCodeChanges: false },
         };
     }
     if (responseType === "plan") {
@@ -57,14 +57,14 @@ function nativeTurnToGlobalDecision(parsed, pendingWrite) {
             message: String(parsed?.reply || ""),
             tool: null,
             plan: parsed?.plan,
-            workflowDecision: parsed?.workflowDecision || { mode: "plan_task", actionRequired: false },
+            workflowDecision: parsed?.workflowDecision || { reason: "展示计划", actionRequired: false, requiresCodeChanges: false },
         };
     }
     return {
         state: "answer",
         message: String(parsed?.reply || ""),
         tool: null,
-        workflowDecision: parsed?.workflowDecision || { mode: "answer", actionRequired: false },
+        workflowDecision: parsed?.workflowDecision || { reason: "直接回复", actionRequired: false, requiresCodeChanges: false },
     };
 }
 async function runGlobalNativeQueryCall(input) {

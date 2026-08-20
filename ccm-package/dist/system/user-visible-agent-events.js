@@ -79,6 +79,38 @@ function compactText(value, max = 500) {
 function uniqueStrings(value, max = 100) {
     return [...new Set((Array.isArray(value) ? value : value == null ? [] : [value]).map(item => compactText(item, 500)).filter(Boolean))].slice(0, max);
 }
+function sanitizePromptDescriptor(value) {
+    if (!value || typeof value !== "object" || value.schema !== "ccm-internal-prompt-v1" || value.language !== "en" || value.visibility !== "internal_only")
+        return null;
+    const promptId = compactText(value.promptId, 160);
+    const promptVersion = compactText(value.promptVersion, 80);
+    const scope = ["global", "group", "project", "child_agent", "test_agent", "runtime"].includes(String(value.scope)) ? value.scope : "runtime";
+    const checksum = compactText(value.checksum, 128);
+    if (!promptId || !promptVersion || !checksum || value.contentStored !== false)
+        return null;
+    return { schema: "ccm-internal-prompt-v1", promptId, promptVersion, language: "en", scope, visibility: "internal_only", checksum, contentStored: false };
+}
+function sanitizePromptBindings(value) {
+    if (!value || typeof value !== "object")
+        return null;
+    const skills = (Array.isArray(value.skills) ? value.skills : []).map((item) => ({
+        name: compactText(item?.name, 160),
+        ...(item?.version ? { version: compactText(item.version, 80) } : {}),
+        checksum: compactText(item?.checksum, 128),
+        language: "en",
+    })).filter((item) => item.name && item.checksum);
+    const mcp = (Array.isArray(value.mcp) ? value.mcp : []).map((item) => ({
+        name: compactText(item?.name, 160),
+        ...(item?.version ? { version: compactText(item.version, 80) } : {}),
+        checksum: compactText(item?.checksum, 128),
+        language: "en",
+    })).filter((item) => item.name && item.checksum);
+    const system = sanitizePromptDescriptor(value.system);
+    const developer = sanitizePromptDescriptor(value.developer);
+    if (!system && !developer && !skills.length && !mcp.length)
+        return null;
+    return { ...(system ? { system } : {}), ...(developer ? { developer } : {}), skills, mcp };
+}
 function sanitizeUserVisibleAgentDetail(value, depth = 0, seen = new WeakSet()) {
     if (depth > 7)
         return "[depth-limited]";
@@ -486,6 +518,9 @@ function normalizeUserVisibleAgentEvent(input, sequence = 0) {
                 contentStored: false,
             },
         } : {}),
+        ...(sanitizePromptBindings(detailSource.promptBindings || detailSource.prompt_bindings)
+            ? { promptBindings: sanitizePromptBindings(detailSource.promptBindings || detailSource.prompt_bindings) }
+            : {}),
         ...(detailSource.liveProgress && typeof detailSource.liveProgress === "object"
             && ["starting", "running", "testing", "building", "finishing", "retrying"].includes(String(detailSource.liveProgress.phase))
             && compactText(detailSource.liveProgress.safeSummary, 160) ? {
@@ -886,7 +921,7 @@ function runUserVisibleAgentEventSelfTest() {
         detail: { progress: { kind: "key_finding", text: "完成接口定位", modelCallIndex: 1, relatedToolCallIds: [], batchId: "batch-1", milestoneChecksum: "sum" }, causalRefs: { planStepId: "step-1", dependencyIds: ["dep-1"] } },
     }, 2);
     const longProgress = (0, assistant_progress_1.sanitizeAssistantProgressText)(`我会先检查当前项目结构和配置，再定位实际启动入口。${"这是不应继续展示的冗长说明。".repeat(20)}`);
-    const protocolProgress = (0, assistant_progress_1.sanitizeAssistantProgressText)('{"workflowDecision":{"mode":"project_analysis"},"selectedSkills":[]}');
+    const protocolProgress = (0, assistant_progress_1.sanitizeAssistantProgressText)('{"workflowDecision":{"actionRequired":false},"selectedSkills":[]}');
     const globalDispatch = appendToolProjection({
         scope: "global", scopeId: "global", exactSessionId: "session-global-dispatch", eventId: "global-dispatch-stage",
         eventType: "tool_completed", toolName: "dispatch_project_task", toolCallId: "dispatch-1",

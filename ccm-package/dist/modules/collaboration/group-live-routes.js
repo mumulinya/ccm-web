@@ -368,7 +368,7 @@ function buildGroupTaskIntakeSummary(input) {
 }
 // ===== merged from group-live-routes-part-02-part-01.ts =====
 async function handleGroupLiveRoutesSendPreface(payload, uploadedFiles, ctx, deps, res, readOnly = false) {
-    const { writeSse, ensureTraceId, classifyGroupProjectTaskIntentWithAgent, shouldCreatePersistentGroupTask, shouldUseProjectAnalysisMode, continueTaskWithMessage, appendMainAgentDecisionTrace, applyMainAgentDecisionPetState, buildWorkflowMeta, buildInlineTaskRuntime, updateGroupMemory, getAgentQaItemsForGroup, } = deps;
+    const { writeSse, ensureTraceId, classifyGroupProjectTaskIntentWithAgent, shouldCreatePersistentGroupTask, shouldLoadReadOnlyProjectContext, continueTaskWithMessage, appendMainAgentDecisionTrace, applyMainAgentDecisionPetState, buildWorkflowMeta, buildInlineTaskRuntime, updateGroupMemory, getAgentQaItemsForGroup, } = deps;
     let reliabilityOperationKey = "";
     const { group_id, target_project, message, client_message_id } = payload;
     let groupSessionId = String(payload.group_session_id || payload.groupSessionId || "").trim();
@@ -635,8 +635,10 @@ async function handleGroupLiveRoutesSendPreface(payload, uploadedFiles, ctx, dep
             ...taskIntent,
             reason: "用户正在补充当前任务所需条件",
             source: "explicit_task_continuation",
-            workflowDecision: (0, workflow_decision_1.explicitWorkflowDecision)("execute_direct", "用户显式继续现有任务", {
+            workflowDecision: (0, workflow_decision_1.explicitWorkflowDecision)("用户显式继续现有任务", {
                 ...taskIntent.workflowDecision,
+                actionRequired: true,
+                requiresCodeChanges: true,
                 continuationKind: explicitContinuationKind,
             }),
         };
@@ -661,7 +663,7 @@ async function handleGroupLiveRoutesSendPreface(payload, uploadedFiles, ctx, dep
         taskIntent = {
             ...taskIntent,
             kind: "conversation",
-            workflowDecision: (0, workflow_decision_1.explicitWorkflowDecision)("answer", "用户明确选择仅回答当前问题", {
+            workflowDecision: (0, workflow_decision_1.explicitWorkflowDecision)("用户明确选择仅回答当前问题", {
                 ...taskIntent.workflowDecision,
                 actionRequired: false,
                 requiresCodeChanges: false,
@@ -728,9 +730,9 @@ async function handleGroupLiveRoutesSendPreface(payload, uploadedFiles, ctx, dep
     // member is added.  Do not route the first message into source
     // analysis where there is no valid project_id to use.
     const hasRoutableProjects = (0, group_orchestrator_1.getRoutableMembers)(group).length > 0;
-    const projectAnalysisRequest = hasRoutableProjects
+    const readOnlyContextRequest = hasRoutableProjects
         && !statusFollowupRequest
-        && shouldUseProjectAnalysisMode({ isOrchestrated, messageMode, taskIntent })
+        && shouldLoadReadOnlyProjectContext({ isOrchestrated, taskIntent })
         && !persistentTaskRequest;
     const continuationKind = explicitContinuationTask
         ? explicitContinuationKind
@@ -930,7 +932,7 @@ async function handleGroupLiveRoutesSendPreface(payload, uploadedFiles, ctx, dep
         reliabilityOperationKey, group_id, target_project, groupSessionId, userMessage, group, sourceIngestion,
         uploadedFilesContext, attachmentSummary, incomingMessageForAgent, userMessageForHistory, messageForAgent,
         effectiveUserMessage, routing, isBroadcast, isOrchestrated, targetMembers, messageMode, messageTraceId,
-        forceProjectTask, taskIntent, statusFollowupRequest, persistentTaskRequest, projectAnalysisRequest,
+        forceProjectTask, taskIntent, statusFollowupRequest, persistentTaskRequest, readOnlyContextRequest,
         continuationKind, continuationTask, groupOperationKey, userMsg, clarificationContext, clarificationRequestId,
         pendingClarification, clarificationMessageId, explicitContinuationTask, explicitContinuationKind, client_message_id, configs, modelRecovery,
         requestExecutionAnchorMessageId, requestRecoveryAttempt, requestTurnId,
@@ -939,7 +941,7 @@ async function handleGroupLiveRoutesSendPreface(payload, uploadedFiles, ctx, dep
 // ===== merged from group-live-routes-part-02-part-02.ts =====
 function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
     const pathname = parsed.pathname;
-    const { writeSse, ensureTraceId, classifyGroupProjectTaskIntentWithAgent, shouldCreatePersistentGroupTask, shouldUseProjectAnalysisMode, classifyTaskContinuation, looksLikeTaskContinuation, continueTaskWithMessage, appendMainAgentDecisionTrace, applyMainAgentDecisionPetState, validateDailyDevGroupReady, compactMemoryText, buildGroupPlanModePreflight, createTask, updateTask, appendTaskTimelineEvent, buildWorkflowMeta, buildInlineTaskRuntime, updateGroupMemory, enqueueTask, buildCoordinatorSharedFilesContext, buildGroupProjectAnalysisContext, normalizePlanAssignments, getInitialWorkflowMeta, getCoordinatorActionMentions, processCrossAgents, runCoordinatorReviewLoop, getAgentQaItemsForGroup, } = deps;
+    const { writeSse, ensureTraceId, classifyGroupProjectTaskIntentWithAgent, shouldCreatePersistentGroupTask, shouldLoadReadOnlyProjectContext, classifyTaskContinuation, looksLikeTaskContinuation, continueTaskWithMessage, appendMainAgentDecisionTrace, applyMainAgentDecisionPetState, validateDailyDevGroupReady, compactMemoryText, buildGroupPlanModePreflight, createTask, updateTask, appendTaskTimelineEvent, buildWorkflowMeta, buildInlineTaskRuntime, updateGroupMemory, enqueueTask, buildCoordinatorSharedFilesContext, buildGroupProjectAnalysisContext, normalizePlanAssignments, getInitialWorkflowMeta, getCoordinatorActionMentions, processCrossAgents, runCoordinatorReviewLoop, getAgentQaItemsForGroup, } = deps;
     if (pathname === "/api/groups/send" && req.method === "POST") {
         const contentType = req.headers["content-type"] || "";
         const handleGroupSend = async (payload, uploadedFiles = []) => {
@@ -966,7 +968,7 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
             let taskIntent;
             let statusFollowupRequest = false;
             let persistentTaskRequest = false;
-            let projectAnalysisRequest = false;
+            let readOnlyContextRequest = false;
             let continuationKind = "";
             let continuationTask;
             let groupOperationKey = "";
@@ -1013,7 +1015,7 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                     taskIntent,
                     statusFollowupRequest,
                     persistentTaskRequest,
-                    projectAnalysisRequest,
+                    readOnlyContextRequest,
                     continuationKind,
                     continuationTask,
                     groupOperationKey,
@@ -1450,22 +1452,22 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                         "Access-Control-Allow-Origin": "*",
                     });
                     const coordinator = (0, group_orchestrator_1.getCoordinatorMember)(group);
-                    const conversationalOnly = taskIntent?.workflowDecision?.mode === "answer" || projectAnalysisRequest;
+                    const conversationalOnly = taskIntent?.executable !== true || readOnlyContextRequest;
                     writeSse(res, {
                         type: "status",
-                        text: projectAnalysisRequest
-                            ? `🔎 正在只读分析项目...`
+                        text: readOnlyContextRequest
+                            ? `正在查看项目上下文...`
                             : conversationalOnly
                                 ? `💬 正在回复...`
                                 : `🧠 正在协调群聊...`,
                         agent: coordinator.project
                     });
-                    ctx.setAgentActivity(coordinator.project, "working", projectAnalysisRequest ? "正在只读分析项目" : conversationalOnly ? "正在回复" : "正在协调群聊", { tab: "groups", groupId: group_id });
-                    ctx.broadcastPetSpeech(coordinator.project, { role: "status", text: projectAnalysisRequest ? "正在查看项目上下文..." : conversationalOnly ? "正在回复..." : "正在协调群聊...", source: "group" });
+                    ctx.setAgentActivity(coordinator.project, "working", readOnlyContextRequest ? "正在查看项目上下文" : conversationalOnly ? "正在回复" : "正在协调群聊", { tab: "groups", groupId: group_id });
+                    ctx.broadcastPetSpeech(coordinator.project, { role: "status", text: readOnlyContextRequest ? "正在查看项目上下文..." : conversationalOnly ? "正在回复..." : "正在协调群聊...", source: "group" });
                     updateGroupMemory(group_id, {
                         groupSessionId,
                         ...(conversationalOnly ? {} : { goal: effectiveUserMessage || userMessageForHistory }),
-                        currentPhase: projectAnalysisRequest ? "project_analysis" : conversationalOnly ? "conversation" : "understanding",
+                        currentPhase: conversationalOnly ? "conversation" : "understanding",
                         ...(conversationalOnly ? {} : {
                             decision: "用户把消息交给我协调",
                             reason: routing.targetLabel,
@@ -1478,7 +1480,7 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                         ? ""
                         : "【项目状态】当前群聊尚未添加任何项目成员，因此没有可读取、分析或介绍的项目。请直接说明这一点，并引导用户通过“成员”添加项目；不要调用项目、文件或代码工具。";
                     const sharedFilesContext = buildCoordinatorSharedFilesContext(ctx, group, { groupSessionId, message: messageForAgent });
-                    const projectAnalysisContext = projectAnalysisRequest ? buildGroupProjectAnalysisContext(group, messageForAgent, ctx, configs) : "";
+                    const readOnlyProjectContext = readOnlyContextRequest ? buildGroupProjectAnalysisContext(group, messageForAgent, ctx, configs) : "";
                     const responseMessageId = "m" + Date.now().toString(36) + "coord" + crypto.randomBytes(2).toString("hex");
                     const executionAnchorMessageId = String(requestExecutionAnchorMessageId || modelRecovery?.anchorMessageId || responseMessageId);
                     const recoveryAttempt = Math.max(1, Number(requestRecoveryAttempt || modelRecovery?.attempt || 1));
@@ -1496,10 +1498,10 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                     });
                     const coordinatorResult = await (0, group_orchestrator_1.runGroupOrchestrator)({
                         group,
-                        message: projectAnalysisRequest
-                            ? `${messageForAgent}\n\n[模式]\n只读项目分析：请基于项目上下文回答用户问题，不要派发子 Agent，不要创建任务，不要承诺修改。`
+                        message: readOnlyContextRequest
+                            ? `${messageForAgent}\n\n请基于已经读取的项目上下文回答，不要派发子 Agent、创建任务或承诺修改。`
                             : messageForAgent,
-                        context: [context, projectAnalysisRequest ? projectAnalysisContext : "", emptyGroupNotice].filter(Boolean).join("\n\n"),
+                        context: [context, readOnlyContextRequest ? readOnlyProjectContext : "", emptyGroupNotice].filter(Boolean).join("\n\n"),
                         source: "user",
                         groupSessionId,
                         turnId: visibleTurnId,
@@ -1507,7 +1509,7 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                         recoveryAttempt,
                         workflowDecision: taskIntent?.workflowDecision || null,
                         mainAgentFirstTurnResult: taskIntent?.mainAgentFirstTurnResult || taskIntent?.coordinatorResult || null,
-                        sharedFilesContext: [sharedFilesContext, projectAnalysisContext].filter(Boolean).join("\n\n"),
+                        sharedFilesContext: [sharedFilesContext, readOnlyProjectContext].filter(Boolean).join("\n\n"),
                         onDelta: delta => {
                             if (!String(delta || "").trim())
                                 return;
@@ -1555,15 +1557,15 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                             contentStored: false,
                         } : null;
                         const rawPlanAssignments = normalizePlanAssignments(coordinatorResult.assignments || []);
-                        const planAssignments = conversationalOnly || projectAnalysisRequest ? [] : rawPlanAssignments;
+                        const planAssignments = conversationalOnly ? [] : rawPlanAssignments;
                         const visiblePlan = (0, group_presented_plan_1.visibleGroupPresentedPlanFields)({
-                            projectAnalysis: !!projectAnalysisRequest,
+                            projectAnalysis: false,
                             conversationalOnly,
                             coordinationPlan: coordinatorResult.coordinationPlan || null,
                             presentedPlan: coordinatorResult.presentedPlan || null,
                         });
                         const dispatchPolicy = (0, group_clarification_attach_1.resolveGroupLiveDispatchPolicy)({
-                            projectAnalysisRequest,
+                            projectAnalysisRequest: false,
                             conversationalOnly,
                             taskIntent,
                             coordinatorResult,
@@ -1574,7 +1576,7 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                             traceId: messageTraceId,
                             messageId: responseMessageId,
                             coordinator: coordinator.project,
-                            mode: projectAnalysisRequest ? "project_analysis" : planAssignments.length || dispatchPolicy?.action === "delegate" ? "delegation" : "conversation",
+                            mode: planAssignments.length || dispatchPolicy?.action === "delegate" ? "delegation" : "conversation",
                             messageMode,
                             taskIntent,
                             dispatchPolicy,
@@ -1584,7 +1586,7 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                                 clarification_resumed: !!clarificationContext,
                                 clarification_request_id: clarificationRequestId || "",
                                 shared_files_context: !!sharedFilesContext,
-                                project_analysis_context: !!projectAnalysisContext,
+                                read_only_project_context: !!readOnlyProjectContext,
                                 runtime: coordinatorResult.runtime || "",
                                 execution_order: conversationalOnly ? "none" : (coordinatorResult.executionOrder || "parallel"),
                             },

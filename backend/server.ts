@@ -66,6 +66,8 @@ import {
   requestGroupSessionAgentCancellation,
 } from "./agents/execution-kernel";
 import { buildProjectConversationBrief, buildProjectExecutionBrief, buildProjectMemoryPacket, updateProjectMemoryFromReceipt } from "./projects/memory";
+import { prepareChildAgentWorkDir } from "./agents/worktree";
+import { enqueueProjectWorkerDelivery } from "./modules/projects/project-worker-delivery";
 import { validateTaskMutationGuard } from "./system/task-conversation-links";
 import {
   appendDirectAgentDispatchTranscript,
@@ -89,6 +91,7 @@ import {
 import { parseSecureMultipartRequest } from "./system/secure-multipart";
 import { appendUserVisibleAgentEvent, buildUserVisibleAgentResult } from "./system/user-visible-agent-events";
 import { isDevelopmentTaskWorkflowDecision } from "./agents/workflow-decision";
+import { validateImplementationPlanV2 } from "./agents/implementation-plan";
 
 // 导入底座与持久层
 import {
@@ -1137,6 +1140,23 @@ function handleRequest(req: any, res: any) {
           return task;
         };
         if (action === "confirm_plan") {
+          const storedPlan = guardedProjectTask.workflow_meta?.project_main_plan
+            || guardedProjectTask.workflow_meta?.presentedPlan
+            || guardedProjectTask.workflow_meta?.presented_plan
+            || guardedProjectTask.intake_draft?.project_main_plan
+            || guardedProjectTask.intake_draft?.presentedPlan;
+          if (storedPlan?.schema === "ccm-implementation-plan-v2") {
+            const expectedRevision = payload.plan_revision ?? payload.planRevision;
+            const expectedChecksum = String(payload.plan_checksum || payload.planChecksum || "").trim();
+            if (expectedRevision !== undefined && Number(expectedRevision) !== Number(storedPlan.revision)) {
+              return sendJson(res, { success: false, error: "计划 revision 已变化，请重新加载最新计划", code: "PLAN_REVISION_CONFLICT", revision: storedPlan.revision }, 409);
+            }
+            if (expectedChecksum && expectedChecksum !== String(storedPlan.checksum || "")) {
+              return sendJson(res, { success: false, error: "计划 checksum 已变化，请重新加载最新计划", code: "PLAN_CHECKSUM_CONFLICT", checksum: storedPlan.checksum }, 409);
+            }
+            const quality = validateImplementationPlanV2(storedPlan);
+            if (!quality.ok) return sendJson(res, { success: false, error: "计划尚未通过质量复核", code: "PLAN_QUALITY_INVALID", issues: quality.issues }, 409);
+          }
           const confirmedTask = confirmProjectMainTask(taskId, project, projectSessionId);
           const task = persistProjectTaskProjection(confirmedTask, "执行计划已经确认，项目主 Agent 将继续安排开发和验收。", "project-main-agent-plan-confirmed");
           return sendJson(res, { success: true, task, taskExperience: { ...task, requires_card: true }, message_id: task.message_id, resume_required: true, resume_parent_run_id: confirmedTask.id });
@@ -1178,7 +1198,7 @@ function handleRequest(req: any, res: any) {
           const result = await reviseProjectMainTask({ taskId, project, projectSessionId, feedback, clientMessageId });
           const task = persistProjectTaskProjection(
             result.task,
-            `我已根据你的补充要求更新执行计划，这是第 ${result.revision.revision} 次修订。确认后会继续执行。`,
+            `我已根据你的修改要求更新执行计划，这是第 ${result.revision.revision} 次修订。确认后会继续执行。`,
             "project-main-agent-plan-revision",
           );
           return sendJson(res, {
@@ -1719,9 +1739,7 @@ function handleRequest(req: any, res: any) {
         },
       });
       const chatIntent = {
-        mode: isDevelopmentTaskWorkflowDecision(projectFirstTurn.workflowDecision)
-          ? "task"
-          : String(projectFirstTurn.workflowDecision?.mode || "") === "project_analysis" ? "project_analysis" : "conversation",
+        isTask: isDevelopmentTaskWorkflowDecision(projectFirstTurn.workflowDecision),
         workflowDecision: projectFirstTurn.workflowDecision,
       };
       const routeDecision = decideConversationMessageRoute({
@@ -1794,9 +1812,9 @@ function handleRequest(req: any, res: any) {
         if (!res.writableEnded && !res.destroyed) res.end();
         return;
       }
-      if (parentProjectMainTask && explicitRouteChoice !== "answer_only") chatIntent.mode = "task";
+      if (parentProjectMainTask && explicitRouteChoice !== "answer_only") chatIntent.isTask = true;
       const visibleProjectTurn = projectFirstTurnVisiblePresentation(projectFirstTurn, {
-        treatAsTask: chatIntent.mode === "task",
+        treatAsTask: chatIntent.isTask,
       });
       if (visibleProjectTurn.present) {
         const clarificationProjection = projectFirstTurn.prePlanClarification;
@@ -1903,7 +1921,7 @@ function handleRequest(req: any, res: any) {
           });
         }
       }
-      const selectedProjectRoleSkills = chatIntent.mode === "task"
+      const selectedProjectRoleSkills = chatIntent.isTask
         ? selectRoleSkills("project-child-agent", finalMessage, {
             forceWork: true,
             source: "project-chat",
@@ -1927,7 +1945,7 @@ function handleRequest(req: any, res: any) {
         toolContext.workEvent.text = `${project} 执行器自动切换：配置为 ${resolvedRuntime.preferred}，当前可用执行器为 ${agentType}；候选链 ${resolvedRuntime.chain.join(" → ")}`;
         (toolContext.workEvent as any).runtimeFallback = resolvedRuntime;
       }
-      const projectMemoryPacket = chatIntent.mode === "task"
+      const projectMemoryPacket = chatIntent.isTask
         ? buildProjectMemoryPacket(project, { workDir, query: finalMessage })
         : "";
       let projectCompaction: any = null;
@@ -1950,7 +1968,7 @@ function handleRequest(req: any, res: any) {
         }
       }
       let projectMemoryMcp: any = null;
-      if (exactProjectSessionId && chatIntent.mode === "task") {
+      if (exactProjectSessionId && chatIntent.isTask) {
         try {
           const prepareProjectMemoryMcp = () => {
             const projection = buildProjectSessionModelContextProjection(project, exactProjectSessionId, { currentRequest: finalMessage, persistMicroCompactReceipt: true });
@@ -2090,7 +2108,7 @@ function handleRequest(req: any, res: any) {
       const projectSessionContext = memoryMcpEnabled
         ? buildThirdPartyMemoryBootstrap(projectMemoryMcp.snapshot, projectMemoryMcp.challenge)
         : exactProjectSessionId ? buildProjectSessionPostCompactContext(project, exactProjectSessionId, agentType, { currentRequest: finalMessage }) : "";
-      if (requestIsReadOnly(req) && chatIntent.mode === "task") {
+      if (requestIsReadOnly(req) && chatIntent.isTask) {
         releaseDispatch();
         return sendJson(res, { success: false, error: "当前账户仅允许项目只读问答；这条需求需要项目管理权限", code: "PROJECT_EXECUTION_FORBIDDEN" }, 403);
       }
@@ -2151,6 +2169,9 @@ function handleRequest(req: any, res: any) {
           workflowDecision: chatIntent.workflowDecision,
           sourceAttachments: files,
         });
+        const workItemAgentSessions = new Map<string, any>();
+        const workItemMemoryReceiptStarted = new Set<string>();
+        let worktreeMergeQueue: Promise<void> = Promise.resolve();
         projectRun.project_main_task_id = task.id;
         projectRun.status = plan.requiresConfirmation && !existingTask ? "paused" : "queued";
         projectRun.updated_at = new Date().toISOString();
@@ -2296,18 +2317,34 @@ function handleRequest(req: any, res: any) {
           },
           executeWorker: async (workItem, round, reworkProblems) => {
             let doneState: any = null;
+            let workerSession = workItemAgentSessions.get(String(workItem.id));
+            if (!workerSession) {
+              workerSession = openTaskAgentSession({ scopeId: `${exactProjectSessionId}:${task.id}:${workItem.id}`, taskId: task.id, groupId: "project-chat", project, agentType });
+              workItemAgentSessions.set(String(workItem.id), workerSession);
+            }
+            let workerSessionOptions = getTaskAgentSessionOptions(workerSession);
+            const isolatedWorkDir = prepareChildAgentWorkDir(workDir, {
+              mode: workItem.dispatchContract?.worktree?.strategy === "isolated" ? "worktree" : "shared",
+              failClosed: workItem.dispatchContract?.worktree?.strategy === "isolated",
+              taskId: task.id,
+              agentName: workItem.id,
+              sourceProject: project,
+              reuseKey: `${task.id}-${workItem.id}`,
+            });
+            const workerWorkDir = isolatedWorkDir.workDir;
             const workerPrompt = [
               toolContext.prompt,
               projectKnowledge.context,
               projectSessionContext,
               buildProjectExecutionBrief(project, workItem.objective, {
-                workDir,
+                workDir: workerWorkDir,
                 query: finalMessage,
                 verificationHints: Array.isArray(loadProjectConfigs()?.[project]?.verification_commands) ? loadProjectConfigs()[project].verification_commands : [],
                 memoryDeliveryMode: memoryMcpEnabled ? "mcp" : "prompt",
                 memorySnapshotId: projectMemoryMcp?.snapshot?.id || "",
               }),
               `你是当前项目唯一的开发 Agent。项目主 Agent 分配给你的工作项如下：\n标题：${workItem.title}\n目标：${workItem.objective}\n验收标准：${workItem.acceptanceCriteria.join("；") || plan.acceptanceCriteria.join("；")}\n${reworkProblems.length ? `这是第 ${round} 轮返工，必须逐项解决 TestAgent 的真实失败证据：\n${reworkProblems.join("\n")}` : ""}\n请实际完成工作、运行适用验证，并在结尾准确列出变更文件、执行过的验证和仍存在的阻塞。不得自行宣布主任务最终验收通过。`,
+              workItem.dispatchContract ? `计划派发合同绑定：${JSON.stringify({ workItemId: workItem.dispatchContract.workItemId, stepId: workItem.dispatchContract.stepId, planRevision: workItem.dispatchContract.planRevision, planChecksum: workItem.dispatchContract.planChecksum, contractChecksum: workItem.dispatchContract.contractChecksum, sourceManifestChecksum: workItem.dispatchContract.sourceManifestChecksum, files: workItem.dispatchContract.files, dependsOn: workItem.dispatchContract.dependsOn, allowedTools: workItem.dispatchContract.allowedTools, forbiddenPaths: workItem.dispatchContract.forbiddenPaths, acceptance: workItem.dispatchContract.acceptance, verification: workItem.dispatchContract.verification, worktree: workItem.dispatchContract.worktree })}` : "",
             ].filter(Boolean).join("\n\n");
             if (memoryMcpEnabled) {
               const bootstrapTokens = estimateTextTokens(workerPrompt);
@@ -2318,7 +2355,8 @@ function handleRequest(req: any, res: any) {
               projectMemoryMcp.bootstrapTokens = bootstrapTokens;
               projectMemoryMcp.maxBootstrapTokens = maxBootstrapTokens;
             }
-            const output = await callAgent(project, workerPrompt, workDir, agentType, 300000, {
+            const needsMemoryReceipt = firstMemoryReceiptRequired && !workItemMemoryReceiptStarted.has(String(workItem.id));
+            const output = await callAgent(project, workerPrompt, workerWorkDir, agentType, Number(workItem.dispatchContract?.timeoutMs || 300000), {
               background: true,
               taskId: task.id,
               executionId: `${task.id}:${workItem.id}:attempt:${workItem.attempts}`,
@@ -2330,30 +2368,43 @@ function handleRequest(req: any, res: any) {
               mcpConfigPath: toolContext.audit.mcpConfigPath,
               runtimeToolSnapshot: toolContext.runtimeToolSnapshot,
               runtimeToolDispatchGate: toolContext.dispatchGate,
-              agentSession: activeAgentSessionOptions,
-              taskAgentSessionId: activeTaskAgentSession.id,
-              memoryContextConsumptionReceiptRequired: firstMemoryReceiptRequired,
-              memoryContextConsumptionChallenge: firstMemoryReceiptRequired ? projectMemoryMcp?.challenge || null : null,
+              agentSession: workerSessionOptions,
+              taskAgentSessionId: workerSession.id,
+              planDispatchContract: workItem.dispatchContract || null,
+              planId: task.id,
+              planRevision: Number(workItem.dispatchContract?.planRevision || 0),
+              planChecksum: String(workItem.dispatchContract?.planChecksum || ""),
+              contractChecksum: String(workItem.dispatchContract?.contractChecksum || ""),
+              sourceManifestChecksum: String(workItem.dispatchContract?.sourceManifestChecksum || ""),
+              workItemId: String(workItem.dispatchContract?.workItemId || workItem.id),
+              memoryContextConsumptionReceiptRequired: needsMemoryReceipt,
+              memoryContextConsumptionChallenge: needsMemoryReceipt ? projectMemoryMcp?.challenge || null : null,
               onDone: (state: any) => { doneState = state; },
             });
+            workItemMemoryReceiptStarted.add(String(workItem.id));
             firstMemoryReceiptRequired = false;
-            activeTaskAgentSession = recordTaskAgentSessionTurn(activeTaskAgentSession.id, {
+            workerSession = recordTaskAgentSessionTurn(workerSession.id, {
               nativeSessionId: doneState?.nativeSessionId || "",
               nativeContinuationEvidence: doneState?.nativeContinuationEvidence || null,
               success: doneState?.isError !== true,
               error: doneState?.error || "",
               runtimeToolSnapshot: toolContext.runtimeToolSnapshot,
-            }) || activeTaskAgentSession;
-            activeAgentSessionOptions = getTaskAgentSessionOptions(activeTaskAgentSession);
+            }) || workerSession;
+            workItemAgentSessions.set(String(workItem.id), workerSession);
+            workerSessionOptions = getTaskAgentSessionOptions(workerSession);
             const result = {
               success: doneState?.isError !== true && !/^\[[^\]]+\]\s*Agent (?:Runner )?错误:/i.test(String(output || "")),
               output: String(output || ""),
               fileChanges: doneState?.fileChanges || { count: 0, files: [] },
               nativeSessionId: doneState?.nativeSessionId || "",
-              sessionId: activeTaskAgentSession.id,
+              sessionId: workerSession.id,
               usage: doneState?.usage || null,
               error: doneState?.error || "",
             };
+            const deliveryJob = enqueueProjectWorkerDelivery({ prepared: isolatedWorkDir, workItem, mainWorkDir: workDir, queue: worktreeMergeQueue });
+            worktreeMergeQueue = deliveryJob.queue;
+            const delivery = await deliveryJob.promise;
+            if (delivery) (result as any).delivery = delivery;
             workerResults.push(result);
             return result;
           },

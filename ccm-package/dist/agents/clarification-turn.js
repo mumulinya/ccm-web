@@ -25,12 +25,12 @@ function runClarificationTurnSelfTest() {
     const clarify = parsedRequestsUserClarification({
         responseType: "clarify",
         questionForUser: "核销方式？",
-        workflowDecision: { mode: "answer", structuredClarificationQuestions: [{ label: "核销方式" }] },
+        workflowDecision: { actionRequired: false, requiresCodeChanges: false, structuredClarificationQuestions: [{ label: "核销方式" }] },
     });
     const reply = parsedRequestsUserClarification({
         responseType: "reply",
         reply: "你好",
-        workflowDecision: { mode: "answer" },
+        workflowDecision: { actionRequired: false, requiresCodeChanges: false },
     });
     const dispatch = parsedRequestsUserClarification({
         responseType: "dispatch",

@@ -55,7 +55,7 @@ const checks = {
   runtimeDiagnosticsContract: runtimeDiagnosticsContract.success === true,
   projectMainPlansFromCurrentSource: runner.includes('hydrateProjectMainSource({')
     && runner.includes('current_project_source: sourceHydration.prompt')
-    && runner.includes('sourceEvidence: projectSourceEvidenceSummary(sourceHydration.evidence)')
+    && (runner.includes('sourceEvidence: projectSourceEvidenceSummary(sourceHydration.evidence)') || runner.includes('const sourceEvidence = projectSourceEvidenceSummary(sourceHydration.evidence)'))
     && runner.includes('type: "project_main_source_hydrated"'),
   projectSourceIsReadOnlyAndScoped: sourceReader.includes('fs.realpathSync(resolvedRoot)')
     && sourceReader.includes('isSensitivePath(relativePath)')

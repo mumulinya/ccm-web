@@ -530,7 +530,7 @@ import {
   shouldNotifyGlobalDirectDispatchCompletion,
   shouldNotifyGlobalDirectDispatchContinuation,
   shouldNotifyGlobalDirectDispatchRollback,
-  shouldUseProjectAnalysisMode,
+  shouldLoadReadOnlyProjectContext,
   summarizeAgentProbeTargets,
   summarizeNativeTestAgentExecutionPlan,
   summarizeTaskAgentMemoryContextSnapshot,

@@ -110,7 +110,7 @@ exports.buildAcceptedPlanModeDraft = buildAcceptedPlanModeDraft;
 exports.classifyGroupProjectTaskIntent = classifyGroupProjectTaskIntent;
 exports.normalizeGroupAgentGatewayTaskIntent = normalizeGroupAgentGatewayTaskIntent;
 exports.classifyGroupProjectTaskIntentWithAgent = classifyGroupProjectTaskIntentWithAgent;
-exports.shouldUseProjectAnalysisMode = shouldUseProjectAnalysisMode;
+exports.shouldLoadReadOnlyProjectContext = shouldLoadReadOnlyProjectContext;
 exports.shouldCreatePersistentGroupTask = shouldCreatePersistentGroupTask;
 exports.classifyPlanModeRisk = classifyPlanModeRisk;
 exports.buildPlanModeClarificationQuestions = buildPlanModeClarificationQuestions;
@@ -872,8 +872,8 @@ function normalizeGroupAgentGatewayTaskIntent(fallback, coordinatorResult, messa
 async function classifyGroupProjectTaskIntentWithAgent(input) {
     return require("./collaboration-task-intake").classifyGroupProjectTaskIntentWithAgent(input);
 }
-function shouldUseProjectAnalysisMode(input) {
-    return require("./collaboration-task-intake").shouldUseProjectAnalysisMode(input);
+function shouldLoadReadOnlyProjectContext(input) {
+    return require("./collaboration-task-intake").shouldLoadReadOnlyProjectContext(input);
 }
 function shouldCreatePersistentGroupTask(input) {
     return require("./collaboration-task-intake").shouldCreatePersistentGroupTask(input);

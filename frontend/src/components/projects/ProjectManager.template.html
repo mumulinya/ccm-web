@@ -155,11 +155,13 @@
                  :hide-file-changes="hasAcceptedExecutionForMessage(projectAgentExecutionEvents, messages, i)"
                  :message-key="`${currentSession || 'session'}:${getMessageKey(msg)}`"
                  :live-progress="liveProjectAssistantProgress(i)"
+                 :plan-owned-by-dock="projectPlanOwnedByDock(msg, i)"
                  @task-action="handleProjectTaskAction(msg, $event)"
                  @open-file-diff="openFileDiff"
                  @clarify-reply="submitInlineProjectClarification"
                />
               <PresentedPlanCard
+                v-if="!projectPlanOwnedByDock(msg, i)"
                 :plan="planForMessage(msg, i)"
                 :can-confirm-execute="canConfirmOnPlanCard(msg, i)"
                 :confirm-execute-busy="presentedPlanConfirmBusy"
@@ -172,7 +174,7 @@
                 :message-index="i"
                 stage-grouped
                 presentation="live"
-                :omit-requirement-plan="!!planForMessage(msg, i)"
+                :omit-requirement-plan="projectPlanOwnedByDock(msg, i) || !!planForMessage(msg, i)"
                 @open-file-change="openSingleFileChange"
                 @execution-action="handleProjectTaskAction(msg, $event)"
               />
@@ -183,7 +185,7 @@
                 :message-index="i"
                 stage-grouped
                 presentation="completed"
-                :omit-requirement-plan="!!planForMessage(msg, i)"
+                :omit-requirement-plan="!!planForMessage(msg, i) && !projectPlanOwnedByDock(msg, i)"
                 @open-file-change="openSingleFileChange"
                 @open-file-changes="openCodeChangeDrawer($event, { title: '本轮文件改动', project: currentProject })"
                 @execution-action="handleProjectTaskAction(msg, $event)"

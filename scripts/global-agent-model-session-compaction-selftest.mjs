@@ -156,13 +156,13 @@ try {
   }));
   ingestGlobalAgentConversation({ sessionId: chainId, source: "selftest", messages: appendChainMessages("chain-s2", 200_000), compact: false });
   const s2 = await runChainCompact("chain-s2");
-  assert.deepEqual(chainPrompts.at(-1).payload.previousSummary, s1.session.summary);
+  assert.deepEqual(chainPrompts.at(-1).payload.previousSummary, s1.session.unifiedSessionSummary);
   assert.equal(s2.archive.previousSummaryChecksum, s1.archive.summaryChecksum);
   assert.notEqual(chainPrompts.at(-1).sessionMemory, true);
 
   ingestGlobalAgentConversation({ sessionId: chainId, source: "selftest", messages: appendChainMessages("chain-s3", 400_000), compact: false });
   const s3 = await runChainCompact("chain-s3");
-  assert.deepEqual(chainPrompts.at(-1).payload.previousSummary, s2.session.summary);
+  assert.deepEqual(chainPrompts.at(-1).payload.previousSummary, s2.session.unifiedSessionSummary);
   assert.equal(s3.archive.previousSummaryChecksum, s2.archive.summaryChecksum);
   assert.notEqual(chainPrompts.at(-1).sessionMemory, true);
   assert.equal(loadGlobalAgentMemory().archives.filter(archive => archive.sessionId === chainId).length, 3);

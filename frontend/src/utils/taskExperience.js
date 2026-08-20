@@ -1367,7 +1367,7 @@ export const globalAgentRunTaskCard = (message = {}) => {
   const nextAction = userRequestSummary?.next_action || (presentation.phase === 'needs_user'
     ? (run.clarification_question || '请确认后继续')
     : presentation.phase === 'completed'
-      ? (deliveryScaffold ? '可以查看交付总结、验证结果和风险提示' : (runPlanMode ? '可按计划继续，或回复调整计划' : ''))
+      ? (deliveryScaffold ? '可以查看交付总结、验证结果和风险提示' : (runPlanMode ? '可按计划继续，或回复修改计划' : ''))
       : presentation.phase === 'failed'
         ? '可以重新执行，系统会复用已有证据'
         : presentation.phase === 'cancelled'

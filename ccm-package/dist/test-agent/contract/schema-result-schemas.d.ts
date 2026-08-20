@@ -4811,8 +4811,8 @@ export declare const browserEvidenceTemporalIntegritySchema: z.ZodObject<{
         kind?: "report" | "execution_plan" | "browser_result" | "browser_tool_call";
         run?: number;
         startedAt?: string;
-        finishedAt?: string;
         errors?: string[];
+        finishedAt?: string;
         checkId?: string;
     }, {
         id?: string;
@@ -4821,8 +4821,8 @@ export declare const browserEvidenceTemporalIntegritySchema: z.ZodObject<{
         kind?: "report" | "execution_plan" | "browser_result" | "browser_tool_call";
         run?: number;
         startedAt?: string;
-        finishedAt?: string;
         errors?: string[];
+        finishedAt?: string;
         checkId?: string;
     }>, "many">;
 }, "strict", z.ZodTypeAny, {
@@ -4834,8 +4834,8 @@ export declare const browserEvidenceTemporalIntegritySchema: z.ZodObject<{
         kind?: "report" | "execution_plan" | "browser_result" | "browser_tool_call";
         run?: number;
         startedAt?: string;
-        finishedAt?: string;
         errors?: string[];
+        finishedAt?: string;
         checkId?: string;
     }[];
     toleranceMs?: number;
@@ -4857,8 +4857,8 @@ export declare const browserEvidenceTemporalIntegritySchema: z.ZodObject<{
         kind?: "report" | "execution_plan" | "browser_result" | "browser_tool_call";
         run?: number;
         startedAt?: string;
-        finishedAt?: string;
         errors?: string[];
+        finishedAt?: string;
         checkId?: string;
     }[];
     toleranceMs?: number;
@@ -4890,10 +4890,10 @@ export declare const browserResourceLifecycleEventSchema: z.ZodObject<{
     error?: string;
     provider?: "mcp" | "playwright";
     scope?: string;
-    releasedAt?: string;
     acquiredAt?: string;
-    ownership?: "owned" | "external";
     planId?: string;
+    releasedAt?: string;
+    ownership?: "owned" | "external";
     resourceType?: "browser" | "browser_context" | "external_browser_session";
     releaseAttemptedAt?: string;
 }, {
@@ -4902,10 +4902,10 @@ export declare const browserResourceLifecycleEventSchema: z.ZodObject<{
     error?: string;
     provider?: "mcp" | "playwright";
     scope?: string;
-    releasedAt?: string;
     acquiredAt?: string;
-    ownership?: "owned" | "external";
     planId?: string;
+    releasedAt?: string;
+    ownership?: "owned" | "external";
     resourceType?: "browser" | "browser_context" | "external_browser_session";
     releaseAttemptedAt?: string;
 }>;
@@ -4954,10 +4954,10 @@ export declare const browserResourceLifecycleSummarySchema: z.ZodObject<{
         error?: string;
         provider?: "mcp" | "playwright";
         scope?: string;
-        releasedAt?: string;
         acquiredAt?: string;
-        ownership?: "owned" | "external";
         planId?: string;
+        releasedAt?: string;
+        ownership?: "owned" | "external";
         resourceType?: "browser" | "browser_context" | "external_browser_session";
         releaseAttemptedAt?: string;
     }, {
@@ -4966,10 +4966,10 @@ export declare const browserResourceLifecycleSummarySchema: z.ZodObject<{
         error?: string;
         provider?: "mcp" | "playwright";
         scope?: string;
-        releasedAt?: string;
         acquiredAt?: string;
-        ownership?: "owned" | "external";
         planId?: string;
+        releasedAt?: string;
+        ownership?: "owned" | "external";
         resourceType?: "browser" | "browser_context" | "external_browser_session";
         releaseAttemptedAt?: string;
     }>, "many">;
@@ -4981,10 +4981,10 @@ export declare const browserResourceLifecycleSummarySchema: z.ZodObject<{
         error?: string;
         provider?: "mcp" | "playwright";
         scope?: string;
-        releasedAt?: string;
         acquiredAt?: string;
-        ownership?: "owned" | "external";
         planId?: string;
+        releasedAt?: string;
+        ownership?: "owned" | "external";
         resourceType?: "browser" | "browser_context" | "external_browser_session";
         releaseAttemptedAt?: string;
     }[];
@@ -5013,10 +5013,10 @@ export declare const browserResourceLifecycleSummarySchema: z.ZodObject<{
         error?: string;
         provider?: "mcp" | "playwright";
         scope?: string;
-        releasedAt?: string;
         acquiredAt?: string;
-        ownership?: "owned" | "external";
         planId?: string;
+        releasedAt?: string;
+        ownership?: "owned" | "external";
         resourceType?: "browser" | "browser_context" | "external_browser_session";
         releaseAttemptedAt?: string;
     }[];

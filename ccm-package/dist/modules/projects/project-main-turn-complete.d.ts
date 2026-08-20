@@ -1,6 +1,6 @@
 export type ProjectFirstTurnVisiblePresentation = {
     present: boolean;
-    messageMode: "conversation" | "project_analysis";
+    messageMode: "conversation";
     reply: string;
     presentedPlan: any | null;
     responseKind: string;
@@ -9,7 +9,6 @@ export declare function presentedPlanFromProjectFirstTurn(firstTurn: any): any;
 export declare function projectFirstTurnShouldEnterTask(firstTurn: any, options?: {
     treatAsTask?: boolean;
 }): boolean;
-export declare function projectFirstTurnMessageMode(firstTurn: any): "conversation" | "project_analysis";
 export declare function projectFirstTurnVisiblePresentation(firstTurn: any, options?: {
     treatAsTask?: boolean;
 }): ProjectFirstTurnVisiblePresentation;

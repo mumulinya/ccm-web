@@ -1,3 +1,13 @@
+import type { UnifiedCompactionResult } from "../../system/unified-session-compaction-types";
+export declare function createProjectSessionCompactionAdapter(input: {
+    project: string;
+    sessionId: string;
+    load: () => Promise<any> | any;
+    commit: (result: UnifiedCompactionResult, fence: any) => Promise<void> | void;
+    acquire?: () => Promise<any> | any;
+    failure?: (error: unknown, fence: any) => Promise<void> | void;
+    validate?: (fence: any, snapshot: any) => Promise<void> | void;
+}): import("../../system/unified-session-compaction-types").UnifiedSessionCompactionAdapter;
 export declare function getProjectSessionCompactionActivity(project: string, projectSessionId: string): {
     active: boolean;
     status: string;
@@ -77,7 +87,41 @@ export declare function compactProjectSessionWithModel(project: string, projectS
     provider?: string;
     model?: string;
     modelVisiblePayload?: any;
-}): Promise<any>;
+}): Promise<{
+    compacted: any;
+    reason: any;
+    before_tokens: any;
+    after_tokens: any;
+    summary_source: any;
+    boundary_generation: any;
+    boundaryGeneration: any;
+    boundary: any;
+    receipt: any;
+    unifiedSessionSummary: any;
+    unifiedSessionCompaction: any;
+    model_context_capacity: {
+        provider: string;
+        model: string;
+        autoCompactThreshold: number;
+        resolution: string;
+        schema: string;
+        contextWindow: number;
+        maxOutputTokens: number;
+        reservedOutputTokens: number;
+        effectiveContextWindow: number;
+        autoCompactBufferTokens: number;
+        source: any;
+        confidence: number;
+        checkedAt: any;
+        expiresAt: any;
+        evidenceId: any;
+        evidenceChecksum: any;
+        cacheStatus: string;
+        conservativeFallback: boolean;
+    };
+    auto_compact_threshold: number;
+    contentStored: boolean;
+}>;
 export declare function buildProjectSessionPostCompactContext(project: string, projectSessionId: string, targetAgentType?: string, options?: {
     currentRequest?: any;
 }): string;

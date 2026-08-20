@@ -1349,8 +1349,8 @@ export async function classifyGroupProjectTaskIntentWithAgent(input: {
   return require("./collaboration-task-intake").classifyGroupProjectTaskIntentWithAgent(input);
 }
 
-export function shouldUseProjectAnalysisMode(input: { isOrchestrated?: boolean; messageMode?: string; taskIntent?: any }) {
-  return require("./collaboration-task-intake").shouldUseProjectAnalysisMode(input);
+export function shouldLoadReadOnlyProjectContext(input: { isOrchestrated?: boolean; taskIntent?: any }) {
+  return require("./collaboration-task-intake").shouldLoadReadOnlyProjectContext(input);
 }
 
 export function shouldCreatePersistentGroupTask(input: { isOrchestrated?: boolean; messageMode?: string; taskIntent?: any; forceProjectTask?: boolean }) {

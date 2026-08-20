@@ -8,8 +8,7 @@ export const compactStatusText = (value, max = 80) => {
 }
 
 export const mainDecisionModeLabel = (mode) => ({
-  conversation: '普通回复',
-  project_analysis: '项目分析',
+  conversation: '回复',
   project_task: '创建任务',
   delegation: '安排执行成员',
   followup: '追加要求',
@@ -19,15 +18,14 @@ export const mainDecisionModeLabel = (mode) => ({
 export const mainDecisionTone = (decision) => {
   if (!decision?.verify?.passed) return 'warning'
   if (['project_task', 'delegation', 'followup'].includes(decision.mode)) return 'active'
-  if (decision.mode === 'project_analysis') return 'analysis'
   return 'idle'
 }
 
-/** Quiet when read-only conversation/analysis is only the generic coordinator loop, not a user-task plan. */
+/** Hide the generic coordinator loop when no task action or blocker exists. */
 export const isQuietMainAgentDecision = (decision) => {
   if (!decision) return false
   const mode = String(decision?.mode || 'conversation').toLowerCase()
-  if (!['conversation', 'project_analysis'].includes(mode)) return false
+  if (mode !== 'conversation') return false
   const actions = decision?.decision?.selected_actions || decision?.decision?.selectedActions || []
   const workflowActions = new Set([
     'create_project_task',
@@ -69,7 +67,7 @@ export const mainDecisionActionSummary = (decision) => {
 export const mainDecisionPlanSummary = (decision) => {
   const display = decision?.todo_plan?.display || {}
   const policy = decision?.todo_plan?.display_policy || decision?.todo_plan?.displayPolicy || {}
-  if (['conversation', 'project_analysis'].includes(String(decision?.mode || '')) && (display.user_visible === false || display.hide_for_simple_conversation === true)) return ''
+  if (String(decision?.mode || '') === 'conversation' && (display.user_visible === false || display.hide_for_simple_conversation === true)) return ''
   const steps = Array.isArray(decision?.user_plan_steps)
     ? decision.user_plan_steps
     : Array.isArray(decision?.todo_plan?.steps)

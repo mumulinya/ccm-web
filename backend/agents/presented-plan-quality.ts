@@ -1,6 +1,7 @@
 export const PRESENTED_PLAN_QUALITY_ERROR = "PRESENTED_PLAN_QUALITY";
 export const PRESENTED_PLAN_QUALITY_GOAL_MIN = 60;
 export const PRESENTED_PLAN_QUALITY_TITLE_MAX = 240;
+import { validateImplementationPlanV2 } from "./implementation-plan";
 
 export type PresentedPlanQuality = {
   ok: boolean;
@@ -31,29 +32,29 @@ function stepTitles(plan: any) {
 export function evaluatePresentedPlanQuality(plan: any): PresentedPlanQuality {
   const issues: string[] = [];
   if (!plan || typeof plan !== "object") {
-    issues.push("缺少 plan 对象");
+      issues.push("The plan object is missing");
   } else {
     const goal = compactLine(plan.goal, 1200);
     const overview = compactLine(plan.overview, 4000);
     if (goal.length < PRESENTED_PLAN_QUALITY_GOAL_MIN && overview.length < PRESENTED_PLAN_QUALITY_GOAL_MIN) {
       const current = Math.max(goal.length, overview.length);
-      issues.push(`goal 或 overview 至少 ${PRESENTED_PLAN_QUALITY_GOAL_MIN} 字以钉死运转规则（状态、占用/释放、超时时钟、现有对象或 greenfield），当前 ${current} 字`);
+      issues.push(`goal or overview must contain at least ${PRESENTED_PLAN_QUALITY_GOAL_MIN} characters and define the operating rules (state, allocation/release, timeout clock, existing object, or greenfield); current length is ${current}`);
     }
     const titles = stepTitles(plan);
     const nonempty = titles.filter(item => item.title);
     if (!nonempty.length) {
-      issues.push("steps 至少 1 条一行可演示切片，才能出计划卡");
+      issues.push("steps must contain at least one one-line demonstrable slice before a plan card can be submitted");
     }
     const seen = new Set<string>();
     for (const item of nonempty) {
       if (/[\r\n]/.test(item.raw)) {
-        issues.push(`步骤「${item.title.slice(0, 40)}」必须是一行 title，不要换行`);
+        issues.push(`Step \"${item.title.slice(0, 40)}\" must have a single-line title`);
       }
       if (item.title.length > PRESENTED_PLAN_QUALITY_TITLE_MAX) {
-        issues.push(`步骤 title 超过 ${PRESENTED_PLAN_QUALITY_TITLE_MAX} 字`);
+        issues.push(`A step title exceeds ${PRESENTED_PLAN_QUALITY_TITLE_MAX} characters`);
       }
       const key = item.title.toLowerCase();
-      if (seen.has(key)) issues.push(`步骤 title 重复：${item.title.slice(0, 40)}`);
+      if (seen.has(key)) issues.push(`Duplicate step title: ${item.title.slice(0, 40)}`);
       seen.add(key);
     }
     const exclusions = asList(plan.exclusions || plan.outOfScope || plan.out_of_scope)
@@ -63,7 +64,11 @@ export function evaluatePresentedPlanQuality(plan: any): PresentedPlanQuality {
       .map((item: any) => compactLine(item, 600))
       .filter(Boolean);
     if (!exclusions.length && !expected.length) {
-      issues.push("需要 exclusions 或 expectedResults 至少 1 项，写明本次边界或结果口径");
+      issues.push("Provide at least one exclusions or expectedResults item to define scope or the result contract");
+    }
+    if (plan.schema === "ccm-implementation-plan-v2") {
+      const v2 = validateImplementationPlanV2(plan);
+      for (const issue of v2.issues) if (!issues.includes(issue)) issues.push(issue);
     }
   }
   const ok = issues.length === 0;
@@ -71,9 +76,9 @@ export function evaluatePresentedPlanQuality(plan: any): PresentedPlanQuality {
     ok,
     issues,
     directive: ok ? "" : [
-      "计划稿未通过结构质量门，请按下列问题用 ccm_present_plan 重出一张完整计划卡（只修这一次）：",
+      "The plan draft failed the structural quality gate. Resubmit one complete plan card with ccm_present_plan and fix only these issues once:",
       ...issues.map((item, index) => `${index + 1}. ${item}`),
-      "遵守 Skill:ccm-implementation-plan-authoring：goal/overview 钉运转规则；steps 按需求写一行可演示切片；带 exclusions 或 expectedResults。",
+      "Follow Skill:ccm-implementation-plan-authoring: define operating rules in goal/overview, make each step a one-line demonstrable slice, and include exclusions or expectedResults.",
     ].join("\n"),
   };
 }

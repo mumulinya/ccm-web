@@ -1055,9 +1055,9 @@ export async function executeMentionJob(mention: any, env: CrossAgentEnv): Promi
     if (memoryConsumptionChallenge) workerMemoryContext = attachMemoryContextConsumptionChallenge(workerMemoryContext, memoryConsumptionChallenge);
     const projectResourcesConfig = getProjectExtraConfig(targetName);
     const toolContext = nativeTestAgentDispatch
-      ? { prompt: "\n[TestAgent 原生复核]\n- 当前请求由 CCM TestAgent 原生 runner 执行，只读取工作单并运行验证，不注入第三方 Agent 工具。\n", allowedTools: { mcp: [], skill: [] }, toolAudit: null, authorizationReadiness: null }
+      ? { prompt: "\n[Native TestAgent verification]\n- This request runs in the CCM TestAgent runner. Read only the work order and run verification; do not inject third-party Agent tools.\n", allowedTools: { mcp: [], skill: [] }, toolAudit: null, authorizationReadiness: null }
       : advisoryOnly
-      ? { prompt: "\n[Agent 问答权限隔离]\n- 当前请求仅允许提供只读建议，不注入任何额外 MCP 或 Skill。\n", allowedTools: { mcp: [], skill: [] }, toolAudit: null, authorizationReadiness: null }
+      ? { prompt: "\n[Advisory-only Agent boundary]\n- This request may provide read-only advice only. Do not inject additional MCP servers or Skills.\n", allowedTools: { mcp: [], skill: [] }, toolAudit: null, authorizationReadiness: null }
       : buildAgentToolContext(ctx, group, targetName, childTaskText, sourceTask?.selected_skill_names || []);
     let runtimeToolContext = nativeTestAgentDispatch
       ? buildNativeTestAgentRuntimeToolContext(targetName, tWorkDir)

@@ -1296,7 +1296,7 @@ export function buildUserTaskActions(task: any, phase: string, executions: any[]
   const terminal = completed || stopped || retryable;
   if (task?.intake_state === "awaiting_confirmation") {
     actions.push({ id: "confirm_plan", label: "确认执行", kind: "confirm_plan", tone: "primary" });
-    actions.push({ id: "revise_plan", label: "调整计划", kind: "revise_plan", tone: "warning" });
+    actions.push({ id: "revise_plan", label: "修改计划", kind: "revise_plan", tone: "warning" });
     actions.push({ id: "cancel", label: "停止任务", kind: "cancel", tone: "danger" });
     return actions;
   }
@@ -2714,7 +2714,7 @@ export function buildUserPlanAlignmentReview(task: any, summary: any = {}, phase
       id: "plan_confirmed",
       label: "计划已进入执行",
       ok: !!planConfirmed,
-      detail: planConfirmed ? "已按确认后的计划进入执行链路" : "仍在等待你确认或调整计划",
+      detail: planConfirmed ? "已按确认后的计划进入执行链路" : "仍在等待你确认或修改计划",
       evidence: plan?.revision_status ? [`已按反馈调整：${compactMemoryText(plan.last_revision_feedback || "", 120)}`].filter(Boolean) : [],
     },
     {
@@ -3184,7 +3184,6 @@ export function buildGroupMainAgentInternalLoop(input: {
   const toolChoiceReason = (stage: any, stageActions: string[]) => {
     if (stage.id === "observe") {
       if (input.mode === "conversation") return "普通对话只读群聊上下文，不读取项目代码。";
-      if (input.mode === "project_analysis") return "项目分析只读项目快照和知识库，不创建任务。";
       return "开发/续跑任务需要读取任务状态、项目上下文和历史证据。";
     }
     if (stage.id === "think") return input.taskIntent?.reason || input.dispatchPolicy?.reason || "根据消息模式、意图分类和风险信号判断下一步。";
@@ -3270,7 +3269,7 @@ export function buildMainAgentPlanVerificationReminder(input: {
   verified?: boolean;
 }) {
   const mode = String(input.mode || "");
-  if (mode === "conversation" || mode === "project_analysis") return null;
+  if (mode === "conversation") return null;
   const steps = Array.isArray(input.steps) ? input.steps : [];
   if (steps.length < 3) return null;
   if (steps.some(planStepHasVerificationSignal)) return null;
@@ -3410,16 +3409,16 @@ export function loopStageStatus(stage: any, input: { mode: string; actionIds: st
   if (stage.id === "reflect") {
     if (actionIds.includes("replan_from_observation") || input.observations?.needs_replan || input.observations?.acceptance_gate_passed === false) return "in_progress";
     if (input.verified) return "completed";
-    return input.mode === "conversation" || input.mode === "project_analysis" ? "skipped" : "pending";
+    return input.mode === "conversation" ? "skipped" : "pending";
   }
   if (stage.id === "respond") return actionIds.includes("generate_final_reply") ? (input.verified ? "completed" : "in_progress") : "pending";
   if (stage.id === "monitor") {
     if (actionIds.includes("read_child_agent_receipts") || input.observations?.receipt_count || input.observations?.queued) return input.verified ? "completed" : "in_progress";
-    return input.mode === "conversation" || input.mode === "project_analysis" ? "skipped" : "pending";
+    return input.mode === "conversation" ? "skipped" : "pending";
   }
   if (stage.id === "act") {
     if (hasAction) return input.verified ? "completed" : "in_progress";
-    return ["conversation", "project_analysis"].includes(input.mode) ? "skipped" : "pending";
+    return input.mode === "conversation" ? "skipped" : "pending";
   }
   if (stage.id === "plan") {
     if (hasAction || ["project_task", "delegation", "followup", "governance"].includes(input.mode)) return "completed";
@@ -3456,7 +3455,7 @@ export function summaryHasExecutedVerification(summary: any = {}) {
 
 export const GROUP_MAIN_AGENT_LOOP_STAGES = [
   { id: "observe", label: "Observe", title: "观察上下文", actions: ["read_group_context", "read_project_code_snapshot", "query_knowledge_base", "inspect_task_status"], purpose: "先看群聊、项目、知识库和任务状态，避免盲目派发。" },
-  { id: "think", label: "Think", title: "判断意图", actions: [], purpose: "判断普通问答、项目分析、开发任务、治理动作或续跑。" },
+  { id: "think", label: "Think", title: "理解目标", actions: [], purpose: "理解当前消息、上下文、权限边界以及是否需要调用工具或派发。" },
   { id: "plan", label: "Plan", title: "形成计划", actions: ["create_project_task", "ask_user_clarification"], purpose: "形成用户可读计划、Todo、风险和工作单边界。" },
   { id: "act", label: "Act", title: "执行动作", actions: ["dispatch_child_agent", "govern_task_lifecycle"], purpose: "只在授权后创建任务、派发子 Agent 或执行治理动作。" },
   { id: "monitor", label: "Monitor", title: "跟踪执行", actions: ["read_child_agent_receipts", "inspect_task_status"], purpose: "持续读取子 Agent 结果说明、任务状态、文件变更和验证结果。" },

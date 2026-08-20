@@ -28,20 +28,21 @@ function buildExactGroupSessionModelContextProjection(messagesInput, memory, opt
         throw new Error("exact_group_session_required_for_model_context");
     const messages = (Array.isArray(messagesInput) ? messagesInput : [])
         .filter((message) => !String(message?.content || "").startsWith("📤"));
-    const summarySource = String(memory?.compaction?.summarySource || memory?.compaction?.summary_source || "").toLowerCase();
-    const canonicalSummary = ["model", "session-memory", "session_memory"].includes(summarySource)
-        && !!memory?.conversationSummary;
-    const boundaryIndex = canonicalSummary ? (0, group_memory_shared_1.getCompactBoundaryIndex)(memory, messages) : -1;
+    const summarySource = memory?.unifiedSessionSummary ? "model" : String(memory?.compaction?.summarySource || memory?.compaction?.summary_source || "").toLowerCase();
+    const canonicalSummary = !!memory?.unifiedSessionSummary || (["model", "session-memory", "session_memory"].includes(summarySource) && !!memory?.conversationSummary);
+    const boundaryIndex = memory?.unifiedSessionCompaction
+        ? Math.max(-1, Number(memory.unifiedSessionCompaction.summarizedMessageCount || 0) - 1)
+        : canonicalSummary ? (0, group_memory_shared_1.getCompactBoundaryIndex)(memory, messages) : -1;
     const config = (0, group_orchestrator_config_1.loadOrchestratorConfig)();
     const unified = (0, session_model_context_1.buildUnifiedSessionModelContextProjection)({
         scope: "group",
         scopeId: `${groupId}::${groupSessionId}`,
         sessionId: groupSessionId,
         messages,
-        canonicalSummary: canonicalSummary ? memory.conversationSummary : null,
+        canonicalSummary: canonicalSummary ? (memory.unifiedSessionSummary || memory.conversationSummary) : null,
         summarySource: canonicalSummary ? summarySource : "",
-        summaryChecksum: String(memory?.compaction?.summaryChecksum || memory?.compactBoundary?.summaryChecksum || ""),
-        boundaryGeneration: Number(memory?.compaction?.boundaryGeneration || memory?.compactBoundary?.generation || 0),
+        summaryChecksum: String(memory?.unifiedSessionCompaction?.summaryChecksum || memory?.compaction?.summaryChecksum || memory?.compactBoundary?.summaryChecksum || ""),
+        boundaryGeneration: Number(memory?.unifiedSessionCompaction?.boundaryGeneration || memory?.compaction?.boundaryGeneration || memory?.compactBoundary?.generation || 0),
         summarizedThroughIndex: boundaryIndex,
         lastSummarizedMessageId: String(memory?.sessionMemory?.lastSummarizedMessageId
             || memory?.sessionMemory?.last_summarized_message_id

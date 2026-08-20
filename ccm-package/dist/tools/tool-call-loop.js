@@ -90,7 +90,7 @@ function scopeWithAuditContext(scope, options) {
 }
 function formatToolResults(round, rows) {
     const body = rows.map(row => {
-        const label = row.ok ? "工具结果" : "工具错误";
+        const label = row.ok ? "tool result" : "tool error";
         return `[${label}: ${row.name}]\n${row.result}`;
     }).join("\n\n");
     return `<ccm_tool_results round="${round}">\n${body}\n</ccm_tool_results>`;
@@ -98,18 +98,18 @@ function formatToolResults(round, rows) {
 function buildToolContinuationPrompt(input) {
     const context = input.hasNativeSession
         ? ""
-        : `\n\n由于当前运行时没有可恢复的原生会话，下面附上本轮此前的完整转录：\n<ccm_previous_transcript>\n${input.transcript}\n</ccm_previous_transcript>`;
-    return `CCM 已执行你上一条回复中的工具调用。请读取工具结果并继续完成原始任务。
+        : `\n\nThe runtime has no resumable native session, so the earlier transcript for this round is included below:\n<ccm_previous_transcript>\n${input.transcript}\n</ccm_previous_transcript>`;
+    return `CCM executed the tool calls from your previous response. Read the tool results and continue the original task.
 
-要求：
-- 不要重复已经成功执行的相同工具调用。
-- 如需其它工具，仍只输出一个 <tool_call> 块并等待结果。
-- 工具信息足够时，直接给出最终答复，不要只复述工具结果。
-- 不要声称执行了未出现在结果中的操作。
+Rules:
+- Do not repeat an identical tool call that already succeeded.
+- If another tool is needed, emit exactly one <tool_call> block and wait for its result.
+- When the tool evidence is sufficient, provide the final answer instead of merely repeating the results.
+- Never claim an operation that is absent from the results.
 
 ${input.toolResults}${context}
 
-这是工具循环第 ${input.round} 轮，请继续。`;
+This is tool-loop round ${input.round}; continue.`;
 }
 async function runToolCallLoop(options) {
     const maxRounds = Math.max(1, Math.min(8, Number(options.maxRounds || 4)));

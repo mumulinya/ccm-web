@@ -6,10 +6,7 @@ import {
   type WorkflowDecision,
 } from "../../agents/workflow-decision";
 
-export type ProjectChatMode = "conversation" | "project_analysis" | "task";
-
 export type ProjectChatIntent = {
-  mode: ProjectChatMode;
   executable: boolean;
   reason: string;
   workflowDecision?: WorkflowDecision;
@@ -32,7 +29,7 @@ export async function classifyProjectChatIntentWithModel(
   options: { forceTask?: boolean; project?: string; sessionId?: string } = {},
 ): Promise<ProjectChatIntent> {
   const workflowDecision = options.forceTask
-    ? explicitWorkflowDecision("execute_direct", "用户显式继续已有项目任务")
+    ? explicitWorkflowDecision("用户显式继续已有项目任务", { actionRequired: true, requiresCodeChanges: true })
     : await decideWorkflowWithModel({
         message,
         scope: "project",
@@ -47,13 +44,7 @@ export async function classifyProjectChatIntentWithModel(
           })),
         },
       });
-  const mode: ProjectChatMode = workflowDecision.mode === "answer"
-    ? "conversation"
-    : workflowDecision.mode === "project_analysis"
-      ? "project_analysis"
-      : isDevelopmentTaskWorkflowDecision(workflowDecision) ? "task" : "project_analysis";
   return {
-    mode,
     executable: isDevelopmentTaskWorkflowDecision(workflowDecision),
     reason: workflowDecision.reason,
     workflowDecision,
@@ -62,23 +53,19 @@ export async function classifyProjectChatIntentWithModel(
 
 export function runProjectChatIntentSelfTest() {
   const cases = [
-    ["你好", "answer", "conversation"],
-    ["你是什么模型", "answer", "conversation"],
-    ["这个项目是什么架构？", "project_analysis", "project_analysis"],
-    ["修改登录接口并运行测试", "execute_direct", "task"],
-    ["先规划认证重构再实施", "plan_task", "task"],
+    ["你好", false, false],
+    ["你是什么模型", false, false],
+    ["这个项目是什么架构？", false, false],
+    ["修改登录接口并运行测试", true, true],
+    ["先规划认证重构再实施", true, true],
   ] as const;
-  const checks = cases.map(([message, modelMode, expected]) => {
+  const checks = cases.map(([message, actionRequired, expected]) => {
     const workflowDecision = normalizeWorkflowDecision({
-      mode: modelMode,
       reason: "脚本化模型决策",
-      requiresCodeChanges: expected === "task",
+      actionRequired,
+      requiresCodeChanges: actionRequired,
     });
-    const actual: ProjectChatMode = workflowDecision.mode === "answer"
-      ? "conversation"
-      : workflowDecision.mode === "project_analysis"
-        ? "project_analysis"
-        : isDevelopmentTaskWorkflowDecision(workflowDecision) ? "task" : "project_analysis";
+    const actual = isDevelopmentTaskWorkflowDecision(workflowDecision);
     return { message, expected, actual, workflowDecision };
   });
   return { success: checks.every(item => item.actual === item.expected), checks };

@@ -19,10 +19,10 @@ async function callMusicLlm(config, prompt, options = {}) {
     return String(content || "").trim();
 }
 async function generateSongQuote(config, title, artist = "未知") {
-    return callMusicLlm(config, `请根据歌曲“${title}”（歌手：${artist}）写一句有诗意的听歌感悟。只输出一句，20个汉字以内，不要引号。`, { system: "你是音乐感悟助手。", maxTokens: 60, temperature: 0.8 });
+    return callMusicLlm(config, `Write one poetic listening thought for the song "${title}" by ${artist}. Return one sentence only, no quotation marks, and keep it under 20 Chinese characters when the user language is Chinese.`, { system: "You are the CCM music reflection assistant.", maxTokens: 60, temperature: 0.8 });
 }
 async function classifySongEmotion(config, title, artist, labels) {
-    const raw = await callMusicLlm(config, `歌曲“${title}”（歌手：${artist || "未知"}）最符合哪个情绪？只从这些标签中输出一个：${labels.join("、")}`, { system: "你是音乐情绪分析助手，只输出指定标签。", maxTokens: 20, temperature: 0.2 });
+    const raw = await callMusicLlm(config, `Which emotion best matches the song "${title}" by ${artist || "unknown"}? Return exactly one label from this list: ${labels.join(", ")}.`, { system: "You are the CCM music emotion classifier. Return only the requested label.", maxTokens: 20, temperature: 0.2 });
     return labels.find(label => raw.includes(label)) || "";
 }
 //# sourceMappingURL=llm-client.js.map

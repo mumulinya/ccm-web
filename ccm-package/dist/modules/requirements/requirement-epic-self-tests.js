@@ -86,18 +86,18 @@ function runRequirementEpicOrchestrationSelfTest() {
     const contract = (0, workflow_decision_1.runWorkflowDecisionContractSelfTest)();
     assert(contract.success, "统一模型工作流决策契约应通过");
     const scriptedModelCases = [
-        ["普通问答", (0, workflow_decision_1.normalizeWorkflowDecision)({ mode: "answer", reason: "只需回答" }).mode, "answer"],
-        ["方案咨询", (0, workflow_decision_1.normalizeWorkflowDecision)({ mode: "project_analysis", reason: "只读分析" }).mode, "project_analysis"],
-        ["明确小修改", (0, workflow_decision_1.normalizeWorkflowDecision)({ mode: "execute_direct", reason: "范围明确" }).mode, "execute_direct"],
-        ["复杂多文件任务", (0, workflow_decision_1.normalizeWorkflowDecision)({ mode: "plan_task", reason: "先规划", planSteps: ["确认边界", "实现", "验证"] }).mode, "plan_task"],
-        ["PRD/附件", (0, workflow_decision_1.normalizeWorkflowDecision)({ mode: "decompose_epic", reason: "多个可独立验收目标" }).mode, "decompose_epic"],
-        ["含需求一词但只是问答", (0, workflow_decision_1.normalizeWorkflowDecision)({ mode: "answer", reason: "询问需求定义" }).mode, "answer"],
-        ["没有关键词但语义要求拆解", (0, workflow_decision_1.normalizeWorkflowDecision)({ mode: "decompose_epic", reason: "跨项目多目标" }).mode, "decompose_epic"],
+        ["普通问答", (0, workflow_decision_1.normalizeWorkflowDecision)({ reason: "只需回答", actionRequired: false, requiresCodeChanges: false }), false],
+        ["方案咨询", (0, workflow_decision_1.normalizeWorkflowDecision)({ reason: "只读分析", actionRequired: false, requiresCodeChanges: false }), false],
+        ["明确小修改", (0, workflow_decision_1.normalizeWorkflowDecision)({ reason: "范围明确", actionRequired: true, requiresCodeChanges: true }), true],
+        ["复杂多文件任务", (0, workflow_decision_1.normalizeWorkflowDecision)({ reason: "内部拆解", actionRequired: true, requiresCodeChanges: true, planSteps: ["确认边界", "实现", "验证"] }), true],
+        ["PRD/附件", (0, workflow_decision_1.normalizeWorkflowDecision)({ reason: "多个可独立验收目标", actionRequired: true, requiresCodeChanges: true, needsEpicDecomposition: true }), true],
+        ["含需求一词但只是问答", (0, workflow_decision_1.normalizeWorkflowDecision)({ reason: "询问需求定义", actionRequired: false, requiresCodeChanges: false }), false],
+        ["没有关键词但语义要求拆解", (0, workflow_decision_1.normalizeWorkflowDecision)({ reason: "跨项目多目标", actionRequired: true, requiresCodeChanges: true, needsEpicDecomposition: true }), true],
     ];
-    assert(scriptedModelCases.every(([, actual, expected]) => actual === expected), "脚本化模型路由应覆盖问答、分析、执行、计划和 Epic");
+    assert(scriptedModelCases.every(([, decision, expected]) => (0, workflow_decision_1.isDevelopmentTaskWorkflowDecision)(decision) === expected), "脚本化模型路由应覆盖回答、查询、开发和 Epic");
     const unavailable = (0, collaboration_task_intake_1.normalizeGroupAgentGatewayTaskIntent)({ executable: true, kind: "task", reason: "旧规则会执行" }, { runtime: "llm-error", assignments: [{ project: "backend" }] });
     assert(unavailable.executable === false && unavailable.agent_gateway.safe_stop === true, "模型不可用时必须安全停止，不能用旧规则建单");
-    const sameSemantic = ["web", "feishu", "group", "project"].map(() => (0, workflow_decision_1.normalizeWorkflowDecision)({ mode: "decompose_epic", reason: "同一语义的脚本模型结果" }).mode);
+    const sameSemantic = ["web", "feishu", "group", "project"].map(() => (0, workflow_decision_1.normalizeWorkflowDecision)({ reason: "同一语义的脚本模型结果", actionRequired: true, requiresCodeChanges: true, needsEpicDecomposition: true }).needsEpicDecomposition);
     assert(new Set(sameSemantic).size === 1, "各通道必须消费同一工作流决策契约");
     const decomposition = plan(1);
     const now = new Date().toISOString();

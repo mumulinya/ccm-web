@@ -52,6 +52,7 @@ const user_visible_agent_events_1 = require("../../system/user-visible-agent-eve
 const project_git_1 = require("../projects/project-git");
 const access_policy_1 = require("../system/access-policy");
 const project_main_agent_1 = require("../projects/project-main-agent");
+const planning_orchestrator_1 = require("../../agents/planning-orchestrator");
 const conversation_plan_mode_gate_1 = require("../../system/conversation-plan-mode-gate");
 const task_plan_detail_1 = require("./task-plan-detail");
 const task_pause_routes_1 = require("./task-pause-routes");
@@ -69,6 +70,26 @@ function rejectTaskMutationConflict(res, task, payload, requireTarget = false) {
         return false;
     (0, utils_1.sendJson)(res, { success: false, error: guard.error, code: guard.code, ...guard.details }, guard.status);
     return true;
+}
+function confirmBoundPlanningSessionForTask(task, plan) {
+    const groupId = String(task?.group_id || task?.workflow_meta?.group_id || "").trim();
+    const project = String(task?.target_project || "").trim();
+    const scope = groupId ? "group" : "project";
+    const scopeId = groupId || project;
+    const exactSessionId = String(task?.group_session_id || task?.project_session_id || task?.origin_session_id || "").trim();
+    if (!scopeId || !exactSessionId)
+        return;
+    const session = (0, planning_orchestrator_1.latestPlanningSession)(scope, scopeId, exactSessionId);
+    if (!session || session.phase === "confirmed")
+        return;
+    const planRevision = Math.max(1, Number(plan?.revision || session.revision || 1));
+    const planChecksum = String(plan?.checksum || session.planChecksum || "").trim();
+    const confirmed = (0, planning_orchestrator_1.confirmPlanningSession)({ scope, scopeId, exactSessionId, planRevision, planChecksum });
+    if (!confirmed.ok) {
+        const error = new Error("规划会话版本或复核回执已经变化，请重新加载最新计划");
+        error.code = confirmed.code;
+        throw error;
+    }
 }
 const memory_1 = require("./memory");
 const group_session_memory_model_extraction_1 = require("./group-session-memory-model-extraction");
@@ -302,6 +323,7 @@ function handleCollaborationApiReplayAndExecutionRoutes(pathname, req, res, pars
                             resume_parent_run_id: confirmed.id,
                         });
                     }
+                    confirmBoundPlanningSessionForTask(task, task.workflow_meta?.presentedPlan || task.workflow_meta?.presented_plan || task.intake_draft);
                     const planMode = task.workflow_meta?.plan_mode || task.workflow_meta?.intake?.plan_mode || task.intake_draft || {};
                     const acceptedAt = new Date().toISOString();
                     const acceptedPlan = {
@@ -2144,7 +2166,7 @@ function handleCollaborationApiIntakeRoutesPartA(pathname, req, res, parsed, ctx
                         return (0, utils_1.sendJson)(res, {
                             ...epicResult,
                             error: epicResult.needs_clarification
-                                ? "仍有阻断问题，请先在“调整计划”中补充答案后再确认"
+                                ? "仍有阻断问题，请先在“修改计划”中补充答案后再确认"
                                 : "请先确认完整的 Epic 任务图",
                             trace_id: current.trace_id,
                         }, 409);
@@ -2221,6 +2243,7 @@ function handleCollaborationApiIntakeRoutesPartA(pathname, req, res, parsed, ctx
                     });
                 }
                 const basePlan = (0, collaboration_1.getTaskPlanMode)(current) || current.intake_draft || {};
+                confirmBoundPlanningSessionForTask(current, current.workflow_meta?.presentedPlan || current.workflow_meta?.presented_plan || basePlan);
                 const acceptedPlan = (0, collaboration_1.buildAcceptedPlanModeDraft)(basePlan, acceptFeedback, confirmedAt);
                 const meta = current.workflow_meta || {};
                 const acceptanceText = current.acceptance_criteria || current.acceptanceCriteria || "";
@@ -2314,7 +2337,7 @@ function handleCollaborationApiIntakeRoutesPartA(pathname, req, res, parsed, ctx
                 if (rejectTaskMutationConflict(res, current, payload, true))
                     return;
                 if (current.intake_state !== "awaiting_confirmation")
-                    return (0, utils_1.sendJson)(res, { error: "这张确认卡已经失效，不能调整计划" }, 409);
+                    return (0, utils_1.sendJson)(res, { error: "这张确认卡已经失效，不能修改计划" }, 409);
                 if (!feedback)
                     return (0, utils_1.sendJson)(res, { error: "请填写希望主 Agent 调整的地方" }, 400);
                 const basePlan = (0, collaboration_1.getTaskPlanMode)(current) || current.intake_draft || {};
@@ -3409,7 +3432,7 @@ function handleCollaborationApi(pathname, req, res, parsed, ctx) {
         ensureTraceId: reliability_ledger_1.ensureTraceId,
         classifyGroupProjectTaskIntentWithAgent: collaboration_1.classifyGroupProjectTaskIntentWithAgent,
         shouldCreatePersistentGroupTask: collaboration_1.shouldCreatePersistentGroupTask,
-        shouldUseProjectAnalysisMode: collaboration_1.shouldUseProjectAnalysisMode,
+        shouldLoadReadOnlyProjectContext: collaboration_1.shouldLoadReadOnlyProjectContext,
         classifyTaskContinuation: collaboration_1.classifyTaskContinuation,
         looksLikeTaskContinuation: collaboration_1.looksLikeTaskContinuation,
         continueTaskWithMessage: collaboration_1.continueTaskWithMessage,

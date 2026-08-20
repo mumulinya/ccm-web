@@ -8,6 +8,7 @@ export declare function conversationPlanModeWouldCauseSideEffect(input: {
     workflowActionRequired?: boolean;
 }): boolean;
 export declare function conversationPlanModeHoldsParsed(parsed: any): boolean;
+export declare function applyInteractiveConversationModePolicy(scope: ConversationPlanScope, planModeEnabled: boolean, parsed: any): any;
 export declare function holdConversationPlanModeParsed(parsed: any): any;
 export declare function applyConversationPlanModeHold(scope: ConversationPlanScope, scopeId: string, exactSessionId: string, parsed: any): any;
 export declare function applyConversationPlanModeToRound(input: {
@@ -74,6 +75,8 @@ export declare function runConversationPlanModeGateSelfTest(): {
         readToolOpen: boolean;
         groupSessionWins: boolean;
         projectIdentityResolved: boolean;
+        agentModeKeepsModelPlan: boolean;
+        manualPlanStillPresentsPlan: boolean;
         globalHasNoConversationPlanMode: boolean;
         groupKeepsConversationPlanMode: boolean;
         projectKeepsConversationPlanMode: boolean;

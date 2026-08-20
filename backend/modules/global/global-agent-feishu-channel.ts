@@ -406,9 +406,9 @@ export function createGlobalAgentFeishuChannel(deps: any) {
       throw Object.assign(new Error("原任务已不可恢复，请选择作为新任务或仅回答问题"), { code: "CONVERSATION_ROUTE_CANDIDATE_STALE" });
     }
     if (explicitCandidate) {
-      historyBeforeUser.push({ role: "system", content: `用户明确选择继续原任务。可恢复任务摘要：${JSON.stringify(buildRecoverableTaskSummary(explicitCandidate))}。必须沿用该任务目标，不得创建重复任务。` });
+      historyBeforeUser.push({ role: "system", content: `The user explicitly chose to continue the original task. Recoverable task summary: ${JSON.stringify(buildRecoverableTaskSummary(explicitCandidate))}. Preserve this task identity and do not create a duplicate task.` });
     } else if (recoverableCandidates.length) {
-      historyBeforeUser.push({ role: "system", content: `当前精确会话的可恢复任务摘要：${JSON.stringify(recoverableCandidates.slice(0, 3).map(buildRecoverableTaskSummary))}。请结合当前消息判断 continuationKind；不要仅因为存在旧任务就续接。` });
+      historyBeforeUser.push({ role: "system", content: `Recoverable task summaries for the exact session: ${JSON.stringify(recoverableCandidates.slice(0, 3).map(buildRecoverableTaskSummary))}. Decide continuationKind from the current message; do not resume merely because an old task exists.` });
     }
     const sourceIngestion = await ingestFeishuRequirementAttachment(payload, text);
     const controlledAttachments = Array.isArray(payload?.feishu_attachments) ? payload.feishu_attachments : [];
@@ -537,8 +537,8 @@ export function createGlobalAgentFeishuChannel(deps: any) {
           requestedTargetRefs,
           routeGuard: (workflowDecision: any) => {
             if (explicitRouteChoice === "answer_only") {
-              workflowDecision.mode = "answer";
               workflowDecision.actionRequired = false;
+              workflowDecision.requiresCodeChanges = false;
               workflowDecision.requiresCodeChanges = false;
               workflowDecision.continuationKind = "new_task";
               return;

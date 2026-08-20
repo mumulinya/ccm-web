@@ -27,6 +27,7 @@ const props = defineProps({
   card: { type: Object, required: true },
   context: { type: String, default: 'task' },
   busy: { type: Boolean, default: false },
+  suppressPlan: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['action', 'open-details'])
@@ -163,10 +164,10 @@ const terminalSummary = computed(() => clean(
 ))
 
 const verificationTotal = computed(() => verificationItems.value.length)
-const requiresConfirmation = computed(() => props.card.requires_confirmation === true
+const requiresConfirmation = computed(() => !props.suppressPlan && (props.card.requires_confirmation === true
   || (props.card.plan_mode?.requires_confirmation === true
     && !props.card.plan_mode?.accepted_at
-    && !props.card.plan_mode?.confirmed_at))
+    && !props.card.plan_mode?.confirmed_at)))
 const responsibleProjects = computed(() => unique([
   ...asList(props.card.responsible_projects || props.card.responsibleProjects),
 ]).map(item => clean(item, '', 80)).filter(Boolean).slice(0, 4))
@@ -230,6 +231,7 @@ const normalizePlanItem = (item, index) => {
   return { id: String(item?.id || item?.key || `${index}:${text}`), text, completed, active }
 }
 const executionPlan = computed(() => {
+  if (props.suppressPlan) return []
   const plan = props.card.plan_mode || props.card.planMode || props.card.todo_plan || props.card.todoPlan || props.card.execution_plan || props.card.executionPlan || {}
   const raw = asList(plan.steps || plan.items || plan.plan_steps || plan.planSteps || plan.todos)
   const candidates = raw.length ? raw : workItems.value
@@ -242,6 +244,7 @@ const recoveryActions = computed(() => asList(props.card.actions)
   .filter(action => ['resume_interrupted', 'cancel'].includes(action?.kind)))
 const primaryActions = computed(() => asList(props.card.actions)
   .filter(action => actionKinds.has(action?.kind))
+  .filter(action => !props.suppressPlan || !['confirm', 'confirm_plan', 'revise_plan'].includes(action?.kind))
   .filter(action => !recoveryPresentation.value.visible || !['resume_interrupted', 'cancel'].includes(action?.kind))
   .slice(0, needsUser.value ? 2 : 1))
 

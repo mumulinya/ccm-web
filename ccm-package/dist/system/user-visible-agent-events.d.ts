@@ -1,3 +1,4 @@
+import type { CcmInternalPromptBindings } from "../agents/internal-prompt-contract";
 import { type ToolDisplayDetailV1 } from "./tool-display-projection";
 import { type AssistantProgressKind } from "./assistant-progress";
 export declare const USER_VISIBLE_AGENT_EVENT_SCHEMA: "ccm-user-visible-agent-event-v1";
@@ -103,6 +104,7 @@ export type UserVisibleAgentEvent = {
             safeLabel: string;
             contentStored: false;
         };
+        promptBindings?: CcmInternalPromptBindings;
         liveProgress?: {
             phase: "starting" | "running" | "testing" | "building" | "finishing" | "retrying";
             safeSummary: string;

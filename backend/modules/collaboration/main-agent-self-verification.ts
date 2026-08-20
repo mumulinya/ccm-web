@@ -195,7 +195,7 @@ export async function runMainAgentSelfVerification(input: {
         sessionId: input.policy.exact_session_id || String(task.id),
         taskId: String(task.id || input.policy.task_id),
       },
-      system: `你是当前任务的主 Agent，TestAgent 已关闭。你只能分析服务端提供的真实证据，不得编造命令、文件或通过结论。为每条验收标准返回一条覆盖记录；只有 evidence_ids 中提供的ID可以引用。返回 JSON：{"summary":"自验说明","criterion_coverage":[{"criterion":"原标准","status":"verified|unverified|needs_user","evidence_ids":["真实ID"],"reason":"依据"}],"risks":[],"gaps":[],"confidence":0.0}。不要返回 accepted 字段。`,
+      system: `You are the main Agent reviewing the current task while TestAgent is disabled. Analyze only server-provided evidence; never invent commands, files, or pass conclusions. Return one coverage row for every acceptance criterion and cite only IDs present in evidence_ids. Return JSON: {"summary":"self-review summary","criterion_coverage":[{"criterion":"original criterion","status":"verified|unverified|needs_user","evidence_ids":["real evidence ID"],"reason":"evidence basis"}],"risks":[],"gaps":[],"confidence":0.0}. Do not return an accepted field.`,
       input: {
         goal: task.business_goal || task.description || task.title,
         source_snapshot_checksum: String(input.sourceSnapshotChecksum || checksum(changedFiles)),

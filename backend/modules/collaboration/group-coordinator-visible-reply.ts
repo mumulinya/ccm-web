@@ -33,16 +33,13 @@ export function coordinatorShouldFailEmptyVisibleReply(input: {
   parsed?: any;
   priorPlanDraft?: string;
   observationCount?: number;
-  workflowMode?: string;
 } = {}) {
   if (coordinatorUsableReply(input.parsed) || hasPresentedGroupPlan(input.parsed)) return false;
   if (coordinatorChoseClarify(input.parsed)) return false;
-  const mode = String(input.workflowMode || input.parsed?.workflowDecision?.mode || "").toLowerCase();
   return !!(
     String(input.priorPlanDraft || "").trim()
     || Number(input.observationCount || 0) > 0
     || String(input.parsed?.responseType || "").toLowerCase() === "plan"
-    || mode === "plan_task"
   );
 }
 
@@ -79,7 +76,6 @@ export function coordinatorVisibleFallbackContent(input: {
     parsed,
     priorPlanDraft: input.priorPlanDraft,
     observationCount: input.observationCount,
-    workflowMode: input.analysis?.workflowDecision?.mode,
   })) {
     return "";
   }

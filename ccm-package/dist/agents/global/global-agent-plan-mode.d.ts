@@ -14,5 +14,7 @@ export declare function runGlobalAgentPlanModeSelfTest(): {
         readToolOpen: boolean;
         groupSessionWins: boolean;
         projectIdentityResolved: boolean;
+        agentModeKeepsModelPlan: boolean;
+        manualPlanStillPresentsPlan: boolean;
     };
 };

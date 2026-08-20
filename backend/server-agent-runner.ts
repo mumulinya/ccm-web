@@ -1023,9 +1023,7 @@ export function createAgentRunnerRuntime(deps: any) {
           memoryDeliveryMode: options.memoryDeliveryMode === "mcp" ? "mcp" : "prompt",
           memorySnapshotId: options.memorySnapshotId || "",
         })
-        : buildProjectConversationBrief(projectName, options.userMessage || message, {
-          analysis: messageMode === "project_analysis",
-        });
+        : buildProjectConversationBrief(projectName, options.userMessage || message);
     const executionBrief = options.projectSessionContext
       ? `${baseExecutionBrief}\n\n${String(options.projectSessionContext)}`
       : baseExecutionBrief;

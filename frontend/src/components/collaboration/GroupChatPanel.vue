@@ -48,6 +48,7 @@ import { consumeAsideCommand, rewindConversationTurn } from '../../utils/convers
 import { toast } from '../../utils/toast.js'
 import { findActivePrePlanClarification, validatePrePlanClarificationAction } from '../../utils/prePlanClarification.js'
 import { usePresentedPlanConfirmExecute } from '../../composables/usePresentedPlanConfirmExecute.js'
+import { activePlanMessageIndex, projectActiveTaskPlans } from '../../utils/activeTaskPlans.js'
 
 const props = defineProps({
   navigateTo: { type: Object, default: null },
@@ -199,6 +200,12 @@ const groupTaskExecutionActive = computed(() => {
     return !['completed', 'done', 'succeeded', 'failed', 'cancelled', 'canceled', 'reverted'].includes(status)
   })
 })
+const groupPlanOwnedMessageIndexes = computed(() => new Set(
+  projectActiveTaskPlans(groupAgentExecutionEvents.value, { exactSessionId: currentGroupSessionId.value })
+    .map(plan => activePlanMessageIndex(messages.value, plan))
+    .filter(index => index >= 0),
+))
+const groupPlanOwnedByDock = (_message, messageIndex) => groupPlanOwnedMessageIndexes.value.has(messageIndex)
 const rewindGroupMessage = async (message) => {
   try {
     const receipt = await rewindConversationTurn({ scope: 'group', scopeId: currentGroup.value?.id || '', exactSessionId: currentGroupSessionId.value, anchorMessageId: message?.id })

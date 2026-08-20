@@ -19,6 +19,8 @@ const main_agent_turn_1 = require("./main-agent-turn");
 const native_query_messages_1 = require("./native-query-messages");
 const presented_plan_quality_1 = require("./presented-plan-quality");
 const tool_result_storage_1 = require("../tools/tool-result-storage");
+const implementation_plan_1 = require("./implementation-plan");
+const planning_orchestrator_1 = require("./planning-orchestrator");
 exports.NATIVE_CONTROL_TOOL_NAMES = ["ccm_ask_user", "ccm_present_plan", "ccm_dispatch"];
 const CONTROL_TOOL_SET = new Set(exports.NATIVE_CONTROL_TOOL_NAMES);
 function isNativeControlTool(name) {
@@ -28,18 +30,18 @@ function nativeControlToolDefinitions() {
     return [
         {
             name: "ccm_ask_user",
-            description: "向用户提出必须确认的业务澄清，前端会渲染可点选项卡。必须同时给出 question 和 1～3 条 structuredClarificationQuestions（每项含 label 与 options）。不要只输出一段问句就结束。仅当缺口会改变方案、范围或验收时使用；代码和资料可查明的问题应先调用只读工具。",
+            description: "Ask a business clarification that requires user confirmation. The UI renders selectable cards. Provide question and one to three structuredClarificationQuestions with labels and options; do not end with an unstructured question. Use only when the missing answer changes approach, scope, or acceptance; use read-only tools for facts that code or documents can establish.",
             inputSchema: {
                 type: "object",
                 additionalProperties: false,
                 required: ["question"],
                 properties: {
-                    question: { type: "string", description: "给用户看的短引言，不要代替选项卡" },
+                    question: { type: "string", description: "Short user-facing introduction; do not replace the option card." },
                     structuredClarificationQuestions: {
                         type: "array",
                         minItems: 1,
                         maxItems: 3,
-                        description: "选项卡问题；每项需要 label，选择题再给 2～4 个 options",
+                        description: "Option-card questions. Each item needs a label; choice questions also need two to four options.",
                         items: {
                             type: "object",
                             additionalProperties: false,
@@ -66,43 +68,58 @@ function nativeControlToolDefinitions() {
                             },
                         },
                     },
-                    questions: { type: "array", items: { type: "object" }, description: "structuredClarificationQuestions 的别名" },
+                    questions: { type: "array", items: { type: "object" }, description: "Alias for structuredClarificationQuestions." },
                     workflowDecision: { type: "object" },
                 },
             },
         },
         {
             name: "ccm_present_plan",
-            description: "提交只读计划稿供用户确认。用户要求看计划、方案或步骤时必须调用本工具。",
+            description: "Submit a read-only ccm-implementation-plan-v2 for user confirmation when the server-side hybrid planning gate requires it. Never dispatch or edit files while authoring. User-visible strings follow the conversation language; Chinese sessions use natural Simplified Chinese.",
             inputSchema: {
                 type: "object",
                 additionalProperties: false,
                 required: ["plan"],
                 properties: {
-                    reply: { type: "string", description: "给用户看的短引言，不要代替 plan.steps" },
+                    reply: { type: "string", description: "Short user-facing introduction; do not replace plan.steps." },
                     plan: {
                         type: "object",
                         additionalProperties: false,
-                        required: ["goal", "steps"],
+                        required: ["title", "context", "goal", "approach", "scope", "files", "steps", "verification", "risks", "exclusions", "openQuestions"],
                         properties: {
-                            title: { type: "string", description: "短名，对应计划标题" },
-                            goal: { type: "string", description: "关键决策、运转规则和交付顺序；没有 overview 时 UI 用这段" },
-                            overview: { type: "string", description: "可选稍长说明：状态、占用/释放、超时时钟、现有对象或 greenfield。没有则 UI 只用 goal。不要把说明写进 steps" },
+                            schema: { type: "string", enum: ["ccm-implementation-plan-v2"] },
+                            title: { type: "string", description: "Short user-visible plan title" },
+                            context: { type: "string", description: "Why the change is needed, based on evidence" },
+                            goal: { type: "string", description: "Desired user-visible outcome and operational boundary" },
+                            approach: { type: "string", description: "One recommended implementation approach" },
+                            overview: { type: "string", description: "Legacy alias for context/goal" },
+                            files: { type: "array", items: { type: "object" }, description: "Real relative paths with project, reason, and sourceEvidenceIds" },
                             steps: {
                                 type: "array",
                                 minItems: 1,
                                 items: {
                                     type: "object",
                                     additionalProperties: false,
-                                    required: ["title"],
+                                    required: ["id", "title", "objective", "dependsOn", "acceptance"],
                                     properties: {
                                         id: { type: "string" },
-                                        title: { type: "string", description: "一行可演示切片，不要再写要做/结果" },
-                                        description: { type: "string", description: "不要填；说明写在 goal/overview" },
-                                        outcome: { type: "string", description: "不要填；说明写在 goal/overview" },
+                                        title: { type: "string", description: "One demonstrable slice; do not write a generic todo or outcome label." },
+                                        objective: { type: "string", description: "Specific objective for this slice" },
+                                        dependsOn: { type: "array", items: { type: "string" } },
+                                        acceptance: { type: "array", items: { type: "string" } },
+                                        description: { type: "string", description: "Legacy alias for objective" },
+                                        outcome: { type: "string", description: "Legacy alias for acceptance" },
                                     },
                                 },
                             },
+                            verification: { type: "array", items: { type: "object" } },
+                            risks: { type: "array", items: { type: "string" } },
+                            openQuestions: { type: "array", items: { type: "string" } },
+                            revision: { type: "integer", minimum: 1 },
+                            checksum: { type: "string" },
+                            promptVersion: { type: "string" },
+                            outputLanguage: { type: "string" },
+                            contentStored: { type: "boolean", enum: [false] },
                             expectedResults: { type: "array", items: { type: "string" } },
                             exclusions: { type: "array", items: { type: "string" } },
                             scope: { type: "array", items: { type: "string" } },
@@ -114,7 +131,7 @@ function nativeControlToolDefinitions() {
         },
         {
             name: "ccm_dispatch",
-            description: "派发项目 Agent 或创建开发任务。必须给出自包含工作单；未获用户执行授权时不要调用。",
+            description: "Dispatch project Agents or create a development task. Provide self-contained work orders and do not call without execution authorization.",
             inputSchema: {
                 type: "object",
                 additionalProperties: false,
@@ -124,12 +141,12 @@ function nativeControlToolDefinitions() {
                     targets: {
                         type: "array",
                         items: { type: "object" },
-                        description: "按项目的自包含工作单；须覆盖已确认计划卡切片，并写明落实了哪些切片。不要把 TestAgent 放进 targets。",
+                        description: "Self-contained work orders by project. Cover confirmed plan slices and identify each covered slice. Never put TestAgent in targets.",
                     },
                     workflowDecision: { type: "object" },
                     architecturePlan: {
                         type: "object",
-                        description: "dependencySteps 可按项目/依赖排期；不得把已确认卡片重写成前端/后端/测试分工。",
+                        description: "dependencySteps may schedule projects and dependencies; do not rewrite a confirmed plan as frontend/backend/test workstreams.",
                     },
                     coordinationPlan: { type: "object" },
                 },
@@ -141,27 +158,27 @@ function nativeDiscoveryToolDefinitions() {
     return [
         {
             name: "tool_search",
-            description: "按需发现并加载低频只读工具Schema。",
+            description: "Discover and load schemas for infrequent read-only tools on demand.",
             inputSchema: {
                 type: "object",
                 additionalProperties: false,
                 required: ["query"],
                 properties: {
-                    query: { type: "string", description: "工具名称、能力描述或 select:canonicalName" },
+                    query: { type: "string", description: "Tool name, capability description, or select:canonicalName." },
                     max_results: { type: "integer", minimum: 1, maximum: 24 },
                 },
             },
         },
         {
             name: "invoke_skill",
-            description: "加载并调用当前作用域已授权的Skill。",
+            description: "Load and invoke a Skill authorized for the current scope.",
             inputSchema: {
                 type: "object",
                 additionalProperties: false,
                 required: ["name"],
                 properties: {
                     name: { type: "string" },
-                    input: { description: "本轮完整目标或必要上下文" },
+                    input: { description: "Complete goal or necessary context for this turn." },
                 },
             },
         },
@@ -221,20 +238,23 @@ function mapNativeTurnToParsed(turn, controlCalls = []) {
             reply: String(args.friendlyResponse || args.reply || text || ""),
             friendlyResponse: String(args.friendlyResponse || args.reply || text || ""),
             targets: Array.isArray(args.targets) ? args.targets : [],
-            workflowDecision: args.workflowDecision || args.workflow_decision || { mode: "execute_direct", actionRequired: true },
+            workflowDecision: args.workflowDecision || args.workflow_decision || { reason: "主 Agent 已请求派发", actionRequired: true, requiresCodeChanges: true },
             architecturePlan: args.architecturePlan || args.architecture_plan || null,
             coordinationPlan: args.coordinationPlan || args.coordination_plan || null,
         };
     }
     if (plan) {
         const args = plan.arguments || {};
+        const normalizedPlan = args.plan?.schema === "ccm-implementation-plan-v2"
+            ? (0, implementation_plan_1.normalizeImplementationPlanV2)(args.plan, { planId: args.plan?.planId || args.plan?.plan_id })
+            : null;
         return {
             responseType: "plan",
             shouldDelegate: false,
             reply: String(args.reply || text || ""),
             friendlyResponse: String(args.reply || text || ""),
-            plan: args.plan || null,
-            workflowDecision: args.workflowDecision || args.workflow_decision || { mode: "plan_task", actionRequired: false },
+            plan: normalizedPlan || args.plan || null,
+            workflowDecision: args.workflowDecision || args.workflow_decision || { reason: "当前精确会话正在展示计划", actionRequired: false, requiresCodeChanges: false },
         };
     }
     if (ask) {
@@ -254,7 +274,7 @@ function mapNativeTurnToParsed(turn, controlCalls = []) {
                 structuredClarificationQuestions: structuredQuestions,
             },
             workflowDecision: {
-                ...(args.workflowDecision || args.workflow_decision || { mode: "answer", actionRequired: false }),
+                ...(args.workflowDecision || args.workflow_decision || { reason: "需要用户澄清", actionRequired: false, requiresCodeChanges: false }),
                 structuredClarificationQuestions: structuredQuestions,
                 clarificationQuestions: question ? [question] : [],
             },
@@ -266,7 +286,7 @@ function mapNativeTurnToParsed(turn, controlCalls = []) {
         reply: text,
         friendlyResponse: text,
         directResponse: text,
-        workflowDecision: { mode: "answer", actionRequired: false },
+        workflowDecision: { reason: "直接回复", actionRequired: false, requiresCodeChanges: false },
     };
 }
 function mergeUsage(current, next) {
@@ -365,11 +385,43 @@ function persistExecutedToolRows(rows, persistContext) {
         return rows;
     return (0, tool_result_storage_1.persistNativeToolResultRows)(rows, persistContext).rows;
 }
+function nativePlanningIntensityInput(plan, workflowDecision) {
+    const projects = new Set();
+    for (const file of Array.isArray(plan?.files) ? plan.files : [])
+        if (String(file?.project || "").trim())
+            projects.add(String(file.project).trim());
+    return {
+        projectCount: Math.max(1, projects.size),
+        independentModuleCount: workflowDecision?.needsEpicDecomposition === true || workflowDecision?.needs_epic_decomposition === true
+            ? Math.max(2, Array.isArray(workflowDecision?.impactScope || workflowDecision?.impact_scope) ? (workflowDecision.impactScope || workflowDecision.impact_scope).length : 2)
+            : Math.max(1, Array.isArray(plan?.scope) && plan.scope.length > 1 ? plan.scope.length : 1),
+        riskLevel: String(workflowDecision?.riskLevel || workflowDecision?.risk_level || "low"),
+        hasArchitectureOrPublicContractChange: workflowDecision?.needsEpicDecomposition === true
+            || workflowDecision?.needs_epic_decomposition === true
+            || projects.size > 1,
+        scopeUncertain: Array.isArray(plan?.openQuestions) && plan.openQuestions.length > 0,
+    };
+}
+async function independentNativePlanReview(config, plan, evidenceManifest, input) {
+    const options = {
+        messages: [
+            { role: "system", content: (0, planning_orchestrator_1.planningReviewPrompt)(plan, evidenceManifest) },
+            { role: "user", content: "Review this plan independently. Return only the required review JSON." },
+        ],
+        maxTokens: Math.min(4096, Math.max(1200, Number(input.maxTokens || 4096))),
+        retryProfile: "background_auxiliary",
+        signal: input.signal,
+    };
+    return (0, group_orchestrator_llm_client_1.shouldUseAnthropic)(config)
+        ? (0, group_orchestrator_llm_client_1.callAnthropicCompatibleJson)(config, options)
+        : (0, group_orchestrator_llm_client_1.callOpenAiCompatibleJson)(config, options);
+}
 async function runJsonQueryLoop(input) {
     const budget = input.loopBudget || (0, agent_loop_budget_1.resolveAgentLoopBudget)(input.config);
     const executeTools = async (calls, ctx) => (persistExecutedToolRows(await input.executeTools(calls, ctx), input.persistContext));
     let messages = input.messages.slice();
-    const jsonHint = { role: "system", content: "退化路径：只输出一个 JSON 对象，不要 Markdown。格式：{\"responseType\":\"reply|tool_calls|clarify|plan|dispatch\",\"reply\":\"\",\"toolRequests\":[{\"name\":\"\",\"arguments\":{}}],\"workflowDecision\":{}}" };
+    const responseTypes = "reply|tool_calls|clarify|plan|dispatch";
+    const jsonHint = { role: "system", content: "Fallback protocol: return one JSON object, no Markdown. Use responseType=" + responseTypes + ". A plan must contain a ccm-implementation-plan-v2 object; dispatch is allowed only after confirmed plan binding or a server-approved direct path. Format: {\"responseType\":\"reply\",\"reply\":\"\",\"toolRequests\":[{\"name\":\"\",\"arguments\":{}}],\"workflowDecision\":{}}" };
     if (!messages.some(item => String(item.content || "").includes("退化路径：只输出一个 JSON")))
         messages = [jsonHint, ...messages];
     let parsed = { responseType: "reply", reply: "" };
@@ -436,6 +488,44 @@ async function runJsonQueryLoop(input) {
         if (noProgressCount >= budget.noProgressThreshold)
             throw new Error("JSON_QUERY_LOOP_NO_PROGRESS");
     }
+    parsed = (0, conversation_plan_mode_gate_1.applyInteractiveConversationModePolicy)(input.scope, input.planModeEnabled === true, parsed);
+    if (parsed?.responseType === "plan" && parsed?.plan && typeof parsed.plan === "object") {
+        const evidenceManifest = (0, planning_orchestrator_1.planningEvidenceManifestFromToolResults)(toolResults);
+        const normalized = (0, implementation_plan_1.normalizeImplementationPlanV2)({ ...parsed.plan, sourceManifestChecksum: evidenceManifest.checksum }, { planId: parsed.plan.planId || parsed.plan.plan_id });
+        if (!normalized) {
+            const error = new Error("计划结构无效，无法进入复核");
+            error.code = "CCM_PLAN_STRUCTURE_INVALID";
+            throw error;
+        }
+        const planningSession = (0, planning_orchestrator_1.openPlanningSession)({
+            scope: input.scope,
+            scopeId: input.scopeId,
+            exactSessionId: input.exactSessionId,
+            planId: normalized.planId || `${input.scope}:${input.exactSessionId}`,
+            sourceManifestChecksum: evidenceManifest.checksum,
+            ...nativePlanningIntensityInput(normalized, parsed.workflowDecision),
+        });
+        const limits = (0, planning_orchestrator_1.planningAgentLimits)(planningSession.intensity);
+        const reviewer = limits.independentReview ? await independentNativePlanReview(input.config, normalized, evidenceManifest, input) : null;
+        const receipt = (0, planning_orchestrator_1.buildPlanReviewReceipt)({ plan: normalized, evidenceManifest, reviewer });
+        (0, planning_orchestrator_1.updatePlanningSession)(planningSession, {
+            phase: receipt.verdict === "passed" ? "awaiting_user" : "invalidated",
+            plan: normalized,
+            planChecksum: normalized.checksum,
+            sourceManifestChecksum: evidenceManifest.checksum,
+            evidenceManifest,
+            evidenceManifestChecksum: evidenceManifest.checksum,
+            reviewReceipt: receipt,
+            reviewReceiptChecksum: receipt.checksum,
+        });
+        if (receipt.verdict !== "passed") {
+            const error = new Error(`计划复核未通过：${receipt.issues.slice(0, 6).map(issue => issue.message).join("；")}`);
+            error.code = "CCM_PLAN_REVIEW_BLOCKED";
+            error.reviewReceipt = receipt;
+            throw error;
+        }
+        parsed.plan = normalized;
+    }
     parsed = stampPresentedPlanQuality(parsed, false);
     const decision = (0, main_agent_turn_1.normalizeMainAgentTurnDecision)({
         scope: input.scope,
@@ -474,6 +564,20 @@ async function runNativeQueryLoop(input) {
     const executeTools = async (calls, ctx) => (persistExecutedToolRows(await input.executeTools(calls, ctx), input.persistContext));
     const callTurn = input.callTurn || group_orchestrator_llm_client_1.callNativeAgentTurn;
     let messages = input.messages.slice();
+    let planningSession = input.planModeEnabled === true
+        ? (0, planning_orchestrator_1.openPlanningSession)({
+            scope: input.scope,
+            scopeId: input.scopeId,
+            exactSessionId: input.exactSessionId,
+            planId: `${input.scope}:${input.scopeId}:${input.exactSessionId}`,
+            phase: "exploring",
+        })
+        : null;
+    if (planningSession) {
+        const cadence = (0, planning_orchestrator_1.planningPromptForTurn)(planningSession.promptTurn);
+        messages = [{ role: "system", content: cadence.prompt }, ...messages];
+        input.onPlanningPhase?.({ phase: "exploring", intensity: planningSession.intensity });
+    }
     let parsed = { responseType: "reply", reply: "" };
     let lastTurn = { text: "", toolCalls: [], toolReferences: [], stopReason: "", usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0, reported: false } };
     const toolResults = [];
@@ -491,6 +595,78 @@ async function runNativeQueryLoop(input) {
     let planRepairCount = 0;
     const isReadOnly = input.isReadOnly || ((call) => !isNativeControlTool(call.name) && call.name !== "invoke_skill" && call.name !== "tool_search");
     const applyTranscript = (next) => input.compactTranscript ? input.compactTranscript(next) : next;
+    const availableTools = () => {
+        const tools = input.getTools?.() || input.tools;
+        // The planner is available in every scope. The model and the server-side
+        // hybrid gate decide whether a plan is warranted; hiding it by UI mode
+        // made complex work jump straight to dispatch.
+        return tools;
+    };
+    const assessPresentedPlan = async (planCall) => {
+        const evidenceManifest = (0, planning_orchestrator_1.planningEvidenceManifestFromToolResults)(toolResults);
+        if (planningSession) {
+            planningSession = (0, planning_orchestrator_1.openPlanningSession)({
+                scope: input.scope,
+                scopeId: input.scopeId,
+                exactSessionId: input.exactSessionId,
+                planId: planningSession.planId,
+                sourceManifestChecksum: evidenceManifest.checksum,
+                phase: "drafting",
+                previousIntensity: planningSession.intensity,
+            });
+        }
+        const rawPlan = planCall.arguments?.plan;
+        let plan = (0, implementation_plan_1.normalizeImplementationPlanV2)({ ...rawPlan, sourceManifestChecksum: evidenceManifest.checksum }, {
+            planId: rawPlan?.planId || rawPlan?.plan_id || planningSession?.planId,
+            revision: planningSession?.revision || rawPlan?.revision || 1,
+        });
+        if (!plan) {
+            const error = new Error("计划结构无效，无法进入复核");
+            error.code = "CCM_PLAN_STRUCTURE_INVALID";
+            throw error;
+        }
+        if (!planningSession) {
+            planningSession = (0, planning_orchestrator_1.openPlanningSession)({
+                scope: input.scope,
+                scopeId: input.scopeId,
+                exactSessionId: input.exactSessionId,
+                planId: plan.planId,
+                sourceManifestChecksum: evidenceManifest.checksum,
+                ...nativePlanningIntensityInput(plan, planCall.arguments?.workflowDecision || planCall.arguments?.workflow_decision),
+            });
+        }
+        planningSession = (0, planning_orchestrator_1.updatePlanningSession)(planningSession, {
+            phase: "reviewing",
+            plan,
+            planChecksum: plan.checksum,
+            sourceManifestChecksum: evidenceManifest.checksum,
+            evidenceManifest,
+            evidenceManifestChecksum: evidenceManifest.checksum,
+        });
+        input.onPlanningPhase?.({ phase: "drafting", intensity: planningSession.intensity, evidenceCount: evidenceManifest.entries.length });
+        input.onPlanningPhase?.({ phase: "reviewing", intensity: planningSession.intensity, evidenceCount: evidenceManifest.entries.length });
+        const limits = (0, planning_orchestrator_1.planningAgentLimits)(planningSession.intensity);
+        let reviewer = null;
+        if (limits.independentReview)
+            reviewer = await independentNativePlanReview(input.config, plan, evidenceManifest, input);
+        const receipt = (0, planning_orchestrator_1.buildPlanReviewReceipt)({ plan, evidenceManifest, reviewer });
+        const passed = receipt.verdict === "passed";
+        planningSession = (0, planning_orchestrator_1.updatePlanningSession)(planningSession, {
+            phase: passed ? "awaiting_user" : planRepairCount > 0 ? "invalidated" : "repairing",
+            plan,
+            planChecksum: plan.checksum,
+            reviewReceipt: receipt,
+            reviewReceiptChecksum: receipt.checksum,
+        });
+        input.onPlanningPhase?.({
+            phase: passed ? "awaiting_user" : planRepairCount > 0 ? "invalidated" : "repairing",
+            intensity: planningSession.intensity,
+            evidenceCount: evidenceManifest.entries.length,
+            issueCount: receipt.issues.length,
+        });
+        planCall.arguments = { ...(planCall.arguments || {}), plan };
+        return { plan, receipt, passed };
+    };
     try {
         while (true) {
             const round = toolRoundCount;
@@ -514,7 +690,7 @@ async function runNativeQueryLoop(input) {
             try {
                 turn = await callTurn(input.config, {
                     messages,
-                    nativeTools: input.getTools?.() || input.tools,
+                    nativeTools: availableTools(),
                     nativeToolReference: input.nativeToolReference,
                     nativeToolsRequired: true,
                     maxTokens: input.maxTokens,
@@ -564,15 +740,27 @@ async function runNativeQueryLoop(input) {
                     }).parsed);
                 }
                 const planCall = presentPlanControlCall(controlCalls);
-                if (planCall && (0, presented_plan_quality_1.shouldRepairPresentedPlan)(parsed, planRepairCount > 0)) {
+                const planningReview = planCall ? await assessPresentedPlan(planCall) : null;
+                parsed = planCall ? mergeNativeTurnParsed(parsed, mapNativeTurnToParsed(turn, controlCalls)) : parsed;
+                if (planCall && (!planningReview?.passed || (!planningReview && (0, presented_plan_quality_1.shouldRepairPresentedPlan)(parsed, planRepairCount > 0)))) {
+                    if (planRepairCount > 0) {
+                        const error = new Error(`计划复核仍未通过：${planningReview?.receipt.issues.slice(0, 6).map(issue => issue.message).join("；") || "质量门禁未通过"}`);
+                        error.code = "CCM_PLAN_REVIEW_BLOCKED";
+                        error.reviewReceipt = planningReview?.receipt;
+                        throw error;
+                    }
                     planRepairCount += 1;
                     const quality = (0, presented_plan_quality_1.evaluatePresentedPlanQuality)(parsed.plan);
-                    const repairResult = (0, presented_plan_quality_1.buildPresentedPlanQualityToolResult)(planCall.id, quality);
+                    const repairResult = planningReview && !planningReview.passed
+                        ? { callId: planCall.id, name: planCall.name, ok: false, error: "CCM_PLAN_REVIEW_REPAIR_REQUIRED", output: planningReview.receipt }
+                        : (0, presented_plan_quality_1.buildPresentedPlanQualityToolResult)(planCall.id, quality);
                     const controlResults = controlCalls.map(item => item.name === "ccm_present_plan"
                         ? repairResult
                         : { callId: item.id, name: item.name, ok: true, output: { recorded: true, responseType: parsed.responseType } });
                     toolResults.push(repairResult);
                     messages = applyTranscript((0, native_query_messages_1.appendNativeTurnTranscript)(messages, turn, controlResults, family));
+                    if (planningSession)
+                        messages = [{ role: "system", content: (0, planning_orchestrator_1.planningPromptForTurn)(planningSession.promptTurn).prompt }, ...messages];
                     toolRoundCount += 1;
                     continue;
                 }
@@ -654,10 +842,11 @@ async function runNativeQueryLoop(input) {
             toolCallCount += executedRows.filter(row => row.name !== "loop_control").length;
             segmentToolCalls += executedRows.filter(row => row.name !== "loop_control").length;
             const planCall = presentPlanControlCall(controlCalls);
-            const repairing = !!(planCall && (0, presented_plan_quality_1.shouldRepairPresentedPlan)({
+            const planningReview = planCall ? await assessPresentedPlan(planCall) : null;
+            const repairing = !!(planCall && (!planningReview?.passed || (!planningReview && (0, presented_plan_quality_1.shouldRepairPresentedPlan)({
                 responseType: "plan",
                 plan: planCall.arguments?.plan,
-            }, planRepairCount > 0));
+            }, planRepairCount > 0))));
             let controlResults = controlCalls.map(item => ({
                 callId: item.id,
                 name: item.name,
@@ -665,15 +854,25 @@ async function runNativeQueryLoop(input) {
                 output: { deferred: "control_after_tools" },
             }));
             if (repairing && planCall) {
+                if (planRepairCount > 0) {
+                    const error = new Error(`计划复核仍未通过：${planningReview?.receipt.issues.slice(0, 6).map(issue => issue.message).join("；") || "质量门禁未通过"}`);
+                    error.code = "CCM_PLAN_REVIEW_BLOCKED";
+                    error.reviewReceipt = planningReview?.receipt;
+                    throw error;
+                }
                 planRepairCount += 1;
                 const quality = (0, presented_plan_quality_1.evaluatePresentedPlanQuality)(planCall.arguments?.plan);
-                const repairResult = (0, presented_plan_quality_1.buildPresentedPlanQualityToolResult)(planCall.id, quality);
+                const repairResult = planningReview && !planningReview.passed
+                    ? { callId: planCall.id, name: planCall.name, ok: false, error: "CCM_PLAN_REVIEW_REPAIR_REQUIRED", output: planningReview.receipt }
+                    : (0, presented_plan_quality_1.buildPresentedPlanQualityToolResult)(planCall.id, quality);
                 toolResults.push(repairResult);
                 controlResults = controlCalls.map(item => item.name === "ccm_present_plan"
                     ? repairResult
                     : { callId: item.id, name: item.name, ok: true, output: { deferred: "control_after_tools" } });
             }
             messages = applyTranscript((0, native_query_messages_1.appendNativeTurnTranscript)(messages, turn, [...executedRows, ...controlResults], family));
+            if (repairing && planningSession)
+                messages = [{ role: "system", content: (0, planning_orchestrator_1.planningPromptForTurn)(planningSession.promptTurn).prompt }, ...messages];
             if (executedRows.some(row => row.ok === true))
                 noProgressCount = 0;
             else
@@ -723,6 +922,7 @@ async function runNativeQueryLoop(input) {
         }
         throw error;
     }
+    parsed = (0, conversation_plan_mode_gate_1.applyInteractiveConversationModePolicy)(input.scope, input.planModeEnabled === true, parsed);
     parsed = stampPresentedPlanQuality(parsed, planRepairCount > 0);
     const decision = (0, main_agent_turn_1.normalizeMainAgentTurnDecision)({
         scope: input.scope,
@@ -772,7 +972,7 @@ async function runNativeQueryLoopSelfTest() {
     let turnIndex = 0;
     const result = await runNativeQueryLoop({
         config: { providerNativeToolsMode: "auto", forceNativeQueryLoop: true },
-        messages: [{ role: "system", content: "你是主 Agent" }, { role: "user", content: "README 说了什么？" }],
+        messages: [{ role: "system", content: "You are the main Agent. Answer in the user's conversation language and use tools only when needed." }, { role: "user", content: "What does the README say?" }],
         tools: [{ name: "read_file", description: "读取文件", inputSchema: { type: "object", properties: { path: { type: "string" } } } }],
         scope: "group",
         scopeId: "g1",
@@ -888,10 +1088,26 @@ async function runNativeQueryLoopSelfTest() {
     checks.keepClarifyAcrossTextFollowup = keptClarify.responseType === "clarify" && keptClarify.dispatchPolicy?.action === "ask_user";
     const badPlan = { title: "短", goal: "太短", steps: [{ title: "占住资源" }] };
     const goodPlan = {
+        schema: "ccm-implementation-plan-v2",
         title: "预约履约",
+        context: "现有预约流程缺少资源占用、核销和超时释放的一致边界，需要在不改变线下库存操作的前提下补齐履约状态转换。",
         goal: "到店履约时先占住资源，核销后改状态，超时从下单时钟释放并挂到现有预约单；没有现成域就按 greenfield 新建履约对象，验收以可演示切片为准。",
-        steps: [{ title: "占住资源" }, { title: "核销改状态" }, { title: "超时释放" }],
+        approach: "复用现有预约单作为履约聚合入口，依次实现占用、核销状态转换和按下单时钟释放，使用可观察状态与现有验证入口验收。",
+        scope: ["预约履约"],
+        files: [],
+        steps: [
+            { id: "hold", title: "占住资源", objective: "预约创建后占用对应资源", dependsOn: [], acceptance: ["预约创建后资源显示为已占用"] },
+            { id: "redeem", title: "核销改状态", objective: "到店核销后更新履约状态", dependsOn: ["hold"], acceptance: ["核销后预约显示为已履约"] },
+            { id: "timeout", title: "超时释放", objective: "按下单时钟释放超时占用", dependsOn: ["hold"], acceptance: ["超过约定时间后资源恢复可用"] },
+        ],
+        verification: [
+            { expected: "预约创建后资源显示为已占用", acceptanceCriteria: ["预约创建后资源显示为已占用"] },
+            { expected: "核销后预约显示为已履约", acceptanceCriteria: ["核销后预约显示为已履约"] },
+            { expected: "超过约定时间后资源恢复可用", acceptanceCriteria: ["超过约定时间后资源恢复可用"] },
+        ],
+        risks: ["现有预约状态需要保持兼容"],
         exclusions: ["线下手工改库存"],
+        openQuestions: [],
     };
     const presentTurn = (id, plan) => ({
         text: "计划已经整理完成。",
@@ -915,21 +1131,23 @@ async function runNativeQueryLoopSelfTest() {
         callTurn: async () => [presentTurn("p1", badPlan), presentTurn("p2", goodPlan)][Math.min(repairIndex++, 1)],
     });
     checks.planQualityRepairsOnce = repaired.modelCallCount === 2
-        && repaired.toolResults.some(row => row.error === "PRESENTED_PLAN_QUALITY")
+        && repaired.toolResults.some(row => row.error === "CCM_PLAN_REVIEW_REPAIR_REQUIRED")
         && repaired.parsed?.plan?.steps?.length === 3
         && repaired.parsed?.planQuality?.ok === true
         && repaired.parsed?.planQuality?.repaired === true;
     let degradeIndex = 0;
-    const degraded = await runNativeQueryLoop({
-        ...loopInput,
-        exactSessionId: "gcs_plan_degraded",
-        callTurn: async () => presentTurn(degradeIndex++ === 0 ? "d1" : "d2", badPlan),
-    });
-    checks.planQualityAcceptsDegradedAfterRepair = degraded.modelCallCount === 2
-        && degraded.toolResults.some(row => row.error === "PRESENTED_PLAN_QUALITY")
-        && degraded.parsed?.planQuality?.ok === false
-        && degraded.parsed?.planQuality?.repaired === true
-        && Array.isArray(degraded.parsed?.plan?.steps);
+    let degradedBlocked = false;
+    try {
+        await runNativeQueryLoop({
+            ...loopInput,
+            exactSessionId: "gcs_plan_degraded",
+            callTurn: async () => presentTurn(degradeIndex++ === 0 ? "d1" : "d2", badPlan),
+        });
+    }
+    catch (error) {
+        degradedBlocked = error?.code === "CCM_PLAN_REVIEW_BLOCKED";
+    }
+    checks.planQualityAcceptsDegradedAfterRepair = degradedBlocked;
     const passed = await runNativeQueryLoop({
         ...loopInput,
         exactSessionId: "gcs_plan_ok",

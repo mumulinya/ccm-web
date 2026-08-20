@@ -14,9 +14,9 @@ const classifier = runProjectChatIntentSelfTest()
 
 assert.equal(classifier.success, true)
 assert.throws(() => classifyProjectChatIntent('你是什么模型'), /同步关键词项目意图分类已停用/)
-assert.equal(classifier.checks.find(item => item.message === '你是什么模型')?.actual, 'conversation')
-assert.equal(classifier.checks.find(item => item.message === '这个项目是什么架构？')?.actual, 'project_analysis')
-assert.equal(classifier.checks.find(item => item.message === '修改登录接口并运行测试')?.actual, 'task')
+assert.equal(classifier.checks.find(item => item.message === '你是什么模型')?.actual, false)
+assert.equal(classifier.checks.find(item => item.message === '这个项目是什么架构？')?.actual, false)
+assert.equal(classifier.checks.find(item => item.message === '修改登录接口并运行测试')?.actual, true)
 assert.match(frontendUtility, /shouldShowProjectTaskCard/)
 assert.match(projectManager, /data\.type === 'presentation'/)
 assert.match(projectManager, /agentMsg\.messageMode = mode/)
@@ -25,9 +25,9 @@ assert.match(projectMessage, /isTaskMessage/)
 console.log(JSON.stringify({
   success: true,
   checks: [
-    'ordinary question uses conversation presentation',
-    'read-only project question uses project_analysis presentation',
-    'explicit implementation request uses task presentation',
+    'ordinary question stays outside task presentation',
+    'read-only project question is inferred from tool events',
+    'explicit implementation request enters task presentation',
     'synchronous keyword classifier fails closed',
     'project UI consumes presentation mode and hides task-only details',
   ],

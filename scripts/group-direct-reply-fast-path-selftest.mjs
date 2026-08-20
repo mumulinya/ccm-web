@@ -31,11 +31,9 @@ const orchestrator = dist("modules", "collaboration", "group-orchestrator-routin
 const groupLlm = dist("modules", "collaboration", "group-orchestrator-llm.js");
 
 const helloWorkflow = {
-  schema: "ccm-model-workflow-decision-v1",
-  mode: "answer",
+  schema: "ccm-model-workflow-decision-v2",
   reason: "普通问候可直接回答",
   confidence: 1,
-  needsPlanning: false,
   needsEpicDecomposition: false,
   actionRequired: false,
   continuationKind: "new_task",
@@ -154,7 +152,7 @@ try {
     groupSessionId: "selftest-group-session",
   });
   assert.equal(uncachedGroupProviderCalls, 1, "没有预置 workflowDecision 时必须进入群聊首轮模型调用");
-  assert.equal(uncachedGroupResult.workflowDecision?.mode, "answer");
+  assert.equal(uncachedGroupResult.workflowDecision?.actionRequired, false);
   assert.match(uncachedGroupResult.content, /多 Agent 协作开发控制台/);
 } finally {
   globalThis.fetch = originalFetch;
@@ -180,7 +178,7 @@ assert.doesNotMatch(globalChat, /searchAgentKnowledge\s*\(input\.message/);
 assert.doesNotMatch(globalChat, /global_final_reply/);
 
 const groupIntakeSource = source("backend/modules/collaboration/collaboration-task-intake.ts");
-const groupClassifier = groupIntakeSource.slice(groupIntakeSource.indexOf("export async function classifyGroupProjectTaskIntentWithAgent"), groupIntakeSource.indexOf("export function shouldUseProjectAnalysisMode"));
+const groupClassifier = groupIntakeSource.slice(groupIntakeSource.indexOf("export async function classifyGroupProjectTaskIntentWithAgent"), groupIntakeSource.indexOf("export function shouldLoadReadOnlyProjectContext"));
 assert.match(groupClassifier, /runGroupOrchestrator\s*\(/);
 assert.doesNotMatch(groupClassifier, /decideWorkflowWithModel\s*\(/);
 assert.match(groupClassifier, /context:\s*input\.context/);

@@ -1793,7 +1793,7 @@ const GROUP_MAIN_AGENT_ACTIONS = [
         label: "读取项目代码快照",
         category: "context",
         risk: "read",
-        permissionMode: "auto_read_in_project_analysis",
+        permissionMode: "auto_read_in_conversation",
         userVisible: false,
         backend: ["buildGroupProjectAnalysisContext", "buildProjectCodeReadOnlySnapshot"],
         evidence: ["safe_file_snippets", "project_memory", "work_dir"],

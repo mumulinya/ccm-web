@@ -86,7 +86,7 @@ function buildGlobalWriteAuthorizationReceipt(input) {
         && roleCanWrite
         && targetGrounded;
     const toolFamily = canGrant
-        ? (decision.mode === "plan_task" || decision.mode === "decompose_epic" ? "dispatch" : "direct")
+        ? (decision.needsEpicDecomposition === true ? "dispatch" : "direct")
         : "none";
     const base = {
         schema: "ccm-global-write-authorization-receipt-v2",

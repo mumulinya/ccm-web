@@ -526,15 +526,16 @@ function runCollaborationUxSelfTest() {
     const gatewayFallbackBlocked = (0, collaboration_1.normalizeGroupAgentGatewayTaskIntent)((0, collaboration_1.classifyGroupProjectTaskIntent)("帮我给项目A新增支付接口并改前端页面"), { runtime: "coded-fallback", dispatchPolicy: { action: "delegate", reason: "规则猜测需要派发" }, assignments: [{ project: "collab-web" }] }, "project_task");
     const gatewayLlmDelegates = (0, collaboration_1.normalizeGroupAgentGatewayTaskIntent)((0, collaboration_1.classifyGroupProjectTaskIntent)("帮我给项目A新增支付接口并改前端页面"), {
         runtime: "llm-api",
-        workflowDecision: { mode: "execute_direct", reason: "用户要求开发任务", confidence: 0.95, actionRequired: true, needsPlanning: false, needsEpicDecomposition: false },
+        workflowDecision: { schema: "ccm-model-workflow-decision-v2", reason: "用户要求开发任务", confidence: 0.95, actionRequired: true, requiresCodeChanges: true, needsEpicDecomposition: false },
         dispatchPolicy: { action: "delegate", reason: "用户要求开发任务" },
         assignments: [{ project: "collab-web" }],
     }, "project_task");
     const gatewayLlmDirectAnswer = (0, collaboration_1.normalizeGroupAgentGatewayTaskIntent)((0, collaboration_1.classifyGroupProjectTaskIntent)("这个项目架构是什么"), {
         runtime: "llm-api",
-        workflowDecision: { mode: "project_analysis", reason: "只读项目分析即可", confidence: 0.95, actionRequired: false, needsPlanning: false, needsEpicDecomposition: false },
+        workflowDecision: { schema: "ccm-model-workflow-decision-v2", reason: "需要读取项目后回答", confidence: 0.95, actionRequired: false, requiresCodeChanges: false, needsEpicDecomposition: false },
         dispatchPolicy: { action: "direct_answer", reason: "只读项目分析即可" },
         assignments: [],
+        mainAgentToolUsage: { results: [{ name: "read_file", ok: true }] },
     }, "project_task");
     const globalMissionHandoff = (0, collaboration_1.buildGlobalMissionTargetHandoff)({
         parent: { id: "gm-selftest" },

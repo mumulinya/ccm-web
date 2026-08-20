@@ -151,28 +151,28 @@ export function openScopedToolCapability(token: string) {
 }
 
 const rawDefinitions: Array<Omit<WorkspaceReadonlyToolDefinitionV2, "canonicalName" | "server" | "annotations" | "checksum">> = [
-  { name: "list_directory", loadPolicy: "base", description: "列出授权项目目录中的文件和子目录，结果分页返回。默认最多返回100项；未列完时再分页。当前作用域只有一个授权项目时可省略 project_id。", inputSchema: { type: "object", properties: { project_id: { type: "string", description: "当前作用域只有一个授权项目时可省略；多个项目时必须传入精确项目名。" }, path: { type: "string" }, cursor: { type: "string" }, limit: { type: "integer", minimum: 1, maximum: 100 } } } },
-  { name: "glob_files", loadPolicy: "base", description: "按Glob模式查找授权项目内文件，结果按修改时间排序。默认最多返回100个匹配；未读完时再分页。", inputSchema: { type: "object", required: ["pattern"], properties: { project_id: { type: "string" }, pattern: { type: "string" }, cursor: { type: "string" }, limit: { type: "integer", minimum: 1, maximum: 100 } } } },
-  { name: "grep_text", loadPolicy: "base", description: "使用ripgrep在授权项目源码中检索文本或正则表达式。未指定数量时默认返回250条；显式传0表示不限制。", inputSchema: { type: "object", required: ["pattern"], properties: { project_id: { type: "string" }, pattern: { type: "string" }, glob: { type: "string" }, mode: { enum: ["content", "files_with_matches", "count"] }, multiline: { type: "boolean" }, cursor: { type: "string" }, limit: { type: "integer", minimum: 1, maximum: 500 } } } },
-  { name: "read_file", loadPolicy: "base", description: "读取授权项目内文件。默认从文件开头最多读取2000行；仅当文件过大无法一次读完时才提供offset和limit。当前上下文已持有相同内容时返回未变化。", inputSchema: { type: "object", required: ["path"], properties: { project_id: { type: "string" }, path: { type: "string" }, offset: { type: "integer", minimum: 1 }, limit: { type: "integer", minimum: 1, maximum: 2000 }, expected_checksum: { type: "string" } } } },
-  { name: "inspect_notebook", loadPolicy: "search", description: "结构化检查Notebook元数据、单元格身份、源码校验值和输出类型；不返回单元格正文。", inputSchema: { type: "object", required: ["path"], properties: { project_id: { type: "string" }, path: { type: "string" }, cursor: { type: "string" }, limit: { type: "integer", minimum: 1, maximum: 200 } } } },
-  { name: "web_fetch", loadPolicy: "search", description: "安全读取公开HTTPS网页、文本、JSON或PDF，并按 prompt 用模型摘要；逐次校验DNS和重定向并阻止私网、凭据URL和超限响应。prompt 必填，说明想从页面得到什么。未配置统一大模型时明确失败，不会静默返回整页原文。", inputSchema: { type: "object", required: ["url", "prompt"], properties: { project_id: { type: "string" }, url: { type: "string" }, prompt: { type: "string", description: "想从该页面得到什么" } } } },
-  ...(isWebSearchAvailable() ? [{ name: "web_search", loadPolicy: "search" as const, description: "通过已配置的真实搜索Provider检索公开Web；未配置真实后端时本工具不会注册。", inputSchema: { type: "object", required: ["query"], properties: { project_id: { type: "string" }, query: { type: "string" }, count: { type: "integer", minimum: 1, maximum: 20 } } } }] : []),
-  { name: "find_definition", loadPolicy: "search", description: "通过已配置语言服务查找符号定义；没有可靠语言服务时明确返回不可用。", inputSchema: { type: "object", required: ["symbol"], properties: { project_id: { type: "string" }, symbol: { type: "string" }, path: { type: "string" } } } },
-  { name: "find_references", loadPolicy: "search", description: "通过已配置语言服务查找符号引用；没有可靠语言服务时明确返回不可用。", inputSchema: { type: "object", required: ["symbol"], properties: { project_id: { type: "string" }, symbol: { type: "string" }, path: { type: "string" } } } },
-  { name: "workspace_symbols", loadPolicy: "search", description: "通过项目语义索引查询工作区符号，返回位置、类型、索引代次和代码状态，不返回源码正文。多语言项目可指定language_server_id。", inputSchema: { type: "object", properties: { project_id: { type: "string" }, query: { type: "string" }, language_server_id: { type: "string" }, language: { type: "string" }, cursor: { type: "string" }, limit: { type: "integer", minimum: 1, maximum: 500 } } } },
-  { name: "document_symbols", loadPolicy: "search", description: "通过语言服务和增量索引查询指定源码文件中的符号。", inputSchema: { type: "object", required: ["path"], properties: { project_id: { type: "string" }, path: { type: "string" }, query: { type: "string" }, cursor: { type: "string" }, limit: { type: "integer", minimum: 1, maximum: 500 } } } },
-  { name: "find_implementations", loadPolicy: "search", description: "通过语言服务定位接口、抽象成员或符号的真实实现。", inputSchema: { type: "object", required: ["symbol"], properties: { project_id: { type: "string" }, symbol: { type: "string" }, path: { type: "string" }, cursor: { type: "string" }, limit: { type: "integer", minimum: 1, maximum: 500 } } } },
-  { name: "find_type_definition", loadPolicy: "search", description: "通过语言服务定位符号的类型定义。", inputSchema: { type: "object", required: ["symbol"], properties: { project_id: { type: "string" }, symbol: { type: "string" }, path: { type: "string" }, cursor: { type: "string" }, limit: { type: "integer", minimum: 1, maximum: 500 } } } },
-  { name: "find_incoming_calls", loadPolicy: "search", description: "通过语言服务调用层级查询调用当前符号的函数或方法。", inputSchema: { type: "object", required: ["symbol"], properties: { project_id: { type: "string" }, symbol: { type: "string" }, path: { type: "string" }, cursor: { type: "string" }, limit: { type: "integer", minimum: 1, maximum: 500 } } } },
-  { name: "find_outgoing_calls", loadPolicy: "search", description: "通过语言服务调用层级查询当前符号调用的函数或方法。", inputSchema: { type: "object", required: ["symbol"], properties: { project_id: { type: "string" }, symbol: { type: "string" }, path: { type: "string" }, cursor: { type: "string" }, limit: { type: "integer", minimum: 1, maximum: 500 } } } },
-  { name: "read_code_diagnostics", loadPolicy: "search", description: "读取绑定索引代次与RepoStateIdentity的LSP诊断；源码变化后旧诊断不能作为强验收证据。", inputSchema: { type: "object", properties: { project_id: { type: "string" }, path: { type: "string" }, cursor: { type: "string" }, limit: { type: "integer", minimum: 1, maximum: 500 } } } },
-  { name: "read_project_config", loadPolicy: "search", description: "读取授权项目的标准构建和运行配置文件。", inputSchema: { type: "object", properties: { project_id: { type: "string" }, cursor: { type: "string" }, limit: { type: "integer", minimum: 1, maximum: 50 } } } },
-  { name: "read_git_status", loadPolicy: "search", description: "读取授权项目Git工作区状态。", inputSchema: { type: "object", properties: { project_id: { type: "string" } } } },
-  { name: "read_git_diff", loadPolicy: "search", description: "读取授权项目Git差异，支持指定文件和暂存区。", inputSchema: { type: "object", properties: { project_id: { type: "string" }, path: { type: "string" }, staged: { type: "boolean" }, cursor: { type: "string" }, limit: { type: "integer", minimum: 1, maximum: 2000 } } } },
-  { name: "read_git_history", loadPolicy: "search", description: "读取授权项目最近Git提交历史。", inputSchema: { type: "object", properties: { project_id: { type: "string" }, limit: { type: "integer", minimum: 1, maximum: 100 } } } },
-  { name: "read_runtime_status", loadPolicy: "search", description: "读取授权项目的运行配置、进程和构建状态。", inputSchema: { type: "object", properties: { project_id: { type: "string" } } } },
-  { name: "read_runtime_logs", loadPolicy: "search", description: "读取授权项目精确运行配置的运行或构建日志。", inputSchema: { type: "object", required: ["profile_id"], properties: { project_id: { type: "string" }, profile_id: { type: "string" }, kind: { enum: ["run", "build"] }, lines: { type: "integer", minimum: 1, maximum: 2000 } } } },
+  { name: "list_directory", loadPolicy: "base", description: "List files and subdirectories in an authorized project with pagination. Return at most 100 items by default and paginate until complete. project_id may be omitted when the scope has exactly one authorized project.", inputSchema: { type: "object", properties: { project_id: { type: "string", description: "Omit only when exactly one project is authorized; pass the exact project name for multiple projects." }, path: { type: "string" }, cursor: { type: "string" }, limit: { type: "integer", minimum: 1, maximum: 100 } } } },
+  { name: "glob_files", loadPolicy: "base", description: "Find files in an authorized project by Glob pattern, sorted by modification time. Return at most 100 matches by default and paginate when incomplete.", inputSchema: { type: "object", required: ["pattern"], properties: { project_id: { type: "string" }, pattern: { type: "string" }, cursor: { type: "string" }, limit: { type: "integer", minimum: 1, maximum: 100 } } } },
+  { name: "grep_text", loadPolicy: "base", description: "Search authorized project source with ripgrep text or regular expressions. Return at most 250 matches unless a limit is given; an explicit limit of 0 means unbounded.", inputSchema: { type: "object", required: ["pattern"], properties: { project_id: { type: "string" }, pattern: { type: "string" }, glob: { type: "string" }, mode: { enum: ["content", "files_with_matches", "count"] }, multiline: { type: "boolean" }, cursor: { type: "string" }, limit: { type: "integer", minimum: 1, maximum: 500 } } } },
+  { name: "read_file", loadPolicy: "base", description: "Read a file inside an authorized project. Read up to 2000 lines from the beginning by default; provide offset and limit only when the file is too large for one read. Return unchanged when the same content is already held in context.", inputSchema: { type: "object", required: ["path"], properties: { project_id: { type: "string" }, path: { type: "string" }, offset: { type: "integer", minimum: 1 }, limit: { type: "integer", minimum: 1, maximum: 2000 }, expected_checksum: { type: "string" } } } },
+  { name: "inspect_notebook", loadPolicy: "search", description: "Inspect notebook metadata, cell identities, source checksums, and output types structurally; never return cell bodies.", inputSchema: { type: "object", required: ["path"], properties: { project_id: { type: "string" }, path: { type: "string" }, cursor: { type: "string" }, limit: { type: "integer", minimum: 1, maximum: 200 } } } },
+  { name: "web_fetch", loadPolicy: "search", description: "Safely read a public HTTPS page, text, JSON, or PDF and summarize it with the model using the prompt. Validate DNS and redirects on every request; block private networks, credential URLs, and oversized responses. The prompt is required and must state what to extract. Fail explicitly when no unified model is configured; never return the full page silently.", inputSchema: { type: "object", required: ["url", "prompt"], properties: { project_id: { type: "string" }, url: { type: "string" }, prompt: { type: "string", description: "What to extract from the page." } } } },
+  ...(isWebSearchAvailable() ? [{ name: "web_search", loadPolicy: "search" as const, description: "Search the public Web through a configured real search provider. The tool is not registered when no real backend is configured.", inputSchema: { type: "object", required: ["query"], properties: { project_id: { type: "string" }, query: { type: "string" }, count: { type: "integer", minimum: 1, maximum: 20 } } } }] : []),
+  { name: "find_definition", loadPolicy: "search", description: "Find a symbol definition through the configured language service; report unavailable when no reliable service exists.", inputSchema: { type: "object", required: ["symbol"], properties: { project_id: { type: "string" }, symbol: { type: "string" }, path: { type: "string" } } } },
+  { name: "find_references", loadPolicy: "search", description: "Find symbol references through the configured language service; report unavailable when no reliable service exists.", inputSchema: { type: "object", required: ["symbol"], properties: { project_id: { type: "string" }, symbol: { type: "string" }, path: { type: "string" } } } },
+  { name: "workspace_symbols", loadPolicy: "search", description: "Query workspace symbols through the project semantic index. Return locations, types, index generation, and code state without source bodies. Use language_server_id for multi-language projects when needed.", inputSchema: { type: "object", properties: { project_id: { type: "string" }, query: { type: "string" }, language_server_id: { type: "string" }, language: { type: "string" }, cursor: { type: "string" }, limit: { type: "integer", minimum: 1, maximum: 500 } } } },
+  { name: "document_symbols", loadPolicy: "search", description: "Query symbols in a source file through the language service and incremental index.", inputSchema: { type: "object", required: ["path"], properties: { project_id: { type: "string" }, path: { type: "string" }, query: { type: "string" }, cursor: { type: "string" }, limit: { type: "integer", minimum: 1, maximum: 500 } } } },
+  { name: "find_implementations", loadPolicy: "search", description: "Locate the concrete implementation of an interface, abstract member, or symbol through the language service.", inputSchema: { type: "object", required: ["symbol"], properties: { project_id: { type: "string" }, symbol: { type: "string" }, path: { type: "string" }, cursor: { type: "string" }, limit: { type: "integer", minimum: 1, maximum: 500 } } } },
+  { name: "find_type_definition", loadPolicy: "search", description: "Locate a symbol's type definition through the language service.", inputSchema: { type: "object", required: ["symbol"], properties: { project_id: { type: "string" }, symbol: { type: "string" }, path: { type: "string" }, cursor: { type: "string" }, limit: { type: "integer", minimum: 1, maximum: 500 } } } },
+  { name: "find_incoming_calls", loadPolicy: "search", description: "Query the call hierarchy for functions or methods that call the current symbol.", inputSchema: { type: "object", required: ["symbol"], properties: { project_id: { type: "string" }, symbol: { type: "string" }, path: { type: "string" }, cursor: { type: "string" }, limit: { type: "integer", minimum: 1, maximum: 500 } } } },
+  { name: "find_outgoing_calls", loadPolicy: "search", description: "Query the call hierarchy for functions or methods called by the current symbol.", inputSchema: { type: "object", required: ["symbol"], properties: { project_id: { type: "string" }, symbol: { type: "string" }, path: { type: "string" }, cursor: { type: "string" }, limit: { type: "integer", minimum: 1, maximum: 500 } } } },
+  { name: "read_code_diagnostics", loadPolicy: "search", description: "Read LSP diagnostics bound to an index generation and RepoStateIdentity; after source changes, old diagnostics are not strong acceptance evidence.", inputSchema: { type: "object", properties: { project_id: { type: "string" }, path: { type: "string" }, cursor: { type: "string" }, limit: { type: "integer", minimum: 1, maximum: 500 } } } },
+  { name: "read_project_config", loadPolicy: "search", description: "Read standard build and run configuration files for an authorized project.", inputSchema: { type: "object", properties: { project_id: { type: "string" }, cursor: { type: "string" }, limit: { type: "integer", minimum: 1, maximum: 50 } } } },
+  { name: "read_git_status", loadPolicy: "search", description: "Read the Git worktree status of an authorized project.", inputSchema: { type: "object", properties: { project_id: { type: "string" } } } },
+  { name: "read_git_diff", loadPolicy: "search", description: "Read Git differences for an authorized project, optionally scoped to a file or the staging area.", inputSchema: { type: "object", properties: { project_id: { type: "string" }, path: { type: "string" }, staged: { type: "boolean" }, cursor: { type: "string" }, limit: { type: "integer", minimum: 1, maximum: 2000 } } } },
+  { name: "read_git_history", loadPolicy: "search", description: "Read recent Git commit history for an authorized project.", inputSchema: { type: "object", properties: { project_id: { type: "string" }, limit: { type: "integer", minimum: 1, maximum: 100 } } } },
+  { name: "read_runtime_status", loadPolicy: "search", description: "Read run configuration, process state, and build state for an authorized project.", inputSchema: { type: "object", properties: { project_id: { type: "string" } } } },
+  { name: "read_runtime_logs", loadPolicy: "search", description: "Read run or build logs for an exact authorized project run configuration.", inputSchema: { type: "object", required: ["profile_id"], properties: { project_id: { type: "string" }, profile_id: { type: "string" }, kind: { enum: ["run", "build"] }, lines: { type: "integer", minimum: 1, maximum: 2000 } } } },
 ];
 
 const v3Schemas: Record<string, Record<string, any>> = {
@@ -823,6 +823,24 @@ function fileChangedError(relativePath: string, expected: string, actual: string
   throw error;
 }
 
+function attachPlanningReadEvidence(project: string, result: any) {
+  if (!result || typeof result !== "object" || result.status === "failed") return result;
+  const relativePath = normalizeRelative(String(result.path || ""));
+  const sourceChecksum = String(result.checksum || result.safeReceipt?.checksum || "").trim();
+  if (!relativePath || !sourceChecksum) return result;
+  const lines = Array.isArray(result.lines) ? result.lines : [];
+  const from = Math.max(1, Number(lines[0]?.line || result.offset || 1));
+  const to = Math.max(from, Number(lines.at(-1)?.line || result.offset || from));
+  const evidenceCore = { project, path: relativePath, checksum: sourceChecksum, from, to };
+  const planningEvidence = {
+    evidenceId: `pev_${checksum(evidenceCore).slice(0, 24)}`,
+    ...evidenceCore,
+    source: "source_read",
+    contentStored: false,
+  };
+  return { ...result, evidenceId: planningEvidence.evidenceId, planningEvidence };
+}
+
 function decorateWorkspaceReadResult(result: any, args: any) {
   const nextOffset = Math.max(0, Number(result?.next_cursor || result?.nextCursor || 0));
   const total = Math.max(0, Number(result?.total_lines || result?.total_cells || result?.total_pages || 0));
@@ -904,7 +922,7 @@ async function readFilesToolV3(root: string, project: string, args: any, context
     const item = normalized[index];
     try {
       const result: any = await readFileToolV3WithContext(root, project, item, context);
-      files.push(result);
+      files.push(attachPlanningReadEvidence(project, result));
     } catch (error: any) {
       const relativePath = normalizeRelative(item?.path || "");
       const structured = error?.workspaceResult && typeof error.workspaceResult === "object" ? error.workspaceResult : null;
@@ -1001,7 +1019,8 @@ async function executeWorkspaceReadonlyToolWithCapabilityRaw(toolName: string, a
   }
   if (name === "read_file") {
     const result = await (contractVersion === 3 ? readFileToolV3WithContext(root, project, args, options.readContext) : readFileTool(root, args));
-    return attachTransientModelBlocks({ project, ...result }, transientWorkspaceBlocks(result));
+    const evidenced = attachPlanningReadEvidence(project, result);
+    return attachTransientModelBlocks({ project, ...evidenced }, transientWorkspaceBlocks(evidenced));
   }
   if (name === "read_files") {
     const result = await readFilesToolV3(root, project, args, options.readContext);

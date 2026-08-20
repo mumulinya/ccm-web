@@ -9,12 +9,11 @@ import {
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const decision = value => normalizeWorkflowDecision({ reason: 'selftest', confidence: 0.99, ...value })
 const cases = {
-  answer: isDevelopmentTaskWorkflowDecision(decision({ mode: 'answer' })) === false,
-  readOnlyAnalysis: isDevelopmentTaskWorkflowDecision(decision({ mode: 'project_analysis', actionRequired: false })) === false,
-  commandWithoutWrite: isDevelopmentTaskWorkflowDecision(decision({ mode: 'execute_direct', actionRequired: true, requiresCodeChanges: false })) === false,
-  directCodeChange: isDevelopmentTaskWorkflowDecision(decision({ mode: 'execute_direct', actionRequired: true, requiresCodeChanges: true })) === true,
-  plannedCodeChange: isDevelopmentTaskWorkflowDecision(decision({ mode: 'plan_task', actionRequired: true, requiresCodeChanges: true })) === true,
-  epicCodeChange: isDevelopmentTaskWorkflowDecision(decision({ mode: 'decompose_epic', actionRequired: true, requiresCodeChanges: true })) === true,
+  answer: isDevelopmentTaskWorkflowDecision(decision({ actionRequired: false, requiresCodeChanges: false })) === false,
+  readOnlyAnalysis: isDevelopmentTaskWorkflowDecision(decision({ actionRequired: false, requiresCodeChanges: false })) === false,
+  commandWithoutWrite: isDevelopmentTaskWorkflowDecision(decision({ actionRequired: true, requiresCodeChanges: false })) === false,
+  codeChange: isDevelopmentTaskWorkflowDecision(decision({ actionRequired: true, requiresCodeChanges: true })) === true,
+  epicCodeChange: isDevelopmentTaskWorkflowDecision(decision({ actionRequired: true, requiresCodeChanges: true, needsEpicDecomposition: true })) === true,
 }
 
 const transcript = fs.readFileSync(path.join(root, 'frontend/src/components/common/AgentExecutionTranscript.vue'), 'utf8')

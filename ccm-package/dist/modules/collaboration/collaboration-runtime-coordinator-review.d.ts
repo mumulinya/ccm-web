@@ -162,7 +162,7 @@ export declare function getGroupMainAgentActionRegistry(): ({
     label: "读取项目代码快照";
     category: "context";
     risk: "read";
-    permissionMode: "auto_read_in_project_analysis";
+    permissionMode: "auto_read_in_conversation";
     userVisible: false;
     description: "只读读取群聊绑定项目的有限代码片段，过滤密钥、依赖和构建产物，用于项目分析和任务前理解。";
 } | {
@@ -297,7 +297,7 @@ export declare function runGroupMainAgentActionRegistrySelfTest(): {
         label: "读取项目代码快照";
         category: "context";
         risk: "read";
-        permissionMode: "auto_read_in_project_analysis";
+        permissionMode: "auto_read_in_conversation";
         userVisible: false;
         description: "只读读取群聊绑定项目的有限代码片段，过滤密钥、依赖和构建产物，用于项目分析和任务前理解。";
     } | {

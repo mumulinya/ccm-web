@@ -1613,6 +1613,7 @@ const handleGitCommitCardSubmit = async (msg) => {
           :exact-session-id="currentSessionId || ''"
           :active="globalAgentExecutionEnabled && !!currentSessionId && !isCurrentSessionDraft && !activeGlobalPrePlanClarification"
           :detail-enabled="false"
+          :allow-plan-confirmation="false"
           @locate="locateGlobalPlanStep"
           @execution-action="handleGlobalPlanAction"
         />

@@ -64,7 +64,7 @@ export declare function runUnifiedSessionModelContextSelfTest(): {
         tokenAccountingPresent: boolean;
         freshToolResultsRemainRaw: any;
         oldCompletedToolResultClearedSelectively: any;
-        pressureTriggerDefersToFormalCompaction: boolean;
+        pressureTriggerClearsOldToolResult: boolean;
         oldLargeToolResultReplacedRecoverably: boolean;
         contentReplacementReceiptVerifies: boolean;
         toolPairsStayBound: boolean;

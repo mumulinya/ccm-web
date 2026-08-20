@@ -152,21 +152,21 @@ export async function selectMusicTrack(input: { keyword?: string; candidates?: a
   if (canCallModel) {
     try {
       const system = strictMatch
-        ? `你是音乐点歌选曲器。根据用户要点的歌，从候选列表中选出最匹配的一首。
-只输出 JSON，不要 Markdown。
-规则：
-1. 歌名必须对得上用户意图；不能只因歌手相同就选。
-2. 不确定或没有足够匹配时返回 reject=true、index=-1。
-3. index 是候选列表中的整数下标（从 0 开始）。
-返回格式：{"index":0,"reject":false,"reason":"一句话依据"}`
+        ? `You are the CCM music track selector. Select the best candidate for the user's requested song.
+Return JSON only; do not use Markdown.
+Rules:
+1. The title must match the user's intent; do not select solely because the artist matches.
+2. If uncertain or no candidate is a sufficient match, return reject=true and index=-1.
+3. index is the zero-based integer index in the candidate list.
+Return: {"index":0,"reject":false,"reason":"short evidence basis"}`
         : selectionMode === "artist_random"
-          ? `你是歌手作品选曲器。候选已经通过歌手字段筛选，全部属于用户指定的歌手。
-结合用户完整原话判断是否还有情绪、场景或偏好，并从候选作品中选择一首。没有额外偏好时也必须选择，不要虚构候选外歌曲。
-只输出 JSON，不要 Markdown。index 从 0 开始。
-返回格式：{"index":0,"reject":false,"reason":"一句话依据"}`
-          : `你是音乐推荐选曲器。根据用户的心情、场景或曲风，从搜索结果中选一首合适的歌。
-只输出 JSON，不要 Markdown。不要要求歌名精确匹配；候选整体合理时必须选择。index 从 0 开始。
-返回格式：{"index":0,"reject":false,"reason":"一句话依据"}`;
+          ? `You are the artist catalog selector. Candidates were already filtered to the requested artist.
+Use the complete user wording to identify any remaining mood, context, or preference and select one candidate. If there is no extra preference, still select one; never invent a song outside the candidates.
+Return JSON only; do not use Markdown. index is zero-based.
+Return: {"index":0,"reject":false,"reason":"short evidence basis"}`
+          : `You are the music recommendation selector. Choose one suitable song from the search results based on the user's mood, context, or genre.
+Return JSON only; do not use Markdown. The title need not match exactly; select when the candidate is broadly suitable. index is zero-based.
+Return: {"index":0,"reject":false,"reason":"short evidence basis"}`;
       const selection = await runSemanticDecision({
         kind: "music_selection",
         identity: {
@@ -174,7 +174,7 @@ export async function selectMusicTrack(input: { keyword?: string; candidates?: a
           scopeId: "music-player",
           sessionId: "music-singleton",
         },
-        system: `${system}\nreply 必须简短说明实际选择的歌曲，不得提及候选索引或内部协议。`,
+        system: `${system}\nReturn a brief user-facing explanation of the selected song without mentioning candidate indexes or internal protocols.`,
         input: {
           originalRequest: String(input.originalRequest || keyword).slice(0, 500),
           searchTopic: keyword,

@@ -41,17 +41,17 @@ const mockModel = http.createServer(async (request, response) => {
   let content
   if (prompt.includes('shouldDelegate') && prompt.includes('dispatchPolicy')) {
     content = JSON.stringify({
-      workflowDecision: { mode: 'answer', reason: '普通问答', confidence: 0.99, actionRequired: false, intentKind: 'question', memoryPolicy: 'use', authorizationDirective: 'preserve', riskLevel: 'low', requiresUserConfirmation: false },
+      workflowDecision: { reason: '普通问答', confidence: 0.99, actionRequired: false, requiresCodeChanges: false, needsEpicDecomposition: false, intentKind: 'question', memoryPolicy: 'use', authorizationDirective: 'preserve', riskLevel: 'low', requiresUserConfirmation: false },
       intent: 'question', summary: '用户询问主 Agent 身份', domains: ['general'], deliverables: [], constraints: [], documentFindings: [], missingInfo: [],
       dispatchPolicy: { action: 'direct_answer', reason: '普通问答由群聊主 Agent 直接回复', requiresConfirmation: false, risk: '', nextStep: '直接回答用户' },
       coordinationStrategy: 'direct_worker_execution', coordinationPlan: { phases: [], synthesisStrategy: '' },
       reasoning: { knownFacts: ['用户只提出普通问题'], assumptionsToVerify: [], verificationAssertions: [], dependencyRationale: [], replanTriggers: [] },
       toolRequests: [], shouldDelegate: false, executionOrder: 'sequential', targets: [], friendlyResponse: '你好，我是这个群聊的主 Agent。', questionForUser: '', directResponse: '你好，我是这个群聊的主 Agent。', confidence: 0.99,
     })
-  } else if (prompt.includes('ccm-model-workflow-decision-v1') || prompt.includes('needsEpicDecomposition')) {
-    content = JSON.stringify({ mode: 'answer', reason: '用户只提出普通问答', confidence: 0.99, needsPlanning: false, needsEpicDecomposition: false, actionRequired: false, continuationKind: 'new_task', readAction: 'none', targetRefs: [], impactScope: [], planSteps: [], clarificationQuestions: [], selectedSkills: [], intentKind: 'question', requiresCodeChanges: false, requiresAgentQa: false, requiresIndependentReview: false, verificationModes: [], memoryPolicy: 'use', authorizationDirective: 'preserve', riskLevel: 'low', requiresUserConfirmation: false })
+  } else if (prompt.includes('ccm-model-workflow-decision-v2') || prompt.includes('needsEpicDecomposition')) {
+    content = JSON.stringify({ reason: '用户只提出普通问答', confidence: 0.99, needsEpicDecomposition: false, actionRequired: false, continuationKind: 'new_task', readAction: 'none', targetRefs: [], impactScope: [], planSteps: [], clarificationQuestions: [], selectedSkills: [], intentKind: 'question', requiresCodeChanges: false, requiresAgentQa: false, requiresIndependentReview: false, verificationModes: [], memoryPolicy: 'use', authorizationDirective: 'preserve', riskLevel: 'low', requiresUserConfirmation: false })
   } else {
-    content = JSON.stringify({ state: 'answer', message: '你好，我是 CCM 全局 Agent。', workflowDecision: { mode: 'answer', reason: '普通问答', confidence: 0.99, actionRequired: false, intentKind: 'question', memoryPolicy: 'use', authorizationDirective: 'preserve', riskLevel: 'low', requiresUserConfirmation: false }, intent: { category: 'question', goal: '了解 Agent 身份', action_required: false, target_refs: [], impact_scope: [], confidence: 0.99, authorization_basis: 'none', reason: '普通问答' }, plan: [], tool: null, completion: { summary: '已直接回答', evidence: [], risks: [], next_action: '' } })
+    content = JSON.stringify({ state: 'answer', message: '你好，我是 CCM 全局 Agent。', workflowDecision: { reason: '普通问答', confidence: 0.99, actionRequired: false, requiresCodeChanges: false, needsEpicDecomposition: false, intentKind: 'question', memoryPolicy: 'use', authorizationDirective: 'preserve', riskLevel: 'low', requiresUserConfirmation: false }, intent: { category: 'question', goal: '了解 Agent 身份', action_required: false, target_refs: [], impact_scope: [], confidence: 0.99, authorization_basis: 'none', reason: '普通问答' }, plan: [], tool: null, completion: { summary: '已直接回答', evidence: [], risks: [], next_action: '' } })
   }
   response.writeHead(200, { 'Content-Type': 'application/json' })
   response.end(JSON.stringify({ choices: [{ message: { content } }], usage: { prompt_tokens: 100, completion_tokens: 40, total_tokens: 140 } }))

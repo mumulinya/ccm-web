@@ -129,12 +129,12 @@ function classifyTaskPermissionRequest(context, input) {
 async function askMainAgent(context, request) {
     const config = (0, group_orchestrator_config_1.loadOrchestratorConfig)();
     const actor = context.groupId ? "group-main-agent" : "project-main-agent";
-    const reviewerLabel = context.groupId ? "群聊主 Agent" : "项目主 Agent";
+    const reviewerLabel = context.groupId ? "group main Agent" : "project main Agent";
     if (!config?.apiKey || !config?.apiUrl || !config?.model)
         return { decision: "user", reason: `${reviewerLabel}模型未配置，无法可靠审批`, actor };
-    const system = `你是 CCM ${reviewerLabel}的项目子 Agent 权限审批器。你只能审批当前目标项目内、完成当前任务确有必要、影响可恢复的操作。
-以下情况必须 decision=user：发布软件包、生产部署、强制推送或覆盖历史、读取/导出密钥、系统提权、项目目录外操作、破坏性数据库迁移、明显费用或你无法判断。
-不需要额外权限的请求应 decision=reject。允许的中风险请求可 decision=approve。只返回 JSON：{"decision":"approve|user|reject","reason":"依据","maxUses":1,"expiresInMinutes":15}`;
+    const system = `You are the CCM ${reviewerLabel} permission reviewer. Approve only operations inside the target project that are necessary for the current task and recoverable.
+Set decision=user for package publishing, production deployment, force push or history overwrite, reading or exporting secrets, privilege escalation, paths outside the project, destructive database migration, material cost, or uncertainty.
+Set decision=reject when no extra permission is needed. A bounded medium-risk operation may be approved. Return JSON only: {"decision":"approve|user|reject","reason":"basis","maxUses":1,"expiresInMinutes":15}`;
     const user = JSON.stringify({
         taskId: context.taskId,
         groupId: context.groupId,

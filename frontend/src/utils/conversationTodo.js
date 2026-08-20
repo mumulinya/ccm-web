@@ -1,6 +1,6 @@
 const DONE_STATUSES = ['completed', 'skipped', 'cancelled']
 const ACTIVE_STATUSES = ['in_progress', 'running', 'reviewing', 'reworking', 'needs_confirmation', 'needs_user', 'blocked', 'failed']
-const QUIET_MODES = new Set(['conversation', 'project_analysis'])
+const QUIET_MODES = new Set(['conversation'])
 const GENERIC_COORDINATOR_STEP_IDS = new Set([
   'intake',
   'plan',

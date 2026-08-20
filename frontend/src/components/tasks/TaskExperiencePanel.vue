@@ -17,6 +17,7 @@ const props = defineProps({
   card: { type: Object, required: true },
   context: { type: String, default: 'task' },
   busy: { type: Boolean, default: false },
+  suppressPlan: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['action'])
@@ -739,7 +740,7 @@ const planApprovalRequest = computed(() => {
       '最终总结前会逐项核对验收标准；内部记录默认放在排障信息里。',
     ],
     feedback_hint: hasPlanConfirmAction.value
-      ? '你可以在下方补充要求；确认时会一起带入执行计划。'
+      ? '你可以在下方填写修改要求；确认时会一起带入执行计划。'
       : '确认后我会继续执行，并在完成后给出结果总结。',
     display_policy: { user_text_first: true, technical_default_collapsed: true, hide_internal_protocols: true, show_for_ordinary_conversation: false },
   }, '计划确认请求已整理。', 360)

@@ -148,6 +148,23 @@ async function runGroupMainNativeQueryLoop(input) {
             retryNotices.push(publicNotice);
             input.onRetry?.(publicNotice);
         },
+        onPlanningPhase: ({ phase, evidenceCount = 0, issueCount = 0 }) => {
+            const summary = phase === "exploring" ? "正在核对相关项目资料"
+                : phase === "drafting" ? `已核对 ${evidenceCount} 项源码证据，正在整理计划`
+                    : phase === "reviewing" ? "正在复核计划范围和验收标准"
+                        : phase === "repairing" ? `计划有 ${issueCount} 处需要修正，正在自动校正`
+                            : phase === "awaiting_user" ? "计划已通过复核，等待确认"
+                                : "计划复核未通过，需要补充依据";
+            (0, user_visible_agent_events_1.publishEphemeralUserVisibleAgentEvent)({
+                eventId: `group-planning:${visibleTurnId}:${phase}`,
+                scope: "group", scopeId: String(group.id), exactSessionId: groupSessionId,
+                ...(visibleAnchorMessageId ? { anchorMessageId: visibleAnchorMessageId } : {}),
+                eventType: "planning_progress",
+                display: { title: "群聊主 Agent", summary, status: ["invalidated"].includes(phase) ? "failed" : phase === "awaiting_user" ? "completed" : "running" },
+                detail: { planning: { phase, evidenceCount, issueCount, contentStored: false } },
+            });
+            input.markVisibleFeedback();
+        },
         onTurn: ({ round, modelCallIndex }) => {
             const activityPhase = toolResults.length ? "tool_result_review" : round > 0 ? "tool_decision" : "understanding";
             const activity = (0, model_activity_1.createModelActivityController)({

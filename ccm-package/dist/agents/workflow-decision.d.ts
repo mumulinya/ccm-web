@@ -1,10 +1,7 @@
-export type WorkflowDecisionMode = "answer" | "project_analysis" | "execute_direct" | "plan_task" | "decompose_epic";
 export interface WorkflowDecision {
-    schema: "ccm-model-workflow-decision-v1";
-    mode: WorkflowDecisionMode;
+    schema: "ccm-model-workflow-decision-v2";
     reason: string;
     confidence: number;
-    needsPlanning: boolean;
     needsEpicDecomposition: boolean;
     actionRequired: boolean;
     continuationKind: "new_task" | "supplement" | "revise_goal";
@@ -33,7 +30,7 @@ export interface WorkflowDecision {
 export declare const WORKFLOW_DECISION_GUIDANCE: string;
 export declare function normalizeWorkflowDecision(value: any, source?: WorkflowDecision["source"]): WorkflowDecision;
 export declare function isDevelopmentTaskWorkflowDecision(value: any): boolean;
-export declare function explicitWorkflowDecision(mode: WorkflowDecisionMode, reason: string, overrides?: Partial<WorkflowDecision>): WorkflowDecision;
+export declare function explicitWorkflowDecision(reason: string, overrides?: Partial<WorkflowDecision>): WorkflowDecision;
 export declare function decideWorkflowWithModel(input: {
     message: string;
     scope: "global" | "group" | "project";
@@ -45,4 +42,5 @@ export declare function runWorkflowDecisionContractSelfTest(): {
     cases: WorkflowDecision[];
     direct: WorkflowDecision;
     unsafeDirect: WorkflowDecision;
+    legacyRejected: boolean;
 };

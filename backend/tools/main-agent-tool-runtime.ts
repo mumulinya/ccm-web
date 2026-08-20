@@ -68,17 +68,17 @@ export type MainAgentNativeToolV2 = {
 };
 
 export const MAIN_AGENT_NATIVE_TOOLS_V2: MainAgentNativeToolV2[] = [
-  { name: "ask_user_question", description: "向当前精确会话提出结构化澄清问题。", loadPolicy: "base", sideEffect: "orchestrator_control" },
-  { name: "update_todo", description: "更新当前Run的计划步骤和进度。", loadPolicy: "base", sideEffect: "orchestrator_control" },
-  { name: "enter_plan_mode", description: "进入计划制定或修订阶段。", loadPolicy: "base", sideEffect: "orchestrator_control" },
-  { name: "exit_plan_mode", description: "提交计划并进入现有确认或派发门禁。", loadPolicy: "base", sideEffect: "orchestrator_control" },
-  { name: "invoke_skill", description: "加载并调用当前作用域已授权的Skill。", loadPolicy: "base", sideEffect: "none" },
-  { name: "tool_search", description: "按需发现并加载低频只读工具Schema。", loadPolicy: "base", sideEffect: "none" },
-  { name: "list_mcp_resources", description: "列出当前作用域已授权MCP的资源能力。", loadPolicy: "conditional", sideEffect: "none" },
-  { name: "read_mcp_resource", description: "读取当前作用域已授权的精确MCP资源。", loadPolicy: "conditional", sideEffect: "none" },
-  { name: "dispatch_task", description: "通过现有队列和权限门禁分派任务。", loadPolicy: "conditional", sideEffect: "orchestrator_control" },
-  { name: "get_task_status", description: "读取当前作用域任务状态。", loadPolicy: "conditional", sideEffect: "none" },
-  { name: "stop_task", description: "通过现有取消门禁停止任务。", loadPolicy: "conditional", sideEffect: "orchestrator_control" },
+  { name: "ask_user_question", description: "Ask a structured clarification question in the exact session.", loadPolicy: "base", sideEffect: "orchestrator_control" },
+  { name: "update_todo", description: "Update the current Run's task steps and progress.", loadPolicy: "base", sideEffect: "orchestrator_control" },
+  { name: "enter_plan_mode", description: "Enter the plan authoring or revision stage.", loadPolicy: "base", sideEffect: "orchestrator_control" },
+  { name: "exit_plan_mode", description: "Submit the plan to the existing confirmation or dispatch gate.", loadPolicy: "base", sideEffect: "orchestrator_control" },
+  { name: "invoke_skill", description: "Load and invoke a Skill authorized for the current scope.", loadPolicy: "base", sideEffect: "none" },
+  { name: "tool_search", description: "Discover and load low-frequency read-only tool schemas on demand.", loadPolicy: "base", sideEffect: "none" },
+  { name: "list_mcp_resources", description: "List resources exposed by MCP servers authorized for the current scope.", loadPolicy: "conditional", sideEffect: "none" },
+  { name: "read_mcp_resource", description: "Read one exact resource exposed by an authorized MCP server.", loadPolicy: "conditional", sideEffect: "none" },
+  { name: "dispatch_task", description: "Dispatch work through the existing queue and permission gates.", loadPolicy: "conditional", sideEffect: "orchestrator_control" },
+  { name: "get_task_status", description: "Read task status for the current scope.", loadPolicy: "conditional", sideEffect: "none" },
+  { name: "stop_task", description: "Stop a task through the existing cancellation gate.", loadPolicy: "conditional", sideEffect: "orchestrator_control" },
 ];
 
 function uniqueNames(values: any[] = []) {
@@ -103,19 +103,19 @@ export function renderMainAgentToolCatalogLine(tool: any, schemaSurface: "native
   const name = mainAgentCallableToolName(tool);
   const description = String(tool?.description || tool?.name || "");
   if (schemaSurface === "native") return `- ${name}: ${description}`;
-  return `- ${name}: ${description}; 参数 Schema=${JSON.stringify(tool?.inputSchema || {})}`;
+  return `- ${name}: ${description}; parameter schema=${JSON.stringify(tool?.inputSchema || {})}`;
 }
 
 function renderWorkspaceToolPrompt(label: string, tools: any[], deferred = false, schemaSurface: "native" | "prompt" = "prompt") {
   if (!tools.length) return "";
   return [
-    `${label}${deferred ? "可按需加载的" : "可直接使用的"}工作区工具：`,
+    `${label} ${deferred ? "deferred" : "available"} workspace tools:`,
     ...tools.map(tool => deferred
       ? `- ${mainAgentCallableToolName(tool)}`
       : renderMainAgentToolCatalogLine(tool, schemaSurface)),
     deferred
-      ? "这些是 CCM 提供的安全文件能力；调用前先使用 tool_search 加载 Schema，加载后仍使用上面的短名称。"
-      : "这些工具由 CCM 在授权项目边界内执行；直接使用短名称，不要使用内部 MCP canonicalName，也不要改用终端命令读取普通文件。read_file默认一次读完（最多2000行），不要先传offset/limit；只有结果truncated或文件过大时，再用offset/limit继续读取尚未覆盖的部分。PATH_NOT_FOUND只有唯一高可信建议时才可重试。",
+      ? "These are CCM safe workspace capabilities. Load their schema with tool_search before calling them, then use the short names above."
+      : "CCM executes these tools inside the authorized project boundary. Use the short names, never an internal MCP canonicalName, and do not replace ordinary file reads with terminal commands. read_file reads up to 2000 lines by default; use offset/limit only for truncated or oversized files. Retry PATH_NOT_FOUND only when the suggestion is unique and high confidence.",
   ].join("\n");
 }
 
@@ -260,9 +260,9 @@ export function buildMainAgentToolRuntimeContext(input: {
   const toolAudit = toolManager.buildScopeAudit(scope);
   const label = String(input.label || "主 Agent");
   const nativePrompt = [
-    `${label}原生控制工具：`,
+    `${label} native control tools:`,
     ...MAIN_AGENT_NATIVE_TOOLS_V2.filter(tool => tool.loadPolicy === "base").map(tool => `- ${tool.name}: ${tool.description}`),
-    "ask_user_question、update_todo、enter_plan_mode和exit_plan_mode由本轮结构化responseType/plan字段驱动，不要把它们放进toolRequests；invoke_skill与tool_search才通过toolRequests进入工具循环。",
+    "ask_user_question, update_todo, enter_plan_mode, and exit_plan_mode are driven by this turn's structured responseType/plan fields; do not place them in toolRequests. Only invoke_skill and tool_search enter the tool loop through toolRequests.",
   ].join("\n");
   const loadedWorkspace = mcp.filter(isWorkspaceReadonlyDefinition);
   const loadedExtensions = mcp.filter(tool => !isWorkspaceReadonlyDefinition(tool));
@@ -270,14 +270,14 @@ export function buildMainAgentToolRuntimeContext(input: {
   const deferredExtensions = discoverableMcp.filter(tool => !isWorkspaceReadonlyDefinition(tool));
   const workspacePrompt = renderWorkspaceToolPrompt(label, loadedWorkspace, false, schemaSurface);
   const mcpPrompt = loadedExtensions.length ? [
-    `${label}已授权的${readOnly ? "只读" : ""} MCP 工具（必须使用 canonicalName）：`,
+    `${label} authorized ${readOnly ? "read-only " : ""}MCP tools (use canonicalName):`,
     ...loadedExtensions.map(tool => renderMainAgentToolCatalogLine(tool, schemaSurface)),
   ].join("\n") : "";
   const deferredWorkspacePrompt = renderWorkspaceToolPrompt(label, deferredWorkspace, true, schemaSurface);
   const deferredMcpPrompt = deferredExtensions.length ? [
-    `${label}已授权但尚未加载 Schema 的 MCP/低频工具：`,
+    `${label} authorized MCP/low-frequency tools whose schemas are not loaded:`,
     ...deferredExtensions.map(tool => `- ${tool.canonicalName || tool.name}`),
-    "这些名称仅用于发现，不代表 Schema 已进入本轮上下文。调用前必须先使用 tool_search；tool_search 返回的完整 Schema 会保留在当前 Run 的后续轮次。",
+    "These names are discoverable only and do not mean their schemas are in the current context. Call tool_search first; the returned schema remains available in later rounds of the current Run.",
   ].join("\n") : "";
   const skillCatalog = buildDynamicSkillCatalogPrompt({
     label,
@@ -300,12 +300,12 @@ export function buildMainAgentToolRuntimeContext(input: {
     deferredMcpPrompt,
     skillPrompt,
     restored?.renderedSkillAttachments || "",
-    rejectedMcp.length ? `以下 MCP 可能写入或产生副作用，不向${label}开放：${rejectedMcp.map(tool => tool.canonicalName).join(", ")}` : "",
-    unavailable.length ? "部分已配置工具当前不可用；不得声称已经调用。" : "",
-    discoverableMcp.length ? `延迟工具不会预先占用完整 Schema Token；需要时先调用 tool_search，按名称或能力描述加载。` : "",
-    inlineSafetyDowngraded ? `MCP完整定义超过本轮安全容量，已从${contextPolicy.mcpToolLoadingMode}安全降级为deferred。` : "",
-    `读取工作区文件时默认一次读完（最多2000行）；只有文件过大才用offset和limit分段。Glob默认最多100个匹配，Grep未指定数量时默认250条、显式0表示不限制。不要为了穷尽仓库而枚举全部文件。`,
-    `需要工具数据时在 toolRequests 中请求。工作区文件工具只使用短名称；扩展 MCP 使用上面列出的 canonicalName。Skill只能使用 invoke_skill，并在 arguments.name 中填写已列出的 Skill。工具结果由CCM执行后重新交给模型，不得把请求本身视为完成。`,
+    rejectedMcp.length ? `The following MCP tools may write or cause side effects and are unavailable to ${label}: ${rejectedMcp.map(tool => tool.canonicalName).join(", ")}` : "",
+    unavailable.length ? "Some configured tools are unavailable; never claim that they were called." : "",
+    discoverableMcp.length ? "Deferred tools do not consume full schemas up front. Call tool_search when needed and load by name or capability description." : "",
+    inlineSafetyDowngraded ? `The complete MCP definitions exceeded the safe context capacity and were downgraded from ${contextPolicy.mcpToolLoadingMode} to deferred loading.` : "",
+    "Read workspace files in one call by default (up to 2000 lines); use offset and limit only for oversized files. Glob returns at most 100 matches by default; Grep returns 250 matches unless a limit is specified, and explicit 0 means unlimited. Do not enumerate the entire repository.",
+    "Request tool data through toolRequests. Use short names for workspace tools and the canonicalName listed above for extension MCP tools. Skills may only be invoked through invoke_skill with a listed Skill name. CCM executes tool requests and returns the results; a request alone is never completion evidence.",
   ].filter(Boolean).join("\n\n");
   const contextBudget = {
     contextWindow,
@@ -378,21 +378,21 @@ function refreshMainAgentToolPromptState(toolContext: MainAgentToolRuntimeContex
   const workspacePrompt = renderWorkspaceToolPrompt(label, loadedMcp.filter(isWorkspaceReadonlyDefinition), false, schemaSurface);
   const extensionTools = loadedMcp.filter(tool => !isWorkspaceReadonlyDefinition(tool));
   const loadedPrompt = extensionTools.length ? [
-    `${label}当前已加载 Schema 的 MCP 工具（必须使用 canonicalName）：`,
+    `${label} MCP tools with schemas loaded in the current Run (use canonicalName):`,
     ...extensionTools.map((tool: any) => renderMainAgentToolCatalogLine(tool, schemaSurface)),
   ].join("\n") : "";
   const discoverable = toolContext.catalog.discoverableMcp || [];
   const deferredWorkspacePrompt = renderWorkspaceToolPrompt(label, discoverable.filter(isWorkspaceReadonlyDefinition), true, schemaSurface);
   const deferredExtensions = discoverable.filter(tool => !isWorkspaceReadonlyDefinition(tool));
   const deferredPrompt = deferredExtensions.length ? [
-    `${label}已授权但尚未加载 Schema 的 MCP/低频工具：`,
+    `${label} authorized MCP/low-frequency tools whose schemas are not loaded:`,
     ...deferredExtensions.map((tool: any) => `- ${tool.canonicalName || tool.name}`),
-    "调用前必须先使用 tool_search 加载完整功能说明和参数 Schema。",
+    "Call tool_search first to load the complete description and parameter schema.",
   ].join("\n") : "";
   toolContext.mcpPrompt = [workspacePrompt, loadedPrompt, deferredWorkspacePrompt, deferredPrompt].filter(Boolean).join("\n\n");
   toolContext.loadedToolNames = uniqueNames(loadedMcp.map((tool: any) => tool.canonicalName || tool.name));
   toolContext.deferredToolNames = uniqueNames((toolContext.catalog.discoverableMcp || []).map((tool: any) => tool.canonicalName || tool.name));
-  const marker = "[CCM ToolSearch 本轮已加载 Schema]";
+  const marker = "[CCM ToolSearch schemas loaded for this round]";
   toolContext.policyPrompt = `${String(toolContext.policyPrompt || "").split(marker)[0].trim()}\n\n${marker}\n${toolContext.mcpPrompt}`.trim();
 }
 

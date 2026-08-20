@@ -42,6 +42,7 @@ const source_ingestion_1 = require("../requirements/source-ingestion");
 const knowledge_access_1 = require("../knowledge/knowledge-access");
 const project_runtime_1 = require("../projects/project-runtime");
 const main_agent_turn_1 = require("../../agents/main-agent-turn");
+const internal_prompt_contract_1 = require("../../agents/internal-prompt-contract");
 const global_native_query_adapter_1 = require("./global-native-query-adapter");
 const global_agent_tool_authorization_1 = require("./global-agent-tool-authorization");
 const global_tool_load_policy_1 = require("../../agents/global/global-tool-load-policy");
@@ -539,15 +540,15 @@ function createGlobalAgentAgenticRuntime(deps) {
             .slice(-4)
             .map(message => ({ role: message.role === "assistant" ? "assistant" : "user", content: compactGlobalProviderMessageContent(message.content, 3_000) }));
         const recoverySystem = [
-            "你是 CCM 全局 Agent 的恢复决策内核。会话历史和长期记忆已经安全保留在服务端。",
-            "当前只提供必要上下文以恢复本轮，不得声称看到未提供的历史；需要事实时调用只读工具。",
-            "每轮最多一个工具。只输出既有 CCM 决策 JSON 协议，不要 Markdown、内部错误、Token 或上下文容量信息。",
-            "若无法安全继续，使用 needs_confirmation 提出一个具体问题。",
+            "You are the recovery decision kernel for the CCM global Agent. Session history and long-term memory remain safely stored on the server.",
+            "Only the minimum context needed for this turn is provided. Do not claim to see omitted history; use read-only tools when facts are needed.",
+            "Use at most one tool per turn. Return the existing CCM decision JSON protocol only; do not output Markdown, internal errors, token counts, or context-capacity details.",
+            "If it is not safe to continue, use needs_confirmation with one concrete question.",
         ].join("\n");
         return [
-            { role: "system", content: `${compactGlobalProviderMessageContent(system?.content || "", 14_000)}\n\n[上下文恢复模式]\n${recoverySystem}` },
+            { role: "system", content: `${compactGlobalProviderMessageContent(system?.content || "", 14_000)}\n\n[Context recovery mode]\n${recoverySystem}` },
             ...recent,
-            { role: "user", content: `【当前用户目标】\n${compactGlobalProviderMessageContent(currentGoal, 8_000)}\n\n【恢复状态】\n会话内容较多，已保留现场并切换到安全恢复上下文。请决定下一步。` },
+            { role: "user", content: `[Current user goal]\n${compactGlobalProviderMessageContent(currentGoal, 8_000)}\n\n[Recovery state]\nThe session is large; the work context was preserved and this turn uses a safe recovery context. Decide the next action.` },
         ];
     }
     async function prepareGlobalProviderMessages(messages, run, runtime, options = {}) {
@@ -1462,6 +1463,14 @@ function createGlobalAgentAgenticRuntime(deps) {
                     : messages;
                 const { accumulateGlobalAgentRunUsage } = require("../../agents/global/global-agent-metrics");
                 const invoke = (providerMessages) => {
+                    // Keep only descriptor metadata on the run; never retain provider prompt content.
+                    run.main_agent_prompt_bindings = (0, internal_prompt_contract_1.buildInternalPromptBindings)({
+                        scope: "global",
+                        system: providerMessages
+                            .filter((message) => message?.role === "system")
+                            .map((message) => String(message.content || ""))
+                            .join("\n\n"),
+                    });
                     const runStartedAt = Date.parse(String(run.started_at || run.created_at || new Date().toISOString()));
                     const streamMetric = run.streaming_metric || (run.streaming_metric = {
                         firstVisibleFeedbackMs: 0,
@@ -1539,7 +1548,7 @@ function createGlobalAgentAgenticRuntime(deps) {
                         let synthesisSequence = 0;
                         try {
                             const synthesized = await callGlobalModelWithRetry(config, [
-                                { role: "system", content: "请把既有结论整理成面向用户的最终回答。只输出回答正文，不输出JSON、内部协议、推理过程或工具原始结果。" },
+                                { role: "system", content: "Turn the established conclusions into the final user-facing answer. Use the user's conversation language. Output answer text only; do not output JSON, internal protocols, hidden reasoning, or raw tool results." },
                                 { role: "user", content: JSON.stringify({ request: String(run.original_user_message || run.user_message || "").slice(0, 4000), draft: String(result?.message || "").slice(0, 8000) }) },
                             ], {
                                 signal,
@@ -1652,6 +1661,7 @@ function createGlobalAgentAgenticRuntime(deps) {
                     toolRound: Math.max(0, modelCallIndex - 1),
                     usage: run.latest_context_usage || null,
                     inputIdentity: { sessionId: run.session_id, turnId: run.turn_id || input.turnId || "", message: input.authorizationMessage || run.original_user_message || run.user_message },
+                    promptBindings: run.main_agent_prompt_bindings,
                 });
                 run.main_agent_turn_decision = decision;
                 run.main_agent_turn_receipt = receipt;

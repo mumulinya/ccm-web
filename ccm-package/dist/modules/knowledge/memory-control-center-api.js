@@ -77,6 +77,8 @@ const provider_cache_capability_registry_1 = require("../../system/provider-cach
 const context_engine_observability_1 = require("../../system/context-engine-observability");
 const context_engine_recovery_1 = require("../../system/context-engine-recovery");
 const session_context_tool_buckets_1 = require("../../system/session-context-tool-buckets");
+const unified_session_compaction_1 = require("../../system/unified-session-compaction");
+const session_compaction_core_1 = require("../../system/session-compaction-core");
 const MODEL_VISIBLE_FIXED_BUCKETS = [
     "system",
     "tools",
@@ -383,7 +385,7 @@ function rebuildCurrentSessionContextAccounting(scope, scopeId, memory) {
                 sessionId,
                 system: [{ role: "system", content: context }],
                 tools: globalToolSpecs,
-                activeSummary: compaction.activeSummary || compaction.active_summary || null,
+                activeSummary: memory?.unifiedSessionSummary || compaction.activeSummary || compaction.active_summary || null,
                 recentMessages: recentSessionMessagesForMemoryCenter(scope, scopeId, memory),
                 contextComponents: {
                     rules: {
@@ -754,7 +756,7 @@ function resolveMemoryCenterTokenState(scope, scopeId, memory, options = {}) {
                 || compaction.summarySource
                 || compaction.summary_source
                 || "").toLowerCase();
-            const activeSummary = compaction.activeSummary || compaction.active_summary || null;
+            const activeSummary = memory?.unifiedSessionSummary || compaction.activeSummary || compaction.active_summary || null;
             const summaryTokens = activeSummary && ["model", "session_memory", "session-memory"].includes(summarySource)
                 ? (0, group_compaction_projections_1.estimateGroupMessageTokens)({ role: "system", content: activeSummary })
                 : 0;
@@ -1172,6 +1174,10 @@ function memorySummary(scope, scopeId, memory, label, options = {}) {
         }
         catch { }
     }
+    const unifiedState = ["global", "group", "project"].includes(engineScope)
+        ? { receipt: memory?.unifiedSessionCompaction || null, stateV1: (0, unified_session_compaction_1.projectUnifiedSessionCompactionState)(memory?.unifiedSessionCompaction || memory?.unified_session_compaction) }
+        : null;
+    const unifiedCompaction = (0, unified_session_compaction_1.projectUnifiedCompactionReceipt)(unifiedState?.receipt || null, compaction.summaryQuality || compaction.summary_quality || compactionContainer.summary_quality || null);
     return {
         scope, id: scopeId, label, health: alerts.some(item => item.severity === "critical") ? "critical" : alerts.length ? "warning" : "healthy",
         groupId: groupScope?.groupId || "",
@@ -1218,7 +1224,9 @@ function memorySummary(scope, scopeId, memory, label, options = {}) {
         consecutiveFailures: Number(compaction.consecutiveFailures ?? compaction.consecutive_failures ?? memory?.finalDispatchReactiveCompactCircuitBreaker?.consecutive_failures ?? 0),
         postCompactGate: compaction.postCompactGate || compaction.post_compact_gate || compactionContainer.post_compact_gate || null,
         tokenMeasurement: compaction.tokenMeasurement || compaction.token_measurement || compactionContainer.token_measurement || tokenState.fallbackTokenMeasurement || null,
-        modelVisiblePayload,
+        // Never expose the model-visible body through Memory Center. Keep only
+        // token buckets, checksums and loaded-item metadata.
+        modelVisiblePayload: (0, session_compaction_core_1.modelVisiblePayloadAccounting)(modelVisiblePayload),
         availableContextCatalog: buildAvailableContextCatalog(scope, scopeId, memory, modelVisiblePayload),
         resolvedModelCapacity: compaction.resolvedModelCapacity || compaction.resolved_model_capacity || compactionContainer.resolved_model_capacity || memory?.model?.modelContextCapacity || null,
         pendingRequestTokens: Number(compaction.pendingRequestTokens ?? compaction.pending_request_tokens ?? compactionContainer.pending_request_tokens ?? 0),
@@ -1227,6 +1235,9 @@ function memorySummary(scope, scopeId, memory, label, options = {}) {
         ptlRecoveryAttempts: Number(compaction.ptlRecoveryAttempts ?? compaction.ptl_recovery_attempts ?? compactionContainer.ptl_recovery_attempts ?? 0),
         boundaryGeneration: Number(compaction.boundaryGeneration ?? compaction.boundary_generation ?? 0),
         microCompact: microCompactState,
+        // Safe projection only: no summary body, recovery JSON, prompts, source or stdout.
+        unifiedCompaction,
+        unifiedCompactionState: unifiedState?.stateV1 || null,
         providerContextCache: memoryCenterProviderContextCacheState(scope, scopeId, memory),
         contextEngineTrends,
         contextEngineRecovery: {
@@ -1390,7 +1401,7 @@ function appendSessionContinuityItems(groups, scope, scopeId, memory) {
     if (!isExactGroupSession && !["global_session", "project_session", "task_agent"].includes(scope))
         return;
     const compaction = memory?.compaction?.v2 || memory?.compaction || {};
-    let activeSummaryValue = compaction.activeSummary || memory?.summary || memory?.conversationSummary || "";
+    let activeSummaryValue = memory?.unifiedSessionSummary || compaction.activeSummary || memory?.summary || memory?.conversationSummary || "";
     let summarySource = String(memory?.summarySource || memory?.summary_source || compaction.summarySource || compaction.summary_source || "").toLowerCase();
     if (isExactGroupSession && !activeSummaryValue) {
         const exact = parseGroupMemoryScopeId(scopeId, memory);
@@ -1404,7 +1415,10 @@ function appendSessionContinuityItems(groups, scope, scopeId, memory) {
             summarySource = "session_memory";
         }
     }
-    const activeSummary = readableGlobalSessionSummary(activeSummaryValue);
+    // Session summaries are model-continuity material, not Memory Center
+    // content. Expose only a safe receipt marker; the original transcript and
+    // task ledger remain available to the authorized runtime.
+    const activeSummary = activeSummaryValue ? "已保留会话压缩摘要（正文按需由运行时恢复）" : "";
     const canonicalSummary = ["model", "session_memory", "session-memory"].includes(summarySource);
     if (activeSummary)
         groups.push({
@@ -1413,7 +1427,7 @@ function appendSessionContinuityItems(groups, scope, scopeId, memory) {
                     itemId: `session-summary:${scopeId}`,
                     type: canonicalSummary ? "sessionSummary" : "legacySessionSummary",
                     text: activeSummary,
-                    originalText: activeSummary,
+                    originalText: "",
                     pinned: false,
                     deprecated: false,
                     readOnly: true,
@@ -1422,7 +1436,7 @@ function appendSessionContinuityItems(groups, scope, scopeId, memory) {
                         messageId: compaction.lastCompactedMessageId || "",
                         time: compaction.lastCompactedAt || memory?.lastCompactedAt || "",
                     },
-                    raw: { checksum: compaction.activeSummaryChecksum || compaction.summaryChecksum || "", summarySource, canonical: canonicalSummary },
+                    raw: { checksum: compaction.activeSummaryChecksum || compaction.summaryChecksum || "", summarySource, canonical: canonicalSummary, contentStored: false },
                 }],
         });
     const recent = recentSessionMessagesForMemoryCenter(scope, scopeId, memory);

@@ -55,6 +55,22 @@ async function runProjectMainNativeQueryLoop(input) {
         },
         onUsage: input.captureUsage,
         onRetry: () => { modelRetryCount += 1; },
+        onPlanningPhase: ({ phase, evidenceCount = 0, issueCount = 0 }) => {
+            const summary = phase === "exploring" ? "正在核对当前项目资料"
+                : phase === "drafting" ? `已核对 ${evidenceCount} 项源码证据，正在整理计划`
+                    : phase === "reviewing" ? "正在复核计划范围和验收标准"
+                        : phase === "repairing" ? `计划有 ${issueCount} 处需要修正，正在自动校正`
+                            : phase === "awaiting_user" ? "计划已通过复核，等待确认"
+                                : "计划复核未通过，需要补充依据";
+            (0, user_visible_agent_events_1.publishEphemeralUserVisibleAgentEvent)({
+                eventId: `project-planning:${visibleTurnId}:${phase}`,
+                scope: "project", scopeId: project, exactSessionId: projectSessionId,
+                eventType: "planning_progress",
+                display: { title: "项目主 Agent", summary, status: phase === "invalidated" ? "failed" : phase === "awaiting_user" ? "completed" : "running" },
+                detail: { planning: { phase, evidenceCount, issueCount, contentStored: false } },
+            });
+            input.markVisibleFeedback();
+        },
         onTurn: ({ round, modelCallIndex }) => {
             const activityPhase = toolResults.length ? "tool_result_review" : round ? "tool_decision" : "understanding";
             const activity = (0, model_activity_1.createModelActivityController)({
@@ -139,7 +155,7 @@ async function runProjectMainNativeQueryLoop(input) {
                 callId: preparedToolCallIds[index] || calls[index]?.id || `pmtool_${index}`,
                 name: String(row.name || calls[index]?.name || "unknown"),
                 ok: row.ok !== false,
-                output: row.output ?? row.rawOutput ?? row,
+                output: row.rawOutput ?? row.output ?? row,
                 error: row.error,
                 reason: row.reason,
             }));

@@ -42,7 +42,7 @@ function resolveGroupLiveDispatchPolicy(input) {
         };
     }
     if (input.projectAnalysisRequest) {
-        return { action: "project_analysis", reason: input.taskIntent?.reason, nextStep: "已基于只读项目上下文回答用户" };
+        return { action: "answer", reason: input.taskIntent?.reason, nextStep: "已基于读取结果回答用户" };
     }
     if (input.conversationalOnly) {
         return { action: "answer", reason: input.taskIntent?.reason, nextStep: "已按普通对话回复用户" };
@@ -57,7 +57,8 @@ function runGroupClarificationAttachSelfTest() {
             dispatchPolicy: { action: "direct_answer", reason: "workflow mode is answer" },
             mainAgentTurnDecision: { responseKind: "clarify", reply: "先确认履约方式" },
             workflowDecision: {
-                mode: "answer",
+                actionRequired: false,
+                requiresCodeChanges: false,
                 structuredClarificationQuestions: [{ label: "核销方式", options: [{ label: "到店核销" }] }],
             },
         },

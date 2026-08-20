@@ -1,4 +1,5 @@
 import { type WorkflowDecision } from "./workflow-decision";
+import type { CcmInternalPromptBindings } from "./internal-prompt-contract";
 export type MainAgentTurnResponseKind = "reply" | "tool_calls" | "clarify" | "plan" | "dispatch";
 export type MainAgentTurnDecisionV1 = {
     schema: "ccm-main-agent-turn-decision-v1";
@@ -32,9 +33,16 @@ export type MainAgentTurnReceiptV1 = {
     usage: any;
     inputChecksum: string;
     decisionChecksum: string;
+    promptBindings?: CcmInternalPromptBindings;
     createdAt: string;
     checksum: string;
 };
+export declare function resolveMainAgentTurnResponseKind(input: {
+    parsed?: any;
+    workflowDecision: WorkflowDecision;
+    toolRequests?: any[];
+    dispatchDraft?: any;
+}): MainAgentTurnResponseKind;
 export declare function normalizeMainAgentTurnDecision(input: {
     scope: "global" | "group" | "project";
     scopeId?: string;
@@ -53,6 +61,7 @@ export declare function createMainAgentTurnReceipt(input: {
     toolRound?: number;
     usage?: any;
     inputIdentity?: any;
+    promptBindings?: CcmInternalPromptBindings;
     createdAt?: string;
 }): MainAgentTurnReceiptV1;
 export declare function publicMainAgentTurnDecision(decision: MainAgentTurnDecisionV1): {
@@ -65,4 +74,15 @@ export declare function publicMainAgentTurnDecision(decision: MainAgentTurnDecis
     workflow_decision: WorkflowDecision;
     tool_count: number;
     checksum: string;
+};
+export declare function runMainAgentTurnDecisionSelfTest(): {
+    pass: boolean;
+    checks: {
+        replyStaysReply: boolean;
+        readToolsStayToolCalls: boolean;
+        acceptedDevelopmentDispatches: boolean;
+        ungroundedDispatchFailsClosed: boolean;
+        manualPlanPresents: boolean;
+        epicUsesDispatchWithoutPlan: boolean;
+    };
 };

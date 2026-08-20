@@ -1,4 +1,5 @@
 import * as crypto from "crypto";
+import type { CcmPlanDispatchContractV1, CcmPlanDispatchWorkItem } from "./plan-dispatch-contract";
 import {
   buildWorkerContextPacket,
   compactWorkerContextMemoryForRetry,
@@ -330,19 +331,19 @@ function renderContinuationForWorker(continuation: any) {
   const avoid = stringList(continuation.avoid || continuation.stop_doing || continuation.stopDoing, 8);
   const latest = continuation.latest_user_change || continuation.latestUserChange || continuation.message || continuation.reason || "";
   return [
-    "接续/目标调整说明：",
-    `- 类型：${continuation.kind_label || continuation.kind || "补充要求"}`,
-    continuation.route_label || continuation.routeLabel ? `- 处理方式：${continuation.route_label || continuation.routeLabel}` : "",
-    continuation.replan_required || continuation.replanRequired ? "- 本轮必须先按新目标重新核对计划，不要沿旧方向盲目继续。" : "",
-    continuation.interrupt_current_run || continuation.interruptCurrentRun ? "- 之前可能跑偏的执行轮已经被主 Agent 停止；你需要以本工作包的新目标为准。" : "",
-    latest ? `- 最新用户要求：${compact(latest, 700)}` : "",
-    continuation.current_goal || continuation.currentGoal ? `- 当前目标：${compact(continuation.current_goal || continuation.currentGoal, 900)}` : "",
-    continuation.previous_goal || continuation.previousGoal ? `- 旧目标仅作背景，不得继续旧方向：${compact(continuation.previous_goal || continuation.previousGoal, 700)}` : "",
-    instructions.length ? "具体要求：" : "",
+    "Continuation / goal revision:",
+    `- kind: ${continuation.kind_label || continuation.kind || "supplement"}`,
+    continuation.route_label || continuation.routeLabel ? `- route: ${continuation.route_label || continuation.routeLabel}` : "",
+    continuation.replan_required || continuation.replanRequired ? "- Revalidate the plan against the new goal before acting; do not blindly continue the old direction." : "",
+    continuation.interrupt_current_run || continuation.interruptCurrentRun ? "- The previous potentially misaligned execution round was stopped by the main Agent; follow the new goal in this work package." : "",
+    latest ? `- latest user change: ${compact(latest, 700)}` : "",
+    continuation.current_goal || continuation.currentGoal ? `- current goal: ${compact(continuation.current_goal || continuation.currentGoal, 900)}` : "",
+    continuation.previous_goal || continuation.previousGoal ? `- previous goal is context only; do not continue it: ${compact(continuation.previous_goal || continuation.previousGoal, 700)}` : "",
+    instructions.length ? "Specific instructions:" : "",
     ...instructions.map(item => `- ${item}`),
-    preserved.length ? "需要保留的上下文/证据：" : "",
+    preserved.length ? "Context / evidence to preserve:" : "",
     ...preserved.map(item => `- ${item}`),
-    avoid.length ? "不要继续做：" : "",
+    avoid.length ? "Do not continue:" : "",
     ...avoid.map(item => `- ${item}`),
   ].filter(Boolean).join("\n");
 }
@@ -357,6 +358,13 @@ export interface SelfContainedWorkerHandoffInput {
   workDir?: string;
   agentType?: string;
   model?: string;
+  planDispatchContract?: CcmPlanDispatchContractV1 | null;
+  planId?: string;
+  planRevision?: number;
+  planChecksum?: string;
+  sourceManifestChecksum?: string;
+  contractChecksum?: string;
+  workItemId?: string;
   traceId?: string;
   taskId?: string;
   taskAgentSessionId?: string;
@@ -535,27 +543,62 @@ export function buildSelfContainedWorkerHandoff(input: SelfContainedWorkerHandof
     payloadChecksum: String(input.communicationEnvelope.payloadChecksum || ""),
     contentStored: false,
   } : null;
+  const dispatchContract = input.planDispatchContract || null;
+  const selectedWorkItem: CcmPlanDispatchWorkItem | null = dispatchContract?.workItems?.find((item: any) => String(item?.workItemId || "") === String(input.workItemId || "")) || null;
+  const planBinding = {
+    ...(String(input.planId || dispatchContract?.planId || "").trim() ? { planId: String(input.planId || dispatchContract?.planId || "").trim() } : {}),
+    ...(Number(input.planRevision || dispatchContract?.planRevision || 0) > 0 ? { planRevision: Number(input.planRevision || dispatchContract?.planRevision || 0) } : {}),
+    ...(String(input.planChecksum || dispatchContract?.planChecksum || "").trim() ? { planChecksum: String(input.planChecksum || dispatchContract?.planChecksum || "").trim() } : {}),
+    ...(String(input.sourceManifestChecksum || dispatchContract?.sourceManifestChecksum || "").trim() ? { sourceManifestChecksum: String(input.sourceManifestChecksum || dispatchContract?.sourceManifestChecksum || "").trim() } : {}),
+    ...(String(input.contractChecksum || selectedWorkItem?.contractChecksum || dispatchContract?.contractChecksum || "").trim() ? { contractChecksum: String(input.contractChecksum || selectedWorkItem?.contractChecksum || dispatchContract?.contractChecksum || "").trim() } : {}),
+    ...(String(input.workItemId || selectedWorkItem?.workItemId || "").trim() ? { workItemId: String(input.workItemId || selectedWorkItem?.workItemId || "").trim() } : {}),
+    contentStored: false as const,
+  };
+  const boundCommunicationEnvelope = communicationEnvelope ? {
+    ...communicationEnvelope,
+    ...(planBinding.planId ? { planId: planBinding.planId } : {}),
+    ...(planBinding.planRevision ? { planRevision: planBinding.planRevision } : {}),
+    ...(planBinding.planChecksum ? { planChecksum: planBinding.planChecksum } : {}),
+    ...(planBinding.contractChecksum ? { contractChecksum: planBinding.contractChecksum } : {}),
+    ...(planBinding.sourceManifestChecksum ? { sourceManifestChecksum: planBinding.sourceManifestChecksum } : {}),
+  } : null;
   const handoff = {
     schema: "ccm-self-contained-worker-handoff-v2",
     handoff_id: `wh_${hash([project, task, input.traceId, input.taskId, workerContextPacket?.packet_id], 16)}`,
     project,
-    source: String(input.source || "主 Agent 派发").trim(),
-    reason: String(input.reason || "主 Agent 根据用户目标和项目职责分派").trim(),
+    source: String(input.source || "main Agent dispatch").trim(),
+    reason: String(input.reason || "main Agent dispatch based on the user goal and project responsibility").trim(),
     user_goal: userGoal,
     task,
     work_dir: String(input.workDir || "").trim(),
     agent_type: String(input.agentType || "").trim(),
-    communication_envelope: communicationEnvelope,
+    communication_envelope: boundCommunicationEnvelope,
     worker_context_packet: workerContextPacket,
+    plan_binding: planBinding,
+    work_item_contract: selectedWorkItem ? {
+      project: selectedWorkItem.project,
+      files: selectedWorkItem.files,
+      dependsOn: selectedWorkItem.dependsOn,
+      parallelGroup: selectedWorkItem.parallelGroup,
+      allowedTools: selectedWorkItem.allowedTools,
+      forbiddenPaths: selectedWorkItem.forbiddenPaths,
+      acceptance: selectedWorkItem.acceptance,
+      verification: selectedWorkItem.verification,
+      worktree: selectedWorkItem.worktree,
+      executor: selectedWorkItem.executor,
+      timeoutMs: selectedWorkItem.timeoutMs,
+      maxAttempts: selectedWorkItem.maxAttempts,
+      contentStored: false,
+    } : null,
     scope: {
       allowed: allowedScope.length ? allowedScope : [
-        project ? `只在 ${project} 项目职责和当前工作目录内处理` : "只处理本工作单明确范围",
-        "只做满足目标所需的最小必要改动",
+        project ? `Work only within the ${project} responsibility and current work directory` : "Work only within the explicit scope of this work item",
+        "Make only the minimum changes required to satisfy the goal",
       ],
       forbidden: forbiddenScope.length ? forbiddenScope : [
-        "不要修改无关模块",
-        "不要回退或覆盖用户已有改动",
-        "不要编造未执行的验证、文件变更或依赖结论",
+        "Do not modify unrelated modules",
+        "Do not revert or overwrite existing user changes",
+        "Do not invent unexecuted verification, file changes, or dependency conclusions",
       ],
       expected_files: expectedFiles,
       dependencies,
@@ -827,69 +870,71 @@ export function renderSelfContainedWorkerHandoff(handoff: any) {
   const globalMemoryHealthGate = renderGlobalMemoryHealthGate(handoff?.references?.global_memory_health_gate || extractGlobalMemoryHealthGate(handoff?.worker_context_packet?.memory || null));
   const apiMicrocompactNativeApplyPlan = renderApiMicrocompactNativeApplyPlan(handoff?.references?.api_microcompact_native_apply_plan || extractApiMicrocompactNativeApplyPlan(handoff?.worker_context_packet?.memory || null));
   return [
-    "【主 Agent 自包含 Worker 工作包】",
+    "[CCM self-contained worker work package]",
     `schema: ${handoff?.schema || "ccm-self-contained-worker-handoff-v1"}`,
     `handoff_id: ${handoff?.handoff_id || ""}`,
     handoff?.communication_envelope?.messageId ? `communication_message_id: ${handoff.communication_envelope.messageId}` : "",
     "",
-    "重要原则：你看不到用户和主 Agent 的完整历史对话，以下内容就是完成任务所需的完整上下文。不要用泛泛的历史引用来代替理解；必须把你实际理解、实际动作和证据写清楚。",
+    "Principle: you do not have the complete user or main-Agent conversation. The content below is the complete context required for this assignment. Do not replace understanding with vague historical references; state your actual interpretation, actions, and evidence.",
     "",
     packetText,
     "",
-    "用户目标：",
+    "User goal:",
     compact(handoff?.user_goal || handoff?.task || "", 1000),
     "",
-    "为什么交给你：",
-    `- 来源：${handoff?.source || "主 Agent 派发"}`,
-    `- 原因：${handoff?.reason || "你的项目职责匹配本工作单"}`,
-    handoff?.work_dir ? `- 工作目录：${handoff.work_dir}` : "",
-    handoff?.agent_type ? `- 执行器：${handoff.agent_type}` : "",
+    "Why this is assigned to you:",
+    `- source: ${handoff?.source || "main Agent dispatch"}`,
+    `- reason: ${handoff?.reason || "your project responsibility matches this work item"}`,
+    handoff?.work_dir ? `- work directory: ${handoff.work_dir}` : "",
+    handoff?.agent_type ? `- executor: ${handoff.agent_type}` : "",
     "",
-    "本次任务：",
+    "Assignment:",
     compact(handoff?.task || "", 1600),
+    handoff?.plan_binding?.planId ? "\nPlan dispatch binding:\n" + JSON.stringify(handoff.plan_binding) : "",
+    handoff?.work_item_contract ? "\nCurrent work-item contract:\n" + JSON.stringify(handoff.work_item_contract) : "",
     "",
     renderContinuationForWorker(handoff?.scope?.continuation || null),
     "",
-    "允许范围：",
+    "Allowed scope:",
     ...(handoff?.scope?.allowed || []).map((item: string) => `- ${item}`),
     "",
-    "禁止范围：",
+    "Forbidden scope:",
     ...(handoff?.scope?.forbidden || []).map((item: string) => `- ${item}`),
     "",
-    "前置依赖/其他 Agent 输出：",
+    "Dependencies / other Agent outputs:",
     dependencies,
     "",
-    "文档/约束/契约依据：",
+    "Document / constraint / contract evidence:",
     ...(handoff?.references?.document_findings || []).map((item: string) => `- ${compact(item, 260)}`),
-    ...(handoff?.references?.constraints || []).map((item: string) => `- 用户约束：${compact(item, 260)}`),
+    ...(handoff?.references?.constraints || []).map((item: string) => `- user constraint: ${compact(item, 260)}`),
     contractInjections,
-    handoff?.references?.memory_summary ? `- 记忆摘要：${compact(handoff.references.memory_summary, 700)}` : "",
+    handoff?.references?.memory_summary ? `- memory summary: ${compact(handoff.references.memory_summary, 700)}` : "",
     "",
-    "平台记忆/上下文：",
+    "Platform memory / context:",
     memoryFreshnessGate,
     globalMemoryHealthGate,
     apiMicrocompactNativeApplyPlan,
     postCompactReinjectionGate,
     postCompactDispatchMarker,
     readPlanRevalidationGate,
-    trustedMemoryEnvelope || "- 无平台记忆；只依据本工作单、文件和当前上下文执行。",
+    trustedMemoryEnvelope || "- No platform memory; act only on this work package, files, and current context.",
     "",
-    "完成判定：",
+    "Completion criteria:",
     ...(handoff?.done_criteria || []).map((item: string) => `- ${item}`),
     "",
-    "验证要求：",
-    `- ${handoff?.verification?.required || "运行与改动范围匹配的验证"}`,
-    ...(handoff?.verification?.hints || []).map((item: string) => `- 推荐验证：${item}`),
-    ...(handoff?.verification?.acceptance || []).map((item: string) => `- 验收标准：${item}`),
+    "Verification requirements:",
+    `- ${handoff?.verification?.required || "Run verification that matches the change scope."}`,
+    ...(handoff?.verification?.hints || []).map((item: string) => `- suggested verification: ${item}`),
+    ...(handoff?.verification?.acceptance || []).map((item: string) => `- acceptance criterion: ${item}`),
     "",
     "ACK gate：",
-    `- ${handoff?.ack_gate?.rule || "实现前先确认目标、范围和验证计划。"}`,
-    `- 字段：${(handoff?.ack_gate?.fields || []).join("、")}`,
+    `- ${handoff?.ack_gate?.rule || "Confirm the goal, scope, and verification plan before implementation."}`,
+    `- fields: ${(handoff?.ack_gate?.fields || []).join(", ")}`,
     handoff?.communication_envelope?.messageId
       ? `- 通信身份：task=${handoff.communication_envelope.taskId} workItem=${handoff.communication_envelope.workItemId} session=${handoff.communication_envelope.exactSessionId} generation=${handoff.communication_envelope.generation} attempt=${handoff.communication_envelope.attempt} lease=${handoff.communication_envelope.leaseId}`
       : "",
     handoff?.communication_envelope?.messageId
-      ? "- 使用 ccm__agent_communication：先 acknowledge_assignment；执行期间 heartbeat/report_progress；需要其他 Agent 时 request_coordination/request_review；完成时 submit_result。第三方 Agent 不得自行提交 terminal。"
+      ? "- Use ccm__agent_communication: acknowledge_assignment first; heartbeat/report_progress during execution; request_coordination/request_review when another Agent is needed; submit_result on completion. Third-party Agents must not submit terminal themselves."
       : "",
     "",
     renderReceiptSchemaForWorker(handoff),
@@ -988,12 +1033,12 @@ export function runWorkerHandoffSelfTest() {
   const checks = {
     schema: handoff.schema === "ccm-self-contained-worker-handoff-v2",
     packet: !!handoff.worker_context_packet?.packet_id && rendered.includes("WorkerContextPacket"),
-    selfContainedPrinciple: rendered.includes("你看不到用户和主 Agent 的完整历史对话"),
-    goalAndScope: rendered.includes("用户目标") && rendered.includes("允许范围") && rendered.includes("禁止范围"),
-    doneAndVerification: rendered.includes("完成判定") && rendered.includes("验证要求"),
+    selfContainedPrinciple: rendered.includes("you do not have the complete user or main-Agent conversation"),
+    goalAndScope: rendered.includes("User goal:") && rendered.includes("Allowed scope:") && rendered.includes("Forbidden scope:"),
+    doneAndVerification: rendered.includes("Completion criteria:") && rendered.includes("Verification requirements:"),
     ackAndReceipt: rendered.includes("ACK gate") && rendered.includes("CCM_AGENT_RECEIPT"),
     dependencyAndInjection: rendered.includes("backend") && rendered.includes("injection_id"),
-    memoryContextPreserved: handoff.worker_context_packet?.memory?.schema === "ccm-group-memory-context-v1" && rendered.includes("平台记忆/上下文") && rendered.includes("负责人筛选必须保留权限校验"),
+    memoryContextPreserved: handoff.worker_context_packet?.memory?.schema === "ccm-group-memory-context-v1" && rendered.includes("Platform memory / context:") && rendered.includes("负责人筛选必须保留权限校验"),
     globalMemoryHealthGatePreserved: handoff.references?.global_memory_health_gate?.gate_id === "ggmh_worker_handoff_selftest"
       && rendered.includes("Global Agent memory health gate")
       && rendered.includes("ggmh_worker_handoff_selftest"),
@@ -1009,7 +1054,7 @@ export function runWorkerHandoffSelfTest() {
       && rendered.includes("pcfd_worker_handoff_selftest")
       && rendered.includes("first=true"),
     continuationHandoffRendered: handoff.scope?.continuation?.schema === "ccm-worker-continuation-handoff-v1"
-      && rendered.includes("接续/目标调整说明")
+      && rendered.includes("Continuation / goal revision:")
       && rendered.includes("先停止当前轮再重核计划")
       && rendered.includes("不要继续已停止执行轮中的旧方向")
       && rendered.includes("最新用户要求"),

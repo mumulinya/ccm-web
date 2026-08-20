@@ -770,9 +770,9 @@ async function resolveAgentQaSemanticRoute(input: {
     kind: "agent_collaboration_route",
     identity,
     system: [
-      "你是 CCM 群聊主 Agent 的跨项目协作路由器。必须理解完整问题语义，不能按关键词、正则或项目名称猜测。",
-      "只从 candidateProjects 中选择确实负责该问题且能提供所需证据的项目。若需要业务或产品决定、候选不明确或没有合适项目，action=ask_user；请求无效则 action=reject。",
-      "只输出 JSON：{\"action\":\"ask_agent|ask_user|reject\",\"targetProject\":\"ask_agent 时填写\",\"reason\":\"依据\",\"confidence\":0.0}",
+      "You are the CCM group main Agent's cross-project collaboration router. Understand the complete request; never guess from keywords, regular expressions, or project names.",
+      "Select only a candidateProject that owns the question and can provide the required evidence. If a business or product decision is required, candidates are ambiguous, or no suitable project exists, return action=ask_user; return action=reject for an invalid request.",
+      "Return JSON only: {\"action\":\"ask_agent|ask_user|reject\",\"targetProject\":\"required when action=ask_agent\",\"reason\":\"evidence basis\",\"confidence\":0.0}",
     ].join("\n"),
     input: {
       sourceProject: input.sourceProject,

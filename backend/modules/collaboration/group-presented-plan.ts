@@ -1,10 +1,17 @@
 import { appendUserVisibleRequirementPlan } from "../../system/user-visible-agent-events";
 import { attachPresentedPlanQuality } from "../../agents/presented-plan-quality";
+import {
+  normalizeImplementationPlanV2,
+  implementationPlanChecksum,
+  renderImplementationPlanMarkdown,
+  validateImplementationPlanV2,
+  type CcmImplementationPlanV2,
+} from "../../agents/implementation-plan";
 
 export const COORDINATOR_PRESENTED_PLAN_HEADLINE = "计划已经整理完成，请查看下面的待办。";
 export const PRESENTED_PLAN_AUTHORING_SKILL = "ccm-implementation-plan-authoring";
-export const PRESENTED_PLAN_SHAPE_GUIDANCE = "计划稿形状见 Skill:ccm-implementation-plan-authoring。";
-export const PRESENTED_PLAN_DISPATCH_HANDOFF_GUIDANCE = "已确认计划卡交接见 Skill:ccm-implementation-plan-authoring。";
+export const PRESENTED_PLAN_SHAPE_GUIDANCE = "Use the ccm-implementation-plan-v2 contract from Skill:ccm-implementation-plan-authoring.";
+export const PRESENTED_PLAN_DISPATCH_HANDOFF_GUIDANCE = "Dispatch only confirmed plan slices bound to revision and checksum.";
 
 function compactText(value: any, max = 400) {
   return String(value || "").replace(/\s+/g, " ").trim().slice(0, max);
@@ -84,24 +91,68 @@ export function normalizePresentedGroupPlan(input: {
   const overview = compactText(source.overview || source.body || "", 4000);
   const goal = compactText(source.goal || source.summary || source.objective || overview || input.goalFallback, 1200);
   if (!planId || !goal) return null;
-  return {
+  const createdAt = compactText(source.createdAt || source.created_at, 40) || new Date().toISOString();
+  const updatedAt = compactText(source.updatedAt || source.updated_at, 40) || createdAt;
+  const canonical = normalizeImplementationPlanV2({
+    ...source,
     planId,
-    revision: Math.max(1, Number(source.revision || 1)),
-    title: compactText(source.title, 80) || "实施计划",
     goal,
-    ...(overview ? { overview } : {}),
+    overview,
     steps,
+    createdAt,
+    updatedAt,
+  }, { planId });
+  const base = canonical || {
+    schema: "ccm-implementation-plan-v2",
+    planId,
+    title: compactText(source.title, 80) || "实施计划",
+    context: overview || goal,
+    goal,
+    approach: overview || goal,
     scope: asList(source.scope || source.scopes).map((item: any) => compactText(item, 300)).filter(Boolean),
-    expectedResults: asList(source.expectedResults || source.expected_results).map((item: any) => compactText(item, 600)).filter(Boolean),
+    files: [],
+    steps: steps.map((step: any) => ({
+      id: step.id,
+      title: step.title,
+      objective: step.description || step.title,
+      dependsOn: [],
+      acceptance: step.outcome ? [step.outcome] : [],
+      status: step.status,
+    })),
+    verification: [],
+    risks: [],
     exclusions: asList(source.exclusions || source.outOfScope || source.out_of_scope || source.boundaries).map((item: any) => compactText(item, 600)).filter(Boolean),
+    openQuestions: [],
+    revision: Math.max(1, Number(source.revision || 1)),
+    checksum: "",
+    promptVersion: "2026-08-18.en-v2",
+    outputLanguage: "zh-CN",
+    contentStored: false as const,
+  } as CcmImplementationPlanV2;
+  const result: any = {
+    ...base,
+    planId,
+    revision: Math.max(1, Number(source.revision || base.revision || 1)),
+    title: compactText(source.title, 80) || base.title || "实施计划",
+    goal,
+    context: compactText(source.context || overview || goal, 2400),
+    approach: compactText(source.approach || overview || goal, 2400),
+    overview: overview || goal,
+    steps: base.steps?.length ? base.steps : steps,
+    expectedResults: asList(source.expectedResults || source.expected_results).map((item: any) => compactText(item, 600)).filter(Boolean),
+    exclusions: base.exclusions?.length ? base.exclusions : asList(source.exclusions || source.outOfScope || source.out_of_scope || source.boundaries).map((item: any) => compactText(item, 600)).filter(Boolean),
     status: input.status || "ready",
-    createdAt: compactText(source.createdAt || source.created_at, 40) || new Date().toISOString(),
-    updatedAt: compactText(source.updatedAt || source.updated_at, 40) || new Date().toISOString(),
+    createdAt,
+    updatedAt,
+    quality: { v2: validateImplementationPlanV2(base) },
   };
+  result.checksum = implementationPlanChecksum(result);
+  return result;
 }
 
 export function formatPresentedPlanMarkdown(plan: any) {
   if (!plan || typeof plan !== "object") return "";
+  if (plan.schema === "ccm-implementation-plan-v2") return renderImplementationPlanMarkdown(plan);
   const title = compactText(plan.title, 80) || "实施计划";
   const overview = compactText(plan.overview || plan.goal, 4000);
   const steps = presentedPlanSteps(plan)
@@ -182,9 +233,12 @@ export function presentedPlanFromTask(task: any) {
 export function presentedPlanAcceptanceLines(plan: any) {
   if (!plan || typeof plan !== "object") return [];
   const overview = compactText(plan.overview || plan.goal, 400);
-  const steps = presentedPlanSteps(plan)
-    .map((step: any) => compactText(step?.title || step?.label, 160))
-    .filter(Boolean);
+  const steps = presentedPlanSteps(plan).flatMap((step: any) => {
+    const title = compactText(step?.title || step?.label, 160);
+    const acceptance = asList(step?.acceptance || step?.acceptanceCriteria || step?.acceptance_criteria)
+      .map((item: any) => compactText(item, 300)).filter(Boolean);
+    return [title, ...acceptance.map(item => `Acceptance: ${item}`)].filter(Boolean);
+  });
   return [overview, ...steps].filter(Boolean);
 }
 
@@ -193,7 +247,8 @@ export function appendConfirmedPlanSliceContract(taskText: any, plan: any) {
   const lines = presentedPlanAcceptanceLines(plan);
   if (!lines.length) return task;
   if (task.includes(CONFIRMED_SLICE_CONTRACT_MARK)) return task;
-  return [task, "", `${CONFIRMED_SLICE_CONTRACT_MARK}，须覆盖；不要重写成前端/后端/测试分工）：`, ...lines.map((line: string) => `- ${line}`)]
+  const binding = `Plan binding: revision=${Math.max(1, Number(plan?.revision || 1))}, checksum=${compactText(plan?.checksum, 160) || "missing"}`;
+  return [task, "", `${CONFIRMED_SLICE_CONTRACT_MARK}; cover these confirmed slices and do not rewrite them as frontend/backend/test workstreams:`, binding, ...lines.map((line: string) => `- ${line}`)]
     .filter((item: string) => item !== "")
     .join("\n");
 }
@@ -342,7 +397,7 @@ export function runGroupPresentedPlanSelfTest() {
     oneLineTodos: plan?.steps?.every((step: any) => String(step.title || "").includes("\n") === false) === true,
     dropsLongStepEssay: String(verbosePlan?.steps?.[0]?.description || "").length <= 200
       && String(verbosePlan?.steps?.[0]?.outcome || "").length <= 160,
-    markdownHasTodos: markdown.includes("- llm-client 增加 callNativeAgentTurn") && markdown.includes("本次不包含：子 Agent CLI"),
+    markdownHasTodos: markdown.includes("llm-client 增加 callNativeAgentTurn") && markdown.includes("子 Agent CLI"),
     markdownOmitsEssay: markdown.includes("要做") === false && markdown.includes("完成后") === false,
     markdownEmptyWithoutBody: formatPresentedPlanMarkdown({ title: "登录修复计划" }) === "",
     conversationalKeepsPlan: conversational.presentedPlan?.steps?.length === 2,
@@ -351,15 +406,12 @@ export function runGroupPresentedPlanSelfTest() {
       projectAnalysis: true,
       presentedPlan: plan,
     }).presentedPlan == null,
-    dropsStepProject: layered?.steps?.[0]?.title === "占住资源"
-      && layered?.steps?.[0]?.project == null
-      && layered?.steps?.[0]?.dependsOn == null,
-    shapePointsToSkill: PRESENTED_PLAN_SHAPE_GUIDANCE === "计划稿形状见 Skill:ccm-implementation-plan-authoring。"
-      && /Skill:ccm-implementation-plan-authoring/.test(PRESENTED_PLAN_SHAPE_GUIDANCE)
-      && /一行待办/.test(PRESENTED_PLAN_SHAPE_GUIDANCE) === false,
-    handoffPointsToSkill: PRESENTED_PLAN_DISPATCH_HANDOFF_GUIDANCE === "已确认计划卡交接见 Skill:ccm-implementation-plan-authoring。"
-      && /Skill:ccm-implementation-plan-authoring/.test(PRESENTED_PLAN_DISPATCH_HANDOFF_GUIDANCE)
-      && /必须覆盖卡片每条切片的验收口径/.test(PRESENTED_PLAN_DISPATCH_HANDOFF_GUIDANCE) === false,
+    keepsV2StepDependencies: layered?.steps?.[0]?.title === "占住资源"
+      && Array.isArray(layered?.steps?.[0]?.dependsOn)
+      && layered?.schema === "ccm-implementation-plan-v2",
+    shapePointsToSkill: /ccm-implementation-plan-v2/.test(PRESENTED_PLAN_SHAPE_GUIDANCE)
+      && /Skill:ccm-implementation-plan-authoring/.test(PRESENTED_PLAN_SHAPE_GUIDANCE),
+    handoffBindsRevision: /revision and checksum/.test(PRESENTED_PLAN_DISPATCH_HANDOFF_GUIDANCE),
     appendsSliceContract: contract.includes("已确认切片") && contract.includes("占住资源")
       && appendConfirmedPlanSliceContract(contract, layered) === contract,
     mergesAcceptance: merged[0] === "占住后超时从下单时钟释放。" && merged.includes("占住资源") && merged.includes("命令 npm test 必须成功执行。"),

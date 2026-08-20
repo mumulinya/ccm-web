@@ -1,4 +1,5 @@
 import * as crypto from "crypto";
+import type { CcmInternalPromptBindings, CcmInternalPromptDescriptor } from "../agents/internal-prompt-contract";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -136,6 +137,7 @@ export type UserVisibleAgentEvent = {
       safeLabel: string;
       contentStored: false;
     };
+    promptBindings?: CcmInternalPromptBindings;
     liveProgress?: {
       phase: "starting" | "running" | "testing" | "building" | "finishing" | "retrying";
       safeSummary: string;
@@ -267,6 +269,36 @@ function compactText(value: any, max = 500) {
 }
 function uniqueStrings(value: any, max = 100) {
   return [...new Set((Array.isArray(value) ? value : value == null ? [] : [value]).map(item => compactText(item, 500)).filter(Boolean))].slice(0, max);
+}
+
+function sanitizePromptDescriptor(value: any): CcmInternalPromptDescriptor | null {
+  if (!value || typeof value !== "object" || value.schema !== "ccm-internal-prompt-v1" || value.language !== "en" || value.visibility !== "internal_only") return null;
+  const promptId = compactText(value.promptId, 160);
+  const promptVersion = compactText(value.promptVersion, 80);
+  const scope = ["global", "group", "project", "child_agent", "test_agent", "runtime"].includes(String(value.scope)) ? value.scope : "runtime";
+  const checksum = compactText(value.checksum, 128);
+  if (!promptId || !promptVersion || !checksum || value.contentStored !== false) return null;
+  return { schema: "ccm-internal-prompt-v1", promptId, promptVersion, language: "en", scope, visibility: "internal_only", checksum, contentStored: false };
+}
+
+function sanitizePromptBindings(value: any): CcmInternalPromptBindings | null {
+  if (!value || typeof value !== "object") return null;
+  const skills = (Array.isArray(value.skills) ? value.skills : []).map((item: any) => ({
+    name: compactText(item?.name, 160),
+    ...(item?.version ? { version: compactText(item.version, 80) } : {}),
+    checksum: compactText(item?.checksum, 128),
+    language: "en" as const,
+  })).filter((item: any) => item.name && item.checksum);
+  const mcp = (Array.isArray(value.mcp) ? value.mcp : []).map((item: any) => ({
+    name: compactText(item?.name, 160),
+    ...(item?.version ? { version: compactText(item.version, 80) } : {}),
+    checksum: compactText(item?.checksum, 128),
+    language: "en" as const,
+  })).filter((item: any) => item.name && item.checksum);
+  const system = sanitizePromptDescriptor(value.system);
+  const developer = sanitizePromptDescriptor(value.developer);
+  if (!system && !developer && !skills.length && !mcp.length) return null;
+  return { ...(system ? { system } : {}), ...(developer ? { developer } : {}), skills, mcp };
 }
 
 export function sanitizeUserVisibleAgentDetail(value: any, depth = 0, seen = new WeakSet<object>()): any {
@@ -646,6 +678,9 @@ export function normalizeUserVisibleAgentEvent(input: any, sequence = 0): UserVi
         contentStored: false as const,
       },
     } : {}),
+    ...(sanitizePromptBindings(detailSource.promptBindings || detailSource.prompt_bindings)
+      ? { promptBindings: sanitizePromptBindings(detailSource.promptBindings || detailSource.prompt_bindings)! }
+      : {}),
     ...(detailSource.liveProgress && typeof detailSource.liveProgress === "object"
       && ["starting", "running", "testing", "building", "finishing", "retrying"].includes(String(detailSource.liveProgress.phase))
       && compactText(detailSource.liveProgress.safeSummary, 160) ? {
@@ -1034,7 +1069,7 @@ export function runUserVisibleAgentEventSelfTest() {
     detail: { progress: { kind: "key_finding", text: "完成接口定位", modelCallIndex: 1, relatedToolCallIds: [], batchId: "batch-1", milestoneChecksum: "sum" }, causalRefs: { planStepId: "step-1", dependencyIds: ["dep-1"] } },
   }, 2);
   const longProgress = sanitizeAssistantProgressText(`我会先检查当前项目结构和配置，再定位实际启动入口。${"这是不应继续展示的冗长说明。".repeat(20)}`);
-  const protocolProgress = sanitizeAssistantProgressText('{"workflowDecision":{"mode":"project_analysis"},"selectedSkills":[]}');
+  const protocolProgress = sanitizeAssistantProgressText('{"workflowDecision":{"actionRequired":false},"selectedSkills":[]}');
   const globalDispatch = appendToolProjection({
     scope: "global", scopeId: "global", exactSessionId: "session-global-dispatch", eventId: "global-dispatch-stage",
     eventType: "tool_completed", toolName: "dispatch_project_task", toolCallId: "dispatch-1",

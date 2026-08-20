@@ -39,11 +39,9 @@ function coordinatorShouldFailEmptyVisibleReply(input = {}) {
         return false;
     if (coordinatorChoseClarify(input.parsed))
         return false;
-    const mode = String(input.workflowMode || input.parsed?.workflowDecision?.mode || "").toLowerCase();
     return !!(String(input.priorPlanDraft || "").trim()
         || Number(input.observationCount || 0) > 0
-        || String(input.parsed?.responseType || "").toLowerCase() === "plan"
-        || mode === "plan_task");
+        || String(input.parsed?.responseType || "").toLowerCase() === "plan");
 }
 function applySynthesizedCoordinatorReply(parsed, synthesized) {
     const text = String(synthesized || "").trim();
@@ -75,7 +73,6 @@ function coordinatorVisibleFallbackContent(input) {
         parsed,
         priorPlanDraft: input.priorPlanDraft,
         observationCount: input.observationCount,
-        workflowMode: input.analysis?.workflowDecision?.mode,
     })) {
         return "";
     }

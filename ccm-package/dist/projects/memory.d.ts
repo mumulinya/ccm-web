@@ -41,9 +41,7 @@ export declare function buildProjectExecutionBrief(project: string, taskText: st
     memoryDeliveryMode?: "prompt" | "mcp";
     memorySnapshotId?: string;
 }): string;
-export declare function buildProjectConversationBrief(project: string, message: string, options?: {
-    analysis?: boolean;
-}): string;
+export declare function buildProjectConversationBrief(project: string, message: string): string;
 export declare function runProjectMemorySelfTest(): {
     pass: boolean;
     checks: {

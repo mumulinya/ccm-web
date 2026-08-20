@@ -36,6 +36,7 @@ const props = defineProps({
   getAssignmentStatusLabel: { type: Function, default: (value) => value || '待执行' },
   getAgentDisplayName: { type: Function, default: (value) => value || 'Agent' },
   messageKey: { type: String, default: '' },
+  planOwnedByDock: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['step-action', 'task-action', 'open-pipeline', 'open-file-diff', 'failure-action', 'clarify-reply'])
@@ -51,7 +52,7 @@ const showInlineClarify = computed(() => {
   return !!summary && ['waiting_user', 'waiting_clarification', 'needs_user', 'pending'].includes(String(summary.status || '').toLowerCase())
 })
 const showClarificationSummary = () => !structuredClarification() || structuredClarification()?.status !== 'pending'
-const showTaskControlCard = computed(() => props.primaryTaskCard && taskCardNeedsConversationControl(props.taskCard))
+const showTaskControlCard = computed(() => props.primaryTaskCard && taskCardNeedsConversationControl(props.taskCard, { planOwnedByDock: props.planOwnedByDock }))
 const textOnly = computed(() => !(
   showInlineClarify.value
   || (clarificationSummary() && showClarificationSummary())
@@ -145,6 +146,7 @@ const plainAnswer = computed(() => textOnly.value && !isRecoverableModelFailure.
       v-if="showTaskControlCard"
       :card="taskCard"
       :runtime="taskRuntime"
+      :suppress-plan="planOwnedByDock"
       @action="emit('task-action', $event)"
     />
     <div v-if="deliverySummary() && !taskCard" class="delivery-summary-actions">

@@ -4,6 +4,7 @@ exports.conversationPlanModeSupported = void 0;
 exports.isConversationPlanModeEnabled = isConversationPlanModeEnabled;
 exports.conversationPlanModeWouldCauseSideEffect = conversationPlanModeWouldCauseSideEffect;
 exports.conversationPlanModeHoldsParsed = conversationPlanModeHoldsParsed;
+exports.applyInteractiveConversationModePolicy = applyInteractiveConversationModePolicy;
 exports.holdConversationPlanModeParsed = holdConversationPlanModeParsed;
 exports.applyConversationPlanModeHold = applyConversationPlanModeHold;
 exports.applyConversationPlanModeToRound = applyConversationPlanModeToRound;
@@ -31,9 +32,37 @@ function conversationPlanModeWouldCauseSideEffect(input) {
 }
 function conversationPlanModeHoldsParsed(parsed) {
     const responseType = String(parsed?.responseType || parsed?.response_type || "").toLowerCase();
+    const workflowDecision = parsed?.workflowDecision || parsed?.workflow_decision || {};
     return WRITE_RESPONSE_TYPES.has(responseType)
         || parsed?.shouldDelegate === true
-        || parsed?.should_delegate === true;
+        || parsed?.should_delegate === true
+        || workflowDecision?.actionRequired === true
+        || workflowDecision?.action_required === true;
+}
+// In interactive project/group conversations, the user-selected mode owns the
+// visible planning boundary. Workflow decisions carry capabilities only;
+// only the exact-session Plan Mode may turn a write request into a plan card.
+function applyInteractiveConversationModePolicy(scope, planModeEnabled, parsed) {
+    if (!["project", "group"].includes(scope) || planModeEnabled)
+        return parsed;
+    const source = parsed && typeof parsed === "object" ? parsed : {};
+    const decision = source.workflowDecision || source.workflow_decision || {};
+    const actionRequired = decision?.actionRequired === true || decision?.action_required === true;
+    const requiresCodeChanges = decision?.requiresCodeChanges === true || decision?.requires_code_changes === true;
+    const development = actionRequired || requiresCodeChanges;
+    const responseType = String(source.responseType || source.response_type || "").toLowerCase();
+    if (!development && responseType !== "plan") {
+        return source;
+    }
+    // A model-submitted plan is a user-visible proposal even outside the manual
+    // slash Plan Mode. Only an explicit dispatch is executable here.
+    const nextResponseType = responseType === "plan" ? "plan" : responseType;
+    return {
+        ...source,
+        ...(nextResponseType ? { responseType: nextResponseType, response_type: nextResponseType } : {}),
+        workflowDecision: decision,
+        workflow_decision: decision,
+    };
 }
 function holdConversationPlanModeParsed(parsed) {
     return {
@@ -46,7 +75,6 @@ function holdConversationPlanModeParsed(parsed) {
         assignments: [],
         workflowDecision: {
             ...(parsed?.workflowDecision || parsed?.workflow_decision || {}),
-            mode: "plan_task",
             actionRequired: false,
             requiresCodeChanges: false,
             requiresUserConfirmation: false,
@@ -168,9 +196,17 @@ function runConversationPlanModeGateSelfTest() {
     const readAllowed = conversationPlanModeWouldCauseSideEffect({ toolName: "inspect_system", knownTool: true, isReadOnly: true });
     const groupIdentity = conversationPlanModeIdentityFromTask({ group_id: "g1", group_session_id: "gcs_1", target_project: "api", project_session_id: "ps_1" });
     const projectIdentity = conversationPlanModeIdentityFromTask({ target_project: "api", project_session_id: "ps_1" });
+    const agentModePlanTask = applyInteractiveConversationModePolicy("project", false, {
+        responseType: "plan",
+        workflowDecision: { actionRequired: true, requiresCodeChanges: true, needsEpicDecomposition: false },
+    });
+    const manualPlanTask = applyInteractiveConversationModePolicy("project", true, {
+        responseType: "plan",
+        workflowDecision: { actionRequired: false, requiresCodeChanges: false, needsEpicDecomposition: false },
+    });
     const checks = {
         holdClearsDispatch: held.responseType === "plan" && held.shouldDelegate === false && Array.isArray(held.targets) && held.targets.length === 0,
-        holdClearsProjectDelegate: held.should_delegate === false && held.workflowDecision?.mode === "plan_task",
+        holdClearsProjectDelegate: held.should_delegate === false && held.workflowDecision?.actionRequired === false,
         readToolsPass: readRound.stopLoop === false && readRound.requests.map((item) => item.name).join(",") === "read_file,glob_files" && readRound.held === false,
         writeToolsHeld: writeRound.stopLoop === true && writeRound.requests.length === 0 && writeRound.parsed?.responseType === "plan",
         unknownToolsHeld: mixedRound.requests.map((item) => item.name).join(",") === "read_file"
@@ -181,6 +217,10 @@ function runConversationPlanModeGateSelfTest() {
         readToolOpen: readAllowed === false,
         groupSessionWins: groupIdentity?.scope === "group" && groupIdentity.exactSessionId === "gcs_1",
         projectIdentityResolved: projectIdentity?.scope === "project" && projectIdentity.scopeId === "api",
+        agentModeKeepsModelPlan: agentModePlanTask.responseType === "plan"
+            && agentModePlanTask.workflowDecision?.requiresCodeChanges === true,
+        manualPlanStillPresentsPlan: manualPlanTask.responseType === "plan"
+            && manualPlanTask.workflowDecision?.actionRequired === false,
         globalHasNoConversationPlanMode: (0, slash_command_session_state_1.conversationPlanModeSupported)("global") === false,
         groupKeepsConversationPlanMode: (0, slash_command_session_state_1.conversationPlanModeSupported)("group") === true,
         projectKeepsConversationPlanMode: (0, slash_command_session_state_1.conversationPlanModeSupported)("project") === true,

@@ -46,7 +46,7 @@ const fallbackDetail = () => ({
     id: item.id || `work_${index + 1}`, planStepId: item.id || `work_${index + 1}`, title: item.title, objective: item.title,
     project: item.project || '', status: item.status || 'pending', dependsOn: [], acceptanceCriteria: [], editable: item.status === 'pending',
   })),
-  assignments: [], acceptanceCriteria: [], permissionBoundaries: [], risks: [], sourceReferences: [], revisionHistory: [],
+  assignments: [], acceptanceCriteria: props.fallbackPlan?.acceptanceCriteria || [], permissionBoundaries: props.fallbackPlan?.exclusions || [], risks: [], sourceReferences: [], revisionHistory: [],
   revision: props.fallbackPlan?.revision || 1, generation: props.fallbackPlan?.generation || 0, bindingChecksum: '',
 })
 
@@ -223,7 +223,7 @@ const locateItem = item => emit('locate', { taskId: props.taskId, planStepId: it
     <template #footer>
       <div class="plan-detail-footer">
         <template v-if="editing"><button type="button" :disabled="saving" @click="cancelEditing">取消</button><button type="button" class="primary" :disabled="saving" @click="savePlan">{{ saving ? '保存中…' : '保存调整' }}</button></template>
-        <template v-else><button v-if="canEdit" type="button" @click="startEditing">{{ plan?.status === 'executing' ? '调整后续计划' : '调整计划' }}</button><button v-if="needsConfirmation" type="button" class="primary" @click="confirmPlan">确认并分派</button><button v-else type="button" class="primary" @click="emit('close')">{{ plan?.status === 'completed' ? '查看结果' : '返回执行现场' }}</button></template>
+        <template v-else><button v-if="canEdit" type="button" @click="startEditing">修改计划</button><button v-if="needsConfirmation" type="button" class="primary" @click="confirmPlan">确认并执行</button><button v-else type="button" class="primary" @click="emit('close')">{{ plan?.status === 'completed' ? '查看结果' : '返回执行现场' }}</button></template>
       </div>
     </template>
   </ResponsiveDetailDrawer>

@@ -16,7 +16,7 @@ function classifyProjectChatIntent(message, uploadedFiles = [], options = {}) {
  */
 async function classifyProjectChatIntentWithModel(message, uploadedFiles = [], options = {}) {
     const workflowDecision = options.forceTask
-        ? (0, workflow_decision_1.explicitWorkflowDecision)("execute_direct", "用户显式继续已有项目任务")
+        ? (0, workflow_decision_1.explicitWorkflowDecision)("用户显式继续已有项目任务", { actionRequired: true, requiresCodeChanges: true })
         : await (0, workflow_decision_1.decideWorkflowWithModel)({
             message,
             scope: "project",
@@ -31,13 +31,7 @@ async function classifyProjectChatIntentWithModel(message, uploadedFiles = [], o
                 })),
             },
         });
-    const mode = workflowDecision.mode === "answer"
-        ? "conversation"
-        : workflowDecision.mode === "project_analysis"
-            ? "project_analysis"
-            : (0, workflow_decision_1.isDevelopmentTaskWorkflowDecision)(workflowDecision) ? "task" : "project_analysis";
     return {
-        mode,
         executable: (0, workflow_decision_1.isDevelopmentTaskWorkflowDecision)(workflowDecision),
         reason: workflowDecision.reason,
         workflowDecision,
@@ -45,23 +39,19 @@ async function classifyProjectChatIntentWithModel(message, uploadedFiles = [], o
 }
 function runProjectChatIntentSelfTest() {
     const cases = [
-        ["你好", "answer", "conversation"],
-        ["你是什么模型", "answer", "conversation"],
-        ["这个项目是什么架构？", "project_analysis", "project_analysis"],
-        ["修改登录接口并运行测试", "execute_direct", "task"],
-        ["先规划认证重构再实施", "plan_task", "task"],
+        ["你好", false, false],
+        ["你是什么模型", false, false],
+        ["这个项目是什么架构？", false, false],
+        ["修改登录接口并运行测试", true, true],
+        ["先规划认证重构再实施", true, true],
     ];
-    const checks = cases.map(([message, modelMode, expected]) => {
+    const checks = cases.map(([message, actionRequired, expected]) => {
         const workflowDecision = (0, workflow_decision_1.normalizeWorkflowDecision)({
-            mode: modelMode,
             reason: "脚本化模型决策",
-            requiresCodeChanges: expected === "task",
+            actionRequired,
+            requiresCodeChanges: actionRequired,
         });
-        const actual = workflowDecision.mode === "answer"
-            ? "conversation"
-            : workflowDecision.mode === "project_analysis"
-                ? "project_analysis"
-                : (0, workflow_decision_1.isDevelopmentTaskWorkflowDecision)(workflowDecision) ? "task" : "project_analysis";
+        const actual = (0, workflow_decision_1.isDevelopmentTaskWorkflowDecision)(workflowDecision);
         return { message, expected, actual, workflowDecision };
     });
     return { success: checks.every(item => item.actual === item.expected), checks };

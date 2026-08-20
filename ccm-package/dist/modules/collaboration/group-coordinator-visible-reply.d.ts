@@ -6,7 +6,6 @@ export declare function coordinatorShouldFailEmptyVisibleReply(input?: {
     parsed?: any;
     priorPlanDraft?: string;
     observationCount?: number;
-    workflowMode?: string;
 }): boolean;
 export declare function applySynthesizedCoordinatorReply(parsed: any, synthesized: string): any;
 export declare function coordinatorVisibleFallbackContent(input: {

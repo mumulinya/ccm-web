@@ -1,7 +1,7 @@
 export declare const COORDINATOR_PRESENTED_PLAN_HEADLINE = "\u8BA1\u5212\u5DF2\u7ECF\u6574\u7406\u5B8C\u6210\uFF0C\u8BF7\u67E5\u770B\u4E0B\u9762\u7684\u5F85\u529E\u3002";
 export declare const PRESENTED_PLAN_AUTHORING_SKILL = "ccm-implementation-plan-authoring";
-export declare const PRESENTED_PLAN_SHAPE_GUIDANCE = "\u8BA1\u5212\u7A3F\u5F62\u72B6\u89C1 Skill:ccm-implementation-plan-authoring\u3002";
-export declare const PRESENTED_PLAN_DISPATCH_HANDOFF_GUIDANCE = "\u5DF2\u786E\u8BA4\u8BA1\u5212\u5361\u4EA4\u63A5\u89C1 Skill:ccm-implementation-plan-authoring\u3002";
+export declare const PRESENTED_PLAN_SHAPE_GUIDANCE = "Use the ccm-implementation-plan-v2 contract from Skill:ccm-implementation-plan-authoring.";
+export declare const PRESENTED_PLAN_DISPATCH_HANDOFF_GUIDANCE = "Dispatch only confirmed plan slices bound to revision and checksum.";
 export declare function presentedPlanSource(parsed: any): any;
 export declare function presentedPlanSteps(source: any): any;
 export declare function hasPresentedGroupPlan(parsed: any): boolean;
@@ -10,20 +10,7 @@ export declare function normalizePresentedGroupPlan(input: {
     planId?: string;
     goalFallback?: string;
     status?: "ready" | "executing" | "completed" | "blocked" | "superseded";
-}): {
-    steps: any;
-    scope: string[];
-    expectedResults: string[];
-    exclusions: string[];
-    status: "ready" | "completed" | "blocked" | "superseded" | "executing";
-    createdAt: string;
-    updatedAt: string;
-    overview?: string;
-    planId: string;
-    revision: number;
-    title: string;
-    goal: string;
-};
+}): any;
 export declare function formatPresentedPlanMarkdown(plan: any): string;
 export declare function visibleGroupPresentedPlanFields(input: {
     projectAnalysis?: boolean;
@@ -77,9 +64,9 @@ export declare function runGroupPresentedPlanSelfTest(): {
         conversationalKeepsPlan: boolean;
         emptyConversationStillNull: boolean;
         projectAnalysisHides: boolean;
-        dropsStepProject: boolean;
+        keepsV2StepDependencies: boolean;
         shapePointsToSkill: boolean;
-        handoffPointsToSkill: boolean;
+        handoffBindsRevision: boolean;
         appendsSliceContract: boolean;
         mergesAcceptance: boolean;
         readsLatestMessagePlan: boolean;

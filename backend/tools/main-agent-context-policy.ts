@@ -161,7 +161,7 @@ export function contextPolicyUpdateSource(input: any) {
 }
 
 function cleanSkillDescription(value: any) {
-  const text = String(value || "未提供描述").replace(/\s+/g, " ").trim();
+  const text = String(value || "No description provided").replace(/\s+/g, " ").trim();
   return text.slice(0, 250);
 }
 
@@ -186,7 +186,7 @@ export function buildDynamicSkillCatalogPrompt(input: {
     return priority || String(left.name).localeCompare(String(right.name), "zh-CN");
   });
   if (!skills.length) return { prompt: "", targetTokens: 0, actualTokens: 0, nameOnlyTokens: 0, describedCount: 0, nameOnlyCount: 0, budgetOverrun: false };
-  const header = `${input.label}已授权的 Skill：`;
+  const header = `${input.label} authorized Skills:`;
   const lines = skills.map(skill => `- ${String(skill.name)}`);
   const render = () => [header, ...lines].join("\n");
   const nameOnlyTokens = estimateTextTokens(render());

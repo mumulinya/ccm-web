@@ -23,12 +23,13 @@ const props = defineProps({
   hideFileChanges: { type: Boolean, default: false },
   messageKey: { type: String, default: '' },
   liveProgress: { type: String, default: '' },
+  planOwnedByDock: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['task-action', 'open-file-diff', 'clarify-reply'])
 
 const isTaskMessage = computed(() => String(props.message?.messageMode || props.message?.message_mode || '').toLowerCase() === 'task' || !!props.taskCard)
-const showTaskControlCard = computed(() => taskCardNeedsConversationControl(props.taskCard))
+const showTaskControlCard = computed(() => taskCardNeedsConversationControl(props.taskCard, { planOwnedByDock: props.planOwnedByDock }))
 
 const hasFileChanges = computed(() => (
   props.message?.fileChanges?.count > 0 && Array.isArray(props.message?.fileChanges?.files)
@@ -56,6 +57,7 @@ const answerStreaming = computed(() => props.isLastStreaming || (!String(props.m
     :card="taskCard"
     context="project"
     compact
+    :suppress-plan="planOwnedByDock"
     :busy="!!message.streaming || !!message.taskActionBusy"
     @action="emit('task-action', $event)"
   />

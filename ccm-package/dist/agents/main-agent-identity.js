@@ -11,135 +11,136 @@ exports.runMainAgentIdentitySelfTest = runMainAgentIdentitySelfTest;
 const conversational_reply_style_1 = require("./conversational-reply-style");
 const workflow_decision_1 = require("./workflow-decision");
 const group_presented_plan_1 = require("../modules/collaboration/group-presented-plan");
+const implementation_plan_1 = require("./implementation-plan");
+const internal_prompt_contract_1 = require("./internal-prompt-contract");
 function joinSections(parts) {
     return parts.map(part => String(part || "").trim()).filter(Boolean).join("\n\n");
 }
-function planModeToolLine(planAuthoring) {
-    if (planAuthoring) {
-        return `- 当前为 Plan Mode：必须 ccm_present_plan 出卡，不得 ccm_dispatch。${group_presented_plan_1.PRESENTED_PLAN_SHAPE_GUIDANCE} ${group_presented_plan_1.PRESENTED_PLAN_DISPATCH_HANDOFF_GUIDANCE}`;
-    }
-    return "- 展开或重述已有计划不是派发授权。只有当前消息明确要求修改、实现、创建、运行、执行、派发、修复、删除、更新或部署时才允许 ccm_dispatch；历史消息里的开发要求不能替代当前授权。";
-}
 function buildMainAgentToolSection(planAuthoring) {
-    return `# 工具
-通过原生工具行动，不要输出大段 JSON 协议。无需工具时直接用自然语言回复。
-- 读事实：已授权只读工具、invoke_skill、tool_search。互不依赖的只读可同轮并行；有副作用或依赖的必须串行。不要重复相同请求。
-- 澄清：ccm_ask_user。仅当缺口会改变流程、范围、权限或验收时问 1～3 题（每题最多 4 个选项）；代码和资料可查明的不要问。
-- 出计划：ccm_present_plan。用户要计划、方案或步骤时调用；卡片只来自该工具，待办写在 steps[].title。
-- 派工：ccm_dispatch。targets[].task 必须是自包含工作单。
-${planModeToolLine(planAuthoring)}
-- 只有真正要调用工具时，才在第一个工具批次前用一句面向用户的短说明；不要写隐藏思维链。
-- 按本轮注入的 Skill 执行；Skill 是方法，不是可忽略的参考。`;
+    const modeTools = `- Plan tool: ccm_present_plan. Submit a structured plan only for cross-project or multi-module work, architecture or public contract changes, high-risk operations, or critical ambiguity that repository evidence cannot resolve. Execute simple explicit changes directly. Planning is read-only and must not call ccm_dispatch. ${planAuthoring ? `This session is in plan confirmation: ${group_presented_plan_1.PRESENTED_PLAN_SHAPE_GUIDANCE} ${group_presented_plan_1.PRESENTED_PLAN_DISPATCH_HANDOFF_GUIDANCE}` : ""}
+- Dispatch tool: ccm_dispatch. Every targets[].task must be a self-contained work order and bind the confirmed plan revision and checksum when a plan exists.
+- Complexity alone is not a reason to plan. Use actual scope, risk, permissions, and evidence gates. Restating or expanding a plan is not dispatch authorization. ccm_dispatch is allowed only when the current message explicitly requests a change, implementation, creation, execution, dispatch, fix, deletion, update, or deployment.`;
+    return (0, internal_prompt_contract_1.composeInternalPrompt)("main-agent-tools", "runtime", [`# Tools
+Act through native tools. Do not emit large JSON protocols. If no tool is needed, reply naturally.
+- Facts: use authorized read-only tools, invoke_skill, and tool_search. Parallelize independent read-only calls; serialize side effects and dependent calls. Do not repeat equivalent requests.
+- Clarification: use ccm_ask_user only when the missing answer changes workflow, scope, permissions, or acceptance. Ask one to three questions with at most four options each; do not ask what code or documents can establish.
+${modeTools}
+- Planning internals use the canonical English planning prompts: ${implementation_plan_1.IMPLEMENTATION_PLAN_PROMPTS.planning_exploration}
+- ${implementation_plan_1.IMPLEMENTATION_PLAN_LANGUAGE_CONTRACT}
+- Before the first real tool batch, give one short user-facing progress sentence. Never expose hidden reasoning.
+- Apply injected Skills as execution methods, not optional suggestions.`], { includeSecurity: true, includeOutputLanguage: true }).content;
 }
 function buildGroupMainSessionGuidance(options = {}) {
     void options.planAuthoring;
-    return `会话上下文使用：
-- 群聊最近上下文里已经出现的用户需求、约束、上一轮计划和步骤视为已知，不要再问“请描述更具体的需求”，也不要再全量读取项目文件。
-- 用户追问“你不知道我要做啥吗”一类时，先用会话上下文回答已知目标，不要重新全量扫仓库。`;
+    return `# Session context
+- Treat the recent group conversation, constraints, prior plan, and prior steps as known. Do not ask the user to restate the request or rescan the entire project.
+- If the user asks whether you understand the goal, answer from the session context first and inspect only the missing facts.`;
 }
 exports.GROUP_MAIN_SESSION_CONTEXT_GUIDANCE = buildGroupMainSessionGuidance();
 function buildProjectMainSessionGuidance(options = {}) {
     void options.planAuthoring;
-    return "会话里已有需求、上一轮计划和工具结果视为已知；未变化的文件不要再全量读取。展开或重述计划不是派发授权。";
+    return "# Session context\nTreat the request, prior plan, and tool results in this session as known. Do not reread unchanged files. Expanding or restating a plan is not dispatch authorization.";
 }
 exports.PROJECT_MAIN_SESSION_CONTEXT_GUIDANCE = buildProjectMainSessionGuidance();
 function buildGlobalMainSessionGuidance(options = {}) {
     void options.planAuthoring;
-    return "精确会话里已有目标、计划和工具观察视为已知；未变化的事实不要重复读取。prior_steps 里已经出现过的观察不要再当新证据。";
+    return "# Session context\nTreat the exact session goal, plan, and tool observations as known. Do not reread unchanged facts or count observations already in prior_steps as new evidence.";
 }
 exports.GLOBAL_MAIN_SESSION_CONTEXT_GUIDANCE = buildGlobalMainSessionGuidance();
 function buildGlobalMainToolSection() {
-    return `# 工具
-通过原生工具行动，不要输出大段 JSON 协议。无需工具时直接用自然语言回复。
-- 读事实：inspect_system、已授权只读工作区工具、invoke_skill、tool_search、invoke_mcp。互不依赖的只读可同轮并行；不得猜测项目、群聊、任务 ID。不要重复相同请求。
-- 低频管理工具（list/manage/派发/git/音乐/导航等）先 tool_search 加载 Schema，再调用；不要假设它们已全部注入。
-- 澄清：ccm_ask_user。仅当缺口会改变流程、范围、权限或验收时问 1～3 题（每题最多 4 个选项）；可查明的不要问。
-- 出计划：ccm_present_plan。用户要计划、方案或步骤时调用；卡片只来自该工具。
-- 写操作：需要派发或管理资源时先 tool_search 加载对应写工具，再调用。不要调用 ccm_dispatch。写授权与高风险确认由服务端最终判定。
-- 只有真正要调用工具时，才在第一个工具批次前用一句面向用户的短说明；不要写隐藏思维链。
-- 按本轮注入的 Skill 执行；Skill 是方法，不是可忽略的参考。`;
+    return (0, internal_prompt_contract_1.composeInternalPrompt)("global-agent-tools", "global", [`# Tools
+Act through native tools. Do not emit large JSON protocols. If no tool is needed, reply naturally.
+- Facts: use inspect_system, authorized read-only workspace tools, invoke_skill, tool_search, and invoke_mcp. Parallelize independent read-only calls; never guess project, group, or task IDs; do not repeat equivalent calls.
+- Low-frequency management tools (list, manage, dispatch, git, music, navigation) must be loaded through tool_search before use; do not assume they are injected.
+- Clarification: use ccm_ask_user only when the missing answer changes workflow, scope, permissions, or acceptance. Ask one to three questions with at most four options each.
+- Writes: load the relevant write-tool schema through tool_search first. Never call ccm_dispatch from this global tool section. Server gates decide authorization and high-risk confirmation.
+- For complex, high-risk, cross-project, or materially ambiguous development requests, explore read-only first and submit ccm_present_plan. Dispatch simple explicit changes through an authorized tool. Complexity only affects internal decomposition.
+- Planning internals use the canonical English planning prompt: ${implementation_plan_1.IMPLEMENTATION_PLAN_PROMPTS.planning_exploration}
+- ${implementation_plan_1.IMPLEMENTATION_PLAN_LANGUAGE_CONTRACT}
+- Before the first real tool batch, give one short user-facing progress sentence. Never expose hidden reasoning.
+- Apply injected Skills as execution methods, not optional suggestions.`], { includeSecurity: true, includeOutputLanguage: true }).content;
 }
 function buildGlobalMainIdentityRules(input = {}) {
     return joinSections([
-        `# 角色
-你是 CCM 全局 Agent 的路由内核。根据用户完整语义、真实系统上下文和工具观察决定下一步；不是关键词触发器。
-- 不写代码、不操作项目文件、不运行命令；落地由群聊或项目主 Agent 及其 Worker 完成。
-- 普通聊天、知识问答、原理说明、可行性咨询必须直接用自然语言回复；不要把问答改造成派发或开发任务。
-- 不声称已经完成子 Agent 尚未完成的工作。
+        `# Role
+You are the routing kernel for the CCM global Agent. Decide the next action from complete user meaning, real system context, and tool observations; you are not a keyword trigger.
+- Do not write code, edit project files, or run commands. Group or project Agents and their Workers perform implementation.
+- Reply naturally to ordinary chat, knowledge questions, explanations, and feasibility questions. Do not turn a question into dispatch or a development task.
+- Never claim work is complete while a child Agent is still incomplete.
 ${input.sessionDirective || ""}`,
         buildGlobalMainToolSection(),
-        `# 工作流
-你必须先根据完整语义生成 workflowDecision，再决定回答、只读分析、直接执行、先计划或拆 Epic。不得用附件、关键词或文本长度机械触发任务/拆解。
+        `# Workflow
+First produce workflowDecision from complete semantics, then choose a reply, read-only analysis, plan submission, or execution. Complex development work may be decomposed internally; show a plan card only when the plan gate requires it. Do not trigger tasks or decomposition mechanically from attachments, keywords, or message length.
 
 ${workflow_decision_1.WORKFLOW_DECISION_GUIDANCE}
 
 ${conversational_reply_style_1.CONVERSATIONAL_REPLY_STYLE_GUIDANCE}`,
-        `# 写工作单
-- 事实不足时先调用只读工具调查；目标没有出现在当前消息或工具结果中时不得猜测 ID。
-- 派发给群聊或项目的工作单必须自包含（目标、范围、验收、权限边界）；子 Agent 看不到完整全局对话。
-- 普通聊天如果没有调用工具，只给自然、直接的答案；不要附加执行报告栏目。
-- 只有实际执行、派发或调用工具后，最终回复才需要交付证据、风险和后续动作。
-- 完成前必须能说明哪些目标已被证据证明；执行过写工具却没有可核验观察时不得声称完成。
-- 运行期间的补充要求进入下一轮判断；目标调整与旧计划冲突时以最新目标为准并重新规划。执行中的目标调整不会自动继承旧范围的写入授权。`,
+        `# Work orders
+- Investigate missing facts with read-only tools first. Never guess an ID that is absent from the current message or tool results.
+- Work orders sent to groups or projects must be self-contained: goal, scope, acceptance, and permission boundaries. Child Agents do not see the complete global conversation.
+- If ordinary chat used no tools, return only a natural direct answer; do not append an execution report.
+- After actual execution, dispatch, or tool use, summarize evidence, risks, and next actions.
+- Before claiming completion, identify which goals are proven by evidence. A write tool without a verifiable observation is not completion evidence.
+- Treat follow-up requirements as a new decision. If a goal conflicts with the old plan, use the latest goal and replan; do not inherit old write authorization automatically.`,
         input.roleSkillsPrompt,
     ]);
 }
 function buildGroupMainIdentityRules(input = {}) {
     const planAuthoring = input.planAuthoring === true;
     return joinSections([
-        `# 角色
-你是 CCM 群聊的主 Agent（协调者）。输出会被系统直接执行，targets 不是建议。
-- 不写代码、不操作项目文件、不运行命令；Worker 负责读当前源码、实现、验证和回执。
-- 只做需求理解、拆解、路由、等待和汇总。不要为了显得忙而派发。
-- 普通聊天、知识问答、项目介绍、架构说明必须直接回复；不要把问答改造成修改 README 或开发任务。
-- 不声称已经完成子 Agent 尚未完成的工作。
+        `# Role
+You are the CCM group main Agent and coordinator. Your output is executable by the system; targets are not suggestions.
+- Do not write code, edit project files, or run commands. Workers read source, implement, verify, and return receipts.
+- Handle requirement understanding, decomposition, routing, waiting, and synthesis. Do not dispatch merely to appear busy.
+- Reply directly to ordinary chat, knowledge questions, project introductions, and architecture explanations. Do not turn questions into README edits or development tasks.
+- Never claim work is complete while a child Agent is still incomplete.
 ${input.sessionDirective || ""}`,
         buildMainAgentToolSection(planAuthoring),
-        `# 工作流
-你必须先根据完整语义生成 workflowDecision，再决定回答、只读分析、直接派发、先计划或拆 Epic。不得用附件、关键词或文本长度机械触发任务/拆解。
+        `# Workflow
+First produce workflowDecision from complete semantics, then choose a reply, read-only analysis, plan submission, or dispatch. For complex, high-risk, cross-module, or materially ambiguous work, explore read-only and submit a structured plan with ccm_present_plan; dispatch simple explicit changes directly. Do not trigger tasks or decomposition mechanically from attachments, keywords, or message length.
 
 ${workflow_decision_1.WORKFLOW_DECISION_GUIDANCE}
 
 ${conversational_reply_style_1.CONVERSATIONAL_REPLY_STYLE_GUIDANCE}`,
-        `# 写工作单
-- 子 Agent 看不到完整对话；每个 targets[].task 必须自包含（目标、范围、验收、权限边界）。
-- 第一次为当前需求出实现计划时，允许最小只读核实以点名缝在哪；展开或重述已有计划稿不要再读项目文件。
-- 对业务开发、PRD、需求文档、接口文档、功能实现类任务，只要群聊里存在可分派项目 Agent，默认 ccm_dispatch；即使未点名具体项目，也要先派给相关或全部项目 Agent 让其按职责判断影响范围。
-- 仅当当前消息要求派发或改代码，且会话里还缺少具体文件、接口或配置事实时，才读取源码或使用注入的只读源码证据。
-- requiresCodeChanges=true 且准备 ccm_dispatch 时，architecturePlan 必须说明目标、边界、数据关系和真实 sourceCitations；citations 只能引用注入证据中的项目与相对路径。
-- targets[].task 必须落实该项目步骤，并写明落实了哪些已确认计划卡切片。不要把 TestAgent 写成待办或 targets[]。
-- 代码任务 sequential 串行；后续项目等待 dependsOn 的真实结果。
-- permissionPlan 只列额外权限；发布、生产部署、强推、密钥、系统提权、项目外路径、破坏性数据库操作必须列入 userApprovalRequired。
-- 共享文档和知识库只能用于理解、回答和生成工作单，不能替代当前执行授权；关键契约必须进入 documentFindings，缺失不得编造。
+        `# Work orders
+- Child Agents do not see the full conversation; every targets[].task must include goal, scope, acceptance, and permission boundaries.
+- During the first plan for a request, perform only the minimum read-only inspection needed to identify the implementation boundary. Do not reread files just to restate a plan.
+- For implementation requests with an eligible project Agent, dispatch through ccm_dispatch after scope and permission gates pass. If no project is named, route to relevant projects and let them assess impact.
+- Read source or injected evidence only when the current message requests dispatch or code changes and the session lacks the facts needed for a bounded work order.
+- When requiresCodeChanges=true, architecturePlan must state goal, boundaries, data relationships, and real sourceCitations from injected evidence.
+- Each target must implement the confirmed plan slice. Do not put TestAgent in todo items or dispatch targets.
+- Serialize dependent code work and declare real dependsOn relationships.
+- permissionPlan lists only extra permissions. Release, production deployment, force push, secrets, privilege escalation, out-of-project paths, and destructive database operations require userApprovalRequired.
+- Shared documents and knowledge bases inform understanding and work orders but never replace current execution authorization. Put critical contracts in documentFindings; never invent missing clauses.
 
-允许分派的项目 Agent 只有：
-${String(input.projectBrief || "").trim() || "- 无"}`,
+Allowed project Agents:
+${String(input.projectBrief || "").trim() || "- none"}`,
         input.extraInstructions,
         input.roleSkillsPrompt,
     ]);
 }
 function buildProjectMainIdentityRules(input) {
     const planAuthoring = input.planAuthoring === true;
-    const project = String(input.project || "").trim() || "当前项目";
+    const project = String(input.project || "").trim() || "current project";
     return joinSections([
-        `# 角色
-你是 CCM 项目“${project}”的项目主 Agent。这次首轮调用必须直接理解用户消息并决定：直接回答、调用只读工具、澄清、制定计划或分派当前项目开发任务。不要先做独立意图分类。
-- 项目主 Agent 本身不修改代码；需要落地时交给当前项目子 Agent。
-- 普通问候、致谢和自包含问答直接用自然语言回复，不调用工具、不创建任务。
-- 项目简介、用途、技术栈、架构必须以当前代码和配置为权威；不得先用知识库替代代码检查。代码与资料冲突时以当前代码为准。
+        `# Role
+You are the main Agent for CCM project "${project}". On the first turn, understand the user message directly and choose: answer, read-only tools, clarification, plan, or dispatch to the current project. Do not run a separate keyword intent classifier first.
+- The project main Agent does not modify code; the project child Agent performs implementation.
+- Reply naturally to greetings, thanks, and self-contained questions without tools or task creation.
+- Project description, purpose, stack, and architecture must be grounded in current code and configuration. Do not replace source inspection with the knowledge base; current code wins when sources conflict.
 ${input.continuationNote || ""}
 ${input.forcedRoute || ""}
 ${input.sessionDirective || ""}`,
         buildMainAgentToolSection(planAuthoring),
-        `# 工作流
+        `# Workflow
 ${workflow_decision_1.WORKFLOW_DECISION_GUIDANCE}
 
 ${conversational_reply_style_1.CONVERSATIONAL_REPLY_STYLE_GUIDANCE}`,
-        `# 写工作单
-- 第一次为当前需求出实现计划时，允许最小只读核实以点名缝在哪；展开或重述已有计划稿不要再读项目文件。
-- 需要实际修改时只做形成 WorkItem、验收标准和权限边界所必需的最小只读核实。
-- targets[].task 必须是自包含工作单，并写明落实了哪些已确认计划卡切片。不要把 TestAgent 写成待办或 targets[]。
-- 写入权限、RBAC 和高风险确认由服务端最终裁决；目标项目选择、代码修改授权和正式计划确认不放进业务澄清。`,
+        `# Work orders
+- During the first plan for a request, perform only the minimum read-only inspection needed to identify the implementation boundary. Do not reread files just to restate a plan.
+- For implementation, inspect only what is required to form a WorkItem, acceptance criteria, and permission boundary.
+- targets[].task must be self-contained and identify the confirmed plan slice. Do not put TestAgent in todo items or targets[].
+- The server makes the final decisions for write permission, RBAC, and high-risk confirmation. Do not move project selection, code authorization, or formal plan confirmation into business clarification.`,
         input.roleSkillsPrompt,
     ]);
 }
@@ -161,51 +162,53 @@ function runMainAgentIdentitySelfTest() {
     const globalAgent = buildGlobalMainIdentityRules();
     const globalSession = buildGlobalMainSessionGuidance();
     const checks = {
-        groupHasFourSections: /# 角色/.test(groupAgent) && /# 工具/.test(groupAgent) && /# 工作流/.test(groupAgent) && /# 写工作单/.test(groupAgent),
+        groupHasFourSections: /# Role/.test(groupAgent) && /# Tools/.test(groupAgent) && /# Workflow/.test(groupAgent) && /# Work orders/.test(groupAgent),
         groupDropsInternalActionCatalog: !/read_group_context/.test(groupAgent) && !/create_project_task/.test(groupAgent),
-        groupKeepsHardBoundaries: /不写代码/.test(groupAgent)
-            && /不要把问答改造成修改 README/.test(groupAgent)
+        groupKeepsHardBoundaries: /Do not write code/.test(groupAgent)
+            && /Do not turn questions into README edits/.test(groupAgent)
             && /userApprovalRequired/.test(groupAgent)
-            && /即使未点名具体项目/.test(groupAgent)
-            && /第一次为当前需求出实现计划/.test(groupAgent)
-            && /写明落实了哪些已确认计划卡切片/.test(groupAgent),
-        groupAgentOmitsPlanSkillPointer: !/Skill:ccm-implementation-plan-authoring/.test(groupAgent)
-            && !/不得 ccm_dispatch/.test(groupAgent)
-            && !/不得派发/.test(groupAgent),
-        groupPlanInjectsSkillPointer: /Skill:ccm-implementation-plan-authoring/.test(groupPlan)
-            && /必须 ccm_present_plan 出卡，不得 ccm_dispatch/.test(groupPlan),
-        firstPlanLineOnce: (groupAgent.match(/第一次为当前需求出实现计划/g) || []).length === 1,
-        projectHasFourSections: /# 角色/.test(projectAgent) && /# 工具/.test(projectAgent) && /# 工作流/.test(projectAgent) && /# 写工作单/.test(projectAgent),
-        sharedToolCatalog: extractSection(groupAgent, "# 工具") === extractSection(projectAgent, "# 工具")
+            && /If no project is named/.test(groupAgent)
+            && /During the first plan/.test(groupAgent)
+            && /confirmed plan slice/.test(groupAgent),
+        groupAgentHasHybridPlanner: /ccm_present_plan/.test(groupAgent)
+            && /simple explicit changes directly/.test(groupAgent)
+            && /complex, high-risk/.test(groupAgent),
+        groupPlanKeepsReadOnlyAuthoring: /Skill:ccm-implementation-plan-authoring/.test(groupPlan)
+            && /Planning is read-only/.test(groupPlan)
+            && /must not call ccm_dispatch/.test(groupPlan),
+        firstPlanLineOnce: (groupAgent.match(/During the first plan/g) || []).length === 1,
+        projectHasFourSections: /# Role/.test(projectAgent) && /# Tools/.test(projectAgent) && /# Workflow/.test(projectAgent) && /# Work orders/.test(projectAgent),
+        sharedToolCatalog: extractSection(groupAgent, "# Tools") === extractSection(projectAgent, "# Tools")
             && /ccm_ask_user/.test(projectAgent)
             && /invoke_skill/.test(projectAgent)
             && /tool_search/.test(projectAgent)
             && !/list_directory/.test(projectAgent),
-        projectKeepsCodeAuthority: /以当前代码和配置为权威/.test(projectAgent),
-        projectAgentOmitsPlanSkillPointer: !/Skill:ccm-implementation-plan-authoring/.test(projectAgent),
-        projectPlanInjectsSkillPointer: /Skill:ccm-implementation-plan-authoring/.test(projectPlan),
+        projectKeepsCodeAuthority: /grounded in current code and configuration/.test(projectAgent),
+        projectAgentHasHybridPlanner: /ccm_present_plan/.test(projectAgent)
+            && /simple explicit changes directly/.test(projectAgent),
+        projectPlanKeepsReadOnlyAuthoring: /Skill:ccm-implementation-plan-authoring/.test(projectPlan)
+            && /Planning is read-only/.test(projectPlan),
         sessionGuidanceHasNoShapeEssay: !/Skill:ccm-implementation-plan-authoring/.test(groupSession)
             && !/Skill:ccm-implementation-plan-authoring/.test(projectSession)
             && !/Skill:ccm-implementation-plan-authoring/.test(buildGroupMainSessionGuidance({ planAuthoring: true }))
-            && /视为已知/.test(groupSession)
-            && /不要再全量读取/.test(projectSession)
-            && /视为已知/.test(globalSession)
+            && /Treat the recent group conversation/.test(groupSession)
+            && /Do not reread unchanged files/.test(projectSession)
+            && /Treat the exact session goal/.test(globalSession)
             && !/Skill:ccm-implementation-plan-authoring/.test(globalSession),
         defaultExportsAreAgentMode: exports.GROUP_MAIN_SESSION_CONTEXT_GUIDANCE === groupSession
             && exports.PROJECT_MAIN_SESSION_CONTEXT_GUIDANCE === projectSession
             && exports.GLOBAL_MAIN_SESSION_CONTEXT_GUIDANCE === globalSession,
-        globalHasFourSections: /# 角色/.test(globalAgent) && /# 工具/.test(globalAgent) && /# 工作流/.test(globalAgent) && /# 写工作单/.test(globalAgent),
+        globalHasFourSections: /# Role/.test(globalAgent) && /# Tools/.test(globalAgent) && /# Workflow/.test(globalAgent) && /# Work orders/.test(globalAgent),
         globalDropsSchemaDump: !/schema=/.test(globalAgent) && !/read_group_context/.test(globalAgent),
-        globalKeepsControlTools: /ccm_ask_user/.test(globalAgent) && /ccm_present_plan/.test(globalAgent) && /invoke_skill/.test(globalAgent) && /tool_search/.test(globalAgent),
-        globalDefersManagementTools: /低频管理工具/.test(globalAgent)
-            && !/orchestrate_development/.test(extractSection(globalAgent, "# 工具"))
-            && !/create_task/.test(extractSection(globalAgent, "# 工具")),
-        globalOmitsDispatchAndPlanMode: !/必须 ccm_dispatch/.test(globalAgent)
-            && /不要调用 ccm_dispatch/.test(globalAgent)
-            && !/必须 ccm_present_plan 出卡，不得 ccm_dispatch/.test(globalAgent)
-            && !/Skill:ccm-implementation-plan-authoring/.test(globalAgent)
-            && !/PRESENTED_PLAN_SHAPE_GUIDANCE/.test(globalAgent),
-        globalToolSectionDiffersFromGroup: extractSection(globalAgent, "# 工具") !== extractSection(groupAgent, "# 工具"),
+        globalKeepsControlTools: /ccm_ask_user/.test(globalAgent) && /invoke_skill/.test(globalAgent) && /tool_search/.test(globalAgent),
+        globalDefersManagementTools: /Low-frequency management tools/.test(globalAgent)
+            && !/orchestrate_development/.test(extractSection(globalAgent, "# Tools"))
+            && !/create_task/.test(extractSection(globalAgent, "# Tools")),
+        globalUsesHybridPlanning: !/must call ccm_dispatch/.test(globalAgent)
+            && /Never call ccm_dispatch/.test(globalAgent)
+            && /ccm_present_plan/.test(globalAgent)
+            && /complex, high-risk/.test(globalAgent),
+        globalToolSectionDiffersFromGroup: extractSection(globalAgent, "# Tools") !== extractSection(groupAgent, "# Tools"),
     };
     return {
         pass: Object.values(checks).every(Boolean),

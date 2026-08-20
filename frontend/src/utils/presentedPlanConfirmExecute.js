@@ -41,7 +41,7 @@ export function buildPresentedPlanConfirmExecuteMessage(plan) {
     .map(step => String(step?.title || '').trim())
     .filter(Boolean)
   const lines = [
-    '用户已确认下面这份计划卡，并授权按该计划开始执行（派发子 Agent / 改代码）。请调用 ccm_dispatch，覆盖已确认切片，不要重写成前端/后端/测试分工。不要把 TestAgent 放进 targets。',
+    'The user confirmed the following plan card and authorized execution under this plan (dispatch child Agents and modify code). Call ccm_dispatch for the confirmed slices. Do not rewrite the plan as frontend/backend/test workstreams. Never put TestAgent in targets.',
     '',
     '【已确认计划】',
     title,
@@ -50,6 +50,9 @@ export function buildPresentedPlanConfirmExecuteMessage(plan) {
   if (steps.length) {
     lines.push('')
     for (const stepTitle of steps) lines.push(`- ${stepTitle}`)
+  }
+  if (plan?.revision || plan?.checksum) {
+    lines.push('', `Plan binding: revision=${Number(plan.revision || 1)}, checksum=${String(plan.checksum || '')}`)
   }
   return lines.join('\n')
 }

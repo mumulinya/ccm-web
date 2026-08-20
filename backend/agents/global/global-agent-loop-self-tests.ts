@@ -60,7 +60,8 @@ async function runGlobalAgentLoopSelfTest() {
   const directReply = await startGlobalAgentRun({
     message: "你好",
     workflowDecision: {
-      mode: "answer",
+      actionRequired: false,
+      requiresCodeChanges: false,
       confidence: 1,
       reason: "当前消息是自包含问候",
       directReplyReady: true,

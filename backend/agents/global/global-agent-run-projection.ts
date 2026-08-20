@@ -162,13 +162,9 @@ export function normalizeDecision(value: any, fallbackWorkflowDecision: any = nu
   const compactItem = (item: any) => typeof item === "string" ? item : JSON.stringify(item);
   const rawWorkflowDecision = value?.workflowDecision || value?.workflow_decision || null;
   const derivedWorkflowDecision = {
-        mode: tool?.name === "decompose_requirement_epic"
-          ? "decompose_epic"
-          : state === "plan"
-            ? "plan_task"
-            : tool
-              ? "execute_direct"
-              : "answer",
+        actionRequired: !!tool,
+        requiresCodeChanges: tool?.name === "decompose_requirement_epic",
+        needsEpicDecomposition: tool?.name === "decompose_requirement_epic",
         reason: "根据大模型返回的状态和工具选择生成工作流记录",
         confidence: Number(value?.intent?.confidence ?? 0.8),
       };
@@ -181,7 +177,7 @@ export function normalizeDecision(value: any, fallbackWorkflowDecision: any = nu
       ? "high_risk"
       : workflowDecision.actionRequired
         ? "execution"
-        : workflowDecision.mode === "project_analysis"
+        : workflowDecision.readAction === "inspect_status"
           ? "analysis"
           : workflowDecision.intentKind === "question" ? "question" : "conversation",
     goal: String(value?.message || ""),
@@ -358,7 +354,7 @@ export async function buildGlobalAgentModelMessages(run: GlobalAgentRun, runtime
     ? { ...context, session_continuity: continuationMetadata }
     : context);
   const summaryMessages = continuation?.summary
-    ? [{ role: "user", content: `【当前全局会话压缩摘要】\n${JSON.stringify(continuation.summary)}` }]
+    ? [{ role: "user", content: `[Current global session compaction summary]\n${JSON.stringify(continuation.summary)}` }]
     : [];
   const state = JSON.stringify({
     run: {
@@ -392,7 +388,7 @@ export async function buildGlobalAgentModelMessages(run: GlobalAgentRun, runtime
     context: modelContext,
     prior_steps: priorSteps,
   });
-  const currentUserText = `【用户当前目标】\n${currentGoal}`;
+  const currentUserText = `[Current user goal]\n${currentGoal}`;
   const nativeMessages = tryBuildGlobalNativeModelMessages({
     sessionId,
     currentUserText,
@@ -402,7 +398,7 @@ export async function buildGlobalAgentModelMessages(run: GlobalAgentRun, runtime
     continuation,
     runHistory: run.history,
     metaBlocks: [{
-      title: "当前运行状态",
+      title: "Current run state",
       body: state,
     }],
     observations: run.steps.map(step => step.observation),
@@ -414,6 +410,6 @@ export async function buildGlobalAgentModelMessages(run: GlobalAgentRun, runtime
     ...summaryMessages,
     ...continuationWithoutCurrent,
     ...runHistoryMessages,
-    { role: "user", content: `【用户当前目标】\n${run.reasoning_loop.effective_goal || run.user_message}\n\n【当前运行状态】\n${state}\n\n请决定下一步：直接回答、调用工具，或 ccm_ask_user。` },
+    { role: "user", content: `[Current user goal]\n${run.reasoning_loop.effective_goal || run.user_message}\n\n[Current run state]\n${state}\n\nChoose the next action: answer directly, call a tool, or call ccm_ask_user.` },
   ], collectTransientModelBlocks(run.steps.map(step => step.observation)));
 }

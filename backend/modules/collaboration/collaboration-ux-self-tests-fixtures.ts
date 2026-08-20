@@ -13,7 +13,7 @@ import {
   shouldNotifyGlobalDirectDispatchCompletion,
   shouldNotifyGlobalDirectDispatchContinuation,
   shouldNotifyGlobalDirectDispatchRollback,
-  shouldUseProjectAnalysisMode,
+  shouldLoadReadOnlyProjectContext,
 } from "./collaboration";
 
 export function buildUxSelfTestTask(ctx: any = {}) {
@@ -364,11 +364,10 @@ export function buildUxSelfTestChecks(ctx: any = {}) {
       explicitDevelopmentCreatesTaskCard: classifyGroupProjectTaskIntent("帮我给项目A新增支付接口并改前端页面").executable === true,
       groupIntentGatewayBlocksRuleFallbackWrite: gatewayFallbackBlocked.executable === false && gatewayFallbackBlocked.agent_gateway?.llm_backed === false,
       groupIntentGatewayAllowsLlmDelegate: gatewayLlmDelegates.executable === true && gatewayLlmDelegates.agent_gateway?.llm_backed === true,
-      groupIntentGatewayKeepsLlmDirectAnswerReadOnly: gatewayLlmDirectAnswer.executable === false && gatewayLlmDirectAnswer.analysisEligible === true,
+      groupIntentGatewayKeepsLlmDirectAnswerReadOnly: gatewayLlmDirectAnswer.executable === false && gatewayLlmDirectAnswer.hasToolActivity === true,
       projectTaskModeQuestionDoesNotCreatePersistentTask: shouldCreatePersistentGroupTask({ isOrchestrated: true, messageMode: "project_task", taskIntent: classifyGroupProjectTaskIntent("你好，这是一个什么项目") }) === false,
-      projectTaskQuestionUsesReadOnlyAnalysis: shouldUseProjectAnalysisMode({ isOrchestrated: true, messageMode: "project_task", taskIntent: classifyGroupProjectTaskIntent("你好，这是一个什么项目") }) === true,
-      explicitAnalysisGreetingDoesNotReadProjects: shouldUseProjectAnalysisMode({ isOrchestrated: true, messageMode: "project_analysis", taskIntent: classifyGroupProjectTaskIntent("你好") }) === false,
-      explicitAnalysisModeReadsProjectContext: shouldUseProjectAnalysisMode({ isOrchestrated: true, messageMode: "project_analysis", taskIntent: classifyGroupProjectTaskIntent("这个项目架构是什么") }) === true,
+      projectQuestionLoadsContextAfterToolUse: shouldLoadReadOnlyProjectContext({ isOrchestrated: true, taskIntent: classifyGroupProjectTaskIntent("你好，这是一个什么项目") }) === true,
+      greetingWithoutToolDoesNotLoadProjects: shouldLoadReadOnlyProjectContext({ isOrchestrated: true, taskIntent: classifyGroupProjectTaskIntent("你好") }) === false,
       projectAnalysisReadsSafeCodeSnapshot: codeSnapshotSelfTest.pass === true,
       forceTaskCanBypassIntentGate: shouldCreatePersistentGroupTask({ isOrchestrated: true, messageMode: "project_task", taskIntent: classifyGroupProjectTaskIntent("你好"), forceProjectTask: true }) === true,
       nonTaskCardIsHidden: greetingCard.visible === false,

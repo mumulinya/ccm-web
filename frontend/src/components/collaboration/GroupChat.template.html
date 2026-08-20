@@ -107,10 +107,10 @@
                 <!-- 用户消息 -->
                 <div v-else-if="msg.role === 'user'" class="bubble">
                   <div v-html="highlightMentions(msg.content)"></div>
-                  <TaskCollaborationCard v-if="isPrimaryTaskCard(msg, i)" :card="getTaskCard(msg)" :runtime="getTaskRuntime(msg)" @action="handleTaskCardAction(msg, $event)" />
+                  <TaskCollaborationCard v-if="isPrimaryTaskCard(msg, i)" :card="getTaskCard(msg)" :runtime="getTaskRuntime(msg)" :suppress-plan="groupPlanOwnedByDock(msg, i)" @action="handleTaskCardAction(msg, $event)" />
                 </div>
                 <!-- 项目主 Agent 任务接管：主任务只保留统一紧凑卡，避免接管摘要和任务详情重复。 -->
-                <TaskCollaborationCard v-else-if="msg.type === 'project_task_intake' && isPrimaryTaskCard(msg, i)" :card="getTaskCard(msg)" :runtime="getTaskRuntime(msg)" @action="handleTaskCardAction(msg, $event)" />
+                <TaskCollaborationCard v-else-if="msg.type === 'project_task_intake' && isPrimaryTaskCard(msg, i)" :card="getTaskCard(msg)" :runtime="getTaskRuntime(msg)" :suppress-plan="groupPlanOwnedByDock(msg, i)" @action="handleTaskCardAction(msg, $event)" />
                 <ProjectTaskIntakeMessage v-else-if="msg.type === 'project_task_intake'" :msg="msg" :display-content="getVisibleGroupMessageContent(msg, '我已接管项目任务。')" :accent-style="getAgentAccentStyle(msg.agent)">
                   <MainAgentDecisionCard v-if="getMainAgentDecision(msg) && !isPrimaryTaskCard(msg, i)" :decision="getMainAgentDecision(msg)" compact @step-action="handleTaskCardAction(msg, $event)" />
                 </ProjectTaskIntakeMessage>
@@ -156,6 +156,7 @@
                   :get-assignment-status-label="getAssignmentStatusLabel"
                   :get-agent-display-name="getAgentDisplayName"
                   :message-key="`${currentGroupSessionId || 'session'}:${getGroupMessageKey(msg)}`"
+                  :plan-owned-by-dock="groupPlanOwnedByDock(msg, i)"
                   @step-action="handleTaskCardAction(msg, $event)"
                   @task-action="handleTaskCardAction(msg, $event)"
                   @open-pipeline="openPipelineViewer(msg)"
@@ -164,6 +165,7 @@
                   @clarify-reply="submitInlineGroupClarification"
                 />
                 <PresentedPlanCard
+                  v-if="!groupPlanOwnedByDock(msg, i)"
                   :plan="planForMessage(msg, i)"
                   :can-confirm-execute="canConfirmOnPlanCard(msg, i)"
                   :confirm-execute-busy="presentedPlanConfirmBusy"
@@ -176,7 +178,7 @@
                   :message-index="i"
                   stage-grouped
                   presentation="live"
-                  :omit-requirement-plan="!!planForMessage(msg, i)"
+                  :omit-requirement-plan="groupPlanOwnedByDock(msg, i) || !!planForMessage(msg, i)"
                   @open-file-change="openSingleFileChange"
                   @execution-action="handleTaskCardAction(msg, $event)"
                 />
@@ -188,7 +190,7 @@
                   :message-index="i"
                   stage-grouped
                   presentation="completed"
-                  :omit-requirement-plan="!!planForMessage(msg, i)"
+                  :omit-requirement-plan="!!planForMessage(msg, i) && !groupPlanOwnedByDock(msg, i)"
                   @open-file-change="openSingleFileChange"
                   @open-file-changes="openCodeChangeDrawer($event, { title: '群聊任务文件改动' })"
                   @execution-action="handleTaskCardAction(msg, $event)"

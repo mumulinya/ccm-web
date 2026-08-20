@@ -62,8 +62,9 @@ export declare function mapNativeTurnToParsed(turn: ProviderAgentTurn, controlCa
     friendlyResponse: string;
     directResponse: string;
     workflowDecision: {
-        mode: string;
+        reason: string;
         actionRequired: boolean;
+        requiresCodeChanges: boolean;
     };
     targets?: undefined;
     architecturePlan?: undefined;
@@ -109,6 +110,12 @@ export type NativeQueryLoopInput = {
     compactTranscript?: (messages: LlmChatMessage[]) => LlmChatMessage[];
     persistContext?: ToolResultPersistContext | null;
     shouldStopAfterTools?: (calls: ProviderToolCall[], results: NativeToolResult[]) => boolean;
+    onPlanningPhase?: (info: {
+        phase: "exploring" | "drafting" | "reviewing" | "repairing" | "awaiting_user" | "invalidated";
+        intensity: "focused" | "coordinated" | "critical";
+        evidenceCount?: number;
+        issueCount?: number;
+    }) => void;
 };
 export type NativeQueryLoopResult = {
     parsed: any;

@@ -75,19 +75,19 @@ async function resolveMusicIntentDecisionV2(input) {
         role: item.role,
         content: item.content.slice(0, 800),
     }));
-    const system = `你是 CCM 音乐意图决策器。只输出 JSON，不要 Markdown。
-动作只能是 none、search、play、convert。播放策略只能是 exact_song、artist_random、mood_recommendation、genre_recommendation、random；非播放动作 strategy 必须是 none。
-- 明确歌曲名：play + exact_song。
-- 只指定歌手：play + artist_random，不能猜固定歌曲。
-- 心情、活动或场景：play + mood_recommendation，生成简短可搜索主题。
-- 曲风、语言或类型：play + genre_recommendation。
-- 没有限制且明确要求播放：play + random，searchQuery 为 __random__。
-- 只要求查找、推荐列表或询问有没有：search。
-- 下载、转码或转换：convert。
-- 闲聊、歌词问题、播放器说明：none。
-sourceMode 默认必须为 auto；只有用户在当前消息中明确指定“本地、网易、B站或抖音”时才返回 local、netease、bilibili 或 douyin。
-页面当前浏览标签不是来源限制，不得据此缩小AI点歌来源。
-返回：{"action":"none|search|play|convert","strategy":"none|exact_song|artist_random|mood_recommendation|genre_recommendation|random","searchQuery":"","artist":"","mood":"","genre":"","sourceMode":"auto|local|netease|bilibili|douyin","confidence":0.0,"reason":""}`;
+    const system = `You are the CCM music intent decision model. Return JSON only, without Markdown.
+action must be none, search, play, or convert. Playback strategy must be exact_song, artist_random, mood_recommendation, genre_recommendation, or random; non-play actions must use strategy none.
+- An explicit song title: play + exact_song.
+- An artist only: play + artist_random; do not guess a fixed song.
+- A mood, activity, or scene: play + mood_recommendation with a short searchable theme.
+- A genre, language, or type: play + genre_recommendation.
+- An unrestricted explicit play request: play + random with searchQuery __random__.
+- A search, recommendation list, or availability question: search.
+- Download, transcode, or conversion: convert.
+- Chitchat, lyric questions, and player explanations: none.
+sourceMode defaults to auto. Return local, netease, bilibili, or douyin only when the user explicitly names that source in the current message.
+The currently selected UI tab is not a source restriction.
+Return: {"action":"none|search|play|convert","strategy":"none|exact_song|artist_random|mood_recommendation|genre_recommendation|random","searchQuery":"","artist":"","mood":"","genre":"","sourceMode":"auto|local|netease|bilibili|douyin","confidence":0.0,"reason":""}`;
     const result = await (0, semantic_decision_runtime_1.runSemanticDecision)({
         kind: "music_intent",
         identity: {

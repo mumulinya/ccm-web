@@ -8,7 +8,7 @@ exports.buildAcceptedPlanModeDraft = buildAcceptedPlanModeDraft;
 exports.classifyGroupProjectTaskIntent = classifyGroupProjectTaskIntent;
 exports.normalizeGroupAgentGatewayTaskIntent = normalizeGroupAgentGatewayTaskIntent;
 exports.classifyGroupProjectTaskIntentWithAgent = classifyGroupProjectTaskIntentWithAgent;
-exports.shouldUseProjectAnalysisMode = shouldUseProjectAnalysisMode;
+exports.shouldLoadReadOnlyProjectContext = shouldLoadReadOnlyProjectContext;
 exports.shouldCreatePersistentGroupTask = shouldCreatePersistentGroupTask;
 exports.classifyPlanModeRisk = classifyPlanModeRisk;
 exports.buildPlanModeClarificationQuestions = buildPlanModeClarificationQuestions;
@@ -22,6 +22,8 @@ const group_orchestrator_1 = require("./group-orchestrator");
 const project_analysis_1 = require("./project-analysis");
 const memory_1 = require("./memory");
 const worker_handoff_1 = require("../../agents/worker-handoff");
+const plan_dispatch_contract_1 = require("../../agents/plan-dispatch-contract");
+const runtime_1 = require("../../agents/runtime");
 const collaboration_1 = require("./collaboration");
 const main_agent_plan_core_1 = require("./main-agent-plan-core");
 function getTaskPlanMode(task) {
@@ -173,7 +175,7 @@ function normalizeGroupAgentGatewayTaskIntent(fallback, coordinatorResult, messa
         return {
             ...fallback,
             executable: false,
-            analysisEligible: false,
+            hasToolActivity: false,
             kind: "model_unavailable",
             reason: `Agent intent gateway 未获得大模型决策（${runtime || "unknown"}），本轮停止自动路由`,
             workflowDecision: null,
@@ -183,7 +185,7 @@ function normalizeGroupAgentGatewayTaskIntent(fallback, coordinatorResult, messa
     if (!workflowDecision) {
         return {
             executable: false,
-            analysisEligible: false,
+            hasToolActivity: false,
             kind: "model_invalid",
             reason: "群聊主 Agent 未返回 workflowDecision，本轮停止自动路由",
             workflowDecision: null,
@@ -193,11 +195,15 @@ function normalizeGroupAgentGatewayTaskIntent(fallback, coordinatorResult, messa
     const delegates = (0, workflow_decision_1.isDevelopmentTaskWorkflowDecision)(workflowDecision)
         && action === "delegate"
         && assignments.length > 0;
-    const analysisEligible = !delegates && workflowDecision.mode === "project_analysis";
+    const toolResults = Array.isArray(coordinatorResult?.mainAgentToolUsage?.results)
+        ? coordinatorResult.mainAgentToolUsage.results
+        : [];
+    const hasToolActivity = !delegates && toolResults.some((item) => String(item?.name || "") && item?.name !== "loop_control");
+    const needsClarification = String(coordinatorResult?.mainAgentTurnDecision?.responseKind || "") === "clarify";
     return {
         executable: delegates,
-        analysisEligible,
-        kind: delegates ? "task" : analysisEligible ? "project_analysis" : workflowDecision.mode === "answer" ? "conversation" : "needs_clarification",
+        hasToolActivity,
+        kind: delegates ? "task" : needsClarification ? "needs_clarification" : "conversation",
         reason: delegates
             ? `Agent intent gateway 允许创建任务卡：${dispatchPolicy.reason || "主 Agent 判定需要派发"}`
             : `Agent intent gateway 不创建任务卡：${dispatchPolicy.reason || "主 Agent 判定无需派发"}`,
@@ -209,7 +215,7 @@ function normalizeGroupAgentGatewayTaskIntent(fallback, coordinatorResult, messa
 async function classifyGroupProjectTaskIntentWithAgent(input) {
     const fallback = {
         executable: false,
-        analysisEligible: false,
+        hasToolActivity: false,
         kind: "model_required",
         reason: "等待统一大模型语义决策",
     };
@@ -226,7 +232,7 @@ async function classifyGroupProjectTaskIntentWithAgent(input) {
             sharedFilesContext: input.sharedFilesContext || "",
             extraInstructions: input.forceProjectTask
                 ? "用户通过明确的任务入口要求执行；请在同一首轮形成 workflowDecision、计划与分派草稿。"
-                : `当前消息模式：${mode}。请在本次主 Agent首轮直接决定回复、工具、澄清、计划或分派。`,
+                : "请在本次主 Agent首轮直接决定回复、工具、澄清、计划或分派。",
         });
         const normalized = normalizeGroupAgentGatewayTaskIntent(fallback, coordinatorResult, mode);
         return {
@@ -243,7 +249,7 @@ async function classifyGroupProjectTaskIntentWithAgent(input) {
     catch (error) {
         return {
             executable: false,
-            analysisEligible: false,
+            hasToolActivity: false,
             kind: "model_unavailable",
             reason: `Agent intent gateway 调用失败，本轮停止自动路由：${error?.message || error}`,
             workflowDecision: null,
@@ -251,11 +257,11 @@ async function classifyGroupProjectTaskIntentWithAgent(input) {
         };
     }
 }
-function shouldUseProjectAnalysisMode(input) {
+function shouldLoadReadOnlyProjectContext(input) {
     if (!input.isOrchestrated)
         return false;
-    return input.taskIntent?.workflowDecision?.mode === "project_analysis"
-        || input.taskIntent?.analysisEligible === true;
+    return input.taskIntent?.hasToolActivity === true
+        && input.taskIntent?.executable !== true;
 }
 function shouldCreatePersistentGroupTask(input) {
     return !!input.isOrchestrated
@@ -381,10 +387,8 @@ async function buildGroupPlanModePreflight(input) {
         .filter(item => ["destructive_permission", "compatibility_boundary"].includes(item.id))
         .map(item => ({ ...item, source: "server_safety_floor" }));
     const clarificationQuestions = [...modelClarifications, ...safetyClarifications].slice(0, 6);
-    const requiresConfirmation = workflowDecision.needsPlanning
-        || workflowDecision.mode === "decompose_epic"
-        || risk.requiresConfirmation
-        || planningSource.ready !== true
+    const requiresConfirmation = risk.requiresConfirmation
+        || workflowDecision.riskLevel === "high"
         || clarificationQuestions.length > 0;
     const modelPlanSteps = (workflowDecision.planSteps || []).map((label, index) => ({
         id: `model_plan_${index + 1}`,
@@ -412,7 +416,7 @@ async function buildGroupPlanModePreflight(input) {
             label: (0, main_agent_plan_core_1.planStepText)("confirm_boundary").content,
             detail: clarificationQuestions.length
                 ? "需要先补充关键问题，再进入派发。"
-                : requiresConfirmation ? "模型选择先规划，或服务端安全下限要求确认后执行。" : "模型选择直接执行，当前安全边界允许自动继续。",
+                : requiresConfirmation ? "存在业务歧义、权限或高风险边界，需要确认后执行。" : "Agent 模式直接执行，内部计划仅用于施工和验收。",
             status: requiresConfirmation ? "needs_confirmation" : "completed",
         },
         {
@@ -459,7 +463,7 @@ async function buildGroupPlanModePreflight(input) {
             projects: selectedProjects,
             multi_agent: selectedProjects.length > 1 || risk.signals.crossProject,
         },
-        risk: { ...risk, model_reason: workflowDecision.reason, workflow_mode: workflowDecision.mode },
+        risk: { ...risk, model_reason: workflowDecision.reason },
         acceptance,
         clarification_questions: clarificationQuestions,
         needs_clarification: clarificationQuestions.length > 0,
@@ -478,7 +482,7 @@ async function buildGroupPlanModePreflight(input) {
         auto_continue: !requiresConfirmation,
         next_step: clarificationQuestions.length
             ? "请先确认或补充上面的问题；确认后才会派发子 Agent"
-            : requiresConfirmation ? "等待用户确认后创建执行队列并派发子 Agent" : "模型选择直接执行，自动进入执行队列",
+            : requiresConfirmation ? "等待用户确认业务或安全边界后进入执行队列" : "Agent 模式自动进入执行队列",
         generated_at: new Date().toISOString(),
     };
 }
@@ -496,6 +500,25 @@ function buildChildAgentWorkerHandoff(targetProject, taskText = "", options = {}
         ...(options.dependsOn || options.depends_on ? [{ project: options.dependsOn || options.depends_on, reason: "前置依赖" }] : []),
     ];
     const sourceTask = options.task || options.source_task || options.sourceTask || null;
+    const sourcePlan = options.plan || options.implementationPlan || sourceTask?.workflow_meta?.presentedPlan || sourceTask?.workflow_meta?.implementation_plan || sourceTask?.workflow_meta?.project_main_plan || null;
+    const derivedPlanDispatchContract = !options.plan_dispatch_contract && !options.planDispatchContract && sourcePlan?.schema === "ccm-implementation-plan-v2"
+        ? (0, plan_dispatch_contract_1.buildPlanDispatchContract)({
+            plan: sourcePlan,
+            taskId: String(options.task_id || options.taskId || sourceTask?.id || ""),
+            project: targetProject,
+            sourceManifestChecksum: sourcePlan.sourceManifestChecksum || sourcePlan.source_manifest_checksum || sourcePlan.sourceEvidence?.manifestChecksum || "",
+            provider: options.agent_type || options.agentType || sourceTask?.agent_type || "claudecode",
+            agentType: options.agent_type || options.agentType || sourceTask?.agent_type || "claudecode",
+            model: options.model || options.model_id || sourceTask?.model || "",
+            transport: options.transport || "cli",
+            capabilities: options.provider_capabilities || (0, plan_dispatch_contract_1.providerCapabilitiesFromRuntime)((0, runtime_1.getAgentRuntime)(options.agent_type || options.agentType || sourceTask?.agent_type || "claudecode"), { sessionBinding: true }),
+        })
+        : null;
+    const planDispatchContract = options.plan_dispatch_contract || options.planDispatchContract
+        || sourceTask?.plan_dispatch_contract
+        || sourceTask?.workflow_meta?.plan_dispatch_contract
+        || derivedPlanDispatchContract
+        || null;
     const analysis = {
         ...(options.analysis || {}),
         summary: options.user_goal || options.userGoal || options.business_goal || options.businessGoal || sourceTask?.business_goal || sourceTask?.businessGoal || sourceTask?.title || taskText,
@@ -512,6 +535,13 @@ function buildChildAgentWorkerHandoff(targetProject, taskText = "", options = {}
         workDir: options.work_dir || options.workDir || "",
         agentType: options.agent_type || options.agentType || "",
         model: options.model || options.model_id || options.modelId || "",
+        planDispatchContract: planDispatchContract || options.handoff?.plan_dispatch_contract || null,
+        planId: options.plan_id || options.planId || options.handoff?.plan_binding?.planId || "",
+        planRevision: options.plan_revision || options.planRevision || options.handoff?.plan_binding?.planRevision || 0,
+        planChecksum: options.plan_checksum || options.planChecksum || options.handoff?.plan_binding?.planChecksum || "",
+        sourceManifestChecksum: options.source_manifest_checksum || options.sourceManifestChecksum || options.handoff?.plan_binding?.sourceManifestChecksum || "",
+        contractChecksum: options.contract_checksum || options.contractChecksum || options.handoff?.plan_binding?.contractChecksum || "",
+        workItemId: options.work_item_id || options.workItemId || options.handoff?.plan_binding?.workItemId || "",
         traceId: options.trace_id || options.traceId || sourceTask?.trace_id || sourceTask?.traceId || "",
         taskId: options.task_id || options.taskId || sourceTask?.id || "",
         taskAgentSessionId: options.task_agent_session_id || options.taskAgentSessionId || "",

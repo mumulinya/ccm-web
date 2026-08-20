@@ -521,7 +521,7 @@ import {
   shouldNotifyGlobalDirectDispatchCompletion,
   shouldNotifyGlobalDirectDispatchContinuation,
   shouldNotifyGlobalDirectDispatchRollback,
-  shouldUseProjectAnalysisMode,
+  shouldLoadReadOnlyProjectContext,
   summarizeAgentProbeTargets,
   summarizeNativeTestAgentExecutionPlan,
   summarizeTaskAgentMemoryContextSnapshot,
@@ -1031,7 +1031,7 @@ export function runCollaborationUxSelfTest() {
     classifyGroupProjectTaskIntent("帮我给项目A新增支付接口并改前端页面"),
     {
       runtime: "llm-api",
-      workflowDecision: { mode: "execute_direct", reason: "用户要求开发任务", confidence: 0.95, actionRequired: true, needsPlanning: false, needsEpicDecomposition: false },
+      workflowDecision: { schema: "ccm-model-workflow-decision-v2", reason: "用户要求开发任务", confidence: 0.95, actionRequired: true, requiresCodeChanges: true, needsEpicDecomposition: false },
       dispatchPolicy: { action: "delegate", reason: "用户要求开发任务" },
       assignments: [{ project: "collab-web" }],
     },
@@ -1041,9 +1041,10 @@ export function runCollaborationUxSelfTest() {
     classifyGroupProjectTaskIntent("这个项目架构是什么"),
     {
       runtime: "llm-api",
-      workflowDecision: { mode: "project_analysis", reason: "只读项目分析即可", confidence: 0.95, actionRequired: false, needsPlanning: false, needsEpicDecomposition: false },
+      workflowDecision: { schema: "ccm-model-workflow-decision-v2", reason: "需要读取项目后回答", confidence: 0.95, actionRequired: false, requiresCodeChanges: false, needsEpicDecomposition: false },
       dispatchPolicy: { action: "direct_answer", reason: "只读项目分析即可" },
       assignments: [],
+      mainAgentToolUsage: { results: [{ name: "read_file", ok: true }] },
     },
     "project_task"
   );

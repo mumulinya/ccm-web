@@ -711,10 +711,10 @@ async function summarizeExecute(input) {
         throw new Error("所选范围没有可总结的用户对话");
     const summary = assertSafeConversationSummary(String(await (0, global_agent_model_1.callGlobalModelWithRetry)((0, group_orchestrator_config_1.loadOrchestratorConfig)(), [{
             role: "system",
-            content: "你是CCM会话压缩器。用中文生成结构化事实摘要，必须保留：用户纠正、权限边界、已作决策、未完成事项、任务身份、文件引用、验证结果和明确风险。禁止补造事实、隐藏推理、源码正文、密钥、原始命令或原始输出。只输出摘要正文。",
+            content: "You are the CCM conversation compactor. Produce a structured factual summary in the user's conversation language. Preserve user corrections, permission boundaries, decisions, unfinished items, task identity, file references, verification results, and explicit risks. Do not invent facts or include hidden reasoning, source code, secrets, raw commands, or raw output. Return summary text only.",
         }, {
             role: "user",
-            content: `请总结以下会话片段，供后续模型继续工作：\n\n${transcript}`,
+            content: `Summarize the following conversation segment for a later Agent to continue:\n\n${transcript}`,
         }], { retryProfile: "interactive_first_turn" })).trim().slice(0, 24_000));
     if (summary.length < 20)
         throw new Error("模型没有生成可用的会话摘要，未修改当前上下文");
@@ -924,10 +924,10 @@ function asideModelMessages(input) {
         question,
         messages: [{
                 role: "system",
-                content: "你正在回答CCM会话中的临时问题。只能依据给定的提问时会话快照回答；不得调用工具、创建任务、修改计划、承诺执行操作或输出隐藏推理。回答简洁直接；上下文不足时明确说明。",
+                content: "You are answering a temporary question inside a CCM session. Use only the provided point-in-time session snapshot. Do not call tools, create tasks, modify plans, promise execution, or reveal hidden reasoning. Answer concisely and directly; state when the snapshot is insufficient.",
             }, ...context, {
                 role: "user",
-                content: `临时问题（不写入正式会话，也不影响当前任务）：${question}`,
+                content: `Temporary question (not written to the formal session and not affecting the current task): ${question}`,
             }],
     };
 }

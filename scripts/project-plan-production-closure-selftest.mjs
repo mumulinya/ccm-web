@@ -42,9 +42,9 @@ assert.equal(upsertedHistory.filter(row => row.id === 'revision-message-1').leng
 assert.equal(upsertedHistory.filter(row => row.task_id === 'task-preview' && row.role === 'assistant').length, 1, 'task projection must use one assistant bubble')
 assert.equal(upsertedHistory.find(row => row.role === 'assistant').content, '等待确认', 'task projection must update in place')
 
-const decision = workflow.explicitWorkflowDecision('plan_task', '测试同任务计划修订', {
+const decision = workflow.explicitWorkflowDecision('测试同任务计划修订', {
   actionRequired: true,
-  needsPlanning: true,
+  needsEpicDecomposition: false,
   requiresCodeChanges: true,
   requiresIndependentReview: true,
   verificationModes: ['commands'],

@@ -211,7 +211,7 @@ function createGlobalAgentApi(deps) {
                     ? recoverableCandidates.find((item) => String(item.id || "") === resolvedCandidateTaskId)
                     : null;
                 if (resolvedCandidate)
-                    routeHistory.push({ role: "system", content: `用户明确选择继续原任务。可恢复任务摘要：${JSON.stringify((0, conversation_message_routing_1.buildRecoverableTaskSummary)(resolvedCandidate))}。` });
+                    routeHistory.push({ role: "system", content: `The user explicitly chose to continue the original task. Recoverable task summary: ${JSON.stringify((0, conversation_message_routing_1.buildRecoverableTaskSummary)(resolvedCandidate))}.` });
                 try {
                     const run = await runAgenticGlobalRequest(baseUrl, ctx, {
                         message: String(metadata.message || turn.message || ""),
@@ -229,8 +229,8 @@ function createGlobalAgentApi(deps) {
                         queueScope: `global:${sessionId}`,
                         routeGuard: (workflowDecision) => {
                             if (resolvedRoute === "answer_only") {
-                                workflowDecision.mode = "answer";
                                 workflowDecision.actionRequired = false;
+                                workflowDecision.requiresCodeChanges = false;
                                 workflowDecision.requiresCodeChanges = false;
                                 workflowDecision.continuationKind = "new_task";
                                 return;
@@ -1001,7 +1001,7 @@ function createGlobalAgentApi(deps) {
                 scope: "global",
                 context: { projects: requirementTargets().map((item) => ({ type: item.type, id: item.id, name: item.name })) },
             }).then(workflowDecision => {
-                sendJson(res, { success: true, workflow_decision: workflowDecision, intent: workflowDecision, dispatch: { mode: workflowDecision.mode, targets: workflowDecision.targetRefs } });
+                sendJson(res, { success: true, workflow_decision: workflowDecision, intent: workflowDecision, dispatch: { required: workflowDecision.actionRequired === true, targets: workflowDecision.targetRefs } });
             }).catch((error) => {
                 sendJson(res, { success: false, error: `统一大模型无法形成路由预览：${error?.message || error}` }, 503);
             });
@@ -1489,10 +1489,10 @@ function createGlobalAgentApi(deps) {
                         throw Object.assign(new Error("原任务已不可恢复，请重新选择处理方式"), { code: "CONVERSATION_ROUTE_CANDIDATE_STALE" });
                     }
                     if (explicitCandidate) {
-                        history.push({ role: "system", content: `用户明确选择继续原任务。可恢复任务摘要：${JSON.stringify((0, conversation_message_routing_1.buildRecoverableTaskSummary)(explicitCandidate))}。必须沿用该任务目标，不得创建重复任务。` });
+                        history.push({ role: "system", content: `The user explicitly chose to continue the original task. Recoverable task summary: ${JSON.stringify((0, conversation_message_routing_1.buildRecoverableTaskSummary)(explicitCandidate))}. Preserve this task identity and do not create a duplicate task.` });
                     }
                     else if (recoverableCandidates.length) {
-                        history.push({ role: "system", content: `当前精确会话的可恢复任务摘要：${JSON.stringify(recoverableCandidates.slice(0, 3).map(conversation_message_routing_1.buildRecoverableTaskSummary))}。请结合当前消息判断 continuationKind；不要仅因为存在旧任务就续接。` });
+                        history.push({ role: "system", content: `Recoverable task summaries for the exact session: ${JSON.stringify(recoverableCandidates.slice(0, 3).map(conversation_message_routing_1.buildRecoverableTaskSummary))}. Decide continuationKind from the current message; do not resume merely because an old task exists.` });
                     }
                     ctx.setAgentActivity(GLOBAL_PET_AGENT_NAME, "thinking", "全局 Agent 正在思考...", { tab: "global-agent" }, 12 * 60 * 1000);
                     ctx.broadcastPetSpeech(GLOBAL_PET_AGENT_NAME, { role: "user", text: displayMessage, final: true, source: "global" });
@@ -1584,8 +1584,8 @@ function createGlobalAgentApi(deps) {
                         requestedTargetRefs,
                         routeGuard: (workflowDecision) => {
                             if (explicitRouteChoice === "answer_only") {
-                                workflowDecision.mode = "answer";
                                 workflowDecision.actionRequired = false;
+                                workflowDecision.requiresCodeChanges = false;
                                 workflowDecision.requiresCodeChanges = false;
                                 workflowDecision.continuationKind = "new_task";
                                 return;
@@ -1945,7 +1945,7 @@ function createGlobalAgentApi(deps) {
   
   请仅返回上述报告的 Markdown 文本，排版必须美观大方。`;
                     const messages = [
-                        { role: "system", content: "你是一个专业的 AI 代码审查助手。" },
+                        { role: "system", content: "You are a professional AI code review assistant. Use the user's conversation language for the review. Do not reveal hidden reasoning or raw tool output." },
                         { role: "user", content: reviewPrompt }
                     ];
                     const reviewResult = await callLlm(orchestratorConfig, messages);

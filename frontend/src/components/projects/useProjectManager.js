@@ -966,7 +966,7 @@ export function useProjectManager(props, emit) {
   }
   const handleProjectTaskAction = async (msg, action) => {
     const card = getProjectTaskCard(msg)
-    const id = card?.task_id || msg?.task_id
+    const id = card?.task_id || action?.task_id || action?.taskId || msg?.task_id
     const isProjectRun = String(id || '').startsWith('pchat_')
     const isProjectMainTask = card?.orchestration_scope === 'project_session'
     const projectMainRunId = card?.project_main_run_id || msg?.projectRun?.id || ''

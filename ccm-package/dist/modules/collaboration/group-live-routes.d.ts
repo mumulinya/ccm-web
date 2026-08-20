@@ -6,7 +6,7 @@ export type GroupLiveRoutesDeps = {
     ensureTraceId: (value: any, prefix: string) => string;
     classifyGroupProjectTaskIntentWithAgent: (input: any) => Promise<any>;
     shouldCreatePersistentGroupTask: (input: any) => boolean;
-    shouldUseProjectAnalysisMode: (input: any) => boolean;
+    shouldLoadReadOnlyProjectContext: (input: any) => boolean;
     classifyTaskContinuation: (message: string) => string;
     looksLikeTaskContinuation: (message: string) => boolean;
     continueTaskWithMessage: (taskId: string, message: string, ctx: any, options?: any) => any;
@@ -272,7 +272,7 @@ export declare function handleGroupLiveRoutesSendPreface(payload: any, uploadedF
     taskIntent?: undefined;
     statusFollowupRequest?: undefined;
     persistentTaskRequest?: undefined;
-    projectAnalysisRequest?: undefined;
+    readOnlyContextRequest?: undefined;
     continuationKind?: undefined;
     continuationTask?: undefined;
     groupOperationKey?: undefined;
@@ -325,7 +325,7 @@ export declare function handleGroupLiveRoutesSendPreface(payload: any, uploadedF
     taskIntent: any;
     statusFollowupRequest: boolean;
     persistentTaskRequest: boolean;
-    projectAnalysisRequest: boolean;
+    readOnlyContextRequest: boolean;
     continuationKind: string;
     continuationTask: any;
     groupOperationKey: string;

@@ -407,7 +407,7 @@ export class ToolManager {
     return new McpClient(command, this.parseArgs(config.args), this.parseEnv(config.env));
   }
 
-  // 生成工具 prompt 注入文本
+  // Build the internal tool/Skill prompt block.
   buildToolPrompt(scope?: ToolScope): string {
     if (!this.initialized) return "";
 
@@ -431,58 +431,58 @@ export class ToolManager {
       ? Array.from(allowedSkills).filter(name => !skills.some(skill => skill.name === name))
       : [];
 
-    // MCP 工具
+    // MCP tools
     if (tools.length > 0) {
-      parts.push("\n\n你可以使用以下工具：");
+      parts.push("\n\nAvailable MCP tools:");
       for (const tool of tools) {
-        let desc = `\n\n### 工具: ${tool.name}`;
-        desc += `\n描述: ${tool.description}`;
-        desc += `\n来源: ${tool.serverName}`;
-        desc += `\n权限规则: mcp__ccm__${safeSlug(tool.serverName)}__${tool.name}`;
+        let desc = `\n\n### Tool: ${tool.name}`;
+        desc += `\nDescription: ${tool.description}`;
+        desc += `\nServer: ${tool.serverName}`;
+        desc += `\nPermission rule: mcp__ccm__${safeSlug(tool.serverName)}__${tool.name}`;
         if (tool.inputSchema?.properties) {
-          desc += `\n参数:`;
+          desc += `\nParameters:`;
           for (const [key, val] of Object.entries(tool.inputSchema.properties)) {
             const prop = val as any;
-            const required = tool.inputSchema.required?.includes(key) ? " (必填)" : " (可选)";
+            const required = tool.inputSchema.required?.includes(key) ? " (required)" : " (optional)";
             desc += `\n  - ${key}: ${prop.description || prop.type || "any"}${required}`;
           }
         }
         parts.push(desc);
       }
-      parts.push(`\n\n调用工具的格式（严格遵守）：
+      parts.push(`\n\nCall tools using exactly this format:
 <tool_call>
-{"name": "工具名", "arguments": {"参数名": "参数值"}}
+{"name": "tool_name", "arguments": {"parameter": "value"}}
 </tool_call>
 
-注意：
-- 每次只调用一个工具
-- 工具调用必须用 <tool_call> 标签包裹
-- 等待工具结果后再继续回复
-- 如果不需要工具，直接回复即可`);
+Rules:
+- Call one tool at a time.
+- Wrap every call in <tool_call>.
+- Wait for the tool result before continuing.
+- Reply directly when no tool is needed.`);
     }
 
     // Skills
     if (skills.length > 0) {
-      parts.push("\n\n你可以使用以下 Skills（技能）：");
+      parts.push("\n\nAvailable Skills:");
       for (const skill of skills) {
-        parts.push(`\n- ${skill.name}: ${skill.description}（SkillTool: skill:${skill.name}，hash=${skill.contentHash || ""}）`);
+        parts.push(`\n- ${skill.name}: ${skill.description} (SkillTool: skill:${skill.name}, hash=${skill.contentHash || ""})`);
         if (skill.prompt) {
-          parts.push(`  模板: ${skill.prompt}`);
+          parts.push(`  Template: ${skill.prompt}`);
         }
       }
-      parts.push(`\n\n调用 SkillTool 的格式（严格遵守）：
+      parts.push(`\n\nCall SkillTool using exactly this format:
 <tool_call>
-{"name": "invoke_skill", "arguments": {"name": "Skill 名称", "input": "本次要交给该 Skill 的任务或上下文"}}
+{"name": "invoke_skill", "arguments": {"name": "skill_name", "input": "task or context"}}
 </tool_call>
 
-注意：
-- SkillTool 也受当前 Agent 的 skill 授权范围限制
-- 不得使用未授权或未列出的 Skill
-- 成功调用 Skill 后，应在 CCM_AGENT_RECEIPT.memoryUsed 中写入 Skill:<name>`);
+Rules:
+- SkillTool is restricted by the current Agent's Skill grants.
+- Never use a Skill that is not authorized or listed.
+- After a successful Skill call, report Skill:<name> in CCM_AGENT_RECEIPT.memoryUsed.`);
     }
 
     if (missingMcp.length > 0 || missingSkills.length > 0) {
-      parts.push("\n\n已配置但当前未加载成功的工具：");
+      parts.push("\n\nConfigured tools that are not currently loaded:");
       if (missingMcp.length > 0) {
         const mcpDetails = missingMcp.map(name => {
           const grant = parseMcpGrant(name);
@@ -493,10 +493,10 @@ export class ToolManager {
               ? `${name}（${status.state}${status.error ? `: ${status.error}` : ""}）`
               : name;
         });
-        parts.push(`\n- MCP 服务器：${mcpDetails.join(", ")}`);
+        parts.push(`\n- MCP servers: ${mcpDetails.join(", ")}`);
       }
-      if (missingSkills.length > 0) parts.push(`\n- Skills：${missingSkills.join(", ")}`);
-      parts.push("\n如果任务依赖这些工具，请说明工具暂不可用，不要假装已经调用。");
+      if (missingSkills.length > 0) parts.push(`\n- Skills: ${missingSkills.join(", ")}`);
+      parts.push("\nIf the task depends on these tools, state that they are unavailable. Never pretend to have called them.");
     }
 
     return parts.join("");

@@ -1,5 +1,6 @@
 import { type TestAgentAcceptanceEvidence, type TestAgentVerificationProfile } from "../collaboration/test-agent-review-policy";
 import { type WorkflowDecision } from "../../agents/workflow-decision";
+import { type CcmPlanReviewReceiptV1, type CcmPlanningSessionV1, type PlanningEvidenceManifest } from "../../agents/planning-orchestrator";
 export type ProjectMainWorkItem = {
     id: string;
     title: string;
@@ -11,6 +12,10 @@ export type ProjectMainWorkItem = {
     unresolvedCriteria?: string[];
     allowedFiles?: string[];
     forbiddenFiles?: string[];
+    artifacts?: string[];
+    sourceEvidenceIds?: string[];
+    allowedTools?: string[];
+    dispatchContract?: any;
     repairOfWorkItemId?: string;
     output?: string;
     fileChanges?: any;
@@ -37,6 +42,12 @@ export type ProjectMainPlan = {
         }>;
         totalChars: number;
         truncated: boolean;
+        files?: Array<{
+            path: string;
+            checksum: string;
+            chars: number;
+            evidenceId: string;
+        }>;
     };
     runtimeEvidence: {
         manifestChecksum: string;
@@ -52,6 +63,9 @@ export type ProjectMainPlan = {
         }>;
     };
     workItems: ProjectMainWorkItem[];
+    planningSession?: CcmPlanningSessionV1;
+    planReviewReceipt?: CcmPlanReviewReceiptV1;
+    evidenceManifest?: PlanningEvidenceManifest;
     createdAt: string;
 };
 export type ProjectMainPlanRevisionV1 = {
@@ -189,6 +203,9 @@ export declare function planProjectMainTask(input: {
     context?: string;
     acceptanceMode?: "test_agent" | "main_agent_self_verification";
 }): Promise<{
+    planningSession: CcmPlanningSessionV1;
+    planReviewReceipt: CcmPlanReviewReceiptV1;
+    evidenceManifest: PlanningEvidenceManifest;
     schema: "ccm-project-main-plan-v1";
     title: string;
     summary: string;
@@ -210,6 +227,12 @@ export declare function planProjectMainTask(input: {
         }>;
         totalChars: number;
         truncated: boolean;
+        files?: Array<{
+            path: string;
+            checksum: string;
+            chars: number;
+            evidenceId: string;
+        }>;
     };
     runtimeEvidence: {
         manifestChecksum: string;

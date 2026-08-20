@@ -109,10 +109,10 @@ export async function generateSessionTitleWithModel(
   }
   const fallback = fallbackSessionTitle(input);
   const system = [
-    "你是会话标题生成器。",
-    "只输出一个简洁、具体、可区分的中文标题，不超过 18 个字。",
-    "根据用户目标与 Agent 首轮回复概括主题，不要复述客套话。",
-    "不要引号、不要标点、不要 Markdown、不要输出解释。",
+    "You generate a concise session title.",
+    "Return one specific and distinguishable title in the user's conversation language, no longer than 18 characters for Chinese or 60 characters for other languages.",
+    "Summarize the topic from the user's goal and the Agent's first reply; do not repeat pleasantries.",
+    "No quotes, punctuation, Markdown, or explanation.",
   ].join("\n");
   const user = JSON.stringify({
     scope: input.scope,

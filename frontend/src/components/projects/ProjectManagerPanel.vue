@@ -26,6 +26,7 @@ import { consumeAsideCommand, rewindConversationTurn } from '../../utils/convers
 import { toast } from '../../utils/toast.js'
 import { findActivePrePlanClarification, validatePrePlanClarificationAction } from '../../utils/prePlanClarification.js'
 import { usePresentedPlanConfirmExecute } from '../../composables/usePresentedPlanConfirmExecute.js'
+import { activePlanMessageIndex, projectActiveTaskPlans } from '../../utils/activeTaskPlans.js'
 
 const props = defineProps({
   navigateTo: { type: Object, default: null },
@@ -151,6 +152,12 @@ const projectTaskExecutionActive = computed(() => {
     return !['completed', 'done', 'succeeded', 'failed', 'cancelled', 'canceled', 'reverted'].includes(status)
   })
 })
+const projectPlanOwnedMessageIndexes = computed(() => new Set(
+  projectActiveTaskPlans(projectAgentExecutionEvents.value, { exactSessionId: currentSession.value })
+    .map(plan => activePlanMessageIndex(messages.value, plan))
+    .filter(index => index >= 0),
+))
+const projectPlanOwnedByDock = (_message, messageIndex) => projectPlanOwnedMessageIndexes.value.has(messageIndex)
 // The streaming envelope is created before the first text chunk. Once the
 // turn has real execution events, it must not also show the legacy thinking UI.
 const hasLiveProjectExecutionForMessage = messageIndex => shouldRenderExecutionTranscript(
