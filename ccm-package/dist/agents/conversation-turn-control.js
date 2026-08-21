@@ -110,10 +110,44 @@ function normalizeRouting(input) {
     if (!["answer", "new_task", "resume_task", "revise_task", "needs_user"].includes(decision))
         return null;
     const selectedChoice = String(input.selectedChoice || input.selected_choice || "");
+    const routeKindByDecision = {
+        answer: "answer_only",
+        new_task: "start_new_task",
+        resume_task: "resume_existing_task",
+        revise_task: "revise_existing_task",
+        needs_user: "needs_user",
+    };
+    const rawRouteKind = String(input.routeKind || input.route_kind || routeKindByDecision[decision] || "needs_user");
+    const routeKind = (["answer_only", "continue_current_session", "resume_existing_task", "revise_existing_task", "start_new_task", "needs_user"].includes(rawRouteKind)
+        ? rawRouteKind : routeKindByDecision[decision]);
+    const confidence = Math.max(0, Math.min(1, Number(input.confidence || 0)));
+    const confidenceBand = confidence >= 0.85 ? "high" : confidence >= 0.72 ? "medium" : "low";
+    const rawContinuationKind = String(input.continuationKind || input.continuation_kind || (decision === "new_task" || decision === "answer" ? "new_task" : decision === "revise_task" ? "revise_goal" : "supplement"));
     return {
         decision: decision,
+        routeKind,
         candidateTaskId: String(input.candidateTaskId || input.candidate_task_id || ""),
-        confidence: Math.max(0, Math.min(1, Number(input.confidence || 0))),
+        candidateTaskIds: Array.from(new Set((Array.isArray(input.candidateTaskIds || input.candidate_task_ids)
+            ? (input.candidateTaskIds || input.candidate_task_ids) : [input.candidateTaskId || input.candidate_task_id])
+            .map((item) => String(item || "").trim()).filter(Boolean))).slice(0, 12),
+        candidateSummaries: (Array.isArray(input.candidateSummaries || input.candidate_summaries)
+            ? (input.candidateSummaries || input.candidate_summaries) : []).slice(0, 6).map((item) => ({
+            taskId: String(item?.taskId || item?.task_id || ""),
+            title: String(item?.title || "").replace(/[\r\n\t]+/g, " ").trim().slice(0, 160),
+            status: String(item?.status || "").slice(0, 40),
+            ...(["active", "recoverable", "completed"].includes(String(item?.candidateKind || item?.candidate_kind || "")) ? { candidateKind: String(item.candidateKind || item.candidate_kind) } : {}),
+            ...(item?.phase ? { phase: String(item.phase).slice(0, 80) } : {}),
+            ...(Number.isFinite(Number(item?.attempt)) ? { attempt: Math.max(0, Number(item.attempt)) } : {}),
+            ...(typeof item?.hasIncompleteWorkItems === "boolean" ? { hasIncompleteWorkItems: item.hasIncompleteWorkItems } : {}),
+            ...(Array.isArray(item?.targetProjects) ? { targetProjects: item.targetProjects.map((project) => String(project || "")).filter(Boolean).slice(0, 8) } : {}),
+            contentStored: false,
+        })).filter((item) => item.taskId),
+        activeTaskId: String(input.activeTaskId || input.active_task_id || ""),
+        exactSessionId: String(input.exactSessionId || input.exact_session_id || ""),
+        scope: (["global", "group", "project", "feishu"].includes(String(input.scope || "")) ? String(input.scope) : "global"),
+        confidence,
+        confidenceBand: (["high", "medium", "low"].includes(String(input.confidenceBand || input.confidence_band || "")) ? String(input.confidenceBand || input.confidence_band) : confidenceBand),
+        continuationKind: (["new_task", "supplement", "revise_goal"].includes(rawContinuationKind) ? rawContinuationKind : "new_task"),
         reason: String(input.reason || "").replace(/[\r\n\t]+/g, " ").trim().slice(0, 240),
         bindingChecksum: String(input.bindingChecksum || input.binding_checksum || ""),
         ...(selectedChoice ? { selectedChoice: selectedChoice } : {}),
@@ -121,13 +155,14 @@ function normalizeRouting(input) {
         contentStored: false,
     };
 }
-function routeBindingChecksum(turn, candidateTaskId) {
+function routeBindingChecksum(turn, candidateTaskId, candidateTaskIds) {
     return crypto.createHash("sha256").update(JSON.stringify({
         turnId: turn.id,
         requestId: turn.request_id,
         scope: turn.scope,
         conversationId: turn.conversation_id,
         candidateTaskId,
+        ...(candidateTaskIds ? { candidateTaskIds: Array.from(new Set(candidateTaskIds.filter(Boolean))).sort() } : {}),
         messageChecksum: crypto.createHash("sha256").update(turn.message).digest("hex"),
     })).digest("hex");
 }
@@ -286,7 +321,7 @@ function normalizeRecord(input) {
             run_id: String(input?.run_id || input?.runId || input?.active_run_id || input?.activeRunId || ""),
             checkpoint: String(input?.checkpoint || "queued"),
             semantic_decision_receipt: input?.semantic_decision_receipt || input?.semanticDecisionReceipt || null,
-            routing: normalizeRouting(input?.routing),
+            routing: normalizeRouting({ ...(input?.routing || {}), scope, exactSessionId: conversationId }),
         };
     }
     catch {
@@ -572,13 +607,19 @@ class ConversationTurnControlStore {
             if (turn.kind !== "user_message")
                 throw new Error("正式派发任务不参加消息意图确认");
             const candidateTaskId = String(input?.routing?.candidateTaskId || input?.routing?.candidate_task_id || "");
-            const checksum = routeBindingChecksum(turn, candidateTaskId);
+            const candidateTaskIds = Array.from(new Set((Array.isArray(input?.routing?.candidateTaskIds || input?.routing?.candidate_task_ids)
+                ? (input.routing.candidateTaskIds || input.routing.candidate_task_ids) : [candidateTaskId])
+                .map((item) => String(item || "").trim()).filter(Boolean)));
+            const checksum = routeBindingChecksum(turn, candidateTaskId, candidateTaskIds);
             turn.status = "needs_route";
             turn.revision += 1;
             turn.routing = normalizeRouting({
                 ...(input?.routing || {}),
                 decision: "needs_user",
                 candidateTaskId,
+                candidateTaskIds,
+                scope: turn.scope,
+                exactSessionId: turn.conversation_id,
                 bindingChecksum: checksum,
                 source: "model",
             });
@@ -608,16 +649,31 @@ class ConversationTurnControlStore {
             const checksum = String(input?.bindingChecksum || input?.binding_checksum || "");
             if (!checksum || checksum !== turn.routing.bindingChecksum)
                 throw queueConflict("消息与候选任务已经变化，请重新确认");
-            const expected = routeBindingChecksum(turn, turn.routing.candidateTaskId);
-            if (expected !== checksum)
+            const expected = routeBindingChecksum(turn, turn.routing.candidateTaskId, turn.routing.candidateTaskIds || []);
+            const legacyExpected = routeBindingChecksum(turn, turn.routing.candidateTaskId);
+            if (expected !== checksum && legacyExpected !== checksum)
                 throw queueConflict("消息绑定校验失败，请重新确认");
+            const requestedCandidateTaskId = String(input?.candidateTaskId || input?.candidate_task_id || turn.routing.candidateTaskId || "");
+            if (choice === "continue_original") {
+                const allowedCandidates = new Set(turn.routing.candidateTaskIds?.length ? turn.routing.candidateTaskIds : [turn.routing.candidateTaskId].filter(Boolean));
+                if (!requestedCandidateTaskId || !allowedCandidates.has(requestedCandidateTaskId))
+                    throw queueConflict("候选任务已变化，请重新确认");
+            }
             turn.status = "queued";
             turn.revision += 1;
-            turn.routing = { ...turn.routing, selectedChoice: choice, source: "explicit_user_choice", contentStored: false };
+            const routeKind = choice === "answer_only" ? "answer_only"
+                : choice === "start_new_task" ? "start_new_task"
+                    : turn.routing.continuationKind === "revise_goal" ? "revise_existing_task"
+                        : turn.routing.candidateSummaries.find(item => item.taskId === requestedCandidateTaskId)?.candidateKind === "active"
+                            ? "continue_current_session" : "resume_existing_task";
+            const decision = choice === "answer_only" ? "answer"
+                : choice === "start_new_task" ? "new_task"
+                    : routeKind === "revise_existing_task" ? "revise_task" : "resume_task";
+            turn.routing = { ...turn.routing, decision, routeKind, candidateTaskId: requestedCandidateTaskId, activeTaskId: routeKind === "continue_current_session" ? requestedCandidateTaskId : "", selectedChoice: choice, source: "explicit_user_choice", contentStored: false };
             turn.metadata = {
                 ...turn.metadata,
                 resolved_route: choice,
-                resolved_candidate_task_id: turn.routing.candidateTaskId,
+                resolved_candidate_task_id: requestedCandidateTaskId,
                 route_source: "explicit_user_choice",
             };
             turn.updated_at = nowIso();

@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.projectTaskExecutionStageTransition = projectTaskExecutionStageTransition;
 const user_visible_agent_events_1 = require("./user-visible-agent-events");
+const agent_key_progress_1 = require("./agent-key-progress");
 const assistant_progress_1 = require("./assistant-progress");
 const group_orchestrator_config_1 = require("../modules/collaboration/group-orchestrator-config");
 function text(value) { return String(value || "").trim(); }
@@ -32,13 +33,15 @@ function appendStageProgress(task, kind, message, attempt = 1) {
     catch { }
     if (!identity || !enabled)
         return null;
-    return (0, user_visible_agent_events_1.appendAssistantProgress)({
+    return (0, agent_key_progress_1.recordAgentKeyProgress)({
         ...identity,
         taskId: text(task?.id),
         turnId: `task:${text(task?.id)}`,
         eventId: `task-stage:${text(task?.id)}:progress:${kind}:${Math.max(1, attempt)}`,
         text: message,
         kind,
+        source: "deterministic",
+        status: kind === "blocker" ? "failed" : "running",
         modelCallIndex: 0,
         relatedToolCallIds: [],
         title: identity.scope === "group" ? "群聊主 Agent" : "项目主 Agent",
@@ -99,7 +102,7 @@ function appendTestAgentEvent(task, eventType, input) {
     const at = text(input?.at) || new Date().toISOString();
     const startedAt = text(input?.startedAt) || at;
     const durationMs = Math.max(0, number(input?.durationMs, durationBetween(startedAt, at)));
-    return (0, user_visible_agent_events_1.appendUserVisibleAgentEvent)({
+    const event = (0, user_visible_agent_events_1.appendUserVisibleAgentEvent)({
         eventId: `task-stage:${taskId}:test-agent:${attempt}:${eventType}`,
         ...identity,
         taskId,
@@ -139,6 +142,25 @@ function appendTestAgentEvent(task, eventType, input) {
                 ] } : {}),
         },
     });
+    const progressText = eventType === "agent_started"
+        ? `TestAgent 正在核对第 ${attempt} 轮验收标准`
+        : eventType === "agent_completed"
+            ? `TestAgent 第 ${attempt} 轮验收已通过`
+            : `TestAgent 第 ${attempt} 轮验证未通过，准备返工`;
+    (0, agent_key_progress_1.recordAgentKeyProgress)({
+        ...identity,
+        taskId,
+        turnId: `task:${taskId}`,
+        eventId: `task-key-progress:${taskId}:test-agent:${attempt}:${eventType}`,
+        generation: identity.generation,
+        kind: "verification_update",
+        source: "child_agent",
+        status: eventType === "agent_started" ? "running" : eventType === "agent_completed" ? "success" : "failed",
+        round: attempt - 1,
+        text: progressText,
+        title: [identity.project, "TestAgent"].filter(Boolean).join(" · ") || "TestAgent",
+    });
+    return event;
 }
 function appendMainSummaryEvent(task, eventType, input) {
     const identity = taskIdentity(task);
@@ -149,7 +171,7 @@ function appendMainSummaryEvent(task, eventType, input) {
     const startedAt = text(input?.startedAt) || at;
     const durationMs = Math.max(0, number(input?.durationMs, durationBetween(startedAt, at)));
     const roleLabel = identity.scope === "group" ? "群聊主 Agent" : "项目主 Agent";
-    return (0, user_visible_agent_events_1.appendUserVisibleAgentEvent)({
+    const event = (0, user_visible_agent_events_1.appendUserVisibleAgentEvent)({
         eventId: `task-stage:${taskId}:main-summary:${eventType}`,
         ...identity,
         taskId,
@@ -188,6 +210,24 @@ function appendMainSummaryEvent(task, eventType, input) {
                 ] } : {}),
         },
     });
+    (0, agent_key_progress_1.recordAgentKeyProgress)({
+        ...identity,
+        taskId,
+        turnId: `task:${taskId}`,
+        eventId: `task-key-progress:${taskId}:main-summary:${eventType}`,
+        generation: identity.generation,
+        kind: "phase_update",
+        source: "deterministic",
+        status: eventType === "agent_started" ? "running" : eventType === "agent_completed" ? "success" : "failed",
+        round: 0,
+        text: eventType === "agent_started"
+            ? "主 Agent 正在整理最终结论"
+            : eventType === "agent_completed"
+                ? "主 Agent 已完成最终验收与交付总结"
+                : "主 Agent 最终总结未完成，需要继续处理当前问题",
+        title: identity.scope === "group" ? "群聊主 Agent" : "项目主 Agent",
+    });
+    return event;
 }
 function projectTaskExecutionStageTransition(previous, current) {
     if (!current?.id)

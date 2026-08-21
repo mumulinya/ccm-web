@@ -25,7 +25,7 @@ export function detectProviderCacheFamily(config: any = {}, hint = ""): Provider
   const value = `${hint} ${format} ${host}`.toLowerCase();
   if (format === "gemini-compatible" || /generativelanguage\.googleapis\.com|\bgemini\b/.test(value)) return "gemini";
   if (format === "anthropic-compatible" || /(?:^|\.)anthropic\.com$/.test(host) || /\banthropic\b|\bclaude\b/.test(value)) return "anthropic";
-  if (/(?:^|\.)openai\.com$/.test(host) || format === "openai" || hint === "openai") return "openai";
+  if (/(?:^|\.)openai\.com$/.test(host) || format === "openai" || format === "openai-responses" || hint === "openai") return "openai";
   return "compatible";
 }
 

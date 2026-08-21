@@ -162,10 +162,10 @@ function runPresentedPlanQualitySelfTest() {
         validPasses: valid.ok === true && valid.issues.length === 0,
         nineStepsAllowed: tooMany.ok === true,
         oneStepAllowed: oneStep.ok === true,
-        emptyStepsRejected: emptySteps.ok === false && emptySteps.issues.some(item => item.includes("至少 1 条")),
-        duplicateTitleRejected: duplicate.ok === false && duplicate.issues.some(item => item.includes("重复")),
+        emptyStepsRejected: emptySteps.ok === false && emptySteps.issues.some(item => item.includes("at least one")),
+        duplicateTitleRejected: duplicate.ok === false && duplicate.issues.some(item => item.includes("Duplicate step title")),
         missingBoundaryRejected: missingBoundary.ok === false && missingBoundary.issues.some(item => item.includes("exclusions")),
-        shortGoalRejected: shortGoal.ok === false && shortGoal.issues.some(item => item.includes("60 字")),
+        shortGoalRejected: shortGoal.ok === false && shortGoal.issues.some(item => item.includes("at least 60 characters")),
         missingPlanRejected: missingPlan.ok === false && missingPlan.directive.includes("ccm_present_plan"),
         attachRecordsRepaired: attached.plan.quality.repaired === true && attached.quality.ok === true,
         shouldRepairOnce: shouldRepairPresentedPlan({ responseType: "plan", plan: missingBoundary }, false) === true

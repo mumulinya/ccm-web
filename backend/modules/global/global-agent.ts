@@ -47,6 +47,7 @@ import {
   createRequirementEpicWithChildren,
   controlGlobalDevelopmentMission,
   getGlobalDevelopmentMission,
+  continueTaskWithMessage,
   refreshGlobalDevelopmentMissions,
   superviseGlobalDevelopmentMissionCycle,
   sendFeishuReportMessage,
@@ -261,9 +262,16 @@ function deleteGlobalAgentConversationSession(sessionId: string, expectedSource 
   return result
 }
 
+export { deleteGlobalAgentConversationSession };
+
 function getGlobalAgentConversationMessages(sessionId: string) {
   return globalAgentHistoryRuntime.getGlobalAgentConversationMessages(sessionId)
 }
+
+// Task recovery uses the same persistent store, but keeps the user-session
+// decision separate from the Agent runtime. These wrappers intentionally
+// expose metadata operations only; message bodies remain internal.
+export { loadGlobalAgentHistoryStore, createGlobalAgentConversationSession, getGlobalAgentConversationMessages };
 
 function appendGlobalAgentConversationMessage(
   sessionId: string,
@@ -534,6 +542,7 @@ const globalAgentAgenticRuntime = createGlobalAgentAgenticRuntime({
   compactPetText,
   completeGlobalAgentSupervision,
   completeIdempotency,
+  continueTaskWithMessage,
   conversationTurnControl,
   continueGlobalAgentRunWithClarification,
   controlGlobalDevelopmentMission,

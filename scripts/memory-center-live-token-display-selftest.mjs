@@ -19,7 +19,34 @@ if (process.argv.includes("--exact-session-child")) {
     v2: {
       activeSummary: `model summary ${tokens}`,
       activeSummaryChecksum: `checksum-${tokens}`,
-      tokenMeasurement: { activeTokens: tokens, source: "provider_usage_plus_estimate" },
+      tokenMeasurement: {
+        schema: "ccm-context-measurement-v2",
+        accountingSchema: "ccm-context-accounting-v2",
+        source: "model_visible_estimate",
+        precision: "estimated",
+        currentInputTokens: tokens,
+        outputTokens: 0,
+        estimatedNewInputTokens: 0,
+        totalModelVisibleTokens: tokens,
+        updatedAt: "2026-08-20T00:00:00.000Z",
+      },
+      modelVisiblePayload: {
+        schema: "ccm-model-visible-payload-accounting-v1",
+        accountingSchema: "ccm-context-accounting-v2",
+        primaryTokenBreakdown: {
+          systemPrompt: 0, rules: 0, skills: 0, mcpAndDynamicTools: 0,
+          subagentDefinitions: 0, summarizedConversation: 0,
+          conversation: tokens, currentRequest: 0,
+        },
+        technicalTokenBreakdown: {
+          recoveryContext: 0, hooks: 0, workerBootstrap: 0,
+          hydratedContext: 0, providerEnvelope: 0,
+          providerUnpartitionedRemainder: 0,
+        },
+        totalTokens: tokens,
+        payloadChecksum: `payload-${tokens}`,
+        contentStored: false,
+      },
       preservedRecentTokens: 10_000,
       preservedRecentMessageIds: ["m1", "m2", "m3", "m4", "m5"],
       sessionMemoryState: { summary: `session memory ${tokens}`, status: "ready", tokensAtLastExtraction: tokens - 5_000 },
@@ -67,9 +94,10 @@ if (process.argv.includes("--exact-session-child")) {
     taskCircuitIsExact: rows.every(row => row.circuitOpen === false)
       && rows[3].summaryDegraded === true
       && rows[3].summaryFallbackFailures === 3,
-    exactDetailsResolve: details.every((detail, index) => detail?.summary?.currentTokens === expectedTokens[index]),
+    exactDetailsResolve: details.slice(0, 3).every(detail => Number(detail?.summary?.currentTokens || 0) > 0
+      && String(detail?.summary?.tokenSource || "").startsWith("model_visible_payload")),
   };
-  assert.equal(Object.values(checks).every(Boolean), true, JSON.stringify({ checks, rows }, null, 2));
+  assert.equal(Object.values(checks).every(Boolean), true, JSON.stringify({ checks, rows, detailTokens: details.map(detail => detail?.summary?.currentTokens ?? null) }, null, 2));
   console.log(JSON.stringify({ pass: true, checks: Object.keys(checks).length, checksDetail: checks }));
   process.exit(0);
 }
@@ -99,15 +127,15 @@ const memory = {
 const tokenState = resolveMemoryCenterTokenState("group", "token-display-group::gcs_token_display", memory, {
   config: { modelContextWindow: 516000, modelAutoCompactTokenLimit: 460000 },
 });
-assert.equal(tokenState.currentTokens, 2166);
-assert.equal(tokenState.currentMessageCount, 10);
-assert.equal(tokenState.autoCompactThreshold, 460000);
-assert.equal(tokenState.remainingTokens, 457834);
-assert.equal(tokenState.tokenSource, "context_pressure_sample");
-assert.equal(tokenState.sampledAutoCompactThreshold, 460000);
+assert.equal(tokenState.currentTokens, 0);
+assert.equal(tokenState.currentMessageCount, 0);
+assert.equal(tokenState.autoCompactThreshold, 483000);
+assert.equal(tokenState.remainingTokens, 483000);
+assert.equal(tokenState.tokenSource, "unavailable");
+assert.equal(tokenState.sampledAutoCompactThreshold, 483000);
 
 const summary = memorySummary("group", "token-display-group::gcs_token_display", memory, "Token display");
-assert.equal(summary.currentTokens, 2166);
+assert.equal(summary.currentTokens, 0);
 assert.ok(summary.autoCompactThreshold > 0);
 assert.equal(summary.beforeTokens, 0);
 assert.equal(summary.afterTokens, 0);
@@ -119,10 +147,10 @@ const uncompressedProjectSession = resolveMemoryCenterTokenState("project_sessio
   ],
   compaction: {},
 });
-assert.ok(uncompressedProjectSession.currentTokens > 0);
-assert.equal(uncompressedProjectSession.currentMessageCount, 2);
-assert.equal(uncompressedProjectSession.tokenSource, "project_transcript_estimate");
-assert.equal(uncompressedProjectSession.fallbackTokenMeasurement.estimatedMessageTokens, uncompressedProjectSession.currentTokens);
+assert.equal(uncompressedProjectSession.currentTokens, 0);
+assert.equal(uncompressedProjectSession.currentMessageCount, 0);
+assert.equal(uncompressedProjectSession.tokenSource, "unavailable");
+assert.equal(uncompressedProjectSession.fallbackTokenMeasurement, null);
 
 const compressedProjectSession = resolveMemoryCenterTokenState("project_session", "proj::s2", {
   history: [
@@ -134,15 +162,15 @@ const compressedProjectSession = resolveMemoryCenterTokenState("project_session"
     v2: { lastCompactedIndex: 0, activeSummary: "旧会话的正式模型摘要" },
   },
 });
-assert.ok(compressedProjectSession.currentTokens > 0);
-assert.equal(compressedProjectSession.currentMessageCount, 1);
-assert.ok(compressedProjectSession.fallbackTokenMeasurement.estimatedSummaryTokens > 0);
+assert.equal(compressedProjectSession.currentTokens, 0);
+assert.equal(compressedProjectSession.currentMessageCount, 0);
+assert.equal(compressedProjectSession.tokenSource, "unavailable");
 
 const frontend = fs.readFileSync(new URL("../frontend/src/components/knowledge/MemoryCenterPanel.vue", import.meta.url), "utf8");
 assert.match(frontend, /item\.currentTokens/);
 assert.match(frontend, /selectedSummary\.autoCompactThreshold/);
 assert.match(frontend, /selectedSummary\.remainingTokens/);
-assert.match(frontend, /最近压缩/);
+assert.match(frontend, /需选择精确会话/);
 
 const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "ccm-memory-center-exact-sessions-"));
 try {
@@ -155,7 +183,7 @@ try {
   assert.equal(child.status, 0, child.stderr || child.stdout);
   const exactSessionResult = JSON.parse(String(child.stdout || "").trim().split(/\r?\n/).at(-1));
   assert.equal(exactSessionResult.pass, true);
-  console.log(JSON.stringify({ pass: true, checks: 21 + exactSessionResult.checks, current_tokens_without_compaction: true, project_transcript_estimate: true, project_summary_recent_estimate: true, exact_session_scopes: 4 }, null, 2));
+  console.log(JSON.stringify({ pass: true, checks: 21 + exactSessionResult.checks, unverifiable_without_exact_payload: true, no_project_transcript_fallback: true, no_summary_body_estimate_fallback: true, exact_session_scopes: 4 }, null, 2));
 } finally {
   fs.rmSync(tempHome, { recursive: true, force: true });
 }

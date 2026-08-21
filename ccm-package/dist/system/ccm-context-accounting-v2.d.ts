@@ -1,0 +1,54 @@
+export type CcmContextCapacityV2 = {
+    schema: "ccm-context-capacity-v2";
+    provider: string;
+    model: string;
+    rawWindowTokens: number;
+    windowSemantics: "total_context" | "max_input";
+    reservedOutputTokens: number;
+    effectiveInputWindowTokens: number;
+    autoCompactBufferTokens: number;
+    autoCompactThresholdTokens: number;
+    source: "provider_capability" | "user_setting" | "conservative_fallback";
+    confidence: number;
+    evidenceId?: string;
+};
+export type CcmContextMeasurementV2 = {
+    schema: "ccm-context-measurement-v2";
+    source: "provider_reported" | "model_visible_estimate" | "unavailable";
+    precision: "exact" | "estimated" | "unavailable";
+    measurementBasis?: "exact_payload_usage" | "provider_usage_anchor_plus_delta" | "local_payload_prediction" | "unavailable";
+    currentInputTokens: number;
+    outputTokens: number;
+    estimatedNewInputTokens: number;
+    totalModelVisibleTokens: number;
+    lastProviderObservedTokens?: number;
+    predictedNextRequestTokens?: number;
+    providerIdentityChecksum?: string;
+    providerEvidenceId?: string;
+    payloadChecksum?: string;
+    updatedAt: string;
+};
+export type CcmPrimaryTokenBreakdownV2 = {
+    systemPrompt: number;
+    rules: number;
+    skills: number;
+    mcpAndDynamicTools: number;
+    subagentDefinitions: number;
+    summarizedConversation: number;
+    conversation: number;
+    currentRequest: number;
+};
+export type CcmTechnicalTokenBreakdownV2 = {
+    recoveryContext: number;
+    hooks: number;
+    workerBootstrap: number;
+    hydratedContext: number;
+    providerEnvelope: number;
+    providerUnpartitionedRemainder: number;
+};
+export declare function normalizeCcmContextCapacity(input?: any): CcmContextCapacityV2;
+export declare function checksumCcmContextAccounting(value: unknown): string;
+export declare function buildCcmProviderIdentityChecksum(input?: any): string;
+export declare function normalizeCcmPrimaryTokenBreakdown(value?: any): CcmPrimaryTokenBreakdownV2;
+export declare function normalizeCcmTechnicalTokenBreakdown(value?: any): CcmTechnicalTokenBreakdownV2;
+export declare function sumCcmPrimaryTokenBreakdown(value: CcmPrimaryTokenBreakdownV2): number;

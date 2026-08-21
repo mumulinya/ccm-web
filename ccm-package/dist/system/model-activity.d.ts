@@ -1,6 +1,6 @@
 export type ModelActivityPhase = "understanding" | "tool_decision" | "tool_result_review" | "verification" | "final_synthesis";
 export type ModelActivityState = "started" | "waiting" | "retrying" | "streaming" | "completed" | "failed";
-export declare function modelActivityDefaultLabel(phase: ModelActivityPhase): "已取得检查结果，正在归纳关键结论" | "验证结果已返回，正在核对交付条件" | "执行结果已收口，正在整理最终结论" | "正在确定下一步需要核对的项目信息" | "正在理解当前需求并核对必要上下文";
+export declare function modelActivityDefaultLabel(phase: ModelActivityPhase): "正在理解当前需求并核对必要上下文" | "已取得检查结果，正在归纳关键结论" | "执行结果已收口，正在整理最终结论" | "验证结果已返回，正在核对交付条件" | "正在确定下一步需要核对的项目信息";
 export declare function createModelActivityController(input: {
     scope: "global" | "project" | "group";
     scopeId: string;

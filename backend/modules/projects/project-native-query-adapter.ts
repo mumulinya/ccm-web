@@ -2,8 +2,9 @@ import { catalogToNativeTools, nativeControlToolDefinitions, runNativeQueryLoop 
 import type { NativeToolResult } from "../../agents/native-query-messages";
 import { callNativeAgentTurn } from "../collaboration/group-orchestrator-llm-client";
 import { createModelActivityController, type ModelActivityPhase } from "../../system/model-activity";
-import { appendAssistantProgress, publishEphemeralUserVisibleAgentEvent } from "../../system/user-visible-agent-events";
-import { assistantProgressNarrationEnabled, buildAssistantProgressFallback, buildToolBatchOutcomeProgress } from "../../system/assistant-progress";
+import { publishEphemeralUserVisibleAgentEvent } from "../../system/user-visible-agent-events";
+import { assistantProgressNarrationEnabled } from "../../system/assistant-progress";
+import { createAgentKeyProgressCoordinator } from "../../system/agent-key-progress";
 import { isConversationPlanModeEnabled } from "../../system/conversation-plan-mode-gate";
 import type { ProviderToolCall } from "../../system/provider-native-tools";
 
@@ -48,8 +49,20 @@ export async function runProjectMainNativeQueryLoop(input: {
   let visibleReplyDeltaEmitted = false;
   let visibleDeltaSequence = 0;
   let firstProviderDeltaAt = 0;
+  let firstModelPreamble = "";
   let initialReadFileCount = 0;
   let initialReadTokens = 0;
+  const keyProgress = createAgentKeyProgressCoordinator({
+    scope: "project",
+    scopeId: project,
+    exactSessionId: projectSessionId,
+    turnId: visibleTurnId,
+    generation: Number(input.getToolContext?.()?.scopeIdentity?.generation || 0),
+    target: project,
+    goal: input.userMessage,
+    title: "项目主 Agent",
+    config,
+  });
 
   const result = await runNativeQueryLoop({
     config,
@@ -74,6 +87,7 @@ export async function runProjectMainNativeQueryLoop(input: {
       if (!firstProviderDeltaAt) firstProviderDeltaAt = Date.now();
       input.markVisibleFeedback(firstProviderDeltaAt);
       visibleDeltaSequence += 1;
+      if (visibleDeltaSequence === 1 && String(delta).trim().length >= 8) firstModelPreamble = String(delta).trim();
       publishEphemeralUserVisibleAgentEvent({
         eventId: `project-delta:${visibleTurnId}:${visibleDeltaSequence}`,
         scope: "project", scopeId: project, exactSessionId: projectSessionId,
@@ -116,6 +130,7 @@ export async function runProjectMainNativeQueryLoop(input: {
           input.onModelActivity?.(activityValue);
         },
       });
+      keyProgress.phase(activityPhase, modelCallIndex, round);
       activity.complete();
     },
     executeTools: async (calls, ctx) => {
@@ -123,21 +138,13 @@ export async function runProjectMainNativeQueryLoop(input: {
       const runnableRequests = calls.map(item => ({ name: item.name, arguments: item.arguments || {} }));
       const preparedToolCallIds = calls.map(item => item.id);
       const toolContext = input.getToolContext();
-      if (assistantProgressNarrationEnabled(config) && round === 0) {
-        const progressText = buildAssistantProgressFallback(runnableRequests, { target: project, goal: input.userMessage });
-        if (progressText) {
-          appendAssistantProgress({
-            scope: "project", scopeId: project, exactSessionId: projectSessionId,
-            generation: Number(toolContext.scopeIdentity?.generation || 0),
-            turnId: visibleTurnId,
-            text: progressText,
-            kind: "before_tools",
-            modelCallIndex: round + 1,
-            relatedToolCallIds: preparedToolCallIds,
-            title: "项目主 Agent",
-          });
-          input.markVisibleFeedback();
+      if (assistantProgressNarrationEnabled(config)) {
+        if (firstModelPreamble) {
+          keyProgress.modelPreamble(firstModelPreamble, round + 1, round);
+          firstModelPreamble = "";
         }
+        keyProgress.toolBatchStarted(runnableRequests, round, round + 1);
+        input.markVisibleFeedback();
       }
       const roundResults: any[] = [];
       for (let index = 0; index < runnableRequests.length;) {
@@ -169,20 +176,20 @@ export async function runProjectMainNativeQueryLoop(input: {
         initialReadTokens += initialReads.reduce((count, row) => count + Math.max(0, Number(row?.outputTokens || 0)), 0);
       }
       if (assistantProgressNarrationEnabled(config)) {
-        const outcomeProgress = buildToolBatchOutcomeProgress(roundResults, { target: project });
-        if (outcomeProgress) {
-          appendAssistantProgress({
-            scope: "project", scopeId: project, exactSessionId: projectSessionId,
-            generation: Number(toolContext.scopeIdentity?.generation || 0),
-            turnId: visibleTurnId,
-            text: outcomeProgress,
-            kind: "key_finding",
-            modelCallIndex: round + 1,
-            relatedToolCallIds: preparedToolCallIds,
-            title: "项目主 Agent",
+        keyProgress.toolBatchCompleted(roundResults, round, round + 1);
+        input.markVisibleFeedback();
+        await keyProgress.summarizeToolBatch(round, roundResults, async prompt => {
+          const turn = await callNativeAgentTurn(config, {
+            messages: [{ role: "system", content: "You produce one safe, concise progress sentence. Do not call tools or reveal hidden reasoning." }, { role: "user", content: prompt }],
+            maxTokens: 120,
+            stream: false,
+            nativeTools: [],
+            nativeToolsRequired: false,
+            retryAttempts: 1,
+            retryScope: "agent_progress_summary",
           });
-          input.markVisibleFeedback();
-        }
+          return String(turn?.text || "");
+        }, round + 1);
       }
       return roundResults.map((row: any, index: number): NativeToolResult => ({
         callId: preparedToolCallIds[index] || calls[index]?.id || `pmtool_${index}`,

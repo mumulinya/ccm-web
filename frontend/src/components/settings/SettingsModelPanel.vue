@@ -88,6 +88,14 @@ const consumers = computed(() => testResult.value?.consumers || [
   { id: 'project-main-agent', label: '项目主 Agent', ready: null },
   { id: 'music-agent', label: '音乐 Agent', ready: null }
 ])
+const endpointPreview = computed(() => {
+  const raw = String(modelConfig.value.apiUrl || '').replace(/\/+$/, '')
+  if (!raw) return ''
+  if (modelConfig.value.format === 'openai-responses') return /\/responses$/i.test(raw) ? raw : /\/v1$/i.test(raw) ? `${raw}/responses` : `${raw}/v1/responses`
+  if (modelConfig.value.format === 'anthropic-compatible') return /\/messages$/i.test(raw) ? raw : /\/v1$/i.test(raw) ? `${raw}/messages` : `${raw}/v1/messages`
+  if (modelConfig.value.format === 'openai-compatible') return /\/chat\/completions$/i.test(raw) ? raw : /\/v1$/i.test(raw) ? `${raw}/chat/completions` : `${raw}/v1/chat/completions`
+  return raw
+})
 
 const cacheFamilyForFormat = (format) => ({
   'openai-compatible': 'openai',
@@ -251,26 +259,47 @@ const testConnection = async () => {
   testing.value = true
   testResult.value = null
   try {
-    const response = await fetch('/api/orchestrator/cache-capability/probe', { method: 'POST' })
+    const response = await fetch('/api/orchestrator/connection-test', { method: 'POST' })
     const data = await response.json()
     testResult.value = {
       ...data,
-      success: data?.connection?.success === true,
+      success: data?.success === true,
+      capability: data?.providerCacheCapability || null,
       consumers: (data?.consumers || [
         { id: 'global-agent', label: '全局 Agent' },
         { id: 'group-main-agent', label: '群聊主 Agent' },
         { id: 'project-main-agent', label: '项目主 Agent' },
         { id: 'music-agent', label: '音乐 Agent' },
-      ]).map(item => ({ ...item, ready: data?.connection?.success === true })),
-      message: data?.connection?.success
-        ? `连接正常，缓存能力：${({ confirmed: '已确认', unsupported: '不支持', unproven: '尚未证明', degraded: '临时降级' })[data?.receipt?.status] || '尚未证明'}`
-        : (data?.error || data?.receipt?.reason || '连接测试失败'),
+      ]).map(item => ({ ...item, ready: data?.success === true })),
+      message: data?.success ? `${data.message || '连接正常'}；缓存能力单独验证` : (data?.message || data?.error || '连接测试失败'),
     }
-    if (!response.ok || !data?.connection?.success) throw new Error(testResult.value.message)
-    modelConfig.value.providerCacheCapability = data.capability
+    if (!response.ok || !data?.success) throw new Error(testResult.value.message)
     toast.success(testResult.value.message)
   } catch (error) {
     toast.error(error?.message || '统一大模型连接失败')
+  } finally {
+    testing.value = false
+  }
+}
+
+const probeCacheCapability = async () => {
+  testing.value = true
+  try {
+    const response = await fetch('/api/orchestrator/cache-capability/probe', { method: 'POST' })
+    const data = await response.json()
+    if (data?.capability) modelConfig.value.providerCacheCapability = data.capability
+    testResult.value = {
+      ...(testResult.value || {}),
+      capability: data?.capability || null,
+      cacheProbe: data?.receipt || null,
+      message: data?.connection?.success
+        ? `缓存能力：${({ confirmed: '已确认', unsupported: '不支持', unproven: '尚未证明', degraded: '临时降级' })[data?.receipt?.status] || '尚未证明'}`
+        : `模型连接正常，但缓存验证失败：${data?.error || data?.receipt?.reason || '暂时不可用'}`,
+    }
+    if (!response.ok || !data?.connection?.success) throw new Error(testResult.value.message)
+    toast.success(testResult.value.message)
+  } catch (error) {
+    toast.error(error?.message || '缓存能力验证失败')
   } finally {
     testing.value = false
   }
@@ -380,8 +409,9 @@ onBeforeUnmount(clearApiKeyRevealTimer)
             <div class="settings-field">
               <label for="model-format">接口协议</label>
               <select id="model-format" v-model="modelConfig.format" class="settings-input">
-                <option value="auto">自动识别</option>
-                <option value="openai-compatible">OpenAI Compatible</option>
+              <option value="auto">自动识别</option>
+              <option value="openai-compatible">OpenAI Compatible</option>
+                <option value="openai-responses">OpenAI Responses</option>
                 <option value="anthropic-compatible">Anthropic Compatible</option>
                 <option value="gemini-compatible">Gemini Generate Content</option>
               </select>
@@ -394,7 +424,7 @@ onBeforeUnmount(clearApiKeyRevealTimer)
           <div class="settings-field">
             <label for="model-url">API 接口地址</label>
             <input id="model-url" v-model="modelConfig.apiUrl" class="settings-input" placeholder="https://api.openai.com/v1">
-            <span class="settings-field-hint">可以填写 Base URL，也可以填写完整的 messages 或 chat/completions 地址。</span>
+            <span class="settings-field-hint">可以填写 Base URL，也可以填写完整端点。当前协议将请求发送到：{{ endpointPreview || '未配置' }}</span>
           </div>
           <div class="settings-field">
             <label for="model-key">API Key</label>
@@ -521,6 +551,7 @@ onBeforeUnmount(clearApiKeyRevealTimer)
                   <label for="summary-reviewer-format">复核接口协议</label>
                   <select id="summary-reviewer-format" v-model="modelConfig.summaryReviewerFormat" class="settings-input">
                     <option value="openai-compatible">OpenAI Compatible</option>
+                    <option value="openai-responses">OpenAI Responses</option>
                     <option value="anthropic-compatible">Anthropic Compatible</option>
                     <option value="gemini-compatible">Gemini Generate Content</option>
                   </select>
@@ -552,6 +583,7 @@ onBeforeUnmount(clearApiKeyRevealTimer)
           <div class="settings-panel-actions">
             <button type="button" class="settings-button primary" :disabled="loading || testing" @click="saveModelConfig(false)"><Save :size="15" /> 保存配置</button>
             <button type="button" class="settings-button" :disabled="loading || testing" @click="testConnection"><TestTube2 :size="15" /> {{ testing ? '测试中' : '保存并测试连接' }}</button>
+            <button type="button" class="settings-button" :disabled="loading || testing || !modelReady" @click="probeCacheCapability"><Gauge :size="15" /> 验证缓存能力</button>
           </div>
         </div>
       </div>

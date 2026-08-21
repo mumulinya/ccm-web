@@ -38,6 +38,19 @@ export declare function advanceTaskAgentSession(current: TaskAgentSession, resul
     nativeModelCapabilityRecord?: any;
 }): TaskAgentSession;
 export declare function reopenTaskAgentSessions(taskId: string, reason?: string): TaskAgentSession[];
+/**
+ * Activates only the latest session in each execution lane after a recovery
+ * transaction has passed its task CAS and safety preflight. Native sessions
+ * keep their provider conversation identity. Scratchpad or unverifiable
+ * native sessions are replaced with a fresh CCM session so the provider can
+ * rehydrate from the signed work packet instead of pretending to resume.
+ */
+export declare function activateTaskAgentSessionsForRecovery(taskId: string, reason?: string): {
+    mode: "rehydrated_attempt" | "native_session";
+    sessions: TaskAgentSession[];
+    reopenedSessionIds: string[];
+    replacedSessionIds: string[];
+};
 export declare function getTaskAgentSessionOptions(session: TaskAgentSession): {
     sessionId: string;
     resumeSession: boolean;

@@ -1,13 +1,10 @@
+import { callAnthropicCompatibleChat, callOpenAiCompatibleChat } from "../modules/collaboration/group-orchestrator-llm-client";
+import { normalizeOpenAiResponsesUrl } from "./openai-responses-transport";
 import { runModelCallWithRetry } from "./model-call-retry";
 
 export type UnifiedCompactionModelAudit = {
   beforeRequest?: (input: { provider: string; model: string; system: string }) => void | Promise<void>;
-  afterResponse?: (input: {
-    provider: string;
-    model: string;
-    responseId: string;
-    usage: any;
-  }) => void | Promise<void>;
+  afterResponse?: (input: { provider: string; model: string; responseId: string; usage: any }) => void | Promise<void>;
 };
 
 export function extractUnifiedCompactionJson(text: string) {
@@ -28,6 +25,8 @@ export function normalizeUnifiedOpenAiUrl(value: string) {
   return /\/v1\//i.test(base) ? base : `${base}/v1/chat/completions`;
 }
 
+export { normalizeOpenAiResponsesUrl };
+
 export function normalizeUnifiedAnthropicUrl(value: string) {
   const base = String(value || "").trim().replace(/\/+$/, "");
   if (/\/v1\/messages$/i.test(base)) return base;
@@ -37,7 +36,7 @@ export function normalizeUnifiedAnthropicUrl(value: string) {
 
 export function normalizeUnifiedGeminiUrl(value: string, model: string) {
   const base = String(value || "").trim().replace(/\/+$/, "");
-  if (/:(?:generateContent|streamGenerateContent)(?:\?|$)/i.test(base)) return base.replace(/:streamGenerateContent/i, ":generateContent");
+  if (/(?::generateContent|:streamGenerateContent)(?:\?|$)/i.test(base)) return base.replace(/:streamGenerateContent/i, ":generateContent");
   const cleanModel = String(model || "").trim().replace(/^models\//i, "");
   if (/\/models\/[^/]+$/i.test(base)) return `${base}:generateContent`;
   if (/\/v1(?:beta)?$/i.test(base)) return `${base}/models/${encodeURIComponent(cleanModel)}:generateContent`;
@@ -56,17 +55,10 @@ function isAnthropic(config: any) {
     || /\/anthropic(?:\/|$)/i.test(String(config?.apiUrl || ""));
 }
 
-export async function callUnifiedCompactionModelOnce(
-  config: any,
-  system: string,
-  user: string,
-  maxOutputTokens: number,
-  attemptTimeoutMs: number,
-  audit: UnifiedCompactionModelAudit = {},
-) {
+export async function callUnifiedCompactionModelOnce(config: any, system: string, user: string, maxOutputTokens: number, attemptTimeoutMs: number, audit: UnifiedCompactionModelAudit = {}) {
   const anthropic = isAnthropic(config);
   const gemini = isGemini(config);
-  const provider = anthropic ? "anthropic" : gemini ? "gemini" : "openai";
+  const provider = anthropic ? "anthropic" : gemini ? "gemini" : String(config?.format || "openai");
   const controller = new AbortController();
   const externalSignal: AbortSignal | null = config?.compactionAbortSignal || config?.compaction_abort_signal || null;
   const abortFromExternal = () => controller.abort((externalSignal as any)?.reason);
@@ -84,39 +76,37 @@ export async function callUnifiedCompactionModelOnce(
   try {
     await audit.beforeRequest?.({ provider, model: String(config?.model || ""), system });
     activitySignal?.({ stage: "model_summary_request", heartbeat: false });
-    const geminiEndpoint = gemini ? new URL(normalizeUnifiedGeminiUrl(config.apiUrl, config.model)) : null;
-    if (geminiEndpoint && !geminiEndpoint.searchParams.has("key")) geminiEndpoint.searchParams.set("key", config.apiKey);
-    let response: Response;
+    let usage: any = null;
+    let responseMetadata: any = null;
     try {
-      response = await fetch(
-        anthropic ? normalizeUnifiedAnthropicUrl(config.apiUrl)
-          : gemini ? geminiEndpoint!.toString()
-            : normalizeUnifiedOpenAiUrl(config.apiUrl),
-        {
-          method: "POST",
-          headers: anthropic
-            ? { "Content-Type": "application/json", "x-api-key": config.apiKey, "anthropic-version": "2023-06-01" }
-            : gemini ? { "Content-Type": "application/json" }
-              : { "Content-Type": "application/json", "Authorization": `Bearer ${config.apiKey}` },
-          body: JSON.stringify(anthropic ? {
-            model: config.model,
-            max_tokens: maxOutputTokens,
-            temperature: 0.1,
-            system,
-            messages: [{ role: "user", content: user }],
-          } : gemini ? {
-            systemInstruction: { parts: [{ text: system }] },
-            contents: [{ role: "user", parts: [{ text: user }] }],
-            generationConfig: { maxOutputTokens, temperature: 0.1 },
-          } : {
-            model: config.model,
-            max_tokens: maxOutputTokens,
-            temperature: 0.1,
-            messages: [{ role: "system", content: system }, { role: "user", content: user }],
-          }),
-          signal: controller.signal,
-        },
-      );
+      const call = anthropic ? callAnthropicCompatibleChat : callOpenAiCompatibleChat;
+      const content = await call(config, {
+        system,
+        messages: [{ role: "user", content: user }],
+        maxTokens: maxOutputTokens,
+        temperature: 0.1,
+        defaultTimeoutMs: attemptTimeoutMs,
+        timeoutMs: attemptTimeoutMs,
+        retry: false,
+        signal: controller.signal,
+        onUsage: value => { usage = value; },
+        onResponseMetadata: value => { responseMetadata = value; },
+      });
+      if (activityError) {
+        const failed: any = new Error(String(activityError?.message || activityError || "Compaction activity callback failed"));
+        failed.code = "CCM_MODEL_CALL_ACTIVITY_FAILED";
+        throw failed;
+      }
+      if (externalSignal?.aborted) {
+        const cancelled: any = new Error(String((externalSignal as any).reason?.message || "Compaction model call cancelled"));
+        cancelled.code = "CCM_MODEL_CALL_CANCELLED";
+        throw cancelled;
+      }
+      const summary = extractUnifiedCompactionJson(content);
+      if (!summary) throw new Error("Session compaction model returned invalid JSON");
+      const responseId = String(responseMetadata?.responseId || "");
+      await audit.afterResponse?.({ provider: String(responseMetadata?.provider || provider), model: String(responseMetadata?.model || config.model || ""), responseId, usage });
+      return { summary, usage, provider: String(responseMetadata?.provider || provider), model: String(responseMetadata?.model || config.model || ""), responseId, stopReason: String(responseMetadata?.status || "") };
     } catch (error) {
       if (activityError) {
         const failed: any = new Error(String(activityError?.message || activityError || "Compaction activity callback failed"));
@@ -130,26 +120,6 @@ export async function callUnifiedCompactionModelOnce(
       }
       throw error;
     }
-    const body = await response.text();
-    if (!response.ok) throw new Error(`session compaction HTTP ${response.status}: ${body.slice(0, 180)}`);
-    const data = JSON.parse(body);
-    const content = anthropic
-      ? (data?.content || []).map((part: any) => part?.type === "text" ? part.text : "").join("")
-      : gemini
-        ? (data?.candidates || []).flatMap((candidate: any) => candidate?.content?.parts || []).map((part: any) => part?.text || "").join("")
-        : data?.choices?.[0]?.message?.content || "";
-    const summary = extractUnifiedCompactionJson(content);
-    if (!summary) throw new Error("Session compaction model returned invalid JSON");
-    const responseId = String(data?.id || response.headers.get("request-id") || response.headers.get("x-request-id") || "");
-    await audit.afterResponse?.({ provider, model: String(data?.model || config.model || ""), responseId, usage: data?.usage || data?.usageMetadata || null });
-    return {
-      summary,
-      usage: data?.usage || data?.usageMetadata || null,
-      provider,
-      model: String(data?.model || config.model || ""),
-      responseId,
-      stopReason: String(anthropic ? data?.stop_reason || "" : gemini ? data?.candidates?.[0]?.finishReason || "" : data?.choices?.[0]?.finish_reason || ""),
-    };
   } finally {
     clearTimeout(timeout);
     if (heartbeat) clearInterval(heartbeat);
@@ -157,13 +127,7 @@ export async function callUnifiedCompactionModelOnce(
   }
 }
 
-export async function callUnifiedCompactionModel(
-  config: any,
-  system: string,
-  user: string,
-  maxOutputTokens = 16_000,
-  audit: UnifiedCompactionModelAudit = {},
-) {
+export async function callUnifiedCompactionModel(config: any, system: string, user: string, maxOutputTokens = 16_000, audit: UnifiedCompactionModelAudit = {}) {
   const mockCall = config?.compactionModelCall || config?.compaction_model_call || config?.modelCall || config?.model_call;
   if (typeof mockCall === "function") return mockCall({ system, user, maxOutputTokens });
   if (!config?.enabled || !config?.apiUrl || !config?.apiKey || !config?.model) return null;

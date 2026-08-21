@@ -209,10 +209,9 @@ export declare function testUnifiedModelConnection(): Promise<{
         expired: boolean;
         contentStored: boolean;
     };
-    capabilityProbe: {
-        success: any;
-        receipt: any;
-    };
+    capabilityProbe: any;
+    endpoint: any;
+    protocol: string;
     consumers: {
         ready: boolean;
         id: string;
@@ -316,6 +315,8 @@ export declare function testUnifiedModelConnection(): Promise<{
         label: string;
     }[];
     capabilityProbe?: undefined;
+    endpoint?: undefined;
+    protocol?: undefined;
 }>;
 export declare function buildGroupMainAgentBoundary(planner?: string): {
     layer: string;

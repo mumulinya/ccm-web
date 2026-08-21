@@ -55,6 +55,7 @@ const atomic_json_file_1 = require("../core/atomic-json-file");
 const context_budget_1 = require("./context-budget");
 const tool_display_projection_1 = require("./tool-display-projection");
 const assistant_progress_1 = require("./assistant-progress");
+const completion_summary_1 = require("./completion-summary");
 exports.USER_VISIBLE_AGENT_EVENT_SCHEMA = "ccm-user-visible-agent-event-v1";
 exports.USER_VISIBLE_AGENT_RESULT_SCHEMA = "ccm-user-visible-agent-result-v1";
 const STORE_ROOT = path.resolve(process.env.CCM_USER_VISIBLE_AGENT_EVENT_DIR || path.join(os.homedir(), ".cc-connect", "agent-execution-events"));
@@ -518,6 +519,26 @@ function normalizeUserVisibleAgentEvent(input, sequence = 0) {
                 contentStored: false,
             },
         } : {}),
+        ...(detailSource.keyProgress && typeof detailSource.keyProgress === "object"
+            && String(detailSource.keyProgress.schema || "ccm-agent-key-progress-v1") === "ccm-agent-key-progress-v1"
+            && ["model_preamble", "phase_update", "tool_batch_started", "tool_batch_completed", "model_key_summary", "child_agent_update", "verification_update"].includes(String(detailSource.keyProgress.kind))
+            && ["model_stream", "deterministic", "summary_model", "child_agent"].includes(String(detailSource.keyProgress.source)) ? {
+            keyProgress: {
+                schema: "ccm-agent-key-progress-v1",
+                eventId: compactText(detailSource.keyProgress.eventId || input?.eventId || input?.event_id, 240),
+                kind: String(detailSource.keyProgress.kind),
+                source: String(detailSource.keyProgress.source),
+                status: ["running", "success", "failed", "waiting"].includes(String(detailSource.keyProgress.status))
+                    ? String(detailSource.keyProgress.status)
+                    : "running",
+                round: Math.max(0, Number(detailSource.keyProgress.round || 0)),
+                text: (0, assistant_progress_1.sanitizeAssistantProgressText)(detailSource.keyProgress.text || detailSource.progress?.text || "", 240),
+                modelCallIndex: Math.max(0, Number(detailSource.keyProgress.modelCallIndex || 0)),
+                toolCallIds: uniqueStrings(detailSource.keyProgress.toolCallIds || detailSource.keyProgress.tool_call_ids, 64),
+                relatedEventIds: uniqueStrings(detailSource.keyProgress.relatedEventIds || detailSource.keyProgress.related_event_ids, 64),
+                contentStored: false,
+            },
+        } : {}),
         ...(sanitizePromptBindings(detailSource.promptBindings || detailSource.prompt_bindings)
             ? { promptBindings: sanitizePromptBindings(detailSource.promptBindings || detailSource.prompt_bindings) }
             : {}),
@@ -583,15 +604,37 @@ function normalizeUserVisibleAgentEvent(input, sequence = 0) {
                 contentStored: false,
             },
         } : {}),
+        ...(detailSource.completionSummary || input?.completionSummary || input?.result?.completionSummary || input?.result?.completion_summary
+            ? { completionSummary: (0, completion_summary_1.buildCcmCompletionSummary)(detailSource.completionSummary || input?.completionSummary || input?.result?.completionSummary || input?.result?.completion_summary) }
+            : {}),
     };
     const stableIdentity = {
         scope, scopeId, exactSessionId, generation: Math.max(0, Number(input?.generation || 0)),
         taskId: input?.taskId || input?.task_id || "", workItemId: input?.workItemId || input?.work_item_id || "",
         toolCallId: input?.toolCallId || input?.tool_call_id || "", eventType, createdAt,
     };
+    const normalizedEventId = compactText(input?.eventId || input?.event_id, 240) || `uve_${hash(stableIdentity).slice(0, 28)}`;
+    if (/^agent_(?:started|progress|completed|failed)$/.test(eventType) && !detail.keyProgress) {
+        const childText = (0, assistant_progress_1.sanitizeAssistantProgressText)(detail.liveProgress?.safeSummary || display.summary || display.title, 240);
+        if (childText) {
+            detail.keyProgress = {
+                schema: "ccm-agent-key-progress-v1",
+                eventId: normalizedEventId,
+                kind: "child_agent_update",
+                source: "child_agent",
+                status: status === "success" ? "success" : status === "failed" ? "failed" : status === "waiting" ? "waiting" : "running",
+                round: Math.max(0, eventAttempt - 1),
+                text: childText,
+                modelCallIndex: 0,
+                toolCallIds: [],
+                relatedEventIds: [],
+                contentStored: false,
+            };
+        }
+    }
     return {
         schema: exports.USER_VISIBLE_AGENT_EVENT_SCHEMA,
-        eventId: compactText(input?.eventId || input?.event_id, 240) || `uve_${hash(stableIdentity).slice(0, 28)}`,
+        eventId: normalizedEventId,
         sequence: Math.max(0, Number((input?.sequence ?? sequence) || 0)),
         eventType,
         scope,
@@ -692,6 +735,31 @@ function appendAssistantProgress(input) {
     }).slice(0, 16);
     const eventId = compactText(input?.eventId || input?.event_id, 240)
         || `assistant-progress:${turnIdentity}:${repeatableKind ? `${kind}:${semanticFingerprint}` : `${modelCallIndex}:${milestoneChecksum.slice(0, 20)}`}`;
+    const legacyKindToKeyKind = {
+        before_tools: "model_preamble",
+        verification: "verification_update",
+        rework: "child_agent_update",
+        direction_change: "child_agent_update",
+        before_summary: "model_key_summary",
+        key_finding: "phase_update",
+        blocker: "verification_update",
+    };
+    const existingKeyProgress = input?.detail?.keyProgress;
+    const keyProgress = existingKeyProgress && existingKeyProgress.schema === "ccm-agent-key-progress-v1"
+        ? { ...existingKeyProgress, eventId: compactText(existingKeyProgress.eventId || eventId, 240) }
+        : {
+            schema: "ccm-agent-key-progress-v1",
+            eventId,
+            kind: legacyKindToKeyKind[kind] || "phase_update",
+            source: "deterministic",
+            status: input?.display?.status || "running",
+            round: Math.max(0, Number(input?.round || 0)),
+            text: text.slice(0, 240),
+            modelCallIndex,
+            toolCallIds: relatedToolCallIds,
+            relatedEventIds: [],
+            contentStored: false,
+        };
     return appendUserVisibleAgentEvent({
         ...input,
         eventId,
@@ -704,6 +772,7 @@ function appendAssistantProgress(input) {
         detail: {
             ...(input?.detail || {}),
             progress: { kind, text, modelCallIndex, relatedToolCallIds, batchId, milestoneChecksum },
+            keyProgress,
         },
         visibility: "default",
     });
@@ -812,6 +881,17 @@ function publishEphemeralUserVisibleAgentEvent(input) {
     return event;
 }
 function buildUserVisibleAgentResult(input) {
+    const source = input?.source === "terminal_gate" || input?.terminalGate || input?.terminal_gate
+        ? "terminal_gate"
+        : "query_projection";
+    const completionSummary = (0, completion_summary_1.buildCcmCompletionSummary)({
+        ...input,
+        source,
+        terminalGate: input?.terminalGate || input?.terminal_gate,
+        fileChanges: input?.fileChanges || input?.file_changes || input?.filesChanged || input?.files_changed,
+        verification: input?.verification || input?.verificationResults || input?.verification_results,
+        blockers: input?.blockers || input?.unfinished || input?.incomplete,
+    });
     return {
         schema: exports.USER_VISIBLE_AGENT_RESULT_SCHEMA,
         status: compactText(input?.status, 80) || "success",
@@ -826,6 +906,7 @@ function buildUserVisibleAgentResult(input) {
         verification: sanitizeUserVisibleAgentDetail(input?.verification || input?.verificationResults || input?.verification_results || []),
         unfinished: uniqueStrings(input?.unfinished || input?.incomplete || input?.blockers),
         usage: sanitizeUserVisibleAgentDetail(input?.usage || {}),
+        completionSummary,
         contentStored: false,
     };
 }

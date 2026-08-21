@@ -34,8 +34,8 @@ assert.doesNotMatch(groupLlm, /mcpResults:\s*toolResults/);
 assert.match(projectMain, /selectUserMcpToolDefinitions\(configuredToolContext\.catalog\.mcp\)/);
 assert.doesNotMatch(projectMain, /mcpResults:\s*\[runtimeHydration\.prompt/);
 assert.match(memoryCenter, /const mcpLoadedTokens = Math.max\(0, Number\(breakdown\.mcpTools \?\? breakdown\.mcp \?\? 0\)\);/);
-assert.match(usageUi, /label: 'MCP & dynamic tools', tokens: Number\(breakdown\.mcpTools \?\? breakdown\.mcp \?\? 0\)/);
-assert.match(usageUi, /label: '工具结果'/);
+assert.match(usageUi, /label: 'MCP & dynamic tools', tokens: Number\(breakdown\.mcpAndDynamicTools \?\? breakdown\.mcpTools \?\? breakdown\.mcp \?\? 0\)/);
+assert.doesNotMatch(usageUi, /label: '工具结果'/);
 
 console.log(JSON.stringify({
   pass: true,

@@ -5086,10 +5086,10 @@ export declare const browserToolEvidenceLineageSchema: z.ZodObject<{
         name?: string;
         status?: "complete" | "invalid" | "incomplete";
         run?: number;
+        toolCallIds?: string[];
         checkId?: string;
         resultStatus?: "failed" | "blocked" | "passed" | "started" | "skipped" | "already_running" | "timed_out";
         evidenceRequired?: boolean;
-        toolCallIds?: string[];
         linkedToolCallCount?: number;
         failedToolCallCount?: number;
         missingToolCallIds?: string[];
@@ -5100,10 +5100,10 @@ export declare const browserToolEvidenceLineageSchema: z.ZodObject<{
         name?: string;
         status?: "complete" | "invalid" | "incomplete";
         run?: number;
+        toolCallIds?: string[];
         checkId?: string;
         resultStatus?: "failed" | "blocked" | "passed" | "started" | "skipped" | "already_running" | "timed_out";
         evidenceRequired?: boolean;
-        toolCallIds?: string[];
         linkedToolCallCount?: number;
         failedToolCallCount?: number;
         missingToolCallIds?: string[];
@@ -5117,10 +5117,10 @@ export declare const browserToolEvidenceLineageSchema: z.ZodObject<{
         name?: string;
         status?: "complete" | "invalid" | "incomplete";
         run?: number;
+        toolCallIds?: string[];
         checkId?: string;
         resultStatus?: "failed" | "blocked" | "passed" | "started" | "skipped" | "already_running" | "timed_out";
         evidenceRequired?: boolean;
-        toolCallIds?: string[];
         linkedToolCallCount?: number;
         failedToolCallCount?: number;
         missingToolCallIds?: string[];
@@ -5153,10 +5153,10 @@ export declare const browserToolEvidenceLineageSchema: z.ZodObject<{
         name?: string;
         status?: "complete" | "invalid" | "incomplete";
         run?: number;
+        toolCallIds?: string[];
         checkId?: string;
         resultStatus?: "failed" | "blocked" | "passed" | "started" | "skipped" | "already_running" | "timed_out";
         evidenceRequired?: boolean;
-        toolCallIds?: string[];
         linkedToolCallCount?: number;
         failedToolCallCount?: number;
         missingToolCallIds?: string[];

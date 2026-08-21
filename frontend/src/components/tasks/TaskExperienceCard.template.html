@@ -77,6 +77,10 @@
         <li v-for="item in recoverySummary.remaining_gaps?.slice(0, 3)" :key="`gap-${item}`">仍待补齐：{{ item }}</li>
       </ul>
       <small v-if="recoverySummary.next_action">下一步：{{ recoverySummary.next_action }}</small>
+      <small v-if="recoverySummary.technical?.next_attempt">
+        第 {{ recoverySummary.technical.next_attempt }} 次执行 ·
+        {{ recoverySummary.technical.recovery_mode === 'native_session' ? '恢复原生 Agent 会话' : recoverySummary.technical.recovery_mode === 'rehydrated_attempt' ? '从签名工作单重建现场' : recoverySummary.technical.recovery_mode === 'manual_reconciliation' ? '等待核对中断现场' : '执行恢复检查' }}
+      </small>
     </div>
     <div v-if="continuationStatus" class="task-card-section continuation-status" :class="[continuationStatus.status, { 'needs-replan': continuationNeedsReplan }]">
       <div class="section-head">

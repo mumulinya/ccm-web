@@ -1036,7 +1036,7 @@ export function loadCodexGatewayConfig(): CodexGatewayConfig | null {
   const apiUrl = String(config?.apiUrl || "").trim().replace(/\/+$/, "");
   const apiKey = String(config?.apiKey || "").trim();
   const model = String(config?.model || "").trim();
-  if (config?.enabled === false || !["openai-compatible", "auto"].includes(format) || !apiUrl || !apiKey || !model) return null;
+  if (config?.enabled === false || !["openai-compatible", "openai-responses", "auto"].includes(format) || !apiUrl || !apiKey || !model) return null;
   return { apiUrl, apiKey, model, providerId: "ccm", providerName: "CCM Unified Gateway", envKey: "CCM_CODEX_API_KEY", wireApi: "responses", requiresOpenAiAuth: false, linkAuth: false };
 }
 

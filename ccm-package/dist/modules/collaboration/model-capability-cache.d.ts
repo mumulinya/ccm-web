@@ -14,6 +14,8 @@ export type ModelCapabilityEvidence = {
     max_input_tokens?: number;
     maxOutputTokens?: number;
     max_output_tokens?: number;
+    windowSemantics?: "total_context" | "max_input";
+    window_semantics?: "total_context" | "max_input";
     checkedAt?: string;
     checked_at?: string;
     expiresAt?: string;
@@ -133,6 +135,7 @@ export declare function resolveTrustedModelContextCapacity(input?: any): {
     model: any;
     contextWindow: number;
     maxOutputTokens: number;
+    windowSemantics: string;
     reservedOutputTokens: number;
     effectiveContextWindow: number;
     autoCompactBufferTokens: number;
@@ -155,6 +158,7 @@ export declare function resolveTrustedModelContextCapacity(input?: any): {
     model: any;
     contextWindow: number;
     maxOutputTokens: number;
+    windowSemantics: string;
     reservedOutputTokens: number;
     effectiveContextWindow: number;
     autoCompactBufferTokens: number;
@@ -171,6 +175,7 @@ export declare function resolveTrustedModelContextCapacity(input?: any): {
     provider: string;
     model: string;
     contextWindow: number;
+    windowSemantics: string;
     maxOutputTokens: number;
     reservedOutputTokens: number;
     effectiveContextWindow: number;

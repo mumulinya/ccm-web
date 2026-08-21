@@ -86,7 +86,7 @@ import {
 import {
   buildRecoverableTaskSummary,
   decideConversationMessageRoute,
-  findRecoverableConversationTasks,
+  findConversationTaskCandidates,
 } from "./agents/conversation-message-routing";
 import { parseSecureMultipartRequest } from "./system/secure-multipart";
 import { appendUserVisibleAgentEvent, buildUserVisibleAgentResult } from "./system/user-visible-agent-events";
@@ -1172,7 +1172,10 @@ function handleRequest(req: any, res: any) {
           return sendJson(res, { success: true, task, taskExperience: { ...task, requires_card: true }, message_id: task.message_id, recovery_required: true });
         }
         if (action === "resume_interrupted") {
-          const resumedTask = resumeInterruptedProjectMainTask(taskId, project, projectSessionId);
+          const resumedTask = await resumeInterruptedProjectMainTask(taskId, project, projectSessionId, {
+            reconciliationAction: String(payload.reconciliation_action || payload.reconciliationAction || ""),
+            actor: "project-session-user",
+          });
           const task = persistProjectTaskProjection(resumedTask, "已经恢复原任务和子 Agent 会话，将从上一个安全检查点继续。", "project-main-agent-recovered");
           return sendJson(res, { success: true, task, taskExperience: { ...task, requires_card: true }, message_id: task.message_id, resume_required: true, resume_parent_run_id: resumedTask.id });
         }
@@ -1581,7 +1584,7 @@ function handleRequest(req: any, res: any) {
       };
       let projectFirstTurn: any;
       const projectMainMetricStartedAt = Date.now();
-      const recoverableProjectCandidates = findRecoverableConversationTasks({
+      const recoverableProjectCandidates = findConversationTaskCandidates({
         scope: "project",
         scopeId: project,
         exactSessionId: exactProjectSessionId,
@@ -1638,6 +1641,10 @@ function handleRequest(req: any, res: any) {
                 revision: routeTurn.revision,
                 routing: {
                   candidateTaskId: String(recoverableProjectCandidates[0]?.id || ""),
+                  candidateTaskIds: recoverableProjectCandidates.map((item: any) => String(item?.id || "")).filter(Boolean),
+                  candidateSummaries: recoverableProjectCandidates.slice(0, 6).map(buildRecoverableTaskSummary).filter(Boolean),
+                  exactSessionId: exactProjectSessionId,
+                  scope: "project",
                   confidence: 0,
                   reason: "主 Agent 暂时无法可靠判断这条消息是否续接原任务，请选择处理方式",
                 },
@@ -1745,20 +1752,74 @@ function handleRequest(req: any, res: any) {
       const routeDecision = decideConversationMessageRoute({
         workflowDecision: projectFirstTurn.workflowDecision,
         candidates: recoverableProjectCandidates,
+        exactSessionId: exactProjectSessionId,
+        scope: "project",
       });
+      const bindProjectContinuationCandidate = async (candidate: any) => {
+        if (!candidate) return null;
+        const summary = buildRecoverableTaskSummary(candidate);
+        if (summary?.candidateKind === "recoverable") {
+          const resumed = await resumeInterruptedProjectMainTask(String(candidate.id || ""), project, exactProjectSessionId, {
+            actor: req.ccmAuth?.kind === "browser" ? String(req.ccmAuth.userId || "local-user") : "project-main-agent-route",
+          });
+          updateCanonicalTask(String(candidate.id || ""), {
+            continuation_route_kind: "resume_existing_task",
+            last_continue_at: new Date().toISOString(),
+          });
+          return getProjectMainTask(String(candidate.id || "")) || resumed;
+        }
+        if (summary?.candidateKind === "completed") {
+          const continuationKind = String(projectFirstTurn.workflowDecision?.continuationKind || "supplement");
+          updateCanonicalTask(String(candidate.id || ""), {
+            execution_attempt: Math.max(0, Number(candidate.execution_attempt || candidate.attempt || 0)) + 1,
+            continuation_route_kind: continuationKind === "revise_goal" ? "revise_existing_task" : "resume_existing_task",
+            resumed_from_completed_at: new Date().toISOString(),
+            status_detail: continuationKind === "revise_goal" ? "已按用户要求开启返工执行" : "已从正式交付任务继续未完成工作项",
+          });
+        } else {
+          updateCanonicalTask(String(candidate.id || ""), {
+            continuation_route_kind: String(projectFirstTurn.workflowDecision?.continuationKind || "supplement") === "revise_goal"
+              ? "revise_existing_task"
+              : "continue_current_session",
+            last_continue_at: new Date().toISOString(),
+            status_detail: "当前会话的补充要求已并入原任务",
+          });
+        }
+        return getProjectMainTask(String(candidate.id || "")) || candidate;
+      };
       if (explicitRouteChoice === "continue_original") {
         if (!explicitCandidate) {
           releaseDispatch();
           return sendJson(res, { success: false, error: "原任务已不可恢复，请重新选择处理方式", code: "CONVERSATION_ROUTE_CANDIDATE_STALE" }, 409);
         }
         parentRunId = String(explicitCandidate.id || "");
-        parentProjectMainTask = getProjectMainTask(parentRunId) || explicitCandidate;
+        try {
+          parentProjectMainTask = await bindProjectContinuationCandidate(explicitCandidate);
+        } catch (error: any) {
+          releaseDispatch();
+          return sendJson(res, {
+            success: false,
+            error: error?.message || "恢复前需要核对原任务现场",
+            code: error?.code || "TASK_RECOVERY_PREFLIGHT_FAILED",
+            recovery_preflight: error?.recovery_preflight || null,
+          }, 409);
+        }
       } else if (explicitRouteChoice === "start_new_task" || explicitRouteChoice === "answer_only") {
         parentRunId = "";
         parentProjectMainTask = null;
       } else if (["resume_task", "revise_task"].includes(routeDecision.decision) && routeDecision.candidate) {
         parentRunId = String(routeDecision.candidate.id || "");
-        parentProjectMainTask = getProjectMainTask(parentRunId) || routeDecision.candidate;
+        try {
+          parentProjectMainTask = await bindProjectContinuationCandidate(routeDecision.candidate);
+        } catch (error: any) {
+          releaseDispatch();
+          return sendJson(res, {
+            success: false,
+            error: error?.message || "恢复前需要核对原任务现场",
+            code: error?.code || "TASK_RECOVERY_PREFLIGHT_FAILED",
+            recovery_preflight: error?.recovery_preflight || null,
+          }, 409);
+        }
       } else if (routeDecision.decision === "needs_user") {
         let routeTurn = conversationTurnId
           ? conversationTurnControl.listInternal({ scope: "project", conversation_id: `${project}:${exactProjectSessionId}`, limit: 500 }).turns.find(item => item.id === conversationTurnId)
@@ -1784,6 +1845,14 @@ function handleRequest(req: any, res: any) {
           revision: routeTurn.revision,
           routing: {
             candidateTaskId: String(routeDecision.candidate?.id || ""),
+            candidateTaskIds: routeDecision.candidateTaskIds,
+            candidateSummaries: routeDecision.candidateSummaries,
+            routeKind: routeDecision.routeKind,
+            activeTaskId: routeDecision.activeTaskId,
+            exactSessionId: exactProjectSessionId,
+            scope: "project",
+            confidenceBand: routeDecision.confidenceBand,
+            continuationKind: routeDecision.continuationKind,
             confidence: routeDecision.confidence,
             reason: routeDecision.reason,
           },

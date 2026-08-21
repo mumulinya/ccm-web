@@ -127,13 +127,11 @@ const tokenSourceLabel = computed(() => ({
   provider_usage_plus_estimate: 'Provider 实测 + 后续增量',
   provider_usage: 'Provider 实测',
   provider_payload_accounting: 'Provider 调用完整上下文',
-  context_pressure_sample: '完整上下文采样',
   model_visible_payload: '完整模型可见上下文估算',
   model_visible_payload_projection: '当前模型可见上下文投影',
-  message_estimate: '会话消息估算',
-  project_transcript_estimate: '项目会话原文估算',
   post_compact_record: '压缩后门禁记录',
   empty: '暂无样本',
+  unavailable: '容量暂不可验证',
 })[String(props.usage?.tokenSource || '')] || '模型可见上下文计量')
 const tokenUpdatedAt = computed(() => props.usage?.tokenUpdatedAt
   ? new Date(props.usage.tokenUpdatedAt).toLocaleString('zh-CN')
@@ -141,35 +139,33 @@ const tokenUpdatedAt = computed(() => props.usage?.tokenUpdatedAt
 const tokenBreakdown = computed(() => props.usage?.modelVisiblePayload?.tokenBreakdown
   || props.usage?.tokenMeasurement?.modelVisiblePayload?.tokenBreakdown
   || {})
+const primaryTokenBreakdown = computed(() => props.usage?.modelVisiblePayload?.primaryTokenBreakdown
+  || props.usage?.tokenMeasurement?.modelVisiblePayload?.primaryTokenBreakdown
+  || tokenBreakdown.value)
+const technicalTokenBreakdown = computed(() => props.usage?.modelVisiblePayload?.technicalTokenBreakdown
+  || props.usage?.tokenMeasurement?.modelVisiblePayload?.technicalTokenBreakdown
+  || {})
+const measurementPrecisionLabel = computed(() => {
+  const precision = String(props.usage?.tokenMeasurement?.precision || props.usage?.measurement?.precision || '')
+  if (precision === 'exact' || props.usage?.tokenSource === 'provider_usage' || props.usage?.tokenSource === 'provider_usage_plus_estimate') return 'Provider 实测'
+  if (precision === 'estimated' || props.usage?.tokenSource === 'model_visible_payload' || props.usage?.tokenSource === 'model_visible_payload_projection') return '本地估算'
+  return '暂不可验证'
+})
 const breakdownRows = computed(() => {
   const measurement = props.usage?.tokenMeasurement || {}
-  const breakdown = tokenBreakdown.value
+  const breakdown = primaryTokenBreakdown.value
   const hasPayloadBreakdown = Object.keys(breakdown).length > 0
   const rows = [
-    { key: 'system', label: hasPayloadBreakdown ? 'System prompt' : 'Fixed context', tokens: Number(hasPayloadBreakdown ? breakdown.system || 0 : measurement.estimatedFixedTokens || 0), tone: 'system' },
-    { key: 'tools', label: 'Tool definitions', tokens: Number(breakdown.tools || 0), tone: 'tools' },
+    { key: 'system', label: hasPayloadBreakdown ? 'System prompt' : 'Fixed context', tokens: Number(hasPayloadBreakdown ? breakdown.systemPrompt ?? breakdown.system ?? 0 : measurement.estimatedFixedTokens || 0), tone: 'system' },
     { key: 'rules', label: 'Rules', tokens: Number(breakdown.rules || 0), tone: 'rules' },
     { key: 'skills', label: 'Skills', tokens: Number(breakdown.skills || 0), tone: 'skills' },
-    { key: 'mcp', label: 'MCP & dynamic tools', tokens: Number(breakdown.mcpTools ?? breakdown.mcp ?? 0), tone: 'mcp' },
-    { key: 'subagents', label: 'Subagent definitions', tokens: Number(breakdown.subagents || breakdown.subagentDefinitions || 0), tone: 'subagents' },
-    { key: 'summary', label: 'Summarized conversation', tokens: Number(hasPayloadBreakdown ? breakdown.summary || 0 : measurement.estimatedSummaryTokens || 0), tone: 'summary' },
-    { key: 'recentMessages', label: 'Conversation', tokens: Number(hasPayloadBreakdown ? breakdown.recentMessages || 0 : measurement.estimatedMessageTokens || 0), tone: 'conversation' },
-    { key: 'toolResults', label: '工具结果', tokens: Number(breakdown.mcpResults || 0), tone: 'conversation' },
+    { key: 'mcp', label: 'MCP & dynamic tools', tokens: Number(breakdown.mcpAndDynamicTools ?? breakdown.mcpTools ?? breakdown.mcp ?? 0), tone: 'mcp' },
+    { key: 'subagents', label: 'Subagent definitions', tokens: Number(breakdown.subagentDefinitions ?? breakdown.subagents ?? 0), tone: 'subagents' },
+    { key: 'summary', label: 'Summarized conversation', tokens: Number(hasPayloadBreakdown ? breakdown.summarizedConversation ?? breakdown.summary ?? 0 : measurement.estimatedSummaryTokens || 0), tone: 'summary' },
+    { key: 'recentMessages', label: 'Conversation', tokens: Number(hasPayloadBreakdown ? breakdown.conversation ?? breakdown.recentMessages ?? 0 : measurement.estimatedMessageTokens || 0), tone: 'conversation' },
     { key: 'currentRequest', label: 'Current request', tokens: Number(breakdown.currentRequest || 0), tone: 'request' },
-    { key: 'recoveryContext', label: 'Recovery context', tokens: Number(hasPayloadBreakdown ? breakdown.recoveryContext || 0 : props.usage?.recoveryContextTokens || 0), tone: 'recovery' },
-    { key: 'hookResults', label: 'Hooks', tokens: Number(hasPayloadBreakdown ? breakdown.hookResults || 0 : props.usage?.hookResultTokens || 0), tone: 'hooks' },
-    { key: 'workerBootstrap', label: 'Worker bootstrap prompt', tokens: Number(breakdown.workerBootstrap || 0), tone: 'bootstrap' },
-    { key: 'hydratedContext', label: 'MCP hydrated context', tokens: Number(breakdown.hydratedContext || 0), tone: 'hydration' },
-    { key: 'providerEnvelope', label: 'Provider envelope', tokens: Number(breakdown.providerEnvelope || 0), tone: 'envelope' },
   ].filter(row => Number.isFinite(row.tokens) && row.tokens > 0)
   const accountedTokens = rows.reduce((sum, row) => sum + row.tokens, 0)
-  const providerRemainder = Math.max(0, currentTokens.value - accountedTokens)
-  if (providerRemainder > 0) rows.push({
-    key: 'providerRemainder',
-    label: hasPayloadBreakdown ? 'Provider 其余上下文' : '历史 Provider 总量（无分项快照）',
-    tokens: providerRemainder,
-    tone: 'remainder',
-  })
   const usedDenominator = Math.max(1, currentTokens.value, rows.reduce((sum, row) => sum + row.tokens, 0))
   return rows.map(row => ({
     ...row,
@@ -177,11 +173,23 @@ const breakdownRows = computed(() => {
     capacityPercent: contextWindow.value > 0 ? Math.max(0, (row.tokens / contextWindow.value) * 100) : 0,
   }))
 })
+const providerRemainderTokens = computed(() => Math.max(0, currentTokens.value - breakdownRows.value.reduce((sum, row) => sum + Number(row.tokens || 0), 0)))
+const technicalDetailRows = computed(() => {
+  const breakdown = technicalTokenBreakdown.value
+  return [
+    ['Recovery context', breakdown.recoveryContext],
+    ['Hooks', breakdown.hooks],
+    ['Worker bootstrap', breakdown.workerBootstrap],
+    ['Hydrated context', breakdown.hydratedContext],
+    ['Provider envelope', breakdown.providerEnvelope],
+    ['Provider remainder', providerRemainderTokens.value || breakdown.providerUnpartitionedRemainder],
+  ].filter(([, tokens]) => Number(tokens || 0) > 0)
+})
 const conversationTokens = computed(() => breakdownRows.value
-  .filter(row => ['summary', 'recentMessages', 'currentRequest', 'toolResults'].includes(row.key))
+  .filter(row => ['summary', 'recentMessages', 'currentRequest'].includes(row.key))
   .reduce((sum, row) => sum + Number(row.tokens || 0), 0))
 const dynamicContextTokens = computed(() => breakdownRows.value
-  .filter(row => ['tools', 'skills', 'mcp', 'subagents', 'recoveryContext', 'hookResults', 'hydratedContext'].includes(row.key))
+  .filter(row => ['system', 'rules', 'skills', 'mcp', 'subagents'].includes(row.key))
   .reduce((sum, row) => sum + Number(row.tokens || 0), 0))
 const availableCatalog = computed(() => props.usage?.availableContextCatalog || {})
 const deferredCatalogRows = computed(() => [
@@ -242,17 +250,28 @@ const summarySourceLabel = computed(() => ({
   'session-memory': '模型 Session Memory',
   local_selftest: '待模型重新验证',
   structured: '待模型重新验证',
-  project_long_term_injection_estimate: '项目长期记忆注入估算',
 })[String(props.usage?.summarySource || '').toLowerCase()] || '暂无正式摘要')
 const measurementMethodLabel = computed(() => ({
+  exact_payload_usage: '当前 payload Provider 实测',
+  provider_usage_anchor_plus_delta: 'Provider 实测锚点 + 本地增量估算',
+  local_payload_prediction: '当前模型可见 payload 本地估算',
+  unavailable: '容量暂不可验证',
   latest_provider_usage_plus_new_message_estimate: 'Provider 实测 + 后续增量',
   provider_usage_plus_complete_payload_accounting: 'Provider 实测 + 完整上下文分项',
   model_visible_payload_estimate: '完整模型可见上下文估算',
   current_model_visible_payload_projection: '当前模型可见上下文投影',
-  encrypted_transcript_estimate: '加密会话原文估算',
-  project_transcript_estimate: '项目会话原文估算',
-  message_estimate: '会话消息估算',
-})[String(props.usage?.tokenMeasurement?.method || '')] || tokenSourceLabel.value)
+})[String(props.usage?.measurement?.measurementBasis || props.usage?.tokenMeasurement?.measurementBasis || props.usage?.tokenMeasurement?.method || '')] || tokenSourceLabel.value)
+const lastProviderObservedTokens = computed(() => Math.max(0, Number(
+  props.usage?.measurement?.lastProviderObservedTokens
+  ?? props.usage?.tokenMeasurement?.lastProviderObservedTokens
+  ?? props.usage?.tokenMeasurement?.providerObservedTokens
+  ?? 0,
+)))
+const predictedNextRequestTokens = computed(() => Math.max(0, Number(
+  props.usage?.measurement?.predictedNextRequestTokens
+  ?? props.usage?.tokenMeasurement?.predictedNextRequestTokens
+  ?? currentTokens.value,
+)))
 const sessionLabel = computed(() => String(props.usage?.label || props.usage?.id || '当前会话').replace(/^session:/, ''))
 const thresholdPercent = computed(() => autoCompactThreshold.value > 0 && contextWindow.value > 0
   ? Math.min(100, Math.round((autoCompactThreshold.value / contextWindow.value) * 1000) / 10)
@@ -333,7 +352,7 @@ watch(detailsOpen, scheduleRuntimeRefresh)
       </section>
       <template v-if="activeTab === 'context'">
       <div v-if="usage" class="context-popover-session">{{ sessionLabel }}<span>{{ compactStateLabel }}</span></div>
-      <div v-if="usage" class="context-popover-total"><span>最近完整模型载荷</span><b>~{{ formatTokens(currentTokens) }} / {{ formatTokens(contextWindow) }} Tokens</b></div>
+      <div v-if="usage" class="context-popover-total"><span>当前预计模型载荷 <small>{{ measurementPrecisionLabel }}</small></span><b>~{{ formatTokens(currentTokens) }} / {{ formatTokens(contextWindow) }} Tokens</b><small v-if="lastProviderObservedTokens > 0" class="context-popover-observed">最近实测 {{ formatTokens(lastProviderObservedTokens) }} · 预计下一轮 {{ formatTokens(predictedNextRequestTokens) }}</small></div>
       <div v-if="usage" class="context-continuity-note">
         <span><b>会话正文 {{ formatTokens(conversationTokens) }}</b><small>消息与正式摘要</small></span>
         <p v-if="dynamicContextTokens > 0">系统规则和已启用工具保持可用；Skill、知识、源码及工具结果按需加载，因此每轮载荷会变化。会话原文和正式摘要不会被删除。</p>
@@ -372,6 +391,10 @@ watch(detailsOpen, scheduleRuntimeRefresh)
           </div>
         </div>
       </section>
+      <details v-if="usage && technicalDetailRows.length" class="context-technical-details">
+        <summary>技术详情</summary>
+        <div v-for="row in technicalDetailRows" :key="row[0]" class="context-technical-row"><span>{{ row[0] }}</span><b>{{ formatTokens(row[1]) }}</b></div>
+      </details>
       <div v-if="usage" class="context-popover-meta">
         <span><strong>摘要</strong>{{ summarySourceLabel }}</span>
         <span><strong>计量</strong>{{ measurementMethodLabel }}</span>
@@ -462,7 +485,7 @@ watch(detailsOpen, scheduleRuntimeRefresh)
 .context-runtime-project.risk-conflict > span:nth-child(2) { color: #dc2626; }.context-runtime-project.risk-changed > span:nth-child(2) { color: #b45309; }
 .context-popover-close { width: 24px; height: 24px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 50%; background: var(--panel-muted); color: var(--text-muted); cursor: pointer; }.context-popover-close:hover { background: var(--control-hover); color: var(--accent-green); }
 .context-popover-session { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 0 4px; color: var(--text-muted); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.context-popover-session span { flex: 0 0 auto; color: var(--accent-green); font-size: 10px; font-weight: 700; }
-.context-popover-total { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 10px; min-width: 0; padding: 7px 0 8px; color: var(--text-muted); font-size: 10px; }.context-popover-total b { color: var(--text-primary); font-family: var(--font-mono, monospace); font-size: 11px; font-weight: 600; white-space: nowrap; }
+.context-popover-total { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 10px; min-width: 0; padding: 7px 0 8px; color: var(--text-muted); font-size: 10px; }.context-popover-total b { color: var(--text-primary); font-family: var(--font-mono, monospace); font-size: 11px; font-weight: 600; white-space: nowrap; }.context-popover-observed { flex: 1 0 100%; color: var(--text-muted); font-size: 8px; }
 .context-continuity-note { display: grid; min-width: 0; gap: 7px; margin-bottom: 9px; padding: 9px 10px; overflow: hidden; border: 1px solid color-mix(in srgb, var(--accent-cyan, #22d3ee) 18%, var(--border-color)); border-radius: 6px; background: color-mix(in srgb, var(--surface) 93%, var(--accent-cyan, #22d3ee) 7%); }
 .context-continuity-note span { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; min-width: 0; gap: 3px 10px; }.context-continuity-note b { min-width: 0; color: var(--text-primary); font-size: 10px; }.context-continuity-note small { color: var(--text-muted); font-size: 9px; }.context-continuity-note p { min-width: 0; margin: 0; color: var(--text-secondary); font-size: 10px; line-height: 1.6; white-space: normal; overflow-wrap: anywhere; word-break: break-word; }
 .context-meter { position: relative; display: flex; height: 8px; overflow: hidden; border-radius: 4px; background: var(--panel-muted); }.context-meter-segment { display: block; flex: 0 0 auto; height: 100%; transition: width .25s ease; }.context-meter-segment + .context-meter-segment { box-shadow: inset 1px 0 color-mix(in srgb, var(--surface) 70%, transparent); }.context-meter-threshold { position: absolute; top: 0; bottom: 0; z-index: 2; width: 2px; background: var(--accent-yellow); box-shadow: 0 0 0 1px var(--surface); }

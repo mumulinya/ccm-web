@@ -246,9 +246,9 @@ const guideGlobalQueuedTurn = async (turn) => {
   return guidedTurn
 }
 
-const resolveGlobalQueuedRoute = async (turn, choice) => {
+const resolveGlobalQueuedRoute = async (turn, choice, candidateTaskId = '') => {
   try {
-    const resolved = await globalTurnControl.resolveRoute(turn, choice)
+    const resolved = await globalTurnControl.resolveRoute(turn, choice, candidateTaskId)
     if (!resolved) return
     toast.success(choice === 'continue_original' ? '正在继续原任务' : choice === 'answer_only' ? '正在回答这条消息' : '正在作为新任务处理')
     await drainGlobalTurnQueue()

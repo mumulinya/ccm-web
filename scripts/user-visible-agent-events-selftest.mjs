@@ -543,12 +543,8 @@ const failedEvents = [
 ]
 assert.equal(frontendExecution.shouldRenderExecutionTranscript(failedEvents, conversationMessages, 1, false), true, '失败事件必须保留排障入口')
 assert.equal(frontendExecution.executionQueryRecordForMessage(failedEvents, conversationMessages, 1), null, '零工具失败不得投影查询过程')
-assert.match(replyStyle.CONVERSATIONAL_REPLY_STYLE_GUIDANCE, /两至三段短文或少量要点/)
-for (const file of [
-  'backend/agents/global/global-agent-run-projection.ts',
-  'backend/modules/projects/project-main-agent.ts',
-  'backend/modules/collaboration/group-orchestrator-llm.ts',
-]) {
+assert.match(replyStyle.CONVERSATIONAL_REPLY_STYLE_GUIDANCE, /two or three short paragraphs or a few bullets/i)
+for (const file of ['backend/agents/main-agent-identity.ts']) {
   assert.match(fs.readFileSync(new URL(`../${file}`, import.meta.url), 'utf8'), /CONVERSATIONAL_REPLY_STYLE_GUIDANCE/, `${file}必须使用共享普通对话回复风格`)
 }
 const projectMainSource = fs.readFileSync(new URL('../backend/modules/projects/project-main-agent.ts', import.meta.url), 'utf8')

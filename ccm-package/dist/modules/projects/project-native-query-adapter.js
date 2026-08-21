@@ -6,6 +6,7 @@ const group_orchestrator_llm_client_1 = require("../collaboration/group-orchestr
 const model_activity_1 = require("../../system/model-activity");
 const user_visible_agent_events_1 = require("../../system/user-visible-agent-events");
 const assistant_progress_1 = require("../../system/assistant-progress");
+const agent_key_progress_1 = require("../../system/agent-key-progress");
 const conversation_plan_mode_gate_1 = require("../../system/conversation-plan-mode-gate");
 async function runProjectMainNativeQueryLoop(input) {
     const { config, project, projectSessionId, visibleTurnId, loopBudget } = input;
@@ -16,8 +17,20 @@ async function runProjectMainNativeQueryLoop(input) {
     let visibleReplyDeltaEmitted = false;
     let visibleDeltaSequence = 0;
     let firstProviderDeltaAt = 0;
+    let firstModelPreamble = "";
     let initialReadFileCount = 0;
     let initialReadTokens = 0;
+    const keyProgress = (0, agent_key_progress_1.createAgentKeyProgressCoordinator)({
+        scope: "project",
+        scopeId: project,
+        exactSessionId: projectSessionId,
+        turnId: visibleTurnId,
+        generation: Number(input.getToolContext?.()?.scopeIdentity?.generation || 0),
+        target: project,
+        goal: input.userMessage,
+        title: "项目主 Agent",
+        config,
+    });
     const result = await (0, native_query_loop_1.runNativeQueryLoop)({
         config,
         messages: input.buildMessages(),
@@ -44,6 +57,8 @@ async function runProjectMainNativeQueryLoop(input) {
                 firstProviderDeltaAt = Date.now();
             input.markVisibleFeedback(firstProviderDeltaAt);
             visibleDeltaSequence += 1;
+            if (visibleDeltaSequence === 1 && String(delta).trim().length >= 8)
+                firstModelPreamble = String(delta).trim();
             (0, user_visible_agent_events_1.publishEphemeralUserVisibleAgentEvent)({
                 eventId: `project-delta:${visibleTurnId}:${visibleDeltaSequence}`,
                 scope: "project", scopeId: project, exactSessionId: projectSessionId,
@@ -87,6 +102,7 @@ async function runProjectMainNativeQueryLoop(input) {
                     input.onModelActivity?.(activityValue);
                 },
             });
+            keyProgress.phase(activityPhase, modelCallIndex, round);
             activity.complete();
         },
         executeTools: async (calls, ctx) => {
@@ -94,21 +110,13 @@ async function runProjectMainNativeQueryLoop(input) {
             const runnableRequests = calls.map(item => ({ name: item.name, arguments: item.arguments || {} }));
             const preparedToolCallIds = calls.map(item => item.id);
             const toolContext = input.getToolContext();
-            if ((0, assistant_progress_1.assistantProgressNarrationEnabled)(config) && round === 0) {
-                const progressText = (0, assistant_progress_1.buildAssistantProgressFallback)(runnableRequests, { target: project, goal: input.userMessage });
-                if (progressText) {
-                    (0, user_visible_agent_events_1.appendAssistantProgress)({
-                        scope: "project", scopeId: project, exactSessionId: projectSessionId,
-                        generation: Number(toolContext.scopeIdentity?.generation || 0),
-                        turnId: visibleTurnId,
-                        text: progressText,
-                        kind: "before_tools",
-                        modelCallIndex: round + 1,
-                        relatedToolCallIds: preparedToolCallIds,
-                        title: "项目主 Agent",
-                    });
-                    input.markVisibleFeedback();
+            if ((0, assistant_progress_1.assistantProgressNarrationEnabled)(config)) {
+                if (firstModelPreamble) {
+                    keyProgress.modelPreamble(firstModelPreamble, round + 1, round);
+                    firstModelPreamble = "";
                 }
+                keyProgress.toolBatchStarted(runnableRequests, round, round + 1);
+                input.markVisibleFeedback();
             }
             const roundResults = [];
             for (let index = 0; index < runnableRequests.length;) {
@@ -136,20 +144,20 @@ async function runProjectMainNativeQueryLoop(input) {
                 initialReadTokens += initialReads.reduce((count, row) => count + Math.max(0, Number(row?.outputTokens || 0)), 0);
             }
             if ((0, assistant_progress_1.assistantProgressNarrationEnabled)(config)) {
-                const outcomeProgress = (0, assistant_progress_1.buildToolBatchOutcomeProgress)(roundResults, { target: project });
-                if (outcomeProgress) {
-                    (0, user_visible_agent_events_1.appendAssistantProgress)({
-                        scope: "project", scopeId: project, exactSessionId: projectSessionId,
-                        generation: Number(toolContext.scopeIdentity?.generation || 0),
-                        turnId: visibleTurnId,
-                        text: outcomeProgress,
-                        kind: "key_finding",
-                        modelCallIndex: round + 1,
-                        relatedToolCallIds: preparedToolCallIds,
-                        title: "项目主 Agent",
+                keyProgress.toolBatchCompleted(roundResults, round, round + 1);
+                input.markVisibleFeedback();
+                await keyProgress.summarizeToolBatch(round, roundResults, async (prompt) => {
+                    const turn = await (0, group_orchestrator_llm_client_1.callNativeAgentTurn)(config, {
+                        messages: [{ role: "system", content: "You produce one safe, concise progress sentence. Do not call tools or reveal hidden reasoning." }, { role: "user", content: prompt }],
+                        maxTokens: 120,
+                        stream: false,
+                        nativeTools: [],
+                        nativeToolsRequired: false,
+                        retryAttempts: 1,
+                        retryScope: "agent_progress_summary",
                     });
-                    input.markVisibleFeedback();
-                }
+                    return String(turn?.text || "");
+                }, round + 1);
             }
             return roundResults.map((row, index) => ({
                 callId: preparedToolCallIds[index] || calls[index]?.id || `pmtool_${index}`,

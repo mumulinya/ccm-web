@@ -19,4 +19,7 @@ for (const section of ['dependencies', 'optionalDependencies']) {
 for (const command of ['ccm.js', 'legacy-project-cli.js', 'postinstall.js', 'prepublish-guard.js', 'service-runtime.js', 'update-runtime.js']) {
   if (!fs.existsSync(path.join(root, 'ccm-package', 'bin', command))) throw new Error(`Missing packaged CLI file: ${command}`)
 }
+for (const distFile of ['server.js', 'core/credential-store.js', 'core/db.js', 'core/utils.js', 'core/task-store.js']) {
+  if (!fs.existsSync(path.join(root, 'ccm-package', 'dist', distFile))) throw new Error(`Missing packaged dist file: ${distFile}`)
+}
 console.log(JSON.stringify({ success: true, core: core.version, petAssets: pets.version }, null, 2))

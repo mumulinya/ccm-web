@@ -1,7 +1,16 @@
 import { estimateTextTokens } from "./context-budget";
+import { estimateModelTextTokens } from "./model-token-preflight";
 import * as crypto from "crypto";
 import { recordContextEngineEvent } from "./context-engine-observability";
 import { isUserMcpToolDefinition, selectUserMcpToolDefinitions, runSessionContextToolBucketSelfTest } from "./session-context-tool-buckets";
+import {
+  normalizeCcmPrimaryTokenBreakdown,
+  normalizeCcmTechnicalTokenBreakdown,
+  sumCcmPrimaryTokenBreakdown,
+  buildCcmProviderIdentityChecksum,
+  type CcmPrimaryTokenBreakdownV2,
+  type CcmTechnicalTokenBreakdownV2,
+} from "./ccm-context-accounting-v2";
 
 export const SESSION_COMPACTION_STATE_SCHEMA = "ccm-session-compaction-state-v2";
 export const SESSION_COMPACTION_MAX_CONSECUTIVE_FAILURES = 3;
@@ -18,6 +27,9 @@ export type SessionProviderUsageBaseline = {
   sessionId?: string;
   provider?: string;
   model?: string;
+  protocol?: string;
+  endpoint?: string;
+  providerIdentityChecksum?: string;
   generation?: number;
   anchorMessageId?: string;
   boundaryGeneration?: number;
@@ -26,6 +38,7 @@ export type SessionProviderUsageBaseline = {
   directInputTokens?: number;
   cacheCreationInputTokens?: number;
   cacheReadInputTokens?: number;
+  inputTokensIncludesCache?: boolean;
   recordedAt?: string;
   estimatedContextTokens?: number;
   providerObservedContextTokens?: number;
@@ -36,7 +49,7 @@ export type SessionProviderUsageBaseline = {
 };
 
 export type ModelVisiblePayloadSnapshot = {
-  schema: "ccm-model-visible-payload-snapshot-v1";
+  schema: "ccm-model-visible-payload-snapshot-v2";
   scope: SessionCompactionScope;
   sessionId: string;
   system: any;
@@ -46,13 +59,24 @@ export type ModelVisiblePayloadSnapshot = {
   currentRequest: any;
   recoveryContext: any;
   hookResults: any[];
+  messages: any[];
+  exactSessionId: string;
+  provider: string;
+  model: string;
+  protocol: string;
   tokenBreakdown: Record<string, number>;
   totalTokens: number;
+  predictedNextRequestTokens: number;
+  unresolvedToolPairCount: number;
   payloadChecksum: string;
   fixedContextChecksum: string;
   pendingRequestChecksum: string;
   loadedContextItems: LoadedContextItemsV1;
   loadedContextItemsChecksum: string;
+  accountingSchema: "ccm-context-accounting-v2";
+  primaryTokenBreakdown: CcmPrimaryTokenBreakdownV2;
+  technicalTokenBreakdown: CcmTechnicalTokenBreakdownV2;
+  primaryTokenTotal: number;
 };
 
 export type LoadedContextItemV1 = {
@@ -200,7 +224,7 @@ function normalizeLoadedContextItems(value: any): LoadedContextItemsV1 {
       const requestedLevel = String(row?.loadLevel || row?.level || "");
       const loadLevel = kind === "skill"
         ? (requestedLevel === "body" || requestedLevel === "result" ? requestedLevel : "catalog")
-        : (requestedLevel === "result" ? "result" : "schema");
+        : (requestedLevel === "result" ? "result" : requestedLevel === "schema" ? "schema" : "catalog");
       return {
         kind,
         name,
@@ -307,6 +331,11 @@ function partitionTokens(totalInput: number, requestedInput: Record<string, numb
 export function buildModelVisiblePayloadSnapshot(input: {
   scope: SessionCompactionScope;
   sessionId: string;
+  exactSessionId?: string;
+  provider?: string;
+  model?: string;
+  protocol?: string;
+  modelConfig?: any;
   system?: any;
   tools?: any;
   activeSummary?: any;
@@ -319,8 +348,13 @@ export function buildModelVisiblePayloadSnapshot(input: {
   const recentMessages = Array.isArray(input.recentMessages) ? input.recentMessages : [];
   const hookResults = Array.isArray(input.hookResults) ? input.hookResults : [];
   const fixedContext = { system: input.system ?? null, tools: input.tools ?? null, recoveryContext: input.recoveryContext ?? null, hookResults };
-  const rawSystemTokens = valueTokens(input.system);
-  const rawToolTokens = valueTokens(input.tools);
+  const modelConfig = input.modelConfig || { provider: input.provider, model: input.model, format: input.protocol };
+  const modelValueTokens = (value: any) => {
+    if (value == null || value === "" || (Array.isArray(value) && value.length === 0)) return 0;
+    try { return estimateModelTextTokens(value, modelConfig).safetyAdjustedTokens; } catch { return valueTokens(value); }
+  };
+  const rawSystemTokens = modelValueTokens(input.system);
+  const rawToolTokens = modelValueTokens(input.tools);
   const structuredHints = structuredContextHints(input.system);
   const toolHints = toolContextHints(input.tools);
   const explicit = input.contextComponents || {};
@@ -328,18 +362,18 @@ export function buildModelVisiblePayloadSnapshot(input: {
   const toolMcpTokens = toolHints.mcpTools;
   const toolSubagentTokens = toolHints.subagentDefinitions;
   const toolPartition = partitionTokens(rawToolTokens, { mcpTools: toolMcpTokens, subagentDefinitions: toolSubagentTokens });
-  const rawRecentMessageTokens = recentMessages.reduce((sum, message) => sum + valueTokens(messageContent(message)), 0);
+  const rawRecentMessageTokens = recentMessages.reduce((sum, message) => sum + modelValueTokens(messageContent(message)), 0);
   const recentPartition = partitionTokens(rawRecentMessageTokens, {
-    rules: explicit.messageRules === undefined ? 0 : valueTokens(explicit.messageRules),
-    skills: explicit.messageSkills === undefined ? 0 : valueTokens(explicit.messageSkills),
+    rules: explicit.messageRules === undefined ? 0 : modelValueTokens(explicit.messageRules),
+    skills: explicit.messageSkills === undefined ? 0 : modelValueTokens(explicit.messageSkills),
     mcpTools: explicit.messageMcpTools === undefined ? 0 : userMcpHintTokens(explicit.messageMcpTools),
-    subagentDefinitions: explicit.messageSubagentDefinitions === undefined ? 0 : valueTokens(explicit.messageSubagentDefinitions),
+    subagentDefinitions: explicit.messageSubagentDefinitions === undefined ? 0 : modelValueTokens(explicit.messageSubagentDefinitions),
   });
   const systemPartition = partitionTokens(rawSystemTokens, {
-    rules: explicit.rules === undefined ? structuredHints.rules || 0 : valueTokens(explicit.rules),
-    skills: explicit.skills === undefined ? structuredHints.skills || 0 : valueTokens(explicit.skills),
+    rules: explicit.rules === undefined ? structuredHints.rules || 0 : modelValueTokens(explicit.rules),
+    skills: explicit.skills === undefined ? structuredHints.skills || 0 : modelValueTokens(explicit.skills),
     mcpTools: rawToolTokens > 0 ? 0 : explicit.mcpTools === undefined ? structuredHints.mcpTools || 0 : userMcpHintTokens(explicit.mcpTools),
-    subagentDefinitions: explicit.subagentDefinitions === undefined ? structuredHints.subagentDefinitions || 0 : valueTokens(explicit.subagentDefinitions),
+    subagentDefinitions: explicit.subagentDefinitions === undefined ? structuredHints.subagentDefinitions || 0 : modelValueTokens(explicit.subagentDefinitions),
   });
   const tokenBreakdown = {
     system: systemPartition.remaining,
@@ -347,14 +381,21 @@ export function buildModelVisiblePayloadSnapshot(input: {
     rules: Number(systemPartition.allocated.rules || 0) + Number(recentPartition.allocated.rules || 0),
     skills: Number(systemPartition.allocated.skills || 0) + Number(recentPartition.allocated.skills || 0),
     mcpTools: Number(systemPartition.allocated.mcpTools || 0) + Number(toolPartition.allocated.mcpTools || 0) + Number(recentPartition.allocated.mcpTools || 0),
-    mcpResults: Number(recentPartition.allocated.mcpResults || 0),
+    // Tool results are part of the model-visible conversation timeline. Keep
+    // the legacy field at zero so the same tokens cannot be counted a second
+    // time as a separate MCP result bucket.
+    mcpResults: 0,
     subagentDefinitions: Number(systemPartition.allocated.subagentDefinitions || 0) + Number(toolPartition.allocated.subagentDefinitions || 0) + Number(recentPartition.allocated.subagentDefinitions || 0),
-    summary: valueTokens(input.activeSummary),
-    recentMessages: recentPartition.remaining,
-    currentRequest: valueTokens(input.currentRequest),
-    recoveryContext: valueTokens(input.recoveryContext),
-    hookResults: valueTokens(hookResults),
+    summary: modelValueTokens(input.activeSummary),
+    recentMessages: recentPartition.remaining + Number(recentPartition.allocated.mcpResults || 0),
+    currentRequest: modelValueTokens(input.currentRequest),
+    recoveryContext: modelValueTokens(input.recoveryContext),
+    hookResults: modelValueTokens(hookResults),
   };
+  const primaryTokenBreakdown = normalizeCcmPrimaryTokenBreakdown({
+    ...tokenBreakdown,
+  });
+  const technicalTokenBreakdown = normalizeCcmTechnicalTokenBreakdown(tokenBreakdown);
   const payload = {
     system: input.system ?? null,
     tools: input.tools ?? null,
@@ -364,13 +405,30 @@ export function buildModelVisiblePayloadSnapshot(input: {
     recoveryContext: input.recoveryContext ?? null,
     hookResults,
   };
+  const messages = [
+    ...(Array.isArray(input.system) ? input.system : input.system == null ? [] : [{ role: "system", content: input.system }]),
+    ...(input.activeSummary == null ? [] : [{ role: "system", content: input.activeSummary, ccm_summary: true }]),
+    ...recentMessages,
+    ...(input.currentRequest == null ? [] : [input.currentRequest]),
+  ];
   return {
-    schema: "ccm-model-visible-payload-snapshot-v1",
+    schema: "ccm-model-visible-payload-snapshot-v2",
     scope: input.scope,
     sessionId: input.sessionId,
+    exactSessionId: input.exactSessionId || input.sessionId,
+    provider: String(input.provider || modelConfig.provider || ""),
+    model: String(input.model || modelConfig.model || ""),
+    protocol: String(input.protocol || modelConfig.protocol || modelConfig.format || ""),
     ...payload,
+    messages,
     tokenBreakdown,
+    accountingSchema: "ccm-context-accounting-v2",
+    primaryTokenBreakdown,
+    technicalTokenBreakdown,
+    primaryTokenTotal: sumCcmPrimaryTokenBreakdown(primaryTokenBreakdown),
     totalTokens: Object.values(tokenBreakdown).reduce((sum, value) => sum + value, 0),
+    predictedNextRequestTokens: Object.values(tokenBreakdown).reduce((sum, value) => sum + value, 0),
+    unresolvedToolPairCount: unresolvedToolPairCount(messages),
     payloadChecksum: checksum(payload),
     fixedContextChecksum: checksum(fixedContext),
     pendingRequestChecksum: input.currentRequest == null ? "" : checksum(input.currentRequest),
@@ -384,14 +442,30 @@ export function modelVisibleFixedTokens(snapshot: Pick<ModelVisiblePayloadSnapsh
   return MODEL_VISIBLE_FIXED_TOKEN_KEYS.reduce((sum, key) => sum + Math.max(0, Math.floor(Number(breakdown[key] || 0))), 0);
 }
 
+export function isModelVisiblePayloadSnapshot(value: any): value is ModelVisiblePayloadSnapshot {
+  return value?.schema === "ccm-model-visible-payload-snapshot-v2"
+    || value?.schema === "ccm-model-visible-payload-snapshot-v1";
+}
+
 export function modelVisiblePayloadAccounting(snapshot: ModelVisiblePayloadSnapshot | null | undefined) {
   if (!snapshot) return null;
   return {
-    schema: "ccm-model-visible-payload-accounting-v1",
+    schema: "ccm-model-visible-payload-accounting-v2",
     scope: snapshot.scope,
     sessionId: snapshot.sessionId,
+    exactSessionId: snapshot.exactSessionId || snapshot.sessionId,
+    provider: snapshot.provider || "",
+    model: snapshot.model || "",
+    protocol: snapshot.protocol || "",
+    messages: Array.isArray(snapshot.messages) ? snapshot.messages.map((item: any) => ({ role: item?.role, type: item?.type, id: item?.id })) : [],
     tokenBreakdown: { ...snapshot.tokenBreakdown },
+    accountingSchema: "ccm-context-accounting-v2",
+    primaryTokenBreakdown: normalizeCcmPrimaryTokenBreakdown(snapshot.primaryTokenBreakdown || snapshot.tokenBreakdown),
+    technicalTokenBreakdown: normalizeCcmTechnicalTokenBreakdown(snapshot.technicalTokenBreakdown || snapshot.tokenBreakdown),
+    primaryTokenTotal: Number(snapshot.primaryTokenTotal || sumCcmPrimaryTokenBreakdown(normalizeCcmPrimaryTokenBreakdown(snapshot.primaryTokenBreakdown || snapshot.tokenBreakdown))),
     totalTokens: snapshot.totalTokens,
+    predictedNextRequestTokens: snapshot.predictedNextRequestTokens || snapshot.totalTokens,
+    unresolvedToolPairCount: Number(snapshot.unresolvedToolPairCount || 0),
     payloadChecksum: snapshot.payloadChecksum,
     fixedContextChecksum: snapshot.fixedContextChecksum,
     pendingRequestChecksum: snapshot.pendingRequestChecksum,
@@ -407,6 +481,24 @@ function messageToolCallCount(message: any) {
   const blockCount = blocks.filter((block: any) => ["tool_use", "tool_result", "tool_call", "function_call"].includes(String(block?.type || ""))).length;
   const explicit = Array.isArray(message?.tool_calls) ? message.tool_calls.length : message?.tool_call || message?.toolUse ? 1 : 0;
   return blockCount + explicit;
+}
+
+function unresolvedToolPairCount(messages: any[]) {
+  const uses = new Set<string>();
+  const results = new Set<string>();
+  for (const message of Array.isArray(messages) ? messages : []) {
+    const blocks = Array.isArray(message?.content) ? message.content : [];
+    for (const block of blocks) {
+      const type = String(block?.type || "");
+      const id = String(block?.id || block?.tool_use_id || block?.toolUseId || "");
+      if (!id) continue;
+      if (["tool_use", "tool_call", "function_call", "server_tool_use"].includes(type)) uses.add(id);
+      if (["tool_result", "function_result", "web_search_tool_result"].includes(type)) results.add(id);
+    }
+    if (["tool_use", "tool_call", "function_call"].includes(String(message?.type || ""))) uses.add(String(message?.toolCallId || message?.tool_call_id || message?.id || ""));
+    if (["tool_result", "function_result"].includes(String(message?.type || ""))) results.add(String(message?.toolCallId || message?.tool_call_id || message?.tool_use_id || message?.id || ""));
+  }
+  return [...uses].filter(id => id && !results.has(id)).length;
 }
 
 export function evaluateSessionMemoryCadence(messagesInput: any[], stateInput: any = {}) {
@@ -542,6 +634,9 @@ export function normalizeSessionProviderUsage(value: any): SessionProviderUsageB
     sessionId: String(value.sessionId || value.session_id || usage.sessionId || usage.session_id || ""),
     provider: String(value.provider || usage.provider || ""),
     model: String(value.model || usage.model || ""),
+    protocol: String(value.protocol || value.format || usage.protocol || usage.format || ""),
+    endpoint: String(value.endpoint || value.apiUrl || value.api_url || usage.endpoint || ""),
+    providerIdentityChecksum: String(value.providerIdentityChecksum || value.provider_identity_checksum || usage.providerIdentityChecksum || usage.provider_identity_checksum || ""),
     generation: Math.max(0, Math.floor(Number(value.generation ?? usage.generation ?? 0))),
     anchorMessageId: String(value.anchorMessageId || value.anchor_message_id || ""),
     boundaryGeneration: Math.max(0, Math.floor(Number(value.boundaryGeneration ?? value.boundary_generation ?? 0))),
@@ -550,6 +645,7 @@ export function normalizeSessionProviderUsage(value: any): SessionProviderUsageB
     directInputTokens: finiteToken(usage.directInputTokens ?? usage.direct_input_tokens),
     cacheCreationInputTokens: finiteToken(usage.cacheCreationInputTokens ?? usage.cache_creation_input_tokens),
     cacheReadInputTokens: finiteToken(usage.cacheReadInputTokens ?? usage.cache_read_input_tokens),
+    inputTokensIncludesCache: usage.inputTokensIncludesCache === true || usage.input_tokens_includes_cache === true,
     recordedAt: String(value.recordedAt || value.recorded_at || new Date().toISOString()),
     estimatedContextTokens: finiteToken(value.estimatedContextTokens ?? value.estimated_context_tokens),
     providerObservedContextTokens: finiteToken(value.providerObservedContextTokens ?? value.provider_observed_context_tokens),
@@ -558,20 +654,27 @@ export function normalizeSessionProviderUsage(value: any): SessionProviderUsageB
     estimatedFixedTokens: finiteToken(value.estimatedFixedTokens ?? value.estimated_fixed_tokens),
     estimatedPayloadTokens: finiteToken(value.estimatedPayloadTokens ?? value.estimated_payload_tokens ?? value.estimatedContextTokens ?? value.estimated_context_tokens),
   };
-  const providerObservedTokens = normalized.providerObservedContextTokens || (normalized.inputTokens || normalized.directInputTokens)
-    + normalized.cacheCreationInputTokens
-    + normalized.cacheReadInputTokens
-    + normalized.outputTokens;
+  // Input usage is the context-window measurement. Output tokens are tracked
+  // separately for cost/output reporting and must never inflate active input
+  // context. Providers that expose split cache fields default to an input
+  // value excluding those fields; adapters may explicitly mark aggregate
+  // input_tokens as already including cache to avoid double counting.
+  const baseInputTokens = normalized.inputTokens || normalized.directInputTokens;
+  const cacheTokens = normalized.inputTokensIncludesCache ? 0 : normalized.cacheCreationInputTokens + normalized.cacheReadInputTokens;
+  const providerObservedTokens = normalized.providerObservedContextTokens || baseInputTokens + cacheTokens;
+  normalized.providerObservedContextTokens = providerObservedTokens;
+  if (!normalized.providerIdentityChecksum && (normalized.provider || normalized.model || normalized.protocol || normalized.endpoint)) {
+    normalized.providerIdentityChecksum = buildCcmProviderIdentityChecksum(normalized);
+  }
   return providerObservedTokens > 0 ? normalized : null;
 }
 
 export function providerObservedContextTokens(value: any) {
   const usage = normalizeSessionProviderUsage(value);
   if (!usage) return 0;
-  return usage.providerObservedContextTokens || (usage.inputTokens! || usage.directInputTokens!)
-    + usage.cacheCreationInputTokens!
-    + usage.cacheReadInputTokens!
-    + usage.outputTokens!;
+  const baseInputTokens = usage.inputTokens! || usage.directInputTokens!;
+  const cacheTokens = usage.inputTokensIncludesCache ? 0 : usage.cacheCreationInputTokens! + usage.cacheReadInputTokens!;
+  return usage.providerObservedContextTokens || baseInputTokens + cacheTokens;
 }
 
 export function measureSessionContextTokens(input: {
@@ -583,6 +686,8 @@ export function measureSessionContextTokens(input: {
   latestProviderUsage?: any;
   provider?: string;
   model?: string;
+  protocol?: string;
+  endpoint?: string;
   generation?: number;
   boundaryGeneration?: number;
   modelVisiblePayload?: ModelVisiblePayloadSnapshot | null;
@@ -593,15 +698,19 @@ export function measureSessionContextTokens(input: {
   const expectedScope = String(input.scope || "");
   const expectedSessionId = String(input.sessionId || "");
   const expectedModel = String(input.model || "");
+  const expectedProtocol = String(input.protocol || "");
+  const expectedEndpoint = String(input.endpoint || "");
   const expectedGeneration = Math.max(0, Math.floor(Number(input.generation || 0)));
   const expectedBoundaryGeneration = Math.max(0, Math.floor(Number(input.boundaryGeneration || 0)));
-  const payload = input.modelVisiblePayload?.schema === "ccm-model-visible-payload-snapshot-v1" ? input.modelVisiblePayload : null;
+  const payload = isModelVisiblePayloadSnapshot(input.modelVisiblePayload) ? input.modelVisiblePayload : null;
   const fixedIdentityValid = !payload || !!usage?.fixedContextChecksum && usage.fixedContextChecksum === payload.fixedContextChecksum;
   const identityValid = !!usage
     && (!expectedScope || usage.scope === expectedScope)
     && (!expectedSessionId || usage.sessionId === expectedSessionId)
     && (!expectedProvider || usage.provider === expectedProvider)
     && (!expectedModel || usage.model === expectedModel)
+    && (!expectedProtocol || usage.protocol === expectedProtocol)
+    && (!expectedEndpoint || usage.endpoint === expectedEndpoint)
     && (!expectedGeneration || usage.generation === expectedGeneration)
     && usage.boundaryGeneration === expectedBoundaryGeneration
     && fixedIdentityValid;
@@ -609,9 +718,10 @@ export function measureSessionContextTokens(input: {
     ? messages.findIndex(message => messageId(message) === usage.anchorMessageId)
     : -1;
   const snapshotBaselineValid = identityValid
-    && Number(usage?.providerObservedContextTokens || 0) > 0
-    && Number(usage?.estimatedContextTokens || 0) > 0;
+    && providerObservedContextTokens(usage) > 0
+    && (Number(usage?.estimatedContextTokens || 0) > 0 || (!!payload && usage?.payloadChecksum === payload.payloadChecksum));
   const baselineValid = identityValid && (anchorIndex >= 0 || snapshotBaselineValid);
+  const payloadExact = baselineValid && !!payload && !!usage?.payloadChecksum && usage.payloadChecksum === payload.payloadChecksum;
   const estimatedSummaryTokens = payload ? payload.tokenBreakdown.summary : input.activeSummary == null ? 0 : estimateTextTokens(JSON.stringify(input.activeSummary));
   const estimatedFixedTokens = payload
     ? modelVisibleFixedTokens(payload)
@@ -627,12 +737,18 @@ export function measureSessionContextTokens(input: {
     : 0;
   const observedTokens = baselineValid ? providerObservedContextTokens(usage) : 0;
   return {
-    schema: "ccm-session-context-token-measurement-v2",
-    method: baselineValid ? "latest_provider_usage_plus_new_message_estimate" : "model_visible_payload_estimate",
+    schema: "ccm-context-measurement-v2",
+    accountingSchema: "ccm-context-accounting-v2",
+    source: baselineValid ? "provider_reported" : payload ? "model_visible_estimate" : "unavailable",
+    method: payloadExact ? "exact_payload_usage" : baselineValid ? "latest_provider_usage_plus_new_message_estimate" : "model_visible_payload_estimate",
     activeTokens: baselineValid
       ? observedTokens + estimatedTokensAfterUsage
       : currentEstimatedPayloadTokens,
     providerObservedTokens: observedTokens,
+    currentInputTokens: observedTokens,
+    outputTokens: Number(usage?.outputTokens || 0),
+    precision: payloadExact ? "exact" : baselineValid ? "estimated" : payload ? "estimated" : "unavailable",
+    measurementBasis: payloadExact ? "exact_payload_usage" : baselineValid ? "provider_usage_anchor_plus_delta" : payload ? "local_payload_prediction" : "unavailable",
     estimatedTokensAfterUsage,
     estimatedSummaryTokens,
     estimatedFixedTokens,
@@ -652,6 +768,14 @@ export function measureSessionContextTokens(input: {
     payloadChecksum: payload?.payloadChecksum || "",
     fixedContextChecksum: payload?.fixedContextChecksum || "",
     pendingRequestChecksum: payload?.pendingRequestChecksum || "",
+    estimatedNewInputTokens: estimatedTokensAfterUsage,
+    lastProviderObservedTokens: observedTokens,
+    predictedNextRequestTokens: currentEstimatedPayloadTokens,
+    providerIdentityChecksum: usage?.providerIdentityChecksum || buildCcmProviderIdentityChecksum({ provider: usage?.provider || expectedProvider, model: usage?.model || expectedModel, protocol: usage?.protocol || expectedProtocol, endpoint: usage?.endpoint || expectedEndpoint }),
+    totalModelVisibleTokens: baselineValid
+      ? observedTokens + estimatedTokensAfterUsage
+      : currentEstimatedPayloadTokens,
+    updatedAt: new Date().toISOString(),
   };
 }
 

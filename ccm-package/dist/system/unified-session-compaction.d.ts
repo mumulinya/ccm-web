@@ -121,9 +121,9 @@ export declare function buildUnifiedCompactionReceipt(input: Partial<UnifiedComp
     scope: UnifiedCompactionScope;
     boundaryGeneration: number;
     createdAt: string;
+    exactSessionId: string;
     strategy: "cc_two_stage";
     microCompactTrigger: "pressure" | "idle" | "none";
-    exactSessionId: string;
     stage: UnifiedCompactionStage;
     beforeTokens: number;
     afterTokens: number;
@@ -153,9 +153,9 @@ export declare function orchestrateUnifiedCompaction(input: UnifiedCompactionOrc
         scope: UnifiedCompactionScope;
         boundaryGeneration: number;
         createdAt: string;
+        exactSessionId: string;
         strategy: "cc_two_stage";
         microCompactTrigger: "pressure" | "idle" | "none";
-        exactSessionId: string;
         stage: UnifiedCompactionStage;
         beforeTokens: number;
         afterTokens: number;

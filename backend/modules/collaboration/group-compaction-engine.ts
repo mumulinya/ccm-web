@@ -152,7 +152,7 @@ export function buildGroupPressureAccountingSelection(triggerPayload: any, provi
     && providerUsageBaseline.event?.token_breakdown
     && Number(providerUsageBaseline.event?.accounting_total_tokens || 0) > 0
     ? {
-        schema: "ccm-model-visible-payload-accounting-v1",
+        schema: "ccm-model-visible-payload-accounting-v2",
         scope: "group",
         sessionId: `${groupId}:${groupSessionId}`,
         tokenBreakdown: { ...providerUsageBaseline.event.token_breakdown },

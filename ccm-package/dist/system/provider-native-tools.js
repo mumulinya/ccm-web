@@ -35,10 +35,12 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.providerToolsRequestPatch = providerToolsRequestPatch;
 exports.parseOpenAiAgentTurn = parseOpenAiAgentTurn;
+exports.parseOpenAiResponsesAgentTurn = parseOpenAiResponsesAgentTurn;
 exports.parseGeminiAgentTurn = parseGeminiAgentTurn;
 exports.parseAnthropicAgentTurn = parseAnthropicAgentTurn;
 exports.turnForLegacyJsonLoop = turnForLegacyJsonLoop;
 exports.createOpenAiStreamTurnAccumulator = createOpenAiStreamTurnAccumulator;
+exports.createOpenAiResponsesStreamTurnAccumulator = createOpenAiResponsesStreamTurnAccumulator;
 exports.createAnthropicStreamTurnAccumulator = createAnthropicStreamTurnAccumulator;
 const crypto = __importStar(require("crypto"));
 function checksum(value) {
@@ -71,6 +73,14 @@ function call(id, name, args) {
 }
 function providerToolsRequestPatch(family, tools, nativeToolReference = false) {
     const filtered = tools.filter(tool => tool?.name && tool.deferred !== true);
+    if (family === "openai-responses")
+        return {
+            body: {
+                tools: filtered.map(tool => ({ type: "function", name: tool.name, description: tool.description, parameters: tool.inputSchema || { type: "object", properties: {} } })),
+                tool_choice: "auto",
+            },
+            headers: {},
+        };
     if (family === "openai")
         return { body: { tools: filtered.map(tool => ({ type: "function", function: { name: tool.name, description: tool.description, parameters: tool.inputSchema || { type: "object", properties: {} } } })), tool_choice: "auto" }, headers: {} };
     if (family === "gemini")
@@ -87,6 +97,24 @@ function parseOpenAiAgentTurn(data, usage) {
         toolCalls: (message.tool_calls || []).map((item) => call(item.id, item.function?.name, item.function?.arguments)),
         toolReferences: [],
         stopReason: String(data?.choices?.[0]?.finish_reason || ""),
+        usage,
+    };
+}
+function parseOpenAiResponsesAgentTurn(data, usage) {
+    const output = Array.isArray(data?.output) ? data.output : [];
+    const messageText = output
+        .filter((item) => item?.type === "message")
+        .flatMap((item) => Array.isArray(item?.content) ? item.content : [])
+        .filter((item) => item?.type === "output_text" || item?.type === "text")
+        .map((item) => String(item?.text || ""))
+        .join("");
+    return {
+        text: typeof data?.output_text === "string" ? data.output_text : messageText,
+        toolCalls: output
+            .filter((item) => item?.type === "function_call")
+            .map((item) => call(item.call_id || item.id, item.name, item.arguments)),
+        toolReferences: [],
+        stopReason: String(data?.status || data?.incomplete_details?.reason || ""),
         usage,
     };
 }
@@ -155,6 +183,67 @@ function createOpenAiStreamTurnAccumulator(onToolCallReady) {
             }
         },
         finish(usage) { return { text, toolCalls: [...calls.values()].map(row => call(row.id, row.name, row.arguments)), toolReferences: [], stopReason, usage }; },
+    };
+}
+function createOpenAiResponsesStreamTurnAccumulator(onToolCallReady) {
+    const calls = new Map();
+    const emitted = new Set();
+    let text = "";
+    let stopReason = "";
+    let finalResponse = null;
+    const updateCall = (event, item = null) => {
+        const source = item || event?.item || {};
+        const key = String(event?.item_id || source?.id || source?.call_id || event?.call_id || event?.output_index || calls.size);
+        const row = calls.get(key) || { id: "", name: "", arguments: "" };
+        row.id = String(source.call_id || source.id || event?.call_id || row.id || key);
+        row.name = String(source.name || event?.name || row.name || "");
+        if (source.arguments != null)
+            row.arguments = String(source.arguments);
+        else if (event?.arguments != null)
+            row.arguments = String(event.arguments);
+        else if (event?.delta != null)
+            row.arguments += String(event.delta);
+        calls.set(key, row);
+        tryCompleteToolCall(row, emitted, onToolCallReady);
+    };
+    return {
+        push(event) {
+            const type = String(event?.type || "");
+            if (type === "response.output_text.delta")
+                text += String(event?.delta || "");
+            if (type === "response.output_item.added" && event?.item?.type === "function_call")
+                updateCall(event, event.item);
+            if (type === "response.function_call_arguments.delta" || type === "response.function_call_arguments.done")
+                updateCall(event);
+            if (type === "response.output_item.done" && event?.item?.type === "function_call")
+                updateCall(event, event.item);
+            if (["response.completed", "response.incomplete", "response.failed"].includes(type)) {
+                finalResponse = event?.response || null;
+                stopReason = String(finalResponse?.status || type.replace("response.", "") || stopReason);
+            }
+            if (type === "error")
+                stopReason = "failed";
+        },
+        finalResponse() { return finalResponse; },
+        finish(usage) {
+            if (finalResponse) {
+                const parsed = parseOpenAiResponsesAgentTurn(finalResponse, usage);
+                if (!text)
+                    text = parsed.text;
+                for (const item of parsed.toolCalls) {
+                    if (![...calls.values()].some(row => row.id === item.id)) {
+                        calls.set(item.id, { id: item.id, name: item.name, arguments: JSON.stringify(item.arguments || {}) });
+                    }
+                }
+            }
+            return {
+                text,
+                toolCalls: [...calls.values()].filter(row => row.name).map(row => call(row.id, row.name, row.arguments)),
+                toolReferences: [],
+                stopReason,
+                usage,
+            };
+        },
     };
 }
 function createAnthropicStreamTurnAccumulator(onToolCallReady) {

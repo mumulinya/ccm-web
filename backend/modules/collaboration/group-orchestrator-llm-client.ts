@@ -32,14 +32,23 @@ import {
 } from "../../system/provider-native-microcompact-capability";
 import {
   createAnthropicStreamTurnAccumulator,
+  createOpenAiResponsesStreamTurnAccumulator,
   createOpenAiStreamTurnAccumulator,
   parseAnthropicAgentTurn,
   parseGeminiAgentTurn,
   parseOpenAiAgentTurn,
+  parseOpenAiResponsesAgentTurn,
   providerToolsRequestPatch,
   turnForLegacyJsonLoop,
 } from "../../system/provider-native-tools";
 import { providerNativeToolReferenceAllowed, recordProviderNativeToolCapability } from "../../system/provider-native-tool-capability";
+import {
+  buildOpenAiResponsesBody,
+  normalizeOpenAiResponsesUrl,
+  safeProviderHttpDetail,
+} from "../../system/openai-responses-transport";
+
+export { normalizeOpenAiResponsesUrl } from "../../system/openai-responses-transport";
 
 export type LlmChatMessage = {
   role: string;
@@ -81,6 +90,7 @@ export type LlmCallOptions = {
   provider_context_cache?: any;
   onProviderContextCache?: (receipt: any) => void;
   onUsage?: (usage: LlmTokenUsage) => void;
+  onResponseMetadata?: (metadata: { provider: string; responseId: string; model: string; status: string }) => void;
   onDelta?: (delta: string) => void;
   retry?: boolean;
   retryAttempts?: number;
@@ -393,6 +403,10 @@ export function shouldUseAnthropic(config: any) {
     || format === "openai-compatible" && /\/anthropic(?:\/|$)/i.test(apiUrl);
 }
 
+export function shouldUseOpenAiResponses(config: any) {
+  return String(config?.format || "").trim().toLowerCase() === "openai-responses";
+}
+
 export function shouldUseGemini(config: any) {
   const format = String(config.format || "auto").toLowerCase();
   const apiUrl = String(config.apiUrl || "").toLowerCase();
@@ -516,7 +530,7 @@ function assertLlmConfig(config: any, endpoint: string) {
 }
 
 function formatHttpError(prefix: string, status: number, text: string) {
-  const detail = String(text || "").slice(0, 300);
+  const detail = safeProviderHttpDetail(text, 300);
   return detail ? `${prefix} HTTP ${status}: ${detail}` : `${prefix} HTTP ${status}`;
 }
 
@@ -1024,6 +1038,79 @@ async function callOpenAiCompatibleChatOnce(config: any, options: LlmCallOptions
   }
 }
 
+async function callOpenAiResponsesChatOnce(config: any, options: LlmCallOptions) {
+  const endpoint = normalizeOpenAiResponsesUrl(config.apiUrl);
+  assertLlmConfig(config, endpoint);
+  const streaming = options.stream === true || typeof options.onDelta === "function";
+  let emitted = false;
+  const cache = await prepareContextCache(config, options, "openai");
+  const messages = withTransientModelBlocks(cache.messages, cache.transientBlocks || [], "openai");
+  const effort = resolveReasoningEffort(callReasoningConfig(config, options));
+  const abort = createLlmAbortContext(options, resolveLlmTimeoutMs(config, options.defaultTimeoutMs || 30000, options.timeoutMs));
+  try {
+    const response = await fetchWithNodeHttpFallback(endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${config.apiKey}`,
+      },
+      body: JSON.stringify(buildOpenAiResponsesBody({
+        model: config.model,
+        messages,
+        maxOutputTokens: options.maxTokens,
+        stream: streaming,
+        reasoningEffort: effort,
+        temperature: options.temperature ?? resolveTemperature(config, 0.2),
+        cachePatch: cache.adapterPatch?.body || {},
+        nativeTools: config.providerNativeToolsMode !== "json" ? options.nativeTools : undefined,
+      })),
+      signal: abort.controller.signal,
+    });
+    if (!response.ok) {
+      const text = await response.text();
+      throw providerHttpError(options.httpErrorPrefix || "HTTP", response, text);
+    }
+    if (options.nativeTools?.length) { try { recordProviderNativeToolCapability(config, "openai", "confirmed", "responses_native_tools_accepted"); } catch {} }
+    const responseId = providerRequestId(response);
+    if (streaming) {
+      let usage: any = null;
+      const turnAccumulator = createOpenAiResponsesStreamTurnAccumulator(options.onNativeToolCallReady);
+      await consumeSseJson(response, event => {
+        turnAccumulator.push(event);
+        const delta = event?.type === "response.output_text.delta" ? emitStreamDelta(options, event?.delta) : "";
+        if (delta) emitted = true;
+        if (event?.response?.usage) usage = event.response.usage;
+        if (event?.type === "error") throw new Error(String(event?.error?.message || event?.message || "Responses API 流式调用失败"));
+      });
+      const finalResponse = turnAccumulator.finalResponse();
+      const normalizedUsage = normalizeLlmTokenUsage(usage || finalResponse?.usage, "openai");
+      const providerTurn = turnAccumulator.finish(normalizedUsage);
+      options.onProviderAgentTurn?.(providerTurn);
+      const content = turnForLegacyJsonLoop(providerTurn);
+      if (!content.trim() && !providerTurn.toolCalls.length) throw new Error("模型返回空响应");
+      reportTokenUsage(options, normalizedUsage);
+      options.onResponseMetadata?.({ provider: "openai-responses", responseId: String(finalResponse?.id || responseId || ""), model: String(finalResponse?.model || config.model || ""), status: String(finalResponse?.status || providerTurn.stopReason || "") });
+      finishContextCache(options, cache.plan, { ok: true, usage: normalizedUsage, providerRequestId: String(finalResponse?.id || responseId || ""), adapterEvidence: providerAdapterEvidence(cache) });
+      return content;
+    }
+    const data = JSON.parse(await response.text());
+    const normalizedUsage = normalizeLlmTokenUsage(data?.usage, "openai");
+    const providerTurn = parseOpenAiResponsesAgentTurn(data, normalizedUsage);
+    options.onProviderAgentTurn?.(providerTurn);
+    const content = turnForLegacyJsonLoop(providerTurn);
+    if (!content.trim() && !providerTurn.toolCalls.length) throw new Error("模型返回空响应");
+    reportTokenUsage(options, normalizedUsage);
+    options.onResponseMetadata?.({ provider: "openai-responses", responseId: String(data?.id || responseId || ""), model: String(data?.model || config.model || ""), status: String(data?.status || "") });
+    finishContextCache(options, cache.plan, { ok: true, usage: normalizedUsage, providerRequestId: String(data?.id || responseId || ""), adapterEvidence: providerAdapterEvidence(cache) });
+    return content;
+  } catch (error: any) {
+    finishContextCache(options, cache.plan, { ok: false, error });
+    throw markStreamInterrupted(normalizeLlmAbortError(error, options), emitted);
+  } finally {
+    abort.cleanup();
+  }
+}
+
 function geminiContentText(value: any) {
   if (typeof value === "string") return value;
   if (Array.isArray(value)) {
@@ -1350,8 +1437,9 @@ export function resolveLlmRetryOptions(config: any, options: LlmCallOptions, fal
 
 export async function callOpenAiCompatibleChat(config: any, options: LlmCallOptions) {
   if (shouldUseGemini(config)) return callGeminiCompatibleChat(config, options);
+  const responses = shouldUseOpenAiResponses(config);
   const callOnceWithNativeFallback = async (attemptOptions: LlmCallOptions) => {
-    try { return await callOpenAiCompatibleChatOnce(config, attemptOptions); }
+    try { return await (responses ? callOpenAiResponsesChatOnce : callOpenAiCompatibleChatOnce)(config, attemptOptions); }
     catch (error: any) {
       if (!attemptOptions.nativeTools?.length || error?.code === "CCM_MODEL_STREAM_INTERRUPTED_AFTER_DELTA" || !/(unknown|unsupported|unrecognized|invalid).{0,80}(tools?|tool_choice|function)|(?:tools?|tool_choice|function).{0,80}(unknown|unsupported|unrecognized|invalid)/i.test(String(error?.message || error))) throw error;
       try { recordProviderNativeToolCapability(config, "openai", "unsupported", error); } catch {}
@@ -1360,7 +1448,7 @@ export async function callOpenAiCompatibleChat(config: any, options: LlmCallOpti
         rejected.code = "CCM_NATIVE_TOOLS_UNSUPPORTED";
         throw rejected;
       }
-      return callOpenAiCompatibleChatOnce(config, { ...attemptOptions, nativeTools: undefined, nativeToolReference: false, retry: false });
+      return (responses ? callOpenAiResponsesChatOnce : callOpenAiCompatibleChatOnce)(config, { ...attemptOptions, nativeTools: undefined, nativeToolReference: false, retry: false });
     }
   };
   if (options.retry === false) return callOnceWithNativeFallback(options);

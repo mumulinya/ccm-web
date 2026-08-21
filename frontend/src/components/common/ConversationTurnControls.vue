@@ -14,6 +14,7 @@ const props = defineProps({
 const emit = defineEmits(['stop', 'cancel', 'guide', 'retry', 'resolve-route'])
 const expanded = ref(false)
 const menuTurnId = ref('')
+const selectedRouteCandidates = ref({})
 const visibleTurns = computed(() => (props.turns || [])
   .filter(turn => ['queued', 'needs_route', 'failed'].includes(String(turn.status || '')))
   .sort((left, right) => Number(left.position || 0) - Number(right.position || 0)
@@ -33,6 +34,15 @@ const statusLabel = turn => ({
 const turnText = turn => turn.messagePreview || turn.message || (turn.attachmentRefs?.length || turn.attachments?.length ? '附件消息' : '待处理消息')
 const isDispatch = turn => turn?.kind === 'task_dispatch'
 const isResolvingRoute = turn => props.resolvingRouteId === turn?.id
+const routeCandidates = turn => Array.isArray(turn?.routing?.candidateSummaries) ? turn.routing.candidateSummaries : []
+const selectedRouteCandidate = turn => selectedRouteCandidates.value[turn.id]
+  || turn?.routing?.candidateTaskId
+  || routeCandidates(turn)[0]?.taskId
+  || ''
+const selectRouteCandidate = (turn, taskId) => {
+  selectedRouteCandidates.value = { ...selectedRouteCandidates.value, [turn.id]: taskId }
+}
+const candidateKindLabel = candidate => ({ active: '当前任务', recoverable: '可恢复', completed: '已交付' }[candidate?.candidateKind] || candidate?.status || '任务')
 const toggleMenu = turn => { menuTurnId.value = menuTurnId.value === turn.id ? '' : turn.id }
 const runAndClose = (event, turn) => {
   menuTurnId.value = ''
@@ -49,6 +59,11 @@ const viewTask = turn => {
 watch(() => visibleTurns.value.length, count => {
   if (count <= 1) expanded.value = false
   if (!visibleTurns.value.some(turn => turn.id === menuTurnId.value)) menuTurnId.value = ''
+})
+
+watch(() => visibleTurns.value.map(turn => turn.id).join(','), () => {
+  const visibleIds = new Set(visibleTurns.value.map(turn => turn.id))
+  selectedRouteCandidates.value = Object.fromEntries(Object.entries(selectedRouteCandidates.value).filter(([id]) => visibleIds.has(id)))
 })
 </script>
 
@@ -68,8 +83,22 @@ watch(() => visibleTurns.value.length, count => {
               <span v-if="(turn.attachmentRefs?.length || turn.attachments?.length)" class="turn-attachments"><Paperclip :size="11" />{{ turn.attachmentRefs?.length || turn.attachments?.length }}</span>
             </div>
             <p v-if="turn.status === 'needs_route' && turn.routing?.reason" class="route-reason">{{ turn.routing.reason }}</p>
+            <div v-if="turn.status === 'needs_route' && routeCandidates(turn).length" class="route-candidates" aria-label="选择要继续的任务">
+              <button
+                v-for="candidate in routeCandidates(turn)"
+                :key="candidate.taskId"
+                type="button"
+                class="route-candidate"
+                :class="{ selected: selectedRouteCandidate(turn) === candidate.taskId }"
+                :aria-pressed="selectedRouteCandidate(turn) === candidate.taskId"
+                @click="selectRouteCandidate(turn, candidate.taskId)"
+              >
+                <span class="candidate-title">{{ candidate.title || candidate.taskId }}</span>
+                <span class="candidate-meta">{{ candidateKindLabel(candidate) }}<template v-if="candidate.targetProjects?.length"> · {{ candidate.targetProjects.join('、') }}</template><template v-if="candidate.attempt"> · 第 {{ candidate.attempt }} 次执行</template></span>
+              </button>
+            </div>
             <div v-if="turn.status === 'needs_route'" class="route-actions" aria-label="选择消息处理方式">
-              <button type="button" :disabled="isResolvingRoute(turn) || turn.canMutate === false || !turn.routing?.candidateTaskId" :title="!turn.routing?.candidateTaskId ? '当前没有可安全恢复的原任务' : ''" @click="emit('resolve-route', turn, 'continue_original')">{{ isResolvingRoute(turn) && resolvingRouteChoice === 'continue_original' ? '处理中…' : '继续原任务' }}</button>
+              <button type="button" :disabled="isResolvingRoute(turn) || turn.canMutate === false || !selectedRouteCandidate(turn)" :title="!selectedRouteCandidate(turn) ? '当前没有可安全恢复的原任务' : ''" @click="emit('resolve-route', turn, 'continue_original', selectedRouteCandidate(turn))">{{ isResolvingRoute(turn) && resolvingRouteChoice === 'continue_original' ? '处理中…' : (routeCandidates(turn).find(candidate => candidate.taskId === selectedRouteCandidate(turn))?.candidateKind === 'active' ? '继续当前任务' : '继续所选任务') }}</button>
               <button type="button" class="primary" :disabled="isResolvingRoute(turn) || turn.canMutate === false" @click="emit('resolve-route', turn, 'start_new_task')">{{ isResolvingRoute(turn) && resolvingRouteChoice === 'start_new_task' ? '处理中…' : '作为新任务' }}</button>
               <button type="button" :disabled="isResolvingRoute(turn) || turn.canMutate === false" @click="emit('resolve-route', turn, 'answer_only')">{{ isResolvingRoute(turn) && resolvingRouteChoice === 'answer_only' ? '处理中…' : '仅回答问题' }}</button>
             </div>
@@ -133,6 +162,11 @@ watch(() => visibleTurns.value.length, count => {
 .turn-copy { min-width:0; display:grid; gap:4px; }
 .route-title { color:var(--text-primary,#0f172a); font-size:13px; line-height:1.35; }
 .route-reason { margin:1px 0 0; color:var(--text-secondary,#475569); font-size:11px; line-height:1.45; }
+.route-candidates { display:grid; gap:5px; margin-top:5px; }
+.route-candidate { display:grid; gap:2px; width:100%; padding:7px 9px; border:1px solid color-mix(in srgb,var(--border-color,#cbd5e1) 72%,transparent); border-radius:8px; background:var(--surface,#fff); color:var(--text-secondary,#475569); text-align:left; cursor:pointer; }
+.route-candidate.selected { border-color:color-mix(in srgb,var(--primary-color,#2563eb) 68%,var(--border-color,#cbd5e1)); background:color-mix(in srgb,var(--primary-color,#2563eb) 6%,var(--surface,#fff)); }
+.candidate-title { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text-primary,#0f172a); font-size:11px; font-weight:650; }
+.candidate-meta { color:var(--text-muted,#64748b); font-size:10px; }
 .route-actions { display:flex; flex-wrap:wrap; gap:6px; margin-top:6px; }
 .route-actions button { min-height:30px; padding:0 11px; border:1px solid color-mix(in srgb,var(--border-color,#cbd5e1) 80%,transparent); border-radius:8px; background:var(--surface,#fff); color:var(--text-secondary,#475569); font-size:11px; font-weight:650; cursor:pointer; }
 .route-actions button:hover { border-color:color-mix(in srgb,var(--primary-color,#2563eb) 55%,var(--border-color,#cbd5e1)); color:var(--primary-color,#2563eb); }

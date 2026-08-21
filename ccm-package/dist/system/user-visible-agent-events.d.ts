@@ -1,6 +1,7 @@
 import type { CcmInternalPromptBindings } from "../agents/internal-prompt-contract";
 import { type ToolDisplayDetailV1 } from "./tool-display-projection";
 import { type AssistantProgressKind } from "./assistant-progress";
+import { type CcmCompletionSummaryV1 } from "./completion-summary";
 export declare const USER_VISIBLE_AGENT_EVENT_SCHEMA: "ccm-user-visible-agent-event-v1";
 export declare const USER_VISIBLE_AGENT_RESULT_SCHEMA: "ccm-user-visible-agent-result-v1";
 export type UserVisibleAgentEventType = "turn_started" | "thinking_status" | "assistant_text_delta" | "assistant_progress" | "model_activity" | "requirement_plan" | "tool_started" | "tool_progress" | "tool_completed" | "tool_failed" | "agent_started" | "agent_progress" | "agent_completed" | "agent_failed" | "permission_required" | "clarification_required" | "context_compacted" | "result";
@@ -104,6 +105,19 @@ export type UserVisibleAgentEvent = {
             safeLabel: string;
             contentStored: false;
         };
+        keyProgress?: {
+            schema: "ccm-agent-key-progress-v1";
+            eventId: string;
+            kind: "model_preamble" | "phase_update" | "tool_batch_started" | "tool_batch_completed" | "model_key_summary" | "child_agent_update" | "verification_update";
+            source: "model_stream" | "deterministic" | "summary_model" | "child_agent";
+            status: "running" | "success" | "failed" | "waiting";
+            round: number;
+            text: string;
+            modelCallIndex: number;
+            toolCallIds: string[];
+            relatedEventIds: string[];
+            contentStored: false;
+        };
         promptBindings?: CcmInternalPromptBindings;
         liveProgress?: {
             phase: "starting" | "running" | "testing" | "building" | "finishing" | "retrying";
@@ -152,6 +166,7 @@ export type UserVisibleAgentEvent = {
             sourceEventChecksum: string;
             contentStored: false;
         };
+        completionSummary?: CcmCompletionSummaryV1;
     };
     visibility: "default" | "transcript" | "technical";
     contentStored: false;
@@ -236,6 +251,7 @@ export declare function buildUserVisibleAgentResult(input: any): {
     verification: any;
     unfinished: string[];
     usage: any;
+    completionSummary: CcmCompletionSummaryV1;
     contentStored: boolean;
 };
 export declare function appendToolProjection(input: any): UserVisibleAgentEvent;

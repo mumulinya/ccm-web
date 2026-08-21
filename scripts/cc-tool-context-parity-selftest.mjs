@@ -63,6 +63,6 @@ assert.match(source("backend/modules/projects/project-native-messages.ts"), /cle
 assert.match(source("backend/agents/global/global-native-messages.ts"), /clearedToolCallIds/);
 assert.match(source("backend/agents/native-query-loop.ts"), /persistContext/);
 assert.match(source("backend/modules/global/global-native-query-adapter.ts"), /persistContext/);
-assert.doesNotMatch(source("backend/modules/collaboration/group-orchestrator-config.ts"), /timeBasedMicrocompactEnabled:\s*true/);
+assert.match(source("backend/modules/collaboration/group-orchestrator-config.ts"), /timeBasedMicrocompactEnabled:\s*true/);
 
 console.log("cc-tool-context-parity-selftest: pass");

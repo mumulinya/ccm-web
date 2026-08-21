@@ -34,9 +34,10 @@ import { requestAccessPrincipal, requestIsReadOnly } from "../system/api-access-
 import { runGitCommand, tryGitCommand } from "../tools/git-workspace-runtime";
 import { listGlobalTerminalDeliveries, retryGlobalTerminalDelivery } from "../../agents/global/global-terminal-delivery";
 import {
+  bindConversationRouteToWorkflowDecision,
   buildRecoverableTaskSummary,
   decideConversationMessageRoute,
-  findRecoverableConversationTasks,
+  findConversationTaskCandidates,
 } from "../../agents/conversation-message-routing";
 import { buildGlobalMissionSafeProjection, buildTaskConversationLinks } from "../../system/task-conversation-links";
 import { parseSecureMultipartRequest } from "../../system/secure-multipart";
@@ -176,7 +177,7 @@ export function createGlobalAgentApi(deps: any) {
         const metadata = turn.metadata?.global_context_v2 || {};
         const resolvedRoute = String(turn.metadata?.resolved_route || metadata.resolved_route || "");
         const resolvedCandidateTaskId = String(turn.metadata?.resolved_candidate_task_id || metadata.resolved_candidate_task_id || "");
-        const recoverableCandidates = findRecoverableConversationTasks({ scope: "global", scopeId: "global", exactSessionId: sessionId });
+        const recoverableCandidates = findConversationTaskCandidates({ scope: "global", scopeId: "global", exactSessionId: sessionId });
         const routeHistory = Array.isArray(metadata.history) ? [...metadata.history] : [];
         const resolvedCandidate = resolvedRoute === "continue_original"
           ? recoverableCandidates.find((item: any) => String(item.id || "") === resolvedCandidateTaskId)
@@ -209,9 +210,20 @@ export function createGlobalAgentApi(deps: any) {
                 workflowDecision.continuationKind = "new_task";
                 return;
               }
-              if (resolvedRoute === "continue_original" && resolvedCandidate) return;
-              const route = decideConversationMessageRoute({ workflowDecision, candidates: recoverableCandidates });
+              if (resolvedRoute === "continue_original" && resolvedCandidate) {
+                workflowDecision.continuationKind = String(workflowDecision.continuationKind || "supplement") === "revise_goal" ? "revise_goal" : "supplement";
+                bindConversationRouteToWorkflowDecision(workflowDecision, {
+                  routeKind: workflowDecision.continuationKind === "revise_goal" ? "revise_existing_task" : "resume_existing_task",
+                  exactSessionId: sessionId,
+                  scope: "global",
+                }, resolvedCandidate, "explicit_user_choice");
+                return;
+              }
+              const route = decideConversationMessageRoute({ workflowDecision, candidates: recoverableCandidates, exactSessionId: sessionId, scope: "global" });
               if (route.decision === "needs_user") throw Object.assign(new Error(route.reason), { code: "CONVERSATION_ROUTE_REQUIRED", route });
+              if (route.candidate && ["resume_task", "revise_task"].includes(route.decision)) {
+                bindConversationRouteToWorkflowDecision(workflowDecision, route, route.candidate, "session_anchor");
+              }
             },
           });
           conversationTurnControl.settle({
@@ -228,7 +240,19 @@ export function createGlobalAgentApi(deps: any) {
             conversationTurnControl.requireRoute({
               id: turn.id,
               revision: turn.revision,
-              routing: { candidateTaskId: String(error?.route?.candidate?.id || ""), confidence: Number(error?.route?.confidence || 0), reason: error?.route?.reason || error?.message },
+              routing: {
+                candidateTaskId: String(error?.route?.candidate?.id || ""),
+                candidateTaskIds: error?.route?.candidateTaskIds || [],
+                candidateSummaries: error?.route?.candidateSummaries || [],
+                routeKind: error?.route?.routeKind || "needs_user",
+                activeTaskId: error?.route?.activeTaskId || "",
+                exactSessionId: sessionId,
+                scope: "global",
+                confidenceBand: error?.route?.confidenceBand || "low",
+                continuationKind: error?.route?.continuationKind || "supplement",
+                confidence: Number(error?.route?.confidence || 0),
+                reason: error?.route?.reason || error?.message,
+              },
             });
             break;
           }
@@ -1433,7 +1457,7 @@ export function createGlobalAgentApi(deps: any) {
           const sessionId = String(payload.session_id || payload.sessionId || "web:default");
           const explicitRouteChoice = String(payload.resolved_route || payload.resolvedRoute || "").trim();
           const explicitCandidateTaskId = String(payload.resolved_candidate_task_id || payload.resolvedCandidateTaskId || "").trim();
-          const recoverableCandidates = findRecoverableConversationTasks({ scope: "global", scopeId: "global", exactSessionId: sessionId });
+          const recoverableCandidates = findConversationTaskCandidates({ scope: "global", scopeId: "global", exactSessionId: sessionId });
           const explicitCandidate = explicitRouteChoice === "continue_original"
             ? recoverableCandidates.find((item: any) => String(item.id || "") === explicitCandidateTaskId)
             : null;
@@ -1541,11 +1565,19 @@ export function createGlobalAgentApi(deps: any) {
               }
               if (explicitRouteChoice === "continue_original") {
                 workflowDecision.continuationKind = String(workflowDecision.continuationKind || "supplement") === "revise_goal" ? "revise_goal" : "supplement";
+                bindConversationRouteToWorkflowDecision(workflowDecision, {
+                  routeKind: workflowDecision.continuationKind === "revise_goal" ? "revise_existing_task" : "resume_existing_task",
+                  exactSessionId: sessionId,
+                  scope: "global",
+                }, explicitCandidate, "explicit_user_choice");
                 return;
               }
-              const route = decideConversationMessageRoute({ workflowDecision, candidates: recoverableCandidates });
+              const route = decideConversationMessageRoute({ workflowDecision, candidates: recoverableCandidates, exactSessionId: sessionId, scope: "global" });
               if (route.decision === "needs_user") {
                 throw Object.assign(new Error(route.reason), { code: "CONVERSATION_ROUTE_REQUIRED", route });
+              }
+              if (route.candidate && ["resume_task", "revise_task"].includes(route.decision)) {
+                bindConversationRouteToWorkflowDecision(workflowDecision, route, route.candidate, "session_anchor");
               }
             },
             turnId: activeTurn.id,
@@ -1589,6 +1621,14 @@ export function createGlobalAgentApi(deps: any) {
                 revision: activeTurn.revision,
                 routing: {
                   candidateTaskId: String(error?.route?.candidate?.id || ""),
+                  candidateTaskIds: error?.route?.candidateTaskIds || [],
+                  candidateSummaries: error?.route?.candidateSummaries || [],
+                  routeKind: error?.route?.routeKind || "needs_user",
+                  activeTaskId: error?.route?.activeTaskId || "",
+                  exactSessionId: activeSessionId,
+                  scope: "global",
+                  confidenceBand: error?.route?.confidenceBand || "low",
+                  continuationKind: error?.route?.continuationKind || "supplement",
                   confidence: Number(error?.route?.confidence || 0),
                   reason: String(error?.route?.reason || error?.message || "需要确认消息处理方式"),
                 },
@@ -1607,13 +1647,17 @@ export function createGlobalAgentApi(deps: any) {
             && !String(payload.resolved_route || payload.resolvedRoute || "")
             && ["统一大模型尚未配置", "MODEL", "PROVIDER", "TIMEOUT", "NETWORK"].some(token => String(error?.code || error?.message || "").toUpperCase().includes(token))) {
             try {
-              const candidates = findRecoverableConversationTasks({ scope: "global", scopeId: "global", exactSessionId: activeSessionId });
+          const candidates = findConversationTaskCandidates({ scope: "global", scopeId: "global", exactSessionId: activeSessionId });
               if (candidates.length === 0) throw error;
               const routed = conversationTurnControl.requireRoute({
                 id: activeTurn.id,
                 revision: activeTurn.revision,
                 routing: {
                   candidateTaskId: String(candidates[0]?.id || ""),
+                  candidateTaskIds: candidates.map((item: any) => String(item?.id || "")).filter(Boolean),
+                  candidateSummaries: candidates.slice(0, 6).map(buildRecoverableTaskSummary).filter(Boolean),
+                  exactSessionId: activeSessionId,
+                  scope: "global",
                   confidence: 0,
                   reason: "主 Agent 暂时无法可靠判断这条消息是否续接原任务，请选择处理方式",
                 },

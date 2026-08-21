@@ -14,7 +14,8 @@ import {
   recordAgentRuntimeLifecycle,
 } from "../runtime-kernel";
 import { projectContextSourceToolResultForPersistence } from "../../system/context-source-tool-result-projection";
-import { appendAssistantProgress, appendToolProjection, appendUserVisibleAgentEvent, appendUserVisibleRequirementPlan, buildUserVisibleAgentResult } from "../../system/user-visible-agent-events";
+import { appendToolProjection, appendUserVisibleAgentEvent, appendUserVisibleRequirementPlan, buildUserVisibleAgentResult } from "../../system/user-visible-agent-events";
+import { recordAgentKeyProgress } from "../../system/agent-key-progress";
 import { assistantProgressNarrationEnabled, buildAssistantProgressFallback, buildToolBatchOutcomeProgress, sanitizeAssistantProgressText } from "../../system/assistant-progress";
 import { loadOrchestratorConfig } from "../../modules/collaboration/group-orchestrator-config";
 import { publishUserVisibleAssistantText } from "../../system/user-visible-agent-projections";
@@ -160,6 +161,12 @@ export function emit(runtime: GlobalAgentLoopRuntime, event: any, run: GlobalAge
       ];
       return candidates.find(Array.isArray) || [];
     })();
+    const globalAcceptancePassed = !!run.mission_id && (
+      run.final_report?.acceptance_gate_passed === true
+      || run.final_delivery_report?.acceptance_gate_passed === true
+      || run.workchain?.completion_summary?.acceptance_gate_passed === true
+      || run.workchain?.delivery_report?.acceptance_gate_passed === true
+    );
     const result = ["completed", "failed", "cancelled", "blocked", "paused", "interrupted"].includes(sourceType)
       ? buildUserVisibleAgentResult({
         status: sourceType === "completed" ? "success" : sourceType,
@@ -170,6 +177,10 @@ export function emit(runtime: GlobalAgentLoopRuntime, event: any, run: GlobalAge
         stopReason: sourceType,
         usage: run.usage,
         fileChanges: finalFileChanges,
+        source: run.mission_id ? "terminal_gate" : "query_projection",
+        ...(run.mission_id ? { terminalGate: { passed: globalAcceptancePassed, accepted: globalAcceptancePassed } } : {}),
+        verification: run.final_report?.verification || run.final_delivery_report?.verification || [],
+        blockers: run.final_report?.blockers || run.final_delivery_report?.blockers || [],
       })
       : undefined;
     const totalDurationMs = result ? Math.max(0, Date.parse(run.completed_at || run.updated_at) - Date.parse(run.started_at)) : 0;
@@ -178,12 +189,6 @@ export function emit(runtime: GlobalAgentLoopRuntime, event: any, run: GlobalAge
       ? run.steps.reduce((sum, step) => sum + (step.tool ? Math.max(0, Number(step.duration_ms || 0)) : 0), 0)
       : 0;
     const otherDurationMs = result ? Math.max(0, totalDurationMs - modelDurationMs - toolWallDurationMs) : 0;
-    const globalAcceptancePassed = !!run.mission_id && (
-      run.final_report?.acceptance_gate_passed === true
-      || run.final_delivery_report?.acceptance_gate_passed === true
-      || run.workchain?.completion_summary?.acceptance_gate_passed === true
-      || run.workchain?.delivery_report?.acceptance_gate_passed === true
-    );
     const eventInput = {
       eventId: `global:${run.id}:${sourceType}:${tool?.signature || event?.step?.index || run.steps.length}`,
       scope: "global",
@@ -1411,7 +1416,7 @@ async function continueLoop(run: GlobalAgentRun, runtime: GlobalAgentLoopRuntime
             goal: run.user_message,
           }))
           : (decisionProgress && decisionProgress !== previousMessage ? decisionProgress : "");
-        if (progressText) appendAssistantProgress({
+        if (progressText) recordAgentKeyProgress({
           scope: "global", scopeId: "global", exactSessionId: run.session_id,
           generation: Math.max(0, Number(run.resume_count || 0)),
           anchorMessageId: `gam_${String(run.id || "result")}_assistant`,
@@ -1558,7 +1563,7 @@ async function continueLoop(run: GlobalAgentRun, runtime: GlobalAgentLoopRuntime
           const outcomeProgress = buildToolBatchOutcomeProgress([{ name: decision.tool.name, ok: true, output: result }], {
             target: decision.intent?.target_refs?.[0] || summarizeGlobalToolTarget(args),
           });
-          if (outcomeProgress) appendAssistantProgress({
+          if (outcomeProgress) recordAgentKeyProgress({
             scope: "global", scopeId: "global", exactSessionId: run.session_id,
             generation: Math.max(0, Number(run.resume_count || 0)),
             anchorMessageId: `gam_${String(run.id || "result")}_assistant`,
@@ -1567,7 +1572,7 @@ async function continueLoop(run: GlobalAgentRun, runtime: GlobalAgentLoopRuntime
             relatedToolCallIds: [signature], title: "全局 Agent",
           });
         }
-        if (!toolSucceeded && assistantProgressNarrationEnabled(progressConfig)) appendAssistantProgress({
+        if (!toolSucceeded && assistantProgressNarrationEnabled(progressConfig)) recordAgentKeyProgress({
           scope: "global", scopeId: "global", exactSessionId: run.session_id,
           generation: Math.max(0, Number(run.resume_count || 0)),
           anchorMessageId: `gam_${String(run.id || "result")}_assistant`,
@@ -1609,7 +1614,7 @@ async function continueLoop(run: GlobalAgentRun, runtime: GlobalAgentLoopRuntime
         recordGlobalAgentRuntimeOutput(run, { type: "tool_failed", tool: decision.tool.name, risk, duration_ms: step.duration_ms, error: step.error });
         markGlobalAgentToolTodo(run, decision.tool.name, "blocked", step.error);
         emit(runtime, { type: "tool_failed", tool: step.tool, error: step.error }, run);
-        if (assistantProgressNarrationEnabled(progressConfig)) appendAssistantProgress({
+        if (assistantProgressNarrationEnabled(progressConfig)) recordAgentKeyProgress({
           scope: "global", scopeId: "global", exactSessionId: run.session_id,
           generation: Math.max(0, Number(run.resume_count || 0)),
           anchorMessageId: `gam_${String(run.id || "result")}_assistant`,

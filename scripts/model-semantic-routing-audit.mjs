@@ -24,7 +24,7 @@ const workflow = read('backend/agents/workflow-decision.ts')
 checks.mainWorkflowUsesSemanticRuntime = workflow.includes('runSemanticDecision({')
   && workflow.includes('kind: "workflow"')
   && workflow.includes('semanticDecisionReceipt')
-  && workflow.includes('不能按关键词、正则或句子长度机械匹配')
+  && workflow.includes('Never classify by keyword, regex, message length')
 
 const projectIntent = read('backend/modules/projects/project-chat-intent.ts')
 const groupIntake = read('backend/modules/collaboration/collaboration-task-intake.ts')

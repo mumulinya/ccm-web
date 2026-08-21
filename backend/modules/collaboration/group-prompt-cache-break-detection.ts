@@ -4,6 +4,7 @@ import * as os from "os";
 import * as path from "path";
 import { withFileLock, writeJsonAtomic } from "../../core/atomic-json-file";
 import { verifyProviderNativeCompactExecutionReceipt } from "./provider-native-compact-execution-receipt";
+import { buildCcmProviderIdentityChecksum } from "../../system/ccm-context-accounting-v2";
 
 const ROOT = path.join(os.homedir(), ".cc-connect", "group-prompt-cache-break-detection");
 const SCHEMA = "ccm-group-prompt-cache-break-ledger-v1";
@@ -209,6 +210,8 @@ export function recordGroupPromptCacheState(input: any = {}) {
       group_session_id: groupSessionId,
       scope_id: `${groupId}--${groupSessionId}`,
       source: String(input.source || "group_main"),
+      context_measurement_schema: "ccm-context-measurement-v2",
+      provider_observed_context_includes_output: false,
       provider: String(input.provider || "anthropic").toLowerCase(),
       model: String(input.model || ""),
       system_hash: sha(stableValue(stripCacheControl(system)), 24),
@@ -479,15 +482,19 @@ export function recordGroupPromptCacheUsage(input: any = {}) {
     if (current.checksum_valid !== true) return { recorded: false, reason: "prompt_cache_ledger_fail_closed", ledger: current };
     const usage = input.usage || {};
     const provider = String(input.provider || "unknown").toLowerCase();
+    const protocol = String(input.protocol || input.format || "").toLowerCase();
+    const endpoint = String(input.endpoint || input.apiUrl || input.api_url || "").trim().replace(/\/+$/, "");
     const cacheRead = finite(usage.cacheReadInputTokens ?? usage.cache_read_input_tokens);
     const cacheCreation = finite(usage.cacheCreationInputTokens ?? usage.cache_creation_input_tokens);
     const directInput = finite(usage.directInputTokens ?? usage.direct_input_tokens);
+    const aggregateInput = finite(usage.inputTokens ?? usage.input_tokens ?? usage.prompt_tokens);
+    const inputIncludesCache = usage.inputTokensIncludesCache === true || usage.input_tokens_includes_cache === true;
     const output = finite(usage.outputTokens ?? usage.output_tokens);
     const estimatedContext = finite(input.estimatedContextTokens ?? input.estimated_context_tokens);
     const estimatedPayload = finite(input.estimatedPayloadTokens ?? input.estimated_payload_tokens ?? estimatedContext);
     const estimatedFixed = finite(input.estimatedFixedTokens ?? input.estimated_fixed_tokens);
     const modelVisiblePayload = input.modelVisiblePayload || input.model_visible_payload || null;
-    const observedContext = directInput + cacheCreation + cacheRead + output;
+    const observedContext = (aggregateInput || directInput) + (inputIncludesCache ? 0 : cacheCreation + cacheRead);
     const previous = current.previous_cache_read_tokens === null || current.previous_cache_read_tokens === undefined
       ? null
       : finite(current.previous_cache_read_tokens);
@@ -548,7 +555,10 @@ export function recordGroupPromptCacheUsage(input: any = {}) {
       group_session_id: groupSessionId,
       source: String(input.source || "group_main"),
       provider,
+      protocol,
+      endpoint,
       model,
+      provider_identity_checksum: String(input.providerIdentityChecksum || input.provider_identity_checksum || buildCcmProviderIdentityChecksum({ provider, protocol, endpoint, model })),
       call_number: Number(current.call_count || 0) + 1,
       baseline_generation: Math.max(0, Number(current.baseline_generation || 0)),
       previous_cache_read_tokens: previous,
@@ -565,7 +575,9 @@ export function recordGroupPromptCacheUsage(input: any = {}) {
         ? Object.fromEntries(Object.entries(modelVisiblePayload.tokenBreakdown).map(([key, value]) => [key, finite(value)]))
         : null,
       accounting_total_tokens: finite(modelVisiblePayload?.totalTokens || estimatedPayload),
+      predicted_next_request_tokens: finite(modelVisiblePayload?.predictedNextRequestTokens || modelVisiblePayload?.totalTokens || estimatedPayload),
       provider_observed_context_tokens: observedContext,
+      measurement_basis: String(input.measurementBasis || input.measurement_basis || (input.payloadChecksum ? "exact_payload_usage" : "local_payload_prediction")),
       positive_estimation_drift_tokens: Math.max(0, observedContext - estimatedContext),
       token_drop: tokenDrop,
       drop_ratio: Math.round(dropRatio * 10_000) / 10_000,

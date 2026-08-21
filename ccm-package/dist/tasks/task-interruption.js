@@ -39,6 +39,7 @@ exports.buildTaskInterruptionReceipt = buildTaskInterruptionReceipt;
 exports.interruptTaskExecution = interruptTaskExecution;
 exports.buildTaskRecoveryDecision = buildTaskRecoveryDecision;
 exports.resumeInterruptedTaskExecution = resumeInterruptedTaskExecution;
+exports.reconcileTaskInterruptionReceipt = reconcileTaskInterruptionReceipt;
 const crypto = __importStar(require("crypto"));
 const execution_kernel_1 = require("../agents/execution-kernel");
 const agent_sessions_resume_1 = require("./agent-sessions-resume");
@@ -114,7 +115,15 @@ function buildTaskInterruptionReceipt(input) {
         checkpoint: String(input.checkpoint || input.task?.acceptance_state || input.task?.status || "unknown").slice(0, 120),
         ...(input.resumeCheckpoint ? { resume_checkpoint: input.resumeCheckpoint } : {}),
         execution_attempt: Math.max(0, Number(input.task?.execution_attempt || input.task?.project_main_execution?.attempt || 0)),
+        generation: Math.max(0, Number(input.task?.generation || input.task?.project_session_generation || input.task?.agent_communication_generation || 0)),
+        plan_checksum: String(input.resumeCheckpoint?.planChecksum || input.task?.resume_checkpoint?.planChecksum || input.task?.workflow_meta?.project_main_plan?.checksum || input.task?.plan_checksum || ""),
+        contract_checksum: String(input.task?.plan_dispatch_contract?.contractChecksum || input.task?.workflow_meta?.plan_dispatch_contract?.contractChecksum || input.task?.contract_checksum || ""),
+        work_item_id: String(input.resumeCheckpoint?.workItemId || input.task?.work_item_id || input.task?.workItemId || ""),
         workspace_checksum: String(input.workspaceChecksum || input.task?.workspace_snapshot_checksum || input.task?.workspace_evidence?.checksum || ""),
+        completed_work_item_ids: [...new Set((input.resumeCheckpoint?.completedWorkItemIds || input.task?.resume_checkpoint?.completedWorkItemIds || []).map((value) => String(value || "").trim()).filter(Boolean))].slice(0, 200),
+        unresolved_tool_call_ids: [...new Set((input.unresolvedToolCallIds || []).map(value => String(value || "").trim()).filter(Boolean))].slice(0, 200),
+        changed_file_count: Math.max(0, Number(input.changedFileCount || 0)),
+        process_termination_proven: input.processTerminationProven !== false,
         task_agent_sessions: sessions,
         side_effect_state: sideEffectState,
         recoverable,
@@ -146,7 +155,7 @@ function buildTaskRecoveryDecision(task, receiptInput, options = {}) {
         receipt_valid: !!receipt && receipt.schema === "ccm-task-interruption-receipt-v1" && receipt.task_id === taskId && receipt.checksum === receiptChecksum({ ...receipt, checksum: undefined }),
         task_recoverable: receipt?.recoverable === true,
         side_effect_known: receipt?.side_effect_state !== "uncertain",
-        workspace_unchanged: !receipt?.workspace_checksum || !options.workspaceChecksum || receipt.workspace_checksum === options.workspaceChecksum,
+        workspace_unchanged: !!receipt?.workspace_checksum && !!options.workspaceChecksum && receipt.workspace_checksum === options.workspaceChecksum,
         authorization_valid: options.authorizationValid !== false,
         runtime_valid: options.runtimeValid !== false,
         native_identity_valid: Array.isArray(receipt?.task_agent_sessions) && receipt.task_agent_sessions.every(row => row.resume_mode !== "native" || !!row.native_session_id),
@@ -203,5 +212,29 @@ function resumeInterruptedTaskExecution(task, options = {}) {
     (0, execution_kernel_1.clearTaskCancellation)(taskId);
     const reopenedSessions = (0, agent_sessions_resume_1.reopenTaskAgentSessions)(taskId, "中断恢复：继续原任务和原生 Agent 会话");
     return { resumed: true, decision, reopenedSessions };
+}
+function reconcileTaskInterruptionReceipt(task, input) {
+    const receipt = task?.interruption_receipt;
+    if (!receipt || receipt.schema !== "ccm-task-interruption-receipt-v1")
+        throw new Error("任务没有可核对的中断现场");
+    const workspaceChecksum = String(input.workspaceChecksum || "").trim();
+    if (!workspaceChecksum)
+        throw new Error("当前工作区无法生成安全校验值");
+    if (input.action !== "adopt_current_changes")
+        throw new Error("不支持的中断现场处理方式");
+    const raw = {
+        ...receipt,
+        workspace_checksum: workspaceChecksum,
+        side_effect_state: "committed",
+        unresolved_tool_call_ids: [],
+        reconciliation: {
+            action: input.action,
+            actor: String(input.actor || "local-user").slice(0, 120),
+            reconciled_at: new Date().toISOString(),
+            previous_workspace_checksum: String(receipt.workspace_checksum || ""),
+        },
+    };
+    delete raw.checksum;
+    return { ...raw, checksum: receiptChecksum(raw) };
 }
 //# sourceMappingURL=task-interruption.js.map

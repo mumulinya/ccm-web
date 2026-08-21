@@ -44,7 +44,7 @@ exports.assistantProgressMilestoneChecksum = assistantProgressMilestoneChecksum;
 exports.assistantProgressBatchId = assistantProgressBatchId;
 exports.assistantProgressNarrationEnabled = assistantProgressNarrationEnabled;
 const crypto = __importStar(require("crypto"));
-exports.USER_VISIBLE_PROGRESS_MAX_CHARS = 120;
+exports.USER_VISIBLE_PROGRESS_MAX_CHARS = 240;
 const PROGRESS_KINDS = new Set([
     "before_tools", "key_finding", "direction_change", "blocker",
     "rework", "verification", "before_summary",

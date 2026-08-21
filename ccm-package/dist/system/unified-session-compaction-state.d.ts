@@ -40,8 +40,8 @@ export declare function buildUnifiedSessionCompactionStateV1(input: {
     contentStored: false;
     scope: string;
     boundaryGeneration: number;
-    strategy: "cc_two_stage";
     exactSessionId: string;
+    strategy: "cc_two_stage";
     stage: string;
     beforeTokens: number;
     afterTokens: number;

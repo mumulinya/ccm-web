@@ -228,6 +228,7 @@ export declare function runGroupMemoryModelCapacitySelfTest(): {
         model: any;
         contextWindow: number;
         maxOutputTokens: number;
+        windowSemantics: string;
         reservedOutputTokens: number;
         effectiveContextWindow: number;
         autoCompactBufferTokens: number;
@@ -251,6 +252,7 @@ export declare function runGroupMemoryModelCapacitySelfTest(): {
         model: any;
         contextWindow: number;
         maxOutputTokens: number;
+        windowSemantics: string;
         source: any;
         confidence: number;
         checkedAt: any;
@@ -274,6 +276,7 @@ export declare function runGroupMemoryModelCapacitySelfTest(): {
         model: any;
         contextWindow: number;
         maxOutputTokens: number;
+        windowSemantics: string;
         source: any;
         confidence: number;
         checkedAt: any;
@@ -291,6 +294,7 @@ export declare function runGroupMemoryModelCapacitySelfTest(): {
         provider: string;
         model: string;
         contextWindow: number;
+        windowSemantics: string;
         maxOutputTokens: number;
         source: string;
         confidence: number;
@@ -312,6 +316,7 @@ export declare function runGroupMemoryModelCapacitySelfTest(): {
             model: any;
             contextWindow: number;
             maxOutputTokens: number;
+            windowSemantics: string;
             reservedOutputTokens: number;
             effectiveContextWindow: number;
             autoCompactBufferTokens: number;
@@ -335,6 +340,7 @@ export declare function runGroupMemoryModelCapacitySelfTest(): {
             model: any;
             contextWindow: number;
             maxOutputTokens: number;
+            windowSemantics: string;
             source: any;
             confidence: number;
             checkedAt: any;
@@ -358,6 +364,7 @@ export declare function runGroupMemoryModelCapacitySelfTest(): {
             model: any;
             contextWindow: number;
             maxOutputTokens: number;
+            windowSemantics: string;
             source: any;
             confidence: number;
             checkedAt: any;
@@ -375,6 +382,7 @@ export declare function runGroupMemoryModelCapacitySelfTest(): {
             provider: string;
             model: string;
             contextWindow: number;
+            windowSemantics: string;
             maxOutputTokens: number;
             source: string;
             confidence: number;

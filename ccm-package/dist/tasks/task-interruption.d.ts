@@ -28,7 +28,21 @@ export type TaskInterruptionReceiptV1 = {
     resume_checkpoint?: TaskResumeCheckpointV1;
     recovery?: TaskRecoveryScheduleV1;
     execution_attempt: number;
+    generation: number;
+    plan_checksum: string;
+    contract_checksum: string;
+    work_item_id: string;
     workspace_checksum: string;
+    completed_work_item_ids: string[];
+    unresolved_tool_call_ids: string[];
+    changed_file_count: number;
+    process_termination_proven: boolean;
+    reconciliation?: {
+        action: "adopt_current_changes";
+        actor: string;
+        reconciled_at: string;
+        previous_workspace_checksum: string;
+    };
     task_agent_sessions: Array<{
         task_agent_session_id: string;
         native_session_id: string;
@@ -69,6 +83,8 @@ export declare function buildTaskInterruptionReceipt(input: {
     sideEffectState?: "none" | "committed" | "uncertain";
     workspaceChecksum?: string;
     resumeCheckpoint?: TaskResumeCheckpointV1;
+    unresolvedToolCallIds?: string[];
+    changedFileCount?: number;
     recovery?: TaskRecoveryScheduleV1;
     processTerminationProven?: boolean;
 }): {
@@ -76,16 +92,30 @@ export declare function buildTaskInterruptionReceipt(input: {
     version: 1;
     task_id: string;
     reason: string;
+    generation: number;
     recovery?: TaskRecoveryScheduleV1;
     recoverable: boolean;
     schema: "ccm-task-interruption-receipt-v1";
+    plan_checksum: string;
+    work_item_id: string;
     actor: string;
     receipt_id: string;
     reason_code: TaskInterruptionReason;
     checkpoint: string;
     resume_checkpoint?: TaskResumeCheckpointV1;
     execution_attempt: number;
+    contract_checksum: string;
     workspace_checksum: string;
+    completed_work_item_ids: string[];
+    unresolved_tool_call_ids: string[];
+    changed_file_count: number;
+    process_termination_proven: boolean;
+    reconciliation?: {
+        action: "adopt_current_changes";
+        actor: string;
+        reconciled_at: string;
+        previous_workspace_checksum: string;
+    };
     task_agent_sessions: Array<{
         task_agent_session_id: string;
         native_session_id: string;
@@ -104,16 +134,30 @@ export declare function interruptTaskExecution(input: Parameters<typeof buildTas
         version: 1;
         task_id: string;
         reason: string;
+        generation: number;
         recovery?: TaskRecoveryScheduleV1;
         recoverable: boolean;
         schema: "ccm-task-interruption-receipt-v1";
+        plan_checksum: string;
+        work_item_id: string;
         actor: string;
         receipt_id: string;
         reason_code: TaskInterruptionReason;
         checkpoint: string;
         resume_checkpoint?: TaskResumeCheckpointV1;
         execution_attempt: number;
+        contract_checksum: string;
         workspace_checksum: string;
+        completed_work_item_ids: string[];
+        unresolved_tool_call_ids: string[];
+        changed_file_count: number;
+        process_termination_proven: boolean;
+        reconciliation?: {
+            action: "adopt_current_changes";
+            actor: string;
+            reconciled_at: string;
+            previous_workspace_checksum: string;
+        };
         task_agent_sessions: Array<{
             task_agent_session_id: string;
             native_session_id: string;
@@ -145,4 +189,49 @@ export declare function resumeInterruptedTaskExecution(task: any, options?: Para
     resumed: boolean;
     decision: TaskRecoveryDecisionV1;
     reopenedSessions: import("./agent-sessions-shared").TaskAgentSession[];
+};
+export declare function reconcileTaskInterruptionReceipt(task: any, input: {
+    action: "adopt_current_changes";
+    workspaceChecksum: string;
+    actor?: string;
+}): {
+    checksum: string;
+    version: 1;
+    task_id: string;
+    reason: string;
+    generation: number;
+    recovery?: TaskRecoveryScheduleV1;
+    recoverable: boolean;
+    schema: "ccm-task-interruption-receipt-v1";
+    plan_checksum: string;
+    work_item_id: string;
+    actor: string;
+    receipt_id: string;
+    reason_code: TaskInterruptionReason;
+    checkpoint: string;
+    resume_checkpoint?: TaskResumeCheckpointV1;
+    execution_attempt: number;
+    contract_checksum: string;
+    workspace_checksum: string;
+    completed_work_item_ids: string[];
+    unresolved_tool_call_ids: string[];
+    changed_file_count: number;
+    process_termination_proven: boolean;
+    reconciliation?: {
+        action: "adopt_current_changes";
+        actor: string;
+        reconciled_at: string;
+        previous_workspace_checksum: string;
+    };
+    task_agent_sessions: Array<{
+        task_agent_session_id: string;
+        native_session_id: string;
+        agent_type: string;
+        project: string;
+        resume_mode: string;
+        turn_count: number;
+    }>;
+    side_effect_state: "none" | "committed" | "uncertain";
+    auto_resume_allowed: boolean;
+    interrupted_at: string;
 };

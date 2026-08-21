@@ -1,4 +1,5 @@
 import { ModelRetryProfileId, ModelCallRetryNotice } from "../../system/model-call-retry";
+export { normalizeOpenAiResponsesUrl } from "../../system/openai-responses-transport";
 export type LlmChatMessage = {
     role: string;
     content: any;
@@ -37,6 +38,12 @@ export type LlmCallOptions = {
     provider_context_cache?: any;
     onProviderContextCache?: (receipt: any) => void;
     onUsage?: (usage: LlmTokenUsage) => void;
+    onResponseMetadata?: (metadata: {
+        provider: string;
+        responseId: string;
+        model: string;
+        status: string;
+    }) => void;
     onDelta?: (delta: string) => void;
     retry?: boolean;
     retryAttempts?: number;
@@ -57,6 +64,7 @@ export declare function normalizeChatCompletionsUrl(apiUrl: string): string;
 export declare function normalizeAnthropicMessagesUrl(apiUrl: string): string;
 export declare function normalizeGeminiGenerateContentUrl(apiUrl: string, model: string, stream?: boolean): string;
 export declare function shouldUseAnthropic(config: any): boolean;
+export declare function shouldUseOpenAiResponses(config: any): boolean;
 export declare function shouldUseGemini(config: any): boolean;
 export declare function extractJsonObject(text: string): any;
 export declare function resolveLlmTimeoutMs(config: any, defaultTimeoutMs: number, callTimeoutMs?: number): number;

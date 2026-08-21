@@ -49,6 +49,7 @@ const project_runtime_1 = require("../projects/project-runtime");
 const api_access_control_1 = require("./api-access-control");
 const execution_kernel_1 = require("../../agents/execution-kernel");
 const task_interruption_1 = require("../../tasks/task-interruption");
+const task_recovery_orchestrator_1 = require("../../tasks/task-recovery-orchestrator");
 const reliability_ledger_1 = require("../../system/reliability-ledger");
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
@@ -203,7 +204,9 @@ function taskActionsForBlocker(task, phase) {
     if (blocker === "paused")
         return ["resume", "cancel"];
     if (blocker === "recovery_required")
-        return ["resume_interrupted", "cancel"];
+        return task?.recovery_preflight?.recoveryMode === "manual_reconciliation"
+            ? ["adopt_current_changes", "resume_interrupted", "cancel"]
+            : ["resume_interrupted", "cancel"];
     if (blocker === "needs_user")
         return ["supplement", "cancel"];
     return taskActions(task, phase);
@@ -589,6 +592,7 @@ async function executeWorkbenchTaskAction(taskId, payload, req, deps) {
         }
         else if (action === "interrupt") {
             deps.removeTaskFromQueues(taskId);
+            const interruptionWorkspace = (0, task_recovery_orchestrator_1.captureTaskRecoveryWorkspace)(task);
             const interrupted = (0, task_interruption_1.interruptTaskExecution)({
                 task,
                 reasonCode: "user_interrupt",
@@ -596,6 +600,8 @@ async function executeWorkbenchTaskAction(taskId, payload, req, deps) {
                 actor: `workbench:${principal.userId || "user"}`,
                 checkpoint: String(task.acceptance_state || task.status || "unknown"),
                 sideEffectState: "uncertain",
+                workspaceChecksum: interruptionWorkspace.checksum,
+                changedFileCount: interruptionWorkspace.changedFileCount,
             });
             const changed = (0, db_1.updateTaskByIdCas)(taskId, current => taskRevision(current) === taskRevision(task), current => ({
                 ...current,
@@ -615,29 +621,38 @@ async function executeWorkbenchTaskAction(taskId, payload, req, deps) {
             (0, reliability_ledger_1.releaseTaskLease)(taskId, "interrupted");
             result = { task: changed.task, interruption_receipt: interrupted.receipt };
         }
-        else if (action === "resume_interrupted") {
+        else if (action === "resume_interrupted" || action === "adopt_current_changes") {
             if (blocker !== "recovery_required")
                 throw Object.assign(new Error("当前任务不在可恢复中断状态"), { code: "recovery_gate_failed" });
-            const recovery = (0, task_interruption_1.resumeInterruptedTaskExecution)(task, { userRequested: true, authorizationValid: true, runtimeValid: true });
-            if (!recovery.resumed)
-                throw Object.assign(new Error(recovery.decision.reason), { code: "recovery_gate_failed" });
-            const changed = (0, db_1.updateTaskByIdCas)(taskId, current => taskRevision(current) === taskRevision(task), current => ({
-                ...current,
-                status: "pending",
-                acceptance_state: current.interruption_receipt?.checkpoint || "planned",
-                auto_execute: true,
-                paused: false,
-                is_paused: false,
-                recovery_pending: false,
-                recovery_decision: recovery.decision,
-                execution_attempt: Math.max(0, Number(current.execution_attempt || 0)) + 1,
-                resumed_at: new Date().toISOString(),
-                updated_at: new Date().toISOString(),
-                status_detail: "已恢复原任务和子 Agent 会话，等待继续执行",
-            }));
-            if (!changed.updated)
-                throw Object.assign(new Error("任务状态已经变化，请刷新后重试"), { code: "state_drift" });
-            result = { task: changed.task, queue_result: deps.enqueueTask(taskId, deps.ctx), recovery_decision: recovery.decision };
+            let workspace = (0, task_recovery_orchestrator_1.captureTaskRecoveryWorkspace)(task);
+            if (action === "adopt_current_changes") {
+                const reconciledReceipt = (0, task_interruption_1.reconcileTaskInterruptionReceipt)(task, { action: "adopt_current_changes", workspaceChecksum: workspace.checksum, actor: `workbench:${principal.userId || "user"}` });
+                const reconciled = (0, db_1.updateTaskByIdCas)(taskId, current => taskRevision(current) === taskRevision(task), current => ({
+                    ...current,
+                    interruption_receipt: reconciledReceipt,
+                    recovery_preflight: null,
+                    status_detail: "已采用当前工作区改动，正在重新执行恢复检查",
+                    updated_at: new Date().toISOString(),
+                }));
+                if (!reconciled.updated)
+                    throw Object.assign(new Error("任务状态已经变化，请刷新后重试"), { code: "state_drift" });
+                task = reconciled.task;
+                workspace = (0, task_recovery_orchestrator_1.captureTaskRecoveryWorkspace)(task);
+            }
+            const recovery = await (0, task_recovery_orchestrator_1.runTaskRecoveryOrchestrator)(task, {
+                scope: task.group_id ? "group" : task.project_session_id ? "project" : "global",
+                scopeId: String(task.group_id || task.target_project || "global"),
+                exactSessionId: String(task.group_session_id || task.project_session_id || task.origin_session_id || task.task_agent_session_id || task.id),
+                idempotencyKey: clientMessageId || `${taskId}:${task.interruption_receipt?.checksum || "resume"}`,
+                authorizationValid: true,
+                runtimeValid: true,
+                currentWorkspaceChecksum: workspace.checksum,
+                worktreeOwnershipValid: workspace.ownershipValid,
+                enqueue: id => deps.enqueueTask(id, deps.ctx),
+            });
+            if (!recovery.success)
+                throw Object.assign(new Error(recovery.preflight?.blockers?.join("、") || "恢复安全检查未通过"), { code: "recovery_gate_failed", recovery_preflight: recovery.preflight });
+            result = { task: recovery.task, queue_result: recovery.queueResult, recovery_decision: recovery.decision, recovery_preflight: recovery.preflight, recovery_transaction: recovery.transaction };
         }
         else if (action === "retry") {
             if (blocker !== "failed")

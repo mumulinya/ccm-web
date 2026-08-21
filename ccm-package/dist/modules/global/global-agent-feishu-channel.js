@@ -419,7 +419,7 @@ function createGlobalAgentFeishuChannel(deps) {
         const historyBeforeUser = getGlobalAgentConversationMessages(conversationId);
         const explicitRouteChoice = String(options.resolvedRoute || "").trim();
         const explicitCandidateTaskId = String(options.resolvedCandidateTaskId || "").trim();
-        const recoverableCandidates = (0, conversation_message_routing_1.findRecoverableConversationTasks)({ scope: "global", scopeId: "global", exactSessionId: conversationId });
+        const recoverableCandidates = (0, conversation_message_routing_1.findConversationTaskCandidates)({ scope: "feishu", scopeId: "global", exactSessionId: conversationId });
         const explicitCandidate = explicitRouteChoice === "continue_original"
             ? recoverableCandidates.find((item) => String(item?.id || "") === explicitCandidateTaskId)
             : null;
@@ -577,11 +577,19 @@ function createGlobalAgentFeishuChannel(deps) {
                         }
                         if (explicitRouteChoice === "continue_original") {
                             workflowDecision.continuationKind = String(workflowDecision.continuationKind || "supplement") === "revise_goal" ? "revise_goal" : "supplement";
+                            (0, conversation_message_routing_1.bindConversationRouteToWorkflowDecision)(workflowDecision, {
+                                routeKind: workflowDecision.continuationKind === "revise_goal" ? "revise_existing_task" : "resume_existing_task",
+                                exactSessionId: conversationId,
+                                scope: "feishu",
+                            }, explicitCandidate, "explicit_user_choice");
                             return;
                         }
-                        const route = (0, conversation_message_routing_1.decideConversationMessageRoute)({ workflowDecision, candidates: recoverableCandidates });
+                        const route = (0, conversation_message_routing_1.decideConversationMessageRoute)({ workflowDecision, candidates: recoverableCandidates, exactSessionId: conversationId, scope: "feishu" });
                         if (route.decision === "needs_user") {
                             throw Object.assign(new Error(route.reason), { code: "CONVERSATION_ROUTE_REQUIRED", route });
+                        }
+                        if (route.candidate && ["resume_task", "revise_task"].includes(route.decision)) {
+                            (0, conversation_message_routing_1.bindConversationRouteToWorkflowDecision)(workflowDecision, route, route.candidate, "session_anchor");
                         }
                     },
                     onEvent: onFeishuRuntimeEvent,
@@ -643,17 +651,33 @@ function createGlobalAgentFeishuChannel(deps) {
                         revision: currentTurn.revision,
                         routing: {
                             candidateTaskId: String(error?.route?.candidate?.id || recoverableCandidates[0]?.id || ""),
+                            candidateTaskIds: error?.route?.candidateTaskIds || recoverableCandidates.map((item) => String(item?.id || "")).filter(Boolean),
+                            candidateSummaries: error?.route?.candidateSummaries || recoverableCandidates.slice(0, 6).map(conversation_message_routing_1.buildRecoverableTaskSummary).filter(Boolean),
+                            routeKind: error?.route?.routeKind || "needs_user",
+                            activeTaskId: error?.route?.activeTaskId || "",
+                            exactSessionId: conversationId,
+                            scope: "feishu",
+                            confidenceBand: error?.route?.confidenceBand || "low",
+                            continuationKind: error?.route?.continuationKind || "supplement",
                             confidence: Number(error?.route?.confidence || 0),
                             reason: String(error?.route?.reason || (modelCouldNotRoute ? "主 Agent 暂时无法可靠判断这条消息是否续接原任务，请选择处理方式" : error?.message) || "需要确认消息处理方式"),
                         },
                     });
+                    const routeCandidates = Array.isArray(routed.routing?.candidateSummaries)
+                        ? routed.routing.candidateSummaries
+                        : [];
+                    const candidateLines = routeCandidates.length > 1
+                        ? routeCandidates.map((candidate) => `- ${candidate.title || candidate.taskId}（${candidate.status || candidate.candidateKind || "待处理"}）\n  继续任务 ${candidate.taskId}`)
+                        : [];
                     const markdown = [
                         "这条消息可能与刚才的任务有关。",
                         routed.routing?.reason || "请确认如何处理这条消息。",
-                        routed.routing?.candidateTaskId ? "1. 继续原任务" : "1. 继续原任务（当前不可用）",
+                        routeCandidates.length > 1
+                            ? `可续接任务：\n${candidateLines.join("\n")}`
+                            : routed.routing?.candidateTaskId ? "1. 继续原任务" : "1. 继续原任务（当前不可用）",
                         "2. 作为新任务",
                         "3. 仅回答问题",
-                        "请直接回复 1、2 或 3。",
+                        routeCandidates.length > 1 ? "请回复“继续任务 任务ID”，或回复 2、3。" : "请直接回复 1、2 或 3。",
                     ].join("\n");
                     if (sendReport)
                         await sendFeishuConversationReply({ conversationId, title: "全局 Agent · 请选择处理方式", markdown, traceId, stage: "conversation_route_required", dedupeSuffix: `route:${routed.id}:${routed.revision}` });
@@ -805,10 +829,23 @@ function createGlobalAgentFeishuChannel(deps) {
         let resolvedRoute = "";
         let resolvedCandidateTaskId = "";
         let resolvedConversationTurn = null;
-        if (command.kind === "normal" && /^[123]$/.test(command.message)) {
+        const explicitFeishuCandidate = command.kind === "normal"
+            ? String(command.message || "").match(/^继续任务\s+([^\s]+)$/i)?.[1] || ""
+            : "";
+        if (command.kind === "normal" && (/^[123]$/.test(command.message) || explicitFeishuCandidate)) {
             const pendingRoute = conversationTurnControl.listInternal({ scope: "feishu", conversation_id: conversationId, statuses: "needs_route", limit: 20 }).turns.at(-1);
             if (pendingRoute?.routing) {
-                const choice = command.message === "1" ? "continue_original" : command.message === "2" ? "start_new_task" : "answer_only";
+                const choice = (explicitFeishuCandidate || command.message === "1") ? "continue_original" : command.message === "2" ? "start_new_task" : "answer_only";
+                const candidateTaskIds = Array.isArray(pendingRoute.routing.candidateTaskIds)
+                    ? pendingRoute.routing.candidateTaskIds.map(String).filter(Boolean)
+                    : [String(pendingRoute.routing.candidateTaskId || "")].filter(Boolean);
+                const selectedCandidateTaskId = explicitFeishuCandidate || String(pendingRoute.routing.candidateTaskId || "");
+                if (choice === "continue_original" && !explicitFeishuCandidate && candidateTaskIds.length > 1) {
+                    const reply = "当前有多个可续接任务，请回复“继续任务 任务ID”明确选择；也可以回复 2 作为新任务，或回复 3 仅回答问题。";
+                    if (options.sendReport !== false)
+                        await sendFeishuConversationReply({ conversationId, title: "全局 Agent · 请选择具体任务", markdown: reply, traceId: options.traceId, dedupeSuffix: `route-multiple:${pendingRoute.id}:${pendingRoute.revision}` });
+                    return { reply, route_required: true, turn: pendingRoute, report_sent: options.sendReport !== false };
+                }
                 if (choice === "continue_original" && !pendingRoute.routing.candidateTaskId) {
                     const reply = "当前没有可安全恢复的原任务，请回复 2 作为新任务，或回复 3 仅回答问题。";
                     if (options.sendReport !== false)
@@ -820,6 +857,7 @@ function createGlobalAgentFeishuChannel(deps) {
                     revision: pendingRoute.revision,
                     choice,
                     bindingChecksum: pendingRoute.routing.bindingChecksum,
+                    candidateTaskId: selectedCandidateTaskId,
                 });
                 command = { kind: "normal", message: resolved.message };
                 resolvedRoute = choice;

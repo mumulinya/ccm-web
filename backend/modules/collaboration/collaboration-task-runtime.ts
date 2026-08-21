@@ -327,7 +327,7 @@ import {
   recordTaskAgentSessionTurn,
   reopenTaskAgentSessions,
 } from "../../tasks/agent-sessions";
-import { resumeInterruptedTaskExecution } from "../../tasks/task-interruption";
+import { captureTaskRecoveryWorkspace, runTaskRecoveryOrchestrator } from "../../tasks/task-recovery-orchestrator";
 
 import {
   bindTaskAgentInvocationContext,
@@ -782,7 +782,7 @@ export function resumeTaskQueues(ctx: CollabCtx, options: any = {}) {
       const bridgeGeneration = Math.max(1, Number(task.agent_communication_generation || task.generation || 0) + 1);
       const scope = task.group_id ? "group" : task.global_mission_id ? "global" : "project";
       const scopeId = String(task.group_id || task.global_mission_id || task.target_project || task.id);
-      const exactSessionId = String(task.group_session_id || task.groupSessionId || task.project_session_id || task.projectSessionId || task.task_agent_session_id || task.id);
+      const exactSessionId = String(task.execution_session_id || task.active_execution_session_id || task.group_session_id || task.groupSessionId || task.project_session_id || task.projectSessionId || task.task_agent_session_id || task.id);
       const bridge: any = bridgeLegacyAgentCommunication({
         taskId: task.id,
         workItemId: String(task.work_item_id || task.workItemId || task.id),
@@ -811,16 +811,37 @@ export function resumeTaskQueues(ctx: CollabCtx, options: any = {}) {
     }
 
     const traceId = ensureTraceId(task.trace_id, "task");
-    if (task?.interruption_receipt?.schema === "ccm-task-interruption-receipt-v1") {
-      const recoveredExecution = resumeInterruptedTaskExecution(task, {
-        userRequested: forceAuto,
-        authorizationValid: recoveryDecision.authorization_preserved,
+    const requiresInterruptedRecovery = task?.interruption_receipt?.schema === "ccm-task-interruption-receipt-v1"
+      && (task?.recovery_pending === true
+        || ["recovery_required", "recovery_validating"].includes(String(task?.acceptance_state || ""))
+        || ["validating", "rolled_back"].includes(String(task?.recovery_transaction?.status || "")));
+    if (requiresInterruptedRecovery) {
+      const workspace = captureTaskRecoveryWorkspace(task);
+      const recoveredExecution = runTaskRecoveryOrchestrator(task, {
+        scope: task.group_id ? "group" : task.global_mission_id ? "global" : "project",
+        scopeId: String(task.group_id || task.global_mission_id || task.target_project || "global"),
+        exactSessionId: String(task.execution_session_id || task.active_execution_session_id || task.group_session_id || task.groupSessionId || task.project_session_id || task.projectSessionId || task.task_agent_session_id || task.id),
+        idempotencyKey: `startup:${task.id}:${task.interruption_receipt.checksum}`,
+        authorizationValid: recoveryDecision.authorization_preserved === true,
         runtimeValid: true,
+        currentWorkspaceChecksum: workspace.checksum,
+        worktreeOwnershipValid: workspace.ownershipValid,
+        enqueue: id => enqueueTask(id, ctx),
       });
-      if (!recoveredExecution.resumed) {
-        results.push({ task_id: task.id, queued: false, manual_recovery_required: true, reason_code: recoveredExecution.decision.reason_code, message: recoveredExecution.decision.reason });
+      if (!recoveredExecution.success) {
+        results.push({ task_id: task.id, queued: false, manual_recovery_required: true, reason_code: recoveredExecution.preflight?.blockers?.[0] || "recovery_preflight_failed", message: "恢复前需要核对中断现场" });
         continue;
       }
+      appendTaskTimelineEvent(task.id, {
+        type: "startup_auto_recovery",
+        title: `服务重启后已恢复第 ${recoveredExecution.preflight.nextAttempt} 次执行`,
+        detail: "已重新核对权限、工作区、Agent 会话和未完成工具回合。",
+        status: "active",
+        phase: "planning",
+        data: { recovery_mode: recoveredExecution.preflight.recoveryMode, transaction_checksum: recoveredExecution.transaction.checksum },
+      });
+      results.push({ task_id: task.id, ...(recoveredExecution.queueResult || { queued: true }), auto_recovered: true, authorization_preserved: true, reason_code: recoveryDecision.reason_code });
+      continue;
     }
     const recoveryLease = acquireTaskLease(task.id, traceId, 45_000);
     if (!recoveryLease.acquired) {

@@ -40,6 +40,7 @@ exports.inspectTaskAgentFinalDispatchReactiveCompactCircuitBreaker = inspectTask
 exports.recordTaskAgentFinalDispatchReactiveCompactCircuitOutcome = recordTaskAgentFinalDispatchReactiveCompactCircuitOutcome;
 exports.advanceTaskAgentSession = advanceTaskAgentSession;
 exports.reopenTaskAgentSessions = reopenTaskAgentSessions;
+exports.activateTaskAgentSessionsForRecovery = activateTaskAgentSessionsForRecovery;
 exports.getTaskAgentSessionOptions = getTaskAgentSessionOptions;
 exports.getTaskAgentSessionContinuity = getTaskAgentSessionContinuity;
 exports.listTaskAgentSessions = listTaskAgentSessions;
@@ -395,6 +396,97 @@ function reopenTaskAgentSessions(taskId, reason = "用户在同一任务中继�
         if (reopened.length)
             (0, agent_sessions_shared_1.saveStore)(store);
         return reopened;
+    });
+}
+/**
+ * Activates only the latest session in each execution lane after a recovery
+ * transaction has passed its task CAS and safety preflight. Native sessions
+ * keep their provider conversation identity. Scratchpad or unverifiable
+ * native sessions are replaced with a fresh CCM session so the provider can
+ * rehydrate from the signed work packet instead of pretending to resume.
+ */
+function activateTaskAgentSessionsForRecovery(taskId, reason = "中断恢复：重新进入执行") {
+    const id = String(taskId || "").trim();
+    if (!id)
+        return { mode: "rehydrated_attempt", sessions: [], reopenedSessionIds: [], replacedSessionIds: [] };
+    return (0, agent_sessions_shared_1.withTaskAgentSessionStoreLock)(() => {
+        const store = (0, agent_sessions_shared_1.loadStore)();
+        const now = new Date().toISOString();
+        const latestByLane = new Map();
+        for (const session of store.sessions) {
+            if (session.taskId !== id && session.scopeId !== id)
+                continue;
+            const key = `${session.groupId}::${session.project}::${session.agentType}`;
+            const previous = latestByLane.get(key);
+            if (!previous || String(session.lastUsedAt || session.createdAt) > String(previous.lastUsedAt || previous.createdAt))
+                latestByLane.set(key, session);
+        }
+        const reopenedSessionIds = [];
+        const replacedSessionIds = [];
+        const activated = [];
+        for (const current of latestByLane.values()) {
+            const runtime = (0, runtime_1.getAgentRuntime)(current.agentType);
+            const providerContractCompatible = !current.pendingProviderContractId
+                || (!!current.providerContractId && current.pendingProviderContractId === current.providerContractId);
+            const nativeReady = current.resumeMode === "native"
+                && runtime.capabilities.sessionResume === true
+                && !!String(current.nativeSessionId || "").trim()
+                && providerContractCompatible;
+            if (nativeReady) {
+                const index = store.sessions.findIndex(item => item.id === current.id);
+                const next = {
+                    ...current,
+                    status: "open",
+                    closedAt: "",
+                    closeReason: "",
+                    suspendedAt: "",
+                    suspendReason: "",
+                    lastUsedAt: now,
+                    lastError: reason,
+                };
+                store.sessions[index] = next;
+                activated.push(next);
+                reopenedSessionIds.push(next.id);
+                continue;
+            }
+            const runtimeId = (0, runtime_1.normalizeAgentRuntimeId)(current.agentType);
+            const replacement = {
+                ...current,
+                id: `tas_${Date.now().toString(36)}_${crypto.randomBytes(3).toString("hex")}`,
+                nativeSessionId: (0, runtime_1.getAgentRuntime)(runtimeId).capabilities.sessionResume ? (0, agent_sessions_shared_1.createNativeSessionId)(runtimeId) : "",
+                resumeMode: (0, runtime_1.getAgentRuntime)(runtimeId).capabilities.sessionResume ? "native" : "scratchpad",
+                status: "open",
+                turnCount: 0,
+                lastTurnSucceeded: null,
+                createdAt: now,
+                lastUsedAt: now,
+                closedAt: "",
+                closeReason: "",
+                suspendedAt: "",
+                suspendReason: "",
+                nativeCaptureFailures: 0,
+                nativeRecoveryAttempts: Number(current.nativeRecoveryAttempts || 0) + 1,
+                nativeSessionHistory: [...(current.nativeSessionHistory || []), ...(current.nativeSessionId ? [current.nativeSessionId] : [])].slice(-20),
+                lastNativeRecoveryAt: now,
+                lastError: `${reason}；Provider 会话不可验证，已从签名工作单重建`,
+                continuityGeneration: Number(current.continuityGeneration || 0) + 1,
+                continuityMode: "fresh",
+                continuitySourceSessionId: current.id,
+                continuityBranchId: "",
+                pendingProviderContractId: "",
+            };
+            store.sessions.push(replacement);
+            activated.push(replacement);
+            replacedSessionIds.push(current.id);
+        }
+        if (activated.length)
+            (0, agent_sessions_shared_1.saveStore)(store);
+        return {
+            mode: replacedSessionIds.length ? "rehydrated_attempt" : "native_session",
+            sessions: activated,
+            reopenedSessionIds,
+            replacedSessionIds,
+        };
     });
 }
 function getTaskAgentSessionOptions(session) {

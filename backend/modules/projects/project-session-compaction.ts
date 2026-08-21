@@ -2,7 +2,6 @@ import * as crypto from "crypto";
 import * as fs from "fs";
 import * as path from "path";
 import { CCM_DIR, SESSIONS_DIR } from "../../core/utils";
-import { callCompactionModel } from "../collaboration/group-compaction-engine";
 import { callUnifiedCompactionModel } from "../../system/unified-session-compaction-model";
 import { loadOrchestratorConfig } from "../collaboration/group-orchestrator-config";
 import { resolveMainAgentContextPolicy } from "../../tools/main-agent-context-policy";
@@ -23,6 +22,7 @@ import { resolveContainedPath, validateProjectName, validateSessionId } from "./
 import {
   buildSessionPostCompactGate,
   buildModelVisiblePayloadSnapshot,
+  isModelVisiblePayloadSnapshot,
   modelVisibleFixedTokens,
   modelVisiblePayloadAccounting,
   buildSessionCompactionBoundaryMarker,
@@ -51,6 +51,7 @@ import {
 import { buildUnifiedSessionModelContextProjection, resolveSessionModelMicroCompactPolicy } from "../../system/session-model-context";
 import { buildUnifiedCompactionReceipt, buildUnifiedSessionCompactionStateV1, buildUnifiedRecoveryContext, orchestrateUnifiedCompaction, createUnifiedSessionCompactionEngine } from "../../system/unified-session-compaction";
 import { createUnifiedScopeAdapter } from "../../system/unified-session-compaction-adapters";
+import { buildCcmProviderIdentityChecksum } from "../../system/ccm-context-accounting-v2";
 import type { UnifiedCompactionResult } from "../../system/unified-session-compaction-types";
 import { unifiedSummaryChecksum } from "../../system/unified-session-compaction-summary";
 import { evaluateSessionSummaryQuality } from "../../system/session-summary-quality-gate";
@@ -320,12 +321,16 @@ export function appendProjectSessionExecutionEvent(projectInput: string, project
 
 function projectCompactionState(data: any, project: string, projectSessionId: string) {
   const unified = data?.unifiedSessionCompaction || null;
-  if (!unified || unified.schema !== "ccm-unified-session-compaction-state-v1") {
-    return normalizeSessionCompactionState({}, {
-      scope: "project",
-      sessionId: `${project}:${projectSessionId}`,
-    });
-  }
+  if (!unified || unified.schema !== "ccm-unified-session-compaction-state-v1") return {
+    schema: "ccm-unified-session-compaction-state-v1",
+    scope: "project",
+    exactSessionId: `${project}:${projectSessionId}`,
+    activeSummary: null,
+    boundaryGeneration: 0,
+    summarizedMessageCount: 0,
+    preservedRecentMessageIds: [],
+    latestProviderUsage: null,
+  };
   return {
     ...unified,
     activeSummary: data?.unifiedSessionSummary || null,
@@ -383,9 +388,14 @@ export function recordProjectSessionProviderUsage(project: string, projectSessio
   const modelVisibleMessages = projectModelTimeline(data, visibleMessages);
   const currentRequest = pendingProjectRequest(visibleMessages, input.currentRequest || input.current_request);
   const suppliedPayload = input.modelVisiblePayload || input.model_visible_payload || null;
-  const payload = suppliedPayload?.schema === "ccm-model-visible-payload-snapshot-v1" ? suppliedPayload : buildModelVisiblePayloadSnapshot({
+  const payload = isModelVisiblePayloadSnapshot(suppliedPayload) ? suppliedPayload : buildModelVisiblePayloadSnapshot({
     scope: "project",
     sessionId: `${safeProject}:${safeSessionId}`,
+    exactSessionId: safeSessionId,
+    provider: String(input.provider || ""),
+    model: String(input.model || ""),
+    protocol: String(input.protocol || input.format || ""),
+    modelConfig: input.modelConfig || { provider: input.provider, model: input.model, format: input.protocol || input.format },
     system: input.fixedContext || input.fixed_context || null,
     tools: input.tools || null,
     activeSummary: state.activeSummary || null,
@@ -399,6 +409,7 @@ export function recordProjectSessionProviderUsage(project: string, projectSessio
     ...(input || {}),
     scope: "project",
     sessionId: `${safeProject}:${safeSessionId}`,
+    providerIdentityChecksum: input.providerIdentityChecksum || buildCcmProviderIdentityChecksum({ provider: input.provider, model: input.model, protocol: input.protocol || input.format, endpoint: input.endpoint || input.apiUrl }),
     boundaryGeneration: state.boundaryGeneration,
     payloadChecksum: input.payloadChecksum || input.payload_checksum || payload.payloadChecksum,
     fixedContextChecksum: input.fixedContextChecksum || input.fixed_context_checksum || payload.fixedContextChecksum,
@@ -415,6 +426,8 @@ export function recordProjectSessionProviderUsage(project: string, projectSessio
     latestProviderUsage: measurementUsage,
     provider: String(measurementUsage?.provider || ""),
     model: String(measurementUsage?.model || ""),
+    protocol: String(measurementUsage?.protocol || input.protocol || input.format || ""),
+    endpoint: String(measurementUsage?.endpoint || input.endpoint || input.apiUrl || ""),
     generation: Number(measurementUsage?.generation || 0),
     boundaryGeneration: state.boundaryGeneration,
     modelVisiblePayload: payload,
@@ -431,15 +444,12 @@ export function recordProjectSessionProviderUsage(project: string, projectSessio
     recoveryContextTokens: payload.tokenBreakdown.recoveryContext,
     hookResultTokens: payload.tokenBreakdown.hookResults,
   };
-  data.compaction = {
-    ...(data.compaction || {}),
-    latest_provider_usage: measurementUsage || null,
-    latestProviderUsage: measurementUsage || null,
-    token_measurement: tokenMeasurement,
+  data.unifiedSessionCompaction = {
+    ...data.unifiedSessionCompaction,
+    ...nextState,
+    providerUsage: measurementUsage || null,
     tokenMeasurement,
-    model_visible_payload: accounting,
     modelVisiblePayload: accounting,
-    v2: nextState,
   };
   data.updated_at = new Date().toISOString();
   persistSession(safeProject, safeSessionId, data);
@@ -452,91 +462,12 @@ export function scheduleProjectSessionMemoryExtraction(project: string, projectS
   const file = sessionFile(safeProject, safeSessionId);
   if (!fs.existsSync(file)) return { scheduled: false, reason: "session_missing" };
   const data = JSON.parse(fs.readFileSync(file, "utf8"));
-  const history = Array.isArray(data.history) ? data.history.filter((message: any) => ["user", "assistant"].includes(String(message?.role || ""))) : [];
-  const state = projectCompactionState(data, safeProject, safeSessionId);
-  const cadence = evaluateSessionMemoryCadence(history, state.sessionMemoryState || {});
-  if (!cadence.shouldExtract) return { scheduled: false, reason: cadence.reason, cadence };
-  const startIndex = Math.max(0, state.lastCompactedIndex + 1);
-  const visibleTimeline = history.slice(startIndex);
-  if (!visibleTimeline.length) return { scheduled: false, reason: "no_messages" };
-  const timeline = projectModelTimeline(data, visibleTimeline);
-  const reference = referenceSummary(timeline);
-  const sourceMessageIds = reference.sourceMessageIds;
-  const config = loadOrchestratorConfig();
-  const system = [
-    "你是 CCM 项目会话 Session Memory 提取器。只输出 JSON，不要 Markdown，不得编造。",
-    "必须保留授权、决定、未完成事项、文件路径和 sourceMessageIds。",
-  ].join("\n");
-  const user = JSON.stringify({
-    project: safeProject,
-    projectSessionId: safeSessionId,
-    previousSummary: state.sessionMemoryState?.summary || state.activeSummary || null,
-    preservationReference: reference,
-    sourceMessageIds,
-    timeline,
+  const promise = compactProjectSessionWithModel(safeProject, safeSessionId, {
+    reason: "automatic",
+    modelCall: options.modelCall,
   });
-  const identity = {
-    boundaryGeneration: state.boundaryGeneration,
-    lastMessageId: String(history.at(-1)?.id || ""),
-    transcriptChecksum: sessionCompactionChecksum([
-      ...history.map((message: any) => [message.id, message.role, message.content]),
-      ...projectExecutionEvents(data).map(message => [message.id, message.type, message.toolCallId, message.payload]),
-    ]),
-    cadence,
-  };
-  const invoke = options.modelCall || ((request: any) => callCompactionModel(config, request.system, request.user, request.maxOutputTokens));
-  const scheduled = scheduleSessionMemoryExtraction({
-    scope: "project",
-    sessionId: `${safeProject}:${safeSessionId}`,
-    identity,
-    extract: () => invoke({ system, user, maxOutputTokens: MODEL_MAX_OUTPUT_TOKENS, sessionMemory: true }),
-    commit: async (raw, expected) => {
-      const latest = JSON.parse(fs.readFileSync(file, "utf8"));
-      const latestHistory = Array.isArray(latest.history) ? latest.history.filter((message: any) => ["user", "assistant"].includes(String(message?.role || ""))) : [];
-      const latestState = projectCompactionState(latest, safeProject, safeSessionId);
-      if (latestState.boundaryGeneration !== expected.boundaryGeneration
-        || String(latestHistory.at(-1)?.id || "") !== expected.lastMessageId
-        || sessionCompactionChecksum([
-          ...latestHistory.map((message: any) => [message.id, message.role, message.content]),
-          ...projectExecutionEvents(latest).map(message => [message.id, message.type, message.toolCallId, message.payload]),
-        ]) !== expected.transcriptChecksum) {
-        return { committed: false, reason: "stale_identity" };
-      }
-      const candidate = raw?.summary || raw;
-      const validation = validateSummary(bindTrustedProjectSourceBoundary(candidate, sourceMessageIds), reference, sourceMessageIds, {
-        sessionId: `${safeProject}:${safeSessionId}`,
-        sourceMessages: history,
-        previousSummary: state.activeSummary,
-      });
-      if (!validation.valid) throw new Error(`项目 Session Memory 校验失败：${validation.issues.join(", ")}`);
-      const summary = normalizeSummary(candidate, sourceMessageIds);
-      const sessionMemoryState = buildSessionMemoryState({
-        scope: "project",
-        sessionId: `${safeProject}:${safeSessionId}`,
-        summary,
-        cadence,
-        provider: raw?.provider,
-        model: raw?.model || config.model,
-      });
-      latest.compaction = {
-        ...(latest.compaction || {}),
-        session_memory_state: sessionMemoryState,
-        session_memory_extraction: { status: "committed", startedAt: scheduled.startedAt, completedAt: new Date().toISOString() },
-        v2: { ...latestState, sessionMemoryState, sessionMemoryExtraction: { status: "committed", startedAt: scheduled.startedAt, completedAt: new Date().toISOString() } },
-      };
-      persistSession(safeProject, safeSessionId, latest);
-      return { committed: true, sessionMemoryState };
-    },
-  });
-  if (scheduled.scheduled) {
-    data.compaction = {
-      ...(data.compaction || {}),
-      session_memory_extraction: { status: "in_flight", startedAt: scheduled.startedAt, identity },
-      v2: { ...state, sessionMemoryExtraction: { status: "in_flight", startedAt: scheduled.startedAt, identity } },
-    };
-    persistSession(safeProject, safeSessionId, data);
-  }
-  return { ...scheduled, cadence };
+  void promise.catch(() => undefined);
+  return { scheduled: true, unified: true, promise };
 }
 
 function referenceSummary(messages: any[]) {
@@ -744,22 +675,13 @@ export function buildProjectSessionModelContextProjection(
     summaryChecksum: canonicalSummary ? summaryChecksum(summary) : "",
     boundaryGeneration: Number(state.boundaryGeneration || 0),
     summarizedThroughIndex: Number(state.lastCompactedIndex || -1),
-    lastSummarizedMessageId: String(state.sessionMemoryState?.lastExtractedMessageId || ""),
+    lastSummarizedMessageId: String(state.summarizedThroughMessageId || ""),
     currentRequest: options.currentRequest,
     microCompact: resolveSessionModelMicroCompactPolicy(config, {
       contextTokens: Number(state.tokenMeasurement?.activeTokens || 0),
     pressureThresholdTokens: Number(state.autoCompactThreshold || data.compaction?.auto_compact_threshold || 0),
     }),
   });
-  if (options.persistMicroCompactReceipt === true) {
-    data.compaction = {
-      ...(data.compaction || {}),
-      micro_compact_receipt: unified.microCompact,
-      tool_result_content_replacement_receipt: unified.contentReplacement,
-    };
-    data.updated_at = new Date().toISOString();
-    persistSession(project, projectSessionId, data);
-  }
   return {
     ...unified,
     schema: "ccm-project-session-model-context-v1",

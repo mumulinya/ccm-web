@@ -42,8 +42,8 @@ assert.equal(projectScope.autoCompactThreshold, 0);
 assert.equal(projectScope.longTermMemory.activeCount, 1);
 assert.equal(projectScope.longTermMemory.taskHistoryCount, 1);
 assert.equal(projectScope.longTermMemory.writePolicy, "accepted_delivery_only");
-assert.equal(projectScope.tokenSource, "project_long_term_injection_estimate");
-assert.ok(projectScope.currentTokens > 0);
+assert.equal(projectScope.tokenSource, "unavailable");
+assert.equal(projectScope.currentTokens, 0);
 
 const projectGroups = memoryCenter.collectItems("project", "project-memory-v4-selftest", {
   durableMemories: [{ id: "constraint_1", type: "constraint", content: "接口必须向后兼容", status: "active" }],
@@ -57,8 +57,8 @@ assert.deepEqual(projectGroups.map(group => group.type), ["durableMemories"]);
 assert.equal(projectGroups[0].items[0].text, "接口必须向后兼容");
 
 const frontend = fs.readFileSync(path.join(root, "frontend", "src", "components", "knowledge", "MemoryCenterPanel.vue"), "utf8");
-assert.match(frontend, /实际注入估算/);
-assert.match(frontend, /验收后提交/);
+assert.match(frontend, /需选择精确会话/);
+assert.match(frontend, /验收通过后提交/);
 assert.match(frontend, /longTermMemory\?\.activeCount/);
 
 console.log(JSON.stringify({

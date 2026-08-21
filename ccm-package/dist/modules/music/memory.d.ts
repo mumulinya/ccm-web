@@ -71,9 +71,15 @@ export declare function buildMusicAgentModelContext(currentRequest?: string): {
     modelVisiblePayload: import("../../system/session-compaction-core").ModelVisiblePayloadSnapshot;
     tokenMeasurement: {
         schema: string;
+        accountingSchema: string;
+        source: string;
         method: string;
         activeTokens: any;
         providerObservedTokens: number;
+        currentInputTokens: number;
+        outputTokens: number;
+        precision: string;
+        measurementBasis: string;
         estimatedTokensAfterUsage: any;
         estimatedSummaryTokens: number;
         estimatedFixedTokens: number;
@@ -89,6 +95,12 @@ export declare function buildMusicAgentModelContext(currentRequest?: string): {
         payloadChecksum: string;
         fixedContextChecksum: string;
         pendingRequestChecksum: string;
+        estimatedNewInputTokens: any;
+        lastProviderObservedTokens: number;
+        predictedNextRequestTokens: any;
+        providerIdentityChecksum: string;
+        totalModelVisibleTokens: any;
+        updatedAt: string;
     };
     modelContextCapacity: {
         schema: string;
@@ -96,6 +108,7 @@ export declare function buildMusicAgentModelContext(currentRequest?: string): {
         model: any;
         contextWindow: number;
         maxOutputTokens: number;
+        windowSemantics: string;
         reservedOutputTokens: number;
         effectiveContextWindow: number;
         autoCompactBufferTokens: number;
@@ -119,6 +132,7 @@ export declare function buildMusicAgentModelContext(currentRequest?: string): {
         model: any;
         contextWindow: number;
         maxOutputTokens: number;
+        windowSemantics: string;
         source: any;
         confidence: number;
         checkedAt: any;
@@ -142,6 +156,7 @@ export declare function buildMusicAgentModelContext(currentRequest?: string): {
         model: any;
         contextWindow: number;
         maxOutputTokens: number;
+        windowSemantics: string;
         source: any;
         confidence: number;
         checkedAt: any;
@@ -159,6 +174,7 @@ export declare function buildMusicAgentModelContext(currentRequest?: string): {
         provider: string;
         model: string;
         contextWindow: number;
+        windowSemantics: string;
         maxOutputTokens: number;
         source: string;
         confidence: number;
@@ -221,9 +237,15 @@ export declare function prepareMusicAgentTurn(message: string, mode?: string): P
     modelVisiblePayload: import("../../system/session-compaction-core").ModelVisiblePayloadSnapshot;
     tokenMeasurement: {
         schema: string;
+        accountingSchema: string;
+        source: string;
         method: string;
         activeTokens: any;
         providerObservedTokens: number;
+        currentInputTokens: number;
+        outputTokens: number;
+        precision: string;
+        measurementBasis: string;
         estimatedTokensAfterUsage: any;
         estimatedSummaryTokens: number;
         estimatedFixedTokens: number;
@@ -239,6 +261,12 @@ export declare function prepareMusicAgentTurn(message: string, mode?: string): P
         payloadChecksum: string;
         fixedContextChecksum: string;
         pendingRequestChecksum: string;
+        estimatedNewInputTokens: any;
+        lastProviderObservedTokens: number;
+        predictedNextRequestTokens: any;
+        providerIdentityChecksum: string;
+        totalModelVisibleTokens: any;
+        updatedAt: string;
     };
     modelContextCapacity: {
         schema: string;
@@ -246,6 +274,7 @@ export declare function prepareMusicAgentTurn(message: string, mode?: string): P
         model: any;
         contextWindow: number;
         maxOutputTokens: number;
+        windowSemantics: string;
         reservedOutputTokens: number;
         effectiveContextWindow: number;
         autoCompactBufferTokens: number;
@@ -269,6 +298,7 @@ export declare function prepareMusicAgentTurn(message: string, mode?: string): P
         model: any;
         contextWindow: number;
         maxOutputTokens: number;
+        windowSemantics: string;
         source: any;
         confidence: number;
         checkedAt: any;
@@ -292,6 +322,7 @@ export declare function prepareMusicAgentTurn(message: string, mode?: string): P
         model: any;
         contextWindow: number;
         maxOutputTokens: number;
+        windowSemantics: string;
         source: any;
         confidence: number;
         checkedAt: any;
@@ -309,6 +340,7 @@ export declare function prepareMusicAgentTurn(message: string, mode?: string): P
         provider: string;
         model: string;
         contextWindow: number;
+        windowSemantics: string;
         maxOutputTokens: number;
         source: string;
         confidence: number;
@@ -383,6 +415,7 @@ export declare function getPublicMusicAgentMemory(): {
             model: any;
             contextWindow: number;
             maxOutputTokens: number;
+            windowSemantics: string;
             reservedOutputTokens: number;
             effectiveContextWindow: number;
             autoCompactBufferTokens: number;
@@ -406,6 +439,7 @@ export declare function getPublicMusicAgentMemory(): {
             model: any;
             contextWindow: number;
             maxOutputTokens: number;
+            windowSemantics: string;
             source: any;
             confidence: number;
             checkedAt: any;
@@ -429,6 +463,7 @@ export declare function getPublicMusicAgentMemory(): {
             model: any;
             contextWindow: number;
             maxOutputTokens: number;
+            windowSemantics: string;
             source: any;
             confidence: number;
             checkedAt: any;
@@ -446,6 +481,7 @@ export declare function getPublicMusicAgentMemory(): {
             provider: string;
             model: string;
             contextWindow: number;
+            windowSemantics: string;
             maxOutputTokens: number;
             source: string;
             confidence: number;

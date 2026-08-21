@@ -238,10 +238,10 @@ const executionPlan = computed(() => {
   return candidates.map(normalizePlanItem).filter(Boolean).slice(0, 5)
 })
 
-const actionKinds = new Set(['confirm', 'confirm_plan', 'revise_plan', 'approve_epic', 'targeted_rework', 'continue', 'continue_work_item', 'retry', 'resume', 'pause', 'resume_paused', 'force_interrupt', 'interrupt', 'resume_interrupted', 'gap_continue', 'cancel', 'rollback', 'save_knowledge'])
+const actionKinds = new Set(['confirm', 'confirm_plan', 'revise_plan', 'approve_epic', 'targeted_rework', 'continue', 'continue_work_item', 'retry', 'resume', 'pause', 'resume_paused', 'force_interrupt', 'interrupt', 'resume_interrupted', 'adopt_current_changes', 'gap_continue', 'cancel', 'rollback', 'save_knowledge'])
 const { recoveryPresentation } = useTaskRecoveryPresentation(() => props.card)
 const recoveryActions = computed(() => asList(props.card.actions)
-  .filter(action => ['resume_interrupted', 'cancel'].includes(action?.kind)))
+  .filter(action => ['resume_interrupted', 'adopt_current_changes', 'cancel'].includes(action?.kind)))
 const primaryActions = computed(() => asList(props.card.actions)
   .filter(action => actionKinds.has(action?.kind))
   .filter(action => !props.suppressPlan || !['confirm', 'confirm_plan', 'revise_plan'].includes(action?.kind))
@@ -512,6 +512,57 @@ const openTaskCenter = () => emit('action', { kind: 'open_task_center', id: 'tar
 .context-global { border-left: 3px solid #8b5cf6; }
 .context-project { border-left: 3px solid #10b981; }
 .context-group { border-left: 3px solid var(--accent-blue); }
+
+/* Keep the task card on the same visual system as the execution transcript:
+   quiet dividers, shared typography, and state expressed by text/icon as well
+   as color. Detailed contracts and actions remain available below. */
+.task-summary {
+  border-color: var(--execution-divider);
+  border-radius: var(--radius-md, 6px);
+  background: var(--execution-surface);
+  font-family: var(--font-ui);
+}
+.task-summary-head { padding: 11px 14px 9px; border-bottom: 1px solid var(--execution-divider); }
+.task-summary-title { color: var(--execution-active-accent); }
+.task-summary-title strong { color: var(--execution-text-primary); font-size: 13px; }
+.task-summary-title span,
+.task-summary-state b { color: var(--execution-text-muted); }
+.task-summary-state span {
+  padding: 2px 5px;
+  border: 1px solid var(--execution-divider);
+  border-radius: var(--radius-sm, 4px);
+  background: transparent;
+  color: var(--execution-text-secondary);
+  font-weight: 650;
+}
+.task-summary-copy { color: var(--execution-text-secondary); font-size: 12px; font-weight: 550; }
+.task-summary:not(.terminal) .task-summary-copy { color: var(--execution-text-primary); }
+.task-runtime-pulse {
+  margin-bottom: 8px;
+  border-color: var(--execution-divider);
+  border-radius: var(--radius-sm, 4px);
+  background: transparent;
+  color: var(--execution-active-accent);
+}
+.task-runtime-pulse span { color: var(--execution-text-secondary); font-weight: 550; }
+.task-runtime-pulse small { color: var(--execution-text-muted); }
+.task-summary-actions { border-top-color: var(--execution-divider); }
+.summary-link,
+.task-summary-metrics small,
+.task-summary-result li { color: var(--execution-text-secondary); }
+.summary-link.details { color: var(--execution-active-accent); }
+.task-conversation-route,
+.task-request-contract,
+.task-readable-plan,
+.task-queue-overview,
+.task-rework-overview { border-color: var(--execution-divider); border-radius: var(--radius-sm, 4px); }
+.tone-success { border-color: color-mix(in srgb, var(--execution-success-accent) 38%, var(--execution-divider)); }
+.tone-warning { border-color: color-mix(in srgb, var(--execution-warning-accent) 42%, var(--execution-divider)); }
+.tone-success .task-summary-title,
+.tone-success .task-summary-state span { color: var(--execution-success-accent); }
+.tone-warning .task-summary-title,
+.tone-warning .task-summary-state span { color: var(--execution-warning-accent); }
+
 .spinning { animation: summary-spin 1.2s linear infinite; }
 @keyframes summary-spin { to { transform: rotate(360deg); } }
 @media (max-width: 680px) {

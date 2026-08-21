@@ -1104,21 +1104,23 @@ export function useProjectManager(props, emit) {
         await forceInterruptPausedTask({ ...card, ...action, id })
         toast.info('已进入强制中断恢复流程')
         await refreshCurrentProjectSession(currentSession.value)
-      } else if (action.kind === 'interrupt' || action.kind === 'resume_interrupted') {
+      } else if (action.kind === 'interrupt' || action.kind === 'resume_interrupted' || action.kind === 'adopt_current_changes') {
         if (!id || !isProjectMainTask) return toast.info('当前任务不支持此恢复操作')
         if (action.kind === 'interrupt' && !await confirmDialog(`确定停止“${card.title}”当前这一轮执行吗？任务和子 Agent 会话会保留。`)) return
+        if (action.kind === 'adopt_current_changes' && !await confirmDialog(`确定采用“${card.title}”当前工作区里的改动并继续吗？系统仍会重新执行权限、工具回合和验收检查。`)) return
         const data = await postTaskAction('/api/projects/main-agent/task-action', {
-          action: action.kind,
+          action: action.kind === 'adopt_current_changes' ? 'resume_interrupted' : action.kind,
           task_id: id,
           ...mutationGuard,
           project: currentProject.value,
           project_session_id: currentSession.value,
           reason: action.kind === 'interrupt' ? '用户从项目任务卡停止当前执行' : undefined,
+          reconciliation_action: action.kind === 'adopt_current_changes' ? 'adopt_current_changes' : undefined,
         })
         msg.taskExperience = data.taskExperience || data.task || msg.taskExperience
-        if (action.kind === 'resume_interrupted') pendingProjectParentRunId.value = data.resume_parent_run_id || id
+        if (action.kind === 'resume_interrupted' || action.kind === 'adopt_current_changes') pendingProjectParentRunId.value = data.resume_parent_run_id || id
         await refreshCurrentProjectSession(currentSession.value)
-        toast.success(action.kind === 'interrupt' ? '当前执行已停止，恢复现场已保留' : '已恢复原任务和子 Agent 会话')
+        toast.success(action.kind === 'interrupt' ? '当前执行已停止，恢复现场已保留' : action.kind === 'adopt_current_changes' ? '已采用当前改动，并从新的安全基线继续' : '已恢复原任务和子 Agent 会话')
       } else if (action.kind === 'cancel') {
         if (!id) return toast.info('当前项目直连执行暂未绑定任务，无法远程停止')
         if (isProjectRun) {
@@ -1325,9 +1327,9 @@ export function useProjectManager(props, emit) {
     return guidedTurn
   }
 
-  const resolveProjectQueuedRoute = async (turn, choice) => {
+  const resolveProjectQueuedRoute = async (turn, choice, candidateTaskId = '') => {
     try {
-      const resolved = await projectTurnControl.resolveRoute(turn, choice)
+      const resolved = await projectTurnControl.resolveRoute(turn, choice, candidateTaskId)
       if (!resolved) return
       toast.success(choice === 'continue_original' ? '正在继续原任务' : choice === 'answer_only' ? '正在回答这条消息' : '正在作为新任务处理')
       await drainProjectTurnQueue()

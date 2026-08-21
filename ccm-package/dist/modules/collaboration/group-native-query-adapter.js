@@ -40,13 +40,13 @@ const group_orchestrator_llm_client_1 = require("./group-orchestrator-llm-client
 const model_activity_1 = require("../../system/model-activity");
 const user_visible_agent_events_1 = require("../../system/user-visible-agent-events");
 const assistant_progress_1 = require("../../system/assistant-progress");
+const agent_key_progress_1 = require("../../system/agent-key-progress");
 const conversation_plan_mode_gate_1 = require("../../system/conversation-plan-mode-gate");
 const main_agent_tool_runtime_1 = require("../../tools/main-agent-tool-runtime");
 const group_main_tool_result_compact_1 = require("./group-main-tool-result-compact");
 const group_session_execution_ledger_1 = require("./group-session-execution-ledger");
 const group_compaction_strategy_1 = require("./group-compaction-strategy");
 const session_compaction_core_1 = require("../../system/session-compaction-core");
-const context_budget_1 = require("../../system/context-budget");
 const group_prompt_cache_break_detection_1 = require("./group-prompt-cache-break-detection");
 const group_orchestrator_llm_client_2 = require("./group-orchestrator-llm-client");
 async function runGroupMainNativeQueryLoop(input) {
@@ -62,9 +62,21 @@ async function runGroupMainNativeQueryLoop(input) {
     let visibleReplyDeltaEmitted = false;
     let visibleReplyDeltaSequence = 0;
     let firstProviderDeltaAt = 0;
+    let firstModelPreamble = "";
     let initialReadFileCount = 0;
     let initialReadTokens = 0;
     const anthropic = (0, group_orchestrator_llm_client_2.shouldUseAnthropic)(config);
+    const keyProgress = (0, agent_key_progress_1.createAgentKeyProgressCoordinator)({
+        scope: "group",
+        scopeId: String(group.id || ""),
+        exactSessionId: groupSessionId,
+        turnId: visibleTurnId,
+        generation: Number(toolContext?.scopeIdentity?.generation || 0),
+        target: group.name || group.id,
+        goal: String(planningInput.message || ""),
+        title: "群聊主 Agent",
+        config,
+    });
     const result = await (0, native_query_loop_1.runNativeQueryLoop)({
         config,
         messages: input.buildMessages(planningInput),
@@ -96,6 +108,8 @@ async function runGroupMainNativeQueryLoop(input) {
                 firstProviderDeltaAt = Date.now();
             input.markVisibleFeedback(firstProviderDeltaAt);
             visibleReplyDeltaSequence += 1;
+            if (visibleReplyDeltaSequence === 1 && String(delta).trim().length >= 8)
+                firstModelPreamble = String(delta).trim();
             (0, user_visible_agent_events_1.publishEphemeralUserVisibleAgentEvent)({
                 eventId: `group-delta:${visibleTurnId}:${visibleReplyDeltaSequence}`,
                 scope: "group", scopeId: String(group.id), exactSessionId: groupSessionId,
@@ -115,6 +129,12 @@ async function runGroupMainNativeQueryLoop(input) {
                 const providerPayload = (0, session_compaction_core_1.buildModelVisiblePayloadSnapshot)({
                     scope: "group",
                     sessionId: `${group.id}:${groupSessionId}`,
+                    exactSessionId: groupSessionId,
+                    provider: anthropic ? "anthropic" : (0, group_orchestrator_llm_client_2.shouldUseGemini)(config) ? "gemini" : "openai",
+                    model: String(config.model || ""),
+                    protocol: String(config.format || config.protocol || ""),
+                    modelConfig: config,
+                    tools: [...(0, native_query_loop_1.nativeControlToolDefinitions)(), ...(0, native_query_loop_1.catalogToNativeTools)(toolContext)],
                     system: messages.filter((message) => message.role === "system"),
                     contextComponents: input.buildContextComponents(planningInput),
                     recentMessages: messages.filter((message) => message.role !== "system"),
@@ -125,8 +145,10 @@ async function runGroupMainNativeQueryLoop(input) {
                     source: "group_main_native_query",
                     provider: anthropic ? "anthropic" : (0, group_orchestrator_llm_client_2.shouldUseGemini)(config) ? "gemini" : "openai",
                     model: config.model,
+                    protocol: config.format || config.protocol || "",
+                    endpoint: config.apiUrl || config.endpoint || "",
                     usage,
-                    estimatedContextTokens: messages.reduce((sum, message) => sum + (0, context_budget_1.estimateTextTokens)(String(message?.content || "")), 0),
+                    estimatedContextTokens: providerPayload.totalTokens,
                     estimatedPayloadTokens: providerPayload.totalTokens,
                     estimatedFixedTokens: (0, session_compaction_core_1.modelVisibleFixedTokens)(providerPayload),
                     payloadChecksum: providerPayload.payloadChecksum,
@@ -177,6 +199,7 @@ async function runGroupMainNativeQueryLoop(input) {
                     input.onModelActivity?.(activityValue);
                 },
             });
+            keyProgress.phase(activityPhase, modelCallIndex, round);
             activity.complete();
         },
         executeTools: async (calls, ctx) => {
@@ -184,21 +207,12 @@ async function runGroupMainNativeQueryLoop(input) {
             const requests = calls.map(item => ({ name: item.name, arguments: item.arguments || {} }));
             const preparedToolCallIds = calls.map(item => item.id || `gmtool_${crypto.randomBytes(8).toString("hex")}`);
             if ((0, assistant_progress_1.assistantProgressNarrationEnabled)(config)) {
-                const progressText = round === 0 ? (0, assistant_progress_1.buildAssistantProgressFallback)(requests, { target: group.name || group.id, goal: String(planningInput.message || "") }) : "";
-                if (progressText) {
-                    (0, user_visible_agent_events_1.appendAssistantProgress)({
-                        scope: "group", scopeId: String(group.id), exactSessionId: groupSessionId,
-                        ...(visibleAnchorMessageId ? { anchorMessageId: visibleAnchorMessageId } : {}),
-                        generation: Number(toolContext.scopeIdentity?.generation || 0),
-                        turnId: visibleTurnId,
-                        text: progressText,
-                        kind: "before_tools",
-                        modelCallIndex: round + 1,
-                        relatedToolCallIds: preparedToolCallIds,
-                        title: "群聊主 Agent",
-                    });
-                    input.markVisibleFeedback();
+                if (firstModelPreamble) {
+                    keyProgress.modelPreamble(firstModelPreamble, round + 1, round);
+                    firstModelPreamble = "";
                 }
+                keyProgress.toolBatchStarted(requests, round, round + 1);
+                input.markVisibleFeedback();
             }
             const toolBatchStartedAt = Date.now();
             for (const call of calls) {
@@ -227,21 +241,20 @@ async function runGroupMainNativeQueryLoop(input) {
                 initialReadTokens += initialReads.reduce((count, row) => count + Math.max(0, Number(row?.outputTokens || 0)), 0);
             }
             if ((0, assistant_progress_1.assistantProgressNarrationEnabled)(config)) {
-                const outcomeProgress = (0, assistant_progress_1.buildToolBatchOutcomeProgress)(roundResults, { target: group.name || group.id });
-                if (outcomeProgress) {
-                    (0, user_visible_agent_events_1.appendAssistantProgress)({
-                        scope: "group", scopeId: String(group.id), exactSessionId: groupSessionId,
-                        ...(visibleAnchorMessageId ? { anchorMessageId: visibleAnchorMessageId } : {}),
-                        generation: Number(toolContext.scopeIdentity?.generation || 0),
-                        turnId: visibleTurnId,
-                        text: outcomeProgress,
-                        kind: "key_finding",
-                        modelCallIndex: round + 1,
-                        relatedToolCallIds: preparedToolCallIds,
-                        title: "群聊主 Agent",
+                keyProgress.toolBatchCompleted(roundResults, round, round + 1);
+                input.markVisibleFeedback();
+                await keyProgress.summarizeToolBatch(round, roundResults, async (prompt) => {
+                    const turn = await (0, group_orchestrator_llm_client_1.callNativeAgentTurn)(config, {
+                        messages: [{ role: "system", content: "You produce one safe, concise progress sentence. Do not call tools or reveal hidden reasoning." }, { role: "user", content: prompt }],
+                        maxTokens: 120,
+                        stream: false,
+                        nativeTools: [],
+                        nativeToolsRequired: false,
+                        retryAttempts: 1,
+                        retryScope: "agent_progress_summary",
                     });
-                    input.markVisibleFeedback();
-                }
+                    return String(turn?.text || "");
+                }, round + 1);
             }
             const knowledgeResult = [...roundResults].reverse().find((row) => row.name === "query_knowledge" && row.ok && row.rawOutput);
             planningInput = {

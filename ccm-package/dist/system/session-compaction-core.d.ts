@@ -1,3 +1,4 @@
+import { type CcmPrimaryTokenBreakdownV2, type CcmTechnicalTokenBreakdownV2 } from "./ccm-context-accounting-v2";
 export declare const SESSION_COMPACTION_STATE_SCHEMA = "ccm-session-compaction-state-v2";
 export declare const SESSION_COMPACTION_MAX_CONSECUTIVE_FAILURES = 3;
 export declare const SESSION_MEMORY_INITIAL_TOKENS = 10000;
@@ -11,6 +12,9 @@ export type SessionProviderUsageBaseline = {
     sessionId?: string;
     provider?: string;
     model?: string;
+    protocol?: string;
+    endpoint?: string;
+    providerIdentityChecksum?: string;
     generation?: number;
     anchorMessageId?: string;
     boundaryGeneration?: number;
@@ -19,6 +23,7 @@ export type SessionProviderUsageBaseline = {
     directInputTokens?: number;
     cacheCreationInputTokens?: number;
     cacheReadInputTokens?: number;
+    inputTokensIncludesCache?: boolean;
     recordedAt?: string;
     estimatedContextTokens?: number;
     providerObservedContextTokens?: number;
@@ -28,7 +33,7 @@ export type SessionProviderUsageBaseline = {
     estimatedPayloadTokens?: number;
 };
 export type ModelVisiblePayloadSnapshot = {
-    schema: "ccm-model-visible-payload-snapshot-v1";
+    schema: "ccm-model-visible-payload-snapshot-v2";
     scope: SessionCompactionScope;
     sessionId: string;
     system: any;
@@ -38,13 +43,24 @@ export type ModelVisiblePayloadSnapshot = {
     currentRequest: any;
     recoveryContext: any;
     hookResults: any[];
+    messages: any[];
+    exactSessionId: string;
+    provider: string;
+    model: string;
+    protocol: string;
     tokenBreakdown: Record<string, number>;
     totalTokens: number;
+    predictedNextRequestTokens: number;
+    unresolvedToolPairCount: number;
     payloadChecksum: string;
     fixedContextChecksum: string;
     pendingRequestChecksum: string;
     loadedContextItems: LoadedContextItemsV1;
     loadedContextItemsChecksum: string;
+    accountingSchema: "ccm-context-accounting-v2";
+    primaryTokenBreakdown: CcmPrimaryTokenBreakdownV2;
+    technicalTokenBreakdown: CcmTechnicalTokenBreakdownV2;
+    primaryTokenTotal: number;
 };
 export type LoadedContextItemV1 = {
     kind: "skill" | "mcp";
@@ -119,6 +135,11 @@ type ContextComponentHints = {
 export declare function buildModelVisiblePayloadSnapshot(input: {
     scope: SessionCompactionScope;
     sessionId: string;
+    exactSessionId?: string;
+    provider?: string;
+    model?: string;
+    protocol?: string;
+    modelConfig?: any;
     system?: any;
     tools?: any;
     activeSummary?: any;
@@ -129,14 +150,30 @@ export declare function buildModelVisiblePayloadSnapshot(input: {
     contextComponents?: ContextComponentHints;
 }): ModelVisiblePayloadSnapshot;
 export declare function modelVisibleFixedTokens(snapshot: Pick<ModelVisiblePayloadSnapshot, "tokenBreakdown"> | null | undefined): number;
+export declare function isModelVisiblePayloadSnapshot(value: any): value is ModelVisiblePayloadSnapshot;
 export declare function modelVisiblePayloadAccounting(snapshot: ModelVisiblePayloadSnapshot | null | undefined): {
     schema: string;
     scope: SessionCompactionScope;
     sessionId: string;
+    exactSessionId: string;
+    provider: string;
+    model: string;
+    protocol: string;
+    messages: {
+        role: any;
+        type: any;
+        id: any;
+    }[];
     tokenBreakdown: {
         [x: string]: number;
     };
+    accountingSchema: string;
+    primaryTokenBreakdown: CcmPrimaryTokenBreakdownV2;
+    technicalTokenBreakdown: CcmTechnicalTokenBreakdownV2;
+    primaryTokenTotal: number;
     totalTokens: number;
+    predictedNextRequestTokens: number;
+    unresolvedToolPairCount: number;
     payloadChecksum: string;
     fixedContextChecksum: string;
     pendingRequestChecksum: string;
@@ -246,14 +283,22 @@ export declare function measureSessionContextTokens(input: {
     latestProviderUsage?: any;
     provider?: string;
     model?: string;
+    protocol?: string;
+    endpoint?: string;
     generation?: number;
     boundaryGeneration?: number;
     modelVisiblePayload?: ModelVisiblePayloadSnapshot | null;
 }): {
     schema: string;
+    accountingSchema: string;
+    source: string;
     method: string;
     activeTokens: any;
     providerObservedTokens: number;
+    currentInputTokens: number;
+    outputTokens: number;
+    precision: string;
+    measurementBasis: string;
     estimatedTokensAfterUsage: any;
     estimatedSummaryTokens: number;
     estimatedFixedTokens: number;
@@ -269,6 +314,12 @@ export declare function measureSessionContextTokens(input: {
     payloadChecksum: string;
     fixedContextChecksum: string;
     pendingRequestChecksum: string;
+    estimatedNewInputTokens: any;
+    lastProviderObservedTokens: number;
+    predictedNextRequestTokens: any;
+    providerIdentityChecksum: string;
+    totalModelVisibleTokens: any;
+    updatedAt: string;
 };
 export declare function buildSessionPostCompactGate(input: {
     afterTokens?: number;

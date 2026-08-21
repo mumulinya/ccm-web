@@ -19,7 +19,7 @@ const usage = core.normalizeSessionProviderUsage({
   anchorMessageId: "m1",
   boundaryGeneration: 0,
 });
-assert.equal(core.providerObservedContextTokens(usage), 160, "directInputTokens must not double count inputTokens");
+assert.equal(core.providerObservedContextTokens(usage), 150, "outputTokens must not inflate input context and directInputTokens must not double count inputTokens");
 
 const messages = [
   { id: "m1", role: "assistant", content: "baseline" },

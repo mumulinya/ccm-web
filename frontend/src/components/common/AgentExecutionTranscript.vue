@@ -117,7 +117,7 @@ const anchorMessage = computed(() => props.messages?.[props.messageIndex] || {})
 const expansionStorageKey = computed(() => {
   const sessionId = rows.value[0]?.exactSessionId || anchorMessage.value?.exactSessionId || anchorMessage.value?.sessionId || 'session'
   const messageId = anchorMessage.value?.id || anchorMessage.value?.messageId || anchorMessage.value?.timestamp || props.messageIndex
-  return `ccm:execution-expansion:${effectiveExecutionDensity.value}:${sessionId}:${messageId}`
+  return `ccm:execution-expansion:${sessionId}:${messageId}`
 })
 watch(executionDensity, value => {
   try { localStorage.setItem(EXECUTION_DENSITY_KEY, value) } catch {}
@@ -153,11 +153,73 @@ const pausedAt = computed(() => latestPauseMilestone.value?.detail?.pauseMilesto
 const terminalAt = computed(() => Number(terminalBoundary.value?.at || 0) || pausedAt.value)
 const presentationVisible = computed(() => {
   if (props.presentation === 'live') return isLivePresentation.value
-  if (props.presentation === 'completed') return isOfficialCompletion.value || isQueryCompletion.value
+  // A completed-record projection must still render the outcome explanation
+  // for failed/blocked/cancelled runs. Only the accepted file card and full
+  // delivery projection remain gated by isOfficialCompletion below.
+  if (props.presentation === 'completed') return isTerminal.value && !!resultEvent.value
   return true
 })
 const completedProjectionVisible = computed(() => isOfficialCompletion.value || isQueryCompletion.value)
+// Every terminal result gets a visible, safe summary.  Formal delivery and
+// query projections still control the collapsed execution/file projection;
+// failed, blocked, cancelled and interrupted runs must not lose their
+// explanation merely because they have no accepted delivery.
+const completionSummaryVisible = computed(() => isTerminal.value && !!resultEvent.value)
 const compacted = computed(() => !transcriptExpanded.value && completedProjectionVisible.value)
+const completionSummary = computed(() => {
+  const raw = resultEvent.value?.detail?.completionSummary
+    || resultEvent.value?.detail?.safeResult?.completionSummary
+    || resultEvent.value?.result?.completionSummary
+    || resultEvent.value?.result?.completion_summary
+  if (raw && typeof raw === 'object') {
+    const status = String(raw.status || (isOfficialCompletion.value ? 'success' : 'failed')).toLowerCase()
+    return {
+      schema: 'ccm-completion-summary-v1',
+      status,
+      headline: String(raw.headline || '').trim() || (status === 'success' ? (isQueryCompletion.value ? '查询已完成' : '任务已完成，验收通过') : '本轮任务未完成'),
+      detail: String(raw.detail || '').trim(),
+      filesChanged: Math.max(0, Number(raw.filesChanged || raw.files_changed || 0)),
+      additions: Math.max(0, Number(raw.additions || 0)),
+      deletions: Math.max(0, Number(raw.deletions || 0)),
+      verificationPassed: Math.max(0, Number(raw.verificationPassed || raw.verification_passed || 0)),
+      verificationFailed: Math.max(0, Number(raw.verificationFailed || raw.verification_failed || 0)),
+      nextAction: String(raw.nextAction || raw.next_action || '').trim(),
+      blockers: Array.isArray(raw.blockers) ? raw.blockers.map(item => String(item || '').trim()).filter(Boolean).slice(0, 8) : [],
+      source: raw.source === 'terminal_gate' ? 'terminal_gate' : 'query_projection',
+    }
+  }
+  const status = String(terminalBoundary.value?.status || resultEvent.value?.display?.status || '').toLowerCase()
+  const failed = status !== 'success' && !isQueryCompletion.value
+  return {
+    schema: 'ccm-completion-summary-v1',
+    status: failed ? (status === 'blocked' ? 'blocked' : status === 'cancelled' || status === 'canceled' ? 'cancelled' : 'failed') : 'success',
+    headline: failed ? '本轮任务未通过验收，暂未交付' : (isQueryCompletion.value ? (queryRecord.value?.succeeded === false ? '查询部分未完成' : '查询已完成') : '任务已完成，验收通过'),
+    detail: '',
+    filesChanged: completionFiles.value?.length || 0,
+    additions: 0,
+    deletions: 0,
+    verificationPassed: completionVerificationCount.value || 0,
+    verificationFailed: Array.isArray(resultEvent.value?.result?.unfinished) ? resultEvent.value.result.unfinished.length : 0,
+    nextAction: '',
+    blockers: [],
+    source: isOfficialCompletion.value ? 'terminal_gate' : 'query_projection',
+  }
+})
+const terminalCollapseKey = computed(() => {
+  if (!isTerminal.value) return ''
+  return [
+    rows.value[0]?.exactSessionId || anchorMessage.value?.exactSessionId || anchorMessage.value?.sessionId || 'session',
+    currentGeneration.value,
+    terminalBoundary.value?.status || '',
+    terminalBoundary.value?.at || resultEvent.value?.eventId || '',
+  ].join(':')
+})
+const handledTerminalCollapseKey = ref('')
+watch(terminalCollapseKey, key => {
+  if (!key || handledTerminalCollapseKey.value === key) return
+  handledTerminalCollapseKey.value = key
+  transcriptExpanded.value = false
+}, { immediate: true })
 const assistantProgressRows = computed(() => rows.value.filter(event => event.eventType === 'assistant_progress' && !isChildAgentDialogueProgress(event)))
 const currentProgressEventId = computed(() => isTerminal.value ? '' : assistantProgressRows.value.at(-1)?.eventId || '')
 const requirementPlanEvents = computed(() => rows.value.filter(event => event.eventType === 'requirement_plan' && event?.detail?.requirementPlan))
@@ -639,7 +701,10 @@ const restoreExpansionState = () => {
   if (typeof sessionStorage === 'undefined') return
   try {
     const saved = JSON.parse(sessionStorage.getItem(expansionStorageKey.value) || '{}')
-    transcriptExpanded.value = saved.transcriptExpanded === true
+    // Completed records always start collapsed. A saved expanded state is only
+    // a live-session preference; it must not make a finished execution reopen
+    // as a dense transcript after refresh or replay.
+    transcriptExpanded.value = isTerminal.value || completedProjectionVisible.value ? false : saved.transcriptExpanded === true
     requirementPlanExpanded.value = saved.requirementPlanExpanded === true
     attemptHistoryExpanded.value = saved.attemptHistoryExpanded === true
     completionFilesExpanded.value = saved.completionFilesExpanded === true
@@ -655,7 +720,7 @@ const persistExpansionState = () => {
   if (typeof sessionStorage === 'undefined') return
   try {
     sessionStorage.setItem(expansionStorageKey.value, JSON.stringify({
-      transcriptExpanded: transcriptExpanded.value,
+      transcriptExpanded: isTerminal.value || completedProjectionVisible.value ? false : transcriptExpanded.value,
       requirementPlanExpanded: requirementPlanExpanded.value,
       attemptHistoryExpanded: attemptHistoryExpanded.value,
       completionFilesExpanded: completionFilesExpanded.value,
@@ -721,29 +786,18 @@ const completionVerificationCount = computed(() => {
 })
 const completionResultSummary = computed(() => {
   if (!isTerminal.value) return ''
-  if (isQueryCompletion.value) {
+  const summary = completionSummary.value
+  const parts = []
+  const headline = completionSafeSummary(summary.headline)
+  if (headline) parts.push(headline)
+  if (summary.filesChanged) parts.push(`修改 ${summary.filesChanged} 个文件`)
+  if (summary.verificationPassed) parts.push(`验证通过 ${summary.verificationPassed} 项`)
+  if (summary.verificationFailed) parts.push(`验证未通过 ${summary.verificationFailed} 项`)
+  if (isQueryCompletion.value && !summary.filesChanged && !summary.verificationPassed && !summary.verificationFailed) {
     const count = Number(queryRecord.value?.toolCount || toolCount.value || 0)
-    return queryRecord.value?.succeeded === false
-      ? `已检查 ${count || 1} 项，部分操作未完成`
-      : count ? `已检查 ${count} 项` : '查询已完成'
+    if (count) parts.push(`已检查 ${count} 项`)
   }
-  const status = String(terminalBoundary.value?.status || resultEvent.value?.display?.status || '').toLowerCase()
-  const files = completionFiles.value.length
-  const failedVerification = Array.isArray(resultEvent.value?.result?.unfinished)
-    ? resultEvent.value.result.unfinished.length
-    : 0
-  if (status === 'success') {
-    const parts = []
-    const resultSummary = completionSafeSummary(resultEvent.value?.display?.summary)
-    if (resultSummary && !/^(?:任务|执行|回复)?已完成$|^(?:代码修改和)?独立验收(?:均)?已通过$/.test(resultSummary)) parts.push(resultSummary)
-    if (completionVerificationCount.value) parts.push('验证通过')
-    if (files) parts.push(`修改 ${files} 个文件`)
-    return [...new Set(parts)].join(' · ') || '本轮任务已完成'
-  }
-  if (files && failedVerification) return `已完成主要修改，${failedVerification} 项验证未通过`
-  if (status === 'cancelled' || status === 'canceled') return '本轮已停止，未正式交付'
-  if (status === 'interrupted') return '本轮已中断，未正式交付'
-  return '本轮未通过验收，未正式交付'
+  return [...new Set(parts)].join(' · ') || (isQueryCompletion.value ? '查询已完成' : '本轮任务已完成')
 })
 const completedProjectionTitle = computed(() => isQueryCompletion.value ? '查询过程' : '执行记录')
 const completedProjectionSucceeded = computed(() => isOfficialCompletion.value || queryRecord.value?.succeeded === true)
@@ -816,7 +870,9 @@ const openAllFileChanges = () => {
   emit('open-file-changes', { count: completionFiles.value.length, files: completionFiles.value })
 }
 
-const progressText = event => String(event?.detail?.progress?.text || event?.display?.summary || '').trim()
+// keyProgress is the authoritative safe milestone; progress remains the
+// presentation-compatible projection used by older stored events.
+const progressText = event => String(event?.detail?.keyProgress?.text || event?.detail?.progress?.text || event?.display?.summary || '').trim()
 const batchDuration = batchRows => {
   const intervals = batchRows.map(event => {
     const started = eventTime(event?.createdAt)
@@ -1550,7 +1606,7 @@ const displayedExecutionStageRows = computed(() => {
   </header>
   <div v-if="hasProgressFlow && !stageMode && !isLivePresentation && !isQueryCompletion && (!isTerminal || transcriptExpanded)" class="cc-progress-flow" aria-label="Agent 进度说明">
     <div v-for="segment in displayedProgressSegments" :key="segment.key" class="cc-progress-segment" :class="{ current: segment.progress?.eventId === currentProgressEventId, completed: segment.progress?.eventId !== currentProgressEventId }">
-      <p v-if="progressText(segment.progress)" class="cc-progress-text">{{ progressText(segment.progress) }}</p>
+      <p v-if="progressText(segment.progress)" class="cc-progress-text agent-progress-row" :aria-live="isLivePresentation && segment.progress?.eventId === currentProgressEventId ? 'polite' : undefined">{{ progressText(segment.progress) }}</p>
       <button v-if="segment.label" type="button" class="cc-progress-batch" :aria-expanded="transcriptExpanded" @click.stop="toggleTranscript">
         <span class="cc-progress-batch-icon"><Wrench :size="11" /></span>
         <span>{{ segment.label }}</span>
@@ -1559,6 +1615,24 @@ const displayedExecutionStageRows = computed(() => {
       </button>
     </div>
   </div>
+
+  <section v-if="completionSummaryVisible" class="cc-completion-summary" :class="{ warning: ['failed', 'blocked', 'cancelled', 'interrupted', 'partial'].includes(completionSummary.status) }" aria-label="任务总结">
+    <header class="cc-completion-summary-head">
+      <span class="cc-completion-summary-mark" aria-hidden="true"><Check v-if="completionSummary.status === 'success'" :size="13" /><AlertTriangle v-else :size="13" /></span>
+      <strong>{{ isQueryCompletion ? '查询总结' : '任务总结' }}</strong>
+      <span class="cc-completion-summary-status">{{ completionSummary.status === 'success' ? '已完成' : completionSummary.status === 'partial' ? '部分完成' : '未正式交付' }}</span>
+    </header>
+    <p class="cc-completion-summary-headline">{{ completionSummary.headline }}</p>
+    <p v-if="completionSummary.detail" class="cc-completion-summary-detail">{{ completionSummary.detail }}</p>
+    <div class="cc-completion-summary-meta">
+      <span v-if="completionSummary.filesChanged">修改 {{ completionSummary.filesChanged }} 个文件</span>
+      <span v-if="completionSummary.additions || completionSummary.deletions"><b class="additions">+{{ completionSummary.additions || 0 }}</b> <b class="deletions">-{{ completionSummary.deletions || 0 }}</b></span>
+      <span v-if="completionSummary.verificationPassed">验证通过 {{ completionSummary.verificationPassed }} 项</span>
+      <span v-if="completionSummary.verificationFailed">验证未通过 {{ completionSummary.verificationFailed }} 项</span>
+    </div>
+    <p v-if="completionSummary.blockers.length" class="cc-completion-summary-blockers">{{ completionSummary.blockers.join('；') }}</p>
+    <p v-if="completionSummary.nextAction" class="cc-completion-summary-next">下一步：{{ completionSummary.nextAction }}</p>
+  </section>
 
   <section v-if="presentation === 'completed' && isOfficialCompletion && completionFiles.length" class="cc-completion-files" :class="{ warning: !completionSucceeded }" aria-label="本轮文件变化">
     <header class="cc-completion-files-head">
@@ -1645,7 +1719,7 @@ const displayedExecutionStageRows = computed(() => {
         :class="{ current: batchNeedsAttention(event), completed: !batchNeedsAttention(event), attention: batchNeedsAttention(event) }"
         :aria-current="batchNeedsAttention(event) ? 'step' : undefined"
       >
-        <p v-if="event.progress && progressText(event.progress)" class="cc-execution-stage-progress">{{ progressText(event.progress) }}</p>
+        <p v-if="event.progress && progressText(event.progress)" class="cc-execution-stage-progress agent-progress-row" :class="{ current: batchNeedsAttention(event) }" :aria-live="isLivePresentation && batchNeedsAttention(event) ? 'polite' : undefined">{{ progressText(event.progress) }}</p>
         <button v-if="event.children.length && !((isLivePresentation || isQueryCompletion) && batchIsExpanded(event))" type="button" class="cc-progress-batch-head" :aria-expanded="batchIsExpanded(event)" @click="toggleBatch(event)">
           <span class="cc-progress-batch-status" :class="{ failed: batchHasFailure(event), attention: batchNeedsAttention(event) }"><component :is="batchStatusIcon(event)" :size="12" /></span>
           <strong>{{ event.presentation?.label || '工具批次' }}</strong>
@@ -1709,7 +1783,7 @@ const displayedExecutionStageRows = computed(() => {
         @toggle-tools="toggleChildAgentTools"
         @open-file-change="openFileChange"
       />
-      <p v-else-if="event.eventType === 'assistant_progress'" v-show="!normalizedSearchQuery || searchableText(event).includes(normalizedSearchQuery)" class="cc-execution-stage-progress" :class="{ current: event.eventId === currentProgressEventId }" :aria-current="event.eventId === currentProgressEventId ? 'step' : undefined">{{ progressText(event) }}</p>
+      <p v-else-if="event.eventType === 'assistant_progress'" v-show="!normalizedSearchQuery || searchableText(event).includes(normalizedSearchQuery)" class="cc-execution-stage-progress agent-progress-row" :class="{ current: event.eventId === currentProgressEventId }" :aria-current="event.eventId === currentProgressEventId ? 'step' : undefined" :aria-live="isLivePresentation && event.eventId === currentProgressEventId ? 'polite' : undefined">{{ progressText(event) }}</p>
       <article
         v-else
         v-show="eventMatchesSearch(event)"
@@ -2149,6 +2223,17 @@ const displayedExecutionStageRows = computed(() => {
 .cc-execution-actions button { padding: 4px 8px; border: 1px solid rgba(148, 163, 184, 0.24); border-radius: 6px; color: var(--text-secondary); background: transparent; font-size: 10px; cursor: pointer; }
 .cc-execution-actions button:hover:not(:disabled) { border-color: color-mix(in srgb, var(--primary-color, #ec4899) 55%, transparent); color: var(--text-primary); background: color-mix(in srgb, var(--primary-color, #ec4899) 7%, transparent); }
 .cc-execution-actions button:disabled { opacity: 0.45; cursor: not-allowed; }
+.cc-completion-summary { width: 100%; margin: 5px 0 9px; padding: 10px 12px; overflow: hidden; border: 1px solid color-mix(in srgb, #16a34a 28%, var(--border-color, #94a3b8)); border-radius: 9px; background: color-mix(in srgb, #16a34a 5%, var(--surface, #fff)); }
+.cc-completion-summary.warning { border-color: color-mix(in srgb, #d97706 42%, var(--border-color, #94a3b8)); background: color-mix(in srgb, #d97706 5%, var(--surface, #fff)); }
+.cc-completion-summary-head { display:flex; align-items:center; gap:7px; min-height:24px; }
+.cc-completion-summary-mark { display:inline-flex; align-items:center; justify-content:center; width:20px; height:20px; border-radius:50%; color:#15803d; background:color-mix(in srgb,#16a34a 15%,transparent); }
+.cc-completion-summary.warning .cc-completion-summary-mark { color:#b45309; background:color-mix(in srgb,#d97706 16%,transparent); }
+.cc-completion-summary-status { margin-left:auto; color:var(--text-muted); font-size:10px; }
+.cc-completion-summary-headline { margin:6px 0 0; color:var(--text-primary); font-size:12px; line-height:1.5; }
+.cc-completion-summary-detail,.cc-completion-summary-blockers,.cc-completion-summary-next { margin:4px 0 0; color:var(--text-secondary); font-size:10.5px; line-height:1.45; }
+.cc-completion-summary-blockers { color:#b45309; }
+.cc-completion-summary-next { color:var(--text-muted); }
+.cc-completion-summary-meta { display:flex; flex-wrap:wrap; gap:9px; margin-top:7px; color:var(--text-muted); font-size:10px; }
 .cc-completion-files { width: 100%; margin: 5px 0 9px; overflow: hidden; border: 1px solid color-mix(in srgb, var(--border-color, #94a3b8) 38%, transparent); border-radius: 9px; background: color-mix(in srgb, var(--surface, #fff) 97%, transparent); }
 .cc-completion-files.warning { border-color: color-mix(in srgb, #d97706 42%, transparent); }
 .cc-completion-files-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; min-height: 42px; padding: 0 10px; }
@@ -2258,6 +2343,111 @@ const displayedExecutionStageRows = computed(() => {
 .cc-execution.live .cc-requirement-plan-steps p,
 .cc-execution.live .cc-requirement-plan-steps small { display: none; }
 .cc-execution.live .cc-requirement-step-project { align-self: center; font-size: 8px; }
+
+/* Unified CC-style transcript surface. Live and completed records share the
+   same typography and separators; only emphasis and disclosure state differ. */
+.cc-execution {
+  border-color: var(--execution-divider);
+  border-radius: var(--radius-md, 6px);
+  background: var(--execution-surface);
+  color: var(--execution-text-primary);
+  font-family: var(--font-ui);
+}
+.cc-execution.live {
+  border: 1px solid var(--execution-divider);
+  border-radius: var(--radius-md, 6px);
+  background: var(--execution-surface);
+}
+.cc-live-execution-status {
+  border-bottom-color: var(--execution-divider);
+  color: var(--execution-text-muted);
+  font-size: var(--font-size-xs, 11px);
+}
+.cc-live-execution-status strong { color: var(--execution-text-secondary); }
+.cc-execution-head {
+  min-height: var(--execution-row-height, 44px);
+  border-bottom: 1px solid var(--execution-divider);
+  color: var(--execution-text-secondary);
+  font-family: var(--font-ui);
+}
+.cc-execution-head strong,
+.cc-execution-title strong,
+.cc-completion-summary-head strong { color: var(--execution-text-primary); }
+.cc-execution-summary,
+.cc-execution-duration { color: var(--execution-text-muted); }
+.cc-execution-row + .cc-execution-row,
+.cc-execution-stage-head:not(:first-child),
+.cc-completion-file-row,
+.cc-completion-file-list,
+.cc-execution-footer { border-color: var(--execution-divider); }
+.cc-execution-row-summary { min-height: var(--execution-row-height, 44px); font-family: var(--font-ui); }
+.cc-execution-row.completed { opacity: .76; }
+.cc-execution-row.current { background: color-mix(in srgb, var(--execution-active-accent) 7%, transparent); box-shadow: inset 2px 0 var(--execution-active-accent); }
+.cc-execution-stage-progress.agent-progress-row {
+  margin-top: 5px;
+  margin-bottom: 7px;
+  padding: 7px 10px 7px 12px;
+  border-left: 1px solid color-mix(in srgb, var(--execution-active-accent) 35%, var(--execution-divider));
+  color: var(--execution-text-secondary);
+  font-size: 12px;
+  line-height: 1.55;
+  background: transparent;
+}
+.cc-execution-stage-progress.agent-progress-row.current {
+  padding-left: 11px;
+  border-left: 2px solid var(--execution-active-accent);
+  color: var(--execution-text-primary);
+  background: color-mix(in srgb, var(--execution-active-accent) 5%, transparent);
+}
+.cc-execution.complete .cc-execution-stage-progress.agent-progress-row:not(.current) { color: var(--execution-text-muted); opacity: .82; }
+.cc-progress-text.agent-progress-row {
+  color: var(--execution-text-secondary);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 500;
+}
+.cc-progress-segment.current .cc-progress-text.agent-progress-row { color: var(--execution-text-primary); }
+.cc-progress-segment.completed .cc-progress-text.agent-progress-row { color: var(--execution-text-muted); }
+.cc-progress-batch-group { border-left-color: var(--execution-divider); background: transparent; }
+.cc-progress-batch-group.current { border-left-color: var(--execution-active-accent); background: color-mix(in srgb, var(--execution-active-accent) 3%, transparent); }
+.cc-progress-batch-head,
+.cc-execution-stage-head { font-family: var(--font-ui); }
+.cc-progress-batch-head strong,
+.cc-execution-stage-head strong { color: var(--execution-text-secondary); }
+.cc-execution-detail { border: 1px solid var(--execution-divider); border-radius: var(--radius-sm, 4px); background: color-mix(in srgb, var(--execution-divider) 22%, transparent); }
+.cc-tool-result-row { border-radius: var(--radius-sm, 4px); background: color-mix(in srgb, var(--execution-divider) 24%, transparent); }
+.cc-completion-summary {
+  margin: 5px 0 9px;
+  border-color: var(--execution-divider);
+  border-left: 3px solid var(--execution-success-accent);
+  border-radius: var(--radius-md, 6px);
+  background: var(--execution-surface);
+}
+.cc-completion-summary.warning { border-left-color: var(--execution-warning-accent); border-color: var(--execution-divider); background: var(--execution-surface); }
+.cc-completion-summary-mark { color: var(--execution-success-accent); background: color-mix(in srgb, var(--execution-success-accent) 13%, transparent); }
+.cc-completion-summary.warning .cc-completion-summary-mark { color: var(--execution-warning-accent); background: color-mix(in srgb, var(--execution-warning-accent) 14%, transparent); }
+.cc-completion-summary-headline { color: var(--execution-text-primary); font-family: var(--font-ui); }
+.cc-completion-summary-detail,
+.cc-completion-summary-meta,
+.cc-completion-summary-next { color: var(--execution-text-secondary); }
+.cc-completion-summary-blockers { color: var(--execution-warning-accent); }
+.cc-completion-files { border-color: var(--execution-divider); border-radius: var(--radius-md, 6px); background: var(--execution-surface); }
+
+/* In live mode Agent narration remains a first-class timeline row rather than
+   a separate chat bubble, while completed narration is intentionally quieter. */
+.cc-execution.live .cc-execution-stage-progress.agent-progress-row {
+  margin-left: var(--execution-indent, 24px);
+  padding-top: 8px;
+  padding-bottom: 8px;
+  color: var(--execution-text-primary);
+}
+.cc-execution.live .cc-execution-stage-progress.agent-progress-row.current {
+  margin-left: var(--execution-indent, 24px);
+  border-left-color: var(--execution-active-accent);
+}
+.cc-execution.live .cc-progress-batch-group .cc-execution-stage-progress.agent-progress-row { margin-left: 0; }
+.cc-execution.live .cc-execution-row-summary { min-height: 36px; }
+.cc-execution.complete:not(.expanded) .cc-execution-head { border-bottom-color: transparent; }
 
 @keyframes cc-live-pulse { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .cc-execution.live .cc-execution-row.current .cc-execution-mark { animation: none; } }

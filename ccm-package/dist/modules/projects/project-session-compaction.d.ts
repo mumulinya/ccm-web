@@ -107,6 +107,7 @@ export declare function compactProjectSessionWithModel(project: string, projectS
         schema: string;
         contextWindow: number;
         maxOutputTokens: number;
+        windowSemantics: string;
         reservedOutputTokens: number;
         effectiveContextWindow: number;
         autoCompactBufferTokens: number;

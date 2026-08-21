@@ -65,6 +65,7 @@ const test_agent_runner_1 = require("./test-agent-runner");
 const observability_database_1 = require("../../system/observability-database");
 const unified_evidence_registry_1 = require("../../system/unified-evidence-registry");
 const user_visible_agent_events_1 = require("../../system/user-visible-agent-events");
+const task_context_1 = require("../../tasks/task-context");
 const STAGE_ORDER = ["intake", "planning", "dispatch", "execution", "change", "test", "rework", "review", "completion", "system"];
 const TERMINAL = new Set(["done", "completed", "failed", "blocked", "cancelled", "reverted"]);
 function safeTechnical(value, depth = 0) {
@@ -607,6 +608,31 @@ function buildTaskEvents(tasks) {
                         checksum: semanticReceipt.checksum || "",
                     } } : {}),
             } }));
+        const continuationRouteKind = String(task.continuation_route_kind || "");
+        if (continuationRouteKind) {
+            const attempt = Math.max(1, Number(task.execution_attempt || task.attempt || 1));
+            const title = continuationRouteKind === "revise_existing_task"
+                ? `返工执行 · 第 ${attempt} 次执行`
+                : continuationRouteKind === "continue_current_session"
+                    ? "当前会话继续"
+                    : `第 ${attempt} 次执行 · 继续原任务`;
+            events.push(event({
+                id: `task:${taskId}:continuation:${attempt}:${continuationRouteKind}`,
+                at: task.last_continue_at || task.resumed_from_completed_at || task.recovery_transaction?.committedAt || task.updated_at,
+                stage: "execution",
+                category: "task_continuation",
+                status: "running",
+                title,
+                summary: task.status_detail || (continuationRouteKind === "revise_existing_task" ? "目标调整已绑定原任务，重新核对范围和验收标准后继续。" : "补充要求已绑定原任务，将从未完成工作项继续。"),
+                actor: owner,
+                task_id: taskId,
+                parent_task_id: task.parent_task_id,
+                trace_id: task.trace_id,
+                project: task.target_project,
+                source: "conversation_route_v2",
+                technical: { route_kind: continuationRouteKind, attempt, previous_attempt: Math.max(0, attempt - 1) },
+            }));
+        }
         for (const item of (0, logs_1.getTaskTimeline)(task)) {
             events.push(event({ id: `timeline:${taskId}:${item.id || (0, task_replay_shared_1.stableId)("row", item)}`, at: item.at, category: String(item.type || "timeline"), status: (0, task_replay_shared_1.normalizeStatus)(item.status), title: item.title || item.type || "任务进展", summary: timelineSummary(item), actor: item.agent ? actor(/test.?agent/i.test(item.agent) ? "test_agent" : "project_agent", item.agent) : actor("group_agent", "群聊主 Agent"), task_id: taskId, parent_task_id: task.parent_task_id, trace_id: task.trace_id, project: item.agent || task.target_project, source: "timeline", technical: timelineTechnical(item) }));
         }
@@ -1034,6 +1060,9 @@ function taskPublicRow(task, rootId) {
         legacy_status_unverified: normalized.legacy_status_unverified === true || (TERMINAL.has(String(normalized.status || "").toLowerCase()) && !normalized.terminal_decision),
         semantic_decision_receipt: normalized.semantic_decision_receipt || normalized.workflow_decision?.semantic_decision_receipt || null,
         route_decision: normalized.route_decision || null,
+        available_actions: Array.isArray(normalized.available_actions || normalized.availableActions) ? (normalized.available_actions || normalized.availableActions) : [],
+        task_context: (0, task_context_1.projectTaskContext)(normalized),
+        recovery_user_session: normalized.recovery_user_session || null,
         created_at: (0, task_replay_shared_1.iso)(normalized.created_at),
         updated_at: (0, task_replay_shared_1.iso)(normalized.updated_at),
         is_root: String(normalized.id) === rootId,
@@ -1149,6 +1178,8 @@ function buildCompleteTaskReplay(taskId, options = {}) {
         terminal_state_receipt: normalizedRoot.terminal_state_receipt || null,
         terminal_decision: normalizedRoot.terminal_decision || null,
         terminal_gate: normalizedRoot.terminal_gate || null,
+        task_context: (0, task_context_1.projectTaskContext)(normalizedRoot),
+        recovery_user_session: normalizedRoot.recovery_user_session || null,
         scheduler_state: normalizedRoot.scheduler_state || null,
         schedule_origin: normalizedRoot.cron_job_id ? {
             cronJobId: String(normalizedRoot.cron_job_id || ""),

@@ -78,7 +78,6 @@ const checks = {
     && /provider_usage_updated/.test(groupStream),
   detailedContextCategoriesVisible: [
     'System prompt',
-    'Tool definitions',
     'Rules',
     'Skills',
     'MCP & dynamic tools',
@@ -88,8 +87,9 @@ const checks = {
   ].every(label => component.includes(label)),
   componentRatiosVisible: /usedPercent/.test(component) && /row\.usedPercent/.test(component),
   segmentedCapacityMeterVisible: /context-meter-segment/.test(component) && /row\.capacityPercent/.test(component),
-  providerRemainderIsTransparent: /Provider 其余上下文/.test(component) && /历史 Provider 总量（无分项快照）/.test(component),
-  latestPayloadAndConversationAreDistinguished: /最近完整模型载荷/.test(component)
+  providerRemainderIsTransparent: /Provider remainder/.test(component) && /context-technical-details/.test(component),
+  latestPayloadAndConversationAreDistinguished: /当前预计模型载荷/.test(component)
+    && /最近实测/.test(component)
     && /会话正文/.test(component)
     && /系统规则和已启用工具保持可用/.test(component)
     && /Skill、知识、源码及工具结果按需加载/.test(component),
@@ -114,15 +114,15 @@ const checks = {
   toolStateDoesNotGuessFromCategoryTokens: !/loadedThisTurn:\s*mcpLoadedTokens\s*>\s*0/.test(memoryCenterApi)
     && !/loadedThisTurn:\s*skillLoadedTokens\s*>\s*0/.test(memoryCenterApi)
     && /evidenceStatus:\s*evidenceAvailable\s*\?\s*"exact"\s*:\s*"unproven"/.test(memoryCenterApi),
-  mcpRowCountsSchemasOnly: /mcpTools \?\? breakdown\.mcp \?\? 0\), tone: 'mcp'/.test(component)
+  mcpRowCountsSchemasOnly: /mcpAndDynamicTools \?\? breakdown\.mcpTools \?\? breakdown\.mcp \?\? 0\), tone: 'mcp'/.test(component)
     && !/\+ Number\(breakdown\.mcpResults \|\| 0\), tone: 'mcp'/.test(component)
-    && /label: '工具结果'/.test(component)
-    && /'summary', 'recentMessages', 'currentRequest', 'toolResults'/.test(component),
+    && !/label: '工具结果'/.test(component)
+    && /'summary', 'recentMessages', 'currentRequest'/.test(component),
   catalogLoadedTokensExcludeResults: /const mcpLoadedTokens = Math.max\(0, Number\(breakdown\.mcpTools \?\? breakdown\.mcp \?\? 0\)\);/.test(memoryCenterApi),
   threeMainAgentSurfacesAttachExactEvidence: /buildMainAgentLoadedContextItems/.test(groupOrchestrator)
     && /projectMainLoadedContextItems/.test(projectMainAgent)
     && /loadedContextItems/.test(globalAgentRuntime),
-  explicitZeroBucketsDoNotFallback: /hasPayloadBreakdown \? breakdown\.system \|\| 0/.test(component),
+  explicitZeroBucketsDoNotFallback: /hasPayloadBreakdown \? breakdown\.systemPrompt \?\? breakdown\.system \?\? 0/.test(component),
   exactGroupScopeRebuildsMissingBreakdown: /rebuildCurrentGroupContextAccounting/.test(memoryCenterApi)
     && /rebuildCurrentPayload:\s*true/.test(memoryCenterApi)
     && /modelVisiblePayloadAccounting/.test(memoryCenterApi),

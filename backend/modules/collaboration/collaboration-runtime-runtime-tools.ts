@@ -1,6 +1,7 @@
 // collaboration-runtime-runtime-tools.ts — merged from 2 part files (behavior-freeze merge).
 
 import { buildReviewCycleResetUpdate } from "./rework-policy";
+import { captureTaskRecoveryWorkspace, runTaskRecoveryOrchestrator } from "../../tasks/task-recovery-orchestrator";
 import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
@@ -1508,6 +1509,14 @@ function getDashboardWorkerRows(task: any) {
 
 function getTaskDashboardActions(task: any, phase: string) {
   const actions: any[] = [];
+  if (task?.acceptance_state === "recovery_required" && task?.recovery_preflight?.recoveryMode === "manual_reconciliation") {
+    return [
+      { id: "adopt_current_changes", label: "采用当前改动并继续", kind: "adopt_current_changes", tone: "warning" },
+      { id: "view_changes", label: "查看当前改动", kind: "view_changes", tone: "outline" },
+      { id: "rollback", label: "撤销到安全检查点", kind: "rollback", tone: "outline" },
+      { id: "cancel", label: "停止任务", kind: "cancel", tone: "danger" },
+    ];
+  }
   const recovery = task?.recovery || task?.interruption_receipt?.recovery || {};
   const interruptionReason = String(task?.interruption_receipt?.reason_code || "");
   const transientModelRecovery = task?.acceptance_state === "recovery_required"
@@ -1648,8 +1657,10 @@ export function continueTaskWithMessage(taskId: string, message: string, ctx: Co
   if (!compactFormText(message, "")) return { success: false, status: 400, error: "请输入补充说明" };
 
   const tasks = loadTasks();
-  const current = tasks.find(t => t.id === taskId);
+  let current = tasks.find(t => t.id === taskId);
   if (!current) return { success: false, status: 404, error: "任务不存在" };
+  const completedBeforeContinuation = ["done", "completed"].includes(String(current.status || ""))
+    || ["accepted", "terminal_gate_passed"].includes(String(current.acceptance_state || ""));
   const requestedContinuationKind = String(options.continuation_kind || options.continuationKind || "auto");
   const machineGeneratedContinuation = options.internal === true
     || options.internalContinuation === true
@@ -1670,7 +1681,6 @@ export function continueTaskWithMessage(taskId: string, message: string, ctx: Co
       error: "这个需求 Epic 的执行前计划还在等待确认；请使用确认卡上的「修改计划」提交这条要求，我会带着它重新拆解子任务后再请你确认。",
     };
   }
-  const currentlyRunning = runningTaskIds.has(taskId);
   const source = String(options.source || "user");
   const automaticGapContinuation = isAutomaticGapContinuationSource(source);
   const internalContinuation = options.internal === true || options.internalContinuation === true || /dependency_unlocked_next_work_item/i.test(source);
@@ -1697,6 +1707,54 @@ export function continueTaskWithMessage(taskId: string, message: string, ctx: Co
   if (operation && !operation.acquired) {
     return { success: true, duplicate: true, task: loadTasks().find((item: any) => item.id === taskId) || current, ...(operation.record?.result || {}), trace_id: operation.traceId };
   }
+
+  const requiresInterruptedRecovery = current?.interruption_receipt?.schema === "ccm-task-interruption-receipt-v1"
+    && (current?.recovery_pending === true
+      || ["recovery_required", "recovery_validating"].includes(String(current?.acceptance_state || ""))
+      || ["validating", "rolled_back"].includes(String(current?.recovery_transaction?.status || "")));
+  if (requiresInterruptedRecovery) {
+    try {
+      const workspace = captureTaskRecoveryWorkspace(current);
+      const recovered = runTaskRecoveryOrchestrator(current, {
+        scope: current.group_id ? "group" : current.global_mission_id ? "global" : "project",
+        scopeId: String(current.group_id || current.global_mission_id || current.target_project || "global"),
+        exactSessionId: String(current.group_session_id || current.groupSessionId || current.project_session_id || current.projectSessionId || current.origin_session_id || current.task_agent_session_id || current.id),
+        idempotencyKey: `message-route:${taskId}:${current.interruption_receipt.checksum}`,
+        authorizationValid: options.authorizationValid !== false,
+        runtimeValid: options.runtimeValid !== false,
+        currentWorkspaceChecksum: workspace.checksum,
+        worktreeOwnershipValid: workspace.ownershipValid,
+      });
+      if (!recovered.success) {
+        if (operationKey) failIdempotency("task-continue", `${taskId}:${operationKey}`, new Error("recovery_preflight_blocked"));
+        return {
+          success: false,
+          status: 409,
+          manual_recovery_required: true,
+          error: "恢复前需要核对中断现场",
+          recovery_preflight: recovered.preflight,
+          task: recovered.task || current,
+        };
+      }
+      current = recovered.task || current;
+    } catch (error: any) {
+      if (operationKey) failIdempotency("task-continue", `${taskId}:${operationKey}`, error);
+      return {
+        success: false,
+        status: 409,
+        manual_recovery_required: true,
+        error: error?.message || "恢复前需要核对中断现场",
+        recovery_preflight: error?.recovery_preflight || null,
+      };
+    }
+  }
+
+  const currentlyRunning = runningTaskIds.has(taskId);
+  const continuationRouteKind = continuationKind === "revise_goal"
+    ? "revise_existing_task"
+    : completedBeforeContinuation || requiresInterruptedRecovery
+      ? "resume_existing_task"
+      : "continue_current_session";
 
   const resolvesWaitingUser = options.resolve_waiting_user === true
     || options.resolveWaitingUser === true
@@ -1823,6 +1881,11 @@ export function continueTaskWithMessage(taskId: string, message: string, ctx: Co
     collaboration_state: nextCollaborationState,
     last_continue_at: followup.time,
     last_continue_source: followup.source,
+    continuation_route_kind: continuationRouteKind,
+    ...(completedBeforeContinuation ? {
+      execution_attempt: Math.max(0, Number(current.execution_attempt || current.attempt || 0)) + 1,
+      resumed_from_completed_at: followup.time,
+    } : {}),
     ...(resolvesWaitingUser ? {
       recovery_pending: false,
       waiting_user_resolved_at: followup.time,

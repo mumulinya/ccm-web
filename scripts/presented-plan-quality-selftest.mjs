@@ -38,7 +38,7 @@ const empty = quality.evaluatePresentedPlanQuality({
   exclusions: ["手工改库存"],
 });
 assert.equal(empty.ok, false);
-assert.ok(empty.issues.some(item => item.includes("至少 1 条")));
+assert.ok(empty.issues.some(item => item.includes("at least one")));
 
 const duplicate = quality.evaluatePresentedPlanQuality({
   title: "预约履约",
@@ -47,7 +47,7 @@ const duplicate = quality.evaluatePresentedPlanQuality({
   exclusions: ["手工改库存"],
 });
 assert.equal(duplicate.ok, false);
-assert.ok(duplicate.issues.some(item => item.includes("重复")));
+assert.ok(duplicate.issues.some(item => item.includes("Duplicate step title")));
 
 const missingBoundary = quality.evaluatePresentedPlanQuality({
   title: "预约履约",
@@ -79,19 +79,23 @@ const presentTurn = (id) => ({
   usage: { inputTokens: 1, outputTokens: 2, totalTokens: 3, reported: true },
 });
 let degradeIndex = 0;
-const degraded = await loop.runNativeQueryLoop({
-  config: { providerNativeToolsMode: "auto", forceNativeQueryLoop: true },
-  messages: [{ role: "user", content: "做计划" }],
-  tools: [],
-  scope: "group",
-  scopeId: "g1",
-  exactSessionId: "gcs_plan_quality_script",
-  executeTools: async () => [],
-  callTurn: async () => presentTurn(degradeIndex++ === 0 ? "d1" : "d2"),
-});
-assert.equal(degraded.modelCallCount, 2);
-assert.equal(degraded.parsed?.planQuality?.ok, false);
-assert.equal(degraded.parsed?.planQuality?.repaired, true);
-assert.ok(degraded.toolResults.some(row => row.error === quality.PRESENTED_PLAN_QUALITY_ERROR));
+let blockedError = null;
+try {
+  await loop.runNativeQueryLoop({
+    config: { providerNativeToolsMode: "auto", forceNativeQueryLoop: true },
+    messages: [{ role: "user", content: "做计划" }],
+    tools: [],
+    scope: "group",
+    scopeId: "g1",
+    exactSessionId: "gcs_plan_quality_script",
+    executeTools: async () => [],
+    callTurn: async () => presentTurn(degradeIndex++ === 0 ? "d1" : "d2"),
+  });
+} catch (error) {
+  blockedError = error;
+}
+assert.equal(blockedError?.code, "CCM_PLAN_REVIEW_BLOCKED");
+assert.equal(degradeIndex, 2);
+assert.ok(Array.isArray(blockedError?.reviewReceipt?.issues));
 
 console.log("presented-plan-quality-selftest: pass");

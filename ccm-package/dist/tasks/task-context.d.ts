@@ -1,0 +1,129 @@
+export type CcmTaskScope = "global" | "group" | "project" | "feishu";
+export type CcmTaskSessionBindingV1 = {
+    schema: "ccm-task-session-binding-v1";
+    taskId: string;
+    attempt: number;
+    role: "source" | "active_execution" | "recovery";
+    scope: CcmTaskScope;
+    scopeId: string;
+    exactSessionId: string;
+    originalSessionId?: string;
+    createdForRecovery: boolean;
+    status: "active" | "released" | "deleted" | "unavailable";
+    reason?: "original_reused" | "original_missing" | "original_archived" | "session_busy" | "permission_changed";
+    taskContextRevision: number;
+    bindingChecksum: string;
+    createdAt: string;
+    releasedAt?: string;
+    contentStored: false;
+};
+export type CcmTaskContextCapsuleV1 = {
+    schema: "ccm-task-context-capsule-v1";
+    taskId: string;
+    scope: CcmTaskScope;
+    scopeId: string;
+    sourceSession: {
+        exactSessionId: string;
+        triggerMessageId: string;
+        sourceMessageIds: string[];
+        sourceAttachmentRefs: string[];
+        boundarySequence: number;
+        transcriptChecksum: string;
+    };
+    intent: {
+        goal: string;
+        corrections: string[];
+        decisions: string[];
+        acceptanceCriteria: string[];
+        exclusions: string[];
+    };
+    authorization: {
+        projects: string[];
+        allowedPaths: string[];
+        forbiddenPaths: string[];
+        permissionSnapshotChecksum: string;
+    };
+    plan?: {
+        planId: string;
+        revision: number;
+        checksum: string;
+    };
+    dispatchContract?: {
+        contractId: string;
+        checksum: string;
+    };
+    workItems: Array<{
+        workItemId: string;
+        stepId?: string;
+        project: string;
+        files: string[];
+        status: string;
+        latestAttempt: number;
+        completed: boolean;
+        agentSessionIds: string[];
+    }>;
+    fileEvidence: Array<{
+        evidenceId: string;
+        project: string;
+        path: string;
+        checksum: string;
+        readRanges: Array<{
+            start: number;
+            end: number;
+        }>;
+        purpose: string;
+        workItemIds: string[];
+        contentStored: false;
+    }>;
+    workspace: {
+        manifestChecksum: string;
+        worktreeBindings: unknown[];
+    };
+    completedWork: string[];
+    pendingWork: string[];
+    fileChangeEvidenceIds: string[];
+    verificationEvidenceIds: string[];
+    unresolvedToolCallIds: string[];
+    blockers: string[];
+    sessionBindings: CcmTaskSessionBindingV1[];
+    generation: number;
+    latestAttempt: number;
+    revision: number;
+    checksum: string;
+    status: "ready" | "incomplete" | "drifted" | "locked";
+    updatedAt: string;
+    contentStored: false;
+};
+export declare function buildTaskContextCapsule(task: any, previous?: CcmTaskContextCapsuleV1 | null, reason?: string): CcmTaskContextCapsuleV1;
+export declare function createTaskSessionBinding(input: {
+    task: any;
+    taskId: string;
+    attempt: number;
+    role: CcmTaskSessionBindingV1["role"];
+    scope: CcmTaskScope;
+    scopeId: string;
+    exactSessionId: string;
+    createdForRecovery: boolean;
+    originalSessionId?: string;
+    reason?: CcmTaskSessionBindingV1["reason"];
+    revision: number;
+}): CcmTaskSessionBindingV1;
+export declare function refreshTaskContext(task: any, reason?: string): CcmTaskContextCapsuleV1;
+export declare function updateTaskContext(taskId: string, delta?: any, expectedTaskRevision?: number): any;
+export declare function addTaskFileEvidence(taskId: string, evidence: any, expectedRevision?: number): any;
+export declare function projectTaskContext(task: any): {
+    schema: any;
+    taskId: string;
+    scope: any;
+    scopeId: string;
+    sourceSessionId: string;
+    activeSessionId: string;
+    revision: number;
+    checksum: string;
+    status: any;
+    pendingWorkItemCount: any;
+    completedWorkItemCount: any;
+    fileEvidenceCount: any;
+    sessionBindings: any;
+    contentStored: boolean;
+};

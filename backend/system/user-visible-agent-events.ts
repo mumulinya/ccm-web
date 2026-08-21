@@ -13,6 +13,7 @@ import {
   sanitizeAssistantProgressText,
   type AssistantProgressKind,
 } from "./assistant-progress";
+import { buildCcmCompletionSummary, type CcmCompletionSummaryV1 } from "./completion-summary";
 
 export const USER_VISIBLE_AGENT_EVENT_SCHEMA = "ccm-user-visible-agent-event-v1" as const;
 export const USER_VISIBLE_AGENT_RESULT_SCHEMA = "ccm-user-visible-agent-result-v1" as const;
@@ -137,6 +138,19 @@ export type UserVisibleAgentEvent = {
       safeLabel: string;
       contentStored: false;
     };
+    keyProgress?: {
+      schema: "ccm-agent-key-progress-v1";
+      eventId: string;
+      kind: "model_preamble" | "phase_update" | "tool_batch_started" | "tool_batch_completed" | "model_key_summary" | "child_agent_update" | "verification_update";
+      source: "model_stream" | "deterministic" | "summary_model" | "child_agent";
+      status: "running" | "success" | "failed" | "waiting";
+      round: number;
+      text: string;
+      modelCallIndex: number;
+      toolCallIds: string[];
+      relatedEventIds: string[];
+      contentStored: false;
+    };
     promptBindings?: CcmInternalPromptBindings;
     liveProgress?: {
       phase: "starting" | "running" | "testing" | "building" | "finishing" | "retrying";
@@ -185,6 +199,7 @@ export type UserVisibleAgentEvent = {
       sourceEventChecksum: string;
       contentStored: false;
     };
+    completionSummary?: CcmCompletionSummaryV1;
   };
   visibility: "default" | "transcript" | "technical";
   contentStored: false;
@@ -678,6 +693,26 @@ export function normalizeUserVisibleAgentEvent(input: any, sequence = 0): UserVi
         contentStored: false as const,
       },
     } : {}),
+    ...(detailSource.keyProgress && typeof detailSource.keyProgress === "object"
+      && String(detailSource.keyProgress.schema || "ccm-agent-key-progress-v1") === "ccm-agent-key-progress-v1"
+      && ["model_preamble", "phase_update", "tool_batch_started", "tool_batch_completed", "model_key_summary", "child_agent_update", "verification_update"].includes(String(detailSource.keyProgress.kind))
+      && ["model_stream", "deterministic", "summary_model", "child_agent"].includes(String(detailSource.keyProgress.source)) ? {
+      keyProgress: {
+        schema: "ccm-agent-key-progress-v1" as const,
+        eventId: compactText(detailSource.keyProgress.eventId || input?.eventId || input?.event_id, 240),
+        kind: String(detailSource.keyProgress.kind) as UserVisibleAgentEvent["detail"]["keyProgress"]["kind"],
+        source: String(detailSource.keyProgress.source) as UserVisibleAgentEvent["detail"]["keyProgress"]["source"],
+        status: ["running", "success", "failed", "waiting"].includes(String(detailSource.keyProgress.status))
+          ? String(detailSource.keyProgress.status) as UserVisibleAgentEvent["detail"]["keyProgress"]["status"]
+          : "running",
+        round: Math.max(0, Number(detailSource.keyProgress.round || 0)),
+        text: sanitizeAssistantProgressText(detailSource.keyProgress.text || detailSource.progress?.text || "", 240),
+        modelCallIndex: Math.max(0, Number(detailSource.keyProgress.modelCallIndex || 0)),
+        toolCallIds: uniqueStrings(detailSource.keyProgress.toolCallIds || detailSource.keyProgress.tool_call_ids, 64),
+        relatedEventIds: uniqueStrings(detailSource.keyProgress.relatedEventIds || detailSource.keyProgress.related_event_ids, 64),
+        contentStored: false as const,
+      },
+    } : {}),
     ...(sanitizePromptBindings(detailSource.promptBindings || detailSource.prompt_bindings)
       ? { promptBindings: sanitizePromptBindings(detailSource.promptBindings || detailSource.prompt_bindings)! }
       : {}),
@@ -743,15 +778,40 @@ export function normalizeUserVisibleAgentEvent(input: any, sequence = 0): UserVi
         contentStored: false,
       },
     } : {}),
+    ...(detailSource.completionSummary || input?.completionSummary || input?.result?.completionSummary || input?.result?.completion_summary
+      ? { completionSummary: buildCcmCompletionSummary(detailSource.completionSummary || input?.completionSummary || input?.result?.completionSummary || input?.result?.completion_summary) }
+      : {}),
   };
   const stableIdentity = {
     scope, scopeId, exactSessionId, generation: Math.max(0, Number(input?.generation || 0)),
     taskId: input?.taskId || input?.task_id || "", workItemId: input?.workItemId || input?.work_item_id || "",
     toolCallId: input?.toolCallId || input?.tool_call_id || "", eventType, createdAt,
   };
+  const normalizedEventId = compactText(input?.eventId || input?.event_id, 240) || `uve_${hash(stableIdentity).slice(0, 28)}`;
+  if (/^agent_(?:started|progress|completed|failed)$/.test(eventType) && !detail.keyProgress) {
+    const childText = sanitizeAssistantProgressText(
+      detail.liveProgress?.safeSummary || display.summary || display.title,
+      240,
+    );
+    if (childText) {
+      detail.keyProgress = {
+        schema: "ccm-agent-key-progress-v1",
+        eventId: normalizedEventId,
+        kind: "child_agent_update",
+        source: "child_agent",
+        status: status === "success" ? "success" : status === "failed" ? "failed" : status === "waiting" ? "waiting" : "running",
+        round: Math.max(0, eventAttempt - 1),
+        text: childText,
+        modelCallIndex: 0,
+        toolCallIds: [],
+        relatedEventIds: [],
+        contentStored: false,
+      };
+    }
+  }
   return {
     schema: USER_VISIBLE_AGENT_EVENT_SCHEMA,
-    eventId: compactText(input?.eventId || input?.event_id, 240) || `uve_${hash(stableIdentity).slice(0, 28)}`,
+    eventId: normalizedEventId,
     sequence: Math.max(0, Number((input?.sequence ?? sequence) || 0)),
     eventType,
     scope,
@@ -844,6 +904,31 @@ export function appendAssistantProgress(input: any) {
   }).slice(0, 16);
   const eventId = compactText(input?.eventId || input?.event_id, 240)
     || `assistant-progress:${turnIdentity}:${repeatableKind ? `${kind}:${semanticFingerprint}` : `${modelCallIndex}:${milestoneChecksum.slice(0, 20)}`}`;
+  const legacyKindToKeyKind: Record<string, string> = {
+    before_tools: "model_preamble",
+    verification: "verification_update",
+    rework: "child_agent_update",
+    direction_change: "child_agent_update",
+    before_summary: "model_key_summary",
+    key_finding: "phase_update",
+    blocker: "verification_update",
+  };
+  const existingKeyProgress = input?.detail?.keyProgress;
+  const keyProgress = existingKeyProgress && existingKeyProgress.schema === "ccm-agent-key-progress-v1"
+    ? { ...existingKeyProgress, eventId: compactText(existingKeyProgress.eventId || eventId, 240) }
+    : {
+      schema: "ccm-agent-key-progress-v1",
+      eventId,
+      kind: legacyKindToKeyKind[kind] || "phase_update",
+      source: "deterministic",
+      status: input?.display?.status || "running",
+      round: Math.max(0, Number(input?.round || 0)),
+      text: text.slice(0, 240),
+      modelCallIndex,
+      toolCallIds: relatedToolCallIds,
+      relatedEventIds: [],
+      contentStored: false,
+    };
   return appendUserVisibleAgentEvent({
     ...input,
     eventId,
@@ -856,6 +941,7 @@ export function appendAssistantProgress(input: any) {
     detail: {
       ...(input?.detail || {}),
       progress: { kind, text, modelCallIndex, relatedToolCallIds, batchId, milestoneChecksum },
+      keyProgress,
     },
     visibility: "default",
   });
@@ -959,6 +1045,17 @@ export function publishEphemeralUserVisibleAgentEvent(input: any) {
 }
 
 export function buildUserVisibleAgentResult(input: any) {
+  const source = input?.source === "terminal_gate" || input?.terminalGate || input?.terminal_gate
+    ? "terminal_gate"
+    : "query_projection";
+  const completionSummary = buildCcmCompletionSummary({
+    ...input,
+    source,
+    terminalGate: input?.terminalGate || input?.terminal_gate,
+    fileChanges: input?.fileChanges || input?.file_changes || input?.filesChanged || input?.files_changed,
+    verification: input?.verification || input?.verificationResults || input?.verification_results,
+    blockers: input?.blockers || input?.unfinished || input?.incomplete,
+  });
   return {
     schema: USER_VISIBLE_AGENT_RESULT_SCHEMA,
     status: compactText(input?.status, 80) || "success",
@@ -973,6 +1070,7 @@ export function buildUserVisibleAgentResult(input: any) {
     verification: sanitizeUserVisibleAgentDetail(input?.verification || input?.verificationResults || input?.verification_results || []),
     unfinished: uniqueStrings(input?.unfinished || input?.incomplete || input?.blockers),
     usage: sanitizeUserVisibleAgentDetail(input?.usage || {}),
+    completionSummary,
     contentStored: false,
   };
 }

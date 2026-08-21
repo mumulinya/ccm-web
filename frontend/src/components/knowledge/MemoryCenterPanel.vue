@@ -884,8 +884,8 @@ onMounted(() => loadOverview(false))
             <!-- 4 格现代化 KPI 指标卡片 -->
             <div v-if="selectedScope === 'project'" class="metrics-grid">
               <div class="metric-card">
-                <small>实际注入估算</small>
-                <strong class="font-mono">{{ formatNumber(selectedSummary.currentTokens) }} tokens</strong>
+                <small>当前模型载荷</small>
+                <strong>需选择精确会话</strong>
               </div>
               <div class="metric-card">
                 <small>有效长期记忆</small>

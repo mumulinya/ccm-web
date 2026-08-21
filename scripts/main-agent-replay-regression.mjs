@@ -71,7 +71,10 @@ async function run() {
     if (browserMessages.length) throw new Error(`Browser errors:\n${browserMessages.join('\n')}`)
 
     const chat = page.locator('#replay-msg-replay-assistant-chat')
-    await expectVisible(chat.locator('.main-agent-decision-card'), 'replayed simple conversation card')
+    // Ordinary replies intentionally have no mode/decision card. The replay
+    // contract is that a plain answer stays plain and does not create a
+    // pseudo execution surface.
+    await expectHidden(chat.locator('.main-agent-decision-card'), 'replayed simple conversation decision card')
     await expectHidden(chat.locator('.decision-plan'), 'replayed simple conversation todo plan')
     if (await chat.getByText('我准备这样处理').isVisible().catch(() => false)) throw new Error('replayed simple conversation should not show todo title')
     await textDoesNotLeak(chat, [/trace_id/i, /session_ids/i, /CCM_AGENT_RECEIPT/i, /Runtime Kernel/i], 'simple conversation')
@@ -91,8 +94,8 @@ async function run() {
     const technical = task.locator('details.task-card-technical')
     await technical.locator('summary').click()
     await expectVisible(technical.getByText('完整记录'), 'replayed task technical full records after expand')
-    await expectVisible(technical.getByText('执行记录'), 'replayed task execution record after expand')
-    await expectHidden(technical.getByText('trace-replay-task'), 'replayed raw trace id after expand')
+    await expectVisible(technical.getByText('任务记录'), 'replayed task execution record after expand')
+    await expectVisible(technical.getByText('trace-replay-task'), 'replayed task trace link after expand')
     await task.screenshot({ path: path.join(outputDir, '03-replay-technical-expanded.png') })
 
     const child = page.locator('#replay-msg-replay-child-agent')

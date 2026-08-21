@@ -1,3 +1,4 @@
+import { normalizeOpenAiResponsesUrl } from "./openai-responses-transport";
 export type UnifiedCompactionModelAudit = {
     beforeRequest?: (input: {
         provider: string;
@@ -13,6 +14,7 @@ export type UnifiedCompactionModelAudit = {
 };
 export declare function extractUnifiedCompactionJson(text: string): any;
 export declare function normalizeUnifiedOpenAiUrl(value: string): string;
+export { normalizeOpenAiResponsesUrl };
 export declare function normalizeUnifiedAnthropicUrl(value: string): string;
 export declare function normalizeUnifiedGeminiUrl(value: string, model: string): string;
 export declare function callUnifiedCompactionModelOnce(config: any, system: string, user: string, maxOutputTokens: number, attemptTimeoutMs: number, audit?: UnifiedCompactionModelAudit): Promise<{

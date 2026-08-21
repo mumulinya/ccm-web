@@ -1,0 +1,9 @@
+{
+  "schema": "ccm-release-build-attestation-v1",
+  "package_name": "@mumulinya167/cc-web",
+  "version": "2.0.11",
+  "package_json_sha256": "2668fc9345cbc04d9a9947a17a15c24b4661beed35f7d026d08b5b9db3191c95",
+  "source_root": "C:\\Users\\admin\\.cc-connect\\ccm",
+  "created_at": "2026-08-20T02:21:47.215Z",
+  "expires_at": "2026-08-20T03:21:47.216Z"
+}

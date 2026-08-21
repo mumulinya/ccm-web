@@ -60,6 +60,7 @@ import { recordFailure } from "../../system/failure-record";
 import { appendTaskTransitionEvent } from "../../system/task-transition-ledger";
 import { validateTestAgentCompletionGate } from "../../test-agent/completion-gate";
 import { permissionSnapshotForTask } from "../tools/conversation-permission-policy";
+import { buildTaskContextCapsule, refreshTaskContext } from "../../tasks/task-context";
 
 import {
   buildCodedCoordinatorSummary,
@@ -745,6 +746,17 @@ function createTaskWithScopedIdentity(task: any) {
   }
   newTask.work_items = buildMainAgentWorkItems(newTask);
   newTask.work_item_summary = buildMainAgentWorkItemSummary(newTask.work_items);
+  // The task context is the durable recovery authority. It is written in the
+  // same task transaction as the task itself; transcript/session data remains
+  // an auxiliary source and may disappear later.
+  newTask.task_context = buildTaskContextCapsule(newTask);
+  newTask.task_context_revision_receipt = {
+    revision: newTask.task_context.revision,
+    checksum: newTask.task_context.checksum,
+    reason: "task_created",
+    at: newTask.task_context.updatedAt,
+    contentStored: false,
+  };
   tasks.push(newTask);
   saveTasks(tasks);
   appendTraceEvent(traceId, { id: `task:${newTask.id}:created`, type: "task.created", status: "ok", task_id: newTask.id, group_id: newTask.group_id || "", agent: newTask.target_project || "", message: newTask.title, data: { workflow_type: newTask.workflow_type, assign_type: newTask.assign_type, group_session_id: newTask.group_session_id || "", idempotency_key: idempotencyKey ? "present" : "absent", intake_identity_checksum: intakeIdentity?.checksum || "", source_channel: intakeIdentity?.source_channel || "", target_scope: intakeIdentity?.target_scope || "" } });
@@ -1674,6 +1686,14 @@ export function updateTask(id: string, updates: any) {
   tasks[idx].lifecycle = deriveTaskLifecycle(tasks[idx], taskExecutions);
   tasks[idx].work_items = buildMainAgentWorkItems(tasks[idx], { executions: taskExecutions });
   tasks[idx].work_item_summary = buildMainAgentWorkItemSummary(tasks[idx].work_items);
+  tasks[idx].task_context = refreshTaskContext(tasks[idx], updates.status ? `status_${updates.status}` : "task_updated");
+  tasks[idx].task_context_revision_receipt = {
+    revision: tasks[idx].task_context.revision,
+    checksum: tasks[idx].task_context.checksum,
+    reason: updates.status ? `status_${updates.status}` : "task_updated",
+    at: tasks[idx].task_context.updatedAt,
+    contentStored: false,
+  };
   if (updates.status === "done") {
     tasks[idx].completed_at = updates.completed_at || new Date().toISOString();
   } else if (updates.status && updates.status !== "done") {
@@ -1905,11 +1925,13 @@ export function purgeArchivedTask(id: string) {
     }
   }
   const purgedSessions = purgeTaskAgentSessions(id);
+  let purgedRecoverySessions: any[] = [];
+  try { purgedRecoverySessions = require("../../tasks/task-recovery-sessions").purgeTaskRecoveryUserSessions(current); } catch {}
   const purgedExecutionArtifacts = purgeTaskExecutionArtifacts(id);
   const purgedTestAgentArtifacts = purgeTestAgentArtifactsForTask(id);
   const purgedTestAgentRuns = purgeTestAgentRunnerRecordsForTask(id);
   const purgedReplayJournal = purgeTaskReplayJournalForTask(id);
   clearTaskCancellation(id);
   saveTasks(tasks.filter(task => task.id !== id));
-  return { ...current, purge_cleanup: { sessions: purgedSessions.length, test_agent_artifacts: purgedTestAgentArtifacts, test_agent_runs: purgedTestAgentRuns, replay_journal: purgedReplayJournal, ...purgedExecutionArtifacts } };
+  return { ...current, purge_cleanup: { sessions: purgedSessions.length, recovery_user_sessions: purgedRecoverySessions.length, test_agent_artifacts: purgedTestAgentArtifacts, test_agent_runs: purgedTestAgentRuns, replay_journal: purgedReplayJournal, ...purgedExecutionArtifacts } };
 }

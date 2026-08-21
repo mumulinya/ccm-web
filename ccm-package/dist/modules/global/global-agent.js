@@ -35,6 +35,10 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.postLocalSseOrJsonApi = exports.postLocalApi = exports.callLocalApi = exports.getRequestBaseUrl = exports.waitForGlobalAgentBridgeResult = exports.createGlobalAgentBridgeRequest = exports.saveGlobalAgentBridgeStore = exports.loadGlobalAgentBridgeStore = exports.buildGlobalAgentEventUi = exports.runGlobalModelRetrySelfTest = exports.callGlobalModelWithRetry = exports.callLlm = exports.hasExplicitGlobalWriteAuthorization = exports.inferLocalGlobalAction = exports.runGlobalAgentIntentSelfTest = void 0;
 exports.runGlobalAgentHistorySyncSelfTest = runGlobalAgentHistorySyncSelfTest;
+exports.deleteGlobalAgentConversationSession = deleteGlobalAgentConversationSession;
+exports.loadGlobalAgentHistoryStore = loadGlobalAgentHistoryStore;
+exports.createGlobalAgentConversationSession = createGlobalAgentConversationSession;
+exports.getGlobalAgentConversationMessages = getGlobalAgentConversationMessages;
 exports.runFeishuGlobalAgentSessionRoutingSelfTest = runFeishuGlobalAgentSessionRoutingSelfTest;
 exports.verifyGlobalAgentContextBoundary = verifyGlobalAgentContextBoundary;
 exports.buildGlobalAgentGroupMemoryModelContext = buildGlobalAgentGroupMemoryModelContext;
@@ -416,6 +420,7 @@ const globalAgentAgenticRuntime = (0, global_agent_agentic_runtime_1.createGloba
     compactPetText,
     completeGlobalAgentSupervision: loop_1.completeGlobalAgentSupervision,
     completeIdempotency: reliability_ledger_1.completeIdempotency,
+    continueTaskWithMessage: collaboration_1.continueTaskWithMessage,
     conversationTurnControl: conversation_turn_control_1.conversationTurnControl,
     continueGlobalAgentRunWithClarification: loop_1.continueGlobalAgentRunWithClarification,
     controlGlobalDevelopmentMission: collaboration_1.controlGlobalDevelopmentMission,

@@ -41,8 +41,15 @@ function call(id: any, name: any, args: any): ProviderToolCall {
   return { id: String(id || `call_${checksum({ name, parsed }).slice(0, 16)}`), name: String(name || ""), arguments: parsed, argumentsChecksum: checksum(parsed) };
 }
 
-export function providerToolsRequestPatch(family: "openai" | "anthropic" | "gemini", tools: ProviderToolDefinition[], nativeToolReference = false) {
+export function providerToolsRequestPatch(family: "openai" | "openai-responses" | "anthropic" | "gemini", tools: ProviderToolDefinition[], nativeToolReference = false) {
   const filtered = tools.filter(tool => tool?.name && tool.deferred !== true);
+  if (family === "openai-responses") return {
+    body: {
+      tools: filtered.map(tool => ({ type: "function", name: tool.name, description: tool.description, parameters: tool.inputSchema || { type: "object", properties: {} } })),
+      tool_choice: "auto",
+    },
+    headers: {},
+  };
   if (family === "openai") return { body: { tools: filtered.map(tool => ({ type: "function", function: { name: tool.name, description: tool.description, parameters: tool.inputSchema || { type: "object", properties: {} } } })), tool_choice: "auto" }, headers: {} };
   if (family === "gemini") return { body: { tools: [{ functionDeclarations: filtered.map(tool => ({ name: tool.name, description: tool.description, parameters: tool.inputSchema || { type: "object", properties: {} } })) }] }, headers: {} };
   return {
@@ -58,6 +65,25 @@ export function parseOpenAiAgentTurn(data: any, usage: LlmTokenUsage): ProviderA
     toolCalls: (message.tool_calls || []).map((item: any) => call(item.id, item.function?.name, item.function?.arguments)),
     toolReferences: [],
     stopReason: String(data?.choices?.[0]?.finish_reason || ""),
+    usage,
+  };
+}
+
+export function parseOpenAiResponsesAgentTurn(data: any, usage: LlmTokenUsage): ProviderAgentTurn {
+  const output = Array.isArray(data?.output) ? data.output : [];
+  const messageText = output
+    .filter((item: any) => item?.type === "message")
+    .flatMap((item: any) => Array.isArray(item?.content) ? item.content : [])
+    .filter((item: any) => item?.type === "output_text" || item?.type === "text")
+    .map((item: any) => String(item?.text || ""))
+    .join("");
+  return {
+    text: typeof data?.output_text === "string" ? data.output_text : messageText,
+    toolCalls: output
+      .filter((item: any) => item?.type === "function_call")
+      .map((item: any) => call(item.call_id || item.id, item.name, item.arguments)),
+    toolReferences: [],
+    stopReason: String(data?.status || data?.incomplete_details?.reason || ""),
     usage,
   };
 }
@@ -125,6 +151,61 @@ export function createOpenAiStreamTurnAccumulator(onToolCallReady?: (item: Provi
       }
     },
     finish(usage: LlmTokenUsage): ProviderAgentTurn { return { text, toolCalls: [...calls.values()].map(row => call(row.id, row.name, row.arguments)), toolReferences: [], stopReason, usage }; },
+  };
+}
+
+export function createOpenAiResponsesStreamTurnAccumulator(onToolCallReady?: (item: ProviderToolCall) => void) {
+  const calls = new Map<string, { id: string; name: string; arguments: string }>();
+  const emitted = new Set<string>();
+  let text = "";
+  let stopReason = "";
+  let finalResponse: any = null;
+
+  const updateCall = (event: any, item: any = null) => {
+    const source = item || event?.item || {};
+    const key = String(event?.item_id || source?.id || source?.call_id || event?.call_id || event?.output_index || calls.size);
+    const row = calls.get(key) || { id: "", name: "", arguments: "" };
+    row.id = String(source.call_id || source.id || event?.call_id || row.id || key);
+    row.name = String(source.name || event?.name || row.name || "");
+    if (source.arguments != null) row.arguments = String(source.arguments);
+    else if (event?.arguments != null) row.arguments = String(event.arguments);
+    else if (event?.delta != null) row.arguments += String(event.delta);
+    calls.set(key, row);
+    tryCompleteToolCall(row, emitted, onToolCallReady);
+  };
+
+  return {
+    push(event: any) {
+      const type = String(event?.type || "");
+      if (type === "response.output_text.delta") text += String(event?.delta || "");
+      if (type === "response.output_item.added" && event?.item?.type === "function_call") updateCall(event, event.item);
+      if (type === "response.function_call_arguments.delta" || type === "response.function_call_arguments.done") updateCall(event);
+      if (type === "response.output_item.done" && event?.item?.type === "function_call") updateCall(event, event.item);
+      if (["response.completed", "response.incomplete", "response.failed"].includes(type)) {
+        finalResponse = event?.response || null;
+        stopReason = String(finalResponse?.status || type.replace("response.", "") || stopReason);
+      }
+      if (type === "error") stopReason = "failed";
+    },
+    finalResponse() { return finalResponse; },
+    finish(usage: LlmTokenUsage): ProviderAgentTurn {
+      if (finalResponse) {
+        const parsed = parseOpenAiResponsesAgentTurn(finalResponse, usage);
+        if (!text) text = parsed.text;
+        for (const item of parsed.toolCalls) {
+          if (![...calls.values()].some(row => row.id === item.id)) {
+            calls.set(item.id, { id: item.id, name: item.name, arguments: JSON.stringify(item.arguments || {}) });
+          }
+        }
+      }
+      return {
+        text,
+        toolCalls: [...calls.values()].filter(row => row.name).map(row => call(row.id, row.name, row.arguments)),
+        toolReferences: [],
+        stopReason,
+        usage,
+      };
+    },
   };
 }
 

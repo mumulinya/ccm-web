@@ -58,7 +58,6 @@ exports.recordMemoryOperation = recordMemoryOperation;
 exports.memoryCenterExactGroupSessionScope = memoryCenterExactGroupSessionScope;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
-const context_budget_1 = require("../../system/context-budget");
 const utils_1 = require("../../core/utils");
 const db_1 = require("../../core/db");
 const memory_control_center_types_1 = require("./memory-control-center-types");
@@ -79,6 +78,7 @@ const context_engine_recovery_1 = require("../../system/context-engine-recovery"
 const session_context_tool_buckets_1 = require("../../system/session-context-tool-buckets");
 const unified_session_compaction_1 = require("../../system/unified-session-compaction");
 const session_compaction_core_1 = require("../../system/session-compaction-core");
+const ccm_context_accounting_v2_1 = require("../../system/ccm-context-accounting-v2");
 const MODEL_VISIBLE_FIXED_BUCKETS = [
     "system",
     "tools",
@@ -168,16 +168,20 @@ function buildAvailableContextCatalog(scope, scopeId, memory, modelVisiblePayloa
     };
     const decorateEvidence = (name, kind, available, configured = true) => {
         const loadedRows = kind === "mcp" ? loadedMcp : loadedSkills;
-        const loaded = loadedRows.filter((item) => evidenceMatches(item, name, kind));
+        const evidenceRows = loadedRows.filter((item) => evidenceMatches(item, name, kind));
+        const loaded = evidenceRows.filter((item) => {
+            const level = String(item?.loadLevel || item?.level || "");
+            return kind === "mcp" ? level === "schema" : level === "body";
+        });
         const invoked = invocations.filter((item) => evidenceMatches(item, name, kind));
         return {
             state: !available && !loaded.length ? "unavailable" : invoked.length ? "invoked" : loaded.length ? "loaded" : "available",
             configured,
             evidenceStatus: evidenceAvailable ? "exact" : "unproven",
-            loadLevels: Array.from(new Set(loaded.map((item) => String(item?.loadLevel || "")).filter(Boolean))),
-            loadSources: Array.from(new Set(loaded.map((item) => String(item?.loadSource || item?.load_source || "")).filter(Boolean))),
+            loadLevels: Array.from(new Set(evidenceRows.map((item) => String(item?.loadLevel || "")).filter(Boolean))),
+            loadSources: Array.from(new Set(evidenceRows.map((item) => String(item?.loadSource || item?.load_source || "")).filter(Boolean))),
             loadedTokens: loaded.reduce((sum, item) => sum + Math.max(0, Number(item?.tokens || item?.tokenCount || item?.token_count || 0)), 0),
-            dropReasons: Array.from(new Set(loaded.map((item) => String(item?.dropReason || item?.drop_reason || "")).filter(Boolean))),
+            dropReasons: Array.from(new Set(evidenceRows.map((item) => String(item?.dropReason || item?.drop_reason || "")).filter(Boolean))),
             invocationCount: invoked.length,
             invocationSucceeded: invoked.some((item) => item?.ok === true),
             loadedChecksum: String(loadedEvidence?.checksum || modelVisiblePayload?.loadedContextItemsChecksum || modelVisiblePayload?.loaded_context_items_checksum || ""),
@@ -273,11 +277,15 @@ function modelVisiblePayloadFixedTokens(payload) {
 function isCompleteMemoryCenterContextAccounting(payload) {
     const breakdown = payload?.tokenBreakdown || payload?.token_breakdown;
     const totalTokens = Number(payload?.totalTokens ?? payload?.total_tokens ?? 0);
+    const primary = payload?.primaryTokenBreakdown || payload?.primary_token_breakdown;
+    const primaryTotal = primary && typeof primary === "object"
+        ? Object.values((0, ccm_context_accounting_v2_1.normalizeCcmPrimaryTokenBreakdown)(primary)).reduce((sum, value) => sum + value, 0)
+        : 0;
     return !!breakdown
         && typeof breakdown === "object"
         && Number.isFinite(totalTokens)
         && totalTokens > 0
-        && modelVisiblePayloadFixedTokens(payload) > 0;
+        && (primaryTotal > 0 || modelVisiblePayloadFixedTokens(payload) > 0);
 }
 function selectMemoryCenterContextAccounting(input) {
     const stored = input.stored || null;
@@ -310,13 +318,23 @@ function latestGroupContextAccounting(scopeId, memory) {
         return {
             event,
             payload: {
-                schema: "ccm-model-visible-payload-accounting-v1",
+                schema: "ccm-model-visible-payload-accounting-v2",
+                accountingSchema: "ccm-context-accounting-v2",
                 scope: "group",
                 sessionId: `${exact.groupId}:${exact.sessionId}`,
+                exactSessionId: exact.sessionId,
+                provider: String(event.provider || ""),
+                model: String(event.model || ""),
+                protocol: String(event.protocol || ""),
                 tokenBreakdown: event.token_breakdown,
+                primaryTokenBreakdown: (0, ccm_context_accounting_v2_1.normalizeCcmPrimaryTokenBreakdown)(event.token_breakdown),
+                technicalTokenBreakdown: (0, ccm_context_accounting_v2_1.normalizeCcmTechnicalTokenBreakdown)(event.token_breakdown),
+                primaryTokenTotal: Object.values((0, ccm_context_accounting_v2_1.normalizeCcmPrimaryTokenBreakdown)(event.token_breakdown)).reduce((sum, value) => sum + value, 0),
                 totalTokens: Number(event.accounting_total_tokens || event.estimated_payload_tokens || 0),
+                predictedNextRequestTokens: Number(event.predicted_next_request_tokens || event.accounting_total_tokens || event.estimated_payload_tokens || 0),
                 payloadChecksum: String(event.payload_checksum || ""),
                 fixedContextChecksum: String(event.fixed_context_checksum || ""),
+                providerIdentityChecksum: String(event.provider_identity_checksum || ""),
                 contentStored: false,
             },
             updatedAt: String(event.recorded_at || ""),
@@ -646,147 +664,43 @@ function scopeFile(scope, scopeId) {
 }
 function resolveMemoryCenterTokenState(scope, scopeId, memory, options = {}) {
     const compaction = memory?.compaction?.v2 || memory?.compaction || {};
-    const warning = compaction.contextPressureWarning || compaction.compactWarning || {};
-    const decision = compaction.compactStrategyDecision || {};
     const config = options.config || (0, group_orchestrator_config_1.loadOrchestratorConfig)();
     const defaultCapacity = (0, group_compaction_strategy_1.resolveGroupModelContextCapacity)(config);
     const capacity = memory?.compaction?.resolved_model_capacity || compaction.resolvedModelCapacity || compaction.resolved_model_capacity || defaultCapacity;
+    const canonicalCapacity = (0, ccm_context_accounting_v2_1.normalizeCcmContextCapacity)({
+        ...capacity,
+        rawWindowTokens: capacity.rawWindowTokens || capacity.contextWindow || capacity.context_window,
+        windowSemantics: capacity.windowSemantics || capacity.window_semantics,
+        source: capacity.source === "user_setting" ? "user_setting" : capacity.conservativeFallback ? "conservative_fallback" : "provider_capability",
+        confidence: capacity.confidence,
+        evidenceId: capacity.evidenceId || capacity.evidence_id,
+    });
     const modelVisiblePayload = memory?.compaction?.model_visible_payload || compaction.modelVisiblePayload || compaction.model_visible_payload || compaction.postCompactGate?.model_visible_payload || compaction.post_compact_gate?.model_visible_payload || null;
-    let currentTokens = Number(compaction.tokenMeasurement?.activeTokens ?? compaction.token_measurement?.activeTokens ?? modelVisiblePayload?.totalTokens ?? compaction.postCompactTokenCount ?? memory?.providerContextUsageBaseline?.observed_context_tokens ?? 0);
-    let currentMessageCount = 0;
-    const measurementMethod = String(compaction.tokenMeasurement?.method || compaction.token_measurement?.method || "");
-    let tokenSource = currentTokens <= 0 ? "empty"
-        : measurementMethod === "latest_provider_usage_plus_new_message_estimate" ? "provider_usage_plus_estimate"
-            : ["model_visible_payload_estimate", "full_prompt_estimate"].includes(measurementMethod) ? "model_visible_payload"
-                : measurementMethod === "final_provider_payload_gate" ? "provider_usage"
-                    : "post_compact_record";
-    let tokenUpdatedAt = warning.createdAt || decision.createdAt || compaction.lastPressureSampleAt || compaction.lastCompactedAt || "";
-    let fallbackTokenMeasurement = null;
-    if (scope === "project") {
-        const activeDurable = (Array.isArray(memory?.durableMemories) ? memory.durableMemories : [])
-            .filter((item) => item?.content && !["resolved", "superseded"].includes(String(item.status || "active")))
-            .sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")))
-            .slice(0, 24);
-        const projectedContext = {
-            project: memory?.project || scopeId,
-            workDir: memory?.workDir || "",
-            architecture: memory?.architecture || "",
-            techStack: memory?.techStack || [],
-            durableMemories: activeDurable,
-            resources: memory?.resources || {},
-        };
-        currentTokens = (0, group_compaction_projections_1.estimateGroupMessageTokens)({ role: "system", content: JSON.stringify(projectedContext) });
-        currentMessageCount = activeDurable.length;
-        tokenSource = "project_long_term_injection_estimate";
-        tokenUpdatedAt = memory?.updatedAt || tokenUpdatedAt;
-    }
-    else if (scope === "group") {
-        const parts = parseGroupMemoryScopeId(scopeId, memory);
-        const liveAccounting = latestGroupContextAccounting(scopeId, memory);
-        const pressureUpdatedAt = String(warning.createdAt || decision.createdAt || compaction.lastPressureSampleAt || "");
-        const liveAccountingIsNewest = !!liveAccounting
-            && (!pressureUpdatedAt || Date.parse(liveAccounting.updatedAt) >= Date.parse(pressureUpdatedAt));
-        const recordedTokens = Number(warning.tokenUsage
-            ?? decision.activeTokensBeforeCompact
-            ?? compaction.apiMicroCompactEditPlan?.activeTokens
-            ?? compaction.postCompactTokenCount
-            ?? 0);
-        if (liveAccountingIsNewest && Number(liveAccounting?.event?.provider_observed_context_tokens || 0) > 0) {
-            currentTokens = Number(liveAccounting.event.provider_observed_context_tokens || 0);
-            currentMessageCount = Number(compaction.totalMessagesSeen || 0);
-            tokenSource = "provider_usage";
-            tokenUpdatedAt = liveAccounting.updatedAt;
-        }
-        else if (Number.isFinite(recordedTokens) && recordedTokens >= 0 && (warning.schema || decision.schema || compaction.apiMicroCompactEditPlan?.schema)) {
-            currentTokens = recordedTokens;
-            currentMessageCount = Number(warning.activeMessageCount || decision.activeMessageCount || compaction.totalMessagesSeen || 0);
-            tokenSource = warning.schema ? "context_pressure_sample" : decision.schema ? "compact_strategy_sample" : "api_microcompact_sample";
-        }
-        else if (currentTokens <= 0) {
-            try {
-                const messages = require("../collaboration/storage").getGroupMessages(parts.groupId, parts.sessionId);
-                currentTokens = messages.reduce((sum, message) => sum + (0, group_compaction_projections_1.estimateGroupMessageTokens)(message), 0);
-                currentMessageCount = messages.length;
-                tokenSource = "message_estimate";
-            }
-            catch { }
-        }
-        else {
-            currentMessageCount = Number((compaction.preservedRecentMessageIds || compaction.preserved_recent_message_ids || []).length
-                || compaction.preservedRecentMessages
-                || 0);
-            tokenSource = String(compaction.tokenMeasurement?.source || compaction.token_measurement?.source || tokenSource);
-        }
-    }
-    else if (scope === "global_session") {
-        if (currentTokens <= 0) {
-            try {
-                const sessionId = scopeId.replace(/^session:/, "");
-                const transcript = require("../../agents/global/memory").loadGlobalAgentTranscript(sessionId);
-                const lastCompactedIndex = Number(compaction.lastCompactedIndex ?? memory?.lastCompactedIndex ?? -1);
-                const visibleMessages = (Array.isArray(transcript?.messages) ? transcript.messages : []).slice(Math.max(0, lastCompactedIndex + 1));
-                currentTokens = visibleMessages.reduce((sum, message) => sum + (0, group_compaction_projections_1.estimateGroupMessageTokens)(message), 0);
-                currentMessageCount = visibleMessages.length;
-                const summarySource = String(memory?.summarySource || memory?.summary_source || compaction.summarySource || compaction.summary_source || "").toLowerCase();
-                if (["model", "session_memory", "session-memory"].includes(summarySource)) {
-                    const activeSummary = compaction.activeSummary || memory?.summary;
-                    if (activeSummary)
-                        currentTokens += (0, group_compaction_projections_1.estimateGroupMessageTokens)({ role: "system", content: activeSummary });
-                }
-                tokenSource = "encrypted_transcript_estimate";
-                tokenUpdatedAt = transcript?.updatedAt || tokenUpdatedAt;
-            }
-            catch { }
-        }
-        else {
-            currentMessageCount = Number((compaction.preservedRecentMessageIds || compaction.preserved_recent_message_ids || []).length || 0);
-            tokenSource = String(compaction.tokenMeasurement?.source || compaction.token_measurement?.source || tokenSource);
-        }
-    }
-    else if (scope === "project_session") {
-        if (currentTokens <= 0) {
-            const history = Array.isArray(memory?.history)
-                ? memory.history
-                : Array.isArray(memory?.messages) ? memory.messages : [];
-            const lastCompactedIndex = Number(compaction.lastCompactedIndex ?? compaction.last_compacted_index ?? -1);
-            const visibleMessages = history.slice(Math.max(0, lastCompactedIndex + 1));
-            const messageTokens = visibleMessages.reduce((sum, message) => sum + (0, group_compaction_projections_1.estimateGroupMessageTokens)(message), 0);
-            const summarySource = String(memory?.compaction?.summary_source
-                || memory?.compaction?.summarySource
-                || compaction.summarySource
-                || compaction.summary_source
-                || "").toLowerCase();
-            const activeSummary = memory?.unifiedSessionSummary || compaction.activeSummary || compaction.active_summary || null;
-            const summaryTokens = activeSummary && ["model", "session_memory", "session-memory"].includes(summarySource)
-                ? (0, group_compaction_projections_1.estimateGroupMessageTokens)({ role: "system", content: activeSummary })
-                : 0;
-            currentTokens = messageTokens + summaryTokens;
-            currentMessageCount = visibleMessages.length;
-            tokenSource = "project_transcript_estimate";
-            tokenUpdatedAt = String(visibleMessages.at(-1)?.timestamp || memory?.updated_at || memory?.updatedAt || tokenUpdatedAt);
-            fallbackTokenMeasurement = {
-                method: "project_transcript_estimate",
-                source: "project_transcript_estimate",
-                activeTokens: currentTokens,
-                estimatedMessageTokens: messageTokens,
-                estimatedSummaryTokens: summaryTokens,
-            };
-        }
-        else {
-            currentMessageCount = Number((compaction.preservedRecentMessageIds || compaction.preserved_recent_message_ids || []).length
-                || (Array.isArray(memory?.history) ? memory.history.length : 0));
-            tokenSource = String(compaction.tokenMeasurement?.source || compaction.token_measurement?.source || tokenSource);
-        }
-    }
-    const autoCompactThreshold = scope === "project" ? 0 : Number(memory?.compaction?.auto_compact_threshold
-        || compaction.autoCompactThreshold
-        || compaction.auto_compact_threshold
-        || warning.thresholds?.autoCompactThreshold
-        || decision.triggerTokens
-        || (0, group_compaction_strategy_1.getGroupAutoCompactThreshold)(config)
-        || capacity.autoCompactThreshold);
-    const effectiveContextWindow = Number(capacity.effectiveContextWindow || capacity.effective_context_window || capacity.contextWindow || capacity.context_window || context_budget_1.DEFAULT_CONTEXT_WINDOW_TOKENS);
-    const remainingTokens = scope === "project" ? 0 : Math.max(0, autoCompactThreshold - currentTokens);
+    const canonicalMeasurement = compaction.tokenMeasurement?.schema === "ccm-context-measurement-v2"
+        || compaction.tokenMeasurement?.accountingSchema === "ccm-context-accounting-v2"
+        ? compaction.tokenMeasurement
+        : compaction.token_measurement?.schema === "ccm-context-measurement-v2"
+            || compaction.token_measurement?.accountingSchema === "ccm-context-accounting-v2"
+            ? compaction.token_measurement
+            : null;
+    const canonicalPayload = modelVisiblePayload?.accountingSchema === "ccm-context-accounting-v2"
+        || modelVisiblePayload?.primaryTokenBreakdown
+        ? modelVisiblePayload
+        : null;
+    const currentTokens = canonicalPayload
+        ? Math.max(0, Number(canonicalPayload.predictedNextRequestTokens || canonicalPayload.predicted_next_request_tokens || canonicalPayload.totalTokens || canonicalPayload.total_tokens || 0))
+        : canonicalMeasurement
+            ? Math.max(0, Number(canonicalMeasurement.currentInputTokens || 0) + Number(canonicalMeasurement.estimatedNewInputTokens || 0))
+            : 0;
+    const currentMessageCount = Number((compaction.preservedRecentMessageIds || compaction.preserved_recent_message_ids || []).length || 0);
+    const tokenSource = canonicalMeasurement?.source === "provider_reported"
+        ? "provider_usage"
+        : canonicalPayload || currentTokens > 0 ? "model_visible_payload" : "unavailable";
+    const tokenUpdatedAt = String(canonicalMeasurement?.updatedAt || compaction.lastCompactedAt || "");
+    const exactCapacityScope = scope === "global_session" || scope === "project_session" || scope === "group" || scope === "task_agent";
+    const autoCompactThreshold = exactCapacityScope ? canonicalCapacity.autoCompactThresholdTokens : 0;
+    const effectiveContextWindow = exactCapacityScope ? canonicalCapacity.effectiveInputWindowTokens : 0;
+    const remainingTokens = Math.max(0, autoCompactThreshold - currentTokens);
     return {
         currentTokens,
         currentMessageCount,
@@ -796,8 +710,9 @@ function resolveMemoryCenterTokenState(scope, scopeId, memory, options = {}) {
         effectiveContextWindow,
         tokenPressure: scope !== "project" && autoCompactThreshold > 0 ? Math.round((currentTokens / autoCompactThreshold) * 1000) / 10 : 0,
         tokenUpdatedAt,
-        sampledAutoCompactThreshold: Number(warning.thresholds?.autoCompactThreshold || decision.triggerTokens || 0),
-        fallbackTokenMeasurement,
+        sampledAutoCompactThreshold: autoCompactThreshold,
+        fallbackTokenMeasurement: null,
+        capacity: canonicalCapacity,
     };
 }
 function healthAlerts(scope, scopeId, memory) {
@@ -1143,11 +1058,16 @@ function memorySummary(scope, scopeId, memory, label, options = {}) {
     });
     const modelVisiblePayload = selectedAccounting.payload;
     const completeAccounting = isCompleteMemoryCenterContextAccounting(modelVisiblePayload);
-    const currentTokens = completeAccounting
-        ? Number(modelVisiblePayload.totalTokens || modelVisiblePayload.total_tokens || 0)
-        : tokenState.currentTokens;
-    const tokenSource = selectedAccounting.source === "provider_payload_accounting"
-        ? "provider_payload_accounting"
+    const providerMeasuredInputTokens = selectedAccounting.source === "provider_payload_accounting"
+        ? Math.max(0, Number(groupAccounting?.event?.provider_observed_context_tokens || 0))
+        : 0;
+    const currentTokens = providerMeasuredInputTokens > 0
+        ? providerMeasuredInputTokens
+        : completeAccounting
+            ? Number(modelVisiblePayload.predictedNextRequestTokens || modelVisiblePayload.predicted_next_request_tokens || modelVisiblePayload.totalTokens || modelVisiblePayload.total_tokens || 0)
+            : tokenState.currentTokens;
+    const tokenSource = providerMeasuredInputTokens > 0
+        ? "provider_usage"
         : selectedAccounting.source === "current_model_visible_payload_projection"
             ? "model_visible_payload_projection"
             : completeAccounting ? "model_visible_payload" : tokenState.tokenSource;
@@ -1178,6 +1098,13 @@ function memorySummary(scope, scopeId, memory, label, options = {}) {
         ? { receipt: memory?.unifiedSessionCompaction || null, stateV1: (0, unified_session_compaction_1.projectUnifiedSessionCompactionState)(memory?.unifiedSessionCompaction || memory?.unified_session_compaction) }
         : null;
     const unifiedCompaction = (0, unified_session_compaction_1.projectUnifiedCompactionReceipt)(unifiedState?.receipt || null, compaction.summaryQuality || compaction.summary_quality || compactionContainer.summary_quality || null);
+    const storedMeasurement = compaction.tokenMeasurement || compaction.token_measurement || {};
+    const estimatedNewInputTokens = tokenSource === "provider_usage"
+        ? Math.max(0, Number(storedMeasurement.estimatedNewInputTokens ?? storedMeasurement.estimatedTokensAfterUsage ?? 0))
+        : 0;
+    const measuredCurrentInputTokens = tokenSource === "provider_usage"
+        ? Math.max(0, currentTokens - estimatedNewInputTokens)
+        : currentTokens;
     return {
         scope, id: scopeId, label, health: alerts.some(item => item.severity === "critical") ? "critical" : alerts.length ? "warning" : "healthy",
         groupId: groupScope?.groupId || "",
@@ -1196,6 +1123,11 @@ function memorySummary(scope, scopeId, memory, label, options = {}) {
         autoCompactThreshold: tokenState.autoCompactThreshold,
         remainingTokens,
         effectiveContextWindow: tokenState.effectiveContextWindow,
+        contextCapacity: tokenState.capacity || (0, ccm_context_accounting_v2_1.normalizeCcmContextCapacity)({
+            ...tokenState,
+            rawWindowTokens: tokenState.effectiveContextWindow,
+            source: "conservative_fallback",
+        }),
         preCompactPressure: Number(compaction.pressurePercent || 0),
         beforeTokens: Number(compaction.preCompactTokenCount ?? compactionContainer.before_tokens ?? 0),
         afterTokens: Number(compaction.postCompactTokenCount ?? compactionContainer.after_tokens ?? compaction.postCompactGate?.afterTokens ?? 0),
@@ -1224,6 +1156,21 @@ function memorySummary(scope, scopeId, memory, label, options = {}) {
         consecutiveFailures: Number(compaction.consecutiveFailures ?? compaction.consecutive_failures ?? memory?.finalDispatchReactiveCompactCircuitBreaker?.consecutive_failures ?? 0),
         postCompactGate: compaction.postCompactGate || compaction.post_compact_gate || compactionContainer.post_compact_gate || null,
         tokenMeasurement: compaction.tokenMeasurement || compaction.token_measurement || compactionContainer.token_measurement || tokenState.fallbackTokenMeasurement || null,
+        measurement: {
+            schema: "ccm-context-measurement-v2",
+            source: String(storedMeasurement.source || (tokenSource === "provider_usage" ? "provider_reported" : tokenSource === "unavailable" ? "unavailable" : "model_visible_estimate")),
+            precision: String(storedMeasurement.precision || (tokenSource === "provider_usage" ? "exact" : tokenSource === "unavailable" ? "unavailable" : "estimated")),
+            measurementBasis: String(storedMeasurement.measurementBasis || storedMeasurement.measurement_basis || (tokenSource === "provider_usage" ? "provider_usage_anchor_plus_delta" : tokenSource === "unavailable" ? "unavailable" : "local_payload_prediction")),
+            currentInputTokens: measuredCurrentInputTokens,
+            outputTokens: Number((compaction.latestProviderUsage || compaction.latest_provider_usage || {})?.outputTokens || (compaction.latestProviderUsage || compaction.latest_provider_usage || {})?.output_tokens || 0),
+            estimatedNewInputTokens,
+            totalModelVisibleTokens: currentTokens,
+            lastProviderObservedTokens: Number(storedMeasurement.lastProviderObservedTokens || storedMeasurement.providerObservedTokens || providerMeasuredInputTokens || 0),
+            predictedNextRequestTokens: Number(storedMeasurement.predictedNextRequestTokens || currentTokens),
+            providerIdentityChecksum: String(storedMeasurement.providerIdentityChecksum || storedMeasurement.provider_identity_checksum || groupAccounting?.event?.provider_identity_checksum || ""),
+            payloadChecksum: String(modelVisiblePayload?.payloadChecksum || modelVisiblePayload?.payload_checksum || ""),
+            updatedAt: tokenUpdatedAt,
+        },
         // Never expose the model-visible body through Memory Center. Keep only
         // token buckets, checksums and loaded-item metadata.
         modelVisiblePayload: (0, session_compaction_core_1.modelVisiblePayloadAccounting)(modelVisiblePayload),

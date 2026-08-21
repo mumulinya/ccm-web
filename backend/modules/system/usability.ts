@@ -18,7 +18,8 @@ import { closeTaskAgentSessions, reconcileTaskAgentSessions } from "../../tasks/
 import { getProjectRuntimeSummaryReadOnly, projectDisplayName } from "../projects/project-runtime";
 import { requestAccessPrincipal } from "./api-access-control";
 import { requestTaskCancellation } from "../../agents/execution-kernel";
-import { interruptTaskExecution, resumeInterruptedTaskExecution } from "../../tasks/task-interruption";
+import { interruptTaskExecution, reconcileTaskInterruptionReceipt } from "../../tasks/task-interruption";
+import { captureTaskRecoveryWorkspace, runTaskRecoveryOrchestrator } from "../../tasks/task-recovery-orchestrator";
 import { acquireIdempotency, completeIdempotency, failIdempotency, releaseTaskLease } from "../../system/reliability-ledger";
 import * as fs from "fs";
 import * as path from "path";
@@ -167,7 +168,9 @@ function taskActionsForBlocker(task: any, phase: string) {
   if (blocker === "waiting_confirmation") return ["confirm", "edit", "cancel"];
   if (blocker === "permission_required") return ["view_permission", "cancel"];
   if (blocker === "paused") return ["resume", "cancel"];
-  if (blocker === "recovery_required") return ["resume_interrupted", "cancel"];
+  if (blocker === "recovery_required") return task?.recovery_preflight?.recoveryMode === "manual_reconciliation"
+    ? ["adopt_current_changes", "resume_interrupted", "cancel"]
+    : ["resume_interrupted", "cancel"];
   if (blocker === "needs_user") return ["supplement", "cancel"];
   return taskActions(task, phase);
 }
@@ -545,6 +548,7 @@ async function executeWorkbenchTaskAction(
       result = { task: changed.task, queue_result: deps.enqueueTask(taskId, deps.ctx) };
     } else if (action === "interrupt") {
       deps.removeTaskFromQueues(taskId);
+      const interruptionWorkspace = captureTaskRecoveryWorkspace(task);
       const interrupted = interruptTaskExecution({
         task,
         reasonCode: "user_interrupt",
@@ -552,6 +556,8 @@ async function executeWorkbenchTaskAction(
         actor: `workbench:${principal.userId || "user"}`,
         checkpoint: String(task.acceptance_state || task.status || "unknown"),
         sideEffectState: "uncertain",
+        workspaceChecksum: interruptionWorkspace.checksum,
+        changedFileCount: interruptionWorkspace.changedFileCount,
       });
       const changed = updateTaskByIdCas(taskId, current => taskRevision(current) === taskRevision(task), current => ({
         ...current,
@@ -569,26 +575,35 @@ async function executeWorkbenchTaskAction(
       if (!changed.updated) throw Object.assign(new Error("任务状态已经变化，请刷新后重试"), { code: "state_drift" });
       releaseTaskLease(taskId, "interrupted");
       result = { task: changed.task, interruption_receipt: interrupted.receipt };
-    } else if (action === "resume_interrupted") {
+    } else if (action === "resume_interrupted" || action === "adopt_current_changes") {
       if (blocker !== "recovery_required") throw Object.assign(new Error("当前任务不在可恢复中断状态"), { code: "recovery_gate_failed" });
-      const recovery = resumeInterruptedTaskExecution(task, { userRequested: true, authorizationValid: true, runtimeValid: true });
-      if (!recovery.resumed) throw Object.assign(new Error(recovery.decision.reason), { code: "recovery_gate_failed" });
-      const changed = updateTaskByIdCas(taskId, current => taskRevision(current) === taskRevision(task), current => ({
-        ...current,
-        status: "pending",
-        acceptance_state: current.interruption_receipt?.checkpoint || "planned",
-        auto_execute: true,
-        paused: false,
-        is_paused: false,
-        recovery_pending: false,
-        recovery_decision: recovery.decision,
-        execution_attempt: Math.max(0, Number(current.execution_attempt || 0)) + 1,
-        resumed_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-        status_detail: "已恢复原任务和子 Agent 会话，等待继续执行",
-      }));
-      if (!changed.updated) throw Object.assign(new Error("任务状态已经变化，请刷新后重试"), { code: "state_drift" });
-      result = { task: changed.task, queue_result: deps.enqueueTask(taskId, deps.ctx), recovery_decision: recovery.decision };
+      let workspace = captureTaskRecoveryWorkspace(task);
+      if (action === "adopt_current_changes") {
+        const reconciledReceipt = reconcileTaskInterruptionReceipt(task, { action: "adopt_current_changes", workspaceChecksum: workspace.checksum, actor: `workbench:${principal.userId || "user"}` });
+        const reconciled = updateTaskByIdCas(taskId, current => taskRevision(current) === taskRevision(task), current => ({
+          ...current,
+          interruption_receipt: reconciledReceipt,
+          recovery_preflight: null,
+          status_detail: "已采用当前工作区改动，正在重新执行恢复检查",
+          updated_at: new Date().toISOString(),
+        }));
+        if (!reconciled.updated) throw Object.assign(new Error("任务状态已经变化，请刷新后重试"), { code: "state_drift" });
+        task = reconciled.task;
+        workspace = captureTaskRecoveryWorkspace(task);
+      }
+      const recovery = await runTaskRecoveryOrchestrator(task, {
+        scope: task.group_id ? "group" : task.project_session_id ? "project" : "global",
+        scopeId: String(task.group_id || task.target_project || "global"),
+        exactSessionId: String(task.group_session_id || task.project_session_id || task.origin_session_id || task.task_agent_session_id || task.id),
+        idempotencyKey: clientMessageId || `${taskId}:${task.interruption_receipt?.checksum || "resume"}`,
+        authorizationValid: true,
+        runtimeValid: true,
+        currentWorkspaceChecksum: workspace.checksum,
+        worktreeOwnershipValid: workspace.ownershipValid,
+        enqueue: id => deps.enqueueTask(id, deps.ctx),
+      });
+      if (!recovery.success) throw Object.assign(new Error(recovery.preflight?.blockers?.join("、") || "恢复安全检查未通过"), { code: "recovery_gate_failed", recovery_preflight: recovery.preflight });
+      result = { task: recovery.task, queue_result: recovery.queueResult, recovery_decision: recovery.decision, recovery_preflight: recovery.preflight, recovery_transaction: recovery.transaction };
     } else if (action === "retry") {
       if (blocker !== "failed") throw Object.assign(new Error("只有失败任务可以重试"), { code: "retry_gate_failed" });
       result = deps.retryTask(taskId, deps.ctx, String(payload.message || payload.reason || "用户从工作台按失败缺口重试"), true);

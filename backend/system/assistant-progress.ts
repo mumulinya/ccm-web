@@ -9,7 +9,7 @@ export type AssistantProgressKind =
   | "verification"
   | "before_summary";
 
-export const USER_VISIBLE_PROGRESS_MAX_CHARS = 120;
+export const USER_VISIBLE_PROGRESS_MAX_CHARS = 240;
 
 const PROGRESS_KINDS = new Set<AssistantProgressKind>([
   "before_tools", "key_finding", "direction_change", "blocker",

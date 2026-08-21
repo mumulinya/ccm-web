@@ -19,6 +19,7 @@ import { getGroupAutoCompactThreshold, resolveGroupModelContextCapacity } from "
 import {
   buildSessionPostCompactGate,
   buildModelVisiblePayloadSnapshot,
+  isModelVisiblePayloadSnapshot,
   modelVisibleFixedTokens,
   modelVisiblePayloadAccounting,
   buildSessionCompactionBoundaryMarker,
@@ -47,6 +48,7 @@ import {
 import { ccDurableMemoryTaxonomyReceipt } from "../../system/durable-memory-taxonomy";
 import { buildUnifiedSessionModelContextProjection, resolveSessionModelMicroCompactPolicy } from "../../system/session-model-context";
 import { buildUnifiedCompactionReceipt, buildUnifiedRecoveryContext, buildUnifiedSessionCompactionStateV1, orchestrateUnifiedCompaction, createUnifiedSessionCompactionEngine } from "../../system/unified-session-compaction";
+import { buildCcmProviderIdentityChecksum } from "../../system/ccm-context-accounting-v2";
 import { buildUnifiedRecoveryAttachment } from "../../system/unified-session-compaction-recovery";
 import { unifiedSummaryChecksum } from "../../system/unified-session-compaction-summary";
 import { createUnifiedScopeAdapter } from "../../system/unified-session-compaction-adapters";
@@ -767,9 +769,14 @@ export function recordGlobalAgentSessionProviderUsage(sessionId: string, input: 
   const currentRequest = dedupeGlobalPendingRequest(visibleMessages, input.currentRequest || input.current_request);
   const config = loadOrchestratorConfig();
   const suppliedPayload = input.modelVisiblePayload || input.model_visible_payload || null;
-  const payload = suppliedPayload?.schema === "ccm-model-visible-payload-snapshot-v1" ? suppliedPayload : buildModelVisiblePayloadSnapshot({
+  const payload = isModelVisiblePayloadSnapshot(suppliedPayload) ? suppliedPayload : buildModelVisiblePayloadSnapshot({
     scope: "global",
     sessionId: exactSessionId,
+    exactSessionId,
+    provider: String(input.provider || ""),
+    model: String(input.model || config.model || ""),
+    protocol: String(input.protocol || input.format || config.format || ""),
+    modelConfig: config,
     system: globalFixedContext(memory, config, { fixedContext: input.fixedContext || input.fixed_context }),
     tools: input.tools || null,
     activeSummary: state.activeSummary || null,
@@ -783,6 +790,9 @@ export function recordGlobalAgentSessionProviderUsage(sessionId: string, input: 
     ...(input || {}),
     scope: "global",
     sessionId: exactSessionId,
+    protocol: input.protocol || input.format || config.format || "",
+    endpoint: input.endpoint || input.apiUrl || config.apiUrl || "",
+    providerIdentityChecksum: input.providerIdentityChecksum || buildCcmProviderIdentityChecksum({ provider: input.provider, model: input.model || config.model, protocol: input.protocol || input.format || config.format, endpoint: input.endpoint || input.apiUrl || config.apiUrl }),
     boundaryGeneration: state.boundaryGeneration,
     payloadChecksum: input.payloadChecksum || input.payload_checksum || payload.payloadChecksum,
     fixedContextChecksum: input.fixedContextChecksum || input.fixed_context_checksum || payload.fixedContextChecksum,
@@ -799,6 +809,8 @@ export function recordGlobalAgentSessionProviderUsage(sessionId: string, input: 
     latestProviderUsage: measurementUsage,
     provider: String(measurementUsage?.provider || ""),
     model: String(measurementUsage?.model || ""),
+    protocol: String(measurementUsage?.protocol || input.protocol || input.format || config.format || ""),
+    endpoint: String(measurementUsage?.endpoint || input.endpoint || input.apiUrl || config.apiUrl || ""),
     generation: Number(measurementUsage?.generation || 0),
     boundaryGeneration: state.boundaryGeneration,
     modelVisiblePayload: payload,

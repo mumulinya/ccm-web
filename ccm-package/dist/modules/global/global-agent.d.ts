@@ -11,6 +11,33 @@ export declare function runGlobalAgentHistorySyncSelfTest(): {
         sanitizesArtifactPathContent: boolean;
     };
 };
+declare function loadGlobalAgentHistoryStore(): any;
+declare function createGlobalAgentConversationSession(payload: any): {
+    id: string;
+    name: string;
+    titleOrigin: string;
+    source: string;
+    createdAt: string;
+    updatedAt: string;
+    messages: {
+        role: string;
+        content: string;
+        timestamp: string;
+        source: string;
+    }[];
+};
+declare function deleteGlobalAgentConversationSession(sessionId: string, expectedSource?: string): {
+    deleted: boolean;
+    session: any;
+    context_cache_invalidated?: undefined;
+} | {
+    deleted: boolean;
+    session: any;
+    context_cache_invalidated: boolean;
+};
+export { deleteGlobalAgentConversationSession };
+declare function getGlobalAgentConversationMessages(sessionId: string): any[];
+export { loadGlobalAgentHistoryStore, createGlobalAgentConversationSession, getGlobalAgentConversationMessages };
 export declare function runFeishuGlobalAgentSessionRoutingSelfTest(): {
     pass: boolean;
     checks: {

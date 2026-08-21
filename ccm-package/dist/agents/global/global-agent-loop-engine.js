@@ -58,6 +58,7 @@ const reliability_ledger_1 = require("../../system/reliability-ledger");
 const runtime_kernel_1 = require("../runtime-kernel");
 const context_source_tool_result_projection_1 = require("../../system/context-source-tool-result-projection");
 const user_visible_agent_events_1 = require("../../system/user-visible-agent-events");
+const agent_key_progress_1 = require("../../system/agent-key-progress");
 const assistant_progress_1 = require("../../system/assistant-progress");
 const group_orchestrator_config_1 = require("../../modules/collaboration/group-orchestrator-config");
 const user_visible_agent_projections_1 = require("../../system/user-visible-agent-projections");
@@ -137,6 +138,10 @@ function emit(runtime, event, run) {
             ];
             return candidates.find(Array.isArray) || [];
         })();
+        const globalAcceptancePassed = !!run.mission_id && (run.final_report?.acceptance_gate_passed === true
+            || run.final_delivery_report?.acceptance_gate_passed === true
+            || run.workchain?.completion_summary?.acceptance_gate_passed === true
+            || run.workchain?.delivery_report?.acceptance_gate_passed === true);
         const result = ["completed", "failed", "cancelled", "blocked", "paused", "interrupted"].includes(sourceType)
             ? (0, user_visible_agent_events_1.buildUserVisibleAgentResult)({
                 status: sourceType === "completed" ? "success" : sourceType,
@@ -147,6 +152,10 @@ function emit(runtime, event, run) {
                 stopReason: sourceType,
                 usage: run.usage,
                 fileChanges: finalFileChanges,
+                source: run.mission_id ? "terminal_gate" : "query_projection",
+                ...(run.mission_id ? { terminalGate: { passed: globalAcceptancePassed, accepted: globalAcceptancePassed } } : {}),
+                verification: run.final_report?.verification || run.final_delivery_report?.verification || [],
+                blockers: run.final_report?.blockers || run.final_delivery_report?.blockers || [],
             })
             : undefined;
         const totalDurationMs = result ? Math.max(0, Date.parse(run.completed_at || run.updated_at) - Date.parse(run.started_at)) : 0;
@@ -155,10 +164,6 @@ function emit(runtime, event, run) {
             ? run.steps.reduce((sum, step) => sum + (step.tool ? Math.max(0, Number(step.duration_ms || 0)) : 0), 0)
             : 0;
         const otherDurationMs = result ? Math.max(0, totalDurationMs - modelDurationMs - toolWallDurationMs) : 0;
-        const globalAcceptancePassed = !!run.mission_id && (run.final_report?.acceptance_gate_passed === true
-            || run.final_delivery_report?.acceptance_gate_passed === true
-            || run.workchain?.completion_summary?.acceptance_gate_passed === true
-            || run.workchain?.delivery_report?.acceptance_gate_passed === true);
         const eventInput = {
             eventId: `global:${run.id}:${sourceType}:${tool?.signature || event?.step?.index || run.steps.length}`,
             scope: "global",
@@ -1390,7 +1395,7 @@ async function continueLoop(run, runtime) {
                     }))
                     : (decisionProgress && decisionProgress !== previousMessage ? decisionProgress : "");
                 if (progressText)
-                    (0, user_visible_agent_events_1.appendAssistantProgress)({
+                    (0, agent_key_progress_1.recordAgentKeyProgress)({
                         scope: "global", scopeId: "global", exactSessionId: run.session_id,
                         generation: Math.max(0, Number(run.resume_count || 0)),
                         anchorMessageId: `gam_${String(run.id || "result")}_assistant`,
@@ -1540,7 +1545,7 @@ async function continueLoop(run, runtime) {
                         target: decision.intent?.target_refs?.[0] || summarizeGlobalToolTarget(args),
                     });
                     if (outcomeProgress)
-                        (0, user_visible_agent_events_1.appendAssistantProgress)({
+                        (0, agent_key_progress_1.recordAgentKeyProgress)({
                             scope: "global", scopeId: "global", exactSessionId: run.session_id,
                             generation: Math.max(0, Number(run.resume_count || 0)),
                             anchorMessageId: `gam_${String(run.id || "result")}_assistant`,
@@ -1550,7 +1555,7 @@ async function continueLoop(run, runtime) {
                         });
                 }
                 if (!toolSucceeded && (0, assistant_progress_1.assistantProgressNarrationEnabled)(progressConfig))
-                    (0, user_visible_agent_events_1.appendAssistantProgress)({
+                    (0, agent_key_progress_1.recordAgentKeyProgress)({
                         scope: "global", scopeId: "global", exactSessionId: run.session_id,
                         generation: Math.max(0, Number(run.resume_count || 0)),
                         anchorMessageId: `gam_${String(run.id || "result")}_assistant`,
@@ -1595,7 +1600,7 @@ async function continueLoop(run, runtime) {
                 markGlobalAgentToolTodo(run, decision.tool.name, "blocked", step.error);
                 emit(runtime, { type: "tool_failed", tool: step.tool, error: step.error }, run);
                 if ((0, assistant_progress_1.assistantProgressNarrationEnabled)(progressConfig))
-                    (0, user_visible_agent_events_1.appendAssistantProgress)({
+                    (0, agent_key_progress_1.recordAgentKeyProgress)({
                         scope: "global", scopeId: "global", exactSessionId: run.session_id,
                         generation: Math.max(0, Number(run.resume_count || 0)),
                         anchorMessageId: `gam_${String(run.id || "result")}_assistant`,

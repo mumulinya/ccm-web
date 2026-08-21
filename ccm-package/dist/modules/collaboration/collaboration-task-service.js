@@ -65,6 +65,7 @@ const failure_record_1 = require("../../system/failure-record");
 const task_transition_ledger_1 = require("../../system/task-transition-ledger");
 const completion_gate_1 = require("../../test-agent/completion-gate");
 const conversation_permission_policy_1 = require("../tools/conversation-permission-policy");
+const task_context_1 = require("../../tasks/task-context");
 const group_orchestrator_1 = require("./group-orchestrator");
 const memory_1 = require("./memory");
 const logs_1 = require("./logs");
@@ -322,6 +323,17 @@ function createTaskWithScopedIdentity(task) {
     }
     newTask.work_items = (0, work_items_1.buildMainAgentWorkItems)(newTask);
     newTask.work_item_summary = (0, work_items_1.buildMainAgentWorkItemSummary)(newTask.work_items);
+    // The task context is the durable recovery authority. It is written in the
+    // same task transaction as the task itself; transcript/session data remains
+    // an auxiliary source and may disappear later.
+    newTask.task_context = (0, task_context_1.buildTaskContextCapsule)(newTask);
+    newTask.task_context_revision_receipt = {
+        revision: newTask.task_context.revision,
+        checksum: newTask.task_context.checksum,
+        reason: "task_created",
+        at: newTask.task_context.updatedAt,
+        contentStored: false,
+    };
     tasks.push(newTask);
     (0, db_1.saveTasks)(tasks);
     (0, reliability_ledger_1.appendTraceEvent)(traceId, { id: `task:${newTask.id}:created`, type: "task.created", status: "ok", task_id: newTask.id, group_id: newTask.group_id || "", agent: newTask.target_project || "", message: newTask.title, data: { workflow_type: newTask.workflow_type, assign_type: newTask.assign_type, group_session_id: newTask.group_session_id || "", idempotency_key: idempotencyKey ? "present" : "absent", intake_identity_checksum: intakeIdentity?.checksum || "", source_channel: intakeIdentity?.source_channel || "", target_scope: intakeIdentity?.target_scope || "" } });
@@ -1256,6 +1268,14 @@ function updateTask(id, updates) {
     tasks[idx].lifecycle = (0, collaboration_1.deriveTaskLifecycle)(tasks[idx], taskExecutions);
     tasks[idx].work_items = (0, work_items_1.buildMainAgentWorkItems)(tasks[idx], { executions: taskExecutions });
     tasks[idx].work_item_summary = (0, work_items_1.buildMainAgentWorkItemSummary)(tasks[idx].work_items);
+    tasks[idx].task_context = (0, task_context_1.refreshTaskContext)(tasks[idx], updates.status ? `status_${updates.status}` : "task_updated");
+    tasks[idx].task_context_revision_receipt = {
+        revision: tasks[idx].task_context.revision,
+        checksum: tasks[idx].task_context.checksum,
+        reason: updates.status ? `status_${updates.status}` : "task_updated",
+        at: tasks[idx].task_context.updatedAt,
+        contentStored: false,
+    };
     if (updates.status === "done") {
         tasks[idx].completed_at = updates.completed_at || new Date().toISOString();
     }
@@ -1490,12 +1510,17 @@ function purgeArchivedTask(id) {
         }
     }
     const purgedSessions = (0, agent_sessions_1.purgeTaskAgentSessions)(id);
+    let purgedRecoverySessions = [];
+    try {
+        purgedRecoverySessions = require("../../tasks/task-recovery-sessions").purgeTaskRecoveryUserSessions(current);
+    }
+    catch { }
     const purgedExecutionArtifacts = (0, execution_kernel_1.purgeTaskExecutionArtifacts)(id);
     const purgedTestAgentArtifacts = (0, artifact_retention_1.purgeTestAgentArtifactsForTask)(id);
     const purgedTestAgentRuns = (0, test_agent_runner_1.purgeTestAgentRunnerRecordsForTask)(id);
     const purgedReplayJournal = (0, task_replay_journal_1.purgeTaskReplayJournalForTask)(id);
     (0, execution_kernel_1.clearTaskCancellation)(id);
     (0, db_1.saveTasks)(tasks.filter(task => task.id !== id));
-    return { ...current, purge_cleanup: { sessions: purgedSessions.length, test_agent_artifacts: purgedTestAgentArtifacts, test_agent_runs: purgedTestAgentRuns, replay_journal: purgedReplayJournal, ...purgedExecutionArtifacts } };
+    return { ...current, purge_cleanup: { sessions: purgedSessions.length, recovery_user_sessions: purgedRecoverySessions.length, test_agent_artifacts: purgedTestAgentArtifacts, test_agent_runs: purgedTestAgentRuns, replay_journal: purgedReplayJournal, ...purgedExecutionArtifacts } };
 }
 //# sourceMappingURL=collaboration-task-service.js.map

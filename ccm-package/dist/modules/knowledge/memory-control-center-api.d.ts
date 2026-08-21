@@ -31,9 +31,10 @@ export declare function resolveMemoryCenterTokenState(scope: MemoryScope, scopeI
     remainingTokens: number;
     effectiveContextWindow: number;
     tokenPressure: number;
-    tokenUpdatedAt: any;
+    tokenUpdatedAt: string;
     sampledAutoCompactThreshold: number;
     fallbackTokenMeasurement: any;
+    capacity: import("../../system/ccm-context-accounting-v2").CcmContextCapacityV2;
 };
 export declare function healthAlerts(scope: MemoryScope, scopeId: string, memory: any): any[];
 export declare function memoryCenterMicroCompactState(scope: MemoryScope, scopeId: string, memory: any): {
@@ -113,14 +114,44 @@ export declare function memorySummary(scope: MemoryScope, scopeId: string, memor
     consecutiveFailures: number;
     postCompactGate: any;
     tokenMeasurement: any;
+    measurement: {
+        schema: string;
+        source: string;
+        precision: string;
+        measurementBasis: string;
+        currentInputTokens: number;
+        outputTokens: number;
+        estimatedNewInputTokens: number;
+        totalModelVisibleTokens: number;
+        lastProviderObservedTokens: number;
+        predictedNextRequestTokens: number;
+        providerIdentityChecksum: string;
+        payloadChecksum: string;
+        updatedAt: string;
+    };
     modelVisiblePayload: {
         schema: string;
         scope: import("../../system/session-compaction-core").SessionCompactionScope;
         sessionId: string;
+        exactSessionId: string;
+        provider: string;
+        model: string;
+        protocol: string;
+        messages: {
+            role: any;
+            type: any;
+            id: any;
+        }[];
         tokenBreakdown: {
             [x: string]: number;
         };
+        accountingSchema: string;
+        primaryTokenBreakdown: import("../../system/ccm-context-accounting-v2").CcmPrimaryTokenBreakdownV2;
+        technicalTokenBreakdown: import("../../system/ccm-context-accounting-v2").CcmTechnicalTokenBreakdownV2;
+        primaryTokenTotal: number;
         totalTokens: number;
+        predictedNextRequestTokens: number;
+        unresolvedToolPairCount: number;
         payloadChecksum: string;
         fixedContextChecksum: string;
         pendingRequestChecksum: string;
@@ -365,12 +396,13 @@ export declare function memorySummary(scope: MemoryScope, scopeId: string, memor
     currentTokens: number;
     currentMessageCount: number;
     tokenSource: string;
-    tokenUpdatedAt: any;
+    tokenUpdatedAt: string;
     compacting: boolean;
     compactionActivity: any;
     autoCompactThreshold: number;
     remainingTokens: number;
     effectiveContextWindow: number;
+    contextCapacity: import("../../system/ccm-context-accounting-v2").CcmContextCapacityV2;
     preCompactPressure: number;
     beforeTokens: number;
     afterTokens: number;
@@ -391,14 +423,44 @@ export declare function getMemoryCenterScope(scope: MemoryScope, scopeId: string
         consecutiveFailures: number;
         postCompactGate: any;
         tokenMeasurement: any;
+        measurement: {
+            schema: string;
+            source: string;
+            precision: string;
+            measurementBasis: string;
+            currentInputTokens: number;
+            outputTokens: number;
+            estimatedNewInputTokens: number;
+            totalModelVisibleTokens: number;
+            lastProviderObservedTokens: number;
+            predictedNextRequestTokens: number;
+            providerIdentityChecksum: string;
+            payloadChecksum: string;
+            updatedAt: string;
+        };
         modelVisiblePayload: {
             schema: string;
             scope: import("../../system/session-compaction-core").SessionCompactionScope;
             sessionId: string;
+            exactSessionId: string;
+            provider: string;
+            model: string;
+            protocol: string;
+            messages: {
+                role: any;
+                type: any;
+                id: any;
+            }[];
             tokenBreakdown: {
                 [x: string]: number;
             };
+            accountingSchema: string;
+            primaryTokenBreakdown: import("../../system/ccm-context-accounting-v2").CcmPrimaryTokenBreakdownV2;
+            technicalTokenBreakdown: import("../../system/ccm-context-accounting-v2").CcmTechnicalTokenBreakdownV2;
+            primaryTokenTotal: number;
             totalTokens: number;
+            predictedNextRequestTokens: number;
+            unresolvedToolPairCount: number;
             payloadChecksum: string;
             fixedContextChecksum: string;
             pendingRequestChecksum: string;
@@ -643,12 +705,13 @@ export declare function getMemoryCenterScope(scope: MemoryScope, scopeId: string
         currentTokens: number;
         currentMessageCount: number;
         tokenSource: string;
-        tokenUpdatedAt: any;
+        tokenUpdatedAt: string;
         compacting: boolean;
         compactionActivity: any;
         autoCompactThreshold: number;
         remainingTokens: number;
         effectiveContextWindow: number;
+        contextCapacity: import("../../system/ccm-context-accounting-v2").CcmContextCapacityV2;
         preCompactPressure: number;
         beforeTokens: number;
         afterTokens: number;

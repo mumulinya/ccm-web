@@ -177,7 +177,7 @@ const focusReplayEvent = eventId => {
   search.value = ''
   requestAnimationFrame(() => document.querySelector('.full-replay-timeline')?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
 }
-const handleReplayAction = action => {
+const handleReplayAction = async action => {
   if (!action) return
   if (action.type === 'open-code-changes') {
     openCodeChanges({
@@ -194,6 +194,32 @@ const handleReplayAction = action => {
   }
   if (action.type === 'open-evidence') {
     openEvidence(action.evidenceId)
+    return
+  }
+  const kind = String(action.kind || '').toLowerCase()
+  if (['retry', 'resume_interrupted', 'resume_paused', 'continue'].includes(kind)) {
+    const id = String(action.taskId || action.task_id || taskId.value || '').trim()
+    if (!id) return
+    error.value = ''
+    try {
+      const response = await fetch('/api/tasks/resume-interrupted', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          task_id: id,
+          revision: Number(action.revision || 0),
+          generation: Number(action.generation || 0),
+          binding_checksum: action.bindingChecksum || action.binding_checksum || '',
+          idempotency_key: `replay-resume:${id}:${action.revision || 0}:${action.generation || 0}`,
+        }),
+      })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok || data.success === false) throw new Error(data.error || '任务恢复前检查未通过')
+      emit('navigate', { tab: 'tasks', taskId: id, recovery: data.user_session || data.recovery_preflight || null })
+      await loadReplay(id)
+    } catch (e) {
+      error.value = e?.message || '任务恢复失败'
+    }
   }
 }
 const navigateToExecution = event => {

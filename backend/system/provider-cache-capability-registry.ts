@@ -81,7 +81,7 @@ function officialEndpointCapability(config: any) {
 
 function protocolOf(config: any) {
   const value = String(config?.format || "auto").trim().toLowerCase();
-  return ["openai-compatible", "anthropic-compatible", "gemini-compatible"].includes(value) ? value : "auto";
+  return ["openai-compatible", "openai-responses", "anthropic-compatible", "gemini-compatible"].includes(value) ? value : "auto";
 }
 
 function cacheFamilyOf(config: any) {
@@ -89,6 +89,7 @@ function cacheFamilyOf(config: any) {
   if (["openai", "anthropic", "gemini", "compatible"].includes(declared)) return declared;
   return ({
     "openai-compatible": "openai",
+    "openai-responses": "openai",
     "anthropic-compatible": "anthropic",
     "gemini-compatible": "gemini",
   } as Record<string, string>)[protocolOf(config)] || "compatible";

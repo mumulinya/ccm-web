@@ -243,7 +243,7 @@ function buildAttempts(input) {
     return [...rows.values()].sort((a, b) => a.startedAt.localeCompare(b.startedAt) || a.attempt - b.attempt).slice(0, 120);
 }
 function explicitActions(value, fallbackTaskId = "") {
-    const allowed = new Set(["retry", "resolve_permission", "view_error", "recheck", "takeover"]);
+    const allowed = new Set(["retry", "resume_interrupted", "resume_paused", "continue", "resolve_permission", "view_error", "recheck", "takeover"]);
     return (Array.isArray(value) ? value : []).flatMap((row, index) => {
         const kind = String(row?.kind || "");
         if (!allowed.has(kind))
@@ -252,7 +252,7 @@ function explicitActions(value, fallbackTaskId = "") {
                 id: (0, task_replay_shared_1.safeText)(row?.id, 120) || `${fallbackTaskId}:${kind}:${index}`,
                 taskId: (0, task_replay_shared_1.safeText)(row?.taskId || row?.task_id || fallbackTaskId, 120),
                 kind,
-                label: (0, task_replay_shared_1.safeText)(row?.label, 80) || { retry: "重试", resolve_permission: "处理授权", view_error: "查看错误", recheck: "重新核验", takeover: "人工接管" }[kind],
+                label: (0, task_replay_shared_1.safeText)(row?.label, 80) || { retry: "继续任务", resume_interrupted: "继续任务", resume_paused: "继续任务", continue: "继续任务", resolve_permission: "处理授权", view_error: "查看错误", recheck: "重新核验", takeover: "人工接管" }[kind],
                 enabled: row?.enabled === true,
                 disabledReason: (0, task_replay_shared_1.safeText)(row?.disabledReason || row?.disabled_reason, 300),
                 revision: Math.max(0, Number(row?.revision || 0)),

@@ -1,7 +1,7 @@
 {
   "name": "ccm",
   "private": true,
-  "version": "2.0.9",
+  "version": "2.0.11",
   "description": "CCM development workspace",
   "scripts": {
     "dev:frontend": "npm --prefix frontend run dev",
@@ -54,12 +54,14 @@
     "test:project-agent-inline-diff": "npm run build:backend && node scripts/project-agent-inline-diff-selftest.mjs",
     "test:cc-execution-display:visual": "node scripts/cc-execution-display-render-regression.mjs",
     "test:real-stream-progress": "npm run build:backend && node scripts/real-stream-progress-selftest.mjs",
+    "test:agent-key-progress": "npm run build:backend && node scripts/agent-key-progress-selftest.mjs",
     "test:development-task-boundary": "npm run build:backend && node scripts/development-task-boundary-selftest.mjs",
     "test:feishu-inbound-attachments": "npm run build:backend && node scripts/feishu-inbound-attachments-selftest.mjs",
     "test:agent-final-answer:visual": "node scripts/agent-final-answer-render-regression.mjs",
     "test:message-copy:visual": "node scripts/message-copy-render-regression.mjs",
     "test:task-cancel-ui": "node scripts/task-cancellation-ui-selftest.mjs",
     "test:task-stop-governance": "npm run build:backend && node scripts/task-stop-governance-selftest.mjs",
+    "test:task-context-recovery": "npm run build:backend && node scripts/task-context-double-session-selftest.mjs && node scripts/task-recovery-orchestrator-selftest.mjs",
     "test:task-pause-control": "npm run build:backend && node scripts/task-pause-control-selftest.mjs",
     "test:permission-approval:visual": "node scripts/permission-approval-render-regression.mjs",
     "test:active-plan-dock": "node scripts/active-task-plan-dock-selftest.mjs",

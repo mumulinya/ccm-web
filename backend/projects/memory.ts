@@ -432,7 +432,6 @@ function createEmptyProjectMemory(project: string, workDir = "") {
       recentConclusions: 0,
       lastCompactedAt: "",
     },
-    compactBoundary: null,
     updatedAt: new Date().toISOString(),
   };
 }

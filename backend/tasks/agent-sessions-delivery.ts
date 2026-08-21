@@ -657,7 +657,7 @@ export function recordTaskAgentMemoryContextDelivery(sessionId: string, input: {
     providerEnvelope: Number(finalDispatchPayloadGate?.provider_envelope_tokens || 0),
   } : null;
   const taskAgentModelVisiblePayload = taskAgentTokenBreakdown ? {
-    schema: "ccm-model-visible-payload-accounting-v1",
+    schema: "ccm-model-visible-payload-accounting-v2",
     scope: "task_agent",
     sessionId: id,
     tokenBreakdown: taskAgentTokenBreakdown,

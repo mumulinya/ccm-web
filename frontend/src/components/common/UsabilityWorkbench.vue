@@ -271,7 +271,7 @@ const toggleCron = async job => {
 }
 
 const actionLabel = action => ({
-  confirm: '确认执行', edit: '修改计划', cancel: '停止任务', supplement: '补充说明', resume: '恢复', interrupt: '停止当前执行', resume_interrupted: '恢复任务', retry: '重试',
+  confirm: '确认执行', edit: '修改计划', cancel: '停止任务', supplement: '补充说明', resume: '恢复', interrupt: '停止当前执行', resume_interrupted: '恢复任务', adopt_current_changes: '采用当前改动并继续', retry: '重试',
   switch_executor: '切换执行器', pause: '暂停', start: '开始', view_report: '查看交付', archive: '归档', view: '查看',
 })[action] || action
 
@@ -299,6 +299,10 @@ const runAction = async (task, action) => {
     }
     if (action === 'cancel') {
       const ok = await confirmDialog(`确定取消“${task.title}”吗？已产生的执行证据会保留。`)
+      if (!ok) return
+    }
+    if (action === 'adopt_current_changes') {
+      const ok = await confirmDialog(`确定采用“${task.title}”当前工作区里的改动并继续吗？系统会把当前文件现场作为新的安全基线，但仍会重新验证。`)
       if (!ok) return
     }
     await api(`/api/usability/tasks/${encodeURIComponent(task.id)}/action`, {

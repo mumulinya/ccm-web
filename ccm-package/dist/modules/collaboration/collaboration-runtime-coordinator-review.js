@@ -97,6 +97,7 @@ const agent_sessions_1 = require("../../tasks/agent-sessions");
 const task_pause_control_1 = require("../../tasks/task-pause-control");
 const task_pause_routes_1 = require("./task-pause-routes");
 const task_interruption_1 = require("../../tasks/task-interruption");
+const task_recovery_orchestrator_1 = require("../../tasks/task-recovery-orchestrator");
 const task_agent_invocation_lineage_1 = require("../../tasks/task-agent-invocation-lineage");
 const reliability_ledger_1 = require("../../system/reliability-ledger");
 const reasoning_loop_1 = require("../../agents/reasoning-loop");
@@ -1393,15 +1394,17 @@ async function processTargetQueue(targetKey, ctx, testHooks = {}) {
                                         ? "temporary_network"
                                         : "provider_overload";
                     const resumeCheckpoint = latestWithFollowups.resume_checkpoint || latestWithFollowups.interruption_receipt?.resume_checkpoint || undefined;
+                    const interruptionWorkspace = (0, task_recovery_orchestrator_1.captureTaskRecoveryWorkspace)(latestWithFollowups);
                     const interruption = (0, task_interruption_1.interruptTaskExecution)({
                         task: latestWithFollowups,
                         reasonCode: reasonCode,
                         reason: String(error?.message || "模型或网络暂时不可用，当前执行已安全中断").slice(0, 500),
                         actor: "group-task-runtime",
                         checkpoint: latestWithFollowups.acceptance_state || "executing",
-                        workspaceChecksum: latestWithFollowups.workspace_snapshot_checksum || latestWithFollowups.workspace_evidence?.checksum || "",
+                        workspaceChecksum: interruptionWorkspace.checksum,
+                        changedFileCount: interruptionWorkspace.changedFileCount,
                         resumeCheckpoint,
-                        sideEffectState: resumeCheckpoint?.workspaceChecksum && resumeCheckpoint.workspaceChecksum === (latestWithFollowups.workspace_snapshot_checksum || latestWithFollowups.workspace_evidence?.checksum || "") ? "committed" : "uncertain",
+                        sideEffectState: resumeCheckpoint?.workspaceChecksum && resumeCheckpoint.workspaceChecksum === interruptionWorkspace.checksum ? "committed" : "uncertain",
                     });
                     const recovery = interruption.receipt.recovery;
                     const interruptedTask = (0, collaboration_runtime_runtime_tools_1.updateTask)(taskId, {

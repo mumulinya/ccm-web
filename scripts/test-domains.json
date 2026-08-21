@@ -24,6 +24,7 @@
       "build": "backend",
       "tests": [
         "all-session-cc-compaction-alignment-selftest.mjs",
+        "ccm-context-accounting-v2-selftest.mjs",
         "provider-neutral-context-cache-selftest.mjs",
         "provider-native-microcompact-fallback-selftest.mjs",
         "context-engine-v2-selftest.mjs",
@@ -71,6 +72,7 @@
         "group-test-targets-selftest.mjs",
         "project-main-agent-orchestration-selftest.mjs",
         "task-interruption-recovery-selftest.mjs",
+        "task-recovery-orchestrator-selftest.mjs",
         "project-plan-production-closure-selftest.mjs",
         "project-main-agent-source-selftest.mjs",
         "project-main-agent-runtime-diagnostics-selftest.mjs",
@@ -97,6 +99,7 @@
       "tests": [
         "agent-communication-v2-selftest.mjs",
         "user-visible-agent-events-selftest.mjs",
+        "agent-key-progress-selftest.mjs",
         "command-live-progress-selftest.mjs",
         "global-agent-runtime-production-closure-selftest.mjs",
         "unified-model-retry-selftest.mjs",
@@ -182,6 +185,7 @@
         "slash-command-result-v2-selftest.mjs",
         "slash-command-result-v2-render-regression.mjs",
         "cc-execution-display-render-regression.mjs",
+        "agent-text-timeline-style-selftest.mjs",
         "collapse-read-search-selftest.mjs",
         "live-assistant-provisional-selftest.mjs",
         "child-agent-nested-conversation-selftest.mjs",

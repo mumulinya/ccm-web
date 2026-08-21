@@ -1,4 +1,5 @@
-import { appendAssistantProgress, appendUserVisibleAgentEvent } from "./user-visible-agent-events";
+import { appendUserVisibleAgentEvent } from "./user-visible-agent-events";
+import { recordAgentKeyProgress } from "./agent-key-progress";
 import { assistantProgressNarrationEnabled, type AssistantProgressKind } from "./assistant-progress";
 import { loadOrchestratorConfig } from "../modules/collaboration/group-orchestrator-config";
 
@@ -28,13 +29,15 @@ function appendStageProgress(task: any, kind: AssistantProgressKind, message: st
   let enabled = true;
   try { enabled = assistantProgressNarrationEnabled(loadOrchestratorConfig()); } catch {}
   if (!identity || !enabled) return null;
-  return appendAssistantProgress({
+  return recordAgentKeyProgress({
     ...identity,
     taskId: text(task?.id),
     turnId: `task:${text(task?.id)}`,
     eventId: `task-stage:${text(task?.id)}:progress:${kind}:${Math.max(1, attempt)}`,
     text: message,
     kind,
+    source: "deterministic",
+    status: kind === "blocker" ? "failed" : "running",
     modelCallIndex: 0,
     relatedToolCallIds: [],
     title: identity.scope === "group" ? "群聊主 Agent" : "项目主 Agent",
@@ -100,7 +103,7 @@ function appendTestAgentEvent(task: any, eventType: "agent_started" | "agent_com
   const at = text(input?.at) || new Date().toISOString();
   const startedAt = text(input?.startedAt) || at;
   const durationMs = Math.max(0, number(input?.durationMs, durationBetween(startedAt, at)));
-  return appendUserVisibleAgentEvent({
+  const event = appendUserVisibleAgentEvent({
     eventId: `task-stage:${taskId}:test-agent:${attempt}:${eventType}`,
     ...identity,
     taskId,
@@ -140,6 +143,25 @@ function appendTestAgentEvent(task: any, eventType: "agent_started" | "agent_com
       ] } : {}),
     },
   });
+  const progressText = eventType === "agent_started"
+    ? `TestAgent 正在核对第 ${attempt} 轮验收标准`
+    : eventType === "agent_completed"
+      ? `TestAgent 第 ${attempt} 轮验收已通过`
+      : `TestAgent 第 ${attempt} 轮验证未通过，准备返工`;
+  recordAgentKeyProgress({
+    ...identity,
+    taskId,
+    turnId: `task:${taskId}`,
+    eventId: `task-key-progress:${taskId}:test-agent:${attempt}:${eventType}`,
+    generation: identity.generation,
+    kind: "verification_update",
+    source: "child_agent",
+    status: eventType === "agent_started" ? "running" : eventType === "agent_completed" ? "success" : "failed",
+    round: attempt - 1,
+    text: progressText,
+    title: [identity.project, "TestAgent"].filter(Boolean).join(" · ") || "TestAgent",
+  });
+  return event;
 }
 
 function appendMainSummaryEvent(task: any, eventType: "agent_started" | "agent_completed" | "agent_failed", input: any) {
@@ -150,7 +172,7 @@ function appendMainSummaryEvent(task: any, eventType: "agent_started" | "agent_c
   const startedAt = text(input?.startedAt) || at;
   const durationMs = Math.max(0, number(input?.durationMs, durationBetween(startedAt, at)));
   const roleLabel = identity.scope === "group" ? "群聊主 Agent" : "项目主 Agent";
-  return appendUserVisibleAgentEvent({
+  const event = appendUserVisibleAgentEvent({
     eventId: `task-stage:${taskId}:main-summary:${eventType}`,
     ...identity,
     taskId,
@@ -189,6 +211,24 @@ function appendMainSummaryEvent(task: any, eventType: "agent_started" | "agent_c
       ] } : {}),
     },
   });
+  recordAgentKeyProgress({
+    ...identity,
+    taskId,
+    turnId: `task:${taskId}`,
+    eventId: `task-key-progress:${taskId}:main-summary:${eventType}`,
+    generation: identity.generation,
+    kind: "phase_update",
+    source: "deterministic",
+    status: eventType === "agent_started" ? "running" : eventType === "agent_completed" ? "success" : "failed",
+    round: 0,
+    text: eventType === "agent_started"
+      ? "主 Agent 正在整理最终结论"
+      : eventType === "agent_completed"
+        ? "主 Agent 已完成最终验收与交付总结"
+        : "主 Agent 最终总结未完成，需要继续处理当前问题",
+    title: identity.scope === "group" ? "群聊主 Agent" : "项目主 Agent",
+  });
+  return event;
 }
 
 export function projectTaskExecutionStageTransition(previous: any, current: any) {

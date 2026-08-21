@@ -46,7 +46,7 @@ assert.match(projectMain, /title: "可恢复任务摘要"/);
 assert.match(globalProjection, /tryBuildGlobalNativeModelMessages/);
 assert.match(globalProjection, /identityRules,/);
 assert.match(globalProjection, /mcpPolicy,/);
-assert.match(globalProjection, /【用户当前目标】/);
+assert.match(globalProjection, /\[Current user goal\]/);
 assert.equal(globalProjection.includes("currentUserText: currentGoal"), false);
 assert.match(globalNative, /materializeNativeSessionTranscript/);
 assert.match(globalAdapter, /recordGlobalAgentRuntimeOutput/);

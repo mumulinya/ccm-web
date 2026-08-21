@@ -205,7 +205,7 @@ function createGlobalAgentApi(deps) {
                 const metadata = turn.metadata?.global_context_v2 || {};
                 const resolvedRoute = String(turn.metadata?.resolved_route || metadata.resolved_route || "");
                 const resolvedCandidateTaskId = String(turn.metadata?.resolved_candidate_task_id || metadata.resolved_candidate_task_id || "");
-                const recoverableCandidates = (0, conversation_message_routing_1.findRecoverableConversationTasks)({ scope: "global", scopeId: "global", exactSessionId: sessionId });
+                const recoverableCandidates = (0, conversation_message_routing_1.findConversationTaskCandidates)({ scope: "global", scopeId: "global", exactSessionId: sessionId });
                 const routeHistory = Array.isArray(metadata.history) ? [...metadata.history] : [];
                 const resolvedCandidate = resolvedRoute === "continue_original"
                     ? recoverableCandidates.find((item) => String(item.id || "") === resolvedCandidateTaskId)
@@ -239,11 +239,21 @@ function createGlobalAgentApi(deps) {
                                 workflowDecision.continuationKind = "new_task";
                                 return;
                             }
-                            if (resolvedRoute === "continue_original" && resolvedCandidate)
+                            if (resolvedRoute === "continue_original" && resolvedCandidate) {
+                                workflowDecision.continuationKind = String(workflowDecision.continuationKind || "supplement") === "revise_goal" ? "revise_goal" : "supplement";
+                                (0, conversation_message_routing_1.bindConversationRouteToWorkflowDecision)(workflowDecision, {
+                                    routeKind: workflowDecision.continuationKind === "revise_goal" ? "revise_existing_task" : "resume_existing_task",
+                                    exactSessionId: sessionId,
+                                    scope: "global",
+                                }, resolvedCandidate, "explicit_user_choice");
                                 return;
-                            const route = (0, conversation_message_routing_1.decideConversationMessageRoute)({ workflowDecision, candidates: recoverableCandidates });
+                            }
+                            const route = (0, conversation_message_routing_1.decideConversationMessageRoute)({ workflowDecision, candidates: recoverableCandidates, exactSessionId: sessionId, scope: "global" });
                             if (route.decision === "needs_user")
                                 throw Object.assign(new Error(route.reason), { code: "CONVERSATION_ROUTE_REQUIRED", route });
+                            if (route.candidate && ["resume_task", "revise_task"].includes(route.decision)) {
+                                (0, conversation_message_routing_1.bindConversationRouteToWorkflowDecision)(workflowDecision, route, route.candidate, "session_anchor");
+                            }
                         },
                     });
                     conversationTurnControl.settle({
@@ -261,7 +271,19 @@ function createGlobalAgentApi(deps) {
                         conversationTurnControl.requireRoute({
                             id: turn.id,
                             revision: turn.revision,
-                            routing: { candidateTaskId: String(error?.route?.candidate?.id || ""), confidence: Number(error?.route?.confidence || 0), reason: error?.route?.reason || error?.message },
+                            routing: {
+                                candidateTaskId: String(error?.route?.candidate?.id || ""),
+                                candidateTaskIds: error?.route?.candidateTaskIds || [],
+                                candidateSummaries: error?.route?.candidateSummaries || [],
+                                routeKind: error?.route?.routeKind || "needs_user",
+                                activeTaskId: error?.route?.activeTaskId || "",
+                                exactSessionId: sessionId,
+                                scope: "global",
+                                confidenceBand: error?.route?.confidenceBand || "low",
+                                continuationKind: error?.route?.continuationKind || "supplement",
+                                confidence: Number(error?.route?.confidence || 0),
+                                reason: error?.route?.reason || error?.message,
+                            },
                         });
                         break;
                     }
@@ -1481,7 +1503,7 @@ function createGlobalAgentApi(deps) {
                     const sessionId = String(payload.session_id || payload.sessionId || "web:default");
                     const explicitRouteChoice = String(payload.resolved_route || payload.resolvedRoute || "").trim();
                     const explicitCandidateTaskId = String(payload.resolved_candidate_task_id || payload.resolvedCandidateTaskId || "").trim();
-                    const recoverableCandidates = (0, conversation_message_routing_1.findRecoverableConversationTasks)({ scope: "global", scopeId: "global", exactSessionId: sessionId });
+                    const recoverableCandidates = (0, conversation_message_routing_1.findConversationTaskCandidates)({ scope: "global", scopeId: "global", exactSessionId: sessionId });
                     const explicitCandidate = explicitRouteChoice === "continue_original"
                         ? recoverableCandidates.find((item) => String(item.id || "") === explicitCandidateTaskId)
                         : null;
@@ -1596,11 +1618,19 @@ function createGlobalAgentApi(deps) {
                             }
                             if (explicitRouteChoice === "continue_original") {
                                 workflowDecision.continuationKind = String(workflowDecision.continuationKind || "supplement") === "revise_goal" ? "revise_goal" : "supplement";
+                                (0, conversation_message_routing_1.bindConversationRouteToWorkflowDecision)(workflowDecision, {
+                                    routeKind: workflowDecision.continuationKind === "revise_goal" ? "revise_existing_task" : "resume_existing_task",
+                                    exactSessionId: sessionId,
+                                    scope: "global",
+                                }, explicitCandidate, "explicit_user_choice");
                                 return;
                             }
-                            const route = (0, conversation_message_routing_1.decideConversationMessageRoute)({ workflowDecision, candidates: recoverableCandidates });
+                            const route = (0, conversation_message_routing_1.decideConversationMessageRoute)({ workflowDecision, candidates: recoverableCandidates, exactSessionId: sessionId, scope: "global" });
                             if (route.decision === "needs_user") {
                                 throw Object.assign(new Error(route.reason), { code: "CONVERSATION_ROUTE_REQUIRED", route });
+                            }
+                            if (route.candidate && ["resume_task", "revise_task"].includes(route.decision)) {
+                                (0, conversation_message_routing_1.bindConversationRouteToWorkflowDecision)(workflowDecision, route, route.candidate, "session_anchor");
                             }
                         },
                         turnId: activeTurn.id,
@@ -1649,6 +1679,14 @@ function createGlobalAgentApi(deps) {
                                 revision: activeTurn.revision,
                                 routing: {
                                     candidateTaskId: String(error?.route?.candidate?.id || ""),
+                                    candidateTaskIds: error?.route?.candidateTaskIds || [],
+                                    candidateSummaries: error?.route?.candidateSummaries || [],
+                                    routeKind: error?.route?.routeKind || "needs_user",
+                                    activeTaskId: error?.route?.activeTaskId || "",
+                                    exactSessionId: activeSessionId,
+                                    scope: "global",
+                                    confidenceBand: error?.route?.confidenceBand || "low",
+                                    continuationKind: error?.route?.continuationKind || "supplement",
                                     confidence: Number(error?.route?.confidence || 0),
                                     reason: String(error?.route?.reason || error?.message || "需要确认消息处理方式"),
                                 },
@@ -1670,7 +1708,7 @@ function createGlobalAgentApi(deps) {
                         && !String(payload.resolved_route || payload.resolvedRoute || "")
                         && ["统一大模型尚未配置", "MODEL", "PROVIDER", "TIMEOUT", "NETWORK"].some(token => String(error?.code || error?.message || "").toUpperCase().includes(token))) {
                         try {
-                            const candidates = (0, conversation_message_routing_1.findRecoverableConversationTasks)({ scope: "global", scopeId: "global", exactSessionId: activeSessionId });
+                            const candidates = (0, conversation_message_routing_1.findConversationTaskCandidates)({ scope: "global", scopeId: "global", exactSessionId: activeSessionId });
                             if (candidates.length === 0)
                                 throw error;
                             const routed = conversationTurnControl.requireRoute({
@@ -1678,6 +1716,10 @@ function createGlobalAgentApi(deps) {
                                 revision: activeTurn.revision,
                                 routing: {
                                     candidateTaskId: String(candidates[0]?.id || ""),
+                                    candidateTaskIds: candidates.map((item) => String(item?.id || "")).filter(Boolean),
+                                    candidateSummaries: candidates.slice(0, 6).map(conversation_message_routing_1.buildRecoverableTaskSummary).filter(Boolean),
+                                    exactSessionId: activeSessionId,
+                                    scope: "global",
                                     confidence: 0,
                                     reason: "主 Agent 暂时无法可靠判断这条消息是否续接原任务，请选择处理方式",
                                 },

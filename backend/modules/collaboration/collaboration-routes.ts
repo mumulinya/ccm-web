@@ -388,7 +388,9 @@ import {
   reopenTaskAgentSessions,
   suspendTaskAgentSessions,
 } from "../../tasks/agent-sessions";
-import { interruptTaskExecution, resumeInterruptedTaskExecution } from "../../tasks/task-interruption";
+import { interruptTaskExecution, reconcileTaskInterruptionReceipt } from "../../tasks/task-interruption";
+import { captureTaskRecoveryWorkspace, runTaskRecoveryOrchestrator } from "../../tasks/task-recovery-orchestrator";
+import { projectTaskContext } from "../../tasks/task-context";
 import {
   bindTaskAgentInvocationContext,
   bindTaskAgentInvocationMemoryDelivery,
@@ -1332,7 +1334,13 @@ export function handleCollaborationApiReplayAndExecutionRoutes(
       const modelRecovery = modelRecoveryFor(task);
       const pauseStatus = taskPauseStatusProjection(task, { activeWriterCount: listActiveAgentRuns({ taskId: String(task?.id || "") }).length });
       const availableActions: any[] = [];
-      if (pauseStatus.state === "paused" && canStop) {
+      if (task?.acceptance_state === "recovery_required" && task?.recovery_preflight?.recoveryMode === "manual_reconciliation" && canStop) {
+        availableActions.push(
+          { id: "adopt_current_changes", kind: "adopt_current_changes", label: "采用当前改动并继续", enabled: true },
+          { id: "recheck", kind: "recheck", label: "查看并重新核验", enabled: true },
+          { id: "cancel", kind: "cancel", label: "停止任务", enabled: true },
+        );
+      } else if (pauseStatus.state === "paused" && canStop) {
         availableActions.push({ id: "resume_paused", kind: "resume_paused", label: "继续", enabled: true });
       } else if (["requested", "quiescing"].includes(pauseStatus.state) && canStop) {
         if (pauseStatus.stuck) availableActions.push({ id: "force_interrupt", kind: "force_interrupt", label: "强制中断", enabled: true });
@@ -1649,7 +1657,7 @@ export function handleCollaborationApiReplayAndExecutionRoutes(
       try {
         const payload = body ? JSON.parse(body) : {};
         const taskId = String(payload.task_id || payload.taskId || payload.id || "");
-        const task = loadTasks().find((item: any) => item.id === taskId);
+        let task = loadTasks().find((item: any) => item.id === taskId);
         if (!task) return sendJson(res, { error: "任务不存在" }, 404);
         if (rejectTaskMutationConflict(res, task, payload, pathname.endsWith("/resume-interrupted"))) return;
         if (pathname.endsWith("/interrupt")) {
@@ -1658,7 +1666,8 @@ export function handleCollaborationApiReplayAndExecutionRoutes(
             while (index >= 0) { queue.splice(index, 1); index = queue.indexOf(taskId); }
           }
           const reason = compactFormText(payload.reason, "用户停止当前执行");
-          const interruption = interruptTaskExecution({ task, reasonCode: "user_interrupt", reason, actor: String(payload.actor || "local-user"), checkpoint: String(task.acceptance_state || task.status || "unknown"), sideEffectState: "uncertain" });
+          const interruptionWorkspace = captureTaskRecoveryWorkspace(task);
+          const interruption = interruptTaskExecution({ task, reasonCode: "user_interrupt", reason, actor: String(payload.actor || "local-user"), checkpoint: String(task.acceptance_state || task.status || "unknown"), sideEffectState: "uncertain", workspaceChecksum: interruptionWorkspace.checksum, changedFileCount: interruptionWorkspace.changedFileCount });
           cancelTestAgentRunsForTask(taskId, reason);
           const updated = updateTask(taskId, { status: "blocked", acceptance_state: "recovery_required", auto_execute: false, is_paused: true, paused: true, recovery_pending: true, interrupted_at: interruption.receipt.interrupted_at, interruption_receipt: interruption.receipt, status_detail: "当前执行已停止，任务和子 Agent 会话已保留" });
           releaseTaskLease(taskId, "interrupted");
@@ -1668,13 +1677,42 @@ export function handleCollaborationApiReplayAndExecutionRoutes(
           return sendJson(res, { success: true, task: updated, interruption_receipt: interruption.receipt, queue_status: getQueueStatus() });
         }
         if (runningTaskIds.has(taskId)) return sendJson(res, { error: "旧执行仍在终止，请稍后再恢复" }, 409);
-        const recovery = resumeInterruptedTaskExecution(task, { userRequested: true, authorizationValid: true, runtimeValid: true });
-        if (!recovery.resumed) return sendJson(res, { error: recovery.decision.reason, recovery_decision: recovery.decision }, 409);
-        const updated = updateTask(taskId, { status: "pending", acceptance_state: task.interruption_receipt?.checkpoint || "planned", auto_execute: true, is_paused: false, paused: false, recovery_pending: false, recovery_decision: recovery.decision, execution_attempt: Math.max(0, Number(task.execution_attempt || 0)) + 1, resumed_at: new Date().toISOString(), status_detail: "已恢复原任务和子 Agent 会话，等待继续执行" });
-        appendSafeRecoveryMilestone(updated || task, recovery);
-        appendTaskTimelineEvent(taskId, { type: "task_recovered", title: "已恢复原任务和子 Agent 会话", detail: recovery.decision.reason, status: "ok", phase: "queued", data: { reopened_session_ids: recovery.reopenedSessions.map((item: any) => item.id), recovery_checksum: recovery.decision.checksum } });
-        const queued = enqueueTask(taskId, ctx);
-        return sendJson(res, { success: true, task: updated, recovery_decision: recovery.decision, queue_result: queued });
+        let resumableTask = task;
+        let recoveryWorkspace = captureTaskRecoveryWorkspace(resumableTask);
+        // A terminal failure may predate interruption receipts. Convert it into
+        // a reconciled recovery checkpoint from the current workspace so the
+        // replay button can still resume the exact task without creating a
+        // second task. An empty/invalid workspace checksum remains fail-closed
+        // in the orchestrator.
+        if (!resumableTask.interruption_receipt && ["failed", "blocked"].includes(String(resumableTask.status || "").toLowerCase()) && resumableTask.acceptance_state !== "recovery_required") {
+          const checkpoint = interruptTaskExecution({ task: resumableTask, reasonCode: "agent_runtime_unavailable", reason: "从任务回放继续失败任务", actor: String(payload.actor || "local-user"), checkpoint: String(resumableTask.acceptance_state || resumableTask.status || "failed"), sideEffectState: "committed", workspaceChecksum: recoveryWorkspace.checksum, changedFileCount: recoveryWorkspace.changedFileCount, processTerminationProven: true });
+          resumableTask = updateTask(taskId, { status: "blocked", acceptance_state: "recovery_required", auto_execute: false, paused: true, is_paused: true, recovery_pending: true, interruption_receipt: checkpoint.receipt, status_detail: "失败任务已生成可核对恢复现场" }) || resumableTask;
+          task = resumableTask;
+          recoveryWorkspace = captureTaskRecoveryWorkspace(resumableTask);
+        }
+        const reconciliationAction = String(payload.reconciliation_action || payload.reconciliationAction || "");
+        if (reconciliationAction === "adopt_current_changes") {
+          const reconciledReceipt = reconcileTaskInterruptionReceipt(resumableTask, { action: "adopt_current_changes", workspaceChecksum: recoveryWorkspace.checksum, actor: String(payload.actor || "local-user") });
+          resumableTask = updateTask(taskId, { interruption_receipt: reconciledReceipt, recovery_preflight: null, status_detail: "已采用当前工作区改动，正在重新执行恢复检查" }) || resumableTask;
+          recoveryWorkspace = captureTaskRecoveryWorkspace(resumableTask);
+        }
+        const recovery = await runTaskRecoveryOrchestrator(resumableTask, {
+          scope: resumableTask.group_id ? "group" : resumableTask.project_session_id ? "project" : "global",
+          scopeId: String(resumableTask.group_id || resumableTask.target_project || "global"),
+          exactSessionId: String(resumableTask.group_session_id || resumableTask.project_session_id || resumableTask.origin_session_id || resumableTask.task_agent_session_id || resumableTask.id),
+          idempotencyKey: String(payload.idempotency_key || payload.idempotencyKey || payload.client_message_id || payload.clientMessageId || `${taskId}:${resumableTask.interruption_receipt?.checksum || "resume"}`),
+          authorizationValid: true,
+          runtimeValid: true,
+          currentWorkspaceChecksum: recoveryWorkspace.checksum,
+          worktreeOwnershipValid: recoveryWorkspace.ownershipValid,
+          resolveUserSession: true,
+          enqueue: id => enqueueTask(id, ctx),
+        });
+        if (!recovery.success) return sendJson(res, { error: "恢复前需要核对中断现场", recovery_preflight: recovery.preflight, task: recovery.task ? { ...recovery.task, task_context: projectTaskContext(recovery.task) } : null }, 409);
+        appendSafeRecoveryMilestone(recovery.task || task, { ...recovery, reopenedSessions: recovery.activation?.sessions || [] });
+        appendTaskTimelineEvent(taskId, { type: "task_recovered", title: `第 ${recovery.preflight.nextAttempt} 次执行已恢复`, detail: recovery.decision.reason, status: "ok", phase: "queued", data: { recovery_mode: recovery.preflight.recoveryMode, transaction_checksum: recovery.transaction.checksum, recovery_checksum: recovery.decision.checksum } });
+        const safeRecoveryTask = recovery.task ? { ...recovery.task, task_context: projectTaskContext(recovery.task) } : null;
+        return sendJson(res, { success: true, task: safeRecoveryTask, user_session: recovery.userSession || recovery.task?.recovery_user_session || null, agent_sessions: recovery.agentSessions || recovery.task?.recovery_agent_sessions || [], recovery_decision: recovery.decision, recovery_preflight: recovery.preflight, recovery_transaction: recovery.transaction, queue_result: recovery.queueResult });
       } catch (e: any) { return sendJson(res, { error: e.message }, 400); }
     });
     return true;

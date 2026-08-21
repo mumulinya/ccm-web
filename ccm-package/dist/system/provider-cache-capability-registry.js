@@ -87,7 +87,7 @@ function officialEndpointCapability(config) {
 }
 function protocolOf(config) {
     const value = String(config?.format || "auto").trim().toLowerCase();
-    return ["openai-compatible", "anthropic-compatible", "gemini-compatible"].includes(value) ? value : "auto";
+    return ["openai-compatible", "openai-responses", "anthropic-compatible", "gemini-compatible"].includes(value) ? value : "auto";
 }
 function cacheFamilyOf(config) {
     const declared = String(config?.providerNativeCacheFamily || "auto").trim().toLowerCase();
@@ -95,6 +95,7 @@ function cacheFamilyOf(config) {
         return declared;
     return {
         "openai-compatible": "openai",
+        "openai-responses": "openai",
         "anthropic-compatible": "anthropic",
         "gemini-compatible": "gemini",
     }[protocolOf(config)] || "compatible";

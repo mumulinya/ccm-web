@@ -951,7 +951,7 @@ const postCompactDispatchSummary = computed(() => agentCoordination.value?.post_
 const runtimeTooling = computed(() => runtimeKernel.value?.runtime_tooling || runtimeKernel.value?.runtimeTooling || null)
 const recoverySummary = computed(() => displayValue(props.card.recovery_summary || props.card.recoverySummary || props.card.technical?.recovery_summary || props.card.technical?.recoverySummary || null, '恢复接续已整理。'))
 const { recoveryPresentation } = useTaskRecoveryPresentation(() => props.card)
-const recoveryActions = computed(() => asList(props.card.actions).filter(action => ['resume_interrupted', 'cancel'].includes(action?.kind)))
+const recoveryActions = computed(() => asList(props.card.actions).filter(action => ['resume_interrupted', 'adopt_current_changes', 'cancel'].includes(action?.kind)))
 const visibleCardActions = computed(() => asList(card.value.actions)
   .filter(action => !recoveryPresentation.value.visible || !['resume_interrupted', 'cancel'].includes(action?.kind))
   .filter(action => !(planMode.value && (isPlanConfirmAction(action) || isPlanReviseAction(action)))))
@@ -1186,7 +1186,7 @@ watch(() => props.card.task_id || props.card.id || '', () => {
   planAcceptFeedback.value = ''
   planStepEdits.value = {}
 })
-const handoffActionCanEmit = (action) => ['view_changes', 'continue', 'retry', 'resume', 'pause', 'resume_paused', 'force_interrupt', 'interrupt', 'resume_interrupted', 'cancel', 'gap_continue', 'confirm_plan', 'revise_plan', 'approve_epic', 'targeted_rework', 'continue_work_item', 'rollback', 'save_knowledge'].includes(action?.kind)
+const handoffActionCanEmit = (action) => ['view_changes', 'continue', 'retry', 'resume', 'pause', 'resume_paused', 'force_interrupt', 'interrupt', 'resume_interrupted', 'adopt_current_changes', 'cancel', 'gap_continue', 'confirm_plan', 'revise_plan', 'approve_epic', 'targeted_rework', 'continue_work_item', 'rollback', 'save_knowledge'].includes(action?.kind)
 const handoffActionPayload = (action) => {
   if (!action) return action
   if (action.kind === 'view_changes') {

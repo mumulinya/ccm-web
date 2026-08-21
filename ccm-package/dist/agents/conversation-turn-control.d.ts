@@ -4,14 +4,33 @@ export type ConversationTurnMode = "steer" | "queue";
 export type ConversationTurnStatus = "queued" | "sending" | "needs_route" | "applied" | "completed" | "failed" | "cancelled";
 export type ConversationTurnKind = "user_message" | "task_dispatch";
 export type ConversationTurnSource = "web" | "workbench" | "global_agent" | "schedule";
+export type ConversationRouteKind = "answer_only" | "continue_current_session" | "resume_existing_task" | "revise_existing_task" | "start_new_task" | "needs_user";
 export type ConversationTurnRouting = {
     decision: "answer" | "new_task" | "resume_task" | "revise_task" | "needs_user";
+    routeKind: ConversationRouteKind;
     candidateTaskId: string;
+    candidateTaskIds: string[];
+    candidateSummaries: Array<{
+        taskId: string;
+        title: string;
+        status: string;
+        candidateKind?: "active" | "recoverable" | "completed";
+        phase?: string;
+        attempt?: number;
+        hasIncompleteWorkItems?: boolean;
+        targetProjects?: string[];
+        contentStored: false;
+    }>;
+    activeTaskId: string;
+    exactSessionId: string;
+    scope: ConversationTurnScope;
     confidence: number;
+    confidenceBand: "high" | "medium" | "low";
+    continuationKind: "new_task" | "supplement" | "revise_goal";
     reason: string;
     bindingChecksum: string;
     selectedChoice?: "continue_original" | "start_new_task" | "answer_only";
-    source?: "model" | "explicit_user_choice";
+    source?: "model" | "session_anchor" | "explicit_user_choice" | "recovery_preflight";
     contentStored: false;
 };
 export type ConversationTurnRecord = {
@@ -67,12 +86,30 @@ export declare class ConversationTurnControlStore {
             routing?: {
                 contentStored: boolean;
                 decision: "answer" | "new_task" | "resume_task" | "revise_task" | "needs_user";
+                routeKind: ConversationRouteKind;
                 candidateTaskId: string;
+                candidateTaskIds: string[];
+                candidateSummaries: Array<{
+                    taskId: string;
+                    title: string;
+                    status: string;
+                    candidateKind?: "active" | "recoverable" | "completed";
+                    phase?: string;
+                    attempt?: number;
+                    hasIncompleteWorkItems?: boolean;
+                    targetProjects?: string[];
+                    contentStored: false;
+                }>;
+                activeTaskId: string;
+                exactSessionId: string;
+                scope: ConversationTurnScope;
                 confidence: number;
+                confidenceBand: "high" | "medium" | "low";
+                continuationKind: "new_task" | "supplement" | "revise_goal";
                 reason: string;
                 bindingChecksum: string;
                 selectedChoice?: "continue_original" | "start_new_task" | "answer_only";
-                source?: "model" | "explicit_user_choice";
+                source?: "model" | "session_anchor" | "explicit_user_choice" | "recovery_preflight";
             };
             id: string;
             revision: number;
@@ -126,12 +163,30 @@ export declare function admitTaskDispatchTurn(task: any): ConversationTurnRecord
     routing?: {
         contentStored: boolean;
         decision: "answer" | "new_task" | "resume_task" | "revise_task" | "needs_user";
+        routeKind: ConversationRouteKind;
         candidateTaskId: string;
+        candidateTaskIds: string[];
+        candidateSummaries: Array<{
+            taskId: string;
+            title: string;
+            status: string;
+            candidateKind?: "active" | "recoverable" | "completed";
+            phase?: string;
+            attempt?: number;
+            hasIncompleteWorkItems?: boolean;
+            targetProjects?: string[];
+            contentStored: false;
+        }>;
+        activeTaskId: string;
+        exactSessionId: string;
+        scope: ConversationTurnScope;
         confidence: number;
+        confidenceBand: "high" | "medium" | "low";
+        continuationKind: "new_task" | "supplement" | "revise_goal";
         reason: string;
         bindingChecksum: string;
         selectedChoice?: "continue_original" | "start_new_task" | "answer_only";
-        source?: "model" | "explicit_user_choice";
+        source?: "model" | "session_anchor" | "explicit_user_choice" | "recovery_preflight";
     };
     id: string;
     revision: number;

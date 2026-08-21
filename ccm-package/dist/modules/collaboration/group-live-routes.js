@@ -564,7 +564,7 @@ async function handleGroupLiveRoutesSendPreface(payload, uploadedFiles, ctx, dep
     const requestRecoveryAttempt = Math.max(1, Number(modelRecovery?.attempt || 1));
     const requestTurnId = `${requestExecutionAnchorMessageId}:attempt:${requestRecoveryAttempt}:${incomingUserMessageId}`;
     const exactSessionContext = (0, group_session_model_context_1.buildExactGroupSessionModelContextPacket)(group_id, { groupSessionId }).rendered;
-    const recoverableCandidates = (0, conversation_message_routing_1.findRecoverableConversationTasks)({
+    const recoverableCandidates = (0, conversation_message_routing_1.findConversationTaskCandidates)({
         scope: "group",
         scopeId: String(group_id),
         exactSessionId: groupSessionId,
@@ -616,6 +616,10 @@ async function handleGroupLiveRoutesSendPreface(payload, uploadedFiles, ctx, dep
             revision: routeTurn.revision,
             routing: {
                 candidateTaskId: String(recoverableCandidates[0]?.id || ""),
+                candidateTaskIds: recoverableCandidates.map((item) => String(item?.id || "")).filter(Boolean),
+                candidateSummaries: recoverableCandidates.slice(0, 6).map(conversation_message_routing_1.buildRecoverableTaskSummary).filter(Boolean),
+                exactSessionId: groupSessionId,
+                scope: "group",
                 confidence: 0,
                 reason: "主 Agent 暂时无法可靠判断这条消息是否续接原任务，请选择处理方式",
             },
@@ -672,7 +676,7 @@ async function handleGroupLiveRoutesSendPreface(payload, uploadedFiles, ctx, dep
         };
     }
     else if (!explicitContinuationTask && !clarificationContext && !modelRecovery) {
-        const routeDecision = (0, conversation_message_routing_1.decideConversationMessageRoute)({ workflowDecision: taskIntent?.workflowDecision, candidates: recoverableCandidates });
+        const routeDecision = (0, conversation_message_routing_1.decideConversationMessageRoute)({ workflowDecision: taskIntent?.workflowDecision, candidates: recoverableCandidates, exactSessionId: groupSessionId, scope: "group" });
         if (["resume_task", "revise_task"].includes(routeDecision.decision) && routeDecision.candidate) {
             explicitContinuationTask = routeDecision.candidate;
             explicitContinuationKind = routeDecision.decision === "revise_task" ? "revise_goal" : "supplement";
@@ -701,7 +705,19 @@ async function handleGroupLiveRoutesSendPreface(payload, uploadedFiles, ctx, dep
             const routed = conversation_turn_control_1.conversationTurnControl.requireRoute({
                 id: routeTurn.id,
                 revision: routeTurn.revision,
-                routing: { candidateTaskId: String(routeDecision.candidate?.id || ""), confidence: routeDecision.confidence, reason: routeDecision.reason },
+                routing: {
+                    candidateTaskId: String(routeDecision.candidate?.id || ""),
+                    candidateTaskIds: routeDecision.candidateTaskIds,
+                    candidateSummaries: routeDecision.candidateSummaries,
+                    routeKind: routeDecision.routeKind,
+                    activeTaskId: routeDecision.activeTaskId,
+                    exactSessionId: groupSessionId,
+                    scope: "group",
+                    confidenceBand: routeDecision.confidenceBand,
+                    continuationKind: routeDecision.continuationKind,
+                    confidence: routeDecision.confidence,
+                    reason: routeDecision.reason,
+                },
             });
             res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "private, no-store", "Connection": "keep-alive", "Access-Control-Allow-Origin": "*" });
             writeSse(res, { type: "route_required", turn: { id: routed.id, revision: routed.revision, status: routed.status, routing: routed.routing }, messageId: client_message_id });

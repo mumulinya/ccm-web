@@ -46,7 +46,7 @@ assert.ok(webFetchSchema?.required?.includes("prompt"));
 assert.equal(webFetchSchema?.properties?.max_chars, undefined);
 assert.ok(workspace.WORKSPACE_READONLY_TOOL_DEFINITIONS_V3.find(tool => tool.name === "web_fetch")?.inputSchema?.required?.includes("prompt"));
 assert.equal(workspace.WORKSPACE_READONLY_TOOL_DEFINITIONS_V3.find(tool => tool.name === "web_fetch")?.inputSchema?.properties?.max_chars, undefined);
-assert.match(workspace.WORKSPACE_READONLY_TOOL_DEFINITIONS_V3.find(tool => tool.name === "read_file")?.description || "", /最多读取2000行/);
+assert.match(workspace.WORKSPACE_READONLY_TOOL_DEFINITIONS_V3.find(tool => tool.name === "read_file")?.description || "", /up to 2000 lines/i);
 const htmlMd = require(path.join(root, "ccm-package", "dist", "tools", "html-to-light-markdown.js"));
 assert.match(htmlMd.htmlToLightMarkdown("<h1>Hello</h1><p>See <a href=\"https://example.com\">docs</a></p><pre>code()</pre>"), /# Hello/);
 assert.match(htmlMd.htmlToLightMarkdown("<h1>Hello</h1><p>See <a href=\"https://example.com\">docs</a></p><pre>code()</pre>"), /\[docs\]\(https:\/\/example.com\)/);
@@ -162,13 +162,13 @@ const context = mainRuntime.buildMainAgentToolRuntimeContext({
 });
 assert.equal(context.schema, "ccm-main-agent-tool-runtime-context-v2");
 assert.deepEqual(context.catalog.loadedMcp.filter(tool => tool.server === "ccm__workspace_readonly").map(tool => tool.name).sort(), ["glob_files", "grep_text", "list_directory", "read_file", "read_files"]);
-assert.match(context.policyPrompt, /可直接使用的工作区工具/);
+assert.match(context.policyPrompt, /available workspace tools|workspace tools/i);
 assert.match(context.policyPrompt, /- read_file:/);
-assert.match(context.policyPrompt, /默认一次读完/);
+assert.match(context.policyPrompt, /Read workspace files in one call by default/i);
 assert.equal(context.policyPrompt.includes("首轮读取预算"), false);
 assert.equal(context.policyPrompt.includes("不超过8000"), false);
 assert.equal(context.policyPrompt.includes("mcp__ccm__ccm_workspace_readonly__read_file"), false);
-assert.equal(context.policyPrompt.includes("参数 Schema="), true);
+assert.equal(context.policyPrompt.includes("parameter schema="), true);
 const nativeContext = mainRuntime.buildMainAgentToolRuntimeContext({
   configuredTools: {},
   label: "项目主 Agent",
@@ -176,7 +176,7 @@ const nativeContext = mainRuntime.buildMainAgentToolRuntimeContext({
   schemaSurface: "native",
   scopeIdentity: { scope: "project", scopeId: "alpha", exactSessionId: "pchat-alpha", allowedProjects: ["alpha"] },
 });
-assert.equal(nativeContext.policyPrompt.includes("参数 Schema="), false);
+assert.equal(nativeContext.policyPrompt.includes("parameter schema="), false);
 assert.match(nativeContext.policyPrompt, /- read_file:/);
 const nativeLoop = require(path.join(root, "ccm-package", "dist", "agents", "native-query-loop.js"));
 const nativeTools = nativeLoop.catalogToNativeTools(nativeContext);
@@ -305,7 +305,7 @@ assert.equal(context.catalog.loadedMcp.some(tool => tool.name === "read_git_stat
 assert.match(searchRows[0].output, /inputSchema/);
 assert.match(searchRows[0].output, /"name":"read_git_status"/);
 assert.equal(searchRows[0].output.includes("mcp__ccm__ccm_workspace_readonly__read_git_status"), false);
-assert.match(context.policyPrompt, /CCM ToolSearch 本轮已加载 Schema/);
+assert.match(context.policyPrompt, /CCM ToolSearch schemas loaded for this round/);
 
 const fakeTool = (name, readOnlyHint) => ({
   name,

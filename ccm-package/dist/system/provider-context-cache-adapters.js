@@ -62,7 +62,7 @@ function detectProviderCacheFamily(config = {}, hint = "") {
         return "gemini";
     if (format === "anthropic-compatible" || /(?:^|\.)anthropic\.com$/.test(host) || /\banthropic\b|\bclaude\b/.test(value))
         return "anthropic";
-    if (/(?:^|\.)openai\.com$/.test(host) || format === "openai" || hint === "openai")
+    if (/(?:^|\.)openai\.com$/.test(host) || format === "openai" || format === "openai-responses" || hint === "openai")
         return "openai";
     return "compatible";
 }

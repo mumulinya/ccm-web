@@ -54,6 +54,7 @@ type LocalIntentResult = any;
 // Global-only context, tool execution, mission supervision, and agentic loop lifecycle.
 export function createGlobalAgentAgenticRuntime(deps: any) {
   const { hasExplicitGlobalWriteAuthorization, GLOBAL_AGENT_TOOL_SPECS, GLOBAL_MANAGEMENT_ACTIONS, GLOBAL_PET_AGENT_NAME, acquireIdempotency, annotateGlobalAction, applyGlobalAgentSupervisionSteer, attachGlobalAgentRunSupervision, bindFeishuIdentifiersFromValue, bindFeishuTaskContext, buildGlobalAgentMemoryPacket, buildGlobalAgentSessionContinuation, buildGlobalSingleProjectMissionPayload, callGlobalModelWithRetry, compactGlobalAgentSessionWithModel, compactPetText, completeGlobalAgentSupervision, completeIdempotency, continueGlobalAgentRunWithClarification, controlGlobalDevelopmentMission, controlGlobalMissionSupervisor, createGlobalDevelopmentMission, createRequirementEpicWithChildren, executeFeishuAction, executePlayMusic, executeStopMusic, failIdempotency, findClarifyingGlobalAgentRun, formatGlobalMissionFinalReport, getAgentQualityPolicy, getConfigInfo, getConfigs, getGlobalAgentBackgroundOutput, getGlobalAgentMemoryPolicy, getGlobalAgentRun, getGlobalDevelopmentMission, getGlobalMissionSupervisor, getGlobalMissionSupervisorSchedulerStatus, globalRunVisibleReply, hasExplicitDevelopmentExecutionIntent, inferLocalGlobalAction, ingestGlobalAgentConversation, listGlobalAgentRuns, listGlobalMissionSupervisors, listTaskAgentSessions, loadCronJobs, loadGlobalAgentHistoryStore, loadGlobalAgentHooks, loadGlobalAgentMemory, loadGlobalAgentPermissionRules, loadGroups, loadMcpTools, loadOrchestratorConfig, loadSkills, loadTasks, normalizeText, notifyFeishuTaskStage, postLocalApi, queryKnowledgeBase, recallGlobalAgentMemory, rebuildGlobalAgentMemory, recordGlobalAgentRuntimeOutput, recordGlobalAgentSessionProviderUsage, recordGlobalMissionMemory, recoverInterruptedGlobalAgentRuns, refreshGlobalDevelopmentMissions, renderGlobalGroupMemoryContextBundle, resumeGlobalAgentRun, sanitizeGlobalDirectAgentOutput, setGlobalAgentMemoryPolicy, settleIdempotencyByTrace, startGlobalAgentRun, startGlobalMissionSupervisor, startGlobalMissionSupervisorScheduler, stopGlobalMissionSupervisorScheduler, superviseGlobalDevelopmentMissionCycle, updateGlobalAgentSupervisionState, waitForIdempotencyResult } = deps
+  const continueBoundTaskWithMessage = deps.continueTaskWithMessage;
   const globalWorkspaceReadContexts = new Map<string, WorkspaceReadContextLedger>();
 
   function workspaceReadContextForRun(run: GlobalAgentRun) {
@@ -384,6 +385,7 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
   }
 
   function buildGlobalProviderPayloadSnapshot(messages: Array<{ role: string; content: string }>, sessionId: string, run?: GlobalAgentRun) {
+    const config = loadOrchestratorConfig();
     const systemMessages = messages.filter(message => message.role === "system");
     const systemText = systemMessages.map(message => String(message.content || "")).join("\n");
     const completeMessageText = messages.map(message => String(message.content || "")).join("\n");
@@ -468,6 +470,11 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
     return buildModelVisiblePayloadSnapshot({
       scope: "global",
       sessionId,
+      exactSessionId: sessionId,
+      provider: String(config.provider || (String(config.format || "").toLowerCase().includes("anthropic") ? "anthropic" : String(config.format || "").toLowerCase().includes("gemini") ? "gemini" : "openai")),
+      model: String(config.model || ""),
+      protocol: String(config.format || config.protocol || ""),
+      modelConfig: config,
       system: systemMessages,
       tools: modelVisibleToolSpecs,
       recentMessages: messages.filter(message => message.role !== "system"),
@@ -1190,6 +1197,65 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
             code: "CCM_DEVELOPMENT_TASK_WRITE_INTENT_REQUIRED",
           });
         }
+        const continuationTaskId = String(
+          workflowDecision?.continuationTaskId
+          || workflowDecision?.continuation_task_id
+          || "",
+        ).trim();
+        if (continuationTaskId) {
+          if (typeof continueBoundTaskWithMessage !== "function") {
+            throw Object.assign(new Error("当前运行时没有加载任务续接能力，不能安全继续原任务"), {
+              code: "CCM_TASK_CONTINUATION_UNAVAILABLE",
+            });
+          }
+          const boundTask = (loadTasks() || []).find((item: any) => String(item?.id || "") === continuationTaskId);
+          if (!boundTask) {
+            throw Object.assign(new Error("原任务已经变化或不存在，请重新选择处理方式"), {
+              code: "CONVERSATION_ROUTE_CANDIDATE_STALE",
+            });
+          }
+          const continuationKind = String(workflowDecision?.continuationKind || "supplement") === "revise_goal"
+            ? "revise_goal"
+            : "supplement";
+          const continuation = await Promise.resolve(continueBoundTaskWithMessage(
+            continuationTaskId,
+            String(run.original_user_message || run.user_message || ""),
+            ctx,
+            {
+              continuationKind,
+              source: "global-conversation-route-v2",
+              requestId: `${run.id}:${continuationTaskId}:${continuationKind}`,
+              authorizationValid: run.explicit_write_authorization === true,
+            },
+          ));
+          if (!continuation?.success) {
+            throw Object.assign(new Error(continuation?.error || "原任务续接失败"), {
+              code: continuation?.manual_recovery_required ? "TASK_RECOVERY_PREFLIGHT_FAILED" : "TASK_CONTINUATION_FAILED",
+              recovery_preflight: continuation?.recovery_preflight || null,
+            });
+          }
+          const globalMissionId = String(
+            boundTask.global_mission_id
+            || boundTask.globalMissionId
+            || boundTask.mission_id
+            || boundTask.missionId
+            || continuationTaskId,
+          ).trim();
+          run.mission_id = globalMissionId;
+          (run as any).conversation_route_kind = String(workflowDecision?.conversationRouteKind || "resume_existing_task");
+          (run as any).continuation_task_id = continuationTaskId;
+          return {
+            success: true,
+            schema: "ccm-conversation-task-continuation-v2",
+            continued_existing_task: true,
+            task_id: continuationTaskId,
+            mission_id: globalMissionId,
+            route_kind: (run as any).conversation_route_kind,
+            attempt: Math.max(0, Number(continuation?.task?.execution_attempt || continuation?.task?.attempt || 0)),
+            status: String(continuation?.task?.status || "pending"),
+            contentStored: false,
+          };
+        }
         const missionArgs = name === "send_project_cmd"
           ? buildGlobalSingleProjectMissionPayload({
               project: String(args.project || args.projectName || ""),
@@ -1742,6 +1808,8 @@ export function createGlobalAgentAgenticRuntime(deps: any) {
         usage: (run as any).latest_context_usage || null,
         provider: String((run as any).latest_context_usage?.provider || ""),
         model: String((run as any).latest_context_usage?.model || loadOrchestratorConfig()?.model || ""),
+        protocol: String((run as any).latest_context_usage?.protocol || loadOrchestratorConfig()?.format || ""),
+        endpoint: String((run as any).latest_context_usage?.endpoint || loadOrchestratorConfig()?.apiUrl || ""),
         anchorMessageId: assistantMessageId,
         currentRequest: { role: "user", content: input.message },
         fixedContext: { main_agent_loop: true },

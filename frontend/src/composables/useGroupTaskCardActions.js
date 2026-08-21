@@ -119,6 +119,9 @@ export function createGroupTaskCardActionHandler(options = {}) {
         await postTaskCardAction('/api/tasks/interrupt', { id, reason: '用户从群聊任务卡停止当前执行', ...guard })
       } else if (action.kind === 'resume_interrupted') {
         await postTaskCardAction('/api/tasks/resume-interrupted', { id, ...guard })
+      } else if (action.kind === 'adopt_current_changes') {
+        if (!await confirmDialog(`确定采用“${card?.title || id}”当前工作区里的改动并继续吗？系统仍会重新执行权限、工具回合和验收检查。`)) return
+        await postTaskCardAction('/api/tasks/resume-interrupted', { id, ...guard, reconciliation_action: 'adopt_current_changes' })
       } else if (action.kind === 'cancel') {
         const result = await stopTaskWithPreview({ ...card, id }, {
           reason: '用户从群聊任务卡停止任务', actor: 'group-task-card',
@@ -249,6 +252,7 @@ export function createGroupTaskCardActionHandler(options = {}) {
       await loadMessages?.()
     } catch (error) {
       toast.error(error.message || `${action.label}失败`)
+      await loadMessages?.()
     }
   }
 }

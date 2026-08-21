@@ -94,10 +94,10 @@ export const conversationTurnsApi = {
   cancel: (id, reason = '', revision) => api('/api/conversation-turns/cancel', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, reason, revision }) }),
   guide: (id, revision) => api('/api/conversation-turns/guide', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, revision }) }),
   retry: (id, revision) => api('/api/conversation-turns/retry', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, revision }) }),
-  resolveRoute: (id, revision, choice, bindingChecksum) => api('/api/conversation-turns/resolve-route', {
+  resolveRoute: (id, revision, choice, bindingChecksum, candidateTaskId = '') => api('/api/conversation-turns/resolve-route', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ id, revision, choice, bindingChecksum }),
+    body: JSON.stringify({ id, revision, choice, bindingChecksum, candidateTaskId }),
   }),
 };
 

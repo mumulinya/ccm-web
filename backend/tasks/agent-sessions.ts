@@ -38,6 +38,7 @@ export {
   recordTaskAgentFinalDispatchReactiveCompactCircuitOutcome,
   advanceTaskAgentSession,
   reopenTaskAgentSessions,
+  activateTaskAgentSessionsForRecovery,
   getTaskAgentSessionOptions,
   getTaskAgentSessionContinuity,
   listTaskAgentSessions,

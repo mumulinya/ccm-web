@@ -101,14 +101,14 @@ export function useConversationTurnControl(options = {}) {
     finally { await refresh().catch(() => {}) }
   }
 
-  const resolveRoute = async (turn, choice) => {
+  const resolveRoute = async (turn, choice, candidateTaskId = '') => {
     if (!turn?.id) throw new Error('待处理消息已经失效，请刷新后重试')
     if (!turn?.routing?.bindingChecksum) throw new Error('消息处理方式尚未准备好，请刷新后重试')
     if (resolvingRouteId.value) return null
     resolvingRouteId.value = turn.id
     resolvingRouteChoice.value = choice
     try {
-      const data = await conversationTurnsApi.resolveRoute(turn.id, turn.revision, choice, turn.routing.bindingChecksum)
+      const data = await conversationTurnsApi.resolveRoute(turn.id, turn.revision, choice, turn.routing.bindingChecksum, candidateTaskId || turn.routing.candidateTaskId || '')
       return data.turn
     } finally {
       await refresh().catch(() => {})

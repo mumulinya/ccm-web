@@ -53,6 +53,14 @@ export declare function buildMainAgentRecoverySummary(task: any, phase: string, 
         recovery_max_attempts: number;
         resume_phase: any;
         skipped_work_item_count: number;
+        recovery_mode: string;
+        recovery_preflight_checksum: string;
+        recovery_transaction_status: string;
+        recovery_transaction_checksum: string;
+        previous_attempt: number;
+        next_attempt: number;
+        unresolved_tool_call_count: number;
+        changed_file_count: number;
     };
 };
 export declare function taskCardPhase(task: any, executions: any[]): string;
@@ -6268,6 +6276,14 @@ export declare function buildTaskCardView(task: any, executions: any[], sessions
             recovery_max_attempts: number;
             resume_phase: any;
             skipped_work_item_count: number;
+            recovery_mode: string;
+            recovery_preflight_checksum: string;
+            recovery_transaction_status: string;
+            recovery_transaction_checksum: string;
+            previous_attempt: number;
+            next_attempt: number;
+            unresolved_tool_call_count: number;
+            changed_file_count: number;
         };
     };
     recoverySummary: {
@@ -6304,6 +6320,14 @@ export declare function buildTaskCardView(task: any, executions: any[], sessions
             recovery_max_attempts: number;
             resume_phase: any;
             skipped_work_item_count: number;
+            recovery_mode: string;
+            recovery_preflight_checksum: string;
+            recovery_transaction_status: string;
+            recovery_transaction_checksum: string;
+            previous_attempt: number;
+            next_attempt: number;
+            unresolved_tool_call_count: number;
+            changed_file_count: number;
         };
     };
     continuation_status: {
@@ -6582,6 +6606,14 @@ export declare function buildTaskCardView(task: any, executions: any[], sessions
                 recovery_max_attempts: number;
                 resume_phase: any;
                 skipped_work_item_count: number;
+                recovery_mode: string;
+                recovery_preflight_checksum: string;
+                recovery_transaction_status: string;
+                recovery_transaction_checksum: string;
+                previous_attempt: number;
+                next_attempt: number;
+                unresolved_tool_call_count: number;
+                changed_file_count: number;
             };
         };
         continuation_state: any;

@@ -158,6 +158,8 @@ function normalizeEvidence(input, now = new Date()) {
     const model = clean(input.model);
     if (!provider)
         throw new Error("模型能力必须指定 provider");
+    const hasExplicitMaxInput = input.maxInputTokens !== undefined || input.max_input_tokens !== undefined;
+    const windowSemantics = String(input.windowSemantics || input.window_semantics || (hasExplicitMaxInput && input.contextWindow === undefined && input.context_window === undefined ? "max_input" : "total_context")) === "max_input" ? "max_input" : "total_context";
     const contextWindow = Math.floor(Number(input.contextWindow || input.context_window || input.maxInputTokens || input.max_input_tokens || 0));
     const maxOutputTokens = Math.floor(Number(input.maxOutputTokens || input.max_output_tokens || exports.CONSERVATIVE_MAX_OUTPUT_TOKENS));
     if (!Number.isFinite(contextWindow) || contextWindow < 32_000 || contextWindow > 4_000_000)
@@ -182,6 +184,7 @@ function normalizeEvidence(input, now = new Date()) {
         confidence: SOURCE_CONFIDENCE[source],
         priority: SOURCE_PRIORITY[source],
         contextWindow,
+        windowSemantics,
         maxOutputTokens,
         checkedAt: checkedAt.toISOString(),
         expiresAt: expiresAt.toISOString(),
@@ -346,14 +349,18 @@ function summarizeModelCapabilityCache(cache = readModelCapabilityCache()) {
     };
 }
 function capacityFromEntry(entry, cacheStatus) {
-    const reservedOutputTokens = Math.min(20_000, Math.max(0, Number(entry.maxOutputTokens || exports.CONSERVATIVE_MAX_OUTPUT_TOKENS)));
-    const effectiveContextWindow = Math.max(18_000, Number(entry.contextWindow) - reservedOutputTokens);
+    const windowSemantics = entry.windowSemantics === "max_input" ? "max_input" : "total_context";
+    const reservedOutputTokens = windowSemantics === "max_input"
+        ? 0
+        : Math.min(20_000, Math.max(0, Number(entry.maxOutputTokens || exports.CONSERVATIVE_MAX_OUTPUT_TOKENS)));
+    const effectiveContextWindow = Math.max(18_000, windowSemantics === "max_input" ? Number(entry.contextWindow) : Number(entry.contextWindow) - reservedOutputTokens);
     return {
         schema: exports.MODEL_CONTEXT_CAPACITY_SCHEMA,
         provider: entry.provider || "",
         model: entry.model || "",
         contextWindow: Number(entry.contextWindow),
         maxOutputTokens: Number(entry.maxOutputTokens || 0),
+        windowSemantics,
         reservedOutputTokens,
         effectiveContextWindow,
         autoCompactBufferTokens: exports.CONTEXT_AUTOCOMPACT_BUFFER_TOKENS,
@@ -426,6 +433,7 @@ function resolveTrustedModelContextCapacity(input = {}) {
         provider,
         model,
         contextWindow,
+        windowSemantics: "total_context",
         maxOutputTokens: reservedOutputTokens,
         reservedOutputTokens,
         effectiveContextWindow,

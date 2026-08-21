@@ -315,9 +315,9 @@ export function useGroupChatStream({
     return guidedTurn
   }
 
-  const resolveGroupQueuedRoute = async (turn, choice) => {
+  const resolveGroupQueuedRoute = async (turn, choice, candidateTaskId = '') => {
     try {
-      const resolved = await groupTurnControl.resolveRoute(turn, choice)
+      const resolved = await groupTurnControl.resolveRoute(turn, choice, candidateTaskId)
       if (!resolved) return
       toast.success(choice === 'continue_original' ? '正在继续原任务' : choice === 'answer_only' ? '正在回答这条消息' : '正在作为新任务处理')
       await drainGroupTurnQueue()

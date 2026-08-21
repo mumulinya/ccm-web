@@ -18,7 +18,20 @@ export type ProviderAgentTurn = {
     stopReason: string;
     usage: LlmTokenUsage;
 };
-export declare function providerToolsRequestPatch(family: "openai" | "anthropic" | "gemini", tools: ProviderToolDefinition[], nativeToolReference?: boolean): {
+export declare function providerToolsRequestPatch(family: "openai" | "openai-responses" | "anthropic" | "gemini", tools: ProviderToolDefinition[], nativeToolReference?: boolean): {
+    body: {
+        tools: {
+            type: string;
+            name: string;
+            description: string;
+            parameters: Record<string, any>;
+        }[];
+        tool_choice: string;
+    };
+    headers: {
+        "anthropic-beta"?: undefined;
+    };
+} | {
     body: {
         tools: {
             type: string;
@@ -64,11 +77,17 @@ export declare function providerToolsRequestPatch(family: "openai" | "anthropic"
     };
 };
 export declare function parseOpenAiAgentTurn(data: any, usage: LlmTokenUsage): ProviderAgentTurn;
+export declare function parseOpenAiResponsesAgentTurn(data: any, usage: LlmTokenUsage): ProviderAgentTurn;
 export declare function parseGeminiAgentTurn(data: any, usage: LlmTokenUsage): ProviderAgentTurn;
 export declare function parseAnthropicAgentTurn(data: any, usage: LlmTokenUsage): ProviderAgentTurn;
 export declare function turnForLegacyJsonLoop(turn: ProviderAgentTurn): string;
 export declare function createOpenAiStreamTurnAccumulator(onToolCallReady?: (item: ProviderToolCall) => void): {
     push(event: any): void;
+    finish(usage: LlmTokenUsage): ProviderAgentTurn;
+};
+export declare function createOpenAiResponsesStreamTurnAccumulator(onToolCallReady?: (item: ProviderToolCall) => void): {
+    push(event: any): void;
+    finalResponse(): any;
     finish(usage: LlmTokenUsage): ProviderAgentTurn;
 };
 export declare function createAnthropicStreamTurnAccumulator(onToolCallReady?: (item: ProviderToolCall) => void): {

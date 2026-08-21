@@ -7,13 +7,13 @@ import {
   callOpenAiCompatibleChat,
   shouldUseAnthropic,
   shouldUseGemini,
+  shouldUseOpenAiResponses,
 } from "./group-orchestrator-llm-client";
 import { providerNeutralContextCacheCapability } from "../../system/provider-neutral-context-cache";
 import { providerCacheAdapterPublicSummary } from "../../system/provider-context-cache-adapters";
 import { readProviderCacheCapabilityState } from "../../system/provider-cache-capability-registry";
 import { readProviderNativeMicrocompactCapability } from "../../system/provider-native-microcompact-capability";
 import { readProviderNativeToolCapability } from "../../system/provider-native-tool-capability";
-import { probeProviderCacheCapability } from "../../system/provider-cache-capability-probe";
 import { readMainAgentContextPolicy } from "../../tools/main-agent-context-policy";
 
 export const COORDINATOR_PROJECT = "coordinator";
@@ -215,7 +215,7 @@ export function saveOrchestratorConfig(updates: any) {
   if (updates.enabled !== undefined) next.enabled = !!updates.enabled;
   if (updates.format !== undefined) {
     const format = String(updates.format || "openai-compatible").trim();
-    if (!["auto", "openai-compatible", "anthropic-compatible", "gemini-compatible"].includes(format)) throw new Error("不支持的大模型接口协议");
+    if (!["auto", "openai-compatible", "openai-responses", "anthropic-compatible", "gemini-compatible"].includes(format)) throw new Error("不支持的大模型接口协议");
     next.format = format;
   }
   if (updates.apiUrl !== undefined) {
@@ -476,6 +476,7 @@ export function saveOrchestratorConfig(updates: any) {
   if (next.providerNativeCacheFamilyManual !== true && (updates.format !== undefined || providerNativeCacheFamilyManual === false || providerNativeCacheFamily === "auto")) {
     next.providerNativeCacheFamily = ({
       "openai-compatible": "openai",
+      "openai-responses": "openai",
       "anthropic-compatible": "anthropic",
       "gemini-compatible": "gemini",
     } as Record<string, string>)[String(next.format || "")] || "auto";
@@ -584,7 +585,7 @@ export function saveOrchestratorConfig(updates: any) {
   if (updates.summaryReviewerEnabled !== undefined) next.summaryReviewerEnabled = updates.summaryReviewerEnabled === true;
   if (updates.summaryReviewerFormat !== undefined) {
     const value = String(updates.summaryReviewerFormat || "openai-compatible");
-    if (!["openai-compatible", "anthropic-compatible", "gemini-compatible"].includes(value)) throw new Error("摘要复核模型接口协议无效");
+    if (!["openai-compatible", "openai-responses", "anthropic-compatible", "gemini-compatible"].includes(value)) throw new Error("摘要复核模型接口协议无效");
     next.summaryReviewerFormat = value;
   }
   if (updates.summaryReviewerApiUrl !== undefined) {
@@ -649,7 +650,7 @@ export async function testUnifiedModelConnection() {
   const config = loadOrchestratorConfig();
   const contextCacheAdapter = providerCacheAdapterPublicSummary(config);
   const startedAt = Date.now();
-  const provider = shouldUseAnthropic(config) ? "anthropic-compatible" : shouldUseGemini(config) ? "gemini-compatible" : "openai-compatible";
+  const provider = shouldUseAnthropic(config) ? "anthropic-compatible" : shouldUseGemini(config) ? "gemini-compatible" : shouldUseOpenAiResponses(config) ? "openai-responses" : "openai-compatible";
   const consumers = [
     { id: "global-agent", label: "全局 Agent" },
     { id: "group-main-agent", label: "群聊主 Agent" },
@@ -660,7 +661,7 @@ export async function testUnifiedModelConnection() {
     // Connection checks stay lightweight: never attach reasoning / thinking params.
     const testConfig = {
       ...config,
-      timeoutMs: Math.min(20_000, Math.max(5_000, Number(config.timeoutMs) || 15_000)),
+      timeoutMs: Math.min(120_000, Math.max(5_000, Number(config.timeoutMs) || 60_000)),
       reasoningEffort: "off",
     };
     const messages = [{ role: "user", content: "仅回复 OK" }];
@@ -679,18 +680,9 @@ export async function testUnifiedModelConnection() {
         defaultTimeoutMs: 15_000,
       });
     if (!String(content || "").trim()) throw new Error("模型返回了空响应");
-    let capabilityProbe: any = null;
-    const nativeCapabilityBeforeProbe = readProviderNativeMicrocompactCapability(config);
-    if (provider === "anthropic-compatible" && nativeCapabilityBeforeProbe.source !== "official_endpoint") {
-      try {
-        capabilityProbe = await probeProviderCacheCapability(config);
-      } catch (error: any) {
-        capabilityProbe = {
-          success: false,
-          reason: String(error?.message || error || "capability_probe_failed").replace(/[\r\n\t]+/g, " ").slice(0, 240),
-        };
-      }
-    }
+    // Connection health is intentionally independent from optional cache
+    // capability evidence. A cache probe may degrade without making the
+    // configured model unavailable.
     const latencyMs = Date.now() - startedAt;
     return {
       success: true,
@@ -702,10 +694,9 @@ export async function testUnifiedModelConnection() {
       contextCacheAdapter,
       providerCacheCapability: readProviderCacheCapabilityState(config),
       providerNativeMicrocompactCapability: readProviderNativeMicrocompactCapability(config),
-      capabilityProbe: capabilityProbe ? {
-        success: capabilityProbe.success,
-        receipt: capabilityProbe.receipt || null,
-      } : null,
+      capabilityProbe: null,
+      endpoint: config.apiUrl,
+      protocol: provider,
       consumers: consumers.map(item => ({ ...item, ready: true })),
     };
   } catch (error: any) {

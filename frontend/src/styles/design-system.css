@@ -24,6 +24,20 @@
   --shell-nav-width: 232px;
   --shell-header-height: 48px;
   --focus-ring: 0 0 0 3px color-mix(in srgb, var(--accent-blue) 20%, transparent);
+
+  /* Shared execution transcript semantics. Components use these rather than
+     hard-coded light/dark colors so the live and completed projections stay
+     visually aligned across themes and scopes. */
+  --execution-surface: var(--surface);
+  --execution-divider: color-mix(in srgb, var(--border-color) 62%, transparent);
+  --execution-text-primary: var(--text-primary);
+  --execution-text-secondary: var(--text-secondary);
+  --execution-text-muted: var(--text-muted);
+  --execution-active-accent: var(--accent-blue);
+  --execution-success-accent: var(--accent-green, #16a34a);
+  --execution-warning-accent: var(--accent-yellow, #d97706);
+  --execution-row-height: 44px;
+  --execution-indent: 24px;
 }
 
 html,
@@ -363,4 +377,3 @@ html.low-perf .ccm-skeleton {
     transition-duration: 0.01ms !important;
   }
 }
-

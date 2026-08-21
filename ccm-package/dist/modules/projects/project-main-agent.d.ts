@@ -264,7 +264,10 @@ export declare function confirmProjectMainTask(taskId: string, projectInput: str
 export declare function cancelProjectMainTask(taskId: string, projectInput: string, projectSessionIdInput: string, reason?: string): any;
 export declare function cancelProjectMainTasksForSession(projectInput: string, projectSessionIdInput: string, reason: string): any[];
 export declare function interruptProjectMainTask(taskId: string, projectInput: string, projectSessionIdInput: string, reason?: string): any;
-export declare function resumeInterruptedProjectMainTask(taskId: string, projectInput: string, projectSessionIdInput: string): any;
+export declare function resumeInterruptedProjectMainTask(taskId: string, projectInput: string, projectSessionIdInput: string, options?: {
+    reconciliationAction?: string;
+    actor?: string;
+}): Promise<any>;
 export declare function reviseProjectMainTask(input: {
     taskId: string;
     project: string;
@@ -385,6 +388,27 @@ export declare function projectMainTaskPublic(task: any): {
         nextRetryAt: any;
     };
     recovery_decision: any;
+    recovery_preflight: {
+        schema: any;
+        recoveryMode: any;
+        previousAttempt: number;
+        nextAttempt: number;
+        checks: any;
+        completedWorkItemCount: any;
+        unresolvedToolCallCount: any;
+        changedFileCount: number;
+        blockers: any;
+        checksum: any;
+        contentStored: boolean;
+    };
+    recovery_transaction: {
+        schema: any;
+        status: any;
+        previousAttempt: number;
+        nextAttempt: number;
+        checksum: any;
+        contentStored: boolean;
+    };
     actions: {
         id: string;
         kind: string;

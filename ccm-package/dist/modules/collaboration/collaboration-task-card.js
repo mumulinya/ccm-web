@@ -482,6 +482,14 @@ function buildMainAgentRecoverySummary(task, phase, sessions = [], workItems = [
             recovery_max_attempts: Number(recovery.maxAttempts || 3),
             resume_phase: task?.resume_checkpoint?.phase || task?.interruption_receipt?.resume_checkpoint?.phase || "",
             skipped_work_item_count: Number(task?.resume_checkpoint?.completedWorkItemIds?.length || task?.interruption_receipt?.resume_checkpoint?.completedWorkItemIds?.length || 0),
+            recovery_mode: String(task?.recovery_preflight?.recoveryMode || ""),
+            recovery_preflight_checksum: String(task?.recovery_preflight?.checksum || ""),
+            recovery_transaction_status: String(task?.recovery_transaction?.status || ""),
+            recovery_transaction_checksum: String(task?.recovery_transaction?.checksum || ""),
+            previous_attempt: Number(task?.recovery_preflight?.previousAttempt || 0),
+            next_attempt: Number(task?.recovery_preflight?.nextAttempt || 0),
+            unresolved_tool_call_count: Number(task?.recovery_preflight?.unresolvedToolCallIds?.length || 0),
+            changed_file_count: Number(task?.recovery_preflight?.changedFileCount || 0),
         },
     };
 }
@@ -948,6 +956,13 @@ function buildUserTaskActions(task, phase, executions) {
     const retryable = !recoveryRequired && (["failed", "blocked", "environment_blocked"].includes(phase)
         || ["failed", "blocked"].includes(String(task?.status || "")));
     const terminal = completed || stopped || retryable;
+    if (recoveryRequired && task?.recovery_preflight?.recoveryMode === "manual_reconciliation") {
+        actions.push({ id: "adopt_current_changes", label: "采用当前改动并继续", kind: "adopt_current_changes", tone: "warning" });
+        actions.push({ id: "view_changes", label: "查看当前改动", kind: "view_changes", tone: "outline" });
+        actions.push({ id: "rollback", label: "撤销到安全检查点", kind: "rollback", tone: "outline" });
+        actions.push({ id: "cancel", label: "停止任务", kind: "cancel", tone: "danger" });
+        return actions;
+    }
     if (task?.intake_state === "awaiting_confirmation") {
         actions.push({ id: "confirm_plan", label: "确认执行", kind: "confirm_plan", tone: "primary" });
         actions.push({ id: "revise_plan", label: "修改计划", kind: "revise_plan", tone: "warning" });

@@ -129,8 +129,9 @@ import {
   buildTaskRecoverySchedule,
   buildTaskRecoveryDecision,
   interruptTaskExecution,
-  resumeInterruptedTaskExecution,
+  reconcileTaskInterruptionReceipt,
 } from "../../tasks/task-interruption";
+import { runTaskRecoveryOrchestrator } from "../../tasks/task-recovery-orchestrator";
 
 function projectMainToolCallId(projectSessionId: string, toolName: string) {
   return `pmtool_${crypto.createHash("sha256").update(`${projectSessionId}:${toolName}:${Date.now()}:${crypto.randomBytes(4).toString("hex")}`).digest("hex").slice(0, 20)}`;
@@ -499,6 +500,12 @@ function projectMainModelCallOptions(config: any, messages: any[], telemetry?: P
   const payload = buildModelVisiblePayloadSnapshot({
     scope: "project",
     sessionId: `${telemetry.project}:${telemetry.projectSessionId}`,
+    exactSessionId: telemetry.projectSessionId,
+    provider: shouldUseAnthropic(config) ? "anthropic" : shouldUseGemini(config) ? "gemini" : "openai",
+    model: String(config.model || ""),
+    protocol: String(config.format || config.protocol || ""),
+    modelConfig: config,
+    tools: telemetry.nativeTools || [],
     system: messages.filter(message => String(message?.role || "") === "system"),
     recentMessages: messages.filter(message => String(message?.role || "") !== "system"),
     currentRequest: null,
@@ -538,6 +545,8 @@ function projectMainModelCallOptions(config: any, messages: any[], telemetry?: P
           usage,
           provider: shouldUseAnthropic(config) ? "anthropic" : shouldUseGemini(config) ? "gemini" : "openai-compatible",
           model: String(config.model || ""),
+          protocol: String(config.format || config.protocol || ""),
+          endpoint: String(config.apiUrl || config.endpoint || ""),
           currentRequest: telemetry.currentRequest || null,
           modelVisiblePayload: payload,
         });
@@ -2083,6 +2092,7 @@ export function interruptProjectMainTask(taskId: string, projectInput: string, p
   const projectSessionId = validateSessionId(projectSessionIdInput);
   if (task.target_project !== project || task.project_session_id !== projectSessionId) throw new Error("任务不属于当前项目会话");
   activeProjectMainAbortControllers.get(task.id)?.abort(new Error(reason));
+  const workspaceChecksum = projectMainWorkspaceChecksum(projectWorkDir(project), Array.isArray(task.worker_outputs) ? task.worker_outputs : []);
   const interrupted = interruptTaskExecution({
     task,
     reasonCode: "user_interrupt",
@@ -2090,6 +2100,10 @@ export function interruptProjectMainTask(taskId: string, projectInput: string, p
     actor: "project-main-agent-user",
     checkpoint: String(task.acceptance_state || task.status || "unknown"),
     sideEffectState: "uncertain",
+    workspaceChecksum,
+    changedFileCount: Array.isArray(task.worker_outputs)
+      ? task.worker_outputs.reduce((sum: number, row: any) => sum + Number(row?.fileChanges?.files?.length || row?.fileChanges?.length || 0), 0)
+      : 0,
   });
   cancelTestAgentRunsForTask(task.id, reason);
   const updated = updateTask(task.id, {
@@ -2108,8 +2122,8 @@ export function interruptProjectMainTask(taskId: string, projectInput: string, p
   return updated;
 }
 
-export function resumeInterruptedProjectMainTask(taskId: string, projectInput: string, projectSessionIdInput: string) {
-  const task = getProjectMainTask(taskId);
+export async function resumeInterruptedProjectMainTask(taskId: string, projectInput: string, projectSessionIdInput: string, options: { reconciliationAction?: string; actor?: string } = {}) {
+  let task = getProjectMainTask(taskId);
   if (!task) throw new Error("项目主 Agent 任务不存在");
   const project = validateProjectName(projectInput);
   const projectSessionId = validateSessionId(projectSessionIdInput);
@@ -2119,31 +2133,25 @@ export function resumeInterruptedProjectMainTask(taskId: string, projectInput: s
   if (checkpoint?.planChecksum && persistedPlan && projectMainResumePlanChecksum(persistedPlan) !== checkpoint.planChecksum) {
     throw Object.assign(new Error("当前执行计划已变化，不能自动续接；请重新核验后再处理"), { code: "recovery_plan_drift" });
   }
-  const workspaceChecksum = projectMainWorkspaceChecksum(projectWorkDir(project), Array.isArray(task.worker_outputs) ? task.worker_outputs : []);
-  const recovery = resumeInterruptedTaskExecution(task, { userRequested: true, workspaceChecksum, authorizationValid: true, runtimeValid: true });
-  if (!recovery.resumed) throw Object.assign(new Error(recovery.decision.reason), { code: "recovery_gate_failed", recovery_decision: recovery.decision });
-  const recoveryAttempt = Math.max(0, Number(task.recovery?.attempt || task.interruption_receipt?.recovery?.attempt || 0)) + 1;
-  const updated = updateTask(task.id, {
-    status: "pending",
-    acceptance_state: task.interruption_receipt?.checkpoint || "planned",
-    status_detail: "已恢复原任务和子 Agent 会话，等待继续执行",
-    auto_execute: true,
-    is_paused: false,
-    paused: false,
-    recovery_pending: false,
-    recovery: {
-      mode: "safe_auto",
-      state: "queued",
-      attempt: recoveryAttempt,
-      maxAttempts: 3,
-      recovered_at: new Date().toISOString(),
-    },
-    recovery_decision: recovery.decision,
-    execution_attempt: Math.max(0, Number(task.execution_attempt || 0)) + 1,
-    resumed_at: new Date().toISOString(),
+  let workspaceChecksum = projectMainWorkspaceChecksum(projectWorkDir(project), Array.isArray(task.worker_outputs) ? task.worker_outputs : []);
+  if (options.reconciliationAction === "adopt_current_changes") {
+    const reconciledReceipt = reconcileTaskInterruptionReceipt(task, { action: "adopt_current_changes", workspaceChecksum, actor: options.actor || "project-main-agent-user" });
+    task = updateTask(task.id, { interruption_receipt: reconciledReceipt, recovery_preflight: null, status_detail: "已采用当前工作区改动，正在重新执行恢复检查" }) || task;
+    workspaceChecksum = projectMainWorkspaceChecksum(projectWorkDir(project), Array.isArray(task.worker_outputs) ? task.worker_outputs : []);
+  }
+  const recovery = await runTaskRecoveryOrchestrator(task, {
+    scope: "project",
+    scopeId: project,
+    exactSessionId: projectSessionId,
+    idempotencyKey: `${taskId}:${task.interruption_receipt?.checksum || "resume"}`,
+    authorizationValid: true,
+    runtimeValid: true,
+    currentWorkspaceChecksum: workspaceChecksum,
+    worktreeOwnershipValid: true,
   });
-  appendTaskTimelineEvent(task.id, { type: "project_main_recovered", title: "已恢复原任务和子 Agent 会话", detail: recovery.decision.reason, status: "ok", phase: "queued", agent: "project-main-agent", data: { reopened_session_ids: recovery.reopenedSessions.map((item: any) => item.id), recovery_checksum: recovery.decision.checksum } });
-  return updated;
+  if (!recovery.success) throw Object.assign(new Error("恢复前需要核对中断现场"), { code: "recovery_gate_failed", recovery_preflight: recovery.preflight });
+  appendTaskTimelineEvent(task.id, { type: "project_main_recovered", title: `第 ${recovery.preflight.nextAttempt} 次执行已恢复`, detail: recovery.decision.reason, status: "ok", phase: "queued", agent: "project-main-agent", data: { recovery_mode: recovery.preflight.recoveryMode, transaction_checksum: recovery.transaction.checksum, recovery_checksum: recovery.decision.checksum } });
+  return recovery.task;
 }
 
 export async function reviseProjectMainTask(input: {
@@ -3039,6 +3047,10 @@ export async function executeProjectMainTask(input: {
       fileChanges: fileChanges.files,
       verification,
       unfinished: accepted ? [] : risks,
+      source: "terminal_gate",
+      terminalGate: { passed: accepted, accepted },
+      blockers: accepted ? [] : risks,
+      durationMs: Math.max(0, Date.now() - Date.parse(executionStartedAt)),
     });
     appendUserVisibleAgentEvent({
       eventId: `project-task:${taskId}:result:${accepted ? "accepted" : "blocked"}`,
@@ -3350,13 +3362,41 @@ export function projectMainTaskPublic(task: any) {
       nextRetryAt: task.recovery.nextRetryAt || "",
     } : null,
     recovery_decision: task.recovery_decision || null,
+    recovery_preflight: task.recovery_preflight ? {
+      schema: task.recovery_preflight.schema,
+      recoveryMode: task.recovery_preflight.recoveryMode,
+      previousAttempt: Number(task.recovery_preflight.previousAttempt || 0),
+      nextAttempt: Number(task.recovery_preflight.nextAttempt || 0),
+      checks: task.recovery_preflight.checks || {},
+      completedWorkItemCount: Array.isArray(task.recovery_preflight.completedWorkItemIds) ? task.recovery_preflight.completedWorkItemIds.length : 0,
+      unresolvedToolCallCount: Array.isArray(task.recovery_preflight.unresolvedToolCallIds) ? task.recovery_preflight.unresolvedToolCallIds.length : 0,
+      changedFileCount: Number(task.recovery_preflight.changedFileCount || 0),
+      blockers: Array.isArray(task.recovery_preflight.blockers) ? task.recovery_preflight.blockers : [],
+      checksum: task.recovery_preflight.checksum || "",
+      contentStored: false,
+    } : null,
+    recovery_transaction: task.recovery_transaction ? {
+      schema: task.recovery_transaction.schema,
+      status: task.recovery_transaction.status,
+      previousAttempt: Number(task.recovery_transaction.previousAttempt || 0),
+      nextAttempt: Number(task.recovery_transaction.nextAttempt || 0),
+      checksum: task.recovery_transaction.checksum || "",
+      contentStored: false,
+    } : null,
     actions: task.status === "paused"
       ? [{ id: "confirm_plan", kind: "confirm_plan", label: "确认并执行", tone: "primary" }, { id: "revise_plan", kind: "revise_plan", label: "修改计划", tone: "outline" }]
       : runtimeStatus.active
         ? [{ id: "interrupt", kind: "interrupt", label: "停止当前执行", tone: "danger" }, { id: "cancel", kind: "cancel", label: "永久取消", tone: "outline" }]
         : ["failed", "blocked", "environment_blocked", "recovery_required"].includes(runtimeStatus.phase)
           ? task.acceptance_state === "recovery_required"
-            ? ["temporary_network", "provider_overload", "provider_unavailable", "model_stream_interrupted"].includes(String(task.interruption_receipt?.reason_code || ""))
+            ? task.recovery_preflight?.recoveryMode === "manual_reconciliation"
+              ? [
+                  { id: "adopt_current_changes", kind: "adopt_current_changes", label: "采用当前改动并继续", tone: "warning" },
+                  { id: "view_changes", kind: "view_changes", label: "查看当前改动", tone: "outline" },
+                  { id: "rollback", kind: "rollback", label: "撤销到安全检查点", tone: "outline" },
+                  { id: "cancel", kind: "cancel", label: "停止任务", tone: "danger" },
+                ]
+              : ["temporary_network", "provider_overload", "provider_unavailable", "model_stream_interrupted"].includes(String(task.interruption_receipt?.reason_code || ""))
               ? [
                   { id: "resume_interrupted", kind: "resume_interrupted", label: task.recovery?.mode === "safe_auto" ? "立即重试" : "恢复任务", tone: "primary" },
                   { id: "cancel", kind: "cancel", label: "停止任务", tone: "danger" },

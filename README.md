@@ -66,8 +66,12 @@ ccm logs --follow
 
 普通问答由主 Agent首轮直接回答。只有模型确实需要信息时才加载知识、源码、Skill或MCP；复杂开发任务进入持久队列和验收链，后台执行不会长期占用聊天回合。
 
-## 2.0.9 最新能力
+## 2.0.11 最新能力
 
+- **核心包发布构建与运行时完整性修复**：全面修复发布构建中 core 基础层模块（包括 `credential-store`、`db`、`task-store`、`atomic-json-file` 等）的打包编译与分发，彻底解决安装后运行时启动报 `Cannot find module '../core/credential-store'` 的异常，强化全链路真实安装与服务启停生命周期验证。
+- **全局 Agent 记忆中心与向量语义检索**：全局记忆中心引入向量嵌入语义检索（Vector Embedding Search）与过期记忆自动修剪（Auto Pruning），实现高准确度的长程记忆召回；同时将全局与群聊会话执行账本（Session Execution Ledger）的上下文实时落盘持久化，确保服务端重启或断点恢复时零状态漂移。
+- **角色专属 Skill 与计划编排模式精细化**：细化主 Agent 与协作子 Agent 的角色 Skill 注入机制，显式隔离“计划编排模式（Plan Authoring Mode）”与“任务分解（Task Decomposition）”提示词；各角色（全局编排、群聊协调、任务分解、独立测试验收等）按阶段精准按需挂载专属 Skill 与上下文。
+- **上下文工具桶细粒度分类与 Token 账本优化**：深度优化上下文引擎中的工具桶分类逻辑（Session Context Tool Buckets），精准甄别用户自定义 MCP 工具与内部系统运行时工具，杜绝 Token 重复计算与统计溢出；原生会话与执行日志深度对齐。
 - **全局与群聊长期记忆管理升级**：全局 Agent 记忆中心深度升级，引入全局主题索引（Topic Index）、记忆账本（Ledger）、事务隔离与蒸馏记忆（Distilled Memory）；支持长短期记忆投影、动态窗口、分层 Token 预算管理及权威源文件证明；引入会话边界日志（Memory Boundary Journal）与反应式压缩恢复，保障跨会话长程记忆与断点续跑零丢失。
 - **Agent 执行流可视化与交互体验增强**：
   - **行内 Agent Diff（Inline Agent Diff）**：主 Agent 及子 Agent 产生的文件变更在执行流步骤中直接原位呈现代码差异高亮，直观掌握文件修改。
@@ -445,14 +449,17 @@ User message / requirement document / image / attachment
 
 Ordinary questions and read-only analysis remain lightweight. A formal development task is created only when the request explicitly requires code, configuration, dependency, test, or build-script changes. The main agent reads, analyzes, plans, coordinates, and reviews; actual source modifications are delegated to controlled project development agents.
 
-### Version 2.0.9 highlights
+### Version 2.0.11 highlights
 
+- Core Packaging & Runtime Integrity Fix: Fully resolved the packaging of core layer modules (including `credential-store`, `db`, `task-store`, and `atomic-json-file`), fixing runtime startup failures after fresh npm installations.
+- Global Agent Memory & Vector Semantic Search: Integrated vector embedding search and automatic expired memory pruning in Global Memory Manager, with session execution ledger context persistence.
+- Role Skills & Refined Plan Authoring Mode: Explicitly separated plan authoring and task decomposition role skills for main agents and subagents, dynamically loading specialized skills per execution phase.
+- Context Tool Buckets & Accurate Token Accounting: Fine-grained segmentation of user MCP tools and internal runtime tools in the context engine for precise token budgeting.
 - Enhanced Global & Group Memory Management: Topic indexing, memory ledger, transaction isolation, distilled memory, dynamic memory window, and boundary journal with reactive compaction recovery.
 - Advanced Agent Execution UX: Inline agent code diff rendering, nested child agent conversations, presented requirement plan cards with one-click confirmation, pre-plan clarification cards, conversation todo tracking, and collapsible read/search step headers.
 - Context Engine & Multi-Provider Prompt Cache: Provider-neutral prompt caching and microcompaction lifecycle management to optimize token usage in long conversations.
 - Real streaming and explainable progress are shared by global, group, and project conversations.
 - Tool results use three levels: concise summary, user-readable results, and permission-aware technical details.
-- Development-task classification no longer turns ordinary questions or read-only code analysis into heavy task records.
 - Safe pause/resume, message intent routing, pre-plan clarification, Feishu attachment ingestion, conversation status, and away summaries are integrated with the existing task ledger.
 - Only the current generation accepted by Terminal Gate is presented as a completed delivery.
 - Workspace reads support continuation cursors, checksums, in-context deduplication, path suggestions, bundled ripgrep, cancellation, timeout, and partial-result recovery.

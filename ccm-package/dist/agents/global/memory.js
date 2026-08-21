@@ -85,6 +85,7 @@ const session_execution_ledger_1 = require("../../system/session-execution-ledge
 const durable_memory_taxonomy_1 = require("../../system/durable-memory-taxonomy");
 const session_model_context_1 = require("../../system/session-model-context");
 const unified_session_compaction_1 = require("../../system/unified-session-compaction");
+const ccm_context_accounting_v2_1 = require("../../system/ccm-context-accounting-v2");
 const unified_session_compaction_summary_1 = require("../../system/unified-session-compaction-summary");
 const unified_session_compaction_adapters_1 = require("../../system/unified-session-compaction-adapters");
 const session_summary_quality_gate_1 = require("../../system/session-summary-quality-gate");
@@ -794,9 +795,14 @@ function recordGlobalAgentSessionProviderUsage(sessionId, input = {}) {
     const currentRequest = dedupeGlobalPendingRequest(visibleMessages, input.currentRequest || input.current_request);
     const config = (0, group_orchestrator_config_1.loadOrchestratorConfig)();
     const suppliedPayload = input.modelVisiblePayload || input.model_visible_payload || null;
-    const payload = suppliedPayload?.schema === "ccm-model-visible-payload-snapshot-v1" ? suppliedPayload : (0, session_compaction_core_1.buildModelVisiblePayloadSnapshot)({
+    const payload = (0, session_compaction_core_1.isModelVisiblePayloadSnapshot)(suppliedPayload) ? suppliedPayload : (0, session_compaction_core_1.buildModelVisiblePayloadSnapshot)({
         scope: "global",
         sessionId: exactSessionId,
+        exactSessionId,
+        provider: String(input.provider || ""),
+        model: String(input.model || config.model || ""),
+        protocol: String(input.protocol || input.format || config.format || ""),
+        modelConfig: config,
         system: globalFixedContext(memory, config, { fixedContext: input.fixedContext || input.fixed_context }),
         tools: input.tools || null,
         activeSummary: state.activeSummary || null,
@@ -810,6 +816,9 @@ function recordGlobalAgentSessionProviderUsage(sessionId, input = {}) {
         ...(input || {}),
         scope: "global",
         sessionId: exactSessionId,
+        protocol: input.protocol || input.format || config.format || "",
+        endpoint: input.endpoint || input.apiUrl || config.apiUrl || "",
+        providerIdentityChecksum: input.providerIdentityChecksum || (0, ccm_context_accounting_v2_1.buildCcmProviderIdentityChecksum)({ provider: input.provider, model: input.model || config.model, protocol: input.protocol || input.format || config.format, endpoint: input.endpoint || input.apiUrl || config.apiUrl }),
         boundaryGeneration: state.boundaryGeneration,
         payloadChecksum: input.payloadChecksum || input.payload_checksum || payload.payloadChecksum,
         fixedContextChecksum: input.fixedContextChecksum || input.fixed_context_checksum || payload.fixedContextChecksum,
@@ -826,6 +835,8 @@ function recordGlobalAgentSessionProviderUsage(sessionId, input = {}) {
         latestProviderUsage: measurementUsage,
         provider: String(measurementUsage?.provider || ""),
         model: String(measurementUsage?.model || ""),
+        protocol: String(measurementUsage?.protocol || input.protocol || input.format || config.format || ""),
+        endpoint: String(measurementUsage?.endpoint || input.endpoint || input.apiUrl || config.apiUrl || ""),
         generation: Number(measurementUsage?.generation || 0),
         boundaryGeneration: state.boundaryGeneration,
         modelVisiblePayload: payload,

@@ -354,6 +354,7 @@ import { finalizeTaskPauseAtSafeBoundary, reconcileTaskPauseTree } from "./task-
 import {
   interruptTaskExecution,
 } from "../../tasks/task-interruption";
+import { captureTaskRecoveryWorkspace } from "../../tasks/task-recovery-orchestrator";
 import {
   bindTaskAgentInvocationContext,
   bindTaskAgentInvocationMemoryDelivery,
@@ -1943,15 +1944,17 @@ export async function processTargetQueue(targetKey: string, ctx: CollabCtx, test
               ? "temporary_network"
               : "provider_overload";
         const resumeCheckpoint = latestWithFollowups.resume_checkpoint || latestWithFollowups.interruption_receipt?.resume_checkpoint || undefined;
+        const interruptionWorkspace = captureTaskRecoveryWorkspace(latestWithFollowups);
         const interruption = interruptTaskExecution({
           task: latestWithFollowups,
           reasonCode: reasonCode as any,
           reason: String(error?.message || "模型或网络暂时不可用，当前执行已安全中断").slice(0, 500),
           actor: "group-task-runtime",
           checkpoint: latestWithFollowups.acceptance_state || "executing",
-          workspaceChecksum: latestWithFollowups.workspace_snapshot_checksum || latestWithFollowups.workspace_evidence?.checksum || "",
+          workspaceChecksum: interruptionWorkspace.checksum,
+          changedFileCount: interruptionWorkspace.changedFileCount,
           resumeCheckpoint,
-          sideEffectState: resumeCheckpoint?.workspaceChecksum && resumeCheckpoint.workspaceChecksum === (latestWithFollowups.workspace_snapshot_checksum || latestWithFollowups.workspace_evidence?.checksum || "") ? "committed" : "uncertain",
+          sideEffectState: resumeCheckpoint?.workspaceChecksum && resumeCheckpoint.workspaceChecksum === interruptionWorkspace.checksum ? "committed" : "uncertain",
         });
         const recovery = interruption.receipt.recovery;
         const interruptedTask = updateTask(taskId, {

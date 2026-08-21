@@ -1016,6 +1016,27 @@ export function useTaskManager(props, emit) {
     }
   }
 
+  const adoptCurrentRecoveryChanges = async task => {
+    if (!task?.id || !await confirmDialog(`确定采用“${task.title || task.id}”当前工作区里的改动并继续吗？`)) return
+    executionActionBusy.value = task.id
+    try {
+      const guard = await resolveTaskMutationGuard(task.id, task)
+      const response = await fetch('/api/tasks/resume-interrupted', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: task.id, ...guard, reconciliation_action: 'adopt_current_changes' }),
+      })
+      const payload = await response.json()
+      if (!response.ok || payload?.success === false) throw new Error(payload?.error || '采用当前改动失败')
+      toast.success('已采用当前改动，并从新的安全基线继续')
+      await refreshTaskWork()
+    } catch (error) {
+      toast.error(error?.message || '采用当前改动失败')
+    } finally {
+      executionActionBusy.value = ''
+    }
+  }
+
   const handleDashboardAction = async (item, action) => {
     const task = findTaskByDashboardItem(item)
     if (!task) return
@@ -1025,6 +1046,7 @@ export function useTaskManager(props, emit) {
       return
     }
     if (action.kind === 'resume_interrupted') return resumeInterruptedTask(task)
+    if (action.kind === 'adopt_current_changes') return adoptCurrentRecoveryChanges(task)
     if (action.kind === 'pause') {
       executionActionBusy.value = task.id
       try { await requestTaskPause(task); toast.info('正在等待当前操作安全收口'); await refreshTaskWork() }

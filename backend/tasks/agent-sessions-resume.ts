@@ -405,6 +405,94 @@ export function reopenTaskAgentSessions(taskId: string, reason = "用户在同�
   });
 }
 
+/**
+ * Activates only the latest session in each execution lane after a recovery
+ * transaction has passed its task CAS and safety preflight. Native sessions
+ * keep their provider conversation identity. Scratchpad or unverifiable
+ * native sessions are replaced with a fresh CCM session so the provider can
+ * rehydrate from the signed work packet instead of pretending to resume.
+ */
+export function activateTaskAgentSessionsForRecovery(taskId: string, reason = "中断恢复：重新进入执行") {
+  const id = String(taskId || "").trim();
+  if (!id) return { mode: "rehydrated_attempt" as const, sessions: [], reopenedSessionIds: [], replacedSessionIds: [] };
+  return withTaskAgentSessionStoreLock(() => {
+    const store = loadStore();
+    const now = new Date().toISOString();
+    const latestByLane = new Map<string, TaskAgentSession>();
+    for (const session of store.sessions) {
+      if (session.taskId !== id && session.scopeId !== id) continue;
+      const key = `${session.groupId}::${session.project}::${session.agentType}`;
+      const previous = latestByLane.get(key);
+      if (!previous || String(session.lastUsedAt || session.createdAt) > String(previous.lastUsedAt || previous.createdAt)) latestByLane.set(key, session);
+    }
+    const reopenedSessionIds: string[] = [];
+    const replacedSessionIds: string[] = [];
+    const activated: TaskAgentSession[] = [];
+    for (const current of latestByLane.values()) {
+      const runtime = getAgentRuntime(current.agentType);
+      const providerContractCompatible = !current.pendingProviderContractId
+        || (!!current.providerContractId && current.pendingProviderContractId === current.providerContractId);
+      const nativeReady = current.resumeMode === "native"
+        && runtime.capabilities.sessionResume === true
+        && !!String(current.nativeSessionId || "").trim()
+        && providerContractCompatible;
+      if (nativeReady) {
+        const index = store.sessions.findIndex(item => item.id === current.id);
+        const next: TaskAgentSession = {
+          ...current,
+          status: "open",
+          closedAt: "",
+          closeReason: "",
+          suspendedAt: "",
+          suspendReason: "",
+          lastUsedAt: now,
+          lastError: reason,
+        };
+        store.sessions[index] = next;
+        activated.push(next);
+        reopenedSessionIds.push(next.id);
+        continue;
+      }
+      const runtimeId = normalizeAgentRuntimeId(current.agentType);
+      const replacement: TaskAgentSession = {
+        ...current,
+        id: `tas_${Date.now().toString(36)}_${crypto.randomBytes(3).toString("hex")}`,
+        nativeSessionId: getAgentRuntime(runtimeId).capabilities.sessionResume ? createNativeSessionId(runtimeId) : "",
+        resumeMode: getAgentRuntime(runtimeId).capabilities.sessionResume ? "native" : "scratchpad",
+        status: "open",
+        turnCount: 0,
+        lastTurnSucceeded: null,
+        createdAt: now,
+        lastUsedAt: now,
+        closedAt: "",
+        closeReason: "",
+        suspendedAt: "",
+        suspendReason: "",
+        nativeCaptureFailures: 0,
+        nativeRecoveryAttempts: Number(current.nativeRecoveryAttempts || 0) + 1,
+        nativeSessionHistory: [...(current.nativeSessionHistory || []), ...(current.nativeSessionId ? [current.nativeSessionId] : [])].slice(-20),
+        lastNativeRecoveryAt: now,
+        lastError: `${reason}；Provider 会话不可验证，已从签名工作单重建`,
+        continuityGeneration: Number(current.continuityGeneration || 0) + 1,
+        continuityMode: "fresh",
+        continuitySourceSessionId: current.id,
+        continuityBranchId: "",
+        pendingProviderContractId: "",
+      };
+      store.sessions.push(replacement);
+      activated.push(replacement);
+      replacedSessionIds.push(current.id);
+    }
+    if (activated.length) saveStore(store);
+    return {
+      mode: replacedSessionIds.length ? "rehydrated_attempt" as const : "native_session" as const,
+      sessions: activated,
+      reopenedSessionIds,
+      replacedSessionIds,
+    };
+  });
+}
+
 
 export function getTaskAgentSessionOptions(session: TaskAgentSession) {
   return {

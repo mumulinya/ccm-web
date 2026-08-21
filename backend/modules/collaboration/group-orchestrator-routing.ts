@@ -148,7 +148,7 @@ export function getLlmConfigIssue(config: any) {
   if (!String(config.apiUrl || "").trim()) return "主 Agent API URL 未配置";
   if (!String(config.apiKey || "").trim()) return "主 Agent API Key 未配置";
   if (!String(config.model || "").trim()) return "主 Agent 模型未配置";
-  if (!["openai-compatible", "anthropic-compatible", "auto"].includes(config.format)) return `暂不支持的主 Agent API 格式: ${config.format}`;
+  if (!["openai-compatible", "openai-responses", "anthropic-compatible", "auto"].includes(config.format)) return `暂不支持的主 Agent API 格式: ${config.format}`;
   return "";
 }
 
