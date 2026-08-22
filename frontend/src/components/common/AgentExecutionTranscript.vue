@@ -28,6 +28,10 @@ import {
   executionMessageIsFormalTask,
   executionQueryRecordForMessage,
   executionEventsForMessage,
+  executionAttemptForEvent,
+  executionAttemptNumbersForMessage,
+  executionGenerationForRows,
+  executionCurrentGenerationForMessage,
   executionTerminalBoundaryForMessage,
   formatExecutionDuration,
   formatExecutionDurationLong,
@@ -49,6 +53,8 @@ import ChildAgentConversation from './ChildAgentConversation.vue'
 import { buildLegacyToolDisplay, toolResultHasUserDetails } from '../../utils/toolResultPresentation.js'
 import { findSourceReadEventForPath, sourceReadPathsFromEvent } from '../../utils/executionSourceReads.js'
 
+defineOptions({ name: 'AgentExecutionTranscript' })
+
 const props = defineProps({
   events: { type: Array, default: () => [] },
   messages: { type: Array, default: () => [] },
@@ -58,22 +64,17 @@ const props = defineProps({
   stageGrouped: { type: Boolean, default: false },
   presentation: { type: String, default: 'auto' },
   omitRequirementPlan: Boolean,
+  attemptFilter: { type: Number, default: 0 },
+  attemptSummary: { type: Object, default: null },
+  embeddedAttempt: Boolean,
+  showCompletionSummary: { type: Boolean, default: true },
+  showCompletionFiles: { type: Boolean, default: true },
 })
 const emit = defineEmits(['open-file-change', 'open-file-changes', 'execution-action'])
 const requestedStageMode = computed(() => props.stagePreview || props.stageGrouped)
 
 const now = ref(Date.now())
-const EXECUTION_DENSITY_KEY = 'ccm:execution-display-density:v1'
-const executionDensity = ref('standard')
-const executionDensityOptions = [
-  { value: 'summary', label: '摘要' },
-  { value: 'standard', label: '标准' },
-  { value: 'detailed', label: '详细' },
-]
-const onExecutionDensityChanged = event => {
-  const value = String(event?.detail || '')
-  if (value !== executionDensity.value && executionDensityOptions.some(option => option.value === value)) executionDensity.value = value
-}
+const LEGACY_EXECUTION_DENSITY_KEY = 'ccm:execution-display-density:v1'
 const executionAnchor = ref(null)
 const transcriptExpanded = ref(false)
 const searchQuery = ref('')
@@ -97,36 +98,66 @@ const toggleTranscript = event => {
   })
 }
 onMounted(() => {
-  try {
-    const savedDensity = localStorage.getItem(EXECUTION_DENSITY_KEY)
-    if (executionDensityOptions.some(option => option.value === savedDensity)) executionDensity.value = savedDensity
-  } catch {}
+  try { localStorage.removeItem(LEGACY_EXECUTION_DENSITY_KEY) } catch {}
   durationTimer = window.setInterval(() => { now.value = Date.now() }, 1000)
   window.addEventListener('ccm:locate-execution-event', locateExecutionEvent)
-  window.addEventListener('ccm:execution-density-changed', onExecutionDensityChanged)
   restoreExpansionState()
 })
 onBeforeUnmount(() => {
   window.removeEventListener('ccm:locate-execution-event', locateExecutionEvent)
-  window.removeEventListener('ccm:execution-density-changed', onExecutionDensityChanged)
   if (durationTimer) window.clearInterval(durationTimer)
 })
 
-const rows = computed(() => executionEventsForMessage(props.events, props.messages, props.messageIndex))
 const anchorMessage = computed(() => props.messages?.[props.messageIndex] || {})
+const allRows = computed(() => executionEventsForMessage(props.events, props.messages, props.messageIndex))
+const taskId = computed(() => String(
+  anchorMessage.value?.task_id
+    || anchorMessage.value?.taskId
+    || anchorMessage.value?.taskExperience?.task_id
+    || allRows.value.find(event => event?.taskId)?.taskId
+    || '',
+).trim())
+const attemptProjections = ref([])
+const attemptProjectionLoading = ref(false)
+const attemptProjectionError = ref('')
+const attemptEvents = reactive({})
+const attemptEventLoading = reactive({})
+const attemptEventErrors = reactive({})
+const expandedHistoricalAttempts = reactive({})
+const localAttemptNumbers = computed(() => executionAttemptNumbersForMessage(props.events, props.messages, props.messageIndex))
+const currentAttemptNumber = computed(() => {
+  if (props.attemptFilter > 0) return props.attemptFilter
+  const projected = attemptProjections.value.map(item => Number(item?.attempt || 0)).filter(value => value > 0)
+  return Math.max(0, ...projected, ...localAttemptNumbers.value)
+})
+const rows = computed(() => executionEventsForMessage(
+  props.events,
+  props.messages,
+  props.messageIndex,
+  currentAttemptNumber.value ? { attempt: currentAttemptNumber.value } : {},
+))
 const expansionStorageKey = computed(() => {
   const sessionId = rows.value[0]?.exactSessionId || anchorMessage.value?.exactSessionId || anchorMessage.value?.sessionId || 'session'
   const messageId = anchorMessage.value?.id || anchorMessage.value?.messageId || anchorMessage.value?.timestamp || props.messageIndex
   return `ccm:execution-expansion:${sessionId}:${messageId}`
 })
-watch(executionDensity, value => {
-  try { localStorage.setItem(EXECUTION_DENSITY_KEY, value) } catch {}
-  window.dispatchEvent(new CustomEvent('ccm:execution-density-changed', { detail: value }))
-})
 const shouldRender = computed(() => shouldRenderExecutionTranscript(props.events, props.messages, props.messageIndex, transcriptExpanded.value))
-const currentGeneration = computed(() => rows.value.reduce((max, event) => Math.max(max, Number(event?.generation || 0)), 0))
+const currentGeneration = computed(() => executionGenerationForRows(rows.value, true)
+  || executionCurrentGenerationForMessage(props.events, props.messages, props.messageIndex))
 const resultEvent = computed(() => [...rows.value].reverse().find(event => event.eventType === 'result' && Number(event?.generation || 0) === currentGeneration.value))
-const terminalBoundary = computed(() => executionTerminalBoundaryForMessage(props.events, props.messages, props.messageIndex))
+const terminalBoundary = computed(() => {
+  if (!props.embeddedAttempt) return executionTerminalBoundaryForMessage(props.events, props.messages, props.messageIndex)
+  const result = [...rows.value].reverse().find(event => event?.eventType === 'result')
+  const status = String(props.attemptSummary?.status || result?.display?.status || '').toLowerCase()
+  if (!result && (!status || status === 'running')) return null
+  return {
+    terminal: true,
+    source: result ? 'result' : 'attempt_projection',
+    event: result || null,
+    status: status || 'failed',
+    at: Date.parse(String(props.attemptSummary?.endedAt || result?.createdAt || '')) || 0,
+  }
+})
 const isTerminal = computed(() => !!terminalBoundary.value)
 const isFormalTaskExecution = computed(() => executionMessageIsFormalTask(props.events, props.messages, props.messageIndex))
 const hasToolExecution = computed(() => rows.value.some(event => String(event?.eventType || '').startsWith('tool_')))
@@ -139,15 +170,7 @@ const isOfficialCompletion = computed(() => {
   const gate = terminalGateForExecutionEvent(resultEvent.value)
   return gate?.passed === true && gate?.accepted !== false
 })
-const isIncompleteTerminal = computed(() => isTerminal.value && !isOfficialCompletion.value && !isQueryCompletion.value)
 const isLivePresentation = computed(() => props.presentation === 'live' && !isOfficialCompletion.value && !isQueryCompletion.value && !isTerminal.value)
-// Running work always exposes the full construction trail. Density is a
-// completed-record reading preference and must not hide live progress.
-const effectiveExecutionDensity = computed(() => {
-  if (isLivePresentation.value) return 'detailed'
-  if (isQueryCompletion.value && executionDensity.value === 'summary') return 'standard'
-  return executionDensity.value
-})
 const latestPauseMilestone = computed(() => [...rows.value].reverse().find(event => event?.detail?.pauseMilestone?.kind))
 const pausedAt = computed(() => latestPauseMilestone.value?.detail?.pauseMilestone?.kind === 'paused' ? eventTime(latestPauseMilestone.value?.createdAt) : 0)
 const terminalAt = computed(() => Number(terminalBoundary.value?.at || 0) || pausedAt.value)
@@ -159,13 +182,13 @@ const presentationVisible = computed(() => {
   if (props.presentation === 'completed') return isTerminal.value && !!resultEvent.value
   return true
 })
-const completedProjectionVisible = computed(() => isOfficialCompletion.value || isQueryCompletion.value)
+const completedProjectionVisible = computed(() => isTerminal.value || isQueryCompletion.value)
 // Every terminal result gets a visible, safe summary.  Formal delivery and
 // query projections still control the collapsed execution/file projection;
 // failed, blocked, cancelled and interrupted runs must not lose their
 // explanation merely because they have no accepted delivery.
 const completionSummaryVisible = computed(() => isTerminal.value && !!resultEvent.value)
-const compacted = computed(() => !transcriptExpanded.value && completedProjectionVisible.value)
+const compacted = computed(() => !props.embeddedAttempt && !transcriptExpanded.value && completedProjectionVisible.value)
 const completionSummary = computed(() => {
   const raw = resultEvent.value?.detail?.completionSummary
     || resultEvent.value?.detail?.safeResult?.completionSummary
@@ -216,6 +239,7 @@ const terminalCollapseKey = computed(() => {
 })
 const handledTerminalCollapseKey = ref('')
 watch(terminalCollapseKey, key => {
+  if (props.embeddedAttempt) return
   if (!key || handledTerminalCollapseKey.value === key) return
   handledTerminalCollapseKey.value = key
   transcriptExpanded.value = false
@@ -255,7 +279,18 @@ const hasExecutionRows = computed(() => requirementPlan.value || visibleRows.val
   || event.eventType?.startsWith('agent_')
   || ['permission_required', 'context_compacted'].includes(event.eventType)
 )))
-const toolRows = computed(() => rows.value.filter(event => event.eventType.startsWith('tool_')))
+const toolRows = computed(() => {
+  const unique = new Map()
+  for (const event of rows.value.filter(item => String(item?.eventType || '').startsWith('tool_'))) {
+    const callId = String(event?.toolCallId || '').trim()
+    const key = callId
+      ? [event?.taskId || '', event?.generation || 0, event?.attempt || event?.detail?.executionStage?.attempt || 0, event?.agentRunId || '', callId].join(':')
+      : `event:${event?.eventId || event?.sequence}`
+    const previous = unique.get(key)
+    if (!previous || ['tool_completed', 'tool_failed'].includes(String(event?.eventType || ''))) unique.set(key, event)
+  }
+  return [...unique.values()].sort((left, right) => Number(left?.sequence || 0) - Number(right?.sequence || 0))
+})
 const toolCount = computed(() => toolRows.value.length)
 const agentRows = computed(() => rows.value.filter(event => event.eventType.startsWith('agent_')))
 const projectAgentRows = computed(() => agentRows.value.filter(event => {
@@ -311,15 +346,24 @@ const expandedReadSearchGroups = reactive({})
 const expandedChildAgentCards = reactive({})
 const expandedChildAgentTools = reactive({})
 const requirementPlanExpanded = ref(false)
+const planGoalExpanded = ref(false)
 const completionFilesExpanded = ref(false)
 const attemptHistoryExpanded = ref(false)
+watch(terminalCollapseKey, key => {
+  if (!key) return
+  requirementPlanExpanded.value = false
+  planGoalExpanded.value = false
+}, { immediate: true })
 const planIsExpanded = computed(() => isTerminal.value ? requirementPlanExpanded.value && transcriptExpanded.value : requirementPlanExpanded.value)
-const toggleRequirementPlan = () => { requirementPlanExpanded.value = !requirementPlanExpanded.value }
+const toggleRequirementPlan = () => {
+  requirementPlanExpanded.value = !requirementPlanExpanded.value
+  if (!requirementPlanExpanded.value) planGoalExpanded.value = false
+}
 const stageIsExpanded = stage => {
   if (expandedStages[stage.kind] !== undefined) return expandedStages[stage.kind]
-  if (effectiveExecutionDensity.value === 'detailed') return true
-  if (effectiveExecutionDensity.value === 'summary') return stage.status === '失败' || stage.active === true
-  if (!isLivePresentation.value) return stage.status === '失败'
+  if (normalizedSearchQuery.value && stageMatchesSearch(stage.kind)) return true
+  if (stage.status === '失败') return true
+  if (!isLivePresentation.value) return false
   return stage.active === true || stageLifecycleStatus(stage.kind) === 'running'
 }
 const toggleStage = stage => {
@@ -416,8 +460,7 @@ const batchPartialCount = batch => (batch?.children || []).filter(eventHasPartia
 const batchStatusIcon = batch => batchHasFailure(batch) ? CircleX : batchNeedsAttention(batch) ? LoaderCircle : Check
 const batchIsExpanded = batch => {
   if (expandedBatches[batch.key] !== undefined) return expandedBatches[batch.key]
-  if (isQueryCompletion.value || effectiveExecutionDensity.value === 'detailed') return true
-  if (effectiveExecutionDensity.value === 'summary') return batchNeedsAttention(batch)
+  if (normalizedSearchQuery.value && batchMatchesSearch(batch)) return true
   return batchNeedsAttention(batch)
 }
 const toggleBatch = batch => { expandedBatches[batch.key] = !batchIsExpanded(batch) }
@@ -436,8 +479,8 @@ const toggleReadSearchGroup = group => {
 }
 const childAgentCardExpanded = event => {
   if (!event?.__childAgentConversation) return false
-  if (effectiveExecutionDensity.value === 'summary' && !isLivePresentation.value) return false
   if (expandedChildAgentCards[event.key] !== undefined) return expandedChildAgentCards[event.key]
+  if (normalizedSearchQuery.value && childAgentMatchesSearch(event)) return true
   return isLivePresentation.value || String(event?.display?.status || '') === 'failed'
 }
 const toggleChildAgentCard = event => {
@@ -639,9 +682,6 @@ const executionStageRows = computed(() => {
         ...(batchIsExpanded(item) ? item.children.map(event => ({ ...event, __stageChild: true, __batchChild: true, __agentChild: !!owningAgentFor(event), __stageKind: stage.kind, __batchKey: item.key })) : []),
       ]
     })
-    if (isLivePresentation.value) {
-      return { stage, rows: groupedRows }
-    }
     return { stage, rows: [header, ...(stageIsExpanded(header) ? groupedRows : [])] }
   })
   const projected = []
@@ -675,6 +715,15 @@ const expandedInlineDiffs = reactive({})
 
 const locateExecutionEvent = browserEvent => {
   const detail = browserEvent?.detail || {}
+  const historicalTarget = allRows.value.find(event => String(event?.eventId || '') === String(detail.eventId || ''))
+  const historicalAttempt = executionAttemptForEvent(historicalTarget)
+  if (!props.embeddedAttempt && historicalTarget && historicalAttempt > 0 && historicalAttempt < currentAttemptNumber.value) {
+    transcriptExpanded.value = true
+    attemptHistoryExpanded.value = true
+    expandedHistoricalAttempts[historicalAttempt] = true
+    void loadHistoricalAttemptEvents(historicalAttempt)
+    return
+  }
   const target = rows.value.find(event => String(event?.eventId || '') === String(detail.eventId || ''))
     || rows.value.find(event => String(event?.detail?.causalRefs?.planStepId || event?.detail?.replayLink?.planStepId || '') === String(detail.planStepId || ''))
   if (!target) return
@@ -698,6 +747,10 @@ const replaceReactiveFlags = (target, source) => {
   Object.entries(source && typeof source === 'object' ? source : {}).forEach(([key, value]) => { target[key] = value === true })
 }
 const restoreExpansionState = () => {
+  if (props.embeddedAttempt) {
+    transcriptExpanded.value = true
+    return
+  }
   if (typeof sessionStorage === 'undefined') return
   try {
     const saved = JSON.parse(sessionStorage.getItem(expansionStorageKey.value) || '{}')
@@ -705,18 +758,20 @@ const restoreExpansionState = () => {
     // a live-session preference; it must not make a finished execution reopen
     // as a dense transcript after refresh or replay.
     transcriptExpanded.value = isTerminal.value || completedProjectionVisible.value ? false : saved.transcriptExpanded === true
-    requirementPlanExpanded.value = saved.requirementPlanExpanded === true
-    attemptHistoryExpanded.value = saved.attemptHistoryExpanded === true
-    completionFilesExpanded.value = saved.completionFilesExpanded === true
-    replaceReactiveFlags(expandedStages, saved.stages)
-    replaceReactiveFlags(expandedBatches, saved.batches)
-    replaceReactiveFlags(expandedReadSearchGroups, saved.readSearchGroups)
-    replaceReactiveFlags(expandedRows, saved.rows)
+    const completedRecord = isTerminal.value || completedProjectionVisible.value
+    requirementPlanExpanded.value = completedRecord ? false : saved.requirementPlanExpanded === true
+    attemptHistoryExpanded.value = completedRecord ? false : saved.attemptHistoryExpanded === true
+    completionFilesExpanded.value = completedRecord ? false : saved.completionFilesExpanded === true
+    replaceReactiveFlags(expandedStages, completedRecord ? {} : saved.stages)
+    replaceReactiveFlags(expandedBatches, completedRecord ? {} : saved.batches)
+    replaceReactiveFlags(expandedReadSearchGroups, completedRecord ? {} : saved.readSearchGroups)
+    replaceReactiveFlags(expandedRows, completedRecord ? {} : saved.rows)
     replaceReactiveFlags(expandedBatchFiles, saved.batchFiles)
     replaceReactiveFlags(expandedInlineDiffs, saved.inlineDiffs)
   } catch {}
 }
 const persistExpansionState = () => {
+  if (props.embeddedAttempt) return
   if (typeof sessionStorage === 'undefined') return
   try {
     sessionStorage.setItem(expansionStorageKey.value, JSON.stringify({
@@ -790,6 +845,10 @@ const completionResultSummary = computed(() => {
   const parts = []
   const headline = completionSafeSummary(summary.headline)
   if (headline) parts.push(headline)
+  if (isFormalTaskExecution.value && effectiveAttemptProjections.value.length > 1) {
+    parts.push(`共执行 ${effectiveAttemptProjections.value.length} 次`)
+    if (interruptedAttemptCount.value) parts.push(`中断 ${interruptedAttemptCount.value} 次`)
+  }
   if (summary.filesChanged) parts.push(`修改 ${summary.filesChanged} 个文件`)
   if (summary.verificationPassed) parts.push(`验证通过 ${summary.verificationPassed} 项`)
   if (summary.verificationFailed) parts.push(`验证未通过 ${summary.verificationFailed} 项`)
@@ -801,29 +860,140 @@ const completionResultSummary = computed(() => {
 })
 const completedProjectionTitle = computed(() => isQueryCompletion.value ? '查询过程' : '执行记录')
 const completedProjectionSucceeded = computed(() => isOfficialCompletion.value || queryRecord.value?.succeeded === true)
-const attemptHistoryGroups = computed(() => {
-  const groups = new Map()
-  for (const event of agentRows.value) {
-    const history = Array.isArray(event?.detail?.agentAttemptHistory) ? event.detail.agentAttemptHistory : []
-    if (!history.length) continue
-    const display = event?.detail?.agentDisplay || {}
-    const project = String(display.projectName || display.projectId || event?.display?.title || 'Agent').trim()
-    const workItem = String(display.workItemTitle || event?.workItemId || event?.display?.target || '执行任务').trim()
-    const key = `${project}|${workItem}`
-    const existing = groups.get(key) || { key, project, workItem, attempts: [] }
-    for (const attempt of history) {
-      const attemptNumber = Number(attempt?.attempt || 0)
-      const attemptKey = `${attemptNumber}|${String(attempt?.status || '')}|${String(attempt?.summary || '')}`
-      if (!existing.attempts.some(item => item.key === attemptKey)) existing.attempts.push({ ...attempt, key: attemptKey, attempt: attemptNumber })
-    }
-    groups.set(key, existing)
+const localAttemptProjections = computed(() => localAttemptNumbers.value.map(attempt => {
+  const source = allRows.value.filter(event => executionAttemptForEvent(event) === attempt)
+  const terminal = [...source].reverse().find(event => event?.eventType === 'result')
+  const rawStatus = String(terminal?.detail?.completionSummary?.status || terminal?.display?.status || 'running').toLowerCase()
+  const status = rawStatus === 'success' ? 'success'
+    : rawStatus === 'blocked' ? 'blocked'
+      : rawStatus === 'cancelled' || rawStatus === 'canceled' ? 'cancelled'
+        : rawStatus === 'interrupted' || rawStatus === 'waiting' ? 'interrupted'
+          : rawStatus === 'failed' ? 'failed' : 'running'
+  const toolIds = new Set(source.filter(event => String(event?.eventType || '').startsWith('tool_')).map(event => event?.toolCallId || event?.eventId).filter(Boolean))
+  const files = new Set(source.flatMap(event => Array.isArray(event?.detail?.fileChanges) ? event.detail.fileChanges : []).map(file => String(file?.path || file?.file || file || '')).filter(Boolean))
+  const verification = source.filter(event => /验证|验收|test.?agent/i.test(`${event?.display?.title || ''} ${event?.display?.summary || ''}`)).length
+  const startedAt = source[0]?.createdAt || ''
+  const endedAt = status === 'running' ? '' : source.at(-1)?.createdAt || ''
+  return {
+    schema: 'ccm-attempt-replay-projection-v1', taskId: taskId.value, attempt,
+    generation: source.reduce((max, event) => Math.max(max, Number(event?.generation || 0)), 0), status,
+    startedAt, endedAt,
+    durationMs: startedAt && endedAt ? Math.max(0, Date.parse(endedAt) - Date.parse(startedAt)) : 0,
+    stoppedStage: [...source].reverse().find(event => event?.detail?.executionStage?.kind)?.detail?.executionStage?.kind || '',
+    terminalReason: String(terminal?.detail?.completionSummary?.detail || terminal?.detail?.completionSummary?.headline || terminal?.display?.summary || '').trim(),
+    counts: { events: source.length, tools: toolIds.size, files: files.size, verification }, contentStored: false,
   }
-  return [...groups.values()].filter(group => group.attempts.length).map(group => ({
-    ...group,
-    attempts: group.attempts.sort((left, right) => Number(left.attempt || 0) - Number(right.attempt || 0)),
-  }))
+}))
+const effectiveAttemptProjections = computed(() => {
+  const byAttempt = new Map(localAttemptProjections.value.map(item => [Number(item.attempt), item]))
+  for (const item of attemptProjections.value) byAttempt.set(Number(item?.attempt || 0), item)
+  return [...byAttempt.values()].filter(item => Number(item?.attempt || 0) > 0).sort((left, right) => Number(left.attempt) - Number(right.attempt))
 })
-const attemptHistoryCount = computed(() => attemptHistoryGroups.value.reduce((count, group) => count + group.attempts.length, 0))
+const historicalAttempts = computed(() => effectiveAttemptProjections.value.filter(item => Number(item.attempt) < currentAttemptNumber.value))
+const currentAttemptProjection = computed(() => effectiveAttemptProjections.value.find(item => Number(item.attempt) === currentAttemptNumber.value) || null)
+const attemptHistoryCount = computed(() => historicalAttempts.value.length)
+const interruptedAttemptCount = computed(() => effectiveAttemptProjections.value.filter(item => ['interrupted', 'failed', 'blocked', 'cancelled'].includes(String(item?.status || ''))).length)
+const historicalInterruptedCount = computed(() => historicalAttempts.value.filter(item => ['interrupted', 'failed', 'blocked', 'cancelled'].includes(String(item?.status || ''))).length)
+const attemptHistoryDuration = computed(() => historicalAttempts.value.reduce((total, item) => total + Math.max(0, Number(item?.durationMs || 0)), 0))
+const currentAttemptTitle = computed(() => isTerminal.value ? (isOfficialCompletion.value ? '最终执行' : '最近执行') : '当前执行')
+const attemptStatusLabel = attempt => ({
+  running: '正在执行', success: '完成', failed: '失败', blocked: '阻塞', interrupted: '中断', cancelled: '取消',
+}[String(attempt?.status || '')] || '历史结果')
+const attemptStageLabel = value => ({
+  preparation: '了解情况', coordination_dispatch: '协调与分派', project_execution: '实施处理',
+  independent_verification: '独立验证', main_agent_summary: '总结交付', verification_delivery: '验证与交付',
+}[String(value || '')] || String(value || ''))
+const attemptMeta = attempt => [
+  attemptStageLabel(attempt?.stoppedStage),
+  Number(attempt?.counts?.tools || 0) ? `${attempt.counts.tools} 项工具` : '',
+  Number(attempt?.counts?.files || 0) ? `${attempt.counts.files} 个文件` : '',
+  Number(attempt?.counts?.verification || 0) ? `${attempt.counts.verification} 项验证` : '',
+  Number(attempt?.durationMs || 0) ? formatExecutionDuration(attempt.durationMs) : '',
+].filter(Boolean).join(' · ')
+const attemptRequestIdentity = computed(() => {
+  const source = allRows.value.find(event => event?.taskId === taskId.value) || allRows.value[0] || {}
+  return {
+    scope: String(source?.scope || anchorMessage.value?.scope || ''),
+    scopeId: String(source?.scopeId || anchorMessage.value?.scopeId || anchorMessage.value?.scope_id || ''),
+    exactSessionId: String(source?.exactSessionId || anchorMessage.value?.exactSessionId || anchorMessage.value?.sessionId || ''),
+  }
+})
+const refreshAttemptProjections = async () => {
+  if (props.embeddedAttempt || !taskId.value) return
+  const identity = attemptRequestIdentity.value
+  if (!identity.scope || !identity.scopeId || !identity.exactSessionId) return
+  attemptProjectionLoading.value = true
+  try {
+    const query = new URLSearchParams({
+      scope: identity.scope,
+      scope_id: identity.scopeId,
+      exact_session_id: identity.exactSessionId,
+      task_id: taskId.value,
+    })
+    const response = await fetch(`/api/agent-execution/attempts?${query}`, { cache: 'no-store' })
+    const payload = await response.json().catch(() => ({}))
+    if (!response.ok || payload.success === false) throw new Error(payload.error || '读取历史执行失败')
+    attemptProjections.value = Array.isArray(payload.attempts) ? payload.attempts : []
+    attemptProjectionError.value = ''
+  } catch (error) {
+    attemptProjectionError.value = error?.message || '读取历史执行失败'
+  } finally {
+    attemptProjectionLoading.value = false
+  }
+}
+const loadHistoricalAttemptEvents = async attempt => {
+  const number = Math.max(1, Number(attempt?.attempt || attempt || 1))
+  if (Array.isArray(attemptEvents[number]) || attemptEventLoading[number]) return
+  const local = executionEventsForMessage(props.events, props.messages, props.messageIndex, { attempt: number })
+  if (local.length) {
+    attemptEvents[number] = local
+    return
+  }
+  const identity = attemptRequestIdentity.value
+  if (!taskId.value || !identity.scope || !identity.scopeId || !identity.exactSessionId) return
+  attemptEventLoading[number] = true
+  attemptEventErrors[number] = ''
+  try {
+    const collected = []
+    let cursor = 0
+    let hasMore = true
+    while (hasMore && collected.length < 3000) {
+      const query = new URLSearchParams({
+        scope: identity.scope,
+        scope_id: identity.scopeId,
+        exact_session_id: identity.exactSessionId,
+        task_id: taskId.value,
+        attempt: String(number),
+        cursor: String(cursor),
+        limit: '500',
+      })
+      const response = await fetch(`/api/agent-execution/events?${query}`, { cache: 'no-store' })
+      const payload = await response.json().catch(() => ({}))
+      if (!response.ok || payload.success === false) throw new Error(payload.error || '读取历史执行详情失败')
+      collected.push(...(Array.isArray(payload.events) ? payload.events : []))
+      hasMore = payload.hasMore === true && Number(payload.nextCursor || 0) > cursor
+      cursor = Number(payload.nextCursor || cursor)
+    }
+    attemptEvents[number] = collected
+  } catch (error) {
+    attemptEventErrors[number] = error?.message || '读取历史执行详情失败'
+  } finally {
+    attemptEventLoading[number] = false
+  }
+}
+const toggleHistoricalAttempt = attempt => {
+  const number = Math.max(1, Number(attempt?.attempt || 1))
+  expandedHistoricalAttempts[number] = expandedHistoricalAttempts[number] !== true
+  if (expandedHistoricalAttempts[number]) void loadHistoricalAttemptEvents(attempt)
+}
+watch(
+  () => {
+    const tail = allRows.value.at(-1) || {}
+    return `${taskId.value}:${attemptRequestIdentity.value.scope}:${attemptRequestIdentity.value.scopeId}:${attemptRequestIdentity.value.exactSessionId}:${localAttemptNumbers.value.join(',')}:${tail.eventId || ''}:${tail.display?.status || ''}:${allRows.value.length}`
+  },
+  () => { if (!props.embeddedAttempt) void refreshAttemptProjections() },
+  { immediate: true },
+)
 const recoveryMilestone = computed(() => {
   const event = [...rows.value].reverse().find(item => item?.detail?.recoveryMilestone && Number(item?.generation || 0) === currentGeneration.value)
   const recovery = event?.detail?.recoveryMilestone
@@ -846,12 +1016,76 @@ const effectivePlanSteps = computed(() => (requirementPlan.value?.steps || []).m
   if (completionSucceeded.value || requirementPlan.value?.status === 'completed') return { ...step, status: 'completed' }
   return { ...step, status }
 }))
-const planStatusLabel = computed(() => {
-  if (requirementPlan.value?.status === 'completed' || completionSucceeded.value) return '计划已完成'
-  if (requirementPlan.value?.status === 'blocked' || terminalBoundary.value?.status === 'failed') return '计划受阻'
-  if (effectivePlanSteps.value.some(step => step.status === 'running')) return '正在执行'
-  return '计划已就绪'
+const normalizedPlanText = value => String(value || '').replace(/\s+/g, ' ').trim()
+const genericPlanText = value => /^(?:主\s*Agent\s*已请求派发|工作项\s*\d+|实施步骤\s*\d+|按当前需求完成对应功能[。.]?|完成后进入下一步检查[。.]?)$/i.test(normalizedPlanText(value))
+const compactPlanDisplayText = (value, max = 88) => {
+  const text = normalizedPlanText(value)
+    .replace(/^(?:这是|本次是)?(?:一项)?正式开发任务[，,:：。\s]*/i, '')
+    .replace(/^请(?:立即)?派发(?:当前项目)?(?:子\s*)?Agent[，,:：。\s]*/i, '')
+  if (text.length <= max) return text
+  return `${text.slice(0, max).trim()}…`
+}
+const planTextKey = value => normalizedPlanText(value).toLocaleLowerCase().replace(/[，。；、,:：;\s]/g, '')
+const planTextsDuplicate = (left, right) => {
+  const leftKey = planTextKey(left)
+  const rightKey = planTextKey(right)
+  if (!leftKey || !rightKey) return false
+  if (leftKey === rightKey) return true
+  const shorter = leftKey.length <= rightKey.length ? leftKey : rightKey
+  const longer = leftKey.length > rightKey.length ? leftKey : rightKey
+  return shorter.length >= 12 && longer.includes(shorter) && shorter.length / longer.length >= 0.72
+}
+const meaningfulPlanStepText = step => [step?.description, step?.outcome, step?.title].map(normalizedPlanText).find(text => text && !genericPlanText(text)) || ''
+const planStepTitleSource = step => {
+  const title = normalizedPlanText(step?.title)
+  if (title && !genericPlanText(title)) return title
+  return meaningfulPlanStepText(step)
+}
+const compactPlanActionTitle = value => {
+  const text = normalizedPlanText(value)
+  const firstAction = text.split(/[。；;]/, 1)[0]?.trim() || text
+  return compactPlanDisplayText(firstAction, 42)
+}
+const planStepDisplayTitle = (step, index) => {
+  const title = planStepTitleSource(step)
+  return compactPlanActionTitle(title) || `工作项 ${index + 1}`
+}
+const planStepDescription = (step, index) => {
+  const description = normalizedPlanText(step?.description)
+  if (!description || genericPlanText(description) || planTextsDuplicate(description, planStepTitleSource(step))) return ''
+  return description
+}
+const planStepOutcome = (step, index) => {
+  const outcome = normalizedPlanText(step?.outcome)
+  if (!outcome || genericPlanText(outcome) || planTextsDuplicate(outcome, planStepTitleSource(step)) || planTextsDuplicate(outcome, planStepDescription(step, index))) return ''
+  return outcome
+}
+const planGoalText = computed(() => {
+  const goal = normalizedPlanText(requirementPlan.value?.overview || requirementPlan.value?.goal)
+  if (goal && !genericPlanText(goal)) return compactPlanDisplayText(goal, 600)
+  const fallback = meaningfulPlanStepText(effectivePlanSteps.value[0])
+  return compactPlanDisplayText(fallback, 600) || goal || '按已确认的需求完成实施与验证。'
 })
+const genericPlanTitle = value => /^(?:需求实施计划|执行前计划|实施计划|任务计划)$/i.test(normalizedPlanText(value))
+const planDisplayTitle = computed(() => {
+  const title = normalizedPlanText(requirementPlan.value?.title)
+  return title && !genericPlanTitle(title) ? compactPlanDisplayText(title, 48) : '实施计划'
+})
+const planStatusLabel = computed(() => {
+  if (requirementPlan.value?.status === 'completed' || completionSucceeded.value) return '已完成'
+  if (requirementPlan.value?.status === 'blocked' || terminalBoundary.value?.status === 'failed') return '受阻'
+  if (effectivePlanSteps.value.some(step => step.status === 'running')) return '正在执行'
+  return '已就绪'
+})
+const planHeaderSummary = computed(() => `${effectivePlanSteps.value.length} 个工作项 · ${planStatusLabel.value}`)
+const currentPlanStep = computed(() => effectivePlanSteps.value.find(step => step.status === 'running')
+  || effectivePlanSteps.value.find(step => step.status === 'blocked')
+  || effectivePlanSteps.value.find(step => step.status === 'pending')
+  || effectivePlanSteps.value.at(-1))
+const currentPlanStepTitle = computed(() => currentPlanStep.value
+  ? planStepDisplayTitle(currentPlanStep.value, Math.max(0, effectivePlanSteps.value.indexOf(currentPlanStep.value)))
+  : '')
+const planGoalNeedsExpansion = computed(() => planGoalText.value.length > 110)
 const planStepIcon = step => step.status === 'completed' ? Check : step.status === 'blocked' ? CircleX : step.status === 'running' ? LoaderCircle : step.status === 'skipped' ? Minus : Circle
 const stageLifecycleStatus = kind => {
   const stageRows = stageSourceRows.value.filter(event => inferredStageKind(event) === kind && event?.eventType !== 'assistant_progress')
@@ -909,46 +1143,7 @@ const progressSegments = computed(() => {
     }
   })
 })
-const displayedProgressSegments = computed(() => effectiveExecutionDensity.value === 'summary'
-  ? progressSegments.value.slice(-1)
-  : progressSegments.value)
-
-const derivedToolWallMs = computed(() => {
-  const intervals = toolRows.value
-    .map(event => {
-      const start = eventTime(event?.createdAt)
-      const duration = Math.max(0, Number(event?.display?.durationMs || 0))
-      return start && duration ? [start, start + duration] : null
-    })
-    .filter(Boolean)
-    .sort((left, right) => left[0] - right[0])
-  let total = 0
-  let current = null
-  for (const interval of intervals) {
-    if (!current || interval[0] > current[1]) {
-      if (current) total += current[1] - current[0]
-      current = [...interval]
-    } else current[1] = Math.max(current[1], interval[1])
-  }
-  if (current) total += current[1] - current[0]
-  return total
-})
-
-const timingItems = computed(() => {
-  const timing = resultEvent.value?.detail?.timing || {}
-  const items = [
-    ['总耗时', Number(timing.totalMs || turnDurationMs.value)],
-    ['模型', Number(timing.modelMs)],
-    ['工具', Number.isFinite(Number(timing.toolWallMs)) ? Number(timing.toolWallMs) : derivedToolWallMs.value],
-    ['项目 Agent', Number(timing.projectAgentWallMs || timing.stages?.projectAgentWallMs)],
-    ['独立验收', Number(timing.verificationMs || timing.stages?.testAgentWallMs)],
-    ['主 Agent 总结', Number(timing.summaryMs || timing.stages?.mainAgentSummaryMs)],
-    ['排队等待', Number(timing.queueWaitMs)],
-    ['依赖等待', Number(timing.dependencyWaitMs)],
-    ['其他处理', Number(timing.otherMs)],
-  ]
-  return items.filter(([, value]) => Number.isFinite(value) && value > 0)
-})
+const displayedProgressSegments = computed(() => progressSegments.value)
 
 const statusIcon = event => {
   if (event?.display?.status === 'success') return Check
@@ -1050,6 +1245,7 @@ const legacyToolIdentity = event => {
     inspect_system: '检查系统状态', 'Inspect system': '检查系统状态',
     shell_read_runtime_log: '读取项目日志', shell_read_runtime_logs: '读取项目日志',
     maven_build: '运行 Maven 构建', gradle_build: '运行 Gradle 构建', run_terminal: '运行项目命令',
+    command_execution: '运行命令', mcp_tool_call: '调用扩展工具',
   }
   const internalWorkspace = raw.startsWith('mcp__ccm__ccm_workspace_readonly__')
   return { label: labels[operation] || raw, serverLabel: parts[0] === 'mcp' && !internalWorkspace ? parts.at(-2) : '' }
@@ -1081,7 +1277,11 @@ const eventBusinessSummary = event => {
   const fallback = String(event?.display?.summary || '').trim()
   const generic = /^(?:执行完成|工具执行完成|正在执行)$/
   if (projected && !generic.test(projected)) return projected
-  return generic.test(fallback) ? '' : fallback
+  if (!generic.test(fallback)) return fallback
+  const rawTool = String(event?.toolName || event?.display?.title || '').toLowerCase()
+  if ((/command_execution|mcp_tool_call/.test(rawTool) || ['运行命令', '调用扩展工具'].includes(String(event?.display?.title || '')))
+    && !event?.detail?.safeArguments && !event?.detail?.toolDisplay) return '历史事件未记录工具详情'
+  return ''
 }
 const safeInlineTarget = value => {
   const text = typeof value === 'string' || typeof value === 'number' ? String(value).trim() : ''
@@ -1567,44 +1767,48 @@ const collapsedExecutionStageRows = computed(() => {
   })
   return nested.flatMap(event => {
     if (!event?.__childAgentConversation || !childAgentToolsVisible(event)) return [event]
-    const children = collapseReadSearchRows((event.tools || []).map(tool => ({
-      ...tool,
+    const sourceTimeline = Array.isArray(event.timeline) && event.timeline.length
+      ? event.timeline
+      : (event.tools || []).map(tool => ({ kind: 'tool', event: tool, eventId: tool.eventId, sequence: tool.sequence }))
+    const children = sourceTimeline.map(item => item.kind === 'progress' ? {
+      eventId: item.eventId,
+      sequence: item.sequence,
+      eventType: 'assistant_progress',
+      agentRunId: event.agentRunId,
+      parentEventId: event.agentRunId,
+      display: { status: 'running', summary: item.text },
+      detail: { progress: { kind: 'key_finding', text: item.text, source: 'runtime_structured', relatedToolCallIds: [] } },
+      createdAt: item.createdAt,
+      __childAgentChild: true,
+      __childAgentProgress: true,
+      __childAgentKey: event.key,
+      __stageChild: event.__stageChild,
+      __stageKind: event.__stageKind,
+      __agentChild: true,
+    } : {
+      ...item.event,
       __childAgentChild: true,
       __childAgentKey: event.key,
       __stageChild: event.__stageChild,
       __stageKind: event.__stageKind,
       __agentChild: true,
-    })), { expandedGroups: expandedReadSearchGroups })
+    })
     return [event, ...children]
   })
 })
-const displayedExecutionStageRows = computed(() => {
-  if (isQueryCompletion.value || effectiveExecutionDensity.value !== 'summary') return collapsedExecutionStageRows.value
-  const filtered = collapsedExecutionStageRows.value.filter(event => {
-    if (event?.__stageHeader) return event.active || event.status === '失败'
-    if (event?.__progressBatch) return batchNeedsAttention(event)
-    if (event?.__readSearchGroup) return event.failed || event.running
-    if (event?.__childAgentConversation) return true
-    if (event?.__childAgentChild) return false
-    return isCurrentEvent(event)
-      || ['failed', 'waiting', 'blocked', 'cancelled'].includes(String(event?.display?.status || ''))
-      || eventHasPartialResult(event)
-      || event?.eventType === 'permission_required'
-  })
-  return filtered.length ? filtered : collapsedExecutionStageRows.value.slice(-1)
-})
+const displayedExecutionStageRows = computed(() => collapsedExecutionStageRows.value)
 </script>
 
 <template>
   <div v-if="enabled && presentationVisible" ref="executionAnchor" class="cc-execution-anchor">
-  <header v-if="isLivePresentation && shouldRender" class="cc-live-execution-status" aria-live="polite">
+  <header v-if="!embeddedAttempt && isLivePresentation && shouldRender" class="cc-live-execution-status" aria-live="polite">
     <span>已处理 {{ processedDurationLabel }}</span>
     <template v-if="liveStageLabel">
       <span aria-hidden="true">·</span>
       <strong>{{ liveStageLabel }}</strong>
     </template>
   </header>
-  <div v-if="hasProgressFlow && !stageMode && !isLivePresentation && !isQueryCompletion && (!isTerminal || transcriptExpanded)" class="cc-progress-flow" aria-label="Agent 进度说明">
+  <div v-if="!embeddedAttempt && hasProgressFlow && !stageMode && !isLivePresentation && !isQueryCompletion && (!isTerminal || transcriptExpanded)" class="cc-progress-flow" aria-label="Agent 进度说明">
     <div v-for="segment in displayedProgressSegments" :key="segment.key" class="cc-progress-segment" :class="{ current: segment.progress?.eventId === currentProgressEventId, completed: segment.progress?.eventId !== currentProgressEventId }">
       <p v-if="progressText(segment.progress)" class="cc-progress-text agent-progress-row" :aria-live="isLivePresentation && segment.progress?.eventId === currentProgressEventId ? 'polite' : undefined">{{ progressText(segment.progress) }}</p>
       <button v-if="segment.label" type="button" class="cc-progress-batch" :aria-expanded="transcriptExpanded" @click.stop="toggleTranscript">
@@ -1616,7 +1820,7 @@ const displayedExecutionStageRows = computed(() => {
     </div>
   </div>
 
-  <section v-if="completionSummaryVisible" class="cc-completion-summary" :class="{ warning: ['failed', 'blocked', 'cancelled', 'interrupted', 'partial'].includes(completionSummary.status) }" aria-label="任务总结">
+  <section v-if="!embeddedAttempt && showCompletionSummary && completionSummaryVisible" class="cc-completion-summary" :class="{ warning: ['failed', 'blocked', 'cancelled', 'interrupted', 'partial'].includes(completionSummary.status) }" aria-label="任务总结">
     <header class="cc-completion-summary-head">
       <span class="cc-completion-summary-mark" aria-hidden="true"><Check v-if="completionSummary.status === 'success'" :size="13" /><AlertTriangle v-else :size="13" /></span>
       <strong>{{ isQueryCompletion ? '查询总结' : '任务总结' }}</strong>
@@ -1629,12 +1833,14 @@ const displayedExecutionStageRows = computed(() => {
       <span v-if="completionSummary.additions || completionSummary.deletions"><b class="additions">+{{ completionSummary.additions || 0 }}</b> <b class="deletions">-{{ completionSummary.deletions || 0 }}</b></span>
       <span v-if="completionSummary.verificationPassed">验证通过 {{ completionSummary.verificationPassed }} 项</span>
       <span v-if="completionSummary.verificationFailed">验证未通过 {{ completionSummary.verificationFailed }} 项</span>
+      <span v-if="isFormalTaskExecution && effectiveAttemptProjections.length > 1">共执行 {{ effectiveAttemptProjections.length }} 次</span>
+      <span v-if="isFormalTaskExecution && interruptedAttemptCount">中断 {{ interruptedAttemptCount }} 次</span>
     </div>
     <p v-if="completionSummary.blockers.length" class="cc-completion-summary-blockers">{{ completionSummary.blockers.join('；') }}</p>
     <p v-if="completionSummary.nextAction" class="cc-completion-summary-next">下一步：{{ completionSummary.nextAction }}</p>
   </section>
 
-  <section v-if="presentation === 'completed' && isOfficialCompletion && completionFiles.length" class="cc-completion-files" :class="{ warning: !completionSucceeded }" aria-label="本轮文件变化">
+  <section v-if="!embeddedAttempt && showCompletionFiles && presentation === 'completed' && isOfficialCompletion && completionFiles.length" class="cc-completion-files" :class="{ warning: !completionSucceeded }" aria-label="本轮文件变化">
     <header class="cc-completion-files-head">
       <button type="button" class="cc-completion-files-toggle" :aria-expanded="completionFilesExpanded" @click="toggleCompletionFiles">
         <span class="cc-completion-files-icon"><FileCode2 :size="16" /></span>
@@ -1663,27 +1869,68 @@ const displayedExecutionStageRows = computed(() => {
     <button v-if="completionFilesExpanded && completionFiles.length > 40" type="button" class="cc-completion-files-all" @click="openAllFileChanges">查看全部 {{ completionFiles.length }} 个文件</button>
   </section>
 
-  <section v-if="!isIncompleteTerminal && shouldRender && (hasExecutionRows || (!isTerminal && assistantProgressRows.length) || transcriptExpanded || isQueryCompletion) && (!hasProgressFlow || stageMode || transcriptExpanded || isQueryCompletion || isLivePresentation)" class="cc-execution" :class="{ complete: completedProjectionVisible, expanded: transcriptExpanded, live: isLivePresentation, query: isQueryCompletion }" :aria-label="isLivePresentation ? 'Agent 实时执行进度' : completedProjectionTitle">
-    <button v-if="completedProjectionVisible" class="cc-execution-head" type="button" @click.stop="toggleTranscript">
+  <section v-if="shouldRender && (hasExecutionRows || (!isTerminal && assistantProgressRows.length) || transcriptExpanded || isQueryCompletion) && (!hasProgressFlow || stageMode || transcriptExpanded || isQueryCompletion || isLivePresentation || embeddedAttempt)" class="cc-execution" :class="{ complete: completedProjectionVisible, expanded: transcriptExpanded, live: isLivePresentation, query: isQueryCompletion, embedded: embeddedAttempt }" :aria-label="embeddedAttempt ? `第 ${attemptFilter} 次执行详情` : isLivePresentation ? 'Agent 实时执行进度' : completedProjectionTitle">
+    <button v-if="!embeddedAttempt && completedProjectionVisible" class="cc-execution-head" type="button" @click.stop="toggleTranscript">
       <span class="cc-execution-chevron"><ChevronDown v-if="transcriptExpanded" :size="15" /><ChevronRight v-else :size="15" /></span>
       <strong>{{ completedProjectionTitle }}</strong>
       <span :class="['cc-execution-result-mark', completedProjectionSucceeded ? 'success' : 'warning']" aria-hidden="true"><Check v-if="completedProjectionSucceeded" :size="11" /><AlertTriangle v-else :size="11" /></span>
       <span class="cc-execution-summary">{{ completionResultSummary }}</span>
       <span v-if="totalDurationLabel" class="cc-execution-duration">{{ totalDurationLabel }}</span>
     </button>
-    <label v-if="isOfficialCompletion" class="cc-execution-density completed" @click.stop>
-      <span class="sr-only">执行展示密度</span>
-      <select v-model="executionDensity" aria-label="执行展示密度">
-        <option v-for="option in executionDensityOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
-      </select>
-    </label>
-    <div v-if="isOfficialCompletion && transcriptExpanded && recoveryMilestone" class="cc-execution-meta">
+    <div v-if="!embeddedAttempt && isOfficialCompletion && transcriptExpanded && recoveryMilestone" class="cc-execution-meta">
       <p v-if="recoveryMilestone" class="cc-recovery-milestone">{{ recoveryMilestone }}</p>
     </div>
 
     <div v-if="!compacted" class="cc-execution-rows">
-      <div v-if="resultEvent && timingItems.length && !isQueryCompletion" class="cc-execution-timing" aria-label="本轮耗时统计">
-        <span v-for="([label, value]) in timingItems" :key="label"><small>{{ label }}</small>{{ formatExecutionDuration(value) }}</span>
+      <section v-if="!embeddedAttempt && isFormalTaskExecution && attemptHistoryCount" class="cc-attempt-history history-first">
+        <button type="button" class="cc-attempt-history-head" :aria-expanded="attemptHistoryExpanded" @click="attemptHistoryExpanded = !attemptHistoryExpanded">
+          <History :size="15" aria-hidden="true" />
+          <strong>历史执行</strong>
+          <span>{{ attemptHistoryCount }} 次</span>
+          <small v-if="historicalInterruptedCount">中断/失败 {{ historicalInterruptedCount }} 次</small>
+          <small v-if="attemptHistoryDuration">累计 {{ formatExecutionDuration(attemptHistoryDuration) }}</small>
+          <ChevronDown v-if="attemptHistoryExpanded" :size="14" aria-hidden="true" />
+          <ChevronRight v-else :size="14" aria-hidden="true" />
+        </button>
+        <div v-if="attemptHistoryExpanded" class="cc-attempt-history-list">
+          <article v-for="attempt in historicalAttempts" :key="attempt.attempt" class="cc-attempt-history-item" :class="attempt.status">
+            <button type="button" class="cc-attempt-history-item-head" :aria-expanded="expandedHistoricalAttempts[attempt.attempt] === true" @click="toggleHistoricalAttempt(attempt)">
+              <span class="cc-attempt-state" aria-hidden="true"><Check v-if="attempt.status === 'success'" :size="12" /><AlertTriangle v-else :size="12" /></span>
+              <strong>第 {{ attempt.attempt }} 次执行</strong>
+              <span>{{ attemptStatusLabel(attempt) }}</span>
+              <small>{{ attemptMeta(attempt) }}</small>
+              <ChevronDown v-if="expandedHistoricalAttempts[attempt.attempt] === true" :size="14" aria-hidden="true" />
+              <ChevronRight v-else :size="14" aria-hidden="true" />
+            </button>
+            <p v-if="attempt.terminalReason" class="cc-attempt-terminal-reason">{{ attempt.terminalReason }}</p>
+            <div v-if="expandedHistoricalAttempts[attempt.attempt] === true" class="cc-attempt-history-detail">
+              <p v-if="attemptEventLoading[attempt.attempt]" class="cc-attempt-history-notice">正在读取第 {{ attempt.attempt }} 次执行记录…</p>
+              <p v-else-if="attemptEventErrors[attempt.attempt]" class="cc-attempt-history-notice warning">{{ attemptEventErrors[attempt.attempt] }}</p>
+              <AgentExecutionTranscript
+                v-else-if="attemptEvents[attempt.attempt]?.length"
+                :events="attemptEvents[attempt.attempt]"
+                :messages="messages"
+                :message-index="messageIndex"
+                :enabled="enabled"
+                :attempt-filter="attempt.attempt"
+                :attempt-summary="attempt"
+                embedded-attempt
+                stage-grouped
+                omit-requirement-plan
+                @open-file-change="emit('open-file-change', $event)"
+                @open-file-changes="emit('open-file-changes', $event)"
+                @execution-action="emit('execution-action', $event)"
+              />
+              <p v-else class="cc-attempt-history-notice">历史事件未记录可展示详情。</p>
+            </div>
+          </article>
+        </div>
+      </section>
+      <div v-if="!embeddedAttempt && isFormalTaskExecution && currentAttemptNumber" class="cc-current-attempt-head">
+        <span class="cc-current-attempt-dot" aria-hidden="true"></span>
+        <strong>{{ currentAttemptTitle }} · 第 {{ currentAttemptNumber }} 次</strong>
+        <span>{{ attemptStatusLabel(currentAttemptProjection || { status: isTerminal ? terminalBoundary?.status : 'running' }) }}</span>
+        <small v-if="currentAttemptProjection && attemptMeta(currentAttemptProjection)">{{ attemptMeta(currentAttemptProjection) }}</small>
       </div>
       <div v-if="transcriptExpanded && (!isQueryCompletion || visibleRows.length > 20)" class="cc-execution-search" role="search">
         <Search :size="14" aria-hidden="true" />
@@ -1708,8 +1955,7 @@ const displayedExecutionStageRows = computed(() => {
           <strong>{{ event.label }}</strong>
           <small>{{ event.summary }}</small>
         </span>
-        <em>{{ event.status }}</em>
-        <span v-if="event.durationMs">{{ formatExecutionDuration(event.durationMs) }}</span>
+        <span class="cc-execution-stage-meta"><em>{{ event.status }}</em><span v-if="event.durationMs">· {{ formatExecutionDuration(event.durationMs) }}</span></span>
         <span class="cc-execution-stage-chevron"><ChevronDown v-if="stageIsExpanded(event)" :size="14" /><ChevronRight v-else :size="14" /></span>
       </button>
       <section
@@ -1720,7 +1966,7 @@ const displayedExecutionStageRows = computed(() => {
         :aria-current="batchNeedsAttention(event) ? 'step' : undefined"
       >
         <p v-if="event.progress && progressText(event.progress)" class="cc-execution-stage-progress agent-progress-row" :class="{ current: batchNeedsAttention(event) }" :aria-live="isLivePresentation && batchNeedsAttention(event) ? 'polite' : undefined">{{ progressText(event.progress) }}</p>
-        <button v-if="event.children.length && !((isLivePresentation || isQueryCompletion) && batchIsExpanded(event))" type="button" class="cc-progress-batch-head" :aria-expanded="batchIsExpanded(event)" @click="toggleBatch(event)">
+        <button v-if="event.children.length" type="button" class="cc-progress-batch-head" :aria-expanded="batchIsExpanded(event)" @click="toggleBatch(event)">
           <span class="cc-progress-batch-status" :class="{ failed: batchHasFailure(event), attention: batchNeedsAttention(event) }"><component :is="batchStatusIcon(event)" :size="12" /></span>
           <strong>{{ event.presentation?.label || '工具批次' }}</strong>
           <small>{{ event.presentation?.count || event.children.length }}项<span v-if="event.parallel"> · 并行</span><span v-if="event.presentation?.failed"> · {{ event.presentation.failed }}项失败</span><span v-if="batchPartialCount(event)"> · {{ batchPartialCount(event) }}项部分结果</span><span v-if="event.presentation?.durationMs || event.durationMs"> · {{ formatExecutionDuration(event.presentation?.durationMs || event.durationMs) }}</span></small>
@@ -1731,25 +1977,32 @@ const displayedExecutionStageRows = computed(() => {
         <button type="button" class="cc-requirement-plan-head" :aria-expanded="planIsExpanded" @click="toggleRequirementPlan">
           <span class="cc-requirement-plan-icon"><ListChecks :size="14" /></span>
           <span class="cc-requirement-plan-title">
-            <strong>{{ isLivePresentation ? `${requirementPlan?.title || '实施计划'} · ${effectivePlanSteps.length} 项待办` : requirementPlan?.title || '需求实施计划' }}</strong>
-            <small>根据你的需求和现有项目整理 · 版本 {{ requirementPlan?.revision || 1 }}</small>
+            <strong>{{ planDisplayTitle }}</strong>
+            <small>{{ planHeaderSummary }}</small>
           </span>
-          <span class="cc-requirement-plan-status">{{ planStatusLabel }}</span>
           <span class="cc-requirement-plan-chevron"><ChevronDown v-if="planIsExpanded" :size="14" /><ChevronRight v-else :size="14" /></span>
         </button>
+        <p v-if="isLivePresentation && currentPlanStepTitle" class="cc-requirement-plan-current"><b>当前：</b>{{ currentPlanStepTitle }}</p>
         <div v-if="planIsExpanded" class="cc-requirement-plan-body" :class="{ 'has-side': requirementPlan?.exclusions?.length }">
           <div class="cc-requirement-plan-main">
             <section>
               <h4>目标</h4>
-              <p>{{ requirementPlan?.overview || requirementPlan?.goal }}</p>
+              <p class="cc-requirement-plan-goal" :class="{ expanded: planGoalExpanded }">{{ planGoalText }}</p>
+              <button v-if="planGoalNeedsExpansion" type="button" class="cc-requirement-plan-more" @click="planGoalExpanded = !planGoalExpanded">{{ planGoalExpanded ? '收起目标' : '展开完整目标' }}</button>
             </section>
             <section>
-              <h4>待办</h4>
+              <h4>工作项</h4>
               <ol class="cc-requirement-plan-steps">
                 <li v-for="(step, stepIndex) in effectivePlanSteps" :key="step.id || stepIndex" :class="step.status">
                   <span class="cc-requirement-step-mark"><component :is="planStepIcon(step)" :size="11" /></span>
                   <div>
-                    <strong>{{ step.title }}</strong>
+                    <strong :title="planStepTitleSource(step)">{{ planStepDisplayTitle(step, stepIndex) }}</strong>
+                    <details v-if="planStepDescription(step, stepIndex) || planStepOutcome(step, stepIndex) || step.files?.length" class="cc-requirement-step-details">
+                      <summary>查看详情</summary>
+                      <p v-if="planStepDescription(step, stepIndex)">{{ planStepDescription(step, stepIndex) }}</p>
+                      <small v-if="planStepOutcome(step, stepIndex)" class="cc-requirement-step-outcome"><b>验收</b>{{ planStepOutcome(step, stepIndex) }}</small>
+                      <small v-if="step.files?.length" class="cc-requirement-step-files"><b>涉及文件</b>{{ step.files.join('、') }}</small>
+                    </details>
                   </div>
                   <span v-if="step.project" class="cc-requirement-step-project">{{ step.project }}</span>
                 </li>
@@ -1760,10 +2013,6 @@ const displayedExecutionStageRows = computed(() => {
             <section><h4>本次不包含</h4><ul><li v-for="item in requirementPlan.exclusions" :key="item">{{ item }}</li></ul></section>
           </aside>
         </div>
-        <footer v-if="planIsExpanded" class="cc-requirement-plan-foot">
-          <span>{{ effectivePlanSteps.length }} 项待办</span>
-          <button type="button" @click="toggleRequirementPlan">收起计划 <ChevronDown :size="12" /></button>
-        </footer>
       </article>
       <ReadSearchCollapseHeader
         v-else-if="event.__readSearchGroup"
@@ -1778,12 +2027,11 @@ const displayedExecutionStageRows = computed(() => {
         :live="isLivePresentation"
         :expanded="childAgentCardExpanded(event)"
         :tools-expanded="childAgentToolsVisible(event)"
-        :density="effectiveExecutionDensity"
         @toggle="toggleChildAgentCard"
         @toggle-tools="toggleChildAgentTools"
         @open-file-change="openFileChange"
       />
-      <p v-else-if="event.eventType === 'assistant_progress'" v-show="!normalizedSearchQuery || searchableText(event).includes(normalizedSearchQuery)" class="cc-execution-stage-progress agent-progress-row" :class="{ current: event.eventId === currentProgressEventId }" :aria-current="event.eventId === currentProgressEventId ? 'step' : undefined" :aria-live="isLivePresentation && event.eventId === currentProgressEventId ? 'polite' : undefined">{{ progressText(event) }}</p>
+      <p v-else-if="event.eventType === 'assistant_progress'" v-show="!normalizedSearchQuery || searchableText(event).includes(normalizedSearchQuery)" class="cc-execution-stage-progress agent-progress-row" :class="{ current: event.eventId === currentProgressEventId, 'child-agent-progress': event.__childAgentProgress }" :aria-current="event.eventId === currentProgressEventId ? 'step' : undefined" :aria-live="isLivePresentation && event.eventId === currentProgressEventId ? 'polite' : undefined">{{ progressText(event) }}</p>
       <article
         v-else
         v-show="eventMatchesSearch(event)"
@@ -1862,7 +2110,8 @@ const displayedExecutionStageRows = computed(() => {
               <ToolResultDetail
                 :display="toolDisplayFor(event)"
                 :token-count="Number(event.display?.tokenCount || 0)"
-                :detailed="effectiveExecutionDensity === 'detailed' && !isLivePresentation"
+                :detailed="false"
+                :show-technical="true"
                 :custom-content="!!toolDisplayFor(event).result?.preview && !isSourceReadEvent(event)"
                 :source-loading="!!detailLoading[event.eventId]"
                 :source-error="detailErrors[event.eventId] || ''"
@@ -1927,22 +2176,7 @@ const displayedExecutionStageRows = computed(() => {
         </div>
       </article>
       </template>
-      <section v-if="isOfficialCompletion && transcriptExpanded && attemptHistoryGroups.length" class="cc-attempt-history">
-        <button type="button" class="cc-attempt-history-head" :aria-expanded="attemptHistoryExpanded" @click="attemptHistoryExpanded = !attemptHistoryExpanded">
-          <History :size="15" aria-hidden="true" />
-          <strong>历史尝试</strong>
-          <span>{{ attemptHistoryCount }} 次</span>
-          <ChevronDown v-if="attemptHistoryExpanded" :size="14" aria-hidden="true" />
-          <ChevronRight v-else :size="14" aria-hidden="true" />
-        </button>
-        <div v-if="attemptHistoryExpanded" class="cc-attempt-history-list">
-          <article v-for="group in attemptHistoryGroups" :key="group.key">
-            <header><strong>{{ group.project }}</strong><span>{{ group.workItem }}</span></header>
-            <p v-for="attempt in group.attempts" :key="attempt.key">第 {{ attempt.attempt || '—' }} 次 · {{ attempt.summary || attempt.status || '历史结果已保留' }}</p>
-          </article>
-        </div>
-      </section>
-      <div v-if="isOfficialCompletion && transcriptExpanded && replayTarget" class="cc-execution-footer">
+      <div v-if="!embeddedAttempt && isOfficialCompletion && transcriptExpanded && replayTarget" class="cc-execution-footer">
         <button type="button" class="cc-execution-replay-link" @click="openReplay">在任务回放中查看 <ChevronRight :size="13" /></button>
       </div>
     </div>
@@ -1966,10 +2200,6 @@ const displayedExecutionStageRows = computed(() => {
 .cc-execution-anchor:empty { height: 0; }
 .cc-live-execution-status { display: flex; align-items: center; gap: 7px; margin: 0 0 9px; padding: 0 1px 8px; border-bottom: 1px solid color-mix(in srgb, var(--border-color, #94a3b8) 24%, transparent); color: var(--text-muted); font-size: 11px; line-height: 1.4; }
 .cc-live-execution-status strong { min-width: 0; overflow: hidden; color: var(--text-secondary); font-size: 11px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
-.cc-execution-density { margin-left: auto; flex: 0 0 auto; }
-.cc-execution-density select { height: 25px; padding: 0 21px 0 8px; border: 1px solid color-mix(in srgb, var(--border-color, #94a3b8) 40%, transparent); border-radius: 7px; color: var(--text-secondary); background: color-mix(in srgb, var(--surface, #fff) 96%, transparent); font: inherit; font-size: 10px; cursor: pointer; }
-.cc-execution-density select:focus-visible { outline: 2px solid color-mix(in srgb, var(--primary-color, #2563eb) 65%, transparent); outline-offset: 2px; }
-.cc-execution-density.completed { position: absolute; z-index: 2; top: 8px; right: 9px; }
 .cc-execution.complete .cc-execution-head { padding-right: 82px; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 .cc-progress-flow { display: grid; gap: 9px; margin: 0 0 8px; }
@@ -2046,9 +2276,6 @@ const displayedExecutionStageRows = computed(() => {
 .cc-recovery-milestone { margin:0; color:var(--text-muted); font-size:10px; line-height:1.45; }
 .cc-execution-duration { color: var(--text-secondary); font-size: 10px; white-space: nowrap; }
 .cc-execution-rows { border-top: 1px solid rgba(100, 116, 139, 0.1); padding: 7px 0 4px; }
-.cc-execution-timing { display: flex; flex-wrap: wrap; gap: 6px 14px; padding: 3px 2px 8px 30px; color: var(--text-secondary); font-size: 10px; }
-.cc-execution-timing span { display: inline-flex; align-items: baseline; gap: 4px; }
-.cc-execution-timing small { color: var(--text-muted); font-size: 9px; }
 .cc-execution-search { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto auto auto; align-items: center; gap: 6px; margin: 2px 2px 9px 30px; padding: 5px 1px; border: 0; border-bottom: 1px solid rgba(148, 163, 184, 0.11); border-radius: 0; background: transparent; }
 .cc-execution-search input { min-width: 0; border: 0; outline: 0; color: var(--text-primary); background: transparent; font-size: 10px; }
 .cc-execution-search small { color: var(--text-muted); font-size: 9px; white-space: nowrap; }
@@ -2068,23 +2295,27 @@ const displayedExecutionStageRows = computed(() => {
 .cc-requirement-nav-item.running i { color: var(--primary-color, #ec4899); background: color-mix(in srgb, var(--primary-color, #ec4899) 16%, transparent); }
 .cc-requirement-nav-item.blocked i { color: #dc2626; background: rgba(239, 68, 68, 0.12); }
 .cc-requirement-plan { margin: 2px 2px 4px 30px; overflow: hidden; border: 0; border-left: 1px solid color-mix(in srgb, var(--border-color, #94a3b8) 30%, transparent); border-radius: 0; background: transparent; }
-.cc-requirement-plan-head { width: 100%; display: grid; grid-template-columns: 24px minmax(0, 1fr) auto 24px; align-items: center; gap: 7px; padding: 7px 8px; border: 0; color: inherit; background: transparent; text-align: left; cursor: pointer; }
+.cc-requirement-plan-head { width: 100%; display: grid; grid-template-columns: 24px minmax(0, 1fr) 24px; align-items: center; gap: 7px; padding: 8px; border: 0; color: inherit; background: transparent; text-align: left; cursor: pointer; }
 .cc-requirement-plan-head:hover { background: rgba(100,116,139,.035); }
 .cc-requirement-plan-head:focus-visible { outline: 2px solid color-mix(in srgb, var(--primary-color, #ec4899) 70%, transparent); outline-offset: -2px; }
 .cc-requirement-plan-icon { width: 20px; height: 20px; display: inline-flex; align-items: center; justify-content: center; border-radius: 5px; color: var(--text-muted); background: rgba(100,116,139,.08); font-size:10px; }
-.cc-requirement-plan-title { min-width: 0; display: grid; gap: 2px; }
-.cc-requirement-plan-title strong { color: var(--text-primary); font-size: 12px; }
-.cc-requirement-plan-title small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); font-size: 9px; }
-.cc-requirement-plan-status { padding: 2px 7px; border-radius: 999px; color: #15803d; background: rgba(34, 197, 94, 0.1); font-size: 9px; white-space: nowrap; }
-.cc-requirement-plan.blocked .cc-requirement-plan-status { color: #b91c1c; background: rgba(239, 68, 68, 0.1); }
+.cc-requirement-plan-title { min-width: 0; display: flex; align-items: baseline; flex-wrap: wrap; gap: 3px 8px; }
+.cc-requirement-plan-title strong { min-width: 0; color: var(--execution-text-primary, var(--text-primary)); font-size: 12px; line-height: 1.45; }
+.cc-requirement-plan-title small { min-width: 0; overflow: hidden; color: var(--execution-text-muted, var(--text-muted)); font-size: 10px; line-height: 1.45; text-overflow: ellipsis; white-space: nowrap; }
 .cc-requirement-plan-chevron { color: var(--text-muted); font-size: 10px; text-align: center; }
+.cc-requirement-plan-current { margin: 0 8px 7px 39px; overflow: hidden; color: var(--execution-text-secondary, var(--text-secondary)); font-size: 11px; line-height: 1.5; text-overflow: ellipsis; white-space: nowrap; }
+.cc-requirement-plan-current b { margin-right: 4px; color: var(--execution-text-muted, var(--text-muted)); font-weight: 600; }
 .cc-requirement-plan-body { display: grid; grid-template-columns: minmax(0, 1fr); border-top: 1px solid rgba(148, 163, 184, 0.09); }
 .cc-requirement-plan-body.has-side { grid-template-columns: minmax(0, 1.5fr) minmax(220px, 0.72fr); }
-.cc-requirement-plan-main, .cc-requirement-plan-side { min-width: 0; padding: 11px; }
+.cc-requirement-plan-main, .cc-requirement-plan-side { min-width: 0; padding: 12px; }
 .cc-requirement-plan-body.has-side .cc-requirement-plan-main { border-right: 1px solid rgba(148, 163, 184, 0.12); }
 .cc-requirement-plan-body section + section { margin-top: 12px; }
-.cc-requirement-plan-body h4 { margin: 0 0 6px; color: var(--text-muted); font-size: 9px; font-weight: 650; letter-spacing: 0.04em; }
-.cc-requirement-plan-body section > p { margin: 0; color: var(--text-secondary); font-size: 10px; line-height: 1.55; }
+.cc-requirement-plan-body h4 { margin: 0 0 6px; color: var(--execution-text-muted, var(--text-muted)); font-size: 10px; font-weight: 650; letter-spacing: 0.03em; }
+.cc-requirement-plan-body section > p { margin: 0; color: var(--execution-text-secondary, var(--text-secondary)); font-size: 11px; line-height: 1.65; }
+.cc-requirement-plan-goal { display: -webkit-box; overflow: hidden; overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
+.cc-requirement-plan-goal.expanded { display: block; overflow: visible; -webkit-line-clamp: unset; }
+.cc-requirement-plan-more { margin: 5px 0 0; padding: 0; border: 0; color: var(--execution-active-accent, var(--primary-color, #2563eb)); background: transparent; font-size: 10px; cursor: pointer; }
+.cc-requirement-plan-more:hover { text-decoration: underline; }
 .cc-requirement-plan-steps { display: grid; gap: 5px; margin: 0; padding: 0; list-style: none; }
 .cc-requirement-plan-steps li { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; gap: 7px; align-items: start; padding: 6px 2px; border: 0; border-top: 1px solid rgba(148, 163, 184, 0.08); border-radius: 0; background: transparent; }
 .cc-requirement-plan-steps li:first-child { border-top:0; }
@@ -2092,15 +2323,20 @@ const displayedExecutionStageRows = computed(() => {
 .cc-requirement-plan-steps li.completed .cc-requirement-step-mark { color: #15803d; background: rgba(34, 197, 94, 0.11); }
 .cc-requirement-plan-steps li.running .cc-requirement-step-mark { color: var(--primary-color, #ec4899); background: color-mix(in srgb, var(--primary-color, #ec4899) 12%, transparent); }
 .cc-requirement-plan-steps li.blocked .cc-requirement-step-mark { color: #dc2626; background: rgba(239, 68, 68, 0.1); }
-.cc-requirement-plan-steps strong { display: block; color: var(--text-primary); font-size: 10px; }
-.cc-requirement-plan-steps p { margin: 2px 0 0; color: var(--text-secondary); font-size: 9px; line-height: 1.45; }
-.cc-requirement-plan-steps small { display: block; margin-top: 3px; color: var(--text-muted); font-size: 8px; line-height: 1.4; }
+.cc-requirement-plan-steps strong { display: block; overflow: hidden; color: var(--execution-text-primary, var(--text-primary)); font-size: 11px; line-height: 1.5; text-overflow: ellipsis; white-space: nowrap; }
+.cc-requirement-plan-steps p { margin: 6px 0 0; color: var(--execution-text-secondary, var(--text-secondary)); font-size: 10px; line-height: 1.55; }
+.cc-requirement-plan-steps small { display: block; margin-top: 5px; color: var(--execution-text-muted, var(--text-muted)); font-size: 10px; line-height: 1.5; }
+.cc-requirement-plan-steps small b { margin-right: 5px; color: var(--text-secondary); font: inherit; font-weight: 600; }
+.cc-requirement-step-details { margin-top: 4px; }
+.cc-requirement-step-details summary { width: fit-content; color: var(--execution-text-muted, var(--text-muted)); font-size: 10px; line-height: 1.5; cursor: pointer; user-select: none; }
+.cc-requirement-step-details summary:hover { color: var(--execution-text-secondary, var(--text-secondary)); }
+.cc-requirement-step-files { overflow-wrap: anywhere; }
 .cc-requirement-step-project { color: var(--primary-color, #ec4899); font-size: 8px; white-space: nowrap; }
 .cc-requirement-plan-side ul { display: grid; gap: 4px; margin: 0; padding-left: 14px; color: var(--text-secondary); font-size: 9px; line-height: 1.5; }
 .cc-requirement-plan-side li::marker { color: var(--primary-color, #ec4899); }
 .cc-requirement-plan-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 11px; border-top: 1px solid rgba(148, 163, 184, 0.12); color: var(--text-muted); font-size: 8px; }
 .cc-requirement-plan-foot button { display:inline-flex; align-items:center; gap:3px; padding: 2px 0; border: 0; color: var(--primary-color, #ec4899); background: transparent; font-size: 8px; cursor: pointer; }
-.cc-execution-stage-head { position:relative; width: calc(100% - 4px); display: grid; grid-template-columns: 20px minmax(0, 1fr) auto auto 20px; align-items: center; gap: 8px; margin:0 2px; padding: 9px 0; border: 0; color: var(--text-secondary); background: transparent; text-align: left; cursor: pointer; }
+.cc-execution-stage-head { position:relative; width: calc(100% - 4px); display: grid; grid-template-columns: 20px minmax(0, 1fr) auto 20px; align-items: center; gap: 8px; margin:0 2px; padding: 9px 0; border: 0; color: var(--text-secondary); background: transparent; text-align: left; cursor: pointer; }
 .cc-execution-stage-head:not(:first-child) { margin-top: 0; border-top: 1px solid rgba(100, 116, 139, 0.075); }
 .cc-execution-stage-head:hover { background: rgba(100, 116, 139, 0.025); }
 .cc-execution-stage-head.active { color: var(--text-primary); background: transparent; box-shadow: none; }
@@ -2113,11 +2349,11 @@ const displayedExecutionStageRows = computed(() => {
 .cc-execution-stage-chevron { color: var(--text-muted); font-size: 11px; line-height: 1; text-align:center; }
 .cc-execution-stage-head strong { color: var(--text-primary); font-size: 12px; font-weight: 650; white-space:nowrap; }
 .cc-execution-stage-head small { min-width: 0; color: var(--text-muted); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cc-execution-stage-head em { color: var(--text-muted); font-size: 10px; font-style: normal; white-space: nowrap; }
-.cc-execution-stage-head.completed em { color: #15803d; }
-.cc-execution-stage-head.failed em { color: #dc2626; }
-.cc-execution-stage-head > span:nth-last-child(2) { color: var(--text-muted); font-size: 10px; white-space: nowrap; }
-.cc-execution-stage-progress { display: -webkit-box; margin: 3px 8px 7px 31px; padding-left:12px; overflow: hidden; border-left:1px solid color-mix(in srgb,var(--border-color,#94a3b8) 28%,transparent); color: var(--text-primary); font-size: 11px; line-height: 1.6; white-space: normal; overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.cc-execution-stage-meta { display: inline-flex; align-items: center; gap: 3px; color: var(--execution-text-muted, var(--text-muted)); font-size: 10px; white-space: nowrap; }
+.cc-execution-stage-meta em { color: inherit; font: inherit; font-style: normal; }
+.cc-execution-stage-head.completed .cc-execution-stage-meta { color: #15803d; }
+.cc-execution-stage-head.failed .cc-execution-stage-meta { color: #dc2626; }
+.cc-execution-stage-progress { display: -webkit-box; margin: 3px 8px 7px 31px; padding-left:12px; overflow: hidden; border-left:1px solid color-mix(in srgb,var(--border-color,#94a3b8) 28%,transparent); color: var(--text-primary); font-size: 12px; line-height: 1.6; white-space: normal; overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
 .cc-execution-stage-progress.current { padding-left: 7px; border-left: 2px solid color-mix(in srgb, var(--primary-color, #ec4899) 75%, transparent); background: color-mix(in srgb, var(--primary-color, #ec4899) 4%, transparent); }
 .cc-progress-batch-group { margin-left: 24px; border-left: 1px solid color-mix(in srgb, var(--border-color, #94a3b8) 22%, transparent); }
 .cc-progress-batch-group.completed { opacity: 0.84; }
@@ -2262,17 +2498,32 @@ const displayedExecutionStageRows = computed(() => {
 .cc-completion-files-more,
 .cc-completion-files-all { padding: 8px 12px; border: 0; color: var(--text-muted); background: transparent; font-size: 10px; cursor: pointer; text-align: left; }
 .cc-completion-files-all { float: right; }
-.cc-attempt-history { margin:4px 2px 0; border-top:1px solid rgba(100,116,139,.09); }
-.cc-attempt-history-head { width:100%; display:grid; grid-template-columns:20px auto minmax(0,1fr) 20px; align-items:center; gap:7px; min-height:38px; padding:6px 0; border:0; color:var(--text-secondary); background:transparent; text-align:left; cursor:pointer; }
+.cc-attempt-history { margin:0; border-bottom:1px solid color-mix(in srgb,var(--border-color,#94a3b8) 24%,transparent); }
+.cc-attempt-history-head { width:100%; display:grid; grid-template-columns:20px auto auto minmax(0,1fr) auto 20px; align-items:center; gap:7px; min-height:38px; padding:6px 10px; border:0; color:var(--text-secondary); background:color-mix(in srgb,var(--surface-subtle,#f8fafc) 44%,transparent); text-align:left; cursor:pointer; }
 .cc-attempt-history-head:hover { background:rgba(100,116,139,.035); }
 .cc-attempt-history-head strong { color:var(--text-primary); font-size:11px; }
 .cc-attempt-history-head span { color:var(--text-muted); font-size:10px; }
-.cc-attempt-history-list { display:grid; gap:7px; padding:2px 8px 9px 27px; }
-.cc-attempt-history-list article { padding-left:9px; border-left:1px solid color-mix(in srgb,var(--border-color,#94a3b8) 32%,transparent); }
-.cc-attempt-history-list header { display:flex; align-items:baseline; gap:7px; }
-.cc-attempt-history-list header strong { color:var(--text-primary); font-size:10px; }
-.cc-attempt-history-list header span,.cc-attempt-history-list p { color:var(--text-muted); font-size:9px; }
-.cc-attempt-history-list p { margin:3px 0 0; line-height:1.45; }
+.cc-attempt-history-head small { color:var(--text-muted); font-size:9px; justify-self:end; }
+.cc-attempt-history-list { display:grid; padding:0; }
+.cc-attempt-history-list .cc-attempt-history-item { padding:0; border:0; border-top:1px solid color-mix(in srgb,var(--border-color,#94a3b8) 18%,transparent); }
+.cc-attempt-history-item-head { width:100%; display:grid; grid-template-columns:18px auto auto minmax(0,1fr) 18px; align-items:center; gap:7px; min-height:36px; padding:6px 12px 6px 28px; border:0; color:var(--text-secondary); background:transparent; text-align:left; cursor:pointer; }
+.cc-attempt-history-item-head:hover { background:rgba(100,116,139,.04); }
+.cc-attempt-history-item-head strong { color:var(--text-primary); font-size:11px; }
+.cc-attempt-history-item-head > span { color:var(--text-muted); font-size:10px; }
+.cc-attempt-history-item-head small { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text-muted); font-size:9px; text-align:right; }
+.cc-attempt-state { width:18px; height:18px; display:inline-flex; align-items:center; justify-content:center; border-radius:50%; color:var(--execution-warning-accent,#d97706); background:color-mix(in srgb,var(--execution-warning-accent,#d97706) 12%,transparent); }
+.cc-attempt-history-item.success .cc-attempt-state { color:var(--execution-success-accent,#16a34a); background:color-mix(in srgb,var(--execution-success-accent,#16a34a) 12%,transparent); }
+.cc-attempt-terminal-reason { margin:0; padding:0 38px 7px 53px; color:var(--text-muted); font-size:10px; line-height:1.45; }
+.cc-attempt-history-detail { padding:0 12px 10px 28px; }
+.cc-attempt-history-notice { margin:0; padding:9px 12px; color:var(--text-muted); font-size:10px; }
+.cc-attempt-history-notice.warning { color:var(--execution-warning-accent,#d97706); }
+.cc-current-attempt-head { display:grid; grid-template-columns:14px auto auto minmax(0,1fr); align-items:center; gap:7px; min-height:38px; padding:7px 12px; border-bottom:1px solid color-mix(in srgb,var(--border-color,#94a3b8) 20%,transparent); color:var(--text-secondary); }
+.cc-current-attempt-head strong { color:var(--text-primary); font-size:11px; }
+.cc-current-attempt-head span { color:var(--text-muted); font-size:10px; }
+.cc-current-attempt-head small { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text-muted); font-size:9px; text-align:right; }
+.cc-current-attempt-dot { width:7px; height:7px; border-radius:50%; background:var(--execution-active-accent,#3b82f6); box-shadow:0 0 0 3px color-mix(in srgb,var(--execution-active-accent,#3b82f6) 12%,transparent); }
+.cc-execution.embedded { margin:0; border:0; border-radius:0; background:transparent; box-shadow:none; }
+.cc-execution.embedded .cc-execution-rows { border-top:0; padding:0; }
 .cc-execution-footer { display:flex; padding:9px 3px 4px 30px; border-top:1px solid rgba(100,116,139,.09); }
 
 /* Live projection: a compact construction view backed by the same durable ledger. */
@@ -2323,12 +2574,12 @@ const displayedExecutionStageRows = computed(() => {
 .cc-execution.live .cc-execution-actions { margin-left: 23px; }
 
 .cc-execution.live .cc-requirement-plan { margin: 5px 0 7px 20px; border: 0; border-radius: 0; background: transparent; }
-.cc-execution.live .cc-requirement-plan-head { grid-template-columns: minmax(0, 1fr) auto 18px; gap: 7px; min-height: 31px; padding: 5px 1px; }
+.cc-execution.live .cc-requirement-plan-head { grid-template-columns: minmax(0, 1fr) 18px; gap: 7px; min-height: 31px; padding: 5px 1px; }
 .cc-execution.live .cc-requirement-plan-head:hover { background: rgba(100, 116, 139, 0.045); }
 .cc-execution.live .cc-requirement-plan-icon { display: none; }
 .cc-execution.live .cc-requirement-plan-title strong { font-size: 11px; font-weight: 650; }
-.cc-execution.live .cc-requirement-plan-title small { display: none; }
-.cc-execution.live .cc-requirement-plan-status { padding: 0; color: var(--text-muted); background: transparent; font-size: 9px; }
+.cc-execution.live .cc-requirement-plan-title small { display: inline; font-size: 10px; }
+.cc-execution.live .cc-requirement-plan-current { margin: 0 1px 5px; padding-left: 10px; border-left: 2px solid color-mix(in srgb, var(--execution-active-accent) 55%, transparent); }
 .cc-execution.live .cc-requirement-plan-body { display: block; border-top: 0; }
 .cc-execution.live .cc-requirement-plan-main { padding: 1px 0 5px 1px; border: 0; }
 .cc-execution.live .cc-requirement-plan-main > section:first-child,
@@ -2400,13 +2651,18 @@ const displayedExecutionStageRows = computed(() => {
   background: color-mix(in srgb, var(--execution-active-accent) 5%, transparent);
 }
 .cc-execution.complete .cc-execution-stage-progress.agent-progress-row:not(.current) { color: var(--execution-text-muted); opacity: .82; }
+.cc-execution-stage-progress.agent-progress-row.child-agent-progress { margin-left: calc(var(--execution-indent, 24px) + 20px); }
 .cc-progress-text.agent-progress-row {
+  margin: 5px 0 7px;
+  padding: 6px 10px 6px 12px;
+  border-left: 1px solid color-mix(in srgb, var(--execution-active-accent) 35%, var(--execution-divider));
   color: var(--execution-text-secondary);
   font-family: var(--font-ui);
   font-size: 12px;
   font-weight: 500;
+  line-height: 1.55;
 }
-.cc-progress-segment.current .cc-progress-text.agent-progress-row { color: var(--execution-text-primary); }
+.cc-progress-segment.current .cc-progress-text.agent-progress-row { border-left-width: 2px; border-left-color: var(--execution-active-accent); color: var(--execution-text-primary); background: color-mix(in srgb, var(--execution-active-accent) 5%, transparent); }
 .cc-progress-segment.completed .cc-progress-text.agent-progress-row { color: var(--execution-text-muted); }
 .cc-progress-batch-group { border-left-color: var(--execution-divider); background: transparent; }
 .cc-progress-batch-group.current { border-left-color: var(--execution-active-accent); background: color-mix(in srgb, var(--execution-active-accent) 3%, transparent); }
@@ -2459,22 +2715,27 @@ const displayedExecutionStageRows = computed(() => {
   .cc-execution-duration { grid-column: 4; }
   .cc-execution-title span { width: 100%; margin-left: 0; }
   .cc-execution-meta { padding-left:30px; }
-  .cc-execution-timing { padding-left: 24px; }
   .cc-execution-search { margin-left:24px; }
   .cc-execution-stage-head { grid-template-columns: 20px minmax(0, 1fr) auto 20px; gap:6px; }
   .cc-execution-stage-copy { grid-template-columns:1fr; gap:1px; }
-  .cc-execution-stage-head em { display:none; }
-  .cc-execution-stage-head > span:nth-last-child(2) { grid-column:3; }
+  .cc-execution-stage-meta em { display:none; }
+  .cc-execution-stage-meta { grid-column:3; }
   .cc-execution-stage-chevron { grid-column:4; }
   .cc-execution-title code { max-width: 72vw; }
   .cc-requirement-plan-head { grid-template-columns: 28px minmax(0, 1fr) 20px; }
-  .cc-requirement-plan-status { grid-column: 2; width: fit-content; }
-  .cc-requirement-plan-chevron { grid-column: 3; grid-row: 1 / span 2; }
+  .cc-requirement-plan-title { display: grid; gap: 1px; }
+  .cc-requirement-plan-title small { white-space: normal; }
+  .cc-requirement-plan-chevron { grid-column: 3; grid-row: 1; }
   .cc-requirement-plan-body { grid-template-columns: 1fr; }
   .cc-requirement-plan-main { border-right: 0; border-bottom: 1px solid rgba(148, 163, 184, 0.12); }
   .cc-requirement-plan-steps li { grid-template-columns: 20px minmax(0, 1fr); }
   .cc-requirement-step-project { grid-column: 2; }
-  .cc-completion-files-head { grid-template-columns: 30px minmax(0, 1fr) auto; padding: 9px; }
+  .cc-completion-files-head { grid-template-columns: minmax(0, 1fr) auto; padding: 6px 9px; }
+  .cc-completion-files-toggle { grid-template-columns: 22px minmax(0, 1fr) 18px; gap: 6px; }
+  .cc-completion-files-icon { width: 22px; height: 22px; }
+  .cc-completion-files-copy { min-width: 0; flex-wrap: wrap; gap: 1px 6px; }
+  .cc-completion-files-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cc-completion-review { padding-inline: 7px; }
   .cc-completion-file-row { align-items: start; padding: 7px 9px; }
   .cc-completion-file-path { white-space: normal; overflow-wrap: anywhere; }
   .cc-live-execution-status { margin-bottom: 6px; }
@@ -2493,5 +2754,6 @@ const displayedExecutionStageRows = computed(() => {
   .cc-agent-file-change-row > small { grid-column: 3; }
   .cc-execution.live .cc-requirement-plan-steps li { grid-template-columns: 18px minmax(0, 1fr); }
   .cc-execution.live .cc-requirement-step-project { grid-column: 2; }
+  .cc-requirement-plan-current { margin-left: 35px; white-space: normal; }
 }
 </style>

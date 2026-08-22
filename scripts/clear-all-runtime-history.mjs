@@ -5,6 +5,7 @@ import Database from "better-sqlite3";
 
 const store = path.resolve(process.env.CCM_TASK_STORE_DIR || path.join(os.homedir(), ".cc-connect"));
 const sourceRoot = path.resolve(process.cwd());
+const dryRun = process.argv.includes("--dry-run");
 const keepFiles = new Set([
   "config.toml",
   "agent-provider-settings.json",
@@ -51,6 +52,7 @@ const runtimeDirs = [
   "provider-native-compact-execution-receipts", "provider-native-compact-session-capacity",
   "provider-native-microcompact-capability", "reliability", "run", "scheduler", "scratch",
   "semantic-decisions", "session-memory-extractor-sandbox", "sessions", "task-agent-continuation-soak",
+  "session-task-timelines",
   "task-agent-memory-context-snapshots", "temp", "test-agent-artifacts", "test-agent-handoffs",
   "test-agent-runs", "third-party-memory-snapshots", "timers", "tool-results", "typed-memory-conflicts",
   "typed-memory-model-judgments", "uploads", "web-sessions",
@@ -64,13 +66,16 @@ const runtimeFiles = [
   "conversation-turn-control.json", "conversation-turn-control.json.bak", "evidence-registry.json", "evidence-registry.json.bak",
   "feishu-channel-state.json", "feishu-inbound-receipts-v2.json", "feishu-inbound-receipts-v2.json.bak",
   "planning-sessions.json", "planning-sessions.json.bak", "operation-registry.json", "operation-registry.json.bak",
+  "project-chat-runs.json", "project-chat-runs.json.bak", "failure-records.json", "failure-records.json.bak",
+  "global-mission-supervisors.json", "global-mission-supervisors.json.bak", "agent-qa.json", "agent-qa.json.bak",
   "task-agent-sessions.json", "task-agent-sessions.json.bak", "task-governance-audit.jsonl",
   "task-transition-events.json", "task-transition-events.json.bak", "work-journal.jsonl",
   "knowledge-index-cache-v2.json", "dev-reports.json", "dev-reports.json.bak", "dev-weekly-reports.json",
   "dev-weekly-reports.json.bak", "auto-dev-notify.json", "auto-dev-notify.json.bak",
   "cc-connect.log", "ccm-server.log", "ccm-server.err.log", "ccm-server.out.log",
   "ccm-server-3080.log", "ccm-server-3080.err.log", "ccm-server-3080.out.log",
-  "ccm.db-shm", "ccm.db-wal", "music-agent-memory.json", "music-agent-memory.json.bak", "dir_history.json", "phase227-session-memory-fleet-desktop.png",
+  "ccm.db-shm", "ccm.db-wal", "music-agent-memory.json", "music-agent-memory.json.bak", "dir_history.json",
+  "tool-search-usage.json", "tool-search-usage.json.bak", "phase227-session-memory-fleet-desktop.png",
 ];
 
 function assertSafeTarget(target) {
@@ -86,9 +91,10 @@ function assertSafeTarget(target) {
 function removePath(target, report) {
   if (!fs.existsSync(target)) return;
   assertSafeTarget(target);
+  report.removed.push(path.relative(store, target));
+  if (dryRun) return;
   const stat = fs.lstatSync(target);
   fs.rmSync(target, { recursive: stat.isDirectory(), force: true });
-  report.removed.push(path.relative(store, target));
 }
 
 function clearDatabase(report) {
@@ -98,6 +104,18 @@ function clearDatabase(report) {
   try {
     db.pragma("foreign_keys = OFF");
     const tables = db.prepare("select name from sqlite_master where type='table' and name not like 'sqlite_%'").all().map((x) => x.name);
+    const logicalTables = tables.filter((table) => !/^conversation_search_fts_v3_(config|content|data|docsize|idx)$/.test(table));
+    for (const table of logicalTables) {
+      const quoted = String(table).replaceAll('"', '""');
+      const row = table === "app_meta"
+        ? db.prepare(`select count(*) as count from "${quoted}" where key <> 'schema_version'`).get()
+        : db.prepare(`select count(*) as count from "${quoted}"`).get();
+      const count = Number(row?.count || 0);
+      if (count > 0) report.databaseTableRows.push({ table, count });
+      report.databaseRowsRemoved += count;
+    }
+    report.dbTables = logicalTables;
+    if (dryRun) return;
     const tx = db.transaction(() => {
       for (const table of tables) {
         // SQLite FTS shadow tables are maintained by the virtual table and cannot be deleted directly.
@@ -115,13 +133,12 @@ function clearDatabase(report) {
     tx();
     db.pragma("wal_checkpoint(TRUNCATE)");
     db.exec("vacuum");
-    report.dbTables = tables;
   } finally {
     db.close();
   }
 }
 
-const report = { store, protected: [sourceRoot, ...Array.from(keepFiles)], removed: [], dbTables: [] };
+const report = { store, protected: [sourceRoot, ...Array.from(keepFiles)], removed: [], dbTables: [], databaseTableRows: [], databaseRowsRemoved: 0 };
 
 for (const name of runtimeDirs) removePath(path.join(store, name), report);
 for (const name of runtimeFiles) {
@@ -142,10 +159,15 @@ for (const entry of fs.readdirSync(store, { withFileTypes: true })) {
 
 console.log(JSON.stringify({
   schema: "ccm-runtime-history-cleanup-v1",
+  dryRun,
   store,
+  filesChanged: report.removed.length,
+  removedKeys: report.databaseRowsRemoved,
   removedCount: report.removed.length,
   removed: report.removed,
   databaseTablesCleared: report.dbTables.length,
+  databaseRowsRemoved: report.databaseRowsRemoved,
+  databaseTableRows: report.databaseTableRows,
   protectedSourceRoot: sourceRoot,
   protectedFiles: Array.from(keepFiles),
   contentStored: false,

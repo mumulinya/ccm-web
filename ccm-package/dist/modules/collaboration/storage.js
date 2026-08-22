@@ -69,6 +69,7 @@ const provider_neutral_context_cache_1 = require("../../system/provider-neutral-
 const runtime_events_1 = require("../../system/runtime-events");
 const session_title_1 = require("../../system/session-title");
 const group_orchestrator_1 = require("./group-orchestrator");
+const session_task_timeline_1 = require("../../tasks/session-task-timeline");
 const group_post_turn_summary_1 = require("./group-post-turn-summary");
 const group_session_lifecycle_head_1 = require("./group-session-lifecycle-head");
 // === 群聊管理 ===
@@ -716,6 +717,7 @@ function appendGroupMessage(groupId, msg) {
     };
     messages.push(next);
     saveGroupMessages(groupId, messages, sessionId);
+    (0, session_task_timeline_1.recordSessionTimelineMessage)({ exactSessionId: sessionId, scope: "group", scopeId: groupId, role: String(next.role || "user") === "assistant" ? "assistant" : "user", messageId: messageId || undefined, taskId: next?.task_id || next?.taskId, timestamp: next?.timestamp || next?.created_at });
     (0, reliability_ledger_1.appendTraceEvent)(traceId, { id: `group-message:${groupId}:${messageId || messages.length}`, type: "group.message_persisted", status: "ok", group_id: groupId, task_id: msg?.task_id || "", agent: msg?.agent || msg?.role || "", message: String(msg?.content || "").slice(0, 500), data: { message_id: messageId } });
     for (const hook of getGroupMessageAppendHooks()) {
         try {

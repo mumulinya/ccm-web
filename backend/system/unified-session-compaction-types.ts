@@ -31,6 +31,14 @@ export type UnifiedCompactionSnapshot = {
   threshold?: number;
   boundaryGeneration?: number;
   compactionFloorIndex?: number;
+  taskTimeline?: {
+    currentTaskId?: string;
+    span?: any;
+    latestCheckpointSequence?: number;
+    priorTaskSummaries?: any[];
+    taskContextRevision?: number;
+    taskContextChecksum?: string;
+  };
 };
 
 export type UnifiedCompactionFence = {

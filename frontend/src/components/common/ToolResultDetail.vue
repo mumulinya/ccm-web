@@ -39,6 +39,7 @@ const technicalAvailable = computed(() => !!(
   || result.value?.searchExecution
   || result.value?.freshness
   || result.value?.authoritativeRevision
+  || result.value?.commandExecution
   || props.tokenCount
 ))
 const technicalState = computed(() => {
@@ -216,10 +217,11 @@ const copyFile = async file => {
         <dl v-if="display.arguments?.length">
           <template v-for="argument in display.arguments" :key="argument.label"><dt>{{ argument.label }}</dt><dd>{{ displayValue(argument.value) }}</dd></template>
         </dl>
-        <dl v-if="result.searchExecution || freshnessLabel || result.authoritativeRevision || tokenCount">
+        <dl v-if="result.searchExecution || freshnessLabel || result.authoritativeRevision || result.commandExecution || tokenCount">
           <template v-if="result.searchExecution"><dt>搜索方式</dt><dd>{{ result.searchExecution.engine === 'bundled_rg' ? 'CCM 内置搜索' : result.searchExecution.engine === 'system_rg' ? '系统搜索' : '兼容搜索' }}</dd><dt>结果状态</dt><dd>{{ technicalState }}</dd></template>
           <template v-if="freshnessLabel"><dt>数据状态</dt><dd>{{ freshnessLabel }}</dd></template>
           <template v-if="result.authoritativeRevision"><dt>权威版本</dt><dd>{{ result.authoritativeRevision }}</dd></template>
+          <template v-if="result.commandExecution"><dt>执行状态</dt><dd>{{ result.commandExecution.status || 'unknown' }}</dd><dt v-if="Number.isFinite(result.commandExecution.exitCode)">退出码</dt><dd v-if="Number.isFinite(result.commandExecution.exitCode)">{{ result.commandExecution.exitCode }}</dd><dt v-if="Number.isFinite(result.commandExecution.durationMs)">耗时</dt><dd v-if="Number.isFinite(result.commandExecution.durationMs)">{{ result.commandExecution.durationMs }} ms</dd></template>
           <template v-if="tokenCount"><dt>结果 Token</dt><dd>{{ tokenCount }}</dd></template>
         </dl>
       </div>

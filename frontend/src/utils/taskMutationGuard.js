@@ -27,17 +27,33 @@ export const taskMutationGuardFromSource = (source = {}) => {
   const generation = firstNumber(source, ['generation', 'workflow_generation', 'workflowGeneration', 'task_generation', 'taskGeneration'])
   const binding = taskBinding(source)
   const bindingChecksum = source.binding_checksum || source.bindingChecksum || binding.binding_checksum || binding.bindingChecksum || ''
+  const taskContextRevision = firstNumber(source, ['task_context_revision', 'taskContextRevision'])
+  const taskContextChecksum = source.task_context_checksum || source.taskContextChecksum || source.task_context?.checksum || ''
+  const timelineSpanChecksum = source.timeline_span_checksum || source.timelineSpanChecksum || source.task_context?.timelineSpans?.find?.(span => span?.taskId === (source.taskId || source.task_id || source.id))?.checksum || ''
   return {
     ...(revision !== undefined ? { expected_revision: Math.max(0, revision) } : {}),
     ...(generation !== undefined ? { generation: Math.max(1, generation) } : {}),
     ...(bindingChecksum ? { binding_checksum: String(bindingChecksum) } : {}),
+    ...(taskContextRevision !== undefined ? { task_context_revision: Math.max(0, taskContextRevision) } : {}),
+    ...(taskContextChecksum ? { task_context_checksum: String(taskContextChecksum) } : {}),
+    ...(timelineSpanChecksum ? { timeline_span_checksum: String(timelineSpanChecksum) } : {}),
   }
 }
 
 /** Fill missing guard fields from the authoritative task projection. */
 export const resolveTaskMutationGuard = async (taskId, source = {}, request = fetch) => {
   const local = taskMutationGuardFromSource(source)
-  if (local.expected_revision !== undefined && local.generation !== undefined) return local
+  // Replay actions intentionally contain only a small safe projection. A
+  // revision/generation pair is not enough to resume a task: the backend also
+  // requires the normalized task-context and timeline-span checksums. Fetch the
+  // authoritative projection unless the complete recovery fence is present.
+  if (
+    local.expected_revision !== undefined
+    && local.generation !== undefined
+    && local.task_context_revision !== undefined
+    && local.task_context_checksum
+    && local.timeline_span_checksum
+  ) return local
   if (!taskId || typeof request !== 'function') return local
   try {
     const response = await request(`/api/tasks/${encodeURIComponent(taskId)}/conversation-links`)
@@ -48,6 +64,8 @@ export const resolveTaskMutationGuard = async (taskId, source = {}, request = fe
       ...current,
       ...local,
       ...(local.binding_checksum || current.binding_checksum ? { binding_checksum: local.binding_checksum || current.binding_checksum } : {}),
+      ...(local.task_context_checksum || current.task_context_checksum ? { task_context_checksum: local.task_context_checksum || current.task_context_checksum } : {}),
+      ...(local.timeline_span_checksum || current.timeline_span_checksum ? { timeline_span_checksum: local.timeline_span_checksum || current.timeline_span_checksum } : {}),
     }
   } catch {
     return local

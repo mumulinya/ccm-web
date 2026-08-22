@@ -175,7 +175,7 @@ const RERANK_SYSTEM = [
 ].join("\n");
 
 async function callJudgmentModel(config: any, system: string, user: string) {
-  const engine = require("./group-compaction-engine");
+  const engine = require("../../system/unified-session-compaction-model");
   const text = await engine.callCompactionModel(config, system, user, MEMORY_MODEL_JUDGMENT_MAX_OUTPUT_TOKENS);
   if (!text) return null;
   const parsed = engine.extractJsonObject(typeof text === "string" ? text : JSON.stringify(text));

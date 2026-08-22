@@ -77,6 +77,7 @@ const main_agent_tool_runtime_1 = require("../../tools/main-agent-tool-runtime")
 const native_query_loop_1 = require("../../agents/native-query-loop");
 const cc_tool_result_limits_1 = require("../../tools/cc-tool-result-limits");
 const runtime_events_1 = require("../../system/runtime-events");
+const task_conversation_projection_1 = require("../../system/task-conversation-projection");
 const session_execution_ledger_1 = require("../../system/session-execution-ledger");
 const reliability_ledger_1 = require("../../system/reliability-ledger");
 const project_test_agent_gate_1 = require("./project-test-agent-gate");
@@ -231,6 +232,8 @@ function reconcileInterruptedProjectMainTasks() {
             recovery: interruptionReceipt.recovery,
             interruption_receipt: interruptionReceipt,
             recovery_decision: recoveryDecision,
+            recovery_preflight: null,
+            recovery_transaction: null,
             project_main_execution: {
                 ...(task.project_main_execution || {}),
                 schema: "ccm-project-main-execution-v1",
@@ -240,6 +243,16 @@ function reconcileInterruptedProjectMainTasks() {
                 recovery_required: true,
             },
         }) || task;
+        (0, execution_kernel_1.transitionExecution)(String(task.id), "cancelled", detail, {
+            name: "execution.service_restart_interrupted",
+            status: "warning",
+            cancellation: {
+                reason: "service_restart",
+                processTerminationProven: true,
+                interruptedAt: now,
+                contentStored: false,
+            },
+        });
         (0, logs_1.appendTaskTimelineEvent)(task.id, {
             type: "project_main_restart_interrupted",
             title: "项目主 Agent 执行已安全暂停",
@@ -266,6 +279,23 @@ function cleanText(value, max = 1200) {
 function cleanList(value, max = 16, itemMax = 800) {
     return [...new Set((Array.isArray(value) ? value : []).map(item => cleanText(item, itemMax)).filter(Boolean))].slice(0, max);
 }
+function concisePlanLabel(value, fallback, index) {
+    const source = cleanText(value || fallback, 600)
+        .replace(/^(?:这是|本次是)?(?:一项)?正式开发任务[，,:：。\s]*/i, "")
+        .replace(/^请(?:立即)?派发(?:当前项目)?(?:子\s*)?Agent[，,:：。\s]*/i, "")
+        .replace(/\s+/g, " ")
+        .trim();
+    const firstAction = source.split(/(?<=[。！？!?；;])\s*/u).find(Boolean) || source;
+    return cleanText(firstAction, 120) || `工作项 ${index + 1}`;
+}
+function meaningfulPlanSummary(planValue, userMessage, workflowReason) {
+    return cleanText(planValue?.summary
+        || planValue?.goal
+        || planValue?.context
+        || planValue?.approach
+        || userMessage
+        || workflowReason, 1600);
+}
 function projectWorkDir(project) {
     const config = (0, db_1.getConfigs)().find(item => item.name === project);
     if (!config)
@@ -275,20 +305,23 @@ function projectWorkDir(project) {
 }
 function normalizedWorkItems(value, fallbackGoal) {
     const rows = Array.isArray(value) ? value.slice(0, 12) : [];
-    const normalized = rows.map((row, index) => ({
-        id: cleanText(row?.id || row?.key || `work_${index + 1}`, 80).replace(/[^a-zA-Z0-9._-]+/g, "-") || `work_${index + 1}`,
-        title: cleanText(row?.title || `工作项 ${index + 1}`, 160),
-        objective: cleanText(row?.objective || row?.task || row?.description || fallbackGoal, 1800),
-        acceptanceCriteria: cleanList(row?.acceptanceCriteria || row?.acceptance_criteria, 10, 600),
-        dependsOn: cleanList(row?.dependsOn || row?.depends_on, 10, 80),
-        allowedFiles: cleanList(row?.allowedFiles || row?.allowed_files || row?.files || row?.filePaths || row?.file_paths, 30, 500),
-        forbiddenFiles: cleanList(row?.forbiddenFiles || row?.forbidden_files, 30, 500),
-        artifacts: cleanList(row?.artifacts || row?.outputs, 20, 300),
-        sourceEvidenceIds: cleanList(row?.sourceEvidenceIds || row?.source_evidence_ids, 30, 180),
-        allowedTools: cleanList(row?.allowedTools || row?.allowed_tools, 30, 120),
-        status: "pending",
-        attempts: 0,
-    }));
+    const normalized = rows.map((row, index) => {
+        const objective = cleanText(row?.objective || row?.task || row?.description || fallbackGoal, 1800);
+        return {
+            id: cleanText(row?.id || row?.key || `work_${index + 1}`, 80).replace(/[^a-zA-Z0-9._-]+/g, "-") || `work_${index + 1}`,
+            title: concisePlanLabel(row?.title || objective, fallbackGoal, index),
+            objective,
+            acceptanceCriteria: cleanList(row?.acceptanceCriteria || row?.acceptance_criteria, 10, 600),
+            dependsOn: cleanList(row?.dependsOn || row?.depends_on, 10, 80),
+            allowedFiles: cleanList(row?.allowedFiles || row?.allowed_files || row?.files || row?.filePaths || row?.file_paths, 30, 500),
+            forbiddenFiles: cleanList(row?.forbiddenFiles || row?.forbidden_files, 30, 500),
+            artifacts: cleanList(row?.artifacts || row?.outputs, 20, 300),
+            sourceEvidenceIds: cleanList(row?.sourceEvidenceIds || row?.source_evidence_ids, 30, 180),
+            allowedTools: cleanList(row?.allowedTools || row?.allowed_tools, 30, 120),
+            status: "pending",
+            attempts: 0,
+        };
+    });
     if (!normalized.length) {
         normalized.push({ id: "work_1", title: cleanText(fallbackGoal, 100) || "完成项目任务", objective: fallbackGoal, acceptanceCriteria: [], dependsOn: [], allowedFiles: [], forbiddenFiles: [], artifacts: [], sourceEvidenceIds: [], allowedTools: [], status: "pending", attempts: 0 });
     }
@@ -296,6 +329,48 @@ function normalizedWorkItems(value, fallbackGoal) {
     for (const item of normalized)
         item.dependsOn = item.dependsOn.filter(id => id !== item.id && ids.has(id));
     return normalized;
+}
+function directDispatchAcceptanceEvidence(input) {
+    const provided = Array.isArray(input.value) ? input.value : [];
+    if (provided.length)
+        return (0, test_agent_review_policy_1.normalizeTestAgentAcceptanceEvidencePlan)(provided);
+    const workItemCriteria = cleanList(input.workItems.flatMap(item => item.acceptanceCriteria || []), 20, 800);
+    const criteria = workItemCriteria.length
+        ? workItemCriteria
+        : [cleanText(input.userMessage, 800) || "The requested project change is present and verifiable."];
+    const files = cleanList(input.workItems.flatMap(item => item.allowedFiles || []), 30, 500);
+    const verificationModes = cleanList(input.decision.verificationModes, 10, 40).map(item => item.toLowerCase());
+    const commandEvidence = verificationModes.some(item => ["command", "test", "tests", "build", "lint", "typecheck"].includes(item))
+        || /(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?[\w:.-]+|(?:pytest|cargo\s+test|go\s+test|gradle\w*\s+test)/i.test(input.userMessage);
+    const evidenceTypes = [
+        ...(input.decision.requiresCodeChanges ? ["code_diff"] : []),
+        ...(commandEvidence ? ["command"] : []),
+    ];
+    if (!evidenceTypes.length)
+        evidenceTypes.push("artifact");
+    const target = files.length ? files.join(", ").slice(0, 300) : input.project;
+    return (0, test_agent_review_policy_1.normalizeTestAgentAcceptanceEvidencePlan)(criteria.map(criterion => ({
+        criterion,
+        observableOutcome: criterion,
+        evidenceTypes,
+        target,
+    })));
+}
+function directDispatchVerificationProfile(value, decision) {
+    try {
+        return (0, test_agent_review_policy_1.normalizeTestAgentVerificationProfile)(value);
+    }
+    catch {
+        const modes = cleanList(decision.verificationModes, 10, 40).map(item => item.toLowerCase());
+        const interactive = modes.some(item => ["browser", "visual", "http", "integration", "e2e"].includes(item));
+        const tier = decision.riskLevel === "high" ? "critical" : interactive ? "interactive" : decision.requiresCodeChanges ? "standard" : "lightweight";
+        const changeClass = decision.riskLevel === "high" ? "critical" : interactive ? "interactive" : decision.requiresCodeChanges ? "code" : "documentation";
+        return (0, test_agent_review_policy_1.normalizeTestAgentVerificationProfile)({
+            tier,
+            changeClass,
+            reason: decision.reason || "Derived from the accepted workflow decision and verification requirements.",
+        });
+    }
 }
 function projectRequirementPlanProjection(plan, input) {
     const updatedAt = input.updatedAt || new Date().toISOString();
@@ -328,6 +403,7 @@ function projectRequirementPlanProjection(plan, input) {
         ...legacy,
         context: plan.summary || plan.title,
         approach: plan.summary || plan.title,
+        sourceManifestChecksum: plan.sourceEvidence?.manifestChecksum || "",
         files: (plan.sourceEvidence?.files || []).map(file => ({
             project: plan.project,
             path: String(file.path || "").replace(/\\/g, "/"),
@@ -336,7 +412,7 @@ function projectRequirementPlanProjection(plan, input) {
         })),
         verification: (plan.acceptanceCriteria || []).map((expected) => ({ expected, acceptanceCriteria: [expected] })),
     }, { planId: input.planId, revision: input.revision, now: updatedAt });
-    return canonical ? { ...legacy, ...canonical, sourceManifestChecksum: plan.sourceEvidence?.manifestChecksum || "", planId: input.planId, status: input.status || "ready", createdAt, updatedAt } : legacy;
+    return canonical ? { ...legacy, ...canonical, planId: input.planId, status: input.status || "ready", createdAt, updatedAt } : legacy;
 }
 function projectMainModelCallOptions(config, messages, telemetry) {
     if (!telemetry?.project || !telemetry?.projectSessionId)
@@ -1152,12 +1228,28 @@ async function runProjectMainAgentFirstTurn(input) {
             })),
         }),
     });
+    if (!sourceHydration && (turnDecision.responseKind === "dispatch" || workflowDecision.requiresCodeChanges === true)) {
+        sourceHydration = await hydrateProjectMainSource({
+            project,
+            projectSessionId,
+            userMessage: input.userMessage,
+            conversationContext: exactContext,
+            purpose: "planning",
+            requiresCodeChanges: true,
+        });
+    }
     const planValue = parsed?.plan && typeof parsed.plan === "object" ? parsed.plan : null;
     let plan = null;
     if (["plan", "dispatch"].includes(turnDecision.responseKind) || workflowDecision.actionRequired) {
-        const acceptanceEvidencePlan = (0, test_agent_review_policy_1.normalizeTestAgentAcceptanceEvidencePlan)(planValue?.acceptanceEvidencePlan || planValue?.acceptance_evidence_plan);
+        const workItems = normalizedWorkItems(planValue?.workItems || planValue?.work_items || (turnDecision.responseKind === "dispatch" ? parsed?.targets : []), input.userMessage);
+        const acceptanceEvidencePlan = directDispatchAcceptanceEvidence({
+            value: planValue?.acceptanceEvidencePlan || planValue?.acceptance_evidence_plan,
+            userMessage: input.userMessage,
+            project,
+            workItems,
+            decision: workflowDecision,
+        });
         const acceptanceCriteria = acceptanceEvidencePlan.map(item => item.criterion);
-        const workItems = normalizedWorkItems(planValue?.workItems || planValue?.work_items, input.userMessage);
         for (const item of workItems)
             if (!item.acceptanceCriteria.length)
                 item.acceptanceCriteria = acceptanceCriteria.slice();
@@ -1165,7 +1257,7 @@ async function runProjectMainAgentFirstTurn(input) {
         plan = {
             schema: "ccm-project-main-plan-v1",
             title: cleanText(planValue?.title || input.userMessage, 120) || "项目开发任务",
-            summary: cleanText(planValue?.summary || workflowDecision.reason, 1600),
+            summary: meaningfulPlanSummary(planValue, input.userMessage, workflowDecision.reason),
             project,
             projectSessionId,
             acceptanceMode: independentTestAgentEnabled ? "test_agent" : "main_agent_self_verification",
@@ -1181,7 +1273,7 @@ async function runProjectMainAgentFirstTurn(input) {
                 }),
             acceptanceCriteria,
             acceptanceEvidencePlan,
-            verificationProfile: (0, test_agent_review_policy_1.normalizeTestAgentVerificationProfile)(planValue?.verificationProfile || planValue?.verification_profile),
+            verificationProfile: directDispatchVerificationProfile(planValue?.verificationProfile || planValue?.verification_profile, workflowDecision),
             permissionBoundaries: cleanList(planValue?.permissionBoundaries || planValue?.permission_boundaries, 12, 600),
             sourceEvidence: sourceHydration ? projectSourceEvidenceSummary(sourceHydration.evidence) : { manifestChecksum: "", manifestFiles: 0, selectedPaths: [], rejectedPaths: [], totalChars: 0, truncated: false },
             runtimeEvidence: runtimeHydration ? projectRuntimeEvidenceSummary(runtimeHydration) : { manifestChecksum: "", profiles: 0, toolCalls: [] },
@@ -2170,6 +2262,17 @@ async function executeProjectMainTask(input) {
     const project = (0, project_validation_1.validateProjectName)(input.task.target_project);
     const workDir = projectWorkDir(project);
     const currentSourceManifest = (0, project_main_agent_source_1.buildProjectSourceManifest)(project, workDir);
+    if (!String(input.plan.sourceEvidence?.manifestChecksum || "").trim()) {
+        input.plan.sourceEvidence = {
+            ...(input.plan.sourceEvidence || {}),
+            manifestChecksum: currentSourceManifest.checksum,
+            manifestFiles: currentSourceManifest.files.length,
+            selectedPaths: Array.isArray(input.plan.sourceEvidence?.selectedPaths) ? input.plan.sourceEvidence.selectedPaths : [],
+            rejectedPaths: Array.isArray(input.plan.sourceEvidence?.rejectedPaths) ? input.plan.sourceEvidence.rejectedPaths : [],
+            totalChars: Math.max(0, Number(input.plan.sourceEvidence?.totalChars || 0)),
+            truncated: input.plan.sourceEvidence?.truncated === true || currentSourceManifest.truncated === true,
+        };
+    }
     if (input.plan.sourceEvidence?.manifestChecksum && currentSourceManifest.checksum !== input.plan.sourceEvidence.manifestChecksum) {
         const reason = "项目源码清单在计划确认后发生变化，需要重新核对计划后再派发";
         const blockedTask = (0, collaboration_task_service_1.updateTask)(taskId, { status: "blocked", acceptance_state: "plan_source_drift", status_detail: reason, source_manifest_drift: { planned: input.plan.sourceEvidence.manifestChecksum, current: currentSourceManifest.checksum, checked_at: new Date().toISOString(), contentStored: false } }) || input.task;
@@ -3080,12 +3183,20 @@ function projectMainTaskPublic(task) {
     if (!task)
         return null;
     const runtimeStatus = (0, task_user_runtime_1.buildTaskUserRuntimeStatus)(task, { maxReviewRounds: rework_policy_1.AUTO_REWORK_MAX_ROUNDS });
+    const sessionBindings = Array.isArray(task?.task_context?.sessionBindings) ? task.task_context.sessionBindings : [];
+    const activeSessionBinding = [...sessionBindings].reverse().find((item) => item?.status === "active" && item?.role !== "source");
+    const activeExecutionSessionId = String(task.active_execution_session_id || task.execution_session_id || task.recovery_user_session?.activeSessionId || activeSessionBinding?.exactSessionId || task.project_session_id || "");
     return {
         id: task.id,
         task_id: task.id,
         trace_id: task.trace_id || "",
         project: task.target_project,
         project_session_id: task.project_session_id || "",
+        source_session_id: task.project_session_id || task.exact_session_id || "",
+        active_execution_session_id: activeExecutionSessionId,
+        revision: Math.max(0, Number(task.revision || 0)),
+        execution_attempt: Math.max(0, Number(task.execution_attempt || task.attempt || task.recovery_preflight?.nextAttempt || 0)),
+        conversation_content: (0, task_conversation_projection_1.taskConversationProjectionContent)(task),
         project_main_run_id: task.project_main_run_id || "",
         orchestration_scope: "project_session",
         status: task.status,
@@ -3214,9 +3325,47 @@ function projectMainTaskPublic(task) {
 }
 function runProjectMainAgentContractSelfTest() {
     const items = normalizedWorkItems([{ id: "a", title: "A", objective: "做 A", dependsOn: [] }, { id: "b", title: "B", objective: "做 B", dependsOn: ["a", "outside"] }], "fallback");
+    const decision = (0, workflow_decision_1.normalizeWorkflowDecision)({
+        schema: "ccm-model-workflow-decision-v2",
+        reason: "A bounded project file change requires verification.",
+        confidence: 0.98,
+        actionRequired: true,
+        requiresCodeChanges: true,
+        needsEpicDecomposition: false,
+        continuationKind: "new_task",
+        readAction: "none",
+        targetRefs: ["demo"],
+        impactScope: ["E2E_PROOF.md"],
+        structuredClarificationQuestions: [],
+        selectedSkills: [],
+        intentKind: "implementation",
+        riskLevel: "write",
+        requiresUserConfirmation: false,
+        directReplyReady: false,
+        directReply: "",
+        verificationModes: ["command"],
+    });
+    const derivedEvidence = directDispatchAcceptanceEvidence({
+        value: null,
+        userMessage: "Create E2E_PROOF.md and run npm test.",
+        project: "demo",
+        workItems: normalizedWorkItems([{ task: "Create E2E_PROOF.md", files: ["E2E_PROOF.md"] }], "fallback"),
+        decision,
+    });
+    const derivedProfile = directDispatchVerificationProfile(null, decision);
     return {
-        success: items.length === 2 && items[1].dependsOn.join(",") === "a",
-        checks: { serializablePlan: items.length === 2, stripsForeignDependency: items[1].dependsOn.join(",") === "a" },
+        success: items.length === 2
+            && items[1].dependsOn.join(",") === "a"
+            && derivedEvidence.length === 1
+            && derivedEvidence[0].evidenceTypes.includes("command")
+            && derivedProfile.tier === "standard",
+        checks: {
+            serializablePlan: items.length === 2,
+            stripsForeignDependency: items[1].dependsOn.join(",") === "a",
+            directDispatchEvidenceFallback: derivedEvidence.length === 1 && derivedEvidence[0].target === "E2E_PROOF.md",
+            directDispatchCommandEvidence: derivedEvidence[0].evidenceTypes.includes("command"),
+            directDispatchVerificationProfileFallback: derivedProfile.tier === "standard",
+        },
     };
 }
 //# sourceMappingURL=project-main-agent.js.map

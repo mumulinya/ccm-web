@@ -5,11 +5,15 @@ import path from 'node:path'
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ccm-agent-communication-v2-'))
 process.env.CCM_TASK_STORE_DIR = root
+process.env.CCM_EVIDENCE_STORE_DIR = root
+process.env.CCM_USER_VISIBLE_AGENT_EVENT_DIR = path.join(root, 'agent-execution-events')
+process.env.CCM_INTERNAL_MCP_AUDIT_FILE = path.join(root, 'internal-mcp-invocations.jsonl')
 
 const communication = await import('../ccm-package/dist/system/agent-communication-v2.js')
 const taskStore = await import('../ccm-package/dist/core/task-store.js')
 const parallelDispatch = await import('../ccm-package/dist/modules/collaboration/collaboration-agent-parallel-dispatch.js')
 const communicationMcp = await import('../ccm-package/dist/integrations/agent-communication-mcp.js')
+const internalMcpRuntime = await import('../ccm-package/dist/integrations/internal-mcp-runtime.js')
 
 function identity(suffix, receiver = 'project-a') {
   return {
@@ -26,6 +30,13 @@ function identity(suffix, receiver = 'project-a') {
 }
 
 try {
+  const isolatedRuntimeConfig = internalMcpRuntime.buildInternalMcpServerConfig('agent-communication-mcp.js', {
+    bindingKind: 'task', taskId: 'task-store-binding', groupId: '', project: 'project-a', projectSessionId: 'session-store-binding',
+    role: 'project-child-agent', workDir: root, baseWorkDir: root,
+  })
+  assert.equal(isolatedRuntimeConfig.env.CCM_TASK_STORE_DIR, path.resolve(root), '隔离HOME中的内部MCP必须读取主服务任务库')
+  assert.equal(isolatedRuntimeConfig.env.CCM_EVIDENCE_STORE_DIR, path.resolve(root), '隔离HOME中的内部MCP必须写入主服务证据库')
+  assert.equal(isolatedRuntimeConfig.env.CCM_USER_VISIBLE_AGENT_EVENT_DIR, path.join(root, 'agent-execution-events'), '用户可见事件目录必须使用主服务绝对路径')
   assert.equal(communicationMcp.runAgentCommunicationMcpBindingSelfTest().pass, true, '旧attempt/lease签名上下文必须被拒绝')
   const parallelGroupId = parallelDispatch.createAgentParallelGroupId({ groupId: 'group-a', taskId: 'task-parallel', targets: ['project-a', 'project-b'] })
   assert.match(parallelGroupId, /^agent-batch:/)

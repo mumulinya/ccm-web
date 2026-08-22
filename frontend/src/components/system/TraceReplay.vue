@@ -9,11 +9,13 @@ import TaskReplayEvidence from '../replay/TaskReplayEvidence.vue'
 import TaskReplayPlanBoard from '../replay/TaskReplayPlanBoard.vue'
 import TaskReplayTimeline from '../replay/TaskReplayTimeline.vue'
 import TaskReplayInsights from '../replay/TaskReplayInsights.vue'
+import AgentExecutionTranscript from '../common/AgentExecutionTranscript.vue'
 import WorkspacePageShell from '../common/WorkspacePageShell.vue'
 import WorkspaceSectionNav from '../common/WorkspaceSectionNav.vue'
 import { subscribeRuntimeEvents } from '../../utils/runtimeEventBus.js'
 import { compactTaskReplayEvents, replayCompactionStats } from '../../utils/taskReplayEventCompaction.js'
 import { isReplayDiagnosticEvent, replayEventSummary, replayEventTitle, replayStageLabel } from '../../utils/taskReplayPresentation.js'
+import { resolveTaskMutationGuard } from '../../utils/taskMutationGuard.js'
 
 const props = defineProps({ navigateTo: { type: Object, default: null } })
 const emit = defineEmits(['navigate'])
@@ -36,26 +38,34 @@ const focusedEvidenceId = ref('')
 const pendingReplayTarget = ref(null)
 const issuePosition = ref(-1)
 const includeSystemEvents = ref(false)
-const replayView = ref(sessionStorage.getItem('ccm:replay-layout:v1:view') || 'summary')
+const replayView = ref('summary')
 const currentReplaySection = ref('result')
 const replayViews = [{ id: 'summary', label: '摘要' }, { id: 'advanced', label: '完整记录' }]
-const replaySections = [
-  { id: 'result', label: '结果与下一步' },
-  { id: 'integrity', label: '完整度与因果链' },
-  { id: 'acceptance', label: '验收标准' },
-  { id: 'attempts', label: '尝试对比' },
-  { id: 'timeline', label: '完整时间线' },
-]
+const replaySections = computed(() => replayView.value === 'advanced'
+  ? [
+      { id: 'integrity', label: '完整度与因果链' },
+      { id: 'acceptance', label: '验收证据' },
+      { id: 'plan', label: '计划与恢复' },
+      { id: 'timeline', label: '完整时间线' },
+      { id: 'technical', label: '技术详情' },
+    ]
+  : [
+      { id: 'result', label: '任务结果' },
+      { id: 'execution', label: '执行记录' },
+    ])
 const selectReplaySection = id => {
   currentReplaySection.value = id
   requestAnimationFrame(() => document.getElementById(`replay-section-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
 }
-watch(replayView, value => sessionStorage.setItem('ccm:replay-layout:v1:view', value))
+watch(replayView, value => {
+  currentReplaySection.value = value === 'advanced' ? 'integrity' : 'result'
+})
 const timelineMode = ref('key')
 const chapterFilter = ref('all')
 const codeChangeDrawer = ref({ visible: false, title: '', subtitle: '', project: '', files: [] })
 const freshness = ref(null)
 const freshnessLoading = ref(false)
+const recoveryProjectionNotice = ref(null)
 const indexPage = ref(1)
 const indexFilters = reactive({ project: '', groupId: '', status: '', range: 'all' })
 const loadingOlder = ref(false)
@@ -87,6 +97,115 @@ const indexFacets = computed(() => index.value?.facets || { projects: [], groups
 const eventPage = computed(() => replay.value?.event_page || { offset: 0, returned: allEvents.value.length, total: allEvents.value.length, has_previous: false, has_more: false })
 const allEvents = computed(() => replay.value?.events || [])
 const presentation = computed(() => replay.value?.presentation || null)
+const replayExecutionEvents = ref([])
+const replayExecutionAttempts = ref([])
+const acceptedDeliveryFileCount = computed(() => {
+  const keys = new Set()
+  let fallback = 0
+  for (const item of replay.value?.evidence || []) {
+    if (item?.type !== 'code_changes') continue
+    const files = Array.isArray(item.files) ? item.files : []
+    if (!files.length) {
+      fallback += Math.max(0, Number(item.file_count || 0))
+      continue
+    }
+    for (const file of files) {
+      const path = String(file?.path || file?.file || '').trim()
+      if (path) keys.add(`${item.project || ''}:${path}`)
+    }
+  }
+  return keys.size + fallback
+})
+const replayAttemptCount = computed(() => replayExecutionAttempts.value.length)
+const replayInterruptedAttemptCount = computed(() => replayExecutionAttempts.value.filter(item => ['failed', 'blocked', 'interrupted', 'cancelled'].includes(String(item?.status || ''))).length)
+const replayExecutionLoading = ref(false)
+const replayExecutionError = ref('')
+const replayExecutionLoadedKey = ref('')
+let replayExecutionRequest = 0
+const replayExecutionIdentity = computed(() => {
+  const links = Array.isArray(replay.value?.navigation) ? replay.value.navigation : []
+  const usable = links.filter(link => link?.scope && link?.scopeId && link?.exactSessionId && link.available !== false)
+  const link = usable.find(item => item.relation === 'target') || usable.find(item => item.relation === 'source') || usable[0]
+  if (!link) return null
+  return {
+    scope: String(link.scope || ''),
+    scopeId: String(link.scopeId || ''),
+    exactSessionId: String(link.exactSessionId || ''),
+  }
+})
+const replayExecutionMessages = computed(() => {
+  const identity = replayExecutionIdentity.value || {}
+  const startedAt = replay.value?.started_at || new Date(0).toISOString()
+  const endedAt = replay.value?.finished_at || new Date().toISOString()
+  return [
+    {
+      id: `task-replay-user:${taskId.value}`,
+      role: 'user',
+      content: replay.value?.goal || replay.value?.title || '执行任务',
+      timestamp: startedAt,
+    },
+    {
+      id: `task-replay-assistant:${taskId.value}`,
+      role: 'assistant',
+      taskId: taskId.value,
+      task_id: taskId.value,
+      exactSessionId: identity.exactSessionId || '',
+      scope: identity.scope || '',
+      scopeId: identity.scopeId || '',
+      content: replay.value?.title || '任务执行记录',
+      timestamp: endedAt,
+      streaming: replay.value?.completed !== true,
+    },
+  ]
+})
+const loadReplayExecutionProjection = async () => {
+  const identity = replayExecutionIdentity.value
+  const selectedTaskId = String(taskId.value || '')
+  const requestId = ++replayExecutionRequest
+  replayExecutionError.value = ''
+  if (!identity || !selectedTaskId) {
+    replayExecutionLoadedKey.value = ''
+    replayExecutionEvents.value = []
+    replayExecutionAttempts.value = []
+    return
+  }
+  const projectionKey = `${identity.scope}:${identity.scopeId}:${identity.exactSessionId}:${selectedTaskId}`
+  if (projectionKey !== replayExecutionLoadedKey.value) {
+    replayExecutionLoadedKey.value = projectionKey
+    replayExecutionEvents.value = []
+  }
+  replayExecutionLoading.value = true
+  try {
+    const base = new URLSearchParams({
+      scope: identity.scope,
+      scope_id: identity.scopeId,
+      exact_session_id: identity.exactSessionId,
+      task_id: selectedTaskId,
+    })
+    let latestAttempt = 0
+    const attemptsResponse = await fetch(`/api/agent-execution/attempts?${base}`)
+    const attemptsPayload = await attemptsResponse.json()
+    if (attemptsResponse.ok && attemptsPayload.success !== false) {
+      replayExecutionAttempts.value = Array.isArray(attemptsPayload.attempts) ? attemptsPayload.attempts : []
+      latestAttempt = replayExecutionAttempts.value
+        .reduce((max, item) => Math.max(max, Number(item?.attempt || 0)), 0)
+    }
+    const eventParams = new URLSearchParams(base)
+    if (latestAttempt > 0) eventParams.set('attempt', String(latestAttempt))
+    else eventParams.delete('task_id')
+    eventParams.set('limit', '500')
+    const eventsResponse = await fetch(`/api/agent-execution/events?${eventParams}`)
+    const eventsPayload = await eventsResponse.json()
+    if (!eventsResponse.ok || eventsPayload.success === false) throw new Error(eventsPayload.error || '执行记录读取失败')
+    if (requestId !== replayExecutionRequest || selectedTaskId !== String(taskId.value || '')) return
+    replayExecutionEvents.value = Array.isArray(eventsPayload.events) ? eventsPayload.events : []
+  } catch (cause) {
+    if (requestId !== replayExecutionRequest) return
+    replayExecutionError.value = cause?.message || '执行记录读取失败'
+  } finally {
+    if (requestId === replayExecutionRequest) replayExecutionLoading.value = false
+  }
+}
 const canManageReplay = computed(() => replay.value?.replay_capabilities?.technical_events !== false)
 const CHAPTER_STAGES = { requirement: ['intake'], planning: ['planning'], implementation: ['dispatch', 'execution', 'change'], verification: ['test', 'review'], rework: ['rework'], delivery: ['completion'] }
 const issueEvents = computed(() => allEvents.value.filter(item => ['failed', 'blocked', 'warning'].includes(item.status)))
@@ -152,6 +271,7 @@ const dateLabel = (value) => {
 const retentionLabel = (key) => ({ task_record: '任务记录', trace: '完整执行记录', test_agent: 'TestAgent（独立验收）证据' }[key] || key)
 const freshnessLabel = value => ({ current: '与当前代码一致', drifted: '当前代码已变化', deleted: '文件已删除', permission_revoked: '权限已撤销', unavailable: '当前不可读取', unknown: '缺少可比较基线' }[value] || value || '尚未检查')
 const selectChapter = chapter => {
+  replayView.value = 'advanced'
   chapterFilter.value = chapter?.kind || 'all'
   stageFilter.value = 'all'
   preset.value = 'all'
@@ -165,8 +285,26 @@ const openConversationLink = link => {
   }
   emit('navigate', { tab: 'group-chat', groupId: link.groupId, messageId: link.messageId })
 }
+const recoveryConversationLink = computed(() => {
+  const projection = recoveryProjectionNotice.value?.projection
+  const activeSessionId = String(projection?.activeSessionId || '').trim()
+  if (!activeSessionId) return null
+  const links = Array.isArray(replay.value?.navigation) ? replay.value.navigation : []
+  const base = links.find(link => link.exactSessionId === activeSessionId)
+    || links.find(link => link.relation === 'target' && link.available !== false)
+    || links.find(link => link.relation === 'source' && link.available !== false)
+  return base ? { ...base, exactSessionId: activeSessionId } : null
+})
+const openRecoveryConversation = () => {
+  const link = recoveryConversationLink.value
+  if (!link) return
+  if (link.scope === 'project') emit('navigate', { tab: 'projects', project: link.scopeId, sessionId: link.exactSessionId, messageId: link.messageId || '' })
+  else if (link.scope === 'group') emit('navigate', { tab: 'groups', groupId: link.scopeId, groupSessionId: link.exactSessionId, messageId: link.messageId || '' })
+  else emit('navigate', { tab: 'global-agent', sessionId: link.exactSessionId, messageId: link.messageId || '' })
+}
 const focusReplayEvent = eventId => {
   if (!eventId) return
+  replayView.value = 'advanced'
   focusedEventId.value = String(eventId)
   preset.value = 'all'
   chapterFilter.value = 'all'
@@ -202,6 +340,7 @@ const handleReplayAction = async action => {
     if (!id) return
     error.value = ''
     try {
+      const guard = await resolveTaskMutationGuard(id, action)
       const response = await fetch('/api/tasks/resume-interrupted', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -210,12 +349,16 @@ const handleReplayAction = async action => {
           revision: Number(action.revision || 0),
           generation: Number(action.generation || 0),
           binding_checksum: action.bindingChecksum || action.binding_checksum || '',
+          ...guard,
           idempotency_key: `replay-resume:${id}:${action.revision || 0}:${action.generation || 0}`,
         }),
       })
       const data = await response.json().catch(() => ({}))
       if (!response.ok || data.success === false) throw new Error(data.error || '任务恢复前检查未通过')
-      emit('navigate', { tab: 'tasks', taskId: id, recovery: data.user_session || data.recovery_preflight || null })
+      recoveryProjectionNotice.value = {
+        projection: data.conversation_projection || null,
+        userSession: data.user_session || null,
+      }
       await loadReplay(id)
     } catch (e) {
       error.value = e?.message || '任务恢复失败'
@@ -242,6 +385,11 @@ const loadFreshness = async () => {
   } finally {
     freshnessLoading.value = false
   }
+}
+const inspectCurrentCode = async () => {
+  replayView.value = 'advanced'
+  await loadFreshness()
+  requestAnimationFrame(() => document.querySelector('.replay-freshness')?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
 }
 const downloadAuditJson = () => {
   if (!replay.value) return
@@ -392,6 +540,7 @@ const loadReplay = async (id = taskId.value) => {
     if (!response.ok || data.success === false) throw new Error(data.error || '任务回放读取失败')
     taskId.value = selected
     replay.value = data.replay
+    void loadReplayExecutionProjection()
     lastLiveUpdateAt.value = new Date().toISOString()
     traceId.value = data.replay?.tasks?.find(item => item.id === selected)?.trace_id || data.replay?.tasks?.[0]?.trace_id || traceId.value
     stageFilter.value = 'all'; chapterFilter.value = 'all'; statusFilter.value = 'all'; actorFilter.value = 'all'; taskFilter.value = 'all'; preset.value = 'all'; search.value = ''; includeSystemEvents.value = false; timelineMode.value = 'key'
@@ -429,6 +578,7 @@ const loadOlderEvents = async () => {
       next_offset: Number(data.replay.event_page?.offset || 0) + events.length,
       last_cursor: events.at(-1) ? { at: events.at(-1).at, id: events.at(-1).id } : null,
     })
+    void loadReplayExecutionProjection()
   } catch (e) {
     if (e?.name === 'AbortError') return
     if (!requestIsCurrent(request)) return
@@ -451,6 +601,7 @@ const reloadEventWindow = async () => {
     if (!requestIsCurrent(request) || selectedTaskId !== taskId.value) return
     if (!response.ok || data.success === false) throw new Error(data.error || '任务记录筛选失败')
     applyReplayPayload(data.replay, data.replay?.events || [], data.replay?.event_page)
+    void loadReplayExecutionProjection()
     issuePosition.value = -1
   } catch (e) {
     if (e?.name === 'AbortError') return
@@ -488,6 +639,7 @@ const refreshLiveReplay = async () => {
     })
     morePending = data.replay.event_page?.has_more === true
     lastLiveUpdateAt.value = new Date().toISOString()
+    void loadReplayExecutionProjection()
   } catch (e) {
     if (e?.name === 'AbortError') return
   } finally {
@@ -500,7 +652,7 @@ const refreshLiveReplay = async () => {
 const showIndex = async () => {
   for (const controller of requestControllers.values()) controller.abort()
   requestControllers.clear()
-  taskId.value = ''; traceId.value = ''; replay.value = null
+  taskId.value = ''; traceId.value = ''; replay.value = null; replayExecutionLoadedKey.value = ''; replayExecutionEvents.value = []; replayExecutionAttempts.value = []; replayExecutionError.value = ''
   await loadIndex()
 }
 const selectPhase = (phase) => { stageFilter.value = stageFilter.value === phase.id ? 'all' : phase.id; preset.value = 'all' }
@@ -552,6 +704,7 @@ const scheduleLiveRefresh = (delay = 180) => {
 
 const applyReplayFocus = (target = {}) => {
   if (!target) return
+  if (target.event_id || target.eventId || target.evidence_id || target.evidenceId || target.event_query || target.eventQuery) replayView.value = 'advanced'
   if (['all', 'failed', 'issues', 'test', 'browser', 'changes'].includes(target.preset)) preset.value = target.preset
   if (['all', 'failed', 'blocked', 'warning', 'running', 'passed'].includes(target.event_status || target.eventStatus)) statusFilter.value = target.event_status || target.eventStatus
   search.value = String(target.event_query || target.eventQuery || '')
@@ -619,7 +772,6 @@ watch([search, stageFilter, statusFilter, actorFilter, taskFilter, preset, chapt
     title="任务回放"
     description="从最终结果向下查看验收、因果链和完整执行证据"
     :views="replayViews"
-    storage-key="ccm:replay-layout:v1"
   >
     <template #actions>
       <details v-if="replayView === 'advanced'" class="toolbar-diagnostic-lookup">
@@ -632,6 +784,10 @@ watch([search, stageFilter, statusFilter, actorFilter, taskFilter, preset, chapt
     </template>
   <section class="task-replay-page">
     <div v-if="error" class="replay-error">{{ error }}</div>
+    <div v-if="recoveryProjectionNotice" class="replay-recovery-notice" role="status">
+      <span>{{ recoveryProjectionNotice.projection?.status === 'pending_compensation' ? '任务已恢复，会话状态正在同步。' : '任务已恢复，会话中的执行状态已经更新。' }}</span>
+      <button v-if="recoveryConversationLink" type="button" @click="openRecoveryConversation">查看当前执行会话</button>
+    </div>
 
     <template v-if="!replay">
       <div class="replay-index-head">
@@ -721,7 +877,17 @@ watch([search, stageFilter, statusFilter, actorFilter, taskFilter, preset, chapt
         <div v-if="replay.legacy" class="legacy-notice">这条旧记录没有完整任务关联，因此只能显示系统仍保留的诊断事件。</div>
       </div>
 
-      <div id="replay-section-result" class="replay-section-anchor"><TaskReplayExecutiveSummary v-if="presentation" :presentation="presentation" :navigation="replay.navigation || []" @navigate="openConversationLink" /></div>
+      <div id="replay-section-result" class="replay-section-anchor">
+        <TaskReplayExecutiveSummary
+          v-if="presentation"
+          :presentation="presentation"
+          :navigation="replay.navigation || []"
+          :file-count="acceptedDeliveryFileCount"
+          :attempt-count="replayAttemptCount"
+          :interrupted-attempt-count="replayInterruptedAttemptCount"
+          @navigate="openConversationLink"
+        />
+      </div>
       <section v-if="replay.schedule_origin" class="schedule-origin-card">
         <div>
           <strong>由定时规则生成</strong>
@@ -732,13 +898,18 @@ watch([search, stageFilter, statusFilter, actorFilter, taskFilter, preset, chapt
 
       <div class="replay-report-actions">
         <button type="button" @click="printUserReport">打印用户报告 / 保存 PDF</button>
-        <button type="button" :disabled="freshnessLoading" @click="loadFreshness">{{ freshnessLoading ? '正在校验…' : '校验当前代码状态' }}</button>
-        <button v-if="canManageReplay" type="button" @click="downloadAuditJson">导出安全审计 JSON</button>
+        <button type="button" :disabled="freshnessLoading" @click="inspectCurrentCode">{{ freshnessLoading ? '正在校验…' : '校验当前代码状态' }}</button>
+        <button v-if="replayView === 'advanced' && canManageReplay" type="button" @click="downloadAuditJson">导出安全审计 JSON</button>
       </div>
 
-      <div id="replay-section-integrity" class="replay-section-anchor"><TaskReplayInsights v-if="presentation" :presentation="presentation" section="overview" @focus-event="focusReplayEvent" @handle-action="handleReplayAction" /></div>
+      <TaskReplayInsights v-if="presentation" :presentation="presentation" section="actions" @handle-action="handleReplayAction" />
 
-      <section v-if="freshness" class="replay-freshness">
+      <div v-if="replayView === 'advanced'" id="replay-section-integrity" class="replay-section-anchor">
+        <TaskReplayInsights v-if="presentation" :presentation="presentation" section="integrity" />
+        <TaskReplayInsights v-if="presentation" :presentation="presentation" section="causal" @focus-event="focusReplayEvent" />
+      </div>
+
+      <section v-if="replayView === 'advanced' && freshness" class="replay-freshness">
         <header>
           <div>
             <strong>历史证据与当前代码</strong>
@@ -759,32 +930,34 @@ watch([search, stageFilter, statusFilter, actorFilter, taskFilter, preset, chapt
         </div>
       </section>
 
-      <details class="replay-summary-metrics" open>
-        <summary>任务统计与资源使用</summary>
-        <dl class="overview-metrics font-mono">
-          <div><dt>总耗时</dt><dd>{{ durationLabel }}</dd></div>
-          <div><dt>关键节点</dt><dd>{{ overviewKeyEventCount }}</dd></div>
-          <div><dt>执行任务</dt><dd>{{ Math.max(0, (replay.summary?.task_count || 1) - 1) }}</dd></div>
-          <div><dt>TestAgent 验收</dt><dd>{{ replay.summary?.test_run_count || 0 }}</dd></div>
-          <div :class="{ attention: presentation?.outcome?.unresolvedIssueCount || replay.summary?.issue_count }"><dt>当前未解决</dt><dd>{{ presentation?.outcome?.unresolvedIssueCount ?? replay.summary?.issue_count ?? 0 }}</dd></div>
-          <div><dt>验证材料</dt><dd>{{ replay.summary?.evidence_count || 0 }}</dd></div>
-        </dl>
-        <div class="replay-consumption font-mono">
-          <span><small>模型调用</small><b>{{ usageLabel(replay.summary?.model_call_count, '次') }}</b></span>
-          <span><small>Provider 重试</small><b>{{ usageLabel(replay.summary?.provider_retry_count, '次') }}</b></span>
-          <span><small>TestAgent 轮次</small><b>{{ usageLabel(replay.summary?.test_run_count, '轮') }}</b></span>
-          <span><small>已记录 Token</small><b>{{ usageLabel(replay.summary?.token_count) }}</b></span>
-          <p>只显示任务账本中实际记录的数据，缺失项不会估算。</p>
-        </div>
-      </details>
+      <div v-if="replayView === 'advanced'" id="replay-section-acceptance" class="replay-section-anchor"><TaskReplayAcceptanceMatrix v-if="presentation" :rows="presentation.acceptanceMatrix || []" @open-evidence="openEvidence" /></div>
 
-      <div id="replay-section-acceptance" class="replay-section-anchor"><TaskReplayAcceptanceMatrix v-if="presentation" :rows="presentation.acceptanceMatrix || []" @open-evidence="openEvidence" /></div>
+      <div id="replay-section-execution" class="replay-section-anchor">
+        <section class="replay-shared-execution" aria-label="任务执行记录">
+          <header class="replay-shared-execution-head">
+            <strong>任务执行记录</strong>
+            <small v-if="replayExecutionLoading">正在同步…</small>
+          </header>
+          <p v-if="replayExecutionError" class="replay-shared-execution-notice warning">{{ replayExecutionError }}</p>
+          <AgentExecutionTranscript
+            v-if="replayExecutionEvents.length"
+            :events="replayExecutionEvents"
+            :messages="replayExecutionMessages"
+            :message-index="1"
+            :presentation="isReplayRunning ? 'live' : 'completed'"
+            :show-completion-summary="false"
+            stage-grouped
+          />
+          <p v-else-if="!replayExecutionLoading && !replayExecutionError" class="replay-shared-execution-notice">这条任务没有可展示的安全执行事件。</p>
+        </section>
+      </div>
 
-      <div id="replay-section-attempts" class="replay-section-anchor"><TaskReplayInsights v-if="presentation" :presentation="presentation" section="attempts" /></div>
-
+      <template v-if="replayView === 'advanced'">
       <TaskReplayDelivery :deliveries="replay.deliveries || []" :tasks="replay.tasks || []" />
 
-      <TaskReplayPlanBoard :plans="replay.plans || []" :work-items="replay.work_items || []" :tasks="replay.tasks || []" @open-evidence="openEvidence" />
+      <div id="replay-section-plan" class="replay-section-anchor">
+        <TaskReplayPlanBoard :plans="replay.plans || []" :work-items="replay.work_items || []" :tasks="replay.tasks || []" @open-evidence="openEvidence" />
+      </div>
 
       <section v-if="presentation?.recoveryJourney?.length" class="recovery-journey" aria-label="暂停、中断与恢复记录">
         <header>
@@ -805,15 +978,9 @@ watch([search, stageFilter, statusFilter, actorFilter, taskFilter, preset, chapt
         </article>
       </section>
 
-      <TaskReplayChapters
-        v-if="presentation"
-        :chapters="presentation.chapters || []"
-        :attempts="[]"
-        :issues="presentation.issues || []"
-        @select="selectChapter"
-      />
+      <TaskReplayInsights v-if="presentation" :presentation="presentation" section="work_item_attempts" />
 
-      <details id="replay-section-timeline" class="full-replay-timeline replay-section-anchor" :open="replayView === 'advanced' || isReplayRunning">
+      <details id="replay-section-timeline" class="full-replay-timeline replay-section-anchor" open>
         <summary>
           <span>
             <strong>完整时间线</strong>
@@ -821,6 +988,14 @@ watch([search, stageFilter, statusFilter, actorFilter, taskFilter, preset, chapt
           </span>
           <em>{{ isReplayRunning ? '任务运行中，实时更新' : '展开查看完整过程' }}</em>
         </summary>
+
+        <TaskReplayChapters
+          v-if="presentation"
+          :chapters="presentation.chapters || []"
+          :attempts="[]"
+          :issues="presentation.issues || []"
+          @select="selectChapter"
+        />
 
         <nav v-if="replay.phases?.length" class="phase-strip" aria-label="任务阶段">
           <button v-for="phase in replay.phases" :key="phase.id" type="button" :class="[phase.status, { active: stageFilter === phase.id }]" @click="selectPhase(phase)">
@@ -884,6 +1059,26 @@ watch([search, stageFilter, statusFilter, actorFilter, taskFilter, preset, chapt
         </div>
       </details>
 
+      <section id="replay-section-technical" class="replay-technical replay-section-anchor">
+        <details class="replay-summary-metrics">
+          <summary>任务统计与资源使用</summary>
+          <dl class="overview-metrics font-mono">
+            <div><dt>总耗时</dt><dd>{{ durationLabel }}</dd></div>
+            <div><dt>关键节点</dt><dd>{{ overviewKeyEventCount }}</dd></div>
+            <div><dt>执行任务</dt><dd>{{ Math.max(0, (replay.summary?.task_count || 1) - 1) }}</dd></div>
+            <div><dt>TestAgent 验收</dt><dd>{{ replay.summary?.test_run_count || 0 }}</dd></div>
+            <div :class="{ attention: presentation?.outcome?.unresolvedIssueCount || replay.summary?.issue_count }"><dt>当前未解决</dt><dd>{{ presentation?.outcome?.unresolvedIssueCount ?? replay.summary?.issue_count ?? 0 }}</dd></div>
+            <div><dt>验证材料</dt><dd>{{ replay.summary?.evidence_count || 0 }}</dd></div>
+          </dl>
+          <div class="replay-consumption font-mono">
+            <span><small>模型调用</small><b>{{ usageLabel(replay.summary?.model_call_count, '次') }}</b></span>
+            <span><small>Provider 重试</small><b>{{ usageLabel(replay.summary?.provider_retry_count, '次') }}</b></span>
+            <span><small>TestAgent 轮次</small><b>{{ usageLabel(replay.summary?.test_run_count, '轮') }}</b></span>
+            <span><small>已记录 Token</small><b>{{ usageLabel(replay.summary?.token_count) }}</b></span>
+            <p>只显示任务账本中实际记录的数据，缺失项不会估算。</p>
+          </div>
+        </details>
+
       <details class="retention-details">
         <summary>技术详情与记录保留</summary>
         <div>
@@ -896,6 +1091,8 @@ watch([search, stageFilter, statusFilter, actorFilter, taskFilter, preset, chapt
           </dl>
         </div>
       </details>
+      </section>
+      </template>
     </template>
   </section>
   </WorkspacePageShell>
@@ -950,6 +1147,59 @@ watch([search, stageFilter, statusFilter, actorFilter, taskFilter, preset, chapt
 
 .replay-section-anchor {
   scroll-margin-top: 62px;
+}
+
+.replay-shared-execution {
+  margin-bottom: 14px;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.replay-shared-execution-head {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.replay-shared-execution-head > div {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+
+.replay-shared-execution-head strong {
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.replay-shared-execution-head span,
+.replay-shared-execution-head small,
+.replay-shared-execution-notice {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.replay-shared-execution-notice {
+  margin: 0;
+  padding: 12px;
+}
+
+.replay-shared-execution-notice.warning {
+  color: var(--accent-red, #dc2626);
+}
+
+.replay-shared-execution :deep(.cc-execution-anchor) {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
 }
 
 .toolbar-diagnostic-lookup {
@@ -1049,6 +1299,29 @@ watch([search, stageFilter, statusFilter, actorFilter, taskFilter, preset, chapt
   background: rgba(239, 68, 68, 0.08);
   color: var(--accent-red);
   font-size: 12px;
+}
+
+.replay-recovery-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
+  padding: 10px 14px;
+  border: 1px solid color-mix(in srgb, var(--accent-blue) 30%, var(--border-color));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent-blue) 8%, transparent);
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
+.replay-recovery-notice button {
+  border: 0;
+  background: transparent;
+  color: var(--accent-blue);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
 }
 
 .legacy-notice {
@@ -2043,6 +2316,11 @@ watch([search, stageFilter, statusFilter, actorFilter, taskFilter, preset, chapt
 
 @media (max-width: 720px) {
   .task-replay-page { padding: 12px; }
+  .replay-chapter-nav {
+    top: -12px;
+    margin: -12px -12px 12px;
+    padding: 8px 12px;
+  }
   .overview-heading { grid-template-columns: 1fr auto; }
   .overview-heading .back-button { grid-column: 1 / -1; justify-self: start; }
   .overview-metrics { grid-template-columns: repeat(2, 1fr); }

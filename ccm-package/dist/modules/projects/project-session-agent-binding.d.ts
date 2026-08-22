@@ -51,7 +51,7 @@ export declare function bindProjectSessionAgentExecution(input: {
         generation_count: any;
     };
 };
-export declare function rotateProjectSessionAgentBinding(project: string, projectSessionId: string, reason?: string): {
+export declare function rotateProjectSessionAgentBinding(project: string, projectSessionId: string, reason?: string, activeDispatchScopeId?: string): {
     scopeId: string;
     closed: import("../../tasks/agent-sessions-shared").TaskAgentSession[];
     nextGeneration: any;

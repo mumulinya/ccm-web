@@ -4,22 +4,14 @@ import * as os from "os";
 import * as path from "path";
 import Database from "better-sqlite3";
 
-const STORE_SCHEMA_VERSION = 2;
+const STORE_SCHEMA_VERSION = 3;
 const DEFAULT_STORE_DIR = path.join(os.homedir(), ".cc-connect");
 const STORE_DIR = path.resolve(process.env.CCM_TASK_STORE_DIR || DEFAULT_STORE_DIR);
 const DATABASE_FILE = path.join(STORE_DIR, "ccm.db");
-const LEGACY_BACKUP_DIR = path.join(STORE_DIR, "legacy-json-backups");
 const DATABASE_BACKUP_DIR = path.join(STORE_DIR, "database-backups");
 const EXPORT_DIR = path.join(STORE_DIR, "exports");
 
-const LEGACY_FILES = {
-  tasks: path.join(STORE_DIR, "tasks.json"),
-  taskLogs: path.join(STORE_DIR, "task-logs.json"),
-  groupLogs: path.join(STORE_DIR, "group-logs.json"),
-};
-
 let database: Database.Database | null = null;
-let initialized = false;
 
 function isoFileStamp() {
   return new Date().toISOString().replace(/[:.]/g, "-");
@@ -31,6 +23,13 @@ function stableHash(value: string) {
 
 function stringifyJson(value: any) {
   return JSON.stringify(value ?? null);
+}
+
+function canonicalJson(value: any): string {
+  if (value === undefined) return "null";
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  return `{${Object.keys(value).filter(key => value[key] !== undefined).sort().map(key => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(",")}}`;
 }
 
 function parseJson(value: any, fallback: any) {
@@ -46,37 +45,6 @@ function writeJsonAtomic(file: string, value: any) {
   const temp = `${file}.${process.pid}.${Date.now()}.tmp`;
   fs.writeFileSync(temp, `${JSON.stringify(value, null, 2)}\n`, "utf-8");
   fs.renameSync(temp, file);
-}
-
-function readLegacyJson(file: string, expected: "array" | "object") {
-  for (const candidate of [file, `${file}.bak`]) {
-    if (!fs.existsSync(candidate)) continue;
-    try {
-      const parsed = JSON.parse(fs.readFileSync(candidate, "utf-8"));
-      if (expected === "array" && Array.isArray(parsed)) return { source: candidate, value: parsed };
-      if (expected === "object" && parsed && typeof parsed === "object" && !Array.isArray(parsed)) return { source: candidate, value: parsed };
-    } catch {}
-  }
-  return null;
-}
-
-function archiveLegacyFiles(file: string) {
-  if (process.env.CCM_SQLITE_KEEP_LEGACY_JSON === "1") return [];
-  const archived: string[] = [];
-  fs.mkdirSync(LEGACY_BACKUP_DIR, { recursive: true });
-  const stamp = isoFileStamp();
-  for (const candidate of [file, `${file}.bak`]) {
-    if (!fs.existsSync(candidate)) continue;
-    const destination = path.join(LEGACY_BACKUP_DIR, `${path.basename(candidate)}.${stamp}`);
-    try {
-      fs.renameSync(candidate, destination);
-    } catch {
-      fs.copyFileSync(candidate, destination);
-      fs.unlinkSync(candidate);
-    }
-    archived.push(destination);
-  }
-  return archived;
 }
 
 function configureDatabase(db: Database.Database) {
@@ -115,6 +83,127 @@ function createSchema(db: Database.Database) {
     CREATE INDEX IF NOT EXISTS idx_tasks_workflow ON tasks(workflow_type);
     CREATE INDEX IF NOT EXISTS idx_tasks_updated_at ON tasks(updated_at);
     CREATE INDEX IF NOT EXISTS idx_tasks_archived ON tasks(archived, updated_at);
+
+    CREATE TABLE IF NOT EXISTS session_timeline_heads (
+      scope TEXT NOT NULL,
+      scope_id TEXT NOT NULL,
+      exact_session_id TEXT NOT NULL,
+      latest_sequence INTEGER NOT NULL DEFAULT 0,
+      active_task_id TEXT NOT NULL DEFAULT '',
+      head_checksum TEXT NOT NULL DEFAULT '',
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY(scope, scope_id, exact_session_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS session_timeline_events (
+      event_id TEXT PRIMARY KEY,
+      scope TEXT NOT NULL,
+      scope_id TEXT NOT NULL,
+      exact_session_id TEXT NOT NULL,
+      sequence INTEGER NOT NULL,
+      event_type TEXT NOT NULL,
+      task_id TEXT NOT NULL DEFAULT '',
+      work_item_id TEXT NOT NULL DEFAULT '',
+      generation INTEGER NOT NULL DEFAULT 0,
+      attempt INTEGER NOT NULL DEFAULT 0,
+      lease_id TEXT NOT NULL DEFAULT '',
+      payload_ref TEXT NOT NULL DEFAULT '',
+      idempotency_key TEXT NOT NULL UNIQUE,
+      previous_checksum TEXT NOT NULL DEFAULT '',
+      checksum TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      content_stored INTEGER NOT NULL DEFAULT 0,
+      UNIQUE(scope, scope_id, exact_session_id, sequence)
+    );
+    CREATE INDEX IF NOT EXISTS idx_session_timeline_task ON session_timeline_events(task_id, created_at);
+    CREATE INDEX IF NOT EXISTS idx_session_timeline_session ON session_timeline_events(scope, scope_id, exact_session_id, sequence);
+
+    CREATE TABLE IF NOT EXISTS task_timeline_spans (
+      span_id TEXT PRIMARY KEY,
+      task_id TEXT NOT NULL,
+      scope TEXT NOT NULL,
+      scope_id TEXT NOT NULL,
+      exact_session_id TEXT NOT NULL,
+      start_event_id TEXT NOT NULL,
+      start_sequence INTEGER NOT NULL,
+      end_event_id TEXT NOT NULL DEFAULT '',
+      end_sequence INTEGER,
+      latest_sequence INTEGER NOT NULL,
+      status TEXT NOT NULL,
+      summary_json TEXT NOT NULL DEFAULT '{}',
+      checksum TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      content_stored INTEGER NOT NULL DEFAULT 0,
+      UNIQUE(task_id, exact_session_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_task_timeline_spans_task ON task_timeline_spans(task_id, updated_at);
+
+    CREATE TABLE IF NOT EXISTS task_attempt_spans (
+      span_id TEXT NOT NULL,
+      attempt INTEGER NOT NULL,
+      start_sequence INTEGER NOT NULL,
+      end_sequence INTEGER,
+      status TEXT NOT NULL,
+      checksum TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY(span_id, attempt),
+      FOREIGN KEY(span_id) REFERENCES task_timeline_spans(span_id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS task_context_heads (
+      task_id TEXT PRIMARY KEY,
+      revision INTEGER NOT NULL,
+      checksum TEXT NOT NULL,
+      active_span_id TEXT NOT NULL DEFAULT '',
+      applied_cursors_json TEXT NOT NULL DEFAULT '[]',
+      latest_snapshot_revision INTEGER NOT NULL DEFAULT 0,
+      status TEXT NOT NULL DEFAULT 'ready',
+      projection_json TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      content_stored INTEGER NOT NULL DEFAULT 0,
+      FOREIGN KEY(task_id) REFERENCES tasks(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS task_context_revisions (
+      task_id TEXT NOT NULL,
+      revision INTEGER NOT NULL,
+      reason TEXT NOT NULL,
+      source_event_id TEXT NOT NULL DEFAULT '',
+      previous_checksum TEXT NOT NULL DEFAULT '',
+      delta_json TEXT NOT NULL DEFAULT '{}',
+      checksum TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      content_stored INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY(task_id, revision),
+      FOREIGN KEY(task_id) REFERENCES tasks(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS task_context_snapshots (
+      task_id TEXT NOT NULL,
+      revision INTEGER NOT NULL,
+      snapshot_json TEXT NOT NULL,
+      checksum TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      content_stored INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY(task_id, revision),
+      FOREIGN KEY(task_id) REFERENCES tasks(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS task_context_outbox (
+      outbox_id TEXT PRIMARY KEY,
+      dedupe_key TEXT NOT NULL UNIQUE,
+      task_id TEXT NOT NULL DEFAULT '',
+      event_type TEXT NOT NULL,
+      payload_json TEXT NOT NULL DEFAULT '{}',
+      status TEXT NOT NULL DEFAULT 'pending',
+      attempts INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      published_at TEXT NOT NULL DEFAULT '',
+      content_stored INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_task_context_outbox_status ON task_context_outbox(status, created_at);
 
     CREATE TABLE IF NOT EXISTS task_logs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -214,7 +303,16 @@ function createSchema(db: Database.Database) {
     );
     CREATE INDEX IF NOT EXISTS idx_agent_comm_receipts_message ON agent_communication_receipts(message_id, created_at);
   `);
+  ensureColumn(db, "tasks", "task_context_revision", "INTEGER NOT NULL DEFAULT 0");
+  ensureColumn(db, "tasks", "task_context_checksum", "TEXT NOT NULL DEFAULT ''");
+  ensureColumn(db, "tasks", "active_timeline_span_id", "TEXT NOT NULL DEFAULT ''");
   setMeta(db, "schema_version", STORE_SCHEMA_VERSION);
+}
+
+function ensureColumn(db: Database.Database, table: string, column: string, definition: string) {
+  const columns = db.prepare(`PRAGMA table_info("${table.replaceAll('"', '""')}")`).all() as Array<{ name?: string }>;
+  if (columns.some(item => item.name === column)) return;
+  db.exec(`ALTER TABLE "${table.replaceAll('"', '""')}" ADD COLUMN "${column.replaceAll('"', '""')}" ${definition}`);
 }
 
 function getMeta(db: Database.Database, key: string) {
@@ -229,8 +327,30 @@ function setMeta(db: Database.Database, key: string, value: any) {
   `).run(key, stringifyJson(value), new Date().toISOString());
 }
 
+
+function stripTaskContextAuthority(task: any) {
+  const payload = { ...(task || {}) };
+  delete payload.task_context;
+  delete payload.timeline_spans;
+  delete payload.timeline_start_marker_id;
+  delete payload.timeline_start_sequence;
+  delete payload.timeline_end_marker_id;
+  delete payload.timeline_end_sequence;
+  delete payload.latest_checkpoint_sequence;
+  delete payload.task_context_revision_receipt;
+  delete payload.__position;
+  return payload;
+}
+
 function taskColumns(task: any, position: number) {
-  const payload = stringifyJson(task);
+  const payload = stringifyJson(stripTaskContextAuthority(task));
+  const context = task?.task_context && typeof task.task_context === "object" ? task.task_context : null;
+  // Once a canonical context exists it owns the active-span pointer. An empty
+  // value is meaningful at a terminal boundary and must not fall back to the
+  // stale denormalized task column.
+  const activeSpanId = context
+    ? String(context.activeSpanId || "")
+    : String(task?.active_timeline_span_id || "");
   return {
     id: String(task?.id || "").trim(),
     position,
@@ -243,15 +363,134 @@ function taskColumns(task: any, position: number) {
     archived: task?.archived === true || !!task?.archived_at || !!task?.deleted_at ? 1 : 0,
     payload,
     hash: stableHash(payload),
+    taskContextRevision: Math.max(0, Number(context?.revision || task?.task_context_revision || 0)),
+    taskContextChecksum: String(context?.checksum || task?.task_context_checksum || ""),
+    activeSpanId,
   };
 }
 
-function insertTasks(db: Database.Database, tasks: any[]) {
+function hydrateTaskAuthority(db: Database.Database, task: any) {
+  if (!task?.id) return task;
+  const head = db.prepare("SELECT revision, checksum, active_span_id, projection_json FROM task_context_heads WHERE task_id = ?").get(String(task.id)) as any;
+  if (!head) return task;
+  const context = parseJson(head.projection_json, null);
+  return {
+    ...task,
+    ...(context ? { task_context: context } : {}),
+    task_context_revision: Number(head.revision || 0),
+    task_context_checksum: String(head.checksum || ""),
+    active_timeline_span_id: String(head.active_span_id || ""),
+  };
+}
+
+function contextDelta(previous: any, next: any) {
+  const keys = [...new Set([...Object.keys(previous || {}), ...Object.keys(next || {})])]
+    .filter(key => key !== "checksum" && JSON.stringify(previous?.[key]) !== JSON.stringify(next?.[key]));
+  const presentInNext = (key: string) => Object.hasOwn(next || {}, key) && next?.[key] !== undefined;
+  const changes = Object.fromEntries(keys.filter(presentInNext).map(key => [key, next[key]]));
+  return {
+    schema: "ccm-task-context-delta-v1",
+    changedKeys: keys.slice(0, 100),
+    changes,
+    removedKeys: keys.filter(key => !presentInNext(key)).slice(0, 100),
+    appliedCursors: Array.isArray(next?.appliedCursors) ? next.appliedCursors : [],
+    contentStored: false,
+  };
+}
+
+export function persistTaskContextProjection(db: Database.Database, taskId: string, contextInput: any, reason = "task_updated", sourceEventId = "", forceSnapshot = false) {
+  const id = String(taskId || "").trim();
+  if (!id || !contextInput || typeof contextInput !== "object") return null;
+  const previousHead = db.prepare("SELECT revision, checksum, projection_json, latest_snapshot_revision FROM task_context_heads WHERE task_id = ?").get(id) as any;
+  const previous = parseJson(previousHead?.projection_json, null);
+  const requestedRevision = Math.max(1, Number(contextInput.revision || Number(previousHead?.revision || 0) + 1));
+  const previousRevision = Number(previousHead?.revision || 0);
+  // Callers may mutate a hydrated context while its old checksum/revision is
+  // still attached. Never trust those advisory fields to decide whether a new
+  // revision is needed: compare canonical content at the current revision, and
+  // otherwise advance exactly once so the checksum chain cannot be overwritten
+  // through an ON CONFLICT no-op.
+  if (previousHead) {
+    const comparable = { ...contextInput, revision: previousRevision, contentStored: false };
+    delete (comparable as any).checksum;
+    if (stableHash(canonicalJson(comparable)) === String(previousHead.checksum || "")) return previous;
+  }
+  const revision = previousHead ? previousRevision + 1 : requestedRevision;
+  const base = { ...contextInput, revision, contentStored: false };
+  delete (base as any).checksum;
+  // Context revisions are reconstructed from deltas. Object insertion order can
+  // legitimately change during reconstruction, so the authority checksum must
+  // be based on canonical keys rather than JSON property order.
+  const checksum = stableHash(canonicalJson(base));
+  const context = { ...base, checksum };
+  if (previousHead && revision === Number(previousHead.revision) && checksum === String(previousHead.checksum)) return context;
+  const activeSpan = [...(Array.isArray(context.timelineSpans) ? context.timelineSpans : [])]
+    .reverse()
+    .find((span: any) => span?.status === "open" && !span?.endSequence);
+  const activeSpanId = String(Object.hasOwn(context, "activeSpanId")
+    ? context.activeSpanId || ""
+    : activeSpan?.spanId || "");
+  const cursors = Array.isArray(context.appliedCursors) ? context.appliedCursors : [];
+  const now = new Date().toISOString();
+  const delta = contextDelta(previous, context);
+  db.prepare(`
+    INSERT INTO task_context_revisions(task_id, revision, reason, source_event_id, previous_checksum, delta_json, checksum, created_at, content_stored)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)
+    ON CONFLICT(task_id, revision) DO NOTHING
+  `).run(id, revision, String(reason || "task_updated"), String(sourceEventId || ""), String(previousHead?.checksum || ""), stringifyJson(delta), checksum, now);
+  const snapshotRequired = forceSnapshot || revision === 1 || revision % 50 === 0 || /(?:attempt|terminal|finished|failed|interrupted|cancelled|compaction)/i.test(String(reason || ""));
+  let latestSnapshotRevision = Number(previousHead?.latest_snapshot_revision || 0);
+  if (snapshotRequired) {
+    db.prepare(`
+      INSERT INTO task_context_snapshots(task_id, revision, snapshot_json, checksum, created_at, content_stored)
+      VALUES (?, ?, ?, ?, ?, 0)
+      ON CONFLICT(task_id, revision) DO UPDATE SET snapshot_json=excluded.snapshot_json, checksum=excluded.checksum, created_at=excluded.created_at
+    `).run(id, revision, stringifyJson(context), checksum, now);
+    latestSnapshotRevision = revision;
+  }
+  db.prepare(`
+    INSERT INTO task_context_heads(task_id, revision, checksum, active_span_id, applied_cursors_json, latest_snapshot_revision, status, projection_json, updated_at, content_stored)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+    ON CONFLICT(task_id) DO UPDATE SET revision=excluded.revision, checksum=excluded.checksum,
+      active_span_id=excluded.active_span_id, applied_cursors_json=excluded.applied_cursors_json,
+      latest_snapshot_revision=excluded.latest_snapshot_revision, status=excluded.status,
+      projection_json=excluded.projection_json, updated_at=excluded.updated_at
+  `).run(id, revision, checksum, activeSpanId, stringifyJson(cursors), latestSnapshotRevision, String(context.status || "ready"), stringifyJson(context), now);
+  db.prepare("UPDATE tasks SET task_context_revision = ?, task_context_checksum = ?, active_timeline_span_id = ? WHERE id = ?")
+    .run(revision, checksum, activeSpanId, id);
+  const dedupeKey = `task-context:${id}:${revision}:${checksum}`;
+  db.prepare(`
+    INSERT INTO task_context_outbox(outbox_id, dedupe_key, task_id, event_type, payload_json, status, attempts, created_at, content_stored)
+    VALUES (?, ?, ?, 'task_context.updated', ?, 'pending', 0, ?, 0)
+    ON CONFLICT(dedupe_key) DO NOTHING
+  `).run(`outbox_${stableHash(dedupeKey).slice(0, 24)}`, dedupeKey, id, stringifyJson({ taskId: id, revision, checksum, reason: String(reason || ""), contentStored: false }), now);
+  const projectionOutbox = db.prepare(`
+    INSERT INTO task_context_outbox(outbox_id, dedupe_key, task_id, event_type, payload_json, status, attempts, created_at, content_stored)
+    VALUES (?, ?, ?, ?, ?, 'pending', 0, ?, 0)
+    ON CONFLICT(dedupe_key) DO NOTHING
+  `);
+  for (const eventType of ["task_replay.invalidate", "task_search.reindex"]) {
+    const projectionDedupe = `${eventType}:${id}:${revision}:${checksum}`;
+    projectionOutbox.run(`outbox_${stableHash(projectionDedupe).slice(0, 24)}`, projectionDedupe, id, eventType, stringifyJson({ taskId: id, revision, checksum, contentStored: false }), now);
+  }
+  return context;
+}
+
+export function upsertTaskInSqliteTransaction(db: Database.Database, task: any, position: number, persistContext = true) {
+  insertTasks(db, [{ ...task, __position: position }], persistContext);
+}
+
+export function withImmediateTaskStoreTransaction<T>(operation: (db: Database.Database) => T): T {
+  return getDatabase().transaction(() => operation(getDatabase())).immediate();
+}
+
+function insertTasks(db: Database.Database, tasks: any[], persistContext = true) {
   const statement = db.prepare(`
     INSERT INTO tasks(
       id, position, status, group_id, target_project, workflow_type,
-      created_at, updated_at, archived, payload_json, payload_hash
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      created_at, updated_at, archived, payload_json, payload_hash,
+      task_context_revision, task_context_checksum, active_timeline_span_id
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       position = excluded.position,
       status = excluded.status,
@@ -262,12 +501,17 @@ function insertTasks(db: Database.Database, tasks: any[]) {
       updated_at = excluded.updated_at,
       archived = excluded.archived,
       payload_json = excluded.payload_json,
-      payload_hash = excluded.payload_hash
+      payload_hash = excluded.payload_hash,
+      task_context_revision = excluded.task_context_revision,
+      task_context_checksum = excluded.task_context_checksum,
+      active_timeline_span_id = excluded.active_timeline_span_id
   `);
   for (let position = 0; position < tasks.length; position += 1) {
-    const row = taskColumns(tasks[position], position);
+    const requestedPosition = Number.isFinite(Number(tasks[position]?.__position)) ? Number(tasks[position].__position) : position;
+    const row = taskColumns(tasks[position], requestedPosition);
     if (!row.id) throw new Error(`任务缺少 id，位置 ${position}`);
-    statement.run(row.id, row.position, row.status, row.groupId, row.targetProject, row.workflowType, row.createdAt, row.updatedAt, row.archived, row.payload, row.hash);
+    statement.run(row.id, row.position, row.status, row.groupId, row.targetProject, row.workflowType, row.createdAt, row.updatedAt, row.archived, row.payload, row.hash, row.taskContextRevision, row.taskContextChecksum, row.activeSpanId);
+    if (persistContext && tasks[position]?.task_context) persistTaskContextProjection(db, row.id, tasks[position].task_context, "task_write");
   }
 }
 
@@ -293,69 +537,12 @@ function insertGroupLogs(db: Database.Database, logs: any) {
   }
 }
 
-function migrateLegacyStore(db: Database.Database) {
-  const migrations = [
-    {
-      key: "legacy_tasks_imported_v1",
-      table: "tasks",
-      file: LEGACY_FILES.tasks,
-      expected: "array" as const,
-      insert: (value: any) => insertTasks(db, value),
-    },
-    {
-      key: "legacy_task_logs_imported_v1",
-      table: "task_logs",
-      file: LEGACY_FILES.taskLogs,
-      expected: "object" as const,
-      insert: (value: any) => insertTaskLogs(db, value),
-    },
-    {
-      key: "legacy_group_logs_imported_v1",
-      table: "group_logs",
-      file: LEGACY_FILES.groupLogs,
-      expected: "object" as const,
-      insert: (value: any) => insertGroupLogs(db, value),
-    },
-  ];
-
-  for (const migration of migrations) {
-    if (getMeta(db, migration.key)) continue;
-    const existingCount = Number((db.prepare(`SELECT COUNT(*) AS count FROM ${migration.table}`).get() as any)?.count || 0);
-    const legacy = existingCount === 0 ? readLegacyJson(migration.file, migration.expected) : null;
-    const importedAt = new Date().toISOString();
-    const transaction = db.transaction(() => {
-      if (legacy) migration.insert(legacy.value);
-      setMeta(db, migration.key, {
-        imported_at: importedAt,
-        imported: !!legacy,
-        source: legacy?.source || "",
-        count: legacy
-          ? migration.expected === "array"
-            ? legacy.value.length
-            : Object.values(legacy.value).reduce((total: number, rows: any) => total + (Array.isArray(rows) ? rows.length : 0), 0)
-          : existingCount,
-      });
-    });
-    transaction();
-    const archived = legacy ? archiveLegacyFiles(migration.file) : [];
-    if (archived.length) {
-      const current = getMeta(db, migration.key) || {};
-      setMeta(db, migration.key, { ...current, archived });
-    }
-  }
-  db.pragma("wal_checkpoint(PASSIVE)");
-}
-
 function getDatabase() {
   if (database) return database;
   fs.mkdirSync(STORE_DIR, { recursive: true });
   database = new Database(DATABASE_FILE);
   configureDatabase(database);
   createSchema(database);
-  if (!initialized) {
-    migrateLegacyStore(database);
-    initialized = true;
-  }
   return database;
 }
 
@@ -364,15 +551,17 @@ export function withSqliteTaskStore<T>(operation: (db: Database.Database) => T):
 }
 
 export function loadTasksFromSqlite(): any[] {
-  const rows = getDatabase().prepare("SELECT payload_json FROM tasks ORDER BY position ASC, rowid ASC").all() as Array<{ payload_json: string }>;
-  return rows.map(row => parseJson(row.payload_json, null)).filter(Boolean);
+  const db = getDatabase();
+  const rows = db.prepare("SELECT payload_json FROM tasks ORDER BY position ASC, rowid ASC").all() as Array<{ payload_json: string }>;
+  return rows.map(row => parseJson(row.payload_json, null)).filter(Boolean).map(task => hydrateTaskAuthority(db, task));
 }
 
 export function getTaskByIdFromSqlite(id: string): any | null {
   const taskId = String(id || "").trim();
   if (!taskId) return null;
-  const row = getDatabase().prepare("SELECT payload_json FROM tasks WHERE id = ?").get(taskId) as { payload_json?: string } | undefined;
-  return row ? parseJson(row.payload_json, null) : null;
+  const db = getDatabase();
+  const row = db.prepare("SELECT payload_json FROM tasks WHERE id = ?").get(taskId) as { payload_json?: string } | undefined;
+  return row ? hydrateTaskAuthority(db, parseJson(row.payload_json, null)) : null;
 }
 
 export function listTasksByParentIdFromSqlite(parentId: string): any[] {
@@ -381,7 +570,8 @@ export function listTasksByParentIdFromSqlite(parentId: string): any[] {
   const rows = getDatabase().prepare(
     "SELECT payload_json FROM tasks WHERE json_extract(payload_json, '$.parent_task_id') = ? ORDER BY position ASC, rowid ASC",
   ).all(parent) as Array<{ payload_json: string }>;
-  return rows.map(row => parseJson(row.payload_json, null)).filter(Boolean);
+  const db = getDatabase();
+  return rows.map(row => parseJson(row.payload_json, null)).filter(Boolean).map(task => hydrateTaskAuthority(db, task));
 }
 
 /** 行级更新：只读写单条任务，避免整表进出。 */
@@ -393,7 +583,7 @@ export function updateTaskByIdInSqlite(id: string, patchOrMutator: any): any | n
     | { id: string; position: number; payload_json: string }
     | undefined;
   if (!existing) return null;
-  const current = parseJson(existing.payload_json, null);
+  const current = hydrateTaskAuthority(db, parseJson(existing.payload_json, null));
   if (!current) return null;
   const next = typeof patchOrMutator === "function"
     ? patchOrMutator({ ...current })
@@ -403,13 +593,16 @@ export function updateTaskByIdInSqlite(id: string, patchOrMutator: any): any | n
   db.prepare(`
     UPDATE tasks SET
       position = ?, status = ?, group_id = ?, target_project = ?, workflow_type = ?,
-      created_at = ?, updated_at = ?, archived = ?, payload_json = ?, payload_hash = ?
+      created_at = ?, updated_at = ?, archived = ?, payload_json = ?, payload_hash = ?,
+      task_context_revision = ?, task_context_checksum = ?, active_timeline_span_id = ?
     WHERE id = ?
   `).run(
     row.position, row.status, row.groupId, row.targetProject, row.workflowType,
-    row.createdAt, row.updatedAt, row.archived, row.payload, row.hash, taskId,
+    row.createdAt, row.updatedAt, row.archived, row.payload, row.hash,
+    row.taskContextRevision, row.taskContextChecksum, row.activeSpanId, taskId,
   );
-  return next;
+  const persistedContext = next.task_context ? persistTaskContextProjection(db, taskId, next.task_context, "task_update") : null;
+  return persistedContext ? { ...next, task_context: persistedContext } : next;
 }
 
 export type TaskCasMutationResult = {
@@ -437,7 +630,7 @@ export function updateTaskByIdCasInSqlite(
       | { id: string; position: number; payload_json: string }
       | undefined;
     if (!existing) return { updated: false, conflict: false, task: null, previous: null };
-    const current = parseJson(existing.payload_json, null);
+    const current = hydrateTaskAuthority(db, parseJson(existing.payload_json, null));
     if (!current) return { updated: false, conflict: false, task: null, previous: null };
     if (!predicate(current)) return { updated: false, conflict: true, task: current, previous: current };
     const next = mutator({ ...current });
@@ -446,19 +639,23 @@ export function updateTaskByIdCasInSqlite(
     db.prepare(`
       UPDATE tasks SET
         position = ?, status = ?, group_id = ?, target_project = ?, workflow_type = ?,
-        created_at = ?, updated_at = ?, archived = ?, payload_json = ?, payload_hash = ?
+        created_at = ?, updated_at = ?, archived = ?, payload_json = ?, payload_hash = ?,
+        task_context_revision = ?, task_context_checksum = ?, active_timeline_span_id = ?
       WHERE id = ?
     `).run(
       row.position, row.status, row.groupId, row.targetProject, row.workflowType,
-      row.createdAt, row.updatedAt, row.archived, row.payload, row.hash, taskId,
+      row.createdAt, row.updatedAt, row.archived, row.payload, row.hash,
+      row.taskContextRevision, row.taskContextChecksum, row.activeSpanId, taskId,
     );
-    return { updated: true, conflict: false, task: next, previous: current };
+    const persistedContext = next.task_context ? persistTaskContextProjection(db, taskId, next.task_context, String(next?.task_context_revision_receipt?.reason || "task_cas")) : null;
+    return { updated: true, conflict: false, task: persistedContext ? { ...next, task_context: persistedContext } : next, previous: current };
   });
   return transaction.immediate();
 }
 
 export function listUsabilityTaskCandidatesFromSqlite(recentCutoff: string): any[] {
-  const rows = getDatabase().prepare(`
+  const db = getDatabase();
+  const rows = db.prepare(`
     SELECT payload_json
     FROM tasks
     WHERE archived = 0
@@ -469,11 +666,12 @@ export function listUsabilityTaskCandidatesFromSqlite(recentCutoff: string): any
       )
     ORDER BY updated_at DESC, position ASC
   `).all(String(recentCutoff || "")) as Array<{ payload_json: string }>;
-  return rows.map(row => parseJson(row.payload_json, null)).filter(Boolean);
+  return rows.map(row => parseJson(row.payload_json, null)).filter(Boolean).map(task => hydrateTaskAuthority(db, task));
 }
 
 export function listUsabilityArchiveCandidatesFromSqlite(historyCutoff: string, intakeCutoff: string): any[] {
-  const rows = getDatabase().prepare(`
+  const db = getDatabase();
+  const rows = db.prepare(`
     SELECT payload_json
     FROM tasks
     WHERE archived = 0
@@ -494,20 +692,21 @@ export function listUsabilityArchiveCandidatesFromSqlite(historyCutoff: string, 
       )
     ORDER BY updated_at ASC
   `).all(String(historyCutoff || ""), String(intakeCutoff || "")) as Array<{ payload_json: string }>;
-  return rows.map(row => parseJson(row.payload_json, null)).filter(Boolean);
+  return rows.map(row => parseJson(row.payload_json, null)).filter(Boolean).map(task => hydrateTaskAuthority(db, task));
 }
 
 export function saveTasksToSqlite(tasks: any[]) {
   if (!Array.isArray(tasks)) throw new Error("任务存储只接受数组");
   const db = getDatabase();
-  const currentRows = db.prepare("SELECT id, position, payload_hash FROM tasks").all() as Array<{ id: string; position: number; payload_hash: string }>;
+  const currentRows = db.prepare("SELECT id, position, payload_hash, task_context_checksum FROM tasks").all() as Array<{ id: string; position: number; payload_hash: string; task_context_checksum: string }>;
   const current = new Map(currentRows.map(row => [row.id, row]));
   const desiredIds = new Set<string>();
   const upsert = db.prepare(`
     INSERT INTO tasks(
       id, position, status, group_id, target_project, workflow_type,
-      created_at, updated_at, archived, payload_json, payload_hash
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      created_at, updated_at, archived, payload_json, payload_hash,
+      task_context_revision, task_context_checksum, active_timeline_span_id
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       position = excluded.position,
       status = excluded.status,
@@ -518,7 +717,10 @@ export function saveTasksToSqlite(tasks: any[]) {
       updated_at = excluded.updated_at,
       archived = excluded.archived,
       payload_json = excluded.payload_json,
-      payload_hash = excluded.payload_hash
+      payload_hash = excluded.payload_hash,
+      task_context_revision = excluded.task_context_revision,
+      task_context_checksum = excluded.task_context_checksum,
+      active_timeline_span_id = excluded.active_timeline_span_id
   `);
   const remove = db.prepare("DELETE FROM tasks WHERE id = ?");
   let inserted = 0;
@@ -531,8 +733,15 @@ export function saveTasksToSqlite(tasks: any[]) {
       if (desiredIds.has(row.id)) throw new Error(`任务 id 重复：${row.id}`);
       desiredIds.add(row.id);
       const previous = current.get(row.id);
-      if (previous && previous.payload_hash === row.hash && Number(previous.position) === position) continue;
-      upsert.run(row.id, row.position, row.status, row.groupId, row.targetProject, row.workflowType, row.createdAt, row.updatedAt, row.archived, row.payload, row.hash);
+      if (previous && previous.payload_hash === row.hash && Number(previous.position) === position) {
+        if (tasks[position]?.task_context && String(previous.task_context_checksum || "") !== String(row.taskContextChecksum || "")) {
+          persistTaskContextProjection(db, row.id, tasks[position].task_context, String(tasks[position]?.task_context_revision_receipt?.reason || "task_save"));
+          updated += 1;
+        }
+        continue;
+      }
+      upsert.run(row.id, row.position, row.status, row.groupId, row.targetProject, row.workflowType, row.createdAt, row.updatedAt, row.archived, row.payload, row.hash, row.taskContextRevision, row.taskContextChecksum, row.activeSpanId);
+      if (tasks[position]?.task_context) persistTaskContextProjection(db, row.id, tasks[position].task_context, String(tasks[position]?.task_context_revision_receipt?.reason || "task_save"));
       if (previous) updated += 1;
       else inserted += 1;
     }
@@ -597,7 +806,10 @@ export function runTaskStoreAtomicBatchSelfTest() {
       && restartedParent?.workflow_type === "requirement_epic"
       && restartedParent?.child_task_ids?.length === 2;
     const idempotentReplay = replayCount === committedCount;
-    const passed = rollbackObserved && committedCount === 3 && idempotentReplay && parentPayload?.workflow_type === "requirement_epic" && restartRecovered;
+    const undefinedRemovalDelta = contextDelta({ activeSpanId: "span-a", keep: true }, { activeSpanId: undefined, keep: true });
+    const undefinedRemovalRecorded = undefinedRemovalDelta.removedKeys.includes("activeSpanId")
+      && !Object.hasOwn(undefinedRemovalDelta.changes, "activeSpanId");
+    const passed = rollbackObserved && committedCount === 3 && idempotentReplay && parentPayload?.workflow_type === "requirement_epic" && restartRecovered && undefinedRemovalRecorded;
     return {
       success: passed,
       rollback_observed: rollbackObserved,
@@ -606,6 +818,7 @@ export function runTaskStoreAtomicBatchSelfTest() {
       parent_round_trip: parentPayload?.id === parent.id,
       restart_recovered: restartRecovered,
       restart_count: restartCount,
+      undefined_removal_recorded: undefinedRemovalRecorded,
     };
   } finally {
     db.close();
@@ -794,11 +1007,6 @@ export function getSqliteTaskStoreStatus() {
       task_logs: count("task_logs"),
       group_logs: count("group_logs"),
     },
-    migrations: {
-      tasks: getMeta(db, "legacy_tasks_imported_v1"),
-      task_logs: getMeta(db, "legacy_task_logs_imported_v1"),
-      group_logs: getMeta(db, "legacy_group_logs_imported_v1"),
-    },
     integrity: verifySqliteTaskStore(),
   };
 }
@@ -849,7 +1057,6 @@ export function restoreSqliteTaskStore(source: string) {
     try { fs.unlinkSync(`${DATABASE_FILE}${suffix}`); } catch {}
   }
   fs.copyFileSync(resolvedSource, DATABASE_FILE);
-  initialized = false;
   const status = getSqliteTaskStoreStatus();
   return { restored_from: resolvedSource, previous_backup: previous, status };
 }
@@ -860,16 +1067,13 @@ export function closeSqliteTaskStore() {
     database.close();
   }
   database = null;
-  initialized = false;
 }
 
 export function getSqliteTaskStorePaths() {
   return {
     store_dir: STORE_DIR,
     database_file: DATABASE_FILE,
-    legacy_backup_dir: LEGACY_BACKUP_DIR,
     database_backup_dir: DATABASE_BACKUP_DIR,
     export_dir: EXPORT_DIR,
-    legacy_files: { ...LEGACY_FILES },
   };
 }

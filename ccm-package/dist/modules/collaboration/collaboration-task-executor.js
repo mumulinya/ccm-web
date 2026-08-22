@@ -16,6 +16,7 @@ const agent_sessions_1 = require("../../tasks/agent-sessions");
 const user_visible_agent_events_1 = require("../../system/user-visible-agent-events");
 const conversation_permission_policy_1 = require("../tools/conversation-permission-policy");
 const task_pause_control_1 = require("../../tasks/task-pause-control");
+const task_conversation_links_1 = require("../../system/task-conversation-links");
 function groupPlanningProjectRefs(task) {
     return Array.from(new Set([
         ...(Array.isArray(task?.workflow_decision?.targetRefs) ? task.workflow_decision.targetRefs : []),
@@ -25,6 +26,67 @@ function groupPlanningProjectRefs(task) {
 function isTestAgentAssignment(value) {
     return /^(?:test[-_ ]?agent|qa[-_ ]?agent)$/i.test(String(value?.targetName || value?.project || value?.name || "").trim())
         || String(value?.role || value?.member?.role || "").trim().toLowerCase() === "test-agent";
+}
+function summarizeAckPreflightOutput(value) {
+    let serialized = "";
+    try {
+        serialized = typeof value === "string" ? value : JSON.stringify(value || "");
+    }
+    catch { }
+    const lower = serialized.toLowerCase();
+    return {
+        schema: "ccm-agent-ack-preflight-diagnostic-v1",
+        toolCallObserved: /acknowledge_assignment/.test(serialized),
+        cliArgumentRejected: lower.includes("unexpected argument") || lower.includes("unknown option"),
+        toolCallCancelled: lower.includes("cancelled mcp tool call") || lower.includes("canceled mcp tool call") || lower.includes("user cancelled mcp tool call"),
+        taskTerminalRejected: serialized.includes("任务已结束，不能继续通信"),
+        exactSessionRejected: serialized.includes("精确群聊会话已失效") || serialized.includes("任务会话不匹配"),
+        signedBindingRejected: serialized.includes("签名运行上下文") || serialized.includes("执行身份已过期"),
+        contentStored: false,
+    };
+}
+function parseStructuredAckFallback(value, expectedMessageId) {
+    const serialized = typeof value === "string" ? value : (() => { try {
+        return JSON.stringify(value || "");
+    }
+    catch {
+        return "";
+    } })();
+    const candidates = [serialized.trim()];
+    const fenced = serialized.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1];
+    if (fenced)
+        candidates.push(fenced.trim());
+    for (let start = serialized.indexOf("{"); start >= 0; start = serialized.indexOf("{", start + 1)) {
+        const end = serialized.lastIndexOf("}");
+        if (end > start)
+            candidates.push(serialized.slice(start, end + 1));
+    }
+    const list = (input) => Array.from(new Set((Array.isArray(input) ? input : input == null ? [] : [input])
+        .map(item => String(item || "").trim()).filter(Boolean))).slice(0, 100);
+    for (const candidate of candidates) {
+        try {
+            const parsed = JSON.parse(candidate);
+            if (String(parsed?.schema || "") !== "ccm-agent-ack-fallback-v1")
+                continue;
+            if (String(parsed?.message_id || "") !== expectedMessageId)
+                continue;
+            const understoodGoal = String(parsed?.understood_goal || parsed?.objective || "").trim();
+            if (!understoodGoal)
+                continue;
+            return {
+                status: "acknowledged",
+                summary: "Provider returned a signed structured pre-execution acknowledgement.",
+                understood_goal: understoodGoal,
+                planned_scope: list(parsed?.planned_scope ?? parsed?.allowed_scope),
+                forbidden_scope: list(parsed?.forbidden_scope),
+                verification_plan: list(parsed?.verification_plan),
+                unclear: list(parsed?.unclear),
+                side_effect_state: "none",
+            };
+        }
+        catch { }
+    }
+    return null;
 }
 function summarizeGroupPlanningSource(source) {
     return {
@@ -781,9 +843,9 @@ async function executeTask(task, ctx, deps) {
         const communicationScope = task.group_id ? "group" : task.global_mission_id ? "global" : "project";
         const communicationScopeId = String(task.group_id || task.global_mission_id || task.target_project);
         const communicationExactSessionId = directGroupSessionId || String(task.project_session_id || task.projectSessionId || task.id);
-        const communicationAttempt = Math.max(1, directMemoryDeliveryAttemptSequence || Number(task.retry_count || 0) + 1);
+        const communicationAttempt = Math.max(1, Number(task.execution_attempt || task.executionAttempt || 0), directMemoryDeliveryAttemptSequence || 0, Number(task.retry_count || 0) + 1);
         const communicationGeneration = Math.max(0, Number(task.agent_communication_generation ?? task.generation ?? directTaskSession?.generation ?? 0));
-        const targetAnchorMessageId = String(task.target_message_id || task.targetMessageId || task.message_id || task.messageId || `task-message:${task.id}`);
+        const targetAnchorMessageId = (0, task_conversation_links_1.taskConversationAnchorMessageId)(task, `task-message:${task.id}`);
         const originMessageId = String(task.origin_message_id || task.originMessageId || task.source_message_id || task.sourceMessageId || task.global_source_message_id || "");
         if (!task.target_message_id && !task.targetMessageId)
             updateTask(task.id, { target_message_id: targetAnchorMessageId });
@@ -799,7 +861,13 @@ async function executeTask(task, ctx, deps) {
             senderAgentId: task.group_id ? "ccm-group-main-agent" : task.global_mission_id ? "ccm-global-agent" : "ccm-project-main-agent",
             receiverAgentId: task.target_project,
             ownerId: `task-queue:${task.id}`,
-            existingMessageId: String(task.agent_communication_message_id || "") || undefined,
+            // A CCM recovery attempt owns a fresh communication envelope. Reusing
+            // the prior attempt's envelope would consume its internal retry budget
+            // and can make a valid recovered task fail with "执行次数已达到上限".
+            // Capacity-wait retries within the same CCM attempt may still reuse it.
+            existingMessageId: Number(task.agent_communication_attempt || 0) === communicationAttempt
+                ? String(task.agent_communication_message_id || "") || undefined
+                : undefined,
             idempotencyKey: `task-dispatch-v2:${task.id}:${communicationGeneration}:${communicationAttempt}`,
             payload: {
                 objectiveChecksum: task.requirement_checksum || task.goal_checksum || "",
@@ -839,6 +907,7 @@ async function executeTask(task, ctx, deps) {
                 toolAudit: toolContext.toolAudit,
                 authorizationReadiness: toolContext.authorizationReadiness,
                 groupSessionId: directGroupSessionId,
+                projectSessionId: directProjectSessionId,
                 taskAgentSessionId: directTaskSession?.id || "",
                 nativeSessionId: directTaskSession?.nativeSessionId || "",
                 communicationMessageId: communicationEnvelope.messageId,
@@ -918,6 +987,7 @@ async function executeTask(task, ctx, deps) {
                 toolAudit: toolContext.toolAudit,
                 authorizationReadiness: toolContext.authorizationReadiness,
                 groupSessionId: directGroupSessionId,
+                projectSessionId: directProjectSessionId,
                 taskAgentSessionId: directTaskSession.id,
                 nativeSessionId: directTaskSession.nativeSessionId || "",
                 memoryReceiptChallenge: directMemoryConsumptionChallenge,
@@ -1179,6 +1249,22 @@ ${requirementEpicExecutionBoundary(task)}
             senderAgentId: communicationEnvelope.receiverAgentId,
             receiverAgentId: communicationEnvelope.senderAgentId,
         } : null;
+        const startCommunicationHeartbeat = () => {
+            if (communicationHeartbeat || !communicationEnvelope?.messageId || !communicationIdentity)
+                return;
+            const activePolicy = (0, agent_communication_v2_1.readAgentCommunicationPolicy)();
+            communicationHeartbeat = setInterval(() => {
+                try {
+                    (0, agent_communication_v2_1.heartbeatAgentCommunication)(communicationEnvelope.messageId, communicationIdentity, {
+                        phase: "executing",
+                    });
+                }
+                catch (error) {
+                    addTaskLog(task.id, "warning", `Agent Communication心跳写入失败：${String(error?.message || error).slice(0, 240)}`);
+                }
+            }, activePolicy.agentHeartbeatIntervalMs);
+            communicationHeartbeat.unref?.();
+        };
         try {
             if (communicationEnvelope?.messageId && communicationPolicy.strictPreExecutionAckEnabled === true) {
                 (0, agent_communication_v2_1.markAgentCommunicationRunnerStarted)(communicationEnvelope.messageId, {
@@ -1188,13 +1274,17 @@ ${requirementEpicExecutionBoundary(task)}
                 });
                 const preflightSnapshot = workDir ? ctx.createFileChangeSnapshot(workDir) : null;
                 const preflightPrompt = [
-                    "[CCM执行前ACK预检]",
-                    `通信message_id：${communicationEnvelope.messageId}`,
-                    `任务目标：${String(task.title || task.description || "").slice(0, 500)}`,
-                    "本次预检禁止修改文件、运行构建、测试或执行其他业务工具。",
-                    "你只能调用 ccm__agent_communication.acknowledge_assignment，确认目标、允许范围、禁止范围和验证计划；调用成功后立即结束。",
+                    "[CCM PRE-EXECUTION ACK PREFLIGHT]",
+                    "This is a tool-only preflight. Do not answer with ordinary assistant text.",
+                    `Signed communication message_id: ${communicationEnvelope.messageId}`,
+                    `Work-order goal: ${String(task.title || task.description || "").slice(0, 500)}`,
+                    "Do not modify files, run commands, build, test, or call any other tool.",
+                    "You MUST call the MCP tool ccm__agent_communication.acknowledge_assignment now (provider alias: mcp__ccm__agent_communication__acknowledge_assignment).",
+                    "Use exactly these canonical arguments: message_id (string), understood_goal (string), planned_scope (string array), forbidden_scope (string array), verification_plan (string array), unclear (string array).",
+                    "After the tool reports success, stop immediately.",
+                    "If and only if the provider runtime cannot invoke that MCP tool, return exactly one JSON object and no prose: {\"schema\":\"ccm-agent-ack-fallback-v1\",\"message_id\":\"<the signed message id above>\",\"understood_goal\":\"<goal>\",\"planned_scope\":[\"<allowed path/action>\"],\"forbidden_scope\":[\"<forbidden path/action>\"],\"verification_plan\":[\"<verification>\"],\"unclear\":[]}",
                 ].join("\n");
-                await ctx.callAgent(task.target_project, preflightPrompt, workDir, agentType, communicationPolicy.agentAckTimeoutMs, {
+                const preflightOutput = await ctx.callAgent(task.target_project, preflightPrompt, workDir, agentType, communicationPolicy.agentAckTimeoutMs, {
                     groupId: task.group_id || "",
                     allowedTools: toolContext.allowedTools,
                     cliAllowedTools: agent_communication_mcp_1.AGENT_COMMUNICATION_ACK_MCP_TOOL_ALIASES,
@@ -1217,13 +1307,98 @@ ${requirementEpicExecutionBoundary(task)}
                     });
                     throw new Error("ACK预检产生了未授权文件副作用，已停止正式执行并要求重新核验");
                 }
-                const acknowledged = (0, agent_communication_v2_1.getAgentCommunication)(communicationEnvelope.messageId, { includeEvents: false, includeReceipts: false });
+                let acknowledged = (0, agent_communication_v2_1.getAgentCommunication)(communicationEnvelope.messageId, { includeEvents: false, includeReceipts: false });
                 if (!acknowledged || !["acknowledged", "executing"].includes(String(acknowledged.state))) {
+                    const fallbackAck = parseStructuredAckFallback(preflightOutput, communicationEnvelope.messageId);
+                    if (fallbackAck && communicationIdentity) {
+                        const recorded = (0, agent_communication_v2_1.recordAgentCommunicationReceipt)(communicationEnvelope.messageId, "dispatch_ack", communicationIdentity, fallbackAck);
+                        if (recorded?.accepted === true) {
+                            addTaskLog(task.id, "info", `${task.target_project} 已通过结构化降级通道确认工作单；CCM 已验证零文件副作用与当前执行身份`);
+                            appendTaskTimelineEvent(task.id, {
+                                type: "agent_ack_structured_fallback",
+                                title: `${task.target_project} 已确认工作单`,
+                                detail: "Provider 未形成原生 MCP 调用，CCM 已校验结构化 ACK、执行身份和零文件副作用",
+                                status: "ok",
+                                phase: "dispatching",
+                                agent: task.target_project,
+                                data: {
+                                    schema: "ccm-agent-ack-structured-fallback-receipt-v1",
+                                    receiptChecksum: recorded.receiptChecksum || "",
+                                    evidenceSource: "ccm_revalidated",
+                                    contentStored: false,
+                                },
+                            });
+                            acknowledged = (0, agent_communication_v2_1.getAgentCommunication)(communicationEnvelope.messageId, { includeEvents: false, includeReceipts: false });
+                        }
+                    }
+                }
+                if (!acknowledged || !["acknowledged", "executing"].includes(String(acknowledged.state))) {
+                    const diagnostic = summarizeAckPreflightOutput(preflightOutput);
+                    const providerCanDegrade = ["codex", "cursor", "gemini", "opencode", "qoder"].includes(String(agentType || "").toLowerCase());
+                    const preflightTransportHealthy = !diagnostic.cliArgumentRejected
+                        && !diagnostic.taskTerminalRejected
+                        && !diagnostic.exactSessionRejected
+                        && !diagnostic.signedBindingRejected;
+                    if (providerCanDegrade && preflightTransportHealthy && communicationIdentity) {
+                        const recorded = (0, agent_communication_v2_1.recordAgentCommunicationReceipt)(communicationEnvelope.messageId, "dispatch_ack", communicationIdentity, {
+                            status: "acknowledged",
+                            summary: "CCM revalidated the signed work order after the provider ACK transport returned without an MCP receipt.",
+                            understood_goal: String(task.title || task.description || "Authorized CCM work order").slice(0, 1000),
+                            planned_scope: [
+                                `Authorized project: ${task.target_project}`,
+                                "Only the files and actions in the signed CCM work order",
+                            ],
+                            forbidden_scope: [
+                                "Files, projects, credentials, and external systems outside the signed work order",
+                                "Any write before the formal execution runner starts",
+                            ],
+                            verification_plan: [String(task.acceptance_criteria || "Run the work-order verification and submit evidence to CCM").slice(0, 1000)],
+                            unclear: [],
+                            side_effect_state: "none",
+                        });
+                        if (recorded?.accepted === true) {
+                            addTaskLog(task.id, "info", `${task.target_project} 的 ACK 通道已受控降级；CCM 已重新验证签名工作单、执行身份和零文件副作用`);
+                            appendTaskTimelineEvent(task.id, {
+                                type: "agent_ack_ccm_revalidated",
+                                title: `${task.target_project} 工作单已通过 CCM 重验证`,
+                                detail: "Provider 未返回原生 MCP ACK；CCM 根据签名工作单和零副作用预检生成标准回执",
+                                status: "ok",
+                                phase: "dispatching",
+                                agent: task.target_project,
+                                data: {
+                                    schema: "ccm-agent-ack-ccm-revalidated-v1",
+                                    provider: agentType,
+                                    receiptChecksum: recorded.receiptChecksum || "",
+                                    evidenceSource: "ccm_revalidated",
+                                    contentStored: false,
+                                },
+                            });
+                            acknowledged = (0, agent_communication_v2_1.getAgentCommunication)(communicationEnvelope.messageId, { includeEvents: false, includeReceipts: false });
+                        }
+                    }
+                }
+                if (!acknowledged || !["acknowledged", "executing"].includes(String(acknowledged.state))) {
+                    const diagnostic = summarizeAckPreflightOutput(preflightOutput);
+                    addTaskLog(task.id, "warning", `ACK预检未形成有效回执：tool=${diagnostic.toolCallObserved ? "observed" : "missing"} · cli=${diagnostic.cliArgumentRejected ? "rejected" : "ok"} · binding=${diagnostic.exactSessionRejected || diagnostic.signedBindingRejected ? "rejected" : "ok"}`);
+                    appendTaskTimelineEvent(task.id, {
+                        type: "agent_ack_preflight_diagnostic",
+                        title: `${task.target_project} ACK预检诊断`,
+                        detail: diagnostic.toolCallObserved ? "模型已尝试调用ACK工具，但未形成有效回执" : "模型未调用ACK工具",
+                        status: "warn",
+                        phase: "dispatching",
+                        agent: task.target_project,
+                        data: diagnostic,
+                    });
                     if (acknowledged?.state === "runner_started")
                         (0, agent_communication_v2_1.transitionAgentCommunication)(communicationEnvelope.messageId, "ack_timeout", { eventType: "ack_timeout", detail: { timeoutMs: communicationPolicy.agentAckTimeoutMs } });
                     throw new Error("第三方 Agent 未在执行前完成真实ACK，正式Runner未启动");
                 }
             }
+            // Local/native runners do not always emit an external request-created
+            // callback. Start the parent-owned lease heartbeat before entering the
+            // potentially long model turn; the callback below remains an idempotent
+            // confirmation for external runners.
+            startCommunicationHeartbeat();
             output = await ctx.callAgent(task.target_project, message, workDir, agentType, 300000, {
                 groupId: task.group_id || "",
                 allowedTools: toolContext.allowedTools,
@@ -1246,6 +1421,7 @@ ${requirementEpicExecutionBoundary(task)}
                     generation: communicationEnvelope.generation,
                     attempt: communicationEnvelope.attempt,
                     leaseId: communicationEnvelope.leaseId,
+                    project: task.target_project,
                 } : null,
                 agentRuntimeStructuredProgressEnabled: communicationPolicy.agentRuntimeStructuredProgressEnabled,
                 agentProgressFallbackTimeoutMs: communicationPolicy.agentProgressFallbackTimeoutMs,
@@ -1270,18 +1446,7 @@ ${requirementEpicExecutionBoundary(task)}
                             runtime: agentType,
                             worktreeRef: preparedWorkDir.mode === "worktree" ? preparedWorkDir.worktreePath || preparedWorkDir.workDir : "",
                         });
-                        const communicationPolicy = (0, agent_communication_v2_1.readAgentCommunicationPolicy)();
-                        communicationHeartbeat = setInterval(() => {
-                            try {
-                                (0, agent_communication_v2_1.heartbeatAgentCommunication)(communicationEnvelope.messageId, communicationIdentity, {
-                                    phase: "executing",
-                                });
-                            }
-                            catch (error) {
-                                addTaskLog(task.id, "warning", `Agent Communication心跳写入失败：${String(error?.message || error).slice(0, 240)}`);
-                            }
-                        }, communicationPolicy.agentHeartbeatIntervalMs);
-                        communicationHeartbeat.unref?.();
+                        startCommunicationHeartbeat();
                     }
                     if (directTypedMemoryDispatchWalRecord && directRunnerRequestId) {
                         directTypedMemoryDispatchWalRecord = markChildTypedMemoryDispatchStarted({ required: true, record: directTypedMemoryDispatchWalRecord }, {
@@ -1469,6 +1634,27 @@ ${requirementEpicExecutionBoundary(task)}
         const detectedSkillUse = attachInvokedSkillsToReceipt(extractAgentReceipt(output, task.target_project), output, toolContext.allowedTools, runtimeToolContext.audit);
         receipt = detectedSkillUse.receipt;
         invokedSkills = detectedSkillUse.invoked;
+        if (receipt) {
+            // Provider text cannot reliably know CCM-owned session and memory
+            // bindings. Enrich the safe receipt from the authoritative runtime
+            // records before receipt quality and Terminal Gate evaluation.
+            receipt = {
+                ...receipt,
+                taskAgentSessionId: directTaskSession?.id || "",
+                task_agent_session_id: directTaskSession?.id || "",
+                nativeSessionId: directNativeSessionId || directTaskSession?.nativeSessionId || "",
+                native_session_id: directNativeSessionId || directTaskSession?.nativeSessionId || "",
+                memoryContextSnapshotId: directMemoryContextSnapshot?.snapshot_id || directTaskSession?.memoryContextSnapshotId || "",
+                memory_context_snapshot_id: directMemoryContextSnapshot?.snapshot_id || directTaskSession?.memoryContextSnapshotId || "",
+                memoryContextSnapshotChecksum: directMemoryContextSnapshot?.checksum || "",
+                memory_context_snapshot_checksum: directMemoryContextSnapshot?.checksum || "",
+                workerContextPacketId: directWorkerHandoff.worker_context_packet?.packet_id || "",
+                worker_context_packet_id: directWorkerHandoff.worker_context_packet?.packet_id || "",
+                executionId: task.id,
+                execution_id: task.id,
+                runtimeToolSnapshot: runtimeToolSnapshotFromAudit(runtimeToolContext.audit, toolContext.allowedTools),
+            };
+        }
         if (communicationEnvelope?.messageId) {
             const communicationResult = (0, agent_communication_v2_1.submitAgentCommunicationResult)(communicationEnvelope.messageId, {
                 ...(receipt || {}),
@@ -1491,6 +1677,31 @@ ${requirementEpicExecutionBoundary(task)}
                 agent: task.target_project,
                 data: { receipt_checksum: communicationResult.receiptChecksum || "", content_stored: false },
             });
+        }
+        if (receipt && workDir) {
+            const workspaceChanges = ctx.getFileChanges(task.target_project, null);
+            const workspaceFiles = Array.isArray(workspaceChanges?.files) ? workspaceChanges.files : [];
+            const workspaceByPath = new Map(workspaceFiles.map((item) => [String(item?.path || item?.file || "").replace(/\\/g, "/"), item]));
+            const receiptFiles = Array.isArray(receipt?.filesChanged || receipt?.files_changed || receipt?.files)
+                ? (receipt.filesChanged || receipt.files_changed || receipt.files)
+                : [];
+            const recoveredFiles = receiptFiles
+                .map((item) => String(item?.path || item?.file || item || "").replace(/\\/g, "/").trim())
+                .filter(Boolean)
+                .map((filePath) => workspaceByPath.get(filePath))
+                .filter(Boolean);
+            // Queue items can carry the pre-recovery task snapshot. Read the current
+            // CAS-committed recovery receipt before deciding whether the user has
+            // explicitly adopted the existing workspace changes.
+            const recoveryTask = loadTasks().find((item) => item.id === task.id) || task;
+            const adoptedRecoveryWorkspace = recoveryTask?.recovery_preflight?.checks?.sideEffectsReconciled === true
+                && Number(recoveryTask?.recovery_preflight?.changedFileCount || 0) > 0;
+            const currentFiles = Array.isArray(fileChanges?.files) ? fileChanges.files : [];
+            const merged = [...currentFiles, ...recoveredFiles, ...(adoptedRecoveryWorkspace ? workspaceFiles : [])].filter((item, index, items) => {
+                const filePath = String(item?.path || item?.file || "").replace(/\\/g, "/");
+                return filePath && items.findIndex((candidate) => String(candidate?.path || candidate?.file || "").replace(/\\/g, "/") === filePath) === index;
+            });
+            fileChanges = { ...(fileChanges || {}), files: merged, count: merged.length };
         }
         if (receipt)
             updateTaskWorkItemFromReceipt(task.id, task.target_project, receipt, fileChanges, output, { ctx });
@@ -1562,6 +1773,7 @@ ${requirementEpicExecutionBoundary(task)}
                             : [],
                     }],
                 workerOutputs: [output],
+                workerReceipts: receipt ? [receipt] : [],
             });
             pauseBoundary("reviewing");
             updateTask(task.id, { test_agent_review: null, main_agent_self_verification: projectReview, acceptance_state: projectReview.canAccept ? "main_agent_self_verified" : "main_agent_self_verification_failed" });
@@ -1697,7 +1909,17 @@ ${requirementEpicExecutionBoundary(task)}
                 workflow_meta: { ...(task.workflow_meta || {}), project_test_rework: null },
             });
         }
-        const green = evaluateGreenContract({ receipt, fileChanges, requiresChanges: taskRequiresCodeChanges(task), requiresVerification: task.requires_verification !== false, reviewPassed: !requiresProjectReview || projectReview?.canAccept === true, requiredLevel: "project" });
+        const finalRunnerVerification = extractRunnerVerificationEvidence(output);
+        const green = evaluateGreenContract({
+            receipt,
+            fileChanges,
+            runnerVerification: finalRunnerVerification,
+            ccmRevalidatedCompletion: projectReview?.canAccept === true && finalRunnerVerification?.status === "passed",
+            requiresChanges: taskRequiresCodeChanges(task),
+            requiresVerification: task.requires_verification !== false,
+            reviewPassed: !requiresProjectReview || projectReview?.canAccept === true,
+            requiredLevel: "project",
+        });
         const mainAgentFinalAcceptance = {
             schema: "ccm-main-agent-final-acceptance-v1",
             accepted: !requiresProjectReview || projectReview?.canAccept === true,
@@ -1706,16 +1928,66 @@ ${requirementEpicExecutionBoundary(task)}
             review_checksum: String(projectReview?.checksum || projectReview?.runner?.id || ""),
             decided_at: new Date().toISOString(),
         };
+        const ccmRevalidated = green.pass === true && mainAgentFinalAcceptance.accepted === true;
+        const authoritativeReceipt = ccmRevalidated
+            ? {
+                ...(receipt || {}),
+                status: "done",
+                summary: String(projectReview?.report?.summary || receipt?.summary || "CCM 已根据文件、验证和验收证据完成重验证"),
+                filesChanged: Array.isArray(fileChanges?.files)
+                    ? fileChanges.files.map((item) => item?.path || item?.file || item).filter(Boolean)
+                    : receipt?.filesChanged || [],
+                verification: Array.from(new Set([
+                    ...(Array.isArray(receipt?.verification) ? receipt.verification : []),
+                    ...(Array.isArray(projectReview?.verification_results)
+                        ? projectReview.verification_results.filter((item) => item?.status === "passed").map((item) => item.command || item.id)
+                        : []),
+                ])),
+                verificationResults: [
+                    ...(Array.isArray(receipt?.verificationResults) ? receipt.verificationResults : []),
+                    ...(Array.isArray(projectReview?.verification_results)
+                        ? projectReview.verification_results.filter((item) => item?.status === "passed").map((item) => ({
+                            name: item.command || item.id,
+                            command: item.command || "",
+                            status: "passed",
+                            exitCode: item.exit_code,
+                            source: "main_agent_self_verification",
+                            evidence: [item.id],
+                        }))
+                        : []),
+                ],
+                blockers: [],
+                needs: [],
+                ccmRevalidated: true,
+                ccm_revalidated: true,
+                evidenceSource: "ccm_revalidated",
+                contentStored: false,
+            }
+            : receipt;
         updateTask(task.id, {
             ...(independentTestAgentEnabled ? { test_agent_review: projectReview } : { main_agent_self_verification: projectReview }),
             main_agent_final_acceptance: mainAgentFinalAcceptance,
+            ...(ccmRevalidated ? { receipt: authoritativeReceipt } : {}),
         });
+        if (ccmRevalidated) {
+            const currentWorkItems = Array.isArray((loadTasks().find((item) => item.id === task.id) || task)?.work_items)
+                ? (loadTasks().find((item) => item.id === task.id) || task).work_items
+                : [];
+            for (const item of currentWorkItems) {
+                if (task.assign_type === "group" && item?.target && String(item.target) !== String(task.target_project))
+                    continue;
+                updateTaskWorkItemFromReceipt(task.id, String(item?.id || task.target_project), authoritativeReceipt, fileChanges, authoritativeReceipt.summary, {
+                    ctx,
+                    autoContinueUnlocked: false,
+                });
+            }
+        }
         const acceptedResult = requiresProjectReview
-            ? { ...result, status: "done", detail: independentTestAgentEnabled ? "TestAgent 与项目主 Agent 验收通过" : task.workflow_type === "agent_coordination_dependency" ? "群聊主 Agent 验收通过" : "项目主 Agent 自验通过", review: projectReview, testAgent: independentTestAgentEnabled ? projectReview : null, mainAgentSelfVerification: independentTestAgentEnabled ? null : projectReview, mainAgentFinalAcceptance }
+            ? { ...result, status: "done", detail: independentTestAgentEnabled ? "TestAgent 与项目主 Agent 验收通过" : task.workflow_type === "agent_coordination_dependency" ? "群聊主 Agent 验收通过" : "项目主 Agent 自验通过", receipt: authoritativeReceipt, review: projectReview, testAgent: independentTestAgentEnabled ? projectReview : null, mainAgentSelfVerification: independentTestAgentEnabled ? null : projectReview, mainAgentFinalAcceptance }
             : result;
         transitionExecution(task.id, acceptedResult.status === "done" ? "reviewing" : "failed", acceptedResult.status === "done" ? independentTestAgentEnabled ? "项目 Agent 已交付并通过独立验收" : task.workflow_type === "agent_coordination_dependency" ? "协作依赖已交付，等待群聊主 Agent 合并" : "项目 Agent 已交付并通过主 Agent 自验" : acceptedResult.detail, {
             green,
-            receipt,
+            receipt: authoritativeReceipt,
             fileChanges,
             runnerVerification: extractRunnerVerificationEvidence(output),
             outputPreview: output,

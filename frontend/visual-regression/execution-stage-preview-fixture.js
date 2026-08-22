@@ -3,7 +3,10 @@ import AgentExecutionTranscript from '../src/components/common/AgentExecutionTra
 
 const now = Date.now()
 const at = millisecondsAgo => new Date(now - millisecondsAgo).toISOString()
-const base = { schema:'ccm-user-visible-agent-event-v1', scope:'group', scopeId:'preview-group', exactSessionId:'preview-session', generation:1, contentStored:false, visibility:'default' }
+// All events belong to task attempt 1. The nested executionStage/agentDisplay
+// attempt values below represent worker/TestAgent retries inside that task
+// attempt and must not split the task replay into artificial attempts.
+const base = { schema:'ccm-user-visible-agent-event-v1', scope:'group', scopeId:'preview-group', exactSessionId:'preview-session', taskId:'task-preview', generation:1, attempt:1, contentStored:false, visibility:'default' }
 const stage = (kind, attempt = 1, extra = {}) => ({ kind, stageRunId:`preview:${kind}`, attempt, startedAt:at(272000), ...extra })
 const agentDisplay = (projectId, runtimeLabel, workItemTitle, phase, attempt, extra = {}) => ({ projectId, projectName:projectId, runtimeLabel, workItemTitle, phase, attempt, isParallel:true, ...extra })
 
@@ -23,12 +26,13 @@ const events = [
   { ...base, eventId:'test-attempt-2-start', agentRunId:'test-ui', taskId:'task-preview', workItemId:'test-ui-admin', sequence:11, eventType:'agent_started', display:{ title:'TestAgent', target:'smart-live-ui · 第2轮复验', summary:'正在复验失败范围与核心回归', status:'running' }, createdAt:at(65000), detail:{ executionStage:stage('independent_verification',2,{ reviewCycleId:'review-ui' }), agentDisplay:agentDisplay('smart-live-ui','TestAgent','第2轮增量复验','executing',2,{ isParallel:false }) } },
   { ...base, eventId:'test-attempt-2-done', agentRunId:'test-ui', taskId:'task-preview', workItemId:'test-ui-admin', sequence:12, eventType:'agent_completed', display:{ title:'TestAgent', target:'smart-live-ui · 第2轮复验', summary:'第2轮独立验收通过', status:'success', durationMs:23000, toolUseCount:3, tokenCount:1240 }, createdAt:at(42000), detail:{ executionStage:stage('independent_verification',2,{ reviewCycleId:'review-ui' }), agentDisplay:agentDisplay('smart-live-ui','TestAgent','第2轮增量复验','completed',2,{ isParallel:false }), evidenceIds:['test-pass-ui'] } },
 
-  { ...base, eventId:'main-summary', agentRunId:'main-summary', taskId:'task-preview', workItemId:'final-summary', sequence:13, eventType:'agent_progress', display:{ title:'群聊主 Agent', target:'最终验收与交付总结', summary:'TestAgent已通过，正在核对三项目交付并生成最终总结', status:'running', durationMs:12000 }, createdAt:at(12000), detail:{ executionStage:stage('main_agent_summary',1), agentDisplay:{ projectId:'', projectName:'', runtimeLabel:'群聊主 Agent', workItemTitle:'最终验收与交付总结', phase:'executing', attempt:1, isParallel:false }, timing:{ totalMs:272000, queueWaitMs:18000, dependencyWaitMs:22000, stages:{ preparationMs:8000, projectAgentWallMs:135000, testAgentWallMs:54000, mainAgentSummaryMs:12000 } } } },
+  { ...base, eventId:'main-summary', agentRunId:'main-summary', taskId:'task-preview', workItemId:'final-summary', sequence:13, eventType:'agent_completed', display:{ title:'群聊主 Agent', target:'最终验收与交付总结', summary:'TestAgent已通过，三项目交付总结已完成', status:'success', durationMs:12000 }, createdAt:at(12000), detail:{ executionStage:stage('main_agent_summary',1,{ completedAt:at(1000), activeDurationMs:12000 }), agentDisplay:{ projectId:'', projectName:'', runtimeLabel:'群聊主 Agent', workItemTitle:'最终验收与交付总结', phase:'completed', attempt:1, isParallel:false }, timing:{ totalMs:272000, queueWaitMs:18000, dependencyWaitMs:22000, stages:{ preparationMs:8000, projectAgentWallMs:135000, testAgentWallMs:54000, mainAgentSummaryMs:12000 } } } },
+  { ...base, eventId:'result', taskId:'task-preview', sequence:14, eventType:'result', display:{ title:'任务已完成', summary:'三项目交付与独立验收通过', status:'success', durationMs:272000 }, createdAt:at(500), detail:{ terminalGate:{ passed:true, accepted:true, source:'task_ledger' }, completionSummary:{ schema:'ccm-completion-summary-v1', status:'success', headline:'联合任务已完成', filesChanged:3, verificationPassed:2, verificationFailed:0, blockers:[], source:'terminal_gate', contentStored:false } } },
 ]
 
 const messages = [
   { role:'user', content:'完成三个项目的联合功能并独立验收', timestamp:at(275000) },
-  { role:'assistant', content:'正在整理最终交付总结。', timestamp:at(1000), taskId:'task-preview' },
+  { role:'assistant', content:'三项目交付与独立验收已经完成。', timestamp:at(100), taskId:'task-preview', streaming:false },
 ]
 
 createApp({

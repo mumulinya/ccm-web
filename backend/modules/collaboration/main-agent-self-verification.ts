@@ -7,6 +7,7 @@ import {
 } from "../../test-agent/utils";
 import { runSemanticDecision } from "../../system/semantic-decision-runtime";
 import type { TaskAcceptancePolicySnapshot } from "./task-acceptance-policy";
+import { discoverProjectVerificationCommands } from "../../agents/project-verification-discovery";
 
 type VerificationProject = {
   name: string;
@@ -69,6 +70,60 @@ function cleanList(value: any, max = 40, itemMax = 800) {
   return [...new Set((Array.isArray(value) ? value : []).map(item => String(item || "").trim().slice(0, itemMax)).filter(Boolean))].slice(0, max);
 }
 
+function normalizeAcceptanceCriterionForSignedPolicy(criterion: string) {
+  return String(criterion || "")
+    .replace(
+      /并走\s*TestAgent\s*和\s*Terminal Gate\s*验收/gi,
+      "并由本次签署的主 Agent 自验完成复核；Terminal Gate 在本复核通过后由 CCM 执行",
+    )
+    .replace(
+      /require\s+(?:a\s+)?TestAgent\s+and\s+Terminal Gate\s+(?:review|acceptance)/gi,
+      "use the signed main-agent self-verification policy; CCM runs Terminal Gate after this review passes",
+    );
+}
+
+function isSupersededProviderBlocker(value: string) {
+  const blocker = String(value || "").toLowerCase();
+  return blocker.includes("testagent 未创建")
+    || blocker.includes("testagent not created")
+    || blocker.includes("terminal gate")
+    || (blocker.includes("agent communication") && (blocker.includes("签名") || blocker.includes("signed")));
+}
+
+function applyTaskLifetimeFileProvenance(task: any, projects: VerificationProject[], files: any[]) {
+  const workItemIds = new Set<string>([
+    String(task?.work_item_id || task?.workItemId || ""),
+    ...((Array.isArray(task?.task_context?.workItems) ? task.task_context.workItems : [])
+      .map((item: any) => String(item?.workItemId || item?.work_item_id || ""))),
+  ].filter(Boolean));
+  const taskStartedAt = Date.parse(String(task?.created_at || task?.createdAt || task?.task_context?.updatedAt || ""));
+  return files.map(file => {
+    if (String(file?.status || "").toLowerCase() === "added") return file;
+    const project = projects.find(item => item.name === file.project);
+    if (!project?.workDir || !file.path) return file;
+    const result = spawnSync("git", ["log", "--diff-filter=A", "-1", "--format=%H%x09%cI%x09%s", "--", file.path], {
+      cwd: project.workDir,
+      encoding: "utf8",
+      windowsHide: true,
+    });
+    if (result.status !== 0) return file;
+    const [commit = "", committedAt = "", subject = ""] = String(result.stdout || "").trim().split("\t");
+    const committedAtMs = Date.parse(committedAt);
+    const normalizedSubject = subject.trim().toLowerCase();
+    const belongsToTask = normalizedSubject.includes(String(task?.id || "").toLowerCase())
+      || [...workItemIds].some(id => normalizedSubject === `ccm: ${id}`.toLowerCase());
+    if (!commit || !belongsToTask || (Number.isFinite(taskStartedAt) && Number.isFinite(committedAtMs) && committedAtMs < taskStartedAt)) return file;
+    return {
+      ...file,
+      status: "added",
+      task_lifetime_status: "added",
+      provenance: "task_work_item_commit",
+      provenance_checksum: checksum({ taskId: task?.id || "", path: file.path, commit, committedAt, subject }),
+      contentStored: false,
+    };
+  });
+}
+
 async function runCommand(project: VerificationProject, command: string, index: number, timeoutMs: number): Promise<VerificationResult> {
   const id = `command:${project.name}:${index + 1}`;
   const invocation = verificationCommandInvocation(command);
@@ -121,7 +176,8 @@ async function runCommand(project: VerificationProject, command: string, index: 
 async function runConfiguredVerification(projects: VerificationProject[], timeoutMs: number) {
   const results: VerificationResult[] = [];
   for (const project of projects.slice(0, 8)) {
-    const commands = cleanList(project.verificationCommands, 8, 300);
+    const configured = cleanList(project.verificationCommands, 8, 300);
+    const commands = configured.length ? configured : discoverProjectVerificationCommands(project.workDir, 4);
     for (let index = 0; index < commands.length; index += 1) {
       results.push(await runCommand(project, commands[index], index, timeoutMs));
     }
@@ -153,6 +209,7 @@ export async function runMainAgentSelfVerification(input: {
   changedFiles?: any[];
   projects?: VerificationProject[];
   workerOutputs?: string[];
+  workerReceipts?: any[];
   sourceSnapshotChecksum?: string;
   commandTimeoutMs?: number;
   semanticModelCall?: (request: { config: any; messages: any[]; maxTokens: number }) => Promise<any>;
@@ -162,18 +219,42 @@ export async function runMainAgentSelfVerification(input: {
     throw new Error("主 Agent 自验拒绝使用非自验模式的策略快照");
   }
   const task = input.task || {};
-  const criteria = cleanList(input.acceptanceCriteria?.length ? input.acceptanceCriteria : String(task.acceptance_criteria || "").split(/\r?\n|；/), 30, 900);
+  const criteria = cleanList(input.acceptanceCriteria?.length ? input.acceptanceCriteria : String(task.acceptance_criteria || "").split(/\r?\n|；/), 30, 900)
+    .map(normalizeAcceptanceCriterionForSignedPolicy);
   if (!criteria.length) criteria.push(String(task.business_goal || task.description || task.title || "完成任务").trim().slice(0, 900));
-  const changedFiles = (Array.isArray(input.changedFiles) ? input.changedFiles : []).map(item => ({
+  let changedFiles = (Array.isArray(input.changedFiles) ? input.changedFiles : []).map(item => ({
     path: String(item?.path || item?.file || item || "").trim(),
     project: String(item?.project || item?.projectName || task.target_project || "").trim(),
     status: String(item?.status_kind || item?.status || "modified").trim(),
   })).filter(item => item.path).slice(0, 200);
-  const projects = (input.projects || []).filter(project => project?.name && project?.workDir);
+  const projects = (input.projects || []).filter(project => project?.name && project?.workDir).map(project => ({
+    ...project,
+    verificationCommands: cleanList(project.verificationCommands, 8, 300).length
+      ? cleanList(project.verificationCommands, 8, 300)
+      : discoverProjectVerificationCommands(project.workDir, 4),
+  }));
+  changedFiles = applyTaskLifetimeFileProvenance(task, projects, changedFiles);
   const verificationResults = await runConfiguredVerification(projects, Math.max(10_000, Math.min(300_000, Number(input.commandTimeoutMs || 120_000))));
+  const workerReceipts = (Array.isArray(input.workerReceipts) ? input.workerReceipts : []).slice(0, 12).map((receipt, index) => ({
+    id: `worker_receipt:${index + 1}`,
+    status: String(receipt?.status || receipt?.receipt_status || "").slice(0, 80),
+    summary: String(receipt?.summary || "").slice(0, 1000),
+    actions: cleanList(receipt?.actions, 30, 500),
+    filesChanged: cleanList(receipt?.filesChanged || receipt?.files_changed || receipt?.files, 100, 500),
+    verification: cleanList(receipt?.verification || receipt?.verificationResults || receipt?.tests, 30, 500),
+    // TestAgent and Terminal Gate are owned by CCM after the worker returns.
+    // Likewise, reaching this verifier proves that the strict pre-execution
+    // ACK gate already accepted the signed communication envelope. Provider
+    // text cannot turn those downstream/platform responsibilities into a
+    // delivery blocker.
+    blockers: cleanList(receipt?.blockers, 20, 500).filter(item => !isSupersededProviderBlocker(item)),
+    contentStored: false,
+  })).filter(item => item.actions.length || item.filesChanged.length || item.verification.length || item.summary);
   const evidenceIds = new Set<string>([
+    "acceptance_policy:main_agent_self_verification",
     ...changedFiles.map(item => `file:${item.project}:${item.path}`),
     ...verificationResults.filter(item => item.status === "passed").map(item => item.id),
+    ...workerReceipts.map(item => item.id),
   ]);
   const requiresChanges = task.requires_code_changes === true || task.requiresCodeChanges === true;
   const requiresVerification = task.requires_verification !== false && (task.requires_verification === true || task.requiresVerification === true || requiresChanges);
@@ -195,15 +276,24 @@ export async function runMainAgentSelfVerification(input: {
         sessionId: input.policy.exact_session_id || String(task.id),
         taskId: String(task.id || input.policy.task_id),
       },
-      system: `You are the main Agent reviewing the current task while TestAgent is disabled. Analyze only server-provided evidence; never invent commands, files, or pass conclusions. Return one coverage row for every acceptance criterion and cite only IDs present in evidence_ids. Return JSON: {"summary":"self-review summary","criterion_coverage":[{"criterion":"original criterion","status":"verified|unverified|needs_user","evidence_ids":["real evidence ID"],"reason":"evidence basis"}],"risks":[],"gaps":[],"confidence":0.0}. Do not return an accepted field.`,
+      system: `You are the main Agent reviewing the current task while TestAgent is disabled by the signed acceptance policy. Analyze only server-provided evidence; never invent commands, files, or pass conclusions. A structured worker receipt is supporting evidence only and cannot override failed deterministic file or command checks. File status is task-lifetime status: an added status with provenance task_work_item_commit proves that an earlier attempt of this same task created the file, even if the current recovery attempt now sees it as modified. A provider-reported command blocker is superseded only when the same command has a fresh passed CCM verification result; unrelated scope or file blockers remain valid. The acceptance criteria supplied to you are the canonical policy-normalized criteria for this review: the signed main-agent self-verification replaces TestAgent, and Terminal Gate runs only after this receipt passes. Therefore never demand a TestAgent receipt or a pre-existing Terminal Gate receipt. Cite acceptance_policy:main_agent_self_verification when policy substitution is relevant. Return one coverage row for every acceptance criterion and cite only IDs present in evidence_ids. Return JSON: {"summary":"self-review summary","criterion_coverage":[{"criterion":"original criterion","status":"verified|unverified|needs_user","evidence_ids":["real evidence ID"],"reason":"evidence basis"}],"risks":[],"gaps":[],"confidence":0.0}. Do not return an accepted field.`,
       input: {
         goal: task.business_goal || task.description || task.title,
         source_snapshot_checksum: String(input.sourceSnapshotChecksum || checksum(changedFiles)),
         acceptance_criteria: criteria,
         deterministic_checks: checks,
         evidence: {
+          acceptance_policy: {
+            id: "acceptance_policy:main_agent_self_verification",
+            mode: input.policy.mode,
+            test_agent_enabled: input.policy.test_agent_enabled,
+            terminal_gate_stage: "after_self_verification",
+            checksum: input.policy.checksum,
+            contentStored: false,
+          },
           changed_files: changedFiles.map(item => ({ id: `file:${item.project}:${item.path}`, ...item })),
           verification_results: verificationResults.map(item => ({ ...item, output: item.output.slice(0, 800) })),
+          worker_receipts: workerReceipts,
         },
         worker_output_previews: cleanList(input.workerOutputs, 12, 1200),
       },

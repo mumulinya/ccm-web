@@ -44,8 +44,15 @@ import {
 import { providerNativeToolReferenceAllowed, recordProviderNativeToolCapability } from "../../system/provider-native-tool-capability";
 import {
   buildOpenAiResponsesBody,
+  isOpenAiResponsesSse,
   normalizeOpenAiResponsesUrl,
+  rememberOpenAiResponsesMaxOutputTokensUnsupported,
+  rememberOpenAiResponsesTemperatureUnsupported,
   safeProviderHttpDetail,
+  shouldOmitOpenAiResponsesMaxOutputTokens,
+  shouldOmitOpenAiResponsesTemperature,
+  shouldRetryOpenAiResponsesWithoutMaxOutputTokens,
+  shouldRetryOpenAiResponsesWithoutTemperature,
 } from "../../system/openai-responses-transport";
 
 export { normalizeOpenAiResponsesUrl } from "../../system/openai-responses-transport";
@@ -1048,7 +1055,7 @@ async function callOpenAiResponsesChatOnce(config: any, options: LlmCallOptions)
   const effort = resolveReasoningEffort(callReasoningConfig(config, options));
   const abort = createLlmAbortContext(options, resolveLlmTimeoutMs(config, options.defaultTimeoutMs || 30000, options.timeoutMs));
   try {
-    const response = await fetchWithNodeHttpFallback(endpoint, {
+    const request = (omitMaxOutputTokens: boolean, omitTemperature: boolean) => fetchWithNodeHttpFallback(endpoint, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -1057,28 +1064,52 @@ async function callOpenAiResponsesChatOnce(config: any, options: LlmCallOptions)
       body: JSON.stringify(buildOpenAiResponsesBody({
         model: config.model,
         messages,
-        maxOutputTokens: options.maxTokens,
+        maxOutputTokens: omitMaxOutputTokens ? undefined : options.maxTokens,
         stream: streaming,
         reasoningEffort: effort,
-        temperature: options.temperature ?? resolveTemperature(config, 0.2),
+        temperature: omitTemperature ? undefined : options.temperature ?? resolveTemperature(config, 0.2),
         cachePatch: cache.adapterPatch?.body || {},
         nativeTools: config.providerNativeToolsMode !== "json" ? options.nativeTools : undefined,
       })),
       signal: abort.controller.signal,
     });
-    if (!response.ok) {
+    let omittedMaxOutputTokens = shouldOmitOpenAiResponsesMaxOutputTokens(endpoint, config.model);
+    let omittedTemperature = shouldOmitOpenAiResponsesTemperature(endpoint, config.model);
+    let discoveredMaxOutputIncompatibility = false;
+    let discoveredTemperatureIncompatibility = false;
+    let response: any;
+    for (let compatibilityAttempt = 0; compatibilityAttempt < 3; compatibilityAttempt += 1) {
+      response = await request(omittedMaxOutputTokens, omittedTemperature);
+      if (response.ok) break;
       const text = await response.text();
+      if (!omittedMaxOutputTokens
+        && Number(options.maxTokens || 0) > 0
+        && shouldRetryOpenAiResponsesWithoutMaxOutputTokens(response.status, text)) {
+        omittedMaxOutputTokens = true;
+        discoveredMaxOutputIncompatibility = true;
+        continue;
+      }
+      if (!omittedTemperature
+        && effort === "off"
+        && shouldRetryOpenAiResponsesWithoutTemperature(response.status, text)) {
+        omittedTemperature = true;
+        discoveredTemperatureIncompatibility = true;
+        continue;
+      }
       throw providerHttpError(options.httpErrorPrefix || "HTTP", response, text);
     }
+    if (!response?.ok) throw providerHttpError(options.httpErrorPrefix || "HTTP", response || { status: 400 }, "Responses API compatibility retry failed");
+    if (discoveredMaxOutputIncompatibility) rememberOpenAiResponsesMaxOutputTokensUnsupported(endpoint, config.model);
+    if (discoveredTemperatureIncompatibility) rememberOpenAiResponsesTemperatureUnsupported(endpoint, config.model);
     if (options.nativeTools?.length) { try { recordProviderNativeToolCapability(config, "openai", "confirmed", "responses_native_tools_accepted"); } catch {} }
     const responseId = providerRequestId(response);
-    if (streaming) {
+    if (streaming || isOpenAiResponsesSse(response)) {
       let usage: any = null;
       const turnAccumulator = createOpenAiResponsesStreamTurnAccumulator(options.onNativeToolCallReady);
       await consumeSseJson(response, event => {
         turnAccumulator.push(event);
         const delta = event?.type === "response.output_text.delta" ? emitStreamDelta(options, event?.delta) : "";
-        if (delta) emitted = true;
+        if (delta && streaming) emitted = true;
         if (event?.response?.usage) usage = event.response.usage;
         if (event?.type === "error") throw new Error(String(event?.error?.message || event?.message || "Responses API 流式调用失败"));
       });

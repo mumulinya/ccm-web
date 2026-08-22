@@ -47,23 +47,22 @@ const crypto = __importStar(require("crypto"));
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const utils_1 = require("../../core/utils");
-const group_compaction_engine_1 = require("../collaboration/group-compaction-engine");
 const unified_session_compaction_model_1 = require("../../system/unified-session-compaction-model");
 const group_orchestrator_config_1 = require("../collaboration/group-orchestrator-config");
 const group_compaction_strategy_1 = require("../collaboration/group-compaction-strategy");
 const model_capability_cache_1 = require("../collaboration/model-capability-cache");
 const context_budget_1 = require("../../system/context-budget");
-const session_memory_window_1 = require("../../system/session-memory-window");
 const runtime_1 = require("../../agents/runtime");
 const project_session_agent_binding_1 = require("./project-session-agent-binding");
 const project_validation_1 = require("./project-validation");
 const session_compaction_core_1 = require("../../system/session-compaction-core");
 const session_execution_ledger_1 = require("../../system/session-execution-ledger");
+const session_task_timeline_1 = require("../../tasks/session-task-timeline");
+const session_task_timeline_2 = require("../../tasks/session-task-timeline");
 const session_model_context_1 = require("../../system/session-model-context");
 const unified_session_compaction_1 = require("../../system/unified-session-compaction");
 const unified_session_compaction_adapters_1 = require("../../system/unified-session-compaction-adapters");
 const ccm_context_accounting_v2_1 = require("../../system/ccm-context-accounting-v2");
-const session_summary_quality_gate_1 = require("../../system/session-summary-quality-gate");
 const MODEL_MAX_OUTPUT_TOKENS = 20_000;
 const compactions = new Map();
 function projectCompactionSourceChecksum(data) {
@@ -76,8 +75,11 @@ function projectCompactionSourceChecksum(data) {
 async function runUnifiedProjectSessionCompaction(project, projectSessionId, options = {}) {
     const safeProject = (0, project_validation_1.validateProjectName)(project);
     const safeSessionId = (0, project_validation_1.validateSessionId)(projectSessionId);
-    if ((0, project_session_agent_binding_1.isProjectSessionAgentDispatchActive)(safeProject, safeSessionId))
+    const expectedDispatchScopeId = (0, project_session_agent_binding_1.buildProjectSessionAgentScopeId)(safeProject, safeSessionId);
+    const ownsActiveDispatch = String(options.activeDispatchScopeId || "") === expectedDispatchScopeId;
+    if ((0, project_session_agent_binding_1.isProjectSessionAgentDispatchActive)(safeProject, safeSessionId) && !ownsActiveDispatch) {
         throw new Error("当前项目会话仍有第三方 Agent 正在执行，暂不能压缩");
+    }
     const file = sessionFile(safeProject, safeSessionId);
     if (!fs.existsSync(file))
         throw new Error("项目会话不存在");
@@ -115,7 +117,7 @@ async function runUnifiedProjectSessionCompaction(project, projectSessionId, opt
             const current = JSON.parse(fs.readFileSync(file, "utf8"));
             if (projectCompactionSourceChecksum(current) !== acquiredChecksum)
                 throw new Error("project_compaction_fence_stale");
-            if ((0, project_session_agent_binding_1.isProjectSessionAgentDispatchActive)(safeProject, safeSessionId))
+            if ((0, project_session_agent_binding_1.isProjectSessionAgentDispatchActive)(safeProject, safeSessionId) && !ownsActiveDispatch)
                 throw new Error("project_compaction_dispatch_started");
         },
         commit: (result, fence) => {
@@ -128,7 +130,7 @@ async function runUnifiedProjectSessionCompaction(project, projectSessionId, opt
             const preservedIds = result.preservedRecentWindow.messages.map((item) => String(item?.id || "")).filter(Boolean);
             const summarizedCount = Number(result.preservedRecentWindow.startIndex || 0);
             const previousBinding = (0, project_session_agent_binding_1.getProjectSessionAgentBinding)(safeProject, safeSessionId);
-            const rotation = (0, project_session_agent_binding_1.rotateProjectSessionAgentBinding)(safeProject, safeSessionId, `统一会话压缩 ${result.receipt.checksum.slice(0, 12)}`);
+            const rotation = (0, project_session_agent_binding_1.rotateProjectSessionAgentBinding)(safeProject, safeSessionId, `统一会话压缩 ${result.receipt.checksum.slice(0, 12)}`, ownsActiveDispatch ? expectedDispatchScopeId : "");
             const state = (0, unified_session_compaction_1.buildUnifiedSessionCompactionStateV1)({ receipt: result.receipt, summaryQuality: result.summaryQuality, microCompact: result.microCompact, recoveryContext: result.recoveryContext, triggerReason: options.reason || "automatic", summarizedThroughMessageId: data.history?.[summarizedCount - 1]?.id || "", summarizedMessageCount: summarizedCount, preservedRecentMessageIds: preservedIds });
             try {
                 data.unifiedSessionSummary = summary;
@@ -208,10 +210,6 @@ function getProjectSessionCompactionActivity(project, projectSessionId) {
         startedAt: active.startedAt,
         updatedAt: active.startedAt,
     } : { active: false, status: "idle", stage: "", reason: "", startedAt: "", updatedAt: "" };
-}
-function compactText(value, max = 1600) {
-    const text = String(value || "").trim();
-    return text.length > max ? `${text.slice(0, Math.ceil(max * .68))}\n...[摘要输入已截断]...\n${text.slice(-Math.floor(max * .25))}` : text;
 }
 function sessionFile(project, projectSessionId) {
     return (0, project_validation_1.resolveContainedPath)(path.join(utils_1.CCM_DIR, "web-sessions"), (0, project_validation_1.validateProjectName)(project), `${(0, project_validation_1.validateSessionId)(projectSessionId)}.json`);
@@ -307,6 +305,22 @@ function appendProjectSessionExecutionEvent(projectInput, projectSessionIdInput,
     });
     if (!events.some(item => item.id === created.id))
         events.push(created);
+    if (event?.taskId || event?.task_id) {
+        (0, session_task_timeline_1.appendSessionTimelineEvent)({
+            exactSessionId: projectSessionId,
+            scope: "project",
+            scopeId: project,
+            type,
+            eventId: `execution:${created.id}`,
+            taskId: String(event?.taskId || event?.task_id),
+            workItemId: event?.workItemId || event?.work_item_id,
+            generation: event?.generation,
+            attempt: event?.attempt,
+            leaseId: event?.leaseId || event?.lease_id,
+            payloadRef: created.id,
+            timestamp: created.timestamp,
+        });
+    }
     data.execution_history_version = 1;
     data.execution_history = events.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
     data.updated_at = new Date().toISOString();
@@ -315,12 +329,17 @@ function appendProjectSessionExecutionEvent(projectInput, projectSessionIdInput,
 }
 function projectCompactionState(data, project, projectSessionId) {
     const unified = data?.unifiedSessionCompaction || null;
-    if (!unified || unified.schema !== "ccm-unified-session-compaction-state-v1") {
-        return (0, session_compaction_core_1.normalizeSessionCompactionState)({}, {
+    if (!unified || unified.schema !== "ccm-unified-session-compaction-state-v1")
+        return {
+            schema: "ccm-unified-session-compaction-state-v1",
             scope: "project",
-            sessionId: `${project}:${projectSessionId}`,
-        });
-    }
+            exactSessionId: `${project}:${projectSessionId}`,
+            activeSummary: null,
+            boundaryGeneration: 0,
+            summarizedMessageCount: 0,
+            preservedRecentMessageIds: [],
+            latestProviderUsage: null,
+        };
     return {
         ...unified,
         activeSummary: data?.unifiedSessionSummary || null,
@@ -434,15 +453,12 @@ function recordProjectSessionProviderUsage(project, projectSessionId, input = {}
         recoveryContextTokens: payload.tokenBreakdown.recoveryContext,
         hookResultTokens: payload.tokenBreakdown.hookResults,
     };
-    data.compaction = {
-        ...(data.compaction || {}),
-        latest_provider_usage: measurementUsage || null,
-        latestProviderUsage: measurementUsage || null,
-        token_measurement: tokenMeasurement,
+    data.unifiedSessionCompaction = {
+        ...data.unifiedSessionCompaction,
+        ...nextState,
+        providerUsage: measurementUsage || null,
         tokenMeasurement,
-        model_visible_payload: accounting,
         modelVisiblePayload: accounting,
-        v2: nextState,
     };
     data.updated_at = new Date().toISOString();
     persistSession(safeProject, safeSessionId, data);
@@ -455,215 +471,15 @@ function scheduleProjectSessionMemoryExtraction(project, projectSessionId, optio
     if (!fs.existsSync(file))
         return { scheduled: false, reason: "session_missing" };
     const data = JSON.parse(fs.readFileSync(file, "utf8"));
-    const history = Array.isArray(data.history) ? data.history.filter((message) => ["user", "assistant"].includes(String(message?.role || ""))) : [];
-    const state = projectCompactionState(data, safeProject, safeSessionId);
-    const cadence = (0, session_compaction_core_1.evaluateSessionMemoryCadence)(history, state.sessionMemoryState || {});
-    if (!cadence.shouldExtract)
-        return { scheduled: false, reason: cadence.reason, cadence };
-    const startIndex = Math.max(0, state.lastCompactedIndex + 1);
-    const visibleTimeline = history.slice(startIndex);
-    if (!visibleTimeline.length)
-        return { scheduled: false, reason: "no_messages" };
-    const timeline = projectModelTimeline(data, visibleTimeline);
-    const reference = referenceSummary(timeline);
-    const sourceMessageIds = reference.sourceMessageIds;
-    const config = (0, group_orchestrator_config_1.loadOrchestratorConfig)();
-    const system = [
-        "你是 CCM 项目会话 Session Memory 提取器。只输出 JSON，不要 Markdown，不得编造。",
-        "必须保留授权、决定、未完成事项、文件路径和 sourceMessageIds。",
-    ].join("\n");
-    const user = JSON.stringify({
-        project: safeProject,
-        projectSessionId: safeSessionId,
-        previousSummary: state.sessionMemoryState?.summary || state.activeSummary || null,
-        preservationReference: reference,
-        sourceMessageIds,
-        timeline,
+    const promise = compactProjectSessionWithModel(safeProject, safeSessionId, {
+        reason: "automatic",
+        modelCall: options.modelCall,
     });
-    const identity = {
-        boundaryGeneration: state.boundaryGeneration,
-        lastMessageId: String(history.at(-1)?.id || ""),
-        transcriptChecksum: (0, session_compaction_core_1.sessionCompactionChecksum)([
-            ...history.map((message) => [message.id, message.role, message.content]),
-            ...projectExecutionEvents(data).map(message => [message.id, message.type, message.toolCallId, message.payload]),
-        ]),
-        cadence,
-    };
-    const invoke = options.modelCall || ((request) => (0, group_compaction_engine_1.callCompactionModel)(config, request.system, request.user, request.maxOutputTokens));
-    const scheduled = (0, session_compaction_core_1.scheduleSessionMemoryExtraction)({
-        scope: "project",
-        sessionId: `${safeProject}:${safeSessionId}`,
-        identity,
-        extract: () => invoke({ system, user, maxOutputTokens: MODEL_MAX_OUTPUT_TOKENS, sessionMemory: true }),
-        commit: async (raw, expected) => {
-            const latest = JSON.parse(fs.readFileSync(file, "utf8"));
-            const latestHistory = Array.isArray(latest.history) ? latest.history.filter((message) => ["user", "assistant"].includes(String(message?.role || ""))) : [];
-            const latestState = projectCompactionState(latest, safeProject, safeSessionId);
-            if (latestState.boundaryGeneration !== expected.boundaryGeneration
-                || String(latestHistory.at(-1)?.id || "") !== expected.lastMessageId
-                || (0, session_compaction_core_1.sessionCompactionChecksum)([
-                    ...latestHistory.map((message) => [message.id, message.role, message.content]),
-                    ...projectExecutionEvents(latest).map(message => [message.id, message.type, message.toolCallId, message.payload]),
-                ]) !== expected.transcriptChecksum) {
-                return { committed: false, reason: "stale_identity" };
-            }
-            const candidate = raw?.summary || raw;
-            const validation = validateSummary(bindTrustedProjectSourceBoundary(candidate, sourceMessageIds), reference, sourceMessageIds, {
-                sessionId: `${safeProject}:${safeSessionId}`,
-                sourceMessages: history,
-                previousSummary: state.activeSummary,
-            });
-            if (!validation.valid)
-                throw new Error(`项目 Session Memory 校验失败：${validation.issues.join(", ")}`);
-            const summary = normalizeSummary(candidate, sourceMessageIds);
-            const sessionMemoryState = (0, session_compaction_core_1.buildSessionMemoryState)({
-                scope: "project",
-                sessionId: `${safeProject}:${safeSessionId}`,
-                summary,
-                cadence,
-                provider: raw?.provider,
-                model: raw?.model || config.model,
-            });
-            latest.compaction = {
-                ...(latest.compaction || {}),
-                session_memory_state: sessionMemoryState,
-                session_memory_extraction: { status: "committed", startedAt: scheduled.startedAt, completedAt: new Date().toISOString() },
-                v2: { ...latestState, sessionMemoryState, sessionMemoryExtraction: { status: "committed", startedAt: scheduled.startedAt, completedAt: new Date().toISOString() } },
-            };
-            persistSession(safeProject, safeSessionId, latest);
-            return { committed: true, sessionMemoryState };
-        },
-    });
-    if (scheduled.scheduled) {
-        data.compaction = {
-            ...(data.compaction || {}),
-            session_memory_extraction: { status: "in_flight", startedAt: scheduled.startedAt, identity },
-            v2: { ...state, sessionMemoryExtraction: { status: "in_flight", startedAt: scheduled.startedAt, identity } },
-        };
-        persistSession(safeProject, safeSessionId, data);
-    }
-    return { ...scheduled, cadence };
-}
-function referenceSummary(messages) {
-    const users = messages.filter(message => message.role === "user" && message.hidden_execution !== true);
-    const assistants = messages.filter(message => message.role === "assistant" && message.hidden_execution !== true);
-    const executionResults = messages.filter(message => message.type === "tool_result" || (message.hidden_execution === true && message.role === "user"));
-    const allText = messages.map(message => String(message.content || ""));
-    const filesAndResources = [...new Set(allText.flatMap(text => text.match(/(?:[A-Za-z]:\\[^\s"'<>|]+|\/?(?:[\w.-]+\/){1,8}[\w.-]+\.[A-Za-z0-9]{1,8})/g) || []))].slice(-40);
-    const structuredFacts = messages.flatMap(message => Array.isArray(message?.structured_memory_facts) ? message.structured_memory_facts : []);
-    const byStructuredType = (type) => structuredFacts
-        .filter((item) => String(item?.type || "") === type && String(item?.text || "").trim())
-        .map((item) => compactText(item.text, 1200))
-        .slice(-24);
-    return {
-        primaryRequest: compactText(users.at(-1)?.content, 1800),
-        userRequests: users.slice(-20).map(message => `#${message.id} ${compactText(message.content, 1000)}`),
-        keyOutcomes: [
-            ...assistants.slice(-20).map(message => `#${message.id} ${compactText(message.content, 1000)}`),
-            ...executionResults.slice(-20).map(message => `#${message.id} ${compactText(message.content, 1200)}`),
-        ].slice(-24),
-        authorization: byStructuredType("authorization"),
-        decisions: byStructuredType("decision"),
-        unresolved: byStructuredType("unresolved"),
-        filesAndResources,
-        latestOutcome: compactText(assistants.at(-1)?.content, 1800),
-        sourceMessageIds: messages.map(message => String(message.id || "")),
-    };
-}
-function normalizeSummary(value, sourceMessageIds) {
-    const list = (input, maxItems, maxChars = 1400) => (Array.isArray(input) ? input : []).map(item => compactText(item, maxChars)).filter(Boolean).slice(-maxItems);
-    return {
-        primaryRequest: compactText(value?.primaryRequest, 1800),
-        userRequests: list(value?.userRequests, 24),
-        keyOutcomes: list(value?.keyOutcomes, 24),
-        authorization: list(value?.authorization, 20),
-        decisions: list(value?.decisions, 24),
-        unresolved: list(value?.unresolved, 24),
-        filesAndResources: list(value?.filesAndResources, 48, 600),
-        latestOutcome: compactText(value?.latestOutcome, 1800),
-        sourceMessageIds,
-    };
-}
-function validateSummary(value, reference, sourceMessageIds, context = {}) {
-    const issues = [];
-    if (!value || typeof value !== "object" || Array.isArray(value))
-        issues.push("summary_not_object");
-    const ids = Array.isArray(value?.sourceMessageIds) ? value.sourceMessageIds.map(String) : [];
-    if (ids.length !== sourceMessageIds.length || ids.some((id, index) => id !== sourceMessageIds[index]))
-        issues.push("source_boundary_mismatch");
-    if (!String(value?.primaryRequest || value?.latestOutcome || "").trim())
-        issues.push("summary_core_empty");
-    for (const key of ["authorization", "decisions", "unresolved", "filesAndResources"]) {
-        const preserved = (Array.isArray(value?.[key]) ? value[key] : []).map(String);
-        for (const anchor of reference[key] || [])
-            if (!preserved.includes(String(anchor)))
-                issues.push(`${key}_anchor_missing`);
-    }
-    const quality = (0, session_summary_quality_gate_1.evaluateSessionSummaryQuality)({
-        scope: "project",
-        sessionId: String(context.sessionId || "project-session"),
-        summary: value,
-        reference,
-        previousSummary: context.previousSummary,
-        sourceMessages: context.sourceMessages,
-        sourceMessageIds,
-    });
-    issues.push(...quality.issues);
-    return { valid: issues.length === 0, issues: [...new Set(issues)], quality };
-}
-function bindTrustedProjectSourceBoundary(summary, sourceMessageIds) {
-    if (!summary || typeof summary !== "object" || Array.isArray(summary))
-        return summary;
-    return { ...summary, sourceMessageIds: [...sourceMessageIds] };
+    void promise.catch(() => undefined);
+    return { scheduled: true, unified: true, promise };
 }
 function summaryChecksum(value) {
     return crypto.createHash("sha256").update(JSON.stringify(value || null)).digest("hex");
-}
-function fitProjectCompactionPrompt(system, payload, maxInputTokens) {
-    const rounds = (0, session_memory_window_1.buildApiConversationRounds)(payload.timeline || []);
-    const selectedRounds = [...rounds];
-    const droppedMessageIds = [];
-    let droppedRounds = 0;
-    const render = (timeline) => JSON.stringify({
-        ...payload,
-        timeline,
-        timelineProjection: {
-            strategy: droppedMessageIds.length ? "drop_oldest_complete_rounds" : "full_timeline",
-            fullSourceMessageIds: payload.preservationReference?.sourceMessageIds || [],
-            includedMessageIds: timeline.map((message) => String(message?.id || "")),
-            droppedMessageIds,
-            fullTranscriptRetained: true,
-        },
-    });
-    let timeline = selectedRounds.flat();
-    let user = render(timeline);
-    while (selectedRounds.length > 1 && droppedRounds < 3 && (0, context_budget_1.estimateTextTokens)(system) + (0, context_budget_1.estimateTextTokens)(user) > maxInputTokens) {
-        const dropped = selectedRounds.shift() || [];
-        droppedMessageIds.push(...dropped.map((message) => String(message?.id || "")));
-        droppedRounds += 1;
-        timeline = selectedRounds.flat();
-        user = render(timeline);
-    }
-    if ((0, context_budget_1.estimateTextTokens)(system) + (0, context_budget_1.estimateTextTokens)(user) > maxInputTokens) {
-        throw new Error("项目会话压缩输入删除三轮最旧完整对话后仍超过模型容量");
-    }
-    return {
-        user,
-        projection: {
-            strategy: droppedMessageIds.length ? "drop_oldest_complete_rounds" : "full_timeline",
-            originalMessageCount: (payload.timeline || []).length,
-            includedMessageCount: timeline.length,
-            droppedMessageIds,
-            projectedMessageContent: false,
-            ptlRecoveryAttempts: droppedRounds,
-            estimatedInputTokens: (0, context_budget_1.estimateTextTokens)(system) + (0, context_budget_1.estimateTextTokens)(user),
-            maxInputTokens,
-        },
-        timeline,
-    };
-}
-function isPromptTooLong(error) {
-    return /HTTP\s*413|prompt(?:\s+is)?\s+too\s+long|context(?:_length)?(?:\s+window)?\s*(?:exceeded|limit)|maximum context|request too large/i.test(String(error?.message || error || ""));
 }
 async function compactProjectSessionWithModel(project, projectSessionId, options = {}) {
     return runUnifiedProjectSessionCompaction(project, projectSessionId, options);
@@ -715,6 +531,7 @@ function buildProjectSessionModelContextProjection(project, projectSessionId, op
         return null;
     const data = JSON.parse(fs.readFileSync(file, "utf8"));
     const state = projectCompactionState(data, project, projectSessionId);
+    const sessionTaskIndex = (0, session_task_timeline_2.readVerifiedSessionTaskIndex)({ exactSessionId: projectSessionId, scope: "project", scopeId: project });
     const summary = data.unifiedSessionSummary || state.activeSummary || null;
     const history = Array.isArray(data.history)
         ? data.history.filter((message) => ["user", "assistant"].includes(String(message?.role || "")))
@@ -732,22 +549,15 @@ function buildProjectSessionModelContextProjection(project, projectSessionId, op
         summaryChecksum: canonicalSummary ? summaryChecksum(summary) : "",
         boundaryGeneration: Number(state.boundaryGeneration || 0),
         summarizedThroughIndex: Number(state.lastCompactedIndex || -1),
-        lastSummarizedMessageId: String(state.sessionMemoryState?.lastExtractedMessageId || ""),
+        lastSummarizedMessageId: String(state.summarizedThroughMessageId || ""),
         currentRequest: options.currentRequest,
         microCompact: (0, session_model_context_1.resolveSessionModelMicroCompactPolicy)(config, {
             contextTokens: Number(state.tokenMeasurement?.activeTokens || 0),
-            pressureThresholdTokens: Number(state.autoCompactThreshold || data.compaction?.auto_compact_threshold || 0),
+            pressureThresholdTokens: Number(state.autoCompactThreshold || 0),
         }),
+        currentTaskId: sessionTaskIndex.activeTaskId,
+        sessionTaskIndex,
     });
-    if (options.persistMicroCompactReceipt === true) {
-        data.compaction = {
-            ...(data.compaction || {}),
-            micro_compact_receipt: unified.microCompact,
-            tool_result_content_replacement_receipt: unified.contentReplacement,
-        };
-        data.updated_at = new Date().toISOString();
-        persistSession(project, projectSessionId, data);
-    }
     return {
         ...unified,
         schema: "ccm-project-session-model-context-v1",

@@ -664,6 +664,7 @@ export async function runCoordinatorReviewLoop(input: {
       changedFiles: actualFileChanges,
       projects: verificationProjects,
       workerOutputs: allOutputs,
+      workerReceipts: (Array.isArray(currentTask?.work_items) ? currentTask.work_items : []).map((item: any) => item?.lastReceipt).filter(Boolean),
       sourceSnapshotChecksum: String(currentTask?.planning_source_evidence?.checksum || ""),
     });
     const review: any = {

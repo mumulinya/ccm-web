@@ -107,10 +107,11 @@ function bindProjectSessionAgentExecution(input) {
     const binding = getProjectSessionAgentBinding(project, projectSessionId);
     return { session, options: (0, agent_sessions_1.getTaskAgentSessionOptions)(session), binding };
 }
-function rotateProjectSessionAgentBinding(project, projectSessionId, reason = "项目会话开始新世代") {
+function rotateProjectSessionAgentBinding(project, projectSessionId, reason = "项目会话开始新世代", activeDispatchScopeId = "") {
     const scopeId = buildProjectSessionAgentScopeId(project, projectSessionId);
-    if (activeProjectSessionDispatches.has(scopeId))
+    if (activeProjectSessionDispatches.has(scopeId) && String(activeDispatchScopeId || "") !== scopeId) {
         throw new Error("当前项目会话仍有第三方 Agent 正在执行，不能切换会话世代");
+    }
     const closed = (0, agent_sessions_1.closeTaskAgentSessions)({ scopeId, groupId: exports.PROJECT_WEB_SESSION_AGENT_GROUP }, reason);
     return { scopeId, closed, nextGeneration: getProjectSessionAgentBinding(project, projectSessionId).generation_count + 1 };
 }

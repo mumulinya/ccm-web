@@ -40,18 +40,6 @@ export declare function buildCompactionTimeline(messages: any[]): {
     timeline: string[];
 };
 export declare function extractJsonObject(text: string): any;
-export declare function normalizeOpenAiUrl(value: string): string;
-export declare function normalizeAnthropicUrl(value: string): string;
-export declare function normalizeGeminiCompactUrl(value: string, model: string): string;
-export declare function callCompactionModelOnce(config: any, system: string, user: string, maxOutputTokens: number, attemptTimeoutMs: number): Promise<{
-    summary: any;
-    usage: any;
-    provider: string;
-    model: string;
-    responseId: string;
-    stopReason: string;
-}>;
-export declare function callCompactionModel(config: any, system: string, user: string, maxOutputTokens?: number): Promise<any>;
 export declare function fitCompactionPromptToTokenBudget(system: string, user: string, maxInputTokens: number): {
     user: string;
     initialTokens: number;
@@ -175,13 +163,6 @@ export declare function buildGroupCompactionModelRequest(messages: any[], memory
         summaryInputProjection: any;
     };
 };
-export declare function summarizeWithModel(messages: any[], memory: any, fallback: ConversationSummary, config: any): Promise<{
-    summary: ConversationSummary;
-    requestAudit: any;
-    compactionUsage: any;
-    validationFallback: any;
-    qualityMessages: any;
-}>;
 export declare function buildRelevantHistoricalGroupContext(messages: any[], boundaryIndex: number, query: string, options?: any): string;
 export declare function calculateGroupProviderCalibratedContextTokens(estimatedActiveTokens: number, providerUsageBaseline: any): {
     estimatedActiveTokens: number;
@@ -265,7 +246,7 @@ export declare function runGroupMemoryPostCompactRecoveryAuditSelfTest(): Promis
         compacted: boolean;
         auditRecordedInCompaction: boolean;
         auditRecordedInBoundary: boolean;
-        auditRecordedInMessageCompression: boolean;
+        auditRecordedInUnifiedCompaction: boolean;
         boundaryRangeResolvable: boolean;
         rawTranscriptRecoverable: boolean;
         preservedAndReinjectReady: boolean;

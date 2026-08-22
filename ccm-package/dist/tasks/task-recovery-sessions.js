@@ -35,6 +35,7 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.resolveTaskUserSession = resolveTaskUserSession;
 exports.resolveTaskAgentSessionProjection = resolveTaskAgentSessionProjection;
+exports.rollbackResolvedTaskUserSession = rollbackResolvedTaskUserSession;
 exports.purgeTaskRecoveryUserSessions = purgeTaskRecoveryUserSessions;
 const db_1 = require("../core/db");
 const fs = __importStar(require("fs"));
@@ -51,17 +52,6 @@ const activeSessionOf = (task) => text(task?.execution_session_id || task?.activ
 function isBusy(task, currentTaskId) {
     return String(task?.id || "") !== currentTaskId && WRITE_STATUSES.has(String(task?.status || "").toLowerCase()) && task?.requires_code_changes !== false;
 }
-function appendBinding(taskId, binding, expectedContextChecksum = "") {
-    const result = (0, db_1.updateTaskByIdCas)(taskId, current => !expectedContextChecksum || String(current?.task_context?.checksum || "") === expectedContextChecksum, current => {
-        const context = current?.task_context || (0, task_context_1.buildTaskContextCapsule)(current);
-        const bindings = [...(Array.isArray(context.sessionBindings) ? context.sessionBindings : []).filter(item => item.bindingChecksum !== binding.bindingChecksum), binding];
-        const next = { ...context, sessionBindings: bindings, revision: Number(context.revision || 0) + 1, updatedAt: new Date().toISOString() };
-        delete next.checksum;
-        next.checksum = require("crypto").createHash("sha256").update(JSON.stringify(next)).digest("hex");
-        return { ...current, task_context: next, task_context_revision_receipt: { revision: next.revision, checksum: next.checksum, reason: "session_binding", at: next.updatedAt, contentStored: false } };
-    });
-    return result.updated ? result.task : null;
-}
 function findBusy(task, sessionId) {
     return (0, db_1.loadTasks)().find(item => String(item?.execution_session_id || item?.active_execution_session_id || item?.exact_session_id || item?.group_session_id || item?.project_session_id || item?.origin_session_id || "") === sessionId && isBusy(item, String(task?.id || "")));
 }
@@ -69,12 +59,18 @@ function resolveTaskUserSession(taskInput, options = {}) {
     const task = (0, db_1.getTaskById)(text(taskInput?.id)) || taskInput;
     if (!task)
         throw new Error("任务不存在，无法恢复会话");
+    if (options.expectedContextChecksum && String(task?.task_context?.checksum || "") !== String(options.expectedContextChecksum))
+        return { mode: "rejected", reason: "permission_changed", created: false, error: "任务上下文已变化，请重新恢复" };
     const taskId = text(task.id);
     const scope = scopeOf(task);
     const scopeId = scopeIdOf(task, scope);
     const sourceSession = sourceSessionOf(task);
     const original = activeSessionOf(task);
-    const attempt = Math.max(1, Number(options.attempt || task.execution_attempt || task.attempt || 0) + 1);
+    // The orchestrator passes the already-computed next attempt. Do not add one
+    // again or a recovery session becomes labelled N+1 while the task is on N.
+    const attempt = Math.max(1, options.attempt !== undefined
+        ? Number(options.attempt)
+        : Number(task.execution_attempt || task.attempt || task?.task_context?.latestAttempt || 0) + 1);
     let available = false;
     let archived = false;
     let originalSession = null;
@@ -131,16 +127,30 @@ function resolveTaskUserSession(taskInput, options = {}) {
         return { mode: "rejected", originalSessionId: original || undefined, reason, created: false };
     const context = task.task_context || (0, task_context_1.buildTaskContextCapsule)(task);
     const binding = (0, task_context_1.createTaskSessionBinding)({ task, taskId, attempt, role: created ? "recovery" : "active_execution", scope, scopeId, exactSessionId: activeSessionId, originalSessionId: sourceSession || original || undefined, createdForRecovery: created, reason, revision: Number(context.revision || 0) });
-    const updated = appendBinding(taskId, binding, options.expectedContextChecksum || "");
-    if (!updated)
-        return { mode: "rejected", originalSessionId: original || undefined, reason: "permission_changed", created: false, error: "任务上下文已变化，请重新恢复" };
-    return { mode, originalSessionId: original || undefined, activeSessionId, created, reason, binding, task: updated };
+    return { mode, originalSessionId: original || undefined, activeSessionId, created, reason, binding };
 }
 function resolveTaskAgentSessionProjection(task, workItem, attempt, mode = "rehydrated_session") {
     const taskContext = task?.task_context || (0, task_context_1.buildTaskContextCapsule)(task);
     const previous = Array.isArray(workItem?.agent_session_ids) ? workItem.agent_session_ids.at(-1) : workItem?.agent_session_id;
     const raw = { taskId: text(task?.id), workItemId: text(workItem?.id || workItem?.workItemId), attempt: Math.max(1, Number(attempt || 1)), mode, ...(previous ? { previousAgentSessionId: text(previous) } : {}), provider: text(workItem?.provider || task?.provider || ""), project: text(workItem?.target || workItem?.project || task?.target_project), taskContextChecksum: text(taskContext.checksum, 160), workItemChecksum: require("crypto").createHash("sha256").update(JSON.stringify(workItem || {})).digest("hex"), workspaceManifestChecksum: text(taskContext.workspace?.manifestChecksum, 160), blockers: [], contentStored: false };
     return { ...raw, checksum: require("crypto").createHash("sha256").update(JSON.stringify(raw)).digest("hex") };
+}
+function rollbackResolvedTaskUserSession(resolution, scope, scopeId) {
+    if (resolution?.created !== true || !resolution?.activeSessionId)
+        return false;
+    try {
+        if (scope === "group")
+            return Boolean((0, storage_1.deleteGroupChatSession)(scopeId, String(resolution.activeSessionId), { reason: "恢复事务未提交" })?.deleted);
+        if (scope === "global" || scope === "feishu")
+            return Boolean((0, global_agent_1.deleteGlobalAgentConversationSession)(String(resolution.activeSessionId), scope === "feishu" ? "feishu" : "web")?.deleted);
+        const file = (0, sessions_1.getSessionFilePath)(scopeId, String(resolution.activeSessionId));
+        if (fs.existsSync(file))
+            fs.unlinkSync(file);
+        return !fs.existsSync(file);
+    }
+    catch {
+        return false;
+    }
 }
 function purgeTaskRecoveryUserSessions(task) {
     const bindings = Array.isArray(task?.task_context?.sessionBindings) ? task.task_context.sessionBindings : [];

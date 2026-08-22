@@ -154,14 +154,14 @@ export declare function buildProjectRuntime(project: string, profileId?: unknown
 export declare function getProjectRuntimeLogs(project: string, profileId: unknown, kind: unknown, lines?: number): {
     project: string;
     profileId: string;
-    kind: "run" | "build";
+    kind: "build" | "run";
     logs: string;
     logWriteError: string;
     truncated?: undefined;
 } | {
     project: string;
     profileId: string;
-    kind: "run" | "build";
+    kind: "build" | "run";
     logs: string;
     truncated: boolean;
     logWriteError: string;
@@ -169,7 +169,7 @@ export declare function getProjectRuntimeLogs(project: string, profileId: unknow
 export declare function getProjectRuntimeLogsAsync(project: string, profileId: unknown, kind: unknown, lines?: number): Promise<{
     project: string;
     profileId: string;
-    kind: "run" | "build";
+    kind: "build" | "run";
     logs: string;
     truncated: boolean;
     logWriteError: string;

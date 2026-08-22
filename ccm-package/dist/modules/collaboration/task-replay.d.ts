@@ -294,6 +294,8 @@ export declare function runTaskReplayContractSelfTest(): {
         attempt_preserved: boolean;
         integrity_present: boolean;
         causal_chain_present: boolean;
+        recoverable_view_error_preserved: boolean;
+        recoverable_continue_added: boolean;
         no_content: boolean;
     };
 };

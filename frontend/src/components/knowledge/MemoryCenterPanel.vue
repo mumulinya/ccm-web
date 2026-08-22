@@ -79,7 +79,7 @@ const config = ref({
   timeBasedMicrocompactKeepRecent: 5,
   agentCommunicationV2Enabled: true,
   agentRunnerStartTimeoutMs: 60000,
-  agentAckTimeoutMs: 30000,
+  agentAckTimeoutMs: 60000,
   agentHeartbeatIntervalMs: 20000,
   agentRuntimeStructuredProgressEnabled: true,
   strictPreExecutionAckEnabled: true,
@@ -562,7 +562,7 @@ async function loadSettings() {
       timeBasedMicrocompactKeepRecent: Number(current.timeBasedMicrocompactKeepRecent || 5),
       agentCommunicationV2Enabled: current.agentCommunicationV2Enabled !== false,
       agentRunnerStartTimeoutMs: Number(current.agentRunnerStartTimeoutMs || 60000),
-      agentAckTimeoutMs: Number(current.agentAckTimeoutMs || 30000),
+      agentAckTimeoutMs: Number(current.agentAckTimeoutMs || 60000),
       agentHeartbeatIntervalMs: Number(current.agentHeartbeatIntervalMs || 20000),
       agentRuntimeStructuredProgressEnabled: current.agentRuntimeStructuredProgressEnabled !== false,
       strictPreExecutionAckEnabled: current.strictPreExecutionAckEnabled !== false,
@@ -1325,7 +1325,7 @@ onMounted(() => loadOverview(false))
               </div>
               <div class="field-item">
                 <label>ACK 超时 (ms)</label>
-                <input v-model.number="config.agentAckTimeoutMs" type="number" min="5000" max="120000" step="1000">
+                <input v-model.number="config.agentAckTimeoutMs" type="number" min="60000" max="120000" step="1000">
               </div>
               <div class="field-item">
                 <label>系统心跳间隔 (ms)</label>

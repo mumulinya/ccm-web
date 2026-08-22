@@ -265,11 +265,27 @@ function buildCodexExecCommand(msgFile: string, options: AgentCommandOptions = {
   const selectedModel = getConfiguredDevelopmentAgentModel("codex");
   const modelArgs = selectedModel ? ["--model", selectedModel] : [];
   if (options.persistSession && options.resumeSession && sessionId) {
-    const args = ["exec", "resume", ...modelArgs, "-c", `sandbox_mode=${JSON.stringify(sandboxMode)}`, "--skip-git-repo-check", "--json", sessionId, "-"];
+    // --ask-for-approval is a Codex root option, not an `exec` option. Keep
+    // the safety flags before the subcommand or Codex exits before it can run
+    // the required CCM pre-execution ACK tool.
+    const args = [...flags.split(" "), "exec", "resume", ...modelArgs, "-c", `sandbox_mode=${JSON.stringify(sandboxMode)}`, "--skip-git-repo-check", "--json", sessionId, "-"];
     return `${homePrefix}node ${quoteCmdArg(helper)} ${quoteCmdArg(msgFile)} ${quoteCmdArg(developerInstructionsFile)} ${quoteCmdArg(encodeCliArgs(args))}`;
   }
   const persistence = options.persistSession ? " --json" : " --ephemeral";
-  const args = ["exec", ...modelArgs, ...flags.split(" "), persistence.trim(), "--skip-git-repo-check", "-"].filter(Boolean);
+  // Repeat the sandbox setting at the exec layer. Some Codex installations
+  // load an isolated-home profile after root option parsing; the explicit
+  // config keeps a writable project task from silently degrading to a
+  // read-only turn while preserving the non-interactive approval boundary.
+  const args = [
+    ...flags.split(" "),
+    "exec",
+    "-c",
+    `sandbox_mode=${JSON.stringify(sandboxMode)}`,
+    ...modelArgs,
+    persistence.trim(),
+    "--skip-git-repo-check",
+    "-",
+  ].filter(Boolean);
   return `${homePrefix}node ${quoteCmdArg(helper)} ${quoteCmdArg(msgFile)} ${quoteCmdArg(developerInstructionsFile)} ${quoteCmdArg(encodeCliArgs(args))}`;
 }
 
@@ -281,9 +297,10 @@ function getCodexSandboxMode() {
 
 function formatCodexExecSafetyFlags() {
   const sandbox = getCodexSandboxMode();
-  return sandbox === "workspace-write"
-    ? "--full-auto --sandbox workspace-write"
-    : `--sandbox ${sandbox}`;
+  // CCM is the approval authority for project writes. Codex runs
+  // non-interactively inside the selected OS sandbox, so an interactive
+  // approval policy can only cancel a tool call rather than ask the user.
+  return `--sandbox ${sandbox} --ask-for-approval never`;
 }
 
 function buildCursorAgentCommand(msgFile: string, options: AgentCommandOptions = {}) {
@@ -392,7 +409,7 @@ export const AGENT_RUNTIMES: AgentRuntimeDescriptor[] = [
     id: "codex",
     aliases: ["codex"],
     label: "Codex CLI",
-    commandLabel: "codex exec --full-auto -",
+    commandLabel: "codex --sandbox workspace-write --ask-for-approval never exec -",
     capabilities: {
       print: true,
       streaming: true,
@@ -1033,7 +1050,11 @@ export function runAgentRuntimeSessionSelfTest() {
     claudeCreatesNamedSession: claudeInitial.includes("--session-id") && claudeInitial.includes(sessionId),
     claudeResumesSameSession: claudeResume.includes("--resume") && claudeResume.includes(sessionId),
     codexInitialIsPersistent: codexInitial.includes("codex-prompt-runner.js") && codexInitialArgs.includes("--json") && !codexInitialArgs.includes("--ephemeral"),
+    codexInitialPinsWritableSandboxAtRoot: codexInitialArgs.slice(0, 2).join(" ") === "--sandbox workspace-write",
+    codexInitialPinsWritableSandboxAtExec: codexInitialArgs.includes('sandbox_mode="workspace-write"'),
+    codexInitialDisablesInteractiveApproval: codexInitialArgs.includes("--ask-for-approval") && codexInitialArgs.includes("never"),
     codexResumesSameSession: codexResume.includes("codex-prompt-runner.js") && codexResumeArgs.includes("resume") && codexResumeArgs.includes(sessionId),
+    codexResumePinsWritableSandbox: codexResumeArgs.includes('sandbox_mode="workspace-write"'),
     codexCapturesNativeSession: parsed.sessionId === sessionId && parsed.output === "任务完成",
     cursorInitialCapturesSession: cursorInitial.includes("cli-prompt-runner.js") && cursorInitialArgs.includes("--output-format") && cursorInitialArgs.includes("json") && !cursorInitialArgs.includes("--resume"),
     cursorTrustsHeadlessWorkspace: cursorInitialArgs.includes("--trust"),

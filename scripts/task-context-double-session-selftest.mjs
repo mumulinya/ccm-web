@@ -10,6 +10,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'ccm-task-context-'))
 process.env.USERPROFILE = temp
 process.env.HOME = temp
+process.env.CCM_TASK_STORE_DIR = temp
 process.env.CCM_USER_VISIBLE_AGENT_EVENT_DIR = path.join(temp, 'events')
 const require = createRequire(import.meta.url)
 const db = require(path.join(root, 'ccm-package', 'dist', 'core', 'db.js'))

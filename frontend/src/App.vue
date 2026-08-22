@@ -770,8 +770,8 @@ const openTabs = ref([startupTab])
 
 const handleWorkbenchNavigate = (target = {}) => {
   navigateTo.value = target
-  if (target.groupId) navigateTo.value = { tab: 'groups', groupId: target.groupId }
-  if (target.project) navigateTo.value = { tab: 'projects', project: target.project }
+  if (target.groupId) navigateTo.value = { ...target, tab: 'groups', groupId: target.groupId }
+  if (target.project) navigateTo.value = { ...target, tab: 'projects', project: target.project }
   switchTab(target.tab || 'dashboard')
 }
 

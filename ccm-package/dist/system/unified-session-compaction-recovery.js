@@ -57,11 +57,21 @@ function buildUnifiedRecoveryAttachment(input) {
         pendingActions: [...input.summary.pendingWork, ...input.summary.nextActions],
         permissionBoundary: String(snapshot.recoveryContext?.permissionBoundary || `${snapshot.scope}:${snapshot.exactSessionId}`),
     });
+    const taskTimeline = snapshot.taskTimeline ? {
+        currentTaskId: String(snapshot.taskTimeline.currentTaskId || ""),
+        spanChecksum: String(snapshot.taskTimeline.span?.checksum || ""),
+        startSequence: Number(snapshot.taskTimeline.span?.startSequence || 0),
+        endSequence: snapshot.taskTimeline.span?.endSequence == null ? undefined : Number(snapshot.taskTimeline.span.endSequence),
+        latestCheckpointSequence: Number(snapshot.taskTimeline.latestCheckpointSequence || snapshot.taskTimeline.span?.latestSequence || 0),
+        priorTaskCount: Array.isArray(snapshot.taskTimeline.priorTaskSummaries) ? snapshot.taskTimeline.priorTaskSummaries.length : 0,
+        contentStored: false,
+    } : null;
     return {
         schema: "ccm-unified-recovery-attachment-v1",
         scope: snapshot.scope,
         exactSessionId: snapshot.exactSessionId,
         unifiedRecoveryContext: base,
+        taskTimeline,
         provider: snapshot.providerUsage ? {
             provider: String(snapshot.providerUsage?.provider || ""),
             model: String(snapshot.providerUsage?.model || ""),
@@ -71,7 +81,7 @@ function buildUnifiedRecoveryAttachment(input) {
         mcp: Array.isArray(snapshot.contextComponents?.mcp) ? snapshot.contextComponents.mcp.map((item) => ({ name: String(item?.name || item), checksum: String(item?.checksum || "") })).slice(-64) : [],
         attachmentReferences: input.summary.attachmentReferences.slice(-64),
         contentStored: false,
-        checksum: checksum({ base, provider: snapshot.providerUsage, skills: snapshot.contextComponents?.skills, mcp: snapshot.contextComponents?.mcp, attachments: input.summary.attachmentReferences }),
+        checksum: checksum({ base, taskTimeline, provider: snapshot.providerUsage, skills: snapshot.contextComponents?.skills, mcp: snapshot.contextComponents?.mcp, attachments: input.summary.attachmentReferences }),
     };
 }
 function verifyUnifiedRecoveryAttachment(value, expected = {}) {

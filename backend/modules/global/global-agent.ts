@@ -41,8 +41,8 @@ import {
   shouldUseAnthropic,
 } from "../collaboration/group-orchestrator-llm-client";
 import { getConfigs, getConfigInfo, loadCronJobs, loadTasks, loadMcpTools, loadSkills, loadFeishuConfig } from "../../core/db";
+import { loadGroups } from "../collaboration/storage";
 import {
-  loadGroups,
   createGlobalDevelopmentMission,
   createRequirementEpicWithChildren,
   controlGlobalDevelopmentMission,
@@ -223,6 +223,16 @@ const globalAgentHistoryRuntime = createGlobalAgentHistoryRuntime({
       source: "global-session-title",
     });
   },
+  onSessionMessagesChanged: (session: any, message: any) => {
+    const scope = String(session?.source || "") === "feishu" ? "feishu" : "global";
+    publishRuntimeEvent(scope, `${scope}.session_messages_changed`, {
+      sessionId: String(session?.id || ""),
+      taskId: String(message?.task_id || message?.taskId || message?.taskExperience?.task_id || ""),
+      messageId: String(message?.id || ""),
+      status: String(message?.taskExperience?.status || message?.task?.status || "changed"),
+      source: "task-conversation-projection",
+    });
+  },
   writeGlobalJsonAtomic,
 })
 
@@ -240,6 +250,10 @@ function loadGlobalAgentHistoryStore() {
 
 function syncGlobalAgentWebHistory(payload: any) {
   return globalAgentHistoryRuntime.syncGlobalAgentWebHistory(payload)
+}
+
+export function upsertGlobalAgentConversationTaskMessage(sessionId: string, message: any) {
+  return globalAgentHistoryRuntime.upsertGlobalAgentConversationTaskMessage(sessionId, message)
 }
 
 function createGlobalAgentConversationSession(payload: any) {

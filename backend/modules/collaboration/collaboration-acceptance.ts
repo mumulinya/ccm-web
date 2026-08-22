@@ -513,7 +513,14 @@ import {
 
 
 export function evaluateReceiptTaskAgentMemoryContextSnapshot(task: any, receipt: any = {}, context: any = {}) {
-  const snapshots = getTaskAgentMemoryContextSnapshotSources(context).map(summarizeTaskAgentMemoryContextSnapshot);
+  const snapshots = Array.from(new Map(
+    getTaskAgentMemoryContextSnapshotSources(context)
+      .map(summarizeTaskAgentMemoryContextSnapshot)
+      .map((snapshot: any) => [
+        String(snapshot?.snapshot_id || `${snapshot?.task_agent_session_id || ""}:${snapshot?.checksum || ""}`),
+        snapshot,
+      ]),
+  ).values());
   const agent = normalizeMemoryGateAgent(receipt.agent || receipt.project || task?.target_project);
   const receiptTaskSessionId = String(receipt.task_agent_session_id || receipt.taskAgentSessionId || "").trim();
   const receiptSnapshotId = String(receipt.memory_context_snapshot_id || receipt.memoryContextSnapshotId || "").trim();
@@ -542,6 +549,18 @@ export function evaluateReceiptTaskAgentMemoryContextSnapshot(task: any, receipt
     const sessionId = String(snapshot.task_agent_session_id || "").trim();
     const binding = snapshot.group_session_memory_binding || {};
     const delivery = snapshot.delivery_receipt || {};
+    const hasSessionMemoryBinding = !!String(
+      snapshot.memory_binding_id
+      || binding.memoryBindingId
+      || binding.memory_binding_id
+      || snapshot.group_session_id
+      || binding.groupSessionId
+      || binding.group_session_id
+      || snapshot.session_memory_checksum
+      || binding.sessionMemoryChecksum
+      || binding.session_memory_checksum
+      || "",
+    ).trim();
     const systemSessionBound = !!receiptTaskSessionId && sessionId === receiptTaskSessionId;
     const systemSnapshotBound = !!receiptSnapshotId && snapshot.snapshot_id === receiptSnapshotId;
     const systemChecksumBound = !!receiptSnapshotChecksum && snapshot.checksum === receiptSnapshotChecksum;
@@ -555,8 +574,10 @@ export function evaluateReceiptTaskAgentMemoryContextSnapshot(task: any, receipt
       && String(delivery.groupSessionMemoryBinding?.checksum || "") === String(binding.checksum || "")
       && String(delivery.groupSessionMemoryBindingChecksum || "") === String(binding.checksum || "")
       && delivery.modelExtractionEvidenceValid !== false;
-    const bindingIdMatches = !!declaredBindingId && declaredBindingId === String(snapshot.memory_binding_id || binding.memoryBindingId || "");
-    const groupSessionMatches = !!declaredGroupSessionId && declaredGroupSessionId === String(snapshot.group_session_id || binding.groupSessionId || "");
+    const bindingIdMatches = !hasSessionMemoryBinding
+      || (!!declaredBindingId && declaredBindingId === String(snapshot.memory_binding_id || binding.memoryBindingId || ""));
+    const groupSessionMatches = !hasSessionMemoryBinding
+      || (!!declaredGroupSessionId && declaredGroupSessionId === String(snapshot.group_session_id || binding.groupSessionId || ""));
     const expectedSessionMemoryChecksum = String(snapshot.session_memory_checksum || binding.sessionMemoryChecksum || "");
     const sessionMemoryChecksumMatches = expectedSessionMemoryChecksum
       ? declaredSessionMemoryChecksum === expectedSessionMemoryChecksum
@@ -576,7 +597,14 @@ export function evaluateReceiptTaskAgentMemoryContextSnapshot(task: any, receipt
       && modelExtractionReplayStatusMatches
       && factSupersessionGraphChecksumMatches
     );
-    const usageStateValid = ["used", "verified", "ignored"].includes(declaredUsageState);
+    const ignoredMemoryReasons = Array.isArray(receipt.memoryIgnored || receipt.memory_ignored)
+      ? (receipt.memoryIgnored || receipt.memory_ignored).filter(Boolean)
+      : [];
+    // A direct project task can have an authoritative delivery snapshot without
+    // a session-memory binding. The Worker must not invent binding IDs; its
+    // structured memoryIgnored declaration is the correct consumption receipt.
+    const usageStateValid = ["used", "verified", "ignored"].includes(declaredUsageState)
+      || (!hasSessionMemoryBinding && ignoredMemoryReasons.length > 0);
     const declarationCoherent = declaredUsageState === "ignored"
       ? Array.isArray(receipt.memoryIgnored || receipt.memory_ignored) && (receipt.memoryIgnored || receipt.memory_ignored).length > 0
       : Array.isArray(receipt.memoryUsed || receipt.memory_used) && (receipt.memoryUsed || receipt.memory_used).length > 0;
@@ -659,7 +687,7 @@ export function evaluateReceiptTaskAgentMemoryContextSnapshot(task: any, receipt
       && usageStateValid
       && declarationCoherent
       && factCitationsPass
-      && !!declaredReason;
+      && (!!declaredReason || (!hasSessionMemoryBinding && ignoredMemoryReasons.length > 0));
     return {
       ...snapshot,
       pass,
@@ -1158,10 +1186,8 @@ export function buildDeliverySummary(task: any, execution: any, finalStatus: str
   const blockers = uniqueStrings(...receipts.map((receipt: any) => receipt.blockers));
   if (projectPolicyViolations.length) blockers.push(...projectPolicyViolations.map((item: any) => item.message));
   const needs = uniqueStrings(...receipts.map((receipt: any) => receipt.needs));
-  const executionDetail = String(execution?.detail || "").trim();
-  if (finalStatus !== "done" && executionDetail && !needs.length && !blockers.length) {
-    needs.push(executionDetail);
-  }
+  // `execution.detail` is presentation state, not an unresolved requirement.
+  // Only structured receipt needs/blockers may hold the acceptance gate open.
   const actions = uniqueStrings(...receipts.map((receipt: any) => receipt.actions));
   const advisoryNeeds = uniqueStrings(...receipts.map((receipt: any) => receipt.advisoryNeeds || receipt.advisory_needs || []));
   const blockingNeeds = needs;
@@ -1282,7 +1308,14 @@ export function buildDeliverySummary(task: any, execution: any, finalStatus: str
       ignored: receipt.memoryIgnored || [],
     }));
   const taskSessions = task?.id ? listTaskAgentSessions({ taskId: task.id }) : [];
-  const taskAgentMemoryContextSnapshots = task?.id ? listTaskAgentMemoryContextSnapshots({ taskId: task.id }) : [];
+  const taskAgentMemoryContextSnapshots = task?.id
+    ? Array.from(new Map(
+        listTaskAgentMemoryContextSnapshots({ taskId: task.id }).map((snapshot: any) => [
+          String(snapshot?.snapshot_id || `${snapshot?.task_agent_session_id || ""}:${snapshot?.checksum || ""}`),
+          snapshot,
+        ]),
+      ).values())
+    : [];
   const taskAgentMemoryContextSnapshotRows = taskAgentMemoryContextSnapshots.map(summarizeTaskAgentMemoryContextSnapshot);
   const providerToolAccessEvidence = task?.group_id && task?.id
     ? getGroupMessages(task.group_id, task.group_session_id || task.groupSessionId || "default")

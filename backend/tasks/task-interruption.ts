@@ -172,6 +172,16 @@ export function buildTaskInterruptionReceipt(input: {
     && sideEffectState !== "uncertain"
     && nativeIdentityProven
     && recoveryAttempt < TASK_RECOVERY_BACKOFF_MS.length;
+  const timelineAttempts = (Array.isArray(input.task?.task_context?.timelineSpans) ? input.task.task_context.timelineSpans : [])
+    .flatMap((span: any) => Array.isArray(span?.attemptSpans) ? span.attemptSpans : [])
+    .map((item: any) => Number(item?.attempt || 0));
+  const executionAttempt = Math.max(
+    0,
+    Number(input.task?.execution_attempt || 0),
+    Number(input.task?.project_main_execution?.attempt || 0),
+    Number(input.task?.task_context?.latestAttempt || 0),
+    ...timelineAttempts,
+  );
   const raw: Omit<TaskInterruptionReceiptV1, "checksum"> = {
     schema: "ccm-task-interruption-receipt-v1",
     version: 1,
@@ -182,7 +192,7 @@ export function buildTaskInterruptionReceipt(input: {
     actor: String(input.actor || "ccm").slice(0, 120),
     checkpoint: String(input.checkpoint || input.task?.acceptance_state || input.task?.status || "unknown").slice(0, 120),
     ...(input.resumeCheckpoint ? { resume_checkpoint: input.resumeCheckpoint } : {}),
-    execution_attempt: Math.max(0, Number(input.task?.execution_attempt || input.task?.project_main_execution?.attempt || 0)),
+    execution_attempt: executionAttempt,
     generation: Math.max(0, Number(input.task?.generation || input.task?.project_session_generation || input.task?.agent_communication_generation || 0)),
     plan_checksum: String(input.resumeCheckpoint?.planChecksum || input.task?.resume_checkpoint?.planChecksum || input.task?.workflow_meta?.project_main_plan?.checksum || input.task?.plan_checksum || ""),
     contract_checksum: String(input.task?.plan_dispatch_contract?.contractChecksum || input.task?.workflow_meta?.plan_dispatch_contract?.contractChecksum || input.task?.contract_checksum || ""),
@@ -223,6 +233,7 @@ export function buildTaskRecoveryDecision(task: any, receiptInput?: TaskInterrup
   workspaceChecksum?: string;
   authorizationValid?: boolean;
   runtimeValid?: boolean;
+  allowRehydratedSession?: boolean;
 } = {}): TaskRecoveryDecisionV1 {
   const receipt = receiptInput || task?.interruption_receipt || null;
   const taskId = String(task?.id || receipt?.task_id || "");
@@ -251,7 +262,7 @@ export function buildTaskRecoveryDecision(task: any, receiptInput?: TaskInterrup
       && checks.workspace_unchanged
       && checks.authorization_valid
       && checks.runtime_valid
-      && checks.native_identity_valid
+      && (checks.native_identity_valid || options.allowRehydratedSession === true)
       && checks.checkpoint_valid;
     if (!safetyReady) {
       mode = "manual";

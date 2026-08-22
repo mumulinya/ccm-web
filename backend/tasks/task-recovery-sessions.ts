@@ -1,9 +1,9 @@
-import { getTaskById, loadTasks, updateTaskByIdCas } from "../core/db";
+import { getTaskById, loadTasks } from "../core/db";
 import * as fs from "fs";
 import { createProjectSessionRecord, getSessionDetail, getSessionFilePath } from "../modules/projects/sessions";
 import { createGroupChatSession, deleteGroupChatSession, listGroupChatSessions } from "../modules/collaboration/storage";
 import { createGlobalAgentConversationSession, deleteGlobalAgentConversationSession, loadGlobalAgentHistoryStore } from "../modules/global/global-agent";
-import { buildTaskContextCapsule, createTaskSessionBinding, type CcmTaskContextCapsuleV1, type CcmTaskScope } from "./task-context";
+import { buildTaskContextCapsule, createTaskSessionBinding, type CcmTaskScope } from "./task-context";
 
 const WRITE_STATUSES = new Set(["pending", "queued", "in_progress", "running", "reviewing", "executing", "recovery_validating"]);
 const text = (value: unknown, max = 400) => String(value ?? "").trim().slice(0, max);
@@ -16,18 +16,6 @@ function isBusy(task: any, currentTaskId: string) {
   return String(task?.id || "") !== currentTaskId && WRITE_STATUSES.has(String(task?.status || "").toLowerCase()) && task?.requires_code_changes !== false;
 }
 
-function appendBinding(taskId: string, binding: any, expectedContextChecksum = "") {
-  const result = updateTaskByIdCas(taskId, current => !expectedContextChecksum || String(current?.task_context?.checksum || "") === expectedContextChecksum, current => {
-    const context: CcmTaskContextCapsuleV1 = current?.task_context || buildTaskContextCapsule(current);
-    const bindings = [...(Array.isArray(context.sessionBindings) ? context.sessionBindings : []).filter(item => item.bindingChecksum !== binding.bindingChecksum), binding];
-    const next = { ...context, sessionBindings: bindings, revision: Number(context.revision || 0) + 1, updatedAt: new Date().toISOString() } as any;
-    delete next.checksum;
-    next.checksum = require("crypto").createHash("sha256").update(JSON.stringify(next)).digest("hex");
-    return { ...current, task_context: next, task_context_revision_receipt: { revision: next.revision, checksum: next.checksum, reason: "session_binding", at: next.updatedAt, contentStored: false } };
-  });
-  return result.updated ? result.task : null;
-}
-
 function findBusy(task: any, sessionId: string) {
   return loadTasks().find(item => String(item?.execution_session_id || item?.active_execution_session_id || item?.exact_session_id || item?.group_session_id || item?.project_session_id || item?.origin_session_id || "") === sessionId && isBusy(item, String(task?.id || "")));
 }
@@ -35,7 +23,13 @@ function findBusy(task: any, sessionId: string) {
 export function resolveTaskUserSession(taskInput: any, options: { attempt?: number; forceRecoverySession?: boolean; expectedContextChecksum?: string } = {}) {
   const task = getTaskById(text(taskInput?.id)) || taskInput;
   if (!task) throw new Error("任务不存在，无法恢复会话");
-  const taskId = text(task.id); const scope = scopeOf(task); const scopeId = scopeIdOf(task, scope); const sourceSession = sourceSessionOf(task); const original = activeSessionOf(task); const attempt = Math.max(1, Number(options.attempt || task.execution_attempt || task.attempt || 0) + 1);
+  if (options.expectedContextChecksum && String(task?.task_context?.checksum || "") !== String(options.expectedContextChecksum)) return { mode: "rejected", reason: "permission_changed", created: false, error: "任务上下文已变化，请重新恢复" };
+  const taskId = text(task.id); const scope = scopeOf(task); const scopeId = scopeIdOf(task, scope); const sourceSession = sourceSessionOf(task); const original = activeSessionOf(task);
+  // The orchestrator passes the already-computed next attempt. Do not add one
+  // again or a recovery session becomes labelled N+1 while the task is on N.
+  const attempt = Math.max(1, options.attempt !== undefined
+    ? Number(options.attempt)
+    : Number(task.execution_attempt || task.attempt || task?.task_context?.latestAttempt || 0) + 1);
   let available = false; let archived = false; let originalSession: any = null;
   try {
     if (scope === "project") { originalSession = original ? getSessionDetail(scopeId, original) : null; available = !!originalSession; archived = originalSession?.archived === true || originalSession?.readOnly === true; }
@@ -60,9 +54,7 @@ export function resolveTaskUserSession(taskInput: any, options: { attempt?: numb
   if (!activeSessionId) return { mode: "rejected", originalSessionId: original || undefined, reason, created: false };
   const context = task.task_context || buildTaskContextCapsule(task);
   const binding = createTaskSessionBinding({ task, taskId, attempt, role: created ? "recovery" : "active_execution", scope, scopeId, exactSessionId: activeSessionId, originalSessionId: sourceSession || original || undefined, createdForRecovery: created, reason, revision: Number(context.revision || 0) });
-  const updated = appendBinding(taskId, binding, options.expectedContextChecksum || "");
-  if (!updated) return { mode: "rejected", originalSessionId: original || undefined, reason: "permission_changed", created: false, error: "任务上下文已变化，请重新恢复" };
-  return { mode, originalSessionId: original || undefined, activeSessionId, created, reason, binding, task: updated };
+  return { mode, originalSessionId: original || undefined, activeSessionId, created, reason, binding };
 }
 
 export function resolveTaskAgentSessionProjection(task: any, workItem: any, attempt: number, mode: "native_session" | "rehydrated_session" | "new_session" | "rejected" = "rehydrated_session") {
@@ -70,6 +62,17 @@ export function resolveTaskAgentSessionProjection(task: any, workItem: any, atte
   const previous = Array.isArray(workItem?.agent_session_ids) ? workItem.agent_session_ids.at(-1) : workItem?.agent_session_id;
   const raw = { taskId: text(task?.id), workItemId: text(workItem?.id || workItem?.workItemId), attempt: Math.max(1, Number(attempt || 1)), mode, ...(previous ? { previousAgentSessionId: text(previous) } : {}), provider: text(workItem?.provider || task?.provider || ""), project: text(workItem?.target || workItem?.project || task?.target_project), taskContextChecksum: text(taskContext.checksum, 160), workItemChecksum: require("crypto").createHash("sha256").update(JSON.stringify(workItem || {})).digest("hex"), workspaceManifestChecksum: text(taskContext.workspace?.manifestChecksum, 160), blockers: [], contentStored: false as const };
   return { ...raw, checksum: require("crypto").createHash("sha256").update(JSON.stringify(raw)).digest("hex") };
+}
+
+export function rollbackResolvedTaskUserSession(resolution: any, scope: CcmTaskScope, scopeId: string) {
+  if (resolution?.created !== true || !resolution?.activeSessionId) return false;
+  try {
+    if (scope === "group") return Boolean((deleteGroupChatSession(scopeId, String(resolution.activeSessionId), { reason: "恢复事务未提交" }) as any)?.deleted);
+    if (scope === "global" || scope === "feishu") return Boolean((deleteGlobalAgentConversationSession(String(resolution.activeSessionId), scope === "feishu" ? "feishu" : "web") as any)?.deleted);
+    const file = getSessionFilePath(scopeId, String(resolution.activeSessionId));
+    if (fs.existsSync(file)) fs.unlinkSync(file);
+    return !fs.existsSync(file);
+  } catch { return false; }
 }
 
 export function purgeTaskRecoveryUserSessions(task: any) {

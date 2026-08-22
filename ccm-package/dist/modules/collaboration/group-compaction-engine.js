@@ -40,17 +40,11 @@ exports.normalizeHookAnchor = normalizeHookAnchor;
 exports.extractHookAnchors = extractHookAnchors;
 exports.buildCompactionTimeline = buildCompactionTimeline;
 exports.extractJsonObject = extractJsonObject;
-exports.normalizeOpenAiUrl = normalizeOpenAiUrl;
-exports.normalizeAnthropicUrl = normalizeAnthropicUrl;
-exports.normalizeGeminiCompactUrl = normalizeGeminiCompactUrl;
-exports.callCompactionModelOnce = callCompactionModelOnce;
-exports.callCompactionModel = callCompactionModel;
 exports.fitCompactionPromptToTokenBudget = fitCompactionPromptToTokenBudget;
 exports.isGroupCompactionPromptTooLongError = isGroupCompactionPromptTooLongError;
 exports.groupCompactionMessagesByApiRound = groupCompactionMessagesByApiRound;
 exports.truncateGroupCompactionHeadByApiRound = truncateGroupCompactionHeadByApiRound;
 exports.buildGroupCompactionModelRequest = buildGroupCompactionModelRequest;
-exports.summarizeWithModel = summarizeWithModel;
 exports.buildRelevantHistoricalGroupContext = buildRelevantHistoricalGroupContext;
 exports.calculateGroupProviderCalibratedContextTokens = calculateGroupProviderCalibratedContextTokens;
 exports.compactGroupConversationMemory = compactGroupConversationMemory;
@@ -65,9 +59,7 @@ exports.runGroupMemoryMicroCompactSelfTest = runGroupMemoryMicroCompactSelfTest;
 exports.runGroupMemoryTimeBasedMicroCompactSelfTest = runGroupMemoryTimeBasedMicroCompactSelfTest;
 const crypto = __importStar(require("crypto"));
 const context_budget_1 = require("../../system/context-budget");
-const model_call_retry_1 = require("../../system/model-call-retry");
 const unified_session_compaction_model_1 = require("../../system/unified-session-compaction-model");
-const group_prompt_cache_break_detection_1 = require("./group-prompt-cache-break-detection");
 const group_compaction_receipts_1 = require("./group-compaction-receipts");
 const group_compaction_hooks_1 = require("./group-compaction-hooks");
 const group_compaction_projections_1 = require("./group-compaction-projections");
@@ -158,228 +150,7 @@ function buildCompactionTimeline(messages) {
     return { userMessages, timeline };
 }
 function extractJsonObject(text) {
-    const raw = String(text || "").trim();
-    try {
-        return JSON.parse(raw);
-    }
-    catch { }
-    const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
-    if (fenced)
-        try {
-            return JSON.parse(fenced[1].trim());
-        }
-        catch { }
-    const start = raw.indexOf("{");
-    const end = raw.lastIndexOf("}");
-    if (start >= 0 && end > start)
-        try {
-            return JSON.parse(raw.slice(start, end + 1));
-        }
-        catch { }
-    return null;
-}
-function normalizeOpenAiUrl(value) {
-    const base = String(value || "").trim().replace(/\/+$/, "");
-    if (/\/chat\/completions$/i.test(base))
-        return base;
-    if (/\/v1$/i.test(base))
-        return `${base}/chat/completions`;
-    return /\/v1\//i.test(base) ? base : `${base}/v1/chat/completions`;
-}
-function normalizeAnthropicUrl(value) {
-    const base = String(value || "").trim().replace(/\/+$/, "");
-    if (/\/v1\/messages$/i.test(base))
-        return base;
-    if (/\/v1$/i.test(base))
-        return `${base}/messages`;
-    return /\/v1\//i.test(base) ? base : `${base}/v1/messages`;
-}
-function normalizeGeminiCompactUrl(value, model) {
-    const base = String(value || "").trim().replace(/\/+$/, "");
-    if (/:(?:generateContent|streamGenerateContent)(?:\?|$)/i.test(base))
-        return base.replace(/:streamGenerateContent/i, ":generateContent");
-    const cleanModel = String(model || "").trim().replace(/^models\//i, "");
-    if (/\/models\/[^/]+$/i.test(base))
-        return `${base}:generateContent`;
-    if (/\/v1(?:beta)?$/i.test(base))
-        return `${base}/models/${encodeURIComponent(cleanModel)}:generateContent`;
-    return `${base}/v1beta/models/${encodeURIComponent(cleanModel)}:generateContent`;
-}
-function useGeminiCompact(config) {
-    const format = String(config?.format || "auto").toLowerCase();
-    const url = String(config?.apiUrl || "").toLowerCase();
-    return format === "gemini-compatible" || format === "auto" && /generativelanguage\.googleapis\.com|:generatecontent/.test(url);
-}
-async function callCompactionModelOnce(config, system, user, maxOutputTokens, attemptTimeoutMs) {
-    const anthropic = config.format === "anthropic-compatible"
-        || config.format === "auto" && String(config.apiUrl).toLowerCase().includes("anthropic")
-        || /\/anthropic(?:\/|$)/i.test(String(config.apiUrl));
-    const gemini = useGeminiCompact(config);
-    const controller = new AbortController();
-    const externalSignal = config?.compactionAbortSignal || config?.compaction_abort_signal || null;
-    const abortFromExternal = () => controller.abort(externalSignal?.reason);
-    if (externalSignal?.aborted)
-        abortFromExternal();
-    else
-        externalSignal?.addEventListener("abort", abortFromExternal, { once: true });
-    const timeout = setTimeout(() => controller.abort(), Math.max(1_000, attemptTimeoutMs));
-    let activityError = null;
-    const activitySignal = typeof config.onCompactionActivity === "function" ? config.onCompactionActivity : null;
-    const heartbeatMs = Math.max(25, Math.min(Number(config.compactionActivityHeartbeatMs || config.compaction_activity_heartbeat_ms || 30_000), 60_000));
-    const activityInterval = activitySignal
-        ? setInterval(() => {
-            try {
-                activitySignal({ stage: "model_summary_wait", heartbeat: true });
-            }
-            catch (error) {
-                activityError = error;
-                controller.abort();
-            }
-        }, heartbeatMs)
-        : null;
-    activityInterval?.unref?.();
-    try {
-        const groupId = String(config.groupId || config.group_id || "").trim();
-        const groupSessionId = String(config.groupSessionId || config.group_session_id || "").trim();
-        if (anthropic && groupId && groupSessionId.startsWith("gcs_")) {
-            try {
-                (0, group_prompt_cache_break_detection_1.recordGroupPromptCacheState)({
-                    groupId,
-                    groupSessionId,
-                    source: "group_main_compact",
-                    provider: "anthropic",
-                    model: config.model,
-                    system,
-                    toolSchemas: [],
-                    betaHeaders: [],
-                    cachedMicrocompactEnabled: false,
-                });
-            }
-            catch { }
-        }
-        activitySignal?.({ stage: "model_summary_request", heartbeat: false });
-        let response;
-        try {
-            const geminiEndpoint = gemini ? new URL(normalizeGeminiCompactUrl(config.apiUrl, config.model)) : null;
-            if (geminiEndpoint && !geminiEndpoint.searchParams.has("key"))
-                geminiEndpoint.searchParams.set("key", config.apiKey);
-            response = await fetch(anthropic ? normalizeAnthropicUrl(config.apiUrl) : gemini ? geminiEndpoint.toString() : normalizeOpenAiUrl(config.apiUrl), {
-                method: "POST",
-                headers: anthropic
-                    ? { "Content-Type": "application/json", "x-api-key": config.apiKey, "anthropic-version": "2023-06-01" }
-                    : gemini ? { "Content-Type": "application/json" }
-                        : { "Content-Type": "application/json", "Authorization": `Bearer ${config.apiKey}` },
-                body: JSON.stringify(anthropic ? {
-                    model: config.model,
-                    max_tokens: maxOutputTokens,
-                    temperature: 0.1,
-                    system,
-                    messages: [{ role: "user", content: user }],
-                } : gemini ? {
-                    systemInstruction: { parts: [{ text: system }] },
-                    contents: [{ role: "user", parts: [{ text: user }] }],
-                    generationConfig: { maxOutputTokens, temperature: 0.1 },
-                } : {
-                    model: config.model,
-                    max_tokens: maxOutputTokens,
-                    temperature: 0.1,
-                    messages: [{ role: "system", content: system }, { role: "user", content: user }],
-                }),
-                signal: controller.signal,
-            });
-        }
-        catch (error) {
-            if (activityError) {
-                const failed = new Error(String(activityError?.message || activityError || "压缩活动回调失败"));
-                failed.code = "CCM_MODEL_CALL_ACTIVITY_FAILED";
-                throw failed;
-            }
-            if (externalSignal?.aborted) {
-                const cancelled = new Error(String(externalSignal.reason?.message || "模型调用已由外部取消"));
-                cancelled.code = "CCM_MODEL_CALL_CANCELLED";
-                throw cancelled;
-            }
-            throw error;
-        }
-        const body = await response.text();
-        if (activityError) {
-            const failed = new Error(String(activityError?.message || activityError || "压缩活动回调失败"));
-            failed.code = "CCM_MODEL_CALL_ACTIVITY_FAILED";
-            throw failed;
-        }
-        if (!response.ok)
-            throw new Error(`memory compact HTTP ${response.status}: ${body.slice(0, 180)}`);
-        const data = JSON.parse(body);
-        const content = anthropic
-            ? (data?.content || []).map((part) => part?.type === "text" ? part.text : "").join("")
-            : gemini
-                ? (data?.candidates || []).flatMap((candidate) => candidate?.content?.parts || []).map((part) => part?.text || "").join("")
-                : data?.choices?.[0]?.message?.content || "";
-        const summary = extractJsonObject(content);
-        if (!summary)
-            throw new Error("memory compact model returned invalid JSON");
-        if (groupId && groupSessionId.startsWith("gcs_")) {
-            const usage = data?.usage || data?.usageMetadata || {};
-            try {
-                (0, group_prompt_cache_break_detection_1.recordGroupPromptCacheUsage)({
-                    groupId,
-                    groupSessionId,
-                    source: "group_main_compact",
-                    provider: anthropic ? "anthropic" : gemini ? "gemini" : "openai",
-                    model: String(data?.model || config.model || ""),
-                    requestId: String(data?.id || response.headers.get("request-id") || response.headers.get("x-request-id") || ""),
-                    usage: {
-                        directInputTokens: Number(usage.input_tokens || usage.prompt_tokens || usage.promptTokenCount || 0),
-                        cacheCreationInputTokens: Number(usage.cache_creation_input_tokens || 0),
-                        cacheReadInputTokens: Number(usage.cache_read_input_tokens || usage.cachedContentTokenCount || 0),
-                        outputTokens: Number(usage.output_tokens || usage.completion_tokens || usage.candidatesTokenCount || 0),
-                    },
-                });
-            }
-            catch { }
-        }
-        return {
-            summary,
-            usage: data?.usage || data?.usageMetadata || null,
-            provider: anthropic ? "anthropic" : gemini ? "gemini" : "openai",
-            model: String(data?.model || config.model || ""),
-            responseId: String(data?.id || response.headers.get("request-id") || response.headers.get("x-request-id") || ""),
-            stopReason: String(anthropic ? data?.stop_reason || "" : gemini ? data?.candidates?.[0]?.finishReason || "" : data?.choices?.[0]?.finish_reason || ""),
-        };
-    }
-    finally {
-        clearTimeout(timeout);
-        if (activityInterval)
-            clearInterval(activityInterval);
-        externalSignal?.removeEventListener("abort", abortFromExternal);
-    }
-}
-async function callCompactionModel(config, system, user, maxOutputTokens = group_compaction_receipts_1.GROUP_COMPACTION_MODEL_MAX_SUMMARY_TOKENS) {
-    return (0, unified_session_compaction_model_1.callUnifiedCompactionModel)(config, system, user, maxOutputTokens, {
-        beforeRequest: ({ provider, model }) => { config?.onCompactionActivity?.({ stage: "model_summary_request", provider, model, heartbeat: false }); },
-    });
-    /* Legacy transport retained below only for source-level replay fixtures. */
-    const mockCall = config?.compactionModelCall || config?.compaction_model_call || config?.modelCall || config?.model_call;
-    if (typeof mockCall === "function")
-        return mockCall({ system, user, maxOutputTokens });
-    if (!config?.enabled || !config?.apiUrl || !config?.apiKey || !config?.model)
-        return null;
-    return (0, model_call_retry_1.runModelCallWithRetry)(context => callCompactionModelOnce(config, system, user, maxOutputTokens, context.attemptTimeoutMs), {
-        scope: "session memory compaction model call",
-        baseDelayMs: config.modelRetryBaseDelayMs ?? config.model_retry_base_delay_ms,
-        onRetry: notice => {
-            try {
-                config.onCompactionActivity?.({
-                    stage: "model_summary_retry",
-                    heartbeat: false,
-                    attempt: notice.attempt + 1,
-                    maxAttempts: notice.maxAttempts,
-                });
-            }
-            catch { }
-            console.warn(`[模型重试] 会话压缩模型暂时失败，将执行第 ${notice.attempt + 1}/${notice.maxAttempts} 次尝试：${String(notice.error?.message || notice.error || "").slice(0, 240)}`);
-        },
-    });
+    return (0, unified_session_compaction_model_1.extractJsonObject)(text);
 }
 function fitCompactionPromptToTokenBudget(system, user, maxInputTokens) {
     const initialTokens = (0, context_budget_1.estimateTextTokens)(system) + (0, context_budget_1.estimateTextTokens)(user);
@@ -450,7 +221,7 @@ function truncateGroupCompactionHeadByApiRound(messages = [], tokenGap = 0) {
     };
 }
 function buildGroupCompactionModelRequest(messages, memory, fallback, config = {}) {
-    const previous = memory?.conversationSummary || (0, group_compaction_projections_1.createEmptyConversationSummary)();
+    const previous = memory?.unifiedSessionSummary || (0, group_compaction_projections_1.createEmptyConversationSummary)();
     const customInstructions = (0, group_compaction_projections_1.compactText)(config?.customInstructions || config?.custom_instructions || "", 4_000);
     const system = `You are the CCM group-Agent conversation compactor. Return JSON only. Do not call tools, create tasks, or dispatch to any Agent.
 The summary replaces messages before the compaction boundary, so preserve facts accurately and allow the main Agent to continue without a context break.
@@ -541,59 +312,6 @@ ${timeline.timeline.join("\n") || "无"}
             summaryInputProjection: payload.summaryInputProjection.receipt,
         },
     };
-}
-async function summarizeWithModel(messages, memory, fallback, config) {
-    let request = null;
-    let effectiveMessages = messages;
-    let validationFallback = fallback;
-    let ptlRetryAttempts = 0;
-    for (;;) {
-        request = buildGroupCompactionModelRequest(effectiveMessages, memory, validationFallback, config);
-        try {
-            const result = await callCompactionModel(config, request.system, request.user, request.maxOutputTokens);
-            request.audit.ptlRetryAttempts = ptlRetryAttempts;
-            const compactionUsage = (0, group_compaction_receipts_1.buildGroupCompactionModelUsageReceipt)({
-                groupId: config?.groupId || config?.group_id || "",
-                groupSessionId: config?.groupSessionId || config?.group_session_id || "",
-                usage: result?.usage,
-                provider: result?.provider || (config?.format === "anthropic-compatible" ? "anthropic" : "openai"),
-                model: result?.model || config?.model || "",
-                responseId: result?.responseId || "",
-                stopReason: result?.stopReason || "",
-                requestAudit: request.audit,
-                status: result?.usage ? "reported" : "unreported",
-            });
-            return {
-                summary: result?.summary ? (0, group_compaction_projections_1.normalizeSummary)(result.summary, (0, group_compaction_projections_1.createEmptyConversationSummary)()) : null,
-                requestAudit: request.audit,
-                compactionUsage,
-                validationFallback: request.validationFallback,
-                qualityMessages: request.effectiveMessages,
-            };
-        }
-        catch (error) {
-            const truncated = isGroupCompactionPromptTooLongError(error) && ptlRetryAttempts < GROUP_COMPACTION_MAX_PTL_RETRIES
-                ? truncateGroupCompactionHeadByApiRound(request.effectiveMessages)
-                : null;
-            if (truncated) {
-                ptlRetryAttempts += 1;
-                effectiveMessages = truncated.messages;
-                validationFallback = (0, group_compaction_projections_1.buildDeterministicConversationSummary)(effectiveMessages, memory, memory?.conversationSummary || (0, group_compaction_projections_1.createEmptyConversationSummary)());
-                continue;
-            }
-            request.audit.ptlRetryAttempts = ptlRetryAttempts;
-            error.compactionRequestAudit = request.audit;
-            error.compactionUsage = (0, group_compaction_receipts_1.buildGroupCompactionModelUsageReceipt)({
-                groupId: config?.groupId || config?.group_id || "",
-                groupSessionId: config?.groupSessionId || config?.group_session_id || "",
-                provider: config?.format === "anthropic-compatible" ? "anthropic" : "openai",
-                model: config?.model || "",
-                requestAudit: request.audit,
-                status: "failed",
-            });
-            throw error;
-        }
-    }
 }
 function buildRelevantHistoricalGroupContext(messages, boundaryIndex, query, options = {}) {
     if (boundaryIndex < 0 || !messages?.length)
@@ -830,14 +548,7 @@ async function runUnifiedGroupConversationMemory(input) {
         }
         throw error;
     }
-    const displayMemory = {
-        ...input.memory,
-        compaction: {
-            summarySource: compacted.receipt.summarySource,
-            quality: { pass: compacted.summaryQuality?.valid !== false },
-            rawTranscriptPreserved: true,
-        },
-    };
+    const displayMemory = { ...input.memory };
     return {
         success: true,
         compacted: compacted.compacted,
@@ -925,7 +636,7 @@ async function runGroupMemoryPreservedSegmentSelfTest() {
             && boundarySegment.lastPreservedMessageId === "ps-task-result",
         postCompactRestoreCarriesSegment: result.boundary?.post_compact_restore?.preservedSegment?.schema === "ccm-group-preserved-segment-v1",
         memoryCarriesSegment: result.memory?.compaction?.preservedSegment?.schema === "ccm-group-preserved-segment-v1"
-            && result.memory?.messageCompression?.preservedSegment?.schema === "ccm-group-preserved-segment-v1",
+            && result.memory?.unifiedSessionCompaction?.preservedSegment?.schema === "ccm-group-preserved-segment-v1",
         rawTranscriptUntouched: messages[24].content.includes("PRESERVED_SEGMENT_SENTINEL") && messages.length === 26,
     };
     return { pass: Object.values(checks).every(Boolean), checks, keepIndex, segment, boundarySegment };
@@ -962,7 +673,7 @@ async function runGroupMemoryPostCompactRecoveryAuditSelfTest() {
     });
     const audit = result.memory?.compaction?.postCompactRecoveryAudit || {};
     const boundaryAudit = result.boundary?.post_compact_restore?.recoveryAudit || {};
-    const messageCompressionAudit = result.memory?.messageCompression?.postCompactRecoveryAudit || {};
+    const unifiedRecoveryAudit = result.memory?.unifiedSessionCompaction?.postCompactRecoveryAudit || {};
     const checkById = new Map((audit.checks || []).map((check) => [check.id, check]));
     const candidateCounts = audit.candidateCounts || {};
     const candidateTotal = ["files", "skills", "verification", "blockers"].reduce((sum, key) => sum + Number(candidateCounts[key] || 0), 0);
@@ -970,7 +681,7 @@ async function runGroupMemoryPostCompactRecoveryAuditSelfTest() {
         compacted: result.compacted === true,
         auditRecordedInCompaction: audit.schema === "ccm-post-compact-recovery-audit-v1" && audit.status === "pass" && audit.pass === true,
         auditRecordedInBoundary: boundaryAudit.schema === "ccm-post-compact-recovery-audit-v1" && boundaryAudit.summaryChecksum === audit.summaryChecksum,
-        auditRecordedInMessageCompression: messageCompressionAudit.schema === "ccm-post-compact-recovery-audit-v1",
+        auditRecordedInUnifiedCompaction: unifiedRecoveryAudit.schema === "ccm-post-compact-recovery-audit-v1",
         boundaryRangeResolvable: checkById.get("boundary_range_resolvable")?.pass === true
             && checkById.get("compact_window_matches_keep_index")?.pass === true,
         rawTranscriptRecoverable: checkById.get("raw_transcript_path_recorded")?.pass === true

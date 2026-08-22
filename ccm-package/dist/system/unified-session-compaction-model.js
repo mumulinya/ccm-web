@@ -1,12 +1,14 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.normalizeOpenAiResponsesUrl = void 0;
+exports.extractJsonObject = exports.normalizeOpenAiResponsesUrl = void 0;
 exports.extractUnifiedCompactionJson = extractUnifiedCompactionJson;
 exports.normalizeUnifiedOpenAiUrl = normalizeUnifiedOpenAiUrl;
 exports.normalizeUnifiedAnthropicUrl = normalizeUnifiedAnthropicUrl;
 exports.normalizeUnifiedGeminiUrl = normalizeUnifiedGeminiUrl;
 exports.callUnifiedCompactionModelOnce = callUnifiedCompactionModelOnce;
 exports.callUnifiedCompactionModel = callUnifiedCompactionModel;
+exports.callCompactionModelOnce = callCompactionModelOnce;
+exports.callCompactionModel = callCompactionModel;
 const group_orchestrator_llm_client_1 = require("../modules/collaboration/group-orchestrator-llm-client");
 const openai_responses_transport_1 = require("./openai-responses-transport");
 Object.defineProperty(exports, "normalizeOpenAiResponsesUrl", { enumerable: true, get: function () { return openai_responses_transport_1.normalizeOpenAiResponsesUrl; } });
@@ -169,4 +171,28 @@ async function callUnifiedCompactionModel(config, system, user, maxOutputTokens 
         },
     });
 }
+// Compatibility-shaped adapters for non-session callers.  The transport and
+// retry policy above are the single implementation; callers must not create
+// their own provider-specific compaction requests.
+async function callCompactionModelOnce(config, system, user, maxOutputTokens, attemptTimeoutMs) {
+    return callUnifiedCompactionModelOnce(config, system, user, maxOutputTokens, attemptTimeoutMs, {
+        beforeRequest: ({ provider, model }) => {
+            try {
+                config?.onCompactionActivity?.({ stage: "model_summary_request", provider, model, heartbeat: false });
+            }
+            catch { }
+        },
+    });
+}
+async function callCompactionModel(config, system, user, maxOutputTokens = 16_000) {
+    return callUnifiedCompactionModel(config, system, user, maxOutputTokens, {
+        beforeRequest: ({ provider, model }) => {
+            try {
+                config?.onCompactionActivity?.({ stage: "model_summary_request", provider, model, heartbeat: false });
+            }
+            catch { }
+        },
+    });
+}
+exports.extractJsonObject = extractUnifiedCompactionJson;
 //# sourceMappingURL=unified-session-compaction-model.js.map

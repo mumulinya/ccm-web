@@ -64,7 +64,8 @@ try {
       && planCore.includes('source === "model"'),
     codeTasksAreSequential: orchestrator.includes('workflowDecision.requiresCodeChanges === true')
       && orchestrator.includes('? "sequential"'),
-    architecturePlanRequired: orchestrator.includes('"architecturePlan"')
+    architecturePlanRequired: orchestrator.includes('normalizeArchitecturePlan')
+      && orchestrator.includes('architecturePlan = normalizeArchitecturePlan')
       && orchestrator.includes('dataRelationships')
       && orchestrator.includes('sourceCitations'),
     existingIndependentReviewRemains: executor.includes('runCoordinatorReviewLoop')

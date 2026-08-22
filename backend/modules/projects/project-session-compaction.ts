@@ -9,7 +9,6 @@ import { selectUserMcpToolDefinitions } from "../../system/session-context-tool-
 import { resolveGroupModelContextCapacity } from "../collaboration/group-compaction-strategy";
 import { resolveTrustedModelContextCapacity } from "../collaboration/model-capability-cache";
 import { estimateTextTokens } from "../../system/context-budget";
-import { calculateSessionMemoryKeepWindow, buildApiConversationRounds, peelOldestApiConversationRound } from "../../system/session-memory-window";
 import { normalizeAgentRuntimeId } from "../../agents/runtime";
 import {
   buildProjectSessionAgentScopeId,
@@ -20,7 +19,6 @@ import {
 } from "./project-session-agent-binding";
 import { resolveContainedPath, validateProjectName, validateSessionId } from "./project-validation";
 import {
-  buildSessionPostCompactGate,
   buildModelVisiblePayloadSnapshot,
   isModelVisiblePayloadSnapshot,
   modelVisibleFixedTokens,
@@ -29,7 +27,6 @@ import {
   buildSessionMemoryState,
   evaluateSessionMemoryCadence,
   measureSessionContextTokens,
-  normalizeSessionCompactionState,
   normalizeSessionProviderUsage,
   recordSessionCompactionFailure,
   resetSessionCompactionFailures,
@@ -48,14 +45,14 @@ import {
   mergeConversationWithExecution,
   normalizeSessionExecutionEvents,
 } from "../../system/session-execution-ledger";
+import { appendSessionTimelineEvent } from "../../tasks/session-task-timeline";
+import { readVerifiedSessionTaskIndex } from "../../tasks/session-task-timeline";
 import { buildUnifiedSessionModelContextProjection, resolveSessionModelMicroCompactPolicy } from "../../system/session-model-context";
-import { buildUnifiedCompactionReceipt, buildUnifiedSessionCompactionStateV1, buildUnifiedRecoveryContext, orchestrateUnifiedCompaction, createUnifiedSessionCompactionEngine } from "../../system/unified-session-compaction";
+import { buildUnifiedSessionCompactionStateV1, createUnifiedSessionCompactionEngine } from "../../system/unified-session-compaction";
 import { createUnifiedScopeAdapter } from "../../system/unified-session-compaction-adapters";
 import { buildCcmProviderIdentityChecksum } from "../../system/ccm-context-accounting-v2";
 import type { UnifiedCompactionResult } from "../../system/unified-session-compaction-types";
 import { unifiedSummaryChecksum } from "../../system/unified-session-compaction-summary";
-import { evaluateSessionSummaryQuality } from "../../system/session-summary-quality-gate";
-import { reviewSessionSummaryIfSelected } from "../../system/session-summary-secondary-review";
 import { loadProjectConfigs } from "../../core/db";
 import { toolManager } from "../../tools/tool-manager";
 import {
@@ -78,7 +75,11 @@ function projectCompactionSourceChecksum(data: any) {
 async function runUnifiedProjectSessionCompaction(project: string, projectSessionId: string, options: any = {}) {
   const safeProject = validateProjectName(project);
   const safeSessionId = validateSessionId(projectSessionId);
-  if (isProjectSessionAgentDispatchActive(safeProject, safeSessionId)) throw new Error("当前项目会话仍有第三方 Agent 正在执行，暂不能压缩");
+  const expectedDispatchScopeId = buildProjectSessionAgentScopeId(safeProject, safeSessionId);
+  const ownsActiveDispatch = String(options.activeDispatchScopeId || "") === expectedDispatchScopeId;
+  if (isProjectSessionAgentDispatchActive(safeProject, safeSessionId) && !ownsActiveDispatch) {
+    throw new Error("当前项目会话仍有第三方 Agent 正在执行，暂不能压缩");
+  }
   const file = sessionFile(safeProject, safeSessionId);
   if (!fs.existsSync(file)) throw new Error("项目会话不存在");
   const config = loadOrchestratorConfig();
@@ -114,7 +115,7 @@ async function runUnifiedProjectSessionCompaction(project: string, projectSessio
     validate: () => {
       const current = JSON.parse(fs.readFileSync(file, "utf8"));
       if (projectCompactionSourceChecksum(current) !== acquiredChecksum) throw new Error("project_compaction_fence_stale");
-      if (isProjectSessionAgentDispatchActive(safeProject, safeSessionId)) throw new Error("project_compaction_dispatch_started");
+      if (isProjectSessionAgentDispatchActive(safeProject, safeSessionId) && !ownsActiveDispatch) throw new Error("project_compaction_dispatch_started");
     },
     commit: (result, fence) => {
       const data = JSON.parse(fs.readFileSync(file, "utf8"));
@@ -124,7 +125,7 @@ async function runUnifiedProjectSessionCompaction(project: string, projectSessio
       const preservedIds = result.preservedRecentWindow.messages.map((item: any) => String(item?.id || "")).filter(Boolean);
       const summarizedCount = Number(result.preservedRecentWindow.startIndex || 0);
       const previousBinding = getProjectSessionAgentBinding(safeProject, safeSessionId);
-      const rotation = rotateProjectSessionAgentBinding(safeProject, safeSessionId, `统一会话压缩 ${result.receipt.checksum.slice(0, 12)}`);
+      const rotation = rotateProjectSessionAgentBinding(safeProject, safeSessionId, `统一会话压缩 ${result.receipt.checksum.slice(0, 12)}`, ownsActiveDispatch ? expectedDispatchScopeId : "");
       const state = buildUnifiedSessionCompactionStateV1({ receipt: result.receipt, summaryQuality: result.summaryQuality, microCompact: result.microCompact, recoveryContext: result.recoveryContext, triggerReason: options.reason || "automatic", summarizedThroughMessageId: data.history?.[summarizedCount - 1]?.id || "", summarizedMessageCount: summarizedCount, preservedRecentMessageIds: preservedIds });
       try {
         data.unifiedSessionSummary = summary;
@@ -210,11 +211,6 @@ export function getProjectSessionCompactionActivity(project: string, projectSess
     startedAt: active.startedAt,
     updatedAt: active.startedAt,
   } : { active: false, status: "idle", stage: "", reason: "", startedAt: "", updatedAt: "" };
-}
-
-function compactText(value: any, max = 1600) {
-  const text = String(value || "").trim();
-  return text.length > max ? `${text.slice(0, Math.ceil(max * .68))}\n...[摘要输入已截断]...\n${text.slice(-Math.floor(max * .25))}` : text;
 }
 
 function sessionFile(project: string, projectSessionId: string) {
@@ -312,6 +308,22 @@ export function appendProjectSessionExecutionEvent(projectInput: string, project
     persistContext: { scope: "project", sessionId: projectSessionId },
   });
   if (!events.some(item => item.id === created.id)) events.push(created);
+  if (event?.taskId || event?.task_id) {
+    appendSessionTimelineEvent({
+      exactSessionId: projectSessionId,
+      scope: "project",
+      scopeId: project,
+      type,
+      eventId: `execution:${created.id}`,
+      taskId: String(event?.taskId || event?.task_id),
+      workItemId: event?.workItemId || event?.work_item_id,
+      generation: event?.generation,
+      attempt: event?.attempt,
+      leaseId: event?.leaseId || event?.lease_id,
+      payloadRef: created.id,
+      timestamp: created.timestamp,
+    });
+  }
   data.execution_history_version = 1;
   data.execution_history = events.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
   data.updated_at = new Date().toISOString();
@@ -470,126 +482,8 @@ export function scheduleProjectSessionMemoryExtraction(project: string, projectS
   return { scheduled: true, unified: true, promise };
 }
 
-function referenceSummary(messages: any[]) {
-  const users = messages.filter(message => message.role === "user" && message.hidden_execution !== true);
-  const assistants = messages.filter(message => message.role === "assistant" && message.hidden_execution !== true);
-  const executionResults = messages.filter(message => message.type === "tool_result" || (message.hidden_execution === true && message.role === "user"));
-  const allText = messages.map(message => String(message.content || ""));
-  const filesAndResources = [...new Set(allText.flatMap(text => text.match(/(?:[A-Za-z]:\\[^\s"'<>|]+|\/?(?:[\w.-]+\/){1,8}[\w.-]+\.[A-Za-z0-9]{1,8})/g) || []))].slice(-40);
-  const structuredFacts = messages.flatMap(message => Array.isArray(message?.structured_memory_facts) ? message.structured_memory_facts : []);
-  const byStructuredType = (type: string) => structuredFacts
-    .filter((item: any) => String(item?.type || "") === type && String(item?.text || "").trim())
-    .map((item: any) => compactText(item.text, 1200))
-    .slice(-24);
-  return {
-    primaryRequest: compactText(users.at(-1)?.content, 1800),
-    userRequests: users.slice(-20).map(message => `#${message.id} ${compactText(message.content, 1000)}`),
-    keyOutcomes: [
-      ...assistants.slice(-20).map(message => `#${message.id} ${compactText(message.content, 1000)}`),
-      ...executionResults.slice(-20).map(message => `#${message.id} ${compactText(message.content, 1200)}`),
-    ].slice(-24),
-    authorization: byStructuredType("authorization"),
-    decisions: byStructuredType("decision"),
-    unresolved: byStructuredType("unresolved"),
-    filesAndResources,
-    latestOutcome: compactText(assistants.at(-1)?.content, 1800),
-    sourceMessageIds: messages.map(message => String(message.id || "")),
-  };
-}
-
-function normalizeSummary(value: any, sourceMessageIds: string[]) {
-  const list = (input: any, maxItems: number, maxChars = 1400) => (Array.isArray(input) ? input : []).map(item => compactText(item, maxChars)).filter(Boolean).slice(-maxItems);
-  return {
-    primaryRequest: compactText(value?.primaryRequest, 1800),
-    userRequests: list(value?.userRequests, 24),
-    keyOutcomes: list(value?.keyOutcomes, 24),
-    authorization: list(value?.authorization, 20),
-    decisions: list(value?.decisions, 24),
-    unresolved: list(value?.unresolved, 24),
-    filesAndResources: list(value?.filesAndResources, 48, 600),
-    latestOutcome: compactText(value?.latestOutcome, 1800),
-    sourceMessageIds,
-  };
-}
-
-function validateSummary(value: any, reference: any, sourceMessageIds: string[], context: { sessionId?: string; sourceMessages?: any[]; previousSummary?: any } = {}) {
-  const issues: string[] = [];
-  if (!value || typeof value !== "object" || Array.isArray(value)) issues.push("summary_not_object");
-  const ids = Array.isArray(value?.sourceMessageIds) ? value.sourceMessageIds.map(String) : [];
-  if (ids.length !== sourceMessageIds.length || ids.some((id, index) => id !== sourceMessageIds[index])) issues.push("source_boundary_mismatch");
-  if (!String(value?.primaryRequest || value?.latestOutcome || "").trim()) issues.push("summary_core_empty");
-  for (const key of ["authorization", "decisions", "unresolved", "filesAndResources"] as const) {
-    const preserved = (Array.isArray(value?.[key]) ? value[key] : []).map(String);
-    for (const anchor of reference[key] || []) if (!preserved.includes(String(anchor))) issues.push(`${key}_anchor_missing`);
-  }
-  const quality = evaluateSessionSummaryQuality({
-    scope: "project",
-    sessionId: String(context.sessionId || "project-session"),
-    summary: value,
-    reference,
-    previousSummary: context.previousSummary,
-    sourceMessages: context.sourceMessages,
-    sourceMessageIds,
-  });
-  issues.push(...quality.issues);
-  return { valid: issues.length === 0, issues: [...new Set(issues)], quality };
-}
-
-function bindTrustedProjectSourceBoundary(summary: any, sourceMessageIds: string[]) {
-  if (!summary || typeof summary !== "object" || Array.isArray(summary)) return summary;
-  return { ...summary, sourceMessageIds: [...sourceMessageIds] };
-}
-
 function summaryChecksum(value: any) {
   return crypto.createHash("sha256").update(JSON.stringify(value || null)).digest("hex");
-}
-
-function fitProjectCompactionPrompt(system: string, payload: any, maxInputTokens: number) {
-  const rounds = buildApiConversationRounds(payload.timeline || []);
-  const selectedRounds = [...rounds];
-  const droppedMessageIds: string[] = [];
-  let droppedRounds = 0;
-  const render = (timeline: any[]) => JSON.stringify({
-    ...payload,
-    timeline,
-    timelineProjection: {
-      strategy: droppedMessageIds.length ? "drop_oldest_complete_rounds" : "full_timeline",
-      fullSourceMessageIds: payload.preservationReference?.sourceMessageIds || [],
-      includedMessageIds: timeline.map((message: any) => String(message?.id || "")),
-      droppedMessageIds,
-      fullTranscriptRetained: true,
-    },
-  });
-  let timeline = selectedRounds.flat();
-  let user = render(timeline);
-  while (selectedRounds.length > 1 && droppedRounds < 3 && estimateTextTokens(system) + estimateTextTokens(user) > maxInputTokens) {
-    const dropped = selectedRounds.shift() || [];
-    droppedMessageIds.push(...dropped.map((message: any) => String(message?.id || "")));
-    droppedRounds += 1;
-    timeline = selectedRounds.flat();
-    user = render(timeline);
-  }
-  if (estimateTextTokens(system) + estimateTextTokens(user) > maxInputTokens) {
-    throw new Error("项目会话压缩输入删除三轮最旧完整对话后仍超过模型容量");
-  }
-  return {
-    user,
-    projection: {
-      strategy: droppedMessageIds.length ? "drop_oldest_complete_rounds" : "full_timeline",
-      originalMessageCount: (payload.timeline || []).length,
-      includedMessageCount: timeline.length,
-      droppedMessageIds,
-      projectedMessageContent: false,
-      ptlRecoveryAttempts: droppedRounds,
-      estimatedInputTokens: estimateTextTokens(system) + estimateTextTokens(user),
-      maxInputTokens,
-    },
-    timeline,
-  };
-}
-
-function isPromptTooLong(error: any) {
-  return /HTTP\s*413|prompt(?:\s+is)?\s+too\s+long|context(?:_length)?(?:\s+window)?\s*(?:exceeded|limit)|maximum context|request too large/i.test(String(error?.message || error || ""));
 }
 
 export async function compactProjectSessionWithModel(project: string, projectSessionId: string, options: {
@@ -606,6 +500,7 @@ export async function compactProjectSessionWithModel(project: string, projectSes
   provider?: string;
   model?: string;
   modelVisiblePayload?: any;
+  activeDispatchScopeId?: string;
 } = {}) {
   return runUnifiedProjectSessionCompaction(project, projectSessionId, options);
 }
@@ -658,6 +553,7 @@ export function buildProjectSessionModelContextProjection(
   if (!fs.existsSync(file)) return null;
   const data = JSON.parse(fs.readFileSync(file, "utf8"));
   const state = projectCompactionState(data, project, projectSessionId);
+  const sessionTaskIndex = readVerifiedSessionTaskIndex({ exactSessionId: projectSessionId, scope: "project", scopeId: project });
   const summary = data.unifiedSessionSummary || state.activeSummary || null;
   const history = Array.isArray(data.history)
     ? data.history.filter((message: any) => ["user", "assistant"].includes(String(message?.role || "")))
@@ -679,8 +575,10 @@ export function buildProjectSessionModelContextProjection(
     currentRequest: options.currentRequest,
     microCompact: resolveSessionModelMicroCompactPolicy(config, {
       contextTokens: Number(state.tokenMeasurement?.activeTokens || 0),
-    pressureThresholdTokens: Number(state.autoCompactThreshold || data.compaction?.auto_compact_threshold || 0),
+     pressureThresholdTokens: Number(state.autoCompactThreshold || 0),
     }),
+    currentTaskId: sessionTaskIndex.activeTaskId,
+    sessionTaskIndex,
   });
   return {
     ...unified,

@@ -1,5 +1,6 @@
 import * as crypto from "crypto";
-import { getTaskById, updateTaskByIdCas } from "../core/db";
+import { getTaskById } from "../core/db";
+import { persistTaskMutationWithTimelineAtomically, type CcmTaskTimelineCursorV1, type CcmTaskTimelineSpanV1 } from "./session-task-timeline";
 
 export type CcmTaskScope = "global" | "group" | "project" | "feishu";
 
@@ -77,6 +78,15 @@ export type CcmTaskContextCapsuleV1 = {
   verificationEvidenceIds: string[];
   unresolvedToolCallIds: string[];
   blockers: string[];
+  timelineSpans: CcmTaskTimelineSpanV1[];
+  activeSpanId?: string;
+  appliedCursors: CcmTaskTimelineCursorV1[];
+  startMarkerId?: string;
+  endMarkerId?: string;
+  startSequence?: number;
+  endSequence?: number;
+  latestCheckpointSequence: number;
+  taskContextSource: "session_timeline";
   sessionBindings: CcmTaskSessionBindingV1[];
   generation: number;
   latestAttempt: number;
@@ -106,12 +116,33 @@ function scopeIdForTask(task: any, scope: CcmTaskScope) {
 function sourceSessionId(task: any) {
   return text(task?.exact_session_id || task?.group_session_id || task?.project_session_id || task?.origin_session_id || task?.source_conversation_ref?.exactSessionId);
 }
+
+export function taskTimelineIdentity(task: any) {
+  const scope = scopeForTask(task);
+  const active = text(task?.active_execution_session_id || task?.execution_session_id || task?.recovery_user_session?.activeSessionId);
+  return { scope, scopeId: scopeIdForTask(task, scope), exactSessionId: active || sourceSessionId(task) };
+}
 function stringList(value: unknown) {
   if (Array.isArray(value)) return uniq(value);
   const s = text(value, 2000);
   return s ? [s] : [];
 }
 function arrayValue(value: unknown) { return Array.isArray(value) ? value : []; }
+function latestKnownAttempt(task: any, previous?: CcmTaskContextCapsuleV1 | null) {
+  const workItemAttempts = (Array.isArray(task?.work_items) ? task.work_items : [])
+    .map((item: any) => Number(item?.attempt || item?.latest_attempt || item?.latestAttempt || 0));
+  const timelineAttempts = (Array.isArray(previous?.timelineSpans) ? previous!.timelineSpans : [])
+    .flatMap(span => Array.isArray(span?.attemptSpans) ? span.attemptSpans : [])
+    .map(item => Number(item?.attempt || 0));
+  return Math.max(
+    0,
+    Number(task?.execution_attempt || 0),
+    Number(task?.attempt || 0),
+    Number(previous?.latestAttempt || 0),
+    ...workItemAttempts,
+    ...timelineAttempts,
+  );
+}
 function workItemsFor(task: any) {
   const rows = Array.isArray(task?.work_items) ? task.work_items : [];
   return rows.slice(0, 200).map((item: any) => ({
@@ -148,6 +179,11 @@ export function buildTaskContextCapsule(task: any, previous?: CcmTaskContextCaps
   const bindings = sourceBinding ? [sourceBinding, ...existingBindings.filter(item => item !== sourceBinding)] : existingBindings;
   const completed = workItemsFor(task).filter(item => item.completed).map(item => item.workItemId);
   const pending = workItemsFor(task).filter(item => !item.completed).map(item => item.workItemId);
+  const timelineSpans = (Array.isArray(previous?.timelineSpans) ? previous!.timelineSpans : []) as CcmTaskTimelineSpanV1[];
+  const activeTimelineSessionId = taskTimelineIdentity(task).exactSessionId;
+  const currentSpan = [...timelineSpans].reverse().find(item => item.taskId === text(task?.id) && (!activeTimelineSessionId || item.exactSessionId === activeTimelineSessionId))
+    || [...timelineSpans].reverse().find(item => item.taskId === text(task?.id))
+    || timelineSpans.at(-1);
   const status = !text(task?.id) || !scopeId || !goal ? "incomplete" : (task?.status === "drifted" ? "drifted" : "ready");
   const base: Omit<CcmTaskContextCapsuleV1, "checksum"> = {
     schema: "ccm-task-context-capsule-v1", taskId: text(task?.id), scope, scopeId,
@@ -164,7 +200,11 @@ export function buildTaskContextCapsule(task: any, previous?: CcmTaskContextCaps
     ...(plan ? { plan } : {}), ...(dispatchContract ? { dispatchContract } : {}), workItems: workItemsFor(task), fileEvidence: Array.isArray(previous?.fileEvidence) ? previous!.fileEvidence : [],
     workspace: { manifestChecksum: text(task?.workspace_manifest_checksum || task?.interruption_receipt?.workspace_checksum || previous?.workspace?.manifestChecksum, 160), worktreeBindings: Array.isArray(task?.worktree_bindings) ? task.worktree_bindings : (previous?.workspace?.worktreeBindings || []) },
     completedWork: uniq([...(previous?.completedWork || []), ...arrayValue(task?.completed_work), ...completed]), pendingWork: uniq([...(arrayValue(task?.pending_work)), ...pending]),
-    fileChangeEvidenceIds: uniq([...(previous?.fileChangeEvidenceIds || []), ...arrayValue(task?.file_change_evidence_ids || task?.fileChangeEvidenceIds)]), verificationEvidenceIds: uniq([...(previous?.verificationEvidenceIds || []), ...arrayValue(task?.verification_evidence_ids || task?.verificationEvidenceIds), ...arrayValue(task?.terminal_decision?.evidence_registry?.evidenceIds)]), unresolvedToolCallIds: uniq(arrayValue(task?.unresolved_tool_call_ids || task?.unresolvedToolCallIds || previous?.unresolvedToolCallIds)), blockers: uniq([...(previous?.blockers || []), ...arrayValue(task?.blockers || task?.blocking_reasons)]), sessionBindings: bindings, generation: Math.max(0, Number(task?.generation || task?.project_session_generation || previous?.generation || 0)), latestAttempt: Math.max(0, Number(task?.execution_attempt || task?.attempt || previous?.latestAttempt || 0)), revision: Math.max(1, Number(previous?.revision || 0) + 1), status, updatedAt: now, contentStored: false,
+    fileChangeEvidenceIds: uniq([...(previous?.fileChangeEvidenceIds || []), ...arrayValue(task?.file_change_evidence_ids || task?.fileChangeEvidenceIds)]), verificationEvidenceIds: uniq([...(previous?.verificationEvidenceIds || []), ...arrayValue(task?.verification_evidence_ids || task?.verificationEvidenceIds), ...arrayValue(task?.terminal_decision?.evidence_registry?.evidenceIds)]), unresolvedToolCallIds: uniq(arrayValue(task?.unresolved_tool_call_ids || task?.unresolvedToolCallIds || previous?.unresolvedToolCallIds)), blockers: uniq([...(previous?.blockers || []), ...arrayValue(task?.blockers || task?.blocking_reasons)]), sessionBindings: bindings, generation: Math.max(0, Number(task?.generation || task?.project_session_generation || previous?.generation || 0)), latestAttempt: latestKnownAttempt(task, previous), revision: Math.max(1, Number(previous?.revision || 0) + 1), status, updatedAt: now, contentStored: false,
+    timelineSpans,
+    ...(currentSpan ? { activeSpanId: currentSpan.status === "open" ? currentSpan.spanId : undefined, startMarkerId: currentSpan.startMarkerId, endMarkerId: currentSpan.endMarkerId, startSequence: currentSpan.startSequence, endSequence: currentSpan.endSequence } : {}),
+    appliedCursors: Array.isArray(previous?.appliedCursors) ? previous!.appliedCursors : [],
+    latestCheckpointSequence: Math.max(0, Number(task?.latest_checkpoint_sequence || task?.latestCheckpointSequence || previous?.latestCheckpointSequence || currentSpan?.latestSequence || 0)), taskContextSource: "session_timeline" as const,
   };
   const result = { ...base, checksum: checksumWithoutChecksum(base) } as CcmTaskContextCapsuleV1;
   return result;
@@ -177,26 +217,35 @@ export function createTaskSessionBinding(input: { task: any; taskId: string; att
 
 export function refreshTaskContext(task: any, reason = "task_updated") { return buildTaskContextCapsule(task, task?.task_context || null, reason); }
 
-export function updateTaskContext(taskId: string, delta: any = {}, expectedTaskRevision?: number) {
-  const id = text(taskId); if (!id) throw new Error("任务上下文缺少 taskId");
-  const result = updateTaskByIdCas(id, current => expectedTaskRevision === undefined || Number(current?.revision || 0) === Number(expectedTaskRevision), current => {
-    const next = { ...current, ...delta };
-    const context = buildTaskContextCapsule(next, current?.task_context || null, text(delta?.reason || "context_updated", 80));
-    return { ...next, task_context: context, task_context_revision_receipt: { revision: context.revision, checksum: context.checksum, reason: text(delta?.reason || "context_updated", 120), at: context.updatedAt, contentStored: false } };
-  });
-  if (!result.updated) throw new Error("任务上下文版本冲突，请刷新后重试");
-  return result.task;
-}
-
 export function addTaskFileEvidence(taskId: string, evidence: any, expectedRevision?: number) {
   const task = getTaskById(text(taskId)); if (!task) throw new Error("任务不存在");
-  const prior = task.task_context || buildTaskContextCapsule(task);
   const item = { evidenceId: text(evidence?.evidenceId || evidence?.id || `fe_${digest(evidence).slice(0, 20)}`), project: text(evidence?.project || task.target_project), path: text(evidence?.path, 500), checksum: text(evidence?.checksum, 160), readRanges: Array.isArray(evidence?.readRanges || evidence?.read_ranges) ? (evidence.readRanges || evidence.read_ranges).slice(0, 40).map((range: any) => ({ start: Math.max(0, Number(range?.start || 0)), end: Math.max(0, Number(range?.end || 0)) })) : [], purpose: text(evidence?.purpose || "file_read", 240), workItemIds: uniq(evidence?.workItemIds || evidence?.work_item_ids), contentStored: false as const };
-  const result = updateTaskByIdCas(text(taskId), current => expectedRevision === undefined || Number(current?.revision || 0) === Number(expectedRevision), current => { const context = buildTaskContextCapsule(current, current?.task_context || prior, "file_evidence"); const fileEvidence = [...(context.fileEvidence || []).filter((x: any) => x.evidenceId !== item.evidenceId), item].slice(-500); const next = { ...context, fileEvidence, revision: context.revision + 1, updatedAt: new Date().toISOString() }; return { ...current, task_context: { ...next, checksum: checksumWithoutChecksum(next) }, task_context_revision_receipt: { revision: next.revision, checksum: checksumWithoutChecksum(next), reason: "file_evidence", at: next.updatedAt, contentStored: false } }; });
-  if (!result.updated) throw new Error("任务上下文版本冲突，请刷新后重试"); return result.task;
+  const identity = taskTimelineIdentity(task);
+  if (!identity.exactSessionId) throw new Error("任务缺少精确会话身份，不能记录文件证据");
+  const committed = persistTaskMutationWithTimelineAtomically({
+    task,
+    expectedTaskRevision: expectedRevision,
+    exactSessionId: identity.exactSessionId,
+    scope: identity.scope,
+    scopeId: identity.scopeId,
+    type: "file_read",
+    eventId: `file_read:${text(taskId, 120)}:${item.evidenceId}`,
+    idempotencyKey: `file_read:${text(taskId, 120)}:${item.evidenceId}`,
+    workItemId: item.workItemIds[0],
+    generation: Number(task.generation || 0),
+    attempt: Number(task.execution_attempt || task.attempt || 1),
+    leaseId: text(task.lease_id || task.leaseId, 160),
+    payloadRef: item.evidenceId,
+    contextReason: "file_evidence",
+    buildContext: (taskForContext, previousContext) => {
+      const context = buildTaskContextCapsule(taskForContext, previousContext, "file_evidence");
+      return { ...context, fileEvidence: [...(context.fileEvidence || []).filter((entry: any) => entry.evidenceId !== item.evidenceId), item].slice(-500) };
+    },
+  });
+  return committed.task;
 }
 
 export function projectTaskContext(task: any) {
   const context = task?.task_context; if (!context || typeof context !== "object") return null;
-  return { schema: context.schema, taskId: text(context.taskId), scope: context.scope, scopeId: text(context.scopeId), sourceSessionId: text(context.sourceSession?.exactSessionId), activeSessionId: text([...context.sessionBindings || []].reverse().find((x: any) => x.status === "active" && x.role !== "source")?.exactSessionId || context.sourceSession?.exactSessionId), revision: Math.max(0, Number(context.revision || 0)), checksum: text(context.checksum, 160), status: context.status, pendingWorkItemCount: Array.isArray(context.pendingWork) ? context.pendingWork.length : 0, completedWorkItemCount: Array.isArray(context.completedWork) ? context.completedWork.length : 0, fileEvidenceCount: Array.isArray(context.fileEvidence) ? context.fileEvidence.length : 0, sessionBindings: (Array.isArray(context.sessionBindings) ? context.sessionBindings : []).map((x: any) => ({ role: x.role, scope: x.scope, exactSessionId: x.exactSessionId, status: x.status, attempt: x.attempt, createdForRecovery: x.createdForRecovery, reason: x.reason })) , contentStored: false };
+  return { schema: context.schema, taskId: text(context.taskId), scope: context.scope, scopeId: text(context.scopeId), sourceSessionId: text(context.sourceSession?.exactSessionId), activeSessionId: text([...context.sessionBindings || []].reverse().find((x: any) => x.status === "active" && x.role !== "source")?.exactSessionId || context.sourceSession?.exactSessionId), revision: Math.max(0, Number(context.revision || 0)), checksum: text(context.checksum, 160), status: context.status, pendingWorkItemCount: Array.isArray(context.pendingWork) ? context.pendingWork.length : 0, completedWorkItemCount: Array.isArray(context.completedWork) ? context.completedWork.length : 0, fileEvidenceCount: Array.isArray(context.fileEvidence) ? context.fileEvidence.length : 0, timelineSpans: Array.isArray(context.timelineSpans) ? context.timelineSpans.map((span: any) => ({ spanId: span.spanId, taskId: span.taskId, exactSessionId: span.exactSessionId, startSequence: span.startSequence, endSequence: span.endSequence, status: span.status, checksum: span.checksum })) : [], activeSpanId: text(context.activeSpanId, 180), appliedCursors: Array.isArray(context.appliedCursors) ? context.appliedCursors.map((cursor: any) => ({ spanId: cursor.spanId, exactSessionId: cursor.exactSessionId, sequence: Number(cursor.sequence || 0), eventChecksum: text(cursor.eventChecksum, 160) })) : [], startMarkerId: text(context.startMarkerId, 180), endMarkerId: text(context.endMarkerId, 180), latestCheckpointSequence: Math.max(0, Number(context.latestCheckpointSequence || 0)), taskContextSource: context.taskContextSource || "session_timeline", sessionBindings: (Array.isArray(context.sessionBindings) ? context.sessionBindings : []).map((x: any) => ({ role: x.role, scope: x.scope, exactSessionId: x.exactSessionId, status: x.status, attempt: x.attempt, createdForRecovery: x.createdForRecovery, reason: x.reason })) , contentStored: false };
 }

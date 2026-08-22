@@ -66,6 +66,8 @@ const task_transition_ledger_1 = require("../../system/task-transition-ledger");
 const completion_gate_1 = require("../../test-agent/completion-gate");
 const conversation_permission_policy_1 = require("../tools/conversation-permission-policy");
 const task_context_1 = require("../../tasks/task-context");
+const session_task_timeline_1 = require("../../tasks/session-task-timeline");
+const task_conversation_projection_1 = require("../../system/task-conversation-projection");
 const group_orchestrator_1 = require("./group-orchestrator");
 const memory_1 = require("./memory");
 const logs_1 = require("./logs");
@@ -323,19 +325,26 @@ function createTaskWithScopedIdentity(task) {
     }
     newTask.work_items = (0, work_items_1.buildMainAgentWorkItems)(newTask);
     newTask.work_item_summary = (0, work_items_1.buildMainAgentWorkItemSummary)(newTask.work_items);
-    // The task context is the durable recovery authority. It is written in the
-    // same task transaction as the task itself; transcript/session data remains
-    // an auxiliary source and may disappear later.
-    newTask.task_context = (0, task_context_1.buildTaskContextCapsule)(newTask);
-    newTask.task_context_revision_receipt = {
-        revision: newTask.task_context.revision,
-        checksum: newTask.task_context.checksum,
-        reason: "task_created",
-        at: newTask.task_context.updatedAt,
-        contentStored: false,
-    };
-    tasks.push(newTask);
-    (0, db_1.saveTasks)(tasks);
+    // A task becomes part of the session timeline only after the task record has
+    // passed the server-side intake/permission gates above.  The marker is
+    // idempotent and is carried into the durable task context for replay.
+    const timelineIdentity = (0, task_context_1.taskTimelineIdentity)(newTask);
+    if (!timelineIdentity.exactSessionId)
+        throw new Error("正式任务缺少精确会话身份，已阻止创建");
+    const persistedStart = (0, session_task_timeline_1.persistTaskStartedAtomically)({
+        task: newTask,
+        position: tasks.length,
+        exactSessionId: timelineIdentity.exactSessionId,
+        scope: timelineIdentity.scope,
+        scopeId: timelineIdentity.scopeId,
+        generation: Number(newTask.generation || 0),
+        attempt: Math.max(1, Number(newTask.execution_attempt || newTask.attempt || 1)),
+        workItemId: newTask.work_items?.[0]?.id || "",
+        title: newTask.title,
+        goal: newTask.business_goal || newTask.description || newTask.title,
+        buildContext: taskWithTimeline => (0, task_context_1.buildTaskContextCapsule)(taskWithTimeline),
+    });
+    Object.assign(newTask, persistedStart.task);
     (0, reliability_ledger_1.appendTraceEvent)(traceId, { id: `task:${newTask.id}:created`, type: "task.created", status: "ok", task_id: newTask.id, group_id: newTask.group_id || "", agent: newTask.target_project || "", message: newTask.title, data: { workflow_type: newTask.workflow_type, assign_type: newTask.assign_type, group_session_id: newTask.group_session_id || "", idempotency_key: idempotencyKey ? "present" : "absent", intake_identity_checksum: intakeIdentity?.checksum || "", source_channel: intakeIdentity?.source_channel || "", target_scope: intakeIdentity?.target_scope || "" } });
     return newTask;
 }
@@ -1126,6 +1135,7 @@ function updateTask(id, updates) {
     const previousGatePassed = tasks[idx].global_mission_gate_passed === true;
     const previousReceiptKey = String(tasks[idx].receipt_idempotency_key || "");
     const previousCollaborationState = tasks[idx].collaboration_state || {};
+    let pendingTimelineMutation = null;
     const policyValidation = (0, task_acceptance_policy_1.validateTaskAcceptancePolicySnapshot)(tasks[idx]);
     if (policyValidation.valid && policyValidation.snapshot) {
         const policy = policyValidation.snapshot;
@@ -1268,14 +1278,36 @@ function updateTask(id, updates) {
     tasks[idx].lifecycle = (0, collaboration_1.deriveTaskLifecycle)(tasks[idx], taskExecutions);
     tasks[idx].work_items = (0, work_items_1.buildMainAgentWorkItems)(tasks[idx], { executions: taskExecutions });
     tasks[idx].work_item_summary = (0, work_items_1.buildMainAgentWorkItemSummary)(tasks[idx].work_items);
-    tasks[idx].task_context = (0, task_context_1.refreshTaskContext)(tasks[idx], updates.status ? `status_${updates.status}` : "task_updated");
-    tasks[idx].task_context_revision_receipt = {
-        revision: tasks[idx].task_context.revision,
-        checksum: tasks[idx].task_context.checksum,
-        reason: updates.status ? `status_${updates.status}` : "task_updated",
-        at: tasks[idx].task_context.updatedAt,
-        contentStored: false,
-    };
+    if (requestedStatus && previousStatus !== requestedStatus && ["done", "completed", "failed", "blocked", "interrupted", "cancelled", "canceled"].includes(requestedStatus)) {
+        const timelineIdentity = (0, task_context_1.taskTimelineIdentity)(tasks[idx]);
+        if (timelineIdentity.exactSessionId) {
+            pendingTimelineMutation = {
+                exactSessionId: timelineIdentity.exactSessionId,
+                scope: timelineIdentity.scope,
+                scopeId: timelineIdentity.scopeId,
+                type: "task_interrupted",
+                eventId: `task_terminal:${id}:${requestedStatus}:${Number(tasks[idx].execution_attempt || tasks[idx].attempt || 1)}`,
+                terminalStatus: requestedStatus,
+                attempt: Number(tasks[idx].execution_attempt || tasks[idx].attempt || 1),
+                generation: Number(tasks[idx].generation || 0),
+                workItemId: tasks[idx].work_item_id || tasks[idx].workItemId || "",
+                leaseId: tasks[idx].lease_id || tasks[idx].leaseId || "",
+                payloadRef: tasks[idx].terminal_state_receipt?.checksum || tasks[idx].terminal_decision?.checksum || "",
+                result: tasks[idx].delivery_summary?.headline || tasks[idx].final_report || tasks[idx].result || tasks[idx].status_detail || requestedStatus,
+                evidenceIds: tasks[idx].terminal_decision?.evidence_registry?.evidenceIds || [],
+                contextReason: `status_${requestedStatus}`,
+                forceSnapshot: true,
+            };
+        }
+    }
+    else if (updates.receipt || updates.delivery_summary || updates.verification_evidence_ids || updates.verificationEvidenceIds) {
+        const timelineIdentity = (0, task_context_1.taskTimelineIdentity)(tasks[idx]);
+        if (timelineIdentity.exactSessionId) {
+            const eventType = updates.verification_evidence_ids || updates.verificationEvidenceIds ? "verification" : updates.receipt?.fileChanges || updates.delivery_summary?.actual_file_changes ? "file_change" : "assistant_message";
+            const payloadRef = String(updates.receipt_idempotency_key || updates.terminal_decision?.checksum || updates.delivery_summary?.checksum || `task-revision:${tasks[idx].revision}`);
+            pendingTimelineMutation = { exactSessionId: timelineIdentity.exactSessionId, scope: timelineIdentity.scope, scopeId: timelineIdentity.scopeId, type: eventType, eventId: `task-checkpoint:${id}:${tasks[idx].revision}:${eventType}`, workItemId: updates.workItemId || updates.work_item_id || tasks[idx].work_item_id || "", generation: Number(tasks[idx].generation || 0), attempt: Number(tasks[idx].execution_attempt || tasks[idx].attempt || 1), leaseId: tasks[idx].lease_id || "", payloadRef, contextReason: eventType };
+        }
+    }
     if (updates.status === "done") {
         tasks[idx].completed_at = updates.completed_at || new Date().toISOString();
     }
@@ -1288,7 +1320,35 @@ function updateTask(id, updates) {
     (0, collaboration_1.appendGlobalDirectDispatchContinuationToHistory)(tasks[idx], previousStatus);
     (0, collaboration_1.appendGlobalDirectDispatchCompletionToHistory)(tasks[idx], previousStatus);
     (0, collaboration_1.appendGlobalDirectDispatchRollbackToHistory)(tasks[idx], previousStatus);
+    if (pendingTimelineMutation) {
+        const committed = (0, session_task_timeline_1.persistTaskMutationWithTimelineAtomically)({
+            task: tasks[idx],
+            position: idx,
+            expectedTaskRevision: currentRevision,
+            ...pendingTimelineMutation,
+            buildContext: (taskForContext, previousContext) => (0, task_context_1.refreshTaskContext)({ ...taskForContext, task_context: previousContext }, pendingTimelineMutation.contextReason),
+        });
+        tasks[idx] = committed.task;
+    }
+    else {
+        tasks[idx].task_context = (0, task_context_1.refreshTaskContext)(tasks[idx], updates.status ? `status_${updates.status}` : "task_updated");
+    }
     (0, db_1.saveTasks)(tasks);
+    if ((0, task_conversation_projection_1.shouldSyncTaskConversationProjection)(updates)) {
+        const projectionReceipt = (0, task_conversation_projection_1.syncTaskConversationProjection)({
+            ...tasks[idx],
+            conversation_projection_previous_status: previousStatus,
+        }, requestedStatus && previousStatus !== requestedStatus ? `status_${previousStatus || "unknown"}_to_${requestedStatus}` : "task_projection_update");
+        if (projectionReceipt.status === "failed") {
+            (0, session_task_timeline_1.enqueueTaskConversationProjectionSync)({
+                taskId: id,
+                taskRevision: Number(tasks[idx].revision || 0),
+                reason: "direct_projection_sync_failed",
+                issues: projectionReceipt.issues,
+            });
+            console.warn(`[任务会话投影] ${id}: ${projectionReceipt.issues.join("；") || "同步失败，已进入补偿队列"}`);
+        }
+    }
     if (updates.status && updates.status !== previousStatus) {
         (0, reliability_ledger_1.appendTraceEvent)(tasks[idx].trace_id, { id: `task:${id}:status:${updates.status}:${tasks[idx].updated_at}`, type: "task.status_changed", status: updates.status === "failed" ? "error" : updates.status === "done" ? "ok" : "info", task_id: id, group_id: tasks[idx].group_id || "", agent: tasks[idx].target_project || "", message: `${previousStatus || "unknown"} → ${updates.status}`, data: { from: previousStatus || "", to: updates.status, detail: String(updates.status_detail || updates.result || "").slice(0, 500) } });
     }

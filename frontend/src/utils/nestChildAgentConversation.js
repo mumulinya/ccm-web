@@ -102,6 +102,8 @@ export function nestChildAgentConversation(rows) {
       agent,
       dialogue: [],
       tools: [],
+      timeline: [],
+      _toolIndexes: new Map(),
       files: uniqueFileChanges(agent),
       isTestAgent: isTestAgentEvent(agent),
       projectName: String(display.projectName || display.projectId || '').trim(),
@@ -116,6 +118,18 @@ export function nestChildAgentConversation(rows) {
     const card = runId ? cardsByRunId.get(runId) : null
     if (!card) continue
     if (isNestableChildAgentEvent(event)) {
+      if (String(event.eventType || '') === 'agent_progress') {
+        const text = childAgentDialogueText(event)
+        const last = card.dialogue.at(-1)
+        if (text && (!last || last.text !== text)) {
+          card.dialogue.push({
+            eventId: event.eventId,
+            text,
+            createdAt: event.createdAt,
+            sequence: Number(event.sequence || 0),
+          })
+        }
+      }
       card.files = mergeFiles(card.files, uniqueFileChanges(event))
       if (Number(event.sequence || 0) >= Number(card.sequence || 0)) {
         card.agent = event
@@ -141,9 +155,38 @@ export function nestChildAgentConversation(rows) {
       continue
     }
     if (String(event.eventType || '').startsWith('tool_')) {
-      card.tools.push(event)
+      const callId = String(event.toolCallId || event.eventId || '').trim()
+      const existingIndex = callId ? card._toolIndexes.get(callId) : undefined
+      if (existingIndex == null) {
+        card.tools.push({ ...event, __toolStartSequence: Number(event.sequence || 0) })
+        if (callId) card._toolIndexes.set(callId, card.tools.length - 1)
+      } else {
+        const previous = card.tools[existingIndex]
+        const previousTerminal = ['tool_completed', 'tool_failed'].includes(String(previous?.eventType || ''))
+        const currentTerminal = ['tool_completed', 'tool_failed'].includes(String(event.eventType || ''))
+        if (!previousTerminal || currentTerminal) {
+          card.tools[existingIndex] = {
+            ...previous,
+            ...event,
+            sequence: Number(previous.__toolStartSequence ?? previous.sequence ?? event.sequence ?? 0),
+            createdAt: previous.createdAt || event.createdAt,
+            __toolStartSequence: Number(previous.__toolStartSequence ?? previous.sequence ?? event.sequence ?? 0),
+            __toolTerminalSequence: currentTerminal ? Number(event.sequence || 0) : Number(previous.__toolTerminalSequence || 0),
+          }
+        }
+      }
       claimed.add(event.eventId)
     }
+  }
+  for (const card of cardsByRunId.values()) {
+    const toolSummaries = new Set(card.tools.map(event => String(
+      event?.detail?.toolDisplay?.result?.summary || event?.display?.summary || '',
+    ).replace(/\s+/g, ' ').trim()).filter(Boolean))
+    card.timeline = [
+      ...card.dialogue.filter(item => !toolSummaries.has(String(item.text || '').replace(/\s+/g, ' ').trim())).map(item => ({ ...item, kind: 'progress' })),
+      ...card.tools.map(event => ({ kind: 'tool', event, eventId: event.eventId, sequence: Number(event.__toolStartSequence ?? event.sequence ?? 0) })),
+    ].sort((left, right) => Number(left.sequence || 0) - Number(right.sequence || 0))
+    delete card._toolIndexes
   }
   const emitted = new Set()
   const out = []

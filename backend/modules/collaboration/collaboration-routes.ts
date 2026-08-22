@@ -390,6 +390,7 @@ import {
 } from "../../tasks/agent-sessions";
 import { interruptTaskExecution, reconcileTaskInterruptionReceipt } from "../../tasks/task-interruption";
 import { captureTaskRecoveryWorkspace, runTaskRecoveryOrchestrator } from "../../tasks/task-recovery-orchestrator";
+import { catchUpTaskContext } from "../../tasks/session-task-timeline";
 import { projectTaskContext } from "../../tasks/task-context";
 import {
   bindTaskAgentInvocationContext,
@@ -1659,7 +1660,25 @@ export function handleCollaborationApiReplayAndExecutionRoutes(
         const taskId = String(payload.task_id || payload.taskId || payload.id || "");
         let task = loadTasks().find((item: any) => item.id === taskId);
         if (!task) return sendJson(res, { error: "任务不存在" }, 404);
+        if (pathname.endsWith("/resume-interrupted")) {
+          const catchUp = catchUpTaskContext(taskId);
+          if (!catchUp.success) return sendJson(res, { error: "任务事件链不完整，需要人工核对后再恢复", code: "TASK_CONTEXT_DRIFTED", detail: catchUp }, 409);
+          task = loadTasks().find((item: any) => item.id === taskId) || task;
+        }
         if (rejectTaskMutationConflict(res, task, payload, pathname.endsWith("/resume-interrupted"))) return;
+        if (pathname.endsWith("/resume-interrupted")) {
+          const context = task?.task_context;
+          const span = context?.timelineSpans?.find((item: any) => String(item?.taskId || "") === taskId);
+          const suppliedContextRevision = payload.task_context_revision ?? payload.taskContextRevision;
+          const suppliedContextChecksum = String(payload.task_context_checksum || payload.taskContextChecksum || "");
+          const suppliedSpanChecksum = String(payload.timeline_span_checksum || payload.timelineSpanChecksum || "");
+          if (!context || !span || suppliedContextRevision === undefined || !suppliedContextChecksum || !suppliedSpanChecksum) {
+            return sendJson(res, { error: "任务恢复标记不完整，请刷新任务回放后重试", code: "TASK_TIMELINE_GUARD_REQUIRED" }, 409);
+          }
+          if (Number(suppliedContextRevision) !== Number(context.revision || 0) || suppliedContextChecksum !== String(context.checksum || "") || suppliedSpanChecksum !== String(span.checksum || "")) {
+            return sendJson(res, { error: "任务上下文或区间已经变化，请刷新后重试", code: "TASK_TIMELINE_GUARD_CONFLICT" }, 409);
+          }
+        }
         if (pathname.endsWith("/interrupt")) {
           for (const queue of taskQueues.values()) {
             let index = queue.indexOf(taskId);
@@ -1679,12 +1698,42 @@ export function handleCollaborationApiReplayAndExecutionRoutes(
         if (runningTaskIds.has(taskId)) return sendJson(res, { error: "旧执行仍在终止，请稍后再恢复" }, 409);
         let resumableTask = task;
         let recoveryWorkspace = captureTaskRecoveryWorkspace(resumableTask);
+        const resumedAttemptFailed = ["failed", "blocked", "cancelled", "canceled"].includes(String(resumableTask.status || "").toLowerCase())
+          && resumableTask?.interruption_receipt?.schema === "ccm-task-interruption-receipt-v1"
+          && resumableTask?.recovery_transaction?.status === "committed"
+          && resumableTask?.recovery_pending !== true;
+        if (resumedAttemptFailed) {
+          const checkpoint = interruptTaskExecution({
+            task: resumableTask,
+            reasonCode: "agent_runtime_unavailable",
+            reason: "从任务回放继续最近失败的 attempt",
+            actor: String(payload.actor || "local-user"),
+            checkpoint: String(resumableTask.acceptance_state || resumableTask.status || "failed"),
+            sideEffectState: "committed",
+            workspaceChecksum: recoveryWorkspace.checksum,
+            changedFileCount: recoveryWorkspace.changedFileCount,
+            processTerminationProven: true,
+          });
+          resumableTask = updateTask(taskId, {
+            acceptance_state: "recovery_required",
+            auto_execute: false,
+            paused: true,
+            is_paused: true,
+            recovery_pending: true,
+            interruption_receipt: checkpoint.receipt,
+            recovery_preflight: null,
+            recovery_transaction: null,
+            status_detail: "最近一次恢复执行失败，已生成新的安全恢复现场",
+          }) || resumableTask;
+          task = resumableTask;
+          recoveryWorkspace = captureTaskRecoveryWorkspace(resumableTask);
+        }
         // A terminal failure may predate interruption receipts. Convert it into
         // a reconciled recovery checkpoint from the current workspace so the
         // replay button can still resume the exact task without creating a
         // second task. An empty/invalid workspace checksum remains fail-closed
         // in the orchestrator.
-        if (!resumableTask.interruption_receipt && ["failed", "blocked"].includes(String(resumableTask.status || "").toLowerCase()) && resumableTask.acceptance_state !== "recovery_required") {
+        if (!resumableTask.interruption_receipt && ["failed", "blocked", "cancelled", "canceled"].includes(String(resumableTask.status || "").toLowerCase()) && resumableTask.acceptance_state !== "recovery_required") {
           const checkpoint = interruptTaskExecution({ task: resumableTask, reasonCode: "agent_runtime_unavailable", reason: "从任务回放继续失败任务", actor: String(payload.actor || "local-user"), checkpoint: String(resumableTask.acceptance_state || resumableTask.status || "failed"), sideEffectState: "committed", workspaceChecksum: recoveryWorkspace.checksum, changedFileCount: recoveryWorkspace.changedFileCount, processTerminationProven: true });
           resumableTask = updateTask(taskId, { status: "blocked", acceptance_state: "recovery_required", auto_execute: false, paused: true, is_paused: true, recovery_pending: true, interruption_receipt: checkpoint.receipt, status_detail: "失败任务已生成可核对恢复现场" }) || resumableTask;
           task = resumableTask;
@@ -1712,7 +1761,7 @@ export function handleCollaborationApiReplayAndExecutionRoutes(
         appendSafeRecoveryMilestone(recovery.task || task, { ...recovery, reopenedSessions: recovery.activation?.sessions || [] });
         appendTaskTimelineEvent(taskId, { type: "task_recovered", title: `第 ${recovery.preflight.nextAttempt} 次执行已恢复`, detail: recovery.decision.reason, status: "ok", phase: "queued", data: { recovery_mode: recovery.preflight.recoveryMode, transaction_checksum: recovery.transaction.checksum, recovery_checksum: recovery.decision.checksum } });
         const safeRecoveryTask = recovery.task ? { ...recovery.task, task_context: projectTaskContext(recovery.task) } : null;
-        return sendJson(res, { success: true, task: safeRecoveryTask, user_session: recovery.userSession || recovery.task?.recovery_user_session || null, agent_sessions: recovery.agentSessions || recovery.task?.recovery_agent_sessions || [], recovery_decision: recovery.decision, recovery_preflight: recovery.preflight, recovery_transaction: recovery.transaction, queue_result: recovery.queueResult });
+        return sendJson(res, { success: true, task: safeRecoveryTask, user_session: recovery.userSession || recovery.task?.recovery_user_session || null, agent_sessions: recovery.agentSessions || recovery.task?.recovery_agent_sessions || [], recovery_decision: recovery.decision, recovery_preflight: recovery.preflight, recovery_transaction: recovery.transaction, conversation_projection: recovery.conversationProjection || recovery.result?.conversation_projection || null, queue_result: recovery.queueResult });
       } catch (e: any) { return sendJson(res, { error: e.message }, 400); }
     });
     return true;
@@ -1757,8 +1806,22 @@ export function handleCollaborationApiReplayAndExecutionRoutes(
     if (!stillRunning && task?.cancellation_requested_at && String(task?.status || "") !== "cancelled") {
       for (const row of rows) {
         if (taskStopTerminal(row) && String(row?.status || "") !== "in_progress") continue;
+        const stoppedWorkspace = captureTaskRecoveryWorkspace(row);
+        const stoppedReceipt = interruptTaskExecution({
+          task: row,
+          reasonCode: "user_interrupt",
+          reason: "用户安全停止任务",
+          actor: "local-user",
+          checkpoint: String(row.acceptance_state || row.status || "cancelled"),
+          sideEffectState: "committed",
+          workspaceChecksum: stoppedWorkspace.checksum,
+          changedFileCount: stoppedWorkspace.changedFileCount,
+          processTerminationProven: true,
+        });
         updateTask(row.id, {
-          status: "cancelled", status_detail: "任务已安全停止", cancelled_at: new Date().toISOString(),
+          status: "cancelled", status_detail: "任务已安全停止，可从任务回放继续", cancelled_at: new Date().toISOString(),
+          acceptance_state: "recovery_required", recovery_pending: true, paused: true, is_paused: true,
+          interruption_receipt: stoppedReceipt.receipt,
           cancellation_progress: { ...(row.cancellation_progress || {}), stage: "cancelled", completed_at: new Date().toISOString() },
         });
         clearTaskCancellation(row.id);

@@ -9,6 +9,7 @@ import {
   normalizeSessionExecutionEvents,
   type SessionExecutionEvent,
 } from "../../system/session-execution-ledger";
+import { appendSessionTimelineEvent } from "../../tasks/session-task-timeline";
 
 const GROUP_SESSION_EXECUTION_DIR = path.join(CCM_DIR, "group-session-execution");
 
@@ -70,6 +71,22 @@ export function appendGroupSessionExecutionEvent(groupIdInput: string, groupSess
       persistContext: { scope: "group", sessionId: groupSessionId },
     });
     if (!events.some(item => item.id === created.id)) events.push(created);
+    if (event?.taskId || event?.task_id) {
+      appendSessionTimelineEvent({
+        exactSessionId: groupSessionId,
+        scope: "group",
+        scopeId: groupId,
+        type,
+        eventId: `execution:${created.id}`,
+        taskId: String(event?.taskId || event?.task_id),
+        workItemId: event?.workItemId || event?.work_item_id,
+        generation: event?.generation,
+        attempt: event?.attempt,
+        leaseId: event?.leaseId || event?.lease_id,
+        payloadRef: created.id,
+        timestamp: created.timestamp,
+      });
+    }
     writeJsonAtomic(file, {
       ...current,
       schema: "ccm-group-session-execution-v1",

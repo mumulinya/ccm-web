@@ -143,3 +143,30 @@ export async function callUnifiedCompactionModel(config: any, system: string, us
     },
   );
 }
+
+// Compatibility-shaped adapters for non-session callers.  The transport and
+// retry policy above are the single implementation; callers must not create
+// their own provider-specific compaction requests.
+export async function callCompactionModelOnce(
+  config: any,
+  system: string,
+  user: string,
+  maxOutputTokens: number,
+  attemptTimeoutMs: number,
+) {
+  return callUnifiedCompactionModelOnce(config, system, user, maxOutputTokens, attemptTimeoutMs, {
+    beforeRequest: ({ provider, model }) => {
+      try { config?.onCompactionActivity?.({ stage: "model_summary_request", provider, model, heartbeat: false }); } catch {}
+    },
+  });
+}
+
+export async function callCompactionModel(config: any, system: string, user: string, maxOutputTokens = 16_000) {
+  return callUnifiedCompactionModel(config, system, user, maxOutputTokens, {
+    beforeRequest: ({ provider, model }) => {
+      try { config?.onCompactionActivity?.({ stage: "model_summary_request", provider, model, heartbeat: false }); } catch {}
+    },
+  });
+}
+
+export const extractJsonObject = extractUnifiedCompactionJson;

@@ -149,6 +149,8 @@ export declare function runNativeQueryLoopSelfTest(): Promise<{
         unstreamedRemainder: boolean;
         unstreamedNoDup: boolean;
         flushedUnstreamedTurnText: boolean;
+        dispatchPromiseRepairsToControlTool: boolean;
+        emptyPostToolTurnRepairsToControlTool: boolean;
         emptyFollowupKeepsFirstTurnText: boolean;
         keepClarifyAcrossTextFollowup: boolean;
         planQualityRepairsOnce: boolean;

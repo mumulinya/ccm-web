@@ -2022,6 +2022,7 @@ function handleRequest(req: any, res: any) {
         try {
           projectCompaction = await compactProjectSessionWithModel(project, exactProjectSessionId, {
             reason: "auto_model",
+            activeDispatchScopeId: dispatchScope,
             currentRequest: finalMessage,
             fixedContext: { project, workDir, agentType, runtimePrompt: toolContext.prompt, contextSourceCatalog: projectSourceCatalog.context, projectMemoryPacket, projectKnowledge: projectKnowledge.context, projectSharedFiles: projectSharedFiles.context },
             tools: { allowedTools: toolContext.allowedTools, runtimeToolSnapshot: toolContext.runtimeToolSnapshot },
@@ -2106,6 +2107,7 @@ function handleRequest(req: any, res: any) {
               projectCompaction = await compactProjectSessionWithModel(project, exactProjectSessionId, {
                 force: true,
                 reason: "third_party_memory_mcp_required_hydration",
+                activeDispatchScopeId: dispatchScope,
                 currentRequest: finalMessage,
                 fixedContext: { project, workDir, agentType, runtimePrompt: toolContext.prompt, contextSourceCatalog: projectSourceCatalog.context, projectMemoryPacket, projectKnowledge: projectKnowledge.context, projectSharedFiles: projectSharedFiles.context },
                 tools: { allowedTools: toolContext.allowedTools, runtimeToolSnapshot: toolContext.runtimeToolSnapshot },
@@ -2184,7 +2186,10 @@ function handleRequest(req: any, res: any) {
       res.once?.("finish", releaseDispatch);
       try {
         let responseDetached = !!(res.writableEnded || res.destroyed);
-        if (!responseDetached) {
+        // The project main-agent may already have opened the same SSE response
+        // while streaming its preamble.  A later dispatch decision must reuse
+        // that stream instead of attempting to send a second HTTP status line.
+        if (!responseDetached && !res.headersSent) {
           res.writeHead(200, {
             "Content-Type": "text/event-stream",
             "Cache-Control": "no-cache, no-transform",
@@ -2392,6 +2397,41 @@ function handleRequest(req: any, res: any) {
               workItemAgentSessions.set(String(workItem.id), workerSession);
             }
             let workerSessionOptions = getTaskAgentSessionOptions(workerSession);
+            const workerExecutionId = `${task.id}:${workItem.id}:attempt:${workItem.attempts}`;
+            const needsMemoryReceipt = firstMemoryReceiptRequired && !workItemMemoryReceiptStarted.has(String(workItem.id));
+            const workerMemoryChallenge = needsMemoryReceipt
+              ? createMemoryContextConsumptionChallenge({
+                  project,
+                  taskId: task.id,
+                  executionId: workerExecutionId,
+                  taskAgentSessionId: workerSession.id,
+                  attempt: Math.max(1, Number(workItem.attempts || round || 1)),
+                })
+              : projectMemoryMcp?.challenge || null;
+            const workerMemoryServers = memoryMcpEnabled
+              ? buildProjectSessionBoundMemoryMcpServer({
+                  project,
+                  projectSessionId: exactProjectSessionId,
+                  agentType,
+                  workDir,
+                  taskAgentSessionId: workerSession.id,
+                  nativeSessionId: workerSessionOptions.sessionId || "",
+                  memoryReceiptChallenge: workerMemoryChallenge,
+                  memoryReceiptFile: memoryContextConsumptionReceiptFile(workerMemoryChallenge?.challenge_id || ""),
+                  memorySnapshotId: projectMemoryMcp?.snapshot?.id || "",
+                  memorySnapshotChecksum: projectMemoryMcp?.snapshot?.checksum || "",
+                  boundaryGeneration: projectMemoryMcp?.snapshot?.boundaryGeneration || 0,
+                  nativeGeneration: projectMemoryMcp?.snapshot?.nativeGeneration || 0,
+                  requestText: finalMessage,
+                  memoryReadBudgetTokens: projectMemoryMcp?.memoryReadBudgetTokens || 0,
+                })
+              : [];
+            const workerToolContext = memoryMcpEnabled
+              ? buildCurrentProjectToolContext(workerMemoryServers)
+              : toolContext;
+            const workerProjectSessionContext = memoryMcpEnabled
+              ? buildThirdPartyMemoryBootstrap(projectMemoryMcp.snapshot, workerMemoryChallenge)
+              : projectSessionContext;
             const isolatedWorkDir = prepareChildAgentWorkDir(workDir, {
               mode: workItem.dispatchContract?.worktree?.strategy === "isolated" ? "worktree" : "shared",
               failClosed: workItem.dispatchContract?.worktree?.strategy === "isolated",
@@ -2402,9 +2442,9 @@ function handleRequest(req: any, res: any) {
             });
             const workerWorkDir = isolatedWorkDir.workDir;
             const workerPrompt = [
-              toolContext.prompt,
+              workerToolContext.prompt,
               projectKnowledge.context,
-              projectSessionContext,
+              workerProjectSessionContext,
               buildProjectExecutionBrief(project, workItem.objective, {
                 workDir: workerWorkDir,
                 query: finalMessage,
@@ -2424,19 +2464,18 @@ function handleRequest(req: any, res: any) {
               projectMemoryMcp.bootstrapTokens = bootstrapTokens;
               projectMemoryMcp.maxBootstrapTokens = maxBootstrapTokens;
             }
-            const needsMemoryReceipt = firstMemoryReceiptRequired && !workItemMemoryReceiptStarted.has(String(workItem.id));
             const output = await callAgent(project, workerPrompt, workerWorkDir, agentType, Number(workItem.dispatchContract?.timeoutMs || 300000), {
               background: true,
               taskId: task.id,
-              executionId: `${task.id}:${workItem.id}:attempt:${workItem.attempts}`,
+              executionId: workerExecutionId,
               projectSessionId: exactProjectSessionId,
               role: "project-child-agent",
               source: "project-main-agent",
               title: workItem.title,
-              allowedTools: toolContext.allowedTools,
-              mcpConfigPath: toolContext.audit.mcpConfigPath,
-              runtimeToolSnapshot: toolContext.runtimeToolSnapshot,
-              runtimeToolDispatchGate: toolContext.dispatchGate,
+              allowedTools: workerToolContext.allowedTools,
+              mcpConfigPath: workerToolContext.audit.mcpConfigPath,
+              runtimeToolSnapshot: workerToolContext.runtimeToolSnapshot,
+              runtimeToolDispatchGate: workerToolContext.dispatchGate,
               agentSession: workerSessionOptions,
               taskAgentSessionId: workerSession.id,
               planDispatchContract: workItem.dispatchContract || null,
@@ -2447,7 +2486,7 @@ function handleRequest(req: any, res: any) {
               sourceManifestChecksum: String(workItem.dispatchContract?.sourceManifestChecksum || ""),
               workItemId: String(workItem.dispatchContract?.workItemId || workItem.id),
               memoryContextConsumptionReceiptRequired: needsMemoryReceipt,
-              memoryContextConsumptionChallenge: needsMemoryReceipt ? projectMemoryMcp?.challenge || null : null,
+              memoryContextConsumptionChallenge: needsMemoryReceipt ? workerMemoryChallenge : null,
               onDone: (state: any) => { doneState = state; },
             });
             workItemMemoryReceiptStarted.add(String(workItem.id));

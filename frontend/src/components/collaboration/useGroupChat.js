@@ -698,6 +698,11 @@ export function useGroupChat(props, emit) {
     const requestedSessionId = String(currentGroupSessionId.value || '')
     const data = await groupsApi.messages(groupId, limit, requestedSessionId)
     if (currentGroup.value?.id !== groupId) return
+    // A session-list request can already be in flight when the user starts a
+    // deferred draft.  That stale response must not restore the legacy
+    // `default` binding, otherwise the first message skips draft
+    // materialization and is rejected as an old session.
+    if (isGroupSessionDraft.value) return false
     if (requestedSessionId && String(currentGroupSessionId.value || '') !== requestedSessionId) return
     groupSessions.value = data.sessions || groupSessions.value
     if (!requestedSessionId) {
@@ -772,7 +777,12 @@ export function useGroupChat(props, emit) {
 
   const materializeGroupSessionDraft = async () => {
     if (currentGroupSessionId.value) return currentGroupSessionId.value
-    if (!isGroupSessionDraft.value || !currentGroup.value) return ''
+    // Sending the first message is itself sufficient authority to materialize
+    // a conversation session.  Do not depend only on the transient draft flag:
+    // a late initial-load callback can clear that UI flag while the exact
+    // session id is still empty.
+    if (!currentGroup.value) return ''
+    isGroupSessionDraft.value = true
     if (groupDraftCreation) return groupDraftCreation
     const groupId = currentGroup.value.id
     groupDraftCreation = (async () => {
@@ -801,8 +811,12 @@ export function useGroupChat(props, emit) {
     const data = await groupsApi.sessions(groupId)
     if (groupId !== String(currentGroup.value?.id || '')) return ''
     const sessions = Array.isArray(data.sessions) ? data.sessions : []
-    let sessionId = String(data.activeSessionId || data.active_session_id || '').trim()
-    if (!sessionId) sessionId = String(sessions.find(item => !item?.archived)?.id || '').trim()
+    const activeCandidate = String(data.activeSessionId || data.active_session_id || '').trim()
+    let sessionId = activeCandidate.startsWith('gcs_')
+      && sessions.some(item => String(item?.id || '') === activeCandidate && item?.archived !== true)
+      ? activeCandidate
+      : ''
+    if (!sessionId) sessionId = String(sessions.find(item => String(item?.id || '').startsWith('gcs_') && item?.archived !== true)?.id || '').trim()
     if (!sessionId) {
       const created = await groupsApi.createSession(groupId)
       if (groupId !== String(currentGroup.value?.id || '')) return ''

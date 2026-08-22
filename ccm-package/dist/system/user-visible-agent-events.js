@@ -35,6 +35,8 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.USER_VISIBLE_AGENT_RESULT_SCHEMA = exports.USER_VISIBLE_AGENT_EVENT_SCHEMA = void 0;
 exports.sanitizeUserVisibleAgentDetail = sanitizeUserVisibleAgentDetail;
+exports.listTaskAttemptReplayProjections = listTaskAttemptReplayProjections;
+exports.listUserVisibleAgentEventsForTaskAttempt = listUserVisibleAgentEventsForTaskAttempt;
 exports.normalizeUserVisibleAgentEvent = normalizeUserVisibleAgentEvent;
 exports.appendUserVisibleAgentEvent = appendUserVisibleAgentEvent;
 exports.appendAssistantProgress = appendAssistantProgress;
@@ -52,6 +54,7 @@ const fs = __importStar(require("fs"));
 const os = __importStar(require("os"));
 const path = __importStar(require("path"));
 const atomic_json_file_1 = require("../core/atomic-json-file");
+const task_store_1 = require("../core/task-store");
 const context_budget_1 = require("./context-budget");
 const tool_display_projection_1 = require("./tool-display-projection");
 const assistant_progress_1 = require("./assistant-progress");
@@ -188,10 +191,16 @@ function sanitizeUserVisibleRequirementPlan(value) {
         return {
             id: compactText(step?.id || `step_${index + 1}`, 100),
             title: stepTitle,
-            description: compactText(step?.description || step?.detail, 200),
-            outcome: compactText(step?.outcome || step?.expectedResult || step?.expected_result || step?.acceptance?.[0], 160),
+            description: compactText(step?.description || step?.detail || step?.objective, 800),
+            outcome: compactText(step?.outcome || step?.expectedResult || step?.expected_result || step?.acceptance?.[0], 800),
             ...(compactText(step?.project || step?.projectName || step?.project_name, 160)
                 ? { project: compactText(step?.project || step?.projectName || step?.project_name, 160) } : {}),
+            ...(uniqueStrings(step?.files || step?.allowedFiles || step?.allowed_files, 30).length
+                ? { files: uniqueStrings(step?.files || step?.allowedFiles || step?.allowed_files, 30).map(item => compactText(item, 500)) } : {}),
+            ...(uniqueStrings(step?.artifacts || step?.outputs, 20).length
+                ? { artifacts: uniqueStrings(step?.artifacts || step?.outputs, 20).map(item => compactText(item, 300)) } : {}),
+            ...(uniqueStrings(step?.sourceEvidenceIds || step?.source_evidence_ids, 30).length
+                ? { sourceEvidenceIds: uniqueStrings(step?.sourceEvidenceIds || step?.source_evidence_ids, 30).map(item => compactText(item, 180)) } : {}),
             dependsOn: uniqueStrings(step?.dependsOn || step?.depends_on, 20).map(item => compactText(item, 100)),
             status: normalizeRequirementPlanStepStatus(step?.status),
         };
@@ -341,6 +350,168 @@ function readStore(scope, scopeId, exactSessionId) {
     }
     return store;
 }
+function eventAttempt(event) {
+    const explicit = event?.attempt ?? event?.detail?.replayLink?.attempt;
+    const parsed = Number(explicit || 0);
+    if (Number.isFinite(parsed) && parsed > 0)
+        return Math.floor(parsed);
+    const match = String(event?.eventId || "").match(/(?:^|:)attempt:(\d+):/i);
+    return match?.[1] ? Math.max(1, Number(match[1])) : 0;
+}
+function readEventStoresForScope(scope, scopeId) {
+    const directory = path.join(STORE_ROOT, scope);
+    if (!fs.existsSync(directory))
+        return [];
+    const stores = [];
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+        if (!entry.isFile() || !entry.name.endsWith(".json"))
+            continue;
+        try {
+            const value = JSON.parse(fs.readFileSync(path.join(directory, entry.name), "utf8"));
+            if (value?.schema !== "ccm-user-visible-agent-event-store-v1"
+                || compactText(value?.scope, 40) !== scope
+                || compactText(value?.scopeId, 240) !== scopeId
+                || !compactText(value?.exactSessionId, 240))
+                continue;
+            stores.push(readStore(scope, scopeId, compactText(value.exactSessionId, 240)));
+        }
+        catch { }
+    }
+    return stores;
+}
+function taskEventsAcrossSessions(scope, scopeId, taskId) {
+    const byIdentity = new Map();
+    for (const store of readEventStoresForScope(scope, scopeId)) {
+        for (const stored of store.events) {
+            if (compactText(stored?.taskId, 240) !== taskId)
+                continue;
+            const safe = projectSafeStoredEvent(stored);
+            if (!safe)
+                continue;
+            byIdentity.set(`${safe.exactSessionId}:${safe.eventId}`, safe);
+        }
+    }
+    return [...byIdentity.values()].sort((left, right) => {
+        const timeDelta = Date.parse(String(left.createdAt || "")) - Date.parse(String(right.createdAt || ""));
+        if (Number.isFinite(timeDelta) && timeDelta)
+            return timeDelta;
+        return Number(left.sequence || 0) - Number(right.sequence || 0);
+    });
+}
+function attemptStatus(value) {
+    const status = String(value || "running").toLowerCase();
+    if (status === "success" || status === "completed" || status === "accepted")
+        return "success";
+    if (status === "blocked")
+        return "blocked";
+    if (status === "cancelled" || status === "canceled")
+        return "cancelled";
+    if (status === "interrupted")
+        return "interrupted";
+    if (status === "failed" || status === "error" || status === "rejected")
+        return "failed";
+    return "running";
+}
+function attemptTerminalReason(events) {
+    const terminal = [...events].reverse().find(event => event.eventType === "result" || ["failed", "waiting"].includes(String(event.display?.status || "")));
+    const completion = terminal?.detail?.completionSummary || terminal?.detail?.safeResult?.completionSummary;
+    return compactText(completion?.detail || completion?.headline || terminal?.display?.summary, 500);
+}
+function attemptStoppedStage(events) {
+    const event = [...events].reverse().find(item => compactText(item?.detail?.executionStage?.kind, 80));
+    return compactText(event?.detail?.executionStage?.kind, 80);
+}
+function taskAttemptRows(taskId, scope, scopeId) {
+    return (0, task_store_1.withSqliteTaskStore)(db => db.prepare(`
+    SELECT s.exact_session_id, s.scope, s.scope_id, a.attempt, a.status,
+           a.start_sequence, a.end_sequence, a.created_at, a.updated_at,
+           start_event.created_at AS started_at,
+           end_event.created_at AS ended_at,
+           COALESCE(end_event.generation, start_event.generation, 0) AS generation
+      FROM task_attempt_spans a
+      JOIN task_timeline_spans s ON s.span_id = a.span_id
+ LEFT JOIN session_timeline_events start_event
+        ON start_event.scope = s.scope AND start_event.scope_id = s.scope_id
+       AND start_event.exact_session_id = s.exact_session_id AND start_event.sequence = a.start_sequence
+ LEFT JOIN session_timeline_events end_event
+        ON end_event.scope = s.scope AND end_event.scope_id = s.scope_id
+       AND end_event.exact_session_id = s.exact_session_id AND end_event.sequence = a.end_sequence
+     WHERE s.task_id = ? AND s.scope = ? AND s.scope_id = ?
+  ORDER BY a.attempt ASC, a.start_sequence ASC
+  `).all(taskId, scope, scopeId));
+}
+function listTaskAttemptReplayProjections(filter) {
+    const scope = normalizeScope(filter?.scope);
+    const scopeId = compactText(filter?.scopeId || filter?.scope_id || (scope === "global" ? "global" : ""), 240);
+    const exactSessionId = compactText(filter?.exactSessionId || filter?.exact_session_id || filter?.sessionId || filter?.session_id, 240);
+    const taskId = compactText(filter?.taskId || filter?.task_id, 240);
+    if (!scopeId || !exactSessionId || !taskId)
+        throw new Error("查询历史执行必须指定scope、scopeId、exactSessionId和taskId");
+    const allTaskEvents = taskEventsAcrossSessions(scope, scopeId, taskId);
+    const timelineRows = taskAttemptRows(taskId, scope, scopeId);
+    const sessionBound = timelineRows.some(row => compactText(row?.exact_session_id, 240) === exactSessionId)
+        || allTaskEvents.some(event => event.exactSessionId === exactSessionId);
+    if (!sessionBound)
+        throw new Error("任务不属于当前精确会话或其恢复链路");
+    const attemptNumbers = new Set();
+    for (const row of timelineRows)
+        if (Number(row?.attempt || 0) > 0)
+            attemptNumbers.add(Number(row.attempt));
+    for (const event of allTaskEvents)
+        if (eventAttempt(event) > 0)
+            attemptNumbers.add(eventAttempt(event));
+    const attempts = [...attemptNumbers].sort((left, right) => left - right).map(attempt => {
+        const rows = timelineRows.filter(row => Number(row?.attempt || 0) === attempt);
+        const events = allTaskEvents.filter(event => eventAttempt(event) === attempt);
+        const lastRow = rows.at(-1);
+        const status = attemptStatus(lastRow?.status || [...events].reverse().find(event => event.eventType === "result")?.display?.status);
+        const startedAt = compactText(lastRow?.started_at || lastRow?.created_at || events[0]?.createdAt, 40);
+        const endedAt = status === "running" ? "" : compactText(lastRow?.ended_at || lastRow?.updated_at || events.at(-1)?.createdAt, 40);
+        const startedMs = Date.parse(startedAt);
+        const endedMs = Date.parse(endedAt);
+        const tools = new Set(events.filter(event => String(event.eventType || "").startsWith("tool_"))
+            .map(event => compactText(event.toolCallId || event.eventId, 240)).filter(Boolean));
+        const files = new Set(events.flatMap(event => Array.isArray(event.detail?.fileChanges) ? event.detail.fileChanges : [])
+            .map((file) => compactText(file?.path || file?.file || file?.name || file, 500)).filter(Boolean));
+        const verification = new Set(events.filter(event => {
+            const stage = compactText(event?.detail?.executionStage?.kind, 80);
+            return stage === "independent_verification" || /test.?agent|验证|验收/i.test(`${event.display?.title || ""} ${event.display?.summary || ""}`);
+        }).map(event => event.eventId));
+        return {
+            schema: "ccm-attempt-replay-projection-v1",
+            taskId,
+            attempt,
+            generation: Math.max(Number(lastRow?.generation || 0), ...events.map(event => Number(event.generation || 0)), 0),
+            status,
+            ...(compactText(lastRow?.exact_session_id, 240) ? { exactSessionId: compactText(lastRow.exact_session_id, 240) } : {}),
+            ...(startedAt ? { startedAt } : {}),
+            ...(endedAt ? { endedAt } : {}),
+            ...(Number.isFinite(startedMs) && Number.isFinite(endedMs) && endedMs >= startedMs ? { durationMs: endedMs - startedMs } : {}),
+            ...(attemptStoppedStage(events) ? { stoppedStage: attemptStoppedStage(events) } : {}),
+            ...(attemptTerminalReason(events) ? { terminalReason: attemptTerminalReason(events) } : {}),
+            counts: { events: events.length, tools: tools.size, files: files.size, verification: verification.size },
+            contentStored: false,
+        };
+    });
+    return { schema: "ccm-attempt-replay-list-v1", taskId, attempts, contentStored: false };
+}
+function listUserVisibleAgentEventsForTaskAttempt(filter) {
+    const scope = normalizeScope(filter?.scope);
+    const scopeId = compactText(filter?.scopeId || filter?.scope_id || (scope === "global" ? "global" : ""), 240);
+    const exactSessionId = compactText(filter?.exactSessionId || filter?.exact_session_id || filter?.sessionId || filter?.session_id, 240);
+    const taskId = compactText(filter?.taskId || filter?.task_id, 240);
+    const attempt = Math.max(1, Number(filter?.attempt || 1));
+    const cursor = Math.max(0, Number(filter?.cursor || filter?.after || 0));
+    const limit = Math.max(1, Math.min(500, Number(filter?.limit || 200)));
+    const projection = listTaskAttemptReplayProjections({ scope, scopeId, exactSessionId, taskId });
+    if (!projection.attempts.some(item => item.attempt === attempt)) {
+        return { schema: "ccm-user-visible-agent-event-list-v1", events: [], nextCursor: cursor, hasMore: false, contentStored: false };
+    }
+    const source = taskEventsAcrossSessions(scope, scopeId, taskId).filter(event => eventAttempt(event) === attempt);
+    const events = source.slice(cursor, cursor + limit);
+    const nextCursor = cursor + events.length;
+    return { schema: "ccm-user-visible-agent-event-list-v1", events, nextCursor, hasMore: nextCursor < source.length, contentStored: false };
+}
 function toolPresentation(toolNameInput, args = {}) {
     const display = (0, tool_display_projection_1.buildToolDisplayDetail)({ toolName: toolNameInput, arguments: args });
     return { title: display.tool.userLabel || display.tool.label, target: display.tool.target || "" };
@@ -416,6 +587,21 @@ function normalizeUserVisibleAgentEvent(input, sequence = 0) {
             ? { tokenAccuracy: String(input?.display?.tokenAccuracy || input?.tokenAccuracy || input?.token_accuracy) } : {}),
     };
     const detailSource = input?.detail || {};
+    const terminalGateSource = detailSource?.terminalGate
+        || detailSource?.terminal_gate
+        || input?.terminalGate
+        || input?.terminal_gate
+        || input?.result?.terminalGate
+        || input?.result?.terminal_gate;
+    const terminalGate = terminalGateSource && typeof terminalGateSource === "object"
+        && (typeof terminalGateSource.passed === "boolean" || typeof terminalGateSource.accepted === "boolean")
+        ? {
+            passed: terminalGateSource.passed === true,
+            accepted: terminalGateSource.accepted === true,
+            source: "task_ledger",
+            contentStored: false,
+        }
+        : null;
     const taskIdentity = compactText(input?.taskId || input?.task_id, 240);
     const anchorIdentity = compactText(input?.anchorMessageId || input?.anchor_message_id, 240);
     const turnIdentity = compactText(input?.turnId || input?.turn_id || input?.executionTurnId || input?.execution_turn_id, 240);
@@ -469,6 +655,22 @@ function normalizeUserVisibleAgentEvent(input, sequence = 0) {
             }),
         } : {}),
         ...(detailSource.toolDisplay?.schema === "ccm-tool-display-detail-v1" ? { toolDisplay: detailSource.toolDisplay } : {}),
+        ...(detailSource.fileReadEvidence && typeof detailSource.fileReadEvidence === "object"
+            && ["structured_tool", "safe_command_inference"].includes(String(detailSource.fileReadEvidence.source))
+            && compactText(detailSource.fileReadEvidence.path, 500) ? {
+            fileReadEvidence: {
+                project: compactText(detailSource.fileReadEvidence.project, 240),
+                path: compactText(detailSource.fileReadEvidence.path, 500).replace(/\\/g, "/"),
+                ranges: (Array.isArray(detailSource.fileReadEvidence.ranges) ? detailSource.fileReadEvidence.ranges : [])
+                    .slice(0, 20).map((range) => ({
+                    start: Math.max(1, Number(range?.start || 1)),
+                    end: Math.max(Math.max(1, Number(range?.start || 1)), Number(range?.end || range?.start || 1)),
+                })),
+                ...(compactText(detailSource.fileReadEvidence.checksum, 160) ? { checksum: compactText(detailSource.fileReadEvidence.checksum, 160) } : {}),
+                source: detailSource.fileReadEvidence.source,
+                contentStored: false,
+            },
+        } : {}),
         ...(detailSource.timing && typeof detailSource.timing === "object" ? {
             timing: sanitizeUserVisibleAgentDetail({
                 totalMs: Math.max(0, Number(detailSource.timing.totalMs || 0)),
@@ -605,8 +807,12 @@ function normalizeUserVisibleAgentEvent(input, sequence = 0) {
             },
         } : {}),
         ...(detailSource.completionSummary || input?.completionSummary || input?.result?.completionSummary || input?.result?.completion_summary
-            ? { completionSummary: (0, completion_summary_1.buildCcmCompletionSummary)(detailSource.completionSummary || input?.completionSummary || input?.result?.completionSummary || input?.result?.completion_summary) }
+            ? { completionSummary: (0, completion_summary_1.buildCcmCompletionSummary)({
+                    ...(detailSource.completionSummary || input?.completionSummary || input?.result?.completionSummary || input?.result?.completion_summary),
+                    ...(terminalGate ? { terminalGate } : {}),
+                }) }
             : {}),
+        ...(terminalGate ? { terminalGate } : {}),
     };
     const stableIdentity = {
         scope, scopeId, exactSessionId, generation: Math.max(0, Number(input?.generation || 0)),
@@ -665,6 +871,10 @@ function normalizeUserVisibleAgentEvent(input, sequence = 0) {
 function sameVisibleEventLane(item, next) {
     if (Number(item.generation || 0) !== Number(next.generation || 0))
         return false;
+    const itemAttempt = Number(item.attempt || item.detail?.executionStage?.attempt || item.detail?.agentDisplay?.attempt || 0);
+    const nextAttempt = Number(next.attempt || next.detail?.executionStage?.attempt || next.detail?.agentDisplay?.attempt || 0);
+    if ((itemAttempt || nextAttempt) && itemAttempt !== nextAttempt)
+        return false;
     const nextTask = compactText(next.taskId, 240);
     const itemTask = compactText(item.taskId, 240);
     return nextTask ? itemTask === nextTask : !itemTask;
@@ -685,8 +895,21 @@ function appendUserVisibleAgentEvent(input) {
         const store = readStore(initial.scope, initial.scopeId, initial.exactSessionId);
         if (shouldDropLateAssistantProgress(store, initial))
             return;
-        const existing = store.events.find(item => item.eventId === initial.eventId);
+        const existingIndex = store.events.findIndex(item => item.eventId === initial.eventId);
+        const existing = existingIndex >= 0 ? store.events[existingIndex] : null;
         if (existing) {
+            const lifecycleRank = (value) => value === "tool_started" ? 1 : ["tool_completed", "tool_failed"].includes(value) ? 2 : 0;
+            if (initial.toolCallId && existing.toolCallId === initial.toolCallId
+                && lifecycleRank(initial.eventType) > lifecycleRank(existing.eventType)) {
+                event = { ...initial, sequence: existing.sequence, createdAt: existing.createdAt || initial.createdAt };
+                store.events[existingIndex] = event;
+                store.revision = Math.max(store.revision, ...store.events.map(item => item.sequence), 0) + 1;
+                store.updatedAt = now();
+                store.checksum = storeChecksum(store);
+                (0, atomic_json_file_1.writeJsonAtomic)(file, store);
+                appended = true;
+                return;
+            }
             event = existing;
             return;
         }

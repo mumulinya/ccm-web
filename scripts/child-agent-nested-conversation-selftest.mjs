@@ -123,6 +123,27 @@ const testAgent = nestChildAgentConversation([
 ])
 assert.equal(childAgentCardTitle(testAgent.find(event => event.__childAgentConversation)), 'TestAgent · shop')
 
+const lifecycle = nestChildAgentConversation([
+  childAgent('run-lifecycle', 'shop', 1, { fileChanges: [] }),
+  {
+    ...childTool('tool-start-event', 'run-lifecycle', 'command_execution', 2),
+    eventType: 'tool_started',
+    toolCallId: 'same-command',
+    display: { status: 'running', title: 'command_execution' },
+  },
+  {
+    ...childTool('tool-complete-event', 'run-lifecycle', 'command_execution', 3),
+    toolCallId: 'same-command',
+    display: { status: 'success', title: 'command_execution', target: 'npm test' },
+  },
+  childAgent('run-lifecycle', 'shop', 4, { eventType: 'agent_progress', summary: '构建已完成，正在核对测试结果。', fileChanges: [] }),
+])
+const lifecycleCard = lifecycle.find(event => event.__childAgentConversation)
+assert.equal(lifecycleCard.tools.length, 1, '同一toolCallId的开始与完成必须合并成一次工具调用')
+assert.equal(lifecycleCard.tools[0].eventType, 'tool_completed')
+assert.equal(lifecycleCard.timeline.filter(item => item.kind === 'tool').length, 1)
+assert.equal(lifecycleCard.dialogue.some(item => item.text === '构建已完成，正在核对测试结果。'), true, '安全的agent_progress必须补入子Agent文本')
+
 const unsafe = nestChildAgentConversation([
   childAgent('run-bad', 'shop', 1, { fileChanges: [] }),
   {
@@ -162,9 +183,13 @@ assert.match(transcript, /ChildAgentConversation/)
 assert.match(transcript, /nestChildAgentConversation/)
 assert.match(transcript, /childAgentCardExpanded/)
 assert.match(transcript, /__childAgentConversation/)
-assert.match(transcript, /effectiveExecutionDensity.value !== 'summary'/)
+assert.match(transcript, /return isLivePresentation.value \|\| String\(event\?\.display\?\.status \|\| ''\) === 'failed'/)
+assert.doesNotMatch(transcript, /executionDensityOptions/)
 assert.match(card, /cc-child-agent-line/)
 assert.match(card, /toolsToggleLabel/)
+assert.match(transcript, /sourceTimeline/)
+assert.match(transcript, /__childAgentProgress/)
+assert.match(transcript, /command_execution: '运行命令'/)
 
 console.log(JSON.stringify({
   pass: true,

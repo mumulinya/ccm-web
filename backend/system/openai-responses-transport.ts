@@ -1,6 +1,49 @@
 import type { LlmChatMessage } from "../modules/collaboration/group-orchestrator-llm-client";
 import type { ProviderToolDefinition } from "./provider-native-tools";
 
+const responsesWithoutMaxOutputTokens = new Set<string>();
+const responsesWithoutTemperature = new Set<string>();
+
+function responsesCompatibilityKey(endpoint: string, model: string) {
+  return `${String(endpoint || "").trim().replace(/\/+$/, "").toLowerCase()}\n${String(model || "").trim().toLowerCase()}`;
+}
+
+export function shouldOmitOpenAiResponsesMaxOutputTokens(endpoint: string, model: string) {
+  return responsesWithoutMaxOutputTokens.has(responsesCompatibilityKey(endpoint, model));
+}
+
+export function rememberOpenAiResponsesMaxOutputTokensUnsupported(endpoint: string, model: string) {
+  responsesWithoutMaxOutputTokens.add(responsesCompatibilityKey(endpoint, model));
+}
+
+export function shouldOmitOpenAiResponsesTemperature(endpoint: string, model: string) {
+  return responsesWithoutTemperature.has(responsesCompatibilityKey(endpoint, model));
+}
+
+export function rememberOpenAiResponsesTemperatureUnsupported(endpoint: string, model: string) {
+  responsesWithoutTemperature.add(responsesCompatibilityKey(endpoint, model));
+}
+
+export function shouldRetryOpenAiResponsesWithoutMaxOutputTokens(status: number, detail: string) {
+  if (Number(status) !== 400) return false;
+  const message = safeProviderHttpDetail(detail, 500);
+  return /upstream request failed/i.test(message)
+    || /max[_ -]?output[_ -]?tokens?.{0,100}(?:unknown|unsupported|unrecognized|invalid|not allowed)/i.test(message)
+    || /(?:unknown|unsupported|unrecognized|invalid|not allowed).{0,100}max[_ -]?output[_ -]?tokens?/i.test(message);
+}
+
+export function shouldRetryOpenAiResponsesWithoutTemperature(status: number, detail: string) {
+  if (Number(status) !== 400) return false;
+  const message = safeProviderHttpDetail(detail, 500);
+  return /upstream request failed/i.test(message)
+    || /temperature.{0,100}(?:unknown|unsupported|unrecognized|invalid|not allowed)/i.test(message)
+    || /(?:unknown|unsupported|unrecognized|invalid|not allowed).{0,100}temperature/i.test(message);
+}
+
+export function isOpenAiResponsesSse(response: any) {
+  return /(?:^|;)\s*text\/event-stream(?:\s*;|$)/i.test(String(response?.headers?.get?.("content-type") || ""));
+}
+
 export function normalizeOpenAiResponsesUrl(value: string) {
   const base = String(value || "").trim().replace(/\/+$/, "");
   if (!base) return "";

@@ -61,10 +61,13 @@ function cryptoRandomSuffix() {
 }
 let documentChunks = [];
 let documentContent = new Map();
-let activeRebuild = null;
-let rebuildQueued = false;
-let queuedReason = "";
-let indexStatus = {
+var activeRebuild = null;
+// `rag.ts` triggers the startup rebuild through a circular module import. Use a
+// function-safe initializer so that the first call cannot hit a TDZ during
+// CommonJS evaluation after a clean runtime reset.
+var rebuildQueued = false;
+var queuedReason = "";
+var indexStatus = {
     state: "idle",
     reason: "startup",
     startedAt: "",

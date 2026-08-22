@@ -26,3 +26,13 @@ export declare function callUnifiedCompactionModelOnce(config: any, system: stri
     stopReason: string;
 }>;
 export declare function callUnifiedCompactionModel(config: any, system: string, user: string, maxOutputTokens?: number, audit?: UnifiedCompactionModelAudit): Promise<any>;
+export declare function callCompactionModelOnce(config: any, system: string, user: string, maxOutputTokens: number, attemptTimeoutMs: number): Promise<{
+    summary: any;
+    usage: any;
+    provider: string;
+    model: string;
+    responseId: string;
+    stopReason: string;
+}>;
+export declare function callCompactionModel(config: any, system: string, user: string, maxOutputTokens?: number): Promise<any>;
+export declare const extractJsonObject: typeof extractUnifiedCompactionJson;

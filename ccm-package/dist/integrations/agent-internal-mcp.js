@@ -19,6 +19,7 @@ function buildTaskBoundInternalMcpServers(input) {
         taskId: input.taskId,
         groupId: input.groupId || "",
         groupSessionId: input.groupSessionId || "",
+        projectSessionId: input.projectSessionId || "",
         project: input.project,
         role: input.role,
         agentType: input.agentType || "",

@@ -957,8 +957,28 @@ function buildCodexConfigToml(mcpServers, gateway, skillPaths = []) {
         const providerId = gateway.providerId || "ccm";
         lines.push(`model_provider = ${tomlString(providerId)}`, `model = ${tomlString(gateway.model)}`, `web_search = ${tomlString("disabled")}`, "", `[model_providers.${providerId}]`, `name = ${tomlString(gateway.providerName || "CCM Unified Gateway")}`, `base_url = ${tomlString(gateway.apiUrl)}`, `env_key = ${tomlString(gateway.envKey || "CCM_CODEX_API_KEY")}`, `wire_api = ${tomlString(gateway.wireApi || "responses")}`, `requires_openai_auth = ${gateway.requiresOpenAiAuth === true ? "true" : "false"}`, "");
     }
+    const protectedApprovalTools = {
+        ccm__agent_communication: [
+            "acknowledge_assignment",
+            "report_progress",
+            "heartbeat",
+            "request_coordination",
+            "request_review",
+            "report_blocker",
+            "get_assignment_status",
+            "submit_result",
+        ],
+    };
     for (const [name, server] of Object.entries(mcpServers)) {
         lines.push(`[mcp_servers.${tomlString(name)}]`);
+        // CCM internal MCP servers are capability-scoped with a signed invocation
+        // context and enforce task/session/permission checks server-side. Codex
+        // non-interactive runs cannot surface an MCP approval prompt, so leaving
+        // these tools on the default prompt policy makes the client cancel the
+        // required pre-execution ACK. Only protected internal servers receive this
+        // override; user/catalog MCP servers keep their declared approval policy.
+        if (server.protected === true)
+            lines.push(`default_tools_approval_mode = ${tomlString("approve")}`);
         if (server.url) {
             lines.push(`url = ${tomlString(server.url)}`);
         }
@@ -970,6 +990,16 @@ function buildCodexConfigToml(mcpServers, gateway, skillPaths = []) {
             lines.push("", `[mcp_servers.${tomlString(name)}.env]`);
             for (const [key, value] of Object.entries(server.env))
                 lines.push(`${tomlString(key)} = ${tomlString(value)}`);
+        }
+        // Codex versions that apply the global non-interactive approval policy
+        // before the server default can still reject a protected MCP call. Pin
+        // the task communication protocol at tool granularity as well. These
+        // tools are safe to auto-approve here because every call is validated by
+        // the signed task/session/generation/attempt/lease binding in CCM.
+        if (server.protected === true) {
+            for (const tool of protectedApprovalTools[name] || []) {
+                lines.push("", `[mcp_servers.${tomlString(name)}.tools.${tomlString(tool)}]`, `approval_mode = ${tomlString("approve")}`);
+            }
         }
         lines.push("");
     }
@@ -1454,7 +1484,7 @@ function syncRuntimeToolsWithCatalog(workDir, agentType, allowedTools, catalog =
                     throw new Error("内部 MCP 名称必须使用 ccm__ 前缀");
                 if (!server || typeof server !== "object" || !String(server.command || "").trim())
                     throw new Error("内部 MCP 缺少 command");
-                mcpServers[name] = server;
+                mcpServers[name] = { ...server, protected: true };
                 audit.internal_mcp?.push({ name, protected: true, state: "synced" });
             }
             catch (error) {

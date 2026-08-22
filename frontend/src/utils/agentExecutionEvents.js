@@ -144,11 +144,12 @@ const executionTurnIdOf = value => {
   return match?.[2] ? String(match[2]) : ''
 }
 
-const executionAttemptOf = value => {
+export const executionAttemptForEvent = value => {
   const explicit = value?.executionAttempt
     ?? value?.execution_attempt
     ?? value?.recovery?.attempt
     ?? value?.attempt
+    ?? value?.detail?.replayLink?.attempt
   if (explicit !== undefined && explicit !== null && explicit !== '') {
     const parsed = Number(explicit)
     if (Number.isFinite(parsed) && parsed > 0) return parsed
@@ -288,7 +289,7 @@ export function coalesceExecutionEvents(events) {
   return rows.filter(event => !(hasMeaningfulLifecycle && event?.eventType === 'thinking_status'))
 }
 
-export function executionEventsForMessage(events, messages, index) {
+function executionEventSourceForMessage(events, messages, index) {
   const message = messages?.[index]
   if (!isExecutionAnchor(messages, index)) return []
   if (['retrying', 'recovered', 'superseded'].includes(String(message?.recovery?.state || '').toLowerCase())) return []
@@ -305,8 +306,18 @@ export function executionEventsForMessage(events, messages, index) {
       || message?.messageId
       || '',
   )
+  const taskId = String(message?.task_id || message?.taskId || message?.taskExperience?.task_id || '')
+  const latestTaskAttempt = taskId
+    ? orderedEvents.reduce((max, event) => String(event?.taskId || '') === taskId ? Math.max(max, executionAttemptForEvent(event)) : max, 0)
+    : 0
   const belongsToOtherAnchor = event => {
     if (!messageId) return false
+    // A formal task keeps one taskId across recovery attempts, while older
+    // child-agent transports may have used an internal target_message_id as
+    // their visible anchor. Within the already exact-scoped session, taskId is
+    // the stronger ownership identity; attempt/generation fences below still
+    // prevent a stale recovery from becoming the current result.
+    if (taskId && String(event?.taskId || '') === taskId) return false
     const eventAnchor = String(event?.anchorMessageId || event?.anchor_message_id || '')
     return !!eventAnchor && eventAnchor !== messageId
   }
@@ -319,11 +330,12 @@ export function executionEventsForMessage(events, messages, index) {
     .map((event, eventIndex) => ({ event, eventIndex, distance: Math.abs(time(event?.createdAt) - messageTime) }))
     .filter(candidate => candidate.event?.eventType === 'result' && time(candidate.event?.createdAt) && messageTime)
     .filter(candidate => !belongsToOtherAnchor(candidate.event))
+    .filter(candidate => !taskId || !latestTaskAttempt || !executionAttemptForEvent(candidate.event) || executionAttemptForEvent(candidate.event) === latestTaskAttempt)
     .sort((left, right) => left.distance - right.distance || right.eventIndex - left.eventIndex)
   const matchedResult = resultCandidates[0]
   let lifecycleEvents = null
   const matchedTurnId = executionTurnIdOf(matchedResult?.event)
-  const matchedAttempt = executionAttemptOf(matchedResult?.event)
+  const matchedAttempt = executionAttemptForEvent(matchedResult?.event)
 
   // Once an authoritative result is available, use its immutable recovery
   // identity to isolate the current turn.  A shared anchor is only a legacy
@@ -332,7 +344,7 @@ export function executionEventsForMessage(events, messages, index) {
     if (!event || belongsToOtherAnchor(event)) return false
     if (!matchedResult) return true
     const eventTurnId = executionTurnIdOf(event)
-    const eventAttempt = executionAttemptOf(event)
+    const eventAttempt = executionAttemptForEvent(event)
     if (matchedTurnId && eventTurnId && eventTurnId !== matchedTurnId) return false
     if (matchedAttempt && eventAttempt && eventAttempt !== matchedAttempt) return false
     return true
@@ -367,7 +379,6 @@ export function executionEventsForMessage(events, messages, index) {
   }
   const start = time(previousUser?.timestamp || previousUser?.createdAt || previousUser?.created_at)
   const end = time(nextUser?.timestamp || nextUser?.createdAt || nextUser?.created_at) || Number.POSITIVE_INFINITY
-  const taskId = String(message?.task_id || message?.taskId || message?.taskExperience?.task_id || '')
   // Group user timestamps are often the commit time of the reply, not the send
   // time. The window from this user to the next user can therefore swallow the
   // following question's tools. Never attach another assistant bubble's events.
@@ -395,7 +406,23 @@ export function executionEventsForMessage(events, messages, index) {
     ...taskEvents,
   ].filter(Boolean).map(event => [event.eventId, event])).values()]
   const merged = [...current, ...legacyExecutionEvents(message)]
-  return coalesceExecutionEvents(merged).filter(event => !isUnsafeExecutionProgress(event))
+  return merged.filter(event => !isUnsafeExecutionProgress(event))
+}
+
+export function executionAttemptNumbersForMessage(events, messages, index) {
+  return [...new Set(executionEventSourceForMessage(events, messages, index)
+    .map(executionAttemptForEvent)
+    .filter(attempt => Number.isFinite(attempt) && attempt > 0))]
+    .sort((left, right) => left - right)
+}
+
+export function executionEventsForMessage(events, messages, index, options = {}) {
+  const requestedAttempt = Math.max(0, Number(options?.attempt || 0))
+  const source = executionEventSourceForMessage(events, messages, index)
+  const selected = requestedAttempt
+    ? source.filter(event => executionAttemptForEvent(event) === requestedAttempt)
+    : source
+  return coalesceExecutionEvents(selected).filter(event => !isUnsafeExecutionProgress(event))
 }
 
 const terminalStatusFromValue = value => {
@@ -444,6 +471,20 @@ const messageExecutionIsActive = message => {
   return values.some(value => /^(?:running|in_progress|executing|starting|queued|sending|resuming|background_running|waiting_provider|waiting_agent)$/.test(value))
 }
 
+export function executionGenerationForRows(rows, preferTerminalResult = false) {
+  const source = Array.isArray(rows) ? rows : []
+  if (preferTerminalResult) {
+    const terminal = [...source].reverse().find(event => event?.eventType === 'result' && terminalGateForExecutionEvent(event))
+    if (terminal) return Number(terminal?.generation || 0)
+  }
+  return source.reduce((max, event) => Math.max(max, Number(event?.generation || 0)), 0)
+}
+
+export function executionCurrentGenerationForMessage(events, messages, index) {
+  const rows = executionEventsForMessage(events, messages, index)
+  return executionGenerationForRows(rows, !messageExecutionIsActive(messages?.[index] || {}))
+}
+
 // A provider or transport failure can finish the visible assistant turn before
 // the backend manages to append its authoritative `result` event.  Treat the
 // finalized assistant envelope as a terminal boundary as well, so live timers
@@ -451,9 +492,19 @@ const messageExecutionIsActive = message => {
 // active task status still wins and starts a new live projection.
 export function executionTerminalBoundaryForMessage(events, messages, index) {
   const rows = executionEventsForMessage(events, messages, index)
-  const currentGeneration = rows.reduce((max, event) => Math.max(max, Number(event?.generation || 0)), 0)
+  const message = messages?.[index] || {}
+  const currentGeneration = executionGenerationForRows(rows, !messageExecutionIsActive(message))
   const result = [...rows].reverse().find(event => event?.eventType === 'result' && Number(event?.generation || 0) === currentGeneration)
-  if (result) {
+  // The main-agent routing/model loop also emits a successful result before a
+  // formal development task starts its child-agent execution.  Once a task
+  // card says the execution is active, that routing result is not the task's
+  // terminal boundary.  Only a result carrying the authoritative Terminal
+  // Gate may finish an active formal task.
+  const activeFormalTaskHasOnlyTurnResult = !!result
+    && executionMessageIsFormalTask(events, messages, index)
+    && messageExecutionIsActive(message)
+    && !terminalGateForExecutionEvent(result)
+  if (result && !activeFormalTaskHasOnlyTurnResult) {
     return {
       terminal: true,
       source: 'result',
@@ -462,7 +513,6 @@ export function executionTerminalBoundaryForMessage(events, messages, index) {
       at: time(result?.createdAt),
     }
   }
-  const message = messages?.[index] || {}
   const currentRows = rows.filter(event => Number(event?.generation || 0) === currentGeneration || !currentGeneration)
   const currentGenerationIsActive = currentRows.some(event => {
     const status = String(event?.display?.status || '').trim().toLowerCase()
@@ -706,7 +756,7 @@ export function countExecutionToolItems(events = []) {
 
 export function terminalExecutionEventForMessage(events, messages, index) {
   const rows = executionEventsForMessage(events, messages, index)
-  const currentGeneration = rows.reduce((max, event) => Math.max(max, Number(event?.generation || 0)), 0)
+  const currentGeneration = executionGenerationForRows(rows, !messageExecutionIsActive(messages?.[index] || {}))
   return [...rows].reverse().find(event => event?.eventType === 'result' && Number(event?.generation || 0) === currentGeneration) || null
 }
 
@@ -774,7 +824,7 @@ const normalizeCompletionFileChange = value => {
 
 export function completionFileChangesForRows(rows) {
   const sourceRows = Array.isArray(rows) ? rows : []
-  const currentGeneration = sourceRows.reduce((max, event) => Math.max(max, Number(event?.generation || 0)), 0)
+  const currentGeneration = executionGenerationForRows(sourceRows, true)
   const result = [...sourceRows].reverse().find(event => event?.eventType === 'result' && Number(event?.generation || 0) === currentGeneration)
   const authoritativeCandidate = result?.detail?.fileChanges
     || result?.detail?.safeResult?.fileChanges

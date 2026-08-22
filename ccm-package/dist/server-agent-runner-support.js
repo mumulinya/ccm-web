@@ -6,6 +6,7 @@ exports.createAgentRunnerSupport = createAgentRunnerSupport;
 const third_party_memory_snapshot_1 = require("./integrations/third-party-memory-snapshot");
 const internal_mcp_runtime_1 = require("./integrations/internal-mcp-runtime");
 const db_1 = require("./core/db");
+const project_verification_discovery_1 = require("./agents/project-verification-discovery");
 function createAgentRunnerSupport(deps) {
     const { AGENT_RUNNER_DIR, AGENT_RUNNER_REQUESTS_DIR, AGENT_RUNNER_RESULTS_DIR, UPLOAD_DIR, acknowledgeProviderMemoryChannelLaunch, appendDirectAgentDispatchTranscript, bindProjectRunAgentSession, bindProviderMemoryChannelLaunch, broadcastPetSpeech, buildAgentCommand, buildNativeSessionContinuationEvidence, buildProjectConversationBrief, buildProjectExecutionBrief, buildRuntimeToolDispatchGate, buildRuntimeToolSyncPrompt, buildToolAuthorizationPayload, captureAgentRuntimeVersionSnapshot, completeDirectAgentDispatch, createDirectAgentDispatchRequest, createFileChangeSnapshot, createProjectChatRun, detectAgentCommandFailure, extractNativeModelCapabilityReceipt, extractProviderToolAccessEvidence, fs, getAgentCommandLabel, getAgentRunActivityDuration, getAgentRuntime, getFileChanges, getRuntimeExecutionEnv, isSafeVerificationCommand, loadProjectConfigs, markDirectAgentDispatchStarted, normalizeAgentCommandOutput, normalizeAgentRuntimeId, path, persistBoundedOutput, prepareProviderMemoryChannel, publicProjectChatRun, readMemoryContextConsumptionReceipt, recordMetric, recordModelCapabilityRefreshOutcome, recordRuntimeToolSyncAudit, recordTaskAgentSessionTurn, recordVerifiedNativeModelCapabilityReceipt, recoverMemoryContextConsumptionReceipt, registerExternalRunnerRequest, runManagedCommand, runToolCallLoop, sanitizeExecutionEnv, saveProjectChatRuns, sendJson, setAgentActivity, spawn, syncRuntimeTools, terminateManagedChildProcess, toolManager, trackManagedChildProcess, verifyNativeSessionContinuationEvidence, verifyProviderMemoryChannelEvidence, writeSse } = deps;
     function normalizeToolSelection(tools = {}) {
@@ -245,18 +246,19 @@ function createAgentRunnerSupport(deps) {
             catalogRevision: String(source.catalogRevision || source.catalog_revision || ""),
         };
     }
-    function getProjectVerificationCommandsForRunner(projectName) {
+    function getProjectVerificationCommandsForRunner(projectName, workDir = "") {
         const configs = loadProjectConfigs();
         const projectConfig = configs?.[projectName] || {};
-        return normalizeVerificationCommands(projectConfig.verification_commands
+        const configured = normalizeVerificationCommands(projectConfig.verification_commands
             || projectConfig.verificationCommands
             || projectConfig.test_commands
             || projectConfig.testCommands
             || projectConfig.check_commands
             || projectConfig.checkCommands);
+        return configured.length ? configured : (0, project_verification_discovery_1.discoverProjectVerificationCommands)(workDir);
     }
     async function runIndependentProjectVerification(projectName, workDir, timeoutMs, taskId, executionId, agentType) {
-        const commands = getProjectVerificationCommandsForRunner(projectName).filter(isSafeVerificationCommand);
+        const commands = getProjectVerificationCommandsForRunner(projectName, workDir).filter(isSafeVerificationCommand);
         if (!commands.length || !workDir)
             return "";
         const verification = [];

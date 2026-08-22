@@ -100,10 +100,10 @@ export declare function buildTaskInterruptionReceipt(input: {
     work_item_id: string;
     actor: string;
     receipt_id: string;
+    execution_attempt: number;
     reason_code: TaskInterruptionReason;
     checkpoint: string;
     resume_checkpoint?: TaskResumeCheckpointV1;
-    execution_attempt: number;
     contract_checksum: string;
     workspace_checksum: string;
     completed_work_item_ids: string[];
@@ -142,10 +142,10 @@ export declare function interruptTaskExecution(input: Parameters<typeof buildTas
         work_item_id: string;
         actor: string;
         receipt_id: string;
+        execution_attempt: number;
         reason_code: TaskInterruptionReason;
         checkpoint: string;
         resume_checkpoint?: TaskResumeCheckpointV1;
-        execution_attempt: number;
         contract_checksum: string;
         workspace_checksum: string;
         completed_work_item_ids: string[];
@@ -184,6 +184,7 @@ export declare function buildTaskRecoveryDecision(task: any, receiptInput?: Task
     workspaceChecksum?: string;
     authorizationValid?: boolean;
     runtimeValid?: boolean;
+    allowRehydratedSession?: boolean;
 }): TaskRecoveryDecisionV1;
 export declare function resumeInterruptedTaskExecution(task: any, options?: Parameters<typeof buildTaskRecoveryDecision>[2]): {
     resumed: boolean;
@@ -207,10 +208,10 @@ export declare function reconcileTaskInterruptionReceipt(task: any, input: {
     work_item_id: string;
     actor: string;
     receipt_id: string;
+    execution_attempt: number;
     reason_code: TaskInterruptionReason;
     checkpoint: string;
     resume_checkpoint?: TaskResumeCheckpointV1;
-    execution_attempt: number;
     contract_checksum: string;
     workspace_checksum: string;
     completed_work_item_ids: string[];

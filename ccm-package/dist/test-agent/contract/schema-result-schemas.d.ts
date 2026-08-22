@@ -4886,7 +4886,7 @@ export declare const browserResourceLifecycleEventSchema: z.ZodObject<{
     error: z.ZodOptional<z.ZodString>;
 }, "strict", z.ZodTypeAny, {
     id?: string;
-    status?: "released" | "open" | "retained" | "cleanup_failed";
+    status?: "open" | "released" | "retained" | "cleanup_failed";
     error?: string;
     provider?: "mcp" | "playwright";
     scope?: string;
@@ -4898,7 +4898,7 @@ export declare const browserResourceLifecycleEventSchema: z.ZodObject<{
     releaseAttemptedAt?: string;
 }, {
     id?: string;
-    status?: "released" | "open" | "retained" | "cleanup_failed";
+    status?: "open" | "released" | "retained" | "cleanup_failed";
     error?: string;
     provider?: "mcp" | "playwright";
     scope?: string;
@@ -4950,7 +4950,7 @@ export declare const browserResourceLifecycleSummarySchema: z.ZodObject<{
         error: z.ZodOptional<z.ZodString>;
     }, "strict", z.ZodTypeAny, {
         id?: string;
-        status?: "released" | "open" | "retained" | "cleanup_failed";
+        status?: "open" | "released" | "retained" | "cleanup_failed";
         error?: string;
         provider?: "mcp" | "playwright";
         scope?: string;
@@ -4962,7 +4962,7 @@ export declare const browserResourceLifecycleSummarySchema: z.ZodObject<{
         releaseAttemptedAt?: string;
     }, {
         id?: string;
-        status?: "released" | "open" | "retained" | "cleanup_failed";
+        status?: "open" | "released" | "retained" | "cleanup_failed";
         error?: string;
         provider?: "mcp" | "playwright";
         scope?: string;
@@ -4977,7 +4977,7 @@ export declare const browserResourceLifecycleSummarySchema: z.ZodObject<{
     status?: "complete" | "invalid" | "incomplete";
     events?: {
         id?: string;
-        status?: "released" | "open" | "retained" | "cleanup_failed";
+        status?: "open" | "released" | "retained" | "cleanup_failed";
         error?: string;
         provider?: "mcp" | "playwright";
         scope?: string;
@@ -5009,7 +5009,7 @@ export declare const browserResourceLifecycleSummarySchema: z.ZodObject<{
     status?: "complete" | "invalid" | "incomplete";
     events?: {
         id?: string;
-        status?: "released" | "open" | "retained" | "cleanup_failed";
+        status?: "open" | "released" | "retained" | "cleanup_failed";
         error?: string;
         provider?: "mcp" | "playwright";
         scope?: string;

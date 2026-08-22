@@ -81,11 +81,13 @@ const toolsToggleLabel = computed(() => {
       </span>
     </button>
     <div v-if="expanded" class="cc-child-agent-body">
-      <p
-        v-for="line in dialogue"
-        :key="line.eventId"
-        class="cc-child-agent-line"
-      >{{ line.text }}</p>
+      <template v-if="!toolsExpanded">
+        <p
+          v-for="line in dialogue"
+          :key="line.eventId"
+          class="cc-child-agent-line"
+        >{{ line.text }}</p>
+      </template>
       <button
         v-if="showToolsSection"
         type="button"

@@ -96,7 +96,7 @@ const visiblePlan = events.appendUserVisibleRequirementPlan({
     planId: 'task-visible-plan', revision: 1, title: '需求实施计划',
     goal: '完善后台管理功能，让运营人员可以管理商家和订单。',
     steps: [
-      { id: 'step_1', title: '确认功能范围', description: '梳理当前能力和缺失功能。', outcome: '得到明确的实施范围', project: 'smart-live-ui', status: 'completed' },
+      { id: 'step_1', title: '确认功能范围', description: '梳理当前能力和缺失功能。', outcome: '得到明确的实施范围', project: 'smart-live-ui', files: ['src/admin/index.ts'], artifacts: ['范围清单'], sourceEvidenceIds: ['evidence-1'], status: 'completed' },
       { id: 'step_2', title: '完善后台页面', description: '补齐主要管理页面。', outcome: '运营人员可以完成日常管理', project: 'smart-live-ui', dependsOn: ['step_1'], status: 'running' },
     ],
     scope: ['后台管理页面', '业务接口'], expectedResults: ['主要管理流程可用'], exclusions: ['不执行生产发布'], status: 'executing',
@@ -105,6 +105,11 @@ const visiblePlan = events.appendUserVisibleRequirementPlan({
 assert.equal(visiblePlan.eventType, 'requirement_plan')
 assert.equal(visiblePlan.detail?.requirementPlan?.schema, 'ccm-user-visible-requirement-plan-v1')
 assert.equal(visiblePlan.detail?.requirementPlan?.steps?.length, 2)
+assert.equal(visiblePlan.detail?.requirementPlan?.steps?.[0]?.description, '梳理当前能力和缺失功能。')
+assert.equal(visiblePlan.detail?.requirementPlan?.steps?.[0]?.outcome, '得到明确的实施范围')
+assert.deepEqual(visiblePlan.detail?.requirementPlan?.steps?.[0]?.files, ['src/admin/index.ts'])
+assert.deepEqual(visiblePlan.detail?.requirementPlan?.steps?.[0]?.artifacts, ['范围清单'])
+assert.deepEqual(visiblePlan.detail?.requirementPlan?.steps?.[0]?.sourceEvidenceIds, ['evidence-1'])
 assert.equal(visiblePlan.detail?.requirementPlan?.contentStored, false)
 assert.equal(typeof visiblePlan.detail?.requirementPlan?.planChecksum, 'string')
 assert.equal(JSON.stringify(visiblePlan).includes('sourceCode'), false, '用户需求计划不得保存内部源码正文')
@@ -326,6 +331,10 @@ assert.match(progressTranscriptSource, /completionFilesVisible/, '文件变更�
 assert.match(progressTranscriptSource, /产生了.*未验收改动/, '失败或阻塞终态必须使用未验收改动警告语义')
 assert.match(progressTranscriptSource, /requirementPlan/, '统一执行流组件必须展示用户需求实施计划')
 assert.match(progressTranscriptSource, /cc-requirement-plan/, '需求实施计划必须使用独立的可折叠用户界面')
+assert.match(progressTranscriptSource, /planGoalText/, '通用派发文案必须回退为真实需求目标')
+assert.match(progressTranscriptSource, /planStepDescription/, '需求实施计划必须展示步骤说明')
+assert.match(progressTranscriptSource, /planStepOutcome/, '需求实施计划必须展示预期结果')
+assert.match(progressTranscriptSource, /step\.files\?\.length/, '需求实施计划必须展示真实文件范围')
 assert.match(progressTranscriptSource, /batchId|__progressBatch/, '说明文字必须与对应工具批次精确绑定')
 assert.match(progressTranscriptSource, /syntheticParallelBatches/, '缺少主动说明的真实并行工具仍必须合并为一个结果批次')
 assert.match(progressTranscriptSource, /parallelSemanticRank/, '并行批次内部必须按查找、读取、Git和验证的用户语义排序')
@@ -504,7 +513,7 @@ assert.match(transcriptSource, /agentStatusCategory/, '等待验收必须与排�
 assert.match(transcriptSource, /项工具/, '执行记录必须使用明确的工具数量')
 assert.match(transcriptSource, /tokenAccuracy/, '工具Token必须区分真实值和估算值')
 assert.match(transcriptSource, /parallelToolCount/, '真实并发工具必须展示并行标识')
-assert.match(transcriptSource, /cc-execution-timing/, '展开记录必须提供本轮耗时统计')
+assert.doesNotMatch(transcriptSource, /cc-execution-timing/, '总耗时只能在执行记录顶层展示，不能在展开内容中重复')
 assert.doesNotMatch(transcriptSource, /<p v-if="event\.display\?\.summary">/, '工具行不得直接重复通用执行完成摘要')
 assert.match(transcriptSource, /const transcriptExpanded = ref\(false\)/, '每条消息必须拥有独立执行记录展开状态')
 assert.match(transcriptSource, /const stageMode = computed/, '真实会话必须支持阶段分组展示')
@@ -514,6 +523,8 @@ assert.match(transcriptSource, /验证与交付/, '验收与总结必须归入�
 assert.match(transcriptSource, /const stageSummaryFor/, '阶段标题下必须投影安全阶段摘要')
 assert.match(transcriptSource, /const expandedStages = reactive/, '固定阶段必须能够独立收起与展开')
 assert.match(transcriptSource, /const stageIsExpanded/, '固定阶段必须保留独立展开状态')
+assert.match(transcriptSource, /localStorage\.removeItem\(LEGACY_EXECUTION_DENSITY_KEY\)/, '旧执行密度偏好必须被清理')
+assert.doesNotMatch(transcriptSource, /executionDensityOptions|执行展示密度/, '执行记录不得继续暴露手动密度选择器')
 assert.match(transcriptSource, /emit\('open-file-change'/, '执行记录文件路径必须能打开权威Diff抽屉')
 assert.match(transcriptSource, /查看 Diff/, '文件变化列表必须提供明确的Diff入口')
 const completionRows = frontendExecution.completionFileChangesForRows([

@@ -18,10 +18,61 @@ import {
 } from "./agent-sessions-resume";
 import { suspendTaskAgentSessions } from "./agent-sessions-purge";
 import { buildTaskRecoveryDecision } from "./task-interruption";
-import { resolveTaskUserSession, resolveTaskAgentSessionProjection } from "./task-recovery-sessions";
-import { buildTaskContextCapsule } from "./task-context";
+import { resolveTaskUserSession, resolveTaskAgentSessionProjection, rollbackResolvedTaskUserSession } from "./task-recovery-sessions";
+import { buildTaskContextCapsule, taskTimelineIdentity } from "./task-context";
+import { catchUpTaskContext, enqueueTaskConversationProjectionSync, persistTaskMutationWithTimelineAtomically } from "./session-task-timeline";
+import { syncTaskConversationProjection, TaskConversationProjectionReceiptV1 } from "../system/task-conversation-projection";
 
 export type CcmTaskRecoveryMode = "native_session" | "rehydrated_attempt" | "manual_reconciliation" | "rejected";
+
+export type CcmTaskRecoveryConversationProjectionV1 = {
+  status: "synced" | "unchanged" | "pending_compensation";
+  sourceSessionId: string;
+  activeSessionId: string;
+  updatedSessionIds: string[];
+  attempt: number;
+  contentStored: false;
+};
+
+function recoveryConversationProjection(task: any, reason: string): CcmTaskRecoveryConversationProjectionV1 {
+  const receipt: TaskConversationProjectionReceiptV1 = syncTaskConversationProjection(task, reason);
+  const requiresCompensation = receipt.status === "failed"
+    || (receipt.status === "skipped" && receipt.issues.some(issue => issue !== "stale_task_revision"));
+  if (requiresCompensation) {
+    enqueueTaskConversationProjectionSync({
+      taskId: String(task?.id || ""),
+      taskRevision: Number(task?.revision || 0),
+      reason,
+      issues: receipt.issues,
+    });
+  }
+  return {
+    status: requiresCompensation
+      ? "pending_compensation"
+      : receipt.status === "synced" ? "synced" : "unchanged",
+    sourceSessionId: receipt.sourceSessionId,
+    activeSessionId: receipt.activeSessionId,
+    updatedSessionIds: [...new Set(receipt.updatedSessionIds)],
+    attempt: Math.max(0, Number(task?.execution_attempt || task?.attempt || task?.task_context?.latestAttempt || 0)),
+    contentStored: false,
+  };
+}
+
+function mergeRecoveryConversationProjections(
+  first: CcmTaskRecoveryConversationProjectionV1,
+  second: CcmTaskRecoveryConversationProjectionV1,
+): CcmTaskRecoveryConversationProjectionV1 {
+  const pending = first.status === "pending_compensation" || second.status === "pending_compensation";
+  const synced = first.status === "synced" || second.status === "synced";
+  return {
+    status: pending ? "pending_compensation" : synced ? "synced" : "unchanged",
+    sourceSessionId: second.sourceSessionId || first.sourceSessionId,
+    activeSessionId: second.activeSessionId || first.activeSessionId,
+    updatedSessionIds: [...new Set([...first.updatedSessionIds, ...second.updatedSessionIds])],
+    attempt: Math.max(first.attempt, second.attempt),
+    contentStored: false,
+  };
+}
 
 export type CcmTaskRecoveryPreflightV1 = {
   schema: "ccm-task-recovery-preflight-v1";
@@ -99,7 +150,20 @@ function unique(values: any, max = 200) {
 }
 
 function taskAttempt(task: any) {
-  return Math.max(0, Number(task?.execution_attempt || task?.project_main_execution?.attempt || task?.attempt || 0));
+  const timelineAttempts = (Array.isArray(task?.task_context?.timelineSpans) ? task.task_context.timelineSpans : [])
+    .flatMap((span: any) => Array.isArray(span?.attemptSpans) ? span.attemptSpans : [])
+    .map((item: any) => Number(item?.attempt || 0));
+  const workItemAttempts = (Array.isArray(task?.task_context?.workItems) ? task.task_context.workItems : [])
+    .map((item: any) => Number(item?.latestAttempt || item?.latest_attempt || 0));
+  return Math.max(
+    0,
+    Number(task?.execution_attempt || 0),
+    Number(task?.project_main_execution?.attempt || 0),
+    Number(task?.attempt || 0),
+    Number(task?.task_context?.latestAttempt || 0),
+    ...timelineAttempts,
+    ...workItemAttempts,
+  );
 }
 
 function taskPlanChecksum(task: any) {
@@ -176,6 +240,9 @@ function providerRecoveryCapability(taskId: string) {
   const sessions = listTaskAgentSessions({ taskId });
   if (!sessions.length) return { nativeReady: false, providerContractValid: true, runtimeValid: true };
   let nativeReady = true;
+  // A stale native-session contract prevents native continuation, but it does
+  // not prevent CCM from rebuilding a fresh provider session from the signed
+  // task context and work item. Runtime availability remains the hard gate.
   let providerContractValid = true;
   let runtimeValid = true;
   for (const session of sessions) {
@@ -183,7 +250,7 @@ function providerRecoveryCapability(taskId: string) {
     runtimeValid = runtimeValid && !!runtime;
     const contractCompatible = !session.pendingProviderContractId
       || (!!session.providerContractId && session.pendingProviderContractId === session.providerContractId);
-    providerContractValid = providerContractValid && contractCompatible;
+    providerContractValid = providerContractValid && !!runtime;
     nativeReady = nativeReady
       && session.resumeMode === "native"
       && runtime.capabilities.sessionResume === true
@@ -324,17 +391,26 @@ export function runTaskRecoveryOrchestrator(taskInput: any, options: RecoveryOpt
     metadata: { task_id: taskId, scope: options.scope, exact_session_id: exactSessionId, content_stored: false },
   });
   if (!operation.acquired) {
+    const duplicateTask = getTaskById(taskId);
+    const conversationProjection = duplicateTask
+      ? recoveryConversationProjection(duplicateTask, operation.inProgress === true ? "recovery_duplicate_in_progress" : "recovery_duplicate_completed")
+      : null;
     return {
       success: operation.record?.status === "completed" && operation.record?.result?.success === true,
       duplicate: true,
       inProgress: operation.inProgress === true,
-      task: getTaskById(taskId),
+      task: duplicateTask,
+      conversationProjection,
       result: operation.record?.result || null,
     };
   }
   let transaction: CcmTaskRecoveryTransactionV1 | null = null;
   let leaseAcquired = false;
+  let resolvedUserSession: any = null;
+  let recoveryPreflight: CcmTaskRecoveryPreflightV1 | null = null;
   try {
+    const catchUp = catchUpTaskContext(taskId);
+    if (!catchUp.success) throw new Error("任务上下文事件链发生漂移，需要人工核对后再恢复");
     let latest = getTaskById(taskId);
     if (!latest || String(latest?.interruption_receipt?.checksum || "") !== receiptChecksum) throw new Error("任务中断现场已经变化，请刷新后重试");
     if (latest?.recovery_transaction?.status === "committed" && latest?.recovery_pending !== true) {
@@ -370,6 +446,7 @@ export function runTaskRecoveryOrchestrator(taskInput: any, options: RecoveryOpt
       latest = recovered.task;
     }
     const preflight = buildTaskRecoveryPreflight(latest, options);
+    recoveryPreflight = preflight;
     if (preflight.recoveryMode === "manual_reconciliation" || preflight.recoveryMode === "rejected") {
       const blocked = updateTaskByIdCas(taskId,
         current => String(current?.interruption_receipt?.checksum || "") === receiptChecksum,
@@ -383,7 +460,9 @@ export function runTaskRecoveryOrchestrator(taskInput: any, options: RecoveryOpt
           updated_at: new Date().toISOString(),
         }),
       );
-      const result = { success: false, manualReconciliationRequired: preflight.recoveryMode === "manual_reconciliation", preflight, task: blocked.task || latest };
+      const blockedTask = blocked.task || latest;
+      const conversationProjection = recoveryConversationProjection(blockedTask, "recovery_preflight_blocked");
+      const result = { success: false, manualReconciliationRequired: preflight.recoveryMode === "manual_reconciliation", preflight, task: blockedTask, conversationProjection };
       failIdempotency("task-recovery", idempotencyKey, new Error(`recovery_preflight_blocked:${preflight.blockers.join(",")}`));
       releaseTaskLease(taskId, "recovery_preflight_blocked");
       leaseAcquired = false;
@@ -394,12 +473,14 @@ export function runTaskRecoveryOrchestrator(taskInput: any, options: RecoveryOpt
       workspaceChecksum: String(options.currentWorkspaceChecksum || captureTaskRecoveryWorkspace(latest).checksum || ""),
       authorizationValid: preflight.checks.authorizationValid,
       runtimeValid: preflight.checks.runtimeValid,
+      allowRehydratedSession: preflight.recoveryMode === "rehydrated_attempt",
     });
     if (decision.mode !== "auto") throw new Error(decision.reason);
     transaction = transactionCore(latest, preflight, String(lease.lease?.lease_id || ""), idempotencyKey);
     const staged = updateTaskByIdCas(taskId,
       current => String(current?.interruption_receipt?.checksum || "") === receiptChecksum
-        && !["validating", "committed"].includes(String(current?.recovery_transaction?.status || "")),
+        && String(current?.recovery_transaction?.status || "") !== "validating"
+        && !(String(current?.recovery_transaction?.status || "") === "committed" && current?.recovery_pending !== true),
       current => {
         const next = {
           ...current,
@@ -415,9 +496,11 @@ export function runTaskRecoveryOrchestrator(taskInput: any, options: RecoveryOpt
       },
     );
     if (!staged.updated) throw new Error("任务状态已经变化，恢复事务未能锁定");
+    const stagedContextChecksum = String(staged.task?.task_context?.checksum || latest?.task_context?.checksum || "");
     const userSession: any = options.resolveUserSession !== true
       ? { mode: "original_reused", originalSessionId: exactSessionId, activeSessionId: exactSessionId, created: false }
-      : resolveTaskUserSession(staged.task || latest, { attempt: preflight.nextAttempt, expectedContextChecksum: String(staged.task?.task_context?.checksum || latest?.task_context?.checksum || "") });
+      : resolveTaskUserSession(staged.task || latest, { attempt: preflight.nextAttempt, expectedContextChecksum: stagedContextChecksum });
+    resolvedUserSession = userSession;
     if (userSession.mode === "rejected" || !userSession.activeSessionId) throw new Error(userSession.error || `无法确定任务恢复会话 (${String(options.resolveUserSession)}:${String(userSession.reason || "unknown")})`);
     const activation = activateTaskAgentSessionsForRecovery(taskId, "中断恢复：已通过现场预检");
     const agentSessions = (Array.isArray(latest?.work_items) ? latest.work_items : [])
@@ -426,13 +509,12 @@ export function runTaskRecoveryOrchestrator(taskInput: any, options: RecoveryOpt
       .map((item: any) => resolveTaskAgentSessionProjection(latest, item, preflight.nextAttempt, activation.mode === "native_session" ? "native_session" : "rehydrated_session"));
     clearTaskCancellation(taskId);
     const committedTransaction = finishTransaction(transaction, "committed");
-    const committed = updateTaskByIdCas(taskId,
-      current => String(current?.recovery_transaction?.transactionId || "") === transaction?.transactionId,
-      current => {
-        const next = {
-          ...current,
+    const commitIdentity = taskTimelineIdentity(staged.task || latest);
+    if (!commitIdentity.exactSessionId) throw new Error("任务缺少精确恢复会话身份");
+    const committedTask = {
+          ...(staged.task || latest),
         status: "pending",
-        acceptance_state: current.interruption_receipt?.checkpoint || "planned",
+        acceptance_state: (staged.task || latest).interruption_receipt?.checkpoint || "planned",
         auto_execute: true,
         is_paused: false,
         paused: false,
@@ -451,16 +533,40 @@ export function runTaskRecoveryOrchestrator(taskInput: any, options: RecoveryOpt
           ? `第 ${preflight.nextAttempt} 次执行 · 已恢复原生 Agent 会话`
           : `第 ${preflight.nextAttempt} 次执行 · 已从签名工作单重建现场`,
         };
-        const context = buildTaskContextCapsule(next, current?.task_context || null, "recovery_committed");
-        return { ...next, task_context: context, task_context_revision_receipt: { revision: context.revision, checksum: context.checksum, reason: "recovery_committed", at: context.updatedAt, contentStored: false } };
+    const committedTimeline = persistTaskMutationWithTimelineAtomically({
+      task: committedTask,
+      expectedTaskRevision: Number((staged.task || latest)?.revision || 0),
+      validateStoredTask: (current, context) => String(current?.recovery_transaction?.transactionId || "") === transaction?.transactionId && String(context?.checksum || "") === stagedContextChecksum,
+      exactSessionId: String(userSession.activeSessionId || commitIdentity.exactSessionId),
+      scope: commitIdentity.scope,
+      scopeId: commitIdentity.scopeId,
+      type: "task_attempt_started",
+      eventId: `task_attempt_started:${taskId}:${preflight.nextAttempt}`,
+      idempotencyKey: `task_attempt_started:${taskId}:${preflight.nextAttempt}:${committedTransaction.checksum}`,
+      attempt: preflight.nextAttempt,
+      generation: Number(committedTask?.generation || 0),
+      leaseId: String(committedTask?.lease_id || committedTask?.leaseId || ""),
+      payloadRef: committedTransaction.checksum,
+      contextReason: "recovery_committed",
+      forceSnapshot: true,
+      buildContext: (taskForContext, previousContext) => {
+        const context = buildTaskContextCapsule(taskForContext, previousContext, "recovery_committed");
+        const sessionBindings = userSession.binding
+          ? [...(Array.isArray(context.sessionBindings) ? context.sessionBindings : []).filter((item: any) => item.bindingChecksum !== userSession.binding.bindingChecksum), userSession.binding]
+          : context.sessionBindings;
+        return { ...context, sessionBindings };
       },
-    );
-    if (!committed.updated) throw new Error("恢复事务提交冲突");
+    });
+    const committed = { updated: true, conflict: false, task: committedTimeline.task };
+    const committedProjection = recoveryConversationProjection(committed.task, "recovery_attempt_committed");
     let queueResult: any = null;
     if (options.enqueue) {
       queueResult = options.enqueue(taskId, committed.task);
       if (queueResult?.success === false || queueResult?.queued === false) throw new Error(queueResult?.error || queueResult?.message || "恢复任务入队失败");
     }
+    const latestTask = getTaskById(taskId) || committed.task;
+    const queuedProjection = recoveryConversationProjection(latestTask, "recovery_attempt_queued");
+    const conversationProjection = mergeRecoveryConversationProjections(committedProjection, queuedProjection);
     completeIdempotency("task-recovery", idempotencyKey, {
       success: true,
       task_id: taskId,
@@ -468,28 +574,53 @@ export function runTaskRecoveryOrchestrator(taskInput: any, options: RecoveryOpt
       recovery_mode: activation.mode,
       transaction_checksum: committedTransaction.checksum,
       preflight_checksum: preflight.checksum,
+      conversation_projection: conversationProjection,
     });
-    return { success: true, duplicate: false, task: committed.task, userSession, agentSessions, preflight: { ...preflight, recoveryMode: activation.mode }, transaction: committedTransaction, activation, queueResult, decision };
+    return { success: true, duplicate: false, task: latestTask, userSession, agentSessions, preflight: { ...preflight, recoveryMode: activation.mode }, transaction: committedTransaction, activation, queueResult, decision, conversationProjection };
   } catch (error: any) {
+    if (resolvedUserSession?.created === true) rollbackResolvedTaskUserSession(resolvedUserSession, options.scope, options.scopeId);
     if (transaction) {
       const rolledBack = finishTransaction(transaction, "rolled_back", error?.message || error);
-      updateTaskByIdCas(taskId,
-        current => String(current?.recovery_transaction?.transactionId || "") === transaction?.transactionId,
-        current => ({
-          ...current,
-          status: "blocked",
-          acceptance_state: "recovery_required",
-          auto_execute: false,
-          paused: true,
-          is_paused: true,
-          recovery_pending: true,
-          recovery_transaction: rolledBack,
-          status_detail: `恢复未提交：${String(error?.message || error).slice(0, 300)}`,
-          updated_at: new Date().toISOString(),
-        }),
-      );
+      let atomicallyClosedAttempt = false;
+      const currentTask = getTaskById(taskId);
+      if (currentTask && recoveryPreflight && Number(currentTask.execution_attempt || 0) === recoveryPreflight.nextAttempt) {
+        try {
+          const identity = taskTimelineIdentity(currentTask);
+          const rollbackTask = { ...currentTask, status: "blocked", acceptance_state: "recovery_required", auto_execute: false, paused: true, is_paused: true, recovery_pending: true, recovery_transaction: rolledBack, status_detail: `恢复未提交：${String(error?.message || error).slice(0, 300)}`, updated_at: new Date().toISOString() };
+          persistTaskMutationWithTimelineAtomically({
+            task: rollbackTask,
+            expectedTaskRevision: Number(currentTask.revision || 0),
+            validateStoredTask: stored => String(stored?.recovery_transaction?.transactionId || "") === transaction?.transactionId,
+            exactSessionId: String(resolvedUserSession?.activeSessionId || identity.exactSessionId),
+            scope: identity.scope,
+            scopeId: identity.scopeId,
+            type: "task_interrupted",
+            eventId: `task_recovery_rollback:${taskId}:${recoveryPreflight.nextAttempt}:${transaction.transactionId}`,
+            idempotencyKey: `task_recovery_rollback:${taskId}:${recoveryPreflight.nextAttempt}:${transaction.transactionId}`,
+            terminalStatus: "interrupted",
+            attempt: recoveryPreflight.nextAttempt,
+            generation: Number(currentTask.generation || 0),
+            leaseId: String(currentTask.lease_id || currentTask.leaseId || ""),
+            payloadRef: rolledBack.checksum,
+            result: rollbackTask.status_detail,
+            contextReason: "recovery_rolled_back",
+            forceSnapshot: true,
+            buildContext: (taskForContext, previousContext) => {
+              const context = buildTaskContextCapsule(taskForContext, previousContext, "recovery_rolled_back");
+              return { ...context, sessionBindings: (context.sessionBindings || []).map((binding: any) => binding.exactSessionId === resolvedUserSession?.activeSessionId ? { ...binding, status: "unavailable", releasedAt: new Date().toISOString() } : binding) };
+            },
+          });
+          atomicallyClosedAttempt = true;
+        } catch {}
+      }
+      if (!atomicallyClosedAttempt) updateTaskByIdCas(taskId,
+          current => String(current?.recovery_transaction?.transactionId || "") === transaction?.transactionId,
+          current => ({ ...current, status: "blocked", acceptance_state: "recovery_required", auto_execute: false, paused: true, is_paused: true, recovery_pending: true, recovery_transaction: rolledBack, status_detail: `恢复未提交：${String(error?.message || error).slice(0, 300)}`, updated_at: new Date().toISOString() }),
+        );
       suspendTaskAgentSessions({ taskId }, "恢复事务回滚");
       requestTaskCancellation(taskId, "恢复事务未提交", "task-recovery-orchestrator");
+      const rolledBackTask = getTaskById(taskId);
+      if (rolledBackTask) recoveryConversationProjection(rolledBackTask, "recovery_transaction_rolled_back");
     }
     if (leaseAcquired) releaseTaskLease(taskId, "recovery_rolled_back");
     try { failIdempotency("task-recovery", idempotencyKey, error); } catch {}

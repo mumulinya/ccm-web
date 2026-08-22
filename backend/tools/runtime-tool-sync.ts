@@ -1122,8 +1122,27 @@ function buildCodexConfigToml(
       "",
     );
   }
+  const protectedApprovalTools: Record<string, string[]> = {
+    ccm__agent_communication: [
+      "acknowledge_assignment",
+      "report_progress",
+      "heartbeat",
+      "request_coordination",
+      "request_review",
+      "report_blocker",
+      "get_assignment_status",
+      "submit_result",
+    ],
+  };
   for (const [name, server] of Object.entries(mcpServers)) {
     lines.push(`[mcp_servers.${tomlString(name)}]`);
+    // CCM internal MCP servers are capability-scoped with a signed invocation
+    // context and enforce task/session/permission checks server-side. Codex
+    // non-interactive runs cannot surface an MCP approval prompt, so leaving
+    // these tools on the default prompt policy makes the client cancel the
+    // required pre-execution ACK. Only protected internal servers receive this
+    // override; user/catalog MCP servers keep their declared approval policy.
+    if (server.protected === true) lines.push(`default_tools_approval_mode = ${tomlString("approve")}`);
     if (server.url) {
       lines.push(`url = ${tomlString(server.url)}`);
     } else {
@@ -1133,6 +1152,16 @@ function buildCodexConfigToml(
     if (server.env && Object.keys(server.env).length) {
       lines.push("", `[mcp_servers.${tomlString(name)}.env]`);
       for (const [key, value] of Object.entries(server.env)) lines.push(`${tomlString(key)} = ${tomlString(value)}`);
+    }
+    // Codex versions that apply the global non-interactive approval policy
+    // before the server default can still reject a protected MCP call. Pin
+    // the task communication protocol at tool granularity as well. These
+    // tools are safe to auto-approve here because every call is validated by
+    // the signed task/session/generation/attempt/lease binding in CCM.
+    if (server.protected === true) {
+      for (const tool of protectedApprovalTools[name] || []) {
+        lines.push("", `[mcp_servers.${tomlString(name)}.tools.${tomlString(tool)}]`, `approval_mode = ${tomlString("approve")}`);
+      }
     }
     lines.push("");
   }
@@ -1641,7 +1670,7 @@ export function syncRuntimeToolsWithCatalog(
       try {
         if (!name.startsWith(CCM_MCP_PREFIX)) throw new Error("内部 MCP 名称必须使用 ccm__ 前缀");
         if (!server || typeof server !== "object" || !String((server as any).command || "").trim()) throw new Error("内部 MCP 缺少 command");
-        mcpServers[name] = server;
+        mcpServers[name] = { ...(server as any), protected: true };
         audit.internal_mcp?.push({ name, protected: true, state: "synced" });
       } catch (error: any) {
         audit.errors.push(`内部 MCP ${name}: ${error?.message || String(error)}`);

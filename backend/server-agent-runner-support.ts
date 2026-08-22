@@ -3,6 +3,7 @@
 import { THIRD_PARTY_MEMORY_MCP_TOOL_ALIASES } from "./integrations/third-party-memory-snapshot";
 import { signInternalMcpEvidence } from "./integrations/internal-mcp-runtime";
 import { loadTasks } from "./core/db";
+import { discoverProjectVerificationCommands } from "./agents/project-verification-discovery";
 
 export function createAgentRunnerSupport(deps: any) {
   const {
@@ -326,10 +327,10 @@ export function createAgentRunnerSupport(deps: any) {
   
   
   
-  function getProjectVerificationCommandsForRunner(projectName: string) {
+  function getProjectVerificationCommandsForRunner(projectName: string, workDir = "") {
     const configs = loadProjectConfigs();
     const projectConfig = configs?.[projectName] || {};
-    return normalizeVerificationCommands(
+    const configured = normalizeVerificationCommands(
       projectConfig.verification_commands
         || projectConfig.verificationCommands
         || projectConfig.test_commands
@@ -337,10 +338,11 @@ export function createAgentRunnerSupport(deps: any) {
         || projectConfig.check_commands
         || projectConfig.checkCommands
     );
+    return configured.length ? configured : discoverProjectVerificationCommands(workDir);
   }
   
   async function runIndependentProjectVerification(projectName: string, workDir: string, timeoutMs: number, taskId: string, executionId: string, agentType: string) {
-    const commands = getProjectVerificationCommandsForRunner(projectName).filter(isSafeVerificationCommand);
+    const commands = getProjectVerificationCommandsForRunner(projectName, workDir).filter(isSafeVerificationCommand);
     if (!commands.length || !workDir) return "";
     const verification: string[] = [];
     const failed: string[] = [];

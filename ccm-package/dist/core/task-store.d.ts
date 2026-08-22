@@ -1,4 +1,7 @@
 import Database from "better-sqlite3";
+export declare function persistTaskContextProjection(db: Database.Database, taskId: string, contextInput: any, reason?: string, sourceEventId?: string, forceSnapshot?: boolean): any;
+export declare function upsertTaskInSqliteTransaction(db: Database.Database, task: any, position: number, persistContext?: boolean): void;
+export declare function withImmediateTaskStoreTransaction<T>(operation: (db: Database.Database) => T): T;
 export declare function withSqliteTaskStore<T>(operation: (db: Database.Database) => T): T;
 export declare function loadTasksFromSqlite(): any[];
 export declare function getTaskByIdFromSqlite(id: string): any | null;
@@ -33,6 +36,7 @@ export declare function runTaskStoreAtomicBatchSelfTest(): {
     parent_round_trip: boolean;
     restart_recovered: boolean;
     restart_count: number;
+    undefined_removal_recorded: boolean;
 };
 export declare function appendTaskLogRecord(taskId: string, entry: any, maxEntries?: number): number;
 export declare function getTaskLogRecords(taskId: string, limit?: number): any[];
@@ -68,11 +72,6 @@ export declare function getSqliteTaskStoreStatus(): {
         tasks: number;
         task_logs: number;
         group_logs: number;
-    };
-    migrations: {
-        tasks: any;
-        task_logs: any;
-        group_logs: any;
     };
     integrity: {
         valid: boolean;
@@ -112,11 +111,6 @@ export declare function restoreSqliteTaskStore(source: string): {
             task_logs: number;
             group_logs: number;
         };
-        migrations: {
-            tasks: any;
-            task_logs: any;
-            group_logs: any;
-        };
         integrity: {
             valid: boolean;
             integrity: string[];
@@ -128,12 +122,6 @@ export declare function closeSqliteTaskStore(): void;
 export declare function getSqliteTaskStorePaths(): {
     store_dir: string;
     database_file: string;
-    legacy_backup_dir: string;
     database_backup_dir: string;
     export_dir: string;
-    legacy_files: {
-        tasks: string;
-        taskLogs: string;
-        groupLogs: string;
-    };
 };

@@ -9,7 +9,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const require = createRequire(import.meta.url);
 const retry = require(path.join(root, "ccm-package", "dist", "system", "model-call-retry.js"));
 const client = require(path.join(root, "ccm-package", "dist", "modules", "collaboration", "group-orchestrator-llm-client.js"));
-const compaction = require(path.join(root, "ccm-package", "dist", "modules", "collaboration", "group-compaction-engine.js"));
+const compaction = require(path.join(root, "ccm-package", "dist", "system", "unified-session-compaction-model.js"));
 const originalFetch = globalThis.fetch;
 
 const config = {

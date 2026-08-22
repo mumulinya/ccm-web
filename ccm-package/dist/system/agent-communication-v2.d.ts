@@ -43,7 +43,7 @@ export type AgentCommunicationEnvelopeV2 = {
 export declare const DEFAULT_AGENT_COMMUNICATION_POLICY: Readonly<{
     agentCommunicationV2Enabled: true;
     agentRunnerStartTimeoutMs: 60000;
-    agentAckTimeoutMs: 30000;
+    agentAckTimeoutMs: 60000;
     agentHeartbeatIntervalMs: 20000;
     agentHeartbeatLostTimeoutMs: 90000;
     agentLeaseTtlMs: 120000;

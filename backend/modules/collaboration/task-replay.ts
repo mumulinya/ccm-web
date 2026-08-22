@@ -26,6 +26,7 @@ import { captureRepoStateIdentity, compareRepoStateIdentity, listEvidence, repoS
 import { listUserVisibleAgentEvents } from "../../system/user-visible-agent-events";
 import type { ToolDisplayDetailV1 } from "../../system/tool-display-projection";
 import { projectTaskContext } from "../../tasks/task-context";
+import { catchUpTaskContext } from "../../tasks/session-task-timeline";
 
 export type TaskReplayStage = "intake" | "planning" | "dispatch" | "execution" | "change" | "test" | "rework" | "review" | "completion" | "system";
 export type { TaskReplayStatus } from "./task-replay-shared";
@@ -1067,6 +1068,7 @@ function taskPublicRow(task: any, rootId: string) {
 }
 
 export function buildCompleteTaskReplay(taskId: string, options: TaskReplayEventPageOptions = {}) {
+  catchUpTaskContext(String(taskId || ""));
   const family = taskFamily(String(taskId || ""));
   if (!family) return null;
   const ids = [...family.ids];

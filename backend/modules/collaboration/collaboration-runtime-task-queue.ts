@@ -7,6 +7,7 @@ import {
   spawnSync,
 } from "child_process";
 import * as os from "os";
+import { taskConversationProjectionContent } from "../../system/task-conversation-projection";
 import {
   sendJson,
   calculateTokensAndCost,
@@ -1434,9 +1435,24 @@ export function updateGroupTaskInlineStatus(task: any, status: string, detail = 
   const sessionId = groupSessionIdForTask(task);
   const messages = getGroupMessages(task.group_id, sessionId);
   const runtime = buildInlineTaskRuntime({ ...task, status, status_detail: detail || task.status_detail });
+  const projectionContent = String(task?.conversation_projection_content || "")
+    || taskConversationProjectionContent({ ...task, status, status_detail: detail || task.status_detail });
   let changed = false;
+  let projectionRejected = false;
+  let matched = false;
   const next = messages.map((message: any) => {
     if (message?.task_id !== task.id) return message;
+    matched = true;
+    const messageProjection = message?.taskExperience || message?.task || {};
+    if (Number(messageProjection?.revision || 0) > Math.max(0, Number(task.revision || 0))) {
+      projectionRejected = true;
+      return message;
+    }
+    const sameProjection = String(message?.content || "") === projectionContent
+      && String(messageProjection?.status || "") === String(status || "")
+      && Number(messageProjection?.revision || 0) === Math.max(0, Number(task.revision || 0))
+      && Number(messageProjection?.execution_attempt || 0) === Math.max(0, Number(task.execution_attempt || task.attempt || 0));
+    if (sameProjection) return message;
     changed = true;
     const {
       taskRuntime: _storedTaskRuntime,
@@ -1447,12 +1463,66 @@ export function updateGroupTaskInlineStatus(task: any, status: string, detail = 
     } = message;
     return {
       ...messageWithoutStoredRuntime,
-      task: message.task ? { ...message.task, status, status_detail: detail || task.status_detail || "" } : message.task,
+      content: projectionContent || message.content,
+      task: message.task ? {
+        ...message.task,
+        status,
+        status_detail: detail || task.status_detail || "",
+        revision: Math.max(0, Number(task.revision || 0)),
+        execution_attempt: Math.max(0, Number(task.execution_attempt || task.attempt || 0)),
+        acceptance_state: task.acceptance_state || message.task.acceptance_state || "",
+        final_summary: task.final_summary || task.result || message.task.final_summary || "",
+        file_changes: task.file_changes || message.task.file_changes || null,
+        verification: Array.isArray(task.verification) ? task.verification : message.task.verification || [],
+      } : message.task,
+      taskExperience: message.taskExperience ? {
+        ...message.taskExperience,
+        status,
+        status_detail: detail || task.status_detail || "",
+        revision: Math.max(0, Number(task.revision || 0)),
+        execution_attempt: Math.max(0, Number(task.execution_attempt || task.attempt || 0)),
+        acceptance_state: task.acceptance_state || message.taskExperience.acceptance_state || "",
+        final_summary: task.final_summary || task.result || message.taskExperience.final_summary || "",
+        file_changes: task.file_changes || message.taskExperience.file_changes || null,
+        verification: Array.isArray(task.verification) ? task.verification : message.taskExperience.verification || [],
+      } : message.taskExperience,
       workflow: { ...(message.workflow || {}), phase: status === "done" ? "complete" : status === "failed" || status === "cancelled" ? "needs_rework" : status === "in_progress" ? "executing" : (message.workflow?.phase || "dispatching"), updated_at: new Date().toISOString() },
     };
   });
+  if (!matched) {
+    changed = true;
+    const projection = {
+      id: task.id,
+      task_id: task.id,
+      trace_id: task.trace_id || "",
+      project: task.target_project || task.project_id || "",
+      status,
+      status_detail: detail || task.status_detail || "",
+      revision: Math.max(0, Number(task.revision || 0)),
+      execution_attempt: Math.max(0, Number(task.execution_attempt || task.attempt || 0)),
+      acceptance_state: task.acceptance_state || "",
+      final_summary: task.final_summary || task.result || "",
+      file_changes: task.file_changes || null,
+      verification: Array.isArray(task.verification) ? task.verification : [],
+      runtime_status: runtime,
+      active_execution_session_id: task.active_execution_session_id || task.execution_session_id || sessionId,
+      requires_card: true,
+    };
+    next.push({
+      id: task.target_message_id || `group-task:${task.id}:${sessionId}`,
+      role: "assistant",
+      content: projectionContent,
+      timestamp: task.updated_at || new Date().toISOString(),
+      type: task?.conversation_projection_source_link === true ? "task_recovery_link" : "group_task",
+      source: task?.conversation_projection_source_link === true ? "task-recovery-source-projection" : "task-conversation-projection",
+      task_id: task.id,
+      task: projection,
+      taskExperience: projection,
+      workflow: { phase: status === "done" ? "complete" : status === "failed" || status === "cancelled" ? "needs_rework" : status === "in_progress" ? "executing" : "dispatching", updated_at: new Date().toISOString() },
+    });
+  }
   if (changed) saveGroupMessages(task.group_id, next, sessionId);
-  return runtime;
+  return { ...runtime, projectionUpdated: changed, projectionRejected };
 }
 
 export function buildChildAgentWorkerHandoff(targetProject: string, taskText = "", options: any = {}) {

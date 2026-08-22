@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { createRequire } from "node:module";
@@ -76,46 +75,7 @@ try {
   assert.match(budgetedRequest.user, /重点保留数据库迁移风险/);
   assert.equal(budgetedRequest.audit.withinBudget, true);
 
-  let requests = 0;
-  const server = http.createServer((req, res) => {
-    requests += 1;
-    let body = "";
-    req.on("data", chunk => { body += chunk; });
-    req.on("end", () => {
-      if (requests === 1) {
-        res.writeHead(413, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: { code: "context_length_exceeded", message: "prompt too long" } }));
-        return;
-      }
-      const summary = projections.createEmptyConversationSummary();
-      summary.primaryRequest = "keep the latest complete API rounds";
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({
-        id: "mock-compact-response",
-        model,
-        usage: { prompt_tokens: 120, completion_tokens: 20 },
-        choices: [{ finish_reason: "stop", message: { content: JSON.stringify(summary) } }],
-      }));
-    });
-  });
-  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
-  try {
-    const address = server.address();
-    const result = await compact.summarizeWithModel(rounds, {}, projections.createEmptyConversationSummary(), {
-      enabled: true,
-      apiUrl: `http://127.0.0.1:${address.port}`,
-      apiKey: "mock-only",
-      model,
-      format: "openai-compatible",
-      groupId,
-      groupSessionId: sessionId,
-    });
-    assert.equal(requests, 2);
-    assert.equal(result.requestAudit.ptlRetryAttempts, 1);
-    assert.equal(result.summary.primaryRequest, "keep the latest complete API rounds");
-  } finally {
-    await new Promise(resolve => server.close(resolve));
-  }
+  assert.equal(compact.summarizeWithModel, undefined, "group scope must not retain a second model-summary lifecycle");
 
   cache.notifyGroupPromptCacheCompaction({
     groupId,
@@ -129,10 +89,10 @@ try {
   assert.ok(stale.issues.includes("usage_baseline_missing") || stale.issues.includes("usage_post_compaction_reset_pending"));
 
   console.log(JSON.stringify({
-    passed: 18,
+    passed: 16,
     providerObservedTokens: baseline.event.provider_observed_context_tokens,
     correction: calibrated.providerObservedCorrection,
-    ptlRetries: 1,
+    unifiedEngineOnly: true,
     maxSummaryTokens: receipts.GROUP_COMPACTION_MODEL_MAX_SUMMARY_TOKENS,
     customInstructions: true,
     paidProviderCalls: 0,

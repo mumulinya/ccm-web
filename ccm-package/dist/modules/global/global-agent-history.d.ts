@@ -42,6 +42,22 @@ export declare function createGlobalAgentHistoryRuntime(deps: any): {
         extractMemory?: boolean;
         files?: any[];
     }) => void;
+    upsertGlobalAgentConversationTaskMessage: (sessionId: string, messageInput: any) => {
+        updated: boolean;
+        reason: string;
+        sessionId?: undefined;
+        message?: undefined;
+    } | {
+        updated: boolean;
+        reason: string;
+        sessionId: string;
+        message: any;
+    } | {
+        updated: boolean;
+        sessionId: string;
+        message: any;
+        reason?: undefined;
+    };
     scheduleGlobalSessionAutoTitle: (sessionId: string) => Promise<any>;
     resolveFeishuGlobalAgentSessionId: (payload: any, store?: any) => string;
     runFeishuGlobalAgentSessionRoutingSelfTest: () => {

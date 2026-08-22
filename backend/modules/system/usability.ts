@@ -603,7 +603,7 @@ async function executeWorkbenchTaskAction(
         enqueue: id => deps.enqueueTask(id, deps.ctx),
       });
       if (!recovery.success) throw Object.assign(new Error(recovery.preflight?.blockers?.join("、") || "恢复安全检查未通过"), { code: "recovery_gate_failed", recovery_preflight: recovery.preflight });
-      result = { task: recovery.task, queue_result: recovery.queueResult, recovery_decision: recovery.decision, recovery_preflight: recovery.preflight, recovery_transaction: recovery.transaction };
+      result = { task: recovery.task, queue_result: recovery.queueResult, recovery_decision: recovery.decision, recovery_preflight: recovery.preflight, recovery_transaction: recovery.transaction, conversation_projection: recovery.conversationProjection || recovery.result?.conversation_projection || null };
     } else if (action === "retry") {
       if (blocker !== "failed") throw Object.assign(new Error("只有失败任务可以重试"), { code: "retry_gate_failed" });
       result = deps.retryTask(taskId, deps.ctx, String(payload.message || payload.reason || "用户从工作台按失败缺口重试"), true);

@@ -208,7 +208,7 @@ const RERANK_SYSTEM = [
     "Include every input id exactly once.",
 ].join("\n");
 async function callJudgmentModel(config, system, user) {
-    const engine = require("./group-compaction-engine");
+    const engine = require("../../system/unified-session-compaction-model");
     const text = await engine.callCompactionModel(config, system, user, exports.MEMORY_MODEL_JUDGMENT_MAX_OUTPUT_TOKENS);
     if (!text)
         return null;

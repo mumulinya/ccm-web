@@ -32,7 +32,7 @@ const focusNode = node => {
 </script>
 
 <template>
-  <section v-if="section === 'overview'" class="replay-integrity" :class="integrity.level || 'partial'">
+  <section v-if="section === 'integrity'" class="replay-integrity" :class="integrity.level || 'partial'">
     <header>
       <div><span class="integrity-mark"></span><strong>{{ integrityLabel(integrity.level) }}</strong><small>基于当前任务账本的结构化来源判断，不使用伪精确百分比</small></div>
       <em>{{ integrity.observedSources?.length || 0 }} / {{ integrity.expectedSources?.length || 0 }} 类来源</em>
@@ -45,7 +45,7 @@ const focusNode = node => {
     <p v-else class="integrity-ok">需求、计划、执行、验证与终态交付记录均可验证。</p>
   </section>
 
-  <section v-if="section === 'overview' && actions.length" class="replay-actions">
+  <section v-if="section === 'actions' && actions.length" class="replay-actions">
     <header><div><strong>需要处理</strong><small>操作能力由后端根据当前权限和任务状态提供</small></div><em>{{ actions.filter(row => row.enabled).length }} 项可执行</em></header>
     <div>
       <button v-for="action in actions" :key="action.id" type="button" :disabled="!action.enabled" :title="action.disabledReason || ''" @click="emit('handle-action', action)">
@@ -54,7 +54,7 @@ const focusNode = node => {
     </div>
   </section>
 
-  <section v-if="section === 'overview'" class="causal-chain">
+  <section v-if="section === 'causal'" class="causal-chain">
     <header><div><strong>需求到交付的因果链</strong><small>只使用显式工作项、批次、依赖与证据引用建立关联</small></div><em>{{ causal.nodes?.length || 0 }} 个节点</em></header>
     <div v-if="!causal.nodes?.length" class="insight-empty">当前任务没有足够的结构化引用来建立因果链。</div>
     <div v-else class="causal-roots">
@@ -71,21 +71,24 @@ const focusNode = node => {
     </div>
   </section>
 
-  <section v-if="section === 'attempts' && attempts.length" class="attempt-comparisons">
-    <header><div><strong>尝试与返工对比</strong><small>失败尝试保留为历史证据，只有 accepted attempt 进入最终交付</small></div><em>{{ attempts.length }} 个工作项</em></header>
-    <article v-for="group in attempts" :key="group.workItemId">
-      <div class="attempt-title"><strong>{{ group.project || '执行工作项' }}</strong><small>{{ group.workItemId }}</small></div>
-      <div class="attempt-grid">
-        <div v-for="row in group.attempts" :key="row.attempt" :class="['attempt-card', { accepted: row.accepted, superseded: row.superseded }]">
-          <header><b>第 {{ row.attempt }} 次</b><em>{{ row.accepted ? '已验收' : row.superseded ? '已替代' : statusLabel(row.status) }}</em></header>
-          <p>{{ row.summary || row.failureReason || '未保存业务摘要' }}</p>
-          <small>{{ row.filesChanged }} 个文件 · {{ row.verificationCount }} 项验证</small>
+  <details v-if="section === 'work_item_attempts' && attempts.length" class="attempt-comparisons">
+    <summary><div><strong>工作项返工诊断</strong><small>这里展示工作项内部重试；任务级历史执行请查看上方执行记录</small></div><em>{{ attempts.length }} 个工作项</em></summary>
+    <div class="attempt-comparison-body">
+      <article v-for="group in attempts" :key="group.workItemId">
+        <div class="attempt-title"><strong>{{ group.project || '执行工作项' }}</strong><small>{{ group.workItemId }}</small></div>
+        <div class="attempt-grid">
+          <div v-for="row in group.attempts" :key="row.attempt" :class="['attempt-card', { accepted: row.accepted, superseded: row.superseded }]">
+            <header><b>第 {{ row.attempt }} 次</b><em>{{ row.accepted ? '已验收' : row.superseded ? '已替代' : statusLabel(row.status) }}</em></header>
+            <p>{{ row.summary || row.failureReason || '未保存业务摘要' }}</p>
+            <small>{{ row.filesChanged }} 个文件 · {{ row.verificationCount }} 项验证</small>
+          </div>
         </div>
-      </div>
-    </article>
-  </section>
+      </article>
+    </div>
+  </details>
 </template>
 
 <style scoped>
 .replay-integrity,.replay-actions,.causal-chain,.attempt-comparisons{margin:0 0 14px;border:1px solid var(--border-color);border-radius:9px;background:var(--surface);overflow:hidden}.replay-integrity{border-left:4px solid #16a34a}.replay-integrity.mostly_complete{border-left-color:#2563eb}.replay-integrity.partial,.replay-integrity.legacy{border-left-color:#d97706}.replay-integrity>header,.replay-actions>header,.causal-chain>header,.attempt-comparisons>header{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:11px 13px;border-bottom:1px solid var(--border-color)}header>div>strong,header>div>small{display:block}header>div>strong{font-size:12px}header>div>small{margin-top:2px;color:var(--text-muted);font-size:9.5px}header>em{color:var(--text-muted);font-size:10px;font-style:normal}.replay-integrity>header>div{display:grid;grid-template-columns:9px 1fr;column-gap:8px}.replay-integrity>header small{grid-column:2}.integrity-mark{grid-row:1/3;width:8px;height:8px;margin-top:3px;border-radius:50%;background:#16a34a}.partial .integrity-mark,.legacy .integrity-mark{background:#d97706}.integrity-gaps{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:1px;background:var(--border-color)}.integrity-gaps article{padding:10px 12px;background:var(--surface)}.integrity-gaps b{font-size:11px}.integrity-gaps p,.integrity-ok{margin:4px 0 0;color:var(--text-secondary);font-size:10.5px;line-height:1.5}.integrity-ok{padding:11px 13px;margin:0}.replay-actions>div{display:flex;flex-wrap:wrap;gap:7px;padding:10px 12px}.replay-actions button{display:grid;gap:2px;min-width:150px;padding:8px 10px;border:1px solid var(--border-color);border-radius:7px;background:var(--bg-primary);color:var(--text-primary);text-align:left;cursor:pointer}.replay-actions button:disabled{opacity:.55;cursor:not-allowed}.replay-actions button strong{font-size:11px}.replay-actions button small{color:var(--text-muted);font-size:9px}.insight-empty{padding:24px;color:var(--text-muted);font-size:11px;text-align:center}.causal-roots{display:grid}.causal-root{border-bottom:1px solid var(--border-color)}.causal-root:last-child{border-bottom:0}.causal-row{display:grid;grid-template-columns:9px minmax(0,1fr) auto 18px;align-items:center;gap:9px;width:100%;padding:10px 12px;border:0;background:transparent;color:inherit;text-align:left;cursor:pointer}.causal-row:hover{background:var(--bg-secondary)}.causal-dot{width:8px;height:8px;border-radius:50%;background:#94a3b8}.causal-dot.completed,.causal-dot.done,.causal-dot.passed,.causal-dot.accepted,.causal-dot.satisfied{background:#16a34a}.causal-dot.running,.causal-dot.in_progress{background:#2563eb}.causal-dot.failed,.causal-dot.blocked{background:#dc2626}.causal-row span>small,.causal-row span>strong{display:block}.causal-row span>small{color:var(--text-muted);font-size:9px}.causal-row span>strong{margin-top:2px;font-size:11px}.causal-row>em{color:var(--text-muted);font-size:9.5px;font-style:normal}.causal-row>b{font-size:14px}.causal-children{display:grid;margin:0 12px 10px 29px;border-left:1px solid var(--border-color)}.causal-children button{display:grid;grid-template-columns:70px minmax(0,1fr) auto;gap:8px;padding:7px 10px;border:0;border-bottom:1px solid var(--border-color);background:transparent;color:inherit;text-align:left;cursor:pointer}.causal-children button:last-child{border-bottom:0}.causal-children span,.causal-children small{color:var(--text-muted);font-size:9px}.causal-children strong{font-size:10.5px}.attempt-comparisons>article{padding:10px 12px;border-bottom:1px solid var(--border-color)}.attempt-comparisons>article:last-child{border-bottom:0}.attempt-title{display:flex;gap:8px;align-items:baseline;margin-bottom:7px}.attempt-title strong{font-size:11px}.attempt-title small{color:var(--text-muted);font-size:9px}.attempt-grid{display:flex;gap:7px;overflow:auto}.attempt-card{flex:0 0 min(240px,75vw);padding:8px 9px;border:1px solid var(--border-color);border-radius:7px;background:var(--bg-primary)}.attempt-card.accepted{border-color:color-mix(in srgb,#16a34a 45%,var(--border-color));background:color-mix(in srgb,#16a34a 5%,var(--surface))}.attempt-card.superseded{opacity:.65}.attempt-card header{display:flex;justify-content:space-between}.attempt-card header b{font-size:10px}.attempt-card header em{font-size:9px}.attempt-card p{margin:6px 0;color:var(--text-secondary);font-size:10px;line-height:1.45}.attempt-card>small{color:var(--text-muted);font-size:9px}@media(max-width:720px){.causal-children button{grid-template-columns:1fr}.causal-children button span{font-weight:700}.replay-integrity>header,.replay-actions>header,.causal-chain>header,.attempt-comparisons>header{align-items:flex-start}.integrity-gaps{grid-template-columns:1fr}}
+.attempt-comparisons>summary{display:flex;align-items:center;gap:12px;padding:11px 13px;cursor:pointer;list-style:none}.attempt-comparisons>summary::-webkit-details-marker{display:none}.attempt-comparisons>summary>div{min-width:0;flex:1}.attempt-comparisons>summary strong,.attempt-comparisons>summary small{display:block}.attempt-comparisons>summary strong{font-size:12px}.attempt-comparisons>summary small{margin-top:2px;color:var(--text-muted);font-size:9.5px}.attempt-comparisons>summary em{color:var(--text-muted);font-size:10px;font-style:normal}.attempt-comparisons>summary:after{content:'›';color:var(--text-muted);font-size:16px;transition:transform .18s}.attempt-comparisons[open]>summary{border-bottom:1px solid var(--border-color)}.attempt-comparisons[open]>summary:after{transform:rotate(90deg)}.attempt-comparison-body>article{padding:10px 12px;border-bottom:1px solid var(--border-color)}.attempt-comparison-body>article:last-child{border-bottom:0}
 </style>

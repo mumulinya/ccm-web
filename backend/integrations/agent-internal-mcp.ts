@@ -14,6 +14,7 @@ export type TaskBoundInternalMcpInput = {
   taskId: string;
   groupId: string;
   groupSessionId?: string;
+  projectSessionId?: string;
   project: string;
   role: InternalMcpAgentRole;
   agentType?: string;
@@ -45,6 +46,7 @@ export function buildTaskBoundInternalMcpServers(input: TaskBoundInternalMcpInpu
     taskId: input.taskId,
     groupId: input.groupId || "",
     groupSessionId: input.groupSessionId || "",
+    projectSessionId: input.projectSessionId || "",
     project: input.project,
     role: input.role,
     agentType: input.agentType || "",

@@ -1004,8 +1004,9 @@ export function evaluateGreenContract(input: any) {
   const runnerFailed = runner.status === "failed" || (Array.isArray(runner.failed) && runner.failed.length > 0);
   const hasExecutedVerification = runnerPassed || verification.some((item: any) => /passed|通过|exit\s*0|成功/i.test(String(item)) && !/建议|should|未运行/i.test(String(item)));
   const hasChanges = Array.isArray(fileChanges) && fileChanges.length > 0;
-  const receiptDone = ["done", "complete", "completed", "success"].includes(String(receipt.status || input.status || "").toLowerCase());
-  checks.push({ id: "receipt", pass: receiptDone, detail: receiptDone ? "结构化回执完成" : "缺少完成回执" });
+  const providerReceiptDone = ["done", "complete", "completed", "success"].includes(String(receipt.status || input.status || "").toLowerCase());
+  const receiptDone = providerReceiptDone || input.ccmRevalidatedCompletion === true;
+  checks.push({ id: "receipt", pass: receiptDone, detail: providerReceiptDone ? "结构化回执完成" : receiptDone ? "Provider 部分回执已由 CCM 文件、验证和复核证据重验证" : "缺少完成回执" });
   checks.push({ id: "changes", pass: input.requiresChanges === false || hasChanges, detail: hasChanges ? `${fileChanges.length} 个文件变更` : "未捕获文件变更" });
   checks.push({ id: "targeted_verification", pass: input.requiresVerification === false || hasExecutedVerification, detail: hasExecutedVerification ? "存在已执行验证" : "缺少已执行验证" });
   checks.push({ id: "project_verification", pass: input.requiresVerification === false || (hasExecutedVerification && !runnerFailed), detail: runnerFailed ? "项目验证失败" : "项目验证无失败" });
@@ -1279,6 +1280,7 @@ export function runExecutionKernelSelfTest() {
       && fs.existsSync(path.join(tempRoot, "created.txt"));
     const rollback = rollbackExecutionCheckpoint(checkpoint.id, "self test");
     const green = evaluateGreenContract({ receipt: { status: "done", verification: ["npm test passed"] }, fileChanges: [{ path: "tracked.txt" }], requiresChanges: true, requiresVerification: true, runnerVerification: { status: "passed", results: [{ command: "npm test", status: "passed" }] }, workspacePassed: true, branchFresh: true, reviewPassed: true, requiredLevel: "merge_ready" });
+    const revalidatedPartial = evaluateGreenContract({ receipt: { status: "partial", verification: [] }, fileChanges: [{ path: "tracked.txt" }], requiresChanges: true, requiresVerification: true, runnerVerification: { status: "passed", results: [{ command: "npm test", status: "passed" }] }, ccmRevalidatedCompletion: true, branchFresh: true, reviewPassed: true, requiredLevel: "project" });
     const persistedReceipt = { agent: "self-test", status: "done", verification: ["npm test passed by external runner (exit 0)"] };
     const persistedFileChanges = { files: [{ path: "tracked.txt" }] };
     const persistedRunner = { status: "passed", verification: persistedReceipt.verification, failed: [] };
@@ -1300,6 +1302,7 @@ export function runExecutionKernelSelfTest() {
       selectiveCheckpointRewindPreservesOtherFiles: selective.success && selective.selective === true && selectiveRestored,
       classifiesTypedFailure: failure.failureClass === "mcp_handshake" && failure.recoverable,
       evaluatesMergeReadyGreenContract: green.pass && green.level === "merge_ready",
+      acceptsPartialProviderReceiptOnlyAfterCcmRevalidation: revalidatedPartial.pass && revalidatedPartial.checks.find((item: any) => item.id === "receipt")?.pass === true,
       persistsDeliveryEvidence: reloadedExecution?.receipt?.status === "done"
         && reloadedExecution?.fileChanges?.files?.[0]?.path === "tracked.txt"
         && reloadedExecution?.runnerVerification?.status === "passed"

@@ -229,6 +229,7 @@ function prepareAgentRuntimeTools(groupId, projectName, workDir, agentType, allo
             taskId: String(sourceTask.id),
             groupId: String(groupId || sourceTask.group_id || ""),
             groupSessionId: String(options.groupSessionId || sourceTask.group_session_id || sourceTask.groupSessionId || ""),
+            projectSessionId: String(options.projectSessionId || sourceTask.project_session_id || sourceTask.projectSessionId || ""),
             project: projectName,
             role: internalAgentRole,
             agentType,
@@ -1125,6 +1126,17 @@ function getTaskDashboardActions(task, phase) {
             { id: "view_changes", label: "查看当前改动", kind: "view_changes", tone: "outline" },
             { id: "rollback", label: "撤销到安全检查点", kind: "rollback", tone: "outline" },
             { id: "cancel", label: "停止任务", kind: "cancel", tone: "danger" },
+        ];
+    }
+    const interruptedForRecovery = task?.acceptance_state === "recovery_required"
+        || task?.interruption_receipt?.schema === "ccm-task-interruption-receipt-v1"
+        || (["cancelled", "canceled"].includes(String(task?.status || "").toLowerCase())
+            && task?.cancellation_progress?.stage === "cancelled");
+    if (interruptedForRecovery) {
+        return [
+            { id: "resume_interrupted", label: "继续执行", kind: "resume_interrupted", tone: "primary" },
+            { id: "replan", label: "重新规划", kind: "continue", tone: "outline" },
+            { id: "switch_executor", label: "换执行器", kind: "switch_executor", tone: "outline" },
         ];
     }
     const recovery = task?.recovery || task?.interruption_receipt?.recovery || {};

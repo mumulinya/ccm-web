@@ -14,7 +14,19 @@ export interface AgentRuntimeEventIdentity {
     generation: number;
     attempt: number;
     leaseId: string;
+    project?: string;
 }
+export type AgentRuntimeFileReadEvidence = {
+    project: string;
+    path: string;
+    ranges: Array<{
+        start: number;
+        end: number;
+    }>;
+    checksum?: string;
+    source: "structured_tool" | "safe_command_inference";
+    contentStored: false;
+};
 export interface AgentRuntimeStructuredEvent extends AgentRuntimeEventIdentity {
     schema: typeof AGENT_RUNTIME_EVENT_SCHEMA;
     eventId: string;
@@ -28,6 +40,10 @@ export interface AgentRuntimeStructuredEvent extends AgentRuntimeEventIdentity {
     confidence: "declared" | "observed";
     safeSummary?: string;
     target?: string;
+    toolName?: string;
+    safeArguments?: Record<string, unknown>;
+    safeResult?: Record<string, unknown>;
+    fileReadEvidence?: AgentRuntimeFileReadEvidence;
     status: "running" | "success" | "failed" | "waiting";
     sourceEventChecksum: string;
     createdAt: string;

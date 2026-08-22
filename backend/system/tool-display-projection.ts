@@ -42,6 +42,7 @@ export type ToolDisplayDetailV1 = {
     rehydratable?: boolean;
     freshness?: "current" | "drifted" | "deleted" | "permission_revoked";
     authoritativeRevision?: string;
+    commandExecution?: { status: string; exitCode?: number; durationMs?: number };
     searchExecution?: { engine: "bundled_rg" | "system_rg" | "node_fallback"; timedOut: boolean; cancelled: boolean; partial: boolean };
     presentation?: {
       layout: "directory" | "files" | "matches" | "symbols" | "file_content" | "git" | "verification" | "generic";
@@ -516,7 +517,20 @@ function resultProjection(operation: string, rawInput: any, error: any, transien
       running: `${description}仍在运行`, completed: `${description}已完成`, failed: `${description}未通过`,
       cancelled: `${description}已停止`, timed_out: `${description}运行超时`, needs_recheck: `${description}需要重新核验`,
     };
-    return { kind: status === "failed" || status === "timed_out" ? "error" : "summary", summary: summaries[status] || `${description}状态已更新`, presentation: { layout: "verification" }, truncated: Boolean(raw?.truncated), authoritativeRevision: cleanText(raw?.revision || "", 40) };
+    const exitCode = Number(raw?.exitCode ?? raw?.exit_code);
+    const durationMs = Number(raw?.durationMs ?? raw?.duration_ms);
+    return {
+      kind: status === "failed" || status === "timed_out" ? "error" : "summary",
+      summary: summaries[status] || `${description}状态已更新`,
+      presentation: { layout: "verification" },
+      truncated: Boolean(raw?.truncated),
+      authoritativeRevision: cleanText(raw?.revision || "", 40),
+      commandExecution: {
+        status: status || "unknown",
+        ...(Number.isFinite(exitCode) ? { exitCode } : {}),
+        ...(Number.isFinite(durationMs) && durationMs >= 0 ? { durationMs } : {}),
+      },
+    };
   }
   if (["apply_patch", "write_file", "move_path", "delete_path"].includes(operation) && raw?.schema === "ccm-workspace-edit-result-v1") {
     const labels: Record<string, string> = { apply_patch: "文件修改已保存", write_file: raw?.created ? "文件已创建" : "文件已写入", move_path: "文件已移动", delete_path: "文件已删除" };

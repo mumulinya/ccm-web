@@ -67,6 +67,7 @@ export declare function runMainAgentSelfVerification(input: {
     changedFiles?: any[];
     projects?: VerificationProject[];
     workerOutputs?: string[];
+    workerReceipts?: any[];
     sourceSnapshotChecksum?: string;
     commandTimeoutMs?: number;
     semanticModelCall?: (request: {

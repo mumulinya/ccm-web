@@ -75,7 +75,7 @@ export function defaultOrchestratorConfig() {
     postCompactSourceTotalMaxTokens: 25_000,
     agentCommunicationV2Enabled: true,
     agentRunnerStartTimeoutMs: 60_000,
-    agentAckTimeoutMs: 30_000,
+    agentAckTimeoutMs: 60_000,
     agentHeartbeatIntervalMs: 20_000,
     agentHeartbeatLostTimeoutMs: 90_000,
     agentLeaseTtlMs: 120_000,
@@ -182,6 +182,10 @@ export function loadOrchestratorConfig() {
       ...stored,
       memoryCompactionUseModel: true,
       memoryCompactionMode: "model-required",
+      // Older installations persisted the former 30-second default. Normalize
+      // it on read so the settings page can save the full public config after
+      // the ACK contract minimum was raised to 60 seconds.
+      agentAckTimeoutMs: Math.max(60_000, Number(stored.agentAckTimeoutMs) || 60_000),
       apiKey: stored.apiKey ? resolveCredential(stored.apiKey) : "",
       summaryReviewerApiKey: stored.summaryReviewerApiKey ? resolveCredential(stored.summaryReviewerApiKey) : "",
       searchMcpToken: stored.searchMcpToken ? resolveCredential(stored.searchMcpToken) : "",
@@ -390,7 +394,7 @@ export function saveOrchestratorConfig(updates: any) {
   }
   const agentCommunicationLimits = [
     ["agentRunnerStartTimeoutMs", "agent_runner_start_timeout_ms", 5_000, 300_000, "Agent Runner启动超时必须介于5,000和300,000毫秒"],
-    ["agentAckTimeoutMs", "agent_ack_timeout_ms", 5_000, 120_000, "Agent ACK超时必须介于5,000和120,000毫秒"],
+    ["agentAckTimeoutMs", "agent_ack_timeout_ms", 60_000, 120_000, "Agent ACK超时必须介于60,000和120,000毫秒"],
     ["agentHeartbeatIntervalMs", "agent_heartbeat_interval_ms", 5_000, 60_000, "Agent心跳间隔必须介于5,000和60,000毫秒"],
     ["agentHeartbeatLostTimeoutMs", "agent_heartbeat_lost_timeout_ms", 15_000, 600_000, "Agent失联超时必须介于15,000和600,000毫秒"],
     ["agentLeaseTtlMs", "agent_lease_ttl_ms", 15_000, 900_000, "Agent租约必须介于15,000和900,000毫秒"],

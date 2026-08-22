@@ -14,6 +14,7 @@ const access_policy_1 = require("../modules/system/access-policy");
 const db_2 = require("../core/db");
 const command_live_progress_1 = require("./command-live-progress");
 const event_file_diff_1 = require("./event-file-diff");
+const event_file_source_1 = require("./event-file-source");
 function identity(query) {
     return {
         scope: query?.scope,
@@ -67,16 +68,28 @@ function attachSourceFreshness(event, current) {
         current.result.freshness = "current";
     return current;
 }
+function eventReadProject(event) {
+    const explicit = String(event.detail?.fileReadEvidence?.project || event.detail?.safeArguments?.project_id || event.detail?.safeArguments?.projectId || event.detail?.safeArguments?.project || "").trim();
+    if (explicit)
+        return explicit;
+    const task = event.taskId ? (0, db_2.loadTasks)().find((item) => String(item?.id || "") === String(event.taskId)) : null;
+    const workItem = (Array.isArray(task?.work_items) ? task.work_items : [])
+        .find((item) => String(item?.id || item?.workItemId || "") === String(event.workItemId || ""));
+    return String(workItem?.project || workItem?.target || task?.target_project || task?.targetProject || event.detail?.agentDisplay?.projectId || (event.scope === "project" ? event.scopeId : "")).trim();
+}
 function canReadCurrentSource(req, event) {
     const principal = req.ccmAuth;
     if (!principal || principal.kind !== "browser" || principal.role === "admin")
         return true;
     const userId = String(principal.userId || "");
+    const task = event.taskId ? (0, db_2.loadTasks)().find((item) => String(item?.id || "") === String(event.taskId)) : null;
+    if (task && !(0, access_policy_1.hasTaskResourceAccess)(task, principal, "use"))
+        return false;
     if (event.scope === "project" && !(0, access_policy_1.hasResourceAccess)(userId, principal.role, "project", event.scopeId, "use"))
         return false;
     if (event.scope === "group" && !(0, access_policy_1.hasResourceAccess)(userId, principal.role, "group", event.scopeId, "use"))
         return false;
-    const requestedProject = String(event.detail?.safeArguments?.project_id || event.detail?.safeArguments?.projectId || event.detail?.safeArguments?.project || (event.scope === "project" ? event.scopeId : "")).trim();
+    const requestedProject = eventReadProject(event);
     return !!requestedProject && (0, access_policy_1.hasResourceAccess)(userId, principal.role, "project", requestedProject, "use");
 }
 function eventDiffProject(event, requestedPath) {
@@ -93,6 +106,32 @@ function canReadProjectCode(req, project) {
     return !!project && (0, access_policy_1.hasResourceAccess)(String(principal.userId || ""), principal.role, "project", project, "use");
 }
 async function rehydrateReadonlyToolDetail(event, options = {}) {
+    if (event.detail?.fileReadEvidence) {
+        if (!event.taskId || !event.workItemId || !event.agentRunId || !event.toolCallId) {
+            throw Object.assign(new Error("子 Agent 文件读取事件缺少完整的任务、工作项或运行绑定"), { statusCode: 409 });
+        }
+        const source = (0, event_file_source_1.projectEventFileSource)(event, eventReadProject(event));
+        const current = (0, tool_display_projection_1.buildToolDisplayDetail)({
+            toolName: "mcp__ccm__ccm_workspace_readonly__read_file",
+            arguments: {
+                project_id: source.project,
+                path: source.path,
+                offset: source.offset,
+                limit: source.lines.length,
+            },
+            result: source,
+            transientBody: true,
+            freshness: source.freshness,
+            authoritativeRevision: source.checksum,
+        });
+        for (const row of current.result.fileRows || []) {
+            row.observedChecksum = event.detail.fileReadEvidence.checksum;
+            row.currentChecksum = source.checksum;
+            row.freshness = source.freshness;
+        }
+        current.result.freshness = source.freshness;
+        return current;
+    }
     if (!event.toolName || !(0, tool_display_projection_1.isWorkspaceReadonlyToolName)(event.toolName))
         throw Object.assign(new Error("该工具不支持安全详情重取"), { statusCode: 409 });
     if (!event.toolCallId || !event.detail?.safeArguments)
@@ -260,13 +299,39 @@ function handleUserVisibleAgentEventsApi(pathname, req, res, parsed) {
     if (pathname === "/api/agent-execution/events" && req.method === "GET") {
         try {
             const enabled = (0, group_orchestrator_config_1.loadOrchestratorConfig)().ccStyleExecutionDisplayEnabled !== false;
-            const page = enabled ? (0, user_visible_agent_events_1.listUserVisibleAgentEvents)({ ...identity(parsed?.query), ...parsed?.query }) : null;
+            const taskId = String(parsed?.query?.task_id || parsed?.query?.taskId || "").trim();
+            const attempt = Math.max(0, Number(parsed?.query?.attempt || 0));
+            if (enabled && taskId) {
+                const task = (0, db_2.loadTasks)().find((item) => String(item?.id || "") === taskId);
+                if (!task || !(0, access_policy_1.hasTaskResourceAccess)(task, req.ccmAuth, "use")) {
+                    return (0, utils_1.sendJson)(res, { success: false, error: "当前账户无权查看该任务的执行记录", contentStored: false }, 403);
+                }
+            }
+            const page = enabled
+                ? taskId && attempt
+                    ? (0, user_visible_agent_events_1.listUserVisibleAgentEventsForTaskAttempt)({ ...identity(parsed?.query), ...parsed?.query, taskId, attempt })
+                    : (0, user_visible_agent_events_1.listUserVisibleAgentEvents)({ ...identity(parsed?.query), ...parsed?.query })
+                : null;
             (0, utils_1.sendJson)(res, enabled
                 ? { success: true, enabled, ...page, turnStates: (0, unified_agent_turn_state_1.projectUnifiedAgentTurnStates)(page?.events || []) }
                 : { success: true, enabled, schema: "ccm-user-visible-agent-event-list-v1", events: [], nextCursor: 0, hasMore: false, contentStored: false });
         }
         catch (error) {
             (0, utils_1.sendJson)(res, { success: false, error: String(error?.message || error) }, 400);
+        }
+        return true;
+    }
+    if (pathname === "/api/agent-execution/attempts" && req.method === "GET") {
+        try {
+            const taskId = String(parsed?.query?.task_id || parsed?.query?.taskId || "").trim();
+            const task = taskId ? (0, db_2.loadTasks)().find((item) => String(item?.id || "") === taskId) : null;
+            if (!task || !(0, access_policy_1.hasTaskResourceAccess)(task, req.ccmAuth, "use")) {
+                return (0, utils_1.sendJson)(res, { success: false, error: "当前账户无权查看该任务的历史执行", contentStored: false }, 403);
+            }
+            (0, utils_1.sendJson)(res, { success: true, ...(0, user_visible_agent_events_1.listTaskAttemptReplayProjections)({ ...identity(parsed?.query), ...parsed?.query, taskId }) });
+        }
+        catch (error) {
+            (0, utils_1.sendJson)(res, { success: false, error: String(error?.message || error), contentStored: false }, 400);
         }
         return true;
     }

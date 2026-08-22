@@ -28,7 +28,17 @@ export interface AgentRuntimeEventIdentity {
   generation: number;
   attempt: number;
   leaseId: string;
+  project?: string;
 }
+
+export type AgentRuntimeFileReadEvidence = {
+  project: string;
+  path: string;
+  ranges: Array<{ start: number; end: number }>;
+  checksum?: string;
+  source: "structured_tool" | "safe_command_inference";
+  contentStored: false;
+};
 
 export interface AgentRuntimeStructuredEvent extends AgentRuntimeEventIdentity {
   schema: typeof AGENT_RUNTIME_EVENT_SCHEMA;
@@ -43,6 +53,10 @@ export interface AgentRuntimeStructuredEvent extends AgentRuntimeEventIdentity {
   confidence: "declared" | "observed";
   safeSummary?: string;
   target?: string;
+  toolName?: string;
+  safeArguments?: Record<string, unknown>;
+  safeResult?: Record<string, unknown>;
+  fileReadEvidence?: AgentRuntimeFileReadEvidence;
   status: "running" | "success" | "failed" | "waiting";
   sourceEventChecksum: string;
   createdAt: string;
@@ -102,6 +116,118 @@ function safeAssistantText(event: any) {
   return "";
 }
 
+function safeToolSegment(value: any) {
+  return compact(value, 120).replace(/[^a-zA-Z0-9_.-]+/g, "_").replace(/^_+|_+$/g, "");
+}
+
+function safeCommand(value: any) {
+  return compact(value, 500)
+    .replace(/((?:api[_-]?key|access[_-]?token|authorization|cookie|password|secret|credential)\s*[:=]\s*["']?)[^\s,"'}]{4,}/gi, "$1[redacted]")
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [redacted]")
+    .replace(/\b(?:sk|rk|pk)-[A-Za-z0-9_-]{12,}\b/g, "[redacted]")
+    .replace(/(\s(?:-e|--eval|-Command|-EncodedCommand|\/c)\s+)[\s\S]*$/i, "$1[脚本内容已隐藏]");
+}
+
+function safeToolArguments(event: any, item: any) {
+  const raw = valueAt(event, ["arguments", "args", "input", "tool.arguments", "item.arguments", "item.input"]);
+  const source = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+  const allowed = ["path", "paths", "file", "file_path", "query", "pattern", "symbol", "project", "projectId", "project_id", "offset", "limit", "checksum", "expected_checksum"];
+  const result: Record<string, unknown> = {};
+  for (const key of allowed) {
+    const value = source?.[key];
+    if (value === undefined || value === null || value === "") continue;
+    result[key] = Array.isArray(value) ? value.slice(0, 40).map(entry => {
+      if (key !== "paths" || !entry || typeof entry !== "object") return compact(entry, 500);
+      const pathValue = normalizedEvidencePath(entry.path || entry.file || entry.file_path);
+      return {
+        ...(pathValue ? { path: pathValue } : {}),
+        ...(Number.isFinite(Number(entry.offset)) ? { offset: Math.max(1, Number(entry.offset)) } : {}),
+        ...(Number.isFinite(Number(entry.limit)) ? { limit: Math.max(1, Math.min(2_000, Number(entry.limit))) } : {}),
+        ...(compact(entry.expected_checksum || entry.checksum, 160) ? { expected_checksum: compact(entry.expected_checksum || entry.checksum, 160) } : {}),
+      };
+    }).filter(entry => typeof entry !== "object" || Object.keys(entry).length) : compact(value, 500);
+  }
+  const command = item?.command ?? source?.command ?? source?.cmd ?? source?.shellCommand ?? source?.shell_command;
+  if (command != null && safeCommand(Array.isArray(command) ? command.join(" ") : command)) {
+    result.command = safeCommand(Array.isArray(command) ? command.join(" ") : command);
+  }
+  return result;
+}
+
+function safeToolResult(event: any, item: any, status: "running" | "success" | "failed") {
+  const rawStatus = compact(item?.status || event?.status || (status === "success" ? "completed" : status), 80);
+  const exitCode = Number(item?.exit_code ?? item?.exitCode ?? event?.exit_code ?? event?.exitCode);
+  const durationMs = Number(item?.duration_ms ?? item?.durationMs ?? event?.duration_ms ?? event?.durationMs);
+  return {
+    status: rawStatus || status,
+    ...(Number.isFinite(exitCode) ? { exitCode } : {}),
+    ...(Number.isFinite(durationMs) && durationMs >= 0 ? { durationMs } : {}),
+    ...(status === "failed" ? { error: compact(item?.error?.message || item?.error || event?.error?.message || event?.error || "工具执行失败", 300) } : {}),
+    contentStored: false,
+  };
+}
+
+function unquoteShellToken(value: string) {
+  const token = String(value || "").trim();
+  if (token.length >= 2 && ((token.startsWith('"') && token.endsWith('"')) || (token.startsWith("'") && token.endsWith("'")))) {
+    return token.slice(1, -1);
+  }
+  return token;
+}
+
+function normalizedEvidencePath(value: any) {
+  const result = unquoteShellToken(compact(value, 500)).replace(/\\/g, "/").replace(/^\.\//, "").trim();
+  if (!result || /^\//.test(result) || /^[a-z]:\//i.test(result) || result.split("/").some(part => part === "..")) return "";
+  return result;
+}
+
+function rangeFromArguments(args: Record<string, unknown>) {
+  const offset = Math.max(1, Number(args.offset || 1));
+  const limit = Math.max(0, Number(args.limit || 0));
+  return [{ start: offset, end: limit ? offset + limit - 1 : offset + 1_999 }];
+}
+
+function inferReadCommand(commandValue: any) {
+  const command = compact(Array.isArray(commandValue) ? commandValue.join(" ") : commandValue, 1_000);
+  if (!command || /[\r\n]|&&|\|\||[|><;`]|\$\(/.test(command)) return null;
+  const wrappers = [
+    /^(?:powershell(?:\.exe)?|pwsh(?:\.exe)?)\s+(?:-(?:NoProfile|NonInteractive)\s+)*(?:-Command\s+)?Get-Content\s+(?:-(?:LiteralPath|Path)\s+)?(.+?)\s*$/i,
+    /^Get-Content\s+(?:-(?:LiteralPath|Path)\s+)?(.+?)\s*$/i,
+    /^(?:cat|type)\s+(?:--\s+)?(.+?)\s*$/i,
+  ];
+  for (const pattern of wrappers) {
+    const match = command.match(pattern);
+    if (!match) continue;
+    const candidate = match[1].replace(/\s+-(?:Raw|ReadCount|TotalCount|Tail|Head)\b.*$/i, "").trim();
+    if (/\s-[A-Za-z]/.test(candidate)) return null;
+    if (/\s/.test(candidate) && !/^(['"]).*\1$/.test(candidate)) return null;
+    const filePath = normalizedEvidencePath(candidate);
+    if (filePath) return { path: filePath, ranges: [{ start: 1, end: 2_000 }] };
+  }
+  const sed = command.match(/^sed\s+-n\s+['"]?(\d+)\s*,\s*(\d+)p['"]?\s+(.+?)\s*$/i);
+  if (sed) {
+    const start = Math.max(1, Number(sed[1]));
+    const end = Math.max(start, Number(sed[2]));
+    const filePath = normalizedEvidencePath(sed[3]);
+    if (filePath) return { path: filePath, ranges: [{ start, end }] };
+  }
+  return null;
+}
+
+function fileReadEvidence(event: any, item: any, toolName: string, args: Record<string, unknown>) {
+  const operation = String(toolName || "").split("__").at(-1)?.toLowerCase() || "";
+  const normalizedOperation = operation.replace(/[_\s-]+/g, "");
+  const project = compact(event?.project || event?.projectName || event?.identity?.project || "", 240);
+  if (["read", "readfile", "fileread"].includes(normalizedOperation)) {
+    const filePath = normalizedEvidencePath(args.path || args.file || args.file_path);
+    if (!filePath) return null;
+    return { project, path: filePath, ranges: rangeFromArguments(args), checksum: compact(args.checksum || args.expected_checksum, 160) || undefined, source: "structured_tool", contentStored: false } as const;
+  }
+  const inferred = inferReadCommand(item?.command ?? args.command);
+  if (!inferred) return null;
+  return { project, ...inferred, source: "safe_command_inference", contentStored: false } as const;
+}
+
 function assistantRoleFor(event: any, hasRelatedTools: boolean): "progress" | "final" {
   const explicit = compact(event?.assistantRole || event?.assistant_role || event?.message?.assistantRole, 40).toLowerCase();
   if (explicit === "final") return "final";
@@ -117,9 +243,21 @@ function toolDescriptor(event: any) {
   const type = compact(event?.type || event?.event || event?.kind, 120).toLowerCase();
   const item = event?.item || event?.message || event?.tool || event?.part || {};
   const itemType = compact(item?.type || event?.subtype || "", 120).toLowerCase();
-  const toolName = compact(valueAt(event, [
-    "tool_name", "toolName", "name", "tool.name", "item.name", "item.tool_name", "message.name", "part.name",
+  const declaredToolName = compact(valueAt(event, [
+    "tool_name", "toolName", "name", "tool.name", "item.name", "item.tool_name", "item.tool", "message.name", "part.name",
   ]), 160);
+  const serverName = compact(valueAt(event, ["server", "server_name", "item.server", "item.server_name", "tool.server"]), 120);
+  const isMcp = /mcp/.test(`${type} ${itemType}`) || !!serverName;
+  const mcpToolName = safeToolSegment(declaredToolName);
+  const safeServerName = safeToolSegment(serverName || "provider");
+  const toolName = isMcp && mcpToolName
+    ? safeServerName === "ccm_workspace_readonly"
+      ? `mcp__ccm__ccm_workspace_readonly__${mcpToolName}`
+      : safeServerName === "ccm_workspace_edit"
+        ? `mcp__ccm__ccm_workspace_edit__${mcpToolName}`
+        : `mcp__${safeServerName}__${mcpToolName}`
+    : /command_execution|shell|terminal/.test(itemType) ? "run_command"
+      : declaredToolName;
   const callId = compact(valueAt(event, [
     "tool_call_id", "toolCallId", "call_id", "callId", "item.id", "message.id", "id",
   ]), 240);
@@ -127,17 +265,21 @@ function toolDescriptor(event: any) {
   if (!toolLike || HIDDEN_EVENT_PATTERN.test(`${type} ${itemType}`)) return null;
   const failed = /fail|error/.test(`${type} ${event?.status || ""} ${item?.status || ""}`);
   const completed = failed || /completed|complete|result|success|done|finished/.test(`${type} ${event?.status || ""} ${item?.status || ""}`);
-  const args = valueAt(event, ["arguments", "args", "input", "tool.arguments", "item.arguments", "item.input"]);
+  const args = safeToolArguments(event, item);
+  const readEvidence = fileReadEvidence(event, item, toolName || "tool", args);
   const target = compact(
-    typeof args === "string" ? args : args?.path || args?.file || args?.query || args?.command || args?.target || "",
+    args?.path || args?.file || args?.file_path || args?.query || args?.pattern || args?.command || "",
     240,
   );
   return {
     eventType: failed ? "tool_failed" : completed ? "tool_completed" : "tool_started",
     status: failed ? "failed" : completed ? "success" : "running",
-    toolName: toolName || compact(itemType || type || "Tool", 160),
+    toolName: toolName || "tool",
     callId: callId || checksum(JSON.stringify({ type, itemType, toolName, target })).slice(0, 24),
     target,
+    safeArguments: args,
+    safeResult: safeToolResult(event, item, failed ? "failed" : completed ? "success" : "running"),
+    ...(readEvidence ? { fileReadEvidence: readEvidence } : {}),
   } as const;
 }
 
@@ -227,7 +369,18 @@ export function createAgentRuntimeStructuredEventParser(options: ParserOptions) 
     };
     const tool = toolDescriptor(rawEvent);
     if (tool) {
-      options.onEvent({ ...base, eventType: tool.eventType, toolCallId: tool.callId, safeSummary: tool.toolName, target: tool.target, status: tool.status });
+      options.onEvent({
+        ...base,
+        eventType: tool.eventType,
+        toolCallId: tool.callId,
+        toolName: tool.toolName,
+        safeSummary: tool.toolName,
+        target: tool.target,
+        safeArguments: tool.safeArguments,
+        safeResult: tool.safeResult,
+        ...(tool.fileReadEvidence ? { fileReadEvidence: tool.fileReadEvidence } : {}),
+        status: tool.status,
+      });
       return;
     }
     const verification = verificationDescriptor(rawEvent);
@@ -256,8 +409,8 @@ export function createAgentRuntimeStructuredEventParser(options: ParserOptions) 
     index += 1;
   };
 
-  const flushPendingAssistant = (relatedToolCallIds: string[] = []) => {
-    for (const pending of pendingAssistant) emit(pending.rawLine, pending.event, relatedToolCallIds, "progress");
+  const flushPendingAssistant = (relatedToolCallIds: string[] = [], role: "progress" | "final" = "progress") => {
+    for (const pending of pendingAssistant) emit(pending.rawLine, pending.event, relatedToolCallIds, role);
     pendingAssistant = [];
   };
 
@@ -272,8 +425,8 @@ export function createAgentRuntimeStructuredEventParser(options: ParserOptions) 
       const assistantEvents = expandedEvents
         .map((event, eventIndex) => ({ event, eventIndex, text: safeAssistantText(event) }))
         .filter(item => !!item.text);
-      if (relatedToolCallIds.length) flushPendingAssistant(relatedToolCallIds);
-      else if (!assistantEvents.length || role === "final") flushPendingAssistant();
+      if (relatedToolCallIds.length) flushPendingAssistant(relatedToolCallIds, "progress");
+      else if (!assistantEvents.length || role === "final") flushPendingAssistant([], role);
       if (assistantEvents.length && !relatedToolCallIds.length && role === "progress") {
         pendingAssistant.push(...assistantEvents.map(item => ({ rawLine: `${text}#${item.eventIndex}`, event: item.event })));
         for (const [eventIndex, expanded] of expandedEvents.entries()) {
@@ -300,7 +453,7 @@ export function createAgentRuntimeStructuredEventParser(options: ParserOptions) 
     },
     flush() {
       if (buffer.trim()) consumeLine(buffer);
-      flushPendingAssistant();
+      flushPendingAssistant([], "final");
       buffer = "";
     },
     stats() { return { runtime, seen: seen.size, pendingBytes: Buffer.byteLength(buffer), index }; },
@@ -316,7 +469,11 @@ export function runAgentRuntimeStructuredEventSelfTest() {
   };
   const fixtures: Array<[string, string[]]> = [
     ["claudecode", ['{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"先检查入口。"},{"type":"tool_use","id":"claude-tool","name":"Read","input":{"path":"src/a.ts"}}]}}']],
-    ["codex", ['{"type":"item.started","item":{"id":"codex-tool","type":"command_execution","name":"Shell","arguments":{"command":"npm test"}}}', '{"type":"agent_message","text":"开始验证。"}']],
+    ["codex", [
+      '{"type":"item.completed","item":{"id":"codex-message","type":"agent_message","text":"开始验证。"}}',
+      '{"type":"item.started","item":{"id":"codex-tool","type":"command_execution","command":"npm test","status":"in_progress"}}',
+      '{"type":"item.completed","item":{"id":"codex-tool","type":"command_execution","command":"npm test","status":"completed","exit_code":0}}',
+    ]],
     ["cursor", ['{"type":"assistant","text":"检查引用。"}', '{"type":"tool_started","id":"cursor-tool","name":"Grep","arguments":{"query":"symbol"}}']],
     ["gemini", ['{"type":"response","response":{"candidates":[{"content":{"parts":[{"text":"读取配置。"},{"functionCall":{"id":"gemini-tool","name":"read_file","args":{"path":"config.json"}}}]}}]}}']],
     ["opencode", ['{"type":"text","role":"assistant","text":"定位模块。"}', '{"type":"tool","id":"opencode-tool","name":"glob","status":"running"}']],
@@ -336,6 +493,8 @@ export function runAgentRuntimeStructuredEventSelfTest() {
       && [...runtimeSet].every(runtime => events.some(event => event.runtime === runtime && event.eventType === "assistant_progress"))
       && events.some(event => event.runtime === "claudecode" && event.relatedToolCallIds?.includes("claude-tool"))
       && events.some(event => event.runtime === "gemini" && event.relatedToolCallIds?.includes("gemini-tool"))
+      && events.some(event => event.runtime === "codex" && event.toolName === "run_command" && event.target === "npm test")
+      && !events.some(event => ["command_execution", "mcp_tool_call"].includes(String(event.toolName || event.safeSummary)))
       && !events.some(event => event.safeSummary?.includes("最终交付") && event.assistantRole !== "final")
       && events.filter(event => event.eventType === "assistant_progress").every(event => (event.safeSummary || "").length <= 120)
       && !JSON.stringify(events).includes("SECRET_CHAIN_OF_THOUGHT"),

@@ -26,6 +26,9 @@ function createGlobalAgentHistoryRuntime(deps) {
         ? deps.isSessionTitlePlaceholder
         : (title, origin = "") => String(origin || "").toLowerCase() !== "manual"
             && ["", "新会话", "新建飞书会话", "默认会话", "全局 Agent 会话", "飞书全局 Agent"].includes(String(title || "").trim());
+    const onSessionMessagesChanged = typeof deps.onSessionMessagesChanged === "function"
+        ? deps.onSessionMessagesChanged
+        : () => { };
     const isMeaningfulSessionTitleInput = typeof deps.isMeaningfulSessionTitleInput === "function"
         ? deps.isMeaningfulSessionTitleInput
         : (value) => /\p{L}/u.test(String(value || ""));
@@ -62,8 +65,13 @@ function createGlobalAgentHistoryRuntime(deps) {
         return true;
     }
     const GLOBAL_AGENT_HISTORY_METADATA_KEYS = [
+        "id",
         "type",
         "source",
+        "task_id",
+        "taskId",
+        "task",
+        "taskExperience",
         "files",
         "agenticRun",
         "agentic_run",
@@ -502,6 +510,50 @@ function createGlobalAgentHistoryRuntime(deps) {
             });
         }
     }
+    function upsertGlobalAgentConversationTaskMessage(sessionId, messageInput) {
+        const id = String(sessionId || "").trim();
+        const taskId = String(messageInput?.task_id || messageInput?.taskId || messageInput?.taskExperience?.task_id || messageInput?.task?.id || "").trim();
+        if (!id || !taskId)
+            return { updated: false, reason: "identity_missing" };
+        const store = loadGlobalAgentHistoryStore();
+        const session = (store.sessions || []).find((item) => String(item.id || "") === id);
+        if (!session)
+            return { updated: false, reason: "session_unavailable" };
+        const messages = normalizeGlobalAgentMessages(session.messages || []);
+        const existingIndex = messages.findIndex((item) => String(item?.task_id || item?.taskId || item?.taskExperience?.task_id || item?.task?.id || "") === taskId);
+        const existing = existingIndex >= 0 ? messages[existingIndex] : null;
+        const normalized = normalizeGlobalAgentMessage({
+            ...existing,
+            ...messageInput,
+            id: existing?.id || messageInput?.id || `global-task:${taskId}`,
+            role: "assistant",
+            timestamp: existing?.timestamp || messageInput?.timestamp || new Date().toISOString(),
+            task_id: taskId,
+        });
+        if (!normalized)
+            return { updated: false, reason: "message_invalid" };
+        const existingRevision = Number(existing?.taskExperience?.revision || existing?.task?.revision || 0);
+        const nextRevision = Number(normalized?.taskExperience?.revision || normalized?.task?.revision || 0);
+        const existingStatus = String(existing?.taskExperience?.status || existing?.task?.status || "");
+        const nextStatus = String(normalized?.taskExperience?.status || normalized?.task?.status || "");
+        if (existing && existingRevision > nextRevision) {
+            return { updated: false, reason: "stale_revision", sessionId: id, message: existing };
+        }
+        if (existing && String(existing.content || "") === String(normalized.content || "")
+            && existingRevision === nextRevision && existingStatus === nextStatus) {
+            return { updated: false, reason: "unchanged", sessionId: id, message: existing };
+        }
+        if (existingIndex >= 0)
+            messages[existingIndex] = normalized;
+        else
+            messages.push(normalized);
+        session.messages = normalizeGlobalAgentMessages(messages);
+        session.updatedAt = new Date().toISOString();
+        saveGlobalAgentHistoryStore(store);
+        (0, conversation_search_dirty_1.markConversationSearchIndexDirty)(`global:${id}`);
+        onSessionMessagesChanged(session, normalized);
+        return { updated: true, sessionId: id, message: normalized };
+    }
     function buildFeishuConversationId(payload) {
         const exactV2 = String(payload?.conversation_key_v2 || payload?.conversationKeyV2 || "").trim();
         if (/^feishu:v2:[a-f0-9]{32}$/.test(exactV2))
@@ -547,6 +599,7 @@ function createGlobalAgentHistoryRuntime(deps) {
         deleteGlobalAgentConversationSession,
         getGlobalAgentConversationMessages,
         appendGlobalAgentConversationMessage,
+        upsertGlobalAgentConversationTaskMessage,
         scheduleGlobalSessionAutoTitle,
         resolveFeishuGlobalAgentSessionId,
         runFeishuGlobalAgentSessionRoutingSelfTest,

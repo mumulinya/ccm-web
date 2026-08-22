@@ -72,6 +72,7 @@ const feishu_conversation_v2_1 = require("../collaboration/feishu-conversation-v
 const conversation_search_dirty_1 = require("../../system/conversation-search-dirty");
 const main_agent_post_compact_continuity_1 = require("../../system/main-agent-post-compact-continuity");
 const user_visible_agent_events_1 = require("../../system/user-visible-agent-events");
+const session_task_timeline_1 = require("../../tasks/session-task-timeline");
 exports.WEB_SESSIONS_DIR = path.join(utils_1.CCM_DIR, "web-sessions");
 function clearProjectMainDynamicContext(project, sessionId) {
     try {
@@ -662,6 +663,7 @@ function appendProjectSessionTaskMessage(projectName, sessionId, message) {
     data.history = Array.isArray(data.history) ? data.history : [];
     if (!data.history.some((item) => String(item.id || "") === normalized.id))
         data.history.push(normalized);
+    (0, session_task_timeline_1.recordSessionTimelineMessage)({ exactSessionId: safeSessionId, scope: "project", scopeId: safeProject, role: normalized.role, messageId: normalized.id, taskId: normalized.task_id || normalized.taskId || normalized.taskExperience?.task_id, timestamp: normalized.timestamp });
     data.updated_at = new Date().toISOString();
     fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
     (0, conversation_search_dirty_1.markConversationSearchIndexDirty)(`project:${safeProject}:${safeSessionId}`);
@@ -733,6 +735,7 @@ function upsertProjectSessionTaskMessage(projectName, sessionId, message) {
     else {
         data.history.push(normalized);
     }
+    (0, session_task_timeline_1.recordSessionTimelineMessage)({ exactSessionId: safeSessionId, scope: "project", scopeId: safeProject, role: normalized.role, messageId: normalized.id, taskId: normalized.task_id || normalized.taskId || normalized.taskExperience?.task_id, timestamp: normalized.timestamp });
     data.updated_at = new Date().toISOString();
     fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
     (0, conversation_search_dirty_1.markConversationSearchIndexDirty)(`project:${safeProject}:${safeSessionId}`);

@@ -1,3 +1,4 @@
+import { type CcmTaskTimelineCursorV1, type CcmTaskTimelineSpanV1 } from "./session-task-timeline";
 export type CcmTaskScope = "global" | "group" | "project" | "feishu";
 export type CcmTaskSessionBindingV1 = {
     schema: "ccm-task-session-binding-v1";
@@ -85,6 +86,15 @@ export type CcmTaskContextCapsuleV1 = {
     verificationEvidenceIds: string[];
     unresolvedToolCallIds: string[];
     blockers: string[];
+    timelineSpans: CcmTaskTimelineSpanV1[];
+    activeSpanId?: string;
+    appliedCursors: CcmTaskTimelineCursorV1[];
+    startMarkerId?: string;
+    endMarkerId?: string;
+    startSequence?: number;
+    endSequence?: number;
+    latestCheckpointSequence: number;
+    taskContextSource: "session_timeline";
     sessionBindings: CcmTaskSessionBindingV1[];
     generation: number;
     latestAttempt: number;
@@ -93,6 +103,11 @@ export type CcmTaskContextCapsuleV1 = {
     status: "ready" | "incomplete" | "drifted" | "locked";
     updatedAt: string;
     contentStored: false;
+};
+export declare function taskTimelineIdentity(task: any): {
+    scope: CcmTaskScope;
+    scopeId: string;
+    exactSessionId: string;
 };
 export declare function buildTaskContextCapsule(task: any, previous?: CcmTaskContextCapsuleV1 | null, reason?: string): CcmTaskContextCapsuleV1;
 export declare function createTaskSessionBinding(input: {
@@ -109,7 +124,6 @@ export declare function createTaskSessionBinding(input: {
     revision: number;
 }): CcmTaskSessionBindingV1;
 export declare function refreshTaskContext(task: any, reason?: string): CcmTaskContextCapsuleV1;
-export declare function updateTaskContext(taskId: string, delta?: any, expectedTaskRevision?: number): any;
 export declare function addTaskFileEvidence(taskId: string, evidence: any, expectedRevision?: number): any;
 export declare function projectTaskContext(task: any): {
     schema: any;
@@ -124,6 +138,13 @@ export declare function projectTaskContext(task: any): {
     pendingWorkItemCount: any;
     completedWorkItemCount: any;
     fileEvidenceCount: any;
+    timelineSpans: any;
+    activeSpanId: string;
+    appliedCursors: any;
+    startMarkerId: string;
+    endMarkerId: string;
+    latestCheckpointSequence: number;
+    taskContextSource: any;
     sessionBindings: any;
     contentStored: boolean;
 };

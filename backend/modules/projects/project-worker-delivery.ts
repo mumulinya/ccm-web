@@ -9,8 +9,13 @@ function runGit(cwd: string, args: string[]) {
   })).trim();
 }
 
-function commitPaths(worktreePath: string, commit: string) {
-  return new Set(runGit(worktreePath, ["diff-tree", "--no-commit-id", "--name-only", "-r", commit])
+function gitSucceeds(cwd: string, args: string[]) {
+  try { runGit(cwd, args); return true; } catch { return false; }
+}
+
+function changedPathsSince(worktreePath: string, baseCommit: string, headCommit: string) {
+  if (!baseCommit || baseCommit === headCommit) return new Set<string>();
+  return new Set(runGit(worktreePath, ["diff", "--name-only", `${baseCommit}..${headCommit}`])
     .split(/\r?\n/).map(value => value.trim().replace(/\\/g, "/").toLowerCase()).filter(Boolean));
 }
 
@@ -35,19 +40,41 @@ export function enqueueProjectWorkerDelivery(input: { prepared: any; workItem: a
   }
   const run = async () => {
     const status = runGit(prepared.worktreePath, ["status", "--porcelain"]);
-    if (!status) {
+    const baseCommit = String(prepared.baseHead || "").trim();
+    if (status) {
+      runGit(prepared.worktreePath, ["add", "-A"]);
+      if (!gitSucceeds(prepared.worktreePath, ["diff", "--cached", "--quiet"])) {
+        try {
+          runGit(prepared.worktreePath, ["commit", "-m", `ccm: ${workItem?.id || "work-item"}`]);
+        } catch (error) {
+          // A native Agent may commit its own staged changes between the status
+          // snapshot and CCM's delivery commit. Treat that race as a valid
+          // Agent-authored delivery only when the index is now clean and HEAD
+          // has advanced from the isolated worktree baseline.
+          const headAfterCommitRace = runGit(prepared.worktreePath, ["rev-parse", "HEAD"]);
+          const indexCleanAfterRace = gitSucceeds(prepared.worktreePath, ["diff", "--cached", "--quiet"]);
+          if (!indexCleanAfterRace || !baseCommit || headAfterCommitRace === baseCommit) throw error;
+        }
+      }
+    }
+    const commit = runGit(prepared.worktreePath, ["rev-parse", "HEAD"]);
+    if (!baseCommit || commit === baseCommit) {
       cleanupWorktree(mainWorkDir, prepared);
       return { commit: "", branch: prepared.worktreeBranch, merged: true, cleaned: true };
     }
-    runGit(prepared.worktreePath, ["add", "-A"]);
-    runGit(prepared.worktreePath, ["commit", "-m", `ccm: ${workItem?.id || "work-item"}`]);
-    const commit = runGit(prepared.worktreePath, ["rev-parse", "HEAD"]);
-    const changed = commitPaths(prepared.worktreePath, commit);
+    try {
+      runGit(prepared.worktreePath, ["merge-base", "--is-ancestor", baseCommit, commit]);
+    } catch {
+      throw new Error(`工作项 ${workItem?.title || workItem?.id || "unknown"} 的隔离分支已偏离创建基线，拒绝自动合并`);
+    }
+    const commits = runGit(prepared.worktreePath, ["rev-list", "--reverse", `${baseCommit}..${commit}`])
+      .split(/\r?\n/).map(value => value.trim()).filter(Boolean);
+    const changed = changedPathsSince(prepared.worktreePath, baseCommit, commit);
     assertMainWorktreeSafe(mainWorkDir, changed);
     try {
-      runGit(mainWorkDir, ["cherry-pick", commit]);
+      runGit(mainWorkDir, ["cherry-pick", ...commits]);
       cleanupWorktree(mainWorkDir, prepared);
-      return { commit, branch: prepared.worktreeBranch, merged: true, cleaned: true };
+      return { commit, commits, branch: prepared.worktreeBranch, merged: true, cleaned: true };
     } catch (error: any) {
       try { runGit(mainWorkDir, ["cherry-pick", "--abort"]); } catch { /* preserve the original failure */ }
       throw new Error(`工作项 ${workItem?.title || workItem?.id || "unknown"} 合并失败，已保留隔离分支 ${prepared.worktreeBranch} 供处理：${String(error?.message || error)}`);

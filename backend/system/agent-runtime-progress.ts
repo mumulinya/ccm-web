@@ -1,6 +1,7 @@
 import * as crypto from "crypto";
 import { appendUserVisibleAgentEvent } from "./user-visible-agent-events";
 import type { AgentRuntimeStructuredEvent } from "../agents/runtime-structured-events";
+import { buildToolDisplayDetail } from "./tool-display-projection";
 
 type ObservedState = {
   lastSemanticAt: number;
@@ -37,6 +38,7 @@ function base(event: AgentRuntimeStructuredEvent) {
     anchorMessageId: event.anchorMessageId,
     ...(event.originMessageId ? { originMessageId: event.originMessageId } : {}),
     generation: event.generation,
+    attempt: event.attempt,
     taskId: event.taskId,
     workItemId: event.workItemId,
     agentRunId: event.agentRunId,
@@ -72,14 +74,72 @@ export function projectAgentRuntimeStructuredEvent(event: AgentRuntimeStructured
       if (event.eventType === "tool_started") state.activeTools.add(event.toolCallId);
       else { state.activeTools.delete(event.toolCallId); state.completedTools.add(event.toolCallId); }
     }
+    const toolName = event.toolName || event.safeSummary || "tool";
+    const fileReadEvidence = event.fileReadEvidence ? {
+      ...event.fileReadEvidence,
+      project: event.fileReadEvidence.project || event.project || (event.scope === "project" ? event.scopeId : ""),
+    } : null;
+    const eventOperation = String(toolName).split("__").at(-1)?.toLowerCase().replace(/[_\s-]+/g, "") || "";
+    const baseArguments: Record<string, any> = {
+      ...(event.safeArguments || {}),
+      ...(event.project && (fileReadEvidence || /read/.test(eventOperation))
+        && !event.safeArguments?.project && !event.safeArguments?.projectId && !event.safeArguments?.project_id ? { project_id: event.project } : {}),
+    };
+    const displayToolName = fileReadEvidence ? "mcp__ccm__ccm_workspace_readonly__read_file" : toolName;
+    const displayArguments = fileReadEvidence ? {
+      ...baseArguments,
+      ...(fileReadEvidence.project ? { project_id: fileReadEvidence.project } : {}),
+      path: fileReadEvidence.path,
+      offset: fileReadEvidence.ranges[0]?.start || 1,
+      ...(fileReadEvidence.checksum ? { expected_checksum: fileReadEvidence.checksum } : {}),
+    } : baseArguments;
+    const batchReadPaths = ["readfiles"].includes(eventOperation) && Array.isArray(baseArguments.paths)
+      ? baseArguments.paths.map((entry: any) => typeof entry === "string" ? { path: entry } : entry).filter((entry: any) => entry?.path)
+      : [];
+    const displayResult = fileReadEvidence ? {
+      ...(event.safeResult || { status: event.status }),
+      path: fileReadEvidence.path,
+      checksum: fileReadEvidence.checksum,
+      offset: fileReadEvidence.ranges[0]?.start || 1,
+      safeReceipt: { lineCount: 0 },
+    } : batchReadPaths.length ? {
+      ...(event.safeResult || { status: event.status }),
+      files: batchReadPaths.map((entry: any) => ({ path: entry.path, offset: entry.offset || 1, status: event.status === "failed" ? "failed" : "completed", lines: [] })),
+      item_count: batchReadPaths.length,
+    } : event.safeResult || { status: event.status };
+    const toolDisplay = buildToolDisplayDetail({
+      toolName: displayToolName,
+      arguments: displayArguments,
+      result: displayResult,
+      error: event.eventType === "tool_failed" ? event.safeResult?.error || "工具执行失败" : undefined,
+      includeTechnicalCommand: true,
+    });
+    if (fileReadEvidence?.source === "safe_command_inference") {
+      const commandDisplay = buildToolDisplayDetail({
+        toolName,
+        arguments: event.safeArguments || {},
+        result: event.safeResult || { status: event.status },
+        includeTechnicalCommand: true,
+      });
+      if (commandDisplay.sensitiveCommand) toolDisplay.sensitiveCommand = commandDisplay.sensitiveCommand;
+    }
+    const title = toolDisplay.tool.userLabel || toolDisplay.tool.label || "运行工具";
+    const target = toolDisplay.tool.target || event.target;
     return appendUserVisibleAgentEvent({
       ...base(event),
+      eventId: `runtime-tool:${event.agentRunId}:${event.generation}:${event.attempt}:${event.toolCallId || event.eventId}`,
       eventType: event.eventType,
       toolCallId: event.toolCallId,
-      toolName: event.safeSummary || "Runtime tool",
-      target: event.target,
-      display: { title: event.safeSummary || "Runtime tool", target: event.target, status: event.status },
-      detail: { runtimeObservation: { source: event.progressSource, confidence: event.confidence, runtime: event.runtime, runtimeVersion: event.runtimeVersion, sourceEventChecksum: event.sourceEventChecksum, contentStored: false } },
+      toolName,
+      target,
+      display: { title, target, summary: event.eventType === "tool_started" ? "正在执行" : toolDisplay.result.summary, status: event.status },
+      detail: {
+        safeArguments: displayArguments,
+        safeResult: event.safeResult,
+        ...(fileReadEvidence ? { fileReadEvidence } : {}),
+        toolDisplay,
+        runtimeObservation: { source: event.progressSource, confidence: event.confidence, runtime: event.runtime, runtimeVersion: event.runtimeVersion, sourceEventChecksum: event.sourceEventChecksum, contentStored: false },
+      },
       visibility: "transcript",
     });
   }

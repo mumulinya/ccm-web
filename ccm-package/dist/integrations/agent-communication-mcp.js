@@ -75,10 +75,36 @@ function buildAgentCommunicationMcpServerConfig(context) {
         throw new Error("Agent Communication MCP缺少正式任务绑定");
     return (0, internal_mcp_runtime_1.buildInternalMcpServerConfig)(path.join(__dirname, "agent-communication-mcp.js"), context);
 }
+const stringOrStringArray = {
+    oneOf: [
+        { type: "string" },
+        { type: "array", items: { type: "string" } },
+    ],
+};
 const tools = [
-    { name: "acknowledge_assignment", description: "确认已收到并理解CCM工作单；正式执行前调用。", inputSchema: { type: "object", required: ["message_id", "understood_goal"], properties: {
-                message_id: { type: "string" }, understood_goal: { type: "string" }, planned_scope: { type: "array", items: { type: "string" } }, forbidden_scope: { type: "array", items: { type: "string" } }, verification_plan: { type: "array", items: { type: "string" } }, unclear: { type: "array", items: { type: "string" } },
-            }, additionalProperties: false } },
+    {
+        name: "acknowledge_assignment",
+        description: "Acknowledge the bound CCM work order before execution. State the understood goal, allowed scope, forbidden scope, and verification plan, then stop.",
+        inputSchema: {
+            type: "object",
+            required: ["message_id"],
+            anyOf: [
+                { required: ["understood_goal"] },
+                { required: ["objective"] },
+            ],
+            properties: {
+                message_id: { type: "string", description: "The exact signed CCM communication message ID from the work order." },
+                understood_goal: { type: "string", description: "Canonical field: the goal understood from the work order." },
+                objective: { type: "string", description: "Provider alias for understood_goal." },
+                planned_scope: { type: "array", items: { type: "string" }, description: "Canonical field: paths and actions that may be used." },
+                allowed_scope: { ...stringOrStringArray, description: "Provider alias for planned_scope." },
+                forbidden_scope: { ...stringOrStringArray, description: "Paths and actions that must not be used." },
+                verification_plan: { ...stringOrStringArray, description: "Checks that will be run after implementation." },
+                unclear: { ...stringOrStringArray, description: "Any unresolved points; use an empty array when none remain." },
+            },
+            additionalProperties: false,
+        },
+    },
     { name: "report_progress", description: "报告当前阶段、进度、阻塞和副作用状态。", inputSchema: { type: "object", required: ["message_id", "phase"], properties: {
                 message_id: { type: "string" }, phase: { type: "string" }, progress: { type: "number" }, summary: { type: "string" }, blockers: { type: "array", items: { type: "string" } }, side_effect_state: { type: "string", enum: ["none", "known", "uncertain"] },
             }, additionalProperties: false } },
@@ -100,6 +126,21 @@ const tools = [
             }, additionalProperties: false } },
 ];
 function result(value, isError = false) { return { content: [{ type: "text", text: JSON.stringify(value) }], isError }; }
+function normalizedStringList(value) {
+    const values = Array.isArray(value) ? value : value === undefined || value === null ? [] : [value];
+    return Array.from(new Set(values.map(item => String(item || "").trim()).filter(Boolean))).slice(0, 100);
+}
+function normalizeAcknowledgementArgs(args) {
+    const understoodGoal = String(args?.understood_goal || args?.objective || "").trim();
+    return {
+        message_id: String(args?.message_id || "").trim(),
+        understood_goal: understoodGoal,
+        planned_scope: normalizedStringList(args?.planned_scope ?? args?.allowed_scope),
+        forbidden_scope: normalizedStringList(args?.forbidden_scope),
+        verification_plan: normalizedStringList(args?.verification_plan),
+        unclear: normalizedStringList(args?.unclear),
+    };
+}
 function identity(context, message) {
     const signedCommunicationIdentity = !!context.communicationMessageId;
     return {
@@ -155,12 +196,13 @@ function callTool(context, name, args) {
         return result({ success: true, assignments: (0, agent_communication_v2_1.listAgentCommunications)({ taskId: context.taskId, exactSessionId: exactSessionId(context), limit: 50 }) });
     }
     if (["acknowledge_assignment", "report_progress", "heartbeat", "submit_result"].includes(name)) {
-        const message = messageFor(context, args?.message_id);
+        const normalizedArgs = name === "acknowledge_assignment" ? normalizeAcknowledgementArgs(args) : args;
+        const message = messageFor(context, normalizedArgs?.message_id);
         const bound = identity(context, message);
         if (name === "heartbeat")
-            return result({ success: true, ...(0, agent_communication_v2_1.heartbeatAgentCommunication)(message.messageId, bound, args) });
+            return result({ success: true, ...(0, agent_communication_v2_1.heartbeatAgentCommunication)(message.messageId, bound, normalizedArgs) });
         const receiptType = name === "acknowledge_assignment" ? "dispatch_ack" : name === "report_progress" ? "progress" : "result";
-        const recorded = (0, agent_communication_v2_1.recordAgentCommunicationReceipt)(message.messageId, receiptType, bound, args);
+        const recorded = (0, agent_communication_v2_1.recordAgentCommunicationReceipt)(message.messageId, receiptType, bound, normalizedArgs);
         return result({ success: recorded.accepted === true, ...recorded }, recorded.accepted !== true);
     }
     if (["request_coordination", "request_review", "report_blocker"].includes(name)) {

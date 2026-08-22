@@ -652,7 +652,7 @@ async function executeWorkbenchTaskAction(taskId, payload, req, deps) {
             });
             if (!recovery.success)
                 throw Object.assign(new Error(recovery.preflight?.blockers?.join("、") || "恢复安全检查未通过"), { code: "recovery_gate_failed", recovery_preflight: recovery.preflight });
-            result = { task: recovery.task, queue_result: recovery.queueResult, recovery_decision: recovery.decision, recovery_preflight: recovery.preflight, recovery_transaction: recovery.transaction };
+            result = { task: recovery.task, queue_result: recovery.queueResult, recovery_decision: recovery.decision, recovery_preflight: recovery.preflight, recovery_transaction: recovery.transaction, conversation_projection: recovery.conversationProjection || recovery.result?.conversation_projection || null };
         }
         else if (action === "retry") {
             if (blocker !== "failed")

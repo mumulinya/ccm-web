@@ -56,6 +56,11 @@ export type InternalMcpToolDefinition = {
 const CCM_DIR = path.join(os.homedir(), ".cc-connect");
 const SECRET_FILE = path.join(CCM_DIR, "private", "internal-mcp-context-secret");
 const AUDIT_FILE = path.resolve(process.env.CCM_INTERNAL_MCP_AUDIT_FILE || path.join(CCM_DIR, "tools", "internal-mcp-invocations.jsonl"));
+const TASK_STORE_DIR = path.resolve(process.env.CCM_TASK_STORE_DIR || CCM_DIR);
+const EVIDENCE_STORE_DIR = path.resolve(process.env.CCM_EVIDENCE_STORE_DIR || CCM_DIR);
+const USER_VISIBLE_AGENT_EVENT_DIR = path.resolve(
+  process.env.CCM_USER_VISIBLE_AGENT_EVENT_DIR || path.join(CCM_DIR, "agent-execution-events"),
+);
 const CONTEXT_TTL_MS = 14 * 24 * 60 * 60_000;
 
 function ensureSecret() {
@@ -141,6 +146,14 @@ export function buildInternalMcpServerConfig(entryFile: string, context: Omit<In
     env: {
       CCM_INTERNAL_MCP_CONTEXT: sealInternalMcpTaskContext(context),
       CCM_INTERNAL_MCP_SECRET_FILE: path.resolve(String(process.env.CCM_INTERNAL_MCP_SECRET_FILE || SECRET_FILE)),
+      // Project runtimes intentionally use an isolated HOME. Internal MCP
+      // servers must still bind to the authoritative CCM stores owned by the
+      // parent service instead of creating empty stores below that isolated
+      // HOME.
+      CCM_TASK_STORE_DIR: TASK_STORE_DIR,
+      CCM_EVIDENCE_STORE_DIR: EVIDENCE_STORE_DIR,
+      CCM_USER_VISIBLE_AGENT_EVENT_DIR: USER_VISIBLE_AGENT_EVENT_DIR,
+      CCM_INTERNAL_MCP_AUDIT_FILE: AUDIT_FILE,
     },
   };
 }

@@ -8,6 +8,15 @@ export declare function buildUnifiedRecoveryAttachment(input: {
     scope: UnifiedCompactionScope;
     exactSessionId: string;
     unifiedRecoveryContext: import("./unified-session-compaction").UnifiedRecoveryContext;
+    taskTimeline: {
+        currentTaskId: string;
+        spanChecksum: string;
+        startSequence: number;
+        endSequence: number;
+        latestCheckpointSequence: number;
+        priorTaskCount: number;
+        contentStored: boolean;
+    };
     provider: {
         provider: string;
         model: string;

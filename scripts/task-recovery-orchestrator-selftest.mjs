@@ -11,12 +11,19 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ccm-recovery-orchestrator-'))
 process.env.USERPROFILE = tempRoot
 process.env.HOME = tempRoot
+process.env.CCM_TASK_STORE_DIR = tempRoot
 process.env.CCM_USER_VISIBLE_AGENT_EVENT_DIR = path.join(tempRoot, 'events')
+const ccmConfigDir = path.join(tempRoot, '.cc-connect', 'configs')
+fs.mkdirSync(ccmConfigDir, { recursive: true })
+fs.writeFileSync(path.join(ccmConfigDir, 'config-native-task.toml'), '[[projects]]\nname = "native-task"\nwork_dir = "."\ntype = "codex"\n')
 const require = createRequire(import.meta.url)
 const db = require(path.join(root, 'ccm-package', 'dist', 'core', 'db.js'))
 const sessions = require(path.join(root, 'ccm-package', 'dist', 'tasks', 'agent-sessions.js'))
 const interruption = require(path.join(root, 'ccm-package', 'dist', 'tasks', 'task-interruption.js'))
 const recovery = require(path.join(root, 'ccm-package', 'dist', 'tasks', 'task-recovery-orchestrator.js'))
+const timeline = require(path.join(root, 'ccm-package', 'dist', 'tasks', 'session-task-timeline.js'))
+const taskContext = require(path.join(root, 'ccm-package', 'dist', 'tasks', 'task-context.js'))
+const projectSessions = require(path.join(root, 'ccm-package', 'dist', 'modules', 'projects', 'sessions.js'))
 
 const source = relativePath => fs.readFileSync(path.join(root, relativePath), 'utf8')
 
@@ -60,9 +67,28 @@ function interruptedTask(id, workDir, agentType = 'codex') {
   return { ...task, status: 'blocked', acceptance_state: 'recovery_required', interruption_receipt: stopped.receipt, recovery_pending: true }
 }
 
+function storeInterruptedTask(task) {
+  const started = timeline.persistTaskStartedAtomically({
+    task,
+    position: db.loadTasks().length,
+    exactSessionId: task.project_session_id,
+    scope: 'project',
+    scopeId: task.target_project,
+    generation: task.generation,
+    attempt: task.execution_attempt,
+    title: task.title,
+    goal: task.title,
+    buildContext: current => taskContext.buildTaskContextCapsule(current),
+  })
+  timeline.createTaskTerminalTimeline({ taskId: task.id, exactSessionId: task.project_session_id, scope: 'project', scopeId: task.target_project, status: 'interrupted', attempt: 1, generation: task.generation, payloadRef: task.interruption_receipt.checksum })
+  return db.getTaskById(task.id) || started.task
+}
+
 try {
-  const nativeTask = interruptedTask('native-task', workspace('native-workspace'), 'codex')
-  db.saveTasks([nativeTask])
+  const nativeSessionId = projectSessions.createProjectSessionRecord('native-task', '恢复即时投影').sessionId
+  const nativeDraft = interruptedTask('native-task', workspace('native-workspace'), 'codex')
+  nativeDraft.project_session_id = nativeSessionId
+  const nativeTask = storeInterruptedTask(nativeDraft)
   const nativeWorkspace = recovery.captureTaskRecoveryWorkspace(nativeTask)
   let enqueueCount = 0
   const resumed = await recovery.runTaskRecoveryOrchestrator(nativeTask, {
@@ -80,15 +106,52 @@ try {
   assert.equal(resumed.preflight.recoveryMode, 'native_session')
   assert.equal(resumed.task.execution_attempt, 2)
   assert.equal(resumed.task.recovery_transaction.status, 'committed')
+  assert.equal(resumed.conversationProjection?.status, 'synced')
+  assert.equal(resumed.conversationProjection?.attempt, 2)
+  const nativeTaskMessage = projectSessions.getSessionDetail('native-task', nativeSessionId).history.find(row => row.task_id === nativeTask.id)
+  assert.match(nativeTaskMessage?.content || '', /第 2 次执行/, 'recovery commit must be visible before executor progress')
   assert.equal(enqueueCount, 1)
   const duplicate = await recovery.runTaskRecoveryOrchestrator(nativeTask, {
     scope: 'project', exactSessionId: nativeTask.project_session_id, idempotencyKey: 'resume-native-once', authorizationValid: true,
   })
   assert.equal(duplicate.duplicate, true)
   assert.equal(enqueueCount, 1, 'duplicate resume must not enqueue a second attempt')
+  assert.equal(duplicate.conversationProjection?.attempt, 2, 'duplicate recovery must return the current conversation projection receipt')
 
-  const degradedTask = interruptedTask('degraded-task', workspace('degraded-workspace'), 'opencode')
-  db.saveTasks([...db.loadTasks(), degradedTask])
+  const secondWorkspace = recovery.captureTaskRecoveryWorkspace(resumed.task)
+  const secondStopped = interruption.interruptTaskExecution({
+    task: { ...resumed.task, status: 'in_progress', acceptance_state: 'executing' },
+    reasonCode: 'provider_failure',
+    reason: 'second recoverable interruption',
+    actor: 'selftest',
+    checkpoint: 'executing',
+    sideEffectState: 'committed',
+    workspaceChecksum: secondWorkspace.checksum,
+    resumeCheckpoint: resumed.task.resume_checkpoint,
+    processTerminationProven: true,
+  })
+  const interruptedAgain = db.updateTaskById(nativeTask.id, {
+    status: 'blocked',
+    acceptance_state: 'recovery_required',
+    execution_attempt: 2,
+    recovery_pending: true,
+    interruption_receipt: secondStopped.receipt,
+  })
+  const resumedAgain = await recovery.runTaskRecoveryOrchestrator(interruptedAgain, {
+    scope: 'project',
+    scopeId: 'native-task',
+    exactSessionId: nativeTask.project_session_id,
+    idempotencyKey: 'resume-native-second-interruption',
+    authorizationValid: true,
+    runtimeValid: true,
+    currentWorkspaceChecksum: secondWorkspace.checksum,
+    worktreeOwnershipValid: true,
+  })
+  assert.equal(resumedAgain.success, true)
+  assert.equal(resumedAgain.task.execution_attempt, 3)
+  assert.notEqual(resumedAgain.task.recovery_transaction.transactionId, resumed.task.recovery_transaction.transactionId)
+
+  const degradedTask = storeInterruptedTask(interruptedTask('degraded-task', workspace('degraded-workspace'), 'opencode'))
   const degradedWorkspace = recovery.captureTaskRecoveryWorkspace(degradedTask)
   const degraded = await recovery.runTaskRecoveryOrchestrator(degradedTask, {
     scope: 'project', exactSessionId: degradedTask.project_session_id, idempotencyKey: 'resume-degraded-once', authorizationValid: true,
@@ -108,10 +171,11 @@ try {
   const providerDriftPreflight = recovery.buildTaskRecoveryPreflight(providerDriftTask, {
     scope: 'project', exactSessionId: providerDriftTask.project_session_id, authorizationValid: true,
   })
-  assert.equal(providerDriftPreflight.recoveryMode, 'rejected')
-  assert.equal(providerDriftPreflight.blockers.includes('provider_contract_drift'), true)
+  assert.equal(providerDriftPreflight.recoveryMode, 'rehydrated_attempt', 'provider contract drift must rebuild a fresh Agent session')
+  assert.equal(providerDriftPreflight.blockers.includes('provider_contract_drift'), false)
+  assert.equal(providerDriftPreflight.checks.providerContractValid, true)
 
-  const restartTask = interruptedTask('restart-transaction-task', workspace('restart-transaction-workspace'), 'codex')
+  let restartTask = interruptedTask('restart-transaction-task', workspace('restart-transaction-workspace'), 'codex')
   restartTask.recovery_transaction = {
     schema: 'ccm-task-recovery-transaction-v1',
     transactionId: 'abandoned-validating-transaction',
@@ -131,7 +195,7 @@ try {
     checksum: 'old-transaction-checksum',
     contentStored: false,
   }
-  db.saveTasks([...db.loadTasks(), restartTask])
+  restartTask = storeInterruptedTask(restartTask)
   const restartWorkspace = recovery.captureTaskRecoveryWorkspace(restartTask)
   const restarted = await recovery.runTaskRecoveryOrchestrator(restartTask, {
     scope: 'project', exactSessionId: restartTask.project_session_id, idempotencyKey: 'resume-after-restart', authorizationValid: true,
@@ -187,9 +251,10 @@ try {
     checks: {
       native_session_new_attempt: true,
       degraded_provider_rehydrated: true,
-      provider_contract_drift_rejected: true,
+      provider_contract_drift_rehydrated: true,
       abandoned_validating_transaction_recovered: true,
       duplicate_resume_suppressed: true,
+      committed_transaction_can_advance_after_new_interruption: true,
       workspace_drift_manual: true,
       explicit_workspace_adoption_reconciles: true,
       unresolved_tool_pair_manual: true,

@@ -24,6 +24,7 @@ import { buildFeishuConversationIdentityV2 } from "../collaboration/feishu-conve
 import { markConversationSearchIndexDirty } from "../../system/conversation-search-dirty";
 import { clearMainAgentPostCompactContinuity } from "../../system/main-agent-post-compact-continuity";
 import { appendUserVisibleAgentEvent } from "../../system/user-visible-agent-events";
+import { recordSessionTimelineMessage } from "../../tasks/session-task-timeline";
 
 export const WEB_SESSIONS_DIR = path.join(CCM_DIR, "web-sessions");
 
@@ -591,6 +592,7 @@ export function appendProjectSessionTaskMessage(projectName: string, sessionId: 
   const normalized = normalizeWebSessionMessage(message);
   data.history = Array.isArray(data.history) ? data.history : [];
   if (!data.history.some((item: any) => String(item.id || "") === normalized.id)) data.history.push(normalized);
+  recordSessionTimelineMessage({ exactSessionId: safeSessionId, scope: "project", scopeId: safeProject, role: normalized.role, messageId: normalized.id, taskId: normalized.task_id || normalized.taskId || normalized.taskExperience?.task_id, timestamp: normalized.timestamp });
   data.updated_at = new Date().toISOString();
   fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
   markConversationSearchIndexDirty(`project:${safeProject}:${safeSessionId}`);
@@ -655,6 +657,7 @@ export function upsertProjectSessionTaskMessage(projectName: string, sessionId: 
   } else {
     data.history.push(normalized);
   }
+  recordSessionTimelineMessage({ exactSessionId: safeSessionId, scope: "project", scopeId: safeProject, role: normalized.role, messageId: normalized.id, taskId: normalized.task_id || normalized.taskId || normalized.taskExperience?.task_id, timestamp: normalized.timestamp });
   data.updated_at = new Date().toISOString();
   fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
   markConversationSearchIndexDirty(`project:${safeProject}:${safeSessionId}`);

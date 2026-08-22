@@ -289,6 +289,26 @@ function mapNativeTurnToParsed(turn, controlCalls = []) {
         workflowDecision: { reason: "直接回复", actionRequired: false, requiresCodeChanges: false },
     };
 }
+function claimsUnsubmittedDispatch(text) {
+    const value = String(text || "").trim();
+    if (!value)
+        return false;
+    if (/(?:不会|不能|不应|无需|不要|未能|无法).{0,16}(?:派发|分派|dispatch)/i.test(value))
+        return false;
+    return /(?:我|主\s*Agent).{0,24}(?:将|会|立即|现在|准备|正在).{0,24}(?:派发|分派|dispatch)|(?:派发|分派|dispatch).{0,24}(?:子\s*Agent|项目\s*Agent|project\s+agent)/i.test(value);
+}
+function explicitlyRequestsDispatch(messages) {
+    const userText = messages
+        .filter(message => message?.role === "user")
+        .map(message => typeof message.content === "string" ? message.content : JSON.stringify(message.content || ""))
+        .join("\n")
+        .trim();
+    if (!userText)
+        return false;
+    if (/(?:不要|无需|不必|禁止|仅回答|只回答).{0,20}(?:派发|分派|dispatch)/i.test(userText))
+        return false;
+    return /(?:请|立即|直接|现在|务必)?.{0,8}(?:派发|分派).{0,32}(?:子\s*Agent|项目\s*Agent|Agent)|(?:please\s+)?dispatch.{0,40}(?:project\s+)?agent/i.test(userText);
+}
 function mergeUsage(current, next) {
     if (!next)
         return current;
@@ -593,6 +613,8 @@ async function runNativeQueryLoop(input) {
     let stopReason = "model_completed";
     let usage = null;
     let planRepairCount = 0;
+    let controlToolRepairCount = 0;
+    let incompleteAfterToolsRepairCount = 0;
     const isReadOnly = input.isReadOnly || ((call) => !isNativeControlTool(call.name) && call.name !== "invoke_skill" && call.name !== "tool_search");
     const applyTranscript = (next) => input.compactTranscript ? input.compactTranscript(next) : next;
     const availableTools = () => {
@@ -725,6 +747,38 @@ async function runNativeQueryLoop(input) {
             const controlCalls = (turn.toolCalls || []).filter(item => isNativeControlTool(item.name));
             const regularCalls = (turn.toolCalls || []).filter(item => !isNativeControlTool(item.name));
             if (!turn.toolCalls.length) {
+                const canDispatch = availableTools().some(tool => tool.name === "ccm_dispatch");
+                const requiresExplicitDispatch = canDispatch && explicitlyRequestsDispatch(messages);
+                if (canDispatch && (claimsUnsubmittedDispatch(turn.text) || requiresExplicitDispatch) && controlToolRepairCount < 2) {
+                    controlToolRepairCount += 1;
+                    messages = applyTranscript([
+                        ...messages,
+                        { role: "assistant", content: String(turn.text || "") },
+                        {
+                            role: "system",
+                            content: "The user explicitly requested project-Agent dispatch, or you stated that you would dispatch, but no ccm_dispatch tool call was submitted. Do not return another preamble, progress note, or generic summary. If the authorized implementation should proceed, call ccm_dispatch now with a self-contained target work order and workflowDecision. Use ccm_ask_user only for a concrete unresolved business decision. If dispatch is unsafe, explain the specific blocker truthfully.",
+                        },
+                    ]);
+                    toolRoundCount += 1;
+                    continue;
+                }
+                if (requiresExplicitDispatch && controlToolRepairCount >= 2) {
+                    const error = new Error("The model did not submit the required ccm_dispatch control call after bounded repair.");
+                    error.code = "CCM_DISPATCH_TOOL_REQUIRED";
+                    throw error;
+                }
+                if (toolResults.length > 0 && !String(turn.text || "").trim() && incompleteAfterToolsRepairCount < 1) {
+                    incompleteAfterToolsRepairCount += 1;
+                    messages = applyTranscript([
+                        ...messages,
+                        {
+                            role: "system",
+                            content: "The requested read-only tool calls have completed, but this turn returned no final action or answer. Finish the turn now using the existing tool results. Call ccm_dispatch for an authorized implementation, ccm_present_plan only when the plan gate is required, ccm_ask_user only for an unresolved business decision, or provide a truthful final answer. Do not repeat a preamble and do not reread the same files.",
+                        },
+                    ]);
+                    toolRoundCount += 1;
+                    continue;
+                }
                 parsed = mergeNativeTurnParsed(parsed, mapNativeTurnToParsed(turn));
                 stopReason = "model_completed";
                 break;
@@ -1034,6 +1088,73 @@ async function runNativeQueryLoopSelfTest() {
         executeTools: async (toolCalls) => toolCalls.map(item => ({ callId: item.id, name: item.name, ok: true, output: { text: "# Hello" } })),
         shouldStopAfterTools: () => true,
     });
+    let dispatchRepairTurn = 0;
+    const dispatchRepair = await runNativeQueryLoop({
+        config: { providerNativeToolsMode: "auto", forceNativeQueryLoop: true },
+        messages: [{ role: "user", content: "Create the requested project file now." }],
+        tools: [{ name: "ccm_dispatch", description: "Dispatch a project Agent", inputSchema: { type: "object", properties: { targets: { type: "array" } }, required: ["targets"] } }],
+        scope: "project",
+        scopeId: "demo",
+        exactSessionId: "project_dispatch_repair",
+        callTurn: async () => {
+            dispatchRepairTurn += 1;
+            if (dispatchRepairTurn === 1)
+                return {
+                    text: "我将立即派发给当前项目子 Agent。",
+                    toolCalls: [],
+                    toolReferences: [],
+                    stopReason: "end_turn",
+                    usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2, reported: true },
+                };
+            return {
+                text: "",
+                toolCalls: [{ id: "dispatch_repair", name: "ccm_dispatch", arguments: { targets: [{ project: "demo", task: "Create the requested project file." }] }, argumentsChecksum: "dispatch-repair" }],
+                toolReferences: [],
+                stopReason: "tool_calls",
+                usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2, reported: true },
+            };
+        },
+        executeTools: async () => [],
+    });
+    let emptyPostToolRepairTurn = 0;
+    const emptyPostToolRepair = await runNativeQueryLoop({
+        config: { providerNativeToolsMode: "auto", forceNativeQueryLoop: true },
+        messages: [{ role: "user", content: "Inspect the project and create the requested proof file." }],
+        tools: [
+            { name: "read_file", description: "Read a project file", inputSchema: { type: "object", properties: { path: { type: "string" } } } },
+            { name: "ccm_dispatch", description: "Dispatch a project Agent", inputSchema: { type: "object", properties: { targets: { type: "array" } }, required: ["targets"] } },
+        ],
+        scope: "project",
+        scopeId: "demo",
+        exactSessionId: "project_empty_post_tool_repair",
+        callTurn: async () => {
+            emptyPostToolRepairTurn += 1;
+            if (emptyPostToolRepairTurn === 1)
+                return {
+                    text: "I will inspect the requested files first.",
+                    toolCalls: [{ id: "read_before_dispatch", name: "read_file", arguments: { path: "README.md" }, argumentsChecksum: "read-before-dispatch" }],
+                    toolReferences: [],
+                    stopReason: "tool_calls",
+                    usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2, reported: true },
+                };
+            if (emptyPostToolRepairTurn === 2)
+                return {
+                    text: "",
+                    toolCalls: [],
+                    toolReferences: [],
+                    stopReason: "end_turn",
+                    usage: { inputTokens: 1, outputTokens: 0, totalTokens: 1, reported: true },
+                };
+            return {
+                text: "",
+                toolCalls: [{ id: "dispatch_after_empty", name: "ccm_dispatch", arguments: { targets: [{ project: "demo", task: "Create the requested proof file." }] }, argumentsChecksum: "dispatch-after-empty" }],
+                toolReferences: [],
+                stopReason: "tool_calls",
+                usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2, reported: true },
+            };
+        },
+        executeTools: async (toolCalls) => toolCalls.map(item => ({ callId: item.id, name: item.name, ok: true, output: { text: "# Project" } })),
+    });
     const checks = {
         firstTurnReturnsWithoutJsonExtract: result.modelCallCount === 2 && result.toolCallCount === 1,
         secondTurnHasAssistantToolCalls: secondMessages.some((item) => item?.role === "assistant" && Array.isArray(item.tool_calls) && item.tool_calls[0]?.id === "call_1"),
@@ -1046,6 +1167,11 @@ async function runNativeQueryLoopSelfTest() {
         unstreamedRemainder: unstreamedTurnText("我先看 README。", "我先") === "看 README。",
         unstreamedNoDup: unstreamedTurnText("我先看 README。", "我先看 README。") === "",
         flushedUnstreamedTurnText: flushed.join("") === "我先看 README。",
+        dispatchPromiseRepairsToControlTool: dispatchRepairTurn === 2 && dispatchRepair.parsed?.responseType === "dispatch",
+        emptyPostToolTurnRepairsToControlTool: emptyPostToolRepairTurn === 3
+            && emptyPostToolRepair.parsed?.responseType === "dispatch"
+            && emptyPostToolRepair.toolCallCount === 1
+            && emptyPostToolRepair.toolResults.some(item => item.name === "read_file" && item.ok),
         emptyFollowupKeepsFirstTurnText: true,
         keepClarifyAcrossTextFollowup: true,
         planQualityRepairsOnce: true,

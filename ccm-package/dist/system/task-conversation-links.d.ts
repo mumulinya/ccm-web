@@ -30,6 +30,12 @@ export type TaskMutationGuardResult = {
     error: string;
     details: Record<string, any>;
 };
+/**
+ * Stable user-visible message identity for a task across recovery attempts.
+ * target_message_id belongs to the worker handoff and is intentionally only a
+ * legacy fallback; it must not replace the conversation task card anchor.
+ */
+export declare function taskConversationAnchorMessageId(task: any, fallback?: string): string;
 export declare function buildTaskConversationLinks(taskOrId: any, tasksInput?: any[]): {
     schema: string;
     taskId: string;
@@ -38,6 +44,9 @@ export declare function buildTaskConversationLinks(taskOrId: any, tasksInput?: a
     generation: number;
     bindingChecksum: string;
     projectionRevision: string;
+    taskContextRevision: number;
+    taskContextChecksum: string;
+    timelineSpanChecksum: string;
     links: TaskConversationLinkV1[];
     contentStored: boolean;
 };

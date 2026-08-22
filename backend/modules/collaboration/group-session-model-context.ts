@@ -5,6 +5,7 @@ import { getCompactBoundaryIndex } from "./group-memory-shared";
 import { loadGroupMemory } from "./group-memory-storage";
 import { getActiveGroupChatSessionId, getGroupMessages } from "./storage";
 import { listGroupSessionExecutionEvents } from "./group-session-execution-ledger";
+import { readVerifiedSessionTaskIndex } from "../../tasks/session-task-timeline";
 
 function modelContextMessageContent(message: any) {
   const value = message?.content ?? message?.message?.content ?? message?.text ?? "";
@@ -24,6 +25,7 @@ export function buildExactGroupSessionModelContextProjection(messagesInput: any[
     ? Math.max(-1, Number(memory.unifiedSessionCompaction.summarizedMessageCount || 0) - 1)
     : canonicalSummary ? getCompactBoundaryIndex(memory, messages) : -1;
   const config = loadOrchestratorConfig();
+  const sessionTaskIndex = readVerifiedSessionTaskIndex({ exactSessionId: groupSessionId, scope: "group", scopeId: groupId });
   const unified = buildUnifiedSessionModelContextProjection({
     scope: "group",
     scopeId: `${groupId}::${groupSessionId}`,
@@ -45,6 +47,8 @@ export function buildExactGroupSessionModelContextProjection(messagesInput: any[
       contextTokens: Number(memory?.compaction?.tokenMeasurement?.activeTokens || memory?.compaction?.beforeTokens || 0),
       pressureThresholdTokens: getGroupAutoCompactThreshold(config),
     }),
+    currentTaskId: sessionTaskIndex.activeTaskId,
+    sessionTaskIndex,
   });
   return {
     ...unified,

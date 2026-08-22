@@ -56,6 +56,19 @@ try {
   const automatic = interruption.buildTaskRecoveryDecision({ ...task, interruption_receipt: restartReceipt }, restartReceipt, { workspaceChecksum: "workspace-v1", authorizationValid: true, runtimeValid: true });
   assert.equal(automatic.mode, "auto", "a proven restart interruption without uncertain side effects may auto resume");
 
+  const missingNativeIdentityReceipt = interruption.buildTaskInterruptionReceipt({
+    task: { ...task, task_agent_session_id: "missing-native-session", agent_type: "codex" },
+    reasonCode: "service_restart",
+    reason: "native session unavailable",
+    actor: "selftest",
+    checkpoint: "executing",
+    sideEffectState: "committed",
+    workspaceChecksum: "workspace-v1",
+    processTerminationProven: true,
+  });
+  const rehydratedDecision = interruption.buildTaskRecoveryDecision({ ...task, interruption_receipt: missingNativeIdentityReceipt }, missingNativeIdentityReceipt, { userRequested: true, workspaceChecksum: "workspace-v1", authorizationValid: true, runtimeValid: true, allowRehydratedSession: true });
+  assert.equal(rehydratedDecision.mode, "auto", "a verified rehydrated attempt must not require a stale native session id");
+
   const drifted = interruption.buildTaskRecoveryDecision({ ...task, interruption_receipt: restartReceipt }, restartReceipt, { workspaceChecksum: "workspace-v2", authorizationValid: true, runtimeValid: true });
   assert.equal(drifted.mode, "manual", "workspace drift must fail closed to user confirmation");
 

@@ -10,6 +10,7 @@ const group_memory_shared_1 = require("./group-memory-shared");
 const group_memory_storage_1 = require("./group-memory-storage");
 const storage_1 = require("./storage");
 const group_session_execution_ledger_1 = require("./group-session-execution-ledger");
+const session_task_timeline_1 = require("../../tasks/session-task-timeline");
 function modelContextMessageContent(message) {
     const value = message?.content ?? message?.message?.content ?? message?.text ?? "";
     if (typeof value === "string")
@@ -34,6 +35,7 @@ function buildExactGroupSessionModelContextProjection(messagesInput, memory, opt
         ? Math.max(-1, Number(memory.unifiedSessionCompaction.summarizedMessageCount || 0) - 1)
         : canonicalSummary ? (0, group_memory_shared_1.getCompactBoundaryIndex)(memory, messages) : -1;
     const config = (0, group_orchestrator_config_1.loadOrchestratorConfig)();
+    const sessionTaskIndex = (0, session_task_timeline_1.readVerifiedSessionTaskIndex)({ exactSessionId: groupSessionId, scope: "group", scopeId: groupId });
     const unified = (0, session_model_context_1.buildUnifiedSessionModelContextProjection)({
         scope: "group",
         scopeId: `${groupId}::${groupSessionId}`,
@@ -53,6 +55,8 @@ function buildExactGroupSessionModelContextProjection(messagesInput, memory, opt
             contextTokens: Number(memory?.compaction?.tokenMeasurement?.activeTokens || memory?.compaction?.beforeTokens || 0),
             pressureThresholdTokens: (0, group_compaction_strategy_1.getGroupAutoCompactThreshold)(config),
         }),
+        currentTaskId: sessionTaskIndex.activeTaskId,
+        sessionTaskIndex,
     });
     return {
         ...unified,

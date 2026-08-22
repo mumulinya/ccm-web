@@ -212,7 +212,7 @@ export type AgentCommunicationEnvelopeV2 = {
 export const DEFAULT_AGENT_COMMUNICATION_POLICY = Object.freeze({
   agentCommunicationV2Enabled: true,
   agentRunnerStartTimeoutMs: 60_000,
-  agentAckTimeoutMs: 30_000,
+  agentAckTimeoutMs: 60_000,
   agentHeartbeatIntervalMs: 20_000,
   agentHeartbeatLostTimeoutMs: 90_000,
   agentLeaseTtlMs: 120_000,
@@ -234,7 +234,10 @@ export function readAgentCommunicationPolicy(overrides: any = {}) {
   return {
     agentCommunicationV2Enabled: source.agentCommunicationV2Enabled !== false,
     agentRunnerStartTimeoutMs: Math.max(5_000, integer(source.agentRunnerStartTimeoutMs, 60_000)),
-    agentAckTimeoutMs: Math.max(5_000, integer(source.agentAckTimeoutMs, 30_000)),
+    // A real third-party model turn must start, select the signed CCM MCP
+    // tool and return its receipt. Thirty seconds is routinely shorter than
+    // that first-turn latency, especially with a cold provider cache.
+    agentAckTimeoutMs: Math.max(60_000, integer(source.agentAckTimeoutMs, 60_000)),
     agentHeartbeatIntervalMs: Math.max(5_000, integer(source.agentHeartbeatIntervalMs, 20_000)),
     agentHeartbeatLostTimeoutMs: Math.max(15_000, integer(source.agentHeartbeatLostTimeoutMs, 90_000)),
     agentLeaseTtlMs: Math.max(15_000, integer(source.agentLeaseTtlMs, 120_000)),
@@ -544,7 +547,14 @@ export function acquireAgentCommunicationLease(messageId: string, ownerId: strin
       }
       const attempt = Math.max(1, integer(options.attempt, row.attempt || 1));
       const maxAttempts = Math.max(1, integer(options.maxAttempts, policy.agentMaxAttempts));
-      if (attempt > maxAttempts) throw new Error("Agent Communication执行次数已达到上限");
+      // `attempt` is the CCM task-attempt identity and may legitimately be
+      // greater than the per-envelope retry budget after several user-driven
+      // recoveries. Limit actual lease acquisitions for this communication
+      // envelope instead of comparing the absolute task attempt number.
+      const leaseAcquisitionCount = Number((db.prepare(
+        "SELECT COUNT(*) AS count FROM agent_communication_events WHERE message_id=? AND event_type='lease_acquired'",
+      ).get(row.message_id) as any)?.count || 0);
+      if (leaseAcquisitionCount >= maxAttempts) throw new Error("Agent Communication执行次数已达到上限");
       const leaseId = id("acl");
       const at = nowIso();
       const ttl = Math.max(15_000, Math.min(15 * 60_000, integer(options.leaseTtlMs, policy.agentLeaseTtlMs)));

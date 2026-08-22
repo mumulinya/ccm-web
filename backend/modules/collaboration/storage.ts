@@ -18,6 +18,7 @@ import {
   isSessionTitlePlaceholder,
 } from "../../system/session-title";
 import { normalizeGroupOrchestrator } from "./group-orchestrator";
+import { recordSessionTimelineMessage } from "../../tasks/session-task-timeline";
 import { deleteGroupPostTurnSummaryArtifacts } from "./group-post-turn-summary";
 import {
   ensureGroupSessionLifecycleHead,
@@ -626,6 +627,7 @@ export function appendGroupMessage(groupId: string, msg: any) {
   };
   messages.push(next);
   saveGroupMessages(groupId, messages, sessionId);
+  recordSessionTimelineMessage({ exactSessionId: sessionId, scope: "group", scopeId: groupId, role: String(next.role || "user") === "assistant" ? "assistant" : "user", messageId: messageId || undefined, taskId: next?.task_id || next?.taskId, timestamp: next?.timestamp || next?.created_at });
   appendTraceEvent(traceId, { id: `group-message:${groupId}:${messageId || messages.length}`, type: "group.message_persisted", status: "ok", group_id: groupId, task_id: msg?.task_id || "", agent: msg?.agent || msg?.role || "", message: String(msg?.content || "").slice(0, 500), data: { message_id: messageId } });
   for (const hook of getGroupMessageAppendHooks()) {
     try { hook(groupId, next, messages); } catch {}

@@ -1,4 +1,6 @@
 // Mechanically extracted startup recovery and scheduler bootstrap.
+import { recoverTaskContextProjectors } from "./tasks/session-task-timeline";
+import { reconcileTaskConversationProjections } from "./system/task-conversation-projection";
 export function bootstrapServerRuntime(startupCollabCtx: any, port: number, deps: any) {
   const {
     CCM_DIR,
@@ -109,6 +111,14 @@ export function bootstrapServerRuntime(startupCollabCtx: any, port: number, deps
       + `安全暂停 ${projectMainRecovery.interrupted} 个，`
       + `仍由其他实例执行 ${projectMainRecovery.active_elsewhere} 个`,
     );
+  }
+  const taskContextRecovery = recoverTaskContextProjectors();
+  if (taskContextRecovery.checked > 0 || taskContextRecovery.outbox.published > 0) {
+    console.log(`[任务上下文投影] 检查 ${taskContextRecovery.checked} 个任务：当前 ${taskContextRecovery.current}，追赶 ${taskContextRecovery.caughtUp}，漂移 ${taskContextRecovery.drifted}，发布 ${taskContextRecovery.outbox.published}`);
+  }
+  const conversationProjectionRecovery = reconcileTaskConversationProjections();
+  if (conversationProjectionRecovery.checked > 0) {
+    console.log(`[任务会话投影] 检查 ${conversationProjectionRecovery.checked} 个任务：同步 ${conversationProjectionRecovery.synced}，当前 ${conversationProjectionRecovery.unchanged}，跳过 ${conversationProjectionRecovery.skipped}，失败 ${conversationProjectionRecovery.failed}`);
   }
   const resumeResult = resumeTaskQueues(startupCollabCtx);
   if (resumeResult.total > 0) {

@@ -147,7 +147,9 @@ try {
     windowsHide: true,
   })
   assert.equal(result.status, 0, result.stderr || result.stdout || '目标会话绑定回归失败')
-  const receipt = JSON.parse(String(result.stdout || '').trim().split(/\r?\n/).at(-1))
+  const receiptLine = String(result.stdout || '').trim().split(/\r?\n/).reverse().find(line => line.trim().startsWith('{'))
+  assert.ok(receiptLine, result.stdout || '目标会话绑定回归未返回 JSON 回执')
+  const receipt = JSON.parse(receiptLine)
   assert.equal(receipt.pass, true)
   const groupSidebar = fs.readFileSync(path.join(root, 'frontend/src/components/collaboration/GroupChatSessionSidebar.vue'), 'utf8')
   const projectSidebar = fs.readFileSync(path.join(root, 'frontend/src/components/projects/ProjectSessionSidebar.vue'), 'utf8')

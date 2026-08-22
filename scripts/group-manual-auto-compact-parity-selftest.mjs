@@ -153,26 +153,26 @@ assert.deepEqual(
 // 必须相同:摘要来源与质量门结论
 // ---------------------------------------------------------------------------
 assert.equal(
-  manual.memory?.compaction?.summarySource,
-  auto.memory?.compaction?.summarySource,
+  manual.memory?.unifiedSessionCompaction?.summarySource,
+  auto.memory?.unifiedSessionCompaction?.summarySource,
   "摘要来源必须一致(都应为 model)",
 );
-assert.equal(manual.memory?.compaction?.summarySource, "model", "手动压缩摘要必须由模型生成");
+assert.equal(manual.memory?.unifiedSessionCompaction?.summarySource, "model", "手动压缩摘要必须由模型生成");
 assert.equal(
-  manual.memory?.compaction?.quality?.pass,
-  auto.memory?.compaction?.quality?.pass,
+  manual.memory?.unifiedSessionCompaction?.qualityStatus,
+  auto.memory?.unifiedSessionCompaction?.qualityStatus,
   "质量门结论必须一致",
 );
-assert.equal(manual.memory?.compaction?.quality?.pass, true, "手动压缩必须通过质量门");
+assert.equal(manual.memory?.unifiedSessionCompaction?.qualityStatus, "passed", "手动压缩必须通过质量门");
 
 // 原始 transcript 在两条路径下都不得被改写
 assert.equal(
-  manual.memory?.compaction?.rawTranscriptPreserved !== false,
+  manual.memory?.unifiedSessionCompaction?.contentStored === false,
   true,
   "手动压缩不得破坏原始 transcript",
 );
 assert.equal(
-  auto.memory?.compaction?.rawTranscriptPreserved !== false,
+  auto.memory?.unifiedSessionCompaction?.contentStored === false,
   true,
   "自动压缩不得破坏原始 transcript",
 );

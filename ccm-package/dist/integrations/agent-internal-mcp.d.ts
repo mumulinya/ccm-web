@@ -3,6 +3,7 @@ export type TaskBoundInternalMcpInput = {
     taskId: string;
     groupId: string;
     groupSessionId?: string;
+    projectSessionId?: string;
     project: string;
     role: InternalMcpAgentRole;
     agentType?: string;
@@ -54,6 +55,10 @@ export declare function buildProjectSessionBoundMemoryMcpServer(input: ProjectSe
         env: {
             CCM_INTERNAL_MCP_CONTEXT: string;
             CCM_INTERNAL_MCP_SECRET_FILE: string;
+            CCM_TASK_STORE_DIR: string;
+            CCM_EVIDENCE_STORE_DIR: string;
+            CCM_USER_VISIBLE_AGENT_EVENT_DIR: string;
+            CCM_INTERNAL_MCP_AUDIT_FILE: string;
         };
     };
     ccm__permission_broker: {
@@ -62,6 +67,10 @@ export declare function buildProjectSessionBoundMemoryMcpServer(input: ProjectSe
         env: {
             CCM_INTERNAL_MCP_CONTEXT: string;
             CCM_INTERNAL_MCP_SECRET_FILE: string;
+            CCM_TASK_STORE_DIR: string;
+            CCM_EVIDENCE_STORE_DIR: string;
+            CCM_USER_VISIBLE_AGENT_EVENT_DIR: string;
+            CCM_INTERNAL_MCP_AUDIT_FILE: string;
         };
     };
 };

@@ -110,7 +110,15 @@ export function useTaskExecutionDashboard(options = {}) {
   const toggleDashboardItem = (item) => {
     expandedDashboardTaskId.value = isDashboardItemExpanded(item) ? '' : item.id
   }
-  const findTaskByDashboardItem = (item) => item?.raw_task || tasks.value.find(task => task.id === item?.id) || null
+  const findTaskByDashboardItem = (item) => item?.raw_task
+    || tasks.value.find(task => task.id === item?.id)
+    || (item?.id ? {
+      ...item,
+      id: item.id,
+      title: item.title || item.headline || item.summary || item.id,
+      status: item.status || item.phase || item.state || '',
+      target_project: item.target_project || item.project || item.source?.project || '',
+    } : null)
 
   const workflowAgentPreview = (task) => {
     const summary = task?.delivery_summary

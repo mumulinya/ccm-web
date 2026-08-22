@@ -1,4 +1,12 @@
 export type CcmTaskRecoveryMode = "native_session" | "rehydrated_attempt" | "manual_reconciliation" | "rejected";
+export type CcmTaskRecoveryConversationProjectionV1 = {
+    status: "synced" | "unchanged" | "pending_compensation";
+    sourceSessionId: string;
+    activeSessionId: string;
+    updatedSessionIds: string[];
+    attempt: number;
+    contentStored: false;
+};
 export type CcmTaskRecoveryPreflightV1 = {
     schema: "ccm-task-recovery-preflight-v1";
     taskId: string;

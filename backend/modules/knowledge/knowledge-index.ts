@@ -122,10 +122,13 @@ export type KnowledgeIndexStatus = {
 
 let documentChunks: KnowledgeChunk[] = [];
 let documentContent = new Map<string, { content: string; parser: string; status: string; error: string }>();
-let activeRebuild: Promise<KnowledgeIndexStatus> | null = null;
-let rebuildQueued = false;
-let queuedReason = "";
-let indexStatus: KnowledgeIndexStatus = {
+var activeRebuild: Promise<KnowledgeIndexStatus> | null = null;
+// `rag.ts` triggers the startup rebuild through a circular module import. Use a
+// function-safe initializer so that the first call cannot hit a TDZ during
+// CommonJS evaluation after a clean runtime reset.
+var rebuildQueued = false;
+var queuedReason = "";
+var indexStatus: KnowledgeIndexStatus = {
   state: "idle",
   reason: "startup",
   startedAt: "",

@@ -45,6 +45,26 @@ function clean(value: any, max = 240) {
   return String(value || "").replace(/[\r\n\t]+/g, " ").replace(/\s+/g, " ").trim().slice(0, max);
 }
 
+/**
+ * Stable user-visible message identity for a task across recovery attempts.
+ * target_message_id belongs to the worker handoff and is intentionally only a
+ * legacy fallback; it must not replace the conversation task card anchor.
+ */
+export function taskConversationAnchorMessageId(task: any, fallback = "") {
+  const taskId = clean(task?.id || task?.taskId || task?.task_id, 160);
+  return clean(
+    task?.anchor_message_id
+      || task?.anchorMessageId
+      || task?.message_id
+      || task?.messageId
+      || task?.target_conversation_ref?.messageId
+      || task?.target_conversation_ref?.message_id
+      || fallback
+      || (taskId ? `task-message:${taskId}` : ""),
+    240,
+  );
+}
+
 function globalSessionAvailable(exactSessionId: string) {
   if (!exactSessionId) return false;
   const store = readJsonWithBackup<any>(path.join(CCM_DIR, "global-agent-history.json"), { sessions: [] });
@@ -103,14 +123,14 @@ function targetRefForTask(task: any) {
     scope: "group" as const,
     scopeId: clean(task.group_id, 160),
     exactSessionId: clean(task.group_session_id, 240),
-    messageId: clean(task.target_message_id || `global-task-queued-${task.id}`, 240),
+    messageId: taskConversationAnchorMessageId(task, `global-task-queued-${task.id}`),
     title: clean(task?.mission_target?.name || task.title || "群聊任务", 160),
   };
   if (task?.target_project && task?.project_session_id) return {
     scope: "project" as const,
     scopeId: clean(task.target_project, 160),
     exactSessionId: clean(task.project_session_id, 240),
-    messageId: clean(task.target_message_id || `global-task-queued-${task.id}`, 240),
+    messageId: taskConversationAnchorMessageId(task, `global-task-queued-${task.id}`),
     title: clean(task?.mission_target?.name || task.title || "项目任务", 160),
   };
   return null;
@@ -165,6 +185,9 @@ export function buildTaskConversationLinks(taskOrId: any, tasksInput?: any[]) {
       128,
     ),
     projectionRevision: stableChecksum({ task: task.id, revision: task.revision, updatedAt: task.updated_at, links: links.map(link => link.linkId) }),
+    taskContextRevision: Math.max(0, Number(task?.task_context?.revision || 0)),
+    taskContextChecksum: clean(task?.task_context?.checksum, 160),
+    timelineSpanChecksum: clean(task?.task_context?.timelineSpans?.find((span: any) => String(span?.taskId || "") === String(task?.id || ""))?.checksum, 160),
     links,
     contentStored: false,
   };

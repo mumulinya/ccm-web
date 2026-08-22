@@ -33,6 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.taskConversationAnchorMessageId = taskConversationAnchorMessageId;
 exports.buildTaskConversationLinks = buildTaskConversationLinks;
 exports.validateTaskMutationGuard = validateTaskMutationGuard;
 exports.buildGlobalMissionSafeProjection = buildGlobalMissionSafeProjection;
@@ -48,6 +49,22 @@ function stableChecksum(value) {
 }
 function clean(value, max = 240) {
     return String(value || "").replace(/[\r\n\t]+/g, " ").replace(/\s+/g, " ").trim().slice(0, max);
+}
+/**
+ * Stable user-visible message identity for a task across recovery attempts.
+ * target_message_id belongs to the worker handoff and is intentionally only a
+ * legacy fallback; it must not replace the conversation task card anchor.
+ */
+function taskConversationAnchorMessageId(task, fallback = "") {
+    const taskId = clean(task?.id || task?.taskId || task?.task_id, 160);
+    return clean(task?.anchor_message_id
+        || task?.anchorMessageId
+        || task?.message_id
+        || task?.messageId
+        || task?.target_conversation_ref?.messageId
+        || task?.target_conversation_ref?.message_id
+        || fallback
+        || (taskId ? `task-message:${taskId}` : ""), 240);
 }
 function globalSessionAvailable(exactSessionId) {
     if (!exactSessionId)
@@ -112,7 +129,7 @@ function targetRefForTask(task) {
             scope: "group",
             scopeId: clean(task.group_id, 160),
             exactSessionId: clean(task.group_session_id, 240),
-            messageId: clean(task.target_message_id || `global-task-queued-${task.id}`, 240),
+            messageId: taskConversationAnchorMessageId(task, `global-task-queued-${task.id}`),
             title: clean(task?.mission_target?.name || task.title || "群聊任务", 160),
         };
     if (task?.target_project && task?.project_session_id)
@@ -120,7 +137,7 @@ function targetRefForTask(task) {
             scope: "project",
             scopeId: clean(task.target_project, 160),
             exactSessionId: clean(task.project_session_id, 240),
-            messageId: clean(task.target_message_id || `global-task-queued-${task.id}`, 240),
+            messageId: taskConversationAnchorMessageId(task, `global-task-queued-${task.id}`),
             title: clean(task?.mission_target?.name || task.title || "项目任务", 160),
         };
     return null;
@@ -173,6 +190,9 @@ function buildTaskConversationLinks(taskOrId, tasksInput) {
             || links.find((link) => link.relation === "target")?.bindingChecksum
             || links.find((link) => link.relation === "source")?.bindingChecksum, 128),
         projectionRevision: stableChecksum({ task: task.id, revision: task.revision, updatedAt: task.updated_at, links: links.map(link => link.linkId) }),
+        taskContextRevision: Math.max(0, Number(task?.task_context?.revision || 0)),
+        taskContextChecksum: clean(task?.task_context?.checksum, 160),
+        timelineSpanChecksum: clean(task?.task_context?.timelineSpans?.find((span) => String(span?.taskId || "") === String(task?.id || ""))?.checksum, 160),
         links,
         contentStored: false,
     };

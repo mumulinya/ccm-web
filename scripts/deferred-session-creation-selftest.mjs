@@ -51,6 +51,14 @@ const group = read('frontend/src/components/collaboration/useGroupChat.js')
 const groupCreate = group.slice(group.indexOf('const createGroupSession = async'), group.indexOf('const renameGroupSession = async'))
 assert.match(groupCreate, /isGroupSessionDraft\.value = true/)
 assert.doesNotMatch(groupCreate, /groupsApi\.createSession/)
+const groupMaterialize = group.slice(group.indexOf('const materializeGroupSessionDraft = async'), group.indexOf('const refreshWritableGroupSession = async'))
+assert.doesNotMatch(groupMaterialize, /if \(!isGroupSessionDraft\.value/, '缺少精确会话 ID 时发送动作必须能够创建规范会话')
+assert.match(groupMaterialize, /isGroupSessionDraft\.value = true[\s\S]*groupsApi\.createSession\(groupId\)/)
+const groupLoad = group.slice(group.indexOf('const loadMessages = async'), group.indexOf('const openTraceReplay ='))
+assert.match(groupLoad, /const data = await groupsApi\.messages[\s\S]*if \(isGroupSessionDraft\.value\) return false/, '迟到的群聊读取不能把草稿会话覆盖回旧绑定')
+const groupRefresh = group.slice(group.indexOf('const refreshWritableGroupSession = async'), group.indexOf('const createGroupSession = async'))
+assert.match(groupRefresh, /activeCandidate\.startsWith\('gcs_'\)/, '普通消息重绑定不能把 legacy default 当作可写会话')
+assert.match(groupRefresh, /groupsApi\.createSession\(groupId\)/, '没有规范群聊会话时必须创建新的 gcs 会话')
 
 const groupStream = read('frontend/src/components/collaboration/useGroupChatStream.js')
 assert.match(groupStream, /await ensureGroupSession\?\.\(\)/)
@@ -61,7 +69,7 @@ assert.match(groupStream, /messages\.value\.splice\(assistantIdx, 1\)/, '群聊 
 
 console.log(JSON.stringify({
   pass: true,
-  checks: 12,
+  checks: 17,
   scopes: ['global', 'project', 'group'],
   paidProviderCalls: 0,
 }, null, 2))

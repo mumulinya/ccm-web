@@ -217,7 +217,11 @@ export declare function runAgentRuntimeSessionSelfTest(): {
         claudeCreatesNamedSession: boolean;
         claudeResumesSameSession: boolean;
         codexInitialIsPersistent: boolean;
+        codexInitialPinsWritableSandboxAtRoot: boolean;
+        codexInitialPinsWritableSandboxAtExec: any;
+        codexInitialDisablesInteractiveApproval: any;
         codexResumesSameSession: any;
+        codexResumePinsWritableSandbox: any;
         codexCapturesNativeSession: boolean;
         cursorInitialCapturesSession: boolean;
         cursorTrustsHeadlessWorkspace: any;

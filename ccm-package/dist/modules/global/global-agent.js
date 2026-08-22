@@ -35,6 +35,7 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.postLocalSseOrJsonApi = exports.postLocalApi = exports.callLocalApi = exports.getRequestBaseUrl = exports.waitForGlobalAgentBridgeResult = exports.createGlobalAgentBridgeRequest = exports.saveGlobalAgentBridgeStore = exports.loadGlobalAgentBridgeStore = exports.buildGlobalAgentEventUi = exports.runGlobalModelRetrySelfTest = exports.callGlobalModelWithRetry = exports.callLlm = exports.hasExplicitGlobalWriteAuthorization = exports.inferLocalGlobalAction = exports.runGlobalAgentIntentSelfTest = void 0;
 exports.runGlobalAgentHistorySyncSelfTest = runGlobalAgentHistorySyncSelfTest;
+exports.upsertGlobalAgentConversationTaskMessage = upsertGlobalAgentConversationTaskMessage;
 exports.deleteGlobalAgentConversationSession = deleteGlobalAgentConversationSession;
 exports.loadGlobalAgentHistoryStore = loadGlobalAgentHistoryStore;
 exports.createGlobalAgentConversationSession = createGlobalAgentConversationSession;
@@ -77,6 +78,7 @@ const rag_1 = require("../knowledge/rag");
 const utils_1 = require("../../core/utils");
 const group_orchestrator_1 = require("../collaboration/group-orchestrator");
 const db_1 = require("../../core/db");
+const storage_1 = require("../collaboration/storage");
 const collaboration_1 = require("../collaboration/collaboration");
 const display_1 = require("../collaboration/display");
 const feishu_channel_1 = require("../collaboration/feishu-channel");
@@ -143,6 +145,16 @@ const globalAgentHistoryRuntime = (0, global_agent_history_1.createGlobalAgentHi
             source: "global-session-title",
         });
     },
+    onSessionMessagesChanged: (session, message) => {
+        const scope = String(session?.source || "") === "feishu" ? "feishu" : "global";
+        (0, runtime_events_1.publishRuntimeEvent)(scope, `${scope}.session_messages_changed`, {
+            sessionId: String(session?.id || ""),
+            taskId: String(message?.task_id || message?.taskId || message?.taskExperience?.task_id || ""),
+            messageId: String(message?.id || ""),
+            status: String(message?.taskExperience?.status || message?.task?.status || "changed"),
+            source: "task-conversation-projection",
+        });
+    },
     writeGlobalJsonAtomic,
 });
 function runGlobalAgentHistorySyncSelfTest() {
@@ -156,6 +168,9 @@ function loadGlobalAgentHistoryStore() {
 }
 function syncGlobalAgentWebHistory(payload) {
     return globalAgentHistoryRuntime.syncGlobalAgentWebHistory(payload);
+}
+function upsertGlobalAgentConversationTaskMessage(sessionId, message) {
+    return globalAgentHistoryRuntime.upsertGlobalAgentConversationTaskMessage(sessionId, message);
 }
 function createGlobalAgentConversationSession(payload) {
     return globalAgentHistoryRuntime.createGlobalAgentConversationSession(payload);
@@ -363,7 +378,7 @@ const globalAgentStatusRuntime = (0, global_agent_status_1.createGlobalAgentStat
     hasExplicitGlobalWriteAuthorization,
     listGlobalAgentRuns: loop_1.listGlobalAgentRuns,
     loadCronJobs: db_1.loadCronJobs,
-    loadGroups: collaboration_1.loadGroups,
+    loadGroups: storage_1.loadGroups,
     loadTasks: db_1.loadTasks,
     normalizeText,
     refreshGlobalDevelopmentMissions: collaboration_1.refreshGlobalDevelopmentMissions,
@@ -392,7 +407,7 @@ const globalAgentFeishuActions = (0, global_agent_feishu_actions_1.createGlobalA
     getConfigs: db_1.getConfigs,
     guessCronSchedule,
     inferGlobalDirectDispatchRequiresCodeChanges,
-    loadGroups: collaboration_1.loadGroups,
+    loadGroups: storage_1.loadGroups,
     normalizeText,
     parseMusicKeyword,
     postLocalApi,
@@ -455,7 +470,7 @@ const globalAgentAgenticRuntime = (0, global_agent_agentic_runtime_1.createGloba
     loadGlobalAgentHooks: runtime_1.loadGlobalAgentHooks,
     loadGlobalAgentMemory: memory_2.loadGlobalAgentMemory,
     loadGlobalAgentPermissionRules: runtime_1.loadGlobalAgentPermissionRules,
-    loadGroups: collaboration_1.loadGroups,
+    loadGroups: storage_1.loadGroups,
     loadMcpTools: db_1.loadMcpTools,
     loadOrchestratorConfig: group_orchestrator_1.loadOrchestratorConfig,
     loadSkills: db_1.loadSkills,
@@ -714,7 +729,7 @@ const globalAgentFeishuChannel = (0, global_agent_feishu_channel_1.createGlobalA
     globalRunVisibleReply,
     isGlobalProgressStatusRequest,
     listGlobalAgentRuns: loop_1.listGlobalAgentRuns,
-    loadGroups: collaboration_1.loadGroups,
+    loadGroups: storage_1.loadGroups,
     notifyFeishuTaskStage: feishu_channel_1.notifyFeishuTaskStage,
     listTaskPermissionRequests: task_permission_broker_1.listTaskPermissionRequests,
     postLocalApi,
@@ -804,7 +819,7 @@ const globalAgentApi = (0, global_agent_api_1.createGlobalAgentApi)({
     loadGlobalAgentPermissionRules: runtime_1.loadGlobalAgentPermissionRules,
     loadGlobalAgentBridgeStore,
     loadGlobalAgentHistoryStore,
-    loadGroups: collaboration_1.loadGroups,
+    loadGroups: storage_1.loadGroups,
     loadOrchestratorConfig: group_orchestrator_1.loadOrchestratorConfig,
     loadTasks: db_1.loadTasks,
     normalizeFeishuEventPayload,

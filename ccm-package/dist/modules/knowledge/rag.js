@@ -306,7 +306,8 @@ async function handleKnowledgeChat(payload, res, readOnly = false) {
         modelReady: true,
     });
 }
-void (0, knowledge_index_1.rebuildKnowledgeIndex)("startup").then(() => knowledge_watcher_1.knowledgeDirectoryWatcher.start());
+// Defer startup until knowledge-index.ts has completed its CommonJS cycle.
+queueMicrotask(() => void (0, knowledge_index_1.rebuildKnowledgeIndex)("startup").then(() => knowledge_watcher_1.knowledgeDirectoryWatcher.start()));
 function handleRagApi(pathname, req, res, parsed) {
     if (pathname === "/api/rag/status" && req.method === "GET") {
         const embedding = (0, knowledge_files_1.publicRagEmbeddingConfig)((0, knowledge_files_1.loadRagEmbeddingConfig)());

@@ -2793,7 +2793,7 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             error: z.ZodOptional<z.ZodString>;
         }, "strict", z.ZodTypeAny, {
             id?: string;
-            status?: "released" | "open" | "retained" | "cleanup_failed";
+            status?: "open" | "released" | "retained" | "cleanup_failed";
             error?: string;
             provider?: "mcp" | "playwright";
             scope?: string;
@@ -2805,7 +2805,7 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             releaseAttemptedAt?: string;
         }, {
             id?: string;
-            status?: "released" | "open" | "retained" | "cleanup_failed";
+            status?: "open" | "released" | "retained" | "cleanup_failed";
             error?: string;
             provider?: "mcp" | "playwright";
             scope?: string;
@@ -2820,7 +2820,7 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
         status?: "complete" | "invalid" | "incomplete";
         events?: {
             id?: string;
-            status?: "released" | "open" | "retained" | "cleanup_failed";
+            status?: "open" | "released" | "retained" | "cleanup_failed";
             error?: string;
             provider?: "mcp" | "playwright";
             scope?: string;
@@ -2852,7 +2852,7 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
         status?: "complete" | "invalid" | "incomplete";
         events?: {
             id?: string;
-            status?: "released" | "open" | "retained" | "cleanup_failed";
+            status?: "open" | "released" | "retained" | "cleanup_failed";
             error?: string;
             provider?: "mcp" | "playwright";
             scope?: string;
@@ -7494,7 +7494,7 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             error: z.ZodOptional<z.ZodString>;
         }, "strict", z.ZodTypeAny, {
             id?: string;
-            status?: "released" | "open" | "retained" | "cleanup_failed";
+            status?: "open" | "released" | "retained" | "cleanup_failed";
             error?: string;
             provider?: "mcp" | "playwright";
             scope?: string;
@@ -7506,7 +7506,7 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             releaseAttemptedAt?: string;
         }, {
             id?: string;
-            status?: "released" | "open" | "retained" | "cleanup_failed";
+            status?: "open" | "released" | "retained" | "cleanup_failed";
             error?: string;
             provider?: "mcp" | "playwright";
             scope?: string;
@@ -7521,7 +7521,7 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
         status?: "complete" | "invalid" | "incomplete";
         events?: {
             id?: string;
-            status?: "released" | "open" | "retained" | "cleanup_failed";
+            status?: "open" | "released" | "retained" | "cleanup_failed";
             error?: string;
             provider?: "mcp" | "playwright";
             scope?: string;
@@ -7553,7 +7553,7 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
         status?: "complete" | "invalid" | "incomplete";
         events?: {
             id?: string;
-            status?: "released" | "open" | "retained" | "cleanup_failed";
+            status?: "open" | "released" | "retained" | "cleanup_failed";
             error?: string;
             provider?: "mcp" | "playwright";
             scope?: string;
@@ -12195,7 +12195,7 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             error: z.ZodOptional<z.ZodString>;
         }, "strict", z.ZodTypeAny, {
             id?: string;
-            status?: "released" | "open" | "retained" | "cleanup_failed";
+            status?: "open" | "released" | "retained" | "cleanup_failed";
             error?: string;
             provider?: "mcp" | "playwright";
             scope?: string;
@@ -12207,7 +12207,7 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             releaseAttemptedAt?: string;
         }, {
             id?: string;
-            status?: "released" | "open" | "retained" | "cleanup_failed";
+            status?: "open" | "released" | "retained" | "cleanup_failed";
             error?: string;
             provider?: "mcp" | "playwright";
             scope?: string;
@@ -12222,7 +12222,7 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
         status?: "complete" | "invalid" | "incomplete";
         events?: {
             id?: string;
-            status?: "released" | "open" | "retained" | "cleanup_failed";
+            status?: "open" | "released" | "retained" | "cleanup_failed";
             error?: string;
             provider?: "mcp" | "playwright";
             scope?: string;
@@ -12254,7 +12254,7 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
         status?: "complete" | "invalid" | "incomplete";
         events?: {
             id?: string;
-            status?: "released" | "open" | "retained" | "cleanup_failed";
+            status?: "open" | "released" | "retained" | "cleanup_failed";
             error?: string;
             provider?: "mcp" | "playwright";
             scope?: string;
@@ -16896,7 +16896,7 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             error: z.ZodOptional<z.ZodString>;
         }, "strict", z.ZodTypeAny, {
             id?: string;
-            status?: "released" | "open" | "retained" | "cleanup_failed";
+            status?: "open" | "released" | "retained" | "cleanup_failed";
             error?: string;
             provider?: "mcp" | "playwright";
             scope?: string;
@@ -16908,7 +16908,7 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             releaseAttemptedAt?: string;
         }, {
             id?: string;
-            status?: "released" | "open" | "retained" | "cleanup_failed";
+            status?: "open" | "released" | "retained" | "cleanup_failed";
             error?: string;
             provider?: "mcp" | "playwright";
             scope?: string;
@@ -16923,7 +16923,7 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
         status?: "complete" | "invalid" | "incomplete";
         events?: {
             id?: string;
-            status?: "released" | "open" | "retained" | "cleanup_failed";
+            status?: "open" | "released" | "retained" | "cleanup_failed";
             error?: string;
             provider?: "mcp" | "playwright";
             scope?: string;
@@ -16955,7 +16955,7 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
         status?: "complete" | "invalid" | "incomplete";
         events?: {
             id?: string;
-            status?: "released" | "open" | "retained" | "cleanup_failed";
+            status?: "open" | "released" | "retained" | "cleanup_failed";
             error?: string;
             provider?: "mcp" | "playwright";
             scope?: string;
@@ -21597,7 +21597,7 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             error: z.ZodOptional<z.ZodString>;
         }, "strict", z.ZodTypeAny, {
             id?: string;
-            status?: "released" | "open" | "retained" | "cleanup_failed";
+            status?: "open" | "released" | "retained" | "cleanup_failed";
             error?: string;
             provider?: "mcp" | "playwright";
             scope?: string;
@@ -21609,7 +21609,7 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             releaseAttemptedAt?: string;
         }, {
             id?: string;
-            status?: "released" | "open" | "retained" | "cleanup_failed";
+            status?: "open" | "released" | "retained" | "cleanup_failed";
             error?: string;
             provider?: "mcp" | "playwright";
             scope?: string;
@@ -21624,7 +21624,7 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
         status?: "complete" | "invalid" | "incomplete";
         events?: {
             id?: string;
-            status?: "released" | "open" | "retained" | "cleanup_failed";
+            status?: "open" | "released" | "retained" | "cleanup_failed";
             error?: string;
             provider?: "mcp" | "playwright";
             scope?: string;
@@ -21656,7 +21656,7 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
         status?: "complete" | "invalid" | "incomplete";
         events?: {
             id?: string;
-            status?: "released" | "open" | "retained" | "cleanup_failed";
+            status?: "open" | "released" | "retained" | "cleanup_failed";
             error?: string;
             provider?: "mcp" | "playwright";
             scope?: string;
@@ -26470,7 +26470,7 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 error: z.ZodOptional<z.ZodString>;
             }, "strict", z.ZodTypeAny, {
                 id?: string;
-                status?: "released" | "open" | "retained" | "cleanup_failed";
+                status?: "open" | "released" | "retained" | "cleanup_failed";
                 error?: string;
                 provider?: "mcp" | "playwright";
                 scope?: string;
@@ -26482,7 +26482,7 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 releaseAttemptedAt?: string;
             }, {
                 id?: string;
-                status?: "released" | "open" | "retained" | "cleanup_failed";
+                status?: "open" | "released" | "retained" | "cleanup_failed";
                 error?: string;
                 provider?: "mcp" | "playwright";
                 scope?: string;
@@ -26497,7 +26497,7 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             status?: "complete" | "invalid" | "incomplete";
             events?: {
                 id?: string;
-                status?: "released" | "open" | "retained" | "cleanup_failed";
+                status?: "open" | "released" | "retained" | "cleanup_failed";
                 error?: string;
                 provider?: "mcp" | "playwright";
                 scope?: string;
@@ -26529,7 +26529,7 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             status?: "complete" | "invalid" | "incomplete";
             events?: {
                 id?: string;
-                status?: "released" | "open" | "retained" | "cleanup_failed";
+                status?: "open" | "released" | "retained" | "cleanup_failed";
                 error?: string;
                 provider?: "mcp" | "playwright";
                 scope?: string;
@@ -31171,7 +31171,7 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 error: z.ZodOptional<z.ZodString>;
             }, "strict", z.ZodTypeAny, {
                 id?: string;
-                status?: "released" | "open" | "retained" | "cleanup_failed";
+                status?: "open" | "released" | "retained" | "cleanup_failed";
                 error?: string;
                 provider?: "mcp" | "playwright";
                 scope?: string;
@@ -31183,7 +31183,7 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 releaseAttemptedAt?: string;
             }, {
                 id?: string;
-                status?: "released" | "open" | "retained" | "cleanup_failed";
+                status?: "open" | "released" | "retained" | "cleanup_failed";
                 error?: string;
                 provider?: "mcp" | "playwright";
                 scope?: string;
@@ -31198,7 +31198,7 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             status?: "complete" | "invalid" | "incomplete";
             events?: {
                 id?: string;
-                status?: "released" | "open" | "retained" | "cleanup_failed";
+                status?: "open" | "released" | "retained" | "cleanup_failed";
                 error?: string;
                 provider?: "mcp" | "playwright";
                 scope?: string;
@@ -31230,7 +31230,7 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             status?: "complete" | "invalid" | "incomplete";
             events?: {
                 id?: string;
-                status?: "released" | "open" | "retained" | "cleanup_failed";
+                status?: "open" | "released" | "retained" | "cleanup_failed";
                 error?: string;
                 provider?: "mcp" | "playwright";
                 scope?: string;
@@ -35872,7 +35872,7 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 error: z.ZodOptional<z.ZodString>;
             }, "strict", z.ZodTypeAny, {
                 id?: string;
-                status?: "released" | "open" | "retained" | "cleanup_failed";
+                status?: "open" | "released" | "retained" | "cleanup_failed";
                 error?: string;
                 provider?: "mcp" | "playwright";
                 scope?: string;
@@ -35884,7 +35884,7 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 releaseAttemptedAt?: string;
             }, {
                 id?: string;
-                status?: "released" | "open" | "retained" | "cleanup_failed";
+                status?: "open" | "released" | "retained" | "cleanup_failed";
                 error?: string;
                 provider?: "mcp" | "playwright";
                 scope?: string;
@@ -35899,7 +35899,7 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             status?: "complete" | "invalid" | "incomplete";
             events?: {
                 id?: string;
-                status?: "released" | "open" | "retained" | "cleanup_failed";
+                status?: "open" | "released" | "retained" | "cleanup_failed";
                 error?: string;
                 provider?: "mcp" | "playwright";
                 scope?: string;
@@ -35931,7 +35931,7 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             status?: "complete" | "invalid" | "incomplete";
             events?: {
                 id?: string;
-                status?: "released" | "open" | "retained" | "cleanup_failed";
+                status?: "open" | "released" | "retained" | "cleanup_failed";
                 error?: string;
                 provider?: "mcp" | "playwright";
                 scope?: string;
@@ -40573,7 +40573,7 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 error: z.ZodOptional<z.ZodString>;
             }, "strict", z.ZodTypeAny, {
                 id?: string;
-                status?: "released" | "open" | "retained" | "cleanup_failed";
+                status?: "open" | "released" | "retained" | "cleanup_failed";
                 error?: string;
                 provider?: "mcp" | "playwright";
                 scope?: string;
@@ -40585,7 +40585,7 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 releaseAttemptedAt?: string;
             }, {
                 id?: string;
-                status?: "released" | "open" | "retained" | "cleanup_failed";
+                status?: "open" | "released" | "retained" | "cleanup_failed";
                 error?: string;
                 provider?: "mcp" | "playwright";
                 scope?: string;
@@ -40600,7 +40600,7 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             status?: "complete" | "invalid" | "incomplete";
             events?: {
                 id?: string;
-                status?: "released" | "open" | "retained" | "cleanup_failed";
+                status?: "open" | "released" | "retained" | "cleanup_failed";
                 error?: string;
                 provider?: "mcp" | "playwright";
                 scope?: string;
@@ -40632,7 +40632,7 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             status?: "complete" | "invalid" | "incomplete";
             events?: {
                 id?: string;
-                status?: "released" | "open" | "retained" | "cleanup_failed";
+                status?: "open" | "released" | "retained" | "cleanup_failed";
                 error?: string;
                 provider?: "mcp" | "playwright";
                 scope?: string;
@@ -45274,7 +45274,7 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 error: z.ZodOptional<z.ZodString>;
             }, "strict", z.ZodTypeAny, {
                 id?: string;
-                status?: "released" | "open" | "retained" | "cleanup_failed";
+                status?: "open" | "released" | "retained" | "cleanup_failed";
                 error?: string;
                 provider?: "mcp" | "playwright";
                 scope?: string;
@@ -45286,7 +45286,7 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
                 releaseAttemptedAt?: string;
             }, {
                 id?: string;
-                status?: "released" | "open" | "retained" | "cleanup_failed";
+                status?: "open" | "released" | "retained" | "cleanup_failed";
                 error?: string;
                 provider?: "mcp" | "playwright";
                 scope?: string;
@@ -45301,7 +45301,7 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             status?: "complete" | "invalid" | "incomplete";
             events?: {
                 id?: string;
-                status?: "released" | "open" | "retained" | "cleanup_failed";
+                status?: "open" | "released" | "retained" | "cleanup_failed";
                 error?: string;
                 provider?: "mcp" | "playwright";
                 scope?: string;
@@ -45333,7 +45333,7 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             status?: "complete" | "invalid" | "incomplete";
             events?: {
                 id?: string;
-                status?: "released" | "open" | "retained" | "cleanup_failed";
+                status?: "open" | "released" | "retained" | "cleanup_failed";
                 error?: string;
                 provider?: "mcp" | "playwright";
                 scope?: string;
@@ -47755,7 +47755,7 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             status?: "complete" | "invalid" | "incomplete";
             events?: {
                 id?: string;
-                status?: "released" | "open" | "retained" | "cleanup_failed";
+                status?: "open" | "released" | "retained" | "cleanup_failed";
                 error?: string;
                 provider?: "mcp" | "playwright";
                 scope?: string;
@@ -48066,8 +48066,8 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
         }, z.ZodTypeAny, "passthrough">[];
         evidenceSummary?: {
-            commands?: Record<string, number>;
             artifacts?: number;
+            commands?: Record<string, number>;
             httpChecks?: Record<string, number>;
             browserChecks?: Record<string, number>;
             browserToolCalls?: Record<string, number>;
@@ -48660,7 +48660,7 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             status?: "complete" | "invalid" | "incomplete";
             events?: {
                 id?: string;
-                status?: "released" | "open" | "retained" | "cleanup_failed";
+                status?: "open" | "released" | "retained" | "cleanup_failed";
                 error?: string;
                 provider?: "mcp" | "playwright";
                 scope?: string;
@@ -48971,8 +48971,8 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
         }, z.ZodTypeAny, "passthrough">[];
         evidenceSummary?: {
-            commands?: Record<string, number>;
             artifacts?: number;
+            commands?: Record<string, number>;
             httpChecks?: Record<string, number>;
             browserChecks?: Record<string, number>;
             browserToolCalls?: Record<string, number>;
@@ -49565,7 +49565,7 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             status?: "complete" | "invalid" | "incomplete";
             events?: {
                 id?: string;
-                status?: "released" | "open" | "retained" | "cleanup_failed";
+                status?: "open" | "released" | "retained" | "cleanup_failed";
                 error?: string;
                 provider?: "mcp" | "playwright";
                 scope?: string;
@@ -49876,8 +49876,8 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
         }, z.ZodTypeAny, "passthrough">[];
         evidenceSummary?: {
-            commands?: Record<string, number>;
             artifacts?: number;
+            commands?: Record<string, number>;
             httpChecks?: Record<string, number>;
             browserChecks?: Record<string, number>;
             browserToolCalls?: Record<string, number>;
@@ -50470,7 +50470,7 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             status?: "complete" | "invalid" | "incomplete";
             events?: {
                 id?: string;
-                status?: "released" | "open" | "retained" | "cleanup_failed";
+                status?: "open" | "released" | "retained" | "cleanup_failed";
                 error?: string;
                 provider?: "mcp" | "playwright";
                 scope?: string;
@@ -50781,8 +50781,8 @@ export declare const TestAgentInvocationResultContractSchema: z.ZodEffects<z.Zod
             evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
         }, z.ZodTypeAny, "passthrough">[];
         evidenceSummary?: {
-            commands?: Record<string, number>;
             artifacts?: number;
+            commands?: Record<string, number>;
             httpChecks?: Record<string, number>;
             browserChecks?: Record<string, number>;
             browserToolCalls?: Record<string, number>;

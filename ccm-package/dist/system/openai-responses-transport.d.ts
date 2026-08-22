@@ -1,5 +1,12 @@
 import type { LlmChatMessage } from "../modules/collaboration/group-orchestrator-llm-client";
 import type { ProviderToolDefinition } from "./provider-native-tools";
+export declare function shouldOmitOpenAiResponsesMaxOutputTokens(endpoint: string, model: string): boolean;
+export declare function rememberOpenAiResponsesMaxOutputTokensUnsupported(endpoint: string, model: string): void;
+export declare function shouldOmitOpenAiResponsesTemperature(endpoint: string, model: string): boolean;
+export declare function rememberOpenAiResponsesTemperatureUnsupported(endpoint: string, model: string): void;
+export declare function shouldRetryOpenAiResponsesWithoutMaxOutputTokens(status: number, detail: string): boolean;
+export declare function shouldRetryOpenAiResponsesWithoutTemperature(status: number, detail: string): boolean;
+export declare function isOpenAiResponsesSse(response: any): boolean;
 export declare function normalizeOpenAiResponsesUrl(value: string): string;
 export declare function encodeOpenAiResponsesInput(messages: LlmChatMessage[]): any[];
 export declare function buildOpenAiResponsesTools(tools?: ProviderToolDefinition[]): {

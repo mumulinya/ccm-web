@@ -2,6 +2,8 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.bootstrapServerRuntime = bootstrapServerRuntime;
 // Mechanically extracted startup recovery and scheduler bootstrap.
+const session_task_timeline_1 = require("./tasks/session-task-timeline");
+const task_conversation_projection_1 = require("./system/task-conversation-projection");
 function bootstrapServerRuntime(startupCollabCtx, port, deps) {
     const { CCM_DIR, CONFIGS_DIR, bootstrapGlobalAgentMemoryForServer, bootstrapGroupSessionLifecycleJournals, conversationTurnControl, ensureRoleSkillsInstalled, listTaskAgentInvocationEdges, listTaskAgentSessions, loadFeishuConfig, migrateConfigDirectory, migrateTomlCredentials, path, reconcileGroupSessionLifecycleAgentCancellations, reconcileMemoryContextConsumptionReceipts, reconcileMemoryContextConsumptionRecoveries, reconcileInterruptedProjectMainTasks, reconcileTaskAgentContinuationSoak, reconcileTaskAgentInvocationRecovery, recoverChildTypedMemoryDispatchWal, recoverGroupTypedMemoryArtifactTransactionsFleet, refreshEnvPath, resumeSoakTest, resumeTaskQueues, saveFeishuConfig, startAgentRecoveryMonitor, startCronScheduler, startGlobalMissionSupervisionForServer, startGroupSessionRetentionMaintenanceScheduler, startReliabilityDrillScheduler, startTaskWatchdog, startUsabilityArchiveScheduler, toolManager } = deps;
     const recoveredConversationTurns = conversationTurnControl.recoverInterrupted();
@@ -83,6 +85,14 @@ function bootstrapServerRuntime(startupCollabCtx, port, deps) {
         console.log(`[项目主 Agent] 启动检查 ${projectMainRecovery.checked} 个中断编排：`
             + `安全暂停 ${projectMainRecovery.interrupted} 个，`
             + `仍由其他实例执行 ${projectMainRecovery.active_elsewhere} 个`);
+    }
+    const taskContextRecovery = (0, session_task_timeline_1.recoverTaskContextProjectors)();
+    if (taskContextRecovery.checked > 0 || taskContextRecovery.outbox.published > 0) {
+        console.log(`[任务上下文投影] 检查 ${taskContextRecovery.checked} 个任务：当前 ${taskContextRecovery.current}，追赶 ${taskContextRecovery.caughtUp}，漂移 ${taskContextRecovery.drifted}，发布 ${taskContextRecovery.outbox.published}`);
+    }
+    const conversationProjectionRecovery = (0, task_conversation_projection_1.reconcileTaskConversationProjections)();
+    if (conversationProjectionRecovery.checked > 0) {
+        console.log(`[任务会话投影] 检查 ${conversationProjectionRecovery.checked} 个任务：同步 ${conversationProjectionRecovery.synced}，当前 ${conversationProjectionRecovery.unchanged}，跳过 ${conversationProjectionRecovery.skipped}，失败 ${conversationProjectionRecovery.failed}`);
     }
     const resumeResult = resumeTaskQueues(startupCollabCtx);
     if (resumeResult.total > 0) {

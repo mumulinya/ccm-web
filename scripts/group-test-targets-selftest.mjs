@@ -81,7 +81,9 @@ const result = spawnSync(process.execPath, ['-e', probe], {
 
 try {
   assert.equal(result.status, 0, result.stderr || result.stdout)
-  const output = JSON.parse(result.stdout.trim().split(/\r?\n/).at(-1))
+  const outputLine = result.stdout.trim().split(/\r?\n/).reverse().find(line => line.trim().startsWith('{'))
+  assert.ok(outputLine, result.stdout || '群聊测试目标回归未返回 JSON 回执')
+  const output = JSON.parse(outputLine)
   assert.equal(output.checks, 15)
   assert.equal(output.paidProviderCalls, 0)
   console.log(`group-test-targets self-test: ${output.checks}/15 checks passed; paid provider calls: 0`)

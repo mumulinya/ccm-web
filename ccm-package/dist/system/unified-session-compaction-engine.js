@@ -44,6 +44,7 @@ const session_execution_ledger_1 = require("./session-execution-ledger");
 const unified_session_compaction_1 = require("./unified-session-compaction");
 const unified_session_compaction_recovery_1 = require("./unified-session-compaction-recovery");
 const unified_session_compaction_summary_1 = require("./unified-session-compaction-summary");
+const session_task_timeline_1 = require("../tasks/session-task-timeline");
 function checksum(value) {
     return crypto.createHash("sha256").update(JSON.stringify(value ?? null)).digest("hex");
 }
@@ -185,6 +186,11 @@ class UnifiedSessionCompactionEngine {
             }).decision;
             const recent = selectRecentWindow(snapshot, policy);
             const mustSummarize = decision.required || this.input.force === true || this.input.promptTooLong === true;
+            if (mustSummarize && snapshot.taskTimeline?.currentTaskId) {
+                const taskSnapshot = (0, session_task_timeline_1.snapshotTaskContextForBoundary)(String(snapshot.taskTimeline.currentTaskId), "compaction_boundary");
+                if (taskSnapshot.success)
+                    snapshot = { ...snapshot, taskTimeline: { ...snapshot.taskTimeline, taskContextRevision: taskSnapshot.revision, taskContextChecksum: taskSnapshot.checksum } };
+            }
             let summary = null;
             let summarySource = "none";
             let quality = { valid: true, score: 100, issues: [] };

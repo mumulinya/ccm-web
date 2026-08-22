@@ -226,7 +226,8 @@ export function buildPlanDispatchContract(input: {
   const agentType = text(input.agentType || provider, 80) || provider;
   const capabilities = normalizeCapabilities(input.capabilities);
   const sourceManifestChecksum = text(input.sourceManifestChecksum || plan.sourceManifestChecksum || plan.source_manifest_checksum || plan.sourceEvidence?.manifestChecksum, 120);
-  const blockers = validatePlanForDispatch({ ...plan, sourceManifestChecksum }, { allowedProjects: input.project ? [input.project] : [] }).issues;
+  const planForValidation = sourceManifestChecksum ? { ...plan, sourceManifestChecksum } : plan;
+  const blockers = validatePlanForDispatch(planForValidation, { allowedProjects: input.project ? [input.project] : [] }).issues;
   if (capabilities.writeScope !== true) blockers.push("Provider 无法证明写入范围，禁止派发");
   if (capabilities.sessionBinding !== true) blockers.push("Provider 无法证明任务身份绑定，禁止派发");
   const stepToWork = new Map<string, string>();
@@ -287,7 +288,8 @@ export function validatePlanDispatchContract(contract: any, expected: any = {}) 
 }
 
 export function runPlanDispatchContractSelfTest() {
-  const plan = { schema: "ccm-implementation-plan-v2", planId: "p1", revision: 1, checksum: "pchecksum", sourceEvidenceChecksum: "", sourceManifestChecksum: "manifest", files: [{ project: "web", path: "src/a.ts", sourceEvidenceIds: ["e1"] }, { project: "web", path: "src/b.ts", sourceEvidenceIds: ["e2"] }], steps: [{ id: "a", title: "A", objective: "A", files: ["src/a.ts"], sourceEvidenceIds: ["e1"], acceptance: ["A done"], verification: [{ command: "npm test", expected: "pass" }] }, { id: "b", title: "B", objective: "B", files: ["src/b.ts"], sourceEvidenceIds: ["e2"], acceptance: ["B done"], verification: [{ command: "npm test", expected: "pass" }] }] };
+  const plan: any = { schema: "ccm-implementation-plan-v2", planId: "p1", revision: 1, checksum: "", sourceEvidenceChecksum: "", sourceManifestChecksum: "manifest", files: [{ project: "web", path: "src/a.ts", sourceEvidenceIds: ["e1"] }, { project: "web", path: "src/b.ts", sourceEvidenceIds: ["e2"] }], steps: [{ id: "a", title: "A", objective: "A", files: ["src/a.ts"], sourceEvidenceIds: ["e1"], acceptance: ["A done"], verification: [{ command: "npm test", expected: "pass" }] }, { id: "b", title: "B", objective: "B", files: ["src/b.ts"], sourceEvidenceIds: ["e2"], acceptance: ["B done"], verification: [{ command: "npm test", expected: "pass" }] }] };
+  plan.checksum = implementationPlanChecksum(plan);
   const contract = buildPlanDispatchContract({ plan, taskId: "t1", project: "web", capabilities: { writeScope: true, sessionBinding: true, structuredToolStream: true, structuredReceipt: true, worktree: true } });
   const checks = { hasContract: contract.schema === CCM_PLAN_DISPATCH_CONTRACT_SCHEMA, ready: contract.dispatchReady === true, parallel: contract.workItems[0]?.parallelGroup !== contract.workItems[1]?.parallelGroup, validates: validatePlanDispatchContract(contract).valid };
   return { pass: Object.values(checks).every(Boolean), checks, contract };

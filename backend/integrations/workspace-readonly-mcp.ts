@@ -10,6 +10,7 @@ import {
   type MainAgentScopeKind,
   type ScopedToolCapabilityV1,
 } from "../tools/workspace-readonly-tools";
+import { addTaskFileEvidence } from "../tasks/task-context";
 
 export const WORKSPACE_READONLY_MCP_SERVER_NAME = "ccm__workspace_readonly";
 const MAIN_AGENT_ROLES: InternalMcpAgentRole[] = ["global-agent", "group-main-agent", "project-agent"];
@@ -55,5 +56,25 @@ runInternalMcpServer({
   name: WORKSPACE_READONLY_MCP_SERVER_NAME,
   version: "2.0.0",
   tools,
-  callTool: (context, name, args) => executeWorkspaceReadonlyToolWithCapability(name, args, capabilityFromContext(context), 3),
+  callTool: async (context, name, args) => {
+    const result: any = await executeWorkspaceReadonlyToolWithCapability(name, args, capabilityFromContext(context), 3);
+    if (context.bindingKind === "task" && context.taskId && /(?:^|_)(?:read_file|read_text_file)$/.test(String(name || "")) && result?.path && result?.checksum) {
+      try {
+        const lines = Array.isArray(result.lines) ? result.lines : [];
+        const starts = lines.map((row: any) => Number(row?.line || 0)).filter((value: number) => value > 0);
+        addTaskFileEvidence(context.taskId, {
+          evidenceId: `mcp-read:${context.taskId}:${result.checksum}:${result.offset || starts[0] || 1}`,
+          project: context.project,
+          path: result.path,
+          checksum: result.checksum,
+          readRanges: starts.length ? [{ start: Math.min(...starts), end: Math.max(...starts) }] : [],
+          purpose: String(args?.purpose || "workspace_readonly_mcp"),
+          workItemIds: context.communicationMessageId ? [context.communicationMessageId] : [],
+        });
+      } catch (error: any) {
+        console.warn(`[workspace-readonly-mcp] task evidence append failed: ${error?.message || error}`);
+      }
+    }
+    return result;
+  },
 });

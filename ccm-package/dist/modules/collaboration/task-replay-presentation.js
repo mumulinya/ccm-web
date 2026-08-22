@@ -266,6 +266,29 @@ function buildActionCenter(input) {
         ...input.tasks.flatMap(task => explicitActions(task?.available_actions || task?.availableActions, String(task?.id || ""))),
         ...input.events.flatMap(event => explicitActions(event?.available_actions || event?.technical?.available_actions, String(event?.task_id || ""))),
     ];
+    const continuationKinds = new Set(["retry", "resume_interrupted", "resume_paused", "continue"]);
+    const taskIdsWithContinuation = new Set(rows
+        .filter(row => continuationKinds.has(String(row.kind || "")))
+        .map(row => String(row.taskId || "")));
+    for (const task of input.tasks) {
+        const taskId = String(task?.id || "").trim();
+        const status = String(task?.status || "").toLowerCase();
+        if (!taskId || taskIdsWithContinuation.has(taskId) || !["blocked", "failed", "cancelled", "canceled"].includes(status))
+            continue;
+        const interrupted = task?.interruption_receipt?.schema === "ccm-task-interruption-receipt-v1"
+            || String(task?.acceptance_state || "") === "recovery_required";
+        rows.push({
+            id: `${taskId}:${interrupted ? "resume_interrupted" : "retry"}:replay`,
+            taskId,
+            kind: interrupted ? "resume_interrupted" : "retry",
+            label: "继续任务",
+            enabled: true,
+            disabledReason: "",
+            revision: Math.max(0, Number(task?.revision || task?.task_revision || 0)),
+            generation: Math.max(0, Number(task?.generation || task?.workflow_generation || 0)),
+            bindingChecksum: (0, task_replay_shared_1.safeText)(task?.binding_checksum || task?.bindingChecksum, 160),
+        });
+    }
     const seen = new Set();
     return rows.filter(row => {
         const key = `${row.taskId}|${row.id}|${row.kind}`;
@@ -559,6 +582,25 @@ function runTaskReplayPresentationSelfTest() {
         ],
         status: "done", acceptanceState: "accepted", startedAt: "2026-08-01T00:00:00.000Z", finishedAt: "2026-08-01T00:02:00.000Z",
     });
+    const recoverable = buildTaskReplayPresentation({
+        root: { id: "recoverable", business_goal: "恢复中断任务" },
+        tasks: [{
+                id: "recoverable",
+                status: "cancelled",
+                acceptance_state: "recovery_required",
+                interruption_receipt: { schema: "ccm-task-interruption-receipt-v1" },
+                available_actions: [{ kind: "view_error", enabled: true, label: "查看错误" }],
+            }],
+        plans: [],
+        workItems: [],
+        deliveries: [],
+        evidence: [],
+        events: [],
+        status: "cancelled",
+        acceptanceState: "recovery_required",
+        startedAt: "2026-08-01T00:00:00.000Z",
+        finishedAt: "2026-08-01T00:01:00.000Z",
+    });
     const checks = {
         schema: presentation.schema === "ccm-task-replay-presentation-v5",
         six_chapters: presentation.chapters.length === 6,
@@ -567,6 +609,8 @@ function runTaskReplayPresentationSelfTest() {
         attempt_preserved: presentation.attempts[0]?.attempt === 2,
         integrity_present: !!presentation.integrity?.level,
         causal_chain_present: presentation.causalChain?.nodes?.length > 0,
+        recoverable_view_error_preserved: recoverable.actionCenter.some(action => action.kind === "view_error"),
+        recoverable_continue_added: recoverable.actionCenter.some(action => action.kind === "resume_interrupted" && action.enabled === true),
         no_content: presentation.contentStored === false,
     };
     return { schema: "ccm-task-replay-presentation-selftest-v1", pass: Object.values(checks).every(Boolean), checks };

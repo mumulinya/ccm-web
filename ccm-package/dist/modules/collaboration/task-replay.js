@@ -66,6 +66,7 @@ const observability_database_1 = require("../../system/observability-database");
 const unified_evidence_registry_1 = require("../../system/unified-evidence-registry");
 const user_visible_agent_events_1 = require("../../system/user-visible-agent-events");
 const task_context_1 = require("../../tasks/task-context");
+const session_task_timeline_1 = require("../../tasks/session-task-timeline");
 const STAGE_ORDER = ["intake", "planning", "dispatch", "execution", "change", "test", "rework", "review", "completion", "system"];
 const TERMINAL = new Set(["done", "completed", "failed", "blocked", "cancelled", "reverted"]);
 function safeTechnical(value, depth = 0) {
@@ -1069,6 +1070,7 @@ function taskPublicRow(task, rootId) {
     };
 }
 function buildCompleteTaskReplay(taskId, options = {}) {
+    (0, session_task_timeline_1.catchUpTaskContext)(String(taskId || ""));
     const family = taskFamily(String(taskId || ""));
     if (!family)
         return null;

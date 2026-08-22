@@ -11,7 +11,6 @@ process.env.CCM_GLOBAL_AGENT_MEMORY_DIR = path.join(root, "global-agent-memory")
 const memoryModule = await import("../ccm-package/dist/agents/global/memory.js");
 const {
   compactGlobalAgentSessionWithModel,
-  buildGlobalAgentSessionContinuation,
   ingestGlobalAgentConversation,
   loadGlobalAgentMemory,
   loadGlobalAgentTranscript,
@@ -94,45 +93,7 @@ try {
   assert.equal(afterFailure.archives.some(archive => archive.sessionId === failureId), false);
   assert.equal(afterFailure.sessions.find(session => session.sessionId === failureId)?.summary, undefined);
   assert.equal(loadGlobalAgentTranscript(failureId).messages.length, failureMessages.length);
-  assert.equal(afterFailure.compaction.health, "degraded");
-
-  const legacyLowPressureId = "session_legacy_low_pressure";
-  const legacyLowPressureMessages = makeMessages("legacy-low", 8);
-  ingestGlobalAgentConversation({ sessionId: legacyLowPressureId, source: "selftest", messages: legacyLowPressureMessages, compact: false });
-  const memoryFile = path.join(process.env.CCM_GLOBAL_AGENT_MEMORY_DIR, "memory.json");
-  const legacyMemory = JSON.parse(fs.readFileSync(memoryFile, "utf8"));
-  const legacySession = legacyMemory.sessions.find(session => session.sessionId === legacyLowPressureId);
-  legacySession.summary = {
-    primaryRequest: "旧版规则摘要仅供审计",
-    sourceMessageIds: legacyLowPressureMessages.slice(0, 2).map(message => message.id),
-  };
-  legacySession.lastCompactedIndex = 1;
-  legacySession.compaction = {
-    ...(legacySession.compaction || {}),
-    schema: "ccm-session-compaction-state-v2",
-    scope: "global",
-    sessionId: legacyLowPressureId,
-    lastCompactedIndex: -1,
-    consecutiveFailures: 3,
-    lastError: "模型摘要校验失败：source_boundary_mismatch",
-  };
-  fs.writeFileSync(memoryFile, JSON.stringify(legacyMemory, null, 2));
-  let legacyLowPressureModelCalls = 0;
-  const legacyLowPressureResult = await compactGlobalAgentSessionWithModel(legacyLowPressureId, {
-    reason: "auto_model",
-    currentRequest: { role: "user", content: "继续普通对话" },
-    modelCall: async () => {
-      legacyLowPressureModelCalls += 1;
-      throw new Error("低压力会话不应调用压缩模型");
-    },
-  });
-  assert.equal(legacyLowPressureResult.reason, "below_threshold");
-  assert.equal(legacyLowPressureResult.legacySummaryIgnored, true);
-  assert.equal(legacyLowPressureModelCalls, 0);
-  assert.equal(loadGlobalAgentMemory().sessions.find(session => session.sessionId === legacyLowPressureId)?.compaction?.consecutiveFailures, 0);
-  const legacyContinuation = buildGlobalAgentSessionContinuation(legacyLowPressureId);
-  assert.equal(legacyContinuation.summary, null, "旧本地摘要不得注入模型连续性上下文");
-  assert.equal(legacyContinuation.messages.length, legacyLowPressureMessages.length, "旧摘要不可信时必须回退到原始 transcript");
+  assert.equal(afterFailure.sessions.find(session => session.sessionId === failureId)?.unifiedSessionCompactionFailure?.contentStored, false);
 
   const chainId = "session_model_chain";
   ingestGlobalAgentConversation({ sessionId: chainId, source: "selftest", messages: makeMessages("chain-s1", 70), compact: false });
@@ -186,12 +147,12 @@ try {
     target_session: targetId,
     sibling_isolated: true,
     invalid_model_fail_closed: true,
-    legacy_low_pressure_not_compacted: true,
-    legacy_summary_not_injected: true,
-    legacy_boundary_circuit_repaired: true,
+    unified_failure_isolated: true,
     session_memory_chain: "S1 -> S2 -> S3",
     real_provider_calls: 0,
   }, null, 2));
 } finally {
+  const taskStore = await import("../ccm-package/dist/core/task-store.js");
+  taskStore.closeSqliteTaskStore();
   fs.rmSync(root, { recursive: true, force: true });
 }

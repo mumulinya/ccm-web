@@ -65,6 +65,7 @@ import {
 import { shouldUseNativeQueryLoop } from "../../agents/native-query-loop";
 import { CC_ALIGNED_TOOL_RESULT_MAX_TOKENS } from "../../tools/cc-tool-result-limits";
 import { publishRuntimeEvent } from "../../system/runtime-events";
+import { taskConversationProjectionContent } from "../../system/task-conversation-projection";
 import { sanitizeSessionExecutionValue } from "../../system/session-execution-ledger";
 import {
   acquireTaskLease,
@@ -115,7 +116,7 @@ import {
 import { runProjectMainNativeQueryLoop } from "./project-native-query-adapter";
 import { attachTransientModelBlocks, collectTransientModelBlocks, transientModelBlocks } from "../../system/transient-model-content";
 import { cancelTestAgentRunsForTask } from "../collaboration/test-agent-runner";
-import { classifyExecutionFailure, requestTaskCancellation } from "../../agents/execution-kernel";
+import { classifyExecutionFailure, requestTaskCancellation, transitionExecution } from "../../agents/execution-kernel";
 import { captureRepoStateIdentity, repoStateFingerprint } from "../../system/unified-evidence-registry";
 import { closeTaskAgentSessions, suspendTaskAgentSessions } from "../../tasks/agent-sessions-purge";
 import {
@@ -353,6 +354,8 @@ export function reconcileInterruptedProjectMainTasks() {
       recovery: interruptionReceipt.recovery,
       interruption_receipt: interruptionReceipt,
       recovery_decision: recoveryDecision,
+      recovery_preflight: null,
+      recovery_transaction: null,
       project_main_execution: {
         ...(task.project_main_execution || {}),
         schema: "ccm-project-main-execution-v1",
@@ -362,6 +365,16 @@ export function reconcileInterruptedProjectMainTasks() {
         recovery_required: true,
       },
     }) || task;
+    transitionExecution(String(task.id), "cancelled", detail, {
+      name: "execution.service_restart_interrupted",
+      status: "warning",
+      cancellation: {
+        reason: "service_restart",
+        processTerminationProven: true,
+        interruptedAt: now,
+        contentStored: false,
+      },
+    });
     appendTaskTimelineEvent(task.id, {
       type: "project_main_restart_interrupted",
       title: "项目主 Agent 执行已安全暂停",
@@ -391,6 +404,28 @@ function cleanList(value: any, max = 16, itemMax = 800) {
   return [...new Set((Array.isArray(value) ? value : []).map(item => cleanText(item, itemMax)).filter(Boolean))].slice(0, max);
 }
 
+function concisePlanLabel(value: any, fallback: string, index: number) {
+  const source = cleanText(value || fallback, 600)
+    .replace(/^(?:这是|本次是)?(?:一项)?正式开发任务[，,:：。\s]*/i, "")
+    .replace(/^请(?:立即)?派发(?:当前项目)?(?:子\s*)?Agent[，,:：。\s]*/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  const firstAction = source.split(/(?<=[。！？!?；;])\s*/u).find(Boolean) || source;
+  return cleanText(firstAction, 120) || `工作项 ${index + 1}`;
+}
+
+function meaningfulPlanSummary(planValue: any, userMessage: string, workflowReason: string) {
+  return cleanText(
+    planValue?.summary
+      || planValue?.goal
+      || planValue?.context
+      || planValue?.approach
+      || userMessage
+      || workflowReason,
+    1600,
+  );
+}
+
 function projectWorkDir(project: string) {
   const config = getConfigs().find(item => item.name === project);
   if (!config) throw new Error("项目不存在");
@@ -400,26 +435,77 @@ function projectWorkDir(project: string) {
 
 function normalizedWorkItems(value: any, fallbackGoal: string): ProjectMainWorkItem[] {
   const rows = Array.isArray(value) ? value.slice(0, 12) : [];
-  const normalized = rows.map((row: any, index: number) => ({
-    id: cleanText(row?.id || row?.key || `work_${index + 1}`, 80).replace(/[^a-zA-Z0-9._-]+/g, "-") || `work_${index + 1}`,
-    title: cleanText(row?.title || `工作项 ${index + 1}`, 160),
-    objective: cleanText(row?.objective || row?.task || row?.description || fallbackGoal, 1800),
-    acceptanceCriteria: cleanList(row?.acceptanceCriteria || row?.acceptance_criteria, 10, 600),
-    dependsOn: cleanList(row?.dependsOn || row?.depends_on, 10, 80),
-    allowedFiles: cleanList(row?.allowedFiles || row?.allowed_files || row?.files || row?.filePaths || row?.file_paths, 30, 500),
-    forbiddenFiles: cleanList(row?.forbiddenFiles || row?.forbidden_files, 30, 500),
-    artifacts: cleanList(row?.artifacts || row?.outputs, 20, 300),
-    sourceEvidenceIds: cleanList(row?.sourceEvidenceIds || row?.source_evidence_ids, 30, 180),
-    allowedTools: cleanList(row?.allowedTools || row?.allowed_tools, 30, 120),
-    status: "pending" as const,
-    attempts: 0,
-  }));
+  const normalized = rows.map((row: any, index: number) => {
+    const objective = cleanText(row?.objective || row?.task || row?.description || fallbackGoal, 1800);
+    return {
+      id: cleanText(row?.id || row?.key || `work_${index + 1}`, 80).replace(/[^a-zA-Z0-9._-]+/g, "-") || `work_${index + 1}`,
+      title: concisePlanLabel(row?.title || objective, fallbackGoal, index),
+      objective,
+      acceptanceCriteria: cleanList(row?.acceptanceCriteria || row?.acceptance_criteria, 10, 600),
+      dependsOn: cleanList(row?.dependsOn || row?.depends_on, 10, 80),
+      allowedFiles: cleanList(row?.allowedFiles || row?.allowed_files || row?.files || row?.filePaths || row?.file_paths, 30, 500),
+      forbiddenFiles: cleanList(row?.forbiddenFiles || row?.forbidden_files, 30, 500),
+      artifacts: cleanList(row?.artifacts || row?.outputs, 20, 300),
+      sourceEvidenceIds: cleanList(row?.sourceEvidenceIds || row?.source_evidence_ids, 30, 180),
+      allowedTools: cleanList(row?.allowedTools || row?.allowed_tools, 30, 120),
+      status: "pending" as const,
+      attempts: 0,
+    };
+  });
   if (!normalized.length) {
     normalized.push({ id: "work_1", title: cleanText(fallbackGoal, 100) || "完成项目任务", objective: fallbackGoal, acceptanceCriteria: [], dependsOn: [], allowedFiles: [], forbiddenFiles: [], artifacts: [], sourceEvidenceIds: [], allowedTools: [], status: "pending", attempts: 0 });
   }
   const ids = new Set(normalized.map(item => item.id));
   for (const item of normalized) item.dependsOn = item.dependsOn.filter(id => id !== item.id && ids.has(id));
   return normalized;
+}
+
+function directDispatchAcceptanceEvidence(input: {
+  value: any;
+  userMessage: string;
+  project: string;
+  workItems: ProjectMainWorkItem[];
+  decision: WorkflowDecision;
+}) {
+  const provided = Array.isArray(input.value) ? input.value : [];
+  if (provided.length) return normalizeTestAgentAcceptanceEvidencePlan(provided);
+
+  const workItemCriteria = cleanList(input.workItems.flatMap(item => item.acceptanceCriteria || []), 20, 800);
+  const criteria = workItemCriteria.length
+    ? workItemCriteria
+    : [cleanText(input.userMessage, 800) || "The requested project change is present and verifiable."];
+  const files = cleanList(input.workItems.flatMap(item => item.allowedFiles || []), 30, 500);
+  const verificationModes = cleanList(input.decision.verificationModes, 10, 40).map(item => item.toLowerCase());
+  const commandEvidence = verificationModes.some(item => ["command", "test", "tests", "build", "lint", "typecheck"].includes(item))
+    || /(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?[\w:.-]+|(?:pytest|cargo\s+test|go\s+test|gradle\w*\s+test)/i.test(input.userMessage);
+  const evidenceTypes: TestAgentAcceptanceEvidence["evidenceTypes"] = [
+    ...(input.decision.requiresCodeChanges ? ["code_diff" as const] : []),
+    ...(commandEvidence ? ["command" as const] : []),
+  ];
+  if (!evidenceTypes.length) evidenceTypes.push("artifact");
+  const target = files.length ? files.join(", ").slice(0, 300) : input.project;
+  return normalizeTestAgentAcceptanceEvidencePlan(criteria.map(criterion => ({
+    criterion,
+    observableOutcome: criterion,
+    evidenceTypes,
+    target,
+  })));
+}
+
+function directDispatchVerificationProfile(value: any, decision: WorkflowDecision): TestAgentVerificationProfile {
+  try {
+    return normalizeTestAgentVerificationProfile(value);
+  } catch {
+    const modes = cleanList(decision.verificationModes, 10, 40).map(item => item.toLowerCase());
+    const interactive = modes.some(item => ["browser", "visual", "http", "integration", "e2e"].includes(item));
+    const tier = decision.riskLevel === "high" ? "critical" : interactive ? "interactive" : decision.requiresCodeChanges ? "standard" : "lightweight";
+    const changeClass = decision.riskLevel === "high" ? "critical" : interactive ? "interactive" : decision.requiresCodeChanges ? "code" : "documentation";
+    return normalizeTestAgentVerificationProfile({
+      tier,
+      changeClass,
+      reason: decision.reason || "Derived from the accepted workflow decision and verification requirements.",
+    });
+  }
 }
 
 type ProjectMainModelTelemetry = {
@@ -476,6 +562,7 @@ function projectRequirementPlanProjection(
     ...legacy,
     context: plan.summary || plan.title,
     approach: plan.summary || plan.title,
+    sourceManifestChecksum: plan.sourceEvidence?.manifestChecksum || "",
     files: (plan.sourceEvidence?.files || []).map(file => ({
       project: plan.project,
       path: String(file.path || "").replace(/\\/g, "/"),
@@ -484,7 +571,7 @@ function projectRequirementPlanProjection(
     })),
     verification: (plan.acceptanceCriteria || []).map((expected: string) => ({ expected, acceptanceCriteria: [expected] })),
   }, { planId: input.planId, revision: input.revision, now: updatedAt });
-  return canonical ? { ...legacy, ...canonical, sourceManifestChecksum: plan.sourceEvidence?.manifestChecksum || "", planId: input.planId, status: input.status || "ready", createdAt, updatedAt } : legacy;
+  return canonical ? { ...legacy, ...canonical, planId: input.planId, status: input.status || "ready", createdAt, updatedAt } : legacy;
 }
 
 function projectMainModelCallOptions(config: any, messages: any[], telemetry?: ProjectMainModelTelemetry) {
@@ -1341,18 +1428,37 @@ export async function runProjectMainAgentFirstTurn(input: {
       })),
     }),
   });
+  if (!sourceHydration && (turnDecision.responseKind === "dispatch" || workflowDecision.requiresCodeChanges === true)) {
+    sourceHydration = await hydrateProjectMainSource({
+      project,
+      projectSessionId,
+      userMessage: input.userMessage,
+      conversationContext: exactContext,
+      purpose: "planning",
+      requiresCodeChanges: true,
+    });
+  }
   const planValue = parsed?.plan && typeof parsed.plan === "object" ? parsed.plan : null;
   let plan: ProjectMainPlan | null = null;
   if (["plan", "dispatch"].includes(turnDecision.responseKind) || workflowDecision.actionRequired) {
-    const acceptanceEvidencePlan = normalizeTestAgentAcceptanceEvidencePlan(planValue?.acceptanceEvidencePlan || planValue?.acceptance_evidence_plan);
+    const workItems = normalizedWorkItems(
+      planValue?.workItems || planValue?.work_items || (turnDecision.responseKind === "dispatch" ? parsed?.targets : []),
+      input.userMessage,
+    );
+    const acceptanceEvidencePlan = directDispatchAcceptanceEvidence({
+      value: planValue?.acceptanceEvidencePlan || planValue?.acceptance_evidence_plan,
+      userMessage: input.userMessage,
+      project,
+      workItems,
+      decision: workflowDecision,
+    });
     const acceptanceCriteria = acceptanceEvidencePlan.map(item => item.criterion);
-    const workItems = normalizedWorkItems(planValue?.workItems || planValue?.work_items, input.userMessage);
     for (const item of workItems) if (!item.acceptanceCriteria.length) item.acceptanceCriteria = acceptanceCriteria.slice();
     const independentTestAgentEnabled = isTestAgentEnabled();
     plan = {
       schema: "ccm-project-main-plan-v1",
       title: cleanText(planValue?.title || input.userMessage, 120) || "项目开发任务",
-      summary: cleanText(planValue?.summary || workflowDecision.reason, 1600),
+      summary: meaningfulPlanSummary(planValue, input.userMessage, workflowDecision.reason),
       project,
       projectSessionId,
       acceptanceMode: independentTestAgentEnabled ? "test_agent" : "main_agent_self_verification",
@@ -1368,7 +1474,7 @@ export async function runProjectMainAgentFirstTurn(input: {
         }),
       acceptanceCriteria,
       acceptanceEvidencePlan,
-      verificationProfile: normalizeTestAgentVerificationProfile(planValue?.verificationProfile || planValue?.verification_profile),
+      verificationProfile: directDispatchVerificationProfile(planValue?.verificationProfile || planValue?.verification_profile, workflowDecision),
       permissionBoundaries: cleanList(planValue?.permissionBoundaries || planValue?.permission_boundaries, 12, 600),
       sourceEvidence: sourceHydration ? projectSourceEvidenceSummary(sourceHydration.evidence) : { manifestChecksum: "", manifestFiles: 0, selectedPaths: [], rejectedPaths: [], totalChars: 0, truncated: false },
       runtimeEvidence: runtimeHydration ? projectRuntimeEvidenceSummary(runtimeHydration) : { manifestChecksum: "", profiles: 0, toolCalls: [] },
@@ -2397,6 +2503,17 @@ export async function executeProjectMainTask(input: {
   const project = validateProjectName(input.task.target_project);
   const workDir = projectWorkDir(project);
   const currentSourceManifest = buildProjectSourceManifest(project, workDir);
+  if (!String(input.plan.sourceEvidence?.manifestChecksum || "").trim()) {
+    input.plan.sourceEvidence = {
+      ...(input.plan.sourceEvidence || {}),
+      manifestChecksum: currentSourceManifest.checksum,
+      manifestFiles: currentSourceManifest.files.length,
+      selectedPaths: Array.isArray(input.plan.sourceEvidence?.selectedPaths) ? input.plan.sourceEvidence.selectedPaths : [],
+      rejectedPaths: Array.isArray(input.plan.sourceEvidence?.rejectedPaths) ? input.plan.sourceEvidence.rejectedPaths : [],
+      totalChars: Math.max(0, Number(input.plan.sourceEvidence?.totalChars || 0)),
+      truncated: input.plan.sourceEvidence?.truncated === true || currentSourceManifest.truncated === true,
+    };
+  }
   if (input.plan.sourceEvidence?.manifestChecksum && currentSourceManifest.checksum !== input.plan.sourceEvidence.manifestChecksum) {
     const reason = "项目源码清单在计划确认后发生变化，需要重新核对计划后再派发";
     const blockedTask = updateTask(taskId, { status: "blocked", acceptance_state: "plan_source_drift", status_detail: reason, source_manifest_drift: { planned: input.plan.sourceEvidence.manifestChecksum, current: currentSourceManifest.checksum, checked_at: new Date().toISOString(), contentStored: false } }) || input.task;
@@ -3280,12 +3397,20 @@ export async function executeProjectMainTask(input: {
 export function projectMainTaskPublic(task: any) {
   if (!task) return null;
   const runtimeStatus = buildTaskUserRuntimeStatus(task, { maxReviewRounds: AUTO_REWORK_MAX_ROUNDS });
+  const sessionBindings = Array.isArray(task?.task_context?.sessionBindings) ? task.task_context.sessionBindings : [];
+  const activeSessionBinding = [...sessionBindings].reverse().find((item: any) => item?.status === "active" && item?.role !== "source");
+  const activeExecutionSessionId = String(task.active_execution_session_id || task.execution_session_id || task.recovery_user_session?.activeSessionId || activeSessionBinding?.exactSessionId || task.project_session_id || "");
   return {
     id: task.id,
     task_id: task.id,
     trace_id: task.trace_id || "",
     project: task.target_project,
     project_session_id: task.project_session_id || "",
+    source_session_id: task.project_session_id || task.exact_session_id || "",
+    active_execution_session_id: activeExecutionSessionId,
+    revision: Math.max(0, Number(task.revision || 0)),
+    execution_attempt: Math.max(0, Number(task.execution_attempt || task.attempt || task.recovery_preflight?.nextAttempt || 0)),
+    conversation_content: taskConversationProjectionContent(task),
     project_main_run_id: task.project_main_run_id || "",
     orchestration_scope: "project_session",
     status: task.status,
@@ -3415,8 +3540,46 @@ export function projectMainTaskPublic(task: any) {
 
 export function runProjectMainAgentContractSelfTest() {
   const items = normalizedWorkItems([{ id: "a", title: "A", objective: "做 A", dependsOn: [] }, { id: "b", title: "B", objective: "做 B", dependsOn: ["a", "outside"] }], "fallback");
+  const decision = normalizeWorkflowDecision({
+    schema: "ccm-model-workflow-decision-v2",
+    reason: "A bounded project file change requires verification.",
+    confidence: 0.98,
+    actionRequired: true,
+    requiresCodeChanges: true,
+    needsEpicDecomposition: false,
+    continuationKind: "new_task",
+    readAction: "none",
+    targetRefs: ["demo"],
+    impactScope: ["E2E_PROOF.md"],
+    structuredClarificationQuestions: [],
+    selectedSkills: [],
+    intentKind: "implementation",
+    riskLevel: "write",
+    requiresUserConfirmation: false,
+    directReplyReady: false,
+    directReply: "",
+    verificationModes: ["command"],
+  });
+  const derivedEvidence = directDispatchAcceptanceEvidence({
+    value: null,
+    userMessage: "Create E2E_PROOF.md and run npm test.",
+    project: "demo",
+    workItems: normalizedWorkItems([{ task: "Create E2E_PROOF.md", files: ["E2E_PROOF.md"] }], "fallback"),
+    decision,
+  });
+  const derivedProfile = directDispatchVerificationProfile(null, decision);
   return {
-    success: items.length === 2 && items[1].dependsOn.join(",") === "a",
-    checks: { serializablePlan: items.length === 2, stripsForeignDependency: items[1].dependsOn.join(",") === "a" },
+    success: items.length === 2
+      && items[1].dependsOn.join(",") === "a"
+      && derivedEvidence.length === 1
+      && derivedEvidence[0].evidenceTypes.includes("command")
+      && derivedProfile.tier === "standard",
+    checks: {
+      serializablePlan: items.length === 2,
+      stripsForeignDependency: items[1].dependsOn.join(",") === "a",
+      directDispatchEvidenceFallback: derivedEvidence.length === 1 && derivedEvidence[0].target === "E2E_PROOF.md",
+      directDispatchCommandEvidence: derivedEvidence[0].evidenceTypes.includes("command"),
+      directDispatchVerificationProfileFallback: derivedProfile.tier === "standard",
+    },
   };
 }

@@ -52,6 +52,11 @@ export type ToolDisplayDetailV1 = {
         rehydratable?: boolean;
         freshness?: "current" | "drifted" | "deleted" | "permission_revoked";
         authoritativeRevision?: string;
+        commandExecution?: {
+            status: string;
+            exitCode?: number;
+            durationMs?: number;
+        };
         searchExecution?: {
             engine: "bundled_rg" | "system_rg" | "node_fallback";
             timedOut: boolean;

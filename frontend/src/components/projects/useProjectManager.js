@@ -514,6 +514,21 @@ export function useProjectManager(props, emit) {
   let projectSessionRefreshSequence = 0
   const projectTaskMessageId = message => String(message?.task_id || message?.taskExperience?.task_id || '').trim()
   const isProjectTaskTerminal = task => ['completed', 'done', 'succeeded', 'failed', 'cancelled', 'canceled', 'reverted'].includes(String(task?.phase || task?.status || '').toLowerCase())
+  const authoritativeProjectTaskContent = (task, fallback = '') => {
+    const projected = String(task?.conversation_content || task?.conversationContent || '').trim()
+    if (projected) return projected
+    const status = String(task?.status || task?.phase || '').toLowerCase()
+    const detail = String(task?.status_detail || task?.statusDetail || task?.delivery_summary?.headline || '').trim()
+    if (['completed', 'done', 'succeeded', 'success'].includes(status)) return `任务已完成：${detail || '最终验收已通过'}。`
+    if (status === 'failed') return `任务未能完成：${detail || '执行失败，任务现场已经保留'}。`
+    if (status === 'blocked') return `任务需要处理：${detail || '当前存在阻塞，任务现场已经保留'}。`
+    if (['cancelled', 'canceled'].includes(status)) return `任务已取消：${detail || '任务现场和历史记录已经保留'}。`
+    if (['pending', 'queued', 'in_progress', 'running', 'reviewing', 'executing'].includes(status)) {
+      const attempt = Math.max(0, Number(task?.execution_attempt || task?.recovery_preflight?.nextAttempt || 0))
+      return `任务正在继续执行${attempt ? `（第 ${attempt} 次执行）` : ''}：${detail || '已从最近安全检查点接续'}。`
+    }
+    return fallback
+  }
   const hydrateProjectTaskMessages = async (history, project, sessionId) => {
     const rows = Array.isArray(history) ? history : []
     const candidates = rows
@@ -526,7 +541,8 @@ export function useProjectManager(props, emit) {
         const response = await fetch(`/api/projects/main-agent/task?task_id=${encodeURIComponent(taskId)}`)
         const payload = await response.json()
         if (!response.ok || !payload.success || !payload.task) return null
-        if (String(payload.task.project || '') !== String(project || '') || String(payload.task.project_session_id || '') !== String(sessionId || '')) return null
+        const taskSessionIds = [payload.task.project_session_id, payload.task.source_session_id, payload.task.active_execution_session_id].map(value => String(value || '')).filter(Boolean)
+        if (String(payload.task.project || '') !== String(project || '') || !taskSessionIds.includes(String(sessionId || ''))) return null
         return { message, task: payload.task }
       } catch { return null }
     }))
@@ -538,6 +554,7 @@ export function useProjectManager(props, emit) {
       return {
         ...message,
         id: task.message_id || message.id || `project-main-task:${taskId}`,
+        content: authoritativeProjectTaskContent(task, message.content),
         messageMode: 'task',
         task_id: taskId,
         taskExperience: { ...task, requires_card: true },

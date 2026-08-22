@@ -5,6 +5,26 @@ import { type CcmCompletionSummaryV1 } from "./completion-summary";
 export declare const USER_VISIBLE_AGENT_EVENT_SCHEMA: "ccm-user-visible-agent-event-v1";
 export declare const USER_VISIBLE_AGENT_RESULT_SCHEMA: "ccm-user-visible-agent-result-v1";
 export type UserVisibleAgentEventType = "turn_started" | "thinking_status" | "assistant_text_delta" | "assistant_progress" | "model_activity" | "requirement_plan" | "tool_started" | "tool_progress" | "tool_completed" | "tool_failed" | "agent_started" | "agent_progress" | "agent_completed" | "agent_failed" | "permission_required" | "clarification_required" | "context_compacted" | "result";
+export type CcmAttemptReplayProjectionV1 = {
+    schema: "ccm-attempt-replay-projection-v1";
+    taskId: string;
+    attempt: number;
+    generation: number;
+    status: "running" | "success" | "failed" | "blocked" | "interrupted" | "cancelled";
+    exactSessionId?: string;
+    startedAt?: string;
+    endedAt?: string;
+    durationMs?: number;
+    stoppedStage?: string;
+    terminalReason?: string;
+    counts: {
+        events: number;
+        tools: number;
+        files: number;
+        verification: number;
+    };
+    contentStored: false;
+};
 export type UserVisibleAgentEvent = {
     schema: typeof USER_VISIBLE_AGENT_EVENT_SCHEMA;
     eventId: string;
@@ -67,6 +87,17 @@ export type UserVisibleAgentEvent = {
             activeDurationMs?: number;
         };
         toolDisplay?: ToolDisplayDetailV1;
+        fileReadEvidence?: {
+            project: string;
+            path: string;
+            ranges: Array<{
+                start: number;
+                end: number;
+            }>;
+            checksum?: string;
+            source: "structured_tool" | "safe_command_inference";
+            contentStored: false;
+        };
         timing?: {
             totalMs: number;
             modelMs?: number;
@@ -167,6 +198,12 @@ export type UserVisibleAgentEvent = {
             contentStored: false;
         };
         completionSummary?: CcmCompletionSummaryV1;
+        terminalGate?: {
+            passed: boolean;
+            accepted: boolean;
+            source: "task_ledger";
+            contentStored: false;
+        };
     };
     visibility: "default" | "transcript" | "technical";
     contentStored: false;
@@ -188,6 +225,9 @@ export type UserVisibleRequirementPlanStepV1 = {
     description: string;
     outcome: string;
     project?: string;
+    files?: string[];
+    artifacts?: string[];
+    sourceEvidenceIds?: string[];
     dependsOn: string[];
     status: "pending" | "running" | "completed" | "blocked" | "skipped";
 };
@@ -214,6 +254,38 @@ export type UserVisibleRequirementPlanV1 = {
     };
 };
 export declare function sanitizeUserVisibleAgentDetail(value: any, depth?: number, seen?: WeakSet<object>): any;
+export declare function listTaskAttemptReplayProjections(filter: any): {
+    schema: string;
+    taskId: string;
+    attempts: {
+        counts: {
+            events: number;
+            tools: number;
+            files: number;
+            verification: number;
+        };
+        contentStored: false;
+        terminalReason?: string;
+        stoppedStage?: string;
+        durationMs?: number;
+        endedAt?: string;
+        startedAt?: string;
+        exactSessionId?: string;
+        schema: "ccm-attempt-replay-projection-v1";
+        taskId: string;
+        attempt: number;
+        generation: number;
+        status: "failed" | "cancelled" | "blocked" | "success" | "running" | "interrupted";
+    }[];
+    contentStored: boolean;
+};
+export declare function listUserVisibleAgentEventsForTaskAttempt(filter: any): {
+    schema: string;
+    events: UserVisibleAgentEvent[];
+    nextCursor: number;
+    hasMore: boolean;
+    contentStored: boolean;
+};
 export declare function normalizeUserVisibleAgentEvent(input: any, sequence?: number): UserVisibleAgentEvent;
 export declare function appendUserVisibleAgentEvent(input: any): UserVisibleAgentEvent;
 export declare function appendAssistantProgress(input: any): UserVisibleAgentEvent;

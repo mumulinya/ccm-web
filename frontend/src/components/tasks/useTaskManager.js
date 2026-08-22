@@ -1040,6 +1040,12 @@ export function useTaskManager(props, emit) {
   const handleDashboardAction = async (item, action) => {
     const task = findTaskByDashboardItem(item)
     if (!task) return
+    if (action.kind === 'resume') {
+      const status = String(task.status || '').toLowerCase()
+      if (task.acceptance_state === 'recovery_required' || task.interruption_receipt || ['cancelled', 'canceled', 'failed', 'blocked'].includes(status)) {
+        return resumeInterruptedTask(task)
+      }
+    }
     if (action.kind === 'continue') {
       if (action.id === 'replan') return replanDashboardTask(item)
       openContinueTask(task)

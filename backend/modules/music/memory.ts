@@ -17,7 +17,8 @@ import {
   sessionCompactionChecksum,
   sessionCompactionCircuitOpen,
 } from "../../system/session-compaction-core";
-import { callCompactionModel, isGroupCompactionPromptTooLongError } from "../collaboration/group-compaction-engine";
+import { isGroupCompactionPromptTooLongError } from "../collaboration/group-compaction-engine";
+import { callCompactionModel } from "../../system/unified-session-compaction-model";
 import { loadOrchestratorConfig } from "../collaboration/group-orchestrator-config";
 import { resolveGroupModelContextCapacity } from "../collaboration/group-compaction-strategy";
 import { evaluateSessionSummaryQuality } from "../../system/session-summary-quality-gate";

@@ -68,7 +68,10 @@ if (developerInstructionsFile) {
     if (!instructions.trim())
         fail("Developer instructions file is empty");
     const configArg = `developer_instructions=${JSON.stringify(instructions)}`;
-    const insertionIndex = args[0] === "exec" && args[1] === "resume" ? 2 : 1;
+    const execIndex = args.indexOf("exec");
+    if (execIndex < 0)
+        fail("Codex CLI args are missing the exec subcommand");
+    const insertionIndex = args[execIndex + 1] === "resume" ? execIndex + 2 : execIndex + 1;
     args.splice(insertionIndex, 0, "--config", configArg);
 }
 function resolveCodexLaunch() {

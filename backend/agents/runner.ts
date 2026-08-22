@@ -16,6 +16,7 @@ import {
   getAgentCommandLabel,
   normalizeAgentCommandOutput,
   normalizeAgentRuntimeId,
+  detectAgentCommandFailure,
 } from "./runtime";
 import { extractProviderToolAccessEvidence } from "./provider-tool-access-evidence";
 import { buildNativeSessionContinuationEvidence } from "./native-continuation";
@@ -52,6 +53,7 @@ import {
 } from "./provider-memory-channel";
 import { readMemoryContextConsumptionReceipt } from "../integrations/memory-context-consumption-receipt";
 import { recoverMemoryContextConsumptionReceipt } from "../integrations/memory-context-consumption-recovery";
+import { discoverProjectVerificationCommands } from "./project-verification-discovery";
 
 const AGENT_RUNNER_DIR = path.join(CCM_DIR, "agent-runner");
 const REQUESTS_DIR = path.join(AGENT_RUNNER_DIR, "requests");
@@ -88,6 +90,11 @@ function writeJsonAtomic(file: string, data: any) {
 function markRequest(file: string, patch: any) {
   const request = readJson(file);
   writeJsonAtomic(file, { ...request, ...patch, updated_at: new Date().toISOString() });
+}
+
+export function isMissingNativeSessionFailure(value: any) {
+  const message = String(value || "");
+  return /(?:thread|session|conversation)[\/_-]?(?:resume)?.{0,80}(?:no rollout|not found|does not exist|missing)|no rollout/i.test(message);
 }
 
 export function validateAgentRunnerSessionLifecycleFence(request: any = {}) {
@@ -140,14 +147,14 @@ function normalizeVerificationCommands(value: any) {
   return commands.slice(0, 8);
 }
 
-function getProjectVerificationCommands(projectName: string) {
-  if (!projectName) return [];
+function getProjectVerificationCommands(projectName: string, workDir = "") {
+  if (!projectName) return discoverProjectVerificationCommands(workDir);
   const configFile = path.join(CCM_DIR, "project-configs.json");
-  if (!fs.existsSync(configFile)) return [];
+  if (!fs.existsSync(configFile)) return discoverProjectVerificationCommands(workDir);
   try {
     const configs = readJson(configFile);
     const config = configs?.[projectName] || {};
-    return normalizeVerificationCommands(
+    const configured = normalizeVerificationCommands(
       config.verification_commands
         || config.verificationCommands
         || config.test_commands
@@ -155,8 +162,9 @@ function getProjectVerificationCommands(projectName: string) {
         || config.check_commands
         || config.checkCommands
     );
+    return configured.length ? configured : discoverProjectVerificationCommands(workDir);
   } catch {
-    return [];
+    return discoverProjectVerificationCommands(workDir);
   }
 }
 
@@ -607,7 +615,7 @@ function buildCliAllowedTools(request: any): string[] {
   return Array.from(new Set(rules));
 }
 async function runProjectVerificationCommands(projectName: string, workDir: string, timeoutMs: number, request: any) {
-  const commands = getProjectVerificationCommands(projectName).filter(isSafeVerificationCommand);
+  const commands = getProjectVerificationCommands(projectName, workDir).filter(isSafeVerificationCommand);
   const results: any[] = [];
   const verification: string[] = [];
   const failed: string[] = [];
@@ -736,12 +744,13 @@ async function runRequest(file: string) {
     fs.writeFileSync(msgFile, providerMemoryChannel.userPrompt, "utf-8");
     if (providerMemoryChannel.systemPrompt) fs.writeFileSync(memorySystemPromptFile, providerMemoryChannel.systemPrompt, "utf-8");
     if (providerMemoryChannel.developerPrompt) fs.writeFileSync(memoryDeveloperInstructionsFile, providerMemoryChannel.developerPrompt, "utf-8");
-    const providerCommand = buildAgentCommand(agentType, msgFile, {
+    let effectiveAgentSession = request.agentSession || {};
+    let providerCommand = buildAgentCommand(agentType, msgFile, {
       cliAllowedTools,
       mcpConfigPath: effectiveMcpConfigPath,
       appendSystemPromptFile: providerMemoryChannel.systemPrompt ? memorySystemPromptFile : "",
       developerInstructionsFile: providerMemoryChannel.developerPrompt ? memoryDeveloperInstructionsFile : "",
-      ...(request.agentSession || {}),
+      ...effectiveAgentSession,
     });
     providerMemoryChannelEvidence = bindProviderMemoryChannelLaunch(providerMemoryChannel, {
       command: providerCommand,
@@ -767,7 +776,7 @@ async function runRequest(file: string) {
       const seedEvent: any = { ...runtimeProgressIdentity, runtime: agentType, runtimeVersion: runtimeVersionSnapshot?.version || "", schema: "ccm-agent-runtime-event-v1", eventId: `seed-${runtimeProgressIdentity.agentRunId}`, eventType: "status", progressSource: "system_observed", confidence: "observed", status: "running", sourceEventChecksum: "seed", createdAt: new Date().toISOString(), contentStored: false };
       stopRuntimeProgressFallback = startAgentProgressFallback(seedEvent, Number(request.agentProgressFallbackTimeoutMs || 60_000));
     }
-    const managed = await runManagedCommand({
+    const executeProvider = () => runManagedCommand({
       taskId,
       executionId,
       command: providerCommand,
@@ -777,6 +786,65 @@ async function runRequest(file: string) {
       env: sanitizeExecutionEnv(getRuntimeExecutionEnv(agentType), request.envAllowlist || []),
       onStdout: text => runtimeEventParser?.push(text),
     });
+    let managed: any;
+    let resumeLaunchError: any = null;
+    try {
+      managed = await executeProvider();
+    } catch (error: any) {
+      const failureText = [error?.message, error?.stdout, error?.stderr].filter(Boolean).join("\n");
+      if (effectiveAgentSession?.resumeSession === true && isMissingNativeSessionFailure(failureText)) {
+        resumeLaunchError = error;
+      } else {
+        throw error;
+      }
+    }
+    let commandFailure = detectAgentCommandFailure(
+      agentType,
+      String(managed?.stdout || resumeLaunchError?.stdout || ""),
+      managed?.exitCode ?? resumeLaunchError?.status ?? 1,
+      String(managed?.stderr || resumeLaunchError?.stderr || resumeLaunchError?.message || ""),
+    );
+    if (effectiveAgentSession?.resumeSession === true && (resumeLaunchError || (commandFailure.failed && isMissingNativeSessionFailure(commandFailure.message)))) {
+      // The CCM task remains recoverable even when the provider's native
+      // conversation cache has been cleaned. Re-run the same signed work
+      // packet in a fresh provider session inside this attempt; do not fake a
+      // successful resume and do not require the user to start a new task.
+      disposeManagedCommandRawOutput(managed || resumeLaunchError);
+      effectiveAgentSession = {
+        ...effectiveAgentSession,
+        persistSession: true,
+        resumeSession: false,
+        sessionId: "",
+      };
+      providerCommand = buildAgentCommand(agentType, msgFile, {
+        cliAllowedTools,
+        mcpConfigPath: effectiveMcpConfigPath,
+        appendSystemPromptFile: providerMemoryChannel.systemPrompt ? memorySystemPromptFile : "",
+        developerInstructionsFile: providerMemoryChannel.developerPrompt ? memoryDeveloperInstructionsFile : "",
+        ...effectiveAgentSession,
+      });
+      providerMemoryChannelEvidence = bindProviderMemoryChannelLaunch(providerMemoryChannel, {
+        command: providerCommand,
+        systemPromptFile: providerMemoryChannel.systemPrompt ? memorySystemPromptFile : "",
+        developerInstructionsFile: providerMemoryChannel.developerPrompt ? memoryDeveloperInstructionsFile : "",
+        runnerRequestId: request.id,
+        runtimeVersionSnapshot,
+      });
+      resumeLaunchError = null;
+      managed = await executeProvider();
+      commandFailure = detectAgentCommandFailure(
+        agentType,
+        String(managed.stdout || ""),
+        managed.exitCode,
+        String(managed.stderr || ""),
+      );
+    }
+    if (commandFailure.failed) {
+      throw Object.assign(new Error(commandFailure.message || `${agentType} execution failed`), {
+        code: "CCM_AGENT_COMMAND_FAILED",
+        status: managed.exitCode,
+      });
+    }
     runtimeEventParser?.flush();
     stopRuntimeProgressFallback?.();
     const normalizedOutput = normalizeAgentCommandOutput(agentType, String(managed.stdout || "").trim(), { runtimeVersionSnapshot });
@@ -784,12 +852,12 @@ async function runRequest(file: string) {
     const nativeContinuationEvidence = buildNativeSessionContinuationEvidence({
       provider: agentType,
       runnerRequestId: request.id,
-      requestedNativeSessionId: request.agentSession?.sessionId || "",
+      requestedNativeSessionId: effectiveAgentSession?.sessionId || "",
       returnedNativeSessionId: normalizedOutput.rawSessionId || normalizedOutput.sessionId || "",
       providerOutputContractEvidence: normalizedOutput.providerOutputContractEvidence || null,
       providerRuntimeVersionSnapshot: runtimeVersionSnapshot,
       expectedProviderContractId: request.agentSession?.expectedProviderContractId || request.agentSession?.providerContractId || "",
-      nativeResumeRequested: request.agentSession?.resumeSession === true,
+      nativeResumeRequested: effectiveAgentSession?.resumeSession === true,
       runnerSuccess: true,
     });
     providerMemoryChannelEvidence = acknowledgeProviderMemoryChannelLaunch(providerMemoryChannelEvidence, {
@@ -1265,6 +1333,8 @@ export function runAgentRunnerSelfTest() {
     const nestedOnlyClaudeCommand = buildAgentCommand("claudecode", "prompt.txt", { mcpConfigPath: nestedOnlyClaudeConfigPath });
     const nestedOnlyCursorCommand = buildAgentCommand("cursor", "prompt.txt", { mcpConfigPath: nestedOnlyCursorConfigPath });
     const nestedOnlyCodexCommand = buildAgentCommand("codex", "prompt.txt", { mcpConfigPath: nestedOnlyCodexConfigPath });
+    const missingCodexRolloutRecognized = isMissingNativeSessionFailure("thread/resume: thread/resume failed: no rollout");
+    const unrelatedProviderFailureNotRehydrated = !isMissingNativeSessionFailure("HTTP 401 invalid API key");
     const decodePromptRunnerArgs = (command: string) => {
       const encoded = command.trim().split(/\s+/).pop() || "";
       try { return JSON.parse(Buffer.from(encoded, "base64").toString("utf-8")); } catch { return []; }
@@ -1292,7 +1362,9 @@ export function runAgentRunnerSelfTest() {
         && nestedOnlyCursorArgs.includes("--plugin-dir")
         && nestedOnlyCursorArgs.includes(cursorPluginDir)
         && nestedOnlyCodexCommand.includes("CODEX_HOME")
-        && nestedOnlyCodexCommand.includes(codexHomePath),
+        && nestedOnlyCodexCommand.includes(codexHomePath)
+        && missingCodexRolloutRecognized
+        && unrelatedProviderFailureNotRehydrated,
       checks: {
         runnerGateAcceptsFreshSnapshot: ready.ok === true,
         runnerGateBlocksMissingSnapshot: missingSnapshot.ok === false,
@@ -1326,6 +1398,8 @@ export function runAgentRunnerSelfTest() {
           && nestedOnlyCursorArgs.includes(cursorPluginDir),
         runnerLaunchesCodexWithSnapshotIsolatedHome: nestedOnlyCodexCommand.includes("CODEX_HOME")
           && nestedOnlyCodexCommand.includes(codexHomePath),
+        runnerRecognizesMissingNativeSessionForRehydration: missingCodexRolloutRecognized,
+        runnerDoesNotRehydrateUnrelatedProviderFailures: unrelatedProviderFailureNotRehydrated,
         runnerGateBlocksRuntimeSnapshotMismatch: mismatchedRuntimeValidation.ok === false
           && mismatchedRuntimeValidation.runtimeToolDispatchGate?.blockers?.some((item: any) => item.id === "payload_runtime" || item.id === "snapshot_runtime") === true,
       },

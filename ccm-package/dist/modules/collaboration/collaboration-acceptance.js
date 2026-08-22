@@ -77,7 +77,12 @@ const collaboration_1 = require("./collaboration");
 // ===== merged from collaboration-acceptance-part-01-part-01.ts =====
 // Extracted functional module. The original entry remains a compatibility facade.
 function evaluateReceiptTaskAgentMemoryContextSnapshot(task, receipt = {}, context = {}) {
-    const snapshots = (0, collaboration_1.getTaskAgentMemoryContextSnapshotSources)(context).map(collaboration_1.summarizeTaskAgentMemoryContextSnapshot);
+    const snapshots = Array.from(new Map((0, collaboration_1.getTaskAgentMemoryContextSnapshotSources)(context)
+        .map(collaboration_1.summarizeTaskAgentMemoryContextSnapshot)
+        .map((snapshot) => [
+        String(snapshot?.snapshot_id || `${snapshot?.task_agent_session_id || ""}:${snapshot?.checksum || ""}`),
+        snapshot,
+    ])).values());
     const agent = (0, collaboration_1.normalizeMemoryGateAgent)(receipt.agent || receipt.project || task?.target_project);
     const receiptTaskSessionId = String(receipt.task_agent_session_id || receipt.taskAgentSessionId || "").trim();
     const receiptSnapshotId = String(receipt.memory_context_snapshot_id || receipt.memoryContextSnapshotId || "").trim();
@@ -106,6 +111,16 @@ function evaluateReceiptTaskAgentMemoryContextSnapshot(task, receipt = {}, conte
         const sessionId = String(snapshot.task_agent_session_id || "").trim();
         const binding = snapshot.group_session_memory_binding || {};
         const delivery = snapshot.delivery_receipt || {};
+        const hasSessionMemoryBinding = !!String(snapshot.memory_binding_id
+            || binding.memoryBindingId
+            || binding.memory_binding_id
+            || snapshot.group_session_id
+            || binding.groupSessionId
+            || binding.group_session_id
+            || snapshot.session_memory_checksum
+            || binding.sessionMemoryChecksum
+            || binding.session_memory_checksum
+            || "").trim();
         const systemSessionBound = !!receiptTaskSessionId && sessionId === receiptTaskSessionId;
         const systemSnapshotBound = !!receiptSnapshotId && snapshot.snapshot_id === receiptSnapshotId;
         const systemChecksumBound = !!receiptSnapshotChecksum && snapshot.checksum === receiptSnapshotChecksum;
@@ -119,8 +134,10 @@ function evaluateReceiptTaskAgentMemoryContextSnapshot(task, receipt = {}, conte
             && String(delivery.groupSessionMemoryBinding?.checksum || "") === String(binding.checksum || "")
             && String(delivery.groupSessionMemoryBindingChecksum || "") === String(binding.checksum || "")
             && delivery.modelExtractionEvidenceValid !== false;
-        const bindingIdMatches = !!declaredBindingId && declaredBindingId === String(snapshot.memory_binding_id || binding.memoryBindingId || "");
-        const groupSessionMatches = !!declaredGroupSessionId && declaredGroupSessionId === String(snapshot.group_session_id || binding.groupSessionId || "");
+        const bindingIdMatches = !hasSessionMemoryBinding
+            || (!!declaredBindingId && declaredBindingId === String(snapshot.memory_binding_id || binding.memoryBindingId || ""));
+        const groupSessionMatches = !hasSessionMemoryBinding
+            || (!!declaredGroupSessionId && declaredGroupSessionId === String(snapshot.group_session_id || binding.groupSessionId || ""));
         const expectedSessionMemoryChecksum = String(snapshot.session_memory_checksum || binding.sessionMemoryChecksum || "");
         const sessionMemoryChecksumMatches = expectedSessionMemoryChecksum
             ? declaredSessionMemoryChecksum === expectedSessionMemoryChecksum
@@ -138,7 +155,14 @@ function evaluateReceiptTaskAgentMemoryContextSnapshot(task, receipt = {}, conte
             && modelExtractionExecutionMatches
             && modelExtractionReplayStatusMatches
             && factSupersessionGraphChecksumMatches);
-        const usageStateValid = ["used", "verified", "ignored"].includes(declaredUsageState);
+        const ignoredMemoryReasons = Array.isArray(receipt.memoryIgnored || receipt.memory_ignored)
+            ? (receipt.memoryIgnored || receipt.memory_ignored).filter(Boolean)
+            : [];
+        // A direct project task can have an authoritative delivery snapshot without
+        // a session-memory binding. The Worker must not invent binding IDs; its
+        // structured memoryIgnored declaration is the correct consumption receipt.
+        const usageStateValid = ["used", "verified", "ignored"].includes(declaredUsageState)
+            || (!hasSessionMemoryBinding && ignoredMemoryReasons.length > 0);
         const declarationCoherent = declaredUsageState === "ignored"
             ? Array.isArray(receipt.memoryIgnored || receipt.memory_ignored) && (receipt.memoryIgnored || receipt.memory_ignored).length > 0
             : Array.isArray(receipt.memoryUsed || receipt.memory_used) && (receipt.memoryUsed || receipt.memory_used).length > 0;
@@ -219,7 +243,7 @@ function evaluateReceiptTaskAgentMemoryContextSnapshot(task, receipt = {}, conte
             && usageStateValid
             && declarationCoherent
             && factCitationsPass
-            && !!declaredReason;
+            && (!!declaredReason || (!hasSessionMemoryBinding && ignoredMemoryReasons.length > 0));
         return {
             ...snapshot,
             pass,
@@ -694,10 +718,8 @@ function buildDeliverySummary(task, execution, finalStatus) {
     if (projectPolicyViolations.length)
         blockers.push(...projectPolicyViolations.map((item) => item.message));
     const needs = (0, collaboration_1.uniqueStrings)(...receipts.map((receipt) => receipt.needs));
-    const executionDetail = String(execution?.detail || "").trim();
-    if (finalStatus !== "done" && executionDetail && !needs.length && !blockers.length) {
-        needs.push(executionDetail);
-    }
+    // `execution.detail` is presentation state, not an unresolved requirement.
+    // Only structured receipt needs/blockers may hold the acceptance gate open.
     const actions = (0, collaboration_1.uniqueStrings)(...receipts.map((receipt) => receipt.actions));
     const advisoryNeeds = (0, collaboration_1.uniqueStrings)(...receipts.map((receipt) => receipt.advisoryNeeds || receipt.advisory_needs || []));
     const blockingNeeds = needs;
@@ -816,7 +838,12 @@ function buildDeliverySummary(task, execution, finalStatus) {
         ignored: receipt.memoryIgnored || [],
     }));
     const taskSessions = task?.id ? (0, agent_sessions_1.listTaskAgentSessions)({ taskId: task.id }) : [];
-    const taskAgentMemoryContextSnapshots = task?.id ? (0, agent_sessions_1.listTaskAgentMemoryContextSnapshots)({ taskId: task.id }) : [];
+    const taskAgentMemoryContextSnapshots = task?.id
+        ? Array.from(new Map((0, agent_sessions_1.listTaskAgentMemoryContextSnapshots)({ taskId: task.id }).map((snapshot) => [
+            String(snapshot?.snapshot_id || `${snapshot?.task_agent_session_id || ""}:${snapshot?.checksum || ""}`),
+            snapshot,
+        ])).values())
+        : [];
     const taskAgentMemoryContextSnapshotRows = taskAgentMemoryContextSnapshots.map(collaboration_1.summarizeTaskAgentMemoryContextSnapshot);
     const providerToolAccessEvidence = task?.group_id && task?.id
         ? (0, storage_1.getGroupMessages)(task.group_id, task.group_session_id || task.groupSessionId || "default")

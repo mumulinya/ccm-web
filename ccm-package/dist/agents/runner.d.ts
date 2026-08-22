@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+export declare function isMissingNativeSessionFailure(value: any): boolean;
 export declare function validateAgentRunnerSessionLifecycleFence(request?: any): {
     schema: string;
     valid: boolean;
@@ -101,6 +102,8 @@ export declare function runAgentRunnerSelfTest(): {
         runnerLaunchesClaudeWithSnapshotMcpConfig: boolean;
         runnerLaunchesCursorWithSnapshotPluginDir: any;
         runnerLaunchesCodexWithSnapshotIsolatedHome: boolean;
+        runnerRecognizesMissingNativeSessionForRehydration: boolean;
+        runnerDoesNotRehydrateUnrelatedProviderFailures: boolean;
         runnerGateBlocksRuntimeSnapshotMismatch: boolean;
     };
 };

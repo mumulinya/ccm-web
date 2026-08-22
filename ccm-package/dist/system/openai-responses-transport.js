@@ -1,11 +1,54 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.shouldOmitOpenAiResponsesMaxOutputTokens = shouldOmitOpenAiResponsesMaxOutputTokens;
+exports.rememberOpenAiResponsesMaxOutputTokensUnsupported = rememberOpenAiResponsesMaxOutputTokensUnsupported;
+exports.shouldOmitOpenAiResponsesTemperature = shouldOmitOpenAiResponsesTemperature;
+exports.rememberOpenAiResponsesTemperatureUnsupported = rememberOpenAiResponsesTemperatureUnsupported;
+exports.shouldRetryOpenAiResponsesWithoutMaxOutputTokens = shouldRetryOpenAiResponsesWithoutMaxOutputTokens;
+exports.shouldRetryOpenAiResponsesWithoutTemperature = shouldRetryOpenAiResponsesWithoutTemperature;
+exports.isOpenAiResponsesSse = isOpenAiResponsesSse;
 exports.normalizeOpenAiResponsesUrl = normalizeOpenAiResponsesUrl;
 exports.encodeOpenAiResponsesInput = encodeOpenAiResponsesInput;
 exports.buildOpenAiResponsesTools = buildOpenAiResponsesTools;
 exports.buildOpenAiResponsesBody = buildOpenAiResponsesBody;
 exports.safeProviderHttpDetail = safeProviderHttpDetail;
 exports.consumeOpenAiResponsesSse = consumeOpenAiResponsesSse;
+const responsesWithoutMaxOutputTokens = new Set();
+const responsesWithoutTemperature = new Set();
+function responsesCompatibilityKey(endpoint, model) {
+    return `${String(endpoint || "").trim().replace(/\/+$/, "").toLowerCase()}\n${String(model || "").trim().toLowerCase()}`;
+}
+function shouldOmitOpenAiResponsesMaxOutputTokens(endpoint, model) {
+    return responsesWithoutMaxOutputTokens.has(responsesCompatibilityKey(endpoint, model));
+}
+function rememberOpenAiResponsesMaxOutputTokensUnsupported(endpoint, model) {
+    responsesWithoutMaxOutputTokens.add(responsesCompatibilityKey(endpoint, model));
+}
+function shouldOmitOpenAiResponsesTemperature(endpoint, model) {
+    return responsesWithoutTemperature.has(responsesCompatibilityKey(endpoint, model));
+}
+function rememberOpenAiResponsesTemperatureUnsupported(endpoint, model) {
+    responsesWithoutTemperature.add(responsesCompatibilityKey(endpoint, model));
+}
+function shouldRetryOpenAiResponsesWithoutMaxOutputTokens(status, detail) {
+    if (Number(status) !== 400)
+        return false;
+    const message = safeProviderHttpDetail(detail, 500);
+    return /upstream request failed/i.test(message)
+        || /max[_ -]?output[_ -]?tokens?.{0,100}(?:unknown|unsupported|unrecognized|invalid|not allowed)/i.test(message)
+        || /(?:unknown|unsupported|unrecognized|invalid|not allowed).{0,100}max[_ -]?output[_ -]?tokens?/i.test(message);
+}
+function shouldRetryOpenAiResponsesWithoutTemperature(status, detail) {
+    if (Number(status) !== 400)
+        return false;
+    const message = safeProviderHttpDetail(detail, 500);
+    return /upstream request failed/i.test(message)
+        || /temperature.{0,100}(?:unknown|unsupported|unrecognized|invalid|not allowed)/i.test(message)
+        || /(?:unknown|unsupported|unrecognized|invalid|not allowed).{0,100}temperature/i.test(message);
+}
+function isOpenAiResponsesSse(response) {
+    return /(?:^|;)\s*text\/event-stream(?:\s*;|$)/i.test(String(response?.headers?.get?.("content-type") || ""));
+}
 function normalizeOpenAiResponsesUrl(value) {
     const base = String(value || "").trim().replace(/\/+$/, "");
     if (!base)

@@ -361,6 +361,7 @@ export declare function runExecutionKernelSelfTest(): {
         selectiveCheckpointRewindPreservesOtherFiles: boolean;
         classifiesTypedFailure: boolean;
         evaluatesMergeReadyGreenContract: boolean;
+        acceptsPartialProviderReceiptOnlyAfterCcmRevalidation: boolean;
         persistsDeliveryEvidence: boolean;
         sanitizesEnvironment: boolean;
         supportsTargetedAgentRunCancel: boolean;

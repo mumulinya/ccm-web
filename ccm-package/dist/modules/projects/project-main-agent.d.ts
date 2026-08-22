@@ -296,6 +296,11 @@ export declare function projectMainTaskPublic(task: any): {
     trace_id: any;
     project: any;
     project_session_id: any;
+    source_session_id: any;
+    active_execution_session_id: string;
+    revision: number;
+    execution_attempt: number;
+    conversation_content: string;
     project_main_run_id: any;
     orchestration_scope: string;
     status: any;
@@ -421,5 +426,8 @@ export declare function runProjectMainAgentContractSelfTest(): {
     checks: {
         serializablePlan: boolean;
         stripsForeignDependency: boolean;
+        directDispatchEvidenceFallback: boolean;
+        directDispatchCommandEvidence: boolean;
+        directDispatchVerificationProfileFallback: boolean;
     };
 };

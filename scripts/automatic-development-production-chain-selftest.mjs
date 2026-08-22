@@ -48,7 +48,7 @@ const mockModel = http.createServer(async (request, response) => {
   const payload = JSON.parse(body || '{}')
   const prompt = (payload.messages || []).map(item => String(item.content || '')).join('\n')
   let content = { sufficient: true, reason: '证据充分', selected_files: [], search_queries: [], plan_steps: ['核对队列身份'], impact_scope: ['任务链'], clarification_questions: [] }
-  if (prompt.includes('只读源码规划器')) {
+  if (prompt.includes('read-only source planner')) {
     sourcePlannerCalls += 1
     content = sourcePlannerCalls === 1
       ? { sufficient: false, reason: '需要读取深层实现', selected_files: [{ project: 'source-project', path: deepRelative, reason: '核对深层源码实现' }], search_queries: [], plan_steps: [], impact_scope: [], clarification_questions: [] }
@@ -249,7 +249,13 @@ try {
 
   const sourceGroup = { id: 'source-group', name: 'Source', members: [{ project: 'coordinator', role: 'coordinator', agent: 'coded-orchestrator' }, { project: 'source-project', agent: 'codex' }] }
   const sourceContext = await projectAnalysis.buildModelDrivenGroupPlanningSourceContext(sourceGroup, '修改深层队列身份实现', db.getConfigs(), { targetProjects: ['source-project'], maxRounds: 3 })
-  assert.equal(sourceContext.ready, true)
+  assert.equal(sourceContext.ready, true, JSON.stringify({
+    ready: sourceContext.ready,
+    issues: sourceContext.issues,
+    projects: sourceContext.projects?.map(project => ({ project: project.project, status: project.status, selectedPaths: project.selectedPaths, issue: project.issue })),
+    modelPlanning: sourceContext.modelPlanning,
+    sourcePlannerCalls,
+  }))
   assert.equal(sourceContext.modelPlanning.rounds, 2)
   assert.equal(sourceContext.projects[0].selectedPaths.includes(deepRelative), true)
   assert.equal(sourceContext.modelPlanning.projectedTokens > 0, true)

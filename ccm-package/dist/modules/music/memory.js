@@ -52,6 +52,7 @@ const context_budget_1 = require("../../system/context-budget");
 const session_memory_window_1 = require("../../system/session-memory-window");
 const session_compaction_core_1 = require("../../system/session-compaction-core");
 const group_compaction_engine_1 = require("../collaboration/group-compaction-engine");
+const unified_session_compaction_model_1 = require("../../system/unified-session-compaction-model");
 const group_orchestrator_config_1 = require("../collaboration/group-orchestrator-config");
 const group_compaction_strategy_1 = require("../collaboration/group-compaction-strategy");
 const session_summary_quality_gate_1 = require("../../system/session-summary-quality-gate");
@@ -315,7 +316,7 @@ async function compactMusicAgentMemoryWithModel(options = {}) {
             hookResults: preHooks,
             timeline: segment.map((message) => ({ id: message.id, role: message.role, content: message.content, timestamp: message.timestamp })),
         };
-        const invoke = options.modelCall || (async (request) => (0, group_compaction_engine_1.callCompactionModel)((0, group_orchestrator_config_1.loadOrchestratorConfig)(), request.system, request.user, 8_000));
+        const invoke = options.modelCall || (async (request) => (0, unified_session_compaction_model_1.callCompactionModel)((0, group_orchestrator_config_1.loadOrchestratorConfig)(), request.system, request.user, 8_000));
         let timeline = basePayload.timeline;
         let attempts = 0;
         let candidate = null;

@@ -37,41 +37,48 @@ export declare function scheduleProjectSessionMemoryExtraction(project: string, 
 }): {
     scheduled: boolean;
     reason: string;
-    cadence?: undefined;
+    unified?: undefined;
+    promise?: undefined;
 } | {
     scheduled: boolean;
-    reason: string;
-    cadence: {
-        schema: string;
-        shouldExtract: boolean;
-        reason: string;
-        totalTokens: any;
-        priorTokens: number;
-        growthTokens: number;
-        toolCallsSinceLastExtraction: any;
-        cursorIndex: number;
-        cursorValid: boolean;
-        sourceLastMessageId: string;
-        sourceMessageIds: string[];
-    };
-} | {
-    cadence: {
-        schema: string;
-        shouldExtract: boolean;
-        reason: string;
-        totalTokens: any;
-        priorTokens: number;
-        growthTokens: number;
-        toolCallsSinceLastExtraction: any;
-        cursorIndex: number;
-        cursorValid: boolean;
-        sourceLastMessageId: string;
-        sourceMessageIds: string[];
-    };
-    scheduled: boolean;
-    reason: string;
-    startedAt: string;
-    identity: any;
+    unified: boolean;
+    promise: Promise<{
+        compacted: any;
+        reason: any;
+        before_tokens: any;
+        after_tokens: any;
+        summary_source: any;
+        boundary_generation: any;
+        boundaryGeneration: any;
+        boundary: any;
+        receipt: any;
+        unifiedSessionSummary: any;
+        unifiedSessionCompaction: any;
+        model_context_capacity: {
+            provider: string;
+            model: string;
+            autoCompactThreshold: number;
+            resolution: string;
+            schema: string;
+            contextWindow: number;
+            maxOutputTokens: number;
+            windowSemantics: string;
+            reservedOutputTokens: number;
+            effectiveContextWindow: number;
+            autoCompactBufferTokens: number;
+            source: any;
+            confidence: number;
+            checkedAt: any;
+            expiresAt: any;
+            evidenceId: any;
+            evidenceChecksum: any;
+            cacheStatus: string;
+            conservativeFallback: boolean;
+        };
+        auto_compact_threshold: number;
+        contentStored: boolean;
+    }>;
+    reason?: undefined;
 };
 export declare function compactProjectSessionWithModel(project: string, projectSessionId: string, options?: {
     force?: boolean;
@@ -87,6 +94,7 @@ export declare function compactProjectSessionWithModel(project: string, projectS
     provider?: string;
     model?: string;
     modelVisiblePayload?: any;
+    activeDispatchScopeId?: string;
 }): Promise<{
     compacted: any;
     reason: any;

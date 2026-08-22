@@ -30,6 +30,15 @@ function createAgentRunnerRuntime(deps) {
             },
         };
     };
+    const isMissingNativeSessionFailure = (error) => {
+        const detail = String(error?.message || error || "").toLowerCase();
+        return detail.includes("no rollout")
+            || detail.includes("thread/resume failed")
+            || detail.includes("session not found")
+            || detail.includes("session does not exist")
+            || detail.includes("unknown session")
+            || detail.includes("conversation not found");
+    };
     async function callAgent(projectName, message, workDir, agentType, timeoutMs, workspaceTarget = null) {
         const background = workspaceTarget?.background === true || workspaceTarget?.silent === true;
         if (!background)
@@ -462,6 +471,26 @@ function createAgentRunnerRuntime(deps) {
                     memoryContextConsumptionRecovery: e?.memoryContextConsumptionRecovery || memoryContextConsumptionRecovery,
                 });
                 durableDirectDispatchCompleted = true;
+            }
+            // A provider-native session is only a reusable cache. A recovery task
+            // must not fail solely because that cache has expired or was removed by
+            // the provider. Keep the same CCM task/attempt and rebuild one fresh
+            // provider session exactly once; the task context and workspace remain
+            // authoritative and are revalidated by the caller before dispatch.
+            if (workspaceTarget?.agentSession?.resumeSession === true
+                && workspaceTarget?.missingNativeSessionFallbackAttempted !== true
+                && isMissingNativeSessionFailure(e)) {
+                return callAgent(projectName, message, workDir, agentType, timeoutMs, {
+                    ...workspaceTarget,
+                    missingNativeSessionFallbackAttempted: true,
+                    agentSession: {
+                        ...(workspaceTarget.agentSession || {}),
+                        persistSession: true,
+                        resumeSession: false,
+                        sessionId: "",
+                        expectedSessionId: "",
+                    },
+                });
             }
             if (isSpawnPermissionError(e) && (e?.memoryContextConsumptionRecovery || memoryContextConsumptionRecovery)?.suppress_task_replay !== true) {
                 try {

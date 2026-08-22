@@ -36,6 +36,7 @@ export declare function runRequirementEpicSelfTest(): {
         parent_round_trip: boolean;
         restart_recovered: boolean;
         restart_count: number;
+        undefined_removal_recorded: boolean;
     };
     sqlite_row_apis: {
         success: boolean;

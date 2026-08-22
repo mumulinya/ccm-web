@@ -76,9 +76,11 @@ export function bindProjectSessionAgentExecution(input: { project: string; proje
   return { session, options: getTaskAgentSessionOptions(session), binding };
 }
 
-export function rotateProjectSessionAgentBinding(project: string, projectSessionId: string, reason = "项目会话开始新世代") {
+export function rotateProjectSessionAgentBinding(project: string, projectSessionId: string, reason = "项目会话开始新世代", activeDispatchScopeId = "") {
   const scopeId = buildProjectSessionAgentScopeId(project, projectSessionId);
-  if (activeProjectSessionDispatches.has(scopeId)) throw new Error("当前项目会话仍有第三方 Agent 正在执行，不能切换会话世代");
+  if (activeProjectSessionDispatches.has(scopeId) && String(activeDispatchScopeId || "") !== scopeId) {
+    throw new Error("当前项目会话仍有第三方 Agent 正在执行，不能切换会话世代");
+  }
   const closed = closeTaskAgentSessions({ scopeId, groupId: PROJECT_WEB_SESSION_AGENT_GROUP }, reason);
   return { scopeId, closed, nextGeneration: getProjectSessionAgentBinding(project, projectSessionId).generation_count + 1 };
 }

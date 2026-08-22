@@ -12,6 +12,22 @@ export declare function runGlobalAgentHistorySyncSelfTest(): {
     };
 };
 declare function loadGlobalAgentHistoryStore(): any;
+export declare function upsertGlobalAgentConversationTaskMessage(sessionId: string, message: any): {
+    updated: boolean;
+    reason: string;
+    sessionId?: undefined;
+    message?: undefined;
+} | {
+    updated: boolean;
+    reason: string;
+    sessionId: string;
+    message: any;
+} | {
+    updated: boolean;
+    sessionId: string;
+    message: any;
+    reason?: undefined;
+};
 declare function createGlobalAgentConversationSession(payload: any): {
     id: string;
     name: string;

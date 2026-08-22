@@ -15,8 +15,9 @@ const executionTranscript = read('frontend/src/components/common/AgentExecutionT
 
 assert.match(projectMessaging, /addAgentMessage\(\)\s*\r?\n\s*scrollToBottom\(\{ force: true \}\)/)
 assert.doesNotMatch(projectMessage, /title="正在思考…"/)
-assert.match(executionTranscript, /if \(isLivePresentation\.value\) \{\s*return \{ stage, rows: groupedRows \}/)
-assert.match(executionTranscript, /return \{ stage, rows: groupedRows \}/)
+assert.match(executionTranscript, /const groupedRows = liveOrderedStageItems\(groupedStageItems\(stageRows\)\)/)
+assert.match(executionTranscript, /rows: \[header, \.\.\.\(stageIsExpanded\(header\) \? groupedRows : \[\]\)\]/)
+assert.match(executionTranscript, /return appendLiveModelActivityToTail\(projected, nestedLedgerRows\.value\)/)
 assert.match(executionTranscript, /visibleModelActivity/)
 
 assert.match(globalMessaging, /ensureGlobalStreamMessage\(agentMsg, agentMsgAdded\)\s*\r?\n\s*saveHistory\(\)/)
@@ -24,7 +25,8 @@ assert.doesNotMatch(globalMessages, /title="正在思考…"/)
 assert.match(globalApi, /type: "response_delta"/)
 assert.doesNotMatch(globalApi, /streamBufferedGlobalReply/)
 
-assert.match(groupStream, /messages\.value\.push\(agentMsg\)/)
+assert.match(groupStream, /rememberLiveGroupStreamMessage\(agentMsg\)/)
+assert.match(groupStream, /else messages\.value\.push\(msg\)/)
 assert.match(groupStream, /streaming: true/)
 assert.doesNotMatch(groupStream, /thinkingMsg/)
 assert.doesNotMatch(groupTemplate, /title="正在思考…"/)

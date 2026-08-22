@@ -36,9 +36,16 @@ assert.ok(
   'project session dispatch must be locked before the first model turn',
 )
 assert.doesNotMatch(streamRoute, /res\.once\?\.\("close", releaseDispatch\)/)
-assert.match(streamRoute, /persistConversationReply\(visibleProjectReply, "conversation"/)
-assert.match(streamRoute, /persistConversationReply\(answer, chatIntent\.mode\)/)
+assert.match(streamRoute, /persistConversationReply\(visibleProjectReply, visibleProjectTurn\.messageMode/)
 assert.match(streamRoute, /type: "response_delta"/)
+assert.match(
+  streamRoute,
+  /if \(!responseDetached && !res\.headersSent\)/,
+  'a dispatch that follows a streamed project-agent preamble must reuse the existing SSE response',
+)
+assert.match(streamRoute, /const workerExecutionId = `\$\{task\.id\}:\$\{workItem\.id\}:attempt:\$\{workItem\.attempts\}`/)
+assert.match(streamRoute, /createMemoryContextConsumptionChallenge\(\{[\s\S]*?taskId: task\.id,[\s\S]*?executionId: workerExecutionId,[\s\S]*?taskAgentSessionId: workerSession\.id/)
+assert.match(streamRoute, /memoryContextConsumptionChallenge: needsMemoryReceipt \? workerMemoryChallenge : null/)
 assert.doesNotMatch(streamRoute, /streamBufferedConversationReply/)
 assert.match(streamRoute, /message_id: safeAssistantMessageId/)
 assert.match(streamRoute, /assistant_message_id, assistantMessageId/)
@@ -58,5 +65,7 @@ process.stdout.write(`${JSON.stringify({
     factualWaitingProjectedAfterThreshold: true,
     authoritativeConversationReplyReconciled: true,
     providerReplyDeltaStreamedDirectly: true,
+    streamedPreambleDispatchReusesResponse: true,
+    workerMemoryReceiptIdentityBoundAtDispatch: true,
   },
 }, null, 2)}\n`)

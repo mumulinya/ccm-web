@@ -1153,6 +1153,12 @@ onMounted(() => {
   void loadGlobalTools(false)
   void loadGlobalDispatchTargets()
   unsubscribeFeishuSessionEvents = subscribeRuntimeEvents(['feishu', 'music', 'global'], event => {
+    if (event?.type === 'global.session_messages_changed') {
+      const sessionId = String(event?.data?.sessionId || event?.data?.session_id || '')
+      if (sessionId && sessionId === String(currentSessionId.value || '')) {
+        void syncHistoryFromServer({ replaceSessionId: sessionId, preferServerCurrent: true })
+      }
+    }
     if (event?.type === 'global.session_title_changed') {
       const sessionId = String(event?.data?.sessionId || '')
       const session = sessions.value.find(item => item.id === sessionId)

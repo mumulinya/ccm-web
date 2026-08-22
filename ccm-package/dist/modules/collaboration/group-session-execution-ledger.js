@@ -42,6 +42,7 @@ const utils_1 = require("../../core/utils");
 const atomic_json_file_1 = require("../../core/atomic-json-file");
 const group_memory_storage_1 = require("./group-memory-storage");
 const session_execution_ledger_1 = require("../../system/session-execution-ledger");
+const session_task_timeline_1 = require("../../tasks/session-task-timeline");
 const GROUP_SESSION_EXECUTION_DIR = path.join(utils_1.CCM_DIR, "group-session-execution");
 function ledgerFile(groupId, groupSessionId) {
     return (0, group_memory_storage_1.getGroupSessionSidecarFile)(GROUP_SESSION_EXECUTION_DIR, groupId, groupSessionId);
@@ -103,6 +104,22 @@ function appendGroupSessionExecutionEvent(groupIdInput, groupSessionIdInput, eve
         });
         if (!events.some(item => item.id === created.id))
             events.push(created);
+        if (event?.taskId || event?.task_id) {
+            (0, session_task_timeline_1.appendSessionTimelineEvent)({
+                exactSessionId: groupSessionId,
+                scope: "group",
+                scopeId: groupId,
+                type,
+                eventId: `execution:${created.id}`,
+                taskId: String(event?.taskId || event?.task_id),
+                workItemId: event?.workItemId || event?.work_item_id,
+                generation: event?.generation,
+                attempt: event?.attempt,
+                leaseId: event?.leaseId || event?.lease_id,
+                payloadRef: created.id,
+                timestamp: created.timestamp,
+            });
+        }
         (0, atomic_json_file_1.writeJsonAtomic)(file, {
             ...current,
             schema: "ccm-group-session-execution-v1",

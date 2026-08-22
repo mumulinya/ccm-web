@@ -7,6 +7,8 @@ import {
 } from "./session-execution-ledger";
 import { isPersistedToolResult } from "../tools/tool-result-storage";
 import { buildUnifiedCompactionReceipt, resolveUnifiedCompactionPolicy } from "./unified-session-compaction";
+import { projectPriorTaskSummaries, type CcmSessionTaskIndexV1 } from "../tasks/session-task-timeline";
+import { buildTaskAwareSessionProjection } from "./task-aware-session-projection";
 
 export type SessionModelContextScope = "global" | "group" | "project";
 
@@ -44,6 +46,9 @@ export type UnifiedSessionModelContextInput = {
   microCompact?: SessionModelContextMicroCompactPolicy;
   contentReplacement?: SessionModelContextContentReplacementPolicy;
   heading?: string;
+  currentTaskId?: string;
+  taskContext?: any;
+  sessionTaskIndex?: CcmSessionTaskIndexV1 | null;
 };
 
 export function resolveSessionModelMicroCompactPolicy(config: any = {}, overrides: SessionModelContextMicroCompactPolicy = {}): SessionModelContextMicroCompactPolicy {
@@ -297,6 +302,8 @@ function renderProjection(input: UnifiedSessionModelContextInput, projection: an
     projection.contentReplacement?.applied
       ? `- Tool result content replacement=applied；替换 ${projection.contentReplacement.replacements.length} 个旧且超大的结果，均可由账本定位恢复。`
       : "- Tool result content replacement=not_applied。",
+    projection.taskProjection?.currentTaskId ? `- current_task_id=${projection.taskProjection.currentTaskId}；当前任务区间保持完整可见。` : "",
+    projection.taskProjection?.priorTaskSummaries?.length ? `\n【之前任务安全摘要】\n${JSON.stringify(projection.taskProjection.priorTaskSummaries, null, 2)}` : "",
     projection.canonicalSummary ? `\n【正式模型摘要】\n${JSON.stringify(projection.summary, null, 2)}` : "",
     `\n【${projection.canonicalSummary ? "压缩后近期完整原文" : "压缩前完整会话原文"} · ${projection.visibleMessages.length}/${projection.historyMessageCount} 条】\n${JSON.stringify(projection.visibleMessages)}`,
   ].filter(Boolean).join("\n");
@@ -305,7 +312,8 @@ function renderProjection(input: UnifiedSessionModelContextInput, projection: an
 export function buildUnifiedSessionModelContextProjection(input: UnifiedSessionModelContextInput) {
   const sessionId = String(input.sessionId || "").trim();
   if (!sessionId) throw new Error("exact_session_required_for_model_context");
-  const allMessages = (Array.isArray(input.messages) ? input.messages : [])
+  const taskProjectionInput = buildTaskAwareSessionProjection({ messages: Array.isArray(input.messages) ? input.messages : [], sessionTaskIndex: input.sessionTaskIndex, currentTaskId: input.currentTaskId || input.taskContext?.taskId });
+  const allMessages = taskProjectionInput.messages
     .filter(message => ["user", "assistant"].includes(String(message?.role || "")))
     .filter(message => message?.modelVisible !== false && message?.model_visible !== false)
     .filter(message => !["local_command", "command_result"].includes(String(message?.type || "")));
@@ -388,6 +396,16 @@ export function buildUnifiedSessionModelContextProjection(input: UnifiedSessionM
     microCompact,
     contentReplacement,
     completeTurnProjection: true,
+    taskProjection: {
+      currentTaskId: String(input.currentTaskId || input.taskContext?.taskId || ""),
+      currentTaskContextChecksum: String(input.taskContext?.checksum || ""),
+      currentTaskSpanChecksum: String(input.taskContext?.timelineSpans?.find((span: any) => span.taskId === String(input.currentTaskId || input.taskContext?.taskId || ""))?.checksum || ""),
+      priorTaskSummaries: input.sessionTaskIndex ? projectPriorTaskSummaries(input.sessionTaskIndex, String(input.currentTaskId || input.taskContext?.taskId || "")) : [],
+      currentTaskMessageIds: taskProjectionInput.currentTaskMessageIds,
+      priorTaskMessageIds: taskProjectionInput.priorTaskMessageIds,
+      currentTaskFullTimeline: Boolean(input.currentTaskId || input.taskContext?.taskId),
+      contentStored: false,
+    },
     toolPairInvariant: {
       valid: toolUses.every(id => toolResults.has(id)),
       toolUseCount: toolUses.length,

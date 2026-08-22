@@ -306,7 +306,8 @@ async function handleKnowledgeChat(payload: any, res: any, readOnly = false) {
   });
 }
 
-void rebuildKnowledgeIndex("startup").then(() => knowledgeDirectoryWatcher.start());
+// Defer startup until knowledge-index.ts has completed its CommonJS cycle.
+queueMicrotask(() => void rebuildKnowledgeIndex("startup").then(() => knowledgeDirectoryWatcher.start()));
 
 export function handleRagApi(pathname: string, req: any, res: any, parsed: any): boolean {
   if (pathname === "/api/rag/status" && req.method === "GET") {

@@ -58,6 +58,7 @@ import {
 } from "../../system/agent-communication-v2";
 import { AGENT_COMMUNICATION_ACK_MCP_TOOL_ALIASES } from "../../integrations/agent-communication-mcp";
 import { authorizeProjectChildAgentStart } from "../tools/conversation-permission-policy";
+import { taskConversationAnchorMessageId } from "../../system/task-conversation-links";
 
 // ===== merged from collaboration-cross-agents.ts =====
 
@@ -942,7 +943,7 @@ export async function executeMentionJob(mention: any, env: CrossAgentEnv): Promi
     const communicationAttempt = Math.max(1, memoryDeliveryAttemptSequence || 1);
     const communicationGeneration = Math.max(0, Number(sourceTask?.agent_communication_generation || sourceTask?.generation || 0));
     const communicationPolicy = readAgentCommunicationPolicy(sourceTask?.contextPolicy?.effective || sourceTask?.context_policy?.effective || sourceTask?.context_policy_effective || {});
-    const targetAnchorMessageId = String(sourceTask?.target_message_id || sourceTask?.targetMessageId || `task-message:${taskId}:${targetName}`);
+    const targetAnchorMessageId = taskConversationAnchorMessageId(sourceTask, `task-message:${taskId}:${targetName}`);
     const originMessageId = String(sourceTask?.origin_message_id || sourceTask?.originMessageId || sourceTask?.source_message_id || sourceTask?.sourceMessageId || "");
     const communicationDispatchInput: any = {
       taskId,
@@ -2625,6 +2626,7 @@ export async function executeMentionJobTryA(mention: any, env: CrossAgentEnv): P
             generation: communicationEnvelope.generation,
             attempt: communicationEnvelope.attempt,
             leaseId: communicationEnvelope.leaseId,
+            project: targetName,
           } : null,
           agentRuntimeStructuredProgressEnabled: communicationPolicy.agentRuntimeStructuredProgressEnabled,
           agentProgressFallbackTimeoutMs: communicationPolicy.agentProgressFallbackTimeoutMs,

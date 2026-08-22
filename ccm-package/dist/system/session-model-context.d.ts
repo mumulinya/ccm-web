@@ -1,4 +1,5 @@
 import { type SessionExecutionEvent } from "./session-execution-ledger";
+import { type CcmSessionTaskIndexV1 } from "../tasks/session-task-timeline";
 export type SessionModelContextScope = "global" | "group" | "project";
 export type SessionModelContextMicroCompactPolicy = {
     enabled?: boolean;
@@ -32,6 +33,9 @@ export type UnifiedSessionModelContextInput = {
     microCompact?: SessionModelContextMicroCompactPolicy;
     contentReplacement?: SessionModelContextContentReplacementPolicy;
     heading?: string;
+    currentTaskId?: string;
+    taskContext?: any;
+    sessionTaskIndex?: CcmSessionTaskIndexV1 | null;
 };
 export declare function resolveSessionModelMicroCompactPolicy(config?: any, overrides?: SessionModelContextMicroCompactPolicy): SessionModelContextMicroCompactPolicy;
 export declare function sessionModelMessageContent(value: any): string;

@@ -9,7 +9,7 @@ const cache = require(path.join(root, 'ccm-package', 'dist', 'system', 'provider
 const adapters = require(path.join(root, 'ccm-package', 'dist', 'system', 'provider-context-cache-adapters.js'))
 const client = require(path.join(root, 'ccm-package', 'dist', 'modules', 'collaboration', 'group-orchestrator-llm-client.js'))
 const compact = require(path.join(root, 'ccm-package', 'dist', 'modules', 'collaboration', 'group-memory-compaction.js'))
-const compactionEngine = require(path.join(root, 'ccm-package', 'dist', 'modules', 'collaboration', 'group-compaction-engine.js'))
+const compactionEngine = require(path.join(root, 'ccm-package', 'dist', 'system', 'unified-session-compaction-model.js'))
 
 const unit = cache.runProviderNeutralContextCacheSelfTest()
 const adapterUnit = adapters.runProviderContextCacheAdapterSelfTest()

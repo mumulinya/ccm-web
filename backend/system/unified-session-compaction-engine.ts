@@ -15,6 +15,7 @@ import type {
   UnifiedCompactionSnapshot,
 } from "./unified-session-compaction-types";
 import { buildUnifiedSummaryPrompt, buildUnifiedSummaryReference, normalizeCcmUnifiedSummary, runUnifiedSummaryShapeCheck, unifiedSummaryChecksum, UNIFIED_COMPACTION_SYSTEM_PROMPT } from "./unified-session-compaction-summary";
+import { snapshotTaskContextForBoundary } from "../tasks/session-task-timeline";
 
 function checksum(value: unknown) {
   return crypto.createHash("sha256").update(JSON.stringify(value ?? null)).digest("hex");
@@ -159,6 +160,10 @@ export class UnifiedSessionCompactionEngine {
       }).decision;
       const recent = selectRecentWindow(snapshot, policy);
       const mustSummarize = decision.required || this.input.force === true || this.input.promptTooLong === true;
+      if (mustSummarize && snapshot.taskTimeline?.currentTaskId) {
+        const taskSnapshot = snapshotTaskContextForBoundary(String(snapshot.taskTimeline.currentTaskId), "compaction_boundary");
+        if (taskSnapshot.success) snapshot = { ...snapshot, taskTimeline: { ...snapshot.taskTimeline, taskContextRevision: taskSnapshot.revision, taskContextChecksum: taskSnapshot.checksum } };
+      }
       let summary: CcmUnifiedSessionSummaryV1 | null = null;
       let summarySource: any = "none";
       let quality: any = { valid: true, score: 100, issues: [] };

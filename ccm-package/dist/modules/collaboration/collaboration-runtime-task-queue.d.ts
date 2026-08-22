@@ -239,6 +239,8 @@ export declare function buildInlineTaskRuntime(task: any): {
     task_card: any;
 };
 export declare function updateGroupTaskInlineStatus(task: any, status: string, detail?: string): {
+    projectionUpdated: boolean;
+    projectionRejected: boolean;
     taskId: any;
     status: any;
     statusText: any;
