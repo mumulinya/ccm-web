@@ -1,0 +1,2248 @@
+"use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.createGlobalAgentAgenticRuntime = createGlobalAgentAgenticRuntime;
+const crypto = __importStar(require("crypto"));
+const global_agent_run_projection_1 = require("../../agents/global/global-agent-run-projection");
+const session_compaction_core_1 = require("../../system/session-compaction-core");
+const main_agent_context_envelope_1 = require("../../system/main-agent-context-envelope");
+const group_compaction_strategy_1 = require("../collaboration/group-compaction-strategy");
+const source_ingestion_1 = require("../requirements/source-ingestion");
+const knowledge_access_1 = require("../knowledge/knowledge-access");
+const project_runtime_1 = require("../projects/project-runtime");
+const main_agent_turn_1 = require("../../agents/main-agent-turn");
+const internal_prompt_contract_1 = require("../../agents/internal-prompt-contract");
+const global_native_query_adapter_1 = require("./global-native-query-adapter");
+const global_agent_tool_authorization_1 = require("./global-agent-tool-authorization");
+const global_tool_load_policy_1 = require("../../agents/global/global-tool-load-policy");
+const session_context_tool_buckets_1 = require("../../system/session-context-tool-buckets");
+const main_agent_tool_runtime_1 = require("../../tools/main-agent-tool-runtime");
+const cc_tool_result_limits_1 = require("../../tools/cc-tool-result-limits");
+const delegated_inquiry_projections_1 = require("../../system/delegated-inquiry-projections");
+const delegated_inquiry_recovery_1 = require("../../system/delegated-inquiry-recovery");
+const global_agent_run_store_1 = require("../../agents/global/global-agent-run-store");
+const reliability_ledger_1 = require("../../system/reliability-ledger");
+const global_agent_authorization_1 = require("../../agents/global/global-agent-authorization");
+const shared_files_v2_1 = require("../tools/shared-files-v2");
+const main_agent_context_source_continuity_1 = require("../../system/main-agent-context-source-continuity");
+const context_source_tool_result_projection_1 = require("../../system/context-source-tool-result-projection");
+const slash_command_session_state_1 = require("../../system/slash-command-session-state");
+const transient_model_content_1 = require("../../system/transient-model-content");
+const workflow_decision_1 = require("../../agents/workflow-decision");
+const canonical_context_accounting_1 = require("../../system/canonical-context-accounting");
+const context_usage_events_1 = require("../../system/context-usage-events");
+const scope_instructions_1 = require("../../system/scope-instructions");
+const context_budget_1 = require("../../system/context-budget");
+const pre_request_tool_context_1 = require("../../system/pre-request-tool-context");
+// Global-only context, tool execution, mission supervision, and agentic loop lifecycle.
+function createGlobalAgentAgenticRuntime(deps) {
+    const { hasExplicitGlobalWriteAuthorization, GLOBAL_AGENT_TOOL_SPECS, GLOBAL_MANAGEMENT_ACTIONS, GLOBAL_PET_AGENT_NAME, acquireIdempotency, annotateGlobalAction, applyGlobalAgentSupervisionSteer, attachGlobalAgentRunSupervision, bindFeishuIdentifiersFromValue, bindFeishuTaskContext, buildGlobalAgentMemoryPacket, buildGlobalAgentSessionContinuation, buildGlobalSingleProjectMissionPayload, callGlobalModelWithRetry, compactGlobalAgentSessionWithModel, compactPetText, completeGlobalAgentSupervision, completeIdempotency, continueGlobalAgentRunWithClarification, controlGlobalDevelopmentMission, controlGlobalMissionSupervisor, createGlobalDevelopmentMission, createRequirementEpicWithChildren, executeFeishuAction, executePlayMusic, executeStopMusic, failIdempotency, findClarifyingGlobalAgentRun, formatGlobalMissionFinalReport, getAgentQualityPolicy, getConfigInfo, getConfigs, getGlobalAgentBackgroundOutput, getGlobalAgentMemoryPolicy, getGlobalAgentRun, getGlobalDevelopmentMission, getGlobalMissionSupervisor, getGlobalMissionSupervisorSchedulerStatus, globalRunVisibleReply, hasExplicitDevelopmentExecutionIntent, inferLocalGlobalAction, ingestGlobalAgentConversation, listGlobalAgentRuns, listGlobalMissionSupervisors, listTaskAgentSessions, loadCronJobs, loadGlobalAgentHistoryStore, loadGlobalAgentHooks, loadGlobalAgentMemory, loadGlobalAgentPermissionRules, loadGroups, loadMcpTools, loadOrchestratorConfig, loadSkills, loadTasks, normalizeText, notifyFeishuTaskStage, postLocalApi, queryKnowledgeBase, recallGlobalAgentMemory, rebuildGlobalAgentMemory, recordGlobalAgentRuntimeOutput, recordGlobalAgentSessionProviderUsage, recordGlobalMissionMemory, recoverInterruptedGlobalAgentRuns, refreshGlobalDevelopmentMissions, renderGlobalGroupMemoryContextBundle, resumeGlobalAgentRun, sanitizeGlobalDirectAgentOutput, setGlobalAgentMemoryPolicy, settleIdempotencyByTrace, startGlobalAgentRun, startGlobalMissionSupervisor, startGlobalMissionSupervisorScheduler, stopGlobalMissionSupervisorScheduler, superviseGlobalDevelopmentMissionCycle, updateGlobalAgentSupervisionState, waitForIdempotencyResult } = deps;
+    const continueBoundTaskWithMessage = deps.continueTaskWithMessage;
+    function safeProjectRows() {
+        const projectIds = getConfigs().map((config) => String(config.name || "")).filter(Boolean);
+        const groupIds = loadGroups().map((group) => String(group?.id || "")).filter(Boolean);
+        const instructions = (0, scope_instructions_1.listScopeInstructionCatalog)({ scope: "global", scopeId: "global", allowedProjects: projectIds, allowedGroups: groupIds });
+        return getConfigs().map((config) => {
+            const info = getConfigInfo(config.path)?.[0] || {};
+            return {
+                name: config.name,
+                display_name: (0, project_runtime_1.projectDisplayName)(config.name),
+                agent: info.agent || "claudecode",
+                platform: info.platform || "",
+                source_access: "delegated_to_project_main_agent",
+                instruction: instructions.find((entry) => entry.kind === "project" && entry.projectId === config.name) || null,
+            };
+        });
+    }
+    function compactTask(task) {
+        return {
+            id: task.id,
+            title: task.title,
+            status: task.status,
+            status_detail: task.status_detail,
+            group_id: task.group_id,
+            target_project: task.target_project,
+            updated_at: task.updated_at || task.completed_at || task.created_at,
+            trace_id: task.trace_id,
+        };
+    }
+    function isGlobalAgentOwnedTask(task) {
+        const source = String(task?.source || task?.created_by || task?.createdBy || "").toLowerCase();
+        return !!String(task?.global_mission_id || task?.globalMissionId || task?.global_run_id || task?.globalRunId || task?.parent_run_id || task?.parentRunId || "").trim()
+            || source.includes("global-agent")
+            || source.includes("global_agent");
+    }
+    const GLOBAL_AGENT_CONTEXT_ALLOWED_KEYS = new Set([
+        "projects",
+        "groups",
+        "task_summary",
+        "cron_jobs",
+        "tools",
+        "global_memory",
+        "global_knowledge",
+        "global_shared_files",
+        "context_source_catalog",
+        "session_continuity",
+        "memory_context_boundary",
+        "context_source_manifest",
+        "context_boundary_proof",
+        "scope_instruction_loaded_context",
+        "scope_instruction_catalog",
+        // Routing-only target hints are part of the global context contract. They
+        // contain names and scoped ids only; the boundary validator must allow the
+        // same projection that buildAgenticContext emits.
+        "requested_dispatch_targets",
+    ]);
+    function globalAgentContextProofPayload(context = {}) {
+        const payload = { ...(context || {}) };
+        delete payload.context_boundary_proof;
+        return payload;
+    }
+    function verifyGlobalAgentContextBoundary(context = {}) {
+        const issues = [];
+        for (const key of Object.keys(context || {}))
+            if (!GLOBAL_AGENT_CONTEXT_ALLOWED_KEYS.has(key))
+                issues.push(`global_context_source_not_allowed:${key}`);
+        if (context?.memory_context_boundary?.group_session_context_included !== false)
+            issues.push("global_context_group_session_boundary_missing");
+        if (context?.memory_context_boundary?.project_memory_included !== false)
+            issues.push("global_context_project_memory_boundary_missing");
+        if (context?.memory_context_boundary?.group_memory_included !== false)
+            issues.push("global_context_group_memory_boundary_missing");
+        for (const group of Array.isArray(context?.groups) ? context.groups : []) {
+            for (const key of Object.keys(group || {}))
+                if (!new Set(["id", "name", "members", "instructions"]).has(key))
+                    issues.push(`global_context_group_directory_field_not_allowed:${key}`);
+            if (group?.group_session_id || group?.groupSessionId || group?.messages || group?.memory)
+                issues.push("global_context_group_session_payload_present");
+            for (const member of Array.isArray(group?.members) ? group.members : []) {
+                for (const key of Object.keys(member || {}))
+                    if (!new Set(["project", "agent"]).has(key))
+                        issues.push(`global_context_group_member_field_not_allowed:${key}`);
+            }
+        }
+        for (const project of Array.isArray(context?.projects) ? context.projects : []) {
+            for (const key of Object.keys(project || {}))
+                if (!new Set(["id", "name", "display_name", "agent", "platform", "source_access", "instruction"]).has(key))
+                    issues.push(`global_context_project_directory_field_not_allowed:${key}`);
+            if (project?.work_dir || project?.workDir)
+                issues.push("global_context_project_workdir_exposed");
+        }
+        if (context?.task_summary?.policy !== "global_agent_owned_tasks_only")
+            issues.push("global_context_task_boundary_missing");
+        for (const task of Array.isArray(context?.task_summary?.recent) ? context.task_summary.recent : []) {
+            for (const key of Object.keys(task || {}))
+                if (!new Set(["id", "title", "status", "status_detail", "group_id", "target_project", "updated_at", "trace_id"]).has(key))
+                    issues.push(`global_context_task_field_not_allowed:${key}`);
+            if (task?.group_session_id || task?.groupSessionId || task?.description || task?.content || task?.memory)
+                issues.push("global_context_group_task_payload_present");
+        }
+        const manifestEntries = Array.isArray(context?.context_source_manifest?.entries) ? context.context_source_manifest.entries : [];
+        const expectedSources = ["global_agent_memory", "global_agent_session", "global_knowledge", "global_shared_files", "scope_instruction_catalog", "routing_directory", "global_task_state", "runtime_capability_directory"];
+        if (expectedSources.some(source => !manifestEntries.some((entry) => entry.source === source && entry.allowed === true)))
+            issues.push("global_context_source_manifest_incomplete");
+        if (manifestEntries.some((entry) => !expectedSources.includes(String(entry?.source || ""))))
+            issues.push("global_context_source_manifest_unknown_source");
+        if (manifestEntries.some((entry) => entry.allowed !== true))
+            issues.push("global_context_source_manifest_contains_unapproved_source");
+        const proof = context?.context_boundary_proof || {};
+        if (proof.schema !== "ccm-global-agent-context-boundary-proof-v1")
+            issues.push("global_context_boundary_proof_schema_invalid");
+        const expectedChecksum = crypto.createHash("sha256").update(JSON.stringify(globalAgentContextProofPayload(context))).digest("hex");
+        if (String(proof.context_checksum || "") !== expectedChecksum)
+            issues.push("global_context_boundary_checksum_invalid");
+        if (/\bgcs_[a-z0-9_-]+\b/i.test(JSON.stringify(context || {})))
+            issues.push("global_context_group_session_identifier_present");
+        return { schema: "ccm-global-agent-context-boundary-validation-v1", valid: issues.length === 0, issues, expectedChecksum };
+    }
+    function summarizeGlobalToolObservationForUser(observation, fallback = "操作已返回结果。") {
+        if (!observation)
+            return fallback;
+        if (observation.success === false || observation.error) {
+            return sanitizeGlobalDirectAgentOutput(observation.error || observation.summary || observation.message, "操作未完成；错误详情已放入技术详情。", 700);
+        }
+        const explicit = sanitizeGlobalDirectAgentOutput(observation.summary || observation.message || observation.reply || "", "", 700);
+        if (explicit)
+            return explicit;
+        const count = observation.jobs?.length
+            ?? observation.tasks?.length
+            ?? observation.projects?.length
+            ?? observation.groups?.length
+            ?? observation.missions?.length
+            ?? observation.children?.length;
+        if (count !== undefined)
+            return `操作已返回结果，共 ${count} 条；详细记录已放入技术详情。`;
+        if (observation.accepted === true && observation.completed === false)
+            return "任务已受理并进入持续跟进；这不代表最终完成，完成后会再给出交付总结。";
+        if (observation.client_effect)
+            return "操作已返回结果，界面会同步执行对应动作。";
+        return "操作已返回结果；详细记录已放入技术详情。";
+    }
+    function buildGlobalAgentGroupMemoryModelContext(bundle, options = {}) {
+        const maxChars = Math.max(4_000, Math.min(24_000, Number(options.maxChars || options.max_chars || 12_000)));
+        const sourceText = typeof bundle === "string"
+            ? bundle
+            : String(bundle?.rendered_text || renderGlobalGroupMemoryContextBundle(bundle) || "");
+        const truncated = sourceText.length > maxChars;
+        const renderedText = truncated
+            ? `${sourceText.slice(0, Math.max(0, maxChars - 56)).trimEnd()}\n[群聊记忆摘要已按模型上下文预算截断]`
+            : sourceText;
+        const selectedGroups = Array.isArray(bundle?.groups)
+            ? bundle.groups.slice(0, 12).map((group) => ({
+                group_id: String(group?.group_id || ""),
+                group_name: String(group?.group_name || ""),
+                score: Number(group?.score || 0),
+            }))
+            : [];
+        const sourceBytes = typeof bundle === "string" ? Buffer.byteLength(bundle) : Buffer.byteLength(JSON.stringify(bundle || {}));
+        return {
+            schema: "ccm-global-group-memory-model-context-v1",
+            source_schema: typeof bundle === "object" ? String(bundle?.schema || "") : "text",
+            generated_at: typeof bundle === "object" ? String(bundle?.generated_at || "") : "",
+            query: typeof bundle === "object" ? String(bundle?.query || "") : "",
+            total_group_count: Number(bundle?.total_group_count || 0),
+            selected_group_count: Number(bundle?.selected_group_count || selectedGroups.length),
+            selected_groups: selectedGroups,
+            memory_policy: bundle?.memory_policy || null,
+            rendered_text: renderedText,
+            context_budget: {
+                max_chars: maxChars,
+                used_chars: renderedText.length,
+                approximate_tokens: Math.ceil(renderedText.length / 3),
+                source_bytes: sourceBytes,
+                truncated,
+                full_context_available_via: "query_group_memory technical endpoint",
+            },
+        };
+    }
+    function buildAgenticContext(query = "", sessionId = "", options = {}) {
+        const lazyResources = options.lazyResources === true || options.lazy_resources === true;
+        const tasks = loadTasks();
+        const groups = Array.isArray(options.groups) ? options.groups : loadGroups();
+        const globalTasks = tasks.filter(isGlobalAgentOwnedTask);
+        const authorizedTools = (0, global_agent_tool_authorization_1.buildGlobalAgentToolRuntimeContext)({
+            taskId: String(options.runId || options.run_id || ""),
+            executionId: String(options.executionId || options.execution_id || ""),
+            sessionId,
+            source: String(options.source || "global-agent-context"),
+        }, Array.isArray(options.loadedToolNames || options.loaded_tool_names) ? (options.loadedToolNames || options.loaded_tool_names) : [], {
+            executionSkills: (0, global_agent_tool_authorization_1.resolveGlobalAgentExecutionSkills)({
+                message: query,
+                source: String(options.source || "global-agent-context"),
+                workflowDecision: options.workflowDecision || options.workflow_decision || null,
+            }),
+        });
+        (0, shared_files_v2_1.migrateLegacyGlobalSharedDirectoryV2)();
+        const globalContextPolicy = authorizedTools.context_policy.effective;
+        const globalContextWindow = Number(authorizedTools.context_budget?.contextWindow || (0, group_compaction_strategy_1.resolveGroupModelContextCapacity)(loadOrchestratorConfig()).effectiveContextWindow || 200_000);
+        const globalSourceBudget = (0, main_agent_context_source_continuity_1.calculateContextSourceBudget)({ contextWindow: globalContextWindow, catalogPercent: globalContextPolicy.contextSourceCatalogBudgetPercent, hydrationPercent: globalContextPolicy.contextSourceHydrationBudgetPercent, remainingSafeTokens: authorizedTools.context_budget?.finalSafetyRemainingTokens });
+        const globalSharedFiles = (0, shared_files_v2_1.buildSharedFilesContextV2)("global", "global", {
+            contextWindow: globalContextWindow,
+            hydrationBudgetPercent: globalContextPolicy.contextSourceHydrationBudgetPercent,
+            remainingSafeTokens: globalSourceBudget.hydrationTargetTokens,
+            explicitText: query,
+            title: "以下是全局 Agent 已授权共享文件。使用其中事实时必须引用文件和分片：",
+        });
+        const sourceIdentity = sessionId ? { agentKind: "global", scope: "global", scopeId: "global", exactSessionId: sessionId, generation: Number(authorizedTools.scope_identity?.generation || 0) } : null;
+        const globalSourceCatalog = (0, main_agent_context_source_continuity_1.buildContextSourceCatalog)({
+            sources: (0, main_agent_context_source_continuity_1.listContextSourceCatalogEntries)({ sharedScope: "global", sharedScopeId: "global", knowledgeContext: { role: "global-agent" } }),
+            maxTokens: globalSourceBudget.catalogTargetTokens,
+            explicitText: query,
+            recentReceipts: sourceIdentity ? (0, main_agent_context_source_continuity_1.readContextSourceContinuity)(sourceIdentity).receipts : [],
+        });
+        if (sourceIdentity && !lazyResources) {
+            (0, main_agent_context_source_continuity_1.recordContextSourceCatalog)(sourceIdentity, globalSourceCatalog, globalSourceBudget);
+            (0, main_agent_context_source_continuity_1.recordSharedFileProjection)(sourceIdentity, globalSharedFiles, { ...globalSourceBudget, catalogUsedTokens: globalSourceCatalog.usedTokens, sharedFileTokens: globalSharedFiles.total_tokens, hydrationUsedTokens: globalSharedFiles.total_tokens });
+        }
+        const restoredSources = sourceIdentity && Number(authorizedTools.scope_identity?.generation || 0) > 0 && !lazyResources
+            ? (0, main_agent_context_source_continuity_1.restoreContextSources)({
+                identity: { ...sourceIdentity, generation: Number(authorizedTools.scope_identity?.generation || 0) },
+                knowledgeContext: { role: "global-agent" },
+                explicitText: query,
+                maxPerItemTokens: globalContextPolicy.postCompactSourcePerItemMaxTokens,
+                maxTotalTokens: globalContextPolicy.postCompactSourceTotalMaxTokens,
+                hydrationTargetTokens: globalSourceBudget.hydrationTargetTokens,
+                remainingSafeTokens: globalSourceBudget.remainingSafeTokens,
+            }).context
+            : "";
+        const globalProjectIds = safeProjectRows().map((project) => String(project.name || "")).filter(Boolean);
+        const globalGroupIds = groups.map((group) => String(group?.id || "")).filter(Boolean);
+        const instructionCatalog = (0, scope_instructions_1.listScopeInstructionCatalog)({ scope: "global", scopeId: "global", allowedProjects: globalProjectIds, allowedGroups: globalGroupIds });
+        const lightweightDirectory = options.lightweightDirectory === true || options.lightweight_directory === true;
+        const context = {
+            projects: safeProjectRows().map((project) => lightweightDirectory
+                ? { id: String(project?.name || ""), name: String(project?.name || ""), display_name: String(project?.display_name || "") }
+                : project),
+            groups: groups.map((group) => lightweightDirectory
+                ? { id: String(group?.id || ""), name: String(group?.name || "") }
+                : {
+                    id: group.id,
+                    name: group.name,
+                    members: (group.members || []).map((member) => ({ project: member.project, agent: member.agent })),
+                    instructions: instructionCatalog.filter((entry) => entry.groupId === String(group.id || "")),
+                }),
+            scope_instruction_catalog: instructionCatalog.map((entry) => ({
+                documentId: String(entry?.documentId || ""),
+                kind: String(entry?.kind || ""),
+                projectId: String(entry?.projectId || ""),
+                groupId: String(entry?.groupId || ""),
+                status: String(entry?.status || ""),
+                generation: Number(entry?.generation || 0),
+                revision: Number(entry?.revision || 0),
+                checksum: String(entry?.checksum || ""),
+                contentStored: false,
+            })),
+            scope_instruction_loaded_context: sourceIdentity ? (0, scope_instructions_1.restoreScopeInstructionContext)({
+                scope: "global", scopeId: "global", exactSessionId: sessionId,
+                generation: Number(authorizedTools.scope_identity?.generation || 0),
+                allowedProjects: globalProjectIds, allowedGroups: globalGroupIds,
+            }).context : "",
+            requested_dispatch_targets: {
+                schema: "ccm-global-requested-dispatch-targets-v1",
+                targets: (Array.isArray(options.requestedTargetRefs || options.requested_target_refs) ? (options.requestedTargetRefs || options.requested_target_refs) : [])
+                    .map((target) => ({ scope: target.scope, scope_id: target.scopeId || target.scope_id, name: target.displayName || target.canonicalName || target.name }))
+                    .filter((target) => target.scope && target.scope_id),
+                policy: "only_these_targets_may_receive_tasks",
+            },
+            task_summary: {
+                total: globalTasks.length,
+                active: globalTasks.filter((task) => ["pending", "queued", "in_progress", "running"].includes(String(task.status))).length,
+                recent: globalTasks.slice(-12).map(compactTask),
+                policy: "global_agent_owned_tasks_only",
+            },
+            cron_jobs: loadCronJobs().map((job) => ({ id: job.id, name: job.name, schedule: job.schedule, enabled: job.enabled !== false, target_type: job.target_type, group_id: job.group_id, project: job.project })),
+            tools: {
+                schema: authorizedTools.schema,
+                authorization_checksum: authorizedTools.checksum,
+                authorization_readiness: authorizedTools.authorization_readiness,
+                connection_preflight: authorizedTools.connection_preflight,
+                configured_counts: authorizedTools.configured_counts,
+                available_counts: authorizedTools.counts,
+                workspace: authorizedTools.catalog.tools
+                    .filter((tool) => tool.server === "ccm__workspace_readonly")
+                    .map((tool) => ({
+                    name: tool.name,
+                    description: tool.description,
+                    input_schema: tool.inputSchema,
+                    annotations: tool.annotations,
+                })),
+                mcp: authorizedTools.catalog.tools
+                    .filter((tool) => tool.server !== "ccm__workspace_readonly")
+                    .map((tool) => ({
+                    name: tool.canonicalName,
+                    server: tool.server,
+                    description: tool.description,
+                    input_schema: tool.inputSchema,
+                    annotations: tool.annotations,
+                })),
+                deferred_workspace: authorizedTools.discoverable_tools
+                    .filter((tool) => tool.server === "ccm__workspace_readonly")
+                    .map((tool) => ({ name: tool.name })),
+                deferred_mcp: authorizedTools.discoverable_tools
+                    .filter((tool) => tool.server !== "ccm__workspace_readonly")
+                    .map((tool) => ({ name: tool.canonicalName || tool.name })),
+                loaded_tool_names: authorizedTools.loaded_tool_names,
+                skills: authorizedTools.catalog.skills.map((skill) => ({
+                    name: skill.name,
+                    description: skill.description,
+                    content_hash: skill.contentHash,
+                })),
+                policy: "global_scope_authorized_only",
+            },
+            global_memory: query && !lazyResources ? buildGlobalAgentMemoryPacket(query, {
+                sessionId,
+                limit: 7,
+                recordMetric: options.recordMemoryMetric !== false && options.record_memory_metric !== false,
+            }) : "",
+            global_knowledge: options.knowledgeContext || options.knowledge_context || "",
+            context_source_catalog: [globalSourceCatalog.context, restoredSources].filter(Boolean).join("\n\n"),
+            global_shared_files: {
+                context: lazyResources ? "" : globalSharedFiles.context,
+                manifest_checksum: globalSharedFiles.checksum,
+                complete: globalSharedFiles.complete,
+                files: globalSharedFiles.files.map((file) => ({
+                    id: file.id,
+                    name: file.name,
+                    checksum: file.checksum,
+                    chunks: file.chunks?.length || 0,
+                })),
+            },
+            session_continuity: sessionId && options.includeSessionContinuity !== false && options.include_session_continuity !== false
+                ? buildGlobalAgentSessionContinuation(sessionId, { consumeSessionStartHookContext: true })
+                : null,
+            memory_context_boundary: {
+                schema: "ccm-global-agent-memory-boundary-v1",
+                policy: "global_memory_only_group_session_content_excluded",
+                group_session_context_included: false,
+                group_memory_included: false,
+                project_memory_included: false,
+                routing_directory_included: true,
+                global_task_state_included: true,
+            },
+            context_source_manifest: {
+                schema: "ccm-global-agent-context-source-manifest-v1",
+                entries: [
+                    { source: "global_agent_memory", allowed: true },
+                    { source: "global_agent_session", allowed: true },
+                    { source: "global_knowledge", allowed: true },
+                    { source: "global_shared_files", allowed: true },
+                    { source: "scope_instruction_catalog", allowed: true },
+                    { source: "routing_directory", allowed: true },
+                    { source: "global_task_state", allowed: true },
+                    { source: "runtime_capability_directory", allowed: true },
+                ],
+            },
+        };
+        context.context_boundary_proof = {
+            schema: "ccm-global-agent-context-boundary-proof-v1",
+            context_checksum: crypto.createHash("sha256").update(JSON.stringify(globalAgentContextProofPayload(context))).digest("hex"),
+            generated_at: new Date().toISOString(),
+        };
+        const validation = verifyGlobalAgentContextBoundary(context);
+        if (!validation.valid)
+            throw new Error(`global agent context boundary failed: ${validation.issues.join(", ")}`);
+        return context;
+    }
+    function buildGlobalProviderPayloadSnapshot(messages, sessionId, run, requestTools) {
+        const config = loadOrchestratorConfig();
+        const systemMessages = messages.filter(message => message.role === "system");
+        const systemText = systemMessages.map(message => String(message.content || "")).join("\n");
+        const completeMessageText = messages.map(message => String(message.content || "")).join("\n");
+        const skillSections = [];
+        const catalogStart = systemText.indexOf("[CCM 可由模型选择的 Skill 目录]");
+        if (catalogStart >= 0) {
+            const catalogEnd = systemText.indexOf("\n\n只输出一个合法 JSON", catalogStart);
+            skillSections.push(systemText.slice(catalogStart, catalogEnd > catalogStart ? catalogEnd : undefined));
+        }
+        const selectedSkillStart = systemText.indexOf("[CCM 本轮角色 Skill]");
+        if (selectedSkillStart >= 0)
+            skillSections.push(systemText.slice(selectedSkillStart));
+        const authorizedTools = (0, global_agent_tool_authorization_1.buildGlobalAgentToolRuntimeContext)({ sessionId, taskId: String(run?.id || ""), source: "global-agent-provider-payload" }, (run?.loaded_tool_names || run?.loadedToolNames || []), { executionSkills: (0, global_agent_tool_authorization_1.resolveGlobalAgentExecutionSkillsFromRun)(run) });
+        const configuredMcpTools = (0, session_context_tool_buckets_1.selectUserMcpToolDefinitions)(authorizedTools.catalog.tools).map((tool) => ({ name: String(tool?.canonicalName || tool?.name || ""), server: String(tool?.server || "") })).filter((tool) => tool.name);
+        const restoredSkillNames = new Set((authorizedTools.restored_skill_attachments || []).map((skill) => String(skill?.name || "")));
+        const selectedSkillNames = new Set((0, global_agent_tool_authorization_1.resolveGlobalAgentExecutionSkillsFromRun)(run).map((name) => String(name || "")).filter(Boolean));
+        const loadedSkills = authorizedTools.catalog.skills
+            .map((skill) => ({
+            kind: "skill",
+            name: String(skill?.name || ""),
+            aliases: [String(skill?.name || ""), `skill:${String(skill?.name || "")}`].filter(Boolean),
+            loadLevel: restoredSkillNames.has(String(skill?.name || "")) || selectedSkillNames.has(String(skill?.name || "")) ? "body" : "available",
+            checksum: String(skill?.contentHash || ""),
+            loadSource: restoredSkillNames.has(String(skill?.name || "")) ? "post_compact_restored"
+                : selectedSkillNames.has(String(skill?.name || "")) ? "same_run" : "catalog",
+            tokens: restoredSkillNames.has(String(skill?.name || ""))
+                ? Number((authorizedTools.restored_skill_attachments || []).find((item) => item?.name === skill?.name)?.tokenCount || 0)
+                : selectedSkillNames.has(String(skill?.name || ""))
+                    ? (0, context_budget_1.estimateTextTokens)(skillSections.find(section => section.includes(String(skill?.name || ""))) || String(skill?.name || ""))
+                    : 0,
+        }));
+        const allSkillCatalog = new Map((Array.isArray(loadSkills()) ? loadSkills() : [])
+            .map((skill) => [String(skill?.name || ""), skill]));
+        for (const match of systemText.matchAll(/^## Skill:([^\r\n]+)/gm)) {
+            const name = String(match[1] || "").trim();
+            if (!name || loadedSkills.some((skill) => skill.name === name))
+                continue;
+            const skill = allSkillCatalog.get(name) || null;
+            loadedSkills.push({
+                kind: "skill",
+                name,
+                aliases: [name, `skill:${name}`],
+                loadLevel: "body",
+                checksum: String(skill?.contentHash || crypto.createHash("sha256").update(name).digest("hex")),
+                loadSource: "same_run",
+                tokens: (0, context_budget_1.estimateTextTokens)(skillSections.find(section => section.includes(`## Skill:${name}`)) || name),
+            });
+        }
+        const loadedMcp = (0, session_context_tool_buckets_1.selectUserMcpToolDefinitions)(authorizedTools.catalog.tools).map((tool) => ({
+            kind: "mcp",
+            name: String(tool?.canonicalName || tool?.name || ""),
+            aliases: [
+                String(tool?.canonicalName || ""),
+                String(tool?.server || ""),
+                tool?.server && tool?.name ? `${tool.server}/${tool.name}` : "",
+                String(tool?.name || ""),
+            ].filter(Boolean),
+            loadLevel: "schema",
+            checksum: crypto.createHash("sha256").update(JSON.stringify({
+                name: tool?.canonicalName || tool?.name,
+                server: tool?.server,
+                inputSchema: tool?.inputSchema || null,
+            })).digest("hex"),
+            loadSource: authorizedTools.post_compact_restore_receipt?.loadedToolNames?.includes(String(tool?.canonicalName || tool?.name || ""))
+                ? "post_compact_restored"
+                : tool?.alwaysLoad === true ? "always_load" : "same_run",
+        }));
+        const loadedToolNames = (run?.loaded_tool_names || run?.loadedToolNames || []).map(value => String(value || ""));
+        const modelVisibleToolSpecs = Array.isArray(requestTools)
+            ? requestTools
+            : GLOBAL_AGENT_TOOL_SPECS.filter(spec => !(0, global_tool_load_policy_1.isGlobalDeferredTool)(spec.name, loadedToolNames));
+        const visibleToolNames = new Set(modelVisibleToolSpecs.map((tool) => String(tool?.name || tool?.function?.name || "")).filter(Boolean));
+        const availableSystemTools = GLOBAL_AGENT_TOOL_SPECS
+            .filter((tool) => !visibleToolNames.has(String(tool?.name || "")))
+            .map((tool) => ({
+            kind: "system_tool",
+            origin: "system",
+            name: String(tool?.name || ""),
+            aliases: [String(tool?.name || "")].filter(Boolean),
+            loadLevel: "available",
+            checksum: crypto.createHash("sha256").update(JSON.stringify({ name: tool?.name || "", description: tool?.description || "" })).digest("hex"),
+            loadSource: "catalog",
+            tokens: 0,
+        }));
+        const availableMcp = (authorizedTools.discoverable_tools || []).map((tool) => ({
+            kind: "mcp",
+            origin: "extension",
+            name: String(tool?.canonicalName || tool?.name || ""),
+            aliases: [String(tool?.canonicalName || ""), String(tool?.server || ""), String(tool?.name || "")].filter(Boolean),
+            loadLevel: "available",
+            checksum: crypto.createHash("sha256").update(JSON.stringify({ name: tool?.canonicalName || tool?.name || "", server: tool?.server || "" })).digest("hex"),
+            loadSource: "catalog",
+            tokens: 0,
+        }));
+        const invocations = (Array.isArray(run?.steps) ? run.steps : []).flatMap((step) => {
+            const wrapper = String(step?.tool?.name || "");
+            const kind = wrapper === "invoke_skill" ? "skill" : wrapper === "invoke_mcp" ? "mcp" : "";
+            const name = kind === "skill"
+                ? String(step?.tool?.arguments?.name || "")
+                : kind === "mcp" ? String(step?.tool?.arguments?.tool_name || step?.tool?.arguments?.toolName || step?.tool?.arguments?.name || "") : "";
+            if (!kind || !name || (step?.observation === undefined && !step?.error))
+                return [];
+            return [{
+                    kind,
+                    name,
+                    aliases: [name, kind === "skill" ? `skill:${name}` : ""].filter(Boolean),
+                    ok: !step?.error && step?.observation?.success !== false,
+                    resultChecksum: crypto.createHash("sha256").update(JSON.stringify(step?.observation ?? step?.error ?? null)).digest("hex"),
+                }];
+        });
+        const priorEnvelope = run?.global_context_envelope || null;
+        const globalContextEnvelope = priorEnvelope ? {
+            ...priorEnvelope,
+            stablePrefixChecksum: crypto.createHash("sha256").update(JSON.stringify({
+                system: systemMessages,
+                tools: modelVisibleToolSpecs,
+                selectedSkills: Array.from(selectedSkillNames).sort(),
+            })).digest("hex"),
+            layerTokens: {
+                ...priorEnvelope.layerTokens,
+                stablePrefix: (0, context_budget_1.estimateTextTokens)(JSON.stringify({ system: systemMessages, tools: modelVisibleToolSpecs })),
+            },
+            contentStored: false,
+        } : undefined;
+        const loadedContextItems = {
+            schema: "ccm-loaded-context-items-v2",
+            systemTools: availableSystemTools,
+            skills: loadedSkills,
+            mcp: [...loadedMcp, ...availableMcp],
+            invocations,
+        };
+        const routingDirectory = run?.global_routing_directory || {};
+        const capabilityDirectory = (0, main_agent_context_envelope_1.buildMainAgentCapabilityDirectoryV1)({
+            scope: "global",
+            scopeId: "global",
+            exactSessionId: sessionId,
+            generation: Number(run?.generation || 0),
+            toolContext: {
+                catalog: {
+                    native: modelVisibleToolSpecs,
+                    skills: loadedSkills,
+                    mcp: loadedMcp,
+                    discoverableMcp: availableMcp,
+                },
+                loadedContext: run?.context?.scope_instruction_loaded_context || "",
+            },
+            loadedContextItems,
+            memberProjects: routingDirectory.projects || [],
+            sharedFiles: {
+                available: visibleToolNames.has("read_global_shared_files") ? 1 : 0,
+                readTool: "read_global_shared_files",
+            },
+            scopeInstructions: {
+                available: Array.isArray(run?.context?.scope_instruction_catalog) ? run.context.scope_instruction_catalog.length : 0,
+                loaded: run?.context?.scope_instruction_loaded_context ? 1 : 0,
+            },
+        });
+        const mainAgentContextEnvelope = (0, main_agent_context_envelope_1.buildMainAgentContextEnvelopeV1)({
+            scope: "global",
+            scopeId: "global",
+            exactSessionId: sessionId,
+            generation: Number(run?.generation || 0),
+            messages,
+            tools: modelVisibleToolSpecs,
+            capabilityDirectory,
+            loadedContextChecksums: (0, main_agent_context_envelope_1.mainAgentLoadedContextChecksums)(loadedContextItems),
+        });
+        return (0, session_compaction_core_1.buildModelVisiblePayloadSnapshot)({
+            scope: "global",
+            sessionId,
+            exactSessionId: sessionId,
+            provider: String(config.provider || (String(config.format || "").toLowerCase().includes("anthropic") ? "anthropic" : String(config.format || "").toLowerCase().includes("gemini") ? "gemini" : "openai")),
+            model: String(config.model || ""),
+            protocol: String(config.format || config.protocol || ""),
+            modelConfig: config,
+            system: systemMessages,
+            tools: modelVisibleToolSpecs,
+            recentMessages: messages.filter(message => message.role !== "system"),
+            globalContextEnvelope,
+            mainAgentContextEnvelope,
+            mainAgentCapabilityDirectory: capabilityDirectory,
+            contextComponents: {
+                skills: [...skillSections, ...(authorizedTools.restored_skill_attachments || [])],
+                mcpTools: configuredMcpTools,
+                subagentDefinitions: null,
+                memoryAndLoadedContext: {
+                    contextEnvelope: globalContextEnvelope || null,
+                    routingDirectory: run?.global_routing_directory || null,
+                    loadedScopeInstruction: run?.context?.scope_instruction_loaded_context || null,
+                    sessionContinuity: run?.context?.session_continuity || null,
+                },
+                loadedContextItems,
+            },
+        });
+    }
+    function isGlobalPromptTooLongError(error) {
+        return /HTTP\s*413|prompt(?:\s+is)?\s+too\s+long|context(?:_length)?(?:\s+window)?\s*(?:exceeded|limit)|maximum context|request too large|token\s*(?:检查|门禁).*拒绝|Token.*(?:rejected|refused)|POST_COMPACT_THRESHOLD/i.test(String(error?.message || error || ""));
+    }
+    async function prepareGlobalProviderMessages(messages, run, runtime, options = {}) {
+        const sessionId = String(run.session_id || "").trim();
+        if (!sessionId)
+            throw new Error("全局 Agent Provider 调用缺少精确会话 ID");
+        const baseConfig = loadOrchestratorConfig();
+        const sessionPreferences = (0, slash_command_session_state_1.readSlashCommandSessionState)("global", "global", sessionId).preferences;
+        const config = { ...baseConfig, model: sessionPreferences.model || baseConfig.model, reasoningEffort: sessionPreferences.effort || baseConfig.reasoningEffort };
+        const modelCapacity = (0, group_compaction_strategy_1.resolveGroupModelContextCapacity)(config);
+        const threshold = (0, group_compaction_strategy_1.getGroupAutoCompactThreshold)(config);
+        let triggerPayload = buildGlobalProviderPayloadSnapshot(messages, sessionId, run, (0, global_native_query_adapter_1.globalNativeTools)(run));
+        if (!options.promptTooLong && !options.contextPressure && triggerPayload.totalTokens < threshold)
+            return messages;
+        const toolPreflight = (0, pre_request_tool_context_1.stagePreRequestToolContext)({
+            scope: "global",
+            scopeId: "global",
+            exactSessionId: sessionId,
+            messages,
+            providerPayloadChecksum: String(triggerPayload.payloadChecksum || ""),
+            tokensBefore: Number(triggerPayload.totalTokens || 0),
+            config,
+            generation: Math.max(0, Number(run.generation || run.resume_count || 0)),
+            attempt: Math.max(1, Number(run.attempt || Number(run.resume_count || 0) + 1)),
+            forcePromptTooLong: options.promptTooLong === true,
+        });
+        if (toolPreflight.changed) {
+            messages = toolPreflight.messages;
+            triggerPayload = buildGlobalProviderPayloadSnapshot(messages, sessionId, run, (0, global_native_query_adapter_1.globalNativeTools)(run));
+            if (triggerPayload.totalTokens < threshold)
+                return messages;
+        }
+        let compaction = null;
+        try {
+            compaction = await compactGlobalAgentSessionWithModel(sessionId, {
+                reason: options.promptTooLong ? "provider_prompt_too_long" : "provider_payload_preflight",
+                promptTooLong: options.promptTooLong === true,
+                currentRequest: { role: "user", content: run.reasoning_loop?.effective_goal || run.user_message },
+                fixedContext: messages.filter(message => message.role === "system"),
+                modelVisiblePayload: triggerPayload,
+                postCompactPayloadBuilder: async ({ summary, preservedMessages, boundaryMarker, recoveryContext, hookResults }) => {
+                    const continuation = {
+                        schema: "ccm-global-session-continuation-v2",
+                        sessionId,
+                        summary,
+                        messages: preservedMessages.map((message) => ({
+                            id: String(message.id || ""),
+                            role: message.role === "assistant" ? "assistant" : "user",
+                            content: String(message.content || ""),
+                            timestamp: String(message.timestamp || ""),
+                        })),
+                        boundary: boundaryMarker,
+                        recoveryContext,
+                        hookResults,
+                    };
+                    const rebuiltMessages = await (0, global_agent_run_projection_1.buildGlobalAgentModelMessages)(run, runtime, { sessionContinuationOverride: continuation });
+                    return {
+                        messages: rebuiltMessages,
+                        modelVisiblePayload: buildGlobalProviderPayloadSnapshot(rebuiltMessages, sessionId, run),
+                    };
+                },
+                turnId: String(run.turn_id || run.turnId || ""),
+                taskId: String(run.task_id || run.taskId || ""),
+                generation: Number(run.generation || run.resume_count || 0),
+                attempt: Number(run.attempt || Number(run.resume_count || 0) + 1),
+                anchorMessageId: String(run.anchor_message_id || run.anchorMessageId || ""),
+            });
+        }
+        catch (error) {
+            if (isGlobalPromptTooLongError(error) || /GLOBAL_COMPACTION_|GLOBAL_SESSION_/i.test(String(error?.code || ""))) {
+                recordGlobalAgentRuntimeOutput(run, { type: "context_recovery", status: "warning", message: "请求前上下文压缩未能降到安全容量线", detail: "provider_or_compaction_capacity" });
+            }
+            throw error;
+        }
+        if (compaction?.reason === "circuit_breaker" || compaction?.compacted !== true) {
+            const error = new Error(`全局 Agent 请求前会话压缩未完成：${compaction?.reason || "compaction_not_applied"}`);
+            error.code = "GLOBAL_PRE_REQUEST_COMPACTION_NOT_APPLIED";
+            error.compaction = compaction;
+            throw error;
+        }
+        const rebuiltMessages = Array.isArray(compaction.preparedModelMessages)
+            ? compaction.preparedModelMessages
+            : await (0, global_agent_run_projection_1.buildGlobalAgentModelMessages)(run, runtime);
+        const rebuiltPayload = buildGlobalProviderPayloadSnapshot(rebuiltMessages, sessionId, run);
+        const postCompactGate = (0, session_compaction_core_1.buildSessionPostCompactGate)({ modelVisiblePayload: rebuiltPayload, threshold });
+        if (postCompactGate.providerCallAllowed !== true || rebuiltPayload.totalTokens >= modelCapacity.contextWindow) {
+            const error = new Error(`全局 Agent 请求前会话压缩后仍超过容量线：${rebuiltPayload.totalTokens}/${threshold}`);
+            error.code = "GLOBAL_PRE_REQUEST_CONTEXT_CAPACITY_EXCEEDED";
+            error.postCompactGate = postCompactGate;
+            throw error;
+        }
+        return rebuiltMessages;
+    }
+    function localActionToAgenticDecision(localIntent, run) {
+        if (run.steps.length > 0) {
+            const last = run.steps[run.steps.length - 1];
+            const observationText = summarizeGlobalToolObservationForUser(last.observation, localIntent?.reply || "操作已返回结果。");
+            return {
+                state: "complete",
+                message: last.error ? `操作未完成：${last.error}` : `${localIntent?.reply || "操作已返回结果。"}\n\n${observationText}`,
+                tool: null,
+                completion: { evidence: last.error ? [] : [`工具 ${last.tool?.name || "unknown"} 已返回执行结果`], risks: last.error ? [last.error] : [] },
+            };
+        }
+        if (!localIntent?.action?.type) {
+            if (localIntent?.intent?.category === "conversation") {
+                return { state: "answer", message: localIntent.reply, tool: null, intent: localIntent.intent };
+            }
+            return {
+                state: "answer",
+                message: "大模型暂时不可用，本次请求未开始。请检查模型配置或网络后重试。",
+                tool: null,
+                intent: {
+                    category: "question",
+                    goal: run.user_message,
+                    action_required: false,
+                    confidence: 0.2,
+                    authorization_basis: "none",
+                    reason: "模型不可用，未执行任何操作",
+                },
+            };
+        }
+        const action = localIntent.action;
+        const toolName = action.type === "system_status" ? "inspect_system" : action.type;
+        if (!GLOBAL_AGENT_TOOL_SPECS.some(spec => spec.name === toolName)) {
+            return { state: "answer", message: `${localIntent.reply}\n\n当前动作还没有接入 Agentic Loop 后端工具，未执行。`, tool: null };
+        }
+        const spec = GLOBAL_AGENT_TOOL_SPECS.find(item => item.name === toolName);
+        const fallbackRisk = typeof spec.risk === "function" ? spec.risk(action.params || {}) : spec.risk;
+        const deterministicUiTools = new Set(["play_music", "stop_music", "toggle_pet", "navigate"]);
+        if (fallbackRisk !== "read" && !deterministicUiTools.has(toolName)) {
+            return {
+                state: "answer",
+                message: "大模型暂时不可用，本次操作未开始。请检查模型配置或网络后重试。",
+                tool: null,
+                intent: { category: "ambiguous", goal: run.user_message, action_required: false, confidence: 0.2, authorization_basis: "none", reason: "模型不可用，禁止关键词规则代替语义决策执行写操作" },
+            };
+        }
+        return { state: "execute", message: localIntent.reply, tool: { name: toolName, arguments: action.params || {} } };
+    }
+    function createMissionSupervisorRuntime(ctx) {
+        return {
+            inspectMission: (missionId) => getGlobalDevelopmentMission(missionId),
+            advanceMission: (missionId, options) => superviseGlobalDevelopmentMissionCycle(missionId, ctx, options),
+            controlMission: (missionId, operation, payload) => controlGlobalDevelopmentMission(missionId, operation, ctx, payload),
+            deliverTerminal: async (record, receipt, delivery) => {
+                const report = record.final_report || {};
+                const formatted = formatGlobalMissionFinalReport(report);
+                if (delivery.kind === "memory") {
+                    recordGlobalMissionMemory({ missionId: record.mission_id, sessionId: record.session_id, traceId: record.trace_id, source: record.source, status: receipt.outcome, report });
+                    return;
+                }
+                if (delivery.kind === "run") {
+                    if (record.global_run_id) {
+                        const run = completeGlobalAgentSupervision(record.global_run_id, { ...report, formatted, terminal_receipt: receipt }, receipt.outcome);
+                        if (run) {
+                            run.terminal_receipt = receipt;
+                            (0, global_agent_run_store_1.saveRun)(run, true);
+                        }
+                    }
+                    return;
+                }
+                if (delivery.kind === "replay") {
+                    (0, reliability_ledger_1.appendTraceEvent)(record.trace_id, {
+                        id: `${record.id}:terminal-delivery:${receipt.checksum}`,
+                        type: "global_agent.terminal_delivery_recorded",
+                        status: receipt.outcome === "completed" ? "ok" : "warning",
+                        task_id: record.mission_id,
+                        message: report?.summary || formatted,
+                        data: { terminal_receipt: receipt },
+                    });
+                    return;
+                }
+                if (delivery.kind === "web_session") {
+                    ingestGlobalAgentConversation({
+                        sessionId: record.session_id,
+                        source: record.source || "global-supervisor",
+                        messages: [{
+                                id: `gam_${record.global_run_id || record.mission_id}_terminal`,
+                                role: "assistant",
+                                content: formatted,
+                                timestamp: receipt.settled_at,
+                                trace_id: record.trace_id,
+                                mission_id: record.mission_id,
+                                metadata: { terminal_receipt: receipt },
+                            }],
+                    });
+                    return;
+                }
+                if (delivery.kind === "feishu") {
+                    bindFeishuIdentifiersFromValue(record.session_id, report);
+                    bindFeishuTaskContext({ sessionId: record.session_id, runIds: [record.global_run_id], missionIds: [record.mission_id], source: record.source, targetType: "global_agent" });
+                    const delivered = await notifyFeishuTaskStage({
+                        stage: receipt.outcome === "completed" ? "completion" : receipt.outcome,
+                        title: receipt.outcome === "completed" ? "任务已经完成" : receipt.outcome === "cancelled" ? "任务已取消" : "任务执行遇到问题",
+                        markdown: formatted,
+                        sessionId: record.session_id,
+                        runId: record.global_run_id,
+                        missionId: record.mission_id,
+                        dedupeKey: `mission:${record.mission_id}:terminal:${receipt.checksum}`,
+                    });
+                    if (delivered?.success !== true && delivered?.queued !== true)
+                        throw new Error(delivered?.reason || "飞书终态投递失败");
+                }
+            },
+            onProgress: async (record, event) => {
+                if (event?.type === "waiting_user")
+                    recordGlobalMissionMemory({ missionId: record.mission_id, sessionId: record.session_id, traceId: record.trace_id, source: record.source, status: "waiting_user", report: { summary: `全局任务等待人工处理`, remaining_items: (event.items || []).map((item) => item.reason || item.task_id) } });
+                if (record.global_run_id && event?.type === "waiting_user")
+                    updateGlobalAgentSupervisionState(record.global_run_id, "waiting_user");
+                if (!/feishu/i.test(record.source))
+                    return;
+                const taskIds = [
+                    ...(event.items || []).map((item) => item.task_id || item.taskId),
+                    ...(event.actions || []).map((item) => item.task_id || item.taskId),
+                ].filter(Boolean);
+                bindFeishuTaskContext({ sessionId: record.session_id, runIds: [record.global_run_id], missionIds: [record.mission_id], taskIds, source: record.source, targetType: "global_agent" });
+                if (event?.type === "waiting_user") {
+                    const lines = (event.items || []).map((item) => `- ${item.reason || "需要你补充信息"}`);
+                    const markdown = `任务暂时需要你的帮助：\n${lines.join("\n")}`;
+                    await notifyFeishuTaskStage({ stage: "waiting_user", title: "任务需要你补充信息", markdown, sessionId: record.session_id, missionId: record.mission_id, dedupeKey: `mission:${record.mission_id}:waiting-user:${record.cycle_count}` });
+                    return;
+                }
+                if (event?.type === "actions" && event.actions?.length) {
+                    const actionLabels = {
+                        gate_gap_rework: "验收发现缺口，已安排定向返工",
+                        failure_rework: "执行遇到问题，已安排返工",
+                        runtime_recovery: "执行通道异常，正在恢复原任务",
+                        stalled_recovery: "任务停滞，已从原进度继续恢复",
+                        merge_conflict_rework: "代码合并出现冲突，已安排定向处理",
+                        merge_failed: "代码合并未通过，正在处理",
+                        worktree_merged: "项目代码已经合并，正在继续验收",
+                        dependency_released: "前置任务已完成，后续工作开始执行",
+                        queue_recovered: "任务已重新进入执行队列",
+                    };
+                    const lines = event.actions.map((item) => `- ${actionLabels[item.type] || "任务进度已经更新"}`);
+                    await notifyFeishuTaskStage({ stage: "rework", title: "任务进度更新", markdown: [...new Set(lines)].join("\n"), sessionId: record.session_id, missionId: record.mission_id, dedupeKey: `mission:${record.mission_id}:actions:${record.cycle_count}` });
+                }
+            },
+        };
+    }
+    function attachGlobalRunTestAgentExecutionPlan(run, event = {}) {
+        if (String(event?.type || "") !== "test_agent_execution_plan_ready")
+            return;
+        const plan = event.test_agent_execution_plan || event.testAgentExecutionPlan || event.technical?.test_agent_execution_plan || null;
+        if (!plan)
+            return;
+        run.test_agent_execution_plan = plan;
+        run.testAgentExecutionPlan = plan;
+        run.test_agent_execution_plan_summary = event.test_agent_execution_plan_summary || event.testAgentExecutionPlanSummary || event.detail || "";
+        run.testAgentExecutionPlanSummary = event.testAgentExecutionPlanSummary || event.test_agent_execution_plan_summary || event.detail || "";
+        run.test_agent_execution_plan_detail = event.detail || "";
+        run.testAgentExecutionPlanDetail = event.detail || "";
+    }
+    function attachGlobalRunTestAgentReview(run, event = {}) {
+        if (String(event?.type || "") !== "test_agent_review_ready")
+            return;
+        const summary = event.test_agent_review_summary || event.testAgentReviewSummary || event.independent_review_summary || event.independentReviewSummary || null;
+        if (!summary)
+            return;
+        const rows = Array.isArray(event.independent_review) ? event.independent_review : Array.isArray(event.independentReview) ? event.independentReview : [];
+        run.test_agent_review_summary = summary;
+        run.testAgentReviewSummary = summary;
+        run.independent_review_summary = summary;
+        run.independentReviewSummary = summary;
+        run.independent_review = rows;
+        run.independentReview = rows;
+        run.test_agent_report = event.test_agent_report || event.testAgentReport || event.technical?.test_agent_report || null;
+        run.testAgentReport = event.testAgentReport || event.test_agent_report || event.technical?.test_agent_report || null;
+        run.post_review_spot_check_summary = event.post_review_spot_check_summary || event.postReviewSpotCheckSummary || null;
+        run.postReviewSpotCheckSummary = event.postReviewSpotCheckSummary || event.post_review_spot_check_summary || null;
+        run.post_review_spot_check = event.technical?.post_review_spot_check || event.post_review_spot_check || event.postReviewSpotCheck || null;
+        run.postReviewSpotCheck = event.postReviewSpotCheck || event.post_review_spot_check || event.technical?.post_review_spot_check || null;
+    }
+    function unresolvedRequiredSources(run) {
+        const rows = Array.isArray(run.requirement_sources)
+            ? run.requirement_sources
+            : Array.isArray(run.source_ingestion?.sources)
+                ? run.source_ingestion.sources
+                : Array.isArray(run.source_attachments)
+                    ? run.source_attachments
+                    : [];
+        return rows.filter((source) => {
+            if (source?.required === false)
+                return false;
+            const status = String(source?.status || "").toLowerCase();
+            return source?.readable !== true && !["parsed", "partial"].includes(status);
+        });
+    }
+    function sourceExecutionGate(run, toolName, args) {
+        const spec = GLOBAL_AGENT_TOOL_SPECS.find((item) => item.name === toolName);
+        const risk = typeof spec?.risk === "function" ? spec.risk(args || {}) : spec?.risk;
+        if (!["write", "high"].includes(String(risk || "")))
+            return null;
+        if (run.source_execution_waiver?.scope === "current_run")
+            return null;
+        const unresolved = unresolvedRequiredSources(run);
+        if (!unresolved.length)
+            return null;
+        const names = unresolved.slice(0, 4).map((source) => compactPetText(source?.name || source?.url || source?.path || "任务资料", 80));
+        return {
+            success: false,
+            accepted: false,
+            completed: false,
+            needs_clarification: true,
+            clarification_questions: [
+                `以下关键资料尚未完整读取：${names.join("、")}。请完成授权、重新上传可读取版本，或明确允许忽略这些资料后再继续。`,
+            ],
+            source_coverage: {
+                total: Array.isArray(run.requirement_sources) ? run.requirement_sources.length : unresolved.length,
+                unresolved: unresolved.map((source) => ({
+                    id: source?.id || "",
+                    name: source?.name || source?.url || source?.path || "任务资料",
+                    status: source?.status || "failed",
+                    reason: source?.error || source?.summary || "未读取正文",
+                })),
+            },
+            error: "关键任务资料尚未完整读取，已阻止执行操作",
+        };
+    }
+    async function executeAgenticTool(baseUrl, ctx, name, args, run, onEvent, signal) {
+        const sourceGate = sourceExecutionGate(run, name, args);
+        if (sourceGate)
+            return sourceGate;
+        const loadedNames = (run.loaded_tool_names || run.loadedToolNames || []).map(value => String(value || ""));
+        if ((0, global_tool_load_policy_1.isGlobalDeferredTool)(name, loadedNames)) {
+            throw new Error(`MAIN_AGENT_TOOL_SCHEMA_NOT_LOADED:${name}`);
+        }
+        if (name === "invoke_mcp") {
+            const preflight = (0, global_agent_tool_authorization_1.buildGlobalAgentToolRuntimeContext)({ taskId: run.id, sessionId: run.session_id, source: run.source || "global-agent-preflight" }, run.loaded_tool_names || run.loadedToolNames || [], { executionSkills: (0, global_agent_tool_authorization_1.resolveGlobalAgentExecutionSkillsFromRun)(run) });
+            const requested = String(args?.tool_name || args?.toolName || args?.name || "");
+            const deferred = preflight.discoverable_tools.find((tool) => requested === tool.canonicalName || requested === tool.name || requested === `${tool.server}/${tool.name}`);
+            if (deferred)
+                throw new Error(`MAIN_AGENT_TOOL_SCHEMA_NOT_LOADED:${deferred.canonicalName}`);
+        }
+        const signature = crypto.createHash("sha256").update(`${name}:${JSON.stringify(args || {})}`).digest("hex").slice(0, 24);
+        const contextSourceRead = (0, context_source_tool_result_projection_1.isContextSourceToolResult)(name, { toolName: args?.tool_name || args?.toolName || args?.name });
+        let operationKey = `${run.id}:${signature}`;
+        let operation = acquireIdempotency({
+            scope: "global-agent-tool",
+            key: operationKey,
+            traceId: run.trace_id,
+            leaseMs: 12 * 60 * 1000,
+            metadata: { run_id: run.id, tool: name },
+        });
+        if (!operation.acquired) {
+            const settled = operation.inProgress ? await waitForIdempotencyResult("global-agent-tool", operationKey, 12 * 60 * 1000) : operation.record;
+            if (settled?.status === "completed") {
+                if (contextSourceRead) {
+                    // 来源正文不进入幂等结果。重复读取另开只读尝试，从权威存储取得当前版本。
+                    operationKey = `${run.id}:${signature}:source-reread:${crypto.randomBytes(8).toString("hex")}`;
+                    operation = acquireIdempotency({
+                        scope: "global-agent-tool",
+                        key: operationKey,
+                        traceId: run.trace_id,
+                        leaseMs: 12 * 60 * 1000,
+                        metadata: { run_id: run.id, tool: name, authoritative_reread: true },
+                    });
+                    if (!operation.acquired)
+                        throw new Error(`来源工具 ${name} 无法取得权威重读租约`);
+                }
+                else {
+                    const replayed = { ...(settled.result?.observation || settled.result || {}), replayed: true };
+                    if (name === "tool_search") {
+                        const rows = Array.isArray(replayed?.result?.tools) ? replayed.result.tools : [];
+                        const names = rows.map((tool) => String(tool?.canonicalName || tool?.name || "")).filter(Boolean);
+                        run.loaded_tool_names = Array.from(new Set([...(run.loaded_tool_names || run.loadedToolNames || []), ...names]));
+                        run.loadedToolNames = run.loaded_tool_names.slice();
+                        (0, global_agent_run_store_1.saveRun)(run, true);
+                    }
+                    return replayed;
+                }
+            }
+            if (!operation.acquired) {
+                if (settled?.status === "failed")
+                    throw new Error(settled.error || `工具 ${name} 的历史执行失败`);
+                throw new Error(`工具 ${name} 仍在另一个执行实例中运行`);
+            }
+        }
+        const executionSkills = (0, global_agent_tool_authorization_1.resolveGlobalAgentExecutionSkillsFromRun)(run);
+        const sourceRuntime = (0, global_agent_tool_authorization_1.buildGlobalAgentToolRuntimeContext)({ taskId: run.id, executionId: operationKey, sessionId: run.session_id, source: run.source || "global-agent-source" }, run.loaded_tool_names || run.loadedToolNames || [], { executionSkills });
+        try {
+            let observation;
+            if (name === "invoke_skill") {
+                observation = await (0, global_agent_tool_authorization_1.executeGlobalAgentAuthorizedTool)("skill", args, {
+                    taskId: run.id,
+                    executionId: operationKey,
+                    sessionId: run.session_id,
+                    source: run.source || "global-agent",
+                }, run.loaded_tool_names || run.loadedToolNames || [], { executionSkills });
+            }
+            else if (name === "invoke_mcp") {
+                observation = await (0, global_agent_tool_authorization_1.executeGlobalAgentAuthorizedTool)("mcp", args, {
+                    taskId: run.id,
+                    executionId: operationKey,
+                    sessionId: run.session_id,
+                    source: run.source || "global-agent",
+                }, run.loaded_tool_names || run.loadedToolNames || [], { executionSkills });
+            }
+            else if (name === "tool_search") {
+                const runtime = (0, global_agent_tool_authorization_1.buildGlobalAgentToolRuntimeContext)({
+                    taskId: run.id,
+                    executionId: operationKey,
+                    sessionId: run.session_id,
+                    source: run.source || "global-agent",
+                }, run.loaded_tool_names || run.loadedToolNames || [], { executionSkills });
+                const toolContext = {
+                    schema: "ccm-main-agent-tool-runtime-context-v2",
+                    scope: runtime.scope,
+                    configured: runtime.tools,
+                    executionSkills,
+                    effective: { mcp: runtime.scope?.mcp || [], skill: runtime.scope?.skill || [] },
+                    catalog: {
+                        mcp: runtime.catalog.tools,
+                        skills: runtime.catalog.skills,
+                        rejectedMcp: [],
+                        discoverableMcp: runtime.discoverable_tools,
+                        native: [],
+                    },
+                    toolAudit: runtime.tool_audit,
+                    mcpPrompt: "",
+                    skillPrompt: "",
+                    policyPrompt: "",
+                    checksum: runtime.checksum,
+                    version: 2,
+                    capabilityToken: runtime.capability_token,
+                    loadedToolNames: runtime.loaded_tool_names,
+                    scopeIdentity: runtime.scope_identity,
+                    restoredSkillAttachments: runtime.restored_skill_attachments || [],
+                    postCompactRestoreReceipt: runtime.post_compact_restore_receipt || undefined,
+                };
+                const rows = await (0, main_agent_tool_runtime_1.executeMainAgentToolRequests)({
+                    requests: [{ name, arguments: args || {}, reason: "全局主 Agent按需读取" }],
+                    toolContext,
+                    resultTokenLimit: cc_tool_result_limits_1.CC_ALIGNED_TOOL_RESULT_MAX_TOKENS,
+                    abortSignal: signal,
+                });
+                const row = rows[0];
+                if (!row?.ok)
+                    throw new Error(row?.error || `${name}调用失败`);
+                if (name === "tool_search") {
+                    run.loaded_tool_names = Array.from(new Set((toolContext.loadedToolNames || []).map((value) => String(value || "")).filter(Boolean)));
+                    run.loadedToolNames = run.loaded_tool_names.slice();
+                    (0, global_agent_run_store_1.saveRun)(run, true);
+                }
+                observation = (0, transient_model_content_1.attachTransientModelBlocks)({ success: true, tool: name, result: (() => { try {
+                        return JSON.parse(row.output);
+                    }
+                    catch {
+                        return row.output;
+                    } })(), authorization_checksum: runtime.checksum }, (0, transient_model_content_1.transientModelBlocks)(row));
+            }
+            else if (name === "inspect_system") {
+                observation = { success: true, ...buildAgenticContext(), missions: refreshGlobalDevelopmentMissions().slice(-8) };
+            }
+            else if (name === "list_projects") {
+                observation = { success: true, projects: safeProjectRows() };
+            }
+            else if (name === "inspect_project") {
+                const project = String(args.project || "");
+                const config = getConfigs().find((item) => item.name === project);
+                if (!config)
+                    throw new Error(`项目不存在：${project}`);
+                const info = getConfigInfo(config.path)?.[0] || {};
+                observation = {
+                    success: true,
+                    project,
+                    config: { configured: true, agent: info.agent || "claudecode", platform: info.platform || "" },
+                    source_access: "delegated_to_project_main_agent",
+                    memory_boundary: { project_memory_included: false, policy: "routing_metadata_only_delegate_to_project_main_agent" },
+                };
+            }
+            else if (name === "read_scope_instruction") {
+                const allowedProjects = safeProjectRows().map((project) => String(project.name || "")).filter(Boolean);
+                const allowedGroups = loadGroups().map((group) => String(group?.id || "")).filter(Boolean);
+                observation = {
+                    success: true,
+                    ...(0, scope_instructions_1.readScopeInstructionForAgent)({
+                        identity: { scope: "global", scopeId: "global", exactSessionId: String(run.session_id || run.id || ""), generation: Number(sourceRuntime.scope_identity?.generation || 0), allowedProjects, allowedGroups },
+                        documentId: String(args.documentId || args.document_id || ""),
+                        expectedChecksum: String(args.expectedChecksum || args.expected_checksum || "") || undefined,
+                    }),
+                };
+            }
+            else if (name === "request_project_source_inquiry") {
+                const readDepth = String(args.read_depth || args.readDepth || "focused") === "broad" ? "broad" : "focused";
+                const targetProject = String(args.project || "").trim();
+                const question = String(args.question || run.user_message || run.reasoning_loop?.effective_goal || "");
+                const inquiryGeneration = Math.max(0, Number(run.generation ?? run.resume_count ?? 0));
+                const delegated = (0, delegated_inquiry_projections_1.beginDelegatedInquiryProjection)({ sourceSessionId: String(run.session_id || run.id || ""), targetScope: "project", targetId: targetProject, question, generation: inquiryGeneration });
+                try {
+                    const inquiry = await (0, delegated_inquiry_recovery_1.requestRecoverableProjectSourceInquiry)({
+                        requestScope: String(run.source || "").toLowerCase().includes("feishu") ? "feishu" : "global",
+                        exactSessionId: String(run.session_id || run.id || ""),
+                        project: targetProject,
+                        question,
+                        readDepth,
+                        automaticSupplement: true,
+                        generation: inquiryGeneration,
+                        signal,
+                    });
+                    const evidenceCount = (inquiry.receipt?.projectReceipts || []).reduce((sum, row) => sum + (Array.isArray(row?.evidenceIds) ? row.evidenceIds.length : 0), 0);
+                    const projection = (0, delegated_inquiry_projections_1.finishDelegatedInquiryProjection)({
+                        inquiryId: delegated.inquiryId,
+                        status: inquiry.receipt.sufficient ? "completed" : inquiry.needsUserInput ? "needs_input" : "partial",
+                        evidenceCount,
+                        evidenceIds: inquiry.planningEvidenceEntries.map((item) => item.evidenceId),
+                        missingEvidenceSummaries: inquiry.missingEvidenceSummaries,
+                        automaticSupplementAttempts: inquiry.automaticSupplementAttempts,
+                        conclusion: inquiry.answer || inquiry.receipt.reason,
+                        repoStateChecksums: Object.fromEntries((inquiry.receipt?.projectReceipts || []).map((row) => [String(row?.project || ""), String(row?.repoStateChecksum || "")]).filter(([project, checksum]) => project && checksum)),
+                    });
+                    observation = {
+                        success: true,
+                        outcome: inquiry.receipt.sufficient ? "completed" : inquiry.needsUserInput ? "needs_input" : "partial",
+                        sufficient: inquiry.receipt.sufficient,
+                        answer: inquiry.answer,
+                        receipt: inquiry.receipt,
+                        planningEvidenceEntries: inquiry.planningEvidenceEntries,
+                        missingEvidenceSummaries: inquiry.missingEvidenceSummaries,
+                        automaticSupplementAttempts: inquiry.automaticSupplementAttempts,
+                        inquiry_projection: projection,
+                        cache_status: inquiry.cacheStatus,
+                        contentStored: false,
+                    };
+                }
+                catch (error) {
+                    try {
+                        (0, delegated_inquiry_projections_1.finishDelegatedInquiryProjection)({ inquiryId: delegated.inquiryId, status: "failed", conclusion: error?.message || "源码核对失败" });
+                    }
+                    catch { }
+                    throw error;
+                }
+            }
+            else if (name === "request_group_source_inquiry") {
+                const groupId = String(args.group || args.group_id || args.groupId || "").trim();
+                const group = loadGroups().find((item) => String(item?.id || "") === groupId || String(item?.name || "") === groupId);
+                if (!group)
+                    throw new Error(`群聊不存在：${groupId}`);
+                const readDepth = String(args.read_depth || args.readDepth || "focused") === "broad" ? "broad" : "focused";
+                const projects = Array.isArray(args.projects) ? args.projects.map(String).filter(Boolean) : [];
+                const question = String(args.question || run.user_message || run.reasoning_loop?.effective_goal || "");
+                const inquiryGeneration = Math.max(0, Number(run.generation ?? run.resume_count ?? 0));
+                const delegated = (0, delegated_inquiry_projections_1.beginDelegatedInquiryProjection)({ sourceSessionId: String(run.session_id || run.id || ""), targetScope: "group", targetId: String(group.id || groupId), question, generation: inquiryGeneration });
+                try {
+                    const inquiry = await (0, delegated_inquiry_recovery_1.requestRecoverableGroupSourceInquiry)({
+                        group,
+                        exactSessionId: String(run.session_id || run.id || ""),
+                        question,
+                        readDepth,
+                        projects,
+                        automaticSupplement: true,
+                        generation: inquiryGeneration,
+                        signal,
+                    });
+                    const evidenceCount = (inquiry.receipt?.projectReceipts || []).reduce((sum, row) => sum + (Array.isArray(row?.evidenceIds) ? row.evidenceIds.length : 0), 0);
+                    const projection = (0, delegated_inquiry_projections_1.finishDelegatedInquiryProjection)({
+                        inquiryId: delegated.inquiryId,
+                        status: inquiry.receipt.sufficient ? "completed" : inquiry.needsUserInput ? "needs_input" : "partial",
+                        evidenceCount,
+                        evidenceIds: inquiry.planningEvidenceEntries.map((item) => item.evidenceId),
+                        missingEvidenceSummaries: inquiry.missingEvidenceSummaries,
+                        automaticSupplementAttempts: inquiry.automaticSupplementAttempts,
+                        conclusion: inquiry.answer || inquiry.receipt.reason,
+                        repoStateChecksums: Object.fromEntries((inquiry.receipt?.projectReceipts || []).map((row) => [String(row?.project || ""), String(row?.repoStateChecksum || "")]).filter(([project, checksum]) => project && checksum)),
+                    });
+                    observation = {
+                        success: true,
+                        outcome: inquiry.receipt.sufficient ? "completed" : inquiry.needsUserInput ? "needs_input" : "partial",
+                        sufficient: inquiry.receipt.sufficient,
+                        answer: inquiry.answer,
+                        receipt: inquiry.receipt,
+                        planningEvidenceEntries: inquiry.planningEvidenceEntries,
+                        missingEvidenceSummaries: inquiry.missingEvidenceSummaries,
+                        automaticSupplementAttempts: inquiry.automaticSupplementAttempts,
+                        inquiry_projection: projection,
+                        source_access: "delegated_to_group_main_agent",
+                        contentStored: false,
+                    };
+                }
+                catch (error) {
+                    try {
+                        (0, delegated_inquiry_projections_1.finishDelegatedInquiryProjection)({ inquiryId: delegated.inquiryId, status: "failed", conclusion: error?.message || "源码核对失败" });
+                    }
+                    catch { }
+                    throw error;
+                }
+            }
+            else if (name === "list_groups") {
+                observation = { success: true, groups: buildAgenticContext().groups };
+            }
+            else if (name === "list_tasks") {
+                const tasks = loadTasks().filter(isGlobalAgentOwnedTask).filter((task) => !args.id || task.id === args.id).filter((task) => !args.status || task.status === args.status);
+                observation = {
+                    success: true,
+                    tasks: tasks.slice(-50).map(compactTask),
+                    task_boundary: { schema: "ccm-global-agent-task-boundary-v1", policy: "global_agent_owned_tasks_only" },
+                };
+            }
+            else if (name === "list_cron") {
+                observation = { success: true, jobs: buildAgenticContext().cron_jobs };
+            }
+            else if (name === "query_knowledge") {
+                const knowledge = await (0, knowledge_access_1.searchAgentKnowledge)(String(args.query || ""), { role: "global-agent" }, { limit: 6, continuityIdentity: { agentKind: "global", scope: "global", scopeId: "global-agent", exactSessionId: run.session_id, generation: Number(sourceRuntime.scope_identity?.generation || 0) } });
+                observation = {
+                    success: true,
+                    query: args.query,
+                    content: knowledge.context || "未检索到相关知识",
+                    citations: knowledge.citations,
+                    retrieval: { embedding: knowledge.embeddingMode, fallback: knowledge.fallback, error: knowledge.embeddingError },
+                    sourceReferences: (knowledge.results || []).map((result) => ({
+                        sourceKind: "knowledge",
+                        sourceId: result.filename,
+                        documentName: result.filename,
+                        chunkIds: [result.citation].filter(Boolean),
+                        revision: result.revision,
+                        checksum: result.checksum,
+                        citations: [result.citation].filter(Boolean),
+                        tokenCount: result.tokenCount,
+                    })),
+                };
+            }
+            else if (name === "query_global_memory") {
+                observation = { success: true, query: args.query, ...recallGlobalAgentMemory(String(args.query || ""), { sessionId: run.session_id, limit: Number(args.limit || 8) }) };
+            }
+            else if (name === "read_global_shared_files") {
+                const runtimeBudget = (0, main_agent_context_source_continuity_1.calculateContextSourceBudget)({ contextWindow: Number(sourceRuntime.context_budget?.contextWindow || 200_000), catalogPercent: Number(sourceRuntime.context_policy?.effective?.contextSourceCatalogBudgetPercent || 1), hydrationPercent: Number(sourceRuntime.context_policy?.effective?.contextSourceHydrationBudgetPercent || 10), remainingSafeTokens: Number(sourceRuntime.context_budget?.finalSafetyRemainingTokens || 0) });
+                const sharedFiles = (0, shared_files_v2_1.buildSharedFilesContextV2)("global", "global", {
+                    maxTokens: runtimeBudget.hydrationTargetTokens,
+                    explicitText: String(args.file_id || args.name || args.query || ""),
+                    title: "以下是全局 Agent 已授权共享文件。使用其中事实时必须引用文件和分片：",
+                });
+                (0, main_agent_context_source_continuity_1.recordSharedFileProjection)({ agentKind: "global", scope: "global", scopeId: "global-agent", exactSessionId: run.session_id, generation: Number(sourceRuntime.scope_identity?.generation || 0) }, sharedFiles, runtimeBudget);
+                observation = {
+                    success: true,
+                    context: sharedFiles.context,
+                    manifest_checksum: sharedFiles.checksum,
+                    complete: sharedFiles.complete,
+                    files: sharedFiles.files.map((file) => ({ id: file.id, name: file.name, checksum: file.checksum, chunks: file.chunks?.length || 0 })),
+                    sourceReferences: (sharedFiles.selected_chunks || []).map((chunk) => ({
+                        sourceKind: "shared_file",
+                        sourceId: chunk.file_id,
+                        documentName: chunk.file_name,
+                        chunkIds: [chunk.chunk_id].filter(Boolean),
+                        checksum: chunk.checksum,
+                        tokenCount: chunk.token_count,
+                    })),
+                };
+            }
+            else if (name === "manage_global_memory") {
+                const operation = String(args.operation || "").toLowerCase();
+                if (operation !== "status" && !String(args.reason || "").trim())
+                    throw new Error("全局记忆变更操作必须说明原因");
+                if (operation === "compact") {
+                    observation = { success: true, operation, sessions: await Promise.all(loadGlobalAgentMemory().sessions.map((session) => compactGlobalAgentSessionWithModel(session.sessionId, { force: true, reason: args.reason }))) };
+                }
+                else if (operation === "rebuild") {
+                    const memory = rebuildGlobalAgentMemory(args.reason, "global-agent");
+                    const sessions = await Promise.all((memory.sessions || []).map((session) => compactGlobalAgentSessionWithModel(session.sessionId, { force: true, reason: args.reason || "rebuild" })));
+                    observation = { success: true, operation, memory: loadGlobalAgentMemory(), sessions };
+                }
+                else if (["enable", "disable"].includes(operation)) {
+                    observation = { success: true, operation, policy: setGlobalAgentMemoryPolicy({ disabled: operation === "disable", reason: args.reason, actor: "global-agent" }) };
+                }
+                else if (operation === "status") {
+                    observation = { success: true, operation, policy: getGlobalAgentMemoryPolicy(), memory: loadGlobalAgentMemory() };
+                }
+                else
+                    throw new Error(`不支持的全局记忆操作：${operation}`);
+            }
+            else if (name === "decompose_requirement_epic") {
+                let plan = args.decomposition_plan
+                    || args.decompositionPlan
+                    || run.requirement_decomposition
+                    || run.requirementDecomposition;
+                if (!plan?.items?.length) {
+                    const availableTargets = [
+                        ...loadGroups().map((group) => ({
+                            type: "group",
+                            id: group.id,
+                            name: group.name || group.id,
+                            capabilities: (group.members || []).flatMap((member) => member.skills || member.capabilities || []),
+                        })),
+                        ...getConfigs().map((config) => ({ type: "project", id: config.name, name: (0, project_runtime_1.projectDisplayName)(config.name) })),
+                    ];
+                    const requirement = args.requirement_extraction
+                        || args.requirementExtraction
+                        || run.requirement_extraction
+                        || run.requirementExtraction;
+                    if (requirement) {
+                        plan = await (0, source_ingestion_1.decomposeRequirementToTaskPlan)({
+                            requirement,
+                            sources: run.requirement_sources || run.requirementSources || [],
+                            contentHash: run.requirement_content_hash || run.requirementContentHash || "",
+                            availableTargets,
+                        });
+                    }
+                    else {
+                        const sourceAttachments = Array.isArray(run.source_attachments) ? run.source_attachments : [];
+                        const ingestion = await (0, source_ingestion_1.ingestRequirementSources)({
+                            files: sourceAttachments
+                                .filter((item) => item?.path)
+                                .map((item) => ({
+                                filename: item.name || item.filename || "requirement-source",
+                                savedPath: item.path,
+                                size: Number(item.size || 0),
+                                type: item.type || "",
+                            })),
+                            userText: run.original_user_message || run.user_message || "",
+                            extractRequirement: true,
+                            decomposeRequirement: true,
+                            availableTargets,
+                        });
+                        attachGlobalRunRequirementSources(run, ingestion);
+                        plan = ingestion.decomposition;
+                    }
+                    if (!plan?.items?.length)
+                        throw new Error("大模型未能从当前消息或资料生成可靠的 Epic 任务图，请补充业务目标、范围或验收标准");
+                    run.requirement_decomposition = plan;
+                    run.requirementDecomposition = plan;
+                }
+                observation = {
+                    success: true,
+                    read_only: true,
+                    needs_confirmation: true,
+                    needs_clarification: Array.isArray(plan.clarification_questions) && plan.clarification_questions.length > 0,
+                    clarification_questions: plan.clarification_questions || [],
+                    decomposition_plan: plan,
+                    summary: `已将需求文档拆成 ${plan.items.length} 个持久子任务；确认任务图后才会创建和派发。`,
+                };
+            }
+            else if (name === "create_requirement_epic") {
+                const plan = args.decomposition_plan
+                    || args.decompositionPlan
+                    || run.requirement_decomposition
+                    || run.requirementDecomposition;
+                if (!plan?.items?.length)
+                    throw new Error("缺少已确认的需求拆解计划");
+                const clarificationQuestions = Array.isArray(plan.clarification_questions) ? plan.clarification_questions.filter(Boolean) : [];
+                const clarificationsResolved = args.clarifications_resolved === true
+                    || args.clarificationsResolved === true
+                    || clarificationQuestions.length === 0;
+                if (clarificationQuestions.length && !clarificationsResolved) {
+                    observation = {
+                        success: false,
+                        accepted: false,
+                        completed: false,
+                        needs_clarification: true,
+                        clarification_questions: clarificationQuestions,
+                        decomposition_plan: plan,
+                        message: "需求拆解仍有阻断问题；请先逐项回答 clarification_questions，并在更新后的计划中清空这些问题后再创建 Epic。",
+                    };
+                }
+                else {
+                    const epicResult = createRequirementEpicWithChildren({
+                        ...args,
+                        decomposition_plan: plan,
+                        requirement_extraction: args.requirement_extraction || args.requirementExtraction || run.requirement_extraction || null,
+                        requirement_content_hash: args.requirement_content_hash || args.requirementContentHash || run.requirement_content_hash || plan.content_hash || "",
+                        source_documents: args.source_documents || args.sourceDocuments || run.user_message || "",
+                        source_attachments: args.source_attachments || args.sourceAttachments || run.source_attachments || [],
+                        source_ingestion: args.source_ingestion || args.sourceIngestion || run.source_ingestion || null,
+                        group_id: args.group_id || args.groupId || "",
+                        group_session_id: args.group_session_id || args.groupSessionId || "",
+                        target_project: args.target_project || args.targetProject || "",
+                        source: run.source || "global-agent-requirement-epic",
+                        channel: run.source || "global-agent",
+                        conversation_id: run.session_id,
+                        client_message_id: args.client_message_id || args.clientMessageId || run.id,
+                        trace_id: run.trace_id,
+                        idempotency_key: args.idempotency_key || `${run.id}:requirement-epic:${plan.content_hash || "v1"}`,
+                        owner_agent: "global-agent",
+                        confirmed: args.confirmed === true || args.user_confirmed === true || args.userConfirmed === true,
+                        clarifications_resolved: clarificationsResolved,
+                        auto_execute: args.auto_execute !== false,
+                        requires_independent_review: args.requires_independent_review !== false,
+                    });
+                    if (!epicResult.success) {
+                        observation = {
+                            ...epicResult,
+                            success: false,
+                            accepted: false,
+                            completed: false,
+                            message: epicResult.needs_clarification
+                                ? "需求拆解仍有阻断问题；请先回答 clarification_questions，再重新确认任务图。"
+                                : "需求拆解计划仍需用户确认后才能创建。",
+                        };
+                    }
+                    else {
+                        const supervisor = startGlobalMissionSupervisor({
+                            mission_id: epicResult.epic.id,
+                            global_run_id: run.id,
+                            trace_id: run.trace_id,
+                            session_id: run.session_id,
+                            source: run.source,
+                            business_goal: epicResult.epic.business_goal,
+                            acceptance: epicResult.epic.acceptance_criteria,
+                            max_attempts: args.max_attempts || 3,
+                        });
+                        attachGlobalAgentRunSupervision(run, { mission_id: epicResult.epic.id, supervisor_id: supervisor.id, state: supervisor.status });
+                        const dispatch = await superviseGlobalDevelopmentMissionCycle(epicResult.epic.id, ctx, { max_attempts: args.max_attempts || 3 });
+                        observation = {
+                            success: true,
+                            accepted: true,
+                            completed: false,
+                            message: `需求 Epic 已创建，${epicResult.children.length} 个子任务将按依赖执行；当前不是完成状态。`,
+                            mission_id: epicResult.epic.id,
+                            epic: epicResult.epic,
+                            children: epicResult.children.map((task) => ({
+                                task_id: task.id,
+                                item_key: task.requirement_item_key,
+                                title: task.title,
+                                target: task.mission_target?.name || task.target_project,
+                                dependencies: task.mission_dependencies || [],
+                                status: task.status,
+                            })),
+                            dependency_edges: epicResult.dependency_edges,
+                            supervisor_id: supervisor.id,
+                            supervisor_status: supervisor.status,
+                            dispatch_actions: dispatch?.actions || [],
+                        };
+                    }
+                }
+            }
+            else if (name === "inspect_mission") {
+                const mission = getGlobalDevelopmentMission(String(args.id || ""));
+                if (!mission)
+                    throw new Error("全局开发任务不存在");
+                observation = { success: true, ...mission, supervisor: getGlobalMissionSupervisor(String(args.id || "")) };
+            }
+            else if (name === "inspect_supervision") {
+                const supervisor = getGlobalMissionSupervisor(String(args.id || ""));
+                if (!supervisor)
+                    throw new Error("全局任务监工不存在");
+                observation = { success: true, supervisor, mission: getGlobalDevelopmentMission(supervisor.mission_id) };
+            }
+            else if (name === "orchestrate_development" || name === "send_project_cmd" || name === "create_task") {
+                const workflowDecision = (run.workflow_decision || run.workflowDecision);
+                if (!(0, workflow_decision_1.isDevelopmentTaskWorkflowDecision)(workflowDecision)) {
+                    throw Object.assign(new Error("当前请求没有明确要求修改代码或项目配置，因此不会创建开发任务；我会先以只读分析方式回答。"), {
+                        code: "CCM_DEVELOPMENT_TASK_WRITE_INTENT_REQUIRED",
+                    });
+                }
+                const continuationTaskId = String(workflowDecision?.continuationTaskId
+                    || workflowDecision?.continuation_task_id
+                    || "").trim();
+                if (continuationTaskId) {
+                    if (typeof continueBoundTaskWithMessage !== "function") {
+                        throw Object.assign(new Error("当前运行时没有加载任务续接能力，不能安全继续原任务"), {
+                            code: "CCM_TASK_CONTINUATION_UNAVAILABLE",
+                        });
+                    }
+                    const boundTask = (loadTasks() || []).find((item) => String(item?.id || "") === continuationTaskId);
+                    if (!boundTask) {
+                        throw Object.assign(new Error("原任务已经变化或不存在，请重新选择处理方式"), {
+                            code: "CONVERSATION_ROUTE_CANDIDATE_STALE",
+                        });
+                    }
+                    const continuationKind = String(workflowDecision?.continuationKind || "supplement") === "revise_goal"
+                        ? "revise_goal"
+                        : "supplement";
+                    const continuation = await Promise.resolve(continueBoundTaskWithMessage(continuationTaskId, String(run.original_user_message || run.user_message || ""), ctx, {
+                        continuationKind,
+                        source: "global-conversation-route-v2",
+                        requestId: `${run.id}:${continuationTaskId}:${continuationKind}`,
+                        authorizationValid: run.explicit_write_authorization === true,
+                    }));
+                    if (!continuation?.success) {
+                        throw Object.assign(new Error(continuation?.error || "原任务续接失败"), {
+                            code: continuation?.manual_recovery_required ? "TASK_RECOVERY_PREFLIGHT_FAILED" : "TASK_CONTINUATION_FAILED",
+                            recovery_preflight: continuation?.recovery_preflight || null,
+                        });
+                    }
+                    const globalMissionId = String(boundTask.global_mission_id
+                        || boundTask.globalMissionId
+                        || boundTask.mission_id
+                        || boundTask.missionId
+                        || continuationTaskId).trim();
+                    run.mission_id = globalMissionId;
+                    run.conversation_route_kind = String(workflowDecision?.conversationRouteKind || "resume_existing_task");
+                    run.continuation_task_id = continuationTaskId;
+                    return {
+                        success: true,
+                        schema: "ccm-conversation-task-continuation-v2",
+                        continued_existing_task: true,
+                        task_id: continuationTaskId,
+                        mission_id: globalMissionId,
+                        route_kind: run.conversation_route_kind,
+                        attempt: Math.max(0, Number(continuation?.task?.execution_attempt || continuation?.task?.attempt || 0)),
+                        status: String(continuation?.task?.status || "pending"),
+                        contentStored: false,
+                    };
+                }
+                const missionArgs = name === "send_project_cmd"
+                    ? buildGlobalSingleProjectMissionPayload({
+                        project: String(args.project || args.projectName || ""),
+                        message: String(args.message || args.prompt || args.command || run.user_message || ""),
+                        originalText: run.original_user_message || run.user_message,
+                        traceId: run.trace_id,
+                        globalRunId: run.id,
+                        sessionId: run.session_id,
+                        source: run.source || "global-agent-single-project-dispatch",
+                        idempotencyKey: args.idempotency_key || `${run.id}:single-project-mission`,
+                        requiresCodeChanges: typeof args.requires_code_changes === "boolean"
+                            ? args.requires_code_changes
+                            : !!(run.workflow_decision || run.workflowDecision)?.requiresCodeChanges,
+                    })
+                    : name === "create_task"
+                        ? {
+                            title: args.title || "全局 Agent 下发的协作任务",
+                            business_goal: args.business_goal || args.businessGoal || args.goal || args.message || run.original_user_message || run.user_message,
+                            source_documents: args.source_documents || args.sourceDocuments || run.user_message || "",
+                            source_attachments: args.source_attachments || args.sourceAttachments || run.source_attachments || [],
+                            requirement_extraction: args.requirement_extraction || args.requirementExtraction || run.requirement_extraction || null,
+                            source_ingestion: args.source_ingestion || args.sourceIngestion || run.source_ingestion || null,
+                            acceptance: args.acceptance || args.acceptance_criteria || [
+                                "群聊主 Agent 必须创建计划并派发项目子 Agent。",
+                                "群聊主 Agent 必须验收项目子 Agent 的实际变更和验证证据。",
+                                "涉及独立复核时由群聊主 Agent 调用 TestAgent，并负责返工、复验和最终总结。",
+                            ].join("；"),
+                            targets: [{
+                                    type: "group",
+                                    group_id: args.group_id || args.groupId || "",
+                                    group_session_id: args.group_session_id || args.groupSessionId || "",
+                                    task: args.business_goal || args.businessGoal || args.goal || args.message || run.original_user_message || run.user_message,
+                                    reason: "全局 Agent 将复杂任务交给群聊主 Agent 计划、派发、验收和总结。",
+                                    requires_code_changes: args.requires_code_changes !== false,
+                                    requires_verification: args.requires_verification !== false,
+                                    requires_independent_review: args.requires_independent_review !== false,
+                                }],
+                            requires_code_changes: args.requires_code_changes !== false,
+                            requires_verification: args.requires_verification !== false,
+                            requires_independent_review: args.requires_independent_review !== false,
+                            auto_execute: args.auto_execute !== false,
+                            source: "global_agent",
+                            trace_id: run.trace_id,
+                            idempotency_key: args.idempotency_key || `${run.id}:group-mission`,
+                        }
+                        : {
+                            ...args,
+                            source_documents: args.source_documents || args.sourceDocuments || run.user_message || "",
+                            source_attachments: args.source_attachments || args.sourceAttachments || run.source_attachments || [],
+                            requirement_extraction: args.requirement_extraction || args.requirementExtraction || run.requirement_extraction || null,
+                            source_ingestion: args.source_ingestion || args.sourceIngestion || run.source_ingestion || null,
+                            source: "global_agent",
+                            trace_id: run.trace_id,
+                            idempotency_key: args.idempotency_key || `${run.id}:mission`,
+                        };
+                const groundedTargets = Array.isArray(run.requested_target_refs) ? run.requested_target_refs : [];
+                if (groundedTargets.length) {
+                    const allowed = new Set(groundedTargets.map((target) => `${String(target.scope || target.type)}:${String(target.scopeId || target.scope_id || target.id)}`));
+                    const missionTargets = Array.isArray(missionArgs.targets) ? missionArgs.targets : [];
+                    for (const target of missionTargets) {
+                        const scope = String(target?.type || target?.scope || (target?.group_id || target?.groupId ? "group" : "project"));
+                        const scopeId = String(target?.group_id || target?.groupId || target?.project || target?.project_id || target?.projectId || target?.id || "");
+                        if (!allowed.has(`${scope}:${scopeId}`))
+                            throw new Error(`任务目标 ${scope}:${scopeId} 不在用户本轮明确选择的投放范围内`);
+                        delete target.group_session_id;
+                        delete target.groupSessionId;
+                        delete target.project_session_id;
+                        delete target.projectSessionId;
+                    }
+                }
+                const missionResult = createGlobalDevelopmentMission({
+                    ...missionArgs,
+                    source: "global_agent",
+                    automation_task_source: "global_agent",
+                    source_documents: missionArgs.source_documents || missionArgs.sourceDocuments || run.user_message || "",
+                    source_attachments: missionArgs.source_attachments || missionArgs.sourceAttachments || run.source_attachments || [],
+                    requirement_extraction: missionArgs.requirement_extraction || missionArgs.requirementExtraction || run.requirement_extraction || null,
+                    source_ingestion: missionArgs.source_ingestion || missionArgs.sourceIngestion || run.source_ingestion || null,
+                }, ctx);
+                const supervisor = startGlobalMissionSupervisor({
+                    mission_id: missionResult.mission.id,
+                    global_run_id: run.id,
+                    trace_id: run.trace_id,
+                    session_id: run.session_id,
+                    source: run.source,
+                    business_goal: missionResult.mission.business_goal || missionArgs.business_goal,
+                    acceptance: missionResult.mission.acceptance_criteria || missionArgs.acceptance,
+                    max_attempts: missionArgs.max_attempts || 3,
+                });
+                attachGlobalAgentRunSupervision(run, { mission_id: missionResult.mission.id, supervisor_id: supervisor.id, state: supervisor.status });
+                observation = {
+                    success: true,
+                    accepted: true,
+                    completed: false,
+                    message: "全局任务已派发并进入持久监督；当前不是完成状态。",
+                    mission_id: missionResult.mission.id,
+                    supervisor_id: supervisor.id,
+                    supervisor_status: supervisor.status,
+                    children: missionResult.children.map((item) => ({
+                        task_id: item.task?.id,
+                        target: item.target?.name,
+                        queued: item.queue_result?.queued,
+                        status: item.task?.status,
+                        target_conversation: item.targetConversation || item.target?.target_conversation || null,
+                    })),
+                    rejected: missionResult.rejected,
+                };
+            }
+            else if (name === "manage_supervision") {
+                const supervisor = await controlGlobalMissionSupervisor(String(args.id || ""), String(args.operation || ""), createMissionSupervisorRuntime(ctx), args);
+                if (supervisor.global_run_id) {
+                    if (supervisor.status === "cancelled")
+                        completeGlobalAgentSupervision(supervisor.global_run_id, { summary: "全局任务已由用户取消。" }, "cancelled");
+                    else
+                        updateGlobalAgentSupervisionState(supervisor.global_run_id, supervisor.status);
+                }
+                observation = { success: true, supervisor, mission: getGlobalDevelopmentMission(supervisor.mission_id) };
+            }
+            else if (name === "navigate") {
+                observation = { success: true, message: `Web 客户端可切换到 ${args.tab}`, client_effect: { type: "navigate", params: { tab: args.tab } } };
+            }
+            else if (name === "play_music") {
+                const played = await executePlayMusic(baseUrl, {
+                    keyword: args.keyword || args.query || args.song || "",
+                    mode: args.mode || "",
+                    source: run.source || "global-agent",
+                    originalText: run.user_message,
+                    sessionId: run.session_id,
+                });
+                observation = {
+                    success: played.success !== false,
+                    message: played.message,
+                    keyword: played.keyword,
+                    mode: played.mode,
+                    command: played.command,
+                    client_effect: played.client_effect,
+                };
+            }
+            else if (name === "stop_music") {
+                const stopped = await executeStopMusic(baseUrl, {
+                    source: run.source || "global-agent",
+                });
+                observation = {
+                    success: stopped.success !== false,
+                    message: stopped.message,
+                    command: stopped.command,
+                    client_effect: stopped.client_effect,
+                };
+            }
+            else {
+                let action = { type: name, params: { ...(args || {}) } };
+                if (GLOBAL_MANAGEMENT_ACTIONS[name]) {
+                    action = annotateGlobalAction(action);
+                    if (action.validated === false)
+                        throw new Error(`缺少参数：${(action.missing_params || []).join("、")}`);
+                    action.confirmed = true;
+                }
+                const summary = await executeFeishuAction(baseUrl, action, run.user_message, run.trace_id, {
+                    globalRunId: run.id,
+                    sessionId: run.session_id,
+                    source: run.source,
+                    onEvent: (event) => {
+                        attachGlobalRunTestAgentExecutionPlan(run, event);
+                        attachGlobalRunTestAgentReview(run, event);
+                        onEvent?.(event);
+                    },
+                });
+                observation = { success: true, summary };
+            }
+            completeIdempotency("global-agent-tool", operationKey, {
+                observation: (0, context_source_tool_result_projection_1.projectContextSourceToolResultForPersistence)(name === "invoke_mcp" ? (args?.tool_name || args?.toolName || name) : name, observation, args?.query || args?.file_id || args?.name || ""),
+            });
+            return observation;
+        }
+        catch (error) {
+            failIdempotency("global-agent-tool", operationKey, error);
+            throw error;
+        }
+    }
+    function attachGlobalRunRequirementSources(run, ingestion) {
+        if (!ingestion)
+            return;
+        run.source_ingestion = ingestion.technical;
+        run.sourceIngestion = ingestion.technical;
+        run.source_attachments = ingestion.attachments;
+        run.sourceAttachments = ingestion.attachments;
+        run.requirement_extraction = ingestion.requirement;
+        run.requirementExtraction = ingestion.requirement;
+        run.requirement_decomposition = ingestion.decomposition;
+        run.requirementDecomposition = ingestion.decomposition;
+        run.requirement_content_hash = ingestion.content_hash;
+        run.requirementContentHash = ingestion.content_hash;
+        run.requirement_source_documents = ingestion.source_documents || "";
+        run.requirementSourceDocuments = ingestion.source_documents || "";
+        run.requirement_sources = ingestion.sources || [];
+        run.requirementSources = ingestion.sources || [];
+    }
+    function createAgenticRuntime(baseUrl, ctx, input = {}) {
+        const baseConfig = loadOrchestratorConfig();
+        const runtime = {
+            callModel: async (messages, run, signal) => {
+                attachGlobalRunRequirementSources(run, input.sourceIngestion);
+                const sessionState = (0, slash_command_session_state_1.readSlashCommandSessionState)("global", "global", String(run.session_id || input.sessionId || ""));
+                const config = { ...baseConfig, model: sessionState.preferences?.model || baseConfig.model, reasoningEffort: sessionState.preferences?.effort || baseConfig.reasoningEffort };
+                if (!config.apiKey || !config.apiUrl || !config.model)
+                    throw new Error("统一大模型尚未配置");
+                const directive = (0, slash_command_session_state_1.renderSlashCommandSessionDirective)("global", "global", String(run.session_id || input.sessionId || ""));
+                const providerMessages = directive && !messages.some(message => String(message.content || "").includes(directive))
+                    ? [...messages.slice(0, -1), { role: "system", content: directive }, ...messages.slice(-1)]
+                    : messages;
+                const { accumulateGlobalAgentRunUsage } = require("../../agents/global/global-agent-metrics");
+                const invoke = (providerMessages) => {
+                    // Keep only descriptor metadata on the run; never retain provider prompt content.
+                    run.main_agent_prompt_bindings = (0, internal_prompt_contract_1.buildInternalPromptBindings)({
+                        scope: "global",
+                        system: providerMessages
+                            .filter((message) => message?.role === "system")
+                            .map((message) => String(message.content || ""))
+                            .join("\n\n"),
+                    });
+                    const runStartedAt = Date.parse(String(run.started_at || run.created_at || new Date().toISOString()));
+                    const streamMetric = run.streaming_metric || (run.streaming_metric = {
+                        firstVisibleFeedbackMs: 0,
+                        firstTokenMs: 0,
+                        maxSilentGapMs: 0,
+                        providerRetryCount: 0,
+                        fallbackStreamCount: 0,
+                        lastVisibleFeedbackAt: Number.isFinite(runStartedAt) ? runStartedAt : Date.now(),
+                    });
+                    const markVisibleFeedback = (at = Date.now()) => {
+                        if (!streamMetric.firstVisibleFeedbackMs && Number.isFinite(runStartedAt))
+                            streamMetric.firstVisibleFeedbackMs = Math.max(0, at - runStartedAt);
+                        streamMetric.maxSilentGapMs = Math.max(Number(streamMetric.maxSilentGapMs || 0), Math.max(0, at - Number(streamMetric.lastVisibleFeedbackAt || runStartedAt || at)));
+                        streamMetric.lastVisibleFeedbackAt = at;
+                    };
+                    const markProviderToken = (at = Date.now()) => {
+                        if (!streamMetric.firstTokenMs && Number.isFinite(runStartedAt))
+                            streamMetric.firstTokenMs = Math.max(0, at - runStartedAt);
+                    };
+                    run.latest_model_visible_payload = buildGlobalProviderPayloadSnapshot(providerMessages, String(run.session_id || ""), run);
+                    const providerCacheBoundary = buildGlobalAgentSessionContinuation(String(run.session_id || ""));
+                    const recordCanonicalPayload = (request) => {
+                        const snapshot = buildGlobalProviderPayloadSnapshot(request.messages, String(run.session_id || ""), run, request.tools);
+                        run.latest_model_visible_payload = snapshot;
+                        const receipt = (0, canonical_context_accounting_1.recordCanonicalContextPreflight)({
+                            scope: "global",
+                            scopeId: "global",
+                            exactSessionId: String(run.session_id || ""),
+                            payload: snapshot,
+                            provider: String(config.provider || "openai"),
+                            model: String(config.model || ""),
+                            protocol: String(config.format || config.protocol || ""),
+                            endpoint: String(config.apiUrl || config.endpoint || ""),
+                            generation: Number(run.generation || run.resume_count || 0),
+                            boundaryGeneration: Number(providerCacheBoundary?.boundaryGeneration || providerCacheBoundary?.boundary_generation || 0),
+                        });
+                        run.latest_canonical_context_receipt = receipt;
+                        (0, context_usage_events_1.publishContextUsageFromPayload)({
+                            scope: "global", scopeId: "global", exactSessionId: String(run.session_id || ""),
+                            requestId: String(run.id || ""), payload: snapshot, reason: "request_preflight",
+                            contextWindow: Number(receipt?.contextWindow || 0),
+                            autoCompactThreshold: Number(receipt?.autoCompactThreshold || 0),
+                        });
+                        return { payloadChecksum: snapshot.payloadChecksum, totalTokens: snapshot.totalTokens };
+                    };
+                    run.__context_streamed_tokens = 0;
+                    return (0, global_native_query_adapter_1.runGlobalNativeQueryCall)({
+                        config,
+                        messages: providerMessages,
+                        run,
+                        signal,
+                        executeTool: async (name, args, currentRun, toolSignal) => {
+                            const snapshot = run.latest_model_visible_payload;
+                            (0, context_usage_events_1.publishContextUsageDelta)({
+                                scope: "global", scopeId: "global", exactSessionId: String(run.session_id || ""), requestId: String(run.id || ""),
+                                currentTokens: Number(snapshot?.totalTokens || 0),
+                                predictedNextRequestTokens: Number(snapshot?.predictedNextRequestTokens || snapshot?.totalTokens || 0),
+                                tokenSource: "local_incremental_estimate", reason: "tool_started",
+                            });
+                            const result = await executeAgenticTool(baseUrl, ctx, name, args, currentRun, input.onEvent, toolSignal);
+                            const outputTokens = Math.max(0, Math.floor(String(result?.summary || result?.message || "").length / 4));
+                            (0, context_usage_events_1.publishContextUsageDelta)({
+                                scope: "global", scopeId: "global", exactSessionId: String(run.session_id || ""), requestId: String(run.id || ""),
+                                currentTokens: Number(snapshot?.totalTokens || 0) + outputTokens,
+                                predictedNextRequestTokens: Number(snapshot?.predictedNextRequestTokens || snapshot?.totalTokens || 0) + outputTokens,
+                                tokenSource: "local_incremental_estimate", reason: "tool_completed",
+                            });
+                            return result;
+                        },
+                        onEvent: input.onEvent,
+                        markVisibleFeedback,
+                        markProviderToken,
+                        onContextUsageDelta: (delta) => {
+                            const snapshot = run.latest_model_visible_payload;
+                            const deltaTokens = Math.max(0, Math.floor(String(delta || "").length / 4));
+                            const streamed = Number(run.__context_streamed_tokens || 0) + deltaTokens;
+                            run.__context_streamed_tokens = streamed;
+                            (0, context_usage_events_1.publishContextUsageDelta)({
+                                scope: "global", scopeId: "global", exactSessionId: String(run.session_id || ""), requestId: String(run.id || ""),
+                                currentTokens: Number(snapshot?.totalTokens || 0) + streamed,
+                                predictedNextRequestTokens: Number(snapshot?.predictedNextRequestTokens || snapshot?.totalTokens || 0) + streamed,
+                                tokenSource: "local_incremental_estimate", tokenBreakdown: { conversation: streamed }, reason: "assistant_delta",
+                            });
+                        },
+                        onCanonicalPayload: recordCanonicalPayload,
+                        onConversationContextPressure: async ({ messages: liveMessages, forcePromptTooLong }) => {
+                            const liveSuffix = liveMessages.slice(Math.min(liveMessages.length, providerMessages.length));
+                            const rebuilt = await prepareGlobalProviderMessages(providerMessages, run, runtime, {
+                                promptTooLong: forcePromptTooLong,
+                                contextPressure: !forcePromptTooLong,
+                            });
+                            if (!Array.isArray(rebuilt))
+                                return null;
+                            return [...rebuilt, ...liveSuffix];
+                        },
+                        onUsage: (usage) => {
+                            run.latest_context_usage = usage;
+                            accumulateGlobalAgentRunUsage(run, usage);
+                            const snapshot = run.latest_model_visible_payload;
+                            if (snapshot?.payloadChecksum) {
+                                const receipt = (0, canonical_context_accounting_1.completeCanonicalContextAccounting)({
+                                    scope: "global",
+                                    scopeId: "global",
+                                    exactSessionId: String(run.session_id || ""),
+                                    payloadChecksum: snapshot.payloadChecksum,
+                                    usage,
+                                    provider: String(config.provider || usage?.provider || "openai"),
+                                    model: String(config.model || usage?.model || ""),
+                                    protocol: String(config.format || config.protocol || usage?.protocol || ""),
+                                    endpoint: String(config.apiUrl || config.endpoint || usage?.endpoint || ""),
+                                    generation: Number(run.generation || run.resume_count || 0),
+                                    boundaryGeneration: Number(providerCacheBoundary?.boundaryGeneration || providerCacheBoundary?.boundary_generation || 0),
+                                });
+                                const observed = Number(receipt?.providerObservedInputTokens || usage?.inputTokens || usage?.input_tokens || 0);
+                                (0, context_usage_events_1.publishContextUsageDelta)({
+                                    scope: "global", scopeId: "global", exactSessionId: String(run.session_id || ""),
+                                    requestId: String(run.id || ""),
+                                    currentTokens: observed || Number(receipt?.estimatedInputTokens || snapshot.totalTokens || 0),
+                                    predictedNextRequestTokens: Number(receipt?.predictedNextRequestTokens || snapshot.predictedNextRequestTokens || 0),
+                                    tokenSource: observed > 0 ? "provider_usage" : "canonical_payload_estimate",
+                                    tokenBreakdown: receipt?.primaryTokenBreakdown || snapshot.tokenBreakdown,
+                                    reason: "provider_usage",
+                                });
+                            }
+                        },
+                    });
+                };
+                return invoke(providerMessages);
+            },
+            prepareModelMessages: (messages, run) => prepareGlobalProviderMessages(messages, run, runtime),
+            getContext: (run) => buildAgenticContext(run.user_message, run.session_id, {
+                knowledgeContext: input.knowledgeContext || "",
+                lazyResources: true,
+                lightweightDirectory: true,
+                runId: run.id,
+                source: run.source || "global-agent",
+                loadedToolNames: run.loaded_tool_names || run.loadedToolNames || [],
+                requestedTargetRefs: input.requestedTargetRefs || run.requested_target_refs || [],
+            }),
+            verifyContextBoundary: context => verifyGlobalAgentContextBoundary(context),
+            executeTool: (name, args, run, signal) => {
+                attachGlobalRunRequirementSources(run, input.sourceIngestion);
+                return executeAgenticTool(baseUrl, ctx, name, args, run, input.onEvent, signal);
+            },
+            fallbackDecision: (run, error) => {
+                const detail = compactPetText(error?.message || error || "统一大模型调用失败", 800);
+                console.warn(`[全局 Agent] 模型决策失败，已进入安全兜底：${detail}`);
+                recordGlobalAgentRuntimeOutput(run, { type: "model_fallback", status: "warning", error: detail });
+                // 模型不可用时只总结已有观察；不得让本地关键词规则替模型选择新工作流。
+                return null;
+            },
+            onWorkflowDecision: (workflowDecision, run, modelCallIndex, modelDecision) => {
+                const confirmedPlanBound = String(run?.plan_mode?.confirmation_status || "") === "confirmed"
+                    || (Array.isArray(run?.reasoning_loop?.assertions)
+                        && run.reasoning_loop.assertions.some((item) => item?.id === "confirmed_plan_binding" && item?.status === "passed"));
+                const confirmedPlanProjects = confirmedPlanBound
+                    ? Array.from(new Set((Array.isArray(run?.presented_plan?.businessRequirement?.targetProjects)
+                        ? run.presented_plan.businessRequirement.targetProjects
+                        : Array.isArray(run?.presentedPlan?.businessRequirement?.targetProjects)
+                            ? run.presentedPlan.businessRequirement.targetProjects
+                            : [])
+                        .map((project) => String(project || "").trim())
+                        .filter(Boolean)))
+                    : [];
+                const requestedTargets = Array.isArray(input.requestedTargetRefs) ? input.requestedTargetRefs : [];
+                // A server-confirmed plan is an authoritative target binding. The UI
+                // does not need to repeat project chips when resuming the same run.
+                const groundedTargets = requestedTargets.length
+                    ? requestedTargets
+                    : confirmedPlanProjects.map((project) => ({ scope: "project", scopeId: project, displayName: project }));
+                let requestedToolName = String(modelDecision?.tool?.name || "").toLowerCase();
+                const sourceInquiryAlreadyObserved = (run.steps || []).some((step) => String(step?.tool?.name || "") === "request_project_source_inquiry" && step?.observation);
+                if (workflowDecision?.readAction === "inspect_source"
+                    && workflowDecision?.actionRequired === false
+                    && workflowDecision?.requiresCodeChanges === false
+                    && requestedToolName !== "request_project_source_inquiry"
+                    && !sourceInquiryAlreadyObserved) {
+                    const knownProjects = new Set(safeProjectRows().map((project) => String(project?.name || "")).filter(Boolean));
+                    const sourceCandidates = Array.from(new Set([
+                        ...groundedTargets.filter((target) => String(target?.scope || "") === "project").map((target) => String(target?.scopeId || "")),
+                        ...(workflowDecision?.targetRefs || []).map((target) => String(target?.id || target?.name || target || "").replace(/^project:/, "")),
+                    ].filter((project) => knownProjects.has(project))));
+                    if (sourceCandidates.length === 1) {
+                        modelDecision.state = "investigate";
+                        modelDecision.tool = {
+                            name: "request_project_source_inquiry",
+                            arguments: {
+                                project: sourceCandidates[0],
+                                question: String(run.original_user_message || run.user_message || ""),
+                                read_depth: workflowDecision.sourceReadDepth === "broad" ? "broad" : "focused",
+                            },
+                        };
+                        modelDecision.message = `正在请求项目 ${sourceCandidates[0]} 主 Agent核对源码。`;
+                        requestedToolName = "request_project_source_inquiry";
+                    }
+                    else {
+                        modelDecision.state = "needs_confirmation";
+                        modelDecision.tool = undefined;
+                        modelDecision.message = sourceCandidates.length > 1
+                            ? "这项源码问题可能涉及多个项目，请先明确要核对的项目；我不会向所有项目广播读取请求。"
+                            : "请先明确要核对源码的项目；全局主 Agent不会直接读取项目文件。";
+                        requestedToolName = "";
+                    }
+                }
+                const targetRequired = (0, workflow_decision_1.isDevelopmentTaskWorkflowDecision)(workflowDecision)
+                    && ["orchestrate_development", "send_project_cmd", "send_group_cmd", "create_task"].includes(requestedToolName);
+                const modelSelectedWriteDispatch = ["orchestrate_development", "send_project_cmd", "send_group_cmd", "create_task"].includes(requestedToolName);
+                const modelSelectedManagementTool = Boolean(GLOBAL_MANAGEMENT_ACTIONS[requestedToolName]);
+                if (modelSelectedManagementTool) {
+                    const requestedOperationalIntent = requestedToolName === "manage_task" ? "task_supervision" : "management_action";
+                    if (["development_request", "source_inquiry", "direct_reply"].includes(String(workflowDecision.mainAgentIntent || ""))) {
+                        const error = new Error("当前工作流意图与 CCM 管理工具不一致");
+                        error.code = "CCM_MANAGEMENT_INTENT_MISMATCH";
+                        throw error;
+                    }
+                    const operation = String(modelDecision?.tool?.arguments?.operation || "").trim().toLowerCase();
+                    const destructive = Array.isArray(GLOBAL_MANAGEMENT_ACTIONS[requestedToolName]?.destructive)
+                        && GLOBAL_MANAGEMENT_ACTIONS[requestedToolName].destructive.includes(operation);
+                    workflowDecision.mainAgentIntent = requestedOperationalIntent;
+                    workflowDecision.managementRisk = destructive ? "destructive" : operation === "list" || operation === "status" || operation === "inspect" ? "read_only" : "mutable";
+                    workflowDecision.intentKind = "management";
+                    workflowDecision.requiresCodeChanges = false;
+                    workflowDecision.needsEpicDecomposition = false;
+                    workflowDecision.directReplyReady = false;
+                    workflowDecision.actionRequired = workflowDecision.managementRisk !== "read_only";
+                }
+                if (modelSelectedWriteDispatch && ["management_action", "task_supervision"].includes(String(workflowDecision.mainAgentIntent || ""))) {
+                    const error = new Error("CCM 管理请求不能通过开发任务派发工具执行");
+                    error.code = "CCM_MANAGEMENT_DISPATCH_FORBIDDEN";
+                    throw error;
+                }
+                const originalMessageExplicitlyRequestsExecution = hasExplicitDevelopmentExecutionIntent(String(run.original_user_message || input.authorizationMessage || run.user_message || ""));
+                if (modelSelectedWriteDispatch && groundedTargets.length && (originalMessageExplicitlyRequestsExecution || confirmedPlanBound)) {
+                    // The model has already selected a concrete write/dispatch tool and
+                    // the current user turn explicitly authorizes development execution.
+                    // Keep the structured workflow projection consistent with that
+                    // decision instead of asking the user to repeat the same scope.
+                    workflowDecision.actionRequired = true;
+                    workflowDecision.requiresCodeChanges = true;
+                    workflowDecision.mainAgentIntent = "development_request";
+                    workflowDecision.managementRisk = "read_only";
+                    workflowDecision.intentKind = "execution";
+                    workflowDecision.directReplyReady = false;
+                    workflowDecision.requiresUserConfirmation = false;
+                    workflowDecision.authorizationDirective = "grant";
+                    if (modelDecision?.intent) {
+                        modelDecision.intent.category = "execution";
+                        modelDecision.intent.action_required = true;
+                        modelDecision.intent.authorization_basis = "current_message";
+                    }
+                }
+                const effectiveTargetRequired = (targetRequired || modelSelectedWriteDispatch)
+                    && workflowDecision.actionRequired === true;
+                if (groundedTargets.length) {
+                    const targetRefs = groundedTargets.map((target) => `${String(target.scope || "project")}:${String(target.scopeId || target.id || target.name || "")}`);
+                    workflowDecision.targetRefs = targetRefs;
+                    if (modelDecision?.intent) {
+                        modelDecision.intent.target_refs = targetRefs;
+                    }
+                }
+                else if (effectiveTargetRequired) {
+                    workflowDecision.actionRequired = false;
+                    workflowDecision.requiresCodeChanges = false;
+                    workflowDecision.clarificationQuestions = ["请选择本次任务要投放的项目或群聊。"];
+                    if (modelDecision) {
+                        modelDecision.state = "needs_confirmation";
+                        modelDecision.tool = undefined;
+                        modelDecision.message = "这项请求需要投放任务，但还没有明确目标。请从可投放的项目或群聊中选择后继续；我不会猜测目标。";
+                    }
+                }
+                input.routeGuard?.(workflowDecision);
+                const responseType = modelDecision?.tool
+                    ? "tool_calls"
+                    : modelDecision?.state === "needs_confirmation" ? "clarify"
+                        : modelDecision?.state === "plan" ? "plan"
+                            : modelDecision?.state === "execute" ? "dispatch"
+                                : "reply";
+                const decision = (0, main_agent_turn_1.normalizeMainAgentTurnDecision)({
+                    scope: "global",
+                    scopeId: "global",
+                    exactSessionId: String(run.session_id || input.sessionId || "default"),
+                    turnId: String(run.turn_id || input.turnId || run.id),
+                    parsed: { responseType, reply: modelDecision?.message || "" },
+                    workflowDecision,
+                    reply: modelDecision?.message || "",
+                    toolRequests: modelDecision?.tool ? [{ name: modelDecision.tool.name, arguments: modelDecision.tool.arguments || {}, reason: modelDecision.message || "" }] : [],
+                });
+                const receipt = (0, main_agent_turn_1.createMainAgentTurnReceipt)({
+                    decision,
+                    modelCallIndex,
+                    toolRound: Math.max(0, modelCallIndex - 1),
+                    usage: run.latest_context_usage || null,
+                    inputIdentity: { sessionId: run.session_id, turnId: run.turn_id || input.turnId || "", message: input.authorizationMessage || run.original_user_message || run.user_message },
+                    promptBindings: run.main_agent_prompt_bindings,
+                });
+                run.main_agent_turn_decision = decision;
+                run.main_agent_turn_receipt = receipt;
+                input.onEvent?.({ type: "turn_decision", decision: (0, main_agent_turn_1.publicMainAgentTurnDecision)(decision), receipt });
+                const authorizationReceipt = (0, global_agent_authorization_1.buildGlobalWriteAuthorizationReceipt)({
+                    turnId: String(run.turn_id || input.turnId || run.id),
+                    sessionId: String(run.session_id || input.sessionId || "default"),
+                    source: String(run.source || input.source || "web"),
+                    message: String(input.authorizationMessage || run.original_user_message || run.user_message || ""),
+                    workflowDecision,
+                    principal: input.principal,
+                    readOnly: input.readOnly,
+                });
+                if (input.readOnly === true && workflowDecision.actionRequired === true) {
+                    throw Object.assign(new Error("当前 Viewer 账户仅允许只读问答；这条需求需要创建任务或执行写入操作，请联系 Operator 或 Admin"), { code: "VIEWER_EXECUTION_FORBIDDEN" });
+                }
+                const currentAuthorization = run.write_authorization_receipt || run.writeAuthorizationReceipt;
+                const shouldReplaceAuthorization = authorizationReceipt.allowed_risk === "write"
+                    || !currentAuthorization
+                    || authorizationReceipt.directive === "revoke";
+                if (shouldReplaceAuthorization) {
+                    run.write_authorization_receipt = authorizationReceipt;
+                    run.writeAuthorizationReceipt = authorizationReceipt;
+                    run.explicit_write_authorization = authorizationReceipt.allowed_risk === "write";
+                }
+            },
+            onEvent: input.onEvent ? (event) => input.onEvent(event) : undefined,
+        };
+        return runtime;
+    }
+    async function runAgenticGlobalRequest(baseUrl, ctx, input) {
+        const sessionId = input.sessionId || "default";
+        const visibleUserMessage = input.originalMessage || input.message;
+        let deferredTerminalEvent = null;
+        const runtimeEventSink = input.onEvent
+            ? (event) => {
+                if (["completed", "failed", "cancelled"].includes(String(event?.type || ""))) {
+                    deferredTerminalEvent = event;
+                    return;
+                }
+                input.onEvent?.(event);
+            }
+            : undefined;
+        if (!/feishu/i.test(input.source || "")) {
+            ingestGlobalAgentConversation({ sessionId, source: input.source || "web", messages: [...(input.history || []), { role: "user", content: visibleUserMessage, timestamp: new Date().toISOString(), trace_id: input.traceId }], compact: false });
+        }
+        const requestedClarificationRunId = String(input.clarificationRunId || "").trim();
+        let clarificationCandidate = null;
+        if (requestedClarificationRunId) {
+            const requestedRun = getGlobalAgentRun(requestedClarificationRunId);
+            if (!requestedRun || requestedRun.session_id !== sessionId)
+                throw new Error("当前会话中没有这个待补充请求");
+            if (requestedRun.status !== "waiting_clarification")
+                throw new Error("这个请求已不再等待补充，请刷新后查看最新状态");
+            clarificationCandidate = requestedRun;
+        }
+        else {
+            clarificationCandidate = findClarifyingGlobalAgentRun(sessionId);
+        }
+        const runtime = createAgenticRuntime(baseUrl, ctx, {
+            localIntent: null,
+            onEvent: runtimeEventSink,
+            sourceIngestion: input.sourceIngestion,
+            knowledgeContext: "",
+            principal: input.principal,
+            readOnly: input.readOnly,
+            turnId: input.turnId,
+            sessionId,
+            source: input.source || "web",
+            authorizationMessage: visibleUserMessage,
+            requestedTargetRefs: input.requestedTargetRefs || [],
+            routeGuard: input.routeGuard,
+        });
+        const waitingClarification = requestedClarificationRunId ? clarificationCandidate : null;
+        if (waitingClarification && Array.isArray(input.requestedTargetRefs) && input.requestedTargetRefs.length) {
+            waitingClarification.requested_target_refs = input.requestedTargetRefs;
+        }
+        const run = waitingClarification
+            ? await continueGlobalAgentRunWithClarification(waitingClarification.id, input.message, runtime, { turnId: input.turnId })
+            : await startGlobalAgentRun({
+                message: input.message,
+                originalMessage: input.originalMessage || input.message,
+                history: input.history || [],
+                sessionId,
+                source: input.source || "web",
+                traceId: input.traceId,
+                explicitWriteAuthorization: false,
+                writeAuthorizationReceipt: null,
+                authorizationMessage: visibleUserMessage,
+                turnId: input.turnId,
+                queueScope: input.queueScope,
+                requestedTargetRefs: input.requestedTargetRefs || [],
+                workflowDecision: null,
+                directReply: "",
+                maxSteps: 10,
+                timeoutMs: 12 * 60 * 1000,
+            }, runtime);
+        attachGlobalRunRequirementSources(run, input.sourceIngestion);
+        run.retryable = run.status === "failed";
+        run.degraded = run.status === "failed" && /模型|provider|timeout|network|熔断/i.test(String(run.error || run.final_reply || ""));
+        if (run.degraded)
+            run.failure_category = "provider_unavailable";
+        (0, global_agent_run_store_1.saveRun)(run, true);
+        if (input.onEvent) {
+            const canonicalReply = globalRunVisibleReply(run, "我已整理处理结果，技术细节已放入技术详情。");
+            if (canonicalReply.trim())
+                input.onEvent({ type: "text", text: canonicalReply, run_id: run.id, trace_id: run.trace_id, canonical: true });
+            if (deferredTerminalEvent) {
+                input.onEvent({
+                    ...deferredTerminalEvent,
+                    reply: run.final_reply,
+                    run,
+                });
+                deferredTerminalEvent = null;
+            }
+        }
+        let assistantMessageId = "";
+        if (!/feishu/i.test(input.source || "")) {
+            try {
+                assistantMessageId = `gam_${String(run.id || "result")}_assistant`;
+                ingestGlobalAgentConversation({
+                    sessionId,
+                    source: input.source || "web",
+                    messages: [{
+                            id: assistantMessageId,
+                            role: "assistant",
+                            content: globalRunVisibleReply(run, "我已整理处理结果，技术细节已放入技术详情。"),
+                            technical_content: run.final_report?.technical_content || run.final_delivery_report?.technical_content || "",
+                            timestamp: new Date().toISOString(),
+                            trace_id: run.trace_id,
+                            mission_id: run.mission_id,
+                        }],
+                    extractMemory: run.direct_reply_fast_path !== true,
+                });
+            }
+            catch (error) {
+                console.warn(`[全局记忆] Agentic 结果写入失败：${error?.message || error}`);
+            }
+        }
+        try {
+            recordGlobalAgentSessionProviderUsage(sessionId, {
+                usage: run.latest_context_usage || null,
+                provider: String(run.latest_context_usage?.provider || ""),
+                model: String(run.latest_context_usage?.model || loadOrchestratorConfig()?.model || ""),
+                protocol: String(run.latest_context_usage?.protocol || loadOrchestratorConfig()?.format || ""),
+                endpoint: String(run.latest_context_usage?.endpoint || loadOrchestratorConfig()?.apiUrl || ""),
+                anchorMessageId: assistantMessageId,
+                currentRequest: { role: "user", content: input.message },
+                fixedContext: { main_agent_loop: true },
+                tools: run.direct_reply_fast_path === true ? [] : GLOBAL_AGENT_TOOL_SPECS.filter(spec => !(0, global_tool_load_policy_1.isGlobalDeferredTool)(spec.name, run.loaded_tool_names || run.loadedToolNames || [])),
+                modelVisiblePayload: run.latest_model_visible_payload || null,
+                contextComponents: (() => {
+                    if (run.direct_reply_fast_path === true)
+                        return { skills: [], mcpTools: [] };
+                    const authorizedTools = (0, global_agent_tool_authorization_1.buildGlobalAgentToolRuntimeContext)({ taskId: run.id, sessionId: run.session_id, source: run.source || "global-agent-usage" }, run.loaded_tool_names || run.loadedToolNames || [], { executionSkills: (0, global_agent_tool_authorization_1.resolveGlobalAgentExecutionSkillsFromRun)(run) });
+                    return {
+                        skills: authorizedTools.catalog.skills.map((skill) => ({ name: String(skill?.name || ""), contentHash: String(skill?.contentHash || "") })).filter((skill) => skill.name),
+                        mcpTools: (0, session_context_tool_buckets_1.selectUserMcpToolDefinitions)(authorizedTools.catalog.tools).map((tool) => ({ name: String(tool?.canonicalName || tool?.name || ""), server: String(tool?.server || "") })).filter((tool) => tool.name),
+                    };
+                })(),
+            });
+        }
+        catch (error) {
+            console.warn(`[全局记忆] 上下文计量写入失败：${error?.message || error}`);
+        }
+        return run;
+    }
+    async function resumeGlobalAgentLoopsForServer(ctx, port) {
+        const result = await recoverInterruptedGlobalAgentRuns(createAgenticRuntime(`http://127.0.0.1:${port}`, ctx));
+        for (const run of result.results || []) {
+            if (!["completed", "failed", "cancelled"].includes(run.status))
+                continue;
+            settleIdempotencyByTrace(run.trace_id, run.status === "completed" ? "completed" : "failed", { run_id: run.id, status: run.status, recovered: true }, ["global-agent-request", "feishu-control-message", "feishu-event"]);
+        }
+        return result;
+    }
+    function startGlobalMissionSupervisionForServer(ctx) {
+        try {
+            require("../collaboration/collaboration-task-runtime").bindTaskRuntimeCollabCtx(ctx);
+        }
+        catch { /* ignore bind failures during optional boot wiring */ }
+        return startGlobalMissionSupervisorScheduler(createMissionSupervisorRuntime(ctx));
+    }
+    function bootstrapGlobalAgentMemoryForServer() {
+        const store = loadGlobalAgentHistoryStore();
+        const results = [];
+        for (const session of store.sessions || []) {
+            try {
+                results.push(ingestGlobalAgentConversation({ sessionId: session.id, source: session.source || "history-migration", messages: session.messages || [] }));
+            }
+            catch (error) {
+                results.push({ sessionId: session.id, error: error?.message || String(error) });
+            }
+        }
+        return { total: (store.sessions || []).length, migrated: results.filter(item => !item.error).length, results };
+    }
+    function stopGlobalMissionSupervisionForServer() {
+        stopGlobalMissionSupervisorScheduler();
+    }
+    return {
+        hasExplicitGlobalWriteAuthorization, verifyGlobalAgentContextBoundary, buildGlobalAgentGroupMemoryModelContext, buildAgenticContext, localActionToAgenticDecision,
+        createMissionSupervisorRuntime, createAgenticRuntime, runAgenticGlobalRequest, resumeGlobalAgentLoopsForServer,
+        startGlobalMissionSupervisionForServer, bootstrapGlobalAgentMemoryForServer, stopGlobalMissionSupervisionForServer,
+    };
+}
+//# sourceMappingURL=global-agent-agentic-runtime.js.map

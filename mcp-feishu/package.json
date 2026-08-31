@@ -1,0 +1,23 @@
+{
+  "name": "mcp-feishu",
+  "version": "1.0.0",
+  "description": "飞书消息访问工具 - MCP Server (Claude Code) + CLI (所有 agent)",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "feishu-cli": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "cli": "node dist/cli.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0",
+    "@types/node": "^22.0.0"
+  }
+}

@@ -1,0 +1,806 @@
+"use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.buildTestAgentRunnerJobKey = buildTestAgentRunnerJobKey;
+exports.listTestAgentRunnerRecords = listTestAgentRunnerRecords;
+exports.upsertTestAgentRunnerRecordForSelfTest = upsertTestAgentRunnerRecordForSelfTest;
+exports.getTestAgentRunnerRecordForSelfTest = getTestAgentRunnerRecordForSelfTest;
+exports.captureTestAgentSourceBinding = captureTestAgentSourceBinding;
+exports.runTestAgentCliJob = runTestAgentCliJob;
+exports.cancelTestAgentRunsForTask = cancelTestAgentRunsForTask;
+exports.reconcileTestAgentRunnerRecords = reconcileTestAgentRunnerRecords;
+exports.pruneTestAgentRunnerRecords = pruneTestAgentRunnerRecords;
+exports.purgeTestAgentRunnerRecordsForTask = purgeTestAgentRunnerRecordsForTask;
+exports.runTestAgentRunnerSelfTest = runTestAgentRunnerSelfTest;
+const crypto = __importStar(require("crypto"));
+const fs = __importStar(require("fs"));
+const path = __importStar(require("path"));
+const child_process_1 = require("child_process");
+const utils_1 = require("../../core/utils");
+const artifact_verifier_1 = require("../../test-agent/artifact-verifier");
+const git_workspace_runtime_1 = require("../tools/git-workspace-runtime");
+const operation_registry_1 = require("../../system/operation-registry");
+const evidence_projection_1 = require("../../test-agent/evidence-projection");
+const runtime_fingerprint_1 = require("../../test-agent/runtime-fingerprint");
+const RUN_DIR = path.join(utils_1.CCM_DIR, "test-agent-runs");
+const HANDOFF_DIR = path.join(utils_1.CCM_DIR, "test-agent-handoffs");
+const activeByKey = new Map();
+const activeChildren = new Map();
+const purgedRunIds = new Set();
+function nowIso() {
+    return new Date().toISOString();
+}
+function runtimeEnvironmentFingerprint(runtimeEnv) {
+    const entries = Object.entries(runtimeEnv || {})
+        .filter(([name]) => /^[A-Z_][A-Z0-9_]*$/.test(name))
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([name, value]) => [name, hash(String(value))]);
+    return entries.length ? hash(entries) : "";
+}
+function buildTestAgentRunnerJobKey(input, sourceFingerprint) {
+    const source = sourceFingerprint || captureTestAgentSourceBinding(input.handoff).fingerprint;
+    return hash({
+        mode: input.mode,
+        taskId: input.taskId || input.handoff?.taskId || input.handoff?.task_id || "",
+        groupId: input.groupId || input.handoff?.groupId || input.handoff?.group_id || "",
+        handoff: input.handoff,
+        source,
+        idempotencyKey: input.idempotencyKey || "",
+        attemptScope: String(input.attemptScope || ""),
+        runtimeEnvFingerprint: runtimeEnvironmentFingerprint(input.runtimeEnv),
+    });
+}
+function ensureDirs() {
+    fs.mkdirSync(RUN_DIR, { recursive: true });
+    fs.mkdirSync(HANDOFF_DIR, { recursive: true });
+}
+function stable(value) {
+    if (Array.isArray(value))
+        return value.map(stable);
+    if (value && typeof value === "object")
+        return Object.fromEntries(Object.keys(value).sort().map(key => [key, stable(value[key])]));
+    return value;
+}
+function hash(value) {
+    return crypto.createHash("sha256").update(typeof value === "string" ? value : JSON.stringify(stable(value))).digest("hex");
+}
+function safeId(value, fallback) {
+    return String(value || fallback).replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 96) || fallback;
+}
+function recordFile(id) {
+    return path.join(RUN_DIR, `${safeId(id, "test-agent-run")}.json`);
+}
+function writeJsonAtomic(file, value) {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const temp = `${file}.${process.pid}.${crypto.randomBytes(3).toString("hex")}.tmp`;
+    fs.writeFileSync(temp, `${JSON.stringify(value, null, 2)}\n`, "utf-8");
+    let lastError = null;
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+        try {
+            fs.renameSync(temp, file);
+            return;
+        }
+        catch (error) {
+            lastError = error;
+            if (fs.existsSync(file)) {
+                try {
+                    fs.unlinkSync(file);
+                }
+                catch { }
+            }
+        }
+    }
+    try {
+        if (fs.existsSync(temp))
+            fs.unlinkSync(temp);
+    }
+    catch { }
+    throw lastError || new Error(`Unable to persist TestAgent runner record: ${file}`);
+}
+function saveRecord(record) {
+    if (purgedRunIds.has(record.id))
+        return;
+    const projectedResult = record.result === undefined
+        ? undefined
+        : (0, evidence_projection_1.projectTestAgentExecutionResultForPersistence)(record.result);
+    const persisted = {
+        ...record,
+        ...(projectedResult === undefined ? {} : { result: projectedResult }),
+        persistenceProjection: {
+            schema: "ccm-test-agent-runner-record-persistence-v2",
+            contentStored: false,
+            redactedResultFields: projectedResult?.persistenceProjection?.redactedCount || 0,
+            checksum: crypto.createHash("sha256").update(JSON.stringify({
+                id: record.id,
+                status: record.status,
+                result: projectedResult || null,
+            })).digest("hex"),
+        },
+    };
+    writeJsonAtomic(recordFile(record.id), persisted);
+}
+function loadRecords() {
+    ensureDirs();
+    return fs.readdirSync(RUN_DIR)
+        .filter(file => file.endsWith(".json"))
+        .map(file => {
+        try {
+            return JSON.parse(fs.readFileSync(path.join(RUN_DIR, file), "utf-8"));
+        }
+        catch {
+            return null;
+        }
+    })
+        .filter((item) => !!item && item.schema === "ccm-test-agent-runner-record-v1");
+}
+function listTestAgentRunnerRecords(options = {}) {
+    const taskIds = new Set((options.taskIds || []).map(item => String(item || "").trim()).filter(Boolean));
+    const limit = Math.max(1, Math.min(2000, Number(options.limit || 500)));
+    return loadRecords()
+        .filter(record => !taskIds.size || taskIds.has(record.taskId))
+        .sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")))
+        .slice(0, limit);
+}
+/** Test-only helper: persist a runner record without registering activeChildren (orphan simulation). */
+function upsertTestAgentRunnerRecordForSelfTest(partial) {
+    ensureDirs();
+    const now = nowIso();
+    const record = {
+        schema: "ccm-test-agent-runner-record-v1",
+        id: partial.id,
+        key: partial.key || partial.id,
+        mode: partial.mode || "invocation",
+        taskId: partial.taskId,
+        groupId: partial.groupId || "",
+        handoffId: partial.handoffId || "",
+        handoffHash: partial.handoffHash || "",
+        status: partial.status || "running",
+        pid: Number(partial.pid || 0),
+        createdAt: partial.createdAt || now,
+        startedAt: partial.startedAt || now,
+        heartbeatAt: partial.heartbeatAt || now,
+        finishedAt: partial.finishedAt || "",
+        deadlineAt: partial.deadlineAt || "",
+        timeoutMs: Number(partial.timeoutMs || 60_000),
+        handoffPath: partial.handoffPath || "",
+        stdoutPath: partial.stdoutPath || "",
+        stderrPath: partial.stderrPath || "",
+        progressPath: partial.progressPath || "",
+        exitCode: partial.exitCode === undefined ? null : partial.exitCode,
+        signal: partial.signal || "",
+        error: partial.error || "",
+        cancelledReason: partial.cancelledReason || "",
+        recoveredAfterRestart: partial.recoveredAfterRestart === true,
+        sourceBefore: partial.sourceBefore || {
+            schema: "ccm-test-agent-source-binding-v1",
+            capturedAt: now,
+            fingerprint: "self-test",
+            projects: [],
+        },
+        ...(partial.sourceAfter ? { sourceAfter: partial.sourceAfter } : {}),
+        ...(partial.sourceStable !== undefined ? { sourceStable: partial.sourceStable } : {}),
+        ...(partial.result ? { result: partial.result } : {}),
+    };
+    saveRecord(record);
+    return record;
+}
+function getTestAgentRunnerRecordForSelfTest(id) {
+    const safe = safeId(id, "");
+    if (!safe)
+        return null;
+    return loadRecords().find(record => record.id === id || record.id === safe) || null;
+}
+function readLimited(file, max = 32 * 1024 * 1024) {
+    if (!file || !fs.existsSync(file))
+        return "";
+    const stat = fs.statSync(file);
+    const size = Math.min(stat.size, max);
+    const fd = fs.openSync(file, "r");
+    try {
+        const buffer = Buffer.alloc(size);
+        fs.readSync(fd, buffer, 0, size, Math.max(0, stat.size - size));
+        return buffer.toString("utf-8");
+    }
+    finally {
+        fs.closeSync(fd);
+    }
+}
+/** stdout/stderr are IPC scratch files, not durable evidence. They exist only
+ * while a child is running (or while a restarted runner parses its terminal
+ * JSON), and are removed immediately after the in-memory result is built. */
+function removeTransientOutputFiles(record) {
+    for (const file of [record.stdoutPath, record.stderrPath]) {
+        if (!file)
+            continue;
+        const resolved = path.resolve(file);
+        const relative = path.relative(RUN_DIR, resolved);
+        if (relative.startsWith("..") || path.isAbsolute(relative))
+            continue;
+        try {
+            if (fs.existsSync(resolved))
+                fs.unlinkSync(resolved);
+        }
+        catch { }
+    }
+}
+function parseResult(mode, stdout) {
+    try {
+        const parsed = JSON.parse(String(stdout || "").trim());
+        if (mode === "plan" && parsed?.schema === "ccm-test-agent-execution-plan-v1")
+            return parsed;
+        if (mode === "invocation" && parsed?.schema === "ccm-test-agent-invocation-result-v1")
+            return parsed;
+    }
+    catch { }
+    return null;
+}
+function refreshInvocationArtifactVerification(result) {
+    if (result?.schema !== "ccm-test-agent-invocation-result-v1")
+        return result;
+    const manifestPath = String(result?.report?.metadata?.artifactFiles?.manifestPath || result?.artifactVerification?.manifestPath || "");
+    if (!manifestPath)
+        return result;
+    try {
+        const verification = (0, artifact_verifier_1.verifyTestAgentArtifactManifestFile)(manifestPath);
+        result.artifactVerification = verification;
+        if (verification.status !== "passed") {
+            result.status = "runtime_error";
+            result.canAccept = false;
+            result.outputValidation = {
+                valid: false,
+                errors: [{ severity: "error", code: "test_agent_cached_artifact_verification_failed", message: "Cached TestAgent artifacts no longer pass integrity verification." }],
+                warnings: result.outputValidation?.warnings || [],
+            };
+            result.error = "Cached TestAgent artifacts changed after the original invocation.";
+        }
+    }
+    catch (error) {
+        result.status = "runtime_error";
+        result.canAccept = false;
+        result.outputValidation = {
+            valid: false,
+            errors: [{ severity: "error", code: "test_agent_cached_artifact_verification_error", message: error.message || String(error) }],
+            warnings: result.outputValidation?.warnings || [],
+        };
+        result.error = "Cached TestAgent artifacts could not be reverified.";
+    }
+    return result;
+}
+function gitValue(workDir, args, maxBuffer = 8 * 1024 * 1024) {
+    try {
+        const result = (0, child_process_1.spawnSync)("git", ["-C", workDir, ...args], { encoding: "utf-8", windowsHide: true, timeout: 8000, maxBuffer });
+        return result.status === 0 ? String(result.stdout || "").trim() : "";
+    }
+    catch {
+        return "";
+    }
+}
+function declaredFileEvidence(project, realWorkDir) {
+    const files = [...new Set((project?.changedFiles || project?.changed_files || []).map((item) => String(item)).filter(Boolean))].sort();
+    const evidence = [];
+    for (const relative of files.slice(0, 200)) {
+        try {
+            const safe = (0, git_workspace_runtime_1.resolveSafeRepositoryPath)(realWorkDir, relative, { allowLeafSymlink: true });
+            if (!fs.existsSync(safe.absolute)) {
+                evidence.push({ path: relative, state: "missing", size: 0, checksum: hash("missing"), verified: true });
+                continue;
+            }
+            const stat = fs.lstatSync(safe.absolute);
+            if (stat.isSymbolicLink()) {
+                const target = fs.readlinkSync(safe.absolute);
+                evidence.push({ path: relative, state: "symlink", size: stat.size, checksum: hash(`symlink:${target}`), verified: true });
+            }
+            else if (stat.isFile() && stat.size <= 25 * 1024 * 1024) {
+                evidence.push({ path: relative, state: "file", size: stat.size, checksum: crypto.createHash("sha256").update(fs.readFileSync(safe.absolute)).digest("hex"), verified: true });
+            }
+            else {
+                evidence.push({ path: relative, state: stat.isFile() ? "too_large" : "unsupported", size: stat.size, checksum: hash(`${stat.size}:${stat.mtimeMs}`), verified: false });
+            }
+        }
+        catch {
+            evidence.push({ path: relative, state: "unsafe", size: 0, checksum: "", verified: false });
+        }
+    }
+    return evidence;
+}
+function declaredFileHash(project, realWorkDir) {
+    return hash(declaredFileEvidence(project, realWorkDir));
+}
+function captureTestAgentSourceBinding(handoff) {
+    const projects = (Array.isArray(handoff?.projects) ? handoff.projects : handoff?.project ? [handoff.project] : [])
+        .map((project, index) => {
+        const workDir = path.resolve(String(project?.workDir || project?.work_dir || process.cwd()));
+        let realWorkDir = workDir;
+        try {
+            realWorkDir = fs.realpathSync(workDir);
+        }
+        catch { }
+        const gitHead = gitValue(realWorkDir, ["rev-parse", "HEAD"]);
+        const gitStatus = gitValue(realWorkDir, ["status", "--porcelain=v1", "--untracked-files=all"]);
+        const gitStatusHash = hash(gitStatus);
+        const declaredFiles = [...new Set((project?.changedFiles || project?.changed_files || []).map(String).filter(Boolean))].sort();
+        const fileEvidence = declaredFileEvidence(project, realWorkDir);
+        const fileHash = hash(fileEvidence);
+        const runtimeFingerprint = (0, runtime_fingerprint_1.captureTestAgentRuntimeFingerprint)({
+            workDir: realWorkDir,
+            targetUrl: project?.targetUrl || project?.target_url || project?.startupUrl || project?.startup_url || "",
+            providerFamily: project?.providerFamily || project?.provider_family || "",
+            providerCapabilityVersion: project?.providerCapabilityVersion || project?.provider_capability_version || "",
+            isolationMode: project?.isolationMode || project?.isolation_mode || "runner",
+            isolationEnvironmentId: project?.isolationEnvironmentId || project?.isolation_environment_id || "",
+            testTenantReference: project?.testTenantReference || project?.test_tenant_reference || "",
+            credentialReference: project?.credentialReference || project?.credential_reference || "",
+        });
+        return {
+            name: String(project?.name || `project-${index + 1}`),
+            workDir,
+            realWorkDir,
+            gitHead,
+            gitStatusHash,
+            declaredFiles,
+            declaredFileHash: fileHash,
+            declaredFileEvidence: fileEvidence,
+            runtimeFingerprint,
+            fingerprint: hash({ realWorkDir: realWorkDir.toLowerCase(), gitHead, gitStatusHash, fileHash, runtimeFingerprint: runtimeFingerprint.checksum }),
+        };
+    });
+    return {
+        schema: "ccm-test-agent-source-binding-v2",
+        version: 2,
+        capturedAt: nowIso(),
+        fingerprint: hash(projects.map(project => project.fingerprint)),
+        projects,
+    };
+}
+function processAlive(pid) {
+    if (!pid)
+        return false;
+    try {
+        process.kill(pid, 0);
+        return true;
+    }
+    catch {
+        return false;
+    }
+}
+function killProcessTree(pid) {
+    if (!pid)
+        return;
+    if (process.platform === "win32") {
+        try {
+            (0, child_process_1.spawnSync)("taskkill", ["/pid", String(pid), "/t", "/f"], { windowsHide: true, stdio: "ignore", timeout: 10000 });
+        }
+        catch { }
+        return;
+    }
+    try {
+        process.kill(-pid, "SIGTERM");
+    }
+    catch {
+        try {
+            process.kill(pid, "SIGTERM");
+        }
+        catch { }
+    }
+}
+function resolveCliPath() {
+    const candidates = [
+        path.resolve(__dirname, "../../test-agent/cli.js"),
+        path.join(utils_1.CCM_DIR, "ccm-package", "dist", "test-agent", "cli.js"),
+    ];
+    return candidates.find(candidate => fs.existsSync(candidate)) || candidates[0];
+}
+function writeHandoff(handoff) {
+    ensureDirs();
+    const id = safeId(handoff?.id, "test-agent-handoff");
+    const projected = (0, evidence_projection_1.projectTestAgentHandoffForPersistence)(handoff);
+    const file = path.join(HANDOFF_DIR, `${id}-${hash(projected).slice(0, 16)}.handoff.json`);
+    if (!fs.existsSync(file))
+        fs.writeFileSync(file, `${JSON.stringify(projected, null, 2)}\n`, "utf-8");
+    return file;
+}
+function resultFromRecord(record, reused) {
+    const stdout = readLimited(record.stdoutPath);
+    const stderr = readLimited(record.stderrPath);
+    const result = record.mode === "invocation"
+        ? refreshInvocationArtifactVerification(record.result || parseResult(record.mode, stdout))
+        : record.result || parseResult(record.mode, stdout);
+    return {
+        schema: "ccm-test-agent-runner-result-v1",
+        record: { ...record, result },
+        ...(record.mode === "plan" ? { plan: result } : { invocation: result }),
+        stdout,
+        stderr,
+        reused,
+    };
+}
+async function waitForRecoveredRecord(record) {
+    while (processAlive(record.pid) && Date.now() < Date.parse(record.deadlineAt)) {
+        await new Promise(resolve => setTimeout(resolve, 500));
+    }
+    if (processAlive(record.pid)) {
+        killProcessTree(record.pid);
+        record.error = `TestAgent ${record.mode} timed out after ${record.timeoutMs}ms.`;
+        record.status = "failed";
+    }
+    const stdout = readLimited(record.stdoutPath);
+    const parsed = parseResult(record.mode, stdout);
+    record.sourceAfter = captureTestAgentSourceBinding({ projects: record.sourceBefore.projects.map(item => ({ name: item.name, workDir: item.realWorkDir, changedFiles: item.declaredFiles })) });
+    record.sourceStable = record.sourceBefore.fingerprint === record.sourceAfter.fingerprint;
+    record.result = parsed;
+    record.finishedAt = nowIso();
+    record.heartbeatAt = record.finishedAt;
+    record.recoveredAfterRestart = true;
+    if (record.status !== "failed" && record.status !== "cancelled") {
+        const exitOk = record.exitCode === 0 || record.exitCode === null;
+        // Recovered waiters rarely know exitCode; require parsed contract and no kill/timeout failure.
+        record.status = parsed && exitOk ? "completed" : "interrupted";
+        if (parsed && record.exitCode !== 0 && record.exitCode !== null) {
+            record.status = "failed";
+            record.error = record.error || `TestAgent process exited with code ${record.exitCode}.`;
+        }
+    }
+    if (!parsed && !record.error)
+        record.error = "TestAgent process ended without a contract-valid result.";
+    saveRecord(record);
+    const result = resultFromRecord(record, true);
+    removeTransientOutputFiles(record);
+    purgedRunIds.delete(record.id);
+    return result;
+}
+function finalizeRecord(record, status, exitCode, signal, error = "") {
+    const stdout = readLimited(record.stdoutPath);
+    const parsed = parseResult(record.mode, stdout);
+    record.exitCode = exitCode;
+    record.signal = signal;
+    record.error = error || (!parsed ? "TestAgent process did not return the expected result contract." : "");
+    record.result = parsed;
+    record.sourceAfter = captureTestAgentSourceBinding({ projects: record.sourceBefore.projects.map(item => ({ name: item.name, workDir: item.realWorkDir, changedFiles: item.declaredFiles })) });
+    record.sourceStable = record.sourceBefore.fingerprint === record.sourceAfter.fingerprint;
+    if (status === "cancelled") {
+        record.status = "cancelled";
+    }
+    else if (parsed && exitCode === 0) {
+        record.status = "completed";
+    }
+    else if (status === "interrupted") {
+        record.status = "interrupted";
+    }
+    else {
+        record.status = "failed";
+        if (parsed && exitCode !== 0 && exitCode !== null && !record.error) {
+            record.error = `TestAgent process exited with code ${exitCode}.`;
+        }
+    }
+    record.finishedAt = nowIso();
+    record.heartbeatAt = record.finishedAt;
+    saveRecord(record);
+    const result = resultFromRecord(record, false);
+    removeTransientOutputFiles(record);
+    return result;
+}
+async function startJob(input, key) {
+    ensureDirs();
+    const sourceBefore = captureTestAgentSourceBinding(input.handoff);
+    const handoffHash = hash(input.handoff);
+    const id = `tar_${hash(key).slice(0, 24)}`;
+    const handoffPath = writeHandoff(input.handoff);
+    const timeoutMs = Math.max(30_000, Number(input.timeoutMs || (input.mode === "plan" ? 120_000 : 900_000)));
+    const createdAt = nowIso();
+    const stdoutPath = path.join(RUN_DIR, `${id}.stdout.json`);
+    const stderrPath = path.join(RUN_DIR, `${id}.stderr.log`);
+    const progressPath = path.join(RUN_DIR, `${id}.progress.jsonl`);
+    const record = {
+        schema: "ccm-test-agent-runner-record-v1",
+        id,
+        key,
+        mode: input.mode,
+        taskId: String(input.taskId || input.handoff?.taskId || input.handoff?.task_id || ""),
+        groupId: String(input.groupId || input.handoff?.groupId || input.handoff?.group_id || ""),
+        handoffId: String(input.handoff?.id || ""),
+        handoffHash,
+        status: "queued",
+        pid: 0,
+        createdAt,
+        startedAt: "",
+        heartbeatAt: createdAt,
+        finishedAt: "",
+        deadlineAt: new Date(Date.now() + timeoutMs).toISOString(),
+        timeoutMs,
+        handoffPath,
+        stdoutPath,
+        stderrPath,
+        progressPath,
+        exitCode: null,
+        signal: "",
+        error: "",
+        cancelledReason: "",
+        recoveredAfterRestart: false,
+        sourceBefore,
+        attemptScope: String(input.attemptScope || ""),
+        runtimeEnvFingerprint: runtimeEnvironmentFingerprint(input.runtimeEnv),
+    };
+    saveRecord(record);
+    const outFd = fs.openSync(stdoutPath, "w");
+    const errFd = fs.openSync(stderrPath, "w");
+    const cliArgs = [
+        resolveCliPath(),
+        "--from-handoff",
+        handoffPath,
+        ...(input.mode === "plan" ? ["--plan-only", "--json"] : ["--invocation-json", "--json"]),
+    ];
+    const child = (0, child_process_1.spawn)(process.execPath, cliArgs, {
+        cwd: utils_1.CCM_DIR,
+        windowsHide: true,
+        detached: process.platform !== "win32",
+        stdio: ["ignore", outFd, errFd],
+        env: {
+            ...process.env,
+            ...Object.fromEntries(Object.entries(input.runtimeEnv || {})
+                .filter(([name]) => /^[A-Z_][A-Z0-9_]*$/.test(name))
+                .map(([name, value]) => [name, String(value)])),
+            CCM_TEST_AGENT_ALLOWED_WORK_DIRS: JSON.stringify((input.allowedWorkDirs || []).map(item => path.resolve(item))),
+            CCM_TEST_AGENT_RUNNER_ID: id,
+            CCM_TEST_AGENT_PROGRESS_PATH: progressPath,
+            CCM_TEST_AGENT_PROGRESS_CONTEXT: JSON.stringify(input.runtimeProgressContext || null),
+        },
+    });
+    fs.closeSync(outFd);
+    fs.closeSync(errFd);
+    record.pid = child.pid || 0;
+    record.status = "running";
+    record.startedAt = nowIso();
+    record.heartbeatAt = record.startedAt;
+    saveRecord(record);
+    activeChildren.set(id, { child, record });
+    return new Promise(resolve => {
+        let settled = false;
+        const finish = (status, exitCode, signal = "", error = "") => {
+            if (settled)
+                return;
+            settled = true;
+            clearTimeout(timeout);
+            clearInterval(heartbeat);
+            activeChildren.delete(id);
+            try {
+                resolve(finalizeRecord(record, status, exitCode, signal, error));
+            }
+            finally {
+                purgedRunIds.delete(id);
+            }
+        };
+        const heartbeat = setInterval(() => {
+            record.heartbeatAt = nowIso();
+            try {
+                saveRecord(record);
+            }
+            catch { }
+        }, 5000);
+        heartbeat.unref?.();
+        const timeout = setTimeout(() => {
+            killProcessTree(record.pid);
+            finish("failed", null, "", `TestAgent ${input.mode} timed out after ${timeoutMs}ms.`);
+        }, timeoutMs);
+        timeout.unref?.();
+        child.on("error", error => finish("failed", null, "", error.message));
+        child.on("close", (code, signal) => {
+            const cancelled = record.status === "cancelled";
+            finish(cancelled ? "cancelled" : code === null && !signal ? "interrupted" : "failed", code, String(signal || ""));
+        });
+    });
+}
+async function runTestAgentCliJob(input) {
+    const source = captureTestAgentSourceBinding(input.handoff);
+    const key = buildTestAgentRunnerJobKey(input, source.fingerprint);
+    const rawInput = input;
+    const operation = (0, operation_registry_1.reserveOperation)({
+        operationType: "test",
+        normalizedArguments: { taskId: input.taskId, handoff: input.handoff?.acceptanceCriteria || input.handoff?.acceptance_criteria || [], runner: rawInput.runner || rawInput.cli || "test-agent" },
+        scope: rawInput.scope || "project",
+        target: input.taskId,
+        repoStateFingerprint: source.fingerprint,
+        toolVersion: rawInput.runner || rawInput.cli || "test-agent",
+    });
+    const active = activeByKey.get(key);
+    if (active)
+        return active;
+    const existing = loadRecords().filter(record => record.key === key).sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+    // Reuse completed or failed terminal records that still have a contract result.
+    // Failed often means canAccept=false (CLI exit 1), not a missing invocation payload.
+    if (existing?.result
+        && existing.sourceStable !== false
+        && (existing.status === "completed" || existing.status === "failed")) {
+        const reused = resultFromRecord(existing, true);
+        (0, operation_registry_1.completeOperation)(operation.record.operationId, { status: "succeeded", evidenceIds: existing.result?.evidenceIds || [] });
+        return reused;
+    }
+    if (existing?.status === "running" && processAlive(existing.pid)) {
+        const recovered = waitForRecoveredRecord(existing);
+        activeByKey.set(key, recovered);
+        try {
+            return await recovered;
+        }
+        finally {
+            activeByKey.delete(key);
+        }
+    }
+    const promise = startJob(input, key).then((result) => {
+        (0, operation_registry_1.completeOperation)(operation.record.operationId, { status: result?.status === "completed" || result?.status === "failed" ? "succeeded" : "failed", evidenceIds: result?.evidenceIds || [] });
+        return result;
+    }).catch(error => {
+        (0, operation_registry_1.completeOperation)(operation.record.operationId, { status: "failed" });
+        throw error;
+    });
+    activeByKey.set(key, promise);
+    try {
+        return await promise;
+    }
+    finally {
+        activeByKey.delete(key);
+    }
+}
+function cancelTestAgentRunsForTask(taskId, reason = "Task cancelled") {
+    const cancelled = [];
+    const markCancelled = (record) => {
+        if (cancelled.includes(record.id))
+            return;
+        record.status = "cancelled";
+        record.cancelledReason = reason;
+        record.heartbeatAt = nowIso();
+        record.finishedAt = record.finishedAt || nowIso();
+        saveRecord(record);
+        if (record.pid)
+            killProcessTree(record.pid);
+        cancelled.push(record.id);
+    };
+    for (const { record } of activeChildren.values()) {
+        if (record.taskId !== taskId || record.status !== "running")
+            continue;
+        markCancelled(record);
+    }
+    // Also kill orphaned running records after server restart (not in activeChildren).
+    for (const record of loadRecords()) {
+        if (record.taskId !== taskId || record.status !== "running")
+            continue;
+        markCancelled(record);
+    }
+    return cancelled;
+}
+function reconcileTestAgentRunnerRecords() {
+    const records = loadRecords();
+    let interrupted = 0;
+    let running = 0;
+    for (const record of records) {
+        if (record.status !== "running")
+            continue;
+        if (processAlive(record.pid)) {
+            running += 1;
+            continue;
+        }
+        const parsed = parseResult(record.mode, readLimited(record.stdoutPath));
+        record.result = parsed;
+        // Dead process after restart: only completed when contract-valid AND prior exit was success.
+        const exitOk = record.exitCode === 0;
+        record.status = parsed && exitOk ? "completed" : "interrupted";
+        record.error = parsed && exitOk
+            ? ""
+            : (record.error || (parsed
+                ? `TestAgent process ended with exit code ${record.exitCode ?? "unknown"}.`
+                : "TestAgent process ended before the server could collect a valid result."));
+        record.finishedAt = record.finishedAt || nowIso();
+        record.heartbeatAt = record.finishedAt;
+        record.recoveredAfterRestart = true;
+        saveRecord(record);
+        removeTransientOutputFiles(record);
+        interrupted += record.status === "interrupted" ? 1 : 0;
+    }
+    const retention = pruneTestAgentRunnerRecords();
+    return { schema: "ccm-test-agent-runner-reconciliation-v1", total: records.length, running, interrupted, retention };
+}
+function removeRunnerRecordFiles(record, remaining) {
+    const files = [recordFile(record.id), record.stdoutPath, record.stderrPath, record.progressPath];
+    if (record.handoffPath && !remaining.some(item => item.id !== record.id && item.handoffPath === record.handoffPath))
+        files.push(record.handoffPath);
+    let removed = 0;
+    for (const file of files) {
+        if (!file)
+            continue;
+        const resolved = path.resolve(file);
+        const inOwnedRoot = [RUN_DIR, HANDOFF_DIR].some(root => {
+            const relative = path.relative(root, resolved);
+            return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+        });
+        if (!inOwnedRoot)
+            continue;
+        try {
+            if (fs.existsSync(resolved)) {
+                fs.unlinkSync(resolved);
+                removed += 1;
+            }
+        }
+        catch { }
+    }
+    return removed;
+}
+function pruneTestAgentRunnerRecords(options = {}) {
+    const records = loadRecords().sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    const retentionDays = Math.max(1, Number(options.retentionDays || process.env.CCM_TEST_AGENT_RUN_RETENTION_DAYS || 14));
+    const maxRecords = Math.max(20, Number(options.maxRecords || process.env.CCM_TEST_AGENT_RUN_MAX_RECORDS || 500));
+    const cutoff = Date.now() - retentionDays * 24 * 60 * 60_000;
+    const removable = records.filter((record, index) => record.status !== "running"
+        && (index >= maxRecords || Date.parse(record.finishedAt || record.createdAt) < cutoff));
+    const removableIds = new Set(removable.map(record => record.id));
+    const remaining = records.filter(record => !removableIds.has(record.id));
+    let removedFiles = 0;
+    for (const record of removable)
+        removedFiles += removeRunnerRecordFiles(record, remaining);
+    return { schema: "ccm-test-agent-runner-retention-v1", scanned: records.length, removedRecords: removable.length, removedFiles };
+}
+function purgeTestAgentRunnerRecordsForTask(taskId) {
+    const records = loadRecords();
+    const matching = records.filter(record => record.taskId === taskId);
+    const matchingIds = new Set(matching.map(record => record.id));
+    const remaining = records.filter(record => !matchingIds.has(record.id));
+    for (const record of matching)
+        purgedRunIds.add(record.id);
+    cancelTestAgentRunsForTask(taskId, "Task permanently purged");
+    for (const record of matching) {
+        if (record.status !== "running" || activeChildren.has(record.id))
+            continue;
+        record.status = "cancelled";
+        record.cancelledReason = "Task permanently purged";
+        killProcessTree(record.pid);
+    }
+    let removedFiles = 0;
+    for (const record of matching)
+        removedFiles += removeRunnerRecordFiles(record, remaining);
+    return { schema: "ccm-test-agent-runner-task-purge-v1", taskId, removedRecords: matching.length, removedFiles };
+}
+function runTestAgentRunnerSelfTest() {
+    const handoff = {
+        id: "runner-selftest",
+        taskId: "runner-selftest-task",
+        groupId: "runner-selftest-group",
+        projects: [{ name: "selftest", workDir: process.cwd(), changedFiles: [] }],
+    };
+    const first = captureTestAgentSourceBinding(handoff);
+    const second = captureTestAgentSourceBinding(handoff);
+    return {
+        pass: first.fingerprint === second.fingerprint && first.projects.length === 1,
+        stableSourceFingerprint: first.fingerprint === second.fingerprint,
+        recordsReconcile: !!reconcileTestAgentRunnerRecords().schema,
+    };
+}
+//# sourceMappingURL=test-agent-runner.js.map

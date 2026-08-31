@@ -1,0 +1,16 @@
+{
+  "schema": "ccm-internal-mcp-v1",
+  "name": "mcp-feishu",
+  "display_name": "Feishu Collaboration MCP",
+  "description": "Read Feishu chats, message history, and message details to provide business context to Agents.",
+  "version": "1.0.0",
+  "entry": "dist/index.js",
+  "configuration": "feishu_settings",
+  "scopes": ["global-agent", "group-main-agent", "project-child-agent"],
+  "tools": [
+    { "name": "list_chats", "label": "List chats", "description": "List Feishu chats where the bot is a member." },
+    { "name": "get_chat_history", "label": "Chat history", "description": "Read historical messages from a specified Feishu chat." },
+    { "name": "search_messages", "label": "Search messages", "description": "Search Feishu messages by a query." },
+    { "name": "get_message_detail", "label": "Message details", "description": "Read message content, attachments, and sender metadata." }
+  ]
+}

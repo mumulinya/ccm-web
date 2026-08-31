@@ -1,0 +1,2320 @@
+"use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.NATIVE_AGENT_TURN_MAX_TOKENS = exports.MODEL_LONG_REQUEST_TOTAL_TIMEOUT_MS = exports.normalizeOpenAiResponsesUrl = void 0;
+exports.normalizeLlmTokenUsage = normalizeLlmTokenUsage;
+exports.normalizeChatCompletionsUrl = normalizeChatCompletionsUrl;
+exports.normalizeAnthropicMessagesUrl = normalizeAnthropicMessagesUrl;
+exports.normalizeGeminiGenerateContentUrl = normalizeGeminiGenerateContentUrl;
+exports.shouldUseAnthropic = shouldUseAnthropic;
+exports.shouldUseOpenAiResponses = shouldUseOpenAiResponses;
+exports.shouldUseGemini = shouldUseGemini;
+exports.extractJsonObject = extractJsonObject;
+exports.resolveLlmTimeoutMs = resolveLlmTimeoutMs;
+exports.resolveReasoningEffort = resolveReasoningEffort;
+exports.buildOpenAiReasoningFields = buildOpenAiReasoningFields;
+exports.parseOpenAiStreamText = parseOpenAiStreamText;
+exports.buildAnthropicThinkingFields = buildAnthropicThinkingFields;
+exports.fetchWithNodeHttpFallback = fetchWithNodeHttpFallback;
+exports.applyAnthropicCacheReferenceEditing = applyAnthropicCacheReferenceEditing;
+exports.resolveLlmRetryOptions = resolveLlmRetryOptions;
+exports.callOpenAiCompatibleChat = callOpenAiCompatibleChat;
+exports.callGeminiCompatibleChat = callGeminiCompatibleChat;
+exports.callAnthropicCompatibleChat = callAnthropicCompatibleChat;
+exports.callOpenAiCompatibleJson = callOpenAiCompatibleJson;
+exports.callGeminiCompatibleJson = callGeminiCompatibleJson;
+exports.callAnthropicCompatibleJson = callAnthropicCompatibleJson;
+exports.callNativeAgentTurn = callNativeAgentTurn;
+exports.runLlmTokenUsageSelfTest = runLlmTokenUsageSelfTest;
+exports.runLlmStreamingSelfTest = runLlmStreamingSelfTest;
+exports.runGroupOrchestratorApiMicrocompactNativeAdapterTelemetrySelfTest = runGroupOrchestratorApiMicrocompactNativeAdapterTelemetrySelfTest;
+const http = __importStar(require("http"));
+const https = __importStar(require("https"));
+const crypto = __importStar(require("crypto"));
+const model_call_retry_1 = require("../../system/model-call-retry");
+const provider_native_compact_execution_receipt_1 = require("./provider-native-compact-execution-receipt");
+const transient_model_content_1 = require("../../system/transient-model-content");
+const provider_microcompact_1 = require("../../system/provider-microcompact");
+const group_prompt_cache_break_detection_1 = require("./group-prompt-cache-break-detection");
+const provider_neutral_context_cache_1 = require("../../system/provider-neutral-context-cache");
+const provider_context_cache_adapters_1 = require("../../system/provider-context-cache-adapters");
+const provider_cache_breakpoint_encoding_1 = require("../../system/provider-cache-breakpoint-encoding");
+const provider_cache_capability_registry_1 = require("../../system/provider-cache-capability-registry");
+const automatic_provider_cache_optimization_1 = require("../../system/automatic-provider-cache-optimization");
+const provider_native_microcompact_capability_1 = require("../../system/provider-native-microcompact-capability");
+const provider_native_tools_1 = require("../../system/provider-native-tools");
+const provider_native_tool_capability_1 = require("../../system/provider-native-tool-capability");
+const openai_responses_transport_1 = require("../../system/openai-responses-transport");
+const provider_cache_protocol_1 = require("../../system/provider-cache-protocol");
+const sse_json_parser_1 = require("../../system/sse-json-parser");
+const provider_stream_activity_1 = require("../../system/provider-stream-activity");
+const provider_reasoning_summary_capability_1 = require("../../system/provider-reasoning-summary-capability");
+var openai_responses_transport_2 = require("../../system/openai-responses-transport");
+Object.defineProperty(exports, "normalizeOpenAiResponsesUrl", { enumerable: true, get: function () { return openai_responses_transport_2.normalizeOpenAiResponsesUrl; } });
+function ensureProviderRequestEvidence(options) {
+    if (options.providerRequestEvidence)
+        return options.providerRequestEvidence;
+    const evidence = {
+        attemptCount: 0,
+        retryCount: 0,
+        requestDispatchCount: 0,
+        responseStartedCount: 0,
+        providerRequestIdPresent: false,
+        contentStored: false,
+    };
+    options.providerRequestEvidence = evidence;
+    return evidence;
+}
+function recordProviderRequestActivity(options, provider, phase, response) {
+    const evidence = ensureProviderRequestEvidence(options);
+    const requestIdPresent = phase === "response_started" && !!providerRequestId(response);
+    if (phase === "request_dispatched") {
+        (0, provider_stream_activity_1.recordProviderStreamRequestDispatched)(options);
+        evidence.requestDispatchCount += 1;
+        evidence.attemptCount = Math.max(evidence.attemptCount, evidence.requestDispatchCount);
+    }
+    else {
+        (0, provider_stream_activity_1.recordProviderStreamResponseStarted)(options);
+        evidence.responseStartedCount += 1;
+        evidence.providerRequestIdPresent = evidence.providerRequestIdPresent || requestIdPresent;
+    }
+    options.onProviderRequestActivity?.({ phase, provider, providerRequestIdPresent: requestIdPresent });
+}
+function attachProviderRequestEvidence(error, options) {
+    const target = error && typeof error === "object" ? error : new Error(String(error || "model request failed"));
+    const evidence = ensureProviderRequestEvidence(options);
+    target.attemptCount = Math.max(Number(target.attemptCount || 0), evidence.attemptCount);
+    target.retryCount = Math.max(Number(target.retryCount || 0), evidence.retryCount);
+    target.requestDispatchCount = evidence.requestDispatchCount;
+    target.responseStartedCount = evidence.responseStartedCount;
+    target.providerRequestIdPresent = evidence.providerRequestIdPresent;
+    evidence.streamTiming = (0, provider_stream_activity_1.providerStreamTiming)(options);
+    target.providerRequestEvidence = { ...evidence };
+    return target;
+}
+function createLlmAbortContext(options, timeoutMs) {
+    const controller = new AbortController();
+    const onAbort = () => controller.abort(options.signal?.reason || new Error("模型调用已取消"));
+    if (options.signal?.aborted)
+        onAbort();
+    else
+        options.signal?.addEventListener("abort", onAbort, { once: true });
+    const timeout = setTimeout(() => controller.abort(Object.assign(new Error(`model request timeout after ${timeoutMs}ms`), { code: "CCM_MODEL_ATTEMPT_TIMEOUT" })), timeoutMs);
+    return {
+        controller,
+        cleanup: () => {
+            clearTimeout(timeout);
+            options.signal?.removeEventListener("abort", onAbort);
+        },
+    };
+}
+function normalizeLlmAbortError(error, options) {
+    if (!options.signal?.aborted)
+        return error;
+    const reason = options.signal.reason;
+    if (reason?.code === "CCM_MODEL_ATTEMPT_TIMEOUT") {
+        return attachProviderRequestEvidence(reason, options);
+    }
+    const cancelled = new Error(String(options.signal.reason?.message || options.signal.reason || "模型调用已取消"));
+    cancelled.code = "CCM_MODEL_CALL_CANCELLED";
+    return attachProviderRequestEvidence(cancelled, options);
+}
+function providerHttpError(prefix, response, detail) {
+    const error = new Error(formatHttpError(prefix, response.status, detail));
+    error.status = Number(response.status || 0);
+    const header = String(response.headers?.get?.("retry-after") || "").trim();
+    if (/^\d+(?:\.\d+)?$/.test(header))
+        error.retryAfterMs = Math.max(0, Number(header) * 1_000);
+    else if (header) {
+        const at = Date.parse(header);
+        if (Number.isFinite(at))
+            error.retryAfterMs = Math.max(0, at - Date.now());
+    }
+    return error;
+}
+function providerContextCacheOptions(config, options, provider) {
+    const explicit = options.providerContextCache || options.provider_context_cache || null;
+    const tracking = options.promptCacheTracking || options.prompt_cache_tracking || null;
+    let fallback = null;
+    if (tracking?.groupSessionId || tracking?.group_session_id) {
+        const groupId = String(tracking?.groupId || tracking?.group_id || "");
+        const sessionId = String(tracking?.groupSessionId || tracking?.group_session_id || "");
+        let boundaryGeneration = Math.max(0, Number(tracking?.boundaryGeneration || tracking?.boundary_generation || 0));
+        if (!boundaryGeneration && groupId && sessionId.startsWith("gcs_")) {
+            try {
+                const memory = require("./group-memory-storage").loadGroupMemory(groupId, sessionId);
+                boundaryGeneration = Math.max(0, Number(memory?.compaction?.boundaryGeneration || memory?.compaction?.boundary_generation || memory?.compactBoundary?.generation || 0));
+            }
+            catch { }
+        }
+        fallback = {
+            scope: "group",
+            scopeId: groupId,
+            sessionId,
+            boundaryGeneration,
+            source: String(tracking?.source || "group_main_model"),
+        };
+    }
+    if (!fallback && config.contextEngineSessionId) {
+        fallback = {
+            scope: String(config.contextEngineScope || "other"),
+            scopeId: String(config.contextEngineScopeId || config.contextEngineSessionId),
+            sessionId: String(config.contextEngineSessionId),
+            generation: Math.max(0, Number(config.contextEngineGeneration || 0)),
+            boundaryGeneration: Math.max(0, Number(config.contextEngineBoundaryGeneration || 0)),
+            source: String(config.contextEngineSource || "unified_model_consumer"),
+        };
+    }
+    const binding = explicit || fallback;
+    if (!binding?.sessionId)
+        return null;
+    const adapterCapabilityBase = (0, provider_context_cache_adapters_1.resolveProviderContextCacheAdapter)(config, provider);
+    const adapterCapability = { ...adapterCapabilityBase, reasoningModeChecksum: crypto.createHash("sha256").update(JSON.stringify({
+            effort: options.reasoningEffort ?? config.reasoningEffort ?? config.reasoning_effort ?? "off",
+            thinkingBudget: options.thinkingBudgetTokens ?? config.thinkingBudgetTokens ?? config.thinking_budget_tokens ?? 0,
+        })).digest("hex") };
+    return {
+        ...binding,
+        enabled: binding.enabled ?? true,
+        mode: binding.mode || "auto",
+        provider,
+        model: String(config.model || ""),
+        apiUrl: String(config.apiUrl || ""),
+        apiKey: String(config.apiKey || config.api_key || ""),
+        proxyUrl: String(config.proxyUrl || config.proxy_url || ""),
+        proxyEndpoint: String(config.proxyEndpoint || config.proxy_endpoint || ""),
+        httpProxy: String(config.httpProxy || config.http_proxy || ""),
+        httpsProxy: String(config.httpsProxy || config.https_proxy || ""),
+        format: String(config.format || "auto"),
+        providerNativeCacheFamily: String(config.providerNativeCacheFamily || "auto"),
+        providerNativeCacheFamilyManual: config.providerNativeCacheFamilyManual === true,
+        inferenceBackendKind: String(config.inferenceBackendKind || "remote_api"),
+        contextWindowTokens: Math.max(0, Number(config.modelContextWindow || config.model_context_window || 0)),
+        maxOutputTokens: Math.max(0, Number(options.maxTokens || config.modelMaxOutputTokens || config.model_max_output_tokens || 0)),
+        reservedTokens: Math.max(0, Number(config.contextPlanReservedTokens || config.context_plan_reserved_tokens || 2_000)),
+        formalCompactionStatus: String(binding.formalCompactionStatus || binding.formal_compaction_status || "not_required_or_completed"),
+        adaptiveStablePrefix: binding.adaptiveStablePrefix ?? binding.adaptive_stable_prefix ?? config.contextAdaptiveStablePrefix !== false,
+        providerPromptCacheRetention: "automatic",
+        inputCostPerMillionTokens: Math.max(0, Number(config.inputCostPerMillionTokens || config.input_cost_per_million_tokens || 0)),
+        cacheReadCostPerMillionTokens: Math.max(0, Number(config.cacheReadCostPerMillionTokens || config.cache_read_cost_per_million_tokens || 0)),
+        cacheCreationCostPerMillionTokens: Math.max(0, Number(config.cacheCreationCostPerMillionTokens || config.cache_creation_cost_per_million_tokens || 0)),
+        nativeApplyPlan: getApiMicrocompactNativeApplyPlan(options),
+        adapterCapability,
+    };
+}
+async function prepareContextCache(config, options, provider) {
+    const transientBlocks = (0, transient_model_content_1.transientModelBlocks)(options.messages || []);
+    const sourceMessages = options.system != null
+        && !(options.messages || []).some(message => String(message?.role || "") === "system")
+        ? [{ role: "system", content: options.system }, ...(options.messages || [])]
+        : options.messages || [];
+    const cacheOptions = providerContextCacheOptions(config, options, provider);
+    // Provider-native context editing is no longer planned here. A native plan
+    // may only arrive from the shared request-preflight owner after canonical
+    // payload measurement and capability confirmation.
+    if (!cacheOptions)
+        return { messages: sourceMessages, plan: null, adapterPatch: null, transientBlocks };
+    const prepared = await (0, provider_neutral_context_cache_1.prepareProviderNeutralContextCacheRequestSingleflight)(sourceMessages, cacheOptions);
+    (0, provider_microcompact_1.captureCcmProviderMicrocompactBaseline)(prepared.plan, getApiMicrocompactNativeApplyPlan(options));
+    Object.defineProperty(options, "_providerContextPlan", { value: prepared.plan, enumerable: false, configurable: true });
+    const adapterPatch = (0, provider_context_cache_adapters_1.buildProviderContextCacheAdapterRequestPatch)(config, prepared.plan, cacheOptions.adapterCapability, prepared.messages);
+    if (prepared.plan)
+        Object.defineProperty(prepared.plan, "_runtimePromptCacheKeyChecksum", {
+            value: String(adapterPatch.promptCacheKeyChecksum || ""), enumerable: false, configurable: true,
+        });
+    if (prepared.plan)
+        Object.defineProperty(prepared.plan, "_runtimeBreakpointChecksums", {
+            value: Array.isArray(adapterPatch.breakpointChecksums) ? adapterPatch.breakpointChecksums : [], enumerable: false, configurable: true,
+        });
+    if (prepared.plan)
+        Object.defineProperty(prepared.plan, "_runtimeCacheStrategy", {
+            value: adapterPatch.strategy || null, enumerable: false, configurable: true,
+        });
+    const result = {
+        ...prepared,
+        adapterPatch,
+        transientBlocks,
+    };
+    if (result.plan)
+        Object.defineProperty(result.plan, "_runtimeProviderStartedAtMs", { value: Date.now(), enumerable: false, configurable: true });
+    if (result.plan)
+        Object.defineProperty(result.plan, "_runtimeProviderConfig", { value: config, enumerable: false, configurable: true });
+    return result;
+}
+function finishContextCache(options, plan, input) {
+    const streamTiming = (0, provider_stream_activity_1.providerStreamTiming)(options);
+    ensureProviderRequestEvidence(options).streamTiming = streamTiming;
+    input = {
+        ...(input || {}),
+        adapterEvidence: {
+            ...(input?.adapterEvidence || {}),
+            providerStreamTiming: streamTiming,
+        },
+    };
+    const receipt = (0, provider_neutral_context_cache_1.completeProviderNeutralContextCacheRequest)(plan, input);
+    if (receipt) {
+        if (input?.ok === true && plan?._runtimeProviderConfig) {
+            try {
+                (0, provider_cache_capability_registry_1.observeProviderCacheUsage)(plan._runtimeProviderConfig, {
+                    cacheReadInputTokens: receipt.cacheReadInputTokens,
+                    cacheCreationInputTokens: receipt.cacheCreationInputTokens,
+                    providerInputTokens: receipt.providerInputTokens,
+                    requestPatchApplied: receipt.adapterEvidence?.requestPatchApplied === true,
+                    usageReported: receipt.providerInputTokens > 0 || receipt.cacheReadInputTokens > 0 || receipt.cacheCreationInputTokens > 0,
+                    missReason: receipt.cacheMissReason || "provider_usage_not_reported",
+                    requestClass: receipt.requestClass || "auxiliary",
+                    stablePrefixChecksum: receipt.stablePrefixChecksum,
+                    dynamicSuffixChecksum: receipt.dynamicSuffixChecksum,
+                    payloadChecksum: receipt.payloadChecksum,
+                    promptCacheKeyChecksum: receipt.promptCacheKeyChecksum,
+                    conversationIdentityChecksum: receipt.contextIdentityChecksum,
+                    prefixExtensionEligible: receipt.prefixExtensionEligible === true,
+                    explicitBreakpointsApplied: Number(receipt.adapterEvidence?.explicitBreakpointCount || 0) > 0,
+                    explicitCacheKeyApplied: Array.isArray(receipt.adapterEvidence?.requestFields) && receipt.adapterEvidence.requestFields.includes("prompt_cache_key"),
+                    blockCacheControlApplied: Array.isArray(receipt.adapterEvidence?.requestFields) && receipt.adapterEvidence.requestFields.includes("cache_control"),
+                    nativeCacheEditingApplied: Number(receipt.adapterEvidence?.cacheEditCount || 0) > 0,
+                });
+                try {
+                    const matrix = plan?._runtimeCacheStrategy?.capabilityMatrix;
+                    const usageReported = Number(receipt.providerInputTokens || 0) > 0
+                        || Number(receipt.cacheCreationInputTokens || 0) > 0
+                        || Number(receipt.cacheReadInputTokens || 0) > 0;
+                    if (matrix && usageReported)
+                        (0, automatic_provider_cache_optimization_1.observeAutomaticProviderCacheRouting)(plan._runtimeProviderConfig, plan, matrix, {
+                            hit: Number(receipt.cacheReadInputTokens || 0) > 0,
+                            eligible: receipt.prefixExtensionEligible === true
+                                && plan.stablePrefixChanged !== true
+                                && plan.toolSchemaChanged !== true,
+                            missReason: receipt.cacheMissReason,
+                            stablePrefixChecksum: receipt.stablePrefixChecksum,
+                            promptCacheKeyChecksum: receipt.promptCacheKeyChecksum,
+                        });
+                }
+                catch { }
+            }
+            catch { }
+        }
+        try {
+            options.onProviderContextCache?.(receipt);
+        }
+        catch { }
+    }
+    if (!getApiMicrocompactNativeApplyPlan(options)?.schema) {
+        try {
+            (0, provider_microcompact_1.recordCcmProviderMicrocompactReceipt)({ contextPlan: plan, provider: plan?.provider, usage: input?.usage, ok: input?.ok, error: input?.error });
+        }
+        catch { }
+    }
+    return receipt;
+}
+function providerAdapterEvidence(cache) {
+    const fields = Object.keys(cache?.adapterPatch?.body || {});
+    const breakpoints = Array.isArray(cache?.adapterPatch?.breakpointMessageIndexes) ? cache.adapterPatch.breakpointMessageIndexes : [];
+    return {
+        applied: cache?.plan?.providerNative === true,
+        adapter: String(cache?.plan?.adapterKind || ""),
+        requestPatchApplied: fields.length > 0,
+        requestFields: [...fields, ...(breakpoints.length ? ["prompt_cache_breakpoint"] : [])],
+        explicitBreakpointCount: breakpoints.length,
+        breakpointDiagnostic: cache?.adapterPatch?.breakpointDiagnostic || null,
+        strategy: cache?.adapterPatch?.strategy || null,
+        resolvedExecution: cache?.adapterPatch?.strategy?.execution || null,
+        capabilityMatrix: cache?.adapterPatch?.strategy?.capabilityMatrix || null,
+        reason: fields.length > 0 ? "provider_request_fields_applied" : cache?.plan?.providerNative === true ? "provider_implicit_cache" : "stable_prefix_or_ccm_projection",
+    };
+}
+function finiteTokenCount(value) {
+    const number = Number(value);
+    return Number.isFinite(number) && number > 0 ? Math.floor(number) : 0;
+}
+function normalizeLlmTokenUsage(value, provider = "openai") {
+    const usage = value && typeof value === "object" ? value : {};
+    const outputTokens = Math.max(finiteTokenCount(usage.output_tokens), finiteTokenCount(usage.outputTokens), finiteTokenCount(usage.completion_tokens), finiteTokenCount(usage.completionTokens), finiteTokenCount(usage.candidatesTokenCount), finiteTokenCount(usage.candidates_token_count));
+    const reportedInputTokens = Math.max(finiteTokenCount(usage.input_tokens), finiteTokenCount(usage.inputTokens), finiteTokenCount(usage.prompt_tokens), finiteTokenCount(usage.promptTokens), finiteTokenCount(usage.promptTokenCount), finiteTokenCount(usage.prompt_token_count));
+    const cacheCreationTokens = Math.max(finiteTokenCount(usage.cache_creation_input_tokens), finiteTokenCount(usage.cacheCreationInputTokens), finiteTokenCount(usage.input_tokens_details?.cache_write_tokens), finiteTokenCount(usage.input_tokens_details?.cache_write_input_tokens), finiteTokenCount(usage.inputTokensDetails?.cacheWriteTokens), finiteTokenCount(usage.inputTokensDetails?.cacheWriteInputTokens), finiteTokenCount(usage.prompt_tokens_details?.cache_write_tokens), finiteTokenCount(usage.promptTokensDetails?.cacheWriteTokens));
+    const cacheReadTokens = Math.max(finiteTokenCount(usage.cache_read_input_tokens), finiteTokenCount(usage.cacheReadInputTokens), finiteTokenCount(usage.prompt_tokens_details?.cached_tokens), finiteTokenCount(usage.promptTokensDetails?.cachedTokens), finiteTokenCount(usage.input_tokens_details?.cached_tokens), finiteTokenCount(usage.inputTokensDetails?.cachedTokens), finiteTokenCount(usage.cachedContentTokenCount), finiteTokenCount(usage.cached_content_token_count), finiteTokenCount(usage.total_cached_tokens));
+    const directInputTokens = provider === "anthropic"
+        ? reportedInputTokens
+        : Math.max(0, reportedInputTokens - cacheReadTokens - cacheCreationTokens);
+    const cacheDeletedInputTokens = provider === "anthropic"
+        ? Math.max(finiteTokenCount(usage.cache_deleted_input_tokens), finiteTokenCount(usage.cacheDeletedInputTokens))
+        : 0;
+    const cacheCreation5mInputTokens = provider === "anthropic"
+        ? Math.max(finiteTokenCount(usage.cache_creation?.ephemeral_5m_input_tokens), finiteTokenCount(usage.cacheCreation?.ephemeral5mInputTokens))
+        : 0;
+    const cacheCreation1hInputTokens = provider === "anthropic"
+        ? Math.max(finiteTokenCount(usage.cache_creation?.ephemeral_1h_input_tokens), finiteTokenCount(usage.cacheCreation?.ephemeral1hInputTokens))
+        : 0;
+    // Anthropic reports uncached input and cache buckets separately. Keep
+    // inputTokens as the direct-input component so the shared CC-style
+    // measurement can add each bucket exactly once.
+    const inputTokens = directInputTokens;
+    const reported = inputTokens > 0 || cacheCreationTokens > 0 || cacheReadTokens > 0 || outputTokens > 0;
+    const costUsd = Math.max(0, Number(usage.cost_usd
+        ?? usage.costUsd
+        ?? usage.estimated_cost_usd
+        ?? usage.estimatedCostUsd
+        ?? usage.cost?.usd
+        ?? 0) || 0);
+    return {
+        inputTokens,
+        outputTokens,
+        totalTokens: inputTokens + cacheCreationTokens + cacheReadTokens + outputTokens,
+        reported,
+        directInputTokens,
+        cacheCreationInputTokens: cacheCreationTokens,
+        cacheReadInputTokens: cacheReadTokens,
+        cacheDeletedInputTokens,
+        cacheCreation5mInputTokens,
+        cacheCreation1hInputTokens,
+        costUsd,
+    };
+}
+function reportTokenUsage(options, usage) {
+    try {
+        options.onUsage?.(usage);
+    }
+    catch { }
+}
+function normalizeChatCompletionsUrl(apiUrl) {
+    const base = String(apiUrl || "").trim().replace(/\/+$/, "");
+    if (!base)
+        return "";
+    if (/\/chat\/completions$/i.test(base))
+        return base;
+    if (/\/v1$/i.test(base))
+        return `${base}/chat/completions`;
+    if (/\/v1\//i.test(base))
+        return base;
+    return `${base}/v1/chat/completions`;
+}
+function normalizeAnthropicMessagesUrl(apiUrl) {
+    const base = String(apiUrl || "").trim().replace(/\/+$/, "");
+    if (!base)
+        return "";
+    if (/\/v1\/messages$/i.test(base))
+        return base;
+    if (/\/v1$/i.test(base))
+        return `${base}/messages`;
+    if (/\/v1\//i.test(base))
+        return base;
+    return `${base}/v1/messages`;
+}
+function normalizeGeminiGenerateContentUrl(apiUrl, model, stream = false) {
+    const base = String(apiUrl || "").trim().replace(/\/+$/, "");
+    if (!base)
+        return "";
+    const method = stream ? "streamGenerateContent" : "generateContent";
+    if (/:(?:generateContent|streamGenerateContent)(?:\?|$)/i.test(base)) {
+        return base.replace(/:(?:generateContent|streamGenerateContent)/i, `:${method}`);
+    }
+    const cleanModel = String(model || "").trim().replace(/^models\//i, "");
+    if (!cleanModel)
+        return "";
+    if (/\/models\/[^/]+$/i.test(base))
+        return `${base}:${method}`;
+    if (/\/v1(?:beta)?$/i.test(base))
+        return `${base}/models/${encodeURIComponent(cleanModel)}:${method}`;
+    return `${base}/v1beta/models/${encodeURIComponent(cleanModel)}:${method}`;
+}
+function shouldUseAnthropic(config) {
+    return (0, provider_cache_protocol_1.resolveProviderTransport)(config).protocol === "anthropic_messages";
+}
+function shouldUseOpenAiResponses(config) {
+    return (0, provider_cache_protocol_1.resolveProviderTransport)(config).protocol === "responses";
+}
+function shouldUseGemini(config) {
+    return (0, provider_cache_protocol_1.resolveProviderTransport)(config).protocol === "gemini_generate_content";
+}
+function extractJsonObject(text) {
+    const raw = String(text || "").trim();
+    try {
+        return JSON.parse(raw);
+    }
+    catch { }
+    const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
+    if (fenced) {
+        try {
+            return JSON.parse(fenced[1].trim());
+        }
+        catch { }
+    }
+    const start = raw.indexOf("{");
+    const end = raw.lastIndexOf("}");
+    if (start >= 0 && end > start) {
+        try {
+            return JSON.parse(raw.slice(start, end + 1));
+        }
+        catch { }
+    }
+    return null;
+}
+function resolveLlmTimeoutMs(config, defaultTimeoutMs, callTimeoutMs) {
+    const scopedTimeout = Number(callTimeoutMs);
+    if (Number.isFinite(scopedTimeout) && scopedTimeout > 0)
+        return Math.max(5000, scopedTimeout);
+    return Math.max(5000, Number(config.timeoutMs) || defaultTimeoutMs);
+}
+function resolveTemperature(config, fallback) {
+    return Number.isFinite(Number(config.temperature)) ? Number(config.temperature) : fallback;
+}
+const REASONING_EFFORTS = new Set(["low", "medium", "high"]);
+const ANTHROPIC_THINKING_BUDGETS = {
+    low: 1024,
+    medium: 4096,
+    high: 16000,
+};
+function resolveReasoningEffort(config) {
+    const effort = String(config?.reasoningEffort ?? config?.reasoning_effort ?? "off").trim().toLowerCase();
+    return REASONING_EFFORTS.has(effort) ? effort : "off";
+}
+function buildOpenAiReasoningFields(config) {
+    const effort = resolveReasoningEffort(config);
+    if (effort === "off")
+        return {};
+    // Chat Completions historically used flat reasoning_effort; GPT-5 / many relays
+    // also accept (or only honor) the nested Responses-style reasoning.effort.
+    // Send both with lowercase values — OpenAI enums are lowercase, not "High".
+    return {
+        reasoning_effort: effort,
+        reasoning: { effort },
+    };
+}
+function callReasoningConfig(config, options) {
+    const effort = String(options.reasoningEffort || "").trim().toLowerCase();
+    return effort ? { ...config, reasoningEffort: effort, reasoning_effort: effort } : config;
+}
+function streamDeltaText(value) {
+    if (typeof value === "string")
+        return value;
+    if (!Array.isArray(value))
+        return "";
+    return value.map(item => typeof item === "string" ? item : String(item?.text || item?.content || "")).join("");
+}
+function emitStreamDelta(options, value) {
+    const delta = streamDeltaText(value);
+    if (!delta)
+        return "";
+    (0, provider_stream_activity_1.emitProviderStreamActivity)(options, { kind: "output_text_delta", text: delta });
+    options.onDelta?.(delta);
+    return delta;
+}
+function nativeToolReadyCallback(options) {
+    return (call) => {
+        (0, provider_stream_activity_1.recordProviderStreamToolReady)(options);
+        options.onNativeToolCallReady?.(call);
+    };
+}
+function nativeToolDeclaredCallback(options) {
+    return (call) => {
+        (0, provider_stream_activity_1.emitProviderStreamActivity)(options, {
+            kind: "tool_call_declared",
+            toolCallId: call.id,
+            toolName: call.name,
+        });
+    };
+}
+function markStreamInterrupted(error, emitted) {
+    if (!emitted)
+        return error;
+    const normalized = error instanceof Error ? error : new Error(String(error || "模型流式响应中断"));
+    normalized.code = "CCM_MODEL_STREAM_INTERRUPTED_AFTER_DELTA";
+    return normalized;
+}
+function parseOpenAiStreamText(text) {
+    const raw = String(text || "");
+    if (!/^\s*(?:data:|event:)/m.test(raw))
+        return null;
+    let content = "";
+    let usage = null;
+    for (const line of raw.split(/\r?\n/)) {
+        const trimmed = line.trim();
+        if (!trimmed.startsWith("data:"))
+            continue;
+        const payload = trimmed.slice(5).trim();
+        if (!payload || payload === "[DONE]")
+            continue;
+        try {
+            const event = JSON.parse(payload);
+            const choice = event?.choices?.[0];
+            content += streamDeltaText(choice?.delta?.content ?? choice?.message?.content ?? "");
+            if (event?.usage)
+                usage = event.usage;
+        }
+        catch { }
+    }
+    return { content, usage };
+}
+function buildAnthropicThinkingFields(config) {
+    const effort = resolveReasoningEffort(config);
+    if (effort === "off")
+        return {};
+    return {
+        thinking: {
+            type: "enabled",
+            budget_tokens: ANTHROPIC_THINKING_BUDGETS[effort] || ANTHROPIC_THINKING_BUDGETS.medium,
+        },
+    };
+}
+function assertLlmConfig(config, endpoint) {
+    if (!endpoint)
+        throw new Error("主 Agent API URL 未配置");
+    if (!config.apiKey)
+        throw new Error("主 Agent API Key 未配置");
+    if (!config.model)
+        throw new Error("主 Agent 模型未配置");
+}
+function formatHttpError(prefix, status, text) {
+    const detail = (0, openai_responses_transport_1.safeProviderHttpDetail)(text, 300);
+    return detail ? `${prefix} HTTP ${status}: ${detail}` : `${prefix} HTTP ${status}`;
+}
+function nativeHttpRequest(endpoint, init = {}, redirectCount = 0) {
+    return new Promise((resolve, reject) => {
+        const url = endpoint instanceof URL ? endpoint : new URL(String(endpoint));
+        const transport = url.protocol === "https:" ? https : http;
+        const request = transport.request(url, {
+            method: init.method || "GET",
+            headers: init.headers || {},
+            signal: init.signal,
+        }, response => {
+            const status = Number(response.statusCode || 0);
+            const location = String(response.headers.location || "");
+            if (location && [301, 302, 303, 307, 308].includes(status) && init.redirect !== "manual" && redirectCount < 5) {
+                response.resume();
+                const redirected = new URL(location, url);
+                const nextInit = [301, 302, 303].includes(status) && String(init.method || "GET").toUpperCase() !== "GET"
+                    ? { ...init, method: "GET", body: undefined }
+                    : init;
+                nativeHttpRequest(redirected, nextInit, redirectCount + 1).then(resolve, reject);
+                return;
+            }
+            response.on("error", reject);
+            let buffered = null;
+            const readAll = () => {
+                if (!buffered) {
+                    buffered = (async () => {
+                        const chunks = [];
+                        for await (const chunk of response) {
+                            chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+                        }
+                        return Buffer.concat(chunks);
+                    })();
+                }
+                return buffered;
+            };
+            resolve({
+                ok: status >= 200 && status < 300,
+                status,
+                url: url.toString(),
+                body: response,
+                headers: {
+                    get(name) {
+                        const value = response.headers[String(name || "").toLowerCase()];
+                        return Array.isArray(value) ? value.join(", ") : String(value || "");
+                    },
+                },
+                async text() { return (await readAll()).toString("utf-8"); },
+                async arrayBuffer() {
+                    const body = await readAll();
+                    return body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength);
+                },
+            });
+        });
+        request.on("error", reject);
+        if (init.body !== undefined && init.body !== null)
+            request.write(init.body);
+        request.end();
+    });
+}
+async function* responseTextChunks(response) {
+    const body = response?.body;
+    const decoder = new TextDecoder();
+    if (body?.getReader) {
+        const reader = body.getReader();
+        try {
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done)
+                    break;
+                const text = decoder.decode(value, { stream: true });
+                if (text)
+                    yield text;
+            }
+            const tail = decoder.decode();
+            if (tail)
+                yield tail;
+        }
+        finally {
+            try {
+                reader.releaseLock?.();
+            }
+            catch { }
+        }
+        return;
+    }
+    if (body && typeof body[Symbol.asyncIterator] === "function") {
+        for await (const value of body) {
+            const bytes = typeof value === "string" ? Buffer.from(value) : value;
+            const text = decoder.decode(bytes, { stream: true });
+            if (text)
+                yield text;
+        }
+        const tail = decoder.decode();
+        if (tail)
+            yield tail;
+        return;
+    }
+    const text = await response.text();
+    if (text)
+        yield text;
+}
+async function consumeSseJson(response, onPayload) {
+    await (0, sse_json_parser_1.consumeSseJsonTextChunks)(responseTextChunks(response), onPayload);
+}
+async function fetchWithNodeHttpFallback(endpoint, init = {}) {
+    try {
+        return await fetch(endpoint, init);
+    }
+    catch (fetchError) {
+        if (init.signal?.aborted)
+            throw fetchError;
+        try {
+            return await nativeHttpRequest(endpoint, init);
+        }
+        catch (nativeError) {
+            const fetchCause = fetchError?.cause?.message || fetchError?.cause?.code || fetchError?.message || String(fetchError);
+            const nativeCause = nativeError?.message || String(nativeError);
+            throw new Error(`网络请求失败：${fetchCause}；原生 HTTP/HTTPS 重试失败：${nativeCause}`);
+        }
+    }
+}
+function getApiMicrocompactNativeApplyPlan(options) {
+    return options.apiMicrocompactNativeApplyPlan || options.api_microcompact_native_apply_plan || null;
+}
+function getApiMicrocompactNativeTelemetryOptions(options) {
+    return options.apiMicrocompactNativeApplyTelemetry || options.api_microcompact_native_apply_telemetry || {};
+}
+function getHeaderKey(headers, name) {
+    const wanted = name.toLowerCase();
+    return Object.keys(headers).find(key => key.toLowerCase() === wanted) || name;
+}
+function appendCsvHeader(headers, name, values) {
+    const cleanValues = values.map(value => String(value || "").trim()).filter(Boolean);
+    if (!cleanValues.length)
+        return headers;
+    const key = getHeaderKey(headers, name);
+    const existing = String(headers[key] || "")
+        .split(",")
+        .map(value => value.trim())
+        .filter(Boolean);
+    headers[key] = Array.from(new Set([...existing, ...cleanValues])).join(",");
+    return headers;
+}
+function applyApiMicrocompactNativeRequestPatch(bodyObj, headers, options) {
+    const plan = getApiMicrocompactNativeApplyPlan(options);
+    const capabilityConfig = options._providerNativeMicrocompactCapabilityConfig || {};
+    const requestPatch = plan?.requestPatch || plan?.request_patch || null;
+    const contextManagement = requestPatch?.body?.context_management;
+    const betaHeaders = Array.isArray(requestPatch?.beta_headers || requestPatch?.betaHeaders)
+        ? (requestPatch.beta_headers || requestPatch.betaHeaders).map((item) => String(item || "").trim()).filter(Boolean)
+        : [];
+    const verification = (0, provider_microcompact_1.verifyProviderMicrocompactNativeApplyPlan)(plan || {});
+    const canApply = plan?.nativeApplyReady === true
+        && plan?.mode === "native_api_context_management"
+        && verification.valid
+        && (0, provider_native_microcompact_capability_1.providerNativeMicrocompactAllowed)(capabilityConfig)
+        && !!contextManagement;
+    if (!canApply) {
+        return { applied: false, plan, requestPatch, verification, body: bodyObj, headers };
+    }
+    const nextBody = {
+        ...bodyObj,
+        ...(requestPatch.body || {}),
+        context_management: contextManagement,
+    };
+    const nextHeaders = appendCsvHeader({ ...headers }, "anthropic-beta", betaHeaders);
+    return { applied: true, plan, requestPatch, verification, body: nextBody, headers: nextHeaders };
+}
+function anthropicBlockText(block) {
+    if (typeof block === "string")
+        return block;
+    const value = block?.content ?? block?.text ?? block?.output ?? block?.result ?? "";
+    if (typeof value === "string")
+        return value;
+    try {
+        return JSON.stringify(value);
+    }
+    catch {
+        return "";
+    }
+}
+function insertAfterLeadingToolResults(blocks, value) {
+    let index = 0;
+    while (index < blocks.length && ["tool_result", "web_search_tool_result"].includes(String(blocks[index]?.type || "")))
+        index += 1;
+    return [...blocks.slice(0, index), value, ...blocks.slice(index)];
+}
+function applyAnthropicCacheReferenceEditing(bodyInput, config = {}) {
+    if (config.anthropicCacheReferenceEnabled !== true && config.anthropic_cache_reference_enabled !== true) {
+        return { body: bodyInput, applied: false, cacheReferenceCount: 0, cacheEditCount: 0, reason: "disabled" };
+    }
+    const messages = (Array.isArray(bodyInput?.messages) ? bodyInput.messages : []).map((message) => ({
+        ...message,
+        content: Array.isArray(message?.content)
+            ? message.content.map((block) => block && typeof block === "object" ? { ...block } : block)
+            : [{ type: "text", text: String(message?.content || "") }],
+    }));
+    const lastUserIndex = (() => {
+        for (let index = messages.length - 1; index >= 0; index -= 1)
+            if (messages[index]?.role === "user")
+                return index;
+        return -1;
+    })();
+    if (lastUserIndex < 0)
+        return { body: bodyInput, applied: false, cacheReferenceCount: 0, cacheEditCount: 0, reason: "user_message_missing" };
+    const deletions = new Set();
+    let cacheReferenceCount = 0;
+    for (let index = 0; index < lastUserIndex; index += 1) {
+        const message = messages[index];
+        if (message?.role !== "user")
+            continue;
+        message.content = message.content.map((block) => {
+            if (!block || !["tool_result", "web_search_tool_result"].includes(String(block.type || "")))
+                return block;
+            const reference = String(block.cache_reference || block.tool_use_id || block.toolUseId || "").trim();
+            if (!reference)
+                return block;
+            cacheReferenceCount += 1;
+            if (/Old tool result content cleared|Large old tool result replaced|旧工具结果.*清理/i.test(anthropicBlockText(block)))
+                deletions.add(reference);
+            return { ...block, cache_reference: reference };
+        });
+    }
+    const markerMessage = messages[lastUserIndex];
+    if (markerMessage.content.length === 0)
+        markerMessage.content.push({ type: "text", text: "" });
+    const markerIndex = markerMessage.content.length - 1;
+    const markerBlock = markerMessage.content[markerIndex];
+    if (markerBlock && typeof markerBlock === "object" && markerBlock.type !== "cache_edits") {
+        markerMessage.content[markerIndex] = { ...markerBlock, cache_control: markerBlock.cache_control || { type: "ephemeral" } };
+    }
+    if (deletions.size > 0) {
+        markerMessage.content = insertAfterLeadingToolResults(markerMessage.content, {
+            type: "cache_edits",
+            edits: [...deletions].map(cacheReference => ({ type: "delete", cache_reference: cacheReference })),
+        });
+    }
+    const applied = cacheReferenceCount > 0 || deletions.size > 0;
+    return {
+        body: applied ? { ...bodyInput, messages } : bodyInput,
+        applied,
+        cacheReferenceCount,
+        cacheEditCount: deletions.size,
+        reason: applied ? "verified_block_placement" : "no_eligible_tool_results_before_cache_boundary",
+    };
+}
+function responseHeader(response, name) {
+    try {
+        return String(response?.headers?.get?.(name) || "");
+    }
+    catch {
+        return "";
+    }
+}
+function providerRequestId(response) {
+    return responseHeader(response, "request-id")
+        || responseHeader(response, "x-request-id")
+        || responseHeader(response, "anthropic-request-id")
+        || responseHeader(response, "x-anthropic-request-id");
+}
+function withTransientModelBlocks(messagesInput, blocks, family) {
+    if (!blocks.length)
+        return messagesInput;
+    const messages = messagesInput.map(message => ({ ...message }));
+    let index = messages.length - 1;
+    while (index >= 0 && String(messages[index]?.role || "") === "system")
+        index -= 1;
+    if (index < 0)
+        messages.push({ role: "user", content: "" }), index = messages.length - 1;
+    const current = messages[index];
+    const content = Array.isArray(current.content)
+        ? [...current.content]
+        : family === "anthropic"
+            ? [{ type: "text", text: String(current.content || "") }]
+            : [{ type: "text", text: String(current.content || "") }];
+    for (const block of blocks) {
+        if (block.type === "text")
+            content.push({ type: "text", text: block.text });
+        else if (family === "anthropic") {
+            content.push({ type: "text", text: block.label ? `临时视觉内容：${block.label}` : "临时视觉内容" });
+            content.push({ type: "image", source: { type: "base64", media_type: block.mimeType, data: block.data.toString("base64") } });
+        }
+        else {
+            content.push({ type: "text", text: block.label ? `临时视觉内容：${block.label}` : "临时视觉内容" });
+            content.push({ type: "image_url", image_url: { url: `data:${block.mimeType};base64,${block.data.toString("base64")}` } });
+        }
+    }
+    messages[index] = { ...current, content };
+    return messages;
+}
+function geminiPartsWithTransient(content, blocks) {
+    const parts = encodeGeminiContentParts(content);
+    for (const block of blocks) {
+        if (block.type === "text")
+            parts.push({ text: block.text });
+        else {
+            if (block.label)
+                parts.push({ text: `临时视觉内容：${block.label}` });
+            parts.push({ inlineData: { mimeType: block.mimeType, data: block.data.toString("base64") } });
+        }
+    }
+    return parts;
+}
+function encodeGeminiContentParts(content) {
+    if (Array.isArray(content)) {
+        const parts = content.flatMap((item) => {
+            if (!item || typeof item !== "object")
+                return String(item || "").trim() ? [{ text: String(item) }] : [];
+            if (item.functionCall || item.functionResponse || item.inlineData || item.text != null)
+                return [item];
+            if (item.type === "functionCall" || item.type === "function_call")
+                return [{ functionCall: item.functionCall || { name: item.name, args: item.args || item.arguments || {} } }];
+            if (item.type === "functionResponse" || item.type === "function_response")
+                return [{ functionResponse: item.functionResponse || { name: item.name, response: item.response } }];
+            if (item.type === "text")
+                return String(item.text || "").trim() ? [{ text: String(item.text) }] : [];
+            return [{ text: geminiContentText(item) }];
+        }).filter(Boolean);
+        return parts.length ? parts : [{ text: "" }];
+    }
+    if (content && typeof content === "object" && Array.isArray(content.parts))
+        return encodeGeminiContentParts(content.parts);
+    return [{ text: geminiContentText(content) }];
+}
+function encodeGeminiChatContent(message, transientBlocks = []) {
+    const role = String(message?.role || "");
+    if (role === "assistant" || role === "model") {
+        return { role: "model", parts: transientBlocks.length ? geminiPartsWithTransient(message?.content, transientBlocks) : encodeGeminiContentParts(message?.content) };
+    }
+    if (role === "tool") {
+        return {
+            role: "user",
+            parts: [{
+                    functionResponse: {
+                        name: String(message?.name || message?.toolName || ""),
+                        response: typeof message?.content === "string" ? { result: message.content } : (message?.content || { result: "" }),
+                    },
+                }],
+        };
+    }
+    return { role: "user", parts: transientBlocks.length ? geminiPartsWithTransient(message?.content, transientBlocks) : encodeGeminiContentParts(message?.content) };
+}
+function recordAnthropicPromptCacheState(config, options, body, headers) {
+    const tracking = options.promptCacheTracking || options.prompt_cache_tracking || null;
+    const groupId = String(tracking?.groupId || tracking?.group_id || "").trim();
+    const groupSessionId = String(tracking?.groupSessionId || tracking?.group_session_id || "").trim();
+    if (!groupId || !groupSessionId.startsWith("gcs_"))
+        return null;
+    const betaHeader = Object.entries(headers || {}).find(([key]) => key.toLowerCase() === "anthropic-beta")?.[1] || "";
+    try {
+        return (0, group_prompt_cache_break_detection_1.recordGroupPromptCacheState)({
+            ...tracking,
+            groupId,
+            groupSessionId,
+            provider: "anthropic",
+            model: config.model,
+            system: body?.system || "",
+            toolSchemas: body?.tools || tracking?.toolSchemas || tracking?.tool_schemas || [],
+            betaHeaders: String(betaHeader).split(",").map(value => value.trim()).filter(Boolean),
+            cachedMicrocompactEnabled: !!body?.context_management,
+            extraBodyParams: tracking?.extraBodyParams || tracking?.extra_body_params || {},
+        });
+    }
+    catch {
+        return null;
+    }
+}
+function recordApiMicrocompactNativeAdapterTelemetry(options, input = {}) {
+    const plan = getApiMicrocompactNativeApplyPlan(options);
+    if (!plan?.schema)
+        return null;
+    const contextPlan = options._providerContextPlan || null;
+    let commonReceipt = null;
+    try {
+        commonReceipt = (0, provider_microcompact_1.recordCcmProviderMicrocompactReceipt)({
+            contextPlan,
+            nativePlan: plan,
+            provider: input.provider,
+            requestBody: input.requestBody,
+            responseBody: input.responseBody,
+            usage: input.responseBody?.usage,
+            ok: input.ok,
+            error: input.error,
+            recordedAt: input.sentAt,
+        });
+    }
+    catch { }
+    const nativeInput = {
+        ...getApiMicrocompactNativeTelemetryOptions(options),
+        apiMicrocompactNativeApplyPlan: plan,
+        telemetrySource: "native_request_adapter",
+        transport: plan?.executor?.transport || "anthropic_api",
+        ...input,
+    };
+    const runtimeCapabilityConfig = options._providerNativeMicrocompactCapabilityConfig || {};
+    const capabilityConfig = {
+        ...runtimeCapabilityConfig,
+        apiUrl: runtimeCapabilityConfig.apiUrl || input.endpoint || "",
+        model: runtimeCapabilityConfig.model || input.model || "",
+        format: runtimeCapabilityConfig.format || "anthropic-compatible",
+        inferenceBackendKind: runtimeCapabilityConfig.inferenceBackendKind || "remote_api",
+    };
+    const providerOutcome = input?.responseBody?.context_management
+        || input?.responseBody?.contextManagement
+        || input?.responseBody?.usage?.context_management
+        || null;
+    const providerOutcomeVerified = !!providerOutcome
+        || Number(input?.responseBody?.usage?.cache_deleted_input_tokens || input?.responseBody?.usage?.cacheDeletedInputTokens || 0) > 0;
+    try {
+        if (input.ok === true && providerOutcomeVerified) {
+            (0, provider_native_microcompact_capability_1.recordProviderNativeMicrocompactCapability)(capabilityConfig, {
+                status: "confirmed",
+                reason: "provider_context_management_outcome_verified",
+                providerRequestId: input.requestId,
+            });
+        }
+        else if (input.ok === false && (0, provider_native_microcompact_capability_1.isProviderNativeMicrocompactFieldRejection)(input.error)) {
+            (0, provider_native_microcompact_capability_1.recordProviderNativeMicrocompactCapability)(capabilityConfig, {
+                status: "unsupported",
+                reason: input.error,
+                providerRequestId: input.requestId,
+            });
+        }
+    }
+    catch { }
+    if (String(plan?.scope || contextPlan?.scope || "") !== "group")
+        return { commonReceipt, executionReceipt: null, cacheDeletionNotification: null };
+    let executionReceipt = null;
+    let cacheDeletionNotification = null;
+    try {
+        executionReceipt = (0, provider_native_compact_execution_receipt_1.recordProviderNativeCompactExecutionReceipt)(nativeInput);
+    }
+    catch { }
+    const appliedReceipt = executionReceipt?.receipt;
+    if (input.ok === true && appliedReceipt?.strong_proof === true && appliedReceipt?.provider_outcome_verified === true) {
+        try {
+            (0, provider_native_microcompact_capability_1.recordProviderNativeMicrocompactCapability)(capabilityConfig, {
+                status: "confirmed",
+                reason: "provider_context_management_execution_receipt_verified",
+                providerRequestId: input.requestId,
+            });
+        }
+        catch { }
+    }
+    if (executionReceipt?.verification?.valid === true
+        && appliedReceipt?.status === "native_applied"
+        && appliedReceipt?.strong_proof === true
+        && appliedReceipt?.provider_outcome_verified === true
+        && Number(appliedReceipt?.applied_edit_count || 0) >= 1
+        && Number(appliedReceipt?.cleared_input_tokens || 0) > 0
+        && String(appliedReceipt?.group_session_id || "").startsWith("gcs_")) {
+        try {
+            cacheDeletionNotification = (0, group_prompt_cache_break_detection_1.notifyGroupPromptCacheDeletion)({ executionReceipt: appliedReceipt });
+        }
+        catch { }
+    }
+    try {
+        const api = require("./memory");
+        if (typeof api.recordGroupApiMicrocompactNativeApplyAdapterTelemetry !== "function")
+            return { commonReceipt, executionReceipt, cacheDeletionNotification };
+        const requestTelemetry = api.recordGroupApiMicrocompactNativeApplyAdapterTelemetry(nativeInput);
+        return { commonReceipt, executionReceipt, requestTelemetry, cacheDeletionNotification };
+    }
+    catch {
+        return { commonReceipt, executionReceipt, cacheDeletionNotification };
+    }
+}
+async function callOpenAiCompatibleChatOnce(config, options) {
+    const transport = (0, provider_cache_protocol_1.assertProviderTransportResolution)(config);
+    const endpoint = transport.protocol === "chat_completions" ? transport.normalizedEndpoint : normalizeChatCompletionsUrl(config.apiUrl);
+    assertLlmConfig(config, endpoint);
+    const streaming = options.stream === true || typeof options.onDelta === "function";
+    let emitted = false;
+    const cache = await prepareContextCache(config, options, "openai");
+    const nativePatch = options.nativeTools?.length && config.providerNativeToolsMode !== "json"
+        ? (0, provider_native_tools_1.providerToolsRequestPatch)("openai", options.nativeTools, false, options.nativeToolChoice)
+        : { body: {}, headers: {} };
+    const abort = createLlmAbortContext(options, resolveLlmTimeoutMs(config, options.defaultTimeoutMs || 30000, options.timeoutMs));
+    try {
+        recordProviderRequestActivity(options, "openai", "request_dispatched");
+        const response = await fetchWithNodeHttpFallback(endpoint, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${config.apiKey}`,
+            },
+            body: JSON.stringify({
+                model: config.model,
+                temperature: options.temperature ?? resolveTemperature(config, 0.2),
+                ...(options.maxTokens ? { max_tokens: options.maxTokens } : {}),
+                ...(streaming ? { stream: true } : {}),
+                ...buildOpenAiReasoningFields(callReasoningConfig(config, options)),
+                ...(cache.adapterPatch?.body || {}),
+                ...nativePatch.body,
+                messages: withTransientModelBlocks(cache.messages, cache.transientBlocks || [], "openai"),
+            }),
+            signal: abort.controller.signal,
+        });
+        recordProviderRequestActivity(options, "openai", "response_started", response);
+        if (!response.ok) {
+            const text = await response.text();
+            throw providerHttpError(options.httpErrorPrefix || "HTTP", response, text);
+        }
+        if (options.nativeTools?.length) {
+            try {
+                (0, provider_native_tool_capability_1.recordProviderNativeToolCapability)(config, "openai", "confirmed", "native_tools_accepted");
+            }
+            catch { }
+        }
+        if (streaming) {
+            let content = "";
+            let usage = null;
+            const turnAccumulator = (0, provider_native_tools_1.createOpenAiStreamTurnAccumulator)(nativeToolReadyCallback(options), nativeToolDeclaredCallback(options));
+            await consumeSseJson(response, event => {
+                (0, provider_stream_activity_1.recordProviderStreamSseEvent)(options);
+                turnAccumulator.push(event);
+                const choice = event?.choices?.[0];
+                const delta = emitStreamDelta(options, choice?.delta?.content ?? choice?.message?.content ?? "");
+                if (delta) {
+                    emitted = true;
+                    content += delta;
+                }
+                if (event?.usage)
+                    usage = event.usage;
+            });
+            const normalizedUsage = normalizeLlmTokenUsage(usage, "openai");
+            const providerTurn = turnAccumulator.finish(normalizedUsage);
+            options.onProviderAgentTurn?.(providerTurn);
+            content = (0, provider_native_tools_1.turnForLegacyJsonLoop)(providerTurn);
+            if (!content.trim() && !providerTurn.toolCalls.length)
+                throw new Error("模型返回空响应");
+            reportTokenUsage(options, normalizedUsage);
+            finishContextCache(options, cache.plan, { ok: true, usage: normalizedUsage, providerRequestId: providerRequestId(response), adapterEvidence: providerAdapterEvidence(cache) });
+            return content;
+        }
+        const text = await response.text();
+        const data = JSON.parse(text);
+        const normalizedUsage = normalizeLlmTokenUsage(data?.usage, "openai");
+        const providerTurn = (0, provider_native_tools_1.parseOpenAiAgentTurn)(data, normalizedUsage);
+        options.onProviderAgentTurn?.(providerTurn);
+        const content = (0, provider_native_tools_1.turnForLegacyJsonLoop)(providerTurn);
+        if (!content.trim() && !providerTurn.toolCalls.length)
+            throw new Error("模型返回空响应");
+        reportTokenUsage(options, normalizedUsage);
+        finishContextCache(options, cache.plan, { ok: true, usage: normalizedUsage, providerRequestId: providerRequestId(response), adapterEvidence: providerAdapterEvidence(cache) });
+        return content;
+    }
+    catch (error) {
+        finishContextCache(options, cache.plan, { ok: false, error });
+        throw attachProviderRequestEvidence(markStreamInterrupted(normalizeLlmAbortError(error, options), emitted), options);
+    }
+    finally {
+        abort.cleanup();
+    }
+}
+async function callOpenAiResponsesChatOnce(config, options) {
+    const transport = (0, provider_cache_protocol_1.assertProviderTransportResolution)(config);
+    const endpoint = transport.protocol === "responses" ? transport.normalizedEndpoint : (0, openai_responses_transport_1.normalizeOpenAiResponsesUrl)(config.apiUrl);
+    assertLlmConfig(config, endpoint);
+    const streaming = options.stream === true || typeof options.onDelta === "function";
+    let emitted = false;
+    const cache = await prepareContextCache(config, options, "openai");
+    const messages = withTransientModelBlocks(cache.messages, cache.transientBlocks || [], "openai");
+    const effort = resolveReasoningEffort(callReasoningConfig(config, options));
+    const canReusePreviousResponse = (0, openai_responses_transport_1.isOfficialOpenAiResponsesEndpoint)(endpoint, config)
+        && !options.nativeTools?.length
+        && !messages.some((message) => ["tool", "function"].includes(String(message?.role || "").toLowerCase()) || Array.isArray(message?.tool_calls))
+        && String(messages.at(-1)?.role || "").toLowerCase() === "user";
+    const abort = createLlmAbortContext(options, resolveLlmTimeoutMs(config, options.defaultTimeoutMs || 30000, options.timeoutMs));
+    try {
+        const request = async (omitMaxOutputTokens, omitTemperature, omitReasoningSummary, omitPreviousResponseId) => {
+            const previousResponseId = !omitPreviousResponseId && canReusePreviousResponse
+                ? (0, openai_responses_transport_1.getReusableResponsesPreviousId)(endpoint, options.providerContextCache, config)
+                : "";
+            const requestMessages = previousResponseId ? [messages.at(-1)] : messages;
+            const instructions = previousResponseId
+                ? messages.filter((message) => String(message?.role || "").toLowerCase() === "system")
+                    .map((message) => typeof message?.content === "string" ? message.content : JSON.stringify(message?.content ?? ""))
+                    .filter(Boolean)
+                    .join("\n\n")
+                : "";
+            recordProviderRequestActivity(options, "openai", "request_dispatched");
+            const response = await fetchWithNodeHttpFallback(endpoint, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${config.apiKey}`,
+                },
+                body: JSON.stringify((0, openai_responses_transport_1.buildOpenAiResponsesBody)({
+                    model: config.model,
+                    messages: requestMessages,
+                    instructions,
+                    previousResponseId,
+                    maxOutputTokens: omitMaxOutputTokens ? undefined : options.maxTokens,
+                    stream: streaming,
+                    reasoningEffort: effort,
+                    reasoningSummary: !omitReasoningSummary && effort !== "off" ? "auto" : undefined,
+                    temperature: omitTemperature ? undefined : options.temperature ?? resolveTemperature(config, 0.2),
+                    cachePatch: cache.adapterPatch?.body || {},
+                    breakpointMessageIndexes: cache.adapterPatch?.breakpointMessageIndexes || [],
+                    nativeTools: config.providerNativeToolsMode !== "json" ? options.nativeTools : undefined,
+                    nativeToolChoice: options.nativeToolChoice,
+                })),
+                signal: abort.controller.signal,
+            });
+            recordProviderRequestActivity(options, "openai", "response_started", response);
+            return response;
+        };
+        let omittedMaxOutputTokens = (0, openai_responses_transport_1.shouldOmitOpenAiResponsesMaxOutputTokens)(endpoint, config.model);
+        let omittedTemperature = (0, openai_responses_transport_1.shouldOmitOpenAiResponsesTemperature)(endpoint, config.model);
+        let omittedReasoningSummary = effort === "off" || !(0, provider_reasoning_summary_capability_1.providerReasoningSummaryAllowed)(config);
+        let omittedPreviousResponseId = false;
+        let previousResponseIdUsed = "";
+        let discoveredMaxOutputIncompatibility = false;
+        let discoveredTemperatureIncompatibility = false;
+        let discoveredReasoningSummaryIncompatibility = false;
+        let response;
+        for (let compatibilityAttempt = 0; compatibilityAttempt < 4; compatibilityAttempt += 1) {
+            previousResponseIdUsed = !omittedPreviousResponseId && canReusePreviousResponse
+                ? (0, openai_responses_transport_1.getReusableResponsesPreviousId)(endpoint, options.providerContextCache, config)
+                : "";
+            response = await request(omittedMaxOutputTokens, omittedTemperature, omittedReasoningSummary, omittedPreviousResponseId);
+            if (response.ok)
+                break;
+            const text = await response.text();
+            if (previousResponseIdUsed && /previous[_ -]?response[_ -]?id|conversation(?:\s+state)?(?:\s+not|.*invalid)|response(?:\s+id)?\s+not\s+found/i.test(text)) {
+                omittedPreviousResponseId = true;
+                (0, openai_responses_transport_1.forgetResponsesPreviousId)(options.providerContextCache, endpoint, config);
+                continue;
+            }
+            if (!omittedReasoningSummary && (0, provider_reasoning_summary_capability_1.isProviderReasoningSummaryFieldRejection)(response.status, text)) {
+                omittedReasoningSummary = true;
+                discoveredReasoningSummaryIncompatibility = true;
+                try {
+                    (0, provider_reasoning_summary_capability_1.recordProviderReasoningSummaryCapability)(config, "unsupported", (0, openai_responses_transport_1.safeProviderHttpDetail)(text, 300));
+                }
+                catch { }
+                continue;
+            }
+            if (!omittedMaxOutputTokens
+                && Number(options.maxTokens || 0) > 0
+                && (0, openai_responses_transport_1.shouldRetryOpenAiResponsesWithoutMaxOutputTokens)(response.status, text)) {
+                omittedMaxOutputTokens = true;
+                discoveredMaxOutputIncompatibility = true;
+                continue;
+            }
+            if (!omittedTemperature
+                && effort === "off"
+                && (0, openai_responses_transport_1.shouldRetryOpenAiResponsesWithoutTemperature)(response.status, text)) {
+                omittedTemperature = true;
+                discoveredTemperatureIncompatibility = true;
+                continue;
+            }
+            throw providerHttpError(options.httpErrorPrefix || "HTTP", response, text);
+        }
+        if (!response?.ok)
+            throw providerHttpError(options.httpErrorPrefix || "HTTP", response || { status: 400 }, "Responses API compatibility retry failed");
+        if (discoveredMaxOutputIncompatibility)
+            (0, openai_responses_transport_1.rememberOpenAiResponsesMaxOutputTokensUnsupported)(endpoint, config.model);
+        if (discoveredTemperatureIncompatibility)
+            (0, openai_responses_transport_1.rememberOpenAiResponsesTemperatureUnsupported)(endpoint, config.model);
+        if (!omittedReasoningSummary && !discoveredReasoningSummaryIncompatibility) {
+            try {
+                (0, provider_reasoning_summary_capability_1.recordProviderReasoningSummaryCapability)(config, "confirmed", "reasoning_summary_request_accepted");
+            }
+            catch { }
+        }
+        if (options.nativeTools?.length) {
+            try {
+                (0, provider_native_tool_capability_1.recordProviderNativeToolCapability)(config, "openai", "confirmed", "responses_native_tools_accepted");
+            }
+            catch { }
+        }
+        const responseId = providerRequestId(response);
+        if (streaming || (0, openai_responses_transport_1.isOpenAiResponsesSse)(response)) {
+            let usage = null;
+            let reasoningSummaryDeltaSeen = false;
+            let reasoningSummaryDone = false;
+            const turnAccumulator = (0, provider_native_tools_1.createOpenAiResponsesStreamTurnAccumulator)(nativeToolReadyCallback(options), nativeToolDeclaredCallback(options));
+            await consumeSseJson(response, event => {
+                (0, provider_stream_activity_1.recordProviderStreamSseEvent)(options);
+                turnAccumulator.push(event);
+                const eventType = String(event?.type || "");
+                if (eventType === "response.reasoning_summary_text.delta") {
+                    const summaryDelta = String(event?.delta || "");
+                    if (summaryDelta) {
+                        reasoningSummaryDeltaSeen = true;
+                        (0, provider_stream_activity_1.emitProviderStreamActivity)(options, { kind: "reasoning_summary_delta", text: summaryDelta });
+                    }
+                }
+                if (eventType === "response.reasoning_summary_text.done" || eventType === "response.reasoning_summary_part.done") {
+                    reasoningSummaryDone = true;
+                    (0, provider_stream_activity_1.emitProviderStreamActivity)(options, {
+                        kind: "reasoning_summary_delta",
+                        ...(!reasoningSummaryDeltaSeen && event?.text ? { text: String(event.text) } : {}),
+                        done: true,
+                    });
+                }
+                if (["response.completed", "response.incomplete", "response.failed"].includes(eventType) && !reasoningSummaryDone) {
+                    reasoningSummaryDone = true;
+                    (0, provider_stream_activity_1.emitProviderStreamActivity)(options, { kind: "reasoning_summary_delta", done: true });
+                }
+                const delta = event?.type === "response.output_text.delta" ? emitStreamDelta(options, event?.delta) : "";
+                if (delta && streaming)
+                    emitted = true;
+                if (event?.response?.usage)
+                    usage = event.response.usage;
+                if (event?.type === "error")
+                    throw new Error(String(event?.error?.message || event?.message || "Responses API 流式调用失败"));
+            });
+            const finalResponse = turnAccumulator.finalResponse();
+            const normalizedUsage = normalizeLlmTokenUsage(usage || finalResponse?.usage, "openai");
+            const providerTurn = turnAccumulator.finish(normalizedUsage);
+            options.onProviderAgentTurn?.(providerTurn);
+            const content = (0, provider_native_tools_1.turnForLegacyJsonLoop)(providerTurn);
+            if (!content.trim() && !providerTurn.toolCalls.length)
+                throw new Error("模型返回空响应");
+            reportTokenUsage(options, normalizedUsage);
+            options.onResponseMetadata?.({ provider: "openai-responses", responseId: String(finalResponse?.id || responseId || ""), model: String(finalResponse?.model || config.model || ""), status: String(finalResponse?.status || providerTurn.stopReason || "") });
+            if (canReusePreviousResponse && !providerTurn.toolCalls.length) {
+                (0, openai_responses_transport_1.rememberResponsesResponseId)(endpoint, options.providerContextCache, String(finalResponse?.id || responseId || ""), config);
+            }
+            else {
+                (0, openai_responses_transport_1.forgetResponsesPreviousId)(options.providerContextCache, endpoint, config);
+            }
+            finishContextCache(options, cache.plan, { ok: true, usage: normalizedUsage, providerRequestId: String(finalResponse?.id || responseId || ""), adapterEvidence: providerAdapterEvidence(cache) });
+            return content;
+        }
+        const data = JSON.parse(await response.text());
+        const normalizedUsage = normalizeLlmTokenUsage(data?.usage, "openai");
+        const providerTurn = (0, provider_native_tools_1.parseOpenAiResponsesAgentTurn)(data, normalizedUsage);
+        options.onProviderAgentTurn?.(providerTurn);
+        const content = (0, provider_native_tools_1.turnForLegacyJsonLoop)(providerTurn);
+        if (!content.trim() && !providerTurn.toolCalls.length)
+            throw new Error("模型返回空响应");
+        reportTokenUsage(options, normalizedUsage);
+        options.onResponseMetadata?.({ provider: "openai-responses", responseId: String(data?.id || responseId || ""), model: String(data?.model || config.model || ""), status: String(data?.status || "") });
+        if (canReusePreviousResponse && !providerTurn.toolCalls.length) {
+            (0, openai_responses_transport_1.rememberResponsesResponseId)(endpoint, options.providerContextCache, String(data?.id || responseId || ""), config);
+        }
+        else {
+            (0, openai_responses_transport_1.forgetResponsesPreviousId)(options.providerContextCache, endpoint, config);
+        }
+        finishContextCache(options, cache.plan, { ok: true, usage: normalizedUsage, providerRequestId: String(data?.id || responseId || ""), adapterEvidence: providerAdapterEvidence(cache) });
+        return content;
+    }
+    catch (error) {
+        finishContextCache(options, cache.plan, { ok: false, error });
+        throw attachProviderRequestEvidence(markStreamInterrupted(normalizeLlmAbortError(error, options), emitted), options);
+    }
+    finally {
+        abort.cleanup();
+    }
+}
+function geminiContentText(value) {
+    if (typeof value === "string")
+        return value;
+    if (Array.isArray(value)) {
+        return value.map(item => typeof item === "string" ? item : item?.text || JSON.stringify(item)).join("\n");
+    }
+    return value == null ? "" : JSON.stringify(value);
+}
+function geminiResponseText(data) {
+    return (data?.candidates || [])
+        .flatMap((candidate) => candidate?.content?.parts || [])
+        .map((part) => String(part?.text || ""))
+        .join("");
+}
+function geminiEndpointWithKey(endpoint, apiKey, stream) {
+    const url = new URL(endpoint);
+    if (!url.searchParams.has("key"))
+        url.searchParams.set("key", apiKey);
+    if (stream && !url.searchParams.has("alt"))
+        url.searchParams.set("alt", "sse");
+    return url.toString();
+}
+async function callGeminiCompatibleChatOnce(config, options) {
+    const streaming = options.stream === true || typeof options.onDelta === "function";
+    const endpoint = normalizeGeminiGenerateContentUrl(config.apiUrl, config.model, streaming);
+    assertLlmConfig(config, endpoint);
+    const cache = await prepareContextCache(config, options, "gemini");
+    const system = cache.messages.filter((message) => String(message?.role || "") === "system")
+        .map((message) => geminiContentText(message?.content)).filter(Boolean).join("\n\n");
+    const nonSystemMessages = cache.messages.filter((message) => String(message?.role || "") !== "system");
+    const lastTransientMessageIndex = nonSystemMessages.length - 1;
+    const contents = nonSystemMessages
+        .map((message, index) => encodeGeminiChatContent(message, index === lastTransientMessageIndex ? cache.transientBlocks || [] : []))
+        .filter((message) => message.parts.some((part) => part.inlineData || part.functionCall || part.functionResponse || String(part.text || "").trim()));
+    const body = {
+        ...(system ? { systemInstruction: { parts: [{ text: system }] } } : {}),
+        contents,
+        generationConfig: {
+            temperature: options.temperature ?? resolveTemperature(config, 0.2),
+            ...(options.maxTokens ? { maxOutputTokens: options.maxTokens } : {}),
+        },
+        ...(options.nativeTools?.length && config.providerNativeToolsMode !== "json"
+            ? (0, provider_native_tools_1.providerToolsRequestPatch)("gemini", options.nativeTools, false, options.nativeToolChoice).body
+            : {}),
+    };
+    const abort = createLlmAbortContext(options, resolveLlmTimeoutMs(config, options.defaultTimeoutMs || 30000, options.timeoutMs));
+    let emitted = false;
+    try {
+        recordProviderRequestActivity(options, "gemini", "request_dispatched");
+        const response = await fetchWithNodeHttpFallback(geminiEndpointWithKey(endpoint, config.apiKey, streaming), {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+            signal: abort.controller.signal,
+        });
+        recordProviderRequestActivity(options, "gemini", "response_started", response);
+        if (!response.ok) {
+            const detail = await response.text();
+            throw providerHttpError(options.httpErrorPrefix || "Gemini HTTP", response, detail);
+        }
+        if (options.nativeTools?.length) {
+            try {
+                (0, provider_native_tool_capability_1.recordProviderNativeToolCapability)(config, "gemini", "confirmed", "native_tools_accepted");
+            }
+            catch { }
+        }
+        if (streaming) {
+            let content = "";
+            let usage = null;
+            const nativeEvents = [];
+            await consumeSseJson(response, payload => {
+                (0, provider_stream_activity_1.recordProviderStreamSseEvent)(options);
+                for (const event of Array.isArray(payload) ? payload : [payload]) {
+                    nativeEvents.push(event);
+                    const delta = emitStreamDelta(options, geminiResponseText(event));
+                    if (delta) {
+                        emitted = true;
+                        content += delta;
+                    }
+                    if (event?.usageMetadata || event?.usage)
+                        usage = event.usageMetadata || event.usage;
+                }
+            });
+            const normalizedUsage = normalizeLlmTokenUsage(usage, "gemini");
+            const providerTurn = (0, provider_native_tools_1.parseGeminiAgentTurn)({ candidates: nativeEvents.flatMap(event => event?.candidates || []) }, normalizedUsage);
+            options.onProviderAgentTurn?.(providerTurn);
+            content = (0, provider_native_tools_1.turnForLegacyJsonLoop)(providerTurn);
+            if (!content.trim() && !providerTurn.toolCalls.length)
+                throw new Error("模型返回空响应");
+            reportTokenUsage(options, normalizedUsage);
+            finishContextCache(options, cache.plan, { ok: true, usage: normalizedUsage, providerRequestId: providerRequestId(response), adapterEvidence: providerAdapterEvidence(cache) });
+            return content;
+        }
+        const data = JSON.parse(await response.text());
+        const normalizedUsage = normalizeLlmTokenUsage(data?.usageMetadata || data?.usage, "gemini");
+        const providerTurn = (0, provider_native_tools_1.parseGeminiAgentTurn)(data, normalizedUsage);
+        options.onProviderAgentTurn?.(providerTurn);
+        const content = (0, provider_native_tools_1.turnForLegacyJsonLoop)(providerTurn).trim();
+        if (!content && !providerTurn.toolCalls.length)
+            throw new Error("模型返回空响应");
+        reportTokenUsage(options, normalizedUsage);
+        finishContextCache(options, cache.plan, { ok: true, usage: normalizedUsage, providerRequestId: providerRequestId(response), adapterEvidence: providerAdapterEvidence(cache) });
+        return content;
+    }
+    catch (error) {
+        finishContextCache(options, cache.plan, { ok: false, error });
+        throw attachProviderRequestEvidence(markStreamInterrupted(normalizeLlmAbortError(error, options), emitted), options);
+    }
+    finally {
+        abort.cleanup();
+    }
+}
+async function callAnthropicCompatibleChatOnce(config, options) {
+    const transport = (0, provider_cache_protocol_1.assertProviderTransportResolution)(config);
+    const endpoint = transport.protocol === "anthropic_messages" ? transport.normalizedEndpoint : normalizeAnthropicMessagesUrl(config.apiUrl);
+    assertLlmConfig(config, endpoint);
+    Object.defineProperty(options, "_providerNativeMicrocompactCapabilityConfig", {
+        value: config,
+        enumerable: false,
+        configurable: true,
+    });
+    const streaming = options.stream === true || typeof options.onDelta === "function";
+    let emitted = false;
+    const cache = await prepareContextCache(config, options, "anthropic");
+    const messages = withTransientModelBlocks(cache.messages, cache.transientBlocks || [], "anthropic");
+    // Anthropic 的 system 是独立字段，必须把所有 system 消息按序拼接。
+    // 此前用 find() 只取首条，一旦上游把稳定段与易变段拆成多条 system
+    // （为了让 prompt cache 前缀不被工具目录变更击穿），后续几条会被静默丢弃。
+    const system = options.system ?? messages
+        .filter((m) => m.role === "system")
+        .map((m) => String(m?.content ?? ""))
+        .filter(Boolean)
+        .join("\n\n");
+    const userMessages = messages
+        .filter((m) => m.role !== "system")
+        .map((m) => ({ role: m.role === "assistant" ? "assistant" : "user", content: m.content }));
+    const abort = createLlmAbortContext(options, resolveLlmTimeoutMs(config, options.defaultTimeoutMs || 30000, options.timeoutMs));
+    try {
+        const useNativeToolReference = options.nativeToolReference === true && (0, provider_native_tool_capability_1.providerNativeToolReferenceAllowed)(config);
+        const nativePatch = options.nativeTools?.length && config.providerNativeToolsMode !== "json"
+            ? (0, provider_native_tools_1.providerToolsRequestPatch)("anthropic", options.nativeTools, useNativeToolReference, options.nativeToolChoice)
+            : { body: {}, headers: {} };
+        const patched = applyApiMicrocompactNativeRequestPatch({
+            model: config.model,
+            max_tokens: options.maxTokens || 1500,
+            temperature: options.temperature ?? resolveTemperature(config, 0.2),
+            system,
+            messages: userMessages,
+            ...(streaming ? { stream: true } : {}),
+            ...buildAnthropicThinkingFields(callReasoningConfig(config, options)),
+            ...nativePatch.body,
+        }, {
+            "Content-Type": "application/json",
+            "x-api-key": config.apiKey,
+            "anthropic-version": "2023-06-01",
+            ...nativePatch.headers,
+        }, options);
+        const blockCacheControl = (0, provider_cache_breakpoint_encoding_1.applyProtocolBlockCacheControl)(patched.body, cache.adapterPatch?.strategy);
+        patched.body = blockCacheControl.body;
+        const cacheReferenceEditing = applyAnthropicCacheReferenceEditing(patched.body, config);
+        patched.body = cacheReferenceEditing.body;
+        const anthropicAdapterEvidence = {
+            ...providerAdapterEvidence(cache),
+            requestPatchApplied: blockCacheControl.applied || cacheReferenceEditing.applied,
+            requestFields: [
+                ...(blockCacheControl.applied ? ["cache_control"] : []),
+                ...(cacheReferenceEditing.applied ? ["cache_reference", ...(cacheReferenceEditing.cacheEditCount > 0 ? ["cache_edits"] : [])] : []),
+            ],
+            explicitBreakpointCount: Number(blockCacheControl.breakpointCount || 0),
+            cacheReferenceCount: cacheReferenceEditing.cacheReferenceCount,
+            cacheEditCount: cacheReferenceEditing.cacheEditCount,
+            reason: blockCacheControl.applied ? blockCacheControl.reason : cacheReferenceEditing.reason,
+        };
+        recordAnthropicPromptCacheState(config, options, patched.body, patched.headers);
+        const sentAt = new Date().toISOString();
+        let response = null;
+        try {
+            recordProviderRequestActivity(options, "anthropic", "request_dispatched");
+            response = await fetchWithNodeHttpFallback(endpoint, {
+                method: "POST",
+                headers: patched.headers,
+                body: JSON.stringify(patched.body),
+                signal: abort.controller.signal,
+            });
+            recordProviderRequestActivity(options, "anthropic", "response_started", response);
+        }
+        catch (error) {
+            recordApiMicrocompactNativeAdapterTelemetry(options, {
+                requestPatch: patched.requestPatch,
+                requestBody: patched.body,
+                headers: patched.headers,
+                provider: "anthropic",
+                model: config.model,
+                endpoint,
+                method: "POST",
+                sentAt,
+                ok: false,
+                error: error?.message || String(error),
+            });
+            throw error;
+        }
+        if (!response.ok) {
+            const text = await response.text();
+            const httpError = providerHttpError(options.httpErrorPrefix || "HTTP", response, text);
+            recordApiMicrocompactNativeAdapterTelemetry(options, {
+                requestPatch: patched.requestPatch,
+                requestBody: patched.body,
+                headers: patched.headers,
+                provider: "anthropic",
+                model: config.model,
+                endpoint,
+                method: "POST",
+                responseStatus: response.status,
+                requestId: providerRequestId(response),
+                sentAt,
+                ok: false,
+                error: httpError?.message || `HTTP ${response.status}`,
+            });
+            throw httpError;
+        }
+        if (options.nativeTools?.length) {
+            try {
+                (0, provider_native_tool_capability_1.recordProviderNativeToolCapability)(config, "anthropic", "confirmed", useNativeToolReference ? "native_tools_and_tool_reference_accepted" : "native_tools_accepted");
+            }
+            catch { }
+        }
+        if (streaming) {
+            let content = "";
+            let usage = {};
+            const turnAccumulator = (0, provider_native_tools_1.createAnthropicStreamTurnAccumulator)(nativeToolReadyCallback(options), nativeToolDeclaredCallback(options));
+            await consumeSseJson(response, event => {
+                (0, provider_stream_activity_1.recordProviderStreamSseEvent)(options);
+                turnAccumulator.push(event);
+                if (event?.usage) {
+                    usage = { ...usage, ...event.usage };
+                }
+                if (event?.type === "message_start" && event?.message?.usage) {
+                    usage = { ...usage, ...event.message.usage };
+                }
+                if (event?.type === "message_delta" && event?.usage) {
+                    usage = { ...usage, ...event.usage };
+                }
+                const textDelta = Array.isArray(event?.content)
+                    ? event.content.map((part) => part?.type === "text" ? part.text : "").join("")
+                    : event?.type === "content_block_start" && event?.content_block?.type === "text"
+                        ? event.content_block.text
+                        : event?.type === "content_block_delta" && event?.delta?.type === "text_delta"
+                            ? event.delta.text
+                            : "";
+                const delta = emitStreamDelta(options, textDelta);
+                if (delta) {
+                    emitted = true;
+                    content += delta;
+                }
+            });
+            recordApiMicrocompactNativeAdapterTelemetry(options, {
+                requestPatch: patched.requestPatch,
+                requestBody: patched.body,
+                headers: patched.headers,
+                provider: "anthropic",
+                model: config.model,
+                endpoint,
+                method: "POST",
+                responseStatus: response.status,
+                requestId: providerRequestId(response),
+                responseBody: { type: "stream", content_length: content.length, usage },
+                sentAt,
+                ok: true,
+            });
+            const normalizedUsage = normalizeLlmTokenUsage(usage, "anthropic");
+            const providerTurn = turnAccumulator.finish(normalizedUsage);
+            options.onProviderAgentTurn?.(providerTurn);
+            content = (0, provider_native_tools_1.turnForLegacyJsonLoop)(providerTurn);
+            if (!content.trim() && !providerTurn.toolCalls.length)
+                throw new Error("模型返回空响应");
+            reportTokenUsage(options, normalizedUsage);
+            finishContextCache(options, cache.plan, { ok: true, usage: normalizedUsage, providerRequestId: providerRequestId(response), adapterEvidence: anthropicAdapterEvidence });
+            return content;
+        }
+        const text = await response.text();
+        let data = null;
+        try {
+            data = JSON.parse(text);
+        }
+        catch (error) {
+            recordApiMicrocompactNativeAdapterTelemetry(options, {
+                requestPatch: patched.requestPatch,
+                requestBody: patched.body,
+                headers: patched.headers,
+                provider: "anthropic",
+                model: config.model,
+                endpoint,
+                method: "POST",
+                responseStatus: response.status,
+                requestId: providerRequestId(response),
+                sentAt,
+                ok: true,
+                responseParseError: error?.message || String(error),
+            });
+            throw error;
+        }
+        recordApiMicrocompactNativeAdapterTelemetry(options, {
+            requestPatch: patched.requestPatch,
+            requestBody: patched.body,
+            headers: patched.headers,
+            provider: "anthropic",
+            model: config.model,
+            endpoint,
+            method: "POST",
+            responseStatus: response.status,
+            requestId: providerRequestId(response),
+            responseBody: data,
+            sentAt,
+            ok: true,
+        });
+        const normalizedUsage = normalizeLlmTokenUsage(data?.usage, "anthropic");
+        const providerTurn = (0, provider_native_tools_1.parseAnthropicAgentTurn)(data, normalizedUsage);
+        options.onProviderAgentTurn?.(providerTurn);
+        const content = (0, provider_native_tools_1.turnForLegacyJsonLoop)(providerTurn).trim();
+        if (!content && !providerTurn.toolCalls.length)
+            throw new Error("模型返回空响应");
+        reportTokenUsage(options, normalizedUsage);
+        finishContextCache(options, cache.plan, { ok: true, usage: normalizedUsage, providerRequestId: providerRequestId(response), adapterEvidence: anthropicAdapterEvidence });
+        return content;
+    }
+    catch (error) {
+        finishContextCache(options, cache.plan, { ok: false, error });
+        throw attachProviderRequestEvidence(markStreamInterrupted(normalizeLlmAbortError(error, options), emitted), options);
+    }
+    finally {
+        abort.cleanup();
+    }
+}
+exports.MODEL_LONG_REQUEST_TOTAL_TIMEOUT_MS = 360_000;
+function resolveLlmRetryOptions(config, options, fallbackScope) {
+    const requestEvidence = ensureProviderRequestEvidence(options);
+    const configuredTimeoutMs = resolveLlmTimeoutMs(config, options.defaultTimeoutMs || model_call_retry_1.UNIFIED_MODEL_ATTEMPT_TIMEOUT_MS, options.timeoutMs);
+    const attempts = Math.max(1, Math.min(model_call_retry_1.UNIFIED_MODEL_MAX_ATTEMPTS, Math.floor(Number(options.retryAttempts) || model_call_retry_1.UNIFIED_MODEL_MAX_ATTEMPTS)));
+    const configuredTotalTimeoutMs = Number(options.retryTotalTimeoutMs);
+    const derivedTotalTimeoutMs = Math.max(model_call_retry_1.UNIFIED_MODEL_TOTAL_TIMEOUT_MS, Math.min(exports.MODEL_LONG_REQUEST_TOTAL_TIMEOUT_MS, configuredTimeoutMs * Math.min(3, attempts)));
+    return {
+        profile: options.retryProfile || "long_running_task",
+        attempts,
+        // timeoutMs is a per-provider-request contract. Do not silently replace a
+        // user configured 120 second request with the historical 30 second default.
+        attemptTimeoutMs: configuredTimeoutMs,
+        baseDelayMs: options.retryBaseDelayMs,
+        // Long reasoning requests get up to six minutes overall, while transient
+        // fast failures can still consume all five attempts.
+        totalTimeoutMs: Number.isFinite(configuredTotalTimeoutMs) && configuredTotalTimeoutMs > 0
+            ? Math.max(configuredTimeoutMs, configuredTotalTimeoutMs)
+            : derivedTotalTimeoutMs,
+        scope: options.retryScope || fallbackScope,
+        signal: options.signal,
+        onRetry: (notice) => {
+            requestEvidence.retryCount = Math.max(requestEvidence.retryCount, Math.max(0, Number(notice.attempt || 0)));
+            if (options.onRetry)
+                options.onRetry(notice);
+            else {
+                const message = String(notice.error?.message || notice.error || "temporary model error").slice(0, 240);
+                console.warn(`[模型重试] ${options.retryScope || fallbackScope} 暂时失败，将执行第 ${notice.attempt + 1}/${notice.maxAttempts} 次尝试：${message}`);
+            }
+        },
+    };
+}
+async function callOpenAiCompatibleChat(config, options) {
+    const protocol = (0, provider_cache_protocol_1.assertProviderTransportResolution)(config).protocol;
+    if (protocol === "anthropic_messages")
+        return callAnthropicCompatibleChat(config, options);
+    if (protocol === "gemini_generate_content")
+        return callGeminiCompatibleChat(config, options);
+    const responses = protocol === "responses";
+    const callOnceWithNativeFallback = async (attemptOptions) => {
+        try {
+            return await (responses ? callOpenAiResponsesChatOnce : callOpenAiCompatibleChatOnce)(config, attemptOptions);
+        }
+        catch (error) {
+            if (error?.code !== "CCM_MODEL_STREAM_INTERRUPTED_AFTER_DELTA"
+                && (0, provider_context_cache_adapters_1.isProviderContextCacheFieldRejection)(error)
+                && (0, provider_context_cache_adapters_1.resolveProviderContextCacheAdapter)(config, "openai").providerNative === true) {
+                const rejectedField = (0, provider_context_cache_adapters_1.classifyProviderCacheFieldRejection)(error, responses ? "responses" : "chat_completions");
+                const fieldPatch = rejectedField === "prompt_cache_breakpoint"
+                    ? { providerCacheDisableBreakpoints: true }
+                    : rejectedField === "prompt_cache_options"
+                        ? { providerCacheDisableOptions: true }
+                        : rejectedField === "prompt_cache_key"
+                            ? { providerCacheDisableKey: true }
+                            // An unlabelled cache-field error is safest to retry without
+                            // optional breakpoint/options metadata while retaining the
+                            // routing key, which may still be accepted by the relay.
+                            : { providerCacheDisableBreakpoints: true, providerCacheDisableOptions: true };
+                try {
+                    (0, provider_cache_capability_registry_1.recordProviderCacheCapabilityEvidence)(config, {
+                        status: "degraded",
+                        ...(rejectedField === "prompt_cache_key" ? { explicitCacheKeyStatus: "unsupported" } : {}),
+                        ...(rejectedField === "prompt_cache_options" ? { promptCacheOptionsStatus: "unsupported" } : {}),
+                        ...(rejectedField === "prompt_cache_breakpoint" ? { explicitBreakpointsStatus: "unsupported" } : {}),
+                        ...(rejectedField === "unknown" ? { promptCacheOptionsStatus: "unsupported", explicitBreakpointsStatus: "unsupported" } : {}),
+                        source: "provider_usage",
+                        providerCallCount: 1,
+                        reason: String(error?.message || error || "provider_cache_fields_rejected"),
+                    });
+                }
+                catch { }
+                const controlledConfig = {
+                    ...config,
+                    ...fieldPatch,
+                };
+                return (responses ? callOpenAiResponsesChatOnce : callOpenAiCompatibleChatOnce)(controlledConfig, { ...attemptOptions, retry: false });
+            }
+            if (!attemptOptions.nativeTools?.length || error?.code === "CCM_MODEL_STREAM_INTERRUPTED_AFTER_DELTA" || !/(unknown|unsupported|unrecognized|invalid).{0,80}(tools?|tool_choice|function)|(?:tools?|tool_choice|function).{0,80}(unknown|unsupported|unrecognized|invalid)/i.test(String(error?.message || error)))
+                throw error;
+            try {
+                (0, provider_native_tool_capability_1.recordProviderNativeToolCapability)(config, "openai", "unsupported", error);
+            }
+            catch { }
+            if (attemptOptions.nativeToolsRequired) {
+                const rejected = new Error("当前供应商不支持原生 tools，已退回 JSON 循环");
+                rejected.code = "CCM_NATIVE_TOOLS_UNSUPPORTED";
+                throw rejected;
+            }
+            return (responses ? callOpenAiResponsesChatOnce : callOpenAiCompatibleChatOnce)(config, { ...attemptOptions, nativeTools: undefined, nativeToolReference: false, retry: false });
+        }
+    };
+    if (options.retry === false)
+        return callOnceWithNativeFallback(options);
+    return (0, model_call_retry_1.runModelCallWithRetry)(context => callOnceWithNativeFallback({ ...options, timeoutMs: context.attemptTimeoutMs, signal: context.signal, retry: false }), resolveLlmRetryOptions(config, options, "OpenAI-compatible model call"));
+}
+async function callGeminiCompatibleChat(config, options) {
+    const callOnceWithNativeFallback = async (attemptOptions) => {
+        try {
+            return await callGeminiCompatibleChatOnce(config, attemptOptions);
+        }
+        catch (error) {
+            if (!attemptOptions.nativeTools?.length || error?.code === "CCM_MODEL_STREAM_INTERRUPTED_AFTER_DELTA" || !/(unknown|unsupported|unrecognized|invalid).{0,80}(tools?|function)|(?:tools?|function).{0,80}(unknown|unsupported|unrecognized|invalid)/i.test(String(error?.message || error)))
+                throw error;
+            try {
+                (0, provider_native_tool_capability_1.recordProviderNativeToolCapability)(config, "gemini", "unsupported", error);
+            }
+            catch { }
+            if (attemptOptions.nativeToolsRequired) {
+                const rejected = new Error("当前供应商不支持原生 tools，已退回 JSON 循环");
+                rejected.code = "CCM_NATIVE_TOOLS_UNSUPPORTED";
+                throw rejected;
+            }
+            return callGeminiCompatibleChatOnce(config, { ...attemptOptions, nativeTools: undefined, nativeToolReference: false, retry: false });
+        }
+    };
+    if (options.retry === false)
+        return callOnceWithNativeFallback(options);
+    return (0, model_call_retry_1.runModelCallWithRetry)(context => callOnceWithNativeFallback({ ...options, timeoutMs: context.attemptTimeoutMs, signal: context.signal, retry: false }), resolveLlmRetryOptions(config, options, "Gemini-compatible model call"));
+}
+async function callAnthropicCompatibleChat(config, options) {
+    const callOnceWithNativeFallback = async (attemptOptions) => {
+        try {
+            return await callAnthropicCompatibleChatOnce(config, attemptOptions);
+        }
+        catch (error) {
+            if (error?.code !== "CCM_MODEL_STREAM_INTERRUPTED_AFTER_DELTA" && (0, provider_context_cache_adapters_1.isProviderContextCacheFieldRejection)(error)) {
+                const rejectedField = (0, provider_context_cache_adapters_1.classifyProviderCacheFieldRejection)(error, "anthropic_messages");
+                const nativeContextRejected = /context[_ -]?management|cache[_ -]?edit/i.test(String(error?.message || error || ""));
+                try {
+                    (0, provider_cache_capability_registry_1.recordProviderCacheCapabilityEvidence)(config, {
+                        status: "degraded",
+                        ...(rejectedField === "cache_control" || rejectedField === "prompt_cache_breakpoint" ? { blockCacheControlStatus: "unsupported" } : {}),
+                        ...(rejectedField === "unknown" ? { blockCacheControlStatus: "unsupported" } : {}),
+                        ...(nativeContextRejected ? { nativeCacheEditingStatus: "unsupported" } : {}),
+                        source: "provider_usage",
+                        providerCallCount: 1,
+                        reason: String(error?.message || error || "provider_cache_fields_rejected"),
+                    });
+                }
+                catch { }
+                const binding = attemptOptions.providerContextCache || attemptOptions.provider_context_cache || {};
+                return callAnthropicCompatibleChatOnce({
+                    ...config,
+                    ...(rejectedField === "cache_control" || rejectedField === "prompt_cache_breakpoint" ? { providerCacheDisableBreakpoints: true } : {}),
+                }, {
+                    ...attemptOptions,
+                    ...(nativeContextRejected ? { apiMicrocompactNativeApplyPlan: undefined, api_microcompact_native_apply_plan: undefined } : {}),
+                    providerContextCache: { ...binding },
+                    retry: false,
+                });
+            }
+            if (attemptOptions.nativeTools?.length && error?.code !== "CCM_MODEL_STREAM_INTERRUPTED_AFTER_DELTA" && /(unknown|unsupported|unrecognized|invalid).{0,80}(tools?|defer_loading|tool_reference)|(?:tools?|defer_loading|tool_reference).{0,80}(unknown|unsupported|unrecognized|invalid)/i.test(String(error?.message || error))) {
+                try {
+                    (0, provider_native_tool_capability_1.recordProviderNativeToolCapability)(config, "anthropic", "unsupported", error);
+                }
+                catch { }
+                if (attemptOptions.nativeToolsRequired) {
+                    const rejected = new Error("当前供应商不支持原生 tools，已退回 JSON 循环");
+                    rejected.code = "CCM_NATIVE_TOOLS_UNSUPPORTED";
+                    throw rejected;
+                }
+                return callAnthropicCompatibleChatOnce(config, { ...attemptOptions, nativeTools: undefined, nativeToolReference: false, retry: false });
+            }
+            const nativePlan = getApiMicrocompactNativeApplyPlan(attemptOptions);
+            if (!nativePlan?.nativeApplyReady || error?.code === "CCM_MODEL_STREAM_INTERRUPTED_AFTER_DELTA" || !(0, provider_native_microcompact_capability_1.isProviderNativeMicrocompactFieldRejection)(error))
+                throw error;
+            try {
+                (0, provider_native_microcompact_capability_1.recordProviderNativeMicrocompactCapability)(config, { status: "unsupported", reason: error, source: "runtime_field_rejection" });
+            }
+            catch { }
+            const binding = attemptOptions.providerContextCache || attemptOptions.provider_context_cache || {};
+            return callAnthropicCompatibleChatOnce({ ...config, providerCacheInternalMode: "controlled" }, {
+                ...attemptOptions,
+                apiMicrocompactNativeApplyPlan: undefined,
+                api_microcompact_native_apply_plan: undefined,
+                providerContextCache: { ...binding, mode: "controlled" },
+                provider_context_cache: undefined,
+                retry: false,
+            });
+        }
+    };
+    if (options.retry === false)
+        return callOnceWithNativeFallback(options);
+    return (0, model_call_retry_1.runModelCallWithRetry)(context => callOnceWithNativeFallback({ ...options, timeoutMs: context.attemptTimeoutMs, signal: context.signal, retry: false }), resolveLlmRetryOptions(config, options, "Anthropic-compatible model call"));
+}
+async function callOpenAiCompatibleJson(config, options) {
+    if (shouldUseGemini(config))
+        return callGeminiCompatibleJson(config, options);
+    if (options.retry === false) {
+        const content = await callOpenAiCompatibleChat(config, { ...options, retry: false });
+        const parsed = extractJsonObject(content);
+        if (!parsed)
+            throw new Error(options.invalidJsonMessage || "主 Agent API 未返回有效 JSON");
+        return parsed;
+    }
+    return (0, model_call_retry_1.runModelCallWithRetry)(async (context) => {
+        let usage = null;
+        const content = await callOpenAiCompatibleChat(config, {
+            ...options,
+            retry: false,
+            timeoutMs: context.attemptTimeoutMs,
+            signal: context.signal,
+            onUsage: value => { usage = value; },
+        });
+        const parsed = extractJsonObject(content);
+        if (!parsed)
+            throw new Error(options.invalidJsonMessage || "主 Agent API 未返回有效 JSON");
+        if (usage)
+            reportTokenUsage(options, usage);
+        return parsed;
+    }, resolveLlmRetryOptions(config, options, "OpenAI-compatible JSON model call"));
+}
+async function callGeminiCompatibleJson(config, options) {
+    if (options.retry === false) {
+        const content = await callGeminiCompatibleChat(config, { ...options, retry: false });
+        const parsed = extractJsonObject(content);
+        if (!parsed)
+            throw new Error(options.invalidJsonMessage || "主 Agent API 未返回有效 JSON");
+        return parsed;
+    }
+    return (0, model_call_retry_1.runModelCallWithRetry)(async (context) => {
+        let usage = null;
+        const content = await callGeminiCompatibleChat(config, {
+            ...options,
+            retry: false,
+            timeoutMs: context.attemptTimeoutMs,
+            signal: context.signal,
+            onUsage: value => { usage = value; },
+        });
+        const parsed = extractJsonObject(content);
+        if (!parsed)
+            throw new Error(options.invalidJsonMessage || "主 Agent API 未返回有效 JSON");
+        if (usage)
+            reportTokenUsage(options, usage);
+        return parsed;
+    }, resolveLlmRetryOptions(config, options, "Gemini-compatible JSON model call"));
+}
+async function callAnthropicCompatibleJson(config, options) {
+    if (options.retry === false) {
+        const content = await callAnthropicCompatibleChat(config, { ...options, retry: false });
+        const parsed = extractJsonObject(content);
+        if (!parsed)
+            throw new Error(options.invalidJsonMessage || "主 Agent API 未返回有效 JSON");
+        return parsed;
+    }
+    return (0, model_call_retry_1.runModelCallWithRetry)(async (context) => {
+        let usage = null;
+        const content = await callAnthropicCompatibleChat(config, {
+            ...options,
+            retry: false,
+            timeoutMs: context.attemptTimeoutMs,
+            signal: context.signal,
+            onUsage: value => { usage = value; },
+        });
+        const parsed = extractJsonObject(content);
+        if (!parsed)
+            throw new Error(options.invalidJsonMessage || "主 Agent API 未返回有效 JSON");
+        if (usage)
+            reportTokenUsage(options, usage);
+        return parsed;
+    }, resolveLlmRetryOptions(config, options, "Anthropic-compatible JSON model call"));
+}
+exports.NATIVE_AGENT_TURN_MAX_TOKENS = 4096;
+function emptyNativeTurn(text = "") {
+    return {
+        text: String(text || ""),
+        toolCalls: [],
+        toolReferences: [],
+        stopReason: "end_turn",
+        usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0, reported: false },
+    };
+}
+async function callNativeAgentTurn(config, options) {
+    let captured = null;
+    const merged = {
+        ...options,
+        maxTokens: options.maxTokens || exports.NATIVE_AGENT_TURN_MAX_TOKENS,
+        stream: options.stream !== false,
+        nativeToolsRequired: options.nativeToolsRequired !== false && !!options.nativeTools?.length,
+        onProviderAgentTurn: (turn) => {
+            captured = turn;
+            options.onProviderAgentTurn?.(turn);
+        },
+    };
+    const protocol = (0, provider_cache_protocol_1.assertProviderTransportResolution)(config).protocol;
+    const content = protocol === "anthropic_messages"
+        ? await callAnthropicCompatibleChat(config, merged)
+        : await callOpenAiCompatibleChat(config, merged);
+    if (captured)
+        return captured;
+    return emptyNativeTurn(content);
+}
+async function runLlmTokenUsageSelfTest() {
+    const originalFetch = globalThis.fetch;
+    let openAiUsage = null;
+    let anthropicUsage = null;
+    try {
+        globalThis.fetch = async () => ({
+            ok: true,
+            status: 200,
+            headers: { get: () => "" },
+            async text() {
+                return JSON.stringify({
+                    choices: [{ message: { content: "openai ok" } }],
+                    usage: { prompt_tokens: 120, completion_tokens: 30, total_tokens: 150 },
+                });
+            },
+        });
+        const openAiContent = await callOpenAiCompatibleChat({
+            apiUrl: "https://example.com/v1",
+            apiKey: "selftest-key",
+            model: "selftest-model",
+        }, {
+            messages: [{ role: "user", content: "selftest" }],
+            onUsage: usage => { openAiUsage = usage; },
+        });
+        globalThis.fetch = async () => ({
+            ok: true,
+            status: 200,
+            headers: { get: () => "" },
+            async text() {
+                return JSON.stringify({
+                    content: [{ type: "text", text: "anthropic ok" }],
+                    usage: {
+                        input_tokens: 100,
+                        cache_creation_input_tokens: 20,
+                        cache_read_input_tokens: 300,
+                        output_tokens: 40,
+                    },
+                });
+            },
+        });
+        const anthropicContent = await callAnthropicCompatibleChat({
+            apiUrl: "https://example.com/v1",
+            apiKey: "selftest-key",
+            model: "selftest-model",
+        }, {
+            messages: [{ role: "user", content: "selftest" }],
+            onUsage: usage => { anthropicUsage = usage; },
+        });
+        const checks = {
+            openAiContentPreserved: openAiContent === "openai ok",
+            openAiInputTokensCaptured: openAiUsage?.inputTokens === 120,
+            openAiOutputTokensCaptured: openAiUsage?.outputTokens === 30,
+            anthropicContentPreserved: anthropicContent === "anthropic ok",
+            anthropicDirectInputTokensCaptured: anthropicUsage?.inputTokens === 100,
+            anthropicCacheTokensCaptured: anthropicUsage?.cacheCreationInputTokens === 20 && anthropicUsage?.cacheReadInputTokens === 300,
+            anthropicTotalIncludesCacheTokens: anthropicUsage?.totalTokens === 460,
+            anthropicOutputTokensCaptured: anthropicUsage?.outputTokens === 40,
+        };
+        return { pass: Object.values(checks).every(Boolean), checks, openAiUsage, anthropicUsage };
+    }
+    finally {
+        globalThis.fetch = originalFetch;
+    }
+}
+async function runLlmStreamingSelfTest() {
+    const originalFetch = globalThis.fetch;
+    const encoder = new TextEncoder();
+    const createResponse = (chunks, onClosed) => ({
+        ok: true,
+        status: 200,
+        headers: { get: () => "text/event-stream" },
+        body: new ReadableStream({
+            start(controller) {
+                chunks.forEach((chunk, index) => {
+                    setTimeout(() => {
+                        controller.enqueue(encoder.encode(chunk));
+                        if (index === chunks.length - 1) {
+                            setTimeout(() => {
+                                onClosed();
+                                controller.close();
+                            }, 5);
+                        }
+                    }, index * 5);
+                });
+            },
+        }),
+        async text() { return ""; },
+    });
+    try {
+        const openAiDeltas = [];
+        let openAiClosed = false;
+        let openAiDeltaBeforeClose = false;
+        let openAiUsage = null;
+        globalThis.fetch = async () => createResponse([
+            "data: {\"choices\":[{\"delta\":{\"content\":\"你\"}}]}\n",
+            "\ndata: {\"choices\":[{\"delta\":{\"content\":\"好\"}}],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":2}}\n\n",
+            "data: [DONE]\n\n",
+        ], () => { openAiClosed = true; });
+        const openAiContent = await callOpenAiCompatibleChat({
+            apiUrl: "https://example.com/v1",
+            apiKey: "selftest-key",
+            model: "selftest-model",
+        }, {
+            messages: [{ role: "user", content: "selftest" }],
+            stream: true,
+            retry: false,
+            onDelta: delta => {
+                openAiDeltas.push(delta);
+                if (!openAiClosed)
+                    openAiDeltaBeforeClose = true;
+            },
+            onUsage: usage => { openAiUsage = usage; },
+        });
+        const anthropicDeltas = [];
+        let anthropicClosed = false;
+        let anthropicDeltaBeforeClose = false;
+        let anthropicUsage = null;
+        globalThis.fetch = async () => createResponse([
+            "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":12}}}\n\n",
+            "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"流\"}}\n\n",
+            "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"式\"}}\n\n",
+            "event: message_delta\ndata: {\"type\":\"message_delta\",\"usage\":{\"output_tokens\":2}}\n\n",
+        ], () => { anthropicClosed = true; });
+        const anthropicContent = await callAnthropicCompatibleChat({
+            apiUrl: "https://example.com/v1",
+            apiKey: "selftest-key",
+            model: "selftest-model",
+        }, {
+            messages: [{ role: "user", content: "selftest" }],
+            stream: true,
+            retry: false,
+            onDelta: delta => {
+                anthropicDeltas.push(delta);
+                if (!anthropicClosed)
+                    anthropicDeltaBeforeClose = true;
+            },
+            onUsage: usage => { anthropicUsage = usage; },
+        });
+        let interruptedCalls = 0;
+        let interruptedErrorCode = "";
+        globalThis.fetch = async () => {
+            interruptedCalls += 1;
+            return {
+                ok: true,
+                status: 200,
+                headers: { get: () => "text/event-stream" },
+                body: new ReadableStream({
+                    start(controller) {
+                        controller.enqueue(encoder.encode("data: {\"choices\":[{\"delta\":{\"content\":\"已\"}}]}\n\n"));
+                        setTimeout(() => controller.error(new Error("socket closed during stream")), 5);
+                    },
+                }),
+                async text() { return ""; },
+            };
+        };
+        try {
+            await callOpenAiCompatibleChat({
+                apiUrl: "https://example.com/v1",
+                apiKey: "selftest-key",
+                model: "selftest-model",
+            }, {
+                messages: [{ role: "user", content: "selftest" }],
+                stream: true,
+                retryAttempts: 5,
+                retryBaseDelayMs: 0,
+                onDelta: () => { },
+            });
+        }
+        catch (error) {
+            interruptedErrorCode = String(error?.code || "");
+        }
+        const checks = {
+            openAiContent: openAiContent === "你好",
+            openAiDeltas: openAiDeltas.join("") === "你好" && openAiDeltas.length === 2,
+            openAiIncremental: openAiDeltaBeforeClose,
+            openAiUsage: openAiUsage?.inputTokens === 10 && openAiUsage?.outputTokens === 2,
+            anthropicContent: anthropicContent === "流式",
+            anthropicDeltas: anthropicDeltas.join("") === "流式" && anthropicDeltas.length === 2,
+            anthropicIncremental: anthropicDeltaBeforeClose,
+            anthropicUsage: anthropicUsage?.inputTokens === 12 && anthropicUsage?.outputTokens === 2,
+            interruptedStreamDoesNotRetry: interruptedCalls === 1 && interruptedErrorCode === "CCM_MODEL_STREAM_INTERRUPTED_AFTER_DELTA",
+        };
+        return { pass: Object.values(checks).every(Boolean), checks };
+    }
+    finally {
+        globalThis.fetch = originalFetch;
+    }
+}
+async function runGroupOrchestratorApiMicrocompactNativeAdapterTelemetrySelfTest() {
+    const groupId = `group-orchestrator-api-microcompact-native-adapter-selftest-${process.pid}-${Date.now()}`;
+    const groupSessionId = `gcs-${groupId}`;
+    const taskId = `task-${groupId}`;
+    const executionId = `execution-${groupId}`;
+    const runnerRequestId = `runner-${groupId}`;
+    const memoryApi = require("./memory");
+    const compactionApi = require("./group-memory-compaction");
+    const editPlan = compactionApi.buildGroupApiMicroCompactEditPlan([
+        {
+            id: "adapter-telemetry-thinking",
+            role: "assistant",
+            content: [{ type: "thinking", thinking: "ADAPTER_TELEMETRY_THINKING" }],
+        },
+        {
+            id: "adapter-telemetry-tool",
+            role: "assistant",
+            content: [{ type: "tool_use", id: "adapter-read", name: "Read", input: { file_path: "src/adapter.ts" } }],
+        },
+        {
+            id: "adapter-telemetry-tool-result",
+            role: "user",
+            content: [{ type: "tool_result", tool_use_id: "adapter-read", content: "adapter result" }],
+        },
+    ], {
+        groupId,
+        groupSessionId,
+        targetProject: "api",
+        activeTokens: 220000,
+        force: true,
+        now: "2026-07-08T09:00:00.000Z",
+    });
+    const nativePlan = compactionApi.buildGroupApiMicrocompactNativeApplyPlan(editPlan, {
+        groupId,
+        groupSessionId,
+        targetProject: "api",
+        agentType: "anthropic-api",
+        transport: "anthropic_api",
+        provider: "anthropic",
+        supportsApiContextManagement: true,
+        nativeApiRequestLayer: true,
+        betaHeaders: ["context-management-2025-06-27"],
+        sessionBinding: {
+            schema: "ccm-child-agent-memory-session-binding-v1",
+            binding_id: `csm-${groupId}`,
+            task_agent_session_id: `tas-${groupId}`,
+            native_session_id: `native-${groupId}`,
+        },
+        memoryContextSnapshotId: `snapshot-${groupId}`,
+        memoryContextSnapshotChecksum: `snapshot-checksum-${groupId}`,
+        executionId,
+        runnerRequestId,
+        now: "2026-07-08T09:01:00.000Z",
+    });
+    const ledgerFile = memoryApi.getGroupApiMicrocompactNativeApplyRequestTelemetryLedgerFile(groupId, groupSessionId);
+    const executionReceiptApi = require("./provider-native-compact-execution-receipt");
+    const executionReceiptFile = executionReceiptApi.getProviderNativeCompactExecutionReceiptLedgerFile(groupId, groupSessionId);
+    const originalFetch = globalThis.fetch;
+    let captured = null;
+    try {
+        globalThis.fetch = async (url, init = {}) => {
+            captured = {
+                url: String(url || ""),
+                headers: init.headers || {},
+                body: JSON.parse(String(init.body || "{}")),
+            };
+            return {
+                ok: true,
+                status: 200,
+                headers: {
+                    get(name) {
+                        return String(name || "").toLowerCase().includes("request-id") ? "req-api-microcompact-adapter-selftest" : "";
+                    },
+                },
+                async text() {
+                    return JSON.stringify({
+                        content: [{ type: "text", text: "adapter ok" }],
+                        context_management: {
+                            applied_edits: [{ type: "clear_tool_uses_20250919", cleared_tool_uses: 4, cleared_input_tokens: 24000 }],
+                        },
+                    });
+                },
+            };
+        };
+        const content = await callAnthropicCompatibleChat({
+            apiUrl: "https://api.anthropic.com/v1",
+            apiKey: "selftest-key",
+            model: "claude-selftest",
+            timeoutMs: 5000,
+        }, {
+            messages: [{ role: "user", content: "adapter telemetry selftest" }],
+            apiMicrocompactNativeApplyPlan: nativePlan,
+            apiMicrocompactNativeApplyTelemetry: {
+                groupId,
+                groupSessionId,
+                targetProject: "api",
+                taskId,
+                executionId,
+                runnerRequestId,
+                taskAgentSessionId: nativePlan.task_agent_session_id,
+                nativeSessionId: nativePlan.native_session_id,
+                memoryContextSnapshotId: nativePlan.memory_context_snapshot_id,
+                memoryContextSnapshotChecksum: nativePlan.memory_context_snapshot_checksum,
+            },
+        });
+        const ledger = memoryApi.readGroupApiMicrocompactNativeApplyRequestTelemetryLedger(groupId, groupSessionId);
+        const executionReceiptLedger = executionReceiptApi.readProviderNativeCompactExecutionReceiptLedger(groupId, groupSessionId);
+        const executionReceipt = executionReceiptLedger.entries?.at(-1);
+        const entry = (ledger.entries || []).find((item) => item.task_id === taskId);
+        const checks = {
+            modelReturned: content === "adapter ok",
+            requestBodyIncludesContextManagement: !!captured?.body?.context_management
+                && captured.body.context_management.edits?.length === editPlan.editCount,
+            requestHeaderIncludesBeta: String(captured?.headers?.["anthropic-beta"] || captured?.headers?.["Anthropic-Beta"] || "").includes("context-management-2025-06-27"),
+            ledgerRecordedAdapterTelemetry: entry?.telemetry_source === "native_request_adapter"
+                && entry?.telemetry_status === "matched_contract"
+                && entry?.request_patch_checksum === nativePlan.requestPatchChecksum,
+            ledgerBindsSessionAndSnapshot: entry?.task_agent_session_id === nativePlan.task_agent_session_id
+                && entry?.memory_context_snapshot_id === nativePlan.memory_context_snapshot_id,
+            platformExecutionReceiptIsStrong: executionReceipt?.status === "native_applied"
+                && executionReceipt?.strong_proof === true
+                && executionReceipt?.provider_outcome_verified === true
+                && executionReceipt?.applied_edit_count === 1
+                && executionReceipt?.execution_id === executionId
+                && executionReceipt?.runner_request_id === runnerRequestId,
+        };
+        return {
+            pass: Object.values(checks).every(Boolean),
+            checks,
+            captured: {
+                hasContextManagement: !!captured?.body?.context_management,
+                beta: captured?.headers?.["anthropic-beta"] || captured?.headers?.["Anthropic-Beta"] || "",
+            },
+            entry: entry ? {
+                telemetryStatus: entry.telemetry_status,
+                telemetrySource: entry.telemetry_source,
+                requestPatchChecksum: entry.request_patch_checksum,
+            } : null,
+        };
+    }
+    finally {
+        globalThis.fetch = originalFetch;
+        for (const file of [ledgerFile, `${ledgerFile}.bak`, executionReceiptFile, `${executionReceiptFile}.bak`]) {
+            try {
+                if (file && require("fs").existsSync(file))
+                    require("fs").unlinkSync(file);
+            }
+            catch { }
+        }
+    }
+}
+//# sourceMappingURL=group-orchestrator-llm-client.js.map

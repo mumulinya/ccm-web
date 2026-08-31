@@ -1,0 +1,916 @@
+"use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.SIMPLE_MESSAGE_PATTERNS = exports.GREETING_PATTERNS = exports.PLANNING_HINTS = exports.IMPLEMENT_HINTS = exports.BUG_HINTS = exports.TEST_HINTS = exports.REVIEW_HINTS = exports.QUESTION_HINTS = exports.BROAD_HINTS = exports.BACKEND_HINTS = exports.FRONTEND_HINTS = exports.GROUP_MEMORY_WORKER_CONTEXT_PTL_EMERGENCIES_DIR = exports.GROUP_MEMORY_WORKER_CONTEXT_COMPACT_STRATEGIES_DIR = exports.GROUP_MEMORY_WORKER_CONTEXT_COMPACT_OUTCOMES_DIR = exports.GROUP_MEMORY_WORKER_CONTEXT_COMPACT_HOOKS_DIR = exports.GROUP_MEMORY_REPLAY_REPAIR_TIMELINE_BINDINGS_DIR = exports.GROUP_MEMORY_REPLAY_REPAIR_DISPATCH_BINDINGS_DIR = exports.GROUP_MEMORY_REPLAY_REPAIR_DISPATCH_PLANS_DIR = exports.GROUP_MEMORY_REPLAY_REPAIR_WORK_ITEMS_DIR = exports.runGroupOrchestratorFailureSelfTest = exports.summarizeGroupOrchestratorProviderError = exports.classifyGroupOrchestratorFailure = void 0;
+exports.getLlmConfigIssue = getLlmConfigIssue;
+exports.createCoordinatorMember = createCoordinatorMember;
+exports.isCoordinatorMember = isCoordinatorMember;
+exports.getCoordinatorProject = getCoordinatorProject;
+exports.getCoordinatorMember = getCoordinatorMember;
+exports.normalizeGroupOrchestrator = normalizeGroupOrchestrator;
+exports.isOrchestratorEnabled = isOrchestratorEnabled;
+exports.getRoutableMembers = getRoutableMembers;
+exports.getMemberNames = getMemberNames;
+exports.selectGroupTargets = selectGroupTargets;
+exports.resolveMemberRuntime = resolveMemberRuntime;
+exports.inspectGroupMemberRuntimeForAddition = inspectGroupMemberRuntimeForAddition;
+exports.buildRecentGroupContext = buildRecentGroupContext;
+exports.containsAny = containsAny;
+exports.memberKind = memberKind;
+exports.isGreetingMessage = isGreetingMessage;
+exports.isSimpleMessage = isSimpleMessage;
+exports.isExplicitExecutionRequest = isExplicitExecutionRequest;
+exports.analyzeRequirement = analyzeRequirement;
+exports.scoreMember = scoreMember;
+exports.explicitMentionTargets = explicitMentionTargets;
+exports.routeMembers = routeMembers;
+exports.formatRequirementUnderstanding = formatRequirementUnderstanding;
+exports.buildDelegationLine = buildDelegationLine;
+exports.buildVisibleAssignmentLine = buildVisibleAssignmentLine;
+exports.inferCoordinatorStrategy = inferCoordinatorStrategy;
+exports.buildCoordinatorPlan = buildCoordinatorPlan;
+exports.isStructuredCoordinatorFallbackAllowed = isStructuredCoordinatorFallbackAllowed;
+exports.measureGroupMainAgentPayload = measureGroupMainAgentPayload;
+exports.prepareExactGroupMainAgentInput = prepareExactGroupMainAgentInput;
+exports.runGroupOrchestratorCore = runGroupOrchestratorCore;
+exports.streamCanonicalGroupReply = streamCanonicalGroupReply;
+exports.runGroupOrchestrator = runGroupOrchestrator;
+exports.isContextLimitError = isContextLimitError;
+exports.buildReactiveCompactionContext = buildReactiveCompactionContext;
+const fs = __importStar(require("fs"));
+const path = __importStar(require("path"));
+const db_1 = require("../../core/db");
+const provider_cache_protocol_1 = require("../../system/provider-cache-protocol");
+const session_compaction_core_1 = require("../../system/session-compaction-core");
+const pre_request_tool_context_1 = require("../../system/pre-request-tool-context");
+const native_query_loop_1 = require("../../agents/native-query-loop");
+const group_compaction_strategy_1 = require("./group-compaction-strategy");
+const group_session_model_context_1 = require("./group-session-model-context");
+const role_skills_1 = require("../../skills/role-skills");
+const conversation_plan_mode_gate_1 = require("../../system/conversation-plan-mode-gate");
+const model_retry_presentation_1 = require("../../system/model-retry-presentation");
+const group_orchestrator_config_1 = require("./group-orchestrator-config");
+const group_orchestrator_prompts_1 = require("./group-orchestrator-prompts");
+const group_orchestrator_coded_1 = require("./group-orchestrator-coded");
+const main_agent_context_source_continuity_1 = require("../../system/main-agent-context-source-continuity");
+const group_orchestrator_llm_1 = require("./group-orchestrator-llm");
+const user_visible_agent_events_1 = require("../../system/user-visible-agent-events");
+const group_orchestrator_failure_1 = require("./group-orchestrator-failure");
+var group_orchestrator_failure_2 = require("./group-orchestrator-failure");
+Object.defineProperty(exports, "classifyGroupOrchestratorFailure", { enumerable: true, get: function () { return group_orchestrator_failure_2.classifyGroupOrchestratorFailure; } });
+Object.defineProperty(exports, "summarizeGroupOrchestratorProviderError", { enumerable: true, get: function () { return group_orchestrator_failure_2.summarizeGroupOrchestratorProviderError; } });
+Object.defineProperty(exports, "runGroupOrchestratorFailureSelfTest", { enumerable: true, get: function () { return group_orchestrator_failure_2.runGroupOrchestratorFailureSelfTest; } });
+exports.GROUP_MEMORY_REPLAY_REPAIR_WORK_ITEMS_DIR = path.join(group_orchestrator_config_1.CCM_DIR, "group-memory-replay-repair-work-items");
+exports.GROUP_MEMORY_REPLAY_REPAIR_DISPATCH_PLANS_DIR = path.join(group_orchestrator_config_1.CCM_DIR, "group-memory-replay-repair-dispatch-plans");
+exports.GROUP_MEMORY_REPLAY_REPAIR_DISPATCH_BINDINGS_DIR = path.join(group_orchestrator_config_1.CCM_DIR, "group-memory-replay-repair-dispatch-bindings");
+exports.GROUP_MEMORY_REPLAY_REPAIR_TIMELINE_BINDINGS_DIR = path.join(group_orchestrator_config_1.CCM_DIR, "group-memory-replay-repair-timeline-bindings");
+exports.GROUP_MEMORY_WORKER_CONTEXT_COMPACT_HOOKS_DIR = path.join(group_orchestrator_config_1.CCM_DIR, "group-memory-worker-context-compact-hooks");
+exports.GROUP_MEMORY_WORKER_CONTEXT_COMPACT_OUTCOMES_DIR = path.join(group_orchestrator_config_1.CCM_DIR, "group-memory-worker-context-compact-outcomes");
+exports.GROUP_MEMORY_WORKER_CONTEXT_COMPACT_STRATEGIES_DIR = path.join(group_orchestrator_config_1.CCM_DIR, "group-memory-worker-context-compact-strategies");
+exports.GROUP_MEMORY_WORKER_CONTEXT_PTL_EMERGENCIES_DIR = path.join(group_orchestrator_config_1.CCM_DIR, "group-memory-worker-context-ptl-emergencies");
+function getLlmConfigIssue(config) {
+    if (!config.enabled)
+        return "主 Agent 大模型 API 未启用";
+    if (!String(config.apiUrl || "").trim())
+        return "主 Agent API URL 未配置";
+    if (!String(config.apiKey || "").trim())
+        return "主 Agent API Key 未配置";
+    if (!String(config.model || "").trim())
+        return "主 Agent 模型未配置";
+    const transport = (0, provider_cache_protocol_1.resolveProviderTransport)(config);
+    if (transport.conflict === "endpoint_override_mismatch")
+        return "接口协议高级覆盖与完整 API 端点不一致";
+    if (!transport.protocol)
+        return "无法识别主 Agent API 协议";
+    return "";
+}
+function createCoordinatorMember(agent = "coded-orchestrator") {
+    return {
+        project: group_orchestrator_config_1.COORDINATOR_PROJECT,
+        role: "coordinator",
+        agent,
+    };
+}
+function isCoordinatorMember(member, group = null) {
+    const coordinatorProject = getCoordinatorProject(group);
+    return member?.role === "coordinator" || member?.project === coordinatorProject || member?.project === group_orchestrator_config_1.COORDINATOR_PROJECT;
+}
+function getCoordinatorProject(group) {
+    return String(group?.orchestrator?.coordinatorProject || group_orchestrator_config_1.COORDINATOR_PROJECT).trim() || group_orchestrator_config_1.COORDINATOR_PROJECT;
+}
+function getCoordinatorMember(group) {
+    const coordinatorProject = getCoordinatorProject(group);
+    const member = (group?.members || []).find((m) => m.project === coordinatorProject || m.role === "coordinator");
+    return member || createCoordinatorMember();
+}
+function normalizeGroupOrchestrator(group) {
+    if (!group || typeof group !== "object")
+        return group;
+    group.orchestrator = {
+        ...group_orchestrator_config_1.DEFAULT_GROUP_ORCHESTRATOR,
+        ...(group.orchestrator || {}),
+    };
+    if (group.orchestrator.mode === "coordinator_first" || group.orchestrator.mode === "coded_coordinator") {
+        group.orchestrator.mode = group_orchestrator_config_1.DEFAULT_GROUP_ORCHESTRATOR.mode;
+    }
+    const coordinatorProject = getCoordinatorProject(group);
+    const seen = new Set();
+    const members = Array.isArray(group.members) ? group.members : [];
+    const normalizedMembers = [];
+    let coordinator = members.find((m) => m?.project === coordinatorProject || m?.role === "coordinator");
+    if (!coordinator) {
+        coordinator = createCoordinatorMember();
+    }
+    coordinator = {
+        ...coordinator,
+        project: coordinator.project || coordinatorProject,
+        role: "coordinator",
+        agent: "coded-orchestrator",
+    };
+    normalizedMembers.push(coordinator);
+    seen.add(coordinator.project);
+    for (const member of members) {
+        if (!member?.project || seen.has(member.project))
+            continue;
+        if (member.project === coordinator.project)
+            continue;
+        normalizedMembers.push(member);
+        seen.add(member.project);
+    }
+    group.members = normalizedMembers;
+    return group;
+}
+function isOrchestratorEnabled(group) {
+    return normalizeGroupOrchestrator(group).orchestrator?.enabled !== false;
+}
+function getRoutableMembers(group) {
+    return normalizeGroupOrchestrator(group).members.filter((m) => !isCoordinatorMember(m, group));
+}
+function getMemberNames(group, excludeProject = "") {
+    return normalizeGroupOrchestrator(group).members
+        .map((m) => m.project)
+        .filter((project) => project && project !== excludeProject)
+        .join(", ");
+}
+function selectGroupTargets(group, targetProject) {
+    const normalized = normalizeGroupOrchestrator(group);
+    const target = String(targetProject || "").trim();
+    const coordinator = getCoordinatorMember(normalized);
+    const mainAgentTarget = !target || target === "all" || target === coordinator.project;
+    return {
+        isBroadcast: mainAgentTarget,
+        orchestrated: mainAgentTarget,
+        targetLabel: coordinator.project,
+        members: mainAgentTarget ? [coordinator] : [],
+        rejectedDirectTarget: mainAgentTarget ? "" : target,
+    };
+}
+function resolveMemberRuntime(projectName, group, configs) {
+    const normalized = normalizeGroupOrchestrator(group);
+    if (projectName === getCoordinatorMember(normalized).project) {
+        return null;
+    }
+    const member = normalized.members.find((m) => m.project === projectName);
+    const config = configs.find((c) => c.name === projectName);
+    if (!config)
+        return null;
+    const projectInfos = (0, db_1.getConfigInfo)(config.path);
+    const info = projectInfos.find((item) => String(item?.name || "") === projectName) || projectInfos[0] || {};
+    const configuredWorkDir = String(info.workDir || "").trim();
+    // A missing work_dir must never fall back to CCM's own process.cwd(). Apart
+    // from making the member look healthy when it is not, that fallback grants
+    // the wrong repository to a project Agent.
+    if (!configuredWorkDir)
+        return null;
+    let workDir = "";
+    try {
+        workDir = fs.realpathSync(configuredWorkDir);
+        if (!fs.statSync(workDir).isDirectory())
+            return null;
+        fs.accessSync(workDir, fs.constants.R_OK);
+    }
+    catch {
+        return null;
+    }
+    return {
+        project: projectName,
+        workDir,
+        // A group member may explicitly select a runtime for this collaboration.
+        // Otherwise inherit the project's configured default.
+        agentType: member?.agent || info.agent || "claudecode",
+        configured: true,
+    };
+}
+function inspectGroupMemberRuntimeForAddition(projectName, group, configs, requestedAgent = "") {
+    const project = String(projectName || "").trim();
+    if (!project)
+        return { valid: false, project, reason: "项目名称不能为空" };
+    const config = (configs || []).find((item) => String(item?.name || "") === project);
+    if (!config)
+        return { valid: false, project, reason: "项目配置尚未保存" };
+    const infos = (0, db_1.getConfigInfo)(config.path);
+    const info = infos.find((item) => String(item?.name || "") === project) || infos[0] || {};
+    const configuredWorkDir = String(info.workDir || "").trim();
+    if (!configuredWorkDir)
+        return { valid: false, project, reason: "项目配置缺少 work_dir" };
+    try {
+        const workDir = fs.realpathSync(configuredWorkDir);
+        if (!fs.statSync(workDir).isDirectory())
+            return { valid: false, project, reason: "项目工作目录不是文件夹" };
+        fs.accessSync(workDir, fs.constants.R_OK);
+        return {
+            valid: true,
+            project,
+            workDir,
+            agentType: String(requestedAgent || info.agent || "claudecode").trim() || "claudecode",
+        };
+    }
+    catch (error) {
+        return {
+            valid: false,
+            project,
+            reason: `项目工作目录不可读取：${String(error?.message || error || "unknown").slice(0, 180)}`,
+        };
+    }
+}
+function buildRecentGroupContext(messages, fullCount = 5) {
+    const msgs = messages || [];
+    return msgs.map((m, idx) => {
+        const who = m.role === "user" ? `[用户 -> ${m.target}]` : `[${m.agent || "Agent"}]`;
+        const content = String(m.content || "");
+        // 最近 fullCount 条保留全文，更早的只保留前 200 字摘要
+        if (idx >= msgs.length - fullCount) {
+            return `${who} ${content}`;
+        }
+        const summary = content.length > 200 ? content.slice(0, 200) + "..." : content;
+        return `${who} ${summary}`;
+    }).join("\n");
+}
+function containsAny(text, words) {
+    return words.some(word => text.includes(word.toLowerCase()));
+}
+function memberKind(member) {
+    const name = String(member?.project || "").toLowerCase();
+    if (/app|web|front|frontend|mobile|client|ui|view|页面|前端|客户端/.test(name))
+        return "frontend";
+    if (/cloud|api|server|backend|service|admin|db|后端|服务端|云/.test(name))
+        return "backend";
+    return "general";
+}
+exports.FRONTEND_HINTS = ["前端", "页面", "界面", "ui", "组件", "样式", "交互", "app", "客户端", "移动端", "小程序", "按钮", "表单", "展示", "原型", "流程"];
+exports.BACKEND_HINTS = ["后端", "接口", "api", "服务", "数据库", "鉴权", "权限", "字段", "表", "缓存", "队列", "部署", "cloud", "server", "endpoint", "schema", "入参", "出参"];
+exports.BROAD_HINTS = ["全栈", "前后端", "联调", "跨端", "需求", "开发", "实现", "修复", "排查", "bug", "报错", "测试", "验收", "项目", "接口文档", "业务文档", "需求文档", "prd", "文档"];
+exports.QUESTION_HINTS = ["?", "？", "怎么", "如何", "为什么", "能不能", "是否", "吗"];
+exports.REVIEW_HINTS = ["review", "审查", "评审", "检查代码", "看一下代码", "风险"];
+exports.TEST_HINTS = ["测试", "验收", "验证", "用例", "回归", "自测"];
+exports.BUG_HINTS = ["bug", "报错", "错误", "异常", "失败", "崩溃", "无法", "不生效", "修复"];
+exports.IMPLEMENT_HINTS = ["实现", "开发", "新增", "接入", "适配", "改成", "优化", "重构", "做一下", "加一个", "完成这个任务", "按文档"];
+exports.PLANNING_HINTS = ["方案", "设计", "架构", "规划", "拆分", "怎么做", "思路", "接口文档", "业务文档", "需求文档", "prd"];
+exports.GREETING_PATTERNS = [
+    /^(你好|您好|hi|hello|hey|在吗|在不在|哈喽|嗨)[。！!,.，\s]*$/i,
+    /^(早上好|下午好|晚上好|辛苦了)[。！!,.，\s]*$/i,
+];
+exports.SIMPLE_MESSAGE_PATTERNS = [
+    /^[0-9.,，。!！?？\s]+$/, // 纯数字/标点
+    /^(好的|ok|OK|Ok|收到|了解|知道了|嗯|嗯嗯|对|是的|明白|谢谢|感谢|辛苦|没事|没问题|可以|行)[。！!,.，\s]*$/i,
+    /^.{0,2}$/, // 1-2 个字符
+];
+function isGreetingMessage(message) {
+    const text = String(message || "").trim();
+    return exports.GREETING_PATTERNS.some(pattern => pattern.test(text));
+}
+function isSimpleMessage(message) {
+    const text = String(message || "").trim();
+    if (!text)
+        return true;
+    if (isGreetingMessage(text))
+        return true;
+    return exports.SIMPLE_MESSAGE_PATTERNS.some(pattern => pattern.test(text));
+}
+function isExplicitExecutionRequest(message) {
+    const text = String(message || "").trim();
+    if (!text)
+        return false;
+    const explanationOnly = /^(?:请)?(?:介绍|说明|解释|分析|总结|概括|告诉我|这(?:个)?是|这是|什么是|为什么|为何|如何|怎么|是否|能否|能不能).{0,80}$/i.test(text)
+        || /(?:是什么项目|项目是做什么的|介绍一下项目|分析一下(?:项目|代码|架构)|有什么功能|采用什么技术|为什么会)/i.test(text);
+    const explicitAction = /(?:^|请|帮我|给我|需要|我要|现在|立即|开始|继续|然后|并且|把).{0,18}(?:修改|实现|开发|新增|添加|加上|加一个|创建|运行|执行|派发|修复|删除|清理|更新|重构|接入|安装|部署|提交|写入|生成|迁移|恢复|暂停|取消|启动|停止)/i.test(text)
+        || /^(?:修改|实现|开发|新增|添加|创建|运行|执行|派发|修复|删除|清理|更新|重构|接入|安装|部署|提交|写入|生成|迁移|恢复|暂停|取消|启动|停止)/i.test(text)
+        || /(?:按|照).{0,20}(?:文档|方案|要求).{0,8}(?:做|落地|实现|执行)/i.test(text);
+    return explicitAction && !explanationOnly;
+}
+function analyzeRequirement(group, message, context = "") {
+    const normalized = normalizeGroupOrchestrator(group);
+    const raw = String(message || "").trim();
+    const contextText = String(context || "").trim();
+    const text = [raw, contextText].filter(Boolean).join("\n").toLowerCase();
+    const members = getRoutableMembers(normalized);
+    const explicitProjects = members
+        .map((m) => String(m.project || ""))
+        .filter(project => project && (raw.includes(`@${project}`) || text.includes(project.toLowerCase())));
+    const domains = [];
+    if (containsAny(text, exports.FRONTEND_HINTS))
+        domains.push("frontend");
+    if (containsAny(text, exports.BACKEND_HINTS))
+        domains.push("backend");
+    if (/联调|前后端|全栈|跨端|接口.*页面|页面.*接口/.test(raw)) {
+        if (!domains.includes("frontend"))
+            domains.push("frontend");
+        if (!domains.includes("backend"))
+            domains.push("backend");
+    }
+    if (domains.length === 0 && explicitProjects.length > 0) {
+        for (const project of explicitProjects) {
+            const member = members.find((m) => m.project === project);
+            const kind = memberKind(member);
+            if (kind !== "general" && !domains.includes(kind))
+                domains.push(kind);
+        }
+    }
+    let intent = "discussion";
+    if (isGreetingMessage(raw))
+        intent = "greeting";
+    else if (containsAny(text, exports.BUG_HINTS))
+        intent = "bugfix";
+    else if (containsAny(text, exports.REVIEW_HINTS))
+        intent = "review";
+    else if (containsAny(text, exports.TEST_HINTS))
+        intent = "verification";
+    else if (containsAny(text, exports.IMPLEMENT_HINTS))
+        intent = "implementation";
+    else if (containsAny(text, exports.PLANNING_HINTS))
+        intent = "planning";
+    else if (containsAny(text, exports.QUESTION_HINTS))
+        intent = "question";
+    const deliverables = [];
+    if (intent === "implementation")
+        deliverables.push("实现方案或代码修改");
+    if (intent === "bugfix")
+        deliverables.push("问题定位、修复点和验证方式");
+    if (intent === "review")
+        deliverables.push("风险点、修改建议和结论");
+    if (intent === "verification")
+        deliverables.push("验证步骤、结果和遗留风险");
+    if (intent === "planning")
+        deliverables.push("任务拆分、依赖关系和执行顺序");
+    if (deliverables.length === 0)
+        deliverables.push("结论、依据和下一步");
+    const constraints = [];
+    if (/不要|不能|避免|必须|需要|要求|只/.test(raw))
+        constraints.push("包含用户显式约束，子 Agent 需要逐条遵守");
+    if (/紧急|马上|尽快|阻塞|线上/.test(raw))
+        constraints.push("优先级较高");
+    const missingInfo = [];
+    if (!raw)
+        missingInfo.push("缺少需求内容");
+    if (intent === "bugfix" && !/报错|日志|复现|截图|现象|错误/.test(raw))
+        missingInfo.push("缺少具体现象或复现信息");
+    if (intent === "implementation" && domains.length === 0 && explicitProjects.length === 0)
+        missingInfo.push("未明确涉及哪个项目或端");
+    if (domains.length > 1 && !/联调|接口|字段|协议|契约|对接/.test(raw))
+        missingInfo.push("跨端任务可能需要确认接口/字段契约");
+    const needsCoordination = intent !== "greeting" && (explicitProjects.length > 0 ||
+        domains.length > 1 ||
+        intent === "implementation" ||
+        intent === "bugfix" ||
+        intent === "review" ||
+        containsAny(text, exports.BROAD_HINTS));
+    const summaryParts = [
+        intent === "question" ? "用户在咨询问题" : `用户想要${deliverables[0]}`,
+        domains.length ? `涉及${domains.join(" + ")}` : "暂未明确项目范围",
+        explicitProjects.length ? `点名${explicitProjects.join(", ")}` : ""
+    ].filter(Boolean);
+    return {
+        raw,
+        summary: summaryParts.join("；"),
+        intent,
+        domains,
+        deliverables,
+        constraints,
+        explicitProjects,
+        missingInfo,
+        needsCoordination,
+        contextSignal: context ? (0, group_orchestrator_prompts_1.compactText)(context, 240) : "",
+        confidence: explicitProjects.length || domains.length ? 0.82 : needsCoordination ? 0.64 : 0.48,
+    };
+}
+function scoreMember(member, message, analysis = null) {
+    const text = message.toLowerCase();
+    const name = String(member?.project || "").toLowerCase();
+    let score = 0;
+    if (name && text.includes(name))
+        score += 8;
+    if (analysis?.explicitProjects?.includes(member?.project))
+        score += 10;
+    const kind = memberKind(member);
+    if (analysis?.domains?.includes(kind))
+        score += 7;
+    if (kind === "frontend" && containsAny(text, exports.FRONTEND_HINTS))
+        score += 5;
+    if (kind === "backend" && containsAny(text, exports.BACKEND_HINTS))
+        score += 5;
+    if (analysis?.needsCoordination || containsAny(text, exports.BROAD_HINTS))
+        score += 1;
+    return score;
+}
+function explicitMentionTargets(group, message) {
+    const members = getRoutableMembers(group);
+    const results = [];
+    const seen = new Set();
+    const lines = String(message || "").split(/\r?\n/);
+    for (const member of members) {
+        const project = String(member.project || "");
+        if (!project)
+            continue;
+        const mention = `@${project}`;
+        const line = lines.find(item => item.includes(mention)) || "";
+        if (!line)
+            continue;
+        const task = line.replace(mention, "").replace(/^[\s：:，,、\-—]+/, "").trim() || message;
+        if (seen.has(project))
+            continue;
+        seen.add(project);
+        results.push({ member, task });
+    }
+    return results;
+}
+function routeMembers(group, message, analysis = null) {
+    const normalized = normalizeGroupOrchestrator(group);
+    const members = getRoutableMembers(normalized);
+    const explicit = explicitMentionTargets(normalized, message);
+    if (explicit.length > 0)
+        return explicit;
+    const requirement = analysis || analyzeRequirement(normalized, message);
+    const scored = members
+        .map((member) => ({ member, score: scoreMember(member, message, requirement) }))
+        .filter(item => item.score > 0)
+        .sort((a, b) => b.score - a.score);
+    if (scored.length > 0) {
+        const bestScore = scored[0].score;
+        return scored.filter(item => item.score >= Math.max(2, bestScore - 2)).map(item => ({
+            member: item.member,
+            task: message,
+        }));
+    }
+    const text = String(message || "").toLowerCase();
+    if (requirement.needsCoordination || containsAny(text, exports.BROAD_HINTS) || containsAny(text, exports.QUESTION_HINTS)) {
+        return members.map((member) => ({ member, task: message }));
+    }
+    return [];
+}
+function formatRequirementUnderstanding(analysis) {
+    const lines = [
+        `意图：${analysis.intent}`,
+        `理解：${analysis.summary}`,
+        `范围：${analysis.domains.length ? analysis.domains.join(" + ") : "未明确"}`,
+        `交付物：${analysis.deliverables.join("、")}`,
+    ];
+    if (analysis.constraints.length)
+        lines.push(`约束：${analysis.constraints.join("、")}`);
+    if (analysis.missingInfo.length)
+        lines.push(`缺口：${analysis.missingInfo.join("、")}`);
+    return lines;
+}
+function buildDelegationLine(project, task, analysis) {
+    const broadDevelopmentRequest = (0, group_orchestrator_coded_1.isBroadDevelopmentRequest)(task, analysis);
+    const brief = [
+        `需求理解：${analysis.summary}`,
+        `意图：${analysis.intent}`,
+        `交付物：${analysis.deliverables.join("、")}`,
+        analysis.constraints.length ? `约束：${analysis.constraints.join("、")}` : "",
+        analysis.missingInfo.length ? `${broadDevelopmentRequest ? "先按项目职责判断并补齐范围" : "注意缺口"}：${analysis.missingInfo.join("、")}` : "",
+        `原始需求：${(0, group_orchestrator_prompts_1.compactText)(task)}`
+    ].filter(Boolean).join("；");
+    return `@${project} 请从 ${project} 项目职责处理。${brief}。回复时请给出结论、依据、需要修改的点、风险和验证方式。`;
+}
+function buildVisibleAssignmentLine(item) {
+    const project = item?.member?.project || item?.project || "";
+    const task = (0, group_orchestrator_prompts_1.compactText)(item?.task || "", 220);
+    const reason = (0, group_orchestrator_prompts_1.compactText)(item?.reason || "", 120);
+    const dependsOn = String(item?.dependsOn || "").trim();
+    const suffix = [
+        reason ? `原因：${reason}` : "",
+        dependsOn ? `依赖：先等 ${dependsOn}` : "",
+    ].filter(Boolean).join("；");
+    return `@${project} ${task}${suffix ? `（${suffix}）` : ""}`;
+}
+function inferCoordinatorStrategy(analysis = {}, targetCount = 0) {
+    const intent = String(analysis?.intent || "");
+    const hasDocuments = Array.isArray(analysis?.documentFindings) && analysis.documentFindings.length > 0;
+    const complexIntent = ["implementation", "bugfix", "planning", "review"].includes(intent);
+    const crossProject = targetCount > 1 || (Array.isArray(analysis?.domains) && analysis.domains.length > 1);
+    if (hasDocuments || crossProject || complexIntent) {
+        return "research_synthesis_implementation_verification";
+    }
+    return "direct_worker_execution";
+}
+function buildCoordinatorPlan(group, analysis, targets, executionOrder = "parallel", strategy = "") {
+    const targetNames = (targets || []).map((item) => item?.member?.project || item?.project).filter(Boolean);
+    const coordinationStrategy = strategy || inferCoordinatorStrategy(analysis, targetNames.length);
+    const phases = [
+        "理解需求：主 Agent 提炼业务目标、范围、约束、文档依据和缺口",
+        coordinationStrategy === "research_synthesis_implementation_verification"
+            ? "研究与综合：子 Agent 先在各自项目内确认事实，主 Agent 综合成明确实现/验证判断，禁止把理解责任转嫁给 Worker"
+            : "",
+        targetNames.length
+            ? `分配任务：按 ${executionOrder} 派发给 ${targetNames.join("、")}，每个子 Agent 获得自包含工作单`
+            : "分配任务：当前没有可执行子 Agent，先直接回答或向用户补充提问",
+        "协同执行：子 Agent 在各自项目中完成研究、实现、验证，并返回 CCM_AGENT_RECEIPT",
+        "复盘验收：主 Agent 汇总回执、文件变更和验证证据，发现缺口时继续返工",
+    ].filter(Boolean);
+    const missingInfo = Array.isArray(analysis?.missingInfo) ? analysis.missingInfo.filter(Boolean) : [];
+    return {
+        mode: "cc-style-coordinator",
+        strategy: coordinationStrategy,
+        executionOrder,
+        phases,
+        targets: targetNames,
+        missingInfo,
+    };
+}
+function isStructuredCoordinatorFallbackAllowed(input) {
+    const source = String(input?.source || "").toLowerCase();
+    const message = String(input?.message || "");
+    const trustedSource = /^(?:task|cron|daily[_-]?dev|daily-dev-dispatch-repair|mission|global-mission)/.test(source);
+    const structuredPacket = /(?:主 Agent .*工作单|任务标题[:：])/.test(message)
+        && /业务目标[:：]/.test(message)
+        && /验收标准[:：]/.test(message);
+    return trustedSource && structuredPacket;
+}
+function measureGroupMainAgentPayload(input) {
+    const messages = (0, group_orchestrator_llm_1.buildLlmCoordinatorMessages)(input);
+    const config = input?.config || (0, group_orchestrator_config_1.loadOrchestratorConfig)();
+    const toolContext = (0, group_orchestrator_llm_1.buildGroupMainAgentToolContext)(input);
+    const snapshot = (0, session_compaction_core_1.buildModelVisiblePayloadSnapshot)({
+        scope: "group",
+        sessionId: `${String(input?.group?.id || "")}:${String(input?.groupSessionId || input?.group_session_id || "")}`,
+        exactSessionId: String(input?.groupSessionId || input?.group_session_id || ""),
+        provider: String(config?.provider || ""),
+        model: String(config?.model || ""),
+        protocol: String(config?.format || config?.protocol || ""),
+        modelConfig: config,
+        system: messages.filter((message) => message.role === "system"),
+        tools: [...(0, native_query_loop_1.nativeControlToolDefinitions)(), ...(0, native_query_loop_1.catalogToNativeTools)(toolContext)],
+        contextComponents: (0, group_orchestrator_llm_1.buildLlmCoordinatorContextComponents)(input),
+        recentMessages: messages.filter((message) => message.role !== "system"),
+    });
+    return { messages, snapshot, tokens: snapshot.totalTokens };
+}
+async function prepareExactGroupMainAgentInput(input, group, groupSessionId, config, runtime = {}) {
+    if (!groupSessionId.startsWith("gcs_"))
+        return { input, compacted: false, measurement: measureGroupMainAgentPayload(input) };
+    const buildProjection = typeof runtime.buildProjection === "function"
+        ? runtime.buildProjection
+        : group_session_model_context_1.buildExactGroupSessionModelContextPacket;
+    const runCompaction = typeof runtime.runCompaction === "function"
+        ? runtime.runCompaction
+        : (groupId, options) => {
+            const memoryContextApi = require("./group-memory-context");
+            return memoryContextApi.runGroupMemoryAutoCompactionNow(groupId, options);
+        };
+    let projection = buildProjection(group.id, { groupSessionId });
+    let preparedInput = { ...input, group, context: projection.rendered, groupSessionId };
+    let measurement = measureGroupMainAgentPayload(preparedInput);
+    const capacity = (0, group_compaction_strategy_1.resolveGroupModelContextCapacity)(config);
+    const threshold = (0, group_compaction_strategy_1.getGroupAutoCompactThreshold)(config);
+    if (measurement.tokens < threshold) {
+        return { input: preparedInput, compacted: false, projection, measurement, capacity, threshold, compactResult: null };
+    }
+    const toolPreflight = (0, pre_request_tool_context_1.stagePreRequestToolContext)({
+        scope: "group",
+        scopeId: String(group.id || ""),
+        exactSessionId: groupSessionId,
+        messages: measurement.messages,
+        providerPayloadChecksum: String(measurement.snapshot?.payloadChecksum || ""),
+        tokensBefore: Number(measurement.tokens || 0),
+        config,
+    });
+    if (toolPreflight.changed) {
+        preparedInput = { ...preparedInput, __preRequestProviderMessages: toolPreflight.messages };
+        measurement = measureGroupMainAgentPayload(preparedInput);
+        if (measurement.tokens < threshold) {
+            return { input: preparedInput, compacted: true, toolContextCompacted: true, projection, measurement, capacity, threshold, compactResult: null };
+        }
+        delete preparedInput.__preRequestProviderMessages;
+    }
+    const fixedPayload = measureGroupMainAgentPayload({ ...preparedInput, context: "" });
+    const compactResult = await runCompaction(group.id, {
+        sessionId: groupSessionId,
+        reason: "group_main_final_payload_capacity",
+        config: {
+            ...config,
+            memoryCompactionUseModel: true,
+            memoryCompactionMode: "model-required",
+            modelContextWindow: capacity.contextWindow,
+            modelMaxOutputTokens: capacity.reservedOutputTokens,
+            modelVisibleSystemContext: fixedPayload.messages,
+        },
+    });
+    if (compactResult?.success !== true || compactResult?.compacted !== true) {
+        throw new Error(`GROUP_MAIN_FORMAL_COMPACTION_FAILED:${compactResult?.error || compactResult?.reason || "formal_compaction_not_committed"}`);
+    }
+    projection = buildProjection(group.id, { groupSessionId });
+    if (projection.canonicalSummary !== true) {
+        throw new Error("GROUP_MAIN_FORMAL_COMPACTION_FAILED:canonical_summary_missing");
+    }
+    preparedInput = { ...preparedInput, context: projection.rendered };
+    measurement = measureGroupMainAgentPayload(preparedInput);
+    if (measurement.tokens >= threshold) {
+        throw new Error(`GROUP_MAIN_POST_COMPACT_PAYLOAD_BLOCKED:${measurement.tokens}/${threshold}`);
+    }
+    return { input: preparedInput, compacted: true, projection, measurement, capacity, threshold, compactResult };
+}
+async function runGroupOrchestratorCore(input) {
+    const group = normalizeGroupOrchestrator(input.group);
+    const initialInput = { ...input, group };
+    const groupSessionId = String(initialInput.groupSessionId || initialInput.group_session_id || "").trim();
+    const config = (0, group_orchestrator_config_1.loadOrchestratorConfig)();
+    const configIssue = getLlmConfigIssue(config);
+    const raggedInput = groupSessionId.startsWith("gcs_")
+        ? { ...initialInput, group, context: (0, group_session_model_context_1.buildExactGroupSessionModelContextPacket)(group.id, { groupSessionId }).rendered, groupSessionId }
+        : initialInput;
+    const replayRepairContext = (0, group_orchestrator_prompts_1.buildCoordinatorReplayRepairDispatchContext)(group);
+    const contextId = String(raggedInput.contextId || raggedInput.context_id || `group-main-agent-context:${(0, group_orchestrator_coded_1.hashCoordinator)([
+        group?.id || "",
+        groupSessionId,
+        raggedInput.source || "",
+        raggedInput.message || "",
+        String(raggedInput.context || "").slice(-800),
+    ], 24)}`);
+    const sessionId = String(raggedInput.sessionId || raggedInput.session_id || `group-main-agent:${group?.id || "unknown"}:${groupSessionId || "unscoped"}`);
+    const maintenanceNotificationContext = (0, group_orchestrator_prompts_1.buildCoordinatorMaintenanceNotificationInstructions)(group, {
+        contextId,
+        sessionId,
+        groupSessionId,
+        recordDelivery: false,
+        channel: "run-group-orchestrator",
+    });
+    let enrichedInput = {
+        ...raggedInput,
+        group,
+        extraInstructions: [raggedInput.extraInstructions || "", replayRepairContext, maintenanceNotificationContext.text].filter(Boolean).join("\n\n"),
+    };
+    if (!configIssue) {
+        enrichedInput = (await prepareExactGroupMainAgentInput(enrichedInput, group, groupSessionId, config)).input;
+    }
+    const coordinator = getCoordinatorMember(group);
+    if (configIssue) {
+        return {
+            agent: coordinator.project,
+            delegated: [],
+            assignments: [],
+            runtime: "llm-not-configured",
+            agentBoundary: (0, group_orchestrator_config_1.buildGroupMainAgentBoundary)("llm-not-configured"),
+            providerFailure: {
+                kind: "configuration",
+                code: "CCM_MODEL_NOT_CONFIGURED",
+                safeSummary: String(configIssue).slice(0, 220),
+                contentStored: false,
+            },
+            providerFailureTechnical: {
+                schema: "ccm-model-failure-technical-v1",
+                category: "configuration",
+                code: "CCM_MODEL_NOT_CONFIGURED",
+                safeSummary: String(configIssue).slice(0, 220),
+                contentStored: false,
+            },
+            content: "大模型尚未配置，本次请求未开始。\n请完成模型配置后重试。",
+        };
+    }
+    try {
+        (0, group_orchestrator_prompts_1.buildCoordinatorMaintenanceNotificationInstructions)(group, {
+            contextId,
+            sessionId,
+            groupSessionId,
+            recordDelivery: true,
+            channel: "run-group-orchestrator-llm",
+        });
+        return await (0, group_orchestrator_llm_1.runLlmGroupOrchestrator)({ ...enrichedInput, group });
+    }
+    catch (error) {
+        const failure = (0, group_orchestrator_failure_1.classifyGroupOrchestratorFailure)(error);
+        const retryPresentation = (0, model_retry_presentation_1.modelProviderFailurePresentation)(error);
+        const userSummary = retryPresentation.presentable ? retryPresentation.text : failure.userSummary;
+        const providerErrorSummary = (0, group_orchestrator_failure_1.summarizeGroupOrchestratorProviderError)(error);
+        const visibleTurnId = String(input.turnId || input.turn_id || `${group.id}:${groupSessionId}:${Date.now()}`);
+        const anchorMessageId = String(input.anchorMessageId || input.anchor_message_id || "").trim();
+        const elapsedMs = Math.max(0, Number(error?.elapsedMs) || 0);
+        const observedTools = Math.max(0, Number(error?.observationCount || error?.toolResultCount || 0));
+        const providerFailure = {
+            kind: failure.kind,
+            code: String(error?.code || "CCM_MODEL_CALL_FAILED"),
+            retryExhausted: String(error?.code || "") === "CCM_MODEL_RETRY_EXHAUSTED",
+            attempts: Math.max(0, Number(error?.attempts) || 0),
+            maxAttempts: Math.max(0, Number(error?.maxAttempts) || 0),
+            retryCount: retryPresentation.retryCount,
+            maxRetries: retryPresentation.maxRetries,
+            attemptCount: retryPresentation.attemptCount,
+            requestDispatchCount: retryPresentation.requestDispatchCount,
+            responseStartedCount: retryPresentation.responseStartedCount,
+            providerRequestIdPresent: retryPresentation.providerRequestIdPresent,
+            failureKind: retryPresentation.failureKind,
+            elapsedMs,
+            attemptTimeoutMs: Math.max(0, Number(error?.attemptTimeoutMs) || 0),
+            totalTimeoutMs: Math.max(0, Number(error?.totalTimeoutMs) || 0),
+            observationCount: observedTools,
+            userSummary,
+            userGuidance: failure.userGuidance,
+            safeSummary: providerErrorSummary,
+            contentStored: false,
+        };
+        if (group.id && groupSessionId)
+            (0, user_visible_agent_events_1.appendUserVisibleAgentEvent)({
+                eventId: `group-turn:${visibleTurnId}:interrupted`,
+                scope: "group",
+                scopeId: String(group.id),
+                exactSessionId: groupSessionId,
+                ...(anchorMessageId ? { anchorMessageId } : {}),
+                turnId: visibleTurnId,
+                generation: Math.max(0, Number(input.sourceGeneration || input.source_generation || 0)),
+                attempt: Math.max(1, Number(input.recoveryAttempt || input.recovery_attempt || 1)),
+                eventType: "result",
+                display: {
+                    title: "执行已中断",
+                    summary: userSummary,
+                    status: "failed",
+                    ...(elapsedMs ? { durationMs: elapsedMs } : {}),
+                },
+                detail: {
+                    safeResult: providerFailure,
+                    providerRetry: {
+                        retryCount: retryPresentation.retryCount,
+                        maxRetries: retryPresentation.maxRetries,
+                        exhausted: retryPresentation.unavailable && retryPresentation.retryCount >= retryPresentation.maxRetries,
+                        contentStored: false,
+                    },
+                    availableActions: [
+                        { id: "retry-model-call", kind: "retry", label: "立即重试", enabled: true },
+                        { id: "view-model-error", kind: "view_error", label: "查看技术详情", enabled: true },
+                    ],
+                },
+                error: providerFailure.code,
+            });
+        return {
+            agent: coordinator.project,
+            delegated: [],
+            assignments: [],
+            runtime: "llm-error",
+            providerFailure,
+            providerFailureTechnical: {
+                schema: "ccm-model-failure-technical-v1",
+                category: failure.kind,
+                code: providerFailure.code,
+                attempts: providerFailure.attempts,
+                maxAttempts: providerFailure.maxAttempts,
+                elapsedMs: providerFailure.elapsedMs,
+                retryExhausted: providerFailure.retryExhausted,
+                safeSummary: providerErrorSummary,
+                contentStored: false,
+            },
+            usage: error?.usage || null,
+            agentBoundary: (0, group_orchestrator_config_1.buildGroupMainAgentBoundary)("llm-error"),
+            content: retryPresentation.presentable ? userSummary : [userSummary, failure.userGuidance].filter(Boolean).join("\n"),
+        };
+    }
+}
+function streamCanonicalGroupReply(text, onDelta, maxChunkChars = 240) {
+    if (!onDelta)
+        return 0;
+    const value = String(text || "").trim();
+    if (!value)
+        return 0;
+    const chunks = [];
+    for (const paragraph of value.split(/(\n{2,})/)) {
+        if (!paragraph)
+            continue;
+        if (paragraph.length <= maxChunkChars) {
+            chunks.push(paragraph);
+            continue;
+        }
+        const characters = Array.from(paragraph);
+        for (let offset = 0; offset < characters.length; offset += maxChunkChars) {
+            chunks.push(characters.slice(offset, offset + maxChunkChars).join(""));
+        }
+    }
+    chunks.forEach(chunk => onDelta(chunk));
+    return chunks.length;
+}
+async function runGroupOrchestrator(input) {
+    const startedAt = Date.now();
+    const group = normalizeGroupOrchestrator(input.group);
+    const groupSessionId = String(input.groupSessionId || input.group_session_id || "");
+    const coordinator = getCoordinatorMember(group);
+    try {
+        const reusedFirstTurn = !!(input.mainAgentFirstTurnResult || input.main_agent_first_turn_result);
+        const result = input.mainAgentFirstTurnResult || input.main_agent_first_turn_result || await runGroupOrchestratorCore(input);
+        const runtime = String(result?.runtime || "");
+        if (input.onDelta && result?.replyDeltaEmitted !== true && result?.reply_delta_emitted !== true && !["llm-error", "llm-not-configured"].includes(runtime)) {
+            const canonicalReply = String(result?.content || "").trim();
+            if (canonicalReply) {
+                streamCanonicalGroupReply(canonicalReply, input.onDelta);
+                result.streamingMetric = { ...(result.streamingMetric || {}), fallbackStreamCount: Number(result.streamingMetric?.fallbackStreamCount || 0) + 1 };
+            }
+        }
+        const workflowDecision = result?.workflowDecision || result?.analysis?.workflowDecision || null;
+        const selectedRoleSkills = (0, role_skills_1.buildRoleSkillPrompt)("group-main-agent", input.message, {
+            source: input.source || "",
+            phase: "planning",
+            selectedSkillNames: workflowDecision?.selectedSkills || [],
+            modelDecision: workflowDecision,
+            planAuthoring: (0, conversation_plan_mode_gate_1.isConversationPlanModeEnabled)("group", String(group.id || ""), groupSessionId),
+        }).names;
+        const finalRuntime = String(result?.runtime || "");
+        if (groupSessionId) {
+            const sourceIdentity = { agentKind: "group", scope: "group", scopeId: String(group.id), exactSessionId: groupSessionId, generation: 0 };
+            (0, main_agent_context_source_continuity_1.markContextSourcesFromOutput)(sourceIdentity, JSON.stringify({ content: result?.content || "", assignments: result?.assignments || [], workflowDecision }));
+            (0, main_agent_context_source_continuity_1.finalizeContextSourceRun)(sourceIdentity);
+        }
+        if (!reusedFirstTurn)
+            (0, db_1.recordMetric)(coordinator.project, {
+                success: !["llm-error", "llm-not-configured"].includes(finalRuntime),
+                durationMs: Date.now() - startedAt,
+                fileChangeCount: 0,
+                scopeType: "group",
+                groupId: group.id,
+                role: "main_agent",
+                source: String(input.source || "group-orchestrator"),
+                runtime: finalRuntime,
+                traceId: input.traceId || input.trace_id || "",
+                taskId: input.taskId || input.task_id || "",
+                executionId: input.executionId || input.execution_id || "",
+                usage: result?.usage || null,
+                timing: {
+                    modelMs: Number(result?.streamingMetric?.modelMs || 0),
+                    toolWallMs: Number(result?.streamingMetric?.toolWallMs || 0),
+                    firstVisibleFeedbackMs: Number(result?.streamingMetric?.firstVisibleFeedbackMs || 0),
+                    firstTokenMs: Number(result?.streamingMetric?.firstTokenMs || 0),
+                    maxSilentGapMs: Number(result?.streamingMetric?.maxSilentGapMs || 0),
+                },
+                streaming: result?.streamingMetric || null,
+                error: finalRuntime === "llm-error" ? "群聊主 Agent 大模型调用失败" : finalRuntime === "llm-not-configured" ? "群聊主 Agent 模型未配置" : "",
+            });
+        return { ...result, selectedRoleSkills };
+    }
+    catch (error) {
+        (0, db_1.recordMetric)(coordinator.project, {
+            success: false,
+            durationMs: Date.now() - startedAt,
+            fileChangeCount: 0,
+            scopeType: "group",
+            groupId: group.id,
+            role: "main_agent",
+            source: String(input.source || "group-orchestrator"),
+            traceId: input.traceId || input.trace_id || "",
+            taskId: input.taskId || input.task_id || "",
+            executionId: input.executionId || input.execution_id || "",
+            usage: error?.usage || null,
+            error: error?.message || String(error),
+        });
+        throw error;
+    }
+}
+function isContextLimitError(error) {
+    const text = String(error?.message || error || "");
+    return /HTTP\s*413|prompt(?:\s+is)?\s+too\s+long|context(?:_length)?(?:\s+window)?\s*(?:exceeded|limit)|maximum context|token limit/i.test(text);
+}
+function buildReactiveCompactionContext(context, maxChars = 48_000) {
+    const text = String(context || "");
+    if (text.length <= maxChars)
+        return text;
+    const marker = "\n\n…[Reactive Compact：中间上下文已紧急折叠；原始群聊记录仍可按 message id 回溯]…\n\n";
+    const head = Math.floor((maxChars - marker.length) * 0.58);
+    const tail = Math.max(1, maxChars - marker.length - head);
+    return `${text.slice(0, head)}${marker}${text.slice(-tail)}`;
+}
+//# sourceMappingURL=group-orchestrator-routing.js.map

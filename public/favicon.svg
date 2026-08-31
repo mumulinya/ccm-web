@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="CCM">
+  <rect x="64" y="64" width="896" height="896" rx="220" fill="#071719"/>
+  <rect x="73" y="73" width="878" height="878" rx="211" fill="none" stroke="#1a363a" stroke-width="18"/>
+  <path d="M430 300h-76c-74 0-118 48-118 122v180c0 74 44 122 118 122h76" fill="none" stroke="#42d6a4" stroke-width="86" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M594 300h76c74 0 118 48 118 122v180c0 74-44 122-118 122h-76" fill="none" stroke="#39b8d0" stroke-width="86" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M374 682V350l138 170 138-170v332" fill="none" stroke="#edf8f4" stroke-width="74" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="512" cy="520" r="31" fill="#071719"/>
+  <circle cx="512" cy="520" r="12" fill="#77e4c0"/>
+</svg>

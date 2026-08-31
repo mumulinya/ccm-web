@@ -1,0 +1,682 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.createAgentRunnerSupport = createAgentRunnerSupport;
+// Support helpers extracted from server-agent-runner.ts (behavior-freeze).
+// Contains tool/verification/external-runner plumbing used by the three orchestrators.
+const third_party_memory_snapshot_1 = require("./integrations/third-party-memory-snapshot");
+const internal_mcp_runtime_1 = require("./integrations/internal-mcp-runtime");
+const db_1 = require("./core/db");
+const project_verification_discovery_1 = require("./agents/project-verification-discovery");
+function createAgentRunnerSupport(deps) {
+    const { AGENT_RUNNER_DIR, AGENT_RUNNER_REQUESTS_DIR, AGENT_RUNNER_RESULTS_DIR, UPLOAD_DIR, acknowledgeProviderMemoryChannelLaunch, appendDirectAgentDispatchTranscript, bindProjectRunAgentSession, bindProviderMemoryChannelLaunch, broadcastPetSpeech, buildAgentCommand, buildNativeSessionContinuationEvidence, buildProjectConversationBrief, buildProjectExecutionBrief, buildRuntimeToolDispatchGate, buildRuntimeToolSyncPrompt, buildToolAuthorizationPayload, captureAgentRuntimeVersionSnapshot, completeDirectAgentDispatch, createDirectAgentDispatchRequest, createFileChangeSnapshot, createProjectChatRun, detectAgentCommandFailure, extractNativeModelCapabilityReceipt, extractProviderToolAccessEvidence, fs, getAgentCommandLabel, getAgentRunActivityDuration, getAgentRuntime, getFileChanges, getRuntimeExecutionEnv, isSafeVerificationCommand, loadProjectConfigs, markDirectAgentDispatchStarted, normalizeAgentCommandOutput, normalizeAgentRuntimeId, path, persistBoundedOutput, prepareProviderMemoryChannel, publicProjectChatRun, readMemoryContextConsumptionReceipt, recordMetric, recordModelCapabilityRefreshOutcome, recordRuntimeToolSyncAudit, recordTaskAgentSessionTurn, recordVerifiedNativeModelCapabilityReceipt, recoverMemoryContextConsumptionReceipt, registerExternalRunnerRequest, runManagedCommand, runToolCallLoop, sanitizeExecutionEnv, saveProjectChatRuns, sendJson, setAgentActivity, spawn, syncRuntimeTools, terminateManagedChildProcess, toolManager, trackManagedChildProcess, verifyNativeSessionContinuationEvidence, verifyProviderMemoryChannelEvidence, writeSse } = deps;
+    function normalizeToolSelection(tools = {}) {
+        const source = tools && typeof tools === "object" ? tools : {};
+        return {
+            mcp: Array.isArray(source.mcp) ? source.mcp.map((x) => String(x).trim()).filter(Boolean).sort() : [],
+            skill: Array.isArray(source.skill) ? source.skill.map((x) => String(x).trim()).filter(Boolean).sort() : [],
+        };
+    }
+    function hasToolSelection(tools = {}) {
+        const normalized = normalizeToolSelection(tools);
+        return normalized.mcp.length > 0 || normalized.skill.length > 0;
+    }
+    function buildAgentRunnerRuntimeToolPayload(projectName, agentType, allowedTools = null, mcpConfigPath = "", executionInfo = null) {
+        const providedSnapshot = executionInfo?.runtimeToolSnapshot || executionInfo?.runtime_tool_snapshot || null;
+        const snapshotPath = providedSnapshot ? "" : findRuntimeToolSnapshotPath(mcpConfigPath);
+        const loadedSnapshot = providedSnapshot || readJsonFileSafe(snapshotPath) || null;
+        const runtimeToolSnapshot = loadedSnapshot
+            ? normalizeAgentRunnerRuntimeToolSnapshot({
+                ...loadedSnapshot,
+                snapshotPath: loadedSnapshot.snapshotPath || loadedSnapshot.snapshot_path || snapshotPath,
+                mcpConfigPath: loadedSnapshot.mcpConfigPath || loadedSnapshot.mcp_config_path || mcpConfigPath,
+            }, allowedTools, mcpConfigPath)
+            : normalizeAgentRunnerRuntimeToolSnapshot({
+                snapshotPath,
+                mcpConfigPath,
+                allowedTools: allowedTools || { mcp: [], skill: [] },
+            }, allowedTools, mcpConfigPath);
+        const boundTaskId = String(executionInfo?.taskId || executionInfo?.task_id || "");
+        const boundTask = boundTaskId ? (0, db_1.loadTasks)().find((item) => String(item?.id || "") === boundTaskId) : null;
+        const scopeIdentity = {
+            projectName: String(projectName || ""),
+            groupId: String(executionInfo?.groupId || executionInfo?.group_id || ""),
+            exactSessionId: String(executionInfo?.groupSessionId || executionInfo?.group_session_id || executionInfo?.projectSessionId || executionInfo?.project_session_id || boundTask?.group_session_id || boundTask?.project_session_id || ""),
+            taskId: boundTaskId,
+            taskAgentSessionId: String(executionInfo?.taskAgentSessionId || executionInfo?.task_agent_session_id || executionInfo?.agentSession?.id || ""),
+            nativeGeneration: Number(executionInfo?.nativeGeneration || executionInfo?.native_generation || executionInfo?.agentSession?.nativeGeneration || 0),
+            runtime: normalizeAgentRuntimeId(agentType || runtimeToolSnapshot.runtime || "claudecode"),
+        };
+        const authorizationCore = {
+            schema: "ccm-runtime-tool-authorization-snapshot-v2",
+            snapshotId: String(runtimeToolSnapshot.snapshotId || ""),
+            catalogRevision: String(runtimeToolSnapshot.catalogRevision || ""),
+            configuredTools: normalizeToolSelection(runtimeToolSnapshot.configuredTools || {}),
+            executionRoleSkills: Array.from(new Set((runtimeToolSnapshot.executionRoleSkills || []).map((item) => String(item || "").trim()).filter(Boolean))).sort(),
+            enforceExecutionRoleSkills: runtimeToolSnapshot.enforceExecutionRoleSkills === true,
+            effectiveTools: normalizeToolSelection(runtimeToolSnapshot.effectiveTools || runtimeToolSnapshot.allowedTools || {}),
+            scopeIdentity,
+        };
+        Object.assign(runtimeToolSnapshot, authorizationCore, {
+            authorizationSignature: (0, internal_mcp_runtime_1.signInternalMcpEvidence)(authorizationCore),
+        });
+        const runtimeToolDispatchGate = executionInfo?.runtimeToolDispatchGate
+            || executionInfo?.runtime_tool_dispatch_gate
+            || runtimeToolSnapshot.dispatchGate
+            || runtimeToolSnapshot.dispatch_gate
+            || null;
+        return {
+            runtimeToolSnapshot,
+            runtimeToolDispatchGate,
+            runtimeToolSnapshotPath: runtimeToolSnapshot.snapshotPath || "",
+            runtimeToolSnapshotRequired: !!(mcpConfigPath || runtimeToolSnapshot.snapshotPath || hasToolSelection(allowedTools)),
+        };
+    }
+    function normalizeVerificationCommands(value) {
+        const raw = Array.isArray(value) ? value : (typeof value === "string" ? value.split(/\r?\n|,/) : []);
+        const seen = new Set();
+        const commands = [];
+        for (const item of raw) {
+            const command = String(item || "").trim();
+            if (!command || seen.has(command))
+                continue;
+            seen.add(command);
+            commands.push(command);
+        }
+        return commands.slice(0, 8);
+    }
+    function extractVerificationCommandsFromMessage(message) {
+        const text = String(message || "");
+        const commands = [];
+        const add = (value) => {
+            for (const part of value.split(/[；;，,]/)) {
+                const command = part.trim();
+                if (/^(npm run [\w:-]+|mvn \w+|gradle \w+|pytest|go test\b.*|cargo test\b.*)$/i.test(command))
+                    commands.push(command);
+            }
+        };
+        for (const match of text.matchAll(/推荐优先执行的项目验证：([^\n]+)/g))
+            add(match[1] || "");
+        for (const match of text.matchAll(/验证命令：([^\n]+)/g))
+            add(match[1] || "");
+        return normalizeVerificationCommands(commands);
+    }
+    function buildAgentCliAllowedTools(projectName, message = "") {
+        const commands = normalizeVerificationCommands([
+            ...getProjectVerificationCommandsForRunner(projectName),
+            ...extractVerificationCommandsFromMessage(message),
+        ]);
+        const rules = [];
+        for (const command of commands) {
+            rules.push(`Bash(${command})`);
+            if (process.platform === "win32")
+                rules.push(`PowerShell(${command})`);
+        }
+        return Array.from(new Set(rules));
+    }
+    function isSpawnPermissionError(error) {
+        const text = `${error?.code || ""} ${error?.message || ""} ${error?.stderr || ""}`;
+        return /\bEPERM\b|spawnSync .* EPERM|spawn .* EPERM/i.test(text);
+    }
+    function nativeContinuationDoneFields(evidence) {
+        return {
+            requestedNativeSessionId: String(evidence?.requestedNativeSessionId || ""),
+            returnedNativeSessionId: String(evidence?.returnedNativeSessionId || ""),
+            effectiveNativeSessionId: String(evidence?.effectiveNativeSessionId || ""),
+            nativeSessionEvidenceSource: String(evidence?.evidenceSource || "missing"),
+            nativeResumeRequested: evidence?.nativeResumeRequested === true,
+            nativeContinuationAcknowledged: evidence?.nativeContinuationAcknowledged === true,
+            nativeSessionReusable: evidence?.nativeSessionReusable === true,
+            providerOutputContractStatus: String(evidence?.providerOutputContractStatus || ""),
+            providerOutputFormatFingerprint: String(evidence?.providerOutputFormatFingerprint || ""),
+            providerRuntimeVersion: String(evidence?.providerRuntimeVersion || ""),
+            providerRuntimeVersionStatus: String(evidence?.providerRuntimeVersionStatus || ""),
+            providerContractId: String(evidence?.providerContractId || ""),
+            expectedProviderContractId: String(evidence?.expectedProviderContractId || ""),
+            providerContractTransition: evidence?.providerContractTransition === true,
+            providerContractContinuityVerified: evidence?.providerContractContinuityVerified === true,
+            nativeContinuationEvidence: evidence || null,
+        };
+    }
+    async function callAgentViaExternalRunner(projectName, message, workDir, agentType, timeoutMs, allowedTools = null, mcpConfigPath = "", agentSession = null, executionInfo = null) {
+        const initial = await callAgentViaExternalRunnerRaw(projectName, message, workDir, agentType, timeoutMs, allowedTools, mcpConfigPath, agentSession, executionInfo);
+        const loop = await continueAgentToolCalls({
+            output: initial.output,
+            nativeSessionId: initial.nativeSessionId,
+            projectName,
+            workDir,
+            agentType,
+            timeoutMs,
+            allowedTools,
+            mcpConfigPath,
+            agentSession,
+            taskId: String(executionInfo?.taskId || initial.runnerRequestId),
+            executionId: String(executionInfo?.executionId || ""),
+            groupId: String(executionInfo?.groupId || executionInfo?.group_id || ""),
+            onEvent: executionInfo?.onToolEvent,
+            continueAgent: async (prompt, state) => {
+                const continuationSession = {
+                    ...(agentSession || {}),
+                    persistSession: true,
+                    resumeSession: !!state.nativeSessionId,
+                    sessionId: state.nativeSessionId || "",
+                };
+                const next = await callAgentViaExternalRunnerRaw(projectName, prompt, workDir, agentType, timeoutMs, allowedTools, mcpConfigPath, continuationSession, {
+                    ...executionInfo,
+                    taskId: `${executionInfo?.taskId || initial.runnerRequestId}-tool-${state.round}`,
+                    groupId: executionInfo?.groupId || executionInfo?.group_id || "",
+                    skipVerification: true,
+                });
+                return { output: next.output, nativeSessionId: next.nativeSessionId || state.nativeSessionId };
+            },
+        });
+        return { ...initial, output: loop.output, nativeSessionId: loop.nativeSessionId || initial.nativeSessionId };
+    }
+    function getProjectToolSelection(projectName) {
+        const configs = loadProjectConfigs();
+        return normalizeToolSelection(configs?.[projectName]?.tools || {});
+    }
+    function findRuntimeToolSnapshotPath(mcpConfigPath = "") {
+        const configPath = String(mcpConfigPath || "").trim();
+        if (!configPath)
+            return "";
+        const configDir = path.dirname(configPath);
+        const candidates = [
+            path.join(configDir, "runtime-tool-snapshot.json"),
+            path.join(path.dirname(configDir), "runtime-tool-snapshot.json"),
+        ];
+        return candidates.find(candidate => fs.existsSync(candidate)) || "";
+    }
+    function readJsonFileSafe(file = "") {
+        try {
+            return file && fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, "utf-8").replace(/^\uFEFF/, "")) : null;
+        }
+        catch {
+            return null;
+        }
+    }
+    function runtimeToolSnapshotFromAudit(audit = {}, allowedTools = {}) {
+        const dispatchGate = audit.dispatch_gate || audit.dispatchGate || null;
+        const authorizationReadiness = audit.authorization_readiness || audit.authorizationReadiness || null;
+        const configuredTools = normalizeToolSelection(allowedTools?.configuredTools || allowedTools?.configured_tools || allowedTools);
+        const executionRoleSkills = Array.from(new Set((allowedTools?.executionRoleSkills || allowedTools?.execution_role_skills || []).map((item) => String(item || "").trim()).filter(Boolean)));
+        const effectiveTools = normalizeToolSelection(allowedTools || audit.requested || {});
+        return {
+            schema: "ccm-runtime-tool-authorization-snapshot-v2",
+            snapshotId: String(audit.snapshotId || audit.snapshot_id || ""),
+            snapshotPath: String(audit.snapshotPath || audit.snapshot_path || ""),
+            mcpConfigPath: String(audit.mcpConfigPath || audit.mcp_config_path || ""),
+            runtime: normalizeAgentRuntimeId(audit.runtime || ""),
+            allowedTools: effectiveTools,
+            requested: effectiveTools,
+            configuredTools,
+            executionRoleSkills,
+            enforceExecutionRoleSkills: allowedTools?.enforceExecutionRoleSkills === true || allowedTools?.enforce_execution_role_skills === true,
+            effectiveTools,
+            permissionRules: Array.isArray(audit.permission_rules) ? audit.permission_rules : [],
+            permission_rules: Array.isArray(audit.permission_rules) ? audit.permission_rules : [],
+            authorizationReadiness,
+            authorization_readiness: authorizationReadiness,
+            dispatchGate,
+            dispatch_gate: dispatchGate,
+            catalogRevision: String(audit.catalogRevision || ""),
+        };
+    }
+    function normalizeAgentRunnerRuntimeToolSnapshot(snapshot = {}, allowedTools = null, mcpConfigPath = "") {
+        const source = snapshot && typeof snapshot === "object" ? snapshot : {};
+        const dispatchGate = source.dispatchGate || source.dispatch_gate || null;
+        const authorizationReadiness = source.authorizationReadiness || source.authorization_readiness || null;
+        return {
+            ...source,
+            snapshotId: String(source.snapshotId || source.snapshot_id || ""),
+            snapshotPath: String(source.snapshotPath || source.snapshot_path || ""),
+            mcpConfigPath: String(source.mcpConfigPath || source.mcp_config_path || mcpConfigPath || ""),
+            runtime: normalizeAgentRuntimeId(source.runtime || ""),
+            allowedTools: normalizeToolSelection(allowedTools || source.allowedTools || source.allowed_tools || source.effectiveTools || source.effective_tools || source.requested || {}),
+            requested: source.requested || allowedTools || source.allowedTools || source.allowed_tools || { mcp: [], skill: [] },
+            configuredTools: normalizeToolSelection(source.configuredTools || source.configured_tools || allowedTools?.configuredTools || allowedTools?.configured_tools || allowedTools || {}),
+            executionRoleSkills: Array.from(new Set((source.executionRoleSkills || source.execution_role_skills || allowedTools?.executionRoleSkills || allowedTools?.execution_role_skills || []).map((item) => String(item || "").trim()).filter(Boolean))),
+            enforceExecutionRoleSkills: source.enforceExecutionRoleSkills === true || source.enforce_execution_role_skills === true || allowedTools?.enforceExecutionRoleSkills === true,
+            effectiveTools: normalizeToolSelection(source.effectiveTools || source.effective_tools || allowedTools || source.allowedTools || source.requested || {}),
+            permissionRules: source.permissionRules || source.permission_rules || [],
+            permission_rules: source.permission_rules || source.permissionRules || [],
+            authorizationReadiness,
+            authorization_readiness: authorizationReadiness,
+            dispatchGate,
+            dispatch_gate: dispatchGate,
+            catalogRevision: String(source.catalogRevision || source.catalog_revision || ""),
+        };
+    }
+    function getProjectVerificationCommandsForRunner(projectName, workDir = "") {
+        const configs = loadProjectConfigs();
+        const projectConfig = configs?.[projectName] || {};
+        const configured = normalizeVerificationCommands(projectConfig.verification_commands
+            || projectConfig.verificationCommands
+            || projectConfig.test_commands
+            || projectConfig.testCommands
+            || projectConfig.check_commands
+            || projectConfig.checkCommands);
+        return configured.length ? configured : (0, project_verification_discovery_1.discoverProjectVerificationCommands)(workDir);
+    }
+    async function runIndependentProjectVerification(projectName, workDir, timeoutMs, taskId, executionId, agentType) {
+        const commands = getProjectVerificationCommandsForRunner(projectName, workDir).filter(isSafeVerificationCommand);
+        if (!commands.length || !workDir)
+            return "";
+        const verification = [];
+        const failed = [];
+        const results = [];
+        const perCommandTimeout = Math.max(30_000, Math.min(timeoutMs || 300_000, 180_000));
+        for (const command of commands) {
+            try {
+                const managed = await runManagedCommand({
+                    taskId,
+                    executionId,
+                    command,
+                    cwd: workDir,
+                    timeoutMs: perCommandTimeout,
+                    maxOutputBytes: 5 * 1024 * 1024,
+                    env: sanitizeExecutionEnv(getRuntimeExecutionEnv(agentType), []),
+                });
+                verification.push(`${command} passed by external runner (exit 0)`);
+                results.push({ command, status: "passed", exitCode: 0, output: String(managed.stdout || "").slice(-4000) });
+            }
+            catch (error) {
+                const exitCode = error?.exitCode ?? error?.status ?? null;
+                failed.push(`${command} failed by external runner${exitCode === null ? "" : ` (exit ${exitCode})`}`);
+                results.push({ command, status: "failed", exitCode, output: String(error?.stdout || error?.stderr || error?.message || error || "").slice(-4000) });
+            }
+        }
+        return "\n\nCCM_RUNNER_VERIFICATION\n```json\n" + JSON.stringify({
+            ccm_runner_verification: true,
+            status: failed.length ? "failed" : "passed",
+            verification,
+            failed,
+            results,
+        }, null, 2) + "\n```";
+    }
+    function buildProjectToolContext(projectName, workDir = "", agentType = "claudecode", options = {}) {
+        const configuredTools = normalizeToolSelection(getProjectToolSelection(projectName));
+        const selectedRoleSkills = Array.isArray(options.selectedRoleSkills) ? options.selectedRoleSkills : [];
+        const roleSkillNames = selectedRoleSkills.map((item) => String(item?.name || item || "").trim()).filter(Boolean);
+        const toolAuth = buildToolAuthorizationPayload({
+            mcp: configuredTools.mcp,
+            skill: Array.from(new Set([...configuredTools.skill, ...roleSkillNames])),
+        });
+        const allowedTools = toolAuth.tools;
+        const audit = syncRuntimeTools(workDir, agentType, allowedTools, {
+            authorizationReadiness: toolAuth.authorization_readiness,
+            internalMcpServers: options.internalMcpServers || {},
+        });
+        audit.authorization_readiness = toolAuth.authorization_readiness;
+        audit.dispatch_gate = buildRuntimeToolDispatchGate(audit);
+        recordRuntimeToolSyncAudit(audit, projectName);
+        const hasKnowledgeMcp = (audit.internal_mcp || []).some((item) => item.name === "ccm__knowledge_context" && item.state === "synced");
+        const hasPermissionBrokerMcp = (audit.internal_mcp || []).some((item) => item.name === "ccm__permission_broker" && item.state === "synced");
+        const knowledgePrompt = hasKnowledgeMcp ? [
+            "",
+            "[CCM 知识库使用规则]",
+            "- 当前任务提供签名作用域知识工具。任务涉及业务规范、历史文档、接口约定或用户明确要求查资料时，先调用 ccm__knowledge_context.search_knowledge。",
+            "- 需要完整原文时再调用 read_knowledge_document；不得通过文件名读取作用域之外的文档。",
+            "- 使用知识结论时在交付中保留 [source:引用标识]；未命中时明确说明，不得编造资料内容。",
+        ].join("\n") : "";
+        const permissionPrompt = hasPermissionBrokerMcp ? [
+            "",
+            "[CCM 分级权限规则]",
+            "- 项目工作区内的读取、编辑、构建、测试和普通依赖安装按任务包默认权限执行。",
+            "- 超出默认范围前调用 ccm__permission_broker.request_execution_permission；绑定命令的授权必须通过 execute_approved_command 执行，非命令授权才调用 consume_execution_permission。",
+            "- awaiting_user、rejected、expired 或 consumed 均表示不得执行；应报告阻塞并等待主 Agent 或用户。",
+            "- 发布、生产部署、强推、密钥读取、系统提权、项目外路径和破坏性数据库操作不能由子 Agent 自行决定，也不能绕开 CCM 工具直接执行。",
+        ].join("\n") : "";
+        const prompt = [
+            String(options.roleSkillPrompt || "").trim(),
+            toolManager.buildToolPrompt(allowedTools) + buildRuntimeToolSyncPrompt(audit) + knowledgePrompt + permissionPrompt,
+        ].filter(Boolean).join("\n\n");
+        const mcpStatuses = Array.isArray(audit.mcp_statuses) ? audit.mcp_statuses : [];
+        const nativeMcpCount = mcpStatuses.length ? mcpStatuses.filter((item) => item.state === "synced").length : audit.synced.mcp.length;
+        const proxyMcpCount = mcpStatuses.filter((item) => item.state === "proxy_only").length;
+        const authorizationSuffix = toolAuth.authorization_readiness?.dispatchReady === false ? "；授权需处理缺失项" : "";
+        const workEvent = {
+            id: "we" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+            time: new Date().toISOString(),
+            agent: projectName,
+            kind: audit.mode === "failed" ? "error" : "tool",
+            text: audit.mode === "native-and-proxy"
+                ? `${projectName} (${audit.runtime}/${audit.isolation || "project-scope"}) 已交付工具：原生 MCP ${nativeMcpCount}，代理 MCP ${proxyMcpCount}，Skill ${audit.synced.skill.length}${authorizationSuffix}${audit.warnings?.length ? `；${audit.warnings.join("；")}` : ""}`
+                : audit.mode === "ccm-proxy-only"
+                    ? `${projectName} (${audit.runtime}) 使用 CCM 工具代理模式`
+                    : `${projectName} Runtime 工具同步失败：${audit.errors.join("；") || "未知错误"}`,
+            runtimeToolSync: audit,
+        };
+        if (audit.dispatch_gate.dispatchReady === false) {
+            workEvent.kind = "error";
+            workEvent.text = `${projectName} 工具授权派发已阻断：${audit.dispatch_gate.reason}`;
+        }
+        return {
+            prompt,
+            allowedTools,
+            audit,
+            workEvent,
+            dispatchGate: audit.dispatch_gate,
+            runtimeToolSnapshot: runtimeToolSnapshotFromAudit(audit, allowedTools),
+            selectedRoleSkills: selectedRoleSkills.map((item) => ({ name: item.name, kind: item.kind, reason: item.reason })),
+        };
+    }
+    function sendRuntimeToolDispatchBlocked(res, toolContext) {
+        const gate = toolContext?.dispatchGate || toolContext?.audit?.dispatch_gate || {};
+        return sendJson(res, {
+            success: false,
+            error: gate.reason || "MCP/Skill 授权未就绪，已阻止派发子 Agent",
+            runtime_tool_dispatch_gate: gate,
+            runtime_tool_sync: toolContext?.audit || null,
+        }, 409);
+    }
+    function ensureAgentRunnerDirs() {
+        for (const dir of [AGENT_RUNNER_DIR, AGENT_RUNNER_REQUESTS_DIR, AGENT_RUNNER_RESULTS_DIR, UPLOAD_DIR]) {
+            if (!fs.existsSync(dir))
+                fs.mkdirSync(dir, { recursive: true });
+        }
+    }
+    function cleanupAgentRunnerEphemeralResults(maxAgeMs = 24 * 60 * 60 * 1000) {
+        ensureAgentRunnerDirs();
+        const now = Date.now();
+        let removed = 0;
+        for (const name of fs.readdirSync(AGENT_RUNNER_RESULTS_DIR)) {
+            if (!/^[a-zA-Z0-9_.-]+\.json$/.test(String(name || "")))
+                continue;
+            const file = path.join(AGENT_RUNNER_RESULTS_DIR, name);
+            try {
+                const stat = fs.statSync(file);
+                if (!stat.isFile() || now - stat.mtimeMs < Math.max(60_000, maxAgeMs))
+                    continue;
+                fs.unlinkSync(file);
+                removed += 1;
+            }
+            catch { }
+        }
+        return { removed, contentStored: false };
+    }
+    // 外部Runner结果可能含用于一次性归一化的stdout。服务恢复时清理已无人
+    // 等待的过期结果；活跃/刚结束任务仍保留一个恢复窗口。
+    cleanupAgentRunnerEphemeralResults();
+    function createAgentRunnerRequest(projectName, message, workDir, agentType, timeoutMs, allowedTools = null, mcpConfigPath = "", agentSession = null, executionInfo = null) {
+        ensureAgentRunnerDirs();
+        const id = `ar_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+        const groupId = String(executionInfo?.groupId || executionInfo?.group_id || executionInfo?.toolScope?.groupId || executionInfo?.tool_scope?.group_id || "");
+        const groupSessionId = String(executionInfo?.groupSessionId || executionInfo?.group_session_id || "");
+        const sessionLifecycleFence = executionInfo?.sessionLifecycleFence || executionInfo?.session_lifecycle_fence || null;
+        const runtimeToolPayload = buildAgentRunnerRuntimeToolPayload(projectName, agentType, allowedTools, mcpConfigPath, { ...(executionInfo || {}), agentSession: agentSession || null });
+        const request = {
+            id,
+            projectName,
+            workDir,
+            agentType: normalizeAgentRuntimeId(agentType || "claudecode"),
+            timeoutMs,
+            allowedTools,
+            mcpConfigPath,
+            agentSession: agentSession || null,
+            taskId: String(executionInfo?.taskId || ""),
+            executionId: String(executionInfo?.executionId || executionInfo?.taskId || ""),
+            taskAgentSessionId: String(executionInfo?.taskAgentSessionId || executionInfo?.task_agent_session_id || ""),
+            groupId,
+            groupSessionId,
+            trustedMemoryProviderChannelRequired: executionInfo?.trustedMemoryProviderChannelRequired === true,
+            trustedMemoryProviderAcknowledgementRequired: executionInfo?.trustedMemoryProviderAcknowledgementRequired === true,
+            memoryContextConsumptionReceiptRequired: executionInfo?.memoryContextConsumptionReceiptRequired === true,
+            memoryContextConsumptionChallenge: executionInfo?.memoryContextConsumptionChallenge || null,
+            trustedMemoryEnvelopeChecksum: String(executionInfo?.trustedMemoryEnvelopeChecksum || ""),
+            trustedMemoryEnvelopeSourceChecksum: String(executionInfo?.trustedMemoryEnvelopeSourceChecksum || ""),
+            sessionLifecycleFence,
+            runtimeProgressContext: executionInfo?.runtimeProgressContext || executionInfo?.runtime_progress_context || null,
+            agentRuntimeStructuredProgressEnabled: executionInfo?.agentRuntimeStructuredProgressEnabled !== false,
+            agentProgressFallbackTimeoutMs: Math.max(15_000, Math.min(300_000, Number(executionInfo?.agentProgressFallbackTimeoutMs || 60_000))),
+            agentRawOutputRetentionMode: "ephemeral",
+            toolScope: {
+                schema: "ccm-agent-runner-tool-scope-v1",
+                scope: groupId ? "group-project" : "project",
+                groupId,
+                projectName,
+            },
+            runtimeToolSnapshot: runtimeToolPayload.runtimeToolSnapshot,
+            runtimeToolDispatchGate: runtimeToolPayload.runtimeToolDispatchGate,
+            runtimeToolSnapshotPath: runtimeToolPayload.runtimeToolSnapshotPath,
+            runtimeToolSnapshotRequired: runtimeToolPayload.runtimeToolSnapshotRequired,
+            skipVerification: executionInfo?.skipVerification === true,
+            disableBuiltinTools: executionInfo?.disableBuiltinTools === true,
+            cliAllowedTools: Array.isArray(executionInfo?.cliAllowedTools)
+                ? Array.from(new Set(executionInfo.cliAllowedTools.map((item) => String(item || "").trim()).filter(Boolean)))
+                : Array.from(new Set([
+                    ...buildAgentCliAllowedTools(projectName, message),
+                    ...(executionInfo?.memoryContextConsumptionReceiptRequired === true
+                        ? third_party_memory_snapshot_1.THIRD_PARTY_MEMORY_MCP_TOOL_ALIASES
+                        : []),
+                ])),
+            message,
+            status: "pending",
+            created_at: new Date().toISOString(),
+        };
+        const tmpFile = path.join(AGENT_RUNNER_REQUESTS_DIR, `${id}.tmp`);
+        const requestFile = path.join(AGENT_RUNNER_REQUESTS_DIR, `${id}.json`);
+        fs.writeFileSync(tmpFile, JSON.stringify(request, null, 2), "utf-8");
+        fs.renameSync(tmpFile, requestFile);
+        return { id, requestFile, resultFile: path.join(AGENT_RUNNER_RESULTS_DIR, `${id}.json`) };
+    }
+    async function waitForAgentRunnerResult(resultFile, timeoutMs) {
+        const started = Date.now();
+        const pollMs = 1000;
+        while (Date.now() - started < Math.max(1000, timeoutMs || 300000)) {
+            if (fs.existsSync(resultFile)) {
+                try {
+                    const result = JSON.parse(fs.readFileSync(resultFile, "utf-8").replace(/^\uFEFF/, ""));
+                    // 外部Runner结果中的原始stdout只用于本次归一化。读取进内存后立即
+                    // 删除临时结果文件，后续持久恢复使用无正文direct-dispatch证据。
+                    try {
+                        fs.unlinkSync(resultFile);
+                    }
+                    catch { }
+                    return result;
+                }
+                catch { }
+            }
+            await new Promise(resolve => setTimeout(resolve, pollMs));
+        }
+        throw new Error("外部 Agent Runner 等待超时；请运行 npm run agent-runner:ps 或 npm run agent-runner 启用外部执行通道");
+    }
+    function recordNativeCapacityRefreshOutcome(agentType, model, capabilityRecord, binding = {}) {
+        const provider = normalizeAgentRuntimeId(agentType);
+        const refreshed = capabilityRecord?.recorded === true;
+        const supportsNativeMetadata = ["codex", "cursor"].includes(provider);
+        return recordModelCapabilityRefreshOutcome({
+            provider,
+            model: capabilityRecord?.entry?.model || model || "",
+            outcome: refreshed ? "refreshed" : supportsNativeMetadata ? "metadata_absent" : "unsupported",
+            receiptEvidenceChecksum: capabilityRecord?.entry?.checksum || "",
+            refreshRequest: capabilityRecord?.refreshRequest || null,
+            reason: refreshed ? "verified_native_capability_receipt_recorded" : supportsNativeMetadata ? "native_execution_completed_without_model_capacity_metadata" : "runtime_has_no_supported_native_capacity_metadata_adapter",
+            ...binding,
+        });
+    }
+    async function callAgentViaExternalRunnerRaw(projectName, message, workDir, agentType, timeoutMs, allowedTools = null, mcpConfigPath = "", agentSession = null, executionInfo = null) {
+        const request = createAgentRunnerRequest(projectName, message, workDir, agentType, timeoutMs, allowedTools, mcpConfigPath, agentSession, executionInfo);
+        if (executionInfo?.executionId)
+            registerExternalRunnerRequest(executionInfo.executionId, request.id);
+        executionInfo?.onRunnerRequestCreated?.(request.id);
+        const result = await waitForAgentRunnerResult(request.resultFile, timeoutMs);
+        if (!result?.success) {
+            const label = result?.command || getAgentCommandLabel(agentType);
+            const exitText = result?.exitCode === undefined || result?.exitCode === null ? "" : `，exitCode=${result.exitCode}`;
+            let persistedRequest = null;
+            try {
+                persistedRequest = JSON.parse(fs.readFileSync(request.requestFile, "utf-8"));
+            }
+            catch { }
+            throw Object.assign(new Error(`[${projectName}] 外部 Agent Runner 执行 ${label} 失败${exitText}：${result?.error || result?.output || "未知错误"}`), {
+                runnerRequestId: request.id,
+                runnerStarted: !!persistedRequest?.started_at && result?.runtimeToolDispatchBlocked !== true,
+                memoryContextConsumptionRecovery: result?.memoryContextConsumptionRecovery || result?.memory_context_consumption_recovery || null,
+            });
+        }
+        const persistedContinuationEvidence = result.nativeContinuationEvidence || null;
+        const persistedContinuationValidation = persistedContinuationEvidence
+            ? verifyNativeSessionContinuationEvidence(persistedContinuationEvidence, {
+                provider: normalizeAgentRuntimeId(agentType),
+                runnerRequestId: request.id,
+                requestedNativeSessionId: agentSession?.sessionId || "",
+                expectedProviderContractId: agentSession?.expectedProviderContractId || agentSession?.providerContractId || "",
+            })
+            : { valid: false, issues: ["evidence_missing"] };
+        const nativeContinuationEvidence = persistedContinuationValidation.valid
+            ? persistedContinuationEvidence
+            : buildNativeSessionContinuationEvidence({
+                provider: normalizeAgentRuntimeId(agentType),
+                runnerRequestId: request.id,
+                requestedNativeSessionId: agentSession?.sessionId || "",
+                returnedNativeSessionId: result.returnedNativeSessionId
+                    || (result.nativeSessionEvidenceSource === "provider_output" ? result.nativeSessionId : ""),
+                providerOutputContractEvidence: result.providerOutputContractEvidence || null,
+                providerRuntimeVersionSnapshot: result.providerRuntimeVersionSnapshot || null,
+                expectedProviderContractId: agentSession?.expectedProviderContractId || agentSession?.providerContractId || "",
+                nativeResumeRequested: agentSession?.resumeSession === true,
+                runnerSuccess: true,
+            });
+        const nativeModelCapabilityRecord = result.nativeModelCapabilityReceipt
+            ? recordVerifiedNativeModelCapabilityReceipt(result.nativeModelCapabilityReceipt, {
+                provider: normalizeAgentRuntimeId(agentType),
+                runnerRequestId: request.id,
+                groupId: executionInfo?.groupId || executionInfo?.group_id || "",
+                taskId: executionInfo?.taskId || "",
+                executionId: executionInfo?.executionId || executionInfo?.taskId || "",
+                taskAgentSessionId: executionInfo?.taskAgentSessionId || executionInfo?.task_agent_session_id || "",
+                nativeSessionId: nativeContinuationEvidence.effectiveNativeSessionId,
+            })
+            : null;
+        const modelCapabilityRefreshOutcome = recordNativeCapacityRefreshOutcome(agentType, executionInfo?.model || executionInfo?.modelId || "", nativeModelCapabilityRecord, {
+            runnerRequestId: request.id,
+            taskId: executionInfo?.taskId || "",
+            executionId: executionInfo?.executionId || executionInfo?.taskId || "",
+            taskAgentSessionId: executionInfo?.taskAgentSessionId || executionInfo?.task_agent_session_id || "",
+            nativeSessionId: nativeContinuationEvidence.nativeSessionReusable ? nativeContinuationEvidence.effectiveNativeSessionId : "",
+        });
+        return {
+            output: String(result.output || "").trim(),
+            fileChanges: result.fileChanges || null,
+            usage: result.usage || null,
+            runnerRequestId: request.id,
+            nativeSessionId: nativeContinuationEvidence.nativeSessionReusable ? nativeContinuationEvidence.effectiveNativeSessionId : "",
+            ...nativeContinuationDoneFields(nativeContinuationEvidence),
+            nativeModelCapabilityReceipt: result.nativeModelCapabilityReceipt || null,
+            nativeModelCapabilityRecord,
+            modelCapabilityRefreshOutcome,
+            providerToolAccessEvidence: result.providerToolAccessEvidence || result.provider_tool_access_evidence || null,
+            providerMemoryChannelEvidence: result.providerMemoryChannelEvidence || result.provider_memory_channel_evidence || null,
+            memoryContextConsumptionReceipt: result.memoryContextConsumptionReceipt || result.memory_context_consumption_receipt || null,
+            memoryContextConsumptionRecovery: result.memoryContextConsumptionRecovery || result.memory_context_consumption_recovery || null,
+        };
+    }
+    async function runManagedAgentContinuation(input) {
+        const tmpMsg = path.join(UPLOAD_DIR, `_tool_continue_${Date.now()}_${Math.random().toString(36).slice(2, 7)}.txt`);
+        if (!fs.existsSync(UPLOAD_DIR))
+            fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+        fs.writeFileSync(tmpMsg, input.prompt, "utf-8");
+        const sessionId = String(input.nativeSessionId || input.agentSession?.sessionId || "");
+        const sessionOptions = {
+            ...(input.agentSession || {}),
+            persistSession: true,
+            resumeSession: !!sessionId,
+            sessionId,
+        };
+        try {
+            const managed = await runManagedCommand({
+                taskId: `${input.taskId}-tool-${input.round}`,
+                executionId: input.executionId || "",
+                command: buildAgentCommand(input.agentType, tmpMsg, {
+                    mcpConfigPath: input.mcpConfigPath,
+                    ...sessionOptions,
+                }),
+                cwd: (input.workDir || process.cwd()).replace(/\\/g, "/"),
+                timeoutMs: input.timeoutMs || 300000,
+                maxOutputBytes: Number(input.maxOutputBytes || 2 * 1024 * 1024),
+                env: sanitizeExecutionEnv(getRuntimeExecutionEnv(input.agentType), input.envAllowlist || []),
+                project: input.projectName,
+                agentType: input.agentType,
+                source: "tool-continuation",
+                commandLabel: getAgentCommandLabel(input.agentType),
+                title: `工具结果续跑第 ${input.round} 轮`,
+            });
+            const normalized = normalizeAgentCommandOutput(input.agentType, String(managed.stdout || "").trim());
+            const failure = detectAgentCommandFailure(input.agentType, String(managed.stdout || "").trim(), 0, "");
+            if (failure.failed)
+                throw new Error(failure.message || "Agent 工具续跑失败");
+            return {
+                output: persistBoundedOutput(`${input.taskId}-tool-${input.round}`, normalized.output, Number(input.maxContextOutputBytes || 256 * 1024)).content,
+                nativeSessionId: normalized.sessionId || sessionId,
+            };
+        }
+        finally {
+            try {
+                fs.unlinkSync(tmpMsg);
+            }
+            catch { }
+        }
+    }
+    async function continueAgentToolCalls(input) {
+        return runToolCallLoop({
+            initialOutput: input.output,
+            initialSessionId: input.nativeSessionId || input.agentSession?.sessionId || "",
+            scope: input.allowedTools || undefined,
+            runtime: normalizeAgentRuntimeId(input.agentType),
+            project: input.projectName,
+            groupId: input.groupId || "",
+            taskId: input.taskId,
+            executionId: input.executionId || "",
+            source: input.groupId ? "group-agent" : "project-agent",
+            maxRounds: 4,
+            parseToolCalls: text => toolManager.parseToolCalls(text),
+            executeToolCall: (name, args, scope) => toolManager.executeToolCall(name, args, scope),
+            onEvent: input.onEvent,
+            continueAgent: input.continueAgent || ((prompt, state) => runManagedAgentContinuation({
+                projectName: input.projectName,
+                prompt,
+                workDir: input.workDir,
+                agentType: input.agentType,
+                timeoutMs: input.timeoutMs,
+                mcpConfigPath: input.mcpConfigPath,
+                agentSession: input.agentSession,
+                nativeSessionId: state.nativeSessionId,
+                taskId: input.taskId,
+                executionId: input.executionId,
+                round: state.round,
+                envAllowlist: input.envAllowlist,
+                maxOutputBytes: input.maxOutputBytes,
+                maxContextOutputBytes: input.maxContextOutputBytes,
+            })),
+        });
+    }
+    return {
+        normalizeToolSelection,
+        hasToolSelection,
+        buildAgentRunnerRuntimeToolPayload,
+        normalizeVerificationCommands,
+        extractVerificationCommandsFromMessage,
+        buildAgentCliAllowedTools,
+        isSpawnPermissionError,
+        nativeContinuationDoneFields,
+        callAgentViaExternalRunner,
+        getProjectToolSelection,
+        findRuntimeToolSnapshotPath,
+        readJsonFileSafe,
+        runtimeToolSnapshotFromAudit,
+        normalizeAgentRunnerRuntimeToolSnapshot,
+        getProjectVerificationCommandsForRunner,
+        runIndependentProjectVerification,
+        buildProjectToolContext,
+        sendRuntimeToolDispatchBlocked,
+        ensureAgentRunnerDirs,
+        cleanupAgentRunnerEphemeralResults,
+        createAgentRunnerRequest,
+        waitForAgentRunnerResult,
+        recordNativeCapacityRefreshOutcome,
+        callAgentViaExternalRunnerRaw,
+        runManagedAgentContinuation,
+        continueAgentToolCalls,
+    };
+}
+//# sourceMappingURL=server-agent-runner-support.js.map

@@ -1,0 +1,424 @@
+"use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.GROUP_SESSION_ID_PATTERN = exports.GLOBAL_MODEL_FORBIDDEN_FIELD = exports.GLOBAL_MODEL_ROUTE_KEYS = void 0;
+exports.compactObservation = compactObservation;
+exports.redactGroupSessionIds = redactGroupSessionIds;
+exports.redactGroupSessionFields = redactGroupSessionFields;
+exports.projectRoutingValue = projectRoutingValue;
+exports.projectProjectRows = projectProjectRows;
+exports.projectGroupRows = projectGroupRows;
+exports.projectGlobalTaskRows = projectGlobalTaskRows;
+exports.projectGlobalAgentObservationForModel = projectGlobalAgentObservationForModel;
+exports.projectGlobalAgentReasoningForModel = projectGlobalAgentReasoningForModel;
+exports.parseGlobalAgentDecision = parseGlobalAgentDecision;
+exports.normalizeDecision = normalizeDecision;
+exports.buildGlobalAgentModelMessages = buildGlobalAgentModelMessages;
+const crypto = __importStar(require("crypto"));
+const role_skills_1 = require("../../skills/role-skills");
+const reasoning_loop_1 = require("../reasoning-loop");
+const workflow_decision_1 = require("../workflow-decision");
+const transient_model_content_1 = require("../../system/transient-model-content");
+const global_native_messages_1 = require("./global-native-messages");
+const main_agent_identity_1 = require("../main-agent-identity");
+const slash_command_session_state_1 = require("../../system/slash-command-session-state");
+const global_agent_tool_authorization_1 = require("../../modules/global/global-agent-tool-authorization");
+const global_agent_context_envelope_1 = require("../../system/global-agent-context-envelope");
+function compactObservation(value) {
+    return value;
+}
+exports.GLOBAL_MODEL_ROUTE_KEYS = new Set([
+    "success", "accepted", "completed", "replayed", "operation", "id", "mission_id", "global_mission_id",
+    "supervisor_id", "status", "state", "supervisor_status", "task_id", "group_id", "project", "target",
+    "name", "queued", "enabled", "schedule", "target_type", "target_conversation", "children", "rejected", "count", "total", "active",
+    "updated_at", "created_at", "completed_at", "trace_id", "phase", "attempt", "attempts", "max_attempts",
+]);
+exports.GLOBAL_MODEL_FORBIDDEN_FIELD = /(?:^|_)(?:group_session(?:_id)?|group_messages?|group_memory|project_memory|messages?|prompt|raw_payload|raw_receipt|worker_context_packet|task_agent_session|native_session)(?:$|_)/i;
+exports.GROUP_SESSION_ID_PATTERN = /\bgcs_[a-z0-9_-]+\b/ig;
+function redactGroupSessionIds(value) {
+    return typeof value === "string" ? value.replace(exports.GROUP_SESSION_ID_PATTERN, "[group-session-redacted]") : value;
+}
+function redactGroupSessionFields(value) {
+    if (Array.isArray(value))
+        return value.slice(0, 100).map(redactGroupSessionFields);
+    if (!value || typeof value !== "object")
+        return redactGroupSessionIds(value);
+    const projected = {};
+    for (const [key, nested] of Object.entries(value)) {
+        if (exports.GLOBAL_MODEL_FORBIDDEN_FIELD.test(key))
+            continue;
+        projected[key] = redactGroupSessionFields(nested);
+    }
+    return projected;
+}
+function projectRoutingValue(value) {
+    if (Array.isArray(value))
+        return value.slice(0, 100).map(projectRoutingValue);
+    if (!value || typeof value !== "object")
+        return redactGroupSessionIds(value);
+    const projected = {};
+    for (const [key, nested] of Object.entries(value)) {
+        if (exports.GLOBAL_MODEL_FORBIDDEN_FIELD.test(key) || !exports.GLOBAL_MODEL_ROUTE_KEYS.has(key))
+            continue;
+        projected[key] = projectRoutingValue(nested);
+    }
+    return projected;
+}
+function projectProjectRows(rows) {
+    return (Array.isArray(rows) ? rows : []).slice(0, 100).map((row) => ({
+        name: redactGroupSessionIds(String(row?.name || "")),
+        agent: redactGroupSessionIds(String(row?.agent || "")),
+        platform: redactGroupSessionIds(String(row?.platform || "")),
+        source_access: "delegated_to_project_main_agent",
+    }));
+}
+function projectGroupRows(rows) {
+    return (Array.isArray(rows) ? rows : []).slice(0, 100).map((row) => ({
+        id: redactGroupSessionIds(String(row?.id || "")),
+        name: redactGroupSessionIds(String(row?.name || "")),
+        members: (Array.isArray(row?.members) ? row.members : []).slice(0, 100).map((member) => ({
+            project: redactGroupSessionIds(String(member?.project || "")),
+            agent: redactGroupSessionIds(String(member?.agent || "")),
+        })),
+    }));
+}
+function projectGlobalTaskRows(observation) {
+    if (observation?.task_boundary?.policy !== "global_agent_owned_tasks_only")
+        return [];
+    return (Array.isArray(observation?.tasks) ? observation.tasks : []).slice(0, 100).map((task) => ({
+        id: redactGroupSessionIds(String(task?.id || "")),
+        title: redactGroupSessionIds(String(task?.title || "")),
+        status: String(task?.status || ""),
+        status_detail: redactGroupSessionIds(String(task?.status_detail || "")),
+        group_id: redactGroupSessionIds(String(task?.group_id || "")),
+        target_project: redactGroupSessionIds(String(task?.target_project || "")),
+        updated_at: String(task?.updated_at || ""),
+        trace_id: redactGroupSessionIds(String(task?.trace_id || "")),
+    }));
+}
+function projectGlobalAgentObservationForModel(toolName, observation) {
+    const name = String(toolName || "");
+    if (!observation || typeof observation !== "object")
+        return observation === undefined ? undefined : { available: true };
+    if (name === "list_projects")
+        return { success: observation.success !== false, projects: projectProjectRows(observation.projects) };
+    if (name === "inspect_project")
+        return {
+            success: observation.success !== false,
+            project: redactGroupSessionIds(String(observation.project || "")),
+            config: observation.config ? {
+                configured: observation.config.configured === true,
+                agent: redactGroupSessionIds(String(observation.config.agent || "")),
+                platform: redactGroupSessionIds(String(observation.config.platform || "")),
+            } : undefined,
+            source_access: "delegated_to_project_main_agent",
+            memory_boundary: { project_memory_included: false, policy: "routing_metadata_only_delegate_to_project_main_agent" },
+        };
+    if (name === "request_project_source_inquiry")
+        return compactObservation(redactGroupSessionFields(observation));
+    if (name === "request_group_source_inquiry")
+        return compactObservation(redactGroupSessionFields(observation));
+    if (name === "list_groups")
+        return { success: observation.success !== false, groups: projectGroupRows(observation.groups) };
+    if (name === "list_tasks")
+        return {
+            success: observation.success !== false,
+            tasks: projectGlobalTaskRows(observation),
+            task_boundary: { policy: "global_agent_owned_tasks_only", historical_unproven_rows_dropped: observation?.task_boundary?.policy !== "global_agent_owned_tasks_only" },
+        };
+    if (name === "list_cron")
+        return { success: observation.success !== false, jobs: projectRoutingValue(observation.jobs) };
+    if (name === "inspect_system")
+        return {
+            success: observation.success !== false,
+            projects: projectProjectRows(observation.projects),
+            groups: projectGroupRows(observation.groups),
+            missions: projectRoutingValue(observation.missions),
+            memory_context_boundary: { group_session_context_included: false, group_memory_included: false, project_memory_included: false },
+        };
+    if (["query_global_memory", "manage_global_memory", "query_knowledge"].includes(name))
+        return compactObservation(redactGroupSessionFields(observation));
+    return projectRoutingValue(observation);
+}
+function projectGlobalAgentReasoningForModel(reasoning) {
+    return {
+        version: reasoning.version,
+        original_goal: reasoning.original_goal,
+        effective_goal: reasoning.effective_goal,
+        authorization_scope: reasoning.authorization_scope,
+        clarification_chain: reasoning.clarification_chain,
+        plan_version: reasoning.plan_version,
+        replan_required: reasoning.replan_required,
+        fact_snapshots: reasoning.fact_snapshots.map(item => ({ id: item.id, source: item.source, hash: item.hash, at: item.at })),
+        assertions: reasoning.assertions.map(item => ({ id: item.id, kind: item.kind, status: item.status, updated_at: item.updated_at })),
+        deviations: reasoning.deviations.map(item => ({ id: item.id, type: item.type, severity: item.severity, at: item.at })),
+        recovery_checks: reasoning.recovery_checks.map(item => ({
+            goal_revalidated: item.goal_revalidated,
+            state_revalidated: item.state_revalidated,
+            acceptance_revalidated: item.acceptance_revalidated,
+            remaining_gap_count: item.remaining_gaps.length,
+            at: item.at,
+        })),
+        updated_at: reasoning.updated_at,
+    };
+}
+function parseGlobalAgentDecision(raw, fallbackWorkflowDecision = null) {
+    if (raw && typeof raw === "object")
+        return normalizeDecision(raw, fallbackWorkflowDecision);
+    const text = String(raw || "").trim();
+    const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1]?.trim();
+    const candidates = [fenced, text, text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1)].filter(Boolean);
+    let lastError;
+    for (const candidate of candidates) {
+        try {
+            return normalizeDecision(JSON.parse(candidate), fallbackWorkflowDecision);
+        }
+        catch (error) {
+            lastError = error;
+        }
+    }
+    throw new Error(`Agent 决策不是合法 JSON：${lastError?.message || "无法解析"}`);
+}
+function normalizeDecision(value, fallbackWorkflowDecision = null) {
+    const state = String(value?.state || "").toLowerCase();
+    if (!["answer", "investigate", "plan", "execute", "needs_confirmation", "complete"].includes(state))
+        throw new Error(`无效决策状态：${state || "空"}`);
+    const tool = value?.tool && value.tool.name ? { name: String(value.tool.name), arguments: value.tool.arguments && typeof value.tool.arguments === "object" ? value.tool.arguments : {} } : null;
+    const rawCompletion = value?.completion && typeof value.completion === "object" ? value.completion : null;
+    const compactItem = (item) => typeof item === "string" ? item : JSON.stringify(item);
+    const rawWorkflowDecision = value?.workflowDecision || value?.workflow_decision || null;
+    const derivedWorkflowDecision = {
+        actionRequired: !!tool,
+        requiresCodeChanges: tool?.name === "decompose_requirement_epic",
+        needsEpicDecomposition: tool?.name === "decompose_requirement_epic",
+        reason: "根据大模型返回的状态和工具选择生成工作流记录",
+        confidence: Number(value?.intent?.confidence ?? 0.8),
+    };
+    const workflowDecision = (0, workflow_decision_1.normalizeWorkflowDecision)({
+        ...(fallbackWorkflowDecision || {}),
+        ...(rawWorkflowDecision || derivedWorkflowDecision),
+    });
+    const intent = value?.intent && typeof value.intent === "object" ? value.intent : {
+        category: workflowDecision.riskLevel === "high"
+            ? "high_risk"
+            : workflowDecision.actionRequired
+                ? "execution"
+                : workflowDecision.readAction === "inspect_status"
+                    ? "analysis"
+                    : workflowDecision.readAction === "inspect_source"
+                        ? "analysis"
+                        : workflowDecision.intentKind === "question" ? "question" : "conversation",
+        goal: String(value?.message || ""),
+        action_required: workflowDecision.actionRequired,
+        target_refs: workflowDecision.targetRefs,
+        impact_scope: workflowDecision.impactScope,
+        confidence: workflowDecision.confidence,
+        authorization_basis: "none",
+        reason: workflowDecision.reason,
+    };
+    return {
+        state,
+        message: String(value?.message || "").slice(0, 20_000),
+        plan: Array.isArray(value?.plan)
+            ? value.plan.map((item) => String(item).slice(0, 500)).slice(0, 12)
+            : value?.plan?.schema === "ccm-implementation-plan-v2"
+                ? value.plan
+                : [],
+        tool,
+        intent,
+        workflowDecision,
+        completion: rawCompletion ? {
+            summary: String(rawCompletion.summary || ""),
+            evidence: Array.isArray(rawCompletion.evidence) ? rawCompletion.evidence.map(compactItem).slice(0, 20) : [],
+            risks: Array.isArray(rawCompletion.risks) ? rawCompletion.risks.map(compactItem).slice(0, 20) : [],
+            next_action: String(rawCompletion.next_action || ""),
+        } : undefined,
+    };
+}
+/**
+ * The global directory is intentionally broad, but it must never become a
+ * model-sized dump of every MCP schema, resource and historical task.  The
+ * detailed records remain available through the read tools.  This projection
+ * is the only global context embedded in a provider request.
+ */
+function buildBoundedGlobalModelContext(context) {
+    return (0, global_agent_context_envelope_1.buildGlobalModelContextProjectionV2)(context);
+}
+async function buildGlobalAgentModelMessages(run, runtime, options = {}) {
+    const context = runtime.getContext ? await runtime.getContext(run) : {};
+    const boundaryValidation = runtime.verifyContextBoundary?.(context, run);
+    if (boundaryValidation === false || (typeof boundaryValidation === "object" && boundaryValidation?.valid !== true)) {
+        const issues = typeof boundaryValidation === "object" && Array.isArray(boundaryValidation?.issues) ? boundaryValidation.issues : ["context_boundary_rejected"];
+        throw new Error(`global agent model context boundary failed: ${issues.join(", ")}`);
+    }
+    (0, reasoning_loop_1.captureReasoningFacts)(run.reasoning_loop, "current_system_context", context);
+    const priorSteps = run.steps.map(step => ({
+        index: step.index,
+        state: step.state,
+        tool: step.tool ? {
+            name: step.tool.name,
+            arguments_checksum: crypto.createHash("sha256").update(JSON.stringify(redactGroupSessionFields(step.tool.arguments) ?? null)).digest("hex"),
+            risk: step.tool.risk,
+        } : null,
+        result_checksum: step.observation === undefined
+            ? ""
+            : crypto.createHash("sha256").update(JSON.stringify(projectGlobalAgentObservationForModel(step.tool?.name || "", step.observation) ?? null)).digest("hex"),
+        error: step.error ? "tool_failed" : "",
+    }));
+    const roleSkills = (0, role_skills_1.buildRoleSkillPrompt)("global-agent", run.reasoning_loop.effective_goal || run.user_message, {
+        source: run.source || "",
+        phase: "planning",
+        selectedSkillNames: (run.workflow_decision || run.workflowDecision)?.selectedSkills || [],
+        modelDecision: run.workflow_decision || run.workflowDecision || null,
+    });
+    const sessionId = String(run.session_id || "");
+    const loadedToolNames = run.loaded_tool_names || run.loadedToolNames || [];
+    const authorizedTools = (0, global_agent_tool_authorization_1.buildGlobalAgentToolRuntimeContext)({ taskId: run.id, sessionId, source: run.source || "global-agent-model-messages" }, loadedToolNames, { executionSkills: roleSkills.names });
+    const identityInput = {
+        sessionDirective: (0, slash_command_session_state_1.renderSlashCommandSessionDirective)("global", "global", sessionId),
+        roleSkillsPrompt: roleSkills.prompt,
+    };
+    const sessionGuidance = [(0, main_agent_identity_1.buildGlobalMainSessionGuidance)(), (0, main_agent_identity_1.buildGlobalMainDynamicContext)(identityInput)].filter(Boolean).join("\n\n");
+    const identityRules = (0, main_agent_identity_1.buildGlobalMainIdentityRules)(identityInput);
+    const mcpPolicy = String(authorizedTools.policy_prompt || "").trim();
+    const identitySystem = identityRules;
+    const continuation = options.sessionContinuationOverride !== undefined
+        ? options.sessionContinuationOverride
+        : context?.session_continuity && typeof context.session_continuity === "object"
+            ? context.session_continuity
+            : null;
+    const continuationMessages = (Array.isArray(continuation?.messages) ? continuation.messages : [])
+        .map((item) => ({ role: item?.role === "assistant" ? "assistant" : "user", content: String(item?.content || "") }))
+        .filter((item) => item.content.trim());
+    const currentGoal = String(run.reasoning_loop.effective_goal || run.user_message || "").trim();
+    const continuationWithoutCurrent = continuationMessages.filter((item) => !(item.role === "user" && item.content.trim() === currentGoal));
+    const continuationKeys = new Set(continuationWithoutCurrent.map((item) => `${item.role}\0${item.content.trim()}`));
+    const runHistoryMessages = (Array.isArray(run.history) ? run.history : [])
+        .map((item) => ({ role: item?.role === "assistant" ? "assistant" : "user", content: String(item?.content || "") }))
+        .filter((item) => item.content.trim() && item.content.trim() !== currentGoal)
+        .filter((item) => {
+        const key = `${item.role}\0${item.content.trim()}`;
+        if (continuationKeys.has(key))
+            return false;
+        continuationKeys.add(key);
+        return true;
+    });
+    const { messages: _continuationMessages, ...continuationMetadata } = continuation || {};
+    const modelContext = buildBoundedGlobalModelContext(continuation
+        ? { ...context, session_continuity: continuationMetadata }
+        : context);
+    const summaryMessages = continuation?.summary
+        ? [{ role: "user", content: `[Current global session compaction summary]\n${JSON.stringify(continuation.summary)}` }]
+        : [];
+    const workflowDecision = run.workflow_decision || run.workflowDecision || null;
+    const turnContext = {
+        phase: run.phase,
+        remaining_steps: Math.max(0, run.max_steps - run.steps.length),
+        write_authorized: run.explicit_write_authorization === true,
+        replan_required: run.reasoning_loop.replan_required === true,
+        requested_dispatch_targets: modelContext.requestedDispatchTargets,
+        workflow_decision_checksum: crypto.createHash("sha256").update(JSON.stringify(workflowDecision ?? null)).digest("hex"),
+    };
+    const contextEnvelope = (0, global_agent_context_envelope_1.buildGlobalAgentContextEnvelopeV2)({
+        exactSessionId: sessionId,
+        generation: Number(run.generation || run.resume_count || 0),
+        stablePrefix: { identitySystem },
+        routingDirectory: modelContext.routingDirectory,
+        sessionContext: {
+            continuation: continuationMetadata,
+            continuationMessages,
+            runHistoryMessages,
+            summary: continuation?.summary || null,
+            loadedScopeInstructionContext: modelContext.sessionContext.loadedScopeInstructionContext,
+            scopeInstructionCatalog: modelContext.scopeInstructionCatalog,
+        },
+        loadedContextChecksums: modelContext.sessionContext.loadedContextChecksums,
+        turnContext: { ...turnContext, currentGoal },
+        toolResults: run.steps.map(step => projectGlobalAgentObservationForModel(step.tool?.name || "", step.observation)),
+    });
+    run.global_context_envelope = contextEnvelope;
+    run.global_routing_directory = modelContext.routingDirectory;
+    const state = JSON.stringify({
+        run: {
+            ...turnContext,
+            selected_role_skills: roleSkills.names,
+            requirement_sources: {
+                available: Number(run.source_ingestion?.source_count || 0) > 0
+                    || !!run.requirement_extraction
+                    || !!run.requirement_decomposition,
+                content_hash: String(run.requirement_content_hash || ""),
+                source_count: Number(run.source_ingestion?.source_count || 0),
+                has_extraction: !!run.requirement_extraction,
+                has_decomposition: !!run.requirement_decomposition,
+                decomposition_item_count: Array.isArray(run.requirement_decomposition?.items)
+                    ? run.requirement_decomposition.items.length
+                    : 0,
+                clarification_question_count: Array.isArray(run.requirement_decomposition?.clarification_questions)
+                    ? run.requirement_decomposition.clarification_questions.length
+                    : 0,
+            },
+        },
+        reasoning_loop: projectGlobalAgentReasoningForModel(run.reasoning_loop),
+        context: modelContext,
+        prior_steps: priorSteps,
+    });
+    const currentUserText = `[Current user goal]\n${currentGoal}`;
+    const nativeMessages = (0, global_native_messages_1.tryBuildGlobalNativeModelMessages)({
+        sessionId,
+        currentUserText,
+        identityRules,
+        sessionGuidance,
+        mcpPolicy,
+        continuation,
+        runHistory: run.history,
+        metaBlocks: [{
+                title: "Current run state",
+                body: state,
+            }],
+        observations: run.steps.map(step => step.observation),
+    });
+    if (nativeMessages)
+        return nativeMessages;
+    return (0, transient_model_content_1.attachTransientModelBlocks)([
+        { role: "system", content: identitySystem },
+        { role: "system", contextBlockType: "dynamic_context", content: sessionGuidance },
+        ...(mcpPolicy ? [{ role: "system", contextBlockType: "dynamic_context", content: mcpPolicy }] : []),
+        ...summaryMessages,
+        ...continuationWithoutCurrent,
+        ...runHistoryMessages,
+        { role: "user", content: `[Current user goal]\n${run.reasoning_loop.effective_goal || run.user_message}\n\n[Current run state]\n${state}\n\nChoose the next action: answer directly, call a tool, or call ccm_ask_user.` },
+    ], (0, transient_model_content_1.collectTransientModelBlocks)(run.steps.map(step => step.observation)));
+}
+//# sourceMappingURL=global-agent-run-projection.js.map

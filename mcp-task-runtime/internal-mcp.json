@@ -1,0 +1,18 @@
+{
+  "schema": "ccm-internal-mcp-v1",
+  "name": "ccm__task_runtime",
+  "display_name": "任务运行 MCP",
+  "description": "让任务绑定的 Agent 读取上下文、维护 Todo、汇报进度、提交交付候选并请求用户决策。",
+  "version": "1.0.0",
+  "entry": "../dist/integrations/task-runtime-mcp.js",
+  "lifecycle": "task_scoped",
+  "lifecycle_label": "按任务签名注入",
+  "scopes": ["全局 Agent", "群聊主 Agent", "项目子 Agent", "TestAgent"],
+  "tools": [
+    { "name": "get_task_context", "label": "读取任务上下文", "description": "读取当前绑定任务目标、验收、Todo 和待决策事项。" },
+    { "name": "update_todo", "label": "更新 Todo", "description": "维护当前 Agent 的真实工作计划快照。" },
+    { "name": "report_progress", "label": "汇报进度", "description": "把阶段进展同步到任务时间线和日志。" },
+    { "name": "submit_delivery", "label": "提交交付候选", "description": "提交文件、验证和分支证据，等待主 Agent 验收。" },
+    { "name": "request_user_decision", "label": "请求用户决策", "description": "记录必须由用户决定的问题和建议。" }
+  ]
+}

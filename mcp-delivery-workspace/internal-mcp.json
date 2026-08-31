@@ -1,0 +1,19 @@
+{
+  "schema": "ccm-internal-mcp-v1",
+  "name": "ccm__delivery_workspace",
+  "display_name": "交付工作区 MCP",
+  "description": "受控管理任务 worktree、代码 diff、项目检查、交付分支、验收后合并和安全清理。",
+  "version": "1.0.0",
+  "entry": "../dist/integrations/delivery-workspace-mcp.js",
+  "lifecycle": "task_scoped",
+  "lifecycle_label": "按任务与项目隔离",
+  "scopes": ["群聊主 Agent", "项目子 Agent", "TestAgent"],
+  "tools": [
+    { "name": "create_delivery_worktree", "label": "创建 worktree", "description": "为项目创建独立任务分支和工作区。" },
+    { "name": "get_delivery_diff", "label": "查看代码变更", "description": "读取受控工作区的状态、统计和逐行 diff。" },
+    { "name": "run_project_checks", "label": "运行项目检查", "description": "执行已配置的 test/check/lint/build。" },
+    { "name": "commit_delivery_branch", "label": "提交交付分支", "description": "提交 ccm/* 分支并生成交付回执。" },
+    { "name": "merge_approved_delivery", "label": "合并已验收交付", "description": "仅在 TestAgent canAccept 后由主 Agent 合并。" },
+    { "name": "cleanup_delivery_worktree", "label": "清理工作区", "description": "安全清理已合并且无改动的 worktree。" }
+  ]
+}

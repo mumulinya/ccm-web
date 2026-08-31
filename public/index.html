@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/ccm-app-icon.png" />
+    <meta name="theme-color" content="#081416" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CCM Agent Workspace</title>
+    <style>
+      :root { --bg-primary: #ffffff; --text-primary: #17201d; }
+      [data-theme="dark"] { --bg-primary: #0a0e1a; --text-primary: #f3f7f5; }
+      [data-theme-preset="deep-void"] { --bg-primary: #0a0f1d; }
+      [data-theme-preset="cyberpunk"] { --bg-primary: #07040f; }
+      [data-theme-preset="deep-ocean"] { --bg-primary: #050c1e; }
+      [data-theme-preset="aurora"] { --bg-primary: #f0f7f4; }
+      html, body, #app { width: 100%; height: 100%; margin: 0; }
+      body { background: var(--bg-primary); color: var(--text-primary); font-family: "Plus Jakarta Sans", "Microsoft YaHei", "PingFang SC", "Segoe UI", system-ui, sans-serif; }
+      .ccm-boot { position: fixed; inset: 0; display: grid; place-items: center; background: var(--bg-primary); }
+      .page-loading-overlay.viewport { position: fixed; inset: 0; z-index: 12000; display: grid; place-items: center; background: var(--bg-primary); color: var(--text-primary); }
+      .ccm-boot__content { width: min(300px, calc(100% - 40px)); display: grid; justify-items: center; gap: 10px; text-align: center; }
+      .ccm-boot__mark { width: 44px; height: 44px; display: block; }
+      .ccm-boot strong { font-size: 14px; }
+      .ccm-boot span { color: #6d7973; font-size: 11px; }
+      .ccm-boot__track { width: 148px; height: 3px; margin-top: 3px; overflow: hidden; background: #dce3df; }
+      .ccm-boot__track::after { content: ""; display: block; width: 44%; height: 100%; background: #0e6b4f; animation: ccm-boot-progress 1.1s ease-in-out infinite; }
+      @keyframes ccm-boot-progress { from { transform: translateX(-115%); } to { transform: translateX(330%); } }
+      @media (prefers-reduced-motion: reduce) { .ccm-boot__track::after { animation-duration: 2.4s; } }
+    </style>
+    <script type="module" crossorigin src="/assets/index-BrJekYgm.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-COohG3sW.css">
+  </head>
+  <body>
+    <div id="app">
+      <div class="ccm-boot" role="status" aria-live="polite" aria-label="CCM 正在启动">
+        <div class="ccm-boot__content">
+          <img class="ccm-boot__mark" src="/favicon.svg" alt="" aria-hidden="true" />
+          <strong>正在打开工作台</strong>
+          <span>正在准备界面和本地数据</span>
+          <i class="ccm-boot__track" aria-hidden="true"></i>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>
