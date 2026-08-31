@@ -68,8 +68,45 @@ const STARTUP_TIMEOUT_MS = Math.min(
   Math.max(10_000, Number(process.env.CCM_STARTUP_TIMEOUT_MS || 60_000)),
 );
 
+const RUNTIME_HOME_README = `# CCM 运行数据目录
+
+此目录由 CCM 自动管理，默认位置为：
+
+- Windows: %USERPROFILE%\\.ccm
+- macOS/Linux: ~/.ccm
+
+## 用户常用内容
+
+- configs/：项目配置
+- web-sessions/：项目会话记录
+- mcp/：MCP 配置
+- skills/：Skill 配置
+- feishu-config.json：飞书配置
+- project-configs.json：项目列表和配置索引
+- logs/：服务和通道日志
+- uploads/：上传文件
+
+## 系统内部内容
+
+其余目录主要是 Agent 运行状态、记忆、索引、模型和缓存。不要手动移动或重命名；需要清理时使用：
+
+ccm maintenance cleanup
+
+该命令默认只预览，确认后使用 --apply 执行。它不会删除配置、飞书凭据、会话或项目数据。
+
+旧版 ~/.cc-connect 只用于一次性迁移和兼容，不是新安装的运行目录。
+`;
+
+function ensureRuntimeReadme() {
+  const file = path.join(CCM_DIR, "README.md");
+  try {
+    if (!fs.existsSync(file)) fs.writeFileSync(file, RUNTIME_HOME_README, "utf-8");
+  } catch {}
+}
+
 function ensureRuntimeDirs() {
   for (const dir of [CCM_DIR, RUN_DIR, LOG_DIR, CONFIGS_DIR, PID_DIR]) fs.mkdirSync(dir, { recursive: true });
+  ensureRuntimeReadme();
 }
 
 async function readServerState() {
@@ -181,6 +218,9 @@ function printHelp() {
   console.log("  logs [--lines 120] [--follow]                Read background logs");
   console.log("  doctor [--json]                              Check local readiness");
   console.log("  setup-code [--rotate]                        Show or rotate first-install code\n");
+  console.log(style.strong("Maintenance"));
+  console.log("  maintenance cleanup [--older-than N]         Preview old logs/test artifacts/temp data");
+  console.log("  maintenance cleanup --apply [--older-than N] Remove the previewed safe entries\n");
   console.log(style.strong("Projects and extensions"));
   console.log("  project list                                 List projects");
   console.log("  project connect <name> [agent]               Connect project Agent");
@@ -584,6 +624,78 @@ function showLogs(args = []) {
   return 0;
 }
 
+function formatBytes(value) {
+  const bytes = Math.max(0, Number(value) || 0);
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
+}
+
+function runtimeCleanupCandidates(args = []) {
+  const days = Math.max(1, Math.min(3650, Number(optionValue(args, "--older-than", 14)) || 14));
+  const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+  const candidates = [];
+  const add = (file, kind) => {
+    try {
+      const stat = fs.statSync(file);
+      if (stat.mtimeMs < cutoff) candidates.push({ file, kind, bytes: stat.isDirectory() ? directorySize(file) : stat.size, modified: stat.mtime });
+    } catch {}
+  };
+  const directorySize = (root) => {
+    let total = 0;
+    try {
+      for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+        const child = path.join(root, entry.name);
+        total += entry.isDirectory() ? directorySize(child) : (fs.statSync(child).size || 0);
+      }
+    } catch {}
+    return total;
+  };
+  const logs = path.join(CCM_DIR, "logs");
+  if (fs.existsSync(logs)) {
+    for (const entry of fs.readdirSync(logs, { withFileTypes: true })) {
+      if (entry.isFile() && /\.(?:log|out\.log|err\.log)$/i.test(entry.name)) add(path.join(logs, entry.name), "old log");
+    }
+  }
+  for (const name of ["test-agent-artifacts", "test-agent-runs", "test-agent-handoffs", "inspection-sandboxes", "session-memory-extractor-sandbox"]) {
+    const root = path.join(CCM_DIR, name);
+    if (!fs.existsSync(root)) continue;
+    for (const entry of fs.readdirSync(root, { withFileTypes: true })) add(path.join(root, entry.name), "old test artifact");
+  }
+  for (const entry of fs.existsSync(CCM_DIR) ? fs.readdirSync(CCM_DIR, { withFileTypes: true }) : []) {
+    if (entry.isDirectory() && /^(?:tmp-|temp-)/i.test(entry.name)) add(path.join(CCM_DIR, entry.name), "old temporary directory");
+  }
+  return { days, candidates };
+}
+
+function maintenanceCleanup(args = []) {
+  const { days, candidates } = runtimeCleanupCandidates(args);
+  printHeader("Runtime data maintenance");
+  console.log(`${style.muted("Data")}     ${CCM_DIR}`);
+  console.log(`${style.muted("Policy")}   old logs/test artifacts/temp directories older than ${days} days`);
+  if (!candidates.length) {
+    console.log(style.success("No cleanup candidates found."));
+    return 0;
+  }
+  let total = 0;
+  for (const item of candidates) {
+    total += item.bytes;
+    console.log(`  ${hasFlag(args, "--apply") ? style.warning("REMOVE") : style.muted("PREVIEW")}  ${item.kind.padEnd(24)} ${formatBytes(item.bytes).padStart(9)}  ${item.file}`);
+  }
+  console.log(`${style.muted("Total")}    ${formatBytes(total)}`);
+  if (!hasFlag(args, "--apply")) {
+    console.log(style.warning('Preview only. Add "--apply" to remove exactly these entries.'));
+    return 0;
+  }
+  let removed = 0;
+  for (const item of candidates) {
+    try { fs.rmSync(item.file, { recursive: true, force: false }); removed += 1; } catch (error) { console.error(style.danger(`清理失败：${item.file}：${error?.message || error}`)); }
+  }
+  console.log(style.success(`Removed ${removed}/${candidates.length} cleanup entries.`));
+  return removed === candidates.length ? 0 : 1;
+}
+
 function delegateLegacy(args) {
   const result = spawnSync(process.execPath, [LEGACY_CLI, ...args], { stdio: "inherit", windowsHide: false, env: process.env });
   return Number(result.status || 0);
@@ -840,6 +952,12 @@ async function main() {
     return 0;
   }
   if (command === "logs") return showLogs(rest);
+  if (command === "maintenance") {
+    const action = String(rest[0] || "").toLowerCase();
+    if (action === "cleanup") return maintenanceCleanup(rest.slice(1));
+    console.error(style.danger('用法：ccm maintenance cleanup [--older-than N] [--apply]'));
+    return 1;
+  }
   if (command === "update") return updatePackage(rest);
   if (command === "project") return projectCommand(rest);
   if (command === "projects") return projectCommand(["interactive", ...rest]);

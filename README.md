@@ -274,6 +274,8 @@ ccm status --json                 输出结构化状态
 ccm doctor                        检查Node、PTY、资源和Agent CLI
 ccm open                          打开当前工作区
 ccm logs --follow                 跟踪轮转日志
+ccm maintenance cleanup           预览可安全清理的旧日志和测试产物
+ccm maintenance cleanup --apply   执行上述安全清理
 ccm update --check                检查新版本
 ccm update                        验证并更新npm版本
 ccm version                       查看版本
