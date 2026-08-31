@@ -50,6 +50,15 @@ ccm doctor
 ccm logs --follow
 ```
 
+## 发布包与源码仓库
+
+这是 CCM 的 npm 发布包，发布仓库只保存可安装的生产产物。完整 TypeScript/Vue 源码、测试和开发文档位于源码仓库：<https://github.com/mumulinya/ccm-workbench>。
+
+- 发布仓库：<https://github.com/mumulinya/ccm-web>
+- npm 安装入口：<https://www.npmjs.com/package/@mumulinya167/cc-web>
+- 运行数据保存在用户目录 `~/.ccm`，不会写入 npm 安装目录。
+- `ccm start` 启动已安装包中的 `dist/server.js`；源码仓库开发时请先执行 `npm run build`。
+
 ## 2.0.14 更新重点
 
 - **主 Agent 实时过程与最终回答全生命周期统一（Live-Final Presentation Lifecycle V1）**：
@@ -387,8 +396,8 @@ ccm doctor
 
 - GitHub：<https://github.com/mumulinya/ccm-web>
 - 问题反馈：<https://github.com/mumulinya/ccm-web/issues>
-- 完整业务流程：<https://github.com/mumulinya/ccm-web/tree/main/docs/confirmed-business-processes>
-- 已确认架构：<https://github.com/mumulinya/ccm-web/tree/main/docs/confirmed-project-architecture>
+- 完整业务流程：<https://github.com/mumulinya/ccm-workbench/tree/main/docs/confirmed-business-processes>
+- 已确认架构：<https://github.com/mumulinya/ccm-workbench/tree/main/docs/confirmed-project-architecture>
 
 ## License
 
@@ -420,6 +429,14 @@ ccm status
 ccm doctor
 ccm logs --follow
 ```
+
+### Package and source repositories
+
+This npm package contains the production runtime and frontend assets. The complete TypeScript/Vue source, tests, and engineering documentation are maintained in the source repository: <https://github.com/mumulinya/ccm-workbench>.
+
+- Package repository: <https://github.com/mumulinya/ccm-web>
+- npm package: <https://www.npmjs.com/package/@mumulinya167/cc-web>
+- `ccm start` runs the installed package's `dist/server.js`; source changes require `npm run build` before starting a local build.
 
 ### Main capabilities
 
@@ -516,7 +533,8 @@ Uninstalling the npm package does not delete user data. Stop CCM and back up `~/
 ### Support
 
 - [GitHub repository](https://github.com/mumulinya/ccm-web)
-- [Documentation](https://github.com/mumulinya/ccm-web/tree/main/docs)
+- [Source repository](https://github.com/mumulinya/ccm-workbench)
+- [Documentation](https://github.com/mumulinya/ccm-workbench/tree/main/docs)
 - [npm package](https://www.npmjs.com/package/@mumulinya167/cc-web)
 - [Issue tracker](https://github.com/mumulinya/ccm-web/issues)
 
