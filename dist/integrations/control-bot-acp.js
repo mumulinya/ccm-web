@@ -418,7 +418,17 @@ async function callProjectAgent(text, sessionId = "default", messageId = "", pla
     });
     try {
         const run = (async () => {
-            const targets = await jsonRequest(`/api/sessions/feishu-targets?project=${encodeURIComponent(project)}&acp_session_id=${encodeURIComponent(sessionId)}`, { signal: controller.signal });
+            const targetQuery = new URLSearchParams({
+                project,
+                acp_session_id: sessionId,
+                ...(platformContext.chat_id ? { chat_id: String(platformContext.chat_id) } : {}),
+                ...(platformContext.open_id ? { open_id: String(platformContext.open_id) } : {}),
+                ...(platformContext.user_id ? { user_id: String(platformContext.user_id) } : {}),
+                ...(platformContext.root_id ? { root_id: String(platformContext.root_id) } : {}),
+                ...(platformContext.thread_id ? { thread_id: String(platformContext.thread_id) } : {}),
+                ...(platformContext.platform_session_key ? { platform_session_key: String(platformContext.platform_session_key) } : {}),
+            }).toString();
+            const targets = await jsonRequest(`/api/sessions/feishu-targets?${targetQuery}`, { signal: controller.signal });
             const metadataMatches = (targets.targets || []).filter((target) => projectTargetMatches(target, platformContext));
             const resolvedTarget = targets.resolved_target || (metadataMatches.length === 1 ? metadataMatches[0] : null);
             if (!resolvedTarget)

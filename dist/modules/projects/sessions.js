@@ -199,7 +199,18 @@ function getProjectFeishuSessionTargets(projectName) {
     const { targets } = loadProjectCcSessionStore(project);
     return targets.sort((a, b) => String(a.label || "").localeCompare(String(b.label || "")));
 }
-function resolveProjectFeishuTargetFromStore(store, targets, acpSessionId) {
+function buildProjectFeishuPlatformSessionKey(context = {}) {
+    const explicit = String(context.platform_session_key || context.platformSessionKey || "").trim();
+    if (/^(?:feishu|lark):/i.test(explicit))
+        return explicit;
+    const chatId = String(context.chat_id || context.chatId || "").trim();
+    const openId = String(context.open_id || context.openId || context.sender_open_id || "").trim();
+    if (!chatId && !openId)
+        return "";
+    const threadId = String(context.thread_id || context.threadId || context.root_id || context.rootId || "").trim();
+    return `feishu:${chatId || "chat"}:${openId || "user"}${threadId ? `:root:${threadId}` : ""}`;
+}
+function resolveProjectFeishuTargetFromStore(store, targets, acpSessionId, context = {}, projectName = "selftest-project") {
     const matchingSessionIds = Object.entries(store?.sessions || {})
         .filter(([, session]) => String(session?.agent_session_id || "") === acpSessionId)
         .map(([sessionId]) => String(sessionId));
@@ -208,18 +219,42 @@ function resolveProjectFeishuTargetFromStore(store, targets, acpSessionId) {
         return { target: exact[0], resolution: "cc_connect_agent_session" };
     if (exact.length > 1)
         throw new Error("ACP 会话同时映射到多个飞书目标，已拒绝路由");
+    // A project ACP process knows its project at launch time. When the first
+    // Feishu message arrives, bind that ACP session to the supplied platform
+    // identity instead of requiring a separate UI binding step.
+    const platformSessionKey = buildProjectFeishuPlatformSessionKey(context);
+    if (matchingSessionIds.length === 1 && platformSessionKey) {
+        const sessionId = matchingSessionIds[0];
+        const existing = targets.find((target) => target.id === platformSessionKey);
+        if (existing && existing.active_session_id && String(existing.active_session_id) !== sessionId) {
+            throw new Error("当前飞书目标已经绑定到其他项目会话");
+        }
+        store.active_session = store.active_session || {};
+        store.user_sessions = store.user_sessions || {};
+        store.active_session[platformSessionKey] = sessionId;
+        store.user_sessions[platformSessionKey] = [...new Set([
+                ...(Array.isArray(store.user_sessions[platformSessionKey]) ? store.user_sessions[platformSessionKey] : []),
+                sessionId,
+            ])];
+        const target = projectFeishuTargetsFromStore(store, projectName).find((item) => item.id === platformSessionKey);
+        if (target)
+            return { target, resolution: "auto_bound_platform_context", changed: true };
+    }
     const bound = targets.filter((target) => String(target.active_session_id || "").trim());
     throw new Error(bound.length ? "尚未建立 ACP 会话与飞书目标的精确映射，请重新绑定当前项目飞书会话" : "当前项目没有已绑定的飞书会话");
 }
-function resolveProjectFeishuTargetForAcpSession(projectName, acpSessionId) {
+function resolveProjectFeishuTargetForAcpSession(projectName, acpSessionId, context = {}) {
     const project = requireActiveProject(projectName).project;
     const safeAcpSessionId = String(acpSessionId || "").trim();
     if (!safeAcpSessionId || safeAcpSessionId.length > 240)
         throw new Error("ACP 会话 ID 无效");
-    const { store, targets } = loadProjectCcSessionStore(project);
+    const { file, store, targets } = loadProjectCcSessionStore(project);
     if (!store)
         throw new Error("项目 cc-connect 会话存储不存在");
-    return resolveProjectFeishuTargetFromStore(store, targets, safeAcpSessionId);
+    const resolved = resolveProjectFeishuTargetFromStore(store, targets, safeAcpSessionId, context, project);
+    if (resolved.changed && file)
+        fs.writeFileSync(file, JSON.stringify(store, null, 2));
+    return resolved;
 }
 function runProjectFeishuSessionSourceSelfTest() {
     const groupKey = "feishu:oc_project:ou_owner";
@@ -866,7 +901,14 @@ function handleSessionsApi(pathname, req, res, parsed) {
         try {
             const project = (0, project_validation_1.validateProjectName)(parsed?.query?.project || "");
             const acpSessionId = String(parsed?.query?.acp_session_id || parsed?.query?.acpSessionId || "").trim();
-            const resolved = acpSessionId ? resolveProjectFeishuTargetForAcpSession(project, acpSessionId) : null;
+            const resolved = acpSessionId ? resolveProjectFeishuTargetForAcpSession(project, acpSessionId, {
+                chat_id: parsed?.query?.chat_id || parsed?.query?.chatId,
+                open_id: parsed?.query?.open_id || parsed?.query?.openId,
+                user_id: parsed?.query?.user_id || parsed?.query?.userId,
+                root_id: parsed?.query?.root_id || parsed?.query?.rootId,
+                thread_id: parsed?.query?.thread_id || parsed?.query?.threadId,
+                platform_session_key: parsed?.query?.platform_session_key || parsed?.query?.platformSessionKey,
+            }) : null;
             (0, utils_1.sendJson)(res, {
                 success: true,
                 project,
