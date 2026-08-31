@@ -23,9 +23,10 @@ const {
   rollbackInstalledUpdate,
   switchPreparedUpdate,
 } = require("./update-runtime");
-const { ensureCcmRuntimeHomeMigration, resolveCcmRuntimeHome } = require("./runtime-home");
+const { ensureCcmRuntimeHomeMigration, resolveCcmRuntimeHome, rewriteActiveRuntimePaths } = require("./runtime-home");
 
 const runtimeMigration = ensureCcmRuntimeHomeMigration();
+rewriteActiveRuntimePaths(resolveCcmRuntimeHome());
 if (runtimeMigration.status === "failed") {
   console.warn(`[CCM] 运行数据迁移未完成，旧目录保留：${runtimeMigration.error}`);
 }

@@ -7,6 +7,7 @@ const LEGACY_CCM_DIR = path.join(os.homedir(), ".cc-connect");
 const DEFAULT_CCM_DIR = path.join(os.homedir(), ".ccm");
 const MIGRATION_SCHEMA = "ccm-runtime-home-migration-v1";
 const MIGRATION_FILE = "migration-v1.json";
+const PATH_MIGRATION_FILE = "runtime-path-migration-v1.json";
 
 function resolveCcmRuntimeHome() {
   return path.resolve(process.env.CCM_TASK_STORE_DIR || DEFAULT_CCM_DIR);
@@ -69,9 +70,57 @@ function ensureCcmRuntimeHomeMigration() {
   }
 }
 
+function rewriteActiveRuntimePaths(target) {
+  if (process.env.CCM_TASK_STORE_DIR) return { changedFiles: [], skipped: "explicit_override" };
+  const packageRoot = path.resolve(__dirname, "..");
+  const legacyPackage = path.join(LEGACY_CCM_DIR, "ccm", "ccm-package");
+  const legacySource = path.join(LEGACY_CCM_DIR, "ccm");
+  const replacements = [
+    [legacyPackage, packageRoot],
+    [path.join(legacySource, "node_modules"), path.join(packageRoot, "node_modules")],
+    [path.join(legacySource, "mcp-feishu"), path.join(packageRoot, "mcp-feishu")],
+    [LEGACY_CCM_DIR, DEFAULT_CCM_DIR],
+  ];
+  const rewriteText = (text) => {
+    let out = String(text || "");
+    for (const [from, to] of replacements) {
+      for (const [source, targetValue] of [[from, to], [from.replace(/\\/g, "/"), to.replace(/\\/g, "/")], [from.replace(/\\/g, "\\\\"), to.replace(/\\/g, "\\\\")]]) {
+        out = out.replace(new RegExp(String(source).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi"), targetValue);
+      }
+    }
+    return out;
+  };
+  const files = [];
+  const visit = (dir) => {
+    if (!fs.existsSync(dir)) return;
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const file = path.join(dir, entry.name);
+      if (entry.isDirectory()) visit(file);
+      else if (entry.isFile() && file.toLowerCase().endsWith(".json")) files.push(file);
+    }
+  };
+  visit(path.join(target, "mcp"));
+  visit(path.join(target, "agent-runtime"));
+  const installations = path.join(target, "marketplace", "installations.json");
+  if (fs.existsSync(installations)) files.push(installations);
+  const changedFiles = [];
+  for (const file of files) {
+    try {
+      const source = fs.readFileSync(file, "utf8");
+      let rewritten;
+      try { rewritten = rewriteText(JSON.stringify(JSON.parse(source), null, 2) + "\n"); }
+      catch { rewritten = rewriteText(source); }
+      if (rewritten !== source) { fs.writeFileSync(file, rewritten, "utf8"); changedFiles.push(file); }
+    } catch {}
+  }
+  try { fs.writeFileSync(path.join(target, PATH_MIGRATION_FILE), `${JSON.stringify({ schema: "ccm-runtime-path-normalization-v1", packageRoot, changedFiles, completedAt: new Date().toISOString() }, null, 2)}\n`, "utf8"); } catch {}
+  return { changedFiles, packageRoot };
+}
+
 module.exports = {
   DEFAULT_CCM_DIR,
   LEGACY_CCM_DIR,
   resolveCcmRuntimeHome,
   ensureCcmRuntimeHomeMigration,
+  rewriteActiveRuntimePaths,
 };

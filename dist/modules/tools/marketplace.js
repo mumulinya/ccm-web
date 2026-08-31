@@ -1519,7 +1519,7 @@ function localMarketplaceItems() {
     const bundledFeishuEntry = [
         path.resolve(__dirname, "../../../mcp-feishu/dist/index.js"),
         path.join(process.cwd(), "ccm-package", "mcp-feishu", "dist", "index.js"),
-        path.join(exports.CCM_DIR, "ccm", "ccm-package", "mcp-feishu", "dist", "index.js"),
+        path.join(process.cwd(), "mcp-feishu", "dist", "index.js"),
     ].find(candidate => fs.existsSync(candidate))
         || path.resolve(__dirname, "../../../mcp-feishu/dist/index.js");
     const filesystemRoot = path.join(exports.CCM_DIR, "shared");

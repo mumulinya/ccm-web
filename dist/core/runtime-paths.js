@@ -35,6 +35,7 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.CCM_DIR = exports.CCM_MIGRATION_SCHEMA = exports.DEFAULT_CCM_DIR = exports.LEGACY_CCM_DIR = void 0;
 exports.ensureCcmRuntimeHomeMigrationSync = ensureCcmRuntimeHomeMigrationSync;
+exports.ensureActiveRuntimePathsNormalizedSync = ensureActiveRuntimePathsNormalizedSync;
 const fs = __importStar(require("fs"));
 const os = __importStar(require("os"));
 const path = __importStar(require("path"));
@@ -46,6 +47,7 @@ const child_process_1 = require("child_process");
 exports.LEGACY_CCM_DIR = path.join(os.homedir(), ".cc-connect");
 exports.DEFAULT_CCM_DIR = path.join(os.homedir(), ".ccm");
 exports.CCM_MIGRATION_SCHEMA = "ccm-runtime-home-migration-v1";
+const RUNTIME_PATH_MIGRATION_SCHEMA = "ccm-runtime-path-normalization-v1";
 function isExcludedLegacyEntry(name) {
     const normalized = String(name || "").toLowerCase();
     // The old home also contains this checkout, developer metadata and
@@ -121,6 +123,173 @@ function ensureCcmRuntimeHomeMigrationSync() {
         throw error;
     }
 }
+function packageRootCandidates() {
+    return Array.from(new Set([
+        // Compiled npm payload: ccm-package/dist/core -> ccm-package.
+        path.resolve(__dirname, "../.."),
+        path.resolve(process.cwd(), "ccm-package"),
+        path.resolve(process.cwd()),
+    ]));
+}
+function resolvePackageRoot() {
+    return packageRootCandidates().find(candidate => {
+        try {
+            const pkg = JSON.parse(fs.readFileSync(path.join(candidate, "package.json"), "utf8"));
+            return pkg?.name === "@mumulinya167/cc-web" || fs.existsSync(path.join(candidate, "dist", "server.js"));
+        }
+        catch {
+            return false;
+        }
+    }) || packageRootCandidates()[0];
+}
+function rewriteRuntimePathValue(value, packageRoot) {
+    const raw = String(value || "");
+    if (!raw)
+        return raw;
+    const slash = raw.includes("/") && !raw.includes("\\") ? "/" : "\\";
+    const normalized = raw.replace(/[\\/]+/g, "\\");
+    const legacyPackage = path.join(exports.LEGACY_CCM_DIR, "ccm", "ccm-package");
+    const legacySource = path.join(exports.LEGACY_CCM_DIR, "ccm");
+    const lower = normalized.toLowerCase();
+    const sourceSuffix = normalized.slice(legacySource.length).replace(/^\\+/, "").toLowerCase();
+    const isKnownPackagePath = /^(?:ccm-package|node_modules|mcp-[^\\/]+|dist|public|bin)(?:[\\/]|$)/.test(sourceSuffix);
+    const replacePrefix = (prefix, target) => {
+        const prefixLower = prefix.toLowerCase();
+        if (lower !== prefixLower && !lower.startsWith(`${prefixLower}\\`))
+            return null;
+        const suffix = normalized.slice(prefix.length).replace(/^\\+/, "");
+        return suffix ? `${target}${path.sep}${suffix}` : target;
+    };
+    const rewritten = replacePrefix(legacyPackage, packageRoot)
+        || (isKnownPackagePath ? replacePrefix(legacySource, packageRoot) : null)
+        || (lower.startsWith(`${exports.LEGACY_CCM_DIR.toLowerCase()}\\ccm\\`) ? null : replacePrefix(exports.LEGACY_CCM_DIR, exports.DEFAULT_CCM_DIR));
+    if (!rewritten)
+        return raw;
+    return slash === "/" ? rewritten.replace(/\\/g, "/") : rewritten;
+}
+function rewriteRuntimePathText(value, packageRoot) {
+    let rewritten = String(value || "");
+    const pairs = [
+        [path.join(exports.LEGACY_CCM_DIR, "ccm", "ccm-package"), packageRoot],
+        [path.join(exports.LEGACY_CCM_DIR, "ccm", "node_modules"), path.join(packageRoot, "node_modules")],
+        [path.join(exports.LEGACY_CCM_DIR, "ccm", "mcp-feishu"), path.join(packageRoot, "mcp-feishu")],
+        [exports.LEGACY_CCM_DIR, exports.DEFAULT_CCM_DIR],
+    ];
+    for (const [from, to] of pairs) {
+        const forms = [
+            [from, to],
+            [from.replace(/\\/g, "/"), to.replace(/\\/g, "/")],
+            [from.replace(/\\/g, "\\\\"), to.replace(/\\/g, "\\\\")],
+        ];
+        for (const [source, target] of forms) {
+            const escaped = source.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+            rewritten = rewritten.replace(new RegExp(escaped, "gi"), target);
+        }
+    }
+    return rewritten;
+}
+function rewriteRuntimePathsDeep(value, packageRoot) {
+    if (typeof value === "string") {
+        const rewritten = rewriteRuntimePathValue(value, packageRoot);
+        return { value: rewritten, changed: rewritten !== value };
+    }
+    if (Array.isArray(value)) {
+        let changed = false;
+        const next = value.map(item => {
+            const result = rewriteRuntimePathsDeep(item, packageRoot);
+            changed ||= result.changed;
+            return result.value;
+        });
+        return { value: next, changed };
+    }
+    if (value && typeof value === "object") {
+        let changed = false;
+        const next = {};
+        for (const [key, item] of Object.entries(value)) {
+            const result = rewriteRuntimePathsDeep(item, packageRoot);
+            changed ||= result.changed;
+            next[key] = result.value;
+        }
+        return { value: next, changed };
+    }
+    return { value, changed: false };
+}
+function writeJsonIfChanged(file, packageRoot) {
+    try {
+        const source = fs.readFileSync(file, "utf8");
+        const parsed = JSON.parse(source);
+        const result = rewriteRuntimePathsDeep(parsed, packageRoot);
+        if (!result.changed)
+            return false;
+        const temp = `${file}.ccm-path-${process.pid}-${Date.now()}.tmp`;
+        fs.writeFileSync(temp, `${JSON.stringify(result.value, null, 2)}\n`, "utf8");
+        fs.renameSync(temp, file);
+        return true;
+    }
+    catch {
+        return false;
+    }
+}
+/**
+ * Normalize only active runtime configuration snapshots. Historical logs and
+ * sessions intentionally remain untouched. This is idempotent and safe to
+ * run at every startup, which also repairs stores created by older releases.
+ */
+function ensureActiveRuntimePathsNormalizedSync() {
+    if (process.env.CCM_TASK_STORE_DIR)
+        return { changedFiles: [], skipped: "explicit_override" };
+    const target = exports.DEFAULT_CCM_DIR;
+    const packageRoot = resolvePackageRoot();
+    const files = [];
+    const addJsonFiles = (root) => {
+        if (!fs.existsSync(root))
+            return;
+        const visit = (dir) => {
+            for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+                const file = path.join(dir, entry.name);
+                if (entry.isDirectory())
+                    visit(file);
+                else if (entry.isFile() && entry.name.toLowerCase().endsWith(".json"))
+                    files.push(file);
+            }
+        };
+        visit(root);
+    };
+    addJsonFiles(path.join(target, "mcp"));
+    addJsonFiles(path.join(target, "agent-runtime"));
+    const installations = path.join(target, "marketplace", "installations.json");
+    if (fs.existsSync(installations))
+        files.push(installations);
+    const changedFiles = files.filter(file => writeJsonIfChanged(file, packageRoot));
+    // TOML files are generated runtime snapshots. Restrict replacement to the
+    // same active locations and preserve all historical logs/session content.
+    const tomlFiles = [
+        path.join(target, "control-bot", "config.toml"),
+        path.join(target, "private", "runtime-configs"),
+    ];
+    for (const candidate of tomlFiles) {
+        const candidates = fs.existsSync(candidate) && fs.statSync(candidate).isDirectory()
+            ? fs.readdirSync(candidate).filter(name => name.endsWith(".toml")).map(name => path.join(candidate, name))
+            : [candidate];
+        for (const file of candidates) {
+            try {
+                const source = fs.readFileSync(file, "utf8");
+                const rewritten = rewriteRuntimePathText(source, packageRoot);
+                if (rewritten !== source) {
+                    fs.writeFileSync(file, rewritten, "utf8");
+                    changedFiles.push(file);
+                }
+            }
+            catch { }
+        }
+    }
+    const marker = path.join(target, "runtime-path-migration-v1.json");
+    try {
+        fs.writeFileSync(marker, `${JSON.stringify({ schema: RUNTIME_PATH_MIGRATION_SCHEMA, packageRoot, changedFiles, completedAt: new Date().toISOString() }, null, 2)}\n`, "utf8");
+    }
+    catch { }
+    return { changedFiles, packageRoot };
+}
 // Run before exporting the path consumed by eager storage modules.
 exports.CCM_DIR = path.resolve(process.env.CCM_TASK_STORE_DIR || exports.DEFAULT_CCM_DIR);
 if (!process.env.CCM_TASK_STORE_DIR) {
@@ -131,6 +300,12 @@ if (!process.env.CCM_TASK_STORE_DIR) {
         // Do not silently run against a partially migrated store.  The caller can
         // still use an explicit CCM_TASK_STORE_DIR for diagnostics/recovery.
         console.error(`[CCM] runtime data migration failed: ${String(error?.message || error)}`);
+    }
+    try {
+        ensureActiveRuntimePathsNormalizedSync();
+    }
+    catch (error) {
+        console.error(`[CCM] active runtime path normalization failed: ${String(error?.message || error)}`);
     }
 }
 //# sourceMappingURL=runtime-paths.js.map
