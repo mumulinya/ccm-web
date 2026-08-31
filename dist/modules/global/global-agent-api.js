@@ -36,6 +36,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.createGlobalAgentApi = createGlobalAgentApi;
 const crypto = __importStar(require("crypto"));
 const fs = __importStar(require("fs"));
+const os = __importStar(require("os"));
 const path = __importStar(require("path"));
 const workflow_decision_1 = require("../../agents/workflow-decision");
 const global_agent_attachments_1 = require("./global-agent-attachments");
@@ -108,17 +109,41 @@ function normalizeGlobalRequestedTargets(value, message = "") {
     }
     return matches.filter((item) => !ambiguousNames.has(String(item.canonicalName)) && !ambiguousNames.has(String(item.displayName)));
 }
-function resolveControlBotAcpPlatformContext(acpSessionIdValue) {
+function resolveControlBotAcpPlatformContext(acpSessionIdValue, payload = {}) {
     const acpSessionId = String(acpSessionIdValue || "").trim();
-    if (!acpSessionId || acpSessionId.length > 240 || !fs.existsSync(utils_1.SESSIONS_DIR))
+    if (!acpSessionId || acpSessionId.length > 240)
         throw new Error("全局 ACP 会话 ID 无效");
-    const files = fs.readdirSync(utils_1.SESSIONS_DIR)
+    // The ACP adapter may already carry the authoritative Feishu identity on the
+    // first turn. Prefer it so a new global conversation does not need a
+    // pre-created CCM binding.
+    const chatId = String(payload.chat_id || payload.chatId || "").trim();
+    const openId = String(payload.open_id || payload.openId || payload.sender_open_id || "").trim();
+    if (chatId || openId) {
+        const threadId = String(payload.thread_id || payload.threadId || payload.root_id || payload.rootId || "").trim();
+        const platformSessionKey = String(payload.platform_session_key || payload.platformSessionKey || (`feishu:${chatId || "chat"}:${openId || "user"}${threadId ? `:root:${threadId}` : ""}`)).trim();
+        return {
+            chat_id: chatId,
+            open_id: openId,
+            user_id: String(payload.user_id || payload.userId || payload.sender_user_id || "").trim(),
+            root_id: threadId,
+            thread_id: threadId,
+            platform_message_id: String(payload.platform_message_id || payload.platformMessageId || payload.message_id || "").trim(),
+            platform_session_key: platformSessionKey,
+            acp_session_id: acpSessionId,
+        };
+    }
+    // cc-connect versions predating the .ccm runtime migration still persist
+    // their ACP session map under ~/.cc-connect. Read it as compatibility data;
+    // the resulting conversation/binding is written by CCM under ~/.ccm.
+    const sessionDirs = [utils_1.SESSIONS_DIR, path.join(os.homedir(), ".cc-connect", "sessions")]
+        .filter((dir, index, all) => all.indexOf(dir) === index && fs.existsSync(dir));
+    const files = sessionDirs.flatMap((dir) => fs.readdirSync(dir)
         .filter((file) => /^ccm-control-bot(?:_[^/\\]+)?\.json$/i.test(file))
-        .map((file) => ({ file, mtime: fs.statSync(path.join(utils_1.SESSIONS_DIR, file)).mtimeMs }))
+        .map((file) => ({ dir, file, mtime: fs.statSync(path.join(dir, file)).mtimeMs })))
         .sort((a, b) => b.mtime - a.mtime || a.file.localeCompare(b.file));
     for (const candidate of files) {
         try {
-            const store = JSON.parse(fs.readFileSync(path.join(utils_1.SESSIONS_DIR, candidate.file), "utf-8"));
+            const store = JSON.parse(fs.readFileSync(path.join(candidate.dir, candidate.file), "utf-8"));
             const sessionIds = Object.entries(store.sessions || {})
                 .filter(([, session]) => String(session?.agent_session_id || "") === acpSessionId)
                 .map(([sessionId]) => String(sessionId));
@@ -129,15 +154,15 @@ function resolveControlBotAcpPlatformContext(acpSessionIdValue) {
                 continue;
             const platformSessionKey = platformKeys[0];
             const parts = platformSessionKey.split(":");
-            const chatId = parts.find((part) => /^oc_/i.test(part)) || "";
-            const openId = parts.find((part) => /^ou_/i.test(part)) || "";
+            const mappedChatId = parts.find((part) => /^oc_/i.test(part)) || "";
+            const mappedOpenId = parts.find((part) => /^ou_/i.test(part)) || "";
             const rootIndex = parts.findIndex((part) => part === "root");
             const threadId = rootIndex >= 0 ? String(parts[rootIndex + 1] || "") : "";
-            if (!chatId && !openId)
+            if (!mappedChatId && !mappedOpenId)
                 continue;
             return {
-                chat_id: chatId,
-                open_id: openId,
+                chat_id: mappedChatId,
+                open_id: mappedOpenId,
                 user_id: "",
                 root_id: threadId,
                 thread_id: threadId,
@@ -556,7 +581,7 @@ function createGlobalAgentApi(deps) {
                     }
                     streamResponse = isAcp && payload.stream === true;
                     if (isAcp) {
-                        const resolvedAcpContext = resolveControlBotAcpPlatformContext(payload.acpSessionId || payload.sessionId);
+                        const resolvedAcpContext = resolveControlBotAcpPlatformContext(payload.acpSessionId || payload.sessionId, payload);
                         payload = {
                             ...payload,
                             chat_id: payload.chat_id || resolvedAcpContext.chat_id,
