@@ -93,6 +93,17 @@ function resolveCcConnectLauncher() {
 function spawnCcConnect(args, options) {
     const launcher = resolveCcConnectLauncher();
     const resolvedArgs = [...(launcher.prefixArgs || []), ...args];
+    // cc-connect has its own data-home setting. Keep the managed bridge process
+    // on CCM's runtime home so sessions, logs and locks are not recreated under
+    // the legacy ~/.cc-connect directory after migration.
+    const childOptions = {
+        ...options,
+        env: {
+            ...process.env,
+            ...(options?.env || {}),
+            CC_DATA_DIR: utils_1.CCM_DIR,
+        },
+    };
     if (process.platform === "win32") {
         // cc-connect can launch another console application (for example Claude Code).
         // A winexe parent with CreateNoWindow keeps the complete descendant tree hidden.
@@ -100,12 +111,12 @@ function spawnCcConnect(args, options) {
         const childCommand = launcher.shell ? (process.env.ComSpec || "cmd.exe") : launcher.command;
         const childArgs = launcher.shell ? ["/d", "/s", "/c", launcher.command, ...resolvedArgs] : resolvedArgs;
         return (0, child_process_1.spawn)(hiddenLauncher, [childCommand, ...childArgs], {
-            ...options,
+            ...childOptions,
             shell: false,
             windowsHide: true,
         });
     }
-    return (0, child_process_1.spawn)(launcher.command, resolvedArgs, { ...options, shell: launcher.shell, windowsHide: true });
+    return (0, child_process_1.spawn)(launcher.command, resolvedArgs, { ...childOptions, shell: launcher.shell, windowsHide: true });
 }
 function applyCcConnectTurnGuards(content, guards) {
     const newline = content.includes("\r\n") ? "\r\n" : "\n";

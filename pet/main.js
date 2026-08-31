@@ -12,7 +12,7 @@ const shouldDisableHardwareAcceleration = process.env.CCM_PET_DISABLE_HARDWARE_A
 if (shouldDisableHardwareAcceleration) app.disableHardwareAcceleration();
 
 const os = require('os');
-const CCM_DIR = path.join(os.homedir(), '.cc-connect');
+const CCM_DIR = path.resolve(process.env.CCM_TASK_STORE_DIR || path.join(os.homedir(), '.ccm'));
 const USER_DATA_DIR = path.join(CCM_DIR, 'temp', 'pet-userdata');
 if (!fs.existsSync(USER_DATA_DIR)) {
   fs.mkdirSync(USER_DATA_DIR, { recursive: true });
