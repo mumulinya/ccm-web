@@ -109,18 +109,23 @@ function ensureWebSessionDir(projectName) {
         fs.mkdirSync(dir, { recursive: true });
     return dir;
 }
-// 查找 cc-connect 的 session 文件（带 hash 的）
+// 查找 cc-connect 的 session 文件（带 hash 的）。新版本优先使用
+// ~/.ccm，旧版 cc-connect 仍可能把项目会话写在 ~/.cc-connect；读取旧目录
+// 是迁移期兼容行为，后续同步仍会保留 cc-connect 所需的存储。
 function findCcSessionFile(projectName) {
     const safeProjectName = (0, project_validation_1.validateProjectName)(projectName);
-    if (!fs.existsSync(utils_1.SESSIONS_DIR))
-        return null;
     const escaped = safeProjectName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const matcher = new RegExp(`^${escaped}(?:_[^/\\\\]+)?\\.json$`);
-    const files = fs.readdirSync(utils_1.SESSIONS_DIR).filter(f => matcher.test(f) && !fs.statSync((0, project_validation_1.resolveContainedPath)(utils_1.SESSIONS_DIR, f)).isDirectory());
+    const sessionDirs = [
+        utils_1.SESSIONS_DIR,
+        path.join(path.dirname(utils_1.SESSIONS_DIR), ".cc-connect", "sessions"),
+    ].filter((dir, index, all) => all.indexOf(dir) === index && fs.existsSync(dir));
+    const files = sessionDirs.flatMap((dir) => fs.readdirSync(dir)
+        .filter(f => matcher.test(f) && !fs.statSync(path.join(dir, f)).isDirectory())
+        .map((file) => ({ dir, file, mtime: fs.statSync(path.join(dir, file)).mtimeMs })));
     const newest = files
-        .map((file) => ({ file, mtime: fs.statSync((0, project_validation_1.resolveContainedPath)(utils_1.SESSIONS_DIR, file)).mtimeMs }))
         .sort((a, b) => b.mtime - a.mtime || a.file.localeCompare(b.file))[0];
-    return newest ? (0, project_validation_1.resolveContainedPath)(utils_1.SESSIONS_DIR, newest.file) : null;
+    return newest ? (0, project_validation_1.resolveContainedPath)(newest.dir, newest.file) : null;
 }
 function isFeishuPlatformSessionKey(value) {
     return /^(?:feishu|lark):/i.test(String(value || "").trim());
