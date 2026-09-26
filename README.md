@@ -5,11 +5,12 @@
 </p>
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/mumulinya/ccm-web/main/ccm-package/public/ccm-app-icon.png" alt="CCM Workbench" width="88" height="88" />
+  <img src="https://raw.githubusercontent.com/mumulinya/ccm-web/main/public/ccm-app-icon.png" alt="CCM Workbench" width="96" height="96" />
 </p>
 
 <p align="center">
-  <strong>本地优先的多 Agent 协作、自动开发与工作区管理平台</strong>
+  <strong>本地优先的多 Agent 协作、自动开发与工作区管理平台</strong><br />
+  <em>Local-First Multi-Agent Collaboration, Autonomous Development & Workspace Control Plane</em>
 </p>
 
 <p align="center">
@@ -17,139 +18,189 @@
   <img src="https://img.shields.io/badge/Node.js-%3E%3D20-339933" alt="Node.js 20+" />
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT License" />
   <img src="https://img.shields.io/badge/storage-local--first-0f766e" alt="Local first" />
+  <img src="https://img.shields.io/badge/architecture-agentic--loop-8b5cf6" alt="Agentic Loop" />
 </p>
 
 <a id="中文"></a>
 
 ## 中文
 
-CCM 将全局助手、群聊主 Agent、项目主 Agent、项目开发 Agent、TestAgent、会话记忆、MCP/Skill、知识库、Git、终端、飞书和任务回放放进同一个本地工作区。它不是单一聊天界面，而是一套从需求进入、源码规划、开发执行、独立验收到最终交付的可恢复工作流。
+CCM（CC-Web）将**全局助手**、**群聊主 Agent**、**项目主 Agent**、**项目开发 Agent**、**TestAgent 独立验收**、**会话长短期记忆**、**MCP/Skill 体系**、**知识库**、**Git 工作区**、**终端**、**飞书协作**与**任务执行回放**深度整合进同一个本地优先的工作区。
+
+CCM 不是简单的单聊 Web 界面，而是一套从**需求结构化输入**、**源码深度感知规划**、**子 Agent 隔离执行**、**独立自动化验收**到**最终确定性交付**的完整工业级自愈工作流。
+
+---
 
 ## 快速开始
 
-要求 Node.js 20 或更高版本。
+> 运行要求：**Node.js 20 或更高版本**（推荐 LTS 版本）。
+
+### 1. 安装与启动
 
 ```bash
 npm install -g @mumulinya167/cc-web@latest
 ccm start --background --open
 ```
 
-默认访问地址：<http://localhost:3080>
+默认 Web 访问地址：**<http://localhost:3080>**
 
-- 默认只监听 `127.0.0.1`，不会自动暴露到局域网或公网。
-- 首次运行会创建本地数据目录并进入账户初始化流程。
-- 账户、项目、会话、任务和运行数据保存在 `~/.ccm`，不会写入 npm 安装目录。旧版 `~/.cc-connect` 会作为只读兼容源保留。
-- 首次运行会在后台准备本地知识库 Embedding 模型；下载失败不会阻止 CCM 启动，知识检索会明确降级。
-- Electron 不随服务端安装。桌面宠物首次启动时按需准备桌面运行时，纯 Web 或 Linux 服务器无需下载。
+- **安全边界**：默认仅监听 `127.0.0.1` 本地回环，不主动向局域网或公网暴露端口。
+- **数据隔离**：所有用户账户、项目定义、会话记录、任务账本及运行状态持久化存储于 `~/.ccm`，绝不污染全局 npm 安装目录；旧版 `~/.cc-connect` 仅作为只读向下兼容源。
+- **渐进式准备**：首次启动将在后台自动预热本地知识库 Embedding 模型；即使离线或下载中断，核心控制台仍正常拉起，检索能力平滑降级。
+- **轻量按需**：桌面宠物基于 Electron 按需独立准备，服务端和纯 Web 模式零额外依赖开销。
 
-检查安装状态：
+### 2. 基础运维与诊断
 
 ```bash
-ccm status
-ccm doctor
-ccm logs --follow
+ccm status            # 查看当前守护进程、端口与项目状态
+ccm doctor            # 全面体检：Node.js、PTY 终端、第三方 CLI 与系统环境
+ccm logs --follow     # 实时查看服务端轮转日志
 ```
+
+---
 
 ## 发布包与源码仓库
 
-这是 CCM 的 npm 发布包，发布仓库只保存可安装的生产产物。完整 TypeScript/Vue 源码、测试和开发文档位于源码仓库：<https://github.com/mumulinya/ccm-workbench>。
+- **npm 生产发布包**：<https://www.npmjs.com/package/@mumulinya167/cc-web>
+- **发布产物仓库**：<https://github.com/mumulinya/cc-web>
+- **完整开源工程（源码、测试套件与详细架构文档）**：<https://github.com/mumulinya/ccm-workbench>
+- 生产环境启动安装包中编译后的 `dist/server.js`；源码仓库二次开发请先执行 `npm run build`。
 
-- 发布仓库：<https://github.com/mumulinya/ccm-web>
-- npm 安装入口：<https://www.npmjs.com/package/@mumulinya167/cc-web>
-- 运行数据保存在用户目录 `~/.ccm`，不会写入 npm 安装目录。
-- `ccm start` 启动已安装包中的 `dist/server.js`；源码仓库开发时请先执行 `npm run build`。
+---
 
-## 2.0.14 更新重点
+## 核心架构与特性矩阵
 
-- **主 Agent 实时过程与最终回答全生命周期统一（Live-Final Presentation Lifecycle V1）**：
-  - 确立并实现权威展示生命周期契约，在首个真实回答文本或工具调用发生前仅呈现轻量思考态或声明式临时前导（`model_preamble`）；
-  - 工具执行期间保持实时叙述与操作可见，最终流式回答接管后自动收拢过程，历史记录严格遵循“最终回答 → 已交付 → 文件变化 → 已处理”统一层级。
-- **多协议 Provider 动态流式能力矩阵与缓存增强（Live Provider Protocol Cache Matrix）**：
-  - 深度集成多协议 Provider（OpenAI/Claude/Gemini 等）的流式探针与缓存矩阵校验；
-  - 支持 Provider 原生微压缩降级回退与长会话 Token 优化，显著提升高并发与长程多轮交互稳定性。
-- **主 Agent 5 层分层上下文与端到端开发执行链（Main Agent Five-Layer Context & Real Chain E2E）**：
-  - 引入主 Agent 5 层结构化上下文模型与端到端真实开发执行链自动化验证；
-  - 强化主 Agent 交付后评审抽检闭环（Post-Review Spot Check）与受控工作区只读分析边界。
-- **风险分级验收机制与执行记录自动调和（Risk-Tiered Acceptance & Execution Reconciliation）**：
-  - 建立系统级风险分层验收机制，细化变更影响度评估与安全确认门禁；
-  - 增强会话执行账本状态的自动对齐与调和能力，杜绝复杂断点恢复下的状态不一致。
-- **飞书全局渠道与 Slash 命令通道规范化（Feishu Global Channel & Slash Command Standardization）**：
-  - 规范化飞书全局 Agent 交互渠道与 Slash 命令会话生命周期，全面精简侧边停靠栏并提升跨端交互一致性。
-- **统一会话压缩引擎与 Provider 上下文微压缩（Unified Session Compaction Engine & Provider Microcompact）**：
-  - 深度重构会话压缩调度层（`session-compaction-core`），集成中立 Provider 提示词缓存与微压缩生命周期管理（`provider-microcompact`）；
-  - 新增微压缩状态面板（`MicroCompactStatusPanel`），支持实时查看与管理长会话压缩状态，显著降低 Token 消耗并彻底消除上下文超限异常。
-- **规范上下文记账体系与细粒度 Token 分解（Canonical Context Accounting & Breakdown）**：
-  - 建立权威上下文记账规范（`canonical-context-accounting`、`ccm-context-accounting-v2`），精准区分系统提示词、知识库、工具桶与历史轮次的 Token 分布；
-  - 提供多维度会话上下文用量视图（`SessionContextUsage`），杜绝统计漂移与重复计费。
-- **原生模型调用生命周期与流式查询闭环（Native Model Call Lifecycle & Native Query Loop）**：
-  - 增强原生模型调用的生命周期事件分发（`native-model-call-lifecycle`、`native-query-loop`），深度统一全局、群聊与项目 Agent 的流式响应机制；
-  - 引入暂态助手行为投射（`TransientAssistantActivity`），提供更加平滑可解释的中间状态与思考过程展示。
-- **业务方案结构化分发与代码变更工作台（Business Plan Dispatch & Code Changes Workbench）**：
-  - 强化源码探询路由与业务需求方案分发契约（`business-requirement-plan-dispatch`、`development-source-grounding-gate`），支持结构化方案确认卡片（`PresentedPlanCard`）与一键决策闭环；
-  - 全面升级代码变更工作台（`CodeChanges`、`CodeChangeSummary`、`UnifiedDiffModal`），支持精细化文件变更树、状态汇总与原位 Diff 审查。
-- **会话轮次精细化控制与作用域指令交互（Conversation Turn Control & Scope Instructions）**：
-  - 升级会话轮次控制面板（`ConversationTurnControls`）与作用域指令按钮（`ScopeInstructionButton`），支持便捷的模式切换与多作用域权限管控；
-  - 新增项目孤立资源清理对话框（`ProjectOrphanRemovalDialog`）与受控委托记录面板（`DelegatedInquiryRecords`）。
-- **会话滚动长短期记忆与精细化压缩体系（Rolling Session Memory & Dynamic Token Basis）**：
-  - 引入会话滚动记忆模块（`rolling-session-memory`），基于动态 Token 预算基础（`session-memory-token-basis`）自适应管理历史上下文；
-  - 支持会话阶段性局部压缩记录与压缩对话框（`PartialCompactDialog`），以及会话启动挂钩上下文（`session-start-hook-context`），保障跨阶段上下文无缝连贯与高准确率召回。
-- **任务与会话执行态实时投射与全景 Trace 回放升级（Live Execution Activity & Trace Replay）**：
-  - 新增会话执行态实时投射面板（`LiveExecutionActivity`、`TransientAssistantActivity`）与会话文件变更卡片（`ConversationFileChanges`），全景展示实时步骤与文件修改轨迹；
-  - 升级 TraceReplay 交互（`TraceReplay`），支持多层级布局、多轮次执行对比与历史标记点无缝原位回放。
-- **SSE 心跳保活与强一致性任务账本（SSE Heartbeat & Task SQLite Consistency）**：
-  - 新增 SSE 长连接保活心跳（`sse-heartbeat`），提升弱网与长任务流式输出的稳定性；
-  - 强化任务恢复编排器与 SQLite 强一致性执行账本，保障系统重启后断点续跑零差错。
-- **核心包发布构建与运行时完整性加固**：全面固化 core 基础层模块校验与真实安装启停自测门禁，杜绝任何模块分发遗漏。
-- **全局 Agent 记忆中心与向量语义检索**：全局记忆中心引入向量嵌入语义检索（Vector Embedding Search）与过期记忆自动修剪（Auto Pruning），实现高准确度的长程记忆召回；同时将全局与群聊会话执行账本（Session Execution Ledger）的上下文实时落盘持久化，确保服务端重启或断点恢复时零状态漂移。
-- **角色专属 Skill 与计划编排模式精细化**：细化主 Agent 与协作子 Agent 的角色 Skill 注入机制，显式隔离“计划编排模式（Plan Authoring Mode）”与“任务分解（Task Decomposition）”提示词；各角色按阶段精准按需挂载专属 Skill 与上下文。
-- **上下文工具桶细粒度分类与 Token 账本优化**：深度优化上下文引擎中的工具桶分类逻辑（Session Context Tool Buckets），精准甄别用户自定义 MCP 工具与内部系统运行时工具，杜绝 Token 重复计算与统计溢出；原生会话与执行日志深度对齐。
-- **全局与群聊长期记忆管理升级**：全局 Agent 记忆中心深度升级，引入全局主题索引（Topic Index）、记忆账本（Ledger）、事务隔离与蒸馏记忆（Distilled Memory）；支持长短期记忆投影、动态窗口、分层 Token 预算管理及权威源文件证明；引入会话边界日志（Memory Boundary Journal）与反应式压缩恢复，保障跨会话长程记忆与断点续跑零丢失。
-- **Agent 执行流可视化与交互体验增强**：
-  - **行内 Agent Diff（Inline Agent Diff）**：主 Agent 及子 Agent 产生的文件变更在执行流步骤中直接原位呈现代码差异高亮，直观掌握文件修改。
-  - **子 Agent 嵌套会话（Nested Child Agent Conversation）**：子 Agent 的执行步骤与内部对话以嵌套层级折叠呈现，清晰追溯多 Agent 协作细节。
-  - **需求方案确认与一键执行（Presented Requirement Plan）**：提供直观的方案确认卡片与一键执行流，支持实施前业务澄清问答与交互式决策。
-  - **会话待办事项追踪（Conversation Todo）**：在会话中实时同步并追踪待办事项完成度与步骤进度。
-  - **文件阅读与检索折叠收起（Read & Search Collapsible Header）**：大批量文件读取与代码搜索步骤自动收拢折叠，显著降低聊天视窗干扰。
-  - **工具结果多维结构化呈现（Rich Tool Result Detail & Replay）**：工具输出深度适配各类结构化数据，提供更详尽可读的视图与回放支持。
-- 全局、项目和群聊统一采用真实流式回答与可解释进度：工具完成后立即展示安全结果和下一步，长等待只显示真实阶段，不展示隐藏推理。
-- 开发需求、只读分析和普通问答使用统一边界；只有明确需要修改代码或配置时才创建正式开发任务，修改仍由受控项目开发 Agent执行。
-- 执行记录升级为“摘要 → 用户可读详情 → 技术详情”三层展示，目录、文件、搜索位置、读取范围、Git与验证结果不再暴露原始JSON字段。
-- 支持安全暂停与原位续接、任务意图路由、计划前业务澄清、飞书附件接入、运行时状态中心和离开期间摘要。
-- 完成态严格由当前generation的Terminal Gate确认；失败、暂停、中断和等待处理不会伪装为正式交付。
-- 主 Agent文件读取升级为安全续读闭环：批量读取会稳定保留原文件集合，一键继续读取未完成内容，并通过checksum阻止文件漂移后误拼接旧结果。
-- 同一模型上下文内的重复读取会返回未变化状态，避免重复注入正文与重复计算Token；新任务、压缩、恢复或generation变化后会重新读取权威内容。
-- Glob和Grep优先使用npm随包安装的ripgrep，系统ripgrep和Node安全实现作为降级；搜索支持超时、取消和已完成部分结果保留。
-- 文件路径不存在时返回受项目权限、敏感文件和真实路径边界约束的候选建议，不会猜测或暴露越界文件。
-- 全局、项目和群聊使用同一套只读工作区工具与展示；主 Agent负责读取、分析和规划，代码修改仍由受控项目开发 Agent执行。
-- 修复全局 Agent 上下文边界白名单遗漏，恢复全局飞书会话和“继续”操作的正常执行。
-- 全局、项目和群聊统一接入可恢复任务队列、阶段计划、执行记录与任务回放；服务重启后保留任务现场和会话连续性。
-- Agent 指标覆盖主 Agent、项目子 Agent 和 TestAgent，支持真实 Token、费用、阶段耗时与进程资源观测；未提供 usage 时明确显示原因。
-- 运行中的文件查询按“读取文件、查找文件、搜索代码、检查 Git、运行验证”分层展示，普通消息不暴露原始 Shell 命令。
+| 核心维度 | 关键能力实现 | 业务价值与优势 |
+| :--- | :--- | :--- |
+| **Token用量审计** | 统一 Provider Usage 归一化 + 读/写/直接输入精准计量 + 零重复失真 | 彻底解决跨 Provider 统计口径不一，用量与真实账单 100% 对应 |
+| **单调追加缓存** | Append-Only v11 协议排布 + 静态公共指令锁 + 公共工具指纹 Profile | 跨会话长前缀稳定不击穿，可变控制与静态前缀彻底解耦，提速降本 |
+| **多模态与语音转录**| 抖音 MCP ASR 语音转录（SiliconFlow/Whisper/火山）+ 智能短链文案提取 | 视频内容秒级文本化，打通音视频探索、自动化下载与智能转录全链路 |
+| **极致流式渲染** | 50ms 增量合并 + 同帧滚动单次读写 + 过程/最终回答阶段传输信号 | DOM 替换次数减少 90%，彻底消除长回答流式卡顿与重绘抖动 |
+| **内存与缓存配额** | 独立物化缓存策略 + 4MB 单项与 8MB 单会话上限 + 超大单次免击穿 | 杜绝单次超大工具输出击穿全进程缓存，长效保障高并发内存平稳 |
+| **轮次意图与路由** | 结构化意图决策 + 歧义输入安全收敛（needs_route） + 校验和防重 | 彻底理清任务暂停/恢复插话，防止歧义输入破坏运行态与历史账本 |
+| **闭环验收与返工** | 待验收阶段支持批准交付与提修改（revise） + 自动返工工作单流转 | 交付标准透明可溯，一键触发增量返工流水线并检测版本冲突 |
+| **安全并发批次调度** | 完整模型返回批次边界 + 纯只读受控并发 + 严格声明顺序物化 | 杜绝读写交叠竞态，消除工具提前执行乱序，并发开销可控 |
+| **证据真实性与防重** | 只读失败有限重试（最多3次） + 真实哈希校验短路（file_unchanged） | 消除过度去重死锁，杜绝虚假文件命中，确保上下文证据真实 |
+| **Responses 原生保真** | reasoning/encrypted_content 完整回放 + 本地 Token 估算去重 | 原生思维链与加密项无损回放，修复本地 Token 虚增，严防跨域污染 |
+| **多 Agent 协作网络** | 全局 Agent + 群聊主 Agent + 项目主 Agent + 隔离项目 Worker | 明确角色职责边界：主 Agent 只读规划，子 Agent 隔离执行 |
+| **企业协同与多端集成** | 飞书双向会话与自动化工作报告 + 多协议终端 PTY + 可互动桌宠 | 多端消息直通工作区，会话事实自动生成可信工作日报/周报 |
 
-### 代码智能与精确源码定位
+---
 
-- 新增三栏代码智能工作台，统一项目/文件/符号树、语义查询、诊断、调用关系、只读源码定位和Agent投递。
-- 支持工作区符号、文件符号、定义、引用、实现、类型定义、调用者、被调用者和代码诊断九类查询。
-- 查询使用精确文件、行和列定位，并绑定索引generation、RepoStateIdentity、Evidence和结果checksum；代码变化后旧结果会标记为陈旧。
-- TS/JS语言服务随包可用；Vue、Python、Go、Rust、Java、Kotlin、C/C++、C#、PHP、Ruby、Lua、HTML、CSS和JSON可通过管理员确认的标准LSP接入。
-- 索引按需异步建立并增量维护。缺少语言服务时明确返回能力不可用，不使用Grep伪造定义、引用或调用关系。
-- 源码正文仅在当前页面按位置有界重读，使用`no-store`响应；索引、Evidence、查询历史和JSON/CSV导出均不保存源码正文。
+## 4.0.0 重大里程碑与版本演进
 
-### 可观察的Agent执行与严格验收
+在 4.0.0 重大版本中，CCM 完成了全链路 Provider Token 用量与缓存命中审计归一化、Append-Only 严格单调追加缓存排布（v11）、抖音原生 MCP ASR 语音识别与智能转录、以及服务实例单例锁与存储可靠性的全面升级：
 
-- 普通对话保持轻量；真实工具、Skill、MCP和项目Agent执行才显示CC风格进度说明与折叠详情。
-- 开发任务按准备检索、用户可读计划、项目Agent、TestAgent、返工复验、主Agent总结和文件交付展示。
-- Claude Code、Codex、Cursor、Gemini/Antigravity、OpenCode和Qoder使用Agent Communication V2结构化ACK、进度、Result和CCM终态回执。
-- 新任务必须在写入前完成真实ACK；第三方Agent不汇报业务进度时，CCM只显示可验证的心跳、结构化工具、文件或验证状态，不猜测自由格式stdout。
-- 第三方Result不会直接宣布完成；只有当前RepoState下的Evidence、TestAgent或主Agent自验及Terminal Gate全部通过后才显示最终交付。
+### 1. 统一模型 Token 用量与缓存命中审计标准化（Provider Usage Normalization & Audit）
+- **独立归一化核心（provider-usage.ts）**：彻底终结不同 Provider（OpenAI Responses / Chat Completions、Anthropic、Gemini、中转代理）对 `input_tokens`、`cached_tokens`、`cache_read_input_tokens`、`cache_creation_input_tokens` 口径不一、重复计费或计算错误的问题。
+- **细粒度四维度计量**：清晰拆分直接输入（`directInputTokens`）、缓存读入（`cacheReadInputTokens`）、缓存创建（`cacheCreationInputTokens`）和补全输出（`outputTokens`），实现跨 Provider 确定性精确核算，彻底杜绝缓存命中 token 与未命中输入 token 混算失真。
+- **全局诊断与可视化透出**：三端会话上下文明细与诊断看板直观展现缓存命中率与节约比例，真实反映每一次模型调用的底层数据流动。
 
-### 动态上下文、记忆连续性与跨会话投放
+### 2. 三端 Append-Only 严格单调追加缓存排布（Provider Cache Append-Only Wire Layout v11）
+- **v11 单调追加排布标准**：演进至 `ccm-append-only-v11` 协议排布标准，将完整确定性的公共指令集固定在系统前缀首位，后续轮次仅严格做增量追加。
+- **动态控制与静态前缀彻底解耦**：彻底阻断可变运行时状态（如工具动态发现、会话临时指令、任务编排控制）侵入导致的前缀哈希变更，保证长会话前缀指纹恒定不破裂。
+- **公共工具指纹 Profile（provider-cache-public-profile.ts）**：基于工具 Schema 指纹（`toolSchemaChecksum`）生成公共工具 Profile，实现跨会话跨项目长前缀大缓存复用，杜绝私有环境与参数泄露。
 
-- MCP支持`deferred`、`auto`、`inline`加载；Skill目录、已调用Skill恢复、来源正文和输出预留按模型真实容量动态预算。
-- Skill可选择`inline`或`context: fork`；压缩后重新校验Skill hash、授权和MCP Schema。
-- 知识库和共享文件正文仅进入当前Agent Loop，长期只保存无正文引用与版本回执；恢复时从权威存储重新读取。
-- 全局Agent、工作台和需求池投放任务时只选择项目或群聊，系统自动解析对应的自动化任务会话。
-- 来源任务与目标会话支持双向跳转，同一任务卡原位更新计划、执行、验收、返工、文件变化和最终总结。
+### 3. 多模态工作台升级：抖音 MCP ASR 语音识别与智能转录（Speech-to-Text & Transcripts）
+- **原生 ASR 音视频智能转录**：抖音原生 MCP 桥接深度打通自动语音识别（ASR）能力，全面支持单视频转录（`transcribe_video`）与多视频批量转录（`batch_transcribe`）。
+- **多模型服务商生态接入**：原生支持 SiliconFlow（硅基流动 SenseVoice）、OpenAI Whisper、火山引擎（Volcengine）及自定义 Custom ASR 服务；密钥凭证隔离存储（`protectCredential`），在音乐设置面板中提供可视化配置与实时连通性探测。
+- **智能文案提取与短链解析**：支持直接粘贴抖音 App“保存链接”或“复制链接”产生的完整包含标题、表情与标点的复杂文案，自动过滤修饰字符并秒级提取核心短链与视频 ID。
+
+### 4. 服务单例互斥锁与持久化存储高可靠（Server Instance Lock & Storage Reliability）
+- **服务实例进程锁（server-instance-lock.ts）**：保障端口与工作区文件数据库的多实例互斥与平滑热重启，杜绝并发多进程启动对同一工作区状态造成的数据污染与端口抢占。
+- **任务存储（task-store.ts）与核心 DB 健壮性**：增强并发读写与断电恢复自愈能力，会话事件与任务账本保证写入原子性。
+
+### 5. 前端交互与工作区全景看板演进
+- **全景缓存诊断看板（SessionCacheDiagnostics.vue）**：直观展示缓存读入、缓存创建与直接输入占比，支持移动端自适应布局。
+- **终端体验优化（Terminal.vue）**：增强 PTY 终端渲染平滑度与会话重连弹性，多终端切换不卡顿。
+
+---
+
+## 3.0.10 历史版本特性回顾
+
+在 3.0.10 版本中，CCM 全面增强了本地物化内存缓存分级配额控制、会话轮次意图结构化解析与安全路由、以及任务生命周期中待用户验收的自动返工闭环流转：
+
+### 1. 本地物化缓存分级配额与防击穿保护（Local Materialization Cache Budget）
+- **细粒度内存分级管控**：提取独立 `provider-local-materialization-cache` 策略模块，确立单项条目上限（4MB）、单会话上限（8MB）、全局条目（128 项）与全局内存上限（32MB）四级防线。
+- **超大工具结果免击穿保护**：当单次工具返回超大代码或检索结果（超过单项 4MB 阈值）时，采用单次即时物化服务，不常驻热内存缓存，彻底杜绝单次大型工具调用将工作区其他活跃会话缓存全部逐出的隐患，新增 `oversizeSkips` 审计指标。
+- **公共前缀与私有会话严格隔离**：细化公共前缀块划分（`publicStablePrefixBlockCount`），协议适配器可在跨项目公共前缀边界设置断点，严密防止私有指令污染全局缓存键。
+
+### 2. 会话轮次意图结构化决策与安全路由（Conversation Turn Intent Resolution）
+- **意图决策接口（/resolve-intent）**：新增 `/api/conversation-turns/resolve-intent`，统一解析用户恢复与插话动作，支持 `resume_original`、`resume_with_instruction`、`new_turn`、`steer_original` 等标准决策类型。
+- **模糊恢复输入安全收敛**：用户在任务暂停或中断后输入补充说明时，系统智能识别“补充原任务”还是“开启新任务”；如遇歧义安全转入 `needs_route` 状态，复用路由引导卡片等待用户确认，杜绝歧义输入导致的任务状态破坏或误执行。
+- **校验绑定与版本防篡改**：引入 `binding_checksum` 校验机制，严密绑定 turn、revision、attempt 与会话作用域，防止网络延迟下的重复动作生效。
+
+### 3. 任务生命周期标准化与用户验收返工流转（Task Lifecycle & Acceptance Revise）
+- **验收阶段双向决策闭环**：完善待用户验收（`awaiting_user_acceptance`）状态机，除常规批准（`accept`）外，原生支持提出修改要求（`revise`）。
+- **自动化返工（Rework）工作单流转**：用户提出返工修改意见时，后端自动生成独立 `attemptId`，将前序验收标记为 `superseded`，任务平滑流转为 `reworking` 状态，并自动入队继续执行返工流水线，保留完整时间线历史。
+- **输出版本冲突保护（output_revision）**：操作严格校验 `output_revision`，一旦任务已生成新最终输出则返回 `TASK_ACCEPTANCE_VERSION_CONFLICT`，从根本上防止基于陈旧输出的脏操作。
+
+### 4. 前端三端全生命周期体验闭环
+- **任务卡片与回放交互增强**：项目、群聊、全局全面接入最新的任务卡片验收与返工动作，无缝展示返工进度与修改时间线。
+- **输入框智能状态引导**：在用户确认路由与意图期间，输入框精确联动状态，杜绝等待期间的假性错误报错。
+
+---
+
+## 3.0.9 历史版本特性回顾
+
+在 3.0.9 版本中，CCM 全面升级了三端 Agent 流式渲染性能、工具批次调度边界与只读受控并发、工具重复调用有限重试与文件证据校验、以及 Responses 原生 output 项回放保真：
+
+### 1. 三端 Agent 流式渲染极致优化与阶段信号（Streamed Markdown Render & Phase Signaling）
+- **高频增量智能合并（useStreamedMarkdown）**：项目、群聊、全局统一接入 `useStreamedMarkdown` 组合式函数，在 50ms 渲染窗口内合并密集 Markdown 片段增量；固定高密样本下正文 DOM 替换次数从 121 降至 12（削减 90% 以上），首段文本与稀疏增量保持零延迟即时呈现。
+- **自动滚动同帧合并**：同帧发起的多次滚动请求自动合并为 1 次布局读写，彻底消除超长回答流式输出时的布局抖动与重绘卡顿；智能保留用户上翻脱离底部的阅读位置，支持容器切换、会话重置与初次挂载自动补偿。
+- **传输阶段协议信号（answerPhase）**：原生模型循环协议引入 `[[CCM_PROCESS]]`（过程说明）与 `[[CCM_FINAL]]`（最终回答）传输阶段标记；后端实时派发 `model_activity.answerPhase` 并在传输前净化正文，前端在最终回答到达时平滑折叠思考过程；若后续流式中再次声明工具则自适应恢复工具复核，保证执行记录完整不丢失。
+
+### 2. 三端工具调度统一与完整批次边界（Native Tool Scheduling & Batch Boundary）
+- **完整模型批次调度边界**：流式声明阶段仅展示准备活动，彻底杜绝未接收完整批次即凭参数提前执行导致的时序错乱与读写交叠风险；整批参数齐备并持久化检查点后，统一进入权限与调度队列。
+- **纯只读批次受控并发**：整批均为只读策略确认时允许受控并发执行（按轻/中/重任务并发限制 10/6/4，群聊每项目上限 2），读写混合批次、工具发现、Skill/规范加载与写操作保持严格串行。
+- **声明顺序严格回灌**：工具执行结果按调用 ID 严格归位，按模型原始声明顺序物化回灌到上下文，消除并发完成先后对模型上下文的扰乱；执行取消或异常时安全等待在途调用，旧 attempt 无法污染新 attempt。
+
+### 3. 工具重复调用有限放行与真实哈希证据校验（Tool Repeat Policy & File Evidence Integrity）
+- **只读临时失败有限重试**：经适配器明确判定的只读工具，临时失败后允许模型使用新调用 ID 以相同参数请求重试，单参数连续失败最多放行 3 次（首次加 2 次重试），杜绝盲目去重导致的推理中断；写入、控制工具与未确认只读工具持续保持防重保护。
+- **同批次相同参数去重与 JSON 降级对齐**：同批次内相同参数只执行一次并按各调用 ID 映射结果；JSON 降级路径完整记录阻止结果，杜绝静默遗漏。
+- **真实文件内容哈希复用（file_unchanged）**：`file_unchanged` 前置条件由简单大小/修改时间判断收紧为真实文件内容哈希校验，且必须满足当前精确会话历史中已包含完整选择正文，杜绝文本内容被篡改或正文被截断时的伪命中。
+
+### 4. Responses 原生回放保真与本地 Token 估算去重（Responses Native Replay & Token Deduplication）
+- **原生 Output 项完整保真**：Responses 协议流式与非流式返回均完整保留已支持的原生 output 项（包含 reasoning 项、encrypted_content、消息 phase 及交错原始顺序），下一轮请求与跨进程检查点恢复优先使用原生项。
+- **本地 Token 估算去重**：工具专用 assistant 消息的本地 token 估算剔除内部回放副本与加密字节，避免本地估算虚增（固定样本下从 275 token 降至 87 token）。
+- **Provider 默认保留策略与凭据绑定**：缓存策略始终采用 Provider 默认保留，消除非标准的固定 ttl 或 prompt_cache_retention；原生回放元数据绑定 Provider、模型及凭据摘要哈希，切换模型或凭据时不发生 cross-provider 污染。
+
+---
+
+## 3.0.8 历史版本特性回顾
+
+在 3.0.8 版本中，CCM 完成了模型输入跨会话缓存深度复用、原生工具按需动态发现加载、会话抢占并发竞争消除与只读观察器的重大升级：
+
+### 1. 三端模型输入去重与跨会话缓存复用（Model Input Deduplication & Cache Reuse）
+- **单份正文与审计分离**：项目、群聊、全局全面统一模型工具结果投影；原始执行细节按脱敏规则持久化于 `~/.ccm/workspace-execution-audit/`，大模型请求仅发送一份单层紧凑模型正文，本地 Token 估算开销直降 50%+。
+- **模型历史检查点（Session Model Checkpoint）**：引入 `session-model-checkpoint` 机制，按 scope、scopeId 及精确 sessionId 哈希物理隔离；真实工具声明批次与调用 ID 按严格顺序物化，消除并行工具执行导致的乱序与重复副作用，杜绝旧运行复活已删除历史。
+- **跨会话路由键复用**：`ccm-v2-` 路由键基于用户配置、工作区、Provider/模型与角色指令共享，跨会话保持长前缀缓存，长空闲时间不击穿 Provider 缓存。
+- **精准局部 JSON 提取（read_json_fields）**：新增只读 `read_json_fields` 工具，支持按 JSON Pointer 提取特定节点、字段校验和与未变短路（`file_unchanged`），避免大型 JSON 数据无谓全量读入。
+
+### 2. 原生工具按需动态发现与按需加载（Native Tool On-Demand Discovery）
+- **工具模式按需按序加载**：重构 `native-tool-catalog`，彻底阻断旧版将所有未加载 MCP 工具模式（Schema）全量展开的问题；仅向模型提供已声明加载的工具定义，默认 deferred 策略不被适配器覆盖。
+- **单次请求输入开销削减 68%**：单次模型调用中共享工具 Schema 的 Token 消耗从 ~5,400 token 暴降至 ~1,600 token，大幅降低 API 调用费用并显著提速首字响应（TTFT）。
+- **工具连续动态恢复**：原生工作区支持从连续证据快照恢复工具选择，校验校验和与当前 generation；全局上下文连续加载保留管理工具，保障多轮交互中工具调用的确定性与安全边界。
+
+### 3. 会话抢占竞争消除与只读观察器（Conversation Turn Observation）
+- **只读观察接口（/observation）与编辑门禁彻底解耦**：新增 `/api/conversation-turns/observation`，发送归属确认与状态流接入统一采用只读模式；将排队编辑（`/detail`）与流观察完全隔离，杜绝后台 worker 抢先领取消息导致的 `QUEUE_EDIT_NOT_ALLOWED` 并发竞争。
+- **三端共享队列保护与防丢失退回**：入队成功后若刷新失败完整保留服务端消息；切换会话时尚未执行的消息按原 attempt_id 与 revision 安全退回队列，防止前端切换会话将任务误判为失败。
+- **断线指数退避重连与自愈**：观察连接断开或未收到终态时，按 1s/2s/4s/8s/15s 指数退避自动重连；回放完毕立即终结连接，杜绝死循环重试。
+
+### 4. 结构化验收合同与 Git 审计证据账本
+- **结构化验收合同（Acceptance Contract）**：规范化 TestAgent 与项目主 Agent 的验收闭环，每一项指标均严密对应需求、代码边界与工作单。
+- **Git 审计与用户可见投影**：全自动 Git 变更审计与不可篡改证据账本，保障代码交付透明可信。
+
+### 5. 跨平台多模态音视频工坊与抖音原生 MCP
+- **抖音 MCP 原生桥接服务**：全面引入抖音原生 MCP 桥接服务（`douyin-mcp`），深度打通短视频/音频/热榜聚合探索（`DouyinExplorer`），提供精细化元数据解析与自动化流式下载。
+- **高可用 HLS 自适应流式播放**：自适应 HLS 发布机制与视频主舞台（`MusicMainVideoStage`），支持网易云 MV 与 B 站跨平台音视频沉浸体验。
+
+### 6. OpenAI Responses WebSocket 双向流式传输与自愈降级
+- **原生双向 WebSocket 协议**：毫秒级双向长连接流式交互，全自动握手探测与心跳保活；遇到网络或代理限制时透明平滑回退至 HTTP fetch。
+
+---
+
+
 
 ## CCM 能做什么
 
@@ -247,11 +298,16 @@ CCM负责统一配置、派发、上下文交付和回执验收，实际CLI需�
 
 ### 10. 音乐平台、通知与桌面宠物
 
-- 音乐页面统一管理本地曲库、网易、B站、搜索、下载、播放队列、歌词、历史和音质升级。
-- 浏览器是实际音频输出端，服务端负责搜索、下载、持久命令、领取租约和播放回执。
-- 最新点歌优先，新请求会使旧播放意图失效，防止旧下载完成后抢回播放权。
-- 用户通知先持久化，再投递网页通知中心、网页宠物、Electron宠物或精确飞书来源。
-- 桌宠只显示脱敏短摘要；离线期间的通知会在重连后补发。
+<p align="center">
+  <img src="https://raw.githubusercontent.com/mumulinya/ccm-web/main/public/panda_mascot.png" alt="CCM Mascot" width="140" />
+</p>
+
+- **多媒体工坊**：统一管理本地曲库、网易云、B 站、抖音短视频与音频、智能搜索、多任务下载、播放队列、逐字歌词与自适应 HLS 流式播放。
+- **浏览器安全输出**：浏览器是实际音视频渲染端，服务端负责元数据解析、下载管道、持久命令租约和播放回执。
+- **点歌抢占保护**：最新点歌优先（Latest-Wins），新请求立即淘汰旧播放意图，防止滞后下载完成后抢夺当前播放权。
+- **全渠道通知路由**：任务状态与异常提醒先落盘持久化，再按优先级精准投递至浏览器通知、网页动效宠物、桌面 Electron 宠物或飞书应用。
+- **互动桌面宠物**：提供拟人化灵动陪伴状态与脱敏任务摘要提示；服务离线期间的通知会在重连后自动拉取补发。
+
 
 ## 模型与Provider
 
@@ -469,8 +525,20 @@ Message / requirement document / image / attachment
 
 Ordinary questions, status checks, and read-only code analysis remain normal conversation turns. A formal task is created only when the request explicitly requires code, configuration, dependency, test, or build-script changes. Main agents do not receive unrestricted write or shell access; source changes are delegated to controlled project development agents.
 
-### Version 2.0.14 highlights
+### Version 3.0.4 highlights
 
+- Cross-Platform Music & Video Multimodal Workbench: Deep integration of Douyin MCP bridge (`douyin-mcp`) enabling short-video/audio exploration (`DouyinExplorer`), metadata resolution, high-concurrency download management, adaptive HLS publication, NetEase MV synchronization, and real-time comment overlay.
+- Global Agent Tool Load Policy & Security Boundaries: Fine-grained on-demand intent routing and tool lazy-loading policies (`global-tool-load-policy`), maintaining high responsiveness with strict authorization barriers for sensitive operational tools.
+- Workbench UI Shell & Unified Session Navigation: Cohesive session sidebar and stage layouts across GroupChat and ProjectManager (`GroupChatSessionSidebar`, `ProjectSessionSidebar`, `WorkspacePageShell`), providing smooth collapsible navigation and dark-mode atmosphere aesthetics.
+- OpenAI Responses WebSocket Transport & Fallback: Comprehensive support for OpenAI Responses API WebSocket protocol (`wss://.../v1/responses`), enabling low-latency bidirectional streaming with automatic handshake probing and transparent HTTP fallback.
+- Final Context Projection Micro-Compact & Proportional Convergence: Seamless integration of tool result micro-compacting (`microCompactToolResults`) with dynamic token budget proportional convergence, strictly adhering to context boundaries while preserving protocol integrity.
+- Provider Cache Persistent Idle Identity & Real Workload Loop: Long-duration idle resilience (>6h) preserving session context identity without cold-start cache eviction, complemented by real-world workload benchmark and tuning loop suites.
+- Frontend SSE Tail Recovery & Conversation Ledger Reconciliation: Automated multi-pass reconciliation (`reconcileProjectConversationReply`) resolving truncated proxy streams and repairing transient failure states from authoritative persisted logs.
+- Final Context Projection & Streamlined Delivery: Employs final context projection (`final-context-projection`) to strip transient intermediate states, preamble thinking, and internal tool scaffolding events when finalizing answers, ensuring clean and deterministic delivery transcripts.
+- Workspace Model Result Projection: Adaptive model-facing result projection (`workspace-model-result-projection`) that summarizes and extracts structured references from oversized tool outputs, preventing context window exhaustion.
+- Provider Cache Scope Metrics & Paired Comparison: Comprehensive scope-level cache efficiency tracking and paired comparison test suite (`provider-cache-scope-metrics`, `provider-cache-paired-comparison`) to benchmark token savings and latency improvements across OpenAI, Claude, and Gemini protocols.
+- Search-First Workspace Observation Budget & Continuation Cursors: Enforces search-first observation paradigms (`glob_files`, `grep_text`, `list_directory`), with adaptive soft token budgets (~12K for single file, ~4K for searches, ~32K per turn) and structured `next_cursor` continuation previews preventing context bloat.
+- CLI Maintenance Cleanup & System Reliability: Introduces `ccm maintenance cleanup` command and interactive CleanupCenter for one-click safe purging of stale temporary directories, orphaned worktrees, and expired todos.
 - Main Agent Live-Final Presentation Lifecycle V1: Strict lifecycle contract ensuring transient preambles auto-dismiss upon reply/tool generation, and streaming answers collapse into a clean "Final Answer → Delivered → File Changes → Processed" structure.
 - Live Provider Protocol Cache Matrix: Dynamic multi-protocol capability matrix and prompt cache probing across OpenAI, Claude, and Gemini formats with native microcompact fallback.
 - Main Agent Five-Layer Context & Real Chain E2E: Five-tier structured agent context model with end-to-end development execution chain verification and post-review spot check closures.
