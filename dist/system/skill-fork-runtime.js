@@ -167,7 +167,17 @@ async function executeSkillFork(input) {
                     scopeId: input.parent.scopeId,
                     sessionId: input.parent.exactSessionId,
                     source: "semantic_skill_fork",
+                    requestAttribution: {
+                        purpose: "skill_fork_execution", requestClass: "auxiliary",
+                        scope: cacheScope, scopeId: input.parent.scopeId,
+                        exactSessionId: input.parent.exactSessionId,
+                    },
                     cacheAffinity,
+                },
+                requestAttribution: {
+                    purpose: "skill_fork_execution", requestClass: "auxiliary",
+                    scope: cacheScope, scopeId: input.parent.scopeId,
+                    exactSessionId: input.parent.exactSessionId,
                 },
             };
             const text = (0, group_orchestrator_llm_client_1.shouldUseAnthropic)(config) ? await (0, group_orchestrator_llm_client_1.callAnthropicCompatibleChat)(config, options) : await (0, group_orchestrator_llm_client_1.callOpenAiCompatibleChat)(config, options);

@@ -726,6 +726,11 @@ exports.TestAgentProjectTargetContractSchema = zod_1.z.object({
     agentSummary: exports.optionalString,
     agent_summary: exports.optionalString,
     risks: exports.stringList.optional(),
+    editablePaths: exports.stringList.optional(),
+    readOnlyPaths: exports.stringList.optional(),
+    cleanupPaths: exports.stringList.optional(),
+    synchronizedFixturePaths: zod_1.z.array(zod_1.z.object({ path: zod_1.z.string().min(1), allowedChanges: exports.stringList.optional() }).passthrough()).optional(),
+    verificationRoot: exports.optionalString,
 }).passthrough();
 exports.TestAgentHandoffProjectContractSchema = zod_1.z.object({
     name: exports.optionalString,

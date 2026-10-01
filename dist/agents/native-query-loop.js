@@ -45,15 +45,24 @@ exports.mergeNativeTurnParsed = mergeNativeTurnParsed;
 exports.runNativeQueryLoop = runNativeQueryLoop;
 exports.runNativeQueryLoopSelfTest = runNativeQueryLoopSelfTest;
 const crypto = __importStar(require("crypto"));
+const declared_answer_stream_1 = require("../system/declared-answer-stream");
+const provider_request_diagnostics_1 = require("../system/provider-request-diagnostics");
+const main_agent_tool_prompt_1 = require("../tools/main-agent-tool-prompt");
+const native_tool_catalog_1 = require("./native-tool-catalog");
 const provider_cache_stable_tools_1 = require("../system/provider-cache-stable-tools");
 const provider_cache_message_layout_1 = require("../system/provider-cache-message-layout");
 const group_orchestrator_llm_client_1 = require("../modules/collaboration/group-orchestrator-llm-client");
 const provider_native_tool_capability_1 = require("../system/provider-native-tool-capability");
+const session_model_checkpoint_runtime_1 = require("./session-model-checkpoint-runtime");
+const model_tool_attachments_1 = require("./model-tool-attachments");
+const provider_native_tools_1 = require("../system/provider-native-tools");
 const agent_loop_budget_1 = require("../system/agent-loop-budget");
-const readonly_tool_concurrency_1 = require("../system/readonly-tool-concurrency");
+const native_tool_scheduling_1 = require("./native-tool-scheduling");
+const native_tool_repeat_policy_1 = require("./native-tool-repeat-policy");
 const conversation_plan_mode_gate_1 = require("../system/conversation-plan-mode-gate");
 const main_agent_turn_1 = require("./main-agent-turn");
 const native_query_messages_1 = require("./native-query-messages");
+const workspace_model_result_projection_1 = require("../tools/workspace-model-result-projection");
 const presented_plan_quality_1 = require("./presented-plan-quality");
 const tool_result_storage_1 = require("../tools/tool-result-storage");
 const implementation_plan_1 = require("./implementation-plan");
@@ -62,8 +71,21 @@ const evidence_policy_1 = require("./evidence-policy");
 const agent_cache_affinity_1 = require("../system/agent-cache-affinity");
 const pre_request_tool_context_1 = require("../system/pre-request-tool-context");
 const agent_cache_affinity_2 = require("../system/agent-cache-affinity");
+const final_context_projection_1 = require("../system/final-context-projection");
 exports.NATIVE_CONTROL_TOOL_NAMES = ["ccm_ask_user", "ccm_present_plan", "ccm_dispatch"];
 const CONTROL_TOOL_SET = new Set(exports.NATIVE_CONTROL_TOOL_NAMES);
+function hasCompletedToolContext(messages) {
+    return (Array.isArray(messages) ? messages : []).some(message => {
+        const role = String(message?.role || "").toLowerCase();
+        if (role === "tool" || role === "function")
+            return true;
+        if (Array.isArray(message?.tool_calls) && message.tool_calls.length > 0)
+            return true;
+        if (!Array.isArray(message?.content))
+            return false;
+        return message.content.some((part) => ["tool_result", "function_call_output"].includes(String(part?.type || "")));
+    });
+}
 function isNativeControlTool(name) {
     return CONTROL_TOOL_SET.has(String(name || ""));
 }
@@ -251,23 +273,6 @@ function nativeDiscoveryToolDefinitions() {
         },
     ];
 }
-function catalogLoadedTools(toolContext) {
-    const stableServers = new Set(["ccm__workspace_readonly", "ccm-group-readonly", "ccm-project-readonly"]);
-    const loaded = [...(toolContext?.catalog?.loadedMcp || [])]
-        .filter((tool) => stableServers.has(String(tool?.server || "")));
-    const names = new Set(loaded.map((tool) => String(tool?.canonicalName || tool?.name || "")));
-    for (const tool of [...(toolContext?.catalog?.mcp || []), ...(toolContext?.catalog?.discoverableMcp || [])]) {
-        const server = String(tool?.server || "");
-        const name = String(tool?.canonicalName || tool?.name || "");
-        if (!name || names.has(name))
-            continue;
-        if (stableServers.has(server)) {
-            loaded.push({ ...tool, deferred: false });
-            names.add(name);
-        }
-    }
-    return loaded;
-}
 function catalogNativeToolName(tool) {
     return String(tool?.server || "") === "ccm__workspace_readonly"
         ? String(tool?.name || "")
@@ -288,6 +293,10 @@ function canonicalToolValue(value) {
 }
 const NATIVE_TOOL_SCHEMA_CACHE = new Map();
 const NATIVE_TOOL_SCHEMA_CACHE_LIMIT = 128;
+// Keep the wire order append-only for the lifetime of the process. Existing
+// tools retain their first-seen position; newly discovered tools are appended
+// so a catalog refresh cannot invalidate the entire cached prefix.
+const NATIVE_TOOL_APPEND_ORDER = new Map();
 function memoizeNativeToolSchema(tools) {
     const canonical = tools.map(tool => ({
         name: String(tool?.name || ""),
@@ -314,14 +323,23 @@ function memoizeNativeToolSchema(tools) {
 function catalogToNativeTools(toolContext) {
     const discovery = nativeDiscoveryToolDefinitions();
     const reserved = new Set(discovery.map(tool => tool.name));
-    const loaded = catalogLoadedTools(toolContext).map((tool) => ({ ...tool, deferred: false }));
+    const loaded = (0, native_tool_catalog_1.catalogLoadedTools)(toolContext).map((tool) => ({ ...tool, deferred: false }));
     const catalog = loaded.map((tool) => ({
         name: catalogNativeToolName(tool),
         description: String(tool.description || ""),
         inputSchema: canonicalToolValue(tool.inputSchema || { type: "object", properties: {} }),
         deferred: tool.deferred === true,
     })).filter((tool) => tool.name && !reserved.has(tool.name))
+        .map((tool) => tool);
+    // Assign all newly discovered names as one deterministic append batch. This
+    // keeps refresh order irrelevant while preserving positions already sent.
+    const unseen = catalog.filter((tool) => !NATIVE_TOOL_APPEND_ORDER.has(tool.name))
         .sort((left, right) => left.name.localeCompare(right.name));
+    for (const tool of unseen)
+        NATIVE_TOOL_APPEND_ORDER.set(tool.name, NATIVE_TOOL_APPEND_ORDER.size);
+    catalog
+        .sort((left, right) => (NATIVE_TOOL_APPEND_ORDER.get(left.name) ?? Number.MAX_SAFE_INTEGER)
+        - (NATIVE_TOOL_APPEND_ORDER.get(right.name) ?? Number.MAX_SAFE_INTEGER));
     return memoizeNativeToolSchema([...discovery, ...catalog]);
 }
 function shouldUseNativeQueryLoop(config) {
@@ -433,9 +451,6 @@ function mergeUsage(current, next) {
         totalTokens: Number(current.totalTokens || 0) + Number(next.totalTokens || 0),
         reported: current.reported !== false && next.reported !== false,
     };
-}
-function fingerprintCall(call) {
-    return JSON.stringify({ name: call.name, arguments: call.arguments || {} });
 }
 function unstreamedTurnText(turnText, emitted) {
     const text = String(turnText || "");
@@ -563,6 +578,7 @@ function nativeEvidencePolicy(plan, workflowDecision) {
 }
 async function independentNativePlanReview(config, plan, evidenceManifest, input) {
     const options = {
+        requestAttribution: { ...(0, provider_request_diagnostics_1.mainRequestAttribution)(input), purpose: 'plan_review', requestClass: 'auxiliary' },
         messages: [
             { role: "system", content: (0, planning_orchestrator_1.planningReviewSystemPrompt)() },
             { role: "user", content: (0, planning_orchestrator_1.planningReviewInputPrompt)(plan, evidenceManifest) },
@@ -592,11 +608,23 @@ async function independentNativePlanReview(config, plan, evidenceManifest, input
 }
 async function runJsonQueryLoop(input) {
     const budget = input.loopBudget || (0, agent_loop_budget_1.resolveAgentLoopBudget)(input.config);
-    const executeTools = async (calls, ctx) => (persistExecutedToolRows(await input.executeTools(calls, ctx), input.persistContext));
-    let messages = input.messages.slice();
+    const jsonCallBatchId = crypto.randomUUID();
+    const checkpoint = (0, session_model_checkpoint_runtime_1.createModelCheckpointRuntime)(input, 'json');
+    const executeTools = (0, native_tool_scheduling_1.createNativeToolExecution)(input, completed => {
+        const rows = persistExecutedToolRows(completed, input.persistContext);
+        checkpoint.results(rows);
+        return rows;
+    });
+    let messages = (await checkpoint.resume(executeTools)).slice();
     const responseTypes = "reply|tool_calls|clarify|plan|dispatch";
     const jsonHint = { role: "system", content: "Fallback protocol: return one JSON object as the outer envelope, never a Markdown code fence. Use responseType=" + responseTypes + ". The reply string is user-visible and may use concise GitHub-Flavored Markdown when structure improves readability. A plan must contain a ccm-implementation-plan-v2 object; dispatch is allowed only after confirmed plan binding or a server-approved direct path. Format: {\"responseType\":\"reply\",\"reply\":\"\",\"toolRequests\":[{\"name\":\"\",\"arguments\":{}}],\"workflowDecision\":{}}" };
-    if (!messages.some(item => String(item.content || "").includes("退化路径：只输出一个 JSON")))
+    Object.assign(jsonHint, {
+        promptPart: 'protocol',
+        prefixLayoutVersion: messages.find(item => item.prefixLayoutVersion)?.prefixLayoutVersion || 'legacy',
+        prefixEligible: true,
+        publicPrefixEligible: true,
+    });
+    if (!messages.some(item => String(item.content || "").includes("Fallback protocol: return one JSON object")))
         messages = [jsonHint, ...messages];
     let parsed = { responseType: "reply", reply: "" };
     const toolResults = [];
@@ -605,12 +633,20 @@ async function runJsonQueryLoop(input) {
     let toolCallCount = 0;
     let noProgressCount = 0;
     let usage = null;
+    let finalContextProjection = null;
     let stopReason = "model_completed";
-    const executed = new Set();
+    const repeats = (0, native_tool_repeat_policy_1.createNativeToolRepeatPolicy)(input.isReadOnly);
     let ptlRecoveryAttempts = 0;
     let conversationPressureAttempts = 0;
     const ptlDroppedMessageIds = [];
     while (true) {
+        messages = (0, main_agent_tool_prompt_1.refreshToolCatalogMessages)(messages, input.getToolPromptLayout?.());
+        if (toolResults.length > 0 || hasCompletedToolContext(messages)) {
+            const projected = (0, final_context_projection_1.projectFinalContextMessages)(messages, { config: input.config, preserveAppendOnlyPrefix: true });
+            finalContextProjection = projected;
+            if (projected.changed)
+                messages = projected.messages;
+        }
         modelCallCount += 1;
         const modelLifecycle = input.onModelCallStart?.({
             round: toolRoundCount,
@@ -635,6 +671,7 @@ async function runJsonQueryLoop(input) {
             },
             onUsage: (value) => { usage = mergeUsage(usage, value); input.onUsage?.(value); },
             onRetry: (notice) => {
+                executeTools.markModelRetry();
                 modelLifecycle?.onRetry(Math.max(1, Number(notice?.attempt || 1)), Math.max(1, Number(notice?.maxAttempts || 1) - 1), Math.max(0, Number(notice?.delayMs || 0)));
                 input.onRetry?.(notice);
             },
@@ -647,12 +684,14 @@ async function runJsonQueryLoop(input) {
                     modelLifecycle?.onToolDeclared?.(String(projected.toolName || ""));
                 input.onProviderStreamActivity?.(projected);
             },
+            requestAttribution: (0, provider_request_diagnostics_1.mainRequestAttribution)(input),
             providerContextCache: input.providerContextCache || {
                 scope: input.scope,
                 scopeId: input.scopeId,
                 sessionId: input.exactSessionId,
                 source: `${input.scope}_main_json_query`,
             },
+            finalContextProjection,
             onProviderContextCache: input.onProviderContextCache,
         };
         let nextParsed = null;
@@ -668,6 +707,8 @@ async function runJsonQueryLoop(input) {
             jsonOptions.providerContextCache = {
                 ...jsonOptions.providerContextCache,
                 canonicalPayloadChecksum: String(canonicalPayload?.payloadChecksum || ""),
+                workspaceModelAudit: (0, workspace_model_result_projection_1.aggregateWorkspaceModelAuditReceipts)(toolResults),
+                finalContextProjection,
             };
             preRequest = (0, pre_request_tool_context_1.stagePreRequestToolContext)({
                 scope: input.scope,
@@ -719,10 +760,9 @@ async function runJsonQueryLoop(input) {
             });
             preRequestBound = true;
             try {
+                messages = checkpoint.request(messages, modelCallCount);
                 const attemptOptions = { ...jsonOptions, messages };
-                nextParsed = (0, group_orchestrator_llm_client_1.shouldUseAnthropic)(input.config)
-                    ? await (0, group_orchestrator_llm_client_1.callAnthropicCompatibleJson)(input.config, attemptOptions)
-                    : await (0, group_orchestrator_llm_client_1.callOpenAiCompatibleJson)(input.config, attemptOptions);
+                nextParsed = await (0, declared_answer_stream_1.callWithDeclaredAnswerPhase)((0, group_orchestrator_llm_client_1.shouldUseAnthropic)(input.config) ? group_orchestrator_llm_client_1.callAnthropicCompatibleJson : group_orchestrator_llm_client_1.callOpenAiCompatibleJson, input.config, attemptOptions, modelLifecycle, true);
                 if (preRequestBound && preRequest)
                     (0, pre_request_tool_context_1.commitPreRequestToolContext)(input.scope, input.scopeId, input.exactSessionId, preRequest.evaluation.requestId);
                 modelLifecycle?.complete();
@@ -774,7 +814,7 @@ async function runJsonQueryLoop(input) {
         parsed = mergeNativeTurnParsed(parsed, nextParsed);
         const requests = (Array.isArray(parsed?.toolRequests) ? parsed.toolRequests : Array.isArray(parsed?.tool_requests) ? parsed.tool_requests : [])
             .map((item, index) => ({
-            id: `json_${toolRoundCount}_${index}`,
+            id: `json_${jsonCallBatchId}_${toolRoundCount}_${index}`,
             name: String(item?.name || "").trim(),
             arguments: item?.arguments && typeof item.arguments === "object" ? item.arguments : {},
             argumentsChecksum: "",
@@ -784,28 +824,28 @@ async function runJsonQueryLoop(input) {
             stopReason = "model_completed";
             break;
         }
-        const fresh = requests.filter((item) => !executed.has(fingerprintCall(item)));
-        if (!fresh.length) {
-            noProgressCount += 1;
-            messages.push({ role: "user", content: JSON.stringify({ error: "duplicate_tool_request" }) });
-            if (noProgressCount >= budget.noProgressThreshold)
-                throw new Error("JSON_QUERY_LOOP_NO_PROGRESS");
-            toolRoundCount += 1;
-            continue;
-        }
-        for (const item of fresh)
-            executed.add(fingerprintCall(item));
-        const rows = await executeTools(fresh, {
+        const { fresh, duplicateResults, retrying } = repeats.select(requests);
+        if (retrying)
+            executeTools.markModelRetry();
+        messages = (0, native_query_messages_1.insertBeforeDynamicSystemTail)(messages, [{ role: 'assistant', content: JSON.stringify(nextParsed) }]);
+        checkpoint.adopt(messages);
+        checkpoint.turn({ text: String(parsed?.reply || ''), toolCalls: requests, toolReferences: [], stopReason: 'tool_calls', usage: usage || { inputTokens: 0, outputTokens: 0, totalTokens: 0, reported: false } }, modelCallCount);
+        checkpoint.results(duplicateResults);
+        const completedRows = await executeTools(fresh, {
             round: toolRoundCount,
-            turn: { text: String(parsed?.reply || ""), toolCalls: fresh, toolReferences: [], stopReason: "tool_calls", usage: usage || { inputTokens: 0, outputTokens: 0, totalTokens: 0, reported: false } },
+            turn: { text: String(parsed?.reply || ""), toolCalls: requests, toolReferences: [], stopReason: "tool_calls", usage: usage || { inputTokens: 0, outputTokens: 0, totalTokens: 0, reported: false } },
             signal: input.signal,
             startedCallIds: new Set(),
         });
+        const rows = requests.map(call => [...completedRows, ...duplicateResults].find(row => row.callId === call.id)).filter(Boolean);
+        const madeProgress = repeats.record(fresh, completedRows);
         toolResults.push(...rows);
-        toolCallCount += rows.length;
-        messages.push({ role: "user", content: JSON.stringify({ toolResults: rows }) });
+        toolCallCount += completedRows.length;
+        messages = (0, native_query_messages_1.insertBeforeDynamicSystemTail)(messages, [{ role: "user", content: JSON.stringify({ toolResults: (0, native_query_messages_1.dedupeNativeToolResultsForModel)(rows, messages).map(native_query_messages_1.modelVisibleNativeToolResult) }) }]);
+        messages = (0, model_tool_attachments_1.appendModelToolAttachments)(messages, rows, (0, native_query_messages_1.nativeQueryFamily)(input.config));
+        checkpoint.adopt(messages);
         toolRoundCount += 1;
-        if (rows.some(row => row.ok === true))
+        if (madeProgress)
             noProgressCount = 0;
         else
             noProgressCount += 1;
@@ -863,6 +903,7 @@ async function runJsonQueryLoop(input) {
         parsed.plan = normalized;
     }
     parsed = stampPresentedPlanQuality(parsed, false);
+    checkpoint.complete(messages, String(parsed?.reply || ''));
     const decision = (0, main_agent_turn_1.normalizeMainAgentTurnDecision)({
         scope: input.scope,
         scopeId: input.scopeId,
@@ -915,11 +956,15 @@ async function runNativeQueryLoop(input) {
     if (!shouldUseNativeQueryLoop(input.config))
         return fallBackToJsonQueryLoop(input);
     const family = (0, native_query_messages_1.nativeQueryFamily)(input.config);
+    const checkpoint = (0, session_model_checkpoint_runtime_1.createModelCheckpointRuntime)(input, family);
     const budget = input.loopBudget || (0, agent_loop_budget_1.resolveAgentLoopBudget)(input.config);
-    const speculativeReadScheduler = (0, readonly_tool_concurrency_1.createReadonlyToolScheduler)(budget.readOnlyParallelism);
-    const executeTools = async (calls, ctx) => (persistExecutedToolRows(await input.executeTools(calls, ctx), input.persistContext));
+    const executeTools = (0, native_tool_scheduling_1.createNativeToolExecution)(input, completed => {
+        const rows = persistExecutedToolRows(completed, input.persistContext);
+        checkpoint.results(rows);
+        return rows;
+    });
     const callTurn = input.callTurn || group_orchestrator_llm_client_1.callNativeAgentTurn;
-    let messages = input.messages.slice();
+    let messages = (await checkpoint.resume(executeTools)).slice();
     let planningSession = input.planModeEnabled === true
         ? (0, planning_orchestrator_1.openPlanningSession)({
             scope: input.scope,
@@ -937,7 +982,7 @@ async function runNativeQueryLoop(input) {
     let parsed = { responseType: "reply", reply: "" };
     let lastTurn = { text: "", toolCalls: [], toolReferences: [], stopReason: "", usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0, reported: false } };
     const toolResults = [];
-    const executed = new Set();
+    const repeats = (0, native_tool_repeat_policy_1.createNativeToolRepeatPolicy)(input.isReadOnly);
     let modelCallCount = 0;
     let toolRoundCount = 0;
     let toolCallCount = 0;
@@ -958,7 +1003,7 @@ async function runNativeQueryLoop(input) {
         && call.name !== "invoke_skill"
         && call.name !== "tool_search"
         && call.name !== "invoke_mcp");
-    const applyTranscript = (next) => input.compactTranscript ? input.compactTranscript(next) : next;
+    const applyTranscript = (next) => checkpoint.adopt(input.compactTranscript ? input.compactTranscript(next) : next);
     const stableToolOrder = new Map();
     const availableTools = () => {
         const tools = input.getTools?.() || input.tools;
@@ -1055,6 +1100,14 @@ async function runNativeQueryLoop(input) {
     };
     try {
         queryLoop: while (true) {
+            messages = (0, main_agent_tool_prompt_1.refreshToolCatalogMessages)(messages, input.getToolPromptLayout?.());
+            let finalContextProjection = null;
+            if (toolResults.length > 0 || hasCompletedToolContext(messages)) {
+                const projected = (0, final_context_projection_1.projectFinalContextMessages)(messages, { config: input.config, preserveAppendOnlyPrefix: true });
+                finalContextProjection = projected;
+                if (projected.changed)
+                    messages = projected.messages;
+            }
             const round = toolRoundCount;
             modelCallCount += 1;
             segmentModelTurns += 1;
@@ -1065,23 +1118,7 @@ async function runNativeQueryLoop(input) {
                     ? (0, agent_cache_affinity_2.createModelCallStage)({ affinity: input.providerContextCache.cacheAffinity, modelCallIndex: modelCallCount })
                     : undefined,
             }) || undefined;
-            const started = new Map();
             const startedCallIds = new Set();
-            const onNativeToolCallReady = (call) => {
-                if (isNativeControlTool(call.name) || !isReadOnly(call) || started.has(call.id) || executed.has(fingerprintCall(call)))
-                    return;
-                startedCallIds.add(call.id);
-                // Read-only tools may start speculatively while the Provider is still
-                // finishing the current turn. Flush the already streamed narration
-                // first so the persisted/user-visible order stays narration -> tool.
-                input.onBeforeToolExecution?.({ round, modelCallIndex: modelCallCount, calls: [call] });
-                started.set(call.id, speculativeReadScheduler.run(call, () => executeTools([call], {
-                    round,
-                    turn: lastTurn,
-                    signal: input.signal,
-                    startedCallIds,
-                })).then(rows => rows[0] || { callId: call.id, name: call.name, ok: false, error: "empty_tool_result" }));
-            };
             let turn;
             let turnEmitted = "";
             try {
@@ -1138,11 +1175,7 @@ async function runNativeQueryLoop(input) {
                     error.preRequestEvaluation = preRequest.evaluation;
                     throw error;
                 }
-                const serializedToolSchema = JSON.stringify(requestTools.map(tool => ({
-                    name: String(tool?.name || ""),
-                    description: String(tool?.description || ""),
-                    inputSchema: tool?.inputSchema || null,
-                })));
+                const serializedToolSchema = (0, provider_native_tools_1.serializeProviderToolSchema)(requestTools);
                 const providerContextCache = {
                     ...(input.providerContextCache || {
                         scope: input.scope,
@@ -1153,6 +1186,9 @@ async function runNativeQueryLoop(input) {
                     canonicalPayloadChecksum: String(canonicalPayload?.payloadChecksum || ""),
                     toolSchemaChecksum: crypto.createHash("sha256").update(serializedToolSchema).digest("hex"),
                     toolSchemaTokens: Math.max(0, Math.ceil(serializedToolSchema.length / 4)),
+                    toolSchemaVersion: "ccm-native-tools-v1",
+                    workspaceModelAudit: (0, workspace_model_result_projection_1.aggregateWorkspaceModelAuditReceipts)(toolResults),
+                    finalContextProjection,
                 };
                 (0, pre_request_tool_context_1.bindPreRequestToolContext)({
                     scope: input.scope,
@@ -1165,7 +1201,8 @@ async function runNativeQueryLoop(input) {
                 });
                 for (;;) {
                     try {
-                        turn = await callTurn(input.config, {
+                        messages = checkpoint.request(messages, modelCallCount);
+                        turn = await (0, declared_answer_stream_1.callWithDeclaredAnswerPhase)(callTurn, input.config, {
                             messages,
                             nativeTools: requestTools,
                             nativeToolReference: input.nativeToolReference,
@@ -1174,6 +1211,7 @@ async function runNativeQueryLoop(input) {
                             retryProfile: input.retryProfile || (round > 0 ? "agent_orchestration" : "interactive_first_turn"),
                             promptCacheTracking: input.promptCacheTracking,
                             providerContextCache,
+                            requestAttribution: (0, provider_request_diagnostics_1.mainRequestAttribution)(input),
                             onProviderContextCache: input.onProviderContextCache,
                             signal: input.signal,
                             stream: true,
@@ -1189,6 +1227,7 @@ async function runNativeQueryLoop(input) {
                                 input.onUsage?.(value);
                             },
                             onRetry: (notice) => {
+                                executeTools.markModelRetry();
                                 modelLifecycle?.onRetry(Math.max(1, Number(notice?.attempt || 1)), Math.max(1, Number(notice?.maxAttempts || 1) - 1), Math.max(0, Number(notice?.delayMs || 0)));
                                 input.onRetry?.(notice);
                             },
@@ -1201,8 +1240,7 @@ async function runNativeQueryLoop(input) {
                                     modelLifecycle?.onToolDeclared?.(String(projected.toolName || ""));
                                 input.onProviderStreamActivity?.(projected);
                             },
-                            onNativeToolCallReady,
-                        });
+                        }, modelLifecycle);
                         (0, pre_request_tool_context_1.commitPreRequestToolContext)(input.scope, input.scopeId, input.exactSessionId, preRequest.evaluation.requestId);
                         break;
                     }
@@ -1269,12 +1307,13 @@ async function runNativeQueryLoop(input) {
                     // a user-visible model failure. Close this attempt monotonically and
                     // continue with a distinct JSON lifecycle identity.
                     modelLifecycle?.complete();
-                    return fallBackToJsonQueryLoop(input, modelCallCount);
+                    return fallBackToJsonQueryLoop({ ...input, messages: checkpoint.forJson(messages) }, modelCallCount);
                 }
                 modelLifecycle?.fail(error);
                 throw error;
             }
             lastTurn = turn;
+            checkpoint.turn(turn, modelCallCount);
             const unstreamed = unstreamedTurnText(turn.text, turnEmitted);
             if (unstreamed) {
                 modelLifecycle?.onDelta(unstreamed);
@@ -1368,18 +1407,17 @@ async function runNativeQueryLoop(input) {
                     : "model_completed";
                 break;
             }
-            const fresh = regularCalls.filter(item => !executed.has(fingerprintCall(item)));
-            if (!fresh.length) {
+            const { fresh, duplicateResults, retrying } = repeats.select(regularCalls);
+            if (retrying)
+                executeTools.markModelRetry();
+            checkpoint.results(duplicateResults);
+            if (!fresh.length && !controlCalls.length) {
                 noProgressCount += 1;
-                const duplicate = {
-                    callId: `loop_control_${round}`,
-                    name: "loop_control",
-                    ok: false,
-                    error: "NATIVE_QUERY_LOOP_DUPLICATE_REQUEST",
-                    reason: "相同工具和参数已经执行，请基于已有结果完成回答或改用控制工具。",
-                };
-                toolResults.push(duplicate);
-                messages = applyTranscript((0, native_query_messages_1.appendNativeTurnTranscript)(messages, turn, [duplicate], family));
+                // Every provider-native function call must have a result with the
+                // exact same call id. A single synthetic loop-control result leaves
+                // the other calls orphaned and breaks the next protocol turn.
+                toolResults.push(...duplicateResults);
+                messages = applyTranscript((0, native_query_messages_1.appendNativeTurnTranscript)(messages, turn, duplicateResults, family));
                 if (noProgressCount >= budget.noProgressThreshold) {
                     stopReason = "no_progress";
                     throw new Error(`${String(input.scope || "agent").toUpperCase()}_MAIN_TOOL_LOOP_NO_PROGRESS`);
@@ -1399,13 +1437,13 @@ async function runNativeQueryLoop(input) {
             });
             parsed = mergeNativeTurnParsed(parsed, planModeRound.parsed);
             if (planModeRound.stopLoop) {
-                messages = applyTranscript((0, native_query_messages_1.appendNativeTurnTranscript)(messages, turn, planModeRound.blockedResults.map((row, index) => ({
-                    callId: fresh[index]?.id || `blocked_${index}`,
-                    name: String(row.name || "unknown"),
-                    ok: false,
-                    error: row.error,
-                    reason: row.reason,
-                })), family));
+                messages = applyTranscript((0, native_query_messages_1.appendNativeTurnTranscript)(messages, turn, [...duplicateResults, ...planModeRound.blockedResults.map((row, index) => ({
+                        callId: fresh[index]?.id || `blocked_${index}`,
+                        name: String(row.name || "unknown"),
+                        ok: false,
+                        error: row.error,
+                        reason: row.reason,
+                    }))], family));
                 stopReason = "plan_mode_held";
                 break;
             }
@@ -1413,8 +1451,7 @@ async function runNativeQueryLoop(input) {
                 return fresh.find(item => item.name === request.name && JSON.stringify(item.arguments || {}) === JSON.stringify(request.arguments || {}))
                     || { id: request.id || `call_${toolCallCount}`, name: request.name, arguments: request.arguments || {}, argumentsChecksum: "" };
             });
-            const remaining = [...started.entries()].filter(([id]) => runnable.some(item => item.id === id));
-            const pending = runnable.filter(item => !started.has(item.id));
+            const pending = runnable;
             if (pending.length) {
                 input.onBeforeToolExecution?.({ round, modelCallIndex: modelCallCount, calls: pending });
             }
@@ -1425,17 +1462,18 @@ async function runNativeQueryLoop(input) {
                 error: row.error,
                 reason: row.reason,
             }));
-            for (const request of [...runnable, ...(planModeRound.blockedRequests || [])]) {
-                executed.add(fingerprintCall(request));
-            }
+            const pendingRows = pending.length
+                ? await executeTools(pending, { round, turn, signal: input.signal, startedCallIds })
+                : [];
             const executedRows = [
-                ...(await Promise.all(remaining.map(row => row[1]))),
-                ...(pending.length ? await executeTools(pending, { round, turn, signal: input.signal, startedCallIds }) : []),
+                ...pendingRows,
                 ...blockedResults,
+                ...duplicateResults,
             ];
+            const madeProgress = repeats.record(runnable, pendingRows);
             toolResults.push(...executedRows);
-            toolCallCount += executedRows.filter(row => row.name !== "loop_control").length;
-            segmentToolCalls += executedRows.filter(row => row.name !== "loop_control").length;
+            toolCallCount += executedRows.filter(row => row.name !== "loop_control" && row.error !== "NATIVE_QUERY_LOOP_DUPLICATE_REQUEST").length;
+            segmentToolCalls += executedRows.filter(row => row.name !== "loop_control" && row.error !== "NATIVE_QUERY_LOOP_DUPLICATE_REQUEST").length;
             const planCall = presentPlanControlCall(controlCalls);
             const planningReview = planCall ? await assessPresentedPlan(planCall) : null;
             const repairing = !!(planCall && (!planningReview?.passed || (!planningReview && (0, presented_plan_quality_1.shouldRepairPresentedPlan)({
@@ -1468,7 +1506,7 @@ async function runNativeQueryLoop(input) {
             messages = applyTranscript((0, native_query_messages_1.appendNativeTurnTranscript)(messages, turn, [...executedRows, ...controlResults], family));
             if (repairing && planningSession)
                 messages = (0, provider_cache_message_layout_1.insertDynamicSystemAfterStableCore)(messages, (0, planning_orchestrator_1.planningPromptForTurn)(planningSession.promptTurn).prompt);
-            if (executedRows.some(row => row.ok === true))
+            if (madeProgress)
                 noProgressCount = 0;
             else
                 noProgressCount += 1;
@@ -1528,6 +1566,7 @@ async function runNativeQueryLoop(input) {
     }
     parsed = (0, conversation_plan_mode_gate_1.applyInteractiveConversationModePolicy)(input.scope, input.planModeEnabled === true, parsed);
     parsed = stampPresentedPlanQuality(parsed, planRepairCount > 0);
+    messages = checkpoint.complete(messages, String(parsed?.reply || lastTurn.text || ''), lastTurn);
     const decision = (0, main_agent_turn_1.normalizeMainAgentTurnDecision)({
         scope: input.scope,
         scopeId: input.scopeId,
@@ -1880,12 +1919,14 @@ async function runNativeQueryLoopSelfTest() {
         catalog: {
             loadedMcp: [
                 { name: "read_file", canonicalName: "mcp__ccm__ccm_workspace_readonly__read_file", server: "ccm__workspace_readonly", description: "read", inputSchema: { type: "object" } },
+                { name: "read_git_status", canonicalName: "mcp__ccm__ccm_workspace_readonly__read_git_status", server: "ccm__workspace_readonly", description: "git", inputSchema: { type: "object", properties: { a: { type: "string" }, z: { type: "string" } } } },
+                { name: "query_knowledge", canonicalName: "query_knowledge", server: "ccm-group-readonly", description: "kb", inputSchema: { type: "object" } },
             ],
             mcp: [
                 { name: "query_knowledge", canonicalName: "query_knowledge", server: "ccm-group-readonly", description: "kb", inputSchema: { type: "object" } },
             ],
             discoverableMcp: [
-                { name: "read_git_status", canonicalName: "mcp__ccm__ccm_workspace_readonly__read_git_status", server: "ccm__workspace_readonly", description: "git", inputSchema: { type: "object", properties: { a: { type: "string" }, z: { type: "string" } } } },
+                { name: "unloaded_tool", canonicalName: "unloaded_tool", server: "ccm__workspace_readonly", inputSchema: { type: "object" } },
             ],
         },
     });
@@ -1899,6 +1940,7 @@ async function runNativeQueryLoopSelfTest() {
     const reorderedCatalog = catalogToNativeTools({
         catalog: {
             loadedMcp: [
+                { name: "query_knowledge", canonicalName: "query_knowledge", server: "ccm-group-readonly", description: "kb", inputSchema: { type: "object" } },
                 { name: "read_git_status", canonicalName: "mcp__ccm__ccm_workspace_readonly__read_git_status", server: "ccm__workspace_readonly", description: "git", inputSchema: { properties: { z: { type: "string" }, a: { type: "string" } }, type: "object" } },
                 { name: "read_file", canonicalName: "mcp__ccm__ccm_workspace_readonly__read_file", server: "ccm__workspace_readonly", description: "read", inputSchema: { type: "object" } },
             ],
@@ -1912,6 +1954,7 @@ async function runNativeQueryLoopSelfTest() {
     checks.catalogSchemaSnapshotIsMemoized = nativeCatalog === catalogToNativeTools({
         catalog: {
             loadedMcp: [
+                { name: "query_knowledge", canonicalName: "query_knowledge", server: "ccm-group-readonly", description: "kb", inputSchema: { type: "object" } },
                 { name: "read_file", canonicalName: "mcp__ccm__ccm_workspace_readonly__read_file", server: "ccm__workspace_readonly", description: "read", inputSchema: { type: "object" } },
                 { name: "read_git_status", canonicalName: "mcp__ccm__ccm_workspace_readonly__read_git_status", server: "ccm__workspace_readonly", description: "git", inputSchema: { type: "object", properties: { z: { type: "string" }, a: { type: "string" } } } },
             ],

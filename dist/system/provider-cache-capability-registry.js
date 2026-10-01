@@ -48,6 +48,7 @@ const os = __importStar(require("os"));
 const path = __importStar(require("path"));
 const atomic_json_file_1 = require("../core/atomic-json-file");
 const provider_cache_protocol_1 = require("./provider-cache-protocol");
+const credential_store_1 = require("../core/credential-store");
 const REGISTRY_ROOT = process.env.CCM_PROVIDER_CACHE_CAPABILITY_DIR
     ? path.resolve(process.env.CCM_PROVIDER_CACHE_CAPABILITY_DIR)
     : path.join(os.homedir(), ".ccm", "provider-cache-capability");
@@ -118,7 +119,15 @@ function providerCacheCapabilityIdentity(config) {
         inferenceBackendKind,
     };
     const proxyIdentity = clean(config?.proxyUrl || config?.proxy_url || config?.httpsProxy || config?.https_proxy || config?.httpProxy || config?.http_proxy, 1000);
-    const credentialIdentity = clean(config?.apiKey || config?.api_key, 4000);
+    // Config files persist credentials as ccm-secret references while runtime
+    // callers may pass the already materialized secret. Resolve only for the
+    // in-memory checksum so both paths address the same capability evidence;
+    // the plaintext is never written to receipts or diagnostics.
+    let credentialIdentity = clean(config?.apiKey || config?.api_key, 4000);
+    try {
+        credentialIdentity = clean((0, credential_store_1.resolveCredential)(credentialIdentity), 4000);
+    }
+    catch { /* missing secret stays unproven */ }
     const rawHeaders = config?.headers || config?.customHeaders || config?.custom_headers || {};
     const headerNames = Object.keys(rawHeaders).sort();
     const headerIdentity = headerNames.map(name => [name.toLowerCase(), hash(String(rawHeaders[name] ?? ""))]);
@@ -209,6 +218,11 @@ function createProviderCacheCapabilityEvidence(config, input) {
         transportIdentityChecksum: identity.transportIdentityChecksum,
         implicitCacheStatus: input.implicitCacheStatus || (cacheReadInputTokens > 0 ? "confirmed" : "unproven"),
         explicitFieldStatus: input.explicitFieldStatus || input.status,
+        cacheStatus: input.cacheStatus
+            || (cacheReadInputTokens > 0 || input.implicitCacheStatus === "confirmed" || input.explicitCacheKeyStatus === "confirmed"
+                ? "confirmed"
+                : input.status === "unsupported" && input.responsesContinuationStatus === "unsupported" ? "unproven" : input.status),
+        promptCacheKeyStatus: input.promptCacheKeyStatus || input.explicitCacheKeyStatus || (input.explicitFieldStatus === "confirmed" ? "confirmed" : undefined),
         lastCacheReadTokens: Math.max(0, Number(input.lastCacheReadTokens ?? cacheReadInputTokens)),
         hitCount: Math.max(0, Number(input.hitCount || (cacheReadInputTokens > 0 ? 1 : 0))),
         missCount: Math.max(0, Number(input.missCount || 0)),
@@ -222,11 +236,23 @@ function createProviderCacheCapabilityEvidence(config, input) {
         foregroundProviderInputTokens: Math.max(0, Number(input.foregroundProviderInputTokens || 0)),
         auxiliaryHitCount: Math.max(0, Number(input.auxiliaryHitCount || 0)),
         auxiliaryMissCount: Math.max(0, Number(input.auxiliaryMissCount || 0)),
+        prefixExtensionSuccessStreak: Math.max(0, Number(input.prefixExtensionSuccessStreak || 0)),
+        prefixExtensionMissStreak: Math.max(0, Number(input.prefixExtensionMissStreak ?? input.prefixEligibleMissStreak ?? 0)),
+        ...(input.lastProbeResult ? { lastProbeResult: input.lastProbeResult } : {}),
+        ...(input.lastProbeAt ? { lastProbeAt: clean(input.lastProbeAt, 64) } : {}),
         prefixEligibleMissStreak: Math.max(0, Number(input.prefixEligibleMissStreak || 0)),
         explicitBreakpointsVerified: input.explicitBreakpointsVerified === true,
         ...(input.explicitCacheKeyStatus ? { explicitCacheKeyStatus: input.explicitCacheKeyStatus } : {}),
         ...(input.promptCacheOptionsStatus ? { promptCacheOptionsStatus: input.promptCacheOptionsStatus } : {}),
         ...(input.explicitBreakpointsStatus ? { explicitBreakpointsStatus: input.explicitBreakpointsStatus } : {}),
+        ...(input.responsesContinuationStatus ? { responsesContinuationStatus: input.responsesContinuationStatus } : {}),
+        ...(input.responsesWebSocketStatus ? { responsesWebSocketStatus: input.responsesWebSocketStatus } : {}),
+        ...(input.responsesWebSocketResponseCreateStatus ? { responsesWebSocketResponseCreateStatus: input.responsesWebSocketResponseCreateStatus } : {}),
+        ...(input.responsesWebSocketContinuationStatus ? { responsesWebSocketContinuationStatus: input.responsesWebSocketContinuationStatus } : {}),
+        ...(input.responsesWebSocketToolLoopStatus ? { responsesWebSocketToolLoopStatus: input.responsesWebSocketToolLoopStatus } : {}),
+        ...(input.responsesWebSocketLastFailureReason ? { responsesWebSocketLastFailureReason: clean(input.responsesWebSocketLastFailureReason, 300) } : {}),
+        ...(input.responsesToolLoopContinuationStatus ? { responsesToolLoopContinuationStatus: input.responsesToolLoopContinuationStatus } : {}),
+        ...(input.lastContinuationFailureReason ? { lastContinuationFailureReason: clean(input.lastContinuationFailureReason, 500) } : {}),
         ...(input.blockCacheControlStatus ? { blockCacheControlStatus: input.blockCacheControlStatus } : {}),
         ...(input.nativeCacheEditingStatus ? { nativeCacheEditingStatus: input.nativeCacheEditingStatus } : {}),
         ...(input.cacheUsageReportingStatus ? { cacheUsageReportingStatus: input.cacheUsageReportingStatus } : {}),
@@ -253,9 +279,28 @@ function recordProviderCacheCapabilityEvidence(config, input) {
             // record and thereby discard a still-usable routing key or implicit
             // prefix capability.
             explicitFieldStatus: input.explicitFieldStatus ?? previous?.explicitFieldStatus,
+            cacheStatus: input.cacheStatus ?? previous?.cacheStatus,
+            promptCacheKeyStatus: input.promptCacheKeyStatus
+                ?? (input.explicitCacheKeyStatus === "confirmed" ? "confirmed" : undefined)
+                ?? (previous?.promptCacheKeyStatus === "confirmed" ? previous.promptCacheKeyStatus : undefined)
+                ?? previous?.explicitCacheKeyStatus,
             explicitCacheKeyStatus: input.explicitCacheKeyStatus ?? previous?.explicitCacheKeyStatus,
             promptCacheOptionsStatus: input.promptCacheOptionsStatus ?? previous?.promptCacheOptionsStatus,
             explicitBreakpointsStatus: input.explicitBreakpointsStatus ?? previous?.explicitBreakpointsStatus,
+            responsesContinuationStatus: input.responsesContinuationStatus ?? previous?.responsesContinuationStatus,
+            responsesToolLoopContinuationStatus: input.responsesToolLoopContinuationStatus ?? previous?.responsesToolLoopContinuationStatus,
+            responsesWebSocketStatus: input.responsesWebSocketStatus ?? previous?.responsesWebSocketStatus,
+            responsesWebSocketResponseCreateStatus: input.responsesWebSocketResponseCreateStatus ?? previous?.responsesWebSocketResponseCreateStatus,
+            responsesWebSocketContinuationStatus: input.responsesWebSocketContinuationStatus ?? previous?.responsesWebSocketContinuationStatus,
+            responsesWebSocketToolLoopStatus: input.responsesWebSocketToolLoopStatus ?? previous?.responsesWebSocketToolLoopStatus,
+            responsesWebSocketLastFailureReason: input.responsesWebSocketLastFailureReason !== undefined
+                ? clean(input.responsesWebSocketLastFailureReason, 300)
+                : previous?.responsesWebSocketLastFailureReason,
+            lastContinuationFailureReason: input.lastContinuationFailureReason !== undefined
+                ? input.lastContinuationFailureReason
+                : input.responsesContinuationStatus === "confirmed"
+                    ? undefined
+                    : previous?.lastContinuationFailureReason,
             blockCacheControlStatus: input.blockCacheControlStatus ?? previous?.blockCacheControlStatus,
             nativeCacheEditingStatus: input.nativeCacheEditingStatus ?? previous?.nativeCacheEditingStatus,
             foregroundHitCount: input.foregroundHitCount ?? previous?.foregroundHitCount ?? 0,
@@ -264,6 +309,10 @@ function recordProviderCacheCapabilityEvidence(config, input) {
             foregroundProviderInputTokens: input.foregroundProviderInputTokens ?? previous?.foregroundProviderInputTokens ?? 0,
             auxiliaryHitCount: input.auxiliaryHitCount ?? previous?.auxiliaryHitCount ?? 0,
             auxiliaryMissCount: input.auxiliaryMissCount ?? previous?.auxiliaryMissCount ?? 0,
+            prefixExtensionSuccessStreak: input.prefixExtensionSuccessStreak ?? previous?.prefixExtensionSuccessStreak ?? 0,
+            prefixExtensionMissStreak: input.prefixExtensionMissStreak ?? previous?.prefixExtensionMissStreak ?? previous?.prefixEligibleMissStreak ?? 0,
+            lastProbeResult: input.lastProbeResult ?? previous?.lastProbeResult,
+            lastProbeAt: input.lastProbeAt ?? previous?.lastProbeAt,
             recentForegroundSamples: input.recentForegroundSamples ?? previous?.recentForegroundSamples ?? [],
             exactReplayStatus: input.exactReplayStatus ?? previous?.exactReplayStatus ?? "unproven",
             prefixExtensionStatus: input.prefixExtensionStatus ?? previous?.prefixExtensionStatus ?? "unproven",
@@ -284,10 +333,27 @@ function recordProviderCacheCapabilityEvidence(config, input) {
             && previousStillValid
             && previous.status === "confirmed"
             && !fieldWasRejected;
-        if (!preserveConfirmed)
-            registry.entries[key] = evidence;
+        // Continuation failures are independent from Prompt Cache. Keep the
+        // merged continuation=unsupported state active so subsequent requests do
+        // not retry `previous_response_id`, while retaining the confirmed cache
+        // status and the degraded latest-attempt receipt for diagnostics.
+        const continuationOnlyUpdate = (input.responsesContinuationStatus !== undefined
+            || input.responsesToolLoopContinuationStatus !== undefined
+            || input.lastContinuationFailureReason !== undefined);
+        const activeEvidence = continuationOnlyUpdate
+            && previousStillValid
+            && previous?.status === "confirmed"
+            && !fieldWasRejected
+            ? {
+                ...evidence,
+                status: previous.status,
+                checksum: checksum({ ...evidence, status: previous.status, checksum: undefined }),
+            }
+            : evidence;
+        if (!preserveConfirmed || continuationOnlyUpdate)
+            registry.entries[key] = activeEvidence;
         writeRegistry(registry);
-        return { evidence: preserveConfirmed ? previous : evidence, latestAttempt: evidence, preservedConfirmed: preserveConfirmed };
+        return { evidence: activeEvidence, latestAttempt: evidence, preservedConfirmed: preserveConfirmed && !continuationOnlyUpdate };
     }, { timeoutMs: 30_000, retryMs: 20, staleMs: 2 * 60_000 });
 }
 function observeProviderCacheUsage(config, input) {
@@ -299,7 +365,9 @@ function observeProviderCacheUsage(config, input) {
         const cacheCreation = Math.max(0, Number(input.cacheCreationInputTokens || 0));
         const directInput = Math.max(0, Number(input.providerInputTokens || 0));
         const observedInput = directInput + cacheCreation + cacheRead;
-        const usageReported = input.usageReported === true || Math.max(0, Number(input.providerInputTokens || 0)) > 0;
+        const usageReported = input.usageReported !== undefined
+            ? input.usageReported === true
+            : Math.max(0, Number(input.providerInputTokens || 0)) > 0;
         const hit = cacheRead > 0;
         const requestClass = ["foreground_main", "auxiliary", "probe"].includes(String(input.requestClass || ""))
             ? input.requestClass
@@ -310,6 +378,11 @@ function observeProviderCacheUsage(config, input) {
         const promptCacheKeyChecksum = clean(input.promptCacheKeyChecksum, 64);
         const conversationIdentityChecksum = clean(input.conversationIdentityChecksum, 64);
         const previousSamples = Array.isArray(previous?.recentForegroundSamples) ? previous.recentForegroundSamples : [];
+        const historicalMeaningfulPrefixReuse = previousSamples.some((sample) => {
+            const sampleRead = Math.max(0, Number(sample?.cacheReadTokens || 0));
+            const sampleInput = Math.max(0, Number(sample?.providerInputTokens || 0));
+            return sampleRead > 0 && sampleInput > 0 && sampleRead >= sampleInput * 0.5;
+        });
         // Prefix capability is reusable across sessions in the same scoped
         // provider route. The exact conversation identity remains audit-only and
         // is required for replay classification, not for prefix-extension
@@ -325,6 +398,15 @@ function observeProviderCacheUsage(config, input) {
             && !!payloadChecksum
             && previousComparable.payloadChecksum !== payloadChecksum
             && previousComparable.dynamicSuffixChecksum !== dynamicSuffixChecksum;
+        // A small provider read is not proof that an explicit breakpoint was
+        // honored. Require the returned cache read to cover a meaningful portion
+        // of the locally comparable prefix before promoting foreground evidence.
+        // Capability probes have their own explicit-field evidence path and are
+        // not gated by this foreground heuristic.
+        const prefixCandidateTokens = Math.max(0, Number(input.matchingPrefixTokensEstimate || 0), Number(input.cacheablePrefixTokens || 0));
+        const meaningfulPrefixHit = prefixExtensionCandidate
+            && prefixCandidateTokens > 0
+            && cacheRead >= prefixCandidateTokens * 0.5;
         const explicitConfirmed = input.requestPatchApplied === true && usageReported;
         const explicitFieldStatus = explicitConfirmed ? "confirmed" : previous?.explicitFieldStatus || previous?.status || "unproven";
         const implicitCacheStatus = hit ? "confirmed" : previous?.implicitCacheStatus || "unproven";
@@ -334,13 +416,48 @@ function observeProviderCacheUsage(config, input) {
         const prefixEligibleMissStreak = prefixExtensionCandidate
             ? (hit ? 0 : Math.max(0, Number(previous?.prefixEligibleMissStreak || 0)) + 1)
             : Math.max(0, Number(previous?.prefixEligibleMissStreak || 0));
+        const previousPrefixMissStreak = Math.max(0, Number(previous?.prefixExtensionMissStreak ?? previous?.prefixEligibleMissStreak ?? 0));
+        const previousPrefixSuccessStreak = Math.max(0, Number(previous?.prefixExtensionSuccessStreak || 0));
+        const prefixExtensionMissStreak = prefixExtensionCandidate && usageReported && !hit
+            ? previousPrefixMissStreak + 1
+            : prefixExtensionCandidate && hit ? 0 : previousPrefixMissStreak;
+        // Only a meaningful prefix hit can establish rolling-prefix capability.
+        // A relay's fixed baseline fragment (for example 192 tokens) is still a
+        // cache hit, but it must never count toward breakpoint recovery.
+        const prefixExtensionSuccessStreak = prefixExtensionCandidate && usageReported && hit && meaningfulPrefixHit
+            ? previousPrefixSuccessStreak + 1
+            : prefixExtensionCandidate && (!hit || !meaningfulPrefixHit) ? 0 : previousPrefixSuccessStreak;
         const providerRoutingMissStreak = hit || !prefixExtensionCandidate
             ? 0
             : Math.max(0, Number(previous?.providerRoutingMissStreak || 0)) + (usageReported ? 1 : 0);
         let prefixExtensionStatus = previous?.prefixExtensionStatus || "unproven";
-        if (hit && prefixExtensionCandidate)
-            prefixExtensionStatus = "confirmed";
-        else if (prefixEligibleMissStreak >= 3 && prefixExtensionStatus !== "confirmed") {
+        if (prefixExtensionCandidate && hit && meaningfulPrefixHit) {
+            // A provider accepted as exact-only needs two consecutive dynamic-prefix
+            // hits before production strategy is promoted again. Initial/unproven
+            // capability can be confirmed by the first real hit.
+            if (prefixExtensionStatus === "exact_only") {
+                if (prefixExtensionSuccessStreak >= 2)
+                    prefixExtensionStatus = "confirmed";
+            }
+            else if (prefixExtensionStatus !== "unsupported") {
+                prefixExtensionStatus = "confirmed";
+            }
+        }
+        else if (prefixExtensionCandidate && hit && !meaningfulPrefixHit) {
+            // A positive usage value alone is not evidence that a changing
+            // transcript prefix was reused. Relays commonly report a tiny fixed
+            // baseline fragment (for example 192 tokens) while the comparable
+            // prefix is thousands of tokens long. Keep the provider's basic cache
+            // capability, but do not promote rolling-prefix support from it. A
+            // previously confirmed rolling-prefix path must remain confirmed: the
+            // small sample does not invalidate an earlier successful observation.
+            prefixExtensionStatus = previous?.prefixExtensionStatus === "confirmed" || historicalMeaningfulPrefixReuse
+                ? "confirmed"
+                : exactReplayStatus === "confirmed" ? "exact_only" : "degraded";
+        }
+        else if (prefixExtensionCandidate && usageReported && !hit && prefixExtensionMissStreak >= 3) {
+            // Keep a confirmed Prompt Cache capability. Only dynamic-prefix reuse is
+            // downgraded after three consecutive reported misses.
             prefixExtensionStatus = exactReplayStatus === "confirmed" ? "exact_only" : "degraded";
         }
         const sample = {
@@ -362,7 +479,7 @@ function observeProviderCacheUsage(config, input) {
             : prefixExtensionStatus === "exact_only"
                 ? "gateway_exact_replay_only"
                 : prefixExtensionCandidate
-                    ? (prefixEligibleMissStreak >= 3 ? "provider_routing_or_eviction" : "provider_prefix_reuse_unproven")
+                    ? "provider_prefix_reuse_unproven"
                     : input.missReason || (usageReported ? "cold_start" : "provider_usage_not_reported");
         const evidence = createProviderCacheCapabilityEvidence(config, {
             status: explicitFieldStatus,
@@ -372,6 +489,10 @@ function observeProviderCacheUsage(config, input) {
             cacheCreationInputTokens: Math.max(0, Number(input.cacheCreationInputTokens || 0)),
             implicitCacheStatus,
             explicitFieldStatus,
+            cacheStatus: hit ? "confirmed" : previous?.cacheStatus || undefined,
+            promptCacheKeyStatus: input.explicitCacheKeyApplied === true && hit
+                ? "confirmed"
+                : previous?.promptCacheKeyStatus || previous?.explicitCacheKeyStatus,
             exactReplayStatus,
             prefixExtensionStatus,
             stablePrefixChecksum: stablePrefixChecksum || previous?.stablePrefixChecksum,
@@ -386,14 +507,33 @@ function observeProviderCacheUsage(config, input) {
             auxiliaryHitCount: Math.max(0, Number(previous?.auxiliaryHitCount || 0)) + (requestClass !== "foreground_main" && hit ? 1 : 0),
             auxiliaryMissCount: Math.max(0, Number(previous?.auxiliaryMissCount || 0)) + (requestClass !== "foreground_main" && !hit && usageReported ? 1 : 0),
             prefixEligibleMissStreak,
+            prefixExtensionSuccessStreak,
+            prefixExtensionMissStreak,
+            lastProbeResult: !usageReported ? "unreported" : hit ? "hit" : "miss",
+            lastProbeAt: new Date().toISOString(),
+            // A successful request carrying the breakpoint field is evidence that
+            // the field is accepted, independent of how many tokens the Provider
+            // elected to read. A small fixed read (for example 192 tokens) is a
+            // usage result, not a capability rejection. Preserve a prior confirmed
+            // breakpoint capability until the Provider explicitly rejects the field.
             explicitBreakpointsVerified: previous?.explicitBreakpointsVerified === true
-                || (input.explicitBreakpointsApplied === true && hit && prefixExtensionCandidate),
+                || historicalMeaningfulPrefixReuse
+                || meaningfulPrefixHit && input.explicitBreakpointsApplied === true,
             explicitCacheKeyStatus: previous?.explicitCacheKeyStatus === "unsupported"
                 ? "unsupported"
                 : input.explicitCacheKeyApplied === true && hit ? "confirmed" : previous?.explicitCacheKeyStatus,
             explicitBreakpointsStatus: previous?.explicitBreakpointsStatus === "unsupported"
                 ? "unsupported"
-                : input.explicitBreakpointsApplied === true && hit && prefixExtensionCandidate ? "confirmed" : previous?.explicitBreakpointsStatus,
+                : previous?.explicitBreakpointsStatus === "confirmed" || historicalMeaningfulPrefixReuse
+                    ? "confirmed"
+                    : meaningfulPrefixHit && input.explicitBreakpointsApplied === true
+                        ? "confirmed"
+                        : input.explicitBreakpointsApplied === true && prefixExtensionCandidate && previous?.source === "provider_usage"
+                            ? "degraded"
+                            : previous?.explicitBreakpointsStatus,
+            responsesContinuationStatus: previous?.responsesContinuationStatus,
+            responsesToolLoopContinuationStatus: previous?.responsesToolLoopContinuationStatus,
+            lastContinuationFailureReason: previous?.lastContinuationFailureReason,
             blockCacheControlStatus: previous?.blockCacheControlStatus === "unsupported"
                 ? "unsupported"
                 : input.blockCacheControlApplied === true && hit ? "confirmed" : previous?.blockCacheControlStatus,
@@ -431,6 +571,8 @@ function readProviderCacheCapabilityState(config) {
         evidence = createProviderCacheCapabilityEvidence(config, {
             id: `pcce_official_${identity.identityChecksum.slice(0, 24)}`,
             status: "confirmed",
+            cacheStatus: "confirmed",
+            promptCacheKeyStatus: ["chat_completions", "responses"].includes(protocol) ? "confirmed" : "unproven",
             explicitFieldStatus: ["chat_completions", "responses", "anthropic_messages"].includes(protocol) ? "confirmed" : "unproven",
             implicitCacheStatus: ["chat_completions", "responses", "gemini_generate_content"].includes(protocol) ? "confirmed" : "unproven",
             source: "official_endpoint",
@@ -439,6 +581,8 @@ function readProviderCacheCapabilityState(config) {
             explicitBreakpointsVerified: protocolOf(config) === "responses",
             explicitCacheKeyStatus: ["chat_completions", "responses"].includes(protocolOf(config)) ? "confirmed" : "unproven",
             explicitBreakpointsStatus: protocolOf(config) === "responses" ? "confirmed" : "unproven",
+            responsesContinuationStatus: protocolOf(config) === "responses" ? "confirmed" : "unproven",
+            responsesToolLoopContinuationStatus: protocolOf(config) === "responses" ? "confirmed" : "unproven",
             blockCacheControlStatus: protocolOf(config) === "anthropic_messages" ? "confirmed" : "unproven",
             cacheUsageReportingStatus: "confirmed",
             reason: "official_endpoint_documented_capability",
@@ -468,13 +612,28 @@ function readProviderCacheCapabilityState(config) {
         schema: "ccm-provider-cache-capability-state-v1",
         version: 1,
         identity,
-        status: evidence?.explicitFieldStatus || evidence?.status || "unproven",
+        status: evidence?.status || evidence?.explicitFieldStatus || "unproven",
+        cacheStatus: evidence?.cacheStatus || (evidence?.implicitCacheStatus === "confirmed" || evidence?.explicitCacheKeyStatus === "confirmed" ? "confirmed" : evidence?.status || "unproven"),
+        promptCacheKeyStatus: evidence?.promptCacheKeyStatus || evidence?.explicitCacheKeyStatus || "unproven",
         implicitCacheStatus: evidence?.implicitCacheStatus || "unproven",
         explicitFieldStatus: evidence?.explicitFieldStatus || evidence?.status || "unproven",
         exactReplayStatus: evidence?.exactReplayStatus || "unproven",
         prefixExtensionStatus: evidence?.prefixExtensionStatus || "unproven",
         explicitBreakpointsVerified: evidence?.explicitBreakpointsVerified === true,
         promptCacheOptionsStatus: evidence?.promptCacheOptionsStatus || "unproven",
+        explicitBreakpointsStatus: evidence?.explicitBreakpointsStatus || "unproven",
+        responsesContinuationStatus: evidence?.responsesContinuationStatus || "unproven",
+        responsesToolLoopContinuationStatus: evidence?.responsesToolLoopContinuationStatus || "unproven",
+        responsesWebSocketStatus: evidence?.responsesWebSocketStatus || "unproven",
+        responsesWebSocketResponseCreateStatus: evidence?.responsesWebSocketResponseCreateStatus || "unproven",
+        responsesWebSocketContinuationStatus: evidence?.responsesWebSocketContinuationStatus || "unproven",
+        responsesWebSocketToolLoopStatus: evidence?.responsesWebSocketToolLoopStatus || "unproven",
+        responsesWebSocketLastFailureReason: evidence?.responsesWebSocketLastFailureReason || "",
+        lastContinuationFailureReason: evidence?.lastContinuationFailureReason || "",
+        prefixExtensionSuccessStreak: Math.max(0, Number(evidence?.prefixExtensionSuccessStreak || 0)),
+        prefixExtensionMissStreak: Math.max(0, Number(evidence?.prefixExtensionMissStreak ?? evidence?.prefixEligibleMissStreak ?? 0)),
+        lastProbeResult: evidence?.lastProbeResult || null,
+        lastProbeAt: evidence?.lastProbeAt || null,
         providerRoutingMissStreak: Math.max(0, Number(evidence?.providerRoutingMissStreak || 0)),
         lastCacheReadTokens: Math.max(0, Number(evidence?.lastCacheReadTokens || 0)),
         hitCount: Math.max(0, Number(evidence?.hitCount || 0)),
@@ -552,6 +711,8 @@ function runProviderCacheCapabilityRegistrySelfTest() {
         promptCacheKeyChecksum: hash("cache-key"),
         conversationIdentityChecksum: hash("project\0p\0s1"),
         prefixExtensionEligible: true,
+        cacheablePrefixTokens: 100,
+        matchingPrefixTokensEstimate: 100,
     });
     const implicitState = readProviderCacheCapabilityState(config);
     observeProviderCacheUsage(config, {
@@ -566,6 +727,8 @@ function runProviderCacheCapabilityRegistrySelfTest() {
         promptCacheKeyChecksum: hash("cache-key"),
         conversationIdentityChecksum: hash("project\0p\0s1"),
         prefixExtensionEligible: true,
+        cacheablePrefixTokens: 100,
+        matchingPrefixTokensEstimate: 100,
     });
     observeProviderCacheUsage(config, {
         cacheReadInputTokens: 80,
@@ -579,8 +742,85 @@ function runProviderCacheCapabilityRegistrySelfTest() {
         promptCacheKeyChecksum: hash("cache-key"),
         conversationIdentityChecksum: hash("project\0p\0s2"),
         prefixExtensionEligible: true,
+        cacheablePrefixTokens: 100,
+        matchingPrefixTokensEstimate: 100,
     });
     const confirmed = readProviderCacheCapabilityState(config);
+    // Verify conservative prefix state transitions: one miss is tolerated,
+    // three reported misses downgrade only prefix reuse, and exact-only needs
+    // two consecutive dynamic-prefix hits to recover.
+    const streakConfig = { ...config, model: "streak-model" };
+    revokeProviderCacheCapabilityEvidence(streakConfig);
+    const streakInput = (suffix, payload, hit) => observeProviderCacheUsage(streakConfig, {
+        cacheReadInputTokens: hit ? 100 : 0,
+        providerInputTokens: 300,
+        usageReported: true,
+        requestClass: "foreground_main",
+        stablePrefixChecksum: hash("stable-prefix"),
+        dynamicSuffixChecksum: hash(suffix),
+        payloadChecksum: hash(payload),
+        promptCacheKeyChecksum: hash("cache-key"),
+        conversationIdentityChecksum: hash("project\0p\0streak"),
+        prefixExtensionEligible: true,
+        cacheablePrefixTokens: 100,
+        matchingPrefixTokensEstimate: 100,
+    });
+    streakInput("seed", "seed", true);
+    streakInput("seed-2", "seed-2", true);
+    streakInput("miss-1", "miss-1", false);
+    const oneMiss = readProviderCacheCapabilityState(streakConfig);
+    streakInput("miss-2", "miss-2", false);
+    streakInput("miss-3", "miss-3", false);
+    const threeMisses = readProviderCacheCapabilityState(streakConfig);
+    recordProviderCacheCapabilityEvidence(streakConfig, { status: "confirmed", prefixExtensionStatus: "exact_only", reason: "selftest_exact_only" });
+    streakInput("hit-1", "hit-1", true);
+    const oneRecovery = readProviderCacheCapabilityState(streakConfig);
+    streakInput("hit-2", "hit-2", true);
+    const twoRecovery = readProviderCacheCapabilityState(streakConfig);
+    const baselineConfig = { ...config, model: "baseline-only-model" };
+    revokeProviderCacheCapabilityEvidence(baselineConfig);
+    // A previously confirmed Responses breakpoint must remain confirmed when a
+    // later request only reports the Provider's small baseline fragment. Usage
+    // size cannot revoke field support; only an explicit field rejection can.
+    recordProviderCacheCapabilityEvidence(baselineConfig, {
+        status: "confirmed",
+        explicitBreakpointsStatus: "confirmed",
+        explicitBreakpointsVerified: true,
+        reason: "selftest_explicit_breakpoint_confirmed",
+    });
+    observeProviderCacheUsage(baselineConfig, {
+        cacheReadInputTokens: 192,
+        providerInputTokens: 8_000,
+        requestPatchApplied: true,
+        explicitBreakpointsApplied: true,
+        usageReported: true,
+        requestClass: "foreground_main",
+        stablePrefixChecksum: hash("stable-prefix"),
+        dynamicSuffixChecksum: hash("baseline-a"),
+        payloadChecksum: hash("baseline-a"),
+        promptCacheKeyChecksum: hash("cache-key"),
+        conversationIdentityChecksum: hash("project\0p\0baseline"),
+        prefixExtensionEligible: true,
+        cacheablePrefixTokens: 4_000,
+        matchingPrefixTokensEstimate: 4_000,
+    });
+    observeProviderCacheUsage(baselineConfig, {
+        cacheReadInputTokens: 192,
+        providerInputTokens: 8_000,
+        requestPatchApplied: true,
+        explicitBreakpointsApplied: true,
+        usageReported: true,
+        requestClass: "foreground_main",
+        stablePrefixChecksum: hash("stable-prefix"),
+        dynamicSuffixChecksum: hash("baseline-b"),
+        payloadChecksum: hash("baseline-b"),
+        promptCacheKeyChecksum: hash("cache-key"),
+        conversationIdentityChecksum: hash("project\0p\0baseline"),
+        prefixExtensionEligible: true,
+        cacheablePrefixTokens: 4_000,
+        matchingPrefixTokensEstimate: 4_000,
+    });
+    const baselineOnly = readProviderCacheCapabilityState(baselineConfig);
     const degraded = recordProviderCacheCapabilityEvidence(config, { status: "degraded", providerCallCount: 1, reason: "HTTP 503" });
     const state = readProviderCacheCapabilityState(config);
     const revoked = revokeProviderCacheCapabilityEvidence(config);
@@ -590,9 +830,25 @@ function runProviderCacheCapabilityRegistrySelfTest() {
         businessUsageConfirmsPrefixExtension: confirmed.prefixExtensionStatus === "confirmed"
             && confirmed.foreground.hitCount === 3
             && confirmed.foreground.tokenReuseRate > 0,
+        cacheStatusIsIndependentFromContinuation: confirmed.cacheStatus === "confirmed"
+            && confirmed.promptCacheKeyStatus === "confirmed",
         crossSessionPrefixReuse: confirmed.prefixExtensionStatus === "confirmed"
             && confirmed.evidence?.recentForegroundSamples?.some((sample) => sample.conversationIdentityChecksum === hash("project\0p\0s2")),
-        transientFailurePreservesConfirmed: degraded.preservedConfirmed === true && state.evidence?.status === "confirmed" && state.latestAttempt?.status === "degraded",
+        transientFailurePreservesConfirmed: degraded.preservedConfirmed === true
+            && state.evidence?.status === "confirmed"
+            && state.evidence?.cacheStatus === "confirmed"
+            && state.latestAttempt?.status === "degraded",
+        singleMissDoesNotDowngrade: oneMiss.prefixExtensionStatus === "confirmed"
+            && oneMiss.prefixExtensionMissStreak === 1,
+        threeMissesDowngradePrefixOnly: threeMisses.prefixExtensionStatus === "degraded"
+            && threeMisses.cacheStatus === "confirmed",
+        exactOnlyNeedsTwoHitsToRecover: oneRecovery.prefixExtensionStatus === "exact_only"
+            && twoRecovery.prefixExtensionStatus === "confirmed",
+        baselineFragmentDoesNotConfirmPrefixExtension: baselineOnly.prefixExtensionStatus === "degraded"
+            && baselineOnly.lastCacheReadTokens === 192
+            && baselineOnly.cacheStatus === "confirmed",
+        baselineFragmentPreservesConfirmedBreakpoints: baselineOnly.explicitBreakpointsStatus === "confirmed"
+            && baselineOnly.explicitBreakpointsVerified === true,
         secretsNotStored: !JSON.stringify(state).includes("hidden") && !JSON.stringify(state).includes("gateway.example"),
         revokeWorks: revoked.removed === true && readProviderCacheCapabilityState(config).evidence === null,
     };

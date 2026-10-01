@@ -47,6 +47,7 @@ const js_tiktoken_1 = require("js-tiktoken");
 const context_budget_1 = require("./context-budget");
 const provider_cache_capability_registry_1 = require("./provider-cache-capability-registry");
 const atomic_json_file_1 = require("../core/atomic-json-file");
+const responses_output_replay_1 = require("./responses-output-replay");
 const ROOT = process.env.CCM_MODEL_TOKEN_PREFLIGHT_DIR
     ? path.resolve(process.env.CCM_MODEL_TOKEN_PREFLIGHT_DIR)
     : path.join(os.homedir(), ".ccm", "model-token-preflight");
@@ -213,7 +214,9 @@ function estimateModelTextTokens(value, config = {}) {
 function estimateModelMessagesTokens(messagesInput, config = {}) {
     const messages = Array.isArray(messagesInput) ? messagesInput : [];
     const overhead = family(config) === "openai" ? 4 : 3;
-    const rows = messages.map((message) => rawTextTokens(message?.content ?? message, config));
+    // Opaque continuation bytes are not plaintext tokens. In particular a
+    // tool-only assistant with null content must not count both representations.
+    const rows = messages.map((message) => rawTextTokens(message?.content ?? (message && typeof message === 'object' ? (0, responses_output_replay_1.stripResponsesReplay)(message) : message), config));
     const rawTokens = rows.reduce((sum, row) => sum + row.tokens, 0) + messages.length * overhead + 3;
     const rawStrategy = [...new Set(rows.map(row => row.strategy))].join("+") || `${family(config)}_empty_messages`;
     // Ratio calibration and, especially, the absolute P95 drift are learned for

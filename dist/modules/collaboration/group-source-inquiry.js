@@ -37,6 +37,7 @@ exports.requestGroupSourceInquiry = requestGroupSourceInquiry;
 const crypto = __importStar(require("crypto"));
 const group_orchestrator_routing_1 = require("./group-orchestrator-routing");
 const source_inquiry_contract_1 = require("../../agents/source-inquiry-contract");
+const source_evidence_guidance_1 = require("../../agents/source-evidence-guidance");
 async function requestGroupSourceInquiry(input) {
     const group = (0, group_orchestrator_routing_1.normalizeGroupOrchestrator)(input.group);
     const memberProjects = (0, group_orchestrator_routing_1.getRoutableMembers)(group).map((member) => String(member?.project || "")).filter(Boolean);
@@ -66,7 +67,7 @@ async function requestGroupSourceInquiry(input) {
             directReplyReady: false,
             targetRefs: authorizedProjectIds.map(project => ({ type: "project", id: project })),
         },
-        extraInstructions: "This is a delegated read-only source inquiry from the global main Agent. Inspect only the authorized relevant projects, do not dispatch or create a task, and return a concise evidence-grounded answer without raw source text.",
+        extraInstructions: `This is a delegated read-only source inquiry from the global main Agent. Inspect only the authorized relevant projects, do not dispatch or create a task, and return a concise evidence-grounded answer without raw source text.\n${source_evidence_guidance_1.SOURCE_EVIDENCE_GUIDANCE}`,
         signal: input.signal,
     });
     const rawReceipt = result?.sourceInquiryReceipt;
@@ -105,13 +106,13 @@ async function requestGroupSourceInquiry(input) {
                 evidenceIds: evidence.map(item => item.evidenceId),
                 paths: evidence.map(item => item.path),
                 findings: [],
-                sufficient: evidence.length > 0,
+                sufficient: rawReceipt.sufficient === true && evidence.length > 0,
                 repoStateChecksum: evidence.length
                     ? crypto.createHash("sha256").update(JSON.stringify(evidence.map(item => [item.path, item.checksum]).sort())).digest("hex")
                     : "",
             };
         }),
-        sufficient: authorizedProjectIds.every(project => (byProject.get(project) || []).length > 0),
+        sufficient: rawReceipt.sufficient === true && authorizedProjectIds.every(project => (byProject.get(project) || []).length > 0),
         reason: rawReceipt.sufficient === true ? "群聊主 Agent 已取得目标项目源码证据" : "群聊源码证据不足",
     });
     return { answer: String(result?.content || "").trim(), receipt, planningEvidenceEntries };

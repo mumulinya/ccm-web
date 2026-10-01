@@ -28,10 +28,9 @@ function mergeProjectInquiry(first, supplement) {
     const evidence = uniqueEvidence([...projectEvidence(first), ...(supplement ? projectEvidence(supplement) : [])]);
     const project = final.evidence.project;
     const finalProjectReceipt = final.receipt.projectReceipts.find(item => item.project === project);
-    const findings = uniqueText([
-        ...first.receipt.projectReceipts.flatMap(item => item.findings || []),
-        ...(supplement ? supplement.receipt.projectReceipts.flatMap(item => item.findings || []) : []),
-    ], 12, 1200);
+    // The latest assessment may correct the earlier findings. Retain evidence
+    // references for traceability, without reviving superseded conclusions.
+    const findings = uniqueText(final.receipt.projectReceipts.flatMap(item => item.findings || []), 12, 1200);
     const projectReceipt = (0, source_inquiry_contract_1.buildSourceInquiryProjectReceipt)({
         project,
         projectSessionId: finalProjectReceipt?.projectSessionId || first.receipt.projectReceipts[0]?.projectSessionId || "source-inquiry",
@@ -74,7 +73,8 @@ async function requestRecoverableProjectSourceInquiry(input) {
     if (first.receipt.sufficient || input.automaticSupplement === false || input.readDepth === "broad" || first.needsUserInput) {
         return mergeProjectInquiry(first);
     }
-    const supplement = await (0, project_source_inquiry_1.requestProjectSourceInquiry)({ ...input, readDepth: "broad" });
+    const gaps = uniqueText(first.missingEvidence.map(item => item.summary), 8, 500);
+    const supplement = await (0, project_source_inquiry_1.requestProjectSourceInquiry)({ ...input, readDepth: "broad", evidenceGaps: gaps });
     return mergeProjectInquiry(first, supplement);
 }
 function missingProjects(receipt) {
@@ -101,7 +101,7 @@ function mergeGroupInquiry(first, supplement) {
             evidenceIds: rows.map(item => item.evidenceId),
             paths: rows.map(item => item.path),
             findings: prior?.findings || [],
-            sufficient: rows.length > 0,
+            sufficient: prior?.sufficient === true && rows.length > 0,
             repoStateChecksum: prior?.repoStateChecksum || "",
         });
     });
@@ -124,7 +124,7 @@ function mergeGroupInquiry(first, supplement) {
         answer: answers.join("\n\n"),
         receipt,
         planningEvidenceEntries: evidence,
-        missingEvidenceSummaries: unanswered.map(project => `项目 ${project} 尚未取得可验证源码证据`),
+        missingEvidenceSummaries: unanswered.map(project => `项目 ${project} 仍有待核实的源码问题`),
         needsUserInput: false,
         automaticSupplementAttempts: supplement ? 1 : 0,
         contentStored: false,

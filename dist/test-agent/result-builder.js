@@ -182,6 +182,10 @@ function buildCriterionLinkedEvidence(workOrder, commandResults, httpResults, br
     if (surfaceAudit?.schema === "ccm-test-agent-surface-audit-v1") {
         add("CCM authoritative change-surface audit", surfaceAudit.status === "passed" && surfaceAudit.canAccept === true ? "passed" : "failed");
     }
+    const baselineEvidence = workOrder.metadata?.baselineEvidence;
+    if (workOrder.metadata?.readOnlyBaseline === true && baselineEvidence?.noFileChanges === true) {
+        add("CCM authoritative baseline audit", "passed");
+    }
     const evidence = [];
     for (const row of rows) {
         const criterion = String(row?.criterion || "").trim();
@@ -202,11 +206,11 @@ function buildCriterionLinkedEvidence(workOrder, commandResults, httpResults, br
     }
     return evidence;
 }
-function computeOperationalStatus(commandResults, devServerResults, httpResults, browserResults, issues, requiredCheckCoverage, adversarialEvidenceSummary) {
+function computeOperationalStatus(commandResults, devServerResults, httpResults, browserResults, issues, requiredCheckCoverage, adversarialEvidenceSummary, authoritativeBaselinePassed = false) {
     if (issues.some(issue => issue.severity === "error"))
         return "blocked";
     const executableCount = commandResults.length + httpResults.length + browserResults.length;
-    if (executableCount === 0)
+    if (executableCount === 0 && !authoritativeBaselinePassed)
         return "blocked";
     if (httpResults.some(item => item.status === "failed"))
         return "failed";
@@ -301,7 +305,7 @@ function buildTestAgentReport(input) {
         browserResults,
         browserToolCalls,
     });
-    const executionStatus = computeOperationalStatus(commandResults, devServerResults, httpResults, browserResults, issues, requiredCheckCoverage, adversarialEvidenceSummary);
+    const executionStatus = computeOperationalStatus(commandResults, devServerResults, httpResults, browserResults, issues, requiredCheckCoverage, adversarialEvidenceSummary, workOrder.metadata?.readOnlyBaseline === true && workOrder.metadata?.baselineEvidence?.noFileChanges === true);
     const lineageStatus = applyBrowserToolEvidenceLineageGate(executionStatus, browserToolEvidenceLineage);
     const temporalStatus = applyBrowserTemporalIntegrityGate(lineageStatus, browserEvidenceTemporalIntegrity);
     const operationalStatus = browserResourceLifecycleSummary.status === "complete" || temporalStatus === "blocked" || temporalStatus === "failed"

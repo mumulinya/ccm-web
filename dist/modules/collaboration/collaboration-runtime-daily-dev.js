@@ -1,5 +1,4 @@
 "use strict";
-// collaboration-runtime-daily-dev.ts — merged from 2 part files (behavior-freeze merge).
 var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
     if (k2 === undefined) k2 = k;
     var desc = Object.getOwnPropertyDescriptor(m, k);
@@ -66,6 +65,8 @@ exports.buildPostReviewSpotCheckFollowUps = buildPostReviewSpotCheckFollowUps;
 exports.buildCodedCoordinatorReview = buildCodedCoordinatorReview;
 exports.writeSse = writeSse;
 exports.emitAssignmentStatus = emitAssignmentStatus;
+// collaboration-runtime-daily-dev.ts — merged from 2 part files (behavior-freeze merge).
+const conversation_attempt_1 = require("../../agents/conversation-attempt");
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const crypto = __importStar(require("crypto"));
@@ -1395,6 +1396,9 @@ function buildCodedCoordinatorReview(group, outputs, options = {}) {
 }
 function writeSse(res, data) {
     if (!res || res.writableEnded || res.destroyed)
+        return;
+    data = (0, conversation_attempt_1.projectConversationAttemptEvent)(res, data);
+    if (!data)
         return;
     try {
         const sequence = Number(res.__ccmSseSequence || 0) + 1;

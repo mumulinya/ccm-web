@@ -46,7 +46,7 @@ exports.listRequirementBacklogCollections = listRequirementBacklogCollections;
 exports.dispatchDailyDevBacklog = dispatchDailyDevBacklog;
 exports.dispatchReadyDailyDevBacklogs = dispatchReadyDailyDevBacklogs;
 exports.runDailyDevAutopilotOnce = runDailyDevAutopilotOnce;
-exports.ensureDailyDevAutopilotCronJobs = ensureDailyDevAutopilotCronJobs;
+exports.ensureDailyDevAutopilotAutomationDefinitions = ensureDailyDevAutopilotAutomationDefinitions;
 exports.buildDailyDevTaskDescription = buildDailyDevTaskDescription;
 exports.evaluateDailyDevIntakeQuality = evaluateDailyDevIntakeQuality;
 exports.normalizeDailyDevQualityDecision = normalizeDailyDevQualityDecision;
@@ -58,6 +58,7 @@ const semantic_decision_runtime_1 = require("../../system/semantic-decision-runt
 const atomic_json_file_1 = require("../../core/atomic-json-file");
 const utils_1 = require("../../core/utils");
 const automation_session_bindings_1 = require("../../system/automation-session-bindings");
+const automation_definition_service_1 = require("../scheduling/automation-definition-service");
 let runtimeDeps = {};
 function configureDailyDevBacklogRuntime(deps) {
     runtimeDeps = deps;
@@ -545,7 +546,7 @@ function claimReadyDailyDevBacklogUnlocked(groupId, claim = {}) {
             scopeId: groupId,
             source: "requirement_pool",
             title: compactFormText(file.name || "需求池任务", "需求池任务").slice(0, 80),
-            actor: String(claim.source || "daily_dev_cron"),
+            actor: String(claim.source || "daily_dev_automation"),
         });
         targetSession = (0, storage_1.listGroupChatSessions)(groupId).sessions.find((session) => String(session?.id || "") === resolution.snapshot.exactSessionId);
         if (!targetSession)
@@ -559,7 +560,7 @@ function claimReadyDailyDevBacklogUnlocked(groupId, claim = {}) {
         file.updated_at = now;
         file.revision = Math.max(0, Number(file.revision || 0)) + 1;
         file.last_result = `需求池自动化会话不可用：${error?.message || error}。请检查群聊自动化会话的来源绑定。`;
-        appendDailyDevBacklogHistory(file, "blocked", file.last_result, claim.source || "daily_dev_cron");
+        appendDailyDevBacklogHistory(file, "blocked", file.last_result, claim.source || "daily_dev_automation");
         file.content = replaceBacklogStatusLine(String(file.content || ""), "blocked");
         (0, storage_1.saveGroups)(groups);
         return null;
@@ -573,23 +574,23 @@ function claimReadyDailyDevBacklogUnlocked(groupId, claim = {}) {
         file.target_session_bound_at = now;
         file.target_session_binding_source = "automation_source_binding";
         file.automation_session_binding_snapshot = automationBindingSnapshot;
-        appendDailyDevBacklogHistory(file, "ready", `已按需求池来源绑定到“${file.target_session_title}”`, claim.source || "daily_dev_cron");
+        appendDailyDevBacklogHistory(file, "ready", `已按需求池来源绑定到“${file.target_session_title}”`, claim.source || "daily_dev_automation");
     }
     file.status = "planned";
     file.claimed_at = now;
-    file.claimed_by = claim.source || "daily_dev_cron";
-    file.claimed_by_cron_job_id = claim.cron_job_id || null;
+    file.claimed_by = claim.source || "daily_dev_automation";
+    file.claimed_by_automation_definition_id = claim.automation_definition_id || null;
     file.entry_id = file.entry_id || `backlog_${crypto.randomUUID()}`;
     file.revision = Math.max(0, Number(file.revision || 0)) + 1;
     file.claim_lease = {
         id: `claim_${crypto.randomUUID()}`,
-        owner: claim.source || "daily_dev_cron",
+        owner: claim.source || "daily_dev_automation",
         acquired_at: now,
         expires_at: new Date(Date.now() + Math.max(60_000, Number(claim.lease_ms || 10 * 60_000))).toISOString(),
         fencing_token: file.revision,
     };
     file.updated_at = now;
-    appendDailyDevBacklogHistory(file, "planned", `定时任务已认领，将派发到“${file.target_session_title || targetSession.title || targetSession.id}”`, claim.source || "daily_dev_cron");
+    appendDailyDevBacklogHistory(file, "planned", `自动化定义已认领，将派发到“${file.target_session_title || targetSession.title || targetSession.id}”`, claim.source || "daily_dev_automation");
     file.content = replaceBacklogStatusLine(String(file.content || ""), "planned");
     (0, storage_1.saveGroups)(groups);
     return extractDailyDevBacklogPayload(file);
@@ -672,7 +673,7 @@ function listDailyDevBacklogs(groupId = "") {
                 state_history: stateCard.history,
                 priority: readDailyDevBacklogPriority(file),
                 task_id: file.task_id || null,
-                claimed_by_cron_job_id: file.claimed_by_cron_job_id || null,
+                claimed_by_automation_definition_id: file.claimed_by_automation_definition_id || null,
                 created_at: file.created_at || "",
                 updated_at: file.updated_at || "",
                 claimed_at: file.claimed_at || "",
@@ -1107,16 +1108,9 @@ const DEFAULT_DAILY_DEV_CRON_PROMPT = [
     "4. 主 Agent 必须等待回执并复盘；发现缺口时继续返工或说明需要用户补充的信息。",
     "5. 最终报告要包含完成内容、涉及项目/文件、验证结果、风险和下一步。"
 ].join("\n");
-function isDailyDevCronJobForGroup(job, groupId) {
-    return (job?.target_type === "group" || job?.group_id)
-        && job?.group_id === groupId
-        && (job?.workflow_type === "daily_dev" || job?.workflowType === "daily_dev" || job?.daily_dev || job?.dailyDev);
-}
-function ensureDailyDevAutopilotCronJobs(options = {}) {
+function ensureDailyDevAutopilotAutomationDefinitions(options = {}) {
     const groups = (0, storage_1.loadGroups)();
     const configs = (0, db_1.getConfigs)();
-    const jobs = (0, db_1.loadCronJobs)();
-    const now = new Date().toISOString();
     const schedule = String(options.schedule || "*/30 * * * *").trim();
     const limit = Math.max(1, Math.min(100, Number(options.limit || groups.length || 1)));
     const backlogBatchLimit = Math.max(1, Math.min(20, Number(options.backlog_batch_limit || options.backlogBatchLimit || 3)));
@@ -1139,58 +1133,42 @@ function ensureDailyDevAutopilotCronJobs(options = {}) {
             });
             continue;
         }
-        const found = jobs.find((job) => isDailyDevCronJobForGroup(job, readiness.normalizedGroup.id));
+        const definitionId = `daily-dev-${readiness.normalizedGroup.id}`;
+        const found = (0, automation_definition_service_1.getAutomationDefinition)(definitionId);
         if (found) {
             if (found.enabled === false && enableExisting) {
-                found.enabled = true;
-                found.updated_at = now;
-                found.next_run = found.next_run || null;
-                enabled.push({ id: found.id, group_id: readiness.normalizedGroup.id, name: found.name });
+                const updated = (0, automation_definition_service_1.updateAutomationDefinition)(definitionId, { revision: found.revision, enabled: true });
+                enabled.push({ id: updated?.definition_id || definitionId, group_id: readiness.normalizedGroup.id, name: updated?.name || found.name });
             }
             else {
-                existing.push({ id: found.id, group_id: readiness.normalizedGroup.id, name: found.name, enabled: found.enabled !== false });
+                existing.push({ id: found.definition_id, group_id: readiness.normalizedGroup.id, name: found.name, enabled: found.enabled !== false });
             }
             continue;
         }
-        const job = {
-            id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+        const definition = (0, automation_definition_service_1.createAutomationDefinition)({
+            definition_id: definitionId,
             name: `日常业务开发 - ${groupName}`,
-            target_type: "group",
-            workflow_type: "daily_dev",
-            requires_code_changes: options.requires_code_changes !== false && options.requiresCodeChanges !== false,
-            project: "",
-            group_id: readiness.normalizedGroup.id,
+            target: { type: "group", id: readiness.normalizedGroup.id, exact_session_id: "" },
             schedule,
             prompt: String(options.prompt || DEFAULT_DAILY_DEV_CRON_PROMPT).trim(),
-            priority: options.priority || "normal",
-            backlog_batch_limit: backlogBatchLimit,
-            import_shared_docs: options.import_shared_docs !== false && options.importSharedDocs !== false,
-            continue_gaps: options.continue_gaps !== false && options.continueGaps !== false,
-            gap_continue_limit: gapContinueLimit,
+            goal: String(options.prompt || DEFAULT_DAILY_DEV_CRON_PROMPT).trim(),
+            dispatch_policy: options.dispatch_policy || "orchestrated",
+            verification_policy: options.verification_policy || "test_agent",
+            workspace_policy: options.workspace_policy || "isolated_worktree",
+            approval_policy: options.approval_policy || "preapproved",
             enabled: true,
-            created_at: now,
-            updated_at: now,
-            created_by: "daily_dev_autopilot_ensure",
-            last_run: null,
-            last_run_key: null,
-            last_status: "never",
-            last_result: "",
-            last_task_id: null,
-            run_count: 0,
-            next_run: null,
-        };
-        jobs.push(job);
+            owner_id: "daily_dev_autopilot_ensure",
+            metadata: { workflow_type: "daily_dev", requires_code_changes: options.requires_code_changes !== false && options.requiresCodeChanges !== false, priority: options.priority || "normal", backlog_batch_limit: backlogBatchLimit, import_shared_docs: options.import_shared_docs !== false && options.importSharedDocs !== false, continue_gaps: options.continue_gaps !== false && options.continueGaps !== false, gap_continue_limit: gapContinueLimit },
+        });
         created.push({
-            id: job.id,
-            name: job.name,
-            group_id: job.group_id,
+            id: definition.definition_id,
+            name: definition.name,
+            group_id: readiness.normalizedGroup.id,
             group_name: groupName,
-            schedule: job.schedule,
+            schedule: definition.schedule,
             ready_members: readiness.readyMembers.map((member) => member.project),
         });
     }
-    if (created.length > 0 || enabled.length > 0)
-        (0, db_1.saveCronJobs)(jobs);
     return {
         success: true,
         created: created.length,
@@ -1202,7 +1180,7 @@ function ensureDailyDevAutopilotCronJobs(options = {}) {
         enabled_jobs: enabled,
         existing_jobs: existing,
         skipped_groups: skipped,
-        jobs: (0, db_1.loadCronJobs)(),
+        jobs: (0, automation_definition_service_1.listAutomationDefinitions)().filter((definition) => String(definition.definition_id || "").startsWith("daily-dev-")),
     };
 }
 function buildDailyDevTaskDescription(payload) {

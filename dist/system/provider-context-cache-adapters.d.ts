@@ -1,0 +1,187 @@
+export type ProviderCacheFamily = "anthropic" | "openai" | "gemini" | "compatible";
+export type ProviderCacheAdapterKind = "anthropic_context_management" | "openai_prompt_cache" | "gemini_implicit_cache" | "stable_prefix" | "disabled";
+export type CcmCacheBreakpointDiagnosticV2 = {
+    schema: "ccm-cache-breakpoint-diagnostic-v2";
+    mode: "implicit" | "explicit" | "implicit_with_explicit_breakpoints";
+    selectedIndexes: number[];
+    selectedRoles: string[];
+    encodedBreakpoints: number;
+    omittedCandidates: Array<{
+        index: number;
+        reason: "tool_message_unencodable" | "current_boundary" | "provider_limit";
+    }>;
+    payloadChecksum: string;
+    contentStored: false;
+};
+export type ProviderRollingBreakpoint = {
+    index: number;
+    reason: string;
+};
+/** One CCM cache contract; provider adapters only translate its wire fields. */
+export type UnifiedCcmCacheRequest = {
+    provider: string;
+    protocol: ProviderCacheFamily | string;
+    cacheIdentity: string;
+    stablePrefixChecksum: string;
+    cacheEpoch: number;
+    messages: any[];
+    plan: any;
+};
+export declare function buildUnifiedCcmCacheRequest(config: any, input: Omit<UnifiedCcmCacheRequest, "provider" | "protocol"> & {
+    provider?: string;
+    protocol?: string;
+}): {
+    schema: string;
+    provider: string;
+    protocol: import("./provider-cache-protocol").CcmProviderCacheProtocol;
+    adapter: ProviderCacheAdapterKind;
+    cacheIdentity: string;
+    stablePrefixChecksum: string;
+    cacheEpoch: number;
+    wirePatch: any;
+    headers: {} | {};
+    breakpointDiagnostic: any;
+    contentStored: boolean;
+};
+export declare function isProviderContextCacheFieldRejection(error: any): boolean;
+export type ProviderCacheRejectedField = "prompt_cache_key" | "prompt_cache_options" | "prompt_cache_breakpoint" | "cache_control" | "unknown";
+export declare function classifyProviderCacheFieldRejection(error: any, protocol?: string): ProviderCacheRejectedField;
+/** @deprecated Compatibility only. Healthy cache routing uses protocol + evidence. */
+export declare function detectProviderCacheFamily(config?: any, _hint?: string): ProviderCacheFamily;
+export declare function resolveProviderContextCacheAdapter(config?: any, _hint?: string, evidenceInput?: any): {
+    schema: string;
+    version: number;
+    family: ProviderCacheFamily;
+    protocol: import("./provider-cache-protocol").CcmProviderCacheProtocol;
+    protocolResolution: import("./provider-cache-protocol").CcmProviderTransportResolutionV2;
+    adapter: ProviderCacheAdapterKind;
+    providerNative: boolean;
+    providerManagedKvCache: boolean;
+    requestLayerOwned: boolean;
+    capabilitySource: string;
+    capabilityStatus: any;
+    capabilityEvidenceId: any;
+    capabilityEvidenceExpiresAt: any;
+    capabilityReason: any;
+    requestedMode: string;
+    supportsPromptCacheKey: boolean;
+    supportsPromptCacheRetention: boolean;
+    supportsImplicitCache: boolean;
+    supportsContextManagement: boolean;
+    supportsCacheReferenceEdits: boolean;
+    customCompatibleEndpoint: boolean;
+    safeToSendProviderFields: boolean;
+    forcedWithoutEvidence: boolean;
+    unsupportedEvidenceBlocksForce: boolean;
+    capabilityEvidence: any;
+    capabilityState: any;
+    capabilityMatrix: import("./provider-cache-capability-matrix").CcmProviderCacheCapabilityMatrixV1;
+    resolvedExecution: import("./provider-cache-strategy").CcmResolvedCacheExecutionV1;
+    explicitBreakpointsVerified: boolean;
+};
+export declare function resolveProviderCacheBreakpointMessageIndexes(messagesInput: any[], staticIndexes?: number[], maxBreakpoints?: number, options?: {
+    allowToolResultBreakpoints?: boolean;
+    allowCurrentUserBoundary?: boolean;
+}): number[];
+export declare function buildProviderContextCacheAdapterRequestPatch(config: any, plan: any, capabilityInput?: any, messagesInput?: any[]): {
+    capability: any;
+    strategy: import("./provider-cache-strategy").CcmProviderCacheStrategyV3;
+    body: {};
+    headers: {};
+    patchChecksum: string;
+    promptCacheKeyChecksum: string;
+    promptCacheKeyPresent: boolean;
+    cacheKeyOmissionReason: string;
+    breakpointMessageIndexes: any[];
+    breakpointChecksums: any[];
+    breakpointDiagnostic: any;
+    breakpointOmissionReason: string;
+    cacheRouteVersion: number;
+    routeKeyRotated: boolean;
+} | {
+    breakpointDiagnostic: CcmCacheBreakpointDiagnosticV2;
+    patchChecksum: string;
+    promptCacheKeyChecksum: string;
+    promptCacheKeyPresent: boolean;
+    cacheKeyOmissionReason: string;
+    breakpointOmissionReason: string;
+    cacheRouteVersion: number;
+    cacheKeyScope: string;
+    routeKeyRotated: boolean;
+    capability: any;
+    strategy: import("./provider-cache-strategy").CcmProviderCacheStrategyV3;
+    body: any;
+    headers: {};
+    breakpointMessageIndexes: number[];
+    breakpointChecksums: string[];
+    rollingBreakpointIndex: number;
+    rollingBreakpointReason: string;
+};
+export declare function providerCacheAdapterPublicSummary(config?: any): {
+    schema: string;
+    version: number;
+    active: {
+        schema: string;
+        version: number;
+        family: ProviderCacheFamily;
+        protocol: import("./provider-cache-protocol").CcmProviderCacheProtocol;
+        protocolResolution: import("./provider-cache-protocol").CcmProviderTransportResolutionV2;
+        adapter: ProviderCacheAdapterKind;
+        providerNative: boolean;
+        providerManagedKvCache: boolean;
+        requestLayerOwned: boolean;
+        capabilitySource: string;
+        capabilityStatus: any;
+        capabilityEvidenceId: any;
+        capabilityEvidenceExpiresAt: any;
+        capabilityReason: any;
+        requestedMode: string;
+        supportsPromptCacheKey: boolean;
+        supportsPromptCacheRetention: boolean;
+        supportsImplicitCache: boolean;
+        supportsContextManagement: boolean;
+        supportsCacheReferenceEdits: boolean;
+        customCompatibleEndpoint: boolean;
+        safeToSendProviderFields: boolean;
+        forcedWithoutEvidence: boolean;
+        unsupportedEvidenceBlocksForce: boolean;
+        capabilityEvidence: any;
+        capabilityState: any;
+        capabilityMatrix: import("./provider-cache-capability-matrix").CcmProviderCacheCapabilityMatrixV1;
+        resolvedExecution: import("./provider-cache-strategy").CcmResolvedCacheExecutionV1;
+        explicitBreakpointsVerified: boolean;
+    };
+    protocol: import("./provider-cache-protocol").CcmProviderCacheProtocol;
+    capabilityMatrix: import("./provider-cache-capability-matrix").CcmProviderCacheCapabilityMatrixV1;
+    resolvedExecution: import("./provider-cache-strategy").CcmResolvedCacheExecutionV1;
+    automaticOptimization: import("./automatic-provider-cache-optimization").CcmAutomaticCacheOptimizationV1;
+    adapters: {
+        protocol: string;
+        capabilities: string[];
+        guarded: boolean;
+    }[];
+    falseNativeClaimsForbidden: boolean;
+};
+export declare function runProviderContextCacheAdapterSelfTest(): {
+    pass: boolean;
+    checks: {
+        officialChatUsesProtocolCapability: boolean;
+        arbitraryModelNamesDoNotChangeProtocol: boolean;
+        responsesUsesImplicitPrefixByDefault: boolean;
+        explicitBreakpointOptInKeepsPublicBoundary: boolean;
+        sameScopeUsesImplicitPrefixByDefault: boolean;
+        responsesUsesStableKeyWithConfirmedBreakpoints: boolean;
+        responsesUsesConfirmedCacheOptionsOnlyWhenOptedIn: boolean;
+        relayCacheKeyWithoutVerifiedBreakpointsUsesImplicitMode: boolean;
+        emptyEncodedBreakpointSetOmitsOptions: boolean;
+        unfinishedToolBatchIsNotBreakpoint: boolean;
+        verifiedResponsesCanBoundaryCompletedToolOutput: boolean;
+        toolLoopDefersNewestCompletedOutput: boolean;
+        newestToolBoundaryIsDeferred: boolean;
+        completedToolBatchUsesPriorCacheableBoundary: boolean;
+        cacheKeyIsolatedAcrossSessions: boolean;
+        cacheKeyIsolatedAcrossScopes: boolean;
+        cacheKeyFitsProviderLimit: boolean;
+        automaticLegacyFamilyIsIgnored: boolean;
+    };
+};

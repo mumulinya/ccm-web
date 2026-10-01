@@ -48,7 +48,8 @@ const runtime_1 = require("../../agents/runtime");
 const agent_sessions_1 = require("../../tasks/agent-sessions");
 const project_validation_1 = require("./project-validation");
 exports.PROJECT_WEB_SESSION_AGENT_GROUP = "project-chat";
-const activeProjectSessionDispatches = new Set();
+const activeProjectSessionDispatches = new Map();
+const PROJECT_DISPATCH_STALE_MS = 10 * 60_000;
 function buildProjectSessionAgentScopeId(project, projectSessionId) {
     const safeProject = (0, project_validation_1.validateProjectName)(project);
     const safeSessionId = (0, project_validation_1.validateSessionId)(projectSessionId);
@@ -57,16 +58,41 @@ function buildProjectSessionAgentScopeId(project, projectSessionId) {
 }
 function acquireProjectSessionAgentDispatch(project, projectSessionId) {
     const scopeId = buildProjectSessionAgentScopeId(project, projectSessionId);
-    if (activeProjectSessionDispatches.has(scopeId))
-        return { acquired: false, scopeId };
-    activeProjectSessionDispatches.add(scopeId);
-    return { acquired: true, scopeId };
+    const now = Date.now();
+    const current = activeProjectSessionDispatches.get(scopeId);
+    if (current && now - current.startedAt < PROJECT_DISPATCH_STALE_MS)
+        return { acquired: false, scopeId, leaseId: "" };
+    if (current)
+        activeProjectSessionDispatches.delete(scopeId);
+    const leaseId = `dispatch_${crypto.randomUUID()}`;
+    activeProjectSessionDispatches.set(scopeId, { startedAt: now, leaseId });
+    return { acquired: true, scopeId, leaseId };
 }
-function releaseProjectSessionAgentDispatch(scopeId) {
-    return activeProjectSessionDispatches.delete(String(scopeId || ""));
+/**
+ * Release only the lease that was acquired by this request.  The optional
+ * lease id keeps the old scope-only API compatible for maintenance callers,
+ * while preventing a timed-out request from releasing a newer request's
+ * replacement lease.
+ */
+function releaseProjectSessionAgentDispatch(scopeId, leaseId = "") {
+    const key = String(scopeId || "");
+    const current = activeProjectSessionDispatches.get(key);
+    if (!current)
+        return false;
+    if (leaseId && current.leaseId !== String(leaseId))
+        return false;
+    return activeProjectSessionDispatches.delete(key);
 }
 function isProjectSessionAgentDispatchActive(project, projectSessionId) {
-    return activeProjectSessionDispatches.has(buildProjectSessionAgentScopeId(project, projectSessionId));
+    const scopeId = buildProjectSessionAgentScopeId(project, projectSessionId);
+    const current = activeProjectSessionDispatches.get(scopeId);
+    if (!current)
+        return false;
+    if (Date.now() - current.startedAt >= PROJECT_DISPATCH_STALE_MS) {
+        activeProjectSessionDispatches.delete(scopeId);
+        return false;
+    }
+    return true;
 }
 function getProjectSessionAgentBinding(project, projectSessionId) {
     const scopeId = buildProjectSessionAgentScopeId(project, projectSessionId);

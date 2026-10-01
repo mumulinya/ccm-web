@@ -43,6 +43,7 @@ exports.eventsAnchoredToMessages = eventsAnchoredToMessages;
 exports.mergeConversationWithExecution = mergeConversationWithExecution;
 exports.runSessionExecutionLedgerSelfTest = runSessionExecutionLedgerSelfTest;
 const crypto = __importStar(require("crypto"));
+const conversation_attempt_1 = require("../agents/conversation-attempt");
 const context_source_tool_result_projection_1 = require("./context-source-tool-result-projection");
 const tool_result_storage_1 = require("../tools/tool-result-storage");
 const SECRET_KEY = /(?:^|_)(?:api[_-]?key|access[_-]?token|refresh[_-]?token|authorization|cookie|password|passwd|secret|credential)(?:$|_)/i;
@@ -78,6 +79,10 @@ function sanitizeSessionExecutionValue(value, depth = 0, seen = new WeakSet()) {
     return output;
 }
 function createSessionExecutionEvent(input) {
+    const context = input.persistContext;
+    const binding = context && (0, conversation_attempt_1.currentConversationAttemptBinding)(context.scope, context.scope === 'global' ? context.sessionId : `${context.scopeId}:${context.sessionId}`);
+    if (binding)
+        (0, conversation_attempt_1.requireConversationAttempt)(binding.current(), { attempt_id: binding.attempt_id }, true);
     const timestamp = String(input.timestamp || new Date().toISOString());
     const status = input.status === "error" ? "error" : input.type === "tool_use" ? "running" : "ok";
     const modelContent = input.type === "tool_result"
@@ -106,6 +111,9 @@ function createSessionExecutionEvent(input) {
         status,
         payload,
         ...(modelContent !== undefined ? { modelContent } : {}),
+        ...(input.auditReceipt ? { auditReceipt: sanitizeSessionExecutionValue(input.auditReceipt) } : {}),
+        ...(binding ? { attempt_id: binding.attempt_id, conversation_turn_id: binding.id }
+            : input.attempt_id ? { attempt_id: input.attempt_id, conversation_turn_id: input.conversation_turn_id } : {}),
         id: String(input.id || `exec_${hash([toolCallId, input.type, timestamp])}`),
         hidden: true,
     };

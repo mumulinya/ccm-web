@@ -104,17 +104,19 @@ function createGlobalAgentFeishuActions(deps) {
             return formatSystemStatus();
         if (action.type === "manage_cron") {
             if (operation === "list")
-                result = await callLocalApi(baseUrl, "/api/cron");
-            else if (operation === "create")
-                result = await postLocalApi(baseUrl, "/api/cron/create", fillCronParams(params, originalText, groups, projects));
+                result = await callLocalApi(baseUrl, "/api/automations");
+            else if (operation === "create") {
+                const p = fillCronParams(params, originalText, groups, projects);
+                result = await postLocalApi(baseUrl, "/api/automations", { ...p, target: { type: p.target_type, id: p.target_type === "group" ? p.group_id : p.project } });
+            }
             else if (operation === "update")
-                result = await postLocalApi(baseUrl, "/api/cron/update", params);
+                result = await postLocalApi(baseUrl, `/api/automations/${encodeURIComponent(String(params.id || params.definition_id))}`, params);
             else if (operation === "enable" || operation === "disable")
-                result = await postLocalApi(baseUrl, "/api/cron/update", { id: params.id, enabled: operation === "enable" });
+                result = await postLocalApi(baseUrl, `/api/automations/${encodeURIComponent(String(params.id || params.definition_id))}`, { enabled: operation === "enable" });
             else if (operation === "run")
-                result = await postLocalApi(baseUrl, "/api/cron/run", { id: params.id });
+                result = await postLocalApi(baseUrl, `/api/automations/${encodeURIComponent(String(params.id || params.definition_id))}/run`, {});
             else if (operation === "delete")
-                result = await postLocalApi(baseUrl, "/api/cron/delete", { id: params.id });
+                result = await fetch(`${baseUrl}/api/automations/${encodeURIComponent(String(params.id || params.definition_id))}`, { method: "DELETE" }).then(r => r.json());
         }
         else if (action.type === "manage_task") {
             const id = params.id || params.task_id;
@@ -127,9 +129,9 @@ function createGlobalAgentFeishuActions(deps) {
             else if (operation === "continue")
                 result = await postLocalApi(baseUrl, "/api/tasks/continue", { id, message: params.message || "由飞书全局 Agent 继续推进", auto_execute: true, idempotency_key: params.idempotency_key });
             else if (operation === "retry")
-                result = await postLocalApi(baseUrl, "/api/tasks/retry", { id, reason: params.message || "由飞书全局 Agent 发起重试", auto_execute: true, idempotency_key: params.idempotency_key });
+                result = await postLocalApi(baseUrl, "/api/tasks/retry", { id, run_id: params.run_id || params.runId || params.active_run_id || "", reason: params.message || "由飞书全局 Agent 发起重试", auto_execute: true, idempotency_key: params.idempotency_key });
             else if (operation === "queue")
-                result = await postLocalApi(baseUrl, "/api/tasks/queue", { task_id: id });
+                result = await postLocalApi(baseUrl, "/api/tasks/queue", { task_id: id, run_id: params.run_id || params.runId || params.active_run_id || "" });
             else if (operation === "delete")
                 result = await postLocalApi(baseUrl, "/api/tasks/delete", { id });
         }
@@ -185,7 +187,7 @@ function createGlobalAgentFeishuActions(deps) {
             throw new Error(`暂不支持从飞书执行 ${action.type}/${operation}`);
         if (action.type === "manage_cron" && operation === "create") {
             const cronParams = fillCronParams(params, originalText, loadGroups(), getConfigs().map(c => c.name));
-            return `定时任务已创建：${result.job?.name || cronParams.name || "未命名任务"}\n- Cron：${result.job?.schedule || cronParams.schedule}\n- 提示词：${result.job?.prompt || cronParams.prompt}`;
+            return `自动化已创建：${result.definition?.name || cronParams.name || "未命名任务"}\n- Cron：${result.definition?.schedule || cronParams.schedule}\n- 提示词：${result.definition?.prompt || cronParams.prompt}`;
         }
         if (action.type === "manage_project" && operation === "delete") {
             return `${result.message || "项目已归档，可随时恢复"}${result.audit_id ? `\n- 审计编号：${result.audit_id}` : ""}`;
@@ -227,8 +229,8 @@ function createGlobalAgentFeishuActions(deps) {
             const groups = loadGroups();
             const projects = getConfigs().map(c => c.name);
             const cronParams = fillCronParams(params, originalText, groups, projects);
-            const result = await postLocalApi(baseUrl, "/api/cron/create", cronParams);
-            return `定时任务已创建：${result.job?.name || cronParams.name || "未命名任务"}\n- Cron：${cronParams.schedule}\n- 提示词：${cronParams.prompt}`;
+            const result = await postLocalApi(baseUrl, "/api/automations", { ...cronParams, target: { type: cronParams.target_type, id: cronParams.target_type === "group" ? cronParams.group_id : cronParams.project } });
+            return `自动化已创建：${result.definition?.name || cronParams.name || "未命名任务"}\n- Cron：${cronParams.schedule}\n- 提示词：${cronParams.prompt}`;
         }
         if (action.type === "orchestrate_development") {
             const result = await postLocalApi(baseUrl, "/api/global-agent/orchestrate", {
@@ -352,8 +354,8 @@ function createGlobalAgentFeishuActions(deps) {
             });
         }
         if (action.type === "create_cron_task") {
-            const result = await postLocalApi(baseUrl, "/api/cron/create", params);
-            return `定时任务已创建：${result.job?.name || params.name || "未命名任务"}（${params.schedule}）`;
+            const result = await postLocalApi(baseUrl, "/api/automations", { ...params, target: { type: params.target_type, id: params.target_type === "group" ? params.group_id : params.project } });
+            return `自动化已创建：${result.definition?.name || params.name || "未命名任务"}（${params.schedule}）`;
         }
         return `已识别动作 ${action.type}，但它不适合从飞书远程执行。`;
     }

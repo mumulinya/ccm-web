@@ -84,6 +84,14 @@ function normalizeProject(raw, index, globalStartupTimeoutMs, issues) {
             .slice(0, 12),
         agentSummary: (0, work_order_aliases_1.text)(raw?.agentSummary || raw?.agent_summary),
         risks: (0, utils_1.asArray)(raw?.risks).map(String).filter(Boolean),
+        editablePaths: (0, utils_1.asArray)(raw?.editablePaths).map(String).filter(Boolean),
+        readOnlyPaths: (0, utils_1.asArray)(raw?.readOnlyPaths).map(String).filter(Boolean),
+        cleanupPaths: (0, utils_1.asArray)(raw?.cleanupPaths).map(String).filter(Boolean),
+        synchronizedFixturePaths: (0, utils_1.asArray)(raw?.synchronizedFixturePaths).map((item) => ({
+            path: (0, work_order_aliases_1.text)(item?.path),
+            allowedChanges: (0, utils_1.asArray)(item?.allowedChanges || item?.allowed_changes).map(String).filter(Boolean),
+        })).filter((item) => item.path),
+        verificationRoot: (0, work_order_aliases_1.text)(raw?.verificationRoot || workDir),
     };
 }
 function normalizeTestAgentWorkOrder(input, overrides = {}) {

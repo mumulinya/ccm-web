@@ -5,18 +5,22 @@ exports.nativeTurnToGlobalDecision = nativeTurnToGlobalDecision;
 exports.runGlobalNativeQueryCall = runGlobalNativeQueryCall;
 exports.runGlobalNativeQuerySelfTest = runGlobalNativeQuerySelfTest;
 const native_query_loop_1 = require("../../agents/native-query-loop");
+const global_agent_tool_authorization_1 = require("./global-agent-tool-authorization");
 const main_agent_harness_1 = require("../../agents/main-agent-harness");
+const session_model_checkpoint_1 = require("../../agents/session-model-checkpoint");
+const model_tool_result_1 = require("../../agents/model-tool-result");
 const group_orchestrator_llm_client_1 = require("../collaboration/group-orchestrator-llm-client");
 const runtime_1 = require("../../agents/global/runtime");
 const global_agent_run_store_1 = require("../../agents/global/global-agent-run-store");
+const global_tool_load_policy_1 = require("../../agents/global/global-tool-load-policy");
 const provider_native_tools_1 = require("../../system/provider-native-tools");
 const agent_key_progress_1 = require("../../system/agent-key-progress");
 const readonly_tool_concurrency_1 = require("../../system/readonly-tool-concurrency");
 const model_activity_1 = require("../../system/model-activity");
 const provider_stream_visible_projection_1 = require("../../system/provider-stream-visible-projection");
 function globalNativeTools(run) {
-    void run;
-    const specs = (0, runtime_1.buildGlobalAgentToolDefinitions)(global_agent_run_store_1.GLOBAL_AGENT_TOOL_SPECS);
+    const loaded = run?.loaded_tool_names || run?.loadedToolNames || [];
+    const specs = (0, runtime_1.buildGlobalAgentToolDefinitions)(global_agent_run_store_1.GLOBAL_AGENT_TOOL_SPECS.filter(spec => !(0, global_tool_load_policy_1.isGlobalDeferredTool)(spec.name, loaded)));
     const fromSpecs = specs.map(spec => ({
         name: spec.name,
         description: spec.description,
@@ -181,18 +185,27 @@ async function runGlobalNativeQueryCall(input) {
             attempt,
         }),
         config,
-        messages: [
+        messages: (0, session_model_checkpoint_1.transferModelReplaySource)([
             ...input.messages,
             ...(confirmedPlan ? [{ role: "system", content: "The current structured plan is already confirmed and server-bound. Do not present, rewrite, or review another plan. Continue from the confirmed requirement/plan checksums and invoke the authorized global development-dispatch tool for the target automation conversation. Use read-only tools only when current facts must be refreshed." }] : []),
-        ],
+        ], input.messages),
         tools: globalNativeTools(run),
+        checkpointIdentity: { trace_id: run.trace_id, attempt_id: run.attempt_id, finalMessageId: `gam_${run.id}_assistant` },
         scope: "global",
         scopeId: "global",
         exactSessionId: String(run.session_id || ""),
+        providerContextCache: {
+            scope: "global",
+            scopeId: "global",
+            sessionId: String(run.session_id || ""),
+            auditTurnKey: String(run.turn_id || run.id || "global"),
+            source: "global_main_native_query",
+        },
         signal: input.signal,
         nativeToolReference: true,
         persistContext: { scope: "global", scopeId: "global", sessionId: String(run.session_id || "") },
         getTools: () => globalNativeTools(run),
+        getToolPromptLayout: () => (0, global_agent_tool_authorization_1.buildGlobalAgentToolRuntimeContext)({ taskId: run.id, sessionId: run.session_id }, run.loaded_tool_names || run.loadedToolNames || []).toolPromptLayout,
         isReadOnly: isReadOnlyCall,
         shouldStopAfterTools: (calls) => calls.some(call => !isReadOnlyCall(call)),
         onDelta: (delta, context) => {
@@ -256,7 +269,7 @@ async function runGlobalNativeQueryCall(input) {
             const rows = [];
             const reads = calls.filter(isReadOnlyCall);
             const writes = calls.filter(call => !isReadOnlyCall(call) && call.name !== "ccm_ask_user" && call.name !== "ccm_present_plan");
-            const readRows = await (0, readonly_tool_concurrency_1.runReadonlyToolsAdaptive)({
+            const readRows = await (ctx.runReadonlyTools || readonly_tool_concurrency_1.runReadonlyToolsAdaptive)({
                 items: reads,
                 configuredLimit: readonly_tool_concurrency_1.CCM_READONLY_TOOL_CONCURRENCY_DEFAULT,
                 worker: async (call) => {
@@ -284,8 +297,16 @@ async function runGlobalNativeQueryCall(input) {
                             tool: call.name,
                             toolCallId: call.id,
                             observation,
+                            // Keep the same sanitized model-facing body that is returned to
+                            // the native loop. The runtime event is persisted as an audit
+                            // record, so the explicit projection is needed for exact replay.
+                            modelOutput: (0, model_tool_result_1.globalModelToolObservation)(observation),
                         });
-                        return { callId: call.id, name: call.name, ok: true, output: observation };
+                        const auditReceipt = observation?.auditReceipt || observation?.result?.auditReceipt;
+                        const row = (0, model_tool_result_1.toModelToolResult)({ name: call.name, ok: observation?.ok !== false,
+                            modelOutput: (0, model_tool_result_1.globalModelToolObservation)(observation), auditReceipt }, call.id);
+                        ctx.onToolResult?.(row);
+                        return row;
                     }
                     catch (error) {
                         (0, runtime_1.recordGlobalAgentRuntimeOutput)(run, {
@@ -293,8 +314,12 @@ async function runGlobalNativeQueryCall(input) {
                             tool: call.name,
                             toolCallId: call.id,
                             error: String(error?.message || error),
+                            ...(error?.code ? { modelOutput: { code: String(error.code), error: String(error?.message || error) } } : {}),
                         });
-                        return { callId: call.id, name: call.name, ok: false, error: String(error?.message || error) };
+                        const row = { callId: call.id, name: call.name, ok: false, error: String(error?.message || error),
+                            ...(error?.code ? { modelOutput: { code: String(error.code), error: String(error?.message || error) } } : {}) };
+                        ctx.onToolResult?.(row);
+                        return row;
                     }
                 }
             });
@@ -343,9 +368,10 @@ function runGlobalNativeQuerySelfTest() {
             && firstNames.includes("request_group_source_inquiry") === true
             && firstNames.includes("read_file") === false
             && firstNames.includes("grep_text") === false
-            && firstNames.includes("manage_project") === true
-            && firstNames.includes("orchestrate_development") === true,
-        searchDoesNotChangeProviderToolSurface: JSON.stringify(afterNames) === JSON.stringify(firstNames),
+            && firstNames.includes("manage_project") === false
+            && firstNames.includes("orchestrate_development") === false,
+        searchLoadsOnlySelectedTool: afterNames.includes("manage_project")
+            && JSON.stringify(afterNames.filter(name => name !== "manage_project")) === JSON.stringify(firstNames),
         confirmationDoesNotChangeProviderToolSurface: JSON.stringify(afterConfirmationNames) === JSON.stringify(firstNames),
     };
     return { pass: Object.values(checks).every(Boolean), checks };

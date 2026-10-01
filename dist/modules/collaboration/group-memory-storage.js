@@ -687,7 +687,7 @@ function deleteGroupSessionMemoryArtifacts(groupId, sessionId) {
     const conflictResolutionMaintenanceSchedulerArtifacts = cleanSessionId.startsWith("gcs_")
         ? (() => {
             try {
-                const { deleteConflictResolutionMemoryMaintenanceSchedulerSessionState } = require("../scheduling/cron");
+                const { deleteConflictResolutionMemoryMaintenanceSchedulerSessionState } = require("../scheduling/maintenance-scheduler");
                 return deleteConflictResolutionMemoryMaintenanceSchedulerSessionState(groupId, cleanSessionId);
             }
             catch (error) {

@@ -51,11 +51,11 @@ const db_1 = require("../../core/db");
 const utils_1 = require("../../core/utils");
 const collaboration_1 = require("../collaboration/collaboration");
 const feishu_channel_1 = require("../collaboration/feishu-channel");
-const cron_job_store_1 = require("./cron-job-store");
+const schedule_expression_1 = require("./schedule-expression");
 const work_journal_1 = require("./work-journal");
 const work_report_ai_1 = require("./work-report-ai");
-function localDateKey(date = new Date(), timezone = cron_job_store_1.DEFAULT_CRON_TIMEZONE) {
-    return (0, cron_job_store_1.dateKeyInTimezone)(date, (0, cron_job_store_1.normalizeCronTimezone)(timezone));
+function localDateKey(date = new Date(), timezone = schedule_expression_1.DEFAULT_CRON_TIMEZONE) {
+    return (0, schedule_expression_1.dateKeyInTimezone)(date, (0, schedule_expression_1.normalizeCronTimezone)(timezone));
 }
 function parseReportDay(dateKey = localDateKey()) {
     const safe = /^\d{4}-\d{2}-\d{2}$/.test(String(dateKey)) ? String(dateKey) : localDateKey();
@@ -283,12 +283,12 @@ function buildAutoDevReportMarkdown(report) {
     ];
     return lines.join("\n");
 }
-function generateAutoDevDailyReport(dateKey = localDateKey(), timezone = cron_job_store_1.DEFAULT_CRON_TIMEZONE, inputEvents) {
+function generateAutoDevDailyReport(dateKey = localDateKey(), timezone = schedule_expression_1.DEFAULT_CRON_TIMEZONE, inputEvents) {
     return (0, work_journal_1.generateEvidenceDailyReport)(dateKey, inputEvents, timezone);
 }
 function upsertAutoDevDailyReport(dateKey = localDateKey(), options = {}) {
     const existing = (0, db_1.loadDevReports)().find((item) => item.date === dateKey || item.id === dateKey);
-    const timezone = (0, cron_job_store_1.normalizeCronTimezone)(options.timezone || (0, db_1.loadAutoDevNotifyConfig)()?.timezone || cron_job_store_1.DEFAULT_CRON_TIMEZONE);
+    const timezone = (0, schedule_expression_1.normalizeCronTimezone)(options.timezone || (0, db_1.loadAutoDevNotifyConfig)()?.timezone || schedule_expression_1.DEFAULT_CRON_TIMEZONE);
     if (options.force !== true && dateKey < localDateKey(new Date(), timezone) && existing?.schema === "ccm-evidence-work-report-v2")
         return existing;
     const events = options.events || (0, work_journal_1.syncWorkJournal)().events;
@@ -312,14 +312,14 @@ function upsertAutoDevDailyReport(dateKey = localDateKey(), options = {}) {
     return report;
 }
 function dateKeyFromDate(date) {
-    return `${date.getFullYear()}-${(0, cron_job_store_1.pad2)(date.getMonth() + 1)}-${(0, cron_job_store_1.pad2)(date.getDate())}`;
+    return `${date.getFullYear()}-${(0, schedule_expression_1.pad2)(date.getMonth() + 1)}-${(0, schedule_expression_1.pad2)(date.getDate())}`;
 }
 function addLocalDays(date, days) {
     const next = new Date(date);
     next.setDate(next.getDate() + days);
     return next;
 }
-function reportWeekRange(dateKey = localDateKey(), timezone = cron_job_store_1.DEFAULT_CRON_TIMEZONE) {
+function reportWeekRange(dateKey = localDateKey(), timezone = schedule_expression_1.DEFAULT_CRON_TIMEZONE) {
     return (0, work_journal_1.workWeekRange)(dateKey, timezone);
 }
 function uniqueBy(items, keyOf) {
@@ -359,11 +359,11 @@ function buildWeeklyReportMarkdown(report) {
     ];
     return lines.join("\n");
 }
-function generateAutoDevWeeklyReport(dateKey = localDateKey(), timezone = cron_job_store_1.DEFAULT_CRON_TIMEZONE, inputEvents) {
+function generateAutoDevWeeklyReport(dateKey = localDateKey(), timezone = schedule_expression_1.DEFAULT_CRON_TIMEZONE, inputEvents) {
     return (0, work_journal_1.generateEvidenceWeeklyReport)(dateKey, inputEvents, timezone);
 }
 function upsertAutoDevWeeklyReport(dateKey = localDateKey(), options = {}) {
-    const timezone = (0, cron_job_store_1.normalizeCronTimezone)(options.timezone || (0, db_1.loadAutoDevNotifyConfig)()?.timezone || cron_job_store_1.DEFAULT_CRON_TIMEZONE);
+    const timezone = (0, schedule_expression_1.normalizeCronTimezone)(options.timezone || (0, db_1.loadAutoDevNotifyConfig)()?.timezone || schedule_expression_1.DEFAULT_CRON_TIMEZONE);
     const range = (0, work_journal_1.workWeekRange)(dateKey, timezone);
     const existing = (0, db_1.loadDevWeeklyReports)().find((item) => item.id === range.id);
     if (options.force !== true && range.end_key < localDateKey(new Date(), timezone) && existing?.schema === "ccm-evidence-work-report-v2")
@@ -401,8 +401,8 @@ function saveGeneratedReport(kind, report) {
     }
     return report;
 }
-function buildAutoDevReportPreview(kind, dateKey, timezone = cron_job_store_1.DEFAULT_CRON_TIMEZONE) {
-    const normalizedTimezone = (0, cron_job_store_1.normalizeCronTimezone)(timezone);
+function buildAutoDevReportPreview(kind, dateKey, timezone = schedule_expression_1.DEFAULT_CRON_TIMEZONE) {
+    const normalizedTimezone = (0, schedule_expression_1.normalizeCronTimezone)(timezone);
     const events = (0, work_journal_1.readWorkJournalEvents)();
     const report = kind === "weekly"
         ? generateAutoDevWeeklyReport(dateKey, normalizedTimezone, events)
@@ -422,7 +422,7 @@ function buildAutoDevReportPreview(kind, dateKey, timezone = cron_job_store_1.DE
 }
 async function generateAndUpsertAutoDevReport(kind, dateKey = localDateKey(), options = {}) {
     const config = normalizeAutoDevNotifyConfig((0, db_1.loadAutoDevNotifyConfig)());
-    const timezone = (0, cron_job_store_1.normalizeCronTimezone)(options.timezone || config.timezone);
+    const timezone = (0, schedule_expression_1.normalizeCronTimezone)(options.timezone || config.timezone);
     const events = (0, work_journal_1.syncWorkJournal)().events;
     const report = kind === "weekly"
         ? generateAutoDevWeeklyReport(dateKey, timezone, events)
@@ -476,7 +476,7 @@ function normalizeClock(value, fallback) {
     const match = String(value || "").match(/^(\d{1,2}):(\d{2})$/);
     if (!match)
         return fallback;
-    return `${(0, cron_job_store_1.pad2)(Math.max(0, Math.min(23, Number(match[1]))))}:${(0, cron_job_store_1.pad2)(Math.max(0, Math.min(59, Number(match[2]))))}`;
+    return `${(0, schedule_expression_1.pad2)(Math.max(0, Math.min(23, Number(match[1]))))}:${(0, schedule_expression_1.pad2)(Math.max(0, Math.min(59, Number(match[2]))))}`;
 }
 function normalizeAutoDevNotifyConfig(input = {}) {
     return {
@@ -485,7 +485,7 @@ function normalizeAutoDevNotifyConfig(input = {}) {
         weekly_enabled: input.weekly_enabled === true,
         weekly_day: Math.max(0, Math.min(6, Number(input.weekly_day ?? 5))),
         weekly_time: normalizeClock(input.weekly_time, "18:40"),
-        timezone: (0, cron_job_store_1.normalizeCronTimezone)(input.timezone || cron_job_store_1.DEFAULT_CRON_TIMEZONE),
+        timezone: (0, schedule_expression_1.normalizeCronTimezone)(input.timezone || schedule_expression_1.DEFAULT_CRON_TIMEZONE),
         target_type: "user",
         target_id: "",
         retry_limit: Math.max(1, Math.min(10, Number(input.retry_limit || 3))),
@@ -605,7 +605,7 @@ async function tickAutoDevReportNotifications(now = new Date()) {
     const config = normalizeAutoDevNotifyConfig((0, db_1.loadAutoDevNotifyConfig)());
     const today = localDateKey(now, config.timezone);
     const week = reportWeekRange(today, config.timezone);
-    const zonedNow = (0, cron_job_store_1.zonedDateParts)(now, config.timezone);
+    const zonedNow = (0, schedule_expression_1.zonedDateParts)(now, config.timezone);
     const jobs = [];
     const dailyRetries = config.daily_attempt_key === today ? config.daily_retry_count : 0;
     const weeklyRetries = config.weekly_attempt_key === week.id ? config.weekly_retry_count : 0;

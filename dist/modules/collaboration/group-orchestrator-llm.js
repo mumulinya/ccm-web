@@ -51,9 +51,11 @@ exports.sanitizeLlmTargets = sanitizeLlmTargets;
 exports.normalizeLlmAnalysis = normalizeLlmAnalysis;
 exports.buildCoordinatorResultFromAnalysis = buildCoordinatorResultFromAnalysis;
 exports.runLlmGroupOrchestrator = runLlmGroupOrchestrator;
+const native_session_transcript_1 = require("../../agents/native-session-transcript");
 const crypto = __importStar(require("crypto"));
 const db_1 = require("../../core/db");
 const group_orchestrator_llm_client_1 = require("./group-orchestrator-llm-client");
+const unified_model_call_config_1 = require("../../system/unified-model-call-config");
 const context_budget_1 = require("../../system/context-budget");
 const agent_loop_budget_1 = require("../../system/agent-loop-budget");
 const readonly_tool_concurrency_1 = require("../../system/readonly-tool-concurrency");
@@ -174,10 +176,11 @@ function buildGroupMainAgentToolContext(input) {
         "Built-in read-only tools for the group main Agent:",
         ...GROUP_MAIN_BUILTIN_TOOLS.map(tool => (0, main_agent_tool_runtime_1.renderMainAgentToolCatalogLine)(tool, schemaSurface)),
     ].join("\n");
-    return {
+    const context = {
         ...shared,
         catalog: { ...shared.catalog, mcp, loadedMcp },
         mcpPrompt: [builtinPrompt, shared.mcpPrompt].filter(Boolean).join("\n\n"),
+        toolPromptLayout: shared.toolPromptLayout ? { ...shared.toolPromptLayout, dynamicCatalog: [builtinPrompt, shared.toolPromptLayout.dynamicCatalog].join('\n\n') } : undefined,
         policyPrompt: [builtinPrompt, shared.policyPrompt].filter(Boolean).join("\n\n"),
         group,
         sourceAccess,
@@ -189,6 +192,8 @@ function buildGroupMainAgentToolContext(input) {
         contextBudget: shared.contextBudget,
         sharedFilesContext: String(input.sharedFilesContext || ""),
     };
+    (0, main_agent_tool_runtime_1.refreshMainAgentToolPromptState)(context);
+    return context;
 }
 function normalizeGroupMainToolRequests(value) {
     return (0, main_agent_tool_runtime_1.normalizeMainAgentToolRequests)(value);
@@ -201,6 +206,13 @@ async function executeGroupMainAgentToolRequests(input) {
     // group contained more projects than the default batch size.
     const requests = input.requests.slice(0, 32);
     const preparedIds = new Map(requests.map((request, index) => [request, String(input.toolCallIds?.[index] || "")]));
+    const normalizeResult = (row) => row.error === "MAIN_AGENT_TOOL_NOT_AUTHORIZED"
+        ? { ...row, error: "GROUP_MAIN_TOOL_NOT_AUTHORIZED" }
+        : row.error === "MAIN_AGENT_TOOL_SCHEMA_NOT_LOADED"
+            ? { ...row, error: "GROUP_MAIN_TOOL_SCHEMA_NOT_LOADED" }
+            : row.error === cc_tool_result_limits_1.MAIN_AGENT_TOOL_RESULT_LIMIT_ERROR || row.error === "MAIN_AGENT_TOOL_RESULT_EXCEEDS_8K_TOKEN_BUDGET"
+                ? { ...row, error: cc_tool_result_limits_1.GROUP_MAIN_TOOL_RESULT_LIMIT_ERROR }
+                : row;
     const executeOne = async (request, parallelGroupId = "") => {
         const groupId = String(input.toolContext?.group?.id || "");
         const exactSessionId = String(input.toolContext?.groupSessionId || input.toolContext?.group_session_id || "");
@@ -227,10 +239,12 @@ async function executeGroupMainAgentToolRequests(input) {
                 const rows = await (0, main_agent_tool_runtime_1.executeMainAgentToolRequests)({
                     ...input,
                     requests: [request],
+                    onUse: () => toolCallId,
                     resultTokenLimit: cc_tool_result_limits_1.CC_ALIGNED_TOOL_RESULT_MAX_TOKENS,
                     toolBatchSize: 1,
                     readOnlyParallelism,
                     abortSignal: input.signal,
+                    turnKey: `${String(input.toolContext?.turnId || input.toolContext?.turn_id || "group")}:${String(input.toolContext?.round || 0)}:${String(input.toolContext?.executionAttempt || input.toolContext?.execution_attempt || 1)}`,
                 });
                 row = rows[0];
             }
@@ -259,7 +273,7 @@ async function executeGroupMainAgentToolRequests(input) {
                     const outputTokens = (0, context_budget_1.estimateTextTokens)(output);
                     row = outputTokens > cc_tool_result_limits_1.CC_ALIGNED_TOOL_RESULT_MAX_TOKENS
                         ? { name: request.name, itemName: request.name, toolKind: "mcp", ok: false, error: cc_tool_result_limits_1.GROUP_MAIN_TOOL_RESULT_LIMIT_ERROR, outputTokens, reason: request.reason }
-                        : { name: request.name, itemName: request.name, toolKind: "internal_mcp", source: "ccm__knowledge_context", scope: "group", loaded: true, durationMs: Date.now() - startedAt, ok: true, output, rawOutput, outputTokens, resultChecksum: crypto.createHash("sha256").update(output).digest("hex"), reason: request.reason };
+                        : { name: request.name, itemName: request.name, toolKind: "internal_mcp", source: "ccm__knowledge_context", scope: "group", loaded: true, durationMs: Date.now() - startedAt, ok: true, output, modelOutput, rawOutput, outputTokens, resultChecksum: crypto.createHash("sha256").update(output).digest("hex"), reason: request.reason };
                 }
                 else
                     throw new Error(`未知群聊内置工具：${request.name}`);
@@ -281,6 +295,7 @@ async function executeGroupMainAgentToolRequests(input) {
                 parallelGroupId: parallelGroupId || undefined,
                 display: { summary: row?.ok === false ? row?.error || "工具执行失败" : "执行完成" },
             });
+        input.onToolResult?.(normalizeResult(row), toolCallId);
         return { ...row, toolCallId };
     };
     const isSafeReadOnly = (request) => {
@@ -309,7 +324,7 @@ async function executeGroupMainAgentToolRequests(input) {
         const parallelGroupId = readBatch.length > 1
             ? `group-parallel:${String(input.toolContext?.groupSessionId || input.toolContext?.group_session_id || "session")}:${Date.now()}:${index - readBatch.length}`
             : "";
-        rows.push(...await (0, readonly_tool_concurrency_1.runReadonlyToolsAdaptive)({
+        rows.push(...await (input.runReadonlyTools || readonly_tool_concurrency_1.runReadonlyToolsAdaptive)({
             items: readBatch,
             worker: request => executeOne(request, parallelGroupId),
             configuredLimit: Math.min(readOnlyParallelism, batchSize),
@@ -317,13 +332,7 @@ async function executeGroupMainAgentToolRequests(input) {
             perKeyLimit: readonly_tool_concurrency_1.CCM_GROUP_READONLY_PER_PROJECT_MAX,
         }));
     }
-    return rows.map(row => row.error === "MAIN_AGENT_TOOL_NOT_AUTHORIZED"
-        ? { ...row, error: "GROUP_MAIN_TOOL_NOT_AUTHORIZED" }
-        : row.error === "MAIN_AGENT_TOOL_SCHEMA_NOT_LOADED"
-            ? { ...row, error: "GROUP_MAIN_TOOL_SCHEMA_NOT_LOADED" }
-            : row.error === cc_tool_result_limits_1.MAIN_AGENT_TOOL_RESULT_LIMIT_ERROR || row.error === "MAIN_AGENT_TOOL_RESULT_EXCEEDS_8K_TOKEN_BUDGET"
-                ? { ...row, error: cc_tool_result_limits_1.GROUP_MAIN_TOOL_RESULT_LIMIT_ERROR }
-                : row);
+    return rows.map(normalizeResult);
 }
 function attachLlmTokenUsage(error, usage) {
     if (error && usage)
@@ -745,6 +754,7 @@ function buildLlmCoordinatorMessages(input) {
         identityRules,
         sessionGuidance,
         mcpPolicy: mainAgentTools.policyPrompt,
+        toolPromptLayout: mainAgentTools.toolPromptLayout,
         mainAgentToolResults: toolResults,
     });
     if (nativeMessages)
@@ -761,11 +771,7 @@ ${JSON.stringify(input.workflowDecision || null)}
 
 Decide from complete semantics whether to reply directly, call read-only tools, call ccm_ask_user, submit ccm_present_plan, or call ccm_dispatch. When the user explicitly requests a plan, approach, or steps, call ccm_present_plan. If the recent context already answers the message and no plan is requested, prefer a direct reply.`;
     return (0, transient_model_content_1.attachTransientModelBlocks)([
-        { role: "system", content: identityRules },
-        { role: "system", contextBlockType: "dynamic_context", content: sessionGuidance },
-        ...(mainAgentTools.policyPrompt
-            ? [{ role: "system", contextBlockType: "dynamic_context", content: mainAgentTools.policyPrompt }]
-            : []),
+        ...(0, native_session_transcript_1.splitNativeSystemSegments)({ identityRules, sessionGuidance, mcpPolicy: mainAgentTools.policyPrompt, toolPromptLayout: mainAgentTools.toolPromptLayout }),
         { role: "user", content: user },
     ], (0, transient_model_content_1.collectTransientModelBlocks)(toolResults));
 }
@@ -1157,7 +1163,8 @@ async function runLlmGroupOrchestrator(input) {
     };
     const groupSessionId = String(input.groupSessionId || input.group_session_id || "").trim();
     const sessionPreferences = (0, slash_command_session_state_1.readSlashCommandSessionState)("group", String(group.id), groupSessionId).preferences;
-    const config = { ...baseConfig, model: sessionPreferences.model || baseConfig.model, reasoningEffort: sessionPreferences.effort || baseConfig.reasoningEffort };
+    const unified = (0, unified_model_call_config_1.resolveUnifiedModelConfig)({ callSource: "group_main_agent", config: baseConfig });
+    const config = { ...baseConfig, model: unified.model, reasoningEffort: unified.reasoningEffort, configVersion: unified.configVersion };
     const sessionDirective = (0, slash_command_session_state_1.renderSlashCommandSessionDirective)("group", String(group.id), groupSessionId);
     const visibleTurnId = String(input.turnId || input.turn_id || `${group.id}:${groupSessionId}:${Date.now()}`);
     const visibleAnchorMessageId = String(input.anchorMessageId || input.anchor_message_id || "").trim();

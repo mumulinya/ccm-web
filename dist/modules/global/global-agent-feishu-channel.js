@@ -35,6 +35,7 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.createGlobalAgentFeishuChannel = createGlobalAgentFeishuChannel;
 const crypto = __importStar(require("crypto"));
+const conversation_attempt_1 = require("../../agents/conversation-attempt");
 const source_ingestion_1 = require("../requirements/source-ingestion");
 const feishu_channel_1 = require("../collaboration/feishu-channel");
 const feishu_conversation_v2_1 = require("../collaboration/feishu-conversation-v2");
@@ -729,7 +730,7 @@ function createGlobalAgentFeishuChannel(deps) {
                 try {
                     const queuedContext = turn.metadata?.feishu_context_v2 || null;
                     const queuedPayload = queuedContext?.payload || payload;
-                    const reply = await processFeishuGlobalAgentMessage(baseUrl, ctx, turn.message, queuedPayload, {
+                    const reply = await (0, conversation_attempt_1.runWithConversationAttempt)(conversationTurnControl, turn, () => processFeishuGlobalAgentMessage(baseUrl, ctx, turn.message, queuedPayload, {
                         sendReport: true,
                         traceId: String(turn.metadata?.trace_id || ""),
                         inboundRecorded: !!queuedContext,
@@ -740,13 +741,13 @@ function createGlobalAgentFeishuChannel(deps) {
                         turnId: turn.id,
                         resolvedRoute: String(turn.metadata?.resolved_route || ""),
                         resolvedCandidateTaskId: String(turn.metadata?.resolved_candidate_task_id || ""),
-                    });
-                    conversationTurnControl.settle({ id: turn.id, status: "completed", result: { reply } });
+                    }));
+                    conversationTurnControl.settle({ id: turn.id, attempt_id: (0, conversation_attempt_1.conversationAttemptId)(turn), status: "completed", result: { reply } });
                 }
                 catch (error) {
                     if (error?.routeHandled === true)
                         break;
-                    conversationTurnControl.settle({ id: turn.id, status: "failed", error: error?.message || String(error) });
+                    conversationTurnControl.settle({ id: turn.id, attempt_id: (0, conversation_attempt_1.conversationAttemptId)(turn), status: "failed", error: error?.message || String(error) });
                     break;
                 }
             }
@@ -892,14 +893,14 @@ function createGlobalAgentFeishuChannel(deps) {
                     source: "feishu_mid_turn",
                     requestId: queued.turn.request_id,
                 });
-                conversationTurnControl.settle({ id: queued.turn.id, status: "applied", active_run_id: activeRun.id });
+                conversationTurnControl.settle({ id: queued.turn.id, attempt_id: (0, conversation_attempt_1.conversationAttemptId)(queued.turn), status: "applied", active_run_id: activeRun.id });
                 const result = { reply: "已把这条要求纳入当前工作，我会在安全节点重新核对计划并继续。", turn: queued.turn, run_id: activeRun.id };
                 if (options.sendReport !== false)
                     await sendFeishuConversationReply({ conversationId, title: "全局 Agent", markdown: result.reply, traceId: options.traceId, dedupeSuffix: `steer:${queued.turn.id}` });
                 return { ...result, report_sent: options.sendReport !== false };
             }
             catch (error) {
-                conversationTurnControl.settle({ id: queued.turn.id, status: "failed", error: error?.message || String(error) });
+                conversationTurnControl.settle({ id: queued.turn.id, attempt_id: (0, conversation_attempt_1.conversationAttemptId)(queued.turn), status: "failed", error: error?.message || String(error) });
                 throw error;
             }
         }
@@ -946,8 +947,8 @@ function createGlobalAgentFeishuChannel(deps) {
             return { reply, queued: true, position, turn: queued.turn, report_sent: options.sendReport !== false, origin_receipt: originReceipt };
         }
         try {
-            const reply = await processFeishuGlobalAgentMessage(baseUrl, ctx, command.message, payload, { ...options, inboundRecorded: true, destination, conversationId, originReceipt, turnId: turn.id, resolvedRoute, resolvedCandidateTaskId, principal: { kind: "feishu", id: destination?.open_id || destination?.user_id || "unknown", role: access.role || (access.canOperate ? "operator" : "viewer"), capabilities: access.canOperate ? ["task.execute"] : [] } });
-            conversationTurnControl.settle({ id: turn.id, status: "completed", checkpoint: "completed", result: { reply } });
+            const reply = await (0, conversation_attempt_1.runWithConversationAttempt)(conversationTurnControl, turn, () => processFeishuGlobalAgentMessage(baseUrl, ctx, command.message, payload, { ...options, inboundRecorded: true, destination, conversationId, originReceipt, turnId: turn.id, resolvedRoute, resolvedCandidateTaskId, principal: { kind: "feishu", id: destination?.open_id || destination?.user_id || "unknown", role: access.role || (access.canOperate ? "operator" : "viewer"), capabilities: access.canOperate ? ["task.execute"] : [] } }));
+            conversationTurnControl.settle({ id: turn.id, attempt_id: (0, conversation_attempt_1.conversationAttemptId)(turn), status: "completed", checkpoint: "completed", result: { reply } });
             void drainFeishuConversationTurns(baseUrl, ctx, conversationId, payload).catch((error) => console.warn(`[飞书全局 Agent] 队列续跑失败：${error?.message || error}`));
             return { reply, turn_id: turn.id };
         }
@@ -955,7 +956,7 @@ function createGlobalAgentFeishuChannel(deps) {
             if (error?.routeHandled === true) {
                 return { reply: String(error.safeReply || error.message || "请选择处理方式"), route_required: true, turn: error.routed, report_sent: options.sendReport !== false };
             }
-            conversationTurnControl.settle({ id: turn.id, status: "failed", checkpoint: "failed", error: error?.message || String(error) });
+            conversationTurnControl.settle({ id: turn.id, attempt_id: (0, conversation_attempt_1.conversationAttemptId)(turn), status: "failed", checkpoint: "failed", error: error?.message || String(error) });
             throw error;
         }
     }

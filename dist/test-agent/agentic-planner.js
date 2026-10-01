@@ -44,6 +44,7 @@ const work_order_1 = require("./work-order");
 const agentic_planner_browser_contract_1 = require("./agentic-planner-browser-contract");
 const semantic_decision_runtime_1 = require("../system/semantic-decision-runtime");
 const agent_cache_affinity_1 = require("../system/agent-cache-affinity");
+const unified_model_call_config_1 = require("../system/unified-model-call-config");
 const planning_fallback_1 = require("./planning-fallback");
 const user_visible_progress_1 = require("./user-visible-progress");
 const SOURCE_EXTENSIONS = new Set([
@@ -151,6 +152,10 @@ function allowedCriterionCheckNames(workOrder, evidence) {
     }
     if (evidence.surfaceAudit?.canAccept === true)
         names.push("CCM authoritative change-surface audit");
+    if (workOrder.metadata?.readOnlyBaseline === true
+        && workOrder.metadata?.baselineEvidence?.noFileChanges === true) {
+        names.push("CCM authoritative baseline audit");
+    }
     return unique(names.filter(Boolean), value => value).slice(0, 120);
 }
 function mentionedFileScore(file, terms, changed) {
@@ -210,7 +215,7 @@ function plannerSystemPrompt() {
         "Never propose editing files, installing dependencies, changing configuration, committing code, or weakening assertions.",
         "Commands must be read-only verification commands accepted by the existing project, preferably package.json scripts.",
         "Only propose Git commands when currentSource reports gitMetadataAvailable=true. CCM already performs an authoritative changed-file surface audit outside disposable copies, so Git diagnostics are not a substitute for product checks.",
-        "When authoritativeEvidence.surfaceAudit has status='passed' and canAccept=true, treat declared-vs-actual file scope, missing declared files, and undeclared changes as covered by the check named 'CCM authoritative change-surface audit'. Do not return unsupported or needs_user only because the disposable copy lacks Git metadata. Behavioral, build, test, checksum, API, and UI outcomes still require their own executable checks.",
+        "When authoritativeEvidence.surfaceAudit has status='passed' and canAccept=true, treat declared-vs-actual file scope, missing declared files, and undeclared changes as covered by the check named 'CCM authoritative change-surface audit'. For an explicit read-only baseline work item whose metadata.readOnlyBaseline=true and metadata.baselineEvidence.noFileChanges=true, use the exact check name 'CCM authoritative baseline audit' for baseline fingerprint, clean-diff, execution-directory, and no-change criteria; those facts are captured by CCM before the Git-less disposable copy. Do not return unsupported or needs_user only because the disposable copy lacks Git metadata. Behavioral, build, test, checksum, API, and UI outcomes still require their own executable checks.",
         "Browser checks must use explicit Playwright-style actions and assertions against the supplied local/test URL.",
         "When a project supplies browserScenarios, translate every scenario into a concrete browser check that proves it.",
         "Do not claim pass/fail. Return only a JSON plan; CCM's deterministic evidence gate makes the verdict.",
@@ -265,7 +270,9 @@ function followupSystemPrompt() {
     ].join("\n");
 }
 async function callDefaultFollowupPlanner(input) {
-    const config = (0, group_orchestrator_config_1.loadOrchestratorConfig)();
+    const baseConfig = (0, group_orchestrator_config_1.loadOrchestratorConfig)();
+    const unifiedConfig = (0, unified_model_call_config_1.resolveUnifiedModelConfig)({ callSource: "test_agent", config: baseConfig });
+    const config = { ...baseConfig, model: unifiedConfig.model, reasoningEffort: unifiedConfig.reasoningEffort, configVersion: unifiedConfig.configVersion };
     if (config.enabled === false || !config.apiUrl || !config.apiKey || !config.model) {
         throw new Error("统一大模型未配置，无法进行 TestAgent 失败复核规划");
     }
@@ -300,7 +307,7 @@ async function callDefaultFollowupPlanner(input) {
     const result = (0, group_orchestrator_llm_client_1.shouldUseAnthropic)(config)
         ? await (0, group_orchestrator_llm_client_1.callAnthropicCompatibleJson)(config, options)
         : await (0, group_orchestrator_llm_client_1.callOpenAiCompatibleJson)(config, options);
-    return { ...result, providerUsage };
+    return { ...result, providerUsage, modelCallProvenance: (0, unified_model_call_config_1.buildModelCallProvenance)(unifiedConfig, { cachePlanCreated: !!cache.providerContextCache }) };
 }
 async function callDefaultPlanner(input) {
     const semanticInput = {
@@ -385,6 +392,14 @@ function normalizeSemanticTestPlan(value, workOrder) {
     }
     if (safeAuthoritativeEvidence(workOrder).surfaceAudit?.canAccept === true) {
         availableCheckNames.add("ccm authoritative change-surface audit");
+    }
+    const baselineEvidence = workOrder.metadata?.baselineEvidence;
+    if (workOrder.metadata?.readOnlyBaseline === true && baselineEvidence?.noFileChanges === true) {
+        // A read-only baseline work item is verified by CCM before the Git-less
+        // disposable copy is handed to TestAgent. Keep this as an explicit,
+        // reserved check name so the semantic planner can bind each baseline
+        // criterion without inventing an executable command.
+        availableCheckNames.add("ccm authoritative baseline audit");
     }
     if (coverage.some((row) => !allowed.has(row.status)))
         throw new Error("TestAgent 语义计划包含无效验收覆盖状态");

@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.CCM_STABLE_PROMPT_VERSION = void 0;
+exports.CCM_CACHE_KEY_PREFIX = exports.CCM_CACHE_ROUTE_VERSION = exports.CCM_STABLE_PROMPT_VERSION = void 0;
 exports.observeAutomaticProviderCacheRouting = observeAutomaticProviderCacheRouting;
 exports.buildAutomaticProviderCacheKey = buildAutomaticProviderCacheKey;
 exports.automaticProviderCacheTtl = automaticProviderCacheTtl;
@@ -44,85 +44,107 @@ const crypto = __importStar(require("crypto"));
 const os = __importStar(require("os"));
 const runtime_paths_1 = require("../core/runtime-paths");
 const agent_cache_affinity_1 = require("./agent-cache-affinity");
-exports.CCM_STABLE_PROMPT_VERSION = "ccm-main-agent-stable-core-v1";
+const provider_cache_transcript_1 = require("./provider-cache-transcript");
+exports.CCM_STABLE_PROMPT_VERSION = "ccm-main-agent-stable-core-v2";
+// A public-profile wire contract changes the cache identity.  The prompt
+// cache route is deliberately branched by conversation: public prefix
+// evidence remains comparable, but a provider must not make unrelated full
+// transcript branches compete for one cache lane.
+exports.CCM_CACHE_ROUTE_VERSION = 11;
+exports.CCM_CACHE_KEY_PREFIX = "ccm-v11-";
 function hash(value, length = 64) {
     return crypto.createHash("sha256").update(typeof value === "string" ? value : JSON.stringify(value ?? null)).digest("hex").slice(0, length);
 }
+const MAIN_AGENT_ROLES = new Set(["project_main", "group_main", "global_main"]);
+function isUnifiedMainAffinity(affinity) {
+    const role = String(affinity?.agentRole || "").trim().toLowerCase();
+    const stage = String(affinity?.stage || "").trim().toLowerCase();
+    const profile = String(affinity?.cacheKeyProfile || "").trim().toLowerCase();
+    return MAIN_AGENT_ROLES.has(role)
+        && (stage === "main_tool_loop" || (!stage && profile === `${role}:main_tool_loop`));
+}
 function cacheScopeProfile(plan) {
     const explicit = String(plan?.cacheAffinity?.cacheKeyProfile || "").trim();
+    const requestClass = String(plan?.requestClass || "").trim().toLowerCase();
+    // The request owner can identify an auxiliary/probe call even when a
+    // legacy affinity still describes the parent main loop.
+    if (requestClass === "probe")
+        return explicit ? `probe:${explicit}` : "probe";
+    if (requestClass === "auxiliary")
+        return explicit ? `auxiliary:${explicit}` : "auxiliary";
+    if (isUnifiedMainAffinity(plan?.cacheAffinity))
+        return "main_agent:main_tool_loop";
     if (explicit)
         return explicit;
-    const requestClass = String(plan?.requestClass || "foreground_main");
     const source = String(plan?.source || "").toLowerCase();
-    if (requestClass === "probe" || /probe|capability/.test(source))
+    if (/probe|capability/.test(source))
         return "probe";
-    if (requestClass === "auxiliary" || /summary|title|memory|compact|review|suggest|secondary|semantic|synthesis|distill|extract/.test(source))
+    if (/summary|title|memory|compact|review|suggest|secondary|semantic|synthesis|distill|extract/.test(source))
         return "auxiliary";
-    return "main_agent";
+    return "main_agent:main_tool_loop";
 }
-// Routing shards are deliberately conservative and process-local.  A shard
-// is introduced only after sustained high traffic and repeated eligible
-// misses; normal traffic keeps one shared route so cross-session reuse is not
-// fragmented.  The state is bounded and never contains prompt content.
-const cacheRouteObservations = new Map();
-const CACHE_ROUTE_WINDOW_MS = 60_000;
-const CACHE_ROUTE_HIGH_TRAFFIC = 15;
+function cacheStablePromptVersion(plan) {
+    if (cacheScopeProfile(plan) === "main_agent:main_tool_loop")
+        return exports.CCM_STABLE_PROMPT_VERSION;
+    return String(plan?.cacheAffinity?.stablePromptVersion || exports.CCM_STABLE_PROMPT_VERSION);
+}
+function conversationBranchChecksum(plan) {
+    const requestClass = String(plan?.requestClass || "").trim().toLowerCase();
+    // Capability probes have no conversation transcript and must remain
+    // independent from user-session branches.  Normal foreground and
+    // auxiliary calls are isolated by their durable scope/session identity;
+    // turn/attempt/generation are intentionally excluded so the branch stays
+    // stable across messages, retries, and restarts.
+    if (requestClass === "probe")
+        return "";
+    const scope = String(plan?.scope || "").trim();
+    const scopeId = String(plan?.scopeId || "").trim();
+    const sessionId = String(plan?.sessionId || "").trim();
+    if (!scope || !scopeId || !sessionId)
+        return "";
+    return hash({ scope, scopeId, sessionId }, 32);
+}
 function cacheRouteIdentity(config, plan, matrix) {
-    const scope = String(plan?.scope || "other");
-    const scopeId = scope === "global" ? "global" : String(plan?.scopeId || "");
+    // The routing key identifies a provider cache namespace, not the complete
+    // conversation. Prefer the explicit workspace-public checksum. The former
+    // implementation preferred stablePrefixChecksum, which includes
+    // project/role-specific identity rules and therefore split projects before
+    // the provider could compare their equal public prefix. Private/session
+    // material remains in the request and is never placed in this key.
+    const publicPrefixChecksum = String(plan?.publicStablePrefixChecksum || "").trim();
+    const stablePrefixChecksum = publicPrefixChecksum || String(plan?.stablePrefixChecksum || "").trim();
     return {
+        version: exports.CCM_CACHE_ROUTE_VERSION,
+        wireLayoutVersion: String(plan?.wireLayoutVersion || provider_cache_transcript_1.PROVIDER_CACHE_WIRE_LAYOUT_VERSION),
         transportIdentityChecksum: matrix.transportIdentityChecksum,
         model: String(config?.model || ""),
         workspaceIdentityChecksum: workspaceIdentityChecksum(),
-        userIdentityChecksum: hash(String(config?.userId || config?.user_id || config?.credentialProfileId || config?.credential_profile_id || "local-user")),
-        scope,
-        scopeId,
+        userIdentityChecksum: hash({
+            user: String(config?.userId || config?.user_id || "local-user"),
+            credentialProfile: String(config?.credentialProfileId || config?.credential_profile_id || ""),
+        }),
+        // Public fields describe the comparable prefix.  The branch identity is
+        // separate from those fields so a provider does not reuse or evict a
+        // complete private transcript when another conversation is active.
+        scope: "workspace_conversation",
+        scopeId: "workspace",
+        ...(publicPrefixChecksum
+            ? { publicPrefixChecksum }
+            : stablePrefixChecksum ? { stablePrefixChecksum } : {}),
+        publicInstructionChecksum: String(plan?.publicInstructionChecksum || ""),
+        publicInstructionProfileVersion: String(plan?.publicInstructionProfileVersion || ""),
+        publicToolProfileChecksum: String(plan?.publicToolProfileChecksum || ""),
+        publicToolSchemaChecksum: String(plan?.publicToolSchemaChecksum || ""),
+        publicToolSchemaVersion: String(plan?.publicToolSchemaVersion || ""),
+        publicProfileVersion: String(plan?.publicProfileVersion || ""),
+        conversationBranchChecksum: conversationBranchChecksum(plan),
         scopeProfile: cacheScopeProfile(plan),
-        stablePromptVersion: String(plan?.cacheAffinity?.stablePromptVersion || exports.CCM_STABLE_PROMPT_VERSION),
+        stablePromptVersion: cacheStablePromptVersion(plan),
     };
 }
-function cacheRouteObservationKey(identity) {
-    return hash(identity, 64);
-}
-function currentRouteShardCount(identity) {
-    const observation = cacheRouteObservations.get(cacheRouteObservationKey(identity));
-    return observation?.shardCount || 1;
-}
-/** Record real Provider cache usage for conservative high-traffic routing. */
+/** Usage is observational; misses must never rotate a shared routing key. */
 function observeAutomaticProviderCacheRouting(config, plan, matrix, input) {
-    const identity = cacheRouteIdentity(config, plan, matrix);
-    const key = cacheRouteObservationKey(identity);
-    const now = Date.now();
-    const previous = cacheRouteObservations.get(key) || { timestamps: [], missStreak: 0, shardCount: 1 };
-    const timestamps = previous.timestamps.filter(value => now - value <= CACHE_ROUTE_WINDOW_MS);
-    timestamps.push(now);
-    const hit = typeof input === "boolean" ? input : input.hit === true;
-    const excludedReason = new Set([
-        "cold_start", "ttl_expired", "stable_prefix_changed", "schema_changed",
-        "tool_schema_changed", "compaction_boundary_changed", "ccm_projection_changed",
-        "transcript_projection_changed", "provider_usage_unreported", "provider_usage_not_reported",
-        "prefix_below_provider_threshold", "native_fields_unproven",
-    ]).has(String(typeof input === "boolean" ? "" : input.missReason || ""));
-    const eligible = typeof input === "boolean"
-        ? false
-        : input.eligible === true && !excludedReason;
-    if (!eligible) {
-        cacheRouteObservations.set(key, { timestamps: timestamps.slice(-120), missStreak: 0, shardCount: 1 });
-        return { shardCount: 1, missStreak: 0, trafficPerMinute: timestamps.length, eligible: false };
-    }
-    const missStreak = hit ? 0 : previous.missStreak + 1;
-    let shardCount = previous.shardCount;
-    if (shardCount === 1 && timestamps.length >= CACHE_ROUTE_HIGH_TRAFFIC && missStreak >= 3)
-        shardCount = 2;
-    else if (shardCount === 2 && timestamps.length >= CACHE_ROUTE_HIGH_TRAFFIC * 2 && missStreak >= 6)
-        shardCount = 4;
-    cacheRouteObservations.set(key, { timestamps: timestamps.slice(-120), missStreak, shardCount, lastEligibleAt: now });
-    if (cacheRouteObservations.size > 512) {
-        const oldest = [...cacheRouteObservations.entries()].sort((left, right) => (left[1].timestamps.at(-1) || 0) - (right[1].timestamps.at(-1) || 0))[0]?.[0];
-        if (oldest)
-            cacheRouteObservations.delete(oldest);
-    }
-    return { shardCount, missStreak, trafficPerMinute: timestamps.length, eligible: true };
+    return { shardCount: 1, missStreak: 0, trafficPerMinute: 0, eligible: false };
 }
 function workspaceIdentityChecksum() {
     return hash({
@@ -133,25 +155,12 @@ function workspaceIdentityChecksum() {
 }
 function buildAutomaticProviderCacheKey(config, plan, matrix) {
     const routeIdentity = cacheRouteIdentity(config, plan, matrix);
-    const shardCount = currentRouteShardCount(routeIdentity);
-    const sessionShard = shardCount > 1 ? hash({ sessionId: String(plan?.sessionId || plan?.exactSessionId || ""), shardCount }, 4) : "0";
-    const digest = hash({
-        ...routeIdentity,
-        deterministicShard: `${shardCount}:${sessionShard}`,
-    }, 48);
-    return `ccm-${digest}`;
+    return `${exports.CCM_CACHE_KEY_PREFIX}${hash(routeIdentity, 48)}`;
 }
 function automaticProviderCacheTtl(matrix) {
-    // Prefer the longest explicitly confirmed retention, while keeping the
-    // provider's default as the safe fallback.  The 24h value is retained for
-    // existing Chat Completions gateways even though the public lifecycle
-    // projection exposes it as provider-managed/unknown.
-    if (matrix.supportedTtls.includes("1h"))
-        return "1h";
-    if (matrix.supportedTtls.includes("30m"))
-        return "30m";
-    if (matrix.supportedTtls.includes("24h"))
-        return "24h";
+    // Capability is not a retention preference. Normal calls use the provider
+    // default even when an older persisted matrix advertises a longer lifetime.
+    void matrix;
     return "provider_default";
 }
 function aggregateCapabilityStatus(matrix) {
@@ -173,6 +182,8 @@ function buildAutomaticCacheOptimizationProjection(input) {
             implicitPrefix: "unproven",
             explicitCacheKey: "unproven",
             explicitBreakpoints: "unproven",
+            responsesContinuation: "unproven",
+            responsesToolLoopContinuation: "unproven",
             blockCacheControl: "unproven",
             nativeCacheEditing: "unproven",
             cacheUsageReporting: "unproven",
@@ -193,7 +204,7 @@ function buildAutomaticCacheOptimizationProjection(input) {
         schema: "ccm-automatic-cache-optimization-v1",
         enabled: true,
         effectiveStrategy,
-        cacheKeyScope: "workspace_scope_profile",
+        cacheKeyScope: "conversation_branch",
         stableCoreChecksum: String(input.stableCoreChecksum || ""),
         stableCoreTokens: Math.max(0, Number(input.stableCoreTokens || 0)),
         capabilityStatus: aggregateCapabilityStatus(matrix),
@@ -221,6 +232,8 @@ function runAutomaticProviderCacheOptimizationSelfTest() {
             implicitPrefix: "confirmed",
             explicitCacheKey: "confirmed",
             explicitBreakpoints: "confirmed",
+            responsesContinuation: "confirmed",
+            responsesToolLoopContinuation: "confirmed",
             blockCacheControl: "unproven",
             nativeCacheEditing: "unproven",
             cacheUsageReporting: "confirmed",
@@ -247,6 +260,18 @@ function runAutomaticProviderCacheOptimizationSelfTest() {
     const testPlanKey = key({ scope: "project", scopeId: "project-a", sessionId: "test-session-1", cacheAffinity: testPlanFirst });
     const testPlanOtherSessionKey = key({ scope: "project", scopeId: "project-a", sessionId: "test-session-2", cacheAffinity: testPlanSecond });
     const testFollowupKey = key({ scope: "project", scopeId: "project-a", sessionId: "test-session-2", cacheAffinity: testFollowup });
+    const mainAffinity = (role, stablePromptVersion) => ({
+        agentRole: role,
+        stage: "main_tool_loop",
+        cacheKeyProfile: `${role}:main_tool_loop`,
+        stablePromptVersion,
+    });
+    const projectMainKey = key({ scope: "project", scopeId: "project-a", sessionId: "project-main", cacheAffinity: mainAffinity("project_main", "ccm-project-main-stable-core-v2") });
+    const groupMainKey = key({ scope: "group", scopeId: "group-a", sessionId: "group-main", cacheAffinity: mainAffinity("group_main", "ccm-group-main-stable-core-v2") });
+    const globalMainKey = key({ scope: "global", scopeId: "global", sessionId: "global-main", cacheAffinity: mainAffinity("global_main", "ccm-global-main-stable-core-v2") });
+    const auxiliaryKey = key({ scope: "group", scopeId: "group-a", sessionId: "group-review", cacheAffinity: {
+            agentRole: "group_main", stage: "coordination_review", cacheKeyProfile: "group_main:coordination_review", stablePromptVersion: "ccm-coordination-review-stable-core-v2",
+        } });
     const routingPlan = { scope: "project", scopeId: "busy-project", sessionId: "session-a" };
     const routingConfig = { ...config, model: "routing-selftest" };
     const routingMatrix = matrix;
@@ -260,16 +285,38 @@ function runAutomaticProviderCacheOptimizationSelfTest() {
         });
     const routingKeyAfter = buildAutomaticProviderCacheKey(routingConfig, routingPlan, routingMatrix);
     const routingKeyAfterRepeat = buildAutomaticProviderCacheKey(routingConfig, routingPlan, routingMatrix);
+    const samePublicDifferentPrivateA = key({
+        scope: "project", scopeId: "project-a", sessionId: "private-a",
+        stablePrefixChecksum: "scope-private-a", publicStablePrefixChecksum: "workspace-public",
+    });
+    const samePublicDifferentPrivateB = key({
+        scope: "project", scopeId: "project-b", sessionId: "private-b",
+        stablePrefixChecksum: "scope-private-b", publicStablePrefixChecksum: "workspace-public",
+    });
+    const differentPublic = key({
+        scope: "project", scopeId: "project-c", sessionId: "private-c",
+        stablePrefixChecksum: "scope-private-c", publicStablePrefixChecksum: "workspace-public-v2",
+    });
     const checks = {
-        projectSessionsShareRoute: projectA === projectAOtherSession,
-        projectsStayIsolated: projectA !== key({ scope: "project", scopeId: "project-b", sessionId: "s1" }),
-        groupsStayIsolated: groupA !== key({ scope: "group", scopeId: "group-b", sessionId: "g1" }),
-        globalSessionsShareRoute: globalA === key({ scope: "global", scopeId: "global", sessionId: "y", generation: 9 }),
-        scopesStayIsolated: new Set([projectA, groupA, globalA]).size === 3,
-        testAgentProjectSessionsSharePlanRoute: testPlanKey === testPlanOtherSessionKey,
+        projectSessionsAreIsolated: projectA !== projectAOtherSession,
+        projectsAreIsolated: projectA !== key({ scope: "project", scopeId: "project-b", sessionId: "s1" }),
+        groupsAreIsolated: groupA !== key({ scope: "group", scopeId: "group-b", sessionId: "g1" }),
+        globalSessionsAreIsolated: globalA !== key({ scope: "global", scopeId: "global", sessionId: "y", generation: 9 }),
+        scopesAreIsolated: new Set([projectA, groupA, globalA]).size === 3,
+        projectsWithSamePublicPrefixAreIsolated: samePublicDifferentPrivateA !== samePublicDifferentPrivateB,
+        projectsWithDifferentPublicPrefixStayIsolated: samePublicDifferentPrivateA !== differentPublic,
+        testAgentProjectSessionsAreIsolated: testPlanKey !== testPlanOtherSessionKey,
         testAgentStagesStayIsolated: testPlanKey !== testFollowupKey,
+        mainScopesUseSeparateConversationBranches: new Set([projectMainKey, groupMainKey, globalMainKey]).size === 3,
+        auxiliaryStageStaysIsolatedFromMain: auxiliaryKey !== projectMainKey,
+        auxiliaryRequestOverridesInheritedMainAffinity: projectMainKey !== key({ scope: "project", requestClass: "auxiliary",
+            cacheAffinity: mainAffinity("project_main", "ccm-project-main-stable-core-v2") }),
+        probeRequestOverridesInheritedMainAffinity: projectMainKey !== key({ scope: "project", requestClass: "probe",
+            cacheAffinity: mainAffinity("project_main", "ccm-project-main-stable-core-v2") }),
+        routeAndWireVersionsAlign: exports.CCM_CACHE_KEY_PREFIX === `ccm-v${exports.CCM_CACHE_ROUTE_VERSION}-`
+            && String(provider_cache_transcript_1.PROVIDER_CACHE_WIRE_LAYOUT_VERSION).endsWith(`-v${exports.CCM_CACHE_ROUTE_VERSION}`),
         keyLengthSafe: [projectA, groupA, globalA].every(value => value.length <= 64),
-        highTrafficRoutingShardIsStable: routingKeyAfter !== routingKeyBefore && routingKeyAfter === routingKeyAfterRepeat,
+        highTrafficExactSessionKeyStaysStable: routingKeyAfter === routingKeyBefore && routingKeyAfter === routingKeyAfterRepeat,
     };
     return { pass: Object.values(checks).every(Boolean), checks };
 }

@@ -38,11 +38,13 @@ exports.resolveTaskAgentSessionProjection = resolveTaskAgentSessionProjection;
 exports.rollbackResolvedTaskUserSession = rollbackResolvedTaskUserSession;
 exports.purgeTaskRecoveryUserSessions = purgeTaskRecoveryUserSessions;
 const db_1 = require("../core/db");
+const crypto = __importStar(require("crypto"));
 const fs = __importStar(require("fs"));
 const sessions_1 = require("../modules/projects/sessions");
 const storage_1 = require("../modules/collaboration/storage");
 const global_agent_1 = require("../modules/global/global-agent");
 const task_context_1 = require("./task-context");
+const task_recovery_context_1 = require("./task-recovery-context");
 const WRITE_STATUSES = new Set(["pending", "queued", "in_progress", "running", "reviewing", "executing", "recovery_validating"]);
 const text = (value, max = 400) => String(value ?? "").trim().slice(0, max);
 const scopeOf = (task) => text(task?.source_channel || task?.request_origin, 40).toLowerCase().includes("feishu") ? "feishu" : text(task?.group_id) ? "group" : text(task?.target_project || task?.project_session_id) ? "project" : "global";
@@ -59,6 +61,12 @@ function resolveTaskUserSession(taskInput, options = {}) {
     const task = (0, db_1.getTaskById)(text(taskInput?.id)) || taskInput;
     if (!task)
         throw new Error("任务不存在，无法恢复会话");
+    // A recovery session must be built from a persisted, integrity-checked
+    // context anchor. Never create a new conversation from an unanchored task
+    // object supplied by a caller or an old partial record.
+    if (!task?.task_context || typeof task.task_context !== "object") {
+        return { mode: "rejected", reason: "recovery_anchor_missing", created: false, error: "任务缺少可验证的恢复锚点，请重新规划" };
+    }
     if (options.expectedContextChecksum && String(task?.task_context?.checksum || "") !== String(options.expectedContextChecksum))
         return { mode: "rejected", reason: "permission_changed", created: false, error: "任务上下文已变化，请重新恢复" };
     const taskId = text(task.id);
@@ -66,6 +74,9 @@ function resolveTaskUserSession(taskInput, options = {}) {
     const scopeId = scopeIdOf(task, scope);
     const sourceSession = sourceSessionOf(task);
     const original = activeSessionOf(task);
+    const contamination = task?.task_context ? (0, task_recovery_context_1.inspectTaskRecoveryContext)(task) : null;
+    if (contamination?.status === "blocked" || contamination?.status === "state_changed")
+        return { mode: "rejected", originalSessionId: original || undefined, reason: contamination.reason, created: false, error: "任务恢复上下文无法核验或范围已变化，请重新规划", contamination };
     // The orchestrator passes the already-computed next attempt. Do not add one
     // again or a recovery session becomes labelled N+1 while the task is on N.
     const attempt = Math.max(1, options.attempt !== undefined
@@ -97,7 +108,7 @@ function resolveTaskUserSession(taskInput, options = {}) {
         available = false;
     }
     const busy = original ? findBusy(task, original) : null;
-    const canReuse = !options.forceRecoverySession && available && !archived && !busy;
+    const canReuse = !options.forceRecoverySession && contamination?.status !== "context_contaminated" && available && !archived && !busy;
     let activeSessionId = original;
     let mode = "rejected";
     let reason = "permission_changed";
@@ -107,27 +118,20 @@ function resolveTaskUserSession(taskInput, options = {}) {
         reason = "original_reused";
     }
     else {
-        reason = !available ? "original_missing" : archived ? "original_archived" : busy ? "session_busy" : "permission_changed";
-        const title = `恢复任务 · ${text(task.title || task.business_goal || "未命名任务", 55)} · 第 ${attempt} 次执行`;
-        try {
-            if (scope === "project")
-                activeSessionId = String((0, sessions_1.createProjectSessionRecord)(scopeId, title, "web", { sessionKind: "automation" }).sessionId || "");
-            else if (scope === "group")
-                activeSessionId = String((0, storage_1.createGroupChatSession)(scopeId, title, { sessionKind: "automation" }).id || "");
-            else
-                activeSessionId = String((0, global_agent_1.createGlobalAgentConversationSession)({ source: scope === "feishu" ? "feishu" : "web", name: title }).id || "");
-            created = !!activeSessionId;
-            mode = created ? "recovery_session_created" : "rejected";
-        }
-        catch (error) {
-            return { mode: "rejected", originalSessionId: original || undefined, activeSessionId: undefined, reason, error: text(error?.message || error), created: false };
-        }
+        reason = contamination?.status === "context_contaminated" ? "context_contaminated" : !available ? "original_missing" : archived ? "original_archived" : busy ? "session_busy" : "manual_retry";
+        // Recovery needs a precise execution branch, but it must not create a
+        // user-visible project/group/global conversation. The source conversation
+        // remains the projection surface; this opaque identity is persisted in the
+        // task context and used only by the execution and evidence layers.
+        activeSessionId = `internal-task-session:${crypto.randomUUID()}`;
+        mode = "internal_task_session";
+        created = false;
     }
     if (!activeSessionId)
         return { mode: "rejected", originalSessionId: original || undefined, reason, created: false };
     const context = task.task_context || (0, task_context_1.buildTaskContextCapsule)(task);
-    const binding = (0, task_context_1.createTaskSessionBinding)({ task, taskId, attempt, role: created ? "recovery" : "active_execution", scope, scopeId, exactSessionId: activeSessionId, originalSessionId: sourceSession || original || undefined, createdForRecovery: created, reason, revision: Number(context.revision || 0) });
-    return { mode, originalSessionId: original || undefined, activeSessionId, created, reason, binding };
+    const binding = (0, task_context_1.createTaskSessionBinding)({ task, taskId, attempt, role: "active_execution", scope, scopeId, exactSessionId: activeSessionId, originalSessionId: sourceSession || original || undefined, createdForRecovery: false, reason, revision: Number(context.revision || 0) });
+    return { mode, originalSessionId: original || undefined, activeSessionId, created, reason, binding, contamination };
 }
 function resolveTaskAgentSessionProjection(task, workItem, attempt, mode = "rehydrated_session") {
     const taskContext = task?.task_context || (0, task_context_1.buildTaskContextCapsule)(task);

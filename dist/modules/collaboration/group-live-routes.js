@@ -49,6 +49,7 @@ exports.buildGroupTaskIntakeSummary = buildGroupTaskIntakeSummary;
 exports.handleGroupLiveRoutesSendPreface = handleGroupLiveRoutesSendPreface;
 exports.handleGroupLiveRoutes = handleGroupLiveRoutes;
 const crypto = __importStar(require("crypto"));
+const conversation_attempt_1 = require("../../agents/conversation-attempt");
 const pre_plan_clarification_1 = require("../../agents/pre-plan-clarification");
 const utils_1 = require("../../core/utils");
 const api_access_control_1 = require("../system/api-access-control");
@@ -457,6 +458,7 @@ async function handleGroupLiveRoutesSendPreface(payload, uploadedFiles, ctx, dep
         return { done: true };
     }
     (0, group_orchestrator_1.normalizeGroupOrchestrator)(group);
+    (0, conversation_attempt_1.bindConversationAttemptResponse)(res, conversation_turn_control_1.conversationTurnControl, { id: payload.conversation_turn_id || payload.conversationTurnId, scope: "group", conversation_id: `${group_id}:${groupSessionId}`, attempt_id: payload.attempt_id });
     const authorizedProjectIds = (0, group_orchestrator_1.getRoutableMembers)(group)
         .map((member) => String(member?.project || "").trim())
         .filter(Boolean)
@@ -616,7 +618,7 @@ async function handleGroupLiveRoutesSendPreface(payload, uploadedFiles, ctx, dep
         generation: 0,
     });
     const exactSessionContext = (0, group_session_model_context_1.buildExactGroupSessionModelContextPacket)(group_id, { groupSessionId }).rendered;
-    const recoverableCandidates = (0, conversation_message_routing_1.findConversationTaskCandidates)({
+    const recoverableCandidates = groupLiveFlag(payload.new_topic ?? payload.newTopic, false) ? [] : (0, conversation_message_routing_1.findConversationTaskCandidates)({
         scope: "group",
         scopeId: String(group_id),
         exactSessionId: groupSessionId,
@@ -829,7 +831,13 @@ async function handleGroupLiveRoutesSendPreface(payload, uploadedFiles, ctx, dep
             .filter((item) => item.status !== "done" || Date.now() - Date.parse(item.completed_at || item.updated_at || "") < 30 * 60 * 1000)
             .sort((a, b) => String(b.updated_at || b.created_at || "").localeCompare(String(a.updated_at || a.created_at || "")))[0]
         : null);
-    const groupOperationKey = persistentTaskRequest && client_message_id ? `${group_id}:${groupSessionId || "active"}:${String(client_message_id)}` : "";
+    const discussionTaskId = String(payload.discussion_task_id || payload.discussionTaskId || "").trim();
+    const discussionTask = !groupLiveFlag(payload.new_topic ?? payload.newTopic, false) && discussionTaskId
+        ? (0, db_1.loadTasks)().find((item) => String(item.id) === discussionTaskId
+            && String(item.group_id || "") === String(group_id)
+            && String(item.group_session_id || "") === groupSessionId
+            && item.task_spec?.task_session_archive_policy === "user_confirm") : null;
+    const groupOperationKey = persistentTaskRequest && client_message_id ? `${group_id}:${groupSessionId || "active"}:${String(client_message_id)}${payload.attempt_id ? `:${payload.attempt_id}` : ""}` : "";
     reliabilityOperationKey = groupOperationKey;
     const groupOperation = groupOperationKey
         ? (0, reliability_ledger_1.acquireIdempotency)({ scope: "group-task-message", key: groupOperationKey, traceId: messageTraceId, leaseMs: 10 * 60 * 1000, metadata: { group_id, client_message_id: String(client_message_id) } })
@@ -850,7 +858,7 @@ async function handleGroupLiveRoutesSendPreface(payload, uploadedFiles, ctx, dep
         timestamp: new Date().toISOString(),
         trace_id: messageTraceId,
         ...(groupSessionId ? { group_session_id: groupSessionId } : {}),
-        ...(continuationTask ? { task_id: continuationTask.id } : {}),
+        ...(continuationTask || discussionTask ? { task_id: (continuationTask || discussionTask).id } : {}),
         ...(modelRecovery ? {
             resumes_message_id: modelRecovery.failureMessageId,
             execution_anchor_message_id: modelRecovery.anchorMessageId,
@@ -1025,7 +1033,7 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
     const { writeSse, ensureTraceId, classifyGroupProjectTaskIntentWithAgent, shouldCreatePersistentGroupTask, shouldLoadReadOnlyProjectContext, classifyTaskContinuation, looksLikeTaskContinuation, continueTaskWithMessage, appendMainAgentDecisionTrace, applyMainAgentDecisionPetState, validateDailyDevGroupReady, compactMemoryText, buildGroupPlanModePreflight, createTask, updateTask, appendTaskTimelineEvent, buildWorkflowMeta, buildInlineTaskRuntime, updateGroupMemory, enqueueTask, buildCoordinatorSharedFilesContext, buildGroupProjectAnalysisContext, normalizePlanAssignments, getInitialWorkflowMeta, getCoordinatorActionMentions, processCrossAgents, runCoordinatorReviewLoop, getAgentQaItemsForGroup, } = deps;
     if (pathname === "/api/groups/send" && req.method === "POST") {
         const contentType = req.headers["content-type"] || "";
-        const handleGroupSend = async (payload, uploadedFiles = []) => {
+        const handleGroupSend = (0, conversation_attempt_1.withConversationAttemptScope)(async (payload, uploadedFiles = []) => {
             let reliabilityOperationKey = "";
             let group_id;
             let target_project;
@@ -1267,6 +1275,7 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                         orchestration_scope: "group_session",
                         queue_scope: "conversation_serial",
                         request_origin: globalDirectDispatch ? "global-agent" : "group-session",
+                        task_session_archive_policy: "user_confirm",
                         origin_session_id: groupSessionId || undefined,
                         priority: payload.priority || "normal",
                         auto_execute: autoExecute,
@@ -1807,6 +1816,7 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                         (0, storage_1.appendGroupMessage)(group_id, {
                             id: responseMessageId,
                             role: "assistant",
+                            ...(userMsg?.task_id ? { task_id: userMsg.task_id } : {}),
                             agent: coordinator.project,
                             content: outputText,
                             timestamp: new Date().toISOString(),
@@ -1934,7 +1944,7 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                     (0, utils_1.sendJson)(res, { error: failure.presentable ? failure.text : e.message, provider_retry_count: failure.retryCount, max_retries: failure.maxRetries, provider_request_evidence: failure }, 500);
                 }
             }
-        };
+        });
         if (contentType.includes("multipart/form-data")) {
             (0, secure_multipart_1.parseSecureMultipartRequest)(req)
                 .then(({ files, fields }) => handleGroupSend(fields, files))
@@ -1954,69 +1964,11 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
         return true;
     }
     if (pathname === "/api/groups/decompose" && req.method === "POST") {
-        let body = "";
-        req.on("data", (chunk) => body += chunk);
-        req.on("end", async () => {
-            try {
-                const payload = JSON.parse(body);
-                const { group_id, requirement, group_session_id, groupSessionId: groupSessionIdCamel } = payload;
-                let groupSessionId = String(group_session_id || groupSessionIdCamel || "").trim();
-                const groups = (0, storage_1.loadGroups)();
-                const group = groups.find(g => g.id === group_id);
-                if (!group)
-                    return (0, utils_1.sendJson)(res, { error: "群聊不存在" }, 400);
-                try {
-                    groupSessionId = (0, storage_1.resolveWritableGroupChatSession)(group_id, groupSessionId, { title: "需求分解" }).id;
-                }
-                catch (error) {
-                    const status = /不存在/.test(String(error?.message || "")) ? 404 : 409;
-                    return (0, utils_1.sendJson)(res, { error: error.message }, status);
-                }
-                const configs = (0, db_1.getConfigs)();
-                const coordinator = (0, group_orchestrator_1.getCoordinatorMember)(group);
-                const members = (0, group_orchestrator_1.getRoutableMembers)(group);
-                const memberList = members.map((m) => `${m.project}(${m.agent})`).join(", ");
-                const tasks = await (0, group_orchestrator_1.decomposeRequirementWithModelCoordinator)(group, requirement);
-                const output = JSON.stringify({ coordinator: coordinator.project, members: memberList, tasks }, null, 2);
-                const requestId = String(payload.client_message_id || payload.clientMessageId || `legacy_decompose_${crypto.randomUUID()}`);
-                const createdTasks = tasks.map((t, index) => createTask({
-                    title: t.title,
-                    description: t.description || "",
-                    business_goal: t.description || t.title,
-                    acceptance_criteria: Array.isArray(t.acceptance_criteria) ? t.acceptance_criteria.join("；") : String(t.acceptance_criteria || ""),
-                    target_project: t.target_project || coordinator.project,
-                    group_id,
-                    group_session_id: groupSessionId || undefined,
-                    assign_type: "group",
-                    orchestration_scope: "group_session",
-                    queue_scope: "conversation_serial",
-                    request_origin: "legacy-group-decompose",
-                    source_channel: "legacy-group-decompose",
-                    target_scope: "group_session",
-                    target_id: group_id,
-                    exact_session_id: groupSessionId,
-                    client_message_id: `${requestId}:${index + 1}`,
-                    workflow_type: "daily_dev",
-                    requires_code_changes: t.requires_code_changes !== false,
-                    requires_verification: t.requires_verification !== false,
-                    priority: t.priority || "normal",
-                    auto_execute: payload.auto_execute !== false,
-                }));
-                const queueResults = createdTasks.map(task => task.auto_execute ? enqueueTask(task.id, ctx) : { queued: false, message: "等待手动启动" });
-                (0, storage_1.appendGroupMessage)(group_id, {
-                    id: "m" + Date.now().toString(36) + "decompose",
-                    role: "assistant",
-                    agent: coordinator.project,
-                    content: `📋 需求已分解，共 ${createdTasks.length} 个任务：\n${createdTasks.map((t, i) => `${i + 1}. [${t.target_project}] ${t.title}`).join("\n")}`,
-                    timestamp: new Date().toISOString(),
-                    ...(groupSessionId ? { group_session_id: groupSessionId } : {}),
-                });
-                (0, utils_1.sendJson)(res, { success: true, tasks: createdTasks, queue_results: queueResults, raw_output: output, compatibility_route: true });
-            }
-            catch (e) {
-                (0, utils_1.sendJson)(res, { error: e.message }, 500);
-            }
-        });
+        (0, utils_1.sendJson)(res, {
+            success: false,
+            error: "旧任务拆分入口已移除，请使用统一任务规格入口",
+            code: "LEGACY_TASK_SPLIT_REMOVED",
+        }, 410);
         return true;
     }
     return false;

@@ -64,6 +64,9 @@ const ROUTE_ALLOWLIST = {
     ],
     "server-recovery": [
         /^\/api\/(?:tasks|projects|global-agent|feishu)(?:\/|\?|$)/,
+        // Recovery tooling may re-run the concrete project Agent CLI probe after
+        // a restart so stale readiness cannot strand an otherwise valid task.
+        /^\/api\/orchestrator\/agent-cli-probe(?:\?|$)/,
         /^\/api\/send-stream(?:\?|$)/,
     ],
     "desktop-pet": [

@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.buildTestAgentWorkOrderFromHandoff = buildTestAgentWorkOrderFromHandoff;
 const utils_1 = require("./utils");
+const work_order_prompt_contract_1 = require("../agents/work-order-prompt-contract");
 function text(value) {
     return String(value || "").trim();
 }
@@ -112,6 +113,14 @@ function buildProject(project, index, warnings, globalCompletedTasks, completedT
         adversarialBrowserProbeTemplates: (0, utils_1.asArray)(project.adversarialBrowserProbeTemplates || project.adversarial_browser_probe_templates),
         agentSummary: agentSummaryParts.join("\n"),
         risks: uniqueStrings((0, utils_1.asArray)(project.risks)),
+        editablePaths: uniqueStrings((0, utils_1.asArray)(project.editablePaths)),
+        readOnlyPaths: uniqueStrings((0, utils_1.asArray)(project.readOnlyPaths)),
+        cleanupPaths: uniqueStrings((0, utils_1.asArray)(project.cleanupPaths)),
+        synchronizedFixturePaths: (0, utils_1.asArray)(project.synchronizedFixturePaths).map((item) => ({
+            path: text(item?.path),
+            allowedChanges: uniqueStrings((0, utils_1.asArray)(item?.allowedChanges || item?.allowed_changes)),
+        })).filter((item) => item.path),
+        verificationRoot: text(project.verificationRoot || workDir),
     };
 }
 function buildTestAgentWorkOrderFromHandoff(input) {
@@ -168,6 +177,9 @@ function buildTestAgentWorkOrderFromHandoff(input) {
             handoffSource: text(input.metadata?.handoffSource) || "test-agent-handoff-builder",
             completedByProjectAgents: uniqueStrings((0, utils_1.asArray)(input.completedByProjectAgents || input.completed_by_project_agents)),
             completedTasksContextOnly,
+            promptVersion: work_order_prompt_contract_1.CCM_TEST_AGENT_WORK_ORDER_PROMPT_VERSION,
+            workOrderSchemaVersion: "ccm-test-agent-work-order-v3",
+            readOnly: true,
             ...(warnings.length ? { handoffWarnings: warnings.slice() } : {}),
         },
     };

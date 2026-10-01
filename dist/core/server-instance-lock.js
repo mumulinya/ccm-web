@@ -137,8 +137,20 @@ function archiveDeadLock(file) {
         return true;
     const owner = readOwner(file);
     const localOwner = !owner?.hostname || String(owner.hostname) === os.hostname();
-    if (!localOwner || processAlive(Number(owner?.pid || 0)))
+    if (!localOwner)
         return false;
+    const ownerPid = Number(owner?.pid || 0);
+    if (processAlive(ownerPid)) {
+        // Windows can reuse a PID after the original CCM process exits. Treat a
+        // live PID as ownership only when its process fingerprint and entry point
+        // still match the recorded server instance.
+        const liveFingerprint = getProcessIdentityFingerprint(ownerPid);
+        const fingerprintMatches = !!(liveFingerprint
+            && owner?.process_fingerprint
+            && liveFingerprint === String(owner.process_fingerprint));
+        if (fingerprintMatches)
+            return false;
+    }
     try {
         const archiveDir = path.join(path.dirname(file), "stale");
         fs.mkdirSync(archiveDir, { recursive: true });
@@ -230,7 +242,17 @@ function inspectCcmServerInstanceLock() {
     const file = getLockFile();
     const owner = readOwner(file);
     const alive = !!owner && String(owner.hostname || "") === os.hostname() && processAlive(Number(owner.pid || 0));
-    const fingerprint = alive ? getProcessIdentityFingerprint(Number(owner.pid || 0)) : "";
+    // When the lifecycle endpoint is handled by the owning process itself,
+    // re-running the Windows PowerShell process inspection is both unnecessary
+    // and unreliable for hidden/background Node processes. The fingerprint was
+    // already captured when the lock was acquired; compare it with the cached
+    // current-process value. External callers still use the OS-level probe.
+    const ownerIsCurrentProcess = alive && Number(owner?.pid || 0) === process.pid;
+    const fingerprint = alive
+        ? ownerIsCurrentProcess
+            ? (currentProcessFingerprint || getProcessIdentityFingerprint(process.pid))
+            : getProcessIdentityFingerprint(Number(owner.pid || 0))
+        : "";
     const identityVerified = !!(alive
         && owner?.schema === "ccm-service-instance-v2"
         && owner?.process_fingerprint

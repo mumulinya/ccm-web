@@ -52,6 +52,8 @@ const provider_neutral_context_cache_1 = require("../../system/provider-neutral-
 const provider_cache_capability_registry_1 = require("../../system/provider-cache-capability-registry");
 const provider_context_cache_adapters_1 = require("../../system/provider-context-cache-adapters");
 const provider_cache_scope_metrics_1 = require("../../system/provider-cache-scope-metrics");
+const session_cache_diagnostics_api_1 = require("./session-cache-diagnostics-api");
+const execution_session_registry_1 = require("../../agents/execution-session-registry");
 const user_visible_agent_events_1 = require("../../system/user-visible-agent-events");
 const project_git_1 = require("../projects/project-git");
 const access_policy_1 = require("../system/access-policy");
@@ -60,7 +62,12 @@ const planning_orchestrator_1 = require("../../agents/planning-orchestrator");
 const conversation_plan_mode_gate_1 = require("../../system/conversation-plan-mode-gate");
 const group_presented_plan_1 = require("./group-presented-plan");
 const task_plan_detail_1 = require("./task-plan-detail");
+const task_intake_preview_route_1 = require("./task-intake-preview-route");
 const task_pause_routes_1 = require("./task-pause-routes");
+const task_run_routes_1 = require("./task-run-routes");
+const task_session_store_1 = require("./task-session-store");
+const task_run_store_1 = require("./task-run-store");
+const scope_expansion_1 = require("../../agents/scope-expansion");
 const task_pause_control_1 = require("../../tasks/task-pause-control");
 const task_intake_preflight_1 = require("./task-intake-preflight");
 const source_ingestion_1 = require("../requirements/source-ingestion");
@@ -262,6 +269,131 @@ function configureCollaborationRouteExecutors(ctx) {
     });
 }
 function handleCollaborationApiReplayAndExecutionRoutes(pathname, req, res, parsed, ctx) {
+    const taskForRead = (taskId, required = "use") => {
+        const task = (0, db_1.loadTasks)().find((item) => String(item?.id || "") === String(taskId || ""));
+        if (!task)
+            return { task: null, allowed: false };
+        return { task, allowed: (0, access_policy_1.hasTaskResourceAccess)(task, req.ccmAuth, required) };
+    };
+    const rejectTaskRead = (taskId, required = "use") => {
+        const access = taskForRead(taskId, required);
+        if (!access.task) {
+            (0, utils_1.sendJson)(res, { success: false, error: "任务不存在" }, 404);
+            return null;
+        }
+        if (!access.allowed) {
+            (0, utils_1.sendJson)(res, { success: false, error: "当前账户没有该任务的访问权限", code: "RESOURCE_ACCESS_DENIED" }, 403);
+            return null;
+        }
+        return access.task;
+    };
+    const sessionMatch = pathname.match(/^\/api\/tasks\/([^/]+)\/execution-sessions(?:\/([^/]+))?$/);
+    if (sessionMatch && req.method === "GET") {
+        const taskId = decodeURIComponent(sessionMatch[1]);
+        if (!rejectTaskRead(taskId))
+            return true;
+        const rows = (0, execution_session_registry_1.listExecutionSessions)(taskId);
+        if (sessionMatch[2]) {
+            const session = (0, execution_session_registry_1.getExecutionSession)(decodeURIComponent(sessionMatch[2]));
+            if (!session || session.taskId !== taskId)
+                return (0, utils_1.sendJson)(res, { error: "执行会话不存在" }, 404);
+            return (0, utils_1.sendJson)(res, { success: true, session, runtimeBindings: (0, execution_session_registry_1.listRuntimeBindings)(session.id) });
+        }
+        return (0, utils_1.sendJson)(res, { success: true, sessions: rows });
+    }
+    const bindingMatch = pathname.match(/^\/api\/tasks\/([^/]+)\/runtime-bindings$/);
+    if (bindingMatch && req.method === "GET") {
+        const taskId = decodeURIComponent(bindingMatch[1]);
+        if (!rejectTaskRead(taskId))
+            return true;
+        const sessions = (0, execution_session_registry_1.listExecutionSessions)(taskId);
+        return (0, utils_1.sendJson)(res, { success: true, bindings: sessions.flatMap(session => (0, execution_session_registry_1.listRuntimeBindings)(session.id)) });
+    }
+    const workItemAction = pathname.match(/^\/api\/tasks\/([^/]+)\/work-items\/([^/]+)\/(transition|retry|replan|runtime-rebind)$/);
+    if (workItemAction && req.method === "POST") {
+        const taskId = decodeURIComponent(workItemAction[1]);
+        const workItemId = decodeURIComponent(workItemAction[2]);
+        const action = workItemAction[3];
+        const task = (0, db_1.loadTasks)().find((row) => String(row?.id || "") === taskId);
+        if (!task)
+            return (0, utils_1.sendJson)(res, { success: false, error: "任务不存在" }, 404);
+        if (!(0, access_policy_1.hasTaskResourceAccess)(task, req.ccmAuth, "manage"))
+            return (0, utils_1.sendJson)(res, { success: false, error: "当前账户没有该任务的管理权限", code: "RESOURCE_ACCESS_DENIED" }, 403);
+        const item = (Array.isArray(task.work_items) ? task.work_items : []).find((row) => String(row?.id || row?.workItemId || "") === workItemId);
+        if (!item)
+            return (0, utils_1.sendJson)(res, { success: false, error: "工作项不存在" }, 404);
+        const session = (0, execution_session_registry_1.listExecutionSessions)(taskId).find(row => row.workItemId === workItemId);
+        if (!session)
+            return (0, utils_1.sendJson)(res, { success: false, error: "工作项尚未绑定执行会话" }, 409);
+        try {
+            if (action === "transition") {
+                const status = String(parsed.query.status || parsed.query.to || "").trim();
+                const allowed = ["created", "ready", "running", "paused", "verifying", "repairing", "blocked", "completed", "failed", "cancelled"];
+                if (!allowed.includes(status))
+                    return (0, utils_1.sendJson)(res, { success: false, error: "无效的执行会话状态" }, 400);
+                return (0, utils_1.sendJson)(res, { success: true, session: (0, execution_session_registry_1.transitionExecutionSession)(session.id, status) });
+            }
+            if (action === "runtime-rebind") {
+                const runtimeType = String(parsed.query.runtime_type || parsed.query.runtimeType || "CUSTOM").toUpperCase();
+                const providerSessionId = String(parsed.query.provider_session_id || parsed.query.providerSessionId || "").trim();
+                return (0, utils_1.sendJson)(res, { success: true, sessionId: session.id, binding: (0, execution_session_registry_1.replaceRuntimeSession)(session.id, { runtimeType, providerSessionId, agentId: runtimeType }) });
+            }
+            const attemptId = String(parsed.query.attempt_id || parsed.query.attemptId || `${action}-${Date.now()}`).trim();
+            const updated = (0, execution_session_registry_1.appendExecutionAttempt)(session.id, attemptId);
+            const targetStatus = action === "replan" ? "ready" : "repairing";
+            const next = (0, execution_session_registry_1.transitionExecutionSession)(session.id, targetStatus);
+            return (0, utils_1.sendJson)(res, { success: true, action, taskId, workItemId, attemptId, session: next, previous: updated });
+        }
+        catch (error) {
+            return (0, utils_1.sendJson)(res, { success: false, error: String(error?.message || error) }, 409);
+        }
+    }
+    const scopeExpansionMatch = pathname.match(/^\/api\/tasks\/([^/]+)\/work-items\/([^/]+)\/scope-expansion(?:\/(approve|reject))?$/);
+    if (scopeExpansionMatch && req.method === "POST") {
+        const taskId = decodeURIComponent(scopeExpansionMatch[1]);
+        const workItemId = decodeURIComponent(scopeExpansionMatch[2]);
+        const action = scopeExpansionMatch[3] || "request";
+        const task = (0, db_1.loadTasks)().find((row) => String(row?.id || "") === taskId);
+        if (!task)
+            return (0, utils_1.sendJson)(res, { success: false, error: "任务不存在" }, 404);
+        if (!(0, access_policy_1.hasTaskResourceAccess)(task, req.ccmAuth, "manage"))
+            return (0, utils_1.sendJson)(res, { success: false, error: "当前账户没有该任务的管理权限" }, 403);
+        const item = (Array.isArray(task.work_items) ? task.work_items : []).find((row) => String(row?.id || row?.workItemId || "") === workItemId);
+        if (!item)
+            return (0, utils_1.sendJson)(res, { success: false, error: "工作项不存在" }, 404);
+        const requests = Array.isArray(task.scope_expansion_requests) ? task.scope_expansion_requests.slice() : [];
+        try {
+            if (action === "request") {
+                const request = (0, scope_expansion_1.createScopeExpansionRequest)({ path: parsed.query.path, reason: parsed.query.reason, allowedChanges: String(parsed.query.allowed_changes || parsed.query.allowedChanges || "").split(","), requestedBy: parsed.query.requestedBy || "project-agent" });
+                const next = (0, collaboration_1.updateTask)(taskId, { scope_expansion_requests: [...requests.filter((r) => r.id !== request.id), { ...request, workItemId }] });
+                return (0, utils_1.sendJson)(res, { success: true, request, taskId, workItemId, fileChangePolicy: (0, scope_expansion_1.scopeExpansionPolicy)(next || task) });
+            }
+            const requestId = String(parsed.query.request_id || parsed.query.requestId || "").trim();
+            const index = requests.findIndex((r) => r.id === requestId && String(r.workItemId || workItemId) === workItemId);
+            if (index < 0)
+                return (0, utils_1.sendJson)(res, { success: false, error: "范围扩展请求不存在" }, 404);
+            requests[index] = { ...requests[index], status: action === "approve" ? "approved" : "rejected", ...(action === "approve" ? { approvedAt: new Date().toISOString(), approvedBy: "ccm" } : {}) };
+            const next = (0, collaboration_1.updateTask)(taskId, { scope_expansion_requests: requests });
+            return (0, utils_1.sendJson)(res, { success: true, request: requests[index], approvedPaths: (0, scope_expansion_1.approvedScopePaths)(next || task), fileChangePolicy: (0, scope_expansion_1.scopeExpansionPolicy)(next || task) });
+        }
+        catch (error) {
+            return (0, utils_1.sendJson)(res, { success: false, error: String(error?.message || error) }, 400);
+        }
+    }
+    const taskResourceMatch = pathname.match(/^\/api\/tasks\/([^/]+)\/(failures|evidence|lifecycle)$/);
+    if (taskResourceMatch && req.method === "GET") {
+        const taskId = decodeURIComponent(taskResourceMatch[1]);
+        const task = rejectTaskRead(taskId);
+        if (!task)
+            return true;
+        const kind = taskResourceMatch[2];
+        if (kind === "lifecycle") {
+            return (0, utils_1.sendJson)(res, { success: true, taskId, status: task.status || "pending", phase: task.phase || null, statusDetail: task.status_detail || task.statusDetail || null, generation: task.generation || 1, attempt: task.attempt || 0, updatedAt: task.updated_at || task.updatedAt || null });
+        }
+        const values = kind === "failures" ? (task.failures || task.failureRecords || []) : (task.evidence || task.evidenceRecords || []);
+        const rows = Array.isArray(values) ? values.map((item) => ({ id: item.id || item.evidenceId || item.failureRecordId || "", type: item.type || item.kind || kind, status: item.status || null, summary: String(item.summary || item.message || item.result || "").slice(0, 500), createdAt: item.createdAt || item.created_at || null, contentStored: false })) : [];
+        return (0, utils_1.sendJson)(res, { success: true, taskId, [kind]: rows, contentStored: false });
+    }
     if ((0, task_pause_routes_1.handleTaskPauseRoutes)(req, res, parsed, ctx, {
         sendJson: utils_1.sendJson,
         loadTasks: db_1.loadTasks,
@@ -281,24 +413,6 @@ function handleCollaborationApiReplayAndExecutionRoutes(pathname, req, res, pars
         updateGroupTaskInlineStatus: collaboration_1.updateGroupTaskInlineStatus,
     }))
         return true;
-    const taskForRead = (taskId, required = "use") => {
-        const task = (0, db_1.loadTasks)().find((item) => String(item?.id || "") === String(taskId || ""));
-        if (!task)
-            return { task: null, allowed: false };
-        return { task, allowed: (0, access_policy_1.hasTaskResourceAccess)(task, req.ccmAuth, required) };
-    };
-    const rejectTaskRead = (taskId, required = "use") => {
-        const access = taskForRead(taskId, required);
-        if (!access.task) {
-            (0, utils_1.sendJson)(res, { success: false, error: "任务不存在" }, 404);
-            return null;
-        }
-        if (!access.allowed) {
-            (0, utils_1.sendJson)(res, { success: false, error: "当前账户没有该任务的访问权限", code: "RESOURCE_ACCESS_DENIED" }, 403);
-            return null;
-        }
-        return access.task;
-    };
     const planDetailMatch = pathname.match(/^\/api\/tasks\/([^/]+)\/plan-detail(?:\/confirm)?$/);
     if (planDetailMatch && ["GET", "PATCH", "POST"].includes(req.method)) {
         const taskId = decodeURIComponent(planDetailMatch[1]);
@@ -518,7 +632,7 @@ function handleCollaborationApiReplayAndExecutionRoutes(pathname, req, res, pars
             .filter((session) => !["closed", "cancelled", "failed", "completed"].includes(String(session?.status || session?.state || "").toLowerCase()));
         const worktrees = executions.filter((execution) => execution?.workspace?.mode === "worktree" && !execution?.workspace?.cleanedAt);
         const canUndo = targets.every(target => ["pending", "paused", "blocked", "needs_user"].includes(String(target?.status || "").toLowerCase()))
-            && agentRuns.length === 0 && liveExecutions.length === 0 && !targets.some(target => collaboration_1.runningTaskIds.has(String(target?.id || "")));
+            && agentRuns.length === 0 && liveExecutions.length === 0 && !targets.some(target => (0, collaboration_1.isTaskRunningInMemory)(target));
         return {
             schema: "ccm-task-stop-preview-v1",
             taskId: String(task?.id || ""),
@@ -821,23 +935,48 @@ function handleCollaborationApiReplayAndExecutionRoutes(pathname, req, res, pars
         });
         const configuredModel = runtimeTask?.model_display_name || runtimeTask?.model || runtimeTask?.provider_model || runtimeTask?.runtime_model;
         const runtimeTaskTerminal = runtimeTask && ["done", "failed", "cancelled", "canceled", "reverted"].includes(String(runtimeTask?.status || "").toLowerCase());
-        const model = configuredModel ? { displayName: String(configuredModel).slice(0, 120), effort: runtimeTask?.reasoning_effort ? String(runtimeTask.reasoning_effort).slice(0, 40) : undefined, source: runtimeTaskTerminal ? "latest_run" : runtimeTask ? "active_run" : "configured" } : undefined;
+        const settingsModelConfig = (0, group_orchestrator_1.loadOrchestratorConfig)();
+        const model = configuredModel ? { displayName: String(configuredModel).slice(0, 120), effort: runtimeTask?.reasoning_effort ? String(runtimeTask.reasoning_effort).slice(0, 40) : String(settingsModelConfig.reasoningEffort || "").trim() || undefined, source: runtimeTaskTerminal ? "latest_run" : runtimeTask ? "active_run" : "configured", configSource: runtimeTask?.reasoning_effort ? "runtime_receipt" : "settings_page" } : undefined;
         const task = runtimeTask ? { title: String(runtimeTask?.title || "当前任务").replace(/[\r\n]+/g, " ").slice(0, 160), state: String(runtimeTask?.status || "running"), stage: stageFor(runtimeTask) } : undefined;
         const providerCacheState = (0, provider_neutral_context_cache_1.readLatestProviderNeutralContextCacheState)({ scope: scope, scopeId, sessionId: exactSessionId });
+        const sessionCacheDiagnostics = { ...(0, provider_cache_scope_metrics_1.readProviderCacheSessionDiagnostics)({ scope, scopeId, sessionId: exactSessionId }, providerCacheState),
+            canReadOverallRequests: req.ccmAuth?.kind === 'internal' || req.ccmAuth?.role === 'admin' };
         const providerCacheCapability = (0, provider_cache_capability_registry_1.readProviderCacheCapabilityState)((0, group_orchestrator_1.loadOrchestratorConfig)());
         const providerCacheAdapter = (0, provider_context_cache_adapters_1.providerCacheAdapterPublicSummary)((0, group_orchestrator_1.loadOrchestratorConfig)()).active;
         const providerCacheMetrics = (0, provider_cache_scope_metrics_1.readProviderCacheScopeMetrics)({ scope, scopeId, sessionId: exactSessionId });
         const cacheObservedInputTokens = Math.max(0, Number(providerCacheState?.providerInputTokens || 0))
             + Math.max(0, Number(providerCacheState?.cacheCreationInputTokens || 0))
             + Math.max(0, Number(providerCacheState?.cacheReadInputTokens || 0));
+        const providerUsageReported = providerCacheState?.providerUsageReported === true;
+        const sessionRecent20 = providerCacheMetrics.session.recent20 || {};
+        const capabilityRequestHitRate = providerCacheCapability?.foreground?.requestHitRate;
+        const liveRequestHitRate = sessionRecent20.requestHitRate ?? capabilityRequestHitRate;
+        const liveTokenReuseRate = sessionRecent20.tokenReuseRate;
         const providerCache = {
             mode: String(providerCacheState?.adapterKind || "stable_prefix"),
             cacheReadInputTokens: Math.max(0, Number(providerCacheState?.cacheReadInputTokens || 0)),
-            cacheHitRate: Math.max(0, Number(providerCacheCapability?.foreground?.requestHitRate || 0)),
-            tokenReuseRate: cacheObservedInputTokens > 0 ? Math.min(1, Math.max(0, Number(providerCacheState?.cacheReadInputTokens || 0)) / cacheObservedInputTokens) : 0,
+            cacheCreationInputTokens: Math.max(0, Number(providerCacheState?.cacheCreationInputTokens || 0)),
+            providerInputTokens: Math.max(0, Number(providerCacheState?.providerInputTokens || 0)),
+            // Keep Provider-reported usage separate from CCM's local payload
+            // accounting. `providerInputTokens` is the direct/un-cached input field
+            // returned by the Provider; the accounted total includes cache read and
+            // cache creation fields when those are reported.
+            providerTotalInputTokens: cacheObservedInputTokens,
+            estimatedInputTokens: Math.max(0, Number(providerCacheState?.estimatedInputTokens || 0)),
+            providerUsageReported,
+            cacheStatus: String(providerCacheCapability?.cacheStatus || "unproven"),
+            promptCacheKeyStatus: String(providerCacheCapability?.promptCacheKeyStatus || providerCacheCapability?.evidence?.promptCacheKeyStatus || providerCacheCapability?.evidence?.explicitCacheKeyStatus || "unproven"),
+            cacheHitRate: liveRequestHitRate == null ? null : Math.min(1, Math.max(0, Number(liveRequestHitRate || 0))),
+            tokenReuseRate: cacheObservedInputTokens > 0 ? Math.min(1, Math.max(0, Number(providerCacheState?.cacheReadInputTokens || 0)) / cacheObservedInputTokens) : null,
+            // Explicit names used by the live diagnostics panel. Keep the legacy
+            // aliases above for API compatibility.
+            liveRequestHitRate: liveRequestHitRate == null ? null : Math.min(1, Math.max(0, Number(liveRequestHitRate || 0))),
+            liveTokenReuseRate: liveTokenReuseRate == null ? null : Math.min(1, Math.max(0, Number(liveTokenReuseRate || 0))),
             hitCount: Math.max(0, Number(providerCacheCapability?.foreground?.hitCount || 0)),
             missCount: Math.max(0, Number(providerCacheCapability?.foreground?.missCount || 0)),
             missReason: String(providerCacheState?.cacheMissReason || ""),
+            localHistoryState: providerCacheState?.localHistoryState,
+            providerCacheObservation: providerCacheState?.providerCacheObservation,
             implicitCacheStatus: String(providerCacheCapability?.implicitCacheStatus || "unproven"),
             explicitFieldStatus: String(providerCacheCapability?.explicitFieldStatus || "unproven"),
             exactReplayStatus: String(providerCacheCapability?.exactReplayStatus || "unproven"),
@@ -846,6 +985,11 @@ function handleCollaborationApiReplayAndExecutionRoutes(pathname, req, res, pars
             prefixExtensionEligible: providerCacheState?.prefixExtensionEligible === true,
             prefixExtensionVerified: providerCacheState?.prefixExtensionVerified === true,
             explicitBreakpointsVerified: providerCacheCapability?.explicitBreakpointsVerified === true,
+            explicitBreakpointsStatus: String(providerCacheCapability?.explicitBreakpointsStatus || "unproven"),
+            promptCacheOptionsStatus: String(providerCacheCapability?.promptCacheOptionsStatus || "unproven"),
+            responsesContinuationStatus: String(providerCacheCapability?.responsesContinuationStatus || "unproven"),
+            responsesToolLoopContinuationStatus: String(providerCacheCapability?.responsesToolLoopContinuationStatus || "unproven"),
+            lastContinuationFailureReason: String(providerCacheCapability?.lastContinuationFailureReason || ""),
             cacheWarmState: String(providerCacheState?.cacheWarmState || "cold"),
             providerRoutingMissStreak: Math.max(0, Number(providerCacheState?.providerRoutingMissStreak || 0)),
             stablePrefixChangeReasons: Array.isArray(providerCacheState?.stablePrefixChangeReasons) ? providerCacheState.stablePrefixChangeReasons.map(String).slice(0, 12) : [],
@@ -854,6 +998,12 @@ function handleCollaborationApiReplayAndExecutionRoutes(pathname, req, res, pars
             automaticCacheOptimization: providerCacheState?.automaticCacheOptimization || null,
             stableCoreChecksum: String(providerCacheState?.stableCoreChecksum || providerCacheState?.stablePrefixChecksum || ""),
             stableCoreTokens: Math.max(0, Number(providerCacheState?.stableCoreTokens || providerCacheState?.stablePrefixTokens || 0)),
+            stablePrefixTokens: Math.max(0, Number(providerCacheState?.stablePrefixTokens || 0)),
+            dynamicSuffixTokens: Math.max(0, Number(providerCacheState?.dynamicSuffixTokens || 0)),
+            toolSchemaTokens: Math.max(0, Number(providerCacheState?.toolSchemaTokens || 0)),
+            toolSchemaPrefixEligible: providerCacheState?.toolSchemaPrefixEligible === true,
+            continuation: providerCacheState?.adapterEvidence?.continuation || null,
+            cacheRecommendation: providerCacheState?.cacheRecommendation || null,
             agentCacheStageMetrics: providerCacheState?.agentCacheStageMetrics || null,
             breakpointChecksums: Array.isArray(providerCacheState?.breakpointChecksums) ? providerCacheState.breakpointChecksums.map(String).slice(0, 4) : [],
             cacheStrategy: providerCacheState?.cacheStrategy || null,
@@ -862,8 +1012,9 @@ function handleCollaborationApiReplayAndExecutionRoutes(pathname, req, res, pars
             resolvedExecution: providerCacheAdapter?.resolvedExecution || null,
             scopeRecent20: providerCacheMetrics.scope.recent20,
             scopeRecent50: providerCacheMetrics.scope.recent50,
-            sessionRecent20: providerCacheMetrics.session.recent20,
+            sessionRecent20,
             sessionRecent50: providerCacheMetrics.session.recent50,
+            sessionDiagnostics: sessionCacheDiagnostics,
             recent20: providerCacheMetrics.session.recent20,
             recent50: providerCacheMetrics.session.recent50,
             agentStages: providerCacheMetrics.stages || [],
@@ -986,6 +1137,8 @@ function handleCollaborationApiReplayAndExecutionRoutes(pathname, req, res, pars
                 availableActions.push({ id: "undo_stop", kind: "undo_stop", label: "撤销停止", enabled: true });
             return {
                 taskId: String(task?.id || ""),
+                run_id: String(task?.active_run_id || task?.run_id || task?.task_run?.run_id || ""),
+                active_run_id: String(task?.active_run_id || task?.run_id || task?.task_run?.run_id || ""),
                 title: safeText(task?.title, 140) || "未命名任务",
                 source,
                 state: stateFor(task),
@@ -1266,7 +1419,10 @@ function handleCollaborationApiReplayAndExecutionRoutes(pathname, req, res, pars
                 const task = rejectTaskRead(taskId, "manage");
                 if (!task)
                     return;
-                if (collaboration_1.runningTaskIds.has(taskId))
+                const runGuard = (0, task_run_store_1.validateActiveTaskRun)(task, payload.run_id || payload.runId || "");
+                if (!runGuard.ok)
+                    return (0, utils_1.sendJson)(res, { success: false, ...runGuard }, 409);
+                if ((0, collaboration_1.isTaskRunningInMemory)(task))
                     return (0, utils_1.sendJson)(res, { error: "任务仍在执行，请先停止后再撤销" }, 409);
                 const checkpointIds = (0, collaboration_1.uniqueStrings)((0, execution_kernel_1.listExecutions)({ taskId }).flatMap((item) => item.checkpointIds || [])).reverse();
                 if (!checkpointIds.length)
@@ -1288,17 +1444,51 @@ function handleCollaborationApiReplayAndExecutionRoutes(pathname, req, res, pars
         });
         return true;
     }
-    if (["/api/tasks/interrupt", "/api/tasks/resume-interrupted"].includes(pathname) && req.method === "POST") {
+    const recoveryActionAlias = pathname.match(/^\/api\/tasks\/([^/]+)\/(resume|retry|replan)$/);
+    const isRecoveryAction = pathname.endsWith("/resume-interrupted") || !!recoveryActionAlias;
+    if ((["/api/tasks/interrupt", "/api/tasks/resume-interrupted"].includes(pathname) || recoveryActionAlias) && req.method === "POST") {
         let body = "";
         req.on("data", (chunk) => body += chunk);
         req.on("end", async () => {
             try {
                 const payload = body ? JSON.parse(body) : {};
-                const taskId = String(payload.task_id || payload.taskId || payload.id || "");
-                let task = (0, db_1.loadTasks)().find((item) => item.id === taskId);
+                const taskId = String(payload.task_id || payload.taskId || payload.id || (recoveryActionAlias ? decodeURIComponent(recoveryActionAlias[1]) : ""));
+                if (recoveryActionAlias && taskId !== decodeURIComponent(recoveryActionAlias[1]))
+                    return (0, utils_1.sendJson)(res, { error: "任务标识不一致" }, 409);
+                let task = rejectTaskRead(taskId, "manage");
                 if (!task)
-                    return (0, utils_1.sendJson)(res, { error: "任务不存在" }, 404);
-                if (pathname.endsWith("/resume-interrupted")) {
+                    return;
+                const runGuard = (0, task_run_store_1.validateActiveTaskRun)(task, payload.run_id || payload.runId || "");
+                if (!runGuard.ok)
+                    return (0, utils_1.sendJson)(res, { success: false, ...runGuard }, 409);
+                // A TESTAGENT_VERIFY item is a read-only projection of an already
+                // completed independent review. It has no runtime interruption
+                // context to recover and must be re-enqueued directly so the queue
+                // consumes the signed child verdict instead of creating another
+                // write-capable Agent attempt.
+                const isTestAgentProjection = String(task?.requirement_item_key || task?.mission_target?.item_key || "").toUpperCase() === "TESTAGENT_VERIFY"
+                    || task?.task_kind === "acceptance_projection";
+                if (isRecoveryAction && isTestAgentProjection) {
+                    const dependencies = Array.isArray(task?.mission_dependencies) ? task.mission_dependencies.map(String) : [];
+                    const child = (0, db_1.loadTasks)().find((candidate) => dependencies.includes(String(candidate?.id || ""))
+                        && candidate?.status === "done"
+                        && candidate?.test_agent_review?.canAccept === true
+                        && candidate?.terminal_gate?.passed === true);
+                    if (!child)
+                        return (0, utils_1.sendJson)(res, { error: "等待实现子任务的 TestAgent 与 Terminal Gate 终态回执", code: "TEST_AGENT_PROJECTION_NOT_READY" }, 409);
+                    const queuedTask = (0, collaboration_1.updateTask)(taskId, {
+                        status: "pending",
+                        acceptance_state: "pending",
+                        auto_execute: true,
+                        paused: false,
+                        is_paused: false,
+                        recovery_pending: false,
+                        status_detail: "已确认前置验收回执，等待队列消费只读投影",
+                    }) || task;
+                    const queueResult = (0, collaboration_1.enqueueTask)(taskId, ctx, runGuard.runId);
+                    return (0, utils_1.sendJson)(res, { success: true, task: queuedTask, queue_result: queueResult, projection: { source_task_id: child.id, content_stored: false } });
+                }
+                if (isRecoveryAction) {
                     if (["done", "completed"].includes(String(task?.status || "").toLowerCase())
                         || ["accepted", "terminal_gate_passed"].includes(String(task?.acceptance_state || "").toLowerCase())) {
                         return (0, utils_1.sendJson)(res, { error: "任务已经正式完成，不能从历史中断记录继续执行；请创建新任务或发起明确返工", code: "TASK_ALREADY_COMPLETED" }, 409);
@@ -1308,12 +1498,13 @@ function handleCollaborationApiReplayAndExecutionRoutes(pathname, req, res, pars
                         return (0, utils_1.sendJson)(res, { error: "任务事件链不完整，需要人工核对后再恢复", code: "TASK_CONTEXT_DRIFTED", detail: catchUp }, 409);
                     task = (0, db_1.loadTasks)().find((item) => item.id === taskId) || task;
                 }
-                if (rejectTaskMutationConflict(res, task, payload, pathname.endsWith("/resume-interrupted")))
+                if (rejectTaskMutationConflict(res, task, payload, isRecoveryAction))
                     return;
-                if (pathname.endsWith("/resume-interrupted")) {
+                if (isRecoveryAction) {
                     const context = task?.task_context;
                     const span = context?.timelineSpans?.find((item) => String(item?.taskId || "") === taskId);
-                    const suppliedContextRevision = payload.task_context_revision ?? payload.taskContextRevision;
+                    const suppliedContextRevision = payload.expectedContextRevision ?? payload.expected_context_revision
+                        ?? payload.task_context_revision ?? payload.taskContextRevision;
                     const suppliedContextChecksum = String(payload.task_context_checksum || payload.taskContextChecksum || "");
                     const suppliedSpanChecksum = String(payload.timeline_span_checksum || payload.timelineSpanChecksum || "");
                     if (!context || !span || suppliedContextRevision === undefined || !suppliedContextChecksum || !suppliedSpanChecksum) {
@@ -1321,6 +1512,19 @@ function handleCollaborationApiReplayAndExecutionRoutes(pathname, req, res, pars
                     }
                     if (Number(suppliedContextRevision) !== Number(context.revision || 0) || suppliedContextChecksum !== String(context.checksum || "") || suppliedSpanChecksum !== String(span.checksum || "")) {
                         return (0, utils_1.sendJson)(res, { error: "任务上下文或区间已经变化，请刷新后重试", code: "TASK_TIMELINE_GUARD_CONFLICT" }, 409);
+                    }
+                    const suppliedSession = String(payload.conversationSessionId || payload.conversation_session_id || "").trim();
+                    const expectedSession = String(task.execution_session_id || task.active_execution_session_id || task.group_session_id || task.project_session_id || task.origin_session_id || "").trim();
+                    if (suppliedSession && expectedSession && suppliedSession !== expectedSession) {
+                        return (0, utils_1.sendJson)(res, { error: "恢复会话与任务锚点不匹配", code: "TASK_SESSION_GUARD_CONFLICT" }, 409);
+                    }
+                    const suppliedGeneration = payload.generation;
+                    if (suppliedGeneration !== undefined && Number(suppliedGeneration) !== Number(task.generation || 0)) {
+                        return (0, utils_1.sendJson)(res, { error: "任务世代已经变化，请刷新后重试", code: "TASK_GENERATION_GUARD_CONFLICT" }, 409);
+                    }
+                    const suppliedWorkItemId = String(payload.workItemId || payload.work_item_id || "").trim();
+                    if (suppliedWorkItemId && !(Array.isArray(task.work_items) && task.work_items.some((item) => String(item?.id || item?.workItemId || "") === suppliedWorkItemId))) {
+                        return (0, utils_1.sendJson)(res, { error: "工作项不属于当前任务", code: "TASK_WORK_ITEM_GUARD_CONFLICT" }, 409);
                     }
                 }
                 if (pathname.endsWith("/interrupt")) {
@@ -1342,7 +1546,7 @@ function handleCollaborationApiReplayAndExecutionRoutes(pathname, req, res, pars
                     await ctx.onTaskStatusChange?.(updated || task, "interrupted", reason);
                     return (0, utils_1.sendJson)(res, { success: true, task: updated, interruption_receipt: interruption.receipt, queue_status: (0, collaboration_1.getQueueStatus)() });
                 }
-                if (collaboration_1.runningTaskIds.has(taskId))
+                if ((0, collaboration_1.isTaskRunningInMemory)(task))
                     return (0, utils_1.sendJson)(res, { error: "旧执行仍在终止，请稍后再恢复" }, 409);
                 let resumableTask = task;
                 let recoveryWorkspace = (0, task_recovery_orchestrator_1.captureTaskRecoveryWorkspace)(resumableTask);
@@ -1403,7 +1607,8 @@ function handleCollaborationApiReplayAndExecutionRoutes(pathname, req, res, pars
                     currentWorkspaceChecksum: recoveryWorkspace.checksum,
                     worktreeOwnershipValid: recoveryWorkspace.ownershipValid,
                     resolveUserSession: true,
-                    enqueue: id => (0, collaboration_1.enqueueTask)(id, ctx),
+                    action: recoveryActionAlias?.[2] === "retry" ? "retry" : recoveryActionAlias?.[2] === "replan" ? "replan" : "resume",
+                    enqueue: id => (0, collaboration_1.enqueueTask)(id, ctx, runGuard.runId),
                 });
                 if (!recovery.success)
                     return (0, utils_1.sendJson)(res, { error: "恢复前需要核对中断现场", recovery_preflight: recovery.preflight, task: recovery.task ? { ...recovery.task, task_context: (0, task_context_1.projectTaskContext)(recovery.task) } : null }, 409);
@@ -1430,6 +1635,9 @@ function handleCollaborationApiReplayAndExecutionRoutes(pathname, req, res, pars
                 const task = rejectTaskRead(taskId, "manage");
                 if (!task)
                     return;
+                const runGuard = (0, task_run_store_1.validateActiveTaskRun)(task, payload.run_id || payload.runId || "");
+                if (!runGuard.ok)
+                    return (0, utils_1.sendJson)(res, { success: false, ...runGuard }, 409);
                 if (rejectTaskMutationConflict(res, task, payload, false))
                     return;
                 if (taskStopTerminal(task))
@@ -1459,7 +1667,7 @@ function handleCollaborationApiReplayAndExecutionRoutes(pathname, req, res, pars
         const activeRuns = rows.flatMap((item) => (0, execution_kernel_1.listActiveAgentRuns)({ taskId: String(item.id || "") }));
         const liveExecutions = rows.flatMap((item) => (0, execution_kernel_1.listExecutions)({ taskId: String(item.id || "") }))
             .filter((execution) => !["succeeded", "failed", "cancelled"].includes(String(execution?.state || "")));
-        const stillRunning = rows.some((item) => collaboration_1.runningTaskIds.has(String(item.id || ""))) || activeRuns.length > 0 || liveExecutions.length > 0;
+        const stillRunning = rows.some((item) => (0, collaboration_1.isTaskRunningInMemory)(item)) || activeRuns.length > 0 || liveExecutions.length > 0;
         const requestedAt = String(task?.cancellation_requested_at || task?.cancellation_progress?.requested_at || "");
         const elapsedMs = requestedAt ? Math.max(0, Date.now() - Date.parse(requestedAt)) : 0;
         const stuck = stillRunning && elapsedMs >= 30_000;
@@ -1525,6 +1733,9 @@ function handleCollaborationApiReplayAndExecutionRoutes(pathname, req, res, pars
                 const task = rejectTaskRead(taskId, "manage");
                 if (!task)
                     return;
+                const runGuard = (0, task_run_store_1.validateActiveTaskRun)(task, payload.run_id || payload.runId || "");
+                if (!runGuard.ok)
+                    return (0, utils_1.sendJson)(res, { success: false, ...runGuard }, 409);
                 if (rejectTaskMutationConflict(res, task, payload, false))
                     return;
                 const action = String(payload.action || "recheck");
@@ -1560,6 +1771,9 @@ function handleCollaborationApiReplayAndExecutionRoutes(pathname, req, res, pars
                 const task = rejectTaskRead(taskId, "manage");
                 if (!task)
                     return;
+                const runGuard = (0, task_run_store_1.validateActiveTaskRun)(task, payload.run_id || payload.runId || "");
+                if (!runGuard.ok)
+                    return (0, utils_1.sendJson)(res, { success: false, ...runGuard }, 409);
                 if (rejectTaskMutationConflict(res, task, payload, false))
                     return;
                 const undo = task?.cancellation_undo;
@@ -1584,9 +1798,11 @@ function handleCollaborationApiReplayAndExecutionRoutes(pathname, req, res, pars
                         cancellation_requested_at: null,
                         cancellation_reason: null, cancelled_at: null, cancellation_scope: null,
                         cancellation_progress: null, cancellation_undo: null,
-                    });
-                    if (snapshot.was_queued || (snapshot.status === "pending" && snapshot.auto_execute !== false))
-                        (0, collaboration_1.enqueueTask)(String(snapshot.task_id || ""), ctx);
+                    }, { allowCancelledRecovery: true });
+                    if (snapshot.was_queued || (snapshot.status === "pending" && snapshot.auto_execute !== false)) {
+                        const restoredRun = updated?.active_run_id || updated?.run_id || updated?.task_run?.run_id || "";
+                        (0, collaboration_1.enqueueTask)(String(snapshot.task_id || ""), ctx, restoredRun);
+                    }
                     if (updated)
                         restored.push(updated);
                 }
@@ -1614,6 +1830,9 @@ function handleCollaborationApiReplayAndExecutionRoutes(pathname, req, res, pars
                 const task = rejectTaskRead(taskId, "manage");
                 if (!task)
                     return;
+                const runGuard = (0, task_run_store_1.validateActiveTaskRun)(task, payload.run_id || payload.runId || "");
+                if (!runGuard.ok)
+                    return (0, utils_1.sendJson)(res, { success: false, ...runGuard }, 409);
                 if (rejectTaskMutationConflict(res, task, payload, false))
                     return;
                 if (taskStopTerminal(task))
@@ -1637,10 +1856,10 @@ function handleCollaborationApiReplayAndExecutionRoutes(pathname, req, res, pars
                 let anyRunning = false;
                 for (const target of targets) {
                     const targetId = String(target.id || "");
-                    (0, collaboration_1.removeTaskFromQueues)(targetId);
+                    (0, collaboration_1.removeTaskFromQueues)(targetId, targetId === taskId ? runGuard.runId : undefined);
                     const cancellation = (0, execution_kernel_1.requestTaskCancellation)(targetId, reason, String(payload.actor || "local-user"));
                     const testAgentRunsCancelled = (0, test_agent_runner_1.cancelTestAgentRunsForTask)(targetId, reason);
-                    const isRunning = collaboration_1.runningTaskIds.has(targetId) || (0, execution_kernel_1.listActiveAgentRuns)({ taskId: targetId }).length > 0;
+                    const isRunning = (0, collaboration_1.isTaskRunningInMemory)(target) || (0, execution_kernel_1.listActiveAgentRuns)({ taskId: targetId }).length > 0;
                     anyRunning = anyRunning || isRunning;
                     const sessions = (0, agent_sessions_1.closeTaskAgentSessions)({ taskId: targetId }, "用户停止任务，关闭任务级原生会话");
                     const idempotencySettled = target.trace_id ? (0, reliability_ledger_1.settleIdempotencyByTrace)(target.trace_id, "failed", { cancelled: true, task_id: targetId, reason }) : [];
@@ -1869,212 +2088,11 @@ function bindRequirementPlanTargetSessions(plan, input) {
     return { ...plan, items };
 }
 function handleCollaborationApiIntakeRoutesPartA(pathname, req, res, parsed, ctx) {
-    if (pathname === "/api/usability/intake/preview" && req.method === "POST") {
-        const handleIntakePreview = async (payload, files = []) => {
-            try {
-                const userRequirement = (0, collaboration_1.compactFormText)(payload.requirement || payload.goal || payload.message, "");
-                const groups = (0, storage_1.loadGroups)();
-                const configs = (0, db_1.getConfigs)();
-                const availableTargets = [
-                    ...groups.map((group) => ({
-                        type: "group",
-                        id: group.id,
-                        name: group.name || group.id,
-                        capabilities: (group.members || []).flatMap((member) => member.skills || member.capabilities || []),
-                    })),
-                    ...configs.map((config) => ({ type: "project", id: config.name, name: config.name })),
-                ];
-                const sourceIngestion = await (0, source_ingestion_1.ingestRequirementSources)({
-                    files,
-                    userText: userRequirement,
-                    extractRequirement: true,
-                    decomposeRequirement: true,
-                    availableTargets,
-                });
-                const extractedRequirement = sourceIngestion.requirement;
-                if (sourceIngestion.coverage_receipt?.complete === false) {
-                    (0, task_attachments_1.removeUploadedFiles)(files);
-                    return (0, utils_1.sendJson)(res, {
-                        error: "仍有必需资料未完整读取，请重试、移除或改为非必需后再生成计划",
-                        code: "requirement_source_coverage_incomplete",
-                        source_ingestion: sourceIngestion.technical,
-                        coverage_receipt: sourceIngestion.coverage_receipt,
-                    }, 422);
-                }
-                if (!extractedRequirement) {
-                    (0, task_attachments_1.removeUploadedFiles)(files);
-                    return (0, utils_1.sendJson)(res, {
-                        error: sourceIngestion.warnings?.[0] || "统一大模型未能形成可靠需求结构，本轮未创建任务",
-                        code: "requirement_model_decision_required",
-                        source_ingestion: sourceIngestion.technical,
-                    }, 503);
-                }
-                const requirement = (0, collaboration_1.compactFormText)(extractedRequirement?.business_goal || userRequirement, "");
-                if (!requirement && sourceIngestion.sources.length === 0)
-                    return (0, utils_1.sendJson)(res, { error: "请先说说你想完成什么，或者上传需求资料" }, 400);
-                const group = groups.find((item) => item.id === (payload.group_id || payload.groupId)) || null;
-                const requestedProject = (0, collaboration_1.compactFormText)(payload.target_project || payload.targetProject, "");
-                const coordinator = group?.members?.find((member) => member.role === "coordinator")?.project || group?.members?.[0]?.project || "";
-                const targetProject = requestedProject || coordinator || configs[0]?.name || "";
-                if (!targetProject && !group)
-                    return (0, utils_1.sendJson)(res, { error: "还没有可执行项目，请先添加项目或开发群聊" }, 409);
-                const requestOrigin = (0, collaboration_1.compactFormText)(payload.source || payload.request_origin || payload.requestOrigin, "workbench");
-                const automationSource = (0, automation_session_bindings_1.normalizeAutomationTaskSource)(requestOrigin) || "workbench";
-                const resolvedAutomationSession = (0, automation_session_bindings_1.resolveAutomationSessionBinding)({
-                    scope: group ? "group" : "project",
-                    scopeId: group?.id || targetProject,
-                    source: automationSource,
-                    title: (0, collaboration_1.compactFormText)(payload.title || requirement, "自动开发任务").slice(0, 80),
-                    actor: requestOrigin,
-                });
-                const groupSession = group ? { id: resolvedAutomationSession.snapshot.exactSessionId } : null;
-                const projectSession = !group ? { sessionId: resolvedAutomationSession.snapshot.exactSessionId } : null;
-                sourceIngestion.decomposition = bindRequirementPlanTargetSessions(sourceIngestion.decomposition, {
-                    groups,
-                    configs,
-                    defaultGroup: group,
-                    defaultProject: targetProject,
-                    taskSource: automationSource,
-                });
-                const clientMessageId = (0, collaboration_1.compactFormText)(payload.client_message_id || payload.clientMessageId, "")
-                    || `intake_${Date.now().toString(36)}_${crypto.randomBytes(6).toString("hex")}`;
-                const workflowDecision = await (0, workflow_decision_1.decideWorkflowWithModel)({
-                    message: requirement,
-                    scope: group ? "group" : "project",
-                    sourceCount: sourceIngestion.sources.length,
-                    context: {
-                        explicit_intake_preview: true,
-                        target_project: targetProject,
-                        group_id: group?.id || "",
-                        extracted_requirement: extractedRequirement,
-                    },
-                });
-                const areas = Array.isArray(extractedRequirement.scope)
-                    ? extractedRequirement.scope.map((item) => (0, collaboration_1.compactFormText)(item, "")).filter(Boolean)
-                    : [];
-                if (!areas.length)
-                    areas.push(group ? "群聊内相关项目" : "目标项目");
-                const acceptanceFallback = (0, collaboration_1.compactFormText)(payload.acceptance_criteria || payload.acceptanceCriteria, "") || [
-                    "目标功能按描述完成，并覆盖主要正常流程",
-                    "相关项目通过现有构建或测试命令",
-                    "交付报告列出实际修改文件、验证结果和剩余风险",
-                ].join("；");
-                const fallbackRisks = [
-                    group ? "多个项目之间的接口或数据契约需要保持一致" : "实现范围可能需要根据现有代码进一步收敛",
-                    "涉及既有行为时需要回归验证，避免影响当前功能",
-                ];
-                const extractedAcceptance = extractedRequirement?.acceptance_criteria || [];
-                const acceptance = extractedAcceptance.length ? extractedAcceptance.join("；") : acceptanceFallback;
-                const title = (0, collaboration_1.compactFormText)(payload.title, "") || extractedRequirement?.title || requirement.replace(/\s+/g, " ").slice(0, 48) || "处理提交的需求资料";
-                const intakeDraft = {
-                    ...(0, source_ingestion_1.requirementToIntakeDraft)(extractedRequirement, {
-                        requirement,
-                        scope: areas,
-                        acceptance: acceptance.split("；").filter(Boolean),
-                        risks: fallbackRisks,
-                    }),
-                    project: targetProject,
-                    group_id: group?.id || "",
-                    group_name: group?.name || "",
-                    project_session_id: projectSession?.sessionId || "",
-                    group_session_id: groupSession?.id || "",
-                    source_summary: sourceIngestion.user_summary,
-                    source_ingestion: sourceIngestion.technical,
-                    decomposition_plan: sourceIngestion.decomposition,
-                    requirement_content_hash: sourceIngestion.content_hash,
-                    workflow_decision: workflowDecision,
-                };
-                const sourceDocuments = [
-                    userRequirement ? `用户输入：\n${userRequirement}` : "",
-                    sourceIngestion.source_documents,
-                    extractedRequirement ? `结构化需求：\n${JSON.stringify(extractedRequirement, null, 2)}` : "",
-                ].filter(Boolean).join("\n\n");
-                const task = (0, collaboration_1.createTask)({
-                    title,
-                    description: requirement,
-                    business_goal: requirement,
-                    acceptance_criteria: acceptance,
-                    source_documents: sourceDocuments,
-                    source_attachments: sourceIngestion.attachments,
-                    requirement_extraction: extractedRequirement,
-                    requirement_decomposition: sourceIngestion.decomposition,
-                    decomposition_plan: sourceIngestion.decomposition,
-                    requirement_content_hash: sourceIngestion.content_hash,
-                    source_ingestion: sourceIngestion.technical,
-                    target_project: targetProject,
-                    priority: payload.priority || "normal",
-                    group_id: group?.id || null,
-                    group_session_id: groupSession?.id || null,
-                    project_session_id: projectSession?.sessionId || null,
-                    assign_type: group ? "group" : "project",
-                    orchestration_scope: group ? "group_session" : "project_session",
-                    queue_scope: payload.queue_scope || payload.queueScope || "conversation_serial",
-                    request_origin: requestOrigin,
-                    automation_task_source: automationSource,
-                    source_channel: payload.source_channel || payload.sourceChannel || requestOrigin,
-                    target_scope: group ? "group_session" : "project_session",
-                    target_id: group?.id || targetProject,
-                    exact_session_id: groupSession?.id || projectSession?.sessionId || "",
-                    client_message_id: clientMessageId,
-                    workflow_type: "requirement_epic",
-                    requires_code_changes: typeof payload.requires_code_changes === "boolean" ? payload.requires_code_changes : workflowDecision.requiresCodeChanges,
-                    requires_verification: Array.isArray(workflowDecision.verificationModes) && workflowDecision.verificationModes.length > 0,
-                    auto_execute: false,
-                    intake_state: "awaiting_confirmation",
-                    intake_draft: intakeDraft,
-                    workflow_decision: workflowDecision,
-                    workflow_meta: {
-                        intake: {
-                            source: requestOrigin,
-                            channel: payload.channel || "web",
-                            project_session_id: projectSession?.sessionId || "",
-                            group_session_id: groupSession?.id || "",
-                            client_message_id: clientMessageId,
-                            source_ingestion: sourceIngestion.technical,
-                        },
-                        requirement_epic: {
-                            version_of_epic_id: payload.epic_id || payload.epicId || "",
-                            content_hash: sourceIngestion.content_hash,
-                        },
-                    },
-                    trace_id: payload.trace_id || payload.traceId,
-                    idempotency_key: payload.idempotency_key || payload.idempotencyKey || "",
-                });
-                const updated = (0, collaboration_1.updateTask)(task.id, { status: "pending", auto_execute: false, intake_state: "awaiting_confirmation", intake_draft: intakeDraft, status_detail: "执行计划已准备好，等待你确认" }) || task;
-                (0, reliability_ledger_1.appendTraceEvent)(updated.trace_id, { type: "intake.previewed", status: "ok", task_id: updated.id, group_id: updated.group_id || "", agent: targetProject, message: "已生成执行前确认卡，尚未开始执行", data: intakeDraft });
-                (0, logs_1.appendTaskTimelineEvent)(updated.id, {
-                    type: "requirement_sources_ingested",
-                    title: "需求资料已读取",
-                    detail: sourceIngestion.user_summary || "已根据用户文字整理需求",
-                    status: sourceIngestion.warnings.length ? "warning" : "completed",
-                    data: sourceIngestion.technical,
-                });
-                (0, utils_1.sendJson)(res, { success: true, task: updated, confirmation: intakeDraft, source_ingestion: sourceIngestion.technical, same_task_trace: true });
-            }
-            catch (e) {
-                (0, task_attachments_1.removeUploadedFiles)(files);
-                (0, utils_1.sendJson)(res, { error: e.message }, 400);
-            }
-        };
-        const contentType = String(req.headers["content-type"] || "");
-        if (contentType.includes("multipart/form-data")) {
-            (0, secure_multipart_1.parseSecureMultipartRequest)(req).then(({ fields, files }) => {
-                return handleIntakePreview(fields || {}, files || []);
-            }).catch((e) => (0, utils_1.sendJson)(res, { error: e.message }, 400));
-            return true;
-        }
-        let body = "";
-        req.on("data", (chunk) => body += chunk);
-        req.on("end", () => {
-            try {
-                handleIntakePreview(body ? JSON.parse(body) : {});
-            }
-            catch (e) {
-                (0, utils_1.sendJson)(res, { error: e.message }, 400);
-            }
-        });
+    if ((0, task_intake_preview_route_1.handleTaskIntakePreviewRoute)(pathname, req, res, {
+        compactFormText: collaboration_1.compactFormText, removeUploadedFiles: task_attachments_1.removeUploadedFiles, bindRequirementPlanTargetSessions,
+        decideWorkflowWithModel: workflow_decision_1.decideWorkflowWithModel, createTask: collaboration_1.createTask, updateTask: collaboration_1.updateTask, appendTraceEvent: reliability_ledger_1.appendTraceEvent, appendTaskTimelineEvent: logs_1.appendTaskTimelineEvent,
+    }))
         return true;
-    }
     if (["/api/requirements/sources/retry", "/api/requirements/sources/refresh"].includes(pathname) && req.method === "POST") {
         let body = "";
         req.on("data", (chunk) => body += chunk);
@@ -2296,6 +2314,15 @@ function handleCollaborationApiIntakeRoutesPartA(pathname, req, res, parsed, ctx
                             same_task_trace: true,
                         });
                     }
+                    // A revised plan is explicitly re-confirmed by the user.  The
+                    // decomposition model may retain informational questions (for
+                    // example, how a read-only task should cite source evidence), even
+                    // after plan mode has marked them as resolved.  Use that persisted
+                    // plan-mode decision when building the Epic; otherwise the confirm
+                    // action loops forever on the same clarification card.
+                    const persistedPlanMode = current.workflow_meta?.plan_mode || current.intake_draft || {};
+                    const planModeClarificationsResolved = persistedPlanMode?.needs_clarification === false
+                        && Number(current.plan_revision_count || persistedPlanMode.revision_count || 0) > 0;
                     const epicResult = (0, collaboration_1.createRequirementEpicWithChildren)({
                         draft_task_id: current.id,
                         decomposition_plan: confirmedPlan,
@@ -2327,7 +2354,7 @@ function handleCollaborationApiIntakeRoutesPartA(pathname, req, res, parsed, ctx
                         idempotency_key: current.idempotency_key,
                         owner_agent: current.target_project || "global-agent",
                         confirmed: true,
-                        clarifications_resolved: !confirmedPlan?.clarification_questions?.length || !!acceptFeedback,
+                        clarifications_resolved: !confirmedPlan?.clarification_questions?.length || !!acceptFeedback || planModeClarificationsResolved,
                         auto_execute: true,
                         requires_independent_review: true,
                     });
@@ -3244,9 +3271,63 @@ function handleCollaborationApiTaskLifecycleRoutes(pathname, req, res, parsed, c
                 const current = (0, db_1.loadTasks)().find((task) => String(task.id) === taskId);
                 if (!current)
                     return (0, utils_1.sendJson)(res, { error: "任务不存在" }, 404);
+                if (!(0, access_policy_1.hasTaskResourceAccess)(current, req.ccmAuth, "manage"))
+                    return (0, utils_1.sendJson)(res, { error: "没有该任务的操作权限", code: "RESOURCE_ACCESS_DENIED" }, 403);
+                const availableActions = (0, task_session_store_1.taskSessionArchiveActions)(current);
+                const action = String(payload.action || "accept").trim().toLowerCase();
+                const currentOutputRevision = (0, task_session_store_1.taskSessionOutputRevision)(current);
+                const requestedOutputRevision = String(payload.output_revision || payload.outputRevision || "");
+                if (action === "archive_unfinished") {
+                    if (current.task_session_archive?.decision === "close_unfinished" && (0, task_session_store_1.getTaskSession)(taskId))
+                        return (0, utils_1.sendJson)(res, { success: true, task: current, decision: "archived_unfinished", available_actions: [], task_session: { available: true } });
+                    if (!availableActions.includes(action))
+                        return (0, utils_1.sendJson)(res, { success: false, error: "当前任务不能结束归档", code: "TASK_ARCHIVE_NOT_ALLOWED" }, 409);
+                    if (!requestedOutputRevision || requestedOutputRevision !== currentOutputRevision)
+                        return (0, utils_1.sendJson)(res, { success: false, error: "任务结果已更新，请刷新后再归档", code: "TASK_ACCEPTANCE_VERSION_CONFLICT" }, 409);
+                    const task = (0, collaboration_1.updateTask)(taskId, { task_session_archive: { decision: "close_unfinished", actor: "user", decided_at: new Date().toISOString(), output_revision: currentOutputRevision } });
+                    const session = (0, task_session_store_1.getTaskSession)(taskId);
+                    if (!session)
+                        return (0, utils_1.sendJson)(res, { success: false, error: "任务记录整理失败，请重试", code: "TASK_SESSION_MATERIALIZATION_FAILED" }, 503);
+                    return (0, utils_1.sendJson)(res, { success: true, task, decision: "archived_unfinished", available_actions: [], task_session: { available: true, session_id: session.session_id } });
+                }
+                if (current.status !== "waiting_user" || current.acceptance_state !== "awaiting_user_acceptance") {
+                    if (action === "accept" && current.acceptance_state === "accepted")
+                        return (0, utils_1.sendJson)(res, { success: true, task: current, decision: "completed", available_actions: [] });
+                    return (0, utils_1.sendJson)(res, { success: false, error: "任务当前不在待用户验收状态", code: "TASK_ACCEPTANCE_NOT_PENDING" }, 409);
+                }
+                if (!requestedOutputRevision || requestedOutputRevision !== currentOutputRevision)
+                    return (0, utils_1.sendJson)(res, { success: false, error: "验收版本已更新，请使用最新最终输出", code: "TASK_ACCEPTANCE_VERSION_CONFLICT" }, 409);
                 const decidedAt = new Date().toISOString();
+                if (action === "revise") {
+                    const message = (0, collaboration_1.compactFormText)(payload.message || payload.reason, "用户提出新的修改要求");
+                    const attemptId = `attempt_${Date.now().toString(36)}_${crypto.randomBytes(5).toString("hex")}`;
+                    const task = (0, collaboration_1.updateTask)(taskId, {
+                        status: "reworking",
+                        acceptance_state: "reworking",
+                        status_detail: message,
+                        execution_attempt: Math.max(1, Number(current.execution_attempt || current.attempt || 1) + 1),
+                        current_attempt_id: attemptId,
+                        user_acceptance: { ...(current.user_acceptance || {}), state: "superseded", superseded_at: decidedAt, superseded_by_attempt_id: attemptId, contentStored: false },
+                        acceptance_decision: { schema: "ccm-user-task-acceptance-decision-v1", actor: "user", status: "revise_requested", decided_at: decidedAt, reason: message, attempt_id: attemptId },
+                    });
+                    const continuation = (0, collaboration_1.continueTaskWithMessage)(taskId, message, ctx, {
+                        source: "user_acceptance_revise",
+                        continuationKind: "revise_goal",
+                        resolve_waiting_user: true,
+                        auto_execute: true,
+                        idempotencyKey: payload.idempotency_key || `acceptance-revise:${taskId}:${requestedOutputRevision}`,
+                    });
+                    if (!continuation?.success)
+                        return (0, utils_1.sendJson)(res, { success: false, error: continuation?.error || "返工任务入队失败", code: "TASK_REWORK_QUEUE_FAILED" }, Number(continuation?.status || 409));
+                    (0, logs_1.appendTaskTimelineEvent)(taskId, { type: "user_rework_requested", title: "用户提出修改要求", detail: message, status: "warn", phase: "reworking", agent: "user", data: { attempt_id: attemptId, output_revision: currentOutputRevision } });
+                    (0, collaboration_1.updateGroupTaskInlineStatus)(task, "reworking", message);
+                    return (0, utils_1.sendJson)(res, { success: true, task: continuation.task || task, decision: "rework_started", attempt_id: attemptId, queue_result: continuation.queue_result || null, available_actions: [], binding_checksum: crypto.createHash("sha256").update(`${taskId}|${task?.revision || 0}|${attemptId}`).digest("hex") });
+                }
+                if (action !== "accept")
+                    return (0, utils_1.sendJson)(res, { success: false, error: "不支持的验收动作" }, 400);
                 const updates = {
-                    status: "done",
+                    status: "completed",
+                    acceptance_state: "accepted",
                     status_detail: (0, collaboration_1.compactFormText)(payload.reason, "用户已核对现有结构化验收证据并批准交付"),
                     terminal_actor: "user",
                     acceptance_decision: {
@@ -3255,6 +3336,7 @@ function handleCollaborationApiTaskLifecycleRoutes(pathname, req, res, parsed, c
                         status: "approved",
                         decided_at: decidedAt,
                         reason: (0, collaboration_1.compactFormText)(payload.reason, "用户批准"),
+                        output_revision: currentOutputRevision,
                     },
                 };
                 const validationError = (0, collaboration_1.validateTaskManualStatusUpdate)(current, updates);
@@ -3270,8 +3352,9 @@ function handleCollaborationApiTaskLifecycleRoutes(pathname, req, res, parsed, c
                     agent: "user",
                     data: { terminal_decision: task?.terminal_decision || null },
                 });
-                (0, collaboration_1.updateGroupTaskInlineStatus)(task, "done", updates.status_detail);
-                (0, utils_1.sendJson)(res, { success: true, task, terminal_decision: task?.terminal_decision || null });
+                (0, collaboration_1.updateGroupTaskInlineStatus)(task, "completed", updates.status_detail);
+                const session = (0, task_session_store_1.getTaskSession)(taskId);
+                (0, utils_1.sendJson)(res, { success: true, task, decision: "completed", available_actions: [], task_session: session ? { available: true, session_id: session.session_id } : { available: false }, binding_checksum: crypto.createHash("sha256").update(`${taskId}|${task?.revision || 0}|${currentOutputRevision}`).digest("hex"), terminal_decision: task?.terminal_decision || null });
             }
             catch (e) {
                 (0, utils_1.sendJson)(res, { error: e.message }, 400);
@@ -3329,10 +3412,13 @@ function handleCollaborationApiTaskLifecycleRoutes(pathname, req, res, parsed, c
                 if (!task)
                     return (0, utils_1.sendJson)(res, { error: "任务不存在" }, 404);
                 let queueResult = null;
-                if (priorityChanged && !collaboration_1.runningTaskIds.has(id)) {
-                    const removed = (0, collaboration_1.removeTaskFromQueues)(id);
+                const priorityRunGuard = priorityChanged ? (0, task_run_store_1.validateActiveTaskRun)(current, payload.run_id || payload.runId || "") : { ok: true, runId: "" };
+                if (!priorityRunGuard.ok)
+                    return (0, utils_1.sendJson)(res, { success: false, ...priorityRunGuard }, 409);
+                if (priorityChanged && !(0, collaboration_1.isTaskRunningInMemory)(current)) {
+                    const removed = (0, collaboration_1.removeTaskFromQueues)(id, priorityRunGuard.runId);
                     if (removed > 0) {
-                        queueResult = (0, collaboration_1.enqueueTask)(id, ctx);
+                        queueResult = (0, collaboration_1.enqueueTask)(id, ctx, priorityRunGuard.runId);
                         (0, logs_1.appendTaskTimelineEvent)(id, {
                             type: "task_queue_reprioritized",
                             title: updates.priority === "high" ? "任务已插队" : "任务优先级已调整",
@@ -3525,6 +3611,16 @@ function handleCollaborationApiTaskLifecycleRoutes(pathname, req, res, parsed, c
 // Extracted functional module. The original entry remains a compatibility facade.
 function handleCollaborationApi(pathname, req, res, parsed, ctx) {
     configureCollaborationRouteExecutors(ctx);
+    if ((0, session_cache_diagnostics_api_1.handleSessionCacheDiagnosticsApi)(pathname, req, res, parsed))
+        return true;
+    if ((0, task_run_routes_1.handleTaskRunRoutes)(pathname, req, res, parsed, ctx, {
+        updateTask: collaboration_1.updateTask,
+        enqueueTask: collaboration_1.enqueueTask,
+        retryTask: collaboration_1.retryTask,
+        removeTaskFromQueues: collaboration_1.removeTaskFromQueues,
+        requestTaskCancellation: execution_kernel_1.requestTaskCancellation,
+    }))
+        return true;
     if (handleCollaborationApiReplayAndExecutionRoutes(pathname, req, res, parsed, ctx))
         return true;
     if (handleCollaborationApiIntakeRoutes(pathname, req, res, parsed, ctx))

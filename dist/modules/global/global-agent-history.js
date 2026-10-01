@@ -5,9 +5,11 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.createGlobalAgentHistoryRuntime = createGlobalAgentHistoryRuntime;
 const fs_1 = __importDefault(require("fs"));
+const conversation_session_identity_1 = require("../../system/conversation-session-identity");
+const deleted_session_context_1 = require("../../system/deleted-session-context");
+const conversation_attempt_1 = require("../../agents/conversation-attempt");
 const crypto_1 = __importDefault(require("crypto"));
 const global_agent_attachments_1 = require("./global-agent-attachments");
-const provider_neutral_context_cache_1 = require("../../system/provider-neutral-context-cache");
 const feishu_conversation_v2_1 = require("../collaboration/feishu-conversation-v2");
 const conversation_search_dirty_1 = require("../../system/conversation-search-dirty");
 const session_compaction_runs_1 = require("../../system/session-compaction-runs");
@@ -96,6 +98,10 @@ function createGlobalAgentHistoryRuntime(deps) {
         "technical_content",
         "technicalContent",
         "trace_id",
+        "attempt_id",
+        "conversation_turn_id",
+        "execution_anchor_message_id",
+        "status",
         "mission_id",
         "run_id",
         "finalNotified",
@@ -399,6 +405,13 @@ function createGlobalAgentHistoryRuntime(deps) {
                 titleGeneratedAt: keepExistingTitle ? existing?.titleGeneratedAt || "" : session.titleGeneratedAt || existing?.titleGeneratedAt || "",
                 titleProvisionalAt: keepExistingTitle ? existing?.titleProvisionalAt || "" : session.titleProvisionalAt || existing?.titleProvisionalAt || "",
                 source: "web",
+                session_kind: ["recovery", "automation"].includes(String(session.session_kind || session.sessionKind || existing?.session_kind || "").toLowerCase())
+                    ? String(session.session_kind || session.sessionKind || existing?.session_kind).toLowerCase()
+                    : existing?.session_kind || session.session_kind || "conversation",
+                ...(String(session.session_kind || session.sessionKind || existing?.session_kind || "").toLowerCase() === "recovery" ? {
+                    recovery_task_id: String(session.recovery_task_id || session.recoveryTaskId || existing?.recovery_task_id || "").slice(0, 160),
+                    recovery_attempt: Math.max(0, Number(session.recovery_attempt || session.recoveryAttempt || existing?.recovery_attempt || 0)),
+                } : {}),
                 createdAt: existing?.createdAt || session.createdAt || new Date().toISOString(),
                 updatedAt: session.updatedAt || session.updated_at || lastMessageAt || existing?.updatedAt || new Date().toISOString(),
                 messages: mergeGlobalAgentMessages(existing?.messages || [], incomingMessages),
@@ -454,6 +467,11 @@ function createGlobalAgentHistoryRuntime(deps) {
         }
         const reconciled = reconcileGlobalAgentWebHistory(store, { ...payload, sessions });
         saveGlobalAgentHistoryStore(reconciled);
+        for (const session of store.sessions || []) {
+            if (session.source === 'web' && !(reconciled.sessions || []).some((item) => item.id === session.id)) {
+                (0, deleted_session_context_1.clearDeletedSessionContext)('global', 'global', session.id);
+            }
+        }
         for (const session of reconciled.sessions || []) {
             if (String(session.source || "") !== "web")
                 continue;
@@ -473,7 +491,7 @@ function createGlobalAgentHistoryRuntime(deps) {
         const now = new Date().toISOString();
         const id = source === "feishu"
             ? `feishu:manual:${crypto_1.default.randomBytes(10).toString("hex")}`
-            : `session_${Date.now()}_${crypto_1.default.randomBytes(4).toString("hex")}`;
+            : (0, conversation_session_identity_1.createConversationSessionId)('global');
         const name = String(input.name || (source === "feishu" ? "新建飞书会话" : "新会话")).trim().slice(0, 80)
             || (source === "feishu" ? "新建飞书会话" : "新会话");
         const welcome = String(input.welcome || (source === "feishu"
@@ -484,6 +502,13 @@ function createGlobalAgentHistoryRuntime(deps) {
             name,
             titleOrigin: isSessionTitlePlaceholder(name) ? "placeholder" : "manual",
             source,
+            session_kind: ["recovery", "automation"].includes(String(input.session_kind || input.sessionKind || "").toLowerCase())
+                ? String(input.session_kind || input.sessionKind).toLowerCase()
+                : "conversation",
+            ...(String(input.session_kind || input.sessionKind || "").toLowerCase() === "recovery" ? {
+                recovery_task_id: String(input.recovery_task_id || input.recoveryTaskId || "").slice(0, 160),
+                recovery_attempt: Math.max(0, Number(input.recovery_attempt || input.recoveryAttempt || 0)),
+            } : {}),
             createdAt: now,
             updatedAt: now,
             messages: [{ role: "assistant", content: welcome, timestamp: now, source }],
@@ -507,6 +532,7 @@ function createGlobalAgentHistoryRuntime(deps) {
         if (!session) {
             rememberDeletedGlobalSessionIds(store, [id]);
             saveGlobalAgentHistoryStore(store);
+            (0, deleted_session_context_1.clearDeletedSessionContext)('global', 'global', id);
             return { deleted: false, already_deleted: true, session: null };
         }
         if (source && String(session.source || "web").toLowerCase() !== source) {
@@ -518,15 +544,7 @@ function createGlobalAgentHistoryRuntime(deps) {
             store.current_session_id = (store.sessions || []).find((item) => String(item.source || "web") === "web")?.id || "";
         }
         saveGlobalAgentHistoryStore(store);
-        let contextCacheCleanup = null;
-        try {
-            contextCacheCleanup = (0, provider_neutral_context_cache_1.invalidateProviderNeutralContextCacheState)({
-                scope: "global",
-                scopeId: id,
-                sessionId: id,
-            }, "global_session_deleted");
-        }
-        catch { }
+        const contextCacheCleanup = (0, deleted_session_context_1.clearDeletedSessionContext)('global', 'global', id);
         return { deleted: true, session, context_cache_invalidated: contextCacheCleanup?.success === true };
     }
     function getBaseGlobalAgentMessages(store) {
@@ -543,7 +561,7 @@ function createGlobalAgentHistoryRuntime(deps) {
         const existing = (store.sessions || []).find((item) => item.id === sessionId);
         if (existing)
             return normalizeGlobalAgentMessages(existing.messages || []);
-        if (String(sessionId || "").startsWith("feishu:"))
+        if (String(sessionId || "").trim())
             return [];
         return getBaseGlobalAgentMessages(store);
     }
@@ -561,11 +579,11 @@ function createGlobalAgentHistoryRuntime(deps) {
                 titleOrigin: "placeholder",
                 source,
                 createdAt: new Date().toISOString(),
-                messages: source === "feishu" ? [] : getBaseGlobalAgentMessages(store),
+                messages: [],
             };
             sessions.unshift(session);
         }
-        const message = {
+        const message = (0, conversation_attempt_1.bindConversationMessage)({
             role,
             content,
             timestamp: new Date().toISOString(),
@@ -573,7 +591,7 @@ function createGlobalAgentHistoryRuntime(deps) {
             ...(role === "user" && Array.isArray(options.files) && options.files.length
                 ? { files: (0, global_agent_attachments_1.sanitizeGlobalHistoryAttachments)(options.files, "user") }
                 : {}),
-        };
+        }, "global", sessionId);
         try {
             ingestGlobalAgentConversation({ sessionId, source, messages: [message], extractMemory: options.extractMemory });
         }
@@ -607,7 +625,7 @@ function createGlobalAgentHistoryRuntime(deps) {
         const existing = existingIndex >= 0 ? messages[existingIndex] : null;
         const normalized = normalizeGlobalAgentMessage({
             ...existing,
-            ...messageInput,
+            ...(0, conversation_attempt_1.bindConversationMessage)(messageInput, "global", sessionId),
             id: existing?.id || messageInput?.id || `global-task:${taskId}`,
             role: "assistant",
             timestamp: existing?.timestamp || messageInput?.timestamp || new Date().toISOString(),

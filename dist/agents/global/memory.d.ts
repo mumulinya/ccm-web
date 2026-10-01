@@ -1,0 +1,425 @@
+import { type SessionExecutionEvent } from "../../system/session-execution-ledger";
+import type { UnifiedCompactionResult } from "../../system/unified-session-compaction-types";
+import { type CcmManualCompactionRequestV2 } from "../../system/manual-session-compaction";
+export type GlobalMemoryItemType = "user" | "feedback" | "authorization" | "decisions" | "missions" | "unresolved" | "references";
+export declare function createGlobalSessionCompactionAdapter(input: {
+    sessionId: string;
+    load: () => Promise<any> | any;
+    commit: (result: UnifiedCompactionResult, fence: any) => Promise<void> | void;
+    acquire?: () => Promise<any> | any;
+    failure?: (error: unknown, fence: any) => Promise<void> | void;
+    validate?: (fence: any, snapshot: any) => Promise<void> | void;
+}): import("../../system/unified-session-compaction-types").UnifiedSessionCompactionAdapter;
+export interface GlobalMemoryItem {
+    id: string;
+    type: GlobalMemoryItemType;
+    text: string;
+    why?: string;
+    howToApply?: string;
+    importance: number;
+    confidence: number;
+    createdAt: string;
+    updatedAt: string;
+    source: {
+        sessionId?: string;
+        messageIds?: string[];
+        missionId?: string;
+        traceId?: string;
+        source?: string;
+        timestamp?: string;
+    };
+    expiresAt?: string;
+    ccMemoryType?: "user" | "feedback" | "project" | "reference";
+    taxonomy?: any;
+    extractionSource?: "model_semantic" | "structured_event" | "manual" | "legacy_unverified";
+    evidenceMessageIds?: string[];
+    semanticStatus?: "confirmed" | "legacy_unverified";
+    semanticDecisionReceipt?: any;
+}
+export declare const GLOBAL_AGENT_MEMORY_FILE: string;
+export declare function getGlobalAgentSessionCompactionActivity(sessionId: string): {
+    active: boolean;
+    status: string;
+    stage: string;
+    reason: string;
+    startedAt: string;
+    updatedAt: string;
+    compactionRunId: string;
+    committed: boolean;
+    cancellable: boolean;
+    contentStored: boolean;
+};
+export declare function acquireGlobalAgentMemorySelfTestLock(label?: string, options?: any): () => void;
+export declare function scanGlobalAgentMemorySelfTestContamination(options?: any): {
+    schema: string;
+    generatedAt: string;
+    file: string;
+    status: string;
+    pass: boolean;
+    active_contamination_count: number;
+    residue_contamination_count: number;
+    contamination_count: number;
+    contaminated_file_count: number;
+    files: {
+        exists: boolean;
+        contaminated: boolean;
+        sentinelCount: number;
+        hasSelftestSource: boolean;
+        bytes: number;
+        file: string;
+        role: string;
+        active: boolean;
+    }[];
+    rows: any[];
+};
+export declare function archiveGlobalAgentMemorySelfTestResidues(options?: any): {
+    schema: string;
+    dryRun: boolean;
+    reason: string;
+    actor: string;
+    archiveDir: string;
+    selectedCount: number;
+    archivedCount: number;
+    skippedCount: number;
+    archived: any[];
+    skipped: any[];
+    before: {
+        active_contamination_count: number;
+        residue_contamination_count: number;
+    };
+    after: {
+        active_contamination_count: number;
+        residue_contamination_count: number;
+    };
+};
+export declare function runGlobalAgentMemorySelfTestResidueArchiveSelfTest(): {
+    pass: boolean;
+    checks: {
+        beforeDetectsResidue: boolean;
+        dryRunDoesNotMoveFile: boolean;
+        archiveMovesOnlyResidue: boolean;
+        activeMemoryStillClean: boolean;
+        residueNoLongerIncludesTestFile: boolean;
+    };
+    archived: {
+        archiveFile: string;
+        archivedCount: number;
+        skippedCount: number;
+    };
+};
+export declare function runGlobalAgentMemorySelfTestIsolationSelfTest(): {
+    pass: boolean;
+    checks: {
+        detectsActivePollution: boolean;
+        lockFileExists: boolean;
+        startedCleanOrWarnOnly: boolean;
+    };
+    polluted: {
+        status: string;
+        active: number;
+    };
+};
+export declare function getGlobalAgentTranscriptFile(sessionId: string): string;
+export declare function loadGlobalAgentTranscript(sessionId: string): {
+    version: number;
+    sessionId: string;
+    source: any;
+    messages: any;
+    executionMessages: SessionExecutionEvent[];
+    updatedAt: any;
+    storageRecovery: {
+        recoveredFromBackup: boolean;
+        recoveredAt: string;
+    };
+};
+export declare function appendGlobalAgentExecutionEvent(sessionIdInput: string, event: any): {
+    id: string;
+    hidden: true;
+    attempt_id?: string;
+    conversation_turn_id?: string;
+    auditReceipt?: any;
+    modelContent?: any;
+    type: import("../../system/session-execution-ledger").SessionExecutionEventType;
+    toolName: string;
+    toolCallId: string;
+    timestamp: string;
+    runId: string;
+    traceId: string;
+    anchorMessageId: string;
+    status: "error" | "running" | "ok";
+    payload: any;
+};
+export declare function previewGlobalTranscriptContextSourceMaintenance(sessionIdInput: string): {
+    file: string;
+    fileChecksum: string;
+    changed: number;
+    removedTokens: number;
+    contentStored: boolean;
+};
+export declare function applyGlobalTranscriptContextSourceMaintenance(plan: any, backupFile: string): {
+    updated: number;
+    backupFile: string;
+};
+export declare function rollbackGlobalTranscriptContextSourceMaintenance(file: string, backupFile: string): {
+    restored: number;
+};
+export declare function loadGlobalAgentMemory(options?: {
+    recover?: boolean;
+}): any;
+export declare function pruneDeletedGlobalWebSessionMemory(activeSessionIds: string[]): {
+    removed: any;
+    transcriptFilesRemoved: number;
+};
+export declare function recordGlobalAgentSessionProviderUsage(sessionId: string, input?: any): import("../../system/session-compaction-core").SessionProviderUsageBaseline;
+export declare function setGlobalAgentMemoryPolicy(input: any): any;
+export declare function extractGlobalMemoryCandidates(messages: any[], sessionId: string): {
+    candidates: GlobalMemoryItem[];
+    rejected: number;
+    mode: string;
+};
+export declare function compactGlobalAgentSessionWithModel(sessionId: string, options?: {
+    force?: boolean;
+    promptTooLong?: boolean;
+    reason?: string;
+    customInstructions?: string;
+    modelCall?: (request: any) => Promise<any>;
+    currentRequest?: any;
+    fixedContext?: any;
+    tools?: any;
+    recoveryContext?: any;
+    modelVisiblePayload?: any;
+    contextComponents?: any;
+    postCompactPayloadBuilder?: (input: any) => Promise<any> | any;
+    mode?: "full" | "partial";
+    pivotMessageId?: string;
+    direction?: "up_to" | "from";
+    expectedGeneration?: number;
+    expectedPayloadChecksum?: string;
+    request?: CcmManualCompactionRequestV2;
+    signal?: AbortSignal;
+    compactionRunId?: string;
+    turnId?: string;
+    taskId?: string;
+    generation?: number;
+    attempt?: number;
+    anchorMessageId?: string;
+}): Promise<{
+    compacted: any;
+    reason: any;
+    before_tokens: any;
+    after_tokens: any;
+    summary_source: any;
+    boundary_generation: any;
+    unifiedSessionSummary: any;
+    unifiedSessionCompaction: any;
+    compactionMode: any;
+    partialCompaction: any;
+    hookResults: any;
+    model_context_capacity: {
+        schema: string;
+        provider: any;
+        model: any;
+        contextWindow: number;
+        maxOutputTokens: number;
+        windowSemantics: string;
+        reservedOutputTokens: number;
+        effectiveContextWindow: number;
+        autoCompactBufferTokens: number;
+        autoCompactThreshold: number;
+        source: any;
+        confidence: number;
+        checkedAt: any;
+        expiresAt: any;
+        evidenceId: any;
+        evidenceChecksum: any;
+        cacheStatus: string;
+        conservativeFallback: boolean;
+    } | {
+        reservedOutputTokens: number;
+        effectiveContextWindow: number;
+        autoCompactBufferTokens: number;
+        autoCompactThreshold: number;
+        reserveSource: string;
+        schema: string;
+        provider: any;
+        model: any;
+        contextWindow: number;
+        maxOutputTokens: number;
+        windowSemantics: string;
+        source: any;
+        confidence: number;
+        checkedAt: any;
+        expiresAt: any;
+        evidenceId: any;
+        evidenceChecksum: any;
+        cacheStatus: string;
+        conservativeFallback: boolean;
+    } | {
+        reservedOutputTokens: number;
+        effectiveContextWindow: number;
+        autoCompactBufferTokens: number;
+        autoCompactThreshold: number;
+        reserveSource: string;
+        conservativeFallback: boolean;
+        fallbackReason: string;
+        staleEvidenceId: any;
+        staleEvidenceSource: any;
+        schema: string;
+        provider: any;
+        model: any;
+        contextWindow: number;
+        maxOutputTokens: number;
+        windowSemantics: string;
+        source: any;
+        confidence: number;
+        checkedAt: any;
+        expiresAt: any;
+        evidenceId: any;
+        evidenceChecksum: any;
+        cacheStatus: string;
+    } | {
+        reservedOutputTokens: number;
+        effectiveContextWindow: number;
+        autoCompactBufferTokens: number;
+        autoCompactThreshold: number;
+        reserveSource: string;
+        schema: string;
+        provider: string;
+        model: string;
+        contextWindow: number;
+        windowSemantics: string;
+        maxOutputTokens: number;
+        source: string;
+        confidence: number;
+        checkedAt: string;
+        expiresAt: string;
+        evidenceId: string;
+        evidenceChecksum: string;
+        cacheStatus: string;
+        conservativeFallback: boolean;
+        fallbackReason: string;
+    };
+    auto_compact_threshold: number;
+    contentStored: boolean;
+    archive: any;
+    session: any;
+    legacySummaryIgnored: boolean;
+}>;
+export declare function scheduleGlobalAgentSessionMemoryExtraction(sessionId: string, options?: {
+    modelCall?: (request: any) => Promise<any>;
+}): {
+    scheduled: boolean;
+    reason: string;
+    cadence?: undefined;
+} | {
+    scheduled: boolean;
+    reason: string;
+    cadence: {
+        schema: string;
+        shouldExtract: boolean;
+        reason: string;
+        totalTokens: any;
+        priorTokens: number;
+        growthTokens: number;
+        toolCallsSinceLastExtraction: any;
+        naturalBreak: boolean;
+        growthReady: boolean;
+        turnReady: boolean;
+        cursorIndex: number;
+        cursorValid: boolean;
+        sourceLastMessageId: string;
+        sourceMessageIds: string[];
+        tokenBasis: any;
+    };
+} | {
+    unified: boolean;
+    cadence: {
+        schema: string;
+        shouldExtract: boolean;
+        reason: string;
+        totalTokens: any;
+        priorTokens: number;
+        growthTokens: number;
+        toolCallsSinceLastExtraction: any;
+        naturalBreak: boolean;
+        growthReady: boolean;
+        turnReady: boolean;
+        cursorIndex: number;
+        cursorValid: boolean;
+        sourceLastMessageId: string;
+        sourceMessageIds: string[];
+        tokenBasis: any;
+    };
+    tokenBasisIssues: any[] | string[];
+    scheduled: boolean;
+    reason: string;
+    startedAt: string;
+    identity: any;
+};
+export declare function ingestGlobalAgentConversation(input: {
+    sessionId: string;
+    source?: string;
+    messages: any[];
+    compact?: boolean;
+    extractMemory?: boolean;
+}): {
+    transcript: {
+        sessionId: string;
+        messageCount: any;
+        updatedAt: any;
+    };
+    extracted: number;
+    extraction: string;
+    rejected: number;
+    compaction: any;
+};
+export declare function recallGlobalAgentMemory(query: string, options?: {
+    sessionId?: string;
+    limit?: number;
+    recordMetric?: boolean;
+    memoryPolicy?: "use" | "ignore";
+    workflowDecision?: any;
+}): {
+    ignored: boolean;
+    items: any[];
+    sessionSummary: any;
+    citations: any[];
+    boundary?: undefined;
+} | {
+    ignored: boolean;
+    items: any[];
+    sessionSummary: any;
+    boundary: any;
+    citations: any[];
+};
+export declare function buildGlobalAgentSessionContinuation(sessionId: string, options?: {
+    persistMicroCompactReceipt?: boolean;
+    consumeSessionStartHookContext?: boolean;
+}): any;
+export declare function buildGlobalAgentMemoryPacket(query: string, options?: {
+    sessionId?: string;
+    limit?: number;
+    maxChars?: number;
+    recordMetric?: boolean;
+}): string;
+export declare function recordGlobalMissionMemory(input: any): GlobalMemoryItem;
+export declare function recordGlobalStructuredMemoryFact(input: {
+    type: GlobalMemoryItemType;
+    text: string;
+    sessionId: string;
+    messageId: string;
+    source?: string;
+    importance?: number;
+    confidence?: number;
+    why?: string;
+    howToApply?: string;
+}): GlobalMemoryItem;
+export declare function recordGlobalDirectDispatchMemory(input: any): GlobalMemoryItem;
+export declare function recordGlobalDirectDispatchRollbackMemory(input: any): GlobalMemoryItem;
+export declare function getGlobalMemoryEvidence(input: {
+    sessionId?: string;
+    messageId?: string;
+    missionId?: string;
+}): any[];
+export declare function rebuildGlobalAgentMemory(reason?: string, actor?: string): any;
+export declare function getGlobalAgentMemoryPolicy(): any;

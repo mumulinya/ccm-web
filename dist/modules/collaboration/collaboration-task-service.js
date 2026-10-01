@@ -51,9 +51,16 @@ exports.reconcileTaskCollaborationState = reconcileTaskCollaborationState;
 exports.continueDailyDevTasksFromGaps = continueDailyDevTasksFromGaps;
 exports.retryTask = retryTask;
 exports.purgeArchivedTask = purgeArchivedTask;
+const task_acceptance_service_1 = require("../../agents/task-acceptance-service");
+const acceptance_contract_1 = require("../../agents/acceptance-contract");
+const acceptance_ledger_1 = require("../../agents/acceptance-ledger");
+const acceptance_projection_service_1 = require("../../agents/acceptance-projection-service");
+const acceptance_contract_2 = require("../../agents/acceptance-contract");
 const path = __importStar(require("path"));
 const crypto = __importStar(require("crypto"));
 const task_execution_stage_projection_1 = require("../../system/task-execution-stage-projection");
+const execution_session_registry_1 = require("../../agents/execution-session-registry");
+const task_lifecycle_1 = require("../../core/task-lifecycle");
 const atomic_json_file_1 = require("../../core/atomic-json-file");
 const utils_1 = require("../../core/utils");
 const source_ingestion_1 = require("../requirements/source-ingestion");
@@ -68,6 +75,9 @@ const conversation_permission_policy_1 = require("../tools/conversation-permissi
 const task_context_1 = require("../../tasks/task-context");
 const session_task_timeline_1 = require("../../tasks/session-task-timeline");
 const task_conversation_projection_1 = require("../../system/task-conversation-projection");
+const task_workflow_model_1 = require("./task-workflow-model");
+const task_run_store_1 = require("./task-run-store");
+const task_session_store_1 = require("./task-session-store");
 const group_orchestrator_1 = require("./group-orchestrator");
 const memory_1 = require("./memory");
 const logs_1 = require("./logs");
@@ -279,6 +289,8 @@ function createTaskWithScopedIdentity(task) {
         target_message_id: task.target_message_id || task.targetMessageId || null,
         project_main_run_id: task.project_main_run_id || task.projectMainRunId || null,
         request_origin: task.request_origin || task.requestOrigin || task.workflow_meta?.intake?.source || "task-dispatch",
+        task_session_creation_policy: (0, task_workflow_model_1.defaultTaskSessionCreationPolicy)(task),
+        task_session_archive_policy: (0, task_workflow_model_1.resolveTaskSessionArchivePolicy)(task),
         origin_session_id: task.origin_session_id || task.originSessionId || taskGroupSessionId || task.project_session_id || task.projectSessionId || null,
         parent_work_item_id: task.parent_work_item_id || task.parentWorkItemId || null,
         acceptance_state: task.acceptance_state || task.acceptanceState || "pending",
@@ -318,11 +330,18 @@ function createTaskWithScopedIdentity(task) {
         followups: Array.isArray(task.followups) ? task.followups : [],
         intake_state: task.intake_state || task.intakeState || null,
         intake_draft: task.intake_draft || task.intakeDraft || null,
-        cron_job_id: task.cron_job_id || null,
-        cron_run_id: task.cron_run_id || null,
-        cron_occurrence_id: task.cron_occurrence_id || task.cronOccurrenceId || null,
-        cron_scheduled_for: task.cron_scheduled_for || task.cronScheduledFor || null,
-        cron_trigger: task.cron_trigger || null,
+        planning_target_context: task.planning_target_context || null,
+        planning_submission: task.planning_submission || null,
+        scope: task.scope || task.allowed_paths || "",
+        automation_definition: task.automation_definition || task.automationDefinition || null,
+        automation_definition_id: task.automation_definition_id || task.automationDefinitionId || null,
+        automation_definition_revision: task.automation_definition_revision || task.automationDefinitionRevision || null,
+        automation_occurrence_id: task.automation_occurrence_id || task.automationOccurrenceId || null,
+        automation_scheduled_for: task.automation_scheduled_for || task.automationScheduledFor || null,
+        dispatch_policy: task.dispatch_policy || task.dispatchPolicy || null,
+        verification_policy: task.verification_policy || task.verificationPolicy || null,
+        workspace_policy: task.workspace_policy || task.workspacePolicy || null,
+        approval_policy: task.approval_policy || task.approvalPolicy || null,
         trace_id: traceId,
         idempotency_key: idempotencyKey || null,
         intake_identity: intakeIdentity,
@@ -335,6 +354,29 @@ function createTaskWithScopedIdentity(task) {
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
     };
+    const executionPolicy = (0, task_workflow_model_1.resolveTaskExecutionPolicy)(newTask);
+    if ((0, task_workflow_model_1.normalizeTaskOrigin)(newTask) === "automation" && !newTask.automation_definition) {
+        newTask.automation_definition = (0, task_workflow_model_1.buildAutomationDefinitionV1)({
+            ...newTask,
+            id: newTask.automation_definition_id || newTask.id,
+            revision: newTask.automation_definition_revision || task.automation_definition_revision || 1,
+            name: task.automation_name || task.automationName || task.title || "自动化任务",
+            schedule: task.automation_schedule || task.schedule || "",
+            timezone: task.automation_timezone || task.timezone || "Asia/Shanghai",
+        }, executionPolicy);
+    }
+    const taskSpec = (0, task_workflow_model_1.buildTaskSpecV1)(newTask, executionPolicy);
+    const taskRun = (0, task_workflow_model_1.buildTaskRunV1)({
+        ...newTask,
+        trace_id: traceId,
+        auto_execute: newTask.auto_execute,
+    }, taskSpec, (0, task_workflow_model_1.normalizeTaskOrigin)(newTask) === "automation" ? "automation" : "user");
+    newTask.workflow_policy_snapshot = executionPolicy;
+    newTask.task_spec = taskSpec;
+    newTask.task_session_creation_policy = taskSpec.task_session_creation_policy;
+    newTask.task_run = taskRun;
+    newTask.run_id = taskRun.run_id;
+    newTask.active_run_id = taskRun.run_id;
     const acceptancePolicy = (0, task_acceptance_policy_1.buildTaskAcceptancePolicySnapshot)(newTask);
     newTask.conversation_permission_snapshot = (0, conversation_permission_policy_1.permissionSnapshotForTask)(newTask);
     newTask.conversation_permission_mode = newTask.conversation_permission_snapshot.mode;
@@ -369,6 +411,21 @@ function createTaskWithScopedIdentity(task) {
         buildContext: taskWithTimeline => (0, task_context_1.buildTaskContextCapsule)(taskWithTimeline),
     });
     Object.assign(newTask, persistedStart.task);
+    // TaskRun is the durable execution identity. The task record remains a
+    // projection for existing timeline and UI code.
+    (0, task_run_store_1.createTaskRunRecord)(newTask, newTask.task_spec, newTask.task_run?.trigger || "user", {
+        runId: newTask.task_run?.run_id,
+    });
+    if (taskSpec.task_session_creation_policy === "on_create") {
+        try {
+            (0, task_session_store_1.materializeTaskSession)(newTask);
+        }
+        catch (error) {
+            // Session projection must never make a successfully persisted task
+            // disappear. The next reconciliation pass can safely retry it.
+            console.warn(`[task-session] create projection deferred for ${newTask.id}: ${error?.message || error}`);
+        }
+    }
     (0, reliability_ledger_1.appendTraceEvent)(traceId, { id: `task:${newTask.id}:created`, type: "task.created", status: "ok", task_id: newTask.id, group_id: newTask.group_id || "", agent: newTask.target_project || "", message: newTask.title, data: { workflow_type: newTask.workflow_type, assign_type: newTask.assign_type, group_session_id: newTask.group_session_id || "", idempotency_key: idempotencyKey ? "present" : "absent", intake_identity_checksum: intakeIdentity?.checksum || "", source_channel: intakeIdentity?.source_channel || "", target_scope: intakeIdentity?.target_scope || "" } });
     return newTask;
 }
@@ -985,7 +1042,9 @@ function hasStructuredTaskAcceptanceEvidence(task, updates = {}) {
         if (!policyResult.valid || !policyResult.snapshot)
             return false;
         const independentReviewRequired = (0, task_acceptance_policy_1.taskAcceptanceUsesIndependentReview)(merged, policyResult.snapshot);
-        const effectiveMode = independentReviewRequired ? "test_agent" : "main_agent_self_verification";
+        const effectiveMode = merged?.workflow_policy_snapshot?.verification === "quick_check"
+            ? "quick_check"
+            : independentReviewRequired ? "test_agent" : "main_agent_self_verification";
         const finalAcceptance = updates.main_agent_final_acceptance
             || updates.delivery_summary?.main_agent_final_acceptance
             || task?.main_agent_final_acceptance
@@ -998,6 +1057,11 @@ function hasStructuredTaskAcceptanceEvidence(task, updates = {}) {
             || merged?.requires_independent_review === true;
         if (!acceptanceRequired)
             return finalAcceptanceValid;
+        if (merged?.workflow_policy_snapshot?.verification === "quick_check") {
+            const quick = updates.quick_check_receipt || task?.quick_check_receipt;
+            const quickValid = (0, main_agent_self_verification_1.validateQuickTaskVerificationReceipt)(merged, quick).valid;
+            return quickValid && finalAcceptanceValid && (finalAcceptance?.mode === "quick_check" || finalAcceptance?.mode === "not_required");
+        }
         if (!independentReviewRequired) {
             const receipt = updates.main_agent_self_verification || task?.main_agent_self_verification;
             return (0, main_agent_self_verification_1.validateMainAgentSelfVerificationReceipt)(merged, policyResult.snapshot, receipt).valid
@@ -1039,8 +1103,55 @@ function hasStructuredTaskAcceptanceEvidence(task, updates = {}) {
         || updates.terminal_decision?.gate_passed === true;
 }
 function validateTaskTerminalTransition(task, updates = {}) {
+    if ((0, acceptance_contract_2.isAcceptanceProjectionTask)(task))
+        return (0, acceptance_projection_service_1.validateProjectionTerminal)(task, updates, (0, db_1.loadTasks)());
+    const acceptanceError = (0, task_acceptance_service_1.validateUnifiedTaskAcceptance)(task, updates);
+    if (acceptanceError)
+        return acceptanceError;
     const requestedStatus = String(updates.status || "").trim().toLowerCase();
     if (requestedStatus !== "done" || String(task?.status || "") === "done")
+        return null;
+    // New TaskSpec/TaskRun tasks use their frozen workflow policy as the
+    // authoritative completion gate. The older workflow-type checks below are
+    // retained only for records that predate the unified model.
+    const workflowPolicy = task?.workflow_policy_snapshot || task?.task_spec?.execution_policy;
+    if (task?.task_spec?.schema === "ccm-task-spec-v1" && workflowPolicy) {
+        const verification = String(workflowPolicy.verification || "").trim();
+        const approval = String(workflowPolicy.approval || "").trim();
+        if (approval === "confirm_before_delivery"
+            && updates?.delivery_result?.confirmed !== true
+            && updates?.delivery_confirmation?.confirmed !== true
+            && updates?.delivery_confirmed !== true) {
+            return `任务 ${task?.id || ""} 已通过验收，但交付仍需用户确认`;
+        }
+        if (verification === "quick_check") {
+            const receipt = updates.quick_check_receipt || updates.quickCheckReceipt || task?.quick_check_receipt || task?.quickCheckReceipt;
+            const result = (0, main_agent_self_verification_1.validateQuickTaskVerificationReceipt)({ ...task, ...updates }, receipt);
+            if (!result.valid)
+                return `任务 ${task?.id || ""} 缺少有效快速检查证据：${result.reason}`;
+        }
+        else if (verification === "main_agent_self") {
+            const receipt = updates.main_agent_self_verification || updates.mainAgentSelfVerification || task?.main_agent_self_verification || task?.mainAgentSelfVerification;
+            const policy = updates.acceptance_policy_snapshot || task?.acceptance_policy_snapshot;
+            if (policy?.checksum) {
+                const result = (0, main_agent_self_verification_1.validateMainAgentSelfVerificationReceipt)({ ...task, ...updates }, policy, receipt);
+                if (!result.valid)
+                    return `任务 ${task?.id || ""} 缺少有效主 Agent 自验凭证：${result.reason}`;
+            }
+            else if (!receipt || receipt.canAccept !== true || receipt.deterministic_gate?.pass !== true) {
+                return `任务 ${task?.id || ""} 缺少有效主 Agent 自验凭证`;
+            }
+        }
+        else if (verification === "test_agent") {
+            const review = updates.test_agent_review || updates.testAgentReview || task?.test_agent_review || task?.testAgentReview;
+            const completionGate = review?.completionGate || review?.completion_gate;
+            if (!review || review.canAccept !== true)
+                return `任务 ${task?.id || ""} 缺少 TestAgent 独立验收证据`;
+            if (completionGate && !(0, completion_gate_1.validateTestAgentCompletionGate)(completionGate).valid)
+                return `任务 ${task?.id || ""} 的 TestAgent 完成门禁未通过`;
+        }
+    }
+    if ((0, acceptance_contract_1.taskAcceptanceContract)({ ...task, ...updates }))
         return null;
     const workflowType = String(task?.workflow_type || "general").trim().toLowerCase();
     if (!AUTOMATED_TERMINAL_WORKFLOWS.has(workflowType))
@@ -1065,6 +1176,8 @@ function validateTaskTerminalTransition(task, updates = {}) {
     return null;
 }
 function collectTerminalEvidence(task, updates = {}) {
+    if ((0, acceptance_contract_1.taskAcceptanceContract)({ ...task, ...updates }))
+        return [];
     const merged = { ...task, ...updates };
     const receipt = updates.receipt || task?.receipt || {};
     const summary = updates.delivery_summary || task?.delivery_summary || {};
@@ -1122,6 +1235,12 @@ function collectTerminalEvidence(task, updates = {}) {
     return records;
 }
 function buildTaskTerminalDecisionV2(task, updates = {}) {
+    const projection = (0, acceptance_projection_service_1.projectionTerminalDecision)(task, updates, (0, db_1.loadTasks)());
+    if (projection)
+        return projection;
+    const unified = (0, task_acceptance_service_1.unifiedTaskTerminalDecision)(task, updates);
+    if (unified)
+        return unified;
     const status = String(updates.status || "").trim().toLowerCase();
     const acceptanceState = { done: "accepted", failed: "rejected", blocked: "blocked", cancelled: "cancelled" };
     const evidenceRecords = collectTerminalEvidence(task, updates);
@@ -1133,7 +1252,8 @@ function buildTaskTerminalDecisionV2(task, updates = {}) {
         status,
         acceptance_state: acceptanceState[status] || String(updates.acceptance_state || task?.acceptance_state || "pending"),
         actor: (0, collaboration_1.compactFormText)(updates.terminal_actor || updates.terminalActor || updates.acceptance_decision?.actor, "task-runtime"),
-        gate_passed: status === "done" ? hasStructuredTaskAcceptanceEvidence(task, updates) : true,
+        gate_passed: status === "done" ? ((0, acceptance_contract_1.taskAcceptanceContract)({ ...task, ...updates })
+            ? (0, acceptance_ledger_1.evaluateAcceptanceLedger)({ ...task, ...updates }).canComplete : hasStructuredTaskAcceptanceEvidence(task, updates)) : true,
         evidence_registry: {
             evidenceIds: evidenceRecords.map(item => item.evidenceId),
             validCount: evidenceRecords.filter(item => item.status === "valid").length,
@@ -1151,11 +1271,14 @@ function buildTaskTerminalDecisionV2(task, updates = {}) {
     };
     return { ...base, checksum: crypto.createHash("sha256").update(JSON.stringify(base)).digest("hex") };
 }
-function updateTask(id, updates) {
+function updateTask(id, updates, options = {}) {
     const tasks = (0, db_1.loadTasks)();
     const idx = tasks.findIndex(t => t.id === id);
     if (idx === -1)
         return null;
+    const replay = (0, task_acceptance_service_1.replayAcceptanceTerminal)(tasks[idx], updates);
+    if (replay)
+        return replay;
     const expectedRevision = updates?.expectedRevision ?? updates?.expected_revision;
     const currentRevision = Math.max(0, Number(tasks[idx].revision || 0));
     if (expectedRevision !== undefined && Number(expectedRevision) !== currentRevision) {
@@ -1165,6 +1288,45 @@ function updateTask(id, updates) {
     delete updates.expectedRevision;
     delete updates.expected_revision;
     const previousStatus = tasks[idx].status;
+    if (updates.status != null) {
+        const requestedRaw = String(updates.status).trim().toLowerCase();
+        const normalized = (0, task_lifecycle_1.normalizeTaskStatus)(requestedRaw);
+        const transition = options.allowCancelledRecovery && String(previousStatus || "").toLowerCase() === "cancelled" && normalized === "pending"
+            ? { valid: true, issues: [] }
+            : (0, task_lifecycle_1.validateTaskLifecycleTransition)(previousStatus, normalized, "任务");
+        if (!transition.valid)
+            throw new Error(transition.issues.join("；"));
+        if (requestedRaw !== normalized) {
+            updates.status_alias = requestedRaw;
+            updates.status_normalized_at = new Date().toISOString();
+        }
+        updates.status = normalized;
+    }
+    const acceptanceUpdateError = (0, task_acceptance_service_1.validateUnifiedTaskAcceptance)(tasks[idx], updates);
+    if (acceptanceUpdateError)
+        throw new Error(acceptanceUpdateError);
+    const workItemId = String(updates.workItemId || updates.work_item_id || tasks[idx].work_item_id || tasks[idx].workItemId || "").trim();
+    if (workItemId) {
+        const executionSession = (0, execution_session_registry_1.createExecutionSession)({
+            taskId: id,
+            workItemId,
+            projectId: String(updates.projectId || updates.project_id || tasks[idx].target_project || tasks[idx].project || "").trim(),
+            generation: Number(updates.generation ?? tasks[idx].generation ?? 1),
+        });
+        updates.execution_session_id = executionSession.id;
+        updates.executionSessionId = executionSession.id;
+        const requested = String(updates.status || "").toLowerCase();
+        const mapped = { in_progress: "running", running: "running", executing: "running", reviewing: "verifying", reworking: "repairing", blocked: "blocked", completed: "completed", done: "completed", failed: "failed", cancelled: "cancelled", canceled: "cancelled", paused: "paused" };
+        if (mapped[requested]) {
+            try {
+                (0, execution_session_registry_1.transitionExecutionSession)(executionSession.id, mapped[requested]);
+            }
+            catch (error) {
+                if (!/终态/.test(String(error?.message || error)))
+                    throw error;
+            }
+        }
+    }
     const previousTaskSnapshot = { ...tasks[idx] };
     const previousGatePassed = tasks[idx].global_mission_gate_passed === true;
     const previousReceiptKey = String(tasks[idx].receipt_idempotency_key || "");
@@ -1220,7 +1382,7 @@ function updateTask(id, updates) {
             updates = { ...updates, failure_record: failure };
         }
         const settledAt = String(updates.completed_at || updates.failed_at || updates.cancelled_at || new Date().toISOString());
-        const evidenceChecksum = crypto.createHash("sha256").update(JSON.stringify({
+        const evidenceChecksum = (0, acceptance_contract_1.taskAcceptanceContract)(tasks[idx]) || (0, acceptance_contract_2.isAcceptanceProjectionTask)(tasks[idx]) ? terminalDecision.evidence_checksum : crypto.createHash("sha256").update(JSON.stringify({
             delivery_summary: updates.delivery_summary || tasks[idx].delivery_summary || null,
             receipt: updates.receipt || tasks[idx].receipt || null,
             review: updates.review || tasks[idx].review || null,
@@ -1259,6 +1421,36 @@ function updateTask(id, updates) {
         updates.receipt_idempotency_key = crypto.createHash("sha256").update(JSON.stringify(updates.receipt)).digest("hex");
     }
     Object.assign(tasks[idx], updates, { revision: currentRevision + 1, updated_at: new Date().toISOString() });
+    if (tasks[idx].task_run?.schema === "ccm-task-run-v1") {
+        const raw = String(tasks[idx].status || "pending").toLowerCase();
+        const runStatus = {
+            pending: "queued",
+            queued: "queued",
+            in_progress: "running",
+            running: "running",
+            reviewing: "verifying",
+            waiting: "waiting_user",
+            blocked: "blocked",
+            done: "completed",
+            completed: "completed",
+            failed: "failed",
+            cancelled: "cancelled",
+            canceled: "cancelled",
+            paused: "blocked",
+        }[raw] || tasks[idx].task_run.status;
+        tasks[idx].task_run = {
+            ...tasks[idx].task_run,
+            task_id: tasks[idx].id,
+            trace_id: tasks[idx].trace_id || tasks[idx].task_run.trace_id,
+            status: runStatus,
+            attempt: Math.max(1, Number(tasks[idx].execution_attempt || tasks[idx].attempt || tasks[idx].task_run.attempt || 1)),
+            updated_at: tasks[idx].updated_at,
+            ...(Array.isArray(updates.execution_evidence) ? { execution_evidence: updates.execution_evidence } : {}),
+            ...(updates.verification_result !== undefined ? { verification_result: updates.verification_result } : {}),
+            ...(updates.delivery_result !== undefined ? { delivery_result: updates.delivery_result } : {}),
+            ...(String(updates.queue_scope || updates.queueScope || tasks[idx].queue_scope || "").trim() ? { queue_lane: String(updates.queue_scope || updates.queueScope || tasks[idx].queue_scope || "").trim() } : {}),
+        };
+    }
     try {
         (0, task_execution_stage_projection_1.projectTaskExecutionStageTransition)(previousTaskSnapshot, tasks[idx]);
     }
@@ -1371,6 +1563,30 @@ function updateTask(id, updates) {
         tasks[idx].task_context = (0, task_context_1.refreshTaskContext)(tasks[idx], updates.status ? `status_${updates.status}` : "task_updated");
     }
     (0, db_1.saveTasks)(tasks);
+    if (tasks[idx].task_run?.run_id) {
+        try {
+            (0, task_run_store_1.recordTaskRunFromTask)(tasks[idx]);
+        }
+        catch (error) {
+            console.warn(`[task-run-store] ${id}: ${error?.message || error}`);
+        }
+    }
+    // The archive policy is frozen in TaskSpec. This is best effort after the
+    // authoritative task and run records have been committed.
+    try {
+        const materialized = (0, task_session_store_1.materializeTaskSession)(tasks[idx]);
+        if (materialized.created || materialized.available) {
+            tasks[idx].task_session = {
+                available: true,
+                session_id: materialized.session?.session_id || tasks[idx].task_session?.session_id || "",
+                materialized_at: materialized.session?.materialized_at || tasks[idx].task_session?.materialized_at || "",
+            };
+            (0, db_1.saveTasks)(tasks);
+        }
+    }
+    catch (error) {
+        console.warn(`[task-session] ${id}: ${error?.message || error}`);
+    }
     if ((0, task_conversation_projection_1.shouldSyncTaskConversationProjection)(updates)) {
         const projectionReceipt = (0, task_conversation_projection_1.syncTaskConversationProjection)({
             ...tasks[idx],
@@ -1444,14 +1660,16 @@ function normalizeTaskTerminalStateView(task) {
         },
     };
 }
-function removeTaskFromQueues(taskId) {
+function removeTaskFromQueues(taskId, requestedRunId = "") {
     let removed = 0;
+    const task = (0, db_1.loadTasks)().find(item => item.id === taskId);
+    const runId = String(requestedRunId || task?.active_run_id || task?.task_run?.run_id || task?.run_id || "");
     for (const queue of collaboration_1.taskQueues.values()) {
-        let index = queue.indexOf(taskId);
+        let index = queue.findIndex(item => item === taskId || (!!runId && item === runId));
         while (index >= 0) {
             queue.splice(index, 1);
             removed++;
-            index = queue.indexOf(taskId);
+            index = queue.findIndex(item => item === taskId || (!!runId && item === runId));
         }
     }
     collaboration_1.runningTaskIds.delete(taskId);
@@ -1520,8 +1738,9 @@ function continueDailyDevTasksFromGaps(ctx, options = {}) {
         results,
     };
 }
-function retryTask(id, ctx, reason = "", autoExecute = true) {
-    if (collaboration_1.runningTaskIds.has(id)) {
+function retryTask(id, ctx, reason = "", autoExecute = true, parentRunId = "") {
+    const activeTask = (0, db_1.loadTasks)().find((task) => task.id === id);
+    if (activeTask && (0, collaboration_1.isTaskRunningInMemory)(activeTask)) {
         return { success: false, status: 409, error: "任务正在执行中，请等待本轮结束后再重试" };
     }
     const current = (0, db_1.loadTasks)().find(t => t.id === id);
@@ -1545,6 +1764,20 @@ function retryTask(id, ctx, reason = "", autoExecute = true) {
         };
     }
     const retryCount = Number(current.retry_count || 0) + 1;
+    const nextRun = current.task_spec?.schema === "ccm-task-spec-v1"
+        ? (0, task_workflow_model_1.buildTaskRunV1)({
+            ...current,
+            run_id: "",
+            task_run: null,
+            execution_attempt: retryCount + 1,
+            auto_execute: autoExecute,
+            trace_id: current.trace_id,
+            automation_definition: current.automation_definition || null,
+        }, current.task_spec, "retry")
+        : null;
+    if (nextRun) {
+        nextRun.parent_run_id = String(parentRunId || current.task_run?.run_id || current.run_id || "");
+    }
     (0, execution_kernel_1.clearTaskCancellation)(id);
     const retryReason = (0, collaboration_1.compactFormText)(reason, "用户重新入队");
     const previousDelivery = (current.delivery_summary || current.receipt || current.review || current.final_report || current.result)
@@ -1576,15 +1809,35 @@ function retryTask(id, ctx, reason = "", autoExecute = true) {
             ? [...(Array.isArray(current.delivery_history) ? current.delivery_history : []), previousDelivery].slice(-20)
             : (Array.isArray(current.delivery_history) ? current.delivery_history : []),
         retry_count: retryCount,
+        ...(nextRun ? { task_run: nextRun, run_id: nextRun.run_id, execution_attempt: nextRun.attempt } : {}),
+        ...(nextRun ? { active_run_id: nextRun.run_id, parent_run_id: nextRun.parent_run_id } : {}),
         last_retry_at: new Date().toISOString(),
         last_retry_reason: retryReason,
         // 重试开启新的返工周期：本周期验收轮次清零，否则上一周期用满 3 轮的任务会零返工机会直接 blocked。
         ...require("./rework-policy").buildReviewCycleResetUpdate(current, `第 ${retryCount} 次重试：${retryReason}`),
     });
+    if (task && nextRun && task.task_spec?.schema === "ccm-task-spec-v1") {
+        try {
+            (0, task_run_store_1.createTaskRunRecord)({
+                ...task,
+                run_id: nextRun.run_id,
+                task_run: nextRun,
+                trace_id: current.trace_id,
+                parent_run_id: nextRun.parent_run_id,
+            }, task.task_spec, "retry", {
+                runId: nextRun.run_id,
+                parentRunId: nextRun.parent_run_id,
+            });
+        }
+        catch (error) {
+            (0, logs_1.addTaskLog)(id, "error", `重试运行记录写入失败：${String(error?.message || error).slice(0, 240)}`);
+            return { success: false, status: 500, code: "TASK_RUN_PERSIST_FAILED", error: "新的 TaskRun 无法持久化，已阻止重试" };
+        }
+    }
     if (task)
         (0, collaboration_1.updateGroupTaskInlineStatus)(task, "pending", `第 ${retryCount} 次重试，等待主 Agent 重新执行`);
     (0, logs_1.addTaskLog)(id, "info", `任务重新入队重试：${retryReason}`);
-    const queueResult = autoExecute ? (0, collaboration_1.enqueueTask)(id, ctx) : null;
+    const queueResult = autoExecute ? (0, collaboration_1.enqueueTask)(id, ctx, nextRun?.run_id || "") : null;
     return { success: true, task, queued: !!queueResult?.queued, queue_result: queueResult, queue_status: (0, collaboration_1.getQueueStatus)() };
 }
 function purgeArchivedTask(id) {

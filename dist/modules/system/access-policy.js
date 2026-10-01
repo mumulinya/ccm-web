@@ -194,7 +194,7 @@ function featureForApi(pathname) {
         return "terminal_ops";
     if (/^\/api\/(?:tools|marketplace|smithery)/.test(pathname))
         return "tool_ops";
-    if (/^\/api\/cron/.test(pathname))
+    if (/^\/api\/(?:automations|automation-runs)(?:\/|$)/.test(pathname))
         return "schedule_ops";
     if (/^\/api\/(?:metrics|cleanup|reliability)/.test(pathname))
         return "maintenance_ops";

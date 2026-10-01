@@ -51,6 +51,8 @@ const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const utils_1 = require("../core/utils");
 const context_source_tool_result_projection_1 = require("../system/context-source-tool-result-projection");
+const model_tool_result_1 = require("../agents/model-tool-result");
+const context_budget_1 = require("../system/context-budget");
 exports.DEFAULT_MAX_RESULT_SIZE_CHARS = 50_000;
 exports.MAX_TOOL_RESULTS_PER_MESSAGE_CHARS = 200_000;
 exports.PREVIEW_SIZE_BYTES = 2_000;
@@ -271,16 +273,20 @@ function persistPayloadObservation(input) {
 }
 function resultChars(value) {
     if (isPersistedToolResult(value))
-        return String(value.preview || "").length;
+        return modelVisiblePersistedToolResult(value).length;
     return serialize(value).length;
+}
+function replaceModelBody(row, body) {
+    return { ...row, output: body, modelOutput: body,
+        outputTokens: (0, context_budget_1.estimateTextTokens)(isPersistedToolResult(body) ? modelVisiblePersistedToolResult(body) : serialize(body)) };
 }
 function enforceToolResultBudget(rows, context, maxChars = exports.MAX_TOOL_RESULTS_PER_MESSAGE_CHARS) {
     const next = (Array.isArray(rows) ? rows : []).map(row => ({ ...row }));
     let changed = false;
-    const total = () => next.reduce((sum, row) => sum + resultChars(row.output), 0);
+    const total = () => next.reduce((sum, row) => sum + resultChars((0, model_tool_result_1.modelToolBody)(row)), 0);
     if (total() <= maxChars)
         return { rows: next, changed };
-    const ranked = [...next.keys()].sort((left, right) => resultChars(next[right].output) - resultChars(next[left].output));
+    const ranked = [...next.keys()].sort((left, right) => resultChars((0, model_tool_result_1.modelToolBody)(next[right])) - resultChars((0, model_tool_result_1.modelToolBody)(next[left])));
     for (const index of ranked) {
         if (total() <= maxChars)
             break;
@@ -289,12 +295,12 @@ function enforceToolResultBudget(rows, context, maxChars = exports.MAX_TOOL_RESU
         const persisted = persistToolResultIfNeeded({
             toolName: String(row.name || "tool"),
             toolCallId,
-            payload: row.output,
+            payload: (0, model_tool_result_1.modelToolBody)(row),
             context,
             thresholdChars: 1,
         });
-        if (persisted !== row.output) {
-            next[index] = { ...row, output: persisted };
+        if (persisted !== (0, model_tool_result_1.modelToolBody)(row)) {
+            next[index] = replaceModelBody(row, persisted);
             changed = true;
         }
     }
@@ -308,13 +314,13 @@ function persistNativeToolResultRows(rows, context) {
         const persisted = persistToolResultIfNeeded({
             toolName: String(row.name || "tool"),
             toolCallId: String(row.callId || row.toolCallId || ""),
-            payload: row.output,
+            payload: (0, model_tool_result_1.modelToolBody)(row),
             context,
         });
-        if (persisted === row.output)
+        if (persisted === (0, model_tool_result_1.modelToolBody)(row))
             return { ...row };
         changed = true;
-        return { ...row, output: persisted };
+        return replaceModelBody(row, persisted);
     });
     const budgeted = enforceToolResultBudget(next, context);
     return { rows: budgeted.rows, changed: changed || budgeted.changed };

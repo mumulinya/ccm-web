@@ -228,9 +228,9 @@ function buildUxSelfTestChecks(ctx = {}) {
             && /API microcompact edit plan raw detail/.test(JSON.stringify(jargonAcceptance.technical || {})),
         simplePhaseLanguage: card.phase_label === "已完成",
         conciseAgentLanguage: card.agents.every((item) => !/receipt|回执|门禁|session|trace/i.test(item.summary)),
-        simpleActions: card.actions.some((item) => item.label === "查看改动")
-            && card.actions.some((item) => item.label === "继续修改")
-            && card.actions.some((item) => item.label === "安全撤销")
+        simpleActions: card.available_actions.some((item) => item.label === "查看改动")
+            && card.available_actions.some((item) => item.label === "继续修改")
+            && card.available_actions.some((item) => item.label === "安全撤销")
             && failedCard.actions.some((item) => item.label === "重新执行")
             && activeCard.actions.some((item) => item.label === "停止"),
         revertedPhase: revertedCard.phase === "reverted" && revertedCard.phase_label === "已安全撤销",
@@ -437,7 +437,7 @@ function buildUxSelfTestChecks(ctx = {}) {
         changeSummaryVisible: card.change_summary?.schema === "ccm-main-agent-change-summary-v1"
             && card.change_summary?.files?.some((item) => item.path === "frontend/app.js" && item.project === "collab-web")
             && card.change_summary?.file_count >= 2,
-        changeSummaryActionDataReady: card.change_summary?.next_action?.includes("查看具体文件 diff") && card.actions.some((item) => item.kind === "view_changes"),
+        changeSummaryActionDataReady: card.change_summary?.next_action?.includes("查看具体文件 diff") && card.available_actions.some((item) => item.kind === "view_changes"),
         receiptReworkSummaryVisible: missingEvidenceCard.receipt_rework_summary?.schema === "ccm-main-agent-receipt-rework-summary-v1"
             && missingEvidenceCard.receipt_rework_summary?.gaps?.some((item) => item.id === "missing_receipt" && item.target === "collab-web")
             && missingEvidenceCard.receipt_rework_summary?.gaps?.every((item) => item.action?.kind === "targeted_rework"),

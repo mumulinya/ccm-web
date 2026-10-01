@@ -278,7 +278,7 @@ function buildContextSourceToolResultReference(toolNameInput, value, query = "")
     };
 }
 const WORKSPACE_PERSISTENCE_TOOLS = new Set([
-    "read_file", "read_files", "grep_text", "glob_files", "list_directory", "inspect_notebook",
+    "read_file", "read_files", "read_json_fields", "grep_text", "glob_files", "list_directory", "inspect_notebook",
     "read_project_config", "read_git_status", "read_git_diff", "read_git_history",
     "read_runtime_status", "read_runtime_logs",
     "workspace_symbols", "document_symbols",

@@ -21,11 +21,11 @@ const collaboration_runtime_coordinator_review_1 = require("./collaboration-runt
 const collaboration_runtime_plan_tools_1 = require("./collaboration-runtime-plan-tools");
 const collaboration_runtime_runtime_tools_1 = require("./collaboration-runtime-runtime-tools");
 function switchTaskExecutor(id, requestedRuntime, ctx, options = {}) {
-    if (collaboration_runtime_task_queue_1.runningTaskIds.has(id))
-        return { success: false, status: 409, error: "任务正在执行中，请先暂停或等待本轮结束后再切换执行器" };
     const current = (0, db_1.loadTasks)().find((task) => task.id === id);
     if (!current)
         return { success: false, status: 404, error: "任务不存在" };
+    if ((0, collaboration_runtime_task_queue_1.isTaskRunningInMemory)(current))
+        return { success: false, status: 409, error: "任务正在执行中，请先暂停或等待本轮结束后再切换执行器" };
     if (current.archived || current.deleted_at)
         return { success: false, status: 409, error: "归档任务不能切换执行器，请先恢复" };
     if (["done", "cancelled"].includes(String(current.status || "")))
@@ -133,7 +133,7 @@ function archiveTask(id, reason = "用户删除任务") {
     if (current.archived || current.deleted_at)
         return current;
     (0, collaboration_runtime_runtime_tools_1.removeTaskFromQueues)(id);
-    const running = collaboration_runtime_task_queue_1.runningTaskIds.has(id);
+    const running = (0, collaboration_runtime_task_queue_1.isTaskRunningInMemory)(current);
     let cancellation = null;
     if (!['done', 'cancelled'].includes(String(current.status || ''))) {
         try {

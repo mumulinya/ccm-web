@@ -92,6 +92,7 @@ const session_compaction_runs_1 = require("../../system/session-compaction-runs"
 const context_compaction_lifecycle_1 = require("../../system/context-compaction-lifecycle");
 const post_turn_tool_context_compaction_1 = require("../../system/post-turn-tool-context-compaction");
 const pre_request_tool_context_1 = require("../../system/pre-request-tool-context");
+const model_tool_result_1 = require("../model-tool-result");
 function createGlobalSessionCompactionAdapter(input) {
     return (0, unified_session_compaction_adapters_1.createUnifiedScopeAdapter)({
         load: async () => ({ scope: "global", exactSessionId: String(input.sessionId), ...(await input.load()) }),
@@ -601,6 +602,17 @@ function appendGlobalAgentExecutionEvent(sessionIdInput, event) {
         payload: type === "tool_use"
             ? { arguments: event?.arguments || {}, risk: event?.risk || "", confirmed: event?.confirmed === true }
             : { observation: event?.observation ?? null, error: event?.error || event?.question || "", duration_ms: event?.duration_ms || 0, confirmed: event?.confirmed === true },
+        // Runtime output is an audit event, while the provider needs the exact
+        // model-facing observation that was returned by the native tool adapter.
+        // Retain that projection separately so a later global turn can replay the
+        // same function_call_output bytes instead of rebuilding it from audit data.
+        ...(type === "tool_result" ? {
+            modelContent: event?.modelContent !== undefined
+                ? event.modelContent
+                : event?.modelOutput !== undefined
+                    ? event.modelOutput
+                    : (0, model_tool_result_1.globalModelToolObservation)(event?.observation ?? null),
+        } : {}),
         persistContext: { scope: "global", scopeId: "global", sessionId },
     });
     if (!events.some(item => item.id === created.id))
@@ -1184,7 +1196,7 @@ async function runUnifiedGlobalSessionCompaction(sessionId, options = {}) {
             saveMemory(memory);
         },
     });
-    const modelCall = options.modelCall || ((request) => (0, unified_session_compaction_model_1.callUnifiedCompactionModel)({ ...config, compactionAbortSignal: options.signal }, request.system, request.user, request.maxOutputTokens, {
+    const modelCall = options.modelCall || ((request) => (0, unified_session_compaction_model_1.callUnifiedCompactionModel)({ ...config, compactionAbortSignal: options.signal, requestAttribution: { scope: 'global', scopeId: 'global', exactSessionId, purpose: 'session_compaction', requestClass: 'auxiliary' } }, request.system, request.user, request.maxOutputTokens, {
         beforeRequest: ({ provider, model }) => { options.onCompactionActivity?.({ stage: "model_summary_request", provider, model }); },
     }));
     const result = await (0, unified_session_compaction_1.createUnifiedSessionCompactionEngine)({
@@ -1310,7 +1322,7 @@ function scheduleGlobalAgentSessionMemoryExtraction(sessionId, options = {}) {
         sourceChecksum: sha({ generation, messageIds: transcript.messages.map((item) => String(item?.id || "")) }, 64),
     };
     const config = (0, group_orchestrator_config_1.loadOrchestratorConfig)();
-    const modelCall = options.modelCall || ((request) => (0, unified_session_compaction_model_1.callUnifiedCompactionModel)(config, request.system, request.user, request.maxOutputTokens));
+    const modelCall = options.modelCall || ((request) => (0, unified_session_compaction_model_1.callUnifiedCompactionModel)({ ...config, requestAttribution: { scope: 'global', scopeId: 'global', exactSessionId, purpose: 'session_memory', requestClass: 'auxiliary' } }, request.system, request.user, request.maxOutputTokens));
     const scheduled = (0, session_compaction_core_1.scheduleSessionMemoryExtraction)({
         scope: "global",
         sessionId: exactSessionId,

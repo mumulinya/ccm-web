@@ -427,7 +427,7 @@ function runPostCompactCompletionMemoryPreservationClosureConflictResolutionMain
         });
         (0, group_memory_index_1.writeJsonAtomic)((0, group_memory_index_1.getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveManifestFile)(groupC), { schema: "selftest-manifest", group_id: groupC });
         const safeTelemetry = () => ({ destructive_action_authorized: false, deleted_count: 0, created_task_count: 0, created_approval_receipt_count: 0 });
-        const { runConflictResolutionMemoryMaintenanceSchedulerTick } = require("../scheduling/cron");
+        const { runConflictResolutionMemoryMaintenanceSchedulerTick } = require("../scheduling/maintenance-scheduler");
         const scheduler = runConflictResolutionMemoryMaintenanceSchedulerTick({
             at: "2026-07-12T17:01:00.000Z", groupIds: [groupC], force: true, stateFile: schedulerStateFile,
             runMaintenance: () => ({ dueCount: 0, skippedCount: 1, destructiveActionAuthorized: false, deletedCount: 0 }),
@@ -660,7 +660,7 @@ function runPostCompactCompletionMemoryPreservationClosureConflictResolutionMain
         const quarantineArtifacts = (0, group_memory_index_1.readJson)(discoveryB.quarantine_file, {}).entries || [];
         (0, group_memory_index_1.writeJsonAtomic)((0, group_memory_index_1.getPostCompactCompletionMemoryPreservationClosureConflictResolutionColdArchiveManifestFile)(groupB), { schema: "selftest-manifest", group_id: groupB });
         const safeTelemetry = () => ({ destructive_action_authorized: false, deleted_count: 0, created_task_count: 0, created_approval_receipt_count: 0 });
-        const { runConflictResolutionMemoryMaintenanceSchedulerTick } = require("../scheduling/cron");
+        const { runConflictResolutionMemoryMaintenanceSchedulerTick } = require("../scheduling/maintenance-scheduler");
         const scheduler = runConflictResolutionMemoryMaintenanceSchedulerTick({
             at: "2026-07-12T18:17:00.000Z", groupIds: [groupB], force: true, stateFile: schedulerStateFile,
             runMaintenance: () => ({ dueCount: 0, skippedCount: 1, destructiveActionAuthorized: false, deletedCount: 0 }),

@@ -98,9 +98,22 @@ function runReadonlyToolsAdaptive(input) {
     return new Promise((resolve, reject) => {
         let completed = 0;
         let settled = false;
+        let failed = false;
+        let failure;
         const launch = () => {
             if (settled)
                 return;
+            if (input.signal?.aborted && !failed) {
+                failed = true;
+                failure = Object.assign(new Error('工具调度已取消'), { name: 'AbortError', code: 'CCM_TOOL_SCHEDULING_ABORTED' });
+            }
+            if (failed) {
+                if (!active.length) {
+                    settled = true;
+                    reject(failure);
+                }
+                return;
+            }
             if (completed === input.items.length) {
                 settled = true;
                 resolve(results);
@@ -131,7 +144,11 @@ function runReadonlyToolsAdaptive(input) {
                 active.push({ item: candidate.item, key });
                 if (key)
                     activeByKey.set(key, Number(activeByKey.get(key) || 0) + 1);
-                Promise.resolve(input.worker(candidate.item, candidate.index)).then(result => {
+                Promise.resolve().then(() => {
+                    if (input.signal?.aborted)
+                        throw Object.assign(new Error('工具调度已取消'), { name: 'AbortError' });
+                    return input.worker(candidate.item, candidate.index);
+                }).then(result => {
                     results[candidate.index] = result;
                     completed += 1;
                     const activeIndex = active.findIndex(row => row.item === candidate.item && row.key === key);
@@ -148,8 +165,14 @@ function runReadonlyToolsAdaptive(input) {
                 }, error => {
                     if (settled)
                         return;
-                    settled = true;
-                    reject(error);
+                    failed = true;
+                    failure ||= error;
+                    const activeIndex = active.findIndex(row => row.item === candidate.item && row.key === key);
+                    if (activeIndex >= 0)
+                        active.splice(activeIndex, 1);
+                    // Drain already running workers before surfacing failure. A retry
+                    // cannot overlap late results from the preceding batch.
+                    launch();
                 });
             }
         };

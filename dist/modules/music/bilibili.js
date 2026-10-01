@@ -38,6 +38,7 @@ exports.ensureBuvid3 = ensureBuvid3;
 exports.ensureWbiKey = ensureWbiKey;
 exports.signBiliParams = signBiliParams;
 exports.biliSearch = biliSearch;
+exports.getBiliPlaybackStreams = getBiliPlaybackStreams;
 exports.getBiliAudioUrl = getBiliAudioUrl;
 exports.getBiliCookieHeader = getBiliCookieHeader;
 const crypto = __importStar(require("crypto"));
@@ -167,7 +168,9 @@ async function biliSearch(keyword) {
     console.log("[BiliSearch] found", results.length, "results");
     return results;
 }
-async function getBiliAudioUrl(bvid) {
+async function getBiliPlaybackStreams(bvid) {
+    if (!/^BV[0-9A-Za-z]{10}$/.test(bvid))
+        throw new Error('B站视频 ID 无效');
     await ensureBuvid3();
     await ensureWbiKey();
     const params = { bvid };
@@ -219,7 +222,16 @@ async function getBiliAudioUrl(bvid) {
     if (!audioList || audioList.length === 0) {
         throw new Error("未找到对应的音频流直链");
     }
-    return audioList[0].baseUrl || audioList[0].backupUrl[0];
+    const videoList = playData?.data?.dash?.video || [];
+    const video = videoList.find((item) => item.codecid === 7) || videoList[0];
+    return {
+        audioUrl: audioList[0].baseUrl || audioList[0].backupUrl?.[0],
+        videoUrl: video?.baseUrl || video?.backupUrl?.[0],
+        durationSeconds: Number(viewData?.data?.duration || 0),
+    };
+}
+async function getBiliAudioUrl(bvid) {
+    return (await getBiliPlaybackStreams(bvid)).audioUrl;
 }
 function getBiliCookieHeader() {
     return `buvid3=${buvid3}`;

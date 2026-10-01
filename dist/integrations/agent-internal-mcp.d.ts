@@ -1,0 +1,76 @@
+import { InternalMcpAgentRole, InternalMcpProjectBinding } from "./internal-mcp-runtime";
+export type TaskBoundInternalMcpInput = {
+    taskId: string;
+    groupId: string;
+    groupSessionId?: string;
+    projectSessionId?: string;
+    project: string;
+    role: InternalMcpAgentRole;
+    agentType?: string;
+    taskAgentSessionId?: string;
+    nativeSessionId?: string;
+    workDir: string;
+    baseWorkDir?: string;
+    projects?: InternalMcpProjectBinding[];
+    memoryReceiptChallenge?: any;
+    memoryReceiptFile?: string;
+    memorySnapshotId?: string;
+    memorySnapshotChecksum?: string;
+    boundaryGeneration?: number;
+    nativeGeneration?: number;
+    communicationMessageId?: string;
+    communicationGeneration?: number;
+    communicationAttempt?: number;
+    communicationLeaseId?: string;
+    anchorMessageId?: string;
+    originMessageId?: string;
+    requestText?: string;
+    memoryReadBudgetTokens?: number;
+    nativeWorkspaceEditing?: boolean;
+};
+export declare function buildTaskBoundInternalMcpServers(input: TaskBoundInternalMcpInput): Record<string, any>;
+export type ProjectSessionBoundMemoryMcpInput = {
+    project: string;
+    projectSessionId: string;
+    agentType?: string;
+    workDir: string;
+    taskAgentSessionId?: string;
+    nativeSessionId?: string;
+    memoryReceiptChallenge: any;
+    memoryReceiptFile: string;
+    memorySnapshotId: string;
+    memorySnapshotChecksum: string;
+    boundaryGeneration?: number;
+    nativeGeneration?: number;
+    requestText?: string;
+    memoryReadBudgetTokens?: number;
+};
+export declare function buildProjectSessionBoundMemoryMcpServer(input: ProjectSessionBoundMemoryMcpInput): {
+    ccm__knowledge_context?: undefined;
+    ccm__permission_broker?: undefined;
+} | {
+    ccm__knowledge_context: {
+        command: string;
+        args: string[];
+        env: {
+            CCM_INTERNAL_MCP_CONTEXT: string;
+            CCM_INTERNAL_MCP_SECRET_FILE: string;
+            CCM_TASK_STORE_DIR: string;
+            CCM_EVIDENCE_STORE_DIR: string;
+            CCM_USER_VISIBLE_AGENT_EVENT_DIR: string;
+            CCM_INTERNAL_MCP_AUDIT_FILE: string;
+        };
+    };
+    ccm__permission_broker: {
+        command: string;
+        args: string[];
+        env: {
+            CCM_INTERNAL_MCP_CONTEXT: string;
+            CCM_INTERNAL_MCP_SECRET_FILE: string;
+            CCM_TASK_STORE_DIR: string;
+            CCM_EVIDENCE_STORE_DIR: string;
+            CCM_USER_VISIBLE_AGENT_EVENT_DIR: string;
+            CCM_INTERNAL_MCP_AUDIT_FILE: string;
+        };
+    };
+};

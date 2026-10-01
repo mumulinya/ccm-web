@@ -1,0 +1,146 @@
+import type { TestAgentInvocationResult } from "../../test-agent/invocation";
+export type TestAgentRunnerMode = "plan" | "invocation";
+export type TestAgentRunnerStatus = "queued" | "running" | "completed" | "failed" | "cancelled" | "interrupted";
+export interface TestAgentSourceProjectBinding {
+    name: string;
+    workDir: string;
+    realWorkDir: string;
+    gitHead: string;
+    gitStatusHash: string;
+    declaredFiles: string[];
+    declaredFileHash: string;
+    declaredFileEvidence?: Array<{
+        path: string;
+        state: string;
+        size: number;
+        checksum: string;
+        verified: boolean;
+    }>;
+    runtimeFingerprint?: any;
+    fingerprint: string;
+}
+export interface TestAgentSourceBinding {
+    schema: "ccm-test-agent-source-binding-v1" | "ccm-test-agent-source-binding-v2";
+    version?: 1 | 2;
+    capturedAt: string;
+    fingerprint: string;
+    projects: TestAgentSourceProjectBinding[];
+}
+export interface TestAgentRunnerRecord {
+    schema: "ccm-test-agent-runner-record-v1";
+    id: string;
+    key: string;
+    mode: TestAgentRunnerMode;
+    taskId: string;
+    groupId: string;
+    handoffId: string;
+    handoffHash: string;
+    status: TestAgentRunnerStatus;
+    pid: number;
+    createdAt: string;
+    startedAt: string;
+    heartbeatAt: string;
+    finishedAt: string;
+    deadlineAt: string;
+    timeoutMs: number;
+    handoffPath: string;
+    stdoutPath: string;
+    stderrPath: string;
+    progressPath: string;
+    exitCode: number | null;
+    signal: string;
+    error: string;
+    cancelledReason: string;
+    recoveredAfterRestart: boolean;
+    sourceBefore: TestAgentSourceBinding;
+    sourceAfter?: TestAgentSourceBinding;
+    sourceStable?: boolean;
+    attemptScope?: string;
+    runtimeEnvFingerprint?: string;
+    result?: any;
+    persistenceProjection?: {
+        schema: "ccm-test-agent-runner-record-persistence-v2";
+        contentStored: false;
+        redactedResultFields: number;
+        checksum: string;
+    };
+}
+export interface RunTestAgentJobInput {
+    mode: TestAgentRunnerMode;
+    handoff: any;
+    taskId?: string;
+    groupId?: string;
+    timeoutMs?: number;
+    idempotencyKey?: string;
+    attemptScope?: string;
+    allowedWorkDirs?: string[];
+    runtimeEnv?: Record<string, string>;
+    runtimeProgressContext?: Record<string, any> | null;
+}
+export interface TestAgentRunnerResult {
+    schema: "ccm-test-agent-runner-result-v1";
+    record: TestAgentRunnerRecord;
+    plan?: any;
+    invocation?: TestAgentInvocationResult;
+    stdout: string;
+    stderr: string;
+    reused: boolean;
+}
+export declare function buildTestAgentRunnerJobKey(input: RunTestAgentJobInput, sourceFingerprint?: string): string;
+export declare function listTestAgentRunnerRecords(options?: {
+    taskIds?: string[];
+    limit?: number;
+}): TestAgentRunnerRecord[];
+/** Test-only helper: persist a runner record without registering activeChildren (orphan simulation). */
+export declare function upsertTestAgentRunnerRecordForSelfTest(partial: Partial<TestAgentRunnerRecord> & {
+    id: string;
+    taskId: string;
+}): TestAgentRunnerRecord;
+export declare function getTestAgentRunnerRecordForSelfTest(id: string): TestAgentRunnerRecord;
+export declare function captureTestAgentSourceBinding(handoff: any): TestAgentSourceBinding;
+export declare function runTestAgentCliJob(input: RunTestAgentJobInput): Promise<TestAgentRunnerResult>;
+export declare function cancelTestAgentRunsForTask(taskId: string, reason?: string): string[];
+/** Return whether a TestAgent process for a task is still alive after a
+ * server restart. Used by queue recovery to distinguish an active review
+ * from an orphaned `reviewing/test_agent_running` task. */
+export declare function hasActiveTestAgentRunForTask(taskId: string): boolean;
+/**
+ * Return the most recent terminal invocation result for a task.  This is used
+ * by queue recovery when the TestAgent child has already exited but the
+ * coordinator process was restarted before it persisted the review outcome.
+ * The persisted runner record is the source of truth; transient stdout files
+ * are never required and are not exposed to callers.
+ */
+export declare function getLatestTestAgentRunnerResultForTask(taskId: string, mode?: TestAgentRunnerMode): TestAgentRunnerResult;
+export declare function reconcileTestAgentRunnerRecords(): {
+    schema: string;
+    total: number;
+    running: number;
+    interrupted: number;
+    retention: {
+        schema: string;
+        scanned: number;
+        removedRecords: number;
+        removedFiles: number;
+    };
+};
+export declare function pruneTestAgentRunnerRecords(options?: {
+    retentionDays?: number;
+    maxRecords?: number;
+}): {
+    schema: string;
+    scanned: number;
+    removedRecords: number;
+    removedFiles: number;
+};
+export declare function purgeTestAgentRunnerRecordsForTask(taskId: string): {
+    schema: string;
+    taskId: string;
+    removedRecords: number;
+    removedFiles: number;
+};
+export declare function runTestAgentRunnerSelfTest(): {
+    pass: boolean;
+    stableSourceFingerprint: boolean;
+    recordsReconcile: boolean;
+};

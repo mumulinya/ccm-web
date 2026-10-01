@@ -256,8 +256,27 @@ function ensureExecution(input) {
     const executionId = safePart(input.executionId || input.task?.id || `execution-${Date.now().toString(36)}`);
     const file = executionFile(executionId);
     const existing = readJson(file, null);
-    if (existing)
+    if (existing) {
+        // A task may be resumed after its initial packet was created before the
+        // confirmed verification commands were attached. Enrich only the missing
+        // command list; never rewrite the stable task identity or dynamic history.
+        const incomingCommands = input.packet?.verification?.commands || [];
+        const existingCommands = existing.packet?.verification?.commands || [];
+        if (!existingCommands.length && incomingCommands.length) {
+            existing.packet = {
+                ...existing.packet,
+                verification: {
+                    ...(existing.packet?.verification || {}),
+                    commands: [...incomingCommands],
+                    required: input.packet?.verification?.required ?? existing.packet?.verification?.required,
+                    requiredGreenLevel: input.packet?.verification?.requiredGreenLevel || existing.packet?.verification?.requiredGreenLevel,
+                },
+            };
+            existing.updatedAt = now();
+            writeJsonAtomic(file, existing);
+        }
         return existing;
+    }
     const packet = input.packet || buildDevelopmentTaskPacket(input.task, { project: input.project, workDir: input.workDir });
     const validation = validateDevelopmentTaskPacket(packet);
     if (!validation.pass)

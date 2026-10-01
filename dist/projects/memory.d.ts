@@ -1,0 +1,67 @@
+import type { MainAgentContinuityIdentityV1 } from "../system/main-agent-post-compact-continuity";
+export declare function scanProjectFileStructure(workDir: string, maxDepth?: number, maxEntries?: number): string;
+export declare function loadProjectMemory(project: string, options?: {
+    workDir?: string;
+    resources?: any;
+    refreshStructure?: boolean;
+}): any;
+export declare function updateProjectMemoryFromReceipt(input: {
+    project: string;
+    workDir?: string;
+    groupId?: string;
+    taskId?: string;
+    agent?: string;
+    accepted?: boolean;
+    sourceKind?: string;
+    receipt: any;
+    actualFiles?: any[];
+    resources?: any;
+    contextSourceIdentity?: MainAgentContinuityIdentityV1;
+}): any;
+export declare function recordAcceptedProjectDeliveryMemory(input: {
+    task: any;
+    deliverySummary: any;
+    resources?: any;
+}): {
+    committed: boolean;
+    reason: string;
+    projects: any[];
+    durableCandidateCount: any;
+};
+export declare function buildProjectMemoryPacket(project: string, options?: {
+    workDir?: string;
+    resources?: any;
+    query?: string;
+}): string;
+export declare function buildProjectExecutionBrief(project: string, taskText: string, options?: {
+    workDir?: string;
+    resources?: any;
+    query?: string;
+    verificationHints?: any;
+    memoryDeliveryMode?: "prompt" | "mcp";
+    memorySnapshotId?: string;
+}): string;
+export declare function buildProjectConversationBrief(project: string, message: string): string;
+export declare function runProjectMemorySelfTest(): {
+    pass: boolean;
+    checks: {
+        compactsAfterThreshold: boolean;
+        retainsOlderDigest: any;
+        retainsNewestConclusion: boolean;
+        archivesAreLosslessAcrossRollovers: any;
+        archivesHaveIntegrityChecksums: any;
+        decisionsRollIntoLosslessArchives: any;
+        integrityValidationDetectsTampering: boolean;
+        retrievesRelevantArchivedEvidence: boolean;
+        projectBoundaryTracksTokenPressure: boolean;
+        decisionBoundaryTracksTokenPressure: boolean;
+        postCompactRestoreAnchorsRecorded: boolean;
+        taskHistoryUpsertsByTaskInsteadOfAppending: boolean;
+        lowValueTaskHistoryIsNotInjectedByDefault: boolean;
+        acceptedDurableMemoryIsDeduplicatedAndInjected: boolean;
+        failedReceiptCannotCommitDurableMemory: boolean;
+        finalAcceptanceControlsDurableCommit: boolean;
+        buildsExecutionBriefWithRecallAndRules: boolean;
+        atomicBackupRecoveryWorks: boolean;
+    };
+};

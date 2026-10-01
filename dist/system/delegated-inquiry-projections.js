@@ -75,7 +75,9 @@ function normalizeProjection(value) {
     const evidenceIds = Array.from(new Set((Array.isArray(value?.evidenceIds) ? value.evidenceIds : []).map((item) => safeText(item, 180)).filter(Boolean)));
     const missingEvidenceSummaries = Array.from(new Set((Array.isArray(value?.missingEvidenceSummaries || value?.missing_evidence_summaries)
         ? (value.missingEvidenceSummaries || value.missing_evidence_summaries) : []).map((item) => safeText(item, 500)).filter(Boolean))).slice(0, 8);
-    const availableActions = (Array.isArray(value?.availableActions || value?.available_actions) ? (value.availableActions || value.available_actions) : [])
+    const hasActionProjection = Object.prototype.hasOwnProperty.call(value, "availableActions")
+        || Object.prototype.hasOwnProperty.call(value, "available_actions");
+    const availableActions = (Array.isArray(value?.availableActions ?? value?.available_actions) ? (value.availableActions ?? value.available_actions) : [])
         .map(String).filter((item) => ["continue_with_current", "supplement_check", "provide_clarification", "promote_to_development"].includes(item));
     const legacyOutcome = legacyStatus === "insufficient" ? "partial"
         : ["completed", "failed"].includes(legacyStatus) ? legacyStatus
@@ -103,7 +105,7 @@ function normalizeProjection(value) {
             .filter(([key, checksum]) => key && checksum)),
         missingEvidenceSummaries,
         automaticSupplementAttempts: Math.min(1, Math.max(0, Math.floor(Number(value?.automaticSupplementAttempts || value?.automatic_supplement_attempts || 0)))),
-        availableActions: availableActions.length ? Array.from(new Set(availableActions)) : actionsForStatus(status),
+        availableActions: hasActionProjection ? Array.from(new Set(availableActions)) : actionsForStatus(status),
         ...(safeText(value?.conclusionSummary || value?.conclusion_summary, 800)
             ? { conclusionSummary: safeText(value?.conclusionSummary || value?.conclusion_summary, 800) }
             : {}),

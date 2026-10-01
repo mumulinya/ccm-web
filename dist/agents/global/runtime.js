@@ -54,6 +54,7 @@ exports.runGlobalAgentRuntimeSelfTest = runGlobalAgentRuntimeSelfTest;
 const crypto = __importStar(require("crypto"));
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
+const douyin_tool_schema_1 = require("../../modules/music/douyin-tool-schema");
 const utils_1 = require("../../core/utils");
 const context_source_tool_result_projection_1 = require("../../system/context-source-tool-result-projection");
 const RUNTIME_DIR = path.join(utils_1.CCM_DIR, "global-agent-runtime");
@@ -115,6 +116,9 @@ function toolTitle(name) {
     return String(name || "").split("_").filter(Boolean).map(part => part[0]?.toUpperCase() + part.slice(1)).join(" ") || "Tool";
 }
 function schemaForSpec(spec) {
+    const douyin = (0, douyin_tool_schema_1.douyinToolSchema)(spec.name, spec.required);
+    if (douyin)
+        return douyin;
     const properties = {};
     for (const key of spec.required || []) {
         properties[key] = {

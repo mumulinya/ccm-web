@@ -104,7 +104,7 @@ function enqueueProjectWorkerDelivery(input) {
         const commit = runGit(prepared.worktreePath, ["rev-parse", "HEAD"]);
         if (!baseCommit || commit === baseCommit) {
             cleanupWorktree(mainWorkDir, prepared);
-            return { commit: "", baseCommit, branch: prepared.worktreeBranch, merged: true, cleaned: true };
+            return { commit: "", baseCommit, branch: prepared.worktreeBranch, changedFiles: [], merged: true, cleaned: true };
         }
         try {
             runGit(prepared.worktreePath, ["merge-base", "--is-ancestor", baseCommit, commit]);
@@ -117,13 +117,13 @@ function enqueueProjectWorkerDelivery(input) {
         const changed = changedPathsSince(prepared.worktreePath, baseCommit, commit);
         if (mainWorktreeAlreadyContainsCommit(mainWorkDir, commit, changed)) {
             cleanupWorktree(mainWorkDir, prepared);
-            return { commit, baseCommit, commits, branch: prepared.worktreeBranch, merged: true, cleaned: true, alreadyApplied: true };
+            return { commit, baseCommit, commits, branch: prepared.worktreeBranch, changedFiles: [...changed], merged: true, cleaned: true, alreadyApplied: true };
         }
         assertMainWorktreeSafe(mainWorkDir, changed);
         try {
             runGit(mainWorkDir, ["cherry-pick", ...commits]);
             cleanupWorktree(mainWorkDir, prepared);
-            return { commit, baseCommit, commits, branch: prepared.worktreeBranch, merged: true, cleaned: true };
+            return { commit, baseCommit, commits, branch: prepared.worktreeBranch, changedFiles: [...changed], merged: true, cleaned: true };
         }
         catch (error) {
             try {

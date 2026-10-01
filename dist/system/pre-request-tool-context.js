@@ -49,6 +49,7 @@ const context_budget_1 = require("./context-budget");
 const ccm_context_accounting_v2_1 = require("./ccm-context-accounting-v2");
 const post_turn_tool_context_compaction_1 = require("./post-turn-tool-context-compaction");
 const native_query_messages_1 = require("../agents/native-query-messages");
+const session_model_checkpoint_1 = require("../agents/session-model-checkpoint");
 function digest(value) {
     return crypto.createHash("sha256").update(typeof value === "string" ? value : JSON.stringify(value ?? null)).digest("hex");
 }
@@ -124,6 +125,12 @@ function loadPreRequestToolContextState(scope, scopeId, exactSessionId) {
     }
 }
 function initialState(scope, scopeId, exactSessionId) {
+    // V1 post-turn evidence is an audit/rehydration record, not proof that the
+    // current provider-visible message was replaced. Treating it as
+    // `compacted` here rewrites an already committed tool result on the first
+    // request after a restart (and breaks the append-only cache prefix).
+    // V2 will record an actual replacement only when this request is under
+    // pressure and the replacement is applied to the wire messages.
     const legacy = (0, post_turn_tool_context_compaction_1.loadPostTurnToolContextState)(scope, scopeId, exactSessionId);
     return {
         schema: "ccm-pre-request-tool-context-state-v2",
@@ -136,7 +143,10 @@ function initialState(scope, scopeId, exactSessionId) {
             turnId: row.turnId,
             generation: row.generation,
             attempt: row.attempt,
-            state: row.resultState === "stale" ? "stale" : "compacted",
+            // A legacy row does not contain the exact replacement that was sent on
+            // the wire. Keep it unconsumed so the full historical result remains
+            // stable; a later pressure pass can explicitly compact it.
+            state: "unconsumed",
             observedAt: legacy?.updatedAt || new Date().toISOString(),
         })),
         pendingRequests: [],
@@ -190,7 +200,10 @@ function stagePreRequestToolContext(input) {
             turnId: row.turnId,
             generation: row.generation,
             attempt: row.attempt,
-            state: row.resultState === "stale" ? "stale" : "compacted",
+            // Compatibility evidence is deliberately not a compaction command.
+            // The model transcript remains authoritative until a real pressure
+            // decision below applies a deterministic replacement.
+            state: "unconsumed",
             observedAt: legacy?.updatedAt || new Date().toISOString(),
         };
         if (!knownLegacy.has(resultKey(migrated)))
@@ -233,7 +246,7 @@ function stagePreRequestToolContext(input) {
         const stateRow = rowsByKey.get(resultKey({ toolCallId: view.toolCallId, resultChecksum: checksum, generation, attempt }));
         if (stateRow.state === "consumed")
             consumedToolCallIds.add(view.toolCallId);
-        if (stateRow.state === "compacted" || stateRow.state === "stale") {
+        if ((stateRow.state === "compacted" || stateRow.state === "stale") && pressure) {
             const replacement = evidenceOutput(view, checksum);
             candidates.push({ view, stateRow, replacement, freed: Math.max(0, (0, context_budget_1.estimateTextTokens)(view.content) - (0, context_budget_1.estimateTextTokens)(replacement)) });
             continue;
@@ -339,6 +352,7 @@ function abortPreRequestToolContext(scope, scopeId, exactSessionId, requestId) {
     return persistState(state);
 }
 function deletePreRequestToolContextState(scope, scopeId, exactSessionId) {
+    (0, session_model_checkpoint_1.invalidateModelCheckpoint)({ scope, scopeId, sessionId: exactSessionId });
     const file = stateFile(scope, scopeId, exactSessionId);
     try {
         fs.rmSync(file, { force: true });

@@ -83,9 +83,15 @@ function buildProviderCacheCapabilityMatrix(config = {}, stateInput) {
     const official = officialEndpoint(config, protocolResolution.protocol);
     const implicit = status(state?.implicitCacheStatus || evidence?.implicitCacheStatus);
     const explicit = status(state?.explicitFieldStatus || evidence?.explicitFieldStatus);
-    const explicitKeyEvidence = status(state?.explicitCacheKeyStatus || evidence?.explicitCacheKeyStatus || explicit);
+    const explicitKeyEvidence = status(state?.promptCacheKeyStatus || evidence?.promptCacheKeyStatus || state?.explicitCacheKeyStatus || evidence?.explicitCacheKeyStatus || explicit);
     const explicitOptionsEvidence = status(state?.promptCacheOptionsStatus || evidence?.promptCacheOptionsStatus);
     const explicitBreakpointEvidence = status(state?.explicitBreakpointsStatus || evidence?.explicitBreakpointsStatus || explicit);
+    const responsesContinuationEvidence = status(state?.responsesContinuationStatus || evidence?.responsesContinuationStatus);
+    const responsesToolLoopContinuationEvidence = status(state?.responsesToolLoopContinuationStatus || evidence?.responsesToolLoopContinuationStatus);
+    const responsesWebSocketEvidence = status(state?.responsesWebSocketStatus || evidence?.responsesWebSocketStatus);
+    const responsesWebSocketResponseCreateEvidence = status(state?.responsesWebSocketResponseCreateStatus || evidence?.responsesWebSocketResponseCreateStatus);
+    const responsesWebSocketContinuationEvidence = status(state?.responsesWebSocketContinuationStatus || evidence?.responsesWebSocketContinuationStatus);
+    const responsesWebSocketToolLoopEvidence = status(state?.responsesWebSocketToolLoopStatus || evidence?.responsesWebSocketToolLoopStatus);
     const blockCacheEvidence = status(state?.blockCacheControlStatus || evidence?.blockCacheControlStatus);
     const usage = Number(state?.hitCount || evidence?.hitCount || 0) > 0 || implicit === "confirmed"
         ? "confirmed"
@@ -94,27 +100,86 @@ function buildProviderCacheCapabilityMatrix(config = {}, stateInput) {
     let explicitBreakpoints = "unproven";
     let blockCacheControl = "unproven";
     let nativeCacheEditing = "unproven";
+    let responsesContinuation = "unproven";
+    let responsesToolLoopContinuation = "unproven";
+    let responsesWebSocketStatus = responsesWebSocketEvidence;
+    let responsesWebSocketResponseCreateStatus = responsesWebSocketResponseCreateEvidence;
+    let responsesWebSocketContinuationStatus = responsesWebSocketContinuationEvidence;
+    let responsesWebSocketToolLoopStatus = responsesWebSocketToolLoopEvidence;
     let supportedTtls = ["provider_default"];
     if (protocolResolution.protocol === "chat_completions") {
-        explicitCacheKey = explicitKeyEvidence === "unsupported" ? "unsupported" : official ? "confirmed" : explicitKeyEvidence;
-        supportedTtls = explicitCacheKey === "confirmed" ? ["provider_default", "24h"] : ["provider_default"];
+        // `prompt_cache_key` is a standard optional routing hint for the OpenAI
+        // wire protocol.  Use it immediately for a configured Chat Completions
+        // endpoint instead of waiting for a separate probe; if a relay rejects
+        // the field, the existing field-scoped retry path records `unsupported`
+        // and removes it on subsequent requests.
+        explicitCacheKey = explicitKeyEvidence === "unsupported" ? "unsupported" : "confirmed";
+        supportedTtls = ["provider_default"];
     }
     else if (protocolResolution.protocol === "responses") {
-        explicitCacheKey = explicitKeyEvidence === "unsupported" ? "unsupported" : official ? "confirmed" : explicitKeyEvidence;
+        // Responses providers likewise support the stable routing key without
+        // requiring explicit breakpoint support.  Breakpoints remain separately
+        // capability-gated below.
+        explicitCacheKey = explicitKeyEvidence === "unsupported" ? "unsupported" : "confirmed";
         const modelSupportsExplicitBreakpoints = responsesModelSupportsExplicitBreakpoints(config?.model);
+        // A relay can temporarily report a degraded breakpoint sample (for
+        // example, a tiny baseline fragment) even though the same transport has
+        // already returned substantial cached prefixes for requests carrying a
+        // breakpoint.  Do not throw that proven path away permanently: the
+        // registry keeps the cumulative prefix-extension streak and token totals
+        // specifically so a restart can re-enable the previously useful layout.
+        const historicalSamples = [
+            ...(Array.isArray(state?.recentForegroundSamples) ? state.recentForegroundSamples : []),
+            ...(Array.isArray(evidence?.recentForegroundSamples) ? evidence.recentForegroundSamples : []),
+        ];
+        const historicalMeaningfulUsage = historicalSamples.some((sample) => {
+            const cacheRead = Math.max(0, Number(sample?.cacheReadTokens || 0));
+            const providerInput = Math.max(0, Number(sample?.providerInputTokens || 0));
+            // Compare against the Provider's own reported input instead of a fixed
+            // token floor. This recognizes a genuinely reused prefix while ignoring
+            // a small baseline fragment without assuming that every Provider uses
+            // the same cache block size.
+            return cacheRead > 0 && providerInput > 0 && cacheRead >= providerInput * 0.5;
+        });
+        const historicalPrefixReuseObserved = String(state?.prefixExtensionStatus
+            ?? evidence?.prefixExtensionStatus
+            ?? "") === "confirmed" || historicalMeaningfulUsage;
+        // A previous large prefix hit is stronger evidence than the latest
+        // capability label. The label can be downgraded by a later 192-token
+        // baseline sample, but that sample must not disable the breakpoint path
+        // that produced the earlier 20k+ reuse. Keep it enabled unless the
+        // Provider explicitly rejected the field.
+        const historicalPrefixReuseCanUseBreakpoints = explicitBreakpointEvidence !== "unsupported"
+            && explicitKeyEvidence !== "unsupported"
+            && historicalPrefixReuseObserved;
+        // A successful, provider-specific capability probe is authoritative even
+        // when the relay exposes a model name that does not follow OpenAI's
+        // `gpt-*` naming convention (for example grok-4.6).  The model-name gate
+        // remains the safe default for official endpoints, while verified
+        // evidence is explicitly opt-in and scoped to this exact transport/model
+        // identity by the capability registry.
         explicitBreakpoints = explicitBreakpointEvidence === "unsupported"
             ? "unsupported"
-            : modelSupportsExplicitBreakpoints && (official || evidence?.explicitBreakpointsVerified === true)
+            : evidence?.explicitBreakpointsVerified === true
+                || (modelSupportsExplicitBreakpoints && official)
+                || historicalPrefixReuseCanUseBreakpoints
                 ? "confirmed"
                 : "unproven";
-        supportedTtls = explicitCacheKey === "confirmed" ? ["provider_default", "30m"] : ["provider_default"];
+        responsesContinuation = official
+            ? "confirmed"
+            : responsesContinuationEvidence;
+        responsesToolLoopContinuation = official
+            ? "confirmed"
+            : responsesToolLoopContinuationEvidence;
+        // A routing key proves neither retention support nor a selected lifetime.
+        supportedTtls = ["provider_default"];
     }
     else if (protocolResolution.protocol === "anthropic_messages") {
         blockCacheControl = blockCacheEvidence === "unsupported" ? "unsupported" : official ? "confirmed" : blockCacheEvidence;
         nativeCacheEditing = evidence?.nativeCacheEditingStatus === "confirmed"
             ? "confirmed"
             : evidence?.nativeCacheEditingStatus === "unsupported" ? "unsupported" : "unproven";
-        supportedTtls = blockCacheControl === "confirmed" ? ["provider_default", "1h"] : ["provider_default"];
+        supportedTtls = ["provider_default"];
     }
     const transportIdentityChecksum = String(state?.identity?.transportIdentityChecksum || hash({
         protocol: protocolResolution.protocol,
@@ -130,6 +195,12 @@ function buildProviderCacheCapabilityMatrix(config = {}, stateInput) {
             explicitCacheKey,
             promptCacheOptions: explicitOptionsEvidence === "unsupported" ? "unsupported" : official ? "confirmed" : explicitOptionsEvidence,
             explicitBreakpoints,
+            responsesContinuation,
+            responsesToolLoopContinuation,
+            responsesWebSocketStatus,
+            responsesWebSocketResponseCreateStatus,
+            responsesWebSocketContinuationStatus,
+            responsesWebSocketToolLoopStatus,
             blockCacheControl,
             nativeCacheEditing,
             cacheUsageReporting: usage,
@@ -149,10 +220,35 @@ function runProviderCacheCapabilityMatrixSelfTest() {
     const checks = {
         modelNamesShareProtocolDecision: matrices.every(value => value.protocol === "chat_completions"),
         implicitEvidenceIsSharedRule: matrices.every(value => value.capabilities.implicitPrefix === "confirmed"),
-        implicitDoesNotProveExplicitKey: matrices.every(value => value.capabilities.explicitCacheKey === "unproven"),
+        standardProtocolUsesStableKeyWithoutProbe: matrices.every(value => value.capabilities.explicitCacheKey === "confirmed"),
         responsesRequiresSupportedModel: buildProviderCacheCapabilityMatrix({ format: "openai-responses", apiUrl: "https://api.openai.com/v1", model: "gpt-5.6" }, {}).capabilities.explicitBreakpoints === "confirmed"
             && buildProviderCacheCapabilityMatrix({ format: "openai-responses", apiUrl: "https://api.openai.com/v1", model: "gpt-5.5" }, {}).capabilities.explicitBreakpoints !== "confirmed",
-        proxiedOfficialEndpointIsNotAutoConfirmed: buildProviderCacheCapabilityMatrix({ format: "openai-responses", apiUrl: "https://api.openai.com/v1", proxyUrl: "https://relay.example", model: "gpt-5.6" }, {}).capabilities.explicitCacheKey !== "confirmed"
+        verifiedRelayModelUsesExplicitBreakpoints: buildProviderCacheCapabilityMatrix({ format: "openai-responses", apiUrl: "https://relay.example/v1", model: "grok-4.6" }, {
+            identity: { transportIdentityChecksum: "relay-grok" },
+            explicitBreakpointsStatus: "confirmed",
+            explicitBreakpointsVerified: true,
+            evidence: { explicitBreakpointsStatus: "confirmed", explicitBreakpointsVerified: true },
+        }).capabilities.explicitBreakpoints === "confirmed",
+        degradedRelayWithHistoricalReuseCanRetryBreakpoints: buildProviderCacheCapabilityMatrix({ format: "openai-responses", apiUrl: "https://relay.example/v1", model: "grok-4.6" }, {
+            identity: { transportIdentityChecksum: "relay-grok-degraded" },
+            explicitBreakpointsStatus: "degraded",
+            explicitCacheKeyStatus: "confirmed",
+            implicitCacheStatus: "confirmed",
+            prefixExtensionStatus: "confirmed",
+            lastCacheReadTokens: 192,
+            foregroundCacheReadTokens: 8192,
+        }).capabilities.explicitBreakpoints === "confirmed",
+        baselineOnlyRelayDoesNotRecoverBreakpoints: buildProviderCacheCapabilityMatrix({ format: "openai-responses", apiUrl: "https://relay.example/v1", model: "grok-4.6" }, {
+            identity: { transportIdentityChecksum: "relay-grok-baseline" },
+            explicitBreakpointsStatus: "degraded",
+            explicitCacheKeyStatus: "confirmed",
+            implicitCacheStatus: "confirmed",
+            prefixExtensionStatus: "degraded",
+            prefixExtensionSuccessStreak: 8,
+            lastCacheReadTokens: 192,
+            foregroundCacheReadTokens: 8192,
+        }).capabilities.explicitBreakpoints !== "confirmed",
+        proxiedOfficialEndpointKeepsStandardKeyButNotBreakpoints: buildProviderCacheCapabilityMatrix({ format: "openai-responses", apiUrl: "https://api.openai.com/v1", proxyUrl: "https://relay.example", model: "gpt-5.6" }, {}).capabilities.explicitCacheKey === "confirmed"
             && buildProviderCacheCapabilityMatrix({ format: "openai-responses", apiUrl: "https://api.openai.com/v1", proxyUrl: "https://relay.example", model: "gpt-5.6" }, {}).capabilities.explicitBreakpoints !== "confirmed",
         anthropicProtocolUsesGenericBlockCapability: buildProviderCacheCapabilityMatrix({ format: "anthropic-compatible", apiUrl: "https://api.anthropic.com/v1" }, {}).capabilities.blockCacheControl === "confirmed",
     };

@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.createPetActivityRuntime = createPetActivityRuntime;
+const conversation_attempt_1 = require("./agents/conversation-attempt");
 // Mechanically extracted from server.ts; preserves pet activity state and callbacks.
 function createPetActivityRuntime(deps) {
     const { CCM_DIR, GlobalPetActivityCoordinator, PETS_FILE, PID_DIR, bindProjectSessionAgentExecution, fs, getConfigs, getPort, getTaskAgentSessionOptions, loadProjectChatRuns, openTaskAgentSession, path, projectChatRuns, saveProjectChatRuns, createPetSpeechNotification, sanitizePetNotificationText, url } = deps;
@@ -39,6 +40,9 @@ function createPetActivityRuntime(deps) {
     // === 辅助广播及状态跟踪函数 ===
     function writeSse(res, data) {
         if (!res || res.writableEnded || res.destroyed)
+            return;
+        data = (0, conversation_attempt_1.projectConversationAttemptEvent)(res, data);
+        if (!data)
             return;
         try {
             res.write(`data: ${JSON.stringify(data)}\n\n`);

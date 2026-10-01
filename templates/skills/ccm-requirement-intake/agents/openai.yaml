@@ -1,0 +1,4 @@
+interface:
+  display_name: "CCM Requirement Intake"
+  short_description: "Extract goals, constraints, sources, and acceptance criteria"
+  default_prompt: "Use $ccm-requirement-intake to turn these sources into an executable requirement."

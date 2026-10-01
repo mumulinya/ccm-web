@@ -128,6 +128,7 @@ async function runSemanticDecision(request) {
             scopeId: cacheAffinity.scopeId,
             sessionId: identity.sessionId,
             source: `semantic_${request.kind}`,
+            requestAttribution: { purpose: `semantic_${request.kind}`, requestClass: 'auxiliary', scope: identity.scope, scopeId: identity.scopeId, exactSessionId: identity.sessionId },
             cacheAffinity,
         };
         const capacity = (0, group_compaction_strategy_1.resolveGroupModelContextCapacity)(config);

@@ -1,0 +1,4 @@
+interface:
+  display_name: "CCM Business Rule Modeling"
+  short_description: "Model roles, states, permissions, and business invariants"
+  default_prompt: "Use $ccm-business-rule-modeling to turn this feature request into explicit business rules before implementation."

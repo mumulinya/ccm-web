@@ -104,6 +104,9 @@ function buildStartupTaskRecoveryDecision(task, forceAuto = false) {
     if (task?.archived || task?.deleted_at || task?.completed_at || ["done", "completed", "cancelled", "canceled", "archived", "failed"].includes(status)) {
         return decision(task, "skip", "terminal_task", "任务已结束或归档，不参与启动恢复。", "", "", { candidate: false });
     }
+    if (!forceAuto && (task?.recovery_sessions?.length || task?.recovery_transaction)) {
+        return decision(task, "manual", "recovery_requires_explicit_continue", "恢复执行在服务重启后需要用户继续。", "任务恢复现场已保留，等待继续。", "核对现场后点击继续或重试。", { requiresUser: true });
+    }
     if (planRequiresConfirmation(task)) {
         return decision(task, "manual", "awaiting_plan_confirmation", "执行前计划仍待用户确认。", "这轮任务还在等你确认执行计划，服务重启后没有自动开始。", "确认计划后，我会沿用同一任务上下文继续执行。", { requiresUser: true });
     }

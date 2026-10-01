@@ -1331,7 +1331,8 @@ function getGroupTaskExecutionStatus(review, coordinatorResult, outputText, task
             detail: `业务开发任务缺少项目配置验证命令的执行证据，不能判定完成；缺失：${missing}`,
         });
     }
-    if (isDailyDev && task?.test_agent_enabled !== false) {
+    const frozenVerification = String(task?.workflow_policy_snapshot?.verification || "").toLowerCase();
+    if (isDailyDev && (frozenVerification ? frozenVerification === "test_agent" : task?.test_agent_enabled !== false)) {
         const agentQaForTask = task?.group_id
             ? (0, agent_qa_service_1.getAgentQaItemsForGroup)(String(task.group_id), 120).filter((item) => !task?.id || !item.task_id || item.task_id === task.id)
             : [];

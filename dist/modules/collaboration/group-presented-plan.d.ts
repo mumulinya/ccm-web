@@ -1,0 +1,87 @@
+export declare const COORDINATOR_PRESENTED_PLAN_HEADLINE = "\u8BA1\u5212\u5DF2\u7ECF\u6574\u7406\u5B8C\u6210\uFF0C\u8BF7\u67E5\u770B\u4E0B\u9762\u7684\u5F85\u529E\u3002";
+export declare const PRESENTED_PLAN_AUTHORING_SKILL = "ccm-implementation-plan-authoring";
+export declare const PRESENTED_PLAN_SHAPE_GUIDANCE = "Use the ccm-implementation-plan-v2 contract from Skill:ccm-implementation-plan-authoring.";
+export declare const PRESENTED_PLAN_DISPATCH_HANDOFF_GUIDANCE = "Dispatch only confirmed plan slices bound to revision and checksum.";
+export declare function presentedPlanSource(parsed: any): any;
+export declare function presentedPlanSteps(source: any): any;
+export declare function hasPresentedGroupPlan(parsed: any): boolean;
+export declare function normalizePresentedGroupPlan(input: {
+    parsed?: any;
+    planId?: string;
+    goalFallback?: string;
+    sourceMessageIds?: string[];
+    targetProjects?: string[];
+    status?: "ready" | "executing" | "completed" | "blocked" | "superseded";
+}): any;
+export declare function validatePresentedPlanForConfirmation(plan: any, allowedProjects?: string[]): {
+    ok: boolean;
+    issues: string[];
+};
+export declare function formatPresentedPlanMarkdown(plan: any): string;
+export declare function visibleGroupPresentedPlanFields(input: {
+    projectAnalysis?: boolean;
+    conversationalOnly?: boolean;
+    coordinationPlan?: any;
+    presentedPlan?: any;
+}): {
+    coordinationPlan: any;
+    presentedPlan: any;
+};
+export declare function presentedPlanFromMessage(item: any): any;
+export declare function latestPresentedPlanFromMessages(messages: any[]): any;
+export declare function latestPresentedPlanFromGroupSession(groupId?: string, groupSessionId?: string): any;
+export declare function presentedPlanFromTask(task: any): any;
+export declare function presentedPlanAcceptanceLines(plan: any): any[];
+export declare function assignedPresentedPlanSteps(plan: any, project?: string): any;
+export declare function appendConfirmedPlanSliceContract(taskText: any, plan: any, project?: string): string;
+export declare function attachConfirmedPlanSlicesToDispatchTargets(targets: any[], plan: any): any[];
+export declare function mergePresentedPlanAcceptanceCriteria(existing: any, plan: any, limit?: number): string[];
+export declare function presentedPlanFromParsed(input: {
+    parsed?: any;
+    planId?: string;
+    goalFallback?: string;
+    sourceMessageIds?: string[];
+    targetProjects?: string[];
+    status?: "ready" | "executing" | "completed" | "blocked" | "superseded";
+}): any;
+export declare function publishGroupPresentedRequirementPlan(input: {
+    groupId?: string;
+    groupSessionId?: string;
+    scope?: "group" | "project";
+    scopeId?: string;
+    exactSessionId?: string;
+    turnId?: string;
+    anchorMessageId?: string;
+    generation?: number;
+    parsed?: any;
+    plan?: any;
+    goalFallback?: string;
+    skip?: boolean;
+}): any;
+export declare function runGroupPresentedPlanSelfTest(): {
+    pass: boolean;
+    checks: {
+        hasPlan: boolean;
+        keepsSteps: boolean;
+        keepsGoal: boolean;
+        keepsOverview: boolean;
+        oneLineTodos: boolean;
+        dropsLongStepEssay: boolean;
+        markdownHasTodos: boolean;
+        markdownOmitsEssay: boolean;
+        markdownEmptyWithoutBody: boolean;
+        conversationalKeepsPlan: boolean;
+        emptyConversationStillNull: boolean;
+        projectAnalysisHides: boolean;
+        keepsV2StepDependencies: boolean;
+        shapePointsToSkill: boolean;
+        handoffBindsRevision: boolean;
+        appendsSliceContract: boolean;
+        mergesAcceptance: boolean;
+        readsLatestMessagePlan: boolean;
+        attachLeavesEmptyTargets: boolean;
+        publishedHasQuality: boolean;
+        publishedProjectScopeKeepsPlan: boolean;
+        shapeDroppedLongEssay: boolean;
+    };
+};

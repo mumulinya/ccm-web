@@ -1,6 +1,8 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.executeTask = executeTask;
+const acceptance_contract_1 = require("../../agents/acceptance-contract");
+const acceptance_projection_service_1 = require("../../agents/acceptance-projection-service");
 // Mechanically extracted from collaboration.ts; keep orchestration behavior unchanged.
 const group_session_model_context_1 = require("./group-session-model-context");
 const project_test_agent_gate_1 = require("../projects/project-test-agent-gate");
@@ -19,6 +21,7 @@ const task_pause_control_1 = require("../../tasks/task-pause-control");
 const task_conversation_links_1 = require("../../system/task-conversation-links");
 const development_source_grounding_1 = require("../../agents/development-source-grounding");
 const project_analysis_index_1 = require("../../system/project-analysis-index");
+const execution_kernel_1 = require("../../agents/execution-kernel");
 function groupPlanningProjectRefs(task) {
     return Array.from(new Set([
         ...(Array.isArray(task?.workflow_decision?.targetRefs) ? task.workflow_decision.targetRefs : []),
@@ -31,6 +34,56 @@ function groupPlanningProjectRefs(task) {
 function isTestAgentAssignment(value) {
     return /^(?:test[-_ ]?agent|qa[-_ ]?agent)$/i.test(String(value?.targetName || value?.project || value?.name || "").trim())
         || String(value?.role || value?.member?.role || "").trim().toLowerCase() === "test-agent";
+}
+function frozenVerification(task) {
+    const value = String(task?.workflow_policy_snapshot?.verification || "").trim();
+    return ["quick_check", "main_agent_self", "test_agent"].includes(value) ? value : "";
+}
+function usesFrozenWorkflow(task) {
+    return !!frozenVerification(task);
+}
+function shouldUseIndependentTestAgent(task, acceptancePolicy) {
+    const verification = frozenVerification(task);
+    if (verification)
+        return verification === "test_agent";
+    return !!acceptancePolicy && (0, task_acceptance_policy_1.taskAcceptanceUsesIndependentReview)(task, acceptancePolicy);
+}
+function resolveExecutionVerificationCommands(task, project) {
+    const values = [
+        task?.verification_commands,
+        task?.verificationCommands,
+        task?.test_commands,
+        task?.testCommands,
+        task?.workflow_meta?.project_main_plan?.verificationCommands,
+        task?.workflow_meta?.project_main_plan?.verification_commands,
+    ];
+    const workItems = Array.isArray(task?.work_items) ? task.work_items : [];
+    for (const item of workItems) {
+        const owner = String(item?.owner || item?.target || item?.project || "").trim();
+        if (owner && project && owner !== project)
+            continue;
+        const receipt = item?.lastReceipt || item?.last_receipt || item?.receipt || {};
+        values.push(receipt?.verification, receipt?.verificationCommands, receipt?.verification_commands);
+        for (const result of (Array.isArray(receipt?.verificationResults) ? receipt.verificationResults : [])) {
+            values.push(result?.command);
+        }
+    }
+    const commands = [];
+    const seen = new Set();
+    const visit = (value) => {
+        if (Array.isArray(value))
+            return value.forEach(visit);
+        const text = String(value || "").trim();
+        if (!text || /(?:passed by external|exit\s*\d+|退出码|已执行|通过|范围检查|git diff)/i.test(text))
+            return;
+        const command = text.replace(/^命令\s*[:：]?\s*/i, "").trim();
+        if (!command || seen.has(command))
+            return;
+        seen.add(command);
+        commands.push(command);
+    };
+    values.forEach(visit);
+    return commands.slice(0, 12);
 }
 function summarizeAckPreflightOutput(value) {
     let serialized = "";
@@ -207,8 +260,20 @@ async function executeTask(task, ctx, deps) {
         (0, task_pause_control_1.assertTaskPauseBoundary)(latest, phase, workItemId);
     };
     const configs = getConfigs();
+    // New tasks carry a frozen workflow policy. Historical records without it
+    // intentionally keep the legacy execution and acceptance behavior.
+    const workflowPolicy = task?.workflow_policy_snapshot || null;
     const acceptancePolicyResult = (0, task_acceptance_policy_1.resolveTaskAcceptancePolicy)(task);
     const acceptancePolicy = acceptancePolicyResult.snapshot;
+    if ((0, acceptance_contract_1.isAcceptanceProjectionTask)(task)) {
+        const updates = (0, acceptance_projection_service_1.acceptanceProjectionUpdate)(task, loadTasks());
+        const accepted = updateTask(task.id, updates) || task;
+        appendTaskTimelineEvent(task.id, { type: updates.status === "done" ? "test_agent_projection_completed" : "test_agent_projection_blocked",
+            title: "验收回执核对", detail: updates.status_detail, status: updates.status === "done" ? "ok" : "warn",
+            phase: updates.status === "done" ? "completed" : "reviewing", agent: "test-agent",
+            data: { source_receipts: updates.acceptance_projection?.references || [], contentStored: false } });
+        return { status: accepted.status, detail: updates.status_detail };
+    }
     if (task.assign_type === "group" && task.group_id) {
         const groups = loadGroups();
         const group = groups.find(g => g.id === task.group_id);
@@ -274,7 +339,7 @@ async function executeTask(task, ctx, deps) {
                 eventId: `group-task:${task.id}:requirement-plan:${revision}:${phase}`,
                 scope: "group",
                 scopeId: String(task.group_id),
-                exactSessionId: String(latestTask?.group_session_id || latestTask?.groupSessionId || ""),
+                exactSessionId: groupSessionIdForTask(latestTask),
                 anchorMessageId: String(latestTask?.anchor_message_id || latestTask?.target_message_id || `task-message:${task.id}`),
                 generation: Math.max(0, Number(latestTask?.generation || 0)),
                 taskId: String(task.id),
@@ -297,6 +362,7 @@ async function executeTask(task, ctx, deps) {
         appendTaskTimelineEvent(task.id, { type: "queued_group_task", title: "任务进入群聊主 Agent", detail: task.title || "", status: "active", phase: "intake", agent: coordinatorProject, data: { group_id: task.group_id } });
         appendGroupMessage(task.group_id, {
             id: "m" + Date.now().toString(36) + "task",
+            session_id: groupSessionIdForTask(task),
             role: "user",
             target: coordinatorProject,
             content: message,
@@ -315,7 +381,7 @@ async function executeTask(task, ctx, deps) {
             reason: task.title,
             nextAction: "主 Agent 拆分任务并协调子 Agent",
         });
-        const context = (0, group_session_model_context_1.buildExactGroupSessionModelContextPacket)(task.group_id, { groupSessionId: task.group_session_id || task.groupSessionId || "" }).rendered;
+        const context = (0, group_session_model_context_1.buildExactGroupSessionModelContextPacket)(task.group_id, { groupSessionId: groupSessionIdForTask(task) }).rendered;
         let planningSource = await buildGroupMainPlanningSourceContext(group, message, configs, {
             targetProjects: groupPlanningProjectRefs(task),
             maxRounds: 3,
@@ -678,14 +744,14 @@ async function executeTask(task, ctx, deps) {
                 addTaskLog(task.id, "warning", "daily_dev 主 Agent 空派发修复未产生可执行目标");
             }
         }
-        if (!acceptancePolicyResult.valid || !acceptancePolicy)
+        if ((!acceptancePolicyResult.valid || !acceptancePolicy) && (!usesFrozenWorkflow(task) || frozenVerification(task) !== "quick_check"))
             throw new Error(`群聊任务验收策略不可用：${acceptancePolicyResult.reason}`);
-        let independentTestAgentEnabled = (0, task_acceptance_policy_1.taskAcceptanceUsesIndependentReview)(task, acceptancePolicy);
+        let independentTestAgentEnabled = shouldUseIndependentTestAgent(task, acceptancePolicy);
         const plannedProjects = [...new Set([
                 ...validMentions.map((item) => String(item?.targetName || item?.project || "").trim()),
                 ...planAssignments.map((item) => String(item?.project || item?.projectId || item?.project_id || "").trim()),
             ].filter(Boolean))];
-        if (!independentTestAgentEnabled && acceptancePolicy.schema === "ccm-task-acceptance-policy-snapshot-v3" && acceptancePolicy.route === "main_agent_with_escalation" && plannedProjects.length > 1) {
+        if (!usesFrozenWorkflow(task) && !independentTestAgentEnabled && acceptancePolicy?.schema === "ccm-task-acceptance-policy-snapshot-v3" && acceptancePolicy.route === "main_agent_with_escalation" && plannedProjects.length > 1) {
             const escalation = (0, task_acceptance_policy_1.buildTaskAcceptanceEscalationReceipt)({
                 task,
                 policy: acceptancePolicy,
@@ -784,7 +850,7 @@ async function executeTask(task, ctx, deps) {
                 ctx,
                 executionOrder: coordinatorResult.executionOrder || "parallel",
                 taskId: task.id,
-                groupSessionId: task.group_session_id || task.groupSessionId || "",
+                groupSessionId: groupSessionIdForTask(task),
                 acceptancePolicy,
             });
             pauseBoundary("reviewing");
@@ -855,14 +921,22 @@ async function executeTask(task, ctx, deps) {
         }
         const toolContext = buildAgentToolContext(ctx, null, task.target_project, `${task.title || ""}\n${task.description || ""}\n${task.acceptance_criteria || ""}`, task.selected_skill_names || []);
         const preparedWorkDir = prepareChildAgentWorkDir(workDir, {
-            mode: getChildAgentIsolationMode(null, task),
+            mode: workflowPolicy
+                ? workflowPolicy.workspace === "isolated_worktree" ? "worktree" : "shared"
+                : getChildAgentIsolationMode(null, task),
             taskId: task.id,
             agentName: task.target_project,
             sourceProject: "task-queue",
             failClosed: true,
         });
         workDir = preparedWorkDir.workDir;
-        ensureExecution({ task, project: task.target_project, agent: task.target_project, workDir, executionId: task.id });
+        const executionVerificationCommands = resolveExecutionVerificationCommands(task, task.target_project);
+        const executionPacket = (0, execution_kernel_1.buildDevelopmentTaskPacket)(task, {
+            project: task.target_project,
+            workDir,
+            verificationCommands: executionVerificationCommands,
+        });
+        ensureExecution({ task, project: task.target_project, agent: task.target_project, workDir, executionId: task.id, packet: executionPacket });
         claimTaskWorkItemForAgent(task.id, task.target_project, `${task.target_project} 已开始执行直接任务：${compactMemoryText(task.title, 180)}`);
         attachExecutionWorkspace(task.id, { ...preparedWorkDir, project: task.target_project, mode: preparedWorkDir.mode });
         if (!loadExecution(task.id)?.checkpointIds?.length) {
@@ -924,7 +998,7 @@ async function executeTask(task, ctx, deps) {
             `${task.title}\n${task.description || ""}`,
             reworkInstruction ? `[${coordinationReworkInstruction ? "群聊主 Agent 验收返工要求" : "TestAgent 返工要求"}]\n${reworkInstruction}` : "",
         ].filter(Boolean).join("\n\n"), task);
-        const directGroupSessionId = String(task.group_session_id || task.groupSessionId || "");
+        const directGroupSessionId = groupSessionIdForTask(task);
         const directProjectSessionId = String(task.project_session_id || task.projectSessionId || "");
         const directContinuity = directGroupSessionId
             ? (0, agent_sessions_1.buildTaskAgentContinuityBinding)({ scope: "group", scopeId: String(task.group_id || ""), exactSessionId: directGroupSessionId, project: task.target_project, agentType })
@@ -951,41 +1025,44 @@ async function executeTask(task, ctx, deps) {
         if (!task.target_message_id && !task.targetMessageId)
             updateTask(task.id, { target_message_id: targetAnchorMessageId });
         const communicationPolicy = (0, agent_communication_v2_1.readAgentCommunicationPolicy)(task.contextPolicy?.effective || task.context_policy?.effective || task.context_policy_effective || {});
-        const communicationDispatch = (0, agent_communication_v2_1.startAgentCommunicationDispatch)({
-            taskId: task.id,
-            workItemId: String(task.work_item_id || task.workItemId || task.id),
-            scope: communicationScope,
-            scopeId: communicationScopeId,
-            exactSessionId: communicationExactSessionId,
-            generation: communicationGeneration,
-            attempt: communicationAttempt,
-            senderAgentId: task.group_id ? "ccm-group-main-agent" : task.global_mission_id ? "ccm-global-agent" : "ccm-project-main-agent",
-            receiverAgentId: task.target_project,
-            ownerId: `task-queue:${task.id}`,
-            // A CCM recovery attempt owns a fresh communication envelope. Reusing
-            // the prior attempt's envelope would consume its internal retry budget
-            // and can make a valid recovered task fail with "执行次数已达到上限".
-            // Capacity-wait retries within the same CCM attempt may still reuse it.
-            existingMessageId: Number(task.agent_communication_attempt || 0) === communicationAttempt
-                ? String(task.agent_communication_message_id || "") || undefined
-                : undefined,
-            idempotencyKey: `task-dispatch-v2:${task.id}:${communicationGeneration}:${communicationAttempt}`,
-            payload: {
-                objectiveChecksum: task.requirement_checksum || task.goal_checksum || "",
-                acceptanceChecksum: task.acceptance_checksum || "",
-                authorizedProject: task.target_project,
-                projectName: task.target_project,
-                runtimeId: agentType,
-                workItemTitle: String(task.title || task.description || "").replace(/\s+/g, " ").trim().slice(0, 300),
-                workspaceMode: preparedWorkDir.mode,
-                worktreeRef: preparedWorkDir.mode === "worktree" ? preparedWorkDir.worktreePath || preparedWorkDir.workDir : "",
-                verificationRequired: task.requires_verification !== false,
-                anchorMessageId: targetAnchorMessageId,
-                originMessageId,
-                strictPreExecutionAck: communicationPolicy.strictPreExecutionAckEnabled === true,
-            },
-            policy: task.contextPolicy?.effective || task.context_policy?.effective || task.context_policy_effective || {},
-        });
+        const communicationDispatch = workflowPolicy?.dispatch === "direct_worker"
+            ? { enabled: false, acquired: true, envelope: null, reason: "lightweight_direct_worker" }
+            : (0, agent_communication_v2_1.startAgentCommunicationDispatch)({
+                taskId: task.id,
+                workItemId: String(task.work_item_id || task.workItemId || task.id),
+                scope: communicationScope,
+                scopeId: communicationScopeId,
+                exactSessionId: communicationExactSessionId,
+                generation: communicationGeneration,
+                attempt: communicationAttempt,
+                senderAgentId: task.group_id ? "ccm-group-main-agent" : task.global_mission_id ? "ccm-global-agent" : "ccm-project-main-agent",
+                receiverAgentId: task.target_project,
+                ownerId: `task-queue:${task.id}`,
+                // A CCM recovery attempt owns a fresh communication envelope. Reusing
+                // the prior attempt's envelope would consume its internal retry budget
+                // and can make a valid recovered task fail with "执行次数已达到上限".
+                // Capacity-wait retries within the same CCM attempt may still reuse it.
+                existingMessageId: Number(task.agent_communication_attempt || 0) === communicationAttempt
+                    ? String(task.agent_communication_message_id || "") || undefined
+                    : undefined,
+                idempotencyKey: `task-dispatch-v2:${task.id}:${communicationGeneration}:${communicationAttempt}`,
+                payload: {
+                    objectiveChecksum: task.requirement_checksum || task.goal_checksum || "",
+                    acceptanceChecksum: task.acceptance_checksum || "",
+                    authorizedProject: task.target_project,
+                    projectName: task.target_project,
+                    runtimeId: agentType,
+                    workItemTitle: String(task.title || task.description || "").replace(/\s+/g, " ").trim().slice(0, 300),
+                    workspaceMode: preparedWorkDir.mode,
+                    worktreeRef: preparedWorkDir.mode === "worktree" ? preparedWorkDir.worktreePath || preparedWorkDir.workDir : "",
+                    verificationRequired: task.requires_verification !== false,
+                    anchorMessageId: targetAnchorMessageId,
+                    originMessageId,
+                    strictPreExecutionAck: communicationPolicy.strictPreExecutionAckEnabled === true
+                        && workflowPolicy?.dispatch !== "direct_worker",
+                },
+                policy: task.contextPolicy?.effective || task.context_policy?.effective || task.context_policy_effective || {},
+            });
         if (communicationDispatch.enabled !== false && communicationDispatch.acquired !== true) {
             if (communicationDispatch.envelope?.messageId)
                 updateTask(task.id, {
@@ -1059,7 +1136,7 @@ async function executeTask(task, ctx, deps) {
                 nativeSessionId: directTaskSession?.nativeSessionId || "",
                 taskAgentSessionTurn: directMemoryDeliveryAttemptSequence,
                 modelContextWindow: directTaskSession?.modelContextWindow || 0,
-                groupSessionId: task.group_session_id || task.groupSessionId || "",
+                groupSessionId: groupSessionIdForTask(task),
                 requireExactGroupSession: true,
                 task,
                 ...taskAgentInvocationMemoryOptions(directInvocationEdge),
@@ -1844,16 +1921,18 @@ ${requirementEpicExecutionBoundary(task)}
             return { ...result, ...coordination, runtimeToolSync: compactRuntimeToolAudit(runtimeToolContext.audit), invokedSkills, executionKernel: { executionId: task.id, green: failedGreen } };
         }
         const changedFiles = Array.isArray(fileChanges?.files) ? fileChanges.files : [];
-        const requiresProjectReview = task.requires_independent_review === true
-            || task.requires_verification === true
-            || taskRequiresCodeChanges(task)
-            || changedFiles.length > 0;
+        const requiresProjectReview = workflowPolicy?.verification === "quick_check"
+            ? false
+            : task.requires_independent_review === true
+                || task.requires_verification === true
+                || taskRequiresCodeChanges(task)
+                || changedFiles.length > 0;
         if (requiresProjectReview && (!acceptancePolicyResult.valid || !acceptancePolicy))
             throw new Error(`项目任务验收策略不可用：${acceptancePolicyResult.reason}`);
-        let independentTestAgentEnabled = acceptancePolicy ? (0, task_acceptance_policy_1.taskAcceptanceUsesIndependentReview)(task, acceptancePolicy) : false;
+        let independentTestAgentEnabled = shouldUseIndependentTestAgent(task, acceptancePolicy);
         let projectReview = null;
         if (requiresProjectReview && acceptancePolicy && !independentTestAgentEnabled) {
-            const runtimeEscalation = (0, task_acceptance_policy_1.evaluateTaskAcceptanceEscalation)({ task, policy: acceptancePolicy, changedFiles });
+            const runtimeEscalation = usesFrozenWorkflow(task) ? { escalate: false, implementationFailure: false, reasons: [], changedFileCount: changedFiles.length, topLevelModuleCount: 0 } : (0, task_acceptance_policy_1.evaluateTaskAcceptanceEscalation)({ task, policy: acceptancePolicy, changedFiles });
             if (runtimeEscalation.escalate) {
                 const escalation = (0, task_acceptance_policy_1.buildTaskAcceptanceEscalationReceipt)({
                     task,
@@ -1916,7 +1995,7 @@ ${requirementEpicExecutionBoundary(task)}
                 data: { review: projectReview, test_agent_created: false },
             });
             if (!projectReview.canAccept) {
-                const runtimeEscalation = (0, task_acceptance_policy_1.evaluateTaskAcceptanceEscalation)({ task, policy: acceptancePolicy, changedFiles, selfVerification: projectReview });
+                const runtimeEscalation = usesFrozenWorkflow(task) ? { escalate: false, implementationFailure: false, reasons: [], changedFileCount: changedFiles.length, topLevelModuleCount: 0 } : (0, task_acceptance_policy_1.evaluateTaskAcceptanceEscalation)({ task, policy: acceptancePolicy, changedFiles, selfVerification: projectReview });
                 if (runtimeEscalation.escalate && !runtimeEscalation.implementationFailure) {
                     const escalation = (0, task_acceptance_policy_1.buildTaskAcceptanceEscalationReceipt)({ task, policy: acceptancePolicy, reasons: runtimeEscalation.reasons, changedFileCount: runtimeEscalation.changedFileCount, topLevelModuleCount: runtimeEscalation.topLevelModuleCount });
                     independentTestAgentEnabled = true;
@@ -2049,21 +2128,51 @@ ${requirementEpicExecutionBoundary(task)}
                 workflow_meta: { ...(task.workflow_meta || {}), project_test_rework: null },
             });
         }
-        const finalRunnerVerification = extractRunnerVerificationEvidence(output);
+        let quickCheckReceipt = null;
+        if (workflowPolicy?.verification === "quick_check") {
+            quickCheckReceipt = await (0, main_agent_self_verification_1.runQuickTaskVerification)({
+                task: loadTasks().find((item) => item.id === task.id) || task,
+                project: task.target_project,
+                workDir,
+                changedFiles,
+                verificationCommands: executionVerificationCommands,
+            });
+            updateTask(task.id, {
+                quick_check_receipt: quickCheckReceipt,
+                acceptance_actual_level: "lightweight",
+                acceptance_actual_route: "quick_check",
+                acceptance_state: quickCheckReceipt.canAccept ? "quick_check_passed" : "quick_check_failed",
+                status_detail: quickCheckReceipt.canAccept ? "快速检查通过" : "快速检查未通过",
+            });
+            appendTaskTimelineEvent(task.id, {
+                type: "quick_check_finished",
+                title: quickCheckReceipt.canAccept ? "快速检查通过" : "快速检查未通过",
+                detail: quickCheckReceipt.canAccept ? "已核对文件变化并完成项目检查" : "文件变化或项目检查未满足完成条件",
+                status: quickCheckReceipt.canAccept ? "ok" : "warn",
+                phase: "reviewing",
+                agent: task.target_project,
+                data: { receipt: quickCheckReceipt, contentStored: false },
+            });
+            if (!quickCheckReceipt.canAccept)
+                return { ...result, status: "blocked", detail: "快速检查未通过", quickCheck: quickCheckReceipt, ...coordination };
+        }
+        const finalRunnerVerification = quickCheckReceipt
+            ? { status: quickCheckReceipt.canAccept ? "passed" : "failed", source: "quick_check", verificationResults: quickCheckReceipt.verification_results || [] }
+            : extractRunnerVerificationEvidence(output);
         const green = evaluateGreenContract({
             receipt,
             fileChanges,
             runnerVerification: finalRunnerVerification,
             ccmRevalidatedCompletion: projectReview?.canAccept === true && finalRunnerVerification?.status === "passed",
             requiresChanges: taskRequiresCodeChanges(task),
-            requiresVerification: task.requires_verification !== false,
-            reviewPassed: !requiresProjectReview || projectReview?.canAccept === true,
+            requiresVerification: workflowPolicy?.verification === "quick_check" ? true : task.requires_verification !== false,
+            reviewPassed: workflowPolicy?.verification === "quick_check" ? quickCheckReceipt?.canAccept === true : !requiresProjectReview || projectReview?.canAccept === true,
             requiredLevel: "project",
         });
         const mainAgentFinalAcceptance = {
             schema: "ccm-main-agent-final-acceptance-v1",
-            accepted: !requiresProjectReview || projectReview?.canAccept === true,
-            mode: requiresProjectReview ? independentTestAgentEnabled ? "test_agent" : "main_agent_self_verification" : "not_required",
+            accepted: workflowPolicy?.verification === "quick_check" ? quickCheckReceipt?.canAccept === true : !requiresProjectReview || projectReview?.canAccept === true,
+            mode: workflowPolicy?.verification === "quick_check" ? "quick_check" : requiresProjectReview ? independentTestAgentEnabled ? "test_agent" : "main_agent_self_verification" : "not_required",
             acceptance_policy_checksum: acceptancePolicy?.checksum || "",
             review_checksum: String(projectReview?.checksum || projectReview?.runner?.id || ""),
             decided_at: new Date().toISOString(),
@@ -2073,18 +2182,31 @@ ${requirementEpicExecutionBoundary(task)}
             ? {
                 ...(receipt || {}),
                 status: "done",
-                summary: String(projectReview?.report?.summary || receipt?.summary || "CCM 已根据文件、验证和验收证据完成重验证"),
+                summary: String(quickCheckReceipt?.status === "passed" ? "快速检查已通过" : projectReview?.report?.summary || receipt?.summary || "CCM 已根据文件、验证和验收证据完成重验证"),
                 filesChanged: Array.isArray(fileChanges?.files)
                     ? fileChanges.files.map((item) => item?.path || item?.file || item).filter(Boolean)
                     : receipt?.filesChanged || [],
                 verification: Array.from(new Set([
                     ...(Array.isArray(receipt?.verification) ? receipt.verification : []),
+                    ...(Array.isArray(quickCheckReceipt?.verification_results)
+                        ? quickCheckReceipt.verification_results.filter((item) => item?.status === "passed").map((item) => item.command || item.id)
+                        : []),
                     ...(Array.isArray(projectReview?.verification_results)
                         ? projectReview.verification_results.filter((item) => item?.status === "passed").map((item) => item.command || item.id)
                         : []),
                 ])),
                 verificationResults: [
                     ...(Array.isArray(receipt?.verificationResults) ? receipt.verificationResults : []),
+                    ...(Array.isArray(quickCheckReceipt?.verification_results)
+                        ? quickCheckReceipt.verification_results.filter((item) => item?.status === "passed").map((item) => ({
+                            name: item.command || item.id,
+                            command: item.command || "",
+                            status: "passed",
+                            exitCode: item.exit_code,
+                            source: "quick_check",
+                            evidence: [item.id],
+                        }))
+                        : []),
                     ...(Array.isArray(projectReview?.verification_results)
                         ? projectReview.verification_results.filter((item) => item?.status === "passed").map((item) => ({
                             name: item.command || item.id,
@@ -2105,9 +2227,9 @@ ${requirementEpicExecutionBoundary(task)}
             }
             : receipt;
         updateTask(task.id, {
-            ...(independentTestAgentEnabled ? { test_agent_review: projectReview } : { main_agent_self_verification: projectReview }),
-            acceptance_actual_level: independentTestAgentEnabled && acceptancePolicy?.schema === "ccm-task-acceptance-policy-snapshot-v3" && acceptancePolicy.level === "standard" ? "strict" : acceptancePolicy?.schema === "ccm-task-acceptance-policy-snapshot-v3" ? acceptancePolicy.level : independentTestAgentEnabled ? "strict" : "standard",
-            acceptance_actual_route: independentTestAgentEnabled ? "independent_test_agent" : acceptancePolicy?.schema === "ccm-task-acceptance-policy-snapshot-v3" ? acceptancePolicy.route : "main_agent_self_verification",
+            ...(workflowPolicy?.verification === "quick_check" ? { quick_check_receipt: quickCheckReceipt } : independentTestAgentEnabled ? { test_agent_review: projectReview } : { main_agent_self_verification: projectReview }),
+            acceptance_actual_level: workflowPolicy?.verification === "quick_check" ? "lightweight" : independentTestAgentEnabled && acceptancePolicy?.schema === "ccm-task-acceptance-policy-snapshot-v3" && acceptancePolicy.level === "standard" ? "strict" : acceptancePolicy?.schema === "ccm-task-acceptance-policy-snapshot-v3" ? acceptancePolicy.level : independentTestAgentEnabled ? "strict" : "standard",
+            acceptance_actual_route: workflowPolicy?.verification === "quick_check" ? "quick_check" : independentTestAgentEnabled ? "independent_test_agent" : acceptancePolicy?.schema === "ccm-task-acceptance-policy-snapshot-v3" ? acceptancePolicy.route : "main_agent_self_verification",
             main_agent_final_acceptance: mainAgentFinalAcceptance,
             ...(ccmRevalidated ? { receipt: authoritativeReceipt } : {}),
         });
@@ -2127,7 +2249,7 @@ ${requirementEpicExecutionBoundary(task)}
             }
         }
         const acceptedResult = requiresProjectReview
-            ? { ...result, status: "done", detail: independentTestAgentEnabled ? "TestAgent 与项目主 Agent 验收通过" : task.workflow_type === "agent_coordination_dependency" ? "群聊主 Agent 验收通过" : "项目主 Agent 自验通过", receipt: authoritativeReceipt, review: projectReview, testAgent: independentTestAgentEnabled ? projectReview : null, mainAgentSelfVerification: independentTestAgentEnabled ? null : projectReview, mainAgentFinalAcceptance }
+            ? { ...result, status: "waiting_user", acceptance_state: "awaiting_user_acceptance", detail: independentTestAgentEnabled ? "TestAgent 与项目主 Agent 验收通过，等待用户验收" : task.workflow_type === "agent_coordination_dependency" ? "协作验收通过，等待用户验收" : "项目主 Agent 自验通过，等待用户验收", receipt: authoritativeReceipt, review: projectReview, testAgent: independentTestAgentEnabled ? projectReview : null, mainAgentSelfVerification: independentTestAgentEnabled ? null : projectReview, mainAgentFinalAcceptance }
             : result;
         transitionExecution(task.id, acceptedResult.status === "done" ? "reviewing" : "failed", acceptedResult.status === "done" ? independentTestAgentEnabled ? "项目 Agent 已交付并通过独立验收" : task.workflow_type === "agent_coordination_dependency" ? "协作依赖已交付，等待群聊主 Agent 合并" : "项目 Agent 已交付并通过主 Agent 自验" : acceptedResult.detail, {
             green,

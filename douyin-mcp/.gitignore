@@ -1,0 +1,49 @@
+# Python
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Sensitive / credentials
+cookies.txt
+.env
+.env.local
+.env.*
+*.env
+!.env.example
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project specific — 不应上传到 GitHub
+_reference_repo/
+temporary/
+douyin_mcp_research.md
+review_report*.md
+Auth.txt
+eye/
+
+# Temporary media files
+downloads/
+*.mp4
+*.mp3
+*.wav
+transcripts/
+publish-drafts/
+
+# Agent / AI
+.gemini/
+.agents/
+AGENTS.md

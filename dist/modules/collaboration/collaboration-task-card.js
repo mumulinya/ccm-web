@@ -129,6 +129,7 @@ const collaboration_memory_gates_1 = require("./collaboration-memory-gates");
 const crypto = __importStar(require("crypto"));
 const task_conversation_links_1 = require("../../system/task-conversation-links");
 const task_pause_control_1 = require("../../tasks/task-pause-control");
+const task_workflow_model_1 = require("./task-workflow-model");
 const db_1 = require("../../core/db");
 const display_1 = require("./display");
 const memory_1 = require("./memory");
@@ -178,7 +179,7 @@ function isRecoverableRuntimeFailure(task) {
 function isAgentExecutionBlockedPendingTask(task) {
     if (!task?.auto_execute || isTaskPaused(task) || task.status !== "pending")
         return false;
-    if (collaboration_1.runningTaskIds.has(task.id) || (0, collaboration_1.isTaskQueuedInMemory)(task.id))
+    if ((0, collaboration_1.isTaskRunningInMemory)(task) || (0, collaboration_1.isTaskQueuedInMemory)(task.id))
         return false;
     const readiness = task.execution_readiness || {};
     const text = [
@@ -1047,7 +1048,7 @@ function stableTaskEntityId(prefix, value) {
     return `${prefix}_${crypto.createHash("sha256").update(typeof value === "string" ? value : JSON.stringify(value || {})).digest("hex").slice(0, 20)}`;
 }
 function groupSessionIdForTask(task) {
-    return String(task?.group_session_id || task?.groupSessionId || "default");
+    return String(task?.active_execution_session_id || task?.recovery_user_session?.activeSessionId || task?.group_session_id || task?.groupSessionId || "default");
 }
 function buildTaskEntityChain(taskId) {
     const task = (0, db_1.loadTasks)().find((item) => item.id === taskId);
@@ -1362,11 +1363,25 @@ function buildTaskCardView(task, executions, sessions) {
     const progressCheckpoints = displayStream.progress_checkpoints || displayStream.workchain?.progress_checkpoints || null;
     const runtimeStatus = (0, task_user_runtime_1.buildTaskUserRuntimeStatus)(task, { phase, statusDetail: summary.headline || task?.status_detail || "" });
     const conversationLinks = (0, task_conversation_links_1.buildTaskConversationLinks)(task);
+    const workflowPolicy = task?.workflow_policy_snapshot || (0, task_workflow_model_1.resolveTaskExecutionPolicy)(task);
+    const workflowOrigin = (0, task_workflow_model_1.normalizeTaskOrigin)(task);
+    const workflowModel = (0, task_workflow_model_1.validateTaskWorkflowModel)(task);
+    const workflowLabels = {
+        conversation: "对话任务",
+        dispatch: "任务派发",
+        workbench: "工作台任务",
+        automation: "自动化任务",
+        global_agent: "全局 Agent",
+    };
+    const dispatchLabels = { direct_worker: "快速执行", planned_worker: "标准开发", orchestrated: "协同开发" };
+    const verificationLabels = { quick_check: "快速检查", main_agent_self: "主 Agent 自验", test_agent: "独立验收" };
     return {
         version: 1,
         visible: visible && presentation !== "reply",
         presentation,
         task_id: task?.id || "",
+        run_id: task?.active_run_id || task?.task_run?.run_id || task?.run_id || "",
+        active_run_id: task?.active_run_id || task?.task_run?.run_id || task?.run_id || "",
         revision: Math.max(0, Number(task?.revision || 0)),
         generation: Math.max(1, Number(task?.generation || task?.workflow_generation || 1)),
         conversation_links: conversationLinks?.links || [],
@@ -1379,6 +1394,18 @@ function buildTaskCardView(task, executions, sessions) {
         runtime_status: runtimeStatus,
         status_detail: task?.status_detail || runtimeStatus.status_detail,
         status: task?.status || "pending",
+        workflow: {
+            origin: workflowOrigin,
+            origin_label: workflowLabels[workflowOrigin] || workflowOrigin,
+            dispatch: workflowPolicy.dispatch,
+            dispatch_label: dispatchLabels[workflowPolicy.dispatch] || workflowPolicy.dispatch,
+            verification: workflowPolicy.verification,
+            verification_label: verificationLabels[workflowPolicy.verification] || workflowPolicy.verification,
+            workspace: workflowPolicy.workspace,
+            approval: workflowPolicy.approval,
+            reasons: Array.isArray(workflowPolicy.reasons) ? workflowPolicy.reasons.slice(0, 4) : [],
+            model_ready: workflowModel.valid,
+        },
         pause_status: (0, task_pause_control_1.taskPauseStatusProjection)(task),
         pauseStatus: (0, task_pause_control_1.taskPauseStatusProjection)(task),
         usage_summary: task?.usage_summary || task?.usageSummary || task?.provider_usage || task?.providerUsage || {
@@ -1548,7 +1575,7 @@ function buildTaskCardView(task, executions, sessions) {
         pickup_summary: summary.delivery_report?.pickup_summary || summary.pickup_summary || null,
         pickupSummary: summary.delivery_report?.pickup_summary || summary.pickupSummary || null,
         delivery: { headline: summary.headline || task?.status_detail || "", files: files.slice(0, 30), changes: Array.isArray(summary.actual_file_changes) ? summary.actual_file_changes.slice(0, 30) : [], verification: verification.slice(0, 20), risks: (0, collaboration_1.uniqueStrings)([...(summary.risks || []), ...(summary.remaining_items || []), ...(summary.advisory_needs || [])]).slice(0, 10), acceptance_passed: deliveryAccepted },
-        actions: buildUserTaskActions(task, runtimeStatus.phase, executions),
+        available_actions: buildUserTaskActions(task, runtimeStatus.phase, executions),
         technical: { trace_id: task?.trace_id || "", execution_ids: executions.map(item => item.id), session_ids: sessions.map(item => item.id), source_ingestion: task?.source_ingestion || task?.sourceIngestion || null, requirement_extraction: task?.requirement_extraction || task?.requirementExtraction || null, work_item_ids: workItems.map((item) => item.id), work_item_summary: workItemSummary, work_item_claim_summary: workItemClaimSummary, work_item_unlock_summary: workItemUnlockSummary, completion_readiness_summary: completionReadinessSummary, recovery_summary: recoverySummary, continuation_state: task?.collaboration_state?.last_continuation || null, receipt_rework_summary: receiptReworkSummary, agent_progress_summary: agentProgressSummary, change_summary: changeSummary, plan_alignment: planAlignment, user_handoff: userHandoff, post_review_spot_check: summary.post_review_spot_check || null, gap_fingerprint: terminalPhase ? "" : (0, collaboration_1.getTaskGapFingerprint)(task), entity_chain_endpoint: `/api/tasks/entity-chain?id=${encodeURIComponent(task?.id || "")}`, mainAgentDecision: liveMainAgentDecision, main_agent_decision: liveMainAgentDecision, runtime_kernel: runtimeKernel, display_stream: displayStream },
         updated_at: task?.updated_at || new Date().toISOString(),
     };

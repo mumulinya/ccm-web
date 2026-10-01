@@ -100,7 +100,12 @@ function appendGroupSessionExecutionEvent(groupIdInput, groupSessionIdInput, eve
             timestamp: event?.timestamp || event?.at || new Date().toISOString(),
             status: event?.status === "error" || event?.error ? "error" : type === "tool_use" ? "running" : "ok",
             payload: event?.payload ?? (type === "tool_use" ? { arguments: event?.arguments || {} } : { observation: event?.observation ?? null, error: event?.error || "" }),
+            // The execution payload is an audit projection. Preserve the canonical
+            // model-visible result separately so a later session reconstruction
+            // emits the same function_call_output bytes.
+            ...(event?.modelContent !== undefined ? { modelContent: event.modelContent } : {}),
             persistContext: { scope: "group", scopeId: String(groupId || ""), sessionId: groupSessionId },
+            auditReceipt: event.auditReceipt,
         });
         if (!events.some(item => item.id === created.id))
             events.push(created);

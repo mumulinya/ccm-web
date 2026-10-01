@@ -41,6 +41,7 @@ exports.scheduleMusicCatalogRescan = scheduleMusicCatalogRescan;
 exports.ensureMusicCatalogPrepared = ensureMusicCatalogPrepared;
 exports.queryMusicCatalog = queryMusicCatalog;
 exports.findMusicCatalogTrackByFilename = findMusicCatalogTrackByFilename;
+exports.findMusicCatalogTrackById = findMusicCatalogTrackById;
 exports.ensureMusicCatalogTrackReady = ensureMusicCatalogTrackReady;
 exports.ensureMusicCatalogTrackRemoved = ensureMusicCatalogTrackRemoved;
 exports.musicCatalogFileDiagnostics = musicCatalogFileDiagnostics;
@@ -54,6 +55,8 @@ const utils_1 = require("../../core/utils");
 const music_persistence_1 = require("./music-persistence");
 const observability_database_1 = require("../../system/observability-database");
 const library_1 = require("./library");
+const media_provenance_1 = require("./media-provenance");
+const catalog_track_identity_1 = require("./catalog-track-identity");
 const execFileAsync = (0, util_1.promisify)(child_process_1.execFile);
 const { parseFile: parseMusicMetadataFile } = require("music-metadata");
 const AUDIO_EXTENSION = /\.(mp3|wav|ogg|m4a|flac|aac)$/i;
@@ -164,11 +167,12 @@ function rowToTrack(row) {
     catch {
         return {};
     } })();
+    const media = (0, media_provenance_1.resolveTrackMedia)(row);
     return {
         id: row.track_id,
         trackId: row.track_id,
         filename: row.filename,
-        title: row.title,
+        title: media.displayName || row.title,
         artist: row.artist,
         bvid: metadata.bvid || undefined,
         pic: `/api/music/cover?file=${encodeURIComponent(row.filename)}`,
@@ -185,6 +189,7 @@ function rowToTrack(row) {
         error: row.error || "",
         source: row.source || "local",
         sourceId: row.source_id || row.filename,
+        media,
     };
 }
 async function mapLimit(items, concurrency, worker) {
@@ -230,7 +235,7 @@ async function buildGeneration(reason) {
             ? (0, observability_database_1.getObservabilityDatabase)().prepare("SELECT * FROM music_catalog_tracks_v4 WHERE generation=?").all(previousGeneration)
             : [];
         const previousByFile = new Map(previousRows.map(row => [row.filename, row]));
-        const rows = await mapLimit(filenames, 2, async (filename) => {
+        const scannedRows = await mapLimit(filenames, 2, async (filename) => {
             try {
                 const safe = resolveSafeMusicFile(filename);
                 const stamp = `${safe.stat.size}:${safe.stat.mtimeMs}`;
@@ -291,6 +296,7 @@ async function buildGeneration(reason) {
                 };
             }
         });
+        const rows = (0, catalog_track_identity_1.assignCatalogTrackIdentities)(scannedRows, previousRows);
         const digest = crypto.createHash("sha256");
         for (const row of rows)
             digest.update(`${row.filename}:${row.file_checksum}:${row.state}\n`);
@@ -371,6 +377,10 @@ function findMusicCatalogTrackByFilename(filenameValue) {
     LIMIT 1
   `).get(generation, filename);
     return row ? { ...rowToTrack(row), indexGeneration: generation } : null;
+}
+function findMusicCatalogTrackById(trackId) {
+    const row = (0, observability_database_1.getObservabilityDatabase)().prepare('SELECT filename FROM music_catalog_tracks_v4 WHERE generation=? AND track_id=? LIMIT 1').get((0, music_persistence_1.activeMusicCatalogGeneration)(), trackId);
+    return row ? findMusicCatalogTrackByFilename(row.filename) : null;
 }
 async function ensureMusicCatalogTrackReady(filenameValue, reason = "file_change") {
     const { filename } = resolveSafeMusicFile(filenameValue);

@@ -82,6 +82,8 @@ function defaultOrchestratorConfig() {
         providerContextCacheMode: "auto",
         protocolMode: "auto",
         protocolOverride: "",
+        responsesTransportMode: "auto",
+        responsesWebSocketUrl: "",
         codeIntelligenceEnabled: true,
         codeIndexStartPolicy: "on_demand",
         codeIndexMaxConcurrentProjects: 1,
@@ -266,6 +268,12 @@ function loadOrchestratorConfig() {
             // Active calls and future saves use the unified protocol fields.
             ...migratedProtocol,
             ...retiredRuntimeConfig,
+            responsesTransportMode: ["auto", "http", "websocket"].includes(String(stored.responsesTransportMode || "").trim().toLowerCase())
+                ? String(stored.responsesTransportMode).trim().toLowerCase()
+                : "auto",
+            responsesWebSocketUrl: /^wss:\/\//i.test(String(stored.responsesWebSocketUrl || "").trim())
+                ? String(stored.responsesWebSocketUrl).trim()
+                : "",
             memoryCompactionUseModel: true,
             memoryCompactionMode: "model-required",
             // Older installations persisted the former 30-second default. Normalize
@@ -334,6 +342,29 @@ function saveOrchestratorConfig(updates) {
         throw new Error("人工指定接口协议时必须选择协议");
     if (next.protocolMode !== "manual")
         next.protocolOverride = "";
+    if (updates.responsesTransportMode !== undefined || updates.responses_transport_mode !== undefined) {
+        const value = String(updates.responsesTransportMode ?? updates.responses_transport_mode ?? "auto").trim().toLowerCase();
+        if (!["auto", "http", "websocket"].includes(value))
+            throw new Error("Responses 传输模式必须是 auto、http 或 websocket");
+        next.responsesTransportMode = value;
+    }
+    if (updates.responsesWebSocketUrl !== undefined || updates.responses_websocket_url !== undefined) {
+        const value = String(updates.responsesWebSocketUrl ?? updates.responses_websocket_url ?? "").trim();
+        if (value && !/^wss:\/\//i.test(value))
+            throw new Error("Responses WebSocket 地址必须以 wss:// 开头");
+        if (value && /[?#\r\n]/.test(value))
+            throw new Error("Responses WebSocket 地址不能包含查询参数或片段");
+        if (value && (() => { try {
+            const parsed = new URL(value);
+            return !!parsed.username || !!parsed.password;
+        }
+        catch {
+            return true;
+        } })()) {
+            throw new Error("Responses WebSocket 地址不能包含凭据");
+        }
+        next.responsesWebSocketUrl = value;
+    }
     next.format = "auto";
     if (updates.model !== undefined)
         next.model = String(updates.model || "").trim();
@@ -828,6 +859,14 @@ async function testUnifiedModelConnection() {
             reasoningEffort: "off",
         };
         const messages = [{ role: "user", content: "仅回复 OK" }];
+        const probeCache = {
+            scope: "workspace", scopeId: "workspace", sessionId: "connectivity-probe",
+            source: "connectivity_probe", requestClass: "probe",
+            requestAttribution: {
+                purpose: "unified_model_connectivity", requestClass: "probe",
+                scope: "workspace", scopeId: "workspace", exactSessionId: "connectivity-probe",
+            },
+        };
         const content = provider === "anthropic-compatible"
             ? await (0, group_orchestrator_llm_client_1.callAnthropicCompatibleChat)(testConfig, {
                 system: "You are running a CCM unified-model connectivity check. Return only a short health response.",
@@ -835,12 +874,16 @@ async function testUnifiedModelConnection() {
                 maxTokens: 16,
                 temperature: 0,
                 defaultTimeoutMs: 15_000,
+                providerContextCache: probeCache,
+                requestAttribution: probeCache.requestAttribution,
             })
             : await (0, group_orchestrator_llm_client_1.callOpenAiCompatibleChat)(testConfig, {
                 messages: [{ role: "system", content: "You are running a CCM unified-model connectivity check. Return only a short health response." }, ...messages],
                 maxTokens: 16,
                 temperature: 0,
                 defaultTimeoutMs: 15_000,
+                providerContextCache: probeCache,
+                requestAttribution: probeCache.requestAttribution,
             });
         if (!String(content || "").trim())
             throw new Error("模型返回了空响应");
@@ -864,6 +907,8 @@ async function testUnifiedModelConnection() {
             maxTokens: 16,
             temperature: 0,
             defaultTimeoutMs: 15_000,
+            providerContextCache: probeCache,
+            requestAttribution: probeCache.requestAttribution,
         });
         // Connection health is intentionally independent from optional cache
         // capability evidence. A cache probe may degrade without making the

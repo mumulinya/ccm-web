@@ -998,7 +998,9 @@ function handleProjectsApi(pathname, req, res, parsed, ctx) {
                 platform: info[0]?.platform || "未知",
                 work_dir: info[0]?.workDir || "",
                 work_dir_status: directoryState.status,
-                session_count: ctx.getSessions(config.name).length,
+                session_count: typeof ctx.getSessionCount === "function"
+                    ? ctx.getSessionCount(config.name)
+                    : ctx.getSessions(config.name).length,
                 state: agentState.state,
                 lastActivity: agentState.lastActivity,
                 stateDetail: agentState.detail,
@@ -1940,7 +1942,6 @@ type = "${finalPlatform}"${platformOptionsToml}
                 const payload = JSON.parse(body || "{}");
                 const project = requireActiveProjectName(payload.project);
                 const sessionId = (0, project_validation_1.validateSessionId)(payload.sessionId || payload.session_id);
-                (0, sessions_1.syncSessions)(project);
                 if (!(0, sessions_1.getSessionDetail)(project, sessionId))
                     throw new Error("项目会话不存在");
                 (0, runtime_events_1.publishRuntimeEvent)("project", "project.session_messages_changed", {

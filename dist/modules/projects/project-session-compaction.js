@@ -49,6 +49,7 @@ const path = __importStar(require("path"));
 const utils_1 = require("../../core/utils");
 const unified_session_compaction_model_1 = require("../../system/unified-session-compaction-model");
 const group_orchestrator_config_1 = require("../collaboration/group-orchestrator-config");
+const unified_model_call_config_1 = require("../../system/unified-model-call-config");
 const group_compaction_strategy_1 = require("../collaboration/group-compaction-strategy");
 const model_capability_cache_1 = require("../collaboration/model-capability-cache");
 const context_budget_1 = require("../../system/context-budget");
@@ -101,7 +102,9 @@ async function runUnifiedProjectSessionCompaction(project, projectSessionId, opt
     const file = sessionFile(safeProject, safeSessionId);
     if (!fs.existsSync(file))
         throw new Error("项目会话不存在");
-    const config = (0, group_orchestrator_config_1.loadOrchestratorConfig)();
+    const baseConfig = (0, group_orchestrator_config_1.loadOrchestratorConfig)();
+    const unifiedConfig = (0, unified_model_call_config_1.resolveUnifiedModelConfig)({ callSource: "compaction", config: baseConfig });
+    const config = { ...baseConfig, model: unifiedConfig.model, reasoningEffort: unifiedConfig.reasoningEffort, configVersion: unifiedConfig.configVersion };
     const binding = (0, project_session_agent_binding_1.getProjectSessionAgentBinding)(safeProject, safeSessionId);
     const modelCapacity = resolveProjectCompactionCapacity(JSON.parse(fs.readFileSync(file, "utf8")), config, binding, {}, options);
     const initialData = JSON.parse(fs.readFileSync(file, "utf8"));
@@ -185,7 +188,7 @@ async function runUnifiedProjectSessionCompaction(project, projectSessionId, opt
             persistSession(safeProject, safeSessionId, data);
         },
     });
-    const modelCall = options.modelCall || ((request) => (0, unified_session_compaction_model_1.callUnifiedCompactionModel)({ ...config, compactionAbortSignal: options.signal }, request.system, request.user, request.maxOutputTokens));
+    const modelCall = options.modelCall || ((request) => (0, unified_session_compaction_model_1.callUnifiedCompactionModel)({ ...config, compactionAbortSignal: options.signal, requestAttribution: { scope: 'project', scopeId: safeProject, exactSessionId: safeSessionId, purpose: 'session_compaction', requestClass: 'auxiliary' } }, request.system, request.user, request.maxOutputTokens));
     const engine = (0, unified_session_compaction_1.createUnifiedSessionCompactionEngine)({
         adapter,
         config: { ...config, autoCompactThreshold: modelCapacity.autoCompactThreshold },
@@ -267,14 +270,6 @@ function getProjectSessionCompactionActivity(project, projectSessionId) {
 function sessionFile(project, projectSessionId) {
     return (0, project_validation_1.resolveContainedPath)(path.join(utils_1.CCM_DIR, "web-sessions"), (0, project_validation_1.validateProjectName)(project), `${(0, project_validation_1.validateSessionId)(projectSessionId)}.json`);
 }
-function findCcSessionFile(project) {
-    if (!fs.existsSync(utils_1.SESSIONS_DIR))
-        return "";
-    const escaped = (0, project_validation_1.validateProjectName)(project).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const files = fs.readdirSync(utils_1.SESSIONS_DIR).filter(file => new RegExp(`^${escaped}(?:_[^/\\\\]+)?\\.json$`).test(file));
-    const selected = files.find(file => file !== `${project}.json`) || files[0];
-    return selected ? (0, project_validation_1.resolveContainedPath)(utils_1.SESSIONS_DIR, selected) : "";
-}
 function writeAtomic(file, value) {
     fs.mkdirSync(path.dirname(file), { recursive: true });
     const temp = `${file}.${process.pid}.${Date.now()}.tmp`;
@@ -283,14 +278,6 @@ function writeAtomic(file, value) {
 }
 function persistSession(project, projectSessionId, value) {
     writeAtomic(sessionFile(project, projectSessionId), value);
-    const ccFile = findCcSessionFile(project);
-    if (!ccFile || !fs.existsSync(ccFile))
-        return;
-    const data = JSON.parse(fs.readFileSync(ccFile, "utf8"));
-    data.sessions = data.sessions || {};
-    const { execution_history, executionHistory, execution_history_version, ...sharedSessionValue } = value || {};
-    data.sessions[projectSessionId] = sharedSessionValue;
-    writeAtomic(ccFile, data);
 }
 function projectExecutionEvents(data) {
     return (0, session_execution_ledger_1.normalizeSessionExecutionEvents)(data?.execution_history || data?.executionHistory);
@@ -354,7 +341,12 @@ function appendProjectSessionExecutionEvent(projectInput, projectSessionIdInput,
         timestamp: event?.timestamp || event?.at || new Date().toISOString(),
         status: event?.status === "error" || event?.error ? "error" : type === "tool_use" ? "running" : "ok",
         payload: event?.payload ?? (type === "tool_use" ? { arguments: event?.arguments || {} } : { observation: event?.observation ?? null, error: event?.error || "" }),
+        // Keep the exact model-visible projection that was sent in the native
+        // request. The audit payload may be reprojected later and is not a stable
+        // substitute for the committed provider bytes.
+        ...(event?.modelContent !== undefined ? { modelContent: event.modelContent } : {}),
         persistContext: { scope: "project", scopeId: project, sessionId: projectSessionId },
+        auditReceipt: event?.auditReceipt,
     });
     if (!events.some(item => item.id === created.id))
         events.push(created);
@@ -536,8 +528,10 @@ function scheduleProjectSessionMemoryExtraction(project, projectSessionId, optio
     if (!cadence.shouldExtract)
         return { scheduled: false, reason: cadence.reason, cadence };
     const identity = { generation, sourceChecksum: projectCompactionSourceChecksum(data) };
-    const config = (0, group_orchestrator_config_1.loadOrchestratorConfig)();
-    const modelCall = options.modelCall || ((request) => (0, unified_session_compaction_model_1.callUnifiedCompactionModel)(config, request.system, request.user, request.maxOutputTokens));
+    const baseConfig = (0, group_orchestrator_config_1.loadOrchestratorConfig)();
+    const unifiedConfig = (0, unified_model_call_config_1.resolveUnifiedModelConfig)({ callSource: "compaction", config: baseConfig });
+    const config = { ...baseConfig, model: unifiedConfig.model, reasoningEffort: unifiedConfig.reasoningEffort, configVersion: unifiedConfig.configVersion };
+    const modelCall = options.modelCall || ((request) => (0, unified_session_compaction_model_1.callUnifiedCompactionModel)({ ...config, requestAttribution: { scope: 'project', scopeId: safeProject, exactSessionId: safeSessionId, purpose: 'session_memory', requestClass: 'auxiliary' } }, request.system, request.user, request.maxOutputTokens));
     const scheduled = (0, session_compaction_core_1.scheduleSessionMemoryExtraction)({
         scope: "project",
         sessionId: `${safeProject}:${safeSessionId}`,
@@ -635,6 +629,9 @@ function buildProjectSessionModelContextProjection(project, projectSessionId, op
     const state = projectCompactionState(data, project, projectSessionId);
     const sessionTaskIndex = (0, session_task_timeline_2.readVerifiedSessionTaskIndex)({ exactSessionId: projectSessionId, scope: "project", scopeId: project });
     const summary = data.unifiedSessionSummary || state.activeSummary || null;
+    if (summary && state.activeSummaryChecksum && summaryChecksum(summary) !== state.activeSummaryChecksum) {
+        throw Object.assign(new Error("项目会话摘要校验失败，不能使用已变化的恢复上下文"), { code: "PROJECT_SESSION_SUMMARY_CHECKSUM_MISMATCH" });
+    }
     const history = Array.isArray(data.history)
         ? data.history.filter((message) => ["user", "assistant"].includes(String(message?.role || "")))
         : [];

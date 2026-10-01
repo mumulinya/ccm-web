@@ -36,10 +36,13 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.updateDouyinSettings = updateDouyinSettings;
 exports.douyinVideoUrl = douyinVideoUrl;
 exports.startDouyinBrowserLogin = startDouyinBrowserLogin;
+exports.startDouyinLogin = startDouyinLogin;
 exports.revokeDouyinBrowserLogin = revokeDouyinBrowserLogin;
+exports.revokeDouyinLogin = revokeDouyinLogin;
 exports.douyinSearch = douyinSearch;
 exports.prepareDouyinMediaRuntime = prepareDouyinMediaRuntime;
 exports.resolveDouyinMediaInput = resolveDouyinMediaInput;
+exports.downloadDouyinVideoForPlayback = downloadDouyinVideoForPlayback;
 exports.douyinPlatformStatus = douyinPlatformStatus;
 exports.runDouyinMusicSelfTest = runDouyinMusicSelfTest;
 const crypto = __importStar(require("crypto"));
@@ -52,6 +55,7 @@ const credential_store_1 = require("../../core/credential-store");
 const utils_1 = require("../../core/utils");
 const managed_process_tree_1 = require("../../system/managed-process-tree");
 const platform_http_1 = require("./platform-http");
+const douyin_mcp_bridge_1 = require("./douyin-mcp-bridge");
 const DOUYIN_HOME = "https://www.douyin.com/";
 const DOUYIN_SEARCH_API = "https://open.douyin.com/dy_open_api/v2/search/video/";
 const DOUYIN_TOKEN_API = "https://open.douyin.com/oauth/client_token/";
@@ -85,10 +89,15 @@ function settings() {
     const value = (0, db_1.loadMusicConfig)()?.douyin || {};
     return {
         compatibilityEnabled: value.compatibilityEnabled !== false,
+        mcpMode: ["auto", "on", "off"].includes(String(value.mcpMode)) ? String(value.mcpMode) : "auto",
         officialClientKey: cleanText(value.officialClientKey, 160),
         officialClientSecretRef: (0, credential_store_1.isCredentialReference)(value.officialClientSecretRef) ? value.officialClientSecretRef : "",
         browserStorageRef: (0, credential_store_1.isCredentialReference)(value.browserStorageRef) ? value.browserStorageRef : "",
         browserAuthenticatedAt: cleanText(value.browserAuthenticatedAt, 64),
+        asrProvider: ["siliconflow", "openai", "custom", "volcengine"].includes(String(value.asrProvider).toLowerCase()) ? String(value.asrProvider).toLowerCase() : "siliconflow",
+        asrApiUrl: cleanText(value.asrApiUrl, 500),
+        asrModel: cleanText(value.asrModel, 160),
+        asrApiKeyRef: (0, credential_store_1.isCredentialReference)(value.asrApiKeyRef) ? value.asrApiKeyRef : "",
     };
 }
 function persistSettings(update) {
@@ -102,8 +111,26 @@ function updateDouyinSettings(input) {
     const update = {};
     if (input.compatibilityEnabled !== undefined)
         update.compatibilityEnabled = input.compatibilityEnabled === true;
+    if (input.mcpMode !== undefined && ["auto", "on", "off"].includes(String(input.mcpMode)))
+        update.mcpMode = String(input.mcpMode);
     if (input.officialClientKey !== undefined)
         update.officialClientKey = cleanText(input.officialClientKey, 160);
+    if (input.asrProvider !== undefined && ["siliconflow", "openai", "custom", "volcengine"].includes(String(input.asrProvider).toLowerCase()))
+        update.asrProvider = String(input.asrProvider).toLowerCase();
+    if (input.asrApiUrl !== undefined)
+        update.asrApiUrl = cleanText(input.asrApiUrl, 500);
+    if (input.asrModel !== undefined)
+        update.asrModel = cleanText(input.asrModel, 160);
+    const asrKey = String(input.asrApiKey || "").trim();
+    if (asrKey) {
+        if (current.asrApiKeyRef)
+            (0, credential_store_1.deleteCredential)(current.asrApiKeyRef);
+        update.asrApiKeyRef = (0, credential_store_1.protectCredential)("music-douyin", "asr-api-key", asrKey);
+    }
+    if (input.clearAsrApiKey === true && current.asrApiKeyRef) {
+        (0, credential_store_1.deleteCredential)(current.asrApiKeyRef);
+        update.asrApiKeyRef = "";
+    }
     const secret = String(input.officialClientSecret || "").trim();
     if (secret) {
         if (current.officialClientSecretRef)
@@ -323,6 +350,14 @@ async function startDouyinBrowserLogin() {
         browserLoginStartPromise = null;
     }
 }
+/** Use the upstream MCP login flow exclusively. The legacy TypeScript
+ * Playwright login opens duplicate browser pages on some Windows hosts, so
+ * it must not be selected for the user-facing login action. */
+async function startDouyinLogin() {
+    if (!(0, douyin_mcp_bridge_1.douyinMcpStatus)().enabled)
+        throw new Error("抖音 MCP 登录已关闭，请在设置中启用");
+    return (0, douyin_mcp_bridge_1.startDouyinMcpLogin)();
+}
 function revokeDouyinBrowserLogin() {
     closeActiveLogin();
     lastBrowserLoginError = "";
@@ -331,6 +366,10 @@ function revokeDouyinBrowserLogin() {
         (0, credential_store_1.deleteCredential)(config.browserStorageRef);
     persistSettings({ browserStorageRef: "", browserAuthenticatedAt: "" });
     return douyinPlatformStatus();
+}
+async function revokeDouyinLogin() {
+    await (0, douyin_mcp_bridge_1.revokeDouyinMcpLogin)().catch(() => { });
+    return revokeDouyinBrowserLogin();
 }
 function collectAwemeObjects(value, output, depth = 0) {
     if (!value || depth > 8 || output.length >= 50)
@@ -430,40 +469,9 @@ async function douyinSearch(keyword, limit = 12) {
     if (!query)
         return [];
     const config = settings();
-    // 1. 官方接口优先
-    if (config.officialClientKey && officialSecret(config)) {
-        try {
-            return await searchOfficial(query, limit);
-        }
-        catch (officialError) {
-            // capability_unavailable / unavailable / timeout → 降级到浏览器；rejected 直接抛出
-            const state = String(officialError?.douyinState || (officialError instanceof platform_http_1.MusicPlatformHttpError ? officialError.status : ""));
-            if (state === "rejected")
-                throw officialError;
-            // 其余错误降级，不再暴露官方失败
-        }
-    }
-    // 2. 浏览器兼容通道（匿名或登录增强）
-    if (config.compatibilityEnabled) {
-        // 串行锁：最多只允许一个并发浏览器搜索，避免多个 Chromium 实例同时启动
-        if (browserSearchLock) {
-            try {
-                return await browserSearchLock;
-            }
-            catch { /* 前一次失败，重新搜索 */ }
-        }
-        browserSearchLock = searchBrowser(query, limit);
-        try {
-            return await browserSearchLock;
-        }
-        finally {
-            browserSearchLock = null;
-        }
-    }
-    // 3. 两个通道都不可用
-    const error = new Error("抖音搜索需要配置官方能力或开启浏览器兼容通道");
-    error.douyinState = "capability_unavailable";
-    throw error;
+    (0, douyin_mcp_bridge_1.adoptDouyinMcpCookie)(browserStorage(config));
+    // Search never launches a TS browser or hides MCP authentication failures.
+    return (0, douyin_mcp_bridge_1.douyinMcpSearch)(query, limit);
 }
 function runtimeAsset() {
     return YTDLP_ASSETS[`${process.platform}-${process.arch}`] || null;
@@ -630,18 +638,40 @@ async function resolveDouyinMediaInput(awemeId, options = {}) {
             catch { }
     }
 }
+/** MCP-first local media acquisition used by the CCM music download queue. */
+async function downloadDouyinVideoForPlayback(awemeId, options = {}) {
+    if (options.signal?.aborted)
+        throw new Error("抖音媒体解析已取消");
+    const status = (0, douyin_mcp_bridge_1.douyinMcpStatus)();
+    if (!status.authenticated) {
+        const error = new Error('未登录抖音，请到设置中心登录');
+        error.douyinState = 'login_required';
+        throw error;
+    }
+    if (!status.enabled)
+        return null;
+    const result = await (0, douyin_mcp_bridge_1.douyinMcpDownloadVideo)(canonicalAwemeId(awemeId), `staging/${crypto.randomUUID()}`, options);
+    const filePath = String(result?.file_path || result?.filePath || "");
+    if (!(0, douyin_mcp_bridge_1.isDouyinManagedMediaPath)(filePath) || !fs.existsSync(filePath))
+        throw new Error("抖音 MCP 未返回 CCM 管理目录内的视频文件");
+    return { filePath, title: cleanText(result?.video?.title || "", 200), durationSeconds: Number(result?.video?.duration_seconds || 0) };
+}
 function douyinPlatformStatus() {
     const config = settings();
+    (0, douyin_mcp_bridge_1.adoptDouyinMcpCookie)(browserStorage(config));
     const storage = browserStorage(config);
     const runtime = existingYtDlpPath();
     const authenticated = hasAuthenticatedCookie(storage);
     const officialConfigured = !!config.officialClientKey && !!officialSecret(config);
     const browserAvailable = config.compatibilityEnabled;
-    const searchEnabled = officialConfigured || browserAvailable;
-    const searchMode = officialConfigured && browserAvailable ? "official+browser"
-        : officialConfigured ? "official"
-            : browserAvailable ? "browser"
-                : "disabled";
+    const mcp = (0, douyin_mcp_bridge_1.douyinMcpStatus)();
+    const searchEnabled = officialConfigured || browserAvailable || (mcp.enabled && mcp.authenticated);
+    const searchMode = mcp.enabled && mcp.authenticated
+        ? (officialConfigured || browserAvailable ? "mcp+official+browser" : "mcp")
+        : officialConfigured && browserAvailable ? "official+browser"
+            : officialConfigured ? "official"
+                : browserAvailable ? "browser"
+                    : "disabled";
     return {
         schema: "ccm-douyin-music-status-v1",
         official: {
@@ -657,6 +687,7 @@ function douyinPlatformStatus() {
             loginStartedAt: activeBrowserLogin?.startedAt || null,
             error: activeBrowserLogin?.error || lastBrowserLoginError || null,
         },
+        mcp,
         runtime: {
             ready: !!runtime,
             managed: !!runtime && runtime === managedRuntimePath(),
@@ -664,11 +695,19 @@ function douyinPlatformStatus() {
             platformSupported: !!runtimeAsset() || !!runtime,
             preparation: runtimePreparation,
         },
+        asr: {
+            provider: config.asrProvider,
+            configured: !!config.asrApiKeyRef || !!process.env.ASR_API_KEY || !!process.env.SILICONFLOW_API_KEY || !!process.env.OPENAI_API_KEY,
+            apiUrl: config.asrApiUrl || "",
+            model: config.asrModel || "",
+            apiUrlConfigured: !!config.asrApiUrl || !!process.env.ASR_API_URL,
+            keyProtected: !!config.asrApiKeyRef,
+        },
         search: {
-            enabled: searchEnabled,
-            mode: searchMode,
-            anonymousSupported: browserAvailable,
-            authenticatedEnhancement: authenticated,
+            enabled: mcp.enabled,
+            mode: 'mcp',
+            anonymousSupported: false,
+            authenticatedEnhancement: mcp.authenticated,
         },
     };
 }

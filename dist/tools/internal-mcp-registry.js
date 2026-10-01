@@ -217,16 +217,25 @@ function isLegacyOfficialFilesystemMcpDefinition(value = {}) {
 function buildBundledFilesystemMcpTool(fallback = {}) {
     const entryPath = resolveBundledFilesystemMcpEntry();
     const oldArgs = Array.isArray(fallback?.args) ? fallback.args.map(String) : [];
-    const configuredRoot = oldArgs.find((item) => (item
+    const configuredRoot = [...oldArgs].reverse().find((item) => (item
         && item !== "-y"
         && item !== "--yes"
-        && !/^@modelcontextprotocol\/server-filesystem(?:@|$)/i.test(item)));
-    const root = configuredRoot || path.join(os.homedir(), ".ccm", "shared");
+        && !/^@modelcontextprotocol\/server-filesystem(?:@|$)/i.test(item)
+        && !/server-filesystem[\\/]dist[\\/]index\.js$/i.test(item)
+        && !/\.m?js$/i.test(item)));
+    const root = configuredRoot && fs.existsSync(configuredRoot) && fs.statSync(configuredRoot).isDirectory()
+        ? configuredRoot
+        : path.join(os.homedir(), ".ccm", "shared");
     return {
         ...fallback,
         name: exports.FILESYSTEM_BUNDLED_MCP,
         description: "Filesystem MCP server scoped to an explicit directory.",
         command: process.execPath,
+        // Marketplace/runtime synchronization treats executablePath as the
+        // approved launch target for managed stdio servers. Keep it alongside the
+        // canonical command so a repaired bundled entry is dispatchable immediately
+        // after restart instead of waiting for a manual marketplace re-review.
+        executablePath: process.execPath,
         args: [entryPath, root],
         env: {},
         enabled: fallback?.enabled !== false && fs.existsSync(entryPath),

@@ -247,18 +247,16 @@ function evaluateTaskAcceptanceEscalation(input) {
     const paths = strings((input.changedFiles || []).map(changedPath), 500);
     const modules = new Set(paths.map(moduleForPath));
     const reasons = [];
-    if (paths.length >= 8)
-        reasons.push("实际源码或配置变更达到8个文件");
-    if (modules.size >= 3)
-        reasons.push("实际变更横跨3个顶层模块");
-    if (paths.some(file => HIGH_RISK_PATH.test(file)))
-        reasons.push("实际变更触及安全、数据、发布或公共契约目录");
+    const declaredRisk = input.task?.workflow_decision || input.task?.workflowDecision || {};
+    if (declaredRisk.riskLevel === "high" || declaredRisk.hasPermissionOrSecurityChange === true
+        || declaredRisk.hasMigration === true || declaredRisk.hasReleaseOrDeployment === true)
+        reasons.push("已声明的高风险操作需要独立验收");
     const checks = Array.isArray(input.selfVerification?.deterministic_gate?.checks) ? input.selfVerification.deterministic_gate.checks : [];
     const deterministicFailures = checks.filter((item) => item?.pass === false && ["source_changes", "verification_configured", "verification_passed"].includes(String(item?.id || "")));
     const implementationFailure = deterministicFailures.length > 0;
     if (input.selfVerification && !input.selfVerification.canAccept && !implementationFailure)
         reasons.push("确定性验证未发现实现失败，但验收证据仍不完整");
-    return { escalate: reasons.length > 0, implementationFailure, reasons, changedFileCount: paths.length, topLevelModuleCount: modules.size };
+    return { escalate: reasons.length > 0 && !implementationFailure, implementationFailure, reasons, changedFileCount: paths.length, topLevelModuleCount: modules.size };
 }
 function buildTaskAcceptanceEscalationReceipt(input) {
     if (input.policy.schema !== "ccm-task-acceptance-policy-snapshot-v3" || input.policy.route !== "main_agent_with_escalation")

@@ -407,6 +407,29 @@ function resolveClaudeCodeCommand() {
             }
             catch { }
         }
+        // Production CCM may be started from a service/scheduled process whose
+        // environment contains only the machine PATH.  npm's user/global prefix
+        // (for example D:\\npm) can therefore be absent even though the Claude
+        // Code package is installed and usable.  Resolve the bundled executable
+        // from stable Node/npm sibling locations before reporting the CLI missing.
+        const nodeRoot = path.dirname(process.execPath);
+        const candidateRoots = Array.from(new Set([
+            String(process.env.NPM_CONFIG_PREFIX || process.env.npm_config_prefix || "").trim(),
+            path.join(nodeRoot, "..", "npm"),
+            path.join(nodeRoot, "..", "node_modules"),
+            path.join(String(process.env.APPDATA || ""), "npm"),
+            path.join(String(process.env.LOCALAPPDATA || ""), "npm"),
+        ].filter(Boolean).map(item => path.resolve(item))));
+        for (const root of candidateRoots) {
+            const candidates = [
+                path.join(root, "node_modules", "@anthropic-ai", "claude-code", "bin", "claude.exe"),
+                path.join(root, "@anthropic-ai", "claude-code", "bin", "claude.exe"),
+            ];
+            for (const candidate of candidates) {
+                if (commandExists(candidate))
+                    return candidate;
+            }
+        }
     }
     return "claude";
 }

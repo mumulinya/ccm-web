@@ -1,0 +1,56 @@
+import { BrowserActionSpec, BrowserAssertionSpec, HttpAssertionSpec, HttpConcurrencyAssertionSpec, TestAgentOptions } from "./types";
+export declare const DEFAULT_OPTIONS: Required<TestAgentOptions>;
+export declare function text(value: any): string;
+export declare const BROWSER_ACTION_TYPES: Set<string>;
+export declare const BROWSER_ACTION_ALIASES: Record<string, BrowserActionSpec["type"]>;
+export declare const BROWSER_ASSERTION_TYPES: Set<string>;
+export declare const BROWSER_ASSERTION_ALIASES: Record<string, BrowserAssertionSpec["type"]>;
+export declare const HTTP_ASSERTION_TYPES: Set<string>;
+export declare const HTTP_ASSERTION_ALIASES: Record<string, HttpAssertionSpec["type"]>;
+export declare const HTTP_CONCURRENCY_ASSERTION_TYPES: Set<string>;
+export declare const HTTP_CONCURRENCY_ASSERTION_ALIASES: Record<string, HttpConcurrencyAssertionSpec["type"]>;
+export declare function normalizedType<T extends string>(rawType: any, aliases: Record<string, T>): string;
+export declare function optionalNumber(value: any): number;
+export declare function optionalBoolean(value: any): boolean;
+export declare function optionalNumberList(value: any): number | number[] | undefined;
+export declare function coordinate(value: any): [number, number] | undefined;
+export declare function normalizeBrowserApps(value: any): {
+    displayName: string;
+    bundleId: string;
+    bundle_id: string;
+}[];
+export declare function normalizeBrowserUploadFiles(raw: any): ({
+    filePath: string;
+    file_path: string;
+    path: string;
+    fileName?: undefined;
+    file_name?: undefined;
+    filename?: undefined;
+    fileContent?: undefined;
+    file_content?: undefined;
+    content?: undefined;
+    mediaType?: undefined;
+    media_type?: undefined;
+} | {
+    filePath: string;
+    file_path: string;
+    path: string;
+    fileName: string;
+    file_name: string;
+    filename: string;
+    fileContent: string;
+    file_content: string;
+    content: string;
+    mediaType: string;
+    media_type: string;
+})[];
+export declare function normalizeStringList(value: any): string[];
+export declare function browserScrollDirection(raw: any): any;
+export declare function normalizeBrowserStorageArea(raw: any, type: string): string;
+export declare function normalizeBrowserGeolocation(value: any): {
+    accuracy?: number;
+    latitude: number;
+    longitude: number;
+};
+export declare function normalizeBrowserActionKey(raw: any, type: string): string;
+export declare function normalizeSameSite(value: any): string;

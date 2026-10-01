@@ -34,9 +34,25 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.WorkspaceReadContextLedger = void 0;
+exports.workspaceTextEvidenceKey = workspaceTextEvidenceKey;
+exports.reconcileJsonReadEvidence = reconcileJsonReadEvidence;
 exports.createWorkspaceReadContextLedger = createWorkspaceReadContextLedger;
 exports.clearWorkspaceReadContextLedger = clearWorkspaceReadContextLedger;
 const crypto = __importStar(require("crypto"));
+/** Fingerprint the complete selected text, not a checksum-only reference. */
+function workspaceTextEvidenceKey(value, project = '') {
+    if (value?.schema !== 'ccm-workspace-read-result-v3' || value.type !== 'text' || !value.checksum)
+        return '';
+    const content = Array.isArray(value.lines) && value.lines.every((row) => Number.isInteger(row?.line) && typeof row?.text === 'string')
+        ? value.lines.map((row) => `${row.line}\t${row.text}`).join('\n') : value.content;
+    if (typeof content !== 'string')
+        return '';
+    return crypto.createHash('sha256').update(JSON.stringify({
+        project: project || value.project || value.planningEvidence?.project || '', path: value.path,
+        checksum: value.checksum, offset: value.offset, content,
+        total: value.total_lines, next: value.next_cursor, truncated: value.truncated,
+    })).digest('hex');
+}
 function stableRange(range) {
     return JSON.stringify({
         offset: Number(range.offset || 0),
@@ -45,6 +61,7 @@ function stableRange(range) {
         cellOffset: Number(range.cellOffset || 0),
         cellLimit: Number(range.cellLimit || 0),
         tokenBudget: Number(range.tokenBudget || 0),
+        ...(range.jsonPointers ? { jsonPointers: range.jsonPointers } : {}),
     });
 }
 function pathKey(project, filePath) {
@@ -59,6 +76,12 @@ class WorkspaceReadContextLedger {
     entries = new Map();
     signatures = new Map();
     inFlight = new Map();
+    jsonEvidence = new Set();
+    textEvidence = new Set();
+    hasJsonEvidence(id) { return this.jsonEvidence.has(id); }
+    retainJsonEvidence(ids) { this.jsonEvidence = new Set(ids); }
+    hasTextEvidence(id) { return Boolean(id) && this.textEvidence.has(id); }
+    retainTextEvidence(ids) { this.textEvidence = new Set(ids); }
     constructor(identity) {
         this.identity = { ...identity, generation: Math.max(0, Number(identity.generation || 0)) };
         this.epoch = crypto.createHash("sha256").update(JSON.stringify({ ...this.identity, createdAt: Date.now(), nonce: crypto.randomBytes(8).toString("hex") })).digest("hex").slice(0, 24);
@@ -99,6 +122,37 @@ class WorkspaceReadContextLedger {
 }
 exports.WorkspaceReadContextLedger = WorkspaceReadContextLedger;
 const sessionLedgers = new Map();
+/** Only complete selections in the effective messages authorize unchanged replies.
+ * Keep the existing export for checkpoint callers and older integrations. */
+function reconcileJsonReadEvidence(identity, messages) {
+    const ids = new Set();
+    const textIds = new Set();
+    const visit = (value) => {
+        if (typeof value === 'string') {
+            try {
+                visit(JSON.parse(value));
+            }
+            catch { }
+            return;
+        }
+        if (!value || typeof value !== 'object')
+            return;
+        if (value.schema === 'ccm-workspace-json-fields-result-v1' && Array.isArray(value.fields) && value.evidenceId)
+            ids.add(value.evidenceId);
+        const textId = workspaceTextEvidenceKey(value);
+        if (textId)
+            textIds.add(textId);
+        for (const nested of Object.values(value))
+            visit(nested);
+    };
+    visit(messages);
+    for (const ledger of sessionLedgers.values()) {
+        if (ledger.identity.scope === identity.scope && ledger.identity.scopeId === identity.scopeId && ledger.identity.exactSessionId === identity.exactSessionId) {
+            ledger.retainJsonEvidence(ids);
+            ledger.retainTextEvidence(textIds);
+        }
+    }
+}
 function identityKey(identity) {
     return JSON.stringify({
         scope: identity.scope,

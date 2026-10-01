@@ -35,6 +35,7 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.runVerificationCommands = runVerificationCommands;
 const child_process_1 = require("child_process");
+const acceptance_contract_adapter_1 = require("./acceptance-contract-adapter");
 const utils_1 = require("./utils");
 const isolation_1 = require("./isolation");
 const side_effect_policy_1 = require("./side-effect-policy");
@@ -168,7 +169,10 @@ async function runVerificationCommands(workOrder) {
                 command,
             });
             try {
-                const result = await runSingleCommand(project, command, workOrder.options.commandTimeoutMs, workOrder.options.maxOutputChars, policyContext, liveIdentity ? { ...liveIdentity, commandRunId: trace.toolCallId } : null);
+                const acceptance = (0, acceptance_contract_adapter_1.prepareContractCommand)(workOrder, project, command);
+                const scopedProject = acceptance.length ? { ...project, workDir: acceptance[0].cwd } : project;
+                const result = await runSingleCommand(scopedProject, command, workOrder.options.commandTimeoutMs, workOrder.options.maxOutputChars, policyContext, liveIdentity ? { ...liveIdentity, commandRunId: trace.toolCallId } : null);
+                result.acceptanceEvidenceIds = (0, acceptance_contract_adapter_1.recordContractCommand)(acceptance, result, workOrder.metadata?.acceptanceProducer === "main_agent" ? "main_agent" : "test_agent");
                 trace.finish(result);
                 results.push(result);
             }

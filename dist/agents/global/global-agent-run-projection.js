@@ -47,6 +47,7 @@ exports.parseGlobalAgentDecision = parseGlobalAgentDecision;
 exports.normalizeDecision = normalizeDecision;
 exports.buildGlobalAgentModelMessages = buildGlobalAgentModelMessages;
 const crypto = __importStar(require("crypto"));
+const native_session_transcript_1 = require("../native-session-transcript");
 const role_skills_1 = require("../../skills/role-skills");
 const reasoning_loop_1 = require("../reasoning-loop");
 const workflow_decision_1 = require("../workflow-decision");
@@ -401,6 +402,7 @@ async function buildGlobalAgentModelMessages(run, runtime, options = {}) {
         identityRules,
         sessionGuidance,
         mcpPolicy,
+        toolPromptLayout: authorizedTools.toolPromptLayout,
         continuation,
         runHistory: run.history,
         metaBlocks: [{
@@ -412,9 +414,7 @@ async function buildGlobalAgentModelMessages(run, runtime, options = {}) {
     if (nativeMessages)
         return nativeMessages;
     return (0, transient_model_content_1.attachTransientModelBlocks)([
-        { role: "system", content: identitySystem },
-        { role: "system", contextBlockType: "dynamic_context", content: sessionGuidance },
-        ...(mcpPolicy ? [{ role: "system", contextBlockType: "dynamic_context", content: mcpPolicy }] : []),
+        ...(0, native_session_transcript_1.splitNativeSystemSegments)({ identityRules: identitySystem, sessionGuidance, mcpPolicy, toolPromptLayout: authorizedTools.toolPromptLayout }),
         ...summaryMessages,
         ...continuationWithoutCurrent,
         ...runHistoryMessages,

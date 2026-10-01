@@ -101,10 +101,27 @@ function normalizeReceiptRows(task = {}) {
     ];
 }
 function findReceiptForItem(item, receipts) {
-    return receipts.find(receipt => {
+    const matches = receipts.filter(receipt => {
         const agent = String(receipt?.agent || receipt?.project || receipt?.target || "").trim().toLowerCase();
         return agent && [item.target, item.owner].some(value => String(value || "").trim().toLowerCase() === agent);
-    }) || null;
+    });
+    if (!matches.length)
+        return null;
+    const attemptOf = (receipt) => Math.max(0, Number(receipt?.attempt ?? receipt?.execution_attempt ?? receipt?.review_round ?? 0) || 0);
+    const timeOf = (receipt) => {
+        const raw = receipt?.recordedAt || receipt?.recorded_at || receipt?.createdAt || receipt?.created_at || receipt?.updatedAt || receipt?.updated_at || "";
+        const time = Date.parse(String(raw || ""));
+        return Number.isFinite(time) ? time : 0;
+    };
+    // Task delivery summaries can contain receipts from earlier retries.  A
+    // stale failure must never overwrite the work item's newer successful
+    // receipt, otherwise dependency unlocking and lifecycle reconciliation
+    // remain stuck even though the runtime already returned `done`.
+    return matches
+        .map((receipt, index) => ({ receipt, index }))
+        .sort((a, b) => attemptOf(b.receipt) - attemptOf(a.receipt)
+        || timeOf(b.receipt) - timeOf(a.receipt)
+        || b.index - a.index)[0]?.receipt || null;
 }
 function findExecutionForItem(item, executions) {
     return executions.find(execution => {
@@ -206,7 +223,10 @@ function fallbackTaskWorkItem(task, now) {
     });
 }
 function applyReceiptAndExecution(item, task, receipts, executions, now) {
-    const receipt = findReceiptForItem(item, receipts);
+    const receipt = findReceiptForItem(item, [
+        ...(item.lastReceipt ? [item.lastReceipt] : []),
+        ...receipts,
+    ]);
     const execution = findExecutionForItem(item, executions);
     let status = item.status;
     if (receipt)

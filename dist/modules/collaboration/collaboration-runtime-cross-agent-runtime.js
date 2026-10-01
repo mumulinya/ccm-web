@@ -1342,7 +1342,7 @@ async function settleGroupCoordinationDependency(task, ctx, streamRes = null) {
         const execution = (0, execution_kernel_1.loadExecution)(task.id);
         const receipt = task.receipt || execution?.receipt || null;
         const hasReturned = ["done", "failed", "cancelled"].includes(String(task.status || ""))
-            || (!!receipt && !collaboration_runtime_task_queue_1.runningTaskIds.has(task.id) && !(0, collaboration_runtime_coordinator_review_1.isTaskQueuedInMemory)(task.id));
+            || (!!receipt && !(0, collaboration_runtime_task_queue_1.isTaskRunningInMemory)(task) && !(0, collaboration_runtime_coordinator_review_1.isTaskQueuedInMemory)(task.id));
         if (!hasReturned)
             return { handled: true, pending: true, status: task.status };
         let acceptance = evaluateCoordinationTaskEvidence(task, request, receipt, execution);
@@ -1481,7 +1481,7 @@ async function recoverGroupCoordinationDependencies(ctx) {
             results.push({ request_id: request.id, recovered: false, reason: "work_item_missing" });
             continue;
         }
-        if (["pending", "queued"].includes(task.status) && task.auto_execute !== false && !(0, collaboration_runtime_coordinator_review_1.isTaskQueuedInMemory)(task.id) && !collaboration_runtime_task_queue_1.runningTaskIds.has(task.id)) {
+        if (["pending", "queued"].includes(task.status) && task.auto_execute !== false && !(0, collaboration_runtime_coordinator_review_1.isTaskQueuedInMemory)(task.id) && !(0, collaboration_runtime_task_queue_1.isTaskRunningInMemory)(task)) {
             results.push({ request_id: request.id, task_id: task.id, ...(0, collaboration_runtime_coordinator_review_1.enqueueTask)(task.id, ctx) });
             continue;
         }

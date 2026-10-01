@@ -12,6 +12,14 @@ async function callMusicLlm(config, prompt, options = {}) {
         temperature: options.temperature ?? 0.4,
         defaultTimeoutMs: options.timeoutMs || 10_000,
         httpErrorPrefix: "音乐助手模型请求失败",
+        providerContextCache: {
+            scope: "workspace", scopeId: "workspace", sessionId: "music-assistant",
+            source: "music_assistant", requestClass: "auxiliary",
+        },
+        requestAttribution: {
+            purpose: "music_assistant", requestClass: "auxiliary",
+            scope: "workspace", scopeId: "workspace", exactSessionId: "music-assistant",
+        },
     };
     const content = (0, group_orchestrator_llm_client_1.shouldUseAnthropic)(config)
         ? await (0, group_orchestrator_llm_client_1.callAnthropicCompatibleChat)(config, request)

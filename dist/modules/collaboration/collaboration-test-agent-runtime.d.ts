@@ -1,0 +1,524 @@
+import type { TestAgentReport } from "../../test-agent/types";
+export declare function buildCoordinatorReworkRoutingDecision(item: any, input?: {
+    previousLedger?: any;
+    userMessage?: string;
+    coordinatorOutput?: string;
+}): {
+    schema: string;
+    project: string;
+    strategy: string;
+    continuationStrategy: string;
+    continuation_strategy: string;
+    user_label: string;
+    reason: string;
+    context_overlap: any;
+    requires_stop: boolean;
+    requires_fresh_verifier: boolean;
+    signals: string[];
+};
+export declare function selectCoordinatorIndependentVerifier(group: any, originalTarget?: string): {
+    schema: string;
+    available: boolean;
+    originalTarget: string;
+    targetName: any;
+    reason: string;
+    nativeTestAgent: {
+        available: boolean;
+        project: string;
+        workDir: string;
+    } | {
+        available: boolean;
+        project?: undefined;
+        workDir?: undefined;
+    };
+    candidates: any[];
+};
+export declare function hasConfiguredTestAgentMultiSessionBrowserCheck(...lists: any[][]): boolean;
+export declare function buildCoordinatorTestAgentHandoff(item: any, input: {
+    group: any;
+    sourceTask?: any;
+    taskId?: string;
+    previousLedger?: any;
+    reworkRoute?: any;
+    userMessage?: string;
+    coordinatorOutput?: string;
+    forcePlaywrightProvider?: boolean;
+    providerGapReroute?: boolean;
+}): {
+    schema: string;
+    id: string;
+    taskId: any;
+    groupId: any;
+    issuedBy: string;
+    originalUserGoal: any;
+    acceptanceCriteria: string[];
+    requirementBinding: any;
+    planBinding: {
+        planId: any;
+        revision: any;
+        checksum: any;
+        contentStored: boolean;
+    };
+    acceptanceMatrix: any;
+    completedTasks: string[];
+    completedByProjectAgents: string[];
+    requiredChecks: string[];
+    projects: any[];
+    options: any;
+    metadata: {
+        providerGapReroute?: boolean;
+        providerGapRerouteReason?: string;
+        handoffWarnings?: string[];
+        handoffSource: string;
+        route: any;
+        reviewSubject: string;
+        verifier: string;
+        previousLedger: {
+            schema: string;
+            project: string;
+            evidence: import("../../test-agent/evidence-projection").TestAgentEvidenceProjectionV2;
+            summary: string;
+            actionCount: any;
+            actionChecksum: string;
+            filesChanged: any[];
+            verification: any[];
+            blockerCount: any;
+            blockerChecksum: string;
+            sourceRefs: any[];
+            contentStored: boolean;
+        };
+        verifierContext: {
+            schema: string;
+            mode: string;
+            contentStored: boolean;
+            fields: string[];
+        };
+        requirementBinding: any;
+        planBinding: {
+            planId: any;
+            revision: any;
+            checksum: any;
+            contentStored: boolean;
+        };
+        acceptanceMatrix: any;
+        reviewPolicy: {
+            browserEnabled: boolean;
+            requireAdversarialProbe: boolean;
+            requiredChecks: string[];
+            schema: "ccm-test-agent-review-policy-v1";
+            tier: import("./test-agent-review-policy").TestAgentReviewTier;
+            reason: string;
+            httpEnabled: boolean;
+            collectBrowserArtifacts: boolean;
+            autoDiscoverVerificationCommands: boolean;
+        };
+        hardeningPolicy: any;
+        verificationHardening: {
+            version: number;
+            policy: any;
+        };
+        coordinatorOutputReference: {
+            checksum: string;
+            charCount: number;
+            contentStored: boolean;
+        };
+        projectRuntimeSource: string;
+        surfaceAudit: import("../../test-agent/surface-audit").TestAgentSurfaceAuditReceipt;
+        runtimeFingerprint: import("../../test-agent/runtime-fingerprint").TestAgentRuntimeFingerprint;
+        reviewInstructions: string[];
+    };
+    target: string;
+    review_subject: string;
+    warnings: string[];
+    display_policy: {
+        user_text_first: boolean;
+        technical_default_collapsed: boolean;
+        hide_internal_protocols: boolean;
+    };
+};
+export declare function collectTestAgentBrowserEvidenceSummaryLines(report: TestAgentReport, verdict?: any): string[];
+export declare function buildNativeTestAgentReceipt(targetName: string, report: TestAgentReport, handoff?: any, workOrder?: any, invocationResult?: any): {
+    ccm_receipt: boolean;
+    agent: string;
+    status: any;
+    summary: string;
+    actions: string[];
+    filesChanged: any[];
+    verification: string[];
+    blockers: string[];
+    needs: string[];
+    independentReview: any[];
+    reviewer: string;
+    role: string;
+    testAgentReport: {
+        schema: "ccm-test-agent-report-v1";
+        id: string;
+        workOrderId: string;
+        status: import("../../test-agent").TestAgentStatus;
+        recommendation: import("../../test-agent").TestAgentRecommendation;
+        artifactDir: string;
+        artifactFiles: any;
+        verdict: {
+            schema: "ccm-test-agent-verdict-v1";
+            reportId: string;
+            workOrderId: string;
+            status: import("../../test-agent").TestAgentStatus;
+            recommendation: import("../../test-agent").TestAgentRecommendation;
+            canAccept: boolean;
+            needsRework: boolean;
+            needsHuman: boolean;
+            needsRecheck: boolean;
+            needsEnvironment: boolean;
+            reviewRoute: any;
+            summary: string;
+            failedRequiredChecks: import("../../test-agent").RequiredCheckCoverageItem[];
+            unknownRequiredChecks: import("../../test-agent").RequiredCheckCoverageItem[];
+            failedAcceptanceCriteria: import("../../test-agent").AcceptanceCoverageItem[];
+            unknownAcceptanceCriteria: import("../../test-agent").AcceptanceCoverageItem[];
+            requiredCheckSummary: import("../../test-agent").TestAgentRequiredCheckSummary;
+            acceptanceSummary: import("../../test-agent").TestAgentAcceptanceSummary;
+            blockedReasons: string[];
+            risks: string[];
+            nextActions: string[];
+            evidenceSummary: {
+                commands: Record<string, number>;
+                devServers: Record<string, number>;
+                httpChecks: Record<string, number>;
+                httpConcurrencyChecks?: number;
+                httpConcurrentRequests?: number;
+                httpConcurrentFailed?: number;
+                httpConcurrentBlocked?: number;
+                browserChecks: Record<string, number>;
+                browserToolCalls: Record<string, number>;
+                browserToolLinkedResults?: number;
+                browserToolUnlinkedResults?: number;
+                browserToolLinkedCalls?: number;
+                browserToolOrphanCalls?: number;
+                browserToolUnscopedCalls?: number;
+                browserToolInvalidLinks?: number;
+                browserToolTimedOutCalls?: number;
+                browserToolAbortRequestedCalls?: number;
+                browserNetworkErrors?: number;
+                browserActions?: number;
+                browserFailedActions?: number;
+                browserAssertions?: number;
+                browserFailedAssertions?: number;
+                browserAcceptanceFlows?: number;
+                browserFailedAcceptanceFlows?: number;
+                browserMultiSessionScenarios?: number;
+                browserMultiSessionSessions?: number;
+                browserMultiSessionParallelGroups?: number;
+                browserMultiSessionComparisons?: number;
+                browserFailedSessionComparisons?: number;
+                browserFailedMultiSessionScenarios?: number;
+                browserStabilityGroups?: number;
+                browserFlakyStabilityGroups?: number;
+                browserStabilityRuns?: number;
+                browserFailedStabilityRuns?: number;
+                browserPlannedChecks?: number;
+                browserExpectedRuns?: number;
+                browserCoveredRuns?: number;
+                browserMissingRuns?: number;
+                browserDuplicateResults?: number;
+                browserInvalidResults?: number;
+                browserTemporalInvalidItems?: number;
+                browserTemporalPlanMismatches?: number;
+                browserTemporalWindowViolations?: number;
+                browserOwnedResources?: number;
+                browserReleasedResources?: number;
+                browserOpenResources?: number;
+                browserCleanupFailures?: number;
+                browserRecoveryAttempts?: number;
+                browserRecoveredOperations?: number;
+                browserFailedRecoveries?: number;
+                browserUnsafeRetriesPrevented?: number;
+                browserActionEffectChecks?: number;
+                browserActionEffects?: number;
+                browserFailedActionEffects?: number;
+                browserCrossSessionActionEffects?: number;
+                adversarialProbes?: number;
+                adversarialPassed?: number;
+                adversarialFailed?: number;
+                adversarialBlocked?: number;
+                adversarialRelevant?: number;
+                adversarialUnlinked?: number;
+                adversarialPassedRelevant?: number;
+                acceptanceMatchedEvidence?: number;
+                acceptanceFallbackEvidence?: number;
+                acceptanceMissingEvidence?: number;
+                browserProviderGaps?: number;
+                artifacts: number;
+            };
+            browserNetworkSummary: import("../../test-agent").BrowserNetworkSummaryItem[];
+            browserInteractionSummary: import("../../test-agent").BrowserInteractionSummaryItem[];
+            browserFlowSummary: import("../../test-agent").BrowserFlowSummary;
+            browserMultiSessionSummary: import("../../test-agent").BrowserMultiSessionSummary;
+            browserAuthenticationSummary: any;
+            browserActionEffectSummary: import("../../test-agent").BrowserActionEffectSummary;
+            browserRecoverySummary: import("../../test-agent").BrowserRecoverySummary;
+            adversarialEvidenceSummary: import("../../test-agent").AdversarialEvidenceSummary;
+            browserProviderSummary: import("../../test-agent").BrowserProviderSummary;
+            browserProviderGaps: import("../../test-agent").BrowserProviderGapItem[];
+            failureSummary: any;
+            artifacts: {
+                artifactDir: string;
+                reportJsonPath?: string;
+                reportMarkdownPath?: string;
+                verdictJsonPath?: string;
+                manifestPath?: string;
+            };
+        };
+        failureSummary: any;
+        requiredChecks: string[];
+        requiredCheckSummary: import("../../test-agent").TestAgentRequiredCheckSummary;
+        acceptanceSummary: import("../../test-agent").TestAgentAcceptanceSummary;
+        browserFlowSummary: any;
+        browserMultiSessionSummary: any;
+        browserAuthenticationSummary: any;
+        browserActionEffectSummary: any;
+        browserRecoverySummary: any;
+        adversarialEvidenceSummary: any;
+        acceptanceCoverage: import("../../test-agent").AcceptanceCoverageItem[];
+        requiredCheckCoverage: import("../../test-agent").RequiredCheckCoverageItem[];
+    };
+};
+export declare function buildNativeTestAgentReviewSummary(targetName: string, report: TestAgentReport, receipt: any): {
+    schema: string;
+    title: string;
+    status: any;
+    status_label: string;
+    headline: string;
+    rows: string[];
+    next_action: string;
+    display_policy: {
+        user_text_first: boolean;
+        technical_default_collapsed: boolean;
+        hide_internal_protocols: boolean;
+        show_for_ordinary_conversation: boolean;
+    };
+    review_route: any;
+    browser_provider_gap_count: any;
+    test_agent_environment_prep: any;
+    testAgentEnvironmentPrep: any;
+    technical: {
+        failure_step_screenshots: any;
+        failure_step_screenshot_rows: any;
+        test_agent_environment_prep: any;
+    };
+};
+export declare function formatNativeTestAgentOutput(targetName: string, report: TestAgentReport, receipt: any, handoff?: any): string;
+export declare function summarizeNativeTestAgentExecutionPlan(plan: any): string;
+export declare function buildNativeTestAgentPlanBlockedReceipt(targetName: string, plan: any, dispatch?: any, handoff?: any): {
+    ccm_receipt: boolean;
+    agent: string;
+    status: string;
+    summary: string;
+    actions: string[];
+    filesChanged: any[];
+    verification: any[];
+    blockers: string[];
+    needs: string[];
+    independentReview: {
+        reviewer: string;
+        verdict: string;
+        summary: string;
+        evidence: string[];
+        reviewSubject: string;
+        workOrderId: any;
+        artifactDir: any;
+    }[];
+    reviewer: string;
+    role: string;
+};
+export declare function formatNativeTestAgentPlanBlockedOutput(targetName: string, plan: any, receipt: any, handoff?: any): string;
+export declare function buildNativeTestAgentRuntimeToolContext(targetName: string, workDir: string): {
+    audit: {
+        runtime: string;
+        mode: string;
+        isolation: string;
+        snapshotId: string;
+        snapshotPath: string;
+        mcpConfigPath: string;
+        skillRoot: string;
+        requested: {
+            mcp: string[];
+            skill: string[];
+        };
+        synced: {
+            mcp: string[];
+            skill: string[];
+        };
+        missing: {
+            mcp: string[];
+            skill: string[];
+        };
+        mcp_statuses: {
+            name: string;
+            server: string;
+            state: string;
+            readOnly: boolean;
+            mutability: string;
+            schemaChecksum: string;
+            signature: string;
+        }[];
+        skill_statuses: {
+            name: string;
+            state: string;
+            readOnly: boolean;
+            source: "builtin" | "registry";
+            contentHash: string;
+            summaryChecksum: string;
+            truncated: boolean;
+            signature: string;
+        }[];
+        permission_rules: any[];
+        invoked_skills: any[];
+        authorization_readiness: {
+            dispatchReady: boolean;
+            mode: string;
+        };
+        dispatch_gate: {
+            dispatchReady: boolean;
+            reason: string;
+            readonlyCapabilityManifestChecksum: string;
+        };
+        catalogRevision: string;
+        warnings: string[];
+        errors: any[];
+        reusedSnapshot: boolean;
+        timestamp: string;
+        workDir: string;
+        readonly_capability_manifest: import("../../test-agent/readonly-capabilities").TestAgentReadonlyCapabilityManifest;
+    };
+    dispatchGate: {
+        dispatchReady: boolean;
+        reason: string;
+        readonlyCapabilityManifestChecksum: string;
+    };
+    dispatchBlocked: boolean;
+    prompt: string;
+    readonlyCapabilityManifest: import("../../test-agent/readonly-capabilities").TestAgentReadonlyCapabilityManifest;
+    readonlyCapabilityPrompt: string;
+    workEvent: {
+        id: string;
+        time: string;
+        agent: string;
+        kind: string;
+        text: string;
+        runtimeToolSync: {
+            runtime: string;
+            mode: string;
+            isolation: string;
+            snapshotId: string;
+            snapshotPath: string;
+            mcpConfigPath: string;
+            skillRoot: string;
+            requested: {
+                mcp: string[];
+                skill: string[];
+            };
+            synced: {
+                mcp: string[];
+                skill: string[];
+            };
+            missing: {
+                mcp: string[];
+                skill: string[];
+            };
+            mcp_statuses: {
+                name: string;
+                server: string;
+                state: string;
+                readOnly: boolean;
+                mutability: string;
+                schemaChecksum: string;
+                signature: string;
+            }[];
+            skill_statuses: {
+                name: string;
+                state: string;
+                readOnly: boolean;
+                source: "builtin" | "registry";
+                contentHash: string;
+                summaryChecksum: string;
+                truncated: boolean;
+                signature: string;
+            }[];
+            permission_rules: any[];
+            invoked_skills: any[];
+            authorization_readiness: {
+                dispatchReady: boolean;
+                mode: string;
+            };
+            dispatch_gate: {
+                dispatchReady: boolean;
+                reason: string;
+                readonlyCapabilityManifestChecksum: string;
+            };
+            catalogRevision: string;
+            warnings: string[];
+            errors: any[];
+            reusedSnapshot: boolean;
+            timestamp: string;
+            workDir: string;
+            readonly_capability_manifest: import("../../test-agent/readonly-capabilities").TestAgentReadonlyCapabilityManifest;
+        };
+    };
+};
+export declare function buildCoordinatorReworkContinuationFallback(input: {
+    reworkRoute?: any;
+    mention?: any;
+    sourceTask?: any;
+    targetName: string;
+    stopResult?: any;
+}): {
+    schema: string;
+    kind: string;
+    kind_label: string;
+    route_label: any;
+    target: string;
+    latest_user_change: string;
+    current_goal: string;
+    previous_goal: string;
+    replan_required: boolean;
+    interrupt_current_run: boolean;
+    interruption_status: string;
+    instructions: string[];
+    preserved_context: string[];
+    avoid: string[];
+    technical: {
+        route_schema: any;
+        route_strategy: any;
+        continuation_strategy: any;
+        review_subject: string;
+        verifier_selection: any;
+        stop_matched: number;
+        stop_killed: number;
+    };
+};
+export declare function buildCoordinatorReworkFollowUp(item: any, input: {
+    group: any;
+    memorySnapshot: any;
+    userMessage: string;
+    coordinatorOutput: string;
+    round: number;
+    maxRounds: number;
+    taskId?: string;
+    sourceTask?: any;
+}): any;
+export declare function buildCoordinatorReworkTask(item: any, input: {
+    userMessage: string;
+    coordinatorOutput: string;
+    round: number;
+    maxRounds: number;
+    previousLedger?: any;
+    reworkRoute?: any;
+}): string;
+export declare function scheduleTestAgentRecheckAfterFollowUps(followUps?: any[], outputs?: string[]): any[];
+export declare function buildGlobalGroupTestAgentOwnership(): {
+    schema: string;
+    global_agent: string;
+    group_main_agent: string;
+    project_agent: string;
+    test_agent: string;
+};

@@ -36,6 +36,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.handleSlashCommandConversationApi = handleSlashCommandConversationApi;
 exports.runSlashCommandConversationSelfTest = runSlashCommandConversationSelfTest;
 const crypto = __importStar(require("crypto"));
+const conversation_session_identity_1 = require("../../system/conversation-session-identity");
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const utils_1 = require("../../core/utils");
@@ -393,7 +394,7 @@ function branchConversation(input) {
     if (boundary.id.scope === "global") {
         created = (0, atomic_json_file_1.withFileLock)(GLOBAL_HISTORY_FILE, () => {
             const store = loadGlobalStore();
-            const sessionId = `session_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`;
+            const sessionId = (0, conversation_session_identity_1.createConversationSessionId)('global');
             const session = { id: sessionId, name: title, titleOrigin: "manual", source: "web", createdAt: now(), updatedAt: now(), messages };
             store.sessions = [session, ...(store.sessions || [])];
             store.current_session_id = sessionId;
@@ -772,13 +773,25 @@ async function summarizeExecute(input) {
     const transcript = summarySourceText(selected);
     if (!transcript.trim())
         throw new Error("所选范围没有可总结的用户对话");
+    const summaryCache = {
+        scope: "workspace", scopeId: "workspace", sessionId: "conversation-compactor",
+        source: "conversation_compactor", requestClass: "auxiliary",
+        requestAttribution: {
+            purpose: "conversation_compaction_summary", requestClass: "auxiliary",
+            scope: "workspace", scopeId: "workspace", exactSessionId: "conversation-compactor",
+        },
+    };
     const summary = assertSafeConversationSummary(String(await (0, global_agent_model_1.callGlobalModelWithRetry)((0, group_orchestrator_config_1.loadOrchestratorConfig)(), [{
             role: "system",
             content: "You are the CCM conversation compactor. Produce a structured factual summary in the user's conversation language. Preserve user corrections, permission boundaries, decisions, unfinished items, task identity, file references, verification results, and explicit risks. Do not invent facts or include hidden reasoning, source code, secrets, raw commands, or raw output. Return summary text only.",
         }, {
             role: "user",
             content: `Summarize the following conversation segment for a later Agent to continue:\n\n${transcript}`,
-        }], { retryProfile: "interactive_first_turn" })).trim().slice(0, 24_000));
+        }], {
+        retryProfile: "interactive_first_turn",
+        providerContextCache: summaryCache,
+        requestAttribution: summaryCache.requestAttribution,
+    })).trim().slice(0, 24_000));
     if (summary.length < 20)
         throw new Error("模型没有生成可用的会话摘要，未修改当前上下文");
     const snapshotId = `summary_${Date.now()}_${crypto.randomBytes(5).toString("hex")}`;

@@ -34,6 +34,7 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.conversationTurnControl = exports.ConversationTurnControlStore = void 0;
+exports.registerGlobalConversationPauseDispatcher = registerGlobalConversationPauseDispatcher;
 exports.admitTaskDispatchTurn = admitTaskDispatchTurn;
 exports.reconcileTaskDispatchTurns = reconcileTaskDispatchTurns;
 exports.startWebConversationTurnRecoveryForServer = startWebConversationTurnRecoveryForServer;
@@ -41,6 +42,10 @@ exports.stopWebConversationTurnRecoveryForServer = stopWebConversationTurnRecove
 exports.handleConversationTurnControlApi = handleConversationTurnControlApi;
 exports.runConversationTurnControlSelfTest = runConversationTurnControlSelfTest;
 const crypto = __importStar(require("crypto"));
+const conversation_turn_observation_api_1 = require("./conversation-turn-observation-api");
+const project_queued_turn_request_1 = require("./project-queued-turn-request");
+const project_conversation_intake_1 = require("./project-conversation-intake");
+const conversation_attempt_1 = require("./conversation-attempt");
 const fs = __importStar(require("fs"));
 const os = __importStar(require("os"));
 const path = __importStar(require("path"));
@@ -53,10 +58,17 @@ const access_policy_1 = require("../modules/system/access-policy");
 const internal_api_auth_1 = require("../modules/system/internal-api-auth");
 const project_session_agent_binding_1 = require("../modules/projects/project-session-agent-binding");
 const storage_1 = require("../modules/collaboration/storage");
+const api_access_control_1 = require("../modules/system/api-access-control");
+const conversation_event_journal_1 = require("./conversation-event-journal");
+const task_conversation_binding_1 = require("./task-conversation-binding");
 const STORE_FILE = process.env.CCM_CONVERSATION_TURN_FILE || path.join(utils_1.CCM_DIR, "conversation-turn-control.json");
 const MAX_RECORDS = 800;
 const TERMINAL_RETENTION_MS = 14 * 24 * 60 * 60 * 1000;
 const ACTIVE_STATUSES = new Set(["queued", "sending", "pausing", "paused", "resuming", "needs_route"]);
+let globalPauseDispatcher = null;
+function registerGlobalConversationPauseDispatcher(dispatcher) {
+    globalPauseDispatcher = dispatcher;
+}
 const TERMINAL_STATUSES = new Set(["applied", "completed", "failed", "cancelled"]);
 function nowIso() {
     return new Date().toISOString();
@@ -83,6 +95,12 @@ function normalizeSource(value) {
 function queueConflict(message = "队列状态已经变化，请刷新后重试") {
     const error = new Error(message);
     error.code = "QUEUE_REVISION_CONFLICT";
+    error.statusCode = 409;
+    return error;
+}
+function steerConflict(message = "当前没有可追加的活动执行，请改为排队等待") {
+    const error = new Error(message);
+    error.code = "STEER_TARGET_UNAVAILABLE";
     error.statusCode = 409;
     return error;
 }
@@ -130,14 +148,32 @@ function requireExpectedRevision(turn, expected) {
         throw queueConflict();
 }
 function emitTurnChanged(turn, operation) {
+    const turnId = turn.id;
+    const attemptId = (0, conversation_attempt_1.conversationAttemptId)(turn);
+    const status = turn.status;
+    const messageId = String(turn.metadata?.original_message_id || turn.request_id || "");
+    queueMicrotask(() => {
+        try {
+            (0, conversation_event_journal_1.appendConversationEvent)(turnId, attemptId, {
+                type: ["completed", "failed", "cancelled"].includes(status) ? "execution_terminal" : "turn_status",
+                status, operation, message_id: messageId,
+            });
+        }
+        catch (error) {
+            console.warn(`[会话事件] ${turnId}: ${error?.message || error}`);
+        }
+    });
     (0, runtime_events_1.publishRuntimeEvent)("system", "conversation.turn.changed", {
         id: turn.id,
         taskId: turn.task_id,
         sessionId: turn.conversation_id,
         source: turn.source,
         status: turn.status,
+        message_id: String(turn.metadata?.original_message_id || turn.request_id || ''),
         operation,
         revision: turn.revision,
+        attempt_id: (0, conversation_attempt_1.conversationAttemptId)(turn),
+        scope: turn.scope,
     });
 }
 function normalizeRouting(input) {
@@ -213,6 +249,12 @@ function publicTurnProjection(turn, position = 0, viewerUserId = "", viewerRole 
         contentType: String(item?.contentType || item?.content_type || item?.mimeType || "application/octet-stream").slice(0, 120),
         url: item?.id ? `/api/conversation-turns/attachment?turn_id=${encodeURIComponent(turn.id)}&attachment_id=${encodeURIComponent(String(item.id))}` : "",
     })).filter((item) => item.id || item.name);
+    const status = String(turn.status || "").toLowerCase();
+    const attemptId = (0, conversation_attempt_1.conversationAttemptId)(turn);
+    const failed = status === "failed";
+    const paused = ["paused", "interrupted"].includes(status);
+    const active = ["queued", "sending", "pausing", "resuming"].includes(status);
+    const availableActions = (0, conversation_attempt_1.conversationTurnActions)(turn, viewerRole === "admin" || !turn.owner_id || (!!viewerUserId && turn.owner_id === viewerUserId));
     return {
         id: turn.id,
         revision: turn.revision,
@@ -225,7 +267,13 @@ function publicTurnProjection(turn, position = 0, viewerUserId = "", viewerRole 
         occurrence_id: turn.occurrence_id,
         mode: turn.mode,
         status: turn.status,
+        conversation_state: failed ? "failed" : paused ? "paused" : active ? "running" : ["completed", "cancelled"].includes(status) ? "completed" : "idle",
+        execution_state: status,
+        attempt_id: attemptId,
+        ...(turn.active_run_id ? { active_run_id: String(turn.active_run_id) } : {}),
+        available_actions: availableActions,
         messagePreview,
+        message_id: String(turn.metadata?.original_message_id || turn.request_id || ""),
         attachmentRefs,
         position,
         retry_count: turn.retry_count,
@@ -297,7 +345,7 @@ function authorizeTurnMutation(req, res, payload) {
     let scope = payload?.scope;
     let conversationId = payload?.conversation_id || payload?.conversationId;
     let turn;
-    if ((!scope || !conversationId) && payload?.id) {
+    if (payload?.id) {
         turn = exports.conversationTurnControl.getInternal(String(payload.id));
         scope = turn?.scope;
         conversationId = turn?.conversation_id;
@@ -425,27 +473,26 @@ class ConversationTurnControlStore {
         const turns = this.mutate((store) => {
             const at = nowIso();
             store.turns = store.turns.map((turn) => {
-                if (turn.status !== "sending" || turn.kind === "task_dispatch")
+                if (!["sending", "pausing", "resuming"].includes(turn.status) || turn.kind === "task_dispatch")
                     return turn;
                 recovered += 1;
                 return {
                     ...turn,
-                    status: "queued",
+                    status: "interrupted",
                     revision: turn.revision + 1,
-                    recovery_count: turn.recovery_count + 1,
-                    error: "服务重启后已恢复到待发送队列",
+                    error: "服务重启中断了本次执行，请核对执行结果后重试",
                     updated_at: at,
                     claimed_at: "",
                     lease_id: "",
                     lease_expires_at: "",
-                    checkpoint: "recovered",
+                    checkpoint: "recovery_required",
                 };
             });
             return store.turns;
         });
         return { recovered, turns };
     }
-    enqueue(input) {
+    enqueue(input, beforeAdmit, options = {}) {
         const scope = normalizeScope(input?.scope);
         const conversationId = String(input?.conversation_id || input?.conversationId || "").trim();
         const message = String(input?.message || "").trim();
@@ -455,13 +502,29 @@ class ConversationTurnControlStore {
         if (!message && attachments.length === 0)
             throw new Error("消息和附件不能同时为空");
         const mode = normalizeMode(input?.mode);
+        const newTopic = input?.metadata?.new_topic === true;
+        const pendingTask = !newTopic && mode === "queue" && !input?.metadata?.continuation_task_id
+            ? (0, task_conversation_binding_1.pendingTaskForConversation)(scope, conversationId) : null;
         const requestId = String(input?.request_id || input?.requestId || crypto.randomUUID()).trim();
-        return this.mutate((store) => {
+        const result = this.mutate((store) => {
             const duplicate = store.turns.find((turn) => turn.scope === scope
                 && turn.conversation_id === conversationId
                 && turn.request_id === requestId);
             if (duplicate)
                 return { turn: duplicate, duplicate: true };
+            if (mode === "steer") {
+                const active = store.turns
+                    .filter((turn) => turn.scope === scope && turn.conversation_id === conversationId
+                    && ["sending", "pausing", "resuming"].includes(turn.status)
+                    && turn.kind === "user_message")
+                    .sort((left, right) => Date.parse(right.updated_at || right.created_at) - Date.parse(left.updated_at || left.created_at))[0];
+                const activeRunId = String(input?.active_run_id || input?.activeRunId || "");
+                const attemptId = String(input?.attempt_id || input?.attemptId || "");
+                if (!active || !activeRunId || active.active_run_id !== activeRunId)
+                    throw steerConflict();
+                if (!attemptId || attemptId !== (0, conversation_attempt_1.conversationAttemptId)(active))
+                    throw steerConflict("当前执行身份已经变化，请刷新后重试");
+            }
             const at = nowIso();
             const turn = {
                 id: `cturn_${Date.now().toString(36)}_${crypto.randomBytes(5).toString("hex")}`,
@@ -472,7 +535,7 @@ class ConversationTurnControlStore {
                 mode,
                 kind: normalizeKind(input?.kind),
                 source: normalizeSource(input?.source),
-                task_id: String(input?.task_id || input?.taskId || input?.metadata?.task_id || ""),
+                task_id: String(input?.task_id || input?.taskId || input?.metadata?.task_id || pendingTask?.id || ""),
                 mission_id: String(input?.mission_id || input?.missionId || input?.metadata?.mission_id || ""),
                 occurrence_id: String(input?.occurrence_id || input?.occurrenceId || input?.metadata?.occurrence_id || ""),
                 owner_id: String(input?.owner_id || input?.ownerId || ""),
@@ -480,7 +543,15 @@ class ConversationTurnControlStore {
                 attachments,
                 status: "queued",
                 active_run_id: String(input?.active_run_id || input?.activeRunId || ""),
-                metadata: input?.metadata && typeof input.metadata === "object" ? input.metadata : {},
+                metadata: {
+                    ...(input?.metadata && typeof input.metadata === "object" ? input.metadata : {}),
+                    ...(pendingTask ? { discussion_task_id: pendingTask.id } : {}),
+                    ...(newTopic ? { resolved_route: "start_new_task", discussion_task_id: "" } : {}),
+                    ...(mode === "steer" ? {
+                        requested_mode: "steer",
+                        steer_attempt_id: String(input?.attempt_id || input?.attemptId || ""),
+                    } : {}),
+                },
                 retry_count: 0,
                 recovery_count: 0,
                 error: "",
@@ -496,16 +567,38 @@ class ConversationTurnControlStore {
                 semantic_decision_receipt: input?.semantic_decision_receipt || input?.semanticDecisionReceipt || null,
                 routing: null,
             };
+            // Project history persistence is performed after releasing this lock.
+            // Mark it pending so the executor cannot claim a turn whose user message
+            // has not reached the authoritative session history yet.
+            if (beforeAdmit && options.deferBeforeAdmit && scope === "project" && turn.source === "web" && turn.kind === "user_message") {
+                turn.metadata.intake_persistence = "pending";
+            }
+            else if (beforeAdmit) {
+                beforeAdmit(turn);
+            }
             store.turns.push(turn);
             emitTurnChanged(turn, "enqueue");
             return { turn, duplicate: false };
         });
+        if (!result.duplicate && beforeAdmit && options.deferBeforeAdmit && result.turn.metadata?.intake_persistence === "pending") {
+            const queuedTurn = result.turn;
+            queueMicrotask(() => {
+                try {
+                    beforeAdmit(queuedTurn);
+                    this.markIntakePersistence(queuedTurn.id, queuedTurn.revision, "ready");
+                }
+                catch (error) {
+                    this.markIntakePersistence(queuedTurn.id, queuedTurn.revision, "failed", error?.message || String(error));
+                }
+            });
+        }
+        return result;
     }
-    edit(input) {
+    edit(input, beforeCommit, options = {}) {
         const id = String(input?.id || "").trim();
         if (!id)
             throw new Error("缺少队列消息 ID");
-        return this.mutate((store) => {
+        const result = this.mutate((store) => {
             const turn = store.turns.find((item) => item.id === id);
             if (!turn)
                 throw new Error("队列消息不存在");
@@ -530,12 +623,31 @@ class ConversationTurnControlStore {
             turn.revision += 1;
             turn.routing = null;
             turn.metadata = metadata;
+            if (beforeCommit && options.deferBeforeCommit && turn.scope === "project" && turn.source === "web") {
+                turn.metadata.intake_persistence = "pending";
+            }
+            else if (beforeCommit) {
+                beforeCommit(turn);
+            }
             turn.error = "";
             turn.updated_at = nowIso();
             turn.checkpoint = "edited";
             emitTurnChanged(turn, "edit");
             return turn;
         });
+        if (beforeCommit && options.deferBeforeCommit && result?.scope === "project" && result.metadata?.intake_persistence === "pending") {
+            const editedTurn = result;
+            queueMicrotask(() => {
+                try {
+                    beforeCommit(editedTurn);
+                    this.markIntakePersistence(editedTurn.id, editedTurn.revision, "ready");
+                }
+                catch (error) {
+                    this.markIntakePersistence(editedTurn.id, editedTurn.revision, "failed", error?.message || String(error));
+                }
+            });
+        }
+        return result;
     }
     list(input = {}) {
         const scope = input?.scope ? normalizeScope(input.scope) : null;
@@ -579,6 +691,24 @@ class ConversationTurnControlStore {
             return null;
         return this.read().turns.find((item) => item.id === turnId) || null;
     }
+    /** Conditionally finalize asynchronous project-history intake. */
+    markIntakePersistence(id, expectedRevision, state, error = "") {
+        return this.mutate((store) => {
+            const turn = store.turns.find(item => item.id === String(id || ""));
+            if (!turn || turn.revision !== Number(expectedRevision || 0))
+                return null;
+            if (turn.metadata?.intake_persistence !== "pending")
+                return turn;
+            turn.metadata = { ...(turn.metadata || {}), intake_persistence: state };
+            turn.error = state === "failed" ? String(error || "项目消息写入会话历史失败") : "";
+            turn.updated_at = nowIso();
+            turn.checkpoint = state === "ready" ? "intake_ready" : "intake_failed";
+            if (state === "failed")
+                turn.status = "failed";
+            emitTurnChanged(turn, `intake_${state}`);
+            return turn;
+        });
+    }
     control(input) {
         const id = String(input?.id || "").trim();
         const action = String(input?.action || "").trim().toLowerCase();
@@ -588,23 +718,19 @@ class ConversationTurnControlStore {
             const turn = store.turns.find((item) => item.id === id);
             if (!turn || turn.kind !== "user_message")
                 throw new Error("普通会话回合不存在");
+            (0, conversation_attempt_1.requireConversationAttempt)(turn, input);
             requireExpectedRevision(turn, input?.revision ?? input?.expected_revision ?? input?.expectedRevision);
             const current = turn.status;
             if (action === "pause") {
                 if (!["sending", "resuming", "pausing"].includes(current))
                     throw queueConflict("当前普通会话不在可暂停状态");
-                turn.status = "paused";
-                turn.checkpoint = String(input?.checkpoint || `round_${Number(input?.round || 0)}_model_${Number(input?.modelCallIndex || input?.model_call_index || 0)}`);
+                turn.status = "pausing";
                 turn.metadata = {
                     ...(turn.metadata || {}),
                     conversation_control: {
-                        state: "paused",
-                        stage: String(input?.stage || "awaiting_next_round"),
-                        round: Math.max(0, Number(input?.round || 0)),
-                        modelCallIndex: Math.max(0, Number(input?.modelCallIndex || input?.model_call_index || 0)),
-                        toolCallCount: Math.max(0, Number(input?.toolCallCount || input?.tool_call_count || 0)),
-                        checkpointRevision: turn.revision + 1,
-                        resumable: true,
+                        state: "pausing",
+                        requested_at: nowIso(),
+                        resumable: false,
                         contentStored: false,
                     },
                 };
@@ -616,11 +742,36 @@ class ConversationTurnControlStore {
                 // claim again.  The metadata keeps the user-visible resuming state
                 // until the next claim, without creating a second user message.
                 turn.status = "queued";
+                turn.recovery_count += 1;
+                turn.lease_id = "";
+                turn.lease_expires_at = "";
                 turn.metadata = { ...(turn.metadata || {}), conversation_control: { ...(turn.metadata?.conversation_control || {}), state: "resuming", resumable: true, contentStored: false } };
             }
             turn.revision += 1;
             turn.updated_at = nowIso();
             emitTurnChanged(turn, action);
+            return turn;
+        });
+    }
+    pauseAtBoundary(id, attemptId, checkpoint) {
+        return this.mutate((store) => {
+            const turn = store.turns.find(item => item.id === id);
+            if (!turn)
+                throw (0, conversation_attempt_1.attemptConflict)();
+            (0, conversation_attempt_1.requireConversationAttempt)(turn, { attempt_id: attemptId }, true);
+            if (turn.status !== "pausing")
+                return turn;
+            turn.status = "paused";
+            turn.checkpoint = checkpoint;
+            turn.revision += 1;
+            turn.updated_at = nowIso();
+            turn.lease_id = "";
+            turn.lease_expires_at = "";
+            turn.metadata = { ...(turn.metadata || {}), conversation_control: {
+                    ...(turn.metadata?.conversation_control || {}), state: "paused", stage: checkpoint,
+                    checkpointRevision: turn.revision, resumable: true, contentStored: false,
+                } };
+            emitTurnChanged(turn, "pause_confirmed");
             return turn;
         });
     }
@@ -635,15 +786,15 @@ class ConversationTurnControlStore {
                 if (item.scope !== scope || item.conversation_id !== conversationId || item.status !== "sending")
                     continue;
                 if (item.lease_expires_at && Date.parse(item.lease_expires_at) <= atMs) {
-                    item.status = "queued";
+                    item.status = "interrupted";
                     item.revision += 1;
-                    item.recovery_count += 1;
-                    item.error = "执行租约过期，已恢复到原队列";
+                    item.error = "执行租约过期，需核对副作用后再继续";
                     item.claimed_at = "";
                     item.lease_id = "";
                     item.lease_expires_at = "";
-                    item.checkpoint = "lease_recovered";
+                    item.checkpoint = "recovery_required";
                     item.updated_at = nowIso();
+                    emitTurnChanged(item, "lease_expired");
                 }
             }
             const active = store.turns.find((item) => item.scope === scope
@@ -660,6 +811,12 @@ class ConversationTurnControlStore {
                 && (!requestedId || item.id === requestedId));
             if (!turn)
                 return null;
+            if (turn.metadata?.intake_persistence === "pending")
+                return null;
+            if (turn.metadata?.intake_persistence === "failed") {
+                throw queueConflict("消息尚未成功写入会话历史，请重试发送");
+            }
+            (0, conversation_attempt_1.requireConversationAttempt)(turn, input);
             requireExpectedRevision(turn, input?.revision ?? input?.expected_revision ?? input?.expectedRevision);
             const continuationTaskId = String(turn.metadata?.continuation_task_id || "").trim();
             if (continuationTaskId) {
@@ -731,7 +888,10 @@ class ConversationTurnControlStore {
             const turn = store.turns.find((item) => item.id === id);
             if (!turn)
                 throw new Error("队列消息不存在");
-            requireExpectedRevision(turn, input?.revision ?? input?.expected_revision ?? input?.expectedRevision);
+            if ((0, conversation_attempt_1.validateConversationSettlement)(turn, { ...input, status }))
+                return turn;
+            if (!input?.attempt_id)
+                requireExpectedRevision(turn, input?.revision ?? input?.expected_revision ?? input?.expectedRevision);
             if (turn.status === "cancelled" && status !== "cancelled")
                 throw new Error("已取消的消息不能再次完成");
             const at = nowIso();
@@ -754,11 +914,13 @@ class ConversationTurnControlStore {
             return turn;
         });
     }
-    defer(id, reason = "当前会话仍在执行，已保留到原队列", expectedRevision) {
+    defer(id, reason = "当前会话仍在执行，已保留到原队列", expectedRevision, attemptId = "") {
         return this.mutate((store) => {
             const turn = store.turns.find((item) => item.id === String(id || ""));
             if (!turn)
                 throw new Error("队列消息不存在");
+            if (attemptId)
+                (0, conversation_attempt_1.requireConversationAttempt)(turn, { attempt_id: attemptId }, true);
             requireExpectedRevision(turn, expectedRevision);
             if (turn.status !== "sending")
                 throw new Error("只有已领取的消息可以退回队列");
@@ -782,6 +944,7 @@ class ConversationTurnControlStore {
             const turn = store.turns.find((item) => item.id === id);
             if (!turn)
                 throw new Error("队列消息不存在");
+            (0, conversation_attempt_1.requireConversationAttempt)(turn, input);
             requireExpectedRevision(turn, input?.revision ?? input?.expected_revision ?? input?.expectedRevision);
             if (!["sending", "needs_route"].includes(turn.status))
                 throw queueConflict("这条消息当前不能进入路由确认");
@@ -865,6 +1028,89 @@ class ConversationTurnControlStore {
             return turn;
         });
     }
+    resolveIntent(input) {
+        const id = String(input?.id || "").trim();
+        const action = String(input?.action || "send").trim().toLowerCase();
+        const message = String(input?.message || "").trim();
+        const intentChoice = String(input?.intent_choice || input?.intentChoice || "").trim().toLowerCase();
+        if (!id)
+            throw new Error("缺少队列消息 ID");
+        if (!["resume", "steer", "send"].includes(action))
+            throw new Error("无效的恢复操作");
+        return this.mutate((store) => {
+            const turn = store.turns.find((item) => item.id === id);
+            if (!turn)
+                throw new Error("队列消息不存在");
+            (0, conversation_attempt_1.requireConversationAttempt)(turn, input);
+            requireExpectedRevision(turn, input?.revision ?? input?.expected_revision ?? input?.expectedRevision);
+            const attemptId = String(turn.attempt_id || `${turn.id}:${turn.retry_count || 0}`);
+            const binding = crypto.createHash("sha256").update(`${turn.id}|${turn.revision}|${attemptId}|${turn.scope}|${turn.conversation_id}`).digest("hex");
+            const active = ["sending", "pausing", "resuming"].includes(turn.status);
+            let decision = "new_turn";
+            if (action === "steer")
+                decision = "steer_original";
+            else if (action === "resume" && !message)
+                decision = "resume_original";
+            else if (action === "resume" && message) {
+                if (["supplement", "continue_original", "resume_original"].includes(intentChoice))
+                    decision = "resume_with_instruction";
+                else if (["new_task", "start_new_task", "answer_only"].includes(intentChoice))
+                    decision = "new_turn";
+                else {
+                    // A typed Continue is ambiguous until the user explicitly chooses
+                    // whether the text supplements the interrupted task or starts a new
+                    // turn. Reuse the existing route card and do not send anything yet.
+                    decision = "needs_route";
+                    if (turn.status !== "needs_route") {
+                        turn.status = "needs_route";
+                        turn.revision += 1;
+                        turn.routing = turn.routing || {
+                            decision: "needs_user",
+                            routeKind: "needs_user",
+                            candidateTaskId: String(turn.metadata?.continuation_task_id || turn.task_id || ""),
+                            candidateTaskIds: [],
+                            candidateSummaries: [],
+                            activeTaskId: String(turn.task_id || ""),
+                            exactSessionId: String(turn.conversation_id || "").split(":").slice(1).join(":"),
+                            scope: turn.scope,
+                            confidence: 0,
+                            confidenceBand: "low",
+                            continuationKind: "supplement",
+                            reason: "请确认这段输入是补充原任务，还是新问题",
+                            bindingChecksum: routeBindingChecksum(turn, String(turn.metadata?.continuation_task_id || turn.task_id || "")),
+                            source: "recovery_preflight",
+                            contentStored: false,
+                        };
+                    }
+                }
+            }
+            else if (action === "send" && active)
+                decision = "queue";
+            const parentRunId = decision === "steer_original" || decision === "resume_original"
+                ? String(turn.active_run_id || turn.run_id || turn.metadata?.parent_run_id || "") : "";
+            turn.metadata = {
+                ...(turn.metadata || {}),
+                intent_decision: decision,
+                intent_source: "backend_rule",
+                intent_message: message,
+                ...(intentChoice ? { intent_choice: intentChoice } : {}),
+                intent_binding_checksum: binding,
+            };
+            turn.updated_at = nowIso();
+            emitTurnChanged(turn, "resolve_intent");
+            return {
+                decision,
+                conversation_turn_id: decision === "new_turn" ? "" : turn.id,
+                ...(decision === "resume_original" || decision === "resume_with_instruction" || decision === "steer_original" ? { attempt_id: attemptId } : {}),
+                ...(parentRunId ? { parent_run_id: parentRunId } : {}),
+                source: "backend_rule",
+                binding_checksum: binding,
+                message,
+                ...(decision === "needs_route" ? { candidate_summaries: turn.routing?.candidateSummaries || [] } : {}),
+                ...(intentChoice ? { intent_choice: intentChoice } : {}),
+            };
+        });
+    }
     cancel(id, reason = "用户取消了这条排队消息", expectedRevision) {
         return this.settle({ id, status: "cancelled", error: reason, revision: expectedRevision });
     }
@@ -936,14 +1182,19 @@ class ConversationTurnControlStore {
             return turn;
         });
     }
-    retry(id, expectedRevision) {
+    retry(id, expectedRevision, attemptId) {
         return this.mutate((store) => {
             const turn = store.turns.find((item) => item.id === id);
             if (!turn)
                 throw new Error("队列消息不存在");
+            (0, conversation_attempt_1.requireConversationAttempt)(turn, { attempt_id: attemptId });
             requireExpectedRevision(turn, expectedRevision);
-            if (!TERMINAL_STATUSES.has(turn.status))
+            // A retry is a recovery action for the latest failed attempt only.
+            // Completed/cancelled projections must remain immutable, and a failure
+            // explicitly dismissed by the user must not silently reappear.
+            if (turn.status !== "failed" || turn.metadata?.dismissed_by_user === true) {
                 throw new Error("这条消息当前不需要重试");
+            }
             turn.status = "queued";
             turn.revision += 1;
             turn.retry_count += 1;
@@ -960,6 +1211,16 @@ class ConversationTurnControlStore {
             return turn;
         });
     }
+    rememberAction(id, key, action, attemptId) {
+        return this.mutate(store => {
+            const turn = store.turns.find(item => item.id === id);
+            if (!turn)
+                throw new Error("会话回合不存在");
+            const receipts = Array.isArray(turn.metadata?.action_receipts) ? turn.metadata.action_receipts : [];
+            turn.metadata = { ...turn.metadata, action_receipts: [...receipts, { key, action, attempt_id: attemptId }].slice(-20) };
+            return turn;
+        });
+    }
     heartbeat(input) {
         const id = String(input?.id || "").trim();
         const leaseId = String(input?.lease_id || input?.leaseId || "").trim();
@@ -969,6 +1230,7 @@ class ConversationTurnControlStore {
             const turn = store.turns.find((item) => item.id === id);
             if (!turn || turn.status !== "sending" || turn.lease_id !== leaseId)
                 throw new Error("队列执行租约已失效");
+            (0, conversation_attempt_1.requireConversationAttempt)(turn, input);
             requireExpectedRevision(turn, input?.revision ?? input?.expected_revision ?? input?.expectedRevision);
             turn.revision += 1;
             turn.lease_expires_at = new Date(Date.now() + Math.max(15_000, Math.min(15 * 60_000, Number(input?.lease_ms || input?.leaseMs || 13 * 60_000)))).toISOString();
@@ -1051,7 +1313,7 @@ function taskDispatchIdentity(task) {
     const group = String(task?.group_id || task?.groupId || "").trim();
     const groupSession = String(task?.group_session_id || task?.groupSessionId || "").trim();
     const rawSource = String(task?.automation_task_source || task?.source_channel || task?.source || "").toLowerCase();
-    const source = task?.cron_job_id || task?.cron_occurrence_id || rawSource === "schedule" || rawSource === "cron"
+    const source = task?.automation_definition_id || rawSource === "schedule" || rawSource === "cron" || rawSource === "automation"
         ? "schedule"
         : rawSource === "global_agent" || task?.mission_id || task?.global_mission_id
             ? "global_agent"
@@ -1083,7 +1345,7 @@ function admitTaskDispatchTurn(task) {
         source: identity.source,
         task_id: taskId,
         mission_id: task?.mission_id || task?.global_mission_id || "",
-        occurrence_id: task?.cron_occurrence_id || "",
+        occurrence_id: task?.automation_occurrence_id || "",
         mode: "queue",
         message: String(task?.title || task?.goal || "待处理任务").slice(0, 2_000),
         request_id: `task-dispatch:${taskId}`,
@@ -1124,7 +1386,9 @@ function reconcileTaskDispatchTurns() {
     catch { }
 });
 const drainingWebConversationTurns = new Set();
+const recoveringProjectIntakes = new Set();
 let webConversationTurnRecoveryTimer = null;
+let webConversationRecoveryBaseUrl = "";
 function turnConversationIdentity(turn) {
     if (turn.scope === "project") {
         const project = String(turn.metadata?.project || turn.conversation_id.split(":")[0] || "");
@@ -1147,7 +1411,12 @@ function conversationTaskOccupiesSlot(identity) {
         if (latest?.role === "user")
             return true;
     }
-    const activeStatuses = new Set(["pending", "queued", "in_progress", "running", "executing", "verifying", "reviewing", "reworking", "blocked", "waiting", "waiting_user", "interrupted", "recovering"]);
+    // Only states that own an execution slot may block a queued conversation
+    // turn.  `waiting_user`, `blocked`, and `interrupted` are persisted task
+    // states but do not represent an active provider/agent execution; treating
+    // them as busy can leave ordinary messages queued until a later unrelated
+    // event (observed as multi-minute or multi-hour delivery delays).
+    const activeStatuses = new Set(["pending", "queued", "in_progress", "running", "executing", "verifying", "reviewing", "reworking", "recovering"]);
     return (0, db_1.loadTasks)().some((task) => {
         if (!activeStatuses.has(String(task?.status || "pending").toLowerCase()))
             return false;
@@ -1158,28 +1427,20 @@ function conversationTaskOccupiesSlot(identity) {
             && String(task?.group_session_id || "") === identity.sessionId;
     });
 }
-async function postQueuedConversationTurn(baseUrl, turn) {
+async function postQueuedConversationTurn(baseUrl, turn, signal) {
     const identity = turnConversationIdentity(turn);
     if (!identity)
         throw new Error("排队消息缺少目标会话");
     const files = (turn.attachments || []).filter((item) => item?.savedPath && fs.existsSync(String(item.savedPath)));
     const continuationTaskId = String(turn.metadata?.continuation_task_id || "").trim();
+    const directedFields = turn.metadata?.directed_input_fields && typeof turn.metadata.directed_input_fields === "object"
+        ? turn.metadata.directed_input_fields : {};
     if (identity.scope === "project") {
         const pathname = "/api/send-stream";
         return fetch(`${baseUrl}${pathname}`, {
             method: "POST",
-            headers: { "Content-Type": "application/json", ...(0, internal_api_auth_1.buildInternalApiHeaders)("server-recovery", "POST", pathname) },
-            body: JSON.stringify({
-                project: identity.resourceId,
-                session_id: identity.sessionId,
-                message: turn.message,
-                files,
-                parent_run_id: turn.metadata?.parent_run_id || turn.metadata?.continuation_task_id || "",
-                conversation_turn_id: turn.id,
-                resolved_route: turn.metadata?.resolved_route || "",
-                resolved_candidate_task_id: turn.metadata?.resolved_candidate_task_id || "",
-                source: "web",
-            }),
+            headers: { "Content-Type": "application/json", "X-Conversation-Attempt-ID": (0, conversation_attempt_1.conversationAttemptId)(turn), ...(0, internal_api_auth_1.buildInternalApiHeaders)("server-recovery", "POST", pathname) },
+            body: JSON.stringify((0, project_queued_turn_request_1.projectQueuedTurnRequest)(turn, identity, files)), signal,
         });
     }
     const pathname = "/api/groups/send?stream=1";
@@ -1191,6 +1452,11 @@ async function postQueuedConversationTurn(baseUrl, turn) {
         form.append("client_message_id", turn.request_id);
         form.append("message_mode", continuationTaskId ? "project_task" : String(turn.metadata?.message_mode || "conversation"));
         form.append("conversation_turn_id", turn.id);
+        if (turn.task_id)
+            form.append("discussion_task_id", turn.task_id);
+        if (turn.metadata?.new_topic === true)
+            form.append("new_topic", "true");
+        form.append("attempt_id", (0, conversation_attempt_1.conversationAttemptId)(turn));
         if (continuationTaskId) {
             form.append("continuation_task_id", continuationTaskId);
             form.append("continuation_kind", "supplement");
@@ -1198,11 +1464,13 @@ async function postQueuedConversationTurn(baseUrl, turn) {
         }
         form.append("resolved_route", String(turn.metadata?.resolved_route || ""));
         form.append("resolved_candidate_task_id", String(turn.metadata?.resolved_candidate_task_id || ""));
+        for (const [field, value] of Object.entries(directedFields))
+            form.append(field, String(value || ""));
         for (const file of files) {
             const blob = new Blob([fs.readFileSync(String(file.savedPath))], { type: String(file.contentType || "application/octet-stream") });
             form.append("files", blob, String(file.name || file.filename || "附件"));
         }
-        return fetch(`${baseUrl}${pathname}`, { method: "POST", headers: (0, internal_api_auth_1.buildInternalApiHeaders)("server-recovery", "POST", pathname), body: form });
+        return fetch(`${baseUrl}${pathname}`, { method: "POST", headers: (0, internal_api_auth_1.buildInternalApiHeaders)("server-recovery", "POST", pathname), body: form, signal });
     }
     return fetch(`${baseUrl}${pathname}`, {
         method: "POST",
@@ -1214,6 +1482,9 @@ async function postQueuedConversationTurn(baseUrl, turn) {
             client_message_id: turn.request_id,
             message_mode: continuationTaskId ? "project_task" : String(turn.metadata?.message_mode || "conversation"),
             conversation_turn_id: turn.id,
+            discussion_task_id: turn.task_id,
+            new_topic: turn.metadata?.new_topic === true,
+            attempt_id: (0, conversation_attempt_1.conversationAttemptId)(turn),
             ...(continuationTaskId ? {
                 continuation_task_id: continuationTaskId,
                 continuation_kind: "supplement",
@@ -1221,7 +1492,8 @@ async function postQueuedConversationTurn(baseUrl, turn) {
             } : {}),
             resolved_route: turn.metadata?.resolved_route || "",
             resolved_candidate_task_id: turn.metadata?.resolved_candidate_task_id || "",
-        }),
+            ...directedFields,
+        }), signal,
     });
 }
 async function drainWebConversationTurns(baseUrl, seed) {
@@ -1237,6 +1509,8 @@ async function drainWebConversationTurns(baseUrl, seed) {
             try {
                 const response = await postQueuedConversationTurn(baseUrl, turn);
                 const body = await response.text();
+                if (exports.conversationTurnControl.getInternal(turn.id)?.status === "paused" || body.includes("CONVERSATION_PAUSED"))
+                    break;
                 if (response.status === 409) {
                     exports.conversationTurnControl.defer(turn.id, "当前任务仍占用会话，已保留原队列位置");
                     break;
@@ -1245,10 +1519,12 @@ async function drainWebConversationTurns(baseUrl, seed) {
                     throw new Error(`会话消息处理失败（HTTP ${response.status}）`);
                 if (/\"type\"\s*:\s*\"route_required\"/.test(body))
                     break;
-                exports.conversationTurnControl.settle({ id: turn.id, status: "completed", result: { delivered: true } });
+                exports.conversationTurnControl.settle({ id: turn.id, attempt_id: (0, conversation_attempt_1.conversationAttemptId)(turn), status: "completed", result: { delivered: true } });
             }
             catch (error) {
-                exports.conversationTurnControl.settle({ id: turn.id, status: "failed", error: error?.message || String(error) });
+                if (exports.conversationTurnControl.getInternal(turn.id)?.status === "paused")
+                    break;
+                exports.conversationTurnControl.settle({ id: turn.id, attempt_id: (0, conversation_attempt_1.conversationAttemptId)(turn), status: "failed", error: error?.message || String(error) });
             }
         }
     }
@@ -1259,9 +1535,30 @@ async function drainWebConversationTurns(baseUrl, seed) {
 function startWebConversationTurnRecoveryForServer(baseUrl) {
     if (webConversationTurnRecoveryTimer)
         return { started: false };
+    webConversationRecoveryBaseUrl = baseUrl;
     const tick = () => {
+        const pendingIntakes = exports.conversationTurnControl.listInternal({ statuses: "queued", limit: 500 }).turns
+            .filter((turn) => turn.scope === "project" && turn.source === "web" && turn.metadata?.intake_persistence === "pending");
+        for (const turn of pendingIntakes) {
+            if (recoveringProjectIntakes.has(turn.id))
+                continue;
+            recoveringProjectIntakes.add(turn.id);
+            queueMicrotask(() => {
+                try {
+                    (0, project_conversation_intake_1.persistProjectConversationIntake)(turn);
+                    exports.conversationTurnControl.markIntakePersistence(turn.id, turn.revision, "ready");
+                }
+                catch (error) {
+                    exports.conversationTurnControl.markIntakePersistence(turn.id, turn.revision, "failed", error?.message || String(error));
+                }
+                finally {
+                    recoveringProjectIntakes.delete(turn.id);
+                }
+            });
+        }
         const queued = exports.conversationTurnControl.listInternal({ statuses: "queued", limit: 500 }).turns
-            .filter((turn) => turn.kind === "user_message" && turn.source === "web" && ["project", "group"].includes(turn.scope));
+            .filter((turn) => turn.kind === "user_message" && turn.source === "web" && ["project", "group"].includes(turn.scope)
+            && turn.metadata?.intake_persistence !== "pending" && turn.metadata?.intake_persistence !== "failed");
         const firstByConversation = new Map();
         for (const turn of queued)
             if (!firstByConversation.has(turn.conversation_id))
@@ -1278,6 +1575,12 @@ function stopWebConversationTurnRecoveryForServer() {
     if (webConversationTurnRecoveryTimer)
         clearInterval(webConversationTurnRecoveryTimer);
     webConversationTurnRecoveryTimer = null;
+    webConversationRecoveryBaseUrl = "";
+}
+function wakeWebConversationTurn(turn) {
+    if (!webConversationRecoveryBaseUrl || !["project", "group"].includes(turn.scope))
+        return;
+    setImmediate(() => void drainWebConversationTurns(webConversationRecoveryBaseUrl, turn));
 }
 function readRequestBody(req) {
     return new Promise((resolve, reject) => {
@@ -1296,6 +1599,104 @@ function readRequestBody(req) {
     });
 }
 function handleConversationTurnControlApi(pathname, req, res, parsed) {
+    const eventRoute = /^\/api\/conversation-turns\/([^/]+)\/events$/.exec(pathname);
+    if (eventRoute && req.method === "GET") {
+        const turn = exports.conversationTurnControl.getInternal(decodeURIComponent(eventRoute[1]));
+        if (!turn)
+            return (0, utils_1.sendJson)(res, { success: false, error: "会话回合不存在" }, 404);
+        if (!authorizeTurnMutation(req, res, { id: turn.id }))
+            return true;
+        const attemptId = String(parsed?.query?.attempt_id || parsed?.query?.attemptId || "");
+        if (!attemptId || !attemptId.startsWith(`${turn.id}:`))
+            return (0, utils_1.sendJson)(res, { success: false, error: "执行尝试身份不匹配" }, 409);
+        const after = Math.max(0, Math.floor(Number(parsed?.query?.after || req.headers["last-event-id"] || 0)));
+        const terminal = attemptId !== (0, conversation_attempt_1.conversationAttemptId)(turn) || ["completed", "failed", "cancelled", "applied"].includes(turn.status);
+        (0, conversation_event_journal_1.streamConversationEvents)(res, turn.id, attemptId, after, terminal);
+        return true;
+    }
+    const actionRoute = /^\/api\/conversation-turns\/([^/]+)\/actions$/.exec(pathname);
+    if (actionRoute && req.method === "POST") {
+        void readRequestBody(req).then(payload => {
+            const id = decodeURIComponent(actionRoute[1]);
+            if (!authorizeTurnMutation(req, res, { id }))
+                return;
+            const action = String(payload?.action || "");
+            const attemptId = String(payload?.attempt_id || "");
+            const key = String(payload?.idempotency_key || "");
+            if (!key || !attemptId || !["pause", "resume", "retry"].includes(action))
+                throw Object.assign(new Error("缺少有效的控制动作或幂等身份"), { statusCode: 400 });
+            const current = exports.conversationTurnControl.getInternal(id);
+            if (!current)
+                throw Object.assign(new Error("会话回合不存在"), { statusCode: 404 });
+            const receipt = (Array.isArray(current.metadata?.action_receipts) ? current.metadata.action_receipts : [])
+                .find((item) => item.key === key);
+            if (receipt) {
+                if (receipt.action !== action || receipt.attempt_id !== attemptId)
+                    throw queueConflict("控制请求身份冲突");
+                return (0, utils_1.sendJson)(res, { success: true, duplicate: true, turn: publicTurnProjection(current) });
+            }
+            if ((0, conversation_attempt_1.conversationAttemptId)(current) !== attemptId)
+                throw queueConflict("这次执行已变化，请刷新后再操作");
+            const updated = action === "retry"
+                ? exports.conversationTurnControl.retry(id, current.revision, attemptId)
+                : exports.conversationTurnControl.control({ id, action, revision: current.revision, attempt_id: attemptId });
+            exports.conversationTurnControl.rememberAction(id, key, action, attemptId);
+            (0, utils_1.sendJson)(res, { success: true, turn: publicTurnProjection(updated) });
+            if (action === "pause" && updated.scope === "global")
+                globalPauseDispatcher?.(updated);
+            if (["resume", "retry"].includes(action))
+                wakeWebConversationTurn(updated);
+        }).catch((error) => (0, utils_1.sendJson)(res, { success: false, error: error?.message || String(error), code: error?.code || "CONVERSATION_ACTION_FAILED" }, Number(error?.statusCode || 409)));
+        return true;
+    }
+    if (pathname === "/api/conversation-turns/submit" && req.method === "POST") {
+        const submit = (payload, attachments = []) => {
+            const normalized = normalizeHttpEnqueuePayload(req, { ...payload, attachments });
+            if (!authorizeTurnMutation(req, res, normalized))
+                return;
+            if (normalized.scope === "global") {
+                const metadata = normalized.metadata && typeof normalized.metadata === "object" ? normalized.metadata : {};
+                const context = metadata.global_context_v2 && typeof metadata.global_context_v2 === "object" ? metadata.global_context_v2 : {};
+                normalized.metadata = { ...metadata, global_context_v2: {
+                        message: String(context.message || normalized.message || ""),
+                        original_message: String(normalized.message || ""),
+                        history: Array.isArray(context.history) ? context.history : [],
+                        source: "web",
+                        clarification_run_id: String(context.clarification_run_id || ""),
+                        requested_target_refs: Array.isArray(context.requested_target_refs) ? context.requested_target_refs : [],
+                        read_only: (0, api_access_control_1.requestIsReadOnly)(req),
+                        principal: req.ccmAuth || null,
+                    } };
+            }
+            const result = exports.conversationTurnControl.enqueue(normalized, project_conversation_intake_1.persistProjectConversationIntake);
+            const turn = result.turn;
+            const attemptId = (0, conversation_attempt_1.conversationAttemptId)(turn);
+            (0, utils_1.sendJson)(res, { success: true, duplicate: result.duplicate, turn: publicTurnProjection(turn), turn_id: turn.id, attempt_id: attemptId });
+            if (!result.duplicate)
+                wakeWebConversationTurn(turn);
+        };
+        if (String(req.headers["content-type"] || "").includes("multipart/form-data")) {
+            void (0, secure_multipart_1.parseSecureMultipartRequest)(req, { maxFiles: 10 }).then(multipart => {
+                try {
+                    submit(JSON.parse(String(multipart.fields.payload || "{}")), adoptQueuedAttachments(multipart.files));
+                }
+                catch (error) {
+                    (0, secure_multipart_1.cleanupSecureMultipartFiles)(multipart.files);
+                    throw error;
+                }
+            }).catch((error) => (0, utils_1.sendJson)(res, { success: false, error: error?.message || String(error) }, Number(error?.statusCode || 400)));
+        }
+        else {
+            void readRequestBody(req).then(payload => submit(payload, Array.isArray(payload?.attachments) ? payload.attachments : []))
+                .catch((error) => (0, utils_1.sendJson)(res, { success: false, error: error?.message || String(error) }, Number(error?.statusCode || 400)));
+        }
+        return true;
+    }
+    if ((0, conversation_turn_observation_api_1.handleConversationTurnObservationApi)(pathname, req, res, parsed, {
+        get: id => exports.conversationTurnControl.getInternal(id), authorize: authorizeTurnMutation,
+        project: (turn, userId, role) => ({ ...publicClaimProjection(turn), ...publicTurnProjection(turn, 0, userId, role) }),
+    }))
+        return true;
     if (pathname === "/api/conversation-turns/attachment" && req.method === "GET") {
         const turnId = String(parsed?.query?.turn_id || "");
         const attachmentId = String(parsed?.query?.attachment_id || "");
@@ -1376,8 +1777,8 @@ function handleConversationTurnControlApi(pathname, req, res, parsed) {
                     (0, secure_multipart_1.cleanupSecureMultipartFiles)(multipart.files);
                     return;
                 }
-                const result = exports.conversationTurnControl.enqueue({ ...payload, attachments: adoptQueuedAttachments(multipart.files) });
-                (0, utils_1.sendJson)(res, { success: true, ...result, turn: publicTurnProjection(result.turn) });
+                const result = exports.conversationTurnControl.enqueue({ ...payload, attachments: adoptQueuedAttachments(multipart.files) }, project_conversation_intake_1.persistProjectConversationIntake, { deferBeforeAdmit: true });
+                (0, utils_1.sendJson)(res, { success: true, ...(0, conversation_attempt_1.projectConversationMutationResult)(exports.conversationTurnControl, { ...result, turn: publicTurnProjection(result.turn) }, req.ccmAuth) });
             }
             catch (error) {
                 (0, secure_multipart_1.cleanupSecureMultipartFiles)(multipart.files);
@@ -1388,22 +1789,28 @@ function handleConversationTurnControlApi(pathname, req, res, parsed) {
     }
     const operations = {
         "/api/conversation-turns/enqueue": (payload) => {
-            const result = exports.conversationTurnControl.enqueue(normalizeHttpEnqueuePayload(req, payload));
+            const result = exports.conversationTurnControl.enqueue(normalizeHttpEnqueuePayload(req, payload), project_conversation_intake_1.persistProjectConversationIntake, { deferBeforeAdmit: true });
             return { ...result, turn: publicTurnProjection(result.turn) };
         },
-        "/api/conversation-turns/claim": (payload) => ({ turn: publicClaimProjection(exports.conversationTurnControl.claim(payload)) }),
+        "/api/conversation-turns/claim": (payload) => {
+            // Project intake is persisted by the enqueue microtask or recovery
+            // ticker. Never synchronously read/write the full session transcript
+            // from the claim request; large histories must not delay admission.
+            return { turn: publicClaimProjection(exports.conversationTurnControl.claim(payload)) };
+        },
         "/api/conversation-turns/settle": (payload) => ({ turn: publicTurnProjection(exports.conversationTurnControl.settle(payload)) }),
         "/api/conversation-turns/heartbeat": (payload) => ({ turn: publicTurnProjection(exports.conversationTurnControl.heartbeat(payload)) }),
         "/api/conversation-turns/control": (payload) => ({ turn: publicTurnProjection(exports.conversationTurnControl.control(payload)) }),
-        "/api/conversation-turns/defer": (payload) => ({ turn: publicTurnProjection(exports.conversationTurnControl.defer(String(payload?.id || ""), payload?.reason, payload?.revision)) }),
+        "/api/conversation-turns/defer": (payload) => ({ turn: publicTurnProjection(exports.conversationTurnControl.defer(String(payload?.id || ""), payload?.reason, payload?.revision, payload?.attempt_id)) }),
         "/api/conversation-turns/cancel": (payload) => {
             const result = cancelConversationTurn(payload);
             return { turn: publicTurnProjection(result.turn) };
         },
         "/api/conversation-turns/guide": (payload) => ({ turn: publicTurnProjection(exports.conversationTurnControl.guide(payload)) }),
-        "/api/conversation-turns/retry": (payload) => ({ turn: publicTurnProjection(exports.conversationTurnControl.retry(String(payload?.id || ""), payload?.revision)) }),
-        "/api/conversation-turns/edit": (payload) => ({ turn: publicTurnProjection(exports.conversationTurnControl.edit(payload)) }),
+        "/api/conversation-turns/retry": (payload) => ({ turn: publicTurnProjection(exports.conversationTurnControl.retry(String(payload?.id || ""), payload?.revision, payload?.attempt_id)) }),
+        "/api/conversation-turns/edit": (payload) => ({ turn: publicTurnProjection(exports.conversationTurnControl.edit(payload, turn => (0, project_conversation_intake_1.persistProjectConversationIntake)(turn, true), { deferBeforeCommit: true })) }),
         "/api/conversation-turns/resolve-route": (payload) => ({ turn: publicTurnProjection(exports.conversationTurnControl.resolveRoute(payload)) }),
+        "/api/conversation-turns/resolve-intent": (payload) => ({ decision: exports.conversationTurnControl.resolveIntent(payload) }),
     };
     const operation = operations[pathname];
     if (!operation || req.method !== "POST")
@@ -1411,8 +1818,9 @@ function handleConversationTurnControlApi(pathname, req, res, parsed) {
     readRequestBody(req).then((payload) => {
         if (!authorizeTurnMutation(req, res, payload))
             return;
+        (0, conversation_attempt_1.validateConversationMutation)(exports.conversationTurnControl, pathname, payload);
         const result = operation(payload);
-        (0, utils_1.sendJson)(res, { success: true, ...result });
+        (0, utils_1.sendJson)(res, { success: true, ...(0, conversation_attempt_1.projectConversationMutationResult)(exports.conversationTurnControl, result, req.ccmAuth) });
     }).catch((error) => (0, utils_1.sendJson)(res, {
         success: false,
         error: error?.message || String(error),
@@ -1432,7 +1840,10 @@ function runConversationTurnControlSelfTest() {
         const third = store.enqueue({ scope: "group", conversation_id: "g1:s1", mode: "queue", message: "第三条", request_id: "r3" });
         const guided = store.guide(third.turn.id);
         const recovered = new ConversationTurnControlStore(file).recoverInterrupted();
-        const reclaimed = store.claim({ scope: "group", conversation_id: "g1:s1" });
+        const recoveredTurn = store.getInternal(first.turn.id);
+        const recoveryRequired = recoveredTurn?.status === "interrupted" && recoveredTurn?.checkpoint === "recovery_required";
+        const resumed = store.control({ id: first.turn.id, action: "resume", revision: recoveredTurn?.revision, attempt_id: (0, conversation_attempt_1.conversationAttemptId)(recoveredTurn) });
+        const reclaimed = store.claim({ scope: "group", conversation_id: "g1:s1", id: resumed.id, revision: resumed.revision, attempt_id: (0, conversation_attempt_1.conversationAttemptId)(resumed) });
         store.settle({ id: reclaimed?.id, status: "completed", result: { ok: true } });
         const guidedClaim = store.claim({ scope: "group", conversation_id: "g1:s1" });
         store.settle({ id: guidedClaim?.id, status: "completed", result: { guided: true } });
@@ -1476,7 +1887,8 @@ function runConversationTurnControlSelfTest() {
         store.settle({ id: routedReclaim?.id, status: "completed" });
         const conversation = store.enqueue({ scope: "global", conversation_id: "g-session", mode: "queue", message: "只读问答", request_id: "conversation-r1", metadata: { direct_execution: true } });
         const conversationClaim = store.claim({ scope: "global", conversation_id: "g-session" });
-        const conversationPaused = store.control({ id: conversationClaim?.id, action: "pause", revision: conversationClaim?.revision, stage: "provider_request", round: 1 });
+        const conversationPausing = store.control({ id: conversationClaim?.id, action: "pause", revision: conversationClaim?.revision });
+        const conversationPaused = store.pauseAtBoundary(conversationPausing.id, (0, conversation_attempt_1.conversationAttemptId)(conversationPausing), "provider_request");
         const conversationResuming = store.control({ id: conversationPaused.id, action: "resume", revision: conversationPaused.revision });
         const conversationReclaimed = store.claim({ scope: "global", conversation_id: "g-session", id: conversationResuming.id, revision: conversationResuming.revision });
         const checks = {
@@ -1485,7 +1897,7 @@ function runConversationTurnControlSelfTest() {
             guidedTurnPromoted: guided.mode === "steer"
                 && guided.metadata.requested_mode === "steer"
                 && guidedClaim?.id === third.turn.id,
-            restartRecovery: recovered.recovered === 1 && reclaimed?.recovery_count === 1,
+            restartRecovery: recovered.recovered === 1 && recoveryRequired,
             terminalStates: rows.find((item) => item.id === first.turn.id)?.status === "completed"
                 && rows.find((item) => item.id === third.turn.id)?.status === "completed"
                 && rows.find((item) => item.id === second.turn.id)?.status === "cancelled",
@@ -1500,6 +1912,7 @@ function runConversationTurnControlSelfTest() {
                 && routedReclaim?.metadata?.resolved_route === "start_new_task",
             routeBindingProtected: staleRouteConflict,
             ordinaryConversationPauseResume: conversationClaim?.status === "sending"
+                && conversationPausing.status === "pausing"
                 && conversationPaused.status === "paused"
                 && conversationResuming.status === "queued"
                 && conversationReclaimed?.status === "sending"

@@ -34,11 +34,13 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.PRIORITY_WEIGHT = exports.agentRecoveryProbeInFlight = exports.agentRecoveryMonitorTimer = exports.taskWatchdogTimer = exports.AGENT_PROBE_TARGET_STATUS_DIR = exports.AGENT_PROBE_STATUS_FILE = exports.AGENT_RUNNER_DIR = exports.AGENT_QUEUE_BLOCK_LOG_COOLDOWN_MS = exports.AGENT_PROBE_FAILURE_BLOCK_MS = exports.AGENT_PROBE_SUCCESS_FRESH_MS = exports.AGENT_RECOVERY_PROBE_TIMEOUT_MS = exports.AGENT_RECOVERY_PROBE_INTERVAL_MS = exports.TASK_WATCHDOG_RECOVERY_MAX = exports.TASK_WATCHDOG_GAP_REWORK_MAX = exports.TASK_WATCHDOG_GAP_REWORK_COOLDOWN_MS = exports.TASK_WATCHDOG_STALE_MS = exports.TASK_WATCHDOG_INTERVAL_MS = exports.coordinationSettlementInFlight = exports.runningTaskIds = exports.runningTasks = exports.taskQueues = exports.markDailyDevBacklogStatus = exports.importSharedDocsToDailyDevBacklog = exports.claimReadyDailyDevBacklog = exports.runGroupMemoryStorageRecoverySelfTest = exports.loadGroups = exports.sendFeishuReportMessage = exports.FEISHU_SCOPES = void 0;
+exports.PRIORITY_WEIGHT = exports.agentRecoveryProbeInFlight = exports.agentRecoveryMonitorTimer = exports.taskWatchdogTimer = exports.AGENT_PROBE_TARGET_STATUS_DIR = exports.AGENT_PROBE_STATUS_FILE = exports.AGENT_RUNNER_DIR = exports.AGENT_QUEUE_BLOCK_LOG_COOLDOWN_MS = exports.AGENT_PROBE_FAILURE_BLOCK_MS = exports.AGENT_PROBE_SUCCESS_FRESH_MS = exports.AGENT_RECOVERY_PROBE_TIMEOUT_MS = exports.AGENT_RECOVERY_PROBE_INTERVAL_MS = exports.TASK_WATCHDOG_RECOVERY_MAX = exports.TASK_WATCHDOG_GAP_REWORK_MAX = exports.TASK_WATCHDOG_GAP_REWORK_COOLDOWN_MS = exports.TASK_WATCHDOG_STALE_MS = exports.TASK_WATCHDOG_INTERVAL_MS = exports.coordinationSettlementInFlight = exports.runningTaskRunIds = exports.runningTaskIds = exports.runningTasks = exports.taskQueues = exports.markDailyDevBacklogStatus = exports.importSharedDocsToDailyDevBacklog = exports.claimReadyDailyDevBacklog = exports.runGroupMemoryStorageRecoverySelfTest = exports.loadGroups = exports.sendFeishuReportMessage = exports.FEISHU_SCOPES = void 0;
 exports.setTaskWatchdogTimer = setTaskWatchdogTimer;
 exports.setAgentRecoveryMonitorTimer = setAgentRecoveryMonitorTimer;
 exports.setAgentRecoveryProbeInFlight = setAgentRecoveryProbeInFlight;
-exports.runCronDailyDevProtocolSelfTestSafe = runCronDailyDevProtocolSelfTestSafe;
+exports.runAutomationDailyDevProtocolSelfTestSafe = runAutomationDailyDevProtocolSelfTestSafe;
+exports.taskRunIdentity = taskRunIdentity;
+exports.isTaskRunningInMemory = isTaskRunningInMemory;
 exports.isTaskPaused = isTaskPaused;
 exports.getTaskFailureText = getTaskFailureText;
 exports.getChildAgentIsolationMode = getChildAgentIsolationMode;
@@ -180,6 +182,7 @@ Object.defineProperty(exports, "markDailyDevBacklogStatus", { enumerable: true, 
 exports.taskQueues = new Map(); // 每个目标（群聊/Agent）独立队列
 exports.runningTasks = new Map(); // 正在运行的任务目标
 exports.runningTaskIds = new Set(); // 正在运行的任务 ID
+exports.runningTaskRunIds = new Set(); // 新模型正在运行的 TaskRun ID
 exports.coordinationSettlementInFlight = new Set();
 exports.TASK_WATCHDOG_INTERVAL_MS = 60 * 1000;
 exports.TASK_WATCHDOG_STALE_MS = 15 * 60 * 1000;
@@ -208,16 +211,39 @@ function setAgentRecoveryMonitorTimer(value) {
 function setAgentRecoveryProbeInFlight(value) {
     exports.agentRecoveryProbeInFlight = value;
 }
-function runCronDailyDevProtocolSelfTestSafe() {
+function runAutomationDailyDevProtocolSelfTestSafe() {
     try {
-        const cronModule = require("../scheduling/cron");
-        if (typeof cronModule.runCronDailyDevProtocolSelfTest === "function") {
-            return cronModule.runCronDailyDevProtocolSelfTest();
-        }
-        return {
-            pass: false,
-            error: "cron 模块未导出 runCronDailyDevProtocolSelfTest",
+        const { buildAutomationDefinitionV1, buildTaskSpecV1, resolveTaskExecutionPolicy } = require("./task-workflow-model");
+        const definition = buildAutomationDefinitionV1({
+            id: "automation-daily-dev-self-test",
+            name: "日常开发协议自测",
+            target: { type: "group", id: "demo-group", exact_session_id: "session-a" },
+            schedule: "*/30 * * * *",
+            prompt: "按接口文档实现退款审核，接口 POST /api/refunds/:id/audit，字段 approved、reason。",
+            workflow_type: "daily_dev",
+            dispatch_policy: "orchestrated",
+            verification_policy: "test_agent",
+            workspace_policy: "isolated_worktree",
+        });
+        const task = {
+            id: "automation-daily-dev-task-self-test",
+            title: definition.name,
+            description: definition.prompt,
+            goal: definition.goal,
+            origin: "automation",
+            group_id: definition.target.id,
+            group_session_id: definition.target.exact_session_id,
+            automation_definition: definition,
         };
+        const spec = buildTaskSpecV1(task, resolveTaskExecutionPolicy(task));
+        const checks = {
+            hasDefinition: definition.schema === "ccm-automation-definition-v1",
+            workflowAutomation: spec.origin === "automation",
+            targetGroup: spec.target.type === "group" && spec.target.id === "demo-group",
+            strictVerification: spec.execution_policy.verification === "test_agent",
+            sourcePromptPreserved: spec.goal.includes("/api/refunds") && spec.goal.includes("approved"),
+        };
+        return { pass: Object.values(checks).every(Boolean), checks };
     }
     catch (error) {
         return {
@@ -228,6 +254,15 @@ function runCronDailyDevProtocolSelfTestSafe() {
 }
 // 优先级权重
 exports.PRIORITY_WEIGHT = { high: 3, normal: 2, low: 1 };
+function taskRunIdentity(task) {
+    return String(task?.active_run_id || task?.task_run?.run_id || task?.run_id || "").trim();
+}
+function isTaskRunningInMemory(task) {
+    const runId = taskRunIdentity(task);
+    if (task?.task_spec?.schema === "ccm-task-spec-v1" && runId)
+        return exports.runningTaskRunIds.has(runId);
+    return exports.runningTaskIds.has(String(task?.id || ""));
+}
 function isTaskPaused(task) {
     return require("./collaboration-task-card").isTaskPaused.apply(null, arguments);
 }
@@ -943,10 +978,9 @@ function buildInlineTaskRuntime(task) {
         task_card: buildTaskCardView(task, executions, sessions),
     };
 }
-function updateGroupTaskInlineStatus(task, status, detail = "") {
+function updateGroupTaskInlineStatus(task, status, detail = "", sessionId = groupSessionIdForTask(task)) {
     if (!task?.group_id || !task?.id)
         return null;
-    const sessionId = groupSessionIdForTask(task);
     const messages = (0, storage_1.getGroupMessages)(task.group_id, sessionId);
     const runtime = buildInlineTaskRuntime({ ...task, status, status_detail: detail || task.status_detail });
     const projectionContent = String(task?.conversation_projection_content || "")

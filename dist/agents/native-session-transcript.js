@@ -35,6 +35,7 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.NATIVE_SESSION_RESUME_HINT = void 0;
 exports.shouldMaterializeNativeSessionTranscript = shouldMaterializeNativeSessionTranscript;
+exports.sessionTranscriptFamily = sessionTranscriptFamily;
 exports.splitNativeSystemSegments = splitNativeSystemSegments;
 exports.buildNativeMetaUserMessage = buildNativeMetaUserMessage;
 exports.materializeNativeSessionTranscript = materializeNativeSessionTranscript;
@@ -42,6 +43,10 @@ exports.lastNativeUserText = lastNativeUserText;
 exports.inspectNativeResumePayload = inspectNativeResumePayload;
 exports.runNativeSessionTranscriptSelfTest = runNativeSessionTranscriptSelfTest;
 const crypto = __importStar(require("crypto"));
+const main_agent_tool_prompt_1 = require("../tools/main-agent-tool-prompt");
+const model_tool_result_1 = require("./model-tool-result");
+const session_model_checkpoint_1 = require("./session-model-checkpoint");
+const native_replay_batches_1 = require("./native-replay-batches");
 const native_query_messages_1 = require("./native-query-messages");
 const native_query_loop_1 = require("./native-query-loop");
 const context_source_tool_result_projection_1 = require("../system/context-source-tool-result-projection");
@@ -136,7 +141,7 @@ function toolResultOutput(event, options) {
     // separately retained safe model projection until V2 explicitly replaces
     // this result during a request-time compaction pass.
     if (event.modelContent !== undefined)
-        return event.modelContent;
+        return (0, model_tool_result_1.executionModelToolResult)(event).modelOutput;
     const payload = event?.payload;
     const persisted = (0, tool_result_storage_1.isPersistedToolResult)(payload)
         ? payload
@@ -165,11 +170,12 @@ function toolResultOutput(event, options) {
 function pairExecutionEvents(events) {
     const uses = new Map();
     const results = new Map();
+    const identity = (event) => JSON.stringify([event.toolCallId, event.toolName, event.attempt_id || '', event.conversation_turn_id || '']);
     for (const event of Array.isArray(events) ? events : []) {
         if (event.type === "tool_use")
-            uses.set(event.toolCallId, event);
+            uses.set(identity(event), event);
         if (event.type === "tool_result")
-            results.set(event.toolCallId, event);
+            results.set(identity(event), event);
     }
     const pairs = [];
     for (const [id, use] of uses) {
@@ -201,9 +207,9 @@ function turnFromPair(pair, options) {
         results: [{
                 callId: pair.result.toolCallId,
                 name: pair.result.toolName,
-                ok: pair.result.status !== "error",
+                ok: (0, model_tool_result_1.executionModelToolResult)(pair.result).ok,
                 output: toolResultOutput(pair.result, options),
-                error: pair.result.status === "error" ? asText(pair.result.payload?.error || pair.result.payload) : undefined,
+                error: (0, model_tool_result_1.executionModelToolResult)(pair.result).error || (pair.result.status === "error" ? pair.result.payload?.error || '工具执行失败' : undefined),
             }],
     };
 }
@@ -211,9 +217,31 @@ function shouldMaterializeNativeSessionTranscript(config, sessionId) {
     const id = String(sessionId || "").trim();
     if (!id)
         return false;
-    return (0, native_query_loop_1.shouldUseNativeQueryLoop)(config);
+    return true;
+}
+// Older session records did not persist anchorMessageId.  They do retain the
+// conversation turn id, so use that durable identity before falling back to
+// the unanchored tail.  This keeps a failed checkpoint replay in the same
+// place as the assistant turn that issued the tools.
+function pairBelongsToConversation(pair, item) {
+    const turnId = String(item?.conversation_turn_id || item?.conversationTurnId || item?.turnId || '').trim();
+    if (!turnId)
+        return false;
+    return String(pair.use.conversation_turn_id || '').trim() === turnId
+        || String(pair.result.conversation_turn_id || '').trim() === turnId;
+}
+function sessionTranscriptFamily(config) {
+    return (0, native_query_loop_1.shouldUseNativeQueryLoop)(config) ? (0, native_query_messages_1.nativeQueryFamily)(config) : 'json';
+}
+function appendSessionTurn(messages, turn, results, family) {
+    if (family !== 'json')
+        return (0, native_query_messages_1.appendNativeTurnTranscript)(messages, turn, results, family);
+    return [...messages, { role: 'assistant', content: JSON.stringify({ reply: turn.text, toolRequests: turn.toolCalls.map(call => ({ name: call.name, arguments: call.arguments })) }) },
+        { role: 'user', content: JSON.stringify({ toolResults: results.map(native_query_messages_1.modelVisibleNativeToolResult) }) }];
 }
 function splitNativeSystemSegments(input) {
+    if (input.toolPromptLayout)
+        return (0, main_agent_tool_prompt_1.toolPromptSystemMessages)({ ...input, toolPromptLayout: input.toolPromptLayout });
     const messages = [];
     const identity = String(input.identityRules || "").trim();
     if (identity)
@@ -237,11 +265,17 @@ function buildNativeMetaUserMessage(blocks, extra = []) {
     return { role: "user", content: parts.join("\n\n"), isMeta: true };
 }
 function materializeNativeSessionTranscript(input) {
+    const source = (0, session_model_checkpoint_1.replaySourceFor)(input);
+    const restored = source ? (0, session_model_checkpoint_1.restoreModelCheckpoint)(input, source) : null;
+    return (0, session_model_checkpoint_1.bindModelReplaySource)(restored || materializeLegacyNativeSessionTranscript(input), source);
+}
+function materializeLegacyNativeSessionTranscript(input) {
     const family = input.family || "openai";
     const conversation = (Array.isArray(input.conversation) ? input.conversation : [])
         .filter(item => ["user", "assistant"].includes(messageRole(item)))
         .filter(item => item?.hidden_execution !== true && item?.modelVisible !== false && item?.model_visible !== false);
     const pairs = pairExecutionEvents(input.executionEvents);
+    const batches = (0, native_replay_batches_1.checkpointReplayBatches)(input.persistContext?.sessionId ? (0, session_model_checkpoint_1.readModelCheckpoint)(input.persistContext) : null);
     const projectionOptions = {
         cleared: new Set(Array.from(input.clearedToolCallIds || []).map(id => String(id || "").trim()).filter(Boolean)),
         replaced: replacementMapFrom(input.replacedToolResults),
@@ -262,6 +296,21 @@ function materializeNativeSessionTranscript(input) {
             return;
         seenPlan.add(body);
         planMetas.push({ title: "已有计划稿", body });
+    };
+    const appendPairs = (messages, selected, summary = '') => {
+        const ordinary = selected.filter(pair => {
+            if (PLAN_TOOLS.has(pair.use.toolName)) {
+                collectPlan(toolUseArguments(pair.use)?.plan || toolUseArguments(pair.use), summary);
+                return false;
+            }
+            return !CONTROL_SKIP_TOOLS.has(pair.use.toolName);
+        });
+        for (const batch of (0, native_replay_batches_1.groupReplayPairs)(ordinary, batches)) {
+            const mapped = batch.pairs.map(pair => turnFromPair(pair, projectionOptions));
+            messages = appendSessionTurn(messages, { ...mapped[0].turn, text: batch.text,
+                toolCalls: mapped.flatMap(item => item.turn.toolCalls) }, mapped.flatMap(item => item.results), family);
+        }
+        return messages;
     };
     if (input.presentedPlan)
         collectPlan(input.presentedPlan);
@@ -286,6 +335,19 @@ function materializeNativeSessionTranscript(input) {
         const role = messageRole(item);
         const content = messageContent(item).trim();
         const id = messageId(item);
+        // The legacy fallback may receive a history where the original user
+        // message is gone but the assistant reply still carries its turn id.
+        // Reinsert that turn's tool batches immediately before the reply instead
+        // of appending them after the entire conversation.
+        const turnPairs = role === "assistant"
+            ? remaining.filter(pair => pairBelongsToConversation(pair, item))
+            : [];
+        for (const pair of turnPairs) {
+            const index = remaining.indexOf(pair);
+            if (index >= 0)
+                remaining.splice(index, 1);
+        }
+        messages = appendPairs(messages, turnPairs, content);
         if (role === "user") {
             if (content)
                 messages.push({ role: "user", content });
@@ -303,16 +365,7 @@ function materializeNativeSessionTranscript(input) {
                 while (remaining.length)
                     attached.push(remaining.shift());
             }
-            for (const pair of attached) {
-                if (PLAN_TOOLS.has(pair.use.toolName)) {
-                    collectPlan(toolUseArguments(pair.use)?.plan || toolUseArguments(pair.use), content);
-                    continue;
-                }
-                if (CONTROL_SKIP_TOOLS.has(pair.use.toolName))
-                    continue;
-                const mapped = turnFromPair(pair, projectionOptions);
-                messages = (0, native_query_messages_1.appendNativeTurnTranscript)(messages, mapped.turn, mapped.results, family);
-            }
+            messages = appendPairs(messages, attached, content);
             appendSummaryAfter(id);
             continue;
         }
@@ -321,16 +374,7 @@ function materializeNativeSessionTranscript(input) {
             messages.push({ role: "assistant", content });
         appendSummaryAfter(id);
     }
-    for (const pair of remaining) {
-        if (PLAN_TOOLS.has(pair.use.toolName)) {
-            collectPlan(toolUseArguments(pair.use)?.plan || toolUseArguments(pair.use));
-            continue;
-        }
-        if (CONTROL_SKIP_TOOLS.has(pair.use.toolName))
-            continue;
-        const mapped = turnFromPair(pair, projectionOptions);
-        messages = (0, native_query_messages_1.appendNativeTurnTranscript)(messages, mapped.turn, mapped.results, family);
-    }
+    messages = appendPairs(messages, remaining);
     const current = String(input.currentUserText || "").trim();
     if (current) {
         const last = messages.at(-1);
@@ -361,6 +405,9 @@ function materializeNativeSessionTranscript(input) {
     return messages;
 }
 function lastNativeUserText(messages) {
+    const source = (0, session_model_checkpoint_1.modelReplaySource)(messages);
+    if (source?.pending)
+        return source.currentUserText;
     for (let index = messages.length - 1; index >= 0; index -= 1) {
         if (messages[index]?.role === "user" && !messages[index].isMeta)
             return String(messages[index].content || "").trim();
@@ -601,7 +648,7 @@ function runNativeSessionTranscriptSelfTest() {
         projectAssembly: projectInspect.lastUserIsCurrent && projectInspect.systemHasNoSessionDump && projectInspect.latestUserHasNoSessionDump && JSON.stringify(projectLike).includes("当前项目源码证据"),
         globalAssembly: globalInspect.lastUserIsCurrent && globalInspect.systemHasNoSessionDump && globalInspect.latestUserHasNoSessionDump && JSON.stringify(globalLike.at(-1)).includes("\"prior_steps\"") === false,
         nativeFamilyHelper: (0, native_query_messages_1.nativeQueryFamily)({ format: "openai-compatible" }) === "openai",
-        jsonModeSkipped: shouldMaterializeNativeSessionTranscript({ providerNativeToolsMode: "json" }, "gcs_x") === false,
+        jsonModeSupported: shouldMaterializeNativeSessionTranscript({ providerNativeToolsMode: "json" }, "gcs_x") === true,
         emptySessionSkipped: shouldMaterializeNativeSessionTranscript({ forceNativeQueryLoop: true }, "") === false,
         forcedNativeMaterialize: shouldMaterializeNativeSessionTranscript({ forceNativeQueryLoop: true }, "gcs_x") === true,
         readFilesReplayUsesReceipt: bulkyMessages.some((item) => item?.role === "tool" && item?.tool_call_id === "call_read_files")

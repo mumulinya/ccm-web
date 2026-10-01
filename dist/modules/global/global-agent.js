@@ -56,6 +56,7 @@ exports.handleGlobalAgentApi = handleGlobalAgentApi;
 exports.startGlobalWebTurnRecoveryForServer = startGlobalWebTurnRecoveryForServer;
 exports.stopGlobalWebTurnRecoveryForServer = stopGlobalWebTurnRecoveryForServer;
 const globalAgentTestAgentDisplay = __importStar(require("./global-agent-test-agent-display"));
+const task_available_actions_1 = require("../../agents/task-available-actions");
 const globalAgentLocalIntent = __importStar(require("./global-agent-local-intent"));
 const globalAgentBridge = __importStar(require("./global-agent-bridge"));
 const globalAgentModel = __importStar(require("./global-agent-model"));
@@ -78,6 +79,7 @@ const rag_1 = require("../knowledge/rag");
 const utils_1 = require("../../core/utils");
 const group_orchestrator_1 = require("../collaboration/group-orchestrator");
 const db_1 = require("../../core/db");
+const automation_definition_service_1 = require("../scheduling/automation-definition-service");
 const storage_1 = require("../collaboration/storage");
 const collaboration_1 = require("../collaboration/collaboration");
 const collaboration_runtime_runtime_tools_1 = require("../collaboration/collaboration-runtime-runtime-tools");
@@ -378,7 +380,7 @@ const globalAgentStatusRuntime = (0, global_agent_status_1.createGlobalAgentStat
     hasExplicitDevelopmentExecutionIntent,
     hasExplicitGlobalWriteAuthorization,
     listGlobalAgentRuns: loop_1.listGlobalAgentRuns,
-    loadCronJobs: db_1.loadCronJobs,
+    listAutomationDefinitions: automation_definition_service_1.listAutomationDefinitions,
     loadGroups: storage_1.loadGroups,
     loadTasks: db_1.loadTasks,
     normalizeText,
@@ -466,7 +468,7 @@ const globalAgentAgenticRuntime = (0, global_agent_agentic_runtime_1.createGloba
     listGlobalAgentRuns: loop_1.listGlobalAgentRuns,
     listGlobalMissionSupervisors: mission_supervisor_1.listGlobalMissionSupervisors,
     listTaskAgentSessions: agent_sessions_1.listTaskAgentSessions,
-    loadCronJobs: db_1.loadCronJobs,
+    listAutomationDefinitions: automation_definition_service_1.listAutomationDefinitions,
     loadGlobalAgentHistoryStore,
     loadGlobalAgentHooks: runtime_1.loadGlobalAgentHooks,
     loadGlobalAgentMemory: memory_2.loadGlobalAgentMemory,
@@ -519,6 +521,7 @@ function publicGlobalAgentRunSummary(run) {
         session_id: run.session_id,
         source: run.source,
         status: run.status,
+        available_actions: (0, task_available_actions_1.globalRunAvailableActions)(run),
         phase: run.phase,
         created_at: run.created_at,
         updated_at: run.updated_at,
@@ -563,6 +566,7 @@ function publicGlobalAgentRun(run, includeObservations = false) {
         session_id: run.session_id,
         source: run.source,
         status: run.status,
+        available_actions: (0, task_available_actions_1.globalRunAvailableActions)(run),
         phase: run.phase,
         pause_control: run.pause_control || null,
         presentation: run.presentation || null,

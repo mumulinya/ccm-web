@@ -1,0 +1,98 @@
+export declare function createGlobalAgentIntentSelfTest(deps: {
+    [key: string]: any;
+}): () => {
+    passed: boolean;
+    results: ({
+        actual: any;
+        targetCount: any;
+        actualAuthorized: any;
+        passed: boolean;
+        message: string;
+        expected: string;
+        expectedTargetCount: number;
+        authorized: boolean;
+    } | {
+        actual: any;
+        targetCount: any;
+        actualAuthorized: any;
+        passed: boolean;
+        message: string;
+        expected: string;
+        authorized: boolean;
+        expectedTargetCount?: undefined;
+    } | {
+        actual: any;
+        targetCount: any;
+        actualAuthorized: any;
+        passed: boolean;
+        message: string;
+        expected: string;
+        expectedTargetCount?: undefined;
+        authorized?: undefined;
+    })[];
+    actionBlockHidden: boolean;
+    fallbackDelegationCannotWrite: boolean;
+    localGroupDispatchUsesSchema: boolean;
+    localDispatchRepliesFriendly: boolean;
+    fallbackCronCannotWrite: boolean;
+    ambiguousFallbackCannotWrite: boolean;
+    fallbackObservationFriendly: boolean;
+    fallbackGreetingStaysConversation: boolean;
+    groupMemoryModelContextBounded: boolean;
+    globalHistoryMergePreservesBackendCompletion: any;
+    statusChecks: {
+        globalStatusFollowupRecognized: any;
+        globalStatusFollowupAvoidsManagementMutation: boolean;
+        globalStatusShortcutDoesNotCaptureExplicitDevelopment: boolean;
+        globalStatusSummaryFriendly: any;
+        globalStatusShowsChildAgentWaitingState: boolean;
+        globalStatusWeakMissionStaysReviewing: boolean;
+        globalStatusShowsSupervisionWaitingState: boolean;
+        globalStatusShowsSupervisionReworkState: any;
+        globalStatusShowsStandaloneRunState: any;
+        globalStatusShowsIndependentReviewRework: boolean;
+        globalStatusShowsTestAgentPlanOnly: boolean;
+        globalStatusSynthesizesTestAgentFailureSummary: boolean;
+        globalStatusIncludesDirectDispatch: any;
+        globalStatusShowsDirectDispatchContinuation: any;
+        globalStatusShowsPickupSummary: any;
+        globalStatusWeakDirectDispatchStaysReviewing: boolean;
+        globalStatusShowsProgressRefreshSummary: any;
+        globalStatusHidesProtocol: boolean;
+    };
+    directDispatchChecks: {
+        groupVisibleWorkOrderFriendly: any;
+        groupVisibleWorkOrderNoProtocolLeak: boolean;
+        groupDirectDispatchSaysAcceptedNotDone: any;
+        groupDirectDispatchHidesTaskId: boolean;
+        groupDirectDispatchUsesFriendlyReplyLabel: boolean;
+        globalFeishuDevelopmentDispatchHidesIds: boolean;
+        globalFeishuTaskDispatchHidesIds: boolean;
+        projectInternalWorkOrderSelfContained: any;
+        directDispatchHandoffSummary: boolean;
+        verificationOnlyCanAvoidCodeChanges: any;
+        singleProjectDispatchUsesPersistentMission: boolean;
+        singleProjectDispatchCarriesReviewAcceptance: boolean;
+        dispatchLaunchUiFriendly: boolean;
+        dispatchLaunchUiHidesProtocol: boolean;
+    };
+    testAgentRelayChecks: {
+        globalTestAgentPassedSpotCheckAllowsAcceptance: boolean;
+        globalTestAgentSpotCheckMismatchOverridesLegacyPass: boolean;
+        globalTestAgentUnknownCoverageRelayNeedsUser: boolean;
+        globalTestAgentUnknownCoverageUiWaits: boolean;
+        globalTestAgentNotVerifiedCoverageRelayNeedsRework: boolean;
+        globalTestAgentNotVerifiedCoverageUiWaits: boolean;
+        globalTestAgentSummaryOnlyGapRelayNeedsRework: boolean;
+        globalTestAgentWeakSummaryRelayNeedsUser: boolean;
+        globalTestAgentWeakSummaryUiWaits: boolean;
+        globalTestAgentFailedBrowserFlowRelayNeedsRework: boolean;
+        globalTestAgentFailedMultiSessionRelayNeedsRework: boolean;
+        globalTestAgentIncompleteLatestEvidenceNeedsRecheck: boolean;
+        globalTestAgentFailedAuthenticationOverridesLegacyPass: boolean;
+        globalTestAgentBlockedAuthenticationNeedsUser: boolean;
+        globalTestAgentFailureSummaryRelayNeedsRework: boolean;
+        globalTestAgentFailureSummaryUiWaits: boolean;
+    };
+    visibleReply: string;
+};

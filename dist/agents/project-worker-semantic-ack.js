@@ -31,6 +31,7 @@ function buildProjectWorkerSemanticAckPrompt(workItem) {
         "[CCM PROJECT WORKER ACK PREFLIGHT]",
         "This is a read-only acknowledgement turn. Do not modify files, run commands, invoke tools, or perform implementation work.",
         "Return exactly one JSON object and no prose.",
+        "Keep the response compact (under 180 tokens): do not repeat the business goal or evidence text; understoodGoal must be at most 20 Chinese characters; plannedScope, forbiddenScope and verificationPlan may be empty arrays.",
         JSON.stringify({
             schema: "ccm-project-worker-semantic-ack-request-v1",
             requirementChecksum: workItem.requirementChecksum,

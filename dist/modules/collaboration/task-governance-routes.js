@@ -8,6 +8,11 @@ const reliability_ledger_1 = require("../../system/reliability-ledger");
 const agent_sessions_1 = require("../../tasks/agent-sessions");
 const execution_kernel_1 = require("../../agents/execution-kernel");
 const task_conversation_links_1 = require("../../system/task-conversation-links");
+const task_run_store_1 = require("./task-run-store");
+const access_policy_1 = require("../system/access-policy");
+function requireTaskRunForNewModel(task, payload) {
+    return (0, task_run_store_1.validateActiveTaskRun)(task, payload?.run_id || payload?.runId || "");
+}
 function rejectMutationConflict(res, guard) {
     if (!("error" in guard))
         return false;
@@ -22,6 +27,9 @@ function handleTaskGovernanceRoutes(req, res, parsed, ctx, deps) {
         req.on("end", () => {
             try {
                 const payload = JSON.parse(body || "{}");
+                const target = (0, db_1.loadTasks)().find((item) => item.id === payload.id);
+                if (target && !(0, access_policy_1.hasTaskResourceAccess)(target, req.ccmAuth, "manage"))
+                    return (0, utils_1.sendJson)(res, { error: "当前账户没有该任务的管理权限", code: "RESOURCE_ACCESS_DENIED" }, 403);
                 const task = deps.archiveTask(payload.id, deps.compactFormText(payload.reason, "用户删除任务并移入归档"));
                 if (!task)
                     return (0, utils_1.sendJson)(res, { error: "任务不存在" }, 404);
@@ -79,8 +87,17 @@ function handleTaskGovernanceRoutes(req, res, parsed, ctx, deps) {
                     return (0, utils_1.sendJson)(res, { error: "请选择任务" }, 400);
                 if (!["archive", "restore", "purge", "pause", "resume", "cancel"].includes(action))
                     return (0, utils_1.sendJson)(res, { error: "不支持的批量操作" }, 400);
-                const results = ids.map((id) => {
+                const runIds = Array.isArray(payload.run_ids) ? payload.run_ids : [];
+                const results = ids.map((id, index) => {
                     try {
+                        const task = (0, db_1.loadTasks)().find((item) => item.id === id);
+                        if (!task)
+                            return { id, success: false, error: "任务不存在" };
+                        const runGuard = ["pause", "resume", "cancel"].includes(action)
+                            ? requireTaskRunForNewModel(task, { run_id: runIds[index] || "" })
+                            : { ok: true, runId: "" };
+                        if (!runGuard.ok)
+                            return { id, success: false, ...runGuard };
                         if (action === "archive")
                             return { id, success: !!deps.archiveTask(id, "用户批量删除任务并移入归档") };
                         if (action === "restore")
@@ -88,18 +105,18 @@ function handleTaskGovernanceRoutes(req, res, parsed, ctx, deps) {
                         if (action === "purge")
                             return { id, success: !!deps.purgeArchivedTask(id) };
                         if (action === "cancel") {
-                            deps.removeTaskFromQueues(id);
+                            deps.removeTaskFromQueues(id, runGuard.runId);
                             (0, execution_kernel_1.requestTaskCancellation)(id, "用户批量取消任务", "task-governance");
-                            const task = deps.updateTask(id, { status: "cancelled", auto_execute: false, cancelled_at: new Date().toISOString(), status_detail: "用户批量取消任务" });
+                            const updatedTask = deps.updateTask(id, { status: "cancelled", auto_execute: false, cancelled_at: new Date().toISOString(), status_detail: "用户批量取消任务" });
                             (0, agent_sessions_1.closeTaskAgentSessions)({ taskId: id }, "用户批量取消任务");
                             (0, reliability_ledger_1.releaseTaskLease)(id, "cancelled");
-                            return { id, success: !!task };
+                            return { id, success: !!updatedTask };
                         }
                         const paused = action === "pause";
-                        const task = deps.updateTask(id, { status: paused ? "paused" : "pending", is_paused: paused, paused, status_detail: paused ? "用户批量暂停" : "用户批量恢复" });
-                        if (!paused && task)
-                            deps.enqueueTask(id, ctx);
-                        return { id, success: !!task };
+                        const updatedTask = deps.updateTask(id, { status: paused ? "paused" : "pending", is_paused: paused, paused, status_detail: paused ? "用户批量暂停" : "用户批量恢复" });
+                        if (!paused && updatedTask)
+                            deps.enqueueTask(id, ctx, runGuard.runId);
+                        return { id, success: !!updatedTask };
                     }
                     catch (error) {
                         return { id, success: false, error: error.message };
@@ -126,9 +143,12 @@ function handleTaskGovernanceRoutes(req, res, parsed, ctx, deps) {
                 const task = tasks.find(t => t.id === task_id);
                 if (!task)
                     return (0, utils_1.sendJson)(res, { error: "任务不存在" }, 404);
+                const runGuard = requireTaskRunForNewModel(task, payload);
+                if (!runGuard.ok)
+                    return (0, utils_1.sendJson)(res, runGuard, 409);
                 if (rejectMutationConflict(res, (0, task_conversation_links_1.validateTaskMutationGuard)(task, payload, { requireTarget: true })))
                     return;
-                const queueResult = deps.enqueueTask(task_id, ctx);
+                const queueResult = deps.enqueueTask(task_id, ctx, runGuard.runId);
                 (0, utils_1.sendJson)(res, { success: true, message: queueResult.message, queued: queueResult.queued, queue_result: queueResult, queue_status: deps.getQueueStatus() });
             }
             catch (e) {
@@ -150,13 +170,16 @@ function handleTaskGovernanceRoutes(req, res, parsed, ctx, deps) {
                 const task = (0, db_1.loadTasks)().find((item) => item.id === taskId);
                 if (!task)
                     return (0, utils_1.sendJson)(res, { error: "任务不存在" }, 404);
+                const runGuard = requireTaskRunForNewModel(task, payload);
+                if (!runGuard.ok)
+                    return (0, utils_1.sendJson)(res, runGuard, 409);
                 if (rejectMutationConflict(res, (0, task_conversation_links_1.validateTaskMutationGuard)(task, payload, { requireTarget: true })))
                     return;
                 const operation = operationKey ? (0, reliability_ledger_1.acquireIdempotency)({ scope: "task-retry", key: `${taskId}:${operationKey}`, traceId: task?.trace_id, leaseMs: 60_000 }) : null;
                 if (operation && !operation.acquired)
                     return (0, utils_1.sendJson)(res, { success: true, duplicate: true, ...(operation.record?.result || {}), trace_id: operation.traceId });
                 const autoExecute = payload.auto_execute !== false && payload.autoExecute !== false;
-                const result = deps.retryTask(taskId, ctx, payload.reason || payload.message || "", autoExecute);
+                const result = deps.retryTask(taskId, ctx, payload.reason || payload.message || "", autoExecute, runGuard.runId || undefined);
                 if (!result.success) {
                     if (operationKey)
                         (0, reliability_ledger_1.failIdempotency)("task-retry", `${taskId}:${operationKey}`, result.error || "重试失败");
@@ -191,10 +214,14 @@ function handleTaskGovernanceRoutes(req, res, parsed, ctx, deps) {
         req.on("data", (chunk) => body += chunk);
         req.on("end", () => {
             try {
-                const { task_ids } = JSON.parse(body);
+                const { task_ids, run_ids } = JSON.parse(body);
                 if (!task_ids || !Array.isArray(task_ids))
                     return (0, utils_1.sendJson)(res, { error: "缺少任务 ID 列表" }, 400);
-                const results = task_ids.map(id => ({ task_id: id, ...deps.enqueueTask(id, ctx) }));
+                const results = task_ids.map((id, index) => {
+                    const task = (0, db_1.loadTasks)().find(item => item.id === id);
+                    const runGuard = requireTaskRunForNewModel(task, { run_id: Array.isArray(run_ids) ? run_ids[index] : "" });
+                    return !task ? { task_id: id, queued: false, error: "任务不存在" } : !runGuard.ok ? { task_id: id, queued: false, ...runGuard } : { task_id: id, run_id: runGuard.runId || undefined, ...deps.enqueueTask(id, ctx, runGuard.runId) };
+                });
                 const queuedCount = results.filter(r => r.queued).length;
                 (0, utils_1.sendJson)(res, { success: true, message: `${queuedCount}/${task_ids.length} 个任务已加入队列`, results, queue_status: deps.getQueueStatus() });
             }

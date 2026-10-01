@@ -36,9 +36,17 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.WORKSPACE_READONLY_TOOL_DEFINITIONS_V3 = exports.WORKSPACE_READONLY_TOOL_DEFINITIONS_V2 = void 0;
 exports.sealScopedToolCapability = sealScopedToolCapability;
 exports.openScopedToolCapability = openScopedToolCapability;
+exports.workspaceSearchRespectsGitignore = workspaceSearchRespectsGitignore;
+exports.workspaceSearchExcludeGlobs = workspaceSearchExcludeGlobs;
+exports.isRootBroadSearch = isRootBroadSearch;
+exports.workspaceSearchPolicyPreview = workspaceSearchPolicyPreview;
 exports.executeWorkspaceReadonlyTool = executeWorkspaceReadonlyTool;
 exports.executeWorkspaceReadonlyToolWithCapability = executeWorkspaceReadonlyToolWithCapability;
 exports.runWorkspaceReadonlyToolsSelfTest = runWorkspaceReadonlyToolsSelfTest;
+const workspace_read_guidance_1 = require("./workspace-read-guidance");
+const workspace_file_metadata_1 = require("./workspace-file-metadata");
+const main_agent_tool_prompt_1 = require("./main-agent-tool-prompt");
+const workspace_json_fields_1 = require("./workspace-json-fields");
 const crypto = __importStar(require("crypto"));
 const fs = __importStar(require("fs"));
 const os = __importStar(require("os"));
@@ -58,10 +66,16 @@ const cc_tool_result_limits_1 = require("./cc-tool-result-limits");
 const workspace_read_media_1 = require("./workspace-read-media");
 const transient_model_content_1 = require("../system/transient-model-content");
 const workspace_search_runtime_1 = require("./workspace-search-runtime");
+const workspace_file_context_read_1 = require("./workspace-file-context-read");
 const workspace_readonly_analysis_1 = require("./workspace-readonly-analysis");
 const execFileAsync = (0, util_1.promisify)(child_process_1.execFile);
 const SECRET_FILE = path.join(os.homedir(), ".ccm", "private", "main-agent-tool-capability-secret");
-const EXCLUDED_DIRECTORIES = new Set([".git", "node_modules", "target", "dist", "build", "coverage", ".next", ".nuxt", ".output"]);
+const EXCLUDED_DIRECTORIES = new Set([
+    ".git", ".svn", ".hg", "node_modules", "target", "dist", "build", "coverage",
+    ".next", ".nuxt", ".output", ".cache", ".tmp", "release-artifacts",
+]);
+const CCM_GENERATED_DIRECTORY = "ccm-package";
+const ROOT_BROAD_SEARCH_RESULT_THRESHOLD = 50;
 const SENSITIVE_NAMES = /(?:^|[-_.])(?:credentials?|secrets?|private[-_.]?key|access[-_.]?key|service[-_.]?account|firebase[-_.]?admin)(?:[-_.]|$)|^\.env(?:\.|$)|^\.(?:npmrc|pypirc|netrc)$|^id_(?:rsa|dsa|ecdsa|ed25519)(?:\.pub)?$|\.(?:pem|p12|pfx|key|keystore|jks)$/i;
 const RG_SENSITIVE_GLOBS = [
     "!**/.env", "!**/.env.*", "!**/.npmrc", "!**/.pypirc", "!**/.netrc",
@@ -148,10 +162,10 @@ function openScopedToolCapability(token) {
     return body;
 }
 const rawDefinitions = [
-    { name: "list_directory", loadPolicy: "base", description: "List files and subdirectories in an authorized project with pagination. Return at most 100 items by default and paginate until complete. project_id may be omitted when the scope has exactly one authorized project.", inputSchema: { type: "object", properties: { project_id: { type: "string", description: "Omit only when exactly one project is authorized; pass the exact project name for multiple projects." }, path: { type: "string" }, cursor: { type: "string" }, limit: { type: "integer", minimum: 1, maximum: 100 } } } },
-    { name: "glob_files", loadPolicy: "base", description: "Find files in an authorized project by Glob pattern, sorted by modification time. Return at most 100 matches by default and paginate when incomplete.", inputSchema: { type: "object", required: ["pattern"], properties: { project_id: { type: "string" }, pattern: { type: "string" }, cursor: { type: "string" }, limit: { type: "integer", minimum: 1, maximum: 100 } } } },
-    { name: "grep_text", loadPolicy: "base", description: "Search authorized project source with ripgrep text or regular expressions. Return at most 250 matches unless a limit is given; an explicit limit of 0 means unbounded.", inputSchema: { type: "object", required: ["pattern"], properties: { project_id: { type: "string" }, pattern: { type: "string" }, glob: { type: "string" }, mode: { enum: ["content", "files_with_matches", "count"] }, multiline: { type: "boolean" }, cursor: { type: "string" }, limit: { type: "integer", minimum: 1, maximum: 500 } } } },
-    { name: "read_file", loadPolicy: "base", description: "Read a file inside an authorized project. Read up to 2000 lines from the beginning by default; provide offset and limit only when the file is too large for one read. Return unchanged when the same content is already held in context.", inputSchema: { type: "object", required: ["path"], properties: { project_id: { type: "string" }, path: { type: "string" }, offset: { type: "integer", minimum: 1 }, limit: { type: "integer", minimum: 1, maximum: 2000 }, expected_checksum: { type: "string" } } } },
+    { name: "list_directory", loadPolicy: "base", description: "List one authorized project directory. Use a specific path for exploration; return at most 100 entries and do not drain every root-level page unless the user explicitly asks.", inputSchema: { type: "object", properties: { project_id: { type: "string", description: "Omit only when exactly one project is authorized; pass the exact project name for multiple projects." }, path: { type: "string" }, cursor: { type: "string" }, limit: { type: "integer", minimum: 1, maximum: 100 }, respect_gitignore: { type: "boolean", description: "Defaults to true; set false only when the user explicitly needs ignored entries." } } } },
+    { name: "glob_files", loadPolicy: "base", description: "Find authorized project files by a focused Glob pattern, sorted by modification time. Start with a path-scoped pattern; root-level **/* exploration over 50 results asks for a narrower scope. Return at most 100 matches and do not drain pages automatically.", inputSchema: { type: "object", required: ["pattern"], properties: { project_id: { type: "string" }, pattern: { type: "string" }, path: { type: "string" }, cursor: { type: "string" }, limit: { type: "integer", minimum: 1, maximum: 100 }, respect_gitignore: { type: "boolean", description: "Defaults to true; set false only when the user explicitly needs ignored files." } } } },
+    { name: "grep_text", loadPolicy: "base", description: "Search authorized project source with ripgrep. Default mode is files_with_matches: first locate paths, then read only relevant files. Use path/glob/type filters; root-level **/* over 50 matches asks for a narrower scope. Return at most 250 matches and never use an unbounded repository search by default.", inputSchema: { type: "object", required: ["pattern"], properties: { project_id: { type: "string" }, pattern: { type: "string" }, path: { type: "string" }, glob: { type: "string" }, type: { type: "string" }, mode: { enum: ["content", "files_with_matches", "count"] }, output_mode: { enum: ["content", "files_with_matches", "count"] }, head_limit: { type: "integer", minimum: 0, maximum: 10000 }, offset: { type: "integer", minimum: 0 }, multiline: { type: "boolean" }, respect_gitignore: { type: "boolean", description: "Defaults to true; set false only when the user explicitly needs ignored files." } } } },
+    { name: "read_file", loadPolicy: "base", description: workspace_read_guidance_1.WORKSPACE_FILE_READ_DESCRIPTION, inputSchema: { type: "object", required: ["path"], properties: { project_id: { type: "string" }, path: { type: "string" }, offset: { type: "integer", minimum: 1 }, limit: { type: "integer", minimum: 1, maximum: 2000 }, expected_checksum: { type: "string" } } } },
     { name: "inspect_notebook", loadPolicy: "search", description: "Inspect notebook metadata, cell identities, source checksums, and output types structurally; never return cell bodies.", inputSchema: { type: "object", required: ["path"], properties: { project_id: { type: "string" }, path: { type: "string" }, cursor: { type: "string" }, limit: { type: "integer", minimum: 1, maximum: 200 } } } },
     { name: "web_fetch", loadPolicy: "search", description: "Safely read a public HTTPS page, text, JSON, or PDF and summarize it with the model using the prompt. Validate DNS and redirects on every request; block private networks, credential URLs, and oversized responses. The prompt is required and must state what to extract. Fail explicitly when no unified model is configured; never return the full page silently.", inputSchema: { type: "object", required: ["url", "prompt"], properties: { project_id: { type: "string" }, url: { type: "string" }, prompt: { type: "string", description: "What to extract from the page." } } } },
     ...((0, web_notebook_tools_1.isWebSearchAvailable)() ? [{ name: "web_search", loadPolicy: "search", description: "Search the public Web through a configured real search provider. The tool is not registered when no real backend is configured.", inputSchema: { type: "object", required: ["query"], properties: { project_id: { type: "string" }, query: { type: "string" }, count: { type: "integer", minimum: 1, maximum: 20 } } } }] : []),
@@ -184,6 +198,7 @@ const v3Schemas = {
         type: "object", required: ["pattern"], additionalProperties: false,
         properties: {
             project_id: { type: "string" }, pattern: { type: "string" }, path: { type: "string" }, glob: { type: "string" },
+            respect_gitignore: { type: "boolean" },
             output_mode: { enum: ["content", "files_with_matches", "count"] }, mode: { enum: ["content", "files_with_matches", "count"] },
             "-B": { type: "integer", minimum: 0, maximum: 100 }, "-A": { type: "integer", minimum: 0, maximum: 100 },
             "-C": { type: "integer", minimum: 0, maximum: 100 }, context: { type: "integer", minimum: 0, maximum: 100 },
@@ -202,33 +217,6 @@ const v3Schemas = {
     },
 };
 const v3OnlyDefinitions = [
-    {
-        name: "read_files",
-        loadPolicy: "base",
-        description: "一次读取最多20个授权项目内的普通文本文件。每个文件独立返回路径、行号、校验和和续读位置；图片、PDF和Notebook请使用read_file。",
-        inputSchema: {
-            type: "object", required: ["paths"], additionalProperties: false,
-            properties: {
-                project_id: { type: "string" },
-                paths: {
-                    type: "array", minItems: 1, maxItems: 20,
-                    items: {
-                        oneOf: [
-                            { type: "string" },
-                            {
-                                type: "object", required: ["path"], additionalProperties: false,
-                                properties: {
-                                    path: { type: "string" }, offset: { type: "integer", minimum: 0 },
-                                    limit: { type: "integer", minimum: 1, maximum: 2000 },
-                                    expected_checksum: { type: "string" },
-                                },
-                            },
-                        ],
-                    },
-                },
-            },
-        },
-    },
     {
         name: "analyze_change_impact", loadPolicy: "search",
         description: "Analyze the direct and indirect impact of authorized project files or symbols using source dependencies, contracts, Git state, and related tests. This is bounded best-effort analysis and does not replace file evidence.",
@@ -279,7 +267,7 @@ exports.WORKSPACE_READONLY_TOOL_DEFINITIONS_V2 = rawDefinitions.map(definition =
     };
     return { ...body, checksum: checksum(body) };
 });
-exports.WORKSPACE_READONLY_TOOL_DEFINITIONS_V3 = [...rawDefinitions, ...v3OnlyDefinitions].map(definition => {
+exports.WORKSPACE_READONLY_TOOL_DEFINITIONS_V3 = [...rawDefinitions, ...v3OnlyDefinitions, workspace_json_fields_1.JSON_FIELDS_TOOL].map(definition => {
     const body = {
         ...definition,
         ...(v3Schemas[definition.name] ? { inputSchema: v3Schemas[definition.name] } : {}),
@@ -523,7 +511,7 @@ async function walkDetailed(root, relativeBase = "", options = {}) {
             }
             if (entry.isSymbolicLink())
                 continue;
-            if (entry.isDirectory() && EXCLUDED_DIRECTORIES.has(entry.name.toLowerCase()))
+            if (entry.isDirectory() && (options.excludedDirectories || EXCLUDED_DIRECTORIES).has(entry.name.toLowerCase()))
                 continue;
             const absolute = path.join(directory, entry.name);
             const projectRelative = normalizeRelative(path.relative(realRoot, absolute));
@@ -548,6 +536,113 @@ function pageOffset(rows, offsetValue, limitValue, defaultLimit) {
     const items = rows.slice(offset, offset + limit);
     return { items, offset, limit, total: rows.length, next_cursor: offset + items.length < rows.length ? String(offset + items.length) : "", truncated: offset + items.length < rows.length };
 }
+function workspaceSearchRespectsGitignore(args) {
+    return args?.respect_gitignore !== false;
+}
+const respectGitignore = workspaceSearchRespectsGitignore;
+function explicitlyScopesDirectory(args, directory) {
+    const name = String(directory || "").toLowerCase();
+    const values = [args?.path, args?.pattern, args?.glob]
+        .map(value => normalizeRelative(value).toLowerCase())
+        .filter(Boolean);
+    return values.some(value => value === name || value.startsWith(`${name}/`) || value.includes(`/${name}/`) || value.includes(`/${name}`));
+}
+function explicitlyScopesCcmGeneratedTree(args) {
+    const values = [args?.path, args?.pattern, args?.glob]
+        .map(value => normalizeRelative(value).toLowerCase())
+        .filter(Boolean);
+    return values.some(value => value === CCM_GENERATED_DIRECTORY
+        || value.startsWith(`${CCM_GENERATED_DIRECTORY}/`)
+        || value.startsWith(`${CCM_GENERATED_DIRECTORY}/**`)
+        || value.includes(`/${CCM_GENERATED_DIRECTORY}/`));
+}
+function isCcmWorkspaceRoot(root) {
+    try {
+        const packageJson = JSON.parse(fs.readFileSync(path.join(root, CCM_GENERATED_DIRECTORY, "package.json"), "utf8"));
+        return packageJson?.name === "@mumulinya167/cc-web"
+            && packageJson?.main === "dist/server.js"
+            && fs.existsSync(path.join(root, "backend"))
+            && fs.existsSync(path.join(root, "frontend"));
+    }
+    catch {
+        return false;
+    }
+}
+function autoExcludedDirectories(root, args) {
+    const directories = new Set(EXCLUDED_DIRECTORIES);
+    if (isCcmWorkspaceRoot(root))
+        directories.add(CCM_GENERATED_DIRECTORY);
+    const explicitGeneratedTree = explicitlyScopesCcmGeneratedTree(args);
+    const generatedDirectories = new Set([
+        "node_modules", "target", "dist", "build", "coverage", ".next", ".nuxt", ".output",
+        ".cache", ".tmp", "release-artifacts", CCM_GENERATED_DIRECTORY,
+    ]);
+    return [...directories].filter(directory => {
+        if (explicitGeneratedTree && generatedDirectories.has(directory.toLowerCase()))
+            return false;
+        return !explicitlyScopesDirectory(args, directory);
+    });
+}
+function ignorePolicy(engine, respects) {
+    if (!respects)
+        return "disabled";
+    return engine === "node_fallback" ? "degraded" : "native";
+}
+function ignoreDegradedReason(engine, respects) {
+    return respects && engine === "node_fallback" ? "node_fallback_root_rules_only" : undefined;
+}
+function workspaceSearchExcludeGlobs(args, root = "") {
+    const excluded = ["!.git/**", "!.svn/**", "!.hg/**", ...RG_SENSITIVE_GLOBS];
+    for (const directory of autoExcludedDirectories(root, args)) {
+        excluded.push(`!${directory}/**`, `!**/${directory}/**`);
+    }
+    return excluded;
+}
+const searchExcludeGlobs = workspaceSearchExcludeGlobs;
+function excludedDirectoryCount(args, root = "") {
+    return autoExcludedDirectories(root, args).length;
+}
+function excludedDirectoriesForSearch(args, root = "") {
+    return new Set(autoExcludedDirectories(root, args)
+        .map(directory => directory.toLowerCase()));
+}
+function isRootBroadSearch(kind, args, pattern) {
+    const targetPath = normalizeRelative(args?.path || "");
+    if (targetPath && targetPath !== ".")
+        return false;
+    const candidate = normalizeRelative(kind === "glob" ? pattern : (args?.glob || "**/*"));
+    return candidate === "**/*" || candidate === "**" || candidate === "*";
+}
+function broadSearchAdvice(kind, total, returned) {
+    const omitted = Math.max(0, total - returned);
+    return {
+        tool_usage_policy_version: main_agent_tool_prompt_1.CCM_TOOL_USAGE_POLICY_VERSION,
+        scope_too_broad: total > ROOT_BROAD_SEARCH_RESULT_THRESHOLD,
+        requires_narrow_scope: total > ROOT_BROAD_SEARCH_RESULT_THRESHOLD,
+        suggested_scope: kind === "directory"
+            ? "指定源码目录（如 src、backend、frontend、lib、scripts），不要连续排空根目录分页"
+            : "指定 path 和更窄的 glob/type（如 src/**/*.ts 或 backend/**），先定位路径再 read_file",
+        requested_result_count: total,
+        returned_result_count: returned,
+        omitted_result_count: omitted,
+        delegation_recommended: total > ROOT_BROAD_SEARCH_RESULT_THRESHOLD,
+        next_action: total > ROOT_BROAD_SEARCH_RESULT_THRESHOLD
+            ? "请先缩小搜索范围，再读取命中的少量文件。"
+            : undefined,
+    };
+}
+function workspaceSearchPolicyPreview(kind, args, total) {
+    const normalizedTotal = Math.max(0, Number(total || 0));
+    const rootBroad = kind === "directory"
+        ? (() => { const value = normalizeRelative(args?.path || ""); return !value || value === "."; })()
+        : isRootBroadSearch(kind, args, String(args?.pattern || "**/*"));
+    const requiresNarrowScope = rootBroad && normalizedTotal > ROOT_BROAD_SEARCH_RESULT_THRESHOLD;
+    return {
+        ...broadSearchAdvice(kind, normalizedTotal, requiresNarrowScope ? ROOT_BROAD_SEARCH_RESULT_THRESHOLD : normalizedTotal),
+        root_broad_search: rootBroad,
+        requires_narrow_scope: requiresNarrowScope,
+    };
+}
 async function globFilesV3(root, args, options = {}) {
     const pattern = normalizeRelative(args?.pattern || "**/*");
     if (!pattern || pattern.length > 500)
@@ -558,9 +653,9 @@ async function globFilesV3(root, args, options = {}) {
         throw new Error("Glob的path必须是目录");
     const target = normalizeRelative(path.relative(root, base)) || ".";
     const rgArgs = ["--files", "--hidden"];
-    if (args?.respect_gitignore !== true)
+    if (!respectGitignore(args))
         rgArgs.push("--no-ignore");
-    for (const excluded of ["!.git/**", "!node_modules/**", "!target/**", "!dist/**", "!build/**", "!coverage/**", "!.next/**", "!.nuxt/**", "!.output/**", ...RG_SENSITIVE_GLOBS])
+    for (const excluded of searchExcludeGlobs(args, root))
         rgArgs.push("--glob", excluded);
     rgArgs.push(target);
     let fallbackWalked = null;
@@ -568,7 +663,7 @@ async function globFilesV3(root, args, options = {}) {
         signal: options.signal,
         nodeFallback: async () => {
             const deadline = Date.now() + (process.env.WSL_DISTRO_NAME ? 60_000 : 20_000);
-            fallbackWalked = await walkDetailed(root, relativeBase, { signal: options.signal, deadline });
+            fallbackWalked = await walkDetailed(root, relativeBase, { signal: options.signal, deadline, excludedDirectories: excludedDirectoriesForSearch(args, root) });
             return {
                 stdout: fallbackWalked.rows.map(row => row.path).join("\n"),
                 engine: "node_fallback",
@@ -590,19 +685,26 @@ async function globFilesV3(root, args, options = {}) {
         catch { }
     }
     const walked = { rows, scanLimitReached: paths.length >= DIRECTORY_SCAN_LIMIT || search.partial || fallbackWalked?.scanLimitReached === true };
-    const ignorePatterns = args?.respect_gitignore === true ? rootIgnorePatterns(root) : [];
+    const ignorePatterns = respectGitignore(args) ? rootIgnorePatterns(root) : [];
     const matches = walked.rows
         .filter(row => !ignorePatterns.length || !ignoredByRootGitignore(row.path, ignorePatterns))
         .filter(row => (0, minimatch_1.minimatch)(row.relativeToBase, pattern, { dot: true, nocase: process.platform === "win32", matchBase: !pattern.includes("/") }))
         .sort((left, right) => right.mtimeMs - left.mtimeMs || left.path.localeCompare(right.path));
     const selected = pageOffset(matches, args?.offset, args?.limit, cc_tool_result_limits_1.CC_ALIGNED_GLOB_MAX_RESULTS);
-    const items = selected.items.map(row => row.path);
+    const broad = isRootBroadSearch("glob", args, pattern) && matches.length > ROOT_BROAD_SEARCH_RESULT_THRESHOLD;
+    const items = selected.items.slice(0, broad ? ROOT_BROAD_SEARCH_RESULT_THRESHOLD : selected.items.length).map(row => row.path);
+    const scopeAdvice = broadSearchAdvice("glob", matches.length, items.length);
     const value = {
         schema: "ccm-workspace-glob-result-v3", toolContractVersion: 3, pattern, path: relativeBase,
         items, filenames: items, numFiles: items.length, durationMs: 0,
-        total: selected.total, offset: selected.offset, next_cursor: selected.next_cursor,
-        truncated: selected.truncated || walked.scanLimitReached, scan_limit_reached: walked.scanLimitReached,
-        status: search.partial ? "partial" : "read",
+        total: selected.total, offset: selected.offset, next_cursor: broad ? "" : selected.next_cursor,
+        truncated: broad || selected.truncated || walked.scanLimitReached, scan_limit_reached: walked.scanLimitReached,
+        search_scope: relativeBase || ".", search_scope_explicit: Boolean(relativeBase || pattern !== "**/*"),
+        respect_gitignore: respectGitignore(args), excluded_directory_count: excludedDirectoryCount(args, root),
+        ignore_policy: ignorePolicy(search.engine, respectGitignore(args)),
+        ...(ignoreDegradedReason(search.engine, respectGitignore(args)) ? { ignore_degraded_reason: ignoreDegradedReason(search.engine, respectGitignore(args)) } : {}),
+        ...scopeAdvice,
+        status: broad ? "scope_too_broad" : search.partial ? "partial" : "read",
         searchExecution: { engine: search.engine, timedOut: search.timedOut, cancelled: search.cancelled, partial: search.partial },
     };
     return enforceResultBudget({ ...value, safeReceipt: { kind: "glob", checksum: checksum(value), itemCount: items.length, truncated: value.truncated, contentStored: false } });
@@ -653,14 +755,14 @@ async function grepTextNodeFallback(root, args, target, targetStat, options) {
     const typeExtensions = args?.type ? FALLBACK_TYPE_EXTENSIONS[String(args.type).toLowerCase()] : undefined;
     if (args?.type && !typeExtensions)
         throw new Error(`未知文件类型：${String(args.type)}`);
-    const ignorePatterns = rootIgnorePatterns(root);
+    const ignorePatterns = respectGitignore(args) ? rootIgnorePatterns(root) : [];
     let candidates = [];
     let scanLimited = false;
     if (targetStat.isFile())
         candidates = [normalizeRelative(path.relative(root, target))];
     else {
         const relativeBase = normalizeRelative(path.relative(root, target));
-        const walked = await walkDetailed(root, relativeBase === "." ? "" : relativeBase, { signal: options.signal, deadline });
+        const walked = await walkDetailed(root, relativeBase === "." ? "" : relativeBase, { signal: options.signal, deadline, excludedDirectories: excludedDirectoriesForSearch(args, root) });
         candidates = walked.rows.map(row => row.path);
         scanLimited = walked.scanLimitReached || walked.interrupted;
     }
@@ -775,9 +877,9 @@ async function grepTextV3(root, args, options = {}) {
                 rgArgs.push("-A", String(Math.max(0, Number(args["-A"]) || 0)));
         }
     }
-    if (targetStat.isFile())
+    if (targetStat.isFile() || !respectGitignore(args))
         rgArgs.push("--no-ignore");
-    for (const excluded of ["!.git/**", "!.svn/**", "!.hg/**", "!.bzr/**", "!.jj/**", "!.sl/**", "!node_modules/**", "!target/**", "!dist/**", "!build/**", ...RG_SENSITIVE_GLOBS])
+    for (const excluded of searchExcludeGlobs(args, root))
         rgArgs.push("--glob", excluded);
     rgArgs.push("-e", pattern, relativeTarget);
     const search = await (0, workspace_search_runtime_1.runWorkspaceRipgrep)(rgArgs, root, {
@@ -792,13 +894,24 @@ async function grepTextV3(root, args, options = {}) {
     const truncated = offset + selected.length < allLines.length || search.partial;
     const filenames = mode === "files_with_matches" ? selected.map(normalizeRelative).filter(Boolean) : grepResultFiles(allLines);
     const numMatches = mode === "count" ? allLines.reduce((sum, line) => sum + Number(line.match(/:(\d+)$/)?.[1] || 0), 0) : undefined;
+    const broad = isRootBroadSearch("grep", args, pattern) && allLines.length > ROOT_BROAD_SEARCH_RESULT_THRESHOLD;
+    const scopeAdvice = broadSearchAdvice("grep", allLines.length, Math.min(selected.length, ROOT_BROAD_SEARCH_RESULT_THRESHOLD));
+    const visibleLines = broad ? [] : selected;
+    const visibleContent = broad ? undefined : selected.join("\n");
     const value = {
         schema: "ccm-workspace-grep-result-v3", toolContractVersion: 3, pattern, path: targetPath, mode,
-        filenames, numFiles: filenames.length, content: mode === "files_with_matches" ? undefined : selected.join("\n"),
-        lines: selected, numLines: mode === "content" ? selected.length : undefined, numMatches,
+        filenames: broad ? filenames.slice(0, ROOT_BROAD_SEARCH_RESULT_THRESHOLD) : filenames,
+        numFiles: broad ? Math.min(filenames.length, ROOT_BROAD_SEARCH_RESULT_THRESHOLD) : filenames.length,
+        content: mode === "files_with_matches" ? undefined : visibleContent,
+        lines: visibleLines, numLines: mode === "content" ? visibleLines.length : undefined, numMatches,
         appliedLimit: truncated ? requestedLimit : undefined, appliedOffset: offset || undefined,
-        next_cursor: truncated ? String(offset + selected.length) : "", truncated,
-        status: search.partial ? "partial" : "read",
+        next_cursor: broad ? "" : truncated ? String(offset + selected.length) : "", truncated: broad || truncated,
+        search_scope: targetPath || ".", search_scope_explicit: Boolean(targetPath !== "." || args?.glob || args?.type),
+        respect_gitignore: respectGitignore(args), excluded_directory_count: excludedDirectoryCount(args, root),
+        ignore_policy: ignorePolicy(search.engine, respectGitignore(args)),
+        ...(ignoreDegradedReason(search.engine, respectGitignore(args)) ? { ignore_degraded_reason: ignoreDegradedReason(search.engine, respectGitignore(args)) } : {}),
+        status: broad ? "scope_too_broad" : search.partial ? "partial" : "read",
+        ...scopeAdvice,
         searchExecution: { engine: search.engine, timedOut: search.timedOut, cancelled: search.cancelled, partial: search.partial },
     };
     return enforceResultBudget({ ...value, safeReceipt: { kind: "grep", checksum: checksum(value), itemCount: selected.length, truncated, contentStored: false } });
@@ -995,41 +1108,11 @@ async function readFileToolV3WithContext(root, project, args, context) {
     const file = safePath(root, args?.path);
     const relativePath = normalizeRelative(path.relative(root, file));
     const range = workspaceReadRange(args);
-    const stat = await fs.promises.lstat(file);
-    const cached = context?.lookup(project, relativePath, range, stat);
-    if (cached) {
-        const expected = String(args?.expected_checksum || args?.expectedChecksum || "").trim();
-        if (expected && expected !== cached.checksum)
-            fileChangedError(relativePath, expected, cached.checksum);
-        const value = {
-            schema: "ccm-workspace-read-result-v3", toolContractVersion: 3, type: "file_unchanged",
-            status: "unchanged", path: relativePath, checksum: cached.checksum,
-            offset: cached.from || range.offset || 1, total_lines: cached.totalLines || 0,
-            next_cursor: cached.nextOffset ? String(cached.nextOffset) : "", truncated: Boolean(cached.nextOffset),
-            ...(cached.nextOffset ? { continuation: { path: relativePath, nextOffset: cached.nextOffset, checksum: cached.checksum, ...(cached.totalLines ? { remainingLines: Math.max(0, cached.totalLines - Number(cached.to || 0)) } : {}) } } : {}),
-            safeReceipt: { kind: "unchanged", path: relativePath, checksum: cached.checksum, lineCount: 0, truncated: Boolean(cached.nextOffset), contentStored: false },
-        };
-        return enforceResultBudget(value, range.tokenBudget);
-    }
-    const inFlight = context?.inFlightFor(project, relativePath, range);
-    if (inFlight) {
-        await inFlight;
-        return readFileToolV3WithContext(root, project, args, context);
-    }
-    const reading = readFileToolV3(root, args).then(result => decorateWorkspaceReadResult(result, args));
-    context?.setInFlight(project, relativePath, range, reading);
-    const result = await reading;
-    const finalStat = await fs.promises.lstat(file);
-    context?.record({
-        project, path: relativePath, range, checksum: String(result?.checksum || result?.safeReceipt?.checksum || ""),
-        mtimeMs: finalStat.mtimeMs, size: finalStat.size,
-        totalLines: Number(result?.total_lines || result?.total_cells || result?.total_pages || 0),
-        from: Array.isArray(result?.lines) ? Number(result.lines[0]?.line || result?.offset || 1) : Number(result?.offset || 0),
-        to: Array.isArray(result?.lines) ? Number(result.lines.at(-1)?.line || result?.offset || 1)
-            : Array.isArray(result?.cells) ? Number(result?.offset || 0) + result.cells.length : 0,
-        nextOffset: Math.max(0, Number(result?.next_cursor || result?.nextCursor || 0)) || undefined,
+    return (0, workspace_file_context_read_1.readWorkspaceFileWithContext)({
+        file, project, path: relativePath, range, context,
+        read: () => readFileToolV3(root, args),
+        decorate: result => decorateWorkspaceReadResult(result, args),
     });
-    return result;
 }
 async function readFilesToolV3(root, project, args, context) {
     const requested = Array.isArray(args?.paths) ? args.paths : [];
@@ -1105,7 +1188,11 @@ async function executeWorkspaceReadonlyToolWithCapabilityRaw(toolName, args, cap
     const alias = { read_project_source: "read_project_config", read_runtime_diagnostics: "read_runtime_status" };
     const name = alias[String(toolName || "")] || String(toolName || "").replace(/^mcp__ccm__ccm_workspace_readonly__/, "");
     const definitions = contractVersion === 3 ? exports.WORKSPACE_READONLY_TOOL_DEFINITIONS_V3 : exports.WORKSPACE_READONLY_TOOL_DEFINITIONS_V2;
-    if (!definitions.some(tool => tool.name === name))
+    // Keep a narrow compatibility path for historical transcripts/replay. The
+    // legacy batch tool is intentionally absent from current definitions, so it
+    // is never advertised to the model or loaded into new Agent contexts.
+    const legacyReadFiles = name === "read_files" && contractVersion === 3;
+    if (!legacyReadFiles && !definitions.some(tool => tool.name === name))
         throw new Error(`未知只读工作区工具：${name}`);
     if (name === "compare_project_contracts") {
         if (contractVersion !== 3 || capability.scope !== "group")
@@ -1169,11 +1256,32 @@ async function executeWorkspaceReadonlyToolWithCapabilityRaw(toolName, args, cap
         const stat = await fs.promises.lstat(directory);
         if (!stat.isDirectory())
             throw new Error("目标不是目录");
+        const ignorePatterns = respectGitignore(args) ? rootIgnorePatterns(root) : [];
+        const excludedForDirectory = new Set(autoExcludedDirectories(root, args).map(name => name.toLowerCase()));
         const entries = (await fs.promises.readdir(directory, { withFileTypes: true }))
-            .filter(entry => !entry.isSymbolicLink() && !EXCLUDED_DIRECTORIES.has(entry.name.toLowerCase()) && !SENSITIVE_NAMES.test(entry.name))
+            .filter(entry => !entry.isSymbolicLink() && !excludedForDirectory.has(entry.name.toLowerCase()) && !SENSITIVE_NAMES.test(entry.name))
             .map(entry => ({ name: entry.name, path: normalizeRelative(path.relative(root, path.join(directory, entry.name))), type: entry.isDirectory() ? "directory" : entry.isFile() ? "file" : "other" }))
+            .filter(entry => !ignorePatterns.length || !ignoredByRootGitignore(entry.path, ignorePatterns))
             .sort((left, right) => left.type.localeCompare(right.type) || left.name.localeCompare(right.name));
-        return enforceResultBudget({ project, path: normalizeRelative(args?.path || ""), ...page(entries, args?.cursor, args?.limit, cc_tool_result_limits_1.CC_ALIGNED_GLOB_MAX_RESULTS) });
+        const paged = page(entries, args?.cursor, args?.limit, cc_tool_result_limits_1.CC_ALIGNED_GLOB_MAX_RESULTS);
+        const listingPath = normalizeRelative(args?.path || "");
+        const rootListing = (!listingPath || listingPath === ".") && entries.length > ROOT_BROAD_SEARCH_RESULT_THRESHOLD;
+        const visibleItems = rootListing ? paged.items.slice(0, ROOT_BROAD_SEARCH_RESULT_THRESHOLD) : paged.items;
+        const scopeAdvice = broadSearchAdvice("directory", entries.length, visibleItems.length);
+        return enforceResultBudget({
+            project, path: listingPath,
+            items: await (0, workspace_file_metadata_1.addVisibleFileSizes)(visibleItems, relative => safePath(root, relative)),
+            total: paged.total,
+            next_cursor: rootListing ? "" : paged.next_cursor,
+            truncated: rootListing || paged.truncated,
+            status: rootListing ? "scope_too_broad" : "read",
+            respect_gitignore: respectGitignore(args),
+            ignore_policy: ignorePolicy("node_fallback", respectGitignore(args)),
+            ignore_degraded_reason: respectGitignore(args) ? "node_fallback_root_rules_only" : undefined,
+            search_scope: listingPath || ".", search_scope_explicit: Boolean(listingPath && listingPath !== "."),
+            excluded_directory_count: excludedDirectoryCount(args, root),
+            ...scopeAdvice,
+        });
     }
     if (name === "glob_files") {
         if (contractVersion === 3)
@@ -1209,7 +1317,11 @@ async function executeWorkspaceReadonlyToolWithCapabilityRaw(toolName, args, cap
         const evidenced = attachPlanningReadEvidence(project, result);
         return (0, transient_model_content_1.attachTransientModelBlocks)({ project, ...evidenced }, (0, workspace_read_media_1.transientWorkspaceBlocks)(evidenced));
     }
-    if (name === "read_files") {
+    if (name === 'read_json_fields') {
+        const file = safePath(root, args?.path);
+        return enforceResultBudget(await (0, workspace_json_fields_1.readWorkspaceJsonFields)(file, project, normalizeRelative(path.relative(root, file)), args, options.readContext));
+    }
+    if (legacyReadFiles) {
         const result = await readFilesToolV3(root, project, args, options.readContext);
         return { project, ...result };
     }
@@ -1303,10 +1415,10 @@ async function executeWorkspaceReadonlyToolWithCapability(toolName, args, capabi
     if (result?.status === "needs_project_id")
         return result;
     const normalizedName = String(toolName || "").replace(/^mcp__ccm__ccm_workspace_readonly__/, "");
-    if (contractVersion !== 3 || !["read_file", "read_files", "glob_files", "grep_text"].includes(normalizedName))
+    if (contractVersion !== 3 || !["read_file", "glob_files", "grep_text"].includes(normalizedName))
         return result;
     const sourceReceipt = result?.safeReceipt || result?.safe_receipt || {};
-    const fallbackKind = normalizedName === "read_file" || normalizedName === "read_files" ? "text" : normalizedName === "glob_files" ? "glob" : "grep";
+    const fallbackKind = normalizedName === "read_file" ? "text" : normalizedName === "glob_files" ? "glob" : "grep";
     const receipt = {
         kind: sourceReceipt.kind || fallbackKind,
         ...(sourceReceipt.path || result?.path ? { path: String(sourceReceipt.path || result.path) } : {}),
@@ -1328,20 +1440,41 @@ async function executeWorkspaceReadonlyToolWithCapability(toolName, args, capabi
 function runWorkspaceReadonlyToolsSelfTest() {
     const checksums = [...exports.WORKSPACE_READONLY_TOOL_DEFINITIONS_V2, ...exports.WORKSPACE_READONLY_TOOL_DEFINITIONS_V3].map(tool => tool.checksum);
     const v3ByName = new Map(exports.WORKSPACE_READONLY_TOOL_DEFINITIONS_V3.map(tool => [tool.name, tool]));
+    const rootBroad = workspaceSearchPolicyPreview("glob", { pattern: "**/*" }, 51);
+    const scopedSearch = workspaceSearchPolicyPreview("grep", { path: "backend", glob: "**/*.ts" }, 500);
+    const genericExcludes = workspaceSearchExcludeGlobs({ pattern: "**/*" }, os.tmpdir());
+    const ccmExcludes = workspaceSearchExcludeGlobs({ pattern: "**/*" }, process.cwd());
+    const explicitGenerated = workspaceSearchExcludeGlobs({ pattern: "ccm-package/**" }, process.cwd());
     return {
         success: Boolean(exports.WORKSPACE_READONLY_TOOL_DEFINITIONS_V2.length >= 21
             && exports.WORKSPACE_READONLY_TOOL_DEFINITIONS_V3.length === exports.WORKSPACE_READONLY_TOOL_DEFINITIONS_V2.length + 9
+            && v3ByName.get("read_json_fields")?.loadPolicy === "search"
             && new Set(checksums).size === checksums.length
             && v3ByName.get("read_file")?.inputSchema?.properties?.pages
             && !v3ByName.get("read_file")?.inputSchema?.properties?.token_budget
-            && !v3ByName.get("read_files")?.inputSchema?.properties?.token_budget
-            && v3ByName.get("read_files")?.inputSchema?.properties?.paths?.maxItems === 20
+            && !v3ByName.has("read_files")
             && v3ByName.get("glob_files")?.inputSchema?.properties?.limit?.maximum === 100
             && v3ByName.get("list_directory")?.inputSchema?.properties?.limit?.maximum === 100
             && v3ByName.get("web_fetch")?.inputSchema?.required?.includes("prompt")
             && !v3ByName.get("web_fetch")?.inputSchema?.properties?.max_chars
             && v3ByName.get("glob_files")?.inputSchema?.properties?.respect_gitignore
             && v3ByName.get("grep_text")?.inputSchema?.properties?.output_mode
+            && v3ByName.get("grep_text")?.inputSchema?.properties?.respect_gitignore
+            && /files_with_matches/.test(String(v3ByName.get("grep_text")?.description || ""))
+            && /do not drain/i.test(String(v3ByName.get("list_directory")?.description || ""))
+            && v3ByName.get("list_directory")?.inputSchema?.properties?.respect_gitignore
+            && workspaceSearchRespectsGitignore({})
+            && !workspaceSearchRespectsGitignore({ respect_gitignore: false })
+            && rootBroad.root_broad_search === true
+            && rootBroad.requires_narrow_scope === true
+            && scopedSearch.requires_narrow_scope === false
+            && !genericExcludes.includes("!ccm-package/**")
+            && genericExcludes.includes("!dist/**")
+            && ccmExcludes.includes("!ccm-package/**")
+            && !explicitGenerated.includes("!ccm-package/**")
+            && !explicitGenerated.includes("!dist/**")
+            && !explicitGenerated.includes("!**/dist/**")
+            && !explicitGenerated.includes("!build/**")
             && [...workspace_readonly_analysis_1.WORKSPACE_ANALYSIS_TOOL_NAMES].every(name => v3ByName.get(name)?.loadPolicy === "search")
             && v3ByName.get("compare_project_contracts")?.inputSchema?.required?.includes("left_project_id")
             && v3ByName.get("run_inspection_command")?.inputSchema?.required?.includes("command")),

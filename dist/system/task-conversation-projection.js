@@ -3,10 +3,13 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.taskConversationProjectionContent = taskConversationProjectionContent;
 exports.syncTaskConversationProjection = syncTaskConversationProjection;
 exports.reconcileTaskConversationProjections = reconcileTaskConversationProjections;
+exports.reconcileTaskConversationProjectionsAsync = reconcileTaskConversationProjectionsAsync;
 exports.shouldSyncTaskConversationProjection = shouldSyncTaskConversationProjection;
 const db_1 = require("../core/db");
+const collaboration_task_card_1 = require("../modules/collaboration/collaboration-task-card");
 const task_user_runtime_1 = require("../agents/task-user-runtime");
 const user_visible_agent_events_1 = require("./user-visible-agent-events");
+const task_session_store_1 = require("../modules/collaboration/task-session-store");
 const text = (value, max = 2_000) => String(value ?? "").replace(/\s+/g, " ").trim().slice(0, max);
 const terminalStatuses = new Set(["done", "completed", "success", "failed", "blocked", "cancelled", "canceled", "interrupted"]);
 function scopeOf(task) {
@@ -111,7 +114,7 @@ function shouldReplaceMessage(existing, task, content) {
     const existingRuntime = existingProjection?.runtime_status || existingProjection?.runtimeStatus || {};
     if (String(existingRuntime?.phase || "") !== expectedRuntime.phase
         || existingRuntime?.terminal !== expectedRuntime.terminal
-        || (expectedRuntime.terminal && Array.isArray(existingProjection?.actions) && existingProjection.actions.length > 0)
+        || JSON.stringify(existingProjection?.available_actions) !== JSON.stringify(publicTaskProjection(task, activeSessionOf(task)).available_actions)
         || verificationCount(task) > (Array.isArray(existingProjection?.verification) ? existingProjection.verification.length : 0))
         return true;
     const existingStatus = text(existingProjection?.status, 40).toLowerCase();
@@ -150,6 +153,9 @@ function publicTaskProjection(task, activeSessionId) {
         next_action: runtimeStatus.next_action,
         completed_at: runtimeStatus.completed_at,
         acceptance_state: text(task?.acceptance_state, 80),
+        task_session_archive_policy: text(task?.task_spec?.task_session_archive_policy, 40),
+        task_session_archive_actions: (0, task_session_store_1.taskSessionArchiveActions)(task),
+        output_revision: (0, task_session_store_1.taskSessionOutputRevision)(task),
         final_summary: text(task?.final_summary || task?.result, 2_000),
         file_changes: task?.file_changes || null,
         verification,
@@ -171,9 +177,13 @@ function publicTaskProjection(task, activeSessionId) {
         recovery_pending: task?.recovery_pending === true,
         recovery_preflight: task?.recovery_preflight || null,
         recovery_transaction: task?.recovery_transaction || null,
+        task_session: (() => {
+            const session = (0, task_session_store_1.getTaskSession)(text(task?.id, 160));
+            return session ? { available: true, session_id: session.session_id, title: session.title, action_label: "查看任务会话" } : { available: false };
+        })(),
         task_context_revision: Math.max(0, Number(task?.task_context_revision || task?.task_context?.revision || 0)),
         task_context_checksum: text(task?.task_context_checksum || task?.task_context?.checksum, 160),
-        actions: terminal ? [] : Array.isArray(task?.actions) ? task.actions : [],
+        available_actions: terminal && ["done", "completed", "cancelled", "canceled"].includes(task?.status) ? [] : (0, collaboration_task_card_1.buildUserTaskActions)(task, runtimeStatus.phase, []),
     };
     return {
         ...projected,
@@ -291,7 +301,7 @@ function syncGroupSession(task, sessionId, content, sourceLink = false) {
         group_session_id: sessionId,
         conversation_projection_content: content,
         conversation_projection_source_link: sourceLink,
-    }, text(task?.status, 40), text(task?.status_detail || content, 500));
+    }, text(task?.status, 40), text(task?.status_detail || content, 500), sessionId);
     if (!result)
         return { status: "skipped", updated: false, issue: "group_task_message_unavailable" };
     if (result.projectionRejected)
@@ -418,6 +428,26 @@ function syncTaskConversationProjection(task, reason = "task_updated") {
 function reconcileTaskConversationProjections() {
     const tasks = (0, db_1.loadTasks)().filter((task) => !task?.archived && text(task?.id, 160));
     const receipts = tasks.map((task) => syncTaskConversationProjection(task, "startup_reconciliation"));
+    return {
+        checked: receipts.length,
+        synced: receipts.filter(item => item.status === "synced").length,
+        unchanged: receipts.filter(item => item.status === "unchanged").length,
+        skipped: receipts.filter(item => item.status === "skipped").length,
+        failed: receipts.filter(item => item.status === "failed").length,
+        receipts,
+        contentStored: false,
+    };
+}
+/** Startup-safe projection reconciliation.  A yield between tasks prevents
+ * a large persisted task list from making the already-listening HTTP server
+ * appear hung while recovery is running. */
+async function reconcileTaskConversationProjectionsAsync() {
+    const tasks = (0, db_1.loadTasks)().filter((task) => !task?.archived && text(task?.id, 160));
+    const receipts = [];
+    for (const task of tasks) {
+        await new Promise(resolve => setImmediate(resolve));
+        receipts.push(syncTaskConversationProjection(task, "startup_reconciliation"));
+    }
     return {
         checked: receipts.length,
         synced: receipts.filter(item => item.status === "synced").length,

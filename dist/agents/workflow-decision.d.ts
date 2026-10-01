@@ -1,0 +1,54 @@
+export type CcmMainAgentIntent = "direct_reply" | "status_inspection" | "management_action" | "source_inquiry" | "development_request" | "task_supervision";
+export type CcmManagementRisk = "read_only" | "mutable" | "destructive";
+export interface WorkflowDecision {
+    schema: "ccm-model-workflow-decision-v2";
+    reason: string;
+    confidence: number;
+    needsEpicDecomposition: boolean;
+    actionRequired: boolean;
+    continuationKind: "new_task" | "supplement" | "revise_goal";
+    readAction: "none" | "inspect_status" | "inspect_source";
+    sourceReadDepth: "none" | "focused" | "broad";
+    targetRefs: string[];
+    impactScope: string[];
+    planSteps: string[];
+    clarificationQuestions: string[];
+    structuredClarificationQuestions: any[];
+    selectedSkills: string[];
+    mainAgentIntent: CcmMainAgentIntent;
+    managementRisk: CcmManagementRisk;
+    intentKind: "conversation" | "question" | "status" | "analysis" | "execution" | "management" | "continuation";
+    requiresCodeChanges: boolean;
+    requiresAgentQa: boolean;
+    requiresIndependentReview: boolean;
+    verificationModes: Array<"commands" | "http" | "browser" | "visual" | "integration" | "release">;
+    memoryPolicy: "use" | "ignore";
+    sourcePolicy: "require_read" | "ignore_unread";
+    authorizationDirective: "preserve" | "grant" | "revoke";
+    riskLevel: "low" | "write" | "high";
+    requiresUserConfirmation: boolean;
+    directReplyReady: boolean;
+    directReply: string;
+    source: "model" | "explicit_user_choice";
+    semanticDecisionReceipt?: any;
+}
+export declare const WORKFLOW_DECISION_GUIDANCE: string;
+export declare function normalizeWorkflowDecision(value: any, source?: WorkflowDecision["source"]): WorkflowDecision;
+export declare function isDevelopmentTaskWorkflowDecision(value: any): boolean;
+export declare function explicitWorkflowDecision(reason: string, overrides?: Partial<WorkflowDecision>): WorkflowDecision;
+export declare function decideWorkflowWithModel(input: {
+    message: string;
+    scope: "global" | "group" | "project";
+    context?: any;
+    sourceCount?: number;
+}): Promise<WorkflowDecision>;
+export declare function runWorkflowDecisionContractSelfTest(): {
+    success: boolean;
+    cases: WorkflowDecision[];
+    management: WorkflowDecision;
+    sourceInquiry: WorkflowDecision;
+    serverRaisedRisk: WorkflowDecision;
+    direct: WorkflowDecision;
+    unsafeDirect: WorkflowDecision;
+    legacyRejected: boolean;
+};

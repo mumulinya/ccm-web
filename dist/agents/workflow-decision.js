@@ -10,6 +10,7 @@ const group_orchestrator_config_1 = require("../modules/collaboration/group-orch
 const internal_skill_catalog_1 = require("../skills/internal-skill-catalog");
 const semantic_decision_runtime_1 = require("../system/semantic-decision-runtime");
 const internal_prompt_contract_1 = require("./internal-prompt-contract");
+const unified_model_call_config_1 = require("../system/unified-model-call-config");
 exports.WORKFLOW_DECISION_GUIDANCE = `
 Select the next action from the user's complete meaning and the current context. Never classify by keyword, regex, message length, attachment presence, or local status labels.
 
@@ -225,7 +226,7 @@ Return exactly one valid JSON object and no Markdown. Use this shape:
         system: String(messages[0].content || ""),
         input: JSON.parse(String(messages[1].content || "{}")),
         maxTokens: 900,
-        reasoningEffort: "low",
+        reasoningEffort: (0, unified_model_call_config_1.resolveUnifiedModelConfig)({ callSource: "planner" }).reasoningEffort,
         validate: value => normalizeWorkflowDecision(value, "model"),
         confidence: value => value.confidence,
     });

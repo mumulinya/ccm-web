@@ -206,7 +206,7 @@ function compactGroupMessageTaskRuntime(runtime) {
             completion_card: card.completion_card,
             pickup_summary: card.pickup_summary,
             delivery: card.delivery,
-            actions: card.actions,
+            available_actions: card.available_actions,
             technical: card.technical,
             updated_at: card.updated_at,
         } : null,

@@ -514,6 +514,18 @@ class UnifiedSessionCompactionEngine {
             if (result.compacted) {
                 (0, session_compaction_runs_1.updateSessionCompactionRun)(snapshot.scope, snapshot.exactSessionId, String(this.input.compactionRunId || ""), { stage: "committing" });
                 await adapter.commit(result, fence);
+                const timelineScopeId = String(this.input.lifecycleScopeId || (snapshot.scope === "global" ? "global" : ""));
+                if (mustSummarize && snapshot.taskTimeline?.currentTaskId && timelineScopeId) {
+                    (0, session_task_timeline_1.recordTaskContextBoundary)({
+                        taskId: String(snapshot.taskTimeline.currentTaskId),
+                        exactSessionId: snapshot.exactSessionId,
+                        scope: snapshot.scope,
+                        scopeId: timelineScopeId,
+                        type: "context_compacted",
+                        generation: nextGeneration,
+                        boundaryRef: receipt.checksum,
+                    });
+                }
                 (0, session_compaction_runs_1.updateSessionCompactionRun)(snapshot.scope, snapshot.exactSessionId, String(this.input.compactionRunId || ""), { stage: "session_start", committed: true });
             }
             if (result.compacted) {

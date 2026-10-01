@@ -104,6 +104,9 @@ async function searchCandidates(decision) {
                     title: cleanText(item.title || item.awemeId, 200),
                     artist: cleanText(item.author || "抖音作者", 120),
                     duration: cleanText(item.duration || "", 40),
+                    pic: cleanText(item.pic || "", 2_000),
+                    shareUrl: cleanText(item.shareUrl || "", 2_000),
+                    searchChannel: item.searchChannel || "mcp",
                     downloadToken: String(item.downloadToken || ""),
                 })).filter(item => item.sourceId),
             })) });
@@ -128,6 +131,7 @@ async function resolveMusicPlaybackDecisionV2(input) {
         requestId,
         originalRequest: intent.originalRequest,
         action: intent.action,
+        mediaMode: intent.mediaMode,
         strategy: intent.strategy,
         sourceMode: sourceMode(intent.sourceMode),
         searchQuery: intent.searchQuery,

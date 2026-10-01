@@ -53,13 +53,17 @@ function validateMusicIntentDecision(value, requestText, mode) {
     return {
         schema: "ccm-music-intent-decision-v2",
         action: action,
+        douyinRequest: action === 'none' && value?.douyinRequest === true,
+        mediaMode: action === 'play' && value?.mediaMode === 'video' ? 'video' : undefined,
         strategy: strategy,
         originalRequest: String(requestText || "").trim().slice(0, 2_000),
         searchQuery,
         artist,
         mood,
         genre,
-        sourceMode: normalizeMusicSourceMode(value?.sourceMode || mode),
+        // mode 只是兼容旧客户端的上下文，不是来源过滤器。只有模型从当前消息
+        // 识别到明确平台并返回 sourceMode 时才限制来源，否则始终三端自动搜索。
+        sourceMode: normalizeMusicSourceMode(value?.sourceMode),
         randomize: strategy === "artist_random" || strategy === "mood_recommendation" || strategy === "genre_recommendation" || strategy === "random",
         strictMatch: strategy === "exact_song",
         confidence: Math.max(0, Math.min(1, Number(value?.confidence || 0))),
@@ -85,9 +89,11 @@ action must be none, search, play, or convert. Playback strategy must be exact_s
 - A search, recommendation list, or availability question: search.
 - Download, transcode, or conversion: convert.
 - Chitchat, lyric questions, and player explanations: none.
+- Only an explicit request to watch a video or the song's associated MV may set mediaMode="video" with action="play". Ordinary song playback and search must omit mediaMode. An MV must be the platform-verified association, never a guessed same-title video.
+- Douyin video details, comments, replies, author posts, recommendations, share-link resolution, image downloads, video downloads, OCR or transcription: none with douyinRequest=true. Use normal search/play for music search/play. Otherwise douyinRequest=false.
 sourceMode defaults to auto. Return local, netease, bilibili, or douyin only when the user explicitly names that source in the current message.
 The currently selected UI tab is not a source restriction.
-Return: {"action":"none|search|play|convert","strategy":"none|exact_song|artist_random|mood_recommendation|genre_recommendation|random","searchQuery":"","artist":"","mood":"","genre":"","sourceMode":"auto|local|netease|bilibili|douyin","confidence":0.0,"reason":""}`;
+Return: {"action":"none|search|play|convert","douyinRequest":false,"strategy":"none|exact_song|artist_random|mood_recommendation|genre_recommendation|random","searchQuery":"","artist":"","mood":"","genre":"","sourceMode":"auto|local|netease|bilibili|douyin","confidence":0.0,"reason":""}`;
     const result = await (0, semantic_decision_runtime_1.runSemanticDecision)({
         kind: "music_intent",
         identity: {
@@ -283,7 +289,7 @@ async function classifyMusicAgentAction(cfg, message, mode, history = []) {
         return {
             type: actionType,
             keyword: decision.searchQuery,
-            mode: mode || "cloud",
+            mode: decision.sourceMode,
             source: "agent",
             confidence: decision.confidence,
             reason: decision.reason,
@@ -308,7 +314,7 @@ async function classifyMusicAgentAction(cfg, message, mode, history = []) {
         return {
             type: "none",
             keyword: "",
-            mode: mode || "cloud",
+            mode: "auto",
             source: "model_unavailable",
             confidence: 0,
             reason: "统一大模型无法可靠识别音乐动作",
@@ -323,7 +329,10 @@ function getMusicHelpText(chatMode) {
     if (chatMode === "netease") {
         return `🎵 网易音乐助手\n\n你可以说：\n• "我想听周杰伦的歌" - 搜索网易\n• "搜索 轻音乐" - 搜索网易音乐\n• "来首适合学习的音乐" - 智能推荐\n\n点击搜索结果可一键下载为本地 MP3`;
     }
-    return `🎵 B站音乐助手\n\n你可以说：\n• "我想听周杰伦的歌" - 搜索B站\n• "搜索 轻音乐" - 搜索B站视频\n• "来首适合编程的音乐" - 智能推荐\n\n点击搜索结果可一键转码为本地 MP3`;
+    if (chatMode === "bilibili") {
+        return `🎵 B站音乐助手\n\n你可以说：\n• "我想听周杰伦的歌" - 搜索B站\n• "搜索 轻音乐" - 搜索B站视频\n• "来首适合编程的音乐" - 智能推荐\n\n点击搜索结果可一键转码为本地 MP3`;
+    }
+    return `🎵 CCM 音乐助手\n\n你可以说：\n• "我想听周杰伦的歌" - 在网易云、B站、抖音和本地曲库中统一搜索\n• "搜索 轻音乐" - 返回三端可用结果\n• "来首适合编程的音乐" - 智能推荐\n\n如果你明确说出平台名称，我会优先使用对应平台。`;
 }
 function writeSse(res, data) {
     if (!res || res.writableEnded || res.destroyed)
@@ -345,7 +354,11 @@ async function callClaudeAgent(cfg, system, messages, res, _chatMode, _options =
                 temperature: 0.2,
                 defaultTimeoutMs: Number(cfg?.timeoutMs || 120_000),
                 retryScope: "music_conversation",
-                providerContextCache: { scope: "music", scopeId: "music-agent", sessionId: "music-singleton", source: "music_conversation" },
+                providerContextCache: {
+                    scope: "music", scopeId: "music-agent", sessionId: "music-singleton", source: "music_conversation",
+                    requestAttribution: { purpose: "music_conversation", requestClass: "auxiliary", scope: "workspace", scopeId: "workspace", exactSessionId: "music-singleton" },
+                },
+                requestAttribution: { purpose: "music_conversation", requestClass: "auxiliary", scope: "workspace", scopeId: "workspace", exactSessionId: "music-singleton" },
             })
             : await (0, group_orchestrator_llm_client_1.callOpenAiCompatibleChat)(cfg, {
                 messages: [{ role: "system", content: system }, ...normalized],
@@ -353,7 +366,11 @@ async function callClaudeAgent(cfg, system, messages, res, _chatMode, _options =
                 temperature: 0.2,
                 defaultTimeoutMs: Number(cfg?.timeoutMs || 120_000),
                 retryScope: "music_conversation",
-                providerContextCache: { scope: "music", scopeId: "music-agent", sessionId: "music-singleton", source: "music_conversation" },
+                providerContextCache: {
+                    scope: "music", scopeId: "music-agent", sessionId: "music-singleton", source: "music_conversation",
+                    requestAttribution: { purpose: "music_conversation", requestClass: "auxiliary", scope: "workspace", scopeId: "workspace", exactSessionId: "music-singleton" },
+                },
+                requestAttribution: { purpose: "music_conversation", requestClass: "auxiliary", scope: "workspace", scopeId: "workspace", exactSessionId: "music-singleton" },
             });
         writeSse(res, { type: "text", text });
         writeSse(res, { type: "done" });

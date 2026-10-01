@@ -46,7 +46,6 @@ const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const db_1 = require("../core/db");
 const task_store_1 = require("../core/task-store");
-const atomic_json_file_1 = require("../core/atomic-json-file");
 const utils_1 = require("../core/utils");
 const attachment_reference_registry_1 = require("./attachment-reference-registry");
 const collaboration_1 = require("../modules/collaboration/collaboration");
@@ -54,6 +53,8 @@ const chat_runs_1 = require("../projects/chat-runs");
 const observability_database_1 = require("./observability-database");
 const storage_index_1 = require("./storage-index");
 const metrics_v3_1 = require("./metrics-v3");
+const douyin_media_jobs_1 = require("../modules/music/douyin-media-jobs");
+const automation_definition_service_1 = require("../modules/scheduling/automation-definition-service");
 const runtime_schema_policy_1 = require("./runtime-schema-policy");
 const CLEANUP_DIR = path.join(utils_1.CCM_DIR, "cleanup-center");
 const CLEANUP_LOCK_FILE = path.join(CLEANUP_DIR, "operation");
@@ -77,10 +78,10 @@ const ACTIONS = {
         risk: "danger",
         irreversible: true,
     },
-    purge_archived_cron: {
-        id: "purge_archived_cron",
-        label: "永久删除已归档定时任务",
-        description: "永久移除不再需要的定时任务配置。",
+    purge_archived_automations: {
+        id: "purge_archived_automations",
+        label: "永久删除已停用自动化",
+        description: "永久移除不再需要的自动化定义。",
         risk: "danger",
         irreversible: true,
     },
@@ -108,7 +109,7 @@ const ACTIONS = {
     purge_music_runtime: {
         id: "purge_music_runtime",
         label: "清理音乐运行记录与临时文件",
-        description: "清理过期播放命令、下载记录、已完成重复项隔离文件和CCM拥有的媒体临时文件，不删除正式歌曲、歌单或播放历史。",
+        description: "清理过期播放命令、下载记录、抖音媒体任务及缓存、已完成重复项隔离文件和CCM拥有的媒体临时文件，不删除正式歌曲、歌单或播放历史。",
         risk: "danger",
         irreversible: true,
     },
@@ -255,11 +256,11 @@ function listCleanupCandidates(action, retentionDays) {
             .filter((task) => matchesRetention(task, retentionDays, dateFields))
             .map(taskCandidate);
     }
-    else if (action === "purge_archived_cron") {
-        candidates = (0, db_1.loadCronJobs)()
-            .filter((job) => job.archived || job.deleted_at)
-            .filter((job) => matchesRetention(job, retentionDays, dateFields))
-            .map(cronCandidate);
+    else if (action === "purge_archived_automations") {
+        candidates = (0, automation_definition_service_1.listAutomationDefinitions)()
+            .filter((definition) => definition.enabled === false || definition.deleted_at)
+            .filter((definition) => matchesRetention(definition, retentionDays, dateFields))
+            .map((definition) => cronCandidate({ ...definition, id: definition.definition_id, name: definition.name }));
     }
     else if (action === "purge_archived_project_runs") {
         candidates = [...chat_runs_1.projectChatRuns.values()]
@@ -343,6 +344,7 @@ function listCleanupCandidates(action, retentionDays) {
             ...downloads.map(row => ({ id: `download:${row.job_id}`, title: "历史下载任务", status: row.status, project: "下载中心", updated_at: row.updated_at, fingerprint: candidateFingerprint(row) })),
             ...duplicates.map(row => ({ id: `duplicate:${row.transaction_id}`, title: "已完成重复项隔离文件", status: row.status, project: "曲库重复治理", updated_at: row.updated_at, fingerprint: candidateFingerprint(row) })),
             ...temporaryFiles,
+            ...(0, douyin_media_jobs_1.listDouyinMediaJobs)().filter(job => ['done', 'failed', 'cancelled'].includes(job.status) && job.updatedAt <= cutoff).map(job => ({ id: `douyin:${job.id}`, title: `抖音媒体缓存 ${job.tool}`, status: job.status, project: '抖音 MCP', updated_at: job.updatedAt, fingerprint: candidateFingerprint(job) })),
         ];
     }
     else if (action === "reset_metrics") {
@@ -440,7 +442,7 @@ function getCleanupHistory(limit = 40) {
 function getCleanupSummary() {
     const attachmentRegistry = (0, attachment_reference_registry_1.readAttachmentReferenceRegistry)();
     const tasks = (0, db_1.loadTasks)();
-    const cronJobs = (0, db_1.loadCronJobs)();
+    const cronJobs = (0, automation_definition_service_1.listAutomationDefinitions)();
     const projectRuns = [...chat_runs_1.projectChatRuns.values()];
     const groups = readJsonSafe(utils_1.GROUPS_FILE, []);
     const globalHistoryFile = path.join(utils_1.CCM_DIR, "global-agent-history.json");
@@ -499,8 +501,8 @@ function getCleanupSummary() {
             id: "cron",
             title: "定时任务",
             count: cronJobs.length,
-            bytes: fileBytes(path.join(utils_1.CCM_DIR, "cron-jobs.json")),
-            detail: `${cronJobs.filter((job) => job.archived || job.deleted_at).length} 项已归档`,
+            bytes: fileBytes(path.join(utils_1.CCM_DIR, "automation-definitions.json")),
+            detail: `${cronJobs.filter((definition) => definition.enabled === false || definition.deleted_at).length} 项已停用`,
         },
         {
             id: "project_runs",
@@ -729,15 +731,12 @@ function executeCleanupStep(action, id) {
         const result = (0, attachment_reference_registry_1.purgeOrphanAttachment)(id, 24 * 60 * 60_000);
         return { status: "deleted", cleanup: { upload_files: 1, upload_bytes: Number(result.bytes || 0) } };
     }
-    if (action === "purge_archived_cron") {
-        return (0, atomic_json_file_1.withFileLock)(path.join(CLEANUP_DIR, "cron"), () => {
-            const jobs = (0, db_1.loadCronJobs)();
-            const next = jobs.filter((job) => String(job.id || "") !== id);
-            if (next.length === jobs.length)
-                throw new Error("定时任务不存在");
-            (0, db_1.saveCronJobs)(next);
-            return { status: "deleted" };
-        });
+    if (action === "purge_archived_automations") {
+        const definition = (0, automation_definition_service_1.listAutomationDefinitions)().find((item) => String(item.definition_id) === id);
+        if (!definition)
+            throw new Error("自动化定义不存在");
+        (0, automation_definition_service_1.deleteAutomationDefinition)(id);
+        return { status: "deleted" };
     }
     if (action === "purge_read_notifications") {
         return (0, observability_database_1.withImmediateObservabilityTransaction)(db => {
@@ -757,6 +756,10 @@ function executeCleanupStep(action, id) {
         const [kind, rawId] = String(id || "").split(":", 2);
         if (!rawId)
             throw new Error("音乐清理项身份无效");
+        if (kind === 'douyin') {
+            (0, douyin_media_jobs_1.controlDouyinMediaJob)(rawId, 'remove');
+            return { status: 'deleted' };
+        }
         return (0, observability_database_1.withImmediateObservabilityTransaction)(db => {
             if (kind === "command") {
                 const changed = db.prepare(`

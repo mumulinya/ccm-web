@@ -405,7 +405,7 @@ function reopenTaskAgentSessions(taskId, reason = "用户在同一任务中继�
  * native sessions are replaced with a fresh CCM session so the provider can
  * rehydrate from the signed work packet instead of pretending to resume.
  */
-function activateTaskAgentSessionsForRecovery(taskId, reason = "中断恢复：重新进入执行") {
+function activateTaskAgentSessionsForRecovery(taskId, reason = "中断恢复：重新进入执行", options = {}) {
     const id = String(taskId || "").trim();
     if (!id)
         return { mode: "rehydrated_attempt", sessions: [], reopenedSessionIds: [], replacedSessionIds: [] };
@@ -428,7 +428,7 @@ function activateTaskAgentSessionsForRecovery(taskId, reason = "中断恢复：�
             const runtime = (0, runtime_1.getAgentRuntime)(current.agentType);
             const providerContractCompatible = !current.pendingProviderContractId
                 || (!!current.providerContractId && current.pendingProviderContractId === current.providerContractId);
-            const nativeReady = current.resumeMode === "native"
+            const nativeReady = options.forceNewRuntime !== true && current.resumeMode === "native"
                 && runtime.capabilities.sessionResume === true
                 && !!String(current.nativeSessionId || "").trim()
                 && providerContractCompatible;
@@ -450,6 +450,8 @@ function activateTaskAgentSessionsForRecovery(taskId, reason = "中断恢复：�
                 continue;
             }
             const runtimeId = (0, runtime_1.normalizeAgentRuntimeId)(current.agentType);
+            const currentIndex = store.sessions.findIndex(item => item.id === current.id);
+            store.sessions[currentIndex] = { ...current, status: "closed", closedAt: now, closeReason: "recovery_runtime_replaced" };
             const replacement = {
                 ...current,
                 id: `tas_${Date.now().toString(36)}_${crypto.randomBytes(3).toString("hex")}`,

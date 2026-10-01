@@ -59,14 +59,13 @@ exports.updateTaskByIdCas = updateTaskByIdCas;
 exports.listUsabilityTaskCandidates = listUsabilityTaskCandidates;
 exports.listUsabilityArchiveCandidates = listUsabilityArchiveCandidates;
 exports.listTasksByParentId = listTasksByParentId;
+exports.listTaskSessionIdsByGroupId = listTaskSessionIdsByGroupId;
 exports.loadProjectConfigs = loadProjectConfigs;
 exports.saveProjectConfigs = saveProjectConfigs;
 exports.loadMusicConfig = loadMusicConfig;
 exports.saveMusicConfig = saveMusicConfig;
 exports.loadFeishuConfig = loadFeishuConfig;
 exports.saveFeishuConfig = saveFeishuConfig;
-exports.loadCronJobs = loadCronJobs;
-exports.saveCronJobs = saveCronJobs;
 exports.loadDevReports = loadDevReports;
 exports.saveDevReports = saveDevReports;
 exports.loadDevWeeklyReports = loadDevWeeklyReports;
@@ -94,7 +93,6 @@ const CCM_DIR = path.resolve(process.env.CCM_TASK_STORE_DIR || runtime_paths_1.C
 const CONFIGS_DIR = path.join(CCM_DIR, "configs");
 const PID_DIR = path.join(CCM_DIR, "pids");
 const TASKS_FILE = path.join(CCM_DIR, "tasks.json");
-const CRON_FILE = path.join(CCM_DIR, "cron-jobs.json");
 const DEV_REPORTS_FILE = path.join(CCM_DIR, "dev-reports.json");
 const DEV_WEEKLY_REPORTS_FILE = path.join(CCM_DIR, "dev-weekly-reports.json");
 const AUTO_DEV_NOTIFY_FILE = path.join(CCM_DIR, "auto-dev-notify.json");
@@ -263,10 +261,29 @@ function loadMcpTools() {
             storedTools[storedFetchIndex] = { ...migrated, filename: "fetch-web-mcp.json" };
         }
         const storedFilesystemIndex = storedTools.findIndex(tool => String(tool?.name || "") === "filesystem-mcp");
-        if (storedFilesystemIndex >= 0 && (0, internal_mcp_registry_1.isLegacyOfficialFilesystemMcpDefinition)(storedTools[storedFilesystemIndex])) {
-            const migrated = (0, internal_mcp_registry_1.buildBundledFilesystemMcpTool)(storedTools[storedFilesystemIndex]);
-            saveMcpTool(migrated);
-            storedTools[storedFilesystemIndex] = { ...migrated, filename: "filesystem-mcp.json" };
+        if (storedFilesystemIndex >= 0) {
+            const filesystemTool = storedTools[storedFilesystemIndex];
+            const source = filesystemTool?.marketplace?.source || {};
+            const isOfficialBundled = String(source?.id || "") === "ccm-official"
+                && String(source?.trust || "") === "official";
+            const configuredEntry = Array.isArray(filesystemTool?.args)
+                ? String(filesystemTool.args[0] || "").trim()
+                : "";
+            const configuredRoot = Array.isArray(filesystemTool?.args)
+                ? String(filesystemTool.args[1] || "").trim()
+                : "";
+            // Older installs may already have the new node-based definition persisted,
+            // but still point at a package-local node_modules directory that no longer
+            // exists after a source checkout or a portable package upgrade. Repair the
+            // managed entry whenever its executable is missing, not only for legacy npx
+            // records. User-managed servers with the same display name are untouched.
+            const entryMissing = !configuredEntry || !fs.existsSync(configuredEntry);
+            const rootMissing = !configuredRoot || !fs.existsSync(configuredRoot) || !fs.statSync(configuredRoot).isDirectory();
+            if (isOfficialBundled && ((0, internal_mcp_registry_1.isLegacyOfficialFilesystemMcpDefinition)(filesystemTool) || entryMissing || rootMissing)) {
+                const migrated = (0, internal_mcp_registry_1.buildBundledFilesystemMcpTool)(filesystemTool);
+                saveMcpTool(migrated);
+                storedTools[storedFilesystemIndex] = { ...migrated, filename: "filesystem-mcp.json" };
+            }
         }
         const storedFeishu = storedTools.find(tool => String(tool?.name || "") === "mcp-feishu") || null;
         const bundledFeishu = (0, internal_mcp_registry_1.buildBundledFeishuMcpTool)(loadFeishuConfig(), storedFeishu || {});
@@ -688,6 +705,9 @@ function listUsabilityArchiveCandidates(historyCutoff, intakeCutoff) {
 function listTasksByParentId(parentId) {
     return (0, task_store_1.listTasksByParentIdFromSqlite)(parentId);
 }
+function listTaskSessionIdsByGroupId(groupId) {
+    return (0, task_store_1.listTaskSessionIdsByGroupIdFromSqlite)(groupId);
+}
 // === Project Configs ===
 function loadProjectConfigs() {
     const parsed = (0, atomic_json_file_1.readJsonWithBackup)(PROJECT_CONFIGS_FILE, {});
@@ -728,26 +748,6 @@ function saveFeishuConfig(config) {
     // The generic atomic writer preserves the previous file verbatim. Credentials
     // are different: both the live file and its recovery copy must be protected.
     fs.writeFileSync(`${FEISHU_CONFIG_FILE}.bak`, JSON.stringify(protectedConfig, null, 2), "utf-8");
-}
-// === Cron Jobs ===
-function loadCronJobs() {
-    if (!fs.existsSync(CRON_FILE))
-        return [];
-    try {
-        return JSON.parse(fs.readFileSync(CRON_FILE, "utf-8"));
-    }
-    catch {
-        try {
-            const recovered = JSON.parse(fs.readFileSync(`${CRON_FILE}.bak`, "utf-8"));
-            return Array.isArray(recovered) ? recovered : [];
-        }
-        catch {
-            return [];
-        }
-    }
-}
-function saveCronJobs(jobs) {
-    (0, atomic_json_file_1.writeJsonAtomic)(CRON_FILE, jobs);
 }
 // === Auto Dev Daily Reports ===
 function loadDevReports() {

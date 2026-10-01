@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.MAX_DIFF_MATRIX_CELLS = exports.MAX_DIFF_CHARS = exports.MAX_FILE_SNAPSHOT_BYTES = exports.MAX_INLINE_FILE_CHARS = exports.OOXML_FILE_EXTENSIONS = exports.IMAGE_FILE_EXTENSIONS = exports.TEXT_FILE_EXTENSIONS = exports.PET_PID_FILE_GLOBAL = exports.PETS_FILE = exports.MUSIC_CONFIG_FILE = exports.GROUP_LOGS_FILE = exports.PROJECT_CONFIGS_FILE = exports.FEISHU_CONFIG_FILE = exports.METRICS_FILE = exports.PUBLIC_DIR = exports.GROUP_LOGS_FILE_SHARED = exports.GROUP_MESSAGES_DIR = exports.GROUPS_FILE = exports.UPLOAD_DIR = exports.CRON_FILE = exports.TASKS_FILE = exports.SHARED_DIR = exports.SESSIONS_DIR = exports.LOG_DIR = exports.PID_DIR = exports.CONFIGS_DIR = exports.ensureCcmRuntimeHomeMigrationSync = exports.LEGACY_CCM_DIR = exports.DEFAULT_CCM_DIR = exports.CCM_DIR = void 0;
+exports.MAX_DIFF_MATRIX_CELLS = exports.MAX_DIFF_CHARS = exports.MAX_FILE_SNAPSHOT_BYTES = exports.MAX_INLINE_FILE_CHARS = exports.OOXML_FILE_EXTENSIONS = exports.IMAGE_FILE_EXTENSIONS = exports.TEXT_FILE_EXTENSIONS = exports.PET_PID_FILE_GLOBAL = exports.PETS_FILE = exports.MUSIC_CONFIG_FILE = exports.GROUP_LOGS_FILE = exports.PROJECT_CONFIGS_FILE = exports.FEISHU_CONFIG_FILE = exports.METRICS_FILE = exports.PUBLIC_DIR = exports.GROUP_LOGS_FILE_SHARED = exports.GROUP_MESSAGES_DIR = exports.GROUPS_FILE = exports.UPLOAD_DIR = exports.TASKS_FILE = exports.SHARED_DIR = exports.SESSIONS_DIR = exports.LOG_DIR = exports.PID_DIR = exports.CONFIGS_DIR = exports.ensureCcmRuntimeHomeMigrationSync = exports.LEGACY_CCM_DIR = exports.DEFAULT_CCM_DIR = exports.CCM_DIR = void 0;
 exports.refreshEnvPath = refreshEnvPath;
 exports.sendJson = sendJson;
 exports.ensureSharedDir = ensureSharedDir;
@@ -157,7 +157,6 @@ exports.LOG_DIR = path.join(runtime_paths_2.CCM_DIR, "logs");
 exports.SESSIONS_DIR = path.join(runtime_paths_2.CCM_DIR, "sessions");
 exports.SHARED_DIR = path.join(runtime_paths_2.CCM_DIR, "shared");
 exports.TASKS_FILE = path.join(runtime_paths_2.CCM_DIR, "tasks.json");
-exports.CRON_FILE = path.join(runtime_paths_2.CCM_DIR, "cron-jobs.json");
 exports.UPLOAD_DIR = path.join(runtime_paths_2.CCM_DIR, "uploads");
 exports.GROUPS_FILE = path.join(runtime_paths_2.CCM_DIR, "groups.json");
 exports.GROUP_MESSAGES_DIR = path.join(runtime_paths_2.CCM_DIR, "group-messages");

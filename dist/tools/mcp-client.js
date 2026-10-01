@@ -38,6 +38,7 @@ exports.resolveMcpStdioCommand = resolveMcpStdioCommand;
 const child_process_1 = require("child_process");
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
+const managed_process_tree_1 = require("../system/managed-process-tree");
 function resolveMcpStdioCommand(command, args = []) {
     if (process.platform !== "win32")
         return { cmd: command, args };
@@ -54,6 +55,7 @@ class McpClient {
     command;
     args;
     env;
+    requestTimeoutMs;
     process = null;
     messageId = 0;
     pending = new Map();
@@ -66,10 +68,12 @@ class McpClient {
     lastError = "";
     elicitationRequired = false;
     elicitationMessage = "";
-    constructor(command, args = [], env = {}) {
+    treeShutdown = null;
+    constructor(command, args = [], env = {}, requestTimeoutMs = 30_000) {
         this.command = command;
         this.args = args;
         this.env = env;
+        this.requestTimeoutMs = requestTimeoutMs;
     }
     safeErrorDetail(value) {
         return String(value || "")
@@ -197,7 +201,7 @@ class McpClient {
             return;
         this.process.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, error: { code, message } }) + "\n");
     }
-    sendRequest(method, params) {
+    sendRequest(method, params, timeoutMs = this.requestTimeoutMs) {
         return new Promise((resolve, reject) => {
             if (!this.process?.stdin?.writable) {
                 return reject(new Error("MCP process not running"));
@@ -207,7 +211,7 @@ class McpClient {
             const timer = setTimeout(() => {
                 this.pending.delete(id);
                 reject(new Error(`MCP request timeout: ${method}`));
-            }, 30000);
+            }, Math.max(1_000, Math.min(1_800_000, Number(timeoutMs) || 30_000)));
             this.pending.set(id, { resolve, reject, timer });
             this.process.stdin.write(message + "\n");
         });
@@ -223,12 +227,12 @@ class McpClient {
             return [];
         return this.tools;
     }
-    async callTool(name, args) {
+    async callTool(name, args, timeoutMs = this.requestTimeoutMs) {
         if (!this.connected) {
             return { content: [{ type: "text", text: "MCP 服务器未连接" }], isError: true };
         }
         try {
-            const result = await this.sendRequest("tools/call", { name, arguments: args });
+            const result = await this.sendRequest("tools/call", { name, arguments: args }, timeoutMs);
             return result || { content: [{ type: "text", text: "无返回结果" }] };
         }
         catch (e) {
@@ -253,6 +257,17 @@ class McpClient {
             elicitationMessage: this.elicitationMessage,
             serverInstructions: this.serverInstructions,
         };
+    }
+    async disconnectTree() {
+        if (this.treeShutdown)
+            return this.treeShutdown;
+        const child = this.process;
+        this.treeShutdown = (async () => {
+            if (child)
+                await (0, managed_process_tree_1.terminateManagedProcessTree)(child, { gracefulTimeoutMs: 500, forceTimeoutMs: 2000 });
+            this.disconnect();
+        })();
+        return this.treeShutdown;
     }
     disconnect() {
         if (this.process) {

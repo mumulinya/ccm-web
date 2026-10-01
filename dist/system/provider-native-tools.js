@@ -33,6 +33,8 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.orderedProviderTools = orderedProviderTools;
+exports.serializeProviderToolSchema = serializeProviderToolSchema;
 exports.providerToolsRequestPatch = providerToolsRequestPatch;
 exports.parseOpenAiAgentTurn = parseOpenAiAgentTurn;
 exports.parseOpenAiResponsesAgentTurn = parseOpenAiResponsesAgentTurn;
@@ -43,6 +45,16 @@ exports.createOpenAiStreamTurnAccumulator = createOpenAiStreamTurnAccumulator;
 exports.createOpenAiResponsesStreamTurnAccumulator = createOpenAiResponsesStreamTurnAccumulator;
 exports.createAnthropicStreamTurnAccumulator = createAnthropicStreamTurnAccumulator;
 const crypto = __importStar(require("crypto"));
+const responses_output_replay_1 = require("./responses-output-replay");
+const workspace_model_result_projection_1 = require("../tools/workspace-model-result-projection");
+function orderedProviderTools(tools) {
+    return tools.slice().sort((left, right) => left.name < right.name ? -1 : left.name > right.name ? 1 : 0);
+}
+function serializeProviderToolSchema(tools) {
+    return (0, workspace_model_result_projection_1.stableModelJson)(orderedProviderTools(tools).map(tool => ({
+        name: String(tool?.name || ''), description: String(tool?.description || ''), inputSchema: tool?.inputSchema || null,
+    })));
+}
 function checksum(value) {
     return crypto.createHash("sha256").update(JSON.stringify(value ?? null)).digest("hex");
 }
@@ -72,28 +84,29 @@ function call(id, name, args) {
     return { id: String(id || `call_${checksum({ name, parsed }).slice(0, 16)}`), name: String(name || ""), arguments: parsed, argumentsChecksum: checksum(parsed) };
 }
 function providerToolsRequestPatch(family, tools, nativeToolReference = false, toolChoice = "auto") {
-    const filtered = tools.filter(tool => tool?.name && tool.deferred !== true);
+    const ordered = orderedProviderTools(tools);
+    const filtered = ordered.filter(tool => tool?.name && tool.deferred !== true);
     if (family === "openai-responses")
         return {
             body: {
-                tools: filtered.map(tool => ({ type: "function", name: tool.name, description: tool.description, parameters: tool.inputSchema || { type: "object", properties: {} } })),
+                tools: filtered.map(tool => (0, workspace_model_result_projection_1.canonicalModelValue)({ type: "function", name: tool.name, description: tool.description, parameters: tool.inputSchema || { type: "object", properties: {} } })),
                 tool_choice: toolChoice,
             },
             headers: {},
         };
     if (family === "openai")
-        return { body: { tools: filtered.map(tool => ({ type: "function", function: { name: tool.name, description: tool.description, parameters: tool.inputSchema || { type: "object", properties: {} } } })), tool_choice: toolChoice }, headers: {} };
+        return { body: { tools: filtered.map(tool => (0, workspace_model_result_projection_1.canonicalModelValue)({ type: "function", function: { name: tool.name, description: tool.description, parameters: tool.inputSchema || { type: "object", properties: {} } } })), tool_choice: toolChoice }, headers: {} };
     if (family === "gemini")
         return {
             body: {
-                tools: [{ functionDeclarations: filtered.map(tool => ({ name: tool.name, description: tool.description, parameters: tool.inputSchema || { type: "object", properties: {} } })) }],
+                tools: [{ functionDeclarations: filtered.map(tool => (0, workspace_model_result_projection_1.canonicalModelValue)({ name: tool.name, description: tool.description, parameters: tool.inputSchema || { type: "object", properties: {} } })) }],
                 ...(toolChoice === "none" ? { toolConfig: { functionCallingConfig: { mode: "NONE" } } } : {}),
             },
             headers: {},
         };
     return {
         body: {
-            tools: tools.map(tool => ({ name: tool.name, description: tool.description, input_schema: tool.inputSchema || { type: "object", properties: {} }, ...(nativeToolReference && tool.deferred === true ? { defer_loading: true } : {}) })),
+            tools: ordered.map(tool => (0, workspace_model_result_projection_1.canonicalModelValue)({ name: tool.name, description: tool.description, input_schema: tool.inputSchema || { type: "object", properties: {} }, ...(nativeToolReference && tool.deferred === true ? { defer_loading: true } : {}) })),
             ...(toolChoice === "none" ? { tool_choice: { type: "none" } } : {}),
         },
         headers: nativeToolReference ? { "anthropic-beta": "advanced-tool-use-2025-11-20" } : {},
@@ -118,6 +131,7 @@ function parseOpenAiResponsesAgentTurn(data, usage) {
         .map((item) => String(item?.text || ""))
         .join("");
     return {
+        responsesOutput: (0, responses_output_replay_1.captureResponsesOutput)(output),
         text: typeof data?.output_text === "string" ? data.output_text : messageText,
         toolCalls: output
             .filter((item) => item?.type === "function_call")
@@ -207,6 +221,7 @@ function createOpenAiResponsesStreamTurnAccumulator(onToolCallReady, onToolCallD
     let text = "";
     let stopReason = "";
     let finalResponse = null;
+    const outputCollector = (0, responses_output_replay_1.createResponsesOutputCollector)();
     const updateCall = (event, item = null) => {
         const source = item || event?.item || {};
         const key = String(event?.item_id || source?.id || source?.call_id || event?.call_id || event?.output_index || calls.size);
@@ -230,6 +245,7 @@ function createOpenAiResponsesStreamTurnAccumulator(onToolCallReady, onToolCallD
     return {
         push(event) {
             const type = String(event?.type || "");
+            outputCollector.push(event);
             if (type === "response.output_text.delta")
                 text += String(event?.delta || "");
             if (type === "response.output_item.added" && event?.item?.type === "function_call")
@@ -247,6 +263,8 @@ function createOpenAiResponsesStreamTurnAccumulator(onToolCallReady, onToolCallD
         },
         finalResponse() { return finalResponse; },
         finish(usage) {
+            const replay = outputCollector.finish(finalResponse);
+            const authoritative = replay ? parseOpenAiResponsesAgentTurn({ ...finalResponse, output: replay.items }, usage) : undefined;
             if (finalResponse) {
                 const parsed = parseOpenAiResponsesAgentTurn(finalResponse, usage);
                 if (!text)
@@ -258,8 +276,9 @@ function createOpenAiResponsesStreamTurnAccumulator(onToolCallReady, onToolCallD
                 }
             }
             return {
-                text,
-                toolCalls: [...calls.values()].filter(row => row.name).map(row => call(row.id, row.name, row.arguments)),
+                responsesOutput: replay,
+                text: authoritative?.text || text,
+                toolCalls: authoritative?.toolCalls || [...calls.values()].filter(row => row.name).map(row => call(row.id, row.name, row.arguments)),
                 toolReferences: [],
                 stopReason,
                 usage,

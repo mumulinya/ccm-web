@@ -48,6 +48,8 @@ const agent_sessions_resume_1 = require("./agent-sessions-resume");
 const agent_sessions_purge_1 = require("./agent-sessions-purge");
 const task_interruption_1 = require("./task-interruption");
 const task_recovery_sessions_1 = require("./task-recovery-sessions");
+const task_recovery_session_1 = require("../agents/task-recovery-session");
+const task_recovery_context_1 = require("./task-recovery-context");
 const task_context_1 = require("./task-context");
 const session_task_timeline_1 = require("./session-task-timeline");
 const task_conversation_projection_1 = require("../system/task-conversation-projection");
@@ -352,6 +354,11 @@ function runTaskRecoveryOrchestrator(taskInput, options) {
         let latest = (0, db_1.getTaskById)(taskId);
         if (!latest || String(latest?.interruption_receipt?.checksum || "") !== receiptChecksum)
             throw new Error("任务中断现场已经变化，请刷新后重试");
+        if (["done", "completed", "cancelled", "canceled", "reverted"].includes(String(latest.status || "")))
+            throw new Error("终态任务不能恢复");
+        const contamination = (0, task_recovery_context_1.inspectTaskRecoveryContext)(latest);
+        if (contamination.status === "blocked" || contamination.status === "state_changed")
+            throw Object.assign(new Error("任务恢复边界无法核验，请重新规划"), { code: contamination.reason });
         if (latest?.recovery_transaction?.status === "committed" && latest?.recovery_pending !== true) {
             throw new Error("当前中断现场已经恢复，不能创建新的恢复 attempt");
         }
@@ -427,13 +434,15 @@ function runTaskRecoveryOrchestrator(taskInput, options) {
         if (!staged.updated)
             throw new Error("任务状态已经变化，恢复事务未能锁定");
         const stagedContextChecksum = String(staged.task?.task_context?.checksum || latest?.task_context?.checksum || "");
-        const userSession = options.resolveUserSession !== true
-            ? { mode: "original_reused", originalSessionId: exactSessionId, activeSessionId: exactSessionId, created: false }
-            : (0, task_recovery_sessions_1.resolveTaskUserSession)(staged.task || latest, { attempt: preflight.nextAttempt, expectedContextChecksum: stagedContextChecksum });
+        const userSession = options.resolveUserSession !== true && contamination.status === "clean_resume" && options.action !== "replan"
+            ? { mode: "original_reused", originalSessionId: contamination.anchor.conversationSessionId, activeSessionId: contamination.anchor.conversationSessionId, created: false, reason: "clean_resume", contamination }
+            : (0, task_recovery_sessions_1.resolveTaskUserSession)(staged.task || latest, { attempt: preflight.nextAttempt, expectedContextChecksum: stagedContextChecksum, forceRecoverySession: options.action === "replan" });
         resolvedUserSession = userSession;
         if (userSession.mode === "rejected" || !userSession.activeSessionId)
             throw new Error(userSession.error || `无法确定任务恢复会话 (${String(options.resolveUserSession)}:${String(userSession.reason || "unknown")})`);
-        const activation = (0, agent_sessions_resume_1.activateTaskAgentSessionsForRecovery)(taskId, "中断恢复：已通过现场预检");
+        const activation = (0, agent_sessions_resume_1.activateTaskAgentSessionsForRecovery)(taskId, "中断恢复：已通过现场预检", {
+            forceNewRuntime: userSession?.contamination?.status === "context_contaminated" || options.action === "retry",
+        });
         const agentSessions = (Array.isArray(latest?.work_items) ? latest.work_items : [])
             .filter((item) => item?.completed !== true && String(item?.status || "").toLowerCase() !== "done")
             .slice(0, 100)
@@ -445,6 +454,7 @@ function runTaskRecoveryOrchestrator(taskInput, options) {
             throw new Error("任务缺少精确恢复会话身份");
         const committedTask = {
             ...(staged.task || latest),
+            ...(options.action === "replan" ? { generation: Number((staged.task || latest).generation || 0) + 1, workflow_generation: Number((staged.task || latest).workflow_generation || (staged.task || latest).generation || 0) + 1 } : {}),
             status: "pending",
             acceptance_state: (staged.task || latest).interruption_receipt?.checkpoint || "planned",
             auto_execute: true,
@@ -456,15 +466,29 @@ function runTaskRecoveryOrchestrator(taskInput, options) {
             recovery_transaction: committedTransaction,
             execution_session_id: userSession.activeSessionId,
             active_execution_session_id: userSession.activeSessionId,
-            recovery_user_session: { mode: userSession.mode, originalSessionId: userSession.originalSessionId || exactSessionId, activeSessionId: userSession.activeSessionId, created: userSession.created === true, contentStored: false },
+            recovery_user_session: { mode: userSession.mode, originalSessionId: userSession.originalSessionId || exactSessionId, activeSessionId: userSession.activeSessionId, created: userSession.created === true, reason: userSession.reason, contamination: userSession.contamination ? { status: userSession.contamination.status, reason: userSession.contamination.reason, events: userSession.contamination.events, eventCount: userSession.contamination.eventCount, contentStored: false } : null, contentStored: false },
             recovery_agent_sessions: agentSessions,
             execution_attempt: preflight.nextAttempt,
             resumed_at: new Date().toISOString(),
             updated_at: new Date().toISOString(),
-            status_detail: activation.mode === "native_session"
-                ? `第 ${preflight.nextAttempt} 次执行 · 已恢复原生 Agent 会话`
-                : `第 ${preflight.nextAttempt} 次执行 · 已从签名工作单重建现场`,
+            status_detail: options.action === "replan"
+                ? `第 ${preflight.nextAttempt} 次执行 · 已重新规划并建立独立恢复会话`
+                : activation.mode === "native_session"
+                    ? `第 ${preflight.nextAttempt} 次执行 · 已恢复原生 Agent 会话`
+                    : `第 ${preflight.nextAttempt} 次执行 · 已从签名工作单重建现场`,
         };
+        // Build the persisted recovery record from the exact committed task snapshot.
+        // In particular, a replan increments generation; recording from `latest`
+        // here would leave the recovery session pointing at the previous generation.
+        const recoverySessionRecord = userSession?.contamination?.anchor
+            ? (0, task_recovery_session_1.buildRecoverySessionRecord)(committedTask, userSession, committedTransaction, activation, options.action || "resume")
+            : null;
+        if (recoverySessionRecord) {
+            committedTask.recovery_sessions = [
+                ...(Array.isArray((staged.task || latest).recovery_sessions) ? (staged.task || latest).recovery_sessions : []).filter((row) => row.id !== recoverySessionRecord.id),
+                recoverySessionRecord,
+            ];
+        }
         const committedTimeline = (0, session_task_timeline_1.persistTaskMutationWithTimelineAtomically)({
             task: committedTask,
             expectedTaskRevision: Number((staged.task || latest)?.revision || 0),

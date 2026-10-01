@@ -1,0 +1,4 @@
+export declare const WORKSPACE_FILE_READ_DESCRIPTION = "Read an authorized project file (default up to 2000 lines). For overviews read the README introduction/stack with offset/limit. Judge small files by size_bytes, not line count; for large/minified JSON discover read_json_fields instead. Full reads remain available for complete review. Return unchanged only while the original content remains in this session.";
+export declare const WORKSPACE_TARGETED_READ_GUIDANCE: string;
+export declare const GLOBAL_SOURCE_READ_GUIDANCE: string;
+export declare const WORKSPACE_TOOL_BOUNDARY_GUIDANCE = "Use short workspace tool names inside the authorized project boundary. Use dedicated tools instead of shell reads (cat/head/tail/sed), find/ls, or grep/rg. Retry PATH_NOT_FOUND only for a unique, high-confidence suggestion; respect tool limits and narrow the range or paginate on oversized results.";

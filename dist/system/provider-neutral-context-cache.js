@@ -34,6 +34,7 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.classifyProviderCacheRequestClass = classifyProviderCacheRequestClass;
+exports.appendProviderDiagnosticReceipt = appendReceipt;
 exports.verifyProviderNeutralContextCachePlan = verifyProviderNeutralContextCachePlan;
 exports.prepareProviderNeutralContextCacheRequest = prepareProviderNeutralContextCacheRequest;
 exports.prepareProviderNeutralContextCacheRequestSingleflight = prepareProviderNeutralContextCacheRequestSingleflight;
@@ -46,27 +47,40 @@ exports.readLatestProviderNeutralContextCacheState = readLatestProviderNeutralCo
 exports.readContextEngineV2Status = readContextEngineV2Status;
 exports.providerNeutralContextCacheCapability = providerNeutralContextCacheCapability;
 exports.runProviderNeutralContextCacheSelfTest = runProviderNeutralContextCacheSelfTest;
+const provider_cache_observation_1 = require("./provider-cache-observation");
 const crypto = __importStar(require("crypto"));
 const fs = __importStar(require("fs"));
-const os = __importStar(require("os"));
 const path = __importStar(require("path"));
 const atomic_json_file_1 = require("../core/atomic-json-file");
+const runtime_paths_1 = require("../core/runtime-paths");
 const provider_context_cache_adapters_1 = require("./provider-context-cache-adapters");
 const provider_cache_capability_registry_1 = require("./provider-cache-capability-registry");
 const model_token_preflight_1 = require("./model-token-preflight");
+const context_budget_1 = require("./context-budget");
 const context_engine_observability_1 = require("./context-engine-observability");
 const provider_cache_diagnostics_1 = require("./provider-cache-diagnostics");
 const provider_cache_scope_metrics_1 = require("./provider-cache-scope-metrics");
 const automatic_provider_cache_optimization_1 = require("./automatic-provider-cache-optimization");
 const agent_cache_affinity_1 = require("./agent-cache-affinity");
 const provider_cache_prompt_segments_1 = require("./provider-cache-prompt-segments");
-const CACHE_DIR = path.join(os.homedir(), ".ccm", "provider-context-cache");
+const workspace_model_result_projection_1 = require("../tools/workspace-model-result-projection");
+const context_cache_message_snapshot_1 = require("./context-cache-message-snapshot");
+const ccm_public_stable_prefix_1 = require("./ccm-public-stable-prefix");
+const provider_prefix_classification_1 = require("./provider-prefix-classification");
+const provider_cache_transcript_1 = require("./provider-cache-transcript");
+const provider_cache_public_profile_1 = require("./provider-cache-public-profile");
+const provider_usage_1 = require("./provider-usage");
+const provider_local_materialization_cache_1 = require("./provider-local-materialization-cache");
+// Use the same runtime root as the rest of CCM. The previous hard-coded
+// os.homedir() path made cache receipts/checkpoints bypass CCM_TASK_STORE_DIR,
+// so a restarted process could not compare its previous request and tests
+// appeared as `no_comparison` even though the wire layout was append-only.
+const CACHE_DIR = path.join(runtime_paths_1.CCM_DIR, "provider-context-cache");
 const LEDGER_FILE = path.join(CACHE_DIR, "receipts.jsonl");
 const MAINTENANCE_LEDGER_FILE = path.join(CACHE_DIR, "maintenance.jsonl");
 const MAX_LEDGER_BYTES = 8 * 1024 * 1024;
-const HOT_CACHE_TTL_MS = Math.max(30_000, Number(process.env.CCM_CONTEXT_HOT_CACHE_TTL_MS || 5 * 60_000));
-const HOT_CACHE_MAX_ENTRIES = Math.max(8, Number(process.env.CCM_CONTEXT_HOT_CACHE_MAX_ENTRIES || 128));
-const HOT_CACHE_MAX_BYTES = Math.max(4 * 1024 * 1024, Number(process.env.CCM_CONTEXT_HOT_CACHE_MAX_BYTES || 32 * 1024 * 1024));
+// Local materialization is an optimization only. Do not expire it merely
+// because a conversation was idle; bound memory with the LRU entry/byte caps.
 const SESSION_STATE_RETENTION_MS = Math.max(1, Number(process.env.CCM_CONTEXT_CACHE_RETENTION_DAYS || 30)) * 24 * 60 * 60_000;
 const RECEIPT_ARCHIVE_RETENTION_MS = Math.max(7, Number(process.env.CCM_CONTEXT_CACHE_ARCHIVE_RETENTION_DAYS || 90)) * 24 * 60 * 60_000;
 const hotMaterializations = new Map();
@@ -75,14 +89,14 @@ const hotCacheMetrics = {
     hits: 0,
     misses: 0,
     evictions: 0,
-    expired: 0,
     singleflightOwners: 0,
     singleflightJoins: 0,
     sharedStateHits: 0,
+    oversizeSkips: 0,
 };
 let lastAutomaticMaintenanceAt = 0;
 function checksum(value, length = 64) {
-    return crypto.createHash("sha256").update(typeof value === "string" ? value : JSON.stringify(value ?? null)).digest("hex").slice(0, length);
+    return crypto.createHash("sha256").update(typeof value === "string" ? value : (0, workspace_model_result_projection_1.stableModelJson)(value ?? null)).digest("hex").slice(0, length);
 }
 function contentText(value) {
     if (typeof value === "string")
@@ -108,19 +122,62 @@ function bindingKey(binding) {
     // starts a new epoch.
     return `${binding.scope}\0${binding.scopeId || ""}\0${binding.sessionId}\0${Number(binding.boundaryGeneration || 0)}`;
 }
-function ttlMilliseconds(value) {
-    const ttl = String(value || "provider_default").toLowerCase();
-    if (ttl === "30m")
-        return 30 * 60_000;
-    if (ttl === "1h")
-        return 60 * 60_000;
-    if (ttl === "24h")
-        return 24 * 60 * 60_000;
-    return 0;
+function safeFinalContextProjection(value) {
+    if (!value || typeof value !== "object")
+        return null;
+    return {
+        schema: cleanIdentity(value.schema || "ccm-final-context-projection-v1"),
+        enabled: value.enabled === true,
+        changed: value.changed === true,
+        originalTokens: Math.max(0, Number(value.originalTokens || 0)),
+        projectedTokens: Math.max(0, Number(value.projectedTokens || 0)),
+        originalDynamicTokens: Math.max(0, Number(value.originalDynamicTokens || 0)),
+        projectedDynamicTokens: Math.max(0, Number(value.projectedDynamicTokens || 0)),
+        budgetTokens: Math.max(0, Number(value.budgetTokens || 0)),
+        compactedMessageCount: Math.max(0, Number(value.compactedMessageCount || 0)),
+        preservedRecentMessageCount: Math.max(0, Number(value.preservedRecentMessageCount || 0)),
+        omittedContentChecksum: cleanIdentity(value.omittedContentChecksum || ""),
+        projectionChecksum: cleanIdentity(value.projectionChecksum || ""),
+        microCompactApplied: value.microCompactApplied === true,
+        microCompactReason: cleanIdentity(value.microCompactReason || ""),
+        clearedToolResultCount: Math.max(0, Number(value.clearedToolResultCount || 0)),
+        clearedToolResultTokens: Math.max(0, Number(value.clearedToolResultTokens || 0)),
+        retainedToolResultTokens: Math.max(0, Number(value.retainedToolResultTokens || 0)),
+        activeToolResultTokens: Math.max(0, Number(value.activeToolResultTokens || 0)),
+        duplicateToolResultTokens: Math.max(0, Number(value.duplicateToolResultTokens || 0)),
+        boundaryChecksum: cleanIdentity(value.boundaryChecksum || ""),
+        contentStored: false,
+    };
+}
+function firstDivergence(prefixChangeReasons = [], previous, current) {
+    const reason = String(prefixChangeReasons.find(Boolean) || "");
+    const mapped = reason === "tool_schema_changed" ? "tool_schema_changed"
+        : reason === "dynamic_prefix_leak" ? "dynamic_diagnostic_in_stable_prefix"
+            : reason === "provider_routing_or_eviction" ? "provider_route_or_eviction"
+                : reason === "ttl_policy_changed" ? "provider_ttl_changed"
+                    : reason === "compaction_boundary_changed" ? "compaction_boundary_changed"
+                        : reason === "stable_prefix_changed" ? "stable_prefix_changed"
+                            : reason === "generation_changed" ? "generation_changed"
+                                : reason === "cold_start" ? "cold_start" : "";
+    if (mapped)
+        return { kind: mapped, index: -1 };
+    const before = Array.isArray(previous?.blocks) ? previous.blocks : [];
+    const after = Array.isArray(current?.blocks) ? current.blocks : [];
+    const length = Math.max(before.length, after.length);
+    for (let index = 0; index < length; index += 1) {
+        const left = before[index];
+        const right = after[index];
+        if (String(left?.contentChecksum || "") !== String(right?.contentChecksum || "")
+            || String(left?.role || "") !== String(right?.role || "")
+            || String(left?.kind || "") !== String(right?.kind || "")) {
+            return { kind: "message_or_block_changed", index };
+        }
+    }
+    return { kind: "", index: -1 };
 }
 function lifecycleTtlSource(value) {
     const ttl = String(value || "provider_default").toLowerCase();
-    if (ttl === "30m" || ttl === "1h")
+    if (ttl === "30m" || ttl === "1h" || ttl === "24h")
         return ttl;
     if (ttl === "provider_default")
         return "provider_default";
@@ -129,13 +186,8 @@ function lifecycleTtlSource(value) {
 function buildCacheLifecycle(input) {
     const rawTtl = String(input.ttl || "provider_default").toLowerCase();
     const ttl = ["automatic", "in_memory", "default", "unknown"].includes(rawTtl) ? "provider_default" : rawTtl;
-    const ttlMs = ttlMilliseconds(ttl);
-    const previousAt = Date.parse(String(input.previous?.updatedAt || input.previous?.completedAt || ""));
-    const expired = ttlMs > 0 && Number.isFinite(previousAt) && Date.now() - previousAt >= ttlMs;
     let cacheState = "cold";
-    if (expired)
-        cacheState = "expired";
-    else if (input.hit)
+    if (input.hit)
         cacheState = "warm";
     else if (input.usageReported === false)
         cacheState = "degraded";
@@ -143,10 +195,10 @@ function buildCacheLifecycle(input) {
         cacheState = "warming";
     else if (input.previous?.cacheWarmState === "warming")
         cacheState = "warming";
-    const reason = expired ? "ttl_expired" : input.missReason;
+    const reason = input.missReason;
     const allowedReasons = new Set([
-        "cold_start", "ttl_expired", "stable_prefix_changed", "dynamic_prefix_leak",
-        "provider_routing_or_eviction", "provider_usage_unreported",
+        "cold_start", "first_request_miss", "ttl_expired", "stable_prefix_changed", "dynamic_prefix_leak",
+        "tool_schema_changed", "compaction_boundary_changed", "provider_routing_or_eviction", "provider_usage_unreported",
     ]);
     return {
         cacheState,
@@ -154,7 +206,12 @@ function buildCacheLifecycle(input) {
         stablePrefixTokens: Math.max(0, Number(input.stablePrefixTokens || 0)),
         stablePrefixBlockCount: Math.max(0, Number(input.stablePrefixBlockCount || 0)),
         breakpointCount: Math.max(0, Number(input.breakpointCount || 0)),
-        cacheKeyScope: "workspace_scope_profile",
+        cacheKeyScope: "conversation_branch",
+        cacheIdentityPersistent: true,
+        localMaterializationStatus: input.localMaterializationStatus || "computed",
+        providerTtlHint: lifecycleTtlSource(ttl),
+        idleDurationMs: Math.max(0, Number(input.idleDurationMs || 0)),
+        ...(input.identityResetReason ? { identityResetReason: cleanIdentity(input.identityResetReason) } : {}),
         ...(reason && allowedReasons.has(reason) ? { missReason: reason } : {}),
         contentStored: false,
     };
@@ -242,6 +299,9 @@ function blockKind(message, index) {
     const explicit = String(message?.contextBlockType || message?.context_block_type || "").trim().toLowerCase();
     if (["system", "rules", "skill", "mcp", "dynamic_context", "long_term_memory", "conversation", "tool_use", "tool_result", "summary", "recovery"].includes(explicit))
         return explicit;
+    const tagged = (0, provider_prefix_classification_1.explicitPromptBlockKind)(message);
+    if (tagged)
+        return tagged;
     const content = contentText(message?.content);
     if (role === "system")
         return "system";
@@ -283,14 +343,14 @@ const STABLE_KIND_PRIORITY = {
 // them in the stable prefix would move the breakpoint whenever a capability
 // is loaded or unloaded and would invalidate the cache for the whole suffix.
 const PROVIDER_STABLE_PREFIX_KINDS = new Set(["system", "rules"]);
-function blockStability(previous, contentChecksum, kind, role) {
+function blockStability(previous, contentChecksum, kind, role, cacheStable = false) {
     const unchanged = !!previous && previous.contentChecksum === contentChecksum;
     const stableRuns = unchanged ? Math.max(1, Number(previous.stableRuns || 1)) + 1 : 1;
     const changeRuns = previous ? Math.max(0, Number(previous.changeRuns || 0)) + (unchanged ? 0 : 1) : 0;
     const reuseRate = stableRuns / Math.max(1, stableRuns + changeRuns);
     const kindScore = Math.max(0, Number(STABLE_KIND_PRIORITY[kind] || 0)) / 100;
     const stabilityScore = Math.round((kindScore * 0.65 + reuseRate * 0.35) * 1000) / 1000;
-    const prefixEligible = role === "system" && PROVIDER_STABLE_PREFIX_KINDS.has(kind) && stabilityScore >= 0.55;
+    const prefixEligible = role === "system" && (PROVIDER_STABLE_PREFIX_KINDS.has(kind) || cacheStable === true) && stabilityScore >= 0.55;
     return { unchanged, stableRuns, changeRuns, reuseRate, stabilityScore, prefixEligible };
 }
 function adaptiveStablePrefixProjection(messages, previousBlocks, enabled = true) {
@@ -303,22 +363,15 @@ function adaptiveStablePrefixProjection(messages, previousBlocks, enabled = true
         const contentChecksum = checksum(contentText(message?.content));
         const id = logicalBlockId(message, originalIndex, kind);
         const prior = previous.get(id);
-        const stability = blockStability(prior, contentChecksum, kind, "system");
+        const stability = blockStability(prior, contentChecksum, kind, "system", message?.cacheStable === true || message?.cache_stable === true);
         return { message, originalIndex, kind, id, stability, priority: Number(STABLE_KIND_PRIORITY[kind] || 0) };
     });
-    const projectedPrefix = enabled
-        ? [...prefixRows].sort((left, right) => {
-            if (left.originalIndex === 0 && left.kind === "system")
-                return -1;
-            if (right.originalIndex === 0 && right.kind === "system")
-                return 1;
-            if (left.stability.prefixEligible !== right.stability.prefixEligible)
-                return left.stability.prefixEligible ? -1 : 1;
-            if (left.priority !== right.priority)
-                return right.priority - left.priority;
-            return left.originalIndex - right.originalIndex;
-        })
-        : prefixRows;
+    // Preserve the provider-visible message order exactly.  Earlier versions
+    // reordered system blocks by stability/priority, which could change prompt
+    // semantics and invalidate an otherwise reusable prefix.  Eligibility is
+    // now metadata only; the leading eligible run remains in source order and
+    // everything after the first volatile block stays in the dynamic suffix.
+    const projectedPrefix = enabled ? prefixRows : prefixRows;
     const tail = messages.slice(leadingSystemCount).map((message, offset) => ({ message, originalIndex: leadingSystemCount + offset }));
     const rows = [...projectedPrefix, ...tail];
     const projectedOriginalPositions = rows.map(row => row.originalIndex);
@@ -332,7 +385,7 @@ function adaptiveStablePrefixProjection(messages, previousBlocks, enabled = true
             projectedOriginalPositions,
             stableCandidates: projectedPrefix.filter(row => row.stability.prefixEligible).map(row => row.id),
             volatileCandidates: projectedPrefix.filter(row => !row.stability.prefixEligible).map(row => row.id),
-            policy: "system_anchor_then_reuse_rate_then_kind_priority_preserve_conversation_order",
+            policy: "preserve_source_message_order_classify_leading_stable_system_run",
         },
     };
 }
@@ -363,7 +416,7 @@ function immutableBlocks(messages, protectedRecentMessages, tokenConfig, origina
         const contentChecksum = checksum(content);
         const id = logicalBlockId(message, originalPosition, kind);
         const role = cleanIdentity(message?.role || "user") || "user";
-        const stability = blockStability(previous.get(id), contentChecksum, kind, role);
+        const stability = blockStability(previous.get(id), contentChecksum, kind, role, message?.cacheStable === true || message?.cache_stable === true);
         return {
             id,
             kind,
@@ -378,6 +431,11 @@ function immutableBlocks(messages, protectedRecentMessages, tokenConfig, origina
             immutableAddress: `sha256:${contentChecksum}`,
             protected: kind === "system" || protectedIndexes.has(index),
             protectionStatus: kind === "system" || protectedIndexes.has(index) ? "protected" : "eligible_for_projection",
+            cacheStable: message?.cacheStable === true || message?.cache_stable === true,
+            // Only an explicitly marked block may cross the workspace-public
+            // boundary. Scope rules, skills and runtime catalogs remain private even
+            // when they happen to be stable in one session.
+            publicPrefixEligible: message?.publicPrefixEligible === true,
             ...stability,
             contentStored: false,
         };
@@ -397,29 +455,16 @@ function materializationInputChecksum(messages, binding, options, tokenConfig) {
             role: cleanIdentity(message?.role || ""),
             type: cleanIdentity(message?.type || ""),
             contextBlockType: cleanIdentity(message?.contextBlockType || message?.context_block_type || ""),
-            contentChecksum: checksum(contentText(message?.content)),
+            cacheStable: message?.cacheStable === true || message?.cache_stable === true,
+            messageChecksum: (0, context_cache_message_snapshot_1.contextCacheMessageChecksum)(message),
         })),
     });
 }
 function hotCacheBytes() {
     return [...hotMaterializations.values()].reduce((sum, item) => sum + Number(item.approximateBytes || 0), 0);
 }
-function evictHotMaterializations(now = Date.now()) {
-    for (const [key, item] of hotMaterializations) {
-        if (now - item.lastAccessAtMs <= HOT_CACHE_TTL_MS)
-            continue;
-        hotMaterializations.delete(key);
-        hotCacheMetrics.expired += 1;
-    }
-    const ordered = [...hotMaterializations.entries()].sort((a, b) => a[1].lastAccessAtMs - b[1].lastAccessAtMs);
-    let bytes = hotCacheBytes();
-    while (ordered.length && (hotMaterializations.size > HOT_CACHE_MAX_ENTRIES || bytes > HOT_CACHE_MAX_BYTES)) {
-        const [key, item] = ordered.shift();
-        if (!hotMaterializations.delete(key))
-            continue;
-        bytes -= Number(item.approximateBytes || 0);
-        hotCacheMetrics.evictions += 1;
-    }
+function evictHotMaterializations() {
+    hotCacheMetrics.evictions += (0, provider_local_materialization_cache_1.evictLocalMaterializations)(hotMaterializations);
 }
 function clearSupersededHotEpochs(binding) {
     const current = bindingKey(binding);
@@ -436,7 +481,7 @@ function clearSupersededHotEpochs(binding) {
     return cleared;
 }
 function copyMaterializedMessages(messages) {
-    return messages.map(message => message && typeof message === "object" ? { ...message } : message);
+    return (0, context_cache_message_snapshot_1.copyContextCacheMessages)(messages);
 }
 function materializeContext(messages, binding, options, tokenConfig, previous) {
     const key = materializationInputChecksum(messages, binding, options, tokenConfig);
@@ -447,7 +492,7 @@ function materializeContext(messages, binding, options, tokenConfig, previous) {
         hot.hits += 1;
         hot.source = "memory_hot_cache";
         hotCacheMetrics.hits += 1;
-        return { ...hot, messages: copyMaterializedMessages(hot.messages), blocks: hot.blocks.map(block => ({ ...block })) };
+        return { ...hot, localMaterializationStatus: "memory_hot_cache", messages: copyMaterializedMessages(hot.messages), blocks: hot.blocks.map(block => ({ ...block })) };
     }
     const sharedStateHit = previous?.materializationInputChecksum === key
         && Array.isArray(previous?.blocks)
@@ -461,7 +506,7 @@ function materializeContext(messages, binding, options, tokenConfig, previous) {
             const materialized = {
                 key,
                 bindingKey: bindingKey(binding),
-                messages: projectedMessages,
+                messages: copyMaterializedMessages(projectedMessages),
                 blocks: previous.blocks.map((block) => ({ ...block })),
                 tokenPreflight: { ...previous.tokenPreflight },
                 adaptiveStablePrefix: { ...previous.adaptiveStablePrefix, source: "shared_state" },
@@ -470,11 +515,17 @@ function materializeContext(messages, binding, options, tokenConfig, previous) {
                 lastAccessAtMs: Date.now(),
                 hits: 1,
                 source: "shared_state",
+                localMaterializationStatus: "shared_state",
             };
-            hotMaterializations.set(key, materialized);
+            if ((0, provider_local_materialization_cache_1.shouldKeepLocalMaterialization)(materialized.approximateBytes)) {
+                hotMaterializations.set(key, materialized);
+                evictHotMaterializations();
+            }
+            else {
+                hotCacheMetrics.oversizeSkips += 1;
+            }
             hotCacheMetrics.sharedStateHits += 1;
-            evictHotMaterializations();
-            return { ...materialized, messages: copyMaterializedMessages(materialized.messages), blocks: materialized.blocks.map(block => ({ ...block })) };
+            return { ...materialized, localMaterializationStatus: "shared_state", messages: copyMaterializedMessages(materialized.messages), blocks: materialized.blocks.map(block => ({ ...block })) };
         }
     }
     hotCacheMetrics.misses += 1;
@@ -485,7 +536,7 @@ function materializeContext(messages, binding, options, tokenConfig, previous) {
     const materialized = {
         key,
         bindingKey: bindingKey(binding),
-        messages: projection.messages,
+        messages: copyMaterializedMessages(projection.messages),
         blocks,
         tokenPreflight,
         adaptiveStablePrefix: projection.receipt,
@@ -494,9 +545,17 @@ function materializeContext(messages, binding, options, tokenConfig, previous) {
         lastAccessAtMs: Date.now(),
         hits: 0,
         source: "computed",
+        localMaterializationStatus: previous?.materializationInputChecksum === key
+            ? "recomputed_after_local_eviction"
+            : "computed",
     };
-    hotMaterializations.set(key, materialized);
-    evictHotMaterializations();
+    if ((0, provider_local_materialization_cache_1.shouldKeepLocalMaterialization)(materialized.approximateBytes)) {
+        hotMaterializations.set(key, materialized);
+        evictHotMaterializations();
+    }
+    else {
+        hotCacheMetrics.oversizeSkips += 1;
+    }
     return { ...materialized, messages: copyMaterializedMessages(materialized.messages), blocks: materialized.blocks.map(block => ({ ...block })) };
 }
 function requestedMode(value) {
@@ -524,6 +583,14 @@ function resolveExecutionMode(options) {
         return { requested, mode: "provider_explicit_cache", nativeReady, downgradeReason: "" };
     }
     if (requested !== "controlled" && adapter === "stable_prefix") {
+        const protocol = String(options.adapterCapability?.protocol || "");
+        // A standard OpenAI/Gemini protocol has an implicit prefix cache even
+        // when an optional routing field was rejected. Keep the full transcript
+        // on the wire and report the route as implicit instead of downgrading CCM
+        // to a local stable-prefix projection.
+        if (["chat_completions", "responses", "gemini_generate_content"].includes(protocol)) {
+            return { requested, mode: "provider_implicit_cache", nativeReady, downgradeReason: "provider_optional_cache_field_unavailable_implicit_prefix" };
+        }
         return { requested, mode: "stable_prefix_cache", nativeReady, downgradeReason: "provider_native_cache_unproven_stable_prefix_only" };
     }
     return {
@@ -576,7 +643,11 @@ function verifyProviderNeutralContextCachePlan(plan, expected = {}) {
 }
 function prepareProviderNeutralContextCacheRequestLocked(messagesInput, options, binding, previous, file) {
     const startedAtMs = Date.now();
-    const messages = Array.isArray(messagesInput) ? messagesInput : [];
+    const inputMessages = Array.isArray(messagesInput) ? messagesInput : [];
+    const publicPrefix = (0, ccm_public_stable_prefix_1.buildCcmPublicStablePrefixMessage)();
+    const messages = inputMessages.some((message) => message?.id === publicPrefix.id)
+        ? inputMessages
+        : [publicPrefix, ...inputMessages];
     const previousSameEpoch = previous?.schema === "ccm-context-plan-state-v2"
         && previous.scope === binding.scope
         && previous.scopeId === binding.scopeId
@@ -620,29 +691,63 @@ function prepareProviderNeutralContextCacheRequestLocked(messagesInput, options,
         }
         return result;
     };
+    const publicStablePrefixBlocks = (rows) => {
+        const result = [];
+        for (const block of rows || []) {
+            if (block?.role !== "system" || block?.prefixEligible !== true || block?.publicPrefixEligible !== true)
+                break;
+            result.push(block);
+        }
+        return result;
+    };
     const currentStablePrefix = stablePrefixBlocks(blocks);
+    const currentPublicStablePrefix = publicStablePrefixBlocks(currentStablePrefix);
     const previousStablePrefix = previousSameConversation ? stablePrefixBlocks(previous?.blocks || []) : [];
     const toolSchemaChecksum = cleanIdentity(options.toolSchemaChecksum || "");
+    const toolSchemaVersion = cleanIdentity(options.toolSchemaVersion || "v1");
+    const previousToolSchemaChecksum = cleanIdentity(previousSameConversation ? previous?.toolSchemaChecksum || "" : "");
+    const previousToolSchemaVersion = cleanIdentity(previousSameConversation ? previous?.toolSchemaVersion || "v1" : "v1");
+    const toolSchemaStableRuns = toolSchemaChecksum && previousToolSchemaChecksum === toolSchemaChecksum && previousToolSchemaVersion === toolSchemaVersion
+        ? Math.max(1, Number(previous?.toolSchemaStableRuns || 1)) + 1
+        : 1;
+    // CCM's own native tool catalog has a versioned, deterministic wire shape.
+    // It can be part of the stable prefix on the first request; waiting for a
+    // second request would unnecessarily invalidate the first cache boundary.
+    // Unknown/dynamic catalogs retain the conservative two-run requirement.
+    const toolSchemaPrefixEligible = !!toolSchemaChecksum && (toolSchemaVersion === "ccm-native-tools-v1" ? toolSchemaStableRuns >= 1 : toolSchemaStableRuns >= 2);
+    const previousToolSchemaPrefixEligible = previousSameConversation && previous?.toolSchemaPrefixEligible === true;
     const toolSchemaChanged = !!(previousSameConversation && previous?.toolSchemaChecksum
         && toolSchemaChecksum
-        && String(previous.toolSchemaChecksum) !== toolSchemaChecksum);
+        && (String(previous.toolSchemaChecksum) !== toolSchemaChecksum
+            || String(previous.toolSchemaVersion || "v1") !== toolSchemaVersion
+            || previousToolSchemaPrefixEligible !== toolSchemaPrefixEligible));
     const stablePrefixChecksum = checksum({
-        blocks: currentStablePrefix.map((block) => ({ id: block.id, kind: block.kind, contentChecksum: block.contentChecksum })),
-        toolSchemaChecksum,
+        // Internal block ids are local projection identities. They are not part of
+        // the provider payload and may be regenerated during retry/resume. Keep
+        // the wire-relevant order/kind/content only so an equivalent prefix keeps
+        // the same cache fingerprint.
+        blocks: currentStablePrefix.map((block, index) => ({ index, kind: block.kind, contentChecksum: block.contentChecksum })),
+        toolSchemaChecksum: toolSchemaPrefixEligible ? toolSchemaChecksum : "",
+        toolSchemaVersion: toolSchemaPrefixEligible ? toolSchemaVersion : "",
     });
-    const dynamicSuffixChecksum = checksum(blocks.slice(currentStablePrefix.length).map((block) => ({
-        id: block.id,
-        kind: block.kind,
-        role: block.role,
-        contentChecksum: block.contentChecksum,
-    })));
+    const dynamicSuffixChecksum = checksum({
+        blocks: blocks.slice(currentStablePrefix.length).map((block) => ({
+            id: block.id,
+            kind: block.kind,
+            role: block.role,
+            contentChecksum: block.contentChecksum,
+        })),
+        dynamicToolSchemaChecksum: toolSchemaPrefixEligible ? "" : toolSchemaChecksum,
+        dynamicToolSchemaVersion: toolSchemaPrefixEligible ? "" : toolSchemaVersion,
+    });
     const toolSchemaTokens = Math.max(0, Number(options.toolSchemaTokens || 0));
+    const dynamicSuffixTokens = blocks.slice(currentStablePrefix.length).reduce((sum, block) => sum + Math.max(0, Number(block?.tokens || 0)), 0)
+        + (toolSchemaPrefixEligible ? 0 : toolSchemaTokens);
     const stablePrefixTokens = currentStablePrefix.reduce((sum, block) => sum + Math.max(0, Number(block.tokens || 0)), 0)
-        + toolSchemaTokens;
+        + (toolSchemaPrefixEligible ? toolSchemaTokens : 0);
     const stableMessagePrefixChanged = !previousSameConversation
         || currentStablePrefix.length !== previousStablePrefix.length
-        || currentStablePrefix.some((block, index) => String(block?.id || "") !== String(previousStablePrefix[index]?.id || "")
-            || String(block?.kind || "") !== String(previousStablePrefix[index]?.kind || "")
+        || currentStablePrefix.some((block, index) => String(block?.kind || "") !== String(previousStablePrefix[index]?.kind || "")
             || String(block?.contentChecksum || "") !== String(previousStablePrefix[index]?.contentChecksum || ""));
     let stablePrefixChanged = stableMessagePrefixChanged || toolSchemaChanged;
     const execution = resolveExecutionMode(options);
@@ -690,10 +795,14 @@ function prepareProviderNeutralContextCacheRequestLocked(messagesInput, options,
         breakpointLayoutChecksum: cleanIdentity(options.adapterCapability?.resolvedExecution?.evidenceChecksum || ""),
         transportParametersChecksum: cleanIdentity(cacheIdentity.transportParametersChecksum || options.adapterCapability?.protocolResolution?.transportParametersChecksum || ""),
     });
+    const divergence = firstDivergence(prefixChangeReasons, previousSameConversation ? previous : null, { blocks });
     stablePrefixChanged = stablePrefixChanged || prefixChangeReasons.some(reason => ![
         "cold_start",
         "generation_changed",
         "compaction_boundary_changed",
+        // Provider retention hints are transport metadata, not conversation
+        // content. Changing them must not rotate the CCM identity or epoch.
+        "ttl_policy_changed",
     ].includes(reason));
     const automaticCacheOptimization = (0, automatic_provider_cache_optimization_1.buildAutomaticCacheOptimizationProjection)({
         matrix: options.adapterCapability?.capabilityMatrix,
@@ -716,7 +825,87 @@ function prepareProviderNeutralContextCacheRequestLocked(messagesInput, options,
         cacheEpoch: Number(binding.boundaryGeneration || 0),
         toolSchemaChecksum,
         toolSchemaTokens,
+        toolSchemaVersion,
+        toolSchemaStableRuns,
+        toolSchemaPrefixEligible,
+        breakpointEligibility: options.adapterCapability?.capabilityMatrix?.capabilities?.explicitBreakpoints === "confirmed"
+            ? "eligible" : options.adapterCapability ? "ineligible" : "unknown",
+        breakpointApplied: false,
+        rollingBreakpointIndex: Number(options.adapterCapability?.resolvedExecution?.rollingBreakpointIndex ?? -1),
+        rollingBreakpointReason: String(options.adapterCapability?.resolvedExecution?.rollingBreakpointReason || ""),
+        firstDivergenceKind: divergence.kind,
+        firstDivergenceIndex: divergence.index,
+        routeFingerprint: cacheIdentity.interfaceFingerprint,
+        microCompactApplied: options.finalContextProjection?.microCompactApplied === true,
+        microCompactReason: String(options.finalContextProjection?.microCompactReason || ""),
+        clearedToolResultCount: Number(options.finalContextProjection?.clearedToolResultCount || 0),
+        clearedToolResultTokens: Number(options.finalContextProjection?.clearedToolResultTokens || 0),
+        retainedToolResultTokens: Number(options.finalContextProjection?.retainedToolResultTokens || 0),
+        boundaryChecksum: String(options.finalContextProjection?.boundaryChecksum || ""),
     });
+    const publicMeta = (0, ccm_public_stable_prefix_1.getCcmPublicStablePrefix)();
+    // `publicMeta.tokens` is calculated from the exact fixed wire text. Do not
+    // substitute the model-preflight token estimate stored on materialized
+    // blocks; that estimate includes model-specific safety drift and is not
+    // comparable with provider-wire diagnostics.
+    const publicStablePrefixTokens = currentPublicStablePrefix.length > 0 ? publicMeta.tokens : 0;
+    const agentStablePrefixTokens = Math.max(0, stablePrefixTokens - publicStablePrefixTokens);
+    const publicInstructionMessages = projectedMessages.slice(0, currentPublicStablePrefix.length);
+    const publicInstructionValue = publicInstructionMessages.map((message) => ({
+        role: String(message?.role || ""),
+        promptPart: String(message?.promptPart || message?.prompt_part || ""),
+        content: contentText(message?.content),
+    }));
+    const publicInstructionChecksum = checksum(publicInstructionValue);
+    const publicInstructionText = publicInstructionMessages.map((message) => contentText(message?.content)).filter(Boolean).join("\n\n");
+    const publicInstructionTokens = (0, context_budget_1.estimateTextTokens)(publicInstructionText);
+    const publicInstructionBlockCount = publicInstructionMessages.length;
+    const publicPrefixContiguous = publicInstructionBlockCount === currentPublicStablePrefix.length
+        && publicInstructionBlockCount > 0;
+    const publicProfile = (0, provider_cache_public_profile_1.buildProviderCachePublicProfile)({
+        publicPrefixChecksum: publicMeta.checksum,
+        // The route namespace must distinguish every concrete tool catalog even
+        // before a catalog has become a durable private-prefix boundary. The
+        // checksum is only an identity value; tool definitions and permissions
+        // remain in the request body and are never shared through this key.
+        toolSchemaChecksum,
+        toolSchemaVersion,
+        toolSchemaTokens: toolSchemaPrefixEligible ? toolSchemaTokens : 0,
+        publicToolSchemaChecksum: toolSchemaPrefixEligible ? toolSchemaChecksum : "",
+        publicToolSchemaVersion: toolSchemaPrefixEligible ? toolSchemaVersion : "",
+        publicToolSchemaTokens: toolSchemaPrefixEligible ? toolSchemaTokens : 0,
+        publicInstructionChecksum,
+        publicInstructionTokens,
+        publicInstructionBlockCount,
+        wireLayoutVersion: (0, provider_cache_transcript_1.normalizeProviderCacheWireLayoutVersion)(options.wireLayoutVersion || provider_cache_transcript_1.PROVIDER_CACHE_WIRE_LAYOUT_VERSION),
+    });
+    const promptSegmentMetrics = {
+        cacheablePrefixTokens: promptSegments.cacheablePrefixTokens,
+        uncachedSuffixTokens: promptSegments.uncachedSuffixTokens,
+        stableCoreTokens: promptSegments.stableCoreTokens,
+        stableToolSchemaTokens: promptSegments.stableToolSchemaTokens,
+        rollingHistoryTokens: promptSegments.rollingHistoryTokens,
+        rollingToolResultTokens: promptSegments.rollingToolResultTokens,
+        activeToolResultTokens: promptSegments.activeToolResultTokens,
+        duplicateToolResultTokens: promptSegments.duplicateToolResultTokens,
+        breakpointEligibility: promptSegments.breakpointEligibility,
+        breakpointApplied: promptSegments.breakpointApplied,
+        rollingBreakpointIndex: promptSegments.rollingBreakpointIndex,
+        rollingBreakpointReason: promptSegments.rollingBreakpointReason,
+        incrementalPayloadTokens: promptSegments.uncachedSuffixTokens,
+        firstDivergenceKind: promptSegments.firstDivergenceKind,
+        firstDivergenceIndex: promptSegments.firstDivergenceIndex,
+        routeFingerprint: promptSegments.routeFingerprint,
+        providerCacheReadTokens: 0,
+        microCompactApplied: promptSegments.microCompactApplied,
+        microCompactReason: promptSegments.microCompactReason,
+        clearedToolResultCount: promptSegments.clearedToolResultCount,
+        clearedToolResultTokens: promptSegments.clearedToolResultTokens,
+        retainedToolResultTokens: promptSegments.retainedToolResultTokens,
+        boundaryChecksum: promptSegments.boundaryChecksum,
+    };
+    const contextRatio = contextWindowTokens > 0 ? totalTokens / contextWindowTokens : 0;
+    promptSegmentMetrics.compactionWarningLevel = contextRatio >= 0.7 ? "recommended" : contextRatio >= 0.6 ? "warning" : "normal";
     const cacheLifecycle = buildCacheLifecycle({
         previous,
         ttl: resolvedTtl,
@@ -724,7 +913,9 @@ function prepareProviderNeutralContextCacheRequestLocked(messagesInput, options,
         stablePrefixBlockCount: currentStablePrefix.length,
         breakpointCount: Array.isArray(previous?.breakpointChecksums) ? previous.breakpointChecksums.length : 0,
         stablePrefixChanged,
-        missReason: !previous ? "cold_start" : stablePrefixChanged ? "stable_prefix_changed" : undefined,
+        localMaterializationStatus: materialized.localMaterializationStatus,
+        idleDurationMs: Math.max(0, Date.now() - (Date.parse(String(previous?.updatedAt || previous?.completedAt || "")) || Date.now())),
+        missReason: stablePrefixChanged ? "stable_prefix_changed" : undefined,
     });
     const plan = {
         schema: "ccm-context-plan-v2",
@@ -734,21 +925,53 @@ function prepareProviderNeutralContextCacheRequestLocked(messagesInput, options,
         canonicalPayloadChecksum: cleanIdentity(options.canonicalPayloadChecksum || ""),
         toolSchemaChecksum,
         toolSchemaTokens,
+        toolSchemaVersion,
+        toolSchemaStableRuns,
+        toolSchemaPrefixEligible,
         toolSchemaChanged,
         transcriptProjectionChanged,
         ccmProjectionChanged: transcriptProjectionChanged,
         compactionBoundaryChanged,
         stablePrefixChanged,
         stablePrefixChangeReasons: prefixChangeReasons,
+        wireLayoutVersion: (0, provider_cache_transcript_1.normalizeProviderCacheWireLayoutVersion)(options.wireLayoutVersion || provider_cache_transcript_1.PROVIDER_CACHE_WIRE_LAYOUT_VERSION),
+        committedPrefixChecksum: cleanIdentity(options.committedPrefixChecksum || ""),
+        lastCommittedMessageId: cleanIdentity(options.lastCommittedMessageId || ""),
+        messageOrderChecksum: cleanIdentity(options.messageOrderChecksum || ""),
+        movedDynamicBlockCount: Math.max(0, Number(options.movedDynamicBlockCount || 0)),
         stablePrefixChecksum,
         dynamicSuffixChecksum,
         stablePrefixTokens,
+        dynamicSuffixTokens,
         stableCoreChecksum: stablePrefixChecksum,
         stableCoreTokens: stablePrefixTokens,
         automaticCacheOptimization,
         promptSegments,
+        ...promptSegmentMetrics,
         cacheLifecycle,
+        cacheIdentityPersistent: true,
+        localMaterializationStatus: materialized.localMaterializationStatus,
+        finalContextProjection: safeFinalContextProjection(options.finalContextProjection),
         prefixExtensionEligible: stablePrefixTokens >= 1_024,
+        publicStablePrefixTokens,
+        publicStablePrefixChecksum: publicMeta.checksum,
+        // Keep the public run explicit so protocol adapters can place an optional
+        // provider breakpoint exactly at the cross-project boundary instead of
+        // accidentally marking scope-private instructions.
+        publicStablePrefixBlockCount: currentPublicStablePrefix.length,
+        publicPrefixVersion: publicMeta.version,
+        agentStablePrefixTokens,
+        agentStablePrefixChecksum: checksum(currentStablePrefix.slice(1)),
+        publicPrefixReuseEligible: stablePrefixTokens >= publicStablePrefixTokens && publicStablePrefixTokens > 0,
+        publicInstructionChecksum,
+        publicInstructionTokens,
+        publicInstructionBlockCount,
+        publicPrefixContiguous,
+        publicToolProfileChecksum: publicProfile.publicToolProfileChecksum,
+        publicToolProfileTokens: publicProfile.publicToolProfileTokens,
+        publicToolSchemaChecksum: publicProfile.publicToolSchemaChecksum,
+        publicToolSchemaVersion: publicProfile.publicToolSchemaVersion,
+        publicProfileVersion: publicProfile.profileVersion,
         requestClass: binding.requestClass || "auxiliary",
         cacheAffinity: binding.cacheAffinity || null,
         provider: cleanIdentity(options.provider || "unknown"),
@@ -761,7 +984,7 @@ function prepareProviderNeutralContextCacheRequestLocked(messagesInput, options,
             scope: binding.scope,
             scopeId: binding.scopeId,
             sessionId: binding.sessionId,
-            generation: binding.generation,
+            stablePromptVersion: String(binding.cacheAffinity?.stablePromptVersion || "ccm-main-agent-stable-core-v1"),
             boundaryGeneration: binding.boundaryGeneration,
         }),
         requestedMode: execution.requested,
@@ -818,9 +1041,9 @@ function prepareProviderNeutralContextCacheRequestLocked(messagesInput, options,
         adaptiveStablePrefix: materialized.adaptiveStablePrefix,
         materializationCache: {
             status: materialized.source === "computed" ? "miss" : "hit",
+            localMaterializationStatus: materialized.localMaterializationStatus,
             source: materialized.source,
             keyChecksum: materialized.key,
-            ttlMs: HOT_CACHE_TTL_MS,
             approximateBytes: materialized.approximateBytes,
             singleflightJoined: options.materializationSingleflightJoined === true,
             processEntries: hotMaterializations.size,
@@ -852,6 +1075,10 @@ function prepareProviderNeutralContextCacheRequestLocked(messagesInput, options,
         contextPlanChecksum: plan.contextPlanChecksum,
         canonicalPayloadChecksum: plan.canonicalPayloadChecksum,
         toolSchemaChecksum: plan.toolSchemaChecksum,
+        toolSchemaTokens: plan.toolSchemaTokens,
+        toolSchemaVersion: plan.toolSchemaVersion,
+        toolSchemaStableRuns: plan.toolSchemaStableRuns,
+        toolSchemaPrefixEligible: plan.toolSchemaPrefixEligible,
         toolSchemaChanged: plan.toolSchemaChanged,
         transcriptProjectionChanged: plan.transcriptProjectionChanged,
         ccmProjectionChanged: plan.ccmProjectionChanged,
@@ -859,13 +1086,30 @@ function prepareProviderNeutralContextCacheRequestLocked(messagesInput, options,
         stablePrefixChanged: plan.stablePrefixChanged,
         stablePrefixChangeReasons: plan.stablePrefixChangeReasons,
         stablePrefixChecksum: plan.stablePrefixChecksum,
+        wireLayoutVersion: (0, provider_cache_transcript_1.normalizeProviderCacheWireLayoutVersion)(plan.wireLayoutVersion || provider_cache_transcript_1.PROVIDER_CACHE_WIRE_LAYOUT_VERSION),
+        committedPrefixChecksum: plan.committedPrefixChecksum || "",
+        lastCommittedMessageId: plan.lastCommittedMessageId || "",
+        messageOrderChecksum: plan.messageOrderChecksum || "",
+        movedDynamicBlockCount: Math.max(0, Number(plan.movedDynamicBlockCount || 0)),
+        publicToolProfileChecksum: plan.publicToolProfileChecksum || "",
+        publicToolProfileTokens: Math.max(0, Number(plan.publicToolProfileTokens || 0)),
+        publicInstructionChecksum: plan.publicInstructionChecksum || "",
+        publicInstructionTokens: Math.max(0, Number(plan.publicInstructionTokens || 0)),
+        publicInstructionBlockCount: Math.max(0, Number(plan.publicInstructionBlockCount || 0)),
+        publicPrefixContiguous: plan.publicPrefixContiguous === true,
+        publicToolSchemaChecksum: plan.publicToolSchemaChecksum || "",
+        publicToolSchemaVersion: plan.publicToolSchemaVersion || "",
+        publicProfileVersion: plan.publicProfileVersion || "",
         dynamicSuffixChecksum: plan.dynamicSuffixChecksum,
         stablePrefixTokens: plan.stablePrefixTokens,
+        dynamicSuffixTokens: plan.dynamicSuffixTokens,
         stableCoreChecksum: plan.stableCoreChecksum,
         stableCoreTokens: plan.stableCoreTokens,
         automaticCacheOptimization: plan.automaticCacheOptimization,
         promptSegments: plan.promptSegments,
         cacheLifecycle: plan.cacheLifecycle,
+        cacheIdentityPersistent: true,
+        localMaterializationStatus: plan.localMaterializationStatus,
         cacheAffinity: plan.cacheAffinity || null,
         prefixExtensionEligible: plan.prefixExtensionEligible,
         requestClass: plan.requestClass,
@@ -966,7 +1210,15 @@ function nextRollingMetrics(current, completion, plan) {
     const previous = current?.rollingMetrics || {};
     const samples = Math.max(0, Number(previous.samples || 0));
     const nextSamples = samples + 1;
-    const average = (previousValue, nextValue) => Math.round((((Number(previousValue || 0) * samples) + Number(nextValue || 0)) / nextSamples) * 1000) / 1000;
+    const reportedSamples = Math.max(0, Number(previous.reportedSamples || 0)) + (completion.providerUsageReported === true ? 1 : 0);
+    const unreportedSamples = Math.max(0, Number(previous.unreportedSamples || 0)) + (completion.providerUsageReported === true ? 0 : 1);
+    const average = (previousValue, nextValue, includeNext = true, sampleCount = samples) => {
+        const priorCount = Math.max(0, Number(previousValue == null ? 0 : sampleCount));
+        const nextCount = includeNext ? priorCount + 1 : priorCount;
+        if (!nextCount)
+            return null;
+        return Math.round((((Number(previousValue || 0) * priorCount) + (includeNext ? Number(nextValue || 0) : 0)) / nextCount) * 1000) / 1000;
+    };
     const previousForeground = Array.isArray(previous.recentForegroundSamples) ? previous.recentForegroundSamples : [];
     const recentForegroundSamples = completion.requestClass === "foreground_main"
         ? [...previousForeground, {
@@ -974,6 +1226,7 @@ function nextRollingMetrics(current, completion, plan) {
                 hit: completion.cacheReadInputTokens > 0,
                 cacheReadTokens: completion.cacheReadInputTokens,
                 providerInputTokens: completion.providerInputTokens + completion.cacheCreationInputTokens + completion.cacheReadInputTokens,
+                usageReported: completion.providerUsageReported === true,
                 missReason: completion.cacheMissReason,
                 warmState: completion.cacheWarmState,
             }].slice(-50)
@@ -983,14 +1236,20 @@ function nextRollingMetrics(current, completion, plan) {
         const hits = rows.filter((row) => row.hit === true).length;
         const cacheReadTokens = rows.reduce((sum, row) => sum + Number(row.cacheReadTokens || 0), 0);
         const providerInputTokens = rows.reduce((sum, row) => sum + Number(row.providerInputTokens || 0), 0);
+        const reportedRows = rows.filter((row) => row.usageReported === true
+            || (row.usageReported == null && Number(row.providerInputTokens || 0) > 0));
         return {
             samples: rows.length,
-            hits,
-            misses: rows.length - hits,
-            requestHitRate: rows.length ? hits / rows.length : 0,
-            cacheReadTokens,
-            providerInputTokens,
-            tokenReuseRate: providerInputTokens > 0 ? Math.min(1, cacheReadTokens / providerInputTokens) : 0,
+            reportedSamples: reportedRows.length,
+            unreportedSamples: rows.length - reportedRows.length,
+            hits: reportedRows.filter((row) => row.hit === true).length,
+            misses: reportedRows.filter((row) => row.hit !== true).length,
+            requestHitRate: reportedRows.length ? reportedRows.filter((row) => row.hit === true).length / reportedRows.length : null,
+            cacheReadTokens: reportedRows.reduce((sum, row) => sum + Number(row.cacheReadTokens || 0), 0),
+            providerInputTokens: reportedRows.reduce((sum, row) => sum + Number(row.providerInputTokens || 0), 0),
+            tokenReuseRate: reportedRows.reduce((sum, row) => sum + Number(row.providerInputTokens || 0), 0) > 0
+                ? Math.min(1, reportedRows.reduce((sum, row) => sum + Number(row.cacheReadTokens || 0), 0) / reportedRows.reduce((sum, row) => sum + Number(row.providerInputTokens || 0), 0))
+                : null,
         };
     };
     return {
@@ -998,7 +1257,12 @@ function nextRollingMetrics(current, completion, plan) {
         samples: nextSamples,
         averageProjectionDurationMs: average(previous.averageProjectionDurationMs, plan.projectionDurationMs),
         averageProviderLatencyMs: average(previous.averageProviderLatencyMs, completion.providerLatencyMs),
-        averageCacheHitRate: average(previous.averageCacheHitRate, completion.cacheHitRate),
+        averageCacheHitRate: completion.cacheHitRate == null
+            ? (previous.averageCacheHitRate == null ? null : previous.averageCacheHitRate)
+            : average(previous.averageCacheHitRate, completion.cacheHitRate, true, Math.max(0, Number(previous.averageCacheHitSamples ?? samples))),
+        averageCacheHitSamples: Math.max(0, Number(previous.averageCacheHitSamples || 0)) + (completion.cacheHitRate == null ? 0 : 1),
+        reportedSamples,
+        unreportedSamples,
         averageReusedBlockRatio: average(previous.averageReusedBlockRatio, completion.reusedBlockCount / Math.max(1, completion.reusedBlockCount + completion.changedBlockCount)),
         totalDirectInputTokens: Math.max(0, Number(previous.totalDirectInputTokens || 0)) + completion.providerInputTokens,
         totalCacheReadInputTokens: Math.max(0, Number(previous.totalCacheReadInputTokens || 0)) + completion.cacheReadInputTokens,
@@ -1022,6 +1286,16 @@ function contextCacheRecommendation(plan, completion, rolling) {
             reason: plan.downgradeReason || "Provider原生缓存尚未得到真实usage证明",
             confidence: samples >= 3 ? "high" : "medium",
             requiresProbe: false,
+        };
+    }
+    if (samples < 5) {
+        return {
+            action: "observe_provider_cache",
+            label: "观察中",
+            reason: "真实Provider usage样本少于5次，暂不建议切换缓存策略",
+            confidence: "low",
+            requiresProbe: false,
+            samplesRequired: 5,
         };
     }
     if (plan.adapterKind === "openai_prompt_cache" && samples >= 3 && reuse >= 0.7 && hitRate < 0.35 && plan.providerPromptCacheRetention !== "24h") {
@@ -1054,6 +1328,13 @@ function completeProviderNeutralContextCacheRequest(plan, input = { ok: true }) 
     if (!plan?.requestId || plan?.schema !== "ccm-context-plan-v2")
         return null;
     const usage = input.usage && typeof input.usage === "object" ? input.usage : {};
+    const normalizedUsage = (0, provider_usage_1.normalizeProviderUsage)(usage, String(plan.provider || "openai"));
+    const reportedInputTokens = normalizedUsage.directInputTokens;
+    const reportedCacheReadTokens = normalizedUsage.cacheReadInputTokens;
+    const reportedCacheCreationTokens = normalizedUsage.cacheCreationInputTokens;
+    const providerCacheHitRatio = reportedInputTokens + reportedCacheReadTokens + reportedCacheCreationTokens > 0
+        ? Math.min(1, reportedCacheReadTokens / Math.max(1, reportedInputTokens + reportedCacheReadTokens + reportedCacheCreationTokens))
+        : null;
     const completion = {
         schema: "ccm-context-plan-usage-receipt-v2",
         version: 2,
@@ -1073,10 +1354,116 @@ function completeProviderNeutralContextCacheRequest(plan, input = { ok: true }) 
         capabilitySource: plan.capabilitySource,
         requestClass: plan.requestClass || "auxiliary",
         cacheAffinity: plan.cacheAffinity || null,
+        warmStartKind: cleanIdentity(input.warmStartKind || ""),
+        concurrentWarmupDetected: input.concurrentWarmupDetected === true,
         stablePrefixChecksum: String(plan.stablePrefixChecksum || ""),
         dynamicSuffixChecksum: String(plan.dynamicSuffixChecksum || ""),
+        stablePrefixTokens: Math.max(0, Number(plan.stablePrefixTokens || 0)),
+        dynamicSuffixTokens: Math.max(0, Number(plan.dynamicSuffixTokens || 0)),
+        cacheablePrefixTokens: Math.max(0, Number(plan.cacheablePrefixTokens || plan.promptSegments?.cacheablePrefixTokens || 0)),
+        uncachedSuffixTokens: Math.max(0, Number(plan.uncachedSuffixTokens || plan.promptSegments?.uncachedSuffixTokens || 0)),
+        stableCoreTokens: Math.max(0, Number(plan.stableCoreTokens || plan.promptSegments?.stableCoreTokens || 0)),
+        stableToolSchemaTokens: Math.max(0, Number(plan.stableToolSchemaTokens || plan.promptSegments?.stableToolSchemaTokens || 0)),
+        rollingHistoryTokens: Math.max(0, Number(plan.rollingHistoryTokens || plan.promptSegments?.rollingHistoryTokens || 0)),
+        rollingToolResultTokens: Math.max(0, Number(plan.rollingToolResultTokens || plan.promptSegments?.rollingToolResultTokens || 0)),
+        activeToolResultTokens: Math.max(0, Number(plan.activeToolResultTokens || plan.promptSegments?.activeToolResultTokens || 0)),
+        incrementalPayloadTokens: Math.max(0, Number(plan.incrementalPayloadTokens || plan.uncachedSuffixTokens || 0)),
+        projectedToolResultTokens: Math.max(0, Number(plan.projectedToolResultTokens || plan.finalContextProjection?.retainedToolResultTokens || 0)),
+        savedToolResultTokens: Math.max(0, Number(plan.savedToolResultTokens || plan.finalContextProjection?.clearedToolResultTokens || 0)),
+        projectionFallbackCount: Math.max(0, Number(plan.projectionFallbackCount || 0)),
+        publicStablePrefixTokens: Math.max(0, Number(plan.publicStablePrefixTokens || 0)),
+        agentStablePrefixTokens: Math.max(0, Number(plan.agentStablePrefixTokens || 0)),
+        publicStablePrefixChecksum: cleanIdentity(plan.publicStablePrefixChecksum || ""),
+        publicPrefixVersion: cleanIdentity(plan.publicPrefixVersion || ""),
+        publicPrefixReuseEligible: plan.publicPrefixReuseEligible === true,
+        publicInstructionChecksum: cleanIdentity(plan.publicInstructionChecksum || ""),
+        publicInstructionTokens: Math.max(0, Number(plan.publicInstructionTokens || 0)),
+        publicInstructionBlockCount: Math.max(0, Number(plan.publicInstructionBlockCount || 0)),
+        publicPrefixContiguous: plan.publicPrefixContiguous === true,
+        publicToolProfileChecksum: cleanIdentity(plan.publicToolProfileChecksum || ""),
+        publicToolProfileTokens: Math.max(0, Number(plan.publicToolProfileTokens || 0)),
+        publicToolSchemaChecksum: cleanIdentity(plan.publicToolSchemaChecksum || ""),
+        publicToolSchemaVersion: cleanIdentity(plan.publicToolSchemaVersion || ""),
+        publicProfileVersion: cleanIdentity(plan.publicProfileVersion || ""),
+        publicPrefixTokens: Math.max(0, Number(plan.publicStablePrefixTokens || 0)),
+        compactionWarningLevel: String(plan.compactionWarningLevel || "normal"),
+        duplicateToolResultTokens: Math.max(0, Number(plan.duplicateToolResultTokens || plan.promptSegments?.duplicateToolResultTokens || 0)),
+        microCompactApplied: plan.microCompactApplied === true || plan.promptSegments?.microCompactApplied === true || plan.finalContextProjection?.microCompactApplied === true,
+        microCompactReason: cleanIdentity(plan.microCompactReason || plan.promptSegments?.microCompactReason || plan.finalContextProjection?.microCompactReason || ""),
+        clearedToolResultCount: Math.max(0, Number(plan.clearedToolResultCount || plan.promptSegments?.clearedToolResultCount || plan.finalContextProjection?.clearedToolResultCount || 0)),
+        clearedToolResultTokens: Math.max(0, Number(plan.clearedToolResultTokens || plan.promptSegments?.clearedToolResultTokens || plan.finalContextProjection?.clearedToolResultTokens || 0)),
+        retainedToolResultTokens: Math.max(0, Number(plan.retainedToolResultTokens || plan.promptSegments?.retainedToolResultTokens || plan.finalContextProjection?.retainedToolResultTokens || 0)),
+        boundaryChecksum: cleanIdentity(plan.boundaryChecksum || plan.promptSegments?.boundaryChecksum || plan.finalContextProjection?.boundaryChecksum || ""),
+        wireLayoutVersion: (0, provider_cache_transcript_1.normalizeProviderCacheWireLayoutVersion)(plan.wireLayoutVersion || provider_cache_transcript_1.PROVIDER_CACHE_WIRE_LAYOUT_VERSION),
+        committedPrefixChecksum: cleanIdentity(plan.committedPrefixChecksum || ""),
+        lastCommittedMessageId: cleanIdentity(plan.lastCommittedMessageId || ""),
+        messageOrderChecksum: cleanIdentity(plan.messageOrderChecksum || ""),
+        movedDynamicBlockCount: Math.max(0, Number(plan.movedDynamicBlockCount || 0)),
+        breakpointEligibility: String(plan.breakpointEligibility || plan.promptSegments?.breakpointEligibility || "unknown"),
+        breakpointApplied: plan.breakpointApplied === true || (Array.isArray(plan._runtimeBreakpointChecksums) && plan._runtimeBreakpointChecksums.length > 0),
+        rollingBreakpointApplied: Number(plan.rollingBreakpointIndex ?? -1) >= 0,
+        rollingBreakpointIndex: Math.max(-1, Number(plan.rollingBreakpointIndex ?? -1)),
+        rollingBreakpointReason: cleanIdentity(plan.rollingBreakpointReason || ""),
+        firstDivergenceKind: cleanIdentity(plan.firstDivergenceKind || plan.promptSegments?.firstDivergenceKind || ""),
+        firstDivergenceIndex: Math.max(-1, Number(plan.firstDivergenceIndex ?? plan.promptSegments?.firstDivergenceIndex ?? -1)),
+        routeFingerprint: cleanIdentity(plan.routeFingerprint || plan.providerEndpointFingerprint || plan.promptSegments?.routeFingerprint || ""),
+        providerCacheReadTokens: Math.max(0, Number(reportedCacheReadTokens || plan.providerCacheReadTokens || 0)),
+        providerCacheColdStart: !plan.previousPlanChecksum,
+        providerCacheCandidateSource: plan.previousPlanChecksum ? "previous_request_prefix" : "current_request_only",
+        localCacheCandidateTokens: Math.max(0, Number(plan.cacheablePrefixTokens || plan.promptSegments?.cacheablePrefixTokens || 0)),
+        providerConfirmedCacheReadTokens: reportedCacheReadTokens,
+        providerUncachedInputTokens: Math.max(0, reportedInputTokens),
+        wirePrefixChecksum: cleanIdentity(plan._runtimeWirePrefixChecksum || plan.stablePrefixChecksum || ""),
+        ...(input.wireReuseEvidence ? { wireReuseEvidence: input.wireReuseEvidence } : {}),
+        requestAttribution: input.requestAttribution,
+        requestAttemptId: cleanIdentity(input.requestAttemptId || ""),
+        logicalCallId: cleanIdentity(input.logicalCallId || ""),
+        attempt: Math.max(0, Number(input.attempt || 0)),
+        firstCacheDivergenceKind: cleanIdentity(plan.firstCacheDivergenceKind || plan.firstDivergenceKind || ""),
+        firstCacheDivergenceIndex: Math.max(-1, Number(plan.firstCacheDivergenceIndex ?? plan.firstDivergenceIndex ?? -1)),
+        continuationMode: cleanIdentity(plan._runtimeContinuationMode || "full"),
+        previousResponseIdUsed: plan._runtimePreviousResponseIdUsed === true,
+        toolSchemaChecksum: cleanIdentity(plan.toolSchemaChecksum || ""),
+        toolSchemaTokens: Math.max(0, Number(plan.toolSchemaTokens || 0)),
+        toolSchemaVersion: cleanIdentity(plan.toolSchemaVersion || "v1"),
+        toolSchemaPrefixEligible: plan.toolSchemaPrefixEligible === true,
+        toolSchemaStableRuns: Math.max(0, Number(plan.toolSchemaStableRuns || 0)),
         promptCacheKeyChecksum: String(plan._runtimePromptCacheKeyChecksum || ""),
+        promptCacheKeyPresent: plan._runtimePromptCacheKeyPresent === true,
+        cacheRouteVersion: Math.max(0, Number(plan._runtimeCacheRouteVersion || 0)),
+        cacheKeyScope: cleanIdentity(plan.automaticCacheOptimization?.cacheKeyScope || "conversation_branch"),
+        routeKeyRotated: plan._runtimeRouteKeyRotated === true,
+        cacheKeyOmissionReason: cleanIdentity(plan._runtimeCacheKeyOmissionReason || ""),
         breakpointChecksums: Array.isArray(plan._runtimeBreakpointChecksums) ? plan._runtimeBreakpointChecksums.slice(0, 4).map(cleanIdentity) : [],
+        breakpointCount: Array.isArray(plan._runtimeBreakpointChecksums) ? plan._runtimeBreakpointChecksums.length : 0,
+        breakpointOmissionReason: cleanIdentity(plan._runtimeBreakpointOmissionReason || ""),
+        providerCacheProtocol: cleanIdentity(plan.providerCacheProtocol || "custom"),
+        providerPromptCacheRetention: cleanIdentity(plan.providerPromptCacheRetention || "provider_default"),
+        requestedCacheStrategy: cleanIdentity(plan.requestedMode || "auto"),
+        effectiveCacheStrategy: cleanIdentity(plan.executionMode || "disabled"),
+        finalContextProjection: plan.finalContextProjection && typeof plan.finalContextProjection === "object" ? {
+            schema: cleanIdentity(plan.finalContextProjection.schema || "ccm-final-context-projection-v1"),
+            enabled: plan.finalContextProjection.enabled === true,
+            changed: plan.finalContextProjection.changed === true,
+            originalTokens: Math.max(0, Number(plan.finalContextProjection.originalTokens || 0)),
+            projectedTokens: Math.max(0, Number(plan.finalContextProjection.projectedTokens || 0)),
+            originalDynamicTokens: Math.max(0, Number(plan.finalContextProjection.originalDynamicTokens || 0)),
+            projectedDynamicTokens: Math.max(0, Number(plan.finalContextProjection.projectedDynamicTokens || 0)),
+            budgetTokens: Math.max(0, Number(plan.finalContextProjection.budgetTokens || 0)),
+            compactedMessageCount: Math.max(0, Number(plan.finalContextProjection.compactedMessageCount || 0)),
+            preservedRecentMessageCount: Math.max(0, Number(plan.finalContextProjection.preservedRecentMessageCount || 0)),
+            omittedContentChecksum: cleanIdentity(plan.finalContextProjection.omittedContentChecksum || ""),
+            projectionChecksum: cleanIdentity(plan.finalContextProjection.projectionChecksum || ""),
+            microCompactApplied: plan.finalContextProjection.microCompactApplied === true,
+            microCompactReason: cleanIdentity(plan.finalContextProjection.microCompactReason || ""),
+            clearedToolResultCount: Math.max(0, Number(plan.finalContextProjection.clearedToolResultCount || 0)),
+            clearedToolResultTokens: Math.max(0, Number(plan.finalContextProjection.clearedToolResultTokens || 0)),
+            retainedToolResultTokens: Math.max(0, Number(plan.finalContextProjection.retainedToolResultTokens || 0)),
+            activeToolResultTokens: Math.max(0, Number(plan.finalContextProjection.activeToolResultTokens || 0)),
+            duplicateToolResultTokens: Math.max(0, Number(plan.finalContextProjection.duplicateToolResultTokens || 0)),
+            boundaryChecksum: cleanIdentity(plan.finalContextProjection.boundaryChecksum || ""),
+            contentStored: false,
+        } : null,
         cacheStrategy: plan._runtimeCacheStrategy || null,
         stablePrefixChangeReasons: Array.isArray(plan.stablePrefixChangeReasons) ? plan.stablePrefixChangeReasons.slice(0, 12).map(cleanIdentity) : [],
         payloadChecksum: String(plan.canonicalPayloadChecksum || ""),
@@ -1089,15 +1476,20 @@ function completeProviderNeutralContextCacheRequest(plan, input = { ok: true }) 
         status: input.ok ? "completed" : "failed",
         providerRequestId: cleanIdentity(input.providerRequestId || ""),
         estimatedInputTokens: Number(plan.totalTokens || 0),
-        providerInputTokens: Math.max(0, Number(usage.inputTokens || usage.input_tokens || 0)),
-        cacheCreationInputTokens: Math.max(0, Number(usage.cacheCreationInputTokens || usage.cache_creation_input_tokens || 0)),
-        cacheReadInputTokens: Math.max(0, Number(usage.cacheReadInputTokens || usage.cache_read_input_tokens || 0)),
+        providerInputTokens: normalizedUsage.directInputTokens,
+        directInputTokens: normalizedUsage.directInputTokens,
+        cacheCreationInputTokens: normalizedUsage.cacheCreationInputTokens,
+        cacheReadInputTokens: normalizedUsage.cacheReadInputTokens,
         cacheDeletedInputTokens: Math.max(0, Number(usage.cacheDeletedInputTokens || usage.cache_deleted_input_tokens || 0)),
         cacheCreation5mInputTokens: Math.max(0, Number(usage.cacheCreation5mInputTokens || usage.ephemeral_5m_input_tokens || 0)),
         cacheCreation1hInputTokens: Math.max(0, Number(usage.cacheCreation1hInputTokens || usage.ephemeral_1h_input_tokens || 0)),
-        cacheHitRate: Math.max(0, Number(usage.inputTokens || usage.input_tokens || 0)) + Math.max(0, Number(usage.cacheReadInputTokens || usage.cache_read_input_tokens || 0)) > 0
-            ? Math.min(1, Math.max(0, Number(usage.cacheReadInputTokens || usage.cache_read_input_tokens || 0)) / Math.max(1, Math.max(0, Number(usage.inputTokens || usage.input_tokens || 0)) + Math.max(0, Number(usage.cacheReadInputTokens || usage.cache_read_input_tokens || 0))))
-            : 0,
+        cacheHitRate: reportedInputTokens + reportedCacheReadTokens + reportedCacheCreationTokens > 0
+            ? Math.min(1, reportedCacheReadTokens / Math.max(1, reportedInputTokens + reportedCacheReadTokens + reportedCacheCreationTokens))
+            : null,
+        // Preserve an explicit Provider usage flag even when the Provider reports
+        // a valid zero-token input.  Falling back to token presence alone turns a
+        // reported miss into `unreported` and makes the cache diagnostics lie.
+        providerUsageReported: normalizedUsage.reported,
         projectionDurationMs: Math.max(0, Number(plan.projectionDurationMs || 0)),
         providerLatencyMs: Math.max(0, Date.now() - Number(plan._runtimeProviderStartedAtMs || Date.now())),
         reusedBlockCount: plan.edits.filter((edit) => edit.action === "keep").length,
@@ -1108,6 +1500,50 @@ function completeProviderNeutralContextCacheRequest(plan, input = { ok: true }) 
             requestPatchApplied: input.adapterEvidence.requestPatchApplied === true,
             requestFields: Array.isArray(input.adapterEvidence.requestFields) ? input.adapterEvidence.requestFields.map(cleanIdentity).filter(Boolean).slice(0, 12) : [],
             explicitBreakpointCount: Math.max(0, Number(input.adapterEvidence.explicitBreakpointCount || 0)),
+            initialBreakpointChecksums: Array.isArray(input.adapterEvidence.initialBreakpointChecksums)
+                ? input.adapterEvidence.initialBreakpointChecksums.slice(0, 4).map(cleanIdentity) : [],
+            finalBreakpointChecksums: Array.isArray(input.adapterEvidence.finalBreakpointChecksums)
+                ? input.adapterEvidence.finalBreakpointChecksums.slice(0, 4).map(cleanIdentity) : [],
+            finalRequestSnapshotChecksum: cleanIdentity(input.adapterEvidence.finalRequestSnapshotChecksum || ""),
+            toolsChecksum: cleanIdentity(input.adapterEvidence.toolsChecksum || ""),
+            inputSequenceChecksum: cleanIdentity(input.adapterEvidence.inputSequenceChecksum || ""),
+            instructionsChecksum: cleanIdentity(input.adapterEvidence.instructionsChecksum || ""),
+            publicPrefixChecksum: cleanIdentity(input.adapterEvidence.publicPrefixChecksum || plan.publicStablePrefixChecksum || ""),
+            publicToolProfileChecksum: cleanIdentity(input.adapterEvidence.publicToolProfileChecksum || plan.publicToolProfileChecksum || ""),
+            publicProfileVersion: cleanIdentity(input.adapterEvidence.publicProfileVersion || plan.publicProfileVersion || ""),
+            publicToolSchemaChecksum: cleanIdentity(input.adapterEvidence.publicToolSchemaChecksum || plan.publicToolSchemaChecksum || ""),
+            publicToolSchemaVersion: cleanIdentity(input.adapterEvidence.publicToolSchemaVersion || plan.publicToolSchemaVersion || ""),
+            crossSessionComparable: input.adapterEvidence.crossSessionComparable === true,
+            promptCacheKeyPresent: input.adapterEvidence.promptCacheKeyPresent === true,
+            promptCacheKeyChecksum: cleanIdentity(input.adapterEvidence.promptCacheKeyChecksum || ""),
+            cacheRouteVersion: Math.max(0, Number(input.adapterEvidence.cacheRouteVersion || 0)),
+            cacheKeyScope: cleanIdentity(input.adapterEvidence.cacheKeyScope || plan.automaticCacheOptimization?.cacheKeyScope || "conversation_branch"),
+            routeKeyRotated: input.adapterEvidence.routeKeyRotated === true,
+            cacheKeyOmissionReason: cleanIdentity(input.adapterEvidence.cacheKeyOmissionReason || ""),
+            breakpointOmissionReason: cleanIdentity(input.adapterEvidence.breakpointOmissionReason || ""),
+            finalContextProjection: input.adapterEvidence.finalContextProjection && typeof input.adapterEvidence.finalContextProjection === "object" ? {
+                schema: cleanIdentity(input.adapterEvidence.finalContextProjection.schema || "ccm-final-context-projection-v1"),
+                enabled: input.adapterEvidence.finalContextProjection.enabled === true,
+                changed: input.adapterEvidence.finalContextProjection.changed === true,
+                originalTokens: Math.max(0, Number(input.adapterEvidence.finalContextProjection.originalTokens || 0)),
+                projectedTokens: Math.max(0, Number(input.adapterEvidence.finalContextProjection.projectedTokens || 0)),
+                originalDynamicTokens: Math.max(0, Number(input.adapterEvidence.finalContextProjection.originalDynamicTokens || 0)),
+                projectedDynamicTokens: Math.max(0, Number(input.adapterEvidence.finalContextProjection.projectedDynamicTokens || 0)),
+                budgetTokens: Math.max(0, Number(input.adapterEvidence.finalContextProjection.budgetTokens || 0)),
+                compactedMessageCount: Math.max(0, Number(input.adapterEvidence.finalContextProjection.compactedMessageCount || 0)),
+                preservedRecentMessageCount: Math.max(0, Number(input.adapterEvidence.finalContextProjection.preservedRecentMessageCount || 0)),
+                omittedContentChecksum: cleanIdentity(input.adapterEvidence.finalContextProjection.omittedContentChecksum || ""),
+                projectionChecksum: cleanIdentity(input.adapterEvidence.finalContextProjection.projectionChecksum || ""),
+                microCompactApplied: input.adapterEvidence.finalContextProjection.microCompactApplied === true,
+                microCompactReason: cleanIdentity(input.adapterEvidence.finalContextProjection.microCompactReason || ""),
+                clearedToolResultCount: Math.max(0, Number(input.adapterEvidence.finalContextProjection.clearedToolResultCount || 0)),
+                clearedToolResultTokens: Math.max(0, Number(input.adapterEvidence.finalContextProjection.clearedToolResultTokens || 0)),
+                retainedToolResultTokens: Math.max(0, Number(input.adapterEvidence.finalContextProjection.retainedToolResultTokens || 0)),
+                activeToolResultTokens: Math.max(0, Number(input.adapterEvidence.finalContextProjection.activeToolResultTokens || 0)),
+                duplicateToolResultTokens: Math.max(0, Number(input.adapterEvidence.finalContextProjection.duplicateToolResultTokens || 0)),
+                boundaryChecksum: cleanIdentity(input.adapterEvidence.finalContextProjection.boundaryChecksum || ""),
+                contentStored: false,
+            } : null,
             breakpointDiagnostic: input.adapterEvidence.breakpointDiagnostic ? {
                 schema: "ccm-cache-breakpoint-diagnostic-v2",
                 mode: cleanIdentity(input.adapterEvidence.breakpointDiagnostic.mode || "implicit"),
@@ -1155,19 +1591,53 @@ function completeProviderNeutralContextCacheRequest(plan, input = { ok: true }) 
             } : null,
             cacheReferenceCount: Math.max(0, Number(input.adapterEvidence.cacheReferenceCount || 0)),
             cacheEditCount: Math.max(0, Number(input.adapterEvidence.cacheEditCount || 0)),
+            continuation: input.adapterEvidence.continuation && typeof input.adapterEvidence.continuation === "object" ? {
+                mode: cleanIdentity(input.adapterEvidence.continuation.mode || "full"),
+                previousResponseIdUsed: input.adapterEvidence.continuation.previousResponseIdUsed === true,
+                fallbackReason: cleanIdentity(input.adapterEvidence.continuation.fallbackReason || ""),
+                contentStored: false,
+            } : null,
             reason: cleanIdentity(input.adapterEvidence.reason || ""),
         } : null,
         error: input.ok ? "" : cleanIdentity(input.error?.message || input.error || "provider_request_failed"),
         completedAt: new Date().toISOString(),
     };
+    if (input.auditTurnKey)
+        completion.auditTurnKey = cleanIdentity(input.auditTurnKey);
+    const workspaceModelAudit = input.workspaceModelAudit && typeof input.workspaceModelAudit === "object" && Number(input.workspaceModelAudit.tool_count || 0) > 0
+        ? input.workspaceModelAudit
+        : null;
+    if (workspaceModelAudit) {
+        completion.workspaceModelAudit = {
+            model_visible_tokens: Math.max(0, Number(workspaceModelAudit.model_visible_tokens || 0)),
+            audit_only_tokens: Math.max(0, Number(workspaceModelAudit.audit_only_tokens || 0)),
+            stripped_dynamic_field_count: Math.max(0, Number(workspaceModelAudit.stripped_dynamic_field_count || 0)),
+            stable_model_payload_checksum: cleanIdentity(workspaceModelAudit.stable_model_payload_checksum || ""),
+            provider_cache_hit_ratio: providerCacheHitRatio,
+            tool_count: Math.max(0, Number(workspaceModelAudit.tool_count || 0)),
+            contentStored: false,
+        };
+        completion.model_visible_tokens = completion.workspaceModelAudit.model_visible_tokens;
+        completion.audit_only_tokens = completion.workspaceModelAudit.audit_only_tokens;
+        completion.stripped_dynamic_field_count = completion.workspaceModelAudit.stripped_dynamic_field_count;
+        completion.stable_model_payload_checksum = completion.workspaceModelAudit.stable_model_payload_checksum;
+        completion.provider_cache_hit_ratio = providerCacheHitRatio;
+    }
     const reportedCostUsd = Math.max(0, Number(usage.costUsd || usage.cost_usd || usage.reportedCostUsd || usage.reported_cost_usd || 0));
     const estimatedCost = estimatedInputCostUsd(plan, completion);
     completion.reportedCostUsd = reportedCostUsd;
     completion.estimatedInputCostUsd = reportedCostUsd > 0 ? reportedCostUsd : estimatedCost.costUsd;
     completion.costSource = reportedCostUsd > 0 ? "provider_usage" : estimatedCost.configured ? "configured_token_rates" : "unavailable";
-    const usageReported = completion.providerInputTokens > 0
-        || completion.cacheCreationInputTokens > 0
-        || completion.cacheReadInputTokens > 0;
+    const explicitUsageReported = typeof usage.reported === "boolean"
+        ? usage.reported
+        : typeof usage.providerUsageReported === "boolean"
+            ? usage.providerUsageReported
+            : undefined;
+    const usageReported = explicitUsageReported !== undefined
+        ? explicitUsageReported
+        : completion.providerInputTokens > 0
+            || completion.cacheCreationInputTokens > 0
+            || completion.cacheReadInputTokens > 0;
     const previousState = readJson(stateFile({
         scope: plan.scope,
         scopeId: plan.scopeId,
@@ -1175,27 +1645,12 @@ function completeProviderNeutralContextCacheRequest(plan, input = { ok: true }) 
         generation: plan.generation,
         boundaryGeneration: plan.boundaryGeneration,
     }));
-    completion.cacheMissReason = completion.cacheReadInputTokens > 0
-        ? ""
-        : plan.toolSchemaChanged === true
-            ? "tool_schema_changed"
-            : !plan.previousPlanChecksum
-                ? "cold_start"
-                : plan.compactionBoundaryChanged === true
-                    ? "compaction_boundary_changed"
-                    : plan.transcriptProjectionChanged === true
-                        ? "transcript_projection_changed"
-                        : plan.stablePrefixChanged === true
-                            ? "stable_prefix_changed"
-                            : !usageReported
-                                ? "provider_usage_not_reported"
-                                : plan.prefixExtensionEligible !== true
-                                    ? "prefix_below_provider_threshold"
-                                    : plan.adapterKind === "stable_prefix"
-                                        ? "native_fields_unproven"
-                                        : !plan.stablePrefixChanged && plan.previousPlanChecksum
-                                            ? "provider_prefix_reuse_unproven"
-                                            : "cold_start";
+    Object.assign(completion, (0, provider_cache_observation_1.providerCacheObservation)(plan, usageReported, completion.cacheReadInputTokens, {
+        candidateTokens: Number(plan.cacheablePrefixTokens || plan.promptSegments?.cacheablePrefixTokens || 0),
+        matchedTokens: Number(input.wireReuseEvidence?.matchingPrefixTokensEstimate || 0),
+        matchingPrefixTokensEstimate: Number(input.wireReuseEvidence?.matchingPrefixTokensEstimate || 0),
+        hasComparableProviderEvidence: input.wireReuseEvidence?.publicPrefix?.comparison === "unchanged",
+    }));
     completion.cacheLifecycle = buildCacheLifecycle({
         previous: previousState,
         ttl: plan.cacheLifecycle?.ttlSource || plan.providerPromptCacheRetention || plan.adapterEvidence?.strategy?.ttl || "provider_default",
@@ -1205,8 +1660,14 @@ function completeProviderNeutralContextCacheRequest(plan, input = { ok: true }) 
         stablePrefixChanged: plan.stablePrefixChanged === true,
         usageReported,
         hit: completion.cacheReadInputTokens > 0,
+        localMaterializationStatus: plan.localMaterializationStatus || plan.materializationCache?.localMaterializationStatus,
+        idleDurationMs: Math.max(0, Number(plan.cacheLifecycle?.idleDurationMs || 0)),
         missReason: completion.cacheMissReason === "provider_usage_not_reported" ? "provider_usage_unreported" : completion.cacheMissReason,
     });
+    completion.cacheIdentityPersistent = true;
+    completion.localMaterializationStatus = plan.localMaterializationStatus || plan.materializationCache?.localMaterializationStatus || "computed";
+    completion.providerTtlHint = plan.cacheLifecycle?.providerTtlHint || plan.providerPromptCacheRetention || "provider_default";
+    completion.idleDurationMs = Math.max(0, Date.now() - (Date.parse(String(previousState?.updatedAt || previousState?.completedAt || "")) || Date.now()));
     completion.agentCacheStageMetrics = plan.cacheAffinity
         ? (0, agent_cache_affinity_1.agentCacheStageMetricsFromUsage)(plan.cacheAffinity, {
             ...usage,
@@ -1221,7 +1682,15 @@ function completeProviderNeutralContextCacheRequest(plan, input = { ok: true }) 
             missReason: completion.cacheMissReason,
         })
         : null;
-    completion.prefixExtensionVerified = completion.cacheReadInputTokens > 0
+    // Provider usage must cover a meaningful part of the locally comparable
+    // prefix before this receipt claims rolling-prefix reuse. A tiny positive
+    // value is still a real Provider cache read, but it is only a baseline
+    // fragment and must not be presented as proof that the transcript prefix
+    // was extended (the common relay response is 192 tokens).
+    const prefixCandidateTokens = Math.max(0, Number(plan.cacheablePrefixTokens || plan.promptSegments?.cacheablePrefixTokens || 0), Number(input.wireReuseEvidence?.matchingPrefixTokensEstimate || 0));
+    const meaningfulPrefixReuse = prefixCandidateTokens > 0
+        && completion.cacheReadInputTokens >= prefixCandidateTokens * 0.5;
+    completion.prefixExtensionVerified = meaningfulPrefixReuse
         && completion.prefixExtensionEligible === true
         && plan.stablePrefixChanged !== true
         && !!plan.previousPlanChecksum;
@@ -1235,20 +1704,6 @@ function completeProviderNeutralContextCacheRequest(plan, input = { ok: true }) 
     });
     completion.cacheWarmState = warm.cacheWarmState;
     completion.providerRoutingMissStreak = warm.providerRoutingMissStreak;
-    if (!completion.cacheReadInputTokens && completion.cacheMissReason === "provider_prefix_reuse_unproven" && warm.cacheWarmState === "evicted") {
-        completion.cacheMissReason = "provider_routing_or_eviction";
-        completion.cacheLifecycle = buildCacheLifecycle({
-            previous: previousState,
-            ttl: plan.cacheLifecycle?.ttlSource || plan.providerPromptCacheRetention || "provider_default",
-            stablePrefixTokens: Number(plan.stablePrefixTokens || 0),
-            stablePrefixBlockCount: Number(plan.stablePrefixBlockCount || 0),
-            breakpointCount: Array.isArray(plan._runtimeBreakpointChecksums) ? plan._runtimeBreakpointChecksums.length : Number(plan.cacheLifecycle?.breakpointCount || 0),
-            stablePrefixChanged: false,
-            usageReported,
-            hit: false,
-            missReason: "provider_routing_or_eviction",
-        });
-    }
     const observedInputTokens = completion.providerInputTokens + completion.cacheCreationInputTokens + completion.cacheReadInputTokens;
     let calibration = null;
     if (input.ok && observedInputTokens > 0) {
@@ -1301,6 +1756,12 @@ function completeProviderNeutralContextCacheRequest(plan, input = { ok: true }) 
                     cacheCreation1hInputTokens: completion.cacheCreation1hInputTokens,
                     cacheHitRate: completion.cacheHitRate,
                     cacheMissReason: completion.cacheMissReason,
+                    localHistoryState: completion.localHistoryState,
+                    providerCacheObservation: completion.providerCacheObservation,
+                    providerCacheReuseClass: completion.providerCacheReuseClass,
+                    providerCacheCandidateTokens: completion.providerCacheCandidateTokens,
+                    providerCacheMatchedTokens: completion.providerCacheMatchedTokens,
+                    providerCachePartialReason: completion.providerCachePartialReason,
                     cacheWarmState: completion.cacheWarmState,
                     providerRoutingMissStreak: completion.providerRoutingMissStreak,
                     stablePrefixChangeReasons: completion.stablePrefixChangeReasons,
@@ -1310,7 +1771,44 @@ function completeProviderNeutralContextCacheRequest(plan, input = { ok: true }) 
                     agentCacheStageMetrics: completion.agentCacheStageMetrics,
                     requestClass: completion.requestClass,
                     stablePrefixChecksum: completion.stablePrefixChecksum,
+                    publicStablePrefixTokens: completion.publicStablePrefixTokens,
+                    agentStablePrefixTokens: completion.agentStablePrefixTokens,
+                    publicStablePrefixChecksum: completion.publicStablePrefixChecksum,
+                    publicInstructionChecksum: completion.publicInstructionChecksum,
+                    publicInstructionTokens: completion.publicInstructionTokens,
+                    publicInstructionBlockCount: completion.publicInstructionBlockCount,
+                    publicPrefixContiguous: completion.publicPrefixContiguous,
+                    warmStartKind: completion.warmStartKind,
+                    concurrentWarmupDetected: completion.concurrentWarmupDetected,
+                    publicToolProfileChecksum: completion.publicToolProfileChecksum,
+                    publicToolProfileTokens: completion.publicToolProfileTokens,
+                    publicPrefixVersion: completion.publicPrefixVersion,
+                    publicProfileVersion: completion.publicProfileVersion,
+                    publicPrefixTokens: completion.publicPrefixTokens,
+                    publicPrefixReuseEligible: completion.publicPrefixReuseEligible,
                     dynamicSuffixChecksum: completion.dynamicSuffixChecksum,
+                    stablePrefixTokens: completion.stablePrefixTokens,
+                    dynamicSuffixTokens: completion.dynamicSuffixTokens,
+                    cacheablePrefixTokens: completion.cacheablePrefixTokens,
+                    uncachedSuffixTokens: completion.uncachedSuffixTokens,
+                    stableCoreTokens: completion.stableCoreTokens,
+                    stableToolSchemaTokens: completion.stableToolSchemaTokens,
+                    rollingHistoryTokens: completion.rollingHistoryTokens,
+                    rollingToolResultTokens: completion.rollingToolResultTokens,
+                    activeToolResultTokens: completion.activeToolResultTokens,
+                    duplicateToolResultTokens: completion.duplicateToolResultTokens,
+                    breakpointEligibility: completion.breakpointEligibility,
+                    breakpointApplied: completion.breakpointApplied,
+                    firstDivergenceKind: completion.firstDivergenceKind,
+                    firstDivergenceIndex: completion.firstDivergenceIndex,
+                    routeFingerprint: completion.routeFingerprint,
+                    providerCacheReadTokens: completion.providerCacheReadTokens,
+                    toolSchemaChecksum: completion.toolSchemaChecksum,
+                    toolSchemaTokens: completion.toolSchemaTokens,
+                    toolSchemaVersion: completion.toolSchemaVersion,
+                    toolSchemaStableRuns: plan.toolSchemaStableRuns,
+                    toolSchemaPrefixEligible: plan.toolSchemaPrefixEligible,
+                    providerUsageReported: completion.providerUsageReported,
                     promptCacheKeyChecksum: completion.promptCacheKeyChecksum,
                     payloadChecksum: completion.payloadChecksum,
                     prefixExtensionEligible: completion.prefixExtensionEligible,
@@ -1326,6 +1824,10 @@ function completeProviderNeutralContextCacheRequest(plan, input = { ok: true }) 
                     adapterEvidence: completion.adapterEvidence,
                     tokenCalibration: completion.tokenCalibration,
                     cacheLifecycle: completion.cacheLifecycle,
+                    cacheIdentityPersistent: true,
+                    localMaterializationStatus: completion.localMaterializationStatus,
+                    providerTtlHint: completion.providerTtlHint,
+                    idleDurationMs: completion.idleDurationMs,
                     promptSegments: plan.promptSegments,
                 } : {}),
                 rollingMetrics,
@@ -1368,9 +1870,10 @@ function readProviderNeutralContextCacheRuntimeStatus() {
         hotCache: {
             entries: hotMaterializations.size,
             approximateBytes: hotCacheBytes(),
-            maxEntries: HOT_CACHE_MAX_ENTRIES,
-            maxBytes: HOT_CACHE_MAX_BYTES,
-            ttlMs: HOT_CACHE_TTL_MS,
+            maxEntries: provider_local_materialization_cache_1.LOCAL_HOT_CACHE_MAX_ENTRIES,
+            maxBytes: provider_local_materialization_cache_1.LOCAL_HOT_CACHE_MAX_BYTES,
+            maxEntryBytes: provider_local_materialization_cache_1.LOCAL_HOT_CACHE_MAX_ENTRY_BYTES,
+            maxSessionBytes: provider_local_materialization_cache_1.LOCAL_HOT_CACHE_MAX_SESSION_BYTES,
             ...hotCacheMetrics,
             contentPersisted: false,
         },
@@ -1490,7 +1993,7 @@ function runProviderNeutralContextCacheMaintenanceLocked(options = {}) {
             }
             catch { }
     }
-    evictHotMaterializations(now);
+    evictHotMaterializations();
     const capability = dryRun ? { removedEntries: 0, removedAttempts: 0, dryRun: true } : (0, provider_cache_capability_registry_1.pruneProviderCacheCapabilityRegistry)({ now, expiredRetentionDays: 30 });
     const result = {
         dryRun,
@@ -1551,11 +2054,19 @@ function readContextEngineV2Status(binding, config = {}) {
             changedBlockCount: Number(state.changedBlockCount || 0),
             stablePrefixBlockCount: Number(state.stablePrefixBlockCount || 0),
             stablePrefixTokens: Number(state.stablePrefixTokens || 0),
+            dynamicSuffixTokens: Number(state.dynamicSuffixTokens || 0),
+            toolSchemaChecksum: String(state.toolSchemaChecksum || ""),
+            toolSchemaTokens: Number(state.toolSchemaTokens || 0),
+            toolSchemaVersion: String(state.toolSchemaVersion || "v1"),
+            toolSchemaStableRuns: Number(state.toolSchemaStableRuns || 0),
+            toolSchemaPrefixEligible: state.toolSchemaPrefixEligible === true,
             stableCoreChecksum: String(state.stableCoreChecksum || state.stablePrefixChecksum || ""),
             stableCoreTokens: Number(state.stableCoreTokens || state.stablePrefixTokens || 0),
             automaticCacheOptimization: state.automaticCacheOptimization || null,
             promptSegments: state.promptSegments || null,
             cacheLifecycle: state.cacheLifecycle || null,
+            cacheIdentityPersistent: state.cacheIdentityPersistent === true,
+            localMaterializationStatus: String(state.localMaterializationStatus || state.materializationCache?.localMaterializationStatus || "computed"),
             agentCacheStageMetrics: state.agentCacheStageMetrics || null,
             stablePrefixChecksum: String(state.stablePrefixChecksum || ""),
             dynamicSuffixChecksum: String(state.dynamicSuffixChecksum || ""),
@@ -1564,6 +2075,8 @@ function readContextEngineV2Status(binding, config = {}) {
             prefixExtensionEligible: state.prefixExtensionEligible === true,
             prefixExtensionVerified: state.prefixExtensionVerified === true,
             cacheMissReason: String(state.cacheMissReason || ""),
+            localHistoryState: state.localHistoryState,
+            providerCacheObservation: state.providerCacheObservation,
             blockChanges: state.blockChanges || null,
             adaptiveStablePrefix: state.adaptiveStablePrefix || null,
             materializationCache: state.materializationCache || null,
@@ -1581,7 +2094,8 @@ function readContextEngineV2Status(binding, config = {}) {
             cacheCreationInputTokens: Math.max(0, Number(state.cacheCreationInputTokens || 0)),
             cacheReadInputTokens: Math.max(0, Number(state.cacheReadInputTokens || 0)),
             cacheDeletedInputTokens: Math.max(0, Number(state.cacheDeletedInputTokens || 0)),
-            cacheHitRate: Math.max(0, Number(state.cacheHitRate || 0)),
+            cacheHitRate: state.cacheHitRate == null ? null : Math.max(0, Number(state.cacheHitRate || 0)),
+            providerUsageReported: state.providerUsageReported === true,
             projectionDurationMs: Math.max(0, Number(state.projectionDurationMs || 0)),
             providerLatencyMs: Math.max(0, Number(state.providerLatencyMs || 0)),
             reportedCostUsd: Math.max(0, Number(state.reportedCostUsd || 0)),
@@ -1625,10 +2139,23 @@ function runProviderNeutralContextCacheSelfTest() {
     const first = prepareProviderNeutralContextCacheRequest(messages, { scope: "project", scopeId: "project-a", sessionId, mode: "auto", provider: "openai-compatible" });
     const second = prepareProviderNeutralContextCacheRequest(messages, { scope: "project", scopeId: "project-a", sessionId, mode: "auto", provider: "openai-compatible" });
     const extended = prepareProviderNeutralContextCacheRequest([...messages, { id: "u2", role: "user", content: "next request" }], { scope: "project", scopeId: "project-a", sessionId, mode: "auto", provider: "openai-compatible" });
+    const toolHistorySessionId = `${sessionId}-tool-history`;
+    const toolHistoryFirst = prepareProviderNeutralContextCacheRequest([
+        { role: "system", content: "rules" },
+        { id: "u1", role: "user", content: "inspect files" },
+        { id: "a1", role: "assistant", content: "I will inspect them" },
+        { id: "t1", role: "tool", tool_call_id: "call-1", content: "file contents" },
+        { id: "u2", role: "user", content: "now summarize" },
+    ], { scope: "project", scopeId: "project-a", sessionId: toolHistorySessionId, mode: "auto", provider: "openai-compatible" });
     const siblingProject = prepareProviderNeutralContextCacheRequest(messages, { scope: "project", scopeId: "project-b", sessionId, mode: "auto", provider: "openai-compatible" });
     const schemaSessionId = `${sessionId}-schema`;
     prepareProviderNeutralContextCacheRequest(messages, { scope: "project", scopeId: "project-a", sessionId: schemaSessionId, mode: "auto", provider: "openai-compatible", toolSchemaChecksum: "schema-a" });
     const changedSchema = prepareProviderNeutralContextCacheRequest(messages, { scope: "project", scopeId: "project-a", sessionId: schemaSessionId, mode: "auto", provider: "openai-compatible", toolSchemaChecksum: "schema-b" });
+    const nativeSchemaSessionId = `${sessionId}-native-schema`;
+    const nativeSchemaFirst = prepareProviderNeutralContextCacheRequest(messages, {
+        scope: "project", scopeId: "project-a", sessionId: nativeSchemaSessionId, mode: "auto", provider: "openai-compatible",
+        toolSchemaChecksum: "native-schema", toolSchemaVersion: "ccm-native-tools-v1", toolSchemaTokens: 120,
+    });
     const auxiliary = prepareProviderNeutralContextCacheRequest(messages, { scope: "project", scopeId: "project-a", sessionId: `${sessionId}-aux`, mode: "auto", provider: "openai-compatible", source: "project-session-auto-title" });
     const dynamicSessionId = `${sessionId}-dynamic-system`;
     const dynamicFirst = prepareProviderNeutralContextCacheRequest([
@@ -1672,12 +2199,27 @@ function runProviderNeutralContextCacheSelfTest() {
         scope: "project", scopeId: "project-a", sessionId: ttlSessionId,
         mode: "auto", provider: "openai-compatible", providerPromptCacheRetention: "30m",
     };
-    prepareProviderNeutralContextCacheRequest(messages, ttlOptions);
+    const ttlFirst = prepareProviderNeutralContextCacheRequest(messages, ttlOptions);
     const ttlFile = stateFile({ scope: "project", scopeId: "project-a", sessionId: ttlSessionId });
     const ttlState = readJson(ttlFile);
     if (ttlState)
-        atomicWriteJson(ttlFile, { ...ttlState, updatedAt: new Date(Date.now() - 31 * 60_000).toISOString() });
+        atomicWriteJson(ttlFile, { ...ttlState, updatedAt: new Date(Date.now() - 6 * 60 * 60_000).toISOString() });
     const ttlExpired = prepareProviderNeutralContextCacheRequest(messages, ttlOptions);
+    const idleScopeChecks = ['project', 'group', 'global'].map((scope, index) => {
+        const scopeId = scope === 'global' ? 'global' : `${scope}-idle-${index}`;
+        const idleSessionId = `${sessionId}-idle-${scope}`;
+        const options = { scope, scopeId, sessionId: idleSessionId, mode: 'auto', provider: 'openai-compatible', providerPromptCacheRetention: '30m' };
+        const first = prepareProviderNeutralContextCacheRequest(messages, options);
+        const file = stateFile({ scope, scopeId, sessionId: idleSessionId });
+        const state = readJson(file);
+        if (state)
+            atomicWriteJson(file, { ...state, updatedAt: new Date(Date.now() - 6 * 60 * 60_000).toISOString() });
+        const second = prepareProviderNeutralContextCacheRequest(messages, options);
+        return second.plan.cacheIdentityPersistent === true
+            && second.plan.contextIdentityChecksum === first.plan.contextIdentityChecksum
+            && second.plan.cacheLifecycle?.cacheState !== 'expired'
+            && second.plan.cacheLifecycle?.missReason !== 'ttl_expired';
+    });
     const native = prepareProviderNeutralContextCacheRequest(messages, {
         scope: "group",
         scopeId: "group-a",
@@ -1687,6 +2229,11 @@ function runProviderNeutralContextCacheSelfTest() {
         nativeApplyPlan: { nativeApplyReady: true, mode: "native_api_context_management", requestPatch: { body: { context_management: { edits: [{ type: "clear_thinking_20251015", keep: "all" }] } } } },
     });
     const receipt = completeProviderNeutralContextCacheRequest(second.plan, { ok: true, usage: { inputTokens: 30 } });
+    const unreportedSessionId = `${sessionId}-unreported`;
+    const unreportedPlan = prepareProviderNeutralContextCacheRequest(messages, {
+        scope: "project", scopeId: "project-a", sessionId: unreportedSessionId, mode: "auto", provider: "openai-compatible",
+    });
+    const unreportedReceipt = completeProviderNeutralContextCacheRequest(unreportedPlan.plan, { ok: true, usage: {} });
     const checks = {
         genericProviderUsesControlledProjection: first.plan.executionMode === "ccm_controlled_projection" && first.plan.providerNative === false,
         secondRequestReusesAllBlocks: second.plan.edits.every((edit) => edit.action === "keep"),
@@ -1694,21 +2241,35 @@ function runProviderNeutralContextCacheSelfTest() {
             && extended.plan.dynamicSuffixChecksum !== second.plan.dynamicSuffixChecksum
             && extended.plan.stablePrefixChanged === false
             && extended.plan.stablePrefixChangeReasons.length === 0,
+        dynamicDiagnosticsDoNotChangeStableMetrics: extended.plan.stableCoreTokens === second.plan.stableCoreTokens
+            && extended.plan.stableToolSchemaTokens === second.plan.stableToolSchemaTokens
+            && extended.plan.stablePrefixChecksum === second.plan.stablePrefixChecksum,
+        completedToolResultsRemainInReusableCandidate: toolHistoryFirst.plan.rollingToolResultTokens > 0
+            && toolHistoryFirst.plan.cacheablePrefixTokens >= toolHistoryFirst.plan.rollingHistoryTokens + toolHistoryFirst.plan.rollingToolResultTokens,
         nativeModeRequiresVerifiedReadyPlan: native.plan.executionMode === "native_api_context_management" && native.plan.providerManagedKvCache === true,
         rawTranscriptNeverStoredInBlocks: first.plan.blocks.every((block) => block.contentStored === false && !("content" in block)),
+        cacheDiagnosticsAreSafeAndNumeric: Number.isFinite(first.plan.cacheablePrefixTokens)
+            && Number.isFinite(first.plan.uncachedSuffixTokens)
+            && Number.isFinite(first.plan.stableCoreTokens)
+            && Number.isFinite(first.plan.rollingHistoryTokens)
+            && first.plan.promptSegments?.contentStored === false
+            && !("prompt" in first.plan.promptSegments)
+            && !("body" in first.plan.promptSegments),
         exactScopeReceiptValid: verifyProviderNeutralContextCachePlan(second.plan, { scope: "project", scopeId: "project-a", sessionId }).valid,
         sameLocalSessionIsolatedByScopeId: siblingProject.plan.contextIdentityChecksum !== second.plan.contextIdentityChecksum
             && verifyProviderNeutralContextCachePlan(siblingProject.plan, { scope: "project", scopeId: "project-b", sessionId }).valid,
         toolSchemaChangeIsExplicit: changedSchema.plan.toolSchemaChanged === true,
+        nativeToolSchemaStableFromFirstRequest: nativeSchemaFirst.plan.toolSchemaPrefixEligible === true
+            && nativeSchemaFirst.plan.stablePrefixTokens >= 120,
         foregroundAndAuxiliaryAreSeparated: first.plan.requestClass === "foreground_main" && auxiliary.plan.requestClass === "auxiliary",
-        dynamicSystemDoesNotBreakStableCore: dynamicFirst.plan.stablePrefixBlockCount === 1
-            && dynamicSecond.plan.stablePrefixBlockCount === 1
+        dynamicSystemDoesNotBreakStableCore: dynamicFirst.plan.stablePrefixBlockCount >= 1
+            && dynamicSecond.plan.stablePrefixBlockCount >= 1
             && dynamicFirst.plan.stableCoreChecksum === dynamicSecond.plan.stableCoreChecksum
             && dynamicFirst.plan.dynamicSuffixChecksum !== dynamicSecond.plan.dynamicSuffixChecksum
             && dynamicSecond.plan.stablePrefixChanged === false
             && dynamicSecond.plan.epochReset === true,
-        dynamicSkillAndMcpStayAfterStableCore: dynamicCatalogFirst.plan.stablePrefixBlockCount === 1
-            && dynamicCatalogSecond.plan.stablePrefixBlockCount === 1
+        dynamicSkillAndMcpStayAfterStableCore: dynamicCatalogFirst.plan.stablePrefixBlockCount >= 1
+            && dynamicCatalogSecond.plan.stablePrefixBlockCount >= 1
             && dynamicCatalogFirst.plan.stableCoreChecksum === dynamicCatalogSecond.plan.stableCoreChecksum
             && dynamicCatalogSecond.plan.stablePrefixChanged === false,
         generationChangeDoesNotColdStart: generationFirst.plan.epochReset === false
@@ -1718,10 +2279,17 @@ function runProviderNeutralContextCacheSelfTest() {
             && generationSecond.plan.cacheLifecycle?.missReason !== "cold_start",
         boundaryGenerationStartsNewEpoch: boundaryReset.plan.epochReset === true
             && boundaryReset.plan.previousPlanChecksum === "",
-        ttlExpiryIsReported: ttlExpired.plan.cacheLifecycle?.cacheState === "expired"
-            && ttlExpired.plan.cacheLifecycle?.missReason === "ttl_expired"
-            && ttlExpired.plan.cacheLifecycle?.ttlSource === "30m",
+        idleDoesNotExpireConversationIdentity: ttlExpired.plan.cacheLifecycle?.cacheState !== "expired"
+            && ttlExpired.plan.cacheLifecycle?.missReason !== "ttl_expired"
+            && ttlExpired.plan.cacheLifecycle?.providerTtlHint === "30m"
+            && ttlExpired.plan.cacheIdentityPersistent === true
+            && ttlExpired.plan.contextIdentityChecksum === ttlFirst.plan.contextIdentityChecksum,
+        localMaterializationHasNoIdleTtlByDefault: !Object.prototype.hasOwnProperty.call(first.plan.materializationCache || {}, "ttlMs"),
+        allScopesSurviveLongIdle: idleScopeChecks.every(Boolean),
         providerUsageRecorded: receipt?.providerInputTokens === 30 && receipt?.contentStored === false,
+        unreportedUsageIsNotZeroHit: unreportedReceipt?.providerUsageReported === false
+            && unreportedReceipt?.cacheHitRate === null
+            && unreportedReceipt?.cacheLifecycle?.cacheState === "degraded",
     };
     return { pass: Object.values(checks).every(Boolean), checks };
 }

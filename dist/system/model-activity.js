@@ -64,6 +64,9 @@ function createModelActivityController(input) {
     let providerRequestIdPresent = false;
     let failureKind = "";
     let lastLabel = safeLabel(input.label, fallbackLabel);
+    let phase = input.phase;
+    let toolDeclared = false;
+    let answerPhase;
     const publish = (nextState, extra = {}) => {
         revision += 1;
         state = nextState;
@@ -77,7 +80,8 @@ function createModelActivityController(input) {
             retryDelayMs = Number(extra.retryDelayMs);
         const activity = {
             state,
-            phase: input.phase,
+            phase,
+            ...(answerPhase ? { answerPhase } : {}),
             modelCallIndex: Math.max(1, Number(input.modelCallIndex || 1)),
             revision,
             ...(retryAttempt ? { retryAttempt } : {}),
@@ -128,6 +132,14 @@ function createModelActivityController(input) {
     };
     return {
         eventId,
+        onAnswerPhase(value) {
+            if (stopped || toolDeclared)
+                return;
+            answerPhase = value;
+            phase = value === 'final' ? 'final_synthesis' : input.phase;
+            // Publish before the first visible text. A declaration alone is not text.
+            publish('started', { label: '正在思考' });
+        },
         onDelta(delta) {
             if (stopped || !String(delta || ""))
                 return;
@@ -139,6 +151,9 @@ function createModelActivityController(input) {
         onToolDeclared(toolName) {
             if (stopped)
                 return;
+            toolDeclared = true;
+            answerPhase = 'process';
+            phase = input.phase === 'final_synthesis' ? 'tool_result_review' : input.phase;
             if (!firstDeltaAt)
                 firstDeltaAt = new Date().toISOString();
             const name = String(toolName || "工具").replace(/[\r\n\t]+/g, " ").trim().slice(0, 80) || "工具";
@@ -147,6 +162,8 @@ function createModelActivityController(input) {
         onRetry(attempt, maximumRetries = 5, delayMs = 0) {
             if (stopped)
                 return;
+            phase = input.phase;
+            answerPhase = undefined;
             const visibleAttempt = Math.max(1, Number(attempt || 1));
             const visibleMax = Math.max(visibleAttempt, Number(maximumRetries || 5));
             publish("retrying", {

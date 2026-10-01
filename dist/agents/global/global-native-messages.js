@@ -3,11 +3,13 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.GLOBAL_MAIN_SESSION_CONTEXT_GUIDANCE = void 0;
 exports.tryBuildGlobalNativeModelMessages = tryBuildGlobalNativeModelMessages;
 const native_session_transcript_1 = require("../native-session-transcript");
+const session_model_checkpoint_1 = require("../session-model-checkpoint");
 const native_query_messages_1 = require("../native-query-messages");
 const transient_model_content_1 = require("../../system/transient-model-content");
 const group_orchestrator_config_1 = require("../../modules/collaboration/group-orchestrator-config");
 const memory_1 = require("./memory");
 const session_model_context_1 = require("../../system/session-model-context");
+const provider_cache_message_layout_1 = require("../../system/provider-cache-message-layout");
 var main_agent_identity_1 = require("../main-agent-identity");
 Object.defineProperty(exports, "GLOBAL_MAIN_SESSION_CONTEXT_GUIDANCE", { enumerable: true, get: function () { return main_agent_identity_1.GLOBAL_MAIN_SESSION_CONTEXT_GUIDANCE; } });
 function tryBuildGlobalNativeModelMessages(input) {
@@ -27,7 +29,8 @@ function tryBuildGlobalNativeModelMessages(input) {
     const extraHistory = (Array.isArray(input.runHistory) ? input.runHistory : [])
         .filter((item) => ["user", "assistant"].includes(String(item?.role || "")));
     const history = (0, native_session_transcript_1.materializeNativeSessionTranscript)({
-        family: (0, native_query_messages_1.nativeQueryFamily)(config),
+        family: (0, native_session_transcript_1.sessionTranscriptFamily)(config),
+        protocolFamily: (0, native_query_messages_1.nativeQueryFamily)(config),
         conversation: conversation.length ? conversation : extraHistory,
         executionEvents: transcript.executionMessages || [],
         canonicalSummary: input.continuation?.summary || null,
@@ -45,7 +48,8 @@ function tryBuildGlobalNativeModelMessages(input) {
         identityRules: input.identityRules,
         sessionGuidance: input.sessionGuidance,
         mcpPolicy: input.mcpPolicy,
+        toolPromptLayout: input.toolPromptLayout,
     });
-    return (0, transient_model_content_1.attachTransientModelBlocks)([...system, ...history], (0, transient_model_content_1.collectTransientModelBlocks)(input.observations || []));
+    return (0, session_model_checkpoint_1.transferModelReplaySource)((0, transient_model_content_1.attachTransientModelBlocks)((0, provider_cache_message_layout_1.composeNativeMessagesWithDynamicBoundary)(system, history), (0, transient_model_content_1.collectTransientModelBlocks)(input.observations || [])), history);
 }
 //# sourceMappingURL=global-native-messages.js.map

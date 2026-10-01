@@ -170,7 +170,14 @@ function mergeRuntimeToolManagerAudit(audit, toolAudit) {
     return audit;
 }
 function getRuntimeAuthorizationReadiness(allowedTools, options = {}) {
-    if (options.authorizationReadiness?.schema === "ccm-tool-authorization-readiness-v1")
+    // A readiness snapshot can outlive the runtime skill catalog (for example
+    // after a service restart or after the user fixes a missing Skill). Reusing
+    // a stale negative snapshot would permanently block an otherwise valid
+    // dispatch. Only trust a supplied snapshot when it is positively ready;
+    // negative snapshots are recomputed against the current catalog below and
+    // the sync audit remains the final source of truth.
+    if (options.authorizationReadiness?.schema === "ccm-tool-authorization-readiness-v1"
+        && options.authorizationReadiness.dispatchReady === true)
         return options.authorizationReadiness;
     if (options.toolAudit)
         return (0, tool_authorization_1.buildAuthorizationReadiness)(options.toolAudit, (0, tool_authorization_1.normalizeToolAuthorization)(allowedTools));
@@ -261,7 +268,31 @@ function prepareAgentRuntimeTools(groupId, projectName, workDir, agentType, allo
         authorizationReadiness,
         internalMcpServers: { ...taskBoundInternalMcpServers, ...(options.internalMcpServers || {}) },
     });
-    audit.authorization_readiness = authorizationReadiness;
+    // Reconcile any precomputed scope audit with the freshly synced runtime.
+    // Scope catalogs are cached in memory and may be stale after restart; the
+    // runtime sync result is authoritative for what was actually delivered.
+    const requested = (0, tool_authorization_1.normalizeToolAuthorization)(allowedTools);
+    const synced = (0, tool_authorization_1.normalizeToolAuthorization)({ mcp: audit?.synced?.mcp || [], skill: audit?.synced?.skill || [] });
+    const missingMcp = requested.mcp.filter(item => !synced.mcp.includes(item));
+    const missingSkill = requested.skill.filter(item => !synced.skill.includes(item));
+    const reconciledAuthorizationReadiness = {
+        ...authorizationReadiness,
+        requested: { mcp: requested.mcp.length, skill: requested.skill.length },
+        available: {
+            ...(authorizationReadiness?.available || {}),
+            mcp: Math.max(0, requested.mcp.length - missingMcp.length),
+            skill: Math.max(0, requested.skill.length - missingSkill.length),
+        },
+        missing: {
+            ...(authorizationReadiness?.missing || {}),
+            missing_mcp_servers: missingMcp.length ? Number(authorizationReadiness?.missing?.missing_mcp_servers || 0) : 0,
+            missing_mcp_tools: missingMcp.length ? Number(authorizationReadiness?.missing?.missing_mcp_tools || 0) : 0,
+            missing_skills: missingSkill.length,
+        },
+        dispatchReady: missingMcp.length === 0 && missingSkill.length === 0 && Number(authorizationReadiness?.invalid_mcp_grants || 0) === 0,
+        status: missingMcp.length === 0 && missingSkill.length === 0 && Number(authorizationReadiness?.invalid_mcp_grants || 0) === 0 ? "ready" : "needs_attention",
+    };
+    audit.authorization_readiness = reconciledAuthorizationReadiness;
     audit.workspace_edit_capability = runtimeEditCapability;
     mergeRuntimeToolManagerAudit(audit, options.toolAudit);
     audit.dispatch_gate = (0, runtime_tool_sync_1.buildRuntimeToolDispatchGate)(audit);
@@ -754,8 +785,8 @@ function appendGlobalDirectDispatchRollbackToHistory(task, previousStatus = "") 
     (0, reliability_ledger_1.appendTraceEvent)(task.trace_id, { id: `timeline:${task.id}:${timelineEvent.id}`, type: "timeline.global_direct_dispatch_rollback_synced", status: "warning", task_id: task.id, group_id: task.group_id || "", agent: "global-agent", message: timelineEvent.detail, data: timelineEvent.data });
     return true;
 }
-function updateTask(id, updates) {
-    return require("./collaboration-task-service").updateTask(id, updates);
+function updateTask(id, updates, options = {}) {
+    return require("./collaboration-task-service").updateTask(id, updates, options);
 }
 function normalizeTaskTerminalStateView(task) {
     return require("./collaboration-task-service").normalizeTaskTerminalStateView(task);
@@ -776,8 +807,8 @@ function missionChildMatchesRef(task, ref) {
         .filter(Boolean)
         .some(value => String(value).toLowerCase() === String(ref).toLowerCase());
 }
-function removeTaskFromQueues(taskId) {
-    return require("./collaboration-task-service").removeTaskFromQueues(taskId);
+function removeTaskFromQueues(taskId, runId = "") {
+    return require("./collaboration-task-service").removeTaskFromQueues(taskId, runId);
 }
 function appendGlobalMissionSupervisorTimeline(mission, actions = [], waitingUser = [], terminal = false) {
     if (!mission?.id)
@@ -1051,7 +1082,7 @@ function hasDailyDevContinuationGaps(task) {
         return false;
     if (task.status === "done" && (0, collaboration_runtime_task_queue_1.hasStrongTaskAcceptanceEvidence)(task, [], task?.delivery_summary || {}))
         return false;
-    if ((0, collaboration_runtime_task_queue_1.isTaskPaused)(task) || collaboration_runtime_task_queue_1.runningTaskIds.has(task.id) || (0, collaboration_runtime_coordinator_review_1.isTaskQueuedInMemory)(task.id))
+    if ((0, collaboration_runtime_task_queue_1.isTaskPaused)(task) || (0, collaboration_runtime_task_queue_1.isTaskRunningInMemory)(task) || (0, collaboration_runtime_coordinator_review_1.isTaskQueuedInMemory)(task.id))
         return false;
     const summary = task.delivery_summary || {};
     const hasSummaryGaps = [
@@ -1107,7 +1138,7 @@ function taskNeedsUserIntervention(task) {
 function getTaskExecutionPhase(task) {
     if (task?.status === "done")
         return (0, collaboration_runtime_task_queue_1.hasStrongTaskAcceptanceEvidence)(task, [], task?.delivery_summary || {}) ? "done" : "reviewing";
-    if (collaboration_runtime_task_queue_1.runningTaskIds.has(task?.id) || task?.status === "in_progress")
+    if ((0, collaboration_runtime_task_queue_1.isTaskRunningInMemory)(task) || task?.status === "in_progress")
         return "running";
     if (taskNeedsUserIntervention(task))
         return "blocked";
@@ -1131,6 +1162,23 @@ function getTaskDashboardActions(task, phase) {
             actions.push({ id: "report", label: "执行报告", kind: "view_report", tone: "outline" });
         }
         actions.push({ id: "replay", label: "任务回放", kind: "view_replay", tone: "outline" });
+        return actions;
+    }
+    // A TestAgent projection is a read-only bookkeeping step.  It must be
+    // queued explicitly after its prerequisite implementation task has passed;
+    // exposing the generic "continue" action here would route the user into a
+    // new development turn instead of consuming the signed acceptance receipt.
+    const workflowVerification = String(task?.workflow_policy_snapshot?.verification || "").toLowerCase();
+    const independentVerification = workflowVerification === "test_agent"
+        || (!workflowVerification && String(task?.acceptance_route || "").toLowerCase() === "independent_test_agent");
+    if (independentVerification
+        && String(task?.requirement_item_key || task?.mission_target?.item_key || "").toUpperCase() === "TESTAGENT_VERIFY"
+        && String(task?.status || "").toLowerCase() === "pending") {
+        actions.push({ id: "queue_acceptance_projection", label: "继续验收", kind: "queue", tone: "primary" });
+        if (task?.delivery_summary || task?.final_report || task?.result || task?.receipt || task?.review) {
+            actions.push({ id: "report", label: "执行报告", kind: "view_report", tone: "outline" });
+        }
+        actions.push({ id: "cancel", label: "停止任务", kind: "cancel", tone: "danger" });
         return actions;
     }
     if (task?.acceptance_state === "recovery_required" && task?.recovery_preflight?.recoveryMode === "manual_reconciliation") {
@@ -1337,7 +1385,8 @@ function continueTaskWithMessage(taskId, message, ctx, options = {}) {
     const source = String(options.source || "user");
     const explicitCompletedRework = continuationKind === "revise_goal"
         || /(?:targeted_rework|completed_task_rework|explicit_rework)/i.test(source);
-    if (completedBeforeContinuation && !explicitCompletedRework) {
+    const awaitingUserAcceptance = current.status === "waiting_user" && current.acceptance_state === "awaiting_user_acceptance";
+    if (completedBeforeContinuation && !explicitCompletedRework && !awaitingUserAcceptance) {
         return {
             success: false,
             status: 409,
@@ -1414,7 +1463,8 @@ function continueTaskWithMessage(taskId, message, ctx, options = {}) {
             };
         }
     }
-    const currentlyRunning = collaboration_runtime_task_queue_1.runningTaskIds.has(taskId);
+    const currentTask = (0, db_1.loadTasks)().find((item) => String(item?.id || "") === taskId);
+    const currentlyRunning = currentTask ? (0, collaboration_runtime_task_queue_1.isTaskRunningInMemory)(currentTask) : collaboration_runtime_task_queue_1.runningTaskIds.has(taskId);
     const continuationRouteKind = continuationKind === "revise_goal"
         ? "revise_existing_task"
         : completedBeforeContinuation || requiresInterruptedRecovery
@@ -1719,7 +1769,7 @@ function continueTaskWithMessage(taskId, message, ctx, options = {}) {
         throw error;
     }
 }
-function retryTask(id, ctx, reason = "", autoExecute = true) {
-    return require("./collaboration-task-service").retryTask(id, ctx, reason, autoExecute);
+function retryTask(id, ctx, reason = "", autoExecute = true, parentRunId = "") {
+    return require("./collaboration-task-service").retryTask(id, ctx, reason, autoExecute, parentRunId);
 }
 //# sourceMappingURL=collaboration-runtime-runtime-tools.js.map

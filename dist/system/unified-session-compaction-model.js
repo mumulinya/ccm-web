@@ -15,6 +15,7 @@ const openai_responses_transport_1 = require("./openai-responses-transport");
 Object.defineProperty(exports, "normalizeOpenAiResponsesUrl", { enumerable: true, get: function () { return openai_responses_transport_1.normalizeOpenAiResponsesUrl; } });
 const model_call_retry_1 = require("./model-call-retry");
 const provider_cache_protocol_1 = require("./provider-cache-protocol");
+const provider_request_diagnostics_1 = require("./provider-request-diagnostics");
 exports.UNIFIED_COMPACTION_MODEL_ATTEMPT_TIMEOUT_MS = 120_000;
 exports.UNIFIED_COMPACTION_MODEL_TOTAL_TIMEOUT_MS = 360_000;
 function resolveUnifiedCompactionRetryOptions(config = {}) {
@@ -78,7 +79,7 @@ function normalizeUnifiedGeminiUrl(value, model) {
         return `${base}/models/${encodeURIComponent(cleanModel)}:generateContent`;
     return `${base}/v1beta/models/${encodeURIComponent(cleanModel)}:generateContent`;
 }
-async function callUnifiedCompactionModelOnce(config, system, user, maxOutputTokens, attemptTimeoutMs, audit = {}) {
+async function callUnifiedCompactionModelOnce(config, system, user, maxOutputTokens, attemptTimeoutMs, audit = {}, diagnostics = (0, provider_request_diagnostics_1.withRequestDiagnostics)({ requestAttribution: { purpose: 'session_compaction', requestClass: 'auxiliary', ...config.requestAttribution } })) {
     const transport = (0, provider_cache_protocol_1.assertProviderTransportResolution)(config);
     const anthropic = transport.protocol === "anthropic_messages";
     const provider = { anthropic_messages: "anthropic", gemini_generate_content: "gemini", responses: "openai-responses", chat_completions: "openai", custom: "custom" }[transport.protocol] || "custom";
@@ -111,6 +112,7 @@ async function callUnifiedCompactionModelOnce(config, system, user, maxOutputTok
         try {
             const call = anthropic ? group_orchestrator_llm_client_1.callAnthropicCompatibleChat : group_orchestrator_llm_client_1.callOpenAiCompatibleChat;
             const content = await call(config, {
+                ...diagnostics,
                 system,
                 messages: [{ role: "user", content: user }],
                 maxTokens: maxOutputTokens,
@@ -167,7 +169,8 @@ async function callUnifiedCompactionModel(config, system, user, maxOutputTokens 
     if (!config?.enabled || !config?.apiUrl || !config?.apiKey || !config?.model)
         return null;
     const retryOptions = resolveUnifiedCompactionRetryOptions(config);
-    return (0, model_call_retry_1.runModelCallWithRetry)(context => callUnifiedCompactionModelOnce(config, system, user, maxOutputTokens, context.attemptTimeoutMs, audit), {
+    const diagnostics = (0, provider_request_diagnostics_1.withRequestDiagnostics)({ requestAttribution: { purpose: 'session_compaction', requestClass: 'auxiliary', ...config.requestAttribution } });
+    return (0, model_call_retry_1.runModelCallWithRetry)(context => callUnifiedCompactionModelOnce(config, system, user, maxOutputTokens, context.attemptTimeoutMs, audit, diagnostics), {
         scope: "session memory compaction model call",
         ...retryOptions,
         baseDelayMs: config.modelRetryBaseDelayMs ?? config.model_retry_base_delay_ms,

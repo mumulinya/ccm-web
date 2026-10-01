@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.tryBuildGroupNativeCoordinatorMessages = tryBuildGroupNativeCoordinatorMessages;
 const native_session_transcript_1 = require("../../agents/native-session-transcript");
+const session_model_checkpoint_1 = require("../../agents/session-model-checkpoint");
 const native_query_messages_1 = require("../../agents/native-query-messages");
 const transient_model_content_1 = require("../../system/transient-model-content");
 const group_orchestrator_config_1 = require("./group-orchestrator-config");
@@ -9,6 +10,7 @@ const group_session_model_context_1 = require("./group-session-model-context");
 const group_session_execution_ledger_1 = require("./group-session-execution-ledger");
 const storage_1 = require("./storage");
 const session_model_context_1 = require("../../system/session-model-context");
+const provider_cache_message_layout_1 = require("../../system/provider-cache-message-layout");
 function tryBuildGroupNativeCoordinatorMessages(input) {
     const groupId = String(input.group?.id || "").trim();
     const groupSessionId = String(input.groupSessionId || "").trim();
@@ -26,7 +28,7 @@ function tryBuildGroupNativeCoordinatorMessages(input) {
     const conversation = (0, storage_1.getGroupMessages)(groupId, groupSessionId)
         .filter((item) => !String(item?.content || "").startsWith("📤"))
         .filter((item) => !visibleIds.size || visibleIds.has(item.id) || visibleIds.has(item.uuid));
-    const family = (0, native_query_messages_1.nativeQueryFamily)(config);
+    const family = (0, native_session_transcript_1.sessionTranscriptFamily)(config);
     // Persistent shared files and knowledge are catalog capabilities. The
     // 本地知识库参考 and 群聊共享文件 labels remain metadata-only until a
     // corresponding read tool puts their body into the native transcript.
@@ -37,6 +39,7 @@ function tryBuildGroupNativeCoordinatorMessages(input) {
         || null;
     const history = (0, native_session_transcript_1.materializeNativeSessionTranscript)({
         family,
+        protocolFamily: (0, native_query_messages_1.nativeQueryFamily)(config),
         conversation,
         executionEvents: (0, group_session_execution_ledger_1.listGroupSessionExecutionEvents)(groupId, groupSessionId),
         canonicalSummary: projection.canonicalSummary ? projection.summary : null,
@@ -55,7 +58,8 @@ function tryBuildGroupNativeCoordinatorMessages(input) {
         identityRules: input.identityRules,
         sessionGuidance: input.sessionGuidance,
         mcpPolicy: input.mcpPolicy,
+        toolPromptLayout: input.toolPromptLayout,
     });
-    return (0, transient_model_content_1.attachTransientModelBlocks)([...system, ...history], (0, transient_model_content_1.collectTransientModelBlocks)(input.mainAgentToolResults || []));
+    return (0, session_model_checkpoint_1.transferModelReplaySource)((0, transient_model_content_1.attachTransientModelBlocks)((0, provider_cache_message_layout_1.composeNativeMessagesWithDynamicBoundary)(system, history), (0, transient_model_content_1.collectTransientModelBlocks)(input.mainAgentToolResults || [])), history);
 }
 //# sourceMappingURL=group-coordinator-native-messages.js.map

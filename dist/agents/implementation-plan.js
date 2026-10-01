@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.IMPLEMENTATION_PLAN_LANGUAGE_CONTRACT = exports.IMPLEMENTATION_PLAN_PROMPTS = exports.CCM_IMPLEMENTATION_PLAN_PROMPT_VERSION = exports.CCM_IMPLEMENTATION_PLAN_SCHEMA = void 0;
+exports.IMPLEMENTATION_PLAN_LANGUAGE_CONTRACT = exports.CCM_WORK_ORDER_PROMPT_CONTRACT = exports.IMPLEMENTATION_PLAN_PROMPTS = exports.CCM_IMPLEMENTATION_PLAN_PROMPT_VERSION = exports.CCM_IMPLEMENTATION_PLAN_SCHEMA = void 0;
 exports.implementationPlanChecksum = implementationPlanChecksum;
 exports.normalizeImplementationPlanV2 = normalizeImplementationPlanV2;
 exports.reviseImplementationPlan = reviseImplementationPlan;
@@ -42,10 +42,12 @@ exports.shouldRequireImplementationPlan = shouldRequireImplementationPlan;
 exports.renderImplementationPlanMarkdown = renderImplementationPlanMarkdown;
 exports.runImplementationPlanSelfTest = runImplementationPlanSelfTest;
 const crypto = __importStar(require("crypto"));
+const acceptance_plan_compiler_1 = require("./acceptance-plan-compiler");
 const business_requirement_contract_1 = require("./business-requirement-contract");
+const work_order_prompt_contract_1 = require("./work-order-prompt-contract");
 exports.CCM_IMPLEMENTATION_PLAN_SCHEMA = "ccm-implementation-plan-v2";
-exports.CCM_IMPLEMENTATION_PLAN_PROMPT_VERSION = "2026-08-31.en-v4";
-const EMPTY_PLAN_PROMPT = `You are the CCM implementation planner.
+exports.CCM_IMPLEMENTATION_PLAN_PROMPT_VERSION = work_order_prompt_contract_1.CCM_PLAN_PROMPT_VERSION;
+const EMPTY_PLAN_PROMPT = `${work_order_prompt_contract_1.CCM_WORK_ORDER_PROMPTS.plan}\n\n${acceptance_plan_compiler_1.ACCEPTANCE_PLAN_DIRECTIVE}\n\nYou are the CCM implementation planner.
 
 Work in read-only mode. Do not modify project files, configuration, dependencies,
 Git state, or external systems.
@@ -66,6 +68,9 @@ exports.IMPLEMENTATION_PLAN_PROMPTS = {
     planning_repair: `${EMPTY_PLAN_PROMPT}\n\nRepair only the reported plan defects. Make each affected step concrete with a real evidence-backed location, behavior change, and verification mapping. Preserve confirmed scope and increment the plan revision.`,
     plan_to_dispatch: `Convert the confirmed ccm-implementation-plan-v2 into self-contained child-Agent work orders.\nPreserve the authoritative business goal. Give each child Agent only the steps assigned to its project. Copy titles, objectives, acceptance criterion IDs, and acceptance text without rewriting them. Add project/file scope, dependencies, permissions, forbidden scope, revision, and checksums.`,
 };
+// Versioned Plan/work-order directives are exported from a focused contract module.
+// Keep the legacy v2 wire schema while sharing the stable directives with dispatch.
+exports.CCM_WORK_ORDER_PROMPT_CONTRACT = work_order_prompt_contract_1.CCM_WORK_ORDER_PROMPTS;
 exports.IMPLEMENTATION_PLAN_LANGUAGE_CONTRACT = `Generate all user-visible plan content in the language used by the user. For Chinese conversations, use natural Simplified Chinese. Keep schema keys, tool names, identifiers, checksums, and status enums in English.`;
 function text(value, max = 4000) {
     return String(value ?? "").replace(/\s+/g, " ").trim().slice(0, max);
@@ -131,6 +136,11 @@ function steps(value, fallbackGoal, requirement) {
             id: text(row?.id || `step_${index + 1}`, 100).replace(/[^a-zA-Z0-9._-]+/g, "-") || `step_${index + 1}`,
             title,
             objective: text(row?.objective || row?.description || row?.task || title || fallbackGoal, 1800),
+            ...(Array.isArray(row?.verification) ? { verification: verification(row.verification, []) } : {}),
+            ...(Array.isArray(row?.editablePaths) ? { editablePaths: list(row.editablePaths, 80, 500) } : {}),
+            ...(Array.isArray(row?.readOnlyPaths) ? { readOnlyPaths: list(row.readOnlyPaths, 80, 500) } : {}),
+            ...(Array.isArray(row?.cleanupPaths) ? { cleanupPaths: list(row.cleanupPaths, 80, 500) } : {}),
+            ...(Array.isArray(row?.synchronizedFixturePaths) ? { synchronizedFixturePaths: row.synchronizedFixturePaths } : {}),
             projects: assignedProjects,
             dependsOn: list(row?.dependsOn || row?.depends_on, 16, 100),
             ...(text(row?.changeSummary || row?.change_summary || row?.behaviorChange || row?.behavior_change, 1800) ? { changeSummary: text(row?.changeSummary || row?.change_summary || row?.behaviorChange || row?.behavior_change, 1800) } : {}),
@@ -151,6 +161,9 @@ function steps(value, fallbackGoal, requirement) {
 function verification(value, expectedResults) {
     const rows = Array.isArray(value) ? value : [];
     const result = rows.map((row) => ({
+        ...(row?.assertion || row?.command ? { ...(row.assertion ? { assertion: row.assertion } : {}), kind: row.kind || (row.command ? "command" : ""),
+            cwd: row.cwd || ".", projectId: row.projectId || row.project, sourceEvidenceIds: list(row.sourceEvidenceIds, 30, 160),
+            acceptanceCriterionIds: list(row.acceptanceCriterionIds, 30, 160), independent: row.independent === true } : {}),
         ...(text(row?.command, 500) ? { command: text(row.command, 500) } : {}),
         expected: text(row?.expected || row?.result || row?.description, 800),
         acceptanceCriteria: list(row?.acceptanceCriteria || row?.acceptance_criteria || row?.acceptance, 12, 800),

@@ -1,0 +1,142 @@
+export declare const CONVERSATION_SEARCH_SCHEMA = "ccm-conversation-search-v3";
+export { markConversationSearchIndexDirty } from "../../system/conversation-search-dirty";
+export type ConversationTypeV3 = "project" | "group" | "global" | "music";
+export type ConversationSearchRecordV3 = {
+    rowId: string;
+    conversationType: ConversationTypeV3;
+    source: string;
+    sourceLabel: string;
+    project: string;
+    groupId: string;
+    groupName: string;
+    sessionId: string;
+    sessionName: string;
+    messageId: string;
+    messageIndex: number;
+    role: string;
+    agent: string;
+    content: string;
+    timestamp: string;
+    taskId: string;
+    taskTitle: string;
+    attachments: any[];
+    sourceIdentity: string;
+    sourceChecksum: string;
+};
+type SourceRow = {
+    sourceIdentity: string;
+    scopeType: ConversationTypeV3;
+    scopeId: string;
+    sessionId: string;
+    sourceChecksum: string;
+    status: "ready" | "degraded";
+    errorSummary: string;
+    records: ConversationSearchRecordV3[];
+};
+export declare function collapseGeneratedGlobalWelcomeSessions(sessions: any[]): any[];
+export declare function collectConversationSearchSources(): SourceRow[];
+export declare function buildConversationSearchIndexSync(): {
+    success: boolean;
+    unchanged: boolean;
+    generation: any;
+    message_count: any;
+    source_count: any;
+    degraded_source_count?: undefined;
+} | {
+    success: boolean;
+    generation: string;
+    source_count: number;
+    message_count: number;
+    degraded_source_count: number;
+    unchanged?: undefined;
+};
+export declare function getConversationSearchIndexStatus(): {
+    schema: string;
+    ready: boolean;
+    active_generation: any;
+    message_count: number;
+    source_count: number;
+    degraded_source_count: number;
+    completed_at: any;
+    stale: boolean;
+    building: boolean;
+    latest_status: any;
+    error: any;
+};
+export declare function startConversationSearchIndexBuild(options?: {
+    force?: boolean;
+    reason?: string;
+}): {
+    schema: string;
+    ready: boolean;
+    active_generation: any;
+    message_count: number;
+    source_count: number;
+    degraded_source_count: number;
+    completed_at: any;
+    stale: boolean;
+    building: boolean;
+    latest_status: any;
+    error: any;
+    accepted: boolean;
+    reason: string;
+} | {
+    schema: string;
+    ready: boolean;
+    active_generation: any;
+    message_count: number;
+    source_count: number;
+    degraded_source_count: number;
+    completed_at: any;
+    stale: boolean;
+    building: boolean;
+    latest_status: any;
+    error: any;
+    accepted: boolean;
+    pid: number;
+};
+export declare function startConversationSearchIndexScheduler(): void;
+export declare function stopConversationSearchIndexScheduler(): void;
+export declare function activeConversationSearchGeneration(): string;
+export declare function shortSearchTerm(value: string): boolean;
+export declare function candidateRowsForTerm(generation: string, term: string): string[];
+export declare function conversationSearchRecordRows(generation: string, rowIds: string[]): any[];
+export declare function conversationMessageWindow(input: {
+    generation?: string;
+    rowId?: string;
+    conversationType?: string;
+    project?: string;
+    groupId?: string;
+    sessionId?: string;
+    messageId?: string;
+    messageIndex?: number;
+    before?: number;
+    after?: number;
+}): {
+    schema: string;
+    generation: string;
+    source_checksum: any;
+    target: {
+        row_id: any;
+        message_id: any;
+        message_index: any;
+    };
+    conversation: {
+        conversation_type: any;
+        project: any;
+        group_id: any;
+        session_id: any;
+        session_name: any;
+    };
+    messages: {
+        rowId: any;
+        messageId: any;
+        messageIndex: any;
+        role: any;
+        agent: any;
+        content: any;
+        timestamp: any;
+        checksum: any;
+        target: boolean;
+    }[];
+};

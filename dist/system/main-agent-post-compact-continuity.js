@@ -37,6 +37,7 @@ exports.resolveMainAgentContinuityIdentity = resolveMainAgentContinuityIdentity;
 exports.recordMainAgentInvokedSkill = recordMainAgentInvokedSkill;
 exports.recordMainAgentLoadedMcpSchemas = recordMainAgentLoadedMcpSchemas;
 exports.recordMainAgentToolContinuityFromResult = recordMainAgentToolContinuityFromResult;
+exports.restoreMainAgentWorkspaceToolNames = restoreMainAgentWorkspaceToolNames;
 exports.buildMainAgentPostCompactRestoreManifest = buildMainAgentPostCompactRestoreManifest;
 exports.persistMainAgentPostCompactRestoreManifest = persistMainAgentPostCompactRestoreManifest;
 exports.validateMainAgentPostCompactRestoreManifest = validateMainAgentPostCompactRestoreManifest;
@@ -298,6 +299,24 @@ function recordMainAgentToolContinuityFromResult(input) {
         sourceMessageId: input.sourceMessageId,
         invokedAt: result.invokedAt,
     });
+}
+// Workspace schemas live outside toolManager's extension catalog. Restore
+// their search selections from the existing evidence store even when no
+// compaction manifest exists. The caller supplies only currently authorized
+// definitions; persisted evidence never supplies executable schemas or grants.
+function restoreMainAgentWorkspaceToolNames(identityInput, currentTools) {
+    const identity = normalizedIdentity(identityInput);
+    const store = readStore(identity);
+    if (!identityMatches(store.identity, identity)
+        || store.checksum !== stableChecksum({ ...store, checksum: undefined }))
+        return [];
+    const current = new Map(currentTools
+        .filter(tool => tool?.server === 'ccm__workspace_readonly')
+        .map(tool => [String(tool.canonicalName || tool.name), tool]));
+    return store.loadedMcpSchemas.filter(evidence => {
+        const tool = current.get(evidence.canonicalName);
+        return tool && evidence.server === tool.server && evidence.schemaChecksum === toolSchemaChecksum(tool);
+    }).map(evidence => evidence.canonicalName);
 }
 function manifestCore(input) {
     const identity = normalizedIdentity(input.identity);

@@ -254,6 +254,7 @@ class MusicDownloadJobStore {
         const existingAsset = (0, music_persistence_1.findMusicMediaAsset)(job.source, job.sourceId);
         const requestedRank = QUALITY_RANK[job.requestedQuality || job.quality] || QUALITY_RANK.high;
         this.removePartial(job);
+        let stagedDouyinFile = "";
         job.status = "resolving";
         job.phase = job.source === "douyin" ? "正在解析抖音视频" : "正在解析音频地址";
         job.checkpoint = "resolving";
@@ -278,18 +279,42 @@ class MusicDownloadJobStore {
                     }
                 }
             }
-            const douyinInput = job.source === "douyin" ? await (0, douyin_1.resolveDouyinMediaInput)(job.sourceId, { signal: abortController.signal }) : null;
+            let douyinInput = null;
+            if (job.source === "douyin") {
+                try {
+                    const staged = await (0, douyin_1.downloadDouyinVideoForPlayback)(job.sourceId, { signal: abortController.signal });
+                    stagedDouyinFile = String(staged?.filePath || "");
+                    if (stagedDouyinFile) {
+                        douyinInput = { localFile: stagedDouyinFile, title: staged?.title || "", durationSeconds: staged?.durationSeconds || 0 };
+                        job.phase = "已通过抖音 MCP 获取视频，准备提取音频";
+                        job.updatedAt = now();
+                        this.persist();
+                    }
+                }
+                catch (mcpError) {
+                    if (abortController.signal.aborted || ['login_required', 'risk_controlled'].includes(mcpError?.douyinState))
+                        throw mcpError;
+                    // Keep the existing yt-dlp resolver as a compatibility fallback.
+                    job.phase = `MCP 下载不可用，切换兼容解析：${String(mcpError?.message || "").slice(0, 120)}`;
+                    job.updatedAt = now();
+                    this.persist();
+                }
+                if (abortController.signal.aborted)
+                    return;
+                if (!douyinInput)
+                    douyinInput = await (0, douyin_1.resolveDouyinMediaInput)(job.sourceId, { signal: abortController.signal });
+            }
             const audioUrl = job.source === "bilibili"
                 ? await (0, bilibili_1.getBiliAudioUrl)(job.sourceId)
                 : job.source === "douyin"
-                    ? String(douyinInput?.url || "")
+                    ? String(douyinInput?.url || douyinInput?.localFile || "")
                     : `https://music.163.com/song/media/outer/url?id=${encodeURIComponent(job.sourceId)}.mp3`;
             if (this.jobs.get(job.id)?.status !== "resolving")
                 return;
             const headers = job.source === "bilibili"
                 ? `User-Agent: ${bilibili_1.BILI_UA}\r\nReferer: https://www.bilibili.com/\r\n`
                 : job.source === "douyin"
-                    ? Object.entries(douyinInput?.headers || {}).map(([key, value]) => `${key}: ${String(value).replace(/[\r\n]/g, " ")}`).join("\r\n") + "\r\n"
+                    ? douyinInput?.localFile ? "" : Object.entries(douyinInput?.headers || {}).map(([key, value]) => `${key}: ${String(value).replace(/[\r\n]/g, " ")}`).join("\r\n") + "\r\n"
                     : "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64)\r\nReferer: https://music.163.com/\r\n";
             job.status = "running";
             job.phase = job.source === "douyin" ? "正在提取音频" : "正在下载并转码";
@@ -304,7 +329,8 @@ class MusicDownloadJobStore {
                     : job.quality === "very_high"
                         ? ["-b:a", "320k"]
                         : ["-q:a", "0"];
-            const child = (0, child_process_1.spawn)("ffmpeg", ["-headers", headers, "-i", audioUrl, "-vn", "-y", ...qualityArgs, "-f", "mp3", "-progress", "pipe:1", "-nostats", partial], {
+            const ffmpegArgs = headers ? ["-headers", headers, "-i", audioUrl] : ["-i", audioUrl];
+            const child = (0, child_process_1.spawn)("ffmpeg", [...ffmpegArgs, "-vn", "-y", ...qualityArgs, "-f", "mp3", "-progress", "pipe:1", "-nostats", partial], {
                 stdio: ["ignore", "pipe", "pipe"], windowsHide: true,
             });
             this.children.set(job.id, child);
@@ -412,6 +438,13 @@ class MusicDownloadJobStore {
             }
         }
         finally {
+            if (stagedDouyinFile) {
+                try {
+                    if (fs.existsSync(stagedDouyinFile))
+                        fs.unlinkSync(stagedDouyinFile);
+                }
+                catch { }
+            }
             this.children.delete(job.id);
             this.abortControllers.delete(job.id);
             this.activeRuns.delete(job.id);

@@ -375,7 +375,10 @@ function buildIntegrity(input) {
         observed.add("execution");
     if (input.deliveries.length || input.events.some(event => event.stage === "completion"))
         observed.add("delivery");
-    const verificationExpected = input.tasks.some(task => task?.test_agent_enabled !== false && task?.skip_independent_verification !== true)
+    const verificationExpected = input.tasks.some(task => {
+        const frozenVerification = String(task?.workflow_policy_snapshot?.verification || "").toLowerCase();
+        return frozenVerification ? frozenVerification === "test_agent" : task?.test_agent_enabled !== false && task?.skip_independent_verification !== true;
+    })
         || input.events.some(event => event.actor?.type === "test_agent" || ["test", "review"].includes(String(event.stage)));
     if (verificationExpected)
         expected.push("verification");

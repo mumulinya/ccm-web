@@ -35,6 +35,7 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.createGlobalAgentApi = createGlobalAgentApi;
 const crypto = __importStar(require("crypto"));
+const conversation_attempt_1 = require("../../agents/conversation-attempt");
 const fs = __importStar(require("fs"));
 const os = __importStar(require("os"));
 const path = __importStar(require("path"));
@@ -62,6 +63,8 @@ const feishu_inbound_attachments_1 = require("../../integrations/feishu-inbound-
 const runtime_events_1 = require("../../system/runtime-events");
 const sse_heartbeat_1 = require("../../system/sse-heartbeat");
 const model_retry_presentation_1 = require("../../system/model-retry-presentation");
+const conversation_event_journal_1 = require("../../agents/conversation-event-journal");
+const conversation_turn_control_1 = require("../../agents/conversation-turn-control");
 function normalizeGlobalRequestedTargets(value, message = "") {
     let rows = value;
     if (typeof rows === "string") {
@@ -217,21 +220,39 @@ function createGlobalAgentApi(deps) {
     ];
     const drainingGlobalWebTurns = new Set();
     let globalWebTurnRecoveryTimer = null;
+    const requestGlobalTurnPause = (turn) => {
+        const run = listGlobalAgentRuns({ sessionId: turn.conversation_id, limit: 50 })
+            .find((item) => String(item.turn_id || "") === turn.id && String(item.status || "") === "running");
+        if (run)
+            pauseGlobalAgentRun(run.id);
+    };
+    setImmediate(() => (0, conversation_turn_control_1.registerGlobalConversationPauseDispatcher)(requestGlobalTurnPause));
     const drainGlobalWebTurns = async (baseUrl, ctx, sessionId) => {
         if (!sessionId || drainingGlobalWebTurns.has(sessionId))
             return;
         drainingGlobalWebTurns.add(sessionId);
         try {
             while (true) {
-                const occupied = listGlobalAgentRuns({ sessionId, limit: 20 })
-                    .some((run) => ["running", "executing", "supervising", "paused", "waiting_clarification", "waiting_user", "blocked", "interrupted", "recovering"]
+                const runs = listGlobalAgentRuns({ sessionId, limit: 20 });
+                const pausedRun = runs.find((run) => run.status === "paused"
+                    && conversationTurnControl.getInternal(String(run.turn_id || ""))?.status === "queued");
+                const occupied = runs
+                    .some((run) => run.id !== pausedRun?.id && ["running", "executing", "supervising", "paused", "waiting_clarification", "waiting_user", "blocked", "interrupted", "recovering"]
                     .includes(String(run?.status || "").toLowerCase()));
                 if (occupied)
                     break;
-                const turn = conversationTurnControl.claim({ scope: "global", conversation_id: sessionId });
+                const turn = conversationTurnControl.claim({ scope: "global", conversation_id: sessionId, ...(pausedRun ? { id: pausedRun.turn_id } : {}) });
                 if (!turn)
                     break;
                 const metadata = turn.metadata?.global_context_v2 || {};
+                const queuedFiles = (turn.attachments || []).filter((file) => file?.savedPath && fs.existsSync(String(file.savedPath)));
+                const sourceIngestion = metadata.source_ingestion || (queuedFiles.length ? await ingestRequirementSources({
+                    files: queuedFiles,
+                    userText: String(metadata.message || turn.message || ""),
+                    extractRequirement: true,
+                    decomposeRequirement: false,
+                    availableTargets: requirementTargets(),
+                }) : null);
                 const resolvedRoute = String(turn.metadata?.resolved_route || metadata.resolved_route || "");
                 const resolvedCandidateTaskId = String(turn.metadata?.resolved_candidate_task_id || metadata.resolved_candidate_task_id || "");
                 const recoverableCandidates = (0, conversation_message_routing_1.findConversationTaskCandidates)({ scope: "global", scopeId: "global", exactSessionId: sessionId });
@@ -242,51 +263,68 @@ function createGlobalAgentApi(deps) {
                 if (resolvedCandidate)
                     routeHistory.push({ role: "system", content: `The user explicitly chose to continue the original task. Recoverable task summary: ${JSON.stringify((0, conversation_message_routing_1.buildRecoverableTaskSummary)(resolvedCandidate))}.` });
                 try {
-                    const run = await runAgenticGlobalRequest(baseUrl, ctx, {
-                        message: String(metadata.message || turn.message || ""),
-                        originalMessage: String(metadata.original_message || turn.message || ""),
-                        history: routeHistory,
-                        sessionId,
-                        source: String(metadata.source || "web-queue-recovery"),
-                        traceId: String(metadata.trace_id || ""),
-                        clarificationRunId: String(metadata.clarification_run_id || ""),
-                        sourceIngestion: metadata.source_ingestion || null,
-                        readOnly: metadata.read_only === true,
-                        principal: metadata.principal || null,
-                        requestedTargetRefs: Array.isArray(metadata.requested_target_refs) ? metadata.requested_target_refs : [],
-                        turnId: turn.id,
-                        queueScope: `global:${sessionId}`,
-                        routeGuard: (workflowDecision) => {
-                            if (resolvedRoute === "answer_only") {
-                                workflowDecision.actionRequired = false;
-                                workflowDecision.requiresCodeChanges = false;
-                                workflowDecision.requiresCodeChanges = false;
-                                workflowDecision.continuationKind = "new_task";
-                                return;
-                            }
-                            if (resolvedRoute === "start_new_task") {
-                                workflowDecision.continuationKind = "new_task";
-                                return;
-                            }
-                            if (resolvedRoute === "continue_original" && resolvedCandidate) {
-                                workflowDecision.continuationKind = String(workflowDecision.continuationKind || "supplement") === "revise_goal" ? "revise_goal" : "supplement";
-                                (0, conversation_message_routing_1.bindConversationRouteToWorkflowDecision)(workflowDecision, {
-                                    routeKind: workflowDecision.continuationKind === "revise_goal" ? "revise_existing_task" : "resume_existing_task",
-                                    exactSessionId: sessionId,
-                                    scope: "global",
-                                }, resolvedCandidate, "explicit_user_choice");
-                                return;
-                            }
-                            const route = (0, conversation_message_routing_1.decideConversationMessageRoute)({ workflowDecision, candidates: recoverableCandidates, exactSessionId: sessionId, scope: "global" });
-                            if (route.decision === "needs_user")
-                                throw Object.assign(new Error(route.reason), { code: "CONVERSATION_ROUTE_REQUIRED", route });
-                            if (route.candidate && ["resume_task", "revise_task"].includes(route.decision)) {
-                                (0, conversation_message_routing_1.bindConversationRouteToWorkflowDecision)(workflowDecision, route, route.candidate, "session_anchor");
-                            }
-                        },
-                    });
+                    const onEvent = (event) => {
+                        (0, conversation_event_journal_1.appendConversationEvent)(turn.id, (0, conversation_attempt_1.conversationAttemptId)(turn), event);
+                        if (event?.type === "started" && conversationTurnControl.getInternal(turn.id)?.status === "pausing")
+                            requestGlobalTurnPause(turn);
+                        if (event?.type === "paused")
+                            conversationTurnControl.pauseAtBoundary(turn.id, (0, conversation_attempt_1.conversationAttemptId)(turn), "global_run_boundary");
+                    };
+                    const run = await (0, conversation_attempt_1.runWithConversationAttempt)(conversationTurnControl, turn, () => pausedRun
+                        ? resumeGlobalAgentRun(pausedRun.id, createAgenticRuntime(baseUrl, ctx, {
+                            onEvent, turnId: turn.id, sessionId, source: "web", readOnly: metadata.read_only === true,
+                            principal: metadata.principal || null,
+                        }), { source: "web" })
+                        : runAgenticGlobalRequest(baseUrl, ctx, {
+                            message: String(metadata.message || turn.message || ""),
+                            originalMessage: String(metadata.original_message || turn.message || ""),
+                            history: routeHistory,
+                            sessionId,
+                            source: String(metadata.source || "web-queue-recovery"),
+                            traceId: String(metadata.trace_id || ""),
+                            clarificationRunId: String(metadata.clarification_run_id || ""),
+                            sourceIngestion,
+                            readOnly: metadata.read_only === true,
+                            principal: metadata.principal || null,
+                            requestedTargetRefs: Array.isArray(metadata.requested_target_refs) ? metadata.requested_target_refs : [],
+                            onEvent,
+                            turnId: turn.id,
+                            queueScope: `global:${sessionId}`,
+                            routeGuard: (workflowDecision) => {
+                                if (resolvedRoute === "answer_only") {
+                                    workflowDecision.actionRequired = false;
+                                    workflowDecision.requiresCodeChanges = false;
+                                    workflowDecision.requiresCodeChanges = false;
+                                    workflowDecision.continuationKind = "new_task";
+                                    return;
+                                }
+                                if (resolvedRoute === "start_new_task") {
+                                    workflowDecision.continuationKind = "new_task";
+                                    return;
+                                }
+                                if (resolvedRoute === "continue_original" && resolvedCandidate) {
+                                    workflowDecision.continuationKind = String(workflowDecision.continuationKind || "supplement") === "revise_goal" ? "revise_goal" : "supplement";
+                                    (0, conversation_message_routing_1.bindConversationRouteToWorkflowDecision)(workflowDecision, {
+                                        routeKind: workflowDecision.continuationKind === "revise_goal" ? "revise_existing_task" : "resume_existing_task",
+                                        exactSessionId: sessionId,
+                                        scope: "global",
+                                    }, resolvedCandidate, "explicit_user_choice");
+                                    return;
+                                }
+                                const route = (0, conversation_message_routing_1.decideConversationMessageRoute)({ workflowDecision, candidates: recoverableCandidates, exactSessionId: sessionId, scope: "global" });
+                                if (route.decision === "needs_user")
+                                    throw Object.assign(new Error(route.reason), { code: "CONVERSATION_ROUTE_REQUIRED", route });
+                                if (route.candidate && ["resume_task", "revise_task"].includes(route.decision)) {
+                                    (0, conversation_message_routing_1.bindConversationRouteToWorkflowDecision)(workflowDecision, route, route.candidate, "session_anchor");
+                                }
+                            },
+                        }));
+                    (0, conversation_event_journal_1.appendConversationEvent)(turn.id, (0, conversation_attempt_1.conversationAttemptId)(turn), { type: "result", run: publicGlobalAgentRun(run) });
+                    if (run.status === "paused")
+                        break;
                     conversationTurnControl.settle({
                         id: turn.id,
+                        attempt_id: (0, conversation_attempt_1.conversationAttemptId)(turn),
                         status: run.status === "failed" ? "failed" : "completed",
                         run_id: run.id,
                         checkpoint: run.status,
@@ -296,6 +334,8 @@ function createGlobalAgentApi(deps) {
                     });
                 }
                 catch (error) {
+                    if (conversationTurnControl.getInternal(turn.id)?.status === "paused")
+                        break;
                     if (error?.code === "CONVERSATION_ROUTE_REQUIRED") {
                         conversationTurnControl.requireRoute({
                             id: turn.id,
@@ -316,7 +356,8 @@ function createGlobalAgentApi(deps) {
                         });
                         break;
                     }
-                    conversationTurnControl.settle({ id: turn.id, status: "failed", checkpoint: "failed", error: error?.message || String(error) });
+                    (0, conversation_event_journal_1.appendConversationEvent)(turn.id, (0, conversation_attempt_1.conversationAttemptId)(turn), { type: "error", text: error?.message || String(error) });
+                    conversationTurnControl.settle({ id: turn.id, attempt_id: (0, conversation_attempt_1.conversationAttemptId)(turn), status: "failed", checkpoint: "failed", error: error?.message || String(error) });
                 }
             }
         }
@@ -967,7 +1008,7 @@ function createGlobalAgentApi(deps) {
                     supervisor: supervisor?.updated_at,
                     children: result.children.map((task) => [task.id, task.revision, task.status, task.updated_at]),
                 })).digest("hex");
-                sendJson(res, { success: true, ...result, supervisor, navigation, delivery, projectionRevision });
+                sendJson(res, { success: true, ...result, mission: { ...result.mission, available_actions: [...(0, task_available_actions_1.missionNavigationActions)(navigation.targets), ...result.mission.available_actions] }, supervisor, navigation, delivery, projectionRevision });
                 return true;
             }
             const missions = refreshGlobalDevelopmentMissions();
@@ -1511,7 +1552,7 @@ function createGlobalAgentApi(deps) {
         }
         if (pathname === "/api/global-agent/run" && req.method === "POST") {
             const contentType = String(req.headers["content-type"] || "");
-            const handleRun = async (payload, files = []) => {
+            const handleRun = (0, conversation_attempt_1.withConversationAttemptScope)(async (payload, files = []) => {
                 const isStream = parsed.query.stream === "true" || payload.stream === true || String(req.headers.accept || "").includes("text/event-stream");
                 let reliabilityOperationKey = "";
                 let reliabilityOperationAcquired = false;
@@ -1533,6 +1574,9 @@ function createGlobalAgentApi(deps) {
                 }
                 const emit = (event) => {
                     if (!isStream || res.writableEnded)
+                        return;
+                    event = (0, conversation_attempt_1.projectConversationAttemptEvent)(res, event);
+                    if (!event)
                         return;
                     if (["text", "response_delta"].includes(String(event?.type || "")) && String(event?.text || "").trim())
                         visibleTextEmitted = true;
@@ -1598,7 +1642,7 @@ function createGlobalAgentApi(deps) {
                     ctx.setAgentActivity(GLOBAL_PET_AGENT_NAME, "thinking", "全局 Agent 正在思考...", { tab: "global-agent" }, 12 * 60 * 1000);
                     ctx.broadcastPetSpeech(GLOBAL_PET_AGENT_NAME, { role: "user", text: displayMessage, final: true, source: "global" });
                     const requestId = String(payload.request_id || payload.requestId || req.headers["x-client-message-id"] || `server-${Date.now()}-${crypto.randomBytes(4).toString("hex")}`).trim();
-                    const operationKey = requestId ? `${sessionId}:${requestId}` : "";
+                    const operationKey = requestId ? `${sessionId}:${requestId}${payload.attempt_id ? `:${payload.attempt_id}` : ""}` : "";
                     streamRequestId = requestId;
                     reliabilityOperationKey = operationKey;
                     const operation = operationKey ? acquireIdempotency({ scope: "global-agent-request", key: operationKey, leaseMs: 13 * 60 * 1000, metadata: { session_id: sessionId, source: "web" } }) : null;
@@ -1623,6 +1667,11 @@ function createGlobalAgentApi(deps) {
                     const suppliedTurn = suppliedTurnId
                         ? conversationTurnControl.listInternal({ scope: "global", conversation_id: sessionId, limit: 500 }).turns.find((item) => item.id === suppliedTurnId)
                         : null;
+                    if (suppliedTurnId) {
+                        if (!suppliedTurn)
+                            throw Object.assign(new Error("消息回合不属于当前会话"), { code: "CONVERSATION_ATTEMPT_CONFLICT", statusCode: 409 });
+                        (0, conversation_attempt_1.requireConversationAttempt)(suppliedTurn, payload, true);
+                    }
                     const queued = suppliedTurn
                         ? { turn: suppliedTurn, duplicate: true }
                         : conversationTurnControl.enqueue({
@@ -1668,6 +1717,7 @@ function createGlobalAgentApi(deps) {
                             sendJson(res, { success: true, ...queuedResult }, 202);
                         return;
                     }
+                    (0, conversation_attempt_1.bindConversationAttemptResponse)(res, conversationTurnControl, { id: activeTurn.id, scope: "global", conversation_id: sessionId, attempt_id: (0, conversation_attempt_1.conversationAttemptId)(activeTurn) });
                     emit({ type: "claimed", turn_id: activeTurn.id, queue_scope: `global:${sessionId}`, queue_position: 1 });
                     let finalPetEventRelayed = false;
                     emit({
@@ -1737,6 +1787,7 @@ function createGlobalAgentApi(deps) {
                         emit({ type: "response_completed", final: true });
                     conversationTurnControl.settle({
                         id: activeTurn.id,
+                        attempt_id: (0, conversation_attempt_1.conversationAttemptId)(activeTurn),
                         status: run.status === "failed" ? "failed" : "completed",
                         run_id: run.id,
                         checkpoint: run.status,
@@ -1824,7 +1875,7 @@ function createGlobalAgentApi(deps) {
                     }
                     if (activeTurn?.id) {
                         try {
-                            conversationTurnControl.settle({ id: activeTurn.id, status: "failed", checkpoint: "failed", error: error?.message || String(error) });
+                            conversationTurnControl.settle({ id: activeTurn.id, attempt_id: (0, conversation_attempt_1.conversationAttemptId)(activeTurn), status: "failed", checkpoint: "failed", error: error?.message || String(error) });
                         }
                         catch { }
                     }
@@ -1837,12 +1888,12 @@ function createGlobalAgentApi(deps) {
                     const providerFailure = (0, model_retry_presentation_1.modelProviderFailurePresentation)(error);
                     relayGlobalPetEvent(ctx, { type: "failed", error: error?.message || String(error) }, { error: error?.message || String(error) });
                     if (isStream) {
-                        emit({ type: "error", text: providerFailure.presentable ? providerFailure.text : error?.message || String(error), provider_retry_count: providerFailure.retryCount, provider_request_evidence: providerFailure });
+                        emit({ type: "error", text: providerFailure.presentable ? providerFailure.text : error?.message || String(error), provider_retry_count: providerFailure.retryCount, max_retries: providerFailure.maxRetries, provider_request_evidence: providerFailure });
                         emit({ type: "done" });
                         res.end();
                     }
                     else
-                        sendJson(res, { success: false, error: providerFailure.presentable ? providerFailure.text : error?.message || String(error), retryable: true, provider_retry_count: providerFailure.retryCount, provider_request_evidence: providerFailure, turn_id: activeTurn?.id || "" }, 400);
+                        sendJson(res, { success: false, error: providerFailure.presentable ? providerFailure.text : error?.message || String(error), retryable: true, provider_retry_count: providerFailure.retryCount, max_retries: providerFailure.maxRetries, provider_request_evidence: providerFailure, turn_id: activeTurn?.id || "" }, 400);
                 }
                 finally {
                     if (activeSessionId) {
@@ -1851,7 +1902,7 @@ function createGlobalAgentApi(deps) {
                         });
                     }
                 }
-            };
+            });
             if (contentType.includes("multipart/form-data")) {
                 (0, secure_multipart_1.parseSecureMultipartRequest)(req).then(({ fields, files }) => {
                     return handleRun(fields || {}, files || []);
@@ -1873,7 +1924,7 @@ function createGlobalAgentApi(deps) {
         }
         if (pathname === "/api/global-agent/chat" && req.method === "POST") {
             const contentType = req.headers["content-type"] || "";
-            const handleAgenticChatProxy = async (payload, files = []) => {
+            const handleAgenticChatProxy = (0, conversation_attempt_1.withConversationAttemptScope)(async (payload, files = []) => {
                 const isStream = parsed.query.stream === "true" || payload.stream === true || String(req.headers.accept || "").includes("text/event-stream");
                 let legacyTurn = null;
                 let legacySessionId = "";
@@ -1889,6 +1940,9 @@ function createGlobalAgentApi(deps) {
                 }
                 const emit = (event) => {
                     if (!isStream || res.writableEnded)
+                        return;
+                    event = (0, conversation_attempt_1.projectConversationAttemptEvent)(res, event);
+                    if (!event)
                         return;
                     const ui = event?.ui === undefined ? buildGlobalAgentEventUi(event) : event.ui;
                     res.write(`data: ${JSON.stringify(ui ? { ...event, ui } : event)}\n\n`);
@@ -1943,6 +1997,7 @@ function createGlobalAgentApi(deps) {
                             sendJson(res, { success: true, accepted: true, queued: true, turn_id: queued.turn.id, queue_scope: `global:${sessionId}`, queue_position: position }, 202);
                         return;
                     }
+                    (0, conversation_attempt_1.bindConversationAttemptResponse)(res, conversationTurnControl, { id: turn.id, scope: "global", conversation_id: sessionId, attempt_id: (0, conversation_attempt_1.conversationAttemptId)(turn) });
                     const run = await runAgenticGlobalRequest(getRequestBaseUrl(req), ctx, {
                         message,
                         originalMessage: displayMessage,
@@ -1956,7 +2011,7 @@ function createGlobalAgentApi(deps) {
                         queueScope: `global:${sessionId}`,
                         onEvent: emit,
                     });
-                    conversationTurnControl.settle({ id: turn.id, status: run.status === "failed" ? "failed" : "completed", run_id: run.id, checkpoint: run.status, semantic_decision_receipt: run.workflow_decision || run.workflowDecision || null, result: { run_id: run.id, status: run.status }, error: run.status === "failed" ? run.error || run.final_reply : "" });
+                    conversationTurnControl.settle({ id: turn.id, attempt_id: (0, conversation_attempt_1.conversationAttemptId)(turn), status: run.status === "failed" ? "failed" : "completed", run_id: run.id, checkpoint: run.status, semantic_decision_receipt: run.workflow_decision || run.workflowDecision || null, result: { run_id: run.id, status: run.status }, error: run.status === "failed" ? run.error || run.final_reply : "" });
                     const result = publicGlobalAgentRun(run);
                     if (isStream) {
                         emit({ type: "result", run: result, source_files: sourceFiles, files: sourceFiles, turn_id: turn.id, queue_scope: `global:${sessionId}`, authorization_receipt: run.write_authorization_receipt || null, retryable: run.retryable === true });
@@ -1971,7 +2026,7 @@ function createGlobalAgentApi(deps) {
                 catch (error) {
                     if (legacyTurn?.id) {
                         try {
-                            conversationTurnControl.settle({ id: legacyTurn.id, status: "failed", checkpoint: "failed", error: error?.message || String(error) });
+                            conversationTurnControl.settle({ id: legacyTurn.id, attempt_id: (0, conversation_attempt_1.conversationAttemptId)(legacyTurn), status: "failed", checkpoint: "failed", error: error?.message || String(error) });
                         }
                         catch { }
                     }
@@ -1988,7 +2043,7 @@ function createGlobalAgentApi(deps) {
                     if (legacySessionId)
                         void drainGlobalWebTurns(getRequestBaseUrl(req), ctx, legacySessionId).catch((error) => console.warn(`[全局 Agent 队列] legacy恢复失败：${error?.message || error}`));
                 }
-            };
+            });
             if (contentType.includes("multipart/form-data")) {
                 (0, secure_multipart_1.parseSecureMultipartRequest)(req).then(({ fields, files }) => {
                     return handleAgenticChatProxy(fields || {}, files || []);
@@ -2078,7 +2133,19 @@ function createGlobalAgentApi(deps) {
                         { role: "system", content: "You are a professional AI code review assistant. Use the user's conversation language for the review. Do not reveal hidden reasoning or raw tool output." },
                         { role: "user", content: reviewPrompt }
                     ];
-                    const reviewResult = await callLlm(orchestratorConfig, messages);
+                    const reviewCache = {
+                        scope: "workspace", scopeId: "workspace", sessionId: "global-code-review",
+                        source: "global_code_review", requestClass: "auxiliary",
+                        requestAttribution: {
+                            purpose: "global_code_review", requestClass: "auxiliary",
+                            scope: "global", scopeId: "global", exactSessionId: "global-code-review",
+                        },
+                    };
+                    const reviewResult = await callLlm(orchestratorConfig, messages, {
+                        providerContextCache: reviewCache,
+                        requestAttribution: reviewCache.requestAttribution,
+                        retryProfile: "background_auxiliary",
+                    });
                     sendJson(res, { success: true, review: reviewResult });
                 }
                 catch (err) {
@@ -2091,4 +2158,5 @@ function createGlobalAgentApi(deps) {
     }
     return { handleGlobalAgentApi, drainGlobalWebTurns, startGlobalWebTurnRecoveryForServer, stopGlobalWebTurnRecoveryForServer };
 }
+const task_available_actions_1 = require("../../agents/task-available-actions");
 //# sourceMappingURL=global-agent-api.js.map

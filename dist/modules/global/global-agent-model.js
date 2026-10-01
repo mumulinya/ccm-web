@@ -7,8 +7,13 @@ exports.runGlobalModelRetrySelfTest = runGlobalModelRetrySelfTest;
 const group_orchestrator_llm_client_1 = require("../collaboration/group-orchestrator-llm-client");
 const model_call_retry_1 = require("../../system/model-call-retry");
 const global_agent_test_agent_display_1 = require("./global-agent-test-agent-display");
+const group_orchestrator_llm_client_2 = require("../collaboration/group-orchestrator-llm-client");
+const openai_responses_transport_1 = require("../../system/openai-responses-transport");
+const responses_output_replay_1 = require("../../system/responses-output-replay");
 async function callLlm(config, messages, options = {}) {
-    const requestBytes = Buffer.byteLength(JSON.stringify(messages));
+    const requestBytes = Buffer.byteLength(JSON.stringify((0, group_orchestrator_llm_client_2.shouldUseOpenAiResponses)(config)
+        ? (0, openai_responses_transport_1.encodeOpenAiResponsesInput)(messages, { replayIdentity: (0, responses_output_replay_1.responsesReplayIdentity)(config) })
+        : messages.map(responses_output_replay_1.stripResponsesReplay)));
     const maxRequestBytes = 512 * 1024;
     if (requestBytes > maxRequestBytes) {
         throw new Error(`统一大模型请求上下文过大：${requestBytes} bytes，安全上限 ${maxRequestBytes} bytes`);
@@ -27,6 +32,7 @@ async function callLlm(config, messages, options = {}) {
             stream: typeof options.onDelta === "function",
             onDelta: options.onDelta,
             providerContextCache: options.providerContextCache,
+            requestAttribution: options.requestAttribution,
             onProviderContextCache: options.onProviderContextCache,
             retryProfile: options.retryProfile,
             signal: options.signal,
@@ -66,6 +72,7 @@ async function callLlm(config, messages, options = {}) {
             stream: typeof options.onDelta === "function",
             onDelta: options.onDelta,
             providerContextCache: options.providerContextCache,
+            requestAttribution: options.requestAttribution,
             onProviderContextCache: options.onProviderContextCache,
             retryProfile: options.retryProfile,
             signal: options.signal,
@@ -82,6 +89,7 @@ async function callLlm(config, messages, options = {}) {
         stream: typeof options.onDelta === "function",
         onDelta: options.onDelta,
         providerContextCache: options.providerContextCache,
+        requestAttribution: options.requestAttribution,
         onProviderContextCache: options.onProviderContextCache,
         retryProfile: options.retryProfile,
         signal: options.signal,
@@ -97,6 +105,7 @@ async function callGlobalModelWithRetry(config, messages, options = {}) {
             onUsage: options.onUsage,
             onDelta: options.onDelta,
             providerContextCache: options.providerContextCache,
+            requestAttribution: options.requestAttribution,
             onProviderContextCache: options.onProviderContextCache,
             retryProfile: options.retryProfile,
             signal: options.signal,

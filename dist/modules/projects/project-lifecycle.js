@@ -122,13 +122,11 @@ function fileDescriptor(label, target) {
 function buildPurgeImpact(name, mode = "archived", affectedGroupIds = []) {
     const project = (0, project_validation_1.validateProjectName)(name);
     const webSessions = (0, project_validation_1.resolveContainedPath)(sessions_1.WEB_SESSIONS_DIR, project);
-    const ccSession = (0, sessions_1.findCcSessionFile)(project);
     const targetConfig = configFile(project, mode === "archived");
     const logFile = (0, project_validation_1.resolveContainedPath)(utils_1.LOG_DIR, `${project}.log`);
     const items = [
         fileDescriptor(mode === "archived" ? "归档项目配置" : "活动项目配置", targetConfig),
         fileDescriptor("网页会话", webSessions),
-        ...(ccSession ? [fileDescriptor("cc-connect 会话", ccSession)] : []),
         fileDescriptor("项目运行日志", logFile),
     ];
     const groupIds = [...new Set(affectedGroupIds.map(String).filter(Boolean))].sort();

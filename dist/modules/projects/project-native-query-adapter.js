@@ -36,6 +36,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.runProjectMainNativeQueryLoop = runProjectMainNativeQueryLoop;
 const native_query_loop_1 = require("../../agents/native-query-loop");
 const main_agent_harness_1 = require("../../agents/main-agent-harness");
+const model_tool_result_1 = require("../../agents/model-tool-result");
 const group_orchestrator_llm_client_1 = require("../collaboration/group-orchestrator-llm-client");
 const model_activity_1 = require("../../system/model-activity");
 const user_visible_agent_events_1 = require("../../system/user-visible-agent-events");
@@ -119,12 +120,20 @@ async function runProjectMainNativeQueryLoop(input) {
         scope: "project",
         scopeId: project,
         exactSessionId: projectSessionId,
+        providerContextCache: {
+            scope: "project",
+            scopeId: project,
+            sessionId: projectSessionId,
+            auditTurnKey: visibleTurnId,
+            source: "project_main_native_query",
+        },
         signal: input.signal,
         nativeToolReference: true,
         persistContext: { scope: "project", scopeId: project, sessionId: projectSessionId },
         loopBudget,
         planModeEnabled: input.planModeEnabled ?? (0, conversation_plan_mode_gate_1.isConversationPlanModeEnabled)("project", project, projectSessionId),
         getTools: () => [...(0, native_query_loop_1.nativeControlToolDefinitions)(), ...(0, native_query_loop_1.catalogToNativeTools)(input.getToolContext())],
+        getToolPromptLayout: () => input.getToolContext().toolPromptLayout,
         onConversationContextPressure: async ({ messages, forcePromptTooLong }) => {
             const fallbackPrefixCount = String(messages[0]?.content || "").includes("Fallback protocol: return one JSON object") ? 1 : 0;
             const liveSuffix = messages.slice(Math.min(messages.length, fallbackPrefixCount + baseProviderMessages.length));
@@ -172,7 +181,7 @@ async function runProjectMainNativeQueryLoop(input) {
                 eventType: "assistant_text_delta",
                 attempt,
                 display: { title: "项目主 Agent", summary: String(delta || "").slice(0, 500), status: "running" },
-                detail: { stream: { sequence: visibleDeltaSequence, modelCallIndex: context.modelCallIndex, round: context.round, final: false } },
+                detail: { delta, stream: { sequence: visibleDeltaSequence, modelCallIndex: context.modelCallIndex, round: context.round, final: false } },
             });
             input.onDelta?.(delta, context);
         },
@@ -343,7 +352,7 @@ async function runProjectMainNativeQueryLoop(input) {
             for (let index = 0; index < runnableRequests.length;) {
                 if (!input.isReadOnly(runnableRequests[index])) {
                     const startedAt = Date.now();
-                    roundResults.push(await input.executeSelectedRequest(runnableRequests[index], "", preparedToolCallIds[index]));
+                    roundResults.push(await input.executeSelectedRequest(runnableRequests[index], "", preparedToolCallIds[index], round));
                     toolWallDurationMs += Math.max(0, Date.now() - startedAt);
                     index += 1;
                     continue;
@@ -355,13 +364,20 @@ async function runProjectMainNativeQueryLoop(input) {
                 }
                 const parallelGroupId = readBatch.length > 1 ? `project-parallel:${visibleTurnId}:${round}:${index - readBatch.length}` : "";
                 const startedAt = Date.now();
-                roundResults.push(...await (0, readonly_tool_concurrency_1.runReadonlyToolsAdaptive)({
+                roundResults.push(...await (ctx.runReadonlyTools || readonly_tool_concurrency_1.runReadonlyToolsAdaptive)({
                     items: readBatch,
                     configuredLimit: Math.min(loopBudget.readOnlyParallelism, loopBudget.toolBatchSize),
-                    worker: request => input.executeSelectedRequest(request, parallelGroupId, preparedToolCallIds[runnableRequests.indexOf(request)]),
+                    worker: async (request) => {
+                        const callId = preparedToolCallIds[runnableRequests.indexOf(request)];
+                        const row = await input.executeSelectedRequest(request, parallelGroupId, callId, round);
+                        ctx.onToolResult?.((0, model_tool_result_1.toModelToolResult)(row, callId, String(row.name || request.name)));
+                        return row;
+                    },
                 }));
                 toolWallDurationMs += Math.max(0, Date.now() - startedAt);
             }
+            for (const row of roundResults)
+                row.outputTokens = (0, model_tool_result_1.modelToolTokens)(row);
             toolResults.push(...roundResults);
             (0, context_usage_events_1.publishContextUsageDelta)({
                 scope: "project", scopeId: project, exactSessionId: projectSessionId, requestId: visibleTurnId,
@@ -378,14 +394,7 @@ async function runProjectMainNativeQueryLoop(input) {
                 keyProgress.toolBatchCompleted(roundResults, round, round + 1);
                 input.markVisibleFeedback();
             }
-            return roundResults.map((row, index) => ({
-                callId: preparedToolCallIds[index] || calls[index]?.id || `pmtool_${index}`,
-                name: String(row.name || calls[index]?.name || "unknown"),
-                ok: row.ok !== false,
-                output: row.rawOutput ?? row.output ?? row,
-                error: row.error,
-                reason: row.reason,
-            }));
+            return roundResults.map((row, index) => (0, model_tool_result_1.toModelToolResult)(row, preparedToolCallIds[index] || calls[index]?.id || `pmtool_${index}`, String(row.name || calls[index]?.name || "unknown")));
         },
         callTurn: async (callConfig, options) => {
             const startedAt = Date.now();

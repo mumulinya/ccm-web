@@ -192,6 +192,13 @@ function hasStrongGlobalMissionChildAcceptanceEvidence(task, deps, executionsInp
     const report = getMissionDeliveryReport(task, summary);
     if (!missionAcceptanceGatePassed(summary, report))
         return false;
+    // The final CCM gate is authoritative even when a legacy acceptance_gate
+    // snapshot still contains stale per-check rows from an earlier attempt.
+    // Require all three persisted terminal signals; never infer from free text.
+    if (task?.terminal_gate?.passed === true
+        && task?.test_agent_review?.canAccept === true
+        && task?.main_agent_final_acceptance?.accepted === true)
+        return true;
     if (hasSubstantiveMissionGateChecks(summary))
         return true;
     if (missionStrongVerificationRows(task).length > 0 && missionFailedVerificationRows(task).length === 0)
@@ -259,6 +266,17 @@ function globalMissionChildGatePassedFromEvidence(task, deps, evidence) {
         return false;
     if (!evidence.merge_passed)
         return false;
+    // A BASELINE work item is intentionally read-only and therefore has no
+    // file-change or executable verification evidence.  It is accepted only
+    // when the persisted CCM TestAgent verdict and main-agent acceptance gate
+    // both explicitly passed; never infer this from a free-form result.
+    const baseline = task?.workflow_meta?.requirement_epic?.item_key === "BASELINE"
+        || task?.requirement_item_key === "BASELINE";
+    if (baseline
+        && task?.test_agent_review?.canAccept === true
+        && task?.main_agent_final_acceptance?.accepted === true
+        && task?.delivery_summary?.acceptance_gate?.pass === true)
+        return true;
     if (evidence.strong_acceptance_passed !== true)
         return false;
     const requiresCode = deps.taskRequiresCodeChanges(task);

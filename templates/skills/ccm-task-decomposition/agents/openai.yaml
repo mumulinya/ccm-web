@@ -1,0 +1,4 @@
+interface:
+  display_name: "CCM Task Decomposition"
+  short_description: "Split delivery work into scoped, dependency-aware tasks"
+  default_prompt: "Use $ccm-task-decomposition to create a minimal executable task plan."

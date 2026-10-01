@@ -37,6 +37,7 @@ exports.runGroupMainNativeQueryLoop = runGroupMainNativeQueryLoop;
 const crypto = __importStar(require("crypto"));
 const native_query_loop_1 = require("../../agents/native-query-loop");
 const main_agent_harness_1 = require("../../agents/main-agent-harness");
+const model_tool_result_1 = require("../../agents/model-tool-result");
 const group_orchestrator_llm_client_1 = require("./group-orchestrator-llm-client");
 const model_activity_1 = require("../../system/model-activity");
 const user_visible_agent_events_1 = require("../../system/user-visible-agent-events");
@@ -131,6 +132,13 @@ async function runGroupMainNativeQueryLoop(input) {
         scope: "group",
         scopeId: String(group.id || ""),
         exactSessionId: groupSessionId,
+        providerContextCache: {
+            scope: "group",
+            scopeId: String(group.id || ""),
+            sessionId: groupSessionId,
+            auditTurnKey: visibleTurnId,
+            source: "group_main_native_query",
+        },
         signal: input.signal,
         nativeToolReference: true,
         persistContext: { scope: "group", scopeId: String(group.id || ""), sessionId: groupSessionId },
@@ -138,6 +146,7 @@ async function runGroupMainNativeQueryLoop(input) {
         planModeEnabled: (0, conversation_plan_mode_gate_1.isConversationPlanModeEnabled)("group", String(group.id), groupSessionId),
         promptCacheTracking: { groupId: group.id, groupSessionId, source: "group_main_planning" },
         getTools: () => [...(0, native_query_loop_1.nativeControlToolDefinitions)(), ...(0, native_query_loop_1.catalogToNativeTools)(toolContext)],
+        getToolPromptLayout: () => toolContext.toolPromptLayout,
         onConversationContextPressure: async ({ messages, forcePromptTooLong }) => {
             const fallbackPrefixCount = String(messages[0]?.content || "").includes("Fallback protocol: return one JSON object") ? 1 : 0;
             const liveSuffix = messages.slice(Math.min(messages.length, fallbackPrefixCount + baseProviderMessages.length));
@@ -194,7 +203,7 @@ async function runGroupMainNativeQueryLoop(input) {
                 eventType: "assistant_text_delta",
                 attempt,
                 display: { title: "群聊主 Agent", summary: String(delta || "").slice(0, 500), status: "running" },
-                detail: { stream: { sequence: visibleReplyDeltaSequence, modelCallIndex: context.modelCallIndex, round: context.round, final: false } },
+                detail: { delta, stream: { sequence: visibleReplyDeltaSequence, modelCallIndex: context.modelCallIndex, round: context.round, final: false } },
             });
             input.onDelta?.(delta, context);
         },
@@ -407,15 +416,20 @@ async function runGroupMainNativeQueryLoop(input) {
                 toolContext: {
                     ...toolContext,
                     turnId: visibleTurnId,
+                    round,
                     anchorMessageId: visibleAnchorMessageId,
                     executionAttempt: Math.max(1, Number(input.recoveryAttempt || 1)),
                 },
                 toolCallIds: preparedToolCallIds,
                 toolBatchSize: loopBudget.toolBatchSize,
                 readOnlyParallelism: loopBudget.readOnlyParallelism,
+                runReadonlyTools: ctx.runReadonlyTools,
+                onToolResult: (row, callId) => ctx.onToolResult?.((0, model_tool_result_1.toModelToolResult)(row, callId, String(row.name || 'unknown'))),
                 signal: input.signal,
             });
             toolWallDurationMs += Math.max(0, Date.now() - toolBatchStartedAt);
+            for (const row of roundResults)
+                row.outputTokens = (0, model_tool_result_1.modelToolTokens)(row);
             toolResults.push(...roundResults);
             (0, context_usage_events_1.publishContextUsageDelta)({
                 scope: "group", scopeId: String(group.id || ""), exactSessionId: groupSessionId, requestId: visibleTurnId,
@@ -441,14 +455,7 @@ async function runGroupMainNativeQueryLoop(input) {
             };
             toolContext = input.buildToolContext(planningInput);
             return roundResults.map((row, index) => {
-                const mapped = {
-                    callId: preparedToolCallIds[index] || calls[index]?.id || `gmtool_${index}`,
-                    name: String(row.name || calls[index]?.name || "unknown"),
-                    ok: row.ok !== false,
-                    output: row.rawOutput ?? row.output ?? row,
-                    error: row.error,
-                    reason: row.reason,
-                };
+                const mapped = (0, model_tool_result_1.toModelToolResult)(row, preparedToolCallIds[index] || calls[index]?.id || `gmtool_${index}`, String(row.name || calls[index]?.name || "unknown"));
                 (0, group_session_execution_ledger_1.appendGroupSessionExecutionEvent)(String(group.id), groupSessionId, {
                     type: "tool_result",
                     toolName: mapped.name,
@@ -457,6 +464,10 @@ async function runGroupMainNativeQueryLoop(input) {
                     anchorMessageId: visibleAnchorMessageId,
                     status: mapped.ok ? "ok" : "error",
                     observation: mapped.output,
+                    // Persist the canonical provider-visible body alongside the audit
+                    // observation so later turns replay identical function output.
+                    modelContent: mapped.modelOutput !== undefined ? mapped.modelOutput : mapped.output,
+                    auditReceipt: mapped.auditReceipt,
                     error: mapped.error,
                 });
                 return mapped;

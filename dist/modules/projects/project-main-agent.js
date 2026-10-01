@@ -48,6 +48,8 @@ exports.executeProjectMainTask = executeProjectMainTask;
 exports.projectMainTaskPublic = projectMainTaskPublic;
 exports.runProjectMainAgentContractSelfTest = runProjectMainAgentContractSelfTest;
 const crypto = __importStar(require("crypto"));
+const native_session_transcript_1 = require("../../agents/native-session-transcript");
+const provider_native_tools_1 = require("../../system/provider-native-tools");
 const context_budget_1 = require("../../system/context-budget");
 const db_1 = require("../../core/db");
 const task_user_runtime_1 = require("../../agents/task-user-runtime");
@@ -57,6 +59,7 @@ const rework_policy_1 = require("../collaboration/rework-policy");
 const test_agent_review_policy_1 = require("../collaboration/test-agent-review-policy");
 const group_orchestrator_llm_client_1 = require("../collaboration/group-orchestrator-llm-client");
 const group_orchestrator_config_1 = require("../collaboration/group-orchestrator-config");
+const unified_model_call_config_1 = require("../../system/unified-model-call-config");
 const group_coordinator_visible_reply_1 = require("../collaboration/group-coordinator-visible-reply");
 const group_presented_plan_1 = require("../collaboration/group-presented-plan");
 const group_compaction_strategy_1 = require("../collaboration/group-compaction-strategy");
@@ -78,6 +81,7 @@ const role_skills_1 = require("../../skills/role-skills");
 const session_context_tool_buckets_1 = require("../../system/session-context-tool-buckets");
 const main_agent_tool_runtime_1 = require("../../tools/main-agent-tool-runtime");
 const native_query_loop_1 = require("../../agents/native-query-loop");
+const model_tool_result_1 = require("../../agents/model-tool-result");
 const cc_tool_result_limits_1 = require("../../tools/cc-tool-result-limits");
 const runtime_events_1 = require("../../system/runtime-events");
 const readonly_tool_concurrency_1 = require("../../system/readonly-tool-concurrency");
@@ -154,7 +158,7 @@ function recordProjectMainToolUse(project, projectSessionId, toolName, args, run
     });
     return toolCallId;
 }
-function recordProjectMainToolResult(project, projectSessionId, toolName, toolCallId, observation, error = "", runId = "") {
+function recordProjectMainToolResult(project, projectSessionId, toolName, toolCallId, observation, error = "", runId = "", modelContent) {
     (0, project_session_compaction_1.appendProjectSessionExecutionEvent)(project, projectSessionId, {
         type: "tool_result",
         toolName,
@@ -163,6 +167,7 @@ function recordProjectMainToolResult(project, projectSessionId, toolName, toolCa
         status: error ? "error" : "ok",
         observation,
         error,
+        ...(modelContent !== undefined ? { modelContent } : {}),
     });
     const started = projectMainToolStartedAt.get(toolCallId);
     const startedAt = started?.startedAt || Date.now();
@@ -358,6 +363,7 @@ function normalizedWorkItems(value, fallbackGoal) {
             id: cleanText(row?.id || row?.key || `work_${index + 1}`, 80).replace(/[^a-zA-Z0-9._-]+/g, "-") || `work_${index + 1}`,
             title: concisePlanLabel(row?.title || objective, fallbackGoal, index),
             objective,
+            ...require("../../agents/project-acceptance-plan").projectAcceptanceFields(row),
             acceptanceCriteria: cleanList(row?.acceptanceCriteria || row?.acceptance_criteria, 10, 600),
             dependsOn: cleanList(row?.dependsOn || row?.depends_on, 10, 80),
             allowedFiles: cleanList(row?.allowedFiles || row?.allowed_files || row?.files || row?.filePaths || row?.file_paths, 30, 500),
@@ -373,8 +379,7 @@ function normalizedWorkItems(value, fallbackGoal) {
         normalized.push({ id: "work_1", title: cleanText(fallbackGoal, 100) || "完成项目任务", objective: fallbackGoal, acceptanceCriteria: [], dependsOn: [], allowedFiles: [], forbiddenFiles: [], artifacts: [], sourceEvidenceIds: [], allowedTools: [], status: "pending", attempts: 0 });
     }
     const ids = new Set(normalized.map(item => item.id));
-    for (const item of normalized)
-        item.dependsOn = item.dependsOn.filter(id => id !== item.id && ids.has(id));
+    // Invalid dependencies must reach the dispatch validator, not disappear here.
     return normalized;
 }
 function directDispatchAcceptanceEvidence(input) {
@@ -461,6 +466,7 @@ function projectRequirementPlanProjection(plan, input) {
         title: "需求实施计划",
         goal: plan.summary || plan.title,
         steps: plan.workItems.map((item, index) => ({
+            ...require("../../agents/project-acceptance-plan").projectAcceptanceStep(item),
             id: item.id || `step_${index + 1}`,
             title: item.title || `实施步骤 ${index + 1}`,
             description: item.objective || "按当前需求完成对应功能。",
@@ -492,7 +498,7 @@ function projectRequirementPlanProjection(plan, input) {
             reason: "规划阶段实际读取的相关文件",
             sourceEvidenceIds: [file.evidenceId],
         })),
-        verification: (plan.acceptanceCriteria || []).map((expected) => ({ expected, acceptanceCriteria: [expected] })),
+        verification: plan.verification?.length ? plan.verification : plan.workItems.flatMap(item => item.verification || []),
     }, { planId: input.planId, revision: input.revision, now: updatedAt, sourceMessageIds: input.sourceMessageIds, targetProjects: [plan.project] });
     return canonical ? { ...legacy, ...canonical, planId: input.planId, status: input.status || "ready", createdAt, updatedAt } : legacy;
 }
@@ -517,7 +523,10 @@ function projectMainModelCallOptions(config, messages, telemetry) {
         recentMessages: messages.filter(message => String(message?.role || "") !== "system"),
         contextComponents: telemetry.contextComponents,
     });
-    const serializedToolSchema = JSON.stringify((telemetry.nativeTools || []).map((tool) => ({
+    // Use the same canonical ordering/shape as the provider request itself.
+    // This keeps the tool-schema cache fingerprint stable when catalog assembly
+    // order changes without changing the actual callable tools.
+    const serializedToolSchema = (0, provider_native_tools_1.serializeProviderToolSchema)((telemetry.nativeTools || []).map((tool) => ({
         name: String(tool?.name || ""),
         description: String(tool?.description || ""),
         inputSchema: tool?.inputSchema || tool?.input_schema || null,
@@ -566,6 +575,7 @@ function projectMainModelCallOptions(config, messages, telemetry) {
             canonicalPayloadChecksum: payload.payloadChecksum,
             toolSchemaChecksum: crypto.createHash("sha256").update(serializedToolSchema).digest("hex"),
             toolSchemaTokens: Math.max(0, Math.ceil(serializedToolSchema.length / 4)),
+            toolSchemaVersion: "ccm-native-tools-v1",
             source: "project_main_agent",
             cacheAffinity: telemetry.stage && telemetry.stage !== "main_tool_loop"
                 ? (0, agent_cache_affinity_1.createAgentCacheAffinity)({
@@ -622,7 +632,8 @@ function projectMainModelCallOptions(config, messages, telemetry) {
 async function modelJson(messages, errorPrefix, telemetry) {
     const baseConfig = (0, group_orchestrator_config_1.loadOrchestratorConfig)();
     const preferences = telemetry?.projectSessionId ? (0, slash_command_session_state_1.readSlashCommandSessionState)("project", telemetry.project, telemetry.projectSessionId).preferences : {};
-    const config = { ...baseConfig, model: preferences.model || baseConfig.model, reasoningEffort: preferences.effort || baseConfig.reasoningEffort };
+    const unified = (0, unified_model_call_config_1.resolveUnifiedModelConfig)({ callSource: "project_main_agent", config: baseConfig });
+    const config = { ...baseConfig, model: unified.model, reasoningEffort: unified.reasoningEffort, configVersion: unified.configVersion };
     if (!config.enabled || !config.apiUrl || !config.apiKey || !config.model)
         throw new Error("统一大模型尚未配置");
     const telemetryOptions = projectMainModelCallOptions(config, messages, telemetry);
@@ -633,7 +644,8 @@ async function modelJson(messages, errorPrefix, telemetry) {
 async function modelText(messages, errorPrefix, maxTokens = 1600, telemetry, onDelta) {
     const baseConfig = (0, group_orchestrator_config_1.loadOrchestratorConfig)();
     const preferences = telemetry?.projectSessionId ? (0, slash_command_session_state_1.readSlashCommandSessionState)("project", telemetry.project, telemetry.projectSessionId).preferences : {};
-    const config = { ...baseConfig, model: preferences.model || baseConfig.model, reasoningEffort: preferences.effort || baseConfig.reasoningEffort };
+    const unified = (0, unified_model_call_config_1.resolveUnifiedModelConfig)({ callSource: "project_main_agent", config: baseConfig });
+    const config = { ...baseConfig, model: unified.model, reasoningEffort: unified.reasoningEffort, configVersion: unified.configVersion };
     if (!config.enabled || !config.apiUrl || !config.apiKey || !config.model)
         throw new Error("统一大模型尚未配置");
     const telemetryOptions = projectMainModelCallOptions(config, messages, telemetry);
@@ -732,7 +744,8 @@ async function ensureProjectMainModelCapacity(input) {
     let messages = input.buildMessages();
     const baseConfig = (0, group_orchestrator_config_1.loadOrchestratorConfig)();
     const preferences = (0, slash_command_session_state_1.readSlashCommandSessionState)("project", input.project, input.projectSessionId).preferences;
-    const config = { ...baseConfig, model: preferences.model || baseConfig.model, reasoningEffort: preferences.effort || baseConfig.reasoningEffort };
+    const unified = (0, unified_model_call_config_1.resolveUnifiedModelConfig)({ callSource: "project_main_agent", config: baseConfig });
+    const config = { ...baseConfig, model: unified.model, reasoningEffort: unified.reasoningEffort, configVersion: unified.configVersion };
     const capacity = (0, group_compaction_strategy_1.resolveGroupModelContextCapacity)(config);
     const threshold = Math.max(1, Number(capacity?.autoCompactThreshold || (0, group_compaction_strategy_1.getGroupAutoCompactThreshold)(config)));
     const buildPayload = () => (0, session_compaction_core_1.buildModelVisiblePayloadSnapshot)({
@@ -1071,6 +1084,8 @@ async function runProjectMainAgentFirstTurn(input) {
     ];
     const toolContext = {
         ...configuredToolContext,
+        toolPromptLayout: configuredToolContext.toolPromptLayout ? { ...configuredToolContext.toolPromptLayout,
+            dynamicCatalog: [...builtinTools.map(tool => (0, main_agent_tool_runtime_1.renderMainAgentToolCatalogLine)(tool, configuredToolContext.schemaSurface)), configuredToolContext.toolPromptLayout.dynamicCatalog].join('\n') } : undefined,
         catalog: {
             ...configuredToolContext.catalog,
             mcp: [...builtinTools, ...configuredToolContext.catalog.mcp],
@@ -1083,6 +1098,7 @@ async function runProjectMainAgentFirstTurn(input) {
         ].filter(Boolean).join("\n"),
     };
     const toolResults = [];
+    (0, main_agent_tool_runtime_1.refreshMainAgentToolPromptState)(toolContext);
     const executed = new Set();
     const budgetConfig = (0, group_orchestrator_config_1.loadOrchestratorConfig)();
     const loopBudget = (0, agent_loop_budget_1.resolveAgentLoopBudget)({
@@ -1183,6 +1199,7 @@ async function runProjectMainAgentFirstTurn(input) {
             identityRules: projectIdentityRules,
             sessionGuidance: [(0, main_agent_identity_1.buildProjectMainSessionGuidance)({ planAuthoring }), projectDynamicContext].filter(Boolean).join("\n\n"),
             mcpPolicy: toolContext.policyPrompt,
+            toolPromptLayout: toolContext.toolPromptLayout,
             metaBlocks: [
                 input.continuationCandidate ? { title: "可恢复任务摘要", body: JSON.stringify(input.continuationCandidate) } : null,
                 input.forcedConversationRoute ? { title: "用户选择的处理方式", body: String(input.forcedConversationRoute) } : null,
@@ -1191,21 +1208,10 @@ async function runProjectMainAgentFirstTurn(input) {
         });
         if (native)
             return native;
-        return (0, transient_model_content_1.attachTransientModelBlocks)([{
-                role: "system",
-                content: projectIdentityRules,
-            }, {
-                role: "system",
-                contextBlockType: "dynamic_context",
-                content: [(0, main_agent_identity_1.buildProjectMainSessionGuidance)({ planAuthoring }), projectDynamicContext].filter(Boolean).join("\n\n"),
-            }, {
-                // 工具目录单独成块：policyPrompt 会被 tool_search 在 Run 中途改写，
-                // 与上面这段固定规则合并成一条 system 时，整块 contentChecksum 每次都变，
-                // provider-neutral-context-cache 的稳定前缀会被整体击穿。
-                role: "system",
-                contextBlockType: "dynamic_context",
-                content: toolContext.policyPrompt,
-            }, {
+        return (0, transient_model_content_1.attachTransientModelBlocks)([
+            ...(0, native_session_transcript_1.splitNativeSystemSegments)({ identityRules: projectIdentityRules,
+                sessionGuidance: [(0, main_agent_identity_1.buildProjectMainSessionGuidance)({ planAuthoring }), projectDynamicContext].filter(Boolean).join("\n\n"),
+                mcpPolicy: toolContext.policyPrompt, toolPromptLayout: toolContext.toolPromptLayout }), {
                 role: "user",
                 content: JSON.stringify({
                     project,
@@ -1216,7 +1222,8 @@ async function runProjectMainAgentFirstTurn(input) {
                     recoverable_task: input.continuationCandidate || null,
                     explicit_route_choice: input.forcedConversationRoute || "",
                 }),
-            }], (0, transient_model_content_1.collectTransientModelBlocks)(toolResults));
+            }
+        ], (0, transient_model_content_1.collectTransientModelBlocks)(toolResults));
     };
     const stableProjectNativeTools = () => [
         ...(0, native_query_loop_1.nativeControlToolDefinitions)(),
@@ -1226,6 +1233,7 @@ async function runProjectMainAgentFirstTurn(input) {
         identityRules: projectIdentityRules,
         sessionGuidance: [(0, main_agent_identity_1.buildProjectMainSessionGuidance)({ planAuthoring }), projectDynamicContext].filter(Boolean).join("\n\n"),
         mcpPolicy: toolContext.policyPrompt,
+        toolPromptLayout: toolContext.toolPromptLayout,
         instruction,
         payload,
     });
@@ -1236,7 +1244,7 @@ async function runProjectMainAgentFirstTurn(input) {
         attempt: 1,
         projectId: project,
     };
-    const executeSelectedRequest = async (request, parallelGroupId = "", preparedToolCallId = "") => {
+    const executeSelectedRequest = async (request, parallelGroupId = "", preparedToolCallId = "", round = 0) => {
         const callId = recordProjectMainToolUse(project, projectSessionId, request.name, request.arguments || {}, "", parallelGroupId, preparedToolCallId, firstTurnToolCorrelation);
         try {
             let output;
@@ -1269,7 +1277,7 @@ async function runProjectMainAgentFirstTurn(input) {
                 };
             }
             else {
-                const rows = await (0, main_agent_tool_runtime_1.executeMainAgentToolRequests)({ requests: [request], toolContext, resultTokenLimit: cc_tool_result_limits_1.CC_ALIGNED_TOOL_RESULT_MAX_TOKENS, toolBatchSize: 1, readOnlyParallelism: loopBudget.readOnlyParallelism, abortSignal: input.signal });
+                const rows = await (0, main_agent_tool_runtime_1.executeMainAgentToolRequests)({ requests: [request], toolContext, onUse: () => callId, resultTokenLimit: cc_tool_result_limits_1.CC_ALIGNED_TOOL_RESULT_MAX_TOKENS, toolBatchSize: 1, readOnlyParallelism: loopBudget.readOnlyParallelism, abortSignal: input.signal, turnKey: `${visibleTurnId}:${round}` });
                 const row = rows[0];
                 if (!row?.ok)
                     throw new Error(row?.error || `项目主 Agent工具调用失败：${request.name}`);
@@ -1280,12 +1288,13 @@ async function runProjectMainAgentFirstTurn(input) {
                 : request.name === "read_scope_instruction"
                     ? (0, context_source_tool_result_projection_1.projectContextSourceToolResultForPersistence)(request.name, output)
                     : (0, session_execution_ledger_1.sanitizeSessionExecutionValue)(output);
-            recordProjectMainToolResult(project, projectSessionId, request.name, callId, recordedOutput);
             const receipt = output && typeof output === "object" && "toolKind" in output ? output : {};
-            return (0, transient_model_content_1.attachTransientModelBlocks)({
+            const modelRow = (0, transient_model_content_1.attachTransientModelBlocks)({
                 name: request.name,
                 ok: true,
                 output,
+                ...(receipt.modelOutput !== undefined ? { modelOutput: receipt.modelOutput } : {}),
+                ...(receipt.auditReceipt ? { auditReceipt: receipt.auditReceipt } : {}),
                 toolKind: receipt.toolKind || (request.name === "query_knowledge" ? "internal_mcp" : "mcp"),
                 source: receipt.source || (request.name === "query_knowledge" ? "ccm__knowledge_context" : "project_builtin"),
                 loaded: receipt.loaded !== false,
@@ -1294,6 +1303,13 @@ async function runProjectMainAgentFirstTurn(input) {
                 durationMs: receipt.durationMs || 0,
                 resultChecksum: receipt.resultChecksum || crypto.createHash("sha256").update(JSON.stringify(output)).digest("hex"),
             }, (0, transient_model_content_1.transientModelBlocks)(output));
+            // Freeze the exact canonical body used by appendNativeToolResults. On a
+            // later user turn the session transcript is rebuilt from the execution
+            // ledger; using only `recordedOutput` there can produce a different
+            // workspace/reference projection and invalidate the provider prefix.
+            const modelContent = (0, model_tool_result_1.toModelToolResult)(modelRow, callId, request.name).modelOutput;
+            recordProjectMainToolResult(project, projectSessionId, request.name, callId, recordedOutput, "", "", modelContent);
+            return modelRow;
         }
         catch (error) {
             const detail = cleanText(error?.message || error, 1000);
@@ -1836,6 +1852,7 @@ ${implementation_plan_1.IMPLEMENTATION_PLAN_LANGUAGE_CONTRACT}\n${implementation
                     roleSkillsPrompt: roleSkills.prompt,
                 })].filter(Boolean).join("\n\n"),
             mcpPolicy: configuredToolContext.policyPrompt,
+            toolPromptLayout: configuredToolContext.toolPromptLayout,
             metaBlocks: [
                 sourceHydration.prompt ? { title: "当前项目源码证据", body: sourceHydration.prompt } : null,
                 evidenceManifest.entries.length ? { title: "规划证据清单", body: JSON.stringify(evidenceManifest) } : null,
@@ -1849,16 +1866,8 @@ ${implementation_plan_1.IMPLEMENTATION_PLAN_LANGUAGE_CONTRACT}\n${implementation
         if (native)
             return native;
         return [
-            {
-                role: "system",
-                content: planningIdentity,
-            },
-            {
-                // 同上：工具目录与固定规则分块，避免 tool_search 改写击穿缓存前缀。
-                role: "system",
-                contextBlockType: "dynamic_context",
-                content: configuredToolContext.policyPrompt,
-            },
+            ...(0, native_session_transcript_1.splitNativeSystemSegments)({ identityRules: planningIdentity, mcpPolicy: configuredToolContext.policyPrompt,
+                toolPromptLayout: configuredToolContext.toolPromptLayout }),
             {
                 role: "user",
                 content: JSON.stringify({
@@ -1918,6 +1927,7 @@ ${implementation_plan_1.IMPLEMENTATION_PLAN_LANGUAGE_CONTRACT}\n${implementation
             item.acceptanceCriteria = acceptanceCriteria.slice();
     }
     let plan = {
+        verification: Array.isArray(parsed?.verification) ? parsed.verification : [],
         schema: "ccm-project-main-plan-v1",
         title: cleanText(parsed?.title || input.userMessage, 120) || "项目开发任务",
         summary: cleanText(parsed?.summary || decision.reason, 1600),
@@ -2064,6 +2074,7 @@ function createProjectMainTask(input) {
         project_session_id: input.projectSessionId,
         queue_scope: "conversation_serial",
         request_origin: "project-session",
+        task_session_archive_policy: "user_confirm",
         origin_session_id: input.projectSessionId,
         project_main_run_id: input.projectMainRunId,
         acceptance_state: "pending",
@@ -2643,6 +2654,8 @@ async function executeProjectMainTask(input) {
         sourceManifestChecksum: input.plan.sourceEvidence?.manifestChecksum || "",
     }, { planId: taskId, revision: Number(dispatchProjection.revision || 1) });
     const dispatchContract = dispatchPlan ? (0, plan_dispatch_contract_1.buildPlanDispatchContract)({
+        acceptanceScope: { scope: "project", scopeId: project, exactSessionId: String(input.task.project_session_id || input.task.exact_session_id || "") },
+        generation: Number(input.task.generation ?? input.task.boundary_generation ?? 0),
         plan: dispatchPlan,
         taskId,
         project,
@@ -2678,6 +2691,7 @@ async function executeProjectMainTask(input) {
         };
     });
     (0, collaboration_task_service_1.updateTask)(taskId, { workflow_meta: { ...(input.task.workflow_meta || {}), plan_dispatch_contract: dispatchContract }, plan_dispatch_contract: dispatchContract });
+    require("../../agents/task-acceptance-service").startTaskAcceptance({ ...input.task, plan_dispatch_contract: dispatchContract }, workDir);
     const executionGeneration = Math.max(0, Number(input.task?.generation || input.task?.boundary_generation || 0));
     const taskToolCorrelation = {
         anchorMessageId: String(input.task?.anchor_message_id || input.task?.anchorMessageId || `project-main-task:${taskId}`).trim(),
@@ -2695,6 +2709,7 @@ async function executeProjectMainTask(input) {
             eventId: `project-task-delta:${taskId}:${Date.now()}:${visibleTaskDeltaSequence}`,
             scope: "project", scopeId: project, exactSessionId: input.plan.projectSessionId,
             generation: executionGeneration, taskId, eventType: "assistant_text_delta",
+            detail: { delta },
             display: { title: "项目主 Agent", summary: String(delta || "").slice(0, 500), status: "running" },
         });
         input.onDelta?.(delta);
@@ -3320,9 +3335,10 @@ async function executeProjectMainTask(input) {
                 },
             });
         }
+        const outputRevision = crypto.createHash("sha256").update(JSON.stringify({ summary, fileChanges, verification, finalAcceptance })).digest("hex");
         const finalTask = (0, collaboration_task_service_1.updateTask)(taskId, {
-            status: accepted ? "done" : "blocked",
-            acceptance_state: accepted ? "accepted" : "blocked",
+            status: accepted ? "waiting_user" : "blocked",
+            acceptance_state: accepted ? "awaiting_user_acceptance" : "blocked",
             status_detail: accepted
                 ? independentTestAgentEnabled ? "TestAgent 与项目主 Agent 验收通过" : "项目主 Agent 自验通过"
                 : independentTestAgentEnabled ? "TestAgent 验收未通过，需要用户处理" : "项目主 Agent 自验未通过，需要用户处理",
@@ -3334,7 +3350,9 @@ async function executeProjectMainTask(input) {
             main_agent_final_acceptance: finalAcceptance,
             work_items: input.plan.workItems,
             delivery_summary: {
-                accepted,
+                accepted: false,
+                technical_acceptance_passed: accepted,
+                output_revision: outputRevision,
                 summary,
                 planned_source_evidence: input.plan.sourceEvidence,
                 planned_runtime_evidence: input.plan.runtimeEvidence,
@@ -3351,8 +3369,8 @@ async function executeProjectMainTask(input) {
             },
             project_main_execution: {
                 schema: "ccm-project-main-execution-v1",
-                state: accepted ? "completed" : "blocked",
-                phase: accepted ? "completed" : "blocked",
+                state: accepted ? "waiting_user" : "blocked",
+                phase: accepted ? "waiting_user" : "blocked",
                 owner_pid: process.pid,
                 lease_recovery_count: Number(lease.lease?.recovery_count || 0),
                 started_at: executionStartedAt,
@@ -3364,6 +3382,7 @@ async function executeProjectMainTask(input) {
             recovery: null,
             recovery_pending: false,
             auto_execute: false,
+            user_acceptance: accepted ? { state: "pending", output_revision: outputRevision, available_actions: ["accept", "revise", "cancel"], contentStored: false } : null,
         }) || input.task;
         if (accepted)
             (0, scope_instructions_1.scheduleProjectScopeInstructionRefreshAfterAcceptedTask)(project, fileChanges.files);
@@ -3738,33 +3757,35 @@ function projectMainTaskPublic(task) {
             checksum: task.recovery_transaction.checksum || "",
             contentStored: false,
         } : null,
-        actions: task.status === "paused"
-            ? [{ id: "confirm_plan", kind: "confirm_plan", label: "确认并执行", tone: "primary" }, { id: "revise_plan", kind: "revise_plan", label: "修改计划", tone: "outline" }]
-            : runtimeStatus.active
-                ? [{ id: "interrupt", kind: "interrupt", label: "停止当前执行", tone: "danger" }, { id: "cancel", kind: "cancel", label: "永久取消", tone: "outline" }]
-                : ["failed", "blocked", "environment_blocked", "recovery_required"].includes(runtimeStatus.phase)
-                    ? task.acceptance_state === "recovery_required"
-                        ? task.recovery_preflight?.recoveryMode === "manual_reconciliation"
-                            ? [
-                                { id: "adopt_current_changes", kind: "adopt_current_changes", label: "采用当前改动并继续", tone: "warning" },
-                                { id: "view_changes", kind: "view_changes", label: "查看当前改动", tone: "outline" },
-                                { id: "rollback", kind: "rollback", label: "撤销到安全检查点", tone: "outline" },
-                                { id: "cancel", kind: "cancel", label: "停止任务", tone: "danger" },
-                            ]
-                            : ["temporary_network", "provider_overload", "provider_unavailable", "model_stream_interrupted"].includes(String(task.interruption_receipt?.reason_code || ""))
+        available_actions: task.pause_control?.state === "paused"
+            ? [{ id: "resume_paused", kind: "resume_paused", label: "继续任务", tone: "primary" }]
+            : task.status === "paused"
+                ? [{ id: "confirm_plan", kind: "confirm_plan", label: "确认并执行", tone: "primary" }, { id: "revise_plan", kind: "revise_plan", label: "修改计划", tone: "outline" }]
+                : runtimeStatus.active
+                    ? [{ id: "interrupt", kind: "interrupt", label: "停止当前执行", tone: "danger" }, { id: "cancel", kind: "cancel", label: "永久取消", tone: "outline" }]
+                    : ["failed", "blocked", "environment_blocked", "recovery_required"].includes(runtimeStatus.phase)
+                        ? task.acceptance_state === "recovery_required"
+                            ? task.recovery_preflight?.recoveryMode === "manual_reconciliation"
                                 ? [
-                                    { id: "resume_interrupted", kind: "resume_interrupted", label: task.recovery?.mode === "safe_auto" ? "立即重试" : "恢复任务", tone: "primary" },
+                                    { id: "adopt_current_changes", kind: "adopt_current_changes", label: "采用当前改动并继续", tone: "warning" },
+                                    { id: "view_changes", kind: "view_changes", label: "查看当前改动", tone: "outline" },
+                                    { id: "rollback", kind: "rollback", label: "撤销到安全检查点", tone: "outline" },
                                     { id: "cancel", kind: "cancel", label: "停止任务", tone: "danger" },
                                 ]
-                                : [
-                                    { id: "resume_interrupted", kind: "resume_interrupted", label: "恢复任务", tone: "primary" },
-                                    { id: "open_project_settings", kind: "open_project_settings", label: "处理配置", tone: "outline" },
-                                    { id: "recheck", kind: "recheck", label: "重新核验", tone: "outline" },
-                                    { id: "takeover", kind: "takeover", label: "人工接管", tone: "outline" },
-                                    { id: "cancel", kind: "cancel", label: "停止任务", tone: "outline" },
-                                ]
-                        : [{ id: "retry", kind: "retry", label: "重新执行", tone: "primary" }]
-                    : [],
+                                : ["temporary_network", "provider_overload", "provider_unavailable", "model_stream_interrupted"].includes(String(task.interruption_receipt?.reason_code || ""))
+                                    ? [
+                                        { id: "resume_interrupted", kind: "resume_interrupted", label: task.recovery?.mode === "safe_auto" ? "立即重试" : "恢复任务", tone: "primary" },
+                                        { id: "cancel", kind: "cancel", label: "停止任务", tone: "danger" },
+                                    ]
+                                    : [
+                                        { id: "resume_interrupted", kind: "resume_interrupted", label: "恢复任务", tone: "primary" },
+                                        { id: "open_project_settings", kind: "open_project_settings", label: "处理配置", tone: "outline" },
+                                        { id: "recheck", kind: "recheck", label: "重新核验", tone: "outline" },
+                                        { id: "takeover", kind: "takeover", label: "人工接管", tone: "outline" },
+                                        { id: "cancel", kind: "cancel", label: "停止任务", tone: "outline" },
+                                    ]
+                            : [{ id: "retry", kind: "retry", label: "重新执行", tone: "primary" }]
+                        : [],
     };
 }
 function runProjectMainAgentContractSelfTest() {

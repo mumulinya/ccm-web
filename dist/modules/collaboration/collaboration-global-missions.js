@@ -1,5 +1,4 @@
 "use strict";
-// Extracted functional module. The original entry remains a compatibility facade.
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getGlobalDirectDispatchContinuationKey = getGlobalDirectDispatchContinuationKey;
 exports.shouldNotifyGlobalDirectDispatchContinuation = shouldNotifyGlobalDirectDispatchContinuation;
@@ -15,6 +14,8 @@ exports.controlGlobalDevelopmentMission = controlGlobalDevelopmentMission;
 exports.buildGlobalMissionTargetHandoff = buildGlobalMissionTargetHandoff;
 exports.normalizeGlobalMissionTargetRequirements = normalizeGlobalMissionTargetRequirements;
 exports.createGlobalDevelopmentMission = createGlobalDevelopmentMission;
+// Extracted functional module. The original entry remains a compatibility facade.
+const task_available_actions_1 = require("../../agents/task-available-actions");
 const sessions_1 = require("../projects/sessions");
 const collaboration_task_card_1 = require("./collaboration-task-card");
 const task_conversation_links_1 = require("../../system/task-conversation-links");
@@ -183,7 +184,7 @@ function getGlobalDevelopmentMission(id) {
     if (!mission)
         return null;
     return {
-        mission,
+        mission: { ...mission, available_actions: (0, task_available_actions_1.globalMissionAvailableActions)(mission) },
         children: tasks.filter((item) => item.parent_task_id === id),
     };
 }
@@ -306,17 +307,17 @@ function superviseGlobalDevelopmentMissionCycle(id, ctx, options = {}) {
             waitingUser.push({ task_id: child.id, reason: "子任务已取消" });
             continue;
         }
-        if (child.status === "pending" && !(0, collaboration_1.isTaskQueuedInMemory)(child.id) && !collaboration_1.runningTaskIds.has(child.id)) {
+        if (child.status === "pending" && !(0, collaboration_1.isTaskQueuedInMemory)(child.id) && !(0, collaboration_1.isTaskRunningInMemory)(child)) {
             if (child.auto_execute === false) {
                 waitingUser.push({ task_id: child.id, reason: "子任务配置为手动启动，等待用户确认派发" });
                 actions.push({ type: "manual_dispatch_required", task_id: child.id });
                 continue;
             }
-            const result = (0, collaboration_1.enqueueTask)(child.id, ctx);
+            const result = (0, collaboration_1.enqueueTask)(child.id, ctx, (0, collaboration_1.taskRunIdentity)(child));
             actions.push({ type: dependencyRefs.length ? "dependency_released" : "queue_recovered", task_id: child.id, result });
             continue;
         }
-        if (child.status === "in_progress" && !collaboration_1.runningTaskIds.has(child.id) && (0, collaboration_1.getTaskAgeMs)(child) >= staleMs) {
+        if (child.status === "in_progress" && !(0, collaboration_1.isTaskRunningInMemory)(child) && (0, collaboration_1.getTaskAgeMs)(child) >= staleMs) {
             if (attempts >= maxAttempts) {
                 waitingUser.push({ task_id: child.id, reason: "子任务执行超时且已达到恢复上限" });
             }
@@ -576,7 +577,7 @@ async function controlGlobalDevelopmentMission(id, operation, ctx, payload = {})
             const reason = (0, collaboration_1.compactFormText)(payload.reason, "用户取消全局任务");
             (0, execution_kernel_1.requestTaskCancellation)(child.id, reason, String(payload.actor || "global-agent"));
             (0, test_agent_runner_1.cancelTestAgentRunsForTask)(child.id, reason);
-            const running = collaboration_1.runningTaskIds.has(child.id);
+            const running = (0, collaboration_1.isTaskRunningInMemory)(child);
             (0, collaboration_1.updateTask)(child.id, { status: running ? "in_progress" : "cancelled", status_detail: running ? "全局任务取消请求已发送，正在终止执行" : "随全局任务取消", cancellation_requested_at: now, cancellation_reason: reason });
             await ctx.onTaskStatusChange?.(child, running ? "cancelling" : "cancelled", reason);
         }
@@ -819,6 +820,7 @@ function createGlobalDevelopmentMission(payload, ctx) {
     } : null;
     const parent = (0, collaboration_1.createTask)({
         title,
+        task_session_archive_policy: sourceConversationRef ? "user_confirm" : "auto_terminal",
         description: businessGoal,
         target_project: "global-agent",
         assign_type: "global",
@@ -889,6 +891,7 @@ function createGlobalDevelopmentMission(payload, ctx) {
         const missionHandoffSummary = (0, worker_handoff_1.summarizeWorkerHandoffForUser)(missionHandoff);
         const child = (0, collaboration_1.createTask)({
             title: childTitle,
+            task_session_archive_policy: "auto_terminal",
             description: (0, daily_dev_backlog_1.buildDailyDevTaskDescription)({
                 title: childTitle,
                 business_goal: childGoal,
@@ -1035,9 +1038,9 @@ function createGlobalDevelopmentMission(payload, ctx) {
                     presentation: "plan",
                     phase: "queued",
                     phase_label: "准备制定计划",
-                    actions: [
+                    available_actions: [
                         { id: "open_source_session", kind: "open_source_session", label: "返回全局任务", tone: "outline" },
-                        ...((0, collaboration_task_card_1.buildTaskCardView)(child, [], []).actions || []).filter((action) => action.kind !== "open_source_session"),
+                        ...((0, collaboration_task_card_1.buildTaskCardView)(child, [], []).available_actions || []).filter((action) => action.kind !== "open_source_session"),
                     ],
                 },
             });
@@ -1068,7 +1071,7 @@ function createGlobalDevelopmentMission(payload, ctx) {
         });
         const hasDependencies = Array.isArray(child.mission_dependencies) && child.mission_dependencies.length > 0;
         const queueResult = autoExecute && !hasDependencies
-            ? (0, collaboration_1.enqueueTask)(child.id, ctx)
+            ? (0, collaboration_1.enqueueTask)(child.id, ctx, (0, collaboration_1.taskRunIdentity)(child))
             : { queued: false, message: hasDependencies ? "子任务已创建，等待前置依赖通过交付验收" : "子任务已创建，等待手动启动" };
         children.push({ task: child, target, queue_result: queueResult, targetConversation });
     }

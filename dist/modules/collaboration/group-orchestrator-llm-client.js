@@ -49,6 +49,7 @@ exports.parseOpenAiStreamText = parseOpenAiStreamText;
 exports.buildAnthropicThinkingFields = buildAnthropicThinkingFields;
 exports.fetchWithNodeHttpFallback = fetchWithNodeHttpFallback;
 exports.applyAnthropicCacheReferenceEditing = applyAnthropicCacheReferenceEditing;
+exports.splitResponsesStableInstructions = splitResponsesStableInstructions;
 exports.resolveLlmRetryOptions = resolveLlmRetryOptions;
 exports.callOpenAiCompatibleChat = callOpenAiCompatibleChat;
 exports.callGeminiCompatibleChat = callGeminiCompatibleChat;
@@ -61,6 +62,10 @@ exports.runLlmTokenUsageSelfTest = runLlmTokenUsageSelfTest;
 exports.runLlmStreamingSelfTest = runLlmStreamingSelfTest;
 exports.runGroupOrchestratorApiMicrocompactNativeAdapterTelemetrySelfTest = runGroupOrchestratorApiMicrocompactNativeAdapterTelemetrySelfTest;
 const http = __importStar(require("http"));
+const provider_request_diagnostics_1 = require("../../system/provider-request-diagnostics");
+const responses_output_replay_1 = require("../../system/responses-output-replay");
+const main_agent_tool_prompt_1 = require("../../tools/main-agent-tool-prompt");
+const workspace_model_result_projection_1 = require("../../tools/workspace-model-result-projection");
 const https = __importStar(require("https"));
 const crypto = __importStar(require("crypto"));
 const model_call_retry_1 = require("../../system/model-call-retry");
@@ -69,14 +74,20 @@ const transient_model_content_1 = require("../../system/transient-model-content"
 const provider_microcompact_1 = require("../../system/provider-microcompact");
 const group_prompt_cache_break_detection_1 = require("./group-prompt-cache-break-detection");
 const provider_neutral_context_cache_1 = require("../../system/provider-neutral-context-cache");
+const ccm_public_stable_prefix_1 = require("../../system/ccm-public-stable-prefix");
 const provider_context_cache_adapters_1 = require("../../system/provider-context-cache-adapters");
 const provider_cache_breakpoint_encoding_1 = require("../../system/provider-cache-breakpoint-encoding");
+const provider_cache_transcript_1 = require("../../system/provider-cache-transcript");
 const provider_cache_capability_registry_1 = require("../../system/provider-cache-capability-registry");
 const automatic_provider_cache_optimization_1 = require("../../system/automatic-provider-cache-optimization");
+const provider_cache_observation_1 = require("../../system/provider-cache-observation");
+const provider_usage_1 = require("../../system/provider-usage");
+const context_budget_1 = require("../../system/context-budget");
 const provider_native_microcompact_capability_1 = require("../../system/provider-native-microcompact-capability");
 const provider_native_tools_1 = require("../../system/provider-native-tools");
 const provider_native_tool_capability_1 = require("../../system/provider-native-tool-capability");
 const openai_responses_transport_1 = require("../../system/openai-responses-transport");
+const openai_responses_websocket_transport_1 = require("../../system/openai-responses-websocket-transport");
 const provider_cache_protocol_1 = require("../../system/provider-cache-protocol");
 const sse_json_parser_1 = require("../../system/sse-json-parser");
 const provider_stream_activity_1 = require("../../system/provider-stream-activity");
@@ -197,6 +208,10 @@ function providerContextCacheOptions(config, options, provider) {
             source: String(config.contextEngineSource || "unified_model_consumer"),
         };
     }
+    // Do not invent a workspace/session identity for a caller that did not bind
+    // the request. Such calls are still captured by provider-request-diagnostics
+    // as `unattributed`, but they must not receive a cache key or be compared to
+    // a guessed session based on prompt text or timing.
     const binding = explicit || fallback;
     if (!binding?.sessionId)
         return null;
@@ -236,20 +251,54 @@ function providerContextCacheOptions(config, options, provider) {
 }
 async function prepareContextCache(config, options, provider) {
     const transientBlocks = (0, transient_model_content_1.transientModelBlocks)(options.messages || []);
-    const sourceMessages = options.system != null
+    const rawSourceMessages = options.system != null
         && !(options.messages || []).some(message => String(message?.role || "") === "system")
         ? [{ role: "system", content: options.system }, ...(options.messages || [])]
         : options.messages || [];
+    const transcript = (0, provider_cache_transcript_1.buildAppendOnlyProviderTranscript)(rawSourceMessages, { turnId: String(options.providerContextCache?.auditTurnKey || '') });
+    const sourceMessages = transcript.messages;
+    Object.defineProperty(options, "_providerCacheTranscript", { value: transcript, enumerable: false, configurable: true });
+    Object.defineProperty(options, "_providerCacheWireMessages", { value: sourceMessages, enumerable: false, configurable: true });
     const cacheOptions = providerContextCacheOptions(config, options, provider);
     // Provider-native context editing is no longer planned here. A native plan
     // may only arrive from the shared request-preflight owner after canonical
     // payload measurement and capability confirmation.
     if (!cacheOptions)
         return { messages: sourceMessages, plan: null, adapterPatch: null, transientBlocks };
+    Object.assign(cacheOptions, {
+        wireLayoutVersion: transcript.wireLayoutVersion,
+        committedPrefixChecksum: transcript.committedPrefixChecksum,
+        lastCommittedMessageId: transcript.lastCommittedMessageId,
+        messageOrderChecksum: transcript.messageOrderChecksum,
+        movedDynamicBlockCount: transcript.movedDynamicBlockCount,
+    });
     const prepared = await (0, provider_neutral_context_cache_1.prepareProviderNeutralContextCacheRequestSingleflight)(sourceMessages, cacheOptions);
+    // The neutral cache layer adds the public workspace header and returns the
+    // exact ordered transcript that will be encoded by every protocol adapter.
+    // Diagnostics must hash that final wire-visible sequence, not the caller's
+    // pre-header source array, otherwise the first segment is reported as
+    // changed even when the Provider receives an unchanged prefix.
+    const wireTranscript = (0, provider_cache_transcript_1.buildAppendOnlyProviderTranscript)(prepared.messages || sourceMessages, { turnId: String(options.providerContextCache?.auditTurnKey || '') });
+    const wireMessages = wireTranscript.messages;
+    Object.defineProperty(options, "_providerCacheTranscript", { value: wireTranscript, enumerable: false, configurable: true });
+    Object.defineProperty(options, "_providerCacheWireMessages", { value: wireMessages, enumerable: false, configurable: true });
     (0, provider_microcompact_1.captureCcmProviderMicrocompactBaseline)(prepared.plan, getApiMicrocompactNativeApplyPlan(options));
     Object.defineProperty(options, "_providerContextPlan", { value: prepared.plan, enumerable: false, configurable: true });
-    const adapterPatch = (0, provider_context_cache_adapters_1.buildProviderContextCacheAdapterRequestPatch)(config, prepared.plan, cacheOptions.adapterCapability, prepared.messages);
+    const adapterPatch = (0, provider_context_cache_adapters_1.buildProviderContextCacheAdapterRequestPatch)(config, prepared.plan, cacheOptions.adapterCapability, wireMessages);
+    if (prepared.plan) {
+        const breakpointApplied = Array.isArray(adapterPatch.breakpointChecksums) && adapterPatch.breakpointChecksums.length > 0;
+        prepared.plan.breakpointEligibility = adapterPatch.strategy?.capabilityMatrix?.capabilities?.explicitBreakpoints === "confirmed"
+            ? "eligible" : "ineligible";
+        prepared.plan.breakpointApplied = breakpointApplied;
+        prepared.plan.rollingBreakpointIndex = Number(adapterPatch.rollingBreakpointIndex ?? -1);
+        prepared.plan.rollingBreakpointReason = String(adapterPatch.rollingBreakpointReason || '');
+        prepared.plan.incrementalPayloadTokens = Number(prepared.plan.uncachedSuffixTokens || 0);
+        prepared.plan.promptSegments = prepared.plan.promptSegments
+            ? { ...prepared.plan.promptSegments, breakpointEligibility: prepared.plan.breakpointEligibility, breakpointApplied,
+                rollingBreakpointIndex: prepared.plan.rollingBreakpointIndex, rollingBreakpointReason: prepared.plan.rollingBreakpointReason,
+                contentStored: false }
+            : prepared.plan.promptSegments;
+    }
     if (prepared.plan)
         Object.defineProperty(prepared.plan, "_runtimePromptCacheKeyChecksum", {
             value: String(adapterPatch.promptCacheKeyChecksum || ""), enumerable: false, configurable: true,
@@ -262,8 +311,29 @@ async function prepareContextCache(config, options, provider) {
         Object.defineProperty(prepared.plan, "_runtimeCacheStrategy", {
             value: adapterPatch.strategy || null, enumerable: false, configurable: true,
         });
+    if (prepared.plan)
+        Object.defineProperty(prepared.plan, "_runtimePromptCacheKeyPresent", {
+            value: adapterPatch.promptCacheKeyPresent === true, enumerable: false, configurable: true,
+        });
+    if (prepared.plan)
+        Object.defineProperty(prepared.plan, "_runtimeCacheRouteVersion", {
+            value: Number(adapterPatch.cacheRouteVersion || 0), enumerable: false, configurable: true,
+        });
+    if (prepared.plan)
+        Object.defineProperty(prepared.plan, "_runtimeRouteKeyRotated", {
+            value: adapterPatch.routeKeyRotated === true, enumerable: false, configurable: true,
+        });
+    if (prepared.plan)
+        Object.defineProperty(prepared.plan, "_runtimeCacheKeyOmissionReason", {
+            value: String(adapterPatch.cacheKeyOmissionReason || ""), enumerable: false, configurable: true,
+        });
+    if (prepared.plan)
+        Object.defineProperty(prepared.plan, "_runtimeBreakpointOmissionReason", {
+            value: String(adapterPatch.breakpointOmissionReason || ""), enumerable: false, configurable: true,
+        });
     const result = {
         ...prepared,
+        messages: wireMessages,
         adapterPatch,
         transientBlocks,
     };
@@ -271,19 +341,107 @@ async function prepareContextCache(config, options, provider) {
         Object.defineProperty(result.plan, "_runtimeProviderStartedAtMs", { value: Date.now(), enumerable: false, configurable: true });
     if (result.plan)
         Object.defineProperty(result.plan, "_runtimeProviderConfig", { value: config, enumerable: false, configurable: true });
+    if (result.plan) {
+        result.plan.wireLayoutVersion = wireTranscript.wireLayoutVersion;
+        result.plan.messageOrderChecksum = wireTranscript.messageOrderChecksum;
+        result.plan.committedPrefixChecksum = wireTranscript.committedPrefixChecksum;
+        result.plan.lastCommittedMessageId = wireTranscript.lastCommittedMessageId;
+        result.plan.movedDynamicBlockCount = wireTranscript.movedDynamicBlockCount;
+    }
+    const stablePrefixBoundary = wireMessages.findIndex((message) => String(message?.role || "").toLowerCase() === "user");
+    const stablePrefixMessages = wireMessages.slice(0, stablePrefixBoundary >= 0 ? stablePrefixBoundary : wireMessages.length);
+    if (result.plan)
+        Object.defineProperty(result.plan, "_runtimeWirePrefixChecksum", {
+            value: crypto.createHash("sha256").update(JSON.stringify(stablePrefixMessages.map((message) => ({
+                role: String(message?.role || ""),
+                type: String(message?.type || ""),
+                checksum: crypto.createHash("sha256").update(JSON.stringify(message?.content ?? message?.text ?? null)).digest("hex"),
+            })))).digest("hex").slice(0, 64), enumerable: false, configurable: true,
+        });
     return result;
 }
 function finishContextCache(options, plan, input) {
+    const cacheCandidateTokens = Number(plan?.cacheablePrefixTokens || plan?.promptSegments?.cacheablePrefixTokens || 0);
+    // The comparison is captured from the exact wire body at attempt start.
+    // Reconstructing it from the completion receipt can drift when a stream
+    // appends assistant/tool events during the call.
+    const wireReuseEvidence = (0, provider_request_diagnostics_1.providerAttemptWireReuseEvidence)(options) || input?.wireReuseEvidence || {};
+    const cacheMatchedTokens = Number(wireReuseEvidence?.matchingPrefixTokensEstimate || 0);
+    const cacheReadTokens = Number(input?.usage?.cacheReadInputTokens || input?.usage?.cache_read_input_tokens || 0);
+    const usageReported = input?.usage?.reported === true;
+    const cacheReuse = (0, provider_cache_observation_1.providerCacheObservation)(plan, usageReported, cacheReadTokens, {
+        candidateTokens: cacheCandidateTokens,
+        matchedTokens: cacheMatchedTokens,
+        matchingPrefixTokensEstimate: cacheMatchedTokens,
+        hasComparableProviderEvidence: wireReuseEvidence?.crossSessionComparable === true
+            || wireReuseEvidence?.publicPrefix?.comparison === "unchanged",
+        candidateSource: plan?.providerCacheCandidateSource,
+    });
+    if (cacheReuse && typeof cacheReuse === "object") {
+        cacheReuse.toolSchemaChecksum = String(plan?.toolSchemaChecksum || "");
+        cacheReuse.toolSchemaVersion = String(plan?.toolSchemaVersion || "v1");
+        cacheReuse.toolSchemaPrefixEligible = plan?.toolSchemaPrefixEligible === true;
+    }
+    const requestDiagnostic = (0, provider_request_diagnostics_1.finishProviderAttempt)(options, { ...(input || {}), cacheReuse });
     const streamTiming = (0, provider_stream_activity_1.providerStreamTiming)(options);
     ensureProviderRequestEvidence(options).streamTiming = streamTiming;
+    // The transport freezes this exact body immediately before dispatch.  Use
+    // that snapshot as the final authority over breakpoint evidence; the
+    // generic adapter scanner may only see the pre-encoded plan and can report
+    // a stale count during a multi-tool loop.
+    const finalSnapshot = plan?._runtimeFinalRequestSnapshot;
+    const snapshotEvidence = finalSnapshot && typeof finalSnapshot === "object"
+        ? {
+            explicitBreakpointCount: Array.isArray(finalSnapshot.breakpointChecksums) ? finalSnapshot.breakpointChecksums.length : 0,
+            initialBreakpointChecksums: Array.isArray(plan?._runtimeInitialBreakpointChecksums)
+                ? plan._runtimeInitialBreakpointChecksums.slice(0, 4) : [],
+            finalBreakpointChecksums: Array.isArray(finalSnapshot.breakpointChecksums)
+                ? finalSnapshot.breakpointChecksums.slice(0, 4) : [],
+            finalRequestSnapshotChecksum: String(finalSnapshot.requestSnapshotChecksum || ""),
+            toolsChecksum: String(finalSnapshot.toolsChecksum || ""),
+            inputSequenceChecksum: String(finalSnapshot.inputSequenceChecksum || ""),
+            instructionsChecksum: String(finalSnapshot.instructionsChecksum || ""),
+            previousResponseIdUsed: finalSnapshot.previousResponseIdUsed === true,
+        } : {};
     input = {
         ...(input || {}),
+        wireReuseEvidence,
         adapterEvidence: {
+            ...(requestDiagnostic ? { applied: plan?.providerNative === true, strategy: plan?._runtimeCacheStrategy,
+                finalContextProjection: plan?.finalContextProjection } : {}),
+            ...(requestDiagnostic?.actualCacheFields || {}),
+            // The frozen request snapshot is the canonical evidence for the request
+            // that crossed the provider boundary.  Merge it after the generic body
+            // scanner so an older field scanner cannot overwrite its breakpoint
+            // count (for example, reporting 3 while the sent body contained 4).
             ...(input?.adapterEvidence || {}),
+            ...snapshotEvidence,
+            ...(snapshotEvidence && Object.prototype.hasOwnProperty.call(snapshotEvidence, "explicitBreakpointCount")
+                ? {
+                    breakpointDiagnostic: {
+                        ...(input?.adapterEvidence?.breakpointDiagnostic || {}),
+                        encodedBreakpoints: snapshotEvidence.explicitBreakpointCount,
+                    },
+                }
+                : {}),
+            publicPrefixChecksum: String(plan?.publicStablePrefixChecksum || ""),
+            publicInstructionChecksum: String(plan?.publicInstructionChecksum || ""),
+            publicInstructionTokens: Number(plan?.publicInstructionTokens || 0),
+            publicInstructionBlockCount: Number(plan?.publicInstructionBlockCount || 0),
+            publicPrefixContiguous: plan?.publicPrefixContiguous === true,
+            publicToolProfileChecksum: String(plan?.publicToolProfileChecksum || ""),
+            publicProfileVersion: String(plan?.publicProfileVersion || ""),
+            crossSessionComparable: wireReuseEvidence?.crossSessionComparable === true,
             providerStreamTiming: streamTiming,
         },
     };
-    const receipt = (0, provider_neutral_context_cache_1.completeProviderNeutralContextCacheRequest)(plan, input);
+    const workspaceModelAudit = options.providerContextCache?.workspaceModelAudit;
+    const receipt = (0, provider_neutral_context_cache_1.completeProviderNeutralContextCacheRequest)(plan, {
+        ...input,
+        ...(requestDiagnostic || {}),
+        ...(workspaceModelAudit && typeof workspaceModelAudit === "object" ? { workspaceModelAudit } : {}),
+        ...(options.providerContextCache?.auditTurnKey ? { auditTurnKey: options.providerContextCache.auditTurnKey } : {}),
+    });
     if (receipt) {
         if (input?.ok === true && plan?._runtimeProviderConfig) {
             try {
@@ -292,7 +450,7 @@ function finishContextCache(options, plan, input) {
                     cacheCreationInputTokens: receipt.cacheCreationInputTokens,
                     providerInputTokens: receipt.providerInputTokens,
                     requestPatchApplied: receipt.adapterEvidence?.requestPatchApplied === true,
-                    usageReported: receipt.providerInputTokens > 0 || receipt.cacheReadInputTokens > 0 || receipt.cacheCreationInputTokens > 0,
+                    usageReported: receipt.providerUsageReported === true,
                     missReason: receipt.cacheMissReason || "provider_usage_not_reported",
                     requestClass: receipt.requestClass || "auxiliary",
                     stablePrefixChecksum: receipt.stablePrefixChecksum,
@@ -302,15 +460,15 @@ function finishContextCache(options, plan, input) {
                     conversationIdentityChecksum: receipt.contextIdentityChecksum,
                     prefixExtensionEligible: receipt.prefixExtensionEligible === true,
                     explicitBreakpointsApplied: Number(receipt.adapterEvidence?.explicitBreakpointCount || 0) > 0,
+                    matchingPrefixTokensEstimate: Number(receipt.wireReuseEvidence?.matchingPrefixTokensEstimate || 0),
+                    cacheablePrefixTokens: Number(receipt.cacheablePrefixTokens || 0),
                     explicitCacheKeyApplied: Array.isArray(receipt.adapterEvidence?.requestFields) && receipt.adapterEvidence.requestFields.includes("prompt_cache_key"),
                     blockCacheControlApplied: Array.isArray(receipt.adapterEvidence?.requestFields) && receipt.adapterEvidence.requestFields.includes("cache_control"),
                     nativeCacheEditingApplied: Number(receipt.adapterEvidence?.cacheEditCount || 0) > 0,
                 });
                 try {
                     const matrix = plan?._runtimeCacheStrategy?.capabilityMatrix;
-                    const usageReported = Number(receipt.providerInputTokens || 0) > 0
-                        || Number(receipt.cacheCreationInputTokens || 0) > 0
-                        || Number(receipt.cacheReadInputTokens || 0) > 0;
+                    const usageReported = receipt.providerUsageReported === true;
                     if (matrix && usageReported)
                         (0, automatic_provider_cache_optimization_1.observeAutomaticProviderCacheRouting)(plan._runtimeProviderConfig, plan, matrix, {
                             hit: Number(receipt.cacheReadInputTokens || 0) > 0,
@@ -339,19 +497,52 @@ function finishContextCache(options, plan, input) {
     }
     return receipt;
 }
-function providerAdapterEvidence(cache) {
-    const fields = Object.keys(cache?.adapterPatch?.body || {});
-    const breakpoints = Array.isArray(cache?.adapterPatch?.breakpointMessageIndexes) ? cache.adapterPatch.breakpointMessageIndexes : [];
+function providerAdapterEvidence(cache, continuation = null) {
+    const runtimeSnapshot = cache?.plan?._runtimeFinalRequestSnapshot || null;
+    const fields = Array.isArray(runtimeSnapshot?.requestFields)
+        ? runtimeSnapshot.requestFields.filter((field) => field !== "prompt_cache_breakpoint")
+        : Object.keys(cache?.adapterPatch?.body || {});
+    const breakpoints = Array.isArray(runtimeSnapshot?.breakpointMessageIndexes)
+        ? runtimeSnapshot.breakpointMessageIndexes
+        : (Array.isArray(cache?.adapterPatch?.breakpointMessageIndexes) ? cache.adapterPatch.breakpointMessageIndexes : []);
+    const breakpointChecksums = Array.isArray(runtimeSnapshot?.breakpointChecksums)
+        ? runtimeSnapshot.breakpointChecksums : (Array.isArray(cache?.adapterPatch?.breakpointChecksums) ? cache.adapterPatch.breakpointChecksums : []);
     return {
         applied: cache?.plan?.providerNative === true,
         adapter: String(cache?.plan?.adapterKind || ""),
-        requestPatchApplied: fields.length > 0,
+        requestPatchApplied: fields.length > 0 || breakpoints.length > 0,
         requestFields: [...fields, ...(breakpoints.length ? ["prompt_cache_breakpoint"] : [])],
         explicitBreakpointCount: breakpoints.length,
+        initialBreakpointChecksums: Array.isArray(cache?.plan?._runtimeInitialBreakpointChecksums)
+            ? cache.plan._runtimeInitialBreakpointChecksums.slice(0, 4) : breakpointChecksums.slice(0, 4),
+        finalBreakpointChecksums: breakpointChecksums.slice(0, 4),
+        finalRequestSnapshotChecksum: String(runtimeSnapshot?.requestSnapshotChecksum || ""),
+        toolsChecksum: String(runtimeSnapshot?.toolsChecksum || ""),
+        inputSequenceChecksum: String(runtimeSnapshot?.inputSequenceChecksum || ""),
+        instructionsChecksum: String(runtimeSnapshot?.instructionsChecksum || ""),
+        promptCacheKeyPresent: cache?.adapterPatch?.promptCacheKeyPresent === true,
+        promptCacheKeyChecksum: String(cache?.adapterPatch?.promptCacheKeyChecksum || ""),
+        cacheRouteVersion: Number(cache?.adapterPatch?.cacheRouteVersion || 0),
+        cacheKeyScope: String(cache?.adapterPatch?.cacheKeyScope || cache?.plan?.automaticCacheOptimization?.cacheKeyScope || "conversation_branch"),
+        routeKeyRotated: cache?.adapterPatch?.routeKeyRotated === true,
+        cacheKeyOmissionReason: String(cache?.adapterPatch?.cacheKeyOmissionReason || ""),
+        breakpointOmissionReason: String(cache?.adapterPatch?.breakpointOmissionReason || ""),
+        finalContextProjection: cache?.plan?.finalContextProjection || null,
         breakpointDiagnostic: cache?.adapterPatch?.breakpointDiagnostic || null,
         strategy: cache?.adapterPatch?.strategy || null,
         resolvedExecution: cache?.adapterPatch?.strategy?.execution || null,
+        responsesTransportSelected: String(cache?.plan?._runtimeResponsesTransportSelected || "http"),
+        responsesWebSocketHandshake: cache?.plan?._runtimeResponsesWebSocketHandshake === true,
+        responsesWebSocketUrlFingerprint: String(cache?.plan?._runtimeResponsesWebSocketUrlFingerprint || ""),
+        responsesWebSocketFallbackReason: String(cache?.plan?._runtimeResponsesWebSocketFallbackReason || ""),
         capabilityMatrix: cache?.adapterPatch?.strategy?.capabilityMatrix || null,
+        ...(continuation && typeof continuation === "object" ? {
+            continuation: {
+                mode: String(continuation.mode || "full"),
+                previousResponseIdUsed: continuation.previousResponseIdUsed === true,
+                fallbackReason: String(continuation.fallbackReason || ""),
+            },
+        } : {}),
         reason: fields.length > 0 ? "provider_request_fields_applied" : cache?.plan?.providerNative === true ? "provider_implicit_cache" : "stable_prefix_or_ccm_projection",
     };
 }
@@ -361,13 +552,11 @@ function finiteTokenCount(value) {
 }
 function normalizeLlmTokenUsage(value, provider = "openai") {
     const usage = value && typeof value === "object" ? value : {};
-    const outputTokens = Math.max(finiteTokenCount(usage.output_tokens), finiteTokenCount(usage.outputTokens), finiteTokenCount(usage.completion_tokens), finiteTokenCount(usage.completionTokens), finiteTokenCount(usage.candidatesTokenCount), finiteTokenCount(usage.candidates_token_count));
-    const reportedInputTokens = Math.max(finiteTokenCount(usage.input_tokens), finiteTokenCount(usage.inputTokens), finiteTokenCount(usage.prompt_tokens), finiteTokenCount(usage.promptTokens), finiteTokenCount(usage.promptTokenCount), finiteTokenCount(usage.prompt_token_count));
-    const cacheCreationTokens = Math.max(finiteTokenCount(usage.cache_creation_input_tokens), finiteTokenCount(usage.cacheCreationInputTokens), finiteTokenCount(usage.input_tokens_details?.cache_write_tokens), finiteTokenCount(usage.input_tokens_details?.cache_write_input_tokens), finiteTokenCount(usage.inputTokensDetails?.cacheWriteTokens), finiteTokenCount(usage.inputTokensDetails?.cacheWriteInputTokens), finiteTokenCount(usage.prompt_tokens_details?.cache_write_tokens), finiteTokenCount(usage.promptTokensDetails?.cacheWriteTokens));
-    const cacheReadTokens = Math.max(finiteTokenCount(usage.cache_read_input_tokens), finiteTokenCount(usage.cacheReadInputTokens), finiteTokenCount(usage.prompt_tokens_details?.cached_tokens), finiteTokenCount(usage.promptTokensDetails?.cachedTokens), finiteTokenCount(usage.input_tokens_details?.cached_tokens), finiteTokenCount(usage.inputTokensDetails?.cachedTokens), finiteTokenCount(usage.cachedContentTokenCount), finiteTokenCount(usage.cached_content_token_count), finiteTokenCount(usage.total_cached_tokens));
-    const directInputTokens = provider === "anthropic"
-        ? reportedInputTokens
-        : Math.max(0, reportedInputTokens - cacheReadTokens - cacheCreationTokens);
+    const normalized = (0, provider_usage_1.normalizeProviderUsage)(usage, provider);
+    const outputTokens = normalized.outputTokens;
+    const cacheCreationTokens = normalized.cacheCreationInputTokens;
+    const cacheReadTokens = normalized.cacheReadInputTokens;
+    const directInputTokens = normalized.directInputTokens;
     const cacheDeletedInputTokens = provider === "anthropic"
         ? Math.max(finiteTokenCount(usage.cache_deleted_input_tokens), finiteTokenCount(usage.cacheDeletedInputTokens))
         : 0;
@@ -381,7 +570,7 @@ function normalizeLlmTokenUsage(value, provider = "openai") {
     // inputTokens as the direct-input component so the shared CC-style
     // measurement can add each bucket exactly once.
     const inputTokens = directInputTokens;
-    const reported = inputTokens > 0 || cacheCreationTokens > 0 || cacheReadTokens > 0 || outputTokens > 0;
+    const reported = normalized.reported;
     const costUsd = Math.max(0, Number(usage.cost_usd
         ?? usage.costUsd
         ?? usage.estimated_cost_usd
@@ -391,7 +580,7 @@ function normalizeLlmTokenUsage(value, provider = "openai") {
     return {
         inputTokens,
         outputTokens,
-        totalTokens: inputTokens + cacheCreationTokens + cacheReadTokens + outputTokens,
+        totalTokens: normalized.directInputTokens + cacheCreationTokens + cacheReadTokens + outputTokens,
         reported,
         directInputTokens,
         cacheCreationInputTokens: cacheCreationTokens,
@@ -403,6 +592,7 @@ function normalizeLlmTokenUsage(value, provider = "openai") {
     };
 }
 function reportTokenUsage(options, usage) {
+    (0, provider_request_diagnostics_1.providerAttemptUsage)(options, usage);
     try {
         options.onUsage?.(usage);
     }
@@ -703,15 +893,15 @@ async function* responseTextChunks(response) {
 async function consumeSseJson(response, onPayload) {
     await (0, sse_json_parser_1.consumeSseJsonTextChunks)(responseTextChunks(response), onPayload);
 }
-async function fetchWithNodeHttpFallback(endpoint, init = {}) {
+async function fetchWithNodeHttpFallback(endpoint, init = {}, meta) {
     try {
-        return await fetch(endpoint, init);
+        return await (0, provider_request_diagnostics_1.auditedProviderFetch)(fetch, endpoint, init, meta);
     }
     catch (fetchError) {
         if (init.signal?.aborted)
             throw fetchError;
         try {
-            return await nativeHttpRequest(endpoint, init);
+            return await (0, provider_request_diagnostics_1.auditedProviderFetch)(nativeHttpRequest, endpoint, init, meta);
         }
         catch (nativeError) {
             const fetchCause = fetchError?.cause?.message || fetchError?.cause?.code || fetchError?.message || String(fetchError);
@@ -860,10 +1050,13 @@ function providerRequestId(response) {
         || responseHeader(response, "x-anthropic-request-id");
 }
 function withTransientModelBlocks(messagesInput, blocks, family) {
+    messagesInput = (0, main_agent_tool_prompt_1.withoutPromptMetadata)(messagesInput);
     if (!blocks.length)
         return messagesInput;
     const messages = messagesInput.map(message => ({ ...message }));
     let index = messages.length - 1;
+    while (index >= 0 && (0, provider_cache_transcript_1.isAppendOnlyProviderRuntimeMessage)(messages[index]))
+        index -= 1;
     while (index >= 0 && String(messages[index]?.role || "") === "system")
         index -= 1;
     if (index < 0)
@@ -1078,6 +1271,10 @@ async function callOpenAiCompatibleChatOnce(config, options) {
         : { body: {}, headers: {} };
     const abort = createLlmAbortContext(options, resolveLlmTimeoutMs(config, options.defaultTimeoutMs || 30000, options.timeoutMs));
     try {
+        if (cache.plan)
+            Object.defineProperty(cache.plan, "_runtimeWirePrefixChecksum", {
+                value: crypto.createHash("sha256").update(JSON.stringify((cache.messages || []).slice(0, (cache.messages || []).findIndex((message) => String(message?.role || "").toLowerCase() === "user") >= 0 ? (cache.messages || []).findIndex((message) => String(message?.role || "").toLowerCase() === "user") : (cache.messages || []).length).map((message) => ({ role: String(message?.role || ""), type: String(message?.type || ""), checksum: crypto.createHash("sha256").update(JSON.stringify(message?.content ?? message?.text ?? null)).digest("hex") })))).digest("hex").slice(0, 64), enumerable: false, configurable: true,
+            });
         recordProviderRequestActivity(options, "openai", "request_dispatched");
         const response = await fetchWithNodeHttpFallback(endpoint, {
             method: "POST",
@@ -1093,10 +1290,10 @@ async function callOpenAiCompatibleChatOnce(config, options) {
                 ...buildOpenAiReasoningFields(callReasoningConfig(config, options)),
                 ...(cache.adapterPatch?.body || {}),
                 ...nativePatch.body,
-                messages: withTransientModelBlocks(cache.messages, cache.transientBlocks || [], "openai"),
+                messages: withTransientModelBlocks(cache.messages, cache.transientBlocks || [], "openai").map(responses_output_replay_1.stripResponsesReplay),
             }),
             signal: abort.controller.signal,
-        });
+        }, { options, config, protocol: 'chat_completions' });
         recordProviderRequestActivity(options, "openai", "response_started", response);
         if (!response.ok) {
             const text = await response.text();
@@ -1121,8 +1318,10 @@ async function callOpenAiCompatibleChatOnce(config, options) {
                     emitted = true;
                     content += delta;
                 }
-                if (event?.usage)
+                if (event?.usage) {
                     usage = event.usage;
+                    (0, provider_request_diagnostics_1.providerAttemptUsage)(options, normalizeLlmTokenUsage(usage, 'openai'));
+                }
             });
             const normalizedUsage = normalizeLlmTokenUsage(usage, "openai");
             const providerTurn = turnAccumulator.finish(normalizedUsage);
@@ -1137,6 +1336,7 @@ async function callOpenAiCompatibleChatOnce(config, options) {
         const text = await response.text();
         const data = JSON.parse(text);
         const normalizedUsage = normalizeLlmTokenUsage(data?.usage, "openai");
+        (0, provider_request_diagnostics_1.providerAttemptUsage)(options, normalizedUsage);
         const providerTurn = (0, provider_native_tools_1.parseOpenAiAgentTurn)(data, normalizedUsage);
         options.onProviderAgentTurn?.(providerTurn);
         const content = (0, provider_native_tools_1.turnForLegacyJsonLoop)(providerTurn);
@@ -1154,6 +1354,45 @@ async function callOpenAiCompatibleChatOnce(config, options) {
         abort.cleanup();
     }
 }
+/**
+ * Split Responses input into the workspace-public instruction prefix and the
+ * remaining session/scope messages.  Only the CCM public stable block belongs
+ * in `instructions`: putting project-specific system messages in the same
+ * field makes the provider treat the entire system fragment as changed and
+ * prevents cross-project prefix reuse.  The private messages stay in `input`
+ * in their original order.
+ */
+function splitResponsesStableInstructions(messagesInput) {
+    const messages = Array.isArray(messagesInput) ? messagesInput : [];
+    const publicPromptParts = new Set(["public_header", "protocol", "identity", "stable_policy"]);
+    const isPublicStableMessage = (message) => {
+        const id = String(message?.id || '').trim();
+        const promptPart = String(message?.promptPart || message?.prompt_part || '').trim().toLowerCase();
+        const contextType = String(message?.contextBlockType || message?.context_block_type || '').trim().toLowerCase();
+        const isHeader = id === `system:${ccm_public_stable_prefix_1.CCM_PUBLIC_STABLE_PREFIX_VERSION}` || id === ccm_public_stable_prefix_1.CCM_PUBLIC_STABLE_PREFIX_VERSION;
+        return String(message?.role || '').toLowerCase() === 'system'
+            && (isHeader || publicPromptParts.has(promptPart))
+            && message?.prefixEligible === true
+            && message?.publicPrefixEligible === true
+            && contextType !== 'scope_private'
+            && contextType !== 'dynamic_context';
+    };
+    const publicMessages = [];
+    for (const message of messages) {
+        if (!isPublicStableMessage(message))
+            break;
+        publicMessages.push(message);
+    }
+    return {
+        instructions: publicMessages
+            .map((message) => typeof message?.content === 'string' ? message.content : JSON.stringify(message?.content ?? ''))
+            .filter(Boolean)
+            .join("\n\n"),
+        inputMessages: messages.slice(publicMessages.length),
+        publicMessageCount: publicMessages.length,
+        publicMessages,
+    };
+}
 async function callOpenAiResponsesChatOnce(config, options) {
     const transport = (0, provider_cache_protocol_1.assertProviderTransportResolution)(config);
     const endpoint = transport.protocol === "responses" ? transport.normalizedEndpoint : (0, openai_responses_transport_1.normalizeOpenAiResponsesUrl)(config.apiUrl);
@@ -1161,49 +1400,236 @@ async function callOpenAiResponsesChatOnce(config, options) {
     const streaming = options.stream === true || typeof options.onDelta === "function";
     let emitted = false;
     const cache = await prepareContextCache(config, options, "openai");
+    // Partition while prompt metadata is still present. The serializer strips
+    // those tags for the provider, so detecting stable blocks afterwards would
+    // incorrectly leave only the synthetic public header in instructions.
     const messages = withTransientModelBlocks(cache.messages, cache.transientBlocks || [], "openai");
     const effort = resolveReasoningEffort(callReasoningConfig(config, options));
-    const canReusePreviousResponse = (0, openai_responses_transport_1.isOfficialOpenAiResponsesEndpoint)(endpoint, config)
-        && !options.nativeTools?.length
-        && !messages.some((message) => ["tool", "function"].includes(String(message?.role || "").toLowerCase()) || Array.isArray(message?.tool_calls))
-        && String(messages.at(-1)?.role || "").toLowerCase() === "user";
+    const capabilityMatrix = cache.adapterPatch?.capability?.capabilityMatrix?.capabilities
+        || cache.adapterPatch?.strategy?.capabilityMatrix?.capabilities
+        || {};
+    const responsesTransportMode = String(config.responsesTransportMode || config.responses_transport_mode || "auto").trim().toLowerCase();
+    const websocketEnabled = String(process.env.CCM_RESPONSES_WEBSOCKET || "").trim().toLowerCase() !== "off";
+    const websocketCapability = String(capabilityMatrix.responsesWebSocketStatus || "unproven").toLowerCase() === "confirmed";
+    const websocketUrl = String(config.responsesWebSocketUrl || config.responses_websocket_url || "").trim();
+    const useResponsesWebSocket = websocketEnabled
+        && (responsesTransportMode === "websocket" || (responsesTransportMode === "auto" && websocketCapability));
+    const continuationProbe = options.providerContextCache?.responsesContinuationProbeInProgress === true;
+    const continuationStatus = String(options.nativeTools?.length
+        ? capabilityMatrix.responsesToolLoopContinuation || "unproven"
+        : capabilityMatrix.responsesContinuation || "unproven");
+    // Responses continuation is a separate transport optimization, not the
+    // prompt-cache mechanism. It is deliberately opt-in: normal CCM requests
+    // always send the frozen full transcript so the Provider can compare and
+    // reuse the append-only prefix. An explicit continuation configuration is
+    // allowed only after the corresponding capability has been confirmed;
+    // rejection still falls back to the full transcript below.
+    const canReusePreviousResponse = config?.providerCacheUseResponsesContinuation === true
+        && continuationStatus === "confirmed";
+    const continuationCache = {
+        ...(options.providerContextCache || {}),
+        ...(canReusePreviousResponse && !(0, openai_responses_transport_1.isOfficialOpenAiResponsesEndpoint)(endpoint, config) ? { responsesContinuationProbeInProgress: true } : {}),
+    };
+    const fullSystemInstructions = messages
+        .filter((message) => String(message?.role || "").toLowerCase() === "system")
+        .map((message) => typeof message?.content === "string" ? message.content : JSON.stringify(message?.content ?? ""))
+        .filter(Boolean)
+        .join("\n\n");
+    // Responses gives `instructions` a stable, separately cacheable position.
+    // Keep only the explicitly tagged workspace-public block there; project and
+    // session-private system rules remain in `input` in their original order.
+    // Putting private system blocks ahead of the public block made two projects
+    // look like different complete prefixes and was the direct cause of the
+    // relay returning only its 192-token baseline on a new session.
+    const instructionSplit = splitResponsesStableInstructions(messages);
+    const initialInstructions = instructionSplit.instructions;
+    const initialInputMessages = instructionSplit.inputMessages;
+    const publicMessageCount = instructionSplit.publicMessageCount;
+    const publicInstructionChecksum = crypto.createHash("sha256").update((0, workspace_model_result_projection_1.stableModelJson)(instructionSplit.publicMessages.map((message) => ({
+        role: String(message?.role || ""),
+        promptPart: String(message?.promptPart || message?.prompt_part || ""),
+        content: typeof message?.content === "string" ? message.content : message?.content ?? null,
+    })))).digest("hex");
+    const publicInstructionTokens = (0, context_budget_1.estimateTextTokens)(initialInstructions);
+    const publicInstructionBlockCount = instructionSplit.publicMessages.length;
+    const sourceBreakpointIndexes = (cache.adapterPatch?.breakpointMessageIndexes || []).slice();
+    let activeBreakpointIndexes = sourceBreakpointIndexes
+        .filter(index => index >= publicMessageCount)
+        .map(index => index - publicMessageCount);
+    let fullInputItems = (0, openai_responses_transport_1.encodeOpenAiResponsesInput)(initialInputMessages, {
+        breakpointMessageIndexes: activeBreakpointIndexes,
+        replayIdentity: (0, responses_output_replay_1.responsesReplayIdentity)(config),
+    });
+    const initialBreakpointIndexes = activeBreakpointIndexes.slice();
+    let initialInputItems = (0, openai_responses_transport_1.encodeOpenAiResponsesInput)(initialInputMessages, {
+        breakpointMessageIndexes: initialBreakpointIndexes,
+        replayIdentity: (0, responses_output_replay_1.responsesReplayIdentity)(config),
+    });
+    const runtimePrefixInput = initialInputItems;
+    const runtimePrefixEnd = runtimePrefixInput.findIndex((item) => String(item?.role || '').toLowerCase() === 'user');
+    const runtimePrefixItems = runtimePrefixInput.slice(0, runtimePrefixEnd >= 0 ? runtimePrefixEnd : runtimePrefixInput.length);
+    if (cache.plan) {
+        Object.defineProperty(cache.plan, "_runtimeWirePrefixChecksum", {
+            value: crypto.createHash("sha256").update(JSON.stringify({ instructions: initialInstructions,
+                input: runtimePrefixItems.map((item) => ({ type: String(item?.type || ""), role: String(item?.role || ""), checksum: crypto.createHash("sha256").update(JSON.stringify(item?.content ?? item?.text ?? null)).digest("hex") })) })).digest("hex").slice(0, 64), enumerable: false, configurable: true,
+        });
+        Object.defineProperties(cache.plan, {
+            publicInstructionChecksum: { value: publicInstructionChecksum, enumerable: true, configurable: true },
+            publicInstructionTokens: { value: publicInstructionTokens, enumerable: true, configurable: true },
+            publicInstructionBlockCount: { value: publicInstructionBlockCount, enumerable: true, configurable: true },
+            publicPrefixContiguous: { value: publicMessageCount > 0, enumerable: true, configurable: true },
+        });
+    }
+    const continuationFingerprint = (0, openai_responses_transport_1.buildResponsesContinuationFingerprint)({
+        instructions: fullSystemInstructions,
+        tools: options.nativeTools || [],
+        cacheKey: cache.adapterPatch?.body?.prompt_cache_key || "",
+        reasoning: effort,
+        model: config.model,
+    });
+    let continuationRequest = { previousResponseId: "", inputItems: fullInputItems, mode: "full", reason: "disabled" };
     const abort = createLlmAbortContext(options, resolveLlmTimeoutMs(config, options.defaultTimeoutMs || 30000, options.timeoutMs));
     try {
         const request = async (omitMaxOutputTokens, omitTemperature, omitReasoningSummary, omitPreviousResponseId) => {
-            const previousResponseId = !omitPreviousResponseId && canReusePreviousResponse
-                ? (0, openai_responses_transport_1.getReusableResponsesPreviousId)(endpoint, options.providerContextCache, config)
-                : "";
-            const requestMessages = previousResponseId ? [messages.at(-1)] : messages;
-            const instructions = previousResponseId
-                ? messages.filter((message) => String(message?.role || "").toLowerCase() === "system")
-                    .map((message) => typeof message?.content === "string" ? message.content : JSON.stringify(message?.content ?? ""))
-                    .filter(Boolean)
-                    .join("\n\n")
-                : "";
+            continuationRequest = !omitPreviousResponseId && canReusePreviousResponse
+                ? (0, openai_responses_transport_1.prepareResponsesContinuationRequest)(endpoint, continuationCache, config, {
+                    inputItems: fullInputItems,
+                    instructions: fullSystemInstructions,
+                    tools: options.nativeTools || [],
+                    cacheKey: cache.adapterPatch?.body?.prompt_cache_key || "",
+                    reasoning: effort,
+                    model: config.model,
+                })
+                : { previousResponseId: "", inputItems: fullInputItems, mode: "full", reason: "disabled" };
+            const previousResponseId = continuationRequest.previousResponseId || "";
+            const requestMessages = previousResponseId ? [] : messages;
+            const instructions = previousResponseId ? fullSystemInstructions : initialInstructions;
             recordProviderRequestActivity(options, "openai", "request_dispatched");
-            const response = await fetchWithNodeHttpFallback(endpoint, {
+            const requestBody = (0, openai_responses_transport_1.buildOpenAiResponsesBody)({
+                model: config.model,
+                messages: requestMessages,
+                instructions,
+                previousResponseId,
+                maxOutputTokens: omitMaxOutputTokens ? undefined : options.maxTokens,
+                stream: streaming,
+                reasoningEffort: effort,
+                reasoningSummary: !omitReasoningSummary && effort !== "off" ? "auto" : undefined,
+                temperature: omitTemperature ? undefined : options.temperature ?? resolveTemperature(config, 0.2),
+                cachePatch: cache.adapterPatch?.body || {},
+                breakpointMessageIndexes: previousResponseId ? [] : activeBreakpointIndexes,
+                inputItems: previousResponseId ? continuationRequest.inputItems : initialInputItems,
+                nativeTools: config.providerNativeToolsMode !== "json" ? options.nativeTools : undefined,
+                nativeToolChoice: options.nativeToolChoice,
+            });
+            // Freeze the exact body that is about to cross the provider boundary.
+            // Completion diagnostics must never read the pre-retry adapter patch,
+            // because a compatibility retry or a changed active marker set can
+            // otherwise report a different request than the provider received.
+            const requestInput = Array.isArray(requestBody.input) ? requestBody.input : [];
+            const digest = (value) => crypto.createHash("sha256").update(JSON.stringify(value ?? null)).digest("hex").slice(0, 64);
+            // Responses encodes the marker on the final input_text part for a user
+            // message (and on the function_call_output item for tool results), so
+            // it is not always present on the top-level input item.  Count the
+            // actual top-level marked items recursively from the frozen body.
+            const hasBreakpoint = (value) => {
+                if (!value || typeof value !== "object")
+                    return false;
+                if (value.prompt_cache_breakpoint)
+                    return true;
+                if (Array.isArray(value))
+                    return value.some(hasBreakpoint);
+                return Object.values(value).some(hasBreakpoint);
+            };
+            const markerItems = requestInput.filter((item) => hasBreakpoint(item));
+            const finalRequestSnapshot = {
+                requestSnapshotChecksum: digest(requestBody),
+                requestFields: [
+                    ...Object.keys(cache.adapterPatch?.body || {}).filter(field => Object.prototype.hasOwnProperty.call(requestBody, field)),
+                    ...(markerItems.length ? ["prompt_cache_breakpoint"] : []),
+                ],
+                breakpointMessageIndexes: activeBreakpointIndexes.slice(0, 4),
+                breakpointChecksums: markerItems.slice(0, 4).map((item) => digest(item)),
+                toolsChecksum: digest(requestBody.tools || []),
+                inputSequenceChecksum: digest(requestInput),
+                instructionsChecksum: digest(requestBody.instructions || ""),
+                previousResponseIdUsed: Boolean(previousResponseId),
+            };
+            if (cache.plan) {
+                // Adapter indexes are only candidates. A boundary can move to
+                // `instructions` or be unencodable in the final Responses shape, so
+                // the frozen wire body is the sole authority for completion counts.
+                // Persist that exact marker set so breakpointCount,
+                // explicitBreakpointCount and encodedBreakpoints cannot diverge.
+                Object.defineProperty(cache.plan, "_runtimeBreakpointChecksums", {
+                    value: finalRequestSnapshot.breakpointChecksums.slice(), enumerable: false, configurable: true,
+                });
+                if (!Array.isArray(cache.plan._runtimeInitialBreakpointChecksums)) {
+                    Object.defineProperty(cache.plan, "_runtimeInitialBreakpointChecksums", {
+                        value: finalRequestSnapshot.breakpointChecksums.slice(), enumerable: false, configurable: true,
+                    });
+                }
+                Object.defineProperty(cache.plan, "_runtimeFinalRequestSnapshot", {
+                    value: finalRequestSnapshot, enumerable: false, configurable: true,
+                });
+            }
+            const requestInit = {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
                     "Authorization": `Bearer ${config.apiKey}`,
                 },
-                body: JSON.stringify((0, openai_responses_transport_1.buildOpenAiResponsesBody)({
-                    model: config.model,
-                    messages: requestMessages,
-                    instructions,
-                    previousResponseId,
-                    maxOutputTokens: omitMaxOutputTokens ? undefined : options.maxTokens,
-                    stream: streaming,
-                    reasoningEffort: effort,
-                    reasoningSummary: !omitReasoningSummary && effort !== "off" ? "auto" : undefined,
-                    temperature: omitTemperature ? undefined : options.temperature ?? resolveTemperature(config, 0.2),
-                    cachePatch: cache.adapterPatch?.body || {},
-                    breakpointMessageIndexes: cache.adapterPatch?.breakpointMessageIndexes || [],
-                    nativeTools: config.providerNativeToolsMode !== "json" ? options.nativeTools : undefined,
-                    nativeToolChoice: options.nativeToolChoice,
-                })),
+                body: JSON.stringify(requestBody),
                 signal: abort.controller.signal,
-            });
+            };
+            let response;
+            if (useResponsesWebSocket) {
+                try {
+                    response = await (0, provider_request_diagnostics_1.auditedProviderFetch)(openai_responses_websocket_transport_1.requestResponsesWebSocket, endpoint, {
+                        ...requestInit,
+                        timeoutMs: resolveLlmTimeoutMs(config, options.defaultTimeoutMs || 30000, options.timeoutMs),
+                        responsesWebSocketUrl: websocketUrl,
+                    }, { options, config, protocol: 'responses' });
+                    if (cache.plan) {
+                        Object.defineProperty(cache.plan, "_runtimeResponsesTransportSelected", { value: "websocket", enumerable: false, configurable: true });
+                        Object.defineProperty(cache.plan, "_runtimeResponsesWebSocketHandshake", { value: true, enumerable: false, configurable: true });
+                        Object.defineProperty(cache.plan, "_runtimeResponsesWebSocketUrlFingerprint", { value: (0, openai_responses_websocket_transport_1.responsesWebSocketUrlFingerprint)(websocketUrl || endpoint), enumerable: false, configurable: true });
+                    }
+                    try {
+                        (0, provider_cache_capability_registry_1.recordProviderCacheCapabilityEvidence)(config, {
+                            status: "confirmed",
+                            responsesWebSocketStatus: "confirmed",
+                            responsesWebSocketResponseCreateStatus: "confirmed",
+                            source: "provider_usage",
+                            providerCallCount: 1,
+                            reason: "responses_websocket_response_create_succeeded",
+                        });
+                    }
+                    catch { }
+                }
+                catch (websocketError) {
+                    if (abort.controller.signal.aborted)
+                        throw websocketError;
+                    if (cache.plan)
+                        Object.defineProperty(cache.plan, "_runtimeResponsesWebSocketFallbackReason", { value: String(websocketError?.message || "websocket_failed").replace(/[\r\n\t]+/g, " ").slice(0, 300), enumerable: false, configurable: true });
+                    try {
+                        (0, provider_cache_capability_registry_1.recordProviderCacheCapabilityEvidence)(config, {
+                            status: "degraded",
+                            responsesWebSocketStatus: "degraded",
+                            responsesWebSocketLastFailureReason: String(websocketError?.message || "websocket_failed").replace(/[\r\n\t]+/g, " ").slice(0, 300),
+                            source: "provider_usage",
+                            providerCallCount: 1,
+                            reason: "responses_websocket_fallback_to_http",
+                        });
+                    }
+                    catch { }
+                    response = await fetchWithNodeHttpFallback(endpoint, requestInit, { options, config, protocol: 'responses' });
+                }
+            }
+            else {
+                response = await fetchWithNodeHttpFallback(endpoint, requestInit, { options, config, protocol: 'responses' });
+                if (cache.plan)
+                    Object.defineProperty(cache.plan, "_runtimeResponsesTransportSelected", { value: "http", enumerable: false, configurable: true });
+            }
             recordProviderRequestActivity(options, "openai", "response_started", response);
             return response;
         };
@@ -1217,17 +1643,84 @@ async function callOpenAiResponsesChatOnce(config, options) {
         let discoveredReasoningSummaryIncompatibility = false;
         let response;
         for (let compatibilityAttempt = 0; compatibilityAttempt < 4; compatibilityAttempt += 1) {
-            previousResponseIdUsed = !omittedPreviousResponseId && canReusePreviousResponse
-                ? (0, openai_responses_transport_1.getReusableResponsesPreviousId)(endpoint, options.providerContextCache, config)
-                : "";
             response = await request(omittedMaxOutputTokens, omittedTemperature, omittedReasoningSummary, omittedPreviousResponseId);
+            // `request()` computes the continuation candidate from the current
+            // transcript. Read it back after dispatch; reading the value before the
+            // call observes the previous iteration and misses a rejected
+            // `previous_response_id`, preventing the required full-transcript retry.
+            previousResponseIdUsed = !omittedPreviousResponseId && canReusePreviousResponse
+                ? String(continuationRequest?.previousResponseId || "")
+                : "";
             if (response.ok)
                 break;
             const text = await response.text();
             if (previousResponseIdUsed && /previous[_ -]?response[_ -]?id|conversation(?:\s+state)?(?:\s+not|.*invalid)|response(?:\s+id)?\s+not\s+found/i.test(text)) {
                 omittedPreviousResponseId = true;
-                (0, openai_responses_transport_1.forgetResponsesPreviousId)(options.providerContextCache, endpoint, config);
+                (0, openai_responses_transport_1.forgetResponsesPreviousId)(continuationCache, endpoint, config);
+                // Continuation is an optional optimization. Persist its rejection as a
+                // field-scoped capability result while retaining any independently
+                // confirmed Prompt Cache evidence. The next request will therefore use
+                // a full transcript without probing the relay again until expiry.
+                try {
+                    (0, provider_cache_capability_registry_1.recordProviderCacheCapabilityEvidence)(config, {
+                        status: "degraded",
+                        responsesContinuationStatus: "unsupported",
+                        ...(options.nativeTools?.length ? { responsesToolLoopContinuationStatus: "unsupported" } : {}),
+                        lastContinuationFailureReason: (0, openai_responses_transport_1.safeProviderHttpDetail)(text, 300),
+                        source: "provider_usage",
+                        providerCallCount: 1,
+                        reason: (0, openai_responses_transport_1.safeProviderHttpDetail)(text, 300),
+                    });
+                }
+                catch { }
                 continue;
+            }
+            // Optional cache fields must never turn into a second model/tool
+            // execution. If a relay rejects a breakpoint, remove only that field,
+            // rebuild the same full transcript without marker metadata, and retry
+            // this physical request once. The model receives exactly the same
+            // conversation; only the provider cache hint is downgraded.
+            const cacheFieldError = { status: response.status, message: `HTTP ${response.status}: ${text}` };
+            if ((0, provider_context_cache_adapters_1.isProviderContextCacheFieldRejection)(cacheFieldError)) {
+                const rejectedField = (0, provider_context_cache_adapters_1.classifyProviderCacheFieldRejection)(cacheFieldError, "responses");
+                if (rejectedField === "prompt_cache_breakpoint" && activeBreakpointIndexes.length > 0) {
+                    activeBreakpointIndexes = [];
+                    fullInputItems = (0, openai_responses_transport_1.encodeOpenAiResponsesInput)(initialInputMessages, {
+                        breakpointMessageIndexes: [],
+                        replayIdentity: (0, responses_output_replay_1.responsesReplayIdentity)(config),
+                    });
+                    initialInputItems = fullInputItems;
+                    if (cache.adapterPatch) {
+                        cache.adapterPatch.breakpointMessageIndexes = [];
+                        cache.adapterPatch.breakpointChecksums = [];
+                        cache.adapterPatch.breakpointOmissionReason = "provider_rejected_breakpoint";
+                    }
+                    if (cache.adapterPatch?.body && typeof cache.adapterPatch.body === "object") {
+                        delete cache.adapterPatch.body.prompt_cache_options;
+                    }
+                    if (cache.plan) {
+                        Object.defineProperty(cache.plan, "_runtimeBreakpointRejected", { value: true, enumerable: false, configurable: true });
+                    }
+                    try {
+                        (0, provider_cache_capability_registry_1.recordProviderCacheCapabilityEvidence)(config, {
+                            status: "degraded",
+                            explicitBreakpointsStatus: "degraded",
+                            source: "provider_usage",
+                            providerCallCount: 1,
+                            reason: (0, openai_responses_transport_1.safeProviderHttpDetail)(text, 300),
+                        });
+                    }
+                    catch { }
+                    continue;
+                }
+                if (rejectedField === "prompt_cache_options" && cache.adapterPatch?.body?.prompt_cache_options) {
+                    delete cache.adapterPatch.body.prompt_cache_options;
+                    continue;
+                }
+                if (rejectedField === "prompt_cache_key" && cache.adapterPatch?.body?.prompt_cache_key) {
+                    delete cache.adapterPatch.body.prompt_cache_key;
+                    continue;
+                }
             }
             if (!omittedReasoningSummary && (0, provider_reasoning_summary_capability_1.isProviderReasoningSummaryFieldRejection)(response.status, text)) {
                 omittedReasoningSummary = true;
@@ -1304,45 +1797,66 @@ async function callOpenAiResponsesChatOnce(config, options) {
                 const delta = event?.type === "response.output_text.delta" ? emitStreamDelta(options, event?.delta) : "";
                 if (delta && streaming)
                     emitted = true;
-                if (event?.response?.usage)
+                if (event?.response?.usage) {
                     usage = event.response.usage;
+                    (0, provider_request_diagnostics_1.providerAttemptUsage)(options, normalizeLlmTokenUsage(usage, 'openai'));
+                }
                 if (event?.type === "error")
                     throw new Error(String(event?.error?.message || event?.message || "Responses API 流式调用失败"));
             });
             const finalResponse = turnAccumulator.finalResponse();
             const normalizedUsage = normalizeLlmTokenUsage(usage || finalResponse?.usage, "openai");
-            const providerTurn = turnAccumulator.finish(normalizedUsage);
+            const providerTurn = (0, responses_output_replay_1.bindResponsesReplay)(turnAccumulator.finish(normalizedUsage), config);
             options.onProviderAgentTurn?.(providerTurn);
             const content = (0, provider_native_tools_1.turnForLegacyJsonLoop)(providerTurn);
             if (!content.trim() && !providerTurn.toolCalls.length)
                 throw new Error("模型返回空响应");
             reportTokenUsage(options, normalizedUsage);
-            options.onResponseMetadata?.({ provider: "openai-responses", responseId: String(finalResponse?.id || responseId || ""), model: String(finalResponse?.model || config.model || ""), status: String(finalResponse?.status || providerTurn.stopReason || "") });
-            if (canReusePreviousResponse && !providerTurn.toolCalls.length) {
-                (0, openai_responses_transport_1.rememberResponsesResponseId)(endpoint, options.providerContextCache, String(finalResponse?.id || responseId || ""), config);
+            options.onResponseMetadata?.({ provider: "openai-responses", responseId: String(finalResponse?.id || responseId || ""), model: String(finalResponse?.model || config.model || ""), status: String(finalResponse?.status || providerTurn.stopReason || ""), previousResponseIdUsed: !!previousResponseIdUsed, responsesTransportSelected: String(cache.plan?._runtimeResponsesTransportSelected || (useResponsesWebSocket ? "websocket" : "http")), responsesWebSocketHandshake: cache.plan?._runtimeResponsesWebSocketHandshake === true || (useResponsesWebSocket && !cache.plan?._runtimeResponsesWebSocketFallbackReason), responsesWebSocketFallbackReason: String(cache.plan?._runtimeResponsesWebSocketFallbackReason || "") });
+            if (canReusePreviousResponse) {
+                (0, openai_responses_transport_1.rememberResponsesResponseId)(endpoint, continuationCache, String(finalResponse?.id || responseId || ""), config, {
+                    inputItemChecksums: (0, openai_responses_transport_1.responsesInputItemChecksums)(fullInputItems),
+                    continuationFingerprint,
+                    providerToolCalls: providerTurn.toolCalls,
+                    providerAssistantText: providerTurn.text,
+                });
             }
             else {
-                (0, openai_responses_transport_1.forgetResponsesPreviousId)(options.providerContextCache, endpoint, config);
+                (0, openai_responses_transport_1.forgetResponsesPreviousId)(continuationCache, endpoint, config);
             }
-            finishContextCache(options, cache.plan, { ok: true, usage: normalizedUsage, providerRequestId: String(finalResponse?.id || responseId || ""), adapterEvidence: providerAdapterEvidence(cache) });
+            if (cache.plan) {
+                Object.defineProperty(cache.plan, "_runtimeContinuationMode", { value: String(continuationRequest.mode || "full"), enumerable: false, configurable: true });
+                Object.defineProperty(cache.plan, "_runtimePreviousResponseIdUsed", { value: !!previousResponseIdUsed, enumerable: false, configurable: true });
+            }
+            finishContextCache(options, cache.plan, { ok: true, usage: normalizedUsage, providerRequestId: String(finalResponse?.id || responseId || ""), adapterEvidence: providerAdapterEvidence(cache, { mode: continuationRequest.mode, previousResponseIdUsed: !!previousResponseIdUsed, fallbackReason: continuationRequest.reason }) });
             return content;
         }
         const data = JSON.parse(await response.text());
         const normalizedUsage = normalizeLlmTokenUsage(data?.usage, "openai");
-        const providerTurn = (0, provider_native_tools_1.parseOpenAiResponsesAgentTurn)(data, normalizedUsage);
+        (0, provider_request_diagnostics_1.providerAttemptUsage)(options, normalizedUsage);
+        const providerTurn = (0, responses_output_replay_1.bindResponsesReplay)((0, provider_native_tools_1.parseOpenAiResponsesAgentTurn)(data, normalizedUsage), config);
         options.onProviderAgentTurn?.(providerTurn);
         const content = (0, provider_native_tools_1.turnForLegacyJsonLoop)(providerTurn);
         if (!content.trim() && !providerTurn.toolCalls.length)
             throw new Error("模型返回空响应");
         reportTokenUsage(options, normalizedUsage);
-        options.onResponseMetadata?.({ provider: "openai-responses", responseId: String(data?.id || responseId || ""), model: String(data?.model || config.model || ""), status: String(data?.status || "") });
-        if (canReusePreviousResponse && !providerTurn.toolCalls.length) {
-            (0, openai_responses_transport_1.rememberResponsesResponseId)(endpoint, options.providerContextCache, String(data?.id || responseId || ""), config);
+        options.onResponseMetadata?.({ provider: "openai-responses", responseId: String(data?.id || responseId || ""), model: String(data?.model || config.model || ""), status: String(data?.status || ""), previousResponseIdUsed: !!previousResponseIdUsed, responsesTransportSelected: String(cache.plan?._runtimeResponsesTransportSelected || (useResponsesWebSocket ? "websocket" : "http")), responsesWebSocketHandshake: cache.plan?._runtimeResponsesWebSocketHandshake === true || (useResponsesWebSocket && !cache.plan?._runtimeResponsesWebSocketFallbackReason), responsesWebSocketFallbackReason: String(cache.plan?._runtimeResponsesWebSocketFallbackReason || "") });
+        if (canReusePreviousResponse) {
+            (0, openai_responses_transport_1.rememberResponsesResponseId)(endpoint, continuationCache, String(data?.id || responseId || ""), config, {
+                inputItemChecksums: (0, openai_responses_transport_1.responsesInputItemChecksums)(fullInputItems),
+                continuationFingerprint,
+                providerToolCalls: providerTurn.toolCalls,
+                providerAssistantText: providerTurn.text,
+            });
         }
         else {
-            (0, openai_responses_transport_1.forgetResponsesPreviousId)(options.providerContextCache, endpoint, config);
+            (0, openai_responses_transport_1.forgetResponsesPreviousId)(continuationCache, endpoint, config);
         }
-        finishContextCache(options, cache.plan, { ok: true, usage: normalizedUsage, providerRequestId: String(data?.id || responseId || ""), adapterEvidence: providerAdapterEvidence(cache) });
+        if (cache.plan) {
+            Object.defineProperty(cache.plan, "_runtimeContinuationMode", { value: String(continuationRequest.mode || "full"), enumerable: false, configurable: true });
+            Object.defineProperty(cache.plan, "_runtimePreviousResponseIdUsed", { value: !!previousResponseIdUsed, enumerable: false, configurable: true });
+        }
+        finishContextCache(options, cache.plan, { ok: true, usage: normalizedUsage, providerRequestId: String(data?.id || responseId || ""), adapterEvidence: providerAdapterEvidence(cache, { mode: continuationRequest.mode, previousResponseIdUsed: !!previousResponseIdUsed, fallbackReason: continuationRequest.reason }) });
         return content;
     }
     catch (error) {
@@ -1407,7 +1921,7 @@ async function callGeminiCompatibleChatOnce(config, options) {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(body),
             signal: abort.controller.signal,
-        });
+        }, { options, config, protocol: 'gemini_generate_content' });
         recordProviderRequestActivity(options, "gemini", "response_started", response);
         if (!response.ok) {
             const detail = await response.text();
@@ -1432,8 +1946,10 @@ async function callGeminiCompatibleChatOnce(config, options) {
                         emitted = true;
                         content += delta;
                     }
-                    if (event?.usageMetadata || event?.usage)
+                    if (event?.usageMetadata || event?.usage) {
                         usage = event.usageMetadata || event.usage;
+                        (0, provider_request_diagnostics_1.providerAttemptUsage)(options, normalizeLlmTokenUsage(usage, 'gemini'));
+                    }
                 }
             });
             const normalizedUsage = normalizeLlmTokenUsage(usage, "gemini");
@@ -1448,6 +1964,7 @@ async function callGeminiCompatibleChatOnce(config, options) {
         }
         const data = JSON.parse(await response.text());
         const normalizedUsage = normalizeLlmTokenUsage(data?.usageMetadata || data?.usage, "gemini");
+        (0, provider_request_diagnostics_1.providerAttemptUsage)(options, normalizedUsage);
         const providerTurn = (0, provider_native_tools_1.parseGeminiAgentTurn)(data, normalizedUsage);
         options.onProviderAgentTurn?.(providerTurn);
         const content = (0, provider_native_tools_1.turnForLegacyJsonLoop)(providerTurn).trim();
@@ -1536,7 +2053,7 @@ async function callAnthropicCompatibleChatOnce(config, options) {
                 headers: patched.headers,
                 body: JSON.stringify(patched.body),
                 signal: abort.controller.signal,
-            });
+            }, { options, config, protocol: 'anthropic_messages' });
             recordProviderRequestActivity(options, "anthropic", "response_started", response);
         }
         catch (error) {
@@ -1588,12 +2105,15 @@ async function callAnthropicCompatibleChatOnce(config, options) {
                 turnAccumulator.push(event);
                 if (event?.usage) {
                     usage = { ...usage, ...event.usage };
+                    (0, provider_request_diagnostics_1.providerAttemptUsage)(options, normalizeLlmTokenUsage(usage, 'anthropic'));
                 }
                 if (event?.type === "message_start" && event?.message?.usage) {
                     usage = { ...usage, ...event.message.usage };
+                    (0, provider_request_diagnostics_1.providerAttemptUsage)(options, normalizeLlmTokenUsage(usage, 'anthropic'));
                 }
                 if (event?.type === "message_delta" && event?.usage) {
                     usage = { ...usage, ...event.usage };
+                    (0, provider_request_diagnostics_1.providerAttemptUsage)(options, normalizeLlmTokenUsage(usage, 'anthropic'));
                 }
                 const textDelta = Array.isArray(event?.content)
                     ? event.content.map((part) => part?.type === "text" ? part.text : "").join("")
@@ -1669,6 +2189,7 @@ async function callAnthropicCompatibleChatOnce(config, options) {
             ok: true,
         });
         const normalizedUsage = normalizeLlmTokenUsage(data?.usage, "anthropic");
+        (0, provider_request_diagnostics_1.providerAttemptUsage)(options, normalizedUsage);
         const providerTurn = (0, provider_native_tools_1.parseAnthropicAgentTurn)(data, normalizedUsage);
         options.onProviderAgentTurn?.(providerTurn);
         const content = (0, provider_native_tools_1.turnForLegacyJsonLoop)(providerTurn).trim();
@@ -1719,6 +2240,7 @@ function resolveLlmRetryOptions(config, options, fallbackScope) {
     };
 }
 async function callOpenAiCompatibleChat(config, options) {
+    options = (0, provider_request_diagnostics_1.withRequestDiagnostics)(options, config);
     const protocol = (0, provider_cache_protocol_1.assertProviderTransportResolution)(config).protocol;
     if (protocol === "anthropic_messages")
         return callAnthropicCompatibleChat(config, options);
@@ -1782,6 +2304,7 @@ async function callOpenAiCompatibleChat(config, options) {
     return (0, model_call_retry_1.runModelCallWithRetry)(context => callOnceWithNativeFallback({ ...options, timeoutMs: context.attemptTimeoutMs, signal: context.signal, retry: false }), resolveLlmRetryOptions(config, options, "OpenAI-compatible model call"));
 }
 async function callGeminiCompatibleChat(config, options) {
+    options = (0, provider_request_diagnostics_1.withRequestDiagnostics)(options, config);
     const callOnceWithNativeFallback = async (attemptOptions) => {
         try {
             return await callGeminiCompatibleChatOnce(config, attemptOptions);
@@ -1806,6 +2329,7 @@ async function callGeminiCompatibleChat(config, options) {
     return (0, model_call_retry_1.runModelCallWithRetry)(context => callOnceWithNativeFallback({ ...options, timeoutMs: context.attemptTimeoutMs, signal: context.signal, retry: false }), resolveLlmRetryOptions(config, options, "Gemini-compatible model call"));
 }
 async function callAnthropicCompatibleChat(config, options) {
+    options = (0, provider_request_diagnostics_1.withRequestDiagnostics)(options, config);
     const callOnceWithNativeFallback = async (attemptOptions) => {
         try {
             return await callAnthropicCompatibleChatOnce(config, attemptOptions);
@@ -1872,6 +2396,7 @@ async function callAnthropicCompatibleChat(config, options) {
     return (0, model_call_retry_1.runModelCallWithRetry)(context => callOnceWithNativeFallback({ ...options, timeoutMs: context.attemptTimeoutMs, signal: context.signal, retry: false }), resolveLlmRetryOptions(config, options, "Anthropic-compatible model call"));
 }
 async function callOpenAiCompatibleJson(config, options) {
+    options = (0, provider_request_diagnostics_1.withRequestDiagnostics)(options, config);
     if (shouldUseGemini(config))
         return callGeminiCompatibleJson(config, options);
     if (options.retry === false) {
@@ -1899,6 +2424,7 @@ async function callOpenAiCompatibleJson(config, options) {
     }, resolveLlmRetryOptions(config, options, "OpenAI-compatible JSON model call"));
 }
 async function callGeminiCompatibleJson(config, options) {
+    options = (0, provider_request_diagnostics_1.withRequestDiagnostics)(options, config);
     if (options.retry === false) {
         const content = await callGeminiCompatibleChat(config, { ...options, retry: false });
         const parsed = extractJsonObject(content);
@@ -1924,6 +2450,7 @@ async function callGeminiCompatibleJson(config, options) {
     }, resolveLlmRetryOptions(config, options, "Gemini-compatible JSON model call"));
 }
 async function callAnthropicCompatibleJson(config, options) {
+    options = (0, provider_request_diagnostics_1.withRequestDiagnostics)(options, config);
     if (options.retry === false) {
         const content = await callAnthropicCompatibleChat(config, { ...options, retry: false });
         const parsed = extractJsonObject(content);

@@ -46,6 +46,7 @@ exports.listTasksByParentIdFromSqlite = listTasksByParentIdFromSqlite;
 exports.updateTaskByIdInSqlite = updateTaskByIdInSqlite;
 exports.updateTaskByIdCasInSqlite = updateTaskByIdCasInSqlite;
 exports.listUsabilityTaskCandidatesFromSqlite = listUsabilityTaskCandidatesFromSqlite;
+exports.listTaskSessionIdsByGroupIdFromSqlite = listTaskSessionIdsByGroupIdFromSqlite;
 exports.listUsabilityArchiveCandidatesFromSqlite = listUsabilityArchiveCandidatesFromSqlite;
 exports.saveTasksToSqlite = saveTasksToSqlite;
 exports.runTaskStoreAtomicBatchSelfTest = runTaskStoreAtomicBatchSelfTest;
@@ -73,6 +74,7 @@ const os = __importStar(require("os"));
 const path = __importStar(require("path"));
 const runtime_paths_1 = require("./runtime-paths");
 const better_sqlite3_1 = __importDefault(require("better-sqlite3"));
+const task_lifecycle_1 = require("./task-lifecycle");
 const STORE_SCHEMA_VERSION = 3;
 const DEFAULT_STORE_DIR = runtime_paths_1.CCM_DIR;
 const STORE_DIR = path.resolve(process.env.CCM_TASK_STORE_DIR || DEFAULT_STORE_DIR);
@@ -642,6 +644,9 @@ function updateTaskByIdInSqlite(id, patchOrMutator) {
     const next = typeof patchOrMutator === "function"
         ? patchOrMutator({ ...current })
         : { ...current, ...(patchOrMutator || {}), id: current.id, updated_at: new Date().toISOString() };
+    const lifecycle = (0, task_lifecycle_1.validateTaskLifecycleTransition)(current.status, next.status, "任务");
+    if (!lifecycle.valid)
+        throw new Error(lifecycle.issues.join("；"));
     if (!next || String(next.id) !== taskId)
         throw new Error("行级更新不能改变任务 id");
     const row = taskColumns(next, Number(existing.position) || 0);
@@ -675,6 +680,9 @@ function updateTaskByIdCasInSqlite(id, predicate, mutator) {
         if (!predicate(current))
             return { updated: false, conflict: true, task: current, previous: current };
         const next = mutator({ ...current });
+        const lifecycle = (0, task_lifecycle_1.validateTaskLifecycleTransition)(current.status, next.status, "任务");
+        if (!lifecycle.valid)
+            return { updated: false, conflict: true, task: current, previous: current };
         if (!next || String(next.id) !== taskId)
             throw new Error("CAS更新不能改变任务 id");
         const row = taskColumns(next, Number(existing.position) || 0);
@@ -704,6 +712,27 @@ function listUsabilityTaskCandidatesFromSqlite(recentCutoff) {
     ORDER BY updated_at DESC, position ASC
   `).all(String(recentCutoff || ""));
     return rows.map(row => parseJson(row.payload_json, null)).filter(Boolean).map(task => hydrateTaskAuthority(db, task));
+}
+/**
+ * Returns only the session identifiers associated with a group.  Group session
+ * listings only need this small projection; loading and hydrating every task
+ * made a sidebar refresh scale with the complete task history.
+ */
+function listTaskSessionIdsByGroupIdFromSqlite(groupId) {
+    const group = String(groupId || "").trim();
+    if (!group)
+        return [];
+    const db = getDatabase();
+    const rows = db.prepare(`
+    SELECT
+      json_extract(payload_json, '$.group_session_id') AS group_session_id,
+      json_extract(payload_json, '$.exact_session_id') AS exact_session_id
+    FROM tasks
+    WHERE group_id = ? OR json_extract(payload_json, '$.group_id') = ?
+  `).all(group, group);
+    return [...new Set(rows
+            .map(row => String(row.group_session_id || row.exact_session_id || "").trim())
+            .filter(Boolean))];
 }
 function listUsabilityArchiveCandidatesFromSqlite(historyCutoff, intakeCutoff) {
     const db = getDatabase();

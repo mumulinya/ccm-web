@@ -1,0 +1,53 @@
+export declare function createAgentRunnerRuntime(deps: any): {
+    buildProjectToolContext: (projectName: string, workDir?: string, agentType?: string, options?: any) => {
+        prompt: string;
+        allowedTools: any;
+        audit: any;
+        workEvent: {
+            id: string;
+            time: string;
+            agent: string;
+            kind: string;
+            text: string;
+            runtimeToolSync: any;
+        };
+        dispatchGate: any;
+        runtimeToolSnapshot: {
+            schema: string;
+            snapshotId: string;
+            snapshotPath: string;
+            mcpConfigPath: string;
+            runtime: any;
+            allowedTools: {
+                mcp: any;
+                skill: any;
+            };
+            requested: {
+                mcp: any;
+                skill: any;
+            };
+            configuredTools: {
+                mcp: any;
+                skill: any;
+            };
+            executionRoleSkills: unknown[];
+            enforceExecutionRoleSkills: boolean;
+            effectiveTools: {
+                mcp: any;
+                skill: any;
+            };
+            permissionRules: any;
+            permission_rules: any;
+            authorizationReadiness: any;
+            authorization_readiness: any;
+            dispatchGate: any;
+            dispatch_gate: any;
+            catalogRevision: string;
+        };
+        selectedRoleSkills: any;
+    };
+    callAgent: (projectName: string, message: string, workDir: string, agentType: string, timeoutMs: number, workspaceTarget?: any) => Promise<any>;
+    callAgentForGroupStream: (projectName: string, message: string, workDir: string, agentType: string, options?: any) => Promise<string>;
+    callAgentStream: (projectName: string, message: string, workDir: string, agentType: string, res: any, options?: any) => void;
+    sendRuntimeToolDispatchBlocked: (res: any, toolContext: any) => any;
+};

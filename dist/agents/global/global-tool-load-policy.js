@@ -5,6 +5,7 @@ exports.isGlobalDeferredTool = isGlobalDeferredTool;
 exports.globalDiscoverableManagementTools = globalDiscoverableManagementTools;
 exports.runGlobalToolLoadPolicySelfTest = runGlobalToolLoadPolicySelfTest;
 const global_agent_run_store_1 = require("./global-agent-run-store");
+const douyin_tool_schema_1 = require("../../modules/music/douyin-tool-schema");
 const GLOBAL_ALWAYS_INLINE_TOOLS = new Set([
     "tool_search",
     "invoke_skill",
@@ -28,6 +29,9 @@ function isGlobalDeferredTool(name, loadedToolNames = []) {
     return !uniqueNames(loadedToolNames).has(toolName);
 }
 function skinnySchema(spec) {
+    const douyin = (0, douyin_tool_schema_1.douyinToolSchema)(spec.name, spec.required);
+    if (douyin)
+        return douyin;
     const properties = {};
     for (const key of spec.required || []) {
         properties[key] = {

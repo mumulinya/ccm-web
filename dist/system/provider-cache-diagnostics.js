@@ -7,6 +7,7 @@ const KNOWN_REASONS = [
     "rules_changed",
     "skills_changed",
     "system_tools_changed",
+    "tool_schema_changed",
     "mcp_tools_changed",
     "model_changed",
     "endpoint_changed",
@@ -31,7 +32,7 @@ function blockFacet(block) {
 function stablePrefixChangeReasons(input) {
     const previous = input.previous;
     if (!previous)
-        return ["cold_start"];
+        return [];
     const reasons = new Set();
     if (String(previous.model || "") !== input.model)
         reasons.add("model_changed");
@@ -54,7 +55,7 @@ function stablePrefixChangeReasons(input) {
     if (String(previous.transportParametersChecksum || "") !== String(input.transportParametersChecksum || ""))
         reasons.add("transport_parameters_changed");
     if (input.toolSchemaChanged)
-        reasons.add("system_tools_changed");
+        reasons.add("tool_schema_changed");
     if (input.previousSameEpoch && input.stableMessagePrefixChanged) {
         const previousById = new Map(input.previousBlocks.map((block) => [String(block?.id || ""), block]));
         for (const block of input.currentBlocks) {
@@ -80,7 +81,7 @@ function nextProviderCacheWarmState(input) {
         };
     const providerRoutingMissStreak = Math.max(0, Number(input.previousRoutingMissStreak || 0)) + 1;
     return {
-        cacheWarmState: providerRoutingMissStreak >= 2 ? "evicted" : "warming",
+        cacheWarmState: "warming",
         providerRoutingMissStreak,
     };
 }

@@ -1,0 +1,22 @@
+export declare const DOUYIN_TOOLS: {
+    readonly check_login_status: readonly [];
+    readonly logout: readonly [];
+    readonly get_login_qrcode: readonly [];
+    readonly search_videos: readonly ["keyword", "offset", "count", "search_channel", "sort_type", "publish_time"];
+    readonly get_video_detail: readonly ["aweme_id"];
+    readonly get_video_comments: readonly ["aweme_id", "cursor", "count", "source_keyword"];
+    readonly get_video_live_comments: readonly ["aweme_id", "since_time", "count", "source_keyword"];
+    readonly get_sub_comments: readonly ["comment_id", "cursor", "count", "source_keyword"];
+    readonly get_user_info: readonly ["sec_user_id"];
+    readonly get_user_posts: readonly ["sec_user_id", "max_cursor", "count"];
+    readonly get_homefeed: readonly ["tag", "count", "refresh_index"];
+    readonly resolve_share_url: readonly ["share_url"];
+    readonly download_video: readonly ["aweme_id", "save_dir"];
+    readonly download_aweme_images: readonly ["aweme_id", "save_dir"];
+    readonly ocr_aweme_images: readonly ["aweme_id", "save_dir"];
+    readonly transcribe_video: readonly ["aweme_id"];
+    readonly batch_transcribe: readonly ["keyword", "count", "sort_type"];
+};
+export declare const DOUYIN_MEDIA_TOOLS: Set<string>;
+export declare function validateDouyinArgs(name: string, input?: Record<string, any>): Record<string, any>;
+export declare function unwrapDouyinResult(raw: any): any;

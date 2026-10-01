@@ -1,0 +1,133 @@
+import Database from "better-sqlite3";
+export declare function persistTaskContextProjection(db: Database.Database, taskId: string, contextInput: any, reason?: string, sourceEventId?: string, forceSnapshot?: boolean): any;
+export declare function upsertTaskInSqliteTransaction(db: Database.Database, task: any, position: number, persistContext?: boolean): void;
+export declare function withImmediateTaskStoreTransaction<T>(operation: (db: Database.Database) => T): T;
+export declare function withSqliteTaskStore<T>(operation: (db: Database.Database) => T): T;
+export declare function loadTasksFromSqlite(): any[];
+export declare function getTaskByIdFromSqlite(id: string): any | null;
+export declare function listTasksByParentIdFromSqlite(parentId: string): any[];
+/** 行级更新：只读写单条任务，避免整表进出。 */
+export declare function updateTaskByIdInSqlite(id: string, patchOrMutator: any): any | null;
+export type TaskCasMutationResult = {
+    updated: boolean;
+    conflict: boolean;
+    task: any | null;
+    previous: any | null;
+};
+/**
+ * Performs a single-row compare-and-swap while holding SQLite's write lock.
+ * The predicate is evaluated against the latest payload, so a scheduler cannot
+ * overwrite a task that changed after its read snapshot.
+ */
+export declare function updateTaskByIdCasInSqlite(id: string, predicate: (current: any) => boolean, mutator: (current: any) => any): TaskCasMutationResult;
+export declare function listUsabilityTaskCandidatesFromSqlite(recentCutoff: string): any[];
+/**
+ * Returns only the session identifiers associated with a group.  Group session
+ * listings only need this small projection; loading and hydrating every task
+ * made a sidebar refresh scale with the complete task history.
+ */
+export declare function listTaskSessionIdsByGroupIdFromSqlite(groupId: string): string[];
+export declare function listUsabilityArchiveCandidatesFromSqlite(historyCutoff: string, intakeCutoff: string): any[];
+export declare function saveTasksToSqlite(tasks: any[]): {
+    total: number;
+    inserted: number;
+    updated: number;
+    deleted: number;
+};
+export declare function runTaskStoreAtomicBatchSelfTest(): {
+    success: boolean;
+    rollback_observed: boolean;
+    committed_count: number;
+    idempotent_replay: boolean;
+    parent_round_trip: boolean;
+    restart_recovered: boolean;
+    restart_count: number;
+    undefined_removal_recorded: boolean;
+};
+export declare function appendTaskLogRecord(taskId: string, entry: any, maxEntries?: number): number;
+export declare function getTaskLogRecords(taskId: string, limit?: number): any[];
+export declare function clearTaskLogRecords(taskId: string): number;
+export declare function loadTaskLogsFromSqlite(): Record<string, any[]>;
+export declare function replaceTaskLogsInSqlite(logs: any): void;
+export declare function appendGroupLogRecord(groupId: string, entry: any, maxEntries?: number): number;
+export declare function loadGroupLogsFromSqlite(): Record<string, any[]>;
+export declare function replaceGroupLogsInSqlite(logs: any): void;
+export declare function clearGroupLogRecords(groupId: string): number;
+export declare function runTaskStoreRowApiSelfTest(): {
+    success: boolean;
+    row_get: boolean;
+    row_update: boolean;
+    parent_list: number;
+    group_logs_cleared: number;
+};
+export declare function verifySqliteTaskStore(): {
+    valid: boolean;
+    integrity: string[];
+    foreign_key_issues: any[];
+};
+export declare function getSqliteTaskStoreStatus(): {
+    schema: string;
+    schema_version: number;
+    database_file: string;
+    journal_mode: string;
+    synchronous: number;
+    database_bytes: number;
+    wal_bytes: number;
+    shm_bytes: number;
+    counts: {
+        tasks: number;
+        task_logs: number;
+        group_logs: number;
+    };
+    integrity: {
+        valid: boolean;
+        integrity: string[];
+        foreign_key_issues: any[];
+    };
+};
+export declare function checkpointSqliteTaskStore(mode?: "PASSIVE" | "FULL" | "RESTART" | "TRUNCATE"): unknown;
+export declare function backupSqliteTaskStore(destination?: string): {
+    destination: string;
+    bytes: number;
+    created_at: string;
+};
+export declare function exportSqliteTaskStore(destination?: string): {
+    destination: string;
+    files: {
+        tasks: string;
+        task_logs: string;
+        group_logs: string;
+    };
+    exported_at: string;
+};
+export declare function restoreSqliteTaskStore(source: string): {
+    restored_from: string;
+    previous_backup: string;
+    status: {
+        schema: string;
+        schema_version: number;
+        database_file: string;
+        journal_mode: string;
+        synchronous: number;
+        database_bytes: number;
+        wal_bytes: number;
+        shm_bytes: number;
+        counts: {
+            tasks: number;
+            task_logs: number;
+            group_logs: number;
+        };
+        integrity: {
+            valid: boolean;
+            integrity: string[];
+            foreign_key_issues: any[];
+        };
+    };
+};
+export declare function closeSqliteTaskStore(): void;
+export declare function getSqliteTaskStorePaths(): {
+    store_dir: string;
+    database_file: string;
+    database_backup_dir: string;
+    export_dir: string;
+};

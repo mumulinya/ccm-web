@@ -34,12 +34,16 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.runMainAgentSelfVerification = runMainAgentSelfVerification;
+exports.runQuickTaskVerification = runQuickTaskVerification;
+exports.validateQuickTaskVerificationReceipt = validateQuickTaskVerificationReceipt;
 exports.validateMainAgentSelfVerificationReceipt = validateMainAgentSelfVerificationReceipt;
 const crypto = __importStar(require("crypto"));
 const child_process_1 = require("child_process");
 const utils_1 = require("../../test-agent/utils");
 const semantic_decision_runtime_1 = require("../../system/semantic-decision-runtime");
 const project_verification_discovery_1 = require("../../agents/project-verification-discovery");
+const task_acceptance_service_1 = require("../../agents/task-acceptance-service");
+const acceptance_contract_adapter_1 = require("../../test-agent/acceptance-contract-adapter");
 function stable(value) {
     if (Array.isArray(value))
         return value.map(stable);
@@ -102,7 +106,7 @@ function applyTaskLifetimeFileProvenance(task, projects, files) {
         };
     });
 }
-async function runCommand(project, command, index, timeoutMs) {
+async function runCommand(project, command, index, timeoutMs, acceptance = []) {
     const id = `command:${project.name}:${index + 1}`;
     const invocation = (0, utils_1.verificationCommandInvocation)(command);
     if (invocation.error) {
@@ -124,6 +128,13 @@ async function runCommand(project, command, index, timeoutMs) {
                 return;
             settled = true;
             clearTimeout(timer);
+            try {
+                (0, acceptance_contract_adapter_1.recordContractCommand)(acceptance, { cwd: project.workDir, command, exitCode, stdout, status }, "main_agent");
+            }
+            catch (e) {
+                status = "blocked";
+                error = `验收证据保存失败：${String(e?.message || e)}`;
+            }
             const secrets = Object.values(project.env || {});
             resolve({
                 id,
@@ -158,13 +169,17 @@ async function runCommand(project, command, index, timeoutMs) {
         child.on("close", code => finish(code === 0 ? "passed" : "failed", code, code === 0 ? "" : `验证命令退出码 ${code}`));
     });
 }
-async function runConfiguredVerification(projects, timeoutMs) {
+async function runConfiguredVerification(projects, timeoutMs, taskId = "") {
     const results = [];
     for (const project of projects.slice(0, 8)) {
+        const metadata = (0, task_acceptance_service_1.taskAcceptanceVerificationMetadata)(taskId, project.name);
         const configured = cleanList(project.verificationCommands, 8, 300);
-        const commands = configured.length ? configured : (0, project_verification_discovery_1.discoverProjectVerificationCommands)(project.workDir, 4);
+        const commands = metadata.acceptanceContract
+            ? [...new Set(metadata.acceptanceContract.checks.filter((c) => c.projectId === project.name && c.kind === "command").map((c) => c.command))]
+            : configured.length ? configured : (0, project_verification_discovery_1.discoverProjectVerificationCommands)(project.workDir, 4);
         for (let index = 0; index < commands.length; index += 1) {
-            results.push(await runCommand(project, commands[index], index, timeoutMs));
+            const acceptance = (0, acceptance_contract_adapter_1.prepareContractCommand)({ metadata }, project, commands[index]);
+            results.push(await runCommand(acceptance.length ? { ...project, workDir: acceptance[0].cwd } : project, commands[index], index, timeoutMs, acceptance));
         }
     }
     return results;
@@ -254,7 +269,7 @@ async function runMainAgentSelfVerification(input) {
             : (0, project_verification_discovery_1.discoverProjectVerificationCommands)(project.workDir, 4),
     }));
     changedFiles = applyTaskLifetimeFileProvenance(task, projects, changedFiles);
-    const verificationResults = await runConfiguredVerification(projects, Math.max(10_000, Math.min(300_000, Number(input.commandTimeoutMs || 120_000))));
+    const verificationResults = await runConfiguredVerification(projects, Math.max(10_000, Math.min(300_000, Number(input.commandTimeoutMs || 120_000))), task.id);
     const workerReceipts = (Array.isArray(input.workerReceipts) ? input.workerReceipts : []).slice(0, 12).map((receipt, index) => ({
         id: `worker_receipt:${index + 1}`,
         status: String(receipt?.status || receipt?.receipt_status || "").slice(0, 80),
@@ -389,6 +404,55 @@ async function runMainAgentSelfVerification(input) {
         completed_at: completedAt,
     };
     return { ...core, checksum: checksum(core) };
+}
+async function runQuickTaskVerification(input) {
+    const task = input.task || {};
+    const commands = cleanList(input.verificationCommands || [], 8, 300);
+    const results = await runConfiguredVerification([
+        { name: input.project, workDir: input.workDir, verificationCommands: commands },
+    ], input.commandTimeoutMs || 120_000, String(task.id || ""));
+    const hasChanges = Array.isArray(input.changedFiles) && input.changedFiles.length > 0;
+    const passed = hasChanges && results.length > 0 && results.every(item => item.status === "passed");
+    const core = {
+        schema: "ccm-quick-check-receipt-v1",
+        version: 1,
+        task_id: String(task.id || ""),
+        scope: task.group_id ? "group" : "project",
+        scope_id: String(task.group_id || task.target_project || ""),
+        exact_session_id: String(task.exact_session_id || task.group_session_id || task.project_session_id || ""),
+        attempt: Math.max(1, Number(task.execution_attempt || task.attempt || 1)),
+        project: input.project,
+        work_dir_checksum: checksum(String(input.workDir || "")),
+        changed_files: input.changedFiles.map((item) => String(item?.path || item?.file || item || "")).filter(Boolean).slice(0, 200),
+        verification_results: results.map(item => ({
+            id: item.id,
+            command: item.command,
+            status: item.status,
+            exit_code: item.exit_code,
+            duration_ms: item.duration_ms,
+            error: item.error,
+        })),
+        canAccept: passed,
+        status: passed ? "passed" : "failed",
+        completed_at: new Date().toISOString(),
+    };
+    return { ...core, checksum: checksum(core) };
+}
+function validateQuickTaskVerificationReceipt(task, receipt) {
+    if (!receipt || receipt.schema !== "ccm-quick-check-receipt-v1" || receipt.version !== 1)
+        return { valid: false, reason: "quick_check_receipt_missing" };
+    const { checksum: supplied, ...core } = receipt;
+    if (!supplied || checksum(core) !== supplied)
+        return { valid: false, reason: "quick_check_receipt_checksum_mismatch" };
+    if (String(receipt.task_id || "") !== String(task?.id || ""))
+        return { valid: false, reason: "quick_check_task_mismatch" };
+    if (receipt.canAccept !== true || receipt.status !== "passed")
+        return { valid: false, reason: "quick_check_failed" };
+    if (!Array.isArray(receipt.changed_files) || receipt.changed_files.length === 0)
+        return { valid: false, reason: "quick_check_changed_files_missing" };
+    if (!Array.isArray(receipt.verification_results) || receipt.verification_results.some((item) => item?.status !== "passed"))
+        return { valid: false, reason: "quick_check_verification_failed" };
+    return { valid: true, reason: "ok" };
 }
 function validateMainAgentSelfVerificationReceipt(task, policy, receipt) {
     if (!receipt || receipt.schema !== "ccm-main-agent-self-verification-receipt-v1" || receipt.version !== 1)

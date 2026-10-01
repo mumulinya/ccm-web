@@ -9,6 +9,7 @@ const test_agent_review_policy_1 = require("../collaboration/test-agent-review-p
 const project_test_targets_1 = require("./project-test-targets");
 const evidence_projection_1 = require("../../test-agent/evidence-projection");
 const surface_audit_1 = require("../../test-agent/surface-audit");
+const scope_expansion_1 = require("../../agents/scope-expansion");
 const runtime_fingerprint_1 = require("../../test-agent/runtime-fingerprint");
 const hardening_policy_1 = require("../../test-agent/hardening-policy");
 const completion_gate_1 = require("../../test-agent/completion-gate");
@@ -18,6 +19,93 @@ function cleanText(value, max = 1200) {
 }
 function cleanList(value, max = 16, itemMax = 800) {
     return [...new Set((Array.isArray(value) ? value : []).map(item => cleanText(item, itemMax)).filter(Boolean))].slice(0, max);
+}
+/**
+ * Verification plans are allowed to use either a bare command string or a
+ * structured entry ({ command: "npm test" }).  Never stringify the latter
+ * directly: String({ command: "npm test" }) becomes "[object Object]" and
+ * silently injects an unusable command into the TestAgent work order.
+ */
+function verificationCommandValues(value) {
+    const values = [];
+    const visit = (item) => {
+        if (typeof item === "string" || typeof item === "number") {
+            const command = cleanText(item, 300);
+            if (command)
+                values.push(command);
+            return;
+        }
+        if (!item || typeof item !== "object")
+            return;
+        for (const key of ["command", "cmd", "script", "value"]) {
+            if (typeof item[key] === "string" || typeof item[key] === "number") {
+                const command = cleanText(item[key], 300);
+                if (command)
+                    values.push(command);
+            }
+        }
+        for (const key of ["commands", "verificationCommands", "verification_commands", "checks"]) {
+            if (Array.isArray(item[key]))
+                item[key].forEach(visit);
+        }
+    };
+    (Array.isArray(value) ? value : [value]).forEach(visit);
+    // Worker receipts may include human-readable verification notes such as
+    // "npm test passed by external runner (exit 0)".  Those notes are evidence,
+    // not commands; forwarding them makes the TestAgent attempt to execute
+    // prose and can invalidate an otherwise frozen work order.  Keep the
+    // actual shell command forms only.
+    return [...new Set(values)].filter(command => {
+        const text = command.toLowerCase();
+        if (/\bpassed?\s+by\s+(external|ccm)|\bexit\s*\(?\s*0\)?|已执行|退出码|通过|范围检查/.test(text))
+            return false;
+        return true;
+    });
+}
+function taskScopeDeclarations(task) {
+    const policy = task?.file_change_policy || {};
+    const editable = [
+        ...(Array.isArray(policy.editablePaths) ? policy.editablePaths : []),
+        ...(Array.isArray(policy.initialEditablePaths) ? policy.initialEditablePaths : []),
+        ...(Array.isArray(task?.editable_paths) ? task.editable_paths : []),
+        ...(Array.isArray(task?.editablePaths) ? task.editablePaths : []),
+    ].map((item) => cleanText(item, 600)).filter(Boolean);
+    const fixtures = [
+        ...(Array.isArray(policy.synchronizedFixturePaths) ? policy.synchronizedFixturePaths : []),
+        ...(Array.isArray(task?.synchronized_fixture_paths) ? task.synchronized_fixture_paths : []),
+        ...(Array.isArray(task?.synchronizedFixturePaths) ? task.synchronizedFixturePaths : []),
+    ].map((item) => ({
+        path: cleanText(item?.path || item, 600),
+        allowedChanges: cleanList(item?.allowedChanges || item?.allowed_changes, 20, 300),
+    })).filter((item) => item.path);
+    // A recovered task can predate the structured file-change policy fields.
+    // Its CCM-persisted work-item receipt is still an authoritative record of
+    // the files already delivered in that attempt.  Carry those paths into the
+    // review projection so recovery does not turn a previously accepted fixture
+    // change into an artificial undeclared-change failure.  This is only a
+    // declaration fallback for the existing signed receipt; Terminal Gate still
+    // audits the actual workspace independently.
+    const receiptFiles = (Array.isArray(task?.work_items) ? task.work_items : [])
+        .flatMap((item) => {
+        const receipt = item?.lastReceipt || item?.last_receipt || item?.receipt || null;
+        const files = receipt?.filesChanged || receipt?.files_changed || receipt?.files || item?.filesChanged || item?.files_changed || [];
+        return Array.isArray(files) ? files : [];
+    })
+        .map((item) => cleanText(item?.path || item?.file || item, 600))
+        .filter(Boolean);
+    return {
+        editable: [...new Set(editable)],
+        fixtures,
+        receiptFiles: [...new Set(receiptFiles)],
+        declared: [...new Set([...editable, ...fixtures.map((item) => item.path), ...receiptFiles])],
+    };
+}
+function workItemSummaryText(item) {
+    if (typeof item === "string" || typeof item === "number")
+        return cleanText(item, 1000);
+    if (!item || typeof item !== "object")
+        return "";
+    return cleanText(item.title || item.objective || item.subject || item.description || item.task || item.name, 1000);
 }
 function aggregateFileChanges(results) {
     const byPath = new Map();
@@ -30,6 +118,41 @@ function aggregateFileChanges(results) {
     }
     const files = [...byPath.values()];
     return { count: files.length, files };
+}
+/**
+ * A baseline work item is intentionally read-only.  Its evidence is captured
+ * by CCM before the disposable TestAgent copy is created; asking that copy to
+ * run git commands would always fail because the copy has no .git metadata.
+ * Keep this exception narrowly scoped to the explicit BASELINE work item.
+ */
+function isReadOnlyBaselineWorkItem(task) {
+    const key = String(task?.workflow_meta?.requirement_epic?.item_key
+        || task?.workflowMeta?.requirement_epic?.item_key
+        || task?.workflow_meta?.requirement_epic?.itemKey
+        || task?.workflowMeta?.requirement_epic?.itemKey
+        || "").trim().toUpperCase();
+    if (key === "BASELINE")
+        return true;
+    if (task?.requires_code_changes !== false && task?.requiresCodeChanges !== false)
+        return false;
+    return /(^|\b)(baseline|基线)(\b|$)/i.test(String(task?.title || task?.business_goal || task?.description || ""));
+}
+function baselineCriterionBinding(criterion, index, enabled) {
+    if (!enabled) {
+        return {
+            id: `criterion-${index + 1}`,
+            text: criterion,
+            checkIds: [],
+            fileRefs: [],
+        };
+    }
+    return {
+        id: `criterion-${index + 1}`,
+        text: criterion,
+        checkIds: ["CCM authoritative baseline audit"],
+        fileRefs: [],
+        waiver: "CCM authoritative baseline evidence captured before disposable verification.",
+    };
 }
 function projectTargetUrl(target) {
     const base = String(target.baseUrl || "").replace(/\/+$/, "");
@@ -111,17 +234,71 @@ function projectTestAgentReworkProblems(review) {
     ].filter(Boolean);
     return cleanList([...base, ...evidence], 20, 700);
 }
+/**
+ * Resolve verification commands from the authoritative task/plan snapshots.
+ *
+ * Some older task records did not copy the plan's verification list onto the
+ * top-level task field.  Falling back only to project configuration therefore
+ * caused TestAgent to receive an empty command set even though the confirmed
+ * work order explicitly required checks.  Read only explicit plan fields here;
+ * do not infer commands from free-form acceptance text.
+ */
+function explicitTaskVerificationCommands(task, workItems = []) {
+    const planCandidates = [
+        task?.verification_commands,
+        task?.verificationCommands,
+        task?.verification,
+        task?.workflow_meta?.project_main_plan?.verificationCommands,
+        task?.workflow_meta?.project_main_plan?.verification_commands,
+        task?.workflow_meta?.sandbox_rehearsal?.verification_plan,
+        task?.sandbox_rehearsal?.verification_plan,
+        task?.decomposition_plan?.verification_plan,
+        task?.requirement_decomposition?.verification_plan,
+    ];
+    const values = [];
+    for (const candidate of planCandidates) {
+        if (Array.isArray(candidate))
+            values.push(...verificationCommandValues(candidate));
+        else if (candidate && typeof candidate === "object") {
+            values.push(...verificationCommandValues(candidate));
+        }
+    }
+    for (const item of Array.isArray(workItems) ? workItems : []) {
+        for (const key of ["verificationCommands", "verification_commands", "verification", "checks"]) {
+            const candidate = item?.[key];
+            values.push(...verificationCommandValues(candidate));
+        }
+    }
+    return cleanList(values, 30, 300);
+}
+function scopeAuditForTask(task, actualFiles) {
+    const policy = task?.file_change_policy || {};
+    const initial = (policy.editablePaths || policy.initialEditablePaths || task?.editable_paths || task?.editablePaths || []);
+    const fixtures = (policy.synchronizedFixturePaths || task?.synchronized_fixture_paths || task?.synchronizedFixturePaths || []).map((item) => item?.path || item);
+    const allowed = new Set([...initial, ...fixtures, ...(0, scope_expansion_1.approvedScopePaths)(task)].map((p) => String(p || "").replace(/\\/g, "/").replace(/^\.\//, "").toLowerCase()).filter(Boolean));
+    if (!allowed.size)
+        return { status: "unavailable", outOfScopeFiles: [] };
+    const outOfScopeFiles = actualFiles.filter(file => !allowed.has(String(file).replace(/\\/g, "/").replace(/^\.\//, "").toLowerCase()));
+    return { status: outOfScopeFiles.length ? "blocked" : "passed", outOfScopeFiles };
+}
 async function runProjectTaskTestAgentReview(input) {
+    const contractMetadata = require("../../agents/task-acceptance-service").taskAcceptanceVerificationMetadata(input.task.id, input.project);
     const targets = (0, project_test_targets_1.resolveProjectTestTargets)(input.project);
-    const allCommands = cleanList([
-        ...(input.fallbackVerificationCommands || []),
-        ...targets.flatMap(target => target.verificationCommands),
-    ], 30, 300);
+    const taskPlanCommands = explicitTaskVerificationCommands(input.task, input.workItems || []);
+    const allCommands = contractMetadata.acceptanceContract
+        ? [...new Set(contractMetadata.acceptanceContract.checks.filter(c => c.projectId === input.project && c.kind === "command").map(c => c.command))]
+        : cleanList([
+            ...(input.fallbackVerificationCommands || []),
+            ...taskPlanCommands,
+            ...targets.flatMap(target => target.verificationCommands),
+        ], 30, 300);
     const changes = aggregateFileChanges(input.workerResults);
     const workItems = input.workItems?.length ? input.workItems : [{ title: input.task.title || input.task.business_goal || "完成项目任务" }];
-    const allAcceptanceCriteria = cleanList(input.acceptanceCriteria?.length
-        ? input.acceptanceCriteria
-        : String(input.task.acceptance_criteria || "").split(/\r?\n|；/), 20, 800);
+    const allAcceptanceCriteria = contractMetadata.acceptanceContract
+        ? contractMetadata.acceptanceContract.criteria.filter(c => c.projectId === input.project).map(c => c.description)
+        : cleanList(input.acceptanceCriteria?.length
+            ? input.acceptanceCriteria
+            : String(input.task.acceptance_criteria || "").split(/\r?\n|；/), 20, 800);
     const evidencePlan = input.task.acceptance_evidence_plan
         || input.task.workflow_meta?.project_main_plan?.acceptanceEvidencePlan
         || [];
@@ -144,9 +321,18 @@ async function runProjectTaskTestAgentReview(input) {
         verificationCommands: allCommands,
         previousReview: input.previousReview,
     });
-    const acceptanceCriteria = incrementalScope.acceptanceCriteria;
-    const commands = incrementalScope.verificationCommands;
+    const acceptanceCriteria = contractMetadata.acceptanceContract ? allAcceptanceCriteria : incrementalScope.acceptanceCriteria;
+    const commands = contractMetadata.acceptanceContract ? allCommands : incrementalScope.verificationCommands;
+    if (allAcceptanceCriteria.length && !commands.length && !reviewPolicy.browserEnabled && !reviewPolicy.httpEnabled) {
+        return {
+            canAccept: false,
+            status: "blocked",
+            error: "工作单要求验收，但没有可执行的验证命令；请补齐已确认计划或项目配置中的 verificationCommands",
+            handoff: null,
+        };
+    }
     const target = targets.find(item => item.required) || targets[0] || null;
+    const readOnlyBaseline = isReadOnlyBaselineWorkItem(input.task);
     const allBrowserChecks = reviewPolicy.browserEnabled
         ? targets.flatMap(item => buildProjectTestTargetBrowserChecks(item, input.workDir))
         : [];
@@ -160,7 +346,16 @@ async function runProjectTaskTestAgentReview(input) {
         ? cleanList([...taskBrowserScenarios, ...workItemBrowserScenarios], 12, 600)
         : [];
     const targetUrl = reviewPolicy.browserEnabled || reviewPolicy.httpEnabled ? target?.baseUrl || "" : "";
-    const declaredFiles = changes.files.map((item) => String(item.path || item.file || "")).filter(Boolean);
+    // The worker receipt is evidence of what it reported, not the authoritative
+    // declaration of what the confirmed work order permits. Include the frozen
+    // task scope (including explicitly synchronized test fixtures) so a worker
+    // can update an approved fixture without being misclassified as out of
+    // scope. Any other changed file remains visible to the surface audit.
+    const scopeDeclarations = taskScopeDeclarations(input.task);
+    const declaredFiles = [...new Set([
+            ...changes.files.map((item) => String(item.path || item.file || "")).filter(Boolean),
+            ...scopeDeclarations.declared,
+        ])];
     const deliveryBaselineRef = String((input.workerResults || [])
         .map((result) => result?.delivery?.baseCommit || result?.delivery?.base_commit || "")
         .find(Boolean) || "");
@@ -176,16 +371,24 @@ async function runProjectTaskTestAgentReview(input) {
         workDir: input.workDir,
         declaredFiles,
         acceptanceCriteria,
-        criterionBindings: acceptanceCriteria.map((criterion, index) => ({
-            id: `criterion-${index + 1}`,
-            text: criterion,
-            checkIds: commands.map((_command, commandIndex) => `command-${commandIndex + 1}`),
-            fileRefs: declaredFiles,
-        })),
+        criterionBindings: acceptanceCriteria.map((criterion, index) => readOnlyBaseline
+            ? baselineCriterionBinding(criterion, index, true)
+            : {
+                id: `criterion-${index + 1}`,
+                text: criterion,
+                checkIds: commands.map((_command, commandIndex) => `command-${commandIndex + 1}`),
+                fileRefs: declaredFiles,
+            }),
         checkDefinitions: commands.map((command, index) => ({ id: `command-${index + 1}`, command })),
         baselineRef: deliveryBaselineRef,
         mode: hardeningPolicy.surfaceAuditMode,
     });
+    const initialScopeAudit = scopeAuditForTask(input.task, surfaceAudit.actualFiles.map((item) => item.path));
+    if (initialScopeAudit.status !== "unavailable") {
+        surfaceAudit.scopeAudit = initialScopeAudit;
+        if (initialScopeAudit.status === "blocked")
+            surfaceAudit.canAccept = false;
+    }
     const runtimeFingerprint = (0, runtime_fingerprint_1.captureTestAgentRuntimeFingerprint)({
         workDir: input.workDir,
         targetUrl,
@@ -201,7 +404,7 @@ async function runProjectTaskTestAgentReview(input) {
         issuedBy: input.issuedBy || "project-main-agent",
         originalUserGoal: input.task.business_goal || input.task.description || input.task.title,
         acceptanceCriteria,
-        completedTasks: workItems.map(item => String(item.title || item.objective || item)).filter(Boolean),
+        completedTasks: workItems.map(workItemSummaryText).filter(Boolean),
         completedByProjectAgents: [input.project],
         projects: [{
                 name: input.project,
@@ -209,9 +412,14 @@ async function runProjectTaskTestAgentReview(input) {
                 targetUrl,
                 devServerCommand: targetUrl ? target?.startupCommand || "" : "",
                 changedFiles: declaredFiles,
-                completedTasks: workItems.map(item => String(item.title || item.objective || item)).filter(Boolean),
+                completedTasks: workItems.map(workItemSummaryText).filter(Boolean),
                 acceptanceCriteria,
                 verificationCommands: commands,
+                verificationRoot: input.workDir,
+                editablePaths: scopeDeclarations.editable,
+                readOnlyPaths: (input.task?.read_only_paths || input.task?.readOnlyPaths || []).map(String),
+                cleanupPaths: (input.task?.cleanup_paths || input.task?.cleanupPaths || []).map(String),
+                synchronizedFixturePaths: scopeDeclarations.fixtures,
                 browserChecks,
                 browserScenarios,
                 agentSummary: (0, evidence_projection_1.summarizeTestAgentEvidenceProjection)(evidenceProjection),
@@ -230,12 +438,13 @@ async function runProjectTaskTestAgentReview(input) {
             agenticPlanning: true,
         },
         metadata: {
+            ...contractMetadata,
             handoffSource: "project-independent-review-gate",
             // Work-item completion is a signed CCM lifecycle fact. TestAgent must
             // verify the observable acceptance criteria and commands, not prove a
             // future main-Agent/Terminal-Gate process statement.
             completedTasksContextOnly: true,
-            completedWorkItemSummaries: workItems.map(item => String(item.title || item.objective || item)).filter(Boolean),
+            completedWorkItemSummaries: workItems.map(workItemSummaryText).filter(Boolean),
             projectSessionId: input.task.project_session_id || "",
             projectMainRunId: input.task.project_main_run_id || "",
             projectTestTargets: targets.map(item => ({
@@ -262,7 +471,19 @@ async function runProjectTaskTestAgentReview(input) {
             hardeningPolicy,
             verificationHardening: { version: 2, policy: hardeningPolicy },
             incrementalScope,
+            // Coverage comes from frozen verification IDs and executed evidence.
+            // A command title or worker receipt cannot establish business acceptance.
             surfaceAudit,
+            readOnlyBaseline,
+            // The baseline is a CCM-captured fact, not a command that can be
+            // re-executed inside the Git-less disposable TestAgent copy.
+            baselineEvidence: readOnlyBaseline ? {
+                schema: "ccm-test-agent-baseline-evidence-v1",
+                capturedBy: "ccm",
+                workDir: input.workDir,
+                noFileChanges: changes.count === 0,
+                contentStored: false,
+            } : null,
             runtimeFingerprint,
         },
     };
@@ -320,16 +541,24 @@ async function runProjectTaskTestAgentReview(input) {
         workDir: input.workDir,
         declaredFiles,
         acceptanceCriteria,
-        criterionBindings: acceptanceCriteria.map((criterion, index) => ({
-            id: `criterion-${index + 1}`,
-            text: criterion,
-            checkIds: commands.map((_command, commandIndex) => `command-${commandIndex + 1}`),
-            fileRefs: declaredFiles,
-        })),
+        criterionBindings: acceptanceCriteria.map((criterion, index) => readOnlyBaseline
+            ? baselineCriterionBinding(criterion, index, true)
+            : {
+                id: `criterion-${index + 1}`,
+                text: criterion,
+                checkIds: commands.map((_command, commandIndex) => `command-${commandIndex + 1}`),
+                fileRefs: declaredFiles,
+            }),
         checkDefinitions: commands.map((command, index) => ({ id: `command-${index + 1}`, command })),
         baselineRef: deliveryBaselineRef,
         mode: hardeningPolicy.surfaceAuditMode,
     });
+    const finalScopeAudit = scopeAuditForTask(input.task, surfaceAuditAfter.actualFiles.map((item) => item.path));
+    if (finalScopeAudit.status !== "unavailable") {
+        surfaceAuditAfter.scopeAudit = finalScopeAudit;
+        if (finalScopeAudit.status === "blocked")
+            surfaceAuditAfter.canAccept = false;
+    }
     const runtimeFingerprintAfter = (0, runtime_fingerprint_1.captureTestAgentRuntimeFingerprint)({
         workDir: input.workDir,
         targetUrl,

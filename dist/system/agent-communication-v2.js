@@ -640,6 +640,21 @@ function recordAgentCommunicationReceipt(messageId, receiptType, identity, rawRe
             const row = db.prepare("SELECT * FROM agent_communication_messages WHERE message_id=?").get(text(messageId, 240));
             if (!row)
                 throw new Error("Agent Communication消息不存在");
+            // A resumed native runtime can replay its pre-execution ACK after the
+            // original attempt already submitted a result. Receipt delivery is
+            // idempotent: a late dispatch_ack must not roll state backward.
+            if (receiptType === "dispatch_ack" && [
+                "result_submitted", "verifying", "accepted", "completed", "rejected", "failed", "cancelled",
+            ].includes(String(row.state || ""))) {
+                return {
+                    accepted: true,
+                    deduplicated: true,
+                    stale: false,
+                    issues: [],
+                    receiptChecksum: "",
+                    envelope: rowToEnvelope(row),
+                };
+            }
             const issues = assertIdentity(row, identity);
             const messagePayload = sanitizeMetadata(json(row.payload_json, {}));
             const semanticBinding = messagePayload?.semanticBinding || messagePayload?.semantic_binding || null;

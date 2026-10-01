@@ -40,6 +40,8 @@ exports.buildPlanDispatchContract = buildPlanDispatchContract;
 exports.validatePlanDispatchContract = validatePlanDispatchContract;
 exports.runPlanDispatchContractSelfTest = runPlanDispatchContractSelfTest;
 const crypto = __importStar(require("crypto"));
+const acceptance_plan_compiler_1 = require("./acceptance-plan-compiler");
+const acceptance_contract_1 = require("./acceptance-contract");
 const implementation_plan_1 = require("./implementation-plan");
 const business_requirement_contract_1 = require("./business-requirement-contract");
 const evidence_policy_1 = require("./evidence-policy");
@@ -292,6 +294,8 @@ function buildPlanDispatchContract(input) {
             planChecksum: text(plan?.checksum, 120),
             evidencePolicy,
             project: stepProject, files, sourceEvidenceIds: evidence,
+            editablePaths: step.editablePaths || files, readOnlyPaths: step.readOnlyPaths || [],
+            cleanupPaths: step.cleanupPaths || [], synchronizedFixturePaths: step.synchronizedFixturePaths || [],
             dependsOn: dependencies, parallelGroup,
             executor: { provider, agentType, ...(text(input.model, 160) ? { model: text(input.model, 160) } : {}), transport: transportOf(input.transport), capabilities: capabilityNames(capabilities), degraded, ...(degraded ? { degradedReason } : {}) },
             // Worktree isolation is provided by CCM around the Provider process; a
@@ -312,6 +316,18 @@ function buildPlanDispatchContract(input) {
     }
     const { issues: _compiledIssues, ...compiledPlanReceipt } = compiledPlan;
     const contractCore = { schema: exports.CCM_PLAN_DISPATCH_CONTRACT_SCHEMA, contractId: `pdc_${hash([input.taskId, plan.planId, plan.revision, plan.checksum, targetProject]).slice(0, 24)}`, planId: text(plan.planId || plan.plan_id, 240), planRevision: Math.max(1, Number(plan.revision || 1)), planChecksum: text(plan.checksum, 120), requirementId: text(plan?.requirementBinding?.requirementId, 240), requirementRevision: Math.max(1, Number(plan?.requirementBinding?.revision || 1)), requirementChecksum: text(plan?.requirementBinding?.checksum, 120), sourceManifestChecksum, evidencePolicy, strategy: "conflict_aware_parallel", workItems, compiledPlan: compiledPlanReceipt, contentStored: false };
+    if (input.acceptanceScope) {
+        const acceptanceContract = (0, acceptance_plan_compiler_1.compilePlanAcceptance)({ taskId: input.taskId, ...input.acceptanceScope,
+            generation: input.generation ?? 1, plan, workItems, strict: evidencePolicy.level === "strict" });
+        contractCore.acceptanceContract = acceptanceContract;
+        blockers.push(...(0, acceptance_contract_1.validateAcceptanceContract)(acceptanceContract).issues.map(issue => `验收合同禁止派发:${issue}`));
+        for (const check of acceptanceContract.checks) {
+            const knownSources = new Set((plan.files || []).filter((file) => file.project === check.projectId)
+                .flatMap((file) => file.sourceEvidenceIds || []));
+            if (check.sourceEvidenceIds.some(id => !knownSources.has(id)))
+                blockers.push(`验收合同禁止派发:unknown_verification_source:${check.id}`);
+        }
+    }
     const fatal = blockers.filter(issue => /schema|planId|checksum|manifest|依赖|未授权|缺少路径|缺少证据|缺少验收|没有明确|项目归属|禁止派发/.test(issue));
     return { ...contractCore, dispatchReady: fatal.length === 0 && workItems.length > 0, blockers: [...new Set(blockers)], contractChecksum: hash(contractCore) };
 }

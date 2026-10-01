@@ -1,0 +1,4 @@
+interface:
+  display_name: "CCM Interface Data Contract"
+  short_description: "Define API, event, schema, and compatibility contracts"
+  default_prompt: "Use $ccm-interface-data-contract to define and verify the cross-layer data contract for this task."

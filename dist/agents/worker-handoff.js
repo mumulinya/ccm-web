@@ -45,6 +45,7 @@ const model_capability_cache_1 = require("../modules/collaboration/model-capabil
 const trusted_memory_prompt_envelope_1 = require("./trusted-memory-prompt-envelope");
 const agent_sessions_1 = require("../tasks/agent-sessions");
 const task_agent_memory_entry_sync_1 = require("../tasks/task-agent-memory-entry-sync");
+const execution_session_registry_1 = require("./execution-session-registry");
 function compact(value, max = 900) {
     const text = typeof value === "string" ? value : JSON.stringify(value || "");
     if (text.length <= max)
@@ -444,6 +445,12 @@ function buildSelfContainedWorkerHandoff(input) {
         ? [explicitlySelectedWorkItem]
         : (dispatchContract?.workItems || []).filter((item) => String(item?.project || "") === project);
     const selectedWorkItem = assignedWorkItems[0] || null;
+    const executionSession = (input.taskId && (input.workItemId || selectedWorkItem?.workItemId))
+        ? (0, execution_session_registry_1.createExecutionSession)({ taskId: String(input.taskId), workItemId: String(input.workItemId || selectedWorkItem?.workItemId), projectId: project, generation: Number(input.communicationEnvelope?.generation || 1) })
+        : null;
+    const runtimeBinding = executionSession && input.agentType
+        ? (0, execution_session_registry_1.bindRuntimeSession)(executionSession.id, { runtimeType: /claude/i.test(input.agentType) ? "CLAUDE_CODE" : /codex/i.test(input.agentType) ? "CODEX" : /gemini|agy/i.test(input.agentType) ? "GEMINI" : "CUSTOM", providerSessionId: input.taskAgentSessionId, agentId: input.agentType })
+        : null;
     const analysis = input.analysis || {};
     const userGoal = String(selectedWorkItem?.businessGoal || input.userGoal || analysis.summary || task || "").trim();
     const dependencies = (input.dependencies || []).map(normalizeDependency).filter(Boolean);
@@ -671,6 +678,22 @@ function buildSelfContainedWorkerHandoff(input) {
         work_dir: String(input.workDir || "").trim(),
         agent_type: String(input.agentType || "").trim(),
         communication_envelope: boundCommunicationEnvelope,
+        execution_session: executionSession ? {
+            id: executionSession.id,
+            taskId: executionSession.taskId,
+            workItemId: executionSession.workItemId,
+            projectId: executionSession.projectId,
+            generation: executionSession.generation,
+            status: executionSession.status,
+            contentStored: false,
+        } : null,
+        runtime_binding: runtimeBinding ? {
+            id: runtimeBinding.id,
+            executionSessionId: runtimeBinding.executionSessionId,
+            runtimeType: runtimeBinding.runtimeType,
+            status: runtimeBinding.status,
+            contentStored: false,
+        } : null,
         worker_context_packet: workerContextPacket,
         plan_binding: planBinding,
         work_item_contract: assignedWorkItemContracts[0] || null,

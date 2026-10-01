@@ -4,13 +4,60 @@ exports.bootstrapServerRuntime = bootstrapServerRuntime;
 // Mechanically extracted startup recovery and scheduler bootstrap.
 const session_task_timeline_1 = require("./tasks/session-task-timeline");
 const task_conversation_projection_1 = require("./system/task-conversation-projection");
+const task_session_store_1 = require("./modules/collaboration/task-session-store");
+function yieldToStartupLoop() {
+    return new Promise(resolve => setImmediate(resolve));
+}
+async function runDeferredTaskRecovery(startupCollabCtx, deps) {
+    const { resumeTaskQueues } = deps;
+    try {
+        console.log('[启动恢复] 开始恢复任务上下文（后台分片）');
+        const taskContextRecovery = await (0, session_task_timeline_1.recoverTaskContextProjectorsAsync)();
+        if (taskContextRecovery.checked > 0 || taskContextRecovery.outbox.published > 0) {
+            console.log(`[任务上下文投影] 检查 ${taskContextRecovery.checked} 个任务：当前 ${taskContextRecovery.current}，追赶 ${taskContextRecovery.caughtUp}，漂移 ${taskContextRecovery.drifted}，发布 ${taskContextRecovery.outbox.published}`);
+        }
+        await yieldToStartupLoop();
+        console.log('[启动恢复] 开始同步任务会话投影（后台分片）');
+        const conversationProjectionRecovery = await (0, task_conversation_projection_1.reconcileTaskConversationProjectionsAsync)();
+        if (conversationProjectionRecovery.checked > 0) {
+            console.log(`[任务会话投影] 检查 ${conversationProjectionRecovery.checked} 个任务：同步 ${conversationProjectionRecovery.synced}，当前 ${conversationProjectionRecovery.unchanged}，跳过 ${conversationProjectionRecovery.skipped}，失败 ${conversationProjectionRecovery.failed}`);
+        }
+        await yieldToStartupLoop();
+        console.log('[启动恢复] 开始恢复任务队列（后台）');
+        const resumeResult = resumeTaskQueues(startupCollabCtx);
+        if (resumeResult.total > 0) {
+            console.log(`[任务队列] 启动恢复检查 ${resumeResult.total} 个未完成任务：`
+                + `已自动接上 ${resumeResult.auto_resumed || resumeResult.resumed || 0} 个，`
+                + `等待确认 ${resumeResult.manual_pending || 0} 个，`
+                + `跳过 ${resumeResult.skipped || 0} 个`);
+        }
+    }
+    catch (error) {
+        // Recovery is best-effort. A corrupt/large historical record must not make
+        // the web console unavailable; the next explicit maintenance/restart can
+        // retry it and the error remains visible in the server log.
+        console.error(`[启动恢复] 后台任务恢复失败：${error?.stack || error?.message || error}`);
+    }
+}
 function bootstrapServerRuntime(startupCollabCtx, port, deps) {
-    const { CCM_DIR, CONFIGS_DIR, bootstrapGlobalAgentMemoryForServer, bootstrapGroupSessionLifecycleJournals, conversationTurnControl, ensureRoleSkillsInstalled, listTaskAgentInvocationEdges, listTaskAgentSessions, loadFeishuConfig, migrateConfigDirectory, migrateTomlCredentials, path, reconcileGroupSessionLifecycleAgentCancellations, reconcileMemoryContextConsumptionReceipts, reconcileMemoryContextConsumptionRecoveries, reconcileInterruptedProjectMainTasks, reconcileTaskAgentContinuationSoak, reconcileTaskAgentInvocationRecovery, recoverChildTypedMemoryDispatchWal, recoverGroupTypedMemoryArtifactTransactionsFleet, refreshEnvPath, resumeSoakTest, resumeTaskQueues, saveFeishuConfig, startAgentRecoveryMonitor, startCronScheduler, startGlobalMissionSupervisionForServer, startGroupSessionRetentionMaintenanceScheduler, startReliabilityDrillScheduler, startTaskWatchdog, startUsabilityArchiveScheduler, toolManager } = deps;
+    const { CCM_DIR, CONFIGS_DIR, bootstrapGlobalAgentMemoryForServer, bootstrapGroupSessionLifecycleJournals, conversationTurnControl, ensureRoleSkillsInstalled, listTaskAgentInvocationEdges, listTaskAgentSessions, loadFeishuConfig, migrateConfigDirectory, migrateTomlCredentials, path, reconcileGroupSessionLifecycleAgentCancellations, reconcileMemoryContextConsumptionReceipts, reconcileMemoryContextConsumptionRecoveries, reconcileInterruptedProjectMainTasks, reconcileTaskAgentContinuationSoak, reconcileTaskAgentInvocationRecovery, recoverChildTypedMemoryDispatchWal, recoverGroupTypedMemoryArtifactTransactionsFleet, refreshEnvPath, resumeSoakTest, resumeTaskQueues, saveFeishuConfig, startAgentRecoveryMonitor, startAutomationScheduler, startGlobalMissionSupervisionForServer, startGroupSessionRetentionMaintenanceScheduler, startReliabilityDrillScheduler, startTaskWatchdog, startUsabilityArchiveScheduler, toolManager } = deps;
     const recoveredConversationTurns = conversationTurnControl.recoverInterrupted();
     if (recoveredConversationTurns.recovered > 0) {
         console.log(`[会话消息队列] 已恢复 ${recoveredConversationTurns.recovered} 条服务重启前发送中的消息`);
     }
     refreshEnvPath();
+    // Materialize terminal task sessions in the background. This only exposes
+    // already-finished tasks and never creates a session for an active run.
+    setImmediate(() => {
+        try {
+            const result = (0, task_session_store_1.reconcileTaskSessions)();
+            if (result.created > 0)
+                console.log(`[任务会话] 启动补齐 ${result.created} 个终态任务会话`);
+        }
+        catch (error) {
+            console.warn(`[任务会话] 启动补齐失败：${error?.message || error}`);
+        }
+    });
     const roleSkills = ensureRoleSkillsInstalled({ force: true });
     console.log(`[角色 Skill] 已就绪 ${roleSkills.available.length} 个${roleSkills.installed.length ? `，更新 ${roleSkills.installed.length} 个` : ""}`);
     const credentialMigration = migrateConfigDirectory(CONFIGS_DIR);
@@ -34,7 +81,7 @@ function bootstrapServerRuntime(startupCollabCtx, port, deps) {
     if (lifecycleAgentReconciliation.checked > 0) {
         console.log(`[会话生命周期撤销] 检查 ${lifecycleAgentReconciliation.checked} 个会话作用域：有效 ${lifecycleAgentReconciliation.active}，撤销 ${lifecycleAgentReconciliation.revoked}，停止任务 ${lifecycleAgentReconciliation.taskCount}`);
     }
-    startCronScheduler(startupCollabCtx);
+    startAutomationScheduler(startupCollabCtx);
     startTaskWatchdog(startupCollabCtx);
     const autoAgentRecoveryMonitor = /^(1|true|yes|on)$/i.test(String(process.env.CCM_AUTO_AGENT_RECOVERY_MONITOR || ""));
     if (autoAgentRecoveryMonitor) {
@@ -72,34 +119,35 @@ function bootstrapServerRuntime(startupCollabCtx, port, deps) {
         const summary = memoryReceiptReconciliation.summary;
         console.log(`[模型记忆加载回执] 对账 ${summary.receiptFileCount} 个文件：有效引用 ${summary.referencedValidCount}，缺失 ${summary.referencedMissingCount}，无效 ${summary.referencedInvalidCount}，孤儿 ${summary.orphanCount}，清理 ${summary.prunedCount}，跳过 ${summary.skippedCount}`);
     }
+    console.log('[启动恢复] 开始对账模型记忆补救');
     const memoryReceiptRecoveryInventory = reconcileMemoryContextConsumptionRecoveries({ prune: true, reconcileInterrupted: true });
     if (memoryReceiptRecoveryInventory.summary.count > 0) {
         const summary = memoryReceiptRecoveryInventory.summary;
         console.log(`[模型记忆加载补救] 恢复 ${summary.recoveredCount}，阻断 ${summary.blockedCount}，运行 ${summary.runningCount}，中断 ${summary.interruptedCount}，孤儿 ${summary.orphanCount}，清理 ${summary.prunedCount}，无效 ${summary.invalidCount}，禁止整任务重放 ${summary.replaySuppressedCount}`);
     }
+    console.log('[启动恢复] 开始恢复稳定性测试');
     const soakResume = resumeSoakTest();
     if (soakResume.resumed)
         console.log("[Soak Test] 已恢复未完成的稳定性浸泡测试");
+    console.log('[启动恢复] 开始检查项目主 Agent');
     const projectMainRecovery = reconcileInterruptedProjectMainTasks();
     if (projectMainRecovery.checked > 0) {
         console.log(`[项目主 Agent] 启动检查 ${projectMainRecovery.checked} 个中断编排：`
             + `安全暂停 ${projectMainRecovery.interrupted} 个，`
             + `仍由其他实例执行 ${projectMainRecovery.active_elsewhere} 个`);
     }
-    const taskContextRecovery = (0, session_task_timeline_1.recoverTaskContextProjectors)();
-    if (taskContextRecovery.checked > 0 || taskContextRecovery.outbox.published > 0) {
-        console.log(`[任务上下文投影] 检查 ${taskContextRecovery.checked} 个任务：当前 ${taskContextRecovery.current}，追赶 ${taskContextRecovery.caughtUp}，漂移 ${taskContextRecovery.drifted}，发布 ${taskContextRecovery.outbox.published}`);
+    // A single historical task can contain a very large event chain and its
+    // synchronous SQLite rebuild cannot be pre-empted by JavaScript.  Running
+    // that pass automatically after every restart therefore still makes an
+    // otherwise healthy HTTP server appear hung.  Keep it opt-in for an
+    // operator-controlled maintenance boot; normal startup relies on the
+    // incremental event/outbox paths and remains immediately responsive.
+    const fullTaskRecovery = /^(1|true|yes|on)$/i.test(String(process.env.CCM_STARTUP_FULL_TASK_RECOVERY || ""));
+    if (fullTaskRecovery) {
+        void runDeferredTaskRecovery(startupCollabCtx, { resumeTaskQueues });
     }
-    const conversationProjectionRecovery = (0, task_conversation_projection_1.reconcileTaskConversationProjections)();
-    if (conversationProjectionRecovery.checked > 0) {
-        console.log(`[任务会话投影] 检查 ${conversationProjectionRecovery.checked} 个任务：同步 ${conversationProjectionRecovery.synced}，当前 ${conversationProjectionRecovery.unchanged}，跳过 ${conversationProjectionRecovery.skipped}，失败 ${conversationProjectionRecovery.failed}`);
-    }
-    const resumeResult = resumeTaskQueues(startupCollabCtx);
-    if (resumeResult.total > 0) {
-        console.log(`[任务队列] 启动恢复检查 ${resumeResult.total} 个未完成任务：`
-            + `已自动接上 ${resumeResult.auto_resumed || resumeResult.resumed || 0} 个，`
-            + `等待确认 ${resumeResult.manual_pending || 0} 个，`
-            + `跳过 ${resumeResult.skipped || 0} 个`);
+    else {
+        console.log('[启动恢复] 已跳过全量任务上下文/会话投影重建；如需维护恢复请设置 CCM_STARTUP_FULL_TASK_RECOVERY=1 后重启');
     }
 }
 //# sourceMappingURL=server-bootstrap.js.map

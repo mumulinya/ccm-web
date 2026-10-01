@@ -1,0 +1,57 @@
+import { MusicSource } from "./search-results";
+export type MusicDownloadStatus = "queued" | "resolving" | "running" | "done" | "failed" | "cancelled";
+export type MusicDownloadJob = {
+    id: string;
+    source: MusicSource;
+    sourceId: string;
+    title: string;
+    artist: string;
+    quality: "standard" | "high" | "very_high" | "source";
+    requestedQuality?: "standard" | "high" | "very_high" | "source";
+    actualQuality?: "standard" | "high" | "very_high" | "source";
+    status: MusicDownloadStatus;
+    progress: number | null;
+    phase: string;
+    filename?: string;
+    error?: string;
+    attempt: number;
+    createdAt: string;
+    updatedAt: string;
+    startedAt?: string;
+    finishedAt?: string;
+    commandId?: string;
+    consumerKind?: "manual" | "playback";
+    reused?: boolean;
+    upgraded?: boolean;
+    checkpoint?: string;
+    catalogGeneration?: number;
+    trackId?: string;
+};
+declare class MusicDownloadJobStore {
+    private jobs;
+    private children;
+    private abortControllers;
+    private activeRuns;
+    private pumping;
+    constructor();
+    list(): MusicDownloadJob[];
+    get(id: string): MusicDownloadJob;
+    create(source: MusicSource, token: string, requestedQuality?: any, options?: {
+        commandId?: string;
+        consumerKind?: "manual" | "playback";
+    }): MusicDownloadJob;
+    cancel(id: string): MusicDownloadJob;
+    cancelPlaybackConsumer(commandId: string): MusicDownloadJob[];
+    retry(id: string): MusicDownloadJob;
+    clearFinished(): MusicDownloadJob[];
+    removeFinished(id: string): MusicDownloadJob[];
+    private require;
+    private persist;
+    private outputFile;
+    private removePartial;
+    private pump;
+    private run;
+    private complete;
+}
+export declare const musicDownloadJobs: MusicDownloadJobStore;
+export {};

@@ -35,6 +35,7 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 const http = __importStar(require("http"));
+const conversation_attempt_1 = require("./agents/conversation-attempt");
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const url = __importStar(require("url"));
@@ -90,7 +91,8 @@ const pre_plan_clarification_1 = require("./agents/pre-plan-clarification");
 const conversation_search_index_1 = require("./modules/search/conversation-search-index");
 const git_1 = require("./modules/tools/git");
 const marketplace_1 = require("./modules/tools/marketplace");
-const cron_1 = require("./modules/scheduling/cron");
+const automation_routes_1 = require("./modules/scheduling/automation-routes");
+const automation_scheduler_1 = require("./modules/scheduling/automation-scheduler");
 const task_templates_1 = require("./modules/collaboration/task-templates");
 const task_intake_preflight_1 = require("./modules/collaboration/task-intake-preflight");
 const tools_1 = require("./modules/tools/tools");
@@ -103,6 +105,12 @@ const pet_activity_coordinator_1 = require("./modules/pets/pet-activity-coordina
 const music_1 = require("./modules/music/music");
 const collaboration_1 = require("./modules/collaboration/collaboration");
 const task_permission_routes_1 = require("./modules/collaboration/task-permission-routes");
+const task_recovery_routes_1 = require("./modules/collaboration/task-recovery-routes");
+const task_acceptance_routes_1 = require("./modules/collaboration/task-acceptance-routes");
+const task_workbench_routes_1 = require("./modules/collaboration/task-workbench-routes");
+const task_session_controls_1 = require("./modules/collaboration/task-session-controls");
+const task_session_routes_1 = require("./modules/collaboration/task-session-routes");
+const task_session_store_1 = require("./modules/collaboration/task-session-store");
 const collaboration_task_service_1 = require("./modules/collaboration/collaboration-task-service");
 const task_permission_broker_1 = require("./modules/collaboration/task-permission-broker");
 const storage_1 = require("./modules/collaboration/storage");
@@ -161,6 +169,8 @@ const chat_runs_1 = require("./projects/chat-runs");
 const cleanup_center_1 = require("./system/cleanup-center");
 const storage_index_1 = require("./system/storage-index");
 const project_session_agent_binding_1 = require("./modules/projects/project-session-agent-binding");
+const project_session_dispatch_lifetime_1 = require("./modules/projects/project-session-dispatch-lifetime");
+const project_conversation_stream_1 = require("./modules/projects/project-conversation-stream");
 const project_feishu_turn_queue_1 = require("./modules/projects/project-feishu-turn-queue");
 const project_session_compaction_1 = require("./modules/projects/project-session-compaction");
 const server_pet_activity_1 = require("./server-pet-activity");
@@ -173,6 +183,10 @@ const server_bootstrap_1 = require("./server-bootstrap");
 let PORT = 3080;
 let LISTEN_HOST = "127.0.0.1";
 let SERVICE_LIFECYCLE_STATE = "starting";
+// Startup recovery performs synchronous workspace/database reconciliation.
+// Hold it until the CLI readiness request has completed so that handshake
+// cannot be blocked by a large existing workspace.
+let STARTUP_RECOVERY_TRIGGER = null;
 let REQUEST_SERVICE_DRAIN = null;
 const CCM_RUNTIME_VERSION = (() => {
     try {
@@ -328,7 +342,6 @@ function createCollabCtx() {
         createSharedFileRecord: utils_1.createSharedFileRecord,
         normalizeSharedFileList: utils_1.normalizeSharedFileList,
         onTaskStatusChange: async (task, status, result = "") => {
-            (0, cron_1.syncCronTaskStatus)(task, status, result);
             const normalizedStatus = String(status || "").toLowerCase();
             if (["done", "completed", "failed", "blocked", "cancelled", "waiting"].includes(normalizedStatus)) {
                 const isSuccess = normalizedStatus === "done" || normalizedStatus === "completed";
@@ -450,6 +463,12 @@ function handleRequest(req, res) {
             identity: lock.owner,
             identity_verified: lock.identity_verified,
         }, ready ? 200 : 503);
+        if (ready) {
+            // Let the ready response and the CLI's follow-up identity verification
+            // complete before starting synchronous recovery work.
+            const trigger = setTimeout(() => STARTUP_RECOVERY_TRIGGER?.(), 2_000);
+            trigger.unref?.();
+        }
         return;
     }
     if (pathname === "/api/internal/lifecycle/drain" && req.method === "POST") {
@@ -707,6 +726,7 @@ function handleRequest(req, res) {
     const projectsCtx = {
         PORT,
         getSessions: sessions_1.getSessions,
+        getSessionCount: sessions_1.getSessionCount,
         getAgentState,
     };
     const petsCtx = {
@@ -1087,7 +1107,7 @@ function handleRequest(req, res) {
     // === 流式发送消息给 Agent（SSE）===
     if (pathname === "/api/send-stream" && req.method === "POST") {
         const contentType = req.headers["content-type"] || "";
-        const handleStreamSend = async (project, message, files = [], parentRunId = "", projectSessionId = "", source = "web", platformContext = {}, clientMessageId = "", assistantMessageId = "", clarificationPayload = null, ccConnectAttachmentRefs = [], feishuAttachments = [], conversationTurnId = "", resolvedRoute = "", resolvedCandidateTaskId = "") => {
+        const handleStreamSend = (0, conversation_attempt_1.withConversationAttemptScope)(async (project, message, files = [], parentRunId = "", projectSessionId = "", source = "web", platformContext = {}, clientMessageId = "", assistantMessageId = "", clarificationPayload = null, ccConnectAttachmentRefs = [], feishuAttachments = [], conversationTurnId = "", resolvedRoute = "", resolvedCandidateTaskId = "", discussionTaskId = "", newTopic = false) => {
             let projectFeishuEnvelope = null;
             if (source === "feishu") {
                 if (String(platformContext?.target_type || "project_agent") !== "project_agent") {
@@ -1153,6 +1173,7 @@ function handleRequest(req, res) {
                 }
             }
             const exactProjectSessionId = String(projectSessionId || "").trim();
+            (0, conversation_attempt_1.bindConversationAttemptResponse)(res, conversation_turn_control_1.conversationTurnControl, { id: conversationTurnId, scope: "project", conversation_id: `${project}:${exactProjectSessionId}`, attempt_id: req.headers["x-conversation-attempt-id"] });
             if (source === "feishu" && exactProjectSessionId && /^[123]$/.test(String(message || "").trim())) {
                 const pendingRoute = conversation_turn_control_1.conversationTurnControl.listInternal({
                     scope: "project",
@@ -1371,798 +1392,73 @@ function handleRequest(req, res) {
                     return (0, utils_1.sendJson)(res, { error: "续跑来源不属于当前项目会话" }, 409);
                 }
             }
-            const dispatchLease = exactProjectSessionId ? (0, project_session_agent_binding_1.acquireProjectSessionAgentDispatch)(project, exactProjectSessionId) : { acquired: true, scopeId: "" };
+            const conversationStreamKey = (0, project_conversation_stream_1.projectConversationStreamKey)(project, exactProjectSessionId, conversationTurnId, String(req.headers["x-conversation-attempt-id"] || ""));
+            if (req.headers["x-conversation-observe"] === "1") {
+                if (project_conversation_stream_1.projectConversationStreams.observe(conversationStreamKey, res, true))
+                    return;
+                return (0, utils_1.sendJson)(res, { code: "PROJECT_STREAM_NOT_READY", error: "当前执行无法接入，请刷新会话查看结果" }, 409);
+            }
+            const dispatchLease = exactProjectSessionId ? (0, project_session_agent_binding_1.acquireProjectSessionAgentDispatch)(project, exactProjectSessionId) : { acquired: true, scopeId: "", leaseId: "" };
             const dispatchScope = dispatchLease.scopeId;
             if (!dispatchLease.acquired) {
+                if (project_conversation_stream_1.projectConversationStreams.observe(conversationStreamKey, res))
+                    return;
                 if (source === "feishu")
                     return enqueueCurrentProjectFeishuTurn();
                 return (0, utils_1.sendJson)(res, { error: "当前项目会话仍在处理上一条消息，请等待原消息完成后再继续", code: "PROJECT_SESSION_TURN_ACTIVE" }, 409);
             }
-            let released = false;
-            let retainDispatchAfterResponse = false;
-            const releaseDispatch = () => {
-                if (retainDispatchAfterResponse || released || !dispatchScope)
-                    return;
-                released = true;
-                (0, project_session_agent_binding_1.releaseProjectSessionAgentDispatch)(dispatchScope);
+            return (0, project_session_dispatch_lifetime_1.runProjectSessionDispatch)(dispatchLease, () => {
                 if (source === "feishu" && exactProjectSessionId) {
                     setImmediate(() => void (0, project_feishu_turn_queue_1.drainProjectFeishuTurns)(`http://127.0.0.1:${PORT}`, project, exactProjectSessionId));
                 }
-            };
-            const persistConversationReply = (content, mode = "conversation", extras = {}) => {
-                if (!exactProjectSessionId || !String(content || "").trim())
-                    return;
-                try {
-                    (0, sessions_1.upsertProjectSessionTaskMessage)(project, exactProjectSessionId, {
-                        id: safeAssistantMessageId,
-                        role: "assistant",
-                        content: String(content || ""),
-                        requestText: message,
-                        timestamp: new Date().toISOString(),
-                        messageMode: mode,
-                        type: "project_main_reply",
-                        task_id: "",
-                        run_id: "",
-                        interruption: null,
-                        ...extras,
-                        source: source === "feishu" ? "feishu-project-main-agent-reply" : "web-project-main-agent-reply",
-                    });
-                }
-                catch (error) {
-                    console.warn(`[项目会话] 权威回复持久化失败 (${project}/${exactProjectSessionId})：${error?.message || error}`);
-                }
-            };
-            let projectReplyStreamStarted = false;
-            let projectReplyHeartbeatStarted = false;
-            let projectReplyDeltaEmitted = false;
-            let projectReplySequence = 0;
-            // Every project turn needs an immutable visible identity.  When a
-            // client omits its message id the old empty fallback caused all later
-            // events to share the task id only; after a task completed, a new
-            // query could therefore be projected into the completed task's
-            // execution transcript.  Reuse the already validated assistant
-            // message id as the final fallback so each request remains isolated.
-            const projectVisibleTurnId = String(sourceIngestion?.client_message_id
-                || safeClientMessageId
-                || `project-turn:${safeAssistantMessageId}`);
-            const ensureProjectReplyStream = () => {
-                if (projectReplyStreamStarted || res.destroyed || res.writableEnded)
-                    return;
-                projectReplyStreamStarted = true;
-                res.writeHead(200, {
-                    "Content-Type": "text/event-stream",
-                    "Cache-Control": "no-cache, no-transform",
-                    "Connection": "keep-alive",
-                    "Access-Control-Allow-Origin": "*",
-                    "X-Accel-Buffering": "no",
-                });
-                if (typeof res.flushHeaders === "function")
-                    res.flushHeaders();
-                if (!projectReplyHeartbeatStarted) {
-                    projectReplyHeartbeatStarted = true;
-                    (0, sse_heartbeat_1.startSseHeartbeat)(res);
-                }
-                writeSse(res, {
-                    type: "response_started",
-                    scope: "project",
-                    scope_id: project,
-                    exact_session_id: exactProjectSessionId,
-                    turn_id: projectVisibleTurnId,
-                    agent: "project-main-agent",
-                });
-            };
-            const emitProjectReplyDelta = (delta, context) => {
-                if (!delta || res.destroyed || res.writableEnded)
-                    return;
-                ensureProjectReplyStream();
-                projectReplyDeltaEmitted = true;
-                projectReplySequence += 1;
-                writeSse(res, {
-                    type: "response_delta",
-                    text: delta,
-                    agent: "project-main-agent",
-                    sequence: projectReplySequence,
-                    model_call_index: Math.max(0, Number(context?.modelCallIndex || 0)),
-                    modelCallIndex: Math.max(0, Number(context?.modelCallIndex || 0)),
-                    round: Math.max(0, Number(context?.round || 0)),
-                    segment_kind: "pending",
-                });
-                res.flush?.();
-            };
-            let projectFirstTurn;
-            const projectMainMetricStartedAt = Date.now();
-            const recoverableProjectCandidates = (0, conversation_message_routing_1.findConversationTaskCandidates)({
-                scope: "project",
-                scopeId: project,
-                exactSessionId: exactProjectSessionId,
-            });
-            const explicitRouteChoice = ["continue_original", "start_new_task", "answer_only"].includes(String(resolvedRoute || ""))
-                ? String(resolvedRoute)
-                : "";
-            const explicitCandidate = explicitRouteChoice === "continue_original"
-                ? recoverableProjectCandidates.find((item) => String(item.id || "") === String(resolvedCandidateTaskId || ""))
-                : null;
-            if (source !== "feishu")
-                ensureProjectReplyStream();
-            const unsubscribeProjectReplyToolEvents = source === "feishu"
-                ? () => { }
-                : (0, user_visible_agent_events_1.subscribeUserVisibleAgentEvents)((event) => {
-                    if (!projectReplyStreamStarted || res.destroyed || res.writableEnded)
+            }, async (releaseDispatch) => {
+                project_conversation_stream_1.projectConversationStreams.capture(conversationStreamKey, res);
+                let retainDispatchAfterResponse = false;
+                const persistConversationReply = (content, mode = "conversation", extras = {}) => {
+                    if (!exactProjectSessionId || !String(content || "").trim())
                         return;
-                    if (event?.scope !== "project" || event?.scopeId !== project || event?.exactSessionId !== exactProjectSessionId)
+                    const attemptIdentity = (0, conversation_attempt_1.projectConversationAttemptEvent)(res, {});
+                    if (!attemptIdentity)
                         return;
-                    if (!(String(event?.eventType || "").startsWith("tool_") || event?.eventType === "assistant_progress"))
-                        return;
-                    const belongsToCurrentTurn = String(event?.anchorMessageId || "") === String(safeAssistantMessageId || "")
-                        || String(event?.turnId || "") === projectVisibleTurnId;
-                    if (!belongsToCurrentTurn)
-                        return;
-                    writeSse(res, { type: "agent_execution", event });
-                    res.flush?.();
-                });
-            try {
-                try {
-                    projectFirstTurn = await (0, project_main_agent_1.runProjectMainAgentFirstTurn)({
-                        project,
-                        projectSessionId: exactProjectSessionId,
-                        userMessage: finalMessage,
-                        turnId: projectVisibleTurnId,
-                        anchorMessageId: String(safeAssistantMessageId || ""),
-                        sourceCount: Number(sourceIngestion?.source_count || sourceIngestion?.sources?.length || files?.length || 0),
-                        originalRequestChecksum: crypto.createHash("sha256").update(String(message || "")).digest("hex"),
-                        clarificationRound: resolvedProjectClarification ? Math.min(2, Number(resolvedProjectClarification.projection.round || 1) + 1) : 1,
-                        continuationCandidate: (0, conversation_message_routing_1.buildRecoverableTaskSummary)(explicitCandidate || (recoverableProjectCandidates.length === 1 ? recoverableProjectCandidates[0] : null)),
-                        forcedConversationRoute: explicitRouteChoice,
-                        onDelta: source === "feishu" ? undefined : emitProjectReplyDelta,
-                        onModelActivity: (activity, event) => {
-                            if (!projectReplyStreamStarted || res.destroyed || res.writableEnded)
-                                return;
-                            writeSse(res, { type: "model_activity", activity, event });
-                        },
-                        onAgentExecutionEvent: (event) => {
-                            if (!projectReplyStreamStarted || res.destroyed || res.writableEnded || !event)
-                                return;
-                            writeSse(res, { type: "agent_execution", event });
-                            res.flush?.();
-                        },
-                    });
-                }
-                finally {
-                    unsubscribeProjectReplyToolEvents();
-                }
-            }
-            catch (error) {
-                // A route choice only makes sense when there is an actual old task to
-                // choose. Without a recoverable candidate, surface the model/provider
-                // failure and let the user retry instead of showing a misleading
-                // "continue or start new" card.
-                if (!explicitRouteChoice && source === "web" && exactProjectSessionId && recoverableProjectCandidates.length > 0) {
                     try {
-                        let routeTurn = conversationTurnId
-                            ? conversation_turn_control_1.conversationTurnControl.listInternal({ scope: "project", conversation_id: `${project}:${exactProjectSessionId}`, limit: 500 }).turns.find(item => item.id === conversationTurnId)
-                            : null;
-                        if (!routeTurn) {
-                            const created = conversation_turn_control_1.conversationTurnControl.enqueue({
-                                scope: "project",
-                                conversation_id: `${project}:${exactProjectSessionId}`,
-                                mode: "queue",
-                                message: String(message || ""),
-                                request_id: `route:${safeClientMessageId || crypto.randomUUID()}`,
-                                owner_id: req.ccmAuth?.kind === "browser" ? req.ccmAuth.userId : "",
-                                metadata: { project, session_id: exactProjectSessionId, original_message_id: safeClientMessageId },
-                            });
-                            routeTurn = conversation_turn_control_1.conversationTurnControl.claim({ scope: "project", conversation_id: `${project}:${exactProjectSessionId}`, id: created.turn.id, revision: created.turn.revision });
-                        }
-                        if (routeTurn?.status === "sending") {
-                            const routed = conversation_turn_control_1.conversationTurnControl.requireRoute({
-                                id: routeTurn.id,
-                                revision: routeTurn.revision,
-                                routing: {
-                                    candidateTaskId: String(recoverableProjectCandidates[0]?.id || ""),
-                                    candidateTaskIds: recoverableProjectCandidates.map((item) => String(item?.id || "")).filter(Boolean),
-                                    candidateSummaries: recoverableProjectCandidates.slice(0, 6).map(conversation_message_routing_1.buildRecoverableTaskSummary).filter(Boolean),
-                                    exactSessionId: exactProjectSessionId,
-                                    scope: "project",
-                                    confidence: 0,
-                                    reason: "主 Agent 暂时无法可靠判断这条消息是否续接原任务，请选择处理方式",
-                                },
-                            });
-                            ensureProjectReplyStream();
-                            writeSse(res, { type: "route_required", turn: { id: routed.id, revision: routed.revision, status: routed.status, routing: routed.routing }, message_id: safeAssistantMessageId });
-                            writeSse(res, { type: "done", route_required: true, message_id: safeAssistantMessageId, message_mode: "conversation", final_text: "" });
-                            releaseDispatch();
-                            if (!res.writableEnded && !res.destroyed)
-                                res.end();
-                            return;
-                        }
-                    }
-                    catch { }
-                }
-                const failedAt = new Date().toISOString();
-                const failedDurationMs = Math.max(0, Date.now() - projectMainMetricStartedAt);
-                const providerFailure = (0, model_retry_presentation_1.modelProviderFailurePresentation)(error);
-                const providerUnavailable = providerFailure.unavailable;
-                const failedTurnEvents = (0, user_visible_agent_events_1.listUserVisibleAgentEvents)({
-                    scope: "project",
-                    scopeId: project,
-                    exactSessionId: exactProjectSessionId,
-                    cursor: 0,
-                    limit: 500,
-                }).events.filter((event) => String(event?.turnId || "") === projectVisibleTurnId);
-                const persistedToolCalls = new Set(failedTurnEvents
-                    .filter((event) => ["tool_started", "tool_completed", "tool_failed"].includes(String(event?.eventType || "")))
-                    .map((event) => String(event?.toolCallId || "").trim())
-                    .filter(Boolean)).size;
-                const failedToolCalls = Math.max(0, Number(error?.toolCallCount || 0), Number(error?.observationCount || 0), persistedToolCalls);
-                const failedModelCalls = Math.max(0, Number(error?.modelCallCount || 0));
-                const safeFailureText = providerFailure.presentable
-                    ? providerFailure.text
-                    : "项目主 Agent 暂时无法形成可靠回复，请稍后重试。";
-                (0, user_visible_agent_events_1.appendUserVisibleAgentEvent)({
-                    eventId: `project-turn:${projectVisibleTurnId}:result:failed`,
-                    scope: "project",
-                    scopeId: project,
-                    exactSessionId: exactProjectSessionId,
-                    ...(String(safeAssistantMessageId || "").trim() ? { anchorMessageId: String(safeAssistantMessageId).trim() } : {}),
-                    turnId: projectVisibleTurnId,
-                    generation: 0,
-                    attempt: 1,
-                    eventType: "result",
-                    error: safeFailureText,
-                    display: {
-                        title: "本轮未完成",
-                        summary: "项目主 Agent 未能形成可靠的后续方案",
-                        status: "failed",
-                        durationMs: failedDurationMs,
-                        toolUseCount: failedToolCalls,
-                    },
-                    result: (0, user_visible_agent_events_1.buildUserVisibleAgentResult)({
-                        status: "failed",
-                        text: safeFailureText,
-                        turns: failedModelCalls,
-                        toolCalls: failedToolCalls,
-                        durationMs: failedDurationMs,
-                        stopReason: String(error?.code || "project_main_first_turn_failed"),
-                        unfinished: ["本轮未启动项目 Agent"],
-                    }),
-                    detail: {
-                        timing: { totalMs: failedDurationMs, modelMs: Math.max(0, Number(error?.modelDurationMs || 0)), toolWallMs: Math.max(0, Number(error?.toolWallDurationMs || 0)) },
-                        retryable: true,
-                        safeRetry: true,
-                        sideEffectState: "read_only",
-                        failedAt,
-                        providerRetry: {
-                            retryCount: providerFailure.retryCount,
-                            maxRetries: providerFailure.maxRetries,
-                            exhausted: providerUnavailable && providerFailure.retryCount >= providerFailure.maxRetries,
-                            contentStored: false,
-                        },
-                        providerRequestEvidence: {
-                            attemptCount: providerFailure.attemptCount,
-                            retryCount: providerFailure.retryCount,
-                            requestDispatchCount: providerFailure.requestDispatchCount,
-                            responseStartedCount: providerFailure.responseStartedCount,
-                            providerRequestIdPresent: providerFailure.providerRequestIdPresent,
-                            failureKind: providerFailure.failureKind,
-                            contentStored: false,
-                        },
-                    },
-                });
-                (0, db_1.recordMetric)("project-main-agent", {
-                    success: false,
-                    durationMs: failedDurationMs,
-                    fileChangeCount: 0,
-                    scopeType: "project", projectId: project, role: "main_agent",
-                    source: "project-main-turn", runtime: "main-agent-model",
-                    taskId: String(parentRunId || ""),
-                    executionId: projectVisibleTurnId,
-                    usageAnchorId: `project-main:${exactProjectSessionId}:${projectVisibleTurnId}`,
-                    usage: error?.usage || { source: "unreported", missingReason: "failed_before_provider" },
-                    providerRetryCount: providerFailure.retryCount,
-                    error: error?.message || String(error),
-                });
-                releaseDispatch();
-                if (projectReplyStreamStarted && !res.destroyed && !res.writableEnded) {
-                    writeSse(res, { type: "error", text: safeFailureText, interrupted: projectReplyDeltaEmitted, completed_at: failedAt, provider_retry_count: providerFailure.retryCount, max_retries: providerFailure.maxRetries });
-                    res.end();
-                    return;
-                }
-                return (0, utils_1.sendJson)(res, {
-                    success: false,
-                    error: safeFailureText,
-                    provider_retry_count: providerFailure.retryCount,
-                    max_retries: providerFailure.maxRetries,
-                    completed_at: failedAt,
-                }, 503);
-            }
-            (0, db_1.recordMetric)("project-main-agent", {
-                success: true,
-                durationMs: Number(projectFirstTurn.metric?.durationMs || Date.now() - projectMainMetricStartedAt),
-                fileChangeCount: 0,
-                scopeType: "project", projectId: project, role: "main_agent",
-                source: "project-main-turn", runtime: "main-agent-model",
-                taskId: String(parentRunId || ""),
-                executionId: projectVisibleTurnId || String(projectFirstTurn.metric?.usageAnchorId || ""),
-                usageAnchorId: projectFirstTurn.metric?.usageAnchorId,
-                usage: projectFirstTurn.metric?.usage || projectFirstTurn.turnReceipt?.usage || { source: "unreported", missingReason: "runtime_unreported" },
-                timing: {
-                    totalMs: Number(projectFirstTurn.metric?.durationMs || 0),
-                    modelMs: Number(projectFirstTurn.metric?.modelMs || 0),
-                    toolWallMs: Number(projectFirstTurn.metric?.toolWallMs || 0),
-                    firstVisibleFeedbackMs: Number(projectFirstTurn.metric?.firstVisibleFeedbackMs || 0),
-                    firstTokenMs: Number(projectFirstTurn.metric?.firstTokenMs || 0),
-                    maxSilentGapMs: Number(projectFirstTurn.metric?.maxSilentGapMs || 0),
-                },
-                streaming: {
-                    firstVisibleFeedbackMs: Number(projectFirstTurn.metric?.firstVisibleFeedbackMs || 0),
-                    firstTokenMs: Number(projectFirstTurn.metric?.firstTokenMs || 0),
-                    maxSilentGapMs: Number(projectFirstTurn.metric?.maxSilentGapMs || 0),
-                    providerRetryCount: Number(projectFirstTurn.metric?.retryCount || 0),
-                    fallbackStreamCount: Number(projectFirstTurn.metric?.fallbackStreamCount || 0),
-                    initialReadFileCount: Number(projectFirstTurn.metric?.initialReadFileCount || 0),
-                    initialReadTokens: Number(projectFirstTurn.metric?.initialReadTokens || 0),
-                },
-            });
-            const chatIntent = {
-                isTask: (0, workflow_decision_1.isDevelopmentTaskWorkflowDecision)(projectFirstTurn.workflowDecision),
-                workflowDecision: projectFirstTurn.workflowDecision,
-            };
-            const routeDecision = (0, conversation_message_routing_1.decideConversationMessageRoute)({
-                workflowDecision: projectFirstTurn.workflowDecision,
-                candidates: recoverableProjectCandidates,
-                exactSessionId: exactProjectSessionId,
-                scope: "project",
-            });
-            const bindProjectContinuationCandidate = async (candidate) => {
-                if (!candidate)
-                    return null;
-                const summary = (0, conversation_message_routing_1.buildRecoverableTaskSummary)(candidate);
-                if (summary?.candidateKind === "recoverable") {
-                    const resumed = await (0, project_main_agent_1.resumeInterruptedProjectMainTask)(String(candidate.id || ""), project, exactProjectSessionId, {
-                        actor: req.ccmAuth?.kind === "browser" ? String(req.ccmAuth.userId || "local-user") : "project-main-agent-route",
-                    });
-                    (0, collaboration_task_service_1.updateTask)(String(candidate.id || ""), {
-                        continuation_route_kind: "resume_existing_task",
-                        last_continue_at: new Date().toISOString(),
-                    });
-                    return (0, project_main_agent_1.getProjectMainTask)(String(candidate.id || "")) || resumed;
-                }
-                if (summary?.candidateKind === "completed") {
-                    const continuationKind = String(projectFirstTurn.workflowDecision?.continuationKind || "supplement");
-                    (0, collaboration_task_service_1.updateTask)(String(candidate.id || ""), {
-                        execution_attempt: Math.max(0, Number(candidate.execution_attempt || candidate.attempt || 0)) + 1,
-                        continuation_route_kind: continuationKind === "revise_goal" ? "revise_existing_task" : "resume_existing_task",
-                        resumed_from_completed_at: new Date().toISOString(),
-                        status_detail: continuationKind === "revise_goal" ? "已按用户要求开启返工执行" : "已从正式交付任务继续未完成工作项",
-                    });
-                }
-                else {
-                    (0, collaboration_task_service_1.updateTask)(String(candidate.id || ""), {
-                        continuation_route_kind: String(projectFirstTurn.workflowDecision?.continuationKind || "supplement") === "revise_goal"
-                            ? "revise_existing_task"
-                            : "continue_current_session",
-                        last_continue_at: new Date().toISOString(),
-                        status_detail: "当前会话的补充要求已并入原任务",
-                    });
-                }
-                return (0, project_main_agent_1.getProjectMainTask)(String(candidate.id || "")) || candidate;
-            };
-            if (explicitRouteChoice === "continue_original") {
-                if (!explicitCandidate) {
-                    releaseDispatch();
-                    return (0, utils_1.sendJson)(res, { success: false, error: "原任务已不可恢复，请重新选择处理方式", code: "CONVERSATION_ROUTE_CANDIDATE_STALE" }, 409);
-                }
-                parentRunId = String(explicitCandidate.id || "");
-                try {
-                    parentProjectMainTask = await bindProjectContinuationCandidate(explicitCandidate);
-                }
-                catch (error) {
-                    releaseDispatch();
-                    return (0, utils_1.sendJson)(res, {
-                        success: false,
-                        error: error?.message || "恢复前需要核对原任务现场",
-                        code: error?.code || "TASK_RECOVERY_PREFLIGHT_FAILED",
-                        recovery_preflight: error?.recovery_preflight || null,
-                    }, 409);
-                }
-            }
-            else if (explicitRouteChoice === "start_new_task" || explicitRouteChoice === "answer_only") {
-                parentRunId = "";
-                parentProjectMainTask = null;
-            }
-            else if (["resume_task", "revise_task"].includes(routeDecision.decision) && routeDecision.candidate) {
-                parentRunId = String(routeDecision.candidate.id || "");
-                try {
-                    parentProjectMainTask = await bindProjectContinuationCandidate(routeDecision.candidate);
-                }
-                catch (error) {
-                    releaseDispatch();
-                    return (0, utils_1.sendJson)(res, {
-                        success: false,
-                        error: error?.message || "恢复前需要核对原任务现场",
-                        code: error?.code || "TASK_RECOVERY_PREFLIGHT_FAILED",
-                        recovery_preflight: error?.recovery_preflight || null,
-                    }, 409);
-                }
-            }
-            else if (routeDecision.decision === "needs_user") {
-                let routeTurn = conversationTurnId
-                    ? conversation_turn_control_1.conversationTurnControl.listInternal({ scope: "project", conversation_id: `${project}:${exactProjectSessionId}`, limit: 500 }).turns.find(item => item.id === conversationTurnId)
-                    : null;
-                if (!routeTurn) {
-                    const created = conversation_turn_control_1.conversationTurnControl.enqueue({
-                        scope: "project",
-                        conversation_id: `${project}:${exactProjectSessionId}`,
-                        mode: "queue",
-                        message: String(message || ""),
-                        request_id: `route:${safeClientMessageId || crypto.randomUUID()}`,
-                        owner_id: req.ccmAuth?.kind === "browser" ? req.ccmAuth.userId : "",
-                        metadata: { project, session_id: exactProjectSessionId, original_message_id: safeClientMessageId },
-                    });
-                    routeTurn = conversation_turn_control_1.conversationTurnControl.claim({ scope: "project", conversation_id: `${project}:${exactProjectSessionId}`, id: created.turn.id, revision: created.turn.revision });
-                }
-                if (!routeTurn || routeTurn.status !== "sending") {
-                    releaseDispatch();
-                    return (0, utils_1.sendJson)(res, { success: false, error: "消息处理方式已经变化，请刷新后重试", code: "QUEUE_REVISION_CONFLICT" }, 409);
-                }
-                const routed = conversation_turn_control_1.conversationTurnControl.requireRoute({
-                    id: routeTurn.id,
-                    revision: routeTurn.revision,
-                    routing: {
-                        candidateTaskId: String(routeDecision.candidate?.id || ""),
-                        candidateTaskIds: routeDecision.candidateTaskIds,
-                        candidateSummaries: routeDecision.candidateSummaries,
-                        routeKind: routeDecision.routeKind,
-                        activeTaskId: routeDecision.activeTaskId,
-                        exactSessionId: exactProjectSessionId,
-                        scope: "project",
-                        confidenceBand: routeDecision.confidenceBand,
-                        continuationKind: routeDecision.continuationKind,
-                        confidence: routeDecision.confidence,
-                        reason: routeDecision.reason,
-                    },
-                });
-                if (source === "feishu") {
-                    await (0, feishu_channel_1.notifyFeishuTaskStage)({
-                        stage: "conversation_route_required",
-                        title: `${(0, project_runtime_1.projectDisplayName)(project)} · 请选择处理方式`,
-                        markdown: [
-                            "这条消息可能与刚才的任务有关。",
-                            routed.routing?.reason || "请确认如何处理这条消息。",
-                            routed.routing?.candidateTaskId ? "1. 继续原任务" : "1. 继续原任务（当前不可用）",
-                            "2. 作为新任务",
-                            "3. 仅回答问题",
-                            "请直接回复 1、2 或 3。",
-                        ].join("\n"),
-                        sessionId: exactProjectSessionId,
-                        forceNewMessage: true,
-                        dedupeKey: `project-route:${routed.id}:${routed.revision}`,
-                    });
-                }
-                ensureProjectReplyStream();
-                writeSse(res, { type: "route_required", turn: { id: routed.id, revision: routed.revision, status: routed.status, routing: routed.routing }, message_id: safeAssistantMessageId });
-                writeSse(res, { type: "done", route_required: true, message_id: safeAssistantMessageId, message_mode: "conversation", final_text: "" });
-                releaseDispatch();
-                if (!res.writableEnded && !res.destroyed)
-                    res.end();
-                return;
-            }
-            if (parentProjectMainTask && explicitRouteChoice !== "answer_only")
-                chatIntent.isTask = true;
-            const visibleProjectTurn = (0, project_main_turn_complete_1.projectFirstTurnVisiblePresentation)(projectFirstTurn, {
-                treatAsTask: chatIntent.isTask,
-            });
-            if (visibleProjectTurn.present) {
-                const clarificationProjection = projectFirstTurn.prePlanClarification;
-                const visibleProjectReply = source === "feishu" && clarificationProjection
-                    ? (0, pre_plan_clarification_1.formatPrePlanClarificationText)(clarificationProjection)
-                    : visibleProjectTurn.reply;
-                const clarificationSummary = projectFirstTurn.clarificationSummary
-                    || (clarificationProjection ? (0, pre_plan_clarification_1.buildConversationClarificationSummary)({
-                        schema: "ccm-project-main-agent-clarification-summary-v1",
-                        question: visibleProjectReply,
-                        prePlanClarification: clarificationProjection,
-                    }) : null);
-                persistConversationReply(visibleProjectReply, visibleProjectTurn.messageMode, {
-                    ...(clarificationProjection ? {
-                        prePlanClarification: { ...clarificationProjection, anchorMessageId: safeAssistantMessageId },
-                        pre_plan_clarification: { ...clarificationProjection, anchorMessageId: safeAssistantMessageId },
-                        clarificationSummary,
-                        clarification_summary: clarificationSummary,
-                        clarificationContext: { schema: "ccm-project-clarification-context-v1", originalRequest: message, status: "pending" },
-                        clarification_context: { schema: "ccm-project-clarification-context-v1", original_request: message, status: "pending" },
-                    } : {}),
-                    ...(visibleProjectTurn.presentedPlan ? { presentedPlan: visibleProjectTurn.presentedPlan } : {}),
-                });
-                if (!res.destroyed && !res.writableEnded) {
-                    ensureProjectReplyStream();
-                    writeSse(res, { type: "turn_decision", decision: projectFirstTurn.turnDecision, receipt: projectFirstTurn.turnReceipt });
-                    for (const item of projectFirstTurn.toolResults || [])
-                        writeSse(res, { type: "tool_activity", phase: item.ok === false ? "failed" : "completed", tool: item.name, scope: item.scope || "project", source: item.source || item.toolKind || "", loaded: item.loaded !== false, output_tokens: item.outputTokens || 0, duration_ms: item.durationMs || 0, result_checksum: item.resultChecksum || "", error: item.error || "" });
-                    writeSse(res, { type: "presentation", message_mode: visibleProjectTurn.messageMode, show_task_card: false, main_agent: "project", direct_reply_fast_path: true, prePlanClarification: clarificationProjection, pre_plan_clarification: clarificationProjection, clarificationSummary, clarification_summary: clarificationSummary, ...(visibleProjectTurn.presentedPlan ? { presentedPlan: visibleProjectTurn.presentedPlan } : {}) });
-                    if (!projectReplyDeltaEmitted && visibleProjectReply)
-                        emitProjectReplyDelta(visibleProjectReply);
-                    if (!res.destroyed && !res.writableEnded) {
-                        writeSse(res, { type: "response_completed", text: visibleProjectReply, sequence: projectReplySequence, final: true });
-                        writeSse(res, { type: "done", message_id: safeAssistantMessageId, message_mode: visibleProjectTurn.messageMode, main_agent: "project", taskExperience: null, direct_reply_fast_path: true, final_text: visibleProjectReply, prePlanClarification: clarificationProjection, pre_plan_clarification: clarificationProjection, clarificationSummary, clarification_summary: clarificationSummary, ...(visibleProjectTurn.presentedPlan ? { presentedPlan: visibleProjectTurn.presentedPlan } : {}) });
-                    }
-                }
-                scheduleFeishuSessionTitle(visibleProjectReply);
-                releaseDispatch();
-                if (!res.writableEnded && !res.destroyed)
-                    res.end();
-                return;
-            }
-            if (resolvedProjectClarification && projectFirstTurn.plan) {
-                projectFirstTurn.plan.requiresConfirmation = true;
-                const resolvedAt = new Date().toISOString();
-                (0, sessions_1.upsertProjectSessionTaskMessage)(project, exactProjectSessionId, {
-                    ...resolvedProjectClarification.pending,
-                    prePlanClarification: { ...resolvedProjectClarification.projection, status: "resolved", revision: Number(resolvedProjectClarification.projection.revision || 1) + 1, resolvedAt },
-                    pre_plan_clarification: { ...resolvedProjectClarification.projection, status: "resolved", revision: Number(resolvedProjectClarification.projection.revision || 1) + 1, resolved_at: resolvedAt },
-                    clarificationContext: { ...(resolvedProjectClarification.pending.clarificationContext || {}), status: "resolved", resolvedAt },
-                    clarification_context: { ...(resolvedProjectClarification.pending.clarification_context || {}), status: "resolved", resolved_at: resolvedAt },
-                });
-            }
-            const info = (0, db_1.getConfigInfo)(config.path);
-            const workDir = info[0]?.workDir;
-            const configuredAgentType = info[0]?.agent || "claudecode";
-            const resolvedRuntime = (0, runtime_1.resolveAvailableAgentRuntime)(configuredAgentType);
-            const agentType = resolvedRuntime.selected;
-            if (exactProjectSessionId)
-                (0, sessions_1.syncSessions)(project);
-            const projectKnowledge = { context: "", citations: [], embeddingMode: "not_loaded", fallback: false };
-            const projectConfigSnapshot = (0, db_1.loadProjectConfigs)()?.[project] || {};
-            const globalContextConfig = (0, group_orchestrator_config_1.loadOrchestratorConfig)();
-            const projectContextPolicy = (0, main_agent_context_policy_1.resolveMainAgentContextPolicy)(globalContextConfig, projectConfigSnapshot.context_policy || projectConfigSnapshot.contextPolicy || {}).effective;
-            const projectContextWindow = Number((0, group_compaction_strategy_1.resolveGroupModelContextCapacity)(globalContextConfig).effectiveContextWindow || 200_000);
-            const projectSourceBudget = (0, main_agent_context_source_continuity_1.calculateContextSourceBudget)({ contextWindow: projectContextWindow, catalogPercent: projectContextPolicy.contextSourceCatalogBudgetPercent, hydrationPercent: projectContextPolicy.contextSourceHydrationBudgetPercent });
-            (0, shared_files_v2_1.migrateLegacySharedFilesV2)("project", project, projectConfigSnapshot.shared_files || [], "project-config-v1");
-            const projectSharedFiles = (0, shared_files_v2_1.buildSharedFilesContextV2)("project", project, {
-                contextWindow: projectContextWindow,
-                hydrationBudgetPercent: projectContextPolicy.contextSourceHydrationBudgetPercent,
-                remainingSafeTokens: projectSourceBudget.hydrationTargetTokens,
-                explicitText: finalMessage,
-                title: "以下是当前项目已授权共享文件。规划、开发和验收必须引用对应文件与分片证据：",
-            });
-            const projectSourceIdentity = exactProjectSessionId ? { agentKind: "project", scope: "project", scopeId: project, exactSessionId: exactProjectSessionId, generation: 0 } : null;
-            const projectSourceCatalog = (0, main_agent_context_source_continuity_1.buildContextSourceCatalog)({
-                sources: (0, main_agent_context_source_continuity_1.listContextSourceCatalogEntries)({ sharedScope: "project", sharedScopeId: project, knowledgeContext: { role: "project-agent", project } }),
-                maxTokens: projectSourceBudget.catalogTargetTokens,
-                explicitText: finalMessage,
-                recentReceipts: projectSourceIdentity ? (0, main_agent_context_source_continuity_1.readContextSourceContinuity)(projectSourceIdentity).receipts : [],
-            });
-            if (projectSourceIdentity) {
-                (0, main_agent_context_source_continuity_1.recordContextSourceCatalog)(projectSourceIdentity, projectSourceCatalog, projectSourceBudget);
-                (0, main_agent_context_source_continuity_1.recordSharedFileProjection)(projectSourceIdentity, projectSharedFiles, { ...projectSourceBudget, catalogUsedTokens: projectSourceCatalog.usedTokens, sharedFileTokens: projectSharedFiles.total_tokens, hydrationUsedTokens: projectSharedFiles.total_tokens });
-            }
-            if (exactProjectSessionId) {
-                if (projectSharedFiles.files.length) {
-                    const sharedToolCallId = `shared_${Date.now().toString(36)}_${Math.random().toString(16).slice(2, 8)}`;
-                    (0, project_session_compaction_1.appendProjectSessionExecutionEvent)(project, exactProjectSessionId, {
-                        type: "tool_use",
-                        toolName: "read_shared_files",
-                        toolCallId: sharedToolCallId,
-                        runId: `project-main:${exactProjectSessionId}`,
-                        arguments: { scope: "project", manifest_checksum: projectSharedFiles.checksum },
-                    });
-                    (0, project_session_compaction_1.appendProjectSessionExecutionEvent)(project, exactProjectSessionId, {
-                        type: "tool_result",
-                        toolName: "read_shared_files",
-                        toolCallId: sharedToolCallId,
-                        runId: `project-main:${exactProjectSessionId}`,
-                        status: "ok",
-                        observation: {
-                            manifest_checksum: projectSharedFiles.checksum,
-                            files: projectSharedFiles.files.map((file) => ({ id: file.id, name: file.name, checksum: file.checksum, chunks: file.chunks?.length || 0 })),
-                            selected_chunks: projectSharedFiles.selected_chunks,
-                            complete: projectSharedFiles.complete,
-                        },
-                    });
-                }
-            }
-            const selectedProjectRoleSkills = chatIntent.isTask
-                ? (0, role_skills_1.selectRoleSkills)("project-child-agent", finalMessage, {
-                    forceWork: true,
-                    source: "project-chat",
-                    phase: "execution",
-                    selectedSkillNames: chatIntent.workflowDecision?.selectedSkills || [],
-                    modelDecision: chatIntent.workflowDecision || null,
-                })
-                : [];
-            const buildCurrentProjectToolContext = (internalMcpServers = {}) => buildProjectToolContext(project, workDir, agentType, {
-                internalMcpServers,
-                selectedRoleSkills: selectedProjectRoleSkills,
-                roleSkillPrompt: (0, role_skills_1.buildSelectedSkillUsageDirective)(selectedProjectRoleSkills),
-            });
-            let toolContext = buildCurrentProjectToolContext();
-            let projectRestoredSourceContext = "";
-            if (toolContext.dispatchGate?.dispatchReady === false) {
-                releaseDispatch();
-                return sendRuntimeToolDispatchBlocked(res, toolContext);
-            }
-            if (resolvedRuntime.switched) {
-                toolContext.workEvent.text = `${project} 执行器自动切换：配置为 ${resolvedRuntime.preferred}，当前可用执行器为 ${agentType}；候选链 ${resolvedRuntime.chain.join(" → ")}`;
-                toolContext.workEvent.runtimeFallback = resolvedRuntime;
-            }
-            const projectMemoryPacket = chatIntent.isTask
-                ? (0, memory_1.buildProjectMemoryPacket)(project, { workDir, query: finalMessage })
-                : "";
-            let projectCompaction = null;
-            if (exactProjectSessionId) {
-                try {
-                    projectCompaction = await (0, project_session_compaction_1.compactProjectSessionWithModel)(project, exactProjectSessionId, {
-                        reason: "auto_model",
-                        activeDispatchScopeId: dispatchScope,
-                        currentRequest: finalMessage,
-                        fixedContext: { project, workDir, agentType, runtimePrompt: toolContext.prompt, contextSourceCatalog: projectSourceCatalog.context, projectMemoryPacket, projectKnowledge: projectKnowledge.context, projectSharedFiles: projectSharedFiles.context },
-                        tools: { allowedTools: toolContext.allowedTools, runtimeToolSnapshot: toolContext.runtimeToolSnapshot },
-                        provider: agentType,
-                    });
-                    if (projectCompaction?.reason === "circuit_breaker") {
-                        releaseDispatch();
-                        return (0, utils_1.sendJson)(res, { error: "项目会话记忆压缩已熔断，本轮未启动第三方 Agent", consecutive_failures: projectCompaction.consecutive_failures || 3 }, 503);
-                    }
-                }
-                catch (error) {
-                    releaseDispatch();
-                    return (0, utils_1.sendJson)(res, { error: `项目会话自动压缩失败，本轮未启动第三方 Agent：${error?.message || error}` }, 503);
-                }
-            }
-            let projectMemoryMcp = null;
-            if (exactProjectSessionId && chatIntent.isTask) {
-                try {
-                    const prepareProjectMemoryMcp = () => {
-                        const projection = (0, project_session_compaction_1.buildProjectSessionModelContextProjection)(project, exactProjectSessionId, { currentRequest: finalMessage, consumeSessionStartHookContext: true });
-                        if (!projection)
-                            throw new Error("项目会话连续性不存在");
-                        const binding = (0, project_session_agent_binding_1.getProjectSessionAgentBinding)(project, exactProjectSessionId);
-                        const nativeGeneration = Number(binding.generation || binding.generation_count + 1 || 1);
-                        const snapshot = (0, third_party_memory_snapshot_1.createThirdPartyMemorySnapshot)({
-                            bindingKind: "project_session",
-                            role: "project-agent",
-                            project,
-                            projectSessionId: exactProjectSessionId,
-                            taskAgentSessionId: binding.task_agent_session_id || "",
-                            provider: agentType,
-                            nativeGeneration,
-                            boundaryGeneration: projection.boundaryGeneration,
-                            mode: projection.mode,
-                            summary: projection.summary,
-                            summarySource: projection.summarySource,
-                            messages: projection.visibleMessages,
-                            archiveMessages: projection.archiveMessages,
-                            memoryItems: [{ kind: "project_memory", source: project, required: true, content: projectMemoryPacket }],
-                            modelContextWindow: projectCompaction?.model_context_capacity?.contextWindow || projectCompaction?.resolved_model_capacity?.contextWindow || 0,
-                            autoCompactThreshold: projectCompaction?.auto_compact_threshold || 0,
-                            requestText: finalMessage,
+                        (0, sessions_1.upsertProjectSessionTaskMessage)(project, exactProjectSessionId, {
+                            id: safeAssistantMessageId,
+                            ...attemptIdentity,
+                            role: "assistant",
+                            content: String(content || ""),
+                            requestText: message,
+                            timestamp: new Date().toISOString(),
+                            messageMode: mode,
+                            type: "project_main_reply",
+                            task_id: "",
+                            run_id: "",
+                            interruption: null,
+                            ...extras,
+                            ...(discussionTaskId && !newTopic && mode === "conversation" ? { task_id: discussionTaskId } : {}),
+                            source: source === "feishu" ? "feishu-project-main-agent-reply" : "web-project-main-agent-reply",
                         });
-                        const challenge = (0, memory_context_consumption_receipt_1.createMemoryContextConsumptionChallenge)({
-                            project,
-                            executionId: `${project}:${exactProjectSessionId}:generation:${nativeGeneration}`,
-                            taskAgentSessionId: binding.task_agent_session_id || "",
-                            attempt: nativeGeneration,
-                        });
-                        const internalMcpServers = (0, agent_internal_mcp_1.buildProjectSessionBoundMemoryMcpServer)({
-                            project,
-                            projectSessionId: exactProjectSessionId,
-                            agentType,
-                            workDir,
-                            taskAgentSessionId: binding.task_agent_session_id || "",
-                            nativeSessionId: binding.native_session_id || "",
-                            memoryReceiptChallenge: challenge,
-                            memoryReceiptFile: (0, memory_context_consumption_receipt_1.memoryContextConsumptionReceiptFile)(challenge.challenge_id),
-                            memorySnapshotId: snapshot.id,
-                            memorySnapshotChecksum: snapshot.checksum,
-                            boundaryGeneration: snapshot.boundaryGeneration,
-                            nativeGeneration: snapshot.nativeGeneration,
-                            requestText: finalMessage,
-                            memoryReadBudgetTokens: snapshot.autoCompactThreshold,
-                        });
-                        return { projection, binding, snapshot, challenge, internalMcpServers };
-                    };
-                    projectMemoryMcp = prepareProjectMemoryMcp();
-                    toolContext = buildCurrentProjectToolContext(projectMemoryMcp.internalMcpServers);
-                    const knowledgeMcp = (toolContext.audit.internal_mcp || []).find((item) => item.name === "ccm__knowledge_context");
-                    projectMemoryMcp.ready = knowledgeMcp?.state === "synced";
-                    if (projectMemoryMcp.ready) {
-                        const threshold = Number(projectCompaction?.auto_compact_threshold || projectMemoryMcp.snapshot.autoCompactThreshold || 0);
-                        let providerUsageBiasTokens = Math.max(0, Number(projectCompaction?.before_tokens || projectCompaction?.token_measurement?.activeTokens || 0)
-                            - Number(projectCompaction?.model_visible_payload?.totalTokens || 0));
-                        const hydratedPayloadTokens = Number(projectMemoryMcp.snapshot.requiredHydrationTokens || 0)
-                            + (0, context_budget_1.estimateTextTokens)(toolContext.prompt)
-                            + (0, context_budget_1.estimateTextTokens)(projectKnowledge.context)
-                            + (0, context_budget_1.estimateTextTokens)(projectSharedFiles.context)
-                            + (0, context_budget_1.estimateTextTokens)(finalMessage)
-                            + providerUsageBiasTokens;
-                        if (threshold > 0 && hydratedPayloadTokens >= threshold && projectCompaction?.compacted !== true) {
-                            projectCompaction = await (0, project_session_compaction_1.compactProjectSessionWithModel)(project, exactProjectSessionId, {
-                                force: true,
-                                reason: "third_party_memory_mcp_required_hydration",
-                                activeDispatchScopeId: dispatchScope,
-                                currentRequest: finalMessage,
-                                fixedContext: { project, workDir, agentType, runtimePrompt: toolContext.prompt, contextSourceCatalog: projectSourceCatalog.context, projectMemoryPacket, projectKnowledge: projectKnowledge.context, projectSharedFiles: projectSharedFiles.context },
-                                tools: { allowedTools: toolContext.allowedTools, runtimeToolSnapshot: toolContext.runtimeToolSnapshot },
-                                provider: agentType,
-                            });
-                            projectMemoryMcp = prepareProjectMemoryMcp();
-                            toolContext = buildCurrentProjectToolContext(projectMemoryMcp.internalMcpServers);
-                            projectMemoryMcp.ready = (toolContext.audit.internal_mcp || []).some((item) => item.name === "ccm__knowledge_context" && item.state === "synced");
-                            providerUsageBiasTokens = Math.max(0, Number(projectCompaction?.before_tokens || projectCompaction?.token_measurement?.activeTokens || 0)
-                                - Number(projectCompaction?.model_visible_payload?.totalTokens || 0));
-                            const postTokens = Number(projectMemoryMcp.snapshot.requiredHydrationTokens || 0) + (0, context_budget_1.estimateTextTokens)(toolContext.prompt) + (0, context_budget_1.estimateTextTokens)(projectKnowledge.context) + (0, context_budget_1.estimateTextTokens)(projectSharedFiles.context) + (0, context_budget_1.estimateTextTokens)(finalMessage) + providerUsageBiasTokens;
-                            if (threshold > 0 && postTokens >= threshold)
-                                throw new Error(`项目记忆 MCP 必读上下文压缩后仍超过阈值：${postTokens}/${threshold}`);
-                        }
-                        const exactThreshold = Number(projectCompaction?.auto_compact_threshold || projectMemoryMcp.snapshot.autoCompactThreshold || 0);
-                        const fixedTokens = (0, context_budget_1.estimateTextTokens)(toolContext.prompt)
-                            + (0, context_budget_1.estimateTextTokens)(projectKnowledge.context)
-                            + (0, context_budget_1.estimateTextTokens)(projectSharedFiles.context)
-                            + (0, context_budget_1.estimateTextTokens)(finalMessage)
-                            + providerUsageBiasTokens;
-                        const memoryReadBudgetTokens = exactThreshold > 0 ? Math.max(0, exactThreshold - fixedTokens) : 0;
-                        if (exactThreshold > 0 && Number(projectMemoryMcp.snapshot.requiredHydrationTokens || 0) >= memoryReadBudgetTokens) {
-                            throw new Error(`项目记忆 MCP 累计读取预算不足：required=${projectMemoryMcp.snapshot.requiredHydrationTokens || 0}; budget=${memoryReadBudgetTokens}`);
-                        }
-                        projectMemoryMcp.internalMcpServers = (0, agent_internal_mcp_1.buildProjectSessionBoundMemoryMcpServer)({
-                            project,
-                            projectSessionId: exactProjectSessionId,
-                            agentType,
-                            workDir,
-                            taskAgentSessionId: projectMemoryMcp.binding.task_agent_session_id || "",
-                            nativeSessionId: projectMemoryMcp.binding.native_session_id || "",
-                            memoryReceiptChallenge: projectMemoryMcp.challenge,
-                            memoryReceiptFile: (0, memory_context_consumption_receipt_1.memoryContextConsumptionReceiptFile)(projectMemoryMcp.challenge.challenge_id),
-                            memorySnapshotId: projectMemoryMcp.snapshot.id,
-                            memorySnapshotChecksum: projectMemoryMcp.snapshot.checksum,
-                            boundaryGeneration: projectMemoryMcp.snapshot.boundaryGeneration,
-                            nativeGeneration: projectMemoryMcp.snapshot.nativeGeneration,
-                            requestText: finalMessage,
-                            memoryReadBudgetTokens,
-                        });
-                        projectMemoryMcp.memoryReadBudgetTokens = memoryReadBudgetTokens;
-                        projectMemoryMcp.providerUsageBiasTokens = providerUsageBiasTokens;
-                        toolContext = buildCurrentProjectToolContext(projectMemoryMcp.internalMcpServers);
-                        projectMemoryMcp.ready = (toolContext.audit.internal_mcp || []).some((item) => item.name === "ccm__knowledge_context" && item.state === "synced");
                     }
-                }
-                catch (error) {
-                    releaseDispatch();
-                    return (0, utils_1.sendJson)(res, { error: `项目会话记忆 MCP 准备失败，本轮未启动第三方 Agent：${error?.message || error}` }, 503);
-                }
-            }
-            if (toolContext.dispatchGate?.dispatchReady === false) {
-                releaseDispatch();
-                return sendRuntimeToolDispatchBlocked(res, toolContext);
-            }
-            const resolvedProjectSourceIdentity = projectSourceIdentity ? (0, main_agent_post_compact_continuity_1.resolveMainAgentContinuityIdentity)(projectSourceIdentity) : null;
-            if (resolvedProjectSourceIdentity && resolvedProjectSourceIdentity.generation > 0) {
-                projectRestoredSourceContext = (0, main_agent_context_source_continuity_1.restoreContextSources)({
-                    identity: resolvedProjectSourceIdentity,
-                    knowledgeContext: { role: "project-agent", project },
-                    explicitText: finalMessage,
-                    maxPerItemTokens: projectContextPolicy.postCompactSourcePerItemMaxTokens,
-                    maxTotalTokens: projectContextPolicy.postCompactSourceTotalMaxTokens,
-                    hydrationTargetTokens: projectSourceBudget.hydrationTargetTokens,
-                    remainingSafeTokens: projectSourceBudget.remainingSafeTokens,
-                }).context;
-            }
-            const fullMessage = [toolContext.prompt, projectSourceCatalog.context, projectRestoredSourceContext, projectKnowledge.context, projectSharedFiles.context, finalMessage].filter(Boolean).join("\n\n");
-            const memoryMcpEnabled = projectMemoryMcp?.ready === true;
-            const projectSessionContext = memoryMcpEnabled
-                ? (0, third_party_memory_snapshot_1.buildThirdPartyMemoryBootstrap)(projectMemoryMcp.snapshot, projectMemoryMcp.challenge)
-                : exactProjectSessionId ? (0, project_session_compaction_1.buildProjectSessionPostCompactContext)(project, exactProjectSessionId, agentType, { currentRequest: finalMessage }) : "";
-            if ((0, api_access_control_1.requestIsReadOnly)(req) && chatIntent.isTask) {
-                releaseDispatch();
-                return (0, utils_1.sendJson)(res, { success: false, error: "当前账户仅允许项目只读问答；这条需求需要项目管理权限", code: "PROJECT_EXECUTION_FORBIDDEN" }, 403);
-            }
-            res.once?.("finish", releaseDispatch);
-            try {
-                let responseDetached = !!(res.writableEnded || res.destroyed);
-                // The project main-agent may already have opened the same SSE response
-                // while streaming its preamble.  A later dispatch decision must reuse
-                // that stream instead of attempting to send a second HTTP status line.
-                if (!responseDetached && !res.headersSent) {
+                    catch (error) {
+                        console.warn(`[项目会话] 权威回复持久化失败 (${project}/${exactProjectSessionId})：${error?.message || error}`);
+                    }
+                };
+                let projectReplyStreamStarted = false;
+                let projectReplyHeartbeatStarted = false;
+                let projectReplyDeltaEmitted = false;
+                let projectReplySequence = 0;
+                // Every project turn needs an immutable visible identity.  When a
+                // client omits its message id the old empty fallback caused all later
+                // events to share the task id only; after a task completed, a new
+                // query could therefore be projected into the completed task's
+                // execution transcript.  Reuse the already validated assistant
+                // message id as the final fallback so each request remains isolated.
+                const projectVisibleTurnId = String(sourceIngestion?.client_message_id
+                    || safeClientMessageId
+                    || `project-turn:${safeAssistantMessageId}`);
+                const ensureProjectReplyStream = () => {
+                    if (projectReplyStreamStarted || res.destroyed || res.writableEnded)
+                        return;
+                    projectReplyStreamStarted = true;
                     res.writeHead(200, {
                         "Content-Type": "text/event-stream",
                         "Cache-Control": "no-cache, no-transform",
@@ -2172,516 +1468,1260 @@ function handleRequest(req, res) {
                     });
                     if (typeof res.flushHeaders === "function")
                         res.flushHeaders();
-                }
-                const send = (data) => {
-                    if (!responseDetached && !res.writableEnded && !res.destroyed)
-                        writeSse(res, data);
-                };
-                let taskHeartbeatFactory = null;
-                const heartbeat = setInterval(() => {
-                    if (!res.writableEnded && !res.destroyed) {
-                        try {
-                            res.write(": keep-alive\n\n");
-                            const taskHeartbeat = taskHeartbeatFactory?.();
-                            if (taskHeartbeat)
-                                send(taskHeartbeat);
-                        }
-                        catch (error) {
-                            console.warn(`[project-main] task heartbeat skipped: ${error?.message || error}`);
-                        }
+                    if (!projectReplyHeartbeatStarted) {
+                        projectReplyHeartbeatStarted = true;
+                        (0, sse_heartbeat_1.startSseHeartbeat)(res);
                     }
-                }, 15000);
-                heartbeat.unref?.();
-                send({ type: "turn_decision", decision: projectFirstTurn.turnDecision, receipt: projectFirstTurn.turnReceipt });
-                for (const item of projectFirstTurn.toolResults || []) {
-                    send({ type: "tool_activity", phase: item.ok === false ? "failed" : "completed", tool: item.name, scope: item.scope || "project", source: item.source || item.toolKind || "", loaded: item.loaded !== false, output_tokens: item.outputTokens || 0, duration_ms: item.durationMs || 0, result_checksum: item.resultChecksum || "", error: item.error || "" });
-                }
-                const projectRun = (0, chat_runs_1.createProjectChatRun)(project, effectiveMessage, workDir, parentRunId, exactProjectSessionId);
-                projectRun.message_mode = "task";
-                projectRun.workflow_decision = chatIntent.workflowDecision;
-                const bound = bindProjectRunAgentSession(projectRun, project, agentType);
-                let activeTaskAgentSession = bound.session;
-                let activeAgentSessionOptions = bound.options;
-                const existingTask = parentProjectMainTask;
-                const plan = existingTask?.workflow_meta?.project_main_plan || projectFirstTurn.plan || await (0, project_main_agent_1.planProjectMainTask)({
-                    project,
-                    projectSessionId: exactProjectSessionId,
-                    userMessage: finalMessage,
-                    workflowDecision: chatIntent.workflowDecision,
-                    context: [projectKnowledge.context, projectSharedFiles.context].filter(Boolean).join("\n\n"),
-                    turnId: String(projectFirstTurn.turnId || ""),
-                    taskId: String(existingTask?.id || ""),
-                    generation: Number(projectFirstTurn.generation || 0),
-                    attempt: 1,
-                    anchorMessageId: String(projectFirstTurn.anchorMessageId || projectFirstTurn.turnId || ""),
-                });
-                const task = existingTask || (0, project_main_agent_1.createProjectMainTask)({
-                    project,
-                    projectSessionId: exactProjectSessionId,
-                    projectMainRunId: projectRun.id,
-                    userMessage: effectiveMessage,
-                    plan,
-                    workflowDecision: chatIntent.workflowDecision,
-                    sourceAttachments: files,
-                });
-                const workItemAgentSessions = new Map();
-                const workItemMemoryReceiptStarted = new Set();
-                let worktreeMergeQueue = Promise.resolve();
-                projectRun.project_main_task_id = task.id;
-                projectRun.status = plan.requiresConfirmation && !existingTask ? "paused" : "queued";
-                projectRun.updated_at = new Date().toISOString();
-                (0, chat_runs_1.saveProjectChatRuns)();
-                const feishuTask = source === "feishu";
-                if (feishuTask) {
-                    (0, feishu_channel_1.bindFeishuTaskContext)({
-                        sessionId: exactProjectSessionId,
-                        destination: projectFeishuDestination,
-                        runIds: [projectRun.id],
-                        taskIds: [task.id],
-                        source: "project-main-agent-feishu",
-                        targetType: "project_agent",
-                        projectId: project,
-                        originReceipt: projectFeishuOriginReceipt,
+                    writeSse(res, {
+                        type: "response_started",
+                        scope: "project",
+                        scope_id: project,
+                        exact_session_id: exactProjectSessionId,
+                        turn_id: projectVisibleTurnId,
+                        agent: "project-main-agent",
                     });
-                }
-                const taskSnapshot = () => (0, project_main_agent_1.projectMainTaskPublic)((0, project_main_agent_1.getProjectMainTask)(task.id) || task);
-                const taskExperience = () => ({
-                    ...taskSnapshot(),
-                    requires_card: true,
-                    rollback_available: !!projectRun.checkpoint_id,
-                    session_ids: [activeTaskAgentSession.id],
-                    parent_run_id: projectRun.parent_run_id || "",
-                });
-                const taskMessageId = `project-main-task:${task.id}`;
-                const persistTaskMessage = (content = "", experience = taskExperience()) => (0, sessions_1.upsertProjectSessionTaskMessage)(project, exactProjectSessionId, {
-                    id: taskMessageId,
-                    role: "assistant",
-                    content: String(content || experience.final_summary || experience.status_detail || plan.summary || "项目主 Agent 正在推进任务"),
-                    timestamp: new Date().toISOString(),
-                    messageMode: "task",
-                    type: "project_main_task",
-                    task_id: task.id,
-                    run_id: projectRun.id,
-                    // The planning/tool rounds were emitted before the persistent task
-                    // card existed. Preserve their original assistant anchor and turn so
-                    // refresh/replay can attach that exact narration to this task card.
-                    execution_anchor_message_id: String(safeAssistantMessageId || ""),
-                    execution_turn_id: projectVisibleTurnId,
-                    taskExperience: experience,
-                    source: source === "feishu" ? "feishu-project-main-agent" : "web-project-main-agent",
-                });
-                taskHeartbeatFactory = () => {
-                    const experience = taskExperience();
-                    return {
-                        type: "task_heartbeat",
-                        message_id: taskMessageId,
-                        task_id: task.id,
-                        at: new Date().toISOString(),
-                        text: experience.runtime_status?.status_detail || experience.phase_label || "项目主 Agent 正在推进任务",
-                        taskExperience: experience,
-                    };
                 };
-                send({ type: "presentation", message_mode: "task", show_task_card: true, workflow_decision: chatIntent.workflowDecision, main_agent: "project" });
-                send({ type: "planning", status: "completed", plan, task_id: task.id });
-                send({ type: "task_runtime", message_id: taskMessageId, run: (0, chat_runs_1.publicProjectChatRun)(projectRun), taskExperience: taskExperience() });
-                persistTaskMessage(plan.summary);
-                if (plan.requiresConfirmation && !existingTask) {
-                    const planText = `我已经整理好执行计划，需要你确认后才会安排开发 Agent。\n\n${plan.summary}\n\n${plan.workItems.map((item, index) => `${index + 1}. ${item.title}：${item.objective}`).join("\n")}`;
-                    scheduleFeishuSessionTitle(planText);
-                    send({ type: "chunk", text: planText, agent: "project-main-agent" });
-                    send({ type: "done", message_id: taskMessageId, message_mode: "task", run: (0, chat_runs_1.publicProjectChatRun)(projectRun), workEvents: [], taskExperience: taskExperience() });
-                    clearInterval(heartbeat);
+                const emitProjectReplyDelta = (delta, context) => {
+                    if (!delta || res.destroyed || res.writableEnded)
+                        return;
+                    ensureProjectReplyStream();
+                    projectReplyDeltaEmitted = true;
+                    projectReplySequence += 1;
+                    writeSse(res, {
+                        type: "response_delta",
+                        text: delta,
+                        agent: "project-main-agent",
+                        sequence: projectReplySequence,
+                        model_call_index: Math.max(0, Number(context?.modelCallIndex || 0)),
+                        modelCallIndex: Math.max(0, Number(context?.modelCallIndex || 0)),
+                        round: Math.max(0, Number(context?.round || 0)),
+                        segment_kind: "pending",
+                    });
+                    res.flush?.();
+                };
+                let projectFirstTurn;
+                const projectMainMetricStartedAt = Date.now();
+                const recoverableProjectCandidates = newTopic ? [] : (0, conversation_message_routing_1.findConversationTaskCandidates)({
+                    scope: "project",
+                    scopeId: project,
+                    exactSessionId: exactProjectSessionId,
+                });
+                const explicitRouteChoice = ["continue_original", "start_new_task", "answer_only"].includes(String(resolvedRoute || ""))
+                    ? String(resolvedRoute)
+                    : "";
+                const explicitCandidate = explicitRouteChoice === "continue_original"
+                    ? recoverableProjectCandidates.find((item) => String(item.id || "") === String(resolvedCandidateTaskId || ""))
+                    : null;
+                if (source !== "feishu")
+                    ensureProjectReplyStream();
+                const unsubscribeProjectReplyToolEvents = source === "feishu"
+                    ? () => { }
+                    : (0, user_visible_agent_events_1.subscribeUserVisibleAgentEvents)((event) => {
+                        if (!projectReplyStreamStarted || res.destroyed || res.writableEnded)
+                            return;
+                        if (event?.scope !== "project" || event?.scopeId !== project || event?.exactSessionId !== exactProjectSessionId)
+                            return;
+                        if (!(String(event?.eventType || "").startsWith("tool_") || event?.eventType === "assistant_progress"))
+                            return;
+                        const belongsToCurrentTurn = String(event?.anchorMessageId || "") === String(safeAssistantMessageId || "")
+                            || String(event?.turnId || "") === projectVisibleTurnId;
+                        if (!belongsToCurrentTurn)
+                            return;
+                        writeSse(res, { type: "agent_execution", event });
+                        res.flush?.();
+                    });
+                try {
+                    try {
+                        projectFirstTurn = await (0, project_main_agent_1.runProjectMainAgentFirstTurn)({
+                            project,
+                            projectSessionId: exactProjectSessionId,
+                            userMessage: finalMessage,
+                            turnId: projectVisibleTurnId,
+                            anchorMessageId: String(safeAssistantMessageId || ""),
+                            sourceCount: Number(sourceIngestion?.source_count || sourceIngestion?.sources?.length || files?.length || 0),
+                            originalRequestChecksum: crypto.createHash("sha256").update(String(message || "")).digest("hex"),
+                            clarificationRound: resolvedProjectClarification ? Math.min(2, Number(resolvedProjectClarification.projection.round || 1) + 1) : 1,
+                            continuationCandidate: (0, conversation_message_routing_1.buildRecoverableTaskSummary)(explicitCandidate || (recoverableProjectCandidates.length === 1 ? recoverableProjectCandidates[0] : null)),
+                            forcedConversationRoute: explicitRouteChoice,
+                            onDelta: source === "feishu" ? undefined : emitProjectReplyDelta,
+                            onModelActivity: (activity, event) => {
+                                if (!projectReplyStreamStarted || res.destroyed || res.writableEnded)
+                                    return;
+                                writeSse(res, { type: "model_activity", activity, event });
+                            },
+                            onAgentExecutionEvent: (event) => {
+                                if (!projectReplyStreamStarted || res.destroyed || res.writableEnded || !event)
+                                    return;
+                                writeSse(res, { type: "agent_execution", event });
+                                res.flush?.();
+                            },
+                        });
+                    }
+                    finally {
+                        unsubscribeProjectReplyToolEvents();
+                    }
+                }
+                catch (error) {
+                    // A route choice only makes sense when there is an actual old task to
+                    // choose. Without a recoverable candidate, surface the model/provider
+                    // failure and let the user retry instead of showing a misleading
+                    // "continue or start new" card.
+                    if (!explicitRouteChoice && source === "web" && exactProjectSessionId && recoverableProjectCandidates.length > 0) {
+                        try {
+                            let routeTurn = conversationTurnId
+                                ? conversation_turn_control_1.conversationTurnControl.listInternal({ scope: "project", conversation_id: `${project}:${exactProjectSessionId}`, limit: 500 }).turns.find(item => item.id === conversationTurnId)
+                                : null;
+                            if (!routeTurn) {
+                                const created = conversation_turn_control_1.conversationTurnControl.enqueue({
+                                    scope: "project",
+                                    conversation_id: `${project}:${exactProjectSessionId}`,
+                                    mode: "queue",
+                                    message: String(message || ""),
+                                    request_id: `route:${safeClientMessageId || crypto.randomUUID()}`,
+                                    owner_id: req.ccmAuth?.kind === "browser" ? req.ccmAuth.userId : "",
+                                    metadata: { project, session_id: exactProjectSessionId, original_message_id: safeClientMessageId },
+                                });
+                                routeTurn = conversation_turn_control_1.conversationTurnControl.claim({ scope: "project", conversation_id: `${project}:${exactProjectSessionId}`, id: created.turn.id, revision: created.turn.revision });
+                            }
+                            if (routeTurn?.status === "sending") {
+                                const routed = conversation_turn_control_1.conversationTurnControl.requireRoute({
+                                    id: routeTurn.id,
+                                    revision: routeTurn.revision,
+                                    routing: {
+                                        candidateTaskId: String(recoverableProjectCandidates[0]?.id || ""),
+                                        candidateTaskIds: recoverableProjectCandidates.map((item) => String(item?.id || "")).filter(Boolean),
+                                        candidateSummaries: recoverableProjectCandidates.slice(0, 6).map(conversation_message_routing_1.buildRecoverableTaskSummary).filter(Boolean),
+                                        exactSessionId: exactProjectSessionId,
+                                        scope: "project",
+                                        confidence: 0,
+                                        reason: "主 Agent 暂时无法可靠判断这条消息是否续接原任务，请选择处理方式",
+                                    },
+                                });
+                                ensureProjectReplyStream();
+                                writeSse(res, { type: "route_required", turn: { id: routed.id, revision: routed.revision, status: routed.status, routing: routed.routing }, message_id: safeAssistantMessageId });
+                                writeSse(res, { type: "done", route_required: true, message_id: safeAssistantMessageId, message_mode: "conversation", final_text: "" });
+                                releaseDispatch();
+                                if (!res.writableEnded && !res.destroyed)
+                                    res.end();
+                                return;
+                            }
+                        }
+                        catch { }
+                    }
+                    const failedAt = new Date().toISOString();
+                    const failedDurationMs = Math.max(0, Date.now() - projectMainMetricStartedAt);
+                    const providerFailure = (0, model_retry_presentation_1.modelProviderFailurePresentation)(error);
+                    const providerUnavailable = providerFailure.unavailable;
+                    const failedTurnEvents = (0, user_visible_agent_events_1.listUserVisibleAgentEvents)({
+                        scope: "project",
+                        scopeId: project,
+                        exactSessionId: exactProjectSessionId,
+                        cursor: 0,
+                        limit: 500,
+                    }).events.filter((event) => String(event?.turnId || "") === projectVisibleTurnId);
+                    const persistedToolCalls = new Set(failedTurnEvents
+                        .filter((event) => ["tool_started", "tool_completed", "tool_failed"].includes(String(event?.eventType || "")))
+                        .map((event) => String(event?.toolCallId || "").trim())
+                        .filter(Boolean)).size;
+                    const failedToolCalls = Math.max(0, Number(error?.toolCallCount || 0), Number(error?.observationCount || 0), persistedToolCalls);
+                    const failedModelCalls = Math.max(0, Number(error?.modelCallCount || 0));
+                    const safeFailureText = providerFailure.presentable
+                        ? providerFailure.text
+                        : "项目主 Agent 暂时无法形成可靠回复，请稍后重试。";
+                    (0, user_visible_agent_events_1.appendUserVisibleAgentEvent)({
+                        eventId: `project-turn:${projectVisibleTurnId}:result:failed`,
+                        scope: "project",
+                        scopeId: project,
+                        exactSessionId: exactProjectSessionId,
+                        ...(String(safeAssistantMessageId || "").trim() ? { anchorMessageId: String(safeAssistantMessageId).trim() } : {}),
+                        turnId: projectVisibleTurnId,
+                        generation: 0,
+                        attempt: 1,
+                        eventType: "result",
+                        error: safeFailureText,
+                        display: {
+                            title: "本轮未完成",
+                            summary: "项目主 Agent 未能形成可靠的后续方案",
+                            status: "failed",
+                            durationMs: failedDurationMs,
+                            toolUseCount: failedToolCalls,
+                        },
+                        result: (0, user_visible_agent_events_1.buildUserVisibleAgentResult)({
+                            status: "failed",
+                            text: safeFailureText,
+                            turns: failedModelCalls,
+                            toolCalls: failedToolCalls,
+                            durationMs: failedDurationMs,
+                            stopReason: String(error?.code || "project_main_first_turn_failed"),
+                            unfinished: ["本轮未启动项目 Agent"],
+                        }),
+                        detail: {
+                            timing: { totalMs: failedDurationMs, modelMs: Math.max(0, Number(error?.modelDurationMs || 0)), toolWallMs: Math.max(0, Number(error?.toolWallDurationMs || 0)) },
+                            retryable: true,
+                            safeRetry: true,
+                            sideEffectState: "read_only",
+                            failedAt,
+                            providerRetry: {
+                                retryCount: providerFailure.retryCount,
+                                maxRetries: providerFailure.maxRetries,
+                                exhausted: providerUnavailable && providerFailure.retryCount >= providerFailure.maxRetries,
+                                contentStored: false,
+                            },
+                            providerRequestEvidence: {
+                                attemptCount: providerFailure.attemptCount,
+                                retryCount: providerFailure.retryCount,
+                                requestDispatchCount: providerFailure.requestDispatchCount,
+                                responseStartedCount: providerFailure.responseStartedCount,
+                                providerRequestIdPresent: providerFailure.providerRequestIdPresent,
+                                failureKind: providerFailure.failureKind,
+                                contentStored: false,
+                            },
+                        },
+                    });
+                    (0, db_1.recordMetric)("project-main-agent", {
+                        success: false,
+                        durationMs: failedDurationMs,
+                        fileChangeCount: 0,
+                        scopeType: "project", projectId: project, role: "main_agent",
+                        source: "project-main-turn", runtime: "main-agent-model",
+                        taskId: String(parentRunId || ""),
+                        executionId: projectVisibleTurnId,
+                        usageAnchorId: `project-main:${exactProjectSessionId}:${projectVisibleTurnId}`,
+                        usage: error?.usage || { source: "unreported", missingReason: "failed_before_provider" },
+                        providerRetryCount: providerFailure.retryCount,
+                        error: error?.message || String(error),
+                    });
                     releaseDispatch();
-                    res.end();
+                    if (projectReplyStreamStarted && !res.destroyed && !res.writableEnded) {
+                        writeSse(res, { type: "error", text: safeFailureText, interrupted: projectReplyDeltaEmitted, completed_at: failedAt, provider_retry_count: providerFailure.retryCount, max_retries: providerFailure.maxRetries, provider_request_evidence: providerFailure });
+                        res.end();
+                        return;
+                    }
+                    return (0, utils_1.sendJson)(res, {
+                        success: false,
+                        error: safeFailureText,
+                        provider_retry_count: providerFailure.retryCount,
+                        max_retries: providerFailure.maxRetries,
+                        provider_request_evidence: providerFailure,
+                        completed_at: failedAt,
+                    }, 503);
+                }
+                (0, db_1.recordMetric)("project-main-agent", {
+                    success: true,
+                    durationMs: Number(projectFirstTurn.metric?.durationMs || Date.now() - projectMainMetricStartedAt),
+                    fileChangeCount: 0,
+                    scopeType: "project", projectId: project, role: "main_agent",
+                    source: "project-main-turn", runtime: "main-agent-model",
+                    taskId: String(parentRunId || ""),
+                    executionId: projectVisibleTurnId || String(projectFirstTurn.metric?.usageAnchorId || ""),
+                    usageAnchorId: projectFirstTurn.metric?.usageAnchorId,
+                    usage: projectFirstTurn.metric?.usage || projectFirstTurn.turnReceipt?.usage || { source: "unreported", missingReason: "runtime_unreported" },
+                    timing: {
+                        totalMs: Number(projectFirstTurn.metric?.durationMs || 0),
+                        modelMs: Number(projectFirstTurn.metric?.modelMs || 0),
+                        toolWallMs: Number(projectFirstTurn.metric?.toolWallMs || 0),
+                        firstVisibleFeedbackMs: Number(projectFirstTurn.metric?.firstVisibleFeedbackMs || 0),
+                        firstTokenMs: Number(projectFirstTurn.metric?.firstTokenMs || 0),
+                        maxSilentGapMs: Number(projectFirstTurn.metric?.maxSilentGapMs || 0),
+                    },
+                    streaming: {
+                        firstVisibleFeedbackMs: Number(projectFirstTurn.metric?.firstVisibleFeedbackMs || 0),
+                        firstTokenMs: Number(projectFirstTurn.metric?.firstTokenMs || 0),
+                        maxSilentGapMs: Number(projectFirstTurn.metric?.maxSilentGapMs || 0),
+                        providerRetryCount: Number(projectFirstTurn.metric?.retryCount || 0),
+                        fallbackStreamCount: Number(projectFirstTurn.metric?.fallbackStreamCount || 0),
+                        initialReadFileCount: Number(projectFirstTurn.metric?.initialReadFileCount || 0),
+                        initialReadTokens: Number(projectFirstTurn.metric?.initialReadTokens || 0),
+                    },
+                });
+                const chatIntent = {
+                    isTask: (0, workflow_decision_1.isDevelopmentTaskWorkflowDecision)(projectFirstTurn.workflowDecision),
+                    workflowDecision: projectFirstTurn.workflowDecision,
+                };
+                const routeDecision = (0, conversation_message_routing_1.decideConversationMessageRoute)({
+                    workflowDecision: projectFirstTurn.workflowDecision,
+                    candidates: recoverableProjectCandidates,
+                    exactSessionId: exactProjectSessionId,
+                    scope: "project",
+                });
+                const bindProjectContinuationCandidate = async (candidate) => {
+                    if (!candidate)
+                        return null;
+                    const summary = (0, conversation_message_routing_1.buildRecoverableTaskSummary)(candidate);
+                    if (summary?.candidateKind === "recoverable") {
+                        const resumed = await (0, project_main_agent_1.resumeInterruptedProjectMainTask)(String(candidate.id || ""), project, exactProjectSessionId, {
+                            actor: req.ccmAuth?.kind === "browser" ? String(req.ccmAuth.userId || "local-user") : "project-main-agent-route",
+                        });
+                        (0, collaboration_task_service_1.updateTask)(String(candidate.id || ""), {
+                            continuation_route_kind: "resume_existing_task",
+                            last_continue_at: new Date().toISOString(),
+                        });
+                        return (0, project_main_agent_1.getProjectMainTask)(String(candidate.id || "")) || resumed;
+                    }
+                    if (summary?.candidateKind === "completed") {
+                        const continuationKind = String(projectFirstTurn.workflowDecision?.continuationKind || "supplement");
+                        (0, collaboration_task_service_1.updateTask)(String(candidate.id || ""), {
+                            execution_attempt: Math.max(0, Number(candidate.execution_attempt || candidate.attempt || 0)) + 1,
+                            continuation_route_kind: continuationKind === "revise_goal" ? "revise_existing_task" : "resume_existing_task",
+                            resumed_from_completed_at: new Date().toISOString(),
+                            status_detail: continuationKind === "revise_goal" ? "已按用户要求开启返工执行" : "已从正式交付任务继续未完成工作项",
+                        });
+                    }
+                    else {
+                        (0, collaboration_task_service_1.updateTask)(String(candidate.id || ""), {
+                            continuation_route_kind: String(projectFirstTurn.workflowDecision?.continuationKind || "supplement") === "revise_goal"
+                                ? "revise_existing_task"
+                                : "continue_current_session",
+                            last_continue_at: new Date().toISOString(),
+                            status_detail: "当前会话的补充要求已并入原任务",
+                        });
+                    }
+                    return (0, project_main_agent_1.getProjectMainTask)(String(candidate.id || "")) || candidate;
+                };
+                if (explicitRouteChoice === "continue_original") {
+                    if (!explicitCandidate) {
+                        releaseDispatch();
+                        return (0, utils_1.sendJson)(res, { success: false, error: "原任务已不可恢复，请重新选择处理方式", code: "CONVERSATION_ROUTE_CANDIDATE_STALE" }, 409);
+                    }
+                    parentRunId = String(explicitCandidate.id || "");
+                    try {
+                        parentProjectMainTask = await bindProjectContinuationCandidate(explicitCandidate);
+                    }
+                    catch (error) {
+                        releaseDispatch();
+                        return (0, utils_1.sendJson)(res, {
+                            success: false,
+                            error: error?.message || "恢复前需要核对原任务现场",
+                            code: error?.code || "TASK_RECOVERY_PREFLIGHT_FAILED",
+                            recovery_preflight: error?.recovery_preflight || null,
+                        }, 409);
+                    }
+                }
+                else if (explicitRouteChoice === "start_new_task" || explicitRouteChoice === "answer_only") {
+                    parentRunId = "";
+                    parentProjectMainTask = null;
+                }
+                else if (["resume_task", "revise_task"].includes(routeDecision.decision) && routeDecision.candidate) {
+                    parentRunId = String(routeDecision.candidate.id || "");
+                    try {
+                        parentProjectMainTask = await bindProjectContinuationCandidate(routeDecision.candidate);
+                    }
+                    catch (error) {
+                        releaseDispatch();
+                        return (0, utils_1.sendJson)(res, {
+                            success: false,
+                            error: error?.message || "恢复前需要核对原任务现场",
+                            code: error?.code || "TASK_RECOVERY_PREFLIGHT_FAILED",
+                            recovery_preflight: error?.recovery_preflight || null,
+                        }, 409);
+                    }
+                }
+                else if (routeDecision.decision === "needs_user") {
+                    let routeTurn = conversationTurnId
+                        ? conversation_turn_control_1.conversationTurnControl.listInternal({ scope: "project", conversation_id: `${project}:${exactProjectSessionId}`, limit: 500 }).turns.find(item => item.id === conversationTurnId)
+                        : null;
+                    if (!routeTurn) {
+                        const created = conversation_turn_control_1.conversationTurnControl.enqueue({
+                            scope: "project",
+                            conversation_id: `${project}:${exactProjectSessionId}`,
+                            mode: "queue",
+                            message: String(message || ""),
+                            request_id: `route:${safeClientMessageId || crypto.randomUUID()}`,
+                            owner_id: req.ccmAuth?.kind === "browser" ? req.ccmAuth.userId : "",
+                            metadata: { project, session_id: exactProjectSessionId, original_message_id: safeClientMessageId },
+                        });
+                        routeTurn = conversation_turn_control_1.conversationTurnControl.claim({ scope: "project", conversation_id: `${project}:${exactProjectSessionId}`, id: created.turn.id, revision: created.turn.revision });
+                    }
+                    if (!routeTurn || routeTurn.status !== "sending") {
+                        releaseDispatch();
+                        return (0, utils_1.sendJson)(res, { success: false, error: "消息处理方式已经变化，请刷新后重试", code: "QUEUE_REVISION_CONFLICT" }, 409);
+                    }
+                    const routed = conversation_turn_control_1.conversationTurnControl.requireRoute({
+                        id: routeTurn.id,
+                        revision: routeTurn.revision,
+                        routing: {
+                            candidateTaskId: String(routeDecision.candidate?.id || ""),
+                            candidateTaskIds: routeDecision.candidateTaskIds,
+                            candidateSummaries: routeDecision.candidateSummaries,
+                            routeKind: routeDecision.routeKind,
+                            activeTaskId: routeDecision.activeTaskId,
+                            exactSessionId: exactProjectSessionId,
+                            scope: "project",
+                            confidenceBand: routeDecision.confidenceBand,
+                            continuationKind: routeDecision.continuationKind,
+                            confidence: routeDecision.confidence,
+                            reason: routeDecision.reason,
+                        },
+                    });
+                    if (source === "feishu") {
+                        await (0, feishu_channel_1.notifyFeishuTaskStage)({
+                            stage: "conversation_route_required",
+                            title: `${(0, project_runtime_1.projectDisplayName)(project)} · 请选择处理方式`,
+                            markdown: [
+                                "这条消息可能与刚才的任务有关。",
+                                routed.routing?.reason || "请确认如何处理这条消息。",
+                                routed.routing?.candidateTaskId ? "1. 继续原任务" : "1. 继续原任务（当前不可用）",
+                                "2. 作为新任务",
+                                "3. 仅回答问题",
+                                "请直接回复 1、2 或 3。",
+                            ].join("\n"),
+                            sessionId: exactProjectSessionId,
+                            forceNewMessage: true,
+                            dedupeKey: `project-route:${routed.id}:${routed.revision}`,
+                        });
+                    }
+                    ensureProjectReplyStream();
+                    writeSse(res, { type: "route_required", turn: { id: routed.id, revision: routed.revision, status: routed.status, routing: routed.routing }, message_id: safeAssistantMessageId });
+                    writeSse(res, { type: "done", route_required: true, message_id: safeAssistantMessageId, message_mode: "conversation", final_text: "" });
+                    releaseDispatch();
+                    if (!res.writableEnded && !res.destroyed)
+                        res.end();
                     return;
                 }
-                if (feishuTask) {
-                    retainDispatchAfterResponse = true;
-                    const acceptedText = `项目主 Agent 已完成任务规划并创建正式任务。\n\n任务：${plan.title}\n任务编号：${task.id}\n工作项：${plan.workItems.length} 个\n\n开发 Agent 与 TestAgent 将在后台按顺序执行，完成或阻塞后会回到当前飞书会话。`;
-                    scheduleFeishuSessionTitle(acceptedText);
-                    send({ type: "chunk", text: acceptedText, agent: "project-main-agent" });
-                    send({ type: "done", message_id: taskMessageId, message_mode: "task", accepted: true, detached: true, task_id: task.id, run: (0, chat_runs_1.publicProjectChatRun)(projectRun), taskExperience: taskExperience() });
-                    clearInterval(heartbeat);
-                    responseDetached = true;
-                    res.end();
+                if (parentProjectMainTask && explicitRouteChoice !== "answer_only")
+                    chatIntent.isTask = true;
+                const visibleProjectTurn = (0, project_main_turn_complete_1.projectFirstTurnVisiblePresentation)(projectFirstTurn, {
+                    treatAsTask: chatIntent.isTask,
+                });
+                if (visibleProjectTurn.present) {
+                    const clarificationProjection = projectFirstTurn.prePlanClarification;
+                    const visibleProjectReply = source === "feishu" && clarificationProjection
+                        ? (0, pre_plan_clarification_1.formatPrePlanClarificationText)(clarificationProjection)
+                        : visibleProjectTurn.reply;
+                    const clarificationSummary = projectFirstTurn.clarificationSummary
+                        || (clarificationProjection ? (0, pre_plan_clarification_1.buildConversationClarificationSummary)({
+                            schema: "ccm-project-main-agent-clarification-summary-v1",
+                            question: visibleProjectReply,
+                            prePlanClarification: clarificationProjection,
+                        }) : null);
+                    persistConversationReply(visibleProjectReply, visibleProjectTurn.messageMode, {
+                        ...(clarificationProjection ? {
+                            prePlanClarification: { ...clarificationProjection, anchorMessageId: safeAssistantMessageId },
+                            pre_plan_clarification: { ...clarificationProjection, anchorMessageId: safeAssistantMessageId },
+                            clarificationSummary,
+                            clarification_summary: clarificationSummary,
+                            clarificationContext: { schema: "ccm-project-clarification-context-v1", originalRequest: message, status: "pending" },
+                            clarification_context: { schema: "ccm-project-clarification-context-v1", original_request: message, status: "pending" },
+                        } : {}),
+                        ...(visibleProjectTurn.presentedPlan ? { presentedPlan: visibleProjectTurn.presentedPlan } : {}),
+                    });
+                    if (!res.destroyed && !res.writableEnded) {
+                        ensureProjectReplyStream();
+                        writeSse(res, { type: "turn_decision", decision: projectFirstTurn.turnDecision, receipt: projectFirstTurn.turnReceipt });
+                        for (const item of projectFirstTurn.toolResults || [])
+                            writeSse(res, { type: "tool_activity", phase: item.ok === false ? "failed" : "completed", tool: item.name, scope: item.scope || "project", source: item.source || item.toolKind || "", loaded: item.loaded !== false, output_tokens: item.outputTokens || 0, duration_ms: item.durationMs || 0, result_checksum: item.resultChecksum || "", error: item.error || "" });
+                        writeSse(res, { type: "presentation", message_mode: visibleProjectTurn.messageMode, show_task_card: false, main_agent: "project", direct_reply_fast_path: true, prePlanClarification: clarificationProjection, pre_plan_clarification: clarificationProjection, clarificationSummary, clarification_summary: clarificationSummary, ...(visibleProjectTurn.presentedPlan ? { presentedPlan: visibleProjectTurn.presentedPlan } : {}) });
+                        if (!projectReplyDeltaEmitted && visibleProjectReply)
+                            emitProjectReplyDelta(visibleProjectReply);
+                        if (!res.destroyed && !res.writableEnded) {
+                            writeSse(res, { type: "response_completed", text: visibleProjectReply, sequence: projectReplySequence, final: true });
+                            writeSse(res, { type: "done", message_id: safeAssistantMessageId, message_mode: visibleProjectTurn.messageMode, main_agent: "project", taskExperience: null, direct_reply_fast_path: true, final_text: visibleProjectReply, prePlanClarification: clarificationProjection, pre_plan_clarification: clarificationProjection, clarificationSummary, clarification_summary: clarificationSummary, ...(visibleProjectTurn.presentedPlan ? { presentedPlan: visibleProjectTurn.presentedPlan } : {}) });
+                        }
+                    }
+                    scheduleFeishuSessionTitle(visibleProjectReply);
+                    releaseDispatch();
+                    if (!res.writableEnded && !res.destroyed)
+                        res.end();
+                    return;
                 }
-                let firstMemoryReceiptRequired = memoryMcpEnabled;
-                const workerResults = [];
-                let finalSummaryStreamed = false;
-                const execution = await (0, unified_task_scheduler_1.scheduleUnifiedTaskOperation)({
-                    taskId: task.id,
-                    queueKey: `conversation:project:${project}:${exactProjectSessionId}`,
-                    workspaceLane: (0, unified_task_scheduler_1.canonicalWorkspaceMutationLane)(workDir, `workspace:project:${project}`),
-                    priority: task.priority || "normal",
-                    onState: schedulerState => {
-                        const queued = schedulerState.state === "queued";
-                        const running = schedulerState.state === "running";
-                        if (queued || running) {
-                            projectRun.status = queued ? "queued" : "running";
-                            projectRun.updated_at = new Date().toISOString();
-                            (0, chat_runs_1.saveProjectChatRuns)();
-                        }
-                        (0, collaboration_task_service_1.updateTask)(task.id, {
-                            scheduler_state: schedulerState,
-                            queue_target_key: schedulerState.queue_key,
-                            queue_position: schedulerState.position,
-                            queue_state: schedulerState.state,
-                            ...(queued ? { status: "pending", status_detail: `项目任务已进入会话串行队列，当前位置 ${schedulerState.position}` } : {}),
-                            ...(running ? { status: "in_progress", status_detail: "项目主 Agent 已取得会话队列和源码工作区执行权" } : {}),
+                if (resolvedProjectClarification && projectFirstTurn.plan) {
+                    projectFirstTurn.plan.requiresConfirmation = true;
+                    const resolvedAt = new Date().toISOString();
+                    (0, sessions_1.upsertProjectSessionTaskMessage)(project, exactProjectSessionId, {
+                        ...resolvedProjectClarification.pending,
+                        prePlanClarification: { ...resolvedProjectClarification.projection, status: "resolved", revision: Number(resolvedProjectClarification.projection.revision || 1) + 1, resolvedAt },
+                        pre_plan_clarification: { ...resolvedProjectClarification.projection, status: "resolved", revision: Number(resolvedProjectClarification.projection.revision || 1) + 1, resolved_at: resolvedAt },
+                        clarificationContext: { ...(resolvedProjectClarification.pending.clarificationContext || {}), status: "resolved", resolvedAt },
+                        clarification_context: { ...(resolvedProjectClarification.pending.clarification_context || {}), status: "resolved", resolved_at: resolvedAt },
+                    });
+                }
+                const info = (0, db_1.getConfigInfo)(config.path);
+                const workDir = info[0]?.workDir;
+                const configuredAgentType = info[0]?.agent || "claudecode";
+                const resolvedRuntime = (0, runtime_1.resolveAvailableAgentRuntime)(configuredAgentType);
+                const agentType = resolvedRuntime.selected;
+                const projectKnowledge = { context: "", citations: [], embeddingMode: "not_loaded", fallback: false };
+                const projectConfigSnapshot = (0, db_1.loadProjectConfigs)()?.[project] || {};
+                const globalContextConfig = (0, group_orchestrator_config_1.loadOrchestratorConfig)();
+                const projectContextPolicy = (0, main_agent_context_policy_1.resolveMainAgentContextPolicy)(globalContextConfig, projectConfigSnapshot.context_policy || projectConfigSnapshot.contextPolicy || {}).effective;
+                const projectContextWindow = Number((0, group_compaction_strategy_1.resolveGroupModelContextCapacity)(globalContextConfig).effectiveContextWindow || 200_000);
+                const projectSourceBudget = (0, main_agent_context_source_continuity_1.calculateContextSourceBudget)({ contextWindow: projectContextWindow, catalogPercent: projectContextPolicy.contextSourceCatalogBudgetPercent, hydrationPercent: projectContextPolicy.contextSourceHydrationBudgetPercent });
+                (0, shared_files_v2_1.migrateLegacySharedFilesV2)("project", project, projectConfigSnapshot.shared_files || [], "project-config-v1");
+                const projectSharedFiles = (0, shared_files_v2_1.buildSharedFilesContextV2)("project", project, {
+                    contextWindow: projectContextWindow,
+                    hydrationBudgetPercent: projectContextPolicy.contextSourceHydrationBudgetPercent,
+                    remainingSafeTokens: projectSourceBudget.hydrationTargetTokens,
+                    explicitText: finalMessage,
+                    title: "以下是当前项目已授权共享文件。规划、开发和验收必须引用对应文件与分片证据：",
+                });
+                const projectSourceIdentity = exactProjectSessionId ? { agentKind: "project", scope: "project", scopeId: project, exactSessionId: exactProjectSessionId, generation: 0 } : null;
+                const projectSourceCatalog = (0, main_agent_context_source_continuity_1.buildContextSourceCatalog)({
+                    sources: (0, main_agent_context_source_continuity_1.listContextSourceCatalogEntries)({ sharedScope: "project", sharedScopeId: project, knowledgeContext: { role: "project-agent", project } }),
+                    maxTokens: projectSourceBudget.catalogTargetTokens,
+                    explicitText: finalMessage,
+                    recentReceipts: projectSourceIdentity ? (0, main_agent_context_source_continuity_1.readContextSourceContinuity)(projectSourceIdentity).receipts : [],
+                });
+                if (projectSourceIdentity) {
+                    (0, main_agent_context_source_continuity_1.recordContextSourceCatalog)(projectSourceIdentity, projectSourceCatalog, projectSourceBudget);
+                    (0, main_agent_context_source_continuity_1.recordSharedFileProjection)(projectSourceIdentity, projectSharedFiles, { ...projectSourceBudget, catalogUsedTokens: projectSourceCatalog.usedTokens, sharedFileTokens: projectSharedFiles.total_tokens, hydrationUsedTokens: projectSharedFiles.total_tokens });
+                }
+                if (exactProjectSessionId) {
+                    if (projectSharedFiles.files.length) {
+                        const sharedToolCallId = `shared_${Date.now().toString(36)}_${Math.random().toString(16).slice(2, 8)}`;
+                        (0, project_session_compaction_1.appendProjectSessionExecutionEvent)(project, exactProjectSessionId, {
+                            type: "tool_use",
+                            toolName: "read_shared_files",
+                            toolCallId: sharedToolCallId,
+                            runId: `project-main:${exactProjectSessionId}`,
+                            arguments: { scope: "project", manifest_checksum: projectSharedFiles.checksum },
                         });
-                        const latestExperience = taskExperience();
-                        if (queued || running) {
-                            const text = queued
-                                ? `项目任务正在排队，当前位置 ${schedulerState.position}`
-                                : "项目主 Agent 已开始执行当前任务";
-                            persistTaskMessage(text, latestExperience);
-                            send({ type: "status", text, agent: "project-main-agent", scheduler_state: schedulerState });
-                            send({ type: "task_runtime", message_id: taskMessageId, run: (0, chat_runs_1.publicProjectChatRun)(projectRun), taskExperience: latestExperience });
+                        (0, project_session_compaction_1.appendProjectSessionExecutionEvent)(project, exactProjectSessionId, {
+                            type: "tool_result",
+                            toolName: "read_shared_files",
+                            toolCallId: sharedToolCallId,
+                            runId: `project-main:${exactProjectSessionId}`,
+                            status: "ok",
+                            observation: {
+                                manifest_checksum: projectSharedFiles.checksum,
+                                files: projectSharedFiles.files.map((file) => ({ id: file.id, name: file.name, checksum: file.checksum, chunks: file.chunks?.length || 0 })),
+                                selected_chunks: projectSharedFiles.selected_chunks,
+                                complete: projectSharedFiles.complete,
+                            },
+                        });
+                    }
+                }
+                const selectedProjectRoleSkills = chatIntent.isTask
+                    ? (0, role_skills_1.selectRoleSkills)("project-child-agent", finalMessage, {
+                        forceWork: true,
+                        source: "project-chat",
+                        phase: "execution",
+                        selectedSkillNames: chatIntent.workflowDecision?.selectedSkills || [],
+                        modelDecision: chatIntent.workflowDecision || null,
+                    })
+                    : [];
+                const buildCurrentProjectToolContext = (internalMcpServers = {}) => buildProjectToolContext(project, workDir, agentType, {
+                    internalMcpServers,
+                    selectedRoleSkills: selectedProjectRoleSkills,
+                    roleSkillPrompt: (0, role_skills_1.buildSelectedSkillUsageDirective)(selectedProjectRoleSkills),
+                });
+                let toolContext = buildCurrentProjectToolContext();
+                let projectRestoredSourceContext = "";
+                if (toolContext.dispatchGate?.dispatchReady === false) {
+                    releaseDispatch();
+                    return sendRuntimeToolDispatchBlocked(res, toolContext);
+                }
+                if (resolvedRuntime.switched) {
+                    toolContext.workEvent.text = `${project} 执行器自动切换：配置为 ${resolvedRuntime.preferred}，当前可用执行器为 ${agentType}；候选链 ${resolvedRuntime.chain.join(" → ")}`;
+                    toolContext.workEvent.runtimeFallback = resolvedRuntime;
+                }
+                const projectMemoryPacket = chatIntent.isTask
+                    ? (0, memory_1.buildProjectMemoryPacket)(project, { workDir, query: finalMessage })
+                    : "";
+                let projectCompaction = null;
+                if (exactProjectSessionId) {
+                    try {
+                        projectCompaction = await (0, project_session_compaction_1.compactProjectSessionWithModel)(project, exactProjectSessionId, {
+                            reason: "auto_model",
+                            activeDispatchScopeId: dispatchScope,
+                            currentRequest: finalMessage,
+                            fixedContext: { project, workDir, agentType, runtimePrompt: toolContext.prompt, contextSourceCatalog: projectSourceCatalog.context, projectMemoryPacket, projectKnowledge: projectKnowledge.context, projectSharedFiles: projectSharedFiles.context },
+                            tools: { allowedTools: toolContext.allowedTools, runtimeToolSnapshot: toolContext.runtimeToolSnapshot },
+                            provider: agentType,
+                        });
+                        if (projectCompaction?.reason === "circuit_breaker") {
+                            releaseDispatch();
+                            return (0, utils_1.sendJson)(res, { error: "项目会话记忆压缩已熔断，本轮未启动第三方 Agent", consecutive_failures: projectCompaction.consecutive_failures || 3 }, 503);
                         }
-                    },
-                    operation: () => (0, project_main_agent_1.executeProjectMainTask)({
-                        task,
-                        plan,
-                        confirmed: !!existingTask || !plan.requiresConfirmation,
-                        verificationCommands: Array.isArray((0, db_1.loadProjectConfigs)()?.[project]?.verification_commands)
-                            ? (0, db_1.loadProjectConfigs)()[project].verification_commands
-                            : [],
-                        onEvent: (event) => {
-                            const label = {
-                                planning: "项目主 Agent 已完成任务规划",
-                                work_item: event.status === "running" ? `开发 Agent 正在执行：${event.work_item?.title || "工作项"}` : `开发 Agent 已提交：${event.work_item?.title || "工作项"}`,
-                                testing: event.status === "running" ? `TestAgent 正在执行第 ${event.round || 1} 轮验收` : event.status === "passed" ? "TestAgent 验收通过" : "TestAgent 发现验收缺口",
-                                reworking: event.status === "running" ? "项目主 Agent 已安排原开发 Agent 返工" : "返工结果已提交，准备重新验收",
-                                accepting: event.status === "running" ? "项目主 Agent 正在完成最终验收" : "项目主 Agent 已完成最终验收",
-                                blocked: event.summary || "任务存在阻塞",
-                            };
-                            const text = label[event.type] || event.summary || "项目主 Agent 正在推进任务";
-                            const latestExperience = taskExperience();
-                            persistTaskMessage(text, latestExperience);
-                            send(event);
-                            send({ type: "status", text, agent: event.type === "testing" ? "test-agent" : "project-main-agent" });
-                            const workEvent = { id: `pma_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`, time: new Date().toISOString(), kind: event.status === "failed" || event.status === "blocked" ? "error" : event.status === "completed" || event.status === "passed" ? "done" : "status", agent: event.type === "testing" ? "TestAgent" : "项目主 Agent", text, phase: event.type, data: event };
-                            projectRun.workEvents = [...(projectRun.workEvents || []), workEvent].slice(-80);
-                            projectRun.updated_at = new Date().toISOString();
-                            (0, chat_runs_1.saveProjectChatRuns)();
-                            send({ type: "work_event", event: workEvent });
-                            send({ type: "task_runtime", message_id: taskMessageId, run: (0, chat_runs_1.publicProjectChatRun)(projectRun), taskExperience: latestExperience });
-                        },
-                        onDelta: delta => {
-                            if (!delta)
-                                return;
-                            finalSummaryStreamed = true;
-                            send({ type: "chunk", text: delta, agent: "project-main-agent" });
-                        },
-                        executeWorker: async (workItem, round, reworkProblems) => {
-                            let doneState = null;
-                            let workerSession = workItemAgentSessions.get(String(workItem.id));
-                            if (!workerSession) {
-                                workerSession = (0, agent_sessions_1.openTaskAgentSession)({ scopeId: `${exactProjectSessionId}:${task.id}:${workItem.id}`, taskId: task.id, groupId: "project-chat", project, agentType });
-                                workItemAgentSessions.set(String(workItem.id), workerSession);
-                            }
-                            let workerSessionOptions = (0, agent_sessions_1.getTaskAgentSessionOptions)(workerSession);
-                            const workerExecutionId = `${task.id}:${workItem.id}:attempt:${workItem.attempts}`;
-                            const needsMemoryReceipt = firstMemoryReceiptRequired && !workItemMemoryReceiptStarted.has(String(workItem.id));
-                            const workerMemoryChallenge = needsMemoryReceipt
-                                ? (0, memory_context_consumption_receipt_1.createMemoryContextConsumptionChallenge)({
-                                    project,
-                                    taskId: task.id,
-                                    executionId: workerExecutionId,
-                                    taskAgentSessionId: workerSession.id,
-                                    attempt: Math.max(1, Number(workItem.attempts || round || 1)),
-                                })
-                                : projectMemoryMcp?.challenge || null;
-                            const workerMemoryServers = memoryMcpEnabled
-                                ? (0, agent_internal_mcp_1.buildProjectSessionBoundMemoryMcpServer)({
-                                    project,
-                                    projectSessionId: exactProjectSessionId,
-                                    agentType,
-                                    workDir,
-                                    taskAgentSessionId: workerSession.id,
-                                    nativeSessionId: workerSessionOptions.sessionId || "",
-                                    memoryReceiptChallenge: workerMemoryChallenge,
-                                    memoryReceiptFile: (0, memory_context_consumption_receipt_1.memoryContextConsumptionReceiptFile)(workerMemoryChallenge?.challenge_id || ""),
-                                    memorySnapshotId: projectMemoryMcp?.snapshot?.id || "",
-                                    memorySnapshotChecksum: projectMemoryMcp?.snapshot?.checksum || "",
-                                    boundaryGeneration: projectMemoryMcp?.snapshot?.boundaryGeneration || 0,
-                                    nativeGeneration: projectMemoryMcp?.snapshot?.nativeGeneration || 0,
-                                    requestText: finalMessage,
-                                    memoryReadBudgetTokens: projectMemoryMcp?.memoryReadBudgetTokens || 0,
-                                })
-                                : [];
-                            const workerToolContext = memoryMcpEnabled
-                                ? buildCurrentProjectToolContext(workerMemoryServers)
-                                : toolContext;
-                            const workerProjectSessionContext = memoryMcpEnabled
-                                ? (0, third_party_memory_snapshot_1.buildThirdPartyMemoryBootstrap)(projectMemoryMcp.snapshot, workerMemoryChallenge)
-                                : projectSessionContext;
-                            const isolatedWorkDir = (0, worktree_1.prepareChildAgentWorkDir)(workDir, {
-                                mode: workItem.dispatchContract?.worktree?.strategy === "isolated" ? "worktree" : "shared",
-                                failClosed: workItem.dispatchContract?.worktree?.strategy === "isolated",
-                                taskId: task.id,
-                                agentName: workItem.id,
-                                sourceProject: project,
-                                reuseKey: `${task.id}-${workItem.id}`,
-                            });
-                            const workerWorkDir = isolatedWorkDir.workDir;
-                            if (!workItem.dispatchContract)
-                                throw new Error("项目子 Agent 缺少已确认计划工作合同，禁止写入");
-                            let ackDoneState = null;
-                            const ackSnapshot = (0, utils_1.createFileChangeSnapshot)(workerWorkDir);
-                            const ackOutput = await callAgent(project, (0, project_worker_semantic_ack_1.buildProjectWorkerSemanticAckPrompt)(workItem.dispatchContract), workerWorkDir, agentType, Math.min(120000, Number(workItem.dispatchContract.timeoutMs || 120000)), {
-                                background: true,
-                                taskId: task.id,
-                                executionId: `${workerExecutionId}:semantic-ack`,
+                    }
+                    catch (error) {
+                        releaseDispatch();
+                        return (0, utils_1.sendJson)(res, { error: `项目会话自动压缩失败，本轮未启动第三方 Agent：${error?.message || error}` }, 503);
+                    }
+                }
+                let projectMemoryMcp = null;
+                if (exactProjectSessionId && chatIntent.isTask) {
+                    try {
+                        const prepareProjectMemoryMcp = () => {
+                            const projection = (0, project_session_compaction_1.buildProjectSessionModelContextProjection)(project, exactProjectSessionId, { currentRequest: finalMessage, consumeSessionStartHookContext: true });
+                            if (!projection)
+                                throw new Error("项目会话连续性不存在");
+                            const binding = (0, project_session_agent_binding_1.getProjectSessionAgentBinding)(project, exactProjectSessionId);
+                            const nativeGeneration = Number(binding.generation || binding.generation_count + 1 || 1);
+                            const snapshot = (0, third_party_memory_snapshot_1.createThirdPartyMemorySnapshot)({
+                                bindingKind: "project_session",
+                                role: "project-agent",
+                                project,
                                 projectSessionId: exactProjectSessionId,
-                                role: "project-child-agent-ack",
-                                source: "project-main-agent",
-                                title: `${workItem.title} · ACK`,
-                                allowedTools: [],
-                                cliAllowedTools: [],
-                                // This preflight accepts one JSON response only. Claude's empty
-                                // --allowed-tools list does not disable Bash by itself, so make
-                                // the built-in tool set unavailable at the provider harness.
-                                disableBuiltinTools: true,
-                                agentSession: workerSessionOptions,
-                                taskAgentSessionId: workerSession.id,
-                                onDone: (state) => { ackDoneState = state; },
+                                taskAgentSessionId: binding.task_agent_session_id || "",
+                                provider: agentType,
+                                nativeGeneration,
+                                boundaryGeneration: projection.boundaryGeneration,
+                                mode: projection.mode,
+                                summary: projection.summary,
+                                summarySource: projection.summarySource,
+                                messages: projection.visibleMessages,
+                                archiveMessages: projection.archiveMessages,
+                                memoryItems: [{ kind: "project_memory", source: project, required: true, content: projectMemoryPacket }],
+                                modelContextWindow: projectCompaction?.model_context_capacity?.contextWindow || projectCompaction?.resolved_model_capacity?.contextWindow || 0,
+                                autoCompactThreshold: projectCompaction?.auto_compact_threshold || 0,
+                                requestText: finalMessage,
                             });
-                            const ackChanges = (0, utils_1.getFileChanges)(project, ackSnapshot);
-                            if (Number(ackChanges?.count || 0) > 0)
-                                throw new Error("项目子 Agent ACK 预检产生了未授权文件副作用，已阻止正式写入");
-                            let semanticAck = (0, project_worker_semantic_ack_1.validateProjectWorkerSemanticAck)(workItem.dispatchContract, ackOutput);
-                            if (!semanticAck.ok && (0, project_worker_semantic_ack_1.projectWorkerSemanticAckCanRepair)(semanticAck.issues)) {
-                                let repairDoneState = null;
-                                const repairOutput = await callAgent(project, (0, project_worker_semantic_ack_1.buildProjectWorkerSemanticAckRepairPrompt)(workItem.dispatchContract, semanticAck.issues), workerWorkDir, agentType, Math.min(120000, Number(workItem.dispatchContract.timeoutMs || 120000)), {
+                            const challenge = (0, memory_context_consumption_receipt_1.createMemoryContextConsumptionChallenge)({
+                                project,
+                                executionId: `${project}:${exactProjectSessionId}:generation:${nativeGeneration}`,
+                                taskAgentSessionId: binding.task_agent_session_id || "",
+                                attempt: nativeGeneration,
+                            });
+                            const internalMcpServers = (0, agent_internal_mcp_1.buildProjectSessionBoundMemoryMcpServer)({
+                                project,
+                                projectSessionId: exactProjectSessionId,
+                                agentType,
+                                workDir,
+                                taskAgentSessionId: binding.task_agent_session_id || "",
+                                nativeSessionId: binding.native_session_id || "",
+                                memoryReceiptChallenge: challenge,
+                                memoryReceiptFile: (0, memory_context_consumption_receipt_1.memoryContextConsumptionReceiptFile)(challenge.challenge_id),
+                                memorySnapshotId: snapshot.id,
+                                memorySnapshotChecksum: snapshot.checksum,
+                                boundaryGeneration: snapshot.boundaryGeneration,
+                                nativeGeneration: snapshot.nativeGeneration,
+                                requestText: finalMessage,
+                                memoryReadBudgetTokens: snapshot.autoCompactThreshold,
+                            });
+                            return { projection, binding, snapshot, challenge, internalMcpServers };
+                        };
+                        projectMemoryMcp = prepareProjectMemoryMcp();
+                        toolContext = buildCurrentProjectToolContext(projectMemoryMcp.internalMcpServers);
+                        const knowledgeMcp = (toolContext.audit.internal_mcp || []).find((item) => item.name === "ccm__knowledge_context");
+                        projectMemoryMcp.ready = knowledgeMcp?.state === "synced";
+                        if (projectMemoryMcp.ready) {
+                            const threshold = Number(projectCompaction?.auto_compact_threshold || projectMemoryMcp.snapshot.autoCompactThreshold || 0);
+                            let providerUsageBiasTokens = Math.max(0, Number(projectCompaction?.before_tokens || projectCompaction?.token_measurement?.activeTokens || 0)
+                                - Number(projectCompaction?.model_visible_payload?.totalTokens || 0));
+                            const hydratedPayloadTokens = Number(projectMemoryMcp.snapshot.requiredHydrationTokens || 0)
+                                + (0, context_budget_1.estimateTextTokens)(toolContext.prompt)
+                                + (0, context_budget_1.estimateTextTokens)(projectKnowledge.context)
+                                + (0, context_budget_1.estimateTextTokens)(projectSharedFiles.context)
+                                + (0, context_budget_1.estimateTextTokens)(finalMessage)
+                                + providerUsageBiasTokens;
+                            if (threshold > 0 && hydratedPayloadTokens >= threshold && projectCompaction?.compacted !== true) {
+                                projectCompaction = await (0, project_session_compaction_1.compactProjectSessionWithModel)(project, exactProjectSessionId, {
+                                    force: true,
+                                    reason: "third_party_memory_mcp_required_hydration",
+                                    activeDispatchScopeId: dispatchScope,
+                                    currentRequest: finalMessage,
+                                    fixedContext: { project, workDir, agentType, runtimePrompt: toolContext.prompt, contextSourceCatalog: projectSourceCatalog.context, projectMemoryPacket, projectKnowledge: projectKnowledge.context, projectSharedFiles: projectSharedFiles.context },
+                                    tools: { allowedTools: toolContext.allowedTools, runtimeToolSnapshot: toolContext.runtimeToolSnapshot },
+                                    provider: agentType,
+                                });
+                                projectMemoryMcp = prepareProjectMemoryMcp();
+                                toolContext = buildCurrentProjectToolContext(projectMemoryMcp.internalMcpServers);
+                                projectMemoryMcp.ready = (toolContext.audit.internal_mcp || []).some((item) => item.name === "ccm__knowledge_context" && item.state === "synced");
+                                providerUsageBiasTokens = Math.max(0, Number(projectCompaction?.before_tokens || projectCompaction?.token_measurement?.activeTokens || 0)
+                                    - Number(projectCompaction?.model_visible_payload?.totalTokens || 0));
+                                const postTokens = Number(projectMemoryMcp.snapshot.requiredHydrationTokens || 0) + (0, context_budget_1.estimateTextTokens)(toolContext.prompt) + (0, context_budget_1.estimateTextTokens)(projectKnowledge.context) + (0, context_budget_1.estimateTextTokens)(projectSharedFiles.context) + (0, context_budget_1.estimateTextTokens)(finalMessage) + providerUsageBiasTokens;
+                                if (threshold > 0 && postTokens >= threshold)
+                                    throw new Error(`项目记忆 MCP 必读上下文压缩后仍超过阈值：${postTokens}/${threshold}`);
+                            }
+                            const exactThreshold = Number(projectCompaction?.auto_compact_threshold || projectMemoryMcp.snapshot.autoCompactThreshold || 0);
+                            const fixedTokens = (0, context_budget_1.estimateTextTokens)(toolContext.prompt)
+                                + (0, context_budget_1.estimateTextTokens)(projectKnowledge.context)
+                                + (0, context_budget_1.estimateTextTokens)(projectSharedFiles.context)
+                                + (0, context_budget_1.estimateTextTokens)(finalMessage)
+                                + providerUsageBiasTokens;
+                            const memoryReadBudgetTokens = exactThreshold > 0 ? Math.max(0, exactThreshold - fixedTokens) : 0;
+                            if (exactThreshold > 0 && Number(projectMemoryMcp.snapshot.requiredHydrationTokens || 0) >= memoryReadBudgetTokens) {
+                                throw new Error(`项目记忆 MCP 累计读取预算不足：required=${projectMemoryMcp.snapshot.requiredHydrationTokens || 0}; budget=${memoryReadBudgetTokens}`);
+                            }
+                            projectMemoryMcp.internalMcpServers = (0, agent_internal_mcp_1.buildProjectSessionBoundMemoryMcpServer)({
+                                project,
+                                projectSessionId: exactProjectSessionId,
+                                agentType,
+                                workDir,
+                                taskAgentSessionId: projectMemoryMcp.binding.task_agent_session_id || "",
+                                nativeSessionId: projectMemoryMcp.binding.native_session_id || "",
+                                memoryReceiptChallenge: projectMemoryMcp.challenge,
+                                memoryReceiptFile: (0, memory_context_consumption_receipt_1.memoryContextConsumptionReceiptFile)(projectMemoryMcp.challenge.challenge_id),
+                                memorySnapshotId: projectMemoryMcp.snapshot.id,
+                                memorySnapshotChecksum: projectMemoryMcp.snapshot.checksum,
+                                boundaryGeneration: projectMemoryMcp.snapshot.boundaryGeneration,
+                                nativeGeneration: projectMemoryMcp.snapshot.nativeGeneration,
+                                requestText: finalMessage,
+                                memoryReadBudgetTokens,
+                            });
+                            projectMemoryMcp.memoryReadBudgetTokens = memoryReadBudgetTokens;
+                            projectMemoryMcp.providerUsageBiasTokens = providerUsageBiasTokens;
+                            toolContext = buildCurrentProjectToolContext(projectMemoryMcp.internalMcpServers);
+                            projectMemoryMcp.ready = (toolContext.audit.internal_mcp || []).some((item) => item.name === "ccm__knowledge_context" && item.state === "synced");
+                        }
+                    }
+                    catch (error) {
+                        releaseDispatch();
+                        return (0, utils_1.sendJson)(res, { error: `项目会话记忆 MCP 准备失败，本轮未启动第三方 Agent：${error?.message || error}` }, 503);
+                    }
+                }
+                if (toolContext.dispatchGate?.dispatchReady === false) {
+                    releaseDispatch();
+                    return sendRuntimeToolDispatchBlocked(res, toolContext);
+                }
+                const resolvedProjectSourceIdentity = projectSourceIdentity ? (0, main_agent_post_compact_continuity_1.resolveMainAgentContinuityIdentity)(projectSourceIdentity) : null;
+                if (resolvedProjectSourceIdentity && resolvedProjectSourceIdentity.generation > 0) {
+                    projectRestoredSourceContext = (0, main_agent_context_source_continuity_1.restoreContextSources)({
+                        identity: resolvedProjectSourceIdentity,
+                        knowledgeContext: { role: "project-agent", project },
+                        explicitText: finalMessage,
+                        maxPerItemTokens: projectContextPolicy.postCompactSourcePerItemMaxTokens,
+                        maxTotalTokens: projectContextPolicy.postCompactSourceTotalMaxTokens,
+                        hydrationTargetTokens: projectSourceBudget.hydrationTargetTokens,
+                        remainingSafeTokens: projectSourceBudget.remainingSafeTokens,
+                    }).context;
+                }
+                const fullMessage = [toolContext.prompt, projectSourceCatalog.context, projectRestoredSourceContext, projectKnowledge.context, projectSharedFiles.context, finalMessage].filter(Boolean).join("\n\n");
+                const memoryMcpEnabled = projectMemoryMcp?.ready === true;
+                const projectSessionContext = memoryMcpEnabled
+                    ? (0, third_party_memory_snapshot_1.buildThirdPartyMemoryBootstrap)(projectMemoryMcp.snapshot, projectMemoryMcp.challenge)
+                    : exactProjectSessionId ? (0, project_session_compaction_1.buildProjectSessionPostCompactContext)(project, exactProjectSessionId, agentType, { currentRequest: finalMessage }) : "";
+                if ((0, api_access_control_1.requestIsReadOnly)(req) && chatIntent.isTask) {
+                    releaseDispatch();
+                    return (0, utils_1.sendJson)(res, { success: false, error: "当前账户仅允许项目只读问答；这条需求需要项目管理权限", code: "PROJECT_EXECUTION_FORBIDDEN" }, 403);
+                }
+                res.once?.("finish", releaseDispatch);
+                try {
+                    let responseDetached = !!(res.writableEnded || res.destroyed);
+                    // The project main-agent may already have opened the same SSE response
+                    // while streaming its preamble.  A later dispatch decision must reuse
+                    // that stream instead of attempting to send a second HTTP status line.
+                    if (!responseDetached && !res.headersSent) {
+                        res.writeHead(200, {
+                            "Content-Type": "text/event-stream",
+                            "Cache-Control": "no-cache, no-transform",
+                            "Connection": "keep-alive",
+                            "Access-Control-Allow-Origin": "*",
+                            "X-Accel-Buffering": "no",
+                        });
+                        if (typeof res.flushHeaders === "function")
+                            res.flushHeaders();
+                    }
+                    const send = (data) => {
+                        if (!responseDetached && !res.writableEnded && !res.destroyed)
+                            writeSse(res, data);
+                    };
+                    let taskHeartbeatFactory = null;
+                    const heartbeat = setInterval(() => {
+                        if (!res.writableEnded && !res.destroyed) {
+                            try {
+                                res.write(": keep-alive\n\n");
+                                const taskHeartbeat = taskHeartbeatFactory?.();
+                                if (taskHeartbeat)
+                                    send(taskHeartbeat);
+                            }
+                            catch (error) {
+                                console.warn(`[project-main] task heartbeat skipped: ${error?.message || error}`);
+                            }
+                        }
+                    }, 15000);
+                    heartbeat.unref?.();
+                    send({ type: "turn_decision", decision: projectFirstTurn.turnDecision, receipt: projectFirstTurn.turnReceipt });
+                    for (const item of projectFirstTurn.toolResults || []) {
+                        send({ type: "tool_activity", phase: item.ok === false ? "failed" : "completed", tool: item.name, scope: item.scope || "project", source: item.source || item.toolKind || "", loaded: item.loaded !== false, output_tokens: item.outputTokens || 0, duration_ms: item.durationMs || 0, result_checksum: item.resultChecksum || "", error: item.error || "" });
+                    }
+                    const projectRun = (0, chat_runs_1.createProjectChatRun)(project, effectiveMessage, workDir, parentRunId, exactProjectSessionId);
+                    projectRun.message_mode = "task";
+                    projectRun.workflow_decision = chatIntent.workflowDecision;
+                    const bound = bindProjectRunAgentSession(projectRun, project, agentType);
+                    let activeTaskAgentSession = bound.session;
+                    let activeAgentSessionOptions = bound.options;
+                    const existingTask = parentProjectMainTask;
+                    const plan = existingTask?.workflow_meta?.project_main_plan || projectFirstTurn.plan || await (0, project_main_agent_1.planProjectMainTask)({
+                        project,
+                        projectSessionId: exactProjectSessionId,
+                        userMessage: finalMessage,
+                        workflowDecision: chatIntent.workflowDecision,
+                        context: [projectKnowledge.context, projectSharedFiles.context].filter(Boolean).join("\n\n"),
+                        turnId: String(projectFirstTurn.turnId || ""),
+                        taskId: String(existingTask?.id || ""),
+                        generation: Number(projectFirstTurn.generation || 0),
+                        attempt: 1,
+                        anchorMessageId: String(projectFirstTurn.anchorMessageId || projectFirstTurn.turnId || ""),
+                    });
+                    const task = existingTask || (0, project_main_agent_1.createProjectMainTask)({
+                        project,
+                        projectSessionId: exactProjectSessionId,
+                        projectMainRunId: projectRun.id,
+                        userMessage: effectiveMessage,
+                        plan,
+                        workflowDecision: chatIntent.workflowDecision,
+                        sourceAttachments: files,
+                    });
+                    const workItemAgentSessions = new Map();
+                    const workItemMemoryReceiptStarted = new Set();
+                    let worktreeMergeQueue = Promise.resolve();
+                    projectRun.project_main_task_id = task.id;
+                    projectRun.status = plan.requiresConfirmation && !existingTask ? "paused" : "queued";
+                    projectRun.updated_at = new Date().toISOString();
+                    (0, chat_runs_1.saveProjectChatRuns)();
+                    const feishuTask = source === "feishu";
+                    if (feishuTask) {
+                        (0, feishu_channel_1.bindFeishuTaskContext)({
+                            sessionId: exactProjectSessionId,
+                            destination: projectFeishuDestination,
+                            runIds: [projectRun.id],
+                            taskIds: [task.id],
+                            source: "project-main-agent-feishu",
+                            targetType: "project_agent",
+                            projectId: project,
+                            originReceipt: projectFeishuOriginReceipt,
+                        });
+                    }
+                    const taskSnapshot = () => (0, project_main_agent_1.projectMainTaskPublic)((0, project_main_agent_1.getProjectMainTask)(task.id) || task);
+                    const taskExperience = () => ({
+                        ...taskSnapshot(),
+                        requires_card: true,
+                        rollback_available: !!projectRun.checkpoint_id,
+                        session_ids: [activeTaskAgentSession.id],
+                        parent_run_id: projectRun.parent_run_id || "",
+                    });
+                    const taskMessageId = `project-main-task:${task.id}`;
+                    const persistTaskMessage = (content = "", experience = taskExperience()) => (0, sessions_1.upsertProjectSessionTaskMessage)(project, exactProjectSessionId, {
+                        id: taskMessageId,
+                        role: "assistant",
+                        content: String(content || experience.final_summary || experience.status_detail || plan.summary || "项目主 Agent 正在推进任务"),
+                        timestamp: new Date().toISOString(),
+                        messageMode: "task",
+                        type: "project_main_task",
+                        task_id: task.id,
+                        run_id: projectRun.id,
+                        // The planning/tool rounds were emitted before the persistent task
+                        // card existed. Preserve their original assistant anchor and turn so
+                        // refresh/replay can attach that exact narration to this task card.
+                        execution_anchor_message_id: String(safeAssistantMessageId || ""),
+                        execution_turn_id: projectVisibleTurnId,
+                        taskExperience: experience,
+                        source: source === "feishu" ? "feishu-project-main-agent" : "web-project-main-agent",
+                    });
+                    taskHeartbeatFactory = () => {
+                        const experience = taskExperience();
+                        return {
+                            type: "task_heartbeat",
+                            message_id: taskMessageId,
+                            task_id: task.id,
+                            at: new Date().toISOString(),
+                            text: experience.runtime_status?.status_detail || experience.phase_label || "项目主 Agent 正在推进任务",
+                            taskExperience: experience,
+                        };
+                    };
+                    send({ type: "presentation", message_mode: "task", show_task_card: true, workflow_decision: chatIntent.workflowDecision, main_agent: "project" });
+                    send({ type: "planning", status: "completed", plan, task_id: task.id });
+                    send({ type: "task_runtime", message_id: taskMessageId, run: (0, chat_runs_1.publicProjectChatRun)(projectRun), taskExperience: taskExperience() });
+                    persistTaskMessage(plan.summary);
+                    if (plan.requiresConfirmation && !existingTask) {
+                        const planText = `我已经整理好执行计划，需要你确认后才会安排开发 Agent。\n\n${plan.summary}\n\n${plan.workItems.map((item, index) => `${index + 1}. ${item.title}：${item.objective}`).join("\n")}`;
+                        scheduleFeishuSessionTitle(planText);
+                        send({ type: "chunk", text: planText, agent: "project-main-agent" });
+                        send({ type: "done", message_id: taskMessageId, message_mode: "task", run: (0, chat_runs_1.publicProjectChatRun)(projectRun), workEvents: [], taskExperience: taskExperience() });
+                        clearInterval(heartbeat);
+                        releaseDispatch();
+                        res.end();
+                        return;
+                    }
+                    if (feishuTask) {
+                        retainDispatchAfterResponse = true;
+                        const acceptedText = `项目主 Agent 已完成任务规划并创建正式任务。\n\n任务：${plan.title}\n任务编号：${task.id}\n工作项：${plan.workItems.length} 个\n\n开发 Agent 与 TestAgent 将在后台按顺序执行，完成或阻塞后会回到当前飞书会话。`;
+                        scheduleFeishuSessionTitle(acceptedText);
+                        send({ type: "chunk", text: acceptedText, agent: "project-main-agent" });
+                        send({ type: "done", message_id: taskMessageId, message_mode: "task", accepted: true, detached: true, task_id: task.id, run: (0, chat_runs_1.publicProjectChatRun)(projectRun), taskExperience: taskExperience() });
+                        clearInterval(heartbeat);
+                        responseDetached = true;
+                        res.end();
+                    }
+                    let firstMemoryReceiptRequired = memoryMcpEnabled;
+                    const workerResults = [];
+                    let finalSummaryStreamed = false;
+                    const execution = await (0, unified_task_scheduler_1.scheduleUnifiedTaskOperation)({
+                        taskId: task.id,
+                        queueKey: `conversation:project:${project}:${exactProjectSessionId}`,
+                        workspaceLane: (0, unified_task_scheduler_1.canonicalWorkspaceMutationLane)(workDir, `workspace:project:${project}`),
+                        priority: task.priority || "normal",
+                        onState: schedulerState => {
+                            const queued = schedulerState.state === "queued";
+                            const running = schedulerState.state === "running";
+                            if (queued || running) {
+                                projectRun.status = queued ? "queued" : "running";
+                                projectRun.updated_at = new Date().toISOString();
+                                (0, chat_runs_1.saveProjectChatRuns)();
+                            }
+                            (0, collaboration_task_service_1.updateTask)(task.id, {
+                                scheduler_state: schedulerState,
+                                queue_target_key: schedulerState.queue_key,
+                                queue_position: schedulerState.position,
+                                queue_state: schedulerState.state,
+                                ...(queued ? { status: "pending", status_detail: `项目任务已进入会话串行队列，当前位置 ${schedulerState.position}` } : {}),
+                                ...(running ? { status: "in_progress", status_detail: "项目主 Agent 已取得会话队列和源码工作区执行权" } : {}),
+                            });
+                            const latestExperience = taskExperience();
+                            if (queued || running) {
+                                const text = queued
+                                    ? `项目任务正在排队，当前位置 ${schedulerState.position}`
+                                    : "项目主 Agent 已开始执行当前任务";
+                                persistTaskMessage(text, latestExperience);
+                                send({ type: "status", text, agent: "project-main-agent", scheduler_state: schedulerState });
+                                send({ type: "task_runtime", message_id: taskMessageId, run: (0, chat_runs_1.publicProjectChatRun)(projectRun), taskExperience: latestExperience });
+                            }
+                        },
+                        operation: () => (0, project_main_agent_1.executeProjectMainTask)({
+                            task,
+                            plan,
+                            confirmed: !!existingTask || !plan.requiresConfirmation,
+                            verificationCommands: Array.isArray((0, db_1.loadProjectConfigs)()?.[project]?.verification_commands)
+                                ? (0, db_1.loadProjectConfigs)()[project].verification_commands
+                                : [],
+                            onEvent: (event) => {
+                                const label = {
+                                    planning: "项目主 Agent 已完成任务规划",
+                                    work_item: event.status === "running" ? `开发 Agent 正在执行：${event.work_item?.title || "工作项"}` : `开发 Agent 已提交：${event.work_item?.title || "工作项"}`,
+                                    testing: event.status === "running" ? `TestAgent 正在执行第 ${event.round || 1} 轮验收` : event.status === "passed" ? "TestAgent 验收通过" : "TestAgent 发现验收缺口",
+                                    reworking: event.status === "running" ? "项目主 Agent 已安排原开发 Agent 返工" : "返工结果已提交，准备重新验收",
+                                    accepting: event.status === "running" ? "项目主 Agent 正在完成最终验收" : "项目主 Agent 已完成最终验收",
+                                    blocked: event.summary || "任务存在阻塞",
+                                };
+                                const text = label[event.type] || event.summary || "项目主 Agent 正在推进任务";
+                                const latestExperience = taskExperience();
+                                persistTaskMessage(text, latestExperience);
+                                send(event);
+                                send({ type: "status", text, agent: event.type === "testing" ? "test-agent" : "project-main-agent" });
+                                const workEvent = { id: `pma_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`, time: new Date().toISOString(), kind: event.status === "failed" || event.status === "blocked" ? "error" : event.status === "completed" || event.status === "passed" ? "done" : "status", agent: event.type === "testing" ? "TestAgent" : "项目主 Agent", text, phase: event.type, data: event };
+                                projectRun.workEvents = [...(projectRun.workEvents || []), workEvent].slice(-80);
+                                projectRun.updated_at = new Date().toISOString();
+                                (0, chat_runs_1.saveProjectChatRuns)();
+                                send({ type: "work_event", event: workEvent });
+                                send({ type: "task_runtime", message_id: taskMessageId, run: (0, chat_runs_1.publicProjectChatRun)(projectRun), taskExperience: latestExperience });
+                            },
+                            onDelta: delta => {
+                                if (!delta)
+                                    return;
+                                finalSummaryStreamed = true;
+                                send({ type: "chunk", text: delta, agent: "project-main-agent" });
+                            },
+                            executeWorker: async (workItem, round, reworkProblems) => {
+                                let doneState = null;
+                                let workerSession = workItemAgentSessions.get(String(workItem.id));
+                                if (!workerSession) {
+                                    workerSession = (0, agent_sessions_1.openTaskAgentSession)({ scopeId: `${exactProjectSessionId}:${task.id}:${workItem.id}`, taskId: task.id, groupId: "project-chat", project, agentType });
+                                    workItemAgentSessions.set(String(workItem.id), workerSession);
+                                }
+                                let workerSessionOptions = (0, agent_sessions_1.getTaskAgentSessionOptions)(workerSession);
+                                const workerExecutionId = `${task.id}:${workItem.id}:attempt:${workItem.attempts}`;
+                                const needsMemoryReceipt = firstMemoryReceiptRequired && !workItemMemoryReceiptStarted.has(String(workItem.id));
+                                const workerMemoryChallenge = needsMemoryReceipt
+                                    ? (0, memory_context_consumption_receipt_1.createMemoryContextConsumptionChallenge)({
+                                        project,
+                                        taskId: task.id,
+                                        executionId: workerExecutionId,
+                                        taskAgentSessionId: workerSession.id,
+                                        attempt: Math.max(1, Number(workItem.attempts || round || 1)),
+                                    })
+                                    : projectMemoryMcp?.challenge || null;
+                                const workerMemoryServers = memoryMcpEnabled
+                                    ? (0, agent_internal_mcp_1.buildProjectSessionBoundMemoryMcpServer)({
+                                        project,
+                                        projectSessionId: exactProjectSessionId,
+                                        agentType,
+                                        workDir,
+                                        taskAgentSessionId: workerSession.id,
+                                        nativeSessionId: workerSessionOptions.sessionId || "",
+                                        memoryReceiptChallenge: workerMemoryChallenge,
+                                        memoryReceiptFile: (0, memory_context_consumption_receipt_1.memoryContextConsumptionReceiptFile)(workerMemoryChallenge?.challenge_id || ""),
+                                        memorySnapshotId: projectMemoryMcp?.snapshot?.id || "",
+                                        memorySnapshotChecksum: projectMemoryMcp?.snapshot?.checksum || "",
+                                        boundaryGeneration: projectMemoryMcp?.snapshot?.boundaryGeneration || 0,
+                                        nativeGeneration: projectMemoryMcp?.snapshot?.nativeGeneration || 0,
+                                        requestText: finalMessage,
+                                        memoryReadBudgetTokens: projectMemoryMcp?.memoryReadBudgetTokens || 0,
+                                    })
+                                    : [];
+                                const workerToolContext = memoryMcpEnabled
+                                    ? buildCurrentProjectToolContext(workerMemoryServers)
+                                    : toolContext;
+                                const workerProjectSessionContext = memoryMcpEnabled
+                                    ? (0, third_party_memory_snapshot_1.buildThirdPartyMemoryBootstrap)(projectMemoryMcp.snapshot, workerMemoryChallenge)
+                                    : projectSessionContext;
+                                const isolatedWorkDir = (0, worktree_1.prepareChildAgentWorkDir)(workDir, {
+                                    mode: workItem.dispatchContract?.worktree?.strategy === "isolated" ? "worktree" : "shared",
+                                    failClosed: workItem.dispatchContract?.worktree?.strategy === "isolated",
+                                    taskId: task.id,
+                                    agentName: workItem.id,
+                                    sourceProject: project,
+                                    reuseKey: `${task.id}-${workItem.id}`,
+                                });
+                                const workerWorkDir = isolatedWorkDir.workDir;
+                                if (!workItem.dispatchContract)
+                                    throw new Error("项目子 Agent 缺少已确认计划工作合同，禁止写入");
+                                let ackDoneState = null;
+                                const ackSnapshot = (0, utils_1.createFileChangeSnapshot)(workerWorkDir);
+                                const ackOutput = await callAgent(project, (0, project_worker_semantic_ack_1.buildProjectWorkerSemanticAckPrompt)(workItem.dispatchContract), workerWorkDir, agentType, Math.min(120000, Number(workItem.dispatchContract.timeoutMs || 120000)), {
                                     background: true,
                                     taskId: task.id,
-                                    executionId: `${workerExecutionId}:semantic-ack-repair`,
+                                    executionId: `${workerExecutionId}:semantic-ack`,
                                     projectSessionId: exactProjectSessionId,
                                     role: "project-child-agent-ack",
                                     source: "project-main-agent",
-                                    title: `${workItem.title} · ACK 修正`,
+                                    title: `${workItem.title} · ACK`,
                                     allowedTools: [],
                                     cliAllowedTools: [],
+                                    // This preflight accepts one JSON response only. Claude's empty
+                                    // --allowed-tools list does not disable Bash by itself, so make
+                                    // the built-in tool set unavailable at the provider harness.
                                     disableBuiltinTools: true,
                                     agentSession: workerSessionOptions,
                                     taskAgentSessionId: workerSession.id,
-                                    onDone: (state) => { repairDoneState = state; },
+                                    onDone: (state) => { ackDoneState = state; },
                                 });
-                                const repairChanges = (0, utils_1.getFileChanges)(project, ackSnapshot);
-                                if (Number(repairChanges?.count || 0) > 0)
-                                    throw new Error("项目子 Agent ACK 修正产生了未授权文件副作用，已阻止正式写入");
-                                semanticAck = (0, project_worker_semantic_ack_1.validateProjectWorkerSemanticAck)(workItem.dispatchContract, repairOutput);
-                                if (semanticAck.ok)
-                                    ackDoneState = repairDoneState;
-                            }
-                            if (!semanticAck.ok)
-                                throw new Error(`项目子 Agent 未通过业务语义 ACK 门禁：${semanticAck.issues.join(", ")}`);
-                            workerSession = (0, agent_sessions_1.recordTaskAgentSessionTurn)(workerSession.id, {
-                                nativeSessionId: ackDoneState?.nativeSessionId || "",
-                                nativeContinuationEvidence: ackDoneState?.nativeContinuationEvidence || null,
-                                success: ackDoneState?.isError !== true,
-                                error: ackDoneState?.error || "",
-                                runtimeToolSnapshot: toolContext.runtimeToolSnapshot,
-                            }) || workerSession;
-                            workItemAgentSessions.set(String(workItem.id), workerSession);
-                            workerSessionOptions = (0, agent_sessions_1.getTaskAgentSessionOptions)(workerSession);
-                            (0, logs_1.appendTaskTimelineEvent)(task.id, { type: "project_worker_semantic_ack", title: `${project} 已确认业务工作单`, detail: `已绑定需求 ${workItem.dispatchContract.requirementRevision}、计划 ${workItem.dispatchContract.planRevision} 和步骤 ${workItem.dispatchContract.stepId}`, status: "ok", phase: "dispatching", agent: project, data: { requirementChecksum: workItem.dispatchContract.requirementChecksum, planChecksum: workItem.dispatchContract.planChecksum, stepId: workItem.dispatchContract.stepId, acceptanceCriterionIds: workItem.dispatchContract.acceptanceCriterionIds, contentStored: false } });
-                            const workerPrompt = [
-                                workerToolContext.prompt,
-                                projectKnowledge.context,
-                                workerProjectSessionContext,
-                                (0, memory_1.buildProjectExecutionBrief)(project, workItem.objective, {
-                                    workDir: workerWorkDir,
-                                    query: finalMessage,
-                                    verificationHints: Array.isArray((0, db_1.loadProjectConfigs)()?.[project]?.verification_commands) ? (0, db_1.loadProjectConfigs)()[project].verification_commands : [],
-                                    memoryDeliveryMode: memoryMcpEnabled ? "mcp" : "prompt",
-                                    memorySnapshotId: projectMemoryMcp?.snapshot?.id || "",
-                                }),
-                                `你是当前项目唯一的开发 Agent。项目主 Agent 分配给你的工作项如下：\n整体业务目标：${workItem.dispatchContract?.businessGoal || plan.summary}\n标题：${workItem.title}\n目标：${workItem.objective}\n验收标准：${workItem.acceptanceCriteria.join("；") || plan.acceptanceCriteria.join("；")}\n${reworkProblems.length ? `这是第 ${round} 轮返工，必须逐项解决 TestAgent 的真实失败证据：\n${reworkProblems.join("\n")}` : ""}\n请实际完成工作、运行适用验证，并在结尾准确列出变更文件、执行过的验证和仍存在的阻塞。不得自行宣布主任务最终验收通过，也不得改写业务目标、验收标准或排除项。`,
-                                workItem.dispatchContract ? `计划派发合同绑定：${JSON.stringify({ workItemId: workItem.dispatchContract.workItemId, stepId: workItem.dispatchContract.stepId, title: workItem.dispatchContract.title, objective: workItem.dispatchContract.objective, businessGoal: workItem.dispatchContract.businessGoal, requirementId: workItem.dispatchContract.requirementId, requirementRevision: workItem.dispatchContract.requirementRevision, requirementChecksum: workItem.dispatchContract.requirementChecksum, planRevision: workItem.dispatchContract.planRevision, planChecksum: workItem.dispatchContract.planChecksum, contractChecksum: workItem.dispatchContract.contractChecksum, sourceManifestChecksum: workItem.dispatchContract.sourceManifestChecksum, files: workItem.dispatchContract.files, dependsOn: workItem.dispatchContract.dependsOn, allowedTools: workItem.dispatchContract.allowedTools, forbiddenPaths: workItem.dispatchContract.forbiddenPaths, constraints: workItem.dispatchContract.constraints, exclusions: workItem.dispatchContract.exclusions, acceptanceCriterionIds: workItem.dispatchContract.acceptanceCriterionIds, acceptance: workItem.dispatchContract.acceptance, verification: workItem.dispatchContract.verification, worktree: workItem.dispatchContract.worktree })}` : "",
-                            ].filter(Boolean).join("\n\n");
-                            if (memoryMcpEnabled) {
-                                const bootstrapTokens = (0, context_budget_1.estimateTextTokens)(workerPrompt);
-                                const maxBootstrapTokens = Math.max(1_000, Number(projectMemoryMcp?.snapshot?.maxBootstrapTokens || 32_000));
-                                if (bootstrapTokens >= maxBootstrapTokens) {
-                                    throw new Error(`项目子 Agent Bootstrap 超过独立 Token 门禁：${bootstrapTokens}/${maxBootstrapTokens}`);
+                                const ackChanges = (0, utils_1.getFileChanges)(project, ackSnapshot);
+                                if (Number(ackChanges?.count || 0) > 0)
+                                    throw new Error("项目子 Agent ACK 预检产生了未授权文件副作用，已阻止正式写入");
+                                let semanticAck = (0, project_worker_semantic_ack_1.validateProjectWorkerSemanticAck)(workItem.dispatchContract, ackOutput);
+                                if (!semanticAck.ok && (0, project_worker_semantic_ack_1.projectWorkerSemanticAckCanRepair)(semanticAck.issues)) {
+                                    let repairDoneState = null;
+                                    const repairOutput = await callAgent(project, (0, project_worker_semantic_ack_1.buildProjectWorkerSemanticAckRepairPrompt)(workItem.dispatchContract, semanticAck.issues), workerWorkDir, agentType, Math.min(120000, Number(workItem.dispatchContract.timeoutMs || 120000)), {
+                                        background: true,
+                                        taskId: task.id,
+                                        executionId: `${workerExecutionId}:semantic-ack-repair`,
+                                        projectSessionId: exactProjectSessionId,
+                                        role: "project-child-agent-ack",
+                                        source: "project-main-agent",
+                                        title: `${workItem.title} · ACK 修正`,
+                                        allowedTools: [],
+                                        cliAllowedTools: [],
+                                        disableBuiltinTools: true,
+                                        agentSession: workerSessionOptions,
+                                        taskAgentSessionId: workerSession.id,
+                                        onDone: (state) => { repairDoneState = state; },
+                                    });
+                                    const repairChanges = (0, utils_1.getFileChanges)(project, ackSnapshot);
+                                    if (Number(repairChanges?.count || 0) > 0)
+                                        throw new Error("项目子 Agent ACK 修正产生了未授权文件副作用，已阻止正式写入");
+                                    semanticAck = (0, project_worker_semantic_ack_1.validateProjectWorkerSemanticAck)(workItem.dispatchContract, repairOutput);
+                                    if (semanticAck.ok)
+                                        ackDoneState = repairDoneState;
                                 }
-                                projectMemoryMcp.bootstrapTokens = bootstrapTokens;
-                                projectMemoryMcp.maxBootstrapTokens = maxBootstrapTokens;
-                            }
-                            const output = await callAgent(project, workerPrompt, workerWorkDir, agentType, Number(workItem.dispatchContract?.timeoutMs || 300000), {
-                                background: true,
-                                taskId: task.id,
-                                executionId: workerExecutionId,
-                                projectSessionId: exactProjectSessionId,
-                                role: "project-child-agent",
-                                source: "project-main-agent",
-                                title: workItem.title,
-                                runtimeProgressContext: {
+                                if (!semanticAck.ok)
+                                    throw new Error(`项目子 Agent 未通过业务语义 ACK 门禁：${semanticAck.issues.join(", ")}`);
+                                workerSession = (0, agent_sessions_1.recordTaskAgentSessionTurn)(workerSession.id, {
+                                    nativeSessionId: ackDoneState?.nativeSessionId || "",
+                                    nativeContinuationEvidence: ackDoneState?.nativeContinuationEvidence || null,
+                                    success: ackDoneState?.isError !== true,
+                                    error: ackDoneState?.error || "",
+                                    runtimeToolSnapshot: toolContext.runtimeToolSnapshot,
+                                }) || workerSession;
+                                workItemAgentSessions.set(String(workItem.id), workerSession);
+                                workerSessionOptions = (0, agent_sessions_1.getTaskAgentSessionOptions)(workerSession);
+                                (0, logs_1.appendTaskTimelineEvent)(task.id, { type: "project_worker_semantic_ack", title: `${project} 已确认业务工作单`, detail: `已绑定需求 ${workItem.dispatchContract.requirementRevision}、计划 ${workItem.dispatchContract.planRevision} 和步骤 ${workItem.dispatchContract.stepId}`, status: "ok", phase: "dispatching", agent: project, data: { requirementChecksum: workItem.dispatchContract.requirementChecksum, planChecksum: workItem.dispatchContract.planChecksum, stepId: workItem.dispatchContract.stepId, acceptanceCriterionIds: workItem.dispatchContract.acceptanceCriterionIds, contentStored: false } });
+                                const workerPrompt = [
+                                    workerToolContext.prompt,
+                                    projectKnowledge.context,
+                                    workerProjectSessionContext,
+                                    (0, memory_1.buildProjectExecutionBrief)(project, workItem.objective, {
+                                        workDir: workerWorkDir,
+                                        query: finalMessage,
+                                        verificationHints: Array.isArray((0, db_1.loadProjectConfigs)()?.[project]?.verification_commands) ? (0, db_1.loadProjectConfigs)()[project].verification_commands : [],
+                                        memoryDeliveryMode: memoryMcpEnabled ? "mcp" : "prompt",
+                                        memorySnapshotId: projectMemoryMcp?.snapshot?.id || "",
+                                    }),
+                                    `你是当前项目唯一的开发 Agent。项目主 Agent 分配给你的工作项如下：\n整体业务目标：${workItem.dispatchContract?.businessGoal || plan.summary}\n标题：${workItem.title}\n目标：${workItem.objective}\n验收标准：${workItem.acceptanceCriteria.join("；") || plan.acceptanceCriteria.join("；")}\n${reworkProblems.length ? `这是第 ${round} 轮返工，必须逐项解决 TestAgent 的真实失败证据：\n${reworkProblems.join("\n")}` : ""}\n请实际完成工作、运行适用验证，并在结尾准确列出变更文件、执行过的验证和仍存在的阻塞。不得自行宣布主任务最终验收通过，也不得改写业务目标、验收标准或排除项。`,
+                                    workItem.dispatchContract ? `计划派发合同绑定：${JSON.stringify({ workItemId: workItem.dispatchContract.workItemId, stepId: workItem.dispatchContract.stepId, title: workItem.dispatchContract.title, objective: workItem.dispatchContract.objective, businessGoal: workItem.dispatchContract.businessGoal, requirementId: workItem.dispatchContract.requirementId, requirementRevision: workItem.dispatchContract.requirementRevision, requirementChecksum: workItem.dispatchContract.requirementChecksum, planRevision: workItem.dispatchContract.planRevision, planChecksum: workItem.dispatchContract.planChecksum, contractChecksum: workItem.dispatchContract.contractChecksum, sourceManifestChecksum: workItem.dispatchContract.sourceManifestChecksum, files: workItem.dispatchContract.files, dependsOn: workItem.dispatchContract.dependsOn, allowedTools: workItem.dispatchContract.allowedTools, forbiddenPaths: workItem.dispatchContract.forbiddenPaths, constraints: workItem.dispatchContract.constraints, exclusions: workItem.dispatchContract.exclusions, acceptanceCriterionIds: workItem.dispatchContract.acceptanceCriterionIds, acceptance: workItem.dispatchContract.acceptance, verification: workItem.dispatchContract.verification, worktree: workItem.dispatchContract.worktree })}` : "",
+                                ].filter(Boolean).join("\n\n");
+                                if (memoryMcpEnabled) {
+                                    const bootstrapTokens = (0, context_budget_1.estimateTextTokens)(workerPrompt);
+                                    const maxBootstrapTokens = Math.max(1_000, Number(projectMemoryMcp?.snapshot?.maxBootstrapTokens || 32_000));
+                                    if (bootstrapTokens >= maxBootstrapTokens) {
+                                        throw new Error(`项目子 Agent Bootstrap 超过独立 Token 门禁：${bootstrapTokens}/${maxBootstrapTokens}`);
+                                    }
+                                    projectMemoryMcp.bootstrapTokens = bootstrapTokens;
+                                    projectMemoryMcp.maxBootstrapTokens = maxBootstrapTokens;
+                                }
+                                const output = await callAgent(project, workerPrompt, workerWorkDir, agentType, Number(workItem.dispatchContract?.timeoutMs || 300000), {
+                                    background: true,
                                     taskId: task.id,
-                                    workItemId: String(workItem.id),
+                                    executionId: workerExecutionId,
+                                    projectSessionId: exactProjectSessionId,
+                                    role: "project-child-agent",
+                                    source: "project-main-agent",
+                                    title: workItem.title,
+                                    runtimeProgressContext: {
+                                        taskId: task.id,
+                                        workItemId: String(workItem.id),
+                                        scope: "project",
+                                        scopeId: project,
+                                        exactSessionId: exactProjectSessionId,
+                                        anchorMessageId: taskMessageId,
+                                        turnId: String(task.turn_id || task.turnId || `project-task:${task.id}`),
+                                        agentRunId: `project-worker:${task.id}:${workItem.id}:attempt:${Math.max(1, Number(workItem.attempts || round || 1))}`,
+                                        generation: Math.max(0, Number(task.generation || 0)),
+                                        attempt: Math.max(1, Number(workItem.attempts || round || 1)),
+                                        project,
+                                    },
+                                    allowedTools: workerToolContext.allowedTools,
+                                    mcpConfigPath: workerToolContext.audit.mcpConfigPath,
+                                    runtimeToolSnapshot: workerToolContext.runtimeToolSnapshot,
+                                    runtimeToolDispatchGate: workerToolContext.dispatchGate,
+                                    agentSession: workerSessionOptions,
+                                    taskAgentSessionId: workerSession.id,
+                                    planDispatchContract: workItem.dispatchContract || null,
+                                    planId: task.id,
+                                    planRevision: Number(workItem.dispatchContract?.planRevision || 0),
+                                    planChecksum: String(workItem.dispatchContract?.planChecksum || ""),
+                                    contractChecksum: String(workItem.dispatchContract?.contractChecksum || ""),
+                                    sourceManifestChecksum: String(workItem.dispatchContract?.sourceManifestChecksum || ""),
+                                    workItemId: String(workItem.dispatchContract?.workItemId || workItem.id),
+                                    memoryContextConsumptionReceiptRequired: needsMemoryReceipt,
+                                    memoryContextConsumptionChallenge: needsMemoryReceipt ? workerMemoryChallenge : null,
+                                    onDone: (state) => { doneState = state; },
+                                });
+                                workItemMemoryReceiptStarted.add(String(workItem.id));
+                                firstMemoryReceiptRequired = false;
+                                workerSession = (0, agent_sessions_1.recordTaskAgentSessionTurn)(workerSession.id, {
+                                    nativeSessionId: doneState?.nativeSessionId || "",
+                                    nativeContinuationEvidence: doneState?.nativeContinuationEvidence || null,
+                                    success: doneState?.isError !== true,
+                                    error: doneState?.error || "",
+                                    runtimeToolSnapshot: toolContext.runtimeToolSnapshot,
+                                }) || workerSession;
+                                workItemAgentSessions.set(String(workItem.id), workerSession);
+                                workerSessionOptions = (0, agent_sessions_1.getTaskAgentSessionOptions)(workerSession);
+                                const result = {
+                                    success: doneState?.isError !== true && !/^\[[^\]]+\]\s*Agent (?:Runner )?错误:/i.test(String(output || "")),
+                                    output: String(output || ""),
+                                    fileChanges: doneState?.fileChanges || { count: 0, files: [] },
+                                    nativeSessionId: doneState?.nativeSessionId || "",
+                                    sessionId: workerSession.id,
+                                    usage: doneState?.usage || null,
+                                    error: doneState?.error || "",
+                                };
+                                const deliveryJob = (0, project_worker_delivery_1.enqueueProjectWorkerDelivery)({ prepared: isolatedWorkDir, workItem, mainWorkDir: workDir, queue: worktreeMergeQueue });
+                                worktreeMergeQueue = deliveryJob.queue;
+                                const delivery = await deliveryJob.promise;
+                                if (delivery)
+                                    result.delivery = delivery;
+                                // A third-party runtime may complete the edit without emitting a
+                                // CCM_AGENT_RECEIPT file list. The isolated delivery commit is
+                                // authoritative, so use its verified changed paths as a safe
+                                // fallback for TestAgent scope/evidence instead of trusting text.
+                                if (delivery?.changedFiles?.length && !Number(result.fileChanges?.count || 0)) {
+                                    result.fileChanges = {
+                                        count: delivery.changedFiles.length,
+                                        files: delivery.changedFiles.map((file) => ({ path: String(file).replace(/\\/g, "/"), statusKind: "modified" })),
+                                    };
+                                }
+                                workerResults.push(result);
+                                return result;
+                            },
+                        }),
+                    });
+                    if (execution.status === "completed") {
+                        try {
+                            const memory = (0, memory_1.updateProjectMemoryFromReceipt)({
+                                project,
+                                workDir,
+                                taskId: task.id,
+                                agent: project,
+                                accepted: true,
+                                sourceKind: "accepted_project_main_agent_delivery",
+                                contextSourceIdentity: {
+                                    agentKind: "project",
                                     scope: "project",
                                     scopeId: project,
-                                    exactSessionId: exactProjectSessionId,
-                                    anchorMessageId: taskMessageId,
-                                    turnId: String(task.turn_id || task.turnId || `project-task:${task.id}`),
-                                    agentRunId: `project-worker:${task.id}:${workItem.id}:attempt:${Math.max(1, Number(workItem.attempts || round || 1))}`,
-                                    generation: Math.max(0, Number(task.generation || 0)),
-                                    attempt: Math.max(1, Number(workItem.attempts || round || 1)),
-                                    project,
+                                    exactSessionId: String(projectRun.project_session_id || projectRun.session_id || projectRun.id),
+                                    generation: Math.max(0, Number(projectRun.project_session_generation || projectRun.generation || 0)),
                                 },
-                                allowedTools: workerToolContext.allowedTools,
-                                mcpConfigPath: workerToolContext.audit.mcpConfigPath,
-                                runtimeToolSnapshot: workerToolContext.runtimeToolSnapshot,
-                                runtimeToolDispatchGate: workerToolContext.dispatchGate,
-                                agentSession: workerSessionOptions,
-                                taskAgentSessionId: workerSession.id,
-                                planDispatchContract: workItem.dispatchContract || null,
-                                planId: task.id,
-                                planRevision: Number(workItem.dispatchContract?.planRevision || 0),
-                                planChecksum: String(workItem.dispatchContract?.planChecksum || ""),
-                                contractChecksum: String(workItem.dispatchContract?.contractChecksum || ""),
-                                sourceManifestChecksum: String(workItem.dispatchContract?.sourceManifestChecksum || ""),
-                                workItemId: String(workItem.dispatchContract?.workItemId || workItem.id),
-                                memoryContextConsumptionReceiptRequired: needsMemoryReceipt,
-                                memoryContextConsumptionChallenge: needsMemoryReceipt ? workerMemoryChallenge : null,
-                                onDone: (state) => { doneState = state; },
+                                actualFiles: execution.fileChanges?.files || [],
+                                receipt: {
+                                    status: "done",
+                                    summary: execution.summary,
+                                    actions: plan.workItems.map((item) => item.title),
+                                    filesChanged: (execution.fileChanges?.files || []).map((item) => item.path || item.file || item).filter(Boolean),
+                                    verification: execution.verification,
+                                    blockers: [],
+                                    needs: execution.risks,
+                                },
                             });
-                            workItemMemoryReceiptStarted.add(String(workItem.id));
-                            firstMemoryReceiptRequired = false;
-                            workerSession = (0, agent_sessions_1.recordTaskAgentSessionTurn)(workerSession.id, {
-                                nativeSessionId: doneState?.nativeSessionId || "",
-                                nativeContinuationEvidence: doneState?.nativeContinuationEvidence || null,
-                                success: doneState?.isError !== true,
-                                error: doneState?.error || "",
-                                runtimeToolSnapshot: toolContext.runtimeToolSnapshot,
-                            }) || workerSession;
-                            workItemAgentSessions.set(String(workItem.id), workerSession);
-                            workerSessionOptions = (0, agent_sessions_1.getTaskAgentSessionOptions)(workerSession);
-                            const result = {
-                                success: doneState?.isError !== true && !/^\[[^\]]+\]\s*Agent (?:Runner )?错误:/i.test(String(output || "")),
-                                output: String(output || ""),
-                                fileChanges: doneState?.fileChanges || { count: 0, files: [] },
-                                nativeSessionId: doneState?.nativeSessionId || "",
-                                sessionId: workerSession.id,
-                                usage: doneState?.usage || null,
-                                error: doneState?.error || "",
-                            };
-                            const deliveryJob = (0, project_worker_delivery_1.enqueueProjectWorkerDelivery)({ prepared: isolatedWorkDir, workItem, mainWorkDir: workDir, queue: worktreeMergeQueue });
-                            worktreeMergeQueue = deliveryJob.queue;
-                            const delivery = await deliveryJob.promise;
-                            if (delivery)
-                                result.delivery = delivery;
-                            workerResults.push(result);
-                            return result;
-                        },
-                    }),
-                });
-                if (execution.status === "completed") {
-                    try {
-                        const memory = (0, memory_1.updateProjectMemoryFromReceipt)({
-                            project,
-                            workDir,
-                            taskId: task.id,
-                            agent: project,
-                            accepted: true,
-                            sourceKind: "accepted_project_main_agent_delivery",
-                            contextSourceIdentity: {
-                                agentKind: "project",
-                                scope: "project",
-                                scopeId: project,
-                                exactSessionId: String(projectRun.project_session_id || projectRun.session_id || projectRun.id),
-                                generation: Math.max(0, Number(projectRun.project_session_generation || projectRun.generation || 0)),
-                            },
-                            actualFiles: execution.fileChanges?.files || [],
-                            receipt: {
-                                status: "done",
-                                summary: execution.summary,
-                                actions: plan.workItems.map((item) => item.title),
-                                filesChanged: (execution.fileChanges?.files || []).map((item) => item.path || item.file || item).filter(Boolean),
-                                verification: execution.verification,
-                                blockers: [],
-                                needs: execution.risks,
-                            },
+                            projectRun.memory_admission = memory.lastMemoryAdmission || null;
+                        }
+                        catch (error) {
+                            projectRun.memory_admission = { decision: "rejected", error: String(error?.message || error) };
+                        }
+                    }
+                    projectRun.status = execution.status === "completed" ? "done" : execution.status;
+                    projectRun.fileChanges = execution.fileChanges;
+                    projectRun.acceptance_state = execution.task?.acceptance_state || execution.status;
+                    projectRun.test_agent_review = execution.testAgent || null;
+                    projectRun.updated_at = new Date().toISOString();
+                    (0, chat_runs_1.saveProjectChatRuns)();
+                    if (execution.summary && !finalSummaryStreamed)
+                        send({ type: "chunk", text: execution.summary, agent: "project-main-agent" });
+                    const latestTaskExperience = taskExperience();
+                    persistTaskMessage(execution.summary, latestTaskExperience);
+                    if (execution.status === "failed") {
+                        send({ type: "error", message_id: taskMessageId, text: execution.summary, message_mode: "task", run: (0, chat_runs_1.publicProjectChatRun)(projectRun), fileChanges: execution.fileChanges, taskExperience: latestTaskExperience });
+                    }
+                    else {
+                        send({
+                            type: "done",
+                            message_id: taskMessageId,
+                            message_mode: "task",
+                            run: (0, chat_runs_1.publicProjectChatRun)(projectRun),
+                            fileChanges: execution.fileChanges,
+                            workEvents: projectRun.workEvents || [],
+                            taskExperience: latestTaskExperience,
+                            provider_usage: workerResults.map(result => result.usage).filter(Boolean).slice(-1)[0] || null,
                         });
-                        projectRun.memory_admission = memory.lastMemoryAdmission || null;
                     }
-                    catch (error) {
-                        projectRun.memory_admission = { decision: "rejected", error: String(error?.message || error) };
-                    }
-                }
-                projectRun.status = execution.status === "completed" ? "done" : execution.status;
-                projectRun.fileChanges = execution.fileChanges;
-                projectRun.acceptance_state = execution.task?.acceptance_state || execution.status;
-                projectRun.test_agent_review = execution.testAgent || null;
-                projectRun.updated_at = new Date().toISOString();
-                (0, chat_runs_1.saveProjectChatRuns)();
-                if (execution.summary && !finalSummaryStreamed)
-                    send({ type: "chunk", text: execution.summary, agent: "project-main-agent" });
-                const latestTaskExperience = taskExperience();
-                persistTaskMessage(execution.summary, latestTaskExperience);
-                if (execution.status === "failed") {
-                    send({ type: "error", message_id: taskMessageId, text: execution.summary, message_mode: "task", run: (0, chat_runs_1.publicProjectChatRun)(projectRun), fileChanges: execution.fileChanges, taskExperience: latestTaskExperience });
-                }
-                else {
-                    send({
-                        type: "done",
-                        message_id: taskMessageId,
-                        message_mode: "task",
-                        run: (0, chat_runs_1.publicProjectChatRun)(projectRun),
-                        fileChanges: execution.fileChanges,
-                        workEvents: projectRun.workEvents || [],
-                        taskExperience: latestTaskExperience,
-                        provider_usage: workerResults.map(result => result.usage).filter(Boolean).slice(-1)[0] || null,
-                    });
-                }
-                clearInterval(heartbeat);
-                if (feishuTask) {
-                    await (0, feishu_channel_1.notifyFeishuTaskStage)({
-                        stage: execution.status === "completed" ? "completion" : "failure",
-                        title: execution.status === "completed" ? `${(0, project_runtime_1.projectDisplayName)(project)} · 项目任务完成` : `${(0, project_runtime_1.projectDisplayName)(project)} · 项目任务未完成`,
-                        markdown: execution.summary || (execution.status === "completed" ? "项目任务已经通过项目主 Agent 验收。" : "项目任务执行失败或仍有阻塞。"),
-                        dedupeKey: `project-main:${task.id}:${execution.status}`,
-                        runId: projectRun.id,
-                        taskId: task.id,
-                        sessionId: exactProjectSessionId,
-                        forceNewMessage: true,
-                    });
-                    retainDispatchAfterResponse = false;
-                    releaseDispatch();
-                }
-                else {
-                    releaseDispatch();
-                    res.end();
-                }
-            }
-            catch (error) {
-                const messageText = String(error?.message || error || "项目主 Agent 执行失败");
-                if (source === "feishu" && retainDispatchAfterResponse) {
-                    try {
+                    clearInterval(heartbeat);
+                    if (feishuTask) {
                         await (0, feishu_channel_1.notifyFeishuTaskStage)({
-                            stage: "failure",
-                            title: `${(0, project_runtime_1.projectDisplayName)(project)} · 项目任务异常`,
-                            markdown: `项目主 Agent 后台执行没有完成：${messageText}`,
-                            dedupeKey: `project-main-background-failure:${project}:${exactProjectSessionId}:${parentRunId || finalMessage.slice(0, 80)}`,
+                            stage: execution.status === "completed" ? "completion" : "failure",
+                            title: execution.status === "completed" ? `${(0, project_runtime_1.projectDisplayName)(project)} · 项目任务完成` : `${(0, project_runtime_1.projectDisplayName)(project)} · 项目任务未完成`,
+                            markdown: execution.summary || (execution.status === "completed" ? "项目任务已经通过项目主 Agent 验收。" : "项目任务执行失败或仍有阻塞。"),
+                            dedupeKey: `project-main:${task.id}:${execution.status}`,
+                            runId: projectRun.id,
+                            taskId: task.id,
                             sessionId: exactProjectSessionId,
                             forceNewMessage: true,
                         });
+                        retainDispatchAfterResponse = false;
+                        releaseDispatch();
                     }
-                    catch { }
-                    retainDispatchAfterResponse = false;
-                    releaseDispatch();
-                    return;
+                    else {
+                        releaseDispatch();
+                        res.end();
+                    }
                 }
-                releaseDispatch();
-                throw error;
-            }
-        };
+                catch (error) {
+                    const messageText = String(error?.message || error || "项目主 Agent 执行失败");
+                    if (source === "feishu" && retainDispatchAfterResponse) {
+                        try {
+                            await (0, feishu_channel_1.notifyFeishuTaskStage)({
+                                stage: "failure",
+                                title: `${(0, project_runtime_1.projectDisplayName)(project)} · 项目任务异常`,
+                                markdown: `项目主 Agent 后台执行没有完成：${messageText}`,
+                                dedupeKey: `project-main-background-failure:${project}:${exactProjectSessionId}:${parentRunId || finalMessage.slice(0, 80)}`,
+                                sessionId: exactProjectSessionId,
+                                forceNewMessage: true,
+                            });
+                        }
+                        catch { }
+                        retainDispatchAfterResponse = false;
+                        releaseDispatch();
+                        return;
+                    }
+                    releaseDispatch();
+                    throw error;
+                }
+            });
+        });
         if (contentType.includes("multipart/form-data")) {
             (0, secure_multipart_1.parseSecureMultipartRequest)(req).then(({ files, fields }) => {
                 try {
-                    void handleStreamSend(fields.project, fields.message, files, String(fields.parent_run_id || fields.parentRunId || ""), String(fields.session_id || fields.sessionId || ""), String(fields.source || "web"), {}, String(fields.client_message_id || fields.clientMessageId || ""), String(fields.assistant_message_id || fields.assistantMessageId || ""), fields.clarification_payload ? JSON.parse(String(fields.clarification_payload)) : null, [], [], String(fields.conversation_turn_id || ""), String(fields.resolved_route || ""), String(fields.resolved_candidate_task_id || ""));
+                    void handleStreamSend(fields.project, fields.message, files, String(fields.parent_run_id || fields.parentRunId || ""), String(fields.session_id || fields.sessionId || ""), String(fields.source || "web"), {}, String(fields.client_message_id || fields.clientMessageId || ""), String(fields.assistant_message_id || fields.assistantMessageId || ""), fields.clarification_payload ? JSON.parse(String(fields.clarification_payload)) : null, [], [], String(fields.conversation_turn_id || ""), String(fields.resolved_route || ""), String(fields.resolved_candidate_task_id || ""), String(fields.discussion_task_id || ""), String(fields.new_topic || "") === "true").catch(error => (0, conversation_attempt_1.failConversationAttemptResponse)(res, error));
                 }
                 catch (e) {
                     (0, utils_1.sendJson)(res, { error: e.message }, 400);
@@ -2693,8 +2733,8 @@ function handleRequest(req, res) {
         req.on("data", (chunk) => body += chunk);
         req.on("end", () => {
             try {
-                const { project, message, files, attachments, cc_connect_attachment_refs, parent_run_id, parentRunId, session_id, sessionId, source, platform_context, platformContext, client_message_id, clientMessageId, assistant_message_id, assistantMessageId, clarification_payload, clarificationPayload, conversation_turn_id, resolved_route, resolved_candidate_task_id } = JSON.parse(body);
-                void handleStreamSend(project, message, Array.isArray(files) ? files : [], String(parent_run_id || parentRunId || ""), String(session_id || sessionId || ""), String(source || "web"), platform_context || platformContext || {}, String(client_message_id || clientMessageId || ""), String(assistant_message_id || assistantMessageId || ""), clarification_payload || clarificationPayload || null, Array.isArray(cc_connect_attachment_refs) ? cc_connect_attachment_refs : [], Array.isArray(attachments) ? attachments : [], String(conversation_turn_id || ""), String(resolved_route || ""), String(resolved_candidate_task_id || ""));
+                const { project, message, files, attachments, cc_connect_attachment_refs, parent_run_id, parentRunId, session_id, sessionId, source, platform_context, platformContext, client_message_id, clientMessageId, assistant_message_id, assistantMessageId, clarification_payload, clarificationPayload, conversation_turn_id, resolved_route, resolved_candidate_task_id, discussion_task_id, new_topic } = JSON.parse(body);
+                void handleStreamSend(project, message, Array.isArray(files) ? files : [], String(parent_run_id || parentRunId || ""), String(session_id || sessionId || ""), String(source || "web"), platform_context || platformContext || {}, String(client_message_id || clientMessageId || ""), String(assistant_message_id || assistantMessageId || ""), clarification_payload || clarificationPayload || null, Array.isArray(cc_connect_attachment_refs) ? cc_connect_attachment_refs : [], Array.isArray(attachments) ? attachments : [], String(conversation_turn_id || ""), String(resolved_route || ""), String(resolved_candidate_task_id || ""), String(discussion_task_id || ""), new_topic === true).catch(error => (0, conversation_attempt_1.failConversationAttemptResponse)(res, error));
             }
             catch (e) {
                 (0, utils_1.sendJson)(res, { error: e.message }, 400);
@@ -2793,7 +2833,7 @@ function handleRequest(req, res) {
         return;
     if ((0, task_intake_preflight_1.handleTaskPreflightApi)(pathname, req, res))
         return;
-    if ((0, cron_1.handleCronApi)(pathname, req, res, parsed, collabCtx))
+    if ((0, automation_routes_1.handleAutomationRoutes)(pathname, req, res, parsed, collabCtx))
         return;
     if ((0, shared_files_api_1.handleSharedFilesV2Api)(pathname, req, res, parsed))
         return;
@@ -2804,6 +2844,41 @@ function handleRequest(req, res) {
     if ((0, music_1.handleMusicApi)(pathname, req, res, parsed, musicCtx))
         return;
     if ((0, task_permission_routes_1.handleTaskPermissionRoutes)(pathname, req, res, parsed, collabCtx))
+        return;
+    if ((0, task_recovery_routes_1.handleTaskRecoveryRoutes)(pathname, req, res))
+        return;
+    if ((0, task_acceptance_routes_1.handleTaskAcceptanceRoute)(pathname, req, res))
+        return;
+    if ((0, task_session_routes_1.handleTaskSessionRoutes)(pathname, req, res, parsed, {
+        ...(0, task_session_controls_1.taskSessionControls)({
+            updateTask: collaboration_task_service_1.updateTask,
+            enqueueTask: (id, runId) => (0, collaboration_1.enqueueTask)(id, collabCtx, runId),
+            retryTask: (id, reason, autoExecute, runId) => (0, collaboration_1.retryTask)(id, collabCtx, reason, autoExecute, runId),
+            removeTaskFromQueues: collaboration_1.removeTaskFromQueues,
+            requestTaskCancellation: execution_kernel_2.requestTaskCancellation,
+            dispatchRoute: (path, request, response, route) => (0, collaboration_1.handleCollaborationApi)(path, request, response, route, collabCtx),
+        }),
+        confirmFollowUp: ({ task, pending, payload }) => {
+            const result = (0, collaboration_1.continueTaskWithMessage)(task.id, pending.content, collabCtx, {
+                continuation_kind: "revise_goal",
+                source: "task-session-follow-up",
+                rework_kind: "user_requested",
+                reason: String(payload?.reason || "用户在任务会话中确认继续执行").trim(),
+                idempotency_key: String(payload?.idempotency_key || payload?.idempotencyKey || `task-session:${task.id}:${pending.message_id}`),
+                auto_execute: payload?.auto_execute !== false,
+                authorizationValid: true,
+            });
+            if (result?.task) {
+                try {
+                    (0, task_session_store_1.materializeTaskSession)(result.task);
+                }
+                catch { }
+            }
+            return { ...result, pending_follow_up: "accepted" };
+        },
+    }))
+        return;
+    if ((0, task_workbench_routes_1.handleTaskWorkbenchRoutes)(pathname, req, res, parsed))
         return;
     if ((0, session_compaction_hook_routes_1.handleSessionCompactionHookRoutes)(pathname, req, res, parsed))
         return;
@@ -2872,7 +2947,7 @@ function bootstrapServerRuntime(startupCollabCtx, port) {
         resumeTaskQueues: collaboration_1.resumeTaskQueues,
         saveFeishuConfig: db_1.saveFeishuConfig,
         startAgentRecoveryMonitor: collaboration_1.startAgentRecoveryMonitor,
-        startCronScheduler: cron_1.startCronScheduler,
+        startAutomationScheduler: automation_scheduler_1.startAutomationScheduler,
         startGlobalMissionSupervisionForServer: global_agent_1.startGlobalMissionSupervisionForServer,
         startGroupSessionRetentionMaintenanceScheduler: group_session_maintenance_1.startGroupSessionRetentionMaintenanceScheduler,
         startReliabilityDrillScheduler: reliability_drills_1.startReliabilityDrillScheduler,
@@ -2928,6 +3003,7 @@ function startServer(port, host = process.env.CCM_HOST || "127.0.0.1") {
         (0, server_instance_lock_1.releaseCcmServerInstanceLock)(instanceLock);
     });
     server.on("close", () => {
+        STARTUP_RECOVERY_TRIGGER = null;
         SERVICE_LIFECYCLE_STATE = "stopped";
         (0, projects_1.stopFeishuChannelSupervisorForServer)();
         (0, projects_1.stopControlBotConnection)();
@@ -2936,7 +3012,7 @@ function startServer(port, host = process.env.CCM_HOST || "127.0.0.1") {
             void (0, project_runtime_1.stopManagedProjectRuntimesForShutdown)();
             void (0, terminal_1.stopAllTerminalRuns)();
         }
-        (0, cron_1.stopCronScheduler)();
+        (0, automation_scheduler_1.stopAutomationScheduler)();
         (0, collaboration_1.stopTaskWatchdog)();
         (0, collaboration_1.stopAgentRecoveryMonitor)();
         (0, global_agent_1.stopGlobalMissionSupervisionForServer)();
@@ -2964,111 +3040,153 @@ function startServer(port, host = process.env.CCM_HOST || "127.0.0.1") {
         // Port ownership and the data-directory lock are the fail-closed singleton
         // gates. No mutable startup work may run before both have succeeded.
         SERVICE_LIFECYCLE_STATE = "ready";
-        try {
-            const marketplaceRecovery = (0, marketplace_1.recoverMarketplaceProductionState)();
-            if (marketplaceRecovery.quarantined || marketplaceRecovery.recoveredTransactions) {
-                console.log(`[工具市场] 隔离旧外部工具 ${marketplaceRecovery.quarantined} 个，恢复待处理事务 ${marketplaceRecovery.recoveredTransactions} 个`);
-            }
-        }
-        catch (error) {
-            console.warn(`[工具市场] 启动恢复失败：${error?.message || error}`);
-        }
-        bootstrapServerRuntime(startupCollabCtx, port);
-        (0, feishu_channel_1.setFeishuChannelAlertHandler)(payload => {
-            startupCollabCtx.broadcastPetSpeech?.("global-agent", { role: payload.role, text: payload.text, final: true, source: payload.source });
-        });
-        (0, task_permission_broker_1.startTaskPermissionNotificationScheduler)(startupCollabCtx);
-        (0, agent_communication_v2_1.startAgentCommunicationWatchdog)({
-            onSafeRetry: outcome => {
-                const reason = `Agent Communication ${outcome.toState}，确认无副作用后自动重试`;
+        // The port and lifecycle identity are already verified above. Startup
+        // recovery can block the event loop on large workspaces, so trigger it
+        // only after the CLI has received a complete ready response. Keep a
+        // fallback for direct server launches that do not perform that probe.
+        let startupRecoveryStarted = false;
+        let startupRecoveryFallback = null;
+        const beginStartupRecovery = () => {
+            if (startupRecoveryStarted)
+                return;
+            startupRecoveryStarted = true;
+            if (startupRecoveryFallback)
+                clearTimeout(startupRecoveryFallback);
+            setImmediate(() => {
                 try {
-                    (0, agent_communication_v2_1.performAgentCommunicationAction)(outcome.messageId, "retry", { reason, actor: "agent-communication-watchdog" });
-                    (0, execution_kernel_2.requestTaskCancellation)(outcome.taskId, reason, "agent-communication-watchdog");
+                    const marketplaceRecovery = (0, marketplace_1.recoverMarketplaceProductionState)();
+                    if (marketplaceRecovery.quarantined || marketplaceRecovery.recoveredTransactions) {
+                        console.log(`[工具市场] 隔离旧外部工具 ${marketplaceRecovery.quarantined} 个，恢复待处理事务 ${marketplaceRecovery.recoveredTransactions} 个`);
+                    }
                 }
                 catch (error) {
-                    console.warn(`[Agent Communication] 自动重试准备失败：${error?.message || error}`);
-                    return;
+                    console.warn(`[工具市场] 启动恢复失败：${error?.message || error}`);
                 }
-                const deadline = Date.now() + 60_000;
-                const retryAfterRunnerStops = () => {
-                    const result = (0, collaboration_1.retryTask)(outcome.taskId, startupCollabCtx, reason, true);
-                    if (result?.success)
-                        return;
-                    if (Date.now() < deadline && [409, 429].includes(Number(result?.status || 0))) {
-                        const timer = setTimeout(retryAfterRunnerStops, 2_000);
-                        timer.unref?.();
-                        return;
-                    }
+                try {
+                    bootstrapServerRuntime(startupCollabCtx, port);
+                }
+                catch (error) {
+                    console.error(`[启动恢复] 后台启动恢复失败：${error?.stack || error?.message || error}`);
+                }
+            });
+        };
+        STARTUP_RECOVERY_TRIGGER = beginStartupRecovery;
+        const fallbackDelayMs = Math.max(1_000, Math.min(30_000, Number(process.env.CCM_STARTUP_RECOVERY_FALLBACK_MS || 15_000)));
+        startupRecoveryFallback = setTimeout(beginStartupRecovery, fallbackDelayMs);
+        startupRecoveryFallback.unref?.();
+        // Keep every other post-listen setup out of the initial event-loop turns.
+        // `setImmediate` runs before the socket poll phase on this Windows
+        // startup path, so synchronous scheduler/index registration can still
+        // starve the CLI readiness requests. Give the handshake a real window.
+        const postListenSetup = setTimeout(() => {
+            (0, feishu_channel_1.setFeishuChannelAlertHandler)(payload => {
+                startupCollabCtx.broadcastPetSpeech?.("global-agent", { role: payload.role, text: payload.text, final: true, source: payload.source });
+            });
+            (0, task_permission_broker_1.startTaskPermissionNotificationScheduler)(startupCollabCtx);
+            (0, agent_communication_v2_1.startAgentCommunicationWatchdog)({
+                onSafeRetry: outcome => {
+                    const reason = `Agent Communication ${outcome.toState}，确认无副作用后自动重试`;
                     try {
-                        (0, agent_communication_v2_1.performAgentCommunicationAction)(outcome.messageId, "takeover", {
-                            reason: `自动重试未能在60秒内安全重新入队：${String(result?.error || "unknown").slice(0, 300)}`,
-                            actor: "agent-communication-watchdog",
-                        });
+                        (0, agent_communication_v2_1.performAgentCommunicationAction)(outcome.messageId, "retry", { reason, actor: "agent-communication-watchdog" });
+                        (0, execution_kernel_2.requestTaskCancellation)(outcome.taskId, reason, "agent-communication-watchdog");
                     }
-                    catch { }
-                };
-                const timer = setTimeout(retryAfterRunnerStops, 250);
-                timer.unref?.();
-            },
-        });
-        const petAutoStart = (0, pets_1.maybeAutoStartPet)(port);
-        if (!petAutoStart.success) {
-            console.warn(`[桌面宠物] 自动启动失败：${"error" in petAutoStart ? petAutoStart.error || "未知错误" : "未知错误"}`);
-        }
-        (0, model_capability_cache_1.startModelCapabilityRefreshScheduler)();
-        (0, runtime_tool_real_cli_matrix_1.startRuntimeToolRealCliMatrixScheduler)();
-        (0, cleanup_center_1.recoverCleanupTransactions)();
-        (0, storage_index_1.startStorageIndexScheduler)();
-        (0, conversation_search_index_1.startConversationSearchIndexScheduler)();
-        // 预热提供商状态缓存：让首个请求也走缓存路径，避免同步 spawnSync 探测冻结事件循环
-        void (0, agent_provider_settings_1.refreshAgentProviderStatusesAsync)().catch(() => { });
-        const localEmbeddingStartup = (0, knowledge_model_startup_1.scheduleLocalKnowledgeModelStartupPreparation)();
-        if (localEmbeddingStartup.scheduled)
-            console.log("[知识库] 本地语义模型将在后台下载或校验，不阻塞 CCM 启动");
-        console.log("");
-        console.log(`CCM Workspace  v${CCM_RUNTIME_VERSION}`);
-        console.log("------------------------------------------------------");
-        console.log(`Local URL   http://localhost:${port}`);
-        console.log(`Listen      ${LISTEN_HOST}:${port}`);
-        for (const accessUrl of networkAccessUrls(LISTEN_HOST, port))
-            console.log(`Network URL ${accessUrl}`);
-        console.log(`Data        ${utils_1.CCM_DIR}`);
-        console.log(`Runtime     ${networkAccessUrls(LISTEN_HOST, port).length ? "remote access enabled; login required" : "local authenticated workspace"}`);
-        console.log("Stop        Ctrl+C");
-        console.log("");
-        void (0, global_agent_1.resumeGlobalAgentLoopsForServer)(startupCollabCtx, port)
-            .then(result => {
-            if (result.total > 0)
-                console.log(`[全局 Agent] 启动恢复 ${result.resumed}/${result.total} 个运行`);
-        })
-            .catch(error => console.warn(`[全局 Agent] 启动恢复失败：${error?.message || error}`))
-            .finally(() => {
-            (0, global_agent_1.startGlobalWebTurnRecoveryForServer)(`http://127.0.0.1:${port}`, startupCollabCtx);
-            (0, global_agent_1.startFeishuConversationTurnRecoveryForServer)(`http://127.0.0.1:${port}`, startupCollabCtx);
-        });
-        (0, project_feishu_turn_queue_1.startProjectFeishuTurnRecoveryForServer)(`http://127.0.0.1:${port}`);
-        (0, conversation_turn_control_1.reconcileTaskDispatchTurns)();
-        (0, conversation_turn_control_1.startWebConversationTurnRecoveryForServer)(`http://127.0.0.1:${port}`);
-        try {
-            const feishuConfig = (0, db_1.loadFeishuConfig)();
-            const hasControlBotCredentials = !!((feishuConfig.control_bot_app_id || feishuConfig.app_id) && (feishuConfig.control_bot_app_secret || feishuConfig.app_secret));
-            if (feishuConfig.control_bot_enabled === true && hasControlBotCredentials) {
-                const result = (0, projects_1.startControlBotConnection)(port);
-                console.log(`[飞书控制机器人] ${result.message || "长连接已启动"}${result.pid ? ` (PID: ${result.pid})` : ""}`);
+                    catch (error) {
+                        console.warn(`[Agent Communication] 自动重试准备失败：${error?.message || error}`);
+                        return;
+                    }
+                    const deadline = Date.now() + 60_000;
+                    const retryAfterRunnerStops = () => {
+                        const result = (0, collaboration_1.retryTask)(outcome.taskId, startupCollabCtx, reason, true);
+                        if (result?.success)
+                            return;
+                        if (Date.now() < deadline && [409, 429].includes(Number(result?.status || 0))) {
+                            const timer = setTimeout(retryAfterRunnerStops, 2_000);
+                            timer.unref?.();
+                            return;
+                        }
+                        try {
+                            (0, agent_communication_v2_1.performAgentCommunicationAction)(outcome.messageId, "takeover", {
+                                reason: `自动重试未能在60秒内安全重新入队：${String(result?.error || "unknown").slice(0, 300)}`,
+                                actor: "agent-communication-watchdog",
+                            });
+                        }
+                        catch { }
+                    };
+                    const timer = setTimeout(retryAfterRunnerStops, 250);
+                    timer.unref?.();
+                },
+            });
+            const petAutoStart = (0, pets_1.maybeAutoStartPet)(port);
+            if (!petAutoStart.success) {
+                console.warn(`[桌面宠物] 自动启动失败：${"error" in petAutoStart ? petAutoStart.error || "未知错误" : "未知错误"}`);
             }
-        }
-        catch (error) {
-            console.warn(`[飞书控制机器人] 自动启动失败：${error?.message || error}`);
-        }
-        void (0, projects_1.reconcileProjectFeishuConnections)(port).then(projectChannelResults => {
-            const recycledProjectChannels = projectChannelResults.filter((item) => item.recycled).length;
-            const failedProjectChannels = projectChannelResults.filter((item) => item.success === false);
-            if (recycledProjectChannels > 0)
-                console.log(`[项目飞书通道] 已更新并重连 ${recycledProjectChannels} 个旧运行实例`);
-            for (const item of failedProjectChannels)
-                console.warn(`[项目飞书通道] ${item.project} 协调失败：${item.error}`);
-        }).catch(error => console.warn(`[项目飞书通道] 启动协调失败：${error?.message || error}`));
-        (0, projects_1.startFeishuChannelSupervisorForServer)(port);
+            (0, model_capability_cache_1.startModelCapabilityRefreshScheduler)();
+            (0, runtime_tool_real_cli_matrix_1.startRuntimeToolRealCliMatrixScheduler)();
+            (0, cleanup_center_1.recoverCleanupTransactions)();
+            (0, storage_index_1.startStorageIndexScheduler)();
+            (0, conversation_search_index_1.startConversationSearchIndexScheduler)();
+            // 预热提供商状态缓存：让首个请求也走缓存路径，避免同步 spawnSync 探测冻结事件循环
+            void (0, agent_provider_settings_1.refreshAgentProviderStatusesAsync)().catch(() => { });
+            const localEmbeddingStartup = (0, knowledge_model_startup_1.scheduleLocalKnowledgeModelStartupPreparation)();
+            if (localEmbeddingStartup.scheduled)
+                console.log("[知识库] 本地语义模型将在后台下载或校验，不阻塞 CCM 启动");
+            console.log("");
+            console.log(`CCM Workspace  v${CCM_RUNTIME_VERSION}`);
+            console.log("------------------------------------------------------");
+            console.log(`Local URL   http://localhost:${port}`);
+            console.log(`Listen      ${LISTEN_HOST}:${port}`);
+            for (const accessUrl of networkAccessUrls(LISTEN_HOST, port))
+                console.log(`Network URL ${accessUrl}`);
+            console.log(`Data        ${utils_1.CCM_DIR}`);
+            console.log(`Runtime     ${networkAccessUrls(LISTEN_HOST, port).length ? "remote access enabled; login required" : "local authenticated workspace"}`);
+            console.log("Stop        Ctrl+C");
+            console.log("");
+            // Never resume persisted global model work or queued global turns merely
+            // because the server started. A stale queued turn can otherwise be picked
+            // up every few seconds and create unexpected Responses API charges. Users
+            // who explicitly want crash recovery can opt in for this process with
+            // CCM_AUTO_RESUME_GLOBAL_AGENT=1.
+            const autoResumeGlobalAgent = /^(1|true|yes|on)$/i.test(String(process.env.CCM_AUTO_RESUME_GLOBAL_AGENT || ""));
+            if (autoResumeGlobalAgent) {
+                void (0, global_agent_1.resumeGlobalAgentLoopsForServer)(startupCollabCtx, port)
+                    .then(result => {
+                    if (result.total > 0)
+                        console.log(`[全局 Agent] 启动恢复 ${result.resumed}/${result.total} 个运行`);
+                })
+                    .catch(error => console.warn(`[全局 Agent] 启动恢复失败：${error?.message || error}`))
+                    .finally(() => {
+                    (0, global_agent_1.startFeishuConversationTurnRecoveryForServer)(`http://127.0.0.1:${port}`, startupCollabCtx);
+                });
+            }
+            else {
+                console.log("[全局 Agent] 启动自动续跑默认关闭；如需恢复中断运行，请显式设置 CCM_AUTO_RESUME_GLOBAL_AGENT=1");
+            }
+            (0, project_feishu_turn_queue_1.startProjectFeishuTurnRecoveryForServer)(`http://127.0.0.1:${port}`);
+            (0, global_agent_1.startGlobalWebTurnRecoveryForServer)(`http://127.0.0.1:${port}`, startupCollabCtx);
+            (0, conversation_turn_control_1.reconcileTaskDispatchTurns)();
+            (0, conversation_turn_control_1.startWebConversationTurnRecoveryForServer)(`http://127.0.0.1:${port}`);
+            try {
+                const feishuConfig = (0, db_1.loadFeishuConfig)();
+                const hasControlBotCredentials = !!((feishuConfig.control_bot_app_id || feishuConfig.app_id) && (feishuConfig.control_bot_app_secret || feishuConfig.app_secret));
+                if (feishuConfig.control_bot_enabled === true && hasControlBotCredentials) {
+                    const result = (0, projects_1.startControlBotConnection)(port);
+                    console.log(`[飞书控制机器人] ${result.message || "长连接已启动"}${result.pid ? ` (PID: ${result.pid})` : ""}`);
+                }
+            }
+            catch (error) {
+                console.warn(`[飞书控制机器人] 自动启动失败：${error?.message || error}`);
+            }
+            void (0, projects_1.reconcileProjectFeishuConnections)(port).then(projectChannelResults => {
+                const recycledProjectChannels = projectChannelResults.filter((item) => item.recycled).length;
+                const failedProjectChannels = projectChannelResults.filter((item) => item.success === false);
+                if (recycledProjectChannels > 0)
+                    console.log(`[项目飞书通道] 已更新并重连 ${recycledProjectChannels} 个旧运行实例`);
+                for (const item of failedProjectChannels)
+                    console.warn(`[项目飞书通道] ${item.project} 协调失败：${item.error}`);
+            }).catch(error => console.warn(`[项目飞书通道] 启动协调失败：${error?.message || error}`));
+            (0, projects_1.startFeishuChannelSupervisorForServer)(port);
+        }, 5_000);
+        postListenSetup.unref?.();
     });
     process.once("exit", () => (0, server_instance_lock_1.releaseCcmServerInstanceLock)(instanceLock));
     server.beginManagedShutdown = () => { managedShutdownInProgress = true; };
@@ -3097,7 +3215,7 @@ if (require.main === module) {
         server.beginManagedShutdown?.();
         if (lifecycleHeartbeat)
             clearInterval(lifecycleHeartbeat);
-        (0, cron_1.stopCronScheduler)();
+        (0, automation_scheduler_1.stopAutomationScheduler)();
         (0, collaboration_1.stopTaskWatchdog)();
         (0, collaboration_1.stopAgentRecoveryMonitor)();
         (0, global_agent_1.stopGlobalMissionSupervisionForServer)();

@@ -11,6 +11,7 @@ const daily_dev_backlog_1 = require("./daily-dev-backlog");
 const model_capability_cache_1 = require("./model-capability-cache");
 const provider_cache_capability_probe_1 = require("../../system/provider-cache-capability-probe");
 const provider_cache_capability_registry_1 = require("../../system/provider-cache-capability-registry");
+const provider_cache_capability_registry_2 = require("../../system/provider-cache-capability-registry");
 const provider_neutral_context_cache_1 = require("../../system/provider-neutral-context-cache");
 const context_engine_observability_1 = require("../../system/context-engine-observability");
 const context_engine_recovery_1 = require("../../system/context-engine-recovery");
@@ -63,6 +64,7 @@ function handleOrchestratorRoutes(req, res, parsed, ctx, deps) {
         req.on("end", () => {
             try {
                 const updates = JSON.parse(body);
+                const previousConfig = (0, group_orchestrator_1.loadOrchestratorConfig)();
                 const config = (0, group_orchestrator_1.saveOrchestratorConfig)(updates);
                 if (Number(config.modelContextWindow || 0) > 0
                     && ["modelContextWindow", "model_context_window", "memoryContextPreset", "memory_context_preset"].some(key => Object.prototype.hasOwnProperty.call(updates, key))) {
@@ -80,7 +82,10 @@ function handleOrchestratorRoutes(req, res, parsed, ctx, deps) {
                     const { startGroupSessionRetentionMaintenanceScheduler } = require("./group-session-maintenance");
                     startGroupSessionRetentionMaintenanceScheduler();
                 }
-                (0, provider_cache_capability_probe_1.scheduleProviderCacheCapabilityProbe)(config);
+                const previousIdentity = (0, provider_cache_capability_registry_2.providerCacheCapabilityIdentity)(previousConfig).identityChecksum;
+                const nextIdentity = (0, provider_cache_capability_registry_2.providerCacheCapabilityIdentity)(config).identityChecksum;
+                if (previousIdentity !== nextIdentity)
+                    (0, provider_cache_capability_probe_1.scheduleProviderCacheCapabilityProbe)(config, { force: true });
                 (0, utils_1.sendJson)(res, { success: true, config: (0, group_orchestrator_1.publicOrchestratorConfig)(config) });
             }
             catch (e) {
@@ -327,13 +332,13 @@ function handleOrchestratorRoutes(req, res, parsed, ctx, deps) {
         });
         return true;
     }
-    if (pathname === "/api/orchestrator/daily-dev-autopilot/ensure-cron" && req.method === "POST") {
+    if (pathname === "/api/orchestrator/daily-dev-autopilot/ensure-automation" && req.method === "POST") {
         let body = "";
         req.on("data", (chunk) => body += chunk);
         req.on("end", () => {
             try {
                 const payload = body ? JSON.parse(body) : {};
-                (0, utils_1.sendJson)(res, (0, daily_dev_backlog_1.ensureDailyDevAutopilotCronJobs)(payload));
+                (0, utils_1.sendJson)(res, (0, daily_dev_backlog_1.ensureDailyDevAutopilotAutomationDefinitions)(payload));
             }
             catch (e) {
                 (0, utils_1.sendJson)(res, { success: false, error: e.message }, 400);

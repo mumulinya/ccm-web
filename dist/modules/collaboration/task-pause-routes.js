@@ -7,6 +7,7 @@ exports.resumeTaskPauseTree = resumeTaskPauseTree;
 exports.handleTaskPauseRoutes = handleTaskPauseRoutes;
 const task_conversation_links_1 = require("../../system/task-conversation-links");
 const access_policy_1 = require("../system/access-policy");
+const task_run_store_1 = require("./task-run-store");
 const task_pause_control_1 = require("../../tasks/task-pause-control");
 function taskIdFrom(value) {
     return String(value?.task_id || value?.taskId || value?.id || "").trim();
@@ -284,7 +285,7 @@ async function resumeTaskPauseTree(task, ctx, deps) {
     for (const row of resumedRows) {
         if (row.auto_execute === false || String(row.workflow_type || "") === "global_mission")
             continue;
-        deps.enqueueTask(String(row.id || ""), ctx);
+        deps.enqueueTask(String(row.id || ""), ctx, String(row.active_run_id || row.run_id || row.task_run?.run_id || ""));
     }
     const root = deps.loadTasks().find((item) => String(item?.id || "") === String(task?.id || "")) || resumedRows[resumedRows.length - 1] || task;
     await ctx.onTaskStatusChange?.(root, "resumed", root.status_detail);
@@ -326,6 +327,9 @@ function handleTaskPauseRoutes(req, res, parsed, ctx, deps) {
             return deps.sendJson(res, { success: false, error: "任务不存在" }, 404);
         if (!(0, access_policy_1.hasTaskResourceAccess)(task, req.ccmAuth, "manage"))
             return deps.sendJson(res, { success: false, error: "当前账户没有该任务的管理权限", code: "RESOURCE_ACCESS_DENIED" }, 403);
+        const runGuard = (0, task_run_store_1.validateActiveTaskRun)(task, payload?.run_id || payload?.runId || "");
+        if (!runGuard.ok)
+            return deps.sendJson(res, { success: false, ...runGuard }, 409);
         const conflict = mutationConflict(task, payload, pathname === "/api/tasks/resume-paused");
         if (conflict)
             return deps.sendJson(res, { success: false, error: conflict.error, code: conflict.code, ...conflict.details }, conflict.status);

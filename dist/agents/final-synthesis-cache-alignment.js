@@ -28,6 +28,7 @@ function buildCacheAlignedFinalMessages(input) {
             identityRules: input.identityRules,
             sessionGuidance: input.sessionGuidance,
             mcpPolicy: input.mcpPolicy,
+            toolPromptLayout: input.toolPromptLayout,
         }),
         instruction: input.instruction,
         payload: input.payload,

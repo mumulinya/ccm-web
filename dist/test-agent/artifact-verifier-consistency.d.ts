@@ -1,0 +1,14 @@
+import { TestAgentArtifactManifest, TestAgentArtifactManifestItem, TestAgentReport } from "./types";
+import { TestAgentArtifactVerificationItem } from "./artifact-verifier-core";
+export declare function verifyHttpPageResourceConsistency(report: TestAgentReport, errors: string[]): void;
+export declare function verifyReportVerdictConsistency(manifest: TestAgentArtifactManifest, manifestPath: string, manifestFiles: TestAgentArtifactManifestItem[], integrityItems: TestAgentArtifactVerificationItem[]): TestAgentArtifactVerificationItem[];
+export declare function verifyReportBrowserToolTimeout(manifestPath: string, manifestFiles: TestAgentArtifactManifestItem[], integrityItems: TestAgentArtifactVerificationItem[]): TestAgentArtifactVerificationItem[];
+export declare function verifyReportBrowserToolLineage(manifestPath: string, manifestFiles: TestAgentArtifactManifestItem[], integrityItems: TestAgentArtifactVerificationItem[]): TestAgentArtifactVerificationItem[];
+export declare function verifyReportBrowserExecutionCoverage(manifestPath: string, manifestFiles: TestAgentArtifactManifestItem[], integrityItems: TestAgentArtifactVerificationItem[]): TestAgentArtifactVerificationItem[];
+export declare function verifyReportBrowserTemporalEvidence(manifestPath: string, manifestFiles: TestAgentArtifactManifestItem[], integrityItems: TestAgentArtifactVerificationItem[]): TestAgentArtifactVerificationItem[];
+export declare function verifyReportBrowserResourceLifecycleEvidence(manifestPath: string, manifestFiles: TestAgentArtifactManifestItem[], integrityItems: TestAgentArtifactVerificationItem[]): TestAgentArtifactVerificationItem[];
+export declare function verifyReportRecoveryEvidence(manifestPath: string, manifestFiles: TestAgentArtifactManifestItem[], integrityItems: TestAgentArtifactVerificationItem[]): TestAgentArtifactVerificationItem[];
+export declare function verifyReportAuthenticationEvidence(manifestPath: string, manifestFiles: TestAgentArtifactManifestItem[], integrityItems: TestAgentArtifactVerificationItem[]): TestAgentArtifactVerificationItem[];
+export declare function verifyReportActionEffectEvidence(manifestPath: string, manifestFiles: TestAgentArtifactManifestItem[], integrityItems: TestAgentArtifactVerificationItem[]): TestAgentArtifactVerificationItem[];
+export declare function verifyReportAdversarialEvidence(manifestPath: string, manifestFiles: TestAgentArtifactManifestItem[], integrityItems: TestAgentArtifactVerificationItem[]): TestAgentArtifactVerificationItem[];
+export declare function verifyReportAcceptanceEvidence(manifestPath: string, manifestFiles: TestAgentArtifactManifestItem[], integrityItems: TestAgentArtifactVerificationItem[]): TestAgentArtifactVerificationItem[];

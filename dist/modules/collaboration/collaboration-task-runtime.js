@@ -25,9 +25,11 @@ const startup_task_recovery_1 = require("./startup-task-recovery");
 const test_agent_runner_1 = require("./test-agent-runner");
 const execution_kernel_1 = require("../../agents/execution-kernel");
 const task_recovery_orchestrator_1 = require("../../tasks/task-recovery-orchestrator");
+const session_task_timeline_1 = require("../../tasks/session-task-timeline");
 const reliability_ledger_1 = require("../../system/reliability-ledger");
 const work_items_1 = require("../../agents/work-items");
 const collaboration_1 = require("./collaboration");
+const task_run_store_1 = require("./task-run-store");
 let runtimeCollabCtx = null;
 const unlockingMissionParents = new Set();
 function bindTaskRuntimeCollabCtx(ctx) {
@@ -56,12 +58,16 @@ function scheduleRequirementEpicDependencyUnlock(parentId, reason = "child_gate_
     });
     return { scheduled: true, mission_id: missionId, reason };
 }
-function enqueueTask(taskId, ctx) {
+function enqueueTask(taskId, ctx, requestedRunId = "") {
     const tasks = (0, db_1.loadTasks)();
     const task = tasks.find(t => t.id === taskId);
     if (!task) {
         console.log(`[任务队列] 任务 ${taskId} 不存在`);
         return { queued: false, message: "任务不存在" };
+    }
+    const taskRunId = String(task?.active_run_id || task?.task_run?.run_id || task?.run_id || "");
+    if (task?.task_spec?.schema === "ccm-task-spec-v1" && requestedRunId && requestedRunId !== taskRunId) {
+        return { queued: false, blocked: true, reason: "task_run_mismatch", message: "指定运行实例不是当前任务的活动运行" };
     }
     if (task.status === "done") {
         (0, logs_1.addTaskLog)(taskId, "info", "任务已完成，跳过入队");
@@ -97,11 +103,14 @@ function enqueueTask(taskId, ctx) {
     const dependencyIds = Array.isArray(task.mission_dependencies) ? task.mission_dependencies.map(String).filter(Boolean) : [];
     const blockedDependencies = dependencyIds.filter((dependencyId) => {
         const dependency = tasks.find((candidate) => String(candidate.id) === dependencyId);
-        if (!dependency || dependency.status !== "done")
+        if (!dependency || !["done", "completed"].includes(String(dependency.status || "").toLowerCase()) || dependency.acceptance_state === "awaiting_user_acceptance")
             return true;
         const summary = dependency.delivery_summary || {};
         if (task.parent_workflow_type === "requirement_epic" || task.requirement_epic_id) {
-            return dependency.global_mission_gate_passed !== true;
+            const terminalAccepted = dependency.terminal_gate?.passed === true
+                && dependency.test_agent_review?.canAccept === true
+                && dependency.main_agent_final_acceptance?.accepted === true;
+            return dependency.global_mission_gate_passed !== true && !terminalAccepted;
         }
         return false;
     });
@@ -111,7 +120,11 @@ function enqueueTask(taskId, ctx) {
         (0, logs_1.addTaskLog)(taskId, "info", message);
         return { queued: false, blocked: true, dependency_wait: true, dependencies: blockedDependencies, message };
     }
-    const readiness = (0, collaboration_1.getTaskAgentExecutionReadiness)(task);
+    const isTestAgentProjection = String(task?.requirement_item_key || task?.mission_target?.item_key || "").toUpperCase() === "TESTAGENT_VERIFY"
+        || task?.task_kind === "acceptance_projection";
+    const readiness = isTestAgentProjection
+        ? { ready: true, message: "TestAgent 只读投影不需要项目 Agent CLI 探针" }
+        : (0, collaboration_1.getTaskAgentExecutionReadiness)(task);
     if (!readiness.ready) {
         const message = readiness.message || "Agent CLI 执行通道不可用，任务暂不入队";
         const fixActions = Array.isArray(readiness.fix_actions) ? readiness.fix_actions : [];
@@ -122,6 +135,7 @@ function enqueueTask(taskId, ctx) {
         if (!sameReason || !recentlyRecorded) {
             (0, collaboration_1.updateTask)(taskId, {
                 status: "pending",
+                acceptance_state: "blocked",
                 status_detail: message.slice(0, 500),
                 last_queue_blocked_at: new Date().toISOString(),
                 execution_readiness: readiness,
@@ -135,14 +149,14 @@ function enqueueTask(taskId, ctx) {
         collaboration_1.taskQueues.set(targetKey, []);
     }
     const queue = collaboration_1.taskQueues.get(targetKey);
-    if (queue.includes(taskId) || collaboration_1.runningTaskIds.has(taskId)) {
+    if (queue.includes(taskRunId || taskId) || (0, collaboration_1.isTaskRunningInMemory)(task)) {
         (0, logs_1.addTaskLog)(taskId, "info", "任务已在队列中或正在执行，跳过重复入队");
         return { queued: false, message: "任务已在队列中或正在执行" };
     }
     const newPriority = collaboration_1.PRIORITY_WEIGHT[task.priority] || 2;
     let insertIndex = queue.length;
     for (let i = 0; i < queue.length; i++) {
-        const queuedTask = tasks.find(t => t.id === queue[i]);
+        const queuedTask = tasks.find(t => t.id === queue[i] || String(t?.task_run?.run_id || t?.run_id || "") === queue[i]);
         if (!queuedTask)
             continue;
         const queuedPriority = collaboration_1.PRIORITY_WEIGHT[queuedTask.priority] || 2;
@@ -151,27 +165,36 @@ function enqueueTask(taskId, ctx) {
             break;
         }
     }
-    queue.splice(insertIndex, 0, taskId);
-    console.log(`[任务队列] 任务 ${taskId} (${task.priority}) 已加入队列 [${targetKey}]，位置: ${insertIndex + 1}/${queue.length}`);
-    queue.forEach((queuedId, index) => (0, collaboration_1.updateTask)(queuedId, {
-        queued_at: queuedId === taskId ? new Date().toISOString() : undefined,
-        queue_target_key: targetKey,
-        queue_position: index + 1,
-        queue_state: "queued",
-    }));
+    const queueIdentity = taskRunId || taskId;
+    queue.splice(insertIndex, 0, queueIdentity);
+    console.log(`[任务队列] 运行 ${queueIdentity}（任务 ${taskId}，${task.priority}）已加入队列 [${targetKey}]，位置: ${insertIndex + 1}/${queue.length}`);
+    queue.forEach((queuedId, index) => {
+        const queuedTask = tasks.find(t => t.id === queuedId || String(t?.task_run?.run_id || t?.run_id || "") === queuedId);
+        if (!queuedTask)
+            return;
+        (0, collaboration_1.updateTask)(queuedTask.id, {
+            queued_at: queuedId === queueIdentity ? new Date().toISOString() : undefined,
+            queue_target_key: targetKey,
+            queue_position: index + 1,
+            queue_state: "queued",
+            ...(queuedTask.task_run?.run_id ? { task_run_id: queuedTask.task_run.run_id } : {}),
+        });
+    });
     (0, logs_1.addTaskLog)(taskId, "info", `任务已加入队列 [${targetKey}]，位置 ${insertIndex + 1}/${queue.length}`);
+    (0, task_run_store_1.syncTaskRunFromTask)(task, { status: "queued", queue_lane: targetKey, reason: "queued" });
     launchTargetQueueProcessor(targetKey, ctx);
-    return { queued: true, message: "任务已加入队列", targetKey, position: insertIndex + 1 };
+    return { queued: true, message: "任务已加入队列", targetKey, position: insertIndex + 1, run_id: taskRunId };
 }
 function launchTargetQueueProcessor(targetKey, ctx, recoveryAttempt = 0) {
     void (0, collaboration_1.processTargetQueue)(targetKey, ctx).catch((error) => {
         const detail = String(error?.message || error || "队列处理异常").slice(0, 500);
         console.error(`[任务队列] [${targetKey}] 处理器异常:`, detail);
         const queue = collaboration_1.taskQueues.get(targetKey) || [];
-        const nextTaskId = queue[0];
-        if (nextTaskId) {
-            (0, logs_1.addTaskLog)(nextTaskId, "error", `队列处理器异常：${detail}`);
-            (0, logs_1.appendTaskTimelineEvent)(nextTaskId, { type: "queue_processor_error", title: "队列处理器正在恢复", detail, status: "warn", phase: "queued", data: { target_key: targetKey, recovery_attempt: recoveryAttempt + 1 } });
+        const nextRunId = queue[0];
+        const nextTask = (0, db_1.loadTasks)().find((item) => item.id === nextRunId || String(item?.task_run?.run_id || item?.run_id || "") === nextRunId);
+        if (nextTask) {
+            (0, logs_1.addTaskLog)(nextTask.id, "error", `队列处理器异常：${detail}`);
+            (0, logs_1.appendTaskTimelineEvent)(nextTask.id, { type: "queue_processor_error", title: "队列处理器正在恢复", detail, status: "warn", phase: "queued", data: { target_key: targetKey, recovery_attempt: recoveryAttempt + 1, run_id: nextRunId } });
         }
         if (queue.length > 0 && recoveryAttempt < 2) {
             const delayMs = 1_000 * (recoveryAttempt + 1);
@@ -181,15 +204,180 @@ function launchTargetQueueProcessor(targetKey, ctx, recoveryAttempt = 0) {
 }
 function createAndQueueTask(task, ctx) {
     const newTask = (0, collaboration_1.createTask)({ ...task, auto_execute: true });
-    const queueResult = enqueueTask(newTask.id, ctx);
+    const queueResult = enqueueTask(newTask.id, ctx, newTask.active_run_id || newTask.run_id || "");
     return { task: newTask, queueResult };
 }
 function resumeTaskQueues(ctx, options = {}) {
     bindTaskRuntimeCollabCtx(ctx);
+    // Consume terminal structured TestAgent receipts before rebuilding queues.
+    // Without this recovery pass a restart could replay a read-only baseline
+    // whose acceptance was already persisted by the project-main executor.
+    try {
+        require("./collaboration-runtime-coordinator-review").reconcilePersistedStructuredAcceptances?.(ctx);
+    }
+    catch (error) {
+        console.warn(`[任务队列] 结构化验收恢复延后：${String(error?.message || error).slice(0, 240)}`);
+    }
     const communicationRecovery = (0, agent_communication_v2_1.reconcileAgentCommunications)();
     const testAgentRunnerRecovery = (0, test_agent_runner_1.reconcileTestAgentRunnerRecords)();
     const traceBackfilled = (0, collaboration_1.backfillTaskTraceIds)();
-    const tasks = (0, db_1.loadTasks)();
+    let tasks = (0, db_1.loadTasks)();
+    // Backfill only records that already carry a complete new-model identity.
+    // Ambiguous legacy activity is handled below as recovery_required.
+    for (const task of tasks) {
+        if (task?.task_spec?.schema !== "ccm-task-spec-v1" || task?.task_run?.schema !== "ccm-task-run-v1")
+            continue;
+        try {
+            (0, task_run_store_1.recordTaskRunFromTask)(task);
+        }
+        catch (error) {
+            console.warn(`[task-run-store] 启动回放失败 ${task.id}: ${error?.message || error}`);
+        }
+    }
+    // Clean switch: active historical records without a frozen TaskSpec are
+    // ambiguous and must be reviewed instead of being routed through guessed
+    // legacy behavior. Completed records remain available for read-only replay.
+    for (const task of tasks) {
+        const status = String(task?.status || "").toLowerCase();
+        const active = ["pending", "queued", "in_progress", "running", "reviewing", "waiting", "blocked"].includes(status);
+        if (!active || task?.task_spec?.schema === "ccm-task-spec-v1")
+            continue;
+        const marked = (0, collaboration_1.updateTask)(task.id, {
+            status: "blocked",
+            acceptance_state: "recovery_required",
+            status_detail: "历史任务缺少冻结任务规格，需要人工核验后恢复",
+            recovery_required: true,
+            recovery_required_at: new Date().toISOString(),
+        });
+        if (marked)
+            (0, logs_1.addTaskLog)(task.id, "warning", "历史任务缺少 TaskSpec，已暂停自动恢复并等待人工核验");
+    }
+    tasks = (0, db_1.loadTasks)();
+    // A service restart can leave a task in the transient TestAgent phase after
+    // its child process has already exited. Requeue only that orphaned review;
+    // a still-live TestAgent remains untouched and will finish normally.
+    for (const task of tasks) {
+        if (!(task?.status === "reviewing" || task?.status === "in_progress"))
+            continue;
+        if (!(task?.acceptance_state === "test_agent_running" || task?.acceptance_state === "awaiting_test_agent"))
+            continue;
+        if ((0, test_agent_runner_1.hasActiveTestAgentRunForTask)(task.id))
+            continue;
+        const terminalReview = (0, test_agent_runner_1.getLatestTestAgentRunnerResultForTask)(task.id, "invocation");
+        const terminalInvocation = terminalReview?.invocation;
+        // A TestAgent can finish between the child process exit and the
+        // coordinator's persistence step (most commonly during a server restart).
+        // Do not requeue that review indefinitely: consume the terminal result and
+        // put the task into an explicit, user-actionable blocked state.  A failed
+        // TestAgent result is never promoted to success here.
+        if (terminalInvocation && terminalReview?.record) {
+            const passed = terminalInvocation.status === "completed"
+                && terminalInvocation.outputValidation?.valid === true
+                && terminalInvocation.artifactVerification?.status === "passed"
+                && terminalInvocation.canAccept === true
+                && terminalReview.record.sourceStable === true;
+            if (!passed) {
+                const detail = String(terminalInvocation.report?.summary
+                    || terminalInvocation.error
+                    || terminalReview.record.error
+                    || "TestAgent 验收已结束但未通过").slice(0, 500);
+                const recoveredReview = {
+                    schema: "ccm-test-agent-review-recovered-v1",
+                    canAccept: false,
+                    status: terminalInvocation.outcome || terminalInvocation.status || terminalReview.record.status,
+                    error: terminalInvocation.error || terminalReview.record.error || detail,
+                    report: terminalInvocation.report || null,
+                    invocation: terminalInvocation,
+                    runner: terminalReview.record,
+                    recoveredAt: new Date().toISOString(),
+                    sourceStable: terminalReview.record.sourceStable === true,
+                };
+                // Some legacy tasks predate the durable session timeline and therefore
+                // have no open span.  Create a recovery attempt before persisting the
+                // terminal blocked state; otherwise the atomic task store correctly
+                // rejects the transition and can abort server startup.
+                try {
+                    const scope = task.group_id ? "group" : task.global_mission_id ? "global" : "project";
+                    const scopeId = String(task.group_id || task.global_mission_id || task.target_project || task.id);
+                    const exactSessionId = String(task.exact_session_id || task.group_session_id || task.project_session_id || task.id);
+                    (0, session_task_timeline_1.createTaskAttemptStartedTimeline)({
+                        taskId: task.id,
+                        exactSessionId,
+                        scope: scope,
+                        scopeId,
+                        attempt: Math.max(1, Number(task.execution_attempt || task.retry_count || 1)),
+                        generation: Number(task.generation || 0),
+                        workItemId: task.work_item_id || task.workItemId || task.id,
+                        leaseId: task.execution_lease?.lease_id || task.lease_id || "",
+                        eventIdSuffix: "test-agent-recovery",
+                    });
+                }
+                catch { }
+                const blocked = (0, collaboration_1.updateTask)(task.id, {
+                    status: "blocked",
+                    acceptance_state: "blocked",
+                    auto_execute: false,
+                    is_paused: true,
+                    paused: true,
+                    status_detail: `TestAgent 验收已结束但未通过：${detail}`,
+                    test_agent_review: recoveredReview,
+                    review: recoveredReview,
+                    queue_state: "blocked",
+                    queue_position: 0,
+                    recovery: {
+                        ...(task.recovery || {}),
+                        test_agent_recovered_at: new Date().toISOString(),
+                        test_agent_recovery_reason: "terminal_runner_result_consumed",
+                    },
+                });
+                try {
+                    (0, execution_kernel_1.transitionExecution)(task.id, "failed", `TestAgent 验收已结束但未通过：${detail}`, {
+                        failureClass: "verification",
+                        status: "error",
+                        data: { recovered: true, runnerId: terminalReview.record.id, contentStored: false },
+                    });
+                }
+                catch { }
+                (0, logs_1.addTaskLog)(task.id, "warning", `服务恢复已消费 TestAgent 终态：${detail}`);
+                (0, logs_1.appendTaskTimelineEvent)(task.id, {
+                    type: "test_agent_review_recovered_terminal",
+                    title: "TestAgent 验收结果已恢复",
+                    detail,
+                    status: "warn",
+                    phase: "reviewing",
+                    agent: "test-agent",
+                    data: { runner_id: terminalReview.record.id, outcome: recoveredReview.status, content_stored: false },
+                });
+                if (blocked)
+                    continue;
+            }
+        }
+        const resumed = (0, collaboration_1.updateTask)(task.id, {
+            status: "pending",
+            acceptance_state: "awaiting_test_agent",
+            status_detail: "TestAgent 进程已中断，已保留原验收证据并重新排队复核",
+            queue_state: "queued",
+            queue_position: 0,
+            recovery: {
+                ...(task.recovery || {}),
+                test_agent_recovered_at: new Date().toISOString(),
+                test_agent_recovery_reason: "orphaned_review_after_restart",
+            },
+        });
+        if (resumed) {
+            (0, logs_1.addTaskLog)(task.id, "warning", "服务重启后发现孤儿 TestAgent 验收，已安全恢复并重新排队");
+            (0, logs_1.appendTaskTimelineEvent)(task.id, {
+                type: "test_agent_review_recovered",
+                title: "TestAgent 验收已恢复",
+                detail: "原验收进程已结束，保留已有证据并重新执行独立复核。",
+                status: "active",
+                phase: "reviewing",
+                agent: "test-agent",
+                data: { reason: "orphaned_review_after_restart", content_stored: false },
+            });
+        }
+    }
+    tasks = (0, db_1.loadTasks)();
     const forceAuto = options.force === true
         || options.manual === true
         || /^(1|true|yes|on)$/i.test(String(process.env.CCM_AUTO_STARTUP_TASK_RECOVERY || ""));
@@ -207,7 +395,10 @@ function resumeTaskQueues(ctx, options = {}) {
             const summary = dependency.delivery_summary || {};
             const report = summary.delivery_report || dependency.delivery_report || {};
             if (task?.parent_workflow_type === "requirement_epic" || task?.requirement_epic_id) {
-                return dependency.global_mission_gate_passed !== true;
+                const terminalAccepted = dependency.terminal_gate?.passed === true
+                    && dependency.test_agent_review?.canAccept === true
+                    && dependency.main_agent_final_acceptance?.accepted === true;
+                return dependency.global_mission_gate_passed !== true && !terminalAccepted;
             }
             return summary.acceptance_gate_passed !== true
                 && summary.acceptanceGatePassed !== true
@@ -508,7 +699,7 @@ function getTaskWatchdogStatus(staleMs = collaboration_1.TASK_WATCHDOG_STALE_MS,
                 stalePending.push(base);
             }
         }
-        else if (task.status === "in_progress" && !collaboration_1.runningTaskIds.has(task.id) && ageMs >= staleMs) {
+        else if (task.status === "in_progress" && !(0, collaboration_1.isTaskRunningInMemory)(task) && ageMs >= staleMs) {
             if (Number(task.watchdog_recoveries || 0) >= recoveryMaxCount) {
                 recoveryExhausted.push({ ...base, recoveries: Number(task.watchdog_recoveries || 0) });
             }
@@ -516,7 +707,7 @@ function getTaskWatchdogStatus(staleMs = collaboration_1.TASK_WATCHDOG_STALE_MS,
                 stalledInProgress.push(base);
             }
         }
-        else if (task.status === "in_progress" && collaboration_1.runningTaskIds.has(task.id) && ageMs >= staleMs) {
+        else if (task.status === "in_progress" && (0, collaboration_1.isTaskRunningInMemory)(task) && ageMs >= staleMs) {
             runningLong.push(base);
         }
     }
@@ -582,7 +773,7 @@ function runTaskWatchdog(ctx, options = {}) {
     }
     for (const item of recoverable) {
         const task = taskSnapshot.find(t => t.id === item.id);
-        if (!task || task.status === "done" || (0, collaboration_1.isTaskPaused)(task) || collaboration_1.runningTaskIds.has(task.id))
+        if (!task || task.status === "done" || (0, collaboration_1.isTaskPaused)(task) || (0, collaboration_1.isTaskRunningInMemory)(task))
             continue;
         const patch = {
             status: "pending",
@@ -597,7 +788,7 @@ function runTaskWatchdog(ctx, options = {}) {
         }
         (0, collaboration_1.updateTask)(task.id, patch);
         (0, logs_1.addTaskLog)(task.id, "warning", patch.status_detail);
-        results.push({ task_id: task.id, ...enqueueTask(task.id, ctx) });
+        results.push({ task_id: task.id, ...enqueueTask(task.id, ctx, (0, collaboration_1.taskRunIdentity)(task)) });
     }
     const stalledByTask = new Map();
     for (const item of status.work_item_stalled || []) {
@@ -611,10 +802,10 @@ function runTaskWatchdog(ctx, options = {}) {
         const requeue = (0, collaboration_1.requeueTaskWorkItemsForWatchdog)(task, staleMs, reason);
         if (!requeue.requeued.length)
             continue;
-        const shouldQueue = !collaboration_1.runningTaskIds.has(task.id) && !(0, collaboration_1.isTaskQueuedInMemory)(task.id);
+        const shouldQueue = !(0, collaboration_1.isTaskRunningInMemory)(task) && !(0, collaboration_1.isTaskQueuedInMemory)(task.id);
         const queueResult = shouldQueue
-            ? enqueueTask(task.id, ctx)
-            : { queued: false, message: collaboration_1.runningTaskIds.has(task.id) ? "任务仍在运行，工作项已释放，等待本轮调度接管" : "任务已在队列中" };
+            ? enqueueTask(task.id, ctx, (0, collaboration_1.taskRunIdentity)(task))
+            : { queued: false, message: (0, collaboration_1.isTaskRunningInMemory)(task) ? "任务仍在运行，工作项已释放，等待本轮调度接管" : "任务已在队列中" };
         workItemResults.push({
             task_id: task.id,
             requeued: requeue.requeued.length,

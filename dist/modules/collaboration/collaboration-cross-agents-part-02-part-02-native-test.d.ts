@@ -1,0 +1,33 @@
+import type { TestAgentReport } from "../../test-agent/types";
+export type NativeTestAgentDispatchState = {
+    testAgentPlanDispatch: any;
+    testAgentExecutionPlan: any;
+    targetReceipt: any;
+    tOutput: string;
+    targetSessionSucceeded: boolean;
+    targetSessionError: string;
+    testAgentInvocationResult: any;
+    testAgentCliDispatch: any;
+    testAgentNativeReport: TestAgentReport | null;
+    testAgentReviewSummary: any;
+    targetWorkEvents: any[];
+};
+export declare function runNativeTestAgentDispatchBranch(input: {
+    mention: any;
+    deps: any;
+    ctx: any;
+    targetName: string;
+    groupId: string;
+    taskId: string;
+    streamRes: any;
+    testAgentHandoffPayload: any;
+    testAgentWorkDirPolicy: any;
+    runtimeAttemptTimeoutMs: number;
+    laneExecutionId: string;
+    sourceTask: any;
+    executionOrder: string;
+    activeTaskSession: any;
+    testAgentProjectWorkDir: string;
+    tWorkDir: string;
+    state: NativeTestAgentDispatchState;
+}): Promise<void>;

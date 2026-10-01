@@ -1,0 +1,4 @@
+interface:
+  display_name: "CCM Release Readiness"
+  short_description: "Check build, migration, rollback, and release risk"
+  default_prompt: "Use $ccm-release-readiness to determine whether this change is ready to release."

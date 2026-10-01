@@ -1,0 +1,44 @@
+import { ModelRetryProfileId } from "../../system/model-call-retry";
+export declare function callLlm(config: any, messages: any[], options?: {
+    onUsage?: (usage: any) => void;
+    onDelta?: (delta: string) => void;
+    providerContextCache?: any;
+    requestAttribution?: any;
+    onProviderContextCache?: (receipt: any) => void;
+    retryProfile?: ModelRetryProfileId;
+    signal?: AbortSignal;
+    onRetry?: (notice: any) => void;
+    maxTokens?: number;
+    nativeTools?: any[];
+    nativeToolReference?: boolean;
+    nativeToolChoice?: "auto" | "none";
+    nativeFinalAnswerOnly?: boolean;
+    onProviderAgentTurn?: (turn: any) => void;
+}): Promise<string>;
+export declare function shouldRetryGlobalModelError(error: any): boolean;
+export declare function callGlobalModelWithRetry(config: any, messages: any[], options?: {
+    attempts?: number;
+    delayMs?: number;
+    onUsage?: (usage: any) => void;
+    onDelta?: (delta: string) => void;
+    providerContextCache?: any;
+    requestAttribution?: any;
+    onProviderContextCache?: (receipt: any) => void;
+    retryProfile?: ModelRetryProfileId;
+    signal?: AbortSignal;
+    onRetry?: (notice: any) => void;
+    nativeTools?: any[];
+    nativeToolReference?: boolean;
+    nativeToolChoice?: "auto" | "none";
+    nativeFinalAnswerOnly?: boolean;
+    call?: (config: any, messages: any[]) => Promise<string>;
+}): Promise<string>;
+export declare function runGlobalModelRetrySelfTest(): Promise<{
+    pass: boolean;
+    checks: {
+        transientFailureRetriesOnce: boolean;
+        permanentClientErrorDoesNotRetry: boolean;
+        openAiBaseUrlUsesV1Endpoint: boolean;
+        anthropicBaseUrlUsesV1Endpoint: boolean;
+    };
+}>;

@@ -50,6 +50,9 @@ exports.appendToolProjection = appendToolProjection;
 exports.clearUserVisibleAgentEventsForTest = clearUserVisibleAgentEventsForTest;
 exports.runUserVisibleAgentEventSelfTest = runUserVisibleAgentEventSelfTest;
 const crypto = __importStar(require("crypto"));
+const ephemeral_assistant_text_1 = require("./ephemeral-assistant-text");
+const conversation_attempt_1 = require("../agents/conversation-attempt");
+const task_available_actions_1 = require("../agents/task-available-actions");
 const fs = __importStar(require("fs"));
 const os = __importStar(require("os"));
 const path = __importStar(require("path"));
@@ -768,6 +771,8 @@ function normalizeUserVisibleAgentEvent(input, sequence = 0) {
             && ["thinking", "started", "waiting", "retrying", "streaming", "completed", "failed"].includes(String(detailSource.modelActivity.state))
             && ["understanding", "tool_decision", "tool_result_review", "verification", "final_synthesis"].includes(String(detailSource.modelActivity.phase)) ? {
             modelActivity: {
+                ...(['process', 'final'].includes(detailSource.modelActivity.answerPhase)
+                    ? { answerPhase: detailSource.modelActivity.answerPhase } : {}),
                 state: String(detailSource.modelActivity.state),
                 phase: String(detailSource.modelActivity.phase),
                 modelCallIndex: Math.max(1, Number(detailSource.modelActivity.modelCallIndex || 1)),
@@ -835,6 +840,9 @@ function normalizeUserVisibleAgentEvent(input, sequence = 0) {
         ...(sanitizeAvailableActions(detailSource.availableActions || detailSource.available_actions).length
             ? { availableActions: sanitizeAvailableActions(detailSource.availableActions || detailSource.available_actions) }
             : {}),
+        available_actions: input?.eventType === "requirement_plan"
+            ? (0, task_available_actions_1.planAvailableActions)(sanitizeUserVisibleRequirementPlan(detailSource.requirementPlan || detailSource.requirement_plan)?.status || "completed")
+            : sanitizeAvailableActions(detailSource.available_actions || detailSource.availableActions),
         ...(detailSource.providerRetry && typeof detailSource.providerRetry === "object" ? {
             providerRetry: {
                 retryCount: Math.max(0, Math.min(5, Number(detailSource.providerRetry.retryCount || 0))),
@@ -892,6 +900,7 @@ function normalizeUserVisibleAgentEvent(input, sequence = 0) {
         ...(terminalGate ? { terminalGate } : {}),
     };
     const stableIdentity = {
+        ...(input?.attempt_id ? { attempt_id: String(input.attempt_id) } : {}),
         scope, scopeId, exactSessionId, generation: Math.max(0, Number(input?.generation || 0)),
         taskId: input?.taskId || input?.task_id || "", workItemId: input?.workItemId || input?.work_item_id || "",
         toolCallId: input?.toolCallId || input?.tool_call_id || "", eventType, createdAt,
@@ -919,6 +928,8 @@ function normalizeUserVisibleAgentEvent(input, sequence = 0) {
         schema: exports.USER_VISIBLE_AGENT_EVENT_SCHEMA,
         eventId: normalizedEventId,
         sequence: Math.max(0, Number((input?.sequence ?? sequence) || 0)),
+        ...(input?.attempt_id ? { attempt_id: String(input.attempt_id) } : {}),
+        ...(input?.conversation_turn_id ? { conversation_turn_id: String(input.conversation_turn_id) } : {}),
         eventType,
         scope,
         scopeId,
@@ -1002,7 +1013,7 @@ function shouldDropLateAssistantProgress(store, next) {
     return !!(lastResult && (!lastTurnStart || Number(lastResult.sequence || 0) >= Number(lastTurnStart.sequence || 0)));
 }
 function appendUserVisibleAgentEvent(input) {
-    const initial = normalizeUserVisibleAgentEvent(input);
+    const initial = normalizeUserVisibleAgentEvent((0, conversation_attempt_1.bindConversationLedgerEvent)(input));
     const file = eventStoreFile(initial.scope, initial.scopeId, initial.exactSessionId);
     let event = initial;
     let appended = false;
@@ -1233,7 +1244,7 @@ function subscribeUserVisibleAgentEvents(handler) {
 }
 /** Live-only text/progress events. They deliberately bypass the projection store. */
 function publishEphemeralUserVisibleAgentEvent(input) {
-    const event = normalizeUserVisibleAgentEvent({ ...input, contentStored: false }, 0);
+    const event = (0, ephemeral_assistant_text_1.preserveEphemeralAssistantText)(normalizeUserVisibleAgentEvent({ ...input, contentStored: false }, 0), input);
     for (const listener of [...listeners]) {
         try {
             listener(event);

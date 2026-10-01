@@ -1,0 +1,82 @@
+/** Stable, versioned instructions. Dynamic task data must never be interpolated here. */
+export declare const CCM_PLAN_PROMPT_VERSION = "2026-09-05.plan-v3";
+export declare const CCM_PROJECT_WORK_ORDER_PROMPT_VERSION = "2026-09-05.project-work-order-v3";
+export declare const CCM_TEST_AGENT_WORK_ORDER_PROMPT_VERSION = "2026-09-05.test-agent-v3";
+export declare const CCM_REWORK_WORK_ORDER_PROMPT_VERSION = "2026-09-05.rework-v3";
+export declare const CCM_WORK_ORDER_PROMPTS: {
+    readonly plan: "进入只读规划模式。只使用已读取的源码、配置和测试证据；明确目标、范围、排除项、依赖、风险和可观察验收标准。不得猜测路径、符号、成员、命令或完成状态。输出 ccm-implementation-plan-v3 结构，不承担权限判断。";
+    readonly project: "执行自包含项目工作单。只修改允许路径，遵守禁止范围和依赖；每一步绑定验收标准并留下可复核证据。不得扩大项目范围、代替 TestAgent 验收或把推测写成事实。";
+    readonly test: "以独立只读 TestAgent 验收。只检查工作单允许范围和实际变更，执行指定验证；每条标准返回 passed、failed 或 blocked，并附 Evidence ID、命令、退出码和风险。不得修改业务代码或依据开发者自报判定通过。";
+    readonly rework: "依据失败验收证据生成增量返工单。沿用原 taskId 和 workItemId，仅递增 attempt，严格限制修复范围和重新验证命令；相同失败证据不得无限重复派发。";
+};
+export type WorkOrderValidation = {
+    valid: boolean;
+    issues: string[];
+};
+export type CcmProjectWorkOrderV3 = {
+    schema: "ccm-project-work-order-v3";
+    taskId: string;
+    workItemId: string;
+    projectId: string;
+    planId: string;
+    planRevision: number;
+    attempt: number;
+    goal: string;
+    objective: string;
+    allowedPaths: string[];
+    editablePaths: string[];
+    readOnlyPaths: string[];
+    cleanupPaths: string[];
+    synchronizedFixturePaths: Array<{
+        path: string;
+        allowedChanges: string[];
+    }>;
+    forbiddenScope: string[];
+    dependsOn: string[];
+    acceptanceCriterionIds: string[];
+    acceptance: string[];
+    verification: any[];
+    identity: Record<string, any>;
+    planChecksum: string;
+    promptVersion: string;
+    checksum: string;
+    contentStored: false;
+};
+export type CcmTestAgentWorkOrderV3 = {
+    schema: "ccm-test-agent-work-order-v3";
+    taskId: string;
+    workItemId: string;
+    originalGoal: string;
+    projectId: string;
+    planChecksum: string;
+    workOrderChecksum: string;
+    changedFiles: string[];
+    acceptanceCriterionIds: string[];
+    verification: any[];
+    readOnly: true;
+    reviewCycle: number;
+    attempt: number;
+    promptVersion: string;
+    checksum: string;
+    contentStored: false;
+};
+export type CcmReworkWorkOrderV3 = {
+    schema: "ccm-rework-work-order-v3";
+    taskId: string;
+    workItemId: string;
+    attempt: number;
+    failedCriterionIds: string[];
+    evidence: any[];
+    allowedPaths: string[];
+    forbiddenScope: string[];
+    verification: any[];
+    promptVersion: string;
+    checksum: string;
+    contentStored: false;
+};
+export declare function validatePlanPromptInput(plan: any): WorkOrderValidation;
+export declare function buildProjectWorkOrderV3(input: any): CcmProjectWorkOrderV3;
+export declare function buildTestAgentWorkOrderV3(input: any): CcmTestAgentWorkOrderV3;
+export declare function buildReworkWorkOrderV3(input: any): CcmReworkWorkOrderV3;
+export declare function validateWorkOrderV3(order: any): WorkOrderValidation;
+export declare function runWorkOrderPromptContractSelfTest(): boolean;

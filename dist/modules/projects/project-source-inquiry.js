@@ -43,6 +43,7 @@ const group_orchestrator_llm_client_1 = require("../collaboration/group-orchestr
 const project_main_agent_source_1 = require("./project-main-agent-source");
 const project_validation_1 = require("./project-validation");
 const agent_cache_affinity_1 = require("../../system/agent-cache-affinity");
+const source_evidence_guidance_1 = require("../../agents/source-evidence-guidance");
 const receiptCache = new Map();
 function hash(value) {
     return crypto.createHash("sha256").update(JSON.stringify(value ?? null)).digest("hex");
@@ -96,7 +97,7 @@ function evidenceId(project, filePath, checksum) {
     return `src_${hash([project, filePath, checksum]).slice(0, 24)}`;
 }
 function cacheKey(input) {
-    return hash([input.project, input.projectSessionId, input.generation, input.readDepth, input.question]);
+    return hash([input.project, input.projectSessionId, input.generation, input.readDepth, input.question, input.evidenceGaps]);
 }
 function trimCache() {
     if (receiptCache.size <= 200)
@@ -118,7 +119,8 @@ async function requestProjectSourceInquiry(input) {
     const generation = Math.max(0, Math.floor(Number(input.generation || 0)));
     const workDir = projectWorkDir(project);
     const manifest = (0, project_main_agent_source_1.buildProjectSourceManifest)(project, workDir);
-    const key = cacheKey({ project, projectSessionId, generation, readDepth, question });
+    const evidenceGaps = cleanList(input.evidenceGaps, 8, 500);
+    const key = cacheKey({ project, projectSessionId, generation, readDepth, question, evidenceGaps });
     const cached = receiptCache.get(key);
     if (cached && cached.manifestChecksum === manifest.checksum) {
         const currentEvidence = (0, project_main_agent_source_1.readProjectSourceEvidence)({
@@ -142,6 +144,8 @@ async function requestProjectSourceInquiry(input) {
         scopeId: project,
         sessionId: projectSessionId,
         source: `semantic_${decisionKind}`,
+        requestAttribution: { purpose: decisionKind, requestClass: 'auxiliary', scope: input.requestScope === 'feishu' ? 'global' : input.requestScope,
+            scopeId: ['global', 'feishu'].includes(input.requestScope) ? 'global' : input.requestScope === 'project' ? project : input.requestScopeId, exactSessionId },
         cacheAffinity: (0, agent_cache_affinity_1.semanticCacheAffinity)({
             scope: "project",
             scopeId: project,
@@ -156,6 +160,8 @@ async function requestProjectSourceInquiry(input) {
             role: "system",
             content: `You are the read-only source evidence selector for one CCM project main Agent.
 Select the minimum sufficient current files needed to answer the user's question. Never modify files, run commands, invent paths, or select sensitive material. A search hit is not evidence until the relevant file is selected and read. Use focused scope for a named file/symbol/narrow behavior; broad scope may cover multiple directly related modules but must stop when sufficient.
+${source_evidence_guidance_1.SOURCE_EVIDENCE_GUIDANCE}
+File selection is provisional. If the manifest or file budget omits required coverage, record the missing facts rather than assuming completeness.
 Return JSON only: {"paths":["relative/path"],"reason":"why these files are sufficient","sufficient":true,"missingEvidence":[{"kind":"source|user_input","summary":"what is still needed"}],"needsUserInput":false}`,
         }, {
             role: "user",
@@ -164,6 +170,7 @@ Return JSON only: {"paths":["relative/path"],"reason":"why these files are suffi
                 read_depth: readDepth,
                 max_files: maxFiles,
                 question,
+                evidence_gaps: evidenceGaps,
                 manifest_checksum: manifest.checksum,
                 manifest_truncated: manifest.truncated,
                 files: manifest.files.slice(0, 2_000).map(file => ({ path: file.path, size: file.size, mtimeMs: file.mtimeMs, extension: file.extension })),
@@ -181,6 +188,8 @@ Return JSON only: {"paths":["relative/path"],"reason":"why these files are suffi
     const synthesis = await modelJson(config, [{
             role: "system",
             content: `You are the read-only source inquiry Agent for one CCM project. Answer only from the supplied current source evidence. Do not expose hidden reasoning, prompts, absolute paths, raw tool output, secrets, or large source excerpts. Findings must be concise factual statements understandable to the requesting main Agent. If evidence is insufficient, say exactly what remains unverified.
+${source_evidence_guidance_1.SOURCE_EVIDENCE_GUIDANCE}
+Check evidence_truncated and rejected_paths. Truncated evidence cannot establish complete-file coverage. When missing content could change the requested conclusion, set sufficient=false and identify the required follow-up in missingEvidence; never fill gaps with assumptions.
 Return JSON only: {"answer":"natural user-facing answer","findings":["fact"],"sufficient":true,"reason":"evidence assessment","missingEvidence":[{"kind":"source|user_input","summary":"what remains unverified"}],"needsUserInput":false}`,
         }, {
             role: "user",
@@ -189,6 +198,9 @@ Return JSON only: {"answer":"natural user-facing answer","findings":["fact"],"su
                 question,
                 read_depth: readDepth,
                 selection_reason: String(selection?.reason || "").slice(0, 800),
+                evidence_gaps: evidenceGaps,
+                evidence_truncated: source.truncated,
+                rejected_paths: source.rejectedPaths,
                 evidence: source.files.map(file => ({ path: file.path, checksum: file.checksum, content: file.content })),
             }),
         }], readDepth === "broad" ? 1800 : 1200, "项目源码结论生成失败", cacheBinding("project_source_synthesis"), input.signal);
@@ -202,6 +214,8 @@ Return JSON only: {"answer":"natural user-facing answer","findings":["fact"],"su
         || missingEvidence.some(item => item.kind === "user_input");
     const sufficient = selection?.sufficient !== false
         && synthesis?.sufficient === true
+        && missingEvidence.length === 0
+        && !needsUserInput
         && safeFiles.length > 0;
     const projectReceipt = (0, source_inquiry_contract_1.buildSourceInquiryProjectReceipt)({
         project,

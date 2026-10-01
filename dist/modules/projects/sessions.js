@@ -36,14 +36,11 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.WEB_SESSIONS_DIR = void 0;
 exports.getProjectSessionDir = getProjectSessionDir;
 exports.getSessionFilePath = getSessionFilePath;
-exports.findCcSessionFile = findCcSessionFile;
 exports.getProjectFeishuSessionTargets = getProjectFeishuSessionTargets;
 exports.resolveProjectFeishuTargetForAcpSession = resolveProjectFeishuTargetForAcpSession;
 exports.runProjectFeishuSessionSourceSelfTest = runProjectFeishuSessionSourceSelfTest;
-exports.syncFromCcToFilesystem = syncFromCcToFilesystem;
-exports.syncToFilesystemToCc = syncToFilesystemToCc;
-exports.syncSessions = syncSessions;
 exports.getSessions = getSessions;
+exports.getSessionCount = getSessionCount;
 exports.getSessionDetail = getSessionDetail;
 exports.replaceProjectSessionConversation = replaceProjectSessionConversation;
 exports.writeProjectSessionConversationBranch = writeProjectSessionConversationBranch;
@@ -57,6 +54,9 @@ exports.upsertProjectSessionTaskMessage = upsertProjectSessionTaskMessage;
 exports.scheduleProjectSessionAutoTitle = scheduleProjectSessionAutoTitle;
 exports.handleSessionsApi = handleSessionsApi;
 const fs = __importStar(require("fs"));
+const conversation_session_identity_1 = require("../../system/conversation-session-identity");
+const deleted_session_context_1 = require("../../system/deleted-session-context");
+const conversation_attempt_1 = require("../../agents/conversation-attempt");
 const path = __importStar(require("path"));
 const utils_1 = require("../../core/utils");
 const project_validation_1 = require("./project-validation");
@@ -67,7 +67,6 @@ const project_session_compaction_1 = require("./project-session-compaction");
 const project_session_agent_binding_1 = require("./project-session-agent-binding");
 const project_main_agent_1 = require("./project-main-agent");
 const runtime_events_1 = require("../../system/runtime-events");
-const provider_neutral_context_cache_1 = require("../../system/provider-neutral-context-cache");
 const feishu_conversation_v2_1 = require("../collaboration/feishu-conversation-v2");
 const conversation_search_dirty_1 = require("../../system/conversation-search-dirty");
 const main_agent_post_compact_continuity_1 = require("../../system/main-agent-post-compact-continuity");
@@ -78,6 +77,7 @@ const session_start_hook_context_1 = require("../../system/session-start-hook-co
 const post_turn_tool_context_compaction_1 = require("../../system/post-turn-tool-context-compaction");
 const pre_request_tool_context_1 = require("../../system/pre-request-tool-context");
 exports.WEB_SESSIONS_DIR = path.join(utils_1.CCM_DIR, "web-sessions");
+const projectSessionSummaryCache = new Map();
 function clearProjectMainDynamicContext(project, sessionId) {
     try {
         (0, main_agent_post_compact_continuity_1.clearMainAgentPostCompactContinuity)({
@@ -108,24 +108,6 @@ function ensureWebSessionDir(projectName) {
     if (!fs.existsSync(dir))
         fs.mkdirSync(dir, { recursive: true });
     return dir;
-}
-// 查找 cc-connect 的 session 文件（带 hash 的）。新版本优先使用
-// ~/.ccm，旧版 cc-connect 仍可能把项目会话写在 ~/.cc-connect；读取旧目录
-// 是迁移期兼容行为，后续同步仍会保留 cc-connect 所需的存储。
-function findCcSessionFile(projectName) {
-    const safeProjectName = (0, project_validation_1.validateProjectName)(projectName);
-    const escaped = safeProjectName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const matcher = new RegExp(`^${escaped}(?:_[^/\\\\]+)?\\.json$`);
-    const sessionDirs = [
-        utils_1.SESSIONS_DIR,
-        path.join(path.dirname(utils_1.SESSIONS_DIR), ".cc-connect", "sessions"),
-    ].filter((dir, index, all) => all.indexOf(dir) === index && fs.existsSync(dir));
-    const files = sessionDirs.flatMap((dir) => fs.readdirSync(dir)
-        .filter(f => matcher.test(f) && !fs.statSync(path.join(dir, f)).isDirectory())
-        .map((file) => ({ dir, file, mtime: fs.statSync(path.join(dir, file)).mtimeMs })));
-    const newest = files
-        .sort((a, b) => b.mtime - a.mtime || a.file.localeCompare(b.file))[0];
-    return newest ? (0, project_validation_1.resolveContainedPath)(newest.dir, newest.file) : null;
 }
 function isFeishuPlatformSessionKey(value) {
     return /^(?:feishu|lark):/i.test(String(value || "").trim());
@@ -173,16 +155,7 @@ function projectFeishuTargetsFromStore(store, projectName = "selftest-project") 
     });
 }
 function loadProjectCcSessionStore(projectName) {
-    const file = findCcSessionFile(projectName);
-    if (!file || !fs.existsSync(file))
-        return { file: "", store: null, targets: [] };
-    try {
-        const store = JSON.parse(fs.readFileSync(file, "utf-8"));
-        return { file, store, targets: projectFeishuTargetsFromStore(store, projectName) };
-    }
-    catch {
-        return { file, store: null, targets: [] };
-    }
+    return { file: "", store: null, targets: [] };
 }
 function projectSessionSource(sessionId, session, targets) {
     const explicit = String(session?.source || session?.channel || "").toLowerCase();
@@ -297,81 +270,8 @@ function runProjectFeishuSessionSourceSelfTest() {
     };
     return { pass: Object.values(checks).every(Boolean), checks };
 }
-// 从 cc-connect 单文件同步到文件夹格式
-function syncFromCcToFilesystem(projectName) {
-    const ccFile = findCcSessionFile(projectName);
-    if (!ccFile || !fs.existsSync(ccFile))
-        return;
-    try {
-        const data = JSON.parse(fs.readFileSync(ccFile, "utf-8"));
-        const targets = projectFeishuTargetsFromStore(data, projectName);
-        const dir = ensureWebSessionDir(projectName);
-        for (const [sid, session] of Object.entries(data.sessions || {})) {
-            const rawSession = session;
-            const sessionData = {
-                ...rawSession,
-                source: projectSessionSource(sid, rawSession, targets),
-                feishu_platform_keys: targets.filter((target) => target.session_ids.includes(sid)).map((target) => target.id),
-            };
-            const filePath = getSessionFilePath(projectName, (0, project_validation_1.validateSessionId)(sid));
-            // 只更新有变化的
-            const existing = fs.existsSync(filePath) ? JSON.parse(fs.readFileSync(filePath, "utf-8")) : null;
-            if (Array.isArray(existing?.execution_history)) {
-                sessionData.execution_history_version = Number(existing.execution_history_version || 1);
-                sessionData.execution_history = existing.execution_history;
-            }
-            const historyChanged = JSON.stringify(existing?.history || []) !== JSON.stringify(sessionData.history || []);
-            const bindingsChanged = JSON.stringify(existing?.feishu_platform_keys || []) !== JSON.stringify(sessionData.feishu_platform_keys || []);
-            if (!existing
-                || existing.updated_at !== sessionData.updated_at
-                || existing.source !== sessionData.source
-                || existing.name !== sessionData.name
-                || historyChanged
-                || bindingsChanged) {
-                fs.writeFileSync(filePath, JSON.stringify(sessionData, null, 2));
-            }
-        }
-        // 删除文件夹中已不存在的会话
-        const ccSids = new Set(Object.keys(data.sessions || {}));
-        for (const f of fs.readdirSync(dir).filter(f => f.endsWith(".json"))) {
-            const fid = f.replace(".json", "");
-            if (!ccSids.has(fid))
-                fs.unlinkSync((0, project_validation_1.resolveContainedPath)(dir, f));
-        }
-    }
-    catch { }
-}
-// 从文件夹格式同步回 cc-connect 单文件
-function syncToFilesystemToCc(projectName) {
-    const ccFile = findCcSessionFile(projectName);
-    if (!ccFile)
-        return;
-    try {
-        const ccData = JSON.parse(fs.readFileSync(ccFile, "utf-8"));
-        ccData.sessions = ccData.sessions || {};
-        const dir = getProjectSessionDir(projectName);
-        if (!fs.existsSync(dir))
-            return;
-        for (const f of fs.readdirSync(dir).filter(f => f.endsWith(".json"))) {
-            const sid = f.replace(".json", "");
-            const sessionData = JSON.parse(fs.readFileSync((0, project_validation_1.resolveContainedPath)(dir, f), "utf-8"));
-            const { execution_history, executionHistory, execution_history_version, ...sharedSessionData } = sessionData;
-            ccData.sessions[sid] = sharedSessionData;
-        }
-        // 更新 counter
-        const maxNum = Math.max(0, ...Object.keys(ccData.sessions).map(s => parseInt(s.replace("s", "")) || 0));
-        ccData.counter = maxNum + 1;
-        fs.writeFileSync(ccFile, JSON.stringify(ccData, null, 2));
-    }
-    catch { }
-}
-// 双向同步
-function syncSessions(projectName) {
-    syncFromCcToFilesystem(projectName);
-}
 // 获取会话列表（从文件夹读取）
 function getSessions(projectName) {
-    syncSessions(projectName);
     const targets = getProjectFeishuSessionTargets(projectName);
     const dir = getProjectSessionDir(projectName);
     if (!fs.existsSync(dir))
@@ -380,38 +280,77 @@ function getSessions(projectName) {
         .filter((task) => String(task?.target_project || "") === String(projectName || ""))
         .map((task) => String(task?.project_session_id || task?.exact_session_id || ""))
         .filter(Boolean));
-    return fs.readdirSync(dir)
-        .filter(f => f.endsWith(".json"))
-        .map(f => {
+    const files = fs.readdirSync(dir)
+        .filter(f => f.endsWith(".json"));
+    const cacheKey = String(projectName);
+    const previous = projectSessionSummaryCache.get(cacheKey) || new Map();
+    const next = new Map();
+    const rows = files.map(f => {
         try {
-            const data = JSON.parse(fs.readFileSync((0, project_validation_1.resolveContainedPath)(dir, f), "utf-8"));
-            const id = data.id || f.replace(".json", "");
-            const source = projectSessionSource(id, data, targets);
-            return {
+            const file = (0, project_validation_1.resolveContainedPath)(dir, f);
+            const stat = fs.statSync(file);
+            const cached = previous.get(f);
+            if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
+                next.set(f, cached);
+                return cached;
+            }
+            const data = JSON.parse(fs.readFileSync(file, "utf-8"));
+            const id = String(data.id || f.replace(".json", ""));
+            const explicitKind = String(data.session_kind || data.sessionKind || "").toLowerCase();
+            const row = {
+                mtimeMs: stat.mtimeMs,
+                size: stat.size,
                 id,
                 name: data.name || data.id || f.replace(".json", ""),
                 agent_type: data.agent_type || "claudecode",
-                message_count: (data.history || []).length,
-                last_message: (data.history || []).slice(-1)[0]?.content?.substring(0, 100) || "",
+                message_count: Array.isArray(data.history) ? data.history.length : 0,
+                last_message: Array.isArray(data.history) ? String(data.history.at(-1)?.content || "").substring(0, 100) : "",
                 created_at: data.created_at,
                 updated_at: data.updated_at,
-                source,
-                session_kind: String(data.session_kind || data.sessionKind || "").toLowerCase() === "automation" || automatedSessionIds.has(String(id))
-                    ? "automation"
-                    : "conversation",
-                feishu_bindings: targets.filter((target) => target.active_session_id === id),
+                sourceHint: String(data.source || data.channel || ""),
+                session_kind: ["recovery", "automation"].includes(explicitKind) ? explicitKind : "conversation",
             };
+            next.set(f, row);
+            return row;
         }
         catch {
             return null;
         }
-    })
+    }).filter(Boolean);
+    projectSessionSummaryCache.set(cacheKey, next);
+    return rows
+        .map(row => ({
+        id: row.id,
+        name: row.name,
+        agent_type: row.agent_type,
+        message_count: row.message_count,
+        last_message: row.last_message,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+        source: projectSessionSource(row.id, { source: row.sourceHint }, targets),
+        session_kind: row.session_kind === "recovery" || row.session_kind === "automation"
+            ? row.session_kind
+            : automatedSessionIds.has(String(row.id)) ? "automation" : "conversation",
+        feishu_bindings: targets.filter((target) => target.active_session_id === row.id),
+    }))
         .filter(Boolean)
         .sort((a, b) => new Date(b.updated_at || 0).getTime() - new Date(a.updated_at || 0).getTime());
 }
+/** Lightweight count used by the project overview endpoint.  It deliberately
+ * avoids parsing every transcript just to render the sidebar summary. */
+function getSessionCount(projectName) {
+    const dir = getProjectSessionDir(projectName);
+    if (!fs.existsSync(dir))
+        return 0;
+    try {
+        return fs.readdirSync(dir).filter(file => file.endsWith(".json")).length;
+    }
+    catch {
+        return 0;
+    }
+}
 // 获取会话详情
 function getSessionDetail(projectName, sessionId) {
-    syncFromCcToFilesystem(projectName);
     const targets = getProjectFeishuSessionTargets(projectName);
     const filePath = getSessionFilePath(projectName, sessionId);
     if (fs.existsSync(filePath)) {
@@ -424,21 +363,6 @@ function getSessionDetail(projectName, sessionId) {
                 feishu_bindings: targets.filter((target) => target.active_session_id === sessionId),
                 agent_binding: (0, project_session_agent_binding_1.getProjectSessionAgentBinding)(projectName, sessionId),
             };
-        }
-        catch { }
-    }
-    // fallback: 从 cc-connect 文件读取
-    const ccFile = findCcSessionFile(projectName);
-    if (ccFile) {
-        try {
-            const data = JSON.parse(fs.readFileSync(ccFile, "utf-8"));
-            const session = data.sessions[sessionId] || null;
-            return session ? {
-                ...session,
-                source: projectSessionSource(sessionId, session, targets),
-                feishu_bindings: targets.filter((target) => target.active_session_id === sessionId),
-                agent_binding: (0, project_session_agent_binding_1.getProjectSessionAgentBinding)(projectName, sessionId),
-            } : null;
         }
         catch { }
     }
@@ -491,6 +415,9 @@ function normalizeWebSessionMessage(message) {
         // after refresh. These are metadata only; no model content is stored.
         "execution_anchor_message_id",
         "execution_turn_id",
+        "conversation_turn_id",
+        "attempt_id",
+        "status",
         "taskExperience",
         "fileChanges",
         "workEvents",
@@ -530,7 +457,6 @@ function replaceProjectSessionConversation(projectInput, sessionIdInput, message
     delete data.compaction;
     data.updated_at = new Date().toISOString();
     fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
-    syncToFilesystemToCc(project);
     (0, conversation_search_dirty_1.markConversationSearchIndexDirty)(`project:${project}:${sessionId}`);
     return { project, sessionId, count: data.history.length, generation: rotation.nextGeneration, data };
 }
@@ -542,7 +468,6 @@ function writeProjectSessionConversationBranch(projectInput, name, messages) {
     data.title_origin = "manual";
     data.updated_at = new Date().toISOString();
     fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
-    syncToFilesystemToCc(created.project);
     (0, conversation_search_dirty_1.markConversationSearchIndexDirty)(`project:${created.project}:${created.sessionId}`);
     return { ...created, data };
 }
@@ -562,30 +487,11 @@ function messageMatchesDeleteSelector(message, selector, index) {
         return true;
     return false;
 }
-function getNextSessionId(projectName) {
-    const dir = getProjectSessionDir(projectName);
-    const nums = [];
-    if (fs.existsSync(dir)) {
-        fs.readdirSync(dir).filter(f => f.endsWith(".json")).forEach(f => nums.push(parseInt(f.replace("s", "").replace(".json", "")) || 0));
-    }
-    const ccFile = findCcSessionFile(projectName);
-    if (ccFile) {
-        try {
-            const data = JSON.parse(fs.readFileSync(ccFile, "utf-8"));
-            Object.keys(data.sessions || {}).forEach(s => nums.push(parseInt(s.replace("s", "")) || 0));
-            Object.values(data.active_session || {}).forEach((s) => nums.push(parseInt(String(s).replace("s", "")) || 0));
-            Object.values(data.user_sessions || {}).flatMap((values) => Array.isArray(values) ? values : [])
-                .forEach((s) => nums.push(parseInt(String(s).replace("s", "")) || 0));
-        }
-        catch { }
-    }
-    return `s${nums.length > 0 ? Math.max(...nums) + 1 : 1}`;
-}
 const projectSessionTitleJobs = new Map();
 function createProjectSessionRecord(projectName, name = "", source = "web", options = {}) {
     const safeProject = requireActiveProject(projectName).project;
     ensureWebSessionDir(safeProject);
-    const sessionId = getNextSessionId(safeProject);
+    const sessionId = (0, conversation_session_identity_1.createConversationSessionId)('project');
     const now = new Date().toISOString();
     const normalizedSource = String(source || "web").toLowerCase() === "feishu" ? "feishu" : "web";
     const placeholderName = normalizedSource === "feishu" ? "新建飞书会话" : "新会话";
@@ -601,13 +507,16 @@ function createProjectSessionRecord(projectName, name = "", source = "web", opti
         source: normalizedSource,
         session_kind: normalizedSource === "feishu"
             ? "conversation"
-            : String(options.sessionKind || options.session_kind || "").toLowerCase() === "automation"
-                ? "automation"
+            : ["recovery", "automation"].includes(String(options.sessionKind || options.session_kind || "").toLowerCase())
+                ? String(options.sessionKind || options.session_kind).toLowerCase()
                 : "conversation",
+        ...(String(options.sessionKind || options.session_kind || "").toLowerCase() === "recovery" ? {
+            recovery_task_id: String(options.recoveryTaskId || options.recovery_task_id || "").slice(0, 160),
+            recovery_attempt: Math.max(0, Number(options.recoveryAttempt || options.recovery_attempt || 0)),
+        } : {}),
     };
-    fs.writeFileSync(getSessionFilePath(safeProject, sessionId), JSON.stringify(sessionData, null, 2));
+    fs.writeFileSync(getSessionFilePath(safeProject, sessionId), JSON.stringify(sessionData, null, 2), { flag: 'wx' });
     (0, conversation_search_dirty_1.markConversationSearchIndexDirty)(`project:${safeProject}:${sessionId}`);
-    syncToFilesystemToCc(safeProject);
     return { project: safeProject, sessionId, name: sessionName, source: normalizedSource, session_kind: sessionData.session_kind, created: true };
 }
 function applyProjectSessionProvisionalTitle(project, sessionId, message) {
@@ -635,7 +544,6 @@ function applyProjectSessionProvisionalTitle(project, sessionId, message) {
     data.updated_at = now;
     fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
     (0, conversation_search_dirty_1.markConversationSearchIndexDirty)(`project:${safeProject}:${safeSessionId}`);
-    syncToFilesystemToCc(safeProject);
     (0, runtime_events_1.publishRuntimeEvent)("project", "project.session_title_changed", {
         project: safeProject,
         sessionId: safeSessionId,
@@ -708,7 +616,7 @@ function appendProjectSessionTaskMessage(projectName, sessionId, message) {
     if (!fs.existsSync(filePath))
         throw new Error("项目会话不存在");
     const data = JSON.parse(fs.readFileSync(filePath, "utf-8"));
-    const normalized = normalizeWebSessionMessage(message);
+    const normalized = normalizeWebSessionMessage((0, conversation_attempt_1.bindConversationMessage)(message, "project", `${safeProject}:${safeSessionId}`));
     data.history = Array.isArray(data.history) ? data.history : [];
     if (!data.history.some((item) => String(item.id || "") === normalized.id))
         data.history.push(normalized);
@@ -716,7 +624,6 @@ function appendProjectSessionTaskMessage(projectName, sessionId, message) {
     data.updated_at = new Date().toISOString();
     fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
     (0, conversation_search_dirty_1.markConversationSearchIndexDirty)(`project:${safeProject}:${safeSessionId}`);
-    syncToFilesystemToCc(safeProject);
     if (normalized.role === "user") {
         try {
             applyProjectSessionProvisionalTitle(safeProject, safeSessionId, normalized);
@@ -751,7 +658,6 @@ function appendProjectSessionLocalCommandRecord(projectName, sessionId, message)
     data.updated_at = new Date().toISOString();
     fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
     (0, conversation_search_dirty_1.markConversationSearchIndexDirty)(`project:${safeProject}:${safeSessionId}`);
-    syncToFilesystemToCc(safeProject);
     return normalized;
 }
 function upsertProjectSessionTaskMessage(projectName, sessionId, message) {
@@ -761,7 +667,7 @@ function upsertProjectSessionTaskMessage(projectName, sessionId, message) {
     if (!fs.existsSync(filePath))
         throw new Error("项目会话不存在");
     const data = JSON.parse(fs.readFileSync(filePath, "utf-8"));
-    const normalized = normalizeWebSessionMessage(message);
+    const normalized = normalizeWebSessionMessage((0, conversation_attempt_1.bindConversationMessage)(message, "project", `${safeProject}:${safeSessionId}`));
     const taskId = String(normalized.task_id || normalized.taskExperience?.task_id || "").trim();
     data.history = Array.isArray(data.history) ? data.history : [];
     const existingIndex = data.history.findIndex((item) => {
@@ -809,7 +715,6 @@ function upsertProjectSessionTaskMessage(projectName, sessionId, message) {
     data.updated_at = new Date().toISOString();
     fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
     (0, conversation_search_dirty_1.markConversationSearchIndexDirty)(`project:${safeProject}:${safeSessionId}`);
-    syncToFilesystemToCc(safeProject);
     (0, runtime_events_1.publishRuntimeEvent)("project", "project.session_messages_changed", {
         project: safeProject,
         sessionId: safeSessionId,
@@ -884,7 +789,6 @@ function scheduleProjectSessionAutoTitle(project, sessionId, options = {}) {
         latest.updated_at = latest.title_generated_at;
         fs.writeFileSync(filePath, JSON.stringify(latest, null, 2));
         (0, conversation_search_dirty_1.markConversationSearchIndexDirty)(`project:${safeProject}:${safeSessionId}`);
-        syncToFilesystemToCc(safeProject);
         (0, runtime_events_1.publishRuntimeEvent)("project", "project.session_title_changed", {
             project: safeProject,
             sessionId: safeSessionId,
@@ -975,7 +879,6 @@ function handleSessionsApi(pathname, req, res, parsed) {
                     data.history.push(normalizedMessage);
                 data.updated_at = new Date().toISOString();
                 fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
-                syncToFilesystemToCc(project);
                 let provisionalTitle = null;
                 if (!duplicate && normalizedMessage.role === "user") {
                     provisionalTitle = applyProjectSessionProvisionalTitle(project, sessionId, normalizedMessage);
@@ -1032,7 +935,6 @@ function handleSessionsApi(pathname, req, res, parsed) {
                 }
                 data.updated_at = new Date().toISOString();
                 fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
-                syncToFilesystemToCc(project);
                 (0, utils_1.sendJson)(res, { success: true, deleted, count: data.history.length, binding_generation: rotation?.nextGeneration || 0 });
             }
             catch (e) {
@@ -1067,7 +969,6 @@ function handleSessionsApi(pathname, req, res, parsed) {
                 delete data.compaction;
                 data.updated_at = new Date().toISOString();
                 fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
-                syncToFilesystemToCc(project);
                 (0, utils_1.sendJson)(res, { success: true, replaced: before, count: data.history.length, binding_generation: rotation.nextGeneration });
             }
             catch (e) {
@@ -1105,7 +1006,6 @@ function handleSessionsApi(pathname, req, res, parsed) {
                 delete data.compaction;
                 data.updated_at = new Date().toISOString();
                 fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
-                syncToFilesystemToCc(project);
                 (0, utils_1.sendJson)(res, { success: true, cleared, binding_generation: rotation.nextGeneration, closed_agent_sessions: rotation.closed.length });
             }
             catch (e) {
@@ -1179,35 +1079,9 @@ function handleSessionsApi(pathname, req, res, parsed) {
                 (0, project_main_agent_1.cancelProjectMainTasksForSession)(project, sessionId, "用户删除项目会话，取消未完成的项目主 Agent 任务");
                 const bindingCleanup = (0, project_session_agent_binding_1.purgeProjectSessionAgentBinding)(project, sessionId);
                 const runCleanup = (0, chat_runs_1.purgeProjectChatRunsForSession)(project, sessionId);
+                const contextCacheCleanup = (0, deleted_session_context_1.clearDeletedSessionContext)('project', project, sessionId);
                 fs.unlinkSync(filePath);
                 clearProjectMainDynamicContext(project, sessionId);
-                let contextCacheCleanup = null;
-                try {
-                    contextCacheCleanup = (0, provider_neutral_context_cache_1.invalidateProviderNeutralContextCacheState)({
-                        scope: "project",
-                        scopeId: project,
-                        sessionId,
-                    }, "project_session_deleted");
-                }
-                catch { }
-                const ccFile = findCcSessionFile(project);
-                if (ccFile) {
-                    try {
-                        const data = JSON.parse(fs.readFileSync(ccFile, "utf-8"));
-                        delete data.sessions[sessionId];
-                        for (const [k, v] of Object.entries(data.active_session || {})) {
-                            if (v === sessionId)
-                                delete data.active_session[k];
-                        }
-                        for (const [k, values] of Object.entries(data.user_sessions || {})) {
-                            if (!Array.isArray(values))
-                                continue;
-                            data.user_sessions[k] = values.filter((value) => String(value) !== String(sessionId));
-                        }
-                        fs.writeFileSync(ccFile, JSON.stringify(data, null, 2));
-                    }
-                    catch { }
-                }
                 (0, utils_1.sendJson)(res, {
                     success: true,
                     removed_agent_sessions: bindingCleanup.removed.length,
@@ -1238,19 +1112,6 @@ function handleSessionsApi(pathname, req, res, parsed) {
                 data.title_origin = "manual";
                 data.updated_at = new Date().toISOString();
                 fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
-                const ccFile = findCcSessionFile(project);
-                if (ccFile) {
-                    try {
-                        const ccData = JSON.parse(fs.readFileSync(ccFile, "utf-8"));
-                        if (ccData.sessions[sessionId]) {
-                            ccData.sessions[sessionId].name = safeName;
-                            ccData.sessions[sessionId].title_origin = "manual";
-                            ccData.sessions[sessionId].updated_at = data.updated_at;
-                            fs.writeFileSync(ccFile, JSON.stringify(ccData, null, 2));
-                        }
-                    }
-                    catch { }
-                }
                 (0, utils_1.sendJson)(res, { success: true });
             }
             catch (e) {

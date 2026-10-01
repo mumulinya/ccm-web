@@ -37,6 +37,7 @@ exports.buildTaskPlanDetail = buildTaskPlanDetail;
 exports.buildTaskPlanPatch = buildTaskPlanPatch;
 exports.runTaskPlanDetailSelfTest = runTaskPlanDetailSelfTest;
 const crypto = __importStar(require("crypto"));
+const task_available_actions_1 = require("../../agents/task-available-actions");
 const text = (value, max = 320) => {
     const normalized = String(value || "").replace(/\s+/g, " ").trim();
     return normalized.length > max ? `${normalized.slice(0, max)}...` : normalized;
@@ -184,6 +185,7 @@ function buildTaskPlanDetail(task) {
         goal: text(task?.business_goal || task?.description || planMode?.architecture_plan?.goal || planMode?.goal || "", 900),
         summary: text(task?.description || planMode?.risk?.summary || task?.status_detail || "", 520),
         status: planStatus(task),
+        available_actions: (0, task_available_actions_1.planAvailableActions)(planStatus(task)),
         workItems: items,
         assignments: assignments(task, items),
         acceptanceCriteria: list(task?.acceptance_evidence_plan?.map?.((item) => item?.criterion || item?.observableOutcome) || task?.acceptance_criteria || planMode?.acceptance, 30),

@@ -48,10 +48,12 @@ exports.verifySessionTimelineChain = verifySessionTimelineChain;
 exports.rebuildTaskContextFromSnapshot = rebuildTaskContextFromSnapshot;
 exports.catchUpTaskContext = catchUpTaskContext;
 exports.recoverTaskContextProjectors = recoverTaskContextProjectors;
+exports.recoverTaskContextProjectorsAsync = recoverTaskContextProjectorsAsync;
 exports.readTaskContextHead = readTaskContextHead;
 exports.snapshotTaskContextForBoundary = snapshotTaskContextForBoundary;
 exports.projectPriorTaskSummaries = projectPriorTaskSummaries;
 exports.recordSessionTimelineMessage = recordSessionTimelineMessage;
+exports.recordTaskContextBoundary = recordTaskContextBoundary;
 exports.runSessionTaskTimelineSelfTest = runSessionTaskTimelineSelfTest;
 const crypto = __importStar(require("crypto"));
 const runtime_events_1 = require("../system/runtime-events");
@@ -119,7 +121,9 @@ function upsertSpan(db, scope, scopeId, span) {
     db.prepare(`
     INSERT INTO task_timeline_spans(span_id, task_id, scope, scope_id, exact_session_id, start_event_id, start_sequence, end_event_id, end_sequence, latest_sequence, status, summary_json, checksum, created_at, updated_at, content_stored)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
-    ON CONFLICT(span_id) DO UPDATE SET end_event_id=excluded.end_event_id, end_sequence=excluded.end_sequence,
+    ON CONFLICT(span_id) DO UPDATE SET scope=excluded.scope, scope_id=excluded.scope_id,
+      exact_session_id=excluded.exact_session_id, start_event_id=excluded.start_event_id,
+      start_sequence=excluded.start_sequence, end_event_id=excluded.end_event_id, end_sequence=excluded.end_sequence,
       latest_sequence=excluded.latest_sequence, status=excluded.status, summary_json=excluded.summary_json, checksum=excluded.checksum, updated_at=excluded.updated_at
   `).run(span.spanId, span.taskId, scope, scopeId, span.exactSessionId, span.startMarkerId, span.startSequence, span.endMarkerId || "", span.endSequence ?? null, span.latestSequence, span.status, stringify(span.summary || {}), span.checksum, now, now);
     const statement = db.prepare(`
@@ -334,9 +338,22 @@ function persistTaskMutationWithTimelineAtomically(input) {
             }
         }
         else if (input.terminalStatus) {
-            if (!span)
-                throw new Error("任务缺少活动时间线区间，不能提交终态");
             const terminalStatus = normalizeStatus(input.terminalStatus);
+            // Historical tasks can reach a terminal callback after a restart before
+            // their first attempt span was persisted. Create a minimal active span
+            // from the authoritative task identity, then close it atomically with
+            // the terminal event instead of leaving the task stuck in progress.
+            if (!span) {
+                const recoveredAttempt = Math.max(1, Number(input.attempt || 1));
+                const recoveredStartEventId = `task_attempt_started:${text(input.task.id, 120)}:${recoveredAttempt}:recovered`;
+                span = startSpan({
+                    taskId: String(input.task.id),
+                    exactSessionId: input.exactSessionId,
+                    attempt: recoveredAttempt,
+                    eventId: recoveredStartEventId,
+                    sequence: current.latestSequence + 1,
+                });
+            }
             eventType = terminalStatus === "success" ? "task_finished" : terminalStatus === "failed" || terminalStatus === "blocked" ? "task_failed" : terminalStatus === "cancelled" ? "task_cancelled" : "task_interrupted";
             const attempt = Math.max(1, Number(input.attempt || span.attemptSpans.at(-1)?.attempt || 1));
             eventId = eventId || `task_terminal:${text(input.task.id, 120)}:${terminalStatus}:${attempt}`;
@@ -420,7 +437,8 @@ function createTaskAttemptStartedTimeline(input) {
     const result = (0, task_store_1.withImmediateTaskStoreTransaction)(db => {
         const current = readIndexInDb(db, input);
         let span = current.taskSpans.find(item => item.taskId === input.taskId);
-        const eventId = `task_attempt_started:${text(input.taskId, 120)}:${Number(input.attempt)}`;
+        const suffix = text(input.eventIdSuffix, 80);
+        const eventId = `task_attempt_started:${text(input.taskId, 120)}:${Number(input.attempt)}${suffix ? `:${suffix}` : ""}`;
         const existing = current.events.find(event => event.eventId === eventId);
         if (existing)
             return { index: current, span: span || null, event: existing };
@@ -583,6 +601,46 @@ function recoverTaskContextProjectors() {
     const outbox = drainTaskContextOutbox(1000);
     return { checked: taskIds.length, current, caughtUp, drifted, outbox, contentStored: false };
 }
+/**
+ * Startup-safe variant of the projector recovery.
+ *
+ * The synchronous implementation is still used by explicit maintenance
+ * callers, but running it as one large loop during server startup can occupy
+ * the Node event loop for minutes on a workspace with a long timeline.  Keep
+ * the exact same ordering and database operations while yielding between
+ * tasks so HTTP/SSE requests remain serviceable.
+ */
+async function recoverTaskContextProjectorsAsync() {
+    (0, task_store_1.withSqliteTaskStore)(db => db.prepare("UPDATE task_context_outbox SET status='pending' WHERE status='processing'").run());
+    const taskIds = (0, task_store_1.withSqliteTaskStore)(db => db.prepare("SELECT task_id FROM task_context_heads ORDER BY task_id").all().map(row => String(row.task_id || "")).filter(Boolean));
+    let current = 0;
+    let caughtUp = 0;
+    let drifted = 0;
+    for (const taskId of taskIds) {
+        await new Promise(resolve => setImmediate(resolve));
+        const result = catchUpTaskContext(taskId);
+        if (!result.success)
+            drifted += 1;
+        else if (result.status === "caught_up")
+            caughtUp += 1;
+        else
+            current += 1;
+    }
+    // Drain in bounded batches and yield between them. The outbox can contain
+    // projection work that itself invokes application code, so it must not be
+    // allowed to monopolize the event loop either.
+    let published = 0;
+    let pending = 0;
+    for (;;) {
+        await new Promise(resolve => setImmediate(resolve));
+        const batch = drainTaskContextOutbox(100);
+        published += Number(batch?.published || 0);
+        pending = Number(batch?.pending || 0);
+        if (!pending || !batch?.published)
+            break;
+    }
+    return { checked: taskIds.length, current, caughtUp, drifted, outbox: { published, pending }, contentStored: false };
+}
 function readTaskContextHead(taskId) {
     return (0, task_store_1.withSqliteTaskStore)(db => { const row = db.prepare("SELECT * FROM task_context_heads WHERE task_id=?").get(taskId); if (!row)
         return null; return { taskId, revision: Number(row.revision || 0), checksum: String(row.checksum || ""), ...(row.active_span_id ? { activeSpanId: String(row.active_span_id) } : {}), appliedCursors: parse(row.applied_cursors_json, []), latestSnapshotRevision: Number(row.latest_snapshot_revision || 0), status: row.status, contentStored: false }; });
@@ -603,6 +661,12 @@ function snapshotTaskContextForBoundary(taskId, reason = "compaction_boundary") 
 }
 function projectPriorTaskSummaries(index, currentTaskId) { return index.taskSpans.filter(span => span.taskId !== currentTaskId).map(span => ({ taskId: span.taskId, status: span.status, title: text(span.summary?.title, 300), goal: text(span.summary?.goal, 1000), result: text(span.summary?.result, 1000), evidenceIds: Array.isArray(span.summary?.evidenceIds) ? span.summary.evidenceIds.slice(0, 100) : [], startSequence: span.startSequence, endSequence: span.endSequence, spanChecksum: span.checksum, contentStored: false })); }
 function recordSessionTimelineMessage(input) { return appendSessionTimelineEvent({ exactSessionId: input.exactSessionId, scope: input.scope, scopeId: input.scopeId, type: input.role === "user" ? "user_message" : "assistant_message", eventId: `message:${text(input.messageId || `${input.role}:${input.timestamp || ""}`, 180)}`, taskId: input.taskId, timestamp: input.timestamp, payloadRef: input.messageId }); }
+function recordTaskContextBoundary(input) {
+    const boundaryRef = text(input.boundaryRef || `${input.type}:${Date.now()}`, 180);
+    return appendSessionTimelineEvent({ ...input, eventId: `task_boundary:${text(input.taskId, 120)}:${input.type}:${digest(boundaryRef).slice(0, 20)}`,
+        idempotencyKey: `task_boundary:${text(input.taskId, 120)}:${input.type}:${boundaryRef}`, payloadRef: boundaryRef,
+        contextReason: input.type, forceSnapshot: true });
+}
 function runSessionTaskTimelineSelfTest() {
     const base = { exactSessionId: `selftest-${crypto.randomUUID()}`, scope: "project", scopeId: "demo" };
     const started = createTaskStartedTimeline({ ...base, taskId: "task-a", attempt: 1 });

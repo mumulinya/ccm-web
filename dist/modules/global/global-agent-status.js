@@ -3,7 +3,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.createGlobalAgentStatusRuntime = createGlobalAgentStatusRuntime;
 function createGlobalAgentStatusRuntime(deps) {
-    const { collectGlobalTestAgentFailureItemsFromSource, getConfigs, getGlobalAgentRun, globalSafeArray, globalUniqueStrings, globalVisibleText, hasExplicitDevelopmentExecutionIntent, hasExplicitGlobalWriteAuthorization, listGlobalAgentRuns, loadCronJobs, loadGroups, loadTasks, normalizeText, refreshGlobalDevelopmentMissions, sanitizeGlobalDirectAgentOutput, scrubGlobalTestAgentEvidencePathText, summarizeGlobalTestAgentDiagnosticItem, summarizeGlobalTestAgentFailureItem } = deps;
+    const { collectGlobalTestAgentFailureItemsFromSource, getConfigs, getGlobalAgentRun, globalSafeArray, globalUniqueStrings, globalVisibleText, hasExplicitDevelopmentExecutionIntent, hasExplicitGlobalWriteAuthorization, listGlobalAgentRuns, listAutomationDefinitions, loadGroups, loadTasks, normalizeText, refreshGlobalDevelopmentMissions, sanitizeGlobalDirectAgentOutput, scrubGlobalTestAgentEvidencePathText, summarizeGlobalTestAgentDiagnosticItem, summarizeGlobalTestAgentFailureItem } = deps;
     function isGlobalProgressStatusRequest(message, modelDecision = null) {
         const text = normalizeText(message);
         if (!text)
@@ -895,7 +895,7 @@ function createGlobalAgentStatusRuntime(deps) {
         const projects = getConfigs();
         const groups = loadGroups();
         const tasks = loadTasks();
-        const cronJobs = loadCronJobs();
+        const cronJobs = listAutomationDefinitions();
         const activeTasks = tasks.filter((item) => ["pending", "queued", "in_progress", "running"].includes(String(item.status))).length;
         return [
             "CCM 当前状态：",

@@ -42,6 +42,7 @@ exports.handleUsabilityApi = handleUsabilityApi;
 const crypto = __importStar(require("crypto"));
 const runtime_events_1 = require("../../system/runtime-events");
 const db_1 = require("../../core/db");
+const automation_definition_service_1 = require("../scheduling/automation-definition-service");
 const utils_1 = require("../../core/utils");
 const collaboration_1 = require("../collaboration/collaboration");
 const agent_sessions_1 = require("../../tasks/agent-sessions");
@@ -368,8 +369,8 @@ function buildUsabilityWorkbench(options = {}) {
     }));
     const projects = readProjectResources();
     const groups = (0, collaboration_1.loadGroups)().map((group) => ({ id: group.id, name: group.name, members: Array.isArray(group.members) ? group.members.length : 0 }));
-    const cron = (0, db_1.loadCronJobs)().filter((job) => !job.archived && !job.deleted_at).map((job) => ({
-        id: job.id, name: job.name || job.title || "定时任务", enabled: job.enabled !== false && job.status !== "paused", next_run: job.next_run || job.nextRun || "", last_status: job.last_status || job.lastStatus || "", actions: ["open", "toggle"],
+    const cron = (0, automation_definition_service_1.listAutomationDefinitions)().filter((definition) => !definition.deleted_at).map((definition) => ({
+        id: definition.definition_id, name: definition.name || "自动化", enabled: definition.enabled !== false, next_run: "", last_status: "", actions: ["open", "toggle"],
     }));
     const attentionCounts = { confirmation: 0, failed: 0, supplement: 0 };
     [...buckets.failed, ...buckets.needs_user].forEach((task) => {
@@ -442,12 +443,12 @@ function workbenchSectionItems(section) {
     if (section === "groups")
         return (0, collaboration_1.loadGroups)().map((group) => ({ id: group.id, name: group.name, members: Array.isArray(group.members) ? group.members.length : 0 }));
     if (section === "cron")
-        return (0, db_1.loadCronJobs)().filter((job) => !job.archived && !job.deleted_at).map((job) => ({
-            id: job.id,
-            name: job.name || job.title || "定时任务",
-            enabled: job.enabled !== false && job.status !== "paused",
-            next_run: job.next_run || job.nextRun || "",
-            last_status: job.last_status || job.lastStatus || "",
+        return (0, automation_definition_service_1.listAutomationDefinitions)().filter((definition) => !definition.deleted_at).map((definition) => ({
+            id: definition.definition_id,
+            name: definition.name || "自动化",
+            enabled: definition.enabled !== false,
+            next_run: "",
+            last_status: "",
         }));
     throw new Error("不支持的工作台分页区域");
 }

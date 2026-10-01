@@ -15,6 +15,7 @@ exports.enforceTaskAgentProbeReadiness = enforceTaskAgentProbeReadiness;
 exports.getTaskAgentExecutionReadiness = getTaskAgentExecutionReadiness;
 exports.buildDailyDevAgentDiagnostics = buildDailyDevAgentDiagnostics;
 const db_1 = require("../../core/db");
+const automation_definition_service_1 = require("../scheduling/automation-definition-service");
 const group_orchestrator_1 = require("./group-orchestrator");
 const memory_1 = require("./memory");
 const storage_1 = require("./storage");
@@ -347,7 +348,7 @@ function buildDailyDevAgentDiagnostics() {
     const groups = (0, storage_1.loadGroups)();
     const configs = (0, db_1.getConfigs)();
     const tasks = (0, db_1.loadTasks)();
-    const cronJobs = (0, db_1.loadCronJobs)();
+    const cronJobs = (0, automation_definition_service_1.listAutomationDefinitions)();
     const enabledCronJobs = cronJobs.filter((job) => job?.enabled !== false);
     const autoTasks = tasks.filter((task) => task?.auto_execute);
     const devGroups = groups.map((group) => {
@@ -569,10 +570,10 @@ function buildDailyDevAgentDiagnostics() {
     checks.push((0, collaboration_1.createDiagnosticCheck)("cron-dispatch", "定时派发", enabledCronJobs.length > 0 ? "ok" : "warn", enabledCronJobs.length > 0
         ? `已启用 ${enabledCronJobs.length} 个定时任务，可自动创建开发任务`
         : "暂无启用中的定时任务；需要自动接活时可在定时任务页创建", { total: cronJobs.length, enabled: enabledCronJobs.length }));
-    const cronDailyDevProtocol = (0, collaboration_1.runCronDailyDevProtocolSelfTestSafe)();
-    checks.push((0, collaboration_1.createDiagnosticCheck)("cron-daily-dev-protocol", "定时业务开发协议", cronDailyDevProtocol.pass ? "ok" : "fail", cronDailyDevProtocol.pass
+    const automationDailyDevProtocol = (0, collaboration_1.runAutomationDailyDevProtocolSelfTestSafe)();
+    checks.push((0, collaboration_1.createDiagnosticCheck)("cron-daily-dev-protocol", "定时业务开发协议", automationDailyDevProtocol.pass ? "ok" : "fail", automationDailyDevProtocol.pass
         ? "daily_dev 定时任务会创建群聊主 Agent 任务，并把定时提示词写入任务级业务/接口文档"
-        : "daily_dev 定时任务未能稳定生成主 Agent 闭环任务或缺少任务级文档", cronDailyDevProtocol));
+        : "daily_dev 定时任务未能稳定生成主 Agent 闭环任务或缺少任务级文档", automationDailyDevProtocol));
     checks.push((0, collaboration_1.createDiagnosticCheck)("receipt-gate", "完成结果说明验收", "ok", "子 Agent 输出必须包含结构化结果说明，队列会按结构化结果说明和主 Agent 复盘判定完成", { autoTaskCount: autoTasks.length }));
     const dailyDevGateSelfTest = (0, collaboration_1.getDailyDevCompletionGateSelfTest)();
     checks.push((0, collaboration_1.createDiagnosticCheck)("daily-dev-completion-gate", "业务开发完成门禁", dailyDevGateSelfTest.pass ? "ok" : "fail", dailyDevGateSelfTest.pass
@@ -620,7 +621,7 @@ function buildDailyDevAgentDiagnostics() {
     }));
     const smokeStatus = (0, collaboration_1.getDailyDevSmokeStatus)();
     const mainAgentCapabilityEvidence = [
-        { id: "business_intake", label: "接收业务描述/文档", ok: cronDailyDevProtocol.pass, evidence: cronDailyDevProtocol.pass ? "任务级业务/接口文档会进入 daily_dev 任务" : "定时/任务入口未稳定写入业务文档" },
+        { id: "business_intake", label: "接收业务描述/文档", ok: automationDailyDevProtocol.pass, evidence: automationDailyDevProtocol.pass ? "自动化定义中的业务/接口文档会进入 TaskSpec" : "自动化定义入口未稳定写入业务文档" },
         { id: "configurable_project_agents", label: "读取可配置项目 Agent", ok: configs.length > 0 && groupsWithReadyMembers.length > 0, evidence: `项目配置 ${configs.length} 个，可执行开发群聊 ${groupsWithReadyMembers.length} 个` },
         { id: "coordinator_plan", label: "主 Agent 计划", ok: coordinatorProtocol.pass, evidence: coordinatorProtocol.pass ? `可生成 ${coordinatorProtocol.coordinationPlan?.phases?.length || 0} 阶段计划` : "协调计划自测失败" },
         { id: "structured_dispatch", label: "结构化派发", ok: Object.values(collaborationProtocol.structuredAssignmentChecks || {}).every(Boolean), evidence: "assignments 会保留目标、任务、依赖和续跑语义" },

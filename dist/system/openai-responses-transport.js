@@ -34,6 +34,9 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.isOfficialOpenAiResponsesEndpoint = isOfficialOpenAiResponsesEndpoint;
+exports.buildResponsesContinuationFingerprint = buildResponsesContinuationFingerprint;
+exports.responsesInputItemChecksums = responsesInputItemChecksums;
+exports.prepareResponsesContinuationRequest = prepareResponsesContinuationRequest;
 exports.getReusableResponsesPreviousId = getReusableResponsesPreviousId;
 exports.rememberResponsesResponseId = rememberResponsesResponseId;
 exports.forgetResponsesPreviousId = forgetResponsesPreviousId;
@@ -51,12 +54,62 @@ exports.buildOpenAiResponsesBody = buildOpenAiResponsesBody;
 exports.safeProviderHttpDetail = safeProviderHttpDetail;
 exports.consumeOpenAiResponsesSse = consumeOpenAiResponsesSse;
 const crypto = __importStar(require("crypto"));
+const responses_output_replay_1 = require("./responses-output-replay");
+const fs = __importStar(require("fs"));
+const path = __importStar(require("path"));
+const provider_native_tools_1 = require("./provider-native-tools");
+const workspace_model_result_projection_1 = require("../tools/workspace-model-result-projection");
 const sse_json_parser_1 = require("./sse-json-parser");
 const provider_cache_protocol_1 = require("./provider-cache-protocol");
+const runtime_paths_1 = require("../core/runtime-paths");
 const responsesWithoutMaxOutputTokens = new Set();
 const responsesWithoutTemperature = new Set();
 const responsesSessionState = new Map();
-const RESPONSES_SESSION_STATE_TTL_MS = 6 * 60 * 60 * 1000;
+const RESPONSES_SESSION_STATE_FILE = path.join(runtime_paths_1.CCM_DIR, "provider-context-cache", "responses-sessions.json");
+// Existing state created before CCM_DIR was introduced remains readable, but
+// writes always go to the active runtime home. This also keeps explicit test
+// homes isolated from the user's default ~/.ccm store.
+const LEGACY_RESPONSES_SESSION_STATE_FILE = path.join(runtime_paths_1.DEFAULT_CCM_DIR, "provider-context-cache", "responses-sessions.json");
+function loadResponsesSessionState() {
+    const files = [RESPONSES_SESSION_STATE_FILE];
+    if (LEGACY_RESPONSES_SESSION_STATE_FILE !== RESPONSES_SESSION_STATE_FILE)
+        files.push(LEGACY_RESPONSES_SESSION_STATE_FILE);
+    for (const file of files) {
+        try {
+            const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
+            if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+                continue;
+            for (const [key, value] of Object.entries(parsed)) {
+                const state = value;
+                if (!key || !state || typeof state !== "object" || !String(state.responseId || ""))
+                    continue;
+                responsesSessionState.set(key, {
+                    responseId: String(state.responseId),
+                    boundaryGeneration: Math.max(0, Number(state.boundaryGeneration || 0)),
+                    updatedAt: Math.max(0, Number(state.updatedAt || 0)),
+                    inputItemChecksums: Array.isArray(state.inputItemChecksums) ? state.inputItemChecksums.slice(-2048).map(String) : [],
+                    outputItemChecksums: Array.isArray(state.outputItemChecksums) ? state.outputItemChecksums.slice(-256).map(String) : [],
+                    continuationFingerprint: String(state.continuationFingerprint || ""),
+                });
+            }
+            // An existing active store is authoritative, including an empty store
+            // after forgetResponsesPreviousId. Never resurrect deleted legacy keys.
+            return;
+        }
+        catch { /* missing or corrupt state is equivalent to a cold continuation */ }
+    }
+}
+function persistResponsesSessionState() {
+    try {
+        fs.mkdirSync(path.dirname(RESPONSES_SESSION_STATE_FILE), { recursive: true });
+        const rows = {};
+        for (const [key, state] of responsesSessionState.entries())
+            rows[key] = state;
+        fs.writeFileSync(RESPONSES_SESSION_STATE_FILE, `${JSON.stringify(rows)}\n`, "utf8");
+    }
+    catch { /* persistence is best effort; prompt cache identity remains authoritative */ }
+}
+loadResponsesSessionState();
 function digest(value) {
     return crypto.createHash("sha256").update(JSON.stringify(value ?? null)).digest("hex").slice(0, 32);
 }
@@ -81,14 +134,108 @@ function isOfficialOpenAiResponsesEndpoint(endpoint, config) {
         return false;
     }
 }
+function continuationAllowed(endpoint, config, cache) {
+    if (["0", "false", "off", "disabled", "no"].includes(String(process.env.CCM_RESPONSES_CONTINUATION || "").trim().toLowerCase()))
+        return false;
+    // Provider conversation continuation is an explicit transport optimization,
+    // not the prompt-cache path.  Keep it disabled for normal requests even on
+    // the first-party endpoint so every request remains a full append-only
+    // transcript.  The isolated capability probe is the only implicit opt-in.
+    return config?.providerCacheUseResponsesContinuation === true
+        || cache?.responsesContinuationProbeInProgress === true
+        || cache?.responsesContinuationConfirmed === true;
+}
+function buildResponsesContinuationFingerprint(input = {}) {
+    return digest({
+        instructions: input.instructions || "",
+        tools: input.tools || [],
+        cacheKey: input.cacheKey || "",
+        reasoning: input.reasoning || "",
+        model: input.model || "",
+    });
+}
+function inputItemChecksums(inputItems) {
+    return (Array.isArray(inputItems) ? inputItems : []).map(item => digest(item));
+}
 /**
- * Responses conversation state is used only for first-party endpoints and
- * only by ordinary no-tool turns. Tool loops continue to send the explicit
- * transcript because CCM must preserve its local execution ledger and
- * permission boundaries.
+ * A Responses continuation already contains the previous assistant output on
+ * the provider side.  Re-sending assistant messages/function calls in the
+ * delta both wastes input tokens and can make a relay reject the request as a
+ * forked transcript.  User items and function_call_output remain additive.
+ */
+function continuationDeltaItems(inputItems) {
+    return (Array.isArray(inputItems) ? inputItems : []).filter(item => {
+        const type = String(item?.type || "").toLowerCase();
+        const role = String(item?.role || "").toLowerCase();
+        if (type === "function_call")
+            return false;
+        if (role === "assistant")
+            return false;
+        return true;
+    });
+}
+function responsesInputItemChecksums(inputItems) {
+    return inputItemChecksums(inputItems);
+}
+function prepareResponsesContinuationRequest(endpoint, cache, config, input) {
+    const inputItems = Array.isArray(input?.inputItems) ? input.inputItems : [];
+    const checksums = inputItemChecksums(inputItems);
+    const fingerprint = buildResponsesContinuationFingerprint(input);
+    const key = responsesSessionStateKey(cache, {
+        endpoint,
+        model: config?.model,
+        proxy: config?.proxyUrl || config?.proxy_url || config?.proxyEndpoint || config?.proxy_endpoint || config?.httpsProxy || config?.https_proxy || config?.httpProxy || config?.http_proxy,
+        credential: config?.apiKey || config?.api_key,
+    });
+    const state = key ? responsesSessionState.get(key) : undefined;
+    if (!continuationAllowed(endpoint, config, cache))
+        return { previousResponseId: "", inputItems, mode: "full", reason: "provider_not_confirmed" };
+    const boundaryGeneration = Math.max(0, Number(cache?.boundaryGeneration || 0));
+    if (!state || !state.responseId) {
+        if (key)
+            responsesSessionState.delete(key);
+        return { previousResponseId: "", inputItems, mode: "full", reason: "no_previous_response" };
+    }
+    if (state.boundaryGeneration !== boundaryGeneration) {
+        if (key)
+            responsesSessionState.delete(key);
+        return { previousResponseId: "", inputItems, mode: "full", reason: "compaction_boundary_changed" };
+    }
+    if (state.continuationFingerprint && state.continuationFingerprint !== fingerprint) {
+        if (key)
+            responsesSessionState.delete(key);
+        return { previousResponseId: "", inputItems, mode: "full", reason: "continuation_fingerprint_changed" };
+    }
+    const prior = state.inputItemChecksums || [];
+    const appendOnly = checksums.length >= prior.length && prior.every((value, index) => value === checksums[index]);
+    if (!appendOnly) {
+        if (cache?.responsesContinuationProbeInProgress === true) {
+            return {
+                previousResponseId: state.responseId,
+                inputItems: inputItems.length ? [inputItems[inputItems.length - 1]] : [],
+                mode: "incremental",
+                reason: "probe_previous_response_id",
+            };
+        }
+        if (key)
+            responsesSessionState.delete(key);
+        return { previousResponseId: "", inputItems, mode: "full", reason: "transcript_not_append_only" };
+    }
+    return {
+        previousResponseId: state.responseId,
+        inputItems: continuationDeltaItems(inputItems.slice(prior.length)),
+        mode: "incremental",
+        reason: "append_only_transcript",
+    };
+}
+/**
+ * Responses conversation state is used for first-party endpoints and for
+ * proxied endpoints only after an isolated capability probe confirms it.
+ * The local execution ledger remains authoritative; this state only decides
+ * whether the provider request can be reduced to an append-only input suffix.
  */
 function getReusableResponsesPreviousId(endpoint, cache, config) {
-    if (!isOfficialOpenAiResponsesEndpoint(endpoint, config))
+    if (!continuationAllowed(endpoint, config, cache))
         return "";
     const key = responsesSessionStateKey(cache, {
         endpoint,
@@ -97,7 +244,7 @@ function getReusableResponsesPreviousId(endpoint, cache, config) {
         credential: config?.apiKey || config?.api_key,
     });
     const state = key ? responsesSessionState.get(key) : undefined;
-    if (!state || Date.now() - state.updatedAt > RESPONSES_SESSION_STATE_TTL_MS) {
+    if (!state) {
         if (key)
             responsesSessionState.delete(key);
         return "";
@@ -105,8 +252,8 @@ function getReusableResponsesPreviousId(endpoint, cache, config) {
     const boundaryGeneration = Math.max(0, Number(cache?.boundaryGeneration || 0));
     return state.boundaryGeneration === boundaryGeneration ? state.responseId : "";
 }
-function rememberResponsesResponseId(endpoint, cache, responseId, config) {
-    if (!isOfficialOpenAiResponsesEndpoint(endpoint, config))
+function rememberResponsesResponseId(endpoint, cache, responseId, config, metadata = {}) {
+    if (!continuationAllowed(endpoint, config, cache))
         return;
     const key = responsesSessionStateKey(cache, {
         endpoint,
@@ -117,15 +264,35 @@ function rememberResponsesResponseId(endpoint, cache, responseId, config) {
     const id = String(responseId || "").trim();
     if (!key || !id)
         return;
+    const inputChecksums = Array.isArray(metadata.inputItemChecksums) ? metadata.inputItemChecksums.slice(-2048) : [];
+    const toolCallChecksums = (Array.isArray(metadata.providerToolCalls) ? metadata.providerToolCalls : [])
+        .map((call) => digest({
+        type: "function_call",
+        call_id: String(call?.id || ""),
+        name: String(call?.name || ""),
+        arguments: JSON.stringify(call?.arguments || {}),
+    }));
+    const assistantText = String(metadata.providerAssistantText || "");
+    const assistantChecksums = assistantText.trim()
+        ? [digest({ role: "assistant", content: assistantText })]
+        : [];
     responsesSessionState.set(key, {
         responseId: id,
         boundaryGeneration: Math.max(0, Number(cache?.boundaryGeneration || 0)),
         updatedAt: Date.now(),
+        // Only request input items participate in the append-only comparison.
+        // Provider output is tracked separately so assistant text/tool calls can
+        // never make the next request look like a rewritten transcript.
+        inputItemChecksums: inputChecksums.slice(-2048),
+        outputItemChecksums: [...assistantChecksums, ...toolCallChecksums].slice(-256),
+        continuationFingerprint: String(metadata.continuationFingerprint || ""),
     });
+    persistResponsesSessionState();
     if (responsesSessionState.size > 512) {
         const oldest = [...responsesSessionState.entries()].sort((left, right) => left[1].updatedAt - right[1].updatedAt)[0]?.[0];
         if (oldest)
             responsesSessionState.delete(oldest);
+        persistResponsesSessionState();
     }
 }
 function forgetResponsesPreviousId(cache, endpoint, config) {
@@ -133,10 +300,12 @@ function forgetResponsesPreviousId(cache, endpoint, config) {
         const prefix = cache && String(cache.scope || "") && String(cache.scopeId || "") && String(cache.sessionId || "")
             ? `${String(cache.scope)}\0${String(cache.scopeId)}\0${String(cache.sessionId)}\0`
             : "";
-        if (prefix)
+        if (prefix) {
             for (const key of responsesSessionState.keys())
                 if (key.startsWith(prefix))
                     responsesSessionState.delete(key);
+            persistResponsesSessionState();
+        }
         return;
     }
     const key = responsesSessionStateKey(cache, {
@@ -145,8 +314,10 @@ function forgetResponsesPreviousId(cache, endpoint, config) {
         proxy: config?.proxyUrl || config?.proxy_url || config?.proxyEndpoint || config?.proxy_endpoint || config?.httpsProxy || config?.https_proxy || config?.httpProxy || config?.http_proxy,
         credential: config?.apiKey || config?.api_key,
     });
-    if (key)
+    if (key) {
         responsesSessionState.delete(key);
+        persistResponsesSessionState();
+    }
 }
 function responsesCompatibilityKey(endpoint, model) {
     return `${String(endpoint || "").trim().replace(/\/+$/, "").toLowerCase()}\n${String(model || "").trim().toLowerCase()}`;
@@ -205,9 +376,20 @@ function textContent(value) {
 function responsesMessageContent(content, role, explicitBreakpoint = false) {
     if (!Array.isArray(content)) {
         const text = String(content ?? "");
-        if (!explicitBreakpoint || role === "assistant")
+        // Keep user/system text in the same wire shape whether a breakpoint is
+        // present or not. Previously a marked message was encoded as an
+        // `input_text` array while the same message without the marker was a raw
+        // string. As rolling breakpoints moved, that changed the bytes of the
+        // already-committed prefix and reduced the Provider hit to its baseline
+        // fragment. Assistant output remains a string for backwards-compatible
+        // Responses replay semantics.
+        if (role === "assistant")
             return text;
-        return [{ type: "input_text", text, prompt_cache_breakpoint: { mode: "explicit" } }];
+        return [{
+                type: "input_text",
+                text,
+                ...(explicitBreakpoint ? { prompt_cache_breakpoint: { mode: "explicit" } } : {}),
+            }];
     }
     const parts = content.flatMap((item) => {
         if (typeof item === "string")
@@ -239,12 +421,23 @@ function encodeOpenAiResponsesInput(messages, options = {}) {
     const input = [];
     const breakpoints = new Set((options.breakpointMessageIndexes || []).slice(0, 4).map(value => Math.max(0, Number(value || 0))));
     for (const [messageIndex, message] of (Array.isArray(messages) ? messages : []).entries()) {
+        const replay = (0, responses_output_replay_1.replayResponsesMessage)(message, options.replayIdentity);
+        if (replay) {
+            input.push(...replay);
+            continue;
+        }
         const role = String(message?.role || "user");
         if (role === "tool") {
             input.push({
                 type: "function_call_output",
                 call_id: String(message.tool_call_id || message.toolCallId || ""),
                 output: textContent(message?.content),
+                // Relays that explicitly confirmed Responses breakpoints can place a
+                // boundary on the completed function output. This preserves the
+                // entire finished tool batch for the next request; never emit it on
+                // the unverified/implicit path because older endpoints reject the
+                // optional field.
+                ...(breakpoints.has(messageIndex) ? { prompt_cache_breakpoint: { mode: "explicit" } } : {}),
             });
             continue;
         }
@@ -260,16 +453,16 @@ function encodeOpenAiResponsesInput(messages, options = {}) {
                 name: String(toolCall?.function?.name || toolCall?.name || ""),
                 arguments: typeof toolCall?.function?.arguments === "string"
                     ? toolCall.function.arguments
-                    : JSON.stringify(toolCall?.function?.arguments || toolCall?.arguments || {}),
+                    : (0, workspace_model_result_projection_1.stableModelJson)(toolCall?.function?.arguments || toolCall?.arguments || {}),
             });
         }
     }
     return input;
 }
 function buildOpenAiResponsesTools(tools = []) {
-    return tools
+    return (0, provider_native_tools_1.orderedProviderTools)(tools)
         .filter(tool => tool?.name && tool.deferred !== true)
-        .map(tool => ({
+        .map(tool => (0, workspace_model_result_projection_1.canonicalModelValue)({
         type: "function",
         name: tool.name,
         description: tool.description,
@@ -283,7 +476,9 @@ function buildOpenAiResponsesBody(input) {
         model: input.model,
         ...(input.instructions ? { instructions: input.instructions } : {}),
         ...(input.previousResponseId ? { previous_response_id: input.previousResponseId } : {}),
-        input: encodeOpenAiResponsesInput(input.messages, { breakpointMessageIndexes: input.breakpointMessageIndexes }),
+        input: Array.isArray(input.inputItems)
+            ? input.inputItems
+            : encodeOpenAiResponsesInput(input.messages, { breakpointMessageIndexes: input.breakpointMessageIndexes, replayIdentity: input.replayIdentity }),
         ...(input.maxOutputTokens ? { max_output_tokens: input.maxOutputTokens } : {}),
         ...(input.stream ? { stream: true } : {}),
         ...(effort ? { reasoning: { effort, ...(input.reasoningSummary === "auto" ? { summary: "auto" } : {}) } } : {}),

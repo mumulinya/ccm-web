@@ -283,6 +283,12 @@ async function runTaskBoundCommand(context, args) {
         child.once("close", () => resolve());
         child.once("error", () => resolve());
     });
+    // The child process can close before the output stream has flushed its
+    // final buffered chunk. Wait for `finish` so foreground callers receive
+    // deterministic command output instead of an occasionally empty string.
+    if (!output.writableFinished) {
+        await new Promise(resolve => output.once("finish", () => resolve()));
+    }
     const outputText = tailOutput(run, run.status === "completed" ? MAX_FOREGROUND_OUTPUT : MAX_FAILURE_OUTPUT);
     return { success: run.status === "completed", ...publicRun(run), output: outputText, truncated: run.totalOutputBytes > outputText.length };
 }

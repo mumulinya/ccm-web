@@ -83,7 +83,37 @@ ccm logs --follow     # 实时查看服务端轮转日志
 | **证据真实性与防重** | 只读失败有限重试（最多3次） + 真实哈希校验短路（file_unchanged） | 消除过度去重死锁，杜绝虚假文件命中，确保上下文证据真实 |
 | **Responses 原生保真** | reasoning/encrypted_content 完整回放 + 本地 Token 估算去重 | 原生思维链与加密项无损回放，修复本地 Token 虚增，严防跨域污染 |
 | **多 Agent 协作网络** | 全局 Agent + 群聊主 Agent + 项目主 Agent + 隔离项目 Worker | 明确角色职责边界：主 Agent 只读规划，子 Agent 隔离执行 |
+| **任务工作流与自动化** | 三级分派策略（直通/规划/编排）+ 任务会话工作台 + Crontab 自动化调度引擎 | 轻量任务免冗长规划秒级执行，重型开发强制独立验收，支持定时任务自动化 |
 | **企业协同与多端集成** | 飞书双向会话与自动化工作报告 + 多协议终端 PTY + 可互动桌宠 | 多端消息直通工作区，会话事实自动生成可信工作日报/周报 |
+
+---
+
+## 4.1.0 重大里程碑与版本演进
+
+在 4.1.0 重大版本中，CCM 全面升级了任务工作流分派分级（Task Workflow Architecture & Dispatch Profiles V1）、任务会话工作台（Task Session Workbench）、自动化与维护调度引擎（Automation & Maintenance Scheduler）、以及全链路会话事件日记账（Conversation Event Journal）：
+
+### 1. 任务工作流架构与分派分级（Task Workflow Architecture & Dispatch Profiles V1）
+- **五段核心链路保持稳定**：确立「用户发消息 → 主 Agent 理解/规划 → 第三方开发 Agent 干活 → TestAgent 验收 → 用户确认/自动收口」的稳固骨架。
+- **三级任务分派策略（Dispatch Profiles）**：
+  - **直通模式（direct_worker）**：工作台明确任务默认轻量执行，免除主 Agent 冗长规划，快速流转并快速验证（quick_check）。
+  - **规划模式（planned_worker）**：普通对话开发任务保留主 Agent 源码感知规划与自审（main_agent_self）。
+  - **严苛编排模式（orchestrated）**：跨项目协作与复杂变更自动升级为多 Agent 严格编排，强制隔离 Git worktree 与 TestAgent 独立自动化验收。
+- **动态门禁配置化（Configurable Gates）**：按任务档位动态决定是否启用 ACK 预检、worktree 物理隔离、完整执行回执与强制人审收口，实现轻量任务秒级响应、重型开发高可靠兜底。
+
+### 2. 任务会话工作台（Task Session Workbench & Live Controls）
+- **任务会话详情抽屉（TaskSession.vue）**：新增任务专属会话抽屉，实时展示任务元数据、目标、执行参数、工作区路径与分派规格。
+- **双向会话绑定机制（Task-Conversation Binding）**：打通用户对话会话与后台执行会话的双向联动，支持在任务工作台随时调出对应的交互式会话抽屉（TaskSessionConversation.vue）。
+- **执行时间轴与状态可视化（Conversation Execution Timeline）**：直观展示从 intake 接入、规划 dispatch、执行 attempt 到 acceptance 验收的完整事件推进过程。
+- **交互式规格表单（TaskSpecForm.vue）**：支持可视化编辑任务目标、工作目录、执行参数与验收要求，支持一键保存与派工。
+
+### 3. 自动化调度与周期性维护引擎（Automation & Maintenance Scheduler）
+- **独立自动化调度服务（automation-scheduler.ts）**：支持标准五段式 Crontab 表达式解析（schedule-expression.ts）与周期性自动化任务定义（automation-definition-service.ts）。
+- **运行记录持久化存储（task-run-store.ts）**：记录每一次自动化执行的触发源、运行耗时、状态流转与执行结果，支持历史运行回溯与重放（ScheduledRunReplay.vue）。
+- **可视化调度任务面板（ScheduledTasks.vue）**：统一呈现自动化任务列表、下次执行时间、最近运行状态与启停开关，支持即时手动触发。
+
+### 4. 会话事件流日记账与执行弹性（Conversation Event Journal & Resilience）
+- **端到端事件日记账（conversation-event-journal.ts）**：严格记录从消息接入、意图解析、模型流式输出、工具批次调用到终态收口的每一笔事件。
+- **全局链路追踪（trace_id）与断点自愈**：强化系统在长耗时运行、意外重启或网络抖动下的状态一致性，任务状态平滑恢复，不丢状态、不重漏事件。
 
 ---
 

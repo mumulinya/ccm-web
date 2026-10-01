@@ -1,0 +1,42 @@
+import type { ModelVisiblePayloadSnapshot } from "./session-compaction-core";
+export type CcmContextUsageDeltaV1 = {
+    schema: "ccm-context-usage-delta-v1";
+    scope: "project" | "group" | "global";
+    scopeId: string;
+    exactSessionId: string;
+    requestId?: string;
+    sequence: number;
+    currentTokens: number;
+    predictedNextRequestTokens: number;
+    contextWindow: number;
+    autoCompactThreshold: number;
+    tokenSource: "local_incremental_estimate" | "canonical_payload_estimate" | "provider_usage";
+    tokenBreakdown?: Record<string, number>;
+    reason: "request_preflight" | "assistant_delta" | "tool_started" | "tool_completed" | "message_appended" | "provider_usage" | "compaction_completed";
+    contentStored: false;
+};
+export declare function publishContextUsageDelta(input: {
+    scope: "project" | "group" | "global";
+    scopeId: string;
+    exactSessionId: string;
+    requestId?: string;
+    currentTokens: number;
+    predictedNextRequestTokens?: number;
+    contextWindow?: number;
+    autoCompactThreshold?: number;
+    tokenSource: CcmContextUsageDeltaV1["tokenSource"];
+    tokenBreakdown?: any;
+    reason: CcmContextUsageDeltaV1["reason"];
+}): import("./runtime-events").RuntimeEvent;
+export declare function publishContextUsageFromPayload(input: {
+    scope: "project" | "group" | "global";
+    scopeId: string;
+    exactSessionId: string;
+    requestId?: string;
+    payload?: ModelVisiblePayloadSnapshot | null;
+    reason: CcmContextUsageDeltaV1["reason"];
+    tokenSource?: CcmContextUsageDeltaV1["tokenSource"];
+    contextWindow?: number;
+    autoCompactThreshold?: number;
+}): import("./runtime-events").RuntimeEvent;
+export declare function resetContextUsageEventSequencesForTest(): void;

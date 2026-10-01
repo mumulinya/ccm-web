@@ -42,8 +42,16 @@ function applyProtocolBlockCacheControl(bodyInput, strategy) {
         const blocks = messages[index].content;
         for (const id of toolUseIds(blocks))
             pending.add(id);
-        for (const id of toolResultIds(blocks))
+        const completedResults = toolResultIds(blocks);
+        for (const id of completedResults)
             pending.delete(id);
+        // A completed tool_result is a user content block in Anthropic's wire
+        // format. It is a valid rolling cache boundary once the matching tool
+        // batch is closed, and retaining it prevents the next request from
+        // falling back to only the static system fragment. A later assistant
+        // response may replace this with the newer boundary below.
+        if (pending.size === 0 && completedResults.length > 0)
+            rollingIndex = index;
         if (pending.size === 0 && String(messages[index]?.role || "") === "assistant")
             rollingIndex = index;
     }
@@ -82,10 +90,20 @@ function runProviderCacheBreakpointEncodingSelfTest() {
             { role: "user", content: "current" },
         ],
     }, strategy);
+    const toolResultBoundary = applyProtocolBlockCacheControl({
+        system: "stable",
+        messages: [
+            { role: "user", content: "old" },
+            { role: "assistant", content: [{ type: "tool_use", id: "t1", name: "read" }] },
+            { role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: "ok" }] },
+            { role: "user", content: "current" },
+        ],
+    }, strategy);
     const checks = {
         staticAndRollingApplied: applied.breakpointCount === 2,
         systemBoundaryHasOneHourTtl: applied.body.system.at(-1)?.cache_control?.ttl === "1h",
         completedAssistantGetsRollingBoundary: applied.body.messages[3].content.at(-1)?.cache_control?.type === "ephemeral",
+        completedToolResultGetsRollingBoundary: toolResultBoundary.body.messages[2].content.at(-1)?.cache_control?.type === "ephemeral",
         unfinishedToolBatchDoesNotGetRollingBoundary: incomplete.breakpointCount === 1,
     };
     return { pass: Object.values(checks).every(Boolean), checks };

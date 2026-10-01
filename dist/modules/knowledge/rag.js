@@ -293,9 +293,14 @@ async function handleKnowledgeChat(payload, res, readOnly = false) {
         });
     }
     const messages = [{ role: "system", content: system }, { role: "user", content: query }];
+    const cacheBinding = {
+        scope: "workspace", scopeId: "workspace", sessionId: "knowledge-rag",
+        source: "knowledge_rag", requestClass: "auxiliary",
+        requestAttribution: { purpose: "knowledge_rag_answer", requestClass: "auxiliary", scope: "workspace", scopeId: "workspace", exactSessionId: "knowledge-rag" },
+    };
     const rawReply = (0, group_orchestrator_llm_client_1.shouldUseAnthropic)(config)
-        ? await (0, group_orchestrator_llm_client_1.callAnthropicCompatibleChat)(config, { messages, system, maxTokens: 1400, temperature: 0.2, defaultTimeoutMs: 60_000, httpErrorPrefix: "知识问答模型" })
-        : await (0, group_orchestrator_llm_client_1.callOpenAiCompatibleChat)(config, { messages, maxTokens: 1400, temperature: 0.2, defaultTimeoutMs: 60_000, httpErrorPrefix: "知识问答模型" });
+        ? await (0, group_orchestrator_llm_client_1.callAnthropicCompatibleChat)(config, { messages, system, maxTokens: 1400, temperature: 0.2, defaultTimeoutMs: 60_000, httpErrorPrefix: "知识问答模型", providerContextCache: cacheBinding, requestAttribution: cacheBinding.requestAttribution })
+        : await (0, group_orchestrator_llm_client_1.callOpenAiCompatibleChat)(config, { messages, maxTokens: 1400, temperature: 0.2, defaultTimeoutMs: 60_000, httpErrorPrefix: "知识问答模型", providerContextCache: cacheBinding, requestAttribution: cacheBinding.requestAttribution });
     const reply = sanitizeReplyCitations(rawReply || "模型没有返回有效回答。", new Set(citations));
     return (0, utils_1.sendJson)(res, {
         success: true,

@@ -40,6 +40,8 @@ exports.getTestAgentRunnerRecordForSelfTest = getTestAgentRunnerRecordForSelfTes
 exports.captureTestAgentSourceBinding = captureTestAgentSourceBinding;
 exports.runTestAgentCliJob = runTestAgentCliJob;
 exports.cancelTestAgentRunsForTask = cancelTestAgentRunsForTask;
+exports.hasActiveTestAgentRunForTask = hasActiveTestAgentRunForTask;
+exports.getLatestTestAgentRunnerResultForTask = getLatestTestAgentRunnerResultForTask;
 exports.reconcileTestAgentRunnerRecords = reconcileTestAgentRunnerRecords;
 exports.pruneTestAgentRunnerRecords = pruneTestAgentRunnerRecords;
 exports.purgeTestAgentRunnerRecordsForTask = purgeTestAgentRunnerRecordsForTask;
@@ -697,6 +699,35 @@ function cancelTestAgentRunsForTask(taskId, reason = "Task cancelled") {
         markCancelled(record);
     }
     return cancelled;
+}
+/** Return whether a TestAgent process for a task is still alive after a
+ * server restart. Used by queue recovery to distinguish an active review
+ * from an orphaned `reviewing/test_agent_running` task. */
+function hasActiveTestAgentRunForTask(taskId) {
+    const id = String(taskId || "");
+    if (!id)
+        return false;
+    return loadRecords().some(record => record.taskId === id
+        && record.status === "running"
+        && processAlive(record.pid));
+}
+/**
+ * Return the most recent terminal invocation result for a task.  This is used
+ * by queue recovery when the TestAgent child has already exited but the
+ * coordinator process was restarted before it persisted the review outcome.
+ * The persisted runner record is the source of truth; transient stdout files
+ * are never required and are not exposed to callers.
+ */
+function getLatestTestAgentRunnerResultForTask(taskId, mode = "invocation") {
+    const id = String(taskId || "");
+    if (!id)
+        return null;
+    const record = loadRecords()
+        .filter(item => item.taskId === id && item.mode === mode && item.status !== "running" && !!item.result)
+        .sort((a, b) => String(b.finishedAt || b.createdAt).localeCompare(String(a.finishedAt || a.createdAt)))[0];
+    if (!record)
+        return null;
+    return resultFromRecord(record, true);
 }
 function reconcileTestAgentRunnerRecords() {
     const records = loadRecords();

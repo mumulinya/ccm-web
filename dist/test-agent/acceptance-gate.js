@@ -1,143 +1,77 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.evaluateTestAgentAcceptanceGate = evaluateTestAgentAcceptanceGate;
+exports.classifyVerificationFailure = classifyVerificationFailure;
 exports.buildAcceptanceEvidenceGateSummary = buildAcceptanceEvidenceGateSummary;
 exports.formatAcceptanceEvidenceGateSummaryLine = formatAcceptanceEvidenceGateSummaryLine;
 exports.acceptanceEvidenceGateSummaryErrors = acceptanceEvidenceGateSummaryErrors;
-function unique(values) {
-    return Array.from(new Set(values.filter(Boolean)));
-}
-function canonicalJson(value) {
-    if (Array.isArray(value))
-        return value.map(canonicalJson);
-    if (!value || typeof value !== "object")
-        return value;
-    return Object.keys(value)
-        .sort()
-        .reduce((out, key) => {
-        out[key] = canonicalJson(value[key]);
-        return out;
-    }, {});
-}
-function sameJson(left, right) {
-    return JSON.stringify(canonicalJson(left)) === JSON.stringify(canonicalJson(right));
-}
-function statusFor(input) {
-    if (input.total === 0)
-        return "not_applicable";
-    if (input.notVerified > 0)
-        return "failed";
-    if (input.unknown > 0)
-        return "incomplete";
-    if (input.fallbackEvidence > 0)
-        return "weak";
-    return "verified";
-}
-function buildAcceptanceEvidenceGateSummary(coverage = []) {
-    const verified = coverage.filter(item => item.status === "verified");
-    const notVerifiedItems = coverage.filter(item => item.status === "not_verified");
-    const unknownItems = coverage.filter(item => item.status === "unknown");
-    const matchedItems = coverage.filter(item => item.evidenceSource === "matched_evidence");
-    const fallbackItems = coverage.filter(item => item.evidenceSource === "single_criterion_report_status"
-        || item.matchStrength === "fallback"
-        // Pure token matches are too loose for accept; treat like weak fallback evidence.
-        || item.matchStrength === "token");
-    const missingItems = coverage.filter(item => item.evidenceSource === "none" || !item.evidenceSource);
-    const status = statusFor({
-        total: coverage.length,
-        notVerified: notVerifiedItems.length,
-        unknown: unknownItems.length,
-        fallbackEvidence: fallbackItems.length,
-    });
-    return {
-        status,
-        canAccept: status === "verified" || status === "not_applicable",
-        total: coverage.length,
-        verified: verified.length,
-        notVerified: notVerifiedItems.length,
-        unknown: unknownItems.length,
-        matchedEvidence: matchedItems.length,
-        fallbackEvidence: fallbackItems.length,
-        missingEvidence: missingItems.length,
-        direct: coverage.filter(item => item.matchStrength === "direct").length,
-        token: coverage.filter(item => item.matchStrength === "token").length,
-        fallback: coverage.filter(item => item.matchStrength === "fallback").length,
-        none: coverage.filter(item => !item.matchStrength || item.matchStrength === "none").length,
-        failedCriteria: unique(notVerifiedItems.map(item => item.criterion)),
-        incompleteCriteria: unique(unknownItems.map(item => item.criterion)),
-        weakCriteria: unique(fallbackItems.map(item => item.criterion)),
-    };
-}
-function formatAcceptanceEvidenceGateSummaryLine(summary) {
-    if (!summary) {
-        return "status=incomplete; canAccept=no; total=0; verified=0; notVerified=0; unknown=0; matched=0; fallback=0; missing=0";
-    }
-    return [
-        `status=${summary.status}`,
-        `canAccept=${summary.canAccept ? "yes" : "no"}`,
-        `total=${summary.total}`,
-        `verified=${summary.verified}`,
-        `notVerified=${summary.notVerified}`,
-        `unknown=${summary.unknown}`,
-        `matched=${summary.matchedEvidence}`,
-        `fallback=${summary.fallbackEvidence}`,
-        `missing=${summary.missingEvidence}`,
-        `direct=${summary.direct}`,
-        `token=${summary.token}`,
-    ].join("; ");
-}
-function acceptanceEvidenceGateSummaryErrors(summary, coverage, label = "acceptance evidence gate summary") {
-    if (!summary || typeof summary !== "object" || Array.isArray(summary)) {
-        return [`${label} must be an object.`];
-    }
-    const errors = [];
-    const allowedKeys = new Set([
-        "status",
-        "canAccept",
-        "total",
-        "verified",
-        "notVerified",
-        "unknown",
-        "matchedEvidence",
-        "fallbackEvidence",
-        "missingEvidence",
-        "direct",
-        "token",
-        "fallback",
-        "none",
-        "failedCriteria",
-        "incompleteCriteria",
-        "weakCriteria",
-    ]);
-    for (const key of Object.keys(summary)) {
-        if (!allowedKeys.has(key))
-            errors.push(`${label}.${key} is not permitted.`);
-    }
-    const expectedCanAccept = summary.status === "verified" || summary.status === "not_applicable";
-    if (summary.canAccept !== expectedCanAccept) {
-        errors.push(`${label}.canAccept does not match status ${JSON.stringify(summary.status)}.`);
-    }
-    const numeric = (key) => Number(summary[key]);
-    if (numeric("total") !== numeric("verified") + numeric("notVerified") + numeric("unknown")) {
-        errors.push(`${label} acceptance status counts do not add up to total.`);
-    }
-    if (numeric("total") !== numeric("direct") + numeric("token") + numeric("fallback") + numeric("none")) {
-        errors.push(`${label} match-strength counts do not add up to total.`);
-    }
-    const expectedStatus = statusFor({
-        total: numeric("total"),
-        notVerified: numeric("notVerified"),
-        unknown: numeric("unknown"),
-        fallbackEvidence: numeric("fallbackEvidence"),
-    });
-    if (summary.status !== expectedStatus) {
-        errors.push(`${label}.status does not match its evidence counts.`);
-    }
-    if (coverage) {
-        const expected = buildAcceptanceEvidenceGateSummary(coverage);
-        if (!sameJson(summary, expected)) {
-            errors.push(`${label} does not match acceptance coverage.`);
+function text(v) { return String(v ?? "").trim(); }
+function list(v) { return Array.isArray(v) ? v : []; }
+function evaluateTestAgentAcceptanceGate(input) {
+    const issues = [];
+    const criteria = list(input?.acceptanceCriteria || input?.criteria);
+    const results = list(input?.criteriaResults || input?.acceptanceResults || input?.items);
+    if (!criteria.length)
+        issues.push("缺少验收标准");
+    const byId = new Map(results.map((r) => [text(r?.criterionId || r?.acceptanceCriterionId || r?.id), r]));
+    let passed = 0;
+    for (const criterion of criteria) {
+        const id = text(criterion?.id || criterion?.criterionId || criterion);
+        const row = byId.get(id);
+        if (!row) {
+            issues.push(`验收标准缺少结果：${id}`);
+            continue;
+        }
+        const status = text(row.status).toLowerCase();
+        if (status === "passed")
+            passed++;
+        if (!["passed", "failed", "blocked"].includes(status))
+            issues.push(`验收结果状态无效：${id}`);
+        if (status === "passed") {
+            const evidence = list(row.evidence || row.evidenceIds || row.artifacts);
+            if (!evidence.length || !text(row.command || row.verificationCommand))
+                issues.push(`通过结果缺少可复现证据：${id}`);
         }
     }
+    const failed = results.some((r) => text(r?.status).toLowerCase() === "failed");
+    const blocked = results.some((r) => text(r?.status).toLowerCase() === "blocked");
+    const status = issues.length || blocked ? "blocked" : failed ? "failed" : passed === criteria.length ? "passed" : "blocked";
+    return { canAccept: status === "passed", status, issues, qualityScore: criteria.length ? Math.round((passed / criteria.length) * 100) : 0 };
+}
+function classifyVerificationFailure(input) {
+    const code = text(input?.errorCode || input?.code).toLowerCase();
+    if (input?.status === "passed" && input?.exitCode === 0)
+        return "passed";
+    if (input?.status === "blocked" || /missing|dependency|permission|environment|timeout/.test(code))
+        return "environment_blocked";
+    if (input?.executed === false || input?.exitCode == null)
+        return "not_executed";
+    return "verification_failed";
+}
+// Compatibility exports used by the existing artifact/report validators.
+function buildAcceptanceEvidenceGateSummary(coverage = []) {
+    const verified = coverage.filter(item => item.status === "verified");
+    const notVerified = coverage.filter(item => item.status === "not_verified");
+    const unknown = coverage.filter(item => item.status === "unknown");
+    const fallback = coverage.filter(item => item.evidenceSource === "single_criterion_report_status" || item.matchStrength === "fallback" || item.matchStrength === "token");
+    const status = coverage.length === 0 ? "not_applicable" : notVerified.length ? "failed" : unknown.length ? "incomplete" : fallback.length ? "weak" : "verified";
+    const unique = (xs) => [...new Set(xs.filter(Boolean))];
+    return { status, canAccept: status === "verified" || status === "not_applicable", total: coverage.length, verified: verified.length, notVerified: notVerified.length, unknown: unknown.length, matchedEvidence: coverage.filter(i => i.evidenceSource === "matched_evidence").length, fallbackEvidence: fallback.length, missingEvidence: coverage.filter(i => i.evidenceSource === "none" || !i.evidenceSource).length, direct: coverage.filter(i => i.matchStrength === "direct").length, token: coverage.filter(i => i.matchStrength === "token").length, fallback: coverage.filter(i => i.matchStrength === "fallback").length, none: coverage.filter(i => !i.matchStrength || i.matchStrength === "none").length, failedCriteria: unique(notVerified.map(i => i.criterion)), incompleteCriteria: unique(unknown.map(i => i.criterion)), weakCriteria: unique(fallback.map(i => i.criterion)) };
+}
+function formatAcceptanceEvidenceGateSummaryLine(summary) {
+    if (!summary)
+        return "status=incomplete; canAccept=no; total=0; verified=0; notVerified=0; unknown=0; matched=0; fallback=0; missing=0";
+    return [`status=${summary.status}`, `canAccept=${summary.canAccept ? "yes" : "no"}`, `total=${summary.total}`, `verified=${summary.verified}`, `notVerified=${summary.notVerified}`, `unknown=${summary.unknown}`, `matched=${summary.matchedEvidence}`, `fallback=${summary.fallbackEvidence}`, `missing=${summary.missingEvidence}`, `direct=${summary.direct}`, `token=${summary.token}`].join("; ");
+}
+function acceptanceEvidenceGateSummaryErrors(summary, coverage, label = "acceptance evidence gate summary") {
+    if (!summary || typeof summary !== "object" || Array.isArray(summary))
+        return [`${label} must be an object.`];
+    const expected = coverage ? buildAcceptanceEvidenceGateSummary(coverage) : null;
+    const errors = [];
+    if (summary.canAccept !== (summary.status === "verified" || summary.status === "not_applicable"))
+        errors.push(`${label}.canAccept does not match status.`);
+    if (expected && JSON.stringify(summary) !== JSON.stringify(expected))
+        errors.push(`${label} does not match acceptance coverage.`);
     return errors;
 }
 //# sourceMappingURL=acceptance-gate.js.map

@@ -7,8 +7,11 @@ exports.resolveModelRetryDelayMs = resolveModelRetryDelayMs;
 exports.runModelCallWithRetry = runModelCallWithRetry;
 exports.runModelCallRetrySelfTest = runModelCallRetrySelfTest;
 exports.UNIFIED_MODEL_MAX_ATTEMPTS = 6;
-exports.UNIFIED_MODEL_ATTEMPT_TIMEOUT_MS = 30_000;
-exports.UNIFIED_MODEL_TOTAL_TIMEOUT_MS = 180_000;
+// Streaming Responses calls can legitimately spend more than a minute before
+// the first/final token (especially with tools).  Keep fast failures retryable,
+// but do not abort a healthy slow provider request at the old 30s boundary.
+exports.UNIFIED_MODEL_ATTEMPT_TIMEOUT_MS = 120_000;
+exports.UNIFIED_MODEL_TOTAL_TIMEOUT_MS = 600_000;
 const RETRY_PROFILES = {
     // Fast HTTP failures still retry immediately. The attempt cap must also cover a
     // healthy streaming completion: gpt-class replies of ~4k tokens commonly take
@@ -17,7 +20,7 @@ const RETRY_PROFILES = {
     interactive_first_turn: { schema: "ccm-model-retry-profile-v1", id: "interactive_first_turn", maxAttempts: 6, attemptTimeoutCapMs: 180_000, totalTimeoutMs: 180_000 },
     agent_orchestration: { schema: "ccm-model-retry-profile-v1", id: "agent_orchestration", maxAttempts: 6, attemptTimeoutCapMs: 180_000, totalTimeoutMs: 180_000 },
     long_running_task: { schema: "ccm-model-retry-profile-v1", id: "long_running_task", maxAttempts: 5, attemptTimeoutCapMs: 360_000, totalTimeoutMs: 360_000 },
-    background_auxiliary: { schema: "ccm-model-retry-profile-v1", id: "background_auxiliary", maxAttempts: 1, attemptTimeoutCapMs: 30_000, totalTimeoutMs: 30_000 },
+    background_auxiliary: { schema: "ccm-model-retry-profile-v1", id: "background_auxiliary", maxAttempts: 1, attemptTimeoutCapMs: 120_000, totalTimeoutMs: 120_000 },
 };
 function resolveModelRetryProfile(id = "long_running_task", configuredAttemptTimeoutMs = exports.UNIFIED_MODEL_ATTEMPT_TIMEOUT_MS) {
     const source = RETRY_PROFILES[id] || RETRY_PROFILES.long_running_task;

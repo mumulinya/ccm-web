@@ -157,13 +157,26 @@ async function musicPlatformRequest(input) {
     }
 }
 async function musicPlatformJson(input) {
-    const response = await musicPlatformRequest(input);
-    try {
-        return JSON.parse(response.text);
+    // 平台接口偶尔会在 2xx 下返回空白/HTML（网关或风控页）。
+    // 请求层已处理网络重试，这里再针对“响应格式异常”做最多两次重取。
+    const attempts = Math.max(1, Math.min(3, Number(input.retries ?? 1) + 1));
+    let lastError;
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+        const response = await musicPlatformRequest(input);
+        try {
+            if (!response.text.trim())
+                throw new Error("empty response");
+            return JSON.parse(response.text);
+        }
+        catch {
+            lastError = new MusicPlatformHttpError("媒体平台返回了无效JSON", "unavailable", response.statusCode);
+            if (attempt + 1 < attempts) {
+                await new Promise(resolve => setTimeout(resolve, Math.min(1_000, 200 * 2 ** attempt)));
+                continue;
+            }
+        }
     }
-    catch {
-        throw new MusicPlatformHttpError("媒体平台返回了无效JSON", "unavailable", response.statusCode);
-    }
+    throw lastError || new MusicPlatformHttpError("媒体平台返回了无效JSON", "unavailable");
 }
 async function musicPlatformText(input) {
     return (await musicPlatformRequest(input)).text;

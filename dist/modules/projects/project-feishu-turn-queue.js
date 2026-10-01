@@ -6,6 +6,7 @@ exports.drainProjectFeishuTurns = drainProjectFeishuTurns;
 exports.startProjectFeishuTurnRecoveryForServer = startProjectFeishuTurnRecoveryForServer;
 exports.stopProjectFeishuTurnRecoveryForServer = stopProjectFeishuTurnRecoveryForServer;
 const conversation_turn_control_1 = require("../../agents/conversation-turn-control");
+const conversation_attempt_1 = require("../../agents/conversation-attempt");
 const feishu_channel_1 = require("../collaboration/feishu-channel");
 const project_session_agent_binding_1 = require("./project-session-agent-binding");
 const project_runtime_1 = require("./project-runtime");
@@ -78,9 +79,10 @@ async function drainProjectFeishuTurns(baseUrl, project, projectSessionId) {
             try {
                 const response = await fetch(`${baseUrl}/api/send-stream`, {
                     method: "POST",
-                    headers: { "Content-Type": "application/json", ...(0, internal_api_auth_1.buildInternalApiHeaders)("project-feishu-queue", "POST", "/api/send-stream") },
+                    headers: { "Content-Type": "application/json", "x-conversation-attempt-id": (0, conversation_attempt_1.conversationAttemptId)(turn), ...(0, internal_api_auth_1.buildInternalApiHeaders)("project-feishu-queue", "POST", "/api/send-stream") },
                     body: JSON.stringify({
                         project,
+                        conversation_turn_id: turn.id,
                         sessionId: projectSessionId,
                         message: turn.message,
                         attachments: turn.attachments,
@@ -113,10 +115,10 @@ async function drainProjectFeishuTurns(baseUrl, project, projectSessionId) {
                 });
                 if (!delivery?.success && !delivery?.queued)
                     throw new Error(delivery?.reason || "原项目飞书会话投递失败");
-                conversation_turn_control_1.conversationTurnControl.settle({ id: turn.id, status: "completed", result: { reply, delivery } });
+                conversation_turn_control_1.conversationTurnControl.settle({ id: turn.id, attempt_id: (0, conversation_attempt_1.conversationAttemptId)(turn), status: "completed", result: { reply, delivery } });
             }
             catch (error) {
-                conversation_turn_control_1.conversationTurnControl.settle({ id: turn.id, status: "failed", error: error?.message || String(error) });
+                conversation_turn_control_1.conversationTurnControl.settle({ id: turn.id, attempt_id: (0, conversation_attempt_1.conversationAttemptId)(turn), status: "failed", error: error?.message || String(error) });
                 await (0, feishu_channel_1.notifyFeishuTaskStage)({
                     stage: "project_agent_queued_failure",
                     title: `${(0, project_runtime_1.projectDisplayName)(project)} · 排队消息未完成`,

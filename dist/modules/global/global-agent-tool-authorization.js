@@ -172,6 +172,14 @@ function buildGlobalAgentToolRuntimeContext(auditContext = {}, loadedToolNames =
         contextWindow: (0, group_compaction_strategy_1.resolveGroupModelContextCapacity)(orchestratorConfig).contextWindow,
         schemaSurface: (0, native_query_loop_1.shouldUseNativeQueryLoop)(orchestratorConfig) ? "native" : "prompt",
     });
+    // Management selections are run-local, but are not extension MCPs. Keep
+    // them in the materialized catalog when another search rebuilds context.
+    const selected = new Set(loadedToolNames);
+    const loadedManagement = (0, global_tool_load_policy_1.globalDiscoverableManagementTools)([]).filter(tool => selected.has(tool.name));
+    if (loadedManagement.length) {
+        shared.catalog.loadedMcp.push(...loadedManagement);
+        (0, main_agent_tool_runtime_1.refreshMainAgentToolPromptState)(shared);
+    }
     (0, main_agent_tool_runtime_1.registerMainAgentDiscoverableTools)(shared, (0, global_tool_load_policy_1.globalDiscoverableManagementTools)(loadedToolNames));
     const catalog = { tools: shared.catalog.mcp, skills: shared.catalog.skills };
     return {
@@ -187,6 +195,7 @@ function buildGlobalAgentToolRuntimeContext(auditContext = {}, loadedToolNames =
         scope: shared.scope,
         capability_token: shared.capabilityToken || "",
         loaded_tool_names: shared.loadedToolNames || [],
+        loaded_tools: shared.catalog.loadedMcp || [],
         discoverable_tools: shared.catalog.discoverableMcp || [],
         deferred_tool_names: shared.deferredToolNames || [],
         scope_identity: shared.scopeIdentity,
@@ -195,6 +204,7 @@ function buildGlobalAgentToolRuntimeContext(auditContext = {}, loadedToolNames =
         context_policy: contextPolicy,
         context_budget: shared.contextBudget || null,
         policy_prompt: shared.policyPrompt,
+        toolPromptLayout: shared.toolPromptLayout,
         mcp_prompt: shared.mcpPrompt,
         execution_skills: executionSkills,
         updated_at: authorization.updated_at,

@@ -40,6 +40,7 @@ const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const utils_1 = require("../../core/utils");
 const context_budget_1 = require("../../system/context-budget");
+const model_tool_result_1 = require("../../agents/model-tool-result");
 const native_query_messages_1 = require("../../agents/native-query-messages");
 const tool_result_storage_1 = require("../../tools/tool-result-storage");
 function cloneRow(row) {
@@ -77,12 +78,21 @@ function fileReadCatN(raw) {
 }
 function compactOne(row) {
     const next = cloneRow(row);
-    const raw = next.rawOutput && typeof next.rawOutput === "object" && !Array.isArray(next.rawOutput) ? next.rawOutput : null;
+    const body = (0, model_tool_result_1.modelToolBody)(next);
+    const raw = body && typeof body === "object" && !Array.isArray(body) ? body : null;
     let changed = false;
     if (isWorkspaceFileRead(next, raw)) {
         const catN = fileReadCatN(raw);
         if (catN && catN !== String(next.output || "")) {
-            next.output = catN;
+            const body = payloadBody(raw);
+            const { lines, files, ...metadata } = body;
+            next.modelOutput = Array.isArray(files)
+                ? { ...metadata, files: files.map((file) => {
+                        const { lines, ...fileMetadata } = file;
+                        return { ...fileMetadata, content: catNLines(lines) };
+                    }) }
+                : { ...metadata, content: catNLines(lines) };
+            next.output = JSON.stringify(next.modelOutput);
             changed = true;
         }
         if (changed) {
@@ -105,18 +115,23 @@ function compactOne(row) {
     return { row: next, changed };
 }
 function stripBody(row) {
-    if ((0, tool_result_storage_1.isPersistedToolResult)(row?.output) || (0, tool_result_storage_1.isPersistedToolResult)(row?.rawOutput))
+    if ((0, tool_result_storage_1.isPersistedToolResult)((0, model_tool_result_1.modelToolBody)(row)))
         return row;
     const next = cloneRow(row);
     const summary = String(next.error || next.reason || next.name || "tool").slice(0, 240);
     next.rawOutput = undefined;
     next.output = JSON.stringify({ name: next.name, ok: next.ok !== false, truncated: true, summary });
+    next.modelOutput = JSON.parse(next.output);
     next.outputTokens = (0, context_budget_1.estimateTextTokens)(next.output);
     next.compacted = true;
     return next;
 }
 function tokenSum(rows) {
-    return rows.reduce((sum, row) => sum + Math.max(0, Number(row?.outputTokens) || (0, context_budget_1.estimateTextTokens)(String(row?.output || ""))), 0);
+    return rows.reduce((sum, row) => {
+        const body = (0, model_tool_result_1.modelToolBody)(row);
+        return sum + (0, context_budget_1.estimateTextTokens)((0, tool_result_storage_1.isPersistedToolResult)(body) ? (0, tool_result_storage_1.modelVisiblePersistedToolResult)(body)
+            : typeof body === "string" ? body : JSON.stringify(body ?? null));
+    }, 0);
 }
 function compactGroupMainToolResultsForPayload(rows = [], budgetTokens = 40_000, persistContext) {
     const budget = Math.max(1_000, Number(budgetTokens) || 40_000);
@@ -126,7 +141,7 @@ function compactGroupMainToolResultsForPayload(rows = [], budgetTokens = 40_000,
     if (before <= budget)
         return { rows: next, changed: persisted.changed, tokens: before };
     let changed = persisted.changed;
-    const ranked = [...next.keys()].sort((left, right) => ((Number(next[right]?.outputTokens) || 0) - (Number(next[left]?.outputTokens) || 0)));
+    const ranked = [...next.keys()].sort((left, right) => tokenSum([next[right]]) - tokenSum([next[left]]));
     for (const index of ranked) {
         if (tokenSum(next) <= budget)
             break;
@@ -143,14 +158,8 @@ function compactGroupMainToolResultsForPayload(rows = [], budgetTokens = 40_000,
     for (const index of ranked) {
         if (tokenSum(next) <= budget)
             break;
-        if (isWorkspaceFileRead(next[index], next[index]?.rawOutput))
+        if (isWorkspaceFileRead(next[index], (0, model_tool_result_1.modelToolBody)(next[index])))
             continue;
-        next[index] = stripBody(next[index]);
-        changed = true;
-    }
-    for (const index of ranked) {
-        if (tokenSum(next) <= budget)
-            break;
         next[index] = stripBody(next[index]);
         changed = true;
     }
@@ -172,8 +181,8 @@ function runGroupMainToolResultCompactSelfTest() {
         name: "grep_text",
         ok: true,
         outputTokens: 12_000,
-        rawOutput: { lines: Array.from({ length: 80 }, (_, index) => `src/a.ts:${index}:recommend`) },
-        output: JSON.stringify({ lines: Array.from({ length: 80 }, (_, index) => `src/a.ts:${index}:recommend`) }),
+        rawOutput: { lines: Array.from({ length: 800 }, (_, index) => `src/a.ts:${index}:recommend`) },
+        output: JSON.stringify({ lines: Array.from({ length: 800 }, (_, index) => `src/a.ts:${index}:recommend`) }),
     };
     const result = compactGroupMainToolResultsForPayload([bulky, { name: "list_directory", ok: true, outputTokens: 20, output: "{}" }], 2_000);
     const fileLines = Array.from({ length: 80 }, (_, index) => ({ line: index + 1, text: `export const v${index} = ${index};` }));

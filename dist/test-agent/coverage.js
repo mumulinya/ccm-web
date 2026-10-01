@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.buildAcceptanceCoverage = buildAcceptanceCoverage;
+const acceptance_contract_adapter_1 = require("./acceptance-contract-adapter");
 const utils_1 = require("./utils");
 const STOP_WORDS = new Set([
     "a",
@@ -207,6 +208,9 @@ function coverageItem(criterion, status, evidence, matchStrength, evidenceSource
     };
 }
 function buildAcceptanceCoverage(input) {
+    const contractCoverage = (0, acceptance_contract_adapter_1.contractAcceptanceCoverage)(input);
+    if (contractCoverage)
+        return contractCoverage;
     const candidates = [
         ...input.devServerResults.map(serverCandidate),
         ...input.commandResults.map(commandCandidate),
@@ -217,6 +221,47 @@ function buildAcceptanceCoverage(input) {
     ];
     if (input.browserToolCalls.length)
         candidates.push(toolCallCandidate(input.browserToolCalls, input.browserResults));
+    // Handoffs may carry explicit, CCM-generated evidence bindings for
+    // criteria that are not represented by a command's (intentionally
+    // redacted) stdout: scope/fingerprint audits and signed worker receipts.
+    // These are not inferred from criterion wording; they are accepted only
+    // when the handoff declares the evidence type and its authoritative source
+    // is present and passed.
+    const metadata = input.workOrder?.metadata || {};
+    const evidencePlan = metadata.acceptanceEvidencePlan || metadata.acceptance_evidence_plan || [];
+    const evidenceRows = Array.isArray(evidencePlan) ? evidencePlan : [];
+    const deterministic = metadata.deterministicCriterionCoverage || metadata.deterministic_criterion_coverage || [];
+    const deterministicRows = Array.isArray(deterministic) ? deterministic : [];
+    const commandByName = new Map(input.commandResults.map(result => [`${result.project}:${result.command}`.toLowerCase(), result]));
+    for (const row of deterministicRows) {
+        const criterion = String(row?.criterion || row?.acceptanceCriterion || row?.acceptance_criterion || "").trim();
+        if (!criterion)
+            continue;
+        const checkNames = Array.isArray(row?.checkNames || row?.check_names) ? (row.checkNames || row.check_names) : [];
+        const passed = checkNames.some((name) => {
+            const result = commandByName.get(String(name || "").toLowerCase());
+            return result?.status === "passed";
+        });
+        if (passed)
+            candidates.push(candidate(`CCM deterministic check: ${criterion}`, "passed", "explicit frozen criterion-to-command binding", criterion));
+    }
+    const surface = metadata.surfaceAudit || metadata.surface_audit;
+    const workerReceiptPresent = input.workOrder?.projects?.some((project) => {
+        const evidence = project?.deliveryEvidence || project?.delivery_evidence;
+        return evidence?.totals?.workers > 0 || (Array.isArray(evidence?.workerReceipts) && evidence.workerReceipts.length > 0);
+    });
+    for (const row of evidenceRows) {
+        const criterion = String(row?.criterion || row?.acceptanceCriterion || row?.acceptance_criterion || "").trim();
+        if (!criterion)
+            continue;
+        const types = (row?.evidenceTypes || row?.evidence_types || []).map((value) => String(value || "").toLowerCase());
+        if (types.includes("scope_audit") && ["passed", "waived"].includes(String(surface?.status || "").toLowerCase())) {
+            candidates.push(candidate(`CCM scope audit: ${criterion}`, "passed", "authoritative scope audit passed", criterion));
+        }
+        if (types.includes("worker_receipt") && workerReceiptPresent) {
+            candidates.push(candidate(`CCM worker receipt: ${criterion}`, "passed", "authoritative worker receipt projection present", criterion));
+        }
+    }
     const positiveCandidates = candidates.filter(item => item.status === "passed");
     const negativeCandidates = candidates.filter(item => item.status === "failed" || item.status === "blocked");
     const singleCriterion = input.workOrder.acceptanceCriteria.length === 1;

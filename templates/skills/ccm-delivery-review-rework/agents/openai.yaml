@@ -1,0 +1,4 @@
+interface:
+  display_name: "CCM Delivery Review and Rework"
+  short_description: "Review receipts and produce precise evidence-based rework"
+  default_prompt: "Use $ccm-delivery-review-rework to judge these receipts and define any rework."

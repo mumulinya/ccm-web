@@ -1,0 +1,4 @@
+interface:
+  display_name: "CCM Business Scenario Acceptance"
+  short_description: "Verify complete business flows with reproducible evidence"
+  default_prompt: "Use $ccm-business-scenario-acceptance to verify this delivery through business-level scenarios and evidence."

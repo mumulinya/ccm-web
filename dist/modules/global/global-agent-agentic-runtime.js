@@ -35,8 +35,10 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.createGlobalAgentAgenticRuntime = createGlobalAgentAgenticRuntime;
 const crypto = __importStar(require("crypto"));
+const unified_model_call_config_1 = require("../../system/unified-model-call-config");
 const global_agent_run_projection_1 = require("../../agents/global/global-agent-run-projection");
 const session_compaction_core_1 = require("../../system/session-compaction-core");
+const workspace_model_result_projection_1 = require("../../tools/workspace-model-result-projection");
 const main_agent_context_envelope_1 = require("../../system/main-agent-context-envelope");
 const group_compaction_strategy_1 = require("../collaboration/group-compaction-strategy");
 const source_ingestion_1 = require("../requirements/source-ingestion");
@@ -66,9 +68,10 @@ const context_usage_events_1 = require("../../system/context-usage-events");
 const scope_instructions_1 = require("../../system/scope-instructions");
 const context_budget_1 = require("../../system/context-budget");
 const pre_request_tool_context_1 = require("../../system/pre-request-tool-context");
+const douyin_agent_tools_1 = require("../music/douyin-agent-tools");
 // Global-only context, tool execution, mission supervision, and agentic loop lifecycle.
 function createGlobalAgentAgenticRuntime(deps) {
-    const { hasExplicitGlobalWriteAuthorization, GLOBAL_AGENT_TOOL_SPECS, GLOBAL_MANAGEMENT_ACTIONS, GLOBAL_PET_AGENT_NAME, acquireIdempotency, annotateGlobalAction, applyGlobalAgentSupervisionSteer, attachGlobalAgentRunSupervision, bindFeishuIdentifiersFromValue, bindFeishuTaskContext, buildGlobalAgentMemoryPacket, buildGlobalAgentSessionContinuation, buildGlobalSingleProjectMissionPayload, callGlobalModelWithRetry, compactGlobalAgentSessionWithModel, compactPetText, completeGlobalAgentSupervision, completeIdempotency, continueGlobalAgentRunWithClarification, controlGlobalDevelopmentMission, controlGlobalMissionSupervisor, createGlobalDevelopmentMission, createRequirementEpicWithChildren, executeFeishuAction, executePlayMusic, executeStopMusic, failIdempotency, findClarifyingGlobalAgentRun, formatGlobalMissionFinalReport, getAgentQualityPolicy, getConfigInfo, getConfigs, getGlobalAgentBackgroundOutput, getGlobalAgentMemoryPolicy, getGlobalAgentRun, getGlobalDevelopmentMission, getGlobalMissionSupervisor, getGlobalMissionSupervisorSchedulerStatus, globalRunVisibleReply, hasExplicitDevelopmentExecutionIntent, inferLocalGlobalAction, ingestGlobalAgentConversation, listGlobalAgentRuns, listGlobalMissionSupervisors, listTaskAgentSessions, loadCronJobs, loadGlobalAgentHistoryStore, loadGlobalAgentHooks, loadGlobalAgentMemory, loadGlobalAgentPermissionRules, loadGroups, loadMcpTools, loadOrchestratorConfig, loadSkills, loadTasks, normalizeText, notifyFeishuTaskStage, postLocalApi, queryKnowledgeBase, recallGlobalAgentMemory, rebuildGlobalAgentMemory, recordGlobalAgentRuntimeOutput, recordGlobalAgentSessionProviderUsage, recordGlobalMissionMemory, recoverInterruptedGlobalAgentRuns, refreshGlobalDevelopmentMissions, renderGlobalGroupMemoryContextBundle, resumeGlobalAgentRun, sanitizeGlobalDirectAgentOutput, setGlobalAgentMemoryPolicy, settleIdempotencyByTrace, startGlobalAgentRun, startGlobalMissionSupervisor, startGlobalMissionSupervisorScheduler, stopGlobalMissionSupervisorScheduler, superviseGlobalDevelopmentMissionCycle, updateGlobalAgentSupervisionState, waitForIdempotencyResult } = deps;
+    const { hasExplicitGlobalWriteAuthorization, GLOBAL_AGENT_TOOL_SPECS, GLOBAL_MANAGEMENT_ACTIONS, GLOBAL_PET_AGENT_NAME, acquireIdempotency, annotateGlobalAction, applyGlobalAgentSupervisionSteer, attachGlobalAgentRunSupervision, bindFeishuIdentifiersFromValue, bindFeishuTaskContext, buildGlobalAgentMemoryPacket, buildGlobalAgentSessionContinuation, buildGlobalSingleProjectMissionPayload, callGlobalModelWithRetry, compactGlobalAgentSessionWithModel, compactPetText, completeGlobalAgentSupervision, completeIdempotency, continueGlobalAgentRunWithClarification, controlGlobalDevelopmentMission, controlGlobalMissionSupervisor, createGlobalDevelopmentMission, createRequirementEpicWithChildren, executeFeishuAction, executePlayMusic, executeStopMusic, failIdempotency, findClarifyingGlobalAgentRun, formatGlobalMissionFinalReport, getAgentQualityPolicy, getConfigInfo, getConfigs, getGlobalAgentBackgroundOutput, getGlobalAgentMemoryPolicy, getGlobalAgentRun, getGlobalDevelopmentMission, getGlobalMissionSupervisor, getGlobalMissionSupervisorSchedulerStatus, globalRunVisibleReply, hasExplicitDevelopmentExecutionIntent, inferLocalGlobalAction, ingestGlobalAgentConversation, listAutomationDefinitions, listGlobalAgentRuns, listGlobalMissionSupervisors, listTaskAgentSessions, loadGlobalAgentHistoryStore, loadGlobalAgentHooks, loadGlobalAgentMemory, loadGlobalAgentPermissionRules, loadGroups, loadMcpTools, loadOrchestratorConfig, loadSkills, loadTasks, normalizeText, notifyFeishuTaskStage, postLocalApi, queryKnowledgeBase, recallGlobalAgentMemory, rebuildGlobalAgentMemory, recordGlobalAgentRuntimeOutput, recordGlobalAgentSessionProviderUsage, recordGlobalMissionMemory, recoverInterruptedGlobalAgentRuns, refreshGlobalDevelopmentMissions, renderGlobalGroupMemoryContextBundle, resumeGlobalAgentRun, sanitizeGlobalDirectAgentOutput, setGlobalAgentMemoryPolicy, settleIdempotencyByTrace, startGlobalAgentRun, startGlobalMissionSupervisor, startGlobalMissionSupervisorScheduler, stopGlobalMissionSupervisorScheduler, superviseGlobalDevelopmentMissionCycle, updateGlobalAgentSupervisionState, waitForIdempotencyResult } = deps;
     const continueBoundTaskWithMessage = deps.continueTaskWithMessage;
     function safeProjectRows() {
         const projectIds = getConfigs().map((config) => String(config.name || "")).filter(Boolean);
@@ -342,7 +345,7 @@ function createGlobalAgentAgenticRuntime(deps) {
                 recent: globalTasks.slice(-12).map(compactTask),
                 policy: "global_agent_owned_tasks_only",
             },
-            cron_jobs: loadCronJobs().map((job) => ({ id: job.id, name: job.name, schedule: job.schedule, enabled: job.enabled !== false, target_type: job.target_type, group_id: job.group_id, project: job.project })),
+            cron_jobs: listAutomationDefinitions().map((definition) => ({ id: definition.definition_id, name: definition.name, schedule: definition.schedule, enabled: definition.enabled !== false, target_type: definition.target?.type, group_id: definition.target?.type === "group" ? definition.target.id : null, project: definition.target?.type === "project" ? definition.target.id : "" })),
             tools: {
                 schema: authorizedTools.schema,
                 authorization_checksum: authorizedTools.checksum,
@@ -641,7 +644,8 @@ function createGlobalAgentAgenticRuntime(deps) {
             throw new Error("全局 Agent Provider 调用缺少精确会话 ID");
         const baseConfig = loadOrchestratorConfig();
         const sessionPreferences = (0, slash_command_session_state_1.readSlashCommandSessionState)("global", "global", sessionId).preferences;
-        const config = { ...baseConfig, model: sessionPreferences.model || baseConfig.model, reasoningEffort: sessionPreferences.effort || baseConfig.reasoningEffort };
+        const unified = (0, unified_model_call_config_1.resolveUnifiedModelConfig)({ callSource: "global_main_agent", config: baseConfig });
+        const config = { ...baseConfig, model: unified.model, reasoningEffort: unified.reasoningEffort, configVersion: unified.configVersion };
         const modelCapacity = (0, group_compaction_strategy_1.resolveGroupModelContextCapacity)(config);
         const threshold = (0, group_compaction_strategy_1.getGroupAutoCompactThreshold)(config);
         let triggerPayload = buildGlobalProviderPayloadSnapshot(messages, sessionId, run, (0, global_native_query_adapter_1.globalNativeTools)(run));
@@ -1047,6 +1051,7 @@ function createGlobalAgentAgenticRuntime(deps) {
                     effective: { mcp: runtime.scope?.mcp || [], skill: runtime.scope?.skill || [] },
                     catalog: {
                         mcp: runtime.catalog.tools,
+                        loadedMcp: runtime.loaded_tools,
                         skills: runtime.catalog.skills,
                         rejectedMcp: [],
                         discoverableMcp: runtime.discoverable_tools,
@@ -1647,6 +1652,9 @@ function createGlobalAgentAgenticRuntime(deps) {
             else if (name === "navigate") {
                 observation = { success: true, message: `Web 客户端可切换到 ${args.tab}`, client_effect: { type: "navigate", params: { tab: args.tab } } };
             }
+            else if (name.startsWith("douyin_")) {
+                observation = await (0, douyin_agent_tools_1.executeDouyinAgentTool)(name, args);
+            }
             else if (name === "play_music") {
                 const played = await executePlayMusic(baseUrl, {
                     keyword: args.keyword || args.query || args.song || "",
@@ -1695,10 +1703,24 @@ function createGlobalAgentAgenticRuntime(deps) {
                 });
                 observation = { success: true, summary };
             }
+            // Keep the complete observation for idempotency/audit, but project
+            // workspace MCP payloads before returning them to the provider. Dynamic
+            // execution metadata must not perturb the model-visible cache prefix.
+            const auditObservation = observation;
+            let modelObservation = observation;
+            const candidate = observation?.result?.modelPayload || observation?.result;
+            if (candidate?.schema === "ccm-workspace-tool-envelope-v3" || candidate?.toolContractVersion === 3) {
+                const projected = (0, workspace_model_result_projection_1.projectWorkspaceToolResultForModel)(candidate);
+                modelObservation = { ...observation, result: projected.modelOutput, auditReceipt: projected.auditReceipt };
+            }
+            else if (observation?.schema === "ccm-workspace-tool-envelope-v3") {
+                const projected = (0, workspace_model_result_projection_1.projectWorkspaceToolResultForModel)(observation);
+                modelObservation = { ...projected.modelOutput, auditReceipt: projected.auditReceipt };
+            }
             completeIdempotency("global-agent-tool", operationKey, {
-                observation: (0, context_source_tool_result_projection_1.projectContextSourceToolResultForPersistence)(name === "invoke_mcp" ? (args?.tool_name || args?.toolName || name) : name, observation, args?.query || args?.file_id || args?.name || ""),
+                observation: (0, context_source_tool_result_projection_1.projectContextSourceToolResultForPersistence)(name === "invoke_mcp" ? (args?.tool_name || args?.toolName || name) : name, auditObservation, args?.query || args?.file_id || args?.name || ""),
             });
-            return observation;
+            return modelObservation;
         }
         catch (error) {
             failIdempotency("global-agent-tool", operationKey, error);
@@ -1729,7 +1751,8 @@ function createGlobalAgentAgenticRuntime(deps) {
             callModel: async (messages, run, signal) => {
                 attachGlobalRunRequirementSources(run, input.sourceIngestion);
                 const sessionState = (0, slash_command_session_state_1.readSlashCommandSessionState)("global", "global", String(run.session_id || input.sessionId || ""));
-                const config = { ...baseConfig, model: sessionState.preferences?.model || baseConfig.model, reasoningEffort: sessionState.preferences?.effort || baseConfig.reasoningEffort };
+                const unified = (0, unified_model_call_config_1.resolveUnifiedModelConfig)({ callSource: "global_main_agent", config: baseConfig });
+                const config = { ...baseConfig, model: unified.model, reasoningEffort: unified.reasoningEffort, configVersion: unified.configVersion };
                 if (!config.apiKey || !config.apiUrl || !config.model)
                     throw new Error("统一大模型尚未配置");
                 const directive = (0, slash_command_session_state_1.renderSlashCommandSessionDirective)("global", "global", String(run.session_id || input.sessionId || ""));
@@ -2208,6 +2231,9 @@ function createGlobalAgentAgenticRuntime(deps) {
         return run;
     }
     async function resumeGlobalAgentLoopsForServer(ctx, port) {
+        if (!/^(1|true|yes|on)$/i.test(String(process.env.CCM_AUTO_RESUME_GLOBAL_AGENT || ""))) {
+            return { total: 0, resumed: 0, blocked: 0, results: [], skipped: "startup_auto_resume_disabled" };
+        }
         const result = await recoverInterruptedGlobalAgentRuns(createAgenticRuntime(`http://127.0.0.1:${port}`, ctx));
         for (const run of result.results || []) {
             if (!["completed", "failed", "cancelled"].includes(run.status))

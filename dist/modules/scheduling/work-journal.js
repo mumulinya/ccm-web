@@ -52,9 +52,10 @@ const crypto = __importStar(require("crypto"));
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const db_1 = require("../../core/db");
+const automation_definition_service_1 = require("./automation-definition-service");
 const utils_1 = require("../../core/utils");
 const storage_1 = require("../collaboration/storage");
-const cron_job_store_1 = require("./cron-job-store");
+const schedule_expression_1 = require("./schedule-expression");
 const WORK_JOURNAL_FILE = path.join(utils_1.CCM_DIR, "work-journal.jsonl");
 const GLOBAL_AGENT_HISTORY_FILE = path.join(utils_1.CCM_DIR, "global-agent-history.json");
 const PROJECT_SESSIONS_DIR = path.join(utils_1.CCM_DIR, "web-sessions");
@@ -206,7 +207,9 @@ function projectTaskWorkEvents(tasks = (0, db_1.loadTasks)()) {
         const project = String(task.target_project || task.project || "");
         const groupId = String(task.group_id || "");
         const fromWorkbench = task.workflow_meta?.source === "workbench" || !!task.intake_state || !!task.intake_draft;
-        const automated = !fromWorkbench && !!(task.cron_job_id || task.cron_trigger || task.workflow_type === "daily_dev");
+        const automated = !fromWorkbench && (String(task.origin || task.request_origin || task.source_channel || "").toLowerCase() === "automation"
+            || !!task.automation_definition_id
+            || task.workflow_type === "daily_dev");
         const baseSource = fromWorkbench ? "workbench" : automated ? "automation" : "task_timeline";
         const created = event({
             id: `task:${taskId}:created`,
@@ -539,28 +542,30 @@ function projectTestAgentWorkEvents(tasks = (0, db_1.loadTasks)()) {
 }
 function projectAutomationEvents() {
     const projected = [];
-    for (const job of (0, db_1.loadCronJobs)()) {
-        if (!job?.last_run)
-            continue;
-        const item = event({
-            id: `automation:${job.id}:run:${hash(job.last_run, 14)}`,
-            at: job.last_run,
-            type: "automation_run",
-            state: String(job.last_status || "recorded"),
-            actor_type: "system",
-            actor_label: "自动开发",
-            source: "automation",
-            source_label: sourceLabel("automation"),
-            title: job.name || "自动开发计划",
-            detail: job.last_result || "自动任务已运行",
-            group_id: String(job.group_id || ""),
-            project: String(job.project || ""),
-            work_id: `automation:${job.id}`,
-            evidence_ref: `cron-jobs.json#${job.id}:last_run`,
-            metadata: { workflow_type: job.workflow_type || "", schedule: job.schedule || "" },
-        });
-        if (item)
-            projected.push(item);
+    for (const definition of (0, automation_definition_service_1.listAutomationDefinitions)()) {
+        for (const run of (0, automation_definition_service_1.listAutomationDefinitionRuns)(definition.definition_id).slice(0, 20)) {
+            if (!run?.created_at)
+                continue;
+            const item = event({
+                id: `automation:${definition.definition_id}:run:${hash(run.run_id, 14)}`,
+                at: run.updated_at || run.created_at,
+                type: "automation_run",
+                state: String(run.status || "recorded"),
+                actor_type: "system",
+                actor_label: "自动开发",
+                source: "automation",
+                source_label: sourceLabel("automation"),
+                title: definition.name || "自动化任务",
+                detail: String(run.status_detail || run.delivery_result?.summary || "自动任务已运行"),
+                group_id: String(definition.target?.type === "group" ? definition.target.id : ""),
+                project: String(definition.target?.type === "project" ? definition.target.id : ""),
+                work_id: `automation:${definition.definition_id}`,
+                evidence_ref: `task-runs.json#${run.run_id}`,
+                metadata: { schedule: definition.schedule || "", definition_revision: definition.revision, run_id: run.run_id },
+            });
+            if (item)
+                projected.push(item);
+        }
     }
     return projected;
 }
@@ -615,19 +620,19 @@ function syncWorkJournal() {
         events: merged.events,
     };
 }
-function localWorkDateKey(date = new Date(), timezone = cron_job_store_1.DEFAULT_CRON_TIMEZONE) {
-    return (0, cron_job_store_1.dateKeyInTimezone)(date, (0, cron_job_store_1.normalizeCronTimezone)(timezone));
+function localWorkDateKey(date = new Date(), timezone = schedule_expression_1.DEFAULT_CRON_TIMEZONE) {
+    return (0, schedule_expression_1.dateKeyInTimezone)(date, (0, schedule_expression_1.normalizeCronTimezone)(timezone));
 }
-function parseWorkDay(dateKey = localWorkDateKey(), timezone = cron_job_store_1.DEFAULT_CRON_TIMEZONE) {
-    const normalizedTimezone = (0, cron_job_store_1.normalizeCronTimezone)(timezone);
+function parseWorkDay(dateKey = localWorkDateKey(), timezone = schedule_expression_1.DEFAULT_CRON_TIMEZONE) {
+    const normalizedTimezone = (0, schedule_expression_1.normalizeCronTimezone)(timezone);
     const safe = /^\d{4}-\d{2}-\d{2}$/.test(String(dateKey)) ? String(dateKey) : localWorkDateKey(new Date(), normalizedTimezone);
     const [year, month, day] = safe.split("-").map(Number);
     const next = new Date(Date.UTC(year, month - 1, day + 1));
     return {
         key: safe,
         timezone: normalizedTimezone,
-        start: (0, cron_job_store_1.zonedDateTimeToDate)({ year, month, day }, normalizedTimezone),
-        end: (0, cron_job_store_1.zonedDateTimeToDate)({ year: next.getUTCFullYear(), month: next.getUTCMonth() + 1, day: next.getUTCDate() }, normalizedTimezone),
+        start: (0, schedule_expression_1.zonedDateTimeToDate)({ year, month, day }, normalizedTimezone),
+        end: (0, schedule_expression_1.zonedDateTimeToDate)({ year: next.getUTCFullYear(), month: next.getUTCMonth() + 1, day: next.getUTCDate() }, normalizedTimezone),
     };
 }
 function inSpan(at, span) {
@@ -787,7 +792,7 @@ function buildDailyMarkdown(report) {
         `- 工作归属：你 ${report.ownership.user_actions} 条、Agent ${report.ownership.agent_actions} 条、TestAgent ${report.ownership.test_agent_actions} 条、系统自动化 ${report.ownership.system_actions} 条`,
     ].join("\n");
 }
-function generateEvidenceDailyReport(dateKey = localWorkDateKey(), inputEvents, timezone = cron_job_store_1.DEFAULT_CRON_TIMEZONE) {
+function generateEvidenceDailyReport(dateKey = localWorkDateKey(), inputEvents, timezone = schedule_expression_1.DEFAULT_CRON_TIMEZONE) {
     const sync = inputEvents ? null : syncWorkJournal();
     const events = inputEvents || sync.events;
     const day = parseWorkDay(dateKey, timezone);
@@ -841,7 +846,7 @@ function generateEvidenceDailyReport(dateKey = localWorkDateKey(), inputEvents, 
             file_changes: fileChanges.length,
             verifications: verifications.length,
             test_agent_reviews: dayEvents.filter(item => item.actor_type === "test_agent").length,
-            enabled_daily_dev_jobs: (0, db_1.loadCronJobs)().filter((job) => job.workflow_type === "daily_dev" && job.enabled !== false).length,
+            enabled_daily_dev_jobs: (0, automation_definition_service_1.listAutomationDefinitions)().filter((definition) => definition.enabled !== false).length,
             cron_runs_today: dayEvents.filter(item => item.type === "automation_run").length,
         },
         ownership,
@@ -864,7 +869,7 @@ function addDays(date, days) {
     next.setDate(next.getDate() + days);
     return next;
 }
-function workWeekRange(dateKey = localWorkDateKey(), timezone = cron_job_store_1.DEFAULT_CRON_TIMEZONE) {
+function workWeekRange(dateKey = localWorkDateKey(), timezone = schedule_expression_1.DEFAULT_CRON_TIMEZONE) {
     const day = parseWorkDay(dateKey, timezone);
     const [year, month, date] = day.key.split("-").map(Number);
     const calendarDay = new Date(Date.UTC(year, month - 1, date));
@@ -918,7 +923,7 @@ function buildWeeklyMarkdown(report) {
         `- 工作归属：你 ${report.ownership.user_actions} 条、Agent ${report.ownership.agent_actions} 条、TestAgent ${report.ownership.test_agent_actions} 条、系统自动化 ${report.ownership.system_actions} 条`,
     ].join("\n");
 }
-function generateEvidenceWeeklyReport(dateKey = localWorkDateKey(), inputEvents, timezone = cron_job_store_1.DEFAULT_CRON_TIMEZONE) {
+function generateEvidenceWeeklyReport(dateKey = localWorkDateKey(), inputEvents, timezone = schedule_expression_1.DEFAULT_CRON_TIMEZONE) {
     const sync = inputEvents ? null : syncWorkJournal();
     const events = inputEvents || sync.events;
     const range = workWeekRange(dateKey, timezone);

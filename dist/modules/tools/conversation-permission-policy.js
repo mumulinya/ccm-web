@@ -119,7 +119,7 @@ function updateConversationPermissionPolicy(input) {
 }
 function automationTask(task) {
     const source = String(task?.automation_task_source || task?.request_origin || task?.source_channel || task?.workflow_meta?.intake?.source || "").toLowerCase();
-    return !!(task?.cron_job_id || task?.cron_occurrence_id || task?.global_mission_id
+    return !!(task?.automation_definition_id || task?.global_mission_id
         || task?.workflow_meta?.global_direct_dispatch || task?.workflow_meta?.project_mission
         || /(?:schedule|cron|workbench|global[_ -]?agent|automation|mission)/.test(source));
 }

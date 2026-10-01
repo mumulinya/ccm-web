@@ -1,0 +1,21 @@
+import { BrowserCheckSpec, BrowserSessionComparisonStepSpec, BrowserSessionExecutableStepSpec, BrowserSessionLeafStepSpec, BrowserSessionParallelStepSpec, BrowserSessionSpec, BrowserSessionStepSpec, BrowserStepResult } from "../types";
+export declare const MULTI_SESSION_BROWSER_PROBE_TYPE = "multi_session_browser_scenario";
+export declare function browserSessionSteps(check: BrowserCheckSpec): BrowserSessionStepSpec[];
+export declare function isBrowserSessionParallelStep(step: BrowserSessionStepSpec): step is BrowserSessionParallelStepSpec;
+export declare function isBrowserSessionComparisonStep(step: BrowserSessionStepSpec): step is BrowserSessionComparisonStepSpec;
+export declare function isBrowserSessionLeafStep(step: BrowserSessionStepSpec | BrowserSessionExecutableStepSpec): step is BrowserSessionLeafStepSpec;
+export declare function flattenBrowserSessionSteps(check: BrowserCheckSpec): BrowserSessionExecutableStepSpec[];
+export declare function browserSessionParallelGroupCount(check: BrowserCheckSpec): number;
+export declare function hasMultiSessionBrowserScenario(check: BrowserCheckSpec): boolean;
+export declare function validateMultiSessionBrowserScenario(check: BrowserCheckSpec): string[];
+export declare function browserSessionByName(sessions: BrowserSessionSpec[], name: string): BrowserSessionSpec;
+export declare function prefixBrowserSessionStep(session: string, step: BrowserStepResult): BrowserStepResult;
+export declare function browserSessionScenarioMetadata(check: BrowserCheckSpec): {
+    multiSession: boolean;
+    sessionCount: number;
+    sessionNames: string[];
+    sessionStepCount: number;
+    parallelGroupCount: number;
+    comparisonCount: number;
+};
+export declare function browserSessionInitialUrl(session: BrowserSessionSpec, fallback: string): string;

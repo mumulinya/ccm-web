@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.neteaseSearch = neteaseSearch;
 const platform_http_1 = require("./platform-http");
+const netease_mv_1 = require("./netease-mv");
 async function neteaseSearch(keyword) {
     const terms = String(keyword || "").trim().split(/[\s\-_/·・]+/).filter(term => term.length >= 2).slice(0, 2);
     const queries = Array.from(new Set([String(keyword || "").trim(), ...(terms.length > 1 ? terms : [])])).filter(Boolean);
@@ -24,6 +25,7 @@ async function neteaseSearch(keyword) {
     }));
     const songs = Array.from(new Map(batches.flat().filter((song) => song?.id).map((song) => [String(song.id), song])).values());
     const results = songs.map((song) => {
+        (0, netease_mv_1.rememberNeteaseMv)(String(song.id), song.mvid ?? song.mv);
         const artists = (song.artists || [])
             .map((a) => a.name)
             .filter((name) => name && name !== "undefined" && name !== "null")
@@ -36,6 +38,7 @@ async function neteaseSearch(keyword) {
         const picUrl = song.album?.picUrl || "";
         return {
             songId: song.id,
+            mvId: song.mvid || song.mv || null,
             title: song.name || "",
             artist: artists || "未知艺术家",
             album,

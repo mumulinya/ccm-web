@@ -1,0 +1,4 @@
+interface:
+  display_name: "CCM Global Mission Lead"
+  short_description: "Route, supervise, and summarize cross-project missions"
+  default_prompt: "Use $ccm-global-mission-lead to route and supervise this CCM mission."

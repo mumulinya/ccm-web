@@ -170,8 +170,8 @@ function buildMainAgentCapabilityDirectoryV1(input) {
 function buildMainAgentContextEnvelopeV1(input) {
     const messages = Array.isArray(input.messages) ? input.messages : [];
     const systemMessages = messages.filter(message => String(message?.role || message?.message?.role || "").toLowerCase() === "system");
-    const directoryMessages = systemMessages.filter(isDirectorySystemMessage);
-    const stableMessages = systemMessages.filter(message => !isDirectorySystemMessage(message));
+    const directoryMessages = systemMessages.filter(message => isDirectorySystemMessage(message) || message?.prefixEligible !== true);
+    const stableMessages = systemMessages.filter(message => message?.prefixEligible === true);
     const nonSystem = messages.filter(message => String(message?.role || message?.message?.role || "").toLowerCase() !== "system");
     const lastUserIndex = nonSystem.reduce((found, message, index) => String(message?.role || message?.message?.role || "").toLowerCase() === "user" ? index : found, -1);
     const turnContext = lastUserIndex >= 0 ? [nonSystem[lastUserIndex]] : [];

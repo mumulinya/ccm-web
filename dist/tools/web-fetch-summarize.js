@@ -20,7 +20,17 @@ async function summarizeWebFetchPage(input) {
     const summary = await callLlm(config, [
         { role: "system", content: "Extract the information requested by the user from the web page. Use only facts present in the page; explicitly say when the page does not provide something. Do not invent facts." },
         { role: "user", content: `URL: ${input.url}\nTitle: ${input.title || ""}\nUser request: ${prompt}\n\nPage content:\n${page}` },
-    ], { maxTokens: 700 });
+    ], {
+        maxTokens: 700,
+        providerContextCache: {
+            scope: "workspace", scopeId: "workspace", sessionId: "web-fetch-summarizer",
+            source: "web_fetch_summarizer", requestClass: "auxiliary",
+        },
+        requestAttribution: {
+            purpose: "web_fetch_summarizer", requestClass: "auxiliary",
+            scope: "workspace", scopeId: "workspace", exactSessionId: "web-fetch-summarizer",
+        },
+    });
     const text = String(summary || "").trim();
     if (!text)
         throw new Error("web_fetch 摘要为空：模型未返回可用内容，未回退为页面原文。");

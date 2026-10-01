@@ -535,7 +535,7 @@ async function runUnifiedGroupConversationMemory(input) {
             const reference = buildUnifiedCompactionReferenceForMock(messages, memory);
             return configuredMock({ ...request, user: `保真校验参考（最终摘要必须由模型生成并完整覆盖这些事实）：\n${JSON.stringify(reference)}\n\n本次被压缩区间内的全部用户消息\n${request.user}` });
         }
-        : (request) => (0, unified_session_compaction_model_1.callUnifiedCompactionModel)(config, request.system, request.user, request.maxOutputTokens, {
+        : (request) => (0, unified_session_compaction_model_1.callUnifiedCompactionModel)({ ...config, requestAttribution: { scope: 'group', scopeId: groupId, exactSessionId: groupSessionId, purpose: 'session_compaction', requestClass: 'auxiliary' } }, request.system, request.user, request.maxOutputTokens, {
             beforeRequest: ({ provider, model }) => { config.onCompactionActivity?.({ stage: "model_summary_request", provider, model, heartbeat: false }); },
         }));
     const engine = (0, unified_session_compaction_1.createUnifiedSessionCompactionEngine)({
@@ -581,6 +581,8 @@ async function runUnifiedGroupConversationMemory(input) {
         qualityReference: () => ({ authorizationBoundaries: [], fileReferences: [], verificationEvidence: [], pendingWork: [], sourceMessageIds: [] }),
         signal: config.compactionAbortSignal || config.compaction_abort_signal,
         compactionRunId: config.compactionRunId || config.compaction_run_id || config.compactionActivityOperationId || config.compaction_activity_operation_id,
+        lifecycleScopeId: groupId,
+        lifecycleTaskId: String(config.taskId || config.task_id || ""),
         onLifecycle: (update) => {
             // The unified engine is the authority for deciding whether compaction
             // is actually required.  Forward its lifecycle only after that decision

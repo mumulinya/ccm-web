@@ -59,6 +59,7 @@ exports.appendGroupMessage = appendGroupMessage;
 exports.saveGroupMessages = saveGroupMessages;
 exports.runGroupChatSessionsSelfTest = runGroupChatSessionsSelfTest;
 const fs = __importStar(require("fs"));
+const conversation_session_identity_1 = require("../../system/conversation-session-identity");
 const path = __importStar(require("path"));
 const conversation_search_dirty_1 = require("../../system/conversation-search-dirty");
 const utils_1 = require("../../core/utils");
@@ -78,9 +79,15 @@ const post_turn_tool_context_compaction_1 = require("../../system/post-turn-tool
 const pre_request_tool_context_1 = require("../../system/pre-request-tool-context");
 // === 群聊管理 ===
 function loadGroups() {
-    if (!fs.existsSync(utils_1.GROUPS_FILE))
+    if (!fs.existsSync(utils_1.GROUPS_FILE)) {
+        groupsFileCache = null;
         return [];
+    }
     try {
+        const stat = fs.statSync(utils_1.GROUPS_FILE);
+        const signature = `${stat.mtimeMs}:${stat.size}`;
+        if (groupsFileCache?.signature === signature)
+            return groupsFileCache.groups;
         const groups = JSON.parse(fs.readFileSync(utils_1.GROUPS_FILE, "utf-8"));
         if (!Array.isArray(groups))
             return [];
@@ -89,18 +96,24 @@ function loadGroups() {
         if (JSON.stringify(normalized) !== before) {
             saveGroups(normalized);
         }
+        const currentStat = fs.statSync(utils_1.GROUPS_FILE);
+        groupsFileCache = { signature: `${currentStat.mtimeMs}:${currentStat.size}`, groups: normalized };
         return normalized;
     }
     catch {
         try {
             const recovered = JSON.parse(fs.readFileSync(`${utils_1.GROUPS_FILE}.bak`, "utf-8"));
-            if (Array.isArray(recovered))
-                return recovered.map(group_orchestrator_1.normalizeGroupOrchestrator);
+            if (Array.isArray(recovered)) {
+                const normalized = recovered.map(group_orchestrator_1.normalizeGroupOrchestrator);
+                groupsFileCache = { signature: `backup:${fs.statSync(`${utils_1.GROUPS_FILE}.bak`).mtimeMs}:${fs.statSync(`${utils_1.GROUPS_FILE}.bak`).size}`, groups: normalized };
+                return normalized;
+            }
         }
         catch { }
         return [];
     }
 }
+let groupsFileCache = null;
 function saveGroups(groups) {
     const content = JSON.stringify(groups, null, 2);
     if (fs.existsSync(utils_1.GROUPS_FILE)) {
@@ -119,6 +132,13 @@ function saveGroups(groups) {
     }
     fs.writeFileSync(temp, content, "utf-8");
     replaceFileWithWindowsRetry(temp, utils_1.GROUPS_FILE);
+    try {
+        const stat = fs.statSync(utils_1.GROUPS_FILE);
+        groupsFileCache = { signature: `${stat.mtimeMs}:${stat.size}`, groups };
+    }
+    catch {
+        groupsFileCache = null;
+    }
 }
 const groupMessagesCache = new Map();
 var groupMessageAppendHooks = null;
@@ -164,6 +184,7 @@ function getGroupMessageAppendHooks() {
 }
 const GROUP_DEFAULT_SESSION_ID = "default";
 const GROUP_MESSAGE_SESSIONS_DIR = path.join(utils_1.GROUP_MESSAGES_DIR, "sessions");
+const groupDefaultSessionSummaryCache = new Map();
 function cleanGroupSessionPathPart(value) {
     return String(value || "").replace(/[^a-zA-Z0-9._-]+/g, "-").slice(0, 120) || "unknown";
 }
@@ -214,9 +235,17 @@ function defaultGroupSessionRecord(groupId) {
     let updatedAt = "";
     try {
         const stat = fs.statSync(file);
-        updatedAt = stat.mtime.toISOString();
-        const parsed = JSON.parse(fs.readFileSync(file, "utf-8"));
-        messageCount = Array.isArray(parsed) ? parsed.length : 0;
+        const cached = groupDefaultSessionSummaryCache.get(groupId);
+        if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
+            messageCount = cached.messageCount;
+            updatedAt = cached.updatedAt;
+        }
+        else {
+            updatedAt = stat.mtime.toISOString();
+            const parsed = JSON.parse(fs.readFileSync(file, "utf-8"));
+            messageCount = Array.isArray(parsed) ? parsed.length : 0;
+            groupDefaultSessionSummaryCache.set(groupId, { mtimeMs: stat.mtimeMs, size: stat.size, messageCount, updatedAt });
+        }
     }
     catch { }
     return {
@@ -231,6 +260,8 @@ function defaultGroupSessionRecord(groupId) {
 }
 function normalizeGroupSessionKind(groupId, session, automatedSessionIds) {
     const explicit = String(session?.session_kind || session?.sessionKind || session?.purpose || "").trim().toLowerCase();
+    if (["recovery", "recovery_task", "task_recovery"].includes(explicit))
+        return "recovery";
     if (["automation", "automated_task", "task"].includes(explicit))
         return "automation";
     if (automatedSessionIds.has(String(session?.id || "")))
@@ -240,10 +271,7 @@ function normalizeGroupSessionKind(groupId, session, automatedSessionIds) {
 function listGroupChatSessions(groupId) {
     const manifest = readGroupSessionManifest(groupId);
     const legacyExists = fs.existsSync(getGroupSessionMessagesFile(groupId, GROUP_DEFAULT_SESSION_ID));
-    const automatedSessionIds = new Set((0, db_1.loadTasks)()
-        .filter((task) => String(task?.group_id || "") === String(groupId || ""))
-        .map((task) => String(task?.group_session_id || task?.exact_session_id || ""))
-        .filter(Boolean));
+    const automatedSessionIds = new Set((0, db_1.listTaskSessionIdsByGroupId)(groupId));
     const sessions = (manifest.sessions.length ? [...manifest.sessions] : [defaultGroupSessionRecord(groupId)])
         .filter((item) => item.id !== GROUP_DEFAULT_SESSION_ID || legacyExists || manifest.activeSessionId === GROUP_DEFAULT_SESSION_ID);
     if ((legacyExists || manifest.activeSessionId === GROUP_DEFAULT_SESSION_ID) && !sessions.some((item) => item.id === GROUP_DEFAULT_SESSION_ID)) {
@@ -332,12 +360,16 @@ function findGroupChatSessionContainingMessage(groupId, messageId) {
 function createGroupChatSession(groupId, title = "", options = {}) {
     const manifest = listGroupChatSessions(groupId);
     const now = new Date().toISOString();
-    const id = `gcs_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+    const id = (0, conversation_session_identity_1.createConversationSessionId)('group');
     const cleanTitle = String(title || "新会话").trim().slice(0, 80) || "新会话";
-    const sessionKind = ["automation", "automated_task", "task"].includes(String(options.sessionKind || options.session_kind || "").toLowerCase())
-        ? "automation"
-        : "conversation";
-    const session = { id, title: cleanTitle, titleOrigin: (0, session_title_1.isSessionTitlePlaceholder)(cleanTitle) ? "placeholder" : "manual", createdAt: now, updatedAt: now, messageCount: 0, legacy: false, session_kind: sessionKind };
+    const normalizedKind = String(options.sessionKind || options.session_kind || "").toLowerCase();
+    const sessionKind = ["recovery", "recovery_task", "task_recovery"].includes(normalizedKind)
+        ? "recovery"
+        : ["automation", "automated_task", "task"].includes(normalizedKind)
+            ? "automation"
+            : "conversation";
+    const session = { id, title: cleanTitle, titleOrigin: (0, session_title_1.isSessionTitlePlaceholder)(cleanTitle) ? "placeholder" : "manual", createdAt: now, updatedAt: now, messageCount: 0, legacy: false, session_kind: sessionKind,
+        ...(sessionKind === "recovery" ? { recovery_task_id: String(options.recoveryTaskId || options.recovery_task_id || "").slice(0, 160), recovery_attempt: Math.max(0, Number(options.recoveryAttempt || options.recovery_attempt || 0)) } : {}) };
     const existingSessions = manifest.sessions.filter((item) => item.id !== GROUP_DEFAULT_SESSION_ID || fs.existsSync(getGroupSessionMessagesFile(groupId, GROUP_DEFAULT_SESSION_ID)));
     (0, group_session_lifecycle_head_1.ensureGroupSessionLifecycleHead)(groupId, id, { createdAt: now, reason: "group_chat_session_created" });
     try {
@@ -718,7 +750,7 @@ function appendGroupMessage(groupId, msg) {
         || msg?.task_id
         || "");
     const next = {
-        ...msg,
+        ...(0, conversation_attempt_1.bindConversationMessage)(msg, "group", `${groupId}:${sessionId}`),
         group_session_id: sessionId,
         trace_id: traceId,
         ...(taskThreadId ? { task_thread_id: taskThreadId } : {}),
@@ -877,4 +909,5 @@ function runGroupChatSessionsSelfTest() {
         }
     }
 }
+const conversation_attempt_1 = require("../../agents/conversation-attempt");
 //# sourceMappingURL=storage.js.map
