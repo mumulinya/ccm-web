@@ -52,6 +52,8 @@ export interface TestAgentRunnerRecord {
     error: string;
     cancelledReason: string;
     recoveredAfterRestart: boolean;
+    agentRunId?: string;
+    leaseOwnerId?: string;
     sourceBefore: TestAgentSourceBinding;
     sourceAfter?: TestAgentSourceBinding;
     sourceStable?: boolean;

@@ -150,6 +150,7 @@ exports.buildAgentQaProtocolInstructions = buildAgentQaProtocolInstructions;
 const path = __importStar(require("path"));
 const crypto = __importStar(require("crypto"));
 const task_conversation_projection_1 = require("../../system/task-conversation-projection");
+const agent_governance_projection_1 = require("../../agents/agent-governance-projection");
 const utils_1 = require("../../core/utils");
 const db_1 = require("../../core/db");
 const display_1 = require("./display");
@@ -974,6 +975,7 @@ function buildInlineTaskRuntime(task) {
             nativeSessionId: session.nativeSessionId || "",
             ...(0, agent_sessions_1.getTaskAgentSessionContinuity)(session),
         })),
+        governance: (0, agent_governance_projection_1.buildAgentGovernanceProjection)(task),
         taskCard: buildTaskCardView(task, executions, sessions),
         task_card: buildTaskCardView(task, executions, sessions),
     };

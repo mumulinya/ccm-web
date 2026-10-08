@@ -81,6 +81,8 @@ class WorkspaceReadContextLedger {
     hasJsonEvidence(id) { return this.jsonEvidence.has(id); }
     retainJsonEvidence(ids) { this.jsonEvidence = new Set(ids); }
     hasTextEvidence(id) { return Boolean(id) && this.textEvidence.has(id); }
+    recordTextEvidence(id) { if (id)
+        this.textEvidence.add(id); }
     retainTextEvidence(ids) { this.textEvidence = new Set(ids); }
     constructor(identity) {
         this.identity = { ...identity, generation: Math.max(0, Number(identity.generation || 0)) };

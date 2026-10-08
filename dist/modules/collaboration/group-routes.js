@@ -170,6 +170,7 @@ function compactGroupMessageTaskRuntime(runtime) {
         counts: compactGroupMessageRuntimeValue(runtime.counts),
         agents: compactGroupMessageRuntimeValue(runtime.agents),
         sessions: compactGroupMessageRuntimeValue(runtime.sessions),
+        governance: compactGroupMessageRuntimeValue(runtime.governance),
         taskCard: card,
     };
     const bytes = Buffer.byteLength(JSON.stringify(compact));
@@ -210,6 +211,7 @@ function compactGroupMessageTaskRuntime(runtime) {
             technical: card.technical,
             updated_at: card.updated_at,
         } : null,
+        governance: compactGroupMessageRuntimeValue(runtime.governance),
     };
 }
 function compactGroupStatusText(value, max = 180) {

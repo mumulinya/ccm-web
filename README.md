@@ -83,8 +83,37 @@ ccm logs --follow     # 实时查看服务端轮转日志
 | **证据真实性与防重** | 只读失败有限重试（最多3次） + 真实哈希校验短路（file_unchanged） | 消除过度去重死锁，杜绝虚假文件命中，确保上下文证据真实 |
 | **Responses 原生保真** | reasoning/encrypted_content 完整回放 + 本地 Token 估算去重 | 原生思维链与加密项无损回放，修复本地 Token 虚增，严防跨域污染 |
 | **多 Agent 协作网络** | 全局 Agent + 群聊主 Agent + 项目主 Agent + 隔离项目 Worker | 明确角色职责边界：主 Agent 只读规划，子 Agent 隔离执行 |
+| **Agent运行治理与可靠性** | 四级身份解耦 + Heartbeat幂等唤醒合并 + 6维证据断点自愈 + 预算硬停与Secret安全注入 | 彻底杜绝并发重复启动，崩溃断电自愈恢复，密钥零泄漏，长效运行高稳定 |
 | **任务工作流与自动化** | 三级分派策略（直通/规划/编排）+ 任务会话工作台 + Crontab 自动化调度引擎 | 轻量任务免冗长规划秒级执行，重型开发强制独立验收，支持定时任务自动化 |
 | **企业协同与多端集成** | 飞书双向会话与自动化工作报告 + 多协议终端 PTY + 可互动桌宠 | 多端消息直通工作区，会话事实自动生成可信工作日报/周报 |
+
+---
+
+## 4.2.0 重大里程碑与版本演进
+
+在 4.2.0 重大版本中，CCM 全面升级了 AgentRun 运行治理与租约体系（Agent Run Governance）、Heartbeat 幂等唤醒与监督自愈（Heartbeat Reliability & Supervisor）、多媒体工坊抖音视频流式调度与主舞台（Douyin Media Coordinator & Video Stage）、以及执行内核与任务验收服务（Execution Kernel & Acceptance Service）：
+
+### 1. AgentRun 运行治理与权威生命周期体系（Agent Run Governance & Authoritative Lifecycle）
+- **四级身份边界标准化**：确立清晰权威的四级运行身份体系：业务全链路追踪（`trace_id`）、用户目标（`task_id`）、交付尝试（`attempt_id`）与底层 Runtime 实际执行（`run_id`），与第三方 Provider 的 `native_session_id` 彻底解耦。
+- **治理沙箱与安全策略（Security & Boundary Gates）**：
+  - **Secret 隔离注入**：密钥仅通过 `ccm-secret://` 动态引用，在 Runtime 启动时短暂注入并于结束或失败后即时撤销，持久化记录与任务回放保证零明文泄漏。
+  - **预算硬停熔断（Budget Hard Stop）**：支持 Token/成本预算告警阈值记录与硬停阈值熔断，阻止超额模型调用。
+  - **依赖阻塞与拓扑释放（Dependency Graphs）**：支持任务前置 `blocks` 依赖拓扑校验，前置 Run 未释放前严禁启动，所有依赖就绪后自动触发派工。
+  - **Git 终态证据审计（Finalize Artifacts）**：执行收口自动沉淀 Git HEAD、Changed Files 与 Diff 校验和 Artifact，不将冗余 Diff 大文本硬塞入持久化主库。
+- **全景治理看板（AgentGovernanceSummary.vue）**：在任务工作台透出审批流、预算水位、工作区 Checkout、依赖拓扑与 Secret 引用状态。
+
+### 2. Heartbeat 幂等唤醒与 Supervisor 监督自愈（Heartbeat Reliability & Supervisor）
+- **事务级幂等唤醒（requestAgentHeartbeat）**：基于 SQLite `IMMEDIATE` 事务与唯一 `idempotency_key` 实现强一致防重。当目标 Agent/Task 存在活跃 Run 时自动执行唤醒合并（coalesced），彻底杜绝重复启动。
+- **动态租约与自动续期（Run Lease & Heartbeat）**：通过 `claimAgentRunLease` 与 `heartbeatAgentRunLease` 严格锁定执行工作区，防范并发冲突。
+- **Supervisor 监督与断点自愈**：后台守护进程周期性巡检：对租约超时或失联 Run 标记为 `recovery_required`；结合 6 维上下文证据（Provider 协议、版本快照、Native Session、工作区路径、Git Checksum 与合同证据）自动触发 `recovering` 断点自愈恢复。
+
+### 3. 多媒体工坊：抖音流式媒体协调器与视频主舞台（Douyin Media Coordinator & Main Video Stage）
+- **媒体流式调度协调器（douyin-media-coordinator.ts）**：重构音视频任务调度内核，支持智能防重下载、异步解析队列、自适应 HLS 切片转换与多端断点续传。
+- **全新主视频舞台与歌词面板（MusicMainVideoStage & MusicLyricsPanel）**：前端新增全沉浸式视频主播放舞台、动态逐字歌词动效面板与抖音视频探索器（DouyinExplorer.vue），打通音视频探索、极速解析、流式播放与桌面端/移动端自适应。
+
+### 4. 执行内核与任务验收服务强化（Execution Kernel & Task Acceptance Service）
+- **执行内核抽象（execution-kernel.ts）**：收拢统一主 Agent、协作群聊与后台 Runner 的任务生命周期状态转移，确保执行事件顺序性与原子性。
+- **任务验收裁决服务（task-acceptance-service.ts）**：强化 TestAgent 独立验收回执裁决（Receipt Resolution），支持多尝试版本比对与防冲突回执校验。
 
 ---
 

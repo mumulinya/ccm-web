@@ -1,0 +1,50 @@
+import type { AgentRunScope } from "./agent-run-types";
+export declare const HEARTBEAT_WAKE_REASONS: readonly ["timer", "assignment", "comment", "on_demand", "automation", "approval", "resume", "retry"];
+export type HeartbeatWakeReason = typeof HEARTBEAT_WAKE_REASONS[number];
+export declare const HEARTBEAT_WAKE_STATUSES: readonly ["queued", "coalesced", "claimed", "completed", "failed", "cancelled"];
+export type HeartbeatWakeStatus = typeof HEARTBEAT_WAKE_STATUSES[number];
+export interface HeartbeatWakeRequest {
+    wakeId: string;
+    agentId: string;
+    scope: AgentRunScope;
+    scopeId: string;
+    taskId: string;
+    traceId: string;
+    reason: HeartbeatWakeReason;
+    idempotencyKey: string;
+    requestedAt: string;
+    availableAt: string;
+    status: HeartbeatWakeStatus;
+    claimedBy: string;
+    claimedAt: string;
+    attemptId: string;
+    completedAt: string;
+    runId: string;
+    coalescedRunId: string;
+    result: any;
+    error: any;
+    createdAt: string;
+    updatedAt: string;
+}
+export interface HeartbeatWakeInput {
+    runId?: string;
+    agentId?: string;
+    scope?: AgentRunScope | string;
+    scopeId?: string;
+    taskId?: string;
+    traceId?: string;
+    reason?: HeartbeatWakeReason | string;
+    idempotencyKey?: string;
+    availableAt?: string;
+    runtimeId?: string;
+    attemptId?: string;
+    executionId?: string;
+    taskAgentSessionId?: string;
+    nativeSessionId?: string;
+    workspacePath?: string;
+    worktreeId?: string;
+    parentRunId?: string;
+    runtimeVersionSnapshot?: any;
+    source?: string;
+}
+export declare function normalizeHeartbeatReason(value: any): HeartbeatWakeReason;

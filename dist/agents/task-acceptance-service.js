@@ -80,7 +80,7 @@ function unifiedTaskTerminalDecision(task, updates) {
     if (!contract)
         return null;
     const merged = { ...task, ...updates }, result = (0, acceptance_ledger_1.evaluateAcceptanceLedger)(merged);
-    const done = updates.status === "done";
+    const done = ["done", "completed"].includes(String(updates.status || "").toLowerCase());
     const core = { schema: "ccm-task-terminal-decision-v2", task_id: task.id, status: updates.status,
         acceptance_state: done ? "accepted" : updates.status === "failed" ? "rejected" : updates.status,
         actor: "ccm-acceptance-service", gate_passed: done && result.canComplete && !validateUnifiedTaskAcceptance(task, updates),
@@ -92,7 +92,9 @@ function unifiedTaskTerminalDecision(task, updates) {
     return { ...core, checksum: (0, acceptance_contract_1.acceptanceHash)(core) };
 }
 function replayAcceptanceTerminal(task, updates) {
-    if ((!(0, acceptance_contract_1.taskAcceptanceContract)(task) && !(0, acceptance_contract_1.isAcceptanceProjectionTask)(task)) || task.status !== "done" || updates.status !== "done")
+    if ((!(0, acceptance_contract_1.taskAcceptanceContract)(task) && !(0, acceptance_contract_1.isAcceptanceProjectionTask)(task))
+        || !["done", "completed"].includes(String(task.status || "").toLowerCase())
+        || !["done", "completed"].includes(String(updates.status || "").toLowerCase()))
         return null;
     if (!task.terminal_state_receipt || !task.terminal_decision?.gate_passed)
         throw new Error("终态缺少权威回执，请人工核对");

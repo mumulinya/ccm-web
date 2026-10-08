@@ -65,7 +65,9 @@ const agent_1 = require("./agent");
 const cover_1 = require("./cover");
 const llm_client_1 = require("./llm-client");
 const search_results_1 = require("./search-results");
+const douyin_mcp_bridge_1 = require("./douyin-mcp-bridge");
 const download_jobs_1 = require("./download-jobs");
+const douyin_media_jobs_1 = require("./douyin-media-jobs");
 const library_state_1 = require("./library-state");
 const duplicates_1 = require("./duplicates");
 const select_track_1 = require("./select-track");
@@ -108,8 +110,8 @@ function handleMusicApi(pathname, req, res, parsed, ctx) {
         return true;
     return handleMusicApiPartB(pathname, req, res, parsed, ctx);
 }
-function startMusicConvertJob(message, keyword = "") {
-    const target = (0, search_results_1.extractMusicConvertTarget)(message, keyword);
+async function startMusicConvertJob(message, keyword = "") {
+    let target = (0, search_results_1.extractMusicConvertTarget)(message, keyword);
     if (!target) {
         return {
             ok: false,
@@ -117,6 +119,14 @@ function startMusicConvertJob(message, keyword = "") {
         };
     }
     try {
+        if (target.source === "douyin" && !target.sourceId && target.shareUrl) {
+            const resolved = await (0, douyin_mcp_bridge_1.douyinMcpResolveShareUrl)(target.shareUrl);
+            const video = resolved?.video || resolved?.aweme || resolved;
+            const sourceId = String(resolved?.aweme_id || resolved?.awemeId || video?.aweme_id || video?.awemeId || video?.id || "").trim();
+            if (!/^\d{10,24}$/.test(sourceId))
+                throw new Error("抖音分享链接未解析出有效的视频 ID");
+            target = { ...target, sourceId, title: String(video?.title || video?.desc || sourceId).slice(0, 200), artist: String(video?.author || video?.nickname || "抖音转码").slice(0, 120) };
+        }
         const token = (0, search_results_1.issueDownloadToken)(target.source, target.sourceId, target.title, target.artist);
         const job = download_jobs_1.musicDownloadJobs.create(target.source, token);
         return {
@@ -1009,7 +1019,7 @@ ${memoryContext.continuityText}`;
                     keyword: agentAction.keyword,
                 };
                 if (intent.type === "convert") {
-                    const convert = startMusicConvertJob(message, intent.keyword);
+                    const convert = await startMusicConvertJob(message, intent.keyword);
                     (0, agent_1.writeSse)(res, {
                         type: "music_convert",
                         success: convert.ok,
@@ -1157,7 +1167,7 @@ function handleMusicApiPartB(pathname, req, res, parsed, ctx) {
                     return (0, utils_1.sendJson)(res, { success: true, intent: "none", keyword: "", action: { type: "none", intentDecision: intent }, reply: (0, agent_1.getMusicHelpText)(chatMode) });
                 }
                 if (intent.action === "convert") {
-                    const convert = startMusicConvertJob(message, intent.searchQuery);
+                    const convert = await startMusicConvertJob(message, intent.searchQuery);
                     return (0, utils_1.sendJson)(res, { success: convert.ok, intent: "convert", keyword: intent.searchQuery, action: { type: "convert_music", intentDecision: intent }, reply: convert.reply, downloadJob: convert.job || null }, convert.ok ? 200 : 422);
                 }
                 const decision = await (0, playback_decision_1.resolveMusicPlaybackDecisionV2)({
@@ -1481,6 +1491,8 @@ function handleMusicApiPartB(pathname, req, res, parsed, ctx) {
     if (pathname === "/api/music/lyric" && req.method === "GET") {
         const filename = parsed.query.filename;
         const bvid = parsed.query.bvid;
+        const lyricSource = String(parsed.query.source || "").trim().toLowerCase();
+        const awemeId = String(parsed.query.aweme_id || parsed.query.awemeId || "").trim();
         function parseLrc(lrc) {
             const lines = lrc.split("\n");
             const result = [];
@@ -1688,7 +1700,42 @@ function handleMusicApiPartB(pathname, req, res, parsed, ctx) {
             }
             return null;
         }
+        function transcriptLyrics(transcription) {
+            const result = transcription?.result || transcription || {};
+            const segments = Array.isArray(result.segments) ? result.segments : [];
+            const lines = segments.map((segment) => ({
+                time: Number(segment?.start_seconds ?? segment?.start ?? segment?.startTime ?? 0),
+                text: String(segment?.text || "").replace(/\s+/g, " ").trim(),
+            })).filter((line) => Number.isFinite(line.time) && line.time >= 0 && line.text);
+            if (lines.length)
+                return lines.sort((a, b) => a.time - b.time);
+            // Older transcription records only contain merged text. Preserve any
+            // timestamps emitted by the chunk merger, otherwise show one readable
+            // line instead of manufacturing playback timing.
+            const text = String(result.text || "").trim();
+            if (!text)
+                return [];
+            const parsedLines = [];
+            for (const rawLine of text.split(/\r?\n+/)) {
+                const match = rawLine.match(/^\[(?:(\d+):)?(\d+):(\d+(?:\.\d+)?)\]\s*(.*)$/);
+                if (match) {
+                    const hours = Number(match[1] || 0);
+                    const minutes = Number(match[2] || 0);
+                    const seconds = Number(match[3] || 0);
+                    const lineText = String(match[4] || "").trim();
+                    if (lineText)
+                        parsedLines.push({ time: hours * 3600 + minutes * 60 + seconds, text: lineText });
+                }
+                else if (rawLine.trim()) {
+                    parsedLines.push({ time: parsedLines.length ? parsedLines[parsedLines.length - 1].time + 3 : 0, text: rawLine.trim() });
+                }
+            }
+            return parsedLines;
+        }
         (async () => {
+            const knownDouyinTranscript = lyricSource === "douyin" && /^\d{10,24}$/.test(awemeId)
+                ? (0, douyin_media_jobs_1.getDouyinTranscription)(awemeId)
+                : null;
             if (filename) {
                 try {
                     const safeFilename = String(filename);
@@ -1713,9 +1760,35 @@ function handleMusicApiPartB(pathname, req, res, parsed, ctx) {
                     return (0, utils_1.sendJson)(res, { success: true, source: "bili-cc", lyrics: biliLyrics });
                 }
             }
+            if (knownDouyinTranscript?.status === "done") {
+                const lyrics = transcriptLyrics(knownDouyinTranscript.result);
+                if (lyrics.length) {
+                    return (0, utils_1.sendJson)(res, {
+                        success: true,
+                        source: "douyin-transcript",
+                        lyrics,
+                        transcription_status: "done",
+                        transcription_job_id: knownDouyinTranscript.id,
+                        is_transcript: true,
+                    });
+                }
+            }
             const neteaseLyrics = await fetchNeteaseLyrics();
             if (neteaseLyrics && neteaseLyrics.length > 0) {
                 return (0, utils_1.sendJson)(res, { success: true, source: "netease", lyrics: neteaseLyrics });
+            }
+            if (lyricSource === "douyin" && /^\d{10,24}$/.test(awemeId)) {
+                const latest = (0, douyin_media_jobs_1.getDouyinTranscription)(awemeId);
+                return (0, utils_1.sendJson)(res, {
+                    success: true,
+                    source: "douyin-transcript-unavailable",
+                    lyrics: [],
+                    can_transcribe: true,
+                    transcription_status: latest?.status || "not_started",
+                    transcription_phase: latest?.phase || "",
+                    transcription_error: latest?.error || "",
+                    transcription_job_id: latest?.id || "",
+                });
             }
             return (0, utils_1.sendJson)(res, { success: true, source: "none", lyrics: [{ time: 0, text: "未检测到歌词字幕，听着旋律，静心聆听吧..." }] });
         })();

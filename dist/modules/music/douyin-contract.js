@@ -12,10 +12,10 @@ exports.DOUYIN_TOOLS = {
     get_user_info: ['sec_user_id'], get_user_posts: ['sec_user_id', 'max_cursor', 'count'],
     get_homefeed: ['tag', 'count', 'refresh_index'], resolve_share_url: ['share_url'],
     download_video: ['aweme_id', 'save_dir'], download_aweme_images: ['aweme_id', 'save_dir'],
-    ocr_aweme_images: ['aweme_id', 'save_dir'], transcribe_video: ['aweme_id'],
+    ocr_aweme_images: ['aweme_id', 'save_dir'], transcribe_video: ['aweme_id'], transcribe_audio: ['audio_path', 'aweme_id'],
     batch_transcribe: ['keyword', 'count', 'sort_type'],
 };
-exports.DOUYIN_MEDIA_TOOLS = new Set(['download_video', 'download_aweme_images', 'ocr_aweme_images', 'transcribe_video', 'batch_transcribe']);
+exports.DOUYIN_MEDIA_TOOLS = new Set(['download_video', 'download_aweme_images', 'ocr_aweme_images', 'transcribe_video', 'transcribe_audio', 'batch_transcribe']);
 function validateDouyinArgs(name, input = {}) {
     if (!Object.prototype.hasOwnProperty.call(exports.DOUYIN_TOOLS, name))
         throw new Error('未注册的抖音工具');
@@ -33,6 +33,11 @@ function validateDouyinArgs(name, input = {}) {
         if (!/^\d{10,24}$/.test(String(args[field] || '')))
             throw new Error(`${field} 必须是有效的数字 ID`);
         args[field] = String(args[field]);
+    }
+    if (fields.includes('audio_path')) {
+        if (typeof args.audio_path !== 'string' || !args.audio_path.trim() || args.audio_path.length > 1000)
+            throw new Error('音频文件路径无效');
+        args.audio_path = args.audio_path.trim();
     }
     if (fields.includes('sec_user_id') && !/^MS4wLjABAAAA[\w-]{8,200}$/.test(String(args.sec_user_id || '')))
         throw new Error('用户安全 ID 无效');
@@ -67,7 +72,7 @@ function validateDouyinArgs(name, input = {}) {
         catch {
             throw new Error('抖音分享链接无效');
         }
-        if (url.protocol !== 'https:' || !['v.douyin.com', 'www.douyin.com', 'douyin.com'].includes(url.hostname) || url.port || url.username || url.password)
+        if (url.protocol !== 'https:' || !['v.douyin.com', 'www.douyin.com', 'douyin.com', 'm.douyin.com', 'www.iesdouyin.com', 'iesdouyin.com'].includes(url.hostname) || url.port || url.username || url.password)
             throw new Error('仅支持 HTTPS 抖音分享链接');
         args.share_url = url.href;
     }

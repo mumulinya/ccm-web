@@ -1172,6 +1172,7 @@ async def _transcribe_single(aweme_id: str) -> dict:
             return {
                 "success": True,
                 "text": "",
+                "segments": [],
                 "duration": audio_duration,
                 "provider": provider.name,
                 "warning": "未检测到人声，可能是纯音乐或纯画面视频",
@@ -1201,6 +1202,15 @@ async def _transcribe_single(aweme_id: str) -> dict:
         return {
             "success": True,
             "text": merged_text,
+            "segments": [
+                {
+                    "start_seconds": float(segment.get("start_seconds", 0) or 0),
+                    "duration": float(segment.get("duration", 0) or 0),
+                    "text": str(segment.get("text", "") or "").strip(),
+                }
+                for segment in segment_results
+                if str(segment.get("text", "") or "").strip()
+            ],
             "duration": audio_duration,
             "provider": provider.name,
             "video_title": video.title,
@@ -1236,6 +1246,50 @@ async def transcribe_video(aweme_id: str) -> dict:
         dict: 包含 text(转写文本), duration(时长), provider(服务商), saved_path(本地文本路径)
     """
     return await _transcribe_single(aweme_id)
+
+
+@mcp.tool
+@safe_tool_call
+async def transcribe_audio(audio_path: str, aweme_id: str = "") -> dict:
+    """转写 CCM 已下载的本地音频，不再次请求抖音视频。"""
+    from .video.audio import get_audio_duration, cleanup_temp_files, split_audio
+
+    audio_file = Path(audio_path).expanduser().resolve()
+    managed_roots = [Path(DOWNLOAD_DIR).expanduser().resolve(), Path(TRANSCRIPT_DIR).expanduser().resolve()]
+    if not any(str(audio_file).startswith(str(root) + os.sep) or audio_file == root for root in managed_roots):
+        raise ValueError("音频文件必须位于 CCM 管理媒体目录内")
+    if not audio_file.exists() or not audio_file.is_file():
+        raise FileNotFoundError(f"音频文件不存在: {audio_path}")
+    provider = _get_asr_provider()
+    if not provider.is_configured():
+        raise ASRNotConfiguredError(ASR_PROVIDER)
+    duration = get_audio_duration(str(audio_file))
+    size_mb = audio_file.stat().st_size / (1024 * 1024)
+    segment_paths = split_audio(str(audio_file), segment_duration=AUDIO_CHUNK_DURATION) if _should_chunk_audio(duration, size_mb) else [str(audio_file)]
+    results = []
+    start = 0.0
+    try:
+        for segment_path in segment_paths:
+            segment_duration = get_audio_duration(segment_path)
+            result = await provider.transcribe(segment_path)
+            text = result.text.strip()
+            if text:
+                results.append({"start_seconds": start, "duration": segment_duration, "text": text})
+            start += segment_duration
+        text = _merge_segment_transcripts(results)
+        saved_path, save_warning = _persist_transcript(
+            aweme_id=aweme_id or audio_file.stem, title=audio_file.stem, author="", aweme_url="",
+            liked_count=0, collected_count=0, duration=duration, provider=provider.name, text=text,
+        )
+        return {
+            "success": True, "text": text,
+            "segments": results, "duration": duration, "provider": provider.name,
+            "saved_path": saved_path, "save_error": save_warning,
+            "source_audio_path": audio_file.name,
+        }
+    finally:
+        generated = [p for p in segment_paths if Path(p).resolve() != audio_file]
+        cleanup_temp_files(*generated)
 
 
 @mcp.tool

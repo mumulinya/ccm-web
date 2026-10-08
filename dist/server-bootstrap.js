@@ -5,6 +5,12 @@ exports.bootstrapServerRuntime = bootstrapServerRuntime;
 const session_task_timeline_1 = require("./tasks/session-task-timeline");
 const task_conversation_projection_1 = require("./system/task-conversation-projection");
 const task_session_store_1 = require("./modules/collaboration/task-session-store");
+const agent_run_store_1 = require("./agents/agent-run-store");
+const agent_run_supervisor_1 = require("./agents/agent-run-supervisor");
+const agent_heartbeat_coordinator_1 = require("./agents/agent-heartbeat-coordinator");
+const agent_run_consistency_1 = require("./agents/agent-run-consistency");
+const db_1 = require("./core/db");
+const agent_routine_recovery_1 = require("./agents/agent-routine-recovery");
 function yieldToStartupLoop() {
     return new Promise(resolve => setImmediate(resolve));
 }
@@ -40,7 +46,32 @@ async function runDeferredTaskRecovery(startupCollabCtx, deps) {
     }
 }
 function bootstrapServerRuntime(startupCollabCtx, port, deps) {
-    const { CCM_DIR, CONFIGS_DIR, bootstrapGlobalAgentMemoryForServer, bootstrapGroupSessionLifecycleJournals, conversationTurnControl, ensureRoleSkillsInstalled, listTaskAgentInvocationEdges, listTaskAgentSessions, loadFeishuConfig, migrateConfigDirectory, migrateTomlCredentials, path, reconcileGroupSessionLifecycleAgentCancellations, reconcileMemoryContextConsumptionReceipts, reconcileMemoryContextConsumptionRecoveries, reconcileInterruptedProjectMainTasks, reconcileTaskAgentContinuationSoak, reconcileTaskAgentInvocationRecovery, recoverChildTypedMemoryDispatchWal, recoverGroupTypedMemoryArtifactTransactionsFleet, refreshEnvPath, resumeSoakTest, resumeTaskQueues, saveFeishuConfig, startAgentRecoveryMonitor, startAutomationScheduler, startGlobalMissionSupervisionForServer, startGroupSessionRetentionMaintenanceScheduler, startReliabilityDrillScheduler, startTaskWatchdog, startUsabilityArchiveScheduler, toolManager } = deps;
+    const { CCM_DIR, CONFIGS_DIR, bootstrapGlobalAgentMemoryForServer, bootstrapGroupSessionLifecycleJournals, conversationTurnControl, ensureRoleSkillsInstalled, listTaskAgentInvocationEdges, listTaskAgentSessions, loadFeishuConfig, migrateConfigDirectory, migrateTomlCredentials, path, reconcileGroupSessionLifecycleAgentCancellations, reconcileMemoryContextConsumptionReceipts, reconcileMemoryContextConsumptionRecoveries, reconcileInterruptedProjectMainTasks, reconcileTaskAgentContinuationSoak, reconcileTaskAgentInvocationRecovery, processAgentHeartbeatWake, recoverChildTypedMemoryDispatchWal, recoverGroupTypedMemoryArtifactTransactionsFleet, refreshEnvPath, resumeSoakTest, resumeTaskQueues, saveFeishuConfig, startAgentRecoveryMonitor, startAutomationScheduler, startGlobalMissionSupervisionForServer, startGroupSessionRetentionMaintenanceScheduler, startReliabilityDrillScheduler, startTaskWatchdog, startUsabilityArchiveScheduler, toolManager } = deps;
+    try {
+        const agentRunRecovery = (0, agent_run_store_1.reconcileLegacyAgentRuns)();
+        const leaseRecovery = (0, agent_run_store_1.reconcileAgentRunLeases)();
+        if (agentRunRecovery.checked > 0 || agentRunRecovery.created > 0 || leaseRecovery.recovered > 0) {
+            console.log(`[AgentRun] 启动对账检查旧任务 ${agentRunRecovery.checked} 个，物化 ${agentRunRecovery.created} 个；检查租约 ${leaseRecovery.checked} 个，转入恢复 ${leaseRecovery.recovered} 个`);
+        }
+        const heartbeatRecovery = (0, agent_heartbeat_coordinator_1.requeueStaleAgentHeartbeats)();
+        if (heartbeatRecovery.requeued > 0)
+            console.log(`[AgentRun] 启动时重新入队 ${heartbeatRecovery.requeued} 个过期 Heartbeat 唤醒`);
+        const consistency = (0, agent_run_consistency_1.reconcileTaskAgentRunConsistency)((0, db_1.loadTasks)(), { appendEvents: true });
+        if (consistency.repairable > 0 || consistency.blocked > 0 || consistency.repaired > 0) {
+            console.log(`[AgentRun] Task/Run 一致性检查 ${consistency.checked} 个：正常 ${consistency.consistent}，自动修复 ${consistency.repaired || 0}，可修复 ${consistency.repairable}，阻塞 ${consistency.blocked}`);
+        }
+        if (typeof processAgentHeartbeatWake === "function") {
+            const heartbeatProcessor = (0, agent_heartbeat_coordinator_1.startAgentHeartbeatProcessor)({ processor: processAgentHeartbeatWake });
+            if (heartbeatProcessor.started)
+                console.log(`[AgentRun] Heartbeat 唤醒消费者已启动（${heartbeatProcessor.intervalMs}ms）`);
+        }
+        // Start the supervisor only after stale wakes have been requeued and the
+        // Task/Run projection has been reconciled, so recovery cannot race startup.
+        (0, agent_run_supervisor_1.startAgentRunSupervisor)();
+    }
+    catch (error) {
+        console.warn(`[AgentRun] 启动对账失败：${error?.message || error}`);
+    }
     const recoveredConversationTurns = conversationTurnControl.recoverInterrupted();
     if (recoveredConversationTurns.recovered > 0) {
         console.log(`[会话消息队列] 已恢复 ${recoveredConversationTurns.recovered} 条服务重启前发送中的消息`);
@@ -81,7 +112,19 @@ function bootstrapServerRuntime(startupCollabCtx, port, deps) {
     if (lifecycleAgentReconciliation.checked > 0) {
         console.log(`[会话生命周期撤销] 检查 ${lifecycleAgentReconciliation.checked} 个会话作用域：有效 ${lifecycleAgentReconciliation.active}，撤销 ${lifecycleAgentReconciliation.revoked}，停止任务 ${lifecycleAgentReconciliation.taskCount}`);
     }
-    startAutomationScheduler(startupCollabCtx);
+    // Recover missed Routine windows before the regular scheduler starts. The
+    // window key is unique, so a concurrent/repeated boot remains idempotent.
+    void (0, agent_routine_recovery_1.recoverAgentRoutineRuns)(startupCollabCtx)
+        .then(result => {
+        if (result.checked > 0 || result.windows > 0) {
+            console.log(`[Routine] 启动恢复检查 ${result.checked} 个 Routine，窗口 ${result.windows}，恢复 ${result.recovered}，跳过 ${result.skipped}，失败 ${result.failed}`);
+        }
+        startAutomationScheduler(startupCollabCtx);
+    })
+        .catch(error => {
+        console.warn(`[Routine] 启动恢复失败：${error?.message || error}`);
+        startAutomationScheduler(startupCollabCtx);
+    });
     startTaskWatchdog(startupCollabCtx);
     const autoAgentRecoveryMonitor = /^(1|true|yes|on)$/i.test(String(process.env.CCM_AUTO_AGENT_RECOVERY_MONITOR || ""));
     if (autoAgentRecoveryMonitor) {

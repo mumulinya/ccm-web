@@ -7,6 +7,10 @@ const third_party_memory_snapshot_1 = require("./integrations/third-party-memory
 const internal_mcp_runtime_1 = require("./integrations/internal-mcp-runtime");
 const db_1 = require("./core/db");
 const project_verification_discovery_1 = require("./agents/project-verification-discovery");
+const agent_run_store_1 = require("./agents/agent-run-store");
+const agent_runtime_adapter_1 = require("./agents/agent-runtime-adapter");
+const agent_execution_coordinator_1 = require("./agents/agent-execution-coordinator");
+const agent_run_workspace_1 = require("./agents/agent-run-workspace");
 function createAgentRunnerSupport(deps) {
     const { AGENT_RUNNER_DIR, AGENT_RUNNER_REQUESTS_DIR, AGENT_RUNNER_RESULTS_DIR, UPLOAD_DIR, acknowledgeProviderMemoryChannelLaunch, appendDirectAgentDispatchTranscript, bindProjectRunAgentSession, bindProviderMemoryChannelLaunch, broadcastPetSpeech, buildAgentCommand, buildNativeSessionContinuationEvidence, buildProjectConversationBrief, buildProjectExecutionBrief, buildRuntimeToolDispatchGate, buildRuntimeToolSyncPrompt, buildToolAuthorizationPayload, captureAgentRuntimeVersionSnapshot, completeDirectAgentDispatch, createDirectAgentDispatchRequest, createFileChangeSnapshot, createProjectChatRun, detectAgentCommandFailure, extractNativeModelCapabilityReceipt, extractProviderToolAccessEvidence, fs, getAgentCommandLabel, getAgentRunActivityDuration, getAgentRuntime, getFileChanges, getRuntimeExecutionEnv, isSafeVerificationCommand, loadProjectConfigs, markDirectAgentDispatchStarted, normalizeAgentCommandOutput, normalizeAgentRuntimeId, path, persistBoundedOutput, prepareProviderMemoryChannel, publicProjectChatRun, readMemoryContextConsumptionReceipt, recordMetric, recordModelCapabilityRefreshOutcome, recordRuntimeToolSyncAudit, recordTaskAgentSessionTurn, recordVerifiedNativeModelCapabilityReceipt, recoverMemoryContextConsumptionReceipt, registerExternalRunnerRequest, runManagedCommand, runToolCallLoop, sanitizeExecutionEnv, saveProjectChatRuns, sendJson, setAgentActivity, spawn, syncRuntimeTools, terminateManagedChildProcess, toolManager, trackManagedChildProcess, verifyNativeSessionContinuationEvidence, verifyProviderMemoryChannelEvidence, writeSse } = deps;
     function normalizeToolSelection(tools = {}) {
@@ -163,6 +167,7 @@ function createAgentRunnerSupport(deps) {
                 const next = await callAgentViaExternalRunnerRaw(projectName, prompt, workDir, agentType, timeoutMs, allowedTools, mcpConfigPath, continuationSession, {
                     ...executionInfo,
                     taskId: `${executionInfo?.taskId || initial.runnerRequestId}-tool-${state.round}`,
+                    parentRunId: initial.agentRunId || executionInfo?.agentRunId || executionInfo?.agent_run_id || "",
                     groupId: executionInfo?.groupId || executionInfo?.group_id || "",
                     skipVerification: true,
                 });
@@ -400,22 +405,101 @@ function createAgentRunnerSupport(deps) {
     function createAgentRunnerRequest(projectName, message, workDir, agentType, timeoutMs, allowedTools = null, mcpConfigPath = "", agentSession = null, executionInfo = null) {
         ensureAgentRunnerDirs();
         const id = `ar_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+        const leaseOwnerId = `agent-runner:${id}`;
         const groupId = String(executionInfo?.groupId || executionInfo?.group_id || executionInfo?.toolScope?.groupId || executionInfo?.tool_scope?.group_id || "");
         const groupSessionId = String(executionInfo?.groupSessionId || executionInfo?.group_session_id || "");
         const sessionLifecycleFence = executionInfo?.sessionLifecycleFence || executionInfo?.session_lifecycle_fence || null;
         const runtimeToolPayload = buildAgentRunnerRuntimeToolPayload(projectName, agentType, allowedTools, mcpConfigPath, { ...(executionInfo || {}), agentSession: agentSession || null });
+        const runtimeId = normalizeAgentRuntimeId(agentType || "claudecode");
+        const taskId = String(executionInfo?.taskId || "");
+        const executionId = String(executionInfo?.executionId || taskId || "");
+        let agentRunId = String(executionInfo?.agentRunId || executionInfo?.agent_run_id || "");
+        let heartbeatWakeId = String(executionInfo?.heartbeatWakeId || executionInfo?.heartbeat_wake_id || "");
+        if (!agentRunId && (taskId || executionId || executionInfo?.persistAgentRun === true)) {
+            const coordinated = (0, agent_execution_coordinator_1.startPersistentAgentExecutionSync)({
+                agentId: executionInfo?.agentId || executionInfo?.agent_id || runtimeId,
+                scope: executionInfo?.scope || (groupId ? "group" : executionInfo?.source === "global-agent" ? "global" : String(executionInfo?.source || "").includes("automation") ? "automation" : "project"),
+                scopeId: executionInfo?.scopeId || executionInfo?.scope_id || groupId || projectName || taskId,
+                taskId,
+                traceId: executionInfo?.traceId || executionInfo?.trace_id || `task:${taskId}`,
+                attemptId: executionInfo?.attemptId || executionInfo?.attempt_id || `attempt:${executionId || taskId}`,
+                parentRunId: executionInfo?.parentRunId || executionInfo?.parent_run_id,
+                runtimeId,
+                runtimeVersionSnapshot: executionInfo?.runtimeVersionSnapshot || executionInfo?.runtime_version_snapshot || captureAgentRuntimeVersionSnapshot(runtimeId),
+                taskAgentSessionId: executionInfo?.taskAgentSessionId || executionInfo?.task_agent_session_id,
+                nativeSessionId: executionInfo?.nativeSessionId || executionInfo?.native_session_id || agentSession?.sessionId,
+                executionId,
+                workspacePath: workDir,
+                worktreeId: executionInfo?.worktreeId || executionInfo?.worktree_id,
+                triggerType: executionInfo?.triggerType || executionInfo?.trigger_type || "user",
+                reason: executionInfo?.heartbeatReason || executionInfo?.heartbeat_reason || executionInfo?.triggerType || "assignment",
+                idempotencyKey: executionInfo?.idempotencyKey || executionInfo?.idempotency_key || `runner:${taskId}:${executionId}:${executionInfo?.attemptId || executionInfo?.attempt_id || id}`,
+                source: executionInfo?.source || "external-runner",
+                leaseOwnerId,
+            });
+            if (coordinated.mode === "coalesced")
+                throw Object.assign(new Error("外部 Agent Runner 已存在同一幂等执行"), { code: "CCM_RUN_ALREADY_ACTIVE", agentRunId: coordinated.run.runId });
+            agentRunId = coordinated.run.runId;
+            heartbeatWakeId = coordinated.wake?.wakeId || "";
+            (0, agent_execution_coordinator_1.markPersistentAgentExecutionStarted)(agentRunId, coordinated.lease?.run?.leaseId || "");
+        }
+        if (agentRunId) {
+            if (!(0, agent_run_store_1.getAgentRun)(agentRunId)) {
+                try {
+                    const materialized = (0, agent_execution_coordinator_1.relinkPersistentAgentExecution)({
+                        runId: agentRunId, taskId, executionId, traceId: executionInfo?.traceId || executionInfo?.trace_id,
+                        attemptId: executionInfo?.attemptId || executionInfo?.attempt_id, parentRunId: executionInfo?.parentRunId || executionInfo?.parent_run_id,
+                        scope: executionInfo?.scope || (groupId ? "group" : executionInfo?.source === "global-agent" ? "global" : String(executionInfo?.source || "").includes("automation") ? "automation" : "project"),
+                        scopeId: executionInfo?.scopeId || executionInfo?.scope_id || groupId || projectName || taskId,
+                        agentId: executionInfo?.agentId || executionInfo?.agent_id || runtimeId, runtimeId,
+                        runtimeVersionSnapshot: executionInfo?.runtimeVersionSnapshot || captureAgentRuntimeVersionSnapshot(runtimeId),
+                        taskAgentSessionId: executionInfo?.taskAgentSessionId || executionInfo?.task_agent_session_id,
+                        nativeSessionId: executionInfo?.nativeSessionId || executionInfo?.native_session_id || agentSession?.sessionId,
+                        workspacePath: workDir, worktreeId: executionInfo?.worktreeId || executionInfo?.worktree_id,
+                        triggerType: executionInfo?.triggerType || executionInfo?.trigger_type || "user",
+                        idempotencyKey: `explicit:${agentRunId}`,
+                        source: "external_runner_relinked",
+                    }, leaseOwnerId, Math.max(30_000, Number(timeoutMs || 300_000)));
+                    agentRunId = materialized.run.runId;
+                }
+                catch (error) {
+                    throw error;
+                }
+            }
+            const lease = (0, agent_execution_coordinator_1.claimPersistentAgentExecution)(agentRunId, leaseOwnerId, Math.max(30_000, Number(timeoutMs || 300_000)));
+            if (!lease.acquired && ["lease_held", "terminal"].includes(String(lease.reason))) {
+                throw Object.assign(new Error("AgentRun 已由其他 Runner 占用，拒绝重复启动"), { code: "CCM_RUN_ALREADY_LEASED", agentRunId });
+            }
+            if (lease.acquired) {
+                (0, agent_execution_coordinator_1.markPersistentAgentExecutionStarted)(agentRunId, lease.run?.leaseId || "");
+            }
+        }
+        const persistedRun = agentRunId ? (0, agent_run_store_1.getAgentRun)(agentRunId) : null;
         const request = {
             id,
             projectName,
             workDir,
-            agentType: normalizeAgentRuntimeId(agentType || "claudecode"),
+            agentType: runtimeId,
             timeoutMs,
             allowedTools,
             mcpConfigPath,
             agentSession: agentSession || null,
-            taskId: String(executionInfo?.taskId || ""),
-            executionId: String(executionInfo?.executionId || executionInfo?.taskId || ""),
-            taskAgentSessionId: String(executionInfo?.taskAgentSessionId || executionInfo?.task_agent_session_id || ""),
+            taskId,
+            executionId,
+            agentRunId,
+            heartbeatWakeId,
+            traceId: String(executionInfo?.traceId || executionInfo?.trace_id || persistedRun?.traceId || (taskId ? `task:${taskId}` : "")),
+            attemptId: String(executionInfo?.attemptId || executionInfo?.attempt_id || persistedRun?.attemptId || (taskId ? `attempt:${executionId || taskId}` : "")),
+            parentRunId: String(executionInfo?.parentRunId || executionInfo?.parent_run_id || ""),
+            scope: String(executionInfo?.scope || (groupId ? "group" : executionInfo?.source === "global-agent" ? "global" : String(executionInfo?.source || "").includes("automation") ? "automation" : "project")),
+            scopeId: String(executionInfo?.scopeId || executionInfo?.scope_id || groupId || projectName || taskId),
+            worktreeId: String(executionInfo?.worktreeId || executionInfo?.worktree_id || ""),
+            triggerType: String(executionInfo?.triggerType || executionInfo?.trigger_type || "user"),
+            nativeSessionId: String(executionInfo?.nativeSessionId || executionInfo?.native_session_id || persistedRun?.nativeSessionId || agentSession?.sessionId || ""),
+            leaseId: String(executionInfo?.leaseId || executionInfo?.lease_id || persistedRun?.leaseId || ""),
+            leaseOwnerId,
+            model: String(executionInfo?.model || executionInfo?.modelId || ""),
+            taskAgentSessionId: String(executionInfo?.taskAgentSessionId || executionInfo?.task_agent_session_id || persistedRun?.taskAgentSessionId || ""),
             groupId,
             groupSessionId,
             trustedMemoryProviderChannelRequired: executionInfo?.trustedMemoryProviderChannelRequired === true,
@@ -496,10 +580,34 @@ function createAgentRunnerSupport(deps) {
     }
     async function callAgentViaExternalRunnerRaw(projectName, message, workDir, agentType, timeoutMs, allowedTools = null, mcpConfigPath = "", agentSession = null, executionInfo = null) {
         const request = createAgentRunnerRequest(projectName, message, workDir, agentType, timeoutMs, allowedTools, mcpConfigPath, agentSession, executionInfo);
+        const agentRunId = String(request.agentRunId || "");
         if (executionInfo?.executionId)
             registerExternalRunnerRequest(executionInfo.executionId, request.id);
         executionInfo?.onRunnerRequestCreated?.(request.id);
-        const result = await waitForAgentRunnerResult(request.resultFile, timeoutMs);
+        let result;
+        const leaseOwnerId = String(request.leaseOwnerId || `agent-runner:${request.id}`);
+        const leaseHeartbeat = agentRunId ? setInterval(() => {
+            try {
+                (0, agent_run_store_1.heartbeatAgentRunLease)(agentRunId, leaseOwnerId, "", Math.max(30_000, Number(timeoutMs || 300_000)));
+            }
+            catch { }
+        }, 15_000) : null;
+        try {
+            result = await waitForAgentRunnerResult(request.resultFile, timeoutMs);
+        }
+        catch (error) {
+            if (leaseHeartbeat)
+                clearInterval(leaseHeartbeat);
+            if (agentRunId) {
+                try {
+                    (0, agent_execution_coordinator_1.finalizePersistentAgentExecution)({ runId: agentRunId, wakeId: request.heartbeatWakeId, leaseOwnerId, status: "failed", error: { code: "runner_timeout", message: String(error?.message || error).slice(0, 500) } });
+                }
+                catch { }
+            }
+            throw error;
+        }
+        if (leaseHeartbeat)
+            clearInterval(leaseHeartbeat);
         if (!result?.success) {
             const label = result?.command || getAgentCommandLabel(agentType);
             const exitText = result?.exitCode === undefined || result?.exitCode === null ? "" : `，exitCode=${result.exitCode}`;
@@ -508,6 +616,12 @@ function createAgentRunnerSupport(deps) {
                 persistedRequest = JSON.parse(fs.readFileSync(request.requestFile, "utf-8"));
             }
             catch { }
+            if (agentRunId) {
+                try {
+                    (0, agent_execution_coordinator_1.finalizePersistentAgentExecution)({ runId: agentRunId, wakeId: request.heartbeatWakeId, leaseOwnerId, status: result?.cancelled ? "cancelled" : "failed", error: { code: result?.cancelled ? "cancelled" : "runner_failed", message: String(result?.error || result?.output || "未知错误").slice(0, 1000) } });
+                }
+                catch { }
+            }
             throw Object.assign(new Error(`[${projectName}] 外部 Agent Runner 执行 ${label} 失败${exitText}：${result?.error || result?.output || "未知错误"}`), {
                 runnerRequestId: request.id,
                 runnerStarted: !!persistedRequest?.started_at && result?.runtimeToolDispatchBlocked !== true,
@@ -555,7 +669,30 @@ function createAgentRunnerSupport(deps) {
             taskAgentSessionId: executionInfo?.taskAgentSessionId || executionInfo?.task_agent_session_id || "",
             nativeSessionId: nativeContinuationEvidence.nativeSessionReusable ? nativeContinuationEvidence.effectiveNativeSessionId : "",
         });
+        if (agentRunId) {
+            let workspaceEvidence = null;
+            try {
+                workspaceEvidence = await (0, agent_run_workspace_1.captureAgentRunWorkspaceEvidence)({ runId: agentRunId, workspacePath: workDir, worktreeId: executionInfo?.worktreeId || executionInfo?.worktree_id || "" });
+            }
+            catch { }
+            try {
+                (0, agent_run_store_1.updateAgentRunBindings)(agentRunId, {
+                    taskAgentSessionId: executionInfo?.taskAgentSessionId || executionInfo?.task_agent_session_id,
+                    nativeSessionId: nativeContinuationEvidence.effectiveNativeSessionId,
+                    workspacePath: workDir,
+                    worktreeId: executionInfo?.worktreeId || executionInfo?.worktree_id,
+                    workspaceEvidence,
+                    runtimeVersionSnapshot: nativeContinuationEvidence.providerRuntimeVersionSnapshot || undefined,
+                });
+            }
+            catch { }
+            try {
+                (0, agent_execution_coordinator_1.finalizePersistentAgentExecution)({ runId: agentRunId, wakeId: request.heartbeatWakeId, leaseOwnerId, status: "succeeded", result: { runnerRequestId: request.id, nativeSessionId: nativeContinuationEvidence.effectiveNativeSessionId }, nativeSessionId: nativeContinuationEvidence.effectiveNativeSessionId, taskAgentSessionId: executionInfo?.taskAgentSessionId || executionInfo?.task_agent_session_id, workspacePath: workDir, worktreeId: executionInfo?.worktreeId || executionInfo?.worktree_id, workspaceEvidence, runtimeVersionSnapshot: nativeContinuationEvidence.providerRuntimeVersionSnapshot || undefined, usage: result.usage, usageMeta: { provider: normalizeAgentRuntimeId(agentType), model: executionInfo?.model || executionInfo?.modelId, provenance: "external-runner" } });
+            }
+            catch { }
+        }
         return {
+            agentRunId,
             output: String(result.output || "").trim(),
             fileChanges: result.fileChanges || null,
             usage: result.usage || null,
@@ -587,7 +724,7 @@ function createAgentRunnerSupport(deps) {
             const managed = await runManagedCommand({
                 taskId: `${input.taskId}-tool-${input.round}`,
                 executionId: input.executionId || "",
-                command: buildAgentCommand(input.agentType, tmpMsg, {
+                command: (0, agent_runtime_adapter_1.getAgentRuntimeAdapter)(input.agentType).buildCommand(tmpMsg, {
                     mcpConfigPath: input.mcpConfigPath,
                     ...sessionOptions,
                 }),
@@ -650,6 +787,41 @@ function createAgentRunnerSupport(deps) {
             })),
         });
     }
+    /** Consume a persisted Heartbeat wake through the existing external Runner. */
+    async function processAgentHeartbeatWake(wake, run) {
+        if (!run)
+            throw Object.assign(new Error("Heartbeat 唤醒没有可绑定的 AgentRun"), { code: "AGENT_RUN_NOT_FOUND" });
+        const task = (0, db_1.loadTasks)().find((item) => String(item?.id || "") === String(wake?.taskId || run.taskId || "")) || {};
+        const projectName = String(task.target_project || task.targetProject || (run.scope === "project" ? run.scopeId : "global-agent") || "global-agent");
+        const message = String(task.description || task.business_goal || task.businessGoal || task.title || task.message || `恢复任务 ${run.taskId}`).trim();
+        const workDir = String(run.workspacePath || task.work_dir || task.workDir || process.cwd());
+        const agentType = normalizeAgentRuntimeId(run.runtimeId || wake.agentId || "codex");
+        const result = await callAgentViaExternalRunner(projectName, message, workDir, agentType, 300_000, null, "", run.nativeSessionId ? { sessionId: run.nativeSessionId, resumeSession: true, persistSession: true } : null, {
+            agentRunId: run.runId,
+            heartbeatWakeId: wake.wakeId,
+            persistAgentRun: true,
+            source: "heartbeat-resume",
+            heartbeatReason: "resume",
+            taskId: run.taskId,
+            traceId: run.traceId,
+            attemptId: run.attemptId,
+            parentRunId: run.parentRunId,
+            scope: run.scope,
+            scopeId: run.scopeId,
+            agentId: run.agentId,
+            executionId: run.executionId,
+            taskAgentSessionId: run.taskAgentSessionId,
+            nativeSessionId: run.nativeSessionId,
+            worktreeId: run.worktreeId,
+            runtimeVersionSnapshot: run.runtimeVersionSnapshot,
+            triggerType: "resume",
+        });
+        return {
+            runId: run.runId,
+            status: "succeeded",
+            result: { runnerRequestId: result?.runnerRequestId || "", nativeSessionId: result?.nativeSessionId || "" },
+        };
+    }
     return {
         normalizeToolSelection,
         hasToolSelection,
@@ -677,6 +849,7 @@ function createAgentRunnerSupport(deps) {
         callAgentViaExternalRunnerRaw,
         runManagedAgentContinuation,
         continueAgentToolCalls,
+        processAgentHeartbeatWake,
     };
 }
 //# sourceMappingURL=server-agent-runner-support.js.map

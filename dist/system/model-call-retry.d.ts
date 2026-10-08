@@ -1,6 +1,6 @@
 export declare const UNIFIED_MODEL_MAX_ATTEMPTS = 6;
 export declare const UNIFIED_MODEL_ATTEMPT_TIMEOUT_MS = 120000;
-export declare const UNIFIED_MODEL_TOTAL_TIMEOUT_MS = 600000;
+export declare const UNIFIED_MODEL_TOTAL_TIMEOUT_MS = 180000;
 export type ModelRetryProfileId = "interactive_first_turn" | "agent_orchestration" | "long_running_task" | "background_auxiliary";
 export type ModelRetryProfileV1 = {
     schema: "ccm-model-retry-profile-v1";

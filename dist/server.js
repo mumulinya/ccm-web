@@ -72,6 +72,13 @@ const workflow_decision_1 = require("./agents/workflow-decision");
 const implementation_plan_1 = require("./agents/implementation-plan");
 const project_worker_semantic_ack_1 = require("./agents/project-worker-semantic-ack");
 const logs_1 = require("./modules/collaboration/logs");
+const agent_run_store_1 = require("./agents/agent-run-store");
+const agent_run_consistency_1 = require("./agents/agent-run-consistency");
+const agent_heartbeat_coordinator_1 = require("./agents/agent-heartbeat-coordinator");
+const agent_execution_coordinator_1 = require("./agents/agent-execution-coordinator");
+const agent_governance_store_1 = require("./agents/agent-governance-store");
+const agent_runtime_adapter_1 = require("./agents/agent-runtime-adapter");
+const agent_routine_store_1 = require("./agents/agent-routine-store");
 // 导入底座与持久层
 const utils_1 = require("./core/utils");
 const db_1 = require("./core/db");
@@ -196,7 +203,7 @@ const CCM_RUNTIME_VERSION = (() => {
         return "dev";
     }
 })();
-const { AGENT_RUNNER_DIR, AGENT_RUNNER_REQUESTS_DIR, AGENT_RUNNER_RESULTS_DIR, MUSIC_PET_AGENT_NAME, bindProjectRunAgentSession, broadcastPetConfigChanged, broadcastPetNavigation, broadcastPetSpeech, getAgentRunActivityDuration, getAgentState, getMusicPetAgent, getPetAgents, getPetNavigationTarget, getProjectPetActionStrategy, petStatusClients, petWorkspaceClients, setAgentActivity, setMusicPetState, writeSse } = (0, server_pet_activity_1.createPetActivityRuntime)({
+const { AGENT_RUNNER_DIR, AGENT_RUNNER_REQUESTS_DIR, AGENT_RUNNER_RESULTS_DIR, MUSIC_PET_AGENT_NAME, bindProjectRunAgentSession, broadcastPetConfigChanged, broadcastPetNavigation, broadcastPetSpeech, getAgentRunActivityDuration, getAgentState, getMusicPetAgent, getPetAgents, getPetNavigationTarget, getProjectPetActionStrategy, petStatusClients, petWorkspaceClients, setAgentActivity, setMusicPetState, writeSse: writePetSse } = (0, server_pet_activity_1.createPetActivityRuntime)({
     getPort: () => PORT,
     CCM_DIR: utils_1.CCM_DIR,
     GlobalPetActivityCoordinator: pet_activity_coordinator_1.GlobalPetActivityCoordinator,
@@ -215,6 +222,20 @@ const { AGENT_RUNNER_DIR, AGENT_RUNNER_REQUESTS_DIR, AGENT_RUNNER_RESULTS_DIR, M
     sanitizePetNotificationText: user_notifications_1.sanitizePetNotificationText,
     url
 });
+function writeSse(res, data) {
+    const taskId = String(data?.taskId || data?.task_id || "").trim();
+    if (taskId && !data?.run_id && !data?.runId) {
+        try {
+            const projection = (0, agent_run_store_1.buildTaskAgentRunProjection)({ id: taskId });
+            const task = (0, db_1.loadTasks)().find((item) => String(item?.id || "") === taskId) || null;
+            const consistency = task ? (0, agent_run_consistency_1.buildTaskRunConsistencyProjection)(task) : null;
+            if (projection)
+                data = { ...data, ...projection, ...(consistency || {}) };
+        }
+        catch { }
+    }
+    return writePetSse(res, data);
+}
 const petAgentMilestoneProjector = (0, pet_agent_milestones_1.createPetAgentMilestoneProjector)({
     getMode: () => (0, pets_1.readPetConfig)().settings.agentProgressMode,
     fallbackTimeoutMs: 60_000,
@@ -256,7 +277,7 @@ const petAgentMilestoneProjector = (0, pet_agent_milestones_1.createPetAgentMile
     },
 });
 // === Agent 并行/同步调用底座 ===
-const { buildProjectToolContext, callAgent, callAgentForGroupStream, callAgentStream, sendRuntimeToolDispatchBlocked } = (0, server_agent_runner_1.createAgentRunnerRuntime)({
+const { buildProjectToolContext, callAgent, callAgentForGroupStream, callAgentStream, sendRuntimeToolDispatchBlocked, processAgentHeartbeatWake, } = (0, server_agent_runner_1.createAgentRunnerRuntime)({
     AGENT_RUNNER_DIR,
     AGENT_RUNNER_REQUESTS_DIR,
     AGENT_RUNNER_RESULTS_DIR,
@@ -343,6 +364,8 @@ function createCollabCtx() {
         normalizeSharedFileList: utils_1.normalizeSharedFileList,
         onTaskStatusChange: async (task, status, result = "") => {
             const normalizedStatus = String(status || "").toLowerCase();
+            const runProjection = (0, agent_run_store_1.buildTaskAgentRunProjection)(task);
+            const consistencyProjection = (0, agent_run_consistency_1.buildTaskRunConsistencyProjection)(task);
             if (["done", "completed", "failed", "blocked", "cancelled", "waiting"].includes(normalizedStatus)) {
                 const isSuccess = normalizedStatus === "done" || normalizedStatus === "completed";
                 const needsUser = normalizedStatus === "blocked" || normalizedStatus === "waiting";
@@ -385,6 +408,8 @@ function createCollabCtx() {
                             anchor_message_id: anchorMessageId,
                             origin_message_id: originMessageId,
                             generation: String(task?.generation || task?.session_generation || 0),
+                            ...(runProjection ? { run_id: runProjection.run_id, run_status: runProjection.run_status, runtime_id: runProjection.runtime_id, run_started_at: runProjection.run_started_at, run_finished_at: runProjection.run_finished_at, run_recovery_state: runProjection.run_recovery_state } : {}),
+                            ...(consistencyProjection ? { heartbeat_wake_id: consistencyProjection.heartbeat_wake_id, heartbeat_status: consistencyProjection.heartbeat_status, heartbeat_coalesced: consistencyProjection.heartbeat_coalesced, consistency_state: consistencyProjection.consistency_state } : {}),
                         },
                         dedupe_key: `task-terminal:${task?.id || "unknown"}:${needsUser ? "needs_user" : isSuccess ? "completed" : normalizedStatus}`,
                     });
@@ -403,6 +428,28 @@ function createCollabCtx() {
     };
 }
 // === 主生命周期请求拦截与模块化分流 ===
+function readRequestJson(req) {
+    return new Promise((resolve, reject) => {
+        let body = "";
+        req.on("data", (chunk) => {
+            body += chunk;
+            if (body.length > 2_000_000)
+                reject(Object.assign(new Error("请求体过大"), { code: "REQUEST_BODY_TOO_LARGE" }));
+        });
+        req.on("end", () => {
+            try {
+                resolve(body ? JSON.parse(body) : {});
+            }
+            catch {
+                reject(Object.assign(new Error("请求 JSON 无效"), { code: "INVALID_JSON" }));
+            }
+        });
+        req.on("error", reject);
+    });
+}
+function actorIdFromRequest(req) {
+    return String(req?.ccmAuth?.userId || req?.auth?.username || req?.ccmAuth?.username || req?.ccmAuth?.caller || "local-user");
+}
 function handleRequest(req, res) {
     const parsed = url.parse(req.url, true);
     const pathname = parsed.pathname || "/";
@@ -529,13 +576,231 @@ function handleRequest(req, res) {
         return;
     if ((0, user_notifications_1.handleUserNotificationsApi)(pathname, req, res, parsed))
         return;
+    const agentRunDetailMatch = pathname.match(/^\/api\/agent-runs\/([^/]+)$/);
+    if (agentRunDetailMatch && agentRunDetailMatch[1] !== "metrics" && req.method === "GET") {
+        const runId = decodeURIComponent(agentRunDetailMatch[1]);
+        const run = (0, agent_run_store_1.getAgentRun)(runId);
+        if (!run) {
+            (0, utils_1.sendJson)(res, { success: false, error: "Run不存在" }, 404);
+            return;
+        }
+        const task = (0, db_1.loadTasks)().find((item) => String(item?.id || "") === String(run.taskId || "")) || null;
+        (0, utils_1.sendJson)(res, {
+            success: true,
+            run,
+            events: (0, agent_run_store_1.listAgentRunEvents)(runId, 500),
+            activity: (0, agent_governance_store_1.listAgentActivity)({ runId, limit: 300 }),
+            approvals: (0, agent_governance_store_1.listAgentApprovals)(runId),
+            artifacts: (0, agent_governance_store_1.listAgentRunArtifacts)(runId),
+            secrets: (0, agent_governance_store_1.listAgentRunSecrets)(runId).map(item => ({ ...item, secretRef: item.secretRef ? "[reference]" : "" })),
+            budget_incidents: (0, agent_governance_store_1.listAgentBudgetIncidents)(runId),
+            consistency: task ? (0, agent_run_consistency_1.buildTaskRunConsistencyProjection)(task) : null,
+        });
+        return;
+    }
+    const agentRunEventsMatch = pathname.match(/^\/api\/agent-runs\/([^/]+)\/events$/);
+    if (agentRunEventsMatch && req.method === "GET") {
+        const runId = decodeURIComponent(agentRunEventsMatch[1]);
+        (0, utils_1.sendJson)(res, { success: true, run_id: runId, events: (0, agent_run_store_1.listAgentRunEvents)(runId, Number(parsed.query.limit || 500)) });
+        return;
+    }
+    const taskRunsMatch = pathname.match(/^\/api\/tasks\/([^/]+)\/runs$/);
+    if (taskRunsMatch && req.method === "GET") {
+        const taskId = decodeURIComponent(taskRunsMatch[1]);
+        const task = (0, db_1.loadTasks)().find((item) => String(item?.id || "") === taskId) || null;
+        (0, utils_1.sendJson)(res, { success: true, task_id: taskId, runs: (0, agent_run_store_1.listAgentRuns)({ taskId, limit: Number(parsed.query.limit || 200) }), consistency: task ? (0, agent_run_consistency_1.buildTaskRunConsistencyProjection)(task) : null });
+        return;
+    }
+    if (pathname === "/api/agent-runs/metrics" && req.method === "GET") {
+        (0, utils_1.sendJson)(res, { success: true, metrics: (0, agent_heartbeat_coordinator_1.heartbeatMetrics)({
+                runtimeId: String(parsed.query.runtime_id || parsed.query.runtimeId || ""),
+                scope: String(parsed.query.scope || ""),
+                status: String(parsed.query.status || ""),
+                from: String(parsed.query.from || ""),
+                to: String(parsed.query.to || ""),
+            }), governance: (0, agent_governance_store_1.agentGovernanceMetrics)({
+                runtimeId: String(parsed.query.runtime_id || parsed.query.runtimeId || ""),
+                scope: String(parsed.query.scope || ""),
+                status: String(parsed.query.status || ""),
+                from: String(parsed.query.from || ""),
+                to: String(parsed.query.to || ""),
+            }), generated_at: new Date().toISOString() });
+        return;
+    }
+    const runActivityMatch = pathname.match(/^\/api\/agent-runs\/([^/]+)\/activity$/);
+    if (runActivityMatch && req.method === "GET") {
+        const runId = decodeURIComponent(runActivityMatch[1]);
+        (0, utils_1.sendJson)(res, { success: true, run_id: runId, activity: (0, agent_governance_store_1.listAgentActivity)({ runId, limit: Number(parsed.query.limit || 300) }) });
+        return;
+    }
+    const taskActivityMatch = pathname.match(/^\/api\/tasks\/([^/]+)\/activity$/);
+    if (taskActivityMatch && req.method === "GET") {
+        const taskId = decodeURIComponent(taskActivityMatch[1]);
+        (0, utils_1.sendJson)(res, { success: true, task_id: taskId, activity: (0, agent_governance_store_1.listAgentActivity)({ taskId, limit: Number(parsed.query.limit || 300) }) });
+        return;
+    }
+    const taskCommentsMatch = pathname.match(/^\/api\/tasks\/([^/]+)\/comments$/);
+    if (taskCommentsMatch && req.method === "GET") {
+        const taskId = decodeURIComponent(taskCommentsMatch[1]);
+        (0, utils_1.sendJson)(res, { success: true, task_id: taskId, comments: (0, agent_governance_store_1.listAgentComments)({ taskId, limit: Number(parsed.query.limit || 300) }) });
+        return;
+    }
+    if (taskCommentsMatch && req.method === "POST") {
+        readRequestJson(req).then(payload => {
+            const taskId = decodeURIComponent(taskCommentsMatch[1]);
+            const result = (0, agent_governance_store_1.createAgentComment)({ taskId, runId: payload.run_id || payload.runId, traceId: payload.trace_id || payload.traceId, authorType: "user", authorId: actorIdFromRequest(req), body: payload.body || payload.comment, idempotencyKey: payload.idempotency_key || payload.idempotencyKey || `comment:${taskId}:${crypto.randomUUID()}`, triggerHeartbeat: payload.trigger_heartbeat !== false });
+            (0, utils_1.sendJson)(res, { success: true, ...result }, result.duplicate ? 200 : 201);
+        }).catch(error => (0, utils_1.sendJson)(res, { success: false, error: error?.message || String(error), code: error?.code || "COMMENT_FAILED" }, 400));
+        return;
+    }
+    const runCommentsMatch = pathname.match(/^\/api\/agent-runs\/([^/]+)\/comments$/);
+    if (runCommentsMatch && req.method === "GET") {
+        const runId = decodeURIComponent(runCommentsMatch[1]);
+        (0, utils_1.sendJson)(res, { success: true, run_id: runId, comments: (0, agent_governance_store_1.listAgentComments)({ runId, limit: Number(parsed.query.limit || 300) }) });
+        return;
+    }
+    const runApprovalsMatch = pathname.match(/^\/api\/agent-runs\/([^/]+)\/approvals(?:\/([^/]+)\/decision)?$/);
+    if (runApprovalsMatch && req.method === "GET") {
+        (0, utils_1.sendJson)(res, { success: true, run_id: decodeURIComponent(runApprovalsMatch[1]), approvals: (0, agent_governance_store_1.listAgentApprovals)(decodeURIComponent(runApprovalsMatch[1])) });
+        return;
+    }
+    if (runApprovalsMatch && req.method === "POST") {
+        readRequestJson(req).then(payload => {
+            const runId = decodeURIComponent(runApprovalsMatch[1]);
+            if (runApprovalsMatch[2]) {
+                const approval = (0, agent_governance_store_1.decideAgentApproval)(decodeURIComponent(runApprovalsMatch[2]), { status: payload.status || payload.decision, decisionBy: actorIdFromRequest(req), reason: payload.reason, actionFingerprint: payload.action_fingerprint || payload.actionFingerprint });
+                (0, utils_1.sendJson)(res, { success: true, approval });
+                return;
+            }
+            const run = (0, agent_run_store_1.getAgentRun)(runId);
+            if (!run) {
+                (0, utils_1.sendJson)(res, { success: false, error: "Run不存在" }, 404);
+                return;
+            }
+            const approval = (0, agent_governance_store_1.createAgentApproval)({ taskId: run.taskId, runId, traceId: run.traceId, actionType: payload.action_type || payload.actionType || "runtime_action", actionFingerprint: payload.action_fingerprint || payload.actionFingerprint || crypto.createHash("sha256").update(JSON.stringify(payload.action || payload)).digest("hex"), requestedBy: actorIdFromRequest(req), expiresAt: payload.expires_at || payload.expiresAt, payload, idempotencyKey: payload.idempotency_key || payload.idempotencyKey || `approval:${runId}:${crypto.randomUUID()}` });
+            (0, utils_1.sendJson)(res, { success: true, approval }, 201);
+        }).catch(error => (0, utils_1.sendJson)(res, { success: false, error: error?.message || String(error), code: error?.code || "APPROVAL_FAILED" }, 400));
+        return;
+    }
+    const runActionsMatch = pathname.match(/^\/api\/agent-runs\/([^/]+)\/actions$/);
+    if (runActionsMatch && req.method === "POST") {
+        readRequestJson(req).then(async (payload) => {
+            const result = await (0, agent_execution_coordinator_1.applyPersistentAgentManualAction)({ runId: decodeURIComponent(runActionsMatch[1]), action: payload.action, actorId: actorIdFromRequest(req), idempotencyKey: payload.idempotency_key || payload.idempotencyKey || `manual:${decodeURIComponent(runActionsMatch[1])}:${payload.action}:${crypto.randomUUID()}`, reason: payload.reason, ownerId: actorIdFromRequest(req), runtimeId: payload.runtime_id || payload.runtimeId, agentId: payload.agent_id || payload.agentId });
+            (0, utils_1.sendJson)(res, { success: true, ...result });
+        }).catch(error => (0, utils_1.sendJson)(res, { success: false, error: error?.message || String(error), code: error?.code || "MANUAL_ACTION_FAILED" }, 400));
+        return;
+    }
+    if (pathname === "/api/runtime-adapters" && req.method === "GET") {
+        (0, utils_1.sendJson)(res, { success: true, runtimes: (0, agent_runtime_adapter_1.getAgentRuntimeRegistry)().list() });
+        return;
+    }
+    const runtimeProbeMatch = pathname.match(/^\/api\/runtime-adapters\/([^/]+)\/probe$/);
+    if (runtimeProbeMatch && req.method === "GET") {
+        (0, agent_runtime_adapter_1.getAgentRuntimeRegistry)().probe(decodeURIComponent(runtimeProbeMatch[1])).then(probe => (0, utils_1.sendJson)(res, { success: true, probe })).catch(error => (0, utils_1.sendJson)(res, { success: false, error: error?.message || String(error) }, 400));
+        return;
+    }
+    if (pathname === "/api/budgets" && req.method === "GET") {
+        (0, utils_1.sendJson)(res, { success: true, policies: (0, agent_governance_store_1.listAgentBudgetPolicies)(String(parsed.query.scope_type || parsed.query.scopeType || ""), String(parsed.query.scope_id || parsed.query.scopeId || "")), incidents: (0, agent_governance_store_1.listAgentBudgetIncidents)(String(parsed.query.run_id || parsed.query.runId || "")) });
+        return;
+    }
+    if (pathname === "/api/budgets" && req.method === "POST") {
+        readRequestJson(req).then(payload => (0, utils_1.sendJson)(res, { success: true, policy: (0, agent_governance_store_1.upsertAgentBudgetPolicy)({ ...payload, scopeType: payload.scope_type || payload.scopeType, scopeId: payload.scope_id || payload.scopeId, period: payload.period || "month" }) }, 201)).catch(error => (0, utils_1.sendJson)(res, { success: false, error: error?.message || String(error) }, 400));
+        return;
+    }
+    if (pathname === "/api/agent-routines" && req.method === "GET") {
+        (0, utils_1.sendJson)(res, { success: true, routines: (0, agent_routine_store_1.listAgentRoutines)(), runs: (0, agent_routine_store_1.listAgentRoutineRuns)() });
+        return;
+    }
+    if (pathname === "/api/agent-routines" && req.method === "POST") {
+        readRequestJson(req).then(payload => (0, utils_1.sendJson)(res, { success: true, routine: (0, agent_routine_store_1.upsertAgentRoutine)({ ...payload, schedule: payload.schedule || payload.cron || "", triggerType: payload.trigger_type || payload.triggerType, catchUpPolicy: payload.catch_up_policy || payload.catchUpPolicy, concurrencyPolicy: payload.concurrency_policy || payload.concurrencyPolicy }) }, 201)).catch(error => (0, utils_1.sendJson)(res, { success: false, error: error?.message || String(error) }, 400));
+        return;
+    }
+    const routineRunsMatch = pathname.match(/^\/api\/agent-routines\/([^/]+)\/runs$/);
+    if (routineRunsMatch && req.method === "GET") {
+        (0, utils_1.sendJson)(res, { success: true, routine_id: decodeURIComponent(routineRunsMatch[1]), runs: (0, agent_routine_store_1.listAgentRoutineRuns)(decodeURIComponent(routineRunsMatch[1])) });
+        return;
+    }
+    if (routineRunsMatch && req.method === "POST") {
+        readRequestJson(req).then(payload => (0, utils_1.sendJson)(res, { success: true, run: (0, agent_routine_store_1.createAgentRoutineRun)({ routineId: decodeURIComponent(routineRunsMatch[1]), scheduleWindowId: payload.schedule_window_id || payload.scheduleWindowId || new Date().toISOString().slice(0, 13), triggerType: payload.trigger_type || payload.triggerType, runId: payload.run_id || payload.runId, status: payload.status, catchUp: payload.catch_up === true || payload.catchUp === true }) }, 201)).catch(error => (0, utils_1.sendJson)(res, { success: false, error: error?.message || String(error) }, 400));
+        return;
+    }
+    const routineRunDetailMatch = pathname.match(/^\/api\/agent-routines\/runs\/([^/]+)$/);
+    if (routineRunDetailMatch && req.method === "POST") {
+        readRequestJson(req).then(payload => (0, utils_1.sendJson)(res, { success: true, run: (0, agent_routine_store_1.updateAgentRoutineRun)(decodeURIComponent(routineRunDetailMatch[1]), { runId: payload.run_id || payload.runId, status: payload.status }) })).catch(error => (0, utils_1.sendJson)(res, { success: false, error: error?.message || String(error) }, 400));
+        return;
+    }
+    const runUsageMatch = pathname.match(/^\/api\/agent-runs\/([^/]+)\/usage$/);
+    if (runUsageMatch && req.method === "GET") {
+        const runId = decodeURIComponent(runUsageMatch[1]);
+        (0, utils_1.sendJson)(res, { success: true, run_id: runId, budget_incidents: (0, agent_governance_store_1.listAgentBudgetIncidents)(runId) });
+        return;
+    }
+    const runArtifactsMatch = pathname.match(/^\/api\/agent-runs\/([^/]+)\/artifacts$/);
+    if (runArtifactsMatch && req.method === "GET") {
+        const runId = decodeURIComponent(runArtifactsMatch[1]);
+        (0, utils_1.sendJson)(res, { success: true, run_id: runId, artifacts: (0, agent_governance_store_1.listAgentRunArtifacts)(runId) });
+        return;
+    }
+    if (runArtifactsMatch && req.method === "POST") {
+        readRequestJson(req).then(payload => { const runId = decodeURIComponent(runArtifactsMatch[1]); const run = (0, agent_run_store_1.getAgentRun)(runId); if (!run)
+            return (0, utils_1.sendJson)(res, { success: false, error: "Run不存在" }, 404); const artifact = (0, agent_governance_store_1.createAgentRunArtifact)({ runId, taskId: run.taskId, kind: payload.kind || "report", name: payload.name, path: payload.path, externalRef: payload.external_ref || payload.externalRef, checksum: payload.checksum || "", contentType: payload.content_type || payload.contentType, sizeBytes: payload.size_bytes || payload.sizeBytes || 0, idempotencyKey: payload.idempotency_key || payload.idempotencyKey || `artifact:${runId}:${crypto.randomUUID()}` }); (0, utils_1.sendJson)(res, { success: true, artifact }, 201); }).catch(error => (0, utils_1.sendJson)(res, { success: false, error: error?.message || String(error) }, 400));
+        return;
+    }
+    const taskArtifactsMatch = pathname.match(/^\/api\/tasks\/([^/]+)\/artifacts$/);
+    if (taskArtifactsMatch && req.method === "GET") {
+        (0, utils_1.sendJson)(res, { success: true, task_id: decodeURIComponent(taskArtifactsMatch[1]), artifacts: (0, agent_governance_store_1.listAgentRunArtifacts)("", decodeURIComponent(taskArtifactsMatch[1])) });
+        return;
+    }
+    const taskDepsMatch = pathname.match(/^\/api\/tasks\/([^/]+)\/dependencies(?:\/([^/]+))?$/);
+    if (taskDepsMatch && req.method === "GET") {
+        (0, utils_1.sendJson)(res, { success: true, task_id: decodeURIComponent(taskDepsMatch[1]), dependencies: (0, agent_governance_store_1.listAgentTaskDependencies)(decodeURIComponent(taskDepsMatch[1])) });
+        return;
+    }
+    if (taskDepsMatch && req.method === "POST") {
+        readRequestJson(req).then(payload => (0, utils_1.sendJson)(res, { success: true, dependency: (0, agent_governance_store_1.addAgentTaskDependency)({ taskId: decodeURIComponent(taskDepsMatch[1]), dependsOnTaskId: payload.depends_on_task_id || payload.dependsOnTaskId, relation: payload.relation || "blocks" }) }, 201)).catch(error => (0, utils_1.sendJson)(res, { success: false, error: error?.message || String(error), code: error?.code || "DEPENDENCY_FAILED" }, 400));
+        return;
+    }
+    if (taskDepsMatch && taskDepsMatch[2] && req.method === "DELETE") {
+        (0, utils_1.sendJson)(res, { success: true, dependency: (0, agent_governance_store_1.releaseAgentTaskDependency)(decodeURIComponent(taskDepsMatch[2])) });
+        return;
+    }
+    const runSecretsMatch = pathname.match(/^\/api\/agent-runs\/([^/]+)\/secrets$/);
+    if (runSecretsMatch && req.method === "GET") {
+        (0, utils_1.sendJson)(res, { success: true, run_id: decodeURIComponent(runSecretsMatch[1]), bindings: (0, agent_governance_store_1.listAgentRunSecrets)(decodeURIComponent(runSecretsMatch[1])) });
+        return;
+    }
+    if (runSecretsMatch && req.method === "POST") {
+        readRequestJson(req).then(payload => (0, utils_1.sendJson)(res, { success: true, binding: (0, agent_governance_store_1.bindAgentRunSecret)({ runId: decodeURIComponent(runSecretsMatch[1]), secretRef: payload.secret_ref || payload.secretRef, scope: payload.scope || "run", envName: payload.env_name || payload.envName }) }, 201)).catch(error => (0, utils_1.sendJson)(res, { success: false, error: error?.message || String(error) }, 400));
+        return;
+    }
+    const runSecretBindingMatch = pathname.match(/^\/api\/agent-runs\/([^/]+)\/secrets\/([^/]+)$/);
+    if (runSecretBindingMatch && req.method === "POST") {
+        readRequestJson(req).then(payload => (0, utils_1.sendJson)(res, { success: true, binding: (0, agent_governance_store_1.updateAgentRunSecret)(decodeURIComponent(runSecretBindingMatch[2]), payload.status) })).catch(error => (0, utils_1.sendJson)(res, { success: false, error: error?.message || String(error) }, 400));
+        return;
+    }
+    const heartbeatDetailMatch = pathname.match(/^\/api\/agent-heartbeats\/([^/]+)$/);
+    if (heartbeatDetailMatch && req.method === "GET") {
+        const wake = (0, agent_heartbeat_coordinator_1.getAgentHeartbeat)(decodeURIComponent(heartbeatDetailMatch[1]));
+        if (!wake) {
+            (0, utils_1.sendJson)(res, { success: false, error: "Heartbeat不存在" }, 404);
+            return;
+        }
+        (0, utils_1.sendJson)(res, { success: true, wake });
+        return;
+    }
+    if (pathname === "/api/agent-heartbeats" && req.method === "GET") {
+        (0, utils_1.sendJson)(res, { success: true, heartbeats: (0, agent_heartbeat_coordinator_1.listAgentHeartbeats)({ taskId: parsed.query.task_id || parsed.query.taskId, status: parsed.query.status, limit: parsed.query.limit }) });
+        return;
+    }
     if (pathname === "/api/agent-runs" && req.method === "GET") {
+        const persistedRuns = (0, agent_run_store_1.listAgentRuns)({ taskId: parsed.query.task_id || parsed.query.taskId, limit: 200 });
         (0, utils_1.sendJson)(res, {
             success: true,
             runs: (0, execution_kernel_1.listActiveAgentRuns)({
                 taskId: parsed.query.task_id || parsed.query.taskId,
                 project: parsed.query.project,
             }),
+            agent_runs: persistedRuns,
             generated_at: new Date().toISOString(),
         });
         return;
@@ -546,6 +811,17 @@ function handleRequest(req, res) {
         req.on("end", () => {
             try {
                 const payload = body ? JSON.parse(body) : {};
+                if (payload.run_id || payload.runId) {
+                    void (0, agent_execution_coordinator_1.applyPersistentAgentManualAction)({
+                        runId: String(payload.run_id || payload.runId),
+                        action: "cancel",
+                        actorId: actorIdFromRequest(req),
+                        idempotencyKey: payload.idempotency_key || payload.idempotencyKey || `legacy-cancel:${payload.run_id || payload.runId}`,
+                        reason: payload.reason || "兼容取消接口请求",
+                        ownerId: actorIdFromRequest(req),
+                    }).then(result => (0, utils_1.sendJson)(res, { success: true, ...result })).catch(error => (0, utils_1.sendJson)(res, { success: false, error: error?.message || String(error), code: error?.code || "CANCEL_FAILED" }, 400));
+                    return;
+                }
                 const result = (0, execution_kernel_1.cancelActiveAgentRun)(payload);
                 (0, utils_1.sendJson)(res, result);
             }
@@ -2947,6 +3223,7 @@ function bootstrapServerRuntime(startupCollabCtx, port) {
         resumeTaskQueues: collaboration_1.resumeTaskQueues,
         saveFeishuConfig: db_1.saveFeishuConfig,
         startAgentRecoveryMonitor: collaboration_1.startAgentRecoveryMonitor,
+        processAgentHeartbeatWake,
         startAutomationScheduler: automation_scheduler_1.startAutomationScheduler,
         startGlobalMissionSupervisionForServer: global_agent_1.startGlobalMissionSupervisionForServer,
         startGroupSessionRetentionMaintenanceScheduler: group_session_maintenance_1.startGroupSessionRetentionMaintenanceScheduler,

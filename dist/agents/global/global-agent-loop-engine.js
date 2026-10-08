@@ -79,6 +79,7 @@ const global_agent_run_supervision_1 = require("./global-agent-run-supervision")
 const globalAgentRunProjection = __importStar(require("./global-agent-run-projection"));
 const globalAgentRunReplies = __importStar(require("./global-agent-run-replies"));
 const globalAgentRunStore = __importStar(require("./global-agent-run-store"));
+const agent_execution_coordinator_1 = require("../agent-execution-coordinator");
 // ===== merged from global-agent-loop-engine-part-01.ts =====
 const { compactObservation, GLOBAL_MODEL_ROUTE_KEYS, GLOBAL_MODEL_FORBIDDEN_FIELD, GROUP_SESSION_ID_PATTERN, redactGroupSessionIds, redactGroupSessionFields, projectRoutingValue, projectProjectRows, projectGroupRows, projectGlobalTaskRows, projectGlobalAgentObservationForModel, projectGlobalAgentReasoningForModel, parseGlobalAgentDecision, normalizeDecision, buildGlobalAgentModelMessages } = globalAgentRunProjection;
 const { nowIso, stripNonExecutionReportSections, GLOBAL_USER_SUMMARY_INTERNAL_PATTERN, GLOBAL_USER_SUMMARY_TECHNICAL_EVIDENCE_PATTERN, hasGlobalUserSummaryTechnicalDetails, compactGlobalUserSummaryText, uniqueGlobalStrings, sanitizeGlobalVisibleReplyTerminology, globalVisibleReplyFallback, buildGlobalVisibleReplyContent, attachGlobalReplyTechnicalContent, getGlobalToolUserLabel, summarizeGlobalToolTarget, buildGlobalClarificationSummary, buildGlobalConfirmationSummary, buildGlobalPlanSteps, buildGlobalPlanExecutionFollowup, buildGlobalPlanModeSummary, buildGlobalStructuredPlanModeSummary, updateGlobalPlanModeStatus, GLOBAL_DISPATCH_VISIBLE_TEXT_PATTERN, sanitizeGlobalDispatchVisibleText, normalizeDispatchDependency, buildGlobalDispatchRow, isGlobalDispatchTool, normalizeGlobalDispatchLaunchRowStatus, buildGlobalDispatchLaunchSummary } = globalAgentRunReplies;
@@ -1006,6 +1007,22 @@ function completeRun(run, runtime, status, reply, error = "") {
     }
     appendGlobalRequirementPlan(run, null, status === "completed" ? "completed" : "blocked");
     saveRun(run, runtime.persist !== false);
+    try {
+        const ccmRunId = String(run.ccm_agent_run_id || "").trim();
+        if (ccmRunId) {
+            const mappedStatus = status === "completed" ? "succeeded" : status === "cancelled" ? "cancelled" : "failed";
+            (0, agent_execution_coordinator_1.finalizePersistentAgentExecution)({
+                runId: ccmRunId,
+                leaseOwnerId: `execution-coordinator:${process.pid}`,
+                status: mappedStatus,
+                usage: run.usage,
+                usageMeta: { provider: "global-agent", model: "", provenance: "global-agent-loop" },
+                error: run.error ? { message: String(run.error).slice(0, 500) } : {},
+                result: { globalRunId: run.id, status },
+            });
+        }
+    }
+    catch { }
     (0, runtime_1.recordGlobalAgentRuntimeOutput)(run, { type: "run_terminal", status, reply: run.final_reply, error: run.error });
     (0, reliability_ledger_1.appendTraceEvent)(run.trace_id, { id: `${run.id}:${status}:${run.completed_at}`, type: `global_agent.run_${status}`, status: status === "completed" ? "ok" : status === "cancelled" ? "warning" : "error", message: run.final_reply.slice(0, 1000), data: { steps: run.steps.length, model_calls: run.model_calls, tool_calls: run.tool_calls, error: run.error } });
     if ((0, global_agent_metrics_1.recordGlobalAgentRunMetric)(run, status, { source: run.source || "global-agent-loop" }) && run.metrics_recorded === true) {
@@ -1813,6 +1830,23 @@ async function startGlobalAgentRun(input, runtime) {
         run.total_cost_usd = run.usage.totalCostUsd;
     }
     saveRun(run, runtime.persist !== false);
+    // Ordinary read-only global questions are transient model calls. Only a
+    // formal mission gets an AgentRun/task identity and the persistent lease.
+    if (run.mission_id) {
+        const coordinatedExecution = await (0, agent_execution_coordinator_1.startPersistentAgentExecution)({
+            traceId: run.trace_id,
+            taskId: run.mission_id,
+            attemptId: String(run.resume_count || 1),
+            scope: "global", scopeId: "global", agentId: "global-agent", runtimeId: "global-agent",
+            taskAgentSessionId: run.session_id, executionId: run.id, triggerType: "user", source: "global-agent",
+            idempotencyKey: `global-agent:${run.id}`,
+        });
+        if (coordinatedExecution.mode === "coalesced")
+            throw Object.assign(new Error("全局 Agent 已存在同一幂等执行"), { code: "CCM_RUN_ALREADY_ACTIVE", agentRunId: coordinatedExecution.run.runId });
+        const ccmRun = coordinatedExecution.run;
+        run.ccm_agent_run_id = ccmRun.runId;
+        (0, agent_execution_coordinator_1.markPersistentAgentExecutionStarted)(ccmRun.runId, coordinatedExecution.lease?.run?.leaseId || "");
+    }
     (0, reliability_ledger_1.appendTraceEvent)(run.trace_id, { id: `${run.id}:created`, type: "global_agent.run_created", status: "info", message: (input.originalMessage || input.message).slice(0, 1000), data: { session_id: run.session_id, source: run.source, explicit_write_authorization: run.explicit_write_authorization } });
     const directReply = String(input.directReply || "").trim();
     if (directReply) {

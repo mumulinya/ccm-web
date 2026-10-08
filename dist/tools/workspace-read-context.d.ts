@@ -38,6 +38,7 @@ export declare class WorkspaceReadContextLedger {
     hasJsonEvidence(id: string): boolean;
     retainJsonEvidence(ids: Set<string>): void;
     hasTextEvidence(id: string): boolean;
+    recordTextEvidence(id: string): void;
     retainTextEvidence(ids: Set<string>): void;
     constructor(identity: WorkspaceReadContextIdentity);
     lookup(project: string, filePath: string, range: WorkspaceReadRange, stat: {

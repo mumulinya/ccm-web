@@ -54,7 +54,6 @@ const search_results_1 = require("./search-results");
 const music_catalog_1 = require("./music-catalog");
 const library_1 = require("./library");
 const bilibili_1 = require("./bilibili");
-const douyin_1 = require("./douyin");
 const video_playback_jobs_1 = require("./video-playback-jobs");
 const video_audio_projection_1 = require("./video-audio-projection");
 const music_persistence_1 = require("./music-persistence");
@@ -62,6 +61,7 @@ const netease_mv_1 = require("./netease-mv");
 const media_interactions_1 = require("./media-interactions");
 const media_errors_1 = require("./media-errors");
 const hls_publication_1 = require("./hls-publication");
+const douyin_media_coordinator_1 = require("./douyin-media-coordinator");
 const ROOT = path.join(utils_1.CCM_DIR, "media", "stream-sessions");
 const STORE = path.join(utils_1.CCM_DIR, "music-stream-sessions.json");
 const sessions = new Map();
@@ -167,8 +167,8 @@ async function resolveStreamMediaInput(s, signal) {
         }
         return { video: streams.videoUrl, audio: streams.audioUrl, headers: { "User-Agent": bilibili_1.BILI_UA, Referer: "https://www.bilibili.com/" }, duration: streams.durationSeconds };
     }
-    const d = await (0, douyin_1.resolveDouyinMediaInput)(s.sourceId, { signal });
-    return { input: d.url, headers: d.headers, duration: d.durationSeconds };
+    const asset = await (0, douyin_media_coordinator_1.ensureDouyinVideoAsset)(s.sourceId, { signal });
+    return { input: asset.filePath, local: true, duration: asset.durationSeconds };
 }
 async function finalize(s, input, signal) {
     const manifest = path.join(s.segmentDirectory, "manifest.m3u8");

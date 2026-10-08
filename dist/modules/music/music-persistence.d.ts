@@ -238,6 +238,14 @@ export declare function deletePersistedDownloadJob(id: string): boolean;
 export declare function findMusicMediaAsset(source: string, sourceId: string): any;
 export declare function findMusicMediaAssetByChecksum(checksum: string): any;
 export declare function upsertMusicMediaAsset(asset: any): any;
+export declare function getDouyinAsset(sourceId: string, kind: string): any;
+export declare function getDouyinAssetById(assetId: string): any;
+export declare function listDouyinAssets(limit?: number): any[];
+export declare function upsertDouyinAsset(asset: any): any;
+export declare function getDouyinOperation(operationId: string): any;
+export declare function findActiveDouyinOperation(sourceId: string, kind: string): any;
+export declare function upsertDouyinOperation(operation: any): any;
+export declare function listDouyinOperations(limit?: number): any[];
 export declare function activeMusicCatalogGeneration(): number;
 export declare function setActiveMusicCatalogGeneration(generation: number): void;
 export declare function getMusicCatalogStatus(): {

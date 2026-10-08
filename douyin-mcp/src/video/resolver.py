@@ -26,7 +26,7 @@ _EMBEDDED_ID_PATTERN = re.compile(r"(?<!\d)(\d{15,25})(?!\d)")
 # Douyin host before URL validation so those decorations do not make
 # urlparse() reject an otherwise valid short link.
 _SHARE_URL_PATTERN = re.compile(
-    r"(?i)(?:(?:https?://)?(?:v|www|m|iesdouyin)\.douyin\.com/[^\s<>\]\[\"']+)"
+    r"(?i)(?:(?:https?://)?(?:(?:v|www|m)\.douyin\.com|(?:www\.)?iesdouyin\.com)/[^\s<>\]\[\"']+)"
 )
 _TRAILING_SHARE_PUNCTUATION = "\u3002\uff0c\uff01\uff1f\uff1b\uff1a\u3001,.!?;:)\u3011\u3010}>》〉"
 

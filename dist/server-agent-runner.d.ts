@@ -50,4 +50,12 @@ export declare function createAgentRunnerRuntime(deps: any): {
     callAgentForGroupStream: (projectName: string, message: string, workDir: string, agentType: string, options?: any) => Promise<string>;
     callAgentStream: (projectName: string, message: string, workDir: string, agentType: string, res: any, options?: any) => void;
     sendRuntimeToolDispatchBlocked: (res: any, toolContext: any) => any;
+    processAgentHeartbeatWake: (wake: any, run: any) => Promise<{
+        runId: any;
+        status: string;
+        result: {
+            runnerRequestId: string;
+            nativeSessionId: any;
+        };
+    }>;
 };

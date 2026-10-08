@@ -75,7 +75,7 @@ const path = __importStar(require("path"));
 const runtime_paths_1 = require("./runtime-paths");
 const better_sqlite3_1 = __importDefault(require("better-sqlite3"));
 const task_lifecycle_1 = require("./task-lifecycle");
-const STORE_SCHEMA_VERSION = 3;
+const STORE_SCHEMA_VERSION = 7;
 const DEFAULT_STORE_DIR = runtime_paths_1.CCM_DIR;
 const STORE_DIR = path.resolve(process.env.CCM_TASK_STORE_DIR || DEFAULT_STORE_DIR);
 const DATABASE_FILE = path.join(STORE_DIR, "ccm.db");
@@ -368,10 +368,330 @@ function createSchema(db) {
       FOREIGN KEY(message_id) REFERENCES agent_communication_messages(message_id) ON DELETE CASCADE
     );
     CREATE INDEX IF NOT EXISTS idx_agent_comm_receipts_message ON agent_communication_receipts(message_id, created_at);
+
+    CREATE TABLE IF NOT EXISTS agent_runs (
+      run_id TEXT PRIMARY KEY,
+      trace_id TEXT NOT NULL DEFAULT '',
+      task_id TEXT NOT NULL DEFAULT '',
+      attempt_id TEXT NOT NULL DEFAULT '',
+      parent_run_id TEXT NOT NULL DEFAULT '',
+      scope TEXT NOT NULL DEFAULT 'project',
+      scope_id TEXT NOT NULL DEFAULT '',
+      agent_id TEXT NOT NULL DEFAULT '',
+      runtime_id TEXT NOT NULL DEFAULT '',
+      runtime_version_snapshot_json TEXT NOT NULL DEFAULT '{}',
+      task_agent_session_id TEXT NOT NULL DEFAULT '',
+      native_session_id TEXT NOT NULL DEFAULT '',
+      execution_id TEXT NOT NULL DEFAULT '',
+      workspace_path TEXT NOT NULL DEFAULT '',
+      worktree_id TEXT NOT NULL DEFAULT '',
+      workspace_evidence_json TEXT NOT NULL DEFAULT '{}',
+      trigger_type TEXT NOT NULL DEFAULT 'user',
+      status TEXT NOT NULL DEFAULT 'created',
+      lease_id TEXT NOT NULL DEFAULT '',
+      lease_owner_id TEXT NOT NULL DEFAULT '',
+      lease_expires_at TEXT NOT NULL DEFAULT '',
+      lease_version INTEGER NOT NULL DEFAULT 0,
+      idempotency_key TEXT NOT NULL UNIQUE,
+      source TEXT NOT NULL DEFAULT 'ccm',
+      started_at TEXT NOT NULL DEFAULT '',
+      last_heartbeat_at TEXT NOT NULL DEFAULT '',
+      finished_at TEXT NOT NULL DEFAULT '',
+      result_json TEXT NOT NULL DEFAULT '{}',
+      error_json TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_agent_runs_task ON agent_runs(task_id, created_at);
+    CREATE INDEX IF NOT EXISTS idx_agent_runs_trace ON agent_runs(trace_id, created_at);
+    CREATE INDEX IF NOT EXISTS idx_agent_runs_status ON agent_runs(status, updated_at);
+    CREATE INDEX IF NOT EXISTS idx_agent_runs_runtime ON agent_runs(runtime_id, status, created_at);
+    CREATE INDEX IF NOT EXISTS idx_agent_runs_execution ON agent_runs(execution_id);
+
+    CREATE TABLE IF NOT EXISTS agent_run_events (
+      event_id TEXT PRIMARY KEY,
+      run_id TEXT NOT NULL,
+      sequence INTEGER NOT NULL,
+      event_type TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT '',
+      message TEXT NOT NULL DEFAULT '',
+      payload_json TEXT NOT NULL DEFAULT '{}',
+      payload_ref TEXT NOT NULL DEFAULT '',
+      idempotency_key TEXT NOT NULL UNIQUE,
+      previous_checksum TEXT NOT NULL DEFAULT '',
+      checksum TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY(run_id) REFERENCES agent_runs(run_id) ON DELETE CASCADE,
+      UNIQUE(run_id, sequence)
+    );
+    CREATE INDEX IF NOT EXISTS idx_agent_run_events_run ON agent_run_events(run_id, sequence);
+
+    CREATE TABLE IF NOT EXISTS agent_run_usage (
+      usage_id TEXT PRIMARY KEY,
+      run_id TEXT NOT NULL,
+      provider TEXT NOT NULL DEFAULT '',
+      model TEXT NOT NULL DEFAULT '',
+      input_tokens INTEGER NOT NULL DEFAULT 0,
+      output_tokens INTEGER NOT NULL DEFAULT 0,
+      cached_tokens INTEGER NOT NULL DEFAULT 0,
+      cost REAL NOT NULL DEFAULT 0,
+      provenance TEXT NOT NULL DEFAULT '',
+      payload_json TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL,
+      FOREIGN KEY(run_id) REFERENCES agent_runs(run_id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_agent_run_usage_run ON agent_run_usage(run_id, created_at);
+
+    CREATE TABLE IF NOT EXISTS agent_wake_requests (
+      wake_id TEXT PRIMARY KEY,
+      agent_id TEXT NOT NULL DEFAULT '',
+      scope TEXT NOT NULL DEFAULT 'project',
+      scope_id TEXT NOT NULL DEFAULT '',
+      task_id TEXT NOT NULL DEFAULT '',
+      trace_id TEXT NOT NULL DEFAULT '',
+      reason TEXT NOT NULL DEFAULT 'on_demand',
+      idempotency_key TEXT NOT NULL UNIQUE,
+      requested_at TEXT NOT NULL,
+      available_at TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'queued',
+      claimed_by TEXT NOT NULL DEFAULT '',
+      claimed_at TEXT NOT NULL DEFAULT '',
+      attempt_id TEXT NOT NULL DEFAULT '',
+      completed_at TEXT NOT NULL DEFAULT '',
+      run_id TEXT NOT NULL DEFAULT '',
+      coalesced_run_id TEXT NOT NULL DEFAULT '',
+      result_json TEXT NOT NULL DEFAULT '{}',
+      error_json TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_agent_wake_ready ON agent_wake_requests(status, available_at, created_at);
+    CREATE INDEX IF NOT EXISTS idx_agent_wake_scope ON agent_wake_requests(agent_id, scope, scope_id, task_id, status);
+    CREATE INDEX IF NOT EXISTS idx_agent_wake_run ON agent_wake_requests(run_id, created_at);
+
+    CREATE TABLE IF NOT EXISTS agent_wake_attempts (
+      attempt_id TEXT PRIMARY KEY,
+      wake_id TEXT NOT NULL,
+      owner_id TEXT NOT NULL DEFAULT '',
+      run_id TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'claimed',
+      started_at TEXT NOT NULL,
+      finished_at TEXT NOT NULL DEFAULT '',
+      error_json TEXT NOT NULL DEFAULT '{}',
+      FOREIGN KEY(wake_id) REFERENCES agent_wake_requests(wake_id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_agent_wake_attempts_wake ON agent_wake_attempts(wake_id, started_at);
+
+    CREATE TABLE IF NOT EXISTS agent_activity_events (
+      event_id TEXT PRIMARY KEY,
+      task_id TEXT NOT NULL DEFAULT '',
+      run_id TEXT NOT NULL DEFAULT '',
+      wake_id TEXT NOT NULL DEFAULT '',
+      trace_id TEXT NOT NULL DEFAULT '',
+      actor_type TEXT NOT NULL DEFAULT 'system',
+      actor_id TEXT NOT NULL DEFAULT '',
+      event_type TEXT NOT NULL,
+      summary TEXT NOT NULL DEFAULT '',
+      payload_json TEXT NOT NULL DEFAULT '{}',
+      payload_ref TEXT NOT NULL DEFAULT '',
+      idempotency_key TEXT NOT NULL UNIQUE,
+      previous_checksum TEXT NOT NULL DEFAULT '',
+      checksum TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_agent_activity_task ON agent_activity_events(task_id, created_at);
+    CREATE INDEX IF NOT EXISTS idx_agent_activity_run ON agent_activity_events(run_id, created_at);
+    CREATE INDEX IF NOT EXISTS idx_agent_activity_type ON agent_activity_events(event_type, created_at);
+
+    CREATE TABLE IF NOT EXISTS agent_comments (
+      comment_id TEXT PRIMARY KEY,
+      task_id TEXT NOT NULL DEFAULT '',
+      run_id TEXT NOT NULL DEFAULT '',
+      trace_id TEXT NOT NULL DEFAULT '',
+      author_type TEXT NOT NULL DEFAULT 'user',
+      author_id TEXT NOT NULL DEFAULT '',
+      body TEXT NOT NULL DEFAULT '',
+      body_checksum TEXT NOT NULL,
+      idempotency_key TEXT NOT NULL UNIQUE,
+      heartbeat_wake_id TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_agent_comments_task ON agent_comments(task_id, created_at);
+    CREATE INDEX IF NOT EXISTS idx_agent_comments_run ON agent_comments(run_id, created_at);
+
+    CREATE TABLE IF NOT EXISTS agent_approvals (
+      approval_id TEXT PRIMARY KEY,
+      task_id TEXT NOT NULL DEFAULT '',
+      run_id TEXT NOT NULL DEFAULT '',
+      trace_id TEXT NOT NULL DEFAULT '',
+      action_type TEXT NOT NULL,
+      action_fingerprint TEXT NOT NULL,
+      requested_by TEXT NOT NULL DEFAULT '',
+      decision_by TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'pending',
+      reason TEXT NOT NULL DEFAULT '',
+      requested_at TEXT NOT NULL,
+      decided_at TEXT NOT NULL DEFAULT '',
+      expires_at TEXT NOT NULL DEFAULT '',
+      idempotency_key TEXT NOT NULL UNIQUE,
+      payload_json TEXT NOT NULL DEFAULT '{}'
+    );
+    CREATE INDEX IF NOT EXISTS idx_agent_approvals_run ON agent_approvals(run_id, status, requested_at);
+
+    CREATE TABLE IF NOT EXISTS agent_task_checkouts (
+      checkout_id TEXT PRIMARY KEY,
+      task_id TEXT NOT NULL,
+      run_id TEXT NOT NULL,
+      trace_id TEXT NOT NULL DEFAULT '',
+      workspace_path TEXT NOT NULL DEFAULT '',
+      worktree_id TEXT NOT NULL DEFAULT '',
+      owner_id TEXT NOT NULL DEFAULT '',
+      lease_id TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'active',
+      acquired_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      released_at TEXT NOT NULL DEFAULT '',
+      idempotency_key TEXT NOT NULL UNIQUE
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_agent_task_checkout_active
+      ON agent_task_checkouts(task_id, workspace_path, worktree_id)
+      WHERE status = 'active';
+    CREATE INDEX IF NOT EXISTS idx_agent_task_checkout_run ON agent_task_checkouts(run_id, status);
+
+    CREATE TABLE IF NOT EXISTS agent_heartbeat_context (
+      wake_id TEXT PRIMARY KEY,
+      run_id TEXT NOT NULL DEFAULT '',
+      native_session_id TEXT NOT NULL DEFAULT '',
+      base_context_checksum TEXT NOT NULL DEFAULT '',
+      context_cursor TEXT NOT NULL DEFAULT '',
+      context_delta_checksum TEXT NOT NULL DEFAULT '',
+      prompt_fingerprint TEXT NOT NULL DEFAULT '',
+      prompt_input_tokens INTEGER NOT NULL DEFAULT 0,
+      prompt_output_tokens INTEGER NOT NULL DEFAULT 0,
+      reuse_mode TEXT NOT NULL DEFAULT 'fresh_session',
+      captured_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_agent_heartbeat_context_run ON agent_heartbeat_context(run_id, captured_at);
+
+    CREATE TABLE IF NOT EXISTS agent_budget_policies (
+      policy_id TEXT PRIMARY KEY,
+      scope_type TEXT NOT NULL,
+      scope_id TEXT NOT NULL,
+      period TEXT NOT NULL,
+      token_limit INTEGER,
+      cost_limit_usd REAL,
+      warning_ratio REAL NOT NULL DEFAULT 0.8,
+      hard_stop_ratio REAL NOT NULL DEFAULT 1.0,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE(scope_type, scope_id, period)
+    );
+
+    CREATE TABLE IF NOT EXISTS agent_budget_incidents (
+      incident_id TEXT PRIMARY KEY,
+      policy_id TEXT NOT NULL,
+      run_id TEXT NOT NULL DEFAULT '',
+      task_id TEXT NOT NULL DEFAULT '',
+      level TEXT NOT NULL,
+      token_used INTEGER NOT NULL DEFAULT 0,
+      cost_used_usd REAL NOT NULL DEFAULT 0,
+      token_limit INTEGER,
+      cost_limit_usd REAL,
+      reason TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL,
+      UNIQUE(policy_id, run_id, level)
+    );
+    CREATE INDEX IF NOT EXISTS idx_agent_budget_incidents_run ON agent_budget_incidents(run_id, created_at);
+
+    CREATE TABLE IF NOT EXISTS agent_run_artifacts (
+      artifact_id TEXT PRIMARY KEY,
+      run_id TEXT NOT NULL,
+      task_id TEXT NOT NULL DEFAULT '',
+      kind TEXT NOT NULL,
+      name TEXT NOT NULL DEFAULT '',
+      path TEXT NOT NULL DEFAULT '',
+      external_ref TEXT NOT NULL DEFAULT '',
+      checksum TEXT NOT NULL DEFAULT '',
+      content_type TEXT NOT NULL DEFAULT '',
+      size_bytes INTEGER NOT NULL DEFAULT 0,
+      retention_status TEXT NOT NULL DEFAULT 'active',
+      created_at TEXT NOT NULL,
+      idempotency_key TEXT NOT NULL UNIQUE
+    );
+    CREATE INDEX IF NOT EXISTS idx_agent_run_artifacts_run ON agent_run_artifacts(run_id, created_at);
+
+    CREATE TABLE IF NOT EXISTS agent_task_dependencies (
+      dependency_id TEXT PRIMARY KEY,
+      task_id TEXT NOT NULL,
+      depends_on_task_id TEXT NOT NULL,
+      relation TEXT NOT NULL DEFAULT 'blocks',
+      status TEXT NOT NULL DEFAULT 'active',
+      created_at TEXT NOT NULL,
+      released_at TEXT NOT NULL DEFAULT '',
+      UNIQUE(task_id, depends_on_task_id, relation)
+    );
+    CREATE INDEX IF NOT EXISTS idx_agent_task_dependencies_task ON agent_task_dependencies(task_id, status);
+    CREATE INDEX IF NOT EXISTS idx_agent_task_dependencies_source ON agent_task_dependencies(depends_on_task_id, status);
+
+    CREATE TABLE IF NOT EXISTS agent_run_secret_bindings (
+      binding_id TEXT PRIMARY KEY,
+      run_id TEXT NOT NULL,
+      secret_ref TEXT NOT NULL,
+      scope TEXT NOT NULL DEFAULT 'run',
+      env_name TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'requested',
+      created_at TEXT NOT NULL,
+      revoked_at TEXT NOT NULL DEFAULT '',
+      UNIQUE(run_id, secret_ref, env_name)
+    );
+    CREATE INDEX IF NOT EXISTS idx_agent_run_secret_bindings_run ON agent_run_secret_bindings(run_id, status);
+
+    CREATE TABLE IF NOT EXISTS agent_routines (
+      routine_id TEXT PRIMARY KEY,
+      name TEXT NOT NULL DEFAULT '',
+      agent_id TEXT NOT NULL DEFAULT '',
+      scope TEXT NOT NULL DEFAULT 'project',
+      scope_id TEXT NOT NULL DEFAULT '',
+      schedule TEXT NOT NULL DEFAULT '',
+      trigger_type TEXT NOT NULL DEFAULT 'cron',
+      catch_up_policy TEXT NOT NULL DEFAULT 'skip',
+      concurrency_policy TEXT NOT NULL DEFAULT 'queue_one',
+      enabled INTEGER NOT NULL DEFAULT 1,
+      payload_json TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS agent_routine_runs (
+      routine_run_id TEXT PRIMARY KEY,
+      routine_id TEXT NOT NULL,
+      schedule_window_id TEXT NOT NULL,
+      trigger_type TEXT NOT NULL DEFAULT 'cron',
+      run_id TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'queued',
+      catch_up INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE(routine_id, schedule_window_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_agent_routine_runs_status ON agent_routine_runs(status, created_at);
   `);
     ensureColumn(db, "tasks", "task_context_revision", "INTEGER NOT NULL DEFAULT 0");
     ensureColumn(db, "tasks", "task_context_checksum", "TEXT NOT NULL DEFAULT ''");
     ensureColumn(db, "tasks", "active_timeline_span_id", "TEXT NOT NULL DEFAULT ''");
+    ensureColumn(db, "agent_runs", "lease_owner_id", "TEXT NOT NULL DEFAULT ''");
+    ensureColumn(db, "agent_runs", "lease_expires_at", "TEXT NOT NULL DEFAULT ''");
+    ensureColumn(db, "agent_runs", "lease_version", "INTEGER NOT NULL DEFAULT 0");
+    ensureColumn(db, "agent_runs", "workspace_evidence_json", "TEXT NOT NULL DEFAULT '{}'");
+    ensureColumn(db, "agent_wake_requests", "attempt_id", "TEXT NOT NULL DEFAULT ''");
+    try {
+        db.exec(`DROP INDEX IF EXISTS uq_agent_runs_active_identity;
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_agent_runs_active_identity
+      ON agent_runs(agent_id, scope_id, task_id)
+      WHERE status NOT IN ('succeeded', 'failed', 'cancelled', 'recovery_required')`);
+    }
+    catch { }
     setMeta(db, "schema_version", STORE_SCHEMA_VERSION);
 }
 function ensureColumn(db, table, column, definition) {

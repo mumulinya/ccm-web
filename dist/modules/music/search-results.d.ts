@@ -26,6 +26,7 @@ export declare function issueDownloadToken(source: MusicSource, sourceId: string
 export declare function extractMusicConvertTarget(message: string, keyword?: string): {
     source: "douyin";
     sourceId: string;
+    shareUrl: string;
     title: string;
     artist: string;
 } | {
@@ -33,11 +34,13 @@ export declare function extractMusicConvertTarget(message: string, keyword?: str
     sourceId: string;
     title: string;
     artist: string;
+    shareUrl?: undefined;
 } | {
     source: "netease";
     sourceId: string;
     title: string;
     artist: string;
+    shareUrl?: undefined;
 };
 export declare function runMusicSearchResultSelfTest(): {
     ok: boolean;

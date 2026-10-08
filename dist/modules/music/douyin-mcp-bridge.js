@@ -250,6 +250,7 @@ const MCP_TOOL_DESCRIPTIONS = {
     download_aweme_images: { readOnly: false, description: "下载抖音图文图片" },
     ocr_aweme_images: { readOnly: false, description: "识别抖音图文中的文字" },
     transcribe_video: { readOnly: false, description: "转写抖音视频语音" },
+    transcribe_audio: { readOnly: false, description: "转写 CCM 已缓存的抖音音频" },
     batch_transcribe: { readOnly: false, description: "批量搜索并转写视频" },
 };
 function managedMediaDir(value = "") {
@@ -282,7 +283,7 @@ function sidecarEnv(outputSubdir = '') {
     const asr = effectiveAsrEnv();
     return {
         DOUYIN_COOKIE: "", DOUYIN_COOKIE_PATH: materializeCookie() || cookieFile,
-        DOUYIN_DOWNLOAD_DIR: managedMediaDir("videos"),
+        DOUYIN_DOWNLOAD_DIR: managedMediaDir(""),
         DOUYIN_TRANSCRIPT_DIR: managedMediaDir(outputSubdir || "transcripts"),
         CCM_DOUYIN_MANAGED: "1", PYTHONUTF8: "1", PYTHONIOENCODING: "utf-8",
         ASR_PROVIDER: asr.provider,
@@ -296,6 +297,8 @@ function sidecarEnv(outputSubdir = '') {
 }
 async function callDouyinMcpTool(name, input = {}, options = {}) {
     const args = (0, douyin_contract_1.validateDouyinArgs)(name, input);
+    if (args.audio_path && !isDouyinManagedMediaPath(args.audio_path))
+        throw new Error("音频路径必须位于 CCM 管理目录内");
     if (args.save_dir !== undefined)
         args.save_dir = managedMediaDir(String(args.save_dir));
     if (name === "get_login_qrcode")
@@ -364,7 +367,7 @@ async function douyinMcpCapabilities() {
                 : asr.provider === "custom" && !!(asr.key && asr.apiUrl);
     return Object.keys(MCP_TOOL_DESCRIPTIONS).map(name => {
         const needsOcr = name === "ocr_aweme_images";
-        const needsAsr = name === "transcribe_video" || name === "batch_transcribe";
+        const needsAsr = name === "transcribe_video" || name === "transcribe_audio" || name === "batch_transcribe";
         const reason = mode() === "off" ? "抖音 MCP 已关闭"
             : !probe.root || !probe.uv || !probe.files ? "缺少 MCP 运行依赖"
                 : needsAsr && !hasAsr ? "未配置 ASR 服务，请在音乐设置中填写服务商和密钥后重启服务"
@@ -411,9 +414,78 @@ async function douyinMcpGetLoginQrcode() {
     // Route through the single managed session; never launch an orphan terminal login.
     return { ...startDouyinMcpLogin(), mode: 'managed_browser', launched: true };
 }
+const DOUYIN_SHARE_HOSTS = new Set(["v.douyin.com", "www.douyin.com", "douyin.com", "m.douyin.com", "www.iesdouyin.com"]);
+const DOUYIN_SHARE_URL_RE = /(?:(?:https?:\/\/)?(?:(?:v|www|m)\.douyin\.com|(?:www\.)?iesdouyin\.com)\/[^\s<>\[\]"']+)/i;
+const DOUYIN_SHARE_ID_RE = /(?:\/video\/|\/note\/|[?&]aweme_id=)(\d{10,24})/i;
+function extractPublicDouyinShare(value) {
+    const original = String(value || "").trim();
+    const match = original.match(DOUYIN_SHARE_URL_RE);
+    const candidate = (match?.[0] || original).replace(/[。，！？；：、,.!?;:)】】}>》〉]+$/g, "");
+    const normalized = candidate && !/^https?:\/\//i.test(candidate) ? `https://${candidate}` : candidate;
+    const id = normalized.match(DOUYIN_SHARE_ID_RE)?.[1] || (/^\d{10,24}$/.test(normalized) ? normalized : "");
+    return { original, normalized, id };
+}
+function validatePublicDouyinUrl(value) {
+    let parsed;
+    try {
+        parsed = new URL(value);
+    }
+    catch {
+        throw new Error("抖音分享地址无效");
+    }
+    if (parsed.protocol !== "https:" || !DOUYIN_SHARE_HOSTS.has(parsed.hostname) || parsed.port || parsed.username || parsed.password)
+        throw new Error("分享链接重定向到不允许的地址");
+    return parsed;
+}
+async function resolvePublicDouyinShare(value) {
+    const input = extractPublicDouyinShare(value);
+    if (!input.normalized)
+        throw new Error("未找到抖音分享链接");
+    if (input.id)
+        return input.id;
+    let current = input.normalized;
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+        validatePublicDouyinUrl(current);
+        const response = await fetch(current, { redirect: "manual", headers: { "user-agent": "CCM/4.1 (+music-share-resolver)" } });
+        if (response.status >= 300 && response.status < 400) {
+            const location = response.headers.get("location");
+            if (!location)
+                throw new Error("抖音分享链接缺少重定向地址");
+            current = new URL(location, current).toString();
+            continue;
+        }
+        if (!response.ok)
+            throw new Error(`抖音分享链接请求失败（HTTP ${response.status}）`);
+        const id = current.match(DOUYIN_SHARE_ID_RE)?.[1] || "";
+        if (id)
+            return id;
+        break;
+    }
+    throw new Error("无法从抖音分享地址解析视频 ID");
+}
 async function douyinMcpResolveShareUrl(shareUrl) {
     const value = String(shareUrl || "").trim();
-    return callDouyinMcpTool("resolve_share_url", { share_url: value.slice(0, 2_000) });
+    let awemeId = "";
+    try {
+        awemeId = await resolvePublicDouyinShare(value);
+    }
+    catch (error) {
+        // A logged-in MCP can still handle provider-specific redirects that the
+        // public resolver cannot inspect, while unauthenticated callers keep the
+        // safe public error instead of silently treating the link as a keyword.
+        if (cookieRef() && loginVerified !== false)
+            return callDouyinMcpTool("resolve_share_url", { share_url: value.slice(0, 2_000) });
+        throw error;
+    }
+    if (cookieRef() && loginVerified !== false) {
+        try {
+            return await callDouyinMcpTool("resolve_share_url", { share_url: value.slice(0, 2_000) });
+        }
+        catch { /* public identity is still enough to render a playable result */ }
+    }
+    // Resolving the public identity does not require a login. Details and media
+    // operations remain behind the existing MCP authentication/risk controls.
+    return { success: true, aweme_id: awemeId, video: { aweme_id: awemeId, desc: `抖音视频 ${awemeId}`, share_url: value.slice(0, 2_000) } };
 }
 async function douyinMcpDownloadVideo(awemeId, subdir = "videos", options = {}) {
     const directory = managedMediaDir(subdir);

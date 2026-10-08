@@ -167,12 +167,16 @@ function issueDownloadToken(source, sourceId, title, artist) {
 }
 function extractMusicConvertTarget(message, keyword = "") {
     const text = `${keyword || ""} ${message || ""}`;
-    const awemeId = text.match(/(?:douyin\.com\/video\/|抖音(?:视频)?\s*[#：:]?)(\d{10,24})/i)?.[1];
-    if (awemeId) {
+    const directAwemeId = text.match(/(?:douyin\.com\/(?:video|note)\/|aweme_id[=：:]|抖音(?:视频)?\s*[#：:]?)(\d{10,24})/i)?.[1];
+    const shareMatch = text.match(/(?:(?:https?:\/\/)?(?:(?:v|www|m)\.douyin\.com|(?:www\.)?iesdouyin\.com)\/[^\s<>\[\]"']+)/i);
+    const shareUrl = shareMatch?.[0]?.replace(/[。，！？；：、,.!?;:)】】}>》〉]+$/g, "");
+    const awemeId = directAwemeId || (shareUrl ? shareUrl.match(/douyin\.com\/(?:video|note)\/(\d{10,24})/i)?.[1] : "");
+    if (awemeId || shareUrl) {
         return {
             source: "douyin",
-            sourceId: awemeId,
-            title: awemeId,
+            sourceId: awemeId || "",
+            shareUrl: shareUrl || undefined,
+            title: awemeId || shareUrl || "抖音分享内容",
             artist: "抖音转码",
         };
     }
@@ -216,6 +220,12 @@ function runMusicSearchResultSelfTest() {
     }
     if (!rejected)
         throw new Error("篡改后的下载令牌未被拒绝");
+    const directDouyin = extractMusicConvertTarget("请转码 https://www.douyin.com/note/7471252140422401337");
+    if (directDouyin?.source !== "douyin" || directDouyin.sourceId !== "7471252140422401337")
+        throw new Error("抖音长链接解析失败");
+    const copiedDouyin = extractMusicConvertTarget("4.10 复制打开抖音，看看【测试】 https://v.douyin.com/iRNBho5G/ 复制此链接");
+    if (copiedDouyin?.source !== "douyin" || copiedDouyin.sourceId || copiedDouyin.shareUrl !== "https://v.douyin.com/iRNBho5G/")
+        throw new Error("抖音分享短链提取失败");
     return { ok: true, first: signed[0].title };
 }
 //# sourceMappingURL=search-results.js.map

@@ -50,10 +50,9 @@ const managed_process_tree_1 = require("../../system/managed-process-tree");
 const search_results_1 = require("./search-results");
 const music_catalog_1 = require("./music-catalog");
 const video_audio_projection_1 = require("./video-audio-projection");
-const douyin_1 = require("./douyin");
-const douyin_mcp_bridge_1 = require("./douyin-mcp-bridge");
 const bilibili_1 = require("./bilibili");
 const netease_mv_1 = require("./netease-mv");
+const douyin_media_coordinator_1 = require("./douyin-media-coordinator");
 const root = path.join(utils_1.CCM_DIR, 'media', 'video-playback');
 const store = path.join(utils_1.CCM_DIR, 'music-video-jobs.json');
 const jobs = new Map();
@@ -73,7 +72,9 @@ function directory(id) {
 }
 function output(job) { return path.join(directory(job.id), 'video.mp4'); }
 function ready(job) {
-    const file = output(job);
+    const file = job.source === 'douyin' ? (0, douyin_media_coordinator_1.getDouyinVideoAsset)(job.sourceId)?.filePath || output(job) : output(job);
+    if (!file)
+        return false;
     return fs.existsSync(file) && !fs.lstatSync(file).isSymbolicLink() && fs.statSync(file).isFile() && fs.statSync(file).size > 32;
 }
 function persist() {
@@ -123,7 +124,6 @@ async function prepare(job) {
     job.phase = '正在获取原视频';
     job.progress = null;
     update(job);
-    let staged = '';
     let partial = '';
     try {
         partial = path.join(directory(job.id), 'partial.mp4');
@@ -131,9 +131,10 @@ async function prepare(job) {
         if (ready(job)) {
             job.phase = '正在关联音乐库';
             update(job);
-            job.durationSeconds = (await (0, music_catalog_1.probeMusicFile)(output(job))).durationSeconds;
+            const localFile = job.source === 'douyin' ? (0, douyin_media_coordinator_1.douyinVideoFile)(job.sourceId) : output(job);
+            job.durationSeconds = (await (0, music_catalog_1.probeMusicFile)(localFile)).durationSeconds;
             if (job.source !== 'netease')
-                job.linkedTrack = await (0, video_audio_projection_1.linkVideoAudio)(job, output(job), controller.signal);
+                job.linkedTrack = await (0, video_audio_projection_1.linkVideoAudio)(job, localFile, controller.signal);
             if (!controller.signal.aborted) {
                 job.status = 'done';
                 job.progress = 100;
@@ -144,19 +145,37 @@ async function prepare(job) {
         }
         let args, duration = 0;
         if (job.source === 'douyin') {
-            const video = await (0, douyin_1.downloadDouyinVideoForPlayback)(job.sourceId, { signal: controller.signal });
-            if (!video?.filePath)
-                throw new Error('抖音 MCP 不可用，请到设置检查');
-            staged = video.filePath;
-            duration = video.durationSeconds;
-            args = ['-i', staged, '-map', '0:v:0', '-map', '0:a?'];
+            try {
+                const asset = await (0, douyin_media_coordinator_1.ensureDouyinVideoAsset)(job.sourceId, { signal: controller.signal });
+                if (!asset?.filePath)
+                    throw new Error('抖音本地视频未生成');
+                if (controller.signal.aborted)
+                    return;
+                job.durationSeconds = asset.durationSeconds;
+                job.phase = '正在建立音频与曲库关联';
+                update(job);
+                job.linkedTrack = await (0, video_audio_projection_1.linkVideoAudio)(job, asset.filePath, controller.signal);
+                if (!controller.signal.aborted) {
+                    job.status = 'done';
+                    job.progress = 100;
+                    job.phase = '视频已下载并可本地播放';
+                    job.error = undefined;
+                }
+                return;
+            }
+            catch (coordinatorError) {
+                // Douyin playback is deliberately local-only. The coordinator already
+                // owns MCP and yt-dlp fallback resolution; a failed asset must surface
+                // its error instead of creating a second remote download path.
+                throw coordinatorError;
+            }
         }
         else if (job.source === 'netease') {
             const video = await (0, netease_mv_1.getNeteaseMvInput)(job.sourceId);
             duration = video.duration;
             args = ['-rw_timeout', '30000000', '-headers', 'Referer: https://music.163.com/\r\n', '-i', video.input, '-map', '0:v:0', '-map', '0:a?'];
         }
-        else {
+        else if (!args) {
             const video = await (0, bilibili_1.getBiliPlaybackStreams)(job.sourceId);
             if (!video.videoUrl || !video.audioUrl)
                 throw new Error('该 B站视频暂不支持画面播放');
@@ -226,12 +245,6 @@ async function prepare(job) {
         }
     }
     finally {
-        if (staged && (0, douyin_mcp_bridge_1.isDouyinManagedMediaPath)(staged)) {
-            try {
-                fs.unlinkSync(staged);
-            }
-            catch { }
-        }
         try {
             if (fs.existsSync(partial))
                 fs.unlinkSync(partial);
@@ -379,6 +392,6 @@ function resolveMusicVideoFile(id) {
     const job = jobs.get(id);
     if (!job || job.status !== 'done' || !ready(job))
         throw new Error('视频缓存未就绪或已删除');
-    return output(job);
+    return job.source === 'douyin' && (0, douyin_media_coordinator_1.getDouyinVideoAsset)(job.sourceId) ? (0, douyin_media_coordinator_1.douyinVideoFile)(job.sourceId) : output(job);
 }
 //# sourceMappingURL=video-playback-jobs.js.map

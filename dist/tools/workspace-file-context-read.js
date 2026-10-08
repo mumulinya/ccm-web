@@ -57,7 +57,12 @@ async function readWorkspaceFileWithContext(input) {
         to: Number(result?.lines?.at(-1)?.line || result?.offset || 0),
         nextOffset: Number(result?.next_cursor || 0) || undefined,
     });
-    if (!context?.hasTextEvidence((0, workspace_read_context_1.workspaceTextEvidenceKey)(result, project)))
+    // Text evidence is recorded only after the effective model context has
+    // reconciled the returned payload. Returning a body to a caller is not
+    // proof that the model received it.
+    const evidenceId = (0, workspace_read_context_1.workspaceTextEvidenceKey)(result, project);
+    const wasSeen = context?.hasTextEvidence(evidenceId) === true;
+    if (!wasSeen)
         return result;
     // Multimodal results never take this text-only shortcut. Preserve range,
     // checksum and pagination metadata; only omit a proven existing text body.

@@ -34,6 +34,7 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.listDouyinMediaJobs = listDouyinMediaJobs;
+exports.getDouyinTranscription = getDouyinTranscription;
 exports.resolveDouyinJobArtifact = resolveDouyinJobArtifact;
 exports.createDouyinMediaJob = createDouyinMediaJob;
 exports.controlDouyinMediaJob = controlDouyinMediaJob;
@@ -43,6 +44,7 @@ const crypto = __importStar(require("crypto"));
 const utils_1 = require("../../core/utils");
 const douyin_mcp_bridge_1 = require("./douyin-mcp-bridge");
 const douyin_contract_1 = require("./douyin-contract");
+const douyin_media_coordinator_1 = require("./douyin-media-coordinator");
 const filename = path.join(utils_1.CCM_DIR, 'douyin-media-jobs.json');
 const records = new Map();
 const active = new Map();
@@ -82,9 +84,20 @@ async function run(job) {
     update(job);
     try {
         const args = { ...job.args };
-        if (['download_video', 'download_aweme_images', 'ocr_aweme_images'].includes(job.tool))
-            args.save_dir = `jobs/${job.id}`;
-        const result = await (0, douyin_mcp_bridge_1.callDouyinMcpTool)(job.tool, args, { signal: controller.signal, timeoutMs: 1_800_000, outputSubdir: `jobs/${job.id}` });
+        let result;
+        if (job.tool === 'download_video') {
+            const asset = await (0, douyin_media_coordinator_1.ensureDouyinVideoAsset)(String(job.args.aweme_id || ''), { signal: controller.signal });
+            result = { success: true, file_path: asset.filePath, video: { aweme_id: asset.sourceId, duration_seconds: asset.durationSeconds } };
+        }
+        else if (job.tool === 'transcribe_video') {
+            const audio = await (0, douyin_media_coordinator_1.ensureDouyinAudioAsset)(String(job.args.aweme_id || ''), { signal: controller.signal });
+            result = await (0, douyin_mcp_bridge_1.callDouyinMcpTool)('transcribe_audio', { audio_path: audio.audioPath, aweme_id: String(job.args.aweme_id || '') }, { signal: controller.signal, timeoutMs: 1_800_000, outputSubdir: `jobs/${job.id}` });
+        }
+        else {
+            if (['download_aweme_images', 'ocr_aweme_images'].includes(job.tool))
+                args.save_dir = `jobs/${job.id}`;
+            result = await (0, douyin_mcp_bridge_1.callDouyinMcpTool)(job.tool, args, { signal: controller.signal, timeoutMs: 1_800_000, outputSubdir: `jobs/${job.id}` });
+        }
         if (controller.signal.aborted)
             return;
         job.result = result;
@@ -138,6 +151,36 @@ function publicJob(job) {
     return { ...job, result: scrub(job.result), artifacts: artifacts(job).map((file, index) => ({ name: path.basename(file), url: `/api/music/platforms/douyin/jobs/${job.id}/files/${index}` })) };
 }
 function listDouyinMediaJobs() { load(); return [...records.values()].reverse().map(publicJob); }
+/**
+ * Return the latest transcription job for a video without exposing the media
+ * job store to the music player.  The lyric endpoint uses this projection to
+ * turn a completed ASR result into timed lyric lines and to show progress for
+ * an already running request.
+ */
+function getDouyinTranscription(awemeId) {
+    load();
+    const id = String(awemeId || '').trim();
+    if (!/^\d{10,24}$/.test(id))
+        return null;
+    const matches = [...records.values()]
+        .filter(job => job.tool === 'transcribe_video' && String(job.args?.aweme_id || '') === id)
+        .sort((a, b) => String(b.updatedAt || b.createdAt).localeCompare(String(a.updatedAt || a.createdAt)));
+    // A failed retry must not hide an earlier successful transcript. Prefer an
+    // active attempt while it is running, otherwise reuse the newest completed
+    // result and only report failure when no usable result exists.
+    const job = matches.find(item => ['waiting_confirmation', 'queued', 'running'].includes(item.status))
+        || matches.find(item => item.status === 'done')
+        || matches[0];
+    if (!job)
+        return null;
+    return {
+        id: job.id,
+        status: job.status,
+        phase: job.phase,
+        error: job.error || '',
+        result: job.status === 'done' ? job.result || null : null,
+    };
+}
 function resolveDouyinJobArtifact(id, index) {
     load();
     const job = records.get(id);

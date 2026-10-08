@@ -39,7 +39,7 @@ const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const child_process_1 = require("child_process");
 const bilibili_1 = require("./bilibili");
-const douyin_1 = require("./douyin");
+const douyin_media_coordinator_1 = require("./douyin-media-coordinator");
 const library_1 = require("./library");
 const search_results_1 = require("./search-results");
 const music_persistence_1 = require("./music-persistence");
@@ -281,28 +281,13 @@ class MusicDownloadJobStore {
             }
             let douyinInput = null;
             if (job.source === "douyin") {
-                try {
-                    const staged = await (0, douyin_1.downloadDouyinVideoForPlayback)(job.sourceId, { signal: abortController.signal });
-                    stagedDouyinFile = String(staged?.filePath || "");
-                    if (stagedDouyinFile) {
-                        douyinInput = { localFile: stagedDouyinFile, title: staged?.title || "", durationSeconds: staged?.durationSeconds || 0 };
-                        job.phase = "已通过抖音 MCP 获取视频，准备提取音频";
-                        job.updatedAt = now();
-                        this.persist();
-                    }
-                }
-                catch (mcpError) {
-                    if (abortController.signal.aborted || ['login_required', 'risk_controlled'].includes(mcpError?.douyinState))
-                        throw mcpError;
-                    // Keep the existing yt-dlp resolver as a compatibility fallback.
-                    job.phase = `MCP 下载不可用，切换兼容解析：${String(mcpError?.message || "").slice(0, 120)}`;
-                    job.updatedAt = now();
-                    this.persist();
-                }
-                if (abortController.signal.aborted)
-                    return;
-                if (!douyinInput)
-                    douyinInput = await (0, douyin_1.resolveDouyinMediaInput)(job.sourceId, { signal: abortController.signal });
+                const asset = await (0, douyin_media_coordinator_1.ensureDouyinAudioAsset)(job.sourceId, { signal: abortController.signal });
+                if (!asset?.audioPath)
+                    throw new Error("抖音本地音频未生成");
+                douyinInput = { localFile: asset.audioPath, title: asset.title || "", durationSeconds: asset.durationSeconds || 0 };
+                job.phase = "已准备本地音频，正在整理曲库";
+                job.updatedAt = now();
+                this.persist();
             }
             const audioUrl = job.source === "bilibili"
                 ? await (0, bilibili_1.getBiliAudioUrl)(job.sourceId)

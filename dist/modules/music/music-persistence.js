@@ -50,6 +50,14 @@ exports.deletePersistedDownloadJob = deletePersistedDownloadJob;
 exports.findMusicMediaAsset = findMusicMediaAsset;
 exports.findMusicMediaAssetByChecksum = findMusicMediaAssetByChecksum;
 exports.upsertMusicMediaAsset = upsertMusicMediaAsset;
+exports.getDouyinAsset = getDouyinAsset;
+exports.getDouyinAssetById = getDouyinAssetById;
+exports.listDouyinAssets = listDouyinAssets;
+exports.upsertDouyinAsset = upsertDouyinAsset;
+exports.getDouyinOperation = getDouyinOperation;
+exports.findActiveDouyinOperation = findActiveDouyinOperation;
+exports.upsertDouyinOperation = upsertDouyinOperation;
+exports.listDouyinOperations = listDouyinOperations;
 exports.activeMusicCatalogGeneration = activeMusicCatalogGeneration;
 exports.setActiveMusicCatalogGeneration = setActiveMusicCatalogGeneration;
 exports.getMusicCatalogStatus = getMusicCatalogStatus;
@@ -518,6 +526,79 @@ function upsertMusicMediaAsset(asset) {
       updated_at=excluded.updated_at
   `).run(asset.assetId || `music_asset_${crypto.randomUUID()}`, asset.source, String(asset.sourceId), asset.filename, asset.displayName || asset.filename, asset.requestedQuality || "", asset.actualQuality || "", Number(asset.bitrate || 0), Number(asset.sampleRate || 0), Number(asset.channels || 0), Number(asset.durationSeconds || 0), asset.format || "", Number(asset.fileSize || 0), asset.fileChecksum || "", timestamp, asset.createdAt || timestamp);
     return findMusicMediaAsset(asset.source, asset.sourceId);
+}
+function getDouyinAsset(sourceId, kind) {
+    ensureMusicPersistenceMigrated();
+    return (0, observability_database_1.getObservabilityDatabase)().prepare(`
+    SELECT * FROM music_douyin_assets_v1 WHERE source='douyin' AND source_id=? AND kind=?
+  `).get(String(sourceId), String(kind));
+}
+function getDouyinAssetById(assetId) {
+    ensureMusicPersistenceMigrated();
+    return (0, observability_database_1.getObservabilityDatabase)().prepare(`
+    SELECT * FROM music_douyin_assets_v1 WHERE asset_id=?
+  `).get(String(assetId));
+}
+function listDouyinAssets(limit = 200) {
+    ensureMusicPersistenceMigrated();
+    return (0, observability_database_1.getObservabilityDatabase)().prepare(`
+    SELECT * FROM music_douyin_assets_v1 ORDER BY updated_at DESC LIMIT ?
+  `).all(Math.max(1, Math.min(1000, Number(limit) || 200)));
+}
+function upsertDouyinAsset(asset) {
+    ensureMusicPersistenceMigrated();
+    const timestamp = now();
+    const id = String(asset.assetId || asset.asset_id || `dy_asset_${crypto.randomUUID()}`);
+    (0, observability_database_1.getObservabilityDatabase)().prepare(`
+    INSERT INTO music_douyin_assets_v1(
+      asset_id, source, source_id, kind, status, file_path, file_checksum,
+      file_size, duration_seconds, format, resolver, metadata_json, error,
+      created_at, updated_at
+    ) VALUES (?, 'douyin', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(source, source_id, kind) DO UPDATE SET
+      asset_id=excluded.asset_id, status=excluded.status, file_path=excluded.file_path,
+      file_checksum=excluded.file_checksum, file_size=excluded.file_size,
+      duration_seconds=excluded.duration_seconds, format=excluded.format,
+      resolver=excluded.resolver, metadata_json=excluded.metadata_json,
+      error=excluded.error, updated_at=excluded.updated_at
+  `).run(id, String(asset.sourceId || asset.source_id), String(asset.kind), String(asset.status || 'ready'), String(asset.filePath || asset.file_path || ''), String(asset.fileChecksum || asset.file_checksum || ''), Number(asset.fileSize || asset.file_size || 0), Number(asset.durationSeconds || asset.duration_seconds || 0), String(asset.format || ''), String(asset.resolver || ''), JSON.stringify(asset.metadata || {}), String(asset.error || ''), asset.createdAt || asset.created_at || timestamp, timestamp);
+    return getDouyinAsset(String(asset.sourceId || asset.source_id), String(asset.kind));
+}
+function getDouyinOperation(operationId) {
+    ensureMusicPersistenceMigrated();
+    return (0, observability_database_1.getObservabilityDatabase)().prepare(`
+    SELECT * FROM music_douyin_operations_v1 WHERE operation_id=?
+  `).get(String(operationId));
+}
+function findActiveDouyinOperation(sourceId, kind) {
+    ensureMusicPersistenceMigrated();
+    return (0, observability_database_1.getObservabilityDatabase)().prepare(`
+    SELECT * FROM music_douyin_operations_v1
+    WHERE source='douyin' AND source_id=? AND kind=?
+      AND status IN ('queued','resolving','downloading','validating','interrupted')
+    ORDER BY updated_at DESC LIMIT 1
+  `).get(String(sourceId), String(kind));
+}
+function upsertDouyinOperation(operation) {
+    ensureMusicPersistenceMigrated();
+    const timestamp = now();
+    (0, observability_database_1.getObservabilityDatabase)().prepare(`
+    INSERT INTO music_douyin_operations_v1(
+      operation_id, source, source_id, kind, status, resolver, attempt,
+      checkpoint, temp_path, asset_id, error, metadata_json, created_at, updated_at
+    ) VALUES (?, 'douyin', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(operation_id) DO UPDATE SET
+      status=excluded.status, resolver=excluded.resolver, attempt=excluded.attempt,
+      checkpoint=excluded.checkpoint, temp_path=excluded.temp_path, asset_id=excluded.asset_id,
+      error=excluded.error, metadata_json=excluded.metadata_json, updated_at=excluded.updated_at
+  `).run(String(operation.operationId || operation.operation_id), String(operation.sourceId || operation.source_id), String(operation.kind), String(operation.status), String(operation.resolver || ''), Number(operation.attempt || 1), String(operation.checkpoint || ''), String(operation.tempPath || operation.temp_path || ''), String(operation.assetId || operation.asset_id || ''), String(operation.error || ''), JSON.stringify(operation.metadata || {}), operation.createdAt || operation.created_at || timestamp, timestamp);
+    return getDouyinOperation(String(operation.operationId || operation.operation_id));
+}
+function listDouyinOperations(limit = 200) {
+    ensureMusicPersistenceMigrated();
+    return (0, observability_database_1.getObservabilityDatabase)().prepare(`
+    SELECT * FROM music_douyin_operations_v1 ORDER BY updated_at DESC LIMIT ?
+  `).all(Math.max(1, Math.min(1000, Number(limit) || 200)));
 }
 function activeMusicCatalogGeneration() {
     return Number((0, observability_database_1.observabilityMeta)("music.catalog.active-generation", 0) || 0);

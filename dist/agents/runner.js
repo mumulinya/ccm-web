@@ -63,6 +63,10 @@ const memory_context_consumption_recovery_1 = require("../integrations/memory-co
 const project_verification_discovery_1 = require("./project-verification-discovery");
 const agent_cache_affinity_1 = require("../system/agent-cache-affinity");
 const provider_cache_scope_metrics_1 = require("../system/provider-cache-scope-metrics");
+const agent_run_store_1 = require("./agent-run-store");
+const agent_runtime_adapter_1 = require("./agent-runtime-adapter");
+const agent_receipt_resolution_1 = require("./agent-receipt-resolution");
+const agent_execution_coordinator_1 = require("./agent-execution-coordinator");
 const AGENT_RUNNER_DIR = path.join(utils_1.CCM_DIR, "agent-runner");
 const REQUESTS_DIR = path.join(AGENT_RUNNER_DIR, "requests");
 const RESULTS_DIR = path.join(AGENT_RUNNER_DIR, "results");
@@ -655,8 +659,49 @@ async function runRequest(file) {
     const createdAt = Date.parse(String(request.created_at || request.createdAt || ""));
     const requestAgeMs = Number.isFinite(createdAt) ? Date.now() - createdAt : 0;
     const staleAfterMs = Math.max(10 * 60 * 1000, Number(request.timeoutMs || 300000) + 60 * 1000);
+    const agentRunId = String(request.agentRunId || request.agent_run_id || "");
+    const finishAgentRun = (status, message, extra = {}) => {
+        const resolution = (0, agent_receipt_resolution_1.resolveAgentRunFromReceipt)({
+            ...request,
+            run_id: request.run_id || request.agentRunId || request.agent_run_id,
+            trace_id: request.trace_id || request.traceId,
+            task_id: request.task_id || request.taskId,
+            attempt_id: request.attempt_id || request.attemptId,
+            execution_id: request.execution_id || request.executionId,
+            task_agent_session_id: request.task_agent_session_id || request.taskAgentSessionId,
+        });
+        if (["ambiguous", "identity_mismatch"].includes(resolution.status))
+            return;
+        const resolvedRunId = resolution.run?.runId || agentRunId;
+        if (!resolvedRunId)
+            return;
+        try {
+            if (["succeeded", "failed", "cancelled"].includes(String(status))) {
+                (0, agent_execution_coordinator_1.finalizePersistentAgentExecution)({
+                    runId: resolvedRunId,
+                    leaseOwnerId: request.leaseOwnerId || request.lease_owner_id || "",
+                    status,
+                    result: extra?.result,
+                    error: extra?.error,
+                    nativeSessionId: extra?.nativeSessionId || request.nativeSessionId || request.native_session_id,
+                    taskAgentSessionId: request.taskAgentSessionId || request.task_agent_session_id,
+                    workspacePath: request.workDir || request.workspacePath || request.workspace_path,
+                    worktreeId: request.worktreeId || request.worktree_id,
+                    usage: extra?.usage,
+                });
+            }
+            else if (status === "running") {
+                (0, agent_execution_coordinator_1.markPersistentAgentExecutionStarted)(resolvedRunId, String(extra?.leaseId || extra?.lease_id || request.leaseId || request.lease_id || ""));
+            }
+            else if (status === "recovery_required") {
+                (0, agent_execution_coordinator_1.markPersistentAgentExecutionRecoveryRequired)(resolvedRunId, message, extra?.error || extra);
+            }
+        }
+        catch { }
+    };
     if (request.status === "pending" && requestAgeMs > staleAfterMs) {
         markRequest(file, { status: "expired", completed_at: new Date().toISOString(), error: "外部 Runner 请求已超过调用方等待窗口，安全跳过，避免恢复历史任务" });
+        finishAgentRun("recovery_required", "外部 Runner 请求过期，等待恢复检查", { error: { code: "runner_request_expired" } });
         return true;
     }
     const resultFile = path.join(RESULTS_DIR, `${request.id}.json`);
@@ -668,6 +713,7 @@ async function runRequest(file) {
     if (!initialSessionLifecycleValidation.valid) {
         writeHeartbeat("blocked", "session lifecycle fence blocked");
         writeSessionLifecycleBlockedResult(file, resultFile, request, initialSessionLifecycleValidation, executionId);
+        finishAgentRun("cancelled", "群聊会话生命周期围栏阻止启动", { error: { code: "session_lifecycle_stale" } });
         writeHeartbeat("idle", "");
         return true;
     }
@@ -675,6 +721,7 @@ async function runRequest(file) {
     if (!runtimeToolValidation.ok) {
         writeHeartbeat("blocked", runtimeToolValidation.reason || "runtime tool gate blocked");
         writeRuntimeToolGateBlockedResult(file, resultFile, request, runtimeToolValidation, executionId);
+        finishAgentRun("failed", "运行时工具授权复验失败", { error: { code: "runtime_tool_dispatch_blocked" } });
         writeHeartbeat("idle", "");
         return true;
     }
@@ -683,9 +730,11 @@ async function runRequest(file) {
         markRequest(file, { status: "cancelled", completed_at: new Date().toISOString() });
         if (executionId)
             (0, execution_kernel_1.transitionExecution)(executionId, "cancelled", request.cancel_reason || "任务已取消");
+        finishAgentRun("cancelled", "外部 Agent Runner 启动前已取消", { error: { code: "cancelled" } });
         return true;
     }
     markRequest(file, { status: "running", runner_pid: process.pid, started_at: new Date().toISOString() });
+    finishAgentRun("running", "外部 Agent Runner 已开始执行", { leaseId: request.leaseId || request.lease_id || "" });
     writeHeartbeat("running", `${request.projectName || "agent"} ${request.id}`);
     const msgFile = path.join(utils_1.UPLOAD_DIR, `_runner_${request.id}.txt`);
     const memorySystemPromptFile = path.join(utils_1.UPLOAD_DIR, `_runner_${request.id}.memory-system.txt`);
@@ -738,7 +787,7 @@ async function runRequest(file) {
         if (providerMemoryChannel.developerPrompt)
             fs.writeFileSync(memoryDeveloperInstructionsFile, providerMemoryChannel.developerPrompt, "utf-8");
         let effectiveAgentSession = request.agentSession || {};
-        let providerCommand = (0, runtime_1.buildAgentCommand)(agentType, msgFile, {
+        let providerCommand = (0, agent_runtime_adapter_1.getAgentRuntimeAdapter)(agentType).buildCommand(msgFile, {
             cliAllowedTools,
             disableBuiltinTools: request.disableBuiltinTools === true,
             mcpConfigPath: effectiveMcpConfigPath,
@@ -796,6 +845,18 @@ async function runRequest(file) {
             maxOutputBytes: Number(request.maxOutputBytes || 2 * 1024 * 1024),
             env: (0, execution_kernel_1.sanitizeExecutionEnv)((0, runtime_tool_sync_1.getRuntimeExecutionEnv)(agentType), request.envAllowlist || []),
             onStdout: text => runtimeEventParser?.push(text),
+            agentRunId,
+            leaseOwnerId: String(request.leaseOwnerId || ""),
+            traceId: request.traceId || request.trace_id,
+            attemptId: request.attemptId || request.attempt_id,
+            parentRunId: request.parentRunId || request.parent_run_id,
+            scope: request.scope,
+            scopeId: request.scopeId || request.scope_id,
+            taskAgentSessionId: request.taskAgentSessionId || request.task_agent_session_id,
+            nativeSessionId: request.nativeSessionId || request.native_session_id,
+            worktreeId: request.worktreeId || request.worktree_id,
+            triggerType: request.triggerType || request.trigger_type,
+            deferAgentRunFinalization: true,
         });
         let managed;
         let resumeLaunchError = null;
@@ -826,7 +887,7 @@ async function runRequest(file) {
                 resumeSession: false,
                 sessionId: "",
             };
-            providerCommand = (0, runtime_1.buildAgentCommand)(agentType, msgFile, {
+            providerCommand = (0, agent_runtime_adapter_1.getAgentRuntimeAdapter)(agentType).buildCommand(msgFile, {
                 cliAllowedTools,
                 disableBuiltinTools: request.disableBuiltinTools === true,
                 mcpConfigPath: effectiveMcpConfigPath,
@@ -943,7 +1004,7 @@ async function runRequest(file) {
                     providerWorkCompleted: true,
                 }, async (recoveryRequest) => {
                     fs.writeFileSync(memoryReceiptRecoveryPromptFile, recoveryRequest.prompt, "utf-8");
-                    const recoveryCommand = (0, runtime_1.buildAgentCommand)(agentType, memoryReceiptRecoveryPromptFile, {
+                    const recoveryCommand = (0, agent_runtime_adapter_1.getAgentRuntimeAdapter)(agentType).buildCommand(memoryReceiptRecoveryPromptFile, {
                         cliAllowedTools,
                         mcpConfigPath: effectiveMcpConfigPath,
                         persistSession: true,
@@ -957,6 +1018,17 @@ async function runRequest(file) {
                         timeoutMs: Math.min(60_000, Math.max(15_000, timeoutMs)),
                         maxOutputBytes: 512 * 1024,
                         env: (0, execution_kernel_1.sanitizeExecutionEnv)((0, runtime_tool_sync_1.getRuntimeExecutionEnv)(agentType), request.envAllowlist || []),
+                        agentRunId,
+                        traceId: request.traceId || request.trace_id,
+                        attemptId: request.attemptId || request.attempt_id,
+                        parentRunId: request.parentRunId || request.parent_run_id,
+                        scope: request.scope,
+                        scopeId: request.scopeId || request.scope_id,
+                        taskAgentSessionId: request.taskAgentSessionId || request.task_agent_session_id,
+                        nativeSessionId: recoveryRequest.nativeSessionId || request.nativeSessionId || request.native_session_id,
+                        worktreeId: request.worktreeId || request.worktree_id,
+                        triggerType: "resume",
+                        deferAgentRunFinalization: true,
                     });
                     memoryReceiptRecoveryProviderOutput = String(recoveryRun.stdout || "");
                     const recoveryOutput = (0, runtime_1.normalizeAgentCommandOutput)(agentType, memoryReceiptRecoveryProviderOutput, { runtimeVersionSnapshot });
@@ -1066,6 +1138,19 @@ async function runRequest(file) {
             completed_at: new Date().toISOString(),
         });
         markRequest(file, { status: "done", completed_at: new Date().toISOString() });
+        if (agentRunId) {
+            try {
+                (0, agent_run_store_1.updateAgentRunBindings)(agentRunId, {
+                    taskAgentSessionId: request.taskAgentSessionId || request.task_agent_session_id,
+                    nativeSessionId: nativeContinuationEvidence.effectiveNativeSessionId,
+                    workspacePath: workDir,
+                    worktreeId: request.worktreeId || request.worktree_id,
+                    runtimeVersionSnapshot,
+                });
+            }
+            catch { }
+            finishAgentRun("succeeded", "外部 Agent Runner 执行成功", { result: { runnerRequestId: request.id, nativeSessionId: nativeContinuationEvidence.effectiveNativeSessionId }, nativeSessionId: nativeContinuationEvidence.effectiveNativeSessionId, usage: projectWorkerUsage });
+        }
     }
     catch (error) {
         runtimeEventParser?.flush();
@@ -1103,6 +1188,9 @@ async function runRequest(file) {
         markRequest(file, { status: cancelled ? "cancelled" : "failed", completed_at: new Date().toISOString(), error: output });
         if (executionId)
             (0, execution_kernel_1.transitionExecution)(executionId, cancelled ? "cancelled" : "failed", output, { failure, failureClass: failure.failureClass });
+        finishAgentRun(cancelled ? "cancelled" : "failed", cancelled ? "外部 Agent Runner 已取消" : "外部 Agent Runner 执行失败", {
+            error: { code: failure.failureClass || "runner_failed", message: output.slice(0, 1000) },
+        });
     }
     finally {
         liveWorkspaceTracker?.stop();
@@ -1379,9 +1467,9 @@ function runAgentRunnerSelfTest() {
         const nestedOnlyClaudeConfigPath = resolveRunnerMcpConfigPath(nestedOnlyClaudeRequest, nestedOnlyClaudeValidation);
         const nestedOnlyCursorConfigPath = resolveRunnerMcpConfigPath(nestedOnlyCursorRequest, nestedOnlyCursorValidation);
         const nestedOnlyCodexConfigPath = resolveRunnerMcpConfigPath(nestedOnlyCodexRequest, nestedOnlyCodexValidation);
-        const nestedOnlyClaudeCommand = (0, runtime_1.buildAgentCommand)("claudecode", "prompt.txt", { mcpConfigPath: nestedOnlyClaudeConfigPath });
-        const nestedOnlyCursorCommand = (0, runtime_1.buildAgentCommand)("cursor", "prompt.txt", { mcpConfigPath: nestedOnlyCursorConfigPath });
-        const nestedOnlyCodexCommand = (0, runtime_1.buildAgentCommand)("codex", "prompt.txt", { mcpConfigPath: nestedOnlyCodexConfigPath });
+        const nestedOnlyClaudeCommand = (0, agent_runtime_adapter_1.getAgentRuntimeAdapter)("claudecode").buildCommand("prompt.txt", { mcpConfigPath: nestedOnlyClaudeConfigPath });
+        const nestedOnlyCursorCommand = (0, agent_runtime_adapter_1.getAgentRuntimeAdapter)("cursor").buildCommand("prompt.txt", { mcpConfigPath: nestedOnlyCursorConfigPath });
+        const nestedOnlyCodexCommand = (0, agent_runtime_adapter_1.getAgentRuntimeAdapter)("codex").buildCommand("prompt.txt", { mcpConfigPath: nestedOnlyCodexConfigPath });
         const missingCodexRolloutRecognized = isMissingNativeSessionFailure("thread/resume: thread/resume failed: no rollout");
         const unrelatedProviderFailureNotRehydrated = !isMissingNativeSessionFailure("HTTP 401 invalid API key");
         const decodePromptRunnerArgs = (command) => {

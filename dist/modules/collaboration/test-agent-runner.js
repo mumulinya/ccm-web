@@ -56,6 +56,8 @@ const git_workspace_runtime_1 = require("../tools/git-workspace-runtime");
 const operation_registry_1 = require("../../system/operation-registry");
 const evidence_projection_1 = require("../../test-agent/evidence-projection");
 const runtime_fingerprint_1 = require("../../test-agent/runtime-fingerprint");
+const agent_run_store_1 = require("../../agents/agent-run-store");
+const agent_execution_coordinator_1 = require("../../agents/agent-execution-coordinator");
 const RUN_DIR = path.join(utils_1.CCM_DIR, "test-agent-runs");
 const HANDOFF_DIR = path.join(utils_1.CCM_DIR, "test-agent-handoffs");
 const activeByKey = new Map();
@@ -508,6 +510,24 @@ function finalizeRecord(record, status, exitCode, signal, error = "") {
     }
     record.finishedAt = nowIso();
     record.heartbeatAt = record.finishedAt;
+    if (record.agentRunId) {
+        try {
+            const runStatus = record.status === "completed" ? "succeeded" : record.status === "cancelled" ? "cancelled" : record.status === "interrupted" ? "recovery_required" : "failed";
+            if (runStatus === "recovery_required") {
+                (0, agent_execution_coordinator_1.markPersistentAgentExecutionRecoveryRequired)(record.agentRunId, `TestAgent ${record.mode} 需要恢复`, record.error ? { message: record.error.slice(0, 500) } : {});
+            }
+            else {
+                (0, agent_execution_coordinator_1.finalizePersistentAgentExecution)({
+                    runId: record.agentRunId,
+                    leaseOwnerId: record.leaseOwnerId,
+                    status: runStatus,
+                    error: record.error ? { message: record.error.slice(0, 500) } : {},
+                    result: { status: record.status, runnerId: record.id },
+                });
+            }
+        }
+        catch { }
+    }
     saveRecord(record);
     const result = resultFromRecord(record, false);
     removeTransientOutputFiles(record);
@@ -554,6 +574,24 @@ async function startJob(input, key) {
         attemptScope: String(input.attemptScope || ""),
         runtimeEnvFingerprint: runtimeEnvironmentFingerprint(input.runtimeEnv),
     };
+    {
+        const taskId = String(input.taskId || input.handoff?.taskId || input.handoff?.task_id || "");
+        const groupId = String(input.groupId || input.handoff?.groupId || input.handoff?.group_id || "");
+        record.leaseOwnerId = `test-agent:${process.pid}:${id}`;
+        const coordinatedExecution = await (0, agent_execution_coordinator_1.startPersistentAgentExecution)({
+            taskId, traceId: String(input.handoff?.trace_id || input.handoff?.traceId || `task:${taskId}`),
+            attemptId: String(input.attemptScope || input.mode), parentRunId: String(input.handoff?.parent_run_id || ""),
+            scope: groupId ? "group" : "test_agent", scopeId: groupId || taskId, agentId: "test-agent", runtimeId: "test-agent",
+            taskAgentSessionId: String(input.runtimeProgressContext?.exactSessionId || input.runtimeProgressContext?.exact_session_id || ""),
+            nativeSessionId: String(input.handoff?.native_session_id || ""), executionId: id, workspacePath: String(input.allowedWorkDirs?.[0] || ""),
+            triggerType: "user", source: "test-agent", idempotencyKey: `test-agent:${key}`, leaseOwnerId: record.leaseOwnerId,
+        });
+        if (coordinatedExecution.mode === "coalesced")
+            throw Object.assign(new Error("TestAgent 已存在同一幂等执行"), { code: "CCM_RUN_ALREADY_ACTIVE", agentRunId: coordinatedExecution.run.runId });
+        const run = coordinatedExecution.run;
+        record.agentRunId = run.runId;
+        (0, agent_execution_coordinator_1.markPersistentAgentExecutionStarted)(run.runId, coordinatedExecution.lease?.run?.leaseId || "");
+    }
     saveRecord(record);
     const outFd = fs.openSync(stdoutPath, "w");
     const errFd = fs.openSync(stderrPath, "w");
@@ -609,6 +647,12 @@ async function startJob(input, key) {
                 saveRecord(record);
             }
             catch { }
+            if (record.agentRunId && record.leaseOwnerId) {
+                try {
+                    (0, agent_run_store_1.heartbeatAgentRunLease)(record.agentRunId, record.leaseOwnerId, "", timeoutMs);
+                }
+                catch { }
+            }
         }, 5000);
         heartbeat.unref?.();
         const timeout = setTimeout(() => {

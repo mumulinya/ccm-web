@@ -32,21 +32,14 @@ export declare function resolveStreamMediaInput(s: StreamSession & any, signal: 
     duration: number;
 } | {
     input: string;
-    local: boolean;
-    duration: any;
-    headers?: undefined;
-    video?: undefined;
-    audio?: undefined;
-} | {
-    input: string;
     headers: {
         "User-Agent"?: undefined;
         Referer?: undefined;
     };
     duration: any;
-    local?: undefined;
     video?: undefined;
     audio?: undefined;
+    local?: undefined;
 } | {
     video: any;
     audio: any;
@@ -58,10 +51,10 @@ export declare function resolveStreamMediaInput(s: StreamSession & any, signal: 
     input?: undefined;
     local?: undefined;
 } | {
-    input: string;
-    headers: Record<string, string>;
-    duration: number;
-    local?: undefined;
+    input: any;
+    local: boolean;
+    duration: any;
+    headers?: undefined;
     video?: undefined;
     audio?: undefined;
 }>;

@@ -67,6 +67,7 @@ exports.writeSse = writeSse;
 exports.emitAssignmentStatus = emitAssignmentStatus;
 // collaboration-runtime-daily-dev.ts — merged from 2 part files (behavior-freeze merge).
 const conversation_attempt_1 = require("../../agents/conversation-attempt");
+const agent_run_store_1 = require("../../agents/agent-run-store");
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const crypto = __importStar(require("crypto"));
@@ -1400,6 +1401,16 @@ function writeSse(res, data) {
     data = (0, conversation_attempt_1.projectConversationAttemptEvent)(res, data);
     if (!data)
         return;
+    const taskId = String(data?.taskId || data?.task_id || "").trim();
+    if (taskId && !data.run_id && !data.runId) {
+        try {
+            const runs = require("../../agents/agent-run-store").listAgentRuns({ taskId, limit: 1 });
+            const projection = runs[0] ? (0, agent_run_store_1.buildAgentRunProjection)(runs[0].runId) : null;
+            if (projection)
+                data = { ...data, ...projection };
+        }
+        catch { }
+    }
     try {
         const sequence = Number(res.__ccmSseSequence || 0) + 1;
         res.__ccmSseSequence = sequence;

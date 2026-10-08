@@ -563,6 +563,49 @@ function createSchema(db) {
     CREATE INDEX IF NOT EXISTS idx_music_media_assets_v2_checksum
       ON music_media_assets_v2(file_checksum);
 
+    CREATE TABLE IF NOT EXISTS music_douyin_assets_v1 (
+      asset_id TEXT PRIMARY KEY,
+      source TEXT NOT NULL DEFAULT 'douyin',
+      source_id TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      status TEXT NOT NULL,
+      file_path TEXT NOT NULL DEFAULT '',
+      file_checksum TEXT NOT NULL DEFAULT '',
+      file_size INTEGER NOT NULL DEFAULT 0,
+      duration_seconds REAL NOT NULL DEFAULT 0,
+      format TEXT NOT NULL DEFAULT '',
+      resolver TEXT NOT NULL DEFAULT '',
+      metadata_json TEXT NOT NULL DEFAULT '{}',
+      error TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE(source, source_id, kind)
+    );
+    CREATE INDEX IF NOT EXISTS idx_music_douyin_assets_v1_status
+      ON music_douyin_assets_v1(source, source_id, kind, status);
+    CREATE INDEX IF NOT EXISTS idx_music_douyin_assets_v1_checksum
+      ON music_douyin_assets_v1(file_checksum);
+
+    CREATE TABLE IF NOT EXISTS music_douyin_operations_v1 (
+      operation_id TEXT PRIMARY KEY,
+      source TEXT NOT NULL DEFAULT 'douyin',
+      source_id TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      status TEXT NOT NULL,
+      resolver TEXT NOT NULL DEFAULT '',
+      attempt INTEGER NOT NULL DEFAULT 1,
+      checkpoint TEXT NOT NULL DEFAULT '',
+      temp_path TEXT NOT NULL DEFAULT '',
+      asset_id TEXT NOT NULL DEFAULT '',
+      error TEXT NOT NULL DEFAULT '',
+      metadata_json TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE(source, source_id, kind, status)
+    );
+    CREATE INDEX IF NOT EXISTS idx_music_douyin_operations_v1_key
+      ON music_douyin_operations_v1(source, source_id, kind, updated_at DESC);
+
     CREATE TABLE IF NOT EXISTS music_catalog_generations_v4 (
       generation INTEGER PRIMARY KEY,
       status TEXT NOT NULL,

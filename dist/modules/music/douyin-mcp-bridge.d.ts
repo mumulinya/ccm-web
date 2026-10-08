@@ -1,5 +1,5 @@
 export type DouyinMcpMode = "auto" | "on" | "off";
-export type DouyinMcpToolName = "check_login_status" | "logout" | "search_videos" | "get_video_detail" | "get_video_comments" | "get_video_live_comments" | "get_sub_comments" | "get_user_info" | "get_user_posts" | "get_homefeed" | "get_login_qrcode" | "resolve_share_url" | "download_video" | "download_aweme_images" | "ocr_aweme_images" | "transcribe_video" | "batch_transcribe";
+export type DouyinMcpToolName = "check_login_status" | "logout" | "search_videos" | "get_video_detail" | "get_video_comments" | "get_video_live_comments" | "get_sub_comments" | "get_user_info" | "get_user_posts" | "get_homefeed" | "get_login_qrcode" | "resolve_share_url" | "download_video" | "download_aweme_images" | "ocr_aweme_images" | "transcribe_video" | "transcribe_audio" | "batch_transcribe";
 export type DouyinMcpCapability = {
     name: DouyinMcpToolName;
     available: boolean;

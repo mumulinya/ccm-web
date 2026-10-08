@@ -15,8 +15,12 @@ const agent_runtime_progress_1 = require("./system/agent-runtime-progress");
 const credential_store_1 = require("./core/credential-store");
 const agent_internal_mcp_1 = require("./integrations/agent-internal-mcp");
 const memory_context_consumption_receipt_1 = require("./integrations/memory-context-consumption-receipt");
+const agent_run_store_1 = require("./agents/agent-run-store");
+const agent_runtime_adapter_1 = require("./agents/agent-runtime-adapter");
+const agent_receipt_resolution_1 = require("./agents/agent-receipt-resolution");
+const agent_execution_coordinator_1 = require("./agents/agent-execution-coordinator");
 function createAgentRunnerRuntime(deps) {
-    const { normalizeToolSelection, hasToolSelection, buildAgentRunnerRuntimeToolPayload, normalizeVerificationCommands, extractVerificationCommandsFromMessage, buildAgentCliAllowedTools, isSpawnPermissionError, nativeContinuationDoneFields, callAgentViaExternalRunner, getProjectToolSelection, findRuntimeToolSnapshotPath, readJsonFileSafe, runtimeToolSnapshotFromAudit, normalizeAgentRunnerRuntimeToolSnapshot, getProjectVerificationCommandsForRunner, runIndependentProjectVerification, buildProjectToolContext, sendRuntimeToolDispatchBlocked, ensureAgentRunnerDirs, createAgentRunnerRequest, waitForAgentRunnerResult, recordNativeCapacityRefreshOutcome, callAgentViaExternalRunnerRaw, runManagedAgentContinuation, continueAgentToolCalls, } = (0, server_agent_runner_support_1.createAgentRunnerSupport)(deps);
+    const { normalizeToolSelection, hasToolSelection, buildAgentRunnerRuntimeToolPayload, normalizeVerificationCommands, extractVerificationCommandsFromMessage, buildAgentCliAllowedTools, isSpawnPermissionError, nativeContinuationDoneFields, callAgentViaExternalRunner, getProjectToolSelection, findRuntimeToolSnapshotPath, readJsonFileSafe, runtimeToolSnapshotFromAudit, normalizeAgentRunnerRuntimeToolSnapshot, getProjectVerificationCommandsForRunner, runIndependentProjectVerification, buildProjectToolContext, sendRuntimeToolDispatchBlocked, ensureAgentRunnerDirs, createAgentRunnerRequest, waitForAgentRunnerResult, recordNativeCapacityRefreshOutcome, callAgentViaExternalRunnerRaw, runManagedAgentContinuation, continueAgentToolCalls, processAgentHeartbeatWake, } = (0, server_agent_runner_support_1.createAgentRunnerSupport)(deps);
     const { AGENT_RUNNER_DIR, AGENT_RUNNER_REQUESTS_DIR, AGENT_RUNNER_RESULTS_DIR, UPLOAD_DIR, acknowledgeProviderMemoryChannelLaunch, appendDirectAgentDispatchTranscript, bindProjectRunAgentSession, bindProviderMemoryChannelLaunch, buildAgentCommand, buildNativeSessionContinuationEvidence, buildProjectConversationBrief, buildProjectExecutionBrief, buildRuntimeToolDispatchGate, buildRuntimeToolSyncPrompt, buildToolAuthorizationPayload, captureAgentRuntimeVersionSnapshot, completeDirectAgentDispatch, createDirectAgentDispatchRequest, createFileChangeSnapshot, createProjectChatRun, detectAgentCommandFailure, extractNativeModelCapabilityReceipt, extractProviderToolAccessEvidence, fs, getAgentCommandLabel, getAgentRunActivityDuration, getAgentRuntime, getFileChanges, getRuntimeExecutionEnv, isSafeVerificationCommand, loadProjectConfigs, markDirectAgentDispatchStarted, normalizeAgentCommandOutput, normalizeAgentRuntimeId, path, persistBoundedOutput, prepareProviderMemoryChannel, publicProjectChatRun, readMemoryContextConsumptionReceipt, recordMetric, recordProjectSessionProviderUsage, recordModelCapabilityRefreshOutcome, recordRuntimeToolSyncAudit, recordTaskAgentSessionTurn, recordVerifiedNativeModelCapabilityReceipt, recoverMemoryContextConsumptionReceipt, registerExternalRunnerRequest, runManagedCommand, runToolCallLoop, sanitizeExecutionEnv, saveProjectChatRuns, sendJson, setAgentActivity, spawn, syncRuntimeTools, terminateManagedChildProcess, toolManager, trackManagedChildProcess, verifyNativeSessionContinuationEvidence, verifyProviderMemoryChannelEvidence, writeSse } = deps;
     const usageWithProvenance = (usage, runnerKind, continuationEvidence, runtimeVersionSnapshot = null) => {
         if (!usage || typeof usage !== "object")
@@ -122,6 +126,7 @@ function createAgentRunnerRuntime(deps) {
         let memoryContextConsumptionRecovery = null;
         let memoryReceiptRecoveryProviderOutput = "";
         let stopRuntimeProgressFallback = null;
+        let managed = null;
         if (durableDirectDispatch) {
             if (executionId)
                 registerExternalRunnerRequest(executionId, durableDirectDispatch.id);
@@ -155,7 +160,8 @@ function createAgentRunnerRuntime(deps) {
                 fs.writeFileSync(memorySystemPromptFile, providerMemoryChannel.systemPrompt, "utf-8");
             if (providerMemoryChannel.developerPrompt)
                 fs.writeFileSync(memoryDeveloperInstructionsFile, providerMemoryChannel.developerPrompt, "utf-8");
-            const cmd = buildAgentCommand(agentType, tmpMsg, {
+            const runtimeAdapter = (0, agent_runtime_adapter_1.getAgentRuntimeAdapter)(agentType);
+            const cmd = runtimeAdapter.buildCommand(tmpMsg, {
                 mcpConfigPath: workspaceTarget?.mcpConfigPath,
                 cliAllowedTools: Array.isArray(workspaceTarget?.cliAllowedTools) ? workspaceTarget.cliAllowedTools : undefined,
                 disableBuiltinTools: workspaceTarget?.disableBuiltinTools === true,
@@ -173,7 +179,7 @@ function createAgentRunnerRuntime(deps) {
             if (workspaceTarget?.trustedMemoryProviderChannelRequired === true && providerMemoryChannelEvidence.status !== "ready") {
                 throw new Error(`Provider memory channel launch unverified: ${providerMemoryChannelEvidence.issues.join(",")}`);
             }
-            const managed = await runManagedCommand({
+            managed = await runManagedCommand({
                 taskId,
                 executionId,
                 command: cmd,
@@ -186,6 +192,17 @@ function createAgentRunnerRuntime(deps) {
                 source: workspaceTarget?.probe ? "agent-probe" : "project-agent",
                 commandLabel: getAgentCommandLabel(agentType),
                 title: String(workspaceTarget?.title || message || "").slice(0, 120),
+                agentRunId: workspaceTarget?.agentRunId || workspaceTarget?.agent_run_id,
+                traceId: workspaceTarget?.traceId || workspaceTarget?.trace_id,
+                attemptId: workspaceTarget?.attemptId || workspaceTarget?.attempt_id,
+                parentRunId: workspaceTarget?.parentRunId || workspaceTarget?.parent_run_id,
+                scope: workspaceTarget?.scope || (metricGroupId ? "group" : "project"),
+                scopeId: workspaceTarget?.scopeId || workspaceTarget?.scope_id || metricGroupId || projectName || taskId,
+                taskAgentSessionId: workspaceTarget?.taskAgentSessionId || workspaceTarget?.task_agent_session_id,
+                nativeSessionId: workspaceTarget?.nativeSessionId || workspaceTarget?.native_session_id || effectiveAgentSession?.sessionId,
+                worktreeId: workspaceTarget?.worktreeId || workspaceTarget?.worktree_id,
+                triggerType: workspaceTarget?.triggerType || workspaceTarget?.trigger_type || "user",
+                deferAgentRunFinalization: true,
                 onStarted: ({ pid, startedAt }) => {
                     durableDirectDispatchStarted = true;
                     if (durableDirectDispatch)
@@ -227,6 +244,8 @@ function createAgentRunnerRuntime(deps) {
                 runnerSuccess: true,
             });
             const deliveryUsage = usageWithProvenance(normalized.usage, "direct_cli", nativeContinuationEvidence, runtimeVersionSnapshot);
+            if (managed.agentRunId && deliveryUsage) {
+            }
             providerMemoryChannelEvidence = acknowledgeProviderMemoryChannelLaunch(providerMemoryChannelEvidence, {
                 executionSucceeded: true,
                 runnerStarted: durableDirectDispatch ? durableDirectDispatchStarted : true,
@@ -320,7 +339,7 @@ function createAgentRunnerRuntime(deps) {
                                 mcpServers: { [recoveryServerName]: knowledgeServer },
                             }, null, 2), "utf-8");
                         }
-                        const recoveryCommand = buildAgentCommand(agentType, memoryReceiptRecoveryPromptFile, {
+                        const recoveryCommand = (0, agent_runtime_adapter_1.getAgentRuntimeAdapter)(agentType).buildCommand(memoryReceiptRecoveryPromptFile, {
                             cliAllowedTools: Array.from(new Set([
                                 ...buildAgentCliAllowedTools(projectName, message),
                                 ...(normalizeAgentRuntimeId(agentType) === "claudecode" ? [recoveryToolName] : third_party_memory_snapshot_1.THIRD_PARTY_MEMORY_MCP_TOOL_ALIASES),
@@ -347,6 +366,17 @@ function createAgentRunnerRuntime(deps) {
                             source: "memory-receipt-recovery",
                             commandLabel: getAgentCommandLabel(agentType),
                             title: "Memory receipt recovery",
+                            agentRunId: workspaceTarget?.agentRunId || workspaceTarget?.agent_run_id,
+                            traceId: workspaceTarget?.traceId || workspaceTarget?.trace_id,
+                            attemptId: workspaceTarget?.attemptId || workspaceTarget?.attempt_id,
+                            parentRunId: workspaceTarget?.parentRunId || workspaceTarget?.parent_run_id,
+                            scope: workspaceTarget?.scope || (metricGroupId ? "group" : "project"),
+                            scopeId: workspaceTarget?.scopeId || workspaceTarget?.scope_id || metricGroupId || projectName || taskId,
+                            taskAgentSessionId: workspaceTarget?.taskAgentSessionId || workspaceTarget?.task_agent_session_id,
+                            nativeSessionId: recoveryNativeSessionId || workspaceTarget?.nativeSessionId || workspaceTarget?.native_session_id,
+                            worktreeId: workspaceTarget?.worktreeId || workspaceTarget?.worktree_id,
+                            triggerType: "resume",
+                            deferAgentRunFinalization: true,
                         });
                         memoryReceiptRecoveryProviderOutput = String(recoveryRun.stdout || "");
                         const recoveryOutput = normalizeAgentCommandOutput(agentType, memoryReceiptRecoveryProviderOutput, { runtimeVersionSnapshot });
@@ -457,6 +487,41 @@ function createAgentRunnerRuntime(deps) {
             const durableNativeSessionId = nativeContinuationEvidence.nativeSessionReusable
                 ? toolLoop.nativeSessionId || normalized.sessionId || workspaceTarget?.agentSession?.sessionId || ""
                 : "";
+            const managedRunResolution = managed.agentRunId ? (0, agent_receipt_resolution_1.resolveAgentRunFromReceipt)({
+                run_id: managed.agentRunId,
+                trace_id: workspaceTarget?.traceId || workspaceTarget?.trace_id || "",
+                task_id: taskId,
+                attempt_id: workspaceTarget?.attemptId || workspaceTarget?.attempt_id || "",
+                execution_id: executionId,
+                task_agent_session_id: workspaceTarget?.taskAgentSessionId || workspaceTarget?.task_agent_session_id || "",
+            }) : null;
+            const resolvedManagedRunId = managedRunResolution?.status === "resolved" ? managedRunResolution.run?.runId : "";
+            if (managed.agentRunId && resolvedManagedRunId) {
+                try {
+                    (0, agent_run_store_1.updateAgentRunBindings)(resolvedManagedRunId, {
+                        taskAgentSessionId: workspaceTarget?.taskAgentSessionId || workspaceTarget?.task_agent_session_id,
+                        nativeSessionId: durableNativeSessionId,
+                        workspacePath: safeCwd,
+                        worktreeId: workspaceTarget?.worktreeId || workspaceTarget?.worktree_id,
+                        runtimeVersionSnapshot,
+                    });
+                }
+                catch { }
+                try {
+                    (0, agent_execution_coordinator_1.finalizePersistentAgentExecution)({
+                        runId: resolvedManagedRunId,
+                        leaseOwnerId: workspaceTarget?.leaseOwnerId || workspaceTarget?.lease_owner_id || "",
+                        status: "succeeded",
+                        result: { exitCode: managed.exitCode, nativeSessionId: durableNativeSessionId },
+                        nativeSessionId: durableNativeSessionId,
+                        taskAgentSessionId: workspaceTarget?.taskAgentSessionId || workspaceTarget?.task_agent_session_id || "",
+                        workspacePath: safeCwd,
+                        worktreeId: workspaceTarget?.worktreeId || workspaceTarget?.worktree_id || "",
+                        usage: deliveryUsage,
+                    });
+                }
+                catch { }
+            }
             if (durableDirectDispatch) {
                 completeDirectAgentDispatch(durableDirectDispatch.id, {
                     success: true,
@@ -535,6 +600,33 @@ function createAgentRunnerRuntime(deps) {
                 nativeResumeRequested: workspaceTarget?.agentSession?.resumeSession === true,
                 runnerSuccess: false,
             });
+            const failedAgentRunCandidate = String(managed?.agentRunId || e?.agentRunId || workspaceTarget?.agentRunId || workspaceTarget?.agent_run_id || "");
+            const failedAgentRunResolution = failedAgentRunCandidate ? (0, agent_receipt_resolution_1.resolveAgentRunFromReceipt)({
+                run_id: failedAgentRunCandidate,
+                trace_id: workspaceTarget?.traceId || workspaceTarget?.trace_id || "",
+                task_id: taskId,
+                attempt_id: workspaceTarget?.attemptId || workspaceTarget?.attempt_id || "",
+                execution_id: executionId,
+                task_agent_session_id: workspaceTarget?.taskAgentSessionId || workspaceTarget?.task_agent_session_id || "",
+            }) : null;
+            const failedAgentRunId = failedAgentRunResolution?.status === "resolved" ? failedAgentRunResolution.run?.runId || "" : "";
+            if (failedAgentRunId) {
+                const terminalStatus = String(e?.code || "") === "CCM_CANCELLED" ? "cancelled" : String(e?.code || "") === "CCM_SESSION_LIFECYCLE_STALE" ? "recovery_required" : "failed";
+                try {
+                    if (["failed", "cancelled"].includes(terminalStatus))
+                        (0, agent_execution_coordinator_1.finalizePersistentAgentExecution)({
+                            runId: failedAgentRunId,
+                            leaseOwnerId: workspaceTarget?.leaseOwnerId || workspaceTarget?.lease_owner_id || "",
+                            status: terminalStatus,
+                            error: { code: e?.code || "runtime_failed", message: String(e?.message || e).slice(0, 500) },
+                            workspacePath: safeCwd,
+                            worktreeId: workspaceTarget?.worktreeId || workspaceTarget?.worktree_id || "",
+                        });
+                    else
+                        (0, agent_execution_coordinator_1.markPersistentAgentExecutionRecoveryRequired)(failedAgentRunId, "Agent Runtime 执行后校验失败", { code: e?.code || "runtime_failed", message: String(e?.message || e).slice(0, 500) });
+                }
+                catch { }
+            }
             if (durableDirectDispatch && durableDirectDispatchStarted && !durableDirectDispatchCompleted) {
                 completeDirectAgentDispatch(durableDirectDispatch.id, {
                     success: false,
@@ -676,7 +768,7 @@ function createAgentRunnerRuntime(deps) {
             fs.mkdirSync(UPLOAD_DIR, { recursive: true });
         }
         fs.writeFileSync(tmpMsg, message, "utf-8");
-        const cmd = buildAgentCommand(agentType, tmpMsg, {
+        const cmd = (0, agent_runtime_adapter_1.getAgentRuntimeAdapter)(agentType).buildCommand(tmpMsg, {
             mcpConfigPath: options.mcpConfigPath,
             cliAllowedTools: Array.isArray(options.cliAllowedTools) ? options.cliAllowedTools : undefined,
             ...(options.agentSession || {}),
@@ -1071,7 +1163,7 @@ function createAgentRunnerRuntime(deps) {
             ? `${baseExecutionBrief}\n\n${String(options.projectSessionContext)}`
             : baseExecutionBrief;
         fs.writeFileSync(tmpMsg, executionBrief, "utf-8");
-        const cmd = buildAgentCommand(agentType, tmpMsg, {
+        const cmd = (0, agent_runtime_adapter_1.getAgentRuntimeAdapter)(agentType).buildCommand(tmpMsg, {
             mcpConfigPath: options.mcpConfigPath,
             ...(Array.isArray(options.cliAllowedTools)
                 ? { cliAllowedTools: options.cliAllowedTools }
@@ -1551,7 +1643,8 @@ function createAgentRunnerRuntime(deps) {
         callAgent,
         callAgentForGroupStream,
         callAgentStream,
-        sendRuntimeToolDispatchBlocked
+        sendRuntimeToolDispatchBlocked,
+        processAgentHeartbeatWake,
     };
 }
 //# sourceMappingURL=server-agent-runner.js.map

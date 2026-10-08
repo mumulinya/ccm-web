@@ -228,6 +228,18 @@ export declare function runManagedCommand(input: {
     source?: string;
     commandLabel?: string;
     title?: string;
+    agentRunId?: string;
+    traceId?: string;
+    attemptId?: string;
+    scope?: string;
+    scopeId?: string;
+    taskAgentSessionId?: string;
+    nativeSessionId?: string;
+    worktreeId?: string;
+    triggerType?: string;
+    parentRunId?: string;
+    leaseOwnerId?: string;
+    deferAgentRunFinalization?: boolean;
 }): Promise<any>;
 export declare function disposeManagedCommandRawOutput(result: any): {
     removed: boolean;

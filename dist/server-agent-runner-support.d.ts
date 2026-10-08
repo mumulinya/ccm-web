@@ -58,6 +58,7 @@ export declare function createAgentRunnerSupport(deps: any): {
         providerContractTransition: boolean;
         providerContractContinuityVerified: boolean;
         nativeContinuationEvidence: any;
+        agentRunId: string;
         fileChanges: any;
         usage: any;
         runnerRequestId: string;
@@ -187,6 +188,7 @@ export declare function createAgentRunnerSupport(deps: any): {
         providerContractTransition: boolean;
         providerContractContinuityVerified: boolean;
         nativeContinuationEvidence: any;
+        agentRunId: string;
         output: string;
         fileChanges: any;
         usage: any;
@@ -234,4 +236,12 @@ export declare function createAgentRunnerSupport(deps: any): {
             nativeSessionId?: string;
         }>;
     }) => Promise<any>;
+    processAgentHeartbeatWake: (wake: any, run: any) => Promise<{
+        runId: any;
+        status: string;
+        result: {
+            runnerRequestId: string;
+            nativeSessionId: any;
+        };
+    }>;
 };

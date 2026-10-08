@@ -11,6 +11,8 @@ var task_session_planning_2 = require("./task-session-planning");
 Object.defineProperty(exports, "updatePlanningTask", { enumerable: true, get: function () { return task_session_planning_2.updatePlanningTask; } });
 const task_run_store_1 = require("./task-run-store");
 const task_context_1 = require("../../tasks/task-context");
+const agent_run_consistency_1 = require("../../agents/agent-run-consistency");
+const agent_governance_store_1 = require("../../agents/agent-governance-store");
 function readBody(req) {
     return (0, utils_1.collectRequestBuffer)(req).then(buffer => {
         if (!buffer.length)
@@ -104,7 +106,15 @@ function handleTaskSessionRoutes(pathname, req, res, parsed, deps = {}) {
             task_id: taskId,
             attempt: Number(task?.execution_attempt || task?.attempt || latestAttemptForTask(taskId) || 0),
         } : null;
-        (0, utils_1.sendJson)(res, { success: true, session, runs: (0, task_run_store_1.listTaskRuns)(taskId), execution_identity: executionIdentity, task: { id: task.id, title: task.title || task.name || "", status: task.status, active_run_id: task.active_run_id || task.run_id || task.task_run?.run_id || "", task_session_creation_policy: session.creation_policy, task_session_archive_policy: session.archive_policy, spec_checksum: task.task_spec?.checksum || "", plan_revision: session.plan_revision, pause_control: task.pause_control || null }, available: true, lifecycle: session.lifecycle, available_actions: planningActions(task, session) });
+        const activeRunId = task.active_run_id || task.run_id || task.task_run?.run_id || "";
+        (0, utils_1.sendJson)(res, { success: true, session, runs: (0, task_run_store_1.listTaskRuns)(taskId), execution_identity: executionIdentity, governance: {
+                activity: (0, agent_governance_store_1.listAgentActivity)({ taskId, limit: 80 }),
+                approvals: activeRunId ? (0, agent_governance_store_1.listAgentApprovals)(activeRunId) : [],
+                artifacts: activeRunId ? (0, agent_governance_store_1.listAgentRunArtifacts)(activeRunId) : [],
+                dependencies: (0, agent_governance_store_1.listAgentTaskDependencies)(taskId),
+                secrets: activeRunId ? (0, agent_governance_store_1.listAgentRunSecrets)(activeRunId).map(item => ({ ...item, secretRef: "[reference]" })) : [],
+                consistency: (0, agent_run_consistency_1.buildTaskRunConsistencyProjection)(task),
+            }, task: { id: task.id, title: task.title || task.name || "", status: task.status, active_run_id: activeRunId, task_session_creation_policy: session.creation_policy, task_session_archive_policy: session.archive_policy, spec_checksum: task.task_spec?.checksum || "", plan_revision: session.plan_revision, pause_control: task.pause_control || null }, available: true, lifecycle: session.lifecycle, available_actions: planningActions(task, session) });
         return true;
     }
     if (messagesMatch && req.method === "GET") {

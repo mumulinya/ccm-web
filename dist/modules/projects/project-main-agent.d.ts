@@ -467,7 +467,7 @@ export declare function runProjectMainAgentContractSelfTest(): {
     success: boolean;
     checks: {
         serializablePlan: boolean;
-        stripsForeignDependency: boolean;
+        preservesForeignDependencyForValidation: boolean;
         structuredPlanTextNormalized: boolean;
         directDispatchEvidenceFallback: boolean;
         directDispatchCommandEvidence: boolean;

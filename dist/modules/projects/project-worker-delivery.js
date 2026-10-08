@@ -20,6 +20,20 @@ function gitSucceeds(cwd, args) {
         return false;
     }
 }
+function commitPatchId(cwd, commit) {
+    try {
+        const diff = (0, child_process_1.execFileSync)("git", ["show", "--format=", "--find-renames", commit], {
+            cwd, encoding: "utf-8", windowsHide: true, stdio: ["ignore", "pipe", "pipe"],
+        });
+        const result = (0, child_process_1.spawnSync)("git", ["patch-id", "--stable"], {
+            cwd, input: diff, encoding: "utf-8", windowsHide: true,
+        });
+        return String(result.stdout || "").trim().split(/\s+/)[0] || "";
+    }
+    catch {
+        return "";
+    }
+}
 function changedPathsSince(worktreePath, baseCommit, headCommit) {
     if (!baseCommit || baseCommit === headCommit)
         return new Set();
@@ -40,14 +54,22 @@ function mainWorktreeAlreadyContainsCommit(mainWorkDir, commit, changedPaths) {
     if (!commit || !changedPaths.size)
         return false;
     try {
-        // Compare the actual working tree (not only HEAD) with the delivery
-        // commit.  This makes retries idempotent when a previous cherry-pick
-        // completed but the process crashed before recording its delivery.
-        runGit(mainWorkDir, ["diff", "--quiet", commit, "--", ...Array.from(changedPaths)]);
+        // A delivery is already applied only when its commit is an ancestor of
+        // the main branch. Comparing the working tree to the isolated commit can
+        // mistake unrelated local edits for a completed cherry-pick.
+        runGit(mainWorkDir, ["merge-base", "--is-ancestor", commit, "HEAD"]);
         return true;
     }
     catch {
-        return false;
+        // A successful cherry-pick rewrites the commit id. Compare the immutable
+        // patch identity against commits already reachable from HEAD so a retry
+        // after a process crash remains idempotent without trusting the working
+        // tree or lowercased Windows pathspecs.
+        const targetPatchId = commitPatchId(mainWorkDir, commit);
+        if (!targetPatchId)
+            return false;
+        const history = runGit(mainWorkDir, ["rev-list", "HEAD"]).split(/\r?\n/).filter(Boolean);
+        return history.some(candidate => commitPatchId(mainWorkDir, candidate) === targetPatchId);
     }
 }
 function cleanupWorktree(mainWorkDir, prepared) {

@@ -65,6 +65,7 @@ const task_plan_detail_1 = require("./task-plan-detail");
 const task_intake_preview_route_1 = require("./task-intake-preview-route");
 const task_pause_routes_1 = require("./task-pause-routes");
 const task_run_routes_1 = require("./task-run-routes");
+const agent_run_store_1 = require("../../agents/agent-run-store");
 const task_session_store_1 = require("./task-session-store");
 const task_run_store_1 = require("./task-run-store");
 const scope_expansion_1 = require("../../agents/scope-expansion");
@@ -388,7 +389,8 @@ function handleCollaborationApiReplayAndExecutionRoutes(pathname, req, res, pars
             return true;
         const kind = taskResourceMatch[2];
         if (kind === "lifecycle") {
-            return (0, utils_1.sendJson)(res, { success: true, taskId, status: task.status || "pending", phase: task.phase || null, statusDetail: task.status_detail || task.statusDetail || null, generation: task.generation || 1, attempt: task.attempt || 0, updatedAt: task.updated_at || task.updatedAt || null });
+            const runProjection = (0, agent_run_store_1.buildTaskAgentRunProjection)(task);
+            return (0, utils_1.sendJson)(res, { success: true, taskId, status: task.status || "pending", phase: task.phase || null, statusDetail: task.status_detail || task.statusDetail || null, generation: task.generation || 1, attempt: task.attempt || 0, updatedAt: task.updated_at || task.updatedAt || null, ...(runProjection || {}) });
         }
         const values = kind === "failures" ? (task.failures || task.failureRecords || []) : (task.evidence || task.evidenceRecords || []);
         const rows = Array.isArray(values) ? values.map((item) => ({ id: item.id || item.evidenceId || item.failureRecordId || "", type: item.type || item.kind || kind, status: item.status || null, summary: String(item.summary || item.message || item.result || "").slice(0, 500), createdAt: item.createdAt || item.created_at || null, contentStored: false })) : [];

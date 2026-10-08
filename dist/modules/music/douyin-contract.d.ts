@@ -15,6 +15,7 @@ export declare const DOUYIN_TOOLS: {
     readonly download_aweme_images: readonly ["aweme_id", "save_dir"];
     readonly ocr_aweme_images: readonly ["aweme_id", "save_dir"];
     readonly transcribe_video: readonly ["aweme_id"];
+    readonly transcribe_audio: readonly ["audio_path", "aweme_id"];
     readonly batch_transcribe: readonly ["keyword", "count", "sort_type"];
 };
 export declare const DOUYIN_MEDIA_TOOLS: Set<string>;

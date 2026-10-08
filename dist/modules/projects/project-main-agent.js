@@ -93,6 +93,8 @@ const project_test_agent_gate_1 = require("./project-test-agent-gate");
 const session_compaction_core_1 = require("../../system/session-compaction-core");
 const canonical_context_accounting_1 = require("../../system/canonical-context-accounting");
 const pre_request_tool_context_1 = require("../../system/pre-request-tool-context");
+const agent_execution_coordinator_1 = require("../../agents/agent-execution-coordinator");
+const agent_run_lifecycle_1 = require("../../agents/agent-run-lifecycle");
 const project_session_compaction_1 = require("./project-session-compaction");
 const project_native_messages_1 = require("./project-native-messages");
 const final_synthesis_cache_alignment_1 = require("../../agents/final-synthesis-cache-alignment");
@@ -378,8 +380,8 @@ function normalizedWorkItems(value, fallbackGoal) {
     if (!normalized.length) {
         normalized.push({ id: "work_1", title: cleanText(fallbackGoal, 100) || "完成项目任务", objective: fallbackGoal, acceptanceCriteria: [], dependsOn: [], allowedFiles: [], forbiddenFiles: [], artifacts: [], sourceEvidenceIds: [], allowedTools: [], status: "pending", attempts: 0 });
     }
-    const ids = new Set(normalized.map(item => item.id));
-    // Invalid dependencies must reach the dispatch validator, not disappear here.
+    // Preserve foreign dependencies so the dispatch validator can reject them
+    // with an actionable diagnostic instead of silently changing the plan.
     return normalized;
 }
 function directDispatchAcceptanceEvidence(input) {
@@ -2618,6 +2620,7 @@ function buildProjectMainConfiguredToolContext(input) {
 }
 async function executeProjectMainTask(input) {
     const taskId = String(input.task?.id || "");
+    let persistedAgentRun = null;
     if (!taskId)
         throw new Error("缺少项目主 Agent 任务 ID");
     if (activeProjectMainTasks.has(taskId))
@@ -2693,13 +2696,38 @@ async function executeProjectMainTask(input) {
     (0, collaboration_task_service_1.updateTask)(taskId, { workflow_meta: { ...(input.task.workflow_meta || {}), plan_dispatch_contract: dispatchContract }, plan_dispatch_contract: dispatchContract });
     require("../../agents/task-acceptance-service").startTaskAcceptance({ ...input.task, plan_dispatch_contract: dispatchContract }, workDir);
     const executionGeneration = Math.max(0, Number(input.task?.generation || input.task?.boundary_generation || 0));
+    const traceId = (0, reliability_ledger_1.ensureTraceId)(input.task.trace_id, "project-main");
+    const projectRuntimeId = (0, runtime_1.normalizeAgentRuntimeId)(input.task?.agent_type || input.task?.agentType || input.task?.provider || "claudecode");
+    const parentRunId = String(input.task?.parent_run_id || input.task?.parentRunId || "").trim();
+    const automationId = String(input.task?.automation_definition_id || input.task?.automationDefinitionId || "").trim();
+    const isAutomationRun = !!automationId || String(input.task?.origin || input.task?.request_origin || input.task?.source_channel || "").toLowerCase() === "automation";
+    const coordinatedExecution = await (0, agent_execution_coordinator_1.startPersistentAgentExecution)({
+        taskId, traceId, attemptId: String(input.task?.attempt_id || input.task?.attemptId || `attempt-${Math.max(1, Number(input.task?.execution_attempt || input.task?.attempt || 1))}`),
+        parentRunId,
+        scope: isAutomationRun ? "automation" : "project", scopeId: automationId || project, agentId: "project-main-agent", runtimeId: projectRuntimeId,
+        runtimeVersionSnapshot: (0, runtime_1.captureAgentRuntimeVersionSnapshot)(projectRuntimeId),
+        taskAgentSessionId: String(input.task?.task_agent_session_id || input.task?.taskAgentSessionId || input.plan?.projectSessionId || ""),
+        nativeSessionId: String(input.task?.native_session_id || input.task?.nativeSessionId || ""), executionId: taskId,
+        workspacePath: workDir, worktreeId: String(input.task?.worktree_id || input.task?.worktreeId || ""),
+        triggerType: parentRunId ? "retry" : isAutomationRun ? "schedule" : "user",
+        source: "project-main-agent", idempotencyKey: `project-main:${taskId}:${String(input.task?.attempt_id || input.task?.attemptId || input.task?.execution_attempt || input.task?.attempt || 1)}`,
+    });
+    persistedAgentRun = coordinatedExecution.run;
+    const executionLeaseOwnerId = coordinatedExecution.lease?.run?.leaseOwnerId || "";
+    if (coordinatedExecution.mode === "coalesced") {
+        throw Object.assign(new Error("项目主 Agent 已存在同一幂等执行，拒绝重复启动"), { code: "CCM_RUN_ALREADY_ACTIVE", agentRunId: persistedAgentRun.runId });
+    }
+    if ((0, agent_run_lifecycle_1.isAgentRunTerminal)(persistedAgentRun.status))
+        throw Object.assign(new Error("项目主 Agent 的 AgentRun 已终态，拒绝重复启动"), { code: "CCM_RUN_ALREADY_TERMINAL", agentRunId: persistedAgentRun.runId });
+    (0, agent_execution_coordinator_1.markPersistentAgentExecutionStarted)(persistedAgentRun.runId, coordinatedExecution.lease?.run?.leaseId || "");
+    (0, collaboration_task_service_1.updateTask)(taskId, { agent_run_id: persistedAgentRun.runId, run_id: persistedAgentRun.runId, trace_id: traceId });
     const taskToolCorrelation = {
         anchorMessageId: String(input.task?.anchor_message_id || input.task?.anchorMessageId || `project-main-task:${taskId}`).trim(),
         turnId: String(input.task?.turn_id || input.task?.turnId || `project-task:${taskId}`).trim(),
         generation: executionGeneration,
         attempt: Math.max(1, Number(input.task?.execution_attempt || input.task?.attempt || 1)),
         taskId,
-        agentRunId: String(input.task?.project_main_run_id || "").trim() || undefined,
+        agentRunId: persistedAgentRun.runId,
         projectId: project,
     };
     let visibleTaskDeltaSequence = 0;
@@ -2734,7 +2762,6 @@ async function executeProjectMainTask(input) {
     if (!acceptancePolicyResult.valid || !acceptancePolicyResult.snapshot)
         throw new Error(`任务验收策略不可用：${acceptancePolicyResult.reason}`);
     const acceptancePolicy = acceptancePolicyResult.snapshot;
-    const traceId = (0, reliability_ledger_1.ensureTraceId)(input.task.trace_id, "project-main");
     const lease = (0, reliability_ledger_1.acquireTaskLease)(taskId, traceId, PROJECT_MAIN_LEASE_TTL_MS);
     if (!lease.acquired)
         throw new Error("项目主 Agent 任务已由另一个运行实例接管");
@@ -3432,6 +3459,10 @@ async function executeProjectMainTask(input) {
                 },
             },
         });
+        try {
+            (0, agent_execution_coordinator_1.finalizePersistentAgentExecution)({ runId: persistedAgentRun.runId, leaseOwnerId: executionLeaseOwnerId, status: accepted ? "succeeded" : "failed", result: { accepted, outputRevision } });
+        }
+        catch { }
         return { task: finalTask, status: accepted ? "completed" : "blocked", summary, fileChanges, verification, risks, testAgent: independentTestAgentEnabled ? latestReview : null };
     }
     catch (error) {
@@ -3476,6 +3507,10 @@ async function executeProjectMainTask(input) {
                 relatedToolCallIds: [],
                 title: "项目主 Agent",
             });
+            try {
+                await (0, agent_execution_coordinator_1.applyPersistentAgentManualAction)({ runId: persistedAgentRun.runId, action: "pause", actorId: "project-main-agent", idempotencyKey: `project-pause:${persistedAgentRun.runId}:${pauseControl.pauseSequence}`, reason: "项目主 Agent 已暂停" });
+            }
+            catch { }
             return { task: pausedTask, status: "paused", summary: pausedTask.status_detail, fileChanges: aggregateFileChanges(results), verification: [], risks: [], testAgent: independentTestAgentEnabled ? latestReview : null };
         }
         const summary = `项目主 Agent 未能完成本轮任务：${error?.message || error}`;
@@ -3625,6 +3660,13 @@ async function executeProjectMainTask(input) {
                     },
                 },
             });
+        try {
+            if (interrupted || lostLease)
+                (0, agent_execution_coordinator_1.markPersistentAgentExecutionRecoveryRequired)(persistedAgentRun.runId, summary, { message: summary.slice(0, 500) });
+            else
+                (0, agent_execution_coordinator_1.finalizePersistentAgentExecution)({ runId: persistedAgentRun.runId, leaseOwnerId: executionLeaseOwnerId, status: cancelled ? "cancelled" : "failed", error: { message: summary.slice(0, 500) } });
+        }
+        catch { }
         return { task, status: interrupted || lostLease ? "blocked" : "failed", summary, fileChanges: unacceptedFileChanges, verification: [], risks: [summary], testAgent: independentTestAgentEnabled ? latestReview : null };
     }
     finally {
@@ -3833,7 +3875,7 @@ function runProjectMainAgentContractSelfTest() {
     const derivedProfile = directDispatchVerificationProfile(null, decision);
     return {
         success: items.length === 2
-            && items[1].dependsOn.join(",") === "a"
+            && items[1].dependsOn.join(",") === "a,outside"
             && structuredItems[0].objective === "修改 deliveryMarker"
             && structuredItems[0].acceptanceCriteria[0] === "deliveryMarker 等于 ready"
             && derivedEvidence.length === 1
@@ -3841,7 +3883,7 @@ function runProjectMainAgentContractSelfTest() {
             && derivedProfile.tier === "standard",
         checks: {
             serializablePlan: items.length === 2,
-            stripsForeignDependency: items[1].dependsOn.join(",") === "a",
+            preservesForeignDependencyForValidation: items[1].dependsOn.join(",") === "a,outside",
             structuredPlanTextNormalized: structuredItems[0].objective === "修改 deliveryMarker"
                 && structuredItems[0].acceptanceCriteria[0] === "deliveryMarker 等于 ready"
                 && !JSON.stringify(structuredItems).includes("[object Object]"),

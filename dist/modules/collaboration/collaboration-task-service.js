@@ -1109,7 +1109,8 @@ function validateTaskTerminalTransition(task, updates = {}) {
     if (acceptanceError)
         return acceptanceError;
     const requestedStatus = String(updates.status || "").trim().toLowerCase();
-    if (requestedStatus !== "done" || String(task?.status || "") === "done")
+    const isDoneRequest = ["done", "completed"].includes(requestedStatus);
+    if (!isDoneRequest || ["done", "completed"].includes(String(task?.status || "").toLowerCase()))
         return null;
     // New TaskSpec/TaskRun tasks use their frozen workflow policy as the
     // authoritative completion gate. The older workflow-type checks below are
@@ -1360,6 +1361,7 @@ function updateTask(id, updates, options = {}) {
         throw new Error(terminalValidationError);
     const terminalAcceptance = {
         done: "accepted",
+        completed: "accepted",
         failed: "rejected",
         blocked: "blocked",
         cancelled: "cancelled",
@@ -1390,7 +1392,9 @@ function updateTask(id, updates, options = {}) {
         const receiptBase = {
             schema: "ccm-task-terminal-state-receipt-v1",
             task_id: id,
-            status: requestedStatus,
+            // Keep the legacy receipt vocabulary readable while the task record
+            // uses the canonical lifecycle status "completed".
+            status: requestedStatus === "completed" ? "done" : requestedStatus,
             acceptance_state: terminalAcceptance[requestedStatus],
             queue_state: requestedStatus,
             queue_position: 0,
@@ -1412,7 +1416,7 @@ function updateTask(id, updates, options = {}) {
                 evidence_checksum: terminalDecision.evidence_checksum,
                 decision_checksum: terminalDecision.checksum,
             },
-            ...(requestedStatus === "done" ? { completed_at: settledAt } : {}),
+            ...(requestedStatus === "done" || requestedStatus === "completed" ? { completed_at: settledAt } : {}),
             ...(requestedStatus === "failed" ? { failed_at: settledAt } : {}),
             ...(requestedStatus === "cancelled" ? { cancelled_at: settledAt } : {}),
         };
@@ -1537,10 +1541,10 @@ function updateTask(id, updates, options = {}) {
             pendingTimelineMutation = { exactSessionId: timelineIdentity.exactSessionId, scope: timelineIdentity.scope, scopeId: timelineIdentity.scopeId, type: eventType, eventId: `task-checkpoint:${id}:${tasks[idx].revision}:${eventType}`, workItemId: updates.workItemId || updates.work_item_id || tasks[idx].work_item_id || "", generation: Number(tasks[idx].generation || 0), attempt: Number(tasks[idx].execution_attempt || tasks[idx].attempt || 1), leaseId: tasks[idx].lease_id || "", payloadRef, contextReason: eventType };
         }
     }
-    if (updates.status === "done") {
+    if (updates.status === "done" || updates.status === "completed") {
         tasks[idx].completed_at = updates.completed_at || new Date().toISOString();
     }
-    else if (updates.status && updates.status !== "done") {
+    else if (updates.status && updates.status !== "done" && updates.status !== "completed") {
         delete tasks[idx].completed_at;
     }
     if (tasks[idx].parent_task_id) {
@@ -1557,7 +1561,18 @@ function updateTask(id, updates, options = {}) {
             ...pendingTimelineMutation,
             buildContext: (taskForContext, previousContext) => (0, task_context_1.refreshTaskContext)({ ...taskForContext, task_context: previousContext }, pendingTimelineMutation.contextReason),
         });
-        tasks[idx] = committed.task;
+        // The timeline transaction returns a projection assembled from the
+        // persisted task payload. Re-apply terminal fields from the authoritative
+        // mutation so an audit write can never erase the terminal gate.
+        tasks[idx] = {
+            ...committed.task,
+            ...(terminalAcceptance[requestedStatus] ? {
+                acceptance_state: tasks[idx].acceptance_state,
+                terminal_state_receipt: tasks[idx].terminal_state_receipt,
+                terminal_decision: tasks[idx].terminal_decision,
+                terminal_gate: tasks[idx].terminal_gate,
+            } : {}),
+        };
     }
     else {
         tasks[idx].task_context = (0, task_context_1.refreshTaskContext)(tasks[idx], updates.status ? `status_${updates.status}` : "task_updated");
